@@ -1,0 +1,23 @@
+name: Deploy to Server
+
+on:
+  push:
+    branches:
+      - main
+  pull_request:
+    branches:
+      - main
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Trigger deployment
+        run: |
+          curl -X POST "${{ secrets.DEPLOY_SERVER_URL }}/deploy/codeforge" \
+            -H "x-deploy-token: ${{ secrets.DEPLOY_TOKEN }}" \
+            -H "Content-Type: application/json"
