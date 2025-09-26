@@ -1,0 +1,277 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>{{ title }}</title>
+    <meta name="description" content="{{ description }}">
+    
+    <!-- Preconnect to Google Fonts -->
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&display=swap" rel="stylesheet">
+    
+    <!-- Load static files -->
+    {% load static %}
+    <link rel="stylesheet" href="{% static 'landing/css/style.css' %}">
+    
+    <!-- Favicon -->
+    <link rel="icon" type="image/svg+xml" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>⚡</text></svg>">
+</head>
+<body>
+    <!-- Header -->
+    <header class="header">
+        <nav class="nav-container">
+            <a href="#" class="logo">CodeForge</a>
+            <ul class="nav-links">
+                <li><a href="#features">Features</a></li>
+                <li><a href="#technologies">Technologies</a></li>
+                <li><a href="#team">Team</a></li>
+                <li><a href="#contact">Contact</a></li>
+            </ul>
+        </nav>
+    </header>
+
+    <!-- Hero Section -->
+    <section class="hero">
+        <div class="hero-content">
+            <h1>{{ title }}</h1>
+            <p class="tagline">{{ tagline }}</p>
+            <p class="description">{{ description }}</p>
+            <div class="cta-buttons">
+                <a href="#contact" class="btn btn-primary">Get Started</a>
+                <a href="#features" class="btn btn-secondary">Learn More</a>
+            </div>
+        </div>
+    </section>
+
+    <!-- Features Section -->
+    <section id="features" class="features">
+        <div class="container">
+            <div class="section-title">
+                <h2>What We Do</h2>
+                <p>We specialize in creating cutting-edge software solutions that drive innovation and deliver exceptional user experiences.</p>
+            </div>
+            <div class="features-grid">
+                {% for feature in features %}
+                <div class="feature-card">
+                    <div class="feature-icon">{{ feature.icon }}</div>
+                    <h3>{{ feature.title }}</h3>
+                    <p>{{ feature.description }}</p>
+                </div>
+                {% empty %}
+                <div class="feature-card">
+                    <div class="feature-icon">🚀</div>
+                    <h3>Rapid Development</h3>
+                    <p>We deliver high-quality software solutions quickly and efficiently, using modern development practices and agile methodologies.</p>
+                </div>
+                <div class="feature-card">
+                    <div class="feature-icon">🔧</div>
+                    <h3>Custom Solutions</h3>
+                    <p>Every project is unique. We build tailored solutions that perfectly fit your business needs and requirements.</p>
+                </div>
+                <div class="feature-card">
+                    <div class="feature-icon">📱</div>
+                    <h3>Modern Technologies</h3>
+                    <p>We stay ahead of the curve, using the latest technologies and frameworks to build scalable, maintainable applications.</p>
+                </div>
+                <div class="feature-card">
+                    <div class="feature-icon">🛡️</div>
+                    <h3>Security First</h3>
+                    <p>Security is built into every solution from the ground up, ensuring your applications are protected against modern threats.</p>
+                </div>
+                <div class="feature-card">
+                    <div class="feature-icon">📊</div>
+                    <h3>Performance Optimized</h3>
+                    <p>We optimize for performance, ensuring your applications are fast, responsive, and provide an excellent user experience.</p>
+                </div>
+                <div class="feature-card">
+                    <div class="feature-icon">🤝</div>
+                    <h3>Collaborative Approach</h3>
+                    <p>We work closely with our clients throughout the development process, ensuring transparency and alignment with your vision.</p>
+                </div>
+                {% endfor %}
+            </div>
+        </div>
+    </section>
+
+    <!-- Technologies Section -->
+    <section id="technologies" class="technologies">
+        <div class="container">
+            <div class="section-title">
+                <h2>Technologies We Love</h2>
+                <p>We work with a wide range of modern technologies to build robust and scalable applications.</p>
+            </div>
+            <div class="tech-grid">
+                {% for category, techs in technologies.items %}
+                <div class="tech-item">
+                    <h4>{{ category|title }}</h4>
+                    <p>{% for tech in techs %}{{ tech.name }}{% if not forloop.last %}, {% endif %}{% endfor %}</p>
+                </div>
+                {% empty %}
+                <div class="tech-item">
+                    <h4>Frontend</h4>
+                    <p>React, Vue.js, Angular, TypeScript</p>
+                </div>
+                <div class="tech-item">
+                    <h4>Backend</h4>
+                    <p>Python, Node.js, Django, FastAPI</p>
+                </div>
+                <div class="tech-item">
+                    <h4>Mobile</h4>
+                    <p>React Native, Flutter, Swift, Kotlin</p>
+                </div>
+                <div class="tech-item">
+                    <h4>Cloud</h4>
+                    <p>AWS, Google Cloud, Azure, Docker</p>
+                </div>
+                <div class="tech-item">
+                    <h4>Databases</h4>
+                    <p>PostgreSQL, MongoDB, Redis, Elasticsearch</p>
+                </div>
+                <div class="tech-item">
+                    <h4>DevOps</h4>
+                    <p>Kubernetes, CI/CD, Terraform, Monitoring</p>
+                </div>
+                {% endfor %}
+            </div>
+        </div>
+    </section>
+
+    <!-- Team Section -->
+    <section id="team" class="team">
+        <div class="container">
+            <div class="section-title">
+                <h2>Meet Our Team</h2>
+                <p>We are a passionate group of developers, designers, and engineers dedicated to creating exceptional software.</p>
+            </div>
+            <div class="team-grid">
+                {% for member in team_members %}
+                <div class="team-member">
+                    <div class="member-avatar">{{ member.avatar_initials }}</div>
+                    <h4>{{ member.name }}</h4>
+                    <p>{{ member.role }}</p>
+                    {% if member.bio %}
+                    <div class="member-bio">{{ member.bio }}</div>
+                    {% endif %}
+                </div>
+                {% empty %}
+                <div class="team-member">
+                    <div class="member-avatar">JD</div>
+                    <h4>John Developer</h4>
+                    <p>Lead Full-Stack Developer</p>
+                </div>
+                <div class="team-member">
+                    <div class="member-avatar">AS</div>
+                    <h4>Alice Smith</h4>
+                    <p>Frontend Specialist</p>
+                </div>
+                <div class="team-member">
+                    <div class="member-avatar">MJ</div>
+                    <h4>Mike Johnson</h4>
+                    <p>Backend Engineer</p>
+                </div>
+                <div class="team-member">
+                    <div class="member-avatar">SD</div>
+                    <h4>Sarah Davis</h4>
+                    <p>DevOps Engineer</p>
+                </div>
+                {% endfor %}
+            </div>
+        </div>
+    </section>
+
+    <!-- Contact Section -->
+    <section id="contact" class="contact">
+        <div class="container">
+            <h2>Ready to Build Something Amazing?</h2>
+            <p>Let's discuss your project and see how we can help bring your ideas to life.</p>
+            <div class="contact-info">
+                {% if contact_email %}
+                <div class="contact-item">
+                    <span>📧</span>
+                    <a href="mailto:{{ contact_email }}">{{ contact_email }}</a>
+                </div>
+                {% endif %}
+                {% if github_url %}
+                <div class="contact-item">
+                    <span>💬</span>
+                    <a href="{{ github_url }}" target="_blank">GitHub</a>
+                </div>
+                {% endif %}
+                {% if twitter_url %}
+                <div class="contact-item">
+                    <span>🐦</span>
+                    <a href="{{ twitter_url }}" target="_blank">Twitter</a>
+                </div>
+                {% endif %}
+                {% if linkedin_url %}
+                <div class="contact-item">
+                    <span>💼</span>
+                    <a href="{{ linkedin_url }}" target="_blank">LinkedIn</a>
+                </div>
+                {% endif %}
+            </div>
+        </div>
+    </section>
+
+    <!-- Footer -->
+    <footer class="footer">
+        <div class="container">
+            <p>&copy; 2024 CodeForge. All rights reserved. Built with ❤️ by our development team.</p>
+        </div>
+    </footer>
+
+    <!-- Smooth scrolling script -->
+    <script>
+        // Smooth scrolling for navigation links
+        document.querySelectorAll('a[href^="#"]').forEach(anchor => {
+            anchor.addEventListener('click', function (e) {
+                e.preventDefault();
+                const target = document.querySelector(this.getAttribute('href'));
+                if (target) {
+                    target.scrollIntoView({
+                        behavior: 'smooth',
+                        block: 'start'
+                    });
+                }
+            });
+        });
+
+        // Add scroll effect to header
+        window.addEventListener('scroll', function() {
+            const header = document.querySelector('.header');
+            if (window.scrollY > 100) {
+                header.style.background = 'rgba(255, 255, 255, 0.95)';
+                header.style.backdropFilter = 'blur(10px)';
+            } else {
+                header.style.background = 'var(--bg-white)';
+                header.style.backdropFilter = 'none';
+            }
+        });
+
+        // Add animation on scroll
+        const observerOptions = {
+            threshold: 0.1,
+            rootMargin: '0px 0px -50px 0px'
+        };
+
+        const observer = new IntersectionObserver(function(entries) {
+            entries.forEach(entry => {
+                if (entry.isIntersecting) {
+                    entry.target.style.opacity = '1';
+                    entry.target.style.transform = 'translateY(0)';
+                }
+            });
+        }, observerOptions);
+
+        // Observe feature cards and team members
+        document.querySelectorAll('.feature-card, .team-member, .tech-item').forEach(el => {
+            el.style.opacity = '0';
+            el.style.transform = 'translateY(20px)';
+            el.style.transition = 'opacity 0.6s ease, transform 0.6s ease';
+            observer.observe(el);
+        });
+    </script>
+</body>
+</html>
