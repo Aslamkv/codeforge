@@ -1,4 +1,4 @@
-name: Deploy to Server
+name: Deploy to Server (Async)
 
 on:
   push:
@@ -13,8 +13,65 @@ jobs:
       - name: Checkout code
         uses: actions/checkout@v4
 
-      - name: Trigger deployment
+      - name: Deploy with async polling
         run: |
-          curl -X POST "${{ secrets.DEPLOY_SERVER_URL }}/deploy2/codeforge" \
-            -H "x-deploy-token: ${{ secrets.DEPLOY_TOKEN }}" \
-            -H "Content-Type: application/json"
+          # Configuration
+          DEPLOY_URL="${{ secrets.DEPLOY_SERVER_URL }}/deploy2"
+          DEPLOY_TOKEN="${{ secrets.DEPLOY_TOKEN }}"
+          SITE_NAME="codeforge"
+          
+          echo "🚀 Starting async deployment for $SITE_NAME..."
+          
+          # Initiate deployment
+          DEPLOYMENT_RESPONSE=$(curl -s -X POST \
+            -H "x-deploy-token: $DEPLOY_TOKEN" \
+            -H "Content-Type: application/json" \
+            "$DEPLOY_URL/$SITE_NAME")
+          
+          # Extract deployment ID
+          DEPLOYMENT_ID=$(echo "$DEPLOYMENT_RESPONSE" | jq -r '.deployment_id')
+          
+          if [ "$DEPLOYMENT_ID" = "null" ] || [ -z "$DEPLOYMENT_ID" ]; then
+            echo "❌ Failed to initiate deployment"
+            echo "Response: $DEPLOYMENT_RESPONSE"
+            exit 1
+          fi
+          
+          echo "✅ Deployment initiated with ID: $DEPLOYMENT_ID"
+          
+          # Poll for completion (max 10 minutes)
+          MAX_ATTEMPTS=120  # 5-second intervals
+          ATTEMPT=0
+          
+          while [ $ATTEMPT -lt $MAX_ATTEMPTS ]; do
+            STATUS=$(curl -s -H "x-deploy-token: $DEPLOY_TOKEN" \
+              "$DEPLOY_URL/status/$DEPLOYMENT_ID" | jq -r '.status')
+            
+            echo "📈 Status: $STATUS (attempt $((ATTEMPT + 1))/$MAX_ATTEMPTS)"
+            
+            case "$STATUS" in
+              "completed")
+                echo "✅ Deployment completed successfully!"
+                exit 0
+                ;;
+              "failed"|"timeout"|"error")
+                echo "❌ Deployment failed with status: $STATUS"
+                # Get final result for debugging
+                curl -s -H "x-deploy-token: $DEPLOY_TOKEN" \
+                  "$DEPLOY_URL/status/$DEPLOYMENT_ID" | jq '.'
+                exit 1
+                ;;
+              "queued"|"running")
+                sleep 5
+                ATTEMPT=$((ATTEMPT + 1))
+                ;;
+              *)
+                echo "⚠️ Unknown status: $STATUS"
+                sleep 5
+                ATTEMPT=$((ATTEMPT + 1))
+                ;;
+            esac
+          done
+          
+          echo "⏰ Deployment polling timed out"
+          exit 1
