@@ -1,136 +1,20 @@
-# Example GitHub Actions workflow for async deployment
-name: Deploy with Async Listener
+name: Deploy to Server
 
 on:
   push:
-    branches: [ main ]
-  workflow_dispatch:
+    branches:
+      - main
 
 jobs:
   deploy:
     runs-on: ubuntu-latest
-    
-    steps:
-    - name: Checkout code
-      uses: actions/checkout@v3
-    
-    - name: Deploy to server (Async)
-      run: |
-        # Configuration
-        SITE_NAME="codeforge"  # Change this to your site name
-        
-        # Function to check deployment status
-        check_deployment_status() {
-          local deployment_id=$1
-          local response=$(curl -s -H "X-Deploy-Token: $DEPLOY_TOKEN" \
-            "$DEPLOY_SERVER_URL/status/$deployment_id")
-          
-          echo "$response" | jq -r '.status'
-        }
-        
-        # Function to get deployment result
-        get_deployment_result() {
-          local deployment_id=$1
-          curl -s -H "X-Deploy-Token: $DEPLOY_TOKEN" \
-            "$DEPLOY_SERVER_URL/status/$deployment_id"
-        }
-        
-        echo "🚀 Starting async deployment for $SITE_NAME..."
-        
-        # Initiate deployment
-        DEPLOYMENT_RESPONSE=$(curl -s -X POST \
-          -H "X-Deploy-Token: $DEPLOY_TOKEN" \
-          "$DEPLOY_SERVER_URL/$SITE_NAME")
-        
-        # Extract deployment ID
-        DEPLOYMENT_ID=$(echo "$DEPLOYMENT_RESPONSE" | jq -r '.deployment_id')
-        
-        if [ "$DEPLOYMENT_ID" = "null" ] || [ -z "$DEPLOYMENT_ID" ]; then
-          echo "❌ Failed to initiate deployment"
-          echo "Response: $DEPLOYMENT_RESPONSE"
-          exit 1
-        fi
-        
-        echo "✅ Deployment initiated with ID: $DEPLOYMENT_ID"
-        echo "📊 Check status at: $DEPLOY_SERVER_URL/status/$DEPLOYMENT_ID"
-        
-        # Poll for completion
-        MAX_ATTEMPTS=120  # 10 minutes with 5-second intervals
-        ATTEMPT=0
-        
-        while [ $ATTEMPT -lt $MAX_ATTEMPTS ]; do
-          STATUS=$(check_deployment_status "$DEPLOYMENT_ID")
-          
-          echo "📈 Deployment status: $STATUS (attempt $((ATTEMPT + 1))/$MAX_ATTEMPTS)"
-          
-          case "$STATUS" in
-            "completed")
-              echo "✅ Deployment completed successfully!"
-              break
-              ;;
-            "failed"|"timeout"|"error")
-              echo "❌ Deployment failed with status: $STATUS"
-              RESULT=$(get_deployment_result "$DEPLOYMENT_ID")
-              echo "📋 Deployment result:"
-              echo "$RESULT" | jq '.'
-              exit 1
-              ;;
-            "queued"|"running")
-              # Still in progress, continue polling
-              sleep 5
-              ATTEMPT=$((ATTEMPT + 1))
-              ;;
-            *)
-              echo "⚠️ Unknown status: $STATUS"
-              sleep 5
-              ATTEMPT=$((ATTEMPT + 1))
-              ;;
-          esac
-        done
-        
-        # Check if we timed out
-        if [ $ATTEMPT -eq $MAX_ATTEMPTS ]; then
-          echo "⏰ Deployment polling timed out"
-          RESULT=$(get_deployment_result "$DEPLOYMENT_ID")
-          echo "📋 Final deployment status:"
-          echo "$RESULT" | jq '.'
-          exit 1
-        fi
-        
-        # Get final result
-        FINAL_RESULT=$(get_deployment_result "$DEPLOYMENT_ID")
-        
-        echo "📋 Final deployment result:"
-        echo "$FINAL_RESULT" | jq '.'
-        
-        # Check if deployment was actually successful
-        SUCCESS=$(echo "$FINAL_RESULT" | jq -r '.success')
-        if [ "$SUCCESS" = "true" ]; then
-          echo "🎉 Deployment completed successfully!"
-        else
-          echo "❌ Deployment failed"
-          exit 1
-        fi
-    
-    - name: Notify on failure
-      if: failure()
-      run: |
-        echo "❌ Deployment failed. Check the logs above for details."
-        # Add your notification logic here (Slack, email, etc.)
 
-  # Optional: Add a separate job for cleanup or notifications
-  cleanup:
-    runs-on: ubuntu-latest
-    needs: deploy
-    if: always()
-    
     steps:
-    - name: Cleanup or notify
-      run: |
-        if [ "${{ needs.deploy.result }}" = "success" ]; then
-          echo "✅ Deployment successful - sending success notification"
-          # Add success notification logic
-        else
-          echo "❌ Deployment failed - sending failure notification"
-          # Add failure notification logic
-        fi
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Trigger deployment
+        run: |
+          curl -X POST "${{ secrets.DEPLOY_SERVER_URL }}/deploy2/codeforge" \
+            -H "x-deploy-token: ${{ secrets.DEPLOY_TOKEN }}" \
+            -H "Content-Type: application/json"
