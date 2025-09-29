@@ -15,6 +15,6 @@ jobs:
 
       - name: Trigger deployment
         run: |
-          curl -X POST "${{ secrets.DEPLOY_SERVER_URL }}/deploy/codeforge" \
+          curl -X POST "${{ secrets.DEPLOY_SERVER_URL }}/deploy2/codeforge" \
             -H "x-deploy-token: ${{ secrets.DEPLOY_TOKEN }}" \
             -H "Content-Type: application/json"
