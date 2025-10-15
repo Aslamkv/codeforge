@@ -1,4 +1,4 @@
-name: Deploy to Server (Async)
+name: Deploy to Server
 
 on:
   push:
@@ -7,105 +7,9 @@ on:
 
 jobs:
   deploy:
-    runs-on: ubuntu-latest
-
-    steps:
-      - name: Checkout code
-        uses: actions/checkout@v4
-
-      - name: Deploy with async polling
-        run: |
-          # Configuration
-          BASE_URL="${{ secrets.DEPLOY_SERVER_URL }}"
-          DEPLOY_TOKEN="${{ secrets.DEPLOY_TOKEN }}"
-          SITE_NAME="codeforge"
-          
-          echo "🚀 Starting async deployment for $SITE_NAME..."
-          
-          # Initiate deployment
-          DEPLOYMENT_RESPONSE=$(curl -s -w "\nHTTP_CODE:%{http_code}" -X POST \
-            -H "x-deploy-token: $DEPLOY_TOKEN" \
-            -H "Content-Type: application/json" \
-            "$BASE_URL/deploy2/$SITE_NAME")
-          
-          # Extract HTTP code and response body
-          HTTP_CODE=$(echo "$DEPLOYMENT_RESPONSE" | grep "HTTP_CODE:" | cut -d: -f2)
-          RESPONSE_BODY=$(echo "$DEPLOYMENT_RESPONSE" | sed '/HTTP_CODE:/d')
-          
-          echo "📡 Deployment HTTP Response Code: $HTTP_CODE"
-          
-          # Extract deployment ID
-          DEPLOYMENT_ID=$(echo "$RESPONSE_BODY" | jq -r '.deployment_id')
-          
-          if [ "$DEPLOYMENT_ID" = "null" ] || [ -z "$DEPLOYMENT_ID" ]; then
-            echo "❌ Failed to initiate deployment"
-            echo "Response: $RESPONSE_BODY"
-            exit 1
-          fi
-          
-          echo "✅ Deployment initiated with ID: $DEPLOYMENT_ID"
-          echo "🔍 Polling status at: $BASE_URL/deploy2/status/$DEPLOYMENT_ID"
-          
-          # Poll for completion (max 10 minutes)
-          MAX_ATTEMPTS=120  # 5-second intervals = 10 minutes
-          ATTEMPT=0
-          
-          while [ $ATTEMPT -lt $MAX_ATTEMPTS ]; do
-            # Get status with error handling
-            STATUS_RESPONSE=$(curl -s -w "\nHTTP_CODE:%{http_code}" \
-              -H "x-deploy-token: $DEPLOY_TOKEN" \
-              "$BASE_URL/deploy2/status/$DEPLOYMENT_ID")
-            
-            STATUS_HTTP_CODE=$(echo "$STATUS_RESPONSE" | grep "HTTP_CODE:" | cut -d: -f2)
-            STATUS_BODY=$(echo "$STATUS_RESPONSE" | sed '/HTTP_CODE:/d')
-            
-            # Check if API call was successful
-            if [ "$STATUS_HTTP_CODE" != "200" ]; then
-              echo "⚠️ Status check returned HTTP $STATUS_HTTP_CODE (attempt $((ATTEMPT + 1))/$MAX_ATTEMPTS)"
-              echo "Response: $STATUS_BODY"
-              sleep 5
-              ATTEMPT=$((ATTEMPT + 1))
-              continue
-            fi
-            
-            STATUS=$(echo "$STATUS_BODY" | jq -r '.status')
-            
-            # Handle null or empty status
-            if [ "$STATUS" = "null" ] || [ -z "$STATUS" ]; then
-              echo "⚠️ Empty status received (attempt $((ATTEMPT + 1))/$MAX_ATTEMPTS)"
-              echo "Response: $STATUS_BODY"
-              sleep 5
-              ATTEMPT=$((ATTEMPT + 1))
-              continue
-            fi
-            
-            echo "📈 Status: $STATUS (attempt $((ATTEMPT + 1))/$MAX_ATTEMPTS)"
-            
-            case "$STATUS" in
-              "completed")
-                echo "✅ Deployment completed successfully!"
-                # Show final result
-                echo "$STATUS_BODY" | jq '.'
-                exit 0
-                ;;
-              "failed"|"timeout"|"error")
-                echo "❌ Deployment failed with status: $STATUS"
-                # Get final result for debugging
-                echo "$STATUS_BODY" | jq '.'
-                exit 1
-                ;;
-              "queued"|"running")
-                sleep 5
-                ATTEMPT=$((ATTEMPT + 1))
-                ;;
-              *)
-                echo "⚠️ Unexpected status: $STATUS"
-                echo "Response: $STATUS_BODY"
-                sleep 5
-                ATTEMPT=$((ATTEMPT + 1))
-                ;;
-            esac
-          done
-          
-          echo "⏰ Deployment polling timed out after $((MAX_ATTEMPTS * 5)) seconds"
-          exit 1
+    uses: aslamkv/.github/.github/workflows/deploy-common.yml@main
+    with:
+      site_name: codeforge
+    secrets:
+      deploy_server_url: ${{ secrets.DEPLOY_SERVER_URL }}
+      deploy_token: ${{ secrets.DEPLOY_TOKEN }}
