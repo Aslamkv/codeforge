@@ -26,7 +26,7 @@ def home(request):
     features = Feature.objects.filter(is_active=True)
     
     context = {
-        'title': f'{settings.site_name} - Development Team',
+        'title': f'{settings.site_name}',
         'tagline': settings.tagline,
         'description': settings.description,
         'contact_email': settings.contact_email,
