@@ -1,4 +1,4 @@
-name: Deploy to Server
+name: Deploy to Server using common deployment workflow
 
 on:
   push:
