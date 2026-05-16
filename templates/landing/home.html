@@ -3,275 +3,225 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>{{ title }}</title>
-    <meta name="description" content="{{ description }}">
+    <meta name="description" content="Codeforge — Built by the community, for the community. Affordable, cutting-edge software that uplifts communities.">
+    <meta property="og:title" content="Codeforge — Community-Driven Software">
+    <meta property="og:description" content="Built by the community, for the community. Affordable tech. Real impact.">
+    <meta property="og:type" content="website">
+    <meta property="og:url" content="https://codeforge.show">
+    <meta property="og:image" content="https://codeforge.show/og-image.png">
+    <meta name="twitter:card" content="summary_large_image">
+    <meta name="twitter:title" content="Codeforge">
+    <meta name="twitter:description" content="Built by the community, for the community.">
     
-    <!-- Preconnect to Google Fonts -->
-    <link rel="preconnect" href="https://fonts.googleapis.com">
-    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&display=swap" rel="stylesheet">
-    
-    <!-- Load static files -->
-    {% load static %}
-    <link rel="stylesheet" href="{% static 'landing/css/style.css' %}">
-    
-    <!-- Favicon -->
-    <link rel="icon" type="image/svg+xml" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>⚡</text></svg>">
+    <title>Codeforge — {{ site_settings.name }}</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script>
+        tailwind.config = {
+            theme: {
+                extend: {
+                    colors: {
+                        warmstone: '#fdf8f3',
+                        warmgold: '#c2600a',
+                        warmorange: '#e07b39',
+                        warmcream: '#f5ede4',
+                    }
+                }
+            }
+        }
+    </script>
+    <style>
+        html {
+            scroll-behavior: smooth;
+        }
+        .reveal {
+            opacity: 0;
+            transform: translateY(20px);
+            transition: opacity 0.6s ease-out, transform 0.6s ease-out;
+        }
+        .reveal.visible {
+            opacity: 1;
+            transform: translateY(0);
+        }
+        .hero-wave {
+            background: linear-gradient(135deg, #e07b39 0%, #c2600a 100%);
+        }
+    </style>
 </head>
-<body>
-    <!-- Header -->
-    <header class="header">
-        <nav class="nav-container">
-            <a href="#" class="logo">CodeForge</a>
-            <ul class="nav-links">
-                <li><a href="#features">Features</a></li>
-                <li><a href="#technologies">Technologies</a></li>
-                <li><a href="#team">Team</a></li>
-                <li><a href="#contact">Contact</a></li>
-            </ul>
-        </nav>
-    </header>
+<body class="bg-warmstone text-gray-800 font-sans">
+    <!-- Navigation -->
+    <nav class="sticky top-0 z-50 bg-white shadow-sm">
+        <div class="max-w-6xl mx-auto px-6 py-4 flex justify-between items-center">
+            <h1 class="text-2xl font-bold text-warmgold">{{ site_settings.name }}</h1>
+            <div class="hidden md:flex gap-8 text-sm font-medium">
+                <a href="#mission" class="text-gray-600 hover:text-warmgold transition">Mission</a>
+                <a href="#values" class="text-gray-600 hover:text-warmgold transition">Values</a>
+                <a href="#stack" class="text-gray-600 hover:text-warmgold transition">Stack</a>
+                <a href="#community" class="text-gray-600 hover:text-warmgold transition">Community</a>
+                <a href="#contact" class="text-gray-600 hover:text-warmgold transition">Contact</a>
+            </div>
+        </div>
+    </nav>
 
     <!-- Hero Section -->
-    <section class="hero">
-        <div class="hero-content">
-            <h1>{{ title }}</h1>
-            <p class="tagline">{{ tagline }}</p>
-            <p class="description">{{ description }}</p>
-            <div class="cta-buttons">
-                <a href="#contact" class="btn btn-primary">Get Started</a>
-                <a href="#features" class="btn btn-secondary">Learn More</a>
+    <section class="hero-wave text-white py-24 px-6">
+        <div class="max-w-4xl mx-auto text-center">
+            <div class="inline-block bg-white bg-opacity-20 px-4 py-2 rounded-full text-sm font-semibold mb-6">
+                🤝 Community-Driven
+            </div>
+            <h2 class="text-5xl md:text-6xl font-bold mb-6 leading-tight">
+                {{ site_settings.name }}
+            </h2>
+            <p class="text-xl md:text-2xl mb-8 text-warmcream font-light">
+                {{ site_settings.tagline }}
+            </p>
+            <p class="text-lg text-warmcream opacity-90 max-w-2xl mx-auto mb-10">
+                {{ site_settings.description }}
+            </p>
+            <a href="#contact" class="inline-block bg-white text-warmgold px-8 py-3 rounded-lg font-semibold hover:bg-warmcream transition">
+                Join Us →
+            </a>
+        </div>
+    </section>
+
+    <!-- Mission Stats -->
+    <section id="mission" class="py-16 px-6 bg-white">
+        <div class="max-w-6xl mx-auto">
+            <div class="grid md:grid-cols-3 gap-8">
+                <div class="reveal text-center p-6 rounded-lg bg-warmcream">
+                    <div class="text-4xl font-bold text-warmgold mb-2">1+</div>
+                    <p class="text-gray-700">Live Projects</p>
+                </div>
+                <div class="reveal text-center p-6 rounded-lg bg-warmcream">
+                    <div class="text-4xl font-bold text-warmgold mb-2">10x</div>
+                    <p class="text-gray-700">More Affordable</p>
+                </div>
+                <div class="reveal text-center p-6 rounded-lg bg-warmcream">
+                    <div class="text-4xl font-bold text-warmgold mb-2">∞</div>
+                    <p class="text-gray-700">Community Impact</p>
+                </div>
             </div>
         </div>
     </section>
 
-    <!-- Features Section -->
-    <section id="features" class="features">
-        <div class="container">
-            <div class="section-title">
-                <h2>What We Do</h2>
-                <p>We specialize in creating cutting-edge software solutions that drive innovation and deliver exceptional user experiences.</p>
-            </div>
-            <div class="features-grid">
-                {% for feature in features %}
-                <div class="feature-card">
-                    <div class="feature-icon">{{ feature.icon }}</div>
-                    <h3>{{ feature.title }}</h3>
-                    <p>{{ feature.description }}</p>
+    <!-- Values Section -->
+    <section id="values" class="py-20 px-6 bg-warmcream">
+        <div class="max-w-6xl mx-auto">
+            <h3 class="text-4xl font-bold text-center mb-16 text-gray-800">What We Stand For</h3>
+            <div class="grid md:grid-cols-2 lg:grid-cols-3 gap-8">
+                <div class="reveal bg-white p-8 rounded-lg shadow-sm hover:shadow-md transition">
+                    <h4 class="text-xl font-semibold text-warmgold mb-3">Community First</h4>
+                    <p class="text-gray-600">Every decision starts with: does this serve the community?</p>
                 </div>
-                {% empty %}
-                <div class="feature-card">
-                    <div class="feature-icon">🚀</div>
-                    <h3>Rapid Development</h3>
-                    <p>We deliver high-quality software solutions quickly and efficiently, using modern development practices and agile methodologies.</p>
+                <div class="reveal bg-white p-8 rounded-lg shadow-sm hover:shadow-md transition">
+                    <h4 class="text-xl font-semibold text-warmgold mb-3">Affordable by Design</h4>
+                    <p class="text-gray-600">No hidden fees. No premium tiers for basic features. Fair pricing for all.</p>
                 </div>
-                <div class="feature-card">
-                    <div class="feature-icon">🔧</div>
-                    <h3>Custom Solutions</h3>
-                    <p>Every project is unique. We build tailored solutions that perfectly fit your business needs and requirements.</p>
+                <div class="reveal bg-white p-8 rounded-lg shadow-sm hover:shadow-md transition">
+                    <h4 class="text-xl font-semibold text-warmgold mb-3">Cutting-Edge Tech</h4>
+                    <p class="text-gray-600">Modern tools, proven practices, always learning and improving.</p>
                 </div>
-                <div class="feature-card">
-                    <div class="feature-icon">📱</div>
-                    <h3>Modern Technologies</h3>
-                    <p>We stay ahead of the curve, using the latest technologies and frameworks to build scalable, maintainable applications.</p>
+                <div class="reveal bg-white p-8 rounded-lg shadow-sm hover:shadow-md transition">
+                    <h4 class="text-xl font-semibold text-warmgold mb-3">Open Collaboration</h4>
+                    <p class="text-gray-600">Build together. Contribute ideas. Shape the future with us.</p>
                 </div>
-                <div class="feature-card">
-                    <div class="feature-icon">🛡️</div>
-                    <h3>Security First</h3>
-                    <p>Security is built into every solution from the ground up, ensuring your applications are protected against modern threats.</p>
+                <div class="reveal bg-white p-8 rounded-lg shadow-sm hover:shadow-md transition">
+                    <h4 class="text-xl font-semibold text-warmgold mb-3">Real Impact</h4>
+                    <p class="text-gray-600">We measure success by the problems we solve for real people.</p>
                 </div>
-                <div class="feature-card">
-                    <div class="feature-icon">📊</div>
-                    <h3>Performance Optimized</h3>
-                    <p>We optimize for performance, ensuring your applications are fast, responsive, and provide an excellent user experience.</p>
+                <div class="reveal bg-white p-8 rounded-lg shadow-sm hover:shadow-md transition">
+                    <h4 class="text-xl font-semibold text-warmgold mb-3">Quality Without Compromise</h4>
+                    <p class="text-gray-600">Affordable doesn't mean cheap. We ship quality code.</p>
                 </div>
-                <div class="feature-card">
-                    <div class="feature-icon">🤝</div>
-                    <h3>Collaborative Approach</h3>
-                    <p>We work closely with our clients throughout the development process, ensuring transparency and alignment with your vision.</p>
-                </div>
-                {% endfor %}
             </div>
         </div>
     </section>
 
-    <!-- Technologies Section -->
-    <section id="technologies" class="technologies">
-        <div class="container">
-            <div class="section-title">
-                <h2>Technologies We Love</h2>
-                <p>We work with a wide range of modern technologies to build robust and scalable applications.</p>
-            </div>
-            <div class="tech-grid">
-                {% for category, techs in technologies.items %}
-                <div class="tech-item">
-                    <h4>{{ category|title }}</h4>
-                    <p>{% for tech in techs %}{{ tech.name }}{% if not forloop.last %}, {% endif %}{% endfor %}</p>
+    <!-- Stack Section -->
+    <section id="stack" class="py-20 px-6 bg-white">
+        <div class="max-w-6xl mx-auto">
+            <h3 class="text-4xl font-bold text-center mb-16 text-gray-800">Our Stack</h3>
+            {% if technologies %}
+                <div class="grid md:grid-cols-2 lg:grid-cols-3 gap-8">
+                    {% for category, tech_list in technologies.items %}
+                        <div class="reveal bg-warmcream p-8 rounded-lg">
+                            <h4 class="text-lg font-semibold text-warmgold mb-4 capitalize">{{ category }}</h4>
+                            <ul class="space-y-2">
+                                {% for tech in tech_list %}
+                                    <li class="text-gray-700">{{ tech }}</li>
+                                {% endfor %}
+                            </ul>
+                        </div>
+                    {% endfor %}
                 </div>
-                {% empty %}
-                <div class="tech-item">
-                    <h4>Frontend</h4>
-                    <p>React, Vue.js, Angular, TypeScript</p>
-                </div>
-                <div class="tech-item">
-                    <h4>Backend</h4>
-                    <p>Python, Node.js, Django, FastAPI</p>
-                </div>
-                <div class="tech-item">
-                    <h4>Mobile</h4>
-                    <p>React Native, Flutter, Swift, Kotlin</p>
-                </div>
-                <div class="tech-item">
-                    <h4>Cloud</h4>
-                    <p>AWS, Google Cloud, Azure, Docker</p>
-                </div>
-                <div class="tech-item">
-                    <h4>Databases</h4>
-                    <p>PostgreSQL, MongoDB, Redis, Elasticsearch</p>
-                </div>
-                <div class="tech-item">
-                    <h4>DevOps</h4>
-                    <p>Kubernetes, CI/CD, Terraform, Monitoring</p>
-                </div>
-                {% endfor %}
-            </div>
+            {% else %}
+                <p class="text-center text-gray-500">Technologies coming soon.</p>
+            {% endif %}
         </div>
     </section>
 
-    <!-- Team Section -->
-    <section id="team" class="team">
-        <div class="container">
-            <div class="section-title">
-                <h2>Meet Our Team</h2>
-                <p>We are a passionate group of developers, designers, and engineers dedicated to creating exceptional software.</p>
-            </div>
-            <div class="team-grid">
-                {% for member in team_members %}
-                <div class="team-member">
-                    <div class="member-avatar">{{ member.avatar_initials }}</div>
-                    <h4>{{ member.name }}</h4>
-                    <p>{{ member.role }}</p>
-                    {% if member.bio %}
-                    <div class="member-bio">{{ member.bio }}</div>
-                    {% endif %}
+    <!-- Community Section -->
+    <section id="community" class="py-20 px-6 bg-warmcream">
+        <div class="max-w-6xl mx-auto">
+            <h3 class="text-4xl font-bold text-center mb-16 text-gray-800">Our Community</h3>
+            {% if contributors %}
+                <div class="grid md:grid-cols-2 lg:grid-cols-3 gap-8">
+                    {% for contributor in contributors %}
+                        <div class="reveal bg-white p-8 rounded-lg text-center shadow-sm">
+                            <div class="w-16 h-16 mx-auto bg-warmgold rounded-full flex items-center justify-center text-white text-2xl font-bold mb-4">
+                                {{ contributor.initials }}
+                            </div>
+                            <h4 class="text-lg font-semibold text-gray-800 mb-1">{{ contributor.name }}</h4>
+                            <p class="text-warmgold text-sm font-medium">{{ contributor.role }}</p>
+                        </div>
+                    {% endfor %}
                 </div>
-                {% empty %}
-                <div class="team-member">
-                    <div class="member-avatar">JD</div>
-                    <h4>John Developer</h4>
-                    <p>Lead Full-Stack Developer</p>
+            {% else %}
+                <div class="bg-white p-12 rounded-lg text-center">
+                    <p class="text-gray-600 mb-6">We're just getting started. Be part of something bigger.</p>
+                    <a href="#contact" class="inline-block bg-warmgold text-white px-6 py-2 rounded-lg font-semibold hover:bg-warmorange transition">
+                        Join the Community
+                    </a>
                 </div>
-                <div class="team-member">
-                    <div class="member-avatar">AS</div>
-                    <h4>Alice Smith</h4>
-                    <p>Frontend Specialist</p>
-                </div>
-                <div class="team-member">
-                    <div class="member-avatar">MJ</div>
-                    <h4>Mike Johnson</h4>
-                    <p>Backend Engineer</p>
-                </div>
-                <div class="team-member">
-                    <div class="member-avatar">SD</div>
-                    <h4>Sarah Davis</h4>
-                    <p>DevOps Engineer</p>
-                </div>
-                {% endfor %}
-            </div>
+            {% endif %}
         </div>
     </section>
 
     <!-- Contact Section -->
-    <section id="contact" class="contact">
-        <div class="container">
-            <h2>Ready to Build Something Amazing?</h2>
-            <p>Let's discuss your project and see how we can help bring your ideas to life.</p>
-            <div class="contact-info">
-                {% if contact_email %}
-                <div class="contact-item">
-                    <span>📧</span>
-                    <a href="mailto:{{ contact_email }}">{{ contact_email }}</a>
-                </div>
-                {% endif %}
-                {% if github_url %}
-                <div class="contact-item">
-                    <span>💬</span>
-                    <a href="{{ github_url }}" target="_blank">GitHub</a>
-                </div>
-                {% endif %}
-                {% if twitter_url %}
-                <div class="contact-item">
-                    <span>🐦</span>
-                    <a href="{{ twitter_url }}" target="_blank">Twitter</a>
-                </div>
-                {% endif %}
-                {% if linkedin_url %}
-                <div class="contact-item">
-                    <span>💼</span>
-                    <a href="{{ linkedin_url }}" target="_blank">LinkedIn</a>
-                </div>
-                {% endif %}
+    <section id="contact" class="py-20 px-6 bg-white">
+        <div class="max-w-4xl mx-auto text-center">
+            <h3 class="text-4xl font-bold mb-6 text-gray-800">Ready to Make an Impact?</h3>
+            <p class="text-lg text-gray-600 mb-10">
+                Join us in building software that uplifts communities. Whether you're a developer, designer, or just someone who believes in affordable tech — we'd love to have you.
+            </p>
+            <div class="flex flex-col md:flex-row gap-4 justify-center">
+                <a href="mailto:{{ site_settings.email }}" class="inline-block bg-warmgold text-white px-8 py-3 rounded-lg font-semibold hover:bg-warmorange transition">
+                    Get in Touch
+                </a>
+                <a href="https://github.com" target="_blank" class="inline-block border-2 border-warmgold text-warmgold px-8 py-3 rounded-lg font-semibold hover:bg-warmcream transition">
+                    GitHub
+                </a>
             </div>
         </div>
     </section>
 
     <!-- Footer -->
-    <footer class="footer">
-        <div class="container">
-            <p>&copy; {% now "Y" %} CodeForge. Built with ❤️ by CodeForge.</p>
+    <footer class="bg-gray-900 text-white py-12 px-6">
+        <div class="max-w-6xl mx-auto text-center">
+            <p class="text-gray-400 mb-2">{{ site_settings.name }} © 2025</p>
+            <p class="text-gray-500">Built by the community, for the community. 🤝</p>
         </div>
     </footer>
 
-    <!-- Smooth scrolling script -->
     <script>
-        // Smooth scrolling for navigation links
-        document.querySelectorAll('a[href^="#"]').forEach(anchor => {
-            anchor.addEventListener('click', function (e) {
-                e.preventDefault();
-                const target = document.querySelector(this.getAttribute('href'));
-                if (target) {
-                    target.scrollIntoView({
-                        behavior: 'smooth',
-                        block: 'start'
-                    });
-                }
-            });
-        });
-
-        // Add scroll effect to header
-        window.addEventListener('scroll', function() {
-            const header = document.querySelector('.header');
-            if (window.scrollY > 100) {
-                header.style.background = 'rgba(255, 255, 255, 0.95)';
-                header.style.backdropFilter = 'blur(10px)';
-            } else {
-                header.style.background = 'var(--bg-white)';
-                header.style.backdropFilter = 'none';
-            }
-        });
-
-        // Add animation on scroll
-        const observerOptions = {
-            threshold: 0.1,
-            rootMargin: '0px 0px -50px 0px'
-        };
-
-        const observer = new IntersectionObserver(function(entries) {
+        const revealElements = document.querySelectorAll('.reveal');
+        const observer = new IntersectionObserver((entries) => {
             entries.forEach(entry => {
                 if (entry.isIntersecting) {
-                    entry.target.style.opacity = '1';
-                    entry.target.style.transform = 'translateY(0)';
+                    entry.target.classList.add('visible');
                 }
             });
-        }, observerOptions);
-
-        // Observe feature cards and team members
-        document.querySelectorAll('.feature-card, .team-member, .tech-item').forEach(el => {
-            el.style.opacity = '0';
-            el.style.transform = 'translateY(20px)';
-            el.style.transition = 'opacity 0.6s ease, transform 0.6s ease';
-            observer.observe(el);
-        });
+        }, { threshold: 0.1 });
+        revealElements.forEach(el => observer.observe(el));
     </script>
 </body>
 </html>

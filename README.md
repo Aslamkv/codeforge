@@ -1,176 +1,130 @@
-# CodeForge - Development Team Landing Page
+# Codeforge
 
-A modern, responsive landing page for a development team built with Django.
+**Built by the community, for the community.**
 
-## Features
+Codeforge is a community-driven software initiative dedicated to building affordable, cutting-edge technology that uplifts entire communities instead of just individuals.
 
-- **Modern Design**: Clean, professional UI with smooth animations
-- **Responsive Layout**: Works perfectly on desktop, tablet, and mobile devices
-- **Interactive Elements**: Smooth scrolling, hover effects, and scroll animations
-- **Dynamic Content**: Database-driven content management through Django admin
-- **Team Showcase**: Display team members and their roles (customizable)
-- **Technology Stack**: Highlight the technologies and tools used (customizable)
-- **Features Section**: Showcase your services and capabilities (customizable)
-- **Contact Information**: Easy ways to get in touch (customizable)
-- **Admin Interface**: Full Django admin interface for content management
+## Vision
 
-## Technologies Used
+We believe technology should serve everyone. Codeforge creates and markets software projects that solve real problems at prices communities can actually afford — while using modern, proven tech stacks.
 
-- **Backend**: Django 4.2
-- **Frontend**: HTML5, CSS3, JavaScript
-- **Styling**: Custom CSS with CSS Grid and Flexbox
-- **Fonts**: Inter font family from Google Fonts
-- **Icons**: Emoji icons for a modern touch
+## How It Works
+
+**Codeforge.show** is the mother brand and landing page. Each project lives under its own subdomain:
+
+- `billbasket.codeforge.show` — Affordable billing software for small shops
+- `xyz.codeforge.show` — Future services, each with its own dedicated site
+
+## Our Values
+
+- **Community First** — Every decision starts with: does this serve the community?
+- **Affordable by Design** — No hidden fees, no premium tiers for basics
+- **Cutting-Edge Tech** — Modern tools, proven practices
+- **Open Collaboration** — Build together, contribute ideas
+- **Real Impact** — Measure success by problems solved
+- **Quality Without Compromise** — Affordable doesn't mean cheap
+
+## Stack
+
+- **Backend**: Django 4.2 (Python)
+- **Frontend**: HTML5 + Tailwind CSS + Vanilla JS
+- **Database**: SQLite (dev), swappable via env vars
+- **Deployment**: GitHub → Auto-deploy pipeline (in progress)
 
 ## Getting Started
 
-### Prerequisites
+### Local Development
 
-- Python 3.9+
-- pip
-- virtualenv (recommended)
-
-### Installation
-
-1. Clone the repository:
 ```bash
-git clone <repository-url>
+git clone https://github.com/Aslamkv/codeforge.git
 cd codeforge
-```
-
-2. Create and activate a virtual environment:
-```bash
 python -m venv venv
-source venv/bin/activate  # On Windows: venv\Scripts\activate
-```
-
-3. Install dependencies:
-```bash
+source venv/bin/activate  # or `venv\Scripts\activate` on Windows
 pip install -r requirements.txt
-```
-
-4. Set up environment variables:
-Create a `.env` file in the project root with:
-```
-SECRET_KEY=your-secret-key-here
-DEBUG=True
-ALLOWED_HOSTS=localhost,127.0.0.1
-```
-
-5. Run migrations:
-```bash
 python manage.py migrate
-```
-
-6. Create a superuser for admin access:
-```bash
-python manage.py createsuperuser
-```
-
-7. Start the development server:
-```bash
 python manage.py runserver
 ```
 
-8. Open your browser and visit:
-   - Landing page: `http://localhost:8000`
-   - Admin interface: `http://localhost:8000/admin`
+Visit `http://localhost:8000`
+
+### Configuration
+
+Create a `.env` file in the project root:
+
+```env
+DEBUG=True
+SECRET_KEY=your-secret-key-here
+DATABASE_URL=sqlite:///db.sqlite3
+ALLOWED_HOSTS=localhost,127.0.0.1
+```
+
+### Admin
+
+```bash
+python manage.py createsuperuser
+# Visit http://localhost:8000/admin
+```
+
+Edit `SiteSettings` to customize the homepage:
+- Site name, tagline, description
+- Email contact
+- Technologies/stack
 
 ## Project Structure
 
 ```
 codeforge/
-├── codeforge/          # Django project settings
-├── landing/            # Landing page app
-│   ├── models.py       # Database models
-│   ├── admin.py        # Admin interface
-│   ├── views.py        # View functions
-│   ├── urls.py         # URL patterns
-│   ├── apps.py         # App configuration
-│   └── __init__.py     # Python package marker
-├── templates/          # HTML templates
-│   └── landing/
-│       └── home.html   # Main landing page template
-├── static/             # Static files
-│   └── landing/
-│       └── css/
-│           └── style.css # Main stylesheet
-├── manage.py           # Django management script
-└── requirements.txt    # Python dependencies
+├── codeforge/          # Django project config
+│   ├── settings.py
+│   ├── urls.py
+│   └── wsgi.py
+├── landing/            # Main app
+│   ├── models.py       # SiteSettings model
+│   ├── views.py        # Homepage view
+│   ├── admin.py        # Admin customization
+│   └── migrations/
+├── templates/landing/  # HTML templates
+│   └── home.html       # Tailwind-powered homepage
+├── static/             # Static assets (future)
+├── manage.py
+└── requirements.txt
 ```
 
-## Admin Interface
+## Roadmap
 
-The landing page includes a full Django admin interface for easy content management:
+### Phase 1 ✅ (Current)
+- Community-focused branding
+- Warm, accessible design with Tailwind
+- Mission & values communication
 
-### Accessing the Admin
-1. Go to `http://localhost:8000/admin`
-2. Login with your superuser credentials
-3. Manage all content through the admin interface
+### Phase 2 (Next)
+- `Project` model for per-service subdomains
+- Services section auto-populated from DB
+- Groundwork for `billbasket.codeforge.show`
 
-### Available Models
+### Phase 3 (Future)
+- GitHub → auto-deploy pipeline
+- Contact form with email integration
+- Image/logo uploads for projects
+- SEO optimization & sitemap
 
-#### Site Settings
-- **Site Name**: Your team/company name
-- **Tagline**: Main headline for the landing page
-- **Description**: Brief description of your team
-- **Contact Information**: Email and social media links
+## Contributing
 
-#### Team Members
-- **Name & Role**: Team member information
-- **Avatar Initials**: Letters displayed in the avatar circle
-- **Bio**: Optional bio text
-- **Contact Links**: Email, LinkedIn, GitHub, Twitter
-- **Order**: Control the display order
-- **Active Status**: Show/hide team members
+We're building this as a community. If you believe in affordable, quality tech:
 
-#### Features
-- **Title & Description**: Service/feature information
-- **Icon**: Emoji icon for the feature
-- **Order**: Control the display order
-- **Active Status**: Show/hide features
-
-#### Technologies
-- **Name & Category**: Technology information
-- **Description**: Brief description
-- **Order**: Control the display order
-- **Active Status**: Show/hide technologies
-
-## Customization
-
-### Colors
-The color scheme can be customized by modifying the CSS variables in `static/landing/css/style.css`:
-
-```css
-:root {
-    --primary-color: #2563eb;
-    --primary-dark: #1d4ed8;
-    --secondary-color: #64748b;
-    --accent-color: #06b6d4;
-    /* ... other variables */
-}
-```
-
-### Content Management
-All content is now managed through the Django admin interface:
-- **Team Information**: Add/edit team members, roles, and bios
-- **Features**: Customize your services and capabilities
-- **Technologies**: Update your tech stack
-- **Site Settings**: Modify site name, tagline, and contact info
-
-### Fallback Content
-If no content is added through the admin, the landing page will display default content to ensure it always looks good.
-
-## Deployment
-
-For production deployment:
-
-1. Set `DEBUG=False` in your environment variables
-2. Configure proper `ALLOWED_HOSTS`
-3. Set up a production database
-4. Configure static file serving
-5. Use a production WSGI server like Gunicorn
+1. Fork the repo
+2. Create a feature branch (`git checkout -b feature/your-idea`)
+3. Commit with clear messages (`feat:`, `fix:`, `docs:`, etc.)
+4. Push and open a PR
 
 ## License
 
-This project is licensed under the MIT License - see the LICENSE file for details.
+See `LICENSE` file.
+
+## Questions?
+
+Reach out at contact@codeforge.show or open an issue.
+
+---
+
+**Codeforge** — Technology that uplifts communities. 🤝
