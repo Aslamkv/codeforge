@@ -46,14 +46,44 @@
             <div class="text-2xl font-bold">
                 <span class="text-orange-500">codeforge</span><span class="mono text-sm text-orange-400">.show</span>
             </div>
-            <div class="flex gap-8 text-sm">
+            <!-- Desktop nav -->
+            <div class="hidden md:flex gap-8 text-sm items-center">
                 <a href="#" class="hover:text-orange-400 transition">Community</a>
                 <a href="#" class="hover:text-orange-400 transition">Projects</a>
                 <a href="#" class="hover:text-orange-400 transition">Docs</a>
                 <a href="#" class="bg-orange-600 hover:bg-orange-700 px-4 py-2 rounded-lg transition">Join</a>
             </div>
+            <!-- Mobile hamburger -->
+            <button id="nav-toggle" class="md:hidden flex flex-col gap-1.5 p-2 focus:outline-none" aria-label="Toggle menu">
+                <span class="block w-6 h-0.5 bg-stone-300 transition-all duration-300" id="bar1"></span>
+                <span class="block w-6 h-0.5 bg-stone-300 transition-all duration-300" id="bar2"></span>
+                <span class="block w-6 h-0.5 bg-stone-300 transition-all duration-300" id="bar3"></span>
+            </button>
+        </div>
+        <!-- Mobile menu -->
+        <div id="mobile-menu" class="md:hidden hidden border-t border-orange-500/20 bg-stone-950/95 backdrop-blur-md">
+            <div class="flex flex-col px-6 py-4 gap-4 text-sm">
+                <a href="#" class="hover:text-orange-400 transition py-2 border-b border-stone-800">Community</a>
+                <a href="#" class="hover:text-orange-400 transition py-2 border-b border-stone-800">Projects</a>
+                <a href="#" class="hover:text-orange-400 transition py-2 border-b border-stone-800">Docs</a>
+                <a href="#" class="bg-orange-600 hover:bg-orange-700 px-4 py-3 rounded-lg transition text-center font-semibold mt-2">Join</a>
+            </div>
         </div>
     </nav>
+    <script>
+        const toggle = document.getElementById('nav-toggle');
+        const menu = document.getElementById('mobile-menu');
+        const bar1 = document.getElementById('bar1');
+        const bar2 = document.getElementById('bar2');
+        const bar3 = document.getElementById('bar3');
+        toggle.addEventListener('click', () => {
+            menu.classList.toggle('hidden');
+            const open = !menu.classList.contains('hidden');
+            bar1.style.transform = open ? 'translateY(8px) rotate(45deg)' : '';
+            bar2.style.opacity = open ? '0' : '1';
+            bar3.style.transform = open ? 'translateY(-8px) rotate(-45deg)' : '';
+        });
+    </script>
 
     <!-- Hero Section -->
     <section class="mesh-gradient min-h-screen flex items-center justify-center pt-20">
@@ -231,8 +261,8 @@
                     </ul>
                 </div>
             </div>
-            <div class="border-t border-stone-700 pt-8 flex justify-between items-center">
-                <p class="text-stone-500 text-sm">© 2026 Codeforge. Built with ❤️ by the community.</p>
+            <div class="border-t border-stone-700 pt-8 flex flex-col sm:flex-row justify-between items-center gap-4">
+                <p class="text-stone-500 text-sm text-center sm:text-left">© 2026 Codeforge. Built with ❤️ by the community.</p>
                 <div class="flex gap-4 text-stone-400">
                     <a href="#" class="hover:text-orange-400 transition">Twitter</a>
                     <a href="#" class="hover:text-orange-400 transition">GitHub</a>
