@@ -45,6 +45,20 @@
         .hero-wave {
             background: linear-gradient(135deg, #e07b39 0%, #c2600a 100%);
         }
+        .url-badge {
+            background: linear-gradient(90deg, #ff6b35, #f7c59f, #ff6b35);
+            background-size: 200% auto;
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+            background-clip: text;
+            animation: shimmer 3s linear infinite;
+            font-weight: 800;
+            letter-spacing: 0.05em;
+        }
+        @keyframes shimmer {
+            0% { background-position: 0% center; }
+            100% { background-position: 200% center; }
+        }
     </style>
 </head>
 <body class="bg-warmstone text-gray-800 font-sans">
@@ -68,9 +82,14 @@
             <div class="inline-block bg-white bg-opacity-20 px-4 py-2 rounded-full text-sm font-semibold mb-6">
                 🤝 Community-Driven
             </div>
-            <h2 class="text-5xl md:text-6xl font-bold mb-6 leading-tight">
+            <h2 class="text-5xl md:text-6xl font-bold mb-4 leading-tight">
                 {{ site_settings.name }}
             </h2>
+            <div class="mb-6">
+                <a href="https://codeforge.show" target="_blank" class="inline-block bg-white bg-opacity-10 border border-white border-opacity-30 px-5 py-2 rounded-full backdrop-blur-sm hover:bg-opacity-20 transition">
+                    <span class="url-badge text-lg">codeforge.show</span>
+                </a>
+            </div>
             <p class="text-xl md:text-2xl mb-8 text-warmcream font-light">
                 {{ site_settings.tagline }}
             </p>
