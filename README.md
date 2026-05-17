@@ -90,24 +90,6 @@ codeforge/
 └── requirements.txt
 ```
 
-## Roadmap
-
-### Phase 1 ✅ (Current)
-- Community-focused branding
-- Warm, accessible design with Tailwind
-- Mission & values communication
-
-### Phase 2 (Next)
-- `Project` model for per-service subdomains
-- Services section auto-populated from DB
-- Groundwork for `billbasket.codeforge.show`
-
-### Phase 3 (Future)
-- GitHub → auto-deploy pipeline
-- Contact form with email integration
-- Image/logo uploads for projects
-- SEO optimization & sitemap
-
 ## Contributing
 
 We're building this as a community. If you believe in affordable, quality tech:
