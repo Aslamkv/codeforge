@@ -88,10 +88,10 @@
             </div>
             <!-- Desktop nav -->
             <div class="hidden md:flex gap-8 text-sm items-center">
-                <a href="#" class="hover:text-orange-400 transition">Community</a>
-                <a href="#" class="hover:text-orange-400 transition">Projects</a>
-                <a href="#" class="hover:text-orange-400 transition">Docs</a>
-                <a href="#" class="bg-orange-600 hover:bg-orange-700 px-4 py-2 rounded-lg transition">Join</a>
+                <a href="#community" class="hover:text-orange-400 transition">Community</a>
+                <a href="#projects" class="hover:text-orange-400 transition">Projects</a>
+                <a href="/docs/" class="hover:text-orange-400 transition">Docs</a>
+                <a href="#contact" class="bg-orange-600 hover:bg-orange-700 px-4 py-2 rounded-lg transition">Join</a>
             </div>
             <!-- Mobile hamburger -->
             <button id="nav-toggle" class="md:hidden flex flex-col gap-1.5 p-2 focus:outline-none" aria-label="Toggle menu">
@@ -103,10 +103,10 @@
         <!-- Mobile menu -->
         <div id="mobile-menu" class="md:hidden hidden border-t border-orange-500/20 bg-stone-950/95 backdrop-blur-md">
             <div class="flex flex-col px-6 py-4 gap-4 text-sm">
-                <a href="#" class="hover:text-orange-400 transition py-2 border-b border-stone-800">Community</a>
-                <a href="#" class="hover:text-orange-400 transition py-2 border-b border-stone-800">Projects</a>
-                <a href="#" class="hover:text-orange-400 transition py-2 border-b border-stone-800">Docs</a>
-                <a href="#" class="bg-orange-600 hover:bg-orange-700 px-4 py-3 rounded-lg transition text-center font-semibold mt-2">Join</a>
+                <a href="#community" class="hover:text-orange-400 transition py-2 border-b border-stone-800">Community</a>
+                <a href="#projects" class="hover:text-orange-400 transition py-2 border-b border-stone-800">Projects</a>
+                <a href="/docs/" class="hover:text-orange-400 transition py-2 border-b border-stone-800">Docs</a>
+                <a href="#contact" class="bg-orange-600 hover:bg-orange-700 px-4 py-3 rounded-lg transition text-center font-semibold mt-2">Join</a>
             </div>
         </div>
     </nav>
@@ -388,42 +388,40 @@
                 <div>
                     <h3 class="font-bold mb-4">Product</h3>
                     <ul class="space-y-2 text-stone-400 text-sm">
-                        <li><a href="#" class="hover:text-orange-400 transition">Projects</a></li>
-                        <li><a href="#" class="hover:text-orange-400 transition">Documentation</a></li>
-                        <li><a href="#" class="hover:text-orange-400 transition">API</a></li>
+                        <li><a href="#projects" class="hover:text-orange-400 transition">Projects</a></li>
+                        <li><a href="/docs/" class="hover:text-orange-400 transition">Documentation</a></li>
                     </ul>
                 </div>
                 <div>
                     <h3 class="font-bold mb-4">Community</h3>
                     <ul class="space-y-2 text-stone-400 text-sm">
-                        <li><a href="#" class="hover:text-orange-400 transition">Discord</a></li>
-                        <li><a href="#" class="hover:text-orange-400 transition">GitHub</a></li>
-                        <li><a href="#" class="hover:text-orange-400 transition">Discussions</a></li>
+                        {% if github_url %}
+                        <li><a href="{{ github_url }}" target="_blank" rel="noopener" class="hover:text-orange-400 transition">GitHub</a></li>
+                        <li><a href="{{ github_url }}/discussions" target="_blank" rel="noopener" class="hover:text-orange-400 transition">Discussions</a></li>
+                        {% endif %}
                     </ul>
                 </div>
                 <div>
                     <h3 class="font-bold mb-4">Company</h3>
                     <ul class="space-y-2 text-stone-400 text-sm">
-                        <li><a href="#" class="hover:text-orange-400 transition">About</a></li>
-                        <li><a href="#" class="hover:text-orange-400 transition">Blog</a></li>
-                        <li><a href="#" class="hover:text-orange-400 transition">Contact</a></li>
+                        <li><a href="/about/" class="hover:text-orange-400 transition">About</a></li>
+                        <li><a href="#contact" class="hover:text-orange-400 transition">Contact</a></li>
                     </ul>
                 </div>
                 <div>
                     <h3 class="font-bold mb-4">Legal</h3>
                     <ul class="space-y-2 text-stone-400 text-sm">
-                        <li><a href="#" class="hover:text-orange-400 transition">Privacy</a></li>
-                        <li><a href="#" class="hover:text-orange-400 transition">Terms</a></li>
-                        <li><a href="#" class="hover:text-orange-400 transition">License</a></li>
+                        <li><a href="/privacy/" class="hover:text-orange-400 transition">Privacy</a></li>
+                        <li><a href="/terms/" class="hover:text-orange-400 transition">Terms</a></li>
+                        <li><a href="/license/" class="hover:text-orange-400 transition">License</a></li>
                     </ul>
                 </div>
             </div>
             <div class="border-t border-stone-700 pt-8 flex flex-col sm:flex-row justify-between items-center gap-4">
                 <p class="text-stone-500 text-sm text-center sm:text-left">© 2026 Codeforge. Built with ❤️ by the community.</p>
-                <div class="flex gap-4 text-stone-400">
-                    <a href="#" class="hover:text-orange-400 transition">Twitter</a>
-                    <a href="#" class="hover:text-orange-400 transition">GitHub</a>
-                    <a href="#" class="hover:text-orange-400 transition">Discord</a>
+                <div class="flex gap-4 text-stone-400 text-sm">
+                    {% if twitter_url %}<a href="{{ twitter_url }}" target="_blank" rel="noopener" class="hover:text-orange-400 transition">Twitter</a>{% endif %}
+                    {% if github_url %}<a href="{{ github_url }}" target="_blank" rel="noopener" class="hover:text-orange-400 transition">GitHub</a>{% endif %}
                 </div>
             </div>
         </div>

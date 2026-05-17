@@ -109,3 +109,37 @@ def contact_submit(request):
         logger.exception("Failed to send contact notification email")
 
     return JsonResponse({"success": True, "message": "Thanks! We'll get back to you soon."})
+
+
+def _base_context():
+    """Shared context for standalone pages (nav/footer social links)."""
+    from .models import SiteSettings
+    try:
+        settings_obj = SiteSettings.objects.first() or SiteSettings()
+    except Exception:
+        settings_obj = SiteSettings()
+    return {
+        "github_url": settings_obj.github_url,
+        "twitter_url": settings_obj.twitter_url,
+        "contact_email": settings_obj.contact_email,
+    }
+
+
+def about(request):
+    return render(request, "landing/about.html", _base_context())
+
+
+def privacy(request):
+    return render(request, "landing/privacy.html", _base_context())
+
+
+def terms(request):
+    return render(request, "landing/terms.html", _base_context())
+
+
+def license_page(request):
+    return render(request, "landing/license.html", _base_context())
+
+
+def docs(request):
+    return render(request, "landing/docs.html", _base_context())

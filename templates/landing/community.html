@@ -1,0 +1,92 @@
+{% extends "landing/base.html" %}
+
+{% block title %}Community — Codeforge{% endblock %}
+{% block meta_description %}Join the Codeforge community. Help build software that makes a real difference — and connect with developers who care about the same things.{% endblock %}
+{% block canonical_path %}/community/{% endblock %}
+{% block og_path %}/community/{% endblock %}
+{% block og_title %}Community — Codeforge{% endblock %}
+{% block og_description %}Join the Codeforge community. Help build software that makes a real difference.{% endblock %}
+{% block tw_title %}Community — Codeforge{% endblock %}
+{% block tw_description %}Join the Codeforge community. Help build software that makes a real difference.{% endblock %}
+
+{% block content %}
+<div class="mesh-gradient min-h-screen pt-32 pb-24">
+    <div class="max-w-3xl mx-auto px-6">
+
+        <!-- Heading -->
+        <div class="mb-16">
+            <span class="text-orange-500 text-sm font-semibold uppercase tracking-widest">Community</span>
+            <h1 class="text-5xl font-bold mt-4 mb-6 leading-tight">Built by people who give a damn.</h1>
+            <p class="text-stone-400 text-xl leading-relaxed">
+                Codeforge runs on contributors. Every feature, every fix, every project exists because someone decided to show up.
+            </p>
+        </div>
+
+        <!-- Ways to contribute -->
+        <div class="mb-16">
+            <h2 class="text-2xl font-bold mb-8">How you can get involved</h2>
+            <div class="space-y-6">
+                <div class="card-border rounded-xl p-6 bg-stone-900/50 flex gap-5 items-start">
+                    <div class="text-3xl mt-1">💻</div>
+                    <div>
+                        <h3 class="font-semibold text-lg mb-1">Contribute code</h3>
+                        <p class="text-stone-400 text-sm leading-relaxed">Pick an open issue, fix a bug, or propose a feature. All skill levels welcome — good code review is part of the deal.</p>
+                    </div>
+                </div>
+                <div class="card-border rounded-xl p-6 bg-stone-900/50 flex gap-5 items-start">
+                    <div class="text-3xl mt-1">🐛</div>
+                    <div>
+                        <h3 class="font-semibold text-lg mb-1">Report issues</h3>
+                        <p class="text-stone-400 text-sm leading-relaxed">Found something broken or confusing? Tell us. A clear bug report is just as valuable as a fix.</p>
+                    </div>
+                </div>
+                <div class="card-border rounded-xl p-6 bg-stone-900/50 flex gap-5 items-start">
+                    <div class="text-3xl mt-1">💬</div>
+                    <div>
+                        <h3 class="font-semibold text-lg mb-1">Share feedback</h3>
+                        <p class="text-stone-400 text-sm leading-relaxed">Using one of our products? Tell us what's working and what isn't. Real feedback from real users shapes everything we build.</p>
+                    </div>
+                </div>
+                <div class="card-border rounded-xl p-6 bg-stone-900/50 flex gap-5 items-start">
+                    <div class="text-3xl mt-1">📣</div>
+                    <div>
+                        <h3 class="font-semibold text-lg mb-1">Spread the word</h3>
+                        <p class="text-stone-400 text-sm leading-relaxed">Know a small business paying too much for software? Tell them about us. Word of mouth is how we grow.</p>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Where to find us -->
+        <div class="mb-16">
+            <h2 class="text-2xl font-bold mb-8">Where we hang out</h2>
+            <div class="grid gap-6 sm:grid-cols-2">
+                <a href="https://github.com/Aslamkv" target="_blank" rel="noopener"
+                   class="card-border rounded-xl p-6 bg-stone-900/50 hover:bg-stone-900 transition block">
+                    <div class="text-3xl mb-3">🐙</div>
+                    <h3 class="font-semibold mb-1">GitHub</h3>
+                    <p class="text-stone-400 text-sm">All our code lives here. Issues, PRs, discussions — this is where the work happens.</p>
+                    <span class="text-orange-400 text-sm mt-3 inline-block">github.com/Aslamkv →</span>
+                </a>
+                <div class="card-border rounded-xl p-6 bg-stone-900/50">
+                    <div class="text-3xl mb-3">✉️</div>
+                    <h3 class="font-semibold mb-1">Email us</h3>
+                    <p class="text-stone-400 text-sm">Prefer a direct conversation? We're reachable. No bots, no auto-replies.</p>
+                    <a href="/contact/" class="text-orange-400 text-sm mt-3 inline-block">Send a message →</a>
+                </div>
+            </div>
+        </div>
+
+        <!-- CTA -->
+        <div class="text-center bg-stone-900/60 border border-orange-500/20 rounded-2xl p-12">
+            <h2 class="text-2xl font-bold mb-4">Ready to jump in?</h2>
+            <p class="text-stone-400 mb-8">Start with GitHub — browse the repos, find an issue that interests you, and say hello.</p>
+            <a href="https://github.com/Aslamkv" target="_blank" rel="noopener"
+               class="bg-orange-600 hover:bg-orange-700 px-8 py-3 rounded-lg font-semibold transition inline-block">
+                View on GitHub
+            </a>
+        </div>
+
+    </div>
+</div>
+{% endblock %}

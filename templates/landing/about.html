@@ -1,0 +1,104 @@
+{% extends "landing/base.html" %}
+
+{% block title %}About{% endblock %}
+{% block meta_description %}Codeforge is a community of developers building affordable software for everyone. We started with billbasket and we're just getting started.{% endblock %}
+{% block canonical_path %}/about/{% endblock %}
+{% block og_url %}/about/{% endblock %}
+{% block og_title %}About — Codeforge{% endblock %}
+{% block og_description %}We believe technology should lift entire communities, not just a privileged few. Here's our story.{% endblock %}
+
+{% block content %}
+<div class="max-w-3xl mx-auto px-6 py-20">
+
+    <!-- Hero -->
+    <div class="mb-16">
+        <p class="text-orange-500 font-mono text-sm mb-3">About us</p>
+        <h1 class="text-4xl sm:text-5xl font-bold mb-6 leading-tight">
+            Technology should work for <span class="text-orange-400">everyone</span>.
+        </h1>
+        <p class="text-stone-400 text-lg leading-relaxed">
+            We're a small community of developers who got tired of watching small businesses pay
+            through the nose for software that should cost a fraction of what it does.
+            So we started building it ourselves.
+        </p>
+    </div>
+
+    <!-- Origin story -->
+    <section class="mb-16">
+        <h2 class="text-2xl font-bold mb-4">How it started</h2>
+        <p class="text-stone-400 leading-relaxed mb-4">
+            It started with a simple observation: local shops were paying hundreds of dollars a year
+            for basic billing software. The tools existed. The technology was there. What was missing
+            was someone willing to build it affordably and maintain it with care.
+        </p>
+        <p class="text-stone-400 leading-relaxed mb-4">
+            That led to <strong class="text-stone-200">Billbasket</strong> — a billing app built for
+            small supermarkets and shops. Same features as the expensive alternatives, a fraction of
+            the price, built on modern tech that actually works.
+        </p>
+        <p class="text-stone-400 leading-relaxed">
+            Codeforge is what we built around that idea. A home for projects like Billbasket —
+            real software solving real problems for real communities.
+        </p>
+    </section>
+
+    <!-- What we believe -->
+    <section class="mb-16">
+        <h2 class="text-2xl font-bold mb-6">What we believe</h2>
+        <div class="space-y-6">
+            <div class="border-l-2 border-orange-500 pl-6">
+                <h3 class="font-semibold mb-1">Affordable beats premium, always.</h3>
+                <p class="text-stone-400 text-sm leading-relaxed">
+                    Great software doesn't have to be expensive. We price our work so that small
+                    businesses and individuals can actually use it — not just large companies with big budgets.
+                </p>
+            </div>
+            <div class="border-l-2 border-orange-500 pl-6">
+                <h3 class="font-semibold mb-1">Community over company.</h3>
+                <p class="text-stone-400 text-sm leading-relaxed">
+                    We're developers building for communities, not a VC-backed startup optimising for
+                    growth. The people who use our software matter more than the numbers on a dashboard.
+                </p>
+            </div>
+            <div class="border-l-2 border-orange-500 pl-6">
+                <h3 class="font-semibold mb-1">Cutting-edge, not cutting corners.</h3>
+                <p class="text-stone-400 text-sm leading-relaxed">
+                    Affordable doesn't mean sloppy. We use modern tools, write tests, and ship software
+                    we're proud to put our name on.
+                </p>
+            </div>
+        </div>
+    </section>
+
+    <!-- What we're building -->
+    <section class="mb-16">
+        <h2 class="text-2xl font-bold mb-4">What we're building</h2>
+        <p class="text-stone-400 leading-relaxed mb-4">
+            Each project lives at its own subdomain — <span class="font-mono text-orange-400 text-sm">billbasket.codeforge.show</span>,
+            and so on as we grow. Each one is a focused tool solving a specific problem for a specific community.
+        </p>
+        <p class="text-stone-400 leading-relaxed">
+            If you have a problem that deserves a good, affordable solution — we'd love to hear about it.
+        </p>
+        <div class="mt-6">
+            <a href="/#contact" class="inline-block bg-orange-600 hover:bg-orange-700 text-white font-semibold px-6 py-3 rounded-lg transition">
+                Get in touch
+            </a>
+        </div>
+    </section>
+
+    <!-- Open source note -->
+    <section class="bg-stone-900 border border-orange-500/20 rounded-xl p-8">
+        <h2 class="text-xl font-bold mb-3">Open by default</h2>
+        <p class="text-stone-400 leading-relaxed text-sm">
+            Most of what we build is open source. You can see the code, raise issues, and contribute
+            on GitHub. We believe transparency builds trust — and trust is how communities work.
+        </p>
+        <a href="https://github.com/Aslamkv" target="_blank" rel="noopener"
+           class="inline-block mt-4 text-orange-400 hover:text-orange-300 text-sm font-semibold transition">
+            Find us on GitHub →
+        </a>
+    </section>
+
+</div>
+{% endblock %}

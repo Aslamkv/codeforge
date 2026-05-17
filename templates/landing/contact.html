@@ -1,0 +1,123 @@
+{% extends "landing/base.html" %}
+
+{% block title %}Contact — Codeforge{% endblock %}
+{% block meta_description %}Get in touch with the Codeforge team. Questions, ideas, feedback — we read everything.{% endblock %}
+{% block canonical_path %}/contact/{% endblock %}
+{% block og_path %}/contact/{% endblock %}
+{% block og_title %}Contact — Codeforge{% endblock %}
+{% block og_description %}Get in touch with the Codeforge team. Questions, ideas, feedback — we read everything.{% endblock %}
+{% block tw_title %}Contact — Codeforge{% endblock %}
+{% block tw_description %}Get in touch with the Codeforge team. We read everything.{% endblock %}
+
+{% block content %}
+<div class="mesh-gradient min-h-screen pt-32 pb-24">
+    <div class="max-w-2xl mx-auto px-6">
+
+        <!-- Heading -->
+        <div class="mb-12">
+            <span class="text-orange-500 text-sm font-semibold uppercase tracking-widest">Contact</span>
+            <h1 class="text-5xl font-bold mt-4 mb-4 leading-tight">Say hello.</h1>
+            <p class="text-stone-400 text-xl leading-relaxed">
+                Have a question, an idea, or just want to know more? We're real people — write to us like one.
+            </p>
+        </div>
+
+        <!-- Form -->
+        <div class="bg-stone-900/60 border border-stone-800 rounded-2xl p-8">
+            <form id="contact-form" class="space-y-6">
+                {% csrf_token %}
+                <div class="grid gap-6 sm:grid-cols-2">
+                    <div>
+                        <label for="name" class="block text-sm font-medium text-stone-300 mb-2">Your name</label>
+                        <input type="text" id="name" name="name" required
+                               class="w-full bg-stone-800 border border-stone-700 rounded-lg px-4 py-3 text-stone-100 placeholder-stone-500 focus:outline-none focus:border-orange-500 transition"
+                               placeholder="Jane Smith">
+                    </div>
+                    <div>
+                        <label for="email" class="block text-sm font-medium text-stone-300 mb-2">Email address</label>
+                        <input type="email" id="email" name="email" required
+                               class="w-full bg-stone-800 border border-stone-700 rounded-lg px-4 py-3 text-stone-100 placeholder-stone-500 focus:outline-none focus:border-orange-500 transition"
+                               placeholder="jane@example.com">
+                    </div>
+                </div>
+                <div>
+                    <label for="subject" class="block text-sm font-medium text-stone-300 mb-2">Subject</label>
+                    <input type="text" id="subject" name="subject"
+                           class="w-full bg-stone-800 border border-stone-700 rounded-lg px-4 py-3 text-stone-100 placeholder-stone-500 focus:outline-none focus:border-orange-500 transition"
+                           placeholder="What's on your mind?">
+                </div>
+                <div>
+                    <label for="message" class="block text-sm font-medium text-stone-300 mb-2">Message</label>
+                    <textarea id="message" name="message" rows="6" required
+                              class="w-full bg-stone-800 border border-stone-700 rounded-lg px-4 py-3 text-stone-100 placeholder-stone-500 focus:outline-none focus:border-orange-500 transition resize-none"
+                              placeholder="Tell us what you're thinking..."></textarea>
+                </div>
+
+                <!-- Feedback messages -->
+                <div id="form-success" class="hidden bg-green-900/40 border border-green-500/30 rounded-lg px-5 py-4 text-green-300 text-sm">
+                    ✅ Message sent! We'll get back to you soon.
+                </div>
+                <div id="form-error" class="hidden bg-red-900/40 border border-red-500/30 rounded-lg px-5 py-4 text-red-300 text-sm">
+                    Something went wrong. Please try again or email us directly.
+                </div>
+
+                <button type="submit" id="submit-btn"
+                        class="w-full bg-orange-600 hover:bg-orange-700 px-6 py-3 rounded-lg font-semibold transition flex items-center justify-center gap-2">
+                    <span id="btn-text">Send message</span>
+                    <span id="btn-spinner" class="hidden">
+                        <svg class="animate-spin h-4 w-4" fill="none" viewBox="0 0 24 24">
+                            <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
+                            <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8H4z"></path>
+                        </svg>
+                    </span>
+                </button>
+            </form>
+        </div>
+
+        <!-- Alternate -->
+        <p class="text-stone-500 text-sm text-center mt-8">
+            Prefer GitHub?
+            <a href="https://github.com/Aslamkv" target="_blank" rel="noopener" class="text-orange-400 hover:underline">Open a discussion there.</a>
+        </p>
+
+    </div>
+</div>
+{% endblock %}
+
+{% block extra_scripts %}
+<script>
+document.getElementById('contact-form').addEventListener('submit', async function(e) {
+    e.preventDefault();
+    const btn = document.getElementById('submit-btn');
+    const btnText = document.getElementById('btn-text');
+    const spinner = document.getElementById('btn-spinner');
+    const success = document.getElementById('form-success');
+    const error = document.getElementById('form-error');
+
+    btn.disabled = true;
+    btnText.textContent = 'Sending…';
+    spinner.classList.remove('hidden');
+    success.classList.add('hidden');
+    error.classList.add('hidden');
+
+    const data = new FormData(this);
+    try {
+        const res = await fetch('/contact/submit/', { method: 'POST', body: data });
+        const json = await res.json();
+        if (json.success) {
+            success.classList.remove('hidden');
+            this.reset();
+        } else {
+            error.textContent = json.error || 'Something went wrong. Please try again.';
+            error.classList.remove('hidden');
+        }
+    } catch {
+        error.classList.remove('hidden');
+    } finally {
+        btn.disabled = false;
+        btnText.textContent = 'Send message';
+        spinner.classList.add('hidden');
+    }
+});
+</script>
+{% endblock %}
