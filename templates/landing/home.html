@@ -146,6 +146,44 @@
     </section>
 
     <!-- CTA Section -->
+    <!-- Projects Section -->
+    <section class="py-32 bg-stone-950">
+        <div class="max-w-7xl mx-auto px-6">
+            <div class="text-center mb-16">
+                <span class="text-orange-500 text-sm font-mono uppercase tracking-widest">What we're building</span>
+                <h2 class="text-5xl font-bold mt-4 mb-4">Our Projects</h2>
+                <p class="text-stone-400 text-xl max-w-2xl mx-auto">Real software, built in the open. Every project lives on its own subdomain at <span class="font-mono text-orange-400">*.codeforge.show</span>.</p>
+            </div>
+            {% if projects %}
+            <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-6">
+                {% for project in projects %}
+                <a href="https://{{ project.subdomain }}.codeforge.show" target="_blank"
+                   class="group block border border-stone-700 hover:border-orange-500/60 bg-stone-900/50 hover:bg-stone-900 rounded-2xl p-8 transition-all duration-300 hover:-translate-y-1 hover:shadow-lg hover:shadow-orange-500/10">
+                    <div class="flex items-start justify-between mb-4">
+                        <span class="text-4xl">{{ project.icon }}</span>
+                        <span class="text-xs font-mono px-3 py-1 rounded-full border
+                            {% if project.status == 'active' %}border-green-500/40 text-green-400 bg-green-500/10
+                            {% elif project.status == 'beta' %}border-orange-500/40 text-orange-400 bg-orange-500/10
+                            {% elif project.status == 'planning' %}border-stone-500/40 text-stone-400 bg-stone-500/10
+                            {% else %}border-red-500/40 text-red-400 bg-red-500/10{% endif %}">
+                            {{ project.get_status_display }}
+                        </span>
+                    </div>
+                    <h3 class="text-xl font-bold mb-2 group-hover:text-orange-400 transition">{{ project.name }}</h3>
+                    <p class="text-stone-400 text-sm mb-4 leading-relaxed">{{ project.tagline }}</p>
+                    <span class="font-mono text-xs text-orange-500/70 group-hover:text-orange-400 transition">{{ project.subdomain }}.codeforge.show →</span>
+                </a>
+                {% endfor %}
+            </div>
+            {% else %}
+            <div class="text-center border border-dashed border-stone-700 rounded-2xl py-20 px-6">
+                <span class="text-5xl mb-4 block">🚧</span>
+                <p class="text-stone-400 text-lg">Projects launching soon. Add them via the admin panel.</p>
+            </div>
+            {% endif %}
+        </div>
+    </section>
+
     <section class="py-32 bg-gradient-to-b from-stone-950 to-stone-900">
         <div class="max-w-4xl mx-auto px-6 text-center">
             <h2 class="text-5xl font-bold mb-6">Ready to Build?</h2>

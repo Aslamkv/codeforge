@@ -1,5 +1,5 @@
 from django.shortcuts import render
-from .models import TeamMember, Technology, Feature, SiteSettings
+from .models import TeamMember, Technology, Feature, SiteSettings, Project
 
 
 def home(request):
@@ -20,6 +20,8 @@ def home(request):
 
     features = Feature.objects.filter(is_active=True)
 
+    projects = Project.objects.filter(is_active=True).order_by('order', 'name')
+
     context = {
         "title": settings.site_name,
         "tagline": settings.tagline,
@@ -31,5 +33,6 @@ def home(request):
         "team_members": team_members,
         "technologies": tech_by_category,
         "features": features,
+        "projects": projects,
     }
     return render(request, "landing/home.html", context)

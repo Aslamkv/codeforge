@@ -1,5 +1,6 @@
 from django.contrib import admin
-from .models import TeamMember, Technology, Feature, SiteSettings
+from .models import TeamMember, Technology, Feature, SiteSettings, Project
+
 
 @admin.register(TeamMember)
 class TeamMemberAdmin(admin.ModelAdmin):
@@ -20,6 +21,7 @@ class TeamMemberAdmin(admin.ModelAdmin):
         }),
     )
 
+
 @admin.register(Technology)
 class TechnologyAdmin(admin.ModelAdmin):
     list_display = ['name', 'category', 'order', 'is_active']
@@ -34,6 +36,7 @@ class TechnologyAdmin(admin.ModelAdmin):
             'fields': ('order', 'is_active')
         }),
     )
+
 
 @admin.register(Feature)
 class FeatureAdmin(admin.ModelAdmin):
@@ -50,6 +53,7 @@ class FeatureAdmin(admin.ModelAdmin):
         }),
     )
 
+
 @admin.register(SiteSettings)
 class SiteSettingsAdmin(admin.ModelAdmin):
     fieldsets = (
@@ -60,11 +64,37 @@ class SiteSettingsAdmin(admin.ModelAdmin):
             'fields': ('contact_email', 'github_url', 'twitter_url', 'linkedin_url')
         }),
     )
-    
+
     def has_add_permission(self, request):
         # Only allow one settings instance
         return not SiteSettings.objects.exists()
-    
+
     def has_delete_permission(self, request, obj=None):
         # Don't allow deletion of settings
         return False
+
+
+@admin.register(Project)
+class ProjectAdmin(admin.ModelAdmin):
+    list_display = ['name', 'subdomain', 'status', 'order', 'is_active', 'created_at']
+    list_filter = ['status', 'is_active']
+    search_fields = ['name', 'subdomain', 'tagline']
+    list_editable = ['order', 'is_active', 'status']
+    prepopulated_fields = {'subdomain': ('name',)}
+    filter_horizontal = ['technologies', 'contributors']
+    fieldsets = (
+        ('Project Information', {
+            'fields': ('name', 'subdomain', 'icon', 'tagline', 'description', 'status')
+        }),
+        ('Links', {
+            'fields': ('github_url',),
+            'classes': ('collapse',)
+        }),
+        ('Associations', {
+            'fields': ('technologies', 'contributors'),
+            'classes': ('collapse',)
+        }),
+        ('Display Settings', {
+            'fields': ('order', 'is_active')
+        }),
+    )

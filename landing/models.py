@@ -1,4 +1,5 @@
 from django.db import models
+from django.utils.text import slugify
 
 
 class TeamMember(models.Model):
@@ -112,3 +113,48 @@ class SiteSettings(models.Model):
             existing.save()
             return existing
         return super().save(*args, **kwargs)
+
+
+class Project(models.Model):
+    """A project hosted under the Codeforge umbrella."""
+
+    STATUS_CHOICES = [
+        ("active", "Active"),
+        ("beta", "Beta"),
+        ("planning", "Planning"),
+        ("archived", "Archived"),
+    ]
+
+    name = models.CharField(max_length=100)
+    subdomain = models.SlugField(
+        max_length=100,
+        unique=True,
+        help_text="Subdomain slug (e.g. 'billbasket' → billbasket.codeforge.show)",
+    )
+    tagline = models.CharField(max_length=200, help_text="One-line description shown on the landing page")
+    description = models.TextField(blank=True, help_text="Longer description for the project page")
+    icon = models.CharField(max_length=10, default="🛠️", help_text="Emoji icon for the project card")
+    status = models.CharField(max_length=20, choices=STATUS_CHOICES, default="planning")
+    technologies = models.ManyToManyField(Technology, blank=True, related_name="projects")
+    contributors = models.ManyToManyField(TeamMember, blank=True, related_name="projects")
+    github_url = models.URLField(blank=True)
+    order = models.PositiveIntegerField(default=0, help_text="Display order on landing page")
+    is_active = models.BooleanField(default=True, help_text="Show on landing page")
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        ordering = ["order", "name"]
+
+    def __str__(self):
+        return f"{self.name} ({self.subdomain}.codeforge.show)"
+
+    @property
+    def url(self):
+        return f"https://{self.subdomain}.codeforge.show"
+
+    def save(self, *args, **kwargs):
+        # Auto-generate subdomain from name if not set
+        if not self.subdomain:
+            self.subdomain = slugify(self.name)
+        super().save(*args, **kwargs)
