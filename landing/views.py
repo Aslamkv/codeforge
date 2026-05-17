@@ -125,6 +125,13 @@ def _base_context():
     }
 
 
+def projects(request):
+    from .models import Project
+    ctx = _base_context()
+    ctx["projects"] = Project.objects.filter(is_active=True).order_by("order", "name")
+    return render(request, "landing/projects.html", ctx)
+
+
 def about(request):
     return render(request, "landing/about.html", _base_context())
 

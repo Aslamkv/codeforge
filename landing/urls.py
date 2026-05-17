@@ -7,6 +7,7 @@ app_name = "landing"
 urlpatterns = [
     path("", views.home, name="home"),
     path("contact/submit/", views.contact_submit, name="contact_submit"),
+    path("projects/", views.projects, name="projects"),
     path("about/", views.about, name="about"),
     path("privacy/", views.privacy, name="privacy"),
     path("terms/", views.terms, name="terms"),
