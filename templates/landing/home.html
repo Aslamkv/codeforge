@@ -182,7 +182,7 @@
             <div class="text-center mb-16">
                 <span class="text-orange-500 text-sm font-mono uppercase tracking-widest">What we're building</span>
                 <h2 class="text-5xl font-bold mt-4 mb-4">Our Projects</h2>
-                <p class="text-stone-400 text-xl max-w-2xl mx-auto">Real software, built in the open. Every project lives on its own subdomain at <span class="font-mono text-orange-400">*.codeforge.show</span>.</p>
+                <p class="text-stone-400 text-xl max-w-2xl mx-auto">Real software, built in the open. Each project is a standalone product — affordable, community-built, and production-ready.</p>
             </div>
             {% if projects %}
             <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-6">
@@ -201,14 +201,15 @@
                     </div>
                     <h3 class="text-xl font-bold mb-2 group-hover:text-orange-400 transition">{{ project.name }}</h3>
                     <p class="text-stone-400 text-sm mb-4 leading-relaxed">{{ project.tagline }}</p>
-                    <span class="font-mono text-xs text-orange-500/70 group-hover:text-orange-400 transition">{{ project.subdomain }}.codeforge.show →</span>
+                    <span class="text-xs text-orange-500/70 group-hover:text-orange-400 transition">Visit {{ project.name }} →</span>
                 </a>
                 {% endfor %}
             </div>
             {% else %}
-            <div class="text-center border border-dashed border-stone-700 rounded-2xl py-20 px-6">
-                <span class="text-5xl mb-4 block">🚧</span>
-                <p class="text-stone-400 text-lg">Projects launching soon. Add them via the admin panel.</p>
+                <div class="text-center border border-dashed border-stone-700 rounded-2xl py-20 px-6">
+                <span class="text-5xl mb-4 block">🚀</span>
+                <p class="text-stone-400 text-lg font-semibold mb-2">Projects coming soon</p>
+                <p class="text-stone-500 text-sm max-w-md mx-auto">We're working on something meaningful. Stay tuned — or join the community and help us build it.</p>
             </div>
             {% endif %}
         </div>
