@@ -1,5 +1,5 @@
 from django.contrib import admin
-from .models import TeamMember, Technology, Feature, SiteSettings, Project
+from .models import TeamMember, Technology, Feature, SiteSettings, Project, ContactMessage
 
 
 @admin.register(TeamMember)
@@ -98,3 +98,27 @@ class ProjectAdmin(admin.ModelAdmin):
             'fields': ('order', 'is_active')
         }),
     )
+
+
+@admin.register(ContactMessage)
+class ContactMessageAdmin(admin.ModelAdmin):
+    list_display = ['name', 'email', 'subject', 'status', 'created_at']
+    list_filter = ['status', 'created_at']
+    search_fields = ['name', 'email', 'subject', 'message']
+    list_editable = ['status']
+    readonly_fields = ['name', 'email', 'subject', 'message', 'ip_address', 'created_at', 'updated_at']
+    fieldsets = (
+        ('Sender', {
+            'fields': ('name', 'email', 'ip_address')
+        }),
+        ('Message', {
+            'fields': ('subject', 'message')
+        }),
+        ('Status', {
+            'fields': ('status', 'created_at', 'updated_at')
+        }),
+    )
+
+    def has_add_permission(self, request):
+        # Messages come in via the public form only
+        return False

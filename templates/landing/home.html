@@ -4,6 +4,46 @@
     <meta charset="UTF-8">
     <title>Codeforge - Where Code Meets Quality</title>
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="description" content="A community-driven platform for building exceptional software. Open source, transparent, and built by developers for developers.">
+    <meta name="keywords" content="open source, software development, community, projects, developers, quality code">
+    <meta name="author" content="Codeforge Community">
+    <link rel="canonical" href="https://codeforge.show/">
+    
+    <!-- Open Graph / Facebook -->
+    <meta property="og:type" content="website">
+    <meta property="og:url" content="https://codeforge.show/">
+    <meta property="og:title" content="Codeforge - Where Code Meets Quality">
+    <meta property="og:description" content="A community-driven platform for building exceptional software. Open source, transparent, and built by developers for developers.">
+    <meta property="og:image" content="https://codeforge.show/og-image.png">
+    <meta property="og:site_name" content="Codeforge">
+    
+    <!-- Twitter -->
+    <meta property="twitter:card" content="summary_large_image">
+    <meta property="twitter:url" content="https://codeforge.show/">
+    <meta property="twitter:title" content="Codeforge - Where Code Meets Quality">
+    <meta property="twitter:description" content="A community-driven platform for building exceptional software. Open source, transparent, and built by developers for developers.">
+    <meta property="twitter:image" content="https://codeforge.show/og-image.png">
+    
+    <!-- JSON-LD Structured Data -->
+    <script type="application/ld+json">
+    {
+        "@context": "https://schema.org",
+        "@type": "Organization",
+        "name": "Codeforge",
+        "url": "https://codeforge.show",
+        "description": "A community-driven platform for building exceptional software.",
+        "sameAs": [
+            "https://github.com/Aslamkv",
+            "https://twitter.com/codeforge"
+        ],
+        "contact": {
+            "@type": "ContactPoint",
+            "contactType": "General",
+            "url": "https://codeforge.show/#contact"
+        }
+    }
+    </script>
+    
     <script src="https://cdn.tailwindcss.com"></script>
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;600&display=swap" rel="stylesheet">
     <style>
@@ -214,6 +254,122 @@
             {% endif %}
         </div>
     </section>
+
+    <!-- Contact Section -->
+    <section id="contact" class="py-32 bg-stone-950">
+        <div class="max-w-4xl mx-auto px-6">
+            <div class="text-center mb-16">
+                <span class="text-orange-500 text-sm font-mono uppercase tracking-widest">Get in touch</span>
+                <h2 class="text-5xl font-bold mt-4 mb-4">Let's Talk</h2>
+                <p class="text-stone-400 text-xl">Have a question? Found a bug? Want to collaborate? We'd love to hear from you.</p>
+            </div>
+            
+            <div class="glass rounded-2xl p-8 md:p-12">
+                <form id="contact-form" class="space-y-6">
+                    {% csrf_token %}
+                    <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
+                        <div>
+                            <label for="contact-name" class="block text-sm font-semibold mb-2 text-stone-300">Name</label>
+                            <input 
+                                type="text" 
+                                id="contact-name" 
+                                name="name" 
+                                required 
+                                placeholder="Your name"
+                                class="w-full bg-stone-900/50 border border-stone-700 hover:border-orange-500/50 focus:border-orange-500 focus:outline-none rounded-lg px-4 py-3 text-stone-100 placeholder-stone-500 transition">
+                        </div>
+                        <div>
+                            <label for="contact-email" class="block text-sm font-semibold mb-2 text-stone-300">Email</label>
+                            <input 
+                                type="email" 
+                                id="contact-email" 
+                                name="email" 
+                                required 
+                                placeholder="your@email.com"
+                                class="w-full bg-stone-900/50 border border-stone-700 hover:border-orange-500/50 focus:border-orange-500 focus:outline-none rounded-lg px-4 py-3 text-stone-100 placeholder-stone-500 transition">
+                        </div>
+                    </div>
+                    <div>
+                        <label for="contact-subject" class="block text-sm font-semibold mb-2 text-stone-300">Subject</label>
+                        <input 
+                            type="text" 
+                            id="contact-subject" 
+                            name="subject" 
+                            required 
+                            placeholder="What's this about?"
+                            class="w-full bg-stone-900/50 border border-stone-700 hover:border-orange-500/50 focus:border-orange-500 focus:outline-none rounded-lg px-4 py-3 text-stone-100 placeholder-stone-500 transition">
+                    </div>
+                    <div>
+                        <label for="contact-message" class="block text-sm font-semibold mb-2 text-stone-300">Message</label>
+                        <textarea 
+                            id="contact-message" 
+                            name="message" 
+                            required 
+                            rows="6"
+                            placeholder="Tell us more..."
+                            class="w-full bg-stone-900/50 border border-stone-700 hover:border-orange-500/50 focus:border-orange-500 focus:outline-none rounded-lg px-4 py-3 text-stone-100 placeholder-stone-500 transition resize-none"></textarea>
+                    </div>
+                    <div class="flex items-center justify-between">
+                        <p id="form-status" class="text-sm text-stone-500"></p>
+                        <button 
+                            type="submit" 
+                            id="contact-submit"
+                            class="bg-orange-600 hover:bg-orange-700 px-8 py-3 rounded-lg font-semibold transition disabled:opacity-50 disabled:cursor-not-allowed">
+                            Send Message
+                        </button>
+                    </div>
+                </form>
+            </div>
+        </div>
+    </section>
+
+    <script>
+        document.getElementById('contact-form').addEventListener('submit', async (e) => {
+            e.preventDefault();
+            const form = e.target;
+            const submitBtn = document.getElementById('contact-submit');
+            const statusEl = document.getElementById('form-status');
+            
+            submitBtn.disabled = true;
+            submitBtn.textContent = 'Sending...';
+            statusEl.textContent = '';
+            
+            const formData = new FormData(form);
+            
+            try {
+                const response = await fetch('/contact/submit/', {
+                    method: 'POST',
+                    body: formData,
+                    headers: {
+                        'X-Requested-With': 'XMLHttpRequest'
+                    }
+                });
+                
+                const data = await response.json();
+                
+                if (response.ok && data.success) {
+                    form.reset();
+                    submitBtn.textContent = 'Message sent! ✓';
+                    statusEl.textContent = 'Thanks for reaching out. We\'ll get back to you soon.';
+                    statusEl.className = 'text-sm text-green-400';
+                    setTimeout(() => {
+                        submitBtn.textContent = 'Send Message';
+                        submitBtn.disabled = false;
+                    }, 3000);
+                } else {
+                    statusEl.textContent = data.message || 'Something went wrong. Please try again.';
+                    statusEl.className = 'text-sm text-red-400';
+                    submitBtn.textContent = 'Send Message';
+                    submitBtn.disabled = false;
+                }
+            } catch (error) {
+                statusEl.textContent = 'Network error. Please try again.';
+                statusEl.className = 'text-sm text-red-400';
+                submitBtn.textContent = 'Send Message';
+                submitBtn.disabled = false;
+            }
+        });
+    </script>
 
     <section class="py-32 bg-gradient-to-b from-stone-950 to-stone-900">
         <div class="max-w-4xl mx-auto px-6 text-center">
