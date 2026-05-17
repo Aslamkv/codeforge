@@ -2,245 +2,206 @@
 <html lang="en">
 <head>
     <meta charset="UTF-8">
+    <title>Codeforge - Where Code Meets Quality</title>
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <meta name="description" content="Codeforge — Built by the community, for the community. Affordable, cutting-edge software that uplifts communities.">
-    <meta property="og:title" content="Codeforge — Community-Driven Software">
-    <meta property="og:description" content="Built by the community, for the community. Affordable tech. Real impact.">
-    <meta property="og:type" content="website">
-    <meta property="og:url" content="https://codeforge.show">
-    <meta property="og:image" content="https://codeforge.show/og-image.png">
-    <meta name="twitter:card" content="summary_large_image">
-    <meta name="twitter:title" content="Codeforge">
-    <meta name="twitter:description" content="Built by the community, for the community.">
-    
-    <title>Codeforge — {{ site_settings.name }}</title>
     <script src="https://cdn.tailwindcss.com"></script>
-    <script>
-        tailwind.config = {
-            theme: {
-                extend: {
-                    colors: {
-                        warmstone: '#fdf8f3',
-                        warmgold: '#c2600a',
-                        warmorange: '#e07b39',
-                        warmcream: '#f5ede4',
-                    }
-                }
-            }
-        }
-    </script>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;600&display=swap" rel="stylesheet">
     <style>
-        html {
-            scroll-behavior: smooth;
+        body { font-family: 'Inter', sans-serif; }
+        .mono { font-family: 'JetBrains Mono', monospace; }
+        .mesh-gradient {
+            background: radial-gradient(circle at 20% 50%, rgba(249, 115, 22, 0.15) 0%, transparent 50%),
+                        radial-gradient(circle at 80% 80%, rgba(168, 85, 247, 0.1) 0%, transparent 50%),
+                        #0c0a09;
         }
-        .reveal {
-            opacity: 0;
-            transform: translateY(20px);
-            transition: opacity 0.6s ease-out, transform 0.6s ease-out;
-        }
-        .reveal.visible {
-            opacity: 1;
-            transform: translateY(0);
-        }
-        .hero-wave {
-            background: linear-gradient(135deg, #e07b39 0%, #c2600a 100%);
-        }
-        .url-badge {
-            background: linear-gradient(90deg, #ff6b35, #f7c59f, #ff6b35);
-            background-size: 200% auto;
-            -webkit-background-clip: text;
-            -webkit-text-fill-color: transparent;
-            background-clip: text;
-            animation: shimmer 3s linear infinite;
-            font-weight: 800;
-            letter-spacing: 0.05em;
+        .shimmer {
+            background: linear-gradient(90deg, #ea580c, #fbbf24, #ea580c);
+            background-size: 200% 100%;
+            animation: shimmer 3s infinite;
         }
         @keyframes shimmer {
-            0% { background-position: 0% center; }
-            100% { background-position: 200% center; }
+            0%, 100% { background-position: 200% 0; }
+            50% { background-position: -200% 0; }
+        }
+        .glass {
+            background: rgba(255, 255, 255, 0.05);
+            backdrop-filter: blur(10px);
+            border: 1px solid rgba(249, 115, 22, 0.2);
+        }
+        .card-border {
+            border: 1px solid rgba(249, 115, 22, 0.3);
+            transition: all 0.3s ease;
+        }
+        .card-border:hover {
+            border-color: rgba(249, 115, 22, 0.8);
+            box-shadow: 0 0 20px rgba(249, 115, 22, 0.2);
+            transform: translateY(-2px);
         }
     </style>
 </head>
-<body class="bg-warmstone text-gray-800 font-sans">
+<body class="bg-stone-950 text-stone-100">
     <!-- Navigation -->
-    <nav class="sticky top-0 z-50 bg-white shadow-sm">
-        <div class="max-w-6xl mx-auto px-6 py-4 flex justify-between items-center">
-            <h1 class="text-2xl font-bold text-warmgold">{{ site_settings.name }}</h1>
-            <div class="hidden md:flex gap-8 text-sm font-medium">
-                <a href="#mission" class="text-gray-600 hover:text-warmgold transition">Mission</a>
-                <a href="#values" class="text-gray-600 hover:text-warmgold transition">Values</a>
-                <a href="#stack" class="text-gray-600 hover:text-warmgold transition">Stack</a>
-                <a href="#community" class="text-gray-600 hover:text-warmgold transition">Community</a>
-                <a href="#contact" class="text-gray-600 hover:text-warmgold transition">Contact</a>
+    <nav class="glass fixed w-full top-0 z-50">
+        <div class="max-w-7xl mx-auto px-6 py-4 flex items-center justify-between">
+            <div class="text-2xl font-bold">
+                <span class="text-orange-500">codeforge</span><span class="mono text-sm text-orange-400">.show</span>
+            </div>
+            <div class="flex gap-8 text-sm">
+                <a href="#" class="hover:text-orange-400 transition">Community</a>
+                <a href="#" class="hover:text-orange-400 transition">Projects</a>
+                <a href="#" class="hover:text-orange-400 transition">Docs</a>
+                <a href="#" class="bg-orange-600 hover:bg-orange-700 px-4 py-2 rounded-lg transition">Join</a>
             </div>
         </div>
     </nav>
 
     <!-- Hero Section -->
-    <section class="hero-wave text-white py-24 px-6">
-        <div class="max-w-4xl mx-auto text-center">
-            <div class="inline-block bg-white bg-opacity-20 px-4 py-2 rounded-full text-sm font-semibold mb-6">
-                🤝 Community-Driven
+    <section class="mesh-gradient min-h-screen flex items-center justify-center pt-20">
+        <div class="max-w-4xl mx-auto px-6 text-center">
+            <div class="inline-block mb-6 px-4 py-2 rounded-full border border-orange-500/30 glass">
+                <span class="mono text-sm shimmer bg-clip-text text-transparent">codeforge.show</span>
             </div>
-            <h2 class="text-5xl md:text-6xl font-bold mb-4 leading-tight">
-                {{ site_settings.name }}
-            </h2>
-            <div class="mb-6">
-                <a href="https://codeforge.show" target="_blank" class="inline-block bg-white bg-opacity-10 border border-white border-opacity-30 px-5 py-2 rounded-full backdrop-blur-sm hover:bg-opacity-20 transition">
-                    <span class="url-badge text-lg">codeforge.show</span>
-                </a>
+            <h1 class="text-7xl font-bold mb-6 leading-tight">
+                Where Code <span class="text-orange-500">Meets</span> Quality
+            </h1>
+            <p class="text-xl text-stone-400 mb-12 max-w-2xl mx-auto">
+                A community-driven platform for building exceptional software. Open source, transparent, and built by developers for developers.
+            </p>
+            <div class="flex gap-4 justify-center">
+                <button class="bg-orange-600 hover:bg-orange-700 px-8 py-3 rounded-lg font-semibold transition">
+                    Explore Projects
+                </button>
+                <button class="border border-orange-500/50 hover:border-orange-500 px-8 py-3 rounded-lg font-semibold transition">
+                    Join Community
+                </button>
             </div>
-            <p class="text-xl md:text-2xl mb-8 text-warmcream font-light">
-                {{ site_settings.tagline }}
-            </p>
-            <p class="text-lg text-warmcream opacity-90 max-w-2xl mx-auto mb-10">
-                {{ site_settings.description }}
-            </p>
-            <a href="#contact" class="inline-block bg-white text-warmgold px-8 py-3 rounded-lg font-semibold hover:bg-warmcream transition">
-                Join Us →
-            </a>
         </div>
     </section>
 
-    <!-- Mission Stats -->
-    <section id="mission" class="py-16 px-6 bg-white">
-        <div class="max-w-6xl mx-auto">
-            <div class="grid md:grid-cols-3 gap-8">
-                <div class="reveal text-center p-6 rounded-lg bg-warmcream">
-                    <div class="text-4xl font-bold text-warmgold mb-2">1+</div>
-                    <p class="text-gray-700">Live Projects</p>
-                </div>
-                <div class="reveal text-center p-6 rounded-lg bg-warmcream">
-                    <div class="text-4xl font-bold text-warmgold mb-2">10x</div>
-                    <p class="text-gray-700">More Affordable</p>
-                </div>
-                <div class="reveal text-center p-6 rounded-lg bg-warmcream">
-                    <div class="text-4xl font-bold text-warmgold mb-2">∞</div>
-                    <p class="text-gray-700">Community Impact</p>
-                </div>
+    <!-- Stats Band -->
+    <section class="bg-stone-900/50 border-y border-orange-500/20 py-12">
+        <div class="max-w-7xl mx-auto px-6 grid grid-cols-3 gap-8 text-center">
+            <div>
+                <div class="text-4xl font-bold text-orange-500">12+</div>
+                <div class="text-stone-400 text-sm mt-2">Active Projects</div>
+            </div>
+            <div>
+                <div class="text-4xl font-bold text-orange-500">180+</div>
+                <div class="text-stone-400 text-sm mt-2">Contributors</div>
+            </div>
+            <div>
+                <div class="text-4xl font-bold text-orange-500">50K+</div>
+                <div class="text-stone-400 text-sm mt-2">Lines of Code</div>
             </div>
         </div>
     </section>
 
     <!-- Values Section -->
-    <section id="values" class="py-20 px-6 bg-warmcream">
-        <div class="max-w-6xl mx-auto">
-            <h3 class="text-4xl font-bold text-center mb-16 text-gray-800">What We Stand For</h3>
-            <div class="grid md:grid-cols-2 lg:grid-cols-3 gap-8">
-                <div class="reveal bg-white p-8 rounded-lg shadow-sm hover:shadow-md transition">
-                    <h4 class="text-xl font-semibold text-warmgold mb-3">Community First</h4>
-                    <p class="text-gray-600">Every decision starts with: does this serve the community?</p>
+    <section class="py-32 bg-stone-950">
+        <div class="max-w-7xl mx-auto px-6">
+            <h2 class="text-5xl font-bold mb-16 text-center">Our Values</h2>
+            <div class="grid grid-cols-3 gap-8">
+                <div class="card-border p-8 rounded-xl bg-stone-900/30">
+                    <div class="text-4xl mb-4">🔓</div>
+                    <h3 class="text-xl font-bold mb-3">Open Source</h3>
+                    <p class="text-stone-400">Everything we build is open, auditable, and community-driven. No hidden agendas.</p>
                 </div>
-                <div class="reveal bg-white p-8 rounded-lg shadow-sm hover:shadow-md transition">
-                    <h4 class="text-xl font-semibold text-warmgold mb-3">Affordable by Design</h4>
-                    <p class="text-gray-600">No hidden fees. No premium tiers for basic features. Fair pricing for all.</p>
+                <div class="card-border p-8 rounded-xl bg-stone-900/30">
+                    <div class="text-4xl mb-4">⚡</div>
+                    <h3 class="text-xl font-bold mb-3">Quality First</h3>
+                    <p class="text-stone-400">Code that ships is code that's tested, documented, and production-ready.</p>
                 </div>
-                <div class="reveal bg-white p-8 rounded-lg shadow-sm hover:shadow-md transition">
-                    <h4 class="text-xl font-semibold text-warmgold mb-3">Cutting-Edge Tech</h4>
-                    <p class="text-gray-600">Modern tools, proven practices, always learning and improving.</p>
-                </div>
-                <div class="reveal bg-white p-8 rounded-lg shadow-sm hover:shadow-md transition">
-                    <h4 class="text-xl font-semibold text-warmgold mb-3">Open Collaboration</h4>
-                    <p class="text-gray-600">Build together. Contribute ideas. Shape the future with us.</p>
-                </div>
-                <div class="reveal bg-white p-8 rounded-lg shadow-sm hover:shadow-md transition">
-                    <h4 class="text-xl font-semibold text-warmgold mb-3">Real Impact</h4>
-                    <p class="text-gray-600">We measure success by the problems we solve for real people.</p>
-                </div>
-                <div class="reveal bg-white p-8 rounded-lg shadow-sm hover:shadow-md transition">
-                    <h4 class="text-xl font-semibold text-warmgold mb-3">Quality Without Compromise</h4>
-                    <p class="text-gray-600">Affordable doesn't mean cheap. We ship quality code.</p>
+                <div class="card-border p-8 rounded-xl bg-stone-900/30">
+                    <div class="text-4xl mb-4">🤝</div>
+                    <h3 class="text-xl font-bold mb-3">Community</h3>
+                    <p class="text-stone-400">Built by developers, for developers. Your voice shapes what we build.</p>
                 </div>
             </div>
         </div>
     </section>
 
-    <!-- Stack Section -->
-    <section id="stack" class="py-20 px-6 bg-white">
-        <div class="max-w-6xl mx-auto">
-            <h3 class="text-4xl font-bold text-center mb-16 text-gray-800">Our Stack</h3>
-            {% if technologies %}
-                <div class="grid md:grid-cols-2 lg:grid-cols-3 gap-8">
-                    {% for category, tech_list in technologies.items %}
-                        <div class="reveal bg-warmcream p-8 rounded-lg">
-                            <h4 class="text-lg font-semibold text-warmgold mb-4 capitalize">{{ category }}</h4>
-                            <ul class="space-y-2">
-                                {% for tech in tech_list %}
-                                    <li class="text-gray-700">{{ tech }}</li>
-                                {% endfor %}
-                            </ul>
-                        </div>
-                    {% endfor %}
+    <!-- Tech Stack -->
+    <section class="py-32 bg-stone-900/50 border-y border-orange-500/20">
+        <div class="max-w-7xl mx-auto px-6">
+            <h2 class="text-5xl font-bold mb-16 text-center">Built With</h2>
+            <div class="grid grid-cols-2 md:grid-cols-4 gap-6">
+                <div class="card-border p-6 rounded-lg bg-stone-950 text-center">
+                    <div class="mono text-orange-500 font-bold mb-2">Python</div>
+                    <p class="text-sm text-stone-400">Backend & automation</p>
                 </div>
-            {% else %}
-                <p class="text-center text-gray-500">Technologies coming soon.</p>
-            {% endif %}
-        </div>
-    </section>
-
-    <!-- Community Section -->
-    <section id="community" class="py-20 px-6 bg-warmcream">
-        <div class="max-w-6xl mx-auto">
-            <h3 class="text-4xl font-bold text-center mb-16 text-gray-800">Our Community</h3>
-            {% if contributors %}
-                <div class="grid md:grid-cols-2 lg:grid-cols-3 gap-8">
-                    {% for contributor in contributors %}
-                        <div class="reveal bg-white p-8 rounded-lg text-center shadow-sm">
-                            <div class="w-16 h-16 mx-auto bg-warmgold rounded-full flex items-center justify-center text-white text-2xl font-bold mb-4">
-                                {{ contributor.initials }}
-                            </div>
-                            <h4 class="text-lg font-semibold text-gray-800 mb-1">{{ contributor.name }}</h4>
-                            <p class="text-warmgold text-sm font-medium">{{ contributor.role }}</p>
-                        </div>
-                    {% endfor %}
+                <div class="card-border p-6 rounded-lg bg-stone-950 text-center">
+                    <div class="mono text-orange-500 font-bold mb-2">Dart/Flutter</div>
+                    <p class="text-sm text-stone-400">Mobile & desktop</p>
                 </div>
-            {% else %}
-                <div class="bg-white p-12 rounded-lg text-center">
-                    <p class="text-gray-600 mb-6">We're just getting started. Be part of something bigger.</p>
-                    <a href="#contact" class="inline-block bg-warmgold text-white px-6 py-2 rounded-lg font-semibold hover:bg-warmorange transition">
-                        Join the Community
-                    </a>
+                <div class="card-border p-6 rounded-lg bg-stone-950 text-center">
+                    <div class="mono text-orange-500 font-bold mb-2">HTML/CSS</div>
+                    <p class="text-sm text-stone-400">Web experiences</p>
                 </div>
-            {% endif %}
-        </div>
-    </section>
-
-    <!-- Contact Section -->
-    <section id="contact" class="py-20 px-6 bg-white">
-        <div class="max-w-4xl mx-auto text-center">
-            <h3 class="text-4xl font-bold mb-6 text-gray-800">Ready to Make an Impact?</h3>
-            <p class="text-lg text-gray-600 mb-10">
-                Join us in building software that uplifts communities. Whether you're a developer, designer, or just someone who believes in affordable tech — we'd love to have you.
-            </p>
-            <div class="flex flex-col md:flex-row gap-4 justify-center">
-                <a href="mailto:{{ site_settings.email }}" class="inline-block bg-warmgold text-white px-8 py-3 rounded-lg font-semibold hover:bg-warmorange transition">
-                    Get in Touch
-                </a>
-                <a href="https://github.com" target="_blank" class="inline-block border-2 border-warmgold text-warmgold px-8 py-3 rounded-lg font-semibold hover:bg-warmcream transition">
-                    GitHub
-                </a>
+                <div class="card-border p-6 rounded-lg bg-stone-950 text-center">
+                    <div class="mono text-orange-500 font-bold mb-2">PostgreSQL</div>
+                    <p class="text-sm text-stone-400">Data & persistence</p>
+                </div>
             </div>
+        </div>
+    </section>
+
+    <!-- CTA Section -->
+    <section class="py-32 bg-gradient-to-b from-stone-950 to-stone-900">
+        <div class="max-w-4xl mx-auto px-6 text-center">
+            <h2 class="text-5xl font-bold mb-6">Ready to Build?</h2>
+            <p class="text-xl text-stone-400 mb-12">Join a community of developers shipping quality code.</p>
+            <button class="bg-orange-600 hover:bg-orange-700 px-12 py-4 rounded-lg font-bold text-lg transition">
+                Get Started Now
+            </button>
         </div>
     </section>
 
     <!-- Footer -->
-    <footer class="bg-gray-900 text-white py-12 px-6">
-        <div class="max-w-6xl mx-auto text-center">
-            <p class="text-gray-400 mb-2">{{ site_settings.name }} © 2025</p>
-            <p class="text-gray-500">Built by the community, for the community. 🤝</p>
+    <footer class="bg-stone-900 border-t border-orange-500/20 py-16">
+        <div class="max-w-7xl mx-auto px-6">
+            <div class="grid grid-cols-4 gap-12 mb-12">
+                <div>
+                    <h3 class="font-bold mb-4">Product</h3>
+                    <ul class="space-y-2 text-stone-400 text-sm">
+                        <li><a href="#" class="hover:text-orange-400 transition">Projects</a></li>
+                        <li><a href="#" class="hover:text-orange-400 transition">Documentation</a></li>
+                        <li><a href="#" class="hover:text-orange-400 transition">API</a></li>
+                    </ul>
+                </div>
+                <div>
+                    <h3 class="font-bold mb-4">Community</h3>
+                    <ul class="space-y-2 text-stone-400 text-sm">
+                        <li><a href="#" class="hover:text-orange-400 transition">Discord</a></li>
+                        <li><a href="#" class="hover:text-orange-400 transition">GitHub</a></li>
+                        <li><a href="#" class="hover:text-orange-400 transition">Discussions</a></li>
+                    </ul>
+                </div>
+                <div>
+                    <h3 class="font-bold mb-4">Company</h3>
+                    <ul class="space-y-2 text-stone-400 text-sm">
+                        <li><a href="#" class="hover:text-orange-400 transition">About</a></li>
+                        <li><a href="#" class="hover:text-orange-400 transition">Blog</a></li>
+                        <li><a href="#" class="hover:text-orange-400 transition">Contact</a></li>
+                    </ul>
+                </div>
+                <div>
+                    <h3 class="font-bold mb-4">Legal</h3>
+                    <ul class="space-y-2 text-stone-400 text-sm">
+                        <li><a href="#" class="hover:text-orange-400 transition">Privacy</a></li>
+                        <li><a href="#" class="hover:text-orange-400 transition">Terms</a></li>
+                        <li><a href="#" class="hover:text-orange-400 transition">License</a></li>
+                    </ul>
+                </div>
+            </div>
+            <div class="border-t border-stone-700 pt-8 flex justify-between items-center">
+                <p class="text-stone-500 text-sm">© 2026 Codeforge. Built with ❤️ by the community.</p>
+                <div class="flex gap-4 text-stone-400">
+                    <a href="#" class="hover:text-orange-400 transition">Twitter</a>
+                    <a href="#" class="hover:text-orange-400 transition">GitHub</a>
+                    <a href="#" class="hover:text-orange-400 transition">Discord</a>
+                </div>
+            </div>
         </div>
     </footer>
-
-    <script>
-        const revealElements = document.querySelectorAll('.reveal');
-        const observer = new IntersectionObserver((entries) => {
-            entries.forEach(entry => {
-                if (entry.isIntersecting) {
-                    entry.target.classList.add('visible');
-                }
-            });
-        }, { threshold: 0.1 });
-        revealElements.forEach(el => observer.observe(el));
-    </script>
 </body>
 </html>
