@@ -1,6 +1,7 @@
 """Planning a cycle: what was learned that it needs, the spec, and the contracts where files meet."""
 
 import json
+import re
 from pathlib import Path
 
 from .knowledge import Embeddings, Learner, Library, Retriever
@@ -296,10 +297,12 @@ class SpecWriter(Phase):
     @staticmethod
     def traced(source, request):
         """Whether a criterion's source is copied from the request: "setting" (a required setting's
-        message) or at least 60% of its words of 3+ letters appear in the request."""
+        message) or at least 60% of its words of 3+ letters appear in the request. A note in brackets
+        after the quote (what the criterion adds to the words it quotes) is not part of the quote."""
         if source.strip().lower().strip('"') == "setting":
             return True
-        wanted = [w for w in words(source) if len(w) >= 3]
+        quoted = re.sub(r"\([^)]*\)", " ", source)
+        wanted = [w for w in words(quoted) if len(w) >= 3]
         have = set(words(request))
         return bool(wanted) and sum(w in have for w in wanted) / len(wanted) >= 0.6
 

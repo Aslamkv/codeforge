@@ -354,9 +354,12 @@ class Prompts:
 - a program a person runs: each command, option or route the request names gets a criterion through
   the entry point, written exactly as the request writes it (e.g. main(["book", "add", "Dune",
   "Herbert"]) prints the new book's id), so the program is tested the way it is used; what it shows
-  a person names the things it is about (a title, a name), not only their ids; wrong input a person
-  can type (an item that does not exist, a malformed number) gets a clear message and a non-zero exit,
-  never a crash: one criterion (source: the request's words about that input);
+  a person names the things it is about (a title, a name), not only their ids; it takes values as a
+  person writes them, and a criterion uses such a value (a number with decimals); every kind of
+  wrong input it can meet gets a
+  clear message and a non-zero exit, never a crash or silence, one criterion each: an unknown
+  command, a missing argument, a value of the wrong kind (a word where a number goes), and what its
+  own rules forbid (dividing by zero) (source: the request's words about what that input is for);
 - each setting the request names (an environment variable, a .env key) gets a criterion that it
   takes effect (source: the request's words naming it);
 - a criterion that states a computed value shows its working from the request's rules, e.g. "2 days

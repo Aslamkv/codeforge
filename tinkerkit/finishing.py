@@ -200,7 +200,8 @@ class ReadmeWriter(Phase):
                  Part("Language", self.p.language, True),
                  *[Part(f"File {p}", self.ws.read(p), atomic=True) for p in dict.fromkeys(entry + code)]]
         try:
-            found = self.s.model.ask_until_usable(Prompts.README_SYSTEM, parts, "README", self.read, attempts=2)
+            found = self.s.model.ask_until_usable(Prompts.README_SYSTEM, parts, "README", self.read, attempts=2,
+                                                  think=False)  # it describes code that exists; its examples are run
         except (PromptTooLarge, OllamaError) as exc:
             print(f"  README: {first_line(str(exc), 120)}; its features are the spec's criteria")
             found = None

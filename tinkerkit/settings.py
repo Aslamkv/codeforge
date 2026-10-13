@@ -69,7 +69,7 @@ FORMAT_AFTER = ("verify",)  # phases after which the toolchain's formatter runs 
 STATUS_TEXT = {"green": "passes", "todo": "to do", "active": "in progress", "blocked": "parked"}
 KINDS = ("code", "test", "template", "config", "docs")
 MAX_FILE_LINES = 60               # design guidance: small modules (a bigger file still works, in windows)
-TESTS_PER_CALL = 5
+TESTS_PER_CALL = 10
 
 # --- fixing: until each criterion's test passes ------------------------------------------------
 DEFAULT_MAX_STALL = 3             # fixes without progress before the review against the plan
