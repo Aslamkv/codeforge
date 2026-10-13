@@ -752,7 +752,8 @@ class TestTool(Worker):
         self.s.all_tests_run = None if attempt else self.s.all_tests_run
         code, output = self.s.run_all_tests()
         present = [r for r in self.p.refs() if r.present(self.ws)]
-        reached = not Toolchain.reached_no_test(code, output, present) if present else self.ran_empty(code, output)
+        reached = (not Toolchain.reached_no_test(code, output, present) if present
+                   else self.ran_empty(code, output) or self.awaits_code(output))
         if not reached:
             print(f"  $ {self.s.toolchain.test_all}  [{'ran no test' if present else 'did not run'}: a tooling problem]")
             return "tests", output
@@ -788,6 +789,12 @@ class TestTool(Worker):
             return True
         return code not in (None, 126, 127) and (bool(Toolchain.NO_TESTS_RE.search(output))
                                                  or not Output.ERROR_LINE_RE.search(output))
+
+    def awaits_code(self, output):
+        """Whether a test command run before any code exists went looking for it: it names files
+        of the plan not written yet (a compiled language reads its sources before any test). The
+        tool works; the code comes later."""
+        return any(path in output for path in self.p.paths() if not self.ws.exists(path))
 
     def linter_runs(self):
         """("ok", "") when the linter runs (what it finds does not matter here), else ("lint", why):

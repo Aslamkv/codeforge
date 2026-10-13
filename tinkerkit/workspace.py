@@ -237,13 +237,13 @@ class Toolchain:
         the network did is set aside (the network is a plugin: it may come back) and the rest run;
         any other failure stops setup with the failing command, its exit code and its output, so
         whoever fixes it knows which command failed even when it printed nothing."""
-        waiting = []
-        for command in self.setup if commands is None else commands:  # in the environment as soon as the setup has made it
+        waiting, again = [], commands is not None  # a try again is quiet: the wait says how it goes
+        for command in self.setup if not again else commands:  # in the environment as soon as the setup has made it
             active = self.activate and ws.run(self.activate, timeout=SETUP_TIMEOUT, quiet=True)[0] == 0
-            code, output = ws.run(self.shell(command) if active else command, timeout=SETUP_TIMEOUT)
+            code, output = ws.run(self.shell(command) if active else command, timeout=SETUP_TIMEOUT, quiet=again)
             if code != 0 and (self.NETWORK_RE.search(output) or not online()):
                 waiting.append(command)
-                if commands is None:  # said once, not at every try again
+                if not again:
                     print(f"  waits for the network: $ {command}")
             elif code != 0:
                 ended = f"timed out after {SETUP_TIMEOUT}s" if code is None else f"exit code {code}"
