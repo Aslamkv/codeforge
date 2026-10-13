@@ -24,6 +24,10 @@ class TestToolSetup(Phase):
     def run(self, cycle):
         Designer(self.s).ensure_toolchain()
         CodeWriter(self.s).write_configs_first(cycle)
+        self.s.setup()
+        if self.s.network_waiting:  # the tests and the code need no network: they are written meanwhile
+            print("  the test tool is checked once the network is back; writing the tests and the code meanwhile")
+            return True
         return TestTool(self.s).works()
 
 
@@ -738,12 +742,13 @@ class TestTool(Worker):
         return False
 
     def check(self, attempt):
-        """("ok" | "setup" | "tests" | "lint", output): setup runs; the test command reaches the
-        tests written so far (with none yet, it runs and finds none) and they can import the app's
-        own code; the linter runs."""
+        """("ok" | "setup" | "tests" | "lint", output): setup runs (what needs the network once it
+        is there); the test command reaches the tests written so far (with none yet, it runs and
+        finds none) and they can import the app's own code; the linter runs."""
         ok, output = self.s.setup(force=attempt > 0)
         if not ok:
             return "setup", output
+        self.s.wait_for_network()
         self.s.all_tests_run = None if attempt else self.s.all_tests_run
         code, output = self.s.run_all_tests()
         present = [r for r in self.p.refs() if r.present(self.ws)]

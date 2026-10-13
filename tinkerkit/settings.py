@@ -81,6 +81,9 @@ TESTS_LOCKED = "tests do not change now"  # why a fix may not change a test (a f
 FIX_FILES = 7                     # files a fix may be shown (the most related first)
 
 # --- the project's commands (one test's limit is test_timeout in config.json) ------------------
+NETWORK_RETRY = 30                # seconds between tries of what waits for the network (a package to install)
+ONLINE_PROBES = (("1.1.1.1", 443), ("8.8.8.8", 443))  # opened and closed to see the internet is there
+NETWORK_NOTE = 600                # while a build waits for the network, a line says so this often
 SETUP_TIMEOUT = 900
 COMMAND_TIMEOUT = 300             # setup aside, the longest a command may run (all tests)
 

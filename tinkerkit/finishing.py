@@ -144,6 +144,7 @@ class FinalReview(Phase):
         ok, output = self.s.setup(force=True)
         if not ok:
             return f"setup fails from the project's own files: {Output.key_line(output)}", output
+        self.s.wait_for_network()
         self.s.all_tests_run = None
         code, output = self.s.run_all_tests()
         if code != 0:

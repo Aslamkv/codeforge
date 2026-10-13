@@ -213,8 +213,9 @@ from tinkerkit.project import Brief, Outcome, Project, RunChecks, Runs
 from tinkerkit.prompts import Part, PromptTooLarge, Prompts, Reply
 from tinkerkit.settings import (
     COMMANDS_FILE, CONFIG_FILE, Config, Console, DEFAULT_MAX_STALL, ENV_EXAMPLE, ENV_FILE, EventLog, FIX_PHASES,
-    FORMAT_AFTER, HOME, Home, JsonFile, LANGUAGES_DIR, LEARNED_DIR, LEARN_LOG, MEMORY_FILE, PHASES, PLANNING_PHASES, SETUP_TIMEOUT, STATE_DIR, STATUS_TEXT, clock, fingerprint, first_line, human_duration,
-    now_text,
+    FORMAT_AFTER, HOME, Home, JsonFile, LANGUAGES_DIR, LEARNED_DIR, LEARN_LOG, MEMORY_FILE, NETWORK_NOTE,
+    NETWORK_RETRY, PHASES, PLANNING_PHASES, SETUP_TIMEOUT, STATE_DIR, STATUS_TEXT, clock, fingerprint, first_line,
+    human_duration, now_text,
 )
 from tinkerkit.web import Internet
 from tinkerkit.workspace import TaughtCommands, Toolchain, Workspace
@@ -1032,6 +1033,7 @@ class Session:
         self.build_problem = ""
         self.unreproduced = ""  # tinker fix: why the bug could not be shown by a test
         self.review_problem = ""  # why the final review found the project not done
+        self.network_waiting = []  # setup commands that failed because the network did: done when it is back
         self.all_tests_run = None  # (files key, (code, output)) of the last run of all tests
         # criteria parked when this session began: one retry each (a resume after a change)
         self.parked_at_start = {s["id"] for s in project.criteria if s.get("status") == "blocked"}
@@ -1069,15 +1071,41 @@ class Session:
     def setup(self, force=False):
         """Run the setup commands when they or the config files changed; prepare .env."""
         self.ws.prepare_env()
-        configs = sorted(p for p in self.project.paths("config") if p not in (ENV_FILE, ENV_EXAMPLE))
-        key = fingerprint(json.dumps(self.toolchain.setup) + "".join(self.ws.read(p) for p in configs))
-        if not force and key == self.project.spec.get("setup_key"):
+        if not force and self.setup_key() == self.project.spec.get("setup_key"):
             return True, ""
-        ok, output = self.toolchain.run_setup(self.ws)
-        if ok:
-            self.project.spec["setup_key"] = key
-            self.save()
+        ok, output, self.network_waiting = self.toolchain.run_setup(self.ws)
+        if ok and not self.network_waiting:
+            self.setup_done()
         return ok, output
+
+    def setup_key(self):
+        """What setup depends on: its commands and the config files."""
+        configs = sorted(p for p in self.project.paths("config") if p not in (ENV_FILE, ENV_EXAMPLE))
+        return fingerprint(json.dumps(self.toolchain.setup) + "".join(self.ws.read(p) for p in configs))
+
+    def setup_done(self):
+        self.project.spec["setup_key"] = self.setup_key()
+        self.save()
+
+    def wait_for_network(self):
+        """When all that needs no network is done and some setup still waits for it: that batch is
+        tried again every NETWORK_RETRY seconds until the network is back, then the run goes on by
+        itself (a person who will not wait stops it with Ctrl+C and runs tinker resume later)."""
+        if not self.network_waiting:
+            return
+        began = noted = time.monotonic()
+        print(f"  waiting for the network: {len(self.network_waiting)} setup command(s), tried every "
+              f"{NETWORK_RETRY}s (Ctrl+C stops; tinker resume goes on later)")
+        while self.network_waiting:
+            time.sleep(NETWORK_RETRY)
+            ok, output, self.network_waiting = self.toolchain.run_setup(self.ws, self.network_waiting)
+            if not ok:  # it reached the network and failed for a reason of its own: the checks that follow report it
+                return
+            if self.network_waiting and time.monotonic() - noted >= NETWORK_NOTE:
+                noted = time.monotonic()
+                print(f"  still waiting for the network ({human_duration(noted - began)})")
+        print(f"  the network is back after {human_duration(time.monotonic() - began)}: setup done")
+        self.setup_done()
 
     def ask(self, system, parts, label, **kw):
         """A model call whose reply is files (FILE or LINES blocks), ended as soon as it is complete."""

@@ -6,14 +6,15 @@ import re
 import shlex
 import shutil
 import signal
+import socket
 import subprocess
 import time
 from pathlib import Path
 
 from .prompts import Part, Prompts, Reply
 from .settings import (
-    COMMANDS_FILE, COMMAND_TIMEOUT, Config, Console, ENV_EXAMPLE, ENV_FILE, JsonFile, OUTPUT_CHARS, SETUP_TIMEOUT,
-    STATE_DIR, first_line, now_text,
+    COMMANDS_FILE, COMMAND_TIMEOUT, Config, Console, ENV_EXAMPLE, ENV_FILE, JsonFile, ONLINE_PROBES, OUTPUT_CHARS,
+    SETUP_TIMEOUT, STATE_DIR, first_line, now_text,
 )
 
 
@@ -170,6 +171,19 @@ class TaughtCommands:
                     "\n".join(lines), atomic=True)
 
 
+def online():
+    """Whether this machine reaches the internet at all: a connection opened and closed (nothing
+    sent) to well-known public addresses. It tells a command that failed because the network is
+    gone, when its output does not say so, from one that failed for a reason of its own."""
+    for address in ONLINE_PROBES:
+        try:
+            socket.create_connection(address, timeout=3).close()
+            return True
+        except OSError:
+            continue
+    return False
+
+
 class Toolchain:
     """Every command written the way a person types it in the project folder. setup (list): what
     prepares it for development (the project's own environment, the test tools); activate: what
@@ -183,6 +197,13 @@ class Toolchain:
     NO_TESTS_RE = re.compile(r"\bno tests? (ran|run|to run|found|collected|matched)\b|\b0 (tests|passed)\b|"
                              r"\bran 0 tests\b|\btests?\s*0\b", re.I)
     ENV_TARGET = re.compile(r"(?<![\w.-])\.env(?![\w.-])")  # the settings file itself, not .env.example
+    # a command that failed because the network did (any package manager): it waits for the network, nothing more
+    NETWORK_RE = re.compile(r"could not resolve|resolve host|name or service not known|nodename nor servname|"
+                            r"temporary failure in name resolution|network is unreachable|no route to host|"
+                            r"connection (refused|reset|aborted|timed out)|failed to establish a new connection|"
+                            r"newconnectionerror|max retries exceeded|read timed out|\b(enotfound|eai_again|"
+                            r"econnrefused|econnreset|etimedout)\b|spurious network error|failed to download|"
+                            r"could not fetch url|unable to (connect|reach)|you are offline|network error", re.I)
 
     def __init__(self, data=None):
         data = data if isinstance(data, dict) else {}
@@ -210,16 +231,24 @@ class Toolchain:
         """The command as a person runs it: in the activated environment, when there is one."""
         return f"{self.activate} && {command}" if self.activate else command
 
-    def run_setup(self, ws):
-        """(ok, what failed): the failing command, its exit code and its output, so whoever fixes
-        it knows which command failed even when it printed nothing."""
-        for command in self.setup:  # in the environment as soon as the setup has made it
+    def run_setup(self, ws, commands=None):
+        """Run the setup commands (or only these of them): (ok, what failed, the commands that wait
+        for the network). A command that failed because
+        the network did is set aside (the network is a plugin: it may come back) and the rest run;
+        any other failure stops setup with the failing command, its exit code and its output, so
+        whoever fixes it knows which command failed even when it printed nothing."""
+        waiting = []
+        for command in self.setup if commands is None else commands:  # in the environment as soon as the setup has made it
             active = self.activate and ws.run(self.activate, timeout=SETUP_TIMEOUT, quiet=True)[0] == 0
             code, output = ws.run(self.shell(command) if active else command, timeout=SETUP_TIMEOUT)
-            if code != 0:
+            if code != 0 and (self.NETWORK_RE.search(output) or not online()):
+                waiting.append(command)
+                if commands is None:  # said once, not at every try again
+                    print(f"  waits for the network: $ {command}")
+            elif code != 0:
                 ended = f"timed out after {SETUP_TIMEOUT}s" if code is None else f"exit code {code}"
-                return False, f"$ {command}  failed ({ended})\n{output.strip() or '(it printed nothing)'}"
-        return True, ""
+                return False, f"$ {command}  failed ({ended})\n{output.strip() or '(it printed nothing)'}", waiting
+        return True, "", waiting
 
     def to_dict(self):
         data = {"setup": self.setup, "activate": self.activate, "use": self.use,
