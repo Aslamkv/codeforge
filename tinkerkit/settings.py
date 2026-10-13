@@ -196,6 +196,41 @@ class Home:
         print(f"Deleted {HOME}. The next command starts fresh.")
 
     @staticmethod
+    def parts():
+        """What tinker clear can delete: {name: (its paths, what it is)}."""
+        return {"languages": ([LANGUAGES_DIR], "per language: the toolchain that worked, its fixes, its lessons"),
+                "memory": ([MEMORY_FILE], "lessons that hold for any language"),
+                "learned": ([LEARNED_DIR, EMBEDDINGS_FILE, LEARN_LOG], "what tinker learn learned, and its index"),
+                "models": ([MODELS_DIR], "what calibration measured for each model"),
+                "runs": ([RUNS_DIR], "the index of runs (projects keep their own .tinker)"),
+                "commands": ([COMMANDS_FILE], "your commands Tinker may use")}
+
+    @staticmethod
+    def clear(names, yes=False):
+        """tinker clear PART...: delete those parts of what Tinker keeps, after asking (yes: without
+        asking); everything else stays."""
+        parts = Home.parts()
+        unknown = [n for n in names if n not in parts]
+        if unknown:
+            raise SystemExit(f"tinker clear: no part {', '.join(unknown)}; the parts are: {', '.join(parts)}")
+        paths = [path for name in dict.fromkeys(names) for path in parts[name][0] if path.exists()]
+        if not paths:
+            print("Nothing to clear: " + ", ".join(names) + " " + ("is" if len(names) == 1 else "are") + " empty.")
+            return
+        print("This deletes:")
+        for path in paths:
+            print(f"  {path.relative_to(HOME.parent)}{'/' if path.is_dir() else ''}")
+        if not yes:
+            if not sys.stdin.isatty():
+                raise SystemExit("Nothing deleted: run it in a terminal to confirm, or add --yes.")
+            if input("Delete them? [y/N] ").strip().lower() not in ("y", "yes"):
+                print("Nothing deleted.")
+                return
+        for path in paths:
+            shutil.rmtree(path) if path.is_dir() else path.unlink()
+        print(f"Cleared {', '.join(dict.fromkeys(names))}.")
+
+    @staticmethod
     def keep_awake():
         """Keep the computer from sleeping while Tinker works (it stops with Tinker): on macOS with
         caffeinate, on Linux with systemd-inhibit; elsewhere nothing is done. Idle sleep would pause

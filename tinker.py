@@ -275,6 +275,8 @@ class Cli:
             ("use-model NAME", "the measured model every build uses"),
             ("embed NAME", "the embedding model that indexes what is learned"),
             ("list-config", "the settings a build would use"),
+            ("clear PART... [--yes]", "delete parts of what Tinker keeps: languages, memory, learned, models,"
+                                      " runs, commands"),
             ("reset", "delete everything Tinker keeps (projects stay)"),
             ("help [COMMAND]", "this list, or one command's arguments and options"),
         ],
@@ -283,7 +285,7 @@ class Cli:
                 'tinker learn "food bank inventory"', "tinker help task")
     RUNS = ("task", "restart", "resume", "add", "fix")
     COMMANDS = RUNS + ("status", "runs", "learn", "memory", "doctor", "models", "use-model", "calibrate", "embed",
-                       "list-config", "reset")
+                       "list-config", "clear", "reset")
     LEARNING = ("learn",)  # the commands that load the model and read the web (but for teaching a command)
     ABOUT = {
         "task": "Build something new: a spec, a unit test for each point, just enough code, and a README a "
@@ -307,6 +309,9 @@ class Cli:
         "calibrate": "Measure a model once: the largest prompt it reads and the longest reply it writes.",
         "embed": "Use this embedding model to index what is learned, so builds find it by meaning.",
         "list-config": "Show the settings a build would use.",
+        "clear": "Delete parts of what Tinker keeps, e.g. tinker clear languages memory: languages (toolchains, "
+                 "fixes, lessons per language), memory (lessons for any language), learned (what tinker learn "
+                 "learned), models (measurements), runs (the run index), commands (your commands).",
         "reset": "Delete everything Tinker keeps (settings, measured models, what it learned, the run index); "
                  "projects are not touched.",
     }
@@ -322,6 +327,10 @@ class Cli:
         argv = sys.argv[1:] if argv is None else argv
         if not argv or argv[0] in ("help", "-h", "--help"):
             Cli.help(argv[1] if len(argv) > 1 else None)
+        if argv[0] == "clear":  # nothing else runs: no model, no project
+            given = Cli.parser("clear").parse_args(argv[1:])
+            Home.clear(given.parts, given.yes)
+            raise SystemExit(0)
         old = next((a for a in argv if a.startswith("--") and a[2:] in Cli.COMMANDS), None)
         if old:  # the commands were options once
             raise SystemExit(f"tinker: commands are written without --: tinker {old[2:]} (tinker help lists them)")
@@ -416,6 +425,10 @@ class Cli:
             parser.add_argument("words", nargs="+", metavar="[ID] TEXT", help=f"the {'bug' if command == 'fix' else 'feature'}")
         elif command == "learn":
             parser.add_argument("words", nargs="+", metavar="WHAT [DEFINITION]")
+        elif command == "clear":
+            parser.add_argument("parts", nargs="+", metavar="PART", help="languages, memory, learned, models, runs "
+                                                                          "or commands")
+            parser.add_argument("--yes", action="store_true", help="delete without asking")
         elif command in ("use-model", "calibrate", "embed"):
             parser.add_argument("name", help="the model's name, as `tinker models` lists it")
         if command in ("task", "add", "fix"):

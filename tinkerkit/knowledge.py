@@ -942,9 +942,10 @@ class Knowledge:
         return known if known else None
 
     def remember_toolchain(self, toolchain):
-        """The toolchain that worked, kept for the language's next projects: without its run command,
-        which belongs to this project's entry point (the next one gives its own)."""
-        kept = dict(toolchain.to_dict(), run="") if toolchain else None
+        """The toolchain that worked, kept for the language's next projects as what holds for any
+        project in it: without its run and check commands, which name this project's own files (the
+        next project gives its own)."""
+        kept = dict(toolchain.to_dict(), run="", check="") if toolchain else None
         if kept and kept != self.language_doc.get("toolchain"):
             self.language_doc["toolchain"], self.language_doc["toolchain_saved"] = kept, now_text()
             self.save()
