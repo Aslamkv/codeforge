@@ -80,7 +80,11 @@ class TestWriter(Phase):
                  Part("Note", note, place="last"),
                  Part("External services: adapters and sample data (tests pass the sample data)", cycle.get("data", ""),
                       place="first")]
+        configs = [c for c in self.s.files_on_disk("config") if c not in (ENV_FILE, ENV_EXAMPLE)]
         return parts + [
+                Part("The project's config files (the tests use the names they give: the package, the library, "
+                     "the program)", "\n\n".join(f"{c}:\n{self.ws.read(c)}" for c in configs), atomic=True,
+                     place="first"),
                 Part("Contracts of the files these tests use", self.p.contracts(uses)),
                 Part(f"Start of {path} (its imports and shared setup; it stays as it is; a fake of the app's own "
                      f"code in it is not to be used)",
@@ -319,9 +323,11 @@ class CodeWriter(Phase):
         return check
 
     def too_long(self, path):
-        """A code file well past MAX_FILE_LINES (half again): it is asked for again, in smaller modules."""
+        """A code file far past MAX_FILE_LINES (twice it): it is asked for again, in smaller modules. Only
+        then: a rewrite into modules is a long call (minutes of thinking), and a file a little past the
+        guidance still works (it is read in windows); a wordier language reaches it sooner."""
         lines = self.ws.lines(path)
-        if lines > MAX_FILE_LINES * 1.5:
+        if lines > MAX_FILE_LINES * 2:
             print(f"  {path}: {lines} lines; asking for smaller modules")
             return True
         return False
@@ -531,7 +537,7 @@ class Verifier(Phase):
         reason to review sooner (see to_review) cuts the fixing short. An attempt that thought to its
         cap always gets its conclusion, even past the attempts allowed. True when the test passes."""
         before = {s["id"] for s in self.p.criteria if s["status"] == "green"}
-        seen, best, total = {Output.signature(output)}, self.RANK[state], 0
+        seen, best, total, sideways = {Output.signature(output)}, self.RANK[state], 0, 0
         for approach, patience in self.ladder(step, output, retry):
             stall, concluding = 0, False  # concluding: the last attempt thought to its cap; its conclusion is due
             while (stall < patience or concluding) and total < MAX_TRIES_PER_PASS:
@@ -544,7 +550,10 @@ class Verifier(Phase):
                 if state == "passes":
                     return True
                 rank = self.RANK[state]
-                progressed = rank > best or (rank == best and Output.signature(output) not in seen)
+                # a new failure at the same stage is progress once (a fix may uncover the next problem);
+                # failures that only change shape (compile errors worded anew) are not, until a stage is won
+                sideways = 0 if rank > best else sideways + (Output.signature(output) not in seen)
+                progressed = rank > best or (rank == best and Output.signature(output) not in seen and sideways <= 1)
                 best, stall = max(best, rank), (0 if progressed else stall + 1)
                 concluding = attempt.overthought
                 seen.add(Output.signature(output))
@@ -608,7 +617,7 @@ class BugReproducer(Phase):
         note = ""
         for _ in range(2):
             step, state, output = self.write_test(cycle, note)
-            if step and state == "fails" and not Toolchain.NO_TESTS_RE.search(output):
+            if step and state == "fails" and not Toolchain.ran_no_test(output):
                 print(f"  reproduced: {first_line(step['behaviour'], 140)}\n  it fails now: {Output.key_line(output)}")
                 self.s.save()
                 return True
@@ -752,14 +761,17 @@ class TestTool(Worker):
         self.s.all_tests_run = None if attempt else self.s.all_tests_run
         code, output = self.s.run_all_tests()
         present = [r for r in self.p.refs() if r.present(self.ws)]
-        reached = (not Toolchain.reached_no_test(code, output, present) if present
-                   else self.ran_empty(code, output) or self.awaits_code(output))
+        reached = self.reaches_code(output) or (not Toolchain.reached_no_test(code, output, present) if present
+                                                else self.ran_empty(code, output))
         if not reached:
             print(f"  $ {self.s.toolchain.test_all}  [{'ran no test' if present else 'did not run'}: a tooling problem]")
             return "tests", output
         unseen = self.unseen_code(output) if present and code else ""
         if unseen:
             return "tests", unseen
+        unpicked = self.one_test_unpicked(present[0]) if present and present[0].name in output else ""
+        if unpicked:
+            return "tests", unpicked
         if not present:
             print(f"  the test tool runs (no tests yet): $ {self.s.toolchain.test_all}")
         return self.linter_runs()
@@ -787,29 +799,51 @@ class TestTool(Worker):
         finish did not run."""
         if code == 0:
             return True
-        return code not in (None, 126, 127) and (bool(Toolchain.NO_TESTS_RE.search(output))
+        return code not in (None, 126, 127) and (Toolchain.ran_no_test(output)
                                                  or not Output.ERROR_LINE_RE.search(output))
 
-    def awaits_code(self, output):
-        """Whether a test command run before any code exists went looking for it: it names files
-        of the plan not written yet (a compiled language reads its sources before any test). The
-        tool works; the code comes later."""
-        return any(path in output for path in self.p.paths() if not self.ws.exists(path))
+    def one_test_unpicked(self, real):
+        """"" when the one-test command runs a test by its name, else why not: a command that answers
+        a made-up test name as it answers a real one does not pick tests, and every test it runs
+        would look failing. Checked once per command, when the whole suite has run that test."""
+        toolchain = self.s.toolchain
+        if getattr(self.s, "one_test_checked", None) == toolchain.test_one:
+            return ""
+        made_up = TestRef(f"{real.file}::tinker_made_up_test")
+        _, real_output = toolchain.run_test(self.ws, real)
+        _, made_up_output = toolchain.run_test(self.ws, made_up)
+
+        def plain(text, name):
+            return re.sub(r"[\d.]+", "", text.replace(name, "<name>"))
+        if plain(real_output, real.name) != plain(made_up_output, made_up.name):
+            self.s.one_test_checked = toolchain.test_one
+            return ""
+        print(f"  $ {real.command(toolchain.test_one)}  [answers a made-up test name the same way: a tooling problem]")
+        return (f"{real_output}\n(The one-test command `{toolchain.test_one}` answers a made-up test name the same "
+                f"way as the real test {real.name}: it does not run a test by its name, as the test tool needs it.)")
+
+    def reaches_code(self, output):
+        """Whether the test command got as far as the app's own code: it names a code file of the
+        plan, one not written yet or one that does not compile (a compiled language builds all of
+        it before any test runs). The tool works; what fails is the code, which the build fixes."""
+        return any(path in output for path in self.p.paths("code"))
 
     def linter_runs(self):
         """("ok", "") when the linter runs (what it finds does not matter here), else ("lint", why):
-        a linter that is not installed or not found is a tooling problem, like a missing test tool."""
+        a linter that is not installed or not found is a tooling problem, like a missing test tool;
+        one that reaches the app's code and finds it does not compile runs (the build fixes that)."""
         if not self.s.toolchain.lint:
             return "ok", ""
         code, output = self.ws.run(self.s.toolchain.shell(self.s.toolchain.lint), quiet=True)
-        if code in (126, 127) or (code != 0 and self.MISSING_TOOL_RE.search(output)):
+        if code in (126, 127) or (code != 0 and self.MISSING_TOOL_RE.search(output) and not self.reaches_code(output)):
             print(f"  $ {self.s.toolchain.lint}  [the linter does not run: a tooling problem]")
             return "lint", f"$ {self.s.toolchain.lint}\nthe linter does not run (exit code {code}):\n{output}"
         return "ok", ""
 
     def remember_what_worked(self, repair):
+        """The repair that made the tools work, for the next projects (the toolchain itself is kept
+        once the project is done: only then has every command of it worked)."""
         knowledge = self.s.knowledge
-        knowledge.remember_toolchain(self.s.toolchain)
         if repair and repair[0] == "known":
             knowledge.fix_result(repair[1], worked=True)
         elif repair:
@@ -900,7 +934,7 @@ class BuildFix(Worker):
         view = FileView(self.ws, fixed, self.candidates(), tail, output=self.output, hints=self.output)
         try:
             reply = self.s.ask(Prompts.BUILD_SYSTEM, view, "Make it build", max_reply=self.s.model.fix_max,
-                               unthinking_retry=False)
+                               unthinking_retry=False, think=False if not self.tried else None)  # first: no thinking
         except PromptTooLarge as exc:
             print(f"  make it build: the prompt does not fit ({exc})")
             return "the prompt did not fit"
@@ -963,19 +997,33 @@ class FixAttempt(Worker):
         if self.broke_others(change, cause):  # passing or not, a change that breaks a passing test goes
             return "fails", self.output + self.broken_note()
         self.record(f"{cause} -> {state}")
+        if state == "passes" and self.approach == "review" and reply.criterion():
+            self.correct_criterion(reply.criterion())
         if state == "passes" and cause != "?":
             self.s.note(self.approach, f"{self.step['behaviour'][:120]} | solved: {cause}")
         print(f"  {self.label}: changed {', '.join(change.files)} -> {state}"
               + (f"  ({cause})" if cause != "?" else ""))
         return state, output
 
+    def correct_criterion(self, text):
+        """The spec says what the corrected test checks: a criterion found wrong (a miscomputed value)
+        is reworded with it, so SPEC.md, the source of truth, and the tests stay the same."""
+        print(f"  {self.step['id']} now reads: {first_line(text, 120)} (was: {first_line(self.step['behaviour'], 80)})")
+        self.step["behaviour"], self.step["title"] = text, text[:80]
+        self.s.save()
+
     def ask(self, view):
-        """The reply. When the last call for this criterion thought to its cap without an answer,
-        this one does not think (the same prompt would think the same way, for minutes, again): it
-        is given that thought to conclude. The one after thinks again: a hard problem needs it."""
-        key = f"overthought_{self.approach}"
-        think = False if self.step.pop(key, None) else None
-        label = self.label + (" (no thinking: concluding the last one's thought)" if think is False else "")
+        """The reply. The first call of an approach for a criterion does not think: most failures
+        show their cause, and a call that thinks often thinks for minutes to its cap first. The
+        next ones think (a hard problem needs it); when one thought to its cap without an answer,
+        the call after it does not think (the same prompt would think the same way again): it is
+        given that thought to conclude."""
+        key, tried = f"overthought_{self.approach}", f"tried_{self.approach}"
+        first, concluding = not self.step.get(tried), bool(self.step.pop(key, None))
+        self.step[tried] = self.step.get(tried, 0) + 1
+        think = False if first or concluding else None
+        label = self.label + (" (no thinking: concluding the last one's thought)" if concluding
+                              else " (no thinking first)" if first else "")
         reply = self.s.ask(self.system(), view, label, max_reply=self.s.model.fix_max, unthinking_retry=False,
                            think=think)
         self.overthought = self.s.model.overthought

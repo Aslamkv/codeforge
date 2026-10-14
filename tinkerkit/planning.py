@@ -1,6 +1,9 @@
 """Planning a cycle: what was learned that it needs, the spec, and the contracts where files meet."""
 
+import ast
 import json
+import math
+import operator
 import re
 from pathlib import Path
 
@@ -166,6 +169,67 @@ class Recaller(Phase):
         return "\n".join(lines)
 
 
+class Working:
+    """The arithmetic a criterion shows for a value it states ("(300 − 273.15) × 9/5 + 32 = 80.33"),
+    worked out here: a model's sums go wrong, and a wrong value in a criterion becomes a test the
+    right code cannot pass. Only plain arithmetic is checked (numbers, + − × ÷ and brackets)."""
+    ARITHMETIC = r"[\d.\s()+\-*/]"
+    CHAIN_RE = re.compile(rf"{ARITHMETIC}+(?:={ARITHMETIC}+)+")
+    SIGNS = {"×": "*", "÷": "/", "−": "-", "–": "-"}
+    OPERATIONS = {ast.Add: operator.add, ast.Sub: operator.sub, ast.Mult: operator.mul, ast.Div: operator.truediv}
+
+    @classmethod
+    def mistakes(cls, text):
+        """Each chain of sums in text ("100 × 9/5 + 32 = 180 + 32 = 212") with a part whose value
+        is not the chain's last one (within the rounding the last one is written with)."""
+        plain = text
+        for sign, same in cls.SIGNS.items():
+            plain = plain.replace(sign, same)
+        plain = re.sub(r"(?<=[\d)])\s*x\s*(?=[\d(])", " * ", plain)
+        found = []
+        for chain in cls.CHAIN_RE.finditer(plain):
+            parts = [cls.balanced(part) for part in chain.group(0).split("=")]
+            worked = [(part, cls.value(part)) for part in parts]
+            worked = [(part, value) for part, value in worked if value is not None]
+            if len(worked) < 2 or not any(re.search(r"[\d)]\s*[-+*/]\s*[\d(]", p) for p, _ in worked):
+                continue
+            last, result = worked[-1]
+            places = len(last.partition(".")[2]) if re.fullmatch(r"-?\d+(\.\d+)?", last) else 6
+            cut_short = plain[chain.end():].lstrip().startswith(("…", "..."))  # 37.777… goes on: not rounded
+            for part, value in worked[:-1]:
+                if cut_short and math.trunc(value * 10 ** places + 1e-9) == round(result * 10 ** places):
+                    continue
+                if cut_short or abs(value - result) > 0.5 * 10 ** -places + 1e-9:
+                    found.append(f"{part} is {round(value, max(places, 2) if places < 6 else 4):g}, not {last}")
+        return found
+
+    @staticmethod
+    def balanced(part):
+        """A part of a chain without the brackets around it that belong to the sentence."""
+        part = part.strip()
+        while part.startswith("(") and part.count("(") > part.count(")"):
+            part = part[1:].strip()
+        while part.endswith(")") and part.count(")") > part.count("("):
+            part = part[:-1].strip()
+        return part
+
+    @classmethod
+    def value(cls, sum_):
+        """The value of plain arithmetic, or None when it is not that (or divides by zero)."""
+        def worked(node):
+            if isinstance(node, ast.Constant) and isinstance(node.value, (int, float)):
+                return node.value
+            if isinstance(node, ast.UnaryOp) and isinstance(node.op, (ast.USub, ast.UAdd)):
+                return -worked(node.operand) if isinstance(node.op, ast.USub) else worked(node.operand)
+            if isinstance(node, ast.BinOp) and type(node.op) in cls.OPERATIONS:
+                return cls.OPERATIONS[type(node.op)](worked(node.left), worked(node.right))
+            raise ValueError(node)
+        try:
+            return worked(ast.parse(sum_, mode="eval").body)
+        except (SyntaxError, ValueError, ZeroDivisionError, TypeError):
+            return None
+
+
 class SpecWriter(Phase):
     """1. Spec: one call plans the project as a small, testable spec: the criteria (each one
     behaviour the request clearly asks for, with one unit test), the files that hold them and
@@ -233,6 +297,24 @@ class SpecWriter(Phase):
         criteria = self.criteria_from(data.get("criteria"), cycle)
         if not criteria:
             raise ValueError("no criteria listed (or none quotes the request)")
+        wrong = [f"in \"{c['behaviour']}\" the working {m}" for c in criteria for m in Working.mistakes(c["behaviour"])]
+        self.sent_back = getattr(self, "sent_back", 0) + bool(wrong)
+        if wrong and self.sent_back <= 2:  # then the review of a failing test is left to find it
+            raise ValueError("; ".join(wrong) + ". Give the same spec again with only these values corrected (the "
+                             "working's own result, and what the criterion shows from it); every other criterion "
+                             "and file stays as it was")
+        listed_tests = [str(Path(str(i.get("path", "")).strip())) for i in data.get("files") or []
+                        if isinstance(i, dict) and str(i.get("kind") or "").strip().lower() == "test"]
+        listed_code = {str(Path(str(i.get("path", "")).strip())) for i in data.get("files") or []
+                       if isinstance(i, dict) and str(i.get("kind") or "code").strip().lower() == "code"}
+        for criterion in criteria:
+            ref = TestRef(criterion["test"])
+            ref = TestRef(f"{self.listed_test_file(ref.file, listed_tests)}::{ref.name}")
+            if "::" in ref.file or not Path(ref.file).suffix or ref.file in listed_code:
+                raise ValueError(f"test {criterion['test']} is not in a test file of its own: write it as "
+                                 f"<test file path>::<test name> (e.g. tests/test_app.py::test_add), and put the "
+                                 f"code it calls where that test file can reach it")
+            criterion["test"] = str(ref)
         test_files = {TestRef(s["test"]).file for s in criteria}
         files = {}
         for item in data.get("files") or []:
@@ -242,8 +324,18 @@ class SpecWriter(Phase):
         for path in sorted(test_files - set(files)):  # a test file the criteria name is in the plan
             files[path] = {"path": path, "kind": "test", "role": "tests", "contract": [], "uses": []}
         entry = str(Path(str(data.get("entry") or "").strip())) if str(data.get("entry") or "").strip() else ""
+        named = [p for p in list(files) + list(self.p.files) if Path(p).name == entry]
+        entry = named[0] if entry not in files and entry not in self.p.files and len(set(named)) == 1 else entry
         if entry and entry not in files and entry not in self.p.files:
             raise ValueError(f"entry {entry} is not one of the files")
+        run = str((data.get("toolchain") or {}).get("run") or "") if isinstance(data.get("toolchain"), dict) else ""
+        unrun = cycle["id"] == "base" and entry and not any(self.runs_program(c["behaviour"], entry, run)
+                                                             for c in criteria)
+        self.sent_back = getattr(self, "sent_back", 0) + bool(unrun)
+        if unrun and self.sent_back <= 2:  # a program a person runs is checked as it is run
+            raise ValueError(f"{entry} is a program a person runs, yet no criterion runs it: add its normal use "
+                             f"as a person runs it, with what it prints (through {entry}'s entry point or its "
+                             f"run command), next to the criteria already there")
         toolchain = None
         if cycle["id"] == "base" or not self.p.toolchain:
             given = data.get("toolchain")
@@ -305,6 +397,27 @@ class SpecWriter(Phase):
         wanted = [w for w in words(quoted) if len(w) >= 3]
         have = set(words(request))
         return bool(wanted) and sum(w in have for w in wanted) / len(wanted) >= 0.6
+
+    @staticmethod
+    def runs_program(text, entry, run):
+        """Whether a criterion uses the program as a person runs it: it calls its entry point (main(),
+        the entry module's own function), names its run command, is written as a command line
+        ("roman 42 prints XLII"), says it runs it, or is about its input, output or exit code."""
+        lower, stem = text.lower(), Path(entry).stem.lower()
+        command = " ".join(run.split()[:2]).lower()
+        return ("main(" in lower or f"{stem}(" in lower or f"{stem}." in lower and "main" in lower
+                or bool(command) and command in lower
+                or bool(re.match(r"\s*`?[a-z][\w.-]*`?(?: [^\s(]+)*? (prints|outputs|shows|writes)\b", lower))
+                or bool(re.search(r"\b(run|runs|running|ran|launch|launched|invoked?|executed?|stdin|stdout|"
+                                  r"standard (input|output)|exit code|exits)\b", lower)))
+
+    def listed_test_file(self, file, listed_tests):
+        """The test file a criterion names, as the plan lists it: a test named the language's own
+        way ("calculator::test_add" for tests/calculator.rs) names its file by the file's stem."""
+        if file in listed_tests or file in self.p.files or not listed_tests:
+            return file
+        same_stem = [p for p in listed_tests if Path(p).stem == Path(file).stem]
+        return same_stem[0] if same_stem else listed_tests[0] if len(listed_tests) == 1 else file
 
     def test_id(self, given, text, siblings):
         ref = TestRef(str(given or "").strip())

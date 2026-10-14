@@ -984,10 +984,12 @@ class ProjectRun:
 
     def summary_done(self):
         project, run_id = self.session.project, self.record["id"]
-        print(f"Done. All {len(project.criteria)} spec tests pass (SPEC.md).")
         failing = [item for c in project.cycles for item in c.get("readme_failures", [])]
-        if failing:
-            print("README examples that do not print what it says:" + "".join(f"\n  - {f}" for f in failing))
+        if failing:  # the README's examples are how a person uses it: one that fails is said first
+            print(f"Done, but {len(failing)} README example(s) do not print what they say (all "
+                  f"{len(project.criteria)} spec tests pass):" + "".join(f"\n  - {f}" for f in failing))
+        else:
+            print(f"Done. All {len(project.criteria)} spec tests pass (SPEC.md).")
         if project.toolchain.run:
             print(f"Run it: cd {project.workdir} && {project.toolchain.run}")
         if (project.workdir / ENV_EXAMPLE).is_file():
@@ -1050,16 +1052,21 @@ class Session:
     def format_code(self):
         """The toolchain's formatter run over the project, when it has one (after setup: it may be
         installed there): the model never formats code itself. Formatting only tidies: when it
-        fails, that is a note and the run goes on."""
+        fails, the project goes on without it, and it is not remembered as a command that works."""
         command = self.toolchain.format
         if not command:
             return
         ok, failed = self.setup()
-        code, output = self.ws.run(self.toolchain.shell(command), timeout=SETUP_TIMEOUT, quiet=True) if ok \
-            else (None, failed)
-        print(f"  formatted the code: $ {command}" if code == 0 else
-              f"  note: the formatter did not run ({first_line(output.strip(), 160) or f'exit code {code}'}); "
-              f"the code stays as written")
+        if not ok:
+            return
+        code, output = self.ws.run(self.toolchain.shell(command), timeout=SETUP_TIMEOUT, quiet=True)
+        if code == 0:
+            print(f"  formatted the code: $ {command}")
+            return
+        print(f"  note: the formatter does not work ({first_line(output.strip(), 160) or f'exit code {code}'}); "
+              f"the code stays as written and the project goes on without `{command}`")
+        self.project.spec["toolchain"] = dict(self.toolchain.to_dict(), format="")
+        self.save()
 
     def save(self):
         self.project.save()

@@ -129,7 +129,7 @@ class FinalReview(Phase):
 
     def run(self, cycle):
         problem, output = self.problem()
-        if problem and ToolchainRepair(self.s).run(output, set()):
+        if problem and "passed once and failed" not in problem and ToolchainRepair(self.s).run(output, set()):
             problem, output = self.problem()
         if problem:
             self.s.review_problem = problem
@@ -149,7 +149,11 @@ class FinalReview(Phase):
         code, output = self.s.run_all_tests()
         if code != 0:
             return f"`{self.s.toolchain.test_all}` fails when the whole suite runs: {Output.key_line(output)}", output
-        if Toolchain.NO_TESTS_RE.search(output):
+        again, output_again = self.s.toolchain.run_all(self.ws)  # a test that passes by chance fails some runs
+        if again != 0:
+            return (f"`{self.s.toolchain.test_all}` passed once and failed the next time: a test depends on chance "
+                    f"(random output) or on order: {Output.key_line(output_again)}"), output_again
+        if Toolchain.ran_no_test(output):
             return f"`{self.s.toolchain.test_all}` runs no test", output
         untested = [s["id"] for s in self.p.criteria
                     if (not TestRef(s["test"]).present(self.ws) or s["status"] != "green")]
@@ -391,9 +395,11 @@ class LessonWriter(Phase):
 
     def run(self, cycle):
         """One call turns the problems this cycle solved into lessons (none: no call). A finished
-        project counts for its language's toolchain."""
+        project's toolchain is kept for its language: every command of it has worked by now (one
+        test at a time, the whole suite, the linter), which is not so when the test tool first runs."""
         events = self.p.spec.get("events", [])
         if cycle["id"] == "base" and not cycle.get("counted"):
+            self.s.knowledge.remember_toolchain(self.s.toolchain)
             self.s.knowledge.finished_project()
             cycle["counted"] = True  # a resumed lessons phase does not count it again
             self.s.save()

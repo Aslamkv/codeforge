@@ -24,6 +24,7 @@ class Reply:
     JOINED_STRINGS_RE = re.compile(r'(?<!\\)"\s*\+\s*"')  # "a" + "b", as in code: one string "ab"
     DEBRIS_RE = re.compile(r"\s*(<{2,}|>{2,}|<<<\w*>>>)\s*")  # a line of the block format's own marks, no content
     FENCE_RE = re.compile(r"\s*(`{3,}|~{3,})[\w+#.-]*\s*")      # a markdown fence line: ``` or ```python
+    QUOTE_ESCAPE_RE = re.compile(r"(?<!\\)((?:\\\\)*)\\'")      # \' after an even run of backslashes
 
     def __init__(self, raw):
         self.text = self.THINK_RE.sub("", raw or "").strip()
@@ -31,12 +32,14 @@ class Reply:
     def json(self):
         """The JSON object in the reply. A model's usual slips are mended in turn, each only when
         the reply does not parse without it: a comma before a closing bracket, strings joined with
-        + as in code, the last brackets left open, a list left open before the next key."""
+        + as in code, a single quote escaped as in code (\\' is not JSON), the last brackets left
+        open, a list left open before the next key."""
         start, end = self.text.find("{"), self.text.rfind("}")
         if start == -1 or end <= start:
             raise ValueError("no JSON object in reply")
         whole, to_the_end = self.text[start:end + 1], self.text[start:].rstrip().rstrip("`").rstrip()
-        mend = lambda text: self.strip_trailing_commas(self.JOINED_STRINGS_RE.sub("", text))
+        mend = lambda text: self.strip_trailing_commas(
+            self.QUOTE_ESCAPE_RE.sub(r"\1'", self.JOINED_STRINGS_RE.sub("", text)))
         candidates = [whole, mend(whole), self.closed(mend(to_the_end)), self.balanced(mend(to_the_end))]
         problem = None
         for candidate in filter(None, candidates):
@@ -195,6 +198,11 @@ class Reply:
         match = re.search(r"^\s*TEST WRONG:\s*(.+)$", self.text, re.M)
         return first_line(match.group(1), 200) if match else ""
 
+    def criterion(self):
+        """The criterion as the reply says it should read ("" when it keeps it): a line CRITERION: text."""
+        match = re.search(r"^\s*CRITERION:\s*(.+)$", self.text, re.M)
+        return match.group(1).strip() if match else ""
+
     def toolchain_line(self):
         match = re.search(r"^\s*TOOLCHAIN:\s*(\{.*\})\s*$", self.text, re.M)
         return json.loads(match.group(1)) if match else None
@@ -331,8 +339,10 @@ class Prompts:
     SPEC_JSON = ('{"language":"Python",\n'
                  ' "criteria":[{"text":"tip.split(\\"60.00\\", 15, 3) is 23.00 (60.00 + 15% = 69.00, / 3)",'
                  '"source":"words copied from the request","test":"tests/test_tip.py::test_split","effort":1},\n'
-                 ' {"text":"tip.main([\\"60\\", \\"--tip\\", \\"15\\", \\"--people\\", \\"3\\"]) prints \\"23.00 each\\"",'
-                 '"source":"...","test":"tests/test_tip.py::test_main_split","effort":1},\n'
+                 ' {"text":"tip.main([\\"60.50\\", \\"--tip\\", \\"15\\", \\"--people\\", \\"3\\"]) prints \\"23.19 each\\" '
+                 '(60.50 + 15% = 69.575, / 3 = 23.19)","source":"...","test":"tests/test_tip.py::test_main_split","effort":1},\n'
+                 ' {"text":"tip.main([]) prints a clear error (the amount is missing) and exits with 1","source":"...",'
+                 '"test":"tests/test_tip.py::test_main_missing_amount","effort":1},\n'
                  ' {"text":"tip.main([\\"abc\\"]) prints a clear error and exits with 1","source":"...",'
                  '"test":"tests/test_tip.py::test_main_bad_amount","effort":1}],\n'
                  ' "files":[{"path":"tip.py","kind":"code","role":"the tip calculator and its command line","uses":[]},\n'
@@ -349,22 +359,31 @@ class Prompts:
 - criteria: each one behaviour the request asks for, or obviously needs to be correct (a calculator
   that divides needs division by zero handled), of one module, checked by ONE fast unit test through
   its public interface; "source" copies the request's words it comes from (else it is dropped); none
-  for what the request does not ask: no command line, menu, server, settings, persistence, logging or
-  input checks it does not ask for; never about how it is built; no repeats; usually 3 to 10;
-- a program a person runs: each command, option or route the request names gets a criterion through
-  the entry point, written exactly as the request writes it (e.g. main(["book", "add", "Dune",
-  "Herbert"]) prints the new book's id), so the program is tested the way it is used; what it shows
-  a person names the things it is about (a title, a name), not only their ids; it takes values as a
-  person writes them, and a criterion uses such a value (a number with decimals); every kind of
-  wrong input it can meet gets a
-  clear message and a non-zero exit, never a crash or silence, one criterion each: an unknown
-  command, a missing argument, a value of the wrong kind (a word where a number goes), and what its
-  own rules forbid (dividing by zero) (source: the request's words about what that input is for);
+  for what the request does not ask: no command line, menu, server, settings, persistence or logging
+  it does not ask for (a program a person runs still gets the checks below); never about how it is
+  built; no repeats; usually 3 to 10;
+- a program a person runs is tested the way it is used, through its entry point; what it shows a
+  person names the things it is about (a title, a name), not only their ids. Its criteria, one each:
+  1. its normal use as a person runs it, and each command, option or route the request names,
+     written exactly as the request writes it, with what it prints, in words a person reads (e.g.
+     main(["book", "add", "Dune", "Herbert"]) prints "Added Dune by Herbert (id 1)");
+  2. a value written as a person writes it (a number with decimals), which it takes, and a computed
+     number it shows written the same way: a result that does not come out even, shown rounded
+     (10 / 3 shows 3.33; 80.33, never 80.33000000000004);
+  3. each kind of wrong input it can meet, with a clear message and a non-zero exit, never a crash
+     or silence, checked on the program as a person runs it (its message and its exit code, not
+     only a function's error): an unknown command, a missing argument, a value of the wrong kind
+     (a word where a number goes), and what its own rules forbid (dividing by zero) (source: the
+     request's words about what that input is for);
 - each setting the request names (an environment variable, a .env key) gets a criterion that it
   takes effect (source: the request's words naming it);
-- a criterion that states a computed value shows its working from the request's rules, e.g. "2 days
-  late x 0.05 = 0.10", so the value is right;
-- "test" is "<test file>::<test name>" in the language's conventions;
+- a criterion that states a computed value shows its working from the request's rules and its input,
+  part by part, adding up every part, e.g. "2 days late x 0.05 = 0.10", "3 x 4.50 + 2 x 1.25 = 16.00",
+  so the value is right;
+- "test" is "<test file path>::<test name>": a test file of its own (never inside a code file), named
+  and placed as the language's test tool finds it; the code the tests call is where a test file can
+  reach it (in a language whose program file cannot be used from a test file, the logic is in a
+  library file the program uses);
 - files: the fewest that hold the criteria: code files (one responsibility each, under {MAX_FILE_LINES}
   lines) and their test files; a dependency file only for third-party dependencies, the fewest (none
   where the standard library does it; the test tools are installed by the toolchain's setup); the
@@ -396,13 +415,17 @@ class Prompts:
     TOOLCHAIN_RULES = ("toolchain: the language's usual tools, every command written the way a person types it in "
                        "the project folder; setup: what prepares it for development, in order (the project's own "
                        "environment when the language keeps dependencies in one, then the test framework, the "
-                       "formatter, the linter and the dependency file's packages), creating no project file; "
+                       "formatter, the linter and the dependency file's packages), creating no project file (the files "
+                       "listed are written for it: never a command that starts a new project) and changing nothing "
+                       "outside the project folder (never the machine's default toolchain, a global install or "
+                       "a global setting: what is installed already is used as it is); "
                        "activate: what makes a shell use that environment (\"\" when the language needs none), "
                        "run before every command but setup's first; use: only what a person must run once to use "
                        "it ([] when the language as installed is enough, e.g. a Python app on the standard library "
                        "alone; else e.g. make and activate the environment and install the dependency file); run: "
                        "how a person starts it after that, with no arguments (they add them), by the command name that "
-                       "works wherever the language is installed (e.g. python3 calculator.py), \"\" when there is "
+                       "works wherever the language is installed (e.g. python3 calculator.py), printing only what the "
+                       "program prints (a tool that reports its own building runs quietly), \"\" when there is "
                        "no entry point; check quickly builds or loads every code file, so a missing import or "
                        "dependency fails it; test_all and test_one: the test tool's own command as a person types "
                        "it (e.g. pytest -q), never a wrapper; it must find the project's code (the project config "
@@ -460,15 +483,23 @@ Rules: {TOOLCHAIN_RULES}."""
     TESTS_REPLY = f"""Reply with the test file, complete:
 {FILE_BLOCK}
 Rules: one test per criterion with exactly the given name; assert only what the criterion and the
-contracts state; the file is self-contained: sample data is defined in it and passed where the app takes
-an adapter, so nothing outside the app runs (no network, no real settings, no fake servers, no helper
-files); never replace the app's own modules, classes or functions with fakes or copies of their logic
-(only an adapter to an external service is replaced, by sample data): a test of a fake tests nothing;
+contracts state, and exactly: a value or line it states equals what is printed or returned (the whole
+line, not a part found in it: "80.33" in "80.33000000000004" passes wrongly), a clear error by what it
+names (the bad value, the missing thing) and its exit code; what a criterion says is shown or printed
+(rounded, worded) is checked on what the program prints, whatever function it names, so every part
+of it is enforced; a test of something random checks what always holds (its length, which
+characters it may use), never what holds only by chance (that each kind appears), unless the app
+guarantees it; the file is self-contained: sample data
+is defined in it and passed where the app takes an adapter, so nothing outside the app runs (no
+network, no real settings, no fake servers, no helper files); never replace the app's own modules,
+classes or functions with fakes or copies of their logic (only an adapter to an external service is replaced, by sample data): a test of a fake tests nothing;
 a test that runs the app as its own process runs it as the run command does (from the project folder,
 with the project's code found there); every test finishes within seconds and leaves nothing running or
 behind: a file it makes (a
-cache, a database, a settings file) goes in a temporary folder of its own, with the app's settings
-pointed there, so no test sees another's; keep each test short."""
+cache, a database, a settings file) goes in a temporary folder of its own, so no test sees another's:
+the app runs in that folder (its working directory) or is pointed there by a setting the criterion
+names, and is called exactly as the criterion writes it (never with an argument it does not show);
+keep each test short."""
 
     SPEC_TESTS_SYSTEM = """Write the spec tests for the given criteria before the code exists, in the project's language
 and test framework (as the test command runs them). Each test checks its criterion through the public
@@ -487,7 +518,9 @@ Keep it short."""
 
     CODE_SYSTEM = f"""Write one file of a project, in its language. It must fulfil its contract exactly, make the
 given tests pass, meet its criteria and do nothing more: no extra functions, options, fallbacks, logging
-or abstraction: only what the tests need. Use the contracts of the files it uses exactly; an adapter to
+or abstraction: only what the tests need. Make the code right, not the tests pass: compute what the request
+means, never a result adjusted or special-cased to match a test's number (a wrong number in a test fails
+and is then reviewed). Use the contracts of the files it uses exactly; an adapter to
 an external service only makes its call and returns the data. Keep it under {MAX_FILE_LINES} lines; if it
 needs more, move a part into a new small module and give that file too; never repeat other files.
 Reply with only:
@@ -499,7 +532,9 @@ only what the project needs (the test tools are installed by the toolchain's set
 file the test tool reads says where the project's code is, so the test tool's own command finds it
 (e.g. pyproject.toml with only [tool.pytest.ini_options] pythonpath = ["."]): only the sections the
 project needs, no packaging metadata or version limits it was not asked for. {ENV_EXAMPLE} lists
-each setting with a comment and its default (empty for a required one). Reply with one block per file:
+each setting with a comment and its default (empty for a required one). Write only the files asked for
+(never the code or tests). Reply with one block per file and nothing else: the reply starts with the
+first block (no plan, notes or reasoning before it):
 {FILE_BLOCK}"""
 
     CHANGE_SYSTEM = ("Change one file of an existing project so that it meets the given criteria or fixes the given "
@@ -524,7 +559,8 @@ each setting with a comment and its default (empty for a required one). Reply wi
                      "decides: a criterion or test that contradicts its rules (a wrong computed value, a rule "
                      "misread) is what is wrong, whatever the criterion says. A test that replaces the app's own "
                      "code with a fake of it (anything but an adapter to an external service) is wrong: it must "
-                     "use the real code.\n" + FILES_REPLY)
+                     "use the real code. When the criterion itself is wrong, also reply with a line \"CRITERION: "
+                     "<the criterion as it should read>\": the spec and its test must say the same.\n" + FILES_REPLY)
 
     LESSONS_SYSTEM = f"""A code generator just built a project. Below are the problems it hit and how each was
 solved. Write the lessons that would have avoided such problems in OTHER projects, so the generator gets
@@ -659,12 +695,17 @@ example is run as written to check it, so it must work exactly as given.
 - requires: what a person needs installed to use it, in a few words (e.g. "Python 3.10 or newer");
 - usage: tldr-style, one entry per feature or common task: "what" says the task in a few words;
   "command" is exactly what a person types in the project folder once it is ready to use: the run
-  command shown with its arguments (e.g. python3 calculator.py add 5 2), never a path into the
-  project's environment; with no entry point, a one-line call through the language's interpreter
-  that prints the result; for a server (started first, so never an example itself), a request to
-  it, e.g. curl -s http://127.0.0.1:<its default port>/...; a command that needs a file creates it
-  first in the same command; "output" is exactly what it prints, errors included (a long output: its
-  first lines), never a note about it such as its exit code; a value that differs each run (an id,
+  command shown with its arguments (e.g. python3 calculator.py add 5 2), quiet so that only the
+  program's own output shows (a tool that reports its own building gets its quiet option, among the
+  tool's options before the program's own arguments, e.g. cargo run -q -- 5 + 3), never a path into
+  the project's environment; with no entry point, a one-line call through the language's
+  interpreter that prints the result; for a server (started first, so never an example itself), a
+  request to it, e.g. curl -s http://127.0.0.1:<its default port>/...; a command that needs a file
+  creates it first in the same command, with printf (it works alike in every shell; echo -e does
+  not); a program that asks for input gets it piped in (printf '1\n5\n' | ...), and its output is
+  shown as printed then: what it was given is not echoed, so each prompt runs on into what follows it
+  on the same line; "output" is exactly what it prints, errors included (a long output: its first lines), never
+  a note about it such as its exit code; a value that differs each run (an id,
   a code, a time) is written as <what it is>;
 - serves: true when the run command keeps running until stopped (a server), else false.
 Reply with ONLY JSON: {"overview":"...","features":["..."],"requires":"Python 3.10 or newer",
@@ -675,7 +716,12 @@ Reply with ONLY JSON: {"overview":"...","features":["..."],"requires":"Python 3.
                          "not do what the request and the README say), and correct that with the smallest change. "
                          "The README and the code files shown may change, never the tests; every test must keep "
                          "passing. \"It printed\" is everything the command wrote, errors included; a README "
-                         "line that is a note about the output (such as an exit code) is a README mistake.\n"
+                         "line that is a note about the output (such as an exit code) is a README mistake. The "
+                         "commands run in a POSIX sh (echo -e prints its -e there: printf makes a file alike "
+                         "everywhere). A tool's own messages in the output (building, running) are the "
+                         "README's mistake: its command gets the tool's quiet option, before the program's own "
+                         "arguments. Input piped in is not echoed: a "
+                         "prompt runs on into the next output on the same line.\n"
                          + FILES_REPLY)
 
     BRIEF_SYSTEM = ("You condense part of a software spec. Output terse bullets of concrete requirements only: "

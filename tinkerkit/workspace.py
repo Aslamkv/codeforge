@@ -195,7 +195,8 @@ class Toolchain:
     COMMANDS = ("check", "test_all", "test_one", "run", "format", "lint")
     REQUIRED = ("test_all", "test_one")
     NO_TESTS_RE = re.compile(r"\bno tests? (ran|run|to run|found|collected|matched)\b|\b0 (tests|passed)\b|"
-                             r"\bran 0 tests\b|\btests?\s*0\b", re.I)
+                             r"\bran 0 tests\b|\btests?\s*0\b|\b\d+ deselected\b", re.I)
+    TESTS_RAN_RE = re.compile(r"\b[1-9]\d* (tests?|passed|passing|failed|failing)\b|\bran [1-9]\d* tests?\b", re.I)
     ENV_TARGET = re.compile(r"(?<![\w.-])\.env(?![\w.-])")  # the settings file itself, not .env.example
     # a command that failed because the network did (any package manager): it waits for the network, nothing more
     NETWORK_RE = re.compile(r"could not resolve|resolve host|name or service not known|nodename nor servname|"
@@ -240,7 +241,12 @@ class Toolchain:
         waiting, again = [], commands is not None  # a try again is quiet: the wait says how it goes
         for command in self.setup if not again else commands:  # in the environment as soon as the setup has made it
             active = self.activate and ws.run(self.activate, timeout=SETUP_TIMEOUT, quiet=True)[0] == 0
+            before = {p.name for p in Path(ws.root).iterdir()}
             code, output = ws.run(self.shell(command) if active else command, timeout=SETUP_TIMEOUT, quiet=again)
+            nested = self.new_project_made(Path(ws.root), before)
+            if nested:
+                return False, (f"$ {command}  made a new project in {nested}/: setup only prepares this project "
+                               f"(its files are written for it), so this command is not one of its setup"), waiting
             if code != 0 and (self.NETWORK_RE.search(output) or not online()):
                 waiting.append(command)
                 if not again:
@@ -249,6 +255,14 @@ class Toolchain:
                 ended = f"timed out after {SETUP_TIMEOUT}s" if code is None else f"exit code {code}"
                 return False, f"$ {command}  failed ({ended})\n{output.strip() or '(it printed nothing)'}", waiting
         return True, "", waiting
+
+    @staticmethod
+    def new_project_made(root, before):
+        """The folder a setup command just made that holds a project of its own (a file named as one
+        of this project's own top files, such as a second dependency file), or ""."""
+        own = {p.name for p in root.iterdir() if p.is_file()}
+        made = [p for p in root.iterdir() if p.is_dir() and p.name not in before]
+        return next((p.name for p in made if any((p / name).is_file() for name in own)), "")
 
     def to_dict(self):
         data = {"setup": self.setup, "activate": self.activate, "use": self.use,
@@ -270,6 +284,13 @@ class Toolchain:
             return True, ""
         code, output = ws.run(self.shell(self.check), quiet=True)
         return code == 0, f"$ {self.check}\n{output}"
+
+    @staticmethod
+    def ran_no_test(output):
+        """Whether a test command's output says it ran no test. A command may run the tests in
+        several parts (a library's, an app's, the test folder's), each saying how many it ran:
+        one part that ran none says nothing while another ran some."""
+        return bool(Toolchain.NO_TESTS_RE.search(output)) and not Toolchain.TESTS_RAN_RE.search(output)
 
     @staticmethod
     def reached_no_test(code, output, refs):
@@ -304,7 +325,7 @@ class Toolchain:
             return "fails", (f"$ {command}\nthe test did not finish within {self.test_timeout()}s: it hangs (an "
                              f"endless loop, a wait for input, a program or server left running, or a real network call). "
                              f"Output so far:\n{output}")
-        if code == 0 and not self.NO_TESTS_RE.search(output):
+        if code == 0 and not self.ran_no_test(output):
             return "passes", output
         if code == 0:
             return "fails", f"$ {command}\nthe command ran no test: is the test named {ref.name}?\n{output}"
