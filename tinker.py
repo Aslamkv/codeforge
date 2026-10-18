@@ -185,6 +185,7 @@ are the modules of tinkerkit/, one responsibility each, each using only those li
   model      the local model (Ollama, Model and the Tries of one request, Models, Calibrator)
   project    the plan and its record (Project, SpecDocument, Runs, RunChecks)
   web        the Internet plugin, the only part that goes online (Internet, OllamaWeb)
+  channels   the chat plugin: a run's progress, status and stop over Telegram (Channel, Channels)
   knowledge  lessons (Knowledge) and learning (Learner, Researcher, Library, Retriever, Embeddings)
   planning   recall, the spec, the contracts where files meet, and their review
   building   setup, the tests, the code, and fixing until every test passes
@@ -218,6 +219,11 @@ from tinkerkit.settings import (
     human_duration, now_text,
 )
 from tinkerkit.web import Internet
+
+try:  # channels are a plugin: without tinkerkit/channels.py, Tinker works as it did
+    from tinkerkit import channels
+except ImportError:
+    channels = None
 from tinkerkit.workspace import TaughtCommands, Toolchain, Workspace
 
 
@@ -281,6 +287,14 @@ class Cli:
             ("reset", "delete everything Tinker keeps (projects stay)"),
             ("help [COMMAND]", "this list, or one command's arguments and options"),
         ],
+        "Channels": [
+            ("channel list", "the chat channels (Telegram), and which are enabled"),
+            ("channel add", "add one: its kind, a name, its token; pairs your chat"),
+            ("channel remove NAME", "delete a channel and its token"),
+            ("channel enable NAME", "a running task reports to it and takes status and stop"),
+            ("channel disable NAME", "stop using it (channels start disabled)"),
+            ("channel start [NAME]", "listen on it: ask for tasks, resumes and status from the chat"),
+        ],
     }
     EXAMPLES = ("tinker doctor", 'tinker task "a calculator in Python"', 'tinker add "keep a history of results"',
                 'tinker learn "food bank inventory"', "tinker help task")
@@ -328,6 +342,11 @@ class Cli:
         argv = sys.argv[1:] if argv is None else argv
         if not argv or argv[0] in ("help", "-h", "--help"):
             Cli.help(argv[1] if len(argv) > 1 else None)
+        if argv[0] == "channel":  # the chat channels: a plugin of its own, nothing else runs
+            if channels is None:
+                raise SystemExit("tinker: channels are not installed (tinkerkit/channels.py is missing)")
+            channels.ChannelCommand.run(argv[1:])
+            raise SystemExit(0)
         if argv[0] == "clear":  # nothing else runs: no model, no project
             given = Cli.parser("clear").parse_args(argv[1:])
             Home.clear(given.parts, given.yes)
@@ -357,6 +376,9 @@ class Cli:
         if command is None:
             print(Cli.overview())
             raise SystemExit(0)
+        if command == "channel" and channels is not None:
+            print(channels.ChannelCommand.USAGE)
+            raise SystemExit(0)
         if command not in Cli.COMMANDS:
             raise SystemExit(f"tinker: no command {command!r} (tinker help lists them)")
         Cli.parser(command).print_help()
@@ -368,13 +390,15 @@ class Cli:
         that take them, read from their parsers) and a few examples; in colour in a terminal
         (unless NO_COLOR is set). Columns are lined up before colouring."""
         paint = Cli.painter()
-        title = {"Build": "🔨 Build", "Learn": "🧠 Learn", "Set up": "🔧 Set up"}
+        title = {"Build": "🔨 Build", "Learn": "🧠 Learn", "Set up": "🔧 Set up", "Channels": "💬 Channels"}
         width = max(len(synopsis) for lines in Cli.GROUPS.values() for synopsis, _ in lines) + 2
         out = [f"🛠  {paint('tinker', 'bold')} builds what you ask for with a local Ollama model: a small spec, a unit",
                "   test for each point, just enough code, and a README a person can follow.", "",
                f"{paint('Usage:', 'bold')} tinker {paint('COMMAND', 'cyan')} {paint('[ARGUMENTS]', 'yellow')} "
                f"{paint('[OPTIONS]', 'green')}"]
         for group, lines in Cli.GROUPS.items():
+            if group == "Channels" and channels is None:  # the plugin is not installed
+                continue
             out += ["", paint(title[group], "bold")]
             for synopsis, what in lines:
                 name, _, arguments = synopsis.partition(" ")
@@ -835,8 +859,13 @@ class ProjectRun:
             Runs.clear_folder(workdir, Path(spec).expanduser().resolve() if spec else None)
         Console.mirror(workdir)
         self.open()
-        self.work_safely()
-        self.finish()
+        listening = channels.attach(f"{Path(workdir).name}: {self.record['task']}") if channels else None
+        try:
+            self.work_safely()
+            self.finish()
+        finally:  # the summary is printed first, so the channels send it too
+            if listening:
+                listening.end()
         sys.exit(self.outcome.exit_code)
 
     def check_requirements(self):
