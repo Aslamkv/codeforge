@@ -14,7 +14,8 @@ class Reply:
     """What the model answered, and the structured parts in it."""
     THINK_RE = re.compile(r"<think>.*?</think>", re.S)
     HEADER_PATH = r"[ \t:]+(?:(?:path|file)[ \t]*[=:][ \t]*)?[\"'`]?([^\s<>\"'`]+?)[\"'`]?"  # FILE x, FILE path=x, FILE "x"
-    FILE_BLOCK_RE = re.compile(r"<<<FILE" + HEADER_PATH + r"[ \t]*>>>[ \t]*([^\s<>]*)[ \t]*\n(.*?)\n?<<<END>>>", re.S)
+    FILE_BLOCK_RE = re.compile(r"<<<FILE" + HEADER_PATH + r"[ \t]*(?:>>>[ \t]*([^\s<>]*))?[ \t]*\n(.*?)\n?<<<END>>>",
+                               re.S)  # the header's >>> may be missing: the path then ends with its line
     LINES_BLOCK_RE = re.compile(r"<<<LINES" + HEADER_PATH + r"[ \t]+(?:lines[ \t]*=[ \t]*)?(\d+)\s*-\s*(\d+)[ \t]*>>>[ \t]*\n"
                                 r"(.*?)\n?<<<END>>>", re.S)
     NUMBERED_RE = re.compile(r"^\s*\d+\| ?")
@@ -203,6 +204,10 @@ class Reply:
         match = re.search(r"^\s*CRITERION:\s*(.+)$", self.text, re.M)
         return match.group(1).strip() if match else ""
 
+    def corrected_criteria(self):
+        """{test name: the criterion as it should read} from lines CRITERION <test name>: text."""
+        return {name: text.strip() for name, text in re.findall(r"^\s*CRITERION\s+([^\s:]+):\s*(.+)$", self.text, re.M)}
+
     def toolchain_line(self):
         match = re.search(r"^\s*TOOLCHAIN:\s*(\{.*\})\s*$", self.text, re.M)
         return json.loads(match.group(1)) if match else None
@@ -322,6 +327,9 @@ class Prompts:
     """Every prompt text: language- and app-neutral (the examples are a small command-line notes
     tool). The *_SYSTEM ones are system prompts; the others are pieces of them and of user messages."""
     NO_TOOL_CALLS = "\nReply in plain text; never call a tool or function."  # Ollama parses tool-call syntax
+    SAME_CASES = ("Several similar cases (every line, every unit, each row of a table) are built from the values "
+                  "the criterion names, with a loop or a small helper, never written out by hand one by one: a long "
+                  "hand-made literal (a grid, a board, a list of positions) is where counting slips.")
     FILE_BLOCK = "<<<FILE path>>>\nthe complete file\n<<<END>>>"  # how a reply gives a whole file
 
     FILES_REPLY = (f"Reply with a line \"CAUSE: <one sentence>\", then each file you change, complete:\n"
@@ -361,7 +369,8 @@ class Prompts:
   its public interface; "source" copies the request's words it comes from (else it is dropped); none
   for what the request does not ask: no command line, menu, server, settings, persistence or logging
   it does not ask for (a program a person runs still gets the checks below); never about how it is
-  built; no repeats; usually 3 to 10;
+  built; no repeats; usually 3 to 10; each thing the constraints say it handles (each kind, level or
+  form named) is checked by a criterion, so nothing the spec promises goes untested;
 - a program a person runs is tested the way it is used, through its entry point; what it shows a
   person names the things it is about (a title, a name), not only their ids. Its criteria, one each:
   1. its normal use as a person runs it, and each command, option or route the request names,
@@ -379,7 +388,10 @@ class Prompts:
   takes effect (source: the request's words naming it);
 - a criterion that states a computed value shows its working from the request's rules and its input,
   part by part, adding up every part, e.g. "2 days late x 0.05 = 0.10", "3 x 4.50 + 2 x 1.25 = 16.00",
-  so the value is right;
+  so the value is right; one that plays out steps (moves, commands, events in turn) shows the state each
+  step leaves, e.g. "X 1, O 2, X 4, O 5, X 7: X holds 1-4-7", so the outcome it states is the one they reach;
+- a program that reads input as it goes (a prompt, a game) ends cleanly when its input runs out, never
+  waiting for more or crashing: one criterion gives it input that stops early;
 - "test" is "<test file path>::<test name>": a test file of its own (never inside a code file), named
   and placed as the language's test tool finds it; the code the tests call is where a test file can
   reach it (in a language whose program file cannot be used from a test file, the logic is in a
@@ -499,12 +511,14 @@ behind: a file it makes (a
 cache, a database, a settings file) goes in a temporary folder of its own, so no test sees another's:
 the app runs in that folder (its working directory) or is pointed there by a setting the criterion
 names, and is called exactly as the criterion writes it (never with an argument it does not show);
-keep each test short."""
+keep each test short. A criterion whose own value is wrong by the request's rules (a miscount, a
+miscalculation) is tested with the right value and corrected, so the spec and its test say the same:
+before the file, a line "CRITERION <test name>: <the criterion as it should read>"."""
 
     SPEC_TESTS_SYSTEM = """Write the spec tests for the given criteria before the code exists, in the project's language
 and test framework (as the test command runs them). Each test checks its criterion through the public
 interface of the module the contracts name: the code will be written to pass these tests and nothing more.
-""" + TESTS_REPLY
+""" + SAME_CASES + "\n" + TESTS_REPLY
 
     REPRODUCE_SYSTEM = f"""A user reports a bug in a project that is built and whose tests pass. Write ONE test that
 shows the bug: it checks the correct behaviour the report implies, so it fails on the code as it is now
@@ -560,7 +574,8 @@ first block (no plan, notes or reasoning before it):
                      "misread) is what is wrong, whatever the criterion says. A test that replaces the app's own "
                      "code with a fake of it (anything but an adapter to an external service) is wrong: it must "
                      "use the real code. When the criterion itself is wrong, also reply with a line \"CRITERION: "
-                     "<the criterion as it should read>\": the spec and its test must say the same.\n" + FILES_REPLY)
+                     "<the criterion as it should read>\": the spec and its test must say the same. "
+                     + SAME_CASES + "\n" + FILES_REPLY)
 
     LESSONS_SYSTEM = f"""A code generator just built a project. Below are the problems it hit and how each was
 solved. Write the lessons that would have avoided such problems in OTHER projects, so the generator gets

@@ -656,12 +656,14 @@ class ContractWriter(Worker):
 
     def needed(self, cycle, path):
         """Whether two sides must agree on the file: another file uses it, or it renders a template
-        (what the page is given). A file that is neither, with no criterion of its own, is a marker."""
+        (what the page is given). A file that is neither, with no criterion of its own and not the entry
+        point, is a marker."""
         info = self.p.files[path]
         used = any(path in other.get("uses", []) for name, other in self.p.files.items()
                    if name != path and other.get("kind") in ("code", "template"))
         renders = any(self.p.files.get(u, {}).get("kind") == "template" for u in info.get("uses", []))
-        if not (used or renders) and not self.p.criteria_of(path, self.p.cycle_criteria(cycle)):
+        started = bool(self.p.entry_files([path]))  # the program a person starts is never a marker
+        if not (used or renders or started) and not self.p.criteria_of(path, self.p.cycle_criteria(cycle)):
             info["marker"] = True
         return used or renders
 

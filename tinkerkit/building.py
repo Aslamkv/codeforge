@@ -1,11 +1,12 @@
 """Building a cycle: the test tool set up, the tests, the code, and fixing until every test passes."""
 
+import itertools
 import json
 import re
 import time
 from pathlib import Path
 
-from .planning import Designer, Phase, Worker
+from .planning import Designer, Phase, SpecWriter, Worker
 from .prompts import Part, PromptTooLarge, Prompts, Reply
 from .settings import (
     BUILD_TRIES, Console, ENV_EXAMPLE, ENV_FILE, FIX_FILES, JsonFile, MAX_FILE_LINES, MAX_TRIES_PER_PASS,
@@ -67,6 +68,7 @@ class TestWriter(Phase):
             change = self.ws.apply(reply.as_file(self.new_file_next_to(path) if current.strip() else path),
                                    self.may_write(path), empty_ok=False)
             self.keep_existing_tests(change)
+            self.correct_criteria(todo, reply.corrected_criteria())
             self.follow_new_files(path, todo, change)
             note = self.report_and_note(path, todo, change)
 
@@ -119,6 +121,15 @@ class TestWriter(Phase):
             if lost:
                 self.ws.restore({path: change.backups.pop(path)})
                 change.notes.append(f"{path} lost its tests {', '.join(lost)}; write the new tests in a new file")
+
+    def correct_criteria(self, todo, corrected):
+        """A criterion the test writer found wrong by the request's rules reads as its test checks,
+        so SPEC.md, the source of truth, and the tests say the same."""
+        for step in todo:
+            text = corrected.get(TestRef(step["test"]).name)
+            if text and text != step["behaviour"]:
+                print(f"  {step['id']} now reads: {first_line(text, 120)} (was: {first_line(step['behaviour'], 80)})")
+                step["behaviour"], step["title"] = text, text[:80]
 
     def follow_new_files(self, path, todo, change):
         """Tests written into a new file: their criteria point there; the file joins the project."""
@@ -269,8 +280,13 @@ class CodeWriter(Phase):
         print(f"  rewired {path}" if change else f"  {path}: no usable change")
 
     def criteria_for(self, path, cycle):
-        """The criteria this file must meet (the same rule its contract was planned with)."""
-        return self.p.criteria_of(path, self.p.cycle_criteria(cycle))
+        """The criteria this file must meet (the same rule its contract was planned with); the entry
+        point's are also those that run the program as a person does ("running the binary with ...")."""
+        steps = self.p.cycle_criteria(cycle)
+        own = self.p.criteria_of(path, steps)
+        if self.p.entry_files([path]):
+            own += [s for s in steps if s not in own and SpecWriter.runs_program(s["behaviour"], path, self.s.toolchain.run)]
+        return own
 
     def fixed_parts(self, path, info, criteria, note):
         renderers = [p for p, f in self.p.files.items() if path in f.get("uses", []) and f.get("kind") == "code"]
@@ -384,9 +400,10 @@ class Verifier(Phase):
         """The project builds and loads (its check command passes) before any criterion is worked
         on: a missing dependency, an import of something that does not exist or a syntax error is
         the project's problem, not one criterion's. Each failure gets a fix that sees the error,
-        the files it names and the dependency files; then setup and the check run again."""
-        tried = []
-        for attempt in range(BUILD_TRIES + 1):
+        the files it names and the dependency files; then setup and the check run again. A fix that
+        thought to its cap gets its conclusion, even past the fixes allowed."""
+        tried, thought = [], ""
+        for attempt in itertools.count():
             ok, output = self.s.setup()
             if ok:
                 ok, output = self.s.toolchain.run_check(self.ws)
@@ -394,9 +411,11 @@ class Verifier(Phase):
                 print("  the project builds now" if attempt else "  the project builds")
                 return True
             print(f"  the project does not build: {Output.key_line(output)}")
-            if attempt == BUILD_TRIES:
+            if attempt >= BUILD_TRIES and not thought:
                 break
-            tried.append(BuildFix(self.s, output, tried).run())
+            fix = BuildFix(self.s, output, tried, thought)
+            tried.append(fix.run())
+            thought = fix.thought
             self.s.all_tests_run = None
         self.s.build_problem = f"the project does not build after {len(tried)} fixes: {Output.key_line(output)}"
         return False
@@ -920,24 +939,31 @@ class BuildFix(Worker):
     fails): the error, the files it names and the dependency files. Code, templates and config
     may change; tests may not."""
 
-    def __init__(self, session, output, tried=()):
+    def __init__(self, session, output, tried=(), concluding=""):
         super().__init__(session)
-        self.output, self.tried = output, tried
+        self.output, self.tried, self.concluding = output, tried, concluding
+        self.thought = ""  # its thought when it thought to its cap without an answer: the next fix concludes it
 
     def run(self):
-        """What it did, one line (for the next try)."""
+        """What it did, one line (for the next try). The first fix does not think; the next ones do,
+        and the one after a fix that thought to its cap does not: it is given that thought to conclude."""
         fixed = [Part("What failed", Output.failure_text(self.output), True, keep="tail"),
                  Part("Project files (all exist; only those shown below may change)",
                       ", ".join(p for p in self.p.files if self.ws.exists(p)), True)]
+        fixed += [Part("Your analysis so far (it ran out of room before an answer: conclude it and answer now)",
+                       self.concluding, True, keep="tail", place="last")] if self.concluding else []
         tail = [Part("Already tried (it still failed)", "\n".join(f"- {t}" for t in self.tried)),
                 Part("Language", self.p.language), *self.s.knowledge_parts("code", "config")]
         view = FileView(self.ws, fixed, self.candidates(), tail, output=self.output, hints=self.output)
         try:
-            reply = self.s.ask(Prompts.BUILD_SYSTEM, view, "Make it build", max_reply=self.s.model.fix_max,
-                               unthinking_retry=False, think=False if not self.tried else None)  # first: no thinking
+            label = "Make it build" + (" (no thinking: concluding the last one's thought)" if self.concluding else "")
+            reply = self.s.ask(Prompts.BUILD_SYSTEM, view, label, max_reply=self.s.model.fix_max, unthinking_retry=False,
+                               think=False if self.concluding or not self.tried else None)
         except PromptTooLarge as exc:
             print(f"  make it build: the prompt does not fit ({exc})")
             return "the prompt did not fit"
+        if self.s.model.overthought:
+            self.thought = self.s.model.last_thought
         change = self.ws.apply(reply, self.may_change(view), view.windows)
         cause = reply.cause() or "?"
         for note in change.notes:
