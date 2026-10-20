@@ -110,11 +110,11 @@ class RunChecks:
             raise SystemExit(f"Run {run_id} has no project spec yet; continue it with tinker resume first.")
 
     @staticmethod
-    def check_awaiting(project):
-        """tinker amend: the open cycle's spec waits for the person to confirm it (task --confirm)."""
+    def check_awaiting(project, what="tinker amend changes"):
+        """tinker amend, tinker rename: the open cycle's spec waits for the person to confirm it (task --confirm)."""
         cycle = project.open_cycle()
         if cycle is None or not cycle.get("awaiting"):
-            raise SystemExit(f"tinker amend changes a spec that waits for confirmation (tinker task --confirm), and "
+            raise SystemExit(f"{what} a spec that waits for confirmation (tinker task --confirm), and "
                              f"run {project.run.get('id', '?')} has none waiting: change a built project with "
                              f"tinker add or tinker fix")
 

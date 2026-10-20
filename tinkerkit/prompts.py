@@ -332,6 +332,10 @@ class Prompts:
     """Every prompt text: language- and app-neutral (the examples are a small command-line notes
     tool). The *_SYSTEM ones are system prompts; the others are pieces of them and of user messages."""
     NO_TOOL_CALLS = "\nReply in plain text; never call a tool or function."  # Ollama parses tool-call syntax
+    FOLDER_NAME_SYSTEM = ("Name the folder of the project the person asks for: one to three short lowercase words "
+                          "joined by hyphens, at most 20 characters, the shorter the better; shorten well-known "
+                          "words (calc-py for a calculator in Python, todo for a todo app). Reply with the name "
+                          "only.")
     SAME_CASES = ("Several similar cases (every line, every unit, each row of a table) are built from the values "
                   "the criterion names, with a loop or a small helper, never written out by hand one by one: a long "
                   "hand-made literal (a grid, a board, a list of positions) is where counting slips.")

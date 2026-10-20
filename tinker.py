@@ -134,7 +134,8 @@ version are never kept.
 Each run is faster than the last. Tinker keeps a folder next to this script, .tinker/:
   config.json            the model in use, Ollama's address, keep_alive,
                          the Internet plugin (tinker learn, --web): web (its backend), web_fallback,
-                         web_timeout, learn_missing; and the embedding model (tinker embed NAME).
+                         web_timeout, learn_missing; the embedding model (tinker embed NAME); and
+                         projects, where tinker task makes each new project's own folder (~/Projects).
   models/<model>.json    measured once per model, in minutes (tinker calibrate NAME): whether its
                          weights fit the GPU memory at all (no call), the think setting it accepts,
                          its chars per token and speeds (one short chat), and whether a run's whole
@@ -262,10 +263,11 @@ class Cli:
     # every command, in the order help shows them: (synopsis, what it does); options are listed apart
     GROUPS = {
         "Build": [
-            ('task "TASK" [SPEC]', "build something new (SPEC: a spec file, e.g. plan.md)"),
+            ('task "TASK" [SPEC]', "build something new, in its own folder in ~/Projects (SPEC: a spec file)"),
             ("restart", "build this folder's task again from scratch (asks first)"),
             ("resume [ID]", "continue a run: this folder's, or the one with ID (a spec that waits: build it)"),
             ('amend [ID] "CHANGE"', "change a spec that waits for confirmation (task --confirm)"),
+            ("rename [ID] NAME", "rename the folder of a project whose spec waits for confirmation"),
             ('add [ID] "FEATURE"', "add a feature to a built project"),
             ('fix [ID] "BUG"', "fix a bug: what you do, what happens, what should"),
             ("status [ID]", "a run's spec points and whether they pass"),
@@ -300,12 +302,14 @@ class Cli:
     EXAMPLES = ("tinker doctor", 'tinker task "a calculator in Python"', 'tinker add "keep a history of results"',
                 'tinker learn "food bank inventory"', "tinker help task")
     RUNS = ("task", "restart", "resume", "amend", "add", "fix")
-    COMMANDS = RUNS + ("status", "runs", "learn", "memory", "doctor", "models", "use-model", "calibrate", "embed",
+    COMMANDS = RUNS + ("rename", "status", "runs", "learn", "memory", "doctor", "models", "use-model", "calibrate", "embed",
                        "list-config", "clear", "reset")
     LEARNING = ("learn",)  # the commands that load the model and read the web (but for teaching a command)
     ABOUT = {
         "task": "Build something new: a spec, a unit test for each point, just enough code, and a README a "
-                "person can follow (its examples are run to check them).",
+                "person can follow (its examples are run to check them). It gets its own folder in the projects "
+                "folder (config.json: projects, ~/Projects), with a short name after the task (calc-py); "
+                "--workdir DIR builds in DIR instead (--workdir . here).",
         "restart": "Build this folder's task again from scratch: everything in it is deleted (after asking), "
                    "but for its spec file.",
         "resume": "Continue a run: this folder's, or the one with this ID (from anywhere). A spec that waits "
@@ -315,6 +319,8 @@ class Cli:
         "add": "Add a feature to a built project (this folder's, or the run with this ID).",
         "fix": "Fix a bug: describe what you do, what happens and what should happen. A test shows the bug, "
                "then the code is fixed so it passes and every other test still passes.",
+        "rename": "Rename a project's folder while its spec waits for confirmation (task --confirm), before "
+                  "anything is built in it (what is built there may name its folder).",
         "status": "Show a run's spec points and whether their tests pass.",
         "runs": "List every run, newest first.",
         "learn": "Learn something and keep it for the builds that need it. Tinker tells what it is: a language "
@@ -338,8 +344,9 @@ class Cli:
               "calibrate": None, "learn": None, "memory": False, "runs": False,
               "status": None, "doctor": False, "task": None, "spec": None, "spec_file": None, "restart": False,
               "resume": None, "amend": None, "add": None, "fix": None, "workdir": None, "plan_only": False,
-              "web": False, "confirm": False}
+              "web": False, "confirm": False, "rename": None}
     RUN_ID_RE = re.compile(r"[0-9a-fA-F]{3,}")
+    FOLDER_RE = re.compile(r"[A-Za-z0-9][\w.-]{0,63}")
 
     @staticmethod
     def parse(argv=None):
@@ -372,7 +379,8 @@ class Cli:
             Cli.read_command(command, given, args, parser)
         if command in Cli.RUNS:
             Cli.check_run(args, parser)
-        args.workdir = args.workdir or "."
+        if command != "task":  # a new task without --workdir gets a folder of its own (ProjectFolder)
+            args.workdir = args.workdir or "."
         return args
 
     @staticmethod
@@ -443,6 +451,7 @@ class Cli:
         """The parser of one command, with only what that command takes."""
         usage = {"add": 'tinker add [ID] "feature" [--spec FILE] [--web] [--plan-only] [--workdir DIR]',
                  "amend": 'tinker amend [ID] "change" [--workdir DIR]',
+                 "rename": "tinker rename [ID] NAME [--workdir DIR]",
                  "fix": 'tinker fix [ID] "bug" [--web] [--workdir DIR]',
                  "learn": 'tinker learn WHAT  |  tinker learn NAME "DEFINITION"'}.get(command)
         parser = argparse.ArgumentParser(prog=f"tinker {command}", usage=usage, allow_abbrev=False,
@@ -452,6 +461,8 @@ class Cli:
             parser.add_argument("spec", nargs="?", help="a spec file, e.g. plan.md")
         elif command in ("resume", "status"):
             parser.add_argument("id", nargs="?", default="", help="the run's ID (default: this folder's run)")
+        elif command == "rename":
+            parser.add_argument("words", nargs="+", metavar="[ID] NAME", help="the folder's new name")
         elif command in ("add", "fix", "amend"):
             parser.add_argument("words", nargs="+", metavar="[ID] TEXT",
                                 help={"fix": "the bug", "add": "the feature", "amend": "the change"}[command])
@@ -472,8 +483,10 @@ class Cli:
                                                                        "tinker resume, change it with tinker amend")
         if command == "add":
             parser.add_argument("--spec", dest="spec_file", metavar="FILE", help="a spec file for the feature")
-        if command in Cli.RUNS + ("status",):
-            parser.add_argument("--workdir", metavar="DIR", help="the project folder, if not this one")
+        if command in Cli.RUNS + ("status", "rename"):
+            parser.add_argument("--workdir", metavar="DIR",
+                                help="the project folder (default: a new one in ~/Projects, named after the task)"
+                                if command == "task" else "the project folder, if not this one")
         return parser
 
     @staticmethod
@@ -490,6 +503,14 @@ class Cli:
             args.restart = True
         elif command in ("add", "fix", "amend"):
             setattr(args, field, given.words)
+        elif command == "rename":
+            if len(given.words) > 2 or not Cli.FOLDER_RE.fullmatch(given.words[-1]):
+                parser.error("use tinker rename NAME or tinker rename ID NAME; a name is letters, digits, - _ and ., "
+                             "starting with a letter or digit")
+            run_id = Cli.run_id(given.words[0], parser) if len(given.words) == 2 else ""
+            if run_id and given.workdir is not None:
+                parser.error(Cli.finds_its_folder("tinker rename"))
+            args.rename = (run_id, given.words[-1])
         elif command == "learn":
             if len(given.words) > 2 or not given.words[0].strip():
                 parser.error('use tinker learn WHAT (e.g. tinker learn Flask) or tinker learn NAME "DEFINITION" '
@@ -593,11 +614,29 @@ class Commands:
             self.list_runs()
         elif args.status is not None:
             self.show_status(args.status, args.workdir)
+        elif args.rename:
+            self.rename(*args.rename, args.workdir)
         elif args.doctor:
             Doctor().run()
         else:
             return False
         return True
+
+    @staticmethod
+    def rename(run_id, name, workdir_arg):
+        """A project's folder renamed (in the folder it is in) while its spec waits for confirmation, with
+        the run's records; nothing is built there yet."""
+        workdir = Runs.workdir(run_id, workdir_arg or ".")
+        run = Runs.read_record(workdir)
+        project = Project(workdir, run, JsonFile.read(workdir / STATE_DIR / "spec.json", {}, keeps_work=True))
+        RunChecks.check_awaiting(project, "tinker rename renames the folder of")
+        target = workdir.parent / name
+        if target.exists():
+            raise SystemExit(f"{target} already exists: pick another name")
+        workdir.rename(target)
+        run["workdir"] = str(target)
+        Runs.save(run, target)
+        print(f"Renamed: {workdir} -> {target}")
 
     @staticmethod
     def list_config():
@@ -908,6 +947,10 @@ class ProjectRun:
             self.internet = Internet.required("--web")
         else:
             Embeddings.check()
+        if self.args.workdir is None:  # a new task: its own folder in the projects folder, named after it
+            if self.args.spec:
+                Runs.read_spec_file(self.args.spec)  # checked before a folder is made
+            self.args.workdir = str(ProjectFolder.make(self.args.task))
         return RunChecks.before_start(self.args)
 
     def work_safely(self):
@@ -1083,6 +1126,7 @@ class ProjectRun:
             print(f"  {s['id']}  {s['behaviour']}")
         if cycle.get("non_goals"):
             print(f"Not included: {'; '.join(cycle['non_goals'])}")
+        print(f"Its folder: {project.workdir}   (rename it: tinker rename {run_id} NAME)")
         print(f"Build it: tinker resume {run_id}   (in the chat: confirm)")
         print(f'Change it: tinker amend {run_id} "..."   (in the chat: amend WHAT)')
 
@@ -1108,6 +1152,52 @@ class ProjectRun:
             for s in session.project.parked():
                 print(f"  {s['id']} {s['title']}: {first_line(s.get('last_error', ''), 160)}")
             print(f"Change what it cannot (the request, the plan, a dependency), then: tinker resume {run_id}")
+
+
+class ProjectFolder:
+    """A new task's own folder in the projects folder (config.json: projects): named after the task by one
+    quick call to the model (calc-py for a calculator in Python), checked, else from the task's own words;
+    a name that is taken gets -2, -3 ..."""
+    NAME_RE = re.compile(r"[a-z][a-z0-9]*(?:-[a-z0-9]+){0,2}")
+    NAME_MAX = 20
+    COMMON = {"a", "an", "the", "build", "make", "create", "write", "simple", "small", "basic", "using", "use",
+              "with", "in", "for", "of", "and", "to", "that", "which", "me", "my", "please", "app", "program"}
+
+    @staticmethod
+    def make(task):
+        root = Path(str(Config.get("projects") or "~/Projects")).expanduser().resolve()
+        root.mkdir(parents=True, exist_ok=True)
+        name = ProjectFolder.named(task) or ProjectFolder.from_words(task)
+        folder, count = root / name, 1
+        while folder.exists():
+            count += 1
+            folder = root / f"{name}-{count}"
+        folder.mkdir()
+        print(f"Project folder: {folder}")
+        return folder
+
+    @staticmethod
+    def named(task):
+        """The model's name for the task's folder ("" when it gives none that fits NAME_RE)."""
+        model, settings = Models.selected()
+        options = {"num_ctx": settings["num_ctx"], "num_predict": 24}  # a run's num_ctx: the model stays loaded
+        if settings.get("num_batch"):
+            options["num_batch"] = settings["num_batch"]
+        think = False if settings.get("think") not in (None, False) else None
+        try:
+            data = Ollama.chat(model, [{"role": "system", "content": Prompts.FOLDER_NAME_SYSTEM},
+                                       {"role": "user", "content": task}],
+                               Config.keep_alive(Config.get("keep_alive")), options, think=think, timeout=180)
+        except OllamaError:
+            return ""
+        name = data["message"]["content"].strip().strip("`'\".").lower()
+        return name if ProjectFolder.NAME_RE.fullmatch(name) and len(name) <= ProjectFolder.NAME_MAX else ""
+
+    @staticmethod
+    def from_words(task):
+        kept = [w for w in re.findall(r"[a-z0-9]+", task.lower()) if w not in ProjectFolder.COMMON]
+        name = "-".join(kept[:2])[:ProjectFolder.NAME_MAX].strip("-")
+        return name if ProjectFolder.NAME_RE.fullmatch(name) else "project"
 
 
 class Session:

@@ -404,9 +404,10 @@ class LineWatcher:
 
 HELP_EMERGENCY = "• emergency MESSAGE: stop what Tinker is doing, answer now, then go on\n"
 HELP_ALONE = ("Ask Tinker:\n"
-              "• task FOLDER \"what to build\": plan it in a new folder; its spec comes here first\n"
+              "• task WHAT TO BUILD: plan it in its own folder in ~/Projects; its spec comes here first\n"
               "• amend WHAT: change the spec that waits\n"
-              "• confirm [ID]: build the spec that waits\n"
+              "• confirm [ID]: build the spec that waits (its folder name is asked once first)\n"
+              "• rename NAME: name its folder otherwise\n"
               "• resume ID: continue a run\n"
               "• runs: every run\n"
               "• status [ID]: a run's spec points\n"
@@ -558,13 +559,13 @@ def keep_typing(channel, chat, done):
 def command_of(text, commands):
     """The command a message gives (one of commands, sent as its first word, with or without a /), or ""
     when it is chat. A word alone is a command; with more after it only task, emergency, amend, resume ID,
-    status ID and confirm ID are."""
+    status ID, confirm ID and rename NAME are."""
     words = text.split()
     first = words[0].lower().lstrip("/") if words else ""
     if first not in commands:
         return ""
-    if len(words) == 1 or first in ("task", "emergency", "amend") or (first in ("resume", "status", "confirm")
-                                                                       and len(words) == 2):
+    if len(words) == 1 or first in ("task", "emergency", "amend") or (first in ("resume", "status", "confirm",
+                                                                                  "rename") and len(words) == 2):
         return first
     return ""
 
@@ -635,13 +636,13 @@ class Alone:
     """tinker channel start: the one reading the chat, from this folder. One task runs here at a time, as
     its own tinker (which does not report too); its printed progress goes to the chat. Tasks run from a
     terminal are served too (running_elsewhere). Anything that is not a command is a normal chat."""
-    FOLDER_RE = re.compile(r"[A-Za-z0-9][\w.-]{0,63}")
-    COMMANDS = ("task", "resume", "runs", "status", "stop", "help", "emergency", "confirm", "amend")
+    COMMANDS = ("task", "resume", "runs", "status", "stop", "help", "emergency", "confirm", "amend", "rename")
     RUN_RE = re.compile(r"^Run ([0-9a-f]{3,}) \(")  # a run's first line: its ID
+    FOLDER_LINE_RE = re.compile(r"^Project: (/.+)$")  # its header's: its folder
 
     def __init__(self, channels, root):
         self.channels, self.root = channels, Path(root).resolve()
-        self.process = self.reporter = self.task = None  # task: (arguments, folder, title) of the last one
+        self.process = self.reporter = self.task = None  # task: {arguments, folder, title, run} of the last one
         self.lock, self.talk = threading.Lock(), Talk(HELP_ALONE)
         self.urgent = False  # an emergency is being answered: no task starts meanwhile
         self.waiting = None  # {run, folder, title, spec} of the spec that waits for confirm or amend
@@ -694,17 +695,12 @@ class Alone:
         command = command_of(text, self.COMMANDS)
         if command == "emergency":
             return "Write: emergency MESSAGE"
-        if command == "task":
-            if len(words) < 3:
-                return 'Write: task FOLDER "what to build", e.g. task calc "a calculator in Python"'
-            folder, request = words[1], " ".join(words[2:])
-            if not self.FOLDER_RE.fullmatch(folder):
-                return f"{folder!r} is not a folder name: letters, digits, - _ and ., starting with a letter or digit"
-            if (self.root / folder).exists():
-                return f"{folder} already exists in {self.root}: pick a new folder, or resume its run"
-            (self.root / folder).mkdir(parents=True)
-            return self.start_task(["task", request, "--confirm"], self.root / folder, f"{folder}: {request}")
-        if command in ("confirm", "amend"):
+        if command == "task":  # Tinker makes its folder in the projects folder, named after it
+            if len(words) < 2:
+                return "Write: task WHAT TO BUILD, e.g. task a calculator in Python"
+            request = " ".join(words[1:])
+            return self.start_task(["task", request, "--confirm"], self.root, request)
+        if command in ("confirm", "amend", "rename"):
             return self.decide(command, words)
         if command == "resume":
             if len(words) != 2:
@@ -726,13 +722,20 @@ class Alone:
         return HELP_ALONE
 
     def decide(self, command, words):
-        """confirm [ID]: build the spec that waits (resumed); amend WHAT: change it (it waits again)."""
+        """confirm [ID]: build the spec that waits (its folder name is asked once first: confirm again, or
+        rename NAME, builds it); amend WHAT: change it (it waits again); rename NAME: rename its folder."""
         waiting = self.waiting or {}
         if command == "amend" and len(words) == 1:
             return "Write: amend WHAT, e.g. amend also handle negative numbers"
+        if command == "rename":
+            return self.rename(waiting, words)
+        if command == "confirm" and len(words) == 1 and waiting.get("stage") == "spec":
+            waiting["stage"] = "name"
+            return (f"📁 Its folder: {waiting['folder']}\nconfirm to build it there, or rename NAME to name it "
+                    f"otherwise (it builds then).")
         run = words[1] if command == "confirm" and len(words) == 2 else waiting.get("run")
         if not run:
-            return 'No spec waits for confirmation: start one with task FOLDER "what to build"'
+            return "No spec waits for confirmation: start one with task WHAT TO BUILD"
         mine = waiting.get("run") == run
         folder, title = (waiting["folder"], waiting["title"]) if mine else (self.root, f"run {run}")
         if command == "confirm":
@@ -740,6 +743,25 @@ class Alone:
             return refused or f"✅ Confirmed: building {title}."
         refused = self.start_task(["amend", run, " ".join(words[1:])], folder, title)
         return refused or f"✏️ Changing the spec of {title}…"
+
+    def rename(self, waiting, words):
+        """rename NAME: the waiting project's folder renamed (tinker rename); asked for its name, it builds."""
+        if len(words) != 2:
+            return "Write: rename NAME, e.g. rename calculator"
+        if not waiting:
+            return "No spec waits for confirmation, so no folder can be renamed (once built, it stays)."
+        if self.busy():
+            return "A task is running: wait for it, or stop it first."
+        done = subprocess.run(tinker_command() + ["rename", waiting["run"], words[1]], cwd=self.root, text=True,
+                              capture_output=True, env=dict(os.environ, NO_COLOR="1"), timeout=60)
+        if done.returncode:
+            return first_lines((done.stdout + done.stderr).strip(), 10)
+        waiting["folder"] = Path(waiting["folder"]).parent / words[1]
+        waiting["title"] = f"{words[1]}: {waiting['title'].split(': ', 1)[-1]}"
+        if waiting.get("stage") != "name":
+            return f"Renamed: its folder is {waiting['folder']}."
+        refused = self.start_task(["resume", waiting["run"]], waiting["folder"], waiting["title"])
+        return refused or f"✅ Renamed to {words[1]}: building {waiting['title']}."
 
     def busy(self):
         return self.process is not None and self.process.poll() is None
@@ -759,7 +781,8 @@ class Alone:
         with self.lock:
             self.urgent, stopped = True, self.task if self.busy() else None
             if stopped:
-                channel.send(message.chat, f"🚨 Stopping {stopped[2]} to answer: it is saved and goes on after.")
+                channel.send(message.chat, f"🚨 Stopping {stopped['title']} to answer: it is saved and goes on "
+                                           f"after.")
                 self.reporter.quiet = True
                 self.stop_task()
                 try:
@@ -773,9 +796,9 @@ class Alone:
         finally:
             self.urgent = False
         if stopped:
-            arguments, folder, title = stopped
-            self.start_task(arguments if arguments[0] == "resume" else ["resume"], folder, title)
-            channel.send(message.chat, f"▶️ Going on with {title}.")
+            again = ["resume", stopped["run"]] if stopped["run"] else stopped["arguments"]
+            self.start_task(again, stopped["folder"], stopped["title"])
+            channel.send(message.chat, f"▶️ Going on with {stopped['title']}.")
         for run in paused:  # its file removed: the task goes on in its terminal
             (RUNNING_DIR / f"{run['pid']}.json").unlink(missing_ok=True)
             channel.send(message.chat, f"▶️ Going on with {run['title']} (in its terminal).")
@@ -799,30 +822,39 @@ class Alone:
                 return "A task is running: wait for it, or stop it first."
             if self.urgent:
                 return "An emergency is being answered: send it again in a moment."
-            self.task = (arguments, folder, title)
+            self.task = {"arguments": arguments, "folder": folder, "title": title, "run": None}
             self.reporter = Reporter(self.channels, title)
             env = dict(os.environ, **{OFF: "off", "PYTHONUNBUFFERED": "1", "NO_COLOR": "1"})
-            self.process = subprocess.Popen(tinker_command() + arguments, cwd=folder, env=env, text=True,
-                                            stdin=subprocess.DEVNULL, stdout=subprocess.PIPE,
-                                            stderr=subprocess.STDOUT, start_new_session=True)
+            try:  # from here: a new task makes its own folder, a run given by ID finds its own
+                self.process = subprocess.Popen(tinker_command() + arguments, cwd=self.root, env=env, text=True,
+                                                stdin=subprocess.DEVNULL, stdout=subprocess.PIPE,
+                                                stderr=subprocess.STDOUT, start_new_session=True)
+            except OSError as exc:
+                self.process = None
+                return f"Could not start it: {exc}"
         if self.waiting and self.waiting["folder"] == folder:
             self.waiting = None  # confirmed or being changed: it waits again only once its spec is sent
-        threading.Thread(target=self.follow, args=(self.process, self.reporter, folder), daemon=True).start()
+        threading.Thread(target=self.follow, args=(self.process, self.reporter, self.task), daemon=True).start()
         self.reporter.update()
         return None
 
-    def follow(self, process, reporter, folder):
-        run = None
+    def follow(self, process, reporter, task):
+        """The task's printed lines to the terminal and the chat; its run and folder, once its header names
+        them (the folder of a new task is named after it: the title says it from then on)."""
         for line in process.stdout:
             sys.stdout.write(line)
+            run, folder = self.RUN_RE.match(line), self.FOLDER_LINE_RE.match(line.rstrip())
+            if run and not task["run"]:
+                task["run"] = run.group(1)
+            if folder and Path(folder.group(1)) != Path(task["folder"]):
+                task["folder"] = Path(folder.group(1))
+                task["title"] = reporter.progress.title = f"{task['folder'].name}: {reporter.progress.title}"
             reporter.line(line)
-            found = self.RUN_RE.match(line)
-            run = run or (found.group(1) if found else None)
         process.wait()
         reporter.finish()
-        if run and reporter.progress.waiting():
-            self.waiting = {"run": run, "folder": folder, "title": reporter.progress.title,
-                            "spec": reporter.progress.ending()}
+        if task["run"] and reporter.progress.waiting():
+            self.waiting = {"run": task["run"], "folder": task["folder"], "title": task["title"],
+                            "spec": reporter.progress.ending(), "stage": "spec"}
 
     def stop_task(self):
         if not self.busy():

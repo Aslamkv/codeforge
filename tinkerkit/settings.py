@@ -38,6 +38,8 @@ DEFAULT_CONFIG = {                      # config.json starts as this; what the f
     "learn_missing": 2,                 # topics the recall phase of a run with --web may learn
     "embed_model": "",                  # the embedding model that indexes what is learned (tinker embed NAME);
                                         # tinker learn and --web need one
+    "projects": "~/Projects",           # where tinker task makes a new project's own folder (named after the
+                                        # task), unless --workdir names one
 }
 
 # --- each project's own state ------------------------------------------------------------------
