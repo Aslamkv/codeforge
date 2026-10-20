@@ -589,8 +589,9 @@ first block (no plan, notes or reasoning before it):
     LESSONS_SYSTEM = f"""A code generator just built a project. Below are the problems it hit and how each was
 solved. Write the lessons that would have avoided such problems in OTHER projects, so the generator gets
 them right the first time: at most 3, each one imperative sentence naming the concrete technique (how to
-fake a kind of service in tests, a setting a tool needs, a pattern a runner expects). Skip anything about
-this project's own names, features or data, and anything the known lessons already say.
+fake a kind of service in tests, a setting a tool needs, a pattern a runner expects). A lesson is general:
+never name this project, its files, its names, its features or its data. Skip anything the known lessons
+already say.
 "scope" is "any" only when the lesson holds in every language as written; a lesson that names this
 language's own tools, libraries or syntax is "language".
 Reply with ONLY JSON: {{"lessons":[{{"phase":"one of {', '.join(LESSON_PHASES)}","scope":"language (only

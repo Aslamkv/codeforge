@@ -1,19 +1,31 @@
-"""The project's plan and record: the spec (Project, SpecDocument), its runs, and the checks before
-a run."""
+"""The project's plan and record: the spec (Project, SpecDocument), its runs, the checks before a run,
+and the run's one report (Tracker). A project's state is kept in its own database, in its .tinker
+folder; Tinker's home keeps only a pointer to each project."""
 
-import json
+import os
 import re
 import secrets
 import shutil
 import sys
+import time
 from pathlib import Path
 
 from .prompts import Part, Prompts, Reply
 from .settings import (
-    FIX_PHASES, HOME, JsonFile, PHASES, PLANNING_PHASES, RUNS_DIR, STATE_DIR, STATUS_TEXT,
-    first_line, now_text, split_text,
+    FIX_PHASES, Home, PHASES, PROJECT_DB, STATE_DIR, STATUS_TEXT, Store, first_line, now_text, split_text,
 )
 from .workspace import TaughtCommands, TestRef, Toolchain
+
+
+def project_store(workdir):
+    """The database of the project in a folder (made when first written)."""
+    return Store(Path(workdir) / STATE_DIR / PROJECT_DB)
+
+
+def saved(workdir, collection, key, default=None):
+    """What a project keeps, read without making a database in a folder that has none."""
+    path = Path(workdir) / STATE_DIR / PROJECT_DB
+    return project_store(workdir).get(collection, key, default) if path.is_file() else default
 
 
 class Outcome:
@@ -23,7 +35,7 @@ class Outcome:
         self.status, self.exit_code = "stopped", 1
 
     def set(self, status):
-        """"done", "planned" or "awaiting" (exit code 0), or "blocked" (1)."""
+        """"done" or "awaiting" (exit code 0), or "blocked" (1)."""
         self.status, self.exit_code = status, (1 if status == "blocked" else 0)
 
 
@@ -36,12 +48,11 @@ class RunChecks:
         """tinker restart: the folder's run read before anything is deleted (its task, its spec's
         text, its spec file when it is in the folder, which stays); its folder. No run: an error."""
         workdir = Runs.workdir("", args.workdir)
-        run = JsonFile.read(workdir / STATE_DIR / "run.json", None, keeps_work=True)
+        run = saved(workdir, "run", "record")
         if not isinstance(run, dict) or not str(run.get("task") or "").strip():
             raise SystemExit(f"{workdir} has no task to restart: start one with tinker task \"...\"")
         args.task = run["task"]
-        spec = workdir / STATE_DIR / "spec.md"
-        args.spec_text = spec.read_text(encoding="utf-8") if spec.is_file() else ""
+        args.spec_text = saved(workdir, "texts", "spec_text", "")
         args.spec_name = run.get("spec")
         named = Path(run["spec"]) if run.get("spec") else None
         args.spec = str(named) if named and named.is_file() else None
@@ -51,9 +62,9 @@ class RunChecks:
     def before_start(args):
         """What a run needs that must be there already, checked before anything starts (no folder
         emptied, no model loaded or measured): a new run's folder (with no run in it) and spec file;
-        for tinker restart, the folder's run (its task and spec are built again); an existing run, its folder and its saved state; for tinker add and
-        tinker fix a project whose cycles are all done; for --plan-only a cycle that is still planning.
-        Returns the project's folder."""
+        for tinker restart, the folder's run (its task and spec are built again); an existing run, its
+        folder and its saved state; for tinker add and tinker fix a project whose cycles are all done;
+        for tinker amend a plan that waits. Returns the project's folder."""
         if args.restart:
             return RunChecks.restarting(args)
         if args.resume is None:
@@ -63,30 +74,23 @@ class RunChecks:
             RunChecks.check_no_run(workdir)
             return workdir
         workdir = Runs.workdir(args.resume, args.workdir)
-        state, run = workdir / STATE_DIR, Runs.read_record(workdir)
+        project = Project.load(workdir, Runs.read_record(workdir))
         if args.add is not None and args.spec_file:
             Runs.read_spec_file(args.spec_file)
-        spec = JsonFile.read(state / "spec.json", {"steps": [], "counter": 0}, keeps_work=True)
-        project = Project(workdir, run, spec)
         RunChecks.check_phases(project)
         if args.add is not None:
             RunChecks.check_open_to_add(project)
         elif args.amend:
             RunChecks.check_awaiting(project)
-        elif args.plan_only:
-            RunChecks.check_planning(project)
-        if args.web and args.add is None:
-            RunChecks.check_recall_ahead(project)
         return workdir
 
     @staticmethod
     def check_no_run(workdir):
         """A new run needs a folder without one (tinker resume, tinker add or tinker fix work on the one there)."""
-        state = workdir / STATE_DIR
-        if (state / "spec.json").is_file() or (state / "run.json").is_file():
-            existing = JsonFile.read(state / "run.json", {}).get("id", "?")
-            raise SystemExit(f"{workdir} already holds run {existing}. Continue it with tinker resume, add to it "
-                             f'with tinker add "...", or start the new project in another folder (--workdir).')
+        existing = saved(workdir, "run", "record")
+        if existing is not None:
+            raise SystemExit(f"{workdir} already holds run {existing.get('id', '?')}. Continue it with tinker resume, add "
+                             f'to it with tinker add "...", or start the new project in another folder (--workdir).')
 
     @staticmethod
     def check_phases(project):
@@ -95,8 +99,7 @@ class RunChecks:
             phases = FIX_PHASES if cycle.get("kind") == "fix" else PHASES
             if cycle.get("phase") not in phases:
                 raise SystemExit(f"The saved phase '{cycle.get('phase')}' of cycle {cycle.get('id')} is not one of its "
-                                 f"phases ({', '.join(phases)}): set its \"phase\" in "
-                                 f"{project.state / 'spec.json'} to one of them")
+                                 f"phases ({', '.join(phases)}): restart the project, or tell it as a bug")
 
     @staticmethod
     def check_open_to_add(project):
@@ -105,57 +108,30 @@ class RunChecks:
         if cycle is not None:
             what = "project" if cycle["id"] == "base" else cycle.get("kind", "feature")
             raise SystemExit(f"Run {run_id} has an unfinished {what} ({first_line(cycle['request'], 80)}). "
-                             f"Finish it first with: tinker resume {run_id}")
+                             f"Finish it first with: tinker resume @{run_id}")
         if not project.cycles:
             raise SystemExit(f"Run {run_id} has no project spec yet; continue it with tinker resume first.")
 
     @staticmethod
     def check_awaiting(project, what="tinker amend changes"):
-        """tinker amend, tinker rename: the open cycle's spec waits for the person to confirm it (task --confirm)."""
+        """tinker amend, tinker rename: the open cycle's plan waits for the person to confirm it."""
         cycle = project.open_cycle()
         if cycle is None or not cycle.get("awaiting"):
-            raise SystemExit(f"{what} a spec that waits for confirmation (tinker task --confirm), and "
-                             f"run {project.run.get('id', '?')} has none waiting: change a built project with "
-                             f"tinker add or tinker fix")
-
-    @staticmethod
-    def check_planning(project):
-        """tinker resume --plan-only: the open cycle is still planning (spec, design, review)."""
-        run_id, cycle = project.run.get("id", "?"), project.open_cycle()
-        if cycle is None and project.cycles:
-            raise SystemExit(f"--plan-only: every cycle of run {run_id} is done, so there is nothing to plan. "
-                             f'Add a feature with tinker add {run_id} "..."')
-        if cycle is not None and cycle.get("kind") == "fix":
-            raise SystemExit(f"--plan-only stops after planning, and a bug fix plans nothing (run {run_id}): continue "
-                             f"it without --plan-only: tinker resume {run_id}")
-        if cycle is not None and cycle["phase"] not in PLANNING_PHASES:
-            raise SystemExit(f"--plan-only stops after planning, and run {run_id} is past it (next phase: "
-                             f"{cycle['phase']}). Continue it without --plan-only: tinker resume {run_id}")
-
-    @staticmethod
-    def check_recall_ahead(project):
-        """tinker resume --web: the web is used only by a cycle's recall phase, so the open cycle must
-        still be at it."""
-        run_id, cycle = project.run.get("id", "?"), project.open_cycle()
-        if cycle is None and not project.cycles:
-            return  # no cycle yet: the project's own starts at its recall phase
-        if cycle is None or cycle["phase"] != "recall":
-            where = f"next phase: {cycle['phase']}" if cycle else "every cycle is done"
-            raise SystemExit(f"--web is used only by a cycle's recall phase, and run {run_id} is past it ({where}). "
-                             f"Continue it without --web: tinker resume {run_id}")
+            raise SystemExit(f"{what} a plan that waits for confirmation, and run {project.run.get('id', '?')} has "
+                             f"none waiting: change a built project with tinker add or tinker fix")
 
 
 class Runs:
-    """The runs: each is registered in runs/ by its ID (and kept in its project's .tinker/run.json),
-    so tinker resume ID, tinker add ID, tinker fix ID and tinker status ID work from any folder; a run opened (a new
-    one, or a saved one resumed or changed); a folder emptied for tinker restart."""
+    """The runs: each kept in its project's database, and pointed to from Tinker's home ("projects":
+    its run ID, folder and task), so @ID and @folder work from any folder; a run opened (a new one, or
+    a saved one resumed or changed); a folder emptied for tinker restart."""
 
     @staticmethod
     def clear_folder(workdir, spec, yes=False):
         """Delete what is in workdir, after showing it and asking (in a terminal only; yes: without asking).
         The entry that holds the spec file stays. Refuses the home folder, the filesystem root and the folder
         Tinker itself lives in."""
-        if workdir in (Path.home().resolve(), Path(workdir.anchor)) or HOME.resolve().is_relative_to(workdir):
+        if workdir in (Path.home().resolve(), Path(workdir.anchor)) or Home.root.resolve().is_relative_to(workdir):
             raise SystemExit(f"tinker restart will not empty {workdir}: run it in the project's own folder.")
         keep = next((item for item in workdir.iterdir() if spec and spec.is_relative_to(item.resolve())), None)
         items = sorted(item for item in workdir.iterdir() if item != keep)
@@ -180,21 +156,21 @@ class Runs:
 
     @staticmethod
     def entries():
-        entries = []
-        for path in sorted(RUNS_DIR.glob("*.json")) if RUNS_DIR.is_dir() else []:
-            try:
-                entries.append(json.loads(path.read_text(encoding="utf-8")))
-            except (OSError, ValueError):
-                continue
-        return entries
+        """Each project pointed to, with its own record when its folder is still there (else "missing")."""
+        found = []
+        for pointer in Home.store().items("projects").values():
+            record = saved(pointer.get("workdir", ""), "run", "record") if Path(pointer.get("workdir", "")).is_dir() \
+                else None
+            found.append({**pointer, **(record or {"status": "missing"})})
+        return found
 
     @staticmethod
-    def workdir(run_id, workdir_arg):
-        """The project folder: the run's (by ID), else the one given (--workdir, else this one)."""
-        if run_id:
-            workdir = Path(Runs.find(run_id)["workdir"])
+    def workdir(name, workdir_arg):
+        """The project folder: the named project's (@ID or @folder), else the one given (--workdir, else this one)."""
+        if name:
+            workdir = Path(Runs.find(name)["workdir"])
             if not workdir.is_dir():
-                raise SystemExit(f"Project folder for run {run_id} no longer exists: {workdir}")
+                raise SystemExit(f"The folder of project @{name} no longer exists: {workdir}")
             return workdir
         workdir = Path(workdir_arg).expanduser().resolve()
         if not workdir.is_dir():
@@ -210,18 +186,18 @@ class Runs:
 
     @staticmethod
     def read_record(workdir):
-        """The run saved in a project folder (its .tinker/run.json)."""
-        run = JsonFile.read(workdir / STATE_DIR / "run.json", None, keeps_work=True)
+        """The run kept in a project folder."""
+        run = saved(workdir, "run", "record")
         if run is None:
             raise SystemExit(f'No saved run in {workdir}. Start one with: tinker task "..." --workdir {workdir}')
         return run
 
     @staticmethod
     def forget_runs_in(workdir):
-        """Drop the registered runs (runs/) of a folder that was emptied: their IDs lead nowhere now."""
-        for path in sorted(RUNS_DIR.glob("*.json")) if RUNS_DIR.is_dir() else []:
-            if JsonFile.read(path, {}).get("workdir") == str(workdir):
-                path.unlink()
+        """Drop the pointers to a folder that was emptied: they lead nowhere now."""
+        for run_id, pointer in Home.store().items("projects").items():
+            if pointer.get("workdir") == str(workdir):
+                Home.store().delete("projects", run_id)
 
     @staticmethod
     def open(args):
@@ -232,34 +208,34 @@ class Runs:
 
     @staticmethod
     def save(run, workdir):
+        """The run kept in its project, and pointed to from Tinker's home (its ID, folder and task only)."""
         run["updated"] = now_text()
-        (workdir / STATE_DIR / "run.json").write_text(json.dumps(run, indent=2), encoding="utf-8")
-        try:
-            RUNS_DIR.mkdir(parents=True, exist_ok=True)
-            (RUNS_DIR / f"{run['id']}.json").write_text(json.dumps(run, indent=2), encoding="utf-8")
-        except OSError as exc:
-            print(f"  note: could not register run in {RUNS_DIR}: {exc}")
+        project_store(workdir).put("run", "record", run)
+        Home.store().put("projects", run["id"], {"id": run["id"], "workdir": str(workdir), "task": run.get("task", "")})
 
     @staticmethod
-    def find(run_id):
-        matches = [e for e in Runs.entries() if e.get("id", "").startswith(run_id.lower())]
-        if not matches:
-            raise SystemExit(f"No run with ID '{run_id}'. List runs with: tinker runs")
-        if len(matches) > 1:
-            raise SystemExit(f"ID '{run_id}' matches several runs: {', '.join(m['id'] for m in matches)}")
-        return matches[0]
+    def find(name):
+        """The project named exactly: by its full run ID, or by its folder's name (never by part of either)."""
+        pointers = list(Home.store().items("projects").values())
+        found = [p for p in pointers if p.get("id") == name] or \
+                [p for p in pointers if Path(str(p.get("workdir", ""))).name == name]
+        if not found:
+            raise SystemExit(f"No project @{name}: name one by its full run ID or its folder's name (tinker runs "
+                             f"lists them)")
+        if len(found) > 1:
+            raise SystemExit(f"Several projects are in folders named {name}: name one by its ID: "
+                             f"{', '.join('@' + p['id'] for p in found)}")
+        return found[0]
 
     @staticmethod
     def open_new(args):
         workdir = Path(args.workdir).expanduser().resolve()
         RunChecks.check_no_run(workdir)
-        state = workdir / STATE_DIR
-        state.mkdir(exist_ok=True)
         if getattr(args, "restart", False):  # the spec the run had, read before the folder was emptied
             spec_text, spec_name = args.spec_text, args.spec_name
         else:
             spec_text, spec_name = Runs.read_spec_file(args.spec) if args.spec else ("", None)
-        (state / "spec.md").write_text(spec_text, encoding="utf-8")  # resume needs no spec file
+        project_store(workdir).put("texts", "spec_text", spec_text)  # resume needs no spec file
         run = Runs.new_record(args.task, workdir, spec_name)
         Runs.save(run, workdir)
         return run, workdir, spec_text, "new"
@@ -267,12 +243,12 @@ class Runs:
     @staticmethod
     def open_existing(args):
         workdir = Runs.workdir(args.resume, args.workdir)
-        state, run = workdir / STATE_DIR, Runs.read_record(workdir)
+        run = Runs.read_record(workdir)
         adding = args.add is not None
         if adding:
             spec_text = Runs.read_spec_file(args.spec_file)[0] if args.spec_file else ""
         else:
-            spec_text = (state / "spec.md").read_text(encoding="utf-8") if (state / "spec.md").is_file() else ""
+            spec_text = saved(workdir, "texts", "spec_text", "")
         run["status"] = "running"
         Runs.save(run, workdir)
         return run, workdir, spec_text, ("change" if adding else "resume")
@@ -284,7 +260,7 @@ class Runs:
 
 
 class Project:
-    """Everything planned and done, saved in .tinker/spec.json (and shown in SPEC.md).
+    """Everything planned and done, kept in the project's database (and shown in SPEC.md).
     Criteria are dicts: id, title, behaviour, test, effort, source, status, cycle, history."""
     DEPENDENCY_FILES = {"requirements.txt", "pyproject.toml", "setup.cfg", "Pipfile", "package.json", "go.mod",
                         "Cargo.toml", "Gemfile", "pom.xml", "build.gradle", "build.gradle.kts", "composer.json", "mix.exs"}
@@ -292,13 +268,19 @@ class Project:
     def __init__(self, workdir, run, spec):
         self.workdir, self.run, self.spec = workdir, run, spec
         self.state = workdir / STATE_DIR
+        self.store = project_store(workdir)
+
+    @classmethod
+    def load(cls, workdir, run=None):
+        """The project kept in a folder (its run read from it, unless given)."""
+        return cls(workdir, run or Runs.read_record(workdir), saved(workdir, "spec", "plan", {"steps": [], "counter": 0}))
 
     @property
     def language(self):
         return self.spec.get("language", "")
 
     def save(self):
-        (self.state / "spec.json").write_text(json.dumps(self.spec, indent=2), encoding="utf-8")
+        self.store.put("spec", "plan", self.spec)
         (self.workdir / "SPEC.md").write_text(SpecDocument(self).text(), encoding="utf-8")
 
     @property
@@ -433,20 +415,20 @@ class Project:
 
 
 class Brief:
-    """A long spec file condensed into a brief that fits the spec prompt (brief.md in the
-    project's .tinker, so a resumed run reads it again without asking)."""
+    """A long spec file condensed into a brief that fits the spec prompt (kept in the project's
+    database, so a resumed run reads it again without asking)."""
 
     @staticmethod
-    def load(model, state, mode, task, spec_text):
+    def load(model, store, mode, task, spec_text):
         """The brief of the project's spec file (none for a change: a feature's spec is condensed
         with its request)."""
         if mode == "change":
             return ""
-        brief_file = state / "brief.md"
-        if brief_file.is_file():
-            return brief_file.read_text(encoding="utf-8")
+        kept = store.get("texts", "brief")
+        if kept is not None:
+            return kept
         brief = Brief.make(model, task, spec_text) if spec_text else ""
-        brief_file.write_text(brief, encoding="utf-8")
+        store.put("texts", "brief", brief)
         return brief
 
     @staticmethod
@@ -533,3 +515,91 @@ class SpecDocument:
                 lines.append(f"- Last error: {first_line(s['last_error'], 300)}")
             lines.append("")
         return lines
+
+
+class Tracker:
+    """A run's one report: what it does, kept as data (never read back out of printed text). Each
+    change is published at once in Tinker's home ("running", under the run's process), where the
+    terminal and the chats read it, and appended to the project's "progress" log. The steps are named
+    by phase (STEPS: what it is doing, and what it did)."""
+    STEPS = {"recall": ("🧠 Recalling what Tinker has learned", "🧠 Recalled what Tinker has learned"),
+             "amend": ("✏️ Changing the plan", "✏️ Plan changed"),
+             "spec": ("📝 Writing the spec", "📝 Spec written"),
+             "design": ("📐 Designing where the files meet", "📐 Design done"),
+             "review": ("🔍 Reviewing the design", "🔍 Design reviewed"),
+             "setup": ("🔧 Setting up the test tool", "🔧 Test tool set up"),
+             "tests": ("🧪 Writing a test for every spec point", "🧪 Tests written"),
+             "code": ("💻 Writing the code", "💻 Code written"),
+             "verify": ("🔁 Fixing until every test passes", "🔁 Verified"),
+             "tidy": ("🧹 Tidying the code", "🧹 Code tidied"),
+             "docs": ("📖 Writing the README", "📖 README written"),
+             "final_review": ("🏁 Final review, as a person runs it", "🏁 Final review done"),
+             "lessons": ("📒 Keeping lessons for the next projects", "📒 Lessons kept"),
+             "reproduce": ("🐞 Showing the bug with a test", "🐞 Bug shown by a test")}
+    STARTING = "🚀 Starting: the model loads"
+    ANSI_RE = re.compile(r"\x1b\[[0-9;]*[A-Za-z]")
+    QUIET_EVERY = 1.0  # seconds between publishing changes that only move the latest line on
+
+    def __init__(self, title, before=0.0):
+        self.pid, self.store, self.published = os.getpid(), None, 0.0
+        self.state = {"title": title, "run": None, "folder": None, "step": None, "doing": self.STARTING,
+                      "began": None, "steps": [], "passing": None, "live": "", "latest": "", "waiting": None,
+                      "ended": None, "before": before, "seconds": 0.0, "paused": False, "pid": self.pid}
+
+    def project(self, store, run_id, folder, title=None):
+        """The run's project: its database (the progress log), its run ID and its folder."""
+        self.store = store
+        self.change("project", run=run_id, folder=str(folder), title=title or self.state["title"])
+
+    def phase(self, phase):
+        """The run is on to a phase: the one before is done."""
+        steps = list(self.state["steps"])
+        if self.state["step"] in self.STEPS:
+            steps.append(self.STEPS[self.state["step"]][1])
+        doing = self.STEPS.get(phase, (phase, phase))[0]
+        self.change("phase", phase=phase, step=phase, doing=doing, began=time.time(), steps=steps, live="", latest="")
+
+    def points(self, passing, total):
+        if total and self.state["passing"] != [passing, total]:
+            self.change("points", passing=[passing, total])
+
+    def live(self, label, written, thinking, seconds):
+        """What the model writes now (a reply as it goes)."""
+        self.change("live", quiet=True,
+                    live=f"{label.split(' [')[0]}: {written} tok written, {thinking} tok thinking, {seconds:.0f}s")
+
+    def printed(self, line):
+        """A line the run printed: kept in the project's output log, and shown as the latest."""
+        line = self.ANSI_RE.sub("", line).rstrip()
+        if self.store is not None:
+            self.store.append("output", {"line": line})
+        shown = line.split("] ", 1)[-1].strip() if line.startswith("[") else line.strip()
+        if shown and not shown.startswith("..."):
+            self.change("printed", quiet=True, latest=shown[:300])
+
+    def wait(self, plan):
+        """The plan waits for the person (plan: what to show them, as data)."""
+        self.change("waiting", waiting=plan, live="")
+
+    def end(self, ending, seconds):
+        """The run ended (ending: its status, headline, details and the commands to go on)."""
+        self.change("ended", ended=ending, seconds=seconds, live="")
+
+    def pause(self):
+        self.change("paused", paused=True)
+
+    def change(self, event, quiet=False, **values):
+        self.state.update(values)
+        if self.store is not None and not quiet:
+            self.store.append("progress", {"event": event, **{k: v for k, v in values.items() if k != "steps"}})
+        now = time.monotonic()
+        if not quiet or now - self.published >= self.QUIET_EVERY:
+            self.publish()
+
+    def publish(self):
+        self.published = time.monotonic()
+        Home.store().put("running", str(self.pid), self.state)
+
+    def close(self):
+        """The run's report taken out of the home (it ended, and nobody waits to read it)."""
+        Home.store().delete("running", str(self.pid))

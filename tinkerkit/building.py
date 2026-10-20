@@ -6,10 +6,11 @@ import re
 import time
 from pathlib import Path
 
-from .planning import Designer, Phase, SpecWriter, Worker
+from .planning import Designer, SpecWriter, asked
+from .session import Phase, Worker
 from .prompts import Part, PromptTooLarge, Prompts, Reply
 from .settings import (
-    BUILD_TRIES, Console, ENV_EXAMPLE, ENV_FILE, FIX_FILES, JsonFile, MAX_FILE_LINES, MAX_TRIES_PER_PASS,
+    BUILD_TRIES, Console, ENV_EXAMPLE, ENV_FILE, FIX_FILES, MAX_FILE_LINES, MAX_TRIES_PER_PASS,
     OUTPUT_CHARS, REVIEW_TRIES, TESTS_LOCKED, TESTS_MAX_TOKENS, TESTS_PER_CALL, first_line,
 )
 from .workspace import FileView, Output, TestRef, ToolError, Toolchain
@@ -360,7 +361,7 @@ class Verifier(Phase):
     BUILDS = True
     RANK = {"missing": -1, "build": 0, "fails": 1, "passes": 2}
 
-    PENDING = "verify-restore-point.json"  # the files as they were before the criterion being worked on
+    PENDING = "verify"                      # the restore point: the files as they were before the criterion worked on
     FLAKY_RERUNS = 3                        # reruns of a failed test that tell a flaky one
     FLAKY_NOTE = ("This test's result changes from one run to the next with no change to the code: the code "
                   "is not deterministic. Look for what can differ between runs: the order of an unordered "
@@ -487,14 +488,14 @@ class Verifier(Phase):
         """climb, with a restore point kept on disk while it goes (a run stopped part way is put
         back on resume: recover_interrupted); the files go back if nothing helped."""
         snapshot = self.ws.snapshot(self.p.files)  # with its test: rolling back keeps the test just written
-        JsonFile.write(self.p.state / self.PENDING, {"criterion": step["id"], "files": snapshot})
+        self.p.store.put("restore", self.PENDING, {"criterion": step["id"], "files": snapshot})
         try:
             if self.climb(step, state, output, retry):
                 return True
             self.roll_back(snapshot)
             return False
         finally:
-            (self.p.state / self.PENDING).unlink(missing_ok=True)
+            self.p.store.delete("restore", self.PENDING)
 
     def flaky(self, step):
         """Whether the criterion's test, which just failed, passes on one of a few reruns."""
@@ -504,7 +505,7 @@ class Verifier(Phase):
     def recover_interrupted(self):
         """A run stopped while a criterion was being worked on (Ctrl-C, a kill, a crash) may have
         left a change that was never checked: the files go back to how they were before it."""
-        pending = JsonFile.read(self.p.state / self.PENDING, None, keeps_work=True)
+        pending = self.p.store.get("restore", self.PENDING)
         if not isinstance(pending, dict) or not isinstance(pending.get("files"), dict):
             return
         changed = [p for p, text in pending["files"].items() if self.ws.read(p) != (text or "")]
@@ -512,7 +513,7 @@ class Verifier(Phase):
             self.roll_back(pending["files"])
             print(f"  the last run stopped while {pending.get('criterion', 'a criterion')} was being worked on: "
                   f"{', '.join(changed)} restored to how they were before it")
-        (self.p.state / self.PENDING).unlink(missing_ok=True)
+        self.p.store.delete("restore", self.PENDING)
 
     def mark_others_passing(self):
         """A fix may have made other criteria pass too."""
@@ -694,10 +695,10 @@ class BugReproducer(Phase):
 
     def prompt(self, cycle, note):
         code = self.s.files_on_disk("code", "template")
-        named = Output.mentioned_in(cycle["request"], code)
+        named = Output.mentioned_in(asked(cycle), code)
         entry = self.p.entry_files(code)
         tests = self.s.files_on_disk("test")
-        return [Part("Bug report", cycle["request"], True),
+        return [Part("Bug report", asked(cycle), True),
                 Part("The project's test files (the new one goes next to them)", "\n".join(tests) or "none yet", True),
                 Part("Note", note, bool(note)),
                 Part("Test command", self.s.toolchain.test_one, True),

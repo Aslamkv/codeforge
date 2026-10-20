@@ -10,6 +10,7 @@ from pathlib import Path
 from .knowledge import Embeddings, Learner, Library, Retriever
 from .model import OllamaError
 from .prompts import Part, PromptTooLarge, Prompts
+from .session import Phase, Worker
 from .settings import (
     CHECK_MAX_TOKENS, Config, ENV_EXAMPLE, ENV_FILE, KINDS, RECALL_TOPICS, TOPIC_RELEVANT, after_what_they_use,
     first_line, groups_fitting, words,
@@ -23,31 +24,11 @@ def asked(cycle):
     return cycle["request"] + "".join(f"\nChanged by the person: {change}" for change in cycle.get("amendments", []))
 
 
-class Worker:
-    """A part of the work on a project, with what every part needs: the session (the model and
-    what earlier projects taught), the project (its plan and state) and its workspace (its files
-    and the commands run in it)."""
-
-    def __init__(self, session):
-        self.s, self.p, self.ws = session, session.project, session.ws
-
-
-class Phase(Worker):
-    """One phase of a cycle (CycleRunner): run(cycle) does it, and returns False when the cycle
-    must stop there. TITLE is printed as it starts. A phase that BUILDS from the plan thinks at
-    build_think (config.json); planning thinks at the model's own setting."""
-    TITLE = ""
-    BUILDS = False
-
-    def run(self, cycle):
-        raise NotImplementedError
-
-
 class Recaller(Phase):
     """0. Recall: before planning, everything learned is searched for what the request needs, by
     words and by meaning (Retriever), so the call that follows sees the most related topics first:
     it decides which this cycle uses and, in a run with --web, which it should learn now that it has
-    not (up to learn_missing in config.json): a framework the request names, a technique, the
+    not (up to the setting learn_missing): a framework the request names, a technique, the
     language. Those are learned (Learner); the chosen topics' facts, ranked by the same search, are
     kept in the project ("learned"), so they go into its prompts and a resumed run uses the same.
     Without --web there is nothing to learn, so no call: the topics used are those the request names
@@ -103,7 +84,7 @@ class Recaller(Phase):
         cycle["topics"] = [slug] + cycle.get("topics", [])[:RECALL_TOPICS - 1]
         query = cycle["request"] + (f"\n{cycle['brief']}" if cycle.get("brief") else "")
         self.keep_facts(cycle, query, Retriever(Embeddings.configured()))
-        print(f"  using the language as learned: {Library.read(slug).get('name', slug)} ({Library.path(slug).name})")
+        print(f"  using the language as learned: {Library.read(slug).get('name', slug)}")
         self.s.save()
 
     def ask(self, cycle, query, known, ranked, can_learn):
@@ -243,8 +224,8 @@ class SpecWriter(Phase):
     interface that fits; only code for other code has none) and,
     for a new project, the toolchain (the one that worked before for the language, reused). What
     the request does not ask for waits until the user asks (tinker add, tinker fix).
-    A spec the person confirms before anything is built (tinker task --confirm, every task from a chat)
-    is a quick draft (thinking low): the person reviews it, and changes it with tinker amend."""
+    A plan the person confirms before anything is built (the default; not with --no-confirm) is a quick
+    draft (thinking low): the person reviews it, and changes it with tinker amend."""
     TITLE = "Plan: the spec"
 
     def run(self, cycle):
@@ -263,10 +244,11 @@ class SpecWriter(Phase):
         return False if level == "none" else level if isinstance(think, str) else think
 
     def amend(self, cycle, change):
-        """The waiting spec changed as the person asks, before anything is built: one call without thinking
+        """The waiting plan changed as the person asks, before anything is built: one call without thinking
         gives the whole spec again, from the spec as it is and the change, checked as the first one was and
-        numbered from where the cycle began. What changed (+ added, ~ changed, - removed) is kept for the
-        summary; a reply that never works leaves the spec as it was."""
+        numbered from where the cycle began; then the cycle plans its design and review again (they wait
+        once more). What changed (+ added, ~ changed, - removed) is kept for the summary; a reply that
+        never works leaves the plan as it was."""
         before = self.p.cycle_criteria(cycle)
         current = self.current_spec(cycle, before)
         saved = (list(self.p.criteria), self.p.spec.get("counter", 0), dict(self.p.files))
@@ -289,6 +271,8 @@ class SpecWriter(Phase):
             raise
         self.take(cycle, plan)
         cycle["changes"] = self.changes(before, self.p.cycle_criteria(cycle))
+        cycle.update(phase="design", awaiting=False, confirmed=False, contracts_done=[])
+        cycle.pop("review", None)
         self.s.save()
 
     def current_spec(self, cycle, criteria):

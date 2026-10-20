@@ -13,19 +13,19 @@ from pathlib import Path
 
 from .prompts import Part, Prompts, Reply
 from .settings import (
-    COMMANDS_FILE, COMMAND_TIMEOUT, Config, Console, ENV_EXAMPLE, ENV_FILE, JsonFile, ONLINE_PROBES, OUTPUT_CHARS,
-    SETUP_TIMEOUT, STATE_DIR, first_line, now_text,
+    COMMAND_TIMEOUT, Config, Console, ENV_EXAMPLE, ENV_FILE, Home, ONLINE_PROBES, OUTPUT_CHARS, SETUP_TIMEOUT, STATE_DIR,
+    first_line, now_text,
 )
 
 
 class TaughtCommands:
-    """The person's own commands Tinker may use (tinker learn NAME [DEFINITION]), kept in
-    commands.json next to the script: an alias (the shell code its name stands for: given, or read
+    """The person's own commands Tinker may use (tinker learn NAME [DEFINITION]), kept in Tinker's
+    database (its "commands"): an alias (the shell code its name stands for: given, or read
     from the person's shell) or a program on PATH. The toolchain prompts list them, so the model
     uses them where they fit. Tinker runs each command in a new non-interactive POSIX shell, where
     the person's aliases do not exist, so a command that uses an alias gets its definition first, as
     a shell function. SPEC.md and the README show commands with aliases spelled out, so they work
-    for anyone. Plain JSON: edit or delete at any time."""
+    for anyone. tinker memory lists them; tinker learn NAME none forgets one."""
     NAME_RE = re.compile(r"[A-Za-z_][A-Za-z0-9_]*")  # a name a POSIX shell function can have
     SOURCE_RE = re.compile(r"(^|[;&|(]\s*)source\s+")  # "source" is not POSIX: "." is
     LOOKUP_TIMEOUT = 10  # seconds the person's shell may take to say what an alias stands for
@@ -36,10 +36,10 @@ class TaughtCommands:
         POSIX shell) or, without one, as the person's shell or PATH has it; "none" forgets it."""
         name, known = name.strip(), TaughtCommands.all()
         if definition is not None and definition.strip().lower() == "none":
-            if known.pop(name, None) is None:
+            if name not in known:
                 raise SystemExit(f"{name} was not taught (tinker memory lists the commands taught)")
-            TaughtCommands.save(known)
-            print(f"Forgot the command {name} (in {COMMANDS_FILE})")
+            Home.store().delete("commands", name)
+            print(f"Forgot the command {name}")
             return
         if definition is None:
             entry = TaughtCommands.look_up(name)
@@ -58,25 +58,20 @@ class TaughtCommands:
                 raise SystemExit(f"{name} stands for `{entry['definition']}`, which is not valid POSIX shell "
                                  f"({problem}); give a definition that is")
         known[name] = dict(entry, taught=now_text())
-        TaughtCommands.save(known)
-        print(f"Learned the command {name}: {TaughtCommands.describe(known[name])} (in {COMMANDS_FILE})")
+        Home.store().put("commands", name, known[name])
+        print(f"Learned the command {name}: {TaughtCommands.describe(known[name])}")
         print("The toolchain uses it where it fits (each command runs in a new shell: e.g. "
               f"`{name} && ...`); SPEC.md and README show it spelled out.")
 
     @staticmethod
     def all():
-        """{name: entry} of the commands taught (a broken commands.json is an error, never overwritten)."""
-        data = JsonFile.read(COMMANDS_FILE, {}, keeps_work=True) or {}
-        commands = data.get("commands", {})
-        if not isinstance(commands, dict) or not all(isinstance(e, dict) and e.get("kind") in ("alias", "program")
-                                                     for e in commands.values()):
-            raise SystemExit(f"{COMMANDS_FILE}: \"commands\" must map each name to {{\"kind\": \"alias\", \"definition\": "
-                             f"...}} or {{\"kind\": \"program\", ...}}: fix it, or delete it to teach them again")
+        """{name: entry} of the commands taught (one that is not an alias or a program is an error)."""
+        commands = Home.store().items("commands")
+        broken = [name for name, e in commands.items() if not (isinstance(e, dict) and e.get("kind") in ("alias", "program"))]
+        if broken:
+            raise SystemExit(f"Tinker's commands {', '.join(broken)} are neither an alias nor a program: forget them "
+                             f"with tinker learn NAME none, and teach them again")
         return commands
-
-    @staticmethod
-    def save(known):
-        JsonFile.write(COMMANDS_FILE, {"commands": known})
 
     @staticmethod
     def look_up(name):
@@ -363,9 +358,8 @@ class Workspace:
     REFUSED = "refused: the command is unsafe"  # the output of a command that is never run
     UNSAFE_COMMAND = re.compile(r"(^|[;&|]\s*)sudo\b|\brm\s+-[a-z]*r[a-z]*f?\s+(/|~|\.\.)|\bmkfs\b|\bdd\s+if=|"
                                 r"(curl|wget)\b[^|]*\|\s*(ba|z)?sh\b|>\s*/(etc|usr|bin|dev/sd)")
-    PLACEHOLDER_RE = re.compile(r"^(<.*>|your[\w-]*|.*_here|change[-_ ]?me|replace[-_ ]?me|x{3,}|\*{3,}|todo|tbd|"
-                                r"none|null|example[\w-]*|placeholder|insert[\w-]*|put[\w-]*|\.\.\.|"
-                                r"tinker-start-check)$", re.I)
+    PLACEHOLDER_RE = re.compile(r"^(<.*>|your[_-][\w-]*|[\w-]*_here|change[-_ ]?me|replace[-_ ]?me|x{3,}|\*{3,}|"
+                                r"\.\.\.|placeholder)$", re.I)  # only what plainly marks where a value goes
 
     def __init__(self, root):
         self.root = root
@@ -415,18 +409,14 @@ class Workspace:
         return change
 
     def prepare_env(self):
-        """.env from .env.example when missing; placeholder values blanked either way."""
+        """.env made once, from .env.example, with its obvious placeholder values blanked (it says which
+        to fill in). A .env that exists is the person's: it is never changed."""
         example, env = self.root / ENV_EXAMPLE, self.root / ENV_FILE
         if example.is_file() and not env.is_file():
             env.write_text(self.env_without_placeholders(example.read_text(encoding="utf-8", errors="replace")),
                            encoding="utf-8")
             unset = [l.split("=")[0] for l in env.read_text(encoding="utf-8").splitlines() if l.endswith("=")]
             print(f"  created {ENV_FILE} from {ENV_EXAMPLE}" + (f"; set {', '.join(unset)} in it" if unset else ""))
-        elif env.is_file():
-            text = env.read_text(encoding="utf-8", errors="replace")
-            if self.env_without_placeholders(text).strip() != text.strip():
-                env.write_text(self.env_without_placeholders(text), encoding="utf-8")
-                print(f"  {ENV_FILE}: cleared placeholder values (a placeholder is not a real setting)")
 
     @staticmethod
     def unsafe(command):

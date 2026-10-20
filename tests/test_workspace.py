@@ -1,6 +1,5 @@
 """WS: the project's files, the commands run in it, and what their output says."""
 
-import json
 import time
 
 import pytest
@@ -166,21 +165,23 @@ def test_prepare_env_from_the_example(ws, project_dir, capsys):
 
 
 @pytest.mark.spec("WS-7")
-def test_prepare_env_clears_placeholders_in_an_existing_env(ws, project_dir):
-    (project_dir / ".env").write_text("TOKEN=changeme\nREAL=abc123\n")
+def test_prepare_env_never_changes_an_existing_env(ws, project_dir):
+    (project_dir / ".env.example").write_text("TOKEN=<token>\n")
+    (project_dir / ".env").write_text("TOKEN=changeme\nLOG_LEVEL=none\n")
     ws.prepare_env()
-    assert ws.read(".env") == "TOKEN=\nREAL=abc123\n"
+    assert ws.read(".env") == "TOKEN=changeme\nLOG_LEVEL=none\n"
 
 
 @pytest.mark.spec("WS-7")
 @pytest.mark.parametrize("value", ["", "<key>", "your_token", "YOUR-KEY", "key_here", "changeme", "replace-me", "xxx",
-                                   "***", "...", "TODO", "'placeholder'"])
+                                   "***", "...", "'placeholder'"])
 def test_placeholders(value):
     assert Workspace.is_placeholder(value)
 
 
 @pytest.mark.spec("WS-7")
-@pytest.mark.parametrize("value", ["8000", "sk-1234", "localhost", "https://api.example.com", "/var/data", "true"])
+@pytest.mark.parametrize("value", ["8000", "sk-1234", "localhost", "https://api.example.com", "/var/data", "true", "none",
+                                   "null", "PUT", "putty", "todo", "TODO", "example_db", "insert", "yours"])
 def test_real_values(value):
     assert not Workspace.is_placeholder(value)
 
@@ -207,7 +208,7 @@ def no_shell_alias(monkeypatch):
 @pytest.mark.spec("WS-9")
 def test_teach_an_alias(tinker_home):
     TaughtCommands.teach("activate", "source .venv/bin/activate")
-    entry = json.loads(settings.COMMANDS_FILE.read_text())["commands"]["activate"]
+    entry = settings.Home.store().get("commands", "activate")
     assert entry["kind"] == "alias" and entry["definition"] == ". .venv/bin/activate" and entry["from"] == "given"
 
 
@@ -219,7 +220,7 @@ def test_teach_rejects_bad_shell_names_and_empty(tinker_home):
         TaughtCommands.teach("my-cmd", "ls")
     with pytest.raises(SystemExit, match="definition is empty"):
         TaughtCommands.teach("x", "  ")
-    assert not settings.COMMANDS_FILE.exists()
+    assert settings.Home.store().items("commands") == {}
 
 
 @pytest.mark.spec("WS-9")
@@ -242,8 +243,8 @@ def test_teach_a_program_on_path(tinker_home, no_shell_alias):
 
 @pytest.mark.spec("WS-10")
 def test_all_rejects_a_broken_commands_file(tinker_home):
-    settings.JsonFile.write(settings.COMMANDS_FILE, {"commands": {"x": {"kind": "magic"}}})
-    with pytest.raises(SystemExit, match="must map each name"):
+    settings.Home.store().put("commands", "x", {"kind": "magic"})
+    with pytest.raises(SystemExit, match="x are neither an alias nor a program"):
         TaughtCommands.all()
 
 
@@ -378,7 +379,7 @@ def test_run_test_that_ran_nothing_fails(ws):
 
 @pytest.mark.spec("WS-14")
 def test_a_test_that_hangs_fails(ws):
-    settings.Config.load()["test_timeout"] = 1
+    settings.Config.save(**{"test_timeout": 1})
     tc = Toolchain(dict(TOOLS, activate="", test_one="sleep 20", test_all="sleep 20"))
     state, output = tc.run_test(ws, TestRef("t.py::test_x"))
     assert state == "fails" and "did not finish within 1s" in output

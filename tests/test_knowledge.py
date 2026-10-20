@@ -4,11 +4,10 @@ import json
 
 import pytest
 
-from tinkerkit.knowledge import Embeddings, Knowledge, Learner, Library, Researcher, Retriever
+from tinkerkit.knowledge import Embeddings, Knowledge, Learner, Library, Researcher, Retriever, language_key
 from tinkerkit.model import Ollama
-from tinkerkit.settings import Config, JsonFile, MAX_LESSONS
+from tinkerkit.settings import Config, Home, MAX_LESSONS
 from tinkerkit.workspace import Toolchain
-from conftest import read_json
 
 
 def learned(slug, **entry):
@@ -27,8 +26,8 @@ def test_library_read_topics_and_language(tinker_home):
     assert len(Library.slug("x" * 100)) == 60
     learned("flask")
     learned("python", kind="language")
-    JsonFile.write(Library.path("broken"), {"facts": "not a list"})
-    (Library.path("junk")).write_text("{")
+    Home.store().put("learned", "broken", {"facts": "not a list"})
+    Home.store().put("learned", "junk", "not an entry")
     assert Library.read("missing") is None and Library.read("broken") is None and Library.read("") is None
     assert sorted(Library.topics()) == ["flask", "python"]
     assert Library.language("Python") == "python" and Library.language("Flask") is None
@@ -36,15 +35,10 @@ def test_library_read_topics_and_language(tinker_home):
 
 
 @pytest.mark.spec("KNW-2")
-@pytest.mark.xfail(strict=True, reason="ISSUE-4: Library.slug keeps the version, Knowledge.language_slug drops it")
 def test_a_learned_language_is_found_for_a_versioned_name(tinker_home):
     learned("python", kind="language", language="Python")
-    assert Library.language("Python 3.12") == "python"
-
-
-@pytest.mark.spec("KNW-2")
-def test_the_two_language_slugs_agree_without_a_version():
-    assert Library.slug("Python") == Knowledge.language_slug("Python") == "python"
+    assert Library.language("Python 3.12") == Library.language("python") == "python"
+    assert Knowledge("Python 3.12").key == Knowledge("Python").key == "python"
 
 
 @pytest.mark.spec("KNW-3")
@@ -64,7 +58,7 @@ def test_items(capsys):
         ("findings", "What is new? Free threading. (high confidence)"),
         ("code", "match is a soft keyword"), ("spec", "a claim (corroborated)")]
     assert all(i["topic"] == "py" and i["name"] == "Python 3.14" for i in items)
-    assert "bad.json is not readable" in capsys.readouterr().out
+    assert "what was learned about bad is not readable" in capsys.readouterr().out
     assert Library.searched(items[0]) == "Python 3.14: A language."
 
 
@@ -80,14 +74,14 @@ def test_shown_in():
 @pytest.mark.spec("KNW-4")
 @pytest.mark.parametrize("language,slug", [("Python 3.12", "python"), ("JavaScript (Node.js)", "javascript"),
                                            ("C++", "cpp"), ("C#", "csharp"), ("", "unknown"), ("Rust", "rust")])
-def test_language_slug(language, slug):
-    assert Knowledge.language_slug(language) == slug
+def test_language_key(language, slug):
+    assert language_key(language) == slug
 
 
 @pytest.mark.spec("KNW-4")
 def test_a_new_language_starts_empty(tinker_home):
     known = Knowledge(None)
-    assert known.language == "Python" and known.path == tinker_home / "languages" / "python.json"
+    assert known.language == "Python" and known.key == "python"
     assert known.known_lessons() == [] and known.toolchain() is None
     assert known.summary() == "Python: nothing learned yet"
 
@@ -103,8 +97,9 @@ def test_add_lessons(tinker_home):
                                lesson("Keep each module under sixty lines", "design"),
                                lesson("", "code"), lesson("text", "nowhere")], [])
     assert added == 2
-    assert [l["text"] for l in read_json(known.path)["lessons"]] == ["Use tmp_path for files a test makes"]
-    assert [l["text"] for l in read_json(tinker_home / "memory.json")["lessons"]] == ["Keep each module under sixty lines"]
+    assert [l["text"] for l in Home.store().get("languages", "python")["lessons"]] == ["Use tmp_path for files a test makes"]
+    assert [l["text"] for l in Home.store().get("memory", "any")["lessons"]] == ["Keep each module under sixty lines"]
+    assert all(l["status"] == "candidate" and len(l["id"]) == 12 for l in known.known_lessons())
     again = Knowledge("Python")
     assert again.add_lessons([lesson("Use tmp_path for the files a test makes", "tests")], [2]) == 0
     seen = {l["text"]: l["seen"] for l in again.known_lessons()}
@@ -130,7 +125,7 @@ def test_lessons_are_capped_and_ranked(tinker_home):
     assert known.add_lessons([lesson("a brand new rule that is unlike every other one")], []) == 1
     texts = [l["text"] for l in known.any_language_doc["lessons"]]
     assert len(texts) == MAX_LESSONS and "a brand new rule that is unlike every other one" in texts
-    assert known.lessons(("code",), limit=1) == [known.known_lessons()[0]["text"]]
+    assert [l["text"] for l in known.lessons(("code",), limit=1)] == [known.known_lessons()[0]["text"]]
     assert known.known_lessons()[0]["seen"] == 2
     assert known.lessons(("design",)) == []
 
@@ -144,9 +139,12 @@ def test_toolchain_fixes(tinker_home):
     assert known.known_fix("no module named pytest", tried={"no module named pytest"}) is None
     assert known.known_fix("other") is None
     stored = known.known_fix("no module named pytest")
+    known.fix_result(stored, worked=True)
+    assert known.known_fix("no module named pytest")["used"] == 2
     known.fix_result(stored, worked=False)
-    known.fix_result(stored, worked=False)
-    assert known.known_fix("no module named pytest") is None  # failed more often than it helped
+    assert known.known_fix("no module named pytest") is None  # a failed replay disproves it: gone at once
+    assert Knowledge("Python").language_doc["fixes"] == []
+    known.remember_fix(fix)
     assert known.similar_fix("no module named pytests")["cause"] == "pytest missing"
     assert known.similar_fix("completely different failure") is None
     for i in range(25):
@@ -165,7 +163,7 @@ def test_remember_toolchain_without_its_project_commands(tinker_home):
     kept = Knowledge("Python").toolchain()
     assert kept.run == "" and kept.check == "" and kept.test_all == "pytest -q" and kept.setup == toolchain.setup
     known.finished_project()
-    assert read_json(known.path)["projects"] == 1
+    assert Home.store().get("languages", "python")["projects"] == 1
     assert "the toolchain that worked (1 finished project(s))" in Knowledge("Python").summary()
 
 
@@ -194,7 +192,8 @@ def test_embeddings_are_cached_per_model(tinker_home, monkeypatch):
     assert server.requests[-1] == ["dddd"]
     Embeddings("embed-b").vectors(["b"])
     assert server.requests[-1] == ["b"]  # another model: embedded again
-    assert list(read_json(tinker_home / "embeddings.json")["vectors"]) == [Embeddings.key("b")]
+    assert list(Home.store().get("embeddings", "embed-b")) == [Embeddings.key("b")]
+    assert len(Home.store().get("embeddings", "embed-a")) == 4  # each model keeps its own
 
 
 @pytest.mark.spec("KNW-7")
@@ -203,9 +202,9 @@ def test_embeddings_keep_prune_and_failure(tinker_home, monkeypatch):
     embeddings = Embeddings("e")
     embeddings.vectors(["one", "two"])
     embeddings.vectors(["two"], prune=True)
-    assert list(read_json(tinker_home / "embeddings.json")["vectors"]) == [Embeddings.key("two")]
+    assert list(Home.store().get("embeddings", "e")) == [Embeddings.key("two")]
     embeddings.vectors(["three"], keep=False)
-    assert Embeddings.key("three") not in read_json(tinker_home / "embeddings.json")["vectors"]
+    assert Embeddings.key("three") not in Home.store().get("embeddings", "e")
     monkeypatch.setattr(Ollama, "get_json", staticmethod(EmbedServer(broken=True)))
     broken = Embeddings("other")
     assert broken.vectors(["x"]) is None and broken.failed == "other gave no embeddings (not an embedding model)"
@@ -218,10 +217,10 @@ def test_embeddings_required_check_and_configured(monkeypatch):
     assert Embeddings.configured() is None
     with pytest.raises(SystemExit, match="needs an embedding model"):
         Embeddings.required("--web")
-    Config.load()["embed_model"] = 5
+    Config.save(embed_model=5)
     with pytest.raises(SystemExit, match="not a model name"):
         Embeddings.check()
-    Config.load()["embed_model"] = "nomic"
+    Config.save(**{"embed_model": "nomic"})
     monkeypatch.setattr(Ollama, "installed_models", staticmethod(lambda: [{"name": "nomic"}]))
     assert Embeddings.required("--web").name == "nomic" and Embeddings.configured().name == "nomic"
 
@@ -368,7 +367,7 @@ def test_learning_cut_short_keeps_what_was_learned_before(make_model, fake_ollam
             facts=[{"phase": "code", "text": "old fact"}])
     learner = Learner(make_model(), FakeInternet(up=False), None)
     entry = learner.learn("Flask")
-    assert entry["facts"] == [{"phase": "code", "text": "old fact"}] and learner.kept_earlier
+    assert [f["text"] for f in entry["facts"]] == ["old fact"] and learner.kept_earlier
     assert fake_ollama.calls == []  # the saved plan is reused: no call
 
 
@@ -545,3 +544,65 @@ def test_a_language_is_learned_as_one(make_model, fake_ollama, tinker_home):
     fake_ollama.reply(json.dumps({"name": "Go", "summary": "s", "language": "Go", "queries": []}), when="Plan learning (")
     again = Learner(make_model(), FakeInternet(pages), None).learn("golang")
     assert again["kind"] == "language" and fake_ollama.labels()[-1].startswith("Plan learning (")  # learned already
+
+
+@pytest.mark.spec("KNW-5")
+def test_a_lesson_that_names_the_project_is_not_kept(tinker_home):
+    known = Knowledge("Python")
+    added = known.add_lessons([lesson("Keep calc.py's parser apart from its arithmetic"),
+                               lesson("In calc-py, store results in history.json"),
+                               lesson("Keep a parser apart from the arithmetic it calls")], [],
+                              names=["calc.py", "history.json", "calc-py"])
+    assert added == 1 and [l["text"] for l in known.known_lessons()] == ["Keep a parser apart from the arithmetic it calls"]
+
+
+def topic_with_facts():
+    Library.save("flask", {"topic": "flask", "name": "Flask", "summary": "s", "facts": [
+        {"phase": "code", "text": "Flask routes use @app.route"}, {"phase": "tests", "text": "Use app.test_client()"}]})
+    return [f["id"] for f in Library.read("flask")["facts"]]
+
+
+@pytest.mark.spec("KNW-17")
+def test_knowledge_starts_as_a_candidate_and_a_success_proves_it(tinker_home):
+    route, client = topic_with_facts()
+    assert all(f["status"] == "candidate" for f in Library.read("flask")["facts"])
+    known = Knowledge("Python")
+    known.add_lessons([lesson("Seed random generators inside tests", "tests")], [])
+    lesson_id = known.known_lessons()[0]["id"]
+    used = {f"lesson:{lesson_id}": ["tests"], f"fact:flask:{route}": ["code"]}
+    assert known.prove(used) == 2
+    again = Knowledge("Python")
+    assert again.known_lessons()[0]["status"] == "proven"
+    statuses = {f["id"]: f["status"] for f in Library.read("flask")["facts"]}
+    assert statuses == {route: "proven", client: "candidate"}
+    assert again.language_doc["facts"] == [{"id": route, "phase": "code", "text": "Flask routes use @app.route",
+                                            "topic": "flask", "status": "proven"}]
+    assert again.prove(used) == 0  # proven once is enough
+
+
+@pytest.mark.spec("KNW-17")
+def test_a_failure_discards_what_was_used_in_that_step(tinker_home):
+    route, client = topic_with_facts()
+    known = Knowledge("Python")
+    known.add_lessons([lesson("Seed random generators inside tests", "tests"),
+                       lesson("Prefer pathlib over os.path joins", "code")], [])
+    seed, paths = (l["id"] for l in known.known_lessons())
+    known.prove({f"fact:flask:{route}": ["code"], f"lesson:{paths}": ["code"]})
+    used = {f"lesson:{seed}": ["tests"], f"lesson:{paths}": ["code"], f"known:{route}": ["code"],
+            f"fact:flask:{client}": ["tests"]}
+    assert known.disprove(used, ("toolchain", "config")) == 0  # none was shown there
+    gone = Knowledge("Python").disprove(used, ("code",))
+    after = Knowledge("Python")
+    assert gone == 2 and [l["text"] for l in after.known_lessons()] == ["Seed random generators inside tests"]
+    assert after.language_doc["facts"] == []  # proven before, discarded all the same
+    assert after.disprove(used, ("tests",)) == 2
+    assert Knowledge("Python").known_lessons() == [] and [f["id"] for f in Library.read("flask")["facts"]] == [route]
+
+
+@pytest.mark.spec("KNW-18")
+def test_proven_facts_are_shown_for_their_phase(tinker_home):
+    route, client = topic_with_facts()
+    known = Knowledge("Python 3.13")
+    known.prove({f"fact:flask:{route}": ["code"]})
+    assert [f["text"] for f in Knowledge("Python").facts(("code",))] == ["Flask routes use @app.route"]
+    assert Knowledge("Python").facts(("tests",)) == []

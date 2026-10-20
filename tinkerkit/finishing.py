@@ -3,10 +3,11 @@ test), one final review as a person runs it, and the lessons for the next projec
 
 import re
 import time
+from pathlib import Path
 
 from .building import ToolchainRepair, Verifier
 from .model import OllamaError
-from .planning import Phase
+from .session import Phase
 from .prompts import Part, PromptTooLarge, Prompts
 from .settings import ENV_EXAMPLE, ENV_FILE, FIX_FILES, first_line
 from .workspace import FileView, Output, TaughtCommands, TestRef, Toolchain
@@ -390,14 +391,22 @@ class ReadmeWriter(Phase):
 
 
 class LessonWriter(Phase):
-    """12. Lessons: what this cycle's problems teach the next projects."""
+    """Lessons: what this cycle proved, and what its problems teach the next projects."""
     TITLE = "Lessons (for the next projects)"
 
     def run(self, cycle):
-        """One call turns the problems this cycle solved into lessons (none: no call). A finished
-        project's toolchain is kept for its language: every command of it has worked by now (one
-        test at a time, the whole suite, the linter), which is not so when the test tool first runs."""
+        """The cycle succeeded: the knowledge it used is proven (once). One call turns the problems
+        this cycle solved into general lessons (none: no call); one that names this project is not
+        general, and is not kept. A finished project's toolchain is kept for its language: every
+        command of it has worked by now (one test at a time, the whole suite, the linter), which is not
+        so when the test tool first runs."""
         events = self.p.spec.get("events", [])
+        if not cycle.get("proven"):
+            proven = self.s.knowledge.prove(cycle.get("used", {}))
+            cycle["proven"] = True
+            self.s.save()
+            if proven:
+                print(f"  {proven} lesson(s) and fact(s) used here are proven now")
         if cycle["id"] == "base" and not cycle.get("counted"):
             self.s.knowledge.remember_toolchain(self.s.toolchain)
             self.s.knowledge.finished_project()
@@ -417,7 +426,8 @@ class LessonWriter(Phase):
         except (SystemExit, OllamaError) as exc:  # the project is built: lessons are a bonus
             print(f"  {exc} Nothing learned this time.")
             return
-        added = self.s.knowledge.add_lessons(new, confirmed)
+        names = [Path(path).name for path in self.p.files] + [self.p.workdir.name]
+        added = self.s.knowledge.add_lessons(new, confirmed, names)
         print(f"  {added} new lesson(s), {len(confirmed)} confirmed: {self.s.knowledge.summary()}")
         self.p.spec["events"] = []
         self.s.save()

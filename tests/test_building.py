@@ -7,7 +7,7 @@ import pytest
 
 from tinkerkit.building import BugReproducer, BuildFix, CodeWriter, FixAttempt, TestTool, TestWriter, ToolchainRepair, Verifier
 from tinkerkit.prompts import Reply
-from tinkerkit.settings import JsonFile, TESTS_LOCKED
+from tinkerkit.settings import TESTS_LOCKED
 from tinkerkit.workspace import Output, TestRef
 from conftest import criterion, file_block
 
@@ -160,7 +160,7 @@ def test_verify_parks_what_nothing_fixes_and_puts_the_files_back(calc, fake_olla
     assert (project_dir / "calc.py").read_text() == CALC
     labels = [label.split(" [")[0] for label in fake_ollama.labels()]
     assert labels[0] == "Fix the code C2 (no thinking first)" and labels[-1].startswith("Review the test and the code against the plan C2")
-    assert len(labels) == 5 and not (project.state / Verifier.PENDING).exists()
+    assert len(labels) == 5 and project.store.get("restore", Verifier.PENDING) is None
 
 
 @pytest.mark.spec("BLD-3")
@@ -177,11 +177,11 @@ def test_a_criterion_failing_like_a_parked_one_is_parked_at_once(calc, fake_olla
 @pytest.mark.spec("BLD-4")
 def test_a_stopped_run_is_put_back_from_its_restore_point(calc, project_dir, capsys):
     session, project = calc
-    JsonFile.write(project.state / Verifier.PENDING, {"criterion": "C2", "files": {"calc.py": CALC, "test_calc.py": TESTS,
-                                                                                  "new.py": None}})
+    project.store.put("restore", Verifier.PENDING, {"criterion": "C2", "files": {"calc.py": CALC, "test_calc.py": TESTS,
+                                                                                 "new.py": None}})
     (project_dir / "calc.py").write_text("half-done change\n")
     Verifier(session).recover_interrupted()
-    assert (project_dir / "calc.py").read_text() == CALC and not (project.state / Verifier.PENDING).exists()
+    assert (project_dir / "calc.py").read_text() == CALC and project.store.get("restore", Verifier.PENDING) is None
     assert "the last run stopped while C2 was being worked on: calc.py restored" in capsys.readouterr().out
 
 
@@ -375,3 +375,14 @@ def test_what_a_bug_test_must_be(bug):
     assert "breaks the build" in reproducer.why_not({"test": "t::x"}, "build", "SyntaxError")
     assert "ran no test" in reproducer.why_not({"test": "t::x"}, "fails", "no tests ran")
     assert reproducer.why_not(None, "missing", "why") == "why"
+
+
+@pytest.mark.spec("BLD-9")
+def test_the_bug_test_follows_the_amendments(bug, fake_ollama):
+    session, project, cycle = bug
+    cycle["amendments"] = ["it happens only with two negative numbers"]
+    fake_ollama.reply("TEST: test_bug.py::test_x\n" + file_block("test_bug.py", "def test_x():\n    assert True\n"),
+                      times=2)
+    BugReproducer(session).run(cycle)
+    prompt = fake_ollama.calls[0]["messages"][1]["content"]
+    assert "Changed by the person: it happens only with two negative numbers" in prompt

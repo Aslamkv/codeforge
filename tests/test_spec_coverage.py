@@ -31,12 +31,9 @@ def test_every_test_names_a_spec_point():
     assert not unknown, f"tests name spec points SPEC.md does not have: {', '.join(unknown)}"
 
 
-def test_every_known_deviation_names_a_point_and_an_xfail_test():
-    text = (ROOT / "SPEC.md").read_text(encoding="utf-8")
-    table = text.split("## Known deviations", 1)[1].split("\n---", 1)[0]
-    issues = re.findall(r"\| (ISSUE-\d+) \| ([A-Z]{2,4}-\d+) \|", table)
-    assert issues, "the known deviations table lists no issue"
+def test_every_xfail_is_strict_and_names_its_issue():
+    """A test the code does not pass yet is a known issue (tracked outside the spec): it fails as soon as the code
+    is fixed, so its marker is removed and the point is enforced from then on."""
     tests = "\n".join(p.read_text(encoding="utf-8") for p in (ROOT / "tests").glob("test_*.py"))
-    for issue, point in issues:
-        assert point in spec_points(), f"{issue} names {point}, which SPEC.md does not state"
-        assert re.search(rf"xfail\(strict=True, reason=\"{issue}\b", tests), f"{issue} has no strict xfail test"
+    marks = re.findall(r"mark\.xfail\(([^)]*)\)", tests)
+    assert all(re.search(r'strict=True, reason="ISSUE-\d+: ', mark) for mark in marks), marks

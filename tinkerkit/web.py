@@ -11,11 +11,11 @@ import urllib.error
 import urllib.parse
 import urllib.request
 
-from .settings import CONFIG_FILE, Config, first_line
+from .settings import Config, first_line
 
 
 class Internet:
-    """The Internet plugin: web search and web fetch through the backend config.json's "web" names
+    """The Internet plugin: web search and web fetch through the backend the setting "web" names
     (one of backends()), and, only when set, its "web_fallback": what the first cannot answer, the
     fallback is asked, and a first backend that is not usable (no key) leaves the fallback alone.
     Used only when asked: by tinker learn, by the recall phase of a run started with --web, and by research
@@ -38,7 +38,7 @@ class Internet:
             else:
                 backend.name = name
                 self.backends_used.append(backend)
-        self.gone = "" if self.backends_used else ("; ".join(reasons) or f"no web backend ({CONFIG_FILE.name}: web)")
+        self.gone = "" if self.backends_used else ("; ".join(reasons) or "no web backend (tinker use-web NAME)")
         self.skipped = reasons  # backends set but not usable (said once, when the plugin is in use)
 
     @property
@@ -75,21 +75,21 @@ class Internet:
 
     @staticmethod
     def backends():
-        """The web backends, by the name config.json's "web" gives one: add a new one here."""
+        """The web backends, by the name the setting "web" gives one: add a new one here."""
         return {"ollama": OllamaWeb, "duckduckgo": DuckDuckGoWeb}
 
     @staticmethod
     def check():
-        """web, web_fallback, web_timeout and learn_missing in config.json are usable."""
+        """web, web_fallback, web_timeout and learn_missing are usable."""
         timeout, missing = Config.get("web_timeout"), Config.get("learn_missing")
         for key in ("web", "web_fallback"):
             if Config.get(key) not in ("", *Internet.backends()):
-                raise SystemExit(f"{key} in {CONFIG_FILE} must be one of {', '.join(map(repr, Internet.backends()))} "
+                raise SystemExit(f"{key} must be one of {', '.join(map(repr, Internet.backends()))} "
                                  f'or "" (none); it is {Config.get(key)!r}')
         if isinstance(timeout, bool) or not isinstance(timeout, (int, float)) or timeout <= 0:
-            raise SystemExit(f"web_timeout in {CONFIG_FILE} must be a number of seconds above 0; it is {timeout!r}")
+            raise SystemExit(f"web_timeout must be a number of seconds above 0; it is {timeout!r}")
         if isinstance(missing, bool) or not isinstance(missing, int) or missing < 1:
-            raise SystemExit(f"learn_missing in {CONFIG_FILE} must be a whole number, 1 or more (the topics a run "
+            raise SystemExit(f"learn_missing must be a whole number, 1 or more (the topics a run "
                              f"with --web may learn); it is {missing!r}")
 
     def available(self):
@@ -159,12 +159,15 @@ class Internet:
                 self.gone = why
 
 
+Config.checks.append(Internet.check)  # tinker config checks the web's settings too
+
+
 class WebBackend:
     """What a web backend gives the Internet plugin. A new one subclasses this, implements its
-    three methods, and is added to Internet.backends() under the name config.json's "web" uses.
+    three methods, and is added to Internet.backends() under the name the setting "web" uses.
     search() and fetch() raise WebError when they cannot answer."""
 
-    name = ""  # the name config.json gives it (set when the plugin takes it)
+    name = ""  # the name the setting "web" gives it (set when the plugin takes it)
 
     def __init__(self, timeout):
         self.timeout = timeout

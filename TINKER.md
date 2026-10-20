@@ -78,17 +78,30 @@ Talk with Tinker:
 tinker
 ```
 
-Build something new (it gets its own folder in `~/Projects`):
+Build something new (it gets its own folder in `~/Projects`). Tinker shows you the plan first:
 
 ```sh
 tinker task a calculator in Python
 ```
 
-Only plan it, and build after you have read the plan:
+Build the plan, or change it first (it waits again):
 
 ```sh
-tinker task a todo list app --plan-only
-tinker resume
+tinker confirm
+tinker amend also handle negative numbers
+```
+
+Build straight through, with no plan to confirm:
+
+```sh
+tinker task a todo list app --no-confirm
+```
+
+Name a project from anywhere with `@` and its folder or ID:
+
+```sh
+tinker status @calc-py
+tinker log @calc-py
 ```
 
 Add a feature, or fix a bug:

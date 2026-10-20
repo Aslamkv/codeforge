@@ -55,27 +55,27 @@ def telegram(api, chats=("42",)):
 
 
 @pytest.mark.spec("CHN-1")
-def test_channels_settings_and_secrets(tinker_home):
+def test_channels_settings_and_secrets(tinker_home, home_store):
     assert Channels.settings() == {}
-    Channels.write({"bot": {"kind": "telegram", "enabled": True, "allowed": ["42"]}}, {"bot": {"token": "secret"}})
-    assert stat.S_IMODE((tinker_home / "channel-secrets.json").stat().st_mode) == 0o600
-    assert "secret" not in (tinker_home / "channels.json").read_text()
+    Channels.keep("bot", {"kind": "telegram", "enabled": True, "allowed": ["42"]}, {"token": "secret"})
+    assert stat.S_IMODE((tinker_home / "tinker.db").stat().st_mode) == 0o600
+    assert "secret" not in json.dumps(Channels.settings()) and Channels.secrets("bot") == {"token": "secret"}
     made = Channels.make("bot")
     assert isinstance(made, TelegramChannel) and made.secrets == {"token": "secret"} and made.allowed == {"42"}
     assert [c.name for c in Channels.enabled()] == ["bot"]
     with pytest.raises(SystemExit, match="no channel 'other'"):
         Channels.make("other")
-    Channels.write({"odd": {"kind": "pigeon"}})
+    Channels.keep("odd", {"kind": "pigeon"})
     with pytest.raises(SystemExit, match="unknown kind 'pigeon'"):
         Channels.make("odd")
-    (tinker_home / "channels.json").write_text("{broken")
+    (tinker_home / "tinker.db").write_bytes(b"not a database at all, just text " * 100)
     with pytest.raises(SystemExit, match="cannot be read"):
         Channels.settings()
 
 
 @pytest.mark.spec("CHN-1")
 def test_a_run_told_not_to_report_has_no_channels(monkeypatch):
-    Channels.write({"bot": {"kind": "telegram", "enabled": True}}, {})
+    Channels.keep("bot", {"kind": "telegram", "enabled": True}, {})
     monkeypatch.setenv("TINKER_CHANNELS", "off")
     assert Channels.enabled() == []
 
@@ -84,7 +84,7 @@ def test_a_run_told_not_to_report_has_no_channels(monkeypatch):
 def test_channel_command_list_enable_disable_remove(capsys):
     ChannelCommand.run([])
     assert "No channels yet" in capsys.readouterr().out
-    Channels.write({"bot": {"kind": "telegram", "enabled": False, "allowed": ["42"]}}, {"bot": {"token": "t"}})
+    Channels.keep("bot", {"kind": "telegram", "enabled": False, "allowed": ["42"]}, {"token": "t"})
     ChannelCommand.run(["enable", "bot"])
     assert Channels.settings()["bot"]["enabled"] is True
     capsys.readouterr()
@@ -94,7 +94,7 @@ def test_channel_command_list_enable_disable_remove(capsys):
     ChannelCommand.run(["disable", "bot"])
     assert Channels.settings()["bot"]["enabled"] is False
     ChannelCommand.run(["remove", "bot"])
-    assert Channels.settings() == {} and Channels.read(channels.SECRETS_FILE) == {}
+    assert Channels.settings() == {} and Channels.secrets("bot") == {}
     with pytest.raises(SystemExit, match="no action 'fly'"):
         ChannelCommand.run(["fly"])
     with pytest.raises(SystemExit, match="no channel 'bot'"):
@@ -111,7 +111,7 @@ def test_channel_add_from_options(monkeypatch, capsys):
     monkeypatch.setattr(TelegramChannel, "connection", lambda self, wait: api.connection(wait))
     ChannelCommand.run(["add", "--kind", "telegram", "--name", "home", "--token", "abc", "--chat", "42, 43"])
     assert Channels.settings()["home"] == {"kind": "telegram", "enabled": False, "allowed": ["42", "43"], "who": "@my_bot"}
-    assert Channels.read(channels.SECRETS_FILE) == {"home": {"token": "abc"}}
+    assert Channels.secrets("home") == {"token": "abc"}
     assert api.calls[0][0] == "/botabc/getMe" and "It starts disabled" in capsys.readouterr().out
     for argv, why in ((["--name", "home"], "exists"), (["--name", "-bad"], "letters, digits"),
                       (["--kind", "pigeon"], "no channel kind"), (["oops"], "unexpected 'oops'")):
@@ -237,7 +237,7 @@ def test_pair_serves_the_chat_its_sender_confirms(monkeypatch, capsys):
 def test_start_needs_a_channel_and_checks_it(monkeypatch):
     with pytest.raises(SystemExit, match="no channel is enabled"):
         ChannelCommand.run(["start"])
-    Channels.write({"bot": {"kind": "telegram", "enabled": False, "allowed": ["42"]}}, {"bot": {"token": "t"}})
+    Channels.keep("bot", {"kind": "telegram", "enabled": False, "allowed": ["42"]}, {"token": "t"})
     api = BotAPI(getMe=(401, "Unauthorized"))
     monkeypatch.setattr(TelegramChannel, "connection", lambda self, wait: api.connection(wait))
     with pytest.raises(SystemExit, match="channel bot does not work"):

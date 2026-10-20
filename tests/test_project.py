@@ -2,72 +2,87 @@
 
 import argparse
 import io
-import json
+import os
 import re
 import sys
 from pathlib import Path
 
 import pytest
 
-import tinkerkit.project as project_module
-from tinkerkit.project import Brief, Outcome, RunChecks, Runs, SpecDocument
+from tinkerkit.project import Brief, Outcome, Project, RunChecks, Runs, SpecDocument, Tracker, project_store, saved
 from tinkerkit.workspace import TaughtCommands, Workspace
-from conftest import criterion, read_json
+from conftest import criterion, plan_of, record_of
 
 
 def run_args(**given):
     defaults = {"restart": False, "resume": None, "workdir": ".", "spec": None, "spec_file": None, "add": None,
-                "amend": None, "plan_only": False, "web": False, "task": "a calculator", "yes": False}
+                "amend": None, "web": False, "task": "a calculator", "yes": False}
     return argparse.Namespace(**dict(defaults, **given))
 
 
 def saved_run(folder, run_id="abc123", cycles=(), steps=()):
-    state = folder / ".tinker"
-    state.mkdir(parents=True, exist_ok=True)
-    run = Runs.new_record("a calculator", folder, None)
-    run["id"] = run_id
+    folder.mkdir(parents=True, exist_ok=True)
+    run = dict(Runs.new_record("a calculator", folder, None), id=run_id)
     Runs.save(run, folder)
-    (state / "spec.json").write_text(json.dumps({"steps": list(steps), "counter": len(steps), "cycles": list(cycles)}))
+    project_store(folder).put("spec", "plan", {"steps": list(steps), "counter": len(steps), "cycles": list(cycles)})
     return run
 
 
 @pytest.mark.spec("PRJ-1")
-def test_new_record_and_save(tinker_home, project_dir):
+def test_new_record_and_save(home_store, project_dir):
     run = Runs.new_record("a task", project_dir, "plan.md")
     assert re.fullmatch(r"[0-9a-f]{6}", run["id"])
     assert {k: run[k] for k in ("task", "workdir", "spec", "status")} == \
         {"task": "a task", "workdir": str(project_dir), "spec": "plan.md", "status": "running"}
     Runs.save(run, project_dir)
-    here, indexed = read_json(project_dir / ".tinker" / "run.json"), read_json(tinker_home / "runs" / f"{run['id']}.json")
-    assert here == indexed and "updated" in here
+    assert record_of(project_dir) == run and "updated" in run
+    assert home_store.get("projects", run["id"]) == {"id": run["id"], "workdir": str(project_dir), "task": "a task"}
 
 
 @pytest.mark.spec("PRJ-2")
-def test_find_by_id_prefix(tmp_path):
-    for run_id in ("abc123", "abd456"):
-        saved_run(tmp_path / run_id, run_id)
-    (Path(project_module.RUNS_DIR) / "broken.json").write_text("{")
-    assert Runs.find("ABC")["id"] == "abc123"
-    with pytest.raises(SystemExit, match="matches several runs: abc123, abd456"):
-        Runs.find("ab")
-    with pytest.raises(SystemExit, match="No run with ID 'fff'"):
-        Runs.find("fff")
-    assert len(Runs.entries()) == 2
+def test_find_by_full_id_or_folder_name_only(tmp_path):
+    saved_run(tmp_path / "calc", "abc123")
+    saved_run(tmp_path / "notes", "abd456")
+    assert Runs.find("abc123")["workdir"] == str(tmp_path / "calc")
+    assert Runs.find("notes")["id"] == "abd456"
+    for part in ("abc", "ab", "ABC123", "calc-py", "not"):
+        with pytest.raises(SystemExit, match=f"No project @{part}"):
+            Runs.find(part)
+
+
+@pytest.mark.spec("PRJ-2")
+def test_two_folders_of_one_name_need_the_id(tmp_path):
+    saved_run(tmp_path / "a" / "calc", "aaa111")
+    saved_run(tmp_path / "b" / "calc", "bbb222")
+    with pytest.raises(SystemExit, match="Several projects are in folders named calc: name one by its ID: @aaa111, "
+                                         "@bbb222"):
+        Runs.find("calc")
+    assert Runs.find("bbb222")["workdir"] == str(tmp_path / "b" / "calc")
+
+
+@pytest.mark.spec("PRJ-2")
+def test_entries_have_each_projects_own_record(tmp_path):
+    saved_run(tmp_path / "calc", "abc123")
+    import shutil
+    saved_run(tmp_path / "gone", "fff000")
+    shutil.rmtree(tmp_path / "gone")
+    entries = {e["id"]: e for e in Runs.entries()}
+    assert entries["abc123"]["status"] == "running" and "updated" in entries["abc123"]
+    assert entries["fff000"]["status"] == "missing"
 
 
 @pytest.mark.spec("PRJ-3")
 def test_workdir(tmp_path, monkeypatch):
     saved_run(tmp_path / "p", "abc123")
-    assert Runs.workdir("abc", None) == tmp_path / "p"
+    assert Runs.workdir("abc123", None) == tmp_path / "p" and Runs.workdir("p", None) == tmp_path / "p"
     monkeypatch.chdir(tmp_path)
     assert Runs.workdir("", "p") == (tmp_path / "p").resolve()
     with pytest.raises(SystemExit, match="does not exist"):
         Runs.workdir("", "nowhere")
-    (tmp_path / "p" / ".tinker" / "run.json").unlink()
     import shutil
     shutil.rmtree(tmp_path / "p")
     with pytest.raises(SystemExit, match="no longer exists"):
-        Runs.workdir("abc", None)
+        Runs.workdir("abc123", None)
 
 
 @pytest.mark.spec("PRJ-4")
@@ -77,7 +92,7 @@ def test_open_new(tmp_path):
     (tmp_path / "plan.md").write_text("Use SQLite.")
     run, workdir, spec_text, mode = Runs.open(run_args(workdir=str(folder), spec=str(tmp_path / "plan.md")))
     assert (mode, spec_text, workdir) == ("new", "Use SQLite.", folder.resolve())
-    assert (folder / ".tinker" / "spec.md").read_text() == "Use SQLite." and run["spec"] == "plan.md"
+    assert saved(folder, "texts", "spec_text") == "Use SQLite." and run["spec"] == "plan.md"
     with pytest.raises(SystemExit, match="already holds run"):
         Runs.open(run_args(workdir=str(folder)))
 
@@ -85,11 +100,9 @@ def test_open_new(tmp_path):
 @pytest.mark.spec("PRJ-4")
 def test_open_existing(tmp_path):
     folder = tmp_path / "p"
-    saved_run(folder)
-    (folder / ".tinker" / "spec.md").write_text("saved spec")
-    run_record = read_json(folder / ".tinker" / "run.json")
-    run_record["status"] = "blocked"
-    (folder / ".tinker" / "run.json").write_text(json.dumps(run_record))
+    run = saved_run(folder)
+    project_store(folder).put("texts", "spec_text", "saved spec")
+    Runs.save(dict(run, status="blocked"), folder)
     run, _, text, mode = Runs.open(run_args(resume="", workdir=str(folder)))
     assert (mode, text, run["status"]) == ("resume", "saved spec", "running")
     (tmp_path / "feature.md").write_text("feature spec")
@@ -98,7 +111,7 @@ def test_open_existing(tmp_path):
 
 
 @pytest.mark.spec("PRJ-5")
-def test_clear_folder_keeps_the_spec_file_and_forgets_its_runs(tmp_path):
+def test_clear_folder_keeps_the_spec_file_and_forgets_its_pointers(tmp_path):
     folder = tmp_path / "p"
     saved_run(folder, "abc123")
     (folder / "app.py").write_text("x")
@@ -127,6 +140,7 @@ def test_clear_folder_refuses_the_wrong_folders(tmp_path, monkeypatch, tinker_ho
 def test_before_start_for_a_new_run(tmp_path, monkeypatch):
     monkeypatch.chdir(tmp_path)
     assert RunChecks.before_start(run_args(workdir=".")) == tmp_path.resolve()
+    assert not (tmp_path / ".tinker").exists()  # checking makes nothing
     with pytest.raises(SystemExit, match="Spec file not found"):
         RunChecks.before_start(run_args(workdir=".", spec="missing.md"))
     with pytest.raises(SystemExit, match="does not exist"):
@@ -146,22 +160,23 @@ def test_before_start_for_a_saved_run(tmp_path):
     assert RunChecks.before_start(run_args(resume="", workdir=str(folder))) == folder
     with pytest.raises(SystemExit, match="unfinished project"):
         RunChecks.before_start(run_args(resume="", workdir=str(folder), add=["more"]))
-    with pytest.raises(SystemExit, match="waits for confirmation"):
+    with pytest.raises(SystemExit, match="a plan that waits for confirmation"):
         RunChecks.before_start(run_args(resume="", workdir=str(folder), amend="change"))
     saved_run(folder, cycles=[])
     with pytest.raises(SystemExit, match="no project spec yet"):
         RunChecks.before_start(run_args(resume="", workdir=str(folder), add=["more"]))
     saved_run(folder, cycles=[{"id": "base", "request": "x", "phase": "done"}])
     assert RunChecks.before_start(run_args(resume="", workdir=str(folder), add=["more"])) == folder
-    saved_run(folder, cycles=[{"id": "base", "request": "x", "phase": "recall", "awaiting": True}])
+    saved_run(folder, cycles=[{"id": "base", "request": "x", "phase": "setup", "awaiting": True}])
     assert RunChecks.before_start(run_args(resume="", workdir=str(folder), amend="change")) == folder
+    assert not hasattr(RunChecks, "check_planning") and not hasattr(RunChecks, "check_recall_ahead")
 
 
 @pytest.mark.spec("PRJ-6")
 def test_restart_reads_the_task_and_spec_first(tmp_path, monkeypatch):
     folder = tmp_path / "p"
     saved_run(folder)
-    (folder / ".tinker" / "spec.md").write_text("the spec text")
+    project_store(folder).put("texts", "spec_text", "the spec text")
     args = run_args(restart=True, workdir=str(folder))
     assert RunChecks.before_start(args) == folder
     assert (args.task, args.spec_text, args.spec) == ("a calculator", "the spec text", None)
@@ -187,8 +202,10 @@ def test_project_cycles_and_criteria(make_project, project_dir):
     assert project.counts() == (1, 1, 2) and [s["id"] for s in project.parked()] == ["B2"]
     assert [s["id"] for s in project.cycle_criteria(fix)] == ["B2"]
     project.save()
-    assert read_json(project_dir / ".tinker" / "spec.json")["steps"][0]["id"] == "C1"
+    assert plan_of(project_dir)["steps"][0]["id"] == "C1"
+    assert Project.load(project_dir, project.run).criteria[0]["id"] == "C1"
     assert (project_dir / "SPEC.md").read_text().startswith("# Spec: a calculator")
+    assert sorted(p.name for p in project_dir.iterdir()) == [".tinker", "SPEC.md"]
 
 
 FILES = {"calc.py": {"kind": "code", "role": "the calculator", "contract": ["add(a, b) -> int"], "uses": ["util.py"]},
@@ -268,15 +285,14 @@ def test_spec_document(make_project, tinker_home):
 
 
 @pytest.mark.spec("PRJ-11")
-def test_brief(tmp_path, make_model, fake_ollama):
+def test_brief(project_dir, make_model, fake_ollama):
     model = make_model(max_prompt_tokens=1024)
-    state = tmp_path / "state"
-    state.mkdir()
-    assert Brief.load(model, state, "change", "task", "long spec") == ""
-    assert Brief.load(model, state, "new", "task", "  short spec  ") == "short spec"
-    assert (state / "brief.md").read_text() == "short spec"
-    (state / "brief.md").write_text("saved brief")
-    assert Brief.load(model, state, "resume", "task", "anything") == "saved brief"
+    store = project_store(project_dir)
+    assert Brief.load(model, store, "change", "task", "long spec") == ""
+    assert Brief.load(model, store, "new", "task", "  short spec  ") == "short spec"
+    assert store.get("texts", "brief") == "short spec"
+    store.put("texts", "brief", "saved brief")
+    assert Brief.load(model, store, "resume", "task", "anything") == "saved brief"
     fake_ollama.reply("- condensed", times=20)
     long_spec = "\n\n".join("requirement " + "x" * 300 for _ in range(30))
     brief = Brief.make(model, "task", long_spec)
@@ -288,6 +304,78 @@ def test_brief(tmp_path, make_model, fake_ollama):
 def test_outcome():
     outcome = Outcome()
     assert (outcome.status, outcome.exit_code) == ("stopped", 1)
-    for status, code in (("done", 0), ("planned", 0), ("awaiting", 0), ("blocked", 1)):
+    for status, code in (("done", 0), ("awaiting", 0), ("blocked", 1)):
         outcome.set(status)
         assert (outcome.status, outcome.exit_code) == (status, code)
+
+
+@pytest.mark.spec("PRJ-13")
+def test_the_tracker_publishes_each_change(home_store, project_dir):
+    tracker = Tracker("a calculator", before=12.0)
+    store = project_store(project_dir)
+    tracker.project(store, "abc123", project_dir, "calc: a calculator")
+    tracker.phase("recall")
+    tracker.phase("spec")
+    tracker.points(1, 3)
+    tracker.wait({"name": "calc", "kind": "project"})
+    state = home_store.get("running", str(os.getpid()))
+    assert state["title"] == "calc: a calculator" and state["run"] == "abc123" and state["folder"] == str(project_dir)
+    assert state["step"] == "spec" and state["doing"] == "📝 Writing the spec" and state["before"] == 12.0
+    assert state["steps"] == ["🧠 Recalled what Tinker has learned"] and state["passing"] == [1, 3]
+    assert state["waiting"] == {"name": "calc", "kind": "project"} and state["pid"] == os.getpid()
+    events = [e["event"] for _, e in store.entries("progress")]
+    assert events == ["project", "phase", "phase", "points", "waiting"]
+    tracker.points(1, 3)  # no change: nothing published
+    assert len(store.entries("progress")) == 5
+    tracker.end({"status": "done", "headline": "Done."}, 30.0)
+    tracker.pause()
+    state = home_store.get("running", str(os.getpid()))
+    assert state["ended"]["status"] == "done" and state["seconds"] == 30.0 and state["paused"]
+    tracker.close()
+    assert home_store.get("running", str(os.getpid())) is None
+
+
+@pytest.mark.spec("PRJ-14")
+def test_steps_live_progress_and_printed_lines(home_store, project_dir, monkeypatch):
+    assert set(Tracker.STEPS) >= {"recall", "spec", "design", "review", "setup", "tests", "code", "verify", "tidy", "docs",
+                                  "final_review", "lessons", "reproduce", "amend"}
+    tracker = Tracker("calc")
+    store = project_store(project_dir)
+    tracker.project(store, "abc123", project_dir)
+    tracker.live("Write calc.py [think high, reply up to 16K tok]", 120, 30, 14.2)
+    tracker.printed("\x1b[2m[10:00:01      1s (1.00s)]   wrote calc.py (12 lines)\x1b[22m")
+    tracker.printed("  ... still thinking")
+    state = tracker.state
+    assert state["live"] == "Write calc.py: 120 tok written, 30 tok thinking, 14s"
+    assert state["latest"] == "wrote calc.py (12 lines)"
+    assert [e["line"] for _, e in store.entries("output")] == ["[10:00:01      1s (1.00s)]   wrote calc.py (12 lines)",
+                                                               "  ... still thinking"]
+    monkeypatch.setattr(Tracker, "QUIET_EVERY", 1000)
+    tracker.printed("next line")  # a quiet change waits to be published with the next
+    assert home_store.get("running", str(os.getpid()))["latest"] != "next line"
+    tracker.phase("verify")
+    assert home_store.get("running", str(os.getpid()))["latest"] == ""
+
+
+@pytest.mark.spec("PRJ-14")
+def test_the_passing_count_follows_every_save(make_project, make_session):
+    steps = [criterion("C1", "t.py::a", status="green"), criterion("B2", "t.py::b", status="todo", cycle="f1")]
+    tracker = Tracker("calc")
+    session = make_session(make_project(steps), tracker=tracker)
+    session.save()
+    assert tracker.state["passing"] == [1, 2]
+    session.project.criteria[1]["status"] = "green"
+    session.save()
+    assert tracker.state["passing"] == [2, 2]
+
+
+@pytest.mark.spec("PRJ-15")
+def test_a_run_keeps_its_calls_and_output_in_its_project(project_dir, make_model, fake_ollama):
+    from tinkerkit.prompts import Part
+    from tinkerkit.settings import Log
+    store = project_store(project_dir)
+    model = make_model()
+    model.log = Log(store, "events")
+    fake_ollama.reply("ok")
+    model.ask("s", [Part("Q", "q", True)], "Ask")
+    assert [e["reply"] for _, e in store.entries("events")] == ["ok"]

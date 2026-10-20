@@ -6,8 +6,8 @@ deletes waits for confirm); anything else is a normal chat with the model in use
 a task holds the model; `command WHAT` has the model name the command line that does it, run once the
 person confirms it (Shell); `research TOPIC` answers from the web, with the pages as sources (Research);
 and `emergency MESSAGE` stops the task (saved), answers at once and then goes on with the task. A task run
-from a terminal is served the same way: its progress is kept in RUNNING_DIR, and it is stopped or paused
-with a signal.
+from a terminal is served the same way: its tracker is kept in Tinker's home ("running"), and it is
+stopped or paused with a signal.
 
 Channel is what every kind of channel does (receive messages, send, edit what it sent); ConsoleChannel is
 the terminal, and the channels plugin adds the chat apps (TelegramChannel). Every message is written in
@@ -29,17 +29,16 @@ import threading
 import time
 from pathlib import Path
 
+from .commands import BY_NAME, COMMANDS, TERMINAL_ONLY, named, refs
 from .model import Models, Ollama, OllamaError
-from .project import Runs
-from .settings import HOME, STATE_DIR, Config, JsonFile, human_duration
+from .project import Runs, Tracker, saved
+from .settings import Config, Home, human_duration
 from .web import Internet
 from .workspace import Toolchain
 
 
 # --- tasks, and the Tinkers that serve them --------------------------------------------------------------
-RUNNING_DIR = HOME / "running"                 # <process>.json: what each run reporting to the channels does now
 OFF = "TINKER_CHANNELS"                        # =off: a run the conversation started does not report too
-STATUS_FILE = HOME / "listening.json"         # channel -> chat -> the id of Tinker's one status message there
 EDIT_EVERY = 5                                 # seconds between edits of a progress message
 CLOCK_EVERY = 15                               # ... between edits that only move its clock on
 STOP_WAIT = 120                                # seconds a task is given to stop (and save) for an emergency
@@ -65,25 +64,19 @@ RESEARCH_SEARCHES = 3                          # web searches a research makes
 RESEARCH_PAGES = 4                             # pages it reads (the first each search finds, then the second ...)
 RESEARCH_PAGE_CHARS = 3500                     # of each page, the parts most about the topic
 
-# --- tinker's commands, as the conversation runs them (their arguments and help are tinker.py's Cli's) -----
-LONG = ("resume", "add", "fix", "restart", "learn", "calibrate")  # a task: one at a time, its progress shown
-QUICK = ("runs", "status", "memory", "doctor", "models", "list-config", "use-model", "embed", "use-web", "channel")
-DELETES = ("clear", "reset", "restart")  # what it deletes is shown first; done once confirmed (--yes)
-OWN = ("task", "confirm", "amend", "rename", "stop", "emergency", "command", "research", "run", "help",
-       "exit")  # the conversation's
-ONE_WORD = ("resume", "status", "confirm", "rename", "help", "use-model", "embed", "use-web", "calibrate")  # one word after it
-ANY_WORDS = ("task", "emergency", "amend", "command", "research", "run", "add", "fix", "learn", "clear", "channel")
-TERMINAL_ONLY = ("add", "remove", "start")  # tinker channel's: they ask in a terminal (a token, a pairing)
-SAID_BARE = LONG + QUICK + DELETES + OWN + ("chat", "channel")  # commands a conversation takes as their words
+# --- tinker's commands, as the conversation takes them: from the one table (commands.py) -------------------
+LONG = named("long")                           # a task: one at a time, its progress shown
+QUICK = named("quick")                         # what it prints is shown
+DELETES = tuple(c.name for c in COMMANDS if c.deletes)  # what it deletes is shown first; done once confirmed
+OWN = named("own")                             # the conversation's own
+ONE_WORD = tuple(c.name for c in COMMANDS if c.chat and c.words == "one")  # a command with one word after it
+ANY_WORDS = tuple(c.name for c in COMMANDS if c.chat and c.words == "any")  # ... with any words after it
+SAID_BARE = tuple(c.name for c in COMMANDS if c.name)  # commands a conversation takes as their words
 BARE_RE = re.compile(r"(?<![/\w.-])tinker (?=(?:" + "|".join(sorted(SAID_BARE, key=len, reverse=True)) + r")\b)")
-USAGE = {"task": "✍️ Write `task WHAT TO BUILD`, e.g. `task a calculator in Python`",
-         "amend": "✍️ Write `amend WHAT`, e.g. `amend also handle negative numbers`",
-         "rename": "✍️ Write `rename NAME`, e.g. `rename calculator`",
-         "resume": "✍️ Write `resume ID` (`runs` lists the IDs)",
-         "emergency": "✍️ Write `emergency MESSAGE`",
-         "command": "✍️ Write `command WHAT`, e.g. `command show the free disk space`",
-         "research": "✍️ Write `research TOPIC`, e.g. `research the newest Python release`"}
+USAGE = {c.name: f"✍️ Write `{c.synopsis}`" + (f", e.g. `{c.example}`" if c.example else "") for c in COMMANDS if c.name}
 EXIT = ("exit",)  # end the conversation (in a chat, once confirmed: it cannot be started again from there)
+START = "/start"  # what a chat app sends when a person first opens the bot
+WELCOME = ("task", "confirm", "amend", "status", "runs", "run", "research", "help")  # the commands a welcome shows
 
 
 # === how a message is written, and the channels it goes through ==============================================
@@ -327,7 +320,6 @@ class Channel:
         """Become the one Tinker listening on this channel: True once it is, False when another one
         listens. Held until this process ends, even when it crashes. holder: what this one is (its
         process), kept in the lock for the next one to read."""
-        HOME.mkdir(parents=True, exist_ok=True)
         self.claimed = open(self.lock_file(), "a")
         try:
             fcntl.flock(self.claimed, fcntl.LOCK_EX | fcntl.LOCK_NB)
@@ -348,7 +340,7 @@ class Channel:
         return holder if isinstance(holder, dict) else {}
 
     def lock_file(self):
-        return HOME / f"channel-{self.name}.lock"
+        return Home.lock_file(self.name)
 
 
 class ChannelError(Exception):
@@ -450,200 +442,145 @@ def pieces(text, size=3500):
 # === a task's one message ====================================================================================
 
 class Progress:
-    """What a run prints, kept short for a chat: one message kept up to date (the steps done, the one it is
-    on with its clock, what the model is writing right now, how many spec points pass, the latest line) and,
-    when the run ends, its summary with how long the task took."""
-    PASS_RE = re.compile(r"tests: (\d+)/(\d+) criteria pass|^\s*C\d+ passes \((\d+)/(\d+) pass\)")
-    END_RE = re.compile(r"^(Done|Stopped|Not done|Interrupted|Run \w+ is not finished|📋 Spec for)")
-    TIMES_RE = re.compile(r"^(Log|Started|Total execution time): ")  # the terminal's, not the chat's
-    RULE = "=" * 20
-    SAID = ("✅", "✏️", "📁")  # a phase Tinker says itself (Markup), not one a run printed
-    SPEC_RE = re.compile(r"📋 Spec for (.+?) \(run (\w+)\): (.+?)(?:; a person runs it with: (.+))?$")
-    CHANGE_RE = re.compile(r"\s+([+~-]) (?:(C\d+) )?(.*)")
-    POINT_RE = re.compile(r"\s+(C\d+)\s+(.*)")
-    LIVE_RE = re.compile(r"^\s*\.\.\. (.+?)(?: \[[^\]]*\])?: (.+?), (\d+)s\s*$")  # a model call, as it goes
-    NOISE_RE = re.compile(r"^(Run \w+ \(|model |reply limit|Project: |Project folder: |Started: |learned so far|"
-                          r"Log: )")  # its header (where its folder is is Tinker's own)
-    TOTAL_RE = re.compile(r"^Total execution time: ([\d.]+)s")
-    ANSI_RE = re.compile(r"\x1b\[[0-9;]*[A-Za-z]")
-    STEPS = (("Recall", "🧠 Recalling what Tinker has learned", "🧠 Recalled what Tinker has learned"),
-             ("Plan: the spec, changed", "✏️ Changing the spec", "✏️ Spec changed"),
-             ("Plan: the spec", "📝 Writing the spec", "📝 Spec written"),
-             ("Plan: the design", "📐 Designing where the files meet", "📐 Design done"),
-             ("Plan: review", "🔍 Reviewing the design", "🔍 Design reviewed"),
-             ("Setup", "🔧 Setting up the test tool", "🔧 Test tool set up"),
-             ("Spec tests", "🧪 Writing a test for every spec point", "🧪 Tests written"),
-             ("Code", "💻 Writing the code", "💻 Code written"),
-             ("Verify", "🔁 Fixing until every test passes", "🔁 Verified"),
-             ("Tidy", "🧹 Tidying the code", "🧹 Code tidied"),
-             ("README", "📖 Writing the README", "📖 README written"),
-             ("Final review", "🏁 Final review, as a person runs it", "🏁 Final review done"),
-             ("Lessons", "📒 Keeping lessons for the next projects", "📒 Lessons kept"),
-             ("Reproduce the bug", "🐞 Showing the bug with a test", "🐞 Bug shown by a test"))  # (title, doing, done)
+    """A run's tracker (its snapshot), shown short for a chat: one message kept up to date (the steps
+    done, the one it is on with its clock, what the model is writing right now, how many spec points
+    pass, the latest line) and, when the run ends, its ending: how it ended and how to go on, or the
+    plan that waits for the person. It only shows the tracker's data: it never reads a run's printed
+    text for meaning."""
+    SAID = ("✅", "✏️", "📁")  # a phase Tinker says itself (Markup), not a step of the run's
 
-    def __init__(self, title, phase="🚀 Starting: the model loads", before=0.0):
-        self.title, self.phase, self.passing, self.latest = title, phase, "", ""
-        self.summary, self.in_summary, self.ended = [], False, False
-        self.steps, self.step, self.step_began, self.live = [], None, None, ""  # done ones; the one it is on
-        self.before, self.seconds = before, 0.0  # the task's time in its runs before; this run's
+    def __init__(self, title, phase=Tracker.STARTING, before=0.0):
+        self.snapshot = {"title": title, "doing": phase, "step": None, "began": None, "steps": [], "passing": None,
+                         "live": "", "latest": "", "waiting": None, "ended": None, "before": before, "seconds": 0.0}
 
-    def read(self, line):
-        """Take one printed line; True when it changed what the progress message says."""
-        line = self.ANSI_RE.sub("", line).rstrip()
-        live, total = self.LIVE_RE.match(line), self.TOTAL_RE.match(line)
-        if live:  # the model writing: what it writes now
-            self.live = f"{live.group(1)}: {live.group(2)}"
-            return True
-        if total:
-            self.seconds = float(total.group(1))
-        if not line.strip() or line.lstrip().startswith("..."):
-            return False
-        if line.startswith(self.RULE):
-            self.in_summary, self.summary = True, []
-            return False
-        if self.in_summary:
-            self.summary.append(line)
-            self.ended = self.ended or bool(self.END_RE.match(line))
-            return False
-        counts = self.PASS_RE.search(line)
-        step = next((step for step in self.STEPS if line.startswith(step[0])), None)
-        if counts:
-            numbers = [n for n in counts.groups() if n]
-            self.passing = f"{numbers[0]}/{numbers[1]} spec points pass"
-        elif step:  # a step prints its title alone on its line
-            if self.step:
-                self.steps.append(self.step[2])
-            self.step, self.phase, self.step_began, self.live, self.latest = step, step[1], time.monotonic(), "", ""
-        elif self.NOISE_RE.match(line):
-            return False
-        else:
-            self.latest = first_words(line.split("] ", 1)[-1], 300)
-        return True
+    def take(self, snapshot):
+        """The tracker as it is now (the phase Tinker said stays until the run is on a step); True when that
+        changed what the message says."""
+        before = self.text()
+        said = self.snapshot["doing"] if self.snapshot.get("step") is None else None
+        self.snapshot = dict(self.snapshot, **{k: v for k, v in (snapshot or {}).items() if k != "before"})
+        if said and self.snapshot.get("step") is None:
+            self.snapshot["doing"] = said
+        return self.text() != before
+
+    @property
+    def title(self):
+        return self.snapshot["title"]
+
+    @property
+    def passing(self):
+        counts = self.snapshot.get("passing")
+        return f"{counts[0]}/{counts[1]} spec points pass" if counts else ""
 
     def text(self):
-        clock = f" · ⏱ {human_duration(time.monotonic() - self.step_began)}" if self.step_began else ""
-        doing = self.phase if self.phase.startswith(self.SAID) else f"**{lit(self.phase)}**"
-        lines = [f"🔨 **{lit(self.title)}**"] + [f"✅ {step}" for step in self.steps] + [f"▸ {doing}{clock}"]
-        lines += [f"⏳ _{lit(self.live)}_"] if self.live else []
+        state = self.snapshot
+        began = state.get("began")
+        clock = f" · ⏱ {human_duration(time.time() - began)}" if began else ""
+        doing = state["doing"] if state["doing"].startswith(self.SAID) else f"**{lit(state['doing'])}**"
+        lines = [f"🔨 **{lit(state['title'])}**"] + [f"✅ {step}" for step in state.get("steps", [])]
+        lines += [f"▸ {doing}{clock}"]
+        lines += [f"⏳ _{lit(state['live'])}_"] if state.get("live") else []
         lines += [f"📊 {lit(self.passing)}"] if self.passing else []
-        lines += [f"… {lit(self.latest)}"] if self.latest else []
+        lines += [f"… {lit(state['latest'])}"] if state.get("latest") else []
         return "\n".join(lines)
 
     def took(self):
-        """How long the task has taken, in its runs (the time a spec waits for the person left out)."""
-        seconds = self.before + self.seconds
+        """How long the task has taken, in its runs (the time a plan waits for the person left out)."""
+        seconds = self.snapshot.get("before", 0.0) + self.snapshot.get("seconds", 0.0)
         return f"{human_duration(seconds)} ({round(seconds)} seconds)"
 
     def brief(self):
         """Markup: the title, with the phase and the passing points."""
         passing = f", {lit(self.passing)}" if self.passing else ""
-        return f"**{lit(self.title)}** ({Markup.plain(self.phase)}{passing})"
-
-    def ending(self):
-        """The summary for the chat (Markup); a spec waiting for confirmation is the summary itself."""
-        lines = [line for line in self.summary if line.strip() and not self.TIMES_RE.match(line)]
-        if self.waiting():
-            return "\n".join([shown for shown in map(self.spec_line, lines) if shown is not None]
-                             + [f"⏱ _so far: {self.took()}_"])
-        if not lines:
-            return f"🏁 **{lit(self.title)}**"
-        first = lines[0]
-        done = first.startswith("Done") and "but" not in first
-        mark = "✅" if done else "⏸" if re.match(r"(Interrupted|Run \w+ is not finished|Planned)", first) else "⚠️"
-        took = f"⏱ **Done in {self.took()}**" if first.startswith("Done") else f"⏱ _so far: {self.took()}_"
-        return "\n".join([f"🏁 **{lit(self.title)}**", f"{mark} **{lit(first)}**", took]
-                          + [self.done_line(line) for line in lines[1:]])
-
-    def spec_line(self, line):
-        """A line of a waiting spec as the chat shows it (None: a line the chat leaves out)."""
-        head, change, point = self.SPEC_RE.match(line), self.CHANGE_RE.match(line), self.POINT_RE.match(line)
-        if head:
-            name, run, language, start = head.groups()
-            return (f"📋 **Spec for {lit(name)}** · run `{run}`\n🧰 {lit(language)}"
-                    + (f" · ▶️ `{start}`" if start else ""))
-        if line == "What changed:":
-            return "\n✏️ **What changed**"
-        if change:
-            sign, number, text = change.groups()
-            number = f"**{number}** " if number else ""
-            return {"+": f"➕ {number}{lit(text)}", "~": f"🔄 {number}{lit(text)}",
-                    "-": f"➖ ~~{lit(text)}~~"}[sign]
-        if line.startswith("Tested before any code is written"):
-            return "\n🧪 **Tested before any code is written**"
-        if point:
-            return f"**{point.group(1)}** {lit(point.group(2))}"
-        if line.startswith("Not included: "):
-            return f"\n🚫 _Not included:_ {lit(line.split(': ', 1)[1])}"
-        if line.startswith("Its folder: "):  # its name: where Tinker keeps it is Tinker's own
-            return f"📁 `{Path(line.split(': ', 1)[1].split('   (', 1)[0]).name}`"
-        if line.startswith("Build it: "):
-            return "\n👉 `confirm` to build it · `amend WHAT` to change it"
-        if line.startswith("Change it: "):
-            return None
-        return lit(line)
-
-    @staticmethod
-    def done_line(line):
-        """A line of a run's summary as the chat shows it: what to type, as code."""
-        label, _, value = line.partition(": ")
-        more = re.fullmatch(r"Add a feature with: (tinker add .+?); fix a bug with: (tinker fix .+)", line)
-        if more:
-            return f"➕ Add a feature: `{more.group(1)}` · 🐞 fix a bug: `{more.group(2)}`"
-        if label in ("Run it", "Settings") and value:  # in its folder: where that is is Tinker's own
-            return (f"▶️ {label}: `{re.sub(r'^cd .+? && ', '', value)}`" if label == "Run it"
-                    else f"⚙️ {label}: {lit(value)}")
-        return lit(line)
+        return f"**{lit(self.title)}** ({Markup.plain(self.snapshot['doing'])}{passing})"
 
     def waiting(self):
-        """The run ended with its spec waiting for the person to confirm or amend it."""
-        return any(line.startswith("📋 Spec for") for line in self.summary)
+        """The run ended with its plan waiting for the person to confirm or amend it."""
+        return bool(self.snapshot.get("waiting"))
+
+    def ending(self):
+        """The ending for the chat (Markup): the plan that waits, or how the run ended and how to go on."""
+        if self.waiting():
+            return self.plan(self.snapshot["waiting"]) + f"\n⏱ _so far: {self.took()}_"
+        ended = self.snapshot.get("ended")
+        if not ended:
+            return f"🏁 **{lit(self.title)}**"
+        mark = {"done": "✅", "blocked": "⚠️"}.get(ended.get("status"), "⏸")
+        took = f"⏱ **Done in {self.took()}**" if ended.get("status") == "done" else f"⏱ _so far: {self.took()}_"
+        lines = [f"🏁 **{lit(self.title)}**", f"{mark} **{lit(ended.get('headline', ''))}**", took]
+        lines += [f"{'▶️' if label == 'Run it' else '•'} {lit(label)}: " + (f"`{value}`" if label == "Run it" else lit(value))
+                  for label, value in ended.get("details", [])]
+        lines += [" · ".join(f"{label}: `{command}`" for label, command in ended.get("next", []))] \
+            if ended.get("next") else []
+        return "\n".join(lines)
+
+    @staticmethod
+    def plan(plan):
+        """A plan that waits for the person (Markup), from the tracker's data."""
+        heading = "🐞 **Bug shown for" if plan.get("kind") == "fix" else "📋 **Plan for"
+        start = f" · ▶️ `{plan['start']}`" if plan.get("start") else ""
+        lines = [f"{heading} {lit(plan.get('name', ''))}** · run `{plan.get('run', '')}`",
+                 f"🧰 {lit(plan.get('language') or '?')}{start}"]
+        signs = {"+": "➕", "~": "🔄"}
+        if plan.get("changes"):
+            lines += ["", "✏️ **What changed**"] + [
+                f"➖ ~~{lit(change[2:])}~~" if change.startswith("- ") else f"{signs.get(change[:1], '•')} {lit(change[2:])}"
+                for change in plan["changes"]]
+        lines += ["", "🧪 **Tested before any code is written**"]
+        lines += [f"**{criterion_id}** {lit(text)}" for criterion_id, text in plan.get("criteria", [])]
+        if plan.get("non_goals"):
+            lines += ["", f"🚫 _Not included:_ {lit('; '.join(plan['non_goals']))}"]
+        if plan.get("folder"):
+            lines += [f"📁 `{Path(plan['folder']).name}`"]
+        return "\n".join(lines + ["", "👉 `confirm` to build it · `amend WHAT` to change it"])
 
 
 class Reporter:
-    """Progress shown on the channels: the task's one message per chat (sent: kept from the task's run
-    before), edited at most every EDIT_EVERY seconds (a change that came sooner is shown once that much has
-    passed), and its summary edited into it when the run ends."""
+    """A run's tracker shown on the channels: the task's one message per chat (sent: kept from the task's
+    run before). It reads the tracker of the run's process (pid) every EDIT_EVERY seconds and edits the
+    message when it changed (its clock moves on every CLOCK_EVERY), and its ending is edited into it when
+    the run ends. A command that keeps no tracker (learn, calibrate) shows its latest printed line."""
 
-    def __init__(self, channels, title, shared=None, sent=None, phase="🚀 Starting: the model loads", keep="",
-                 before=0.0, on_step=None):
-        self.channels, self.progress = channels, Progress(title, phase, before)
-        self.on_step = on_step  # told when the task goes on to its next step (Tinker's status follows it)
-        self.keep = keep  # what stays at the top of the task's message (its confirmed spec), above its progress
+    def __init__(self, channels, title, pid=None, sent=None, phase=Tracker.STARTING, keep="", before=0.0,
+                 on_step=None):
+        self.channels, self.progress, self.pid = channels, Progress(title, phase, before), pid
+        self.on_step = on_step  # told when the message changes (Tinker's status follows it)
+        self.keep = keep  # what stays at the top of the task's message (its confirmed plan), above its progress
         self.sent, self.last_edit, self.lock = ({} if sent is None else sent), 0.0, threading.Lock()
-        self.shared = shared  # a file the progress is kept in too, for the Tinker listening (running_elsewhere)
-        self.quiet = False  # the run stops for an emergency and goes on: no summary
-        self.pending, self.ended = False, False  # a change not shown yet; the run ended
+        self.quiet = False  # the run stops for an emergency and goes on: no ending
+        self.ended = False
         self.fresh = True  # its first update: the task (re)started from the person's message, below which it shows
         threading.Thread(target=self.keep_up, daemon=True).start()
 
-    def line(self, text):
-        with self.lock:
-            if self.progress.read(text):
-                self.pending = True
-                if time.monotonic() - self.last_edit >= EDIT_EVERY:
-                    self.update()
+    def tracked(self):
+        """The run's tracker as it is now (None when it keeps none, or not yet)."""
+        return Home.store().get("running", str(self.pid)) if self.pid else None
 
     def keep_up(self):
-        """A change that came sooner than EDIT_EVERY is shown once that much has passed; the clock of the
-        step it is on moves on every CLOCK_EVERY."""
         while not self.ended:
             time.sleep(EDIT_EVERY)
+            self.refresh()
+
+    def refresh(self):
+        """The message edited when the tracker changed, or its clock is due to move on."""
+        with self.lock:
+            if self.ended:
+                return
+            changed = self.progress.take(self.tracked())
+            if changed or time.monotonic() - self.last_edit >= CLOCK_EVERY:
+                self.update()
+
+    def printed(self, line):
+        """A line a command printed: shown as its latest, when the command keeps no tracker."""
+        if self.tracked() is None and line.strip() and not line.lstrip().startswith("..."):
             with self.lock:
-                if not self.ended and (self.pending or time.monotonic() - self.last_edit >= CLOCK_EVERY):
-                    self.update()
+                self.progress.snapshot["latest"] = line.strip()[:300]
 
     def update(self):
-        self.last_edit, self.pending = time.monotonic(), False
+        self.last_edit = time.monotonic()
         self.say(self.progress.text())
         if self.on_step:
             self.on_step()
-        if self.shared:
-            try:
-                self.shared.parent.mkdir(parents=True, exist_ok=True)
-                self.shared.write_text(json.dumps({"title": self.progress.title, "brief": self.progress.brief(),
-                                                   "text": self.progress.text()}))
-            except OSError:
-                pass
 
     def say(self, text, done=False):
         """text shown in the task's message (Markup), under what it keeps; done: its last update. Its first
@@ -655,37 +592,15 @@ class Reporter:
                 key = (channel.name, chat)
                 self.sent[key] = channel.show(chat, self.sent.get(key), text, done, bottom)
 
-    def finish(self):
+    def finish(self, snapshot=None):
+        """The run ended: its last tracker (given, or read now) shown, with its ending unless quiet."""
         with self.lock:
             self.ended = True
-            if self.progress.summary and not self.quiet:
+            self.progress.take(snapshot or self.tracked())
+            if (self.progress.waiting() or self.progress.snapshot.get("ended")) and not self.quiet:
                 self.say(self.progress.ending(), done=True)
             else:
                 self.update()
-
-
-class LineWatcher:
-    """sys.stdout passed on as it is, each whole line also given to see(line)."""
-
-    def __init__(self, stream, see):
-        self.stream, self.see, self.partial = stream, see, ""
-
-    def write(self, text):
-        self.stream.write(text)
-        self.partial += text.replace("\r", "\n")
-        *lines, self.partial = self.partial.split("\n")
-        for line in lines:
-            try:
-                self.see(line)
-            except Exception:  # a channel must never break the run it reports on
-                pass
-        return len(text)
-
-    def flush(self):
-        self.stream.flush()
-
-    def __getattr__(self, name):
-        return getattr(self.stream, name)
 
 
 # === what a chat asks for: a chat, a command line, a research ================================================
@@ -1024,20 +939,23 @@ class Research:
 # === tasks run from a terminal ===============================================================================
 
 class Attached:
-    """A task run from a terminal, reporting to the channels: its progress message, kept in RUNNING_DIR too,
-    for the conversation (which reads the chat) to answer status from. That stops it with STOP, as Ctrl-C
-    does (saved), and pauses it for an emergency with PAUSE: the run stops the same way, waits for the answer
-    (its file is removed then), and goes on here (resumed)."""
+    """A task run from a terminal, reporting to the channels: its tracker (which the run keeps in Tinker's
+    home) is shown in its progress message, and the conversation (which reads the chat) answers status from
+    it. That stops it with STOP, as Ctrl-C does (saved), and pauses it for an emergency with PAUSE: the run
+    stops the same way, its tracker says it is paused, it waits for the answer (its tracker is removed
+    then), and goes on here (resumed)."""
 
-    def __init__(self, channels, title):
-        self.reporter = Reporter(channels, title, RUNNING_DIR / f"{os.getpid()}.json")
+    def __init__(self, channels, title, tracker):
+        self.tracker = tracker
+        self.reporter = Reporter(channels, title, pid=os.getpid())
         self.paused = False
 
     def start(self):
-        sys.stdout = LineWatcher(sys.stdout, self.reporter.line)
         signal.signal(PAUSE, self.pause)
         signal.signal(STOP, self.stop)
-        self.reporter.update()
+        with self.reporter.lock:
+            self.reporter.progress.take(self.tracker.state)
+            self.reporter.update()
         return self
 
     def pause(self, signum, frame):
@@ -1049,27 +967,20 @@ class Attached:
 
     def end(self):
         """Stop reporting; True when the run stopped for an emergency, now answered: it goes on."""
-        if isinstance(sys.stdout, LineWatcher):
-            sys.stdout.flush()
-            sys.stdout = sys.stdout.stream
-        self.reporter.finish()
-        shared = self.reporter.shared
+        self.reporter.finish(self.tracker.state)
         if not self.paused:
-            shared.unlink(missing_ok=True)
+            self.tracker.close()
             return False
         print("\nStopped for an emergency from the chat: going on once it is answered.")
-        try:
-            shared.write_text(json.dumps(dict(json.loads(shared.read_text()), paused=True)))
-        except (OSError, ValueError):
-            pass
+        self.tracker.pause()
         ends = time.monotonic() + RESUME_WAIT
-        while shared.exists() and time.monotonic() < ends:
-            time.sleep(1)
-        shared.unlink(missing_ok=True)
+        while Home.store().get("running", str(self.tracker.pid)) is not None and time.monotonic() < ends:
+            time.sleep(min(1, RESUME_WAIT))
+        self.tracker.close()
         return True
 
 
-def attach(title):
+def attach(title, tracker):
     """The enabled channels the run about to start reports to (None when there are none). A channel that
     does not work is said once and left out: a run never fails for its channel."""
     try:
@@ -1077,7 +988,7 @@ def attach(title):
     except SystemExit as exc:
         print(f"  note: channels left out: {exc}")
         return None
-    return Attached(channels, title).start() if channels else None
+    return Attached(channels, title, tracker).start() if channels else None
 
 
 def chat_channels():
@@ -1090,26 +1001,32 @@ def chat_channels():
     return Channels.enabled()
 
 
-def running_elsewhere():
-    """[{pid, title, brief, text, paused}] of the tasks run from a terminal, reporting to the channels (the
-    file of one that ended is removed)."""
+def running(skip=()):
+    """[a run's tracker, with its pid] of the runs in Tinker's home ("running"), but for this process and the
+    processes skipped. The tracker of a process that ended is removed."""
     found = []
-    for path in RUNNING_DIR.glob("*.json"):
-        pid = int(path.stem) if path.stem.isdigit() else 0
-        if pid <= 0 or pid == os.getpid():
+    for key, state in Home.store().items("running").items():
+        pid = int(key) if key.isdigit() else 0
+        if pid <= 0 or pid == os.getpid() or pid in skip:
             continue
         try:
             os.kill(pid, 0)
         except ProcessLookupError:
-            path.unlink(missing_ok=True)
+            Home.store().delete("running", key)
             continue
         except PermissionError:
             pass
-        try:
-            found.append(dict(json.loads(path.read_text()), pid=pid))
-        except (OSError, ValueError, TypeError):
-            pass
+        if isinstance(state, dict):
+            found.append(dict(state, pid=pid))
     return found
+
+
+def described(state):
+    """{title, brief, text, pid, paused} of a run's tracker, as the conversation shows it."""
+    progress = Progress(state.get("title") or "a task")
+    progress.take(state)
+    return {"title": progress.title, "brief": progress.brief(), "text": progress.text(), "pid": state.get("pid"),
+            "paused": bool(state.get("paused"))}
 
 
 def signal_task(pid, signum):
@@ -1125,12 +1042,11 @@ def signal_task(pid, signum):
 class Desk:
     """The conversation, one Tinker serving its channels at once: the terminal (tinker, with no command) and
     the enabled chats (tinker channel start serves the chats alone). Every command of tinker's works here: one
-    task runs at a time, as its own tinker (which does not report too), its progress in its one message; one
-    that deletes shows what it deletes first, and waits for confirm. Tasks run from a terminal are served too
-    (running_elsewhere). Anything that is not a command is a normal chat."""
-    COMMANDS = tuple(dict.fromkeys(OWN + LONG + QUICK + DELETES))
-    RUN_RE = re.compile(r"^Run ([0-9a-f]{3,}) \(")  # a run's first line: its ID
-    FOLDER_LINE_RE = re.compile(r"^Project: (/.+)$")  # its header's: its folder
+    task runs at a time, as its own tinker (which does not report too), followed by its tracker, its progress
+    in its one message; one that deletes shows what it deletes first, and waits for confirm. Tasks run from a
+    terminal are served too (running). Anything that is not a command is a normal chat."""
+    COMMANDS = tuple(c.name for c in COMMANDS if c.chat)
+    LOOK_EVERY = 1.0  # seconds between looks at a followed task's tracker (for its run and folder)
 
     def __init__(self, channels, root):
         self.channels, self.root = channels, Path(root).resolve()
@@ -1139,7 +1055,7 @@ class Desk:
         self.shell = Shell(self.talk, self.root)
         self.research = Research(self.talk)
         self.urgent = False  # an emergency is being answered: no task starts meanwhile
-        self.waiting = None  # {run, folder, title, spec} of the spec that waits for confirm or amend
+        self.waiting = None  # {run, folder, title, spec, stage, new} of the plan that waits for confirm or amend
         self.boards = {}  # run -> its task's messages ({(channel, chat): ids}), kept from one of its runs to the next
         self.asking = {}  # (channel, chat) -> {words, shown}: a command that deletes, waiting for confirm
         self.spent = {}  # run -> the seconds its runs took so far (a task's time: done in ...)
@@ -1176,16 +1092,20 @@ class Desk:
             if not self.consoles:
                 print("\nStopped listening.")
 
+    def children(self):
+        """The processes of the task started here (served as here, not as elsewhere)."""
+        return {self.process.pid} if self.process is not None else set()
+
     def status(self):
         """What Tinker is doing now, as its status says it (Markup): working, waiting for the person, or idle."""
         if self.busy():
             progress = self.reporter.progress
             passing = f" · {lit(progress.passing)}" if progress.passing else ""
-            return f"🔄 **Tinker** · working on {lit(progress.title)}\n▸ {Markup.plain(progress.phase)}{passing}"
+            return f"🔄 **Tinker** · working on {lit(progress.title)}\n▸ {Markup.plain(progress.snapshot['doing'])}{passing}"
         if self.waiting:
             then = "`confirm` · `rename NAME`" if self.waiting.get("stage") == "name" else "`confirm` · `amend WHAT`"
             return f"🙋 **Tinker** · {lit(self.waiting['title'])} waits for you: {then}"
-        elsewhere = running_elsewhere()
+        elsewhere = [described(state) for state in running(self.children())]
         if elsewhere:
             return "🔄 **Tinker** · working in a terminal: " + "; ".join(r["brief"] for r in elsewhere)
         return "🟢 **Tinker** · idle: send a task"
@@ -1193,32 +1113,25 @@ class Desk:
     def say_status(self, text=None, anew=False):
         """Tinker's status, one message in each chat, pinned (the console: said at its start and end): text,
         else what it does now, said only when it changed. anew (it starts listening): the one from before is
-        taken out, and this one sent at the bottom; their ids are kept for the next start (STATUS_FILE)."""
+        taken out, and this one sent at the bottom; their ids are kept for the next start (Tinker's
+        "listening")."""
         text = text or self.status()
         if text == self.said_status and not anew:
             return
         self.said_status = text
-        try:
-            kept = json.loads(STATUS_FILE.read_text())
-        except (OSError, ValueError):
-            kept = {}
-        kept = kept if isinstance(kept, dict) else {}
         for channel in self.channels:
             if channel in self.consoles:
                 if anew or text.startswith("💤"):
                     channel.show(ConsoleChannel.CHAT, None, text, done=True)
                 continue
-            mine = kept.setdefault(channel.name, {})
+            mine = Home.store().get("listening", channel.name) or {}
             for chat in channel.allowed:
                 before = mine.get(chat)
                 if anew and before:
                     channel.delete(chat, before)
                 shown = channel.show(chat, None if anew or not before else [before], text, bottom=False, pin=True)
                 mine[chat] = shown[0] if shown else None
-        try:
-            STATUS_FILE.write_text(json.dumps(kept))
-        except OSError:
-            pass
+            Home.store().put("listening", channel.name, mine)
 
     def listen(self, channel):
         while not channel.closed:
@@ -1228,9 +1141,12 @@ class Desk:
                 self.hear(channel, message)
 
     def hear(self, channel, message):
-        """One message: the answer to what waits for it, else the command it gives (the slow ones in a
-        thread, so the next message is heard meanwhile), else a chat."""
-        command = command_of(message.text, self.COMMANDS)
+        """One message: a welcome for a person who just opened the bot; the answer to what waits for it; else
+        the command it gives (the slow ones in a thread, so the next message is heard meanwhile); else a chat."""
+        if message.text.split()[:1] == [START]:
+            channel.send(message.chat, welcome())
+            return
+        command = command_of(message.text)
         if command == "confirm" and message.id:  # a one-time answer: it would only make the chat grow
             channel.delete(message.chat, message.id)
         if self.settle(channel, message, command):
@@ -1290,22 +1206,23 @@ class Desk:
             if len(words) < 2:
                 return USAGE["task"]
             request = " ".join(words[1:])
-            return self.start_task(["task", request, "--confirm"], self.root, request)
+            return self.start_task(["task", request], self.root, request)
         if command in ("confirm", "amend", "rename"):
             return self.decide(command, words)
         if command == "resume":
-            if len(words) != 2:
+            name, rest = refs(words[1:])
+            if not name or rest:
                 return USAGE["resume"]
-            return self.start_task(["resume", words[1]], self.root, f"resume {words[1]}")
+            return self.start_task(["resume", f"@{name}"], self.root, f"resume @{name}")
         if command == "stop":
             if self.stop_task():
                 return "⏹ **Stopping the task:** it is saved; `resume` goes on later."
-            elsewhere = running_elsewhere()
+            elsewhere = running(self.children())
             for run in elsewhere:  # as Ctrl-C in its terminal: the run saves itself
                 signal_task(run["pid"], STOP)
             if not elsewhere:
                 return "💤 No task is running."
-            return f"⏹ **Stopping** {'; '.join(lit(r['title']) for r in elsewhere)}: saved; `resume` goes on later."
+            return f"⏹ **Stopping** {'; '.join(lit(r.get('title', '')) for r in elsewhere)}: saved; `resume` goes on later."
         if command in ("runs", "status"):
             if command == "status" and len(words) == 1:  # at once: what the conversation knows itself
                 return "\n\n".join([self.status()] + [r["text"] for r in self.now()])
@@ -1319,7 +1236,7 @@ class Desk:
             self.asking[(channel.name, message.chat)] = {"words": [command], "shown": shown}
             return None
         if command == "channel" and words[1:2] and words[1] in TERMINAL_ONLY:
-            return f"🖥 `channel {words[1]}` asks in a terminal: `tinker\u00a0channel {words[1]}` there"
+            return f"🖥 `channel {words[1]}` asks in a terminal: `tinker channel {words[1]}` there"
         if command in DELETES and "--yes" not in words:
             return self.ask_first(channel, message.chat, words)
         if command in LONG:
@@ -1352,31 +1269,35 @@ class Desk:
                                             f"{Markup.fenced(self.tinker(words))}\n```", done=True)
 
     def decide(self, command, words):
-        """confirm [ID]: build the spec that waits (its folder name is asked once first: confirm again, or
-        rename NAME, builds it); amend WHAT: change it (it waits again); rename NAME: rename its folder."""
+        """confirm [@PROJECT]: build the plan that waits (a new project's folder name is asked once first:
+        confirm again, or rename NAME, builds it); amend [@PROJECT] WHAT: change it (it waits again); rename
+        NAME: rename its folder."""
         waiting = self.waiting or {}
-        if command == "amend" and len(words) == 1:
-            return USAGE["amend"]
         if command == "rename":
             return self.rename(waiting, words)
-        if command == "confirm" and len(words) == 1 and waiting.get("stage") == "spec":
+        name, rest = refs(words[1:])
+        if command == "amend" and not rest:
+            return USAGE["amend"]
+        if command == "confirm" and not name and waiting.get("stage") == "spec" and waiting.get("new"):
             waiting["stage"] = "name"
             self.on_board(waiting, self.asked(waiting))
             return None
-        run = words[1] if command == "confirm" and len(words) == 2 else waiting.get("run")
-        if not run:
-            return "🤷 No spec waits for confirmation: start one with `task WHAT TO BUILD`"
-        mine = waiting.get("run") == run
-        folder, title = (waiting["folder"], waiting["title"]) if mine else (self.root, f"run {run}")
+        target = name or waiting.get("run")
+        if not target:
+            return "🤷 No plan waits for confirmation: start one with `task WHAT TO BUILD`"
+        mine = bool(waiting) and target in (waiting.get("run"), Path(str(waiting.get("folder", ""))).name)
+        folder, title = (waiting["folder"], waiting["title"]) if mine else (self.root, f"@{target}")
+        target = waiting["run"] if mine else target
         if command == "confirm":
-            return self.on_task(waiting, self.start_task(["resume", run], folder, title, "✅ **Confirmed:** building it",
-                                                         keep=self.kept(waiting) if mine else ""))
-        change = " ".join(words[1:])
-        return self.on_task(waiting, self.start_task(["amend", run, change], folder, title,
-                                                     f"✏️ **Changing the spec:** {lit(change)}"))
+            return self.on_task(waiting if mine else {}, self.start_task(
+                ["resume", f"@{target}"], folder, title, "✅ **Confirmed:** building it",
+                keep=self.kept(waiting) if mine else ""))
+        change = " ".join(rest)
+        return self.on_task(waiting if mine else {}, self.start_task(
+            ["amend", f"@{target}", change], folder, title, f"✏️ **Changing the plan:** {lit(change)}"))
 
     def on_task(self, waiting, said):
-        """What was said about the task whose spec waits (a refusal), in its message rather than apart, under
+        """What was said about the task whose plan waits (a refusal), in its message rather than apart, under
         what it waits for."""
         if said and waiting:
             self.on_board(waiting, f"{self.asked(waiting)}\n\n{said}")
@@ -1385,7 +1306,7 @@ class Desk:
 
     @staticmethod
     def asked(waiting):
-        """The waiting spec, with what it waits for: its folder's name, once the spec is confirmed."""
+        """The waiting plan, with what it waits for: its folder's name, once a new project's plan is confirmed."""
         if waiting.get("stage") != "name":
             return waiting["spec"]
         return (f"{waiting['spec']}\n\n📁 **Its folder:** `{Path(waiting['folder']).name}`\n👉 `confirm` to build it "
@@ -1393,11 +1314,11 @@ class Desk:
 
     @staticmethod
     def kept(waiting):
-        """Of a waiting spec, what stays in the task's message once it is built: all but what to send next."""
+        """Of a waiting plan, what stays in the task's message once it is built: all but what to send next."""
         return "\n".join(line for line in waiting["spec"].splitlines() if not line.startswith(("👉", "⏱"))).strip()
 
     def on_board(self, waiting, text):
-        """text shown in the message of the task whose spec waits (Tinker's status follows it)."""
+        """text shown in the message of the task whose plan waits (Tinker's status follows it)."""
         board = self.boards.setdefault(waiting["run"], {})
         for channel in self.channels:
             for chat in channel.allowed:
@@ -1409,10 +1330,10 @@ class Desk:
         if len(words) != 2:
             return USAGE["rename"]
         if not waiting:
-            return "🤷 No spec waits for confirmation, so no folder can be renamed (once built, it stays)."
+            return "🤷 No plan waits for confirmation, so no folder can be renamed (once built, it stays)."
         if self.busy():
             return self.on_task(waiting, "⏳ A task is running: wait for it, or `stop` it first.")
-        done = subprocess.run(tinker_command() + ["rename", waiting["run"], words[1]], cwd=self.root, text=True,
+        done = subprocess.run(tinker_command() + ["rename", f"@{waiting['run']}", words[1]], cwd=self.root, text=True,
                               capture_output=True, stdin=subprocess.DEVNULL, env=dict(os.environ, NO_COLOR="1"),
                               timeout=60)
         if done.returncode:
@@ -1424,14 +1345,14 @@ class Desk:
         if waiting.get("stage") != "name":
             self.on_board(waiting, f"{waiting['spec']}\n\n📁 **Renamed:** its folder is `{words[1]}`")
             return None
-        return self.on_task(waiting, self.start_task(["resume", waiting["run"]], waiting["folder"], waiting["title"],
-                                                     f"✅ **Renamed** to `{words[1]}`: building it",
+        return self.on_task(waiting, self.start_task(["resume", f"@{waiting['run']}"], waiting["folder"],
+                                                     waiting["title"], f"✅ **Renamed** to `{words[1]}`: building it",
                                                      keep=self.kept(waiting)))
 
     def run_app(self, channel, chat, said):
-        """run [PROJECT] ARGS... [<<< INPUT]: a built project run the way a person runs it (its run command,
+        """run [@PROJECT] ARGS... [<<< INPUT]: a built project run the way a person runs it (its run command,
         in its folder and environment), with the person's arguments (and input), and what it printed. The
-        project is the one named (its folder's name or its run's ID), else the one built last."""
+        project is the one named (@ID or @folder), else the one built last."""
         given = said[0] if said else ""
         words, _, fed = given.partition("<<<")
         stdin = fed.strip() + "\n" if "<<<" in given else None
@@ -1439,20 +1360,20 @@ class Desk:
             words = shlex.split(words)
         except ValueError:
             words = words.split()
-        project, args = (built_project(words[0]), words[1:]) if words else (None, [])
-        if project is None:  # no project named: the one built last, and every word is an argument
-            project, args = built_project(""), words
+        name, args = refs(words)
+        project = built_project(name)
         if project is None:
-            channel.show(chat, None, "🤷 **No project is built yet:** `task WHAT TO BUILD` builds one", done=True)
+            channel.show(chat, None, f"🤷 **No project @{lit(name)}:** `runs` lists them" if name else
+                         "🤷 **No project is built yet:** `task WHAT TO BUILD` builds one", done=True)
             return
-        workdir, name = Path(project["workdir"]), Path(project["workdir"]).name
-        toolchain = Toolchain((JsonFile.read(workdir / STATE_DIR / "spec.json", {}) or {}).get("toolchain"))
+        workdir, title = Path(project["workdir"]), Path(project["workdir"]).name
+        toolchain = Toolchain((saved(workdir, "spec", "plan", {}) or {}).get("toolchain"))
         if not toolchain.run:
-            channel.show(chat, None, f"🤷 **{lit(name)} has no run command:** it is not a program a person runs",
+            channel.show(chat, None, f"🤷 **{lit(title)} has no run command:** it is not a program a person runs",
                          done=True)
             return
         line = " ".join([toolchain.run] + [shlex.quote(arg) for arg in args])
-        shown = channel.show(chat, None, f"▶️ **{lit(name)}** `{line}` …")
+        shown = channel.show(chat, None, f"▶️ **{lit(title)}** `{line}` …")
         try:
             done = subprocess.run([Shell.SHELL, "-lc", toolchain.shell(line)], cwd=workdir, text=True,
                                   capture_output=True, input=stdin, stdin=None if stdin else subprocess.DEVNULL,
@@ -1464,17 +1385,17 @@ class Desk:
             code, output = "not started", str(exc)
         fed = f"\n_input:_ `{lit(stdin.strip())}`" if stdin else ""
         printed = f"```\n{Markup.fenced(output[-COMMAND_SHOWN:])}\n```" if output else "_(it printed nothing)_"
-        channel.show(chat, shown, f"{'✅' if code == 0 else '❌'} **{lit(name)}** `{line}` · _exit {lit(code)}_{fed}\n"
+        channel.show(chat, shown, f"{'✅' if code == 0 else '❌'} **{lit(title)}** `{line}` · _exit {lit(code)}_{fed}\n"
                                   f"{printed}", done=True)
 
     def busy(self):
         return self.process is not None and self.process.poll() is None
 
     def now(self):
-        """What runs now: the task started here, and any run from a terminal."""
+        """What runs now: the task started here, and any run from a terminal ({title, brief, text})."""
         progress = self.reporter.progress if self.busy() else None
         here = [{"title": progress.title, "brief": progress.brief(), "text": progress.text()}] if progress else []
-        return here + running_elsewhere()
+        return here + [described(state) for state in running(self.children())]
 
     def emergency(self, channel, message):
         """Stop what runs (a task saves itself), answer message, then go on with the task: one started here
@@ -1498,38 +1419,41 @@ class Desk:
                 except subprocess.TimeoutExpired:  # it goes on by itself: answered after its step, as a chat
                     stopped = None
                     say(f"⚠️ The task did not stop in {STOP_WAIT}s; answering after its step.")
-            paused = [run for run in running_elsewhere() if self.pause(say, run)]
+            paused = [described(state) for state in running(self.children())]
+            paused = [run for run in paused if self.pause(say, run)]
         try:
             say(f"\n{self.talk.reply(channel, message)}\n", done=not (stopped or paused))
         finally:
             self.urgent = False
         if stopped:
-            again = ["resume", stopped["run"]] if stopped["run"] else stopped["arguments"]
+            again = ["resume", f"@{stopped['run']}"] if stopped["run"] else stopped["arguments"]
             self.start_task(again, stopped["folder"], stopped["title"], sent=self.reporter.sent,
                             keep=self.reporter.keep)
             say(f"▶️ **Going on** with {lit(stopped['title'])}", done=not paused)
-        for run in paused:  # its file removed: the task goes on in its terminal
-            (RUNNING_DIR / f"{run['pid']}.json").unlink(missing_ok=True)
+        for run in paused:  # its tracker removed: the task goes on in its terminal
+            Home.store().delete("running", str(run["pid"]))
             say(f"▶️ **Going on** with {lit(run['title'])} _(in its terminal)_", done=run is paused[-1])
 
     def pause(self, say, run):
-        """A task run from a terminal, stopped for an emergency: True once it says it is paused."""
+        """A task run from a terminal, stopped for an emergency: True once its tracker says it is paused."""
         say(f"⏸ Stopping {lit(run['title'])} to answer: it is saved and goes on after.")
         signal_task(run["pid"], PAUSE)
         ends = time.monotonic() + STOP_WAIT
         while time.monotonic() < ends:
-            now = next((r for r in running_elsewhere() if r["pid"] == run["pid"]), None)
+            now = next((r for r in running(self.children()) if r["pid"] == run["pid"]), None)
             if now is None or now.get("paused"):
                 return now is not None
             time.sleep(1)
         say(f"⚠️ {lit(run['title'])} did not stop in {STOP_WAIT}s; answering after its step.")
         return False
 
-    def start_task(self, arguments, folder, title, phase="🚀 Starting: the model loads", sent=None, keep=""):
+    def start_task(self, arguments, folder, title, phase=Tracker.STARTING, sent=None, keep=""):
         """Start a task as its own tinker. Its message is the one its run had (by its ID: sent, else the
         boards), keeps keep at its top, and says phase first (Markup when Tinker says it: ✅ confirmed ...);
-        it is shown before the run's first line can show it, so it is one message."""
-        run = arguments[1] if arguments[0] in ("resume", "amend") and len(arguments) > 1 else None
+        it is shown before the run's tracker is, so it is one message."""
+        name = refs(arguments[1:2])[0] if arguments[0] in ("resume", "amend") else ""
+        run = (self.waiting or {}).get("run") if name and name == Path(str((self.waiting or {}).get("folder", ""))).name \
+            else name or None
         sent = sent if sent is not None else self.boards.get(run) if run else None
         with self.lock:
             if self.busy():
@@ -1549,36 +1473,49 @@ class Desk:
             except OSError as exc:
                 self.process = None
                 return f"⚠️ **Could not start it:** {lit(exc)}"
+            self.reporter.pid = self.process.pid
         if self.waiting and self.waiting["folder"] == folder:
-            self.waiting = None  # confirmed or being changed: it waits again only once its spec is sent
+            self.waiting = None  # confirmed or being changed: it waits again only once its plan is shown
         threading.Thread(target=self.follow, args=(self.process, self.reporter, self.task), daemon=True).start()
         return None
 
     def follow(self, process, reporter, task):
-        """The task's printed lines to the terminal and the chat; its run and folder, once its header names
-        them (the folder of a new task is named after it: the title says it from then on)."""
+        """The task's printed lines to the terminal (and as its latest line, when it keeps no tracker); its
+        run and folder from its tracker (the title is named after the folder). Once it ends: its last state
+        shown, a plan that waits kept, and its tracker removed."""
+        looked = 0.0
         for line in process.stdout:
             if self.echo:
                 sys.stdout.write(line)
-            run, folder = self.RUN_RE.match(line), self.FOLDER_LINE_RE.match(line.rstrip())
-            if run and not task["run"]:
-                task["run"] = run.group(1)
-            if task["run"]:
-                self.boards[task["run"]] = reporter.sent
-            if folder and Path(folder.group(1)) != Path(task["folder"]):
-                named, _, request = task["title"].partition(": ")  # a title names its folder at most once
-                request = request if request and named == Path(task["folder"]).name else task["title"]
-                task["folder"] = Path(folder.group(1))
-                task["title"] = reporter.progress.title = f"{task['folder'].name}: {request}"
-            reporter.line(line)
+            reporter.printed(line)
+            if time.monotonic() - looked >= self.LOOK_EVERY:
+                looked = time.monotonic()
+                self.learn(task, reporter, reporter.tracked())
         process.wait()
+        final = reporter.tracked()
+        self.learn(task, reporter, final)
         if task["run"]:
-            self.spent[task["run"]] = reporter.progress.before + reporter.progress.seconds
-        reporter.finish()
+            self.spent[task["run"]] = reporter.progress.snapshot.get("before", 0.0) + (final or {}).get("seconds", 0.0)
+        reporter.finish(final)
+        if final is not None:
+            Home.store().delete("running", str(process.pid))
         if task["run"] and reporter.progress.waiting():
+            plan = reporter.progress.snapshot["waiting"]
             self.waiting = {"run": task["run"], "folder": task["folder"], "title": task["title"],
-                            "spec": reporter.progress.ending(), "stage": "spec"}
+                            "spec": reporter.progress.ending(), "stage": "spec", "new": plan.get("kind") == "project"}
         self.say_status()
+
+    def learn(self, task, reporter, state):
+        """A followed task's run, folder and title, as its tracker says them."""
+        if not state:
+            return
+        if state.get("run"):
+            task["run"] = state["run"]
+            self.boards[task["run"]] = reporter.sent
+        if state.get("folder"):
+            task["folder"] = Path(state["folder"])
+        if state.get("title"):
+            task["title"] = state["title"]
 
     def stop_task(self):
         if not self.busy():
@@ -1611,18 +1548,18 @@ def one_shot(command, text):
     console, talk = ConsoleChannel(bare=False), Talk(commands_brief())
     message, chat = Message(ConsoleChannel.CHAT, text, "you"), ConsoleChannel.CHAT
     if command == "stop":
-        elsewhere = running_elsewhere()
+        elsewhere = running()
         for run in elsewhere:
             signal_task(run["pid"], STOP)
-        console.show(chat, None, f"⏹ **Stopping** {'; '.join(lit(r['title']) for r in elsewhere)}: saved; `resume` "
-                                 f"goes on later" if elsewhere else "💤 No task is running.", done=True)
+        console.show(chat, None, f"⏹ **Stopping** {'; '.join(lit(r.get('title', '')) for r in elsewhere)}: saved; "
+                                 f"`resume` goes on later" if elsewhere else "💤 No task is running.", done=True)
         return None
     if not text and command != "run":
         return f"tinker {command} needs words after it, e.g. tinker {command} {'hello' if command == 'chat' else '...'}"
     if command == "chat":
         console.show(chat, None, talk.reply(console, message, "", CHAT_REPLY_TOKENS), done=True)
     elif command == "research":
-        Research(talk).researching(console, chat, text, running_elsewhere)
+        Research(talk).researching(console, chat, text, lambda: [described(state) for state in running()])
     elif command == "emergency":
         Desk([console], Path.cwd()).emergency(console, message)
     elif command == "run":
@@ -1640,13 +1577,13 @@ def one_shot(command, text):
     return None
 
 
-def command_of(text, commands):
-    """The command a message gives (one of commands, sent as its first word, with or without a /), or ""
-    when it is chat. A word alone is a command; one of ONE_WORD with one word after it is, and one of
-    ANY_WORDS with any words after it ("models are getting better" is a chat)."""
+def command_of(text, commands=None):
+    """The command a message gives (one of the conversation's commands, sent as its first word, with or
+    without a /), or "" when it is chat. A word alone is a command; one of ONE_WORD with one word after it
+    is, and one of ANY_WORDS with any words after it ("models are getting better" is a chat)."""
     words = text.split()
     first = words[0].lower().lstrip("/") if words else ""
-    if first not in commands:
+    if first not in (commands or Desk.COMMANDS):
         return ""
     if len(words) == 1 or first in ANY_WORDS or (first in ONE_WORD and len(words) == 2):
         return first
@@ -1656,6 +1593,18 @@ def command_of(text, commands):
 def after_word(message):
     """What a command word is followed by (the emergency's own message, the command described)."""
     return Message(message.chat, message.text.split(None, 1)[1], message.sender)
+
+
+def welcome():
+    """The welcome for a person who just opened the bot (/start): what Tinker is, and the first commands to try,
+    tldr-style (what each does, then what to send), from the command table."""
+    lines = ["👋 **Welcome to Tinker!**",
+             "I build small programs on this computer with a local model. Tell me what you want: I plan it, show "
+             "you the plan, and build it once you `confirm`.", "", "🚀 **Try these**"]
+    for name in WELCOME:
+        command = BY_NAME[name]
+        lines += [f"- {command.what[0].upper()}{command.what[1:]}:", f"  `{command.example or command.synopsis}`"]
+    return "\n".join(lines + ["", "💬 Anything else is a normal chat with me."])
 
 
 # === small helpers ===========================================================================================
@@ -1707,15 +1656,18 @@ def first_words(text, size=160):
     return " ".join(str(text).split())[:size]
 
 
-def built_project(word):
-    """The run of the project word names (its folder's name, or its run's ID), as the run index keeps it
-    ({id, workdir, task, status}); word "": the one built last. None when there is none."""
-    projects = sorted((r for r in Runs.entries() if Path(str(r.get("workdir", ""))).is_dir()),
-                      key=lambda r: str(r.get("updated", "")), reverse=True)
-    if not word:
-        return next((r for r in projects if r.get("status") == "done"), None)
-    return next((r for r in projects if Path(r["workdir"]).name == word or len(word) >= 3
-                 and str(r.get("id", "")).startswith(word)), None)
+def built_project(name=""):
+    """The project named (@ID or @folder, as Runs.find takes it), or without a name the one built last, from
+    the projects Tinker points to ({id, workdir, task, status ...}). None when there is none."""
+    projects = [r for r in Runs.entries() if Path(str(r.get("workdir", ""))).is_dir()]
+    if name:
+        try:
+            found = Runs.find(name)
+        except SystemExit:
+            return None
+        return next((r for r in projects if r.get("id") == found.get("id")), None)
+    done = [r for r in projects if r.get("status") == "done"]
+    return max(done, key=lambda r: str(r.get("updated", "")), default=None)
 
 
 def first_lines(text, count):

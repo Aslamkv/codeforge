@@ -10,8 +10,8 @@ import pytest
 import tinkerkit.model as model_module
 from tinkerkit.model import Calibrator, Model, Models, Ollama, OllamaError, Stream
 from tinkerkit.prompts import Part, Prompts, PromptTooLarge
-from tinkerkit.settings import CHARS_PER_TOKEN, Config, JsonFile, PROMPT_HEADROOM
-from conftest import MEASURED, MODEL, read_json
+from tinkerkit.settings import CHARS_PER_TOKEN, Config, Home, PROMPT_HEADROOM
+from conftest import MEASURED, MODEL
 
 
 class Body(io.BytesIO):
@@ -31,22 +31,25 @@ def http_error(code, body=b""):
 
 
 @pytest.mark.spec("MOD-1")
-def test_model_file(tinker_home):
-    assert Models.file("qwen3:8b") == tinker_home / "models" / "qwen3_8b.json"
-    assert Models.file("a/b c") == tinker_home / "models" / "a_b_c.json"
+def test_measured_settings_are_kept_by_model_name(home_store):
+    assert Models.settings("qwen3:8b") is None
+    Models.keep("qwen3:8b", {"num_ctx": 1})
+    assert Models.settings("qwen3:8b") == {"num_ctx": 1} and home_store.get("models", "qwen3:8b") == {"num_ctx": 1}
+    home_store.put("models", "broken", "not a dict")
+    assert Models.settings("broken") is None
 
 
 @pytest.mark.spec("MOD-2")
 def test_selected_needs_a_measured_model(tinker_home):
     with pytest.raises(SystemExit, match="No model in use"):
         Models.selected()
-    Config.load()["model"] = "m"
+    Config.save(**{"model": "m"})
     with pytest.raises(SystemExit, match="has not been measured"):
         Models.selected()
-    JsonFile.write(Models.file("m"), dict(MEASURED, num_ctx=0, fix_max_tokens=True))
+    Models.keep("m", dict(MEASURED, num_ctx=0, fix_max_tokens=True))
     with pytest.raises(SystemExit, match="no usable num_ctx, fix_max_tokens"):
         Models.selected()
-    JsonFile.write(Models.file("m"), MEASURED)
+    Models.keep("m", MEASURED)
     assert Models.selected() == ("m", MEASURED)
 
 
@@ -77,11 +80,11 @@ def test_remember_keeps_the_learned_chars_per_token(measured_model, make_model, 
     model.crashes = 2
     model.max_tokens = 5000
     Models.remember(model)
-    assert read_json(Models.file(MODEL))["chars_per_token"] == 2.9
+    assert Models.settings(MODEL)["chars_per_token"] == 2.9
     assert "crashed 2 time(s)" in capsys.readouterr().out
     model.ratios = [3.0] * 4  # too few to learn from
     Models.remember(model)
-    assert read_json(Models.file(MODEL))["chars_per_token"] == 2.9
+    assert Models.settings(MODEL)["chars_per_token"] == 2.9
 
 
 @pytest.mark.spec("MOD-6")
@@ -158,6 +161,22 @@ def test_stream_keeps_the_end_of_the_thought(monkeypatch):
     for piece in ("a" * 8, "b" * 8):
         stream.take({"message": {"thinking": piece}})
     assert stream.thought == "aa" + "b" * 8 and stream.thinking == 2
+
+
+@pytest.mark.spec("MOD-9")
+def test_stream_tells_its_watcher_how_the_reply_goes(monkeypatch):
+    clock = iter([0, 3, 6])
+    monkeypatch.setattr(model_module.time, "perf_counter", lambda: next(clock))
+    monkeypatch.setattr(model_module.Console, "progress", staticmethod(lambda text: None))
+    seen = []
+
+    def watch(label, written, thinking, seconds):
+        seen.append((label, written, thinking, seconds))
+        raise RuntimeError("a watcher failing never breaks the reply")
+    stream = Stream("Write calc.py", None, watch)
+    stream.take({"message": {"thinking": "hm"}})
+    stream.take({"message": {"content": "x"}})
+    assert seen == [("Write calc.py", 0, 1, 3), ("Write calc.py", 1, 1, 6)]
 
 
 @pytest.mark.spec("MOD-9")
@@ -248,8 +267,8 @@ def test_calibrate_writes_the_measured_settings(fake_ollama, monkeypatch, no_sle
         lambda name, prompt, options, timeout=0: {"prompt_eval_count": len(prompt), "prompt_eval_duration": 2e9}))
     fake_ollama.reply({"content": "OK", "prompt_eval_count": 400, "eval_count": 2, "eval_duration": 1e8})
     settings = Calibrator("m").run()
-    saved = read_json(Models.file("m"))
-    assert saved == settings
+    saved = Models.settings("m")
+    assert saved == settings and Home.store().get("models", "m") == settings
     assert saved["max_prompt_tokens"] == 8192 and saved["max_reply_tokens"] == 16384
     assert saved["fix_max_tokens"] == 4096 and saved["num_ctx"] == 25600 and saved["think"] == "high"
     assert saved["probes"] == [[8192, "read"]] and 2.0 <= saved["chars_per_token"] <= 4.0
@@ -269,7 +288,7 @@ def test_model_settings(make_model):
 
 
 @pytest.mark.spec("MOD-15")
-def test_ask_once(make_model, fake_ollama, tmp_path):
+def test_ask_once(make_model, fake_ollama, model_log):
     fake_ollama.reply("the answer")
     model = make_model()
     assert model.ask("You help.", [Part("Question", "what?", True), Part("Empty", "")], "Ask") == "the answer"
@@ -277,7 +296,7 @@ def test_ask_once(make_model, fake_ollama, tmp_path):
     assert messages[0] == {"role": "system", "content": "You help." + Prompts.NO_TOOL_CALLS}
     assert messages[1] == {"role": "user", "content": "## Question\nwhat?"}
     assert fake_ollama.calls[0]["think"] == "high" and fake_ollama.calls[0]["options"]["num_ctx"] == 32768
-    log = [json.loads(line) for line in (tmp_path / "model-log.jsonl").read_text().splitlines()]
+    log = [entry for _, entry in model_log.store.entries("calls")]
     assert log[0]["reply"] == "the answer" and log[0]["label"].startswith("Ask [think high")
 
 

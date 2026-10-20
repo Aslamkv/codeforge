@@ -2,7 +2,6 @@
 model once, quickly (Calibrator)."""
 
 import json
-import re
 import secrets
 import subprocess
 import sys
@@ -15,7 +14,6 @@ from .prompts import Part, Prompts, PromptTooLarge, Reply
 from .settings import (
     CAPACITY_STEP,
     CHARS_PER_TOKEN,
-    CONFIG_FILE,
     CRASH_NEAR,
     CRASH_RECOVERY,
     CRASH_RETRIES,
@@ -29,7 +27,6 @@ from .settings import (
     MIN_CHARS_PER_TOKEN,
     MIN_PROMPT_TOKENS,
     MIN_REPLY_TOKENS,
-    MODELS_DIR,
     OOM_RETRIES,
     OOM_SHRINK,
     PROBE_BATCH,
@@ -43,8 +40,7 @@ from .settings import (
     THOUGHT_KEPT,
     Config,
     Console,
-    EventLog,
-    JsonFile,
+    Home,
     first_line,
     now_text,
 )
@@ -65,8 +61,8 @@ class OllamaError(Exception):
 
 
 class Models:
-    """The models Ollama has, and what calibration measured for each (models/<model>.json): the
-    settings a run uses, and what a run learned about its model."""
+    """The models Ollama has, and what calibration measured for each (Tinker's "models"): the settings
+    a run uses, and what a run learned about its model."""
     MEASURED = ("max_prompt_tokens", "num_ctx", "max_reply_tokens", "fix_max_tokens")  # what a run needs of them
 
     @staticmethod
@@ -74,7 +70,7 @@ class Models:
         """The name, when Ollama has a model of exactly that name (as tinker models lists it)."""
         models = Ollama.installed_models()
         if models is None:
-            raise SystemExit(f"Ollama does not answer at {Config.ollama_url()} ({CONFIG_FILE.name}: ollama_url).")
+            raise SystemExit(f"Ollama does not answer at {Config.ollama_url()} (tinker config ollama_url URL).")
         names = [m.get("name", "") for m in models]
         if name not in names:
             close = [n for n in names if name.lower() in n.lower()]
@@ -91,23 +87,23 @@ class Models:
                              "tinker use-model NAME (tinker models lists them).")
         settings = Models.settings(name)
         if settings is None:
-            raise SystemExit(f"{name}, the model in use ({CONFIG_FILE.name}: model), has not been measured: "
-                             f"tinker calibrate {name}")
+            raise SystemExit(f"{name}, the model in use, has not been measured: tinker calibrate {name}")
         broken = [key for key in Models.MEASURED if isinstance(settings.get(key), bool)
                   or not isinstance(settings.get(key), int) or settings[key] < 1]
         if broken:
-            raise SystemExit(f"{Models.file(name)} has no usable {', '.join(broken)}: measure the model again with "
-                             f"tinker calibrate {name}")
+            raise SystemExit(f"What was measured for {name} has no usable {', '.join(broken)}: measure the model "
+                             f"again with tinker calibrate {name}")
         return name, settings
 
     @staticmethod
     def settings(name):
         """A model's measured settings, or None when it was never calibrated."""
-        return JsonFile.read(Models.file(name))
+        settings = Home.store().get("models", name)
+        return settings if isinstance(settings, dict) else None
 
     @staticmethod
-    def file(name):
-        return MODELS_DIR / (re.sub(r"[^A-Za-z0-9._-]+", "_", name) + ".json")
+    def keep(name, settings):
+        Home.store().put("models", name, settings)
 
     @staticmethod
     def remember(model):
@@ -123,10 +119,7 @@ class Models:
                   f"tinker calibrate {model.name}")
         learned, settings = model.learned_chars_per_token(), Models.settings(model.name)
         if learned and settings and settings.get("chars_per_token") != learned:
-            try:
-                JsonFile.write(Models.file(model.name), dict(settings, chars_per_token=learned))
-            except OSError:
-                pass
+            Home.store().update("models", model.name, lambda kept: dict(kept or settings, chars_per_token=learned))
 
     @staticmethod
     def context_for(budget, max_reply, context_length):
@@ -143,7 +136,7 @@ class Models:
 
 
 class Ollama:
-    """Ollama's HTTP API (ollama_url in config.json): chat calls streamed with live progress, raw
+    """Ollama's HTTP API (the setting ollama_url): chat calls streamed with live progress, raw
     prompts for calibration, and what it says about its models."""
     RUNNER_CRASHES = ("runner failed", "runner process has terminated", "runner process no longer running",
                       "command buffer execution failed", "panic:", "signal: abort", "signal: killed",
@@ -217,16 +210,17 @@ class Ollama:
 
     @staticmethod
     def chat(name, messages, keep_alive, options, think=None, label=None, done_when=None,
-             timeout=REQUEST_TIMEOUT):
-        """Stream one chat request (live progress when labelled). done_when(content) says when the
-        reply is complete: the stream is closed there, which stops Ollama generating. Returns the
-        final stats chunk with message.content set to the reply."""
+             timeout=REQUEST_TIMEOUT, watch=None):
+        """Stream one chat request (live progress when labelled; watch(label, written, thinking,
+        seconds) is told as it goes). done_when(content) says when the reply is complete: the stream is
+        closed there, which stops Ollama generating. Returns the final stats chunk with message.content
+        set to the reply."""
         payload = {"model": name, "messages": messages, "stream": True, "keep_alive": keep_alive}
         if think is not None:
             payload["think"] = think
         if options:
             payload["options"] = options
-        stream = Stream(label, done_when)
+        stream = Stream(label, done_when, watch)
         try:
             with urllib.request.urlopen(Ollama.request("/api/chat", payload), timeout=timeout) as response:
                 stream.read(response)
@@ -287,7 +281,7 @@ class Calibrator:
        shared between the prompt (up to PROMPT_TARGET) and the reply.
     A probe is a prompt of an exact number of tokens: random digits sent as is (no chat template),
     one token each in most tokenizers (one that counts them otherwise is measured by the read).
-    Saved in models/<model>.json, which may be edited by hand."""
+    Kept in Tinker's "models" (tinker models and tinker config show it)."""
 
     # text like a real prompt (code, a docstring, a comment): a run sizes its prompts from its chars per token
     FILLER = """def due_items(items, today):
@@ -320,9 +314,9 @@ class Calibrator:
         budget, max_reply = self.shared(context)
         settings = self.settings(facts, think, budget, context, crash, max_reply)
         Ollama.unload(self.name)
-        JsonFile.write(Models.file(self.name), settings)
+        Models.keep(self.name, settings)
         Console.step(f"calibrated {self.name}: prompts up to {budget} tokens, replies up to {max_reply}, think "
-                     f"{think}; saved in {Models.file(self.name)}", started)
+                     f"{think}", started)
         return settings
 
     def check_fit(self, facts):
@@ -478,11 +472,12 @@ class Calibrator:
 
 
 class Model:
-    """The one model, with the settings its calibration measured (models/<model>.json): its
-    context, its think setting, every prompt within its input budget, every reply up to the
-    longest it writes (a fix: up to fix_max)."""
+    """The one model, with the settings its calibration measured: its context, its think setting,
+    every prompt within its input budget, every reply up to the longest it writes (a fix: up to
+    fix_max). Every exchange goes to its log (log.add(event)); watch(label, written, thinking,
+    seconds) is told how a reply goes while it is written."""
 
-    def __init__(self, name, settings, keep_alive, log_path, exclusive=True,
+    def __init__(self, name, settings, keep_alive, log, exclusive=True,
                  max_growth=DEFAULT_CONFIG["max_growth"]):
         self.name, self.settings = name, settings
         self.max_tokens, self.num_ctx = int(settings["max_prompt_tokens"]), int(settings["num_ctx"])
@@ -492,7 +487,8 @@ class Model:
         self.max_reply, self.fix_max = int(settings["max_reply_tokens"]), int(settings["fix_max_tokens"])
         self.keep_alive = keep_alive
         self.options = {"num_batch": int(settings["num_batch"])} if settings.get("num_batch") else {}
-        self.log, self.exclusive, self.max_growth = EventLog(log_path), exclusive, max_growth
+        self.log, self.exclusive, self.max_growth = log, exclusive, max_growth
+        self.watch = None
         self.think_rejected = False
         self.overthought = False    # the last call thought to its cap without an answer
         self.last_thought = ""      # ... and the end of what it thought
@@ -549,7 +545,8 @@ class Model:
             started = time.perf_counter()
             try:
                 data = Ollama.chat(self.name, [{"role": "system", "content": system}, {"role": "user", "content": user}],
-                                   self.keep_alive, self.request_options(tries.budget), tries.think, shown, done_when)
+                                   self.keep_alive, self.request_options(tries.budget), tries.think, shown, done_when,
+                                   watch=self.watch)
             except OllamaError as exc:
                 final = self.after_error(exc, label, tries, self.prompt_tokens(system, user), shown, started)
                 if final is not None:
@@ -799,11 +796,11 @@ class Model:
 
 
 class Stream:
-    """Reads a streamed reply: collects its content, shows live progress, and stops early once
-    done_when(content) says the reply is complete."""
+    """Reads a streamed reply: collects its content, shows live progress (and tells its watcher), and
+    stops early once done_when(content) says the reply is complete."""
 
-    def __init__(self, label, done_when):
-        self.label, self.done_when = label, done_when
+    def __init__(self, label, done_when, watch=None):
+        self.label, self.done_when, self.watch = label, done_when, watch
         self.content, self.written, self.thinking, self.final = "", 0, 0, {}
         self.thought = ""  # the end of what the model thought (kept for a reply cut while thinking)
         self.started = self.last_print = time.perf_counter()
@@ -861,6 +858,11 @@ class Stream:
             status = (f"{self.written} tok written, {self.thinking} tok thinking" if self.written or self.thinking
                       else "loading model / reading prompt")
             Console.progress(f"  ... {self.label}: {status}, {now - self.started:.0f}s")
+            if self.watch:
+                try:
+                    self.watch(self.label, self.written, self.thinking, now - self.started)
+                except Exception:  # whoever watches must never break the reply
+                    pass
 
     def complete(self, piece):
         """Checked when a piece may end a block or an object (or every 40 pieces)."""

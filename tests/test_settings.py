@@ -1,8 +1,9 @@
 """SET: Tinker's settings, its home folder and the small helpers every part uses."""
 
 import io
-import json
+import multiprocessing
 import re
+import stat
 import sys
 from pathlib import Path
 
@@ -10,23 +11,16 @@ import pytest
 
 import tinkerkit.settings as settings
 from tinkerkit.settings import (
-    Config, Console, EventLog, Home, JsonFile, Tee, after_what_they_use, first_line, fingerprint, groups_fitting,
+    Config, Console, Home, Store, Tee, after_what_they_use, first_line, fingerprint, groups_fitting,
     human_duration, similarity, split_text, words,
 )
 from conftest import REAL_HOME
 
 
 @pytest.mark.spec("SET-1")
-def test_home_is_dot_tinker_next_to_the_real_script():
+def test_home_is_dot_tinker_next_to_the_real_script(tinker_home):
     assert REAL_HOME == Path(settings.__file__).resolve().parent.parent / ".tinker"
-
-
-@pytest.mark.spec("SET-1")
-def test_every_home_file_is_inside_home(tinker_home):
-    for name in ("CONFIG_FILE", "MODELS_DIR", "LANGUAGES_DIR", "MEMORY_FILE", "RUNS_DIR", "COMMANDS_FILE",
-                 "LEARNED_DIR", "EMBEDDINGS_FILE", "LEARN_LOG"):
-        assert getattr(settings, name).parent == settings.HOME, name
-    assert settings.HOME == tinker_home
+    assert Home.root == tinker_home and Home.store().path == tinker_home / "tinker.db"
 
 
 @pytest.mark.spec("SET-2")
@@ -43,31 +37,25 @@ def test_phase_lists():
                                "docs", "final_review", "lessons", "done")
     assert settings.FIX_PHASES == ("recall", "reproduce", "verify", "final_review", "lessons", "done")
     assert settings.PLANNING_PHASES == ("recall", "spec", "design", "review")
+    assert settings.CONFIRM_AFTER == {"feature": "review", "fix": "reproduce"}
 
 
 @pytest.mark.spec("SET-4")
-def test_config_is_defaults_overridden_by_the_file_and_read_once(tinker_home):
-    JsonFile.write(tinker_home / "config.json", {"model": "m1", "test_timeout": 5})
-    assert Config.get("model") == "m1" and Config.get("test_timeout") == 5
-    assert Config.get("web") == "ollama"  # a default the file does not set
-    JsonFile.write(tinker_home / "config.json", {"model": "changed"})
-    assert Config.get("model") == "m1"  # cached: read once
-
-
-@pytest.mark.spec("SET-4")
-def test_config_save_writes_the_merged_settings(tinker_home):
-    JsonFile.write(tinker_home / "config.json", {"model": "m1"})
-    Config.save(web="duckduckgo")
-    saved = json.loads((tinker_home / "config.json").read_text())
-    assert saved["model"] == "m1" and saved["web"] == "duckduckgo" and saved["keep_alive"] == 0
+def test_config_is_defaults_overridden_by_the_home(home_store):
+    home_store.put("config", "model", "m1")
+    assert Config.get("model") == "m1" and Config.get("web") == "ollama"
+    home_store.put("config", "model", "changed")  # another Tinker changed it: seen at once
+    assert Config.get("model") == "changed"
+    Config.save(web="duckduckgo", test_timeout=5)
+    assert Config.load() == dict(settings.DEFAULT_CONFIG, model="changed", web="duckduckgo", test_timeout=5)
 
 
 @pytest.mark.spec("SET-5")
 @pytest.mark.parametrize("key,value", [("keep_alive", "soon"), ("keep_alive", "10 m"), ("max_growth", 1),
                                        ("max_growth", True), ("max_growth", "2"), ("build_think", "max"),
-                                       ("build_think", "true")])
+                                       ("build_think", "true"), ("build_think", 1)])
 def test_check_model_rejects_unusable_settings(key, value):
-    Config.load()[key] = value
+    Config.save(**{key: value})
     with pytest.raises(SystemExit, match=key):
         Config.check_model(run=False)
 
@@ -75,14 +63,14 @@ def test_check_model_rejects_unusable_settings(key, value):
 @pytest.mark.spec("SET-5")
 @pytest.mark.parametrize("value", [0, 300, -1, "10m", "1h30m", "500ms"])
 def test_check_model_accepts_keep_alive_seconds_or_durations(value):
-    Config.load()["keep_alive"] = value
+    Config.save(keep_alive=value)
     Config.check_model(run=True)
 
 
 @pytest.mark.spec("SET-5")
 @pytest.mark.parametrize("value", [0, True, 1.5, "60"])
 def test_test_timeout_is_checked_for_a_run_only(value):
-    Config.load()["test_timeout"] = value
+    Config.save(test_timeout=value)
     Config.check_model(run=False)
     with pytest.raises(SystemExit, match="test_timeout"):
         Config.check_model(run=True)
@@ -92,48 +80,92 @@ def test_test_timeout_is_checked_for_a_run_only(value):
 def test_keep_alive_and_ollama_url_as_ollama_takes_them():
     assert Config.keep_alive("300") == 300 and Config.keep_alive(-1) == -1
     assert Config.keep_alive("10m") == "10m"
-    Config.load()["ollama_url"] = "http://host:1/"
+    Config.save(ollama_url="http://host:1/")
     assert Config.ollama_url() == "http://host:1"
 
 
 @pytest.mark.spec("SET-7")
-def test_json_write_is_whole_utf8_and_leaves_no_temporary_file(tmp_path):
-    path = tmp_path / "a" / "b" / "data.json"
-    JsonFile.write(path, {"name": "café", "n": [1]})
-    text = path.read_text(encoding="utf-8")
-    assert text.endswith("\n") and "café" in text and '\n  "n"' in text
-    assert json.loads(text) == {"name": "café", "n": [1]}
-    assert [p.name for p in path.parent.iterdir()] == ["data.json"]
+def test_store_documents(tmp_path):
+    store = Store(tmp_path / "a" / "x.db")
+    assert store.get("c", "k") is None and store.get("c", "k", {"d": 1}) == {"d": 1}
+    store.put("c", "b", {"name": "café", "n": [1]})
+    store.put("c", "a", 2)
+    store.put("c", "b", {"name": "again"})  # replaced, keeping its place
+    store.put("other", "z", 3)
+    assert store.items("c") == {"b": {"name": "again"}, "a": 2} and store.count("c") == 2
+    store.delete("c", "b")
+    assert store.items("c") == {"a": 2}
+    store.delete("c")
+    assert store.items("c") == {} and store.get("other", "z") == 3
+
+
+def add_many(path, times):
+    store = Store(path)
+    for _ in range(times):
+        store.update("c", "n", lambda n: n + 1, 0)
+
+
+@pytest.mark.spec("SET-7")
+def test_store_updates_from_two_processes_lose_nothing(tmp_path):
+    path = tmp_path / "x.db"
+    Store(path).put("c", "n", 0)
+    context = multiprocessing.get_context("spawn")
+    workers = [context.Process(target=add_many, args=(path, 50)) for _ in range(2)]
+    for worker in workers:
+        worker.start()
+    add_many(path, 50)
+    for worker in workers:
+        worker.join(30)
+    assert Store(path).get("c", "n") == 150
+
+
+@pytest.mark.spec("SET-7")
+def test_a_failed_write_leaves_the_old_value(tmp_path):
+    store = Store(tmp_path / "x.db")
+    store.put("c", "k", "old")
+
+    def broken(value):
+        raise RuntimeError("crash in the middle")
+    with pytest.raises(RuntimeError):
+        store.update("c", "k", broken)
+    assert store.get("c", "k") == "old"
+    with pytest.raises(TypeError):
+        store.put("c", "k", object())  # not JSON: nothing written
+    assert store.get("c", "k") == "old"
 
 
 @pytest.mark.spec("SET-8")
-def test_json_read_missing_gives_the_default(tmp_path):
-    assert JsonFile.read(tmp_path / "none.json", {"d": 1}) == {"d": 1}
+def test_store_logs_and_mode(tmp_path):
+    store = Store(tmp_path / "x.db")
+    first = store.append("log", {"label": "one"})
+    store.append("log", {"label": "two", "x": "é"})
+    store.append("other", {"label": "no"})
+    entries = store.entries("log")
+    assert [e["label"] for _, e in entries] == ["one", "two"] and all("time" in e for _, e in entries)
+    assert [e["label"] for _, e in store.entries("log", after=first)] == ["two"]
+    assert store.logged("log") == 2
+    store.drop_log("log")
+    assert store.entries("log") == [] and store.logged("other") == 1
+    assert stat.S_IMODE((tmp_path / "x.db").stat().st_mode) == 0o600
 
 
 @pytest.mark.spec("SET-8")
-@pytest.mark.parametrize("content", ["{broken", "[1, 2]"])
-def test_json_read_broken_file_that_keeps_work_stops(tmp_path, content):
-    path = tmp_path / "x.json"
-    path.write_text(content)
-    with pytest.raises(SystemExit, match="fix it, or delete it"):
-        JsonFile.read(path, {}, keeps_work=True)
-
-
-@pytest.mark.spec("SET-8")
-def test_json_read_broken_cache_is_noted_and_the_default_used(tmp_path, capsys):
-    path = tmp_path / "x.json"
-    path.write_text("{broken")
-    assert JsonFile.read(path, {"d": 1}) == {"d": 1}
-    assert "could not be read" in capsys.readouterr().out
+def test_a_deleted_database_is_made_again(tmp_path):
+    store = Store(tmp_path / "x.db")
+    store.put("c", "k", 1)
+    (tmp_path / "x.db").unlink()
+    assert store.get("c", "k") is None
+    store.put("c", "k", 2)
+    assert store.get("c", "k") == 2
 
 
 @pytest.mark.spec("SET-9")
-def test_ensure_makes_home_and_default_config(tinker_home):
+def test_ensure_makes_home_and_its_database(tinker_home, capsys):
     assert not tinker_home.exists()
     Home.ensure()
-    assert json.loads((tinker_home / "config.json").read_text()) == settings.DEFAULT_CONFIG
-    Home.ensure()  # a second time changes nothing
+    assert (tinker_home / "tinker.db").is_file() and "created" in capsys.readouterr().out
+    Home.ensure()
+    assert capsys.readouterr().out == ""
 
 
 @pytest.mark.spec("SET-9")
@@ -150,6 +182,8 @@ def test_reset_with_yes_deletes_home(tinker_home):
     Home.ensure()
     Home.reset(yes=True)
     assert not tinker_home.exists()
+    Config.save(model="m")  # the next command starts fresh
+    assert Config.get("model") == "m"
 
 
 @pytest.mark.spec("SET-10")
@@ -162,7 +196,7 @@ def test_reset_without_home_does_nothing(tinker_home, capsys):
 def test_reset_refuses_a_folder_not_named_dot_tinker(tmp_path, monkeypatch):
     other = tmp_path / "precious"
     other.mkdir()
-    monkeypatch.setattr(settings, "HOME", other)
+    monkeypatch.setattr(Home, "root", other)
     with pytest.raises(SystemExit, match="not a .tinker folder"):
         Home.reset(yes=True)
     assert other.exists()
@@ -183,12 +217,17 @@ def test_parts_tinker_clear_knows():
 
 
 @pytest.mark.spec("SET-11")
-def test_clear_deletes_only_the_named_parts(tinker_home):
-    for path in (settings.LANGUAGES_DIR / "python.json", settings.MEMORY_FILE, settings.MODELS_DIR / "m.json"):
-        JsonFile.write(path, {})
-    Home.clear(["languages", "memory"], yes=True)
-    assert not settings.LANGUAGES_DIR.exists() and not settings.MEMORY_FILE.exists()
-    assert (settings.MODELS_DIR / "m.json").exists()
+def test_clear_deletes_only_the_named_parts(home_store, capsys):
+    home_store.put("languages", "python", {})
+    home_store.put("memory", "any", {})
+    home_store.put("models", "m", {})
+    home_store.append("learn", {"label": "x"})
+    home_store.put("learned", "flask", {})
+    Home.clear(["languages", "memory", "learned"], yes=True)
+    assert home_store.items("languages") == {} and home_store.items("memory") == {}
+    assert home_store.items("learned") == {} and home_store.entries("learn") == []
+    assert home_store.items("models") == {"m": {}}
+    assert "Cleared languages, memory, learned." in capsys.readouterr().out
 
 
 @pytest.mark.spec("SET-11")
@@ -204,12 +243,12 @@ def test_clear_with_nothing_there(capsys):
 
 
 @pytest.mark.spec("SET-11")
-def test_clear_outside_a_terminal_without_yes_deletes_nothing(monkeypatch):
-    JsonFile.write(settings.MEMORY_FILE, {})
+def test_clear_outside_a_terminal_without_yes_deletes_nothing(home_store, monkeypatch):
+    home_store.put("memory", "any", {})
     monkeypatch.setattr(sys, "stdin", io.StringIO(""))
     with pytest.raises(SystemExit, match="Nothing deleted"):
         Home.clear(["memory"])
-    assert settings.MEMORY_FILE.exists()
+    assert home_store.items("memory") == {"any": {}}
 
 
 @pytest.mark.spec("SET-12")
@@ -272,22 +311,17 @@ def test_groups_fitting():
 
 
 @pytest.mark.spec("SET-16")
-def test_tee_writes_both_and_ignores_the_file_failing():
-    stream, file = io.StringIO(), io.StringIO()
-    tee = Tee(stream, file)
-    assert tee.write("hi") == 2
-    file.close()
-    tee.write(" there")
-    assert stream.getvalue() == "hi there"
+def test_tee_writes_and_gives_whole_lines():
+    stream, seen = io.StringIO(), []
 
-
-@pytest.mark.spec("SET-16")
-def test_event_log_appends_json_lines(tmp_path):
-    log = EventLog(tmp_path / "log.jsonl")
-    log.add({"label": "one"})
-    log.add({"label": "two", "x": "é"})
-    lines = [json.loads(line) for line in (tmp_path / "log.jsonl").read_text(encoding="utf-8").splitlines()]
-    assert [l["label"] for l in lines] == ["one", "two"] and all("time" in l for l in lines)
+    def see(line):
+        seen.append(line)
+        raise RuntimeError("the log failing")
+    tee = Tee(stream, see)
+    assert tee.write("one\ntw") == 6
+    tee.write("o\n")
+    assert stream.getvalue() == "one\ntwo\n" and seen == ["one", "two"]
+    assert tee.getvalue() == stream.getvalue()  # anything else is the stream's
 
 
 @pytest.mark.spec("SET-17")
@@ -298,14 +332,14 @@ def test_console_step_format(capsys):
 
 
 @pytest.mark.spec("SET-17")
-def test_console_mirror_copies_output_to_current_log(tmp_path, monkeypatch):
-    monkeypatch.setattr(sys, "stdout", sys.stdout)
-    monkeypatch.setattr(sys, "stderr", sys.stderr)
-    monkeypatch.setattr(sys, "__stdout__", io.StringIO())
-    monkeypatch.setattr(sys, "__stderr__", io.StringIO())
-    Console.mirror(tmp_path)
+def test_console_mirror_gives_every_printed_line(monkeypatch):
+    out, seen = io.StringIO(), []
+    monkeypatch.setattr(sys, "stdout", out)
+    monkeypatch.setattr(sys, "stderr", io.StringIO())
+    Console.mirror(seen.append)
     print("logged line")
-    assert "logged line" in (tmp_path / "current.log").read_text()
+    print("to stderr", file=sys.stderr)
+    assert seen == ["logged line", "to stderr"] and out.getvalue() == "logged line\n"
 
 
 @pytest.mark.spec("SET-18")
@@ -328,3 +362,28 @@ def test_keep_awake_without_a_tool_or_failing_does_nothing(monkeypatch):
         raise OSError("cannot start")
     monkeypatch.setattr(settings.subprocess, "Popen", broken)
     Home.keep_awake()  # never raises
+
+
+@pytest.mark.spec("SET-19")
+def test_config_set_reads_and_checks_the_value(capsys):
+    assert Config.set("test_timeout", "90") == 90 and Config.get("test_timeout") == 90
+    assert Config.set("keep_alive", "10m") == "10m" and Config.set("keep_alive", "300") == 300
+    assert Config.set("build_think", "false") is False and Config.set("max_growth", "1.5") == 1.5
+    assert Config.set("web_fallback", "duckduckgo") == "duckduckgo"
+    with pytest.raises(SystemExit, match="test_timeout must be a whole number"):
+        Config.set("test_timeout", "soon")
+    assert Config.get("test_timeout") == 90  # what failed is not kept
+    with pytest.raises(SystemExit, match="web_fallback must be one of"):
+        Config.set("web_fallback", "bing")
+    assert Config.get("web_fallback") == "duckduckgo"
+    with pytest.raises(SystemExit, match="learn_missing"):
+        Config.set("learn_missing", "0")
+    assert Config.get("learn_missing") == 2  # never set before: back to the default
+
+
+@pytest.mark.spec("SET-19")
+def test_config_set_only_the_settings_with_no_command_of_their_own():
+    with pytest.raises(SystemExit, match="model is set with tinker use-model NAME"):
+        Config.set("model", "x")
+    with pytest.raises(SystemExit, match="no setting 'colour'"):
+        Config.set("colour", "red")

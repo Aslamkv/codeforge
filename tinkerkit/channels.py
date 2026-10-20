@@ -5,7 +5,7 @@ and the Tinker that listens (tinker channel start, or tinker in a terminal) read
 (conversation.py); this is the chat apps themselves (TelegramChannel), their settings and tinker channel.
 
 Only the chats a channel was paired with are listened to: a message from anyone else is ignored. Bot tokens
-are kept apart from the settings, in a file only its owner can read."""
+are kept apart from the settings ("channel_secrets", in Tinker's database, which only its owner can read)."""
 import http.client
 import json
 import os
@@ -18,11 +18,9 @@ import urllib.parse
 from pathlib import Path
 
 from .conversation import OFF, Channel, ChannelError, Desk, Markup, Message, first_words
-from .settings import HOME
+from .settings import Home
 
 
-CHANNELS_FILE = HOME / "channels.json"         # name -> its kind, whether it is enabled, the chats it serves
-SECRETS_FILE = HOME / "channel-secrets.json"   # name -> its secrets (a bot token): mode 600, never printed
 PAIRING_WAIT = 120                             # seconds to wait for the first message when pairing a chat
 PIN_NOTE_WAIT = 2                              # seconds before Telegram's note about a pin is taken out
 CHECK_TRIES = 3                                # tries of a channel's first call when it starts listening
@@ -208,32 +206,28 @@ KINDS = {kind.KIND: kind for kind in (TelegramChannel,)}
 
 
 class Channels:
-    """The channels Tinker has: their settings (kind, enabled, the chats they serve) in channels.json,
-    their secrets apart in channel-secrets.json (mode 600)."""
+    """The channels Tinker has: their settings (kind, enabled, the chats they serve) in Tinker's
+    "channels", their secrets apart in its "channel_secrets" (never printed)."""
 
     @staticmethod
     def settings():
-        return Channels.read(CHANNELS_FILE)
+        """{name: settings} of every channel."""
+        return Home.store().items("channels")
 
     @staticmethod
-    def read(path):
-        try:
-            data = json.loads(path.read_text())
-        except FileNotFoundError:
-            return {}
-        except (OSError, ValueError) as exc:
-            raise SystemExit(f"tinker: {path} cannot be read ({exc}): fix or delete it") from None
-        return data if isinstance(data, dict) else {}
+    def secrets(name):
+        return Home.store().get("channel_secrets", name, {})
 
     @staticmethod
-    def write(settings=None, secrets=None):
-        HOME.mkdir(parents=True, exist_ok=True)
-        if settings is not None:
-            CHANNELS_FILE.write_text(json.dumps(settings, indent=2) + "\n")
+    def keep(name, settings, secrets=None):
+        Home.store().put("channels", name, settings)
         if secrets is not None:
-            SECRETS_FILE.touch(mode=0o600, exist_ok=True)
-            os.chmod(SECRETS_FILE, 0o600)
-            SECRETS_FILE.write_text(json.dumps(secrets, indent=2) + "\n")
+            Home.store().put("channel_secrets", name, secrets)
+
+    @staticmethod
+    def forget(name):
+        Home.store().delete("channels", name)
+        Home.store().delete("channel_secrets", name)
 
     @staticmethod
     def make(name):
@@ -243,7 +237,7 @@ class Channels:
         kind = KINDS.get(settings.get("kind"))
         if kind is None:
             raise SystemExit(f"tinker: channel {name!r} is of an unknown kind {settings.get('kind')!r}")
-        return kind(name, settings, Channels.read(SECRETS_FILE).get(name, {}))
+        return kind(name, settings, Channels.secrets(name))
 
     @staticmethod
     def enabled():
@@ -316,10 +310,7 @@ class ChannelCommand:
             raise SystemExit(f"tinker: the {kind} channel does not work with that: {exc}") from None
         chats = ([c.strip() for c in given["chat"].split(",")] if given.get("chat")
                  else ChannelCommand.pair(channel, who))
-        settings[name] = {"kind": kind, "enabled": False, "allowed": chats, "who": who}
-        all_secrets = Channels.read(SECRETS_FILE)
-        all_secrets[name] = secrets
-        Channels.write(settings, all_secrets)
+        Channels.keep(name, {"kind": kind, "enabled": False, "allowed": chats, "who": who}, secrets)
         print(f"Added {name} ({kind}, {who}), serving chat(s) {', '.join(chats)}. "
               f"It starts disabled: tinker channel enable {name}")
 
@@ -351,18 +342,13 @@ class ChannelCommand:
     @staticmethod
     def remove(rest):
         name = ChannelCommand.named(rest, "remove")
-        settings, secrets = Channels.settings(), Channels.read(SECRETS_FILE)
-        settings.pop(name, None)
-        secrets.pop(name, None)
-        Channels.write(settings, secrets)
+        Channels.forget(name)
         print(f"Removed {name}.")
 
     @staticmethod
     def enable(rest, on=True):
         name = ChannelCommand.named(rest, "enable" if on else "disable")
-        settings = Channels.settings()
-        settings[name]["enabled"] = on
-        Channels.write(settings)
+        Channels.keep(name, dict(Channels.settings()[name], enabled=on))
         print(f"{name} is {'enabled: tasks report to it; tinker channel start listens on it' if on else 'disabled'}.")
 
     @staticmethod

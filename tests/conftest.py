@@ -9,37 +9,29 @@ from pathlib import Path
 
 import pytest
 
-import tinker  # noqa: F401  (imported so its path constants are redirected too)
-import tinkerkit.settings as settings
+import tinker  # noqa: F401  (the whole of Tinker loaded, as a run loads it)
 from tinkerkit.model import Model, Ollama
 from tinkerkit.project import Project
+from tinkerkit.settings import Home, Log, Store
 
-REAL_HOME = settings.HOME
+REAL_HOME = Home.root
 MODEL = "fake-model"
 MEASURED = {"model": MODEL, "calibrated": "2026-10-20 10:00", "max_prompt_tokens": 8192, "num_ctx": 32768,
             "max_reply_tokens": 16384, "fix_max_tokens": 4096, "think": "high", "chars_per_token": 3.0}
 
 
-def tinker_modules():
-    return [module for name, module in list(sys.modules.items())
-            if module is not None and (name == "tinker" or name.startswith("tinkerkit"))]
-
-
 @pytest.fixture(autouse=True)
 def tinker_home(tmp_path, monkeypatch):
-    """Tinker's home moved into the test's own folder: every path constant under the real home, in every
-    module that imported one, points into it; the cached config is dropped."""
+    """Tinker's home moved into the test's own folder (never the real .tinker next to tinker.py, which holds
+    live settings, secrets and locks): Home owns where it is, so this is all it takes."""
     home = tmp_path / "tinker-home" / ".tinker"
-    for module in tinker_modules():
-        for attr, value in list(vars(module).items()):
-            if isinstance(value, Path) and (value == REAL_HOME or REAL_HOME in value.parents):
-                monkeypatch.setattr(module, attr, home / value.relative_to(REAL_HOME))
-    monkeypatch.setattr(settings.Config, "values", None)
-    for module in tinker_modules():
-        for attr, value in vars(module).items():
-            assert not (isinstance(value, Path) and (value == REAL_HOME or REAL_HOME in value.parents)), \
-                f"{module.__name__}.{attr} still points at the real Tinker home"
+    monkeypatch.setattr(Home, "root", home)
     return home
+
+
+@pytest.fixture
+def home_store(tinker_home):
+    return Home.store()
 
 
 @pytest.fixture(autouse=True)
@@ -78,7 +70,8 @@ class FakeOllama:
             self.queue.append((when, answer))
         return self
 
-    def chat(self, name, messages, keep_alive, options, think=None, label=None, done_when=None, timeout=None):
+    def chat(self, name, messages, keep_alive, options, think=None, label=None, done_when=None, timeout=None,
+             watch=None):
         if not messages:  # an unload
             self.unloaded.append(name)
             return {"message": {"content": "", "thinking": ""}}
@@ -117,19 +110,24 @@ def fake_ollama(monkeypatch):
 
 
 @pytest.fixture
-def make_model(tmp_path, fake_ollama):
+def model_log(tmp_path):
+    """The log a test's model writes its calls to (model_log.store.entries("calls") reads them)."""
+    return Log(Store(tmp_path / "model-log.db"), "calls")
+
+
+@pytest.fixture
+def make_model(model_log, fake_ollama):
     """A real Model on the scripted Ollama, with measured settings (overridable)."""
     def make(**overrides):
-        return Model(MODEL, dict(MEASURED, **overrides), 0, tmp_path / "model-log.jsonl")
+        return Model(MODEL, dict(MEASURED, **overrides), 0, model_log)
     return make
 
 
 @pytest.fixture
-def measured_model(tinker_home):
-    """The fake model selected in config.json and measured in models/ (as tinker use-model leaves it)."""
-    settings.JsonFile.write(tinker_home / "config.json", {"model": MODEL})
-    settings.JsonFile.write(tinker_home / "models" / f"{MODEL}.json", MEASURED)
-    settings.Config.values = None
+def measured_model(home_store):
+    """The fake model selected and measured (as tinker calibrate and tinker use-model leave it)."""
+    home_store.put("config", "model", MODEL)
+    home_store.put("models", MODEL, MEASURED)
     return MODEL
 
 
@@ -161,9 +159,11 @@ def make_project(project_dir):
 
 @pytest.fixture
 def make_session(make_model):
-    """A real Session (tinker.py) on a Project and the scripted model."""
-    def make(project, model=None, internet=None):
-        return tinker.Session(model or make_model(), project, internet=internet)
+    """A real Session on a Project and the scripted model."""
+    from tinkerkit.session import Session
+
+    def make(project, model=None, internet=None, confirm=True, tracker=None):
+        return Session(model or make_model(), project, internet=internet, confirm=confirm, tracker=tracker)
     return make
 
 
@@ -178,3 +178,14 @@ def file_block(path, body):
 
 def read_json(path):
     return json.loads(Path(path).read_text(encoding="utf-8"))
+
+
+def plan_of(folder):
+    """The plan a project keeps in its database."""
+    from tinkerkit.project import saved
+    return saved(folder, "spec", "plan")
+
+
+def record_of(folder):
+    from tinkerkit.project import saved
+    return saved(folder, "run", "record")

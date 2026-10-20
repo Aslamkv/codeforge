@@ -195,6 +195,7 @@ def test_amend_replaces_the_cycles_criteria(planner, fake_ollama):
     assert cycle["amendments"] == ["also subtract"]
     assert cycle["changes"] == ["~ C1 calc.add(2, 3) is 5 and calc.add(-1, 1) is 0", "+ C3 calc.sub(5, 3) is 2"]
     assert fake_ollama.calls[-1]["think"] is False
+    assert (cycle["phase"], cycle["awaiting"], cycle["contracts_done"]) == ("design", False, [])  # planned again
 
 
 @pytest.mark.spec("PLN-7")
@@ -399,3 +400,12 @@ def test_recall_goes_on_when_its_call_fails(make_project, make_session, fake_oll
     cycle = project.cycles[0]
     Recaller(make_session(project, internet=Web())).run(cycle)
     assert cycle["topics"] == [] and "Going on without what was learned" in capsys.readouterr().out
+
+
+@pytest.mark.spec("PLN-6")
+def test_a_plan_to_confirm_is_a_quick_draft(planner, fake_ollama):
+    session, project, cycle = planner
+    cycle["confirm"] = True
+    fake_ollama.reply(spec_reply(), when="Spec")
+    SpecWriter(session).run(cycle)
+    assert fake_ollama.calls[0]["think"] == "low"

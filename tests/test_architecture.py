@@ -2,14 +2,15 @@
 
 import ast
 import builtins
+import re
 import sys
 from pathlib import Path
 
 import pytest
 
 ROOT = Path(__file__).resolve().parent.parent
-LAYERS = ("settings", "prompts", "workspace", "model", "project", "web", "conversation", "channels", "knowledge",
-          "planning", "building", "finishing")
+LAYERS = ("settings", "commands", "prompts", "workspace", "model", "project", "web", "conversation", "channels",
+          "knowledge", "session", "planning", "building", "finishing")
 
 
 def imports_of(module):
@@ -56,7 +57,7 @@ def test_without_the_channels_plugin_the_conversation_has_no_chats(monkeypatch):
     monkeypatch.delitem(sys.modules, "tinkerkit.channels", raising=False)
     monkeypatch.setattr(builtins, "__import__", no_channels)
     assert conversation.chat_channels() == []
-    assert conversation.attach("a task") is None
+    assert conversation.attach("a task", None) is None
 
 
 @pytest.mark.spec("ARCH-3")
@@ -75,3 +76,26 @@ def test_only_the_model_web_and_channel_modules_open_connections():
     runners = {p.stem for p in [*(ROOT / "tinkerkit").glob("*.py"), ROOT / "tinker.py"]
                if "subprocess.Popen(" in p.read_text(encoding="utf-8")}
     assert runners <= {"workspace", "settings", "conversation"}, runners
+
+
+@pytest.mark.spec("ARCH-4")
+def test_only_home_knows_where_the_home_is():
+    for path in [*(ROOT / "tinkerkit").glob("*.py"), ROOT / "tinker.py"]:
+        if path.stem == "settings":
+            continue
+        text = path.read_text(encoding="utf-8")
+        assert "Home.root /" not in text and '"tinker.db"' not in text, f"{path.name} names a path inside the home"
+        assert not re.search(r"\b[A-Z_]+_(FILE|DIR)\s*=\s*HOME\b", text), path.name
+
+
+@pytest.mark.spec("ARCH-4")
+def test_every_phase_works_through_the_session():
+    from tinkerkit import session
+    from tinkerkit.building import Verifier
+    from tinkerkit.planning import SpecWriter
+    assert issubclass(SpecWriter, session.Phase) and issubclass(Verifier, session.Worker)
+    for module in ("planning", "building", "finishing"):
+        top, inner = imports_of(module)
+        assert "session" in top, f"{module} takes its phases from the session"
+    tinker_py = (ROOT / "tinker.py").read_text(encoding="utf-8")
+    assert "class Session" not in tinker_py

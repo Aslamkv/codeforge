@@ -245,3 +245,9 @@ def test_the_example_toolchain_commands_are_real_commands():
     toolchain = example("{" + Prompts.TOOLCHAIN_JSON + "}")["toolchain"]
     commands = toolchain["setup"] + [v for k, v in toolchain.items() if isinstance(v, str)]
     assert not [c for c in commands if re.search(r"\btinker\b", c)]
+
+
+@pytest.mark.spec("PRM-16")
+def test_the_lessons_prompt_asks_for_general_lessons():
+    assert "never name this project, its files, its names, its features or its data" in \
+        " ".join(Prompts.LESSONS_SYSTEM.split())

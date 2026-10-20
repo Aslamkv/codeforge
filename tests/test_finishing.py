@@ -6,8 +6,9 @@ import pytest
 
 from tinkerkit.finishing import FinalReview, LessonWriter, ReadmeWriter, Tidy
 from tinkerkit.prompts import Reply
+from tinkerkit.settings import Home
 from tinkerkit.workspace import TaughtCommands
-from conftest import TOOLCHAIN, criterion, file_block, read_json
+from conftest import TOOLCHAIN, criterion, file_block
 
 FIXED = "def add(a, b):\n    return a + b\n\n\ndef sub(a, b):\n    return a - b\n"
 TESTS = ("import calc\n\n\ndef test_add():\n    assert calc.add(2, 3) == 5\n\n\n"
@@ -178,7 +179,7 @@ def test_lessons_without_problems_make_no_call(built, fake_ollama, tinker_home):
     cycle = project.cycles[0]
     LessonWriter(session).run(cycle)
     LessonWriter(session).run(cycle)
-    doc = read_json(tinker_home / "languages" / "python.json")
+    doc = Home.store().get("languages", "python")
     assert doc["projects"] == 1 and doc["toolchain"]["run"] == "" and cycle["counted"]
     assert fake_ollama.calls == []
 
@@ -247,3 +248,25 @@ def test_tidy_reverts_a_change_that_breaks_a_test_or_finds_more(built, fake_olla
     fake_ollama.reply("<<<LINES calc.py 1-1>>>\n# TODO one\n# TODO two\ndef add(a, b):\n<<<END>>>", when="Tidy calc.py")
     Tidy(session).run(project.cycles[0])
     assert (project_dir / "calc.py").read_text() == FIXED + "# TODO tidy me\n"
+
+
+@pytest.mark.spec("FIN-8")
+def test_the_lessons_step_proves_what_the_cycle_used(built, fake_ollama):
+    session, project = built
+    session.knowledge.add_lessons([{"text": "Seed random generators inside tests", "phase": "tests"}], [])
+    lesson_id = session.knowledge.known_lessons()[0]["id"]
+    cycle = project.cycles[0]
+    cycle["used"] = {f"lesson:{lesson_id}": ["tests"]}
+    LessonWriter(session).run(cycle)
+    assert session.knowledge.known_lessons()[0]["status"] == "proven" and cycle["proven"]
+
+
+@pytest.mark.spec("FIN-8")
+def test_a_lesson_naming_the_project_is_dropped(built, fake_ollama):
+    session, project = built
+    session.note("fix", "sub added | solved: use -")
+    fake_ollama.reply(json.dumps({"lessons": [{"phase": "code", "scope": "any", "text": "In calc.py, subtract with -"},
+                                              {"phase": "code", "scope": "any", "text": "Name tests after criteria"}],
+                                  "confirmed": []}), when="Lessons")
+    LessonWriter(session).run(project.cycles[0])
+    assert [l["text"] for l in session.knowledge.known_lessons()] == ["Name tests after criteria"]

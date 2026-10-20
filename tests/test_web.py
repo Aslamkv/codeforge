@@ -40,7 +40,7 @@ def internet_with(monkeypatch, *backends, web_name="a", fallback=""):
     """An Internet plugin whose config names backends a and b (given as Scripted instances)."""
     named = dict(zip(("a", "b"), backends))
     monkeypatch.setattr(Internet, "backends", staticmethod(lambda: {name: (lambda t, b=b: b) for name, b in named.items()}))
-    Config.load().update(web=web_name, web_fallback=fallback)
+    Config.save(web=web_name, web_fallback=fallback)
     return Internet()
 
 
@@ -82,7 +82,7 @@ def test_no_backend_left_is_not_available(monkeypatch):
                                        ("web_timeout", True), ("learn_missing", 0), ("learn_missing", 1.5),
                                        ("learn_missing", True)])
 def test_check_rejects_unusable_web_settings(key, value):
-    Config.load()[key] = value
+    Config.save(**{key: value})
     with pytest.raises(SystemExit, match=key):
         Internet.check()
 
@@ -90,20 +90,20 @@ def test_check_rejects_unusable_web_settings(key, value):
 @pytest.mark.spec("WEB-3")
 def test_check_accepts_the_defaults_and_duckduckgo():
     Internet.check()
-    Config.load().update(web="duckduckgo", web_fallback="ollama", web_timeout=2.5, learn_missing=3)
+    Config.save(web="duckduckgo", web_fallback="ollama", web_timeout=2.5, learn_missing=3)
     Internet.check()
 
 
 @pytest.mark.spec("WEB-4")
 def test_required_names_the_option_when_no_backend_works():
-    Config.load().update(web="ollama")  # no OLLAMA_API_KEY in tests
+    Config.save(web="ollama")  # no OLLAMA_API_KEY in tests
     with pytest.raises(SystemExit, match="--web needs the Internet plugin: ollama: no Ollama API key"):
         Internet.required("--web")
 
 
 @pytest.mark.spec("WEB-4")
 def test_required_and_state_with_a_backend_ready(capsys):
-    Config.load().update(web="ollama", web_fallback="duckduckgo")
+    Config.save(web="ollama", web_fallback="duckduckgo")
     internet = Internet.required("tinker learn")
     assert internet.describe() == "duckduckgo"
     assert "web: ollama: no Ollama API key" in capsys.readouterr().out
@@ -112,10 +112,10 @@ def test_required_and_state_with_a_backend_ready(capsys):
 
 @pytest.mark.spec("WEB-4")
 def test_state_when_not_usable():
-    Config.load().update(web="ollama")
+    Config.save(web="ollama")
     assert Internet.state().startswith("ollama: no Ollama API key")
-    Config.load().update(web="nonsense")
-    assert Internet.state().startswith("not usable: web in")
+    Config.save(web="nonsense")
+    assert Internet.state().startswith("not usable: web must be one of")
 
 
 @pytest.mark.spec("WEB-5")
