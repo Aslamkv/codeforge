@@ -21,20 +21,27 @@ tools and the kind of app the request implies; Tinker plans with it, runs the co
 names, and judges them by their exit codes and output.
 
 Usage:
-    tinker task "a calculator in Python" [spec.md] [--plan-only] [--web]   build it
-    tinker restart                        build this folder's task again from scratch (asks first)
-    tinker resume [ID]
-    tinker add [ID] "Add a feature" [--spec feature.md] [--web]
-    tinker fix [ID] "Describe a bug: what you do, what happens, what should happen" [--web]
+    tinker                                talk with Tinker here: every command below, and a normal chat
+    tinker task a calculator in Python [--spec plan.md] [--plan-only] [--web] [--confirm]   build it
+    tinker restart [--yes]                build this folder's task again from scratch (asks first)
+    tinker resume [ID] | tinker confirm [ID] | tinker amend [ID] CHANGE | tinker rename [ID] NAME
+    tinker add [ID] Add a feature [--spec feature.md] [--web]
+    tinker fix [ID] Describe a bug: what you do, what happens, what should happen [--web]
     tinker status [ID] | tinker runs
+    tinker chat MESSAGE | tinker command WHAT | tinker research TOPIC | tinker stop | tinker emergency MESSAGE
     tinker learn WHAT                     learn a language, a tool or a domain (Tinker tells which)
     tinker learn NAME ["DEFINITION"]      a command of yours Tinker may use (an alias in your shell)
     tinker doctor                         what is missing or wrong, and the command that fixes it
     tinker models | tinker calibrate NAME | tinker use-model NAME | tinker embed NAME
-    tinker list-config | tinker memory | tinker reset
+    tinker list-config | tinker memory | tinker clear PART... | tinker reset [--yes]
     tinker help [COMMAND]                 every command, or one command's arguments and options
 How a run thinks, how long the model stays loaded and when it is unloaded are Tinker's to decide,
 from the measured model and config.json (where they may be tuned by hand).
+
+The terminal and a chat are one interface (the conversation): tinker with no command, or a chat app
+(tinker channel start), takes every command as its words (no quotes: task a calculator in Python), and
+anything else as a normal chat; tinker COMMAND ... says one of them once. In a conversation a task's spec
+waits for confirm (amend, rename) before anything is built; a command that deletes shows what first.
 
 Tinker has no model of its own choosing: measure one (tinker calibrate NAME), select it (tinker use-model
 NAME), and every run uses that one. Every command is explicit: one command or one run at a time,
@@ -186,7 +193,8 @@ are the modules of tinkerkit/, one responsibility each, each using only those li
   model      the local model (Ollama, Model and the Tries of one request, Models, Calibrator)
   project    the plan and its record (Project, SpecDocument, Runs, RunChecks)
   web        the Internet plugin, the only part that goes online (Internet, OllamaWeb)
-  channels   the chat plugin: a run's progress, status and stop over Telegram, and chat (Channel, Talk)
+  conversation  the terminal and the chats as one: every command, a chat, research (Desk, Channel, Talk)
+  channels   the chat plugin: Telegram, and tinker channel (TelegramChannel, Channels)
   knowledge  lessons (Knowledge) and learning (Learner, Researcher, Library, Retriever, Embeddings)
   planning   recall, the spec, the contracts where files meet, and their review
   building   setup, the tests, the code, and fixing until every test passes
@@ -221,7 +229,9 @@ from tinkerkit.settings import (
 )
 from tinkerkit.web import Internet
 
-try:  # channels are a plugin: without tinkerkit/channels.py, Tinker works as it did
+from tinkerkit import conversation
+
+try:  # chat channels are a plugin: without tinkerkit/channels.py, Tinker works as it did, in the terminal
     from tinkerkit import channels
 except ImportError:
     channels = None
@@ -239,7 +249,7 @@ def main():
     try:
         args = Cli.parse()
         if args.reset:
-            return Home.reset()
+            return Home.reset(args.yes)
         Home.ensure()
         if Cli.works_for_hours(args):
             Home.keep_awake()
@@ -263,13 +273,14 @@ class Cli:
     # every command, in the order help shows them: (synopsis, what it does); options are listed apart
     GROUPS = {
         "Build": [
-            ('task "TASK" [SPEC]', "build something new, in its own folder in ~/Projects (SPEC: a spec file)"),
-            ("restart", "build this folder's task again from scratch (asks first)"),
+            ("task WHAT TO BUILD", "build something new, in its own folder in ~/Projects (--spec FILE)"),
+            ("restart [--yes]", "build this folder's task again from scratch (asks first)"),
             ("resume [ID]", "continue a run: this folder's, or the one with ID (a spec that waits: build it)"),
-            ('amend [ID] "CHANGE"', "change a spec that waits for confirmation (task --confirm)"),
+            ("confirm [ID]", "build the spec that waits for confirmation (as resume)"),
+            ("amend [ID] CHANGE", "change a spec that waits for confirmation"),
             ("rename [ID] NAME", "rename the folder of a project whose spec waits for confirmation"),
-            ('add [ID] "FEATURE"', "add a feature to a built project"),
-            ('fix [ID] "BUG"', "fix a bug: what you do, what happens, what should"),
+            ("add [ID] FEATURE", "add a feature to a built project"),
+            ("fix [ID] BUG", "fix a bug: what you do, what happens, what should"),
             ("status [ID]", "a run's spec points and whether they pass"),
             ("runs", "every run"),
         ],
@@ -287,8 +298,19 @@ class Cli:
             ("list-config", "the settings a build would use"),
             ("clear PART... [--yes]", "delete parts of what Tinker keeps: languages, memory, learned, models,"
                                       " runs, commands"),
-            ("reset", "delete everything Tinker keeps (projects stay)"),
+            ("reset [--yes]", "delete everything Tinker keeps (projects stay)"),
             ("help [COMMAND]", "this list, or one command's arguments and options"),
+        ],
+        "Talk": [
+            ("(no command)", "talk with Tinker here: every command, and a normal chat (exit ends it)"),
+            ("chat MESSAGE", "a normal chat with the model"),
+            ("command WHAT", "the command line that does it, run once you confirm"),
+            ("research TOPIC", "the web searched, answered with its sources"),
+            ("run [PROJECT] ARGS", "run a built project (the last one built, by default) with these arguments; "
+                                   "<<< TEXT gives it input"),
+            ("stop", "stop the tasks that run (they are saved)"),
+            ("emergency MESSAGE", "stop what runs, answer now, then go on"),
+            ("exit", "end the conversation (in a chat, once confirmed)"),
         ],
         "Channels": [
             ("channel list", "the chat channels (Telegram), and which are enabled"),
@@ -299,8 +321,11 @@ class Cli:
             ("channel start [NAME]", "read the chat: tasks, status, stop, emergency, commands, or just chat"),
         ],
     }
-    EXAMPLES = ("tinker doctor", 'tinker task "a calculator in Python"', 'tinker add "keep a history of results"',
-                'tinker learn "food bank inventory"', "tinker help task")
+    EXAMPLES = ("tinker", "tinker doctor", "tinker task a calculator in Python", "tinker add keep a history of results",
+                "tinker research the newest Python release", "tinker help task")
+    TALK = ("chat", "command", "research", "run", "stop", "emergency")  # the conversation's own (one_shot)
+    TITLES = {"Build": "🔨 Build", "Learn": "🧠 Learn", "Set up": "🔧 Set up", "Talk": "💬 Talk",
+              "Channels": "📡 Channels"}
     RUNS = ("task", "restart", "resume", "amend", "add", "fix")
     COMMANDS = RUNS + ("rename", "status", "runs", "learn", "memory", "doctor", "models", "use-model", "calibrate", "embed",
                        "list-config", "clear", "reset")
@@ -310,16 +335,17 @@ class Cli:
                 "person can follow (its examples are run to check them). It gets its own folder in the projects "
                 "folder (config.json: projects, ~/Projects), with a short name after the task (calc-py); "
                 "--workdir DIR builds in DIR instead (--workdir . here).",
-        "restart": "Build this folder's task again from scratch: everything in it is deleted (after asking), "
+        "restart": "Build this folder's task again from scratch: everything in it is deleted (after asking, "
+                   "or with --yes), "
                    "but for its spec file.",
         "resume": "Continue a run: this folder's, or the one with this ID (from anywhere). A spec that waits "
                   "for confirmation (task --confirm) is confirmed: building starts.",
-        "amend": "Change a spec that waits for confirmation (task --confirm), before anything is built: the "
-                 "spec is given again with the change, and waits again (confirm it with tinker resume).",
+        "amend": "Change a spec that waits for confirmation, before anything is built: the spec is given again "
+                 "with the change, and waits again (build it with tinker confirm).",
         "add": "Add a feature to a built project (this folder's, or the run with this ID).",
         "fix": "Fix a bug: describe what you do, what happens and what should happen. A test shows the bug, "
                "then the code is fixed so it passes and every other test still passes.",
-        "rename": "Rename a project's folder while its spec waits for confirmation (task --confirm), before "
+        "rename": "Rename a project's folder while its spec waits for confirmation, before "
                   "anything is built in it (what is built there may name its folder).",
         "status": "Show a run's spec points and whether their tests pass.",
         "runs": "List every run, newest first.",
@@ -344,7 +370,7 @@ class Cli:
               "calibrate": None, "learn": None, "memory": False, "runs": False,
               "status": None, "doctor": False, "task": None, "spec": None, "spec_file": None, "restart": False,
               "resume": None, "amend": None, "add": None, "fix": None, "workdir": None, "plan_only": False,
-              "web": False, "confirm": False, "rename": None}
+              "web": False, "confirm": False, "rename": None, "yes": False}
     RUN_ID_RE = re.compile(r"[0-9a-fA-F]{3,}")
     FOLDER_RE = re.compile(r"[A-Za-z0-9][\w.-]{0,63}")
 
@@ -352,8 +378,19 @@ class Cli:
     def parse(argv=None):
         """The command line read and checked (a mistake exits with what to change)."""
         argv = sys.argv[1:] if argv is None else argv
-        if not argv or argv[0] in ("help", "-h", "--help"):
+        if not argv:  # a conversation in the terminal (and the enabled chats), as in a chat
+            Home.ensure()
+            conversation.session(Path.cwd())
+            raise SystemExit(0)
+        if argv[0] in ("help", "-h", "--help"):
             Cli.help(argv[1] if len(argv) > 1 else None)
+        if argv[0] in Cli.TALK:  # the conversation's own commands, said once
+            if argv[1:2] in (["-h"], ["--help"]):
+                Cli.help(argv[0])
+            Home.ensure()
+            raise SystemExit(conversation.one_shot(argv[0], " ".join(argv[1:])))
+        if argv[0] == "confirm":  # a spec that waits, confirmed: its run resumed
+            argv = ["resume"] + argv[1:]
         if argv[0] == "channel":  # the chat channels: a plugin of its own, nothing else runs
             if channels is None:
                 raise SystemExit("tinker: channels are not installed (tinkerkit/channels.py is missing)")
@@ -387,11 +424,17 @@ class Cli:
     def help(command=None):
         """tinker help: every command; tinker help COMMAND: that command's arguments and options."""
         if command is None:
-            print(Cli.overview())
+            print(Cli.overview_markup() if os.environ.get("TINKER_FORMAT") == "markup" else Cli.overview())
             raise SystemExit(0)
         if command == "channel" and channels is not None:
             print(channels.ChannelCommand.USAGE)
             raise SystemExit(0)
+        talk = {synopsis.split()[0]: (synopsis, what) for synopsis, what in Cli.GROUPS["Talk"] if synopsis[0] != "("}
+        if command in talk:  # the conversation's own: as said in a session, a chat, or once (tinker COMMAND ...)
+            print(f"usage: tinker {talk[command][0]}\n\n{talk[command][1][0].upper()}{talk[command][1][1:]}.")
+            raise SystemExit(0)
+        if command == "confirm":
+            command = "resume"
         if command not in Cli.COMMANDS:
             raise SystemExit(f"tinker: no command {command!r} (tinker help lists them)")
         Cli.parser(command).print_help()
@@ -403,7 +446,7 @@ class Cli:
         that take them, read from their parsers) and a few examples; in colour in a terminal
         (unless NO_COLOR is set). Columns are lined up before colouring."""
         paint = Cli.painter()
-        title = {"Build": "🔨 Build", "Learn": "🧠 Learn", "Set up": "🔧 Set up", "Channels": "💬 Channels"}
+        title = Cli.TITLES
         width = max(len(synopsis) for lines in Cli.GROUPS.values() for synopsis, _ in lines) + 2
         out = [f"🛠  {paint('tinker', 'bold')} builds what you ask for with a local Ollama model: a small spec, a unit",
                "   test for each point, just enough code, and a README a person can follow.", "",
@@ -425,6 +468,20 @@ class Cli:
                 f"{paint('(' + ', '.join(commands) + ')', 'dim')}" for name, (what, commands) in options.items()]
         out += ["", paint("💡 Examples", "bold")] + [f"  {paint('$', 'dim')} {example}" for example in Cli.EXAMPLES]
         return "\n".join(out + ["", f"{paint('tinker help COMMAND', 'cyan')} shows one command in full."])
+
+    @staticmethod
+    def overview_markup():
+        """tinker help as a conversation shows it (Markup): what to send, by what it is for. A command is sent
+        there as its words alone (no tinker before it)."""
+        out = ["🛠 **What you can send**"]
+        for group, lines in Cli.GROUPS.items():
+            if group == "Channels" and channels is None:
+                continue
+            out += ["", f"**{Cli.TITLES[group]}**"]
+            for synopsis, what in lines:
+                shown = "💬 anything else: a normal chat" if synopsis == "(no command)" else f"`{synopsis}` {what}"
+                out.append(f"- {shown}" if synopsis != "(no command)" else shown)
+        return "\n".join(out + ["", "❓ `help COMMAND` shows one command in full"])
 
     @staticmethod
     def painter():
@@ -449,16 +506,16 @@ class Cli:
     @staticmethod
     def parser(command):
         """The parser of one command, with only what that command takes."""
-        usage = {"add": 'tinker add [ID] "feature" [--spec FILE] [--web] [--plan-only] [--workdir DIR]',
-                 "amend": 'tinker amend [ID] "change" [--workdir DIR]',
+        usage = {"add": "tinker add [ID] FEATURE [--spec FILE] [--web] [--plan-only] [--workdir DIR]",
+                 "amend": "tinker amend [ID] CHANGE [--workdir DIR]",
                  "rename": "tinker rename [ID] NAME [--workdir DIR]",
-                 "fix": 'tinker fix [ID] "bug" [--web] [--workdir DIR]',
+                 "fix": "tinker fix [ID] BUG [--web] [--workdir DIR]",
                  "learn": 'tinker learn WHAT  |  tinker learn NAME "DEFINITION"'}.get(command)
         parser = argparse.ArgumentParser(prog=f"tinker {command}", usage=usage, allow_abbrev=False,
                                          description=Cli.ABOUT[command])
         if command == "task":
-            parser.add_argument("task", help="what to build")
-            parser.add_argument("spec", nargs="?", help="a spec file, e.g. plan.md")
+            parser.add_argument("task", nargs="+", metavar="WHAT", help="what to build (no quotes needed)")
+            parser.add_argument("--spec", metavar="FILE", help="a spec file, e.g. plan.md")
         elif command in ("resume", "status"):
             parser.add_argument("id", nargs="?", default="", help="the run's ID (default: this folder's run)")
         elif command == "rename":
@@ -478,6 +535,8 @@ class Cli:
             parser.add_argument("--web", action="store_true", help="may learn from the web what it needs")
         if command in ("task", "add"):
             parser.add_argument("--plan-only", action="store_true", help="plan, write SPEC.md and stop for review")
+        if command in ("restart", "reset"):
+            parser.add_argument("--yes", action="store_true", help="delete without asking")
         if command == "task":
             parser.add_argument("--confirm", action="store_true", help="stop after a quick spec: build it with "
                                                                        "tinker resume, change it with tinker amend")
@@ -516,6 +575,8 @@ class Cli:
                 parser.error('use tinker learn WHAT (e.g. tinker learn Flask) or tinker learn NAME "DEFINITION" '
                              '(quote the definition)')
             args.learn = given.words
+        if command in ("restart", "reset"):
+            args.yes = given.yes
         if command == "status" and args.status and args.workdir is not None:
             parser.error(Cli.finds_its_folder("tinker status"))
 
@@ -543,8 +604,14 @@ class Cli:
         args.spec is the spec file of a new build."""
         kind = args.command
         args.bug, args.change_request = kind == "fix", None
-        if kind == "task" and not args.task:
-            parser.error('give a task, e.g. tinker task "a calculator in Python"')
+        if kind == "task":  # its words, quoted or not; an older spec file given last as a word is still one
+            words = list(args.task)
+            last = Path(words[-1])
+            if len(words) > 1 and not args.spec and last.suffix in (".md", ".txt") and last.is_file():
+                args.spec = words.pop()
+            args.task = " ".join(words).strip()
+            if not args.task:
+                parser.error("give a task, e.g. tinker task a calculator in Python")
         if kind == "resume" and args.resume and args.workdir is not None:
             parser.error(Cli.finds_its_folder("tinker resume"))
         if kind in ("add", "fix"):
@@ -558,28 +625,34 @@ class Cli:
 
     @staticmethod
     def check_amend(args, parser):
-        """amend [ID] "change": a resume of its run, with the change (args.amend)."""
-        if len(args.amend) > 2 or not args.amend[-1].strip():
-            parser.error('use tinker amend "change" or tinker amend ID "change" (quote the change)')
-        run_id = args.amend[0] if len(args.amend) == 2 else ""
-        if run_id and not Cli.RUN_ID_RE.fullmatch(run_id):
-            parser.error(f"'{run_id}' is not a run ID. Use tinker amend \"change\" or tinker amend ID \"change\"")
+        """amend [ID] CHANGE: a resume of its run, with the change (args.amend)."""
+        run_id, text = Cli.id_and_text(args.amend)
+        if not text:
+            parser.error("use tinker amend CHANGE or tinker amend ID CHANGE")
         if run_id and args.workdir is not None:
             parser.error(Cli.finds_its_folder("tinker amend"))
-        args.amend, args.resume = args.amend[-1].strip(), run_id
+        args.amend, args.resume = text, run_id
+
+    @staticmethod
+    def id_and_text(words):
+        """(run ID, text) of [ID] TEXT: the first word is an ID when it names a run (quoted or not, the
+        rest is the text)."""
+        words = [w for w in words if w.strip()]
+        if len(words) > 1 and Cli.RUN_ID_RE.fullmatch(words[0]):
+            try:
+                Runs.find(words[0])
+                return words[0], " ".join(words[1:]).strip()
+            except SystemExit:
+                pass
+        return "", " ".join(words).strip()
 
     @staticmethod
     def check_request(kind, args, parser):
-        """add [ID] "feature" or fix [ID] "bug"."""
+        """add [ID] FEATURE or fix [ID] BUG: a resume of its run, with the request (args.change_request)."""
         what = "bug" if kind == "fix" else "feature"
-        request = args.fix if kind == "fix" else args.add
-        if len(request) > 2:
-            parser.error(f'use tinker {kind} "{what}" or tinker {kind} ID "{what}" (quote the {what})')
-        run_id, text = (request[0], request[1]) if len(request) == 2 else ("", request[0])
-        if not text.strip():
+        run_id, text = Cli.id_and_text(args.fix if kind == "fix" else args.add)
+        if not text:
             parser.error(f"tinker {kind} needs a {what} description")
-        if run_id and not Cli.RUN_ID_RE.fullmatch(run_id):
-            parser.error(f"'{run_id}' is not a run ID. Use tinker {kind} \"{what}\" or tinker {kind} ID \"{what}\"")
         if run_id and args.workdir is not None:
             parser.error(Cli.finds_its_folder(f"tinker {kind}"))
         args.add, args.fix, args.change_request, args.resume = [text], None, text.strip(), run_id
@@ -919,10 +992,10 @@ class ProjectRun:
         workdir = self.check_requirements()
         if self.args.restart:  # this folder's task again, in the folder emptied first
             spec = self.args.spec
-            Runs.clear_folder(workdir, Path(spec).expanduser().resolve() if spec else None)
+            Runs.clear_folder(workdir, Path(spec).expanduser().resolve() if spec else None, self.args.yes)
         Console.mirror(workdir)
         self.open()
-        listening = channels.attach(f"{Path(workdir).name}: {self.record['task']}") if channels else None
+        listening = conversation.attach(f"{Path(workdir).name}: {self.record['task']}")
         urgent = False
         try:
             self.work_safely()
@@ -1128,7 +1201,7 @@ class ProjectRun:
             print(f"Not included: {'; '.join(cycle['non_goals'])}")
         print(f"Its folder: {project.workdir}   (rename it: tinker rename {run_id} NAME)")
         print(f"Build it: tinker resume {run_id}   (in the chat: confirm)")
-        print(f'Change it: tinker amend {run_id} "..."   (in the chat: amend WHAT)')
+        print(f"Change it: tinker amend {run_id} CHANGE   (in the chat: amend WHAT)")
 
     def summary_blocked(self):
         """Why it stopped: a bug no test showed, a project that does not build, tools that do not

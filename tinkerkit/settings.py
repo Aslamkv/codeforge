@@ -179,9 +179,9 @@ class Home:
     deletes it."""
 
     @staticmethod
-    def reset():
+    def reset(yes=False):
         """tinker reset: delete Tinker's folder next to the script (settings, measured models, lessons,
-        what was learned from the web, the run index), after asking; the next command starts fresh.
+        what was learned from the web, the run index), after asking (yes: without); the next command starts fresh.
         Projects keep their own .tinker folders, so tinker resume works inside them."""
         if not HOME.is_dir():
             print(f"Nothing to reset: {HOME} does not exist.")
@@ -192,9 +192,9 @@ class Home:
         for item in sorted(HOME.iterdir()):
             print(f"  {item.name}{'/' if item.is_dir() else ''}")
         print("Projects are not touched (each keeps its own .tinker folder).")
-        if not sys.stdin.isatty():
-            raise SystemExit("Nothing deleted: run tinker reset in a terminal to confirm.")
-        if input("Delete it? [y/N] ").strip().lower() not in ("y", "yes"):
+        if not yes and not sys.stdin.isatty():
+            raise SystemExit("Nothing deleted: run tinker reset in a terminal to confirm, or add --yes.")
+        if not yes and input("Delete it? [y/N] ").strip().lower() not in ("y", "yes"):
             print("Nothing deleted.")
             return
         shutil.rmtree(HOME)

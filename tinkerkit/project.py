@@ -151,9 +151,9 @@ class Runs:
     one, or a saved one resumed or changed); a folder emptied for tinker restart."""
 
     @staticmethod
-    def clear_folder(workdir, spec):
-        """Delete what is in workdir, after showing it and asking (in a terminal only). The entry that
-        holds the spec file stays. Refuses the home folder, the filesystem root and the folder
+    def clear_folder(workdir, spec, yes=False):
+        """Delete what is in workdir, after showing it and asking (in a terminal only; yes: without asking).
+        The entry that holds the spec file stays. Refuses the home folder, the filesystem root and the folder
         Tinker itself lives in."""
         if workdir in (Path.home().resolve(), Path(workdir.anchor)) or HOME.resolve().is_relative_to(workdir):
             raise SystemExit(f"tinker restart will not empty {workdir}: run it in the project's own folder.")
@@ -168,9 +168,10 @@ class Runs:
             print(f"  ... and {len(items) - 20} more")
         if keep:
             print(f"Kept: {keep.name} (it holds the spec file)")
-        if not sys.stdin.isatty():
-            raise SystemExit("Nothing deleted: run tinker restart in a terminal to confirm.")
-        if input("Delete them and build the task again from scratch? [y/N] ").strip().lower() not in ("y", "yes"):
+        if not yes and not sys.stdin.isatty():
+            raise SystemExit("Nothing deleted: run tinker restart in a terminal to confirm, or add --yes.")
+        if not yes and input("Delete them and build the task again from scratch? [y/N] ").strip().lower() not in (
+                "y", "yes"):
             raise SystemExit("Nothing deleted.")
         for item in items:
             shutil.rmtree(item) if item.is_dir() and not item.is_symlink() else item.unlink()
