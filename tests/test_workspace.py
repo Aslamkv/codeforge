@@ -84,6 +84,15 @@ def test_resolve_rejects(ws, path, why):
 
 
 @pytest.mark.spec("WS-3")
+def test_a_root_reached_through_a_symlink_works(tmp_path):
+    (tmp_path / "real").mkdir()
+    (tmp_path / "link").symlink_to(tmp_path / "real")
+    ws = Workspace(tmp_path / "link")
+    ws.write("a.py", "x = 1")
+    assert (tmp_path / "real" / "a.py").read_text() == "x = 1\n"
+
+
+@pytest.mark.spec("WS-3")
 @pytest.mark.parametrize("path", [".tinker/run.json", ".git/config"])
 def test_writes_into_state_folders_are_refused(ws, path):
     with pytest.raises(ToolError, match="protected"):
@@ -148,12 +157,21 @@ def test_line_edits_only_inside_the_window_shown(ws, project_dir):
 
 
 @pytest.mark.spec("WS-6")
-def test_overlapping_line_edits_keep_one(ws, project_dir):
+@pytest.mark.parametrize("first,second,kept", [("1-2", "2-3", "A\n3\n4\n"), ("2-3", "1-2", "1\nA\n4\n")])
+def test_of_overlapping_line_edits_the_earlier_one_is_kept(ws, project_dir, first, second, kept):
     (project_dir / "a.py").write_text("1\n2\n3\n4\n")
-    reply = Reply("<<<LINES a.py 1-2>>>\nA\n<<<END>>>\n<<<LINES a.py 2-3>>>\nB\n<<<END>>>")
+    reply = Reply(f"<<<LINES a.py {first}>>>\nA\n<<<END>>>\n<<<LINES a.py {second}>>>\nB\n<<<END>>>")
     change = ws.apply(reply, allow, windows={"a.py": (1, 4)})
-    assert any("overlapping" in n for n in change.notes)
-    assert ws.read("a.py") in ("A\n3\n4\n", "1\nB\n4\n")
+    assert change.notes == [f"a.py: lines {second} overlap an earlier LINES block; kept the earlier one"]
+    assert ws.read("a.py") == kept
+
+
+@pytest.mark.spec("WS-6")
+def test_a_file_shown_in_part_takes_line_edits_not_a_file_block(ws, project_dir):
+    (project_dir / "a.py").write_text("1\n2\n")
+    reply = Reply("<<<FILE a.py>>>\nnew\n<<<END>>>\n<<<LINES a.py 2-2>>>\nB\n<<<END>>>")
+    change = ws.apply(reply, allow, windows={"a.py": (1, 2)})
+    assert ws.read("a.py") == "1\nB\n" and any("LINES block" in n for n in change.notes)
 
 
 @pytest.mark.spec("WS-7")
@@ -537,7 +555,6 @@ def test_file_view_without_windows_has_no_howto(ws, project_dir):
 
 
 @pytest.mark.spec("WS-22")
-@pytest.mark.xfail(strict=True, reason="ISSUE-5: the window grows only downwards from the line it is about")
 def test_a_window_holds_lines_on_both_sides_of_its_line():
     lines = [f"line{i}" for i in range(1, 21)]
     first, last, _ = FileView.window_view(lines, 10, 80)

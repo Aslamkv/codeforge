@@ -126,7 +126,6 @@ def test_pieces_split_between_lines():
 
 
 @pytest.mark.spec("CNV-3")
-@pytest.mark.xfail(strict=True, reason="ISSUE-2: a line longer than the size is cut and the rest lost")
 def test_pieces_lose_no_text_of_a_long_line():
     text = "short\n" + "x" * 250 + "\nend"
     assert "".join("".join(pieces(text, size=100)).split()) == "".join(text.split())

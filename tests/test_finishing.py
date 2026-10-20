@@ -75,7 +75,6 @@ def test_compare():
 
 
 @pytest.mark.spec("FIN-3")
-@pytest.mark.xfail(strict=True, reason="ISSUE-3: an expected line is looked for inside output lines, not as a whole line")
 def test_an_expected_line_matches_only_a_whole_line():
     assert ReadmeWriter.missing(["80.33"], "80.33000000000004") == ["80.33"]
     assert ReadmeWriter.missing(["7"], "17") == ["7"]

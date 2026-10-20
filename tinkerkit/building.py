@@ -351,7 +351,7 @@ class CodeWriter(Phase):
 
 
 class Verifier(Phase):
-    """6. Verify: fix the code until each criterion's test passes. When fixes stop making
+    """7. Verify: fix the code until each criterion's test passes. When fixes stop making
     progress, one review against the plan decides whether the test or the code is wrong; then the
     criterion is parked. A change that breaks a passing test is reverted. Criteria failing the same
     way as one already parked are parked at once; parked ones get one more try if others passed
@@ -379,8 +379,8 @@ class Verifier(Phase):
             return False
         self.mark_passing()
         green_at_start = self.p.counts()[0]
-        self.work_through([s for s in self.p.current if s["status"] in ("todo", "active")], retry=False)
-        parked = [s for s in self.p.current if s["status"] == "blocked"]
+        self.work_through([s for s in self.p.criteria if s["status"] in ("todo", "active")], retry=False)
+        parked = [s for s in self.p.criteria if s["status"] == "blocked"]
         earlier = [s for s in parked if s["id"] in self.s.parked_at_start]  # parked by an earlier session
         if parked and self.p.counts()[0] > green_at_start:
             print(f"\nRetrying {len(parked)} parked criteria, now that others pass")
@@ -423,7 +423,7 @@ class Verifier(Phase):
 
     def mark_passing(self):
         green = self.passing()
-        for s in self.p.current:
+        for s in self.p.criteria:
             s["status"] = "green" if s["id"] in green else ("blocked" if s["status"] == "blocked" else "todo")
         self.s.save()
 
@@ -443,14 +443,14 @@ class Verifier(Phase):
         """The criteria whose tests pass now: one run of all tests; one per test only when some fail."""
         started = time.perf_counter()
         code, _ = self.s.run_all_tests()
-        tests = [s for s in self.p.current if TestRef(s["test"]).present(self.ws)]
+        tests = [s for s in self.p.criteria if TestRef(s["test"]).present(self.ws)]
         if code == 0:
             result = {s["id"] for s in tests}
         elif not self.s.toolchain.run_check(self.ws)[0]:
             return set()  # it does not build: no test can pass
         else:
             result = {s["id"] for s in tests if self.evaluate(s, checked=True)[0] == "passes"}
-        Console.step(f"tests: {len(result)}/{len(self.p.current)} criteria pass", started)
+        Console.step(f"tests: {len(result)}/{len(self.p.criteria)} criteria pass", started)
         return result
 
     def work(self, step, retry):
@@ -517,7 +517,7 @@ class Verifier(Phase):
 
     def mark_others_passing(self):
         """A fix may have made other criteria pass too."""
-        for other in self.p.current:
+        for other in self.p.criteria:
             if other["status"] != "green" and self.evaluate(other)[0] == "passes":
                 other["status"] = "green"
 

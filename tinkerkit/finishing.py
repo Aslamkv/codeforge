@@ -14,7 +14,7 @@ from .workspace import FileView, Output, TaughtCommands, TestRef, Toolchain
 
 
 class Tidy(Phase):
-    """9. Tidy, once the app is built and its tests pass: the language's linter (toolchain.lint) over
+    """8. Tidy, once the app is built and its tests pass: the language's linter (toolchain.lint) over
     the code and the tests. Each file it reports gets one call that fixes what was found there,
     kept only when every test that passed still passes and every test is still there. Quality, not
     function: tidying never stops the run, and what it cannot fix is said plainly."""
@@ -281,7 +281,7 @@ class ReadmeWriter(Phase):
     @classmethod
     def compare(cls, expected, output):
         """(the documented lines its output does not show, {placeholder: the value it showed}).
-        Each documented line is looked for in each output line, whitespace aside (JSON may be
+        Each documented line must be a whole output line, whitespace aside (JSON may be
         spaced either way); a <placeholder> matches any value, which is kept."""
         said = ["".join(line.split()) for line in output.splitlines()]
         values, missing = {}, []
@@ -291,9 +291,8 @@ class ReadmeWriter(Phase):
             compact = "".join(line.split())
             names = cls.PLACEHOLDER_RE.findall(compact)
             parts = [re.escape(part) for part in cls.PLACEHOLDER_RE.split(compact)]
-            pattern = re.compile(parts[0] + "".join(r"(\S+?)" + part for part in parts[1:]) + ("$" if names and not
-                                                                                             parts[-1] else ""))
-            found = next((m for m in map(pattern.search, said) if m), None)
+            pattern = re.compile(parts[0] + "".join(r"(\S+?)" + part for part in parts[1:]))
+            found = next((m for m in map(pattern.fullmatch, said) if m), None)
             if found:
                 values.update(zip(names, found.groups()))
             else:

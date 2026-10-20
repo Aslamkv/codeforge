@@ -99,12 +99,18 @@ class Reply:
         return text.rstrip().rstrip(",") + "".join(reversed(stack))
 
     @staticmethod
-    def files_complete(content):
-        """A reply of FILE/LINES blocks is complete when its last block has ended and what follows is
-        not another block (models sometimes run on with junk after their answer)."""
+    def files_ended(content):
+        """A reply of FILE/LINES blocks has ended when its last block has, and nothing after it
+        begins another one."""
         end = content.rfind("<<<END>>>")
         rest = content[end + 9:] if end >= 0 else ""
-        return end >= 0 and "<<<FILE" not in rest and "<<<LINES" not in rest and len(rest.strip()) >= 300
+        return end >= 0 and "<<<FILE" not in rest and "<<<LINES" not in rest
+
+    @staticmethod
+    def files_complete(content):
+        """A streamed reply of FILE/LINES blocks can stop once it has ended and the model runs on
+        (300+ chars of junk after its answer): it may still be between two blocks before that."""
+        return Reply.files_ended(content) and len(content[content.rfind("<<<END>>>") + 9:].strip()) >= 300
 
     @staticmethod
     def wrote(paths):
@@ -430,7 +436,7 @@ class Prompts:
     TOOLCHAIN_JSON = ('"toolchain":{"setup":["python3 -m venv .venv","pip install pytest ruff black"],'
                       '"activate":". .venv/bin/activate","use":[],"run":"python3 tip.py",'
                       '"check":"python -c \\"import tip\\"","test_all":"pytest -q",'
-                      '"test_one":"pytest -q {file}::{name}","format":"ruff check tinker fix --exit-zero . && black .",'
+                      '"test_one":"pytest -q {file}::{name}","format":"ruff check --fix --exit-zero . && black .",'
                       '"lint":"ruff check ."}')
 
     TOOLCHAIN_RULES = ("toolchain: the language's usual tools, every command written the way a person types it in "

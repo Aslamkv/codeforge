@@ -529,7 +529,9 @@ class Model:
         is cut is asked again from the start.
         A reply cut off while still thinking is asked again with twice the budget up to max_reply,
         then (if unthinking_retry) without thinking; otherwise it counts as an empty reply (and
-        self.overthought says so). think: this call's think setting instead of the phase's."""
+        self.overthought says so). A cut reply is finished when done_when says so or its blocks have
+        all ended (done_when may wait for the model to run on). think: this call's think setting
+        instead of the phase's."""
         if self.exclusive:
             self.evict_others()
         self.overthought = False
@@ -553,7 +555,8 @@ class Model:
                     return final
                 continue
             content, cut = self.log_exchange(system, user, shown, tries.budget, data, started)
-            unfinished = not content.strip() or (done_when is not None and not done_when(content))
+            unfinished = not content.strip() or (done_when is not None and not done_when(content)
+                                                 and not Reply.files_ended(content))
             if cut and unfinished and tries.think is not False:
                 if self.think_again(tries, data, shown, started, cap, unthinking_retry):
                     continue

@@ -250,9 +250,10 @@ phase, learn from the web what the rest of the cycle needs.
   `<<<LINES path A-B>>>` block. The line-number prefixes (`12| `) are removed when every line has one.
 - **PRM-5** `Reply.as_file(path)` turns a reply that has no FILE block but exactly one fenced block
   into that file. Any other reply stays as it is.
-- **PRM-6** `Reply.files_complete(content)` is true only when the last block has ended, nothing after
-  it begins a block, and at least 300 chars follow it (the model is running on). `Reply.wrote(paths)`
-  is also true once every wanted path has its block.
+- **PRM-6** `Reply.files_ended(content)` is true when the last block has ended and nothing after it
+  begins a block. `Reply.files_complete(content)`, which stops a stream early, also needs at least 300
+  chars after it (the model is running on). `Reply.wrote(paths)` is also true once every wanted path
+  has its block.
 - **PRM-7** `Reply.json_complete(content)` is true once the content ends with `}` and the object from
   its first `{` parses (trailing commas allowed).
 - **PRM-8** `cause()`, `test_wrong()`, `criterion()`, `corrected_criteria()` and `toolchain_line()`
@@ -292,7 +293,7 @@ phase, learn from the web what the rest of the cycle needs.
 - **WS-3** `Workspace.resolve(path)` accepts a path relative to the project and inside it. It
   rejects with `ToolError`: an empty path, an absolute path, a path starting with `~`, a path that
   leaves the project, a path that is too long or has odd characters, and a write into `.tinker` or
-  `.git`.
+  `.git`. The root is taken resolved, so a root reached through a symlink works the same.
 - **WS-4** `write` makes the parent folders and ends a non-empty file with a newline. `read` of a
   missing file gives `""`.
 - **WS-5** `apply(reply, may_change)` writes each FILE block that `may_change(path, exists)` allows,
@@ -300,7 +301,8 @@ phase, learn from the web what the rest of the cycle needs.
   outside the project, a file shown only in part, and an empty body where empty is not allowed.
   `revert(change)` restores each backup and deletes the files the change created.
 - **WS-6** A LINES block changes only a file shown as numbered lines, and only within the lines
-  shown. Of two overlapping blocks, only one is applied, with a note.
+  shown. Of two overlapping blocks, the earlier one in the reply is applied and the later one is
+  dropped, with a note. A file shown in part takes no FILE block.
 - **WS-7** `prepare_env()` makes `.env` from `.env.example` when there is none. Only the values that
   are obvious placeholders are blanked, and it says which settings to fill in. An existing `.env` is
   never changed. `is_placeholder` is true for an empty value, `<...>`, `your_...`, `..._here`,
@@ -405,7 +407,8 @@ phase, learn from the web what the rest of the cycle needs.
   the prompt budget, gives the reply's content, and logs the exchange to its log.
 - **MOD-16** A reply cut off while it is still thinking is asked again: first with twice the budget,
   up to the cap; then, if `unthinking_retry`, without thinking, with the thought so far to
-  conclude. Otherwise the result is `""`, with `overthought` set and `last_thought` kept.
+  conclude. Otherwise the result is `""`, with `overthought` set and `last_thought` kept. A cut
+  reply is finished, and kept, when its `done_when` says so or its blocks have all ended.
 - **MOD-17** A failed request is tried again after what the failure calls for. Out of memory: a
   smaller prompt budget, up to `OOM_RETRIES` times. A stall: the model is reloaded, up to
   `STALL_RETRIES` times. A rejected think level: `true`, then no think setting. A reply error: one
@@ -452,7 +455,8 @@ phase, learn from the web what the rest of the cycle needs.
 - **PRJ-7** `Project` keeps `criteria` (saved as `steps`), `cycles` and `files` in the project's
   database. `Project.load(folder)` reads them back. `open_cycle()` is the first cycle not done.
   `new_cycle` starts at the first phase of its kind. `new_criterion` numbers the criteria
-  `C1, C2 …` (`B…` for a bug) from one counter. `counts()` gives `(passing, parked, total)`.
+  `C1, C2 …` (`B…` for a bug) from one counter. `cycle(id)` and `criterion(id)` give the one with
+  that id, or `None`. `counts()` gives `(passing, parked, total)`.
   `save()` keeps the plan and writes `SPEC.md`.
 - **PRJ-8** `criteria_of(path, steps)` gives the criteria whose test file uses the file, or whose text
   names the file (`name.py`, or `stem.` for code). A template's criteria are also those of the
@@ -462,7 +466,7 @@ phase, learn from the web what the rest of the cycle needs.
   known ones. `dependencies(read)` gives the dependency files. `uses(path)` gives the files used,
   directly and one level down. `remove_file` deletes a file and drops it from the design.
 - **PRJ-10** `SpecDocument` writes SPEC.md: the title, the run and language, a table of criteria
-  with readable status, the commands (with aliases spelled out), each cycle (constraints, non-goals,
+  with readable status, the commands (setup, activate and the rest, with aliases spelled out), each cycle (constraints, non-goals,
   interface check, external-service data), the design (files, roles, uses, contracts), and each
   criterion with its source and, unless it passes, its last error.
 - **PRJ-11** `Brief.load` gives `""` for a change. It reuses the brief kept in the project's database.

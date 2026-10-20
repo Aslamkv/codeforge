@@ -103,6 +103,13 @@ def test_files_complete_only_once_the_model_runs_on():
 
 
 @pytest.mark.spec("PRM-6")
+def test_files_ended_once_the_last_block_ends():
+    answer = "<<<FILE a.py>>>\nx = 1\n<<<END>>>"
+    assert Reply.files_ended(answer) and Reply.files_ended(answer + "\nthat is all")
+    assert not Reply.files_ended("<<<FILE a.py>>>\nx = 1") and not Reply.files_ended(answer + "\n<<<LINES b.py 1-2>>>")
+
+
+@pytest.mark.spec("PRM-6")
 def test_wrote_once_every_wanted_file_has_its_block():
     done = Reply.wrote(["a.py", "./b.py"])
     assert not done("<<<FILE a.py>>>\n1\n<<<END>>>")
@@ -239,8 +246,6 @@ def test_the_templates_format():
 
 
 @pytest.mark.spec("PRM-15")
-@pytest.mark.xfail(strict=True, reason="ISSUE-1: the example format command says 'ruff check tinker fix', "
-                                       "a rename of --fix gone wrong")
 def test_the_example_toolchain_commands_are_real_commands():
     toolchain = example("{" + Prompts.TOOLCHAIN_JSON + "}")["toolchain"]
     commands = toolchain["setup"] + [v for k, v in toolchain.items() if isinstance(v, str)]

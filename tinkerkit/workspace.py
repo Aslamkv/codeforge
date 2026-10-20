@@ -362,7 +362,7 @@ class Workspace:
                                 r"\.\.\.|placeholder)$", re.I)  # only what plainly marks where a value goes
 
     def __init__(self, root):
-        self.root = root
+        self.root = Path(root).resolve()  # a path is inside it when its resolved form is
 
     def run(self, command, timeout=COMMAND_TIMEOUT, quiet=False):
         """Run one planned command in a POSIX shell in the project folder,
@@ -459,17 +459,19 @@ class Workspace:
                 change.notes.append(f"{path}: LINES blocks only change files shown as numbered lines")
             elif not shown[0] <= a <= b <= shown[1]:
                 change.notes.append(f"{path}: lines {a}-{b} are outside the lines shown ({shown[0]}-{shown[1]})")
-            elif path not in change.backups:
+            else:  # a file shown in part never takes a FILE block (refusal)
                 edits.setdefault(path, []).append((a, b, new))
         for path, ranges in edits.items():
+            taken = []
+            for a, b, new in ranges:
+                if any(not (b < x or a > y) for x, y, _ in taken):
+                    change.notes.append(f"{path}: lines {a}-{b} overlap an earlier LINES block; kept the earlier one")
+                else:
+                    taken.append((a, b, new))
             old = self.read(path)
-            lines, taken = old.splitlines(), []
-            for a, b, new in sorted(ranges, reverse=True):
-                if any(not (b < x or a > y) for x, y in taken):
-                    change.notes.append(f"{path}: overlapping LINES blocks; kept the first")
-                    continue
+            lines = old.splitlines()
+            for a, b, new in sorted(taken, key=lambda edit: edit[0], reverse=True):  # bottom up: numbers stay true
                 lines[a - 1:b] = new
-                taken.append((a, b))
             change.backups[path] = old
             self.write(path, "\n".join(lines) + "\n")
 
@@ -818,9 +820,10 @@ class FileView:
         grown = True
         while grown:
             grown = False
-            for a, b in ((start - 1, end), (start, end + 1)):
-                if a >= 1 and b <= len(lines) and size(a, b) <= room:
-                    start, end, grown = a, b, True
+            if start > 1 and size(start - 1, end) <= room:
+                start, grown = start - 1, True
+            if end < len(lines) and size(start, end + 1) <= room:
+                end, grown = end + 1, True
         return start, end, "\n".join(f"{i:>4}| {lines[i - 1]}" for i in range(start, end + 1))
 
 

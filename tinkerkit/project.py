@@ -307,13 +307,13 @@ class Project:
         return self.spec.setdefault("steps", [])
 
     def counts(self):
-        green = sum(1 for s in self.current if s["status"] == "green")
-        parked = sum(1 for s in self.current if s["status"] == "blocked")
-        return green, parked, len(self.current)
+        green = sum(1 for s in self.criteria if s["status"] == "green")
+        parked = sum(1 for s in self.criteria if s["status"] == "blocked")
+        return green, parked, len(self.criteria)
 
     def parked(self):
-        """The criteria in play that nothing made pass (stored as "blocked")."""
-        return [s for s in self.current if s["status"] == "blocked"]
+        """The criteria that nothing made pass (stored as "blocked")."""
+        return [s for s in self.criteria if s["status"] == "blocked"]
 
     @property
     def toolchain(self):
@@ -322,11 +322,6 @@ class Project:
     @toolchain.setter
     def toolchain(self, toolchain):
         self.spec["toolchain"] = toolchain.to_dict()
-
-    @property
-    def current(self):
-        """The criteria in play (all of them)."""
-        return self.criteria
 
     @property
     def files(self):
@@ -374,7 +369,7 @@ class Project:
         return list(found.values())
 
     def refs(self):
-        return [TestRef(s["test"]) for s in self.current]
+        return [TestRef(s["test"]) for s in self.criteria]
 
     def entry_files(self, paths):
         """Of these paths, the app's entry point: the file the design says a user starts, then any
@@ -405,7 +400,7 @@ class Project:
         return next((c for c in self.cycles if c["id"] == cycle_id), None)
 
     def criterion(self, criterion_id):
-        return next(s for s in self.criteria if s["id"] == criterion_id)
+        return next((s for s in self.criteria if s["id"] == criterion_id), None)
 
     def uses(self, path, depth=2):
         """The files a file uses, directly and (depth 2) one level down."""
@@ -472,6 +467,7 @@ class SpecDocument:
             return []
         out = TaughtCommands.spelled_out  # your aliases spelled out: these commands work for anyone
         lines = ["", "## Commands (run in the project folder)", ""] + [f"- setup: `{out(c)}`" for c in tc.setup]
+        lines += [f"- activate: `{out(tc.activate)}`"] if tc.activate else []
         lines += [f"- {key}: `{out(getattr(tc, key))}`" for key in Toolchain.COMMANDS if getattr(tc, key)]
         return lines
 

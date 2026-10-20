@@ -201,6 +201,7 @@ def test_project_cycles_and_criteria(make_project, project_dir):
     project.criteria.extend([dict(first, status="green"), dict(bug, status="blocked")])
     assert project.counts() == (1, 1, 2) and [s["id"] for s in project.parked()] == ["B2"]
     assert [s["id"] for s in project.cycle_criteria(fix)] == ["B2"]
+    assert project.criterion("B2")["status"] == "blocked" and project.criterion("C9") is None
     project.save()
     assert plan_of(project_dir)["steps"][0]["id"] == "C1"
     assert Project.load(project_dir, project.run).criteria[0]["id"] == "C1"
@@ -275,6 +276,7 @@ def test_spec_document(make_project, tinker_home):
     assert "| C1 | add(2, 3) is 5 | `t.py::test_add` | passes |" in text
     assert "| C2 | div(1, 0) says no | `t.py::test_div` | parked |" in text
     assert "- test_all: `. .venv/bin/activate && pytest -q`" in text and "- setup: `python3 -m venv .venv`" in text
+    assert "- activate: `. .venv/bin/activate`" in text
     assert "## Project: a calculator" in text and "Phase: verify" in text
     for line in ("Constraints:\n- stdlib only", "Not wanted (non-goals):\n- a GUI", "Interface check:\n- calc.py: fine",
                  "```\nSAMPLE = {}\n```"):

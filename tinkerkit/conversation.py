@@ -429,13 +429,14 @@ class ConsoleChannel(Channel):
 
 
 def pieces(text, size=3500):
-    """text in parts a chat message holds, split between lines."""
+    """text in parts a chat message holds, split between lines (a line longer than a part, across parts)."""
     parts, part = [], ""
-    for line in text.splitlines():
-        if part and len(part) + len(line) + 1 > size:
-            parts.append(part)
-            part = ""
-        part = f"{part}\n{line}" if part else line[:size]
+    for whole in text.splitlines():
+        for line in [whole[i:i + size] for i in range(0, len(whole), size)] or [""]:
+            if part and len(part) + len(line) + 1 > size:
+                parts.append(part)
+                part = ""
+            part = f"{part}\n{line}" if part else line
     return parts + [part] if part else parts
 
 

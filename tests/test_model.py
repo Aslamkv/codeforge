@@ -9,7 +9,7 @@ import pytest
 
 import tinkerkit.model as model_module
 from tinkerkit.model import Calibrator, Model, Models, Ollama, OllamaError, Stream
-from tinkerkit.prompts import Part, Prompts, PromptTooLarge
+from tinkerkit.prompts import Part, Prompts, PromptTooLarge, Reply
 from tinkerkit.settings import CHARS_PER_TOKEN, Config, Home, PROMPT_HEADROOM
 from conftest import MEASURED, MODEL
 
@@ -325,6 +325,14 @@ def test_without_unthinking_retry_it_gives_up(make_model, fake_ollama):
     model = make_model()
     assert model.ask("s", [Part("Q", "q", True)], "Ask", unthinking_retry=False) == ""
     assert model.overthought and model.last_thought == "half a thought"
+
+
+@pytest.mark.spec("MOD-16")
+def test_a_cut_reply_whose_blocks_have_ended_is_kept(make_model, fake_ollama):
+    answer = "<<<FILE a.py>>>\nx = 1\n<<<END>>>\nI"
+    fake_ollama.reply({"content": answer, "thinking": "t", "done_reason": "length", "eval_count": 4096})
+    assert make_model().ask("s", [Part("Q", "q", True)], "Ask", done_when=Reply.files_complete) == answer
+    assert len(fake_ollama.calls) == 1
 
 
 @pytest.mark.spec("MOD-17")
