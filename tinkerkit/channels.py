@@ -257,13 +257,13 @@ class TelegramChannel(Channel):
         try:
             waiting = self.call("getUpdates", offset=-1)
             self.offset = waiting[-1]["update_id"] + 1 if waiting else None
-        except (OSError, ChannelError):
+        except OSError, ChannelError:
             pass
 
     def send(self, chat, text):
         try:
             sent = self.post("sendMessage", chat, text)["message_id"]
-        except (OSError, ChannelError):
+        except OSError, ChannelError:
             return None
         self.seen(str(chat), sent)
         return sent
@@ -294,7 +294,7 @@ class TelegramChannel(Channel):
     def typing(self, chat):
         try:
             self.call("sendChatAction", wait=10, chat_id=chat, action="typing")
-        except (OSError, ChannelError):
+        except OSError, ChannelError:
             pass
 
     def pin(self, chat, sent):
@@ -309,7 +309,7 @@ class TelegramChannel(Channel):
         after = self.newest.get(chat, 0)
         try:
             self.call("pinChatMessage", chat_id=chat, message_id=sent, disable_notification=True)
-        except (OSError, ChannelError):
+        except OSError, ChannelError:
             return
         self.pinned[chat] = sent
         threading.Thread(target=self.drop_pin_note, args=(chat, after), daemon=True).start()
@@ -317,7 +317,7 @@ class TelegramChannel(Channel):
     def unpin(self, chat, sent):
         try:  # one taken out (sent anew at the bottom) is unpinned already
             self.call("unpinChatMessage", chat_id=chat, message_id=sent)
-        except (OSError, ChannelError):
+        except OSError, ChannelError:
             pass
 
     def drop_pin_note(self, chat, after):
@@ -345,7 +345,7 @@ class TelegramChannel(Channel):
         """A message taken out: Tinker's own, or the person's (a bot may, in a private chat)."""
         try:
             self.call("deleteMessage", chat_id=chat, message_id=sent)
-        except (OSError, ChannelError):
+        except OSError, ChannelError:
             pass
         alive = self.alive.get(str(chat), [])
         if sent in alive:
@@ -373,7 +373,7 @@ class TelegramChannel(Channel):
             try:
                 status, body = self.exchange(path, data, wait)
                 break
-            except (http.client.HTTPException, OSError):
+            except http.client.HTTPException, OSError:
                 if attempt == 2:
                     raise OSError(f"Telegram did not answer {method}") from None
         return self.result(method, status, body)
@@ -385,7 +385,7 @@ class TelegramChannel(Channel):
             connection.request("POST", path, data, {"Content-Type": "application/x-www-form-urlencoded"})
             response = connection.getresponse()
             answer = response.status, response.read().decode(errors="replace")
-        except (http.client.HTTPException, OSError):
+        except http.client.HTTPException, OSError:
             connection.close()
             raise
         self.open_connections.put(connection)

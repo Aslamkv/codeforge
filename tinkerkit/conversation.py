@@ -1402,7 +1402,7 @@ def signal_task(pid, signum):
     """Send a task run from a terminal a signal (PAUSE or STOP)."""
     try:
         os.kill(pid, signum)
-    except (ProcessLookupError, PermissionError):
+    except ProcessLookupError, PermissionError:
         pass
 
 
@@ -1513,7 +1513,7 @@ class Channel:
         """What the Tinker listening on this channel said it is ({} when that cannot be read)."""
         try:
             holder = json.loads(self.lock_file().read_text() or "{}")
-        except (OSError, ValueError):
+        except OSError, ValueError:
             return {}
         return holder if isinstance(holder, dict) else {}
 
@@ -1560,7 +1560,7 @@ class ConsoleChannel(Channel):
         while True:
             try:
                 self.lines.put(input(self.PROMPT))
-            except (EOFError, KeyboardInterrupt):
+            except EOFError, KeyboardInterrupt:
                 self.lines.put(None)
                 return
 
@@ -1789,7 +1789,7 @@ def help_text(words=()):
     try:
         done = subprocess.run(tinker_command() + ["help", *words], text=True, capture_output=True, timeout=30,
                               stdin=subprocess.DEVNULL, env=dict(os.environ, NO_COLOR="1", TINKER_FORMAT="markup"))
-    except (OSError, subprocess.SubprocessError):
+    except OSError, subprocess.SubprocessError:
         return "❓ `help` lists what you can send"
     shown = (done.stdout + done.stderr).strip()
     return shown if not words else f"❓ **help {lit(' '.join(words))}**\n```\n{Markup.fenced(shown)}\n```"

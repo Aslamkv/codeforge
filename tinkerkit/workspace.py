@@ -304,7 +304,7 @@ class Workspace:
             try:
                 os.killpg(proc.pid, signal.SIGTERM)
                 proc.wait(timeout=3)
-            except (OSError, subprocess.TimeoutExpired):
+            except OSError, subprocess.TimeoutExpired:
                 pass
         self.kill(proc)
         proc.wait()
@@ -567,7 +567,7 @@ class TaughtCommands:
         try:
             proc = subprocess.run([shell, "-i", "-c", f"alias {name}"], capture_output=True, text=True,
                                   stdin=subprocess.DEVNULL, timeout=TaughtCommands.LOOKUP_TIMEOUT)
-        except (OSError, subprocess.TimeoutExpired):
+        except OSError, subprocess.TimeoutExpired:
             return None
         definition = TaughtCommands.alias_definition(name, proc.stdout)
         return None if definition is None else {"kind": "alias", "definition": definition,

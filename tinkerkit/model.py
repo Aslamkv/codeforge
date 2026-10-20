@@ -565,7 +565,7 @@ class Calibrator:
         try:
             limit = int(subprocess.run(["sysctl", "-n", "iogpu.wired_limit_mb"], capture_output=True,
                                        text=True).stdout or 0)
-        except (OSError, ValueError):
+        except OSError, ValueError:
             limit = 0
         return limit * 2**20 if limit > 0 else int(total * (0.75 if total > 36e9 else 0.67))
 
@@ -577,7 +577,7 @@ class Calibrator:
                 return int(subprocess.run(["sysctl", "-n", "hw.memsize"], capture_output=True, text=True).stdout)
             with open("/proc/meminfo", encoding="utf-8") as info:
                 return int(next(line for line in info if line.startswith("MemTotal")).split()[1]) * 1024
-        except (OSError, ValueError, StopIteration):
+        except OSError, ValueError, StopIteration:
             return None
 
     def first_chat(self, facts):
@@ -832,9 +832,9 @@ class Ollama:
                 return None
             try:
                 return json.loads(exc.read().decode("utf-8", errors="replace"))
-            except (ValueError, OSError):
+            except ValueError, OSError:
                 return {"error": f"HTTP {exc.code}"}
-        except (urllib.error.URLError, OSError, ValueError):
+        except urllib.error.URLError, OSError, ValueError:
             return None
 
 

@@ -274,7 +274,7 @@ class SpecWriter(Phase):
     def effort(value):
         try:
             return min(max(int(value), 1), 3)
-        except (TypeError, ValueError):
+        except TypeError, ValueError:
             return 2
 
     def send_back_wrong_working(self, criteria):
@@ -527,7 +527,7 @@ class Working:
             raise ValueError(node)
         try:
             return worked(ast.parse(sum_, mode="eval").body)
-        except (SyntaxError, ValueError, ZeroDivisionError, TypeError):
+        except SyntaxError, ValueError, ZeroDivisionError, TypeError:
             return None
 
     @staticmethod
