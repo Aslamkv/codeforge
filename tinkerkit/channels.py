@@ -9,9 +9,11 @@ line that does it, run once the person confirms it (Shell); and `emergency MESSA
 its progress is kept in RUNNING_DIR, and it is stopped or paused with a signal.
 
 Channel is what every kind of channel does (receive messages, send, edit what it sent); TelegramChannel is
-one kind. Only the chats a channel was paired with are listened to: a message from anyone else is ignored.
+one kind. Every message is written in Markup (bold, italic, code ...), each mark for what it means, and each
+kind shows it its own way. Only the chats a channel was paired with are listened to: a message from anyone else is ignored.
 Bot tokens are kept apart from the settings, in a file only its owner can read."""
 import fcntl
+import html
 import json
 import os
 import re
@@ -49,7 +51,124 @@ BUSY_AFTER = 5                                 # seconds a chat reply may take b
 BUSY_EDIT_EVERY = 30                           # seconds between updates of that note (the progress of what runs)
 COMMAND_TOKENS = 300                           # the longest reply naming a command
 COMMAND_TIMEOUT = 120                          # seconds a command run from the chat may take
-COMMAND_SHOWN = 11000                          # chars of its output sent back (its end, when longer: 3 messages)
+COMMAND_SHOWN = 3000                           # chars of its output sent back, folded (its end, when longer)
+COMMAND_READ = 6000                            # ... the model reads to tell what it says
+
+
+class Markup:
+    """The marks a chat message is written with, as in Markdown, each for what it means: **bold** for what
+    matters most, *italic* (or _italic_) for an aside, ~~struck~~ for what is gone, `code` for what is typed
+    or named exactly (a command, a path), ```a block``` of code, and ```output for a command's output (folded
+    where the chat can fold it); "- " starts an item. A mark meant as itself is escaped (literal)."""
+    FENCE_RE = re.compile(r"```(\w*)\n?(.*?)(?:\n?```|\Z)", re.S)
+    CODE_RE = re.compile(r"`([^`\n]+)`")
+    ESCAPED_RE = re.compile(r"\\([*_`~\\])")
+    MARKS = ((re.compile(r"\*\*(?=\S)(.+?)(?<=\S)\*\*"), "b"), (re.compile(r"~~(?=\S)(.+?)(?<=\S)~~"), "s"),
+             (re.compile(r"(?<![\w*])\*(?=[^\s*])(.+?)(?<=[^\s*])\*(?![\w*])"), "i"),
+             (re.compile(r"(?<!\w)_(?=\S)(.+?)(?<=\S)_(?!\w)"), "i"))
+    ITEM_RE = re.compile(r"(?m)^\s*[-*] (?=\S)")
+    HEADING_RE = re.compile(r"(?m)^#{1,6} +(.+)$")
+
+    @staticmethod
+    def literal(text):
+        """text shown as it is: its marks escaped."""
+        return re.sub(r"([*_`~\\])", r"\\\1", str(text))
+
+    @staticmethod
+    def columns(text):
+        """Text in columns, as a terminal lines them up with spaces and tabs, as a chat reads it best: each
+        line's columns joined by " | ". A column ends where the lines are blank at the same place (a short
+        line counts as blank past its end; of 4 lines or more, one value may run into the gap, and its cut
+        moves to the space after it). The line of fewest words (of three or more) shapes them: its last word
+        starts the last column, which runs to the end of each line (spaces and all), and a gap with none of
+        its words on one side is inside a column (a date and its time). Text not in columns stays as it is."""
+        lines = str(text).expandtabs().splitlines()
+        rows = [line for line in lines if len(line.split()) >= 3]
+        if len(rows) < 2:
+            return str(text)
+        shape = min(rows, key=lambda line: len(line.split()))
+        last = list(re.finditer(r"\S+", shape))[-1].start()
+        tolerated = 1 if len(rows) >= 4 else 0
+        blank = [sum(at < len(line) and line[at] != " " for line in rows) <= tolerated for at in range(last)]
+        gaps = [at for at in range(1, last) if blank[at] and not blank[at - 1]] + [last]
+        cuts, begin = [], 0
+        for index, gap in enumerate(gaps):
+            after = shape[gap:gaps[index + 1]] if index + 1 < len(gaps) else shape[gap:]
+            if shape[begin:gap].strip() and after.strip():
+                cuts.append(gap)
+                begin = gap
+        if len(cuts) < 2:
+            return str(text)
+        shown = []
+        for line in lines:
+            if len(line.split()) < 3:
+                shown.append(line)
+                continue
+            parts, begin = [], 0
+            for cut in cuts:
+                if cut >= len(line):
+                    break
+                if line[cut] != " " and line[cut - 1] != " ":  # a value running into the gap: cut after it
+                    cut = line.find(" ", cut)
+                    if cut < 0:
+                        break
+                if cut > begin:
+                    parts.append(line[begin:cut].strip())
+                    begin = cut
+            parts.append(line[begin:].strip())
+            shown.append(" | ".join(part for part in parts if part))
+        return "\n".join(shown)
+
+    @staticmethod
+    def fenced(text):
+        """text safe inside a block: a fence in it cannot end the block."""
+        return str(text).replace("```", "ˋˋˋ")
+
+    @classmethod
+    def html(cls, text):
+        """The text as Telegram's HTML shows it."""
+        keep = cls.keeper()
+
+        def block(found):
+            body = html.escape(found.group(2).rstrip("\n"), quote=False)
+            return keep(f"<blockquote expandable>{body}</blockquote>" if found.group(1) == "output"
+                        else f"<pre>{body}</pre>")
+        return cls.render(text, block, lambda code: f"<code>{html.escape(code, quote=False)}</code>",
+                          lambda plain: html.escape(plain, quote=False),
+                          lambda tag, inner: f"<{tag}>{inner}</{tag}>", keep)
+
+    @classmethod
+    def plain(cls, text):
+        """The text with its marks taken off, for a chat that shows none."""
+        keep = cls.keeper()
+        return cls.render(text, lambda found: keep(found.group(2).rstrip("\n")), lambda code: code,
+                          lambda plain: plain, lambda tag, inner: inner, keep)
+
+    @staticmethod
+    def keeper():
+        kept = []
+
+        def keep(shown):
+            kept.append(shown)
+            return f"\x00{len(kept) - 1}\x00"
+        keep.kept = kept
+        return keep
+
+    @classmethod
+    def render(cls, text, block, code, plain, mark, keep):
+        """text shown with block(fence match), code(text), plain(text) and mark(tag, inner); what is shown
+        as it is (blocks, code, escaped marks) is kept apart until the rest is marked."""
+        text = cls.FENCE_RE.sub(block, str(text))
+        text = cls.ESCAPED_RE.sub(lambda found: keep(plain(found.group(1))), text)
+        text = cls.CODE_RE.sub(lambda found: keep(code(found.group(1))), text)
+        text = cls.ITEM_RE.sub("• ", plain(text))
+        text = cls.HEADING_RE.sub(lambda found: mark("b", found.group(1)), text)
+        for pattern, tag in cls.MARKS:
+            text = pattern.sub(lambda found: mark(tag, found.group(1)), text)
+        return re.sub("\x00(\\d+)\x00", lambda found: keep.kept[int(found.group(1))], text)
+
+
+lit = Markup.literal
 
 
 class Message:
@@ -79,7 +198,7 @@ class Channel:
         raise NotImplementedError
 
     def send(self, chat, text):
-        """Send text to chat; what edit needs to change it later (or None)."""
+        """Send text (Markup) to chat; what edit needs to change it later (or None)."""
         raise NotImplementedError
 
     def edit(self, chat, sent, text):
@@ -197,21 +316,30 @@ class TelegramChannel(Channel):
 
     def send(self, chat, text):
         try:
-            return self.call("sendMessage", chat_id=chat, text=text[:4000])["message_id"]
-        except OSError:
+            return self.post("sendMessage", chat, text)["message_id"]
+        except (OSError, ChannelError):
             return None
 
     def edit(self, chat, sent, text):
         if sent is None:
             return self.send(chat, text)
         try:
-            self.call("editMessageText", chat_id=chat, message_id=sent, text=text[:4000])
+            self.post("editMessageText", chat, text, message_id=sent)
         except ChannelError as exc:  # unchanged text is refused, harmlessly
             if "not modified" not in str(exc):
                 return self.send(chat, text)
         except OSError:
             pass
         return sent
+
+    def post(self, method, chat, text, **fields):
+        """text sent (or edited) as Telegram shows Markup (HTML); what it cannot read as HTML goes plain."""
+        try:
+            return self.call(method, chat_id=chat, text=Markup.html(text)[:4096], parse_mode="HTML", **fields)
+        except ChannelError as exc:
+            if "parse" not in str(exc) and "entit" not in str(exc):
+                raise
+            return self.call(method, chat_id=chat, text=Markup.plain(text)[:4096], **fields)
 
 
 KINDS = {kind.KIND: kind for kind in (TelegramChannel,)}
@@ -302,18 +430,70 @@ class Progress:
         return True
 
     def text(self):
-        lines = [f"🔨 {self.title}", f"▸ {self.phase}"]
-        lines += [f"✅ {self.passing}"] if self.passing else []
-        lines += [f"… {self.latest}"] if self.latest else []
-        return "\n".join(lines + [f"updated {time.strftime('%H:%M:%S')}"])
+        lines = [f"🔨 **{lit(self.title)}**", f"▸ _{lit(self.phase)}_"]
+        lines += [f"✅ {lit(self.passing)}"] if self.passing else []
+        lines += [f"… {lit(self.latest)}"] if self.latest else []
+        return "\n".join(lines + [f"🕒 _updated {time.strftime('%H:%M:%S')}_"])
 
     def brief(self):
-        return f"{self.title} ({self.phase}" + (f", {self.passing})" if self.passing else ")")
+        """Markup: the title, with the phase and the passing points."""
+        return f"**{lit(self.title)}** ({lit(self.phase)}" + (f", {lit(self.passing)})" if self.passing else ")")
 
     def ending(self):
-        """The summary for the chat; a spec waiting for confirmation is the summary itself."""
+        """The summary for the chat (Markup); a spec waiting for confirmation is the summary itself."""
         lines = [line for line in self.summary if line.strip() and not self.TIMES_RE.match(line)]
-        return "\n".join(lines if self.waiting() else [f"🏁 {self.title}"] + lines)
+        if self.waiting():
+            return "\n".join(shown for shown in map(self.spec_line, lines) if shown is not None)
+        if not lines:
+            return f"🏁 **{lit(self.title)}**"
+        first = lines[0]
+        mark = "✅" if first.startswith("Done") and "but" not in first else "⏸" if re.match(
+            r"(Interrupted|Run \w+ is not finished|Planned)", first) else "⚠️"
+        return "\n".join([f"🏁 **{lit(self.title)}**", f"{mark} **{lit(first)}**"] + [self.done_line(line)
+                                                                                    for line in lines[1:]])
+
+    SPEC_RE = re.compile(r"📋 Spec for (.+?) \(run (\w+)\): (.+?)(?:; a person runs it with: (.+))?$")
+    CHANGE_RE = re.compile(r"\s+([+~-]) (?:(C\d+) )?(.*)")
+    POINT_RE = re.compile(r"\s+(C\d+)\s+(.*)")
+
+    def spec_line(self, line):
+        """A line of a waiting spec as the chat shows it (None: a line the chat leaves out)."""
+        head, change, point = self.SPEC_RE.match(line), self.CHANGE_RE.match(line), self.POINT_RE.match(line)
+        if head:
+            name, run, language, start = head.groups()
+            return (f"📋 **Spec for {lit(name)}** · run `{run}`\n🧰 {lit(language)}"
+                    + (f" · ▶️ `{start}`" if start else ""))
+        if line == "What changed:":
+            return "\n✏️ **What changed**"
+        if change:
+            sign, number, text = change.groups()
+            number = f"**{number}** " if number else ""
+            return {"+": f"➕ {number}{lit(text)}", "~": f"🔄 {number}{lit(text)}",
+                    "-": f"➖ ~~{lit(text)}~~"}[sign]
+        if line.startswith("Tested before any code is written"):
+            return "\n🧪 **Tested before any code is written**"
+        if point:
+            return f"**{point.group(1)}** {lit(point.group(2))}"
+        if line.startswith("Not included: "):
+            return f"\n🚫 _Not included:_ {lit(line.split(': ', 1)[1])}"
+        if line.startswith("Its folder: "):
+            return f"📁 `{line.split(': ', 1)[1].split('   (', 1)[0]}`"
+        if line.startswith("Build it: "):
+            return "\n👉 `confirm` to build it · `amend WHAT` to change it"
+        if line.startswith("Change it: "):
+            return None
+        return lit(line)
+
+    @staticmethod
+    def done_line(line):
+        """A line of a run's summary as the chat shows it: what to type, as code."""
+        label, _, value = line.partition(": ")
+        more = re.fullmatch(r"Add a feature with: (tinker add .+?); fix a bug with: (tinker fix .+)", line)
+        if more:
+            return f"➕ Add a feature: `{more.group(1)}` · 🐞 fix a bug: `{more.group(2)}`"
+        if label in ("Run it", "Settings") and value:
+            return f"▶️ {label}: `{value}`" if label == "Run it" else f"⚙️ {label}: {lit(value)}"
+        return lit(line)
 
     def waiting(self):
         """The run ended with its spec waiting for the person to confirm or amend it."""
@@ -371,7 +551,7 @@ class Reporter:
                             channel.send(chat, part)
 
 
-def pieces(text, size=3900):
+def pieces(text, size=3500):
     """text in parts a chat message holds, split between lines."""
     parts, part = [], ""
     for line in text.splitlines():
@@ -406,20 +586,17 @@ class LineWatcher:
         return getattr(self.stream, name)
 
 
-HELP_EMERGENCY = "• emergency MESSAGE: stop what Tinker is doing, answer now, then go on\n"
-HELP_ALONE = ("Ask Tinker:\n"
-              "• task WHAT TO BUILD: plan it in its own folder in ~/Projects; its spec comes here first\n"
-              "• amend WHAT: change the spec that waits\n"
-              "• confirm [ID]: build the spec that waits (its folder name is asked once first)\n"
-              "• rename NAME: name its folder otherwise\n"
-              "• resume ID: continue a run\n"
-              "• runs: every run\n"
-              "• status [ID]: a run's spec points\n"
-              "• stop: stop the task that is running\n"
-              "• command WHAT: the command line that does it, run once you confirm\n"
-              "• help: this list\n"
-              + HELP_EMERGENCY +
-              "• anything else: a normal chat")
+HELP_ALONE = ("🛠 **What you can send**\n"
+              "🔨 `task WHAT TO BUILD` plan it in its own folder; its spec comes here first\n"
+              "✏️ `amend WHAT` change the spec that waits\n"
+              "✅ `confirm [ID]` build the spec that waits (its folder name is asked once)\n"
+              "📁 `rename NAME` name its folder otherwise\n"
+              "▶️ `resume ID` continue a run\n"
+              "📚 `runs` every run · 📊 `status [ID]` a run's spec points\n"
+              "⏹ `stop` stop the task that is running\n"
+              "🚨 `emergency MESSAGE` stop what runs, answer now, then go on\n"
+              "🖥 `command WHAT` the command line that does it, run once you confirm\n"
+              "❓ `help` this list · 💬 anything else: a normal chat")
 
 
 class Talk:
@@ -431,8 +608,11 @@ class Talk:
     becomes the (shorter) answer after the task's current step. Chats take turns, so an emergency waits for one
     at most."""
     SYSTEM = ("You are Tinker, a friendly helper that builds small programs on this computer with a local model. "
-              "You are chatting over {kind}: answer briefly, in plain text, without markdown. Talk about "
-              "anything. You cannot run anything yourself from the chat; these messages do:\n{commands}")
+              "You are chatting over {kind}, read on a phone: answer briefly, in short lines. Format for "
+              "meaning, in Markdown: **bold** for what matters most, *italic* for an aside, `code` for "
+              "commands, names and paths, \"- \" for items; an emoji only where it says something with less "
+              "(✅ done or fine, ⚠️ a problem, 💡 a tip, 👉 what to do next); never a heading or a table. Talk "
+              "about anything. You cannot run anything yourself from the chat; these messages do:\n{commands}")
 
     def __init__(self, commands):
         self.commands, self.said, self.lock, self.turn = commands, {}, threading.Lock(), threading.Lock()
@@ -492,23 +672,23 @@ class Talk:
             note = channel.send(message.chat, self.busy_note(running))
             while not written.wait(BUSY_EDIT_EVERY):
                 note = channel.edit(message.chat, note, self.busy_note(now()))
-        channel.edit(message.chat, note, reply[0] if reply else "The model did not answer.")
+        channel.edit(message.chat, note, reply[0] if reply else "⚠️ **The model did not answer.**")
 
     @staticmethod
     def busy_note(running):
         if not running:
-            lines = ["⏳ The model is busy or loading. I'll answer here as soon as it is free."]
+            lines = ["⏳ **The model is busy or loading.** I'll answer here as soon as it is free."]
         else:
-            lines = ["⏳ Busy with " + "; ".join(r["brief"] for r in running) + ".",
-                     "I'll answer here after the current step; for an answer now: emergency MESSAGE"]
-        return "\n".join(lines + [f"updated {time.strftime('%H:%M:%S')}"])
+            lines = ["⏳ **Busy** with " + "; ".join(r["brief"] for r in running) + ".",
+                     "I'll answer here after the current step.", "🚨 An answer now: `emergency MESSAGE`"]
+        return "\n".join(lines + [f"🕒 _updated {time.strftime('%H:%M:%S')}_"])
 
     def reply(self, channel, message, now="", tokens=CHAT_REPLY_TOKENS):
         """The model's reply to message; now: what is going on (what runs, a spec that waits)."""
         found = self.model()
         if not found:
-            return ("No model is in use yet (tinker calibrate NAME, then tinker use-model NAME), so I cannot "
-                    f"chat. These still work:\n{self.commands}")
+            return ("⚠️ **No model is in use yet**, so I cannot chat: `tinker calibrate NAME`, then "
+                    f"`tinker use-model NAME`. These still work:\n{self.commands}")
         with self.lock:
             said = self.said.setdefault((channel.name, message.chat), [])
             said.append({"role": "user", "content": message.text})
@@ -518,8 +698,8 @@ class Talk:
         try:
             text = self.ask(channel, message.chat, [{"role": "system", "content": system}] + asked, tokens)
         except OllamaError as exc:
-            return f"The model did not answer: {first_words(exc)}"
-        text = text or "(no answer)"
+            return f"⚠️ **The model did not answer:** {lit(first_words(exc))}"
+        text = text or "_(no answer)_"
         with self.lock:
             said.append({"role": "assistant", "content": text})
             del said[:-CHAT_KEPT]
@@ -545,7 +725,7 @@ class Shell:
     what it does (and a warning when it changes or deletes things). `confirm` as the person's very next
     message runs it; anything else drops it. It runs from the folder tinker channel start listens in, in the
     person's login shell, with no input, for up to COMMAND_TIMEOUT seconds; its exit code and output (the
-    end of it, when long) come back."""
+    end of it, when long) come back folded, and the model then tells what it says, in a few lines."""
     SYSTEM = ("The person describes a command they want run on their computer ({system}, shell {shell}, in the "
               "folder {folder}). Reply with ONLY JSON: {{\"command\": \"the one command line that does it\", "
               "\"does\": \"what it does, in one short sentence\"}}, or {{\"command\": \"\", \"does\": \"why no "
@@ -555,10 +735,16 @@ class Shell:
                             r"\b(brew|pip3?|npm|cargo)\s+(install|uninstall|remove)\b|\s-delete\b|-exec\s+(rm|mv)\b|"
                             r"\bxargs\s+(rm|mv)\b|\bsed\s+-i\b")
     WRITING = ""  # a command still being named
+    TELL_SYSTEM = ("Tell the person what this command's output says, for a chat read on a phone: the answer to "
+                   "what they asked first, then only what matters, in a few short lines. Format for meaning, in "
+                   "Markdown: **bold** for the key values, `code` for names and paths, \"- \" for items; an emoji "
+                   "only where it says something with less (⚠️ a problem or something nearly full, ✅ all fine, "
+                   "💾 disk, 📁 folders, 🌐 network, ⏱ time). Never a heading or a table; never anything the "
+                   "output does not show; never the command again.")
 
     def __init__(self, talk, folder):
         self.talk, self.folder = talk, folder
-        self.proposed = {}  # (channel, chat) -> the command line waiting for confirm (WRITING meanwhile)
+        self.proposed = {}  # (channel, chat) -> (command line, what was asked) waiting for confirm (WRITING meanwhile)
         self.shell = os.environ.get("SHELL") or "/bin/sh"
 
     def name(self, channel, message, now):
@@ -570,7 +756,7 @@ class Shell:
         key = (channel.name, message.chat)
         if not self.talk.model():
             self.proposed.pop(key, None)
-            return "No model is in use yet (tinker calibrate NAME, then tinker use-model NAME)."
+            return "⚠️ **No model is in use yet:** `tinker calibrate NAME`, then `tinker use-model NAME`."
         system = self.SYSTEM.format(system=os.uname().sysname, shell=Path(self.shell).name, folder=self.folder)
         try:
             data = json_in(self.talk.ask(channel, message.chat, [{"role": "system", "content": system},
@@ -578,14 +764,16 @@ class Shell:
                                          COMMAND_TOKENS))
         except OllamaError as exc:
             self.proposed.pop(key, None)
-            return f"The model did not answer: {first_words(exc)}"
+            return f"⚠️ **The model did not answer:** {lit(first_words(exc))}"
         line, does = str(data.get("command") or "").strip(), str(data.get("does") or "").strip()
         if not line or "\n" in line:
             self.proposed.pop(key, None)
-            return f"No command found: {does or 'describe it another way'}"
-        self.proposed[key] = line
-        warning = "\n⚠️ It changes or deletes things: read it before you confirm." if self.CHANGES_RE.search(line) else ""
-        return f"🖥 Run this? (in {self.folder})\n$ {line}\n{does}{warning}\nconfirm to run it; anything else cancels it."
+            return f"🤷 **No command found:** {lit(does or 'describe it another way')}"
+        self.proposed[key] = (line, message.text)
+        warning = ("\n⚠️ **It changes or deletes things:** read it before you confirm."
+                   if self.CHANGES_RE.search(line) else "")
+        return (f"🖥 **Run this?** _in_ `{self.folder}`\n```\n{Markup.fenced(line)}\n```\n{lit(does)}{warning}\n"
+                f"👉 `confirm` to run it · anything else cancels it")
 
     def take(self, channel, chat):
         """The command waiting for this chat's next message (WRITING while it is named; None when none)."""
@@ -595,8 +783,10 @@ class Shell:
             self.proposed.pop(key, None)
         return line
 
-    def run(self, channel, chat, line):
-        channel.send(chat, f"▶️ Running: $ {line}")
+    def run(self, channel, chat, proposed):
+        """Run the command; its output comes at once, folded, and what it says once the model has read it."""
+        line, asked = proposed
+        sent = channel.send(chat, f"▶️ **Running** `{line}` …")
         try:
             done = subprocess.run([self.shell, "-lc", line], cwd=self.folder, text=True, capture_output=True,
                                   stdin=subprocess.DEVNULL, timeout=COMMAND_TIMEOUT)
@@ -605,11 +795,22 @@ class Shell:
             code, output = f"stopped after {COMMAND_TIMEOUT}s", text_of(exc.stdout) + text_of(exc.stderr)
         except OSError as exc:
             code, output = "not started", str(exc)
-        output = output.strip() or "(no output)"
-        if len(output) > COMMAND_SHOWN:
-            output = "… (the start is left out)\n" + output[-COMMAND_SHOWN:]
-        for part in pieces(f"{'✅' if code == 0 else '❌'} $ {line}  (exit {code})\n{output}"):
-            channel.send(chat, part)
+        output = output.strip()
+        shown = output if len(output) <= COMMAND_SHOWN else "… (the start is left out)\n" + output[-COMMAND_SHOWN:]
+        head = f"{'✅' if code == 0 else '❌'} `{line}` · _exit {lit(code)}_"
+        folded = f"```output\n{Markup.fenced(Markup.columns(shown))}\n```" if output else "_(no output)_"
+        sent = channel.edit(chat, sent, f"{head}\n{folded}")
+        if not output or not self.talk.model():
+            return
+        try:
+            told = self.talk.ask(channel, chat, [{"role": "system", "content": self.TELL_SYSTEM},
+                                                 {"role": "user", "content": f"They asked: {asked}\nCommand: {line}\n"
+                                                  f"Exit code: {code}\nOutput:\n{output[-COMMAND_READ:]}"}],
+                                 CHAT_REPLY_TOKENS)
+        except OllamaError:
+            return
+        if told:
+            channel.edit(chat, sent, f"{head}\n{told}\n{folded}")
 
 
 def json_in(text):
@@ -757,7 +958,7 @@ class Alone:
         for channel in self.channels:
             channel.skip_waiting()
             for chat in channel.allowed:
-                channel.send(chat, f"👋 Tinker is listening (projects in {self.root}).\n{HELP_ALONE}")
+                channel.send(chat, f"👋 **Tinker is listening** _from_ `{self.root}`\n\n{HELP_ALONE}")
         names = ", ".join(c.name for c in self.channels)
         print(f"Listening on {names}; projects go in {self.root}. Ctrl-C stops.")
         threads = [threading.Thread(target=self.listen, args=(c,), daemon=True) for c in self.channels]
@@ -770,7 +971,7 @@ class Alone:
             self.stop_task()
             for channel in self.channels:
                 for chat in channel.allowed:
-                    channel.send(chat, "Tinker stopped listening.")
+                    channel.send(chat, "👋 **Tinker stopped listening.**")
             print("\nStopped listening.")
 
     def listen(self, channel):
@@ -780,16 +981,16 @@ class Alone:
                 command = command_of(message.text, self.COMMANDS)
                 proposed = self.shell.take(channel, message.chat)  # a command waits for this very message
                 if proposed == Shell.WRITING and command == "confirm":
-                    channel.send(message.chat, "The command is still being worked out: confirm once it is shown.")
+                    channel.send(message.chat, "⏳ The command is still being worked out: `confirm` once it is shown.")
                     continue
                 if proposed and command == "confirm" and len(message.text.split()) == 1:
                     threading.Thread(target=self.shell.run, args=(channel, message.chat, proposed), daemon=True).start()
                     continue
                 if proposed:
-                    channel.send(message.chat, f"Not run: $ {proposed}")
+                    channel.send(message.chat, f"🚫 _Not run:_ `{proposed[0]}`")
                 if command == "command":
                     if len(message.text.split()) == 1:
-                        channel.send(message.chat, "Write: command WHAT, e.g. command show the free disk space")
+                        channel.send(message.chat, "✍️ Write `command WHAT`, e.g. `command show the free disk space`")
                     else:
                         self.shell.name(channel, after_word(message), self.now)
                     continue
@@ -811,31 +1012,32 @@ class Alone:
             words = text.split()
         command = command_of(text, self.COMMANDS)
         if command == "emergency":
-            return "Write: emergency MESSAGE"
+            return "✍️ Write `emergency MESSAGE`"
         if command == "task":  # Tinker makes its folder in the projects folder, named after it
             if len(words) < 2:
-                return "Write: task WHAT TO BUILD, e.g. task a calculator in Python"
+                return "✍️ Write `task WHAT TO BUILD`, e.g. `task a calculator in Python`"
             request = " ".join(words[1:])
             return self.start_task(["task", request, "--confirm"], self.root, request)
         if command in ("confirm", "amend", "rename"):
             return self.decide(command, words)
         if command == "resume":
             if len(words) != 2:
-                return "Write: resume ID (runs lists the IDs)"
+                return "✍️ Write `resume ID` (`runs` lists the IDs)"
             return self.start_task(["resume", words[1]], self.root, f"resume {words[1]}")
         if command == "stop":
             if self.stop_task():
-                return "Stopping the task: it is saved, resume goes on later."
+                return "⏹ **Stopping the task:** it is saved; `resume` goes on later."
             elsewhere = running_elsewhere()
             for run in elsewhere:  # as Ctrl-C in its terminal: the run saves itself
                 signal_task(run["pid"], STOP)
             if not elsewhere:
-                return "No task is running."
-            return f"Stopping {'; '.join(r['title'] for r in elsewhere)}: saved, resume goes on later."
+                return "💤 No task is running."
+            return f"⏹ **Stopping** {'; '.join(lit(r['title']) for r in elsewhere)}: saved; `resume` goes on later."
         if command in ("runs", "status"):
             if command == "status" and len(words) == 1 and self.now():
                 return "\n\n".join(r["text"] for r in self.now())
-            return self.tinker([command] + words[1:2])
+            title = "📚 **Runs**" if command == "runs" else f"📊 **Status** {lit(' '.join(words[1:2]))}".rstrip()
+            return f"{title}\n```\n{Markup.fenced(Markup.columns(self.tinker([command] + words[1:2])))}\n```"
         return HELP_ALONE
 
     def decide(self, command, words):
@@ -843,42 +1045,42 @@ class Alone:
         rename NAME, builds it); amend WHAT: change it (it waits again); rename NAME: rename its folder."""
         waiting = self.waiting or {}
         if command == "amend" and len(words) == 1:
-            return "Write: amend WHAT, e.g. amend also handle negative numbers"
+            return "✍️ Write `amend WHAT`, e.g. `amend also handle negative numbers`"
         if command == "rename":
             return self.rename(waiting, words)
         if command == "confirm" and len(words) == 1 and waiting.get("stage") == "spec":
             waiting["stage"] = "name"
-            return (f"📁 Its folder: {waiting['folder']}\nconfirm to build it there, or rename NAME to name it "
-                    f"otherwise (it builds then).")
+            return (f"📁 **Its folder:** `{waiting['folder']}`\n👉 `confirm` to build it there · `rename NAME` "
+                    f"to name it otherwise (it builds then)")
         run = words[1] if command == "confirm" and len(words) == 2 else waiting.get("run")
         if not run:
-            return "No spec waits for confirmation: start one with task WHAT TO BUILD"
+            return "🤷 No spec waits for confirmation: start one with `task WHAT TO BUILD`"
         mine = waiting.get("run") == run
         folder, title = (waiting["folder"], waiting["title"]) if mine else (self.root, f"run {run}")
         if command == "confirm":
             refused = self.start_task(["resume", run], folder, title)
-            return refused or f"✅ Confirmed: building {title}."
+            return refused or f"✅ **Confirmed:** building {lit(title)}"
         refused = self.start_task(["amend", run, " ".join(words[1:])], folder, title)
-        return refused or f"✏️ Changing the spec of {title}…"
+        return refused or f"✏️ **Changing the spec** of {lit(title)} …"
 
     def rename(self, waiting, words):
         """rename NAME: the waiting project's folder renamed (tinker rename); asked for its name, it builds."""
         if len(words) != 2:
-            return "Write: rename NAME, e.g. rename calculator"
+            return "✍️ Write `rename NAME`, e.g. `rename calculator`"
         if not waiting:
-            return "No spec waits for confirmation, so no folder can be renamed (once built, it stays)."
+            return "🤷 No spec waits for confirmation, so no folder can be renamed (once built, it stays)."
         if self.busy():
-            return "A task is running: wait for it, or stop it first."
+            return "⏳ A task is running: wait for it, or `stop` it first."
         done = subprocess.run(tinker_command() + ["rename", waiting["run"], words[1]], cwd=self.root, text=True,
                               capture_output=True, env=dict(os.environ, NO_COLOR="1"), timeout=60)
         if done.returncode:
-            return first_lines((done.stdout + done.stderr).strip(), 10)
+            return f"⚠️ **Not renamed:** {lit(first_lines((done.stdout + done.stderr).strip(), 10).splitlines()[-1])}"
         waiting["folder"] = Path(waiting["folder"]).parent / words[1]
         waiting["title"] = f"{words[1]}: {waiting['title'].split(': ', 1)[-1]}"
         if waiting.get("stage") != "name":
-            return f"Renamed: its folder is {waiting['folder']}."
+            return f"📁 **Renamed:** its folder is `{waiting['folder']}`"
         refused = self.start_task(["resume", waiting["run"]], waiting["folder"], waiting["title"])
-        return refused or f"✅ Renamed to {words[1]}: building {waiting['title']}."
+        return refused or f"✅ **Renamed** to `{words[1]}`: building {lit(waiting['title'])}"
 
     def busy(self):
         return self.process is not None and self.process.poll() is None
@@ -893,20 +1095,20 @@ class Alone:
         """Stop what runs (a task saves itself), answer message, then go on with the task: one started here
         is resumed here, one run from a terminal resumes itself there."""
         if self.urgent:
-            channel.send(message.chat, "An emergency is being answered: one at a time.")
+            channel.send(message.chat, "🚨 An emergency is being answered: one at a time.")
             return
         with self.lock:
             self.urgent, stopped = True, self.task if self.busy() else None
             if stopped:
-                channel.send(message.chat, f"🚨 Stopping {stopped['title']} to answer: it is saved and goes on "
-                                           f"after.")
+                channel.send(message.chat, f"🚨 **Stopping** {lit(stopped['title'])} to answer: it is saved and "
+                                           f"goes on after.")
                 self.reporter.quiet = True
                 self.stop_task()
                 try:
                     self.process.wait(STOP_WAIT)
                 except subprocess.TimeoutExpired:  # it goes on by itself: answered after its step, as a chat
                     stopped = None
-                    channel.send(message.chat, f"The task did not stop in {STOP_WAIT}s; answering after its step.")
+                    channel.send(message.chat, f"⚠️ The task did not stop in {STOP_WAIT}s; answering after its step.")
             paused = [run for run in running_elsewhere() if self.pause(channel, message, run)]
         try:
             channel.send(message.chat, self.talk.reply(channel, message))
@@ -915,14 +1117,14 @@ class Alone:
         if stopped:
             again = ["resume", stopped["run"]] if stopped["run"] else stopped["arguments"]
             self.start_task(again, stopped["folder"], stopped["title"])
-            channel.send(message.chat, f"▶️ Going on with {stopped['title']}.")
+            channel.send(message.chat, f"▶️ **Going on** with {lit(stopped['title'])}")
         for run in paused:  # its file removed: the task goes on in its terminal
             (RUNNING_DIR / f"{run['pid']}.json").unlink(missing_ok=True)
-            channel.send(message.chat, f"▶️ Going on with {run['title']} (in its terminal).")
+            channel.send(message.chat, f"▶️ **Going on** with {lit(run['title'])} _(in its terminal)_")
 
     def pause(self, channel, message, run):
         """A task run from a terminal, stopped for an emergency: True once it says it is paused."""
-        channel.send(message.chat, f"🚨 Stopping {run['title']} to answer: it is saved and goes on after.")
+        channel.send(message.chat, f"🚨 **Stopping** {lit(run['title'])} to answer: it is saved and goes on after.")
         signal_task(run["pid"], PAUSE)
         ends = time.monotonic() + STOP_WAIT
         while time.monotonic() < ends:
@@ -930,15 +1132,15 @@ class Alone:
             if now is None or now.get("paused"):
                 return now is not None
             time.sleep(1)
-        channel.send(message.chat, f"{run['title']} did not stop in {STOP_WAIT}s; answering after its step.")
+        channel.send(message.chat, f"⚠️ {lit(run['title'])} did not stop in {STOP_WAIT}s; answering after its step.")
         return False
 
     def start_task(self, arguments, folder, title):
         with self.lock:
             if self.busy():
-                return "A task is running: wait for it, or stop it first."
+                return "⏳ A task is running: wait for it, or `stop` it first."
             if self.urgent:
-                return "An emergency is being answered: send it again in a moment."
+                return "🚨 An emergency is being answered: send it again in a moment."
             self.task = {"arguments": arguments, "folder": folder, "title": title, "run": None}
             self.reporter = Reporter(self.channels, title)
             env = dict(os.environ, **{OFF: "off", "PYTHONUNBUFFERED": "1", "NO_COLOR": "1"})
@@ -948,7 +1150,7 @@ class Alone:
                                                 stderr=subprocess.STDOUT, start_new_session=True)
             except OSError as exc:
                 self.process = None
-                return f"Could not start it: {exc}"
+                return f"⚠️ **Could not start it:** {lit(exc)}"
         if self.waiting and self.waiting["folder"] == folder:
             self.waiting = None  # confirmed or being changed: it waits again only once its spec is sent
         threading.Thread(target=self.follow, args=(self.process, self.reporter, self.task), daemon=True).start()
@@ -1084,7 +1286,7 @@ class ChannelCommand:
                 answer = ask(f"Message from {message.sender or 'someone'} (chat {message.chat}): "
                              f"{first_words(message.text, 40)!r}. Is that you? [y/N]", "n")
                 if answer.lower().startswith("y"):
-                    channel.send(message.chat, "✅ Paired with Tinker. Only this chat is listened to.")
+                    channel.send(message.chat, "✅ **Paired with Tinker.** Only this chat is listened to.")
                     return [message.chat]
         raise SystemExit("tinker: no message came; run tinker channel add again (or give --chat ID)")
 
