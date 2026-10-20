@@ -185,7 +185,7 @@ are the modules of tinkerkit/, one responsibility each, each using only those li
   model      the local model (Ollama, Model and the Tries of one request, Models, Calibrator)
   project    the plan and its record (Project, SpecDocument, Runs, RunChecks)
   web        the Internet plugin, the only part that goes online (Internet, OllamaWeb)
-  channels   the chat plugin: a run's progress, status and stop over Telegram (Channel, Channels)
+  channels   the chat plugin: a run's progress, status and stop over Telegram, and chat (Channel, Talk)
   knowledge  lessons (Knowledge) and learning (Learner, Researcher, Library, Retriever, Embeddings)
   planning   recall, the spec, the contracts where files meet, and their review
   building   setup, the tests, the code, and fixing until every test passes
@@ -293,7 +293,7 @@ class Cli:
             ("channel remove NAME", "delete a channel and its token"),
             ("channel enable NAME", "a running task reports to it and takes status and stop"),
             ("channel disable NAME", "stop using it (channels start disabled)"),
-            ("channel start [NAME]", "listen on it: ask for tasks, resumes and status from the chat"),
+            ("channel start [NAME]", "listen on it: ask for tasks, resumes and status, or just chat"),
         ],
     }
     EXAMPLES = ("tinker doctor", 'tinker task "a calculator in Python"', 'tinker add "keep a history of results"',

@@ -1,7 +1,8 @@
 """Channels: talking to Tinker from a chat app, a plugin like the web. With no channel enabled nothing of
 this runs. A channel is enabled with tinker channel enable NAME; then a task it is running reports its
 progress there and takes `status` and `stop` until it ends, and tinker channel start listens on its own:
-a task, a resume, the runs, their status, all asked for from the chat.
+a task, a resume, the runs, their status, all asked for from the chat. Anything else is a normal chat with
+the model in use (Talk).
 
 Channel is what every kind of channel does (receive messages, send, edit what it sent); TelegramChannel is
 one kind. Only the chats a channel was paired with are listened to: a message from anyone else is ignored.
@@ -21,13 +22,19 @@ import urllib.parse
 import urllib.request
 from pathlib import Path
 
-from .settings import HOME
+from .model import Models, Ollama, OllamaError
+from .settings import HOME, Config
 
 CHANNELS_FILE = HOME / "channels.json"         # name -> its kind, whether it is enabled, the chats it serves
 SECRETS_FILE = HOME / "channel-secrets.json"   # name -> its secrets (a bot token): mode 600, never printed
 OFF = "TINKER_CHANNELS"                        # =off: a run started by `tinker channel start` does not listen too
 PAIRING_WAIT = 120                             # seconds to wait for the first message when pairing a chat
+CHECK_TRIES = 3                                # tries of a channel's first call when it starts listening
 EDIT_EVERY = 5                                 # seconds between edits of a progress message
+CHAT_KEPT = 12                                 # messages of one chat kept as the context of its next reply
+CHAT_REPLY_TOKENS = 1024                       # the longest chat reply
+CHAT_TIMEOUT = 600                             # seconds a chat reply may take (a task may hold the model first)
+TYPING_EVERY = 4                               # seconds between "typing…" signs while a reply is written
 
 
 class Message:
@@ -63,6 +70,9 @@ class Channel:
     def edit(self, chat, sent, text):
         """Change a message sent before (a channel that cannot edit sends a new one)."""
         return self.send(chat, text)
+
+    def typing(self, chat):
+        """Show chat that a reply is being written (a channel that cannot says nothing)."""
 
     def skip_waiting(self):
         """Forget the messages sent while nothing listened: a command sent hours ago is not run now."""
@@ -124,6 +134,12 @@ class TelegramChannel(Channel):
         try:
             waiting = self.call("getUpdates", offset=-1)
             self.offset = waiting[-1]["update_id"] + 1 if waiting else None
+        except (OSError, ChannelError):
+            pass
+
+    def typing(self, chat):
+        try:
+            self.call("sendChatAction", wait=10, chat_id=chat, action="typing")
         except (OSError, ChannelError):
             pass
 
@@ -295,14 +311,108 @@ class LineWatcher:
         return getattr(self.stream, name)
 
 
-HELP_ATTACHED = "This task is running. Ask:\n• status: how it is going\n• stop: stop it (tinker resume goes on later)"
+HELP_ATTACHED = ("This task is running. Ask:\n• status: how it is going\n• stop: stop it (tinker resume goes on later)\n"
+                 "• anything else: a normal chat")
 HELP_ALONE = ("Ask Tinker:\n"
               "• task FOLDER \"what to build\": build it in a new folder\n"
               "• resume ID: continue a run\n"
               "• runs: every run\n"
               "• status [ID]: a run's spec points\n"
               "• stop: stop the task that is running\n"
-              "• help: this list")
+              "• help: this list\n"
+              "• anything else: a normal chat")
+
+
+class Talk:
+    """A normal chat with the model in use: a message that is not a command is answered by it, with that
+    chat's last CHAT_KEPT messages (and what is running now) as context. It does not think, so a reply comes
+    quickly, and its settings are a run's own (num_ctx), so a task and a chat share the loaded model: warm
+    loads it as listening starts, and neither the first reply nor the next task waits for it to load."""
+    SYSTEM = ("You are Tinker, a friendly helper that builds small programs on this computer with a local model. "
+              "You are chatting over {kind}: answer briefly, in plain text, without markdown. Talk about "
+              "anything. You cannot run anything yourself from the chat; these messages do:\n{commands}")
+
+    def __init__(self, commands):
+        self.commands, self.said, self.lock = commands, {}, threading.Lock()
+
+    @staticmethod
+    def model():
+        """(name, options, think) for a chat with the model in use; None when no measured model is in use."""
+        name = Config.get("model")
+        settings = (Models.settings(name) or {}) if name else {}
+        if not settings.get("num_ctx"):
+            return None
+        options = {"num_ctx": settings["num_ctx"], "num_predict": CHAT_REPLY_TOKENS}
+        if settings.get("num_batch"):
+            options["num_batch"] = settings["num_batch"]
+        return name, options, (False if settings.get("think") not in (None, False) else None)
+
+    def warm(self):
+        """Load the model now, in the background."""
+        threading.Thread(target=self.load, daemon=True).start()
+
+    def load(self):
+        """The model loaded, and one token written (a loaded model's first reply is much slower than the next)."""
+        found = self.model()
+        if found:
+            name, options, think = found
+            try:
+                Ollama.chat(name, [{"role": "user", "content": "hi"}], Config.keep_alive(Config.get("keep_alive")),
+                            dict(options, num_predict=1), think=think, timeout=CHAT_TIMEOUT)
+            except OllamaError as exc:
+                print(f"  note: the model did not load for chat: {first_words(exc)}")
+
+    def answer(self, channel, message, now=""):
+        """The reply to message, sent when written (in a thread, so `stop` is heard meanwhile)."""
+        threading.Thread(target=lambda: channel.send(message.chat, self.reply(channel, message, now)),
+                         daemon=True).start()
+
+    def reply(self, channel, message, now=""):
+        found = self.model()
+        if not found:
+            return ("No model is in use yet (tinker calibrate NAME, then tinker use-model NAME), so I cannot "
+                    f"chat. These still work:\n{self.commands}")
+        name, options, think = found
+        with self.lock:
+            said = self.said.setdefault((channel.name, message.chat), [])
+            said.append({"role": "user", "content": message.text})
+            asked = said[-CHAT_KEPT:]
+        system = self.SYSTEM.format(kind=channel.KIND.title(), commands=self.commands)
+        system += f"\n\nRunning now:\n{now}" if now else "\n\nNo task is running now."
+        done = threading.Event()
+        threading.Thread(target=keep_typing, args=(channel, message.chat, done), daemon=True).start()
+        try:
+            data = Ollama.chat(name, [{"role": "system", "content": system}] + asked,
+                               Config.keep_alive(Config.get("keep_alive")), options, think=think,
+                               timeout=CHAT_TIMEOUT)
+        except OllamaError as exc:
+            return f"The model did not answer: {first_words(exc)}"
+        finally:
+            done.set()
+        text = data["message"]["content"].strip() or "(no answer)"
+        with self.lock:
+            said.append({"role": "assistant", "content": text})
+            del said[:-CHAT_KEPT]
+        return text
+
+
+def keep_typing(channel, chat, done):
+    """The chat's "typing…" sign, shown until done is set."""
+    while not done.is_set():
+        channel.typing(chat)
+        done.wait(TYPING_EVERY)
+
+
+def command_of(text, commands):
+    """The command a message gives (one of commands, sent as its first word, with or without a /), or ""
+    when it is chat. A word alone is a command; with more after it only task, resume ID and status ID are."""
+    words = text.split()
+    first = words[0].lower().lstrip("/") if words else ""
+    if first not in commands:
+        return ""
+    if len(words) == 1 or first == "task" or (first in ("resume", "status") and len(words) == 2):
+        return first
+    return ""
 
 
 class Attached:
@@ -311,7 +421,7 @@ class Attached:
 
     def __init__(self, channels, title):
         self.channels, self.reporter = channels, Reporter(channels, title)
-        self.done = threading.Event()
+        self.talk, self.done = Talk(HELP_ATTACHED), threading.Event()
         self.threads = [threading.Thread(target=self.listen, args=(c,), daemon=True) for c in channels]
 
     def start(self):
@@ -326,14 +436,16 @@ class Attached:
     def listen(self, channel):
         while not self.done.is_set():
             for message in channel.listened(timeout=20):
-                command = message.text.split()[0].lower().lstrip("/") if message.text else ""
+                command = command_of(message.text, ("stop", "status", "help"))
                 if command == "stop":
                     channel.send(message.chat, "Stopping: the run is saved; tinker resume goes on later.")
                     _thread.interrupt_main()
                 elif command == "status":
                     channel.send(message.chat, self.reporter.progress.text())
-                else:
+                elif command == "help":
                     channel.send(message.chat, HELP_ATTACHED)
+                else:
+                    self.talk.answer(channel, message, self.reporter.progress.text())
 
     def end(self):
         self.done.set()
@@ -356,15 +468,18 @@ def attach(title):
 
 class Alone:
     """tinker channel start: the channels listen on their own, from this folder. One task runs at a
-    time, as its own tinker (which does not listen too); its printed progress goes to the chat."""
+    time, as its own tinker (which does not listen too); its printed progress goes to the chat. Anything
+    that is not a command is a normal chat."""
     FOLDER_RE = re.compile(r"[A-Za-z0-9][\w.-]{0,63}")
+    COMMANDS = ("task", "resume", "runs", "status", "stop", "help")
 
     def __init__(self, channels, root):
         self.channels, self.root = channels, Path(root).resolve()
         self.process = self.reporter = None
-        self.lock = threading.Lock()
+        self.lock, self.talk = threading.Lock(), Talk(HELP_ALONE)
 
     def run(self):
+        self.talk.warm()
         for channel in self.channels:
             channel.skip_waiting()
             for chat in channel.allowed:
@@ -388,17 +503,20 @@ class Alone:
         while True:
             for message in channel.listened(timeout=20):
                 print(f"[{time.strftime('%H:%M:%S')}] {channel.name}: {message.text}")
+                if not command_of(message.text, self.COMMANDS):
+                    self.talk.answer(channel, message, self.reporter.progress.text() if self.busy() else "")
+                    continue
                 reply = self.answer(message.text, channel)
                 if reply:
                     channel.send(message.chat, reply)
 
     def answer(self, text, channel):
-        """What a message asks for, done; the reply (None when the reply comes as progress)."""
+        """What a command asks for, done; the reply (None when the reply comes as progress)."""
         try:
             words = shlex.split(text)
         except ValueError:
             words = text.split()
-        command = words[0].lower().lstrip("/") if words else ""
+        command = command_of(text, self.COMMANDS)
         if command == "task":
             if len(words) < 3:
                 return 'Write: task FOLDER "what to build", e.g. task calc "a calculator in Python"'
@@ -475,7 +593,7 @@ class ChannelCommand:
              "tinker channel remove NAME          delete it, secrets included\n"
              "tinker channel enable NAME          a running task reports to it and takes status and stop\n"
              "tinker channel disable NAME         stop using it (new channels start disabled)\n"
-             "tinker channel start [NAME]         listen on enabled channels (or NAME): ask for tasks from the chat")
+             "tinker channel start [NAME]         listen on enabled channels (or NAME): ask for tasks, or just chat")
 
     @staticmethod
     def run(argv):
@@ -593,11 +711,24 @@ class ChannelCommand:
         if not channels:
             raise SystemExit("tinker: no channel is enabled (tinker channel enable NAME, or start NAME)")
         for channel in channels:
-            try:
-                channel.who()
-            except (ChannelError, OSError) as exc:
-                raise SystemExit(f"tinker: channel {channel.name} does not work: {exc}") from None
+            ChannelCommand.check(channel)
         Alone(channels, Path.cwd()).run()
+
+    @staticmethod
+    def check(channel):
+        """The channel answers: a refusal (a bad token) ends here, a slow or dropped network is asked
+        again, up to CHECK_TRIES times."""
+        for tries in range(1, CHECK_TRIES + 1):
+            try:
+                return channel.who()
+            except ChannelError as exc:
+                raise SystemExit(f"tinker: channel {channel.name} does not work: {exc}") from None
+            except OSError as exc:
+                if tries == CHECK_TRIES:
+                    raise SystemExit(f"tinker: channel {channel.name} cannot be reached ({exc}), tried {tries} "
+                                     f"times: check the network and start it again") from None
+                print(f"  {channel.name} did not answer ({exc}); trying again ({tries + 1}/{CHECK_TRIES})")
+                time.sleep(5)
 
 
 def ask(question, default="", choices=None, secret=False):
