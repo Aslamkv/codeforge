@@ -47,8 +47,8 @@ class TestWriter(Phase):
         for step in steps:
             by_file.setdefault(TestRef(step["test"]).file, []).append(step)
         for path, group in by_file.items():
-            for start in range(0, len(group), TESTS_PER_CALL):
-                self.write_batch(cycle, path, group[start:start + TESTS_PER_CALL])
+            for batch in itertools.batched(group, TESTS_PER_CALL):
+                self.write_batch(cycle, path, list(batch))
         self.s.save()
 
     def write_batch(self, cycle, path, batch):
