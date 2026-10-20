@@ -516,6 +516,8 @@ class Designer(Phase):
             raise ValueError(f"toolchain.run is empty, but a user starts {entry}: give the command that starts it")
         for command in toolchain.dropped:
             print(f"  toolchain: left out `{command}`: Tinker makes {ENV_FILE} itself, from {ENV_EXAMPLE}")
+        for command in toolchain.machine:
+            print(f"  toolchain: left out `{command}`: it changes the machine's own tools, not this project")
         problems = toolchain.problems()
         if problems:
             raise ValueError("; ".join(problems))

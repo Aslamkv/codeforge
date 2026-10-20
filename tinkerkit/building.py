@@ -888,11 +888,12 @@ class ToolchainRepair(Worker):
         return ("model", fix) if fix else None
 
     def replay(self, replay):
-        """A learned fix: its commands, and the config files it created (an existing file is kept)."""
+        """A learned fix: its commands, and the config files it created (an existing file is kept;
+        a file this project plans as code or tests is its own to write, never another project's)."""
         if replay.get("toolchain"):
             self.p.toolchain = self.s.toolchain.merged(replay["toolchain"])
         for path, content in (replay.get("files") or {}).items():
-            if not self.ws.exists(path):
+            if not self.ws.exists(path) and self.p.files.get(path, {}).get("kind") in (None, "config"):
                 self.ws.write(path, content)
                 self.p.register([path], "config", "added by a learned toolchain fix")
         self.s.save()
@@ -929,7 +930,8 @@ class ToolchainRepair(Worker):
         if not changed:
             return None
         replayable = set(change.files) == set(change.created)
-        files = {p: self.ws.read(p) for p in change.created}
+        files = {p: self.ws.read(p) for p in change.created  # code it made to get going belongs to this project
+                 if self.p.files.get(p, {}).get("kind") == "config"}
         return {"failure": failure, "cause": reply.cause() or "?",
                 "replay": {"toolchain": commands, "files": files} if replayable else None}
 

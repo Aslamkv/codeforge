@@ -198,6 +198,11 @@ class Toolchain:
                              r"\bran 0 tests\b|\btests?\s*0\b|\b\d+ deselected\b", re.I)
     TESTS_RAN_RE = re.compile(r"\b[1-9]\d* (tests?|passed|passing|failed|failing)\b|\bran [1-9]\d* tests?\b", re.I)
     ENV_TARGET = re.compile(r"(?<![\w.-])\.env(?![\w.-])")  # the settings file itself, not .env.example
+    # a command that changes the machine's own toolchain, not the project: what is installed is used as it is
+    MACHINE_RE = re.compile(r"\brustup\s+(default|override|update|toolchain|component|target)\b|\bcargo\s+install\b|"
+                            r"\b(npm|pnpm|yarn)\s+(i|install|add)\b[^&|;]*\s(-g|--global)\b|\byarn\s+global\b|"
+                            r"\bpip3?\s+install\b[^&|;]*\s--user\b|\b(brew|apt|apt-get|dnf|yum|pacman|port)\s+install\b|"
+                            r"\b(go|gem)\s+install\b|\b(pyenv|nvm|asdf)\s+(install|global|use)\b")
     # a command that failed because the network did (any package manager): it waits for the network, nothing more
     NETWORK_RE = re.compile(r"could not resolve|resolve host|name or service not known|nodename nor servname|"
                             r"temporary failure in name resolution|network is unreachable|no route to host|"
@@ -210,8 +215,9 @@ class Toolchain:
         data = data if isinstance(data, dict) else {}
         setup = data.get("setup") or []
         setup = [str(c) for c in (setup if isinstance(setup, list) else [setup]) if str(c).strip()]
-        self.setup = [c for c in setup if not self.ENV_TARGET.search(c)]
+        self.setup = [c for c in setup if not self.ENV_TARGET.search(c) and not self.MACHINE_RE.search(c)]
         self.dropped = [c for c in setup if self.ENV_TARGET.search(c)]  # Tinker makes .env itself
+        self.machine = [c for c in setup if self.MACHINE_RE.search(c)]  # never run: it changes the machine
         use = data.get("use") or []
         self.use = [str(c) for c in (use if isinstance(use, list) else [use]) if str(c).strip()]
         self.activate = str(data.get("activate") or "").strip()
@@ -310,10 +316,12 @@ class Toolchain:
         return code, output
 
     def merged(self, changes):
-        """This toolchain with the values a dict of changes gives replacing its own."""
+        """This toolchain with the values a dict of changes gives replacing its own: a command
+        given empty is left as it was, a list given empty is emptied (a fix that drops every setup
+        command, such as one that starts a new project)."""
         data = self.to_dict()
         for key, value in (changes or {}).items():
-            if key in data and value not in (None, "", []):
+            if key in data and (isinstance(value, list) or value not in (None, "")):
                 data[key] = value
         return Toolchain(data)
 

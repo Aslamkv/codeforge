@@ -20,6 +20,8 @@ class Reply:
                                 r"(.*?)\n?<<<END>>>", re.S)
     NUMBERED_RE = re.compile(r"^\s*\d+\| ?")
     PLACEHOLDER_PATHS = {"path", "path/to/file", "file", "filename", "key"}
+    PLACEHOLDER_BODY_RE = re.compile(r"\s*[<\[(]?\s*(the\s+)?(complete\s+|whole\s+|full\s+)?(file\s+)?(content|contents|"
+                                     r"code|text|file|\.\.\.|…)\s*(here|goes here)?\s*[>\])]?\s*", re.I)
     PATH_LINE_RE = re.compile(r"[\w.-]+(?:/[\w.-]+)*\.[\w]+|[\w.-]+(?:/[\w.-]+)+")  # a relative path, alone on a line
     KEY_AFTER_RE = re.compile(r'"(?:[^"\\]|\\.)*"\s*:')  # a string that is an object's key
     JOINED_STRINGS_RE = re.compile(r'(?<!\\)"\s*\+\s*"')  # "a" + "b", as in code: one string "ab"
@@ -117,7 +119,8 @@ class Reply:
     def files(self):
         """[(path, content)] of its FILE blocks. A header that copied the format's placeholder
         (<<<FILE path>>>) with the real path right after it, or as the block's first line, is read
-        as that path."""
+        as that path. A block whose body is only the format's placeholder ("content") is the model
+        musing about the format, not a file."""
         found = []
         for path, after, body in self.FILE_BLOCK_RE.findall(self.text):
             path = path.strip()
@@ -128,6 +131,8 @@ class Reply:
                 body = after + "\n" + body  # the file began on the header's line
             elif path.lower() in self.PLACEHOLDER_PATHS and self.PATH_LINE_RE.fullmatch(first.strip()):
                 path, body = first.strip(), rest
+            if self.PLACEHOLDER_BODY_RE.fullmatch(body):
+                continue
             markdown = path.lower().endswith((".md", ".markdown"))  # a fence around a whole doc may be the doc
             found.append((str(Path(path)), self.without_debris(body, fences=not markdown)))
         return found
