@@ -296,7 +296,7 @@ class Cli:
             ("channel remove NAME", "delete a channel and its token"),
             ("channel enable NAME", "every task reports to it; tinker channel start reads it"),
             ("channel disable NAME", "stop using it (channels start disabled)"),
-            ("channel start [NAME]", "read the chat: tasks, status, stop, emergency, or just chat"),
+            ("channel start [NAME]", "read the chat: tasks, status, stop, emergency, commands, or just chat"),
         ],
     }
     EXAMPLES = ("tinker doctor", 'tinker task "a calculator in Python"', 'tinker add "keep a history of results"',

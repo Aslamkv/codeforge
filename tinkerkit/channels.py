@@ -3,7 +3,8 @@ this runs. A channel is enabled with tinker channel enable NAME; then every task
 and tinker channel start reads the chat: it is the only one that does (Telegram lets one program read a
 bot). From the chat: a task (its spec comes to the chat first, to confirm or amend before anything is built),
 a resume, the runs, their status, stop; anything else is a normal chat with the
-model in use (Talk), told at once when a task holds the model; and `emergency MESSAGE` stops the task
+model in use (Talk), told at once when a task holds the model; `command WHAT` has the model name the command
+line that does it, run once the person confirms it (Shell); and `emergency MESSAGE` stops the task
 (saved), answers at once and then goes on with the task. A task run from a terminal is served the same way:
 its progress is kept in RUNNING_DIR, and it is stopped or paused with a signal.
 
@@ -46,6 +47,9 @@ CHAT_TIMEOUT = 600                             # seconds a chat reply may take (
 TYPING_EVERY = 4                               # seconds between "typing…" signs while a reply is written
 BUSY_AFTER = 5                                 # seconds a chat reply may take before a note says the model is busy
 BUSY_EDIT_EVERY = 30                           # seconds between updates of that note (the progress of what runs)
+COMMAND_TOKENS = 300                           # the longest reply naming a command
+COMMAND_TIMEOUT = 120                          # seconds a command run from the chat may take
+COMMAND_SHOWN = 11000                          # chars of its output sent back (its end, when longer: 3 messages)
 
 
 class Message:
@@ -412,6 +416,7 @@ HELP_ALONE = ("Ask Tinker:\n"
               "• runs: every run\n"
               "• status [ID]: a run's spec points\n"
               "• stop: stop the task that is running\n"
+              "• command WHAT: the command line that does it, run once you confirm\n"
               "• help: this list\n"
               + HELP_EMERGENCY +
               "• anything else: a normal chat")
@@ -459,14 +464,16 @@ class Talk:
             except OllamaError as exc:
                 print(f"  note: the model did not load for chat: {first_words(exc)}")
 
-    def answer(self, channel, message, now, waiting=lambda: ""):
+    def answer(self, channel, message, now, waiting=lambda: "", write=None):
         """The reply to message, sent when written (in a thread, so `stop` is heard meanwhile). now(): what
-        runs now, [{title, brief, text}]; waiting(): a spec that waits for the person. When something runs, or the reply is not
+        runs now, [{title, brief, text}]; waiting(): a spec that waits for the person; write: what writes the
+        reply (channel, message, context, tokens -> text), the chat's own by default. When something runs, or the reply is not
         written in BUSY_AFTER seconds, a note says so at once, updated every BUSY_EDIT_EVERY seconds with the
         progress; the reply then takes its place."""
-        threading.Thread(target=self.answering, args=(channel, message, now, waiting), daemon=True).start()
+        threading.Thread(target=self.answering, args=(channel, message, now, waiting, write or self.reply),
+                         daemon=True).start()
 
-    def answering(self, channel, message, now, waiting):
+    def answering(self, channel, message, now, waiting, write_reply):
         running, written, reply = now(), threading.Event(), []
         context = ["Running now:\n" + "\n\n".join(r["text"] for r in running)] if running else []
         context += [f"A spec waits for the person (confirm builds it, amend WHAT changes it):\n{waiting()}"
@@ -475,8 +482,8 @@ class Talk:
         def write():
             try:
                 with self.turn:
-                    reply.append(self.reply(channel, message, "\n\n".join(c for c in context if c),
-                                            CHAT_BUSY_TOKENS if running else CHAT_REPLY_TOKENS))
+                    reply.append(write_reply(channel, message, "\n\n".join(c for c in context if c),
+                                             CHAT_BUSY_TOKENS if running else CHAT_REPLY_TOKENS))
             finally:
                 written.set()
         threading.Thread(target=write, daemon=True).start()
@@ -502,29 +509,121 @@ class Talk:
         if not found:
             return ("No model is in use yet (tinker calibrate NAME, then tinker use-model NAME), so I cannot "
                     f"chat. These still work:\n{self.commands}")
-        name, options, think = found
-        options = dict(options, num_predict=tokens)
         with self.lock:
             said = self.said.setdefault((channel.name, message.chat), [])
             said.append({"role": "user", "content": message.text})
             asked = said[-CHAT_KEPT:]
         system = self.SYSTEM.format(kind=channel.KIND.title(), commands=self.commands)
         system += f"\n\n{now}" if now else "\n\nNo task is running now."
-        done = threading.Event()
-        threading.Thread(target=keep_typing, args=(channel, message.chat, done), daemon=True).start()
         try:
-            data = Ollama.chat(name, [{"role": "system", "content": system}] + asked,
-                               Config.keep_alive(Config.get("keep_alive")), options, think=think,
-                               timeout=CHAT_TIMEOUT)
+            text = self.ask(channel, message.chat, [{"role": "system", "content": system}] + asked, tokens)
         except OllamaError as exc:
             return f"The model did not answer: {first_words(exc)}"
-        finally:
-            done.set()
-        text = data["message"]["content"].strip() or "(no answer)"
+        text = text or "(no answer)"
         with self.lock:
             said.append({"role": "assistant", "content": text})
             del said[:-CHAT_KEPT]
         return text
+
+
+    def ask(self, channel, chat, messages, tokens):
+        """The model's reply to messages (it does not think), "typing…" shown meanwhile; OllamaError when it
+        fails. Only called once model() found the model."""
+        name, options, think = self.model()
+        done = threading.Event()
+        threading.Thread(target=keep_typing, args=(channel, chat, done), daemon=True).start()
+        try:
+            data = Ollama.chat(name, messages, Config.keep_alive(Config.get("keep_alive")),
+                               dict(options, num_predict=tokens), think=think, timeout=CHAT_TIMEOUT)
+        finally:
+            done.set()
+        return data["message"]["content"].strip()
+
+
+class Shell:
+    """command WHAT: the model names the one command line that does what the person describes, shown with
+    what it does (and a warning when it changes or deletes things). `confirm` as the person's very next
+    message runs it; anything else drops it. It runs from the folder tinker channel start listens in, in the
+    person's login shell, with no input, for up to COMMAND_TIMEOUT seconds; its exit code and output (the
+    end of it, when long) come back."""
+    SYSTEM = ("The person describes a command they want run on their computer ({system}, shell {shell}, in the "
+              "folder {folder}). Reply with ONLY JSON: {{\"command\": \"the one command line that does it\", "
+              "\"does\": \"what it does, in one short sentence\"}}, or {{\"command\": \"\", \"does\": \"why no "
+              "single command fits\"}} when the description is unclear or asks for no command.")
+    CHANGES_RE = re.compile(r"\b(rm|rmdir|mv|dd|mkfs\w*|chmod|chown|kill|killall|pkill|sudo|shutdown|reboot|"
+                            r"truncate)\b|(?<![\d&>])>(?!&)|\bgit\s+(push|reset|clean|checkout|rebase)\b|"
+                            r"\b(brew|pip3?|npm|cargo)\s+(install|uninstall|remove)\b|\s-delete\b|-exec\s+(rm|mv)\b|"
+                            r"\bxargs\s+(rm|mv)\b|\bsed\s+-i\b")
+    WRITING = ""  # a command still being named
+
+    def __init__(self, talk, folder):
+        self.talk, self.folder = talk, folder
+        self.proposed = {}  # (channel, chat) -> the command line waiting for confirm (WRITING meanwhile)
+        self.shell = os.environ.get("SHELL") or "/bin/sh"
+
+    def name(self, channel, message, now):
+        """Have the model name the command (the reply comes as a chat's, busy note and all)."""
+        self.proposed[(channel.name, message.chat)] = self.WRITING
+        self.talk.answer(channel, message, now, write=self.propose)
+
+    def propose(self, channel, message, context, tokens):
+        key = (channel.name, message.chat)
+        if not self.talk.model():
+            self.proposed.pop(key, None)
+            return "No model is in use yet (tinker calibrate NAME, then tinker use-model NAME)."
+        system = self.SYSTEM.format(system=os.uname().sysname, shell=Path(self.shell).name, folder=self.folder)
+        try:
+            data = json_in(self.talk.ask(channel, message.chat, [{"role": "system", "content": system},
+                                                                 {"role": "user", "content": message.text}],
+                                         COMMAND_TOKENS))
+        except OllamaError as exc:
+            self.proposed.pop(key, None)
+            return f"The model did not answer: {first_words(exc)}"
+        line, does = str(data.get("command") or "").strip(), str(data.get("does") or "").strip()
+        if not line or "\n" in line:
+            self.proposed.pop(key, None)
+            return f"No command found: {does or 'describe it another way'}"
+        self.proposed[key] = line
+        warning = "\n⚠️ It changes or deletes things: read it before you confirm." if self.CHANGES_RE.search(line) else ""
+        return f"🖥 Run this? (in {self.folder})\n$ {line}\n{does}{warning}\nconfirm to run it; anything else cancels it."
+
+    def take(self, channel, chat):
+        """The command waiting for this chat's next message (WRITING while it is named; None when none)."""
+        key = (channel.name, chat)
+        line = self.proposed.get(key)
+        if line != self.WRITING:
+            self.proposed.pop(key, None)
+        return line
+
+    def run(self, channel, chat, line):
+        channel.send(chat, f"▶️ Running: $ {line}")
+        try:
+            done = subprocess.run([self.shell, "-lc", line], cwd=self.folder, text=True, capture_output=True,
+                                  stdin=subprocess.DEVNULL, timeout=COMMAND_TIMEOUT)
+            code, output = done.returncode, done.stdout + done.stderr
+        except subprocess.TimeoutExpired as exc:
+            code, output = f"stopped after {COMMAND_TIMEOUT}s", text_of(exc.stdout) + text_of(exc.stderr)
+        except OSError as exc:
+            code, output = "not started", str(exc)
+        output = output.strip() or "(no output)"
+        if len(output) > COMMAND_SHOWN:
+            output = "… (the start is left out)\n" + output[-COMMAND_SHOWN:]
+        for part in pieces(f"{'✅' if code == 0 else '❌'} $ {line}  (exit {code})\n{output}"):
+            channel.send(chat, part)
+
+
+def json_in(text):
+    """The JSON object a reply holds ({} when none)."""
+    found = re.search(r"\{.*\}", text or "", re.S)
+    try:
+        data = json.loads(found.group(0)) if found else {}
+    except ValueError:
+        data = {}
+    return data if isinstance(data, dict) else {}
+
+
+def text_of(output):
+    return output.decode(errors="replace") if isinstance(output, bytes) else (output or "")
 
 
 def running_elsewhere():
@@ -558,20 +657,20 @@ def keep_typing(channel, chat, done):
 
 def command_of(text, commands):
     """The command a message gives (one of commands, sent as its first word, with or without a /), or ""
-    when it is chat. A word alone is a command; with more after it only task, emergency, amend, resume ID,
+    when it is chat. A word alone is a command; with more after it only task, emergency, amend, command, resume ID,
     status ID, confirm ID and rename NAME are."""
     words = text.split()
     first = words[0].lower().lstrip("/") if words else ""
     if first not in commands:
         return ""
-    if len(words) == 1 or first in ("task", "emergency", "amend") or (first in ("resume", "status", "confirm",
+    if len(words) == 1 or first in ("task", "emergency", "amend", "command") or (first in ("resume", "status", "confirm",
                                                                                   "rename") and len(words) == 2):
         return first
     return ""
 
 
-def urgent(message):
-    """The emergency's own message: what follows the word emergency."""
+def after_word(message):
+    """What a command word is followed by (the emergency's own message, the command described)."""
     return Message(message.chat, message.text.split(None, 1)[1], message.sender)
 
 
@@ -636,7 +735,8 @@ class Alone:
     """tinker channel start: the one reading the chat, from this folder. One task runs here at a time, as
     its own tinker (which does not report too); its printed progress goes to the chat. Tasks run from a
     terminal are served too (running_elsewhere). Anything that is not a command is a normal chat."""
-    COMMANDS = ("task", "resume", "runs", "status", "stop", "help", "emergency", "confirm", "amend", "rename")
+    COMMANDS = ("task", "resume", "runs", "status", "stop", "help", "emergency", "confirm", "amend", "rename",
+                "command")
     RUN_RE = re.compile(r"^Run ([0-9a-f]{3,}) \(")  # a run's first line: its ID
     FOLDER_LINE_RE = re.compile(r"^Project: (/.+)$")  # its header's: its folder
 
@@ -644,6 +744,7 @@ class Alone:
         self.channels, self.root = channels, Path(root).resolve()
         self.process = self.reporter = self.task = None  # task: {arguments, folder, title, run} of the last one
         self.lock, self.talk = threading.Lock(), Talk(HELP_ALONE)
+        self.shell = Shell(self.talk, self.root)
         self.urgent = False  # an emergency is being answered: no task starts meanwhile
         self.waiting = None  # {run, folder, title, spec} of the spec that waits for confirm or amend
 
@@ -676,11 +777,27 @@ class Alone:
         while True:
             for message in channel.listened(timeout=20):
                 print(f"[{time.strftime('%H:%M:%S')}] {channel.name}: {message.text}")
-                if not command_of(message.text, self.COMMANDS):
+                command = command_of(message.text, self.COMMANDS)
+                proposed = self.shell.take(channel, message.chat)  # a command waits for this very message
+                if proposed == Shell.WRITING and command == "confirm":
+                    channel.send(message.chat, "The command is still being worked out: confirm once it is shown.")
+                    continue
+                if proposed and command == "confirm" and len(message.text.split()) == 1:
+                    threading.Thread(target=self.shell.run, args=(channel, message.chat, proposed), daemon=True).start()
+                    continue
+                if proposed:
+                    channel.send(message.chat, f"Not run: $ {proposed}")
+                if command == "command":
+                    if len(message.text.split()) == 1:
+                        channel.send(message.chat, "Write: command WHAT, e.g. command show the free disk space")
+                    else:
+                        self.shell.name(channel, after_word(message), self.now)
+                    continue
+                if not command:
                     self.talk.answer(channel, message, self.now, lambda: (self.waiting or {}).get("spec", ""))
                     continue
                 if command_of(message.text, self.COMMANDS) == "emergency" and len(message.text.split()) > 1:
-                    threading.Thread(target=self.emergency, args=(channel, urgent(message)), daemon=True).start()
+                    threading.Thread(target=self.emergency, args=(channel, after_word(message)), daemon=True).start()
                     continue
                 reply = self.answer(message.text, channel)
                 if reply:
