@@ -677,7 +677,9 @@ phase, learn from the web what the rest of the cycle needs.
 - **CNV-1** `Markup` renders `**bold**`, `*italic*`/`_italic_`, `~~struck~~`, `` `code` ``,
   `[links](https://…)`, fenced blocks, ` ```output ` blocks (folded), `- ` items (as `• `) and `#`
   headings: as plain text, as Telegram HTML (escaped), and as ANSI (plain when `NO_COLOR` is set or
-  there is no terminal). `literal` escapes the marks.
+  there is no terminal). `literal` escapes the marks. `of(template)` makes a message from a t-string:
+  each value with its marks escaped, but `:md` keeps Markup as it is, `:code` makes a code span and
+  `:block` a fenced block. Any other format is an error.
 - **CNV-2** `Markup.columns(text)` joins the columns of a terminal table with ` | `. It leaves text
   that is not in columns as it is.
 - **CNV-3** `pieces(text, size)` splits a message between lines into parts of at most `size` chars,

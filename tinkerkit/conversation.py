@@ -99,8 +99,8 @@ def one_shot(command, text):
     message, chat = Message(ConsoleChannel.CHAT, text, "you"), ConsoleChannel.CHAT
     if command == "stop":
         elsewhere = stop_runs()
-        console.show(chat, None, f"⏹ **Stopping** {'; '.join(lit(r.get('title', '')) for r in elsewhere)}: saved; "
-                                 f"`resume` goes on later" if elsewhere else "💤 No task is running.", done=True)
+        console.show(chat, None, md(t"⏹ **Stopping** {'; '.join(r.get('title', '') for r in elsewhere)}: saved; "
+                                    t"`resume` goes on later") if elsewhere else "💤 No task is running.", done=True)
         return None
     if not text and command != "run":
         return f"tinker {command} needs words after it, e.g. tinker {command} {'hello' if command == 'chat' else '...'}"
@@ -202,11 +202,12 @@ class Desk:
         """What Tinker is doing now, as its status says it (Markup): working, waiting for the person, or idle."""
         if self.busy():
             progress = self.reporter.progress
-            passing = f" · {lit(progress.passing)}" if progress.passing else ""
-            return f"🔄 **Tinker** · working on {lit(progress.title)}\n▸ {Markup.plain(progress.snapshot['doing'])}{passing}"
+            passing = f" · {progress.passing}" if progress.passing else ""
+            return md(t"🔄 **Tinker** · working on {progress.title}\n▸ {Markup.plain(progress.snapshot['doing']):md}"
+                      t"{passing}")
         if self.waiting:
             then = "`confirm` · `rename NAME`" if self.waiting.get("stage") == "name" else "`confirm` · `amend WHAT`"
-            return f"🙋 **Tinker** · {lit(self.waiting['title'])} waits for you: {then}"
+            return md(t"🙋 **Tinker** · {self.waiting['title']} waits for you: {then:md}")
         elsewhere = [described(state) for state in running(self.children())]
         if elsewhere:
             return "🔄 **Tinker** · working in a terminal: " + "; ".join(r["brief"] for r in elsewhere)
@@ -323,7 +324,7 @@ class Desk:
         if command in LONG:
             return self.start_task(words, self.root, " ".join(words))
         shown = self.tinker(words)
-        return f"⚙️ **{lit(' '.join(words))}**\n```\n{Markup.fenced(shown)}\n```"
+        return md(t"⚙️ **{' '.join(words)}**\n{shown:block}")
 
     def new_task(self, words):
         """task WHAT: Tinker makes its folder in the projects folder, named after it."""
@@ -356,7 +357,7 @@ class Desk:
                 keep=self.kept(waiting) if mine else ""))
         change = " ".join(rest)
         return self.on_task(waiting if mine else {}, self.start_task(
-            ["amend", f"@{target}", change], folder, title, f"✏️ **Changing the plan:** {lit(change)}"))
+            ["amend", f"@{target}", change], folder, title, md(t"✏️ **Changing the plan:** {change}")))
 
     def ask_folder_name(self, waiting):
         """A new project's plan confirmed: its folder's name is asked once, before it is built."""
@@ -406,7 +407,7 @@ class Desk:
                               timeout=60)
         if done.returncode:
             why = first_lines((done.stdout + done.stderr).strip(), 10).splitlines()[-1]
-            return self.on_task(waiting, f"⚠️ **Not renamed:** {lit(why)}")
+            return self.on_task(waiting, md(t"⚠️ **Not renamed:** {why}"))
         self.renamed(waiting, words[1])
         if waiting.get("stage") != "name":
             self.on_board(waiting, f"{waiting['spec']}\n\n📁 **Renamed:** its folder is `{words[1]}`")
@@ -435,13 +436,13 @@ class Desk:
         elsewhere = stop_runs(self.children())
         if not elsewhere:
             return "💤 No task is running."
-        return f"⏹ **Stopping** {'; '.join(lit(r.get('title', '')) for r in elsewhere)}: saved; `resume` goes on later."
+        return md(t"⏹ **Stopping** {'; '.join(r.get('title', '') for r in elsewhere)}: saved; `resume` goes on later.")
 
     def report(self, command, words):
         """runs, status [@PROJECT]: tinker's own; status alone at once, from what the conversation knows."""
         if command == "status" and len(words) == 1:
             return "\n\n".join([self.status()] + [r["text"] for r in self.now()])
-        title = "📚 **Runs**" if command == "runs" else f"📊 **Status** {lit(' '.join(words[1:2]))}".rstrip()
+        title = "📚 **Runs**" if command == "runs" else md(t"📊 **Status** {' '.join(words[1:2])}").rstrip()
         return f"{title}\n```\n{Markup.fenced(self.tinker([command] + words[1:2]))}\n```"
 
     def ask_to_exit(self, channel, chat, command):
@@ -453,8 +454,8 @@ class Desk:
     def ask_first(self, channel, chat, words):
         """A command that deletes: what it would delete (tinker's own list of it), waiting for confirm."""
         preview = "\n".join(line for line in self.tinker(words).splitlines() if not line.startswith("Nothing deleted"))
-        shown = channel.show(chat, None, f"🗑 **{lit(' '.join(words))}**\n```\n{Markup.fenced(preview)}\n```\n"
-                                         f"👉 `confirm` to delete it · anything else cancels it", done=True)
+        shown = channel.show(chat, None, md(t"🗑 **{' '.join(words)}**\n{preview:block}\n"
+                                            t"👉 `confirm` to delete it · anything else cancels it"), done=True)
         self.asking[(channel.name, chat)] = {"words": words, "shown": shown}
         return None
 
@@ -471,8 +472,8 @@ class Desk:
             if refused:
                 channel.show(chat, asking["shown"], refused, done=True)
             return
-        channel.show(chat, asking["shown"], f"🗑 **{lit(' '.join(asking['words']))}**\n```\n"
-                                            f"{Markup.fenced(self.tinker(words))}\n```", done=True)
+        channel.show(chat, asking["shown"], md(t"🗑 **{' '.join(asking['words'])}**\n{self.tinker(words):block}"),
+                     done=True)
 
     def run_app(self, channel, chat, said):
         """run [@PROJECT] ARGS... [<<< INPUT]: a built project run the way a person runs it (its run command,
@@ -481,22 +482,22 @@ class Desk:
         name, args, stdin = app_request(said[0] if said else "")
         project = built_project(name)
         if project is None:
-            channel.show(chat, None, f"🤷 **No project @{lit(name)}:** `runs` lists them" if name else
+            channel.show(chat, None, md(t"🤷 **No project @{name}:** `runs` lists them") if name else
                          "🤷 **No project is built yet:** `task WHAT TO BUILD` builds one", done=True)
             return
         workdir, title = Path(project["workdir"]), Path(project["workdir"]).name
         toolchain = Toolchain((saved(workdir, "spec", "plan", {}) or {}).get("toolchain"))
         if not toolchain.run:
-            channel.show(chat, None, f"🤷 **{lit(title)} has no run command:** it is not a program a person runs",
+            channel.show(chat, None, md(t"🤷 **{title} has no run command:** it is not a program a person runs"),
                          done=True)
             return
         line = " ".join([toolchain.run] + [shlex.quote(arg) for arg in args])
-        shown = channel.show(chat, None, f"▶️ **{lit(title)}** `{line}` …")
+        shown = channel.show(chat, None, md(t"▶️ **{title}** {line:code} …"))
         code, output = in_shell(Shell.SHELL, toolchain.shell(line), workdir, stdin)
-        fed = f"\n_input:_ `{lit(stdin.strip())}`" if stdin else ""
+        fed = md(t"\n_input:_ `{stdin.strip()}`") if stdin else ""
         printed = f"```\n{Markup.fenced(output[-COMMAND_SHOWN:])}\n```" if output else "_(it printed nothing)_"
-        channel.show(chat, shown, f"{'✅' if code == 0 else '❌'} **{lit(title)}** `{line}` · _exit {lit(code)}_{fed}\n"
-                                  f"{printed}", done=True)
+        channel.show(chat, shown, md(t"{'✅' if code == 0 else '❌'} **{title}** {line:code} · _exit {code}_{fed:md}\n"
+                                     t"{printed:md}"), done=True)
 
     def emergency(self, channel, message):
         """Stop what runs (a task saves itself), answer message, then go on with the task: one started here
@@ -504,7 +505,7 @@ class Desk:
         if self.urgent:
             channel.send(message.chat, "🚨 An emergency is being answered: one at a time.")
             return
-        say = Note(channel, message.chat, f"🚨 **Emergency:** {lit(message.text)}").add
+        say = Note(channel, message.chat, md(t"🚨 **Emergency:** {message.text}")).add
         with self.lock:
             self.urgent = True
             stopped = self.stop_for_emergency(say)
@@ -521,7 +522,7 @@ class Desk:
         stopped = self.task if self.busy() else None
         if not stopped:
             return None
-        say(f"⏸ Stopping {lit(stopped['title'])} to answer: it is saved and goes on after.")
+        say(md(t"⏸ Stopping {stopped['title']} to answer: it is saved and goes on after."))
         self.reporter.quiet = True
         self.stop_task()
         try:
@@ -533,7 +534,7 @@ class Desk:
 
     def pause(self, say, run):
         """A task run from a terminal, stopped for an emergency: True once its tracker says it is paused."""
-        say(f"⏸ Stopping {lit(run['title'])} to answer: it is saved and goes on after.")
+        say(md(t"⏸ Stopping {run['title']} to answer: it is saved and goes on after."))
         signal_task(run["pid"], PAUSE)
         ends = time.monotonic() + STOP_WAIT
         while time.monotonic() < ends:
@@ -541,7 +542,7 @@ class Desk:
             if now is None or now.get("paused"):
                 return now is not None
             time.sleep(1)
-        say(f"⚠️ {lit(run['title'])} did not stop in {STOP_WAIT}s; answering after its step.")
+        say(md(t"⚠️ {run['title']} did not stop in {STOP_WAIT}s; answering after its step."))
         return False
 
     def go_on(self, stopped, paused, say):
@@ -551,10 +552,10 @@ class Desk:
             again = ["resume", f"@{stopped['run']}"] if stopped["run"] else stopped["arguments"]
             self.start_task(again, stopped["folder"], stopped["title"], sent=self.reporter.sent,
                             keep=self.reporter.keep)
-            say(f"▶️ **Going on** with {lit(stopped['title'])}", done=not paused)
+            say(md(t"▶️ **Going on** with {stopped['title']}"), done=not paused)
         for run in paused:
             Home.store().delete("running", str(run["pid"]))
-            say(f"▶️ **Going on** with {lit(run['title'])} _(in its terminal)_", done=run is paused[-1])
+            say(md(t"▶️ **Going on** with {run['title']} _(in its terminal)_"), done=run is paused[-1])
 
     def start_task(self, arguments, folder, title, phase=Tracker.STARTING, sent=None, keep=""):
         """Start a task as its own tinker. Its message is the one its run had (by its ID: sent, else the
@@ -576,7 +577,7 @@ class Desk:
                 self.process = self.spawn(arguments)
             except OSError as exc:
                 self.process = None
-                return f"⚠️ **Could not start it:** {lit(exc)}"
+                return md(t"⚠️ **Could not start it:** {exc}")
             self.reporter.pid = self.process.pid
         if self.waiting and self.waiting["folder"] == folder:
             self.waiting = None  # confirmed or being changed: it waits again only once its plan is shown
@@ -826,7 +827,7 @@ class Talk:
         try:
             text = self.ask(channel, message.chat, [{"role": "system", "content": system}] + asked, tokens)
         except OllamaError as exc:
-            return f"⚠️ **The model did not answer:** {lit(first_words(exc))}"
+            return md(t"⚠️ **The model did not answer:** {first_words(exc)}")
         text = text or "_(no answer)_"
         self.remembered(said, "assistant", text)
         return text
@@ -933,19 +934,19 @@ class Shell:
                                          COMMAND_TOKENS))
         except OllamaError as exc:
             self.proposed.pop(key, None)
-            return f"⚠️ **The model did not answer:** {lit(first_words(exc))}"
+            return md(t"⚠️ **The model did not answer:** {first_words(exc)}")
         line, does = str(data.get("command") or "").strip(), str(data.get("does") or "").strip()
         if not line or "\n" in line:
             self.proposed.pop(key, None)
-            return f"🤷 **No command found:** {lit(does or 'describe it another way')}"
+            return md(t"🤷 **No command found:** {does or 'describe it another way'}")
         self.proposed[key] = {"line": line, "asked": message.text, "shown": None}
         return self.proposal(line, does)
 
     def proposal(self, line, does):
         warning = ("\n⚠️ **It changes or deletes things:** read it before you confirm."
                    if self.CHANGES_RE.search(line) else "")
-        return (f"🖥 **Run this?**\n```\n{Markup.fenced(line)}\n```\n{lit(does)}{warning}\n"
-                f"👉 `confirm` to run it · anything else cancels it")
+        return md(t"🖥 **Run this?**\n{line:block}\n{does}{warning:md}\n"
+                  t"👉 `confirm` to run it · anything else cancels it")
 
     def take(self, channel, chat):
         """The command waiting for this chat's next message (WRITING while it is named; None when none)."""
@@ -965,7 +966,7 @@ class Shell:
         line = proposed["line"]
         sent = channel.show(chat, proposed["shown"], f"▶️ **Running** `{line}` …")
         code, output = in_shell(self.shell, line, self.folder)
-        head = f"{'✅' if code == 0 else '❌'} `{line}` · _exit {lit(code)}_"
+        head = md(t"{'✅' if code == 0 else '❌'} {line:code} · _exit {code}_")
         folded = self.folded(output)
         tells = bool(output) and bool(self.talk.model())
         sent = channel.show(chat, sent, f"{head}\n{folded}", done=not tells)
@@ -1035,7 +1036,7 @@ class Research:
         threading.Thread(target=self.researching, args=(channel, chat, topic, now), daemon=True).start()
 
     def researching(self, channel, chat, topic, now):
-        head = f"🔎 **{lit(topic)}**"
+        head = md(t"🔎 **{topic}**")
         sent = channel.show(chat, None, f"{head}\n⏳ _working out what to search_")
         internet = Internet()
         unusable = self.unusable(internet)
@@ -1050,20 +1051,20 @@ class Research:
             sent = channel.show(chat, sent, f"{head}\n🌐 _searching:_ {searching}{waits}")
             pages = self.read(internet, searches)
             if not pages:
-                channel.show(chat, sent, f"{head}\n🤷 **Nothing found on the web** for it: {lit(internet.why())}",
+                channel.show(chat, sent, md(t"{head:md}\n🤷 **Nothing found on the web** for it: {internet.why()}"),
                              done=True)
                 return
             sent = channel.show(chat, sent, f"{head}\n📖 _read {len(pages)} pages; writing the answer_" + waits)
             told = self.answer_from(channel, chat, topic, pages)
         except OllamaError as exc:
-            channel.show(chat, sent, f"{head}\n⚠️ **The model did not answer:** {lit(first_words(exc))}", done=True)
+            channel.show(chat, sent, md(t"{head:md}\n⚠️ **The model did not answer:** {first_words(exc)}"), done=True)
             return
         channel.show(chat, sent, f"{head}\n{told}\n\n📚 **Sources**\n{self.sources(pages)}", done=True)
 
     def unusable(self, internet):
         """Why a research cannot be made ("" when it can): the web, or the model, not there."""
         if not internet.available():
-            return f"⚠️ **The web is not usable:** {lit(internet.why())}"
+            return md(t"⚠️ **The web is not usable:** {internet.why()}")
         if not self.talk.model():
             return "⚠️ **No model is in use yet:** `tinker use-model NAME`"
         return ""
@@ -1224,12 +1225,12 @@ class Progress:
         state = self.snapshot
         began = state.get("began")
         clock = f" · ⏱ {human_duration(time.time() - began)}" if began else ""
-        doing = state["doing"] if state["doing"].startswith(self.SAID) else f"**{lit(state['doing'])}**"
-        lines = [f"🔨 **{lit(state['title'])}**"] + [f"✅ {step}" for step in state.get("steps", [])]
+        doing = state["doing"] if state["doing"].startswith(self.SAID) else md(t"**{state['doing']}**")
+        lines = [md(t"🔨 **{state['title']}**")] + [f"✅ {step}" for step in state.get("steps", [])]
         lines += [f"▸ {doing}{clock}"]
-        lines += [f"⏳ _{lit(state['live'])}_"] if state.get("live") else []
-        lines += [f"📊 {lit(self.passing)}"] if self.passing else []
-        lines += [f"… {lit(state['latest'])}"] if state.get("latest") else []
+        lines += [md(t"⏳ _{state['live']}_")] if state.get("live") else []
+        lines += [md(t"📊 {self.passing}")] if self.passing else []
+        lines += [md(t"… {state['latest']}")] if state.get("latest") else []
         return "\n".join(lines)
 
     @property
@@ -1243,8 +1244,8 @@ class Progress:
 
     def brief(self):
         """Markup: the title, with the phase and the passing points."""
-        passing = f", {lit(self.passing)}" if self.passing else ""
-        return f"**{lit(self.title)}** ({Markup.plain(self.snapshot['doing'])}{passing})"
+        passing = f", {self.passing}" if self.passing else ""
+        return md(t"**{self.title}** ({Markup.plain(self.snapshot['doing']):md}{passing})")
 
     def waiting(self):
         """The run ended with its plan waiting for the person to confirm or amend it."""
@@ -1256,19 +1257,25 @@ class Progress:
             return self.plan(self.snapshot["waiting"]) + f"\n⏱ _so far: {self.took()}_"
         ended = self.snapshot.get("ended")
         if not ended:
-            return f"🏁 **{lit(self.title)}**"
-        return "\n".join([f"🏁 **{lit(self.title)}**"] + self.ended_lines(ended))
+            return md(t"🏁 **{self.title}**")
+        return "\n".join([md(t"🏁 **{self.title}**")] + self.ended_lines(ended))
 
     def ended_lines(self, ended):
         """How the run ended, how long it took, what it made and how to go on."""
         mark = {"done": "✅", "blocked": "⚠️"}.get(ended.get("status"), "⏸")
         took = f"⏱ **Done in {self.took()}**" if ended.get("status") == "done" else f"⏱ _so far: {self.took()}_"
-        lines = [f"{mark} **{lit(ended.get('headline', ''))}**", took]
-        lines += [f"{'▶️' if label == 'Run it' else '•'} {lit(label)}: " + (f"`{value}`" if label == "Run it" else lit(value))
-                  for label, value in ended.get("details", [])]
+        lines = [md(t"{mark} **{ended.get('headline', '')}**"), took]
+        lines += [self.detail(label, value) for label, value in ended.get("details", [])]
         lines += [" · ".join(f"{label}: `{command}`" for label, command in ended.get("next", []))] \
             if ended.get("next") else []
         return lines
+
+    @staticmethod
+    def detail(label, value):
+        """One detail of how the run ended: the command that runs it as code."""
+        if label == "Run it":
+            return md(t"▶️ {label}: {value:code}")
+        return md(t"• {label}: {value}")
 
     def took(self):
         """How long the task has taken, in its runs (the time a plan waits for the person left out)."""
@@ -1280,14 +1287,14 @@ class Progress:
         """A plan that waits for the person (Markup), from the tracker's data."""
         heading = "🐞 **Bug shown for" if plan.get("kind") == "fix" else "📋 **Plan for"
         start = f" · ▶️ `{plan['start']}`" if plan.get("start") else ""
-        lines = [f"{heading} {lit(plan.get('name', ''))}** · run `{plan.get('run', '')}`",
-                 f"🧰 {lit(plan.get('language') or '?')}{start}"]
+        lines = [md(t"{heading:md} {plan.get('name', '')}** · run {plan.get('run', ''):code}"),
+                 md(t"🧰 {plan.get('language') or '?'}{start:md}")]
         if plan.get("changes"):
             lines += ["", "✏️ **What changed**"] + [Progress.change_line(change) for change in plan["changes"]]
         lines += ["", "🧪 **Tested before any code is written**"]
-        lines += [f"**{criterion_id}** {lit(text)}" for criterion_id, text in plan.get("criteria", [])]
+        lines += [md(t"**{criterion_id}** {text}") for criterion_id, text in plan.get("criteria", [])]
         if plan.get("non_goals"):
-            lines += ["", f"🚫 _Not included:_ {lit('; '.join(plan['non_goals']))}"]
+            lines += ["", md(t"🚫 _Not included:_ {'; '.join(plan['non_goals'])}")]
         if plan.get("folder"):
             lines += [f"📁 `{Path(plan['folder']).name}`"]
         return "\n".join(lines + ["", "👉 `confirm` to build it · `amend WHAT` to change it"])
@@ -1296,8 +1303,8 @@ class Progress:
     def change_line(change):
         """A change to the plan ("+ added", "- dropped", "~ changed"), with its sign."""
         if change.startswith("- "):
-            return f"➖ ~~{lit(change[2:])}~~"
-        return f"{Progress.CHANGE_SIGNS.get(change[:1], '•')} {lit(change[2:])}"
+            return md(t"➖ ~~{change[2:]}~~")
+        return md(t"{Progress.CHANGE_SIGNS.get(change[:1], '•')} {change[2:]}")
 
 
 # === tasks run from a terminal ===================================================================================
@@ -1655,6 +1662,26 @@ class Markup:
     ANSI = {"b": ("1", "22"), "i": ("3", "23"), "s": ("9", "29")}  # a mark's terminal codes: on, off
     OUTPUT_LINES = 30  # of a command's output, the lines a terminal shows (the start; the rest is counted)
 
+    @classmethod
+    def of(cls, template):
+        """A message from a t-string, each value as its format says: none, shown as it is (its marks escaped);
+        :md, Markup already; :code, a code span; :block, a fenced block."""
+        return "".join(part if isinstance(part, str) else cls.formatted(part) for part in template)
+
+    @classmethod
+    def formatted(cls, part):
+        match part.format_spec:
+            case "":
+                return cls.literal(part.value)
+            case "md":
+                return str(part.value)
+            case "code":
+                return f"`{part.value}`"
+            case "block":
+                return f"```\n{cls.fenced(part.value)}\n```"
+            case spec:
+                raise ValueError(f"no Markup format {spec!r}")
+
     @staticmethod
     def literal(text):
         """text shown as it is: its marks escaped."""
@@ -1779,7 +1806,7 @@ class Markup:
         return keep
 
 
-lit = Markup.literal
+md = Markup.of
 
 
 # === small helpers ===============================================================================================
@@ -1792,7 +1819,7 @@ def help_text(words=()):
     except OSError, subprocess.SubprocessError:
         return "❓ `help` lists what you can send"
     shown = (done.stdout + done.stderr).strip()
-    return shown if not words else f"❓ **help {lit(' '.join(words))}**\n```\n{Markup.fenced(shown)}\n```"
+    return shown if not words else md(t"❓ **help {' '.join(words)}**\n{shown:block}")
 
 
 def commands_brief():

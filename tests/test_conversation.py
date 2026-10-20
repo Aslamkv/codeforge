@@ -106,6 +106,15 @@ def test_markup_ansi_and_literal(monkeypatch):
     assert Markup.fenced("a ``` b") == "a ˋˋˋ b"
 
 
+@pytest.mark.spec("CNV-1")
+def test_markup_of_a_t_string():
+    said, bold, line, out = "*hi*", "**ok**", "ls -a", "a ``` b"
+    assert Markup.of(t"🔎 {said} {bold:md} {line:code}") == "🔎 \\*hi\\* **ok** `ls -a`"
+    assert Markup.of(t"{out:block}") == "```\na ˋˋˋ b\n```"
+    with pytest.raises(ValueError):
+        Markup.of(t"{said:bold}")
+
+
 @pytest.mark.spec("CNV-2")
 def test_columns():
     table = ("NAME                 ID              SIZE      MODIFIED\n"
