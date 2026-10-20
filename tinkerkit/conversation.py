@@ -67,11 +67,11 @@ RESEARCH_PAGE_CHARS = 3500                     # of each page, the parts most ab
 
 # --- tinker's commands, as the conversation runs them (their arguments and help are tinker.py's Cli's) -----
 LONG = ("resume", "add", "fix", "restart", "learn", "calibrate")  # a task: one at a time, its progress shown
-QUICK = ("runs", "status", "memory", "doctor", "models", "list-config", "use-model", "embed", "channel")
+QUICK = ("runs", "status", "memory", "doctor", "models", "list-config", "use-model", "embed", "use-web", "channel")
 DELETES = ("clear", "reset", "restart")  # what it deletes is shown first; done once confirmed (--yes)
 OWN = ("task", "confirm", "amend", "rename", "stop", "emergency", "command", "research", "run", "help",
        "exit")  # the conversation's
-ONE_WORD = ("resume", "status", "confirm", "rename", "help", "use-model", "embed", "calibrate")  # one word after it
+ONE_WORD = ("resume", "status", "confirm", "rename", "help", "use-model", "embed", "use-web", "calibrate")  # one word after it
 ANY_WORDS = ("task", "emergency", "amend", "command", "research", "run", "add", "fix", "learn", "clear", "channel")
 TERMINAL_ONLY = ("add", "remove", "start")  # tinker channel's: they ask in a terminal (a token, a pairing)
 SAID_BARE = LONG + QUICK + DELETES + OWN + ("chat", "channel")  # commands a conversation takes as their words

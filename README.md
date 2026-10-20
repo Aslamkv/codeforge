@@ -46,6 +46,8 @@ Let's share what we know and make the world better, together. 🌏
 
 We use the best tools of the time. Those tools will keep changing. Our values will not.
 
+Today we build with Tinker 🔧. See [TINKER.md](TINKER.md) to install and run it.
+
 ## Join Us 🙌
 
 - 📣 **Tell us a need.** What problem does your community have?

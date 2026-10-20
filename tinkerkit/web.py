@@ -195,7 +195,8 @@ class OllamaWeb(WebBackend):
         self.key = os.environ.get(self.KEY_ENV, "").strip()
 
     def unready(self):
-        return "" if self.key else f"no Ollama API key: set {self.KEY_ENV} (a free key from ollama.com/settings/keys)"
+        return "" if self.key else (f"no Ollama API key: set {self.KEY_ENV} (a free key from "
+                                    f"ollama.com/settings/keys), or tinker use-web duckduckgo (no key)")
 
     def search(self, query, count):
         data = self.post("/web_search", {"query": query, "max_results": count})

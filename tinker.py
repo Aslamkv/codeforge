@@ -32,7 +32,7 @@ Usage:
     tinker learn WHAT                     learn a language, a tool or a domain (Tinker tells which)
     tinker learn NAME ["DEFINITION"]      a command of yours Tinker may use (an alias in your shell)
     tinker doctor                         what is missing or wrong, and the command that fixes it
-    tinker models | tinker calibrate NAME | tinker use-model NAME | tinker embed NAME
+    tinker models | tinker calibrate NAME | tinker use-model NAME | tinker embed NAME | tinker use-web NAME
     tinker list-config | tinker memory | tinker clear PART... | tinker reset [--yes]
     tinker help [COMMAND]                 every command, or one command's arguments and options
 How a run thinks, how long the model stays loaded and when it is unloaded are Tinker's to decide,
@@ -126,7 +126,8 @@ finds is not missed; one call then picks the topics to use from the most related
 language as learned is always used; their facts, ranked the same way, go into the prompts of the
 phases they concern, as an optional part (they never push out what is required). A run started with
 --web may also learn then the topics it needs that are not learned yet (up to learn_missing).
-The web is the Internet plugin: web search and web fetch through a backend (config.json's "web":
+The web is the Internet plugin: web search and web fetch through a backend (config.json's "web", set by
+tinker use-web NAME:
 "ollama" is Ollama's web search and fetch, with a free ollama.com key in OLLAMA_API_KEY;
 "duckduckgo" needs no key: DuckDuckGo's results, each page read from its own server as text) and,
 only if set, a fallback ("web_fallback", e.g. "duckduckgo"; "" by default), asked whatever the first
@@ -295,6 +296,7 @@ class Cli:
             ("calibrate NAME", "measure a model once (a minute or a few)"),
             ("use-model NAME", "the measured model every build uses"),
             ("embed NAME", "the embedding model that indexes what is learned"),
+            ("use-web NAME", "the web search tinker learn and --web use: ollama or duckduckgo"),
             ("list-config", "the settings a build would use"),
             ("clear PART... [--yes]", "delete parts of what Tinker keeps: languages, memory, learned, models,"
                                       " runs, commands"),
@@ -328,7 +330,7 @@ class Cli:
               "Channels": "📡 Channels"}
     RUNS = ("task", "restart", "resume", "amend", "add", "fix")
     COMMANDS = RUNS + ("rename", "status", "runs", "learn", "memory", "doctor", "models", "use-model", "calibrate", "embed",
-                       "list-config", "clear", "reset")
+                       "use-web", "list-config", "clear", "reset")
     LEARNING = ("learn",)  # the commands that load the model and read the web (but for teaching a command)
     ABOUT = {
         "task": "Build something new: a spec, a unit test for each point, just enough code, and a README a "
@@ -359,6 +361,7 @@ class Cli:
         "use-model": "Use this measured model for every build from now on.",
         "calibrate": "Measure a model once: the largest prompt it reads and the longest reply it writes.",
         "embed": "Use this embedding model to index what is learned, so builds find it by meaning.",
+        "use-web": "Use this web search for tinker learn and --web from now on: ollama (Ollama's web search and fetch, with a free key in OLLAMA_API_KEY) or duckduckgo (no key).",
         "list-config": "Show the settings a build would use.",
         "clear": "Delete parts of what Tinker keeps, e.g. tinker clear languages memory: languages (toolchains, "
                  "fixes, lessons per language), memory (lessons for any language), learned (what tinker learn "
@@ -366,7 +369,7 @@ class Cli:
         "reset": "Delete everything Tinker keeps (settings, measured models, what it learned, the run index); "
                  "projects are not touched.",
     }
-    FIELDS = {"reset": False, "list_config": False, "models": False, "use_model": None, "embed": None,
+    FIELDS = {"reset": False, "list_config": False, "models": False, "use_model": None, "embed": None, "use_web": None,
               "calibrate": None, "learn": None, "memory": False, "runs": False,
               "status": None, "doctor": False, "task": None, "spec": None, "spec_file": None, "restart": False,
               "resume": None, "amend": None, "add": None, "fix": None, "workdir": None, "plan_only": False,
@@ -531,6 +534,8 @@ class Cli:
             parser.add_argument("--yes", action="store_true", help="delete without asking")
         elif command in ("use-model", "calibrate", "embed"):
             parser.add_argument("name", help="the model's name, as `tinker models` lists it")
+        elif command == "use-web":
+            parser.add_argument("name", choices=list(Internet.backends()), help="the web search to use")
         if command in ("task", "add", "fix"):
             parser.add_argument("--web", action="store_true", help="may learn from the web what it needs")
         if command in ("task", "add"):
@@ -554,7 +559,7 @@ class Cli:
         field = command.replace("-", "_")
         if command in ("reset", "list-config", "models", "memory", "runs", "doctor"):
             setattr(args, field, True)
-        elif command in ("use-model", "calibrate", "embed"):
+        elif command in ("use-model", "calibrate", "embed", "use-web"):
             setattr(args, field, Cli.non_empty(given.name, command, parser))
         elif command in ("resume", "status"):
             setattr(args, field, Cli.run_id(given.id, parser))
@@ -660,7 +665,7 @@ class Cli:
 
 class Commands:
     """The commands that show or change Tinker's settings, models, what it knows and runs, then
-    exit: tinker list-config, tinker models, tinker use-model, tinker embed, tinker calibrate,
+    exit: tinker list-config, tinker models, tinker use-model, tinker embed, tinker use-web, tinker calibrate,
     tinker learn, tinker memory, tinker runs, tinker status."""
 
     def __init__(self, args):
@@ -677,6 +682,8 @@ class Commands:
             self.use_model(args.use_model)
         elif args.embed:
             self.embed(args.embed)
+        elif args.use_web:
+            self.use_web(args.use_web)
         elif args.calibrate is not None:
             self.calibrate()
         elif args.learn:
@@ -778,6 +785,13 @@ class Commands:
         Config.save(embed_model=name)
         print(f"Embedding model: {name} (in {CONFIG_FILE}); what was learned is indexed with it from the next "
               f"tinker learn or run on")
+
+    @staticmethod
+    def use_web(name):
+        """tinker use-web NAME: the web search tinker learn and --web use from now on (one of
+        Internet.backends()); it says when that one is not usable yet (a missing key)."""
+        Config.save(web=name)
+        print(f"Web search: {name} (in {CONFIG_FILE}); {Internet.state()}")
 
     def calibrate(self):
         """tinker calibrate NAME: measure a model (again)."""
@@ -970,7 +984,7 @@ class Doctor:
         if not found:
             script = Path(__file__).resolve()
             raise SystemExit(f"not on PATH, so it is typed as python3 {script}: to type tinker anywhere, run "
-                             f"ln -s {script} /usr/local/bin/tinker")
+                             f"{script.parent / 'install.sh'}")
         return found
 
 class ProjectRun:
