@@ -17,7 +17,8 @@ Tell Tinker what you want. Tinker plans it, builds it, tests it, and learns some
 ## What You Need 🧰
 
 - Python 3.14 or newer (check with `python3 --version`; on a Mac, `brew install python`)
-- [Ollama](https://ollama.com), with at least one model pulled
+- macOS or Linux (on Windows, use [WSL](https://learn.microsoft.com/windows/wsl/))
+- [Ollama](https://ollama.com)
 
 ## Install 📦
 
@@ -44,7 +45,7 @@ So Tinker uses Ollama's own **web search** and **web fetch** by default. It need
 export OLLAMA_API_KEY="your-key-here"
 ```
 
-Tinker only goes on the web when you ask: `tinker learn`, or a run with `--web`.
+Tinker only goes on the web when you ask: `tinker learn`, `tinker research`, or a run with `--web`.
 
 No key? Switch to DuckDuckGo, which needs none:
 
@@ -56,39 +57,53 @@ Switch back any time with `tinker use-web ollama`.
 
 ## First Steps 🚀
 
-Check that everything is ready:
+Check that everything is ready (it tells you how to fix what is missing):
 
 ```sh
 tinker doctor
 ```
 
-Pick a model and measure it:
+Pull a model, then measure it once and use it:
 
 ```sh
-tinker models
+ollama pull qwen3
 tinker calibrate qwen3
 tinker use-model qwen3
 ```
 
-## Usage ✨
-
-Talk with Tinker:
+To learn (`tinker learn`, `--web`), Tinker also needs a small embedding model:
 
 ```sh
-tinker
+ollama pull qwen3-embedding:0.6b
+tinker embed qwen3-embedding:0.6b
 ```
 
-Build something new (it gets its own folder in `~/Projects`). Tinker shows you the plan first:
+See the models Ollama has, and which are measured:
+
+```sh
+tinker models
+```
+
+## Build 🔨
+
+Build something new. It gets its own folder in `~/Projects`, named after the task (`calc-py`), and
+Tinker shows you the plan first:
 
 ```sh
 tinker task a calculator in Python
 ```
 
-Build the plan, or change it first (it waits again):
+Build the plan, or change it first (it waits again). Name the project with `@` and its folder or ID:
 
 ```sh
-tinker confirm
-tinker amend also handle negative numbers
+tinker confirm @calc-py
+tinker amend @calc-py also handle negative numbers
+```
+
+Give its folder another name before it is built:
+
+```sh
+tinker rename @calc-py calculator
 ```
 
 Build straight through, with no plan to confirm:
@@ -97,18 +112,10 @@ Build straight through, with no plan to confirm:
 tinker task a todo list app --no-confirm
 ```
 
-Name a project from anywhere with `@` and its folder or ID:
+Build from a spec you wrote:
 
 ```sh
-tinker status @calc-py
-tinker log @calc-py
-```
-
-Add a feature, or fix a bug:
-
-```sh
-tinker add a history of past results
-tinker fix typing 2/0 crashes, it should say "cannot divide by zero"
+tinker task a calculator in Python --spec plan.md
 ```
 
 Look up the web while building:
@@ -117,17 +124,130 @@ Look up the web while building:
 tinker task a weather app --web
 ```
 
-See how things are going:
+Forgot a project's name? List every project, newest first:
 
 ```sh
-tinker status
 tinker runs
 ```
 
-Teach Tinker something new:
+Add a feature, or fix a bug (inside the project's folder, `@calc-py` can be left out):
+
+```sh
+tinker add @calc-py a history of past results
+tinker fix @calc-py typing 2/0 crashes, it should say "cannot divide by zero"
+```
+
+See how a project is going, and what its runs printed (or its model calls):
+
+```sh
+tinker status @calc-py
+tinker log @calc-py
+tinker log @calc-py --calls
+```
+
+Go on with a run that stopped, or build a project again from scratch (it asks first):
+
+```sh
+tinker resume @calc-py
+tinker restart --workdir ~/Projects/calc-py
+```
+
+## Talk 💬
+
+Talk with Tinker. Every command works here, and anything else is a normal chat (`exit` ends it):
+
+```sh
+tinker
+```
+
+Or say one thing at a time:
+
+```sh
+tinker chat what makes a good unit test
+tinker research the newest Python release
+tinker command show the five biggest files here
+```
+
+`command` shows the command line first, and runs it only once you agree.
+
+Run a project you built (the last one, by default) with its arguments:
+
+```sh
+tinker run add 5 2
+tinker run @calc-py add 5 2
+```
+
+In the conversation or a chat, give it input after `<<<`: `run @calc-py <<< 2+2`.
+
+Stop the tasks that run (they are saved), or stop them just long enough to answer you:
+
+```sh
+tinker stop
+tinker emergency how full is my disk
+```
+
+## Chat Channels 📡
+
+Talk to Tinker from Telegram, and follow every task there.
+
+1. Make a bot with [@BotFather](https://t.me/BotFather) and copy its token.
+2. Add it. Tinker asks for the token, then asks you to send the bot a message, to pair your chat:
+
+```sh
+tinker channel add
+```
+
+3. Turn it on, then listen (plain `tinker` in a terminal listens too):
+
+```sh
+tinker channel enable telegram
+tinker channel start
+```
+
+Only your paired chat is listened to. Manage your channels:
+
+```sh
+tinker channel list
+tinker channel disable telegram
+tinker channel remove telegram
+```
+
+## Learn 🧠
+
+Teach Tinker a language, a tool, or a whole domain (it reads the web, and keeps what it learns):
 
 ```sh
 tinker learn rust
+tinker learn Flask
+tinker learn food bank inventory
+```
+
+Teach it a command of yours, which builds may then use:
+
+```sh
+tinker learn serve "python3 -m http.server"
+```
+
+See what it has learned:
+
+```sh
+tinker memory
+```
+
+## Settings 🔧
+
+See the settings, or change one:
+
+```sh
+tinker config
+tinker config test_timeout 90
+```
+
+Delete parts of what Tinker keeps, or all of it (your projects stay):
+
+```sh
+tinker clear memory runs
+tinker reset
 ```
 
 Get help:
