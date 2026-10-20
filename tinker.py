@@ -291,9 +291,9 @@ class Cli:
             ("channel list", "the chat channels (Telegram), and which are enabled"),
             ("channel add", "add one: its kind, a name, its token; pairs your chat"),
             ("channel remove NAME", "delete a channel and its token"),
-            ("channel enable NAME", "a running task reports to it and takes status and stop"),
+            ("channel enable NAME", "every task reports to it; tinker channel start reads it"),
             ("channel disable NAME", "stop using it (channels start disabled)"),
-            ("channel start [NAME]", "listen on it: ask for tasks, resumes and status, or just chat"),
+            ("channel start [NAME]", "read the chat: tasks, status, stop, emergency, or just chat"),
         ],
     }
     EXAMPLES = ("tinker doctor", 'tinker task "a calculator in Python"', 'tinker add "keep a history of results"',
@@ -860,12 +860,17 @@ class ProjectRun:
         Console.mirror(workdir)
         self.open()
         listening = channels.attach(f"{Path(workdir).name}: {self.record['task']}") if channels else None
+        urgent = False
         try:
             self.work_safely()
             self.finish()
         finally:  # the summary is printed first, so the channels send it too
             if listening:
-                listening.end()
+                urgent = listening.end()
+        if urgent:  # stopped to answer an emergency from a chat, now answered: the run goes on
+            print("\nAn emergency from a chat is answered: resuming.")
+            sys.stdout.flush()
+            os.execv(sys.executable, [sys.executable, str(Path(sys.argv[0]).resolve()), "resume", self.record["id"]])
         sys.exit(self.outcome.exit_code)
 
     def check_requirements(self):
