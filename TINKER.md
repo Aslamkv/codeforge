@@ -136,3 +136,12 @@ Get help:
 tinker help
 tinker help task
 ```
+
+## Specification 📜
+
+[SPEC.md](SPEC.md) says exactly what Tinker is and does, one numbered point at a time.
+The tests in `tests/` enforce every point. Run them from the repository root:
+
+```sh
+python -m pytest
+```
