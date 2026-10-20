@@ -192,7 +192,8 @@ class Runs:
         """The run kept in a project folder."""
         run = saved(workdir, "run", "record")
         if run is None:
-            raise SystemExit(f'No saved run in {workdir}. Start one with: tinker task "..." --workdir {workdir}')
+            raise SystemExit(f'No saved run in {workdir}. Name one with @PROJECT (tinker runs lists them), '
+                             f'or start one with: tinker task "..." --workdir {workdir}')
         return run
 
     @staticmethod
