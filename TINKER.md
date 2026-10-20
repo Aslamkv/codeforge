@@ -153,5 +153,7 @@ It never writes outside the project folder, but the code it writes can do anythi
 The tests in `tests/` enforce every point. Run them from the repository root:
 
 ```sh
+python3 -m venv .venv && source .venv/bin/activate
+pip install -r requirements.txt
 python -m pytest
 ```

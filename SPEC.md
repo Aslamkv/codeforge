@@ -10,7 +10,7 @@ The tests in `tests/` enforce it.
 - Each numbered point (**SET-1**, **WEB-3** ...) states one behaviour. At least one test enforces it,
   marked `@pytest.mark.spec("SET-1")`. `tests/test_spec_coverage.py` checks that every point here has
   a test and that every test names a point that exists.
-- Run the tests from the repository root: `python -m pytest` (with pytest installed).
+- Run the tests from the repository root: `python -m pytest` (after `pip install -r requirements.txt`).
 
 ## The idea
 

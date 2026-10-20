@@ -1,0 +1,2 @@
+# Tinker needs nothing beyond Python. This is for running its tests.
+pytest>=9.1
