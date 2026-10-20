@@ -6,42 +6,32 @@ import os
 import re
 import secrets
 import shutil
-import sys
 import time
 from pathlib import Path
 
 from .prompts import Part, Prompts, Reply
 from .settings import (
-    FIX_PHASES, Home, PHASES, PROJECT_DB, STATE_DIR, STATUS_TEXT, Store, first_line, now_text, split_text,
+    FIX_PHASES, Home, PHASES, PROJECT_DB, STATE_DIR, STATUS_TEXT, Store, confirmed, first_line, now_text, split_text,
 )
 from .workspace import TaughtCommands, TestRef, Toolchain
-
-
-def project_store(workdir):
-    """The database of the project in a folder (made when first written)."""
-    return Store(Path(workdir) / STATE_DIR / PROJECT_DB)
-
-
-def saved(workdir, collection, key, default=None):
-    """What a project keeps, read without making a database in a folder that has none."""
-    path = Path(workdir) / STATE_DIR / PROJECT_DB
-    return project_store(workdir).get(collection, key, default) if path.is_file() else default
-
-
-class Outcome:
-    """How a session ended, for the summary."""
-
-    def __init__(self):
-        self.status, self.exit_code = "stopped", 1
-
-    def set(self, status):
-        """"done" or "awaiting" (exit code 0), or "blocked" (1)."""
-        self.status, self.exit_code = status, (1 if status == "blocked" else 0)
 
 
 class RunChecks:
     """What a run needs that must be there already, checked before anything starts (no folder
     emptied, no model loaded): its folder, its saved state, and that the options fit it."""
+
+    @staticmethod
+    def before_start(args):
+        """What a run needs that must be there already, checked before anything starts (no folder
+        emptied, no model loaded or measured): a new run's folder (with no run in it) and spec file;
+        for tinker restart, the folder's run (its task and spec are built again); an existing run, its
+        folder and its saved state; for tinker add and tinker fix a project whose cycles are all done;
+        for tinker amend a plan that waits. Returns the project's folder."""
+        if args.restart:
+            return RunChecks.restarting(args)
+        if args.resume is None:
+            return RunChecks.new_run(args)
+        return RunChecks.existing_run(args)
 
     @staticmethod
     def restarting(args):
@@ -59,20 +49,15 @@ class RunChecks:
         return workdir
 
     @staticmethod
-    def before_start(args):
-        """What a run needs that must be there already, checked before anything starts (no folder
-        emptied, no model loaded or measured): a new run's folder (with no run in it) and spec file;
-        for tinker restart, the folder's run (its task and spec are built again); an existing run, its
-        folder and its saved state; for tinker add and tinker fix a project whose cycles are all done;
-        for tinker amend a plan that waits. Returns the project's folder."""
-        if args.restart:
-            return RunChecks.restarting(args)
-        if args.resume is None:
-            workdir = Runs.workdir("", args.workdir)
-            if args.spec:
-                Runs.read_spec_file(args.spec)
-            RunChecks.check_no_run(workdir)
-            return workdir
+    def new_run(args):
+        workdir = Runs.workdir("", args.workdir)
+        if args.spec:
+            Runs.read_spec_file(args.spec)
+        RunChecks.check_no_run(workdir)
+        return workdir
+
+    @staticmethod
+    def existing_run(args):
         workdir = Runs.workdir(args.resume, args.workdir)
         project = Project.load(workdir, Runs.read_record(workdir))
         if args.add is not None and args.spec_file:
@@ -127,79 +112,6 @@ class Runs:
     a saved one resumed or changed); a folder emptied for tinker restart."""
 
     @staticmethod
-    def clear_folder(workdir, spec, yes=False):
-        """Delete what is in workdir, after showing it and asking (in a terminal only; yes: without asking).
-        The entry that holds the spec file stays. Refuses the home folder, the filesystem root and the folder
-        Tinker itself lives in."""
-        if workdir in (Path.home().resolve(), Path(workdir.anchor)) or Home.root.resolve().is_relative_to(workdir):
-            raise SystemExit(f"tinker restart will not empty {workdir}: run it in the project's own folder.")
-        keep = next((item for item in workdir.iterdir() if spec and spec.is_relative_to(item.resolve())), None)
-        items = sorted(item for item in workdir.iterdir() if item != keep)
-        if not items:
-            return
-        print(f"tinker restart deletes everything in {workdir} ({len(items)} items):")
-        for item in items[:20]:
-            print(f"  {item.name}{'/' if item.is_dir() and not item.is_symlink() else ''}")
-        if len(items) > 20:
-            print(f"  ... and {len(items) - 20} more")
-        if keep:
-            print(f"Kept: {keep.name} (it holds the spec file)")
-        if not yes and not sys.stdin.isatty():
-            raise SystemExit("Nothing deleted: run tinker restart in a terminal to confirm, or add --yes.")
-        if not yes and input("Delete them and build the task again from scratch? [y/N] ").strip().lower() not in (
-                "y", "yes"):
-            raise SystemExit("Nothing deleted.")
-        for item in items:
-            shutil.rmtree(item) if item.is_dir() and not item.is_symlink() else item.unlink()
-        Runs.forget_runs_in(workdir)
-        print(f"Emptied {workdir}.")
-
-    @staticmethod
-    def entries():
-        """Each project pointed to, with its own record when its folder is still there (else "missing")."""
-        found = []
-        for pointer in Home.store().items("projects").values():
-            record = saved(pointer.get("workdir", ""), "run", "record") if Path(pointer.get("workdir", "")).is_dir() \
-                else None
-            found.append({**pointer, **(record or {"status": "missing"})})
-        return found
-
-    @staticmethod
-    def workdir(name, workdir_arg):
-        """The project folder: the named project's (@ID or @folder), else the one given (--workdir, else this one)."""
-        if name:
-            workdir = Path(Runs.find(name)["workdir"])
-            if not workdir.is_dir():
-                raise SystemExit(f"The folder of project @{name} no longer exists: {workdir}")
-            return workdir
-        workdir = Path(workdir_arg).expanduser().resolve()
-        if not workdir.is_dir():
-            raise SystemExit(f"The project folder {workdir} does not exist: create it first, or give another --workdir.")
-        return workdir
-
-    @staticmethod
-    def read_spec_file(path):
-        spec_path = Path(path).expanduser()
-        if not spec_path.is_file():
-            raise SystemExit(f"Spec file not found: {path}")
-        return spec_path.read_text(encoding="utf-8"), spec_path.name
-
-    @staticmethod
-    def read_record(workdir):
-        """The run kept in a project folder."""
-        run = saved(workdir, "run", "record")
-        if run is None:
-            raise SystemExit(f'No saved run in {workdir}. Start one with: tinker task "..." --workdir {workdir}')
-        return run
-
-    @staticmethod
-    def forget_runs_in(workdir):
-        """Drop the pointers to a folder that was emptied: they lead nowhere now."""
-        for run_id, pointer in Home.store().items("projects").items():
-            if pointer.get("workdir") == str(workdir):
-                Home.store().delete("projects", run_id)
-
-    @staticmethod
     def open(args):
         """Returns (run, workdir, spec_text, mode): mode new, resume, or change (tinker add, tinker fix)."""
         if args.resume is None:
@@ -207,38 +119,21 @@ class Runs:
         return Runs.open_existing(args)
 
     @staticmethod
-    def save(run, workdir):
-        """The run kept in its project, and pointed to from Tinker's home (its ID, folder and task only)."""
-        run["updated"] = now_text()
-        project_store(workdir).put("run", "record", run)
-        Home.store().put("projects", run["id"], {"id": run["id"], "workdir": str(workdir), "task": run.get("task", "")})
-
-    @staticmethod
-    def find(name):
-        """The project named exactly: by its full run ID, or by its folder's name (never by part of either)."""
-        pointers = list(Home.store().items("projects").values())
-        found = [p for p in pointers if p.get("id") == name] or \
-                [p for p in pointers if Path(str(p.get("workdir", ""))).name == name]
-        if not found:
-            raise SystemExit(f"No project @{name}: name one by its full run ID or its folder's name (tinker runs "
-                             f"lists them)")
-        if len(found) > 1:
-            raise SystemExit(f"Several projects are in folders named {name}: name one by its ID: "
-                             f"{', '.join('@' + p['id'] for p in found)}")
-        return found[0]
-
-    @staticmethod
     def open_new(args):
         workdir = Path(args.workdir).expanduser().resolve()
         RunChecks.check_no_run(workdir)
-        if getattr(args, "restart", False):  # the spec the run had, read before the folder was emptied
-            spec_text, spec_name = args.spec_text, args.spec_name
-        else:
-            spec_text, spec_name = Runs.read_spec_file(args.spec) if args.spec else ("", None)
+        spec_text, spec_name = Runs.spec_of_new_run(args)
         project_store(workdir).put("texts", "spec_text", spec_text)  # resume needs no spec file
         run = Runs.new_record(args.task, workdir, spec_name)
         Runs.save(run, workdir)
         return run, workdir, spec_text, "new"
+
+    @staticmethod
+    def spec_of_new_run(args):
+        """(its text, its file's name): a restart's is the spec the run had, read before the folder was emptied."""
+        if getattr(args, "restart", False):
+            return args.spec_text, args.spec_name
+        return Runs.read_spec_file(args.spec) if args.spec else ("", None)
 
     @staticmethod
     def open_existing(args):
@@ -258,6 +153,107 @@ class Runs:
         return {"id": secrets.token_hex(3), "task": task, "workdir": str(workdir), "spec": spec_name,
                 "created": now_text(), "status": "running"}
 
+    @staticmethod
+    def save(run, workdir):
+        """The run kept in its project, and pointed to from Tinker's home (its ID, folder and task only)."""
+        run["updated"] = now_text()
+        project_store(workdir).put("run", "record", run)
+        Home.store().put("projects", run["id"], {"id": run["id"], "workdir": str(workdir), "task": run.get("task", "")})
+
+    @staticmethod
+    def workdir(name, workdir_arg):
+        """The project folder: the named project's (@ID or @folder), else the one given (--workdir, else this one)."""
+        if name:
+            workdir = Path(Runs.find(name)["workdir"])
+            if not workdir.is_dir():
+                raise SystemExit(f"The folder of project @{name} no longer exists: {workdir}")
+            return workdir
+        workdir = Path(workdir_arg).expanduser().resolve()
+        if not workdir.is_dir():
+            raise SystemExit(f"The project folder {workdir} does not exist: create it first, or give another --workdir.")
+        return workdir
+
+    @staticmethod
+    def find(name):
+        """The project named exactly: by its full run ID, or by its folder's name (never by part of either)."""
+        pointers = list(Home.store().items("projects").values())
+        found = [p for p in pointers if p.get("id") == name] or \
+                [p for p in pointers if Path(str(p.get("workdir", ""))).name == name]
+        if not found:
+            raise SystemExit(f"No project @{name}: name one by its full run ID or its folder's name (tinker runs "
+                             f"lists them)")
+        if len(found) > 1:
+            raise SystemExit(f"Several projects are in folders named {name}: name one by its ID: "
+                             f"{', '.join('@' + p['id'] for p in found)}")
+        return found[0]
+
+    @staticmethod
+    def read_record(workdir):
+        """The run kept in a project folder."""
+        run = saved(workdir, "run", "record")
+        if run is None:
+            raise SystemExit(f'No saved run in {workdir}. Start one with: tinker task "..." --workdir {workdir}')
+        return run
+
+    @staticmethod
+    def read_spec_file(path):
+        spec_path = Path(path).expanduser()
+        if not spec_path.is_file():
+            raise SystemExit(f"Spec file not found: {path}")
+        return spec_path.read_text(encoding="utf-8"), spec_path.name
+
+    @staticmethod
+    def entries():
+        """Each project pointed to, with its own record when its folder is still there (else "missing")."""
+        return [{**pointer, **(Runs.record_pointed_to(pointer) or {"status": "missing"})}
+                for pointer in Home.store().items("projects").values()]
+
+    @staticmethod
+    def record_pointed_to(pointer):
+        folder = pointer.get("workdir", "")
+        return saved(folder, "run", "record") if Path(folder).is_dir() else None
+
+    @staticmethod
+    def clear_folder(workdir, spec, yes=False):
+        """Delete what is in workdir, after showing it and asking (in a terminal only; yes: without asking).
+        The entry that holds the spec file stays. Refuses the home folder, the filesystem root and the folder
+        Tinker itself lives in."""
+        Runs.refuse_to_empty_a_shared_folder(workdir)
+        keep = next((item for item in workdir.iterdir() if spec and spec.is_relative_to(item.resolve())), None)
+        items = sorted(item for item in workdir.iterdir() if item != keep)
+        if not items:
+            return
+        Runs.show_what_emptying_deletes(workdir, items, keep)
+        if not confirmed("Delete them and build the task again from scratch?", "tinker restart", yes):
+            raise SystemExit("Nothing deleted.")
+        for item in items:
+            shutil.rmtree(item) if is_folder(item) else item.unlink()
+        Runs.forget_runs_in(workdir)
+        print(f"Emptied {workdir}.")
+
+    @staticmethod
+    def refuse_to_empty_a_shared_folder(workdir):
+        """The home folder, the filesystem root and the folder Tinker lives in are never emptied."""
+        if workdir in (Path.home().resolve(), Path(workdir.anchor)) or Home.root.resolve().is_relative_to(workdir):
+            raise SystemExit(f"tinker restart will not empty {workdir}: run it in the project's own folder.")
+
+    @staticmethod
+    def show_what_emptying_deletes(workdir, items, keep):
+        print(f"tinker restart deletes everything in {workdir} ({len(items)} items):")
+        for item in items[:20]:
+            print(f"  {item.name}{'/' if is_folder(item) else ''}")
+        if len(items) > 20:
+            print(f"  ... and {len(items) - 20} more")
+        if keep:
+            print(f"Kept: {keep.name} (it holds the spec file)")
+
+    @staticmethod
+    def forget_runs_in(workdir):
+        """Drop the pointers to a folder that was emptied: they lead nowhere now."""
+        for run_id, pointer in Home.store().items("projects").items():
+            if pointer.get("workdir") == str(workdir):
+                Home.store().delete("projects", run_id)
+
 
 class Project:
     """Everything planned and done, kept in the project's database (and shown in SPEC.md).
@@ -275,13 +271,13 @@ class Project:
         """The project kept in a folder (its run read from it, unless given)."""
         return cls(workdir, run or Runs.read_record(workdir), saved(workdir, "spec", "plan", {"steps": [], "counter": 0}))
 
-    @property
-    def language(self):
-        return self.spec.get("language", "")
-
     def save(self):
         self.store.put("spec", "plan", self.spec)
         (self.workdir / "SPEC.md").write_text(SpecDocument(self).text(), encoding="utf-8")
+
+    @property
+    def language(self):
+        return self.spec.get("language", "")
 
     @property
     def cycles(self):
@@ -297,14 +293,30 @@ class Project:
         self.save()
         return cycle
 
-    def criterion_of_test(self, test):
-        """The behaviour of the criterion a test checks ("" for a test no criterion owns)."""
-        return next((s["behaviour"] for s in self.criteria if s["test"] == test), "")
+    def cycle(self, cycle_id):
+        return next((c for c in self.cycles if c["id"] == cycle_id), None)
+
+    def cycle_criteria(self, cycle):
+        """The criteria of one cycle."""
+        return [s for s in self.criteria if s.get("cycle") == cycle["id"]]
 
     @property
     def criteria(self):
         """Every criterion, in plan order (saved as "steps")."""
         return self.spec.setdefault("steps", [])
+
+    def criterion(self, criterion_id):
+        return next((s for s in self.criteria if s["id"] == criterion_id), None)
+
+    def new_criterion(self, prefix, title, behaviour, test, cycle_id, source, status, effort=2):
+        """A criterion with the next id: prefix C (spec), B (a bug)."""
+        self.spec["counter"] = self.spec.get("counter", 0) + 1
+        return {"id": f"{prefix}{self.spec['counter']}", "title": title, "behaviour": behaviour, "test": test,
+                "effort": effort, "source": source, "status": status, "cycle": cycle_id, "history": []}
+
+    def criterion_of_test(self, test):
+        """The behaviour of the criterion a test checks ("" for a test no criterion owns)."""
+        return next((s["behaviour"] for s in self.criteria if s["test"] == test), "")
 
     def counts(self):
         green = sum(1 for s in self.criteria if s["status"] == "green")
@@ -314,6 +326,12 @@ class Project:
     def parked(self):
         """The criteria that nothing made pass (stored as "blocked")."""
         return [s for s in self.criteria if s["status"] == "blocked"]
+
+    def refs(self):
+        return [TestRef(s["test"]) for s in self.criteria]
+
+    def test_names(self, file):
+        return [r.name for r in self.refs() if r.file == file]
 
     @property
     def toolchain(self):
@@ -328,48 +346,46 @@ class Project:
         """Every project file: path -> {kind, role, contract, uses}."""
         return self.spec.setdefault("files", {})
 
-    def cycle_criteria(self, cycle):
-        """The criteria of one cycle."""
-        return [s for s in self.criteria if s.get("cycle") == cycle["id"]]
+    def paths(self, *kinds):
+        return [p for p, f in self.files.items() if not kinds or f.get("kind") in kinds]
 
     def outline(self):
         """The project's files by role (what the design says, not parsed code)."""
         return "\n".join(f"- {p} ({f.get('kind', 'code')}): {f.get('role', '')}" for p, f in self.files.items())
 
-    def paths(self, *kinds):
-        return [p for p, f in self.files.items() if not kinds or f.get("kind") in kinds]
-
-    def test_names(self, file):
-        return [r.name for r in self.refs() if r.file == file]
+    def register(self, created, kind, role, uses=()):
+        for path in created:
+            self.files.setdefault(path, {"kind": kind, "role": role, "contract": [], "uses": list(uses)})
 
     def remove_file(self, ws, path):
         """A file of the project gone: from the disk and from the design."""
         ws.restore({path: None})
         self.files.pop(path, None)
 
-    def new_criterion(self, prefix, title, behaviour, test, cycle_id, source, status, effort=2):
-        """A criterion with the next id: prefix C (spec), B (a bug)."""
-        self.spec["counter"] = self.spec.get("counter", 0) + 1
-        return {"id": f"{prefix}{self.spec['counter']}", "title": title, "behaviour": behaviour, "test": test,
-                "effort": effort, "source": source, "status": status, "cycle": cycle_id, "history": []}
+    def uses(self, path, depth=2):
+        """The files a file uses, directly and (depth 2) one level down."""
+        direct = self.files.get(path, {}).get("uses", [])
+        deeper = [u2 for u in direct for u2 in self.files.get(u, {}).get("uses", [])] if depth > 1 else []
+        return list(dict.fromkeys(direct + deeper))
 
     def criteria_of(self, path, steps):
         """The criteria (of steps) a file must meet: those whose tests call it directly, or whose text
         names it ("playlist.songs", "app.py"); a template's are those of the files that render it.
         A file no test reaches (an adapter) has none: its contract says what it does."""
-        name, stem = Path(path).name.lower(), Path(path).stem.lower()
-        template = self.files.get(path, {}).get("kind") == "template"  # named by its file name, not its stem
-        direct = [s for s in steps if path in self.files.get(TestRef(s["test"]).file, {}).get("uses", [])
-                  or name in s["behaviour"].lower()
-                  or (not template and re.search(rf"\b{re.escape(stem)}\.\w", s["behaviour"].lower()))]
+        template = self.files.get(path, {}).get("kind") == "template"
+        direct = [s for s in steps if self.reached_by(path, s, template)]
         if not template:
             return direct
         renderers = [p for p, f in self.files.items() if path in f.get("uses", []) and p != path]
         found = {s["id"]: s for s in direct + [s for p in renderers for s in self.criteria_of(p, steps)]}
         return list(found.values())
 
-    def refs(self):
-        return [TestRef(s["test"]) for s in self.criteria]
+    def reached_by(self, path, criterion, template):
+        """Whether the criterion's test uses the file, or its text names it (a template by its file name only)."""
+        behaviour = criterion["behaviour"].lower()
+        return path in self.files.get(TestRef(criterion["test"]).file, {}).get("uses", []) \
+            or Path(path).name.lower() in behaviour \
+            or (not template and re.search(rf"\b{re.escape(Path(path).stem.lower())}\.\w", behaviour) is not None)
 
     def entry_files(self, paths):
         """Of these paths, the app's entry point: the file the design says a user starts, then any
@@ -385,10 +401,6 @@ class Project:
                 out.append(f"{path}:\n" + "\n".join(f"  - {line}" for line in lines))
         return "\n".join(out)
 
-    def register(self, created, kind, role, uses=()):
-        for path in created:
-            self.files.setdefault(path, {"kind": kind, "role": role, "contract": [], "uses": list(uses)})
-
     def dependencies(self, read):
         """The project's third-party dependencies: its dependency files (read(path) once written,
         else what the design says they hold). Empty when it has none."""
@@ -396,17 +408,80 @@ class Project:
                  and ("depend" in f.get("role", "").lower() or Path(p).name in self.DEPENDENCY_FILES)]
         return "\n".join(f"{p}:\n{read(p) or self.files[p].get('role', '')}".strip() for p in found)
 
-    def cycle(self, cycle_id):
-        return next((c for c in self.cycles if c["id"] == cycle_id), None)
 
-    def criterion(self, criterion_id):
-        return next((s for s in self.criteria if s["id"] == criterion_id), None)
+class SpecDocument:
+    """SPEC.md: the plan as a person reads it."""
 
-    def uses(self, path, depth=2):
-        """The files a file uses, directly and (depth 2) one level down."""
-        direct = self.files.get(path, {}).get("uses", [])
-        deeper = [u2 for u in direct for u2 in self.files.get(u, {}).get("uses", [])] if depth > 1 else []
-        return list(dict.fromkeys(direct + deeper))
+    def __init__(self, project):
+        self.p = project
+
+    def text(self):
+        lines = self.heading() + self.table() + self.commands() + self.cycles() + self.design() + self.criteria()
+        return "\n".join(lines) + "\n"
+
+    def heading(self):
+        p = self.p
+        topics = list(dict.fromkeys(item["name"] for item in p.spec.get("learned", [])))
+        return [f"# Spec: {first_line(p.run['task'], 120)}", "",
+                f"Run {p.run['id']}. Language: {p.language or '?'}."
+                + (f" Learned from the web and used: {', '.join(topics)}." if topics else ""), ""]
+
+    def table(self):
+        return ["| ID | Criterion | Test | Status |", "|---|---|---|---|"] + \
+            [f"| {s['id']} | {s['title']} | `{s['test']}` | {status_text(s)} |" for s in self.p.criteria]
+
+    def commands(self):
+        tc = self.p.toolchain
+        if not tc:
+            return []
+        out = TaughtCommands.spelled_out  # these commands work for anyone
+        lines = ["", "## Commands (run in the project folder)", ""] + [f"- setup: `{out(c)}`" for c in tc.setup]
+        lines += [f"- activate: `{out(tc.activate)}`"] if tc.activate else []
+        lines += [f"- {key}: `{out(getattr(tc, key))}`" for key in Toolchain.COMMANDS if getattr(tc, key)]
+        return lines
+
+    def cycles(self):
+        return [line for cycle in self.p.cycles for line in self.cycle(cycle)]
+
+    @staticmethod
+    def cycle(cycle):
+        lines = ["", f"## {'Project' if cycle['id'] == 'base' else 'Feature ' + cycle['id']}: "
+                     f"{first_line(cycle['request'], 120)}", "", f"Phase: {cycle.get('phase')}", ""]
+        for title, key in (("Constraints", "constraints"), ("Not wanted (non-goals)", "non_goals"),
+                           ("Interface check", "review")):
+            if cycle.get(key):
+                lines += [f"{title}:"] + [f"- {item}" for item in cycle[key]] + [""]
+        if cycle.get("data"):
+            lines += ["External services: adapters and the sample data tests pass instead:", "",
+                      "```", cycle["data"], "```", ""]
+        return lines
+
+    def design(self):
+        if not self.p.files:
+            return []
+        lines = ["", "## Design (each file's contract; tests and code are written to it)", ""]
+        for path, f in self.p.files.items():
+            uses = f" (uses {', '.join(f['uses'])})" if f.get("uses") else ""
+            lines.append(f"- `{path}` [{f.get('kind', 'code')}]: {f.get('role', '')}{uses}")
+            lines += [f"    - {c}" for c in f.get("contract", [])]
+        return lines
+
+    def criteria(self):
+        steps = self.p.criteria
+        return ["", "## Spec criteria (tests written first; the code passes them)", ""] + self.criteria_lines(steps) \
+            if steps else []
+
+    def criteria_lines(self, steps):
+        lines = []
+        for s in steps:
+            lines += [f"### {s['id']} {s['title']}", "", s["behaviour"], ""]
+            if s.get("source"):
+                lines.append(f"- From the request: \"{s['source']}\"")
+            lines += [f"- Test: `{s['test']}`", f"- Status: {status_text(s)}"]
+            if s.get("last_error") and s["status"] != "green":
+                lines.append(f"- Last error: {first_line(s['last_error'], 300)}")
+            lines.append("")
+        return lines
 
 
 class Brief:
@@ -441,76 +516,6 @@ class Brief:
         text = "\n".join(notes)
         cut = text.rfind("\n", 0, limit)
         return text if len(text) <= limit else text[:cut if cut > 0 else limit]
-
-
-class SpecDocument:
-    """SPEC.md: the plan as a person reads it."""
-
-    def __init__(self, project):
-        self.p = project
-
-    def text(self):
-        p = self.p
-        topics = list(dict.fromkeys(item["name"] for item in p.spec.get("learned", [])))
-        lines = [f"# Spec: {first_line(p.run['task'], 120)}", "",
-                 f"Run {p.run['id']}. Language: {p.language or '?'}."
-                 + (f" Learned from the web and used: {', '.join(topics)}." if topics else ""), "",
-                 "| ID | Criterion | Test | Status |", "|---|---|---|---|"]
-        lines += [f"| {s['id']} | {s['title']} | `{s['test']}` | {STATUS_TEXT.get(s['status'], s['status'])} |"
-                  for s in p.criteria]
-        lines += self.commands() + self.cycles() + self.design() + self.criteria()
-        return "\n".join(lines) + "\n"
-
-    def commands(self):
-        tc = self.p.toolchain
-        if not tc:
-            return []
-        out = TaughtCommands.spelled_out  # your aliases spelled out: these commands work for anyone
-        lines = ["", "## Commands (run in the project folder)", ""] + [f"- setup: `{out(c)}`" for c in tc.setup]
-        lines += [f"- activate: `{out(tc.activate)}`"] if tc.activate else []
-        lines += [f"- {key}: `{out(getattr(tc, key))}`" for key in Toolchain.COMMANDS if getattr(tc, key)]
-        return lines
-
-    def cycles(self):
-        lines = []
-        for cycle in self.p.cycles:
-            lines += ["", f"## {'Project' if cycle['id'] == 'base' else 'Feature ' + cycle['id']}: "
-                          f"{first_line(cycle['request'], 120)}", "", f"Phase: {cycle.get('phase')}", ""]
-            for title, key in (("Constraints", "constraints"), ("Not wanted (non-goals)", "non_goals"),
-                               ("Interface check", "review")):
-                if cycle.get(key):
-                    lines += [f"{title}:"] + [f"- {item}" for item in cycle[key]] + [""]
-            if cycle.get("data"):
-                lines += ["External services: adapters and the sample data tests pass instead:", "",
-                          "```", cycle["data"], "```", ""]
-        return lines
-
-    def design(self):
-        if not self.p.files:
-            return []
-        lines = ["", "## Design (each file's contract; tests and code are written to it)", ""]
-        for path, f in self.p.files.items():
-            uses = f" (uses {', '.join(f['uses'])})" if f.get("uses") else ""
-            lines.append(f"- `{path}` [{f.get('kind', 'code')}]: {f.get('role', '')}{uses}")
-            lines += [f"    - {c}" for c in f.get("contract", [])]
-        return lines
-
-    def criteria(self):
-        steps = self.p.criteria
-        return ["", "## Spec criteria (tests written first; the code passes them)", ""] + self.criteria_lines(steps) \
-            if steps else []
-
-    def criteria_lines(self, steps):
-        lines = []
-        for s in steps:
-            lines += [f"### {s['id']} {s['title']}", "", s["behaviour"], ""]
-            if s.get("source"):
-                lines.append(f"- From the request: \"{s['source']}\"")
-            lines += [f"- Test: `{s['test']}`", f"- Status: {STATUS_TEXT.get(s['status'], s['status'])}"]
-            if s.get("last_error") and s["status"] != "green":
-                lines.append(f"- Last error: {first_line(s['last_error'], 300)}")
-            lines.append("")
-        return lines
 
 
 class Tracker:
@@ -569,9 +574,14 @@ class Tracker:
         line = self.ANSI_RE.sub("", line).rstrip()
         if self.store is not None:
             self.store.append("output", {"line": line})
-        shown = line.split("] ", 1)[-1].strip() if line.startswith("[") else line.strip()
+        shown = self.without_clock(line)
         if shown and not shown.startswith("..."):
             self.change("printed", quiet=True, latest=shown[:300])
+
+    @staticmethod
+    def without_clock(line):
+        """A step's line without its [time duration] prefix."""
+        return line.split("] ", 1)[-1].strip() if line.startswith("[") else line.strip()
 
     def wait(self, plan):
         """The plan waits for the person (plan: what to show them, as data)."""
@@ -599,3 +609,33 @@ class Tracker:
     def close(self):
         """The run's report taken out of the home (it ended, and nobody waits to read it)."""
         Home.store().delete("running", str(self.pid))
+
+
+class Outcome:
+    """How a session ended, for the summary."""
+
+    def __init__(self):
+        self.status, self.exit_code = "stopped", 1
+
+    def set(self, status):
+        """"done" or "awaiting" (exit code 0), or "blocked" (1)."""
+        self.status, self.exit_code = status, (1 if status == "blocked" else 0)
+
+
+def project_store(workdir):
+    """The database of the project in a folder (made when first written)."""
+    return Store(Path(workdir) / STATE_DIR / PROJECT_DB)
+
+
+def saved(workdir, collection, key, default=None):
+    """What a project keeps, read without making a database in a folder that has none."""
+    path = Path(workdir) / STATE_DIR / PROJECT_DB
+    return project_store(workdir).get(collection, key, default) if path.is_file() else default
+
+
+def status_text(criterion):
+    return STATUS_TEXT.get(criterion["status"], criterion["status"])
+
+
+def is_folder(item):
+    return item.is_dir() and not item.is_symlink()

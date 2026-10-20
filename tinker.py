@@ -272,34 +272,10 @@ class Cli:
     def parse(argv=None):
         """The command line read and checked (a mistake exits with what to change)."""
         argv = sys.argv[1:] if argv is None else argv
-        if not argv:  # a conversation in the terminal (and the enabled chats), as in a chat
-            Home.ensure()
-            conversation.session(Path.cwd())
-            raise SystemExit(0)
-        if argv[0] in ("help", "-h", "--help"):
-            Cli.help(argv[1] if len(argv) > 1 else None)
-        if argv[0] in Cli.TALK:  # the conversation's own commands, said once
-            if argv[1:2] in (["-h"], ["--help"]):
-                Cli.help(argv[0])
-            Home.ensure()
-            raise SystemExit(conversation.one_shot(argv[0], " ".join(argv[1:])))
+        Cli.run_at_once(argv)
         if argv[0] == "confirm":  # a plan that waits, confirmed: its run resumed
             argv = ["resume"] + argv[1:]
-        if argv[0] == "channel":  # the chat channels: a plugin of its own, nothing else runs
-            if channels is None:
-                raise SystemExit("tinker: channels are not installed (tinkerkit/channels.py is missing)")
-            channels.ChannelCommand.run(argv[1:])
-            raise SystemExit(0)
-        if argv[0] == "clear":  # nothing else runs: no model, no project
-            given = Cli.parser("clear").parse_args(argv[1:])
-            Home.clear(given.parts, given.yes)
-            raise SystemExit(0)
-        old = next((a for a in argv if a.startswith("--") and a[2:] in Cli.COMMANDS), None)
-        if old:  # the commands were options once
-            raise SystemExit(f"tinker: commands are written without --: tinker {old[2:]} (tinker help lists them)")
-        command = argv[0]
-        if command not in Cli.COMMANDS:
-            raise SystemExit(f"tinker: no command {command!r} (tinker help lists them)")
+        command = Cli.known_command(argv)
         parser = Cli.parser(command)
         given = parser.parse_args(argv[1:])
         args = argparse.Namespace(**Cli.FIELDS)
@@ -312,6 +288,42 @@ class Cli:
         if command != "task":  # a new task without --workdir gets a folder of its own (ProjectFolder)
             args.workdir = args.workdir or "."
         return args
+
+    @staticmethod
+    def run_at_once(argv):
+        """What runs as soon as it is read, and exits: the conversation (no command), help, one of the
+        conversation's own commands said once, the chat channels (a plugin of its own) and tinker clear
+        (no model, no project)."""
+        if not argv:
+            Home.ensure()
+            conversation.session(Path.cwd())
+            raise SystemExit(0)
+        if argv[0] in ("help", "-h", "--help"):
+            Cli.help(argv[1] if len(argv) > 1 else None)
+        if argv[0] in Cli.TALK:
+            if argv[1:2] in (["-h"], ["--help"]):
+                Cli.help(argv[0])
+            Home.ensure()
+            raise SystemExit(conversation.one_shot(argv[0], " ".join(argv[1:])))
+        if argv[0] == "channel":
+            if channels is None:
+                raise SystemExit("tinker: channels are not installed (tinkerkit/channels.py is missing)")
+            channels.ChannelCommand.run(argv[1:])
+            raise SystemExit(0)
+        if argv[0] == "clear":
+            given = Cli.parser("clear").parse_args(argv[1:])
+            Home.clear(given.parts, given.yes)
+            raise SystemExit(0)
+
+    @staticmethod
+    def known_command(argv):
+        """The command, one of tinker's (the commands were options once: --task is said to be task)."""
+        old = next((a for a in argv if a.startswith("--") and a[2:] in Cli.COMMANDS), None)
+        if old:
+            raise SystemExit(f"tinker: commands are written without --: tinker {old[2:]} (tinker help lists them)")
+        if argv[0] not in Cli.COMMANDS:
+            raise SystemExit(f"tinker: no command {argv[0]!r} (tinker help lists them)")
+        return argv[0]
 
     @staticmethod
     def help(command=None):
@@ -339,14 +351,22 @@ class Cli:
         that take them) and a few examples; in colour in a terminal (unless NO_COLOR is set). Columns
         are lined up before colouring."""
         paint = Cli.painter()
-        rows = [(group, row) for group in GROUPS for c in COMMANDS if c.group == group for row in c.rows]
-        width = max(len(synopsis) for _, (synopsis, _) in rows) + 2
         out = [f"🛠  {paint('tinker', 'bold')} builds what you ask for with a local Ollama model: a small spec, a unit",
                "   test for each point, just enough code, and a README a person can follow.", "",
                f"{paint('Usage:', 'bold')} tinker {paint('COMMAND', 'cyan')} {paint('[ARGUMENTS]', 'yellow')} "
                f"{paint('[OPTIONS]', 'green')}   (a project: {paint('@ID', 'yellow')} or {paint('@folder', 'yellow')})"]
+        out += Cli.command_lines(paint) + Cli.option_lines(paint)
+        out += ["", paint("💡 Examples", "bold")] + [f"  {paint('$', 'dim')} {example}" for example in Cli.EXAMPLES]
+        return "\n".join(out + ["", f"{paint('tinker help COMMAND', 'cyan')} shows one command in full."])
+
+    @staticmethod
+    def command_lines(paint):
+        """Every command by what it is for, its synopsis lined up (the channels only with their plugin)."""
+        rows = [(group, row) for group in GROUPS for c in COMMANDS if c.group == group for row in c.rows]
+        width = max(len(synopsis) for _, (synopsis, _) in rows) + 2
+        out = []
         for group in GROUPS:
-            if group == "Channels" and channels is None:  # the plugin is not installed
+            if group == "Channels" and channels is None:
                 continue
             out += ["", paint(Cli.TITLES[group], "bold")]
             for synopsis, what in [row for g, row in rows if g == group]:
@@ -354,13 +374,36 @@ class Cli:
                 padding = " " * (width - len(synopsis))
                 out.append(f"  {paint(name, 'cyan')}{' ' + paint(arguments, 'yellow') if arguments else ''}"
                            f"{padding}{what}")
+        return out
+
+    @staticmethod
+    def option_lines(paint):
+        """Every option, with the commands that take it."""
         options = Cli.options()
-        o_width = max(len(name) for name in options) + 2
-        out += ["", paint("⚙️  Options", "bold")]
-        out += [f"  {paint(name, 'green')}{' ' * (o_width - len(name))}{what} "
-                f"{paint('(' + ', '.join(commands) + ')', 'dim')}" for name, (what, commands) in options.items()]
-        out += ["", paint("💡 Examples", "bold")] + [f"  {paint('$', 'dim')} {example}" for example in Cli.EXAMPLES]
-        return "\n".join(out + ["", f"{paint('tinker help COMMAND', 'cyan')} shows one command in full."])
+        width = max(len(name) for name in options) + 2
+        return ["", paint("⚙️  Options", "bold")] + [
+            f"  {paint(name, 'green')}{' ' * (width - len(name))}{what} "
+            f"{paint('(' + ', '.join(commands) + ')', 'dim')}" for name, (what, commands) in options.items()]
+
+    @staticmethod
+    def options():
+        """{--option [VALUE]: (what it does, the commands that take it)}, from the command table."""
+        found = {}
+        for c in COMMANDS:
+            if c.name not in Cli.COMMANDS:
+                continue
+            for option in c.options:
+                name = option.flag + (f" {option.metavar}" if option.metavar else "")
+                found.setdefault(name, (option.help, []))[1].append(c.name)
+        return found
+
+    @staticmethod
+    def painter():
+        """paint(text, style): ANSI colour in a terminal; plain text when piped or NO_COLOR is set."""
+        codes = {"bold": "1", "dim": "2", "cyan": "36", "yellow": "33", "green": "32"}
+        if not sys.stdout.isatty() or os.environ.get("NO_COLOR"):
+            return lambda text, style: text
+        return lambda text, style: f"\033[{codes[style]}m{text}\033[0m"
 
     @staticmethod
     def overview_markup():
@@ -375,26 +418,6 @@ class Cli:
                 for synopsis, what in c.rows:
                     out.append("💬 anything else: a normal chat" if not c.name else f"- `{synopsis}` {what}")
         return "\n".join(out + ["", "❓ `help COMMAND` shows one command in full"])
-
-    @staticmethod
-    def painter():
-        """paint(text, style): ANSI colour in a terminal; plain text when piped or NO_COLOR is set."""
-        codes = {"bold": "1", "dim": "2", "cyan": "36", "yellow": "33", "green": "32"}
-        if not sys.stdout.isatty() or os.environ.get("NO_COLOR"):
-            return lambda text, style: text
-        return lambda text, style: f"\033[{codes[style]}m{text}\033[0m"
-
-    @staticmethod
-    def options():
-        """{--option [VALUE]: (what it does, the commands that take it)}, from the command table."""
-        found = {}
-        for c in COMMANDS:
-            if c.name not in Cli.COMMANDS:
-                continue
-            for option in c.options:
-                name = option.flag + (f" {option.metavar}" if option.metavar else "")
-                found.setdefault(name, (option.help, []))[1].append(c.name)
-        return found
 
     @staticmethod
     def parser(command):
@@ -421,25 +444,15 @@ class Cli:
         elif command in ("use-model", "calibrate", "embed", "use-web"):
             setattr(args, field, Cli.non_empty(given.name, command, parser))
         elif command in ("resume", "status", "log"):
-            name, rest = refs(given.words)
-            if rest:
-                parser.error(f"name a project as @ID or @folder (tinker runs lists them), not {' '.join(rest)!r}")
-            setattr(args, field, name)
+            setattr(args, field, Cli.project_named(given.words, parser))
         elif command == "restart":
             args.restart = True
         elif command in ("add", "fix", "amend"):
             setattr(args, field, given.words)
         elif command == "rename":
-            name, rest = refs(given.words)
-            if len(rest) != 1 or not Cli.FOLDER_RE.fullmatch(rest[0]):
-                parser.error("use tinker rename NAME or tinker rename @PROJECT NAME; a name is letters, digits, - _ "
-                             "and ., starting with a letter or digit")
-            args.rename = (name, rest[0])
+            args.rename = Cli.renamed(given.words, parser)
         elif command == "learn":
-            if len(given.words) > 2 or not given.words[0].strip():
-                parser.error('use tinker learn WHAT (e.g. tinker learn Flask) or tinker learn NAME "DEFINITION" '
-                             '(quote the definition)')
-            args.learn = given.words
+            args.learn = Cli.learning(given.words, parser)
         elif command == "config":
             if len(given.words) not in (0, 2):
                 parser.error("use tinker config (the settings) or tinker config KEY VALUE")
@@ -451,15 +464,34 @@ class Cli:
             parser.error(Cli.finds_its_folder(f"tinker {command}"))
 
     @staticmethod
+    def project_named(words, parser):
+        """The project the words name (@ID or @folder), or "" for this folder's; nothing else may follow."""
+        name, rest = refs(words)
+        if rest:
+            parser.error(f"name a project as @ID or @folder (tinker runs lists them), not {' '.join(rest)!r}")
+        return name
+
+    @staticmethod
+    def renamed(words, parser):
+        """(the project named, or "", the folder's new name)."""
+        name, rest = refs(words)
+        if len(rest) != 1 or not Cli.FOLDER_RE.fullmatch(rest[0]):
+            parser.error("use tinker rename NAME or tinker rename @PROJECT NAME; a name is letters, digits, - _ "
+                         "and ., starting with a letter or digit")
+        return name, rest[0]
+
+    @staticmethod
+    def learning(words, parser):
+        if len(words) > 2 or not words[0].strip():
+            parser.error('use tinker learn WHAT (e.g. tinker learn Flask) or tinker learn NAME "DEFINITION" '
+                         '(quote the definition)')
+        return words
+
+    @staticmethod
     def non_empty(value, command, parser):
         if not value.strip():
             parser.error(f"tinker {command}: the value is empty")
         return value.strip()
-
-    @staticmethod
-    def works_for_hours(args):
-        """A run or learning: work the computer must not sleep through (the other commands are quick)."""
-        return args.command in Cli.RUNS + Cli.LEARNING
 
     @staticmethod
     def check_run(args, parser):
@@ -468,14 +500,8 @@ class Cli:
         args.spec is the spec file of a new build."""
         kind = args.command
         args.bug, args.change_request = kind == "fix", None
-        if kind == "task":  # its words, quoted or not; an older spec file given last as a word is still one
-            words = list(args.task)
-            last = Path(words[-1])
-            if len(words) > 1 and not args.spec and last.suffix in (".md", ".txt") and last.is_file():
-                args.spec = words.pop()
-            args.task = " ".join(words).strip()
-            if not args.task:
-                parser.error("give a task, e.g. tinker task a calculator in Python")
+        if kind == "task":
+            Cli.read_task(args, parser)
         if kind == "resume" and args.resume and args.workdir is not None:
             parser.error(Cli.finds_its_folder("tinker resume"))
         if kind in ("add", "fix"):
@@ -484,8 +510,27 @@ class Cli:
             Cli.check_amend(args, parser)
 
     @staticmethod
-    def finds_its_folder(command):
-        return f"{command} @PROJECT finds the project's folder itself: remove --workdir (or give --workdir and no @PROJECT)"
+    def read_task(args, parser):
+        """The task's words, quoted or not (an older spec file given last as a word is still one)."""
+        words = list(args.task)
+        last = Path(words[-1])
+        if len(words) > 1 and not args.spec and last.suffix in (".md", ".txt") and last.is_file():
+            args.spec = words.pop()
+        args.task = " ".join(words).strip()
+        if not args.task:
+            parser.error("give a task, e.g. tinker task a calculator in Python")
+
+    @staticmethod
+    def check_request(kind, args, parser):
+        """add [@PROJECT] FEATURE or fix [@PROJECT] BUG: a resume of its run, with the request (args.change_request)."""
+        what = "bug" if kind == "fix" else "feature"
+        name, words = refs(args.fix if kind == "fix" else args.add)
+        text = " ".join(words).strip()
+        if not text:
+            parser.error(f"tinker {kind} needs a {what} description")
+        if name and args.workdir is not None:
+            parser.error(Cli.finds_its_folder(f"tinker {kind}"))
+        args.add, args.fix, args.change_request, args.resume = [text], None, text, name
 
     @staticmethod
     def check_amend(args, parser):
@@ -499,16 +544,13 @@ class Cli:
         args.amend, args.resume = text, name
 
     @staticmethod
-    def check_request(kind, args, parser):
-        """add [@PROJECT] FEATURE or fix [@PROJECT] BUG: a resume of its run, with the request (args.change_request)."""
-        what = "bug" if kind == "fix" else "feature"
-        name, words = refs(args.fix if kind == "fix" else args.add)
-        text = " ".join(words).strip()
-        if not text:
-            parser.error(f"tinker {kind} needs a {what} description")
-        if name and args.workdir is not None:
-            parser.error(Cli.finds_its_folder(f"tinker {kind}"))
-        args.add, args.fix, args.change_request, args.resume = [text], None, text, name
+    def finds_its_folder(command):
+        return f"{command} @PROJECT finds the project's folder itself: remove --workdir (or give --workdir and no @PROJECT)"
+
+    @staticmethod
+    def works_for_hours(args):
+        """A run or learning: work the computer must not sleep through (the other commands are quick)."""
+        return args.command in Cli.RUNS + Cli.LEARNING
 
 
 class Commands:
@@ -553,21 +595,6 @@ class Commands:
         return True
 
     @staticmethod
-    def rename(name, new, workdir_arg):
-        """A project's folder renamed (in the folder it is in) while its plan waits for confirmation, with
-        the run's record and its pointer; nothing is built there yet."""
-        workdir = Runs.workdir(name, workdir_arg or ".")
-        project = Project.load(workdir)
-        RunChecks.check_awaiting(project, "tinker rename renames the folder of")
-        target = workdir.parent / new
-        if target.exists():
-            raise SystemExit(f"{target} already exists: pick another name")
-        workdir.rename(target)
-        run = dict(project.run, workdir=str(target))
-        Runs.save(run, target)
-        print(f"Renamed: {workdir} -> {target}")
-
-    @staticmethod
     def config(words):
         """tinker config: the settings a run would use; tinker config KEY VALUE sets one (checked)."""
         if words:
@@ -578,23 +605,9 @@ class Commands:
         settings = Models.settings(name) if name else None
         print(f"home:            {Home.root}")
         print(f"ollama_url:      {Config.ollama_url()}")
-        if not name:
-            state = "none (measure one with tinker calibrate NAME, then select it with tinker use-model NAME)"
-        elif settings:
-            state = f"{name} (calibrated {settings.get('calibrated', '?')})"
-        else:
-            state = f"{name} (not measured: tinker calibrate {name})"
-        print(f"model in use:    {state}")
+        print(f"model in use:    {Commands.model_state(name, settings)}")
         if settings:
-            print(f"input budget:    {settings['max_prompt_tokens']} tokens"
-                  + (f" (largest read {settings['largest_prompt_read']}, crashed at {settings['crashed_reading']})"
-                     if settings.get("crashed_reading") else ""))
-            print(f"reply limit:     {settings['max_reply_tokens']} tokens (fixes at most {settings['fix_max_tokens']})")
-            print(f"context:         {settings['num_ctx']} tokens")
-            think = settings.get("think")
-            build = Config.get("build_think") if think not in (None, False) else None
-            print(f"think:           {think} for planning" + (f", {build} for building" if build else ""))
-            print(f"chars per token: {settings.get('chars_per_token')}")
+            Commands.print_measured(settings)
         for key in Config.SETTABLE:
             if key not in ("ollama_url",):
                 print(f"{key + ':':16} {Config.get(key)!r}")
@@ -602,6 +615,27 @@ class Commands:
         embed = Config.get("embed_model") or "none: select one with tinker embed NAME (tinker learn and --web need one)"
         print(f"embed_model:     {embed}")
         print("Set one with tinker config KEY VALUE (the model, the embedding model and the web have their own commands).")
+
+    @staticmethod
+    def model_state(name, settings):
+        if not name:
+            return "none (measure one with tinker calibrate NAME, then select it with tinker use-model NAME)"
+        if settings:
+            return f"{name} (calibrated {settings.get('calibrated', '?')})"
+        return f"{name} (not measured: tinker calibrate {name})"
+
+    @staticmethod
+    def print_measured(settings):
+        """What calibration measured for the model in use, and how it thinks."""
+        print(f"input budget:    {settings['max_prompt_tokens']} tokens"
+              + (f" (largest read {settings['largest_prompt_read']}, crashed at {settings['crashed_reading']})"
+                 if settings.get("crashed_reading") else ""))
+        print(f"reply limit:     {settings['max_reply_tokens']} tokens (fixes at most {settings['fix_max_tokens']})")
+        print(f"context:         {settings['num_ctx']} tokens")
+        think = settings.get("think")
+        build = Config.get("build_think") if think not in (None, False) else None
+        print(f"think:           {think} for planning" + (f", {build} for building" if build else ""))
+        print(f"chars per token: {settings.get('chars_per_token')}")
 
     @staticmethod
     def list_models():
@@ -660,13 +694,7 @@ class Commands:
         if definition is not None or TaughtCommands.alias(topic):
             TaughtCommands.teach(topic, definition)
             return
-        name, settings = Models.selected()
-        Models.installed(name)
-        Config.check_model(run=False)
-        embeddings = Embeddings.required(option)
-        internet = Internet.required(option)
-        model = Model(name, settings, Config.keep_alive(Config.get("keep_alive")), Log(Home.store(), "learn"),
-                      max_growth=float(Config.get("max_growth")))
+        model, embeddings, internet = self.learning_tools(option)
         learner = Learner(model, internet, embeddings)
         try:
             entry = learner.learn(topic, deep=True)
@@ -678,88 +706,17 @@ class Commands:
         self.print_learned(topic, entry)
 
     @staticmethod
-    def show_memory():
-        print(f"Tinker's home: {Home.root}\nModel in use: {Config.get('model') or 'none'}")
-        for key, doc in Home.store().items("languages").items():
-            print(f"\n{doc.get('language', key)} ({key}), {doc.get('projects', 0)} project(s) finished")
-            if Toolchain(doc.get("toolchain")):
-                print(f"  toolchain: {Toolchain(doc.get('toolchain')).summary()}")
-            for f in doc.get("fixes", []):
-                print(f"  fix: {first_line(f['failure'], 70)} -> {first_line(f['cause'], 70)} (helped {f.get('used', 0)}"
-                      f"{'; replayed without the model' if f.get('replay') else ''})")
-            for fact in doc.get("facts", []):
-                print(f"  proven fact [{fact.get('phase')}]: {first_line(fact.get('text', ''), 100)}")
-            Commands.print_lessons(doc.get("lessons", []))
-        print("\nAny language:")
-        Commands.print_lessons((Home.store().get("memory", "any") or {}).get("lessons", []))
-        topics = Library.topics()
-        print("\nLearned from the web (tinker learn WHAT):" + ("" if topics else " nothing yet"))
-        for slug, entry in topics.items():
-            kind = "language" if entry.get("kind") == "language" else "topic"
-            print(f"  {slug} ({kind}): {entry.get('name', slug)}, learned {entry.get('learned', '?')}, "
-                  f"{len(entry.get('facts', []))} fact(s): {first_line(str(entry.get('summary', '')), 80)}")
-        taught = TaughtCommands.all()
-        print("\nYour commands (tinker learn NAME):" + ("" if taught else " none yet"))
-        for name, entry in taught.items():
-            print(f"  {name}: {TaughtCommands.describe(entry)}")
-        print("\nForget a part with tinker clear PART, a command with tinker learn NAME none.")
-
-    @staticmethod
-    def list_runs():
-        entries = sorted(Runs.entries(), key=lambda e: e.get("updated", ""), reverse=True)
-        if not entries:
-            print("No runs yet.")
-            return
-        home = str(Path.home())
-        print(f"{'PROJECT':9} {'STATUS':14} {'UPDATED':17} {'FOLDER':32} TASK")
-        for e in entries:
-            workdir = e.get("workdir", "")
-            shown = ("~" + workdir[len(home):]) if workdir.startswith(home) else workdir
-            if len(shown) > 32:
-                shown = "..." + shown[-29:]  # keep the folder name, the part that identifies it
-            task = e.get("task", "").replace("\n", " ")
-            if e.get("features"):
-                task = f"[+{len(e['features'])} feature{'s' if len(e['features']) > 1 else ''}] " + task
-            print(f"{'@' + e.get('id', '?'):9} {e.get('status', '?'):14} {e.get('updated', ''):17} "
-                  f"{shown[:32]:32} {task[:60] + ('...' if len(task) > 60 else '')}")
-
-    @staticmethod
-    def show_status(name, workdir_arg):
-        workdir = Runs.workdir(name, workdir_arg)
-        run = Runs.read_record(workdir)
-        spec = saved(workdir, "spec", "plan")
-        print(f"Run {run['id']} ({run.get('status', '?')}, updated {run.get('updated', '?')}): {first_line(run['task'])}")
-        print(f"Project: {workdir}   Language: {(spec or {}).get('language', '?')}")
-        if not spec or not spec.get("steps"):
-            print("No spec yet (planned on the next tinker resume).")
-            return
-        steps = spec["steps"]
-        print(f"{sum(1 for s in steps if s['status'] == 'green')}/{len(steps)} criteria pass")
-        for s in steps:
-            print(f"  {s['id']:5} {STATUS_TEXT.get(s['status'], s['status']):11} {s['title'][:50]:50} {s['test']}")
-            if s["status"] == "blocked" and s.get("last_error"):
-                print(f"        last error: {first_line(s['last_error'], 110)}")
-        for c in spec.get("cycles", []):
-            if c.get("phase") != "done":
-                waits = " (its plan waits for your confirm)" if c.get("awaiting") else ""
-                print(f"  {'project' if c['id'] == 'base' else c.get('kind', 'feature') + ' ' + c['id']}: next phase "
-                      f"{c.get('phase')}{waits}")
-
-    @staticmethod
-    def show_log(name, workdir_arg, calls=False):
-        """tinker log: what the project's runs printed; --calls: its model calls."""
-        workdir = Runs.workdir(name, workdir_arg)
-        Runs.read_record(workdir)
-        store = project_store(workdir)
-        if not calls:
-            for _, entry in store.entries("output"):
-                print(entry.get("line", ""))
-            return
-        for _, entry in store.entries("events"):
-            print(f"[{entry['time']}] {entry.get('label', '')}" + (f"  error: {entry['error']}" if entry.get("error")
-                                                                    else ""))
-            if entry.get("reply"):
-                print("\n".join(f"    {line}" for line in str(entry["reply"]).splitlines()[:40]))
+    def learning_tools(option):
+        """(the model in use, the embedding model, the Internet plugin), each checked first: when one is
+        not there, nothing is loaded and it says why."""
+        name, settings = Models.selected()
+        Models.installed(name)
+        Config.check_model(run=False)
+        embeddings = Embeddings.required(option)
+        internet = Internet.required(option)
+        model = Model(name, settings, Config.keep_alive(Config.get("keep_alive")), Log(Home.store(), "learn"),
+                      max_growth=float(Config.get("max_growth")))
+        return model, embeddings, internet
 
     @staticmethod
     def print_learned(topic, entry):
@@ -775,12 +732,138 @@ class Commands:
         print("A run uses this when its recall phase finds the request needs it; tinker memory lists what was learned.")
 
     @staticmethod
+    def show_memory():
+        print(f"Tinker's home: {Home.root}\nModel in use: {Config.get('model') or 'none'}")
+        for key, doc in Home.store().items("languages").items():
+            Commands.print_language(key, doc)
+        print("\nAny language:")
+        Commands.print_lessons((Home.store().get("memory", "any") or {}).get("lessons", []))
+        Commands.print_topics(Library.topics())
+        Commands.print_taught(TaughtCommands.all())
+        print("\nForget a part with tinker clear PART, a command with tinker learn NAME none.")
+
+    @staticmethod
+    def print_language(key, doc):
+        """What a language's projects taught: the toolchain that worked, its fixes, proven facts, lessons."""
+        print(f"\n{doc.get('language', key)} ({key}), {doc.get('projects', 0)} project(s) finished")
+        if Toolchain(doc.get("toolchain")):
+            print(f"  toolchain: {Toolchain(doc.get('toolchain')).summary()}")
+        for f in doc.get("fixes", []):
+            print(f"  fix: {first_line(f['failure'], 70)} -> {first_line(f['cause'], 70)} (helped {f.get('used', 0)}"
+                  f"{'; replayed without the model' if f.get('replay') else ''})")
+        for fact in doc.get("facts", []):
+            print(f"  proven fact [{fact.get('phase')}]: {first_line(fact.get('text', ''), 100)}")
+        Commands.print_lessons(doc.get("lessons", []))
+
+    @staticmethod
     def print_lessons(lessons):
         for lesson in lessons:
             print(f"  lesson [{lesson.get('phase')}, {lesson.get('status', 'candidate')}, seen {lesson.get('seen', 1)}x]: "
                   f"{lesson.get('text')}")
         if not lessons:
             print("  no lessons yet")
+
+    @staticmethod
+    def print_topics(topics):
+        print("\nLearned from the web (tinker learn WHAT):" + ("" if topics else " nothing yet"))
+        for slug, entry in topics.items():
+            kind = "language" if entry.get("kind") == "language" else "topic"
+            print(f"  {slug} ({kind}): {entry.get('name', slug)}, learned {entry.get('learned', '?')}, "
+                  f"{len(entry.get('facts', []))} fact(s): {first_line(str(entry.get('summary', '')), 80)}")
+
+    @staticmethod
+    def print_taught(taught):
+        print("\nYour commands (tinker learn NAME):" + ("" if taught else " none yet"))
+        for name, entry in taught.items():
+            print(f"  {name}: {TaughtCommands.describe(entry)}")
+
+    @staticmethod
+    def list_runs():
+        entries = sorted(Runs.entries(), key=lambda e: e.get("updated", ""), reverse=True)
+        if not entries:
+            print("No runs yet.")
+            return
+        print(f"{'PROJECT':9} {'STATUS':14} {'UPDATED':17} {'FOLDER':32} TASK")
+        for e in entries:
+            task = Commands.task_of(e)
+            print(f"{'@' + e.get('id', '?'):9} {e.get('status', '?'):14} {e.get('updated', ''):17} "
+                  f"{Commands.short_folder(e.get('workdir', '')):32} {task[:60] + ('...' if len(task) > 60 else '')}")
+
+    @staticmethod
+    def short_folder(workdir):
+        """The folder in at most 32 chars: under ~, and cut at its start (its name is what identifies it)."""
+        home = str(Path.home())
+        shown = ("~" + workdir[len(home):]) if workdir.startswith(home) else workdir
+        return ("..." + shown[-29:] if len(shown) > 32 else shown)[:32]
+
+    @staticmethod
+    def task_of(entry):
+        """The run's task on one line, with how many features were added to it."""
+        task = entry.get("task", "").replace("\n", " ")
+        features = entry.get("features")
+        return f"[+{len(features)} feature{'s' if len(features) > 1 else ''}] " + task if features else task
+
+    @staticmethod
+    def show_status(name, workdir_arg):
+        workdir = Runs.workdir(name, workdir_arg)
+        run = Runs.read_record(workdir)
+        spec = saved(workdir, "spec", "plan")
+        print(f"Run {run['id']} ({run.get('status', '?')}, updated {run.get('updated', '?')}): {first_line(run['task'])}")
+        print(f"Project: {workdir}   Language: {(spec or {}).get('language', '?')}")
+        if not spec or not spec.get("steps"):
+            print("No spec yet (planned on the next tinker resume).")
+            return
+        Commands.print_criteria(spec["steps"])
+        for c in spec.get("cycles", []):
+            if c.get("phase") != "done":
+                waits = " (its plan waits for your confirm)" if c.get("awaiting") else ""
+                print(f"  {'project' if c['id'] == 'base' else c.get('kind', 'feature') + ' ' + c['id']}: next phase "
+                      f"{c.get('phase')}{waits}")
+
+    @staticmethod
+    def print_criteria(steps):
+        """How many criteria pass; each one's status, and a parked one's last error."""
+        print(f"{sum(1 for s in steps if s['status'] == 'green')}/{len(steps)} criteria pass")
+        for s in steps:
+            print(f"  {s['id']:5} {STATUS_TEXT.get(s['status'], s['status']):11} {s['title'][:50]:50} {s['test']}")
+            if s["status"] == "blocked" and s.get("last_error"):
+                print(f"        last error: {first_line(s['last_error'], 110)}")
+
+    @staticmethod
+    def show_log(name, workdir_arg, calls=False):
+        """tinker log: what the project's runs printed; --calls: its model calls."""
+        workdir = Runs.workdir(name, workdir_arg)
+        Runs.read_record(workdir)
+        store = project_store(workdir)
+        if calls:
+            Commands.print_calls(store)
+            return
+        for _, entry in store.entries("output"):
+            print(entry.get("line", ""))
+
+    @staticmethod
+    def print_calls(store):
+        """Each model call: when, what, an error, and the start of its reply."""
+        for _, entry in store.entries("events"):
+            print(f"[{entry['time']}] {entry.get('label', '')}" + (f"  error: {entry['error']}" if entry.get("error")
+                                                                    else ""))
+            if entry.get("reply"):
+                print("\n".join(f"    {line}" for line in str(entry["reply"]).splitlines()[:40]))
+
+    @staticmethod
+    def rename(name, new, workdir_arg):
+        """A project's folder renamed (in the folder it is in) while its plan waits for confirmation, with
+        the run's record and its pointer; nothing is built there yet."""
+        workdir = Runs.workdir(name, workdir_arg or ".")
+        project = Project.load(workdir)
+        RunChecks.check_awaiting(project, "tinker rename renames the folder of")
+        target = workdir.parent / new
+        if target.exists():
+            raise SystemExit(f"{target} already exists: pick another name")
+        workdir.rename(target)
+        run = dict(project.run, workdir=str(target))
+        Runs.save(run, target)
+        print(f"Renamed: {workdir} -> {target}")
 
 
 class Doctor:
@@ -886,11 +969,8 @@ class ProjectRun:
                 urgent = listening.end()
             elif os.environ.get(conversation.OFF) != "off":  # the conversation that started it reads it last
                 self.tracker.close()
-        if urgent:  # stopped to answer an emergency from a chat, now answered: the run goes on
-            print("\nAn emergency from a chat is answered: resuming.")
-            sys.stdout.flush()
-            os.execv(sys.executable, [sys.executable, str(Path(sys.argv[0]).resolve()), "resume",
-                                      f"@{self.record['id']}"])
+        if urgent:
+            self.go_on_after_emergency()
         sys.exit(self.outcome.exit_code)
 
     def check_requirements(self):
@@ -909,25 +989,6 @@ class ProjectRun:
                 Runs.read_spec_file(self.args.spec)  # checked before a folder is made
             self.args.workdir = str(ProjectFolder.make(self.args.task))
         return RunChecks.before_start(self.args)
-
-    def work_safely(self):
-        """work, saved whatever happens: Ollama failing, Ctrl-C, a stop, or a bug (reported, so
-        the run can be continued)."""
-        try:
-            self.work()
-        except OllamaError as exc:
-            print(f"\n{exc}")
-        except KeyboardInterrupt:
-            print("\nInterrupted.")
-        except SystemExit as exc:
-            if exc.code not in (None, 0):
-                print(f"\n{exc.code}" if isinstance(exc.code, str) else "")
-        except Exception as exc:  # a bug must not lose the run: report it, save, and say how to continue
-            details = traceback.format_exc()
-            print(f"\nUnexpected error: {type(exc).__name__}: {first_line(str(exc), 300)}\n{details.rstrip()}")
-            self.log.add({"label": "unexpected error", "error": details})
-        finally:
-            self.save()
 
     def open(self):
         """The model, the run, its project and the session; the tracker told the run and its folder."""
@@ -949,6 +1010,40 @@ class ProjectRun:
         if project.language:
             print(f"learned so far: {self.session.knowledge.summary()}")
 
+    def print_header(self, model, workdir):
+        run, mode, args = self.record, self.mode, self.args
+        change = "fixing a bug" if args.bug else "adding a feature"
+        doing = {"new": "restarting" if self.args.restart else "new", "resume": "resuming", "change": change}[mode]
+        print(f"Run {run['id']} ({doing}): {run['task']}")
+        if mode == "change":
+            print(f"  request: {first_line(args.change_request, 200)}")
+        print(f"model {model.name} (calibrated {model.settings.get('calibrated', '?')})   context {model.num_ctx}   "
+              f"input budget {model.max_tokens} tok   think {model.think}"
+              + (f" (building: {model.build_think})" if model.build_think and model.build_think != model.think else "")
+              + f"   keep_alive {model.keep_alive}")
+        print(f"reply limit per call (thinking included): {model.max_reply} tokens (the longest it writes); "
+              f"fixes at most {model.fix_max}")
+        print(f"Project: {workdir}")
+
+    def work_safely(self):
+        """work, saved whatever happens: Ollama failing, Ctrl-C, a stop, or a bug (reported, so
+        the run can be continued)."""
+        try:
+            self.work()
+        except OllamaError as exc:
+            print(f"\n{exc}")
+        except KeyboardInterrupt:
+            print("\nInterrupted.")
+        except SystemExit as exc:
+            if exc.code not in (None, 0):
+                print(f"\n{exc.code}" if isinstance(exc.code, str) else "")
+        except Exception as exc:  # a bug must not lose the run: report it, save, and say how to continue
+            details = traceback.format_exc()
+            print(f"\nUnexpected error: {type(exc).__name__}: {first_line(str(exc), 300)}\n{details.rstrip()}")
+            self.log.add({"label": "unexpected error", "error": details})
+        finally:
+            self.save()
+
     def work(self):
         """The cycle to work on, run from its saved phase: a plan that waits is confirmed (or amended)."""
         session, run = self.session, self.record
@@ -956,21 +1051,53 @@ class ProjectRun:
         cycle = self.choose_cycle(brief)
         if cycle is not None and self.args.no_confirm:
             cycle["confirm"] = False
-        if cycle is not None and cycle.get("awaiting"):  # its plan waits for the person: changed, or confirmed
-            if self.args.amend:
-                print("\nPlan: changing it as you asked")
-                self.tracker.phase("amend")
-                self.amend(cycle, self.args.amend)
-            else:
-                cycle["awaiting"], cycle["confirmed"] = False, True
-                print("Plan confirmed: building it")
-                session.save()
+        if cycle is not None and cycle.get("awaiting"):
+            self.confirm_or_amend(cycle)
         if cycle is None:
             CycleRunner(session).show_plan()
             print("  every cycle of this run is done; add a feature with tinker add, or fix a bug with tinker fix")
             self.outcome.set("done")
             return
         self.outcome.set(CycleRunner(session).run(cycle, web=self.internet is not None))
+
+    def choose_cycle(self, brief):
+        """The cycle to work on: a new feature or bug (tinker add, tinker fix), the unfinished one, or the
+        project itself. A new cycle's plan waits for confirmation unless the run was given --no-confirm."""
+        project = self.session.project
+        cycle = project.open_cycle()
+        if self.mode == "change":  # its project is open to a new cycle (RunChecks.before_start)
+            cycle = self.new_change()
+        elif cycle is None and not project.cycles:
+            cycle = project.new_cycle("base", self.record["task"], brief)
+            cycle["confirm"] = self.session.confirm
+            project.save()
+        return cycle
+
+    def new_change(self):
+        """A feature's or a bug's cycle (its spec file condensed with its request), kept in the run too."""
+        session, run, args, project = self.session, self.record, self.args, self.session.project
+        feature_id = secrets.token_hex(3)
+        kind = "fix" if args.bug else "feature"
+        feature_brief = Brief.make(session.model, args.change_request, self.spec_text) \
+            if self.spec_text and not args.bug else ""
+        cycle = project.new_cycle(feature_id, args.change_request, feature_brief, kind)
+        cycle["confirm"] = session.confirm
+        run.setdefault("features", []).append({"id": feature_id, "request": args.change_request, "kind": kind,
+                                               "added": now_text()})
+        Runs.save(run, project.workdir)
+        project.save()
+        return cycle
+
+    def confirm_or_amend(self, cycle):
+        """The plan that waits for the person: changed as they ask, or confirmed."""
+        if self.args.amend:
+            print("\nPlan: changing it as you asked")
+            self.tracker.phase("amend")
+            self.amend(cycle, self.args.amend)
+        else:
+            cycle["awaiting"], cycle["confirmed"] = False, True
+            print("Plan confirmed: building it")
+            self.session.save()
 
     def amend(self, cycle, change):
         """The plan that waits, changed as the person asks: a spec planned again (SpecWriter.amend), or a
@@ -1009,43 +1136,6 @@ class ProjectRun:
         total = time.perf_counter() - self.script_started
         print(f"Total execution time: {total:.2f}s ({human_duration(total)})")
         self.tracker.end(self.ending, total)
-
-    def print_header(self, model, workdir):
-        run, mode, args = self.record, self.mode, self.args
-        change = "fixing a bug" if args.bug else "adding a feature"
-        doing = {"new": "restarting" if self.args.restart else "new", "resume": "resuming", "change": change}[mode]
-        print(f"Run {run['id']} ({doing}): {run['task']}")
-        if mode == "change":
-            print(f"  request: {first_line(args.change_request, 200)}")
-        print(f"model {model.name} (calibrated {model.settings.get('calibrated', '?')})   context {model.num_ctx}   "
-              f"input budget {model.max_tokens} tok   think {model.think}"
-              + (f" (building: {model.build_think})" if model.build_think and model.build_think != model.think else "")
-              + f"   keep_alive {model.keep_alive}")
-        print(f"reply limit per call (thinking included): {model.max_reply} tokens (the longest it writes); "
-              f"fixes at most {model.fix_max}")
-        print(f"Project: {workdir}")
-
-    def choose_cycle(self, brief):
-        """The cycle to work on: a new feature or bug (tinker add, tinker fix), the unfinished one, or the
-        project itself. A new cycle's plan waits for confirmation unless the run was given --no-confirm."""
-        session, run, mode, args, spec_text = self.session, self.record, self.mode, self.args, self.spec_text
-        project = session.project
-        cycle = project.open_cycle()
-        if mode == "change":  # its project is open to a new cycle (RunChecks.before_start)
-            feature_id = secrets.token_hex(3)
-            kind = "fix" if args.bug else "feature"
-            feature_brief = Brief.make(session.model, args.change_request, spec_text) if spec_text and not args.bug else ""
-            cycle = project.new_cycle(feature_id, args.change_request, feature_brief, kind)
-            cycle["confirm"] = session.confirm
-            run.setdefault("features", []).append({"id": feature_id, "request": args.change_request, "kind": kind,
-                                                   "added": now_text()})
-            Runs.save(run, project.workdir)
-            project.save()
-        elif cycle is None and not project.cycles:
-            cycle = project.new_cycle("base", run["task"], brief)
-            cycle["confirm"] = session.confirm
-            project.save()
-        return cycle
 
     def print_summary(self):
         """What happened, for the terminal; the same as data (self.ending) for the tracker."""
@@ -1091,56 +1181,73 @@ class ProjectRun:
     def summary_awaiting(self):
         """The plan as a person reads it, to confirm or change before anything is built; the tracker is
         given it as data."""
-        project, run_id = self.session.project, self.record["id"]
-        cycle = project.open_cycle()
-        kind = "fix" if cycle.get("kind") == "fix" else "project" if cycle["id"] == "base" else "feature"
-        criteria = [(s["id"], s["behaviour"]) for s in project.cycle_criteria(cycle)]
-        plan = {"name": project.workdir.name, "run": run_id, "language": project.language,
-                "start": project.toolchain.run, "kind": kind, "changes": cycle.get("changes", []),
-                "criteria": criteria, "non_goals": cycle.get("non_goals", []), "folder": str(project.workdir)}
-        runs = f"; a person runs it with: {project.toolchain.run}" if project.toolchain.run else ""
-        heading = "🐞 Bug shown for" if kind == "fix" else "📋 Plan for"
-        print(f"{heading} {project.workdir.name} (run {run_id}): {project.language}{runs}")
-        if plan["changes"]:
-            print("What changed:" + "".join(f"\n  {line}" for line in plan["changes"]))
-        print("Tested before any code is written:")
-        for criterion_id, behaviour in criteria:
-            print(f"  {criterion_id}  {behaviour}")
-        if plan["non_goals"]:
-            print(f"Not included: {'; '.join(plan['non_goals'])}")
-        print(f"Its folder: {project.workdir}   (rename it: tinker rename @{run_id} NAME)")
+        run_id = self.record["id"]
+        plan = self.waiting_plan()
+        self.print_plan(plan)
+        print(f"Its folder: {plan['folder']}   (rename it: tinker rename @{run_id} NAME)")
         print(f"Build it: tinker confirm @{run_id}   (in the chat: confirm)")
         print(f"Change it: tinker amend @{run_id} CHANGE   (in the chat: amend WHAT)")
         self.ending.update(headline=f"Its plan waits for your confirm: tinker confirm @{run_id}")
         self.tracker.wait(plan)
 
+    def waiting_plan(self):
+        """The plan that waits, as data: what it is, what changed, its criteria, what it leaves out."""
+        project = self.session.project
+        cycle = project.open_cycle()
+        kind = "fix" if cycle.get("kind") == "fix" else "project" if cycle["id"] == "base" else "feature"
+        return {"name": project.workdir.name, "run": self.record["id"], "language": project.language,
+                "start": project.toolchain.run, "kind": kind, "changes": cycle.get("changes", []),
+                "criteria": [(s["id"], s["behaviour"]) for s in project.cycle_criteria(cycle)],
+                "non_goals": cycle.get("non_goals", []), "folder": str(project.workdir)}
+
+    @staticmethod
+    def print_plan(plan):
+        runs = f"; a person runs it with: {plan['start']}" if plan["start"] else ""
+        heading = "🐞 Bug shown for" if plan["kind"] == "fix" else "📋 Plan for"
+        print(f"{heading} {plan['name']} (run {plan['run']}): {plan['language']}{runs}")
+        if plan["changes"]:
+            print("What changed:" + "".join(f"\n  {line}" for line in plan["changes"]))
+        print("Tested before any code is written:")
+        for criterion_id, behaviour in plan["criteria"]:
+            print(f"  {criterion_id}  {behaviour}")
+        if plan["non_goals"]:
+            print(f"Not included: {'; '.join(plan['non_goals'])}")
+
     def summary_blocked(self):
         """Why it stopped: a bug no test showed, a project that does not build, tools that do not
         work, or criteria parked."""
-        session, run_id = self.session, self.record["id"]
-        lines = []
-        if session.unreproduced:
-            lines = [f"Not fixed: {session.unreproduced}"]
-        elif session.review_problem:
-            lines = [f"Not done: the final review found {session.review_problem}",
-                     f"Correct it (or the request), then: tinker resume @{run_id}"]
-        elif session.build_problem:
-            lines = [f"Stopped before working on criteria: {session.build_problem}",
-                     f"See what each fix did (tinker log @{run_id}); correct it by hand or continue with: "
-                     f"tinker resume @{run_id}"]
-        elif session.tool_problem:
-            lines = [f"Stopped before working on criteria: {session.tool_problem}",
-                     "No code change can fix that. Check the commands in SPEC.md (setup, test_all) and the dependency",
-                     f"file, then continue with: tinker resume @{run_id}"]
-        else:
-            green, parked, total = session.project.counts()
-            lines = [f"Stopped: {green}/{total} tests pass; {parked} parked after fixing and a review against the plan:"]
-            lines += [f"  {s['id']} {s['title']}: {first_line(s.get('last_error', ''), 160)}"
-                      for s in session.project.parked()]
-            lines += [f"Change what it cannot (the request, the plan, a dependency), then: tinker resume @{run_id}"]
+        run_id = self.record["id"]
+        lines = self.why_blocked(self.session, run_id)
         print("\n".join(lines))
         self.ending.update(headline=lines[0], details=[("Then", line.strip()) for line in lines[1:]],
                            next=[("Continue it", f"tinker resume @{run_id}")])
+
+    @staticmethod
+    def why_blocked(session, run_id):
+        """The lines that say why it stopped (the first is the headline) and how to go on."""
+        if session.unreproduced:
+            return [f"Not fixed: {session.unreproduced}"]
+        if session.review_problem:
+            return [f"Not done: the final review found {session.review_problem}",
+                    f"Correct it (or the request), then: tinker resume @{run_id}"]
+        if session.build_problem:
+            return [f"Stopped before working on criteria: {session.build_problem}",
+                    f"See what each fix did (tinker log @{run_id}); correct it by hand or continue with: "
+                    f"tinker resume @{run_id}"]
+        if session.tool_problem:
+            return [f"Stopped before working on criteria: {session.tool_problem}",
+                    "No code change can fix that. Check the commands in SPEC.md (setup, test_all) and the dependency",
+                    f"file, then continue with: tinker resume @{run_id}"]
+        green, parked, total = session.project.counts()
+        return [f"Stopped: {green}/{total} tests pass; {parked} parked after fixing and a review against the plan:"] + \
+            [f"  {s['id']} {s['title']}: {first_line(s.get('last_error', ''), 160)}" for s in session.project.parked()] + \
+            [f"Change what it cannot (the request, the plan, a dependency), then: tinker resume @{run_id}"]
+
+    def go_on_after_emergency(self):
+        """Stopped to answer an emergency from a chat, now answered: the run goes on, as tinker resume."""
+        print("\nAn emergency from a chat is answered: resuming.")
+        sys.stdout.flush()
+        os.execv(sys.executable, [sys.executable, str(Path(sys.argv[0]).resolve()), "resume", f"@{self.record['id']}"])
 
 
 class ProjectFolder:
@@ -1169,10 +1276,7 @@ class ProjectFolder:
     def named(task):
         """The model's name for the task's folder ("" when it gives none that fits NAME_RE)."""
         model, settings = Models.selected()
-        options = {"num_ctx": settings["num_ctx"], "num_predict": 24}  # a run's num_ctx: the model stays loaded
-        if settings.get("num_batch"):
-            options["num_batch"] = settings["num_batch"]
-        think = False if settings.get("think") not in (None, False) else None
+        options, think = ProjectFolder.quick_call(settings)
         try:
             data = Ollama.chat(model, [{"role": "system", "content": Prompts.FOLDER_NAME_SYSTEM},
                                        {"role": "user", "content": task}],
@@ -1181,6 +1285,15 @@ class ProjectFolder:
             return ""
         name = data["message"]["content"].strip().strip("`'\".").lower()
         return name if ProjectFolder.NAME_RE.fullmatch(name) and len(name) <= ProjectFolder.NAME_MAX else ""
+
+    @staticmethod
+    def quick_call(settings):
+        """(options, think) of a call that names something: a run's num_ctx (the model stays loaded for the run),
+        a few tokens, no thinking."""
+        options = {"num_ctx": settings["num_ctx"], "num_predict": 24}
+        if settings.get("num_batch"):
+            options["num_batch"] = settings["num_batch"]
+        return options, (False if settings.get("think") not in (None, False) else None)
 
     @staticmethod
     def from_words(task):
@@ -1198,12 +1311,6 @@ class CycleRunner:
 
     def __init__(self, session):
         self.s, self.p = session, session.project
-
-    def show_plan(self):
-        print(f"Plan: {len(self.p.criteria)} spec criteria (see SPEC.md)")
-        for s in self.p.criteria:
-            print(f"  {s['id']:5} [{STATUS_TEXT.get(s['status'], s['status'])}] effort {s.get('effort', 2)} "
-                  f"{s['title']}  -> {s['test']}")
 
     def run(self, cycle, web=False):
         """Continue a cycle from its saved phase: "done", "blocked" (a phase stopped it) or "awaiting" (its
@@ -1224,11 +1331,7 @@ class CycleRunner:
                 return "blocked"
             if phase in FORMAT_AFTER:
                 self.s.format_code()
-            cycle["phase"] = phases[phases.index(phase) + 1]
-            if phase == CONFIRM_AFTER[cycle.get("kind", "feature")] and cycle.get("confirm") \
-                    and not cycle.get("confirmed"):
-                cycle["awaiting"] = True  # the person confirms it (tinker confirm) or changes it (tinker amend)
-            self.s.save()
+            self.done_with(phase, cycle, phases)
             if phase == "review":
                 self.show_plan()
         return "done"
@@ -1239,13 +1342,6 @@ class CycleRunner:
         if self.s.tracker is not None:
             self.s.tracker.phase("recall")
         Recaller(self.s).run(cycle)
-
-    def disprove(self, cycle, phase):
-        """The knowledge used in a step that failed is discarded (it did not hold)."""
-        gone = self.s.knowledge.disprove(cycle.get("used", {}), self.s.failed_phases(phase))
-        if gone:
-            print(f"  {gone} lesson(s) and fact(s) used in this step are discarded: they did not hold")
-        self.s.save()
 
     def run_phase(self, phase, cycle):
         """Runs one phase; only setup, verify, the final review and reproduce can stop
@@ -1274,6 +1370,27 @@ class CycleRunner:
                 "docs": ReadmeWriter,
                 "lessons": LessonWriter,
                 "reproduce": BugReproducer}[phase]
+
+    def done_with(self, phase, cycle, phases):
+        """The cycle on to its next phase, saved; past the phase its plan waits after, it waits for the person
+        to confirm it (tinker confirm) or change it (tinker amend), unless --no-confirm."""
+        cycle["phase"] = phases[phases.index(phase) + 1]
+        if phase == CONFIRM_AFTER[cycle.get("kind", "feature")] and cycle.get("confirm") and not cycle.get("confirmed"):
+            cycle["awaiting"] = True
+        self.s.save()
+
+    def disprove(self, cycle, phase):
+        """The knowledge used in a step that failed is discarded (it did not hold)."""
+        gone = self.s.knowledge.disprove(cycle.get("used", {}), self.s.failed_phases(phase))
+        if gone:
+            print(f"  {gone} lesson(s) and fact(s) used in this step are discarded: they did not hold")
+        self.s.save()
+
+    def show_plan(self):
+        print(f"Plan: {len(self.p.criteria)} spec criteria (see SPEC.md)")
+        for s in self.p.criteria:
+            print(f"  {s['id']:5} [{STATUS_TEXT.get(s['status'], s['status'])}] effort {s.get('effort', 2)} "
+                  f"{s['title']}  -> {s['test']}")
 
 
 if __name__ == "__main__":

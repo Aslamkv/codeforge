@@ -165,124 +165,6 @@ TOPIC_RELEVANT = 0.6              # embedding similarity of a request and a topi
                                   # the topic a request is about 0.65 and up, unrelated topics 0.52 and down)
 
 
-class Store:
-    """One SQLite database: documents (JSON values) by collection and key, and logs of entries. What
-    is written is written whole or not at all, and several Tinkers may use one database at once."""
-    SCHEMA = ("CREATE TABLE IF NOT EXISTS docs (collection TEXT NOT NULL, key TEXT NOT NULL, value TEXT NOT NULL, "
-              "PRIMARY KEY (collection, key))",
-              "CREATE TABLE IF NOT EXISTS logs (id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT NOT NULL, "
-              "time TEXT NOT NULL, entry TEXT NOT NULL)")
-    WAIT = 30  # seconds to wait for another Tinker's write
-
-    def __init__(self, path):
-        self.path, self.made = Path(path), False
-
-    @contextlib.contextmanager
-    def transaction(self, write=False):
-        """A connection, in one transaction (a write's: taken at once, so a read-modify-write is whole)."""
-        try:
-            db = self.connect()
-        except sqlite3.Error as exc:
-            raise SystemExit(f"{self.path} cannot be read ({exc})") from None
-        try:
-            db.execute("BEGIN IMMEDIATE" if write else "BEGIN")
-            yield db
-            db.execute("COMMIT")
-        except sqlite3.DatabaseError as exc:  # not a database (any more), or locked past WAIT
-            raise SystemExit(f"{self.path} cannot be read ({exc})") from None
-        except BaseException:
-            if db.in_transaction:
-                db.execute("ROLLBACK")
-            raise
-        finally:
-            db.close()
-
-    def connect(self):
-        """A connection; the database is made on first use, readable by its owner only."""
-        if not self.path.exists():  # new, or deleted since (tinker reset)
-            self.path.parent.mkdir(parents=True, exist_ok=True)
-            os.close(os.open(self.path, os.O_CREAT | os.O_WRONLY, 0o600))
-            self.made = False
-        db = sqlite3.connect(self.path, timeout=self.WAIT, isolation_level=None)
-        if not self.made:
-            for statement in self.SCHEMA:
-                db.execute(statement)
-            self.made = True
-        return db
-
-    def get(self, collection, key, default=None):
-        with self.transaction() as db:
-            row = db.execute("SELECT value FROM docs WHERE collection = ? AND key = ?", (collection, key)).fetchone()
-        return json.loads(row[0]) if row else default
-
-    def put(self, collection, key, value):
-        with self.transaction(write=True) as db:
-            self.write(db, collection, key, value)
-
-    @staticmethod
-    def write(db, collection, key, value):
-        db.execute("INSERT INTO docs (collection, key, value) VALUES (?, ?, ?) ON CONFLICT (collection, key) "
-                   "DO UPDATE SET value = excluded.value", (collection, key, json.dumps(value, ensure_ascii=False)))
-
-    def update(self, collection, key, change, default=None):
-        """The document changed by change(value) -> value, read and written in one transaction (no other
-        Tinker writes in between); the new value."""
-        with self.transaction(write=True) as db:
-            row = db.execute("SELECT value FROM docs WHERE collection = ? AND key = ?", (collection, key)).fetchone()
-            value = change(json.loads(row[0]) if row else default)
-            self.write(db, collection, key, value)
-        return value
-
-    def delete(self, collection, key=None):
-        """One document, or (key None) the whole collection."""
-        with self.transaction(write=True) as db:
-            if key is None:
-                db.execute("DELETE FROM docs WHERE collection = ?", (collection,))
-            else:
-                db.execute("DELETE FROM docs WHERE collection = ? AND key = ?", (collection, key))
-
-    def items(self, collection):
-        """{key: value} of a collection, in the order they were first written."""
-        with self.transaction() as db:
-            rows = db.execute("SELECT key, value FROM docs WHERE collection = ? ORDER BY rowid", (collection,)).fetchall()
-        return {key: json.loads(value) for key, value in rows}
-
-    def count(self, collection):
-        with self.transaction() as db:
-            return db.execute("SELECT COUNT(*) FROM docs WHERE collection = ?", (collection,)).fetchone()[0]
-
-    def append(self, log, entry):
-        """An entry added to a log, with its time; its id."""
-        with self.transaction(write=True) as db:
-            return db.execute("INSERT INTO logs (name, time, entry) VALUES (?, ?, ?)",
-                              (log, time.strftime("%Y-%m-%d %H:%M:%S"), json.dumps(entry, ensure_ascii=False))).lastrowid
-
-    def entries(self, log, after=0):
-        """[(id, entry with its "time")] of a log after an id, in order."""
-        with self.transaction() as db:
-            rows = db.execute("SELECT id, time, entry FROM logs WHERE name = ? AND id > ? ORDER BY id",
-                              (log, after)).fetchall()
-        return [(row_id, {"time": stamp, **json.loads(entry)}) for row_id, stamp, entry in rows]
-
-    def drop_log(self, log):
-        with self.transaction(write=True) as db:
-            db.execute("DELETE FROM logs WHERE name = ?", (log,))
-
-    def logged(self, log):
-        with self.transaction() as db:
-            return db.execute("SELECT COUNT(*) FROM logs WHERE name = ?", (log,)).fetchone()[0]
-
-
-class Log:
-    """One log of a database (a run's model calls, tinker learn's): add(event) appends to it."""
-
-    def __init__(self, store, name):
-        self.store, self.name = store, name
-
-    def add(self, event):
-        self.store.append(self.name, event)
-
-
 class Home:
     """Tinker's own folder next to the script (.tinker): its database, tinker.db (settings, measured
     models, what it knows, the projects it points to, the channels), and the channels' lock files.
@@ -292,8 +174,11 @@ class Home:
 
     @classmethod
     def store(cls):
-        path = cls.root / "tinker.db"
-        return cls.stores.setdefault(path, Store(path))
+        return cls.stores.setdefault(cls.database(), Store(cls.database()))
+
+    @classmethod
+    def database(cls):
+        return cls.root / "tinker.db"
 
     @classmethod
     def lock_file(cls, name):
@@ -303,9 +188,8 @@ class Home:
 
     @classmethod
     def reset(cls, yes=False):
-        """tinker reset: delete Tinker's folder next to the script (settings, measured models, what it
-        learned, the projects it points to), after asking (yes: without); the next command starts fresh.
-        Projects keep their own .tinker folders, so tinker resume works inside them."""
+        """tinker reset: delete Tinker's folder next to the script, after asking (yes: without); the next
+        command starts fresh. Projects keep their own .tinker folders, so tinker resume works inside them."""
         home = cls.root
         if not home.is_dir():
             print(f"Nothing to reset: {home} does not exist.")
@@ -314,13 +198,11 @@ class Home:
             raise SystemExit(f"Not deleting {home}: it is not a .tinker folder.")
         print(f"This deletes {home}: Tinker's settings, measured models, what it knows and its list of projects.")
         print("Projects are not touched (each keeps its own .tinker folder).")
-        if not yes and not sys.stdin.isatty():
-            raise SystemExit("Nothing deleted: run tinker reset in a terminal to confirm, or add --yes.")
-        if not yes and input("Delete it? [y/N] ").strip().lower() not in ("y", "yes"):
+        if not confirmed("Delete it?", "tinker reset", yes):
             print("Nothing deleted.")
             return
         shutil.rmtree(home)
-        cls.stores.pop(home / "tinker.db", None)
+        cls.stores.pop(cls.database(), None)
         print(f"Deleted {home}. The next command starts fresh.")
 
     @staticmethod
@@ -337,44 +219,52 @@ class Home:
     def clear(cls, names, yes=False):
         """tinker clear PART...: delete those parts of what Tinker keeps, after asking (yes: without
         asking); everything else stays."""
-        parts = cls.parts()
-        unknown = [n for n in names if n not in parts]
-        if unknown:
-            raise SystemExit(f"tinker clear: no part {', '.join(unknown)}; the parts are: {', '.join(parts)}")
-        names, store = list(dict.fromkeys(names)), cls.store()
-        held = {name: sum(store.count(c) for c in parts[name][0]) + sum(store.logged(log) for log in parts[name][1])
-                for name in names}
+        names = cls.known_parts(names)
+        held = {name: cls.entries_in(name) for name in names}
         if not any(held.values()):
             print("Nothing to clear: " + ", ".join(names) + " " + ("is" if len(names) == 1 else "are") + " empty.")
             return
-        print("This deletes:")
+        cls.show_what_clearing_deletes(held)
+        if not confirmed("Delete them?", "it", yes):
+            print("Nothing deleted.")
+            return
         for name in names:
-            print(f"  {name}: {parts[name][2]} ({held[name]} entries)")
-        if not yes:
-            if not sys.stdin.isatty():
-                raise SystemExit("Nothing deleted: run it in a terminal to confirm, or add --yes.")
-            if input("Delete them? [y/N] ").strip().lower() not in ("y", "yes"):
-                print("Nothing deleted.")
-                return
-        for name in names:
-            for collection in parts[name][0]:
-                store.delete(collection)
-            for log in parts[name][1]:
-                store.drop_log(log)
+            cls.delete_part(name)
         print(f"Cleared {', '.join(names)}.")
 
-    @staticmethod
-    def keep_awake():
-        """Keep the computer from sleeping while Tinker works (it stops with Tinker): on macOS with
-        caffeinate, on Linux with systemd-inhibit; elsewhere nothing is done. Idle sleep would pause
-        a run for as long as nobody touches the computer."""
-        pid = str(os.getpid())
-        if shutil.which("caffeinate"):
-            command = ["caffeinate", "-i", "-s", "-w", pid]  # -s: no system sleep either, on mains power
-        elif shutil.which("systemd-inhibit"):
-            command = ["systemd-inhibit", "--what=idle:sleep", "--why=Tinker is working", "tail", f"--pid={pid}",
-                       "-f", "/dev/null"]
-        else:
+    @classmethod
+    def known_parts(cls, names):
+        unknown = [n for n in names if n not in cls.parts()]
+        if unknown:
+            raise SystemExit(f"tinker clear: no part {', '.join(unknown)}; the parts are: {', '.join(cls.parts())}")
+        return list(dict.fromkeys(names))
+
+    @classmethod
+    def entries_in(cls, name):
+        collections, logs, _ = cls.parts()[name]
+        store = cls.store()
+        return sum(store.count(c) for c in collections) + sum(store.logged(log) for log in logs)
+
+    @classmethod
+    def show_what_clearing_deletes(cls, held):
+        print("This deletes:")
+        for name, entries in held.items():
+            print(f"  {name}: {cls.parts()[name][2]} ({entries} entries)")
+
+    @classmethod
+    def delete_part(cls, name):
+        collections, logs, _ = cls.parts()[name]
+        for collection in collections:
+            cls.store().delete(collection)
+        for log in logs:
+            cls.store().drop_log(log)
+
+    @classmethod
+    def keep_awake(cls):
+        """Keep the computer from sleeping while Tinker works (it stops with Tinker). Idle sleep would
+        pause a run for as long as nobody touches the computer."""
+        command = cls.stay_awake_command(str(os.getpid()))
+        if not command:
             return
         try:
             subprocess.Popen(command, stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
@@ -382,14 +272,25 @@ class Home:
         except OSError:
             pass  # staying awake helps, it is not needed
 
+    @staticmethod
+    def stay_awake_command(pid):
+        """The command that keeps this computer awake while the process pid lives: caffeinate on macOS,
+        systemd-inhibit on Linux; None elsewhere."""
+        if shutil.which("caffeinate"):
+            return ["caffeinate", "-i", "-s", "-w", pid]  # -s: no system sleep either, on mains power
+        if shutil.which("systemd-inhibit"):
+            return ["systemd-inhibit", "--what=idle:sleep", "--why=Tinker is working", "tail", f"--pid={pid}",
+                    "-f", "/dev/null"]
+        return None
+
     @classmethod
     def ensure(cls):
         """Tinker's folder next to the script, with its database, made on first use."""
         try:
-            new = not (cls.root / "tinker.db").exists()
+            new = not cls.database().exists()
             cls.store().connect().close()
             if new:
-                print(f"  created {cls.root / 'tinker.db'} (Tinker's settings and memory)")
+                print(f"  created {cls.database()} (Tinker's settings and memory)")
         except (OSError, SystemExit, sqlite3.Error) as exc:
             raise SystemExit(f"Tinker keeps its settings in {cls.root}, which cannot be written: {exc}")
 
@@ -400,7 +301,8 @@ class Config:
     use-web, and tinker config KEY VALUE for the rest."""
     KEEP_ALIVE_RE = re.compile(r"-?\d+|-?(\d+(\.\d+)?(ns|us|ms|s|m|h))+")  # seconds, or a duration: 10m, 1h30m
     SETTABLE = ("ollama_url", "keep_alive", "max_growth", "build_think", "test_timeout", "web_fallback",
-                "web_timeout", "learn_missing", "projects")  # the keys with no command of their own
+                "web_timeout", "learn_missing", "projects")
+    OWN_COMMAND = {"model": "use-model", "embed_model": "embed", "web": "use-web"}
     checks = []  # more checks of the settings, from the parts that use them (the Internet plugin's)
 
     @staticmethod
@@ -419,21 +321,23 @@ class Config:
     @classmethod
     def set(cls, key, text):
         """tinker config KEY VALUE: one setting, read by its type and checked; kept only when it passes."""
-        if key not in cls.SETTABLE:
-            commands = {"model": "use-model", "embed_model": "embed", "web": "use-web"}
-            raise SystemExit(f"tinker config: {key} is set with tinker {commands[key]} NAME" if key in commands else
-                             f"tinker config: no setting {key!r}; the settings are: {', '.join(cls.SETTABLE)}")
+        cls.refuse_unsettable(key)
         value = cls.parse(key, text.strip())
         before = Home.store().get("config", key)
         cls.save(**{key: value})
         try:
-            cls.check_model(run=True)
-            for check in cls.checks:
-                check()
+            cls.check_all()
         except SystemExit:
-            Home.store().delete("config", key) if before is None else cls.save(**{key: before})
+            cls.restore(key, before)
             raise
         return value
+
+    @classmethod
+    def refuse_unsettable(cls, key):
+        if key in cls.OWN_COMMAND:
+            raise SystemExit(f"tinker config: {key} is set with tinker {cls.OWN_COMMAND[key]} NAME")
+        if key not in cls.SETTABLE:
+            raise SystemExit(f"tinker config: no setting {key!r}; the settings are: {', '.join(cls.SETTABLE)}")
 
     @staticmethod
     def parse(key, text):
@@ -441,7 +345,7 @@ class Config:
         known = {"true": True, "false": False, "null": None}
         if text.lower() in known and key == "build_think":
             return known[text.lower()]
-        if isinstance(DEFAULT_CONFIG[key], (int, float)) and not isinstance(DEFAULT_CONFIG[key], bool):
+        if is_number(DEFAULT_CONFIG[key]):
             for kind in (int, float):
                 try:
                     return kind(text)
@@ -449,24 +353,53 @@ class Config:
                     continue
         return text
 
-    @staticmethod
-    def check_model(run):
+    @classmethod
+    def check_all(cls):
+        cls.check_model(run=True)
+        for check in cls.checks:
+            check()
+
+    @classmethod
+    def restore(cls, key, before):
+        if before is None:
+            Home.store().delete("config", key)
+        else:
+            cls.save(**{key: before})
+
+    @classmethod
+    def check_model(cls, run):
         """The settings a model takes (Tinker decides them; a person may tune them with tinker config),
         and for a run also its tests' timeout: checked before anything starts. A command that loads no
         model never reads them."""
-        if not Config.KEEP_ALIVE_RE.fullmatch(str(Config.get("keep_alive"))):
+        cls.check_keep_alive()
+        cls.check_max_growth()
+        cls.check_build_think()
+        if run:
+            cls.check_test_timeout()
+
+    @classmethod
+    def check_keep_alive(cls):
+        if not cls.KEEP_ALIVE_RE.fullmatch(str(cls.get("keep_alive"))):
             raise SystemExit(f"keep_alive must be seconds (0, 300; -1 keeps the model loaded) or a duration (10m, "
-                             f"1h); it is {Config.get('keep_alive')!r} (tinker config keep_alive VALUE)")
-        growth = Config.get("max_growth")
-        if isinstance(growth, bool) or not isinstance(growth, (int, float)) or growth <= 1:
+                             f"1h); it is {cls.get('keep_alive')!r} (tinker config keep_alive VALUE)")
+
+    @classmethod
+    def check_max_growth(cls):
+        growth = cls.get("max_growth")
+        if not is_number(growth) or growth <= 1:
             raise SystemExit(f"max_growth must be a number above 1 (1.15 unloads the model once it is 15% larger); "
                              f"it is {growth!r}")
-        if Config.get("build_think") not in ("high", "medium", "low", True, False, None) \
-                or Config.get("build_think") in (0, 1) and not isinstance(Config.get("build_think"), bool):
-            raise SystemExit(f'build_think must be "high", "medium", "low", true, false or null; it is '
-                             f"{Config.get('build_think')!r}")
-        timeout = Config.get("test_timeout")
-        if run and (isinstance(timeout, bool) or not isinstance(timeout, int) or timeout < 1):
+
+    @classmethod
+    def check_build_think(cls):
+        think = cls.get("build_think")
+        if think not in ("high", "medium", "low", True, False, None) or think in (0, 1) and not isinstance(think, bool):
+            raise SystemExit(f'build_think must be "high", "medium", "low", true, false or null; it is {think!r}')
+
+    @classmethod
+    def check_test_timeout(cls):
+        timeout = cls.get("test_timeout")
+        if not is_number(timeout) or not isinstance(timeout, int) or timeout < 1:
             raise SystemExit(f"test_timeout must be a whole number of seconds, 1 or more; it is {timeout!r}")
 
     @classmethod
@@ -477,6 +410,20 @@ class Config:
     def keep_alive(value):
         """keep_alive as Ollama takes it: seconds as a number, a duration (10m) as it is."""
         return int(value) if re.fullmatch(r"-?\d+", str(value)) else value
+
+
+def confirmed(question, command, yes=False):
+    """Whether the person agrees to what was just shown (yes: agreed beforehand). Only a terminal can
+    ask: elsewhere nothing is done, and it says how to agree."""
+    if yes:
+        return True
+    if not sys.stdin.isatty():
+        raise SystemExit(f"Nothing deleted: run {command} in a terminal to confirm, or add --yes.")
+    return input(f"{question} [y/N] ").strip().lower() in ("y", "yes")
+
+
+def is_number(value):
+    return isinstance(value, (int, float)) and not isinstance(value, bool)
 
 
 class Console:
@@ -519,14 +466,20 @@ class Tee:
 
     def write(self, text):
         self.stream.write(text)
-        self.partial += text
-        *lines, self.partial = self.partial.split("\n")
-        for line in lines:
-            try:
-                self.see(line)
-            except Exception:  # keeping the output must never break the run
-                pass
+        for line in self.whole_lines(text):
+            self.show(line)
         return len(text)
+
+    def whole_lines(self, text):
+        """The lines this text completes; the rest waits for its end."""
+        *lines, self.partial = (self.partial + text).split("\n")
+        return lines
+
+    def show(self, line):
+        try:
+            self.see(line)
+        except Exception:  # keeping the output must never break the run
+            pass
 
     def flush(self):
         self.stream.flush()
@@ -539,6 +492,139 @@ class Tee:
 
     def __getattr__(self, name):
         return getattr(self.stream, name)
+
+
+class Store:
+    """One SQLite database: documents (JSON values) by collection and key, and logs of entries. What
+    is written is written whole or not at all, and several Tinkers may use one database at once."""
+    SCHEMA = ("CREATE TABLE IF NOT EXISTS docs (collection TEXT NOT NULL, key TEXT NOT NULL, value TEXT NOT NULL, "
+              "PRIMARY KEY (collection, key))",
+              "CREATE TABLE IF NOT EXISTS logs (id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT NOT NULL, "
+              "time TEXT NOT NULL, entry TEXT NOT NULL)")
+    WAIT = 30  # seconds to wait for another Tinker's write
+
+    def __init__(self, path):
+        self.path, self.made = Path(path), False
+
+    def get(self, collection, key, default=None):
+        with self.transaction() as db:
+            return self.read(db, collection, key, default)
+
+    def put(self, collection, key, value):
+        with self.transaction(write=True) as db:
+            self.write(db, collection, key, value)
+
+    def update(self, collection, key, change, default=None):
+        """The document changed by change(value) -> value, read and written in one transaction (no other
+        Tinker writes in between); the new value."""
+        with self.transaction(write=True) as db:
+            value = change(self.read(db, collection, key, default))
+            self.write(db, collection, key, value)
+        return value
+
+    def delete(self, collection, key=None):
+        """One document, or (key None) the whole collection."""
+        with self.transaction(write=True) as db:
+            if key is None:
+                db.execute("DELETE FROM docs WHERE collection = ?", (collection,))
+            else:
+                db.execute("DELETE FROM docs WHERE collection = ? AND key = ?", (collection, key))
+
+    def items(self, collection):
+        """{key: value} of a collection, in the order they were first written."""
+        with self.transaction() as db:
+            rows = db.execute("SELECT key, value FROM docs WHERE collection = ? ORDER BY rowid", (collection,)).fetchall()
+        return {key: json.loads(value) for key, value in rows}
+
+    def count(self, collection):
+        with self.transaction() as db:
+            return db.execute("SELECT COUNT(*) FROM docs WHERE collection = ?", (collection,)).fetchone()[0]
+
+    def append(self, log, entry):
+        """An entry added to a log, with its time; its id."""
+        with self.transaction(write=True) as db:
+            return db.execute("INSERT INTO logs (name, time, entry) VALUES (?, ?, ?)",
+                              (log, time.strftime("%Y-%m-%d %H:%M:%S"), json.dumps(entry, ensure_ascii=False))).lastrowid
+
+    def entries(self, log, after=0):
+        """[(id, entry with its "time")] of a log after an id, in order."""
+        with self.transaction() as db:
+            rows = db.execute("SELECT id, time, entry FROM logs WHERE name = ? AND id > ? ORDER BY id",
+                              (log, after)).fetchall()
+        return [(row_id, {"time": stamp, **json.loads(entry)}) for row_id, stamp, entry in rows]
+
+    def drop_log(self, log):
+        with self.transaction(write=True) as db:
+            db.execute("DELETE FROM logs WHERE name = ?", (log,))
+
+    def logged(self, log):
+        with self.transaction() as db:
+            return db.execute("SELECT COUNT(*) FROM logs WHERE name = ?", (log,)).fetchone()[0]
+
+    @contextlib.contextmanager
+    def transaction(self, write=False):
+        """A connection, in one transaction (a write's: taken at once, so a read-modify-write is whole)."""
+        db = self.opened()
+        try:
+            db.execute("BEGIN IMMEDIATE" if write else "BEGIN")
+            yield db
+            db.execute("COMMIT")
+        except sqlite3.DatabaseError as exc:  # not a database (any more), or locked past WAIT
+            raise self.unreadable(exc) from None
+        except BaseException:
+            if db.in_transaction:
+                db.execute("ROLLBACK")
+            raise
+        finally:
+            db.close()
+
+    def opened(self):
+        try:
+            return self.connect()
+        except sqlite3.Error as exc:
+            raise self.unreadable(exc) from None
+
+    def unreadable(self, exc):
+        return SystemExit(f"{self.path} cannot be read ({exc})")
+
+    def connect(self):
+        """A connection; the database is made on first use, readable by its owner only."""
+        if not self.path.exists():  # new, or deleted since (tinker reset)
+            self.create_private_file()
+        db = sqlite3.connect(self.path, timeout=self.WAIT, isolation_level=None)
+        if not self.made:
+            self.create_tables(db)
+        return db
+
+    def create_private_file(self):
+        self.path.parent.mkdir(parents=True, exist_ok=True)
+        os.close(os.open(self.path, os.O_CREAT | os.O_WRONLY, 0o600))
+        self.made = False
+
+    def create_tables(self, db):
+        for statement in self.SCHEMA:
+            db.execute(statement)
+        self.made = True
+
+    @staticmethod
+    def read(db, collection, key, default):
+        row = db.execute("SELECT value FROM docs WHERE collection = ? AND key = ?", (collection, key)).fetchone()
+        return json.loads(row[0]) if row else default
+
+    @staticmethod
+    def write(db, collection, key, value):
+        db.execute("INSERT INTO docs (collection, key, value) VALUES (?, ?, ?) ON CONFLICT (collection, key) "
+                   "DO UPDATE SET value = excluded.value", (collection, key, json.dumps(value, ensure_ascii=False)))
+
+
+class Log:
+    """One log of a database (a run's model calls, tinker learn's): add(event) appends to it."""
+
+    def __init__(self, store, name):
+        self.store, self.name = store, name
+
+    def add(self, event):
+        self.store.append(self.name, event)
 
 
 def first_line(text, limit=140):

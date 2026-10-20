@@ -27,89 +27,206 @@ from .settings import (
 from .workspace import Toolchain, Workspace
 
 
-def language_key(name):
-    """A language's one identity: its first word, without a version. "Python 3.12" -> python,
-    "JavaScript (Node.js)" -> javascript, "C++" -> cpp, "C#" -> csharp."""
-    base = (name or "").split("(")[0].lower().replace("+", "p").replace("#", "sharp")
-    found = re.findall(r"[a-z][a-z0-9]*", base)
-    return found[0] if found else "unknown"
+class Knowledge:
+    """What earlier projects taught, to do it right the first time. Per language (its language_key):
+    the toolchain that last worked and the toolchain fixes found (both replayed without asking the
+    model), lessons, and the facts proven by its projects; for any language: lessons. A lesson is
+    general: it never names a project, its files, its names or its data. Lessons and facts are shown
+    in the prompts of the phase they concern, the most confirmed first; they start as candidates, a
+    cycle that succeeds using them proves them, and a failure in the step they were shown to discards
+    them. Kept in Tinker's "languages" and "memory"."""
 
+    def __init__(self, language):
+        self.language = language or "Python"
+        self.key = language_key(self.language)
+        self.language_doc = Home.store().get("languages", self.key) or {
+            "language": self.language, "projects": 0, "toolchain": None, "fixes": [], "lessons": [], "facts": []}
+        self.any_language_doc = Home.store().get("memory", "any") or {"lessons": []}
 
-class Embeddings:
-    """Embeddings from the embedding model selected with tinker embed NAME (none: the word search
-    works alone), kept in Tinker's "embeddings" by text, per model, so each text is embedded once.
-    Local: nothing goes online."""
-    BATCH = 32  # texts per request
+    def summary(self):
+        lessons = len(self.language_doc.get("lessons", [])) + len(self.any_language_doc.get("lessons", []))
+        projects, facts = self.language_doc.get("projects", 0), len(self.language_doc.get("facts", []))
+        known = [("the toolchain that worked" + (f" ({projects} finished project(s))" if projects else ""))
+                 if self.language_doc.get("toolchain") else "",
+                 f"{len(self.language_doc.get('fixes', []))} toolchain fix(es)" if self.language_doc.get("fixes") else "",
+                 f"{lessons} lesson(s)" if lessons else "", f"{facts} proven fact(s)" if facts else ""]
+        return f"{self.language}: " + (", ".join(k for k in known if k) or "nothing learned yet")
 
-    def __init__(self, name):
-        self.name, self.failed = name, ""
-        self.cache = {"model": name, "vectors": Home.store().get("embeddings", name, {})}
-
-    @staticmethod
-    def required(option):
-        """The embedding model, for an option that learns: one must be selected (tinker embed NAME)."""
-        if not Config.get("embed_model"):
-            raise SystemExit(f"{option} needs an embedding model, which indexes what it learns: select one Ollama "
-                             f"has with tinker embed NAME (tinker models lists them)")
-        Embeddings.check()
-        return Embeddings(Config.get("embed_model"))
-
-    @staticmethod
-    def check():
-        """The embedding model selected (tinker embed NAME), if any, is one Ollama has (checked before
-        anything starts)."""
-        name = Config.get("embed_model")
-        if not isinstance(name, str):
-            raise SystemExit(f"embed_model is not a model name ({name!r}): select one with tinker embed NAME")
-        if name:
-            try:
-                Models.installed(name)
-            except SystemExit as exc:
-                raise SystemExit(f"The embedding model (tinker embed): {exc}")
+    def lessons(self, phases, limit=LESSONS_SHOWN):
+        """The lessons for these phases, the most confirmed first: [{id, text, ...}]."""
+        pool = [lesson for lesson in self.known_lessons() if lesson.get("phase") in phases]
+        pool.sort(key=Knowledge.rank, reverse=True)
+        return [dict(lesson, id=lesson.get("id") or fingerprint(lesson["text"])[:12]) for lesson in pool[:limit]]
 
     @staticmethod
-    def configured():
-        """The embedding model in use, or None (embed_model is "")."""
-        name = Config.get("embed_model")
-        return Embeddings(name) if name else None
+    def rank(lesson):
+        """The most confirmed, then the most recently seen, first (sorted in reverse)."""
+        return lesson.get("seen", 1), lesson.get("last_seen", "")
 
-    def vectors(self, texts, keep=True, prune=False):
-        """One embedding per text (from the cache, the missing ones asked for in batches), or None
-        when the model does not give them (failed says why). keep: cache them; prune: the cache then
-        keeps only these texts' embeddings."""
-        stored = self.cache["vectors"]
-        keys = [self.key(text) for text in texts]
-        missing = list(dict.fromkeys(text for text, key in zip(texts, keys) if key not in stored))
-        fresh = {}
-        for start in range(0, len(missing), self.BATCH):
-            batch = missing[start:start + self.BATCH]
-            data = Ollama.get_json("/api/embed", {"model": self.name, "input": batch, "keep_alive": 0}, timeout=300,
-                                   errors=True)
-            found = data.get("embeddings") if isinstance(data, dict) else None
-            if not (isinstance(found, list) and len(found) == len(batch)
-                    and all(isinstance(v, list) and v and all(isinstance(x, (int, float)) for x in v) for v in found)):
-                self.failed = f"{self.name} gave no embeddings" + (f" ({data['error']})" if isinstance(data, dict)
-                                                                   and data.get("error") else "")
-                return None
-            fresh.update({self.key(text): [round(x, 5) for x in vector] for text, vector in zip(batch, found)})
-        result = [stored.get(key) or fresh[key] for key in keys]
-        if keep and (fresh or prune):
-            stored.update(fresh)
-            if prune:
-                self.cache["vectors"] = {key: stored[key] for key in keys}
-            kept = self.cache["vectors"]
-            Home.store().update("embeddings", self.name, lambda saved: {**({} if prune else saved or {}), **kept})
-        return result
+    def facts(self, phases):
+        """The language's proven facts for these phases: [{id, phase, text, topic}]."""
+        return [fact for fact in self.language_doc.get("facts", []) if fact.get("phase") in phases]
+
+    def known_lessons(self):
+        return self.language_doc.setdefault("lessons", []) + self.any_language_doc.setdefault("lessons", [])
+
+    def add_lessons(self, new, confirmed, names=()):
+        """Adds new lessons as candidates (one like a known lesson confirms it instead; one that names
+        the project, by any of names, is not general and is dropped); returns how many were new."""
+        known, added = self.known_lessons(), 0
+        for number in confirmed:
+            if isinstance(number, int) and 1 <= number <= len(known):
+                self.confirm(known[number - 1])
+        for item in new:
+            lesson = self.new_lesson(item, known, names)
+            if lesson:
+                (self.language_doc if item.get("scope") == "language" else self.any_language_doc)["lessons"].append(lesson)
+                known.append(lesson)
+                added += 1
+        for doc in (self.language_doc, self.any_language_doc):
+            doc["lessons"] = self.keep(doc["lessons"], known[len(known) - added:])
+        self.save()
+        return added
+
+    def new_lesson(self, item, known, names):
+        """The lesson an item teaches, as a candidate; None when it is not a usable general lesson, or one known
+        already (then confirmed)."""
+        text, phase = str(item.get("text", "")).strip()[:240], str(item.get("phase", "")).strip().lower()
+        if not text or phase not in LESSON_PHASES or self.names_project(text, names):
+            return None
+        same = next((lesson for lesson in known if similarity(lesson["text"], text) >= SAME_LESSON), None)
+        if same:
+            self.confirm(same)
+            return None
+        return {"id": fingerprint(text)[:12], "phase": phase, "text": text, "status": "candidate", "seen": 1,
+                "added": now_text(), "last_seen": now_text()}
 
     @staticmethod
-    def key(text):
-        return hashlib.sha1(text.encode("utf-8")).hexdigest()[:20]
+    def names_project(text, names):
+        """Whether a lesson names the project (one of its files, or its folder): then it is not general."""
+        return any(re.search(rf"(?<![\w.-]){re.escape(name)}(?![\w-])", text, re.I) for name in names if name)
 
     @staticmethod
-    def cosine(a, b):
-        dot = sum(x * y for x, y in zip(a, b))
-        size = math.sqrt(sum(x * x for x in a)) * math.sqrt(sum(y * y for y in b))
-        return dot / size if size else 0.0
+    def confirm(lesson):
+        lesson["seen"], lesson["last_seen"] = lesson.get("seen", 1) + 1, now_text()
+
+    @staticmethod
+    def keep(lessons, new):
+        """At most MAX_LESSONS, the most confirmed first; the new ones always stay (the least
+        confirmed older ones go to make room)."""
+        rank = Knowledge.rank
+        fresh = [lesson for lesson in lessons if any(lesson is n for n in new)]
+        older = sorted((lesson for lesson in lessons if not any(lesson is n for n in new)), key=rank, reverse=True)
+        return sorted(fresh + older[:max(0, MAX_LESSONS - len(fresh))], key=rank, reverse=True)
+
+    def prove(self, used):
+        """A cycle that used these succeeded: candidate lessons, facts and findings are proven, and the
+        web's facts are copied into the language's knowledge. used: {key: [prompt phases]}, the keys as
+        Session records them (lesson:ID, fact:TOPIC:ID, known:ID). Returns how many were newly proven."""
+        proven = self.prove_lessons(used) + self.prove_web_facts(used)
+        self.save()
+        return proven
+
+    def prove_lessons(self, used):
+        proven = 0
+        for lesson in self.known_lessons():
+            if f"lesson:{lesson.get('id')}" in used and lesson.get("status") != "proven":
+                lesson["status"], proven = "proven", proven + 1
+        return proven
+
+    def prove_web_facts(self, used):
+        """The web's facts and findings used, proven where they were learned; the facts (a finding stays with its
+        research) copied into the language's knowledge."""
+        proven, known = 0, {fact["id"] for fact in self.language_doc.setdefault("facts", [])}
+        for slug, ids in self.used_facts(used).items():
+            entry = Library.read(slug) or {}
+            claims = [c for c in entry.get("facts", []) + entry.get("findings", []) if c.get("id") in ids]
+            proven += sum(c.get("status") != "proven" for c in claims)
+            Library.claims(slug, ids, lambda claim: dict(claim, status="proven"))
+            for claim in claims:
+                if claim["id"] not in known and claim.get("phase"):
+                    self.language_doc["facts"].append({"id": claim["id"], "phase": claim["phase"],
+                                                       "text": claim["text"], "topic": slug, "status": "proven"})
+                    known.add(claim["id"])
+        return proven
+
+    def disprove(self, used, phases):
+        """A step failed: every lesson, fact or finding used in these prompt phases is discarded, proven
+        or not. Returns how many were discarded."""
+        shown = {key for key, where in used.items() if set(where) & set(phases)}
+        gone = self.discard_lessons(shown)
+        dropped = {key.split(":", 1)[1] for key in shown if key.startswith("known:")}
+        for slug, ids in self.used_facts(shown).items():
+            Library.claims(slug, ids, lambda claim: None)
+            dropped |= ids
+        facts = self.language_doc.get("facts", [])
+        self.language_doc["facts"] = [fact for fact in facts if fact["id"] not in dropped]
+        gone += len(facts) - len(self.language_doc["facts"]) + sum(len(ids) for ids in self.used_facts(shown).values())
+        self.save()
+        return gone
+
+    def discard_lessons(self, shown):
+        """The lessons among the keys shown, discarded; how many."""
+        gone = 0
+        for doc in (self.language_doc, self.any_language_doc):
+            kept = [lesson for lesson in doc.get("lessons", []) if f"lesson:{lesson.get('id')}" not in shown]
+            gone, doc["lessons"] = gone + len(doc.get("lessons", [])) - len(kept), kept
+        return gone
+
+    @staticmethod
+    def used_facts(used):
+        """{topic: {ids}} of the web's facts and findings among used keys (fact:TOPIC:ID)."""
+        found = collections.defaultdict(set)
+        for key in used:
+            kind, _, rest = key.partition(":")
+            if kind == "fact" and ":" in rest:
+                slug, _, claim_id = rest.rpartition(":")
+                found[slug].add(claim_id)
+        return dict(found)
+
+    def toolchain(self):
+        known = Toolchain(self.language_doc.get("toolchain"))
+        return known if known else None
+
+    def remember_toolchain(self, toolchain):
+        """The toolchain that worked, kept for the language's next projects as what holds for any
+        project in it: without its run and check commands, which name this project's own files (the
+        next project gives its own)."""
+        kept = dict(toolchain.to_dict(), run="", check="") if toolchain else None
+        if kept and kept != self.language_doc.get("toolchain"):
+            self.language_doc["toolchain"], self.language_doc["toolchain_saved"] = kept, now_text()
+            self.save()
+
+    def known_fix(self, failure, tried=()):
+        """A replayable fix for exactly this failure, not tried yet in this run."""
+        return next((f for f in self.language_doc.get("fixes", []) if f["failure"] == failure and f.get("replay")
+                     and f["failure"] not in tried), None)
+
+    def similar_fix(self, failure):
+        scored = [(similarity(f["failure"], failure), f) for f in self.language_doc.get("fixes", [])]
+        best = max(scored, key=lambda pair: pair[0], default=(0, None))
+        return best[1] if best[0] >= SIMILAR_FAILURE else None
+
+    def remember_fix(self, fix):
+        fixes = [f for f in self.language_doc.setdefault("fixes", []) if f["failure"] != fix["failure"]]
+        self.language_doc["fixes"] = (fixes + [dict(fix, used=1, added=now_text())])[-20:]
+        self.save()
+
+    def fix_result(self, fix, worked):
+        """A replayed fix helped (counted) or failed (deleted at once: it is disproved)."""
+        if worked:
+            fix["used"] = fix.get("used", 0) + 1
+        else:
+            self.language_doc["fixes"] = [f for f in self.language_doc.get("fixes", []) if f["failure"] != fix["failure"]]
+        self.save()
+
+    def finished_project(self):
+        self.language_doc["projects"] = self.language_doc.get("projects", 0) + 1
+        self.save()
+
+    def save(self):
+        Home.store().put("languages", self.key, self.language_doc)
+        Home.store().put("memory", "any", self.any_language_doc)
 
 
 class Learner:
@@ -162,15 +279,20 @@ class Learner:
             print("  it is a domain: researching it, its sources cross-checked")
             return Researcher(self).research(topic)
         if plan["language"]:
-            slug = Library.language(plan["language"])
-            if slug:  # learned as a language already (with the tools asked for then): not learned again unasked
-                print(f"  it is the programming language {plan['language']}, learned already (as {slug})")
-                return Library.read(slug)
-            print(f"  it is the programming language {plan['language']}: learning it as a language")
-            return self.learn_language(topic)
+            return self.learned_as_language(topic, plan["language"])
         focus = Prompts.TOPIC_FOCUS.format(topic=plan["name"])
         searches = [{"query": query, "section": "", "pages": SEARCH_RESULTS, "focus": focus} for query in plan["queries"]]
         return self.finish(Library.slug(topic), topic, plan, searches, MAX_PAGES, {"": MAX_FACTS})
+
+    def learned_as_language(self, topic, language):
+        """A topic that is a programming language: learned as one, unless it was already (with the tools asked
+        for then: not learned again unasked)."""
+        slug = Library.language(language)
+        if slug:
+            print(f"  it is the programming language {language}, learned already (as {slug})")
+            return Library.read(slug)
+        print(f"  it is the programming language {language}: learning it as a language")
+        return self.learn_language(topic)
 
     def start(self):
         self.notes, self.model_failed, self.kept_earlier = [], "", False
@@ -201,19 +323,124 @@ class Learner:
                              f"(tinker memory; its calls are in tinker learn's log)")
         return plan, False
 
+    @staticmethod
+    def read_plan(data):
+        """A topic's plan, checked: a name, a summary, up to MAX_QUERIES searches, up to
+        MAX_COMMANDS commands that only show what is installed (any other is "dropped"),
+        "language": the language's name when the topic is one (else ""), and "domain": whether it
+        is a field or practice to research rather than software to learn to use."""
+        if not isinstance(data, dict):
+            raise ValueError("not a JSON object")
+        name, summary = str(data.get("name") or "").strip()[:80], " ".join(str(data.get("summary") or "").split())[:200]
+        language = str(data.get("language") or "").strip()[:40]
+        domain = str(data.get("kind") or "").strip().lower() == "domain" and not language
+        queries = [" ".join(str(q).split()) for q in data.get("queries") or [] if str(q).strip()][:MAX_QUERIES]
+        if not name or (not queries and not language):
+            raise ValueError("it needs a name and at least one search")
+        commands, dropped = Learner.safe_commands(data.get("commands") or [])
+        return {"name": name, "summary": summary, "language": language, "domain": domain, "queries": queries,
+                "commands": commands[:MAX_COMMANDS], "dropped": dropped}
+
+    @staticmethod
+    def safe_commands(commands):
+        """(kept, dropped): only commands that show what is installed are kept: one command each,
+        no shell operators, nothing installed or changed."""
+        kept, dropped = [], []
+        for command in commands:
+            command = " ".join(str(command).split())
+            if not command:
+                continue
+            unsafe = (Learner.SHELL_OPERATORS.search(command) or Learner.CHANGES.search(command)
+                      or Workspace.UNSAFE_COMMAND.search(command))
+            (dropped if unsafe else kept).append(command)
+        return kept, dropped
+
+    def show_dropped(self, plan):
+        for command in plan["dropped"]:
+            print(f"  left out `{command}`: a command here must only show what is installed (one command, no shell "
+                  f"operators, nothing installed or changed)")
+
     def learn_language(self, text):
         """A programming language learned as it is today (see the class), saved as
         Tinker's "learned" under its language key; None when nothing could be learned."""
         self.start()
         print(f"\nLearning the language {text}")
         plan = self.plan_language(text)
+        return self.finish(language_key(plan["language"]), text, plan, self.language_searches(plan), LANGUAGE_PAGES,
+                           SECTION_FACTS)
+
+    def plan_language(self, text):
+        """The language's name and version, its tools, the searches of each section and the
+        commands: as saved for this request, else from the model."""
+        known = next((entry for entry in Library.topics().values()
+                      if entry.get("kind") == "language" and entry.get("topic") == text), None)
+        parts = [Part("Request", text, True), Part("Today", datetime.date.today().isoformat(), True)]
+        plan, saved = self.saved_or_asked(known, self.read_language_plan, Prompts.LANGUAGE_PLAN_SYSTEM, parts,
+                                          "Plan learning the language", f"learning {text}",
+                                          language_key((known or {}).get("language") or text))
+        if plan.get("not_language"):
+            raise SystemExit(f"{text!r} is not a programming language ({plan['not_language']}). Nothing was read.")
+        if not saved:
+            print(f"  {plan['name']}: {plan['summary']}")
+        print(f"  tools: {Library.tools_text(plan['tools']) or 'none named'}")
+        self.show_dropped(plan)
+        return plan
+
+    @staticmethod
+    def read_language_plan(data):
+        """A language's plan, checked: its name and version, one tool per role (TOOL_ROLES) with
+        the search that finds how to use it, the searches of each section, and the commands that
+        only show what is installed (any other is "dropped"). {"not_language": why} when the model
+        says the request is no programming language."""
+        if not isinstance(data, dict):
+            raise ValueError("not a JSON object")
+        language = str(data.get("language") or data.get("name") or "").strip()[:40]
+        summary = " ".join(str(data.get("summary") or "").split())[:200]
+        if not language:
+            if summary:
+                return {"not_language": summary}
+            raise ValueError("it needs the language's name")
+        version = str(data.get("version") or "").strip()[:20]
+        tools, tool_commands = Learner.read_tools(data.get("tools") or [], language)
+        searches = Learner.read_searches(data.get("searches") or [])
+        if not searches:
+            raise ValueError(f"it needs searches for the language's {', '.join(LANGUAGE_SECTIONS)}")
+        commands, dropped = Learner.safe_commands(list(data.get("commands") or []) + tool_commands)
+        return {"kind": "language", "language": language, "name": f"{language} {version}".strip(), "version": version,
+                "summary": summary or language, "tools": tools, "searches": searches,
+                "commands": list(dict.fromkeys(commands))[:LANGUAGE_COMMANDS], "dropped": dropped}
+
+    @staticmethod
+    def read_tools(given, language):
+        """([one tool per role, with the search that finds how to use it], [the commands that show them])."""
+        tools, commands = {}, []
+        for tool in given:
+            if not isinstance(tool, dict):
+                continue
+            role, tool_name = str(tool.get("role") or "").strip().lower(), str(tool.get("name") or "").strip()[:40]
+            if role in TOOL_ROLES and tool_name and role not in tools:
+                search = " ".join(str(tool.get("search") or "").split()) or f"how to use {tool_name} in a {language} project"
+                tools[role] = {"role": role, "name": tool_name, "search": search}
+                commands += [tool["command"]] if tool.get("command") else []
+        return list(tools.values()), commands
+
+    @staticmethod
+    def read_searches(given):
+        """The searches of the language's sections, up to LANGUAGE_SEARCHES."""
+        searches = [{"section": str(s.get("section") or "").strip().lower(), "query": " ".join(str(s.get("query") or "").split())}
+                    for s in given if isinstance(s, dict)]
+        return [s for s in searches if s["section"] in LANGUAGE_SECTIONS and s["query"]][:LANGUAGE_SEARCHES]
+
+    @staticmethod
+    def language_searches(plan):
+        """Each section's searches, and one for each tool, with what each looks for."""
         searches = [{"query": search["query"], "section": search["section"], "pages": SECTION_PAGES[search["section"]],
                      "focus": Prompts.LANGUAGE_FOCUS[search["section"]].format(language=plan["language"])}
                     for search in plan["searches"]]
-        searches += [{"query": tool["search"], "section": "tools", "pages": SECTION_PAGES["tools"],
-                      "focus": Prompts.TOOL_FOCUS.format(tool=tool["name"], role=tool["role"], language=plan["language"])}
-                     for tool in plan["tools"]]
-        return self.finish(language_key(plan["language"]), text, plan, searches, LANGUAGE_PAGES, SECTION_FACTS)
+        return searches + [{"query": tool["search"], "section": "tools", "pages": SECTION_PAGES["tools"],
+                            "focus": Prompts.TOOL_FOCUS.format(tool=tool["name"], role=tool["role"],
+                                                               language=plan["language"])}
+                           for tool in plan["tools"]]
 
     def finish(self, slug, topic, plan, searches, max_pages, shares):
         """What is installed here and what the pages state, saved as slug (a topic learned before
@@ -237,80 +464,53 @@ class Learner:
         self.index(slug, entry)
         return entry
 
-    @staticmethod
-    def read_plan(data):
-        """A topic's plan, checked: a name, a summary, up to MAX_QUERIES searches, up to
-        MAX_COMMANDS commands that only show what is installed (any other is "dropped"),
-        "language": the language's name when the topic is one (else ""), and "domain": whether it
-        is a field or practice to research rather than software to learn to use."""
-        if not isinstance(data, dict):
-            raise ValueError("not a JSON object")
-        name, summary = str(data.get("name") or "").strip()[:80], " ".join(str(data.get("summary") or "").split())[:200]
-        language = str(data.get("language") or "").strip()[:40]
-        domain = str(data.get("kind") or "").strip().lower() == "domain" and not language
-        queries = [" ".join(str(q).split()) for q in data.get("queries") or [] if str(q).strip()][:MAX_QUERIES]
-        if not name or (not queries and not language):
-            raise ValueError("it needs a name and at least one search")
-        commands, dropped = Learner.safe_commands(data.get("commands") or [])
-        return {"name": name, "summary": summary, "language": language, "domain": domain, "queries": queries,
-                "commands": commands[:MAX_COMMANDS], "dropped": dropped}
-
-    def show_dropped(self, plan):
-        for command in plan["dropped"]:
-            print(f"  left out `{command}`: a command here must only show what is installed (one command, no shell "
-                  f"operators, nothing installed or changed)")
-
-    def plan_language(self, text):
-        """The language's name and version, its tools, the searches of each section and the
-        commands: as saved for this request, else from the model."""
-        known = next((entry for entry in Library.topics().values()
-                      if entry.get("kind") == "language" and entry.get("topic") == text), None)
-        parts = [Part("Request", text, True), Part("Today", datetime.date.today().isoformat(), True)]
-        plan, saved = self.saved_or_asked(known, self.read_language_plan, Prompts.LANGUAGE_PLAN_SYSTEM, parts,
-                                          "Plan learning the language", f"learning {text}",
-                                          language_key((known or {}).get("language") or text))
-        if plan.get("not_language"):
-            raise SystemExit(f"{text!r} is not a programming language ({plan['not_language']}). Nothing was read.")
-        if not saved:
-            print(f"  {plan['name']}: {plan['summary']}")
-        print(f"  tools: {Library.tools_text(plan['tools']) or 'none named'}")
-        self.show_dropped(plan)
-        return plan
-
     def look_at_machine(self, commands):
         """What each command shows (run in an empty folder): its first line and version number; a
         command that fails means that tool is not installed."""
-        found = []
         with tempfile.TemporaryDirectory(prefix="tinker-learn-") as folder:
             ws = Workspace(Path(folder))
-            for command in commands:
-                code, output = ws.run(command, timeout=VERSION_TIMEOUT, quiet=True)
-                lines = [line.strip() for line in output.splitlines() if line.strip()]
-                version = self.VERSION_RE.search(" ".join(lines[:5])) if code == 0 else None
-                found.append({"command": command, "found": code == 0, "version": version.group(0) if version else "",
-                              "output": (lines[0] if lines else "")[:160]})
-                failed = "did not finish" if code is None else f"exit code {code}"
-                print(f"  $ {command}: " + (found[-1]["output"][:100] if code == 0 else f"not installed ({failed})"))
-        return found
+            return [self.what_shows(ws, command) for command in commands]
+
+    def what_shows(self, ws, command):
+        code, output = ws.run(command, timeout=VERSION_TIMEOUT, quiet=True)
+        lines = [line.strip() for line in output.splitlines() if line.strip()]
+        version = self.VERSION_RE.search(" ".join(lines[:5])) if code == 0 else None
+        shown = {"command": command, "found": code == 0, "version": version.group(0) if version else "",
+                 "output": (lines[0] if lines else "")[:160]}
+        failed = "did not finish" if code is None else f"exit code {code}"
+        print(f"  $ {command}: " + (shown["output"][:100] if code == 0 else f"not installed ({failed})"))
+        return shown
 
     def read_web(self, name, searches, max_pages):
         """(facts, sources): the searches run, their pages taken in turn (each search's first
         result, then each one's second, ...: every search is read) up to max_pages, each read for
         what its search looks for; a fact of a section is kept with it, a fact stated again kept
         once (add_facts)."""
-        results = []
-        for search in searches:
-            found = self.internet.search(search["query"], SEARCH_RESULTS)
-            if found is None:
-                self.notes.append(f"search '{search['query']}': {self.internet.why(search['query'])}")
-                print(f"  {self.notes[-1]}")
-            results.append((found or [])[:search["pages"]])
+        results = [self.results(search) for search in searches]
+        return self.read_pages(name, self.in_turn(searches, results, max_pages))
+
+    def results(self, search):
+        """The pages a search finds, as many as it reads (none, with a note, when the search fails)."""
+        found = self.internet.search(search["query"], SEARCH_RESULTS)
+        if found is None:
+            self.notes.append(f"search '{search['query']}': {self.internet.why(search['query'])}")
+            print(f"  {self.notes[-1]}")
+        return (found or [])[:search["pages"]]
+
+    @staticmethod
+    def in_turn(searches, results, max_pages):
+        """The pages taken in turn (each search's first, then each one's second, ...), each once, with its
+        search's section and what it looks for."""
         pages, seen = [], set()
         for rank in range(SEARCH_RESULTS):
             for search, found in zip(searches, results):
                 if rank < len(found) and found[rank]["url"] not in seen and len(pages) < max_pages:
                     seen.add(found[rank]["url"])
                     pages.append(dict(found[rank], section=search["section"], focus=search["focus"]))
+        return pages
+
+    def read_pages(self, name, pages):
+        """(facts, sources) of the pages read until the model is lost."""
         facts, sources = [], []
         for number, page in enumerate(pages, 1):
             if self.model_failed:
@@ -320,6 +520,66 @@ class Learner:
             found = [dict(f, section=page["section"]) if page["section"] else f for f in found]
             self.add_facts(facts, found)
         return facts, sources
+
+    def read_page(self, topic, page, number):
+        """The facts one page states about what its search looks for, from the parts of its text
+        that hold the most of what it looks for (a page's top is often its menus), in page order;
+        the search's excerpt when the page itself cannot be read."""
+        got = self.internet.fetch(page["url"])
+        text = (got or {}).get("content") or page.get("content") or ""
+        if not text.strip():
+            why = f"{page['url']}: {self.internet.why(page['url'])}"
+            self.notes.append(f"page {why}")
+            print(f"  page {number}: {why}")
+            return []
+        source = Part("Page", f"{(got or {}).get('title') or page.get('title', '')}\n{page['url']}", True)
+        focus = Part("Look for", page["focus"], True)
+        room = self.model.limit_chars(Prompts.FACTS_SYSTEM) - source.size() - focus.size() - len(topic) - 200
+        found = []
+        for i, chunk in enumerate(self.relevant_chunks(text, room, f"{topic} {page['focus']}"), 1):
+            parts = [Part("Topic", topic, True), focus, source, Part("Excerpt", chunk, True)]
+            facts = self.facts_in(parts, page, number, i)
+            if facts is None:
+                break
+            found += [dict(f, source=page["url"]) for f in facts if not self.UNRELEASED.search(f["text"])]
+        return found
+
+    @staticmethod
+    def relevant_chunks(text, room, wanted):
+        """Up to PAGE_CHUNKS prompt-sized chunks of a page: its first (where a page says what it is
+        about), then those the word search ranks the most related to what is looked for (the next
+        ones when none matches), in page order: a long page's useful part is rarely all at its top."""
+        chunks = split_text(text, room)
+        if len(chunks) <= PAGE_CHUNKS:
+            return chunks
+        matched = [i for i in Retriever(None).by_words(wanted, chunks) if i]
+        chosen = [0] + (matched + [i for i in range(1, len(chunks)) if i not in matched])[:PAGE_CHUNKS - 1]
+        return [chunks[i] for i in sorted(chosen)]
+
+    def facts_in(self, parts, page, number, part):
+        """The facts the model reads in one chunk of a page; None when the page cannot be read on (a chunk too
+        large), or the model stopped answering (it crashed or failed again and again: no page is read on)."""
+        try:
+            return self.model.ask_until_usable(Prompts.FACTS_SYSTEM, parts, f"Facts, page {number} part {part}",
+                                               self.read_facts, attempts=2) or []
+        except PromptTooLarge as exc:
+            self.notes.append(f"page {page['url']}: {first_line(str(exc), 160)}")
+        except OllamaError as exc:
+            self.model_failed = first_line(str(exc), 200)
+            self.notes.append(f"the model stopped answering at page {number}; the pages after it were not read")
+            print(f"  {self.notes[-1]} ({self.model_failed})")
+        return None
+
+    @staticmethod
+    def read_facts(reply):
+        facts = []
+        for item in reply.json().get("facts", []):
+            if not isinstance(item, dict):
+                continue
+            text, phase = str(item.get("text", "")).strip()[:FACT_CHARS], str(item.get("phase", "")).strip().lower()
+            if text and phase in FACT_PHASES:
+                facts.append({"phase": phase, "text": text})
+        return facts[:FACTS_PER_CHUNK]
 
     @staticmethod
     def add_facts(facts, found):
@@ -357,108 +617,6 @@ class Learner:
                 else facts_of
         return kept
 
-    def index(self, slug, entry):
-        """The texts embedded now, so the recall phase finds them by meaning (if that fails, the
-        recall phase embeds them when it searches)."""
-        if self.embeddings is None:
-            return
-        texts = [Library.searched(item) for item in Library.items({slug: entry})]
-        if self.embeddings.vectors(texts) is None:
-            print(f"  not indexed now ({self.embeddings.failed}); the recall phase indexes it when it searches")
-        else:
-            print(f"  indexed with {self.embeddings.name}")
-
-    @staticmethod
-    def safe_commands(commands):
-        """(kept, dropped): only commands that show what is installed are kept: one command each,
-        no shell operators, nothing installed or changed."""
-        kept, dropped = [], []
-        for command in commands:
-            command = " ".join(str(command).split())
-            if not command:
-                continue
-            unsafe = (Learner.SHELL_OPERATORS.search(command) or Learner.CHANGES.search(command)
-                      or Workspace.UNSAFE_COMMAND.search(command))
-            (dropped if unsafe else kept).append(command)
-        return kept, dropped
-
-    @staticmethod
-    def read_language_plan(data):
-        """A language's plan, checked: its name and version, one tool per role (TOOL_ROLES) with
-        the search that finds how to use it, the searches of each section, and the commands that
-        only show what is installed (any other is "dropped"). {"not_language": why} when the model
-        says the request is no programming language."""
-        if not isinstance(data, dict):
-            raise ValueError("not a JSON object")
-        language = str(data.get("language") or data.get("name") or "").strip()[:40]
-        summary = " ".join(str(data.get("summary") or "").split())[:200]
-        if not language:
-            if summary:
-                return {"not_language": summary}
-            raise ValueError("it needs the language's name")
-        version = str(data.get("version") or "").strip()[:20]
-        tools, commands = {}, list(data.get("commands") or [])
-        for tool in data.get("tools") or []:
-            if not isinstance(tool, dict):
-                continue
-            role, tool_name = str(tool.get("role") or "").strip().lower(), str(tool.get("name") or "").strip()[:40]
-            if role in TOOL_ROLES and tool_name and role not in tools:
-                search = " ".join(str(tool.get("search") or "").split()) or f"how to use {tool_name} in a {language} project"
-                tools[role] = {"role": role, "name": tool_name, "search": search}
-                commands += [tool["command"]] if tool.get("command") else []
-        searches = [{"section": str(s.get("section") or "").strip().lower(), "query": " ".join(str(s.get("query") or "").split())}
-                    for s in data.get("searches") or [] if isinstance(s, dict)]
-        searches = [s for s in searches if s["section"] in LANGUAGE_SECTIONS and s["query"]][:LANGUAGE_SEARCHES]
-        if not searches:
-            raise ValueError(f"it needs searches for the language's {', '.join(LANGUAGE_SECTIONS)}")
-        commands, dropped = Learner.safe_commands(commands)
-        return {"kind": "language", "language": language, "name": f"{language} {version}".strip(), "version": version,
-                "summary": summary or language, "tools": list(tools.values()), "searches": searches,
-                "commands": list(dict.fromkeys(commands))[:LANGUAGE_COMMANDS], "dropped": dropped}
-
-    def read_page(self, topic, page, number):
-        """The facts one page states about what its search looks for, from the parts of its text
-        that hold the most of what it looks for (a page's top is often its menus), in page order;
-        the search's excerpt when the page itself cannot be read."""
-        got = self.internet.fetch(page["url"])
-        text = (got or {}).get("content") or page.get("content") or ""
-        if not text.strip():
-            why = f"{page['url']}: {self.internet.why(page['url'])}"
-            self.notes.append(f"page {why}")
-            print(f"  page {number}: {why}")
-            return []
-        source = Part("Page", f"{(got or {}).get('title') or page.get('title', '')}\n{page['url']}", True)
-        focus = Part("Look for", page["focus"], True)
-        room = self.model.limit_chars(Prompts.FACTS_SYSTEM) - source.size() - focus.size() - len(topic) - 200
-        found = []
-        for i, chunk in enumerate(self.relevant_chunks(text, room, f"{topic} {page['focus']}"), 1):
-            parts = [Part("Topic", topic, True), focus, source, Part("Excerpt", chunk, True)]
-            try:
-                facts = self.model.ask_until_usable(Prompts.FACTS_SYSTEM, parts, f"Facts, page {number} part {i}",
-                                                    self.read_facts, attempts=2) or []
-            except PromptTooLarge as exc:
-                self.notes.append(f"page {page['url']}: {first_line(str(exc), 160)}")
-                break
-            except OllamaError as exc:  # it crashed or failed again and again: the pages left are not read
-                self.model_failed = first_line(str(exc), 200)
-                self.notes.append(f"the model stopped answering at page {number}; the pages after it were not read")
-                print(f"  {self.notes[-1]} ({self.model_failed})")
-                break
-            found += [dict(f, source=page["url"]) for f in facts if not self.UNRELEASED.search(f["text"])]
-        return found
-
-    @staticmethod
-    def relevant_chunks(text, room, wanted):
-        """Up to PAGE_CHUNKS prompt-sized chunks of a page: its first (where a page says what it is
-        about), then those the word search ranks the most related to what is looked for (the next
-        ones when none matches), in page order: a long page's useful part is rarely all at its top."""
-        chunks = split_text(text, room)
-        if len(chunks) <= PAGE_CHUNKS:
-            return chunks
-        matched = [i for i in Retriever(None).by_words(wanted, chunks) if i]
-        chosen = [0] + (matched + [i for i in range(1, len(chunks)) if i not in matched])[:PAGE_CHUNKS - 1]
-        return [chunks[i] for i in sorted(chosen)]
-
     def pick(self, topic, facts, count):
         """The most useful count, as the model picks them (the first ones if it cannot)."""
         listing = "\n".join(f"{i}. [{f['phase']}] {f['text']}" for i, f in enumerate(facts, 1))
@@ -477,16 +635,17 @@ class Learner:
             kept = None
         return kept or facts[:count]
 
-    @staticmethod
-    def read_facts(reply):
-        facts = []
-        for item in reply.json().get("facts", []):
-            if not isinstance(item, dict):
-                continue
-            text, phase = str(item.get("text", "")).strip()[:FACT_CHARS], str(item.get("phase", "")).strip().lower()
-            if text and phase in FACT_PHASES:
-                facts.append({"phase": phase, "text": text})
-        return facts[:FACTS_PER_CHUNK]
+    def index(self, slug, entry):
+        """The texts embedded now, so the recall phase finds them by meaning (if that fails, the
+        recall phase embeds them when it searches)."""
+        if self.embeddings is None:
+            return
+        texts = [Library.searched(item) for item in Library.items({slug: entry})]
+        if self.embeddings.vectors(texts) is None:
+            print(f"  not indexed now ({self.embeddings.failed}); the recall phase indexes it when it searches")
+        else:
+            print(f"  indexed with {self.embeddings.name}")
+
 
 class Researcher:
     """Researches a domain (tinker learn finds it is one) the way a careful person does, and keeps what it
@@ -588,17 +747,6 @@ class Researcher:
             searches = self.next_searches(frame, facts, analysis)
         return facts, sources, analysis
 
-    @staticmethod
-    def next_searches(frame, facts, analysis):
-        """The next round's searches: one page for each gap, and two for each check (a key fact one
-        site states, looked for on another, independent one)."""
-        gaps = [{"query": gap["search"], "section": str(gap["question"]), "pages": 1,
-                 "focus": frame["questions"][gap["question"] - 1]["question"]} for gap in analysis["gaps"]]
-        checks = [{"query": check["search"], "section": facts[check["fact"] - 1]["section"], "pages": 2,
-                   "focus": f"whether this is so, and the exact figures: {facts[check['fact'] - 1]['text']}"}
-                  for check in analysis["checks"]]
-        return gaps + checks
-
     def cross_check(self, facts):
         """Each fact's sites, with no model call. A fact that repeats another (REPEAT_CLAIM, numbers
         agreeing) is folded into it. A fact making the same claim as one on another site
@@ -613,6 +761,14 @@ class Researcher:
         else:
             self.fold_repeats(facts, vectors)
         sites = [{self.site(url) for url in Learner.pages_of(fact)} for fact in facts]
+        support, differ = self.compared(facts, vectors, sites)
+        for fact, found_on in zip(facts, support):
+            fact["sites"] = sorted(found_on)
+        return differ
+
+    def compared(self, facts, vectors, sites):
+        """([each fact's sites, with those of the facts on other sites that make its claim with the same
+        numbers], [(n, m) of the facts that make one claim with other numbers])."""
         support, differ = [set(s) for s in sites], []
         for i, j in ((i, j) for i in range(len(facts)) for j in range(i + 1, len(facts))):
             if not self.same_claim(vectors[i], vectors[j]) or sites[i] & sites[j]:
@@ -622,9 +778,7 @@ class Researcher:
                 support[j] |= sites[i]
             else:
                 differ.append((i + 1, j + 1))
-        for fact, found_on in zip(facts, support):
-            fact["sites"] = sorted(found_on)
-        return differ
+        return support, differ
 
     def fold_repeats(self, facts, vectors):
         """Each fact that repeats an earlier one, folded into it (in place, with its vector): its
@@ -636,14 +790,16 @@ class Researcher:
             if kept is None:
                 i += 1
                 continue
-            repeat = facts.pop(i)
             vectors.pop(i)
-            original = facts[kept]
-            if (len(self.numbers(repeat)), len(repeat["text"])) > (len(self.numbers(original)), len(original["text"])):
-                original["text"] = repeat["text"]
-            for url in Learner.pages_of(repeat):
-                if url not in Learner.pages_of(original):
-                    original["also"] = original.get("also", []) + [url]
+            self.fold(facts[kept], facts.pop(i))
+
+    def fold(self, original, repeat):
+        """A repeat's pages join the original's, and the more detailed text is kept."""
+        if (len(self.numbers(repeat)), len(repeat["text"])) > (len(self.numbers(original)), len(original["text"])):
+            original["text"] = repeat["text"]
+        for url in Learner.pages_of(repeat):
+            if url not in Learner.pages_of(original):
+                original["also"] = original.get("also", []) + [url]
 
     @staticmethod
     def same_claim(a, b, threshold=SAME_CLAIM):
@@ -655,14 +811,14 @@ class Researcher:
         first, second = cls.numbers(a), cls.numbers(b)
         return first <= second or second <= first
 
+    @classmethod
+    def numbers(cls, fact):
+        return set(cls.NUMBER_RE.findall(fact["text"]))
+
     @staticmethod
     def site(url):
         """The site a page is on (www. left out): pages of one site are one source."""
         return urllib.parse.urlparse(url).netloc.lower().removeprefix("www.")
-
-    @classmethod
-    def numbers(cls, fact):
-        return set(cls.NUMBER_RE.findall(fact["text"]))
 
     def analyse(self, frame, facts, differ):
         """The findings (each question answered from the facts, citing them, with how sure it is),
@@ -706,39 +862,62 @@ class Researcher:
         cited = lambda numbers: sorted({n for n in numbers or [] if isinstance(n, int) and 1 <= n <= fact_count})
         asked = lambda item: isinstance(item, dict) and isinstance(item.get("question"), int) \
             and 1 <= item["question"] <= question_count
-        findings = [{"question": f["question"], "answer": " ".join(str(f.get("answer") or "").split())[:600],
-                     "confidence": f.get("confidence") if f.get("confidence") in ("high", "medium", "low") else "low",
-                     "facts": cited(f.get("facts"))}
-                    for f in data.get("findings") or [] if asked(f) and str(f.get("answer") or "").strip()]
-        contradictions = []
-        for item in data.get("contradictions") or []:
-            if isinstance(item, dict) and len(cited(item.get("facts"))) >= 2:
-                facts = cited(item["facts"])
-                doubtful = [n for n in cited(item.get("doubtful")) if n in facts] or facts  # unsure: all are
-                contradictions.append({"facts": facts, "doubtful": doubtful,
-                                       "note": " ".join(str(item.get("note") or "").split())[:300]})
-        gaps = [{"question": g["question"], "missing": " ".join(str(g.get("missing") or "").split())[:200],
-                 "search": " ".join(str(g.get("search") or "").split())[:160]}
-                for g in data.get("gaps") or [] if asked(g) and str(g.get("search") or "").strip()]
-        checks = [{"fact": c["fact"], "search": " ".join(str(c.get("search") or "").split())[:160]}
-                  for c in data.get("checks") or [] if isinstance(c, dict) and isinstance(c.get("fact"), int)
-                  and 1 <= c["fact"] <= fact_count and str(c.get("search") or "").strip()]
+        findings = Researcher.read_findings(data.get("findings") or [], cited, asked)
         if not findings:
             raise ValueError("it needs a finding for at least one question")
-        return {"findings": findings, "contradictions": contradictions,
-                "gaps": gaps[:RESEARCH_GAPS], "checks": checks[:RESEARCH_CHECKS]}
+        return {"findings": findings, "contradictions": Researcher.read_contradictions(data.get("contradictions") or [],
+                                                                                       cited),
+                "gaps": Researcher.read_gaps(data.get("gaps") or [], asked)[:RESEARCH_GAPS],
+                "checks": Researcher.read_checks(data.get("checks") or [], fact_count)[:RESEARCH_CHECKS]}
+
+    @staticmethod
+    def read_findings(given, cited, asked):
+        return [{"question": f["question"], "answer": " ".join(str(f.get("answer") or "").split())[:600],
+                 "confidence": f.get("confidence") if f.get("confidence") in ("high", "medium", "low") else "low",
+                 "facts": cited(f.get("facts"))}
+                for f in given if asked(f) and str(f.get("answer") or "").strip()]
+
+    @staticmethod
+    def read_contradictions(given, cited):
+        """Contradictions between two or more known facts, with the doubtful ones among them (unsure: all are)."""
+        contradictions = []
+        for item in given:
+            if isinstance(item, dict) and len(cited(item.get("facts"))) >= 2:
+                facts = cited(item["facts"])
+                doubtful = [n for n in cited(item.get("doubtful")) if n in facts] or facts
+                contradictions.append({"facts": facts, "doubtful": doubtful,
+                                       "note": " ".join(str(item.get("note") or "").split())[:300]})
+        return contradictions
+
+    @staticmethod
+    def read_gaps(given, asked):
+        return [{"question": g["question"], "missing": " ".join(str(g.get("missing") or "").split())[:200],
+                 "search": " ".join(str(g.get("search") or "").split())[:160]}
+                for g in given if asked(g) and str(g.get("search") or "").strip()]
+
+    @staticmethod
+    def read_checks(given, fact_count):
+        return [{"fact": c["fact"], "search": " ".join(str(c.get("search") or "").split())[:160]}
+                for c in given if isinstance(c, dict) and isinstance(c.get("fact"), int)
+                and 1 <= c["fact"] <= fact_count and str(c.get("search") or "").strip()]
+
+    @staticmethod
+    def next_searches(frame, facts, analysis):
+        """The next round's searches: one page for each gap, and two for each check (a key fact one
+        site states, looked for on another, independent one)."""
+        gaps = [{"query": gap["search"], "section": str(gap["question"]), "pages": 1,
+                 "focus": frame["questions"][gap["question"] - 1]["question"]} for gap in analysis["gaps"]]
+        checks = [{"query": check["search"], "section": facts[check["fact"] - 1]["section"], "pages": 2,
+                   "focus": f"whether this is so, and the exact figures: {facts[check['fact'] - 1]['text']}"}
+                  for check in analysis["checks"]]
+        return gaps + checks
 
     def entry(self, topic, frame, facts, sources, analysis):
         """What is saved: each fact with its question, its sources and its confidence (disputed: a
         contradiction finds it doubtful; corroborated: two or more sites state it; single: one does),
         and each finding no surer than its facts allow (supported)."""
         disputed = {n for contradiction in analysis["contradictions"] for n in contradiction["doubtful"]}
-        kept = []
-        for n, fact in enumerate(facts, 1):
-            sites = fact.pop("sites", [])
-            confidence = "disputed" if n in disputed else "corroborated" if len(sites) >= 2 else "single"
-            kept.append({**{k: v for k, v in fact.items() if k != "section"}, "question": int(fact["section"]),
-                         "sites": sites, "confidence": confidence})
+        kept = [self.kept_fact(fact, n in disputed) for n, fact in enumerate(facts, 1)]
         cited = lambda finding: [kept[n - 1] for n in finding["facts"]]
         findings = [dict(finding, confidence=self.supported(finding["confidence"], cited(finding)))
                     for finding in analysis["findings"]]
@@ -746,6 +925,14 @@ class Researcher:
                 "questions": frame["questions"], "learned": now_text(), "model": self.model.name, "machine": [],
                 "findings": findings, "contradictions": analysis["contradictions"],
                 "open": analysis["gaps"], "facts": kept, "sources": sources, "notes": self.learner.notes}
+
+    @staticmethod
+    def kept_fact(fact, disputed):
+        """A fact as it is kept: with its question, its sites and how sure it is."""
+        sites = fact.pop("sites", [])
+        confidence = "disputed" if disputed else "corroborated" if len(sites) >= 2 else "single"
+        return {**{k: v for k, v in fact.items() if k != "section"}, "question": int(fact["section"]),
+                "sites": sites, "confidence": confidence}
 
     @classmethod
     def supported(cls, stated, cited):
@@ -770,75 +957,14 @@ class Library:
         return {slug: entry for slug, entry in Home.store().items("learned").items() if Library.readable(entry)}
 
     @staticmethod
-    def readable(entry):
-        return isinstance(entry, dict) and isinstance(entry.get("facts", []), list)
-
-    @staticmethod
-    def slug(topic):
-        """"Test-driven development" -> test-driven-development, "C++" -> cpp, "Python 3.14" -> python-3-14."""
-        text = topic.lower().replace("+", "p").replace("#", "sharp")
-        return re.sub(r"[^a-z0-9]+", "-", text).strip("-")[:60]
-
-    @staticmethod
-    def items(topics):
-        """What can be found in these topics ({slug: entry}), one item per text: each topic's
-        summary, a language's tools, what is installed here, research findings and each fact (with
-        its confidence, when researched), as {topic, name, phase, text, id, status}: a finding's and a
-        fact's id and status (None for what is not a claim). A topic that cannot be read is left out,
-        with a note."""
-        found = []
-        for slug, entry in topics.items():
-            try:
-                name = str(entry.get("name") or entry["topic"])
-                plain = lambda phase, text: {"topic": slug, "name": name, "phase": phase, "text": text, "id": None,
-                                             "status": None}
-                items = [plain("summary", str(entry.get("summary") or name))]
-                if entry.get("tools"):
-                    items.append(plain("tools", f"its tools: {Library.tools_text(entry['tools'])}"))
-                installed = [(m["output"] if m["found"] else f"`{m['command']}` fails (not installed)")
-                             for m in entry.get("machine", [])]
-                if installed:
-                    items.append(plain("machine", f"on this machine: {'; '.join(installed)}"))
-                items += [{"topic": slug, "name": name, "phase": "findings",
-                           "text": f"{entry['questions'][f['question'] - 1]['question']} {f['answer']} "
-                                   f"({f['confidence']} confidence)", "id": Library.claim_id(f, f["answer"]),
-                           "status": f.get("status", "candidate")} for f in entry.get("findings", [])]
-                items += [{"topic": slug, "name": name, "phase": str(f["phase"]),
-                           "text": str(f["text"]) + (f" ({f['confidence']})" if f.get("confidence") else ""),
-                           "id": Library.claim_id(f, f["text"]), "status": f.get("status", "candidate")}
-                          for f in entry["facts"]]
-            except (KeyError, IndexError, TypeError, AttributeError) as exc:
-                print(f"  note: what was learned about {slug} is not readable ({type(exc).__name__}: {exc}); left out")
-                continue
-            found += items
-        return found
-
-    @staticmethod
-    def claim_id(claim, text):
-        return claim.get("id") or fingerprint(str(text))[:12]
-
-    @staticmethod
     def read(slug):
         """A topic's entry, or None (not learned, or not readable)."""
         entry = Home.store().get("learned", slug) if slug else None
         return entry if Library.readable(entry) else None
 
     @staticmethod
-    def tools_text(tools):
-        """A language's tools in one line: "environment venv, tests pytest, format black"."""
-        return ", ".join(f"{tool['role']} {tool['name']}" for tool in tools if isinstance(tool, dict) and tool.get("name"))
-
-    @staticmethod
-    def language(name):
-        """The key of a language learned (with tinker learn, or by a run), under any version of its name; or None."""
-        key = language_key(name) if (name or "").strip() else ""
-        entry = Library.read(key) if key else None
-        return key if entry and entry.get("kind") == "language" else None
-
-    @staticmethod
-    def searched(item):
-        """The text an item is found by (and embedded as): its topic's name, and its own text."""
-        return f"{item['name']}: {item['text']}"
+    def readable(entry):
+        return isinstance(entry, dict) and isinstance(entry.get("facts", []), list)
 
     @staticmethod
     def save(slug, entry):
@@ -848,15 +974,6 @@ class Library:
             claim.setdefault("id", fingerprint(str(text))[:12])
             claim.setdefault("status", "candidate")
         Home.store().put("learned", slug, entry)
-
-    @staticmethod
-    def shown_in(item, phases):
-        """Whether an item belongs in a prompt for these phases: what is installed here goes to the
-        toolchain and config files' prompts, a language's tools to those and the tests', research
-        findings to the spec's and the design's, a fact to its own phase."""
-        shown = {"machine": {"toolchain", "config"}, "tools": {"toolchain", "config", "tests"},
-                 "findings": {"spec", "design"}}.get(item["phase"])
-        return item["phase"] in phases or bool(shown and shown & set(phases))
 
     @staticmethod
     def claims(slug, ids, change):
@@ -871,187 +988,77 @@ class Library:
         if Library.read(slug):
             Home.store().update("learned", slug, changed)
 
-
-class Knowledge:
-    """What earlier projects taught, to do it right the first time. Per language (its language_key):
-    the toolchain that last worked and the toolchain fixes found (both replayed without asking the
-    model), lessons, and the facts proven by its projects; for any language: lessons. A lesson is
-    general: it never names a project, its files, its names or its data. Lessons and facts are shown
-    in the prompts of the phase they concern, the most confirmed first; they start as candidates, a
-    cycle that succeeds using them proves them, and a failure in the step they were shown to discards
-    them. Kept in Tinker's "languages" and "memory"."""
-
-    def __init__(self, language):
-        self.language = language or "Python"
-        self.key = language_key(self.language)
-        self.language_doc = Home.store().get("languages", self.key) or {
-            "language": self.language, "projects": 0, "toolchain": None, "fixes": [], "lessons": [], "facts": []}
-        self.any_language_doc = Home.store().get("memory", "any") or {"lessons": []}
-
-    def summary(self):
-        lessons = len(self.language_doc.get("lessons", [])) + len(self.any_language_doc.get("lessons", []))
-        projects, facts = self.language_doc.get("projects", 0), len(self.language_doc.get("facts", []))
-        known = [("the toolchain that worked" + (f" ({projects} finished project(s))" if projects else ""))
-                 if self.language_doc.get("toolchain") else "",
-                 f"{len(self.language_doc.get('fixes', []))} toolchain fix(es)" if self.language_doc.get("fixes") else "",
-                 f"{lessons} lesson(s)" if lessons else "", f"{facts} proven fact(s)" if facts else ""]
-        return f"{self.language}: " + (", ".join(k for k in known if k) or "nothing learned yet")
-
-    def finished_project(self):
-        self.language_doc["projects"] = self.language_doc.get("projects", 0) + 1
-        self.save()
-
-    def known_lessons(self):
-        return self.language_doc.setdefault("lessons", []) + self.any_language_doc.setdefault("lessons", [])
-
-    def add_lessons(self, new, confirmed, names=()):
-        """Adds new lessons as candidates (one like a known lesson confirms it instead; one that names
-        the project, by any of names, is not general and is dropped); returns how many were new."""
-        known, added = self.known_lessons(), 0
-        for number in confirmed:
-            if isinstance(number, int) and 1 <= number <= len(known):
-                self.confirm(known[number - 1])
-        for item in new:
-            text, phase = str(item.get("text", "")).strip()[:240], str(item.get("phase", "")).strip().lower()
-            if not text or phase not in LESSON_PHASES or self.names_project(text, names):
-                continue
-            same = next((lesson for lesson in known if similarity(lesson["text"], text) >= SAME_LESSON), None)
-            if same:
-                self.confirm(same)
-                continue
-            lesson = {"id": fingerprint(text)[:12], "phase": phase, "text": text, "status": "candidate", "seen": 1,
-                      "added": now_text(), "last_seen": now_text()}
-            (self.language_doc if item.get("scope") == "language" else self.any_language_doc)["lessons"].append(lesson)
-            known.append(lesson)
-            added += 1
-        for doc in (self.language_doc, self.any_language_doc):
-            doc["lessons"] = self.keep(doc["lessons"], known[len(known) - added:])
-        self.save()
-        return added
+    @staticmethod
+    def slug(topic):
+        """"Test-driven development" -> test-driven-development, "C++" -> cpp, "Python 3.14" -> python-3-14."""
+        text = topic.lower().replace("+", "p").replace("#", "sharp")
+        return re.sub(r"[^a-z0-9]+", "-", text).strip("-")[:60]
 
     @staticmethod
-    def names_project(text, names):
-        """Whether a lesson names the project (one of its files, or its folder): then it is not general."""
-        return any(re.search(rf"(?<![\w.-]){re.escape(name)}(?![\w-])", text, re.I) for name in names if name)
-
-    def fix_result(self, fix, worked):
-        """A replayed fix helped (counted) or failed (deleted at once: it is disproved)."""
-        if worked:
-            fix["used"] = fix.get("used", 0) + 1
-        else:
-            self.language_doc["fixes"] = [f for f in self.language_doc.get("fixes", []) if f["failure"] != fix["failure"]]
-        self.save()
-
-    def known_fix(self, failure, tried=()):
-        """A replayable fix for exactly this failure, not tried yet in this run."""
-        return next((f for f in self.language_doc.get("fixes", []) if f["failure"] == failure and f.get("replay")
-                     and f["failure"] not in tried), None)
-
-    def save(self):
-        Home.store().put("languages", self.key, self.language_doc)
-        Home.store().put("memory", "any", self.any_language_doc)
+    def language(name):
+        """The key of a language learned (with tinker learn, or by a run), under any version of its name; or None."""
+        key = language_key(name) if (name or "").strip() else ""
+        entry = Library.read(key) if key else None
+        return key if entry and entry.get("kind") == "language" else None
 
     @staticmethod
-    def confirm(lesson):
-        lesson["seen"], lesson["last_seen"] = lesson.get("seen", 1) + 1, now_text()
+    def items(topics):
+        """What can be found in these topics ({slug: entry}), one item per text: each topic's
+        summary, a language's tools, what is installed here, research findings and each fact (with
+        its confidence, when researched), as {topic, name, phase, text, id, status}: a finding's and a
+        fact's id and status (None for what is not a claim). A topic that cannot be read is left out,
+        with a note."""
+        found = []
+        for slug, entry in topics.items():
+            try:
+                found += Library.topic_items(slug, entry)
+            except (KeyError, IndexError, TypeError, AttributeError) as exc:
+                print(f"  note: what was learned about {slug} is not readable ({type(exc).__name__}: {exc}); left out")
+        return found
 
     @staticmethod
-    def keep(lessons, new):
-        """At most MAX_LESSONS, the most confirmed first; the new ones always stay (the least
-        confirmed older ones go to make room)."""
-        rank = Knowledge.rank
-        fresh = [lesson for lesson in lessons if any(lesson is n for n in new)]
-        older = sorted((lesson for lesson in lessons if not any(lesson is n for n in new)), key=rank, reverse=True)
-        return sorted(fresh + older[:max(0, MAX_LESSONS - len(fresh))], key=rank, reverse=True)
-
-    def toolchain(self):
-        known = Toolchain(self.language_doc.get("toolchain"))
-        return known if known else None
-
-    def remember_toolchain(self, toolchain):
-        """The toolchain that worked, kept for the language's next projects as what holds for any
-        project in it: without its run and check commands, which name this project's own files (the
-        next project gives its own)."""
-        kept = dict(toolchain.to_dict(), run="", check="") if toolchain else None
-        if kept and kept != self.language_doc.get("toolchain"):
-            self.language_doc["toolchain"], self.language_doc["toolchain_saved"] = kept, now_text()
-            self.save()
-
-    def remember_fix(self, fix):
-        fixes = [f for f in self.language_doc.setdefault("fixes", []) if f["failure"] != fix["failure"]]
-        self.language_doc["fixes"] = (fixes + [dict(fix, used=1, added=now_text())])[-20:]
-        self.save()
-
-    def similar_fix(self, failure):
-        scored = [(similarity(f["failure"], failure), f) for f in self.language_doc.get("fixes", [])]
-        best = max(scored, key=lambda pair: pair[0], default=(0, None))
-        return best[1] if best[0] >= SIMILAR_FAILURE else None
+    def topic_items(slug, entry):
+        name = str(entry.get("name") or entry["topic"])
+        plain = lambda phase, text: {"topic": slug, "name": name, "phase": phase, "text": text, "id": None,
+                                     "status": None}
+        items = [plain("summary", str(entry.get("summary") or name))]
+        if entry.get("tools"):
+            items.append(plain("tools", f"its tools: {Library.tools_text(entry['tools'])}"))
+        installed = [(m["output"] if m["found"] else f"`{m['command']}` fails (not installed)")
+                     for m in entry.get("machine", [])]
+        if installed:
+            items.append(plain("machine", f"on this machine: {'; '.join(installed)}"))
+        items += [{"topic": slug, "name": name, "phase": "findings",
+                   "text": f"{entry['questions'][f['question'] - 1]['question']} {f['answer']} "
+                           f"({f['confidence']} confidence)", "id": Library.claim_id(f, f["answer"]),
+                   "status": f.get("status", "candidate")} for f in entry.get("findings", [])]
+        return items + [{"topic": slug, "name": name, "phase": str(f["phase"]),
+                         "text": str(f["text"]) + (f" ({f['confidence']})" if f.get("confidence") else ""),
+                         "id": Library.claim_id(f, f["text"]), "status": f.get("status", "candidate")}
+                        for f in entry["facts"]]
 
     @staticmethod
-    def rank(lesson):
-        """The most confirmed, then the most recently seen, first (sorted in reverse)."""
-        return lesson.get("seen", 1), lesson.get("last_seen", "")
-
-    def lessons(self, phases, limit=LESSONS_SHOWN):
-        """The lessons for these phases, the most confirmed first: [{id, text, ...}]."""
-        pool = [lesson for lesson in self.known_lessons() if lesson.get("phase") in phases]
-        pool.sort(key=Knowledge.rank, reverse=True)
-        return [dict(lesson, id=lesson.get("id") or fingerprint(lesson["text"])[:12]) for lesson in pool[:limit]]
-
-    def facts(self, phases):
-        """The language's proven facts for these phases: [{id, phase, text, topic}]."""
-        return [fact for fact in self.language_doc.get("facts", []) if fact.get("phase") in phases]
-
-    def prove(self, used):
-        """A cycle that used these succeeded: candidate lessons, facts and findings are proven, and the
-        web's facts are copied into the language's knowledge. used: {key: [prompt phases]}, the keys as
-        Session records them (lesson:ID, fact:TOPIC:ID, known:ID). Returns how many were newly proven."""
-        proven = 0
-        for lesson in self.known_lessons():
-            if f"lesson:{lesson.get('id')}" in used and lesson.get("status") != "proven":
-                lesson["status"], proven = "proven", proven + 1
-        known = {fact["id"] for fact in self.language_doc.setdefault("facts", [])}
-        for slug, ids in self.used_facts(used).items():
-            entry = Library.read(slug) or {}
-            claims = [c for c in entry.get("facts", []) + entry.get("findings", []) if c.get("id") in ids]
-            proven += sum(c.get("status") != "proven" for c in claims)
-            Library.claims(slug, ids, lambda claim: dict(claim, status="proven"))
-            for claim in claims:
-                if claim["id"] not in known and claim.get("phase"):  # a finding stays with its research
-                    self.language_doc["facts"].append({"id": claim["id"], "phase": claim["phase"],
-                                                       "text": claim["text"], "topic": slug, "status": "proven"})
-                    known.add(claim["id"])
-        self.save()
-        return proven
-
-    def disprove(self, used, phases):
-        """A step failed: every lesson, fact or finding used in these prompt phases is discarded, proven
-        or not. Returns how many were discarded."""
-        shown = {key for key, where in used.items() if set(where) & set(phases)}
-        gone = 0
-        for doc in (self.language_doc, self.any_language_doc):
-            kept = [lesson for lesson in doc.get("lessons", []) if f"lesson:{lesson.get('id')}" not in shown]
-            gone, doc["lessons"] = gone + len(doc.get("lessons", [])) - len(kept), kept
-        dropped = {key.split(":", 1)[1] for key in shown if key.startswith("known:")}
-        for slug, ids in self.used_facts(shown).items():
-            Library.claims(slug, ids, lambda claim: None)
-            dropped |= ids
-        facts = self.language_doc.get("facts", [])
-        self.language_doc["facts"] = [fact for fact in facts if fact["id"] not in dropped]
-        gone += len(facts) - len(self.language_doc["facts"]) + sum(len(ids) for ids in self.used_facts(shown).values())
-        self.save()
-        return gone
+    def claim_id(claim, text):
+        return claim.get("id") or fingerprint(str(text))[:12]
 
     @staticmethod
-    def used_facts(used):
-        """{topic: {ids}} of the web's facts and findings among used keys (fact:TOPIC:ID)."""
-        found = collections.defaultdict(set)
-        for key in used:
-            kind, _, rest = key.partition(":")
-            if kind == "fact" and ":" in rest:
-                slug, _, claim_id = rest.rpartition(":")
-                found[slug].add(claim_id)
-        return dict(found)
+    def tools_text(tools):
+        """A language's tools in one line: "environment venv, tests pytest, format black"."""
+        return ", ".join(f"{tool['role']} {tool['name']}" for tool in tools if isinstance(tool, dict) and tool.get("name"))
+
+    @staticmethod
+    def searched(item):
+        """The text an item is found by (and embedded as): its topic's name, and its own text."""
+        return f"{item['name']}: {item['text']}"
+
+    @staticmethod
+    def shown_in(item, phases):
+        """Whether an item belongs in a prompt for these phases: what is installed here goes to the
+        toolchain and config files' prompts, a language's tools to those and the tests', research
+        findings to the spec's and the design's, a fact to its own phase."""
+        shown = {"machine": {"toolchain", "config"}, "tools": {"toolchain", "config", "tests"},
+                 "findings": {"spec", "design"}}.get(item["phase"])
+        return item["phase"] in phases or bool(shown and shown & set(phases))
 
 
 class Retriever:
@@ -1084,16 +1091,18 @@ class Retriever:
         terms, docs = set(words(query)), [words(text) for text in texts]
         average = sum(len(doc) for doc in docs) / len(docs) or 1
         holding = collections.Counter(term for doc in docs for term in set(doc) & terms)
-        scores = []
-        for index, doc in enumerate(docs):
-            counts, score = collections.Counter(doc), 0.0
-            for term in terms & counts.keys():
-                idf = math.log(1 + (len(docs) - holding[term] + 0.5) / (holding[term] + 0.5))
-                tf, length = counts[term], len(doc) / average
-                score += idf * tf * (self.BM25_K1 + 1) / (tf + self.BM25_K1 * (1 - self.BM25_B + self.BM25_B * length))
-            if score > 0:
-                scores.append((score, index))
-        return [index for _, index in sorted(scores, key=lambda pair: (-pair[0], pair[1]))]
+        scores = [(self.bm25(terms, doc, len(docs), holding, average), index) for index, doc in enumerate(docs)]
+        return [index for _, index in sorted((s for s in scores if s[0] > 0), key=lambda pair: (-pair[0], pair[1]))]
+
+    def bm25(self, terms, doc, total, holding, average):
+        """One text's score: each query term it holds, weighed by how rare the term is and how often the
+        text says it, for its length."""
+        counts, score = collections.Counter(doc), 0.0
+        for term in terms & counts.keys():
+            idf = math.log(1 + (total - holding[term] + 0.5) / (holding[term] + 0.5))
+            tf, length = counts[term], len(doc) / average
+            score += idf * tf * (self.BM25_K1 + 1) / (tf + self.BM25_K1 * (1 - self.BM25_B + self.BM25_B * length))
+        return score
 
     def by_meaning(self, query, texts, prune):
         """Every text by the cosine similarity of its embedding to the query's, the closest first
@@ -1111,3 +1120,103 @@ class Retriever:
         self.used = f"words and meaning ({self.embeddings.name})"
         similarity_of = [Embeddings.cosine(self.queries[query], vector) for vector in vectors]
         return sorted(range(len(texts)), key=lambda index: (-similarity_of[index], index))
+
+
+class Embeddings:
+    """Embeddings from the embedding model selected with tinker embed NAME (none: the word search
+    works alone), kept in Tinker's "embeddings" by text, per model, so each text is embedded once.
+    Local: nothing goes online."""
+    BATCH = 32  # texts per request
+
+    def __init__(self, name):
+        self.name, self.failed = name, ""
+        self.cache = {"model": name, "vectors": Home.store().get("embeddings", name, {})}
+
+    @staticmethod
+    def required(option):
+        """The embedding model, for an option that learns: one must be selected (tinker embed NAME)."""
+        if not Config.get("embed_model"):
+            raise SystemExit(f"{option} needs an embedding model, which indexes what it learns: select one Ollama "
+                             f"has with tinker embed NAME (tinker models lists them)")
+        Embeddings.check()
+        return Embeddings(Config.get("embed_model"))
+
+    @staticmethod
+    def check():
+        """The embedding model selected (tinker embed NAME), if any, is one Ollama has (checked before
+        anything starts)."""
+        name = Config.get("embed_model")
+        if not isinstance(name, str):
+            raise SystemExit(f"embed_model is not a model name ({name!r}): select one with tinker embed NAME")
+        if name:
+            try:
+                Models.installed(name)
+            except SystemExit as exc:
+                raise SystemExit(f"The embedding model (tinker embed): {exc}")
+
+    @staticmethod
+    def configured():
+        """The embedding model in use, or None (embed_model is "")."""
+        name = Config.get("embed_model")
+        return Embeddings(name) if name else None
+
+    def vectors(self, texts, keep=True, prune=False):
+        """One embedding per text (from the cache, the missing ones asked for in batches), or None
+        when the model does not give them (failed says why). keep: cache them; prune: the cache then
+        keeps only these texts' embeddings."""
+        stored = self.cache["vectors"]
+        keys = [self.key(text) for text in texts]
+        missing = list(dict.fromkeys(text for text, key in zip(texts, keys) if key not in stored))
+        fresh = {}
+        for start in range(0, len(missing), self.BATCH):
+            batch = missing[start:start + self.BATCH]
+            found = self.embedded(batch)
+            if found is None:
+                return None
+            fresh.update({self.key(text): [round(x, 5) for x in vector] for text, vector in zip(batch, found)})
+        result = [stored.get(key) or fresh[key] for key in keys]
+        if keep and (fresh or prune):
+            self.kept(fresh, keys if prune else None)
+        return result
+
+    def embedded(self, batch):
+        """The batch's embeddings, as the model gives them; None when it gives none (failed says why)."""
+        data = Ollama.get_json("/api/embed", {"model": self.name, "input": batch, "keep_alive": 0}, timeout=300,
+                               errors=True)
+        found = data.get("embeddings") if isinstance(data, dict) else None
+        if isinstance(found, list) and len(found) == len(batch) and all(self.is_vector(v) for v in found):
+            return found
+        self.failed = f"{self.name} gave no embeddings" + (f" ({data['error']})" if isinstance(data, dict)
+                                                           and data.get("error") else "")
+        return None
+
+    @staticmethod
+    def is_vector(value):
+        return isinstance(value, list) and value and all(isinstance(x, (int, float)) for x in value)
+
+    def kept(self, fresh, only=None):
+        """The fresh embeddings cached; only: the cache then keeps these keys alone."""
+        stored = self.cache["vectors"]
+        stored.update(fresh)
+        if only is not None:
+            self.cache["vectors"] = {key: stored[key] for key in only}
+        kept = self.cache["vectors"]
+        Home.store().update("embeddings", self.name, lambda saved: {**({} if only is not None else saved or {}), **kept})
+
+    @staticmethod
+    def key(text):
+        return hashlib.sha1(text.encode("utf-8")).hexdigest()[:20]
+
+    @staticmethod
+    def cosine(a, b):
+        dot = sum(x * y for x, y in zip(a, b))
+        size = math.sqrt(sum(x * x for x in a)) * math.sqrt(sum(y * y for y in b))
+        return dot / size if size else 0.0
+
+
+def language_key(name):
+    """A language's one identity: its first word, without a version. "Python 3.12" -> python,
+    "JavaScript (Node.js)" -> javascript, "C++" -> cpp, "C#" -> csharp."""
+    base = (name or "").split("(")[0].lower().replace("+", "p").replace("#", "sharp")
+    found = re.findall(r"[a-z][a-z0-9]*", base)
+    return found[0] if found else "unknown"

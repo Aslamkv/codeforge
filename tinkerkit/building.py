@@ -66,12 +66,7 @@ class TestWriter(Phase):
             except PromptTooLarge as exc:
                 print(f"  tests for {path} skipped: {exc}; verify writes them")
                 return
-            change = self.ws.apply(reply.as_file(self.new_file_next_to(path) if current.strip() else path),
-                                   self.may_write(path), empty_ok=False)
-            self.keep_existing_tests(change)
-            self.correct_criteria(todo, reply.corrected_criteria())
-            self.follow_new_files(path, todo, change)
-            note = self.report_and_note(path, todo, change)
+            note = self.take(reply, path, todo, current)
 
     def prompt(self, cycle, path, todo, current, note):
         where = (f"a NEW test file next to {path} (do not change {path}; name it by the language's test "
@@ -94,6 +89,15 @@ class TestWriter(Phase):
                      "\n".join(current.splitlines()[:30])),
                 Part("Project files", self.p.outline(), place="first"),
                 *self.s.knowledge_parts("tests")]
+
+    def take(self, reply, path, todo, current):
+        """The tests the reply wrote, kept where they belong; what to tell the next call ("" when all were)."""
+        change = self.ws.apply(reply.as_file(self.new_file_next_to(path) if current.strip() else path),
+                               self.may_write(path), empty_ok=False)
+        self.keep_existing_tests(change)
+        self.correct_criteria(todo, reply.corrected_criteria())
+        self.follow_new_files(path, todo, change)
+        return self.report_and_note(path, todo, change)
 
     def new_file_next_to(self, path):
         """A name for a new test file next to path, as the test tool will find it (path's own name
@@ -169,15 +173,6 @@ class CodeWriter(Phase):
             print(f"  setup fails: {Output.key_line(output)} (verify fixes the toolchain first)")
         self.check_wiring(cycle)
 
-    def write_configs_first(self, cycle):
-        """The setup phase: the cycle's new config files (dependencies, the test tool's settings)
-        in one call, before any test or code is written."""
-        configs = [p for p in self.pending(cycle, lambda kind: kind == "config") if not self.ws.exists(p)]
-        if configs:
-            self.write_configs(cycle, configs)
-        cycle["code_done"].extend(configs)
-        self.s.save()
-
     def write_all(self, cycle):
         """The config files still missing (in one call), then one call per other file (not tests,
         not docs), in design order. .env is made by Tinker from .env.example, never by the model."""
@@ -187,21 +182,20 @@ class CodeWriter(Phase):
             cycle["code_done"].append(path)
             self.s.save()
 
+    def write_configs_first(self, cycle):
+        """The setup phase: the cycle's new config files (dependencies, the test tool's settings)
+        in one call, before any test or code is written."""
+        configs = [p for p in self.pending(cycle, lambda kind: kind == "config") if not self.ws.exists(p)]
+        if configs:
+            self.write_configs(cycle, configs)
+        cycle["code_done"].extend(configs)
+        self.s.save()
+
     def pending(self, cycle, wanted):
         """The cycle's files of a wanted kind not written yet, in design order (never .env)."""
         done = cycle.setdefault("code_done", [])
         return [p for p in cycle["files"]
                 if p not in done and p != ENV_FILE and wanted(self.p.files.get(p, {}).get("kind"))]
-
-    def check_wiring(self, cycle):
-        """A code file must refer to each file its contract says it uses (by name or stem). One
-        change call per file that does not."""
-        for path in cycle["files"]:
-            if self.p.files.get(path, {}).get("kind") != "code" or not self.ws.exists(path):
-                continue
-            problems = self.wiring_problems(path)
-            if problems:
-                self.rewire(path, problems)
 
     def write_configs(self, cycle, paths):
         """Small files (dependencies, settings, tool settings): one call for all of them."""
@@ -243,42 +237,15 @@ class CodeWriter(Phase):
                                    view.windows)
             for text in change.notes:
                 print(f"  skipped {text}")
-            if path not in change.backups:
-                note = ("Your reply could not be used: " + "; ".join(change.notes))[:600] if change.notes else \
-                    f"Your reply had no usable <<<FILE {path}>>> block."
-                continue
-            if attempt == 1 and info.get("kind") == "code" and self.too_long(path):
-                note = (f"Your {path} had {self.ws.lines(path)} lines; keep it under {MAX_FILE_LINES} by moving a "
-                        f"part into a new small module (give that file too).")
-                self.ws.revert(change)
-                continue
-            self.p.register([p for p in change.created if p != path], "code", f"module split from {path}")
-            others = [p for p in change.files if p != path]
-            print(f"  {'changed' if exists else 'wrote'} {path} ({self.ws.lines(path)} lines)"
-                  + (f"; also {', '.join(others)}" if others else ""))
-            return
+            note = self.unusable(path, change, attempt == 1 and info.get("kind") == "code")
+            if not note:
+                self.say_written(path, change, exists)
+                return
 
     def write_marker(self, path):
         """A file nothing asks anything of (a package marker): written empty, with no call."""
         self.ws.write(path, "")
         print(f"  wrote {path} (empty: no contract or criterion asks anything of it)")
-
-    def wiring_problems(self, path):
-        text = self.ws.read(path)
-        return [f"it must use {u} (refer to it by name), as its contract says" for u in self.p.files[path].get("uses", [])
-                if self.p.files.get(u, {}).get("kind") in ("code", "template")
-                and Path(u).name not in text and Path(u).stem not in text]
-
-    def rewire(self, path, problems):
-        print(f"  {path} is not wired as designed: {'; '.join(problems)}")
-        info = self.p.files[path]
-        view = FileView(self.ws, [Part("Problems", "\n".join(problems), True),
-                                  Part(f"Contract of {path}", self.p.contracts([path]), True)], [path],
-                        [Part("Contracts of the files it uses", self.p.contracts(info.get("uses", [])))],
-                        hints=" ".join(info.get("uses", [])), windows=1)
-        reply = self.s.ask(Prompts.CHANGE_SYSTEM, view, f"Wire {path}")
-        change = self.ws.apply(reply, lambda p, exists: None if p == path else f"only {path} changes now", view.windows)
-        print(f"  rewired {path}" if change else f"  {path}: no usable change")
 
     def criteria_for(self, path, cycle):
         """The criteria this file must meet (the same rule its contract was planned with); the entry
@@ -339,6 +306,19 @@ class CodeWriter(Phase):
             return f"only {path} (and new modules split off it) can be written now"
         return check
 
+    def unusable(self, path, change, first_code):
+        """What to tell the next call when the reply could not be used: it wrote no file, or (the first time
+        for code) one far too long, then undone; "" when it is kept."""
+        if path not in change.backups:
+            return ("Your reply could not be used: " + "; ".join(change.notes))[:600] if change.notes else \
+                f"Your reply had no usable <<<FILE {path}>>> block."
+        if first_code and self.too_long(path):
+            note = (f"Your {path} had {self.ws.lines(path)} lines; keep it under {MAX_FILE_LINES} by moving a "
+                    f"part into a new small module (give that file too).")
+            self.ws.revert(change)
+            return note
+        return ""
+
     def too_long(self, path):
         """A code file far past MAX_FILE_LINES (twice it): it is asked for again, in smaller modules. Only
         then: a rewrite into modules is a long call (minutes of thinking), and a file a little past the
@@ -348,6 +328,39 @@ class CodeWriter(Phase):
             print(f"  {path}: {lines} lines; asking for smaller modules")
             return True
         return False
+
+    def say_written(self, path, change, exists):
+        self.p.register([p for p in change.created if p != path], "code", f"module split from {path}")
+        others = [p for p in change.files if p != path]
+        print(f"  {'changed' if exists else 'wrote'} {path} ({self.ws.lines(path)} lines)"
+              + (f"; also {', '.join(others)}" if others else ""))
+
+    def check_wiring(self, cycle):
+        """A code file must refer to each file its contract says it uses (by name or stem). One
+        change call per file that does not."""
+        for path in cycle["files"]:
+            if self.p.files.get(path, {}).get("kind") != "code" or not self.ws.exists(path):
+                continue
+            problems = self.wiring_problems(path)
+            if problems:
+                self.rewire(path, problems)
+
+    def wiring_problems(self, path):
+        text = self.ws.read(path)
+        return [f"it must use {u} (refer to it by name), as its contract says" for u in self.p.files[path].get("uses", [])
+                if self.p.files.get(u, {}).get("kind") in ("code", "template")
+                and Path(u).name not in text and Path(u).stem not in text]
+
+    def rewire(self, path, problems):
+        print(f"  {path} is not wired as designed: {'; '.join(problems)}")
+        info = self.p.files[path]
+        view = FileView(self.ws, [Part("Problems", "\n".join(problems), True),
+                                  Part(f"Contract of {path}", self.p.contracts([path]), True)], [path],
+                        [Part("Contracts of the files it uses", self.p.contracts(info.get("uses", [])))],
+                        hints=" ".join(info.get("uses", [])), windows=1)
+        reply = self.s.ask(Prompts.CHANGE_SYSTEM, view, f"Wire {path}")
+        change = self.ws.apply(reply, lambda p, exists: None if p == path else f"only {path} changes now", view.windows)
+        print(f"  rewired {path}" if change else f"  {path}: no usable change")
 
 
 class Verifier(Phase):
@@ -380,22 +393,22 @@ class Verifier(Phase):
         self.mark_passing()
         green_at_start = self.p.counts()[0]
         self.work_through([s for s in self.p.criteria if s["status"] in ("todo", "active")], retry=False)
-        parked = [s for s in self.p.criteria if s["status"] == "blocked"]
-        earlier = [s for s in parked if s["id"] in self.s.parked_at_start]  # parked by an earlier session
-        if parked and self.p.counts()[0] > green_at_start:
-            print(f"\nRetrying {len(parked)} parked criteria, now that others pass")
-            self.parked = {}
-            self.work_through(parked, retry=True)
-        elif earlier:
-            print(f"\nRetrying {len(earlier)} criteria parked by an earlier run, once (the project, its plan or "
-                  f"Tinker may have changed since)")
-            self.s.parked_at_start -= {s["id"] for s in earlier}
-            self.parked = {}
-            self.work_through(earlier, retry=True)
-        elif parked:
-            print(f"  {len(parked)} criteria parked and nothing else passes yet: a retry would see the same project")
+        self.retry_parked(green_at_start)
         green, _, total = self.p.counts()
         return green == total
+
+    def recover_interrupted(self):
+        """A run stopped while a criterion was being worked on (Ctrl-C, a kill, a crash) may have
+        left a change that was never checked: the files go back to how they were before it."""
+        pending = self.p.store.get("restore", self.PENDING)
+        if not isinstance(pending, dict) or not isinstance(pending.get("files"), dict):
+            return
+        changed = [p for p, text in pending["files"].items() if self.ws.read(p) != (text or "")]
+        if changed:
+            self.roll_back(pending["files"])
+            print(f"  the last run stopped while {pending.get('criterion', 'a criterion')} was being worked on: "
+                  f"{', '.join(changed)} restored to how they were before it")
+        self.p.store.delete("restore", self.PENDING)
 
     def make_it_build(self):
         """The project builds and loads (its check command passes) before any criterion is worked
@@ -427,18 +440,6 @@ class Verifier(Phase):
             s["status"] = "green" if s["id"] in green else ("blocked" if s["status"] == "blocked" else "todo")
         self.s.save()
 
-    def work_through(self, steps, retry):
-        for step in steps:
-            if step["status"] == "green":
-                continue
-            passed = self.work(step, retry)
-            step["status"] = "green" if passed else "blocked"
-            if passed:
-                self.mark_others_passing()
-            self.s.save()
-            green, _, total = self.p.counts()
-            print(f"  {step['id']} {'passes' if passed else 'is parked'} ({green}/{total} pass)")
-
     def passing(self):
         """The criteria whose tests pass now: one run of all tests; one per test only when some fail."""
         started = time.perf_counter()
@@ -452,6 +453,36 @@ class Verifier(Phase):
             result = {s["id"] for s in tests if self.evaluate(s, checked=True)[0] == "passes"}
         Console.step(f"tests: {len(result)}/{len(self.p.criteria)} criteria pass", started)
         return result
+
+    def work_through(self, steps, retry):
+        for step in steps:
+            if step["status"] == "green":
+                continue
+            passed = self.work(step, retry)
+            step["status"] = "green" if passed else "blocked"
+            if passed:
+                self.mark_others_passing()
+            self.s.save()
+            green, _, total = self.p.counts()
+            print(f"  {step['id']} {'passes' if passed else 'is parked'} ({green}/{total} pass)")
+
+    def retry_parked(self, green_at_start):
+        """The parked criteria get one more try when others passed since, else those parked by an earlier
+        run once (the project, its plan or Tinker may have changed since)."""
+        parked = [s for s in self.p.criteria if s["status"] == "blocked"]
+        earlier = [s for s in parked if s["id"] in self.s.parked_at_start]
+        if parked and self.p.counts()[0] > green_at_start:
+            print(f"\nRetrying {len(parked)} parked criteria, now that others pass")
+            self.parked = {}
+            self.work_through(parked, retry=True)
+        elif earlier:
+            print(f"\nRetrying {len(earlier)} criteria parked by an earlier run, once (the project, its plan or "
+                  f"Tinker may have changed since)")
+            self.s.parked_at_start -= {s["id"] for s in earlier}
+            self.parked = {}
+            self.work_through(earlier, retry=True)
+        elif parked:
+            print(f"  {len(parked)} criteria parked and nothing else passes yet: a retry would see the same project")
 
     def work(self, step, retry):
         """Whether the criterion passes after fixes; parked (False) when nothing helps, the files
@@ -484,43 +515,6 @@ class Verifier(Phase):
             output += f"\n\n{self.FLAKY_NOTE}"
         return state, output
 
-    def climb_safely(self, step, state, output, retry):
-        """climb, with a restore point kept on disk while it goes (a run stopped part way is put
-        back on resume: recover_interrupted); the files go back if nothing helped."""
-        snapshot = self.ws.snapshot(self.p.files)  # with its test: rolling back keeps the test just written
-        self.p.store.put("restore", self.PENDING, {"criterion": step["id"], "files": snapshot})
-        try:
-            if self.climb(step, state, output, retry):
-                return True
-            self.roll_back(snapshot)
-            return False
-        finally:
-            self.p.store.delete("restore", self.PENDING)
-
-    def flaky(self, step):
-        """Whether the criterion's test, which just failed, passes on one of a few reruns."""
-        ref = TestRef(step["test"])
-        return any(self.s.toolchain.run_test(self.ws, ref)[0] == "passes" for _ in range(self.FLAKY_RERUNS))
-
-    def recover_interrupted(self):
-        """A run stopped while a criterion was being worked on (Ctrl-C, a kill, a crash) may have
-        left a change that was never checked: the files go back to how they were before it."""
-        pending = self.p.store.get("restore", self.PENDING)
-        if not isinstance(pending, dict) or not isinstance(pending.get("files"), dict):
-            return
-        changed = [p for p, text in pending["files"].items() if self.ws.read(p) != (text or "")]
-        if changed:
-            self.roll_back(pending["files"])
-            print(f"  the last run stopped while {pending.get('criterion', 'a criterion')} was being worked on: "
-                  f"{', '.join(changed)} restored to how they were before it")
-        self.p.store.delete("restore", self.PENDING)
-
-    def mark_others_passing(self):
-        """A fix may have made other criteria pass too."""
-        for other in self.p.criteria:
-            if other["status"] != "green" and self.evaluate(other)[0] == "passes":
-                other["status"] = "green"
-
     def evaluate(self, step, checked=False):
         """(state, output): missing / build (the check fails) / fails / passes."""
         ref = TestRef(step["test"])
@@ -545,6 +539,11 @@ class Verifier(Phase):
             step["last_error"] = output
         return state, output
 
+    def flaky(self, step):
+        """Whether the criterion's test, which just failed, passes on one of a few reruns."""
+        ref = TestRef(step["test"])
+        return any(self.s.toolchain.run_test(self.ws, ref)[0] == "passes" for _ in range(self.FLAKY_RERUNS))
+
     @staticmethod
     def failure_key(step, output):
         """The failure without the test's own name: criteria failing alike share it."""
@@ -552,12 +551,25 @@ class Verifier(Phase):
         unnamed = "\0"  # a test without a name: nothing in the output is replaced for it
         return Output.signature(output.replace(str(ref), "#").replace(ref.name or unnamed, "#").replace(ref.file, "#"))
 
+    def climb_safely(self, step, state, output, retry):
+        """climb, with a restore point kept on disk while it goes (a run stopped part way is put
+        back on resume: recover_interrupted); the files go back if nothing helped."""
+        snapshot = self.ws.snapshot(self.p.files)  # with its test: rolling back keeps the test just written
+        self.p.store.put("restore", self.PENDING, {"criterion": step["id"], "files": snapshot})
+        try:
+            if self.climb(step, state, output, retry):
+                return True
+            self.roll_back(snapshot)
+            return False
+        finally:
+            self.p.store.delete("restore", self.PENDING)
+
     def climb(self, step, state, output, retry):
         """Fixes until they stop making progress, then reviews against the plan (see ladder); a
         reason to review sooner (see to_review) cuts the fixing short. An attempt that thought to its
         cap always gets its conclusion, even past the attempts allowed. True when the test passes."""
         before = {s["id"] for s in self.p.criteria if s["status"] == "green"}
-        seen, best, total, sideways = {Output.signature(output)}, self.RANK[state], 0, 0
+        climb, total = Climb(state, output), 0
         for approach, patience in self.ladder(step, output, retry):
             stall, concluding = 0, False  # concluding: the last attempt thought to its cap; its conclusion is due
             while (stall < patience or concluding) and total < MAX_TRIES_PER_PASS:
@@ -569,14 +581,8 @@ class Verifier(Phase):
                 state, output = attempt.run()
                 if state == "passes":
                     return True
-                rank = self.RANK[state]
-                # a new failure at the same stage is progress once (a fix may uncover the next problem);
-                # failures that only change shape (compile errors worded anew) are not, until a stage is won
-                sideways = 0 if rank > best else sideways + (Output.signature(output) not in seen)
-                progressed = rank > best or (rank == best and Output.signature(output) not in seen and sideways <= 1)
-                best, stall = max(best, rank), (0 if progressed else stall + 1)
+                stall = 0 if climb.progressed(state, output) else stall + 1
                 concluding = attempt.overthought
-                seen.add(Output.signature(output))
                 step["last_error"] = Output.key_line(output)
                 why = self.to_review(attempt, approach)
                 if why:
@@ -619,6 +625,282 @@ class Verifier(Phase):
                 (self.ws.root / path).unlink(missing_ok=True)
                 del self.p.files[path]
         self.ws.restore(snapshot)
+
+    def mark_others_passing(self):
+        """A fix may have made other criteria pass too."""
+        for other in self.p.criteria:
+            if other["status"] != "green" and self.evaluate(other)[0] == "passes":
+                other["status"] = "green"
+
+
+class Climb:
+    """How a criterion's fixes go: the furthest stage its test reached (Verifier.RANK) and the failures seen.
+    A new failure at the same stage is progress once (a fix may uncover the next problem); failures that only
+    change shape (compile errors worded anew) are not, until a stage is won."""
+
+    def __init__(self, state, output):
+        self.seen, self.best, self.sideways = {Output.signature(output)}, Verifier.RANK[state], 0
+
+    def progressed(self, state, output):
+        rank, signature = Verifier.RANK[state], Output.signature(output)
+        self.sideways = 0 if rank > self.best else self.sideways + (signature not in self.seen)
+        progressed = rank > self.best or (rank == self.best and signature not in self.seen and self.sideways <= 1)
+        self.best = max(self.best, rank)
+        self.seen.add(signature)
+        return progressed
+
+
+class FixAttempt(Worker):
+    """One model call for a failing test: the prompt, the change, and its result."""
+    APPROACH_TEXT = {"fix": "fix the code", "review": "review the test and the code against the plan"}
+
+    def __init__(self, session, verifier, step, approach, output, before):
+        super().__init__(session)
+        self.v = verifier
+        self.step, self.approach, self.output, self.before = step, approach, output, before
+        self.ref = TestRef(step["test"])
+        self.label = f"{self.APPROACH_TEXT[approach].capitalize()} {step['id']}"
+        self.blamed_test = False  # a fix that changed nothing because it only wanted to change a test
+        self.conflict = False     # it broke a test an earlier fix broke too: the two tests may disagree
+        self.overthought = False  # it thought to its cap without an answer
+        self.broken_test, self.broken_output = "", ""  # a test the change broke, and how it failed
+
+    def run(self):
+        """(state, output) after the attempt; the output carries what went wrong."""
+        view = self.prompt()
+        try:
+            reply = self.ask(view)
+        except PromptTooLarge as exc:
+            return "fails", self.output + f"\n(prompt too large: {exc})"
+        if self.approach == "fix" and reply.test_wrong():
+            return self.test_blamed(reply.test_wrong())
+        change = self.ws.apply(reply, self.may_change(view), view.windows)
+        self.remember_wanted_files(reply, change, view)
+        cause = reply.cause() or "?"
+        if not change:
+            return self.no_change(cause, change)
+        return self.tested(change, reply, cause)
+
+    def prompt(self):
+        """The criterion, the files that exist, the failure and the test first (and, after a call
+        that thought to its cap, that thought); then the files most likely involved, whole while
+        they fit (see FileView)."""
+        excerpt = self.ref.excerpt(self.ws, self.p.test_names(self.ref.file))
+        fixed = [Part("Criterion", self.step["behaviour"], True),
+                 Part("Project files (all exist; only those shown below may change)",
+                      ", ".join(p for p in self.p.files if self.ws.exists(p)), True),
+                 Part("Failure output", Output.failure_text(self.output), True, keep="tail", place="last"),
+                 Part(f"Test {self.ref}", excerpt, True)] + self.kept_tests()
+        if self.approach == "review":
+            fixed += self.plan_parts()
+        thought = self.step.pop("unfinished_thought", "")
+        fixed += [Part("Your analysis so far (it ran out of room before an answer: conclude it and answer now)",
+                       thought, True, keep="tail", place="last")] if thought else []
+        candidates = self.candidates()
+        tail = [Part("Contracts", self.p.contracts(candidates[:4])),
+                Part("Already tried", "\n".join(self.step.get("history", [])[-4:]), keep="tail", place="last"),
+                Part("Language", self.p.language, place="first"),
+                *self.s.knowledge_parts(*(("code", "tests") if self.approach == "review" else ("code",)))]
+        return FileView(self.ws, fixed, candidates, tail, output=self.output, hints=excerpt)
+
+    def kept_tests(self):
+        """The tests an earlier change broke (up to two): they pass now and must keep passing."""
+        return [Part(f"Test {ref} (it passes now and must keep passing)", ref.excerpt(self.ws, self.p.test_names(ref.file)),
+                     True, atomic=True) for ref in map(TestRef, self.step.get("keep", [])[:2]) if ref.present(self.ws)]
+
+    def plan_parts(self):
+        """For a review: the request, which decides when the plan contradicts itself, and the criteria of the
+        tests that must keep passing."""
+        return [Part("Request", self.p.run["task"], True, keep="head", place="first")] + \
+            [Part(f"Criterion of {ref}", self.p.criterion_of_test(str(ref)), True)
+             for ref in map(TestRef, self.step.get("keep", [])[:2]) if self.p.criterion_of_test(str(ref))]
+
+    def candidates(self):
+        """Files the model asked for last time first, then those the failure names, then the
+        files the test uses, then the rest (the test file
+        itself only in a review)."""
+        code = [p for p in self.s.files_on_disk("code", "template", "config") if p != ENV_FILE]
+        named = [p for p in self.mentioned(code) if p in code]
+        wanted = [p for p in self.step.get("want", []) if self.ws.exists(p)]
+        own_test = [self.ref.file] if self.approach == "review" else []
+        uses = [p for p in self.p.uses(self.ref.file) if p in code]
+        return list(dict.fromkeys(wanted + own_test + named[:2] + uses + named + code))[:FIX_FILES]
+
+    def mentioned(self, paths):
+        return Output.mentioned_in(self.output, paths)
+
+    def ask(self, view):
+        """The reply. The first call of an approach for a criterion does not think: most failures
+        show their cause, and a call that thinks often thinks for minutes to its cap first. The
+        next ones think (a hard problem needs it); when one thought to its cap without an answer,
+        the call after it does not think (the same prompt would think the same way again): it is
+        given that thought to conclude."""
+        key, tried = f"overthought_{self.approach}", f"tried_{self.approach}"
+        first, concluding = not self.step.get(tried), bool(self.step.pop(key, None))
+        self.step[tried] = self.step.get(tried, 0) + 1
+        think = False if first or concluding else None
+        label = self.label + (" (no thinking: concluding the last one's thought)" if concluding
+                              else " (no thinking first)" if first else "")
+        reply = self.s.ask(self.system(), view, label, max_reply=self.s.model.fix_max, unthinking_retry=False,
+                           think=think)
+        self.overthought = self.s.model.overthought
+        if self.overthought:
+            self.step[key], self.step["unfinished_thought"] = True, self.s.model.last_thought
+        return reply
+
+    def system(self):
+        return Prompts.FIX_SYSTEM if self.approach == "fix" else Prompts.REVIEW_SYSTEM
+
+    def may_change(self, view):
+        def check(path, exists):
+            if not exists:  # the design is settled: a new file now would shadow or duplicate a planned one
+                return None if self.approach == "review" and Path(path).parent == Path(self.ref.file).parent \
+                    else "no new files now; change the files shown"
+            if self.p.files.get(path, {}).get("kind") == "test" or path == self.ref.file:
+                return None if self.approach == "review" and path in view.shown else TESTS_LOCKED
+            return None if path in view.shown else "only the files shown may change"
+        return check
+
+    def remember_wanted_files(self, reply, change, view):
+        """A file it tried to change without seeing it whole is shown first next time."""
+        self.step["want"] = [p for p in reply.named_paths() if p not in change.backups and self.ws.exists(p)
+                             and p not in view.whole][:2]
+
+    def test_blamed(self, why):
+        """The fix found the test wrong, not the code: nothing changes, and the review comes next."""
+        self.blamed_test = True
+        self.record(f"the test is wrong: {why}")
+        print(f"  {self.label}: the test is wrong ({first_line(why, 120)})")
+        return "fails", self.output
+
+    def no_change(self, cause, change):
+        note = "no usable change" + (f" ({'; '.join(change.notes)})" if change.notes else "")
+        folder = str(Path(self.ref.file).parent)
+        refused_near_tests = any(TESTS_LOCKED in n or str(Path(n.split(":", 1)[0]).parent) == folder
+                                 for n in change.notes)  # a test, or a new file beside them
+        self.blamed_test = self.approach == "fix" and refused_near_tests
+        self.record(f"{cause} -> {note}")
+        print(f"  {self.label}: {note}")
+        return "fails", self.output
+
+    def tested(self, change, reply, cause):
+        """(state, output) with the change; passing or not, a change that breaks a passing test goes."""
+        self.p.register(change.created, "test" if self.approach == "review" else "code", f"added for {self.step['id']}")
+        self.s.setup()
+        state, output = self.v.evaluate(self.step)
+        if self.broke_others(change, cause):
+            return "fails", self.output + self.broken_note()
+        self.record(f"{cause} -> {state}")
+        if state == "passes":
+            self.passed(reply, cause)
+        print(f"  {self.label}: changed {', '.join(change.files)} -> {state}"
+              + (f"  ({cause})" if cause != "?" else ""))
+        return state, output
+
+    def passed(self, reply, cause):
+        """A review's corrected criterion taken; what solved it noted for the lessons."""
+        if self.approach == "review" and reply.criterion():
+            self.correct_criterion(reply.criterion())
+        if cause != "?":
+            self.s.note(self.approach, f"{self.step['behaviour'][:120]} | solved: {cause}")
+
+    def correct_criterion(self, text):
+        """The spec says what the corrected test checks: a criterion found wrong (a miscomputed value)
+        is reworded with it, so SPEC.md, the source of truth, and the tests stay the same."""
+        print(f"  {self.step['id']} now reads: {first_line(text, 120)} (was: {first_line(self.step['behaviour'], 80)})")
+        self.step["behaviour"], self.step["title"] = text, text[:80]
+        self.s.save()
+
+    def broke_others(self, change, cause):
+        if not self.before:
+            return False
+        broken = sorted(self.before - self.v.passing())
+        if not broken:
+            return False
+        first = self.p.criterion(broken[0])  # how it failed, while the change is still there: the next try sees why
+        self.broken_test = first["test"]
+        self.broken_output = Output.failure_text(self.v.evaluate(first)[1], OUTPUT_CHARS // 2)
+        self.ws.revert(change)
+        tests = [self.p.criterion(b)["test"] for b in broken]
+        self.keep_passing(tests)
+        names = ", ".join(tests[:2])
+        self.record(f"{cause} -> broke {names}; reverted")
+        print(f"  {self.label}: broke {names}; reverted")
+        return True
+
+    def keep_passing(self, tests):
+        """Tests the next tries must keep passing; one broken before too means the two tests may disagree."""
+        kept = self.step.setdefault("keep", [])
+        self.conflict = any(t in kept for t in tests)
+        kept.extend(t for t in tests if t not in kept)
+
+    def broken_note(self):
+        return (f"\n\nYour last change broke {', '.join(self.step['keep'])} (shown below); "
+                f"it was reverted. With it, {self.broken_test} failed like this:\n{self.broken_output}")
+
+    def record(self, line):
+        self.step.setdefault("history", []).append(f"{self.approach}: {line}")
+
+
+class BuildFix(Worker):
+    """One model call for a project that does not build or load (its check command or its setup
+    fails): the error, the files it names and the dependency files. Code, templates and config
+    may change; tests may not."""
+
+    def __init__(self, session, output, tried=(), concluding=""):
+        super().__init__(session)
+        self.output, self.tried, self.concluding = output, tried, concluding
+        self.thought = ""  # its thought when it thought to its cap without an answer: the next fix concludes it
+
+    def run(self):
+        """What it did, one line (for the next try). The first fix does not think; the next ones do,
+        and the one after a fix that thought to its cap does not: it is given that thought to conclude."""
+        view = self.prompt()
+        try:
+            label = "Make it build" + (" (no thinking: concluding the last one's thought)" if self.concluding else "")
+            reply = self.s.ask(Prompts.BUILD_SYSTEM, view, label, max_reply=self.s.model.fix_max, unthinking_retry=False,
+                               think=False if self.concluding or not self.tried else None)
+        except PromptTooLarge as exc:
+            print(f"  make it build: the prompt does not fit ({exc})")
+            return "the prompt did not fit"
+        if self.s.model.overthought:
+            self.thought = self.s.model.last_thought
+        change = self.ws.apply(reply, self.may_change(view), view.windows)
+        return self.said(change, reply.cause() or "?")
+
+    def prompt(self):
+        """What failed, the files there are (and a thought to conclude); then the files most likely involved."""
+        fixed = [Part("What failed", Output.failure_text(self.output), True, keep="tail"),
+                 Part("Project files (all exist; only those shown below may change)",
+                      ", ".join(p for p in self.p.files if self.ws.exists(p)), True)]
+        fixed += [Part("Your analysis so far (it ran out of room before an answer: conclude it and answer now)",
+                       self.concluding, True, keep="tail", place="last")] if self.concluding else []
+        tail = [Part("Already tried (it still failed)", "\n".join(f"- {t}" for t in self.tried)),
+                Part("Language", self.p.language), *self.s.knowledge_parts("code", "config")]
+        return FileView(self.ws, fixed, self.candidates(), tail, output=self.output, hints=self.output)
+
+    def candidates(self):
+        """The files the error names, then the dependency and other config files, then the code."""
+        files = [p for p in self.s.files_on_disk("code", "template", "config") if p != ENV_FILE]
+        configs = [p for p in files if self.p.files[p].get("kind") == "config"]
+        return list(dict.fromkeys(Output.mentioned_in(self.output, files) + configs + files))[:FIX_FILES]
+
+    def may_change(self, view):
+        def check(path, exists):
+            if not exists or path not in view.shown:
+                return "only the files shown may change now"
+            return TESTS_LOCKED if self.p.files.get(path, {}).get("kind") == "test" else None
+        return check
+
+    def said(self, change, cause):
+        """What the fix did, said and noted for the lessons; one line, for the next try."""
+        for note in change.notes:
+            print(f"  skipped {note}")
+        did = f"changed {', '.join(change.files)}" if change else "no usable change"
+        print(f"  make it build: {did}" + (f"  ({cause})" if cause != "?" else ""))
+        if change and cause != "?":
+            self.s.note("build", cause)
+        return f"{cause} -> {did}"
 
 
 class BugReproducer(Phase):
@@ -669,30 +951,6 @@ class BugReproducer(Phase):
             step["behaviour"] = first_line(expected.group(1), 300)
         return (step, *Verifier(self.s).evaluate(step))
 
-    def why_not(self, step, state, output):
-        """What to tell the model when its test does not show the bug."""
-        if step is None:
-            return output
-        test = step["test"]
-        if state == "passes":
-            return (f"Your test {test} passed on the code as it is, so it does not show the bug. Check what the "
-                    f"report says happens, and test exactly that.")
-        if state == "build":
-            return f"Your test {test} breaks the build (the test is wrong, not the code): {Output.key_line(output)}"
-        if state == "fails":
-            return (f"The test command ran no test for {test}: name the file and the test as the project's test "
-                    f"tool expects. {Output.key_line(output)}")
-        return f"Your reply had no test {test}: {Output.key_line(output)}"
-
-    def drop(self, cycle):
-        """A report no test could show: its test and criterion go, and the cycle closes (nothing
-        was changed in the code), so the next tinker fix or tinker add can start."""
-        for step in self.p.cycle_criteria(cycle):
-            self.p.remove_file(self.ws, TestRef(step["test"]).file)
-            self.p.criteria.remove(step)
-        cycle["phase"], cycle["outcome"] = "done", "not reproduced"
-        self.s.save()
-
     def prompt(self, cycle, note):
         code = self.s.files_on_disk("code", "template")
         named = Output.mentioned_in(asked(cycle), code)
@@ -742,6 +1000,30 @@ class BugReproducer(Phase):
         self.p.register([ref.file], "test", f"reproduces bug {cycle['id']}", self.p.paths("code"))
         return step
 
+    def why_not(self, step, state, output):
+        """What to tell the model when its test does not show the bug."""
+        if step is None:
+            return output
+        test = step["test"]
+        if state == "passes":
+            return (f"Your test {test} passed on the code as it is, so it does not show the bug. Check what the "
+                    f"report says happens, and test exactly that.")
+        if state == "build":
+            return f"Your test {test} breaks the build (the test is wrong, not the code): {Output.key_line(output)}"
+        if state == "fails":
+            return (f"The test command ran no test for {test}: name the file and the test as the project's test "
+                    f"tool expects. {Output.key_line(output)}")
+        return f"Your reply had no test {test}: {Output.key_line(output)}"
+
+    def drop(self, cycle):
+        """A report no test could show: its test and criterion go, and the cycle closes (nothing
+        was changed in the code), so the next tinker fix or tinker add can start."""
+        for step in self.p.cycle_criteria(cycle):
+            self.p.remove_file(self.ws, TestRef(step["test"]).file)
+            self.p.criteria.remove(step)
+        cycle["phase"], cycle["outcome"] = "done", "not reproduced"
+        self.s.save()
+
 
 class TestTool(Worker):
     """Whether the project's tools work, the way the toolchain runs them: setup runs, the test
@@ -781,20 +1063,42 @@ class TestTool(Worker):
         self.s.all_tests_run = None if attempt else self.s.all_tests_run
         code, output = self.s.run_all_tests()
         present = [r for r in self.p.refs() if r.present(self.ws)]
+        problem = self.test_tool_problem(code, output, present)
+        if problem:
+            return "tests", problem
+        if not present:
+            print(f"  the test tool runs (no tests yet): $ {self.s.toolchain.test_all}")
+        return self.linter_runs()
+
+    def test_tool_problem(self, code, output, present):
+        """The output, with what it means, when the test command does not reach the tests, the tests cannot
+        see the app's code, or the one-test command does not pick a test by its name; else ""."""
         reached = self.reaches_code(output) or (not Toolchain.reached_no_test(code, output, present) if present
                                                 else self.ran_empty(code, output))
         if not reached:
             print(f"  $ {self.s.toolchain.test_all}  [{'ran no test' if present else 'did not run'}: a tooling problem]")
-            return "tests", output
+            return output
         unseen = self.unseen_code(output) if present and code else ""
         if unseen:
-            return "tests", unseen
-        unpicked = self.one_test_unpicked(present[0]) if present and present[0].name in output else ""
-        if unpicked:
-            return "tests", unpicked
-        if not present:
-            print(f"  the test tool runs (no tests yet): $ {self.s.toolchain.test_all}")
-        return self.linter_runs()
+            return unseen
+        return self.one_test_unpicked(present[0]) if present and present[0].name in output else ""
+
+    def reaches_code(self, output):
+        """Whether the test command got as far as the app's own code: it names a code file of the
+        plan, one not written yet or one that does not compile (a compiled language builds all of
+        it before any test runs). The tool works; what fails is the code, which the build fixes."""
+        return any(path in output for path in self.p.paths("code"))
+
+    @staticmethod
+    def ran_empty(code, output):
+        """Whether a test command run before any test exists ran and found none: it says so, or it
+        says nothing that looks like an error (quiet settings may make it say nothing at all, and
+        many test tools exit non-zero when they find no test). One that is not there or does not
+        finish did not run."""
+        if code == 0:
+            return True
+        return code not in (None, 126, 127) and (Toolchain.ran_no_test(output)
+                                                 or not Output.ERROR_LINE_RE.search(output))
 
     def unseen_code(self, output):
         """The output, with what it means, when the tests cannot import the project's own code
@@ -811,17 +1115,6 @@ class TestTool(Worker):
         return output + (f"\n(The tests cannot import the project's own module {missed}, which loads fine with the "
                          f"check command: {Output.OWN_CODE_UNSEEN} when it runs from the project folder.)")
 
-    @staticmethod
-    def ran_empty(code, output):
-        """Whether a test command run before any test exists ran and found none: it says so, or it
-        says nothing that looks like an error (quiet settings may make it say nothing at all, and
-        many test tools exit non-zero when they find no test). One that is not there or does not
-        finish did not run."""
-        if code == 0:
-            return True
-        return code not in (None, 126, 127) and (Toolchain.ran_no_test(output)
-                                                 or not Output.ERROR_LINE_RE.search(output))
-
     def one_test_unpicked(self, real):
         """"" when the one-test command runs a test by its name, else why not: a command that answers
         a made-up test name as it answers a real one does not pick tests, and every test it runs
@@ -832,21 +1125,17 @@ class TestTool(Worker):
         made_up = TestRef(f"{real.file}::tinker_made_up_test")
         _, real_output = toolchain.run_test(self.ws, real)
         _, made_up_output = toolchain.run_test(self.ws, made_up)
-
-        def plain(text, name):
-            return re.sub(r"[\d.]+", "", text.replace(name, "<name>"))
-        if plain(real_output, real.name) != plain(made_up_output, made_up.name):
+        if self.unnamed(real_output, real.name) != self.unnamed(made_up_output, made_up.name):
             self.s.one_test_checked = toolchain.test_one
             return ""
         print(f"  $ {real.command(toolchain.test_one)}  [answers a made-up test name the same way: a tooling problem]")
         return (f"{real_output}\n(The one-test command `{toolchain.test_one}` answers a made-up test name the same "
                 f"way as the real test {real.name}: it does not run a test by its name, as the test tool needs it.)")
 
-    def reaches_code(self, output):
-        """Whether the test command got as far as the app's own code: it names a code file of the
-        plan, one not written yet or one that does not compile (a compiled language builds all of
-        it before any test runs). The tool works; what fails is the code, which the build fixes."""
-        return any(path in output for path in self.p.paths("code"))
+    @staticmethod
+    def unnamed(output, name):
+        """An output without the test's name and its numbers (timings, counts)."""
+        return re.sub(r"[\d.]+", "", output.replace(name, "<name>"))
 
     def linter_runs(self):
         """("ok", "") when the linter runs (what it finds does not matter here), else ("lint", why):
@@ -903,9 +1192,20 @@ class ToolchainRepair(Worker):
         """One call that may change only config files and the commands. Returns the fix (for
         knowledge: replayable when it only changed commands or created files), or None."""
         configs = [p for p in self.s.files_on_disk("config") if p != ENV_FILE]
-        similar = self.s.knowledge.similar_fix(failure)
         before = self.s.toolchain.to_dict()
-        reply = self.s.ask(Prompts.TOOLCHAIN_FIX_SYSTEM, [
+        reply = self.ask_fix(output, failure, configs, before)
+        change = self.apply_fix(reply, configs)
+        commands = {k: v for k, v in self.s.toolchain.to_dict().items() if v != before.get(k)}
+        changed = (["toolchain"] if commands else []) + change.files
+        print(f"  toolchain fix: {', '.join(changed) or 'no usable change'}  ({reply.cause() or '?'})")
+        self.s.save()
+        if not changed:
+            return None
+        return self.learned(failure, reply, commands, change)
+
+    def ask_fix(self, output, failure, configs, before):
+        similar = self.s.knowledge.similar_fix(failure)
+        return self.s.ask(Prompts.TOOLCHAIN_FIX_SYSTEM, [
             Part("Output", Output.failure_text(output), True, keep="tail"),
             Part("Toolchain", json.dumps(before), True),
             Part("Language", self.p.language),
@@ -913,6 +1213,9 @@ class ToolchainRepair(Worker):
             *[Part(f"File {p}", self.ws.read(p), atomic=True) for p in configs],
             *self.s.knowledge_parts("toolchain", "config"),
         ], "Fix the toolchain", max_reply=self.s.model.fix_max, unthinking_retry=False)
+
+    def apply_fix(self, reply, configs):
+        """The commands the reply gives, and its config files (new ones, or those shown): the change."""
         try:
             given = reply.toolchain_line()
         except ValueError:
@@ -924,240 +1227,12 @@ class ToolchainRepair(Worker):
         self.p.register(change.created, "config", "added by the toolchain fix")
         for note in change.notes:
             print(f"  skipped {note}")
-        commands = {k: v for k, v in self.s.toolchain.to_dict().items() if v != before.get(k)}
-        changed = (["toolchain"] if commands else []) + change.files
-        print(f"  toolchain fix: {', '.join(changed) or 'no usable change'}  ({reply.cause() or '?'})")
-        self.s.save()
-        if not changed:
-            return None
+        return change
+
+    def learned(self, failure, reply, commands, change):
+        """The fix as knowledge keeps it: replayable when it only changed commands or created files (code it
+        made to get going belongs to this project: only its config files are kept)."""
         replayable = set(change.files) == set(change.created)
-        files = {p: self.ws.read(p) for p in change.created  # code it made to get going belongs to this project
-                 if self.p.files.get(p, {}).get("kind") == "config"}
+        files = {p: self.ws.read(p) for p in change.created if self.p.files.get(p, {}).get("kind") == "config"}
         return {"failure": failure, "cause": reply.cause() or "?",
                 "replay": {"toolchain": commands, "files": files} if replayable else None}
-
-
-class BuildFix(Worker):
-    """One model call for a project that does not build or load (its check command or its setup
-    fails): the error, the files it names and the dependency files. Code, templates and config
-    may change; tests may not."""
-
-    def __init__(self, session, output, tried=(), concluding=""):
-        super().__init__(session)
-        self.output, self.tried, self.concluding = output, tried, concluding
-        self.thought = ""  # its thought when it thought to its cap without an answer: the next fix concludes it
-
-    def run(self):
-        """What it did, one line (for the next try). The first fix does not think; the next ones do,
-        and the one after a fix that thought to its cap does not: it is given that thought to conclude."""
-        fixed = [Part("What failed", Output.failure_text(self.output), True, keep="tail"),
-                 Part("Project files (all exist; only those shown below may change)",
-                      ", ".join(p for p in self.p.files if self.ws.exists(p)), True)]
-        fixed += [Part("Your analysis so far (it ran out of room before an answer: conclude it and answer now)",
-                       self.concluding, True, keep="tail", place="last")] if self.concluding else []
-        tail = [Part("Already tried (it still failed)", "\n".join(f"- {t}" for t in self.tried)),
-                Part("Language", self.p.language), *self.s.knowledge_parts("code", "config")]
-        view = FileView(self.ws, fixed, self.candidates(), tail, output=self.output, hints=self.output)
-        try:
-            label = "Make it build" + (" (no thinking: concluding the last one's thought)" if self.concluding else "")
-            reply = self.s.ask(Prompts.BUILD_SYSTEM, view, label, max_reply=self.s.model.fix_max, unthinking_retry=False,
-                               think=False if self.concluding or not self.tried else None)
-        except PromptTooLarge as exc:
-            print(f"  make it build: the prompt does not fit ({exc})")
-            return "the prompt did not fit"
-        if self.s.model.overthought:
-            self.thought = self.s.model.last_thought
-        change = self.ws.apply(reply, self.may_change(view), view.windows)
-        cause = reply.cause() or "?"
-        for note in change.notes:
-            print(f"  skipped {note}")
-        did = f"changed {', '.join(change.files)}" if change else "no usable change"
-        print(f"  make it build: {did}" + (f"  ({cause})" if cause != "?" else ""))
-        if change and cause != "?":
-            self.s.note("build", cause)
-        return f"{cause} -> {did}"
-
-    def candidates(self):
-        """The files the error names, then the dependency and other config files, then the code."""
-        files = [p for p in self.s.files_on_disk("code", "template", "config") if p != ENV_FILE]
-        configs = [p for p in files if self.p.files[p].get("kind") == "config"]
-        return list(dict.fromkeys(Output.mentioned_in(self.output, files) + configs + files))[:FIX_FILES]
-
-    def may_change(self, view):
-        def check(path, exists):
-            if not exists or path not in view.shown:
-                return "only the files shown may change now"
-            return TESTS_LOCKED if self.p.files.get(path, {}).get("kind") == "test" else None
-        return check
-
-
-class FixAttempt(Worker):
-    """One model call for a failing test: the prompt, the change, and its result."""
-    APPROACH_TEXT = {"fix": "fix the code", "review": "review the test and the code against the plan"}
-
-    def __init__(self, session, verifier, step, approach, output, before):
-        super().__init__(session)
-        self.v = verifier
-        self.step, self.approach, self.output, self.before = step, approach, output, before
-        self.ref = TestRef(step["test"])
-        self.label = f"{self.APPROACH_TEXT[approach].capitalize()} {step['id']}"
-        self.blamed_test = False  # a fix that changed nothing because it only wanted to change a test
-        self.conflict = False     # it broke a test an earlier fix broke too: the two tests may disagree
-        self.overthought = False  # it thought to its cap without an answer
-        self.broken_test, self.broken_output = "", ""  # a test the change broke, and how it failed
-
-    def run(self):
-        """(state, output) after the attempt; the output carries what went wrong."""
-        view = self.prompt()
-        try:
-            reply = self.ask(view)
-        except PromptTooLarge as exc:
-            return "fails", self.output + f"\n(prompt too large: {exc})"
-        if self.approach == "fix" and reply.test_wrong():
-            return self.test_blamed(reply.test_wrong())
-        change = self.ws.apply(reply, self.may_change(view), view.windows)
-        self.remember_wanted_files(reply, change, view)
-        cause = reply.cause() or "?"
-        if not change:
-            return self.no_change(cause, change)
-        self.p.register(change.created, "test" if self.approach == "review" else "code", f"added for {self.step['id']}")
-        self.s.setup()
-        state, output = self.v.evaluate(self.step)
-        if self.broke_others(change, cause):  # passing or not, a change that breaks a passing test goes
-            return "fails", self.output + self.broken_note()
-        self.record(f"{cause} -> {state}")
-        if state == "passes" and self.approach == "review" and reply.criterion():
-            self.correct_criterion(reply.criterion())
-        if state == "passes" and cause != "?":
-            self.s.note(self.approach, f"{self.step['behaviour'][:120]} | solved: {cause}")
-        print(f"  {self.label}: changed {', '.join(change.files)} -> {state}"
-              + (f"  ({cause})" if cause != "?" else ""))
-        return state, output
-
-    def correct_criterion(self, text):
-        """The spec says what the corrected test checks: a criterion found wrong (a miscomputed value)
-        is reworded with it, so SPEC.md, the source of truth, and the tests stay the same."""
-        print(f"  {self.step['id']} now reads: {first_line(text, 120)} (was: {first_line(self.step['behaviour'], 80)})")
-        self.step["behaviour"], self.step["title"] = text, text[:80]
-        self.s.save()
-
-    def ask(self, view):
-        """The reply. The first call of an approach for a criterion does not think: most failures
-        show their cause, and a call that thinks often thinks for minutes to its cap first. The
-        next ones think (a hard problem needs it); when one thought to its cap without an answer,
-        the call after it does not think (the same prompt would think the same way again): it is
-        given that thought to conclude."""
-        key, tried = f"overthought_{self.approach}", f"tried_{self.approach}"
-        first, concluding = not self.step.get(tried), bool(self.step.pop(key, None))
-        self.step[tried] = self.step.get(tried, 0) + 1
-        think = False if first or concluding else None
-        label = self.label + (" (no thinking: concluding the last one's thought)" if concluding
-                              else " (no thinking first)" if first else "")
-        reply = self.s.ask(self.system(), view, label, max_reply=self.s.model.fix_max, unthinking_retry=False,
-                           think=think)
-        self.overthought = self.s.model.overthought
-        if self.overthought:
-            self.step[key], self.step["unfinished_thought"] = True, self.s.model.last_thought
-        return reply
-
-    def broken_note(self):
-        return (f"\n\nYour last change broke {', '.join(self.step['keep'])} (shown below); "
-                f"it was reverted. With it, {self.broken_test} failed like this:\n{self.broken_output}")
-
-    def prompt(self):
-        """The criterion, the files that exist, the failure and the test first (and, after a call
-        that thought to its cap, that thought); then the files most likely involved, whole while
-        they fit (see FileView)."""
-        excerpt = self.ref.excerpt(self.ws, self.p.test_names(self.ref.file))
-        fixed = [Part("Criterion", self.step["behaviour"], True),
-                 Part("Project files (all exist; only those shown below may change)",
-                      ", ".join(p for p in self.p.files if self.ws.exists(p)), True),
-                 Part("Failure output", Output.failure_text(self.output), True, keep="tail", place="last"),
-                 Part(f"Test {self.ref}", excerpt, True)]
-        fixed += [Part(f"Test {ref} (it passes now and must keep passing)", ref.excerpt(self.ws, self.p.test_names(ref.file)),
-                       True, atomic=True) for ref in map(TestRef, self.step.get("keep", [])[:2])
-                  if ref.present(self.ws)]
-        if self.approach == "review":  # the request decides when the plan contradicts itself
-            fixed += [Part("Request", self.p.run["task"], True, keep="head", place="first")]
-            fixed += [Part(f"Criterion of {ref}", self.p.criterion_of_test(str(ref)), True)
-                      for ref in map(TestRef, self.step.get("keep", [])[:2]) if self.p.criterion_of_test(str(ref))]
-        thought = self.step.pop("unfinished_thought", "")
-        fixed += [Part("Your analysis so far (it ran out of room before an answer: conclude it and answer now)",
-                       thought, True, keep="tail", place="last")] if thought else []
-        candidates = self.candidates()
-        tail = [Part("Contracts", self.p.contracts(candidates[:4])),
-                Part("Already tried", "\n".join(self.step.get("history", [])[-4:]), keep="tail", place="last"),
-                Part("Language", self.p.language, place="first"),
-                *self.s.knowledge_parts(*(("code", "tests") if self.approach == "review" else ("code",)))]
-        return FileView(self.ws, fixed, candidates, tail, output=self.output, hints=excerpt)
-
-    def system(self):
-        return Prompts.FIX_SYSTEM if self.approach == "fix" else Prompts.REVIEW_SYSTEM
-
-    def may_change(self, view):
-        def check(path, exists):
-            if not exists:  # the design is settled: a new file now would shadow or duplicate a planned one
-                return None if self.approach == "review" and Path(path).parent == Path(self.ref.file).parent \
-                    else "no new files now; change the files shown"
-            if self.p.files.get(path, {}).get("kind") == "test" or path == self.ref.file:
-                return None if self.approach == "review" and path in view.shown else TESTS_LOCKED
-            return None if path in view.shown else "only the files shown may change"
-        return check
-
-    def remember_wanted_files(self, reply, change, view):
-        """A file it tried to change without seeing it whole is shown first next time."""
-        self.step["want"] = [p for p in reply.named_paths() if p not in change.backups and self.ws.exists(p)
-                             and p not in view.whole][:2]
-
-    def test_blamed(self, why):
-        """The fix found the test wrong, not the code: nothing changes, and the review comes next."""
-        self.blamed_test = True
-        self.record(f"the test is wrong: {why}")
-        print(f"  {self.label}: the test is wrong ({first_line(why, 120)})")
-        return "fails", self.output
-
-    def no_change(self, cause, change):
-        note = "no usable change" + (f" ({'; '.join(change.notes)})" if change.notes else "")
-        folder = str(Path(self.ref.file).parent)
-        refused_near_tests = any(TESTS_LOCKED in n or str(Path(n.split(":", 1)[0]).parent) == folder
-                                 for n in change.notes)  # a test, or a new file beside them
-        self.blamed_test = self.approach == "fix" and refused_near_tests
-        self.record(f"{cause} -> {note}")
-        print(f"  {self.label}: {note}")
-        return "fails", self.output
-
-    def broke_others(self, change, cause):
-        if not self.before:
-            return False
-        broken = sorted(self.before - self.v.passing())
-        if not broken:
-            return False
-        first = self.p.criterion(broken[0])  # how it failed, while the change is still there: the next try sees why
-        self.broken_test = first["test"]
-        self.broken_output = Output.failure_text(self.v.evaluate(first)[1], OUTPUT_CHARS // 2)
-        self.ws.revert(change)
-        tests = [self.p.criterion(b)["test"] for b in broken]
-        kept = self.step.setdefault("keep", [])
-        self.conflict = any(t in kept for t in tests)
-        kept.extend(t for t in tests if t not in kept)
-        names = ", ".join(tests[:2])
-        self.record(f"{cause} -> broke {names}; reverted")
-        print(f"  {self.label}: broke {names}; reverted")
-        return True
-
-    def record(self, line):
-        self.step.setdefault("history", []).append(f"{self.approach}: {line}")
-
-    def candidates(self):
-        """Files the model asked for last time first, then those the failure names, then the
-        files the test uses, then the rest (the test file
-        itself only in a review)."""
-        code = [p for p in self.s.files_on_disk("code", "template", "config") if p != ENV_FILE]
-        named = [p for p in self.mentioned(code) if p in code]
-        wanted = [p for p in self.step.get("want", []) if self.ws.exists(p)]
-        own_test = [self.ref.file] if self.approach == "review" else []
-        uses = [p for p in self.p.uses(self.ref.file) if p in code]
-        return list(dict.fromkeys(wanted + own_test + named[:2] + uses + named + code))[:FIX_FILES]
-
-    def mentioned(self, paths):
-        return Output.mentioned_in(self.output, paths)

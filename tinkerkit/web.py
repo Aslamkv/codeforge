@@ -11,7 +11,7 @@ import urllib.error
 import urllib.parse
 import urllib.request
 
-from .settings import Config, first_line
+from .settings import Config, first_line, is_number
 
 
 class Internet:
@@ -27,8 +27,14 @@ class Internet:
     GONE_AFTER = 2       # network failures in a row after which a backend is not asked again
 
     def __init__(self):
-        self.errors, self.backends_used, self.failures = {}, [], {}
-        reasons = []
+        self.errors, self.failures = {}, {}
+        self.backends_used, reasons = self.ready_backends()
+        self.gone = "" if self.backends_used else ("; ".join(reasons) or "no web backend (tinker use-web NAME)")
+        self.skipped = reasons  # backends set but not usable (said once, when the plugin is in use)
+
+    def ready_backends(self):
+        """([the backends set, in order, that can be used], [why each of the others cannot])."""
+        ready, reasons = [], []
         timeout = float(Config.get("web_timeout"))
         for name in dict.fromkeys(n for n in (Config.get("web"), Config.get("web_fallback")) if n):
             backend = self.backends()[name](timeout)
@@ -37,13 +43,8 @@ class Internet:
                 reasons.append(f"{name}: {why}")
             else:
                 backend.name = name
-                self.backends_used.append(backend)
-        self.gone = "" if self.backends_used else ("; ".join(reasons) or "no web backend (tinker use-web NAME)")
-        self.skipped = reasons  # backends set but not usable (said once, when the plugin is in use)
-
-    @property
-    def backend(self):
-        return self.backends_used[0] if self.backends_used else None
+                ready.append(backend)
+        return ready, reasons
 
     @staticmethod
     def required(option):
@@ -70,27 +71,37 @@ class Internet:
         skipped = f"; not usable: {'; '.join(internet.skipped)}" if internet.skipped else ""
         return f"ready: {internet.describe()}{skipped}"
 
-    def describe(self):
-        return " then ".join(b.name for b in self.backends_used)
+    @staticmethod
+    def check():
+        """web, web_fallback, web_timeout and learn_missing are usable."""
+        for key in ("web", "web_fallback"):
+            Internet.check_backend_name(key)
+        Internet.check_timeout()
+        Internet.check_learn_missing()
+
+    @staticmethod
+    def check_backend_name(key):
+        if Config.get(key) not in ("", *Internet.backends()):
+            raise SystemExit(f"{key} must be one of {', '.join(map(repr, Internet.backends()))} "
+                             f'or "" (none); it is {Config.get(key)!r}')
+
+    @staticmethod
+    def check_timeout():
+        timeout = Config.get("web_timeout")
+        if not is_number(timeout) or timeout <= 0:
+            raise SystemExit(f"web_timeout must be a number of seconds above 0; it is {timeout!r}")
+
+    @staticmethod
+    def check_learn_missing():
+        missing = Config.get("learn_missing")
+        if not is_number(missing) or not isinstance(missing, int) or missing < 1:
+            raise SystemExit(f"learn_missing must be a whole number, 1 or more (the topics a run "
+                             f"with --web may learn); it is {missing!r}")
 
     @staticmethod
     def backends():
         """The web backends, by the name the setting "web" gives one: add a new one here."""
         return {"ollama": OllamaWeb, "duckduckgo": DuckDuckGoWeb}
-
-    @staticmethod
-    def check():
-        """web, web_fallback, web_timeout and learn_missing are usable."""
-        timeout, missing = Config.get("web_timeout"), Config.get("learn_missing")
-        for key in ("web", "web_fallback"):
-            if Config.get(key) not in ("", *Internet.backends()):
-                raise SystemExit(f"{key} must be one of {', '.join(map(repr, Internet.backends()))} "
-                                 f'or "" (none); it is {Config.get(key)!r}')
-        if isinstance(timeout, bool) or not isinstance(timeout, (int, float)) or timeout <= 0:
-            raise SystemExit(f"web_timeout must be a number of seconds above 0; it is {timeout!r}")
-        if isinstance(missing, bool) or not isinstance(missing, int) or missing < 1:
-            raise SystemExit(f"learn_missing must be a whole number, 1 or more (the topics a run "
-                             f"with --web may learn); it is {missing!r}")
 
     def available(self):
         return not self.gone
@@ -98,14 +109,25 @@ class Internet:
     def why(self, key=None):
         return self.gone or self.errors.get(key) or "no answer"
 
+    def describe(self):
+        return " then ".join(b.name for b in self.backends_used)
+
+    @property
+    def backend(self):
+        return self.backends_used[0] if self.backends_used else None
+
     def search(self, query, count):
         """[{title, url, content}] the web search finds (web addresses only), or None."""
         found = self.call(query, lambda backend: backend.search(query, count),
                           lambda r: isinstance(r, list) or "its search gave no list")
         if found is None:
             return None
-        return [{"title": str(r.get("title") or ""), "url": str(r["url"]), "content": str(r.get("content") or "")}
-                for r in found if isinstance(r, dict) and str(r.get("url", "")).startswith(("http://", "https://"))]
+        return [self.as_result(r) for r in found if isinstance(r, dict) and is_web_address(r.get("url", ""))]
+
+    @staticmethod
+    def as_result(found):
+        return {"title": str(found.get("title") or ""), "url": str(found["url"]),
+                "content": str(found.get("content") or "")}
 
     def fetch(self, url):
         """{title, url, content} of a web page, its main text, or None: from the backends in turn."""
@@ -219,14 +241,22 @@ class OllamaWeb(WebBackend):
             with urllib.request.urlopen(request, timeout=self.timeout) as response:
                 body = response.read(self.MAX_BYTES)
         except urllib.error.HTTPError as exc:
-            hint = {401: f": check {self.KEY_ENV}", 403: f": check {self.KEY_ENV}", 429: ": its rate limit, try later"}
-            raise WebError(f"ollama.com answered HTTP {exc.code}{hint.get(exc.code, '')}",
-                           network=exc.code in (401, 403, 429) or (exc.code >= 500 and path != "/web_fetch"),
-                           retry=exc.code == 429 or exc.code >= 500)  # a fetch's 5xx: that page, not the service
+            raise self.refused(exc.code, path)
         except Exception as exc:  # no answer at all: timeout, refused, no network
-            reason = first_line(str(getattr(exc, "reason", "") or exc) or type(exc).__name__, 160)
-            timed_out = isinstance(exc, (TimeoutError, socket.timeout)) or "timed out" in reason
+            reason, timed_out = unreached(exc)
             raise WebError(f"ollama.com cannot be reached ({reason})", network=True, retry=timed_out)
+        return self.json_object(body)
+
+    def refused(self, code, path):
+        """The WebError of an HTTP error: a key refused, a rate limit or the service down is the network
+        failing; a fetch's 5xx is that page, not the service."""
+        hint = {401: f": check {self.KEY_ENV}", 403: f": check {self.KEY_ENV}", 429: ": its rate limit, try later"}
+        return WebError(f"ollama.com answered HTTP {code}{hint.get(code, '')}",
+                        network=code in (401, 403, 429) or (code >= 500 and path != "/web_fetch"),
+                        retry=code == 429 or code >= 500)
+
+    @staticmethod
+    def json_object(body):
         try:
             data = json.loads(body.decode("utf-8", errors="replace"))
         except ValueError:
@@ -252,17 +282,22 @@ class DuckDuckGoWeb(WebBackend):
 
     def search(self, query, count):
         body = self.get(self.SEARCH, self.timeout, form={"q": query})[0]  # a GET is taken for a bot more often
-        results = []
-        for href, title, rest in self.RESULT_RE.findall(body):
-            url = self.target(html.unescape(href))
-            snippet = self.SNIPPET_RE.search(rest)
-            if url and "duckduckgo.com/y.js" not in url:  # its ads link to itself
-                results.append({"url": url, "title": self.plain(title),
-                                "content": self.plain(snippet.group(1)) if snippet else ""})
+        results = self.results(body)
         if not results and ("anomaly" in body.lower() or "result__a" not in body):
             raise WebError("DuckDuckGo answered with its bot check instead of results (too many searches; it "
                            "passes after a while)", retry=True)
         return results[:count]
+
+    def results(self, body):
+        """The results of a results page, without its ads (they link to DuckDuckGo itself)."""
+        results = []
+        for href, title, rest in self.RESULT_RE.findall(body):
+            url = self.target(html.unescape(href))
+            snippet = self.SNIPPET_RE.search(rest)
+            if url and "duckduckgo.com/y.js" not in url:
+                results.append({"url": url, "title": self.plain(title),
+                                "content": self.plain(snippet.group(1)) if snippet else ""})
+        return results
 
     def fetch(self, url):
         return self.read_page(url, self.timeout)
@@ -294,9 +329,8 @@ class DuckDuckGoWeb(WebBackend):
             raise WebError(f"{urllib.parse.urlsplit(url).netloc} answered HTTP {exc.code}",
                            retry=exc.code == 429 or exc.code >= 500)
         except Exception as exc:  # no answer: timeout, refused, no network
-            reason = first_line(str(getattr(exc, "reason", "") or exc) or type(exc).__name__, 160)
+            reason, timed_out = unreached(exc)
             host = urllib.parse.urlsplit(url).netloc
-            timed_out = isinstance(exc, (TimeoutError, socket.timeout)) or "timed out" in reason
             raise WebError(f"{host} cannot be reached ({reason})", network=host in cls.SEARCH and not timed_out,
                            retry=timed_out)
 
@@ -306,7 +340,7 @@ class DuckDuckGoWeb(WebBackend):
         if href.startswith("//"):
             href = "https:" + href
         query = urllib.parse.parse_qs(urllib.parse.urlsplit(href).query)
-        return query["uddg"][0] if "uddg" in query else (href if href.startswith(("http://", "https://")) else "")
+        return query["uddg"][0] if "uddg" in query else (href if is_web_address(href) else "")
 
     @classmethod
     def plain(cls, fragment):
@@ -368,8 +402,7 @@ class PageText(html.parser.HTMLParser):
         if tag == "title" and not self.title and not self.skipping:
             self.in_title = True  # the page's own title (an icon's <title> is skipped with its <svg>)
         attributes = dict(attrs)
-        if self.skipping or tag in self.SKIP or attributes.get("role") in self.SKIP_ROLES \
-                or attributes.get("aria-hidden") == "true" or "hidden" in attributes:
+        if self.skipping or self.not_content(tag, attributes):
             self.skipping += 1
             return
         if (tag in ("main", "article") or attributes.get("role") == "main") and self.main_depth is None:
@@ -377,8 +410,19 @@ class PageText(html.parser.HTMLParser):
         if tag == "pre":
             self.pre += 1
         if tag in self.BLOCKS:
-            self.add("\n" + ("#" * int(tag[1]) + " " if tag in ("h1", "h2", "h3", "h4", "h5", "h6") else
-                             "- " if tag == "li" else ""))
+            self.add("\n" + self.line_mark(tag))
+
+    def not_content(self, tag, attributes):
+        """A script, a menu, a header or footer, or something hidden."""
+        return tag in self.SKIP or attributes.get("role") in self.SKIP_ROLES \
+            or attributes.get("aria-hidden") == "true" or "hidden" in attributes
+
+    @staticmethod
+    def line_mark(tag):
+        """How a block's line begins: a heading's #s, a list item's dash."""
+        if tag in ("h1", "h2", "h3", "h4", "h5", "h6"):
+            return "#" * int(tag[1]) + " "
+        return "- " if tag == "li" else ""
 
     def handle_endtag(self, tag):
         if tag in self.VOID:
@@ -401,10 +445,17 @@ class PageText(html.parser.HTMLParser):
             self.title += data.strip()
         if self.skipping or self.in_title:
             return
-        if self.pre or not data.strip():
-            self.add(data if self.pre else (" " if data else ""))
+        if self.pre:
+            self.add(data)
+        elif not data.strip():
+            self.add(" " if data else "")
         else:
-            self.add((" " if data[0].isspace() else "") + " ".join(data.split()) + (" " if data[-1].isspace() else ""))
+            self.add(self.collapsed(data))
+
+    @staticmethod
+    def collapsed(data):
+        """Text with its whitespace runs made one space (a run at either end kept as one)."""
+        return (" " if data[0].isspace() else "") + " ".join(data.split()) + (" " if data[-1].isspace() else "")
 
     def add(self, text):
         self.all.append(text)
@@ -420,3 +471,13 @@ class WebError(Exception):
     def __init__(self, message, network=False, retry=False):
         super().__init__(message)
         self.network, self.retry = network, retry
+
+
+def unreached(exc):
+    """(why a request had no answer at all, whether it ran out of time)."""
+    reason = first_line(str(getattr(exc, "reason", "") or exc) or type(exc).__name__, 160)
+    return reason, isinstance(exc, (TimeoutError, socket.timeout)) or "timed out" in reason
+
+
+def is_web_address(url):
+    return str(url).startswith(("http://", "https://"))

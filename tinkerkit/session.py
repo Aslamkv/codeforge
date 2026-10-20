@@ -46,24 +46,9 @@ class Session:
             self._knowledge = Knowledge(language)
         return self._knowledge
 
-    def format_code(self):
-        """The toolchain's formatter run over the project, when it has one (after setup: it may be
-        installed there): the model never formats code itself. Formatting only tidies: when it
-        fails, the project goes on without it, and it is not remembered as a command that works."""
-        command = self.toolchain.format
-        if not command:
-            return
-        ok, failed = self.setup()
-        if not ok:
-            return
-        code, output = self.ws.run(self.toolchain.shell(command), timeout=SETUP_TIMEOUT, quiet=True)
-        if code == 0:
-            print(f"  formatted the code: $ {command}")
-            return
-        print(f"  note: the formatter does not work ({first_line(output.strip(), 160) or f'exit code {code}'}); "
-              f"the code stays as written and the project goes on without `{command}`")
-        self.project.spec["toolchain"] = dict(self.toolchain.to_dict(), format="")
-        self.save()
+    @property
+    def toolchain(self):
+        return self.project.toolchain
 
     def save(self):
         """The project kept, and the tracker told how many spec points pass."""
@@ -71,49 +56,6 @@ class Session:
         if self.tracker is not None:
             green, _, total = self.project.counts()
             self.tracker.points(green, total)
-
-    @property
-    def toolchain(self):
-        return self.project.toolchain
-
-    def setup(self, force=False):
-        """Run the setup commands when they or the config files changed; prepare .env."""
-        self.ws.prepare_env()
-        if not force and self.setup_key() == self.project.spec.get("setup_key"):
-            return True, ""
-        ok, output, self.network_waiting = self.toolchain.run_setup(self.ws)
-        if ok and not self.network_waiting:
-            self.setup_done()
-        return ok, output
-
-    def setup_key(self):
-        """What setup depends on: its commands and the config files."""
-        configs = sorted(p for p in self.project.paths("config") if p not in (ENV_FILE, ENV_EXAMPLE))
-        return fingerprint(json.dumps(self.toolchain.setup) + "".join(self.ws.read(p) for p in configs))
-
-    def setup_done(self):
-        self.project.spec["setup_key"] = self.setup_key()
-        self.save()
-
-    def wait_for_network(self):
-        """When all that needs no network is done and some setup still waits for it: that batch is
-        tried again every NETWORK_RETRY seconds until the network is back, then the run goes on by
-        itself (a person who will not wait stops it with Ctrl+C and runs tinker resume later)."""
-        if not self.network_waiting:
-            return
-        began = noted = time.monotonic()
-        print(f"  waiting for the network: {len(self.network_waiting)} setup command(s), tried every "
-              f"{NETWORK_RETRY}s (Ctrl+C stops; tinker resume goes on later)")
-        while self.network_waiting:
-            time.sleep(NETWORK_RETRY)
-            ok, output, self.network_waiting = self.toolchain.run_setup(self.ws, self.network_waiting)
-            if not ok:  # it reached the network and failed for a reason of its own: the checks that follow report it
-                return
-            if self.network_waiting and time.monotonic() - noted >= NETWORK_NOTE:
-                noted = time.monotonic()
-                print(f"  still waiting for the network ({human_duration(noted - began)})")
-        print(f"  the network is back after {human_duration(time.monotonic() - began)}: setup done")
-        self.setup_done()
 
     def ask(self, system, parts, label, **kw):
         """A model call whose reply is files (FILE or LINES blocks), ended as soon as it is complete."""
@@ -138,15 +80,6 @@ class Session:
         chars-per-token estimate moves with every real count)."""
         return int(self.model.limit_chars(system + Prompts.NO_TOOL_CALLS) * 0.95)
 
-    def run_all_tests(self):
-        """All tests, once per state of the project's files: a slow or hanging suite is not run twice."""
-        key = fingerprint("".join(p + self.ws.read(p) for p in sorted(self.project.files)))
-        if self.all_tests_run and self.all_tests_run[0] == key:
-            return self.all_tests_run[1]
-        result = self.toolchain.run_all(self.ws)
-        self.all_tests_run = (key, result)
-        return result
-
     def knowledge_parts(self, *phases):
         """What is known for these phases, as optional parts (dropped first when the prompt is
         full): lessons from earlier projects, then the facts proven for the language, then the facts
@@ -155,9 +88,7 @@ class Session:
         NAME). Each lesson and fact shown is recorded in the cycle's "used", with these phases."""
         lessons = self.knowledge.lessons(phases)
         proven = self.knowledge.facts(phases)
-        known = {fact["id"] for fact in proven}
-        learned = [item for item in self.project.spec.get("learned", [])
-                   if Library.shown_in(item, phases) and item.get("id") not in known]
+        learned = self.learned_for(phases, {fact["id"] for fact in proven})
         self.used([f"lesson:{lesson['id']}" for lesson in lessons] + [f"known:{fact['id']}" for fact in proven]
                   + [f"fact:{item['topic']}:{item['id']}" for item in learned if item.get("id")], phases)
         facts = [f"- [{self.project.language or 'the language'}] {fact['text']}" for fact in proven] + \
@@ -167,6 +98,11 @@ class Session:
                  Part("Learned from the web (current; newer than what you were trained on)", "\n".join(facts),
                       place="first")]
         return parts + ([TaughtCommands.prompt_part()] if "toolchain" in phases else [])
+
+    def learned_for(self, phases, proven):
+        """What the recall phase chose from the web for these phases, but the facts proven already."""
+        return [item for item in self.project.spec.get("learned", [])
+                if Library.shown_in(item, phases) and item.get("id") not in proven]
 
     def used(self, keys, phases):
         """Knowledge shown in prompts of these phases, recorded in the cycle being worked on."""
@@ -193,6 +129,84 @@ class Session:
         events = self.project.spec.setdefault("events", [])
         events.append({"kind": kind, "text": first_line(text, 300)})
         del events[:-30]
+
+    def setup(self, force=False):
+        """Run the setup commands when they or the config files changed; prepare .env."""
+        self.ws.prepare_env()
+        if not force and self.setup_key() == self.project.spec.get("setup_key"):
+            return True, ""
+        ok, output, self.network_waiting = self.toolchain.run_setup(self.ws)
+        if ok and not self.network_waiting:
+            self.setup_done()
+        return ok, output
+
+    def setup_key(self):
+        """What setup depends on: its commands and the config files."""
+        configs = sorted(p for p in self.project.paths("config") if p not in (ENV_FILE, ENV_EXAMPLE))
+        return fingerprint(json.dumps(self.toolchain.setup) + "".join(self.ws.read(p) for p in configs))
+
+    def setup_done(self):
+        self.project.spec["setup_key"] = self.setup_key()
+        self.save()
+
+    def wait_for_network(self):
+        """When all that needs no network is done and some setup still waits for it: that batch is
+        tried again every NETWORK_RETRY seconds until the network is back, then the run goes on by
+        itself (a person who will not wait stops it with Ctrl+C and runs tinker resume later)."""
+        if not self.network_waiting:
+            return
+        began = time.monotonic()
+        print(f"  waiting for the network: {len(self.network_waiting)} setup command(s), tried every "
+              f"{NETWORK_RETRY}s (Ctrl+C stops; tinker resume goes on later)")
+        if not self.retried_until_online(began):
+            return
+        print(f"  the network is back after {human_duration(time.monotonic() - began)}: setup done")
+        self.setup_done()
+
+    def retried_until_online(self, began):
+        """The setup that waits tried again until it ran: True, or False once one reached the network and failed
+        for a reason of its own (the checks that follow report it). A line says so every NETWORK_NOTE seconds."""
+        noted = began
+        while self.network_waiting:
+            time.sleep(NETWORK_RETRY)
+            ok, output, self.network_waiting = self.toolchain.run_setup(self.ws, self.network_waiting)
+            if not ok:
+                return False
+            if self.network_waiting and time.monotonic() - noted >= NETWORK_NOTE:
+                noted = time.monotonic()
+                print(f"  still waiting for the network ({human_duration(noted - began)})")
+        return True
+
+    def format_code(self):
+        """The toolchain's formatter run over the project, when it has one (after setup: it may be
+        installed there): the model never formats code itself. Formatting only tidies: when it
+        fails, the project goes on without it, and it is not remembered as a command that works."""
+        command = self.toolchain.format
+        if not command:
+            return
+        ok, failed = self.setup()
+        if not ok:
+            return
+        code, output = self.ws.run(self.toolchain.shell(command), timeout=SETUP_TIMEOUT, quiet=True)
+        if code == 0:
+            print(f"  formatted the code: $ {command}")
+        else:
+            self.drop_formatter(command, code, output)
+
+    def drop_formatter(self, command, code, output):
+        print(f"  note: the formatter does not work ({first_line(output.strip(), 160) or f'exit code {code}'}); "
+              f"the code stays as written and the project goes on without `{command}`")
+        self.project.spec["toolchain"] = dict(self.toolchain.to_dict(), format="")
+        self.save()
+
+    def run_all_tests(self):
+        """All tests, once per state of the project's files: a slow or hanging suite is not run twice."""
+        key = fingerprint("".join(p + self.ws.read(p) for p in sorted(self.project.files)))
+        if self.all_tests_run and self.all_tests_run[0] == key:
+            return self.all_tests_run[1]
+        result = self.toolchain.run_all(self.ws)
+        self.all_tests_run = (key, result)
+        return result
 
     def files_on_disk(self, *kinds):
         return [p for p in self.project.paths(*kinds) if self.ws.exists(p)]
