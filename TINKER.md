@@ -137,6 +137,16 @@ tinker help
 tinker help task
 ```
 
+## Safety 🛡️
+
+Tinker runs the code it writes: setup commands, tests and the app itself, as you, on your computer.
+It never writes outside the project folder, but the code it writes can do anything you can.
+
+- 🧪 Want it walled off? Run Tinker as a separate user, or in a VM or container.
+- 🌐 With `--web`, pages can steer the model. Read the plan before you `confirm`.
+- 💬 A paired chat can run commands on your computer. Pair only your own private chat, never a group.
+  Keep the bot token secret.
+
 ## Specification 📜
 
 [SPEC.md](SPEC.md) says exactly what Tinker is and does, one numbered point at a time.

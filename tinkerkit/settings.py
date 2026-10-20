@@ -591,6 +591,8 @@ class Store:
         """A connection; the database is made on first use, readable by its owner only."""
         if not self.path.exists():  # new, or deleted since (tinker reset)
             self.create_private_file()
+        elif not self.made:  # one made before it was kept private
+            self.path.chmod(0o600)
         db = sqlite3.connect(self.path, timeout=self.WAIT, isolation_level=None)
         if not self.made:
             self.create_tables(db)

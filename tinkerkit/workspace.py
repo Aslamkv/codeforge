@@ -310,11 +310,19 @@ class Workspace:
         proc.wait()
 
     def exists(self, rel_path):
-        return (self.root / rel_path).is_file()
+        full = self.inside(rel_path)
+        return full is not None and full.is_file()
 
     def read(self, rel_path):
-        full = self.root / rel_path
-        return full.read_text(encoding="utf-8", errors="replace") if full.is_file() else ""
+        full = self.inside(rel_path)
+        return full.read_text(encoding="utf-8", errors="replace") if full and full.is_file() else ""
+
+    def inside(self, rel_path):
+        """The path in the project, or None when it is unusable or leaves the project."""
+        try:
+            return self.resolve(rel_path)
+        except ToolError:
+            return None
 
     def lines(self, rel_path):
         return len(self.read(rel_path).splitlines())

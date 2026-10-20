@@ -295,7 +295,8 @@ phase, learn from the web what the rest of the cycle needs.
   leaves the project, a path that is too long or has odd characters, and a write into `.tinker` or
   `.git`. The root is taken resolved, so a root reached through a symlink works the same.
 - **WS-4** `write` makes the parent folders and ends a non-empty file with a newline. `read` of a
-  missing file gives `""`.
+  missing file gives `""`. `read` and `exists` see only files inside the project: a path that
+  leaves it reads as `""` and does not exist.
 - **WS-5** `apply(reply, may_change)` writes each FILE block that `may_change(path, exists)` allows,
   and keeps a backup (`None` for a new file). It refuses with a note: a placeholder path, a path
   outside the project, a file shown only in part, and an empty body where empty is not allowed.
@@ -747,7 +748,8 @@ phase, learn from the web what the rest of the cycle needs.
 ## channels
 
 - **CHN-1** `Channels` keeps each channel's settings in the home's `channels`, and its secrets apart
-  in `channel_secrets`. `make(name)` builds the channel of its kind, and an unknown name or kind ends
+  in `channel_secrets`. The database is readable by its owner only, even one made before that was
+  so. `make(name)` builds the channel of its kind, and an unknown name or kind ends
   with `SystemExit`. `enabled()` gives nothing when `TINKER_CHANNELS=off`.
 - **CHN-2** `ChannelCommand.run` lists by default and rejects an unknown action. `list` shows each
   channel and its chats. `add` (from options or questions) checks the name, refuses a name taken,

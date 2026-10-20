@@ -109,6 +109,13 @@ def test_write_and_read(ws, project_dir):
     assert ws.lines("deep/er/a.txt") == 1
 
 
+@pytest.mark.spec("WS-4")
+def test_read_and_exists_stay_inside_the_project(ws, project_dir):
+    (project_dir.parent / "outside.txt").write_text("private\n")
+    assert ws.read("../outside.txt") == "" and not ws.exists("../outside.txt")
+    assert ws.read("/etc/hosts") == "" and not ws.exists("~/.ssh/id_rsa")
+
+
 @pytest.mark.spec("WS-5")
 def test_apply_writes_allowed_blocks_and_reverts(ws, project_dir):
     (project_dir / "old.py").write_text("old\n")

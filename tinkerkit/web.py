@@ -271,7 +271,7 @@ class DuckDuckGoWeb(WebBackend):
     from its own server and its main text taken from its HTML (no scripts, styles, menus). Only
     the standard library: nothing to install."""
     SEARCH = "https://html.duckduckgo.com/html/"
-    USER_AGENT = "Mozilla/5.0 (compatible; Tinker; +https://github.com/codeforge)"
+    USER_AGENT = "Mozilla/5.0 (compatible; Tinker; +https://github.com/Aslamkv/codeforge)"
     MAX_BYTES = 2_000_000
     RESULT_RE = re.compile(r'class="result__a"[^>]*href="([^"]+)"[^>]*>(.*?)</a>(.*?)(?=class="result__a"|$)', re.S)
     SNIPPET_RE = re.compile(r'class="result__snippet"[^>]*>(.*?)</a>', re.S)

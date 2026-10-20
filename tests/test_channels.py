@@ -11,6 +11,7 @@ import pytest
 import tinkerkit.channels as channels
 from tinkerkit.channels import ChannelCommand, Channels, TelegramChannel, ask
 from tinkerkit.conversation import ChannelError
+from tinkerkit.settings import Store
 
 
 class BotAPI:
@@ -71,6 +72,14 @@ def test_channels_settings_and_secrets(tinker_home, home_store):
     (tinker_home / "tinker.db").write_bytes(b"not a database at all, just text " * 100)
     with pytest.raises(SystemExit, match="cannot be read"):
         Channels.settings()
+
+
+@pytest.mark.spec("CHN-1")
+def test_a_database_made_readable_to_others_is_made_private(tmp_path):
+    path = tmp_path / "old.db"
+    path.touch(mode=0o644)
+    Store(path).put("channel_secrets", "bot", {"token": "secret"})
+    assert stat.S_IMODE(path.stat().st_mode) == 0o600
 
 
 @pytest.mark.spec("CHN-1")
