@@ -1,0 +1,293 @@
+"""PRJ: the project's plan and record: runs, the checks before a run, the spec and SPEC.md."""
+
+import argparse
+import io
+import json
+import re
+import sys
+from pathlib import Path
+
+import pytest
+
+import tinkerkit.project as project_module
+from tinkerkit.project import Brief, Outcome, RunChecks, Runs, SpecDocument
+from tinkerkit.workspace import TaughtCommands, Workspace
+from conftest import criterion, read_json
+
+
+def run_args(**given):
+    defaults = {"restart": False, "resume": None, "workdir": ".", "spec": None, "spec_file": None, "add": None,
+                "amend": None, "plan_only": False, "web": False, "task": "a calculator", "yes": False}
+    return argparse.Namespace(**dict(defaults, **given))
+
+
+def saved_run(folder, run_id="abc123", cycles=(), steps=()):
+    state = folder / ".tinker"
+    state.mkdir(parents=True, exist_ok=True)
+    run = Runs.new_record("a calculator", folder, None)
+    run["id"] = run_id
+    Runs.save(run, folder)
+    (state / "spec.json").write_text(json.dumps({"steps": list(steps), "counter": len(steps), "cycles": list(cycles)}))
+    return run
+
+
+@pytest.mark.spec("PRJ-1")
+def test_new_record_and_save(tinker_home, project_dir):
+    run = Runs.new_record("a task", project_dir, "plan.md")
+    assert re.fullmatch(r"[0-9a-f]{6}", run["id"])
+    assert {k: run[k] for k in ("task", "workdir", "spec", "status")} == \
+        {"task": "a task", "workdir": str(project_dir), "spec": "plan.md", "status": "running"}
+    Runs.save(run, project_dir)
+    here, indexed = read_json(project_dir / ".tinker" / "run.json"), read_json(tinker_home / "runs" / f"{run['id']}.json")
+    assert here == indexed and "updated" in here
+
+
+@pytest.mark.spec("PRJ-2")
+def test_find_by_id_prefix(tmp_path):
+    for run_id in ("abc123", "abd456"):
+        saved_run(tmp_path / run_id, run_id)
+    (Path(project_module.RUNS_DIR) / "broken.json").write_text("{")
+    assert Runs.find("ABC")["id"] == "abc123"
+    with pytest.raises(SystemExit, match="matches several runs: abc123, abd456"):
+        Runs.find("ab")
+    with pytest.raises(SystemExit, match="No run with ID 'fff'"):
+        Runs.find("fff")
+    assert len(Runs.entries()) == 2
+
+
+@pytest.mark.spec("PRJ-3")
+def test_workdir(tmp_path, monkeypatch):
+    saved_run(tmp_path / "p", "abc123")
+    assert Runs.workdir("abc", None) == tmp_path / "p"
+    monkeypatch.chdir(tmp_path)
+    assert Runs.workdir("", "p") == (tmp_path / "p").resolve()
+    with pytest.raises(SystemExit, match="does not exist"):
+        Runs.workdir("", "nowhere")
+    (tmp_path / "p" / ".tinker" / "run.json").unlink()
+    import shutil
+    shutil.rmtree(tmp_path / "p")
+    with pytest.raises(SystemExit, match="no longer exists"):
+        Runs.workdir("abc", None)
+
+
+@pytest.mark.spec("PRJ-4")
+def test_open_new(tmp_path):
+    folder = tmp_path / "new"
+    folder.mkdir()
+    (tmp_path / "plan.md").write_text("Use SQLite.")
+    run, workdir, spec_text, mode = Runs.open(run_args(workdir=str(folder), spec=str(tmp_path / "plan.md")))
+    assert (mode, spec_text, workdir) == ("new", "Use SQLite.", folder.resolve())
+    assert (folder / ".tinker" / "spec.md").read_text() == "Use SQLite." and run["spec"] == "plan.md"
+    with pytest.raises(SystemExit, match="already holds run"):
+        Runs.open(run_args(workdir=str(folder)))
+
+
+@pytest.mark.spec("PRJ-4")
+def test_open_existing(tmp_path):
+    folder = tmp_path / "p"
+    saved_run(folder)
+    (folder / ".tinker" / "spec.md").write_text("saved spec")
+    run_record = read_json(folder / ".tinker" / "run.json")
+    run_record["status"] = "blocked"
+    (folder / ".tinker" / "run.json").write_text(json.dumps(run_record))
+    run, _, text, mode = Runs.open(run_args(resume="", workdir=str(folder)))
+    assert (mode, text, run["status"]) == ("resume", "saved spec", "running")
+    (tmp_path / "feature.md").write_text("feature spec")
+    _, _, text, mode = Runs.open(run_args(resume="", workdir=str(folder), add=["x"], spec_file=str(tmp_path / "feature.md")))
+    assert (mode, text) == ("change", "feature spec")
+
+
+@pytest.mark.spec("PRJ-5")
+def test_clear_folder_keeps_the_spec_file_and_forgets_its_runs(tmp_path):
+    folder = tmp_path / "p"
+    saved_run(folder, "abc123")
+    (folder / "app.py").write_text("x")
+    (folder / "docs").mkdir()
+    (folder / "docs" / "plan.md").write_text("spec")
+    Runs.clear_folder(folder, (folder / "docs" / "plan.md").resolve(), yes=True)
+    assert [p.name for p in folder.iterdir()] == ["docs"]
+    assert Runs.entries() == []
+
+
+@pytest.mark.spec("PRJ-5")
+def test_clear_folder_refuses_the_wrong_folders(tmp_path, monkeypatch, tinker_home):
+    for folder in (Path.home().resolve(), Path("/"), tinker_home.parent):
+        with pytest.raises(SystemExit, match="will not empty"):
+            Runs.clear_folder(folder, None, yes=True)
+    folder = tmp_path / "p"
+    folder.mkdir()
+    (folder / "keep.txt").write_text("x")
+    monkeypatch.setattr(sys, "stdin", io.StringIO(""))
+    with pytest.raises(SystemExit, match="Nothing deleted"):
+        Runs.clear_folder(folder, None)
+    assert (folder / "keep.txt").exists()
+
+
+@pytest.mark.spec("PRJ-6")
+def test_before_start_for_a_new_run(tmp_path, monkeypatch):
+    monkeypatch.chdir(tmp_path)
+    assert RunChecks.before_start(run_args(workdir=".")) == tmp_path.resolve()
+    with pytest.raises(SystemExit, match="Spec file not found"):
+        RunChecks.before_start(run_args(workdir=".", spec="missing.md"))
+    with pytest.raises(SystemExit, match="does not exist"):
+        RunChecks.before_start(run_args(workdir="nowhere"))
+    saved_run(tmp_path)
+    with pytest.raises(SystemExit, match="already holds run abc123"):
+        RunChecks.before_start(run_args(workdir="."))
+
+
+@pytest.mark.spec("PRJ-6")
+def test_before_start_for_a_saved_run(tmp_path):
+    folder = tmp_path / "p"
+    saved_run(folder, cycles=[{"id": "base", "request": "x", "phase": "nonsense"}])
+    with pytest.raises(SystemExit, match="saved phase 'nonsense'"):
+        RunChecks.before_start(run_args(resume="", workdir=str(folder)))
+    saved_run(folder, cycles=[{"id": "base", "request": "a calculator", "phase": "verify"}])
+    assert RunChecks.before_start(run_args(resume="", workdir=str(folder))) == folder
+    with pytest.raises(SystemExit, match="unfinished project"):
+        RunChecks.before_start(run_args(resume="", workdir=str(folder), add=["more"]))
+    with pytest.raises(SystemExit, match="waits for confirmation"):
+        RunChecks.before_start(run_args(resume="", workdir=str(folder), amend="change"))
+    saved_run(folder, cycles=[])
+    with pytest.raises(SystemExit, match="no project spec yet"):
+        RunChecks.before_start(run_args(resume="", workdir=str(folder), add=["more"]))
+    saved_run(folder, cycles=[{"id": "base", "request": "x", "phase": "done"}])
+    assert RunChecks.before_start(run_args(resume="", workdir=str(folder), add=["more"])) == folder
+    saved_run(folder, cycles=[{"id": "base", "request": "x", "phase": "recall", "awaiting": True}])
+    assert RunChecks.before_start(run_args(resume="", workdir=str(folder), amend="change")) == folder
+
+
+@pytest.mark.spec("PRJ-6")
+def test_restart_reads_the_task_and_spec_first(tmp_path, monkeypatch):
+    folder = tmp_path / "p"
+    saved_run(folder)
+    (folder / ".tinker" / "spec.md").write_text("the spec text")
+    args = run_args(restart=True, workdir=str(folder))
+    assert RunChecks.before_start(args) == folder
+    assert (args.task, args.spec_text, args.spec) == ("a calculator", "the spec text", None)
+    monkeypatch.chdir(tmp_path)
+    with pytest.raises(SystemExit, match="has no task to restart"):
+        RunChecks.before_start(run_args(restart=True, workdir="."))
+
+
+@pytest.mark.spec("PRJ-7")
+def test_project_cycles_and_criteria(make_project, project_dir):
+    project = make_project(cycles=[])
+    base = project.new_cycle("base", "a calculator")
+    fix = project.new_cycle("f1", "a bug", kind="fix")
+    assert (base["phase"], fix["phase"]) == ("recall", "recall")
+    assert project.open_cycle() is base
+    base["phase"] = "done"
+    assert project.open_cycle() is fix and project.cycle("f1") is fix and project.cycle("zz") is None
+    project.spec["counter"] = 0
+    first = project.new_criterion("C", "t", "adds", "tests/test_a.py::test_add", "base", "request", "todo")
+    bug = project.new_criterion("B", "t", "fixes", "tests/test_b.py::test_b", "f1", "bug report", "todo")
+    assert (first["id"], bug["id"]) == ("C1", "B2") and first["history"] == []
+    project.criteria.extend([dict(first, status="green"), dict(bug, status="blocked")])
+    assert project.counts() == (1, 1, 2) and [s["id"] for s in project.parked()] == ["B2"]
+    assert [s["id"] for s in project.cycle_criteria(fix)] == ["B2"]
+    project.save()
+    assert read_json(project_dir / ".tinker" / "spec.json")["steps"][0]["id"] == "C1"
+    assert (project_dir / "SPEC.md").read_text().startswith("# Spec: a calculator")
+
+
+FILES = {"calc.py": {"kind": "code", "role": "the calculator", "contract": ["add(a, b) -> int"], "uses": ["util.py"]},
+         "util.py": {"kind": "code", "role": "helpers", "contract": [], "uses": ["deep.py"]},
+         "deep.py": {"kind": "code", "role": "deeper", "contract": [], "uses": []},
+         "templates/page.html": {"kind": "template", "role": "the page", "contract": [], "uses": []},
+         "web.py": {"kind": "code", "role": "renders page.html", "contract": [], "uses": ["templates/page.html"]},
+         "tests/test_calc.py": {"kind": "test", "role": "tests", "contract": [], "uses": ["calc.py"]},
+         "tests/test_web.py": {"kind": "test", "role": "tests", "contract": [], "uses": ["web.py"]},
+         "requirements.txt": {"kind": "config", "role": "dependencies", "contract": [], "uses": []}}
+
+
+@pytest.mark.spec("PRJ-8")
+def test_criteria_of(make_project):
+    steps = [criterion("C1", "tests/test_calc.py::test_add", "add(2, 3) is 5"),
+             criterion("C2", "tests/test_other.py::test_x", "util.clean(' a ') is 'a'"),
+             criterion("C3", "tests/test_web.py::test_page", "GET / shows the title"),
+             criterion("C4", "tests/test_other.py::test_y", "nothing related")]
+    project = make_project(steps, files=FILES)
+    assert [s["id"] for s in project.criteria_of("calc.py", steps)] == ["C1"]
+    assert [s["id"] for s in project.criteria_of("util.py", steps)] == ["C2"]
+    assert [s["id"] for s in project.criteria_of("templates/page.html", steps)] == ["C3"]
+    assert project.criteria_of("deep.py", steps) == []
+
+
+@pytest.mark.spec("PRJ-9")
+def test_design_helpers(make_project, project_dir):
+    project = make_project(files=dict(FILES), entry="calc.py")
+    project.spec["toolchain"]["run"] = "python3 web.py"
+    assert project.entry_files(["web.py", "calc.py", "util.py"]) == ["calc.py", "web.py"]
+    assert project.contracts(["calc.py", "util.py"]) == "calc.py:\n  - add(a, b) -> int"
+    project.register(["calc.py", "new.py"], "code", "split off", ["calc.py"])
+    assert project.files["calc.py"]["role"] == "the calculator" and project.files["new.py"]["uses"] == ["calc.py"]
+    (project_dir / "requirements.txt").write_text("flask\n")
+    assert project.dependencies(lambda p: (project_dir / p).read_text()) == "requirements.txt:\nflask"
+    assert project.dependencies(lambda p: "") == "requirements.txt:\ndependencies"
+    assert project.uses("calc.py") == ["util.py", "deep.py"] and project.uses("calc.py", depth=1) == ["util.py"]
+    assert project.paths("test") == ["tests/test_calc.py", "tests/test_web.py"]
+    assert project.outline().startswith("- calc.py (code): the calculator")
+    ws = Workspace(project_dir)
+    ws.write("util.py", "x")
+    project.remove_file(ws, "util.py")
+    assert not ws.exists("util.py") and "util.py" not in project.files
+
+
+@pytest.mark.spec("PRJ-9")
+def test_test_names_and_criterion_of_test(make_project):
+    steps = [criterion("C1", "t.py::test_a", "adds"), criterion("C2", "t.py::test_b", "subtracts")]
+    project = make_project(steps)
+    assert project.test_names("t.py") == ["test_a", "test_b"]
+    assert project.criterion_of_test("t.py::test_b") == "subtracts" and project.criterion_of_test("x") == ""
+
+
+@pytest.mark.spec("PRJ-10")
+def test_spec_document(make_project, tinker_home):
+    TaughtCommands.teach("act", ". .venv/bin/activate")
+    steps = [criterion("C1", "t.py::test_add", "add(2, 3) is 5", status="green", source="adds numbers"),
+             criterion("C2", "t.py::test_div", "div(1, 0) says no", status="blocked", last_error="ZeroDivisionError")]
+    cycles = [{"id": "base", "request": "a calculator", "phase": "verify", "constraints": ["stdlib only"],
+               "non_goals": ["a GUI"], "review": ["calc.py: fine"], "data": "SAMPLE = {}"}]
+    toolchain = {"setup": ["python3 -m venv .venv"], "activate": "act", "test_all": "act && pytest -q",
+                 "test_one": "pytest -q {file}::{name}", "lint": "none"}
+    project = make_project(steps, files=dict(FILES), cycles=cycles, toolchain=toolchain,
+                           learned=[{"name": "Flask", "topic": "flask", "phase": "code", "text": "x"}])
+    text = SpecDocument(project).text()
+    assert text.startswith("# Spec: a calculator\n\nRun abc123. Language: Python. Learned from the web and used: Flask.")
+    assert "| C1 | add(2, 3) is 5 | `t.py::test_add` | passes |" in text
+    assert "| C2 | div(1, 0) says no | `t.py::test_div` | parked |" in text
+    assert "- test_all: `. .venv/bin/activate && pytest -q`" in text and "- setup: `python3 -m venv .venv`" in text
+    assert "## Project: a calculator" in text and "Phase: verify" in text
+    for line in ("Constraints:\n- stdlib only", "Not wanted (non-goals):\n- a GUI", "Interface check:\n- calc.py: fine",
+                 "```\nSAMPLE = {}\n```"):
+        assert line in text
+    assert "- `calc.py` [code]: the calculator (uses util.py)\n    - add(a, b) -> int" in text
+    assert "### C1 add(2, 3) is 5" in text and '- From the request: "adds numbers"' in text
+    assert "- Last error: ZeroDivisionError" in text and text.count("Last error") == 1
+
+
+@pytest.mark.spec("PRJ-11")
+def test_brief(tmp_path, make_model, fake_ollama):
+    model = make_model(max_prompt_tokens=1024)
+    state = tmp_path / "state"
+    state.mkdir()
+    assert Brief.load(model, state, "change", "task", "long spec") == ""
+    assert Brief.load(model, state, "new", "task", "  short spec  ") == "short spec"
+    assert (state / "brief.md").read_text() == "short spec"
+    (state / "brief.md").write_text("saved brief")
+    assert Brief.load(model, state, "resume", "task", "anything") == "saved brief"
+    fake_ollama.reply("- condensed", times=20)
+    long_spec = "\n\n".join("requirement " + "x" * 300 for _ in range(30))
+    brief = Brief.make(model, "task", long_spec)
+    assert brief.startswith("- condensed") and len(brief) < len(long_spec)
+    assert all(label.startswith("Brief ") for label in fake_ollama.labels())
+
+
+@pytest.mark.spec("PRJ-12")
+def test_outcome():
+    outcome = Outcome()
+    assert (outcome.status, outcome.exit_code) == ("stopped", 1)
+    for status, code in (("done", 0), ("planned", 0), ("awaiting", 0), ("blocked", 1)):
+        outcome.set(status)
+        assert (outcome.status, outcome.exit_code) == (status, code)
