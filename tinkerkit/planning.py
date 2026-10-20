@@ -518,12 +518,15 @@ class Working:
     def value(cls, sum_):
         """The value of plain arithmetic, or None when it is not that (or divides by zero)."""
         def worked(node):
-            if isinstance(node, ast.Constant) and isinstance(node.value, (int, float)):
-                return node.value
-            if isinstance(node, ast.UnaryOp) and isinstance(node.op, (ast.USub, ast.UAdd)):
-                return -worked(node.operand) if isinstance(node.op, ast.USub) else worked(node.operand)
-            if isinstance(node, ast.BinOp) and type(node.op) in cls.OPERATIONS:
-                return cls.OPERATIONS[type(node.op)](worked(node.left), worked(node.right))
+            match node:
+                case ast.Constant(value=int() | float() as number):
+                    return number
+                case ast.UnaryOp(op=ast.USub(), operand=inner):
+                    return -worked(inner)
+                case ast.UnaryOp(op=ast.UAdd(), operand=inner):
+                    return worked(inner)
+                case ast.BinOp(left, op, right) if type(op) in cls.OPERATIONS:
+                    return cls.OPERATIONS[type(op)](worked(left), worked(right))
             raise ValueError(node)
         try:
             return worked(ast.parse(sum_, mode="eval").body)
@@ -705,11 +708,12 @@ class InterfaceReviewer(Phase):
     @staticmethod
     def problem(item):
         """{file, problem} of a problem the check names (a file of its own, or none); None for an empty one."""
-        if isinstance(item, dict) and str(item.get("problem", "")).strip():
-            file = str(item.get("file") or "").strip()
-            return {"file": str(Path(file)) if file else "", "problem": str(item["problem"]).strip()}
-        if isinstance(item, str) and item.strip():
-            return {"file": "", "problem": item.strip()}
+        match item:
+            case {"problem": problem} if str(problem).strip():
+                file = str(item.get("file") or "").strip()
+                return {"file": str(Path(file)) if file else "", "problem": str(problem).strip()}
+            case str() if item.strip():
+                return {"file": "", "problem": item.strip()}
         return None
 
     def corrected_file(self, item):

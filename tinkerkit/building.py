@@ -1005,15 +1005,17 @@ class BugReproducer(Phase):
         if step is None:
             return output
         test = step["test"]
-        if state == "passes":
-            return (f"Your test {test} passed on the code as it is, so it does not show the bug. Check what the "
-                    f"report says happens, and test exactly that.")
-        if state == "build":
-            return f"Your test {test} breaks the build (the test is wrong, not the code): {Output.key_line(output)}"
-        if state == "fails":
-            return (f"The test command ran no test for {test}: name the file and the test as the project's test "
-                    f"tool expects. {Output.key_line(output)}")
-        return f"Your reply had no test {test}: {Output.key_line(output)}"
+        match state:
+            case "passes":
+                return (f"Your test {test} passed on the code as it is, so it does not show the bug. Check what the "
+                        f"report says happens, and test exactly that.")
+            case "build":
+                return f"Your test {test} breaks the build (the test is wrong, not the code): {Output.key_line(output)}"
+            case "fails":
+                return (f"The test command ran no test for {test}: name the file and the test as the project's test "
+                        f"tool expects. {Output.key_line(output)}")
+            case _:
+                return f"Your reply had no test {test}: {Output.key_line(output)}"
 
     def drop(self, cycle):
         """A report no test could show: its test and criterion go, and the cycle closes (nothing
