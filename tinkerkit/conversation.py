@@ -29,7 +29,7 @@ import threading
 import time
 from pathlib import Path
 
-from .commands import BY_NAME, COMMANDS, TERMINAL_ONLY, named, refs
+from .commands import COMMANDS, TERMINAL_ONLY, named, refs
 from .model import Models, Ollama, OllamaError
 from .project import Runs, Tracker, saved
 from .settings import Config, Home, human_duration
@@ -76,7 +76,33 @@ BARE_RE = re.compile(r"(?<![/\w.-])tinker (?=(?:" + "|".join(sorted(SAID_BARE, k
 USAGE = {c.name: f"✍️ Write `{c.synopsis}`" + (f", e.g. `{c.example}`" if c.example else "") for c in COMMANDS if c.name}
 EXIT = ("exit",)  # end the conversation (in a chat, once confirmed: it cannot be started again from there)
 START = "/start"  # what a chat app sends when a person first opens the bot
-WELCOME = ("task", "confirm", "amend", "status", "runs", "run", "research", "help")  # the commands a welcome shows
+WELCOME = """👋 **Hi, I'm Tinker!**
+I build small programs for you, on this computer, with an AI model that runs right here.
+
+🔨 **Build something**
+- Tell me what you want: `task a calculator in Python`
+- I reply with a plan: what I will build, and how I will test it
+- Like it? Send `confirm`. Want a change? `amend also handle negative numbers`
+- I build it, and you see my progress here, in one message
+
+📂 **Your projects**
+- `runs` lists them all, newest first
+- `run 5 + 3` uses the one built last
+- `add @calc-py a history of results` adds a feature
+- `fix @calc-py 2/0 crashes` fixes a bug
+
+💬 **Ask me anything**
+- Just write to me: what is not a command is a normal chat
+- `research the newest Python release`: I search the web, and name my sources
+- `command how full is my disk`: I find the command line, and run it once you `confirm`
+- `learn rust`: I study it, and use it in my builds
+
+⏳ **While I work**
+- `status` tells what I am doing
+- `stop` stops the build (it is saved: `resume @calc-py` goes on)
+- `emergency your question`: I pause, answer you, then go on
+
+❓ `help` lists everything I can do, and `help task` explains one command."""  # what a chat app's /start gets
 
 
 # === the conversation ============================================================================================
@@ -710,15 +736,9 @@ def app_request(given):
 
 
 def welcome():
-    """The welcome for a person who just opened the bot (/start): what Tinker is, and the first commands to try,
-    tldr-style (what each does, then what to send), from the command table."""
-    lines = ["👋 **Welcome to Tinker!**",
-             "I build small programs on this computer with a local model. Tell me what you want: I plan it, show "
-             "you the plan, and build it once you `confirm`.", "", "🚀 **Try these**"]
-    for name in WELCOME:
-        command = BY_NAME[name]
-        lines += [f"- {command.what[0].upper()}{command.what[1:]}:", f"  `{command.example or command.synopsis}`"]
-    return "\n".join(lines + ["", "💬 Anything else is a normal chat with me."])
+    """The welcome for a person who just opened the bot (/start): what Tinker is, and what to send, grouped by
+    what a beginner does, in plain words."""
+    return WELCOME
 
 
 def stop_runs(skip=()):

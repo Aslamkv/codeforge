@@ -814,9 +814,10 @@ def test_start_is_answered_with_a_welcome(desk):
     desk, channel, script = desk
     say(desk, channel, "/start")
     text = channel.texts()[-1]
-    assert text.startswith("👋 **Welcome to Tinker!**") and "🚀 **Try these**" in text
-    assert "- Build something new, in its own folder in ~/Projects (--spec FILE):\n  `task a calculator in Python`" in text
-    assert "`help [COMMAND]`" in text and text.rstrip().endswith("💬 Anything else is a normal chat with me.")
+    assert text.startswith("👋 **Hi, I'm Tinker!**")
+    for section in ("🔨 **Build something**", "📂 **Your projects**", "💬 **Ask me anything**", "⏳ **While I work**"):
+        assert section in text
+    assert "`task a calculator in Python`" in text and "normal chat" in text and "`help`" in text
     assert calls_of(script) == ["help"] and desk.process is None  # no task, no chat
     say(desk, channel, "/start abcdef")  # a start link with a payload is a start too
     assert channel.texts()[-1] == welcome()

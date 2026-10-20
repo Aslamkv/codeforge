@@ -744,8 +744,9 @@ phase, learn from the web what the rest of the cycle needs.
   stops it as Ctrl-C does. `PAUSE` (SIGUSR1) stops it for an emergency: its tracker says it is paused,
   and it waits until its tracker is removed (at most `RESUME_WAIT` seconds), and then it goes on.
 - **CNV-25** `/start` (what a chat app sends when a person first opens the bot) is answered with a
-  welcome and a short, tldr-style guide for beginners: what Tinker does, and a few commands to try,
-  each with one line on what it does. It is never taken as a chat or a command.
+  welcome and a short, tldr-style guide for beginners in plain words: what Tinker does, then what to
+  send, grouped by what a person does (build something, their projects, ask anything, while it
+  works), each with one line on what it does, and `help`. It is never taken as a chat or a command.
 
 ## channels
 
