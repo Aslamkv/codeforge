@@ -17,6 +17,12 @@ from .settings import (
 from .workspace import TestRef, Toolchain
 
 
+def asked(cycle):
+    """What a cycle asks for: its request, and each change the person asked for while its spec waited
+    for confirmation (tinker amend)."""
+    return cycle["request"] + "".join(f"\nChanged by the person: {change}" for change in cycle.get("amendments", []))
+
+
 class Worker:
     """A part of the work on a project, with what every part needs: the session (the model and
     what earlier projects taught), the project (its plan and state) and its workspace (its files
@@ -236,14 +242,90 @@ class SpecWriter(Phase):
     what uses what, the file a person starts (what a person uses has one, with the simplest
     interface that fits; only code for other code has none) and,
     for a new project, the toolchain (the one that worked before for the language, reused). What
-    the request does not ask for waits until the user asks (tinker add, tinker fix)."""
+    the request does not ask for waits until the user asks (tinker add, tinker fix).
+    A spec the person confirms before anything is built (tinker task --confirm, every task from a chat)
+    is a quick draft (thinking low): the person reviews it, and changes it with tinker amend."""
     TITLE = "Plan: the spec"
 
     def run(self, cycle):
         if cycle.get("specified"):
             return
         system, parts = self.spec_prompt(cycle)
-        plan = self.s.ask_until_usable(system, parts, "Spec", lambda reply: self.read_spec(reply, cycle))
+        think = self.thinking("low") if cycle.get("confirm") else None
+        self.take(cycle, self.s.ask_until_usable(system, parts, "Spec", lambda reply: self.read_spec(reply, cycle),
+                                                 think=think))
+
+    def thinking(self, level):
+        """A think setting below the model's own: level when the model takes levels, off for "none"."""
+        think = self.s.model.think
+        if think in (None, False):
+            return think
+        return False if level == "none" else level if isinstance(think, str) else think
+
+    def amend(self, cycle, change):
+        """The waiting spec changed as the person asks, before anything is built: one call without thinking
+        gives the whole spec again, from the spec as it is and the change, checked as the first one was and
+        numbered from where the cycle began. What changed (+ added, ~ changed, - removed) is kept for the
+        summary; a reply that never works leaves the spec as it was."""
+        before = self.p.cycle_criteria(cycle)
+        current = self.current_spec(cycle, before)
+        saved = (list(self.p.criteria), self.p.spec.get("counter", 0), dict(self.p.files))
+        self.forget(cycle)
+        cycle.setdefault("amendments", []).append(change)
+        system, parts = self.spec_prompt(cycle)
+        parts += [Part("The spec as it is now: give it again whole, in the same JSON, changed only where the "
+                       "person's change asks (a criterion the change adds quotes the change as its source)",
+                       json.dumps(current), True, atomic=True),
+                  Part("The person's change", change, True)]
+        try:
+            plan = self.s.ask_until_usable(system, parts, "Amend the spec", lambda reply: self.read_spec(reply, cycle),
+                                           think=self.thinking("none"))
+        except BaseException:
+            self.p.criteria[:], self.p.spec["counter"] = saved[0], saved[1]
+            self.p.files.clear()
+            self.p.files.update(saved[2])
+            cycle["amendments"].pop()
+            cycle["specified"] = True
+            raise
+        self.take(cycle, plan)
+        cycle["changes"] = self.changes(before, self.p.cycle_criteria(cycle))
+        self.s.save()
+
+    def current_spec(self, cycle, criteria):
+        """The cycle's spec in the JSON a spec reply gives."""
+        files = [{"path": path, "kind": self.p.files[path]["kind"], "role": self.p.files[path].get("role", ""),
+                  "uses": self.p.files[path].get("uses", [])} for path in cycle.get("files", []) if path in self.p.files]
+        spec = {"language": self.p.language,
+                "criteria": [{"text": c["behaviour"], "source": c.get("source", ""), "test": c["test"],
+                              "effort": c.get("effort", 2)} for c in criteria],
+                "files": files, "entry": self.p.spec.get("entry", ""), "non_goals": cycle.get("non_goals", []),
+                "constraints": cycle.get("constraints", []), "data": cycle.get("data", "")}
+        if cycle["id"] == "base":
+            spec["toolchain"] = self.p.toolchain.to_dict()
+        return spec
+
+    def forget(self, cycle):
+        """The cycle's spec taken back, as if never planned: its criteria (numbered again from where they
+        began) and the files it planned that are not written yet."""
+        self.p.criteria[:] = [c for c in self.p.criteria if c.get("cycle") != cycle["id"]]
+        self.p.spec["counter"] = max([int(n) for c in self.p.criteria for n in re.findall(r"\d+", c["id"])[:1]] or [0])
+        for path in cycle.get("files", []):
+            if not self.ws.exists(path):
+                self.p.files.pop(path, None)
+        cycle["specified"] = False
+
+    @staticmethod
+    def changes(before, after):
+        """What a change did to the criteria, matched by their tests: + added, ~ changed, - removed."""
+        was = {c["test"]: c["behaviour"] for c in before}
+        now = {c["test"] for c in after}
+        lines = [f"{'+' if c['test'] not in was else '~'} {c['id']} {c['behaviour']}" for c in after
+                 if was.get(c["test"]) != c["behaviour"]]
+        lines += [f"- {text}" for test, text in was.items() if test not in now]
+        return lines or ["no spec point changed"]
+
+    def take(self, cycle, plan):
+        """A plan read from a spec reply, made the cycle's spec."""
         if cycle["id"] == "base" or not self.p.language:
             self.p.spec["language"] = plan["language"]
             Recaller(self.s).use_language(cycle)
@@ -271,7 +353,7 @@ class SpecWriter(Phase):
         if cycle["id"] == "base":
             learned = self.s.knowledge.toolchain()
             return Prompts.SPEC_SYSTEM, [
-                Part("Request", cycle["request"], True),
+                Part("Request", asked(cycle), True),
                 Part("Requirements from the spec file", cycle.get("brief", "")),
                 Part(f"Toolchain that worked for {self.s.knowledge.language} before (reuse it when the project is in "
                      f"{self.s.knowledge.language}: change only what names that project's files, and give run for "
@@ -279,7 +361,7 @@ class SpecWriter(Phase):
                      json.dumps(learned.to_dict()) if learned else "", atomic=True, place="first"),
                 *self.s.knowledge_parts("spec", "design", "toolchain")]
         return Prompts.FEATURE_SPEC_SYSTEM, [
-            Part("Change requested", cycle["request"], True, keep="tail"),
+            Part("Change requested", asked(cycle), True, keep="tail"),
             Part("Project", self.p.run["task"], True),
             Part("Language", self.p.language),
             Part("Feature requirements", cycle.get("brief", "")),
@@ -371,7 +453,7 @@ class SpecWriter(Phase):
 
     def criteria_from(self, items, cycle, taken=()):
         """The criteria the reply gives, each traced to the request (else dropped)."""
-        request = cycle["request"] + "\n" + cycle.get("brief", "")
+        request = asked(cycle) + "\n" + cycle.get("brief", "")
         out = []
         for item in items if isinstance(items, list) else []:
             text = str(item.get("text") or item.get("behaviour") or "").strip() if isinstance(item, dict) else ""
@@ -715,7 +797,7 @@ class ContractWriter(Worker):
                        Part("Files that use it", "\n".join(callers), atomic=True),
                        Part("External services: adapters and sample data", cycle.get("data", ""), atomic=True,
                             place="first"),
-                       Part("Request", cycle["request"], atomic=True, place="first"),
+                       Part("Request", asked(cycle), atomic=True, place="first"),
                        *self.s.knowledge_parts("design")], criteria[len(taken):]
 
     @staticmethod

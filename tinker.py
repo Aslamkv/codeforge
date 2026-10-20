@@ -264,7 +264,8 @@ class Cli:
         "Build": [
             ('task "TASK" [SPEC]', "build something new (SPEC: a spec file, e.g. plan.md)"),
             ("restart", "build this folder's task again from scratch (asks first)"),
-            ("resume [ID]", "continue a run: this folder's, or the one with ID"),
+            ("resume [ID]", "continue a run: this folder's, or the one with ID (a spec that waits: build it)"),
+            ('amend [ID] "CHANGE"', "change a spec that waits for confirmation (task --confirm)"),
             ('add [ID] "FEATURE"', "add a feature to a built project"),
             ('fix [ID] "BUG"', "fix a bug: what you do, what happens, what should"),
             ("status [ID]", "a run's spec points and whether they pass"),
@@ -298,7 +299,7 @@ class Cli:
     }
     EXAMPLES = ("tinker doctor", 'tinker task "a calculator in Python"', 'tinker add "keep a history of results"',
                 'tinker learn "food bank inventory"', "tinker help task")
-    RUNS = ("task", "restart", "resume", "add", "fix")
+    RUNS = ("task", "restart", "resume", "amend", "add", "fix")
     COMMANDS = RUNS + ("status", "runs", "learn", "memory", "doctor", "models", "use-model", "calibrate", "embed",
                        "list-config", "clear", "reset")
     LEARNING = ("learn",)  # the commands that load the model and read the web (but for teaching a command)
@@ -307,7 +308,10 @@ class Cli:
                 "person can follow (its examples are run to check them).",
         "restart": "Build this folder's task again from scratch: everything in it is deleted (after asking), "
                    "but for its spec file.",
-        "resume": "Continue a run: this folder's, or the one with this ID (from anywhere).",
+        "resume": "Continue a run: this folder's, or the one with this ID (from anywhere). A spec that waits "
+                  "for confirmation (task --confirm) is confirmed: building starts.",
+        "amend": "Change a spec that waits for confirmation (task --confirm), before anything is built: the "
+                 "spec is given again with the change, and waits again (confirm it with tinker resume).",
         "add": "Add a feature to a built project (this folder's, or the run with this ID).",
         "fix": "Fix a bug: describe what you do, what happens and what should happen. A test shows the bug, "
                "then the code is fixed so it passes and every other test still passes.",
@@ -333,7 +337,8 @@ class Cli:
     FIELDS = {"reset": False, "list_config": False, "models": False, "use_model": None, "embed": None,
               "calibrate": None, "learn": None, "memory": False, "runs": False,
               "status": None, "doctor": False, "task": None, "spec": None, "spec_file": None, "restart": False,
-              "resume": None, "add": None, "fix": None, "workdir": None, "plan_only": False, "web": False}
+              "resume": None, "amend": None, "add": None, "fix": None, "workdir": None, "plan_only": False,
+              "web": False, "confirm": False}
     RUN_ID_RE = re.compile(r"[0-9a-fA-F]{3,}")
 
     @staticmethod
@@ -437,6 +442,7 @@ class Cli:
     def parser(command):
         """The parser of one command, with only what that command takes."""
         usage = {"add": 'tinker add [ID] "feature" [--spec FILE] [--web] [--plan-only] [--workdir DIR]',
+                 "amend": 'tinker amend [ID] "change" [--workdir DIR]',
                  "fix": 'tinker fix [ID] "bug" [--web] [--workdir DIR]',
                  "learn": 'tinker learn WHAT  |  tinker learn NAME "DEFINITION"'}.get(command)
         parser = argparse.ArgumentParser(prog=f"tinker {command}", usage=usage, allow_abbrev=False,
@@ -446,8 +452,9 @@ class Cli:
             parser.add_argument("spec", nargs="?", help="a spec file, e.g. plan.md")
         elif command in ("resume", "status"):
             parser.add_argument("id", nargs="?", default="", help="the run's ID (default: this folder's run)")
-        elif command in ("add", "fix"):
-            parser.add_argument("words", nargs="+", metavar="[ID] TEXT", help=f"the {'bug' if command == 'fix' else 'feature'}")
+        elif command in ("add", "fix", "amend"):
+            parser.add_argument("words", nargs="+", metavar="[ID] TEXT",
+                                help={"fix": "the bug", "add": "the feature", "amend": "the change"}[command])
         elif command == "learn":
             parser.add_argument("words", nargs="+", metavar="WHAT [DEFINITION]")
         elif command == "clear":
@@ -460,6 +467,9 @@ class Cli:
             parser.add_argument("--web", action="store_true", help="may learn from the web what it needs")
         if command in ("task", "add"):
             parser.add_argument("--plan-only", action="store_true", help="plan, write SPEC.md and stop for review")
+        if command == "task":
+            parser.add_argument("--confirm", action="store_true", help="stop after a quick spec: build it with "
+                                                                       "tinker resume, change it with tinker amend")
         if command == "add":
             parser.add_argument("--spec", dest="spec_file", metavar="FILE", help="a spec file for the feature")
         if command in Cli.RUNS + ("status",):
@@ -478,7 +488,7 @@ class Cli:
             setattr(args, field, Cli.run_id(given.id, parser))
         elif command == "restart":
             args.restart = True
-        elif command in ("add", "fix"):
+        elif command in ("add", "fix", "amend"):
             setattr(args, field, given.words)
         elif command == "learn":
             if len(given.words) > 2 or not given.words[0].strip():
@@ -518,10 +528,24 @@ class Cli:
             parser.error(Cli.finds_its_folder("tinker resume"))
         if kind in ("add", "fix"):
             Cli.check_request(kind, args, parser)
+        if kind == "amend":
+            Cli.check_amend(args, parser)
 
     @staticmethod
     def finds_its_folder(command):
         return f"{command} ID finds the run's folder itself: remove --workdir (or give --workdir and no ID)"
+
+    @staticmethod
+    def check_amend(args, parser):
+        """amend [ID] "change": a resume of its run, with the change (args.amend)."""
+        if len(args.amend) > 2 or not args.amend[-1].strip():
+            parser.error('use tinker amend "change" or tinker amend ID "change" (quote the change)')
+        run_id = args.amend[0] if len(args.amend) == 2 else ""
+        if run_id and not Cli.RUN_ID_RE.fullmatch(run_id):
+            parser.error(f"'{run_id}' is not a run ID. Use tinker amend \"change\" or tinker amend ID \"change\"")
+        if run_id and args.workdir is not None:
+            parser.error(Cli.finds_its_folder("tinker amend"))
+        args.amend, args.resume = args.amend[-1].strip(), run_id
 
     @staticmethod
     def check_request(kind, args, parser):
@@ -930,6 +954,14 @@ class ProjectRun:
         session, run = self.session, self.record
         brief = Brief.load(session.model, session.project.state, self.mode, run["task"], self.spec_text)
         cycle = self.choose_cycle(brief)
+        if cycle is not None and cycle.get("awaiting"):  # its spec waits for the person: changed, or confirmed
+            if self.args.amend:
+                print("\nPlan: the spec, changed as you asked")
+                SpecWriter(session).amend(cycle, self.args.amend)
+            else:
+                cycle["awaiting"], cycle["confirmed"] = False, True
+                print("Spec confirmed: building it")
+                session.save()
         if cycle is None:
             CycleRunner(session).show_plan()
             print("  every cycle of this run is done; add a feature with tinker add, or fix a bug with tinker fix")
@@ -941,7 +973,8 @@ class ProjectRun:
         """Whatever happened: the model unloaded, what the run learned about it kept, the run and
         the project saved."""
         model, project = self.session.model, self.session.project
-        model.unload()
+        if self.outcome.status != "awaiting":  # a spec that waits keeps the model loaded for the change asked next
+            model.unload()
         Models.remember(model)
         self.record["status"] = self.outcome.status
         Runs.save(self.record, project.workdir)
@@ -999,6 +1032,9 @@ class ProjectRun:
             Runs.save(run, project.workdir)
         elif cycle is None and not project.cycles:
             cycle = project.new_cycle("base", run["task"], brief)
+            if args.confirm:  # its spec waits for the person once it is planned
+                cycle["confirm"] = True
+                project.save()
         return cycle
 
     def print_summary(self):
@@ -1006,6 +1042,8 @@ class ProjectRun:
         print("\n" + "=" * 60)
         if status == "done":
             self.summary_done()
+        elif status == "awaiting":
+            self.summary_awaiting()
         elif status == "planned":
             print(f"Planned: {session.project.workdir / 'SPEC.md'}")
             print(f"Read the plan (and its commands), then build with: tinker resume {self.record['id']}")
@@ -1031,6 +1069,22 @@ class ProjectRun:
         if any(f.get("role", "").lower().startswith("adapter") for f in project.files.values()):
             print("The tests use sample data instead of external services: try those by hand with real settings.")
         print(f'Add a feature with: tinker add {run_id} "..."; fix a bug with: tinker fix {run_id} "..."')
+
+    def summary_awaiting(self):
+        """The spec as a person reads it, to confirm or change before anything is built."""
+        project, run_id = self.session.project, self.record["id"]
+        cycle = project.open_cycle()
+        runs = f"; a person runs it with: {project.toolchain.run}" if project.toolchain.run else ""
+        print(f"📋 Spec for {project.workdir.name} (run {run_id}): {project.language}{runs}")
+        if cycle.get("changes"):
+            print("What changed:" + "".join(f"\n  {line}" for line in cycle["changes"]))
+        print("Tested before any code is written:")
+        for s in project.cycle_criteria(cycle):
+            print(f"  {s['id']}  {s['behaviour']}")
+        if cycle.get("non_goals"):
+            print(f"Not included: {'; '.join(cycle['non_goals'])}")
+        print(f"Build it: tinker resume {run_id}   (in the chat: confirm)")
+        print(f'Change it: tinker amend {run_id} "..."   (in the chat: amend WHAT)')
 
     def summary_blocked(self):
         """Why it stopped: a bug no test showed, a project that does not build, tools that do not
@@ -1220,10 +1274,12 @@ class CycleRunner:
                   f"{s['title']}  -> {s['test']}")
 
     def run(self, cycle, plan_only=False):
-        """Continue a cycle from its saved phase: "done", "blocked" (a phase stopped it) or "planned"
-        (--plan-only, once planning is done)."""
+        """Continue a cycle from its saved phase: "done", "blocked" (a phase stopped it), "planned"
+        (--plan-only, once planning is done) or "awaiting" (its spec waits for the person to confirm it)."""
         phases = FIX_PHASES if cycle.get("kind") == "fix" else PHASES
         while cycle["phase"] != "done":
+            if cycle.get("awaiting"):
+                return "awaiting"
             phase = cycle["phase"]
             if plan_only and phase not in PLANNING_PHASES:
                 self.show_plan()
@@ -1233,6 +1289,8 @@ class CycleRunner:
             if phase in FORMAT_AFTER:
                 self.s.format_code()
             cycle["phase"] = phases[phases.index(phase) + 1]
+            if phase == "spec" and cycle.get("confirm") and not cycle.get("confirmed"):
+                cycle["awaiting"] = True  # the person confirms it (tinker resume) or changes it (tinker amend)
             self.s.save()
             if phase == "review":
                 self.show_plan()

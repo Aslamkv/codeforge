@@ -23,7 +23,7 @@ class Outcome:
         self.status, self.exit_code = "stopped", 1
 
     def set(self, status):
-        """"done" or "planned" (exit code 0), or "blocked" (1)."""
+        """"done", "planned" or "awaiting" (exit code 0), or "blocked" (1)."""
         self.status, self.exit_code = status, (1 if status == "blocked" else 0)
 
 
@@ -71,6 +71,8 @@ class RunChecks:
         RunChecks.check_phases(project)
         if args.add is not None:
             RunChecks.check_open_to_add(project)
+        elif args.amend:
+            RunChecks.check_awaiting(project)
         elif args.plan_only:
             RunChecks.check_planning(project)
         if args.web and args.add is None:
@@ -106,6 +108,15 @@ class RunChecks:
                              f"Finish it first with: tinker resume {run_id}")
         if not project.cycles:
             raise SystemExit(f"Run {run_id} has no project spec yet; continue it with tinker resume first.")
+
+    @staticmethod
+    def check_awaiting(project):
+        """tinker amend: the open cycle's spec waits for the person to confirm it (task --confirm)."""
+        cycle = project.open_cycle()
+        if cycle is None or not cycle.get("awaiting"):
+            raise SystemExit(f"tinker amend changes a spec that waits for confirmation (tinker task --confirm), and "
+                             f"run {project.run.get('id', '?')} has none waiting: change a built project with "
+                             f"tinker add or tinker fix")
 
     @staticmethod
     def check_planning(project):
