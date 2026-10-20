@@ -4,7 +4,8 @@ and tinker channel start reads the chat: it is the only one that does (Telegram 
 bot). From the chat: a task (its spec comes to the chat first, to confirm or amend before anything is built),
 a resume, the runs, their status, stop; anything else is a normal chat with the
 model in use (Talk), told at once when a task holds the model; `command WHAT` has the model name the command
-line that does it, run once the person confirms it (Shell); and `emergency MESSAGE` stops the task
+line that does it, run once the person confirms it (Shell); `research TOPIC` answers from the web, with the
+pages as sources (Research); and `emergency MESSAGE` stops the task
 (saved), answers at once and then goes on with the task. A task run from a terminal is served the same way:
 its progress is kept in RUNNING_DIR, and it is stopped or paused with a signal.
 
@@ -30,6 +31,7 @@ from pathlib import Path
 
 from .model import Models, Ollama, OllamaError
 from .settings import HOME, Config
+from .web import Internet
 
 CHANNELS_FILE = HOME / "channels.json"         # name -> its kind, whether it is enabled, the chats it serves
 SECRETS_FILE = HOME / "channel-secrets.json"   # name -> its secrets (a bot token): mode 600, never printed
@@ -53,15 +55,20 @@ COMMAND_TOKENS = 300                           # the longest reply naming a comm
 COMMAND_TIMEOUT = 120                          # seconds a command run from the chat may take
 COMMAND_SHOWN = 3000                           # chars of its output sent back, folded (its end, when longer)
 COMMAND_READ = 6000                            # ... the model reads to tell what it says
+RESEARCH_SEARCHES = 3                          # web searches a research makes
+RESEARCH_PAGES = 4                             # pages it reads (the first each search finds, then the second ...)
+RESEARCH_PAGE_CHARS = 3500                     # of each page, the parts most about the topic
 
 
 class Markup:
     """The marks a chat message is written with, as in Markdown, each for what it means: **bold** for what
     matters most, *italic* (or _italic_) for an aside, ~~struck~~ for what is gone, `code` for what is typed
-    or named exactly (a command, a path), ```a block``` of code, and ```output for a command's output (folded
-    where the chat can fold it); "- " starts an item. A mark meant as itself is escaped (literal)."""
+    or named exactly (a command, a path), [a link](https://...), ```a block``` of code, and ```output for a
+    command's output (folded where the chat can fold it); "- " starts an item. A mark meant as itself is
+    escaped (literal)."""
     FENCE_RE = re.compile(r"```(\w*)\n?(.*?)(?:\n?```|\Z)", re.S)
     CODE_RE = re.compile(r"`([^`\n]+)`")
+    LINK_RE = re.compile(r"\[([^\]\n]+)\]\((https?://[^)\s]+)\)")
     ESCAPED_RE = re.compile(r"\\([*_`~\\])")
     MARKS = ((re.compile(r"\*\*(?=\S)(.+?)(?<=\S)\*\*"), "b"), (re.compile(r"~~(?=\S)(.+?)(?<=\S)~~"), "s"),
              (re.compile(r"(?<![\w*])\*(?=[^\s*])(.+?)(?<=[^\s*])\*(?![\w*])"), "i"),
@@ -135,14 +142,15 @@ class Markup:
                         else f"<pre>{body}</pre>")
         return cls.render(text, block, lambda code: f"<code>{html.escape(code, quote=False)}</code>",
                           lambda plain: html.escape(plain, quote=False),
-                          lambda tag, inner: f"<{tag}>{inner}</{tag}>", keep)
+                          lambda tag, inner: f"<{tag}>{inner}</{tag}>", keep,
+                          lambda words, url: f'<a href="{html.escape(url)}">{html.escape(words, quote=False)}</a>')
 
     @classmethod
     def plain(cls, text):
         """The text with its marks taken off, for a chat that shows none."""
         keep = cls.keeper()
         return cls.render(text, lambda found: keep(found.group(2).rstrip("\n")), lambda code: code,
-                          lambda plain: plain, lambda tag, inner: inner, keep)
+                          lambda plain: plain, lambda tag, inner: inner, keep, lambda words, url: f"{words} ({url})")
 
     @staticmethod
     def keeper():
@@ -155,10 +163,11 @@ class Markup:
         return keep
 
     @classmethod
-    def render(cls, text, block, code, plain, mark, keep):
-        """text shown with block(fence match), code(text), plain(text) and mark(tag, inner); what is shown
-        as it is (blocks, code, escaped marks) is kept apart until the rest is marked."""
+    def render(cls, text, block, code, plain, mark, keep, link):
+        """text shown with block(fence match), code(text), plain(text), mark(tag, inner) and link(words, url);
+        what is shown as it is (blocks, code, links, escaped marks) is kept apart until the rest is marked."""
         text = cls.FENCE_RE.sub(block, str(text))
+        text = cls.LINK_RE.sub(lambda found: keep(link(found.group(1), found.group(2))), text)
         text = cls.ESCAPED_RE.sub(lambda found: keep(plain(found.group(1))), text)
         text = cls.CODE_RE.sub(lambda found: keep(code(found.group(1))), text)
         text = cls.ITEM_RE.sub("• ", plain(text))
@@ -596,6 +605,7 @@ HELP_ALONE = ("🛠 **What you can send**\n"
               "⏹ `stop` stop the task that is running\n"
               "🚨 `emergency MESSAGE` stop what runs, answer now, then go on\n"
               "🖥 `command WHAT` the command line that does it, run once you confirm\n"
+              "🔎 `research TOPIC` the web searched, answered with its sources\n"
               "❓ `help` this list · 💬 anything else: a normal chat")
 
 
@@ -813,6 +823,111 @@ class Shell:
             channel.edit(chat, sent, f"{head}\n{told}\n{folded}")
 
 
+class Research:
+    """research TOPIC: an answer from the web, with its sources. One quick call names the searches (up to
+    RESEARCH_SEARCHES), the pages they find are read in turn (the first of each search, then the second
+    ..., up to RESEARCH_PAGES; of each, the parts most about the topic), and one call writes the answer
+    from them alone, each claim citing its page. One message says how far it got, and becomes the answer.
+    (tinker learn researches a topic in depth, and keeps it for the builds.)"""
+    SEARCHES_SYSTEM = ("The person wants to know about a topic. Give the web searches that together answer it "
+                       "best: two or three, each looking for something different, in the topic's language. Today "
+                       "is {today}, and you were trained well before it: never assume what the latest version, "
+                       "release or event is, or name one; for something recent, search for it as the latest, "
+                       "with the year {year}. Reply with ONLY JSON: {{\"searches\": [\"...\", \"...\"]}}")
+    ANSWER_SYSTEM = ("Answer what the person asks from these web pages alone, for a chat read on a phone: the "
+                     "answer itself first, in a line or two, then only what matters, in short lines. Today is "
+                     "{today}: what you were trained on may be out of date, so trust the pages, the newest first, "
+                     "and say so when they may be older than what is asked. Each claim "
+                     "cites its page as [n]. Where the pages disagree, say so; where they say nothing, say that "
+                     "too; never anything they do not say. Format for meaning, in Markdown: **bold** for the key "
+                     "facts and numbers, *italic* for an aside, `code` for exact names, \"- \" for items; an emoji "
+                     "only where it says something with less (✅ settled, ⚠️ a caveat or a disagreement, 📅 a "
+                     "date, 💡 a tip). Never a heading or a table, and no list of sources (it is added).")
+
+    def __init__(self, talk):
+        self.talk = talk
+
+    def answer(self, channel, chat, topic, now):
+        """Research topic, in a thread: its message kept up to date, then the answer in it."""
+        threading.Thread(target=self.researching, args=(channel, chat, topic, now), daemon=True).start()
+
+    def researching(self, channel, chat, topic, now):
+        head = f"🔎 **{lit(topic)}**"
+        sent = channel.send(chat, f"{head}\n⏳ _working out what to search_")
+        internet = Internet()
+        if not internet.available():
+            channel.edit(chat, sent, f"{head}\n⚠️ **The web is not usable:** {lit(internet.why())}")
+            return
+        if not self.talk.model():
+            channel.edit(chat, sent, f"{head}\n⚠️ **No model is in use yet:** `tinker use-model NAME`")
+            return
+        busy = "; ".join(r["brief"] for r in now())
+        waits = f"\n⏳ _the model is busy with_ {busy}_: it answers after the current step_" if busy else ""
+        try:
+            searches = self.searches(channel, chat, topic)
+            channel.edit(chat, sent, f"{head}\n🌐 _searching:_ " + " · ".join(f"`{q}`" for q in searches) + waits)
+            pages = self.read(internet, searches)
+            if not pages:
+                channel.edit(chat, sent, f"{head}\n🤷 **Nothing found on the web** for it: {lit(internet.why())}")
+                return
+            channel.edit(chat, sent, f"{head}\n📖 _read {len(pages)} pages; writing the answer_" + waits)
+            told = self.talk.ask(channel, chat, [
+                {"role": "system", "content": self.ANSWER_SYSTEM.format(today=time.strftime("%d %B %Y"))},
+                {"role": "user", "content": f"The person asks: {topic}\n\n" + "\n\n".join(
+                    f"[{n}] {page['title']} ({page['url']})\n{page['content']}" for n, page in enumerate(pages, 1))}],
+                CHAT_REPLY_TOKENS)
+        except OllamaError as exc:
+            channel.edit(chat, sent, f"{head}\n⚠️ **The model did not answer:** {lit(first_words(exc))}")
+            return
+        sources = "\n".join(f"[{n}] [{page['title'][:70] or page['url']}]({page['url']})"
+                             for n, page in enumerate(pages, 1))
+        parts = pieces(f"{head}\n{told}\n\n📚 **Sources**\n{sources}")
+        channel.edit(chat, sent, parts[0])
+        for part in parts[1:]:
+            channel.send(chat, part)
+
+    def searches(self, channel, chat, topic):
+        """The web searches the model names for the topic (the topic itself when it names none)."""
+        data = json_in(self.talk.ask(channel, chat, [
+            {"role": "system", "content": self.SEARCHES_SYSTEM.format(today=time.strftime("%d %B %Y"),
+                                                                    year=time.strftime("%Y"))},
+            {"role": "user", "content": topic}], COMMAND_TOKENS))
+        found = [str(q).strip() for q in data.get("searches") or [] if str(q).strip()]
+        return list(dict.fromkeys(found))[:RESEARCH_SEARCHES] or [topic]
+
+    def read(self, internet, searches):
+        """[{title, url, content}] of the pages the searches find, in turn (a page that cannot be read
+        gives the search's own excerpt), each cut to the parts most about what was searched."""
+        found = [internet.search(query, RESEARCH_PAGES) or [] for query in searches]
+        order, seen = [], set()
+        for rank in range(RESEARCH_PAGES):
+            for results in found:
+                if rank < len(results) and results[rank]["url"] not in seen:
+                    seen.add(results[rank]["url"])
+                    order.append(results[rank])
+        pages, wanted = [], set(re.findall(r"[a-z0-9]{3,}", " ".join(searches).lower()))
+        for result in order[:RESEARCH_PAGES]:
+            page = internet.fetch(result["url"]) or result
+            content = self.most_about(page.get("content") or result.get("content", ""), wanted)
+            if content.strip():
+                pages.append({"title": page.get("title") or result["title"], "url": result["url"], "content": content})
+        return pages
+
+    @staticmethod
+    def most_about(text, wanted):
+        """Of a page, the paragraphs that share the most words with what was searched, in page order,
+        up to RESEARCH_PAGE_CHARS."""
+        paragraphs = [p.strip() for p in re.split(r"\n\s*\n|\n(?=[#*-] )", text) if len(p.strip()) > 40]
+        score = lambda p: len(wanted & set(re.findall(r"[a-z0-9]{3,}", p.lower())))
+        best, size = set(), 0
+        for index in sorted(range(len(paragraphs)), key=lambda i: -score(paragraphs[i])):
+            if size + len(paragraphs[index]) > RESEARCH_PAGE_CHARS:
+                continue
+            best.add(index)
+            size += len(paragraphs[index])
+        return "\n\n".join(paragraphs[i] for i in sorted(best)) or text[:RESEARCH_PAGE_CHARS]
+
+
 def json_in(text):
     """The JSON object a reply holds ({} when none)."""
     found = re.search(r"\{.*\}", text or "", re.S)
@@ -858,13 +973,14 @@ def keep_typing(channel, chat, done):
 
 def command_of(text, commands):
     """The command a message gives (one of commands, sent as its first word, with or without a /), or ""
-    when it is chat. A word alone is a command; with more after it only task, emergency, amend, command, resume ID,
+    when it is chat. A word alone is a command; with more after it only task, emergency, amend, command,
+    research, resume ID,
     status ID, confirm ID and rename NAME are."""
     words = text.split()
     first = words[0].lower().lstrip("/") if words else ""
     if first not in commands:
         return ""
-    if len(words) == 1 or first in ("task", "emergency", "amend", "command") or (first in ("resume", "status", "confirm",
+    if len(words) == 1 or first in ("task", "emergency", "amend", "command", "research") or (first in ("resume", "status", "confirm",
                                                                                   "rename") and len(words) == 2):
         return first
     return ""
@@ -937,7 +1053,7 @@ class Alone:
     its own tinker (which does not report too); its printed progress goes to the chat. Tasks run from a
     terminal are served too (running_elsewhere). Anything that is not a command is a normal chat."""
     COMMANDS = ("task", "resume", "runs", "status", "stop", "help", "emergency", "confirm", "amend", "rename",
-                "command")
+                "command", "research")
     RUN_RE = re.compile(r"^Run ([0-9a-f]{3,}) \(")  # a run's first line: its ID
     FOLDER_LINE_RE = re.compile(r"^Project: (/.+)$")  # its header's: its folder
 
@@ -946,6 +1062,7 @@ class Alone:
         self.process = self.reporter = self.task = None  # task: {arguments, folder, title, run} of the last one
         self.lock, self.talk = threading.Lock(), Talk(HELP_ALONE)
         self.shell = Shell(self.talk, self.root)
+        self.research = Research(self.talk)
         self.urgent = False  # an emergency is being answered: no task starts meanwhile
         self.waiting = None  # {run, folder, title, spec} of the spec that waits for confirm or amend
 
@@ -988,6 +1105,12 @@ class Alone:
                     continue
                 if proposed:
                     channel.send(message.chat, f"🚫 _Not run:_ `{proposed[0]}`")
+                if command == "research":
+                    if len(message.text.split()) == 1:
+                        channel.send(message.chat, "✍️ Write `research TOPIC`, e.g. `research the newest Python release`")
+                    else:
+                        self.research.answer(channel, message.chat, after_word(message).text, self.now)
+                    continue
                 if command == "command":
                     if len(message.text.split()) == 1:
                         channel.send(message.chat, "✍️ Write `command WHAT`, e.g. `command show the free disk space`")

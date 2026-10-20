@@ -18,8 +18,8 @@ class Internet:
     """The Internet plugin: web search and web fetch through the backend config.json's "web" names
     (one of backends()), and, only when set, its "web_fallback": what the first cannot answer, the
     fallback is asked, and a first backend that is not usable (no key) leaves the fallback alone.
-    Used only when asked: by tinker learn, and by the recall phase of a run started with --web; nothing
-    else goes online. Asked for and not usable, it says why before
+    Used only when asked: by tinker learn, by the recall phase of a run started with --web, and by research
+    TOPIC from a chat (channels); nothing else goes online. Asked for and not usable, it says why before
     anything starts. Its calls never raise: what fails gives None and why() says why. A moment's
     trouble (a timeout, a rate limit) is asked again once; a backend that cannot be reached twice in
     a row is not asked again by the same command, and once none is left the run carries on without."""
