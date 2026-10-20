@@ -199,6 +199,12 @@ import time
 import traceback
 from pathlib import Path
 
+# Checked before tinkerkit, which an older Python cannot even read; so that this check runs there, this file
+# keeps to syntax Python 3.9 reads (no match, no t-strings).
+if sys.version_info < (3, 14):
+    raise SystemExit(f"Tinker needs Python 3.14 or newer; this is {sys.version.split()[0]}. "
+                     f"On a Mac: brew install python")
+
 from tinkerkit.building import BugReproducer, CodeWriter, TestToolSetup, TestWriter, Verifier
 from tinkerkit.commands import BY_NAME, COMMANDS, GROUPS, refs
 from tinkerkit.finishing import FinalReview, LessonWriter, ReadmeWriter, Tidy
