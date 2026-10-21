@@ -5,7 +5,7 @@ import re
 from pathlib import Path
 
 from .settings import (
-    ENV_EXAMPLE, ENV_FILE, FACTS_PER_CHUNK, FACT_PHASES, LESSON_PHASES, MAX_COMMANDS, MAX_FILE_LINES, MAX_QUERIES,
+    ENV_EXAMPLE, ENV_FILE, FACTS_PER_CHUNK, FACTS_PER_SLOT, FACT_PHASES, LESSON_PHASES, MAX_COMMANDS, MAX_FILE_LINES,
     PLAYBOOK_RULES, RESEARCH_CHECKS, RESEARCH_GAPS, RESEARCH_QUERIES, RESEARCH_QUESTIONS, RULE_CHARS, TOOL_ROLES,
     TRIM_FLOOR, first_line,
 )
@@ -680,67 +680,38 @@ request needs that are not listed and that it may not know well or as they are t
 frameworks, libraries and techniques the request names or clearly implies), most important first;
 none when learning now is not possible. Reply with ONLY JSON: {"use":["python"],"learn":["Flask"]}"""
 
-    LEARN_PLAN_SYSTEM = f"""Plan how to learn a topic from the web for a code generator that knows only what it was
-trained on. The topic may be a framework, a library, a tool or a technique, or name several. Give its
-name, one sentence on what it is, up to {MAX_QUERIES} web searches, at least one for each thing it names,
-that find how to use it today (setup, commands, API, configuration) and its current version and what
-changed (name the year when it helps), and, only if it is software that may be installed on this
-machine, up to {MAX_COMMANDS} commands that show its version and exit (one command each: no shell
-operators, nothing installed or changed). "language": the language's name when the topic is mainly a
-programming language (with or without its tools), else "". "kind": "tool" for software, a library, a
-framework or a technique to use; "domain" for a field, practice, standard or subject a program must get
-right (food bank inventory, accessibility rules, double-entry bookkeeping), which is researched.
-Reply with ONLY JSON (this example is for Flask):
-{{"name":"Flask","summary":"A small web framework for Python.","language":"","kind":"tool",
- "queries":["Flask quickstart routes templates","Flask latest release what changed"],
- "commands":["python3 -m flask --version"]}}"""
-
-    LANGUAGE_PLAN_SYSTEM = f"""Plan how to learn a programming language from the web as it is today, for a code generator
-that knows only what it was trained on and must build software in it quickly and well. From the request
-take the language, the version it asks for (else the newest stable one) and the tools it names. Give:
-- name, version, one sentence on what it is;
-- tools: one per role the language has, of {", ".join(TOOL_ROLES)} (build only if it is compiled;
-  environment: how a project's dependencies are kept apart): the tool the request names for a role, else
-  the one most used today (types: a static type checker, only if the language needs one besides its
-  compiler); each with one web search that finds how to use it in a project (install, commands, its
-  strictest useful configuration) and one command that shows its version and exits;
-- searches: 2 for idioms (idiomatic, modern, efficient code in it today: the constructs and standard
-  library to prefer), 2 for new (the newest stable releases: features, deprecations, removals; name the
-  year), 1 for pitfalls (common mistakes and anti-patterns), 1 for conventions (project layout, style
-  guide);
-- commands: up to 2 that show the language's version and exit.
-Commands: one each, no shell operators, nothing installed or changed. If the request is no programming
-language, reply {{"name":"","summary":"what it is instead"}}.
+    SLOT_PLAN_SYSTEM = f"""Plan how to learn a topic for a code generator that knows only what it was trained on.
+Below are the topic, the titles and snippets of web pages already found about it, and the slots learning
+fills: what it must find out, for a language and for a tool. Say what the topic is: "kind": "language" for a
+programming language; "tool" for a library, framework or tool used in code; "domain" for a field, practice,
+standard or subject a program must get right (food bank inventory, accessibility rules), which is researched.
+Give its name, its newest stable version the pages name (else ""), and one sentence on what it is;
+"language": the language's name when it is one, else the language a tool is used with ("" when none);
+"docs": its official documentation site: "root", the address of its newest documentation, and "versioned",
+the address of one version's documentation with {{version}} where the version goes ("" when the site has no
+such addresses);
+"commands": up to {MAX_COMMANDS} commands that show its installed version and exit (one command each: no shell
+operators, nothing installed or changed);
+"tools": for a language only, one per role it has, of {", ".join(TOOL_ROLES)}: the one the topic names, else
+the one most used today, each with the command that shows its version and its "docs" as above;
+"hints": for some slots of its kind, a few words on what to look for about this topic;
+"followups": for each slot of its kind its documentation may not answer, one web search that answers it.
 Reply with ONLY JSON (this example is for Go):
-{{"name":"Go","version":"1.25","summary":"A compiled, statically typed language with built-in concurrency.",
- "tools":[{{"role":"tests","name":"go test","search":"go test flags table-driven tests","command":"go version"}}],
- "searches":[{{"section":"idioms","query":"idiomatic Go effective Go 2025"}},
-  {{"section":"new","query":"Go 1.25 release notes"}}],"commands":["go version"]}}"""
+{{"kind":"language","name":"Go","version":"1.25","summary":"A compiled, statically typed language with built-in
+concurrency.","language":"Go","docs":{{"root":"https://go.dev/doc/","versioned":""}},"commands":["go version"],
+ "tools":[{{"role":"lint","name":"golangci-lint","command":"golangci-lint --version",
+   "docs":{{"root":"https://golangci-lint.run/","versioned":""}}}}],
+ "hints":{{"toolchain":"go test, gofmt, go vet, go mod"}},"followups":{{"limitations":"Go garbage collector limits"}}}}"""
 
-    TOPIC_FOCUS = ("how to set up and use {topic} today (commands, API, configuration), its current version and what "
-                   "is new or changed, its conventions and good practice")
-
-    LANGUAGE_FOCUS = {
-        "idioms": ("how idiomatic, modern {language} is written today: the constructs, types and standard library to "
-                   "prefer and what each replaces, error handling, clear and efficient code (each with a short example "
-                   "when the page gives one)"),
-        "new": ("what the newest stable releases of {language} added, changed, deprecated or removed, and how code "
-                "should use it (nothing unreleased: no alpha, beta, release candidate, dev or draft)"),
-        "pitfalls": ("the mistakes {language} code most often makes and what to write instead: bugs, anti-patterns, "
-                     "outdated forms, slow code"),
-        "conventions": "how {language} projects are laid out and named today: project layout, style guide",
-    }
-
-    SECTION_QUERY = {  # the search of a section a language's plan has none for
-        "idioms": "idiomatic modern {language} {version} best practices",
-        "new": "{language} {version} what's new release notes",
-        "pitfalls": "common {language} mistakes anti-patterns to avoid",
-        "conventions": "{language} project layout style guide",
-    }
-
-    TOOL_FOCUS = ("how to use {tool} ({role}) in a {language} project: installing it in the project, the exact commands "
-                  "and options to run it, its configuration file, and the settings that catch the most bugs and "
-                  "outdated code (which rules to turn on)")
+    DIGEST_SYSTEM = f"""Answer one question about a topic for a code generator that knows only what it was trained on,
+from the numbered passages of web pages below. List the facts the passages state that answer it: each one
+plain, concrete sentence the passages state (never from your own knowledge), with the exact commands, names
+and versions they give; the ones that change how code is written first; nothing about an unreleased version
+(alpha, beta, release candidate, dev, draft); at most {FACTS_PER_SLOT}. "cites": the ids of the passages that
+state it; a fact no passage states is left out. "phase" is where it matters: spec (what to build and test),
+design (files, structure), config (dependencies, settings), tests, code, toolchain (commands and tools).
+Reply with ONLY JSON: {{"facts":[{{"phase":"one of {', '.join(FACT_PHASES)}","text":"the fact","cites":["P3"]}}]}}
+or {{"facts":[]}} when the passages do not answer it."""
 
     FACTS_SYSTEM = f"""Read part of a web page for a code generator that knows only what it was trained on. List what
 the page states that matches "Look for" and that such a generator needs to build good software today:
@@ -754,15 +725,8 @@ settings), tests, code, toolchain (commands and tools).
 Reply with ONLY JSON: {{"facts":[{{"phase":"one of {', '.join(FACT_PHASES)}","text":"the fact"}}]}}
 or {{"facts":[]}} when the excerpt states nothing like that."""
 
-    PICK_FACTS_SYSTEM = """Below are facts found on web pages about a topic, for a code generator. Keep the {count}
-that most help it plan and write good software today: what changes how code, tests, configuration and
-commands are written (APIs, syntax, defaults, removals, exact commands and options). Drop repeats,
-anything vague, history, reference lists a generator already knows (keywords, grammar), and trivia a
-typical project never meets (release signing, proxies, internals, caches, unsafe or low-level features).
-Reply with ONLY JSON: {{"keep":[the numbers of the facts kept]}}"""
-
-    PLAYBOOK_SYSTEM = f"""Condense what was learned about a programming language into the rules a code generator
-follows to write small programs in it that are correct, idiomatic, modern and efficient, quickly: at
+    PLAYBOOK_SYSTEM = f"""Condense what was learned about a programming language or a tool into the rules a code
+generator follows to write small programs with it that are correct, idiomatic, modern and efficient, quickly: at
 most {PLAYBOOK_RULES}, the most useful first. Each rule is one short imperative sentence (under
 {RULE_CHARS} chars) that changes what is written: the construct, library, command or setting to use
 (the newest stable form the facts show) and what it replaces or what to avoid; a short example in

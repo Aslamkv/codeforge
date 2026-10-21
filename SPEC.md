@@ -60,10 +60,15 @@ responsibility, and each imports only the modules listed above it:
 | `workspace` | the project's files and the commands run in it (`Workspace`, `Toolchain`, `TestRef`, `Output`, `FileView`, `TaughtCommands`) |
 | `model` | the local model: Ollama's API, one request with its budgets and retries (`Model`), measuring a model (`Calibrator`) |
 | `project` | the plan and its record (`Project`, `SpecDocument`, `Runs`, `RunChecks`, `Brief`, `Outcome`), and the run's `Tracker` |
+| `fetcher` | the Internet plugin's page fetcher: pages read straight from their sites, in parallel, with the standard library only (`Fetcher`, `Fetched`) |
 | `web` | the Internet plugin, the only part that goes on the web (`Internet`, `OllamaWeb`, `DuckDuckGoWeb`, `PageText`) |
+| `passages` | fetched pages as passages: main content, under headings, repeats dropped (`Cleaner`, `MainBlocks`, `Links`, `Page`, `Passage`) |
 | `conversation` | the terminal and the chats as one conversation (`Desk`, `Channel`, `Markup`, `Talk`, `Shell`, `Research`, `Progress`, `Reporter`) |
 | `channels` | the chat plugin: Telegram, and `tinker channel` |
-| `knowledge` | lessons and proven knowledge (`Knowledge`), and learning (`Learner`, `Researcher`, `Library`, `Retriever`, `Embeddings`) |
+| `knowledge` | lessons and proven knowledge (`Knowledge`), and what learning shares (`Learner`, `Researcher`, `Library`, `Retriever`, `Embeddings`) |
+| `slots` | what learning a language or a tool must find out, as data (`Slot`, `PROFILES`), and each slot's passages (`Selector`) |
+| `docsite` | a topic's documentation site for its version: its map, each slot's pages, kept per topic and version (`DocSite`, `DocCache`) |
+| `learning` | learning a language or a tool by its slots (`SlotLearner`, `Throttle`, `RequestLog`, `LearnStopped`) |
 | `graph` | what Tinker knows as one graph of items and links (`Graph`), and the page that shows it (`GraphPage`) |
 | `session` | what every phase works through (`Session`), and the phase contract (`Worker`, `Phase`) |
 | `planning` | recall, the spec, the contracts where files meet, and their review |
@@ -75,7 +80,7 @@ responsibility, and each imports only the modules listed above it:
 - **ARCH-2** The channels plugin is optional. Without `tinkerkit/channels.py`, the conversation has no
   chat channels, and everything else works.
 - **ARCH-3** Every model call goes through `Model` and `Ollama`. Every web call goes through
-  `Internet`. Every project command goes through `Workspace.run` or `Workspace.start`.
+  `Internet` (pages through its `page_fetcher`, the `fetcher` module). Every project command goes through `Workspace.run` or `Workspace.start`.
 - **ARCH-4** Only `settings.Home` knows where the home is. No other module names a path inside it.
   Every phase reaches the model, the project and its files through the `Session` only.
 
@@ -138,7 +143,10 @@ phase, learn from the web what the rest of the cycle needs.
   database, `tinker.db`, in it.
 - **SET-2** `DEFAULT_CONFIG` is exactly: model `None`, ollama_url `http://localhost:11434`, keep_alive
   `0`, max_growth `1.15`, build_think `"medium"`, test_timeout `60`, web `"ollama"`, web_fallback `""`,
-  web_timeout `30`, learn_missing `2`, embed_model `""`, projects `"~/Projects"`.
+  web_timeout `30`, learn_missing `2`, learn_rate `8`, learn_backoff `20`, learn_cutoff `0.0`, learn_pages
+  `8`, learn_min_pages `2`, learn_searches `3`, learn_think `"low"`, docs_pages `30`, tool_docs_pages `5`,
+  docs_latest_days `30`, fetch_workers `6`, fetch_timeout `15`, fetch_max_bytes `2000000`,
+  fetch_domain_delay `0.1`, fetch_fallbacks `2`, embed_model `""`, projects `"~/Projects"`.
 - **SET-3** `PHASES`, `FIX_PHASES` and `PLANNING_PHASES` are the phase lists given in
   [The cycle](#the-cycle). `CONFIRM_AFTER` is `review` for the project and a feature, and `reproduce`
   for a bug fix.
@@ -147,7 +155,8 @@ phase, learn from the web what the rest of the cycle needs.
   the changes.
 - **SET-5** `Config.check_model(run)` rejects with `SystemExit`: a keep_alive that is neither whole
   seconds nor a duration (`10m`, `1h30m`); a max_growth that is not a number above 1 (booleans
-  rejected); a build_think other than `"high"`, `"medium"`, `"low"`, `true`, `false` or `null`. For a
+  rejected); a build_think or learn_think other than `"high"`, `"medium"`, `"low"`, `true`, `false` or
+  `null`. For a
   run, it also rejects a test_timeout that is not a whole number of at least 1.
 - **SET-6** `Config.keep_alive(value)` gives whole seconds as an `int` and a duration as it is.
   `Config.ollama_url()` has no trailing slash.
@@ -164,7 +173,7 @@ phase, learn from the web what the rest of the cycle needs.
 - **SET-10** `Home.reset(yes)` deletes the home folder. It refuses a folder not named `.tinker`. It
   does nothing when the folder is missing. Without `yes`, and not in a terminal, it deletes nothing
   and exits.
-- **SET-11** `Home.parts()` names exactly: languages, memory, learned, models, runs, commands.
+- **SET-11** `Home.parts()` names exactly: languages, memory, learned, docs, models, runs, commands.
   `Home.clear(names, yes)` deletes only the named parts from the home database. It rejects an unknown
   part by listing the parts. When those parts are empty, it says there is nothing to clear. Without
   `yes`, and not in a terminal, it deletes nothing.
@@ -188,7 +197,8 @@ phase, learn from the web what the rest of the cycle needs.
   and it never raises.
 - **SET-19** `Config.set(key, text)` is `tinker config KEY VALUE`. It sets only the keys that have no
   command of their own (`ollama_url`, `keep_alive`, `max_growth`, `build_think`, `test_timeout`,
-  `web_fallback`, `web_timeout`, `learn_missing`, `projects`), reading the value by the key's type. A
+  `web_fallback`, `web_timeout`, `learn_missing`, the `learn_*`, `docs_*` and `fetch_*` settings, `projects`), reading
+  the value by the key's type. A
   value that fails the checks is not kept, and the command ends with why.
 
 ## commands
@@ -239,6 +249,10 @@ phase, learn from the web what the rest of the cycle needs.
   navigation, headers, footers, asides, forms, `hidden`, `aria-hidden` and navigation roles.
   Headings become `# ` lines, list items become `- ` lines, and `<pre>` keeps its layout. Broken
   HTML gives what was read before it broke.
+- **WEB-12** A `WebError` carries the HTTP status it answered with (`code`), and
+  `Internet.rate_limited(key)` says whether that key's last failure was HTTP 429.
+  `Internet.page_fetcher(log)` is a `Fetcher` set up from the `fetch_*` settings. `Internet.check()`
+  also rejects a `learn_*`, `docs_*` or `fetch_*` limit that is not a number in its range (`LEARN_LIMITS`).
 
 ## prompts
 
@@ -283,7 +297,7 @@ phase, learn from the web what the rest of the cycle needs.
   the rendered length + 2.
 - **PRM-14** The example JSON in `SPEC_SYSTEM`, `FEATURE_SPEC_SYSTEM`, `TOOLCHAIN_SYSTEM` and
   `README_SYSTEM` parses. Its toolchain is a usable `Toolchain`. Every `{placeholder}` template
-  (`BRIEF_SYSTEM`, `PICK_FACTS_SYSTEM`, `TOPIC_FOCUS`, `LANGUAGE_FOCUS`, `TOOL_FOCUS`) formats.
+  (`BRIEF_SYSTEM`) formats.
 - **PRM-15** Each command in the example toolchain is a real command line of its own tools.
   Tinker's own words never appear in it.
 - **PRM-16** `LESSONS_SYSTEM` asks for general lessons only: never a project's names, files or data.
@@ -531,19 +545,12 @@ phase, learn from the web what the rest of the cycle needs.
 - **KNW-8** `Retriever.by_words` ranks the texts that hold the query's words with BM25, best first.
   `rank` fuses the word and meaning rankings and gives every index: the ones neither finds come
   last. When embeddings fail, the meaning search is turned off for the rest of the run.
-- **KNW-9** `Learner.read_plan` needs a name and a search, unless the topic is a language. It keeps
-  at most `MAX_QUERIES` searches and `MAX_COMMANDS` commands. `safe_commands` drops a command with a
-  shell operator, a command that changes something, and an unsafe command. `read_language_plan`
-  keeps one tool per known role (`TOOL_ROLES`, a type checker among them) and the searches of known
-  sections, and notes the roles it was planned with. A plan that says the request is not a language
-  gives `{"not_language": …}`.
+- **KNW-9** `Learner.safe_commands` drops a command with a shell operator, a command that changes
+  something, and an unsafe command.
 - **KNW-10** `Learner.read_facts` keeps facts of a known phase, cut to `FACT_CHARS`, at most
   `FACTS_PER_CHUNK`. `add_facts` keeps a repeated fact once and adds the other page to its `also`.
   `relevant_chunks` gives the page's first chunk and then the best-matching ones, in page order.
   Facts about unreleased versions are dropped.
-- **KNW-11** `Learner.learn(topic)` plans, runs the version commands, reads the pages, and keeps the
-  topic with its facts and sources. When the reading is cut short, or finds nothing, a topic
-  learned before is kept. With nothing found and nothing installed, it gives `None`.
 - **KNW-12** `look_at_machine(commands)` runs each command in an empty temporary folder and keeps
   its first line and version. A failing command means the tool is not installed.
 - **KNW-13** `Researcher.read_frame` and `read_analysis` keep only well-formed questions, findings
@@ -557,10 +564,6 @@ phase, learn from the web what the rest of the cycle needs.
   cross-checks and analyses the facts, searches the gaps and checks in one more round, and keeps the
   topic as research: its questions, findings, contradictions, open gaps, and facts with their sources
   and confidence.
-- **KNW-16** A topic the plan says is a programming language is learned as one (`learn_language`):
-  its sections (idioms, new, pitfalls, conventions) and tools are searched, each section keeps its
-  share of facts, the facts are condensed into rules (KNW-22), and it is kept under its language key
-  with kind `language`.
 - **KNW-17** Every lesson and every learned fact or finding has an ID and a status, `candidate` or
   `proven`. `prove(used)` makes the used candidates proven, and copies the used web facts into the
   language's knowledge as proven facts. `disprove(used, phases)` retires every used item shown in
@@ -575,9 +578,9 @@ phase, learn from the web what the rest of the cycle needs.
   last `RETIRED_KEPT`. Nothing retired is shown in a prompt.
 - **KNW-21** `Library.save` gives each research finding `cites`: the IDs of the facts it cites by
   number, so the link holds when a fact is retired.
-- **KNW-22** A language's playbook. `condense(plan, facts)` asks one call to turn the language's facts,
-  with the lessons its own projects proved (candidates are left out), into at most `PLAYBOOK_RULES`
-  rules. `read_rules` keeps a rule only with a known phase and at least one cited fact or lesson,
+- **KNW-22** A topic's playbook. `condense(plan, facts)` asks one call to turn the topic's facts (a
+  language's with the lessons its own projects proved; candidates are left out) into at most
+  `PLAYBOOK_RULES` rules, at the think setting it is given (learning's `learn_think`). `read_rules` keeps a rule only with a known phase and at least one cited fact or lesson,
   cuts its text to `RULE_CHARS`, keeps one per text and gives each the IDs it cites. When the model
   gives no usable rules, there are none and the facts are shown as they are. `Library.items` gives
   each rule (kind `rule`), and the rules stand in for the facts: none is shown but those a retired
@@ -586,24 +589,118 @@ phase, learn from the web what the rest of the cycle needs.
   Each rule says when it applies (`when`, at most `RULE_WHEN_CHARS`): "" for every program, else
   the kind of code it is for, which a proven copy keeps. What the reply says a new project declares
   to get the newest version (`declare`) is the first rule, for every program.
-- **KNW-24** Learning a language again replaces what its earlier learning proved: `supersede` retires
+- **KNW-24** Learning a language again (LRN-11) replaces what its earlier learning proved: `supersede` retires
   the language's proven facts from its own topic that the new learning does not show (its rules,
   when it has them), with the reason that they were replaced. Proven facts from other topics stay.
 - **KNW-25** `missing_checks` names the language's learned tools that check code and the toolchain that
   worked does not run: a type checker it never names, a linter or formatter where it has no command.
   `toolchain_title` asks to add them. `unavailable_tools` names the learned tools not installed here
   that the toolchain neither installs nor runs, and that are not to be added.
-- **KNW-23** `language_searches` gives each section the plan has no search for the usual one
-  (`SECTION_QUERY`), and asks each tool's pages for the settings that catch the most bugs. A saved
-  language plan made with other tool roles than `TOOL_ROLES` is planned again; one made with them
-  is reused.
+## learning
+
+`tinker learn TOPIC` and the recall phase of a run with `--web` learn a language or a tool by its slots
+(`SlotLearner`), from its own documentation for the version installed: PREFLIGHT, PLAN (saved; else SEARCH 1,
+GATE 1, PICK, FETCH, GATE 2 and the plan call), MACHINE, DOCS, GATE 2, CLEAN, SELECT, DIGEST, FOLLOW-UP,
+CONDENSE, KEEP. Domain research (`Researcher`), own-command learning and run lessons are apart.
+
+- **LRN-1** Profiles are data. `PROFILES["language"]` is the slots installed, toolchain, fundamentals,
+  this-version, limitations, best-use-cases and readiness; `PROFILES["tool"]` is installed, purpose,
+  core-usage, this-version, pitfalls-and-limits, conventions, fit and readiness. Each `Slot` has an id, a
+  question, a query hint, a passage count, a minimum, the section (fact phase) it fills, its source
+  (`web`, `machine` for installed, `check` for readiness), and its `docs` words: what a documentation
+  site's addresses and titles call its pages (`whatsnew`, `changelog`). `TOOL_DOCS` are those of a
+  language's tools' pages. `asked(plan, version)` is its question with the
+  plan's hint; `search(plan, version)` is the plan's follow-up search for it, else its own query.
+- **LRN-2** `Throttle(rate, backoff)` lets at most `rate` requests a minute through (a token bucket, full
+  at the start; an empty one waits). `call(request, limited)` asks again while `limited()` says HTTP 429,
+  after pauses of `BACKOFF_FIRST` seconds, doubled, and raises `RateLimited` once `backoff` seconds have
+  passed since the first 429: it never waits longer than that in all.
+- **LRN-3** `RequestLog` appends every web request of a learn to `Home.web_log()` as one JSON line
+  `{at, kind, result, seconds, target}` (kind search, fetch, robots, probe or fallback; result ok, 429,
+  missing or failed: a robots.txt, site map or version's documentation the site does not have is
+  missing). It counts them by kind, and `text()` gives them in one line with the HTTP 429 count.
+- **LRN-4** `Fetcher.fetch_all(urls)` gives a `Fetched` per address, in order: status, final address,
+  text, content type and error. The pages of one site go one after another over one kept-alive connection
+  (`http.client`), the sites in parallel (`workers`); a connection the site closed is opened again once.
+  One page failing never stops the others. It sends its User-Agent, asks for gzip, reads at most
+  `max_bytes`, follows at most `MAX_REDIRECTS` redirects, waits `domain_delay` between two requests to one
+  site, and decodes by the header's charset, else the page's `<meta>` charset, else UTF-8. An address the
+  environment sends through a proxy is fetched with urllib, which honours it.
+- **LRN-5** `Fetcher` honours each site's robots.txt (read once per site): a disallowed page is not
+  fetched, and its `Fetched` is `refused`. A missing robots.txt allows everything; one answered with 401
+  or 403 allows nothing.
+- **LRN-6** `Cleaner.page` takes an HTML page's main content as blocks (`<main>`/`<article>` when it holds
+  `USABLE_PAGE_CHARS`, else the body), leaving out what `PageText` leaves out and every paragraph that is
+  at least `LINK_ONLY` links; plain text and Markdown are read by their lines (`#` headings, ``` code).
+  `Cleaner.pool(pages, known)` gathers blocks under their heading into passages of up to `PASSAGE_CHARS`
+  (a code block whole), drops text a site repeats on several of its pages and a passage that repeats
+  another or a known one (`NEAR_DUPLICATE`), and numbers them on from the known ones (`P1`, `P2`, ...),
+  each with its address and fetch time.
+- **LRN-7** `Selector.select(slots, pool, plan, version)` gives each slot its passages from the one pool:
+  its best `SLOT_CANDIDATES` by the words of its question, the topic and the version are shortlisted, and
+  only those are embedded; of them, only those that hold a keyword of its own search (`Slot.keywords`,
+  without the topic) or are close to its question in meaning (`SLOT_RELEVANT`) count. They are ranked by
+  words and meaning fused, taken by MMR so a near-repeat of a passage taken is passed over, at most the
+  slot's count and within the digest's room. A passage may serve several slots.
+- **LRN-8** `short_slots(profile, selected)` gives the web slots below their minimum, the emptiest first.
+  Readiness, `missing(profile, facts, machine)`, gives installed when no version command ran and each web
+  slot without a fact.
+- **LRN-9** `read_plan` needs a kind (language, tool or domain) and a name. It keeps safe commands only
+  (`MAX_COMMANDS`), its documentation site (`docs`: web addresses only, `versioned` only with `{version}`
+  in it), a language's tools (one per role of `TOOL_ROLES`, each with a safe version command and its
+  `docs`), and hints and follow-ups for its profile's slots only; a tool's language is `used_with`. `read_digest` keeps a fact only when it cites a
+  passage given and speaks of no unreleased version; each keeps its slot, the passages it cites, their
+  pages (`source`, `also`), and a known phase (else the slot's section); at most `FACTS_PER_SLOT`.
+- **LRN-10** Fail fast. No model call (plan, digest, condense or embedding) runs until the web, or the
+  documentation kept from before, has delivered usable pages. PREFLIGHT stops when the Internet plugin is
+  off or there is no embedding model; GATE 1 when the search fails, is rate limited past `learn_backoff`,
+  finds nothing, or finds nothing above `learn_cutoff`; GATE 2 when fewer than `learn_min_pages` pages give
+  usable text (snippets never count). With a saved plan, GATE 2 counts the documentation's pages, and runs
+  search 1 when they are too few. Then it raises `LearnStopped` (a `SystemExit`: a non-zero exit) naming
+  the cause, what was tried and the requests made, saying nothing was learned or saved and what was learned
+  before is untouched, and the next step; nothing is written to Tinker's database.
+- **LRN-11** A first learn makes one search (`FIRST_SEARCH`, from the topic alone), picks the results whose
+  title and snippet score above `learn_cutoff` (BM25), each address once, at most `learn_pages`, and
+  fetches them with the plugin's fetcher. A page that gives too little text is fetched by the plugin
+  instead (logged as a fallback), at most `fetch_fallbacks` per learn, never one robots.txt refused. Only
+  then does the plan call run (at the model's own think setting); it names the documentation site and,
+  for a language, each tool's version command and documentation. A saved plan is reused with no search
+  and no call. The version commands (each run once) give the version installed; the documentation of that version (LRN-14
+  to LRN-17) and of a language's tools (`TOOL_DOCS`, at most `tool_docs_pages`) joins the pool. Each slot's
+  passages are digested into facts (candidates, each with its slot) and condensed into rules, both at
+  `learn_think`, and kept only after both succeed, under the language's key or the topic's slug, with its
+  plan, machine, documentation versions, sources, cited passages, status (`complete` or `incomplete`),
+  missing slots and request counts; then indexed. A summary prints the slots filled and missing, the
+  documentation, the pages by source, the facts and the requests by kind.
+- **LRN-12** After the digest, each slot left without facts gets the plan's follow-up search, while fewer
+  than `learn_searches` searches were made; its pages join the pool, and that slot alone is selected and
+  digested again. When a follow-up fails, the learn goes on, marked `incomplete`, with a warning and a note.
+- **LRN-13** A topic researched before is researched again when deep, else kept. A plan that says the topic
+  is a domain hands it to `Researcher` when deep; otherwise it is learned like a tool.
+- **LRN-14** `DocSite.resolve(docs, version)` tries the version's documentation most exact first
+  (`version_keys`: 3.15.1, 3.15, 3), at the plan's `versioned` address, then the unversioned `root` as
+  "latest", and gives the first root page that answers with its version key.
+- **LRN-15** `DocSite.map(root, base)` lists the site's pages from its `llms.txt`, else its `sitemap.xml`,
+  else the root page's own links (`Links`), on its site and under the root (all of the site's when none
+  is under it), at most `MAX_MAP_LINKS`. `pick(links, wanted, key, cap, base)` gives each slot its pages
+  by the words their address (below the base) and title share with the slot's `docs` words, in turn (each
+  slot's best, then each one's second), a page that names the version first, each once, at most `cap`.
+- **LRN-16** `DocSite.read` fetches the root and the picked pages, then picks the same way from the links
+  of the pages it read, one level on (the version's what's new behind an index), at most `docs_pages` in
+  all. A page that names another version (`whatsnew/3.14.html` for 3.15) is never picked; the latest
+  documentation is matched to the version installed (major.minor). Pages left with no text are dropped.
+- **LRN-17** `DocCache` keeps the cleaned pages in Tinker's `sources` as `slug@version`. `DocSite.pages`
+  reads them from there before the web, so learning a version again fetches none of its documentation. A
+  copy of the "latest" documentation is read again after `docs_latest_days`; a version's own is kept until
+  `tinker clear docs`.
 
 ## graph
 
 - **GRF-1** `Graph.build()` makes one node per thing Tinker knows: each language (one for its
   knowledge and what was learned of it), any language, each topic learned, the person's commands,
   and each lesson, fact, finding, toolchain, fix, command and retired item. A node is `{id, kind,
-  label, text, status, group, details, sources}`; `group` is the language or topic it belongs to.
+  label, text, status, group, details, sources}`; `group` is the language or topic it belongs to. A
+  fact's details name its slot, and a topic's details name the slots it is missing.
 - **GRF-2** Links: `belongs_to` from an item to its language, topic, any language or the person's
   commands; `cites` from a finding to its facts and from a language's rule to its facts and lessons; `became` from a web fact to the language's proven
   fact it was copied into; and `taught_by`, `confirmed_in`, `helped_in` and `failed_in` from an item
@@ -890,7 +987,8 @@ phase, learn from the web what the rest of the cycle needs.
   are kept, SPEC.md is written, the run is pointed to from the home and the exit code is 0.
 - **CLI-10** `tinker learn NAME "DEFINITION"` (or an alias in the person's shell) keeps the command,
   with no model. `tinker learn WHAT` needs a measured model, an embedding model and the web, all
-  checked before anything is loaded. Learning nothing ends with an error.
+  checked before anything is loaded. Learning nothing ends with an error. However it ends, it prints
+  the time it took (`Time taken: 8m 34s`).
 - **CLI-11** `tinker memory` shows each language's toolchain, fixes and lessons, the lessons for any
   language, the topics learned, the person's commands, and how many items are retired. `tinker models` lists Ollama's models
   with what was measured, and marks the one in use.

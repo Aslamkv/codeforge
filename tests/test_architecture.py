@@ -9,8 +9,8 @@ from pathlib import Path
 import pytest
 
 ROOT = Path(__file__).resolve().parent.parent
-LAYERS = ("settings", "commands", "prompts", "workspace", "model", "project", "web", "conversation", "channels",
-          "knowledge", "graph", "session", "planning", "building", "finishing")
+LAYERS = ("settings", "commands", "prompts", "workspace", "model", "project", "fetcher", "web", "passages", "conversation",
+          "channels", "knowledge", "slots", "docsite", "learning", "graph", "session", "planning", "building", "finishing")
 
 
 def imports_of(module):
@@ -62,7 +62,8 @@ def test_without_the_channels_plugin_the_conversation_has_no_chats(monkeypatch):
 
 @pytest.mark.spec("ARCH-3")
 def test_only_the_model_web_and_channel_modules_open_connections():
-    """Network clients are used in model (Ollama), web (the Internet plugin) and channels (Telegram) only;
+    """Network clients are used in model (Ollama), web and fetcher (the Internet plugin and its page fetcher) and
+    channels (Telegram) only;
     project commands are started only by the workspace (and the conversation's own shell and tasks)."""
     network = {"urllib.request", "http.client", "urlopen", "HTTPSConnection"}
     users = set()
@@ -70,7 +71,7 @@ def test_only_the_model_web_and_channel_modules_open_connections():
         text = path.read_text(encoding="utf-8")
         if any(f"import {name}" in text or f"{name}(" in text for name in network):
             users.add(path.stem)
-    assert users <= {"model", "web", "channels", "knowledge"}, users
+    assert users <= {"model", "web", "fetcher", "channels", "knowledge"}, users
     knowledge = (ROOT / "tinkerkit" / "knowledge.py").read_text(encoding="utf-8")
     assert "urlopen(" not in knowledge, "knowledge goes online only through Internet and Ollama"
     runners = {p.stem for p in [*(ROOT / "tinkerkit").glob("*.py"), ROOT / "tinker.py"]

@@ -29,6 +29,23 @@ DEFAULT_CONFIG = {                      # the settings: what the home's "config"
                                         # when the first is not usable), e.g. "duckduckgo"; "" for none
     "web_timeout": 30,                  # seconds one web search or fetch may take
     "learn_missing": 2,                 # topics the recall phase of a run with --web may learn
+    "learn_rate": 8,                    # web requests per minute while learning (a token bucket)
+    "learn_backoff": 20,                # the most seconds one learn waits out HTTP 429 before it stops
+    "learn_cutoff": 0.0,                # the word score (BM25) a search result's title and snippet need
+    "learn_pages": 8,                   # search results fetched per search, the best first
+    "learn_min_pages": 2,               # pages with usable text a learn needs, else it stops
+    "learn_searches": 3,                # web searches per learn: the first, then one per slot left without facts
+    "learn_think": "low",               # think level for reading pages into facts and condensing them (the plan
+                                        # thinks at the model's own)
+    "docs_pages": 30,                   # pages taken from a topic's documentation site
+    "tool_docs_pages": 5,               # pages taken from the documentation of each of a language's tools
+    "docs_latest_days": 30,             # days a copy of unversioned ("latest") documentation is kept before it
+                                        # is fetched again (a version's own documentation is kept until cleared)
+    "fetch_workers": 6,                 # pages fetched at once
+    "fetch_timeout": 15,                # seconds one page may take
+    "fetch_max_bytes": 2000000,         # the most of one page read
+    "fetch_domain_delay": 0.1,          # seconds between two requests to one site (its pages go one at a time)
+    "fetch_fallbacks": 2,               # pages per learn the web plugin fetches when a site gives too little text
     "embed_model": "",                  # the embedding model that indexes what is learned (tinker embed NAME);
                                         # tinker learn and --web need one
     "projects": "~/Projects",           # where tinker task makes a new project's own folder (named after the
@@ -142,22 +159,34 @@ SIMILAR_WORDS = 0.5               # ... text similarity, when there are no embed
 
 # --- learning from the web: tinker learn TOPIC, and the recall phase of a run --------------------------
 FACT_PHASES = ("spec", "design", "config", "tests", "code", "toolchain")  # where a learned fact is shown
-MAX_QUERIES = 4                   # web searches per topic (at least one for each thing it names)
 MAX_COMMANDS = 6                  # commands that show what of a topic is installed here
 VERSION_TIMEOUT = 20              # seconds such a command may take
-SEARCH_RESULTS = 3                # results taken from each search
-MAX_PAGES = 5                     # pages read per topic
+SEARCH_RESULTS = 3                # results taken from each search of research
 PAGE_CHUNKS = 2                   # prompt-sized chunks of a page condensed (its top, then the most related)
 FACTS_PER_CHUNK = 4               # facts one chunk may give
 FACT_CHARS = 400                  # the longest fact kept (room for its exact numbers, names and units)
-MAX_FACTS = 16                    # facts kept per topic
 TOOL_ROLES = ("environment", "packages", "build", "tests", "format", "lint", "types")  # a language's tools, one per role
-LANGUAGE_SECTIONS = ("idioms", "new", "pitfalls", "conventions")  # what a language's learning searches besides tools
-SECTION_PAGES = {"idioms": 2, "new": 2, "pitfalls": 1, "conventions": 1, "tools": 1}  # pages read per search of a section
-SECTION_FACTS = {"idioms": 10, "new": 10, "pitfalls": 6, "tools": 16, "conventions": 4}  # facts a language keeps per section
-PLAYBOOK_RULES = 16               # rules a language's facts are condensed into (what its prompts show instead)
+PLAYBOOK_RULES = 16               # rules a topic's facts are condensed into (what its prompts show instead)
 RULE_CHARS = 200                  # the longest rule kept
 RULE_WHEN_CHARS = 80              # the longest "when" of a rule that applies only to some code
+
+# --- learning a language or a tool by its slots: tinker learn TOPIC (the limits a person tunes are in config)
+FIRST_SEARCH = "{topic} official documentation"  # the first search, built from the topic alone: its docs site
+DOC_MAPS = ("llms.txt", "sitemap.xml")  # where a documentation site lists its pages (then its own links)
+MAX_MAP_LINKS = 5000              # links read from one site's map
+LEARN_RESULTS = 10                # results asked of one search (the best learn_pages are fetched)
+USABLE_PAGE_CHARS = 400           # a page's main text below this is too little (a page its scripts draw)
+MAX_REDIRECTS = 5                 # redirects one page fetch follows
+FETCH_USER_AGENT = "Tinker/1.0 (a local coding agent learning from documentation)"
+PASSAGE_CHARS = 1200              # a passage under one heading is cut here (a code block is kept whole)
+LINK_ONLY = 0.8                   # share of a block's text inside links at which it is a menu, not content
+NEAR_DUPLICATE = 0.8              # word overlap (3-word shingles) at which a passage repeats another
+SLOT_RELEVANT = 0.6               # embedding similarity a passage needs to a slot's question (or a slot keyword;
+                                  # qwen3-embedding, as TOPIC_RELEVANT: related 0.65 and up, unrelated 0.52 and down)
+SLOT_CANDIDATES = 60              # passages per slot shortlisted by words before the embedding model sees them
+MMR_BALANCE = 0.7                 # relevance against novelty when picking a slot's passages (1: relevance only)
+FACTS_PER_SLOT = 6                # facts one slot's digest may give
+BACKOFF_FIRST = 1.0               # seconds of the first wait after HTTP 429 (then doubled, within learn_backoff)
 
 # --- research: tinker learn of a domain (Researcher) ----------------------------------------------------
 RESEARCH_QUESTIONS = 4            # research questions a topic is split into
@@ -168,9 +197,6 @@ RESEARCH_CHECKS = 2               # key facts one site states that the next roun
 SAME_CLAIM = 0.8                  # embedding similarity at which two facts make the same claim
                                   # (qwen3-embedding: paraphrases 0.86 and up, unrelated facts 0.67 and down)
 REPEAT_CLAIM = 0.9                # ... at which one fact repeats another (kept once, with the pages of both)
-LANGUAGE_SEARCHES = 6             # searches of a language besides its tools
-LANGUAGE_PAGES = 14               # pages read per language
-LANGUAGE_COMMANDS = 8             # commands that show what of a language and its tools is installed here
 RECALL_TOPICS = 6                 # learned topics one cycle uses at most
 TOPIC_RELEVANT = 0.6              # embedding similarity of a request and a topic it needs (qwen3-embedding:
                                   # the topic a request is about 0.65 and up, unrelated topics 0.52 and down)
@@ -190,6 +216,12 @@ class Home:
     @classmethod
     def database(cls):
         return cls.root / "tinker.db"
+
+    @classmethod
+    def web_log(cls):
+        """Where learning logs every web request it makes (one JSON line each: kind, result, seconds, address)."""
+        cls.root.mkdir(parents=True, exist_ok=True)
+        return cls.root / "web-requests.log"
 
     @classmethod
     def graph_page(cls):
@@ -228,6 +260,7 @@ class Home:
         return {"languages": (["languages"], [], "per language: the toolchain that worked, its fixes, its lessons"),
                 "memory": (["memory"], [], "lessons that hold for any language"),
                 "learned": (["learned", "embeddings"], ["learn"], "what tinker learn learned, and its index"),
+                "docs": (["sources"], [], "the documentation pages tinker learn fetched, cleaned, per topic and version"),
                 "models": (["models"], [], "what calibration measured for each model"),
                 "runs": (["projects", "runs"], [], "the list of projects and a line about each run (projects keep "
                                                    "their own .tinker)"),
@@ -319,7 +352,10 @@ class Config:
     use-web, and tinker config KEY VALUE for the rest."""
     KEEP_ALIVE_RE = re.compile(r"-?\d+|-?(\d+(\.\d+)?(ns|us|ms|s|m|h))+")  # seconds, or a duration: 10m, 1h30m
     SETTABLE = ("ollama_url", "keep_alive", "max_growth", "build_think", "test_timeout", "web_fallback",
-                "web_timeout", "learn_missing", "projects")
+                "web_timeout", "learn_missing", "learn_rate", "learn_backoff", "learn_cutoff", "learn_pages",
+                "learn_min_pages", "learn_searches", "learn_think", "docs_pages", "tool_docs_pages",
+                "docs_latest_days", "fetch_workers", "fetch_timeout", "fetch_max_bytes",
+                "fetch_domain_delay", "fetch_fallbacks", "projects")
     OWN_COMMAND = {"model": "use-model", "embed_model": "embed", "web": "use-web"}
     checks = []  # more checks of the settings, from the parts that use them (the Internet plugin's)
 
@@ -361,7 +397,7 @@ class Config:
     def parse(key, text):
         """A setting's value from its text: numbers as numbers, true/false/null as such, else the text."""
         known = {"true": True, "false": False, "null": None}
-        if text.lower() in known and key == "build_think":
+        if text.lower() in known and key in ("build_think", "learn_think"):
             return known[text.lower()]
         if is_number(DEFAULT_CONFIG[key]):
             for kind in (int, float):
@@ -410,9 +446,10 @@ class Config:
 
     @classmethod
     def check_build_think(cls):
-        think = cls.get("build_think")
-        if think not in ("high", "medium", "low", True, False, None) or think in (0, 1) and not isinstance(think, bool):
-            raise SystemExit(f'build_think must be "high", "medium", "low", true, false or null; it is {think!r}')
+        for key in ("build_think", "learn_think"):
+            think = cls.get(key)
+            if think not in ("high", "medium", "low", True, False, None) or think in (0, 1) and not isinstance(think, bool):
+                raise SystemExit(f'{key} must be "high", "medium", "low", true, false or null; it is {think!r}')
 
     @classmethod
     def check_test_timeout(cls):

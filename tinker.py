@@ -212,7 +212,8 @@ from tinkerkit.building import BugReproducer, CodeWriter, TestToolSetup, TestWri
 from tinkerkit.commands import BY_NAME, COMMANDS, GROUPS, refs
 from tinkerkit.finishing import FinalReview, LessonWriter, ReadmeWriter, Tidy
 from tinkerkit.graph import write_page
-from tinkerkit.knowledge import Embeddings, Learner, Library
+from tinkerkit.knowledge import Embeddings, Library
+from tinkerkit.learning import SlotLearner
 from tinkerkit.model import Calibrator, Model, Models, Ollama, OllamaError
 from tinkerkit.planning import Designer, InterfaceReviewer, Recaller, SpecWriter
 from tinkerkit.project import Brief, Outcome, Project, RunChecks, Runs, Tracker, project_store, saved
@@ -696,21 +697,23 @@ class Commands:
     def learn(self):
         """tinker learn WHAT [DEFINITION]: a command of yours (a definition given, or an alias in your
         shell) is kept at once, with no model; anything else is learned from the web with the model
-        in use (Learner.learn tells a language, a tool and a domain apart), kept and indexed (an
+        in use (SlotLearner tells a language, a tool and a domain apart), kept and indexed (an
         embedding model and the Internet plugin must be there; when one is not, nothing is loaded
-        and it says why)."""
+        and it says why). A learn the web cannot feed stops before any model call, saving nothing
+        (learning.LearnStopped), and ends non-zero. However it ends, it says how long it took."""
         args, option = self.args, "tinker learn"
         topic, definition = args.learn[0].strip(), (args.learn[1] if len(args.learn) > 1 else None)
         if definition is not None or TaughtCommands.alias(topic):
             TaughtCommands.teach(topic, definition)
             return
         model, embeddings, internet = self.learning_tools(option)
-        learner = Learner(model, internet, embeddings)
+        started = time.monotonic()
         try:
-            entry = learner.learn(topic, deep=True)
+            entry = SlotLearner(model, internet, embeddings).learn(topic, deep=True)
         finally:
             model.unload()
             Models.remember(model)
+            print(f"\nTime taken: {human_duration(time.monotonic() - started)}")
         if entry is None:
             raise SystemExit(f"Nothing learned about {topic}; nothing saved.")
         self.print_learned(topic, entry)

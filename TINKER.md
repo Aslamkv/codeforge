@@ -222,6 +222,19 @@ tinker learn Flask
 tinker learn food bank inventory
 ```
 
+A language or a tool is learned mainly from its own documentation, for the version you have installed
+(a language's tools too: its test runner, formatter, linter). The first time takes one web search to find
+it; a search follows only for what the documentation leaves unanswered. The cleaned pages are kept per
+version, so learning it again fetches nothing. When the web cannot help (offline, rate limited, nothing
+found), it stops at once and says why, before the model does any work, and keeps what it knew before.
+Every web request is logged in `.tinker/web-requests.log`.
+
+Forget the kept documentation (it is fetched again on the next learn):
+
+```sh
+tinker clear docs
+```
+
 Teach it a command of yours, which builds may then use:
 
 ```sh
@@ -249,6 +262,17 @@ See the settings, or change one:
 ```sh
 tinker config
 tinker config test_timeout 90
+```
+
+Tune how `tinker learn` uses the web:
+
+```sh
+tinker config learn_rate 4          # web requests per minute
+tinker config learn_backoff 10      # most seconds to wait out a rate limit
+tinker config learn_searches 1      # never a second search
+tinker config fetch_fallbacks 0     # never ask the web plugin to fetch a page
+tinker config docs_pages 50         # pages taken from a documentation site
+tinker config learn_think high      # think harder (and slower) while reading pages
 ```
 
 Delete parts of what Tinker keeps, or all of it (your projects stay):

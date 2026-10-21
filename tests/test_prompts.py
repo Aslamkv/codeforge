@@ -237,10 +237,6 @@ def test_the_prompts_example_json_parses_and_its_toolchain_works():
 @pytest.mark.spec("PRM-14")
 def test_the_templates_format():
     assert "60 words" in Prompts.BRIEF_SYSTEM.format(words=60)
-    assert "Keep the 5" in Prompts.PICK_FACTS_SYSTEM.format(count=5)
-    assert "Flask" in Prompts.TOPIC_FOCUS.format(topic="Flask")
-    assert all("Go" in text.format(language="Go") for text in Prompts.LANGUAGE_FOCUS.values())
-    assert "pytest (tests)" in Prompts.TOOL_FOCUS.format(tool="pytest", role="tests", language="Python")
     systems = [v for k, v in vars(Prompts).items() if k.endswith("_SYSTEM")]
     assert len(systems) >= 25 and all(isinstance(s, str) and s.strip() for s in systems)
 

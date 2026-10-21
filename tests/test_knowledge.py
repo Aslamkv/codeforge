@@ -6,7 +6,7 @@ import pytest
 
 from tinkerkit.knowledge import Embeddings, Knowledge, Learner, Library, Researcher, Retriever, language_key, record
 from tinkerkit.model import Ollama
-from tinkerkit.settings import Config, Home, MAX_LESSONS, PLAYBOOK_RULES, RULE_CHARS, TOOL_ROLES
+from tinkerkit.settings import Config, Home, MAX_LESSONS, PLAYBOOK_RULES, RULE_CHARS
 from tinkerkit.workspace import Toolchain
 
 
@@ -257,44 +257,11 @@ def test_rank_fuses_meaning(monkeypatch, capsys):
 
 
 @pytest.mark.spec("KNW-9")
-def test_read_plan():
-    plan = Learner.read_plan({"name": " Flask ", "summary": "A  web\nframework.", "kind": "tool",
-                              "queries": ["a", " ", "b", "c", "d", "e"],
-                              "commands": ["flask --version", "pip install flask", "ls | wc", "rm -rf /"]})
-    assert plan["name"] == "Flask" and plan["summary"] == "A web framework." and plan["queries"] == ["a", "b", "c", "d"]
-    assert plan["commands"] == ["flask --version"] and len(plan["dropped"]) == 3
-    assert Learner.read_plan({"name": "Bookkeeping", "kind": "domain", "queries": ["x"]})["domain"]
-    assert Learner.read_plan({"name": "Go", "language": "Go", "queries": []})["language"] == "Go"
-    for bad in ({"name": "", "queries": ["x"]}, {"name": "X", "queries": []}, ["not", "an", "object"]):
-        with pytest.raises(ValueError):
-            Learner.read_plan(bad)
-
-
-@pytest.mark.spec("KNW-9")
 def test_safe_commands():
     kept, dropped = Learner.safe_commands(["python3 --version", "  go   version ", "", "npm install x",
                                            "cargo --version; rm x", "echo $HOME", "sudo ls"])
     assert kept == ["python3 --version", "go version"]
     assert dropped == ["npm install x", "cargo --version; rm x", "echo $HOME", "sudo ls"]
-
-
-@pytest.mark.spec("KNW-9")
-def test_read_language_plan():
-    plan = Learner.read_language_plan({
-        "name": "Go", "version": "1.25", "summary": "Compiled.",
-        "tools": [{"role": "tests", "name": "go test", "search": "go test flags", "command": "go version"},
-                  {"role": "tests", "name": "ginkgo"}, {"role": "magic", "name": "x"}, "junk",
-                  {"role": "lint", "name": "golangci-lint", "command": "golangci-lint --version"}],
-        "searches": [{"section": "idioms", "query": "Go spec"}, {"section": "gossip", "query": "x"},
-                     {"section": "new", "query": " "}],
-        "commands": ["go version", "go env"]})
-    assert plan["name"] == "Go 1.25" and plan["language"] == "Go" and plan["kind"] == "language"
-    assert [t["name"] for t in plan["tools"]] == ["go test", "golangci-lint"]
-    assert plan["searches"] == [{"section": "idioms", "query": "Go spec"}] and plan["roles"] == list(TOOL_ROLES)
-    assert plan["commands"] == ["go version", "go env", "golangci-lint --version"]
-    assert Learner.read_language_plan({"name": "", "summary": "a band"}) == {"not_language": "a band"}
-    with pytest.raises(ValueError, match="searches"):
-        Learner.read_language_plan({"name": "Go", "searches": []})
 
 
 @pytest.mark.spec("KNW-10")
@@ -341,41 +308,6 @@ class FakeInternet:
 
     def fetch(self, url):
         return {"title": url, "url": url, "content": self.pages[url]} if self.up else None
-
-
-PLAN = {"name": "Flask", "summary": "A small web framework.", "language": "", "kind": "tool",
-        "queries": ["flask quickstart"], "commands": ["echo Flask 3.1.0"]}
-
-
-@pytest.mark.spec("KNW-11")
-def test_learn_a_tool(make_model, fake_ollama, tinker_home):
-    fake_ollama.reply(json.dumps(PLAN), when="Plan learning")
-    fake_ollama.reply(json.dumps({"facts": [{"phase": "code", "text": "Flask 3.1 routes use @app.route"},
-                                            {"phase": "code", "text": "Flask 4.0 is unreleased"}]}), when="Facts")
-    internet = FakeInternet({"https://flask.dev/quick": "Flask quickstart. Routes are decorators."})
-    entry = Learner(make_model(), internet, None).learn("Flask")
-    assert entry["name"] == "Flask" and entry["sources"] == ["https://flask.dev/quick"]
-    assert [f["text"] for f in entry["facts"]] == ["Flask 3.1 routes use @app.route"]
-    assert entry["facts"][0]["source"] == "https://flask.dev/quick"
-    assert entry["machine"] == [{"command": "echo Flask 3.1.0", "found": True, "version": "3.1.0", "output": "Flask 3.1.0"}]
-    assert Library.read("flask")["facts"] == entry["facts"]
-
-
-@pytest.mark.spec("KNW-11")
-def test_learning_cut_short_keeps_what_was_learned_before(make_model, fake_ollama, tinker_home):
-    learned("flask", **{k: v for k, v in PLAN.items() if k != "kind"}, learned="2026-01-01", kind="tool",
-            facts=[{"phase": "code", "text": "old fact"}])
-    learner = Learner(make_model(), FakeInternet(up=False), None)
-    entry = learner.learn("Flask")
-    assert [f["text"] for f in entry["facts"]] == ["old fact"] and learner.kept_earlier
-    assert fake_ollama.calls == []  # the saved plan is reused: no call
-
-
-@pytest.mark.spec("KNW-11")
-def test_learning_nothing_gives_none(make_model, fake_ollama, tinker_home):
-    fake_ollama.reply(json.dumps(dict(PLAN, commands=["false"])), when="Plan learning")
-    assert Learner(make_model(), FakeInternet(up=False), None).learn("Flask") is None
-    assert Library.read("flask") is None
 
 
 @pytest.mark.spec("KNW-12")
@@ -510,45 +442,6 @@ def test_research_a_domain(make_model, fake_ollama, tinker_home):
     assert Library.read("food-bank-inventory")["kind"] == "research"
 
 
-@pytest.mark.spec("KNW-15")
-def test_a_domain_is_researched_when_tinker_learn_finds_one(make_model, fake_ollama, tinker_home):
-    plan = {"name": "Food bank inventory", "summary": "s", "language": "", "kind": "domain", "queries": ["q"]}
-    fake_ollama.reply(json.dumps(plan), when="Plan learning")
-    fake_ollama.reply(json.dumps(FRAME), when="Frame the research")
-    fake_ollama.reply(json.dumps({"facts": [{"phase": "spec", "text": "Food is weighed"}]}), when="Facts", times=2)
-    fake_ollama.reply(analysis(), when="Analyse")
-    entry = Learner(make_model(), FakeInternet({"https://a.org/x": "Food is weighed."}), None).learn("food banks", deep=True)
-    assert entry["kind"] == "research"
-
-
-LANGUAGE_PLAN = {"name": "Go", "version": "1.25", "summary": "A compiled language.",
-                 "tools": [{"role": "tests", "name": "go test", "search": "go test flags", "command": "echo go version go1.25.1"}],
-                 "searches": [{"section": "idioms", "query": "Go spec"}, {"section": "new", "query": "Go 1.25 notes"}],
-                 "commands": ["echo go version go1.25.1"]}
-
-
-@pytest.mark.spec("KNW-16")
-def test_a_language_is_learned_as_one(make_model, fake_ollama, tinker_home):
-    fake_ollama.reply(json.dumps({"name": "Go", "summary": "s", "language": "Go", "kind": "tool", "queries": []}),
-                      when="Plan learning (")
-    fake_ollama.reply(json.dumps(LANGUAGE_PLAN), when="Plan learning the language")
-    fake_ollama.reply(json.dumps({"facts": [{"phase": "code", "text": "Go 1.25 has generic type aliases"}]}),
-                      when="Facts", times=3)
-    fake_ollama.reply(json.dumps({"rules": [{"phase": "code", "text": "Use generic type aliases", "cites": [1]}]}),
-                      when="Condense the language")
-    pages = {"https://go.dev/doc": "Go docs.", "https://go.dev/notes": "Release notes.", "https://go.dev/test": "go test."}
-    entry = Learner(make_model(), FakeInternet(pages), None).learn("Go")
-    assert entry["kind"] == "language" and entry["language"] == "Go" and entry["name"] == "Go 1.25"
-    assert entry["tools"] == [{"role": "tests", "name": "go test", "search": "go test flags"}]
-    assert entry["machine"][0]["version"] == "1.25.1"
-    assert {f["section"] for f in entry["facts"]} <= {"idioms", "new", "pitfalls", "conventions", "tools"}
-    assert [rule["text"] for rule in entry["rules"]] == ["Use generic type aliases"]
-    assert Library.language("Go") == "go"
-    fake_ollama.reply(json.dumps({"name": "Go", "summary": "s", "language": "Go", "queries": []}), when="Plan learning (")
-    again = Learner(make_model(), FakeInternet(pages), None).learn("golang")
-    assert again["kind"] == "language" and fake_ollama.labels()[-1].startswith("Plan learning (")  # learned already
-
-
 SOURCES = [{"id": "fact1", "text": "a"}, {"id": "fact2", "text": "b"}, {"id": "lesson1", "text": "c"}]
 
 
@@ -589,11 +482,11 @@ def test_condensing_folds_in_the_lessons_the_language_proved(make_model, fake_ol
     known.prove({f"lesson:{known.language_doc['lessons'][0]['id']}": ["config"]})
     fake_ollama.reply(json.dumps({"rules": [{"phase": "config", "text": "Name the module after its folder",
                                              "cites": [2]}]}), when="Condense")
-    plan = {"language": "Go", "name": "Go 1.25", "tools": [{"role": "tests", "name": "go test"}]}
-    facts = [{"phase": "code", "text": "Go 1.25 has generic type aliases", "section": "new"}]
+    plan = {"kind": "language", "language": "Go", "name": "Go 1.25", "tools": [{"role": "tests", "name": "go test"}]}
+    facts = [{"phase": "code", "text": "Go 1.25 has generic type aliases", "slot": "this-version"}]
     rules = Learner(make_model(), FakeInternet(), None).condense(plan, facts)
     prompt = fake_ollama.calls[-1]["messages"][-1]["content"]
-    assert "1. [new, code] Go 1.25 has generic type aliases" in prompt and "2. Name the module after its folder" in prompt
+    assert "1. [this-version, code] Go 1.25 has generic type aliases" in prompt and "2. Name the module after its folder" in prompt
     assert "Read the spec twice" not in prompt  # a candidate lesson is not folded in
     assert rules[0]["cites"] == [known.language_doc["lessons"][0]["id"]]
 
@@ -641,49 +534,6 @@ def test_a_rule_is_proven_and_retired_like_a_fact(tinker_home):
     shown = [i["text"] for i in Library.items({"go": entry})]
     assert "go test -run picks tests" in shown  # what only the retired rule cited is shown again
     assert "Aliases may be generic" not in shown and "Go 1.25 has a new GC" not in shown
-
-
-@pytest.mark.spec("KNW-24")
-def test_learning_a_language_again_replaces_what_its_earlier_learning_proved(make_model, fake_ollama, tinker_home):
-    Library.save("go", {"topic": "go", "kind": "language", "language": "Go", "name": "Go 1.24", "summary": "s",
-                        "facts": [{"phase": "code", "text": "Go keywords are break and case"}]})
-    route, _ = topic_with_facts()
-    old = Library.read("go")["facts"][0]["id"]
-    Knowledge("Go").prove({f"fact:go:{old}": ["code"], f"fact:flask:{route}": ["code"]})
-    learned("go", **{**Library.read("go"), "roles": list(TOOL_ROLES)}, searches=LANGUAGE_PLAN["searches"],
-            tools=[], commands=[], version="1.25")
-    fake_ollama.reply(json.dumps({"facts": [{"phase": "code", "text": "Go 1.25 has generic type aliases"}]}),
-                      when="Facts", times=3)
-    fake_ollama.reply(json.dumps({"rules": [{"phase": "code", "text": "Use generic type aliases", "cites": [1]}]}),
-                      when="Condense")
-    Learner(make_model(), FakeInternet({"https://go.dev/doc": "Go docs."}), None).learn("go")
-    known = Knowledge("Go")
-    assert [f["text"] for f in known.facts(("code",))] == ["Flask routes use @app.route"]  # another topic's stays
-    assert known.language_doc["retired"][0]["reason"] == "replaced when the language was learned again"
-
-
-@pytest.mark.spec("KNW-23")
-def test_a_section_the_plan_has_no_search_for_gets_the_usual_one():
-    plan = {"language": "Go", "version": "1.25", "searches": [{"section": "idioms", "query": "effective go"}],
-            "tools": [{"role": "lint", "name": "golangci-lint", "search": "golangci-lint config"}]}
-    searches = Learner.language_searches(plan)
-    assert [(s["section"], s["query"]) for s in searches] == [
-        ("idioms", "effective go"), ("new", "Go 1.25 what's new release notes"),
-        ("pitfalls", "common Go mistakes anti-patterns to avoid"), ("conventions", "Go project layout style guide"),
-        ("tools", "golangci-lint config")]
-    assert "which rules to turn on" in searches[-1]["focus"]
-
-
-@pytest.mark.spec("KNW-23")
-def test_a_language_plan_saved_before_the_tool_roles_is_planned_again(make_model, fake_ollama, tinker_home):
-    learned("go", kind="language", language="Go", topic="Go", **{k: v for k, v in LANGUAGE_PLAN.items() if k != "name"},
-            name="Go 1.25")
-    fake_ollama.reply(json.dumps(LANGUAGE_PLAN), when="Plan learning the language")
-    plan = Learner(make_model(), FakeInternet(), None).plan_language("Go")
-    assert plan["roles"] == list(TOOL_ROLES) and fake_ollama.labels()[-1].startswith("Plan learning the language")
-    learned("go", **{**Library.read("go"), "roles": list(TOOL_ROLES)})
-    Learner(make_model(), FakeInternet(), None).plan_language("Go")
-    assert len(fake_ollama.calls) == 1  # its saved plan is reused
 
 
 @pytest.mark.spec("KNW-5")

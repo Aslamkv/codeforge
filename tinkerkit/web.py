@@ -11,6 +11,7 @@ import urllib.error
 import urllib.parse
 import urllib.request
 
+from .fetcher import Fetcher
 from .settings import Config, first_line, is_number
 
 
@@ -25,9 +26,15 @@ class Internet:
     a row is not asked again by the same command, and once none is left the run carries on without."""
     RETRY_PAUSE = 3      # seconds before asking again after a moment's trouble
     GONE_AFTER = 2       # network failures in a row after which a backend is not asked again
+    LEARN_LIMITS = {     # the settings of learning from the web: (a whole number?, the least it may be)
+        "learn_rate": (False, 1), "learn_backoff": (False, 0), "learn_cutoff": (False, 0), "learn_pages": (True, 1),
+        "learn_min_pages": (True, 1), "learn_searches": (True, 1), "fetch_workers": (True, 1),
+        "fetch_timeout": (False, 1), "fetch_max_bytes": (True, 1000), "fetch_domain_delay": (False, 0),
+        "fetch_fallbacks": (True, 0), "docs_pages": (True, 1), "tool_docs_pages": (True, 0),
+        "docs_latest_days": (False, 0)}
 
     def __init__(self):
-        self.errors, self.failures = {}, {}
+        self.errors, self.failures, self.codes = {}, {}, {}  # codes: the HTTP status of a key's last failure
         self.backends_used, reasons = self.ready_backends()
         self.gone = "" if self.backends_used else ("; ".join(reasons) or "no web backend (tinker use-web NAME)")
         self.skipped = reasons  # backends set but not usable (said once, when the plugin is in use)
@@ -73,11 +80,12 @@ class Internet:
 
     @staticmethod
     def check():
-        """web, web_fallback, web_timeout and learn_missing are usable."""
+        """web, web_fallback, web_timeout, learn_missing and the limits of learning are usable."""
         for key in ("web", "web_fallback"):
             Internet.check_backend_name(key)
         Internet.check_timeout()
         Internet.check_learn_missing()
+        Internet.check_learn_limits()
 
     @staticmethod
     def check_backend_name(key):
@@ -99,6 +107,14 @@ class Internet:
                              f"with --web may learn); it is {missing!r}")
 
     @staticmethod
+    def check_learn_limits():
+        for key, (whole, least) in Internet.LEARN_LIMITS.items():
+            value = Config.get(key)
+            if not is_number(value) or (whole and not isinstance(value, int)) or value < least:
+                kind = "a whole number" if whole else "a number"
+                raise SystemExit(f"{key} must be {kind}, {least} or more; it is {value!r}")
+
+    @staticmethod
     def backends():
         """The web backends, by the name the setting "web" gives one: add a new one here."""
         return {"ollama": OllamaWeb, "duckduckgo": DuckDuckGoWeb}
@@ -109,12 +125,23 @@ class Internet:
     def why(self, key=None):
         return self.gone or self.errors.get(key) or "no answer"
 
+    def rate_limited(self, key):
+        """Whether the last failure for this key was a rate limit (HTTP 429)."""
+        return self.codes.get(key) == 429
+
     def describe(self):
         return " then ".join(b.name for b in self.backends_used)
 
     @property
     def backend(self):
         return self.backends_used[0] if self.backends_used else None
+
+    @staticmethod
+    def page_fetcher(log=None):
+        """The plugin's own page fetcher (fetcher.Fetcher), set up from the fetch_* settings: pages read
+        straight from their sites, many at once. log hears of every request."""
+        return Fetcher(int(Config.get("fetch_workers")), float(Config.get("fetch_timeout")),
+                       int(Config.get("fetch_max_bytes")), float(Config.get("fetch_domain_delay")), log=log)
 
     def search(self, query, count):
         """[{title, url, content}] the web search finds (web addresses only), or None."""
@@ -142,21 +169,24 @@ class Internet:
         """What the first backend that answers gives (usable(result): True, or why not); None when
         none does (errors[key] says why)."""
         reasons = []
+        self.codes.pop(key, None)
         for backend in list(self.backends_used):
-            result, why = self.ask_backend(backend, action, usable)
+            result, why = self.ask_backend(backend, action, usable, key)
             if not why:
+                self.codes.pop(key, None)  # answered: an earlier try's rate limit no longer counts
                 return result
             reasons.append(f"{backend.name}: {why}")
         self.errors[key] = "; ".join(reasons) or self.gone or "no answer"
         return None
 
-    def ask_backend(self, backend, action, usable):
+    def ask_backend(self, backend, action, usable, key):
         """(result, "") from one backend, asked again once after a moment's trouble, or (None, why
         not). A network failure counts towards leaving the backend (lost)."""
         for attempt in (1, 2):
             try:
                 result = action(backend)
             except WebError as exc:
+                self.codes[key] = exc.code
                 if exc.retry and attempt == 1:
                     time.sleep(self.RETRY_PAUSE)
                     continue
@@ -253,7 +283,7 @@ class OllamaWeb(WebBackend):
         hint = {401: f": check {self.KEY_ENV}", 403: f": check {self.KEY_ENV}", 429: ": its rate limit, try later"}
         return WebError(f"ollama.com answered HTTP {code}{hint.get(code, '')}",
                         network=code in (401, 403, 429) or (code >= 500 and path != "/web_fetch"),
-                        retry=code == 429 or code >= 500)
+                        retry=code == 429 or code >= 500, code=code)
 
     @staticmethod
     def json_object(body):
@@ -327,7 +357,7 @@ class DuckDuckGoWeb(WebBackend):
                 return response.read(cls.MAX_BYTES).decode(charset, errors="replace"), kind
         except urllib.error.HTTPError as exc:
             raise WebError(f"{urllib.parse.urlsplit(url).netloc} answered HTTP {exc.code}",
-                           retry=exc.code == 429 or exc.code >= 500)
+                           retry=exc.code == 429 or exc.code >= 500, code=exc.code)
         except Exception as exc:  # no answer: timeout, refused, no network
             reason, timed_out = unreached(exc)
             host = urllib.parse.urlsplit(url).netloc
@@ -466,11 +496,12 @@ class PageText(html.parser.HTMLParser):
 class WebError(Exception):
     """A web backend that could not answer; network: the backend cannot be reached at all (no
     network, its service is down, its key refused), so it is not asked again once that repeats;
-    retry: it may answer if asked again in a moment (a timeout, its rate limit, a server error)."""
+    retry: it may answer if asked again in a moment (a timeout, its rate limit, a server error);
+    code: the HTTP status it answered with, if any."""
 
-    def __init__(self, message, network=False, retry=False):
+    def __init__(self, message, network=False, retry=False, code=None):
         super().__init__(message)
-        self.network, self.retry = network, retry
+        self.network, self.retry, self.code = network, retry, code
 
 
 def unreached(exc):
