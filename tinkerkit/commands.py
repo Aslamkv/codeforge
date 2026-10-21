@@ -20,6 +20,8 @@ OPTIONS = {
     "workdir": Option("--workdir", "workdir", "DIR", "the project folder, if not this one"),
     "yes": Option("--yes", "yes", None, "delete without asking"),
     "calls": Option("--calls", "calls", None, "the model calls, instead of what was printed"),
+    "graph": Option("--graph", "graph", None, "as a graph to explore: a page that opens in the browser (in a chat: "
+                                              "sent as a file)"),
 }
 
 
@@ -100,8 +102,11 @@ COMMANDS = [
             words="any", arguments=[Argument("words", "+", "WHAT [DEFINITION]")], example="learn rust",
             rows=[("learn WHAT", "learn a language, a tool or a domain"),
                   ('learn NAME "DEFINITION"', "a command of yours Tinker may use")]),
-    Command("memory", "Learn", "memory", "what Tinker has learned",
-            "Show what Tinker has learned: toolchains, fixes, lessons, topics, your commands.", chat="quick"),
+    Command("memory", "Learn", "memory [--graph]", "what Tinker has learned (--graph: as a graph to explore)",
+            "Show what Tinker has learned: toolchains, fixes, lessons, topics, your commands. --graph draws it as a "
+            "graph in one page (opened in the browser; in a chat, sent as a file): each lesson, fact and fix linked "
+            "to its language or topic and to the runs that taught it, proved it or found it wrong.", chat="quick",
+            words="one", options=("graph",), example="memory --graph"),
     Command("doctor", "Set up", "doctor", "what is missing or wrong, and how to fix it",
             "Check what Tinker needs (Ollama, a measured model, an embedding model, the web) and say how to fix what "
             "is missing.", chat="quick"),

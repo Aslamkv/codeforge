@@ -10,6 +10,7 @@ from pathlib import Path
 import pytest
 
 from tinkerkit.project import Brief, Outcome, Project, RunChecks, Runs, SpecDocument, Tracker, project_store, saved
+from tinkerkit.settings import Home
 from tinkerkit.workspace import TaughtCommands, Workspace
 from conftest import criterion, plan_of, record_of
 
@@ -381,3 +382,18 @@ def test_a_run_keeps_its_calls_and_output_in_its_project(project_dir, make_model
     fake_ollama.reply("ok")
     model.ask("s", [Part("Q", "q", True)], "Ask")
     assert [e["reply"] for _, e in store.entries("events")] == ["ok"]
+
+
+@pytest.mark.spec("PRJ-16")
+def test_remember_keeps_a_line_about_each_run(home_store, monkeypatch):
+    monkeypatch.setattr("tinkerkit.project.RUNS_KEPT", 2)
+    for run_id, updated in (("aaa111", "2026-10-01 10:00"), ("bbb222", "2026-10-03 10:00"), ("ccc333", "2026-10-02 10:00")):
+        Runs.remember({"id": run_id, "task": f"task {run_id}", "status": "done", "created": "2026-10-01 09:00",
+                       "updated": updated, "workdir": "/somewhere"}, "Python")
+    assert sorted(home_store.items("runs")) == ["bbb222", "ccc333"]
+    assert home_store.get("runs", "bbb222") == {"id": "bbb222", "task": "task bbb222", "status": "done",
+                                                "created": "2026-10-01 09:00", "updated": "2026-10-03 10:00",
+                                                "language": "Python"}
+    home_store.put("projects", "bbb222", {"id": "bbb222", "workdir": "/somewhere", "task": "task bbb222"})
+    Home.clear(["runs"], yes=True)
+    assert home_store.items("runs") == {} and home_store.items("projects") == {}

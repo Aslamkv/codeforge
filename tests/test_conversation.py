@@ -821,3 +821,38 @@ def test_start_is_answered_with_a_welcome(desk):
     assert calls_of(script) == ["help"] and desk.process is None  # no task, no chat
     say(desk, channel, "/start abcdef")  # a start link with a payload is a start too
     assert channel.texts()[-1] == welcome()
+
+
+@pytest.mark.spec("CNV-26")
+def test_memory_graph_is_sent_as_a_file(desk, monkeypatch):
+    desk, channel, _ = desk
+    sent = []
+    channel.send_file = lambda chat, path, caption: sent.append((chat, path, caption))
+    page = conversation.Home.graph_page()
+
+    def make_page(words):
+        desk.ran.append(words)
+        page.write_text("<!doctype html>")
+        return "Tinker's memory: 2 lessons; 3 links"
+    monkeypatch.setattr(desk, "tinker", make_page)
+    assert command_of("memory --graph") == "memory"
+    assert desk.answer(Message("1", "memory --graph"), channel) is None
+    assert desk.ran == [["memory", "--graph"]]
+    assert sent == [("1", page, "🧠 **Tinker's memory**\nTinker's memory: 2 lessons; 3 links")]
+    monkeypatch.setattr(desk, "tinker", lambda words: "Error: the home cannot be read")
+    assert desk.answer(Message("1", "memory --graph"), channel) == \
+        "🧠 **memory --graph**\n```\nError: the home cannot be read\n```" and len(sent) == 1
+
+
+@pytest.mark.spec("CNV-26")
+def test_the_terminal_opens_the_file_and_other_channels_send_where_it_is(monkeypatch, tmp_path):
+    opened, printed = [], []
+    monkeypatch.setattr(conversation.webbrowser, "open", opened.append)
+    console = ConsoleChannel()
+    monkeypatch.setattr(console, "print", printed.append)
+    page = tmp_path / "memory.html"
+    console.send_file("console", page, "🧠 **Tinker's memory**")
+    assert opened == [page.as_uri()] and f"Opened in your browser: {page}" in Markup.plain(printed[0])
+    plain = Recorder()
+    plain.send_file("1", page, "🧠 **Tinker's memory**")
+    assert plain.texts() == [f"🧠 **Tinker's memory**\n📄 `{page}`"]

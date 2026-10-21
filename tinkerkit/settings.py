@@ -131,6 +131,13 @@ LESSONS_SHOWN = 5                 # per prompt (an optional part: dropped first 
 SAME_LESSON = 0.75                # text similarity at which a new lesson is an old one seen again
 SAME_FACT = 0.75                  # text similarity at which a fact learned from the web is a repeat
 SIMILAR_FAILURE = 0.7             # similarity at which a past toolchain fix is shown as a hint
+HISTORY_KEPT = 20                 # events an item keeps (born, confirmed, helped, failed), the newest
+RETIRED_KEPT = 50                 # retired items kept beside each list, for people to see (never prompts)
+RUNS_KEPT = 200                   # lines about runs kept in the home, the most recently updated
+
+# --- the memory graph: tinker memory --graph --------------------------------------------------------------
+SIMILAR_MEANING = 0.75            # embedding similarity at which two lessons are linked as similar
+SIMILAR_WORDS = 0.5               # ... text similarity, when there are no embeddings
 
 # --- learning from the web: tinker learn TOPIC, and the recall phase of a run --------------------------
 FACT_PHASES = ("spec", "design", "config", "tests", "code", "toolchain")  # where a learned fact is shown
@@ -181,6 +188,12 @@ class Home:
         return cls.root / "tinker.db"
 
     @classmethod
+    def graph_page(cls):
+        """The page tinker memory --graph writes: what Tinker knows, as a graph to open in a browser."""
+        cls.root.mkdir(parents=True, exist_ok=True)
+        return cls.root / "memory.html"
+
+    @classmethod
     def lock_file(cls, name):
         """The lock a Tinker holds while it listens on a channel (released when its process ends)."""
         cls.root.mkdir(parents=True, exist_ok=True)
@@ -212,7 +225,8 @@ class Home:
                 "memory": (["memory"], [], "lessons that hold for any language"),
                 "learned": (["learned", "embeddings"], ["learn"], "what tinker learn learned, and its index"),
                 "models": (["models"], [], "what calibration measured for each model"),
-                "runs": (["projects"], [], "the list of projects (projects keep their own .tinker)"),
+                "runs": (["projects", "runs"], [], "the list of projects and a line about each run (projects keep "
+                                                   "their own .tinker)"),
                 "commands": (["commands"], [], "your commands Tinker may use")}
 
     @classmethod

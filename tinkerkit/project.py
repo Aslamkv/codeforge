@@ -11,7 +11,7 @@ from pathlib import Path
 
 from .prompts import Part, Prompts, Reply
 from .settings import (
-    FIX_PHASES, Home, PHASES, PROJECT_DB, STATE_DIR, STATUS_TEXT, Store, confirmed, first_line, now_text, split_text,
+    FIX_PHASES, Home, PHASES, PROJECT_DB, RUNS_KEPT, STATE_DIR, STATUS_TEXT, Store, confirmed, first_line, now_text, split_text,
 )
 from .workspace import TaughtCommands, TestRef, Toolchain
 
@@ -108,8 +108,9 @@ class RunChecks:
 
 class Runs:
     """The runs: each kept in its project's database, and pointed to from Tinker's home ("projects":
-    its run ID, folder and task), so @ID and @folder work from any folder; a run opened (a new one, or
-    a saved one resumed or changed); a folder emptied for tinker restart."""
+    its run ID, folder and task), so @ID and @folder work from any folder; one line about each run kept
+    in the home ("runs"), so what it taught is traced after its folder is gone; a run opened (a new one,
+    or a saved one resumed or changed); a folder emptied for tinker restart."""
 
     @staticmethod
     def open(args):
@@ -159,6 +160,15 @@ class Runs:
         run["updated"] = now_text()
         project_store(workdir).put("run", "record", run)
         Home.store().put("projects", run["id"], {"id": run["id"], "workdir": str(workdir), "task": run.get("task", "")})
+
+    @staticmethod
+    def remember(run, language):
+        """One line about the run in Tinker's home, the last RUNS_KEPT (the least recently updated go first)."""
+        line = {key: run.get(key, "") for key in ("id", "task", "status", "created", "updated")}
+        Home.store().put("runs", run["id"], dict(line, language=language or ""))
+        lines = Home.store().items("runs")
+        for run_id in sorted(lines, key=lambda key: lines[key].get("updated", ""))[:max(0, len(lines) - RUNS_KEPT)]:
+            Home.store().delete("runs", run_id)
 
     @staticmethod
     def workdir(name, workdir_arg):

@@ -4,7 +4,7 @@ import json
 
 import pytest
 
-from tinkerkit.knowledge import Embeddings, Knowledge, Learner, Library, Researcher, Retriever, language_key
+from tinkerkit.knowledge import Embeddings, Knowledge, Learner, Library, Researcher, Retriever, language_key, record
 from tinkerkit.model import Ollama
 from tinkerkit.settings import Config, Home, MAX_LESSONS
 from tinkerkit.workspace import Toolchain
@@ -575,13 +575,14 @@ def test_knowledge_starts_as_a_candidate_and_a_success_proves_it(tinker_home):
     assert again.known_lessons()[0]["status"] == "proven"
     statuses = {f["id"]: f["status"] for f in Library.read("flask")["facts"]}
     assert statuses == {route: "proven", client: "candidate"}
-    assert again.language_doc["facts"] == [{"id": route, "phase": "code", "text": "Flask routes use @app.route",
-                                            "topic": "flask", "status": "proven"}]
+    facts = [{k: v for k, v in f.items() if k != "history"} for f in again.language_doc["facts"]]
+    assert facts == [{"id": route, "phase": "code", "text": "Flask routes use @app.route", "topic": "flask",
+                      "status": "proven"}]
     assert again.prove(used) == 0  # proven once is enough
 
 
 @pytest.mark.spec("KNW-17")
-def test_a_failure_discards_what_was_used_in_that_step(tinker_home):
+def test_a_failure_retires_what_was_used_in_that_step(tinker_home):
     route, client = topic_with_facts()
     known = Knowledge("Python")
     known.add_lessons([lesson("Seed random generators inside tests", "tests"),
@@ -594,7 +595,7 @@ def test_a_failure_discards_what_was_used_in_that_step(tinker_home):
     gone = Knowledge("Python").disprove(used, ("code",))
     after = Knowledge("Python")
     assert gone == 2 and [l["text"] for l in after.known_lessons()] == ["Seed random generators inside tests"]
-    assert after.language_doc["facts"] == []  # proven before, discarded all the same
+    assert after.language_doc["facts"] == []  # proven before, retired all the same
     assert after.disprove(used, ("tests",)) == 2
     assert Knowledge("Python").known_lessons() == [] and [f["id"] for f in Library.read("flask")["facts"]] == [route]
 
@@ -606,3 +607,83 @@ def test_proven_facts_are_shown_for_their_phase(tinker_home):
     known.prove({f"fact:flask:{route}": ["code"]})
     assert [f["text"] for f in Knowledge("Python").facts(("code",))] == ["Flask routes use @app.route"]
     assert Knowledge("Python").facts(("tests",)) == []
+
+
+def events(item):
+    return [(event["event"], event["run"]) for event in item.get("history", [])]
+
+
+@pytest.mark.spec("KNW-19")
+def test_each_item_keeps_its_history_by_run(tinker_home):
+    route, _ = topic_with_facts()
+    Knowledge("Python", "r1").add_lessons([lesson("Seed random generators inside tests", "tests")], [])
+    Knowledge("Python", "r2").add_lessons([lesson("Seed random generators inside the tests", "tests")], [])
+    known = Knowledge("Python", "r3")
+    seed = known.known_lessons()[0]
+    known.prove({f"lesson:{seed['id']}": ["tests"], f"fact:flask:{route}": ["code"]})
+    Knowledge("Python", "r4").prove({f"lesson:{seed['id']}": ["tests"], f"known:{route}": ["code"]})
+    after = Knowledge("Python")
+    seed = after.known_lessons()[0]
+    assert events(seed) == [("born", "r1"), ("confirmed", "r2"), ("helped", "r3"), ("helped", "r4")]
+    assert seed["helped"] == 2 and seed["status"] == "proven"
+    assert events(Library.read("flask")["facts"][0]) == [("helped", "r3")]
+    assert events(after.language_doc["facts"][0]) == [("born", "r3"), ("helped", "r4")]
+
+
+@pytest.mark.spec("KNW-19")
+def test_a_fix_keeps_its_history_and_history_is_capped(tinker_home, monkeypatch):
+    Knowledge("Python", "r1").remember_fix({"failure": "no module named calc", "cause": "pythonpath",
+                                            "replay": {"toolchain": {}}})
+    again = Knowledge("Python", "r2")
+    again.fix_result(again.known_fix("no module named calc"), worked=True)
+    assert events(Knowledge("Python").known_fix("no module named calc")) == [("born", "r1"), ("helped", "r2")]
+    monkeypatch.setattr("tinkerkit.knowledge.HISTORY_KEPT", 3)
+    item = {}
+    for run in ("r1", "r2", "r3", "r4"):
+        record(item, "helped", run)
+    assert [run for _, run in events(item)] == ["r2", "r3", "r4"] and item["helped"] == 4
+
+
+@pytest.mark.spec("KNW-5", "KNW-19")
+def test_lessons_rank_by_times_seen_and_helped(tinker_home):
+    known = Knowledge("Python")
+    known.add_lessons([lesson("Seed random generators inside tests", "tests"),
+                       lesson("Name each test after the behaviour it checks", "tests")], [2])
+    seed, name = known.lessons(("tests",))
+    known.prove({f"lesson:{seed['id']}": ["tests"]})
+    known.prove({f"lesson:{seed['id']}": ["tests"]})
+    assert [l["text"] for l in Knowledge("Python").lessons(("tests",))][0] == "Seed random generators inside tests"
+
+
+@pytest.mark.spec("KNW-20")
+def test_what_is_retired_is_kept_apart_with_why_and_never_shown(tinker_home, monkeypatch):
+    route, client = topic_with_facts()
+    known = Knowledge("Python", "r1")
+    known.add_lessons([lesson("Seed random generators inside tests", "tests")], [])
+    seed = known.known_lessons()[0]["id"]
+    known.remember_fix({"failure": "no module named calc", "cause": "pythonpath", "replay": {"toolchain": {}}})
+    Knowledge("Python", "r2").disprove({f"lesson:{seed}": ["tests"], f"fact:flask:{client}": ["tests"]}, ("tests",))
+    after = Knowledge("Python", "r3")
+    after.fix_result(after.known_fix("no module named calc"), worked=False)
+    retired = Knowledge("Python").any_language_doc["retired"][0]
+    assert retired["text"] == "Seed random generators inside tests" and retired["status"] == "retired"
+    assert retired["reason"] == "shown in the tests prompts of a step that failed" and retired["was"] == "lessons"
+    assert events(retired)[-1] == ("failed", "r2")
+    fix = Knowledge("Python").language_doc["retired"][0]
+    assert fix["reason"] == "its replay failed" and events(fix)[-1] == ("failed", "r3")
+    entry = Library.read("flask")
+    assert [f["id"] for f in entry["facts"]] == [route] and entry["retired"][0]["id"] == client
+    assert Knowledge("Python").lessons(("tests",)) == [] and Knowledge("Python").known_fix("no module named calc") is None
+    assert all(item["id"] != client for item in Library.items({"flask": entry}))
+    monkeypatch.setattr("tinkerkit.knowledge.RETIRED_KEPT", 1)
+    Knowledge("Python").disprove({f"fact:flask:{route}": ["code"]}, ("code",))
+    assert [f["id"] for f in Library.read("flask")["retired"]] == [route]
+
+
+@pytest.mark.spec("KNW-21")
+def test_a_finding_cites_its_facts_by_id(tinker_home):
+    Library.save("food", {"topic": "food", "name": "Food", "summary": "s", "questions": [{"question": "q?"}],
+                          "facts": [{"phase": "spec", "text": "one"}, {"phase": "spec", "text": "two"}],
+                          "findings": [{"question": 1, "answer": "a", "facts": [2, 9], "confidence": "low"}]})
+    entry = Library.read("food")
+    assert entry["findings"][0]["cites"] == [entry["facts"][1]["id"]]

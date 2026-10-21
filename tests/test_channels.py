@@ -2,6 +2,7 @@
 
 import io
 import json
+import re
 import stat
 import sys
 import urllib.parse
@@ -19,7 +20,7 @@ class BotAPI:
 
     def __init__(self, **answers):
         self.answers = {name: list(value) if isinstance(value, list) else [value] for name, value in answers.items()}
-        self.calls = []
+        self.calls, self.raw = [], []  # raw: (headers, body) of each request
 
     def connection(self, wait):
         return Connection(self)
@@ -33,7 +34,8 @@ class Connection:
 
     def request(self, method, path, data, headers):
         name = path.rsplit("/", 1)[1]
-        self.api.calls.append((path, dict(urllib.parse.parse_qsl(data))))
+        self.api.raw.append((headers, data))
+        self.api.calls.append((path, dict(urllib.parse.parse_qsl(data)) if isinstance(data, str) else {}))
         queue = self.api.answers.get(name, [{}])
         answer = queue.pop(0) if len(queue) > 1 else queue[0]
         if isinstance(answer, BaseException):
@@ -262,3 +264,24 @@ def test_start_needs_a_channel_and_checks_it(monkeypatch):
     monkeypatch.setattr(TelegramChannel, "connection", lambda self, wait: api.connection(wait))
     with pytest.raises(SystemExit, match="channel bot does not work"):
         ChannelCommand.run(["start", "bot"])
+
+
+@pytest.mark.spec("CHN-8")
+def test_send_file_uploads_a_document_with_its_caption(tmp_path):
+    page = tmp_path / "memory.html"
+    page.write_bytes(b"<!doctype html><p>graph</p>")
+    api = BotAPI(sendDocument={"message_id": 12})
+    channel = telegram(api)
+    assert channel.send_file("42", page, "**Tinker's memory** " + "x" * 2000) == 12
+    (headers, body), = api.raw
+    boundary = headers["Content-Type"].split("boundary=")[1]
+    assert headers["Content-Type"].startswith("multipart/form-data") and api.calls[0][0] == "/botT0K/sendDocument"
+    parts = body.split(f"--{boundary}".encode())
+    named = {re.search(rb'name="(\w+)"', part).group(1).decode(): part.split(b"\r\n\r\n", 1)[1][:-2]
+             for part in parts[1:-1]}
+    assert named["chat_id"] == b"42" and named["parse_mode"] == b"HTML"
+    assert named["caption"].startswith(b"<b>Tinker's memory</b> xx") and len(named["caption"].decode()) == 1024
+    assert named["document"] == b"<!doctype html><p>graph</p>" and b'filename="memory.html"' in body
+    assert parts[-1] == b"--\r\n" and channel.alive["42"] == [12]
+    failing = telegram(BotAPI(sendDocument=(400, "Bad Request: file too big"), sendMessage={"message_id": 13}))
+    assert failing.send_file("42", page, "the caption") == 13

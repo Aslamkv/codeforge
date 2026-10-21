@@ -43,7 +43,7 @@ class Session:
         """What was learned for the project's language (and any language)."""
         language = self.project.language or "Python"
         if self._knowledge is None or self._knowledge.language != language:
-            self._knowledge = Knowledge(language)
+            self._knowledge = Knowledge(language, (self.project.run or {}).get("id"))
         return self._knowledge
 
     @property

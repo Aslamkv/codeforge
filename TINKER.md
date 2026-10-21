@@ -234,6 +234,14 @@ See what it has learned:
 tinker memory
 ```
 
+See it as a graph you can explore in the browser: each lesson, fact and fix linked to its language, and to
+the runs that taught it, proved it or found it wrong (what did not hold is kept, greyed, with why). In a
+chat, `memory --graph` sends the page as a file to open on your phone:
+
+```sh
+tinker memory --graph
+```
+
 ## Settings 🔧
 
 See the settings, or change one:
