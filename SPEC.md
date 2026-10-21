@@ -760,7 +760,8 @@ phase, learn from the web what the rest of the cycle needs.
   `enable` and `disable` switch a channel.
 - **CHN-3** `TelegramChannel.call` POSTs form fields (`None` left out) to `/bot<token>/<method>`. It
   gives the result of an ok answer, and a refusal is a `ChannelError`. A dropped connection is
-  tried once more, and then it is an `OSError`.
+  tried once more, and then it is an `OSError`. Too many requests (429) is waited out for the
+  `retry_after` seconds Telegram gives, up to 3 times, and then it is a `ChannelError`.
 - **CHN-4** `receive` gives the text messages and moves the offset past every update. A network
   failure gives no messages.
 - **CHN-5** `send` and `edit` post Telegram HTML, and fall back to plain text when the HTML is

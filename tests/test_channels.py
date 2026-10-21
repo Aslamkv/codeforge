@@ -155,6 +155,17 @@ def test_call_refused_and_dropped():
         telegram(BotAPI(getMe=[OSError("reset"), OSError("reset")])).call("getMe")
 
 
+@pytest.mark.spec("CHN-3")
+def test_call_waits_out_too_many_requests(monkeypatch):
+    slept = []
+    monkeypatch.setattr(channels.time, "sleep", slept.append)
+    busy = (429, json.dumps({"ok": False, "error_code": 429, "parameters": {"retry_after": 5}}))
+    assert telegram(BotAPI(getMe=[busy, {"username": "b"}])).call("getMe") == {"username": "b"}
+    assert slept == [5]
+    with pytest.raises(ChannelError, match="Telegram refused getMe: 429"):
+        telegram(BotAPI(getMe=busy)).call("getMe")
+
+
 @pytest.mark.spec("CHN-4")
 def test_receive(monkeypatch):
     updates = [{"update_id": 10, "message": {"message_id": 5, "text": "hello", "chat": {"id": 42},

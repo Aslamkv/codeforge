@@ -24,6 +24,7 @@ from .settings import Home
 PAIRING_WAIT = 120                             # seconds to wait for the first message when pairing a chat
 PIN_NOTE_WAIT = 2                              # seconds before Telegram's note about a pin is taken out
 CHECK_TRIES = 3                                # tries of a channel's first call when it starts listening
+RATE_LIMIT_WAITS = 3                           # times a call waits out Telegram's "too many requests"
 
 
 class ChannelCommand:
@@ -366,17 +367,36 @@ class TelegramChannel(Channel):
         """The Bot API's result (waiting up to wait seconds); a refused call is a ChannelError, a dropped
         connection an OSError. Calls go over connections kept open (a new one per call costs a name lookup
         and a handshake: seconds, where a call on an open one takes a fraction of one); one that dropped
-        meanwhile is opened again, once."""
+        meanwhile is opened again, once. Too many requests (429) is waited out as long as Telegram asks."""
         path = f"/bot{self.secrets.get('token', '')}/{method}"
         data = urllib.parse.urlencode({k: v for k, v in fields.items() if v is not None})
+        status, body = self.answer(method, path, data, wait)
+        for _ in range(RATE_LIMIT_WAITS):
+            pause = self.retry_after(status, body)
+            if pause is None:
+                break
+            time.sleep(pause)
+            status, body = self.answer(method, path, data, wait)
+        return self.result(method, status, body)
+
+    def answer(self, method, path, data, wait):
+        """(status, body) of the call, on a connection opened again once when it dropped."""
         for attempt in (1, 2):
             try:
-                status, body = self.exchange(path, data, wait)
-                break
+                return self.exchange(path, data, wait)
             except http.client.HTTPException, OSError:
                 if attempt == 2:
                     raise OSError(f"Telegram did not answer {method}") from None
-        return self.result(method, status, body)
+
+    @staticmethod
+    def retry_after(status, body):
+        """The seconds Telegram asks to wait before calling again; None when it did not ask."""
+        if status != 429:
+            return None
+        try:
+            return float(json.loads(body)["parameters"]["retry_after"])
+        except ValueError, KeyError, TypeError:
+            return 1
 
     def exchange(self, path, data, wait):
         """(status, body) of one POST over an open connection, kept open for the next call (closed when it failed)."""
