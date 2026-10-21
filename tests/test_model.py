@@ -180,6 +180,17 @@ def test_stream_tells_its_watcher_how_the_reply_goes(monkeypatch):
 
 
 @pytest.mark.spec("MOD-9")
+def test_a_stream_that_writes_one_line_again_and_again_is_cut(monkeypatch):
+    monkeypatch.setattr(model_module, "LOOP_LINES", 4)
+    stream = Stream(None, None)
+    ends = [stream.take({"message": {"content": line}}) for line in ["[tool]\n", "x = 1\n", "x = 1\n", "x = 1\n"]]
+    assert ends == [False] * 4
+    assert stream.take({"message": {"content": "x = 1\n"}}) and stream.final["done_reason"] == "length"
+    calm = Stream(None, None)
+    assert not any(calm.take({"message": {"content": piece}}) for piece in ["\n"] * 6 + ["a\n", "b\n"] * 4)
+
+
+@pytest.mark.spec("MOD-9")
 def test_stream_error_chunks():
     stream = Stream(None, None)
     stream.take({"message": {"content": "partial "}})

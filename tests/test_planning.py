@@ -4,10 +4,11 @@ import json
 
 import pytest
 
-from tinkerkit.knowledge import Library
+from tinkerkit.knowledge import Knowledge, Library
 from tinkerkit.planning import ContractWriter, Designer, InterfaceReviewer, Recaller, SpecWriter, Working, asked
 from tinkerkit.prompts import Reply
 from conftest import TOOLCHAIN, criterion
+from tinkerkit.workspace import Toolchain
 
 
 @pytest.mark.spec("PLN-1")
@@ -362,6 +363,20 @@ def test_recall_without_the_web_uses_the_topics_named_and_the_language(make_proj
 
 
 @pytest.mark.spec("PLN-11")
+def test_recall_keeps_a_languages_rules_before_its_other_facts(make_project, make_session, fake_ollama):
+    topic("python", name="Python 3.14", kind="language", language="Python",
+          tools=[{"role": "tests", "name": "pytest"}],
+          facts=[{"phase": "code", "text": "Python has match"}, {"phase": "code", "text": "t-strings are new"}])
+    entry = Library.read("python")
+    entry["rules"] = [{"phase": "code", "text": "Use match for dispatch", "cites": [entry["facts"][0]["id"]]}]
+    Library.save("python", entry)
+    project = make_project(cycles=[{"id": "base", "request": "a calculator in Python", "phase": "recall"}])
+    Recaller(make_session(project)).run(project.cycles[0])
+    assert [i["text"] for i in project.spec["learned"]] == [
+        "its tools: tests pytest", "Use match for dispatch"]  # the rules stand in for the facts
+
+
+@pytest.mark.spec("PLN-11")
 def test_topic_listing_fits_the_room():
     known = {"a": {"name": "A", "summary": "first"}, "b": {"name": "B", "summary": "second"}}
     assert Recaller.topic_listing(known, ["b", "a"], 1000) == "- b: B, second\n- a: A, first"
@@ -409,3 +424,88 @@ def test_a_plan_to_confirm_is_a_quick_draft(planner, fake_ollama):
     fake_ollama.reply(spec_reply(), when="Spec")
     SpecWriter(session).run(cycle)
     assert fake_ollama.calls[0]["think"] == "low"
+
+
+def python_with_conditional_rules():
+    topic("python", name="Python 3.14", kind="language", language="Python",
+          tools=[{"role": "environment", "name": "uv"}, {"role": "tests", "name": "pytest"}],
+          machine=[{"command": "uv --version", "found": False, "output": ""}],
+          facts=[{"phase": "code", "text": "a fact"}])
+    entry = Library.read("python")
+    cite = [entry["facts"][0]["id"]]
+    entry["rules"] = [{"phase": "code", "text": "Never use a mutable default argument", "when": "", "cites": cite},
+                      {"phase": "code", "text": "Use inspect.iscoroutinefunction", "when": "async code", "cites": cite},
+                      {"phase": "code", "text": "Open text files with an encoding", "when": "code that reads files",
+                       "cites": cite},
+                      {"phase": "config", "text": "Set build-backend uv_build", "when": "", "cites": cite}]
+    Library.save("python", entry)
+    return {rule["text"]: rule["id"] for rule in Library.read("python")["rules"]}
+
+
+def choose(situation):
+    """A spec reply that says the project has the listed situation of this name."""
+    def reply(messages):
+        listing = messages[-1]["content"].split("Code some learned rules are for", 1)[1]
+        number = next(int(line.split(".")[0]) for line in listing.splitlines() if line.endswith(situation))
+        return spec_reply(situations=[number, 99])
+    return reply
+
+
+@pytest.mark.spec("PLN-13")
+def test_rules_for_code_the_project_does_not_have_stay_out_of_its_prompts(make_project, make_session, fake_ollama):
+    ids = python_with_conditional_rules()
+    Knowledge("Python").remember_toolchain(Toolchain(TOOLCHAIN))
+    project = make_project(cycles=[{"id": "base", "request": REQUEST + " in Python", "phase": "recall",
+                                    "kind": "feature"}], toolchain={}, language="")
+    session, cycle = make_session(project), project.cycles[0]
+    Recaller(session).run(cycle)
+    assert cycle["topics"] == ["python"]  # named in the request, without its version
+    assert set(project.spec["inapplicable"]) == {ids["Use inspect.iscoroutinefunction"],
+                                                 ids["Open text files with an encoding"],
+                                                 ids["Set build-backend uv_build"]}  # uv is not installed here
+    fake_ollama.reply(choose("code that reads files"), when="Spec")
+    SpecWriter(session).run(cycle)
+    assert project.spec["situations"] == ["code that reads files"]
+    shown = "\n".join(part.text for part in session.knowledge_parts("code", "config"))
+    assert "mutable default" in shown and "encoding" in shown
+    assert "iscoroutinefunction" not in shown and "uv_build" not in shown
+
+
+@pytest.mark.spec("PLN-13")
+def test_a_proven_rule_for_other_code_stays_out_too(make_project, make_session):
+    ids = python_with_conditional_rules()
+    Knowledge("Python").prove({f"fact:python:{ids['Use inspect.iscoroutinefunction']}": ["code"]})
+    assert Knowledge("Python").facts(("code",))[0]["when"] == "async code"
+    project = make_project(cycles=[{"id": "base", "request": "a calculator in Python", "phase": "recall",
+                                    "kind": "feature"}])
+    session = make_session(project)
+    Recaller(session).run(project.cycles[0])
+    shown = "\n".join(part.text for part in session.knowledge_parts("code"))
+    assert "mutable default" in shown and "iscoroutinefunction" not in shown
+
+
+@pytest.mark.spec("PLN-5")
+def test_the_spec_sees_the_config_rules_since_it_plans_the_config_files(planner, fake_ollama):
+    session, project, cycle = planner
+    topic("python", name="Python 3.14", kind="language", language="Python", facts=[{"phase": "code", "text": "f"}])
+    entry = Library.read("python")
+    entry["rules"] = [{"phase": "config", "text": "Set pythonpath in pyproject.toml", "when": "", "cites": [entry["facts"][0]["id"]]}]
+    Library.save("python", entry)
+    project.spec["learned"] = Library.items({"python": Library.read("python")})[1:]
+    fake_ollama.reply(spec_reply(), when="Spec")
+    SpecWriter(session).run(cycle)
+    assert "Set pythonpath in pyproject.toml" in fake_ollama.calls[0]["messages"][-1]["content"]
+
+
+@pytest.mark.spec("PLN-5")
+def test_a_settings_file_is_planned_only_for_a_spec_point_about_a_setting(planner):
+    session, project, cycle = planner
+    files = [{"path": "calc.py", "kind": "code"}, {"path": "tests/test_calc.py", "kind": "test"},
+             {"path": ".env.example", "kind": "template", "role": "(none needed)"}]
+    plan = SpecWriter(session).read_spec(Reply(spec_reply(files=files)), cycle)
+    assert ".env.example" not in [f["path"] for f in plan["files"]]
+    setting = {"text": "with PRECISION=3 in .env, divide prints 3 decimals", "source": "a calculator that adds",
+               "test": "tests/test_calc.py::test_precision"}
+    criteria = json.loads(spec_reply())["criteria"][:2] + [setting]
+    plan = SpecWriter(session).read_spec(Reply(spec_reply(files=files, criteria=criteria)), cycle)
+    assert ".env.example" in [f["path"] for f in plan["files"]]

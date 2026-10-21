@@ -7,12 +7,13 @@ import operator
 import re
 from pathlib import Path
 
-from .knowledge import Embeddings, Learner, Library, Retriever
+from .knowledge import Embeddings, Learner, Library, Retriever, mentions
 from .model import OllamaError
 from .prompts import Part, PromptTooLarge, Prompts
 from .session import Phase, Worker
 from .settings import (
-    CHECK_MAX_TOKENS, Config, ENV_EXAMPLE, ENV_FILE, KINDS, RECALL_TOPICS, TOPIC_RELEVANT, after_what_they_use,
+    CHECK_MAX_TOKENS, Config, ENV_EXAMPLE, ENV_FILE, FACT_PHASES, KINDS, RECALL_TOPICS, TOPIC_RELEVANT,
+    after_what_they_use,
     first_line, groups_fitting, words,
 )
 from .workspace import TestRef, Toolchain
@@ -103,7 +104,8 @@ class Recaller(Phase):
         """The learned topics a request needs, with no model call: those whose name it says, and
         those close to it in meaning (TOPIC_RELEVANT, by the embedding model when there is one)."""
         text = query.lower()
-        named = [slug for slug, entry in known.items() if str(entry.get("name") or slug).lower() in text]
+        named = [slug for slug, entry in known.items()
+                 if any(mentions(text, name) for name in (str(entry.get("name") or slug), entry.get("language") or slug))]
         embeddings = Embeddings.configured()
         about = [f"{entry.get('name') or slug}: {entry.get('summary', '')}" for slug, entry in known.items()]
         vectors = embeddings.vectors([query] + about, keep=False) if embeddings and known else None
@@ -135,16 +137,46 @@ class Recaller(Phase):
         items = [item for item in Library.items({slug: entry for slug, entry in chosen.items() if entry})
                  if item["phase"] != "summary"]
         order = retriever.rank(query, [Library.searched(item) for item in items])
-        ranked = self.tools_first([items[index] for index in order])
+        ranked = self.essentials_first([items[index] for index in order])
         earlier = [item for item in self.p.spec.get("learned", []) if item["topic"] not in cycle["topics"]]
         self.p.spec["learned"] = ranked + earlier  # a topic chosen again: its current facts only
+        self.keep_out_inapplicable()
+
+    def keep_out_inapplicable(self):
+        """What the project does not need is kept out of its prompts ("inapplicable"), proven or not: what
+        applies only to code (its "when") the spec did not say the project has (the spec's "situations"), and
+        what names a tool a project here cannot count on."""
+        known = self.known_rules()
+        left_out = self.for_other_code(known) | self.needing_tools_missing_here(known)
+        self.p.spec["inapplicable"] = sorted(left_out)
+        if left_out:
+            print(f"  left out {len(left_out)} learned rule(s) or fact(s) this project does not need")
+
+    def known_rules(self):
+        """What was learned for the project: the chosen topics' items, and the language's proven facts once the
+        language is known."""
+        return self.p.spec.get("learned", []) + (self.s.knowledge.facts(FACT_PHASES) if self.p.language else [])
+
+    def situations(self):
+        """The distinct kinds of code learned rules apply only to (their "when"), for the spec to choose from."""
+        return list(dict.fromkeys(item["when"] for item in self.known_rules() if item.get("when")))
+
+    def for_other_code(self, known):
+        """The ids of what applies only to code the spec did not say the project has."""
+        has = set(self.p.spec.get("situations", []))
+        return {item["id"] for item in known if item.get("when") and item.get("id") and item["when"] not in has}
+
+    def needing_tools_missing_here(self, known):
+        """The ids of what names a learned tool a project here cannot count on (Knowledge.unavailable_tools)."""
+        missing = self.s.knowledge.unavailable_tools()
+        return {item["id"] for item in known if item.get("id") and any(mentions(item["text"], name) for name in missing)}
 
     @staticmethod
-    def tools_first(ranked):
-        """What the toolchain is built from (the tools, what is installed), before the facts."""
-        first = ("tools", "machine")
-        return [item for item in ranked if item["phase"] in first] + [item for item in ranked
-                                                                      if item["phase"] not in first]
+    def essentials_first(ranked):
+        """What the toolchain is built from (the tools, what is installed), then a language's rules, then the
+        facts: a full prompt drops its last lines first."""
+        order = lambda item: 0 if item["phase"] in ("tools", "machine") else 1 if item.get("kind") == "rule" else 2
+        return sorted(ranked, key=order)
 
     def use_language(self, cycle):
         """The project's language as learned (tinker learn): used by every cycle of a project
@@ -180,16 +212,28 @@ class SpecWriter(Phase):
                                                  think=think))
 
     def spec_prompt(self, cycle):
+        self.listed = Recaller(self.s).situations()
+        system, parts = self.plan_prompt(cycle)
+        return system, parts + [self.situations_part()]
+
+    def situations_part(self):
+        """The kinds of code some learned rules apply to, numbered, for the spec to say which this project has
+        (its other rules stay out of the prompts)."""
+        listing = "\n".join(f"{n}. {when}" for n, when in enumerate(self.listed, 1))
+        return Part('Code some learned rules are for: add "situations": [the numbers of those this project\'s code '
+                    'will have] to the reply', listing, atomic=True)
+
+    def plan_prompt(self, cycle):
         if cycle["id"] == "base":
             learned = self.s.knowledge.toolchain()
             return Prompts.SPEC_SYSTEM, [
                 Part("Request", asked(cycle), True),
                 Part("Requirements from the spec file", cycle.get("brief", "")),
-                Part(f"Toolchain that worked for {self.s.knowledge.language} before (reuse it when the project is in "
-                     f"{self.s.knowledge.language}: change only what names that project's files, and give run for "
-                     f"this project's entry point when it has one)",
+                Part(self.s.knowledge.toolchain_title(
+                         f"reuse it when the project is in {self.s.knowledge.language}: change only what names that "
+                         f"project's files, and give run for this project's entry point when it has one"),
                      json.dumps(learned.to_dict()) if learned else "", atomic=True, place="first"),
-                *self.s.knowledge_parts("spec", "design", "toolchain")]
+                *self.s.knowledge_parts("spec", "design", "config", "toolchain")]
         return Prompts.FEATURE_SPEC_SYSTEM, [
             Part("Change requested", asked(cycle), True, keep="tail"),
             Part("Project", self.p.run["task"], True),
@@ -218,7 +262,8 @@ class SpecWriter(Phase):
             raise ValueError("no criteria listed (or none quotes the request)")
         self.send_back_wrong_working(criteria)
         self.place_tests(criteria, data.get("files") or [])
-        files = self.planned_files(data.get("files") or [], {TestRef(s["test"]).file for s in criteria})
+        files = self.without_unneeded_settings(
+            self.planned_files(data.get("files") or [], {TestRef(s["test"]).file for s in criteria}), criteria)
         entry = self.planned_entry(data.get("entry"), files)
         if cycle["id"] == "base" and entry:
             self.send_back_unrun_program(criteria, entry, data.get("toolchain"))
@@ -230,7 +275,12 @@ class SpecWriter(Phase):
             toolchain = Designer.read_toolchain_data(given)
         language = str(data.get("language") or "").strip() or "Python"
         return {"language": language, "criteria": criteria, "files": list(files.values()), "entry": entry,
-                "toolchain": toolchain, "data": data}
+                "toolchain": toolchain, "situations": self.chosen_situations(data.get("situations")), "data": data}
+
+    def chosen_situations(self, numbers):
+        """The listed kinds of code the reply says the project has (by number)."""
+        listed = getattr(self, "listed", [])
+        return [listed[n - 1] for n in numbers or [] if isinstance(n, int) and 1 <= n <= len(listed)]
 
     def criteria_from(self, items, cycle, taken=()):
         """The criteria the reply gives, each traced to the request (else dropped)."""
@@ -321,6 +371,20 @@ class SpecWriter(Phase):
             files[path] = {"path": path, "kind": "test", "role": "tests", "contract": [], "uses": []}
         return files
 
+    def without_unneeded_settings(self, files, criteria):
+        """The files planned, without a settings file no spec point needs: one is planned only when a criterion
+        is about a setting (nothing is built that the spec does not need)."""
+        if ENV_EXAMPLE not in files or ENV_EXAMPLE in self.p.files or any(map(self.about_a_setting, criteria)):
+            return files
+        print(f"  left out {ENV_EXAMPLE}: no spec point is about a setting")
+        return {path: entry for path, entry in files.items() if path != ENV_EXAMPLE}
+
+    @staticmethod
+    def about_a_setting(criterion):
+        text = f"{criterion['source']} {criterion['behaviour']}".lower()
+        return criterion["source"].strip().lower() == "setting" or ENV_EXAMPLE in text or ENV_FILE in text \
+            or bool(re.search(r"\bsettings?\b", text))
+
     def planned_entry(self, given, files):
         """The file a person starts: one of the files (named by its path, or by its name alone when only one
         has it), or none."""
@@ -357,6 +421,7 @@ class SpecWriter(Phase):
 
     def take(self, cycle, plan):
         """A plan read from a spec reply, made the cycle's spec."""
+        self.p.spec["situations"] = list(dict.fromkeys(self.p.spec.get("situations", []) + plan["situations"]))
         if cycle["id"] == "base" or not self.p.language:
             self.p.spec["language"] = plan["language"]
             Recaller(self.s).use_language(cycle)
@@ -377,6 +442,7 @@ class SpecWriter(Phase):
         if plan["toolchain"]:
             print(f"  toolchain: {self.p.toolchain.summary()}")
         print(f"  learned so far: {self.s.knowledge.summary()}")
+        Recaller(self.s).keep_out_inapplicable()
         cycle["specified"] = True
         self.s.save()
 
@@ -569,8 +635,8 @@ class Designer(Phase):
         parts = [Part("Language", self.p.language or "Python", True),
                  Part("Entry point (the file a user starts)", entry, bool(entry)),
                  Part("Project files", self.p.outline(), True, exact=True),
-                 Part(f"Toolchain that worked for {self.p.language} before (reuse it; adapt only project names, and "
-                      f"give run for this project's entry point)",
+                 Part(self.s.knowledge.toolchain_title(
+                          "reuse it; adapt only project names, and give run for this project's entry point"),
                       json.dumps(learned.to_dict()) if learned else "", atomic=True),
                  *self.s.knowledge_parts("toolchain")]
         return self.s.ask_until_usable(Prompts.TOOLCHAIN_SYSTEM, parts, "Toolchain",

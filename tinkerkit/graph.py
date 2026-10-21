@@ -57,7 +57,7 @@ class Graph:
 
     def add_topics(self):
         """Each topic learned from the web: a language's joins its language's node; its facts link to the proven
-        facts they became, and its findings to the facts they cite."""
+        facts they became, its findings to the facts they cite, and its rules to the facts and lessons they rest on."""
         for slug, entry in Library.topics().items():
             hub = f"lang:{slug}" if entry.get("kind") == "language" else f"topic:{slug}"
             details = [("learned", entry.get("learned", "?")), ("summary", entry.get("summary", ""))]
@@ -71,6 +71,11 @@ class Graph:
                 node = self.add_claim(f"finding:{slug}:{finding['id']}", "finding", finding, hub)
                 for fact_id in finding.get("cites", []):
                     self.link(node, f"fact:{slug}:{fact_id}", "cites")
+            for rule in entry.get("rules", []):
+                node = self.add_claim(f"rule:{slug}:{rule['id']}", "rule", rule, hub)
+                for cited in rule.get("cites", []):
+                    self.link(node, f"fact:{slug}:{cited}" if f"fact:{slug}:{cited}" in self.nodes
+                              else f"lesson:{cited}", "cites")
             self.add_retired(entry, hub, slug)
 
     def add_commands(self):
@@ -121,7 +126,7 @@ class Graph:
                          details, history=lesson.get("history", []))
 
     def add_claim(self, node_id, kind, claim, hub):
-        """A fact or a finding, with its confidence and its pages."""
+        """A fact, a finding or a rule, with its confidence and its pages."""
         text = claim.get("text") or claim.get("answer", "")
         details = [("phase", claim.get("phase")), ("confidence", claim.get("confidence")),
                    ("helped", claim.get("helped", 0))]
@@ -139,7 +144,7 @@ class Graph:
     def add_retired(self, doc, hub, key):
         """What was retired from this language or topic: shown for people, with why."""
         for number, item in enumerate(doc.get("retired", [])):
-            kind = {"lessons": "lesson", "fixes": "fix", "findings": "finding"}.get(item.get("was"), "fact")
+            kind = {"lessons": "lesson", "fixes": "fix", "findings": "finding", "rules": "rule"}.get(item.get("was"), "fact")
             text = item.get("text") or item.get("answer") or f"{item.get('failure', '')} → {item.get('cause', '')}"
             details = [("was", item.get("was")), ("why", item.get("reason")), ("retired", item.get("retired")),
                        ("phase", item.get("phase"))]
@@ -182,7 +187,7 @@ class Graph:
         """What the graph holds, in one line."""
         counts, many = self.counts(), {"fix": "fixes", "retired": "retired"}
         shown = [f"{counts[k]} {k if counts[k] == 1 else many.get(k, k + 's')}" for k in
-                 ("language", "topic", "lesson", "fact", "finding", "fix", "toolchain", "command", "run", "retired")
+                 ("language", "topic", "lesson", "rule", "fact", "finding", "fix", "toolchain", "command", "run", "retired")
                  if counts.get(k)]
         return (", ".join(shown) or "nothing learned yet") + f"; {len(self.links)} links"
 
@@ -194,7 +199,7 @@ class GraphPage:
     """The page: the graph as data inside it, a plain list of every node (readable without scripts), and the
     script that draws the graph. Nothing is fetched from elsewhere."""
     KIND_NAMES = {"language": "Languages", "topic": "Topics", "commands": "Your commands", "lesson": "Lessons",
-                  "fact": "Facts", "finding": "Findings", "fix": "Toolchain fixes", "toolchain": "Toolchains",
+                  "rule": "Rules", "fact": "Facts", "finding": "Findings", "fix": "Toolchain fixes", "toolchain": "Toolchains",
                   "command": "Commands", "run": "Runs"}
 
     @classmethod
@@ -252,10 +257,10 @@ PAGE = """<!doctype html>
 <style>
 :root{--bg:#fbfaf8;--panel:#ffffff;--ink:#1d1d1f;--muted:#6b6b70;--line:#e3e1dc;--link:#c9c6bf;
 --language:#3a5ba0;--topic:#7a4fa0;--commands:#2f7d6d;--lesson:#d0782a;--fact:#3d8bd0;--finding:#a04f7a;
---fix:#b33b3b;--toolchain:#5d7f2f;--command:#2f7d6d;--run:#8a8a8f;--retired:#b9b7b1;--hl:#f2c94c}
+--rule:#2f8f5b;--fix:#b33b3b;--toolchain:#5d7f2f;--command:#2f7d6d;--run:#8a8a8f;--retired:#b9b7b1;--hl:#f2c94c}
 @media (prefers-color-scheme:dark){:root:not([data-theme="light"]){--bg:#151517;--panel:#1f1f22;--ink:#ececef;
 --muted:#9a9aa1;--line:#2e2e33;--link:#45454c;--language:#7b9be0;--topic:#b38ddb;--commands:#5fbfa9;
---lesson:#f0a05a;--fact:#6fb3ee;--finding:#de8cb6;--fix:#ee7b7b;--toolchain:#9cc560;--command:#5fbfa9;
+--lesson:#f0a05a;--fact:#6fb3ee;--finding:#de8cb6;--rule:#6cc795;--fix:#ee7b7b;--toolchain:#9cc560;--command:#5fbfa9;
 --run:#8f8f96;--retired:#5c5b58}}
 *{box-sizing:border-box}
 body{margin:0;overflow-x:hidden;background:var(--bg);color:var(--ink);font:15px/1.45 -apple-system,BlinkMacSystemFont,"Segoe UI",
@@ -333,7 +338,7 @@ document.body.classList.add('js','graph');
 var ctx=canvas.getContext('2d'),css=getComputedStyle(document.documentElement);
 function color(name){return css.getPropertyValue('--'+name).trim()||'#888';}
 var HUBS={language:1,topic:1,commands:1};
-var KINDS=['lesson','fact','finding','fix','toolchain','command','run'];
+var KINDS=['lesson','rule','fact','finding','fix','toolchain','command','run'];
 var nodes=data.nodes,links=data.links,byId={};
 var hubs=nodes.filter(function(n){return HUBS[n.kind];}),R=hubs.length>1?140*Math.sqrt(hubs.length):0;
 hubs.forEach(function(h,i){var a=6.283*i/hubs.length;h.x=Math.cos(a)*R;h.y=Math.sin(a)*R;});

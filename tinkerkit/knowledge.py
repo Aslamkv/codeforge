@@ -20,7 +20,7 @@ from .prompts import Part, PromptTooLarge, Prompts
 from .settings import (
     Config, FACTS_PER_CHUNK, FACT_CHARS, FACT_PHASES, HISTORY_KEPT, Home, LANGUAGE_COMMANDS, LANGUAGE_PAGES, LANGUAGE_SEARCHES,
     LANGUAGE_SECTIONS, LESSONS_SHOWN, LESSON_PHASES, MAX_COMMANDS, MAX_FACTS, MAX_LESSONS, MAX_PAGES, MAX_QUERIES,
-    PAGE_CHUNKS,
+    PAGE_CHUNKS, PLAYBOOK_RULES, RULE_CHARS, RULE_WHEN_CHARS,
     REPEAT_CLAIM, RETIRED_KEPT, RESEARCH_CHECKS, RESEARCH_GAPS, RESEARCH_PAGES, RESEARCH_QUERIES, RESEARCH_QUESTIONS, SAME_CLAIM,
     SAME_FACT, SAME_LESSON, SEARCH_RESULTS, SECTION_FACTS, SECTION_PAGES, SIMILAR_FAILURE, TOOL_ROLES,
     VERSION_TIMEOUT, fingerprint, first_line, now_text, similarity, split_text, words,
@@ -44,6 +44,15 @@ class Knowledge:
         self.language_doc = Home.store().get("languages", self.key) or {
             "language": self.language, "projects": 0, "toolchain": None, "fixes": [], "lessons": [], "facts": []}
         self.any_language_doc = Home.store().get("memory", "any") or {"lessons": []}
+
+    @staticmethod
+    def named_in(text):
+        """The language a request names, of those Tinker knows (built projects in, or learned), the first it
+        names; None when it names none."""
+        known = [doc.get("language") for doc in Home.store().items("languages").values()] + \
+                [entry.get("language") for entry in Library.topics().values() if entry.get("kind") == "language"]
+        named = [name for name in dict.fromkeys(n for n in known if n) if mentions(text or "", name)]
+        return min(named, key=lambda name: (text or "").lower().index(name.lower()), default=None)
 
     def summary(self):
         lessons = len(self.language_doc.get("lessons", [])) + len(self.any_language_doc.get("lessons", []))
@@ -72,6 +81,10 @@ class Knowledge:
 
     def known_lessons(self):
         return self.language_doc.setdefault("lessons", []) + self.any_language_doc.setdefault("lessons", [])
+
+    def proven_lessons(self):
+        """The lessons this language's own projects proved (not any language's): what its rules fold in."""
+        return [lesson for lesson in self.language_doc.get("lessons", []) if lesson.get("status") == "proven"]
 
     def add_lessons(self, new, confirmed, names=()):
         """Adds new lessons as candidates (one like a known lesson confirms it instead; one that names
@@ -149,13 +162,13 @@ class Knowledge:
         proven, known = 0, {fact["id"] for fact in self.language_doc.setdefault("facts", [])}
         for slug, ids in self.used_facts(used).items():
             entry = Library.read(slug) or {}
-            claims = [c for c in entry.get("facts", []) + entry.get("findings", []) if c.get("id") in ids]
+            claims = [c for key in Library.CLAIMS for c in entry.get(key, []) if c.get("id") in ids]
             proven += sum(c.get("status") != "proven" for c in claims)
             Library.claims(slug, ids, lambda claim: record(dict(claim, status="proven"), "helped", self.run))
             for claim in claims:
                 if claim["id"] not in known and claim.get("phase"):
                     fact = {"id": claim["id"], "phase": claim["phase"], "text": claim["text"], "topic": slug,
-                            "status": "proven"}
+                            "status": "proven", **({"when": claim["when"]} if claim.get("when") else {})}
                     self.language_doc["facts"].append(record(fact, "born", self.run))
                     known.add(claim["id"])
         return proven
@@ -190,9 +203,50 @@ class Knowledge:
                 found[slug].add(claim_id)
         return dict(found)
 
+    def supersede(self, slug, shown):
+        """The language was learned again (kept as slug): the facts its earlier learning proved that the new
+        learning does not show (shown: the ids its prompts show, its rules when it has them) are retired, as
+        replaced by it; how many. Proven facts from other topics stay."""
+        reason = "replaced when the language was learned again"
+        gone = retire(self.language_doc, "facts", lambda fact: fact.get("topic") == slug and fact["id"] not in shown,
+                      reason, self.run)
+        self.save()
+        return gone
+
     def toolchain(self):
         known = Toolchain(self.language_doc.get("toolchain"))
         return known if known else None
+
+    def missing_checks(self):
+        """The language's learned tools that check code but the toolchain that worked does not run, as "role
+        name": a type checker it never names, a linter or formatter where it has no command. A toolchain
+        replayed as it is would never take up what was learned after it."""
+        known, slug = self.toolchain(), Library.language(self.language)
+        if not known or not slug:
+            return []
+        runs = " ".join([*known.setup, known.format, known.lint]).lower()
+        missing = lambda tool: (tool["role"] == "types" and tool["name"].split()[0].lower() not in runs) or \
+            (tool["role"] in ("lint", "format") and not getattr(known, tool["role"]))
+        return [f"{tool['role']} {tool['name']}" for tool in Library.read(slug).get("tools", []) if missing(tool)]
+
+    def unavailable_tools(self):
+        """The language's learned tools a project here cannot count on: not installed on this machine, and
+        neither installed nor run by the toolchain that worked, nor a check it lacks (to be added)."""
+        slug = Library.language(self.language)
+        entry, known = (Library.read(slug) if slug else None) or {}, self.toolchain()
+        failed = " ".join(m["command"] for m in entry.get("machine", []) if not m.get("found"))
+        used = " ".join(([*known.setup, known.format, known.lint, known.test_all] if known else [])
+                        + self.missing_checks())
+        names = dict.fromkeys(str(tool.get("name") or "").split(" ")[0] for tool in entry.get("tools", []))
+        return [name for name in names if name and mentions(failed, name) and not mentions(used, name)]
+
+    def toolchain_title(self, reuse):
+        """The title of the part that shows the toolchain that worked: reuse says how; the learned checks it
+        lacks are named, to be added."""
+        missing = self.missing_checks()
+        add = f"; add the learned {', '.join(missing)} it lacks (setup installs it, lint runs it with its strictest " \
+              f"useful settings)" if missing else ""
+        return f"Toolchain that worked for {self.language} before ({reuse}{add})"
 
     def remember_toolchain(self, toolchain):
         """The toolchain that worked, kept for the language's next projects as what holds for any
@@ -244,8 +298,10 @@ class Learner:
     least one for each thing the topic names, aimed at how to use it today;
     a language (or a language a run's recall phase needs): the same
     sections for every language, each with its own searches, what to look for and share of the
-    facts: its fundamentals, what is new, its tools (one per role: environment, packages, build,
-    tests, format, lint: the ones the request names, else the usual ones) and its conventions.
+    facts: its idioms, what is new, its pitfalls, its tools (one per role: environment, packages,
+    build, tests, format, lint, types: the ones the request names, else the usual ones) and its
+    conventions; then its facts, with the lessons its projects proved, are condensed into a few
+    rules (its playbook), which its prompts show in place of the facts they rest on.
     Then, for both: the commands that show what is installed here run (only such commands: one
     each, no shell operators, nothing installed or changed); the searches run and their pages are
     taken in turn (each search's first result, then each one's second, ...), so every search is
@@ -381,6 +437,9 @@ class Learner:
         commands: as saved for this request, else from the model."""
         known = next((entry for entry in Library.topics().values()
                       if entry.get("kind") == "language" and entry.get("topic") == text), None)
+        if known and set(known.get("roles", [])) != set(TOOL_ROLES):
+            print(f"  its saved plan predates the tool roles {', '.join(TOOL_ROLES)}; planning it again")
+            known = None
         parts = [Part("Request", text, True), Part("Today", datetime.date.today().isoformat(), True)]
         plan, saved = self.saved_or_asked(known, self.read_language_plan, Prompts.LANGUAGE_PLAN_SYSTEM, parts,
                                           "Plan learning the language", f"learning {text}",
@@ -414,7 +473,7 @@ class Learner:
             raise ValueError(f"it needs searches for the language's {', '.join(LANGUAGE_SECTIONS)}")
         commands, dropped = Learner.safe_commands(list(data.get("commands") or []) + tool_commands)
         return {"kind": "language", "language": language, "name": f"{language} {version}".strip(), "version": version,
-                "summary": summary or language, "tools": tools, "searches": searches,
+                "summary": summary or language, "tools": tools, "roles": list(TOOL_ROLES), "searches": searches,
                 "commands": list(dict.fromkeys(commands))[:LANGUAGE_COMMANDS], "dropped": dropped}
 
     @staticmethod
@@ -440,10 +499,15 @@ class Learner:
 
     @staticmethod
     def language_searches(plan):
-        """Each section's searches, and one for each tool, with what each looks for."""
+        """Each section's searches (a section the plan has none for, such as one a plan saved before it
+        existed lacks, gets the usual one), and one for each tool, with what each looks for."""
+        planned = {search["section"] for search in plan["searches"]}
+        usual = [{"section": section, "query": Prompts.SECTION_QUERY[section].format(
+                     language=plan["language"], version=plan.get("version", "")).replace("  ", " ")}
+                 for section in LANGUAGE_SECTIONS if section not in planned]
         searches = [{"query": search["query"], "section": search["section"], "pages": SECTION_PAGES[search["section"]],
                      "focus": Prompts.LANGUAGE_FOCUS[search["section"]].format(language=plan["language"])}
-                    for search in plan["searches"]]
+                    for search in plan["searches"] + usual]
         return searches + [{"query": tool["search"], "section": "tools", "pages": SECTION_PAGES["tools"],
                             "focus": Prompts.TOOL_FOCUS.format(tool=tool["name"], role=tool["role"],
                                                                language=plan["language"])}
@@ -464,12 +528,24 @@ class Learner:
             print(f"  nothing learned about {topic}: " + ("; ".join(self.notes) or "the pages stated nothing useful"))
             return None
         facts = self.keep_shares(plan["name"], facts, shares)
+        rules = self.condense(plan, facts) if plan.get("kind") == "language" else []
         entry = {"topic": topic, **{k: v for k, v in plan.items() if k != "dropped"}, "learned": now_text(),
-                 "model": self.model.name, "machine": machine, "facts": facts, "sources": sources, "notes": self.notes}
+                 "model": self.model.name, "machine": machine, "facts": facts, "rules": rules, "sources": sources,
+                 "notes": self.notes}
         Library.save(slug, entry)
         print(f"  learned {len(facts)} fact(s) about {plan['name']} from {len(sources)} page(s); kept as {slug}")
+        if plan.get("kind") == "language":
+            self.replace_proven(slug, entry)
         self.index(slug, entry)
         return entry
+
+    @staticmethod
+    def replace_proven(slug, entry):
+        """What the language's earlier learning proved, replaced by what it learned now (Knowledge.supersede)."""
+        shown = {item["id"] for item in Library.items({slug: entry}) if item["id"]}
+        gone = Knowledge(entry["language"]).supersede(slug, shown)
+        if gone:
+            print(f"  {gone} fact(s) proven from its earlier learning replaced by what was learned now")
 
     def look_at_machine(self, commands):
         """What each command shows (run in an empty folder): its first line and version number; a
@@ -641,6 +717,63 @@ class Learner:
             print(f"  could not pick ({first_line(str(exc), 120)}): keeping the first {count}")
             kept = None
         return kept or facts[:count]
+
+    def condense(self, plan, facts):
+        """A language's facts, with the lessons its projects proved, condensed into its playbook (one call):
+        at most PLAYBOOK_RULES rules a code generator follows, each citing the facts and lessons it rests on,
+        so its prompts show a few rules in place of many facts. [] when the model gives no usable reply
+        (the facts are then shown as they are)."""
+        lessons = Knowledge(plan["language"]).proven_lessons()
+        sources = self.rule_sources(facts, lessons)
+        try:
+            rules = self.model.ask_until_usable(Prompts.PLAYBOOK_SYSTEM, self.playbook_parts(plan, facts, lessons),
+                                                "Condense the language",
+                                                lambda reply: self.read_rules(reply.json(), sources), attempts=2)
+        except (PromptTooLarge, OllamaError) as exc:
+            rules = None
+            self.notes.append(f"the facts were not condensed into rules ({first_line(str(exc), 160)})")
+        print(f"  condensed into {len(rules)} rule(s)" if rules else "  not condensed: its facts are shown as they are")
+        return rules or []
+
+    @staticmethod
+    def rule_sources(facts, lessons):
+        """What a rule may cite, numbered as the prompt numbers it: the facts, then the lessons."""
+        return [{"id": Library.claim_id(fact, fact["text"]), "text": fact["text"]} for fact in facts] + \
+               [{"id": lesson.get("id") or fingerprint(lesson["text"])[:12], "text": lesson["text"]} for lesson in lessons]
+
+    @staticmethod
+    def playbook_parts(plan, facts, lessons):
+        """The language and its tools, its facts (with their section and phase), then its lessons, numbered on."""
+        listing = "\n".join(f"{n}. [{fact.get('section', '')}, {fact['phase']}] {fact['text']}"
+                            for n, fact in enumerate(facts, 1))
+        proved = "\n".join(f"{n}. {lesson['text']}" for n, lesson in enumerate(lessons, len(facts) + 1))
+        return [Part("Language", f"{plan['name']}; its tools: {Library.tools_text(plan['tools']) or 'none named'}", True),
+                Part("Facts learned from the web", listing, True, exact=True),
+                Part("Lessons its projects proved", proved or "(none yet)", True, exact=True)]
+
+    @staticmethod
+    def read_rules(data, sources):
+        """The rules, checked: each with a known phase, its text (cut to RULE_CHARS), when it applies ("" for
+        every program) and the ids of the sources it cites by number; a rule that rests on none is dropped
+        (never the model's own knowledge). What a new project declares (to get the newest version) is the first
+        rule, for every program. At most PLAYBOOK_RULES, one per text."""
+        rules = {}
+        given = (data.get("rules") or []) if isinstance(data, dict) else []
+        declare = data.get("declare") if isinstance(data, dict) else None
+        if isinstance(declare, dict):  # what a new project declares, first: a rule for every program
+            given = [dict(declare, phase="config", when="")] + list(given)
+        for item in given:
+            if not isinstance(item, dict):
+                continue
+            text, phase = " ".join(str(item.get("text") or "").split())[:RULE_CHARS], str(item.get("phase") or "").lower()
+            cites = list(dict.fromkeys(sources[n - 1]["id"] for n in item.get("cites") or []
+                                       if isinstance(n, int) and 1 <= n <= len(sources)))
+            when = " ".join(str(item.get("when") or "").split())[:RULE_WHEN_CHARS]
+            if text and phase in FACT_PHASES and cites and text not in rules:
+                rules[text] = {"id": fingerprint(text)[:12], "phase": phase, "text": text, "when": when, "cites": cites}
+        if not rules:
+            raise ValueError("it needs at least one rule that cites the facts")
+        return list(rules.values())[:PLAYBOOK_RULES]
 
     def index(self, slug, entry):
         """The texts embedded now, so the recall phase finds them by meaning (if that fails, the
@@ -956,7 +1089,9 @@ class Library:
     learn WHAT or a run's recall phase (a language under its language_key). Each fact and finding has an
     id and a status: a candidate until a cycle that used it succeeds. A run shows the facts of the
     topics its recall phase chose (ranked in the project's "learned") in the prompts of the phases they
-    concern, as an optional part."""
+    concern, as an optional part. A language's rules (its playbook) are claims too, shown in place of the
+    facts they cite."""
+    CLAIMS = ("facts", "findings", "rules")  # what in a topic is proven or retired
 
     @staticmethod
     def topics():
@@ -975,9 +1110,9 @@ class Library:
 
     @staticmethod
     def save(slug, entry):
-        """A topic kept: each fact and finding with an id and a status (a candidate until proven), and each
+        """A topic kept: each fact, finding and rule with an id and a status (a candidate until proven), and each
         finding with the ids of the facts it cites (its numbers no longer count once a fact is retired)."""
-        for claim, text in [(f, f.get("text", "")) for f in entry.get("facts", [])] + \
+        for claim, text in [(f, f.get("text", "")) for f in entry.get("facts", []) + entry.get("rules", [])] + \
                            [(f, f.get("answer", "")) for f in entry.get("findings", [])]:
             claim.setdefault("id", fingerprint(str(text))[:12])
             claim.setdefault("status", "candidate")
@@ -989,11 +1124,11 @@ class Library:
 
     @staticmethod
     def claims(slug, ids, change):
-        """The facts and findings of a topic with these ids, changed by change(claim) -> claim or None (gone)."""
+        """The claims of a topic with these ids, changed by change(claim) -> claim or None (gone)."""
         def changed(entry):
             if not entry:
                 return entry
-            for key in ("facts", "findings"):
+            for key in Library.CLAIMS:
                 entry[key] = [kept for kept in (change(c) if c.get("id") in ids else c for c in entry.get(key, []))
                               if kept is not None]
             return entry
@@ -1002,12 +1137,12 @@ class Library:
 
     @staticmethod
     def retire(slug, ids, reason, run):
-        """The facts and findings of a topic with these ids, retired; how many."""
+        """The claims of a topic with these ids, retired; how many."""
         gone = []
         def retired_in(entry):
             if entry:
                 gone.append(sum(retire(entry, key, lambda claim: claim.get("id") in ids, reason, run)
-                                for key in ("facts", "findings")))
+                                for key in Library.CLAIMS))
             return entry
         if Library.read(slug):
             Home.store().update("learned", slug, retired_in)
@@ -1029,10 +1164,10 @@ class Library:
     @staticmethod
     def items(topics):
         """What can be found in these topics ({slug: entry}), one item per text: each topic's
-        summary, a language's tools, what is installed here, research findings and each fact (with
-        its confidence, when researched), as {topic, name, phase, text, id, status}: a finding's and a
-        fact's id and status (None for what is not a claim). A topic that cannot be read is left out,
-        with a note."""
+        summary, a language's tools, what is installed here, research findings, a language's rules
+        (kind "rule") and each fact shown (facts_shown, with its confidence when researched), as
+        {topic, name, phase, text, id, status}: a claim's id and status (None for what is not a
+        claim). A topic that cannot be read is left out, with a note."""
         found = []
         for slug, entry in topics.items():
             try:
@@ -1057,10 +1192,25 @@ class Library:
                    "text": f"{entry['questions'][f['question'] - 1]['question']} {f['answer']} "
                            f"({f['confidence']} confidence)", "id": Library.claim_id(f, f["answer"]),
                    "status": f.get("status", "candidate")} for f in entry.get("findings", [])]
+        items += [{"topic": slug, "name": name, "phase": str(r["phase"]), "text": str(r["text"]), "kind": "rule",
+                   "when": str(r.get("when") or ""), "id": Library.claim_id(r, r["text"]),
+                   "status": r.get("status", "candidate")} for r in entry.get("rules", [])]
         return items + [{"topic": slug, "name": name, "phase": str(f["phase"]),
                          "text": str(f["text"]) + (f" ({f['confidence']})" if f.get("confidence") else ""),
                          "id": Library.claim_id(f, f["text"]), "status": f.get("status", "candidate")}
-                        for f in entry["facts"]]
+                        for f in Library.facts_shown(entry)]
+
+    @staticmethod
+    def facts_shown(entry):
+        """A topic's facts as its prompts may show them: all of them, unless its rules (a playbook) stand in for
+        them; then only those a retired rule cited and no rule in use cites (what the retired rule said is
+        open again)."""
+        rules = entry.get("rules", [])
+        if not rules:
+            return entry["facts"]
+        cited = lambda given: {fact_id for rule in given for fact_id in rule.get("cites", [])}
+        reopened = cited(r for r in entry.get("retired", []) if r.get("was") == "rules") - cited(rules)
+        return [fact for fact in entry["facts"] if Library.claim_id(fact, fact["text"]) in reopened]
 
     @staticmethod
     def claim_id(claim, text):
@@ -1259,6 +1409,11 @@ def retire(doc, key, gone, reason, run):
     if retired:
         doc["retired"] = (doc.get("retired", []) + retired)[-RETIRED_KEPT:]
     return len(retired)
+
+
+def mentions(text, name):
+    """Whether text names a tool (uv in `uv_build` and `uv.lock` too, not in `uvicorn`)."""
+    return bool(re.search(rf"(?<![A-Za-z]){re.escape(name)}(?![A-Za-z])", text, re.I))
 
 
 def language_key(name):

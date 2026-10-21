@@ -327,6 +327,30 @@ def test_knowledge_parts_record_what_they_show(session, home_store):
 
 
 @pytest.mark.spec("SES-3")
+def test_code_and_tests_are_told_the_checks_they_must_pass(session):
+    session.project.spec["toolchain"]["lint"] = "ruff check . && mypy --strict ."
+    checks = [p for p in session.knowledge_parts("code") if p.title.startswith("Checks")]
+    assert [p.text for p in checks] == ["$ ruff check . && mypy --strict ."]
+    assert not [p for p in session.knowledge_parts("design", "toolchain") if p.title.startswith("Checks")]
+    session.project.spec["toolchain"]["lint"] = "none"
+    assert not [p for p in session.knowledge_parts("tests") if p.title.startswith("Checks")]
+
+
+@pytest.mark.spec("SES-5")
+def test_before_the_spec_names_the_language_knowledge_is_for_the_one_the_request_names(session, home_store):
+    Library.save("rust", {"topic": "rust", "kind": "language", "language": "Rust", "name": "Rust 1.95", "facts": []})
+    Knowledge("Go").finished_project()
+    session.project.spec["language"] = ""
+    for request, language in [("a calculator in Rust", "Rust"), ("a Go tool, later ported to Rust", "Go"),
+                              ("a calculator", "Python"), ("a trusty calculator", "Python")]:
+        session.project.cycles[0]["request"] = request
+        assert session.knowledge.language == language
+    session.project.spec["language"] = "Rust"
+    session.project.cycles[0]["request"] = "a calculator in Go"
+    assert session.knowledge.language == "Rust"  # the spec named it
+
+
+@pytest.mark.spec("SES-3")
 def test_the_phases_a_failure_disproves(session):
     assert session.failed_phases("setup") == ("toolchain", "config")
     assert session.failed_phases("verify") == ("code", "tests", "design", "spec")

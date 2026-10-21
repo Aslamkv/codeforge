@@ -78,6 +78,18 @@ def test_links_join_items_to_what_they_belong_to_and_to_their_runs(memory):
     assert graph.nodes["run:r2"]["text"].startswith("no line about this run is kept")
 
 
+@pytest.mark.spec("GRF-2")
+def test_a_rule_links_to_the_facts_and_lessons_it_rests_on(memory):
+    entry = Library.read("flask")
+    entry["rules"] = [{"phase": "code", "text": "Route with @app.route", "cites": [memory["route"], memory["seed"]]}]
+    Library.save("flask", entry)
+    graph = Graph.build()
+    rule = next(n for n in graph.nodes if n.startswith("rule:"))
+    links = {(l["source"], l["target"], l["kind"]) for l in graph.links}
+    assert {(rule, f"fact:flask:{memory['route']}", "cites"), (rule, f"lesson:{memory['seed']}", "cites")} <= links
+    assert graph.nodes[rule]["kind"] == "rule" and "1 rule" in graph.summary()
+
+
 class FakeEmbeddings:
     name, failed = "embed-model", ""
 

@@ -6,7 +6,8 @@ from pathlib import Path
 
 from .settings import (
     ENV_EXAMPLE, ENV_FILE, FACTS_PER_CHUNK, FACT_PHASES, LESSON_PHASES, MAX_COMMANDS, MAX_FILE_LINES, MAX_QUERIES,
-    RESEARCH_CHECKS, RESEARCH_GAPS, RESEARCH_QUERIES, RESEARCH_QUESTIONS, TOOL_ROLES, TRIM_FLOOR, first_line,
+    PLAYBOOK_RULES, RESEARCH_CHECKS, RESEARCH_GAPS, RESEARCH_QUERIES, RESEARCH_QUESTIONS, RULE_CHARS, TOOL_ROLES,
+    TRIM_FLOOR, first_line,
 )
 
 
@@ -478,8 +479,8 @@ class Prompts:
   language's own project config file when the test tool needs it to find the code (e.g. pyproject.toml
   for tests in a folder of their own), never a helper file;
   {ENV_EXAMPLE} only when the request names a setting a user provides (a key, a path, a port): it lists
-  each with its default (empty if required), and a required one gets a criterion (source "setting")
-  that without it the app says which setting to set; kind: code, test, template, config or docs;
+  each with its default (empty if required); each setting gets a criterion that it takes effect, and a
+  required one a criterion (source "setting") that without it the app says which setting to set; kind: code, test, template, config or docs;
   "uses": the project files it imports, renders or calls; no file named like a standard-library
   module or a dependency (it would be loaded instead of it);
 - entry: the file a person starts to use it. What a person uses (an app, a tool, a calculator, a game,
@@ -700,40 +701,54 @@ take the language, the version it asks for (else the newest stable one) and the 
 - name, version, one sentence on what it is;
 - tools: one per role the language has, of {", ".join(TOOL_ROLES)} (build only if it is compiled;
   environment: how a project's dependencies are kept apart): the tool the request names for a role, else
-  the one most used today; each with one web search that finds how to use it in a project (install,
-  commands, configuration) and one command that shows its version and exits;
-- searches: 2 for fundamentals (syntax, reserved keywords, types, errors, modules, the concurrency and
-  runtime model), 2 for new (the newest stable releases: features, deprecations, removals; name the
-  year), 1 for conventions (project layout, style guide, packaging);
+  the one most used today (types: a static type checker, only if the language needs one besides its
+  compiler); each with one web search that finds how to use it in a project (install, commands, its
+  strictest useful configuration) and one command that shows its version and exits;
+- searches: 2 for idioms (idiomatic, modern, efficient code in it today: the constructs and standard
+  library to prefer), 2 for new (the newest stable releases: features, deprecations, removals; name the
+  year), 1 for pitfalls (common mistakes and anti-patterns), 1 for conventions (project layout, style
+  guide);
 - commands: up to 2 that show the language's version and exit.
 Commands: one each, no shell operators, nothing installed or changed. If the request is no programming
 language, reply {{"name":"","summary":"what it is instead"}}.
 Reply with ONLY JSON (this example is for Go):
 {{"name":"Go","version":"1.25","summary":"A compiled, statically typed language with built-in concurrency.",
  "tools":[{{"role":"tests","name":"go test","search":"go test flags table-driven tests","command":"go version"}}],
- "searches":[{{"section":"fundamentals","query":"Go language specification keywords types"}},
+ "searches":[{{"section":"idioms","query":"idiomatic Go effective Go 2025"}},
   {{"section":"new","query":"Go 1.25 release notes"}}],"commands":["go version"]}}"""
 
     TOPIC_FOCUS = ("how to set up and use {topic} today (commands, API, configuration), its current version and what "
                    "is new or changed, its conventions and good practice")
 
     LANGUAGE_FOCUS = {
-        "fundamentals": ("the core of {language} a developer must get right: syntax rules, reserved keywords, built-in "
-                         "types, error handling, modules and imports, the concurrency and runtime model, idioms"),
-        "new": ("what the newest stable releases of {language} added, changed, deprecated or removed (nothing "
-                "unreleased: no alpha, beta, release candidate, dev or draft)"),
-        "conventions": ("how {language} projects are laid out and written today: project layout, style guide, "
-                        "packaging and dependency files"),
+        "idioms": ("how idiomatic, modern {language} is written today: the constructs, types and standard library to "
+                   "prefer and what each replaces, error handling, clear and efficient code (each with a short example "
+                   "when the page gives one)"),
+        "new": ("what the newest stable releases of {language} added, changed, deprecated or removed, and how code "
+                "should use it (nothing unreleased: no alpha, beta, release candidate, dev or draft)"),
+        "pitfalls": ("the mistakes {language} code most often makes and what to write instead: bugs, anti-patterns, "
+                     "outdated forms, slow code"),
+        "conventions": "how {language} projects are laid out and named today: project layout, style guide",
+    }
+
+    SECTION_QUERY = {  # the search of a section a language's plan has none for
+        "idioms": "idiomatic modern {language} {version} best practices",
+        "new": "{language} {version} what's new release notes",
+        "pitfalls": "common {language} mistakes anti-patterns to avoid",
+        "conventions": "{language} project layout style guide",
     }
 
     TOOL_FOCUS = ("how to use {tool} ({role}) in a {language} project: installing it in the project, the exact commands "
-                  "and options to run it, its configuration file")
+                  "and options to run it, its configuration file, and the settings that catch the most bugs and "
+                  "outdated code (which rules to turn on)")
 
     FACTS_SYSTEM = f"""Read part of a web page for a code generator that knows only what it was trained on. List what
 the page states that matches "Look for" and that such a generator needs to build good software today:
 each one plain, concrete sentence the page states (never from your own knowledge), with the exact
-commands, names and versions it gives; nothing about one particular project, nothing about an
-unreleased version (alpha, beta, release candidate, dev, draft); at most {FACTS_PER_CHUNK}. "phase" is
+commands, names and versions it gives; the ones that change how code is written first (what to use,
+what it replaces, what to avoid); no reference lists a generator already knows (keywords, grammar),
+nothing about one particular project, nothing about an unreleased version (alpha, beta, release
+candidate, dev, draft); at most {FACTS_PER_CHUNK}. "phase" is
 where it matters: spec (what to build and test), design (files, structure), config (dependencies,
 settings), tests, code, toolchain (commands and tools).
 Reply with ONLY JSON: {{"facts":[{{"phase":"one of {', '.join(FACT_PHASES)}","text":"the fact"}}]}}
@@ -742,8 +757,30 @@ or {{"facts":[]}} when the excerpt states nothing like that."""
     PICK_FACTS_SYSTEM = """Below are facts found on web pages about a topic, for a code generator. Keep the {count}
 that most help it plan and write good software today: what changes how code, tests, configuration and
 commands are written (APIs, syntax, defaults, removals, exact commands and options). Drop repeats,
-anything vague, history, and trivia a typical project never meets (release signing, proxies, internals).
+anything vague, history, reference lists a generator already knows (keywords, grammar), and trivia a
+typical project never meets (release signing, proxies, internals, caches, unsafe or low-level features).
 Reply with ONLY JSON: {{"keep":[the numbers of the facts kept]}}"""
+
+    PLAYBOOK_SYSTEM = f"""Condense what was learned about a programming language into the rules a code generator
+follows to write small programs in it that are correct, idiomatic, modern and efficient, quickly: at
+most {PLAYBOOK_RULES}, the most useful first. Each rule is one short imperative sentence (under
+{RULE_CHARS} chars) that changes what is written: the construct, library, command or setting to use
+(the newest stable form the facts show) and what it replaces or what to avoid; a short example in
+backticks when it helps. Rest every rule on the numbered facts and lessons given (cite their numbers;
+never your own knowledge); merge facts that say one thing; leave out what a small program never needs.
+Where the facts give alternatives, the rule names only the one that adds no file, dependency or tool
+(a setting in an existing file over a new file, the standard library over a package), never both.
+A rule that needs a package or tool beyond the language's own install and its tools listed is never for
+every program: its "when" names that package or tool ("projects that use uv").
+A rule never tells to create or add a file (the plan decides the files): it says what to write.
+"phase" is where it matters: {', '.join(FACT_PHASES)} (toolchain: commands and tools).
+"when": "" for a rule that holds for every program in the language; else a few words naming the code it
+applies to ("async code", "a package published to an index", "code that reads files"), so a program that
+has no such code never sees it.
+"declare": what a new project writes to get the newest stable version or edition the facts name, and
+where (one sentence, citing its facts), or null when the facts name none.
+Reply with ONLY JSON: {{"rules":[{{"phase":"code","text":"Use `match` for dispatch on a value's shape, not
+if/elif chains","when":"","cites":[3,7]}}],"declare":{{"text":"Declare `go 1.25` in go.mod","cites":[2]}}}}"""
 
     RESEARCH_PLAN_SYSTEM = f"""Plan research on a topic for a code generator that must understand it well to build
 software for it. Split the topic into at most {RESEARCH_QUESTIONS} research questions that together cover it:
