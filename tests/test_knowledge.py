@@ -6,7 +6,7 @@ import pytest
 
 from tinkerkit.knowledge import Embeddings, Knowledge, Learner, Library, Researcher, Retriever, language_key, record
 from tinkerkit.model import Ollama
-from tinkerkit.settings import Config, Home, MAX_LESSONS
+from tinkerkit.settings import Config, Home, MAX_LESSONS, PLAYBOOK_RULES, RULE_CHARS, TOOL_ROLES
 from tinkerkit.workspace import Toolchain
 
 
@@ -285,12 +285,12 @@ def test_read_language_plan():
         "tools": [{"role": "tests", "name": "go test", "search": "go test flags", "command": "go version"},
                   {"role": "tests", "name": "ginkgo"}, {"role": "magic", "name": "x"}, "junk",
                   {"role": "lint", "name": "golangci-lint", "command": "golangci-lint --version"}],
-        "searches": [{"section": "fundamentals", "query": "Go spec"}, {"section": "gossip", "query": "x"},
+        "searches": [{"section": "idioms", "query": "Go spec"}, {"section": "gossip", "query": "x"},
                      {"section": "new", "query": " "}],
         "commands": ["go version", "go env"]})
     assert plan["name"] == "Go 1.25" and plan["language"] == "Go" and plan["kind"] == "language"
     assert [t["name"] for t in plan["tools"]] == ["go test", "golangci-lint"]
-    assert plan["searches"] == [{"section": "fundamentals", "query": "Go spec"}]
+    assert plan["searches"] == [{"section": "idioms", "query": "Go spec"}] and plan["roles"] == list(TOOL_ROLES)
     assert plan["commands"] == ["go version", "go env", "golangci-lint --version"]
     assert Learner.read_language_plan({"name": "", "summary": "a band"}) == {"not_language": "a band"}
     with pytest.raises(ValueError, match="searches"):
@@ -523,7 +523,7 @@ def test_a_domain_is_researched_when_tinker_learn_finds_one(make_model, fake_oll
 
 LANGUAGE_PLAN = {"name": "Go", "version": "1.25", "summary": "A compiled language.",
                  "tools": [{"role": "tests", "name": "go test", "search": "go test flags", "command": "echo go version go1.25.1"}],
-                 "searches": [{"section": "fundamentals", "query": "Go spec"}, {"section": "new", "query": "Go 1.25 notes"}],
+                 "searches": [{"section": "idioms", "query": "Go spec"}, {"section": "new", "query": "Go 1.25 notes"}],
                  "commands": ["echo go version go1.25.1"]}
 
 
@@ -534,16 +534,156 @@ def test_a_language_is_learned_as_one(make_model, fake_ollama, tinker_home):
     fake_ollama.reply(json.dumps(LANGUAGE_PLAN), when="Plan learning the language")
     fake_ollama.reply(json.dumps({"facts": [{"phase": "code", "text": "Go 1.25 has generic type aliases"}]}),
                       when="Facts", times=3)
+    fake_ollama.reply(json.dumps({"rules": [{"phase": "code", "text": "Use generic type aliases", "cites": [1]}]}),
+                      when="Condense the language")
     pages = {"https://go.dev/doc": "Go docs.", "https://go.dev/notes": "Release notes.", "https://go.dev/test": "go test."}
     entry = Learner(make_model(), FakeInternet(pages), None).learn("Go")
     assert entry["kind"] == "language" and entry["language"] == "Go" and entry["name"] == "Go 1.25"
     assert entry["tools"] == [{"role": "tests", "name": "go test", "search": "go test flags"}]
-    assert entry["machine"][0]["version"] == "1.25.1" and {f["section"] for f in entry["facts"]} <= {"fundamentals", "new",
-                                                                                                    "tools"}
+    assert entry["machine"][0]["version"] == "1.25.1"
+    assert {f["section"] for f in entry["facts"]} <= {"idioms", "new", "pitfalls", "conventions", "tools"}
+    assert [rule["text"] for rule in entry["rules"]] == ["Use generic type aliases"]
     assert Library.language("Go") == "go"
     fake_ollama.reply(json.dumps({"name": "Go", "summary": "s", "language": "Go", "queries": []}), when="Plan learning (")
     again = Learner(make_model(), FakeInternet(pages), None).learn("golang")
     assert again["kind"] == "language" and fake_ollama.labels()[-1].startswith("Plan learning (")  # learned already
+
+
+SOURCES = [{"id": "fact1", "text": "a"}, {"id": "fact2", "text": "b"}, {"id": "lesson1", "text": "c"}]
+
+
+@pytest.mark.spec("KNW-22")
+def test_read_rules_keeps_only_rules_that_rest_on_what_was_learned():
+    rules = Learner.read_rules({"rules": [
+        {"phase": "code", "text": "Use  match\n for dispatch", "cites": [1, 3, 1, 9, "2"]},
+        {"phase": "code", "text": "Trust me", "cites": []},
+        {"phase": "dreams", "text": "Unknown phase", "cites": [1]},
+        {"phase": "code", "text": "Use match for dispatch", "cites": [2]},
+        {"phase": "tests", "text": "x" * 500, "cites": [2]}, "junk"]}, SOURCES)
+    assert [(r["phase"], r["text"][:22], r["cites"]) for r in rules] == [
+        ("code", "Use match for dispatch", ["fact1", "lesson1"]), ("tests", "x" * 22, ["fact2"])]
+    assert len(rules[1]["text"]) == RULE_CHARS and rules[0]["id"]
+    many = Learner.read_rules({"rules": [{"phase": "code", "text": f"rule {n}", "cites": [1]} for n in range(40)]},
+                              SOURCES)
+    assert len(many) == PLAYBOOK_RULES
+    with pytest.raises(ValueError, match="cites"):
+        Learner.read_rules({"rules": [{"phase": "code", "text": "Trust me"}]}, SOURCES)
+
+
+@pytest.mark.spec("KNW-22")
+def test_a_rule_says_when_it_applies_and_what_a_new_project_declares_comes_first():
+    rules = Learner.read_rules({"rules": [{"phase": "code", "text": "Await in async code", "when": "async code " * 20,
+                                           "cites": [1]}],
+                                "declare": {"text": "Set edition 2024 in Cargo.toml", "cites": [2]}}, SOURCES)
+    assert [(r["phase"], r["text"], r["when"]) for r in rules][0] == ("config", "Set edition 2024 in Cargo.toml", "")
+    assert rules[1]["when"].startswith("async code") and len(rules[1]["when"]) <= 80
+    assert Learner.read_rules({"rules": [{"phase": "code", "text": "x", "cites": [1]}], "declare": None},
+                              SOURCES)[0]["when"] == ""
+
+
+@pytest.mark.spec("KNW-22")
+def test_condensing_folds_in_the_lessons_the_language_proved(make_model, fake_ollama, tinker_home):
+    known = Knowledge("Go")
+    known.add_lessons([dict(lesson("Name the module after its folder", "config"), scope="language"),
+                       dict(lesson("Read the spec twice", "design"), scope="language")], [])
+    known.prove({f"lesson:{known.language_doc['lessons'][0]['id']}": ["config"]})
+    fake_ollama.reply(json.dumps({"rules": [{"phase": "config", "text": "Name the module after its folder",
+                                             "cites": [2]}]}), when="Condense")
+    plan = {"language": "Go", "name": "Go 1.25", "tools": [{"role": "tests", "name": "go test"}]}
+    facts = [{"phase": "code", "text": "Go 1.25 has generic type aliases", "section": "new"}]
+    rules = Learner(make_model(), FakeInternet(), None).condense(plan, facts)
+    prompt = fake_ollama.calls[-1]["messages"][-1]["content"]
+    assert "1. [new, code] Go 1.25 has generic type aliases" in prompt and "2. Name the module after its folder" in prompt
+    assert "Read the spec twice" not in prompt  # a candidate lesson is not folded in
+    assert rules[0]["cites"] == [known.language_doc["lessons"][0]["id"]]
+
+
+@pytest.mark.spec("KNW-22")
+def test_a_playbook_the_model_cannot_give_leaves_the_facts_as_they_are(make_model, fake_ollama, tinker_home):
+    fake_ollama.reply(json.dumps({"rules": []}), when="Condense", times=2)
+    learner = Learner(make_model(), FakeInternet(), None)
+    assert learner.condense({"language": "Go", "name": "Go", "tools": []}, [{"phase": "code", "text": "a"}]) == []
+
+
+def language_with_rules():
+    Library.save("go", {"topic": "go", "kind": "language", "language": "Go", "name": "Go 1.25", "summary": "s",
+                        "facts": [{"phase": "code", "text": "Aliases may be generic"},
+                                  {"phase": "tests", "text": "go test -run picks tests"},
+                                  {"phase": "code", "text": "Go 1.25 has a new GC"}]})
+    entry = Library.read("go")
+    aliases, run, _ = (fact["id"] for fact in entry["facts"])
+    entry["rules"] = [{"phase": "code", "text": "Use generic type aliases", "cites": [aliases]},
+                      {"phase": "tests", "text": "Run one test with go test -run", "cites": [run, aliases]}]
+    Library.save("go", entry)
+    return [rule["id"] for rule in Library.read("go")["rules"]]
+
+
+@pytest.mark.spec("KNW-22")
+def test_rules_are_shown_in_place_of_the_facts_they_cite(tinker_home):
+    aliases, _ = language_with_rules()
+    items = Library.items({"go": Library.read("go")})
+    assert [(i["phase"], i["text"], i.get("kind")) for i in items[1:]] == [
+        ("code", "Use generic type aliases", "rule"), ("tests", "Run one test with go test -run", "rule")]
+    assert items[1]["id"] == aliases and items[1]["status"] == "candidate"
+    plain = {k: v for k, v in Library.read("go").items() if k != "rules"}
+    assert len(Library.items({"go": plain})) == 4  # no playbook: every fact is shown
+
+
+@pytest.mark.spec("KNW-22")
+def test_a_rule_is_proven_and_retired_like_a_fact(tinker_home):
+    aliases, run = language_with_rules()
+    Knowledge("Go").prove({f"fact:go:{aliases}": ["code"]})
+    assert Library.read("go")["rules"][0]["status"] == "proven"
+    assert [f["text"] for f in Knowledge("Go").facts(("code",))] == ["Use generic type aliases"]
+    assert Knowledge("Go").disprove({f"fact:go:{run}": ["tests"]}, ("tests",)) == 1
+    entry = Library.read("go")
+    assert [r["text"] for r in entry["rules"]] == ["Use generic type aliases"] and entry["retired"][0]["was"] == "rules"
+    shown = [i["text"] for i in Library.items({"go": entry})]
+    assert "go test -run picks tests" in shown  # what only the retired rule cited is shown again
+    assert "Aliases may be generic" not in shown and "Go 1.25 has a new GC" not in shown
+
+
+@pytest.mark.spec("KNW-24")
+def test_learning_a_language_again_replaces_what_its_earlier_learning_proved(make_model, fake_ollama, tinker_home):
+    Library.save("go", {"topic": "go", "kind": "language", "language": "Go", "name": "Go 1.24", "summary": "s",
+                        "facts": [{"phase": "code", "text": "Go keywords are break and case"}]})
+    route, _ = topic_with_facts()
+    old = Library.read("go")["facts"][0]["id"]
+    Knowledge("Go").prove({f"fact:go:{old}": ["code"], f"fact:flask:{route}": ["code"]})
+    learned("go", **{**Library.read("go"), "roles": list(TOOL_ROLES)}, searches=LANGUAGE_PLAN["searches"],
+            tools=[], commands=[], version="1.25")
+    fake_ollama.reply(json.dumps({"facts": [{"phase": "code", "text": "Go 1.25 has generic type aliases"}]}),
+                      when="Facts", times=3)
+    fake_ollama.reply(json.dumps({"rules": [{"phase": "code", "text": "Use generic type aliases", "cites": [1]}]}),
+                      when="Condense")
+    Learner(make_model(), FakeInternet({"https://go.dev/doc": "Go docs."}), None).learn("go")
+    known = Knowledge("Go")
+    assert [f["text"] for f in known.facts(("code",))] == ["Flask routes use @app.route"]  # another topic's stays
+    assert known.language_doc["retired"][0]["reason"] == "replaced when the language was learned again"
+
+
+@pytest.mark.spec("KNW-23")
+def test_a_section_the_plan_has_no_search_for_gets_the_usual_one():
+    plan = {"language": "Go", "version": "1.25", "searches": [{"section": "idioms", "query": "effective go"}],
+            "tools": [{"role": "lint", "name": "golangci-lint", "search": "golangci-lint config"}]}
+    searches = Learner.language_searches(plan)
+    assert [(s["section"], s["query"]) for s in searches] == [
+        ("idioms", "effective go"), ("new", "Go 1.25 what's new release notes"),
+        ("pitfalls", "common Go mistakes anti-patterns to avoid"), ("conventions", "Go project layout style guide"),
+        ("tools", "golangci-lint config")]
+    assert "which rules to turn on" in searches[-1]["focus"]
+
+
+@pytest.mark.spec("KNW-23")
+def test_a_language_plan_saved_before_the_tool_roles_is_planned_again(make_model, fake_ollama, tinker_home):
+    learned("go", kind="language", language="Go", topic="Go", **{k: v for k, v in LANGUAGE_PLAN.items() if k != "name"},
+            name="Go 1.25")
+    fake_ollama.reply(json.dumps(LANGUAGE_PLAN), when="Plan learning the language")
+    plan = Learner(make_model(), FakeInternet(), None).plan_language("Go")
+    assert plan["roles"] == list(TOOL_ROLES) and fake_ollama.labels()[-1].startswith("Plan learning the language")
+    learned("go", **{**Library.read("go"), "roles": list(TOOL_ROLES)})
+    Learner(make_model(), FakeInternet(), None).plan_language("Go")
+    assert len(fake_ollama.calls) == 1  # its saved plan is reused
 
 
 @pytest.mark.spec("KNW-5")
@@ -687,3 +827,19 @@ def test_a_finding_cites_its_facts_by_id(tinker_home):
                           "findings": [{"question": 1, "answer": "a", "facts": [2, 9], "confidence": "low"}]})
     entry = Library.read("food")
     assert entry["findings"][0]["cites"] == [entry["facts"][1]["id"]]
+
+
+@pytest.mark.spec("KNW-25")
+def test_the_checks_a_reused_toolchain_lacks_and_the_tools_it_cannot_count_on(tinker_home):
+    learned("python", kind="language", language="Python",
+            tools=[{"role": "environment", "name": "uv"}, {"role": "lint", "name": "ruff"},
+                   {"role": "types", "name": "mypy"}, {"role": "format", "name": "black"}],
+            machine=[{"command": "uv --version", "found": False}, {"command": "ruff --version", "found": False},
+                     {"command": "mypy --version", "found": False}])
+    known = Knowledge("Python")
+    assert known.missing_checks() == [] and known.unavailable_tools() == ["uv", "ruff", "mypy"]  # no toolchain yet
+    known.remember_toolchain(Toolchain({"setup": ["python3 -m venv .venv", "pip install pytest ruff"],
+                                        "test_all": "pytest", "test_one": "pytest {file}", "lint": "ruff check ."}))
+    assert known.missing_checks() == ["types mypy", "format black"]
+    assert known.unavailable_tools() == ["uv"]  # the toolchain installs ruff, and mypy is to be added
+    assert "add the learned types mypy, format black it lacks" in known.toolchain_title("reuse it")

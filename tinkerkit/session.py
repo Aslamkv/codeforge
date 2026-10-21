@@ -40,8 +40,10 @@ class Session:
 
     @property
     def knowledge(self):
-        """What was learned for the project's language (and any language)."""
-        language = self.project.language or "Python"
+        """What was learned for the project's language (and any language): before the spec names it, the language
+        the request names, else Python (the spec's own default)."""
+        request = (self.project.cycles[:1] or [{}])[0].get("request", "")
+        language = self.project.language or Knowledge.named_in(request) or "Python"
         if self._knowledge is None or self._knowledge.language != language:
             self._knowledge = Knowledge(language, (self.project.run or {}).get("id"))
         return self._knowledge
@@ -85,9 +87,9 @@ class Session:
         full): lessons from earlier projects, then the facts proven for the language, then the facts
         learned from the web about the topics the recall phase chose for this project (the most
         related to the request first), and for the toolchain the person's own commands (tinker learn
-        NAME). Each lesson and fact shown is recorded in the cycle's "used", with these phases."""
+        NAME). What applies only to code the request does not need is left out, proven or not. Each lesson and fact shown is recorded in the cycle's "used", with these phases."""
         lessons = self.knowledge.lessons(phases)
-        proven = self.knowledge.facts(phases)
+        proven = [fact for fact in self.knowledge.facts(phases) if fact["id"] not in self.inapplicable()]
         learned = self.learned_for(phases, {fact["id"] for fact in proven})
         self.used([f"lesson:{lesson['id']}" for lesson in lessons] + [f"known:{fact['id']}" for fact in proven]
                   + [f"fact:{item['topic']}:{item['id']}" for item in learned if item.get("id")], phases)
@@ -97,12 +99,24 @@ class Session:
                       "\n".join(f"- {lesson['text']}" for lesson in lessons), atomic=True, place="first"),
                  Part("Learned from the web (current; newer than what you were trained on)", "\n".join(facts),
                       place="first")]
-        return parts + ([TaughtCommands.prompt_part()] if "toolchain" in phases else [])
+        return parts + ([TaughtCommands.prompt_part()] if "toolchain" in phases else []) + self.checks_part(phases)
+
+    def checks_part(self, phases):
+        """For a prompt that writes code or tests: the checks they must pass (the toolchain's lint), so they are
+        written to pass them rather than tidied afterwards."""
+        lint = self.project.toolchain.lint if self.project.toolchain else ""
+        if not lint or lint == "none" or not {"code", "tests"} & set(phases):
+            return []
+        return [Part("Checks the code and tests must pass (write them so these find nothing)", f"$ {lint}")]
 
     def learned_for(self, phases, proven):
         """What the recall phase chose from the web for these phases, but the facts proven already."""
         return [item for item in self.project.spec.get("learned", [])
-                if Library.shown_in(item, phases) and item.get("id") not in proven]
+                if Library.shown_in(item, phases) and item.get("id") not in proven | self.inapplicable()]
+
+    def inapplicable(self):
+        """What the recall phase judged this project's request has no need of (Recaller.keep_out_inapplicable)."""
+        return set(self.project.spec.get("inapplicable", []))
 
     def used(self, keys, phases):
         """Knowledge shown in prompts of these phases, recorded in the cycle being worked on."""

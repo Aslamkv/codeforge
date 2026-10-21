@@ -15,6 +15,7 @@ The tests in `tests/` enforce it.
 ## The idea
 
 1. Build only what the request clearly asks for. Anything else waits for `tinker add` or `tinker fix`.
+   Nothing is made or changed beyond what the spec of the project needs: every file serves a spec point.
 2. The plan is a spec of points. Each point has exactly one unit test, written before any code.
 3. The code is just enough to pass those tests.
 4. The project is done when every spec point's test passes, set up afresh, the way a person runs it.
@@ -396,7 +397,8 @@ phase, learn from the web what the rest of the cycle needs.
   error chunk is an `OllamaError`: a reply error with what came before, unless it is out of memory
   or a crash. Once `done_when(content)` says the reply is complete, the stream ends within
   `EARLY_STOP_GRACE` seconds, and the reply is the content as it was at that moment. While it goes,
-  it tells its watcher what has been written and thought so far.
+  it tells its watcher what has been written and thought so far. A reply whose last `LOOP_LINES`
+  finished lines are one non-blank line, again and again, is stopped there and is cut (`length`).
 - **MOD-10** `Calibrator.shared(context)` sets the prompt budget to `min(8192, max(512, context // 3))`,
   and the longest reply to `max(1024, min(16384, context - budget))`. `safe_ratio()` is
   `CHARS_PER_TOKEN` until measured, and then 97% of the measure, within [2, 4], to 2 decimals.
@@ -532,8 +534,9 @@ phase, learn from the web what the rest of the cycle needs.
 - **KNW-9** `Learner.read_plan` needs a name and a search, unless the topic is a language. It keeps
   at most `MAX_QUERIES` searches and `MAX_COMMANDS` commands. `safe_commands` drops a command with a
   shell operator, a command that changes something, and an unsafe command. `read_language_plan`
-  keeps one tool per known role and the searches of known sections. A plan that says the request
-  is not a language gives `{"not_language": …}`.
+  keeps one tool per known role (`TOOL_ROLES`, a type checker among them) and the searches of known
+  sections, and notes the roles it was planned with. A plan that says the request is not a language
+  gives `{"not_language": …}`.
 - **KNW-10** `Learner.read_facts` keeps facts of a known phase, cut to `FACT_CHARS`, at most
   `FACTS_PER_CHUNK`. `add_facts` keeps a repeated fact once and adds the other page to its `also`.
   `relevant_chunks` gives the page's first chunk and then the best-matching ones, in page order.
@@ -555,8 +558,9 @@ phase, learn from the web what the rest of the cycle needs.
   topic as research: its questions, findings, contradictions, open gaps, and facts with their sources
   and confidence.
 - **KNW-16** A topic the plan says is a programming language is learned as one (`learn_language`):
-  its sections and tools are searched, each section keeps its share of facts, and it is kept under
-  its language key with kind `language`.
+  its sections (idioms, new, pitfalls, conventions) and tools are searched, each section keeps its
+  share of facts, the facts are condensed into rules (KNW-22), and it is kept under its language key
+  with kind `language`.
 - **KNW-17** Every lesson and every learned fact or finding has an ID and a status, `candidate` or
   `proven`. `prove(used)` makes the used candidates proven, and copies the used web facts into the
   language's knowledge as proven facts. `disprove(used, phases)` retires every used item shown in
@@ -571,6 +575,28 @@ phase, learn from the web what the rest of the cycle needs.
   last `RETIRED_KEPT`. Nothing retired is shown in a prompt.
 - **KNW-21** `Library.save` gives each research finding `cites`: the IDs of the facts it cites by
   number, so the link holds when a fact is retired.
+- **KNW-22** A language's playbook. `condense(plan, facts)` asks one call to turn the language's facts,
+  with the lessons its own projects proved (candidates are left out), into at most `PLAYBOOK_RULES`
+  rules. `read_rules` keeps a rule only with a known phase and at least one cited fact or lesson,
+  cuts its text to `RULE_CHARS`, keeps one per text and gives each the IDs it cites. When the model
+  gives no usable rules, there are none and the facts are shown as they are. `Library.items` gives
+  each rule (kind `rule`), and the rules stand in for the facts: none is shown but those a retired
+  rule cited and no rule in use cites. A rule is a claim like a fact: it is proven and copied into
+  the language's facts, or retired.
+  Each rule says when it applies (`when`, at most `RULE_WHEN_CHARS`): "" for every program, else
+  the kind of code it is for, which a proven copy keeps. What the reply says a new project declares
+  to get the newest version (`declare`) is the first rule, for every program.
+- **KNW-24** Learning a language again replaces what its earlier learning proved: `supersede` retires
+  the language's proven facts from its own topic that the new learning does not show (its rules,
+  when it has them), with the reason that they were replaced. Proven facts from other topics stay.
+- **KNW-25** `missing_checks` names the language's learned tools that check code and the toolchain that
+  worked does not run: a type checker it never names, a linter or formatter where it has no command.
+  `toolchain_title` asks to add them. `unavailable_tools` names the learned tools not installed here
+  that the toolchain neither installs nor runs, and that are not to be added.
+- **KNW-23** `language_searches` gives each section the plan has no search for the usual one
+  (`SECTION_QUERY`), and asks each tool's pages for the settings that catch the most bugs. A saved
+  language plan made with other tool roles than `TOOL_ROLES` is planned again; one made with them
+  is reused.
 
 ## graph
 
@@ -579,7 +605,7 @@ phase, learn from the web what the rest of the cycle needs.
   and each lesson, fact, finding, toolchain, fix, command and retired item. A node is `{id, kind,
   label, text, status, group, details, sources}`; `group` is the language or topic it belongs to.
 - **GRF-2** Links: `belongs_to` from an item to its language, topic, any language or the person's
-  commands; `cites` from a finding to its facts; `became` from a web fact to the language's proven
+  commands; `cites` from a finding to its facts and from a language's rule to its facts and lessons; `became` from a web fact to the language's proven
   fact it was copied into; and `taught_by`, `confirmed_in`, `helped_in` and `failed_in` from an item
   to the runs in its history. A run is a node with its line from `runs`, or marked as having none.
 - **GRF-3** `similar` links join lessons by meaning (cosine at least `SIMILAR_MEANING`) when the
@@ -603,8 +629,12 @@ phase, learn from the web what the rest of the cycle needs.
   when no reply was usable. `format_code` drops a formatter that fails.
 - **SES-3** `knowledge_parts(*phases)` gives lessons and learned facts as optional parts, plus the
   person's commands for the toolchain. It records each item it shows in the cycle's `used`, with the
-  prompt phases it was shown in.
+  prompt phases it was shown in. A prompt that writes code or tests is also told the checks they must
+  pass: the toolchain's lint command, when it has one.
 - **SES-4** `Session.save` keeps the project and gives the tracker the passing count.
+- **SES-5** `Session.knowledge` is for the project's language. Before the spec names it, it is for the
+  language the request names (`Knowledge.named_in`: the first it names of the languages Tinker knows),
+  and Python only when it names none.
 
 ## planning
 
@@ -621,7 +651,10 @@ phase, learn from the web what the rest of the cycle needs.
   one. It sends back wrong working (at most twice). It needs each test in a test file of its own, an
   entry that is one of the files, and (for the project itself) a criterion that runs the entry
   program and a toolchain without problems. A test file the plan does not list is taken as the one
-  it lists with the same stem, or as the only one it lists. It defaults the language to Python.
+  it lists with the same stem, or as the only one it lists. It defaults the language to Python. It
+  leaves out a planned settings file (`.env.example`) when no criterion is about a setting.
+  The spec's prompt shows what was learned for the spec, the design, the config files (which it
+  plans) and the toolchain.
 - **PLN-6** `SpecWriter.take` adds the criteria, puts the files into the design in build order (a
   new project gets a `README.md`), sets the toolchain and the entry, keeps the cycle's non-goals,
   constraints and data, and marks the cycle specified. When a user starts a file but the toolchain
@@ -644,8 +677,12 @@ phase, learn from the web what the rest of the cycle needs.
   cycle's `review`.
 - **PLN-11** `Recaller`. With nothing learned and no web, it makes no call and uses no topic.
   Without the web, it uses the topics the request names or is close to. It keeps the chosen
-  topics' facts in the project, tools and machine facts first. The project's learned language is
-  always used.
+  topics' facts in the project: tools and machine facts first, then a language's rules, then the
+  other facts. The project's learned language is always used.
+- **PLN-13** A topic is used when the request names it, by its name or by its language without a
+  version. What the project does not need stays out of its prompts (`inapplicable`), proven or not:
+  a rule for some code (its `when`) until the spec reply names that code among the listed
+  `situations`, and anything that names a tool `unavailable_tools` gives.
 - **PLN-12** With the web, recall makes one call that names the learned topics to use and up to
   `learn_missing` new topics to learn (one per slug). Those are learned first, and they come first in
   the cycle's topics. When the call fails, the cycle goes on without learned topics.

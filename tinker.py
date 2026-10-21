@@ -100,10 +100,12 @@ Learning: a model knows what it was trained on, as it was then. tinker learn WHA
 (one planning call; a topic learned before keeps its kind) and learns it the way that fits it:
   a programming language as it is today, e.g. "Python 3.14 with pytest, black and venv". Every
       language gets the same sections, each with its own searches and share of the facts:
-      fundamentals (syntax, keywords, types, errors, modules, the concurrency and runtime model),
-      what is new (the newest stable releases), its tools (one per role: environment, packages,
-      build, tests, format, lint: the ones named, else the usual ones; how to install and run each)
-      and conventions. Kept under the language's one name (python for any Python); every project in it uses it.
+      idioms (modern, efficient code and what it replaces), what is new (the newest stable
+      releases), pitfalls, its tools (one per role: environment, packages, build, tests, format,
+      lint, types: the ones named, else the usual ones; how to install and run each, strictest
+      useful settings) and conventions. One call then condenses the facts, with the lessons its
+      projects proved, into a few rules (its playbook): prompts show the rules in place of the
+      facts they rest on. Kept under the language's one name (python for any Python); every project in it uses it.
   a tool: a framework, a library, a technique such as TDD: a few searches, at least one for each
       thing it names, on how to use it today and what changed.
   a domain: a field, a practice or a standard (e.g. "food bank inventory"), studied the way a

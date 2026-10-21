@@ -95,6 +95,7 @@ MIN_PROMPT_TOKENS = 512           # a run never lowers its prompt budget below t
 MIN_REPLY_TOKENS = 1024
 EARLY_STOP_GRACE = 3.0            # seconds to await Ollama's last chunk (its token counts) once a reply is complete
 PROGRESS_EVERY = 2.0              # seconds between live progress updates
+LOOP_LINES = 20                   # the same line written this many times in a row: the model is looping
 
 # --- thinking budgets: a reply cut off while still thinking is asked again unthinking, given the
 # thought so far to conclude (THOUGHT_KEPT chars of it), so a lower budget costs no answer ----------
@@ -150,10 +151,13 @@ PAGE_CHUNKS = 2                   # prompt-sized chunks of a page condensed (its
 FACTS_PER_CHUNK = 4               # facts one chunk may give
 FACT_CHARS = 400                  # the longest fact kept (room for its exact numbers, names and units)
 MAX_FACTS = 16                    # facts kept per topic
-TOOL_ROLES = ("environment", "packages", "build", "tests", "format", "lint")  # a language's tools, one per role
-LANGUAGE_SECTIONS = ("fundamentals", "new", "conventions")  # what a language's learning searches besides tools
-SECTION_PAGES = {"fundamentals": 2, "new": 2, "conventions": 1, "tools": 1}  # pages read per search of a section
-SECTION_FACTS = {"fundamentals": 10, "new": 10, "tools": 16, "conventions": 6}  # facts a language keeps per section
+TOOL_ROLES = ("environment", "packages", "build", "tests", "format", "lint", "types")  # a language's tools, one per role
+LANGUAGE_SECTIONS = ("idioms", "new", "pitfalls", "conventions")  # what a language's learning searches besides tools
+SECTION_PAGES = {"idioms": 2, "new": 2, "pitfalls": 1, "conventions": 1, "tools": 1}  # pages read per search of a section
+SECTION_FACTS = {"idioms": 10, "new": 10, "pitfalls": 6, "tools": 16, "conventions": 4}  # facts a language keeps per section
+PLAYBOOK_RULES = 16               # rules a language's facts are condensed into (what its prompts show instead)
+RULE_CHARS = 200                  # the longest rule kept
+RULE_WHEN_CHARS = 80              # the longest "when" of a rule that applies only to some code
 
 # --- research: tinker learn of a domain (Researcher) ----------------------------------------------------
 RESEARCH_QUESTIONS = 4            # research questions a topic is split into

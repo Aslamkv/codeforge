@@ -22,6 +22,7 @@ from .settings import (
     DEFAULT_FIX_MAX,
     DEFAULT_THINK,
     EARLY_STOP_GRACE,
+    LOOP_LINES,
     MAX_CHARS_PER_TOKEN,
     MEMORY_OVERHEAD,
     MIN_CHARS_PER_TOKEN,
@@ -840,7 +841,8 @@ class Ollama:
 
 class Stream:
     """Reads a streamed reply: collects its content, shows live progress (and tells its watcher), and
-    stops early once done_when(content) says the reply is complete."""
+    stops early once done_when(content) says the reply is complete, or once the model loops (it writes
+    one line again and again): that reply is cut, as one that ran out of room is."""
 
     def __init__(self, label, done_when, watch=None):
         self.label, self.done_when, self.watch = label, done_when, watch
@@ -868,6 +870,8 @@ class Stream:
         if chunk.get("done"):
             self.final = chunk if self.answer is None else dict(chunk, done_reason="complete")
             return True
+        if self.answer is None and "\n" in piece and self.looping():
+            return self.stop_looping()
         if self.answer is None and piece and self.complete(piece):
             self.answer, self.complete_at = self.content, time.perf_counter()
         if self.complete_at is not None and time.perf_counter() - self.complete_at > EARLY_STOP_GRACE:
@@ -910,6 +914,16 @@ class Stream:
         if not self.done_when or not (">" in piece or "}" in piece or self.written % 40 == 0):
             return False
         return self.done_when(self.content)
+
+    def looping(self):
+        """Whether the last LOOP_LINES finished lines of the reply are one line, written again and again."""
+        lines = self.content.rsplit("\n", LOOP_LINES + 1)[-LOOP_LINES - 1:-1]
+        return len(lines) == LOOP_LINES and bool(lines[0].strip()) and len(set(lines)) == 1
+
+    def stop_looping(self):
+        print(f"  {self.label}: the model is writing one line again and again; stopped (as a cut reply)")
+        self.final = {"done_reason": "length", "eval_count": self.written + self.thinking, "looped": True}
+        return True
 
     def stop_early(self):
         self.final = {"done_reason": "complete", "eval_count": self.written + self.thinking, "early_stop": True}
