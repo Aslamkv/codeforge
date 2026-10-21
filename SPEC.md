@@ -29,14 +29,17 @@ The tests in `tests/` enforce it.
   a command the person gives, and the lessons step at the end of a cycle. A project's files never
   change Tinker's home.
 - **A project's state is the project's alone.** Tinker keeps it in the project's `.tinker` folder. The
-  home keeps only a pointer to each project: its run ID, its folder and its task.
+  home keeps only a pointer to each project (its run ID, its folder and its task) and one line about
+  each run (its task, language, status and dates), so what a run taught can be traced after its folder
+  is gone.
 - **Nothing of Tinker's is put among a project's own files**, except `SPEC.md`, which is the plan,
   written for people.
 - **A project is named only explicitly**, as `@ID` (its full run ID) or `@folder` (its folder's name,
   exactly). Tinker never guesses a project from the words of a request.
 - **Knowledge must be proven.** What Tinker learns starts as a candidate. A cycle that succeeds while
-  using it proves it. A failure in the step it was meant to help discards it, even when it was proven
-  before.
+  using it proves it. A failure in the step it was meant to help retires it, even when it was proven
+  before: it is kept apart, with why, for people to see, and never shown to a model again. Each item
+  keeps its history: the run that taught it, and the runs it helped or failed.
 - **A lesson is general.** It may hold for one language or for any language. It never names a
   project, its files, its names or its data.
 - **Every part reports through one tracker.** A run publishes what it is doing as structured state.
@@ -60,6 +63,7 @@ responsibility, and each imports only the modules listed above it:
 | `conversation` | the terminal and the chats as one conversation (`Desk`, `Channel`, `Markup`, `Talk`, `Shell`, `Research`, `Progress`, `Reporter`) |
 | `channels` | the chat plugin: Telegram, and `tinker channel` |
 | `knowledge` | lessons and proven knowledge (`Knowledge`), and learning (`Learner`, `Researcher`, `Library`, `Retriever`, `Embeddings`) |
+| `graph` | what Tinker knows as one graph of items and links (`Graph`), and the page that shows it (`GraphPage`) |
 | `session` | what every phase works through (`Session`), and the phase contract (`Worker`, `Phase`) |
 | `planning` | recall, the spec, the contracts where files meet, and their review |
 | `building` | setup, the tests, the code, and fixing until every test passes |
@@ -77,7 +81,8 @@ responsibility, and each imports only the modules listed above it:
 ## State
 
 The Tinker home is the `.tinker` folder next to the real `tinker.py` (symlinks resolved). It holds one
-SQLite database, `tinker.db` (mode 600), and the lock files of the chat channels it listens to. The
+SQLite database, `tinker.db` (mode 600), the lock files of the chat channels it listens to, and
+`memory.html`, the page `tinker memory --graph` writes. The
 database holds:
 
 | Collection or log | What |
@@ -90,6 +95,7 @@ database holds:
 | `embeddings` | the embedding of each learned text, per embedding model |
 | `commands` | the person's own commands (aliases, programs) |
 | `projects` | a pointer to each project: its run ID, folder and task |
+| `runs` | one line about each run: its task, language, status and dates (the last `RUNS_KEPT`) |
 | `channels`, `channel_secrets` | the chat channels and their tokens |
 | `listening`, `running` | the conversation's live state: its status messages, and each run's tracker |
 | log `learn` | every model call that `tinker learn` made |
@@ -486,6 +492,9 @@ phase, learn from the web what the rest of the cycle needs.
   headline, its details and the commands to go on.
 - **PRJ-15** A run keeps every model call in the project's `events` log, and everything it prints in
   its `output` log.
+- **PRJ-16** `Runs.remember(run, language)` keeps one line about the run in the home's `runs`: `{id, task,
+  language, status, created, updated}`, at most `RUNS_KEPT`, the least recently updated dropped
+  first. `tinker clear runs` deletes these lines with the pointers.
 
 ## knowledge
 
@@ -507,9 +516,10 @@ phase, learn from the web what the rest of the cycle needs.
   adding a lesson that is like a known one. It skips a lesson with no text, an unknown phase, or one
   that names the project (`names`). A new lesson is a candidate. A lesson goes to the language or to
   any language by its scope. A store keeps at most `MAX_LESSONS`, and new lessons always stay. It
-  gives how many were new. `lessons(phases)` gives the most confirmed first.
+  gives how many were new. `lessons(phases)` gives the best evidenced first: the times seen plus the
+  times helped, then the most recently seen.
 - **KNW-6** Toolchain fixes. `known_fix` replays only a fix for exactly this failure, not tried yet.
-  A replay that fails deletes that fix at once. `remember_fix` keeps the last 20, one per failure.
+  A replay that fails retires that fix at once. `remember_fix` keeps the last 20, one per failure.
   `similar_fix` needs a similarity of at least `SIMILAR_FAILURE`. `remember_toolchain` keeps the
   toolchain without its `run` and `check`.
 - **KNW-7** `Embeddings` keeps each text's vector by its key, per embedding model, in the home
@@ -549,9 +559,38 @@ phase, learn from the web what the rest of the cycle needs.
   its language key with kind `language`.
 - **KNW-17** Every lesson and every learned fact or finding has an ID and a status, `candidate` or
   `proven`. `prove(used)` makes the used candidates proven, and copies the used web facts into the
-  language's knowledge as proven facts. `disprove(used, phases)` discards every used item shown in
+  language's knowledge as proven facts. `disprove(used, phases)` retires every used item shown in
   those phases' prompts, whether it was proven or not.
 - **KNW-18** `facts(phases)` gives the language's proven facts for the prompts of those phases.
+- **KNW-19** `Knowledge(language, run)` records each item's history as `{event, run, at}`, the last
+  `HISTORY_KEPT`: a new lesson or fix is `born`, a lesson seen again is `confirmed`, every item a
+  succeeding cycle used `helped` (counted in `helped`, proven before or not), and a retired one
+  `failed`. A replayed fix that works `helped`.
+- **KNW-20** A retired item leaves the lessons, facts, findings or fixes it was among for the
+  `retired` list beside them, with status `retired`, its `reason` and the run. That list keeps the
+  last `RETIRED_KEPT`. Nothing retired is shown in a prompt.
+- **KNW-21** `Library.save` gives each research finding `cites`: the IDs of the facts it cites by
+  number, so the link holds when a fact is retired.
+
+## graph
+
+- **GRF-1** `Graph.build()` makes one node per thing Tinker knows: each language (one for its
+  knowledge and what was learned of it), any language, each topic learned, the person's commands,
+  and each lesson, fact, finding, toolchain, fix, command and retired item. A node is `{id, kind,
+  label, text, status, group, details, sources}`; `group` is the language or topic it belongs to.
+- **GRF-2** Links: `belongs_to` from an item to its language, topic, any language or the person's
+  commands; `cites` from a finding to its facts; `became` from a web fact to the language's proven
+  fact it was copied into; and `taught_by`, `confirmed_in`, `helped_in` and `failed_in` from an item
+  to the runs in its history. A run is a node with its line from `runs`, or marked as having none.
+- **GRF-3** `similar` links join lessons by meaning (cosine at least `SIMILAR_MEANING`) when the
+  embedding model gives their embeddings, else by words (at least `SIMILAR_WORDS`). `similar_by`
+  says which, and why words were used.
+- **GRF-4** `GraphPage.html(graph)` is one self-contained page: the graph as JSON inside it, and no
+  script, style, font or image from elsewhere. It holds a plain list of every node by group (readable
+  without scripts), escapes every text, and draws the graph when scripts run.
+- **GRF-5** `tinker memory --graph` writes the page to `Home.graph_page()`, prints what it holds (the
+  counts, and how lessons were found similar), and opens it in the browser only when printing to a
+  terminal.
 
 ## session
 
@@ -747,6 +786,9 @@ phase, learn from the web what the rest of the cycle needs.
   welcome and a short, tldr-style guide for beginners in plain words: what Tinker does, then what to
   send, grouped by what a person does (build something, their projects, ask anything, while it
   works), each with one line on what it does, and `help`. It is never taken as a chat or a command.
+- **CNV-26** `memory --graph` in a conversation makes the page (`tinker memory --graph`) and sends it
+  with `send_file`, what tinker printed as its caption. The terminal opens the file in the browser and
+  says where it is; a channel that cannot send files sends the caption with the file's path.
 
 ## channels
 
@@ -772,6 +814,9 @@ phase, learn from the web what the rest of the cycle needs.
   network again up to `CHECK_TRIES` times.
 - **CHN-7** `pair` serves the chat whose sender says yes at the terminal. `start` needs an enabled
   channel (or the one named), and checks each one before listening.
+- **CHN-8** `send_file(chat, path, caption)` posts `sendDocument` as `multipart/form-data`: the chat, the
+  file under its name, and the caption as Telegram HTML (at most 1024 chars). A failure sends the
+  caption alone.
 
 ## command line (tinker.py)
 
@@ -810,7 +855,7 @@ phase, learn from the web what the rest of the cycle needs.
   with no model. `tinker learn WHAT` needs a measured model, an embedding model and the web, all
   checked before anything is loaded. Learning nothing ends with an error.
 - **CLI-11** `tinker memory` shows each language's toolchain, fixes and lessons, the lessons for any
-  language, the topics learned, and the person's commands. `tinker models` lists Ollama's models
+  language, the topics learned, the person's commands, and how many items are retired. `tinker models` lists Ollama's models
   with what was measured, and marks the one in use.
 - **CLI-12** A task waits once its plan is made: it prints the plan to confirm and exits 0 as
   `awaiting`. `tinker confirm` builds it, and `tinker amend CHANGE` changes the plan and waits again.

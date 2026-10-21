@@ -11,6 +11,7 @@ import json
 import os
 import queue
 import re
+import secrets
 import sys
 import threading
 import time
@@ -25,6 +26,8 @@ PAIRING_WAIT = 120                             # seconds to wait for the first m
 PIN_NOTE_WAIT = 2                              # seconds before Telegram's note about a pin is taken out
 CHECK_TRIES = 3                                # tries of a channel's first call when it starts listening
 RATE_LIMIT_WAITS = 3                           # times a call waits out Telegram's "too many requests"
+CAPTION_CHARS = 1024                           # the longest caption Telegram takes on a file
+FORM = "application/x-www-form-urlencoded"
 
 
 class ChannelCommand:
@@ -292,6 +295,17 @@ class TelegramChannel(Channel):
                 raise
             return self.call(method, chat_id=chat, text=Markup.plain(text)[:4096], **fields)
 
+    def send_file(self, chat, path, caption):
+        """The file sent as a document, caption (Markup) under it; a failure sends the caption alone."""
+        caption = self.said(caption)
+        try:
+            sent = self.call("sendDocument", wait=120, file=Path(path), chat_id=chat,
+                             caption=Markup.html(caption)[:CAPTION_CHARS], parse_mode="HTML")["message_id"]
+        except OSError, ChannelError:
+            return self.send(chat, caption)
+        self.seen(str(chat), sent)
+        return sent
+
     def typing(self, chat):
         try:
             self.call("sendChatAction", wait=10, chat_id=chat, action="typing")
@@ -363,27 +377,39 @@ class TelegramChannel(Channel):
         if heard:
             self.heard[chat] = (self.heard.get(chat, []) + [message])[-50:]
 
-    def call(self, method, wait=30, **fields):
+    def call(self, method, wait=30, file=None, **fields):
         """The Bot API's result (waiting up to wait seconds); a refused call is a ChannelError, a dropped
         connection an OSError. Calls go over connections kept open (a new one per call costs a name lookup
         and a handshake: seconds, where a call on an open one takes a fraction of one); one that dropped
-        meanwhile is opened again, once. Too many requests (429) is waited out as long as Telegram asks."""
+        meanwhile is opened again, once. Too many requests (429) is waited out as long as Telegram asks.
+        file: a document (a Path) uploaded with the fields, as a form with parts."""
         path = f"/bot{self.secrets.get('token', '')}/{method}"
-        data = urllib.parse.urlencode({k: v for k, v in fields.items() if v is not None})
-        status, body = self.answer(method, path, data, wait)
+        fields = {k: v for k, v in fields.items() if v is not None}
+        data, kind = self.multipart(fields, file) if file else (urllib.parse.urlencode(fields), FORM)
+        status, body = self.answer(method, path, data, wait, kind)
         for _ in range(RATE_LIMIT_WAITS):
             pause = self.retry_after(status, body)
             if pause is None:
                 break
             time.sleep(pause)
-            status, body = self.answer(method, path, data, wait)
+            status, body = self.answer(method, path, data, wait, kind)
         return self.result(method, status, body)
 
-    def answer(self, method, path, data, wait):
+    @staticmethod
+    def multipart(fields, file):
+        """(body, content type) of a multipart/form-data upload: each field, then the file as "document"."""
+        boundary = f"tinker-{secrets.token_hex(12)}"
+        parts = [f'--{boundary}\r\nContent-Disposition: form-data; name="{name}"\r\n\r\n{value}\r\n'.encode()
+                 for name, value in fields.items()]
+        parts.append(f'--{boundary}\r\nContent-Disposition: form-data; name="document"; filename="{file.name}"\r\n'
+                     f'Content-Type: application/octet-stream\r\n\r\n'.encode() + file.read_bytes() + b"\r\n")
+        return b"".join(parts) + f"--{boundary}--\r\n".encode(), f"multipart/form-data; boundary={boundary}"
+
+    def answer(self, method, path, data, wait, kind=FORM):
         """(status, body) of the call, on a connection opened again once when it dropped."""
         for attempt in (1, 2):
             try:
-                return self.exchange(path, data, wait)
+                return self.exchange(path, data, wait, kind)
             except http.client.HTTPException, OSError:
                 if attempt == 2:
                     raise OSError(f"Telegram did not answer {method}") from None
@@ -398,11 +424,11 @@ class TelegramChannel(Channel):
         except ValueError, KeyError, TypeError:
             return 1
 
-    def exchange(self, path, data, wait):
+    def exchange(self, path, data, wait, kind=FORM):
         """(status, body) of one POST over an open connection, kept open for the next call (closed when it failed)."""
         connection = self.connection(wait)
         try:
-            connection.request("POST", path, data, {"Content-Type": "application/x-www-form-urlencoded"})
+            connection.request("POST", path, data, {"Content-Type": kind})
             response = connection.getresponse()
             answer = response.status, response.read().decode(errors="replace")
         except http.client.HTTPException, OSError:

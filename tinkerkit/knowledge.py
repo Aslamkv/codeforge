@@ -1,7 +1,8 @@
 """What Tinker knows beyond the model: lessons, toolchain fixes and proven facts from earlier projects
 (Knowledge), and what it learns from the web (Learner, Researcher), kept and searched (Library,
 Retriever, Embeddings). What it learns starts as a candidate: a cycle that succeeds using it proves it,
-and a failure in the step it was meant to help discards it."""
+and a failure in the step it was meant to help retires it (kept apart, never shown again). Each item
+keeps its history: the run that taught it, and the runs it helped or failed."""
 
 import collections
 import datetime
@@ -17,10 +18,10 @@ from pathlib import Path
 from .model import Models, Ollama, OllamaError
 from .prompts import Part, PromptTooLarge, Prompts
 from .settings import (
-    Config, FACTS_PER_CHUNK, FACT_CHARS, FACT_PHASES, Home, LANGUAGE_COMMANDS, LANGUAGE_PAGES, LANGUAGE_SEARCHES,
+    Config, FACTS_PER_CHUNK, FACT_CHARS, FACT_PHASES, HISTORY_KEPT, Home, LANGUAGE_COMMANDS, LANGUAGE_PAGES, LANGUAGE_SEARCHES,
     LANGUAGE_SECTIONS, LESSONS_SHOWN, LESSON_PHASES, MAX_COMMANDS, MAX_FACTS, MAX_LESSONS, MAX_PAGES, MAX_QUERIES,
     PAGE_CHUNKS,
-    REPEAT_CLAIM, RESEARCH_CHECKS, RESEARCH_GAPS, RESEARCH_PAGES, RESEARCH_QUERIES, RESEARCH_QUESTIONS, SAME_CLAIM,
+    REPEAT_CLAIM, RETIRED_KEPT, RESEARCH_CHECKS, RESEARCH_GAPS, RESEARCH_PAGES, RESEARCH_QUERIES, RESEARCH_QUESTIONS, SAME_CLAIM,
     SAME_FACT, SAME_LESSON, SEARCH_RESULTS, SECTION_FACTS, SECTION_PAGES, SIMILAR_FAILURE, TOOL_ROLES,
     VERSION_TIMEOUT, fingerprint, first_line, now_text, similarity, split_text, words,
 )
@@ -33,12 +34,13 @@ class Knowledge:
     model), lessons, and the facts proven by its projects; for any language: lessons. A lesson is
     general: it never names a project, its files, its names or its data. Lessons and facts are shown
     in the prompts of the phase they concern, the most confirmed first; they start as candidates, a
-    cycle that succeeds using them proves them, and a failure in the step they were shown to discards
-    them. Kept in Tinker's "languages" and "memory"."""
+    cycle that succeeds using them proves them, and a failure in the step they were shown to retires
+    them. Each keeps its history in this run (run: its ID). Kept in Tinker's "languages" and "memory"."""
 
-    def __init__(self, language):
+    def __init__(self, language, run=None):
         self.language = language or "Python"
         self.key = language_key(self.language)
+        self.run = run
         self.language_doc = Home.store().get("languages", self.key) or {
             "language": self.language, "projects": 0, "toolchain": None, "fixes": [], "lessons": [], "facts": []}
         self.any_language_doc = Home.store().get("memory", "any") or {"lessons": []}
@@ -60,8 +62,9 @@ class Knowledge:
 
     @staticmethod
     def rank(lesson):
-        """The most confirmed, then the most recently seen, first (sorted in reverse)."""
-        return lesson.get("seen", 1), lesson.get("last_seen", "")
+        """The best evidenced (seen, and helped a cycle that succeeded), then the most recently seen, first
+        (sorted in reverse)."""
+        return lesson.get("seen", 1) + lesson.get("helped", 0), lesson.get("last_seen", "")
 
     def facts(self, phases):
         """The language's proven facts for these phases: [{id, phase, text, topic}]."""
@@ -98,17 +101,18 @@ class Knowledge:
         if same:
             self.confirm(same)
             return None
-        return {"id": fingerprint(text)[:12], "phase": phase, "text": text, "status": "candidate", "seen": 1,
-                "added": now_text(), "last_seen": now_text()}
+        lesson = {"id": fingerprint(text)[:12], "phase": phase, "text": text, "status": "candidate", "seen": 1,
+                  "added": now_text(), "last_seen": now_text()}
+        return record(lesson, "born", self.run)
 
     @staticmethod
     def names_project(text, names):
         """Whether a lesson names the project (one of its files, or its folder): then it is not general."""
         return any(re.search(rf"(?<![\w.-]){re.escape(name)}(?![\w-])", text, re.I) for name in names if name)
 
-    @staticmethod
-    def confirm(lesson):
+    def confirm(self, lesson):
         lesson["seen"], lesson["last_seen"] = lesson.get("seen", 1) + 1, now_text()
+        record(lesson, "confirmed", self.run)
 
     @staticmethod
     def keep(lessons, new):
@@ -122,16 +126,21 @@ class Knowledge:
     def prove(self, used):
         """A cycle that used these succeeded: candidate lessons, facts and findings are proven, and the
         web's facts are copied into the language's knowledge. used: {key: [prompt phases]}, the keys as
-        Session records them (lesson:ID, fact:TOPIC:ID, known:ID). Returns how many were newly proven."""
+        Session records them (lesson:ID, fact:TOPIC:ID, known:ID). Each of them helped. Returns how many were
+        newly proven."""
         proven = self.prove_lessons(used) + self.prove_web_facts(used)
+        for fact in self.language_doc.get("facts", []):
+            if f"known:{fact['id']}" in used:
+                record(fact, "helped", self.run)
         self.save()
         return proven
 
     def prove_lessons(self, used):
         proven = 0
         for lesson in self.known_lessons():
-            if f"lesson:{lesson.get('id')}" in used and lesson.get("status") != "proven":
-                lesson["status"], proven = "proven", proven + 1
+            if f"lesson:{lesson.get('id')}" in used:
+                proven += lesson.get("status") != "proven"
+                record(lesson, "helped", self.run)["status"] = "proven"
         return proven
 
     def prove_web_facts(self, used):
@@ -142,36 +151,33 @@ class Knowledge:
             entry = Library.read(slug) or {}
             claims = [c for c in entry.get("facts", []) + entry.get("findings", []) if c.get("id") in ids]
             proven += sum(c.get("status") != "proven" for c in claims)
-            Library.claims(slug, ids, lambda claim: dict(claim, status="proven"))
+            Library.claims(slug, ids, lambda claim: record(dict(claim, status="proven"), "helped", self.run))
             for claim in claims:
                 if claim["id"] not in known and claim.get("phase"):
-                    self.language_doc["facts"].append({"id": claim["id"], "phase": claim["phase"],
-                                                       "text": claim["text"], "topic": slug, "status": "proven"})
+                    fact = {"id": claim["id"], "phase": claim["phase"], "text": claim["text"], "topic": slug,
+                            "status": "proven"}
+                    self.language_doc["facts"].append(record(fact, "born", self.run))
                     known.add(claim["id"])
         return proven
 
     def disprove(self, used, phases):
-        """A step failed: every lesson, fact or finding used in these prompt phases is discarded, proven
-        or not. Returns how many were discarded."""
+        """A step failed: every lesson, fact or finding used in these prompt phases is retired, proven
+        or not. Returns how many were retired."""
         shown = {key for key, where in used.items() if set(where) & set(phases)}
-        gone = self.discard_lessons(shown)
+        reason = f"shown in the {', '.join(phases)} prompts of a step that failed"
+        gone = self.retire_lessons(shown, reason)
         dropped = {key.split(":", 1)[1] for key in shown if key.startswith("known:")}
         for slug, ids in self.used_facts(shown).items():
-            Library.claims(slug, ids, lambda claim: None)
+            gone += Library.retire(slug, ids, reason, self.run)
             dropped |= ids
-        facts = self.language_doc.get("facts", [])
-        self.language_doc["facts"] = [fact for fact in facts if fact["id"] not in dropped]
-        gone += len(facts) - len(self.language_doc["facts"]) + sum(len(ids) for ids in self.used_facts(shown).values())
+        gone += retire(self.language_doc, "facts", lambda fact: fact["id"] in dropped, reason, self.run)
         self.save()
         return gone
 
-    def discard_lessons(self, shown):
-        """The lessons among the keys shown, discarded; how many."""
-        gone = 0
-        for doc in (self.language_doc, self.any_language_doc):
-            kept = [lesson for lesson in doc.get("lessons", []) if f"lesson:{lesson.get('id')}" not in shown]
-            gone, doc["lessons"] = gone + len(doc.get("lessons", [])) - len(kept), kept
-        return gone
+    def retire_lessons(self, shown, reason):
+        """The lessons among the keys shown, retired; how many."""
+        return sum(retire(doc, "lessons", lambda lesson: f"lesson:{lesson.get('id')}" in shown, reason, self.run)
+                   for doc in (self.language_doc, self.any_language_doc))
 
     @staticmethod
     def used_facts(used):
@@ -209,15 +215,16 @@ class Knowledge:
 
     def remember_fix(self, fix):
         fixes = [f for f in self.language_doc.setdefault("fixes", []) if f["failure"] != fix["failure"]]
-        self.language_doc["fixes"] = (fixes + [dict(fix, used=1, added=now_text())])[-20:]
+        self.language_doc["fixes"] = (fixes + [record(dict(fix, used=1, added=now_text()), "born", self.run)])[-20:]
         self.save()
 
     def fix_result(self, fix, worked):
-        """A replayed fix helped (counted) or failed (deleted at once: it is disproved)."""
+        """A replayed fix helped (counted) or failed (retired at once: it is disproved)."""
         if worked:
             fix["used"] = fix.get("used", 0) + 1
+            record(fix, "helped", self.run)
         else:
-            self.language_doc["fixes"] = [f for f in self.language_doc.get("fixes", []) if f["failure"] != fix["failure"]]
+            retire(self.language_doc, "fixes", lambda f: f["failure"] == fix["failure"], "its replay failed", self.run)
         self.save()
 
     def finished_project(self):
@@ -968,11 +975,16 @@ class Library:
 
     @staticmethod
     def save(slug, entry):
-        """A topic kept: each fact and finding with an id and a status (a candidate until proven)."""
+        """A topic kept: each fact and finding with an id and a status (a candidate until proven), and each
+        finding with the ids of the facts it cites (its numbers no longer count once a fact is retired)."""
         for claim, text in [(f, f.get("text", "")) for f in entry.get("facts", [])] + \
                            [(f, f.get("answer", "")) for f in entry.get("findings", [])]:
             claim.setdefault("id", fingerprint(str(text))[:12])
             claim.setdefault("status", "candidate")
+        facts = entry.get("facts", [])
+        for finding in entry.get("findings", []):
+            finding.setdefault("cites", [facts[n - 1]["id"] for n in finding.get("facts", [])
+                                         if isinstance(n, int) and 1 <= n <= len(facts)])
         Home.store().put("learned", slug, entry)
 
     @staticmethod
@@ -987,6 +999,19 @@ class Library:
             return entry
         if Library.read(slug):
             Home.store().update("learned", slug, changed)
+
+    @staticmethod
+    def retire(slug, ids, reason, run):
+        """The facts and findings of a topic with these ids, retired; how many."""
+        gone = []
+        def retired_in(entry):
+            if entry:
+                gone.append(sum(retire(entry, key, lambda claim: claim.get("id") in ids, reason, run)
+                                for key in ("facts", "findings")))
+            return entry
+        if Library.read(slug):
+            Home.store().update("learned", slug, retired_in)
+        return sum(gone)
 
     @staticmethod
     def slug(topic):
@@ -1212,6 +1237,28 @@ class Embeddings:
         dot = sum(x * y for x, y in zip(a, b))
         size = math.sqrt(sum(x * x for x in a)) * math.sqrt(sum(y * y for y in b))
         return dot / size if size else 0.0
+
+
+def record(item, event, run):
+    """An event in an item's history (born, confirmed, helped, failed), the last HISTORY_KEPT; helped is
+    also counted, beyond them. The item, changed."""
+    item["history"] = (item.get("history", []) + [{"event": event, "run": run, "at": now_text()}])[-HISTORY_KEPT:]
+    if event == "helped":
+        item["helped"] = item.get("helped", 0) + 1
+    return item
+
+
+def retire(doc, key, gone, reason, run):
+    """The items of doc[key] that gone(item) picks, moved to doc["retired"] (the last RETIRED_KEPT) with why
+    and the run: never shown again, kept for people to see. How many."""
+    items = doc.get(key, [])
+    leaving = [item for item in items if gone(item)]
+    doc[key] = [item for item in items if not gone(item)]
+    retired = [record(dict(item, status="retired", reason=reason, retired=now_text(), was=key), "failed", run)
+               for item in leaving]
+    if retired:
+        doc["retired"] = (doc.get("retired", []) + retired)[-RETIRED_KEPT:]
+    return len(retired)
 
 
 def language_key(name):

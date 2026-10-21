@@ -27,6 +27,7 @@ import subprocess
 import sys
 import threading
 import time
+import webbrowser
 from pathlib import Path
 
 from .commands import COMMANDS, TERMINAL_ONLY, named, refs
@@ -349,8 +350,20 @@ class Desk:
             return self.ask_first(channel, message.chat, words)
         if command in LONG:
             return self.start_task(words, self.root, " ".join(words))
+        if command == "memory" and "--graph" in words:
+            return self.memory_graph(channel, message.chat, words)
         shown = self.tinker(words)
         return md(t"⚙️ **{' '.join(words)}**\n{shown:block}")
+
+    def memory_graph(self, channel, chat, words):
+        """memory --graph: the page made (tinker memory --graph) and sent as a file, what tinker printed under it."""
+        page = Home.graph_page()
+        before = page.stat().st_mtime_ns if page.exists() else None
+        shown = self.tinker(words)
+        if not page.exists() or page.stat().st_mtime_ns == before:  # not written now: what went wrong is shown
+            return md(t"🧠 **{' '.join(words)}**\n{shown:block}")
+        channel.send_file(chat, page, md(t"🧠 **Tinker's memory**\n{shown}"))
+        return None
 
     def new_task(self, words):
         """task WHAT: Tinker makes its folder in the projects folder, named after it."""
@@ -1465,6 +1478,10 @@ class Channel:
         """Change a message sent before (a channel that cannot edit sends a new one)."""
         return self.send(chat, text)
 
+    def send_file(self, chat, path, caption):
+        """Send a file with caption (Markup) under it; a channel that cannot sends the caption and where the file is."""
+        return self.send(chat, f"{caption}\n📄 `{path}`")
+
     def typing(self, chat):
         """Show chat that a reply is being written (a channel that cannot says nothing)."""
 
@@ -1598,6 +1615,11 @@ class ConsoleChannel(Channel):
     def edit(self, chat, sent, text):
         self.print(Markup.ansi(self.said(text)))
         return sent
+
+    def send_file(self, chat, path, caption):
+        """The file opened in the browser (a terminal is on this computer), and where it is."""
+        webbrowser.open(Path(path).as_uri())
+        return self.send(chat, f"{caption}\n📄 Opened in your browser: `{path}`")
 
     def show(self, chat, shown, text, done=False, bottom=None, pin=False):  # a terminal prints at its bottom
         sent, text = (shown or [None])[0] or self.new_id(), self.said(text)

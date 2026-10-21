@@ -197,6 +197,7 @@ import shutil
 import sys
 import time
 import traceback
+import webbrowser
 from pathlib import Path
 
 # Checked before tinkerkit, which an older Python cannot even read; so that this check runs there, this file
@@ -208,6 +209,7 @@ if sys.version_info < (3, 14):
 from tinkerkit.building import BugReproducer, CodeWriter, TestToolSetup, TestWriter, Verifier
 from tinkerkit.commands import BY_NAME, COMMANDS, GROUPS, refs
 from tinkerkit.finishing import FinalReview, LessonWriter, ReadmeWriter, Tidy
+from tinkerkit.graph import write_page
 from tinkerkit.knowledge import Embeddings, Learner, Library
 from tinkerkit.model import Calibrator, Model, Models, Ollama, OllamaError
 from tinkerkit.planning import Designer, InterfaceReviewer, Recaller, SpecWriter
@@ -271,7 +273,7 @@ class Cli:
               "calibrate": None, "learn": None, "memory": False, "runs": False, "status": None, "log": None,
               "doctor": False, "task": None, "spec": None, "spec_file": None, "restart": False, "resume": None,
               "amend": None, "add": None, "fix": None, "workdir": None, "web": False, "no_confirm": False,
-              "rename": None, "yes": False, "calls": False}
+              "rename": None, "yes": False, "calls": False, "graph": False}
     FOLDER_RE = re.compile(r"[A-Za-z0-9][\w.-]{0,63}")
 
     @staticmethod
@@ -585,7 +587,7 @@ class Commands:
         elif args.learn:
             self.learn()
         elif args.memory:
-            self.show_memory()
+            self.show_memory(args.graph)
         elif args.runs:
             self.list_runs()
         elif args.status is not None:
@@ -738,15 +740,37 @@ class Commands:
         print("A run uses this when its recall phase finds the request needs it; tinker memory lists what was learned.")
 
     @staticmethod
-    def show_memory():
+    def show_memory(graph=False):
+        """What Tinker knows, as lists; or (graph) as a graph in one page, opened in the browser when this
+        prints to a terminal (a chat sends the page as a file)."""
+        if graph:
+            Commands.show_graph()
+            return
         print(f"Tinker's home: {Home.root}\nModel in use: {Config.get('model') or 'none'}")
-        for key, doc in Home.store().items("languages").items():
+        languages, any_language = Home.store().items("languages"), Home.store().get("memory", "any") or {}
+        for key, doc in languages.items():
             Commands.print_language(key, doc)
         print("\nAny language:")
-        Commands.print_lessons((Home.store().get("memory", "any") or {}).get("lessons", []))
+        Commands.print_lessons(any_language.get("lessons", []))
         Commands.print_topics(Library.topics())
         Commands.print_taught(TaughtCommands.all())
+        retired = sum(len(doc.get("retired", [])) for doc in [*languages.values(), any_language,
+                                                              *Library.topics().values()])
+        if retired:
+            print(f"\nRetired: {retired} item(s) that did not hold (never shown to the model; tinker memory --graph "
+                  f"shows them, with why)")
         print("\nForget a part with tinker clear PART, a command with tinker learn NAME none.")
+        print("See it as a graph: tinker memory --graph")
+
+    @staticmethod
+    def show_graph():
+        graph = write_page(Embeddings.configured())
+        print(f"Tinker's memory: {graph.summary()}")
+        print(f"Similar lessons found by {graph.similar_by}")
+        print(f"Page: {Home.graph_page()}")
+        if sys.stdout.isatty():
+            webbrowser.open(Home.graph_page().as_uri())
+            print("Opened in your browser.")
 
     @staticmethod
     def print_language(key, doc):
@@ -1124,6 +1148,7 @@ class ProjectRun:
         Models.remember(model)
         self.record["status"] = self.outcome.status
         Runs.save(self.record, project.workdir)
+        Runs.remember(self.record, project.language)
         try:
             project.save()
         except OSError:
