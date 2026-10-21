@@ -28,7 +28,10 @@ def test_default_config():
     assert settings.DEFAULT_CONFIG == {
         "model": None, "ollama_url": "http://localhost:11434", "keep_alive": 0, "max_growth": 1.15,
         "build_think": "medium", "test_timeout": 60, "web": "ollama", "web_fallback": "", "web_timeout": 30,
-        "learn_missing": 2, "embed_model": "", "projects": "~/Projects"}
+        "learn_missing": 2, "learn_rate": 8, "learn_backoff": 20, "learn_cutoff": 0.0, "learn_pages": 8,
+        "learn_min_pages": 2, "learn_searches": 3, "learn_think": "low", "docs_pages": 30, "tool_docs_pages": 5,
+        "docs_latest_days": 30, "fetch_workers": 6, "fetch_timeout": 15, "fetch_max_bytes": 2000000,
+        "fetch_domain_delay": 0.1, "fetch_fallbacks": 2, "embed_model": "", "projects": "~/Projects"}
 
 
 @pytest.mark.spec("SET-3")
@@ -53,7 +56,7 @@ def test_config_is_defaults_overridden_by_the_home(home_store):
 @pytest.mark.spec("SET-5")
 @pytest.mark.parametrize("key,value", [("keep_alive", "soon"), ("keep_alive", "10 m"), ("max_growth", 1),
                                        ("max_growth", True), ("max_growth", "2"), ("build_think", "max"),
-                                       ("build_think", "true"), ("build_think", 1)])
+                                       ("build_think", "true"), ("build_think", 1), ("learn_think", "max")])
 def test_check_model_rejects_unusable_settings(key, value):
     Config.save(**{key: value})
     with pytest.raises(SystemExit, match=key):
@@ -213,7 +216,7 @@ def test_reset_outside_a_terminal_without_yes_deletes_nothing(tinker_home, monke
 
 @pytest.mark.spec("SET-11")
 def test_parts_tinker_clear_knows():
-    assert list(Home.parts()) == ["languages", "memory", "learned", "models", "runs", "commands"]
+    assert list(Home.parts()) == ["languages", "memory", "learned", "docs", "models", "runs", "commands"]
 
 
 @pytest.mark.spec("SET-11")
@@ -369,6 +372,7 @@ def test_config_set_reads_and_checks_the_value(capsys):
     assert Config.set("test_timeout", "90") == 90 and Config.get("test_timeout") == 90
     assert Config.set("keep_alive", "10m") == "10m" and Config.set("keep_alive", "300") == 300
     assert Config.set("build_think", "false") is False and Config.set("max_growth", "1.5") == 1.5
+    assert Config.set("learn_think", "false") is False and Config.set("docs_pages", "12") == 12
     assert Config.set("web_fallback", "duckduckgo") == "duckduckgo"
     with pytest.raises(SystemExit, match="test_timeout must be a whole number"):
         Config.set("test_timeout", "soon")

@@ -7,7 +7,8 @@ import operator
 import re
 from pathlib import Path
 
-from .knowledge import Embeddings, Learner, Library, Retriever, mentions
+from .knowledge import Embeddings, Library, Retriever, mentions
+from .learning import SlotLearner
 from .model import OllamaError
 from .prompts import Part, PromptTooLarge, Prompts
 from .session import Phase, Worker
@@ -24,7 +25,7 @@ class Recaller(Phase):
     words and by meaning (Retriever), so the call that follows sees the most related topics first:
     it decides which this cycle uses and, in a run with --web, which it should learn now that it has
     not (up to the setting learn_missing): a framework the request names, a technique, the
-    language. Those are learned (Learner); the chosen topics' facts, ranked by the same search, are
+    language. Those are learned (SlotLearner); the chosen topics' facts, ranked by the same search, are
     kept in the project ("learned"), so they go into its prompts and a resumed run uses the same.
     Without --web there is nothing to learn, so no call: the topics used are those the request names
     or is close to in meaning (relevant)."""
@@ -122,7 +123,7 @@ class Recaller(Phase):
             print(f"  not learning {topic}: {internet.why()}")
             return None
         try:
-            entry = Learner(self.s.model, internet, retriever.embeddings).learn(topic)
+            entry = SlotLearner(self.s.model, internet, retriever.embeddings).learn(topic)
         except (SystemExit, PromptTooLarge, OllamaError) as exc:
             print(f"  could not learn {topic}: {exc}")
             return None

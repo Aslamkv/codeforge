@@ -60,7 +60,8 @@ class Graph:
         facts they became, its findings to the facts they cite, and its rules to the facts and lessons they rest on."""
         for slug, entry in Library.topics().items():
             hub = f"lang:{slug}" if entry.get("kind") == "language" else f"topic:{slug}"
-            details = [("learned", entry.get("learned", "?")), ("summary", entry.get("summary", ""))]
+            details = [("learned", entry.get("learned", "?")), ("summary", entry.get("summary", "")),
+                       ("missing", ", ".join(entry.get("missing", [])) or None)]
             hub = self.hub(hub, "language" if hub.startswith("lang:") else "topic", entry.get("name", slug), slug,
                            details)
             for fact in entry.get("facts", []):
@@ -128,7 +129,7 @@ class Graph:
     def add_claim(self, node_id, kind, claim, hub):
         """A fact, a finding or a rule, with its confidence and its pages."""
         text = claim.get("text") or claim.get("answer", "")
-        details = [("phase", claim.get("phase")), ("confidence", claim.get("confidence")),
+        details = [("phase", claim.get("phase")), ("slot", claim.get("slot")), ("confidence", claim.get("confidence")),
                    ("helped", claim.get("helped", 0))]
         sources = [s for s in [claim.get("source")] + list(claim.get("also", [])) + list(claim.get("sites", []))
                    if isinstance(s, str) and s.startswith("http")]

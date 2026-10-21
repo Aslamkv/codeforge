@@ -131,10 +131,10 @@ COMMANDS = [
     Command("clear", "Set up", "clear PART... [--yes]", "delete parts of what Tinker keeps: languages, memory, "
             "learned, models, runs, commands",
             "Delete parts of what Tinker keeps, e.g. tinker clear languages memory: languages (toolchains, fixes, "
-            "lessons per language), memory (lessons for any language), learned (what tinker learn learned), models "
-            "(measurements), runs (the list of projects), commands (your commands).", chat="quick", words="any",
-            deletes=True, arguments=[Argument("parts", "+", "PART", "languages, memory, learned, models, runs or "
-                                                                    "commands")], options=("yes",)),
+            "lessons per language), memory (lessons for any language), learned (what tinker learn learned), docs (the "
+            "documentation it fetched, per version), models (measurements), runs (the list of projects), commands (your commands).", chat="quick", words="any",
+            deletes=True, arguments=[Argument("parts", "+", "PART", "languages, memory, learned, docs, models, "
+                                                                    "runs or commands")], options=("yes",)),
     Command("reset", "Set up", "reset [--yes]", "delete everything Tinker keeps (projects stay)",
             "Delete everything Tinker keeps (settings, measured models, what it learned, the list of projects); "
             "projects are not touched.", chat="quick", deletes=True, options=("yes",)),

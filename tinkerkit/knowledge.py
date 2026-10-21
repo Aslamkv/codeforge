@@ -18,11 +18,10 @@ from pathlib import Path
 from .model import Models, Ollama, OllamaError
 from .prompts import Part, PromptTooLarge, Prompts
 from .settings import (
-    Config, FACTS_PER_CHUNK, FACT_CHARS, FACT_PHASES, HISTORY_KEPT, Home, LANGUAGE_COMMANDS, LANGUAGE_PAGES, LANGUAGE_SEARCHES,
-    LANGUAGE_SECTIONS, LESSONS_SHOWN, LESSON_PHASES, MAX_COMMANDS, MAX_FACTS, MAX_LESSONS, MAX_PAGES, MAX_QUERIES,
+    Config, FACTS_PER_CHUNK, FACT_CHARS, FACT_PHASES, HISTORY_KEPT, Home, LESSONS_SHOWN, LESSON_PHASES, MAX_LESSONS,
     PAGE_CHUNKS, PLAYBOOK_RULES, RULE_CHARS, RULE_WHEN_CHARS,
     REPEAT_CLAIM, RETIRED_KEPT, RESEARCH_CHECKS, RESEARCH_GAPS, RESEARCH_PAGES, RESEARCH_QUERIES, RESEARCH_QUESTIONS, SAME_CLAIM,
-    SAME_FACT, SAME_LESSON, SEARCH_RESULTS, SECTION_FACTS, SECTION_PAGES, SIMILAR_FAILURE, TOOL_ROLES,
+    SAME_FACT, SAME_LESSON, SEARCH_RESULTS, SIMILAR_FAILURE,
     VERSION_TIMEOUT, fingerprint, first_line, now_text, similarity, split_text, words,
 )
 from .workspace import Toolchain, Workspace
@@ -291,24 +290,14 @@ class Knowledge:
 
 
 class Learner:
-    """Learns from the web what a model may not know, or knows as it was when it was trained, and
-    saves it (Library), indexed with the embedding model (Embeddings). The plan tells which kind
-    (learn); a domain is researched (Researcher). The other two:
-    a tool (a framework, a library, a technique such as TDD): the model plans a few searches, at
-    least one for each thing the topic names, aimed at how to use it today;
-    a language (or a language a run's recall phase needs): the same
-    sections for every language, each with its own searches, what to look for and share of the
-    facts: its idioms, what is new, its pitfalls, its tools (one per role: environment, packages,
-    build, tests, format, lint, types: the ones the request names, else the usual ones) and its
-    conventions; then its facts, with the lessons its projects proved, are condensed into a few
-    rules (its playbook), which its prompts show in place of the facts they rest on.
-    Then, for both: the commands that show what is installed here run (only such commands: one
-    each, no shell operators, nothing installed or changed); the searches run and their pages are
-    taken in turn (each search's first result, then each one's second, ...), so every search is
-    read; the model condenses each page into the facts it states, each kept with its source;
-    repeats are dropped and, past a section's share, the model keeps the most useful. Learning
-    again reuses the saved plan (edit it there). It needs the Internet plugin and an embedding
-    model."""
+    """Reads the web for what a model may not know, or knows as it was when it was trained: the parts
+    learning shares. Research (Researcher) reads pages through it (read_web: the searches run and their
+    pages taken in turn, each search's first result, then each one's second, ...; the model condenses each
+    page into the facts it states, each kept with its source; repeats are dropped). Learning a language or
+    a tool by its slots (learning.SlotLearner) runs the commands that show what is installed here (only such
+    commands: one each, no shell operators, nothing installed or changed), condenses its facts into a few
+    rules (condense), keeps them in place of the facts they rest on, and indexes what it learned with the
+    embedding model."""
     VERSION_RE = re.compile(r"\d+(?:\.\d+)+")
     SHELL_OPERATORS = re.compile(r"[;&|<>`$\n\\]")
     # a fact about what is not out yet: never kept
@@ -324,51 +313,8 @@ class Learner:
         self.notes = []  # what could not be learned, and why
         self.kept_earlier = False  # reading was cut short, so the topic as learned before was kept
 
-    def learn(self, topic, deep=False):
-        """What was learned and saved (its entry), or None when nothing could be. The plan tells what
-        it is: a programming language is learned as one (learn_language); a domain or practice is
-        researched when deep (tinker learn: Researcher), else learned quickly like a tool, the way a run
-        learns what it needs; a tool, library or technique is learned from a few pages. A topic
-        learned before is learned again the same way."""
-        self.start()
-        known = Library.read(Library.slug(topic))
-        if (known or {}).get("kind") == "research":
-            return Researcher(self).research(topic) if deep else known
-        if (known or {}).get("kind") == "language":
-            return self.learn_language(known.get("topic") or topic)
-        print(f"\nLearning about {topic}")
-        plan = self.plan(topic, known)
-        if plan["domain"] and deep:
-            print("  it is a domain: researching it, its sources cross-checked")
-            return Researcher(self).research(topic)
-        if plan["language"]:
-            return self.learned_as_language(topic, plan["language"])
-        focus = Prompts.TOPIC_FOCUS.format(topic=plan["name"])
-        searches = [{"query": query, "section": "", "pages": SEARCH_RESULTS, "focus": focus} for query in plan["queries"]]
-        return self.finish(Library.slug(topic), topic, plan, searches, MAX_PAGES, {"": MAX_FACTS})
-
-    def learned_as_language(self, topic, language):
-        """A topic that is a programming language: learned as one, unless it was already (with the tools asked
-        for then: not learned again unasked)."""
-        slug = Library.language(language)
-        if slug:
-            print(f"  it is the programming language {language}, learned already (as {slug})")
-            return Library.read(slug)
-        print(f"  it is the programming language {language}: learning it as a language")
-        return self.learn_language(topic)
-
     def start(self):
         self.notes, self.model_failed, self.kept_earlier = [], "", False
-
-    def plan(self, topic, known):
-        """What the topic is, the searches and the commands: as saved for it, else from the model."""
-        parts = [Part("Topic", topic, True), Part("Today", datetime.date.today().isoformat(), True)]
-        plan, saved = self.saved_or_asked(known, self.read_plan, Prompts.LEARN_PLAN_SYSTEM, parts, "Plan learning",
-                                          f"learning about {topic}", Library.slug(topic))
-        if not saved and not plan["language"]:
-            print(f"  {plan['name']}: {plan['summary']}")
-        self.show_dropped(plan)
-        return plan
 
     def saved_or_asked(self, known, read, system, parts, label, what, saved_as):
         """(plan, whether it was saved): the plan saved before (known, as read reads it), else the
@@ -385,24 +331,6 @@ class Learner:
             raise SystemExit(f"{self.model.name} gave no usable plan for {what}; see the log of its replies "
                              f"(tinker memory; its calls are in tinker learn's log)")
         return plan, False
-
-    @staticmethod
-    def read_plan(data):
-        """A topic's plan, checked: a name, a summary, up to MAX_QUERIES searches, up to
-        MAX_COMMANDS commands that only show what is installed (any other is "dropped"),
-        "language": the language's name when the topic is one (else ""), and "domain": whether it
-        is a field or practice to research rather than software to learn to use."""
-        if not isinstance(data, dict):
-            raise ValueError("not a JSON object")
-        name, summary = str(data.get("name") or "").strip()[:80], " ".join(str(data.get("summary") or "").split())[:200]
-        language = str(data.get("language") or "").strip()[:40]
-        domain = str(data.get("kind") or "").strip().lower() == "domain" and not language
-        queries = [" ".join(str(q).split()) for q in data.get("queries") or [] if str(q).strip()][:MAX_QUERIES]
-        if not name or (not queries and not language):
-            raise ValueError("it needs a name and at least one search")
-        commands, dropped = Learner.safe_commands(data.get("commands") or [])
-        return {"name": name, "summary": summary, "language": language, "domain": domain, "queries": queries,
-                "commands": commands[:MAX_COMMANDS], "dropped": dropped}
 
     @staticmethod
     def safe_commands(commands):
@@ -422,122 +350,6 @@ class Learner:
         for command in plan["dropped"]:
             print(f"  left out `{command}`: a command here must only show what is installed (one command, no shell "
                   f"operators, nothing installed or changed)")
-
-    def learn_language(self, text):
-        """A programming language learned as it is today (see the class), saved as
-        Tinker's "learned" under its language key; None when nothing could be learned."""
-        self.start()
-        print(f"\nLearning the language {text}")
-        plan = self.plan_language(text)
-        return self.finish(language_key(plan["language"]), text, plan, self.language_searches(plan), LANGUAGE_PAGES,
-                           SECTION_FACTS)
-
-    def plan_language(self, text):
-        """The language's name and version, its tools, the searches of each section and the
-        commands: as saved for this request, else from the model."""
-        known = next((entry for entry in Library.topics().values()
-                      if entry.get("kind") == "language" and entry.get("topic") == text), None)
-        if known and set(known.get("roles", [])) != set(TOOL_ROLES):
-            print(f"  its saved plan predates the tool roles {', '.join(TOOL_ROLES)}; planning it again")
-            known = None
-        parts = [Part("Request", text, True), Part("Today", datetime.date.today().isoformat(), True)]
-        plan, saved = self.saved_or_asked(known, self.read_language_plan, Prompts.LANGUAGE_PLAN_SYSTEM, parts,
-                                          "Plan learning the language", f"learning {text}",
-                                          language_key((known or {}).get("language") or text))
-        if plan.get("not_language"):
-            raise SystemExit(f"{text!r} is not a programming language ({plan['not_language']}). Nothing was read.")
-        if not saved:
-            print(f"  {plan['name']}: {plan['summary']}")
-        print(f"  tools: {Library.tools_text(plan['tools']) or 'none named'}")
-        self.show_dropped(plan)
-        return plan
-
-    @staticmethod
-    def read_language_plan(data):
-        """A language's plan, checked: its name and version, one tool per role (TOOL_ROLES) with
-        the search that finds how to use it, the searches of each section, and the commands that
-        only show what is installed (any other is "dropped"). {"not_language": why} when the model
-        says the request is no programming language."""
-        if not isinstance(data, dict):
-            raise ValueError("not a JSON object")
-        language = str(data.get("language") or data.get("name") or "").strip()[:40]
-        summary = " ".join(str(data.get("summary") or "").split())[:200]
-        if not language:
-            if summary:
-                return {"not_language": summary}
-            raise ValueError("it needs the language's name")
-        version = str(data.get("version") or "").strip()[:20]
-        tools, tool_commands = Learner.read_tools(data.get("tools") or [], language)
-        searches = Learner.read_searches(data.get("searches") or [])
-        if not searches:
-            raise ValueError(f"it needs searches for the language's {', '.join(LANGUAGE_SECTIONS)}")
-        commands, dropped = Learner.safe_commands(list(data.get("commands") or []) + tool_commands)
-        return {"kind": "language", "language": language, "name": f"{language} {version}".strip(), "version": version,
-                "summary": summary or language, "tools": tools, "roles": list(TOOL_ROLES), "searches": searches,
-                "commands": list(dict.fromkeys(commands))[:LANGUAGE_COMMANDS], "dropped": dropped}
-
-    @staticmethod
-    def read_tools(given, language):
-        """([one tool per role, with the search that finds how to use it], [the commands that show them])."""
-        tools, commands = {}, []
-        for tool in given:
-            if not isinstance(tool, dict):
-                continue
-            role, tool_name = str(tool.get("role") or "").strip().lower(), str(tool.get("name") or "").strip()[:40]
-            if role in TOOL_ROLES and tool_name and role not in tools:
-                search = " ".join(str(tool.get("search") or "").split()) or f"how to use {tool_name} in a {language} project"
-                tools[role] = {"role": role, "name": tool_name, "search": search}
-                commands += [tool["command"]] if tool.get("command") else []
-        return list(tools.values()), commands
-
-    @staticmethod
-    def read_searches(given):
-        """The searches of the language's sections, up to LANGUAGE_SEARCHES."""
-        searches = [{"section": str(s.get("section") or "").strip().lower(), "query": " ".join(str(s.get("query") or "").split())}
-                    for s in given if isinstance(s, dict)]
-        return [s for s in searches if s["section"] in LANGUAGE_SECTIONS and s["query"]][:LANGUAGE_SEARCHES]
-
-    @staticmethod
-    def language_searches(plan):
-        """Each section's searches (a section the plan has none for, such as one a plan saved before it
-        existed lacks, gets the usual one), and one for each tool, with what each looks for."""
-        planned = {search["section"] for search in plan["searches"]}
-        usual = [{"section": section, "query": Prompts.SECTION_QUERY[section].format(
-                     language=plan["language"], version=plan.get("version", "")).replace("  ", " ")}
-                 for section in LANGUAGE_SECTIONS if section not in planned]
-        searches = [{"query": search["query"], "section": search["section"], "pages": SECTION_PAGES[search["section"]],
-                     "focus": Prompts.LANGUAGE_FOCUS[search["section"]].format(language=plan["language"])}
-                    for search in plan["searches"] + usual]
-        return searches + [{"query": tool["search"], "section": "tools", "pages": SECTION_PAGES["tools"],
-                            "focus": Prompts.TOOL_FOCUS.format(tool=tool["name"], role=tool["role"],
-                                                               language=plan["language"])}
-                           for tool in plan["tools"]]
-
-    def finish(self, slug, topic, plan, searches, max_pages, shares):
-        """What is installed here and what the pages state, saved as slug (a topic learned before
-        is kept when reading was cut short or found nothing); the entry, or None."""
-        machine = self.look_at_machine(plan["commands"])
-        facts, sources = self.read_web(plan["name"], searches, max_pages)
-        known = Library.read(slug)
-        cut_short = self.cut_short()
-        if known and (cut_short or not facts):
-            print(f"  {cut_short or 'no page gave facts'}; kept what was learned before ({known.get('learned', '?')})")
-            self.kept_earlier = True
-            return known
-        if not facts and not any(m["found"] for m in machine):
-            print(f"  nothing learned about {topic}: " + ("; ".join(self.notes) or "the pages stated nothing useful"))
-            return None
-        facts = self.keep_shares(plan["name"], facts, shares)
-        rules = self.condense(plan, facts) if plan.get("kind") == "language" else []
-        entry = {"topic": topic, **{k: v for k, v in plan.items() if k != "dropped"}, "learned": now_text(),
-                 "model": self.model.name, "machine": machine, "facts": facts, "rules": rules, "sources": sources,
-                 "notes": self.notes}
-        Library.save(slug, entry)
-        print(f"  learned {len(facts)} fact(s) about {plan['name']} from {len(sources)} page(s); kept as {slug}")
-        if plan.get("kind") == "language":
-            self.replace_proven(slug, entry)
-        self.index(slug, entry)
-        return entry
 
     @staticmethod
     def replace_proven(slug, entry):
@@ -690,48 +502,20 @@ class Learner:
             return f"the model stopped answering ({self.model_failed})"
         return ""
 
-    def keep_shares(self, name, facts, shares):
-        """Each section's facts, at most its share (shares: {section: count}; a topic's facts have
-        no section): past it, the most useful as the model picks them."""
-        kept = []
-        for section, share in shares.items():
-            facts_of = [f for f in facts if f.get("section", "") == section]
-            kept += self.pick(f"{name}: {section}" if section else name, facts_of, share) if len(facts_of) > share \
-                else facts_of
-        return kept
-
-    def pick(self, topic, facts, count):
-        """The most useful count, as the model picks them (the first ones if it cannot)."""
-        listing = "\n".join(f"{i}. [{f['phase']}] {f['text']}" for i, f in enumerate(facts, 1))
-
-        def read(reply):
-            numbers = dict.fromkeys(reply.json().get("keep", []))
-            kept = [facts[n - 1] for n in numbers if isinstance(n, int) and 1 <= n <= len(facts)]
-            return kept[:count]
-
-        try:
-            kept = self.model.ask_until_usable(Prompts.PICK_FACTS_SYSTEM.format(count=count),
-                                               [Part("Topic", topic, True), Part("Facts", listing, True)], "Pick facts",
-                                               read, attempts=2)
-        except (PromptTooLarge, OllamaError) as exc:
-            print(f"  could not pick ({first_line(str(exc), 120)}): keeping the first {count}")
-            kept = None
-        return kept or facts[:count]
-
-    def condense(self, plan, facts):
-        """A language's facts, with the lessons its projects proved, condensed into its playbook (one call):
-        at most PLAYBOOK_RULES rules a code generator follows, each citing the facts and lessons it rests on,
-        so its prompts show a few rules in place of many facts. [] when the model gives no usable reply
-        (the facts are then shown as they are)."""
-        lessons = Knowledge(plan["language"]).proven_lessons()
+    def condense(self, plan, facts, think=None):
+        """A topic's facts (a language's with the lessons its projects proved) condensed into its playbook (one
+        call): at most PLAYBOOK_RULES rules a code generator follows, each citing the facts and lessons it rests
+        on, so its prompts show a few rules in place of many facts. [] when the model gives no usable reply (the
+        facts are then shown as they are); a model that fails raises, so nothing is kept. think: the call's
+        think setting (None: the model's own)."""
+        lessons = Knowledge(plan["language"]).proven_lessons() if plan.get("kind") == "language" else []
         sources = self.rule_sources(facts, lessons)
-        try:
-            rules = self.model.ask_until_usable(Prompts.PLAYBOOK_SYSTEM, self.playbook_parts(plan, facts, lessons),
-                                                "Condense the language",
-                                                lambda reply: self.read_rules(reply.json(), sources), attempts=2)
-        except (PromptTooLarge, OllamaError) as exc:
-            rules = None
-            self.notes.append(f"the facts were not condensed into rules ({first_line(str(exc), 160)})")
+        rules = self.model.ask_until_usable(Prompts.PLAYBOOK_SYSTEM, self.playbook_parts(plan, facts, lessons),
+                                            "Condense the facts",
+                                            lambda reply: self.read_rules(reply.json(), sources), attempts=2,
+                                            think=think)
+        if not rules:
+            self.notes.append("the facts were not condensed into rules (no usable reply)")
         print(f"  condensed into {len(rules)} rule(s)" if rules else "  not condensed: its facts are shown as they are")
         return rules or []
 
@@ -743,11 +527,12 @@ class Learner:
 
     @staticmethod
     def playbook_parts(plan, facts, lessons):
-        """The language and its tools, its facts (with their section and phase), then its lessons, numbered on."""
-        listing = "\n".join(f"{n}. [{fact.get('section', '')}, {fact['phase']}] {fact['text']}"
+        """The topic and its tools, its facts (with their slot and phase), then its lessons, numbered on."""
+        listing = "\n".join(f"{n}. [{fact.get('slot', '')}, {fact['phase']}] {fact['text']}"
                             for n, fact in enumerate(facts, 1))
         proved = "\n".join(f"{n}. {lesson['text']}" for n, lesson in enumerate(lessons, len(facts) + 1))
-        return [Part("Language", f"{plan['name']}; its tools: {Library.tools_text(plan['tools']) or 'none named'}", True),
+        tools = Library.tools_text(plan.get("tools", [])) or "none named"
+        return [Part("Topic", f"{plan['name']} ({plan.get('kind', 'tool')}); its tools: {tools}", True),
                 Part("Facts learned from the web", listing, True, exact=True),
                 Part("Lessons its projects proved", proved or "(none yet)", True, exact=True)]
 
@@ -1263,11 +1048,17 @@ class Retriever:
 
     def by_words(self, query, texts):
         """BM25: the texts holding the query's words, the best match first (the others not at all)."""
+        scores = [(score, index) for index, score in enumerate(self.word_scores(query, texts))]
+        return [index for _, index in sorted((s for s in scores if s[0] > 0), key=lambda pair: (-pair[0], pair[1]))]
+
+    def word_scores(self, query, texts):
+        """Each text's BM25 score for the query's words, in order (0 for a text that holds none)."""
+        if not texts:
+            return []
         terms, docs = set(words(query)), [words(text) for text in texts]
         average = sum(len(doc) for doc in docs) / len(docs) or 1
         holding = collections.Counter(term for doc in docs for term in set(doc) & terms)
-        scores = [(self.bm25(terms, doc, len(docs), holding, average), index) for index, doc in enumerate(docs)]
-        return [index for _, index in sorted((s for s in scores if s[0] > 0), key=lambda pair: (-pair[0], pair[1]))]
+        return [self.bm25(terms, doc, len(docs), holding, average) for doc in docs]
 
     def bm25(self, terms, doc, total, holding, average):
         """One text's score: each query term it holds, weighed by how rare the term is and how often the

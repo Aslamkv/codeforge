@@ -573,7 +573,7 @@ def test_learn_a_command_of_yours_needs_no_model(home_store):
 
 
 @pytest.mark.spec("CLI-10")
-def test_learning_checks_everything_before_loading(measured_model, fake_ollama, monkeypatch):
+def test_learning_checks_everything_before_loading(measured_model, fake_ollama, monkeypatch, capsys):
     from tinkerkit.workspace import TaughtCommands
     monkeypatch.setattr(TaughtCommands, "alias", staticmethod(lambda name: None))
     monkeypatch.setattr(Ollama, "installed_models", staticmethod(lambda: [{"name": MODEL}, {"name": "embedder"}]))
@@ -583,10 +583,11 @@ def test_learning_checks_everything_before_loading(measured_model, fake_ollama, 
     with pytest.raises(SystemExit, match="tinker learn needs the Internet plugin"):
         Commands(parse("learn", "Flask")).run()
     Config.save(web="duckduckgo")
-    monkeypatch.setattr(tinker.Learner, "learn", lambda self, topic, deep=False: None)
+    monkeypatch.setattr(tinker.SlotLearner, "learn", lambda self, topic, deep=False: None)
     with pytest.raises(SystemExit, match="Nothing learned about Flask; nothing saved."):
         Commands(parse("learn", "Flask")).run()
     assert fake_ollama.calls == []
+    assert "Time taken: 0s" in capsys.readouterr().out  # however it ends
     Config.save(model=None)
     with pytest.raises(SystemExit, match="No model in use"):
         Commands(parse("learn", "Flask")).run()

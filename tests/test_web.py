@@ -9,6 +9,7 @@ from email.message import Message
 import pytest
 
 from tinkerkit.settings import Config
+from tinkerkit.fetcher import Fetcher
 from tinkerkit.web import DuckDuckGoWeb, Internet, OllamaWeb, PageText, WebBackend, WebError
 
 
@@ -339,3 +340,37 @@ def test_page_text_uses_the_whole_body_when_main_is_short():
 def test_page_text_survives_broken_html():
     page = PageText.of("<body><p>kept text<p>more <b>bold</i></div></div></body>")
     assert "kept text" in page.content() and "more bold" in page.content()
+
+
+@pytest.mark.spec("WEB-12")
+def test_a_rate_limit_is_told_apart_from_other_failures(monkeypatch):
+    internet = internet_with(monkeypatch, Scripted(1, [WebError("busy", code=429), WebError("down", code=503),
+                                                       [{"url": "https://ok"}]]))
+    assert internet.search("q", 1) is None and internet.rate_limited("q")
+    assert internet.search("r", 1) is None and not internet.rate_limited("r")
+    assert internet.search("q", 1) and not internet.rate_limited("q")  # a later answer clears it
+    waited = internet_with(monkeypatch, Scripted(1, [WebError("busy", retry=True, code=429), [{"url": "https://ok"}]]))
+    assert waited.search("q", 1) and not waited.rate_limited("q")  # asked again within the call, and answered
+    def urlopen(request, timeout):
+        raise http_error(429)
+    monkeypatch.setattr(urllib.request, "urlopen", urlopen)
+    with pytest.raises(WebError) as error:
+        OllamaWeb(5).post("/web_search", {})
+    assert error.value.code == 429
+
+
+@pytest.mark.spec("WEB-12")
+def test_the_page_fetcher_follows_the_fetch_settings():
+    Config.save(fetch_workers=3, fetch_timeout=7, fetch_max_bytes=5000, fetch_domain_delay=0.25)
+    fetcher = Internet.page_fetcher(log=print)
+    assert isinstance(fetcher, Fetcher) and fetcher.log is print
+    assert (fetcher.workers, fetcher.timeout, fetcher.max_bytes, fetcher.domain_delay) == (3, 7.0, 5000, 0.25)
+
+
+@pytest.mark.spec("WEB-12")
+@pytest.mark.parametrize("key,value", [("learn_rate", 0), ("learn_pages", 2.5), ("learn_min_pages", 0),
+                                       ("learn_backoff", -1), ("fetch_workers", True), ("fetch_max_bytes", "big")])
+def test_check_rejects_learn_limits_out_of_range(key, value):
+    Config.save(**{key: value})
+    with pytest.raises(SystemExit, match=key):
+        Internet.check()

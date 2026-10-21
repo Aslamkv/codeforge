@@ -152,3 +152,16 @@ def test_memory_counts_what_is_retired(memory, capsys):
     Commands.show_memory()
     out = capsys.readouterr().out
     assert "Retired: 1 item(s) that did not hold" in out and "See it as a graph: tinker memory --graph" in out
+
+
+@pytest.mark.spec("GRF-1")
+def test_a_facts_slot_and_a_topics_missing_slots_are_in_their_details(home_store):
+    Library.save("widgetlib", {"topic": "Widgetlib", "kind": "tool", "name": "Widgetlib", "summary": "s",
+                               "status": "incomplete", "missing": ["this-version", "fit"], "passages": [{"id": "P1"}],
+                               "facts": [{"phase": "code", "text": "Create a Widget", "slot": "core-usage",
+                                          "passages": ["P1"], "source": "https://widgetlib.dev/start"}]})
+    nodes = Graph.build().nodes
+    fact = next(n for n in nodes.values() if n["id"].startswith("fact:widgetlib:"))
+    assert ["slot", "core-usage"] in fact["details"] and fact["sources"] == ["https://widgetlib.dev/start"]
+    assert ["missing", "this-version, fit"] in nodes["topic:widgetlib"]["details"]
+    assert "Create a Widget" in GraphPage.html(Graph.build())

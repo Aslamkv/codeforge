@@ -1,0 +1,569 @@
+"""Learning a language or a tool by its slots: tinker learn TOPIC, and the recall phase of a run with --web.
+A fixed pipeline whose main source is the topic's own documentation, for the version installed, and no model
+call (plan, digest, condense or embedding) until the web (or the documentation kept from before) has delivered
+usable pages:
+  PREFLIGHT  the Internet plugin and an embedding model are there
+  PLAN       the plan saved with the topic; else SEARCH 1 (FIRST_SEARCH, throttled), GATE 1, PICK (the results
+             about the topic, BM25), FETCH (the plugin's fetcher), GATE 2, then the first model call: language,
+             tool or domain, the version commands, the documentation sites, slot hints, follow-up searches
+  MACHINE    the version commands run here: the version installed
+  DOCS       the documentation of that version (and of a language's tools): kept from before (DocCache), else
+             read from its site (DocSite); then GATE 2 for a saved plan (search 1 when the docs give too little)
+  CLEAN      the pages as passages, repeats dropped
+  SELECT     each slot's passages from one shared pool
+  DIGEST     each slot's passages into facts that cite them (thinking at learn_think)
+  FOLLOW-UP  each slot left without facts: the plan's follow-up search, while learn_searches allow; its
+             failure is not fatal
+  CONDENSE   the facts into rules (thinking at learn_think)
+  KEEP       saved (only now), the old proven copies retired, and indexed
+A gate that stops the run raises LearnStopped, and a model that fails ends it too: nothing is learned then."""
+
+import datetime
+import json
+import threading
+import time
+import urllib.parse
+from collections import Counter
+
+from .docsite import DocSite
+from .knowledge import Learner, Library, Researcher, Retriever, language_key
+from .model import OllamaError
+from .passages import Cleaner, Page, text_blocks
+from .prompts import Part, PromptTooLarge, Prompts
+from .settings import (
+    BACKOFF_FIRST, Config, FACT_CHARS, FACT_PHASES, FACTS_PER_SLOT, FIRST_SEARCH, Home, LEARN_RESULTS, MAX_COMMANDS,
+    TOOL_ROLES, first_line, now_text,
+)
+from .slots import PROFILES, TOOL_DOCS, Selector, fill, missing, short_slots, web_slots
+from .web import is_web_address
+
+CAUSES = {  # why a learn stopped: (what happened, what to do next)
+    "plugin": ("the Internet plugin is off or cannot be reached",
+               "check the network and tinker use-web (tinker config shows the web's state), then learn again"),
+    "embeddings": ("no embedding model is selected", "select one with tinker embed NAME, then learn again"),
+    "error": ("the search failed", "learn again; if it keeps failing, try another backend with tinker use-web NAME"),
+    "rate-limit": ("the search is rate limited (HTTP 429)", "wait a minute, then learn again"),
+    "no-results": ("the search found nothing", "check the topic's spelling, or name it more fully"),
+    "irrelevant": ("no search result is about the topic", "name the topic more fully (with its language, say)"),
+    "pages": ("too few pages could be fetched", "learn again later: a site may refuse fetches or draw its pages with "
+              "scripts (fetch_fallbacks lets the web plugin fetch more of those)"),
+}
+
+
+class LearnStopped(SystemExit):
+    """A learn stopped before any model call because the web gave nothing to learn from. Its message names the
+    cause, what was tried and the requests made, says nothing was saved, and what to do next. A SystemExit:
+    tinker learn ends non-zero; a run's recall phase goes on without it."""
+
+
+class SearchFailed(Exception):
+    def __init__(self, cause, detail=""):
+        super().__init__(cause)
+        self.cause, self.detail = cause, detail
+
+
+class RateLimited(Exception):
+    """HTTP 429 lasted past the backoff budget."""
+
+
+class SlotLearner:
+    """Learns a topic by its profile's slots (see the module). Learning it again reuses the plan saved with it
+    (edit it there) and the documentation kept for its version; a domain is researched instead when deep
+    (Researcher), else learned like a tool."""
+
+    def __init__(self, model, internet, embeddings):
+        self.learner = Learner(model, internet, embeddings)
+        self.model, self.internet, self.embeddings = model, internet, embeddings
+        self.log = RequestLog()
+        self.throttle = Throttle(Config.get("learn_rate"), Config.get("learn_backoff"))
+        self.cleaner = Cleaner()
+        self.fetcher = None  # the plugin's page fetcher, once the plugin is known to be there
+        self.topic, self.known, self.tried, self.seen, self.docs = "", None, [], set(), {}
+        self.searches, self.fallbacks, self.saw_429, self.incomplete = 0, 0, False, False
+        self.pages = Counter()
+
+    def learn(self, topic, deep=False):
+        """The topic learned and saved (its entry); a topic researched before is researched again when deep,
+        else kept as it is."""
+        known = Library.read(Library.slug(topic))
+        if (known or {}).get("kind") == "research":
+            return Researcher(self.learner).research(topic) if deep else known
+        self.learner.start()
+        self.topic, self.known = topic, known or Library.read(Library.language(topic) or "")
+        print(f"\nLearning about {topic}")
+        self.preflight()
+        plan, pages = self.plan_and_pages()
+        if plan["kind"] == "domain" and deep:
+            print("  it is a domain: researching it, its sources cross-checked")
+            return Researcher(self.learner).research(topic)
+        machine = self.learner.look_at_machine(list(dict.fromkeys(
+            plan["commands"] + [tool["command"] for tool in plan["tools"] if tool["command"]])))  # each command once
+        version = version_of(machine, plan["commands"]) or plan["version"]
+        pages = self.enough_pages(pages + self.documentation(plan, machine, version))
+        return self.learned(plan, version, machine, pages)
+
+    def preflight(self):
+        """The Internet plugin and an embedding model are there, before anything goes online."""
+        if self.internet is None or not self.internet.available():
+            self.stop("preflight", "plugin", self.internet.why() if self.internet else "")
+        if self.embeddings is None:
+            self.stop("preflight", "embeddings")
+        self.fetcher = self.internet.page_fetcher(self.log)
+
+    def plan_and_pages(self):
+        """(the plan, the pages read for it): the plan saved with the topic, with no search; else search 1 and
+        its gates, then the model's plan."""
+        saved = self.saved_plan()
+        if saved:
+            return saved, []
+        pages, results = self.usable_pages(self.first_search())
+        return self.asked_plan(results), pages
+
+    def saved_plan(self):
+        saved = (self.known or {}).get("plan")
+        if not saved:
+            return None
+        try:
+            plan = read_plan(saved)
+        except ValueError as exc:
+            print(f"  its saved plan is not usable ({exc}); planning it again")
+            return None
+        print("  the plan kept for it")
+        return plan
+
+    def first_search(self):
+        """SEARCH 1, then GATE 1: the results about the topic, or the run stops."""
+        try:
+            results = self.search(FIRST_SEARCH.format(topic=self.topic))
+        except SearchFailed as failed:
+            self.stop("gate 1", failed.cause, failed.detail)
+        picked = self.picked(self.topic, results)
+        if not picked:
+            self.stop("gate 1", "irrelevant", f"{len(results)} result(s), none above learn_cutoff")
+        return picked
+
+    def search(self, query):
+        """The results of one throttled search, or SearchFailed with the cause."""
+        self.searches += 1
+        self.tried.append(f'search "{query}"')
+        try:
+            found = self.throttle.call(lambda: self.timed("search", query, lambda: self.internet.search(query, LEARN_RESULTS)),
+                                       lambda: self.internet.rate_limited(query))
+        except RateLimited:
+            raise SearchFailed("rate-limit", f"still after {Config.get('learn_backoff')}s of backoff")
+        if found is None:
+            cause = "rate-limit" if self.saw_429 else "error" if self.internet.available() else "plugin"
+            raise SearchFailed(cause, first_line(self.internet.why(query), 160))
+        if not found:
+            raise SearchFailed("no-results")
+        return found
+
+    def timed(self, kind, target, request):
+        """request()'s result, logged with how long it took and whether it was rate limited."""
+        started = time.monotonic()
+        result = request()
+        limited = self.internet.rate_limited(target)
+        self.saw_429 |= limited
+        self.log(kind, "ok" if result is not None else "429" if limited else "failed", time.monotonic() - started, target)
+        return result
+
+    def picked(self, topic, results):
+        """PICK, with no model: the results about the topic by the words of their title and snippet (BM25 above
+        learn_cutoff), in the order the search ranked them, each address once (none fetched before), at most
+        learn_pages."""
+        scores = Retriever(None).word_scores(topic, [f"{r['title']} {r['content']}" for r in results])
+        picked, cutoff, most = [], float(Config.get("learn_cutoff")), int(Config.get("learn_pages"))
+        for result, score in zip(results, scores):
+            key = address_key(result["url"])
+            if score > cutoff and key not in self.seen and len(picked) < most:
+                self.seen.add(key)
+                picked.append(result)
+        return picked
+
+    def usable_pages(self, picked, have=0):
+        """FETCH, then GATE 2: (the pages with usable text, their search results); the run stops when they and the
+        pages it has already (have) are fewer than learn_min_pages."""
+        pages, results = self.fetched(picked)
+        needed = int(Config.get("learn_min_pages"))
+        if len(pages) + have < needed:
+            self.stop("gate 2", "pages", f"{len(pages) + have} page(s) gave usable text; {needed} needed")
+        return pages, results
+
+    def fetched(self, picked):
+        """(the pages with usable text, their results): fetched by the plugin's fetcher; a page that gives too
+        little text (one its scripts draw) is fetched by the plugin instead, at most fetch_fallbacks per learn.
+        Snippets never count as pages."""
+        got = self.fetcher.fetch_all([result["url"] for result in picked])
+        pages = [self.fallen_back(page) if not page.usable() and self.may_fall_back(fetched) else page
+                 for page, fetched in ((self.page_of(fetched), fetched) for fetched in got)]
+        usable = [(page, result) for page, result in zip(pages, picked) if page.usable()]
+        self.pages.update(searched=len(usable), failed=len(pages) - len(usable))
+        self.tried.append(f"fetched {len(picked)} page(s), {len(usable)} with usable text")
+        return [page for page, _ in usable], [result for _, result in usable]
+
+    @staticmethod
+    def page_of(fetched):
+        if not fetched.ok:
+            print(f"  {fetched.url}: {fetched.error}")
+            return Page(fetched.url, now_text(), [])
+        return Cleaner.page(fetched.final_url or fetched.url, fetched.text, fetched.kind, now_text())
+
+    def may_fall_back(self, fetched):
+        return not fetched.refused and self.fallbacks < int(Config.get("fetch_fallbacks"))
+
+    def fallen_back(self, page):
+        """The page as the web plugin fetches it (logged as a fallback), or as it was when that fails too."""
+        self.fallbacks += 1
+        print(f"  {page.url}: too little text; fetching it through the web plugin "
+              f"({self.fallbacks} of {Config.get('fetch_fallbacks')})")
+        try:
+            got = self.throttle.call(lambda: self.timed("fallback", page.url, lambda: self.internet.fetch(page.url)),
+                                     lambda: self.internet.rate_limited(page.url))
+        except RateLimited:
+            got = None
+        return Page(page.url, now_text(), text_blocks(got["content"])) if got else page
+
+    def asked_plan(self, results):
+        """The model's plan (the first model call), from the topic and the titles and snippets of the pages fetched."""
+        plan = self.model.ask_until_usable(Prompts.SLOT_PLAN_SYSTEM, self.plan_parts(results), "Plan learning",
+                                           lambda reply: read_plan(reply.json()), attempts=2)
+        if plan is None:
+            raise SystemExit(f"{self.model.name} gave no usable plan for learning {self.topic}. Nothing was saved.")
+        print(f"  {plan['name']} ({plan['kind']}): {plan['summary']}")
+        self.learner.show_dropped(plan)
+        return plan
+
+    def plan_parts(self, results):
+        found = "\n".join(f"- {r['title']} ({r['url']}): {first_line(r['content'], 200)}" for r in results)
+        slots = lambda profile: "\n".join(f"- {slot.id}: {fill(slot.question, {'name': self.topic}, '')}"
+                                          for slot in web_slots(profile))
+        return [Part("Topic", self.topic, True), Part("Today", datetime.date.today().isoformat(), True),
+                Part("Pages found", found, True), Part("Slots of a language", slots("language"), True),
+                Part("Slots of a tool", slots("tool"), True)]
+
+    def documentation(self, plan, machine, version):
+        """DOCS: the pages of the topic's documentation its slots want and, for a language, of each tool's (how to
+        run and set it up), each for the version installed: kept from before, else read from the site."""
+        site = DocSite(self.fetcher)
+        pages = self.doc_pages(site, self.slug(plan), plan["docs"], version,
+                               [slot.docs for slot in web_slots(plan["profile"])], int(Config.get("docs_pages")))
+        for tool in {tool["docs"].get("root") or tool["name"]: tool for tool in plan["tools"]}.values():
+            pages += self.doc_pages(site, Library.slug(tool["name"]), tool["docs"],
+                                    version_of(machine, [tool["command"]]), [TOOL_DOCS],
+                                    int(Config.get("tool_docs_pages")))
+        return pages
+
+    def doc_pages(self, site, slug, docs, version, wanted, cap):
+        if not (docs.get("root") or docs.get("versioned")) or cap <= 0:
+            return []
+        pages, key, kept = site.pages(slug, docs, version, wanted, cap)
+        self.docs[slug] = key or "not reachable"
+        self.pages.update(**{"kept docs" if kept else "docs": len(pages)})
+        where = "the copy kept" if kept else docs.get("versioned") or docs.get("root")
+        print(f"  docs of {slug} ({key or 'not reachable'}): {len(pages)} page(s) from {where}")
+        return pages
+
+    def enough_pages(self, pages):
+        """GATE 2 for a learn whose plan was saved: the documentation's usable pages, and when they are fewer than
+        learn_min_pages, search 1's too; the run stops when there are still too few (before any model call)."""
+        usable = [page for page in pages if page.usable()]
+        if self.searches or len(usable) >= int(Config.get("learn_min_pages")):
+            return usable
+        print("  the documentation gave too little: searching the web")
+        return usable + self.usable_pages(self.first_search(), have=len(usable))[0]
+
+    def learned(self, plan, version, machine, pages):
+        """CLEAN, SELECT, DIGEST, FOLLOW-UP, CONDENSE and KEEP: the entry kept."""
+        selector = Selector(self.embeddings, self.digest_room(plan, version))
+        pool = self.cleaner.pool(pages)
+        try:
+            facts = self.digested(plan, version, self.selected(selector, plan, version, pool))
+            facts += self.followed_up(plan, version, pool, selector, facts)
+            rules = self.learner.condense(plan, facts, think=self.think()) if facts else []
+        except (OllamaError, PromptTooLarge) as exc:
+            raise SystemExit(f"Learning {self.topic} stopped: the model failed ({first_line(str(exc), 160)}). "
+                             f"Nothing was saved.")
+        if not facts:
+            raise SystemExit(f"Nothing learned about {self.topic}: no passage answered a slot. Nothing was saved.")
+        entry = self.kept(plan, machine, facts, rules, pool)
+        self.summary(entry, plan["profile"])
+        return entry
+
+    def digest_room(self, plan, version):
+        """The chars a slot's passages may take in its digest prompt: what the topic and the longest question leave."""
+        longest = max(Part("Question", slot.asked(plan, version), True).size() for slot in web_slots(plan["profile"]))
+        topic = Part("Topic", f"{plan['name']} {version}", True).size()
+        return self.model.limit_chars(Prompts.DIGEST_SYSTEM) - longest - topic - Part("Passages", "", True).size()
+
+    def selected(self, selector, plan, version, pool, slots=None):
+        """SELECT: each slot's passages from the one pool; a slot below its minimum is reported."""
+        selected = selector.select(slots or web_slots(plan["profile"]), pool, plan, version)
+        for slot in short_slots(plan["profile"], selected):
+            if slot.id in selected:
+                print(f"  slot {slot.id}: {len(selected[slot.id])} passage(s), fewer than its {slot.minimum}")
+        return selected
+
+    def digested(self, plan, version, selected):
+        """DIGEST: each slot's passages read for the facts that answer its question (one call per slot that has
+        passages), each fact citing its passages."""
+        facts = []
+        for slot in web_slots(plan["profile"]):
+            if selected.get(slot.id):
+                facts += self.slot_facts(slot, plan, version, selected[slot.id])
+        return facts
+
+    def slot_facts(self, slot, plan, version, passages):
+        """One slot's facts; one stated twice is kept once."""
+        parts = [Part("Topic", f"{plan['name']} {version}".strip(), True), Part("Question", slot.asked(plan, version), True),
+                 Part("Passages", "\n\n".join(passage.listing() for passage in passages), True, exact=True)]
+        found = self.model.ask_until_usable(Prompts.DIGEST_SYSTEM, parts, f"Digest {slot.id}",
+                                            lambda reply: read_digest(reply.json(), slot, passages), attempts=2,
+                                            think=self.think()) or []
+        print(f"  {slot.id}: {len(found)} fact(s) from {len(passages)} passage(s)")
+        return Learner.add_facts([], found)
+
+    @staticmethod
+    def think():
+        return Config.get("learn_think")
+
+    def followed_up(self, plan, version, pool, selector, facts):
+        """FOLLOW-UP: each slot left without facts, while searches are left (learn_searches), gets the plan's
+        follow-up search; its pages join the pool, and that slot alone is selected and digested again. A search
+        that fails is no reason to stop: the library is then incomplete. The new facts."""
+        found = []
+        answered = {fact["slot"] for fact in facts}
+        for slot in [slot for slot in web_slots(plan["profile"]) if slot.id not in answered]:
+            if self.searches >= int(Config.get("learn_searches")):
+                break
+            pages = self.extra_pages(slot.search(plan, version), plan)
+            if pages:
+                pool += self.cleaner.pool(pages, known=pool)
+                passages = self.selected(selector, plan, version, pool, [slot])[slot.id]
+                found += self.slot_facts(slot, plan, version, passages) if passages else []
+        return found
+
+    def extra_pages(self, query, plan):
+        """The usable pages one more search gives; [] when it fails, which marks the library incomplete."""
+        print(f"  searching once more: {query}")
+        try:
+            picked = self.picked(plan["name"], self.search(query))
+        except SearchFailed as failed:
+            return self.extra_failed(query, CAUSES[failed.cause][0])
+        pages = self.fetched(picked)[0] if picked else []
+        return pages or self.extra_failed(query, "no result about the topic gave usable text")
+
+    def extra_failed(self, query, why):
+        self.incomplete = True
+        self.learner.notes.append(f'the extra search "{query}" failed: {why}; learned from the pages found before')
+        print(f"  warning: {self.learner.notes[-1]}")
+        return []
+
+    def slug(self, plan):
+        return language_key(plan["language"]) if plan["kind"] == "language" else Library.slug(self.topic)
+
+    def kept(self, plan, machine, facts, rules, pool):
+        """KEEP: the entry saved under the language's key or the topic's slug, with what readiness found missing;
+        a language's earlier proven copies retired; indexed for recall."""
+        slug, language = self.slug(plan), plan["kind"] == "language"
+        gaps = missing(plan["profile"], facts, machine)
+        cited = {passage_id for fact in facts for passage_id in fact["passages"]}
+        used = [passage for passage in pool if passage.id in cited]
+        entry = {"topic": self.topic, "kind": plan["profile"], "name": plan["name"], "summary": plan["summary"],
+                 "language": plan["language"] if language else "", "version": plan["version"],
+                 "tools": [{"role": tool["role"], "name": tool["name"]} for tool in plan["tools"]],
+                 "commands": plan["commands"], "plan": {k: v for k, v in plan.items() if k != "dropped"},
+                 "learned": now_text(), "model": self.model.name, "machine": machine, "facts": facts, "rules": rules,
+                 "sources": list(dict.fromkeys(passage.url for passage in used)), "docs": self.docs,
+                 "passages": [{"id": p.id, "url": p.url, "fetched": p.fetched, "heading": p.heading} for p in used],
+                 "status": "incomplete" if gaps or self.incomplete else "complete", "missing": gaps,
+                 "requests": self.log.counts(), "notes": self.learner.notes}
+        Library.save(slug, entry)
+        print(f"  learned {len(facts)} fact(s) about {plan['name']} from {len(entry['sources'])} page(s); kept as "
+              f"{slug}" + (" (incomplete)" if entry["status"] == "incomplete" else ""))
+        if language:
+            self.learner.replace_proven(slug, entry)
+        self.learner.index(slug, entry)
+        return entry
+
+    def summary(self, entry, profile):
+        """READINESS and the run in a few lines: the slots filled and missing, the documentation, the pages, the
+        facts, the requests."""
+        filled = [slot.id for slot in PROFILES[profile] if slot.source != "check" and slot.id not in entry["missing"]]
+        pages = ", ".join(f"{count} {kind}" for kind, count in self.pages.items() if count) or "none"
+        print("  summary:")
+        print(f"    slots filled: {', '.join(filled) or 'none'}")
+        print(f"    slots missing: {', '.join(entry['missing']) or 'none'}")
+        print(f"    documentation: {', '.join(f'{slug} {key}' for slug, key in self.docs.items()) or 'none'}")
+        print(f"    pages: {pages}")
+        print(f"    facts kept: {len(entry['facts'])}")
+        print(f"    requests: {self.log.text()}")
+        print("    stopped by: no gate")
+
+    def stop(self, gate, cause, detail=""):
+        """The run stops here, before any model call: LearnStopped, with why and what to do next."""
+        what, next_step = CAUSES[cause]
+        before = (f"what was learned about it before ({self.known.get('learned', '?')}) is untouched" if self.known
+                  else "there was no library for it before")
+        raise LearnStopped("\n".join([
+            f"Learning {self.topic} stopped at {gate}: {what}" + (f" ({detail})" if detail else "") + ".",
+            f"  tried: {'; '.join(self.tried) or 'nothing yet'}",
+            f"  requests: {self.log.text()}",
+            f"  Nothing was learned or saved; {before}.",
+            f"  Next: {next_step}"]))
+
+
+def version_of(machine, commands):
+    """The version the first of these commands that worked showed ("" when none did)."""
+    return next((m["version"] for m in machine if m["command"] in commands and m["found"] and m["version"]), "")
+
+
+def read_plan(data):
+    """A slot plan, checked: its kind (language, tool or domain) and profile, a name, its version and summary,
+    the language (a language's own; a tool's goes in used_with), its documentation site, up to MAX_COMMANDS
+    commands that only show what is installed (any other is "dropped"), a language's tools (one per role of
+    TOOL_ROLES, each with its version command and documentation), and the hints and follow-up searches of its
+    profile's slots."""
+    if not isinstance(data, dict):
+        raise ValueError("not a JSON object")
+    kind, name = clean(data.get("kind"), 20).lower(), clean(data.get("name"), 80)
+    if kind not in ("language", "tool", "domain"):
+        raise ValueError('"kind" must be "language", "tool" or "domain"')
+    if not name:
+        raise ValueError("it needs the topic's name")
+    profile = "language" if kind == "language" else "tool"
+    ids = {slot.id for slot in web_slots(profile)}
+    language = clean(data.get("language"), 40)
+    commands, dropped = Learner.safe_commands(data.get("commands") or [])
+    tools, tool_dropped = read_tools(data.get("tools")) if kind == "language" else ([], [])
+    return {"kind": kind, "profile": profile, "name": name, "version": clean(data.get("version"), 20),
+            "summary": clean(data.get("summary"), 200) or name,
+            "language": (language or name) if kind == "language" else "",
+            "used_with": "" if kind == "language" else language or clean(data.get("used_with"), 40),
+            "docs": read_docs(data.get("docs")), "commands": commands[:MAX_COMMANDS], "dropped": dropped + tool_dropped,
+            "tools": tools, "hints": by_slot(data.get("hints"), ids), "followups": by_slot(data.get("followups"), ids)}
+
+
+def read_tools(given):
+    """([one tool per role of TOOL_ROLES, as {role, name, command, docs}], [its commands that were not safe])."""
+    tools, dropped = {}, []
+    for tool in given if isinstance(given, list) else []:
+        if isinstance(tool, dict):
+            role, name = clean(tool.get("role"), 20).lower(), clean(tool.get("name"), 40)
+            if role in TOOL_ROLES and name and role not in tools:
+                kept, unsafe = Learner.safe_commands([tool.get("command") or ""])
+                dropped += unsafe
+                tools[role] = {"role": role, "name": name, "command": (kept or [""])[0], "docs": read_docs(tool.get("docs"))}
+    return list(tools.values()), dropped
+
+
+def read_docs(given):
+    """A documentation site as {root, versioned}: web addresses only; versioned only with {version} in it."""
+    given = given if isinstance(given, dict) else {}
+    root, versioned = clean(given.get("root"), 300), clean(given.get("versioned"), 300)
+    return {"root": root if is_web_address(root) else "",
+            "versioned": versioned if is_web_address(versioned) and "{version}" in versioned else ""}
+
+
+def by_slot(given, ids):
+    """{slot id: text} for the profile's slots only."""
+    return {key: clean(text, 160) for key, text in (given.items() if isinstance(given, dict) else [])
+            if key in ids and clean(text, 160)}
+
+
+def read_digest(data, slot, passages):
+    """A slot's facts, checked: each with its text (cut to FACT_CHARS), a known phase (else the slot's section)
+    and the passages it cites among those given; a fact that cites none, or speaks of an unreleased version, is
+    dropped. At most FACTS_PER_SLOT. Each keeps its slot, the passages it cites and their pages (source, also)."""
+    by_id = {passage.id: passage for passage in passages}
+    facts = []
+    for item in (data.get("facts") or []) if isinstance(data, dict) else []:
+        if not isinstance(item, dict):
+            continue
+        text, phase = clean(item.get("text"), FACT_CHARS), clean(item.get("phase"), 20).lower()
+        cited = list(dict.fromkeys(str(c).strip("[] ") for c in item.get("cites") or []))
+        cited = [passage_id for passage_id in cited if passage_id in by_id]
+        if not text or not cited or Learner.UNRELEASED.search(text):
+            continue
+        pages = list(dict.fromkeys(by_id[passage_id].url for passage_id in cited))
+        facts.append({"phase": phase if phase in FACT_PHASES else slot.section, "text": text, "slot": slot.id,
+                      "passages": cited, "source": pages[0], **({"also": pages[1:]} if pages[1:] else {})})
+    return facts[:FACTS_PER_SLOT]
+
+
+def clean(value, limit):
+    return " ".join(str(value or "").split())[:limit]
+
+
+def address_key(url):
+    """An address as one page: without its #fragment and a trailing slash."""
+    parts = urllib.parse.urlsplit(url)
+    return urllib.parse.urlunsplit((parts.scheme, parts.netloc.lower(), parts.path.rstrip("/"), parts.query, ""))
+
+
+class Throttle:
+    """At most rate requests a minute: a token bucket, full at the start, so a learn's few requests go at once and
+    a burst waits its turn. HTTP 429 is waited out with growing pauses (BACKOFF_FIRST, doubled) for at most backoff
+    seconds from the first one; past that, RateLimited, so a learn that cannot go on stops quickly."""
+
+    def __init__(self, rate, backoff, clock=None, sleep=None):
+        self.rate, self.backoff = float(rate), float(backoff)
+        self.clock, self.sleep = clock or time.monotonic, sleep or time.sleep
+        self.tokens, self.filled = self.rate, self.clock()
+
+    def call(self, request, limited):
+        """request()'s result, asked again while limited() says it was rate limited, within the budget."""
+        deadline, pause = None, BACKOFF_FIRST
+        while True:
+            self.take()
+            result = request()
+            if not limited():
+                return result
+            now = self.clock()
+            deadline = now + self.backoff if deadline is None else deadline
+            if now >= deadline:
+                raise RateLimited()
+            self.sleep(min(pause, deadline - now))
+            pause *= 2
+
+    def take(self):
+        """One token, waiting for it when the bucket is empty."""
+        self.refill()
+        if self.tokens < 1:
+            self.sleep((1 - self.tokens) * 60 / self.rate)
+            self.refill()
+        self.tokens -= 1
+
+    def refill(self):
+        now = self.clock()
+        self.tokens = min(self.rate, self.tokens + (now - self.filled) * self.rate / 60)
+        self.filled = now
+
+
+class RequestLog:
+    """Every web request a learn makes: one JSON line in the home's web log (when, kind, result, seconds, address),
+    so the endpoint that hits a rate limit shows; and counted by kind (search, fetch, robots, fallback) for the
+    summary."""
+
+    def __init__(self):
+        self.path, self.tally, self.lock = Home.web_log(), {}, threading.Lock()
+
+    def __call__(self, kind, result, seconds, target):
+        line = json.dumps({"at": time.strftime("%Y-%m-%dT%H:%M:%S"), "kind": kind, "result": result,
+                           "seconds": round(seconds, 3), "target": target})
+        with self.lock:
+            counts = self.tally.setdefault(kind, Counter())
+            counts.update(requests=1, **{result: 1})
+            with self.path.open("a", encoding="utf-8") as log:
+                log.write(line + "\n")
+
+    def counts(self):
+        """{kind: {requests, ok, failed, 429}}."""
+        return {kind: dict(counts) for kind, counts in self.tally.items()}
+
+    def text(self):
+        """"search 1, fetch 8 (2 failed), fallback 1; HTTP 429: 0", or "none"."""
+        if not self.tally:
+            return "none"
+        shown = [f"{kind} {c['requests']}" + (f" ({c['failed']} failed)" if c["failed"] else "")
+                 for kind, c in self.tally.items()]
+        return ", ".join(shown) + f"; HTTP 429: {sum(c['429'] for c in self.tally.values())}"
