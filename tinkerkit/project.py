@@ -9,6 +9,7 @@ lazy import shutil
 lazy import time
 lazy from pathlib import Path
 
+lazy from .model import plainly
 lazy from .prompts import Part, Prompts, Reply
 lazy from .settings import (
     FIX_PHASES, Home, PHASES, PROJECT_DB, RUNS_KEPT, STATE_DIR, STATUS_TEXT, Store, confirmed, first_line, now_text, split_text,
@@ -547,7 +548,18 @@ class Tracker:
              "docs": ("📖 Writing the README", "📖 README written"),
              "final_review": ("🏁 Final review, as a person runs it", "🏁 Final review done"),
              "lessons": ("📒 Keeping lessons for the next projects", "📒 Lessons kept"),
-             "reproduce": ("🐞 Showing the bug with a test", "🐞 Bug shown by a test")}
+             "reproduce": ("🐞 Showing the bug with a test", "🐞 Bug shown by a test"),
+             # tinker learn's
+             "search": ("🔎 Searching the web", "🔎 Web searched"),
+             "plan": ("🤔 Working out what it is", "🤔 Worked out what it is"),
+             "machine": ("💻 Checking what is installed", "💻 Checked what is installed"),
+             "documentation": ("📖 Reading its documentation", "📖 Documentation read"),
+             "digest": ("🧠 Reading the passages for answers", "🧠 Passages read"),
+             "follow-up": ("🔁 Searching for what is still missing", "🔁 Searched for what was missing"),
+             "condense": ("✍️ Turning the facts into rules", "✍️ Rules written"),
+             "frame": ("📝 Framing the research questions", "📝 Questions framed"),
+             "investigate": ("🔬 Reading and cross-checking sources", "🔬 Sources cross-checked"),
+             "keep": ("💾 Saving what was learned", "💾 Saved")}
     STARTING = "🚀 Starting: the model loads"
     ANSI_RE = re.compile(r"\x1b\[[0-9;]*[A-Za-z]")
     QUIET_EVERY = 1.0  # seconds between publishing changes that only move the latest line on
@@ -579,6 +591,10 @@ class Tracker:
         """What the model writes now (a reply as it goes)."""
         self.change("live", quiet=True,
                     live=f"{label.split(' [')[0]}: {written} tok written, {thinking} tok thinking, {seconds:.0f}s")
+
+    def live_plainly(self, label, written, thinking, seconds):
+        """What the model is doing now, in plain words (tinker learn's)."""
+        self.change("live", quiet=True, live=plainly(written, thinking, seconds))
 
     def printed(self, line):
         """A line the run printed: kept in the project's output log, and shown as the latest."""

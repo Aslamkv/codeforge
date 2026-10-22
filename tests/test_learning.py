@@ -11,6 +11,7 @@ from tinkerkit.fetcher import Fetched
 from tinkerkit.knowledge import Knowledge, Library
 from tinkerkit.learning import LearnStopped, RateLimited, RequestLog, SlotLearner, Throttle, read_digest, read_plan
 from tinkerkit.passages import Passage
+from tinkerkit.project import Tracker
 from tinkerkit.prompts import Reply
 from tinkerkit.settings import FACTS_PER_SLOT, SLOT_CANDIDATES, Config, Home
 from tinkerkit.slots import PROFILES, Selector, missing, short_slots, web_slots
@@ -347,7 +348,7 @@ def test_a_learn_the_web_cannot_feed_stops_before_any_model_call(cause, tinker_h
     message = str(stopped.value)
     assert isinstance(stopped.value, SystemExit) and stopped.value.code  # tinker learn ends non-zero
     assert warning in message and "Nothing was learned or saved" in message and "Next: " in message
-    assert "requests: " in message and "tried: " in message
+    assert "Web requests: " in message and "Tried: " in message
     assert model.calls == [] and embeddings.calls == 0
     assert all(Home.store().items(part) == {} for part in ("learned", "embeddings", "languages", "memory"))
     assert sum(clock.slept) <= 20
@@ -390,8 +391,30 @@ def test_a_tool_is_learned_from_its_versions_documentation_and_one_search(tinker
     saved = Library.read("widgetlib")
     assert saved["plan"]["docs"]["versioned"] and all(f["status"] == "candidate" for f in saved["facts"])
     out = capsys.readouterr().out
-    assert "documentation: widgetlib 2.1" in out and "requests: search 1" in out and "stopped by: no gate" in out
-    assert "pages: 3 searched" in out and f"facts kept: {len(entry['facts'])}" in out
+    assert "Documentation: widgetlib 2.1" in out and "Web requests: search 1" in out
+    assert "Pages: 3 searched" in out and f"Facts kept: {len(entry['facts'])}" in out
+
+
+@pytest.mark.spec("LRN-18")
+def test_learning_moves_its_tracker_through_its_steps_and_keeps_its_summary(tinker_home):
+    tracker = Tracker("Learning Widgetlib")
+    slot_learner = SlotLearner(tool_model(), FakeWeb([RESULTS], {**PAGES, **DOC_PAGES}, FALLBACK), CountingEmbeddings(),
+                               tracker)
+    entry = slot_learner.learn("Widgetlib")
+    done = [Tracker.STEPS[phase][1] for phase in ("search", "plan", "machine", "documentation", "digest")]
+    assert tracker.state["steps"][:5] == done and tracker.state["step"] == "keep"
+    assert len(tracker.state["steps"]) == len(set(tracker.state["steps"]))  # each step once in a row
+    recap = dict(slot_learner.recap)
+    assert list(recap) == ["Answered", "Still open", "Documentation", "Pages", "Facts kept", "Web requests"]
+    assert recap["Facts kept"] == str(len(entry["facts"])) and recap["Documentation"] == "widgetlib 2.1"
+
+
+@pytest.mark.spec("LRN-18")
+def test_a_stopped_learn_says_why_and_what_next_as_data(tinker_home):
+    with pytest.raises(LearnStopped) as stopped:
+        learner(FakeWeb([RESULTS], PAGES, FALLBACK), embeddings=None).learn("Widgetlib")
+    why, next_step = stopped.value.details
+    assert why == ("Why", "stopped before starting: no embedding model is selected") and next_step[0] == "Next"
 
 
 @pytest.mark.spec("LRN-11", "LRN-17")
@@ -468,7 +491,7 @@ def test_a_failed_follow_up_keeps_the_run_alive_and_marks_it_incomplete(tinker_h
     model = tool_model()
     entry = learner(web, model).learn("Widgetlib")
     assert len(web.queries) >= 2 and entry["status"] == "incomplete" and Library.read("widgetlib")
-    assert any("the extra search" in note for note in entry["notes"]) and "warning: the extra search" in capsys.readouterr().out
+    assert any("the extra search" in note for note in entry["notes"]) and "⚠️  the extra search" in capsys.readouterr().out
     assert model.calls[-1] == "Condense the facts"
 
 

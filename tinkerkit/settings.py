@@ -500,16 +500,20 @@ class Console:
 
     @staticmethod
     def progress(text):
-        """Redraw one status line in place, on the terminal only (never kept in the run's output). Cut to
-        the terminal width (a wrapped line cannot be redrawn with \\r); written to a file, it is whole."""
-        width = shutil.get_terminal_size((80, 24)).columns if sys.__stdout__.isatty() else 1000
+        """Redraw one status line in place, on a terminal only (never kept in the run's output): piped, as
+        when a chat follows the command, it would reach the reader as lines of their own. Cut to the
+        terminal width (a wrapped line cannot be redrawn with \\r)."""
+        if not sys.__stdout__.isatty():
+            return
+        width = shutil.get_terminal_size((80, 24)).columns
         sys.__stdout__.write("\r" + text[:max(width - 1, 10)] + "\033[K")
         sys.__stdout__.flush()
 
     @staticmethod
     def clear_progress():
-        sys.__stdout__.write("\r\033[K")
-        sys.__stdout__.flush()
+        if sys.__stdout__.isatty():
+            sys.__stdout__.write("\r\033[K")
+            sys.__stdout__.flush()
 
 
 class Tee:

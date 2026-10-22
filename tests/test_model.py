@@ -311,6 +311,21 @@ def test_ask_once(make_model, fake_ollama, model_log):
     assert log[0]["reply"] == "the answer" and log[0]["label"].startswith("Ask [think high")
 
 
+@pytest.mark.spec("MOD-24")
+def test_a_quiet_model_logs_its_details_and_says_only_when_it_asks_again(model_log, fake_ollama, capsys):
+    fake_ollama.reply("not json").reply('{"ok": 1}')
+    model = Model(MODEL, MEASURED, 0, model_log, quiet=True)
+    assert model.ask_until_usable("s", [Part("Q", "q", True)], "Plan", lambda reply: reply.json()["ok"]) == 1
+    out = capsys.readouterr().out
+    assert out == "     🔁 That answer could not be used; asking again\n"
+    notes = [entry["note"] for _, entry in model_log.store.entries("calls") if "note" in entry]
+    assert any(note.startswith("Plan (attempt 1)") for note in notes) and any("not usable" in note for note in notes)
+    stream = Stream("Plan", None, quiet=True)
+    stream.thinking = 3
+    assert stream.plain_status(stream.started + 12) == "     ⏳ thinking… 12s"
+    assert stream.plain_status(stream.started + 101) == "     ⏳ thinking… 1m 41s (101s)"
+
+
 def cut(thinking="I was thinking about it"):
     return {"content": "", "thinking": thinking, "done_reason": "length", "eval_count": 4096}
 

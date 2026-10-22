@@ -312,6 +312,15 @@ class Learner:
         self.model_failed = ""  # why the model stopped answering while reading pages (then reading ends)
         self.notes = []  # what could not be learned, and why
         self.kept_earlier = False  # reading was cut short, so the topic as learned before was kept
+        self.tracker = None  # tinker learn's report (Tracker); a run's recall phase keeps its own steps
+
+    def step(self, phase, said=""):
+        """Learning is on to a phase (Tracker.STEPS): said here, when there is something to say, and its
+        tracker (when it has one) moved on, so the chats show it."""
+        if said:
+            print(f"  {said}")
+        if self.tracker is not None and self.tracker.state["step"] != phase:
+            self.tracker.phase(phase)
 
     def start(self):
         self.notes, self.model_failed, self.kept_earlier = [], "", False
@@ -322,10 +331,10 @@ class Learner:
         if known:
             try:
                 plan = read(known)
-                print(f"  the plan kept for it ({saved_as})")
+                print(f"  📋 Using the plan saved last time ({saved_as})")
                 return plan, True
             except ValueError as exc:
-                print(f"  its saved plan is not usable ({exc}); planning it again")
+                print(f"  ⚠️  The plan saved last time cannot be used ({exc}), so making a new one")
         plan = self.model.ask_until_usable(system, parts, label, lambda reply: read(reply.json()), attempts=2)
         if plan is None:
             raise SystemExit(f"{self.model.name} gave no usable plan for {what}; see the log of its replies "
@@ -348,8 +357,8 @@ class Learner:
 
     def show_dropped(self, plan):
         for command in plan["dropped"]:
-            print(f"  left out `{command}`: a command here must only show what is installed (one command, no shell "
-                  f"operators, nothing installed or changed)")
+            print(f"     🚫 Skipped `{command}`: Tinker only runs commands that show what is installed (one command, "
+                  f"no shell operators, nothing installed or changed)")
 
     @staticmethod
     def replace_proven(slug, entry):
@@ -357,11 +366,13 @@ class Learner:
         shown = {item["id"] for item in Library.items({slug: entry}) if item["id"]}
         gone = Knowledge(entry["language"]).supersede(slug, shown)
         if gone:
-            print(f"  {gone} fact(s) proven from its earlier learning replaced by what was learned now")
+            print(f"  ♻️  Replaced {gone} fact(s) from earlier learning with what was learned now")
 
     def look_at_machine(self, commands):
         """What each command shows (run in an empty folder): its first line and version number; a
         command that fails means that tool is not installed."""
+        if commands:
+            self.step("machine", "💻 Checking what is installed on this machine…")
         with tempfile.TemporaryDirectory(prefix="tinker-learn-") as folder:
             ws = Workspace(Path(folder))
             return [self.what_shows(ws, command) for command in commands]
@@ -373,7 +384,8 @@ class Learner:
         shown = {"command": command, "found": code == 0, "version": version.group(0) if version else "",
                  "output": (lines[0] if lines else "")[:160]}
         failed = "did not finish" if code is None else f"exit code {code}"
-        print(f"  $ {command}: " + (shown["output"][:100] if code == 0 else f"not installed ({failed})"))
+        print(f"     ✅ {command} → {shown['output'][:100]}" if code == 0
+              else f"     ❌ {command} → not installed ({failed})")
         return shown
 
     def read_web(self, name, searches, max_pages):
@@ -389,7 +401,7 @@ class Learner:
         found = self.internet.search(search["query"], SEARCH_RESULTS)
         if found is None:
             self.notes.append(f"search '{search['query']}': {self.internet.why(search['query'])}")
-            print(f"  {self.notes[-1]}")
+            print(f"     ⚠️  {self.notes[-1]}")
         return (found or [])[:search["pages"]]
 
     @staticmethod
@@ -425,7 +437,7 @@ class Learner:
         if not text.strip():
             why = f"{page['url']}: {self.internet.why(page['url'])}"
             self.notes.append(f"page {why}")
-            print(f"  page {number}: {why}")
+            print(f"     ❌ Could not read page {number}: {why}")
             return []
         source = Part("Page", f"{(got or {}).get('title') or page.get('title', '')}\n{page['url']}", True)
         focus = Part("Look for", page["focus"], True)
@@ -462,7 +474,7 @@ class Learner:
         except OllamaError as exc:
             self.model_failed = first_line(str(exc), 200)
             self.notes.append(f"the model stopped answering at page {number}; the pages after it were not read")
-            print(f"  {self.notes[-1]} ({self.model_failed})")
+            print(f"  ⚠️  {self.notes[-1]} ({self.model_failed})")
         return None
 
     @staticmethod
@@ -510,13 +522,14 @@ class Learner:
         think setting (None: the model's own)."""
         lessons = Knowledge(plan["language"]).proven_lessons() if plan.get("kind") == "language" else []
         sources = self.rule_sources(facts, lessons)
+        self.step("condense", f"✍️  Turning {len(facts)} fact(s) into rules a code writer can follow…")
         rules = self.model.ask_until_usable(Prompts.PLAYBOOK_SYSTEM, self.playbook_parts(plan, facts, lessons),
                                             "Condense the facts",
                                             lambda reply: self.read_rules(reply.json(), sources), attempts=2,
                                             think=think)
         if not rules:
             self.notes.append("the facts were not condensed into rules (no usable reply)")
-        print(f"  condensed into {len(rules)} rule(s)" if rules else "  not condensed: its facts are shown as they are")
+        print(f"     ✅ {len(rules)} rule(s)" if rules else "     ⚠️  Could not make rules: the facts are kept as they are")
         return rules or []
 
     @staticmethod
@@ -567,9 +580,9 @@ class Learner:
             return
         texts = [Library.searched(item) for item in Library.items({slug: entry})]
         if self.embeddings.vectors(texts) is None:
-            print(f"  not indexed now ({self.embeddings.failed}); the recall phase indexes it when it searches")
+            print(f"  ⚠️  Not indexed now ({self.embeddings.failed}); a run indexes it when it searches")
         else:
-            print(f"  indexed with {self.embeddings.name}")
+            print(f"  🔍 Indexed with {self.embeddings.name}, so a run can find it by meaning")
 
 
 class Researcher:
@@ -600,36 +613,39 @@ class Researcher:
         researched before is kept as it was when the web or the model is lost on the way."""
         learner, slug = self.learner, Library.slug(topic)
         learner.start()
-        print(f"\nResearching {topic}")
+        print(f"\n🔬 Researching {topic}")
         known = Library.read(slug)
         frame = self.frame(topic, known if (known or {}).get("kind") == "research" else None)
         facts, sources, analysis = self.investigate(frame)
         if known and (learner.cut_short() or not facts):
-            print(f"  {learner.cut_short() or 'no page gave facts'}; kept what was found before "
+            print(f"  ⚠️  {learner.cut_short() or 'No page gave facts'}; kept what was found before "
                   f"({known.get('learned', '?')})")
             learner.kept_earlier = True
             return known
         if not facts:
-            print(f"  nothing found about {topic}: " + ("; ".join(learner.notes) or "the pages stated nothing useful"))
+            print(f"  ❌ Nothing found about {topic}: " + ("; ".join(learner.notes) or "the pages stated nothing useful"))
             return None
         entry = self.entry(topic, frame, facts, sources, analysis)
+        learner.step("keep")
         Library.save(slug, entry)
-        print(f"  {len(entry['findings'])} finding(s) from {len(facts)} fact(s) on {len(sources)} page(s); kept as "
-              f"{slug}")
+        print(f"  💾 Saved {len(entry['findings'])} finding(s) from {len(facts)} fact(s) on {len(sources)} page(s) "
+              f"as {slug}")
         learner.index(slug, entry)
         return entry
 
     def frame(self, topic, known):
         """The topic's name, summary and research questions (each with its searches): as saved for
         it, else from the model."""
+        self.learner.step("frame")
         parts = [Part("Topic", topic, True), Part("Today", datetime.date.today().isoformat(), True)]
         frame, saved = self.learner.saved_or_asked(known, self.read_frame, Prompts.RESEARCH_PLAN_SYSTEM, parts,
                                                    "Frame the research", f"researching {topic}",
                                                    Library.slug(topic))
         if not saved:
-            print(f"  {frame['name']}: {frame['summary']}")
+            print(f"  🧭 {frame['name']}: {frame['summary']}")
+        print("  📝 Questions to answer:")
         for number, question in enumerate(frame["questions"], 1):
-            print(f"  Q{number}. {question['question']}")
+            print(f"     Q{number}. {question['question']}")
         return frame
 
     @staticmethod
@@ -661,7 +677,8 @@ class Researcher:
         for round_number, pages in enumerate(RESEARCH_PAGES, 1):
             if not searches:
                 break
-            print(f"  round {round_number}: {len(searches)} search(es), up to {pages} page(s)")
+            self.learner.step("investigate",
+                              f"🔎 Round {round_number}: {len(searches)} search(es), reading up to {pages} page(s)…")
             found, read = self.learner.read_web(frame["name"], searches, pages)
             self.learner.add_facts(facts, found)
             sources += [url for url in read if url not in sources]
@@ -681,7 +698,7 @@ class Researcher:
         vectors = self.learner.embeddings.vectors([fact["text"] for fact in facts], keep=False) \
             if self.learner.embeddings else None
         if vectors is None:
-            print("  cross-checking by repeats only: the embedding model gave no embeddings")
+            print("  ⚠️  Cross-checking by repeats only: the embedding model gave no embeddings")
             vectors = [None] * len(facts)
         else:
             self.fold_repeats(facts, vectors)
@@ -761,7 +778,7 @@ class Researcher:
                                                                                 len(frame["questions"])), attempts=2)
         except (PromptTooLarge, OllamaError) as exc:
             self.learner.notes.append(f"the findings could not be analysed ({first_line(str(exc), 160)})")
-            print(f"  {self.learner.notes[-1]}")
+            print(f"  ⚠️  {self.learner.notes[-1]}")
             return None
 
     @staticmethod

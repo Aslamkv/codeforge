@@ -71,7 +71,7 @@ class FakeOllama:
         return self
 
     def chat(self, name, messages, keep_alive, options, think=None, label=None, done_when=None, timeout=None,
-             watch=None):
+             watch=None, quiet=False):
         if not messages:  # an unload
             self.unloaded.append(name)
             return {"message": {"content": "", "thinking": ""}}
