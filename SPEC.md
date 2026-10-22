@@ -762,8 +762,10 @@ on this machine and on the web, the model weighs that evidence alone, and only t
   choice). A preference is only what the person marks with the word prefer: a teaching without it (`marked`) has
   facts alone, whatever the model says. It keeps at most `TEACH_COMMANDS` commands and `TEACH_SEARCHES` searches, and the changes: each rests on the
   claims it names and retires items shown, replaces toolchain commands of `TOOLCHAIN_KEYS` or keeps a lesson with
-  a known phase (any other is dropped). A plan with no claim, facts that nothing checks, no change, or a
-  toolchain key in two changes is a `ValueError`.
+  a known phase (any other is dropped). Setup given as one line is split at `&&` into its commands; any other
+  command given as a list is joined with `&&`. A plan with no claim, facts that nothing checks, no change, a
+  toolchain key in two changes, or a toolchain key or value it cannot use is a `ValueError` (the model is asked
+  again with why).
 - **TCH-4** `Teacher.teach` checks the facts first. It runs only the commands that show what is installed (each
   other one is skipped, and said; a tool not found here may be in a project's own environment), and reads the
   pages the searches find. A preference is honored, never checked: with only preferences, nothing is run or

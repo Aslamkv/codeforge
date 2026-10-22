@@ -301,18 +301,32 @@ def numbers(given, highest):
 
 
 def read_toolchain(given):
-    """{key: command} of TOOLCHAIN_KEYS (setup: a list of commands), the empty ones left out."""
-    given, found = given if isinstance(given, dict) else {}, {}
+    """{key: command} of TOOLCHAIN_KEYS (setup: a list of commands), the empty ones left out. ValueError for any other
+    key or form, so the model is asked again with why rather than a part of its change dropped unsaid."""
+    if not given:
+        return {}
+    if not isinstance(given, dict):
+        raise ValueError("toolchain must be an object of key: command")
+    found = {}
     for key, value in given.items():
-        if key == "setup" and isinstance(value, list):
-            value = [str(command).strip() for command in value if str(command).strip()]
-        elif key in TOOLCHAIN_KEYS and key != "setup" and isinstance(value, str):
-            value = value.strip()
-        else:
-            continue
-        if value:
-            found[key] = value
+        if key not in TOOLCHAIN_KEYS:
+            raise ValueError(f"toolchain {key} cannot be changed (only {', '.join(TOOLCHAIN_KEYS)})")
+        commands = command_list(key, value)
+        if commands:
+            found[key] = commands if key == "setup" else " && ".join(commands)
     return found
+
+
+def command_list(key, value):
+    """The commands a toolchain value gives: a list as it is; setup's line split at && (it is a list of commands);
+    any other line whole. ValueError when it is neither text nor a list."""
+    if isinstance(value, list):
+        commands = value
+    elif isinstance(value, str):
+        commands = value.split("&&") if key == "setup" else [value]
+    else:
+        raise ValueError(f"toolchain {key} must be a command written as text")
+    return [str(command).strip() for command in commands if str(command).strip()]
 
 
 def read_lesson(given):

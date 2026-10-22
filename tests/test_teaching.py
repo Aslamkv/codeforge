@@ -122,8 +122,8 @@ def test_read_plan_keeps_what_is_usable_within_limits():
     plan = read_plan({"claims": [f"claim {n}" for n in range(9)] + [{"text": "I prefer X", "preference": True}, ""],
                       "commands": ["ruff --version"], "searches": ["a", "b", "c", "d"], "language": "Python",
                       "changes": [{"claims": [1, 99], "retire": [1, 3, 99, "2"],
-                                   "toolchain": {"format": "ruff format .", "run": "python app.py", "lint": "",
-                                                 "setup": ["pip install ruff", " "], "test_all": ["not", "a list"]},
+                                   "toolchain": {"format": "ruff format .", "lint": "",
+                                                 "setup": ["pip install ruff", " "]},
                                    "lesson": {"phase": "toolchain", "text": "Use ruff"}},
                                   {"claims": [], "lesson": {"phase": "code", "text": "rests on nothing"}},
                                   {"claims": [2], "lesson": {"phase": "nowhere", "text": "changes nothing"}}]}, count=3)
@@ -138,7 +138,11 @@ def test_read_plan_keeps_what_is_usable_within_limits():
                         ({"claims": ["c"], "changes": [RUFF_CHANGE]}, "no command or web search"),
                         ({"claims": ["c"], "searches": ["s"]}, "no change"),
                         ({"claims": ["c", "d"], "searches": ["s"], "changes": [RUFF_CHANGE, dict(RUFF_CHANGE, claims=[2])]},
-                         "toolchain format is changed twice")]:
+                         "toolchain format is changed twice"),
+                        ({"claims": ["c"], "searches": ["s"], "changes": [dict(RUFF_CHANGE, toolchain={"run": "x"})]},
+                         "toolchain run cannot be changed"),
+                        ({"claims": ["c"], "searches": ["s"], "changes": [dict(RUFF_CHANGE, toolchain={"lint": 3})]},
+                         "toolchain lint must be a command written as text")]:
         with pytest.raises(ValueError, match=why):
             read_plan(broken, count=1)
 
@@ -169,6 +173,15 @@ def test_preferences_alone_are_honored_with_no_check(kept, make_model, fake_olla
     assert len(fake_ollama.calls) == 1 and web.queries == []
     assert ending["status"] == "done" and "Run no type checker in Python projects" in lessons()
     assert "👤 Your preference, honored: Our projects need no type checker" in capsys.readouterr().out
+
+
+@pytest.mark.spec("TCH-3")
+def test_toolchain_commands_are_read_in_either_form():
+    change = {"claims": [1], "toolchain": {"setup": "python3 -m venv .venv && pip install pytest ruff",
+                                           "lint": ["ruff check .", "ruff format --check ."]}}
+    plan = read_plan({"claims": ["c"], "searches": ["s"], "changes": [change]}, count=0)
+    assert plan["changes"][0]["toolchain"] == {"setup": ["python3 -m venv .venv", "pip install pytest ruff"],
+                                               "lint": "ruff check . && ruff format --check ."}
 
 
 @pytest.mark.spec("TCH-3")
