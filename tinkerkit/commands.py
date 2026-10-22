@@ -108,13 +108,13 @@ COMMANDS = [
             "lessons, facts, your commands). Nothing is changed.",
             chat="long", words="any", arguments=[Argument("words", "+", "QUESTION", "the question (no quotes needed)")],
             example="ask what is your current toolchain for python"),
-    Command("teach", "Learn", "teach WHAT", "correct what Tinker has learned (checked first)",
-            "Correct what Tinker has learned; teach several things at once if you like. Your own preferences (\"we "
-            "don't need mypy\") are honored as they are. Facts are checked first, on this machine (commands that only "
-            "show what is installed) and on the web, and each change is made once the facts it rests on hold: what "
-            "you showed wrong is retired, the toolchain corrected and a lesson kept, with its sources. A change whose "
-            "facts do not hold is not made, and it says why. Needs the web (tinker use-web).", chat="long",
-            words="any",
+    Command("teach", "Learn", "teach WHAT", "correct what Tinker has learned (\"prefer\" marks your choices)",
+            "Correct what Tinker has learned; teach several things at once if you like. Mark your own choices with "
+            "the word prefer (\"I prefer no mypy\"): they are honored as they are. Everything else is a fact, checked "
+            "first on this machine (commands that only show what is installed) and on the web, and each change is "
+            "made once the facts it rests on hold: what you showed wrong is retired, the toolchain corrected and a "
+            "lesson kept, with its sources. A change whose facts do not hold is not made, and it says why. Needs the "
+            "web (tinker use-web).", chat="long", words="any",
             arguments=[Argument("words", "+", "WHAT", "what to correct, and why (no quotes needed)")],
             example="teach ruff formats Python as black does, so ruff alone is enough"),
     Command("memory", "Learn", "memory [--graph]", "what Tinker has learned (--graph: as a graph to explore)",

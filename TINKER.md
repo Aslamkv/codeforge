@@ -273,8 +273,8 @@ tinker ask what is your current toolchain for python
 tinker ask which lessons do you have about tests
 ```
 
-Correct it when you know better, as many things at once as you like. Your own preferences ("we don't
-need mypy") are honored as they are. Facts are checked first: Tinker runs commands on your machine that
+Correct it when you know better, as many things at once as you like. Mark your own choices with the word
+**prefer** ("I prefer no mypy"): Tinker honors them as they are. Everything else is a fact, checked first: Tinker runs commands on your machine that
 only show what is installed, and reads web pages about them. Each change is made once the facts it rests
 on hold: what you showed wrong is retired (kept, with why), the toolchain is corrected, and your lesson is
 kept, with its sources. A change whose facts do not hold is not made, and Tinker says why. It needs the
@@ -282,7 +282,7 @@ web (`tinker use-web`):
 
 ```sh
 tinker teach use ruff and not black for python, ruff already does what black does
-tinker teach we don't need mypy, our spec tests already catch what matters
+tinker teach I prefer no mypy, our spec tests already catch what matters
 ```
 
 In zsh, a `?` in a command is a wildcard, so leave it out or quote the question.

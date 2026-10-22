@@ -11,7 +11,7 @@ from tinkerkit.knowledge import Knowledge, Library
 from tinkerkit.model import Ollama
 from tinkerkit.prompts import Prompts
 from tinkerkit.settings import Home, MEMORY_SHOWN, TEACH_CLAIMS
-from tinkerkit.teaching import Asker, Memory, Teacher, Verdict, read_plan
+from tinkerkit.teaching import Asker, Memory, Teacher, Verdict, marked, read_plan
 from tinkerkit.workspace import Toolchain
 from conftest import MODEL, TOOLCHAIN
 
@@ -149,7 +149,7 @@ def test_teach_runs_only_safe_commands_and_reads_the_pages(kept, make_model, fak
     fake_ollama.reply(plan_reply(commands=[f'"{PY}" --version', "pip install black", "no-such-tool --help"]),
                       when="what to check")
     fake_ollama.reply(verdict_reply("unsure"), when="weigh the evidence")
-    Teacher(make_model(), web, kept).teach("ruff alone is enough, and we need no mypy")
+    Teacher(make_model(), web, kept).teach("ruff alone is enough, and I prefer no mypy")
     out = capsys.readouterr().out
     assert "Skipped `pip install black`" in out and "Python 3" in out
     judged = fake_ollama.calls[1]["messages"][1]["content"]
@@ -165,16 +165,25 @@ def test_preferences_alone_are_honored_with_no_check(kept, make_model, fake_olla
     fake_ollama.reply(plan_reply(claims=[NO_MYPY], commands=[], searches=[], changes=[dict(NO_MYPY_CHANGE, claims=[1])]),
                       when="what to check")
     web = FakeWeb()
-    ending = Teacher(make_model(), web, kept).teach("we need no mypy")
+    ending = Teacher(make_model(), web, kept).teach("I prefer no mypy")
     assert len(fake_ollama.calls) == 1 and web.queries == []
     assert ending["status"] == "done" and "Run no type checker in Python projects" in lessons()
     assert "👤 Your preference, honored: Our projects need no type checker" in capsys.readouterr().out
 
 
+@pytest.mark.spec("TCH-3")
+def test_only_a_teaching_marked_with_prefer_has_preferences():
+    reply = json.loads(plan_reply())
+    assert [c["preference"] for c in read_plan(reply, count=0, preferences=False)["claims"]] == [False, False]
+    assert [c["preference"] for c in read_plan(reply, count=0)["claims"]] == [False, True]
+    assert marked("I prefer no mypy") and marked("my preference: no mypy") and marked("Preferred: ruff")
+    assert not marked("we need no mypy")
+
+
 @pytest.mark.spec("TCH-4")
 def test_facts_nothing_could_check_are_unsure_and_asked_no_more(kept, make_model, fake_ollama):
     fake_ollama.reply(plan_reply(commands=["rm -rf build"]), when="what to check")
-    ending = Teacher(make_model(), FakeWeb(pages=()), kept).teach("ruff alone is enough, and we need no mypy")
+    ending = Teacher(make_model(), FakeWeb(pages=()), kept).teach("ruff alone is enough, and I prefer no mypy")
     assert len(fake_ollama.calls) == 1
     assert ("Unsure", "Ruff formats Python code as black does (nothing could check it)") in ending["details"]
     assert Home.store().get("languages", "python")["toolchain"]["format"] == "black ."  # its change waits
@@ -206,7 +215,7 @@ def test_a_verdict_needs_every_fact_and_every_change_a_fact_is_for():
 def test_a_change_whose_fact_does_not_hold_waits_and_the_rest_are_made(kept, make_model, fake_ollama, capsys):
     fake_ollama.reply(plan_reply(), when="what to check")
     fake_ollama.reply(verdict_reply("wrong"), when="weigh the evidence")
-    ending = Teacher(make_model(), FakeWeb(), kept).teach("ruff alone is enough, and we need no mypy")
+    ending = Teacher(make_model(), FakeWeb(), kept).teach("ruff alone is enough, and I prefer no mypy")
     assert ending["status"] == "done" and ending["headline"] == "Corrected: 2 change(s)"
     assert ("Wrong", "Ruff formats Python code as black does (the Ruff docs say so)") in ending["details"]
     assert ("Not changed", "Format and lint Python with ruff alone; black is not needed (claim 1 is wrong)") \
@@ -229,7 +238,7 @@ def test_nothing_changes_when_no_change_can_be_made(kept, make_model, fake_ollam
 
 @pytest.mark.spec("TCH-6")
 def test_a_teaching_that_holds_corrects_what_tinker_keeps(kept, make_model, fake_ollama):
-    teaching = "ruff alone is enough, black is not needed, and we need no mypy"
+    teaching = "ruff alone is enough, black is not needed, and I prefer no mypy"
     lesson = numbered_item(kept, teaching, "lesson")
     fake_ollama.reply(plan_reply(changes=[dict(RUFF_CHANGE, retire=[lesson]), NO_MYPY_CHANGE]), when="what to check")
     fake_ollama.reply(verdict_reply(), when="weigh the evidence")
@@ -268,10 +277,10 @@ def test_ask_and_teach_report_through_a_tracker_and_run_as_tasks(kept, measured_
     Commands(Cli.parse(["ask", "what", "formats", "python"])).run()
     fake_ollama.reply(plan_reply(), when="what to check")
     fake_ollama.reply(verdict_reply(), when="weigh the evidence")
-    Commands(Cli.parse(["teach", "ruff", "alone", "is", "enough"])).run()
+    Commands(Cli.parse(["teach", "ruff", "alone", "is", "enough,", "I", "prefer", "no", "mypy"])).run()
     assert ended[0][:2] == ("Asking: what formats python", "done")
     out = capsys.readouterr().out
     assert out.startswith("Black formats it [1].") and out.count("Time taken") == 2
-    assert ended[1][:2] == ("Teaching: ruff alone is enough", "done")
+    assert ended[1][:2] == ("Teaching: ruff alone is enough, I prefer no mypy", "done")
     assert "🤔 Worked out what to check" in ended[1][2] and "⚖️ Evidence weighed" in ended[1][2]
     assert "ask" in conversation.LONG and "teach" in conversation.LONG

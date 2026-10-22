@@ -7,6 +7,8 @@ independent searches), and the model weighs that evidence alone. Only when every
 change follows from them, are the items shown wrong retired, the toolchain corrected and the lesson kept,
 proven, with its sources. Anything less changes nothing, and says why."""
 
+import re
+
 from .messages import say
 lazy from .conversation import Research
 lazy from .graph import Graph
@@ -19,6 +21,7 @@ lazy from .settings import (
 ITEM_KINDS = ("toolchain", "fix", "lesson", "fact", "finding", "rule", "command")
 TOOLCHAIN_KEYS = ("setup", "check", "test_all", "test_one", "format", "lint")  # what a teaching may replace
 VERDICTS = ("holds", "wrong", "unsure")
+PREFER_RE = re.compile(r"\bprefer", re.I)  # how a person marks a preference: prefer, preferred, preference
 
 
 class Memory:
@@ -127,7 +130,7 @@ class Teacher:
         parts = [Part("What Tinker keeps", numbered(items) or "(nothing yet)", True),
                  Part("What the person teaches", teaching, True)]
         plan = self.model.ask_until_usable(Prompts.TEACH_SYSTEM, parts, "teach: what to check",
-                                           lambda reply: read_plan(reply.json(), len(items)))
+                                           lambda reply: read_plan(reply.json(), len(items), marked(teaching)))
         if plan is None:
             raise SystemExit(f"{self.model.name} could not work out what to check; nothing changed")
         with say.part("What you taught", "📝"):
@@ -239,12 +242,17 @@ class Teacher:
         return f"Lesson kept for {language or 'any language'}: {kept['text']}" if kept else ""
 
 
-def read_plan(data, count):
-    """The claims ({text, preference}), the commands and searches that check the facts (each within its limit),
-    the language and the changes (read_changes; count: how many items were shown). ValueError when there is no
-    claim, nothing checks the facts, or there is no change."""
+def marked(teaching):
+    """Whether the person marked a preference in what they taught (the word prefer): else every claim is a fact."""
+    return bool(PREFER_RE.search(teaching))
+
+
+def read_plan(data, count, preferences=True):
+    """The claims ({text, preference}; with preferences false, each is a fact), the commands and searches that
+    check the facts (each within its limit), the language and the changes (read_changes; count: how many items
+    were shown). ValueError when there is no claim, nothing checks the facts, or there is no change."""
     texts = lambda key, limit: [str(t).strip() for t in data.get(key) or [] if str(t).strip()][:limit]
-    claims = read_claims(data.get("claims"))
+    claims = [dict(claim, preference=claim["preference"] and preferences) for claim in read_claims(data.get("claims"))]
     plan = {"claims": claims, "commands": texts("commands", TEACH_COMMANDS),
             "searches": texts("searches", TEACH_SEARCHES), "language": str(data.get("language") or "").strip(),
             "changes": read_changes(data.get("changes"), len(claims), count)}

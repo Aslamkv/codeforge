@@ -759,7 +759,8 @@ on this machine and on the web, the model weighs that evidence alone, and only t
   no steps and no sources, then the time taken (a terminal shows one status line while it thinks). With nothing kept it
   makes no call and says so. It changes nothing.
 - **TCH-3** `read_plan` keeps at most `TEACH_CLAIMS` claims, each a fact or a preference (the person's own
-  choice), at most `TEACH_COMMANDS` commands and `TEACH_SEARCHES` searches, and the changes: each rests on the
+  choice). A preference is only what the person marks with the word prefer: a teaching without it (`marked`) has
+  facts alone, whatever the model says. It keeps at most `TEACH_COMMANDS` commands and `TEACH_SEARCHES` searches, and the changes: each rests on the
   claims it names and retires items shown, replaces toolchain commands of `TOOLCHAIN_KEYS` or keeps a lesson with
   a known phase (any other is dropped). A plan with no claim, facts that nothing checks, no change, or a
   toolchain key in two changes is a `ValueError`.
