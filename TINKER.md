@@ -296,15 +296,22 @@ steps. The next projects prove those lessons or retire them. A language it has n
 first (this needs the web). Words that are not one language are said so, and nothing is done:
 
 ```sh
-tinker exercise rust      # start, or go on from where it stopped
-tinker exercise status    # how it is going: each project's measures, and what it practises next
-tinker exercise stop      # stop it; everything is kept
+tinker exercise rust           # start, or go on from where it stopped
+tinker exercise status         # how it is going: each project's measures, and what it practises next
+tinker exercise stop           # stop it; everything is kept
+tinker exercise resume         # go on with the exercise you left last
+tinker exercise resume python  # go on with that language's exercise
 ```
+
+One exercise runs at a time, and each language keeps its own projects and lessons. To switch, stop the one
+that runs, then start or resume the other.
 
 You come first. Whenever you ask for something (a chat, a command, a task, or a `tinker` run in another
 terminal), its build stops and saves itself. The exercise goes on once Tinker has been idle for two minutes.
 It runs until you stop it. In a chat, `exercise rust` starts it in the background, so it keeps going after
-the conversation ends.
+the conversation ends. It keeps one message, whether it is started, stopped or resumed, and that message shows
+what its build is doing right now, as a task's does. A conversation
+started later picks up the exercise's message again.
 
 ## Settings 🔧
 

@@ -822,16 +822,19 @@ class Commands:
 
     def exercise(self):
         """tinker exercise LANGUAGE: practice projects in that language, one after another, until it is stopped
-        (exercising.Exercise); tinker exercise stop stops the one that runs, everything kept; tinker exercise status
-        shows how each is going. Its tracker reports to the chats too, as a run's does."""
+        (exercising.Exercise); tinker exercise stop stops the one that runs, everything kept; tinker exercise resume
+        [LANGUAGE] goes on with the one named, else the one left last; tinker exercise status shows how each is going.
+        Its tracker reports to the chats too, as a run's does."""
         what = self.args.exercise
         if what.lower() == "stop":
             return exercising.stop()
         if what.lower() == "status":
             return exercising.show()
+        if what.split()[0].lower() == "resume":
+            what = exercising.Exercises.resumed(what.split()[1:])
         active = exercising.Exercises.active()
         if active:
-            raise SystemExit(f"An exercise of {active['language']} runs already: tinker exercise stop first.")
+            raise SystemExit(exercising.already_running(active))
         model = Commands.model_in_use(*Commands.checked_model(), "exercise")
         Commands.reported(f"Exercising {what}", model, lambda tracker: exercising.Exercise(model, tracker).run(what),
                           chats=True)
