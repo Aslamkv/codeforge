@@ -21,6 +21,7 @@ class TestToolSetup(Phase):
     """4. Setup, before any test is written: the project's config files (its dependencies and its
     test tool's settings) are written, set up, and the test tool is shown to run (TestTool), so
     the tests are written for a test tool that is there and works, in any language."""
+    __test__ = False  # not a pytest test class
     TITLE = "Setup (the test tool, before any test is written)"
     BUILDS = True
 
@@ -37,6 +38,7 @@ class TestToolSetup(Phase):
 
 class TestWriter(Phase):
     """5. Spec tests, before the code: a few criteria per call."""
+    __test__ = False  # not a pytest test class
     TITLE = "Spec tests (one for every spec point, before any code)"
     BUILDS = True
 
@@ -1049,6 +1051,7 @@ class TestTool(Worker):
     runs (what it finds is for the tidy phase). A tooling problem gets a toolchain fix (config files
     and commands only; a fix learned earlier first), at most twice: no code change can fix it. A
     toolchain that works is remembered for the language."""
+    __test__ = False  # not a pytest test class
     STAGE_TEXT = {"setup": "setup fails", "tests": "the tests cannot run", "lint": "the linter cannot run"}
     MISSING_TOOL_RE = re.compile(r"command not found|No module named|not recognized as|cannot find|not installed|"
                                  r"no such file or directory|unknown command", re.I)
