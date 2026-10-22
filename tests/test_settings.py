@@ -215,7 +215,7 @@ def test_reset_outside_a_terminal_without_yes_deletes_nothing(tinker_home, monke
 
 @pytest.mark.spec("SET-11")
 def test_parts_tinker_clear_knows():
-    assert list(Home.parts()) == ["languages", "memory", "learned", "docs", "models", "runs", "commands"]
+    assert list(Home.parts()) == ["languages", "memory", "learned", "docs", "models", "runs", "commands", "exercise"]
 
 
 @pytest.mark.spec("SET-11")

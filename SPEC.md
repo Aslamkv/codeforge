@@ -73,6 +73,7 @@ responsibility, and each imports only the modules listed above it:
 | `learning` | learning a language or a tool by its slots (`SlotLearner`, `Throttle`, `RequestLog`, `LearnStopped`) |
 | `graph` | what Tinker knows as one graph of items and links (`Graph`), and the page that shows it (`GraphPage`) |
 | `teaching` | asking what Tinker keeps (`Asker`), and teaching it, checked before anything changes (`Teacher`, `Memory`, `Verdict`) |
+| `exercising` | practising a language on its own, giving way to the person (`Exercise`, `Exercises`) |
 | `session` | what every phase works through (`Session`), and the phase contract (`Worker`, `Phase`) |
 | `planning` | recall, the spec, the contracts where files meet, and their review |
 | `building` | setup, the tests, the code, and fixing until every test passes |
@@ -107,8 +108,11 @@ database holds:
 | `runs` | one line about each run: its task, language, status and dates (the last `RUNS_KEPT`) |
 | `channels`, `channel_secrets` | the chat channels and their tokens |
 | `listening`, `running` | the conversation's live state: its status messages, and each run's tracker |
+| `exercise` | per language: its exercise's practice projects, what each measured, and the focus of the next |
+| `activity` | when the person last asked for something, and the exercise that runs now |
 | log `learn` | every model call that `tinker learn` made |
 | log `teach` | every model call that `tinker ask` and `tinker teach` made |
+| log `exercise` | every model call that `tinker exercise` made itself (its builds keep theirs) |
 
 Each project keeps its own state in `<project>/.tinker/project.db`:
 
@@ -178,7 +182,7 @@ phase, learn from the web what the rest of the cycle needs.
 - **SET-10** `Home.reset(yes)` deletes the home folder. It refuses a folder not named `.tinker`. It
   does nothing when the folder is missing. Without `yes`, and not in a terminal, it deletes nothing
   and exits.
-- **SET-11** `Home.parts()` names exactly: languages, memory, learned, docs, models, runs, commands.
+- **SET-11** `Home.parts()` names exactly: languages, memory, learned, docs, models, runs, commands, exercise.
   `Home.clear(names, yes)` deletes only the named parts from the home database. It rejects an unknown
   part by listing the parts. When those parts are empty, it says there is nothing to clear. Without
   `yes`, and not in a terminal, it deletes nothing.
@@ -780,6 +784,47 @@ on this machine and on the web, the model weighs that evidence alone, and only t
   for a preference. A lesson like a known one proves that one instead of being added.
 - **TCH-7** `tinker teach` needs the Internet plugin, checked before any model call. Both commands report through
   a tracker, and in the conversation they run as tasks.
+
+## exercise
+
+`tinker exercise LANGUAGE` practises a language on its own, to write better code faster: practice projects one
+after another, each built and given a feature, measured, and turned into lessons, until the person stops it. The
+person always comes first.
+
+- **EXR-1** `identified(model, words)` gives a learned language's name with no call. Otherwise one call says
+  whether the words name one language, could be several (`ambiguous`, with the likely ones), or none (`other`,
+  with why). For anything but one language, it says so and ends (`SystemExit`, "Nothing done"): no build starts,
+  no exercise is kept, and no folder is made. `read_verdict` needs a known verdict, and a language needs its name.
+- **EXR-2** `knows(name)`: a language Tinker has not learned is learned first (`tinker learn`, as a build of the
+  exercise). A language whose learned machine commands all failed is not installed here: it says so and ends
+  before anything is practised.
+- **EXR-3** `read_choice` needs a task and a feature, rejects a task like an earlier project's (`SAME_PROJECT`),
+  adds the language to a task that does not name it, and makes a folder name from the task when the one given
+  does not fit. `free_folder` gives a folder of the exercise folder (`EXERCISE_FOLDER` in the projects folder)
+  that no project has yet.
+- **EXR-4** `practise` goes through a practice project's steps, `build → feature → measure → reflect → done`,
+  saving each as it ends, from the step it reached (a new project is chosen only when none is open). `build`
+  runs `tinker task TASK --workdir FOLDER`, and `tinker resume --workdir FOLDER` once the folder keeps a run.
+  `feature` runs `tinker add FEATURE`, and resume once its cycle exists, only for a project that built (`done`).
+  `reflect` makes one call, keeps its lessons through `add_lessons` (as candidates; none that names the project),
+  and keeps its `focus` for the next choice.
+- **EXR-5** `measured(folder)` reads the project's own database: its status, its minutes (every session's wall
+  time), its model calls, the retried ones (attempt 2 and later), reply tokens, spec points passing, parked and
+  in all, README examples that failed, and the `slowest` steps (a step is its call's first word, so no file is
+  named). `problems` lists, at most `EXERCISE_PROBLEMS`: what nothing made pass, failed README examples, failed,
+  unusable and cut replies, and the warnings the runs said.
+- **EXR-6** The person comes first. `person_busy` is true for `EXERCISE_QUIET` seconds after they ask for
+  anything (`Home.person_seen`: every message of the conversation but `exercise`, a one-shot command, and a plan
+  or deletion waiting for them), and while any run of theirs works (a run an exercise started is marked
+  `exercise` in its tracker). Nothing starts while they are busy. A build that runs when they become busy is
+  stopped as Ctrl-C stops it (it saves itself) and started again, from where it was, once they are not. The
+  conversation never pauses or stops an exercise's runs for an emergency or a `stop`, and its status shows the
+  exercise when nothing else runs.
+- **EXR-7** One exercise runs at a time (`Exercises.claim`). Ctrl-C or `exercise stop` (the `STOP` signal) stops
+  its build, keeps everything, and ends with how to go on; `tinker exercise LANGUAGE` goes on from there.
+  `exercise status` shows each exercise: whether it runs, its focus, each recent project's measures, and what it
+  does now. `tinker exercise` takes a language, `stop` or `status`. In the conversation, `exercise LANGUAGE`
+  starts it as a tinker of its own that outlives the conversation, its progress in its one message.
 
 ## session
 

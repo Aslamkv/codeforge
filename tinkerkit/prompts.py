@@ -811,6 +811,35 @@ Reply with ONLY JSON: {"overview":"...","features":["..."],"requires":"Python 3.
                   "nothing about what you do not keep). The toolchain that worked comes before facts and rules. When "
                   "nothing below answers it, say in one line that you have not learned that yet.")
 
+    EXERCISE_LANGUAGE_SYSTEM = """The person asks Tinker, a code generator, to practise a programming language, named by the
+words below. Say what the words name. "language": exactly one programming language that programs are written and
+run in (its usual name, without a version: "Rust", "TypeScript", "C++"). "ambiguous": they could be several
+languages and nothing says which ("lisp": Common Lisp, Scheme, Clojure...); list the likely ones. "other": not a
+programming language at all (a framework, a tool, a markup or data format, a person, a word). Reply with ONLY JSON:
+{"verdict":"language|ambiguous|other","name":"the language's name, when it is one","choices":["for ambiguous: the
+languages it could be"],"why":"one short sentence"}"""
+
+    EXERCISE_PROJECT_SYSTEM = """Tinker, a code generator, practises a programming language by building small projects
+one after another, to write better code faster. Choose the next one. It is small: a few files, built and tested in
+minutes, run on this machine with no network, no accounts and no paid services. It practises what the language is
+used for and what the earlier projects did not (its standard library, its types and errors, files, text, data
+structures, a command-line interface), a little harder than the last one, and the focus below first when one is
+given. Never repeat an earlier project. "task" is the request as a person writes it, one or two sentences that name
+the language; "feature" is one feature to add to it once it is built, as a person asks for it; "folder" is a short
+lowercase name for its folder, words joined by - ("csv-stats"); "practises" names what of the language it exercises.
+Reply with ONLY JSON: {"task":"...","feature":"...","folder":"...","practises":["..."]}"""
+
+    EXERCISE_REFLECT_SYSTEM = f"""Tinker, a code generator, just built a practice project, to get better at a
+language and faster at it. Below are its measures, the earlier projects' measures, the problems it hit (failures,
+retried or unusable replies, criteria nothing made pass, README examples that failed, slow steps) and the lessons
+it keeps. Write the lessons that would make the next projects better code or need fewer model calls and fixes:
+at most 3, each one imperative sentence naming the concrete technique, tool usage or habit of the language. A
+lesson is general: never name this project, its files, its names, its features or its data. Skip anything the
+known lessons already say. "scope" is "any" only when the lesson holds in every language as written. "focus" is
+one sentence on what the next practice project should exercise, from what went worst here.
+Reply with ONLY JSON: {{"lessons":[{{"phase":"one of {', '.join(LESSON_PHASES)}","scope":"language or any",
+"text":"the lesson"}}],"confirmed":[numbers of known lessons these problems show again],"focus":"..."}}"""
+
     TEACH_SYSTEM = f"""The person teaches you, Tinker, something, to correct what you keep. Below is what you keep that
 is most related to it, numbered. Several things may be taught at once: split it into the claims it rests on and
 the changes it asks for, each change on its own.

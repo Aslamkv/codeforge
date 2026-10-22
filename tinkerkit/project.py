@@ -12,7 +12,7 @@ lazy from pathlib import Path
 lazy from .messages import say
 lazy from .prompts import Part, Prompts, Reply
 lazy from .settings import (
-    FIX_PHASES, Home, PHASES, PROJECT_DB, RUNS_KEPT, STATE_DIR, STATUS_TEXT, Store, confirmed, first_line, now_text, split_text,
+    EXERCISE_ENV, FIX_PHASES, Home, PHASES, PROJECT_DB, RUNS_KEPT, STATE_DIR, STATUS_TEXT, Store, confirmed, first_line, now_text, split_text,
 )
 lazy from .workspace import TaughtCommands, TestRef, Toolchain
 
@@ -565,7 +565,15 @@ class Tracker:
              "answer": ("💬 Answering from what Tinker keeps", "💬 Answered"),
              "understand": ("🤔 Working out what to check", "🤔 Worked out what to check"),
              "judge": ("⚖️ Weighing the evidence", "⚖️ Evidence weighed"),
-             "correct": ("✏️ Correcting what Tinker keeps", "✏️ Corrected")}
+             "correct": ("✏️ Correcting what Tinker keeps", "✏️ Corrected"),
+             # tinker exercise's
+             "identify": ("🔤 Making sure it is a language", "🔤 It is a language"),
+             "learn": ("📚 Learning the language first", "📚 Language learned"),
+             "pick": ("🎯 Choosing the next practice project", "🎯 Practice project chosen"),
+             "build": ("🔨 Building the practice project", "🔨 Practice project built"),
+             "feature": ("➕ Adding a feature to it", "➕ Feature added"),
+             "measure": ("📏 Measuring how it went", "📏 Measured"),
+             "reflect": ("📒 Learning from what went wrong and what was slow", "📒 Lessons kept")}
     STARTING = "🚀 Starting: the model loads"
     QUIET_EVERY = 1.0  # seconds between publishing changes that only move the latest line on
 
@@ -573,7 +581,8 @@ class Tracker:
         self.pid, self.store, self.published = os.getpid(), None, 0.0
         self.state = {"title": title, "run": None, "folder": None, "step": None, "doing": self.STARTING,
                       "began": None, "steps": [], "passing": None, "live": "", "latest": "", "waiting": None,
-                      "ended": None, "before": before, "seconds": 0.0, "paused": False, "pid": self.pid}
+                      "ended": None, "before": before, "seconds": 0.0, "paused": False, "pid": self.pid,
+                      "exercise": os.environ.get(EXERCISE_ENV) == "1"}
 
     @classmethod
     def icon(cls, phase):
