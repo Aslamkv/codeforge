@@ -272,9 +272,10 @@ def test_the_conversation_marks_the_person_and_leaves_exercise_runs_alone(home_s
     channel = Recorder()
     desk = Desk([channel], tmp_path)
     monkeypatch.setattr(desk, "tinker", lambda words, timeout=120: "ok")
-    desk.hear(channel, Message("1", "exercise status"))
+    for looking in ("exercise status", "help exercise", "help", "runs"):
+        desk.hear(channel, Message("1", looking))
     assert Home.person_last_seen() == 0.0
-    desk.hear(channel, Message("1", "help"))
+    desk.hear(channel, Message("1", "hello there"))
     assert Home.person_last_seen() > 0
     home_store.put("running", str(ALIVE), {"title": "Exercising Rust", "exercise": True, "doing": "🔨 Building"})
     assert persons_runs() == []

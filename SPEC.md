@@ -814,8 +814,9 @@ person always comes first.
   named). `problems` lists, at most `EXERCISE_PROBLEMS`: what nothing made pass, failed README examples, failed,
   unusable and cut replies, and the warnings the runs said.
 - **EXR-6** The person comes first. `person_busy` is true for `EXERCISE_QUIET` seconds after they ask for
-  anything (`Home.person_seen`: every message of the conversation but `exercise`, a one-shot command, and a plan
-  or deletion waiting for them), and while any run of theirs works (a run an exercise started is marked
+  anything (`Home.person_seen`: every message of the conversation but one that only shows something (`exercise`,
+  `help`, `status`, `runs`, `log`, `memory`, `doctor`, `models`), a one-shot command, and a plan or deletion
+  waiting for them), and while any run of theirs works (a run an exercise started is marked
   `exercise` in its tracker). Nothing starts while they are busy. A build that runs when they become busy is
   stopped as Ctrl-C stops it (it saves itself) and started again, from where it was, once they are not. The
   conversation never pauses or stops an exercise's runs for an emergency or a `stop`, and its status shows the
