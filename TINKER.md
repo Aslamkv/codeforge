@@ -266,6 +266,26 @@ chat, `memory --graph` sends the page as a file to open on your phone:
 tinker memory --graph
 ```
 
+Ask what it has learned. The answer comes only from what it keeps, and each claim points to the item it
+rests on. Nothing is changed:
+
+```sh
+tinker ask what is your current toolchain for python
+tinker ask which lessons do you have about tests
+```
+
+Correct it when you know better. Nothing changes until your words are checked. Tinker turns them into
+claims, runs commands on your machine that only show what is installed, and reads web pages about the
+claims. It changes things only when every claim holds on that evidence: what you showed wrong is retired
+(kept, with why), its toolchain is corrected, and your lesson is kept as proven, with its sources. If not,
+it says which claim did not hold and why, and changes nothing. It needs the web (`tinker use-web`):
+
+```sh
+tinker teach you use both ruff and black for python, but ruff alone is enough
+```
+
+In zsh, a `?` in a command is a wildcard, so leave it out or quote the question.
+
 ## Settings 🔧
 
 See the settings, or change one:

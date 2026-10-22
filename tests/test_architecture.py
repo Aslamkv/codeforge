@@ -10,7 +10,8 @@ import pytest
 
 ROOT = Path(__file__).resolve().parent.parent
 LAYERS = ("messages", "settings", "commands", "prompts", "workspace", "model", "project", "fetcher", "web", "passages", "conversation",
-          "channels", "knowledge", "slots", "docsite", "learning", "graph", "session", "planning", "building", "finishing")
+          "channels", "knowledge", "slots", "docsite", "learning", "graph", "teaching", "session", "planning", "building",
+          "finishing")
 
 
 def imports_of(module):

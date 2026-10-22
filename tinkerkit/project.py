@@ -560,7 +560,12 @@ class Tracker:
              "condense": ("✍️ Turning the facts into rules", "✍️ Rules written"),
              "frame": ("📝 Framing the research questions", "📝 Questions framed"),
              "investigate": ("🔬 Reading and cross-checking sources", "🔬 Sources cross-checked"),
-             "keep": ("💾 Saving what was learned", "💾 Saved")}
+             "keep": ("💾 Saving what was learned", "💾 Saved"),
+             # tinker ask's and tinker teach's
+             "answer": ("💬 Answering from what Tinker keeps", "💬 Answered"),
+             "understand": ("🤔 Working out what to check", "🤔 Worked out what to check"),
+             "judge": ("⚖️ Weighing the evidence", "⚖️ Evidence weighed"),
+             "correct": ("✏️ Correcting what Tinker keeps", "✏️ Corrected")}
     STARTING = "🚀 Starting: the model loads"
     QUIET_EVERY = 1.0  # seconds between publishing changes that only move the latest line on
 

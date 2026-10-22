@@ -72,6 +72,7 @@ responsibility, and each imports only the modules listed above it:
 | `docsite` | a topic's documentation site for its version: its map, each slot's pages, kept per topic and version (`DocSite`, `DocCache`) |
 | `learning` | learning a language or a tool by its slots (`SlotLearner`, `Throttle`, `RequestLog`, `LearnStopped`) |
 | `graph` | what Tinker knows as one graph of items and links (`Graph`), and the page that shows it (`GraphPage`) |
+| `teaching` | asking what Tinker keeps (`Asker`), and teaching it, checked before anything changes (`Teacher`, `Memory`, `Verdict`) |
 | `session` | what every phase works through (`Session`), and the phase contract (`Worker`, `Phase`) |
 | `planning` | recall, the spec, the contracts where files meet, and their review |
 | `building` | setup, the tests, the code, and fixing until every test passes |
@@ -107,6 +108,7 @@ database holds:
 | `channels`, `channel_secrets` | the chat channels and their tokens |
 | `listening`, `running` | the conversation's live state: its status messages, and each run's tracker |
 | log `learn` | every model call that `tinker learn` made |
+| log `teach` | every model call that `tinker ask` and `tinker teach` made |
 
 Each project keeps its own state in `<project>/.tinker/project.db`:
 
@@ -742,6 +744,32 @@ CONDENSE, KEEP. Domain research (`Researcher`), own-command learning and run les
 - **GRF-5** `tinker memory --graph` writes the page to `Home.graph_page()`, prints what it holds (the
   counts, and how lessons were found similar), and opens it in the browser only when printing to a
   terminal.
+
+## teaching
+
+`tinker ask QUESTION` answers from what Tinker keeps. `tinker teach WHAT` corrects it, and nothing changes until
+what was taught is checked: the model turns it into claims and the change it asks for, the claims are checked
+on this machine and on the web, the model weighs that evidence alone, and only then is anything changed.
+
+- **TCH-1** `Memory(embeddings).items` are the memory graph's toolchains, fixes, lessons, facts, findings, rules
+  and commands, without the retired. `about(text)` gives at most `MEMORY_SHOWN` of them, the most related first.
+- **TCH-2** `Asker.answer(question)` makes one model call with the items numbered, says the answer and lists the
+  items it cites, by the numbers it gives them. With nothing kept it makes no call. It changes nothing.
+- **TCH-3** `read_plan` keeps at most `TEACH_CLAIMS` claims, `TEACH_COMMANDS` commands and `TEACH_SEARCHES`
+  searches, the numbers of items shown to retire, the toolchain commands of `TOOLCHAIN_KEYS`, and a lesson with
+  a known phase. A plan with no claim, nothing that checks its claims, or no change is a `ValueError`.
+- **TCH-4** `Teacher.teach` checks first. It runs only the commands that show what is installed (each other one
+  is skipped, and said), and reads the pages the searches find. With no evidence it changes nothing and makes
+  no further call.
+- **TCH-5** `Verdict.read` needs a verdict for every claim (`holds`, `wrong` or `unsure`), and keeps only the
+  evidence numbers given. `holds()` is true only when every claim holds on evidence it cites and the change
+  follows. Otherwise nothing changes, and the ending gives each claim's verdict and why.
+- **TCH-6** A teaching that holds retires the items it shows wrong (the reason names what was taught), replaces
+  the commands of the language's toolchain (only when it has one, and the result is usable), and keeps the
+  lesson as proven, with a `taught` event and the sources the claims cite. A lesson like a known one proves
+  that one instead of being added.
+- **TCH-7** `tinker teach` needs the Internet plugin, checked before any model call. Both commands report through
+  a tracker, and in the conversation they run as tasks.
 
 ## session
 

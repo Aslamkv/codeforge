@@ -6,8 +6,8 @@ lazy from pathlib import Path
 
 from .settings import (
     ENV_EXAMPLE, ENV_FILE, FACTS_PER_CHUNK, FACTS_PER_SLOT, FACT_PHASES, LESSON_PHASES, MAX_COMMANDS, MAX_FILE_LINES,
-    PLAYBOOK_RULES, RESEARCH_CHECKS, RESEARCH_GAPS, RESEARCH_QUERIES, RESEARCH_QUESTIONS, RULE_CHARS, TOOL_ROLES,
-    TRIM_FLOOR, first_line,
+    PLAYBOOK_RULES, RESEARCH_CHECKS, RESEARCH_GAPS, RESEARCH_QUERIES, RESEARCH_QUESTIONS, RULE_CHARS, TEACH_CLAIMS,
+    TEACH_COMMANDS, TEACH_SEARCHES, TOOL_ROLES, TRIM_FLOOR, first_line,
 )
 
 
@@ -803,6 +803,41 @@ example is run as written to check it, so it must work exactly as given.
 - serves: true when the run command keeps running until stopped (a server), else false.
 Reply with ONLY JSON: {"overview":"...","features":["..."],"requires":"Python 3.10 or newer",
 "usage":[{"what":"Add two numbers","command":"python3 calculator.py add 5 2","output":"7"}],"serves":false}"""
+
+    ASK_SYSTEM = ("The person asks what you, Tinker, have learned. Below is what you keep, numbered: the toolchains that "
+                  "worked, toolchain fixes, lessons, facts, findings and rules, and the person's own commands, each with "
+                  "its kind, the language or topic it belongs to, and its status (proven: a build that used it "
+                  "succeeded; candidate: not proven yet). Answer from these items alone, for a terminal or a chat read "
+                  "on a phone: the answer itself first, in a line or two, then only what matters, in short plain lines "
+                  "(no Markdown). Each claim cites its item as [n]. When the items do not answer the question, say so "
+                  "plainly; never say anything they do not say.")
+
+    TEACH_SYSTEM = f"""The person teaches you, Tinker, something, to correct what you keep. Below is what you keep that
+is most related to it, numbered. Nothing changes until the teaching is checked, so first say what must be checked:
+"claims": each statement the teaching rests on, on its own and checkable, at most {TEACH_CLAIMS};
+"commands": commands that show on this machine whether a claim holds (a tool's --version or --help), one command
+each, no shell operators, nothing installed or changed, at most {TEACH_COMMANDS};
+"searches": web searches that find independent sources for the claims, at most {TEACH_SEARCHES}.
+Then the change it asks for, made only once the claims hold:
+"language": the language it is about, or "" when it holds for every language;
+"retire": the numbers of the items it shows wrong;
+"toolchain": the language's toolchain commands to replace, by key (check, test_all, test_one, format, lint; setup
+is the whole list of its commands), each written as a person types it; {{}} when the toolchain stays as it is;
+"lesson": what was taught, as one general imperative sentence, with the phase where it matters (one of
+{', '.join(LESSON_PHASES)}); never a project's names, files or data.
+Reply with ONLY JSON: {{"claims":["Tool A formats code as tool B does"],"commands":["tool-a format --help"],
+"searches":["tool A replaces tool B formatter"],"language":"Python","retire":[2],"toolchain":{{"format":"tool-a format ."}},
+"lesson":{{"phase":"toolchain","text":"Format with tool A alone; tool B is not needed beside it"}}}}"""
+
+    JUDGE_SYSTEM = """The person taught you, Tinker, something. Before you change what you keep, check it. Below are the
+claims it rests on, the change it asks for, and the evidence, numbered: what commands showed on this machine and
+what web pages say. Decide from the evidence alone, never from what you were trained on (it may be out of date).
+For each claim: "holds" only when the evidence states it (cite those numbers), "wrong" when the evidence
+contradicts it, "unsure" when it says too little. Then "change": true only when the change follows from the
+claims that hold: every item it retires is shown wrong, and every toolchain command and the lesson agree with
+the evidence.
+Reply with ONLY JSON: {"claims":[{"claim":1,"verdict":"holds","why":"one short sentence","evidence":[1,3]}],
+"change":true,"why":"one short sentence"}"""
 
     README_FIX_SYSTEM = ("Some usage examples in a project's README do not print what the README says. For each, "
                          "decide what is wrong: the README (its command or the output it shows) or the code (it does "

@@ -103,6 +103,19 @@ COMMANDS = [
             words="any", arguments=[Argument("words", "+", "WHAT [DEFINITION]")], example="learn rust",
             rows=[("learn WHAT", "learn a language, a tool or a domain"),
                   ('learn NAME "DEFINITION"', "a command of yours Tinker may use")]),
+    Command("ask", "Learn", "ask QUESTION", "ask what Tinker has learned",
+            "Ask what Tinker has learned: the answer comes from what it keeps alone (toolchains, fixes, lessons, "
+            "facts, your commands), each claim citing the item it rests on, listed under it. Nothing is changed.",
+            chat="long", words="any", arguments=[Argument("words", "+", "QUESTION", "the question (no quotes needed)")],
+            example="ask what is your current toolchain for python"),
+    Command("teach", "Learn", "teach WHAT", "correct what Tinker has learned (checked first)",
+            "Correct what Tinker has learned. Nothing changes until it is checked: what you teach is turned into "
+            "claims, each checked on this machine (commands that only show what is installed) and on the web; only "
+            "when every claim holds on that evidence are the items it shows wrong retired, the toolchain corrected "
+            "and a lesson kept, proven, with its sources. Otherwise it says why, and nothing changes. Needs the web "
+            "(tinker use-web).", chat="long", words="any",
+            arguments=[Argument("words", "+", "WHAT", "what to correct, and why (no quotes needed)")],
+            example="teach ruff formats Python as black does, so ruff alone is enough"),
     Command("memory", "Learn", "memory [--graph]", "what Tinker has learned (--graph: as a graph to explore)",
             "Show what Tinker has learned: toolchains, fixes, lessons, topics, your commands. --graph draws it as a "
             "graph in one page (opened in the browser; in a chat, sent as a file): each lesson, fact and fix linked "

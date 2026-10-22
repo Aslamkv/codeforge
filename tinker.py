@@ -184,6 +184,7 @@ are the modules of tinkerkit/, one responsibility each, each using only those li
   conversation  the terminal and the chats as one: every command, a chat, research (Desk, Channel, Talk)
   channels   the chat plugin: Telegram, and tinker channel (TelegramChannel, Channels)
   knowledge  lessons (Knowledge) and learning (Learner, Researcher, Library, Retriever, Embeddings)
+  teaching   asking what Tinker keeps (Asker), and teaching it, checked before anything changes (Teacher)
   session    what every phase works through (Session), and the phase contract (Worker, Phase)
   planning   recall, the spec, the contracts where files meet, and their review
   building   setup, the tests, the code, and fixing until every test passes
@@ -197,7 +198,7 @@ __lazy_modules__ = [
     "argparse", "datetime", "os", "secrets", "shutil", "time", "traceback", "webbrowser", "pathlib",
     "tinkerkit.building", "tinkerkit.conversation", "tinkerkit.finishing", "tinkerkit.graph", "tinkerkit.knowledge",
     "tinkerkit.learning", "tinkerkit.model", "tinkerkit.planning", "tinkerkit.project", "tinkerkit.prompts",
-    "tinkerkit.session", "tinkerkit.settings", "tinkerkit.web", "tinkerkit.workspace",
+    "tinkerkit.session", "tinkerkit.settings", "tinkerkit.teaching", "tinkerkit.web", "tinkerkit.workspace",
 ]
 
 import argparse
@@ -230,6 +231,7 @@ from tinkerkit.planning import Designer, InterfaceReviewer, Recaller, SpecWriter
 from tinkerkit.project import Brief, Outcome, Project, RunChecks, Runs, Tracker, project_store, saved
 from tinkerkit.prompts import Prompts
 from tinkerkit.session import Session
+from tinkerkit.teaching import Asker, Memory, Teacher
 from tinkerkit.settings import (
     CONFIRM_AFTER, Config, DEFAULT_MAX_STALL, ENV_EXAMPLE, ENV_FILE, FIX_PHASES, FORMAT_AFTER, Home, Log,
     PHASES, STATUS_TEXT, clock, first_line, now_text,
@@ -284,7 +286,7 @@ class Cli:
                                                                                                 "confirm"))
     LEARNING = ("learn",)  # the commands that load the model and read the web (but for teaching a command)
     FIELDS = {"reset": False, "config": None, "models": False, "use_model": None, "embed": None, "use_web": None,
-              "calibrate": None, "learn": None, "memory": False, "runs": False, "status": None, "log": None,
+              "calibrate": None, "learn": None, "ask": None, "teach": None, "memory": False, "runs": False, "status": None, "log": None,
               "doctor": False, "task": None, "spec": None, "spec_file": None, "restart": False, "resume": None,
               "amend": None, "add": None, "fix": None, "workdir": None, "web": False, "confirm": False,
               "rename": None, "yes": False, "calls": False, "graph": False}
@@ -475,6 +477,8 @@ class Cli:
             args.rename = Cli.renamed(given.words, parser)
         elif command == "learn":
             args.learn = Cli.learning(given.words, parser)
+        elif command in ("ask", "teach"):
+            setattr(args, field, Cli.non_empty(" ".join(given.words), command, parser))
         elif command == "config":
             if len(given.words) not in (0, 2):
                 parser.error("use tinker config (the settings) or tinker config KEY VALUE")
@@ -578,7 +582,7 @@ class Cli:
 class Commands:
     """The commands that show or change Tinker's settings, models, what it knows and the projects, then
     exit: tinker config, tinker models, tinker use-model, tinker embed, tinker use-web, tinker calibrate,
-    tinker learn, tinker memory, tinker runs, tinker status, tinker log, tinker rename."""
+    tinker learn, tinker ask, tinker teach, tinker memory, tinker runs, tinker status, tinker log, tinker rename."""
 
     def __init__(self, args):
         self.args = args
@@ -600,6 +604,10 @@ class Commands:
             self.calibrate()
         elif args.learn:
             self.learn()
+        elif args.ask:
+            self.ask()
+        elif args.teach:
+            self.teach()
         elif args.memory:
             self.show_memory(args.graph)
         elif args.runs:
@@ -719,7 +727,7 @@ class Commands:
             TaughtCommands.teach(topic, definition)
             return
         model, embeddings, internet = self.learning_tools(option)
-        tracker = Commands.learn_tracker(topic)
+        tracker = Commands.followed(f"Learning {topic}")
         started, ending = time.monotonic(), {"status": "stopped", "headline": f"Learning {topic} did not finish"}
         try:
             ending = self.learned(topic, SlotLearner(model, internet, embeddings, tracker))
@@ -731,12 +739,13 @@ class Commands:
             Models.remember(model)
             took = time.monotonic() - started
             say.title(f"Time taken: {human_duration(took)}", "⏱️")
-            Commands.learn_ended(tracker, ending, took)
+            Commands.tracker_ended(tracker, ending, took)
 
     @staticmethod
-    def learn_tracker(topic):
-        """The learn's one report: what it says and what the model is doing, as a run's tracker keeps them."""
-        tracker = Tracker(f"Learning {topic}")
+    def followed(title):
+        """The one report of a learn, an ask or a teach: what it says and what the model is doing, as a run's
+        tracker keeps them."""
+        tracker = Tracker(title)
         say.follow(tracker.heard)
         return tracker
 
@@ -757,7 +766,7 @@ class Commands:
         return {"status": "blocked", "headline": f"Nothing learned about {topic}", "details": details}
 
     @staticmethod
-    def learn_ended(tracker, ending, seconds):
+    def tracker_ended(tracker, ending, seconds):
         """The end told to the tracker, which leaves the home unless the conversation that started it reads it last."""
         tracker.end(ending, seconds)
         if os.environ.get(conversation.OFF) != "off":
@@ -767,16 +776,63 @@ class Commands:
     def learning_tools(option):
         """(the model in use, the embedding model, the Internet plugin), each checked first: when one is
         not there, nothing is loaded and it says why."""
+        name, settings = Commands.checked_model()
+        embeddings = Embeddings.required(option)
+        internet = Internet.required(option)
+        return Commands.model_in_use(name, settings, "learn"), embeddings, internet
+
+    @staticmethod
+    def checked_model():
+        """(name, settings) of the model in use: selected, installed and measured (else it says what to do)."""
         name, settings = Models.selected()
         Models.installed(name)
         Config.check_model(run=False)
-        embeddings = Embeddings.required(option)
-        internet = Internet.required(option)
-        log = Log(Home.store(), "learn")
+        return name, settings
+
+    @staticmethod
+    def model_in_use(name, settings, log_name):
+        """The model, its calls kept in the home's log of that name (nothing is loaded until it is asked)."""
+        log = Log(Home.store(), log_name)
         say.keep_log(log)
-        model = Model(name, settings, Config.keep_alive(Config.get("keep_alive")), log,
-                      max_growth=float(Config.get("max_growth")))
-        return model, embeddings, internet
+        return Model(name, settings, Config.keep_alive(Config.get("keep_alive")), log,
+                     max_growth=float(Config.get("max_growth")))
+
+    def ask(self):
+        """tinker ask QUESTION: answered from what Tinker keeps alone (no web), each claim citing the item it
+        rests on."""
+        question = self.args.ask
+        model = Commands.model_in_use(*Commands.checked_model(), "teach")
+        memory = Memory(Embeddings.configured())
+        Commands.reported(f"Asking: {first_line(question, 60)}", model,
+                          lambda tracker: Asker(model, memory, tracker).answer(question))
+
+    def teach(self):
+        """tinker teach WHAT: what Tinker keeps corrected by the person, once checked on this machine and on the
+        web (the Internet plugin must be there: nothing is corrected unchecked)."""
+        teaching = self.args.teach
+        name, settings = Commands.checked_model()
+        internet = Internet.required("tinker teach")
+        model, memory = Commands.model_in_use(name, settings, "teach"), Memory(Embeddings.configured())
+        Commands.reported(f"Teaching: {first_line(teaching, 60)}", model,
+                          lambda tracker: Teacher(model, internet, memory, tracker).teach(teaching))
+
+    @staticmethod
+    def reported(title, model, work):
+        """work(tracker) done with the model, its tracker told how it ended (work gives the ending) and how long it
+        took, however it ends; the model unloaded after."""
+        tracker = Commands.followed(title)
+        started, ending = time.monotonic(), {"status": "stopped", "headline": f"{title} did not finish"}
+        try:
+            ending = work(tracker)
+        except SystemExit as stopped:
+            ending = {"status": "blocked", "headline": first_line(str(stopped), 200)}
+            raise
+        finally:
+            model.unload()
+            Models.remember(model)
+            took = time.monotonic() - started
+            say.title(f"Time taken: {human_duration(took)}", "⏱️")
+            Commands.tracker_ended(tracker, ending, took)
 
     @staticmethod
     def print_learned(topic, entry):
