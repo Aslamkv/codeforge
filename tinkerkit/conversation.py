@@ -48,6 +48,7 @@ PAUSE = signal.SIGUSR1                         # to a task run from a terminal: 
 STOP = signal.SIGUSR2                          # ... stop, as Ctrl-C (which a task started in the background ignores)
 RESUME_WAIT = 600                              # seconds such a task waits for the answer before it goes on anyway
 SEEN_EVERY = 30                                # seconds between marks that something waits for the person
+STATUS_EVERY = 10                              # seconds between looks at what Tinker does, for its pinned status
 
 # --- a chat with the model ---------------------------------------------------------------------------------
 CHAT_KEPT = 12                                 # messages of one chat kept as the context of its next reply
@@ -184,6 +185,7 @@ class Desk:
         self.spent = {}  # run -> the seconds its runs took so far (a task's time: done in ...)
         self.consoles = [c for c in channels if isinstance(c, ConsoleChannel)]
         self.said_status = None  # the status said last (a status said again only when it changed)
+        self.exercising = None  # the Reporter of the exercise this conversation follows
         self.echo = not self.consoles  # a task's printed lines go to the terminal too (not to a console's)
 
     def run(self):
@@ -192,6 +194,7 @@ class Desk:
         for channel in self.channels:
             channel.skip_waiting()
         self.say_status(anew=True)
+        self.adopt_exercise()
         if not self.consoles:
             names = ", ".join(c.name for c in self.channels)
             say.info(f"Listening on {names}; projects go in {self.root}. Ctrl-C stops.", "👂")
@@ -265,12 +268,15 @@ class Desk:
         threads = [threading.Thread(target=self.listen, args=(c,), daemon=True) for c in self.channels]
         for thread in threads:
             thread.start()
-        seen = 0.0
+        seen = looked = 0.0
         while any(t.is_alive() for t in threads) and not any(c.closed for c in self.channels):
             time.sleep(0.5)
             if (self.waiting or self.asking) and time.monotonic() - seen >= SEEN_EVERY:
                 seen = time.monotonic()
                 Home.person_seen()  # what waits for the person is theirs: an exercise keeps away meanwhile
+            if time.monotonic() - looked >= STATUS_EVERY:
+                looked = time.monotonic()
+                self.say_status()  # what runs elsewhere (an exercise, a terminal's run) moves on by itself
         raise KeyboardInterrupt
 
     def listen(self, channel):
@@ -289,7 +295,8 @@ class Desk:
         command = command_of(message.text)
         if command not in LOOKS:  # the person comes first: an exercise gives way
             Home.person_seen()
-        if command == "confirm" and message.id:  # a one-time answer: it would only make the chat grow
+        if message.id and (command == "confirm" or exercise_switch(message.text)):  # its answer is in a message
+            # already (the plan's, the exercise's): it would only make the chat grow
             channel.delete(message.chat, message.id)
         if self.settle(channel, message, command):
             return
@@ -372,36 +379,100 @@ class Desk:
         return md(t"⚙️ **{' '.join(words)}**\n{shown:block}")
 
     def exercise(self, channel, chat, words):
-        """exercise LANGUAGE: started as a tinker of its own that outlives this conversation (what it prints goes to
-        the exercise folder's log), its progress in its one message; exercise stop and exercise status: what tinker
-        says, answered in a thread (stopping waits for its build to save itself)."""
+        """exercise LANGUAGE and exercise resume [LANGUAGE]: started as a tinker of its own that outlives this
+        conversation (what it prints goes to the exercise folder's log); exercise stop: told to stop. Both show only
+        in the exercise's one message. exercise status: what tinker says, answered in a thread."""
         if len(words) < 2:
             return USAGE["exercise"]
-        if words[1].lower() not in ("stop", "status"):
+        if words[1].lower() == "stop":
+            return self.stop_exercise()
+        if words[1].lower() != "status":
             return self.start_exercise(words)
         threading.Thread(target=lambda: channel.send(chat, md(t"🏋️ **{' '.join(words)}**\n"
-                                                             t"{self.tinker(words, STOP_WAIT + 60):block}")),
-                         daemon=True).start()
-        return "🛑 Stopping the exercise: its build saves itself first." if words[1].lower() == "stop" else None
-
-    def start_exercise(self, words):
-        folder = projects_folder() / EXERCISE_FOLDER
-        folder.mkdir(parents=True, exist_ok=True)
-        try:
-            with open(folder / "exercise.log", "a", encoding="utf-8") as log:
-                process = tinker_process(words, self.root, log, **{OFF: "off", "NO_COLOR": "1"})
-        except OSError as exc:
-            return md(t"⚠️ **Could not start it:** {exc}")
-        reporter = Reporter(self.channels, " ".join(words), pid=process.pid, on_step=self.say_status)
-        threading.Thread(target=self.follow_exercise, args=(process, reporter), daemon=True).start()
+                                                             t"{self.tinker(words):block}")), daemon=True).start()
         return None
 
-    def follow_exercise(self, process, reporter):
-        """The exercise's message kept up until it ends: its ending shown, its tracker removed."""
-        process.wait()
-        reporter.finish()
-        Home.store().delete("running", str(process.pid))
-        self.say_status()
+    def stop_exercise(self):
+        """The exercise told to stop (its build saves itself first); its message says how it ended."""
+        running_one = exercising_now()
+        if not running_one:
+            return "🤷 No exercise runs: `exercise resume` goes on with the last one"
+        signal_task(running_one["pid"], STOP)
+        self.exercise_says("🛑 Stopping: its build saves itself first")
+        return None
+
+    def start_exercise(self, words):
+        """The exercise started, unless one runs already (one at a time: its message comes to the bottom)."""
+        running_one = exercising_now()
+        if running_one and self.exercising:
+            self.exercise_says("🏋️ It runs already (one at a time): exercise stop first to switch")
+            return None
+        if running_one:
+            return md(t"🏋️ **{running_one['title']}** runs already (one at a time): `exercise stop` first to switch")
+        log = projects_folder() / EXERCISE_FOLDER / "exercise.log"
+        log.parent.mkdir(parents=True, exist_ok=True)
+        start = log.stat().st_size if log.exists() else 0
+        try:
+            with open(log, "a", encoding="utf-8") as output:
+                process = tinker_process(words, self.root, output, **{OFF: "off", "NO_COLOR": "1"})
+        except OSError as exc:
+            return md(t"⚠️ **Could not start it:** {exc}")
+        self.follow_exercise(process.pid, " ".join(words), process.wait, (log, start), anew=True)
+        return None
+
+    def adopt_exercise(self):
+        """As this conversation starts: an exercise that runs and does not report by itself (one a conversation
+        before this one started) has its message kept up here; one that ended without being stopped (its process
+        killed, the computer restarted) goes on. Either way its message comes anew at the bottom of the chat."""
+        exercise, left = exercising_now(), Home.store().get("activity", "exercise")
+        if exercise and not exercise["reports"]:
+            self.follow_exercise(exercise["pid"], exercise["title"], lambda: until_ended(exercise["pid"]), anew=True)
+        elif not exercise and left and not alive(left["pid"]):
+            self.start_exercise(["exercise", "resume", left["language"]])
+
+    def follow_exercise(self, pid, title, ended, log=None, anew=False):
+        """The exercise's message kept up (its tracker) until ended() returns: its ending shown, its tracker
+        removed. One that ended before it kept a tracker shows what it printed to log ((path, from offset)).
+        Every exercise has the one message (its ids kept in the home, "activity"), started, stopped or resumed;
+        anew: the one before is taken out, and it is sent at the bottom."""
+        sent = exercise_board()
+        if anew:
+            self.take_out(sent)
+        reporter = self.exercising = Reporter(self.channels, title, pid=pid, sent=sent,
+                                              on_step=lambda: (keep_exercise_board(sent), self.say_status()))
+        reporter.refresh()
+
+        def follow():
+            ended()
+            printed = printed_since(*log) if log and reporter.tracked() is None else ""
+            reporter.finish()
+            if printed:
+                reporter.say(md(t"⚠️ **{title}**\n{printed:block}"), done=True)
+            keep_exercise_board(sent)
+            if self.exercising is reporter:
+                self.exercising = None
+            Home.store().delete("running", str(pid))
+            self.say_status()
+        threading.Thread(target=follow, daemon=True).start()
+
+    def take_out(self, sent):
+        """The messages of sent ({(channel, chat): ids}) taken out of their chats, and forgotten."""
+        for channel in self.channels:
+            for (name, chat), ids in list(sent.items()):
+                if name == channel.name:
+                    for old in ids or []:
+                        channel.delete(chat, old)
+                    del sent[(name, chat)]
+
+    def exercise_says(self, line):
+        """A line shown as the latest of the exercise's message, which comes to the bottom of the chat."""
+        reporter = self.exercising
+        if reporter is None:
+            return
+        with reporter.lock:
+            reporter.progress.snapshot["latest"] = line
+            reporter.fresh = True
+            reporter.update()
 
     def memory_graph(self, channel, chat, words):
         """memory --graph: the page made (tinker memory --graph) and sent as a file, what tinker printed under it."""
@@ -739,10 +810,11 @@ class Desk:
         return self.process is not None and self.process.poll() is None
 
     def now(self):
-        """What runs now: the task started here, and any run from a terminal ({title, brief, text})."""
+        """What runs now: the task started here, and any run from a terminal ({title, brief, text}). An exercise's
+        are left out: it gives way to the person, so nothing waits for it."""
         progress = self.reporter.progress if self.busy() else None
         here = [{"title": progress.title, "brief": progress.brief(), "text": progress.text()}] if progress else []
-        return here + [described(state) for state in running(self.children())]
+        return here + [described(state) for state in persons_runs(self.children())]
 
     def children(self):
         """The processes of the task started here (served as here, not as elsewhere)."""
@@ -1239,8 +1311,11 @@ class Reporter:
         with self.lock:
             if self.ended:
                 return
-            changed = self.progress.take(self.tracked())
-            if changed or time.monotonic() - self.last_edit >= CLOCK_EVERY:
+            state = self.tracked()
+            went_on = (state or {}).get("resumed", 0) > (self.progress.snapshot.get("resumed") or 0)
+            self.fresh = self.fresh or went_on  # it went on by itself: shown at the bottom, where the person looks
+            changed = self.progress.take(state)
+            if changed or went_on or time.monotonic() - self.last_edit >= CLOCK_EVERY:
                 self.update()
 
     def tracked(self):
@@ -1406,6 +1481,7 @@ class Attached:
     def start(self):
         signal.signal(PAUSE, self.pause)
         signal.signal(STOP, self.stop)
+        self.tracker.change("attached", reports=True)  # a conversation leaves its message to it
         with self.reporter.lock:
             self.reporter.progress.take(self.tracker.state)
             self.reporter.update()
@@ -1491,12 +1567,42 @@ def alive(pid):
     return True
 
 
+def exercise_switch(text):
+    """True for exercise LANGUAGE, exercise resume and exercise stop: shown in the exercise's message alone."""
+    words = text.split()
+    return len(words) > 1 and words[0].lstrip("/").lower() == "exercise" and words[1].lower() != "status"
+
+
+def exercise_board():
+    """The exercise's message ids, as a Reporter keeps them ({(channel, chat): ids})."""
+    kept = Home.store().get("activity", "exercise message") or {}
+    return {tuple(key.split("\t", 1)): ids for key, ids in kept.items()}
+
+
+def keep_exercise_board(sent):
+    Home.store().put("activity", "exercise message", {f"{name}\t{chat}": ids for (name, chat), ids in sent.items()})
+
+
+def printed_since(path, start):
+    """The last lines written to a file after offset start."""
+    with open(path, encoding="utf-8", errors="replace") as file:
+        file.seek(start)
+        return "\n".join(file.read().strip().splitlines()[-10:])
+
+
+def until_ended(pid):
+    """Back once the process (not this one's child) has ended."""
+    while alive(pid):
+        time.sleep(EDIT_EVERY)
+
+
 def described(state):
-    """{title, brief, text, pid, paused} of a run's tracker, as the conversation shows it."""
+    """{title, brief, text, pid, paused, reports} of a run's tracker, as the conversation shows it (reports: the
+    run reports to the chats by itself)."""
     progress = Progress(state.get("title") or "a task")
     progress.take(state)
     return {"title": progress.title, "brief": progress.brief(), "text": progress.text(), "pid": state.get("pid"),
-            "paused": bool(state.get("paused"))}
+            "paused": bool(state.get("paused")), "reports": bool(state.get("reports"))}
 
 
 def signal_task(pid, signum):

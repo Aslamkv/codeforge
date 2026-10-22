@@ -818,14 +818,29 @@ person always comes first.
   `help`, `status`, `runs`, `log`, `memory`, `doctor`, `models`), a one-shot command, and a plan or deletion
   waiting for them), and while any run of theirs works (a run an exercise started is marked
   `exercise` in its tracker). Nothing starts while they are busy. A build that runs when they become busy is
-  stopped as Ctrl-C stops it (it saves itself) and started again, from where it was, once they are not. The
+  stopped as Ctrl-C stops it (it saves itself) and started again, from where it was, once they are not. A model
+  call of the exercise's own (choosing a project, reflecting) is given up at once (`GaveWay`, the `PAUSE` signal
+  it sends itself) and asked again once they are not. A chat
+  never waits for an exercise (`Desk.now` leaves its runs out: no busy note names it). The
   conversation never pauses or stops an exercise's runs for an emergency or a `stop`, and its status shows the
-  exercise when nothing else runs.
+  exercise when nothing else runs (looked at every `STATUS_EVERY` seconds, so it moves on by itself). The
+  exercise's tracker shows its build's: its step after the exercise's, what the model writes now, the spec points
+  passing and the latest line, and a practice project's steps only. Once the person is not busy, it says it goes
+  on, and its message comes to the bottom of the chat (the tracker's `resumed`). As a conversation starts (`adopt_exercise`), it keeps up the message of an exercise that runs, and an exercise
+  that ended without being stopped (killed, the computer restarted) goes on; either way its message is taken
+  out and sent anew at the bottom.
 - **EXR-7** One exercise runs at a time (`Exercises.claim`). Ctrl-C or `exercise stop` (the `STOP` signal) stops
-  its build, keeps everything, and ends with how to go on; `tinker exercise LANGUAGE` goes on from there.
+  its build, keeps everything, and ends with how to go on; `tinker exercise resume [LANGUAGE]` (or
+  `tinker exercise LANGUAGE`) goes on from there: with the language named, else the exercise left last
+  (`Exercises.resumed`; none yet says so). A second exercise does not start while one runs, and says how to switch.
   `exercise status` shows each exercise: whether it runs, its focus, each recent project's measures, and what it
-  does now. `tinker exercise` takes a language, `stop` or `status`. In the conversation, `exercise LANGUAGE`
-  starts it as a tinker of its own that outlives the conversation, its progress in its one message.
+  does now. `tinker exercise` takes a language, `resume [LANGUAGE]`, `stop` or `status`. In the conversation,
+  `exercise LANGUAGE` (or `exercise resume`) starts it as a tinker of its own that outlives the conversation, its
+  progress in its one message: every exercise has the same one (its ids kept in the home), started, stopped
+  (`exercise stop` shows only there) or resumed, and the person's `exercise LANGUAGE`, `resume` or `stop` message
+  is taken out. While one runs, it says so and starts nothing. One that ends before it keeps a
+  tracker shows the last lines it printed. A conversation adopts an exercise whose tracker does not say it
+  `reports` by itself (`Attached` says so).
 
 ## session
 
