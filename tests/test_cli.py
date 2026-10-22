@@ -246,7 +246,7 @@ def test_the_session_holds_what_phases_need(make_project, make_session, make_mod
     model = make_model()
     session = make_session(make_project(), model=model, confirm=False, tracker=tracker)
     assert (session.model, session.confirm, session.tracker, session.cycle) == (model, False, tracker, None)
-    assert model.watch == tracker.live and session.toolchain.test_all == TOOLCHAIN["test_all"]
+    assert session.toolchain.test_all == TOOLCHAIN["test_all"]
     worker = Phase(session)
     assert (worker.s, worker.p, worker.ws) == (session, session.project, session.ws)
 
@@ -304,7 +304,7 @@ def test_format_code_drops_a_formatter_that_fails(session, project_dir, capsys):
     assert (project_dir / "formatted.txt").exists() and session.toolchain.format
     session.project.spec["toolchain"]["format"] = "no-such-formatter-xyz ."
     session.format_code()
-    assert session.toolchain.format == "" and "the formatter does not work" in capsys.readouterr().out
+    assert session.toolchain.format == "" and "The formatter does not work" in capsys.readouterr().out
 
 
 @pytest.mark.spec("SES-3")

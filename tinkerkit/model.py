@@ -10,6 +10,7 @@ lazy import urllib.error
 lazy import urllib.parse
 lazy import urllib.request
 
+from .messages import human_duration, say
 lazy from .prompts import Part, Prompts, PromptTooLarge, Reply
 from .settings import (
     CAPACITY_STEP,
@@ -40,10 +41,8 @@ from .settings import (
     STALL_RETRIES,
     THOUGHT_KEPT,
     Config,
-    Console,
     Home,
     first_line,
-    human_duration,
     now_text,
 )
 lazy from .workspace import ToolError
@@ -52,13 +51,11 @@ lazy from .workspace import ToolError
 class Model:
     """The one model, with the settings its calibration measured: its context, its think setting,
     every prompt within its input budget, every reply up to the longest it writes (a fix: up to
-    fix_max). Every exchange goes to its log (log.add(event)); watch(label, written, thinking,
-    seconds) is told how a reply goes while it is written. quiet (tinker learn): the details of each
-    call go to the log only; the person sees a live line while it writes and a short one when it is
-    asked again."""
+    fix_max). Every exchange, and every detail of a call, goes to its log (log.add(event)); the person
+    sees a live line while it writes (say.live) and a short one when it is asked again."""
 
     def __init__(self, name, settings, keep_alive, log, exclusive=True,
-                 max_growth=DEFAULT_CONFIG["max_growth"], quiet=False):
+                 max_growth=DEFAULT_CONFIG["max_growth"]):
         self.name, self.settings = name, settings
         self.max_tokens, self.num_ctx = int(settings["max_prompt_tokens"]), int(settings["num_ctx"])
         self.think = settings.get("think")
@@ -67,8 +64,7 @@ class Model:
         self.max_reply, self.fix_max = int(settings["max_reply_tokens"]), int(settings["fix_max_tokens"])
         self.keep_alive = keep_alive
         self.options = {"num_batch": int(settings["num_batch"])} if settings.get("num_batch") else {}
-        self.log, self.exclusive, self.max_growth, self.quiet = log, exclusive, max_growth, quiet
-        self.watch = None
+        self.log, self.exclusive, self.max_growth = log, exclusive, max_growth
         self.think_rejected = False
         self.overthought = False    # the last call thought to its cap without an answer
         self.last_thought = ""      # ... and the end of what it thought
@@ -174,8 +170,7 @@ class Model:
 
     def send(self, system, user, tries, shown, done_when):
         return Ollama.chat(self.name, [{"role": "system", "content": system}, {"role": "user", "content": user}],
-                           self.keep_alive, self.request_options(tries.budget), tries.think, shown, done_when,
-                           watch=self.watch, quiet=self.quiet)
+                           self.keep_alive, self.request_options(tries.budget), tries.think, shown, done_when)
 
     def request_options(self, budget):
         options = dict(self.options)
@@ -236,7 +231,7 @@ class Model:
         """Say what happened, log it, and give the crashed runner time to free its memory."""
         self.crashes += 1
         self.note(f"{label}: {self.name} {what} ({first_line(str(exc), 90)}); trying again in {CRASH_RECOVERY}s",
-                  f"🔁 {self.name} crashed; trying again in {CRASH_RECOVERY}s")
+                  f"{self.name} crashed; trying again in {CRASH_RECOVERY}s")
         self.log.add({"label": label, "model": self.name, "error": str(exc), **facts,
                       "budget_now": self.max_tokens, "max_reply_now": self.max_reply})
         Ollama.unload(self.name)
@@ -264,11 +259,11 @@ class Model:
         elif exc.oom and tries.shrink < OOM_RETRIES:
             self.note(f"{label}: out of GPU memory; retrying this request with a prompt budget of "
                       f"{int(self.max_tokens * OOM_SHRINK ** (tries.shrink + 1))} tokens",
-                      "🔁 Out of GPU memory; trying again with a shorter prompt")
+                      "Out of GPU memory; trying again with a shorter prompt")
             tries.shrink += 1
         elif exc.stalled and tries.stalls < STALL_RETRIES:
             self.note(f"{label}: {exc}; reloading the model and retrying",
-                      f"🔁 {self.name} stopped responding; reloading it and trying again")
+                      f"{self.name} stopped responding; reloading it and trying again")
             Ollama.unload(self.name)
             tries.stalls += 1
         elif think not in (None, True, False) and "think" in str(exc).lower():
@@ -348,20 +343,14 @@ class Model:
             self.note(f"reply cut at {tokens_out} tokens")
 
     def step(self, message, started):
-        """A call's step: printed with its time (Console.step), or, when quiet, logged."""
-        if self.quiet:
-            self.log.add({"note": message, "model": self.name, "seconds": round(time.perf_counter() - started, 1)})
-        else:
-            Console.step(message, started)
+        """A call's step, kept in the log with how long it took."""
+        self.log.add({"note": message, "model": self.name, "seconds": round(time.perf_counter() - started, 1)})
 
-    def note(self, detail, friendly=""):
-        """A detail of a call: printed, or, when quiet, logged, with only its friendly words (if any) printed."""
-        if not self.quiet:
-            print(f"  {detail}")
-            return
+    def note(self, detail, retry=""):
+        """A detail of a call, kept in the log; when it is asked again, the person is told in plain words."""
         self.log.add({"note": detail, "model": self.name})
-        if friendly:
-            print(f"     {friendly}")
+        if retry:
+            say.retry(retry)
 
     def check_memory(self):
         """With the model kept loaded, unload it once it grows past max_growth x its first size."""
@@ -395,7 +384,7 @@ class Model:
                 return read(reply)
             except (ValueError, ToolError, AttributeError, TypeError, KeyError) as exc:
                 self.note(f"{label.lower()} not usable: {exc}",
-                          "🔁 That answer could not be used; asking again" if attempt < attempts else "")
+                          "That answer could not be used; asking again" if attempt < attempts else "")
                 parts = self.with_part(parts, Part("Note", f"Your previous reply was not usable ({exc}). Reply "
                                                            f"with ONLY the JSON.", True))
         return None
@@ -485,9 +474,9 @@ class Models:
         lowered = [f"{name} {now} (measured {was})" for name, now, was in
                    (("prompt budget", model.max_tokens, model.calibrated[0]),
                     ("longest reply", model.max_reply, model.calibrated[1])) if now < was]
-        print(f"{model.name} crashed {model.crashes} time(s) this run" + (f"; lowered for this run only: "
-              f"{', '.join(lowered)}" if lowered else "") + f". If crashes keep happening, measure it again: "
-              f"tinker calibrate {model.name}")
+        say.warn(f"{model.name} crashed {model.crashes} time(s) this run" + (f"; lowered for this run only: "
+                 f"{', '.join(lowered)}" if lowered else "") + f". If crashes keep happening, measure it again: "
+                 f"tinker calibrate {model.name}")
 
     @staticmethod
     def context_for(budget, max_reply, context_length):
@@ -543,7 +532,7 @@ class Calibrator:
         self.write_tps = None        # tokens written per second
 
     def run(self):
-        print(f"\nCalibrating {self.name} (once per model; a few minutes)")
+        say.title(f"Calibrating {self.name} (once per model; a few minutes)", "📏")
         started = time.perf_counter()
         facts = Ollama.model_facts(self.name)
         self.check_fit(facts)
@@ -554,8 +543,8 @@ class Calibrator:
         settings = self.settings(facts, think, budget, context, crash, max_reply)
         Ollama.unload(self.name)
         Models.keep(self.name, settings)
-        Console.step(f"calibrated {self.name}: prompts up to {budget} tokens, replies up to {max_reply}, think "
-                     f"{think}", started)
+        say.took(f"Calibrated {self.name}: prompts up to {budget} tokens, replies up to {max_reply}, think {think}",
+                 time.perf_counter() - started)
         return settings
 
     def check_fit(self, facts):
@@ -565,7 +554,8 @@ class Calibrator:
         memory, size = self.gpu_memory(), facts.get("size") or 0
         if not memory or not size:
             return
-        print(f"  {size / 1e9:.1f} GB of weights; {memory / 1e9:.1f} GB of GPU memory")
+        with say.section():
+            say.info(f"{size / 1e9:.1f} GB of weights; {memory / 1e9:.1f} GB of GPU memory", "🧮")
         if size + MEMORY_OVERHEAD > memory:
             raise SystemExit(self.does_not_fit(size, memory))
 
@@ -616,7 +606,9 @@ class Calibrator:
                     continue
                 raise SystemExit(f"{self.name} does not run: {exc}")
             self.measure_chat(content, data)
-            print(f"  think {think!r}; {self.safe_ratio()} chars per token; writes {self.write_tps} tokens a second")
+            with say.section():
+                say.info(f"Thinks with {think!r}; {self.safe_ratio()} chars per token; writes {self.write_tps} "
+                         f"tokens a second", "🧠")
             return think
         return None
 
@@ -649,14 +641,16 @@ class Calibrator:
         reserved the whole context when it loaded); a GGUF runner that crashes on one piece is
         tried once more in pieces (num_batch)."""
         tokens = min(context, PROMPT_TARGET) if gguf else context
-        print(f"  reading {tokens} tokens with a context of {context} (about "
-              f"{round(tokens / max(self.read_speed(), 1))}s)")
+        with say.section():
+            say.step(f"Reading {tokens} tokens with a context of {context} (about "
+                     f"{round(tokens / max(self.read_speed(), 1))}s)…", "📏")
         if self.probe(tokens, context):
             return True
         if gguf and not self.options:
             self.options = {"num_batch": PROBE_BATCH}
             if self.probe(tokens, context):
-                print(f"  read in pieces of {PROBE_BATCH} tokens (num_batch)")
+                with say.section(), say.section():
+                    say.done(f"Read in pieces of {PROBE_BATCH} tokens (num_batch)")
                 return True
             self.options = {}
         return False
@@ -679,7 +673,8 @@ class Calibrator:
         """Noted, after the crashed runner had time to free its memory; Ollama gone ends calibration."""
         if Ollama.installed_models() is None:
             raise SystemExit(f"Ollama stopped answering during calibration: {exc}")
-        print(f"  failed ({first_line(str(exc), 100)})")
+        with say.section(), say.section():
+            say.fail(f"Could not read it ({first_line(str(exc), 100)})")
         self.history.append([tokens, "crashed"])
         Ollama.unload(self.name)
         time.sleep(CRASH_RECOVERY)
@@ -691,7 +686,8 @@ class Calibrator:
         self.history.append([read, "read"])
         if read >= self.best.get("prompt_eval_count", 0):
             self.best = data
-        print(f"  read {read} tokens in {data.get('prompt_eval_duration', 0) / 1e9:.0f}s")
+        with say.section(), say.section():
+            say.done(f"Read {read} tokens in {data.get('prompt_eval_duration', 0) / 1e9:.0f}s")
         return read
 
     def read_speed(self):
@@ -734,13 +730,13 @@ class Ollama:
 
     @staticmethod
     def chat(name, messages, keep_alive, options, think=None, label=None, done_when=None,
-             timeout=REQUEST_TIMEOUT, watch=None, quiet=False):
-        """Stream one chat request (live progress when labelled, in plain words when quiet; watch(label,
-        written, thinking, seconds) is told as it goes). done_when(content) says when the reply is complete: the stream is
+             timeout=REQUEST_TIMEOUT):
+        """Stream one chat request (a live line in plain words when labelled, say.live). done_when(content)
+        says when the reply is complete: the stream is
         closed there, which stops Ollama generating. Returns the final stats chunk with message.content
         set to the reply."""
         payload = Ollama.chat_payload(name, messages, keep_alive, options, think)
-        stream = Stream(label, done_when, watch, quiet)
+        stream = Stream(label, done_when)
         try:
             with urllib.request.urlopen(Ollama.request("/api/chat", payload), timeout=timeout) as response:
                 stream.read(response)
@@ -860,12 +856,12 @@ class Ollama:
 
 
 class Stream:
-    """Reads a streamed reply: collects its content, shows live progress (and tells its watcher), and
+    """Reads a streamed reply: collects its content, shows what the model is doing (say.live), and
     stops early once done_when(content) says the reply is complete, or once the model loops (it writes
     one line again and again): that reply is cut, as one that ran out of room is."""
 
-    def __init__(self, label, done_when, watch=None, quiet=False):
-        self.label, self.done_when, self.watch, self.quiet = label, done_when, watch, quiet
+    def __init__(self, label, done_when):
+        self.label, self.done_when = label, done_when
         self.content, self.written, self.thinking, self.final = "", 0, 0, {}
         self.thought = ""  # the end of what the model thought (kept for a reply cut while thinking)
         self.started = self.last_print = time.perf_counter()
@@ -916,24 +912,10 @@ class Stream:
         now = time.perf_counter()
         if self.label and now - self.last_print >= PROGRESS_EVERY:
             self.last_print, self.progressed = now, True
-            Console.progress(self.plain_status(now) if self.quiet else self.status(now))
-            self.tell_watcher(now - self.started)
+            say.live(self.status(now))
 
     def status(self, now):
-        doing = (f"{self.written} tok written, {self.thinking} tok thinking" if self.written or self.thinking
-                 else "loading model / reading prompt")
-        return f"  ... {self.label}: {doing}, {now - self.started:.0f}s"
-
-    def plain_status(self, now):
-        return f"     ⏳ {plainly(self.written, self.thinking, now - self.started)}"
-
-    def tell_watcher(self, seconds):
-        if not self.watch:
-            return
-        try:
-            self.watch(self.label, self.written, self.thinking, seconds)
-        except Exception:  # whoever watches must never break the reply
-            pass
+        return plainly(self.written, self.thinking, now - self.started)
 
     def complete(self, piece):
         """Checked when a piece may end a block or an object (or every 40 pieces)."""
@@ -947,8 +929,6 @@ class Stream:
         return len(lines) == LOOP_LINES and bool(lines[0].strip()) and len(set(lines)) == 1
 
     def stop_looping(self):
-        if not self.quiet:  # quiet: the cut shows in the logged exchange
-            print(f"  {self.label}: the model is writing one line again and again; stopped (as a cut reply)")
         self.final = {"done_reason": "length", "eval_count": self.written + self.thinking, "looped": True}
         return True
 
@@ -962,7 +942,7 @@ class Stream:
 
     def close(self):
         if self.progressed:
-            Console.clear_progress()
+            say.end_live()
 
 
 def plainly(written, thinking, seconds):

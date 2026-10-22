@@ -2,7 +2,6 @@
 within, and the small helpers every part uses."""
 
 import contextlib
-lazy import datetime
 lazy import difflib
 lazy import hashlib
 lazy import json
@@ -14,6 +13,8 @@ lazy import subprocess
 lazy import sys
 lazy import time
 from pathlib import Path
+
+lazy from .messages import say
 
 
 DEFAULT_CONFIG = frozendict({                      # the settings: what the home's "config" holds overrides these
@@ -241,18 +242,18 @@ class Home:
         command starts fresh. Projects keep their own .tinker folders, so tinker resume works inside them."""
         home = cls.root
         if not home.is_dir():
-            print(f"Nothing to reset: {home} does not exist.")
+            say.info(f"Nothing to reset: {home} does not exist.")
             return
         if home.name != STATE_DIR:
             raise SystemExit(f"Not deleting {home}: it is not a .tinker folder.")
-        print(f"This deletes {home}: Tinker's settings, measured models, what it knows and its list of projects.")
-        print("Projects are not touched (each keeps its own .tinker folder).")
+        say.warn(f"This deletes {home}: Tinker's settings, measured models, what it knows and its list of projects.")
+        say.info("Projects are not touched (each keeps its own .tinker folder).", "📁")
         if not confirmed("Delete it?", "tinker reset", yes):
-            print("Nothing deleted.")
+            say.info("Nothing deleted.")
             return
         shutil.rmtree(home)
         cls.stores.pop(cls.database(), None)
-        print(f"Deleted {home}. The next command starts fresh.")
+        say.done(f"Deleted {home}. The next command starts fresh.")
 
     @staticmethod
     def parts():
@@ -273,15 +274,15 @@ class Home:
         names = cls.known_parts(names)
         held = {name: cls.entries_in(name) for name in names}
         if not any(held.values()):
-            print("Nothing to clear: " + ", ".join(names) + " " + ("is" if len(names) == 1 else "are") + " empty.")
+            say.info("Nothing to clear: " + ", ".join(names) + " " + ("is" if len(names) == 1 else "are") + " empty.")
             return
         cls.show_what_clearing_deletes(held)
         if not confirmed("Delete them?", "it", yes):
-            print("Nothing deleted.")
+            say.info("Nothing deleted.")
             return
         for name in names:
             cls.delete_part(name)
-        print(f"Cleared {', '.join(names)}.")
+        say.done(f"Cleared {', '.join(names)}.")
 
     @classmethod
     def known_parts(cls, names):
@@ -298,9 +299,10 @@ class Home:
 
     @classmethod
     def show_what_clearing_deletes(cls, held):
-        print("This deletes:")
-        for name, entries in held.items():
-            print(f"  {name}: {cls.parts()[name][2]} ({entries} entries)")
+        say.warn("This deletes:")
+        with say.section():
+            for name, entries in held.items():
+                say.item(f"{name}: {cls.parts()[name][2]} ({entries} entries)")
 
     @classmethod
     def delete_part(cls, name):
@@ -341,7 +343,7 @@ class Home:
             new = not cls.database().exists()
             cls.store().connect().close()
             if new:
-                print(f"  created {cls.database()} (Tinker's settings and memory)")
+                say.done(f"Created {cls.database()} (Tinker's settings and memory)")
         except (OSError, SystemExit, sqlite3.Error) as exc:
             raise SystemExit(f"Tinker keeps its settings in {cls.root}, which cannot be written: {exc}")
 
@@ -479,78 +481,6 @@ def confirmed(question, command, yes=False):
 
 def is_number(value):
     return isinstance(value, (int, float)) and not isinstance(value, bool)
-
-
-class Console:
-    """What Tinker prints: each step with when it started and how long it took, a live progress
-    line (on the terminal only), and every whole line given to whoever keeps the run's output."""
-
-    @staticmethod
-    def mirror(see):
-        """Every whole line printed from now on also given to see(line) (a run keeps its output so)."""
-        sys.stdout = Tee(sys.stdout, see)
-        sys.stderr = Tee(sys.stderr, see)
-
-    @staticmethod
-    def step(message, started_at):
-        """[start clock time, duration readable and in seconds] message"""
-        elapsed = time.perf_counter() - started_at
-        began = datetime.datetime.now() - datetime.timedelta(seconds=elapsed)
-        print(f"[{began:%H:%M:%S} {human_duration(elapsed):>7} ({elapsed:.2f}s)] {message}")
-
-    @staticmethod
-    def progress(text):
-        """Redraw one status line in place, on a terminal only (never kept in the run's output): piped, as
-        when a chat follows the command, it would reach the reader as lines of their own. Cut to the
-        terminal width (a wrapped line cannot be redrawn with \\r)."""
-        if not sys.__stdout__.isatty():
-            return
-        width = shutil.get_terminal_size((80, 24)).columns
-        sys.__stdout__.write("\r" + text[:max(width - 1, 10)] + "\033[K")
-        sys.__stdout__.flush()
-
-    @staticmethod
-    def clear_progress():
-        if sys.__stdout__.isatty():
-            sys.__stdout__.write("\r\033[K")
-            sys.__stdout__.flush()
-
-
-class Tee:
-    """Writes to a stream, like `tee`, and gives each whole line to see(line) (which may never break the
-    writing)."""
-
-    def __init__(self, stream, see):
-        self.stream, self.see, self.partial = stream, see, ""
-
-    def write(self, text):
-        self.stream.write(text)
-        for line in self.whole_lines(text):
-            self.show(line)
-        return len(text)
-
-    def whole_lines(self, text):
-        """The lines this text completes; the rest waits for its end."""
-        *lines, self.partial = (self.partial + text).split("\n")
-        return lines
-
-    def show(self, line):
-        try:
-            self.see(line)
-        except Exception:  # keeping the output must never break the run
-            pass
-
-    def flush(self):
-        self.stream.flush()
-
-    def isatty(self):
-        return self.stream.isatty()
-
-    def fileno(self):
-        return self.stream.fileno()
-
-    def __getattr__(self, name):
-        return getattr(self.stream, name)
 
 
 class Store:
@@ -699,13 +629,6 @@ def now_text():
 
 def clock(moment):
     return moment.strftime("%Y-%m-%d %H:%M:%S")
-
-
-def human_duration(seconds):
-    """1762.08 -> '29m 22s'; 4000 -> '1h 6m 40s'; 42.5 -> '42s'."""
-    hours, rest = divmod(int(round(seconds)), 3600)
-    minutes, secs = divmod(rest, 60)
-    return f"{hours}h {minutes}m {secs}s" if hours else (f"{minutes}m {secs}s" if minutes else f"{secs}s")
 
 
 def words(text):

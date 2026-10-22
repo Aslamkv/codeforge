@@ -182,7 +182,7 @@ def test_a_stopped_run_is_put_back_from_its_restore_point(calc, project_dir, cap
     (project_dir / "calc.py").write_text("half-done change\n")
     Verifier(session).recover_interrupted()
     assert (project_dir / "calc.py").read_text() == CALC and project.store.get("restore", Verifier.PENDING) is None
-    assert "the last run stopped while C2 was being worked on: calc.py restored" in capsys.readouterr().out
+    assert "The last run stopped while C2 was being worked on: calc.py restored" in capsys.readouterr().out
 
 
 @pytest.mark.spec("BLD-4")

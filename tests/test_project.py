@@ -9,6 +9,7 @@ from pathlib import Path
 
 import pytest
 
+from tinkerkit.messages import Message, say
 from tinkerkit.project import Brief, Outcome, Project, RunChecks, Runs, SpecDocument, Tracker, project_store, saved
 from tinkerkit.settings import Home
 from tinkerkit.workspace import TaughtCommands, Workspace
@@ -339,22 +340,19 @@ def test_the_tracker_publishes_each_change(home_store, project_dir):
 
 
 @pytest.mark.spec("PRJ-14")
-def test_steps_live_progress_and_printed_lines(home_store, project_dir, monkeypatch):
+def test_steps_live_progress_and_messages(home_store, project_dir, monkeypatch):
     assert set(Tracker.STEPS) >= {"recall", "spec", "design", "review", "setup", "tests", "code", "verify", "tidy", "docs",
                                   "final_review", "lessons", "reproduce", "amend"}
     tracker = Tracker("calc")
     store = project_store(project_dir)
     tracker.project(store, "abc123", project_dir)
-    tracker.live("Write calc.py [think high, reply up to 16K tok]", 120, 30, 14.2)
-    tracker.printed("\x1b[2m[10:00:01      1s (1.00s)]   wrote calc.py (12 lines)\x1b[22m")
-    tracker.printed("  ... still thinking")
+    tracker.heard(Message("live", "writing its answer… 14s", 2, "⏳"))
+    tracker.heard(Message("done", "Wrote calc.py (12 lines)", 1, "✅"))
     state = tracker.state
-    assert state["live"] == "Write calc.py: 120 tok written, 30 tok thinking, 14s"
-    assert state["latest"] == "wrote calc.py (12 lines)"
-    assert [e["line"] for _, e in store.entries("output")] == ["[10:00:01      1s (1.00s)]   wrote calc.py (12 lines)",
-                                                               "  ... still thinking"]
+    assert state["live"] == "writing its answer… 14s" and state["latest"] == "✅ Wrote calc.py (12 lines)"
+    assert [(e["line"], e["kind"]) for _, e in store.entries("output")] == [("   ✅ Wrote calc.py (12 lines)", "done")]
     monkeypatch.setattr(Tracker, "QUIET_EVERY", 1000)
-    tracker.printed("next line")  # a quiet change waits to be published with the next
+    tracker.heard(Message("text", "next line"))  # a quiet change waits to be published with the next
     assert home_store.get("running", str(os.getpid()))["latest"] != "next line"
     tracker.phase("verify")
     assert home_store.get("running", str(os.getpid()))["latest"] == ""
@@ -381,7 +379,12 @@ def test_a_run_keeps_its_calls_and_output_in_its_project(project_dir, make_model
     model.log = Log(store, "events")
     fake_ollama.reply("ok")
     model.ask("s", [Part("Q", "q", True)], "Ask")
-    assert [e["reply"] for _, e in store.entries("events")] == ["ok"]
+    assert [e["reply"] for _, e in store.entries("events") if "reply" in e] == ["ok"]
+    tracker = Tracker("calc")
+    tracker.project(store, "abc123", project_dir)
+    say.follow(tracker.heard)
+    say.done("Wrote calc.py")
+    assert [e["line"] for _, e in store.entries("output")] == ["✅ Wrote calc.py"]
 
 
 @pytest.mark.spec("PRJ-16")

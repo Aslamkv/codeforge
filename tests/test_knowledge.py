@@ -58,7 +58,7 @@ def test_items(capsys):
         ("findings", "What is new? Free threading. (high confidence)"),
         ("code", "match is a soft keyword"), ("spec", "a claim (corroborated)")]
     assert all(i["topic"] == "py" and i["name"] == "Python 3.14" for i in items)
-    assert "what was learned about bad is not readable" in capsys.readouterr().out
+    assert "What was learned about bad is not readable" in capsys.readouterr().out
     assert Library.searched(items[0]) == "Python 3.14: A language."
 
 
@@ -253,7 +253,7 @@ def test_rank_fuses_meaning(monkeypatch, capsys):
             return None
     retriever = Retriever(Broken())
     assert retriever.rank("x", ["a", "b"]) == [0, 1]
-    assert retriever.embeddings is None and "meaning search not used: it broke" in capsys.readouterr().out
+    assert retriever.embeddings is None and "Meaning search not used: it broke" in capsys.readouterr().out
 
 
 @pytest.mark.spec("KNW-9")

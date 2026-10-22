@@ -11,9 +11,10 @@ lazy import subprocess
 lazy import time
 lazy from pathlib import Path
 
+lazy from .messages import human_duration, say
 lazy from .prompts import Part, Prompts, Reply
 from .settings import (
-    COMMAND_TIMEOUT, Config, Console, ENV_EXAMPLE, ENV_FILE, Home, ONLINE_PROBES, OUTPUT_CHARS, SETUP_TIMEOUT, STATE_DIR,
+    COMMAND_TIMEOUT, Config, ENV_EXAMPLE, ENV_FILE, Home, ONLINE_PROBES, OUTPUT_CHARS, SETUP_TIMEOUT, STATE_DIR,
     first_line, now_text,
 )
 
@@ -117,7 +118,7 @@ class Toolchain:
             if code != 0 and self.failed_for_the_network(output):
                 waiting.append(command)
                 if not again:
-                    print(f"  waits for the network: $ {command}")
+                    say.warn(f"`{command}` waits for the network")
             elif code != 0:
                 return False, self.setup_failure(command, code, output), waiting
         return True, "", waiting
@@ -254,7 +255,7 @@ class Workspace:
         proc = self.spawn(command, stdout=subprocess.PIPE, text=True, errors="replace")
         code, output, status = self.finished(proc, timeout)
         if not quiet:
-            Console.step(f"$ {command}  [{status}]", started)
+            say.info(f"Ran `{command}`: {status} ({human_duration(time.perf_counter() - started)})", "▶️")
         return code, (output or "").replace(str(self.root) + os.sep, "")
 
     def spawn(self, command, stdout, **text):
@@ -275,8 +276,8 @@ class Workspace:
     @staticmethod
     def unsafe(command):
         if Workspace.UNSAFE_COMMAND.search(command):
-            print(f"  $ {command}\n    REFUSED: sudo, deleting outside the project, piping a download into a "
-                  f"shell or writing to the system are never run")
+            say.stop(f"Refused `{command}`: sudo, deleting outside the project, piping a download into a "
+                     f"shell or writing to the system are never run")
             return True
         return False
 
@@ -440,7 +441,7 @@ class Workspace:
             return
         env.write_text(self.env_without_placeholders(example.read_text(errors="replace")))
         unset = [l.split("=")[0] for l in env.read_text().splitlines() if l.endswith("=")]
-        print(f"  created {ENV_FILE} from {ENV_EXAMPLE}" + (f"; set {', '.join(unset)} in it" if unset else ""))
+        say.done(f"Created {ENV_FILE} from {ENV_EXAMPLE}" + (f"; set {', '.join(unset)} in it" if unset else ""))
 
     @staticmethod
     def env_without_placeholders(text):
@@ -510,7 +511,7 @@ class TaughtCommands:
         if name not in TaughtCommands.all():
             raise SystemExit(f"{name} was not taught (tinker memory lists the commands taught)")
         Home.store().delete("commands", name)
-        print(f"Forgot the command {name}")
+        say.done(f"Forgot the command {name}")
 
     @staticmethod
     def entry_for(name, definition):
@@ -538,9 +539,9 @@ class TaughtCommands:
     def remember(name, entry):
         entry = dict(entry, taught=now_text())
         Home.store().put("commands", name, entry)
-        print(f"Learned the command {name}: {TaughtCommands.describe(entry)}")
-        print("The toolchain uses it where it fits (each command runs in a new shell: e.g. "
-              f"`{name} && ...`); SPEC.md and README show it spelled out.")
+        say.done(f"Learned the command {name}: {TaughtCommands.describe(entry)}")
+        say.tip("The toolchain uses it where it fits (each command runs in a new shell: e.g. "
+                f"`{name} && ...`); SPEC.md and README show it spelled out.")
 
     @staticmethod
     def look_up(name):

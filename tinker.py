@@ -224,14 +224,15 @@ from tinkerkit.finishing import FinalReview, LessonWriter, ReadmeWriter, Tidy
 from tinkerkit.graph import write_page
 from tinkerkit.knowledge import Embeddings, Library
 from tinkerkit.learning import LearnStopped, SlotLearner
+from tinkerkit.messages import Messages, human_duration, say
 from tinkerkit.model import Calibrator, Model, Models, Ollama, OllamaError
 from tinkerkit.planning import Designer, InterfaceReviewer, Recaller, SpecWriter
 from tinkerkit.project import Brief, Outcome, Project, RunChecks, Runs, Tracker, project_store, saved
 from tinkerkit.prompts import Prompts
 from tinkerkit.session import Session
 from tinkerkit.settings import (
-    CONFIRM_AFTER, Config, Console, DEFAULT_MAX_STALL, ENV_EXAMPLE, ENV_FILE, FIX_PHASES, FORMAT_AFTER, Home, Log,
-    PHASES, STATUS_TEXT, clock, first_line, human_duration, now_text,
+    CONFIRM_AFTER, Config, DEFAULT_MAX_STALL, ENV_EXAMPLE, ENV_FILE, FIX_PHASES, FORMAT_AFTER, Home, Log,
+    PHASES, STATUS_TEXT, clock, first_line, now_text,
 )
 from tinkerkit.web import Internet
 
@@ -350,14 +351,14 @@ class Cli:
     def help(command=None):
         """tinker help: every command; tinker help COMMAND: that command's arguments and options."""
         if command is None:
-            print(Cli.overview_markup() if os.environ.get("TINKER_FORMAT") == "markup" else Cli.overview())
+            say.text(Cli.overview_markup() if os.environ.get("TINKER_FORMAT") == "markup" else Cli.overview())
             raise SystemExit(0)
         if command == "channel" and channels is not None:
-            print(channels.ChannelCommand.USAGE)
+            say.text(channels.ChannelCommand.USAGE)
             raise SystemExit(0)
         if command in Cli.TALK:  # the conversation's own: as said in a session, a chat, or once (tinker COMMAND ...)
             found = BY_NAME[command]
-            print(f"usage: tinker {found.synopsis}\n\n{found.what[0].upper()}{found.what[1:]}.")
+            say.text(f"usage: tinker {found.synopsis}\n\n{found.what[0].upper()}{found.what[1:]}.")
             raise SystemExit(0)
         if command == "confirm":
             command = "resume"
@@ -620,22 +621,22 @@ class Commands:
         """tinker config: the settings a run would use; tinker config KEY VALUE sets one (checked)."""
         if words:
             value = Config.set(words[0], words[1])
-            print(f"{words[0]} is {value!r} now")
+            say.done(f"{words[0]} is {value!r} now")
             return
         name = Config.get("model")
         settings = Models.settings(name) if name else None
-        print(f"home:            {Home.root}")
-        print(f"ollama_url:      {Config.ollama_url()}")
-        print(f"model in use:    {Commands.model_state(name, settings)}")
+        say.text(f"home:            {Home.root}")
+        say.text(f"ollama_url:      {Config.ollama_url()}")
+        say.text(f"model in use:    {Commands.model_state(name, settings)}")
         if settings:
             Commands.print_measured(settings)
         for key in Config.SETTABLE:
             if key not in ("ollama_url",):
-                print(f"{key + ':':16} {Config.get(key)!r}")
-        print(f"web:             {Config.get('web') or 'none'} ({Internet.state()}; used by tinker learn and --web only)")
+                say.text(f"{key + ':':16} {Config.get(key)!r}")
+        say.text(f"web:             {Config.get('web') or 'none'} ({Internet.state()}; used by tinker learn and --web only)")
         embed = Config.get("embed_model") or "none: select one with tinker embed NAME (tinker learn and --web need one)"
-        print(f"embed_model:     {embed}")
-        print("Set one with tinker config KEY VALUE (the model, the embedding model and the web have their own commands).")
+        say.text(f"embed_model:     {embed}")
+        say.text("Set one with tinker config KEY VALUE (the model, the embedding model and the web have their own commands).")
 
     @staticmethod
     def model_state(name, settings):
@@ -648,29 +649,29 @@ class Commands:
     @staticmethod
     def print_measured(settings):
         """What calibration measured for the model in use, and how it thinks."""
-        print(f"input budget:    {settings['max_prompt_tokens']} tokens"
-              + (f" (largest read {settings['largest_prompt_read']}, crashed at {settings['crashed_reading']})"
-                 if settings.get("crashed_reading") else ""))
-        print(f"reply limit:     {settings['max_reply_tokens']} tokens (fixes at most {settings['fix_max_tokens']})")
-        print(f"context:         {settings['num_ctx']} tokens")
+        say.text(f"input budget:    {settings['max_prompt_tokens']} tokens"
+                 + (f" (largest read {settings['largest_prompt_read']}, crashed at {settings['crashed_reading']})"
+                    if settings.get("crashed_reading") else ""))
+        say.text(f"reply limit:     {settings['max_reply_tokens']} tokens (fixes at most {settings['fix_max_tokens']})")
+        say.text(f"context:         {settings['num_ctx']} tokens")
         think = settings.get("think")
         build = Config.get("build_think") if think not in (None, False) else None
-        print(f"think:           {think} for planning" + (f", {build} for building" if build else ""))
-        print(f"chars per token: {settings.get('chars_per_token')}")
+        say.text(f"think:           {think} for planning" + (f", {build} for building" if build else ""))
+        say.text(f"chars per token: {settings.get('chars_per_token')}")
 
     @staticmethod
     def list_models():
         models = Ollama.installed_models()
         if models is None:
             raise SystemExit(f"Ollama does not answer at {Config.ollama_url()} (tinker config ollama_url URL).")
-        print(f"  {'MODEL':36} {'SIZE':>7}  {'PROMPT':>6} {'READ/S':>7} {'WRITE/S':>7}  CALIBRATED")
+        say.text(f"  {'MODEL':36} {'SIZE':>7}  {'PROMPT':>6} {'READ/S':>7} {'WRITE/S':>7}  CALIBRATED")
         for m in models:
             name, s = m.get("name", ""), Models.settings(m.get("name", "")) or {}
             mark = "*" if name == Config.get("model") else " "
-            print(f"{mark} {name[:36]:36} {m.get('size', 0) / 1e9:6.1f}G  {s.get('max_prompt_tokens') or '-':>6} "
-                  f"{s.get('read_tokens_per_s') or '-':>7} {s.get('write_tokens_per_s') or '-':>7}  "
-                  f"{s.get('calibrated', 'not measured: tinker calibrate NAME')}")
-        print("\n* the model in use. Measure one with tinker calibrate NAME, select it with tinker use-model NAME.")
+            say.text(f"{mark} {name[:36]:36} {m.get('size', 0) / 1e9:6.1f}G  {s.get('max_prompt_tokens') or '-':>6} "
+                     f"{s.get('read_tokens_per_s') or '-':>7} {s.get('write_tokens_per_s') or '-':>7}  "
+                     f"{s.get('calibrated', 'not measured: tinker calibrate NAME')}")
+        say.text("\n* the model in use. Measure one with tinker calibrate NAME, select it with tinker use-model NAME.")
 
     @staticmethod
     def use_model(name):
@@ -680,7 +681,7 @@ class Commands:
             raise SystemExit(f"{name} has not been measured: measure it first with tinker calibrate {name} "
                              f"(tinker models lists the models Ollama has)")
         Config.save(model=name)
-        print(f"Model in use: {name}")
+        say.done(f"Model in use: {name}")
 
     @staticmethod
     def embed(name):
@@ -691,14 +692,14 @@ class Commands:
         if embeddings.vectors(["a test"], keep=False) is None:
             raise SystemExit(f"{embeddings.failed}: choose an embedding model (tinker models lists the models Ollama has)")
         Config.save(embed_model=name)
-        print(f"Embedding model: {name}; what was learned is indexed with it from the next tinker learn or run on")
+        say.done(f"Embedding model: {name}; what was learned is indexed with it from the next tinker learn or run on")
 
     @staticmethod
     def use_web(name):
         """tinker use-web NAME: the web search tinker learn and --web use from now on (one of
         Internet.backends()); it says when that one is not usable yet (a missing key)."""
         Config.save(web=name)
-        print(f"Web search: {name}; {Internet.state()}")
+        say.done(f"Web search: {name}; {Internet.state()}")
 
     def calibrate(self):
         """tinker calibrate NAME: measure a model (again)."""
@@ -718,7 +719,7 @@ class Commands:
             TaughtCommands.teach(topic, definition)
             return
         model, embeddings, internet = self.learning_tools(option)
-        tracker = Commands.learn_tracker(topic, model)
+        tracker = Commands.learn_tracker(topic)
         started, ending = time.monotonic(), {"status": "stopped", "headline": f"Learning {topic} did not finish"}
         try:
             ending = self.learned(topic, SlotLearner(model, internet, embeddings, tracker))
@@ -729,15 +730,14 @@ class Commands:
             model.unload()
             Models.remember(model)
             took = time.monotonic() - started
-            print(f"\n⏱️  Time taken: {human_duration(took)}")
+            say.title(f"Time taken: {human_duration(took)}", "⏱️")
             Commands.learn_ended(tracker, ending, took)
 
     @staticmethod
-    def learn_tracker(topic, model):
-        """The learn's one report: what it prints and what the model is doing, as a run's tracker keeps them."""
+    def learn_tracker(topic):
+        """The learn's one report: what it says and what the model is doing, as a run's tracker keeps them."""
         tracker = Tracker(f"Learning {topic}")
-        Console.mirror(tracker.printed)
-        model.watch = tracker.live_plainly
+        say.follow(tracker.heard)
         return tracker
 
     def learned(self, topic, learner):
@@ -772,22 +772,24 @@ class Commands:
         Config.check_model(run=False)
         embeddings = Embeddings.required(option)
         internet = Internet.required(option)
-        model = Model(name, settings, Config.keep_alive(Config.get("keep_alive")), Log(Home.store(), "learn"),
-                      max_growth=float(Config.get("max_growth")), quiet=True)
+        log = Log(Home.store(), "learn")
+        say.keep_log(log)
+        model = Model(name, settings, Config.keep_alive(Config.get("keep_alive")), log,
+                      max_growth=float(Config.get("max_growth")))
         return model, embeddings, internet
 
     @staticmethod
     def print_learned(topic, entry):
-        print(f"\n📘 {entry['name']}: {entry['summary']}")
-        for item in Library.items({Library.slug(entry.get("language") or topic): entry})[1:]:
-            print(f"   • [{item['phase']}] {item['text']}")
-        for contradiction in entry.get("contradictions", []):
-            print(f"   ⚖️  Facts {', '.join(map(str, contradiction['facts']))} disagree: {contradiction['note']}")
-        for gap in entry.get("open", []):
-            print(f"   ❓ Still open (Q{gap['question']}): {gap['missing'] or gap['search']}")
-        for note in entry["notes"]:
-            print(f"   ⚠️  Not learned: {note}")
-        print("💡 A run uses this whenever its request needs it. See everything Tinker learned with: tinker memory")
+        with say.part(f"{entry['name']}: {entry['summary']}", "📘"):
+            for item in Library.items({Library.slug(entry.get("language") or topic): entry})[1:]:
+                say.item(f"[{item['phase']}] {item['text']}")
+            for contradiction in entry.get("contradictions", []):
+                say.info(f"Facts {', '.join(map(str, contradiction['facts']))} disagree: {contradiction['note']}", "⚖️")
+            for gap in entry.get("open", []):
+                say.info(f"Still open (Q{gap['question']}): {gap['missing'] or gap['search']}", "❓")
+            for note in entry["notes"]:
+                say.warn(f"Not learned: {note}")
+        say.tip("A run uses this whenever its request needs it. See everything Tinker learned with: tinker memory")
 
     @staticmethod
     def show_memory(graph=False):
@@ -796,78 +798,78 @@ class Commands:
         if graph:
             Commands.show_graph()
             return
-        print(f"Tinker's home: {Home.root}\nModel in use: {Config.get('model') or 'none'}")
+        say.text(f"Tinker's home: {Home.root}\nModel in use: {Config.get('model') or 'none'}")
         languages, any_language = Home.store().items("languages"), Home.store().get("memory", "any") or {}
         for key, doc in languages.items():
             Commands.print_language(key, doc)
-        print("\nAny language:")
+        say.text("\nAny language:")
         Commands.print_lessons(any_language.get("lessons", []))
         Commands.print_topics(Library.topics())
         Commands.print_taught(TaughtCommands.all())
         retired = sum(len(doc.get("retired", [])) for doc in [*languages.values(), any_language,
                                                               *Library.topics().values()])
         if retired:
-            print(f"\nRetired: {retired} item(s) that did not hold (never shown to the model; tinker memory --graph "
-                  f"shows them, with why)")
-        print("\nForget a part with tinker clear PART, a command with tinker learn NAME none.")
-        print("See it as a graph: tinker memory --graph")
+            say.text(f"\nRetired: {retired} item(s) that did not hold (never shown to the model; tinker memory --graph "
+                     f"shows them, with why)")
+        say.text("\nForget a part with tinker clear PART, a command with tinker learn NAME none.")
+        say.text("See it as a graph: tinker memory --graph")
 
     @staticmethod
     def show_graph():
         graph = write_page(Embeddings.configured())
-        print(f"Tinker's memory: {graph.summary()}")
-        print(f"Similar lessons found by {graph.similar_by}")
-        print(f"Page: {Home.graph_page()}")
+        say.text(f"Tinker's memory: {graph.summary()}")
+        say.text(f"Similar lessons found by {graph.similar_by}")
+        say.text(f"Page: {Home.graph_page()}")
         if sys.stdout.isatty():
             webbrowser.open(Home.graph_page().as_uri())
-            print("Opened in your browser.")
+            say.done("Opened in your browser.")
 
     @staticmethod
     def print_language(key, doc):
         """What a language's projects taught: the toolchain that worked, its fixes, proven facts, lessons."""
-        print(f"\n{doc.get('language', key)} ({key}), {doc.get('projects', 0)} project(s) finished")
+        say.text(f"\n{doc.get('language', key)} ({key}), {doc.get('projects', 0)} project(s) finished")
         if Toolchain(doc.get("toolchain")):
-            print(f"  toolchain: {Toolchain(doc.get('toolchain')).summary()}")
+            say.text(f"  toolchain: {Toolchain(doc.get('toolchain')).summary()}")
         for f in doc.get("fixes", []):
-            print(f"  fix: {first_line(f['failure'], 70)} -> {first_line(f['cause'], 70)} (helped {f.get('used', 0)}"
-                  f"{'; replayed without the model' if f.get('replay') else ''})")
+            say.text(f"  fix: {first_line(f['failure'], 70)} -> {first_line(f['cause'], 70)} (helped {f.get('used', 0)}"
+                     f"{'; replayed without the model' if f.get('replay') else ''})")
         for fact in doc.get("facts", []):
-            print(f"  proven fact [{fact.get('phase')}]: {first_line(fact.get('text', ''), 100)}")
+            say.text(f"  proven fact [{fact.get('phase')}]: {first_line(fact.get('text', ''), 100)}")
         Commands.print_lessons(doc.get("lessons", []))
 
     @staticmethod
     def print_lessons(lessons):
         for lesson in lessons:
-            print(f"  lesson [{lesson.get('phase')}, {lesson.get('status', 'candidate')}, seen {lesson.get('seen', 1)}x]: "
-                  f"{lesson.get('text')}")
+            say.text(f"  lesson [{lesson.get('phase')}, {lesson.get('status', 'candidate')}, seen {lesson.get('seen', 1)}x]: "
+                     f"{lesson.get('text')}")
         if not lessons:
-            print("  no lessons yet")
+            say.text("  no lessons yet")
 
     @staticmethod
     def print_topics(topics):
-        print("\nLearned from the web (tinker learn WHAT):" + ("" if topics else " nothing yet"))
+        say.text("\nLearned from the web (tinker learn WHAT):" + ("" if topics else " nothing yet"))
         for slug, entry in topics.items():
             kind = "language" if entry.get("kind") == "language" else "topic"
-            print(f"  {slug} ({kind}): {entry.get('name', slug)}, learned {entry.get('learned', '?')}, "
-                  f"{len(entry.get('facts', []))} fact(s): {first_line(str(entry.get('summary', '')), 80)}")
+            say.text(f"  {slug} ({kind}): {entry.get('name', slug)}, learned {entry.get('learned', '?')}, "
+                     f"{len(entry.get('facts', []))} fact(s): {first_line(str(entry.get('summary', '')), 80)}")
 
     @staticmethod
     def print_taught(taught):
-        print("\nYour commands (tinker learn NAME):" + ("" if taught else " none yet"))
+        say.text("\nYour commands (tinker learn NAME):" + ("" if taught else " none yet"))
         for name, entry in taught.items():
-            print(f"  {name}: {TaughtCommands.describe(entry)}")
+            say.text(f"  {name}: {TaughtCommands.describe(entry)}")
 
     @staticmethod
     def list_runs():
         entries = sorted(Runs.entries(), key=lambda e: e.get("updated", ""), reverse=True)
         if not entries:
-            print("No runs yet.")
+            say.text("No runs yet.")
             return
-        print(f"{'PROJECT':9} {'STATUS':14} {'UPDATED':17} {'FOLDER':32} TASK")
+        say.text(f"{'PROJECT':9} {'STATUS':14} {'UPDATED':17} {'FOLDER':32} TASK")
         for e in entries:
             task = Commands.task_of(e)
-            print(f"{'@' + e.get('id', '?'):9} {e.get('status', '?'):14} {e.get('updated', ''):17} "
-                  f"{Commands.short_folder(e.get('workdir', '')):32} {task[:60] + ('...' if len(task) > 60 else '')}")
+            say.text(f"{'@' + e.get('id', '?'):9} {e.get('status', '?'):14} {e.get('updated', ''):17} "
+                     f"{Commands.short_folder(e.get('workdir', '')):32} {task[:60] + ('...' if len(task) > 60 else '')}")
 
     @staticmethod
     def short_folder(workdir):
@@ -888,26 +890,26 @@ class Commands:
         workdir = Runs.workdir(name, workdir_arg)
         run = Runs.read_record(workdir)
         spec = saved(workdir, "spec", "plan")
-        print(f"Run {run['id']} ({run.get('status', '?')}, updated {run.get('updated', '?')}): {first_line(run['task'])}")
-        print(f"Project: {workdir}   Language: {(spec or {}).get('language', '?')}")
+        say.text(f"Run {run['id']} ({run.get('status', '?')}, updated {run.get('updated', '?')}): {first_line(run['task'])}")
+        say.text(f"Project: {workdir}   Language: {(spec or {}).get('language', '?')}")
         if not spec or not spec.get("steps"):
-            print("No spec yet (planned on the next tinker resume).")
+            say.text("No spec yet (planned on the next tinker resume).")
             return
         Commands.print_criteria(spec["steps"])
         for c in spec.get("cycles", []):
             if c.get("phase") != "done":
                 waits = " (its plan waits for your confirm)" if c.get("awaiting") else ""
-                print(f"  {'project' if c['id'] == 'base' else c.get('kind', 'feature') + ' ' + c['id']}: next phase "
-                      f"{c.get('phase')}{waits}")
+                say.text(f"  {'project' if c['id'] == 'base' else c.get('kind', 'feature') + ' ' + c['id']}: next phase "
+                         f"{c.get('phase')}{waits}")
 
     @staticmethod
     def print_criteria(steps):
         """How many criteria pass; each one's status, and a parked one's last error."""
-        print(f"{sum(1 for s in steps if s['status'] == 'green')}/{len(steps)} criteria pass")
+        say.text(f"{sum(1 for s in steps if s['status'] == 'green')}/{len(steps)} criteria pass")
         for s in steps:
-            print(f"  {s['id']:5} {STATUS_TEXT.get(s['status'], s['status']):11} {s['title'][:50]:50} {s['test']}")
+            say.text(f"  {s['id']:5} {STATUS_TEXT.get(s['status'], s['status']):11} {s['title'][:50]:50} {s['test']}")
             if s["status"] == "blocked" and s.get("last_error"):
-                print(f"        last error: {first_line(s['last_error'], 110)}")
+                say.text(f"        last error: {first_line(s['last_error'], 110)}")
 
     @staticmethod
     def show_log(name, workdir_arg, calls=False):
@@ -919,16 +921,16 @@ class Commands:
             Commands.print_calls(store)
             return
         for _, entry in store.entries("output"):
-            print(entry.get("line", ""))
+            say.text(entry.get("line", ""))
 
     @staticmethod
     def print_calls(store):
-        """Each model call: when, what, an error, and the start of its reply."""
+        """Each model call and detail: when, what, an error, and the start of its reply."""
         for _, entry in store.entries("events"):
-            print(f"[{entry['time']}] {entry.get('label', '')}" + (f"  error: {entry['error']}" if entry.get("error")
-                                                                    else ""))
+            say.text(f"[{entry['time']}] {entry.get('label') or entry.get('note', '')}"
+                     + (f"  error: {entry['error']}" if entry.get("error") else ""))
             if entry.get("reply"):
-                print("\n".join(f"    {line}" for line in str(entry["reply"]).splitlines()[:40]))
+                say.text("\n".join(f"    {line}" for line in str(entry["reply"]).splitlines()[:40]))
 
     @staticmethod
     def rename(name, new, workdir_arg):
@@ -943,7 +945,7 @@ class Commands:
         workdir.rename(target)
         run = dict(project.run, workdir=str(target))
         Runs.save(run, target)
-        print(f"Renamed: {workdir} -> {target}")
+        say.done(f"Renamed: {workdir} -> {target}")
 
 
 class Doctor:
@@ -957,12 +959,14 @@ class Doctor:
         for required, name, check in self.checks():
             try:
                 found = check()
-                print(f"  ✓ {name}: {found}")
+                say.done(f"{name}: {found}")
             except SystemExit as exc:
                 problems += required
-                print(f"  {'✗' if required else '·'} {name}: {exc}")
-        print("\nEverything Tinker needs is there." if not problems else
-              f"\n{problems} thing(s) to fix before a build can run.")
+                (say.fail if required else say.warn)(f"{name}: {exc}")
+        if problems:
+            say.title(f"{problems} thing(s) to fix before a build can run.", Messages.ICONS["stop"])
+        else:
+            say.title("Everything Tinker needs is there.", "🎉")
         if problems:
             raise SystemExit(1)
 
@@ -1037,7 +1041,7 @@ class ProjectRun:
         if self.args.restart:  # this folder's task again, in the folder emptied first
             spec = self.args.spec
             Runs.clear_folder(workdir, Path(spec).expanduser().resolve() if spec else None, self.args.yes)
-        Console.mirror(self.tracker.printed)
+        say.follow(self.tracker.heard)
         self.open()
         listening = conversation.attach(self.tracker.state["title"], self.tracker)
         urgent = False
@@ -1078,32 +1082,33 @@ class ProjectRun:
         project = Project.load(workdir, self.record)
         self.tracker.project(project.store, self.record["id"], workdir, f"{workdir.name}: {self.record['task']}")
         self.log = Log(project.store, "events")
+        say.keep_log(self.log)
         model = Model(model_name, settings, Config.keep_alive(Config.get("keep_alive")), self.log,
                       max_growth=float(Config.get("max_growth")))
         self.record["model"] = model.name
-        print(f"Started: {clock(self.started_at)}")
         self.print_header(model, workdir)
         self.log.add({"label": "session start", "mode": self.mode, "model": model.name,
                       "started": clock(self.started_at)})
         self.session = Session(model, project, DEFAULT_MAX_STALL, self.internet, confirm=args.confirm,
                                tracker=self.tracker)
         if project.language:
-            print(f"learned so far: {self.session.knowledge.summary()}")
+            say.info(f"Learned so far: {self.session.knowledge.summary()}", "🧠")
 
     def print_header(self, model, workdir):
         run, mode, args = self.record, self.mode, self.args
         change = "fixing a bug" if args.bug else "adding a feature"
         doing = {"new": "restarting" if self.args.restart else "new", "resume": "resuming", "change": change}[mode]
-        print(f"Run {run['id']} ({doing}): {run['task']}")
-        if mode == "change":
-            print(f"  request: {first_line(args.change_request, 200)}")
-        print(f"model {model.name} (calibrated {model.settings.get('calibrated', '?')})   context {model.num_ctx}   "
-              f"input budget {model.max_tokens} tok   think {model.think}"
-              + (f" (building: {model.build_think})" if model.build_think and model.build_think != model.think else "")
-              + f"   keep_alive {model.keep_alive}")
-        print(f"reply limit per call (thinking included): {model.max_reply} tokens (the longest it writes); "
-              f"fixes at most {model.fix_max}")
-        print(f"Project: {workdir}")
+        with say.part(f"Run {run['id']} ({doing}): {run['task']}", "🚀"):
+            if mode == "change":
+                say.info(f"Request: {first_line(args.change_request, 200)}", "✏️")
+            say.info(f"Project: {workdir}", "📁")
+            say.info(f"Model: {model.name}; started {clock(self.started_at)}", "🤖")
+        say.detail(f"model {model.name} (calibrated {model.settings.get('calibrated', '?')})   context {model.num_ctx}   "
+                   f"input budget {model.max_tokens} tok   think {model.think}"
+                   + (f" (building: {model.build_think})" if model.build_think and model.build_think != model.think
+                      else "")
+                   + f"   keep_alive {model.keep_alive}   reply limit per call (thinking included): {model.max_reply} "
+                     f"tokens; fixes at most {model.fix_max}")
 
     def work_safely(self):
         """work, saved whatever happens: Ollama failing, Ctrl-C, a stop, or a bug (reported, so
@@ -1111,15 +1116,17 @@ class ProjectRun:
         try:
             self.work()
         except OllamaError as exc:
-            print(f"\n{exc}")
+            say.title(str(exc), Messages.ICONS["fail"])
         except KeyboardInterrupt:
-            print("\nInterrupted.")
+            say.title("Interrupted", Messages.ICONS["stop"])
         except SystemExit as exc:
-            if exc.code not in (None, 0):
-                print(f"\n{exc.code}" if isinstance(exc.code, str) else "")
+            if exc.code not in (None, 0) and isinstance(exc.code, str):
+                say.title(exc.code, Messages.ICONS["stop"])
         except Exception as exc:  # a bug must not lose the run: report it, save, and say how to continue
             details = traceback.format_exc()
-            print(f"\nUnexpected error: {type(exc).__name__}: {first_line(str(exc), 300)}\n{details.rstrip()}")
+            say.title(f"Unexpected error: {type(exc).__name__}: {first_line(str(exc), 300)}", Messages.ICONS["fail"])
+            with say.section():
+                say.text(details.rstrip())
             self.log.add({"label": "unexpected error", "error": details})
         finally:
             self.save()
@@ -1133,7 +1140,7 @@ class ProjectRun:
             self.confirm_or_amend(cycle)
         if cycle is None:
             CycleRunner(session).show_plan()
-            print("  every cycle of this run is done; add a feature with tinker add, or fix a bug with tinker fix")
+            say.done("Every cycle of this run is done; add a feature with tinker add, or fix a bug with tinker fix")
             self.outcome.set("done")
             return
         self.outcome.set(CycleRunner(session).run(cycle, web=self.internet is not None))
@@ -1169,12 +1176,12 @@ class ProjectRun:
     def confirm_or_amend(self, cycle):
         """The plan that waits for the person: changed as they ask, or confirmed."""
         if self.args.amend:
-            print("\nPlan: changing it as you asked")
+            say.title("Plan: changing it as you asked", "✏️")
             self.tracker.phase("amend")
             self.amend(cycle, self.args.amend)
         else:
             cycle["awaiting"], cycle["confirmed"] = False, True
-            print("Plan confirmed: building it")
+            say.done("Plan confirmed: building it")
             self.session.save()
 
     def amend(self, cycle, change):
@@ -1207,19 +1214,19 @@ class ProjectRun:
         self.print_summary()
         ended_at = datetime.datetime.now()
         wall = (ended_at - self.started_at).total_seconds()
-        print(f"Started: {clock(self.started_at)}   Ended: {clock(ended_at)}   Wall-clock time: {human_duration(wall)}")
         times = {"started": clock(self.started_at), "ended": clock(ended_at), "wall_seconds": round(wall, 1)}
         self.log.add({"label": "session end", "status": self.outcome.status, **times})
         self.record["last_session"] = times
         Runs.save(self.record, self.session.project.workdir)
         total = time.perf_counter() - self.script_started
-        print(f"Total execution time: {total:.2f}s ({human_duration(total)})")
+        say.title(f"Time taken: {human_duration(wall)} (started {clock(self.started_at)}, ended {clock(ended_at)})",
+                  "⏱️")
+        say.detail(f"total execution time: {total:.2f}s")
         self.tracker.end(self.ending, total)
 
     def print_summary(self):
         """What happened, for the terminal; the same as data (self.ending) for the tracker."""
         status = self.outcome.status
-        print("\n" + "=" * 60)
         self.ending = {"status": status, "headline": "", "details": [], "next": []}
         if status == "done":
             self.summary_done()
@@ -1231,8 +1238,9 @@ class ProjectRun:
             run_id = self.record["id"]
             self.ending["headline"] = f"Run {run_id} is not finished. Progress is saved"
             self.ending["next"] = [("Continue it", f"tinker resume @{run_id}")]
-            print(f"{self.ending['headline']}; continue with:\n  tinker resume @{run_id}")
-        print(f"Log: tinker log @{self.record['id']}")
+            say.title(self.ending["headline"], "⏸️")
+            say.tip(f"Continue with: tinker resume @{run_id}")
+        say.tip(f"Everything it said: tinker log @{self.record['id']}")
 
     def summary_done(self):
         project, run_id = self.session.project, self.record["id"]
@@ -1240,20 +1248,22 @@ class ProjectRun:
         if failing:  # the README's examples are how a person uses it: one that fails is said first
             headline = (f"Done, but {len(failing)} README example(s) do not print what they say (all "
                         f"{len(project.criteria)} spec tests pass)")
-            print(f"{headline}:" + "".join(f"\n  - {f}" for f in failing))
+            with say.part(f"{headline}:", Messages.ICONS["warn"]):
+                for failure in failing:
+                    say.item(failure)
         else:
             headline = f"Done. All {len(project.criteria)} spec tests pass (SPEC.md)."
-            print(headline)
+            say.title(headline, "🎉")
         self.ending.update(headline=headline, details=[("README example", f) for f in failing])
         if project.toolchain.run:
-            print(f"Run it: cd {project.workdir} && {project.toolchain.run}")
+            say.info(f"Run it: cd {project.workdir} && {project.toolchain.run}", "▶️")
             self.ending["details"].append(("Run it", project.toolchain.run))
         if (project.workdir / ENV_EXAMPLE).is_file():
-            print(f"Settings: {ENV_FILE} (defaults in {ENV_EXAMPLE}).")
+            say.info(f"Settings: {ENV_FILE} (defaults in {ENV_EXAMPLE}).", "⚙️")
             self.ending["details"].append(("Settings", f"{ENV_FILE} (defaults in {ENV_EXAMPLE})"))
         if any(f.get("role", "").lower().startswith("adapter") for f in project.files.values()):
-            print("The tests use sample data instead of external services: try those by hand with real settings.")
-        print(f'Add a feature with: tinker add @{run_id} "..."; fix a bug with: tinker fix @{run_id} "..."')
+            say.tip("The tests use sample data instead of external services: try those by hand with real settings.")
+        say.tip(f'Add a feature with: tinker add @{run_id} "..."; fix a bug with: tinker fix @{run_id} "..."')
         self.ending["next"] = [("➕ Add a feature", f'tinker add @{run_id} "..."'),
                                ("🐞 fix a bug", f'tinker fix @{run_id} "..."')]
 
@@ -1263,9 +1273,9 @@ class ProjectRun:
         run_id = self.record["id"]
         plan = self.waiting_plan()
         self.print_plan(plan)
-        print(f"Its folder: {plan['folder']}   (rename it: tinker rename @{run_id} NAME)")
-        print(f"Build it: tinker confirm @{run_id}   (in the chat: confirm)")
-        print(f"Change it: tinker amend @{run_id} CHANGE   (in the chat: amend WHAT)")
+        say.info(f"Its folder: {plan['folder']}   (rename it: tinker rename @{run_id} NAME)", "📁")
+        say.tip(f"Build it: tinker confirm @{run_id}   (in the chat: confirm)")
+        say.tip(f"Change it: tinker amend @{run_id} CHANGE   (in the chat: amend WHAT)")
         self.ending.update(headline=f"Its plan waits for your confirm: tinker confirm @{run_id}")
         self.tracker.wait(plan)
 
@@ -1282,22 +1292,28 @@ class ProjectRun:
     @staticmethod
     def print_plan(plan):
         runs = f"; a person runs it with: {plan['start']}" if plan["start"] else ""
-        heading = "🐞 Bug shown for" if plan["kind"] == "fix" else "📋 Plan for"
-        print(f"{heading} {plan['name']} (run {plan['run']}): {plan['language']}{runs}")
-        if plan["changes"]:
-            print("What changed:" + "".join(f"\n  {line}" for line in plan["changes"]))
-        print("Tested before any code is written:")
-        for criterion_id, behaviour in plan["criteria"]:
-            print(f"  {criterion_id}  {behaviour}")
-        if plan["non_goals"]:
-            print(f"Not included: {'; '.join(plan['non_goals'])}")
+        heading, icon = ("Bug shown for", "🐞") if plan["kind"] == "fix" else ("Plan for", "📋")
+        say.title(f"{heading} {plan['name']} (run {plan['run']}): {plan['language']}{runs}", icon)
+        with say.section():
+            if plan["changes"]:
+                with say.part("What changed:", "✏️"):
+                    for line in plan["changes"]:
+                        say.item(line)
+            with say.part("Tested before any code is written:", "🧪"):
+                for criterion_id, behaviour in plan["criteria"]:
+                    say.text(f"{criterion_id}  {behaviour}")
+            if plan["non_goals"]:
+                say.info(f"Not included: {'; '.join(plan['non_goals'])}", "🚫")
 
     def summary_blocked(self):
         """Why it stopped: a bug no test showed, a project that does not build, tools that do not
         work, or criteria parked."""
         run_id = self.record["id"]
         lines = self.why_blocked(self.session, run_id)
-        print("\n".join(lines))
+        say.title(lines[0], Messages.ICONS["stop"])
+        with say.section():
+            for line in lines[1:]:
+                say.text(line)
         self.ending.update(headline=lines[0], details=[("Then", line.strip()) for line in lines[1:]],
                            next=[("Continue it", f"tinker resume @{run_id}")])
 
@@ -1324,7 +1340,7 @@ class ProjectRun:
 
     def go_on_after_emergency(self):
         """Stopped to answer an emergency from a chat, now answered: the run goes on, as tinker resume."""
-        print("\nAn emergency from a chat is answered: resuming.")
+        say.title("An emergency from a chat is answered: resuming.", "🚨")
         sys.stdout.flush()
         os.execv(sys.executable, [sys.executable, str(Path(sys.argv[0]).resolve()), "resume", f"@{self.record['id']}"])
 
@@ -1348,7 +1364,7 @@ class ProjectFolder:
             count += 1
             folder = root / f"{name}-{count}"
         folder.mkdir()
-        print(f"Project folder: {folder}")
+        say.info(f"Project folder: {folder}", "📁")
         return folder
 
     @staticmethod
@@ -1417,21 +1433,26 @@ class CycleRunner:
 
     def recall_first(self, cycle):
         """A run with --web past its recall phase: what the rest of the cycle needs is learned first."""
-        print(f"\n{Recaller.TITLE} (with --web, before {cycle['phase']})")
         if self.s.tracker is not None:
             self.s.tracker.phase("recall")
-        Recaller(self.s).run(cycle)
+        with say.part(f"{Recaller.TITLE} (with --web, before {cycle['phase']})", Tracker.icon("recall")):
+            Recaller(self.s).run(cycle)
 
     def run_phase(self, phase, cycle):
         """Runs one phase; only setup, verify, the final review and reproduce can stop
         the cycle (they return False). The plan is made at the model's full think setting; building
         from it at build_think."""
         worker = self.phase_class(phase)(self.s)
-        if worker.TITLE:
-            print(f"\n{worker.TITLE}" + (f" ({'project' if cycle['id'] == 'base' else 'feature ' + cycle['id']})"
-                                          if phase == "spec" else ""))
         self.s.model.building = worker.BUILDS
-        return worker.run(cycle)
+        if not worker.TITLE:
+            return worker.run(cycle)
+        started = time.perf_counter()
+        with say.part(worker.TITLE + (f" ({'project' if cycle['id'] == 'base' else 'feature ' + cycle['id']})"
+                                      if phase == "spec" else ""), Tracker.icon(phase)):
+            went = worker.run(cycle)
+            if went is not False:
+                say.took(Tracker.done_words(phase), time.perf_counter() - started)
+        return went
 
     @staticmethod
     def phase_class(phase):
@@ -1462,14 +1483,14 @@ class CycleRunner:
         """The knowledge used in a step that failed is discarded (it did not hold)."""
         gone = self.s.knowledge.disprove(cycle.get("used", {}), self.s.failed_phases(phase))
         if gone:
-            print(f"  {gone} lesson(s) and fact(s) used in this step are discarded: they did not hold")
+            say.info(f"{gone} lesson(s) and fact(s) used in this step are discarded: they did not hold", "🗑️")
         self.s.save()
 
     def show_plan(self):
-        print(f"Plan: {len(self.p.criteria)} spec criteria (see SPEC.md)")
-        for s in self.p.criteria:
-            print(f"  {s['id']:5} [{STATUS_TEXT.get(s['status'], s['status'])}] effort {s.get('effort', 2)} "
-                  f"{s['title']}  -> {s['test']}")
+        with say.part(f"Plan: {len(self.p.criteria)} spec criteria (see SPEC.md)", "📋"):
+            for s in self.p.criteria:
+                say.text(f"{s['id']:5} [{STATUS_TEXT.get(s['status'], s['status'])}] effort {s.get('effort', 2)} "
+                         f"{s['title']}  -> {s['test']}")
 
 
 if __name__ == "__main__":

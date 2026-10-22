@@ -13,6 +13,8 @@ Tell Tinker what you want. Tinker plans it, builds it, tests it, and learns some
 - 📒 **Remembers.** Each run makes the next one faster.
 - 🔁 **Any model.** Switch the AI whenever you like.
 - 💬 **One conversation.** The terminal and a chat app are the same Tinker.
+- 🗣️ **Speaks plainly.** Every command says what it does in plain words, the same in the terminal and
+  in a chat. The technical details (tokens, timings, settings tried) go to the log.
 
 ## What You Need 🧰
 
@@ -93,6 +95,19 @@ Tinker builds it straight through:
 tinker task a calculator in Python
 ```
 
+It says each step as it goes, and how long it took (the ⏳ line is redrawn in place while the model works):
+
+```text
+📝 Plan: the spec (project)
+   📋 Language: Python; 3 criteria; files: calc.py, test_calc.py, README.md
+   ✅ Spec written (42s)
+
+🔁 Verify (until every test passes)
+   🎯 C2 (2/3 pass): calc.sub(5, 3) is 2
+      ⏳ thinking… 1m 4s
+   ✅ C2 passes (3/3 pass)
+```
+
 See the plan first (in the conversation, `tinker` alone, it always waits). Build it, or change it
 first (it waits again). Name the project with `@` and its folder or ID:
 
@@ -133,7 +148,7 @@ tinker add @calc-py a history of past results
 tinker fix @calc-py typing 2/0 crashes, it should say "cannot divide by zero"
 ```
 
-See how a project is going, and what its runs printed (or its model calls):
+See how a project is going, and what its runs said (or its model calls and the details):
 
 ```sh
 tinker status @calc-py

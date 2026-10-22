@@ -107,7 +107,7 @@ def test_required_and_state_with_a_backend_ready(capsys):
     Config.save(web="ollama", web_fallback="duckduckgo")
     internet = Internet.required("tinker learn")
     assert internet.describe() == "duckduckgo"
-    assert "web: ollama: no Ollama API key" in capsys.readouterr().out
+    assert "Web: ollama: no Ollama API key" in capsys.readouterr().out
     assert Internet.state().startswith("ready: duckduckgo; not usable: ollama")
 
 

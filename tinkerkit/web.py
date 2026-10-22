@@ -12,6 +12,7 @@ lazy import urllib.parse
 lazy import urllib.request
 
 lazy from .fetcher import Fetcher
+from .messages import say
 from .settings import Config, first_line, is_number
 
 
@@ -62,7 +63,7 @@ class Internet:
         if not internet.available():
             raise SystemExit(f"{option} needs the Internet plugin: {internet.why()}")
         for reason in internet.skipped:
-            print(f"  web: {reason}; using {internet.describe()}")
+            say.warn(f"Web: {reason}; using {internet.describe()}")
         return internet
 
     @staticmethod
@@ -206,7 +207,7 @@ class Internet:
         self.failures[backend.name] = self.failures.get(backend.name, 0) + 1
         if self.failures[backend.name] >= self.GONE_AFTER and backend in self.backends_used:
             self.backends_used.remove(backend)
-            print(f"  web: not asking {backend.name} again ({first_line(why, 120)})")
+            say.warn(f"Web: not asking {backend.name} again ({first_line(why, 120)})")
             if not self.backends_used:
                 self.gone = why
 

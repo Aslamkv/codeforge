@@ -8,6 +8,7 @@ import urllib.request
 import pytest
 
 import tinkerkit.model as model_module
+from tinkerkit.messages import say
 from tinkerkit.model import Calibrator, Model, Models, Ollama, OllamaError, Stream
 from tinkerkit.prompts import Part, Prompts, PromptTooLarge, Reply
 from tinkerkit.settings import CHARS_PER_TOKEN, Config, Home, PROMPT_HEADROOM
@@ -164,19 +165,15 @@ def test_stream_keeps_the_end_of_the_thought(monkeypatch):
 
 
 @pytest.mark.spec("MOD-9")
-def test_stream_tells_its_watcher_how_the_reply_goes(monkeypatch):
+def test_stream_says_live_what_the_model_is_doing(monkeypatch):
     clock = iter([0, 3, 6])
     monkeypatch.setattr(model_module.time, "perf_counter", lambda: next(clock))
-    monkeypatch.setattr(model_module.Console, "progress", staticmethod(lambda text: None))
     seen = []
-
-    def watch(label, written, thinking, seconds):
-        seen.append((label, written, thinking, seconds))
-        raise RuntimeError("a watcher failing never breaks the reply")
-    stream = Stream("Write calc.py", None, watch)
+    say.follow(lambda message: seen.append(message.text) if message.kind == "live" else None)
+    stream = Stream("Write calc.py", None)
     stream.take({"message": {"thinking": "hm"}})
     stream.take({"message": {"content": "x"}})
-    assert seen == [("Write calc.py", 0, 1, 3), ("Write calc.py", 1, 1, 6)]
+    assert seen == ["thinking… 3s", "writing its answer… 6s"]
 
 
 @pytest.mark.spec("MOD-9")
@@ -312,18 +309,17 @@ def test_ask_once(make_model, fake_ollama, model_log):
 
 
 @pytest.mark.spec("MOD-24")
-def test_a_quiet_model_logs_its_details_and_says_only_when_it_asks_again(model_log, fake_ollama, capsys):
+def test_a_model_logs_its_details_and_says_only_when_it_asks_again(model_log, fake_ollama, capsys):
     fake_ollama.reply("not json").reply('{"ok": 1}')
-    model = Model(MODEL, MEASURED, 0, model_log, quiet=True)
+    model = Model(MODEL, MEASURED, 0, model_log)
     assert model.ask_until_usable("s", [Part("Q", "q", True)], "Plan", lambda reply: reply.json()["ok"]) == 1
-    out = capsys.readouterr().out
-    assert out == "     🔁 That answer could not be used; asking again\n"
+    assert capsys.readouterr().out == "🔁 That answer could not be used; asking again\n"
     notes = [entry["note"] for _, entry in model_log.store.entries("calls") if "note" in entry]
     assert any(note.startswith("Plan (attempt 1)") for note in notes) and any("not usable" in note for note in notes)
-    stream = Stream("Plan", None, quiet=True)
+    stream = Stream("Plan", None)
     stream.thinking = 3
-    assert stream.plain_status(stream.started + 12) == "     ⏳ thinking… 12s"
-    assert stream.plain_status(stream.started + 101) == "     ⏳ thinking… 1m 41s (101s)"
+    assert stream.status(stream.started + 12) == "thinking… 12s"
+    assert stream.status(stream.started + 101) == "thinking… 1m 41s (101s)"
 
 
 def cut(thinking="I was thinking about it"):
@@ -365,7 +361,7 @@ def test_a_cut_reply_whose_blocks_have_ended_is_kept(make_model, fake_ollama):
 def test_out_of_memory_shrinks_the_prompt_then_gives_up(make_model, fake_ollama, capsys):
     fake_ollama.reply(OllamaError("oom", oom=True)).reply("ok")
     assert make_model().ask("s", [Part("Q", "q", True)], "Ask") == "ok"
-    assert "out of GPU memory; retrying" in capsys.readouterr().out
+    assert "Out of GPU memory; trying again with a shorter prompt" in capsys.readouterr().out
     fake_ollama.reply(OllamaError("oom", oom=True), times=3)
     with pytest.raises(OllamaError, match="oom"):
         make_model().ask("s", [Part("Q", "q", True)], "Ask")
@@ -428,12 +424,12 @@ def test_any_other_error_is_raised(make_model, fake_ollama):
 
 
 @pytest.mark.spec("MOD-18")
-def test_a_prompt_too_large_is_relaxed_then_refused(make_model, fake_ollama, capsys):
+def test_a_prompt_too_large_is_relaxed_then_refused(make_model, fake_ollama, model_log):
     fake_ollama.reply("ok")
     model = make_model(max_prompt_tokens=512)
     exact = Part("File", "c" * 3000, True, exact=True)
     assert model.ask("s", [exact], "Ask") == "ok"
-    assert "shortening every part" in capsys.readouterr().out
+    assert any("shortening every part" in entry.get("note", "") for _, entry in model_log.store.entries("calls"))
     assert "[...]" in fake_ollama.calls[0]["messages"][1]["content"]
     with pytest.raises(PromptTooLarge):
         model.ask("s", [Part(f"P{i}", "p" * 1000, True) for i in range(10)], "Ask")
@@ -473,7 +469,7 @@ def test_other_models_are_unloaded_and_a_grown_model_too(make_model, fake_ollama
     assert fake_ollama.unloaded == ["other"]
     sizes = iter([10e9, 11e9, 12e9])
     monkeypatch.setattr(Ollama, "loaded_models", staticmethod(lambda: [(MODEL, next(sizes))]))
-    model = Model(MODEL, MEASURED, 300, "/dev/null", exclusive=False, max_growth=1.15)
+    model = Model(MODEL, MEASURED, 300, make_model().log, exclusive=False, max_growth=1.15)
     for _ in range(3):
         model.check_memory()
     assert fake_ollama.unloaded == ["other", MODEL]
@@ -488,7 +484,7 @@ def test_a_failed_probe_is_recorded_and_waited_out(monkeypatch, fake_ollama, no_
     calibrator = Calibrator("m")
     assert calibrator.probe(4096, 8192) is None
     assert calibrator.history == [[4096, "crashed"]] and model_module.CRASH_RECOVERY in no_sleep
-    assert fake_ollama.unloaded == ["m"] and "failed (llama runner process has terminated)" in capsys.readouterr().out
+    assert fake_ollama.unloaded == ["m"] and "Could not read it (llama runner process has terminated)" in capsys.readouterr().out
     monkeypatch.setattr(Ollama, "installed_models", staticmethod(lambda: None))
     with pytest.raises(SystemExit, match="Ollama stopped answering during calibration"):
         calibrator.probe(4096, 8192)
