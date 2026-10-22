@@ -69,6 +69,7 @@ RESEARCH_PAGE_CHARS = 3500                     # of each page, the parts most ab
 LONG = named("long")                           # a task: one at a time, its progress shown
 QUICK = named("quick")                         # what it prints is shown
 DELETES = tuple(c.name for c in COMMANDS if c.deletes)  # what it deletes is shown first; done once confirmed
+PLANNED = tuple(c.name for c in COMMANDS if "--confirm" in (o.flag for o in c.options))  # its plan waits here
 OWN = named("own")                             # the conversation's own
 ONE_WORD = tuple(c.name for c in COMMANDS if c.chat and c.words == "one")  # a command with one word after it
 ANY_WORDS = tuple(c.name for c in COMMANDS if c.chat and c.words == "any")  # ... with any words after it
@@ -631,7 +632,8 @@ class Desk:
 
     def spawn(self, arguments):
         """The task as its own tinker, from here (a new task makes its own folder, a run given by ID finds its
-        own), reporting through this conversation only."""
+        own), reporting through this conversation only. A run that plans waits for its plan to be confirmed."""
+        arguments = arguments + ["--confirm"] if arguments[0] in PLANNED else arguments
         env = dict(os.environ, **{OFF: "off", "PYTHONUNBUFFERED": "1", "NO_COLOR": "1"})
         return subprocess.Popen(tinker_command() + arguments, cwd=self.root, env=env, text=True,
                                 stdin=subprocess.DEVNULL, stdout=subprocess.PIPE, stderr=subprocess.STDOUT,

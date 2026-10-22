@@ -19,7 +19,8 @@ The tests in `tests/` enforce it.
 2. The plan is a spec of points. Each point has exactly one unit test, written before any code.
 3. The code is just enough to pass those tests.
 4. The project is done when every spec point's test passes, set up afresh, the way a person runs it.
-5. The person confirms a plan before anything is built, unless they ask for no confirmation.
+5. In the conversation, the person confirms a plan before anything is built. A run started from the
+   command line builds autonomously, unless it is asked to wait (`--confirm`).
 6. Tinker keeps what it knows in its own database, and each project's state in the project's own
    database. People read them through Tinker's commands. They never edit them by hand.
 
@@ -130,9 +131,10 @@ run in order, each saved as it ends, so a run resumes from the phase it reached:
 
 A bug fix runs `recall → reproduce → verify → final_review → lessons → done`.
 
-By default a cycle waits for the person once its plan is made: the project or a feature after
-`review`, a bug fix after `reproduce`. `confirm` builds it. `amend CHANGE` changes it and plans it
-again, and then it waits again. `--no-confirm` builds straight through. `--web` lets any run, at any
+A cycle started from the conversation, or with `--confirm`, waits for the person once its plan is
+made: the project or a feature after `review`, a bug fix after `reproduce`. `confirm` builds it.
+`amend CHANGE` changes it and plans it again, and then it waits again. A cycle started from the
+command line without `--confirm` builds straight through. `--web` lets any run, at any
 phase, learn from the web what the rest of the cycle needs.
 
 ---
@@ -210,7 +212,8 @@ phase, learn from the web what the rest of the cycle needs.
   chat (`none`, `one`, `any`), its arguments and its options. The command line builds its parser and
   its help from it, and the conversation its commands.
 - **CMD-2** The runs are `task`, `restart`, `resume`, `confirm`, `amend`, `add` and `fix`. Every run
-  but `restart` takes `--web` and `--no-confirm`. The commands that delete are `clear`, `reset` and
+  but `restart` takes `--web`. The runs that start a cycle (`task`, `restart`, `add`, `fix`) take
+  `--confirm`, and the others do not. The commands that delete are `clear`, `reset` and
   `restart`.
 - **CMD-3** `ref(word)` reads a project reference: `@` followed by a run ID or a folder name. Any
   other word is not a reference. `refs(words)` takes a reference from the start of the words, and
@@ -895,7 +898,7 @@ CONDENSE, KEEP. Domain research (`Researcher`), own-command learning and run les
 - **CNV-14** `running(skip)` lists the runs whose trackers are in the home's `running`, but for its
   own process and those it skips. It removes the trackers of processes that have ended.
 - **CNV-15** `Desk.answer` handles a command. `task WHAT` starts a task, and a bare `task` gets its
-  usage. `status` alone gives what runs. `stop` stops the task. A command that deletes shows what it
+  usage. A run that starts a cycle is given `--confirm`, so its plan waits for the person. `status` alone gives what runs. `stop` stops the task. A command that deletes shows what it
   deletes and waits for `confirm`. `exit` asks first. A `channel` action that needs a terminal says
   so. Any other command runs as `tinker`.
 - **CNV-16** `Desk.settle` runs what waits for a `confirm` (a deletion, a command line). Any other
@@ -991,7 +994,7 @@ CONDENSE, KEEP. Domain research (`Researcher`), own-command learning and run les
   `done` otherwise. Every phase has a phase class.
 - **CLI-8** `main()` ends a run cleanly: Ctrl-C ends with `Interrupted.`, and Ollama and file errors
   end with their message, never a traceback.
-- **CLI-9** Built end to end: `tinker task --no-confirm` with a model that answers like a real one
+- **CLI-9** Built end to end: `tinker task` with a model that answers like a real one
   builds a project in its folder. Each spec point gets a test, the code passes them (a wrong first
   version is fixed by the verify loop), the README's examples run, the final review passes, lessons
   are kept, SPEC.md is written, the run is pointed to from the home and the exit code is 0.
@@ -1005,9 +1008,10 @@ CONDENSE, KEEP. Domain research (`Researcher`), own-command learning and run les
 - **CLI-11** `tinker memory` shows each language's toolchain, fixes and lessons, the lessons for any
   language, the topics learned, the person's commands, and how many items are retired. `tinker models` lists Ollama's models
   with what was measured, and marks the one in use.
-- **CLI-12** A task waits once its plan is made: it prints the plan to confirm and exits 0 as
-  `awaiting`. `tinker confirm` builds it, and `tinker amend CHANGE` changes the plan and waits again.
+- **CLI-12** `tinker task` builds straight through, with no confirmation. Given `--confirm`, it waits
+  once its plan is made: it prints the plan to confirm and exits 0 as `awaiting`. `tinker confirm` builds it, and `tinker amend CHANGE` changes the plan and waits again.
   A run that stops (`blocked`) says why and how to go on.
 - **CLI-13** A run works on one cycle. For `add` or `fix`, that is a new feature or fix cycle,
   recorded in the run's `features`. Otherwise it is the unfinished cycle, or else the project's own
-  (`base`). A cycle waits for confirmation unless the run was given `--no-confirm`.
+  (`base`). A new cycle waits for confirmation only when the run was given `--confirm`, and keeps that
+  for the runs that go on with it.

@@ -22,12 +22,12 @@ names, and judges them by their exit codes and output.
 
 Usage (a project is named as @ID or @folder; without one, it is this folder's):
     tinker                                talk with Tinker here: every command below, and a normal chat
-    tinker task a calculator in Python [--spec plan.md] [--web] [--no-confirm]   plan it, then build it
+    tinker task a calculator in Python [--spec plan.md] [--web] [--confirm]   plan it, then build it
     tinker restart [--yes]                build this folder's task again from scratch (asks first)
     tinker resume [@PROJECT] | tinker confirm [@PROJECT] | tinker amend [@PROJECT] CHANGE
     tinker rename [@PROJECT] NAME         rename the folder of a project whose plan waits
-    tinker add [@PROJECT] Add a feature [--spec feature.md] [--web] [--no-confirm]
-    tinker fix [@PROJECT] Describe a bug: what you do, what happens, what should happen [--web] [--no-confirm]
+    tinker add [@PROJECT] Add a feature [--spec feature.md] [--web] [--confirm]
+    tinker fix [@PROJECT] Describe a bug: what you do, what happens, what should happen [--web] [--confirm]
     tinker status [@PROJECT] | tinker runs | tinker log [@PROJECT] [--calls]
     tinker chat MESSAGE | tinker command WHAT | tinker research TOPIC | tinker stop | tinker emergency MESSAGE
     tinker learn WHAT                     learn a language, a tool or a domain (Tinker tells which)
@@ -41,8 +41,9 @@ from the measured model and its settings (tinker config KEY VALUE tunes them).
 
 The terminal and a chat are one interface (the conversation): tinker with no command, or a chat app
 (tinker channel start), takes every command as its words (no quotes: task a calculator in Python), and
-anything else as a normal chat; tinker COMMAND ... says one of them once. A plan waits for confirm (or
-amend, rename) before anything is built, everywhere, unless --no-confirm; a command that deletes shows
+anything else as a normal chat; tinker COMMAND ... says one of them once. In the conversation a plan
+waits for confirm (or amend, rename) before anything is built; tinker task ... builds straight through,
+unless --confirm. A command that deletes shows
 what first. A chat that opens the bot (/start) is welcomed with a short guide.
 
 Tinker has no model of its own choosing: measure one (tinker calibrate NAME), select it (tinker use-model
@@ -93,8 +94,8 @@ design follows the task: a one-file task gets one code file, its tests and no de
                  and every spec point's test there and passing. A tooling problem gets one toolchain
                  fix; what still fails is said plainly, and the run is not done.
  11. Lessons     one call turns the problems the run solved into lessons for the next projects.
-A plan waits for the person's confirm after the review (a bug fix: once the bug is reproduced), unless
---no-confirm; tinker amend CHANGE plans it again, and it waits again.
+A plan waits for the person's confirm after the review (a bug fix: once the bug is reproduced) in the
+conversation, or with --confirm; tinker amend CHANGE plans it again, and it waits again.
 
 Learning: a model knows what it was trained on, as it was then. tinker learn WHAT tells what WHAT is
 (one planning call; a topic learned before keeps its kind) and learns it the way that fits it:
@@ -284,7 +285,7 @@ class Cli:
     FIELDS = {"reset": False, "config": None, "models": False, "use_model": None, "embed": None, "use_web": None,
               "calibrate": None, "learn": None, "memory": False, "runs": False, "status": None, "log": None,
               "doctor": False, "task": None, "spec": None, "spec_file": None, "restart": False, "resume": None,
-              "amend": None, "add": None, "fix": None, "workdir": None, "web": False, "no_confirm": False,
+              "amend": None, "add": None, "fix": None, "workdir": None, "web": False, "confirm": False,
               "rename": None, "yes": False, "calls": False, "graph": False}
     FOLDER_RE = re.compile(r"[A-Za-z0-9][\w.-]{0,63}")
 
@@ -1084,7 +1085,7 @@ class ProjectRun:
         self.print_header(model, workdir)
         self.log.add({"label": "session start", "mode": self.mode, "model": model.name,
                       "started": clock(self.started_at)})
-        self.session = Session(model, project, DEFAULT_MAX_STALL, self.internet, confirm=not args.no_confirm,
+        self.session = Session(model, project, DEFAULT_MAX_STALL, self.internet, confirm=args.confirm,
                                tracker=self.tracker)
         if project.language:
             print(f"learned so far: {self.session.knowledge.summary()}")
@@ -1128,8 +1129,6 @@ class ProjectRun:
         session, run = self.session, self.record
         brief = Brief.load(session.model, session.project.store, self.mode, run["task"], self.spec_text)
         cycle = self.choose_cycle(brief)
-        if cycle is not None and self.args.no_confirm:
-            cycle["confirm"] = False
         if cycle is not None and cycle.get("awaiting"):
             self.confirm_or_amend(cycle)
         if cycle is None:
@@ -1141,7 +1140,7 @@ class ProjectRun:
 
     def choose_cycle(self, brief):
         """The cycle to work on: a new feature or bug (tinker add, tinker fix), the unfinished one, or the
-        project itself. A new cycle's plan waits for confirmation unless the run was given --no-confirm."""
+        project itself. A new cycle's plan waits for confirmation only when the run was given --confirm."""
         project = self.session.project
         cycle = project.open_cycle()
         if self.mode == "change":  # its project is open to a new cycle (RunChecks.before_start)
@@ -1453,7 +1452,7 @@ class CycleRunner:
 
     def done_with(self, phase, cycle, phases):
         """The cycle on to its next phase, saved; past the phase its plan waits after, it waits for the person
-        to confirm it (tinker confirm) or change it (tinker amend), unless --no-confirm."""
+        to confirm it (tinker confirm) or change it (tinker amend), when its run was given --confirm."""
         cycle["phase"] = phases[phases.index(phase) + 1]
         if phase == CONFIRM_AFTER[cycle.get("kind", "feature")] and cycle.get("confirm") and not cycle.get("confirmed"):
             cycle["awaiting"] = True

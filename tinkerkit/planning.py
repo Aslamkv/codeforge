@@ -200,7 +200,7 @@ class SpecWriter(Phase):
     interface that fits; only code for other code has none) and,
     for a new project, the toolchain (the one that worked before for the language, reused). What
     the request does not ask for waits until the user asks (tinker add, tinker fix).
-    A plan the person confirms before anything is built (the default; not with --no-confirm) is a quick
+    A plan the person confirms before anything is built (the conversation's way; --confirm) is a quick
     draft (thinking low): the person reviews it, and changes it with tinker amend."""
     TITLE = "Plan: the spec"
 

@@ -32,10 +32,10 @@ def registered(folder, run_id="abc123", **record):
 @pytest.mark.spec("CLI-1")
 def test_task(tmp_path, monkeypatch):
     monkeypatch.chdir(tmp_path)
-    args = parse("task", "a", "calculator", "in", "Python", "--web", "--no-confirm")
-    assert (args.command, args.task, args.workdir, args.web, args.no_confirm) == \
+    args = parse("task", "a", "calculator", "in", "Python", "--web", "--confirm")
+    assert (args.command, args.task, args.workdir, args.web, args.confirm) == \
         ("task", "a calculator in Python", None, True, True)
-    assert parse("task", "x").no_confirm is False
+    assert parse("task", "x").confirm is False
     (tmp_path / "plan.md").write_text("spec")
     args = parse("task", "a calculator", "plan.md")
     assert (args.task, args.spec) == ("a calculator", "plan.md")
@@ -45,7 +45,7 @@ def test_task(tmp_path, monkeypatch):
 @pytest.mark.spec("CLI-1")
 @pytest.mark.parametrize("argv,why", [(["--task", "x"], "commands are written without --"), (["fly"], "no command 'fly'"),
                                       (["task", "x", "--yes"], None), (["task", "x", "--plan-only"], None),
-                                      (["task", "x", "--confirm"], None), (["resume", "abc123"], None),
+                                      (["task", "x", "--no-confirm"], None), (["resume", "abc123"], None),
                                       (["status", "@abc", "--workdir", "x"], None), (["rename", "bad name!"], None),
                                       (["learn", "a", "b", "c"], None), (["use-web", "bing"], None),
                                       (["resume", "@abc", "--workdir", "x"], None), (["add"], None),
@@ -70,8 +70,10 @@ def test_projects_are_named_with_an_at(tmp_path):
     assert (args.resume, args.change_request) == ("", "add a history")
     args = parse("fix", "100", "divided", "by", "0", "crashes")
     assert (args.bug, args.change_request, args.fix, args.resume) == (True, "100 divided by 0 crashes", None, "")
-    args = parse("amend", "@abc123", "also", "divide", "--no-confirm")
-    assert (args.amend, args.resume, args.no_confirm) == ("also divide", "abc123", True)
+    args = parse("amend", "@abc123", "also", "divide")
+    assert (args.amend, args.resume) == ("also divide", "abc123")
+    with pytest.raises(SystemExit):
+        parse("amend", "@abc123", "also", "divide", "--confirm")
     assert parse("rename", "@abc123", "calc").rename == ("abc123", "calc")
     assert parse("rename", "calc").rename == ("", "calc")
     assert parse("learn", "act", ". .venv/bin/activate").learn == ["act", ". .venv/bin/activate"]
@@ -98,7 +100,7 @@ def test_help_overview(capsys):
     for command in COMMANDS:
         for synopsis, what in command.rows:
             assert synopsis.split()[0] in out and what in out
-    for option in ("--spec FILE", "--web", "--no-confirm", "--workdir DIR", "--yes", "--calls"):
+    for option in ("--spec FILE", "--web", "--confirm", "--workdir DIR", "--yes", "--calls"):
         assert option in out
     assert "@ID" in out and "💡 Examples" in out and "tinker help COMMAND" in out
 
@@ -119,7 +121,7 @@ def test_help_markup_and_one_command(capsys, monkeypatch):
     assert capsys.readouterr().out.startswith("usage: tinker research TOPIC")
     with pytest.raises(SystemExit, match="no command 'fly'"):
         parse("help", "fly")
-    assert "resume" in Cli.options()["--workdir DIR"][1] and "fix" in Cli.options()["--no-confirm"][1]
+    assert "resume" in Cli.options()["--workdir DIR"][1] and "fix" in Cli.options()["--confirm"][1]
 
 
 @pytest.mark.spec("CLI-3")
@@ -544,7 +546,7 @@ def test_a_task_is_built_end_to_end(run_ready, fake_ollama, home_store):
     fake_ollama.reply(json.dumps(README), when="README")
     fake_ollama.reply(json.dumps({"lessons": [{"phase": "code", "scope": "any", "text": "Subtract with the minus operator"}],
                                   "confirmed": []}), when="Lessons")
-    assert build("task", "a calculator that adds and subtracts", "--no-confirm", "--workdir", str(folder)) == 0
+    assert build("task", "a calculator that adds and subtracts", "--workdir", str(folder)) == 0
     labels = [label.split(" [")[0] for label in fake_ollama.labels()]
     assert labels == ["Spec (attempt 1)", "Tests test_calc.py (3)", "Write calc.py", "Fix the code C2 (no thinking first)",
                       "README (attempt 1)", "Lessons (attempt 1)"]
@@ -632,7 +634,7 @@ def test_models(measured_model, monkeypatch, capsys):
 def test_a_task_waits_for_its_plan_then_confirm_builds_it(run_ready, fake_ollama, home_store):
     folder = run_ready
     fake_ollama.reply(json.dumps(SPEC_REPLY), when="Spec")
-    assert build("task", "a calculator that adds and subtracts", "--workdir", str(folder)) == 0
+    assert build("task", "a calculator that adds and subtracts", "--confirm", "--workdir", str(folder)) == 0
     out = printed(folder)
     assert "📋 Plan for calc (run " in out and "  C2  calc.sub(5, 3) is 2" in out and "Not included: a GUI" in out
     assert fake_ollama.calls[0]["think"] == "low" and not (folder / "calc.py").exists()
@@ -651,7 +653,7 @@ def test_a_task_waits_for_its_plan_then_confirm_builds_it(run_ready, fake_ollama
 def test_amend_plans_again_and_waits_again(run_ready, fake_ollama):
     folder = run_ready
     fake_ollama.reply(json.dumps(SPEC_REPLY), when="Spec")
-    build("task", "a calculator that adds and subtracts", "--workdir", str(folder))
+    build("task", "a calculator that adds and subtracts", "--confirm", "--workdir", str(folder))
     more = dict(SPEC_REPLY, criteria=SPEC_REPLY["criteria"] + [{"text": "calc.mul(2, 3) is 6", "source": "adds",
                                                                 "test": "test_calc.py::test_mul"}])
     fake_ollama.reply(json.dumps(more), when="Amend the spec")

@@ -14,7 +14,8 @@ OPTIONS = frozendict({
     "spec": Option("--spec", "spec", "FILE", "a spec file, e.g. plan.md"),
     "feature_spec": Option("--spec", "spec_file", "FILE", "a spec file for the feature"),
     "web": Option("--web", "web", None, "may learn from the web what the rest of the cycle needs"),
-    "no_confirm": Option("--no-confirm", "no_confirm", None, "build straight through: no plan waits for confirmation"),
+    "confirm": Option("--confirm", "confirm", None, "the plan waits for your confirm before anything is built "
+                                              "(as in the conversation)"),
     "new_workdir": Option("--workdir", "workdir", "DIR", "the project folder (default: a new one in ~/Projects, named "
                                                          "after the task)"),
     "workdir": Option("--workdir", "workdir", "DIR", "the project folder, if not this one"),
@@ -48,19 +49,19 @@ class Command:
 
 
 PROJECT = Argument("words", "*", "[@PROJECT]", "the project (@ID or @folder; default: this folder's)")
-RUN_OPTIONS = ("web", "no_confirm", "workdir")
+RUN_OPTIONS = ("web", "workdir")
 
 COMMANDS = [
     Command("task", "Build", "task WHAT TO BUILD", "build something new, in its own folder in ~/Projects (--spec FILE)",
             "Build something new: a spec, a unit test for each point, just enough code, and a README a person can "
-            "follow (its examples are run to check them). Its plan waits for your confirm first (--no-confirm builds "
-            "straight through). It gets its own folder in the projects folder (tinker config projects), with a short "
+            "follow (its examples are run to check them). It builds straight through (--confirm: its plan waits for "
+            "your confirm first, as it does in the conversation). It gets its own folder in the projects folder (tinker config projects), with a short "
             "name after the task (calc-py); --workdir DIR builds in DIR instead (--workdir . here).",
             chat="own", words="any", run=True, arguments=[Argument("task", "+", "WHAT", "what to build (no quotes needed)")],
-            options=("spec", "web", "no_confirm", "new_workdir"), example="task a calculator in Python"),
+            options=("spec", "web", "confirm", "new_workdir"), example="task a calculator in Python"),
     Command("restart", "Build", "restart [--yes]", "build this folder's task again from scratch (asks first)",
             "Build this folder's task again from scratch: everything in it is deleted (after asking, or with --yes), "
-            "but for its spec file.", chat="long", run=True, deletes=True, options=("yes", "workdir")),
+            "but for its spec file.", chat="long", run=True, deletes=True, options=("yes", "confirm", "workdir")),
     Command("resume", "Build", "resume [@PROJECT]", "continue a project's run (a plan that waits: build it)",
             "Continue a run: this folder's, or the project named (@ID or @folder, from anywhere). A plan that waits "
             "for confirmation is confirmed: building starts.", chat="long", words="one", run=True,
@@ -80,13 +81,13 @@ COMMANDS = [
             example="rename calculator"),
     Command("add", "Build", "add [@PROJECT] FEATURE", "add a feature to a built project",
             "Add a feature to a built project (this folder's, or the project named). Its plan waits for your confirm "
-            "first.", chat="long", words="any", run=True,
+            "first with --confirm (as in the conversation).", chat="long", words="any", run=True,
             arguments=[Argument("words", "+", "[@PROJECT] FEATURE", "the feature")],
-            options=("feature_spec",) + RUN_OPTIONS, example="add keep a history of results"),
+            options=("feature_spec", "confirm") + RUN_OPTIONS, example="add keep a history of results"),
     Command("fix", "Build", "fix [@PROJECT] BUG", "fix a bug: what you do, what happens, what should",
-            "Fix a bug: describe what you do, what happens and what should happen. A test shows the bug, and it waits "
-            "for your confirm; then the code is fixed so it passes and every other test still passes.", chat="long",
-            words="any", run=True, arguments=[Argument("words", "+", "[@PROJECT] BUG", "the bug")], options=RUN_OPTIONS,
+            "Fix a bug: describe what you do, what happens and what should happen. A test shows the bug (with --confirm, it "
+            "waits for your confirm); then the code is fixed so it passes and every other test still passes.", chat="long",
+            words="any", run=True, arguments=[Argument("words", "+", "[@PROJECT] BUG", "the bug")], options=("confirm",) + RUN_OPTIONS,
             example='fix typing 2/0 crashes, it should say "cannot divide by zero"'),
     Command("status", "Build", "status [@PROJECT]", "a project's spec points and whether they pass",
             "Show a project's spec points and whether their tests pass.", chat="quick", words="one",

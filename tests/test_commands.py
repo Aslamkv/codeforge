@@ -34,8 +34,8 @@ def test_the_command_line_and_the_conversation_read_the_table():
 def test_runs_and_what_deletes():
     assert [c.name for c in COMMANDS if c.run] == ["task", "restart", "resume", "confirm", "amend", "add", "fix"]
     for command in [c for c in COMMANDS if c.run and c.name != "restart"]:
-        flags = {o.flag for o in command.options}
-        assert {"--web", "--no-confirm"} <= flags, command.name
+        assert "--web" in {o.flag for o in command.options}, command.name
+    assert [c.name for c in COMMANDS if "--confirm" in {o.flag for o in c.options}] == ["task", "restart", "add", "fix"]
     assert [c.name for c in COMMANDS if c.deletes] == ["restart", "clear", "reset"]
     assert conversation.DELETES == ("restart", "clear", "reset")
 
