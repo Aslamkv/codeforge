@@ -752,9 +752,12 @@ what was taught is checked: the model turns it into claims and the change it ask
 on this machine and on the web, the model weighs that evidence alone, and only then is anything changed.
 
 - **TCH-1** `Memory(embeddings).items` are the memory graph's toolchains, fixes, lessons, facts, findings, rules
-  and commands, without the retired. `about(text)` gives at most `MEMORY_SHOWN` of them, the most related first.
-- **TCH-2** `Asker.answer(question)` makes one model call with the items numbered, says the answer and lists the
-  items it cites, by the numbers it gives them. With nothing kept it makes no call. It changes nothing.
+  and commands, without the retired. `about(text)` gives at most `MEMORY_SHOWN` of them, the most related first:
+  first the items whose kind and language (or topic) the text names. A language's toolchain counts as named with
+  its language, however the text calls it ("toolset").
+- **TCH-2** `Asker.answer(question)` makes one model call with the items numbered, and says the answer alone:
+  no steps and no sources, then the time taken (a terminal shows one status line while it thinks). With nothing kept it
+  makes no call and says so. It changes nothing.
 - **TCH-3** `read_plan` keeps at most `TEACH_CLAIMS` claims, `TEACH_COMMANDS` commands and `TEACH_SEARCHES`
   searches, the numbers of items shown to retire, the toolchain commands of `TOOLCHAIN_KEYS`, and a lesson with
   a known phase. A plan with no claim, nothing that checks its claims, or no change is a `ValueError`.
@@ -1048,8 +1051,11 @@ on this machine and on the web, the model weighs that evidence alone, and only t
   the model is doing (in plain words), its steps and its end (learned, with the summary, or why it
   stopped), so a chat that started it shows them; the tracker leaves the home at the end unless that
   conversation reads it last.
-- **CLI-11** `tinker memory` shows each language's toolchain, fixes and lessons, the lessons for any
-  language, the topics learned, the person's commands, and how many items are retired. `tinker models` lists Ollama's models
+- **CLI-11** `tinker memory` shows one part per language (built, or read from the web): how many projects built
+  it and when its docs were read, then the toolchain that worked (one command a row), its proven facts, fixes and
+  lessons (each marked proven or not yet). Then the lessons for any language, the other topics learned, the
+  person's commands, how many items are retired, and what to do next. A part with nothing in it is left out;
+  with nothing learned at all, it says how to start. `tinker models` lists Ollama's models
   with what was measured, and marks the one in use.
 - **CLI-12** `tinker task` builds straight through, with no confirmation. Given `--confirm`, it waits
   once its plan is made: it prints the plan to confirm and exits 0 as `awaiting`. `tinker confirm` builds it, and `tinker amend CHANGE` changes the plan and waits again.

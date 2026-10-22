@@ -104,8 +104,8 @@ COMMANDS = [
             rows=[("learn WHAT", "learn a language, a tool or a domain"),
                   ('learn NAME "DEFINITION"', "a command of yours Tinker may use")]),
     Command("ask", "Learn", "ask QUESTION", "ask what Tinker has learned",
-            "Ask what Tinker has learned: the answer comes from what it keeps alone (toolchains, fixes, lessons, "
-            "facts, your commands), each claim citing the item it rests on, listed under it. Nothing is changed.",
+            "Ask what Tinker has learned: it answers just what you ask, from what it keeps alone (toolchains, fixes, "
+            "lessons, facts, your commands). Nothing is changed.",
             chat="long", words="any", arguments=[Argument("words", "+", "QUESTION", "the question (no quotes needed)")],
             example="ask what is your current toolchain for python"),
     Command("teach", "Learn", "teach WHAT", "correct what Tinker has learned (checked first)",

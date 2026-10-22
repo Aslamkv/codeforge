@@ -83,27 +83,26 @@ def test_memory_is_what_tinker_keeps_but_the_retired_most_related_first(kept):
     first = kept.about("what is your current toolchain for python")[0]
     assert first["kind"] == "toolchain" and "black" in first["text"]
     assert kept.about("which lessons do you have")[0]["kind"] == "lesson"
+    assert kept.about("what is the current toolset you use for a python project")[0]["kind"] == "toolchain"
     assert len(kept.about("anything", limit=2)) == 2 and MEMORY_SHOWN >= 20
 
 
 @pytest.mark.spec("TCH-2")
-def test_ask_answers_from_what_is_kept_citing_its_items(kept, make_model, fake_ollama, capsys):
-    fake_ollama.reply("Python is formatted with black and linted with ruff [1].", when="ask")
+def test_ask_says_the_answer_alone(kept, make_model, fake_ollama, capsys):
+    answer = "Tests run with pytest.\nCode is formatted with black and linted with ruff."
+    fake_ollama.reply(answer, when="ask")
     ending = Asker(make_model(), kept).answer("what is your current toolchain for python")
     asked = fake_ollama.calls[0]["messages"]
     assert asked[0]["content"].startswith(Prompts.ASK_SYSTEM) and "[1] toolchain (python, proven)" in asked[1]["content"]
-    out = capsys.readouterr().out
-    assert "Python is formatted with black and linted with ruff [1]." in out and "• [1] toolchain (python" in out
-    assert ending["status"] == "done" and ending["details"][0] == ("Answer", "Python is formatted with black and "
-                                                                             "linted with ruff [1].")
-    assert [label for label, _ in ending["details"]] == ["Answer", "From"]
+    assert capsys.readouterr().out == answer + "\n"
+    assert ending == {"status": "done", "headline": "Answered", "details": [("Answer", answer)]}
     assert Home.store().get("languages", "python")["toolchain"]["format"] == "black ."  # nothing changed
 
 
 @pytest.mark.spec("TCH-2")
-def test_ask_with_nothing_kept_asks_no_model(home_store, make_model, fake_ollama):
-    ending = Asker(make_model(), Memory()).answer("what do you know")
-    assert ending["status"] == "blocked" and fake_ollama.calls == []
+def test_ask_with_nothing_kept_asks_no_model(home_store, make_model, fake_ollama, capsys):
+    Asker(make_model(), Memory()).answer("what do you know")
+    assert fake_ollama.calls == [] and capsys.readouterr().out.startswith("I have not learned anything yet")
 
 
 @pytest.mark.spec("TCH-3")
@@ -230,7 +229,8 @@ def test_ask_and_teach_report_through_a_tracker_and_run_as_tasks(kept, measured_
     fake_ollama.reply(verdict_reply(), when="weigh the evidence")
     Commands(Cli.parse(["teach", "ruff", "alone", "is", "enough"])).run()
     assert ended[0][:2] == ("Asking: what formats python", "done")
+    out = capsys.readouterr().out
+    assert out.startswith("Black formats it [1].") and out.count("Time taken") == 2
     assert ended[1][:2] == ("Teaching: ruff alone is enough", "done")
     assert "🤔 Worked out what to check" in ended[1][2] and "⚖️ Evidence weighed" in ended[1][2]
     assert "ask" in conversation.LONG and "teach" in conversation.LONG
-    assert "Time taken" in capsys.readouterr().out

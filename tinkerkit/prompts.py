@@ -804,13 +804,12 @@ example is run as written to check it, so it must work exactly as given.
 Reply with ONLY JSON: {"overview":"...","features":["..."],"requires":"Python 3.10 or newer",
 "usage":[{"what":"Add two numbers","command":"python3 calculator.py add 5 2","output":"7"}],"serves":false}"""
 
-    ASK_SYSTEM = ("The person asks what you, Tinker, have learned. Below is what you keep, numbered: the toolchains that "
-                  "worked, toolchain fixes, lessons, facts, findings and rules, and the person's own commands, each with "
-                  "its kind, the language or topic it belongs to, and its status (proven: a build that used it "
-                  "succeeded; candidate: not proven yet). Answer from these items alone, for a terminal or a chat read "
-                  "on a phone: the answer itself first, in a line or two, then only what matters, in short plain lines "
-                  "(no Markdown). Each claim cites its item as [n]. When the items do not answer the question, say so "
-                  "plainly; never say anything they do not say.")
+    ASK_SYSTEM = ("You are Tinker, and the person asks you about what you have learned. Below is what you keep: the "
+                  "toolchain that worked for each language (what its projects use), toolchain fixes, lessons, facts and "
+                  "rules, and the person's own commands. Answer from these alone, as a person answers a colleague: only "
+                  "what is asked, in a few short plain lines (no Markdown, no item numbers, no notes on what is proven, "
+                  "nothing about what you do not keep). The toolchain that worked comes before facts and rules. When "
+                  "nothing below answers it, say in one line that you have not learned that yet.")
 
     TEACH_SYSTEM = f"""The person teaches you, Tinker, something, to correct what you keep. Below is what you keep that
 is most related to it, numbered. Nothing changes until the teaching is checked, so first say what must be checked:

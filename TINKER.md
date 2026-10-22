@@ -266,8 +266,7 @@ chat, `memory --graph` sends the page as a file to open on your phone:
 tinker memory --graph
 ```
 
-Ask what it has learned. The answer comes only from what it keeps, and each claim points to the item it
-rests on. Nothing is changed:
+Ask what it has learned. It answers just what you ask, from what it keeps, and changes nothing:
 
 ```sh
 tinker ask what is your current toolchain for python

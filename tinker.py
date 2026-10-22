@@ -854,21 +854,20 @@ class Commands:
         if graph:
             Commands.show_graph()
             return
-        say.text(f"Tinker's home: {Home.root}\nModel in use: {Config.get('model') or 'none'}")
-        languages, any_language = Home.store().items("languages"), Home.store().get("memory", "any") or {}
-        for key, doc in languages.items():
-            Commands.print_language(key, doc)
-        say.text("\nAny language:")
-        Commands.print_lessons(any_language.get("lessons", []))
-        Commands.print_topics(Library.topics())
-        Commands.print_taught(TaughtCommands.all())
-        retired = sum(len(doc.get("retired", [])) for doc in [*languages.values(), any_language,
-                                                              *Library.topics().values()])
-        if retired:
-            say.text(f"\nRetired: {retired} item(s) that did not hold (never shown to the model; tinker memory --graph "
-                     f"shows them, with why)")
-        say.text("\nForget a part with tinker clear PART, a command with tinker learn NAME none.")
-        say.text("See it as a graph: tinker memory --graph")
+        languages, any_language, topics = Home.store().items("languages"), Home.store().get("memory", "any") or {}, \
+            Library.topics()
+        taught = TaughtCommands.all()
+        say.title("What Tinker has learned", "🧠")
+        if not (languages or any_language.get("lessons") or topics or taught):
+            say.info("Nothing yet: it learns from every build (tinker task) and from tinker learn WHAT", "🌱")
+        for key, (doc, topic) in Commands.languages_known(languages, topics).items():
+            Commands.print_language(key, doc, topic)
+        Commands.print_any_language(any_language.get("lessons", []))
+        Commands.print_topics({slug: entry for slug, entry in topics.items() if entry.get("kind") != "language"})
+        Commands.print_taught(taught)
+        Commands.print_retired(sum(len(doc.get("retired", [])) for doc in [*languages.values(), any_language,
+                                                                           *topics.values()]))
+        Commands.print_memory_tips()
 
     @staticmethod
     def show_graph():
@@ -881,39 +880,109 @@ class Commands:
             say.done("Opened in your browser.")
 
     @staticmethod
-    def print_language(key, doc):
-        """What a language's projects taught: the toolchain that worked, its fixes, proven facts, lessons."""
-        say.text(f"\n{doc.get('language', key)} ({key}), {doc.get('projects', 0)} project(s) finished")
-        if Toolchain(doc.get("toolchain")):
-            say.text(f"  toolchain: {Toolchain(doc.get('toolchain')).summary()}")
-        for f in doc.get("fixes", []):
-            say.text(f"  fix: {first_line(f['failure'], 70)} -> {first_line(f['cause'], 70)} (helped {f.get('used', 0)}"
-                     f"{'; replayed without the model' if f.get('replay') else ''})")
-        for fact in doc.get("facts", []):
-            say.text(f"  proven fact [{fact.get('phase')}]: {first_line(fact.get('text', ''), 100)}")
-        Commands.print_lessons(doc.get("lessons", []))
+    def languages_known(languages, topics):
+        """{key: (what its builds taught, what was learned of it from the web)} of every language Tinker knows."""
+        learned = {slug: entry for slug, entry in topics.items() if entry.get("kind") == "language"}
+        return {key: (languages.get(key) or {}, learned.get(key)) for key in dict.fromkeys([*languages, *learned])}
+
+    @staticmethod
+    def print_language(key, doc, topic):
+        """A language: how many projects built it and what was read of it, then the toolchain that worked, its
+        proven facts, its fixes and its lessons (each only when there is one)."""
+        name = doc.get("language") or (topic or {}).get("name") or key
+        with say.part(" · ".join([name, Commands.projects_built(doc.get("projects", 0)), *Commands.read_of(topic)]),
+                      "📘"):
+            Commands.print_toolchain(Toolchain(doc.get("toolchain")))
+            Commands.print_items("Proven facts", "✅", [fact.get("text", "") for fact in doc.get("facts", [])])
+            Commands.print_items("Fixes", "🔧", [f"{first_line(f['failure'], 60)} → {first_line(f['cause'], 60)}"
+                                                 f" (helped {f.get('used', 0)}×)" for f in doc.get("fixes", [])])
+            Commands.print_lessons(doc.get("lessons", []))
+
+    @staticmethod
+    def projects_built(count):
+        return "nothing built yet" if not count else f"{count} project{'s' if count > 1 else ''} built"
+
+    @staticmethod
+    def read_of(topic):
+        """What was read of it from the web, as a part of its heading (nothing when it was not)."""
+        if not topic:
+            return []
+        return [f"docs read {Commands.short_date(topic.get('learned'))} ({len(topic.get('facts', []))} facts)"]
+
+    @staticmethod
+    def short_date(text):
+        """"2026-10-22 00:22" as "22 Oct"; anything else as it is."""
+        try:
+            return datetime.datetime.strptime(str(text)[:10], "%Y-%m-%d").strftime("%-d %b")
+        except ValueError:
+            return str(text or "?")
+
+    @staticmethod
+    def print_toolchain(toolchain):
+        """The toolchain that worked, one command a row, under what it does."""
+        if not toolchain:
+            return
+        rows = [("setup", command) for command in toolchain.setup] + [
+            (label, getattr(toolchain, key)) for label, key in (("activate", "activate"), ("test", "test_all"),
+                                                                ("check", "check"), ("format", "format"),
+                                                                ("lint", "lint"))]
+        with say.part("Toolchain", "🧰"):
+            shown = ""
+            for label, command in rows:
+                if command:
+                    say.text(f"{'' if label == shown else label:9} {command}")
+                    shown = label
+
+    @staticmethod
+    def print_items(title, icon, texts):
+        if texts:
+            with say.part(title, icon):
+                for text in texts:
+                    say.item(first_line(text, 110))
 
     @staticmethod
     def print_lessons(lessons):
-        for lesson in lessons:
-            say.text(f"  lesson [{lesson.get('phase')}, {lesson.get('status', 'candidate')}, seen {lesson.get('seen', 1)}x]: "
-                     f"{lesson.get('text')}")
-        if not lessons:
-            say.text("  no lessons yet")
+        """Lessons, each marked proven (✅) or not yet (🌱)."""
+        if lessons:
+            with say.part("Lessons (✅ proven by a build, 🌱 not yet)", "📒"):
+                for lesson in lessons:
+                    say.info(first_line(lesson.get("text", ""), 110), "✅" if lesson.get("status") == "proven" else "🌱")
+
+    @staticmethod
+    def print_any_language(lessons):
+        if lessons:
+            with say.part("Any language", "🌍"):
+                Commands.print_lessons(lessons)
 
     @staticmethod
     def print_topics(topics):
-        say.text("\nLearned from the web (tinker learn WHAT):" + ("" if topics else " nothing yet"))
-        for slug, entry in topics.items():
-            kind = "language" if entry.get("kind") == "language" else "topic"
-            say.text(f"  {slug} ({kind}): {entry.get('name', slug)}, learned {entry.get('learned', '?')}, "
-                     f"{len(entry.get('facts', []))} fact(s): {first_line(str(entry.get('summary', '')), 80)}")
+        """The tools and domains learned from the web (languages are shown with their own)."""
+        if topics:
+            with say.part("Topics learned", "🔬"):
+                for slug, entry in topics.items():
+                    say.item(f"{entry.get('name', slug)}: {first_line(str(entry.get('summary', '')), 80)} "
+                             f"(read {Commands.short_date(entry.get('learned'))}, {len(entry.get('facts', []))} facts)")
 
     @staticmethod
     def print_taught(taught):
-        say.text("\nYour commands (tinker learn NAME):" + ("" if taught else " none yet"))
-        for name, entry in taught.items():
-            say.text(f"  {name}: {TaughtCommands.describe(entry)}")
+        if taught:
+            with say.part("Your commands", "⌨️"):
+                for name, entry in taught.items():
+                    say.item(f"{name}: {TaughtCommands.describe(entry)}")
+
+    @staticmethod
+    def print_retired(count):
+        if count:
+            say.title(f"{count} item{'s' if count > 1 else ''} did not hold and {'were' if count > 1 else 'was'} "
+                      f"retired: never shown to the model again", "♻️")
+
+    @staticmethod
+    def print_memory_tips():
+        with say.part("What next", "💡"):
+            for what, command in (("Ask about it", "tinker ask what is your toolchain for python"),
+                                  ("Correct it", "tinker teach WHAT"), ("Explore it", "tinker memory --graph"),
+                                  ("Forget a part", "tinker clear PART")):
+                say.text(f"{what:14} {command}")
 
     @staticmethod
     def list_runs():

@@ -7,8 +7,6 @@ independent searches), and the model weighs that evidence alone. Only when every
 change follows from them, are the items shown wrong retired, the toolchain corrected and the lesson kept,
 proven, with its sources. Anything less changes nothing, and says why."""
 
-import re
-
 from .messages import say
 lazy from .conversation import Research
 lazy from .graph import Graph
@@ -21,7 +19,6 @@ lazy from .settings import (
 ITEM_KINDS = ("toolchain", "fix", "lesson", "fact", "finding", "rule", "command")
 TOOLCHAIN_KEYS = ("setup", "check", "test_all", "test_one", "format", "lint")  # what a teaching may replace
 VERDICTS = ("holds", "wrong", "unsure")
-CITED_RE = re.compile(r"\[(\d+)\]")
 
 
 class Memory:
@@ -43,8 +40,12 @@ class Memory:
 
     @staticmethod
     def named_in(item, named):
-        """How many of an item's kind and language (or topic) the words name ("toolchains" names toolchain)."""
-        return (item["group"] in named) + any(word.startswith(item["kind"]) for word in named)
+        """How many of an item's kind and language (or topic) the words name ("toolchains" names toolchain). A
+        language's toolchain counts its kind as named with its language: it is what that language's projects use,
+        however the words call it (tools, toolset, setup)."""
+        group = item["group"] in named
+        kind = any(word.startswith(item["kind"]) for word in named) or (group and item["kind"] == "toolchain")
+        return group + kind
 
 
 def numbered(items):
@@ -69,44 +70,35 @@ def ending(status, headline, details=()):
 
 
 class Asker:
-    """tinker ask QUESTION: answered from what Tinker keeps alone (no web), each claim citing the item it rests
-    on; the items it cites are listed under it."""
+    """tinker ask QUESTION: answered from what Tinker keeps alone (no web), as a person answers: only what is
+    asked, nothing more. While it thinks, one status line says so (on a terminal), and the tracker moves on."""
 
     def __init__(self, model, memory, tracker=None):
         self.model, self.memory, self.tracker = model, memory, tracker
 
     def answer(self, question):
-        """The answer said, and the items it cites; the ending."""
-        moved_on(self.tracker, "recall", "Recalling what Tinker keeps about it…", "🧠")
+        """The answer said, and nothing else; the ending."""
+        self.thinking("recall")
         items = self.memory.about(question)
         if not items:
-            say.warn("Tinker keeps nothing yet: it learns from builds (tinker task) and from tinker learn")
-            return ending("blocked", "Nothing to answer from", [("Why", "Tinker keeps nothing yet")])
-        moved_on(self.tracker, "answer", "Answering from what Tinker keeps…", "💬")
-        answer = self.asked(question, items)
-        cited = self.cited(answer, items)
-        self.show(question, answer, cited)
-        return ending("done", "Answered", [("Answer", answer)] + [("From", line) for line in cited])
+            return self.said("I have not learned anything yet: I learn from builds (tinker task) and tinker learn.")
+        self.thinking("answer")
+        return self.said(self.asked(question, items))
+
+    def thinking(self, phase):
+        say.live("Thinking…")
+        if self.tracker is not None:
+            self.tracker.phase(phase)
 
     def asked(self, question, items):
         parts = [Part("What Tinker keeps", numbered(items), True), Part("The question", question, True)]
         return self.model.ask(Prompts.ASK_SYSTEM, parts, "ask").strip()
 
     @staticmethod
-    def cited(answer, items):
-        """The lines of the items the answer cites, by the numbers it gives them, in order."""
-        numbers = dict.fromkeys(int(n) for n in CITED_RE.findall(answer))
-        return [item_line(n, items[n - 1]) for n in numbers if 1 <= n <= len(items)]
-
-    @staticmethod
-    def show(question, answer, cited):
-        with say.part(question, "❓"):
-            for line in answer.splitlines():
-                say.text(line)
-        if cited:
-            with say.part("From what Tinker keeps", "📒"):
-                for line in cited:
-                    say.item(line)
+    def said(answer):
+        for line in answer.splitlines():
+            say.text(line)
+        return ending("done", "Answered", [("Answer", answer)])
 
 
 class Teacher:
