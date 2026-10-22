@@ -2,21 +2,21 @@
 within, and the small helpers every part uses."""
 
 import contextlib
-import datetime
-import difflib
-import hashlib
-import json
-import os
+lazy import datetime
+lazy import difflib
+lazy import hashlib
+lazy import json
+lazy import os
 import re
-import shutil
-import sqlite3
-import subprocess
-import sys
-import time
+lazy import shutil
+lazy import sqlite3
+lazy import subprocess
+lazy import sys
+lazy import time
 from pathlib import Path
 
 
-DEFAULT_CONFIG = {                      # the settings: what the home's "config" holds overrides these
+DEFAULT_CONFIG = frozendict({                      # the settings: what the home's "config" holds overrides these
     "model": None,                      # the model every run uses: none until tinker use-model NAME selects one
     "ollama_url": "http://localhost:11434",  # where Ollama listens (Ollama's own default)
     "keep_alive": 0,                    # unload after every call: a model kept loaded can keep growing
@@ -50,7 +50,7 @@ DEFAULT_CONFIG = {                      # the settings: what the home's "config"
                                         # tinker learn and --web need one
     "projects": "~/Projects",           # where tinker task makes a new project's own folder (named after the
                                         # task), unless --workdir names one
-}
+})
 
 # --- each project's own state ------------------------------------------------------------------
 STATE_DIR = ".tinker"             # in each project: its database (project.db) and a started server's output
@@ -77,9 +77,9 @@ PHASES = (
     "done")
 FIX_PHASES = ("recall", "reproduce", "verify", "final_review", "lessons", "done")  # tinker fix: a test that shows the bug, then the fix
 PLANNING_PHASES = ("recall", "spec", "design", "review")  # the phases that make the plan
-CONFIRM_AFTER = {"feature": "review", "fix": "reproduce"}  # by cycle kind: where its plan waits for the person
+CONFIRM_AFTER = frozendict({"feature": "review", "fix": "reproduce"})  # by cycle kind: where its plan waits for the person
 FORMAT_AFTER = ("verify",)  # phases after which the toolchain's formatter runs (the model never formats)
-STATUS_TEXT = {"green": "passes", "todo": "to do", "active": "in progress", "blocked": "parked"}
+STATUS_TEXT = frozendict({"green": "passes", "todo": "to do", "active": "in progress", "blocked": "parked"})
 KINDS = ("code", "test", "template", "config", "docs")
 MAX_FILE_LINES = 60               # design guidance: small modules (a bigger file still works, in windows)
 TESTS_PER_CALL = 10

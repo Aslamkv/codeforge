@@ -3,15 +3,15 @@ linked to what it belongs to, what it cites, and the runs that taught it, proved
 page that shows it (GraphPage) is one file a browser opens with no network: the graph drawn when scripts
 run, and a plain list of everything when they do not (a phone's file preview)."""
 
-import html
-import itertools
-import json
+lazy import html
+lazy import itertools
+lazy import json
 
-from .knowledge import Embeddings, Library
-from .settings import Home, SIMILAR_MEANING, SIMILAR_WORDS, first_line, similarity
-from .workspace import TaughtCommands, Toolchain
+lazy from .knowledge import Embeddings, Library
+lazy from .settings import Home, SIMILAR_MEANING, SIMILAR_WORDS, first_line, similarity
+lazy from .workspace import TaughtCommands, Toolchain
 
-HISTORY_LINKS = {"born": "taught_by", "confirmed": "confirmed_in", "helped": "helped_in", "failed": "failed_in"}
+HISTORY_LINKS = frozendict({"born": "taught_by", "confirmed": "confirmed_in", "helped": "helped_in", "failed": "failed_in"})
 
 
 class Graph:
@@ -245,7 +245,7 @@ class GraphPage:
 def write_page(embeddings=None):
     """The page written to Tinker's home; the graph it shows."""
     graph = Graph.build(embeddings)
-    Home.graph_page().write_text(GraphPage.html(graph), encoding="utf-8")
+    Home.graph_page().write_text(GraphPage.html(graph))
     return graph
 
 

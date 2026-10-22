@@ -5,12 +5,12 @@ title (never one of another version), fetched, then the same from the links of t
 cleaned; and kept per topic
 and version (DocCache), so learning it again fetches nothing."""
 
-import datetime
-import re
-import urllib.parse
+lazy import datetime
+lazy import re
+lazy import urllib.parse
 
-from .passages import Cleaner, Links, Page
-from .settings import DOC_MAPS, MAX_MAP_LINKS, Config, Home, now_text, words
+lazy from .passages import Cleaner, Links, Page
+lazy from .settings import DOC_MAPS, MAX_MAP_LINKS, Config, Home, now_text, words
 
 
 class DocSite:
@@ -50,7 +50,7 @@ class DocSite:
         new index), one level on. The latest documentation is matched to the version installed (major.minor)."""
         base, key = base_of(root.final_url), matched(key, version)
         fetched = [root] + self.fetched(self.map(root, base), wanted, key, cap - 1, base, {root.final_url})
-        deeper = [link for got in fetched if got.ok for link in under(Links.of(got.text, got.final_url), base)]
+        deeper = [*under(Links.of(got.text, got.final_url), base) for got in fetched if got.ok]
         fetched += self.fetched(deeper, wanted, key, cap - len(fetched), base, {got.final_url for got in fetched})
         return [page for page in (self.page_of(got) for got in fetched) if page.blocks]
 

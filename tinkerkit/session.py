@@ -1,16 +1,16 @@
 """What every phase of a cycle works through: the Session (the model, the project and its workspace,
 what Tinker knows, the run's options and its tracker), and the phase contract (Worker, Phase)."""
 
-import json
-import time
+lazy import json
+lazy import time
 
-from .knowledge import Knowledge, Library
-from .prompts import Part, Prompts, PromptTooLarge, Reply
+lazy from .knowledge import Knowledge, Library
+lazy from .prompts import Part, Prompts, PromptTooLarge, Reply
 from .settings import (
     DEFAULT_MAX_STALL, ENV_EXAMPLE, ENV_FILE, NETWORK_NOTE, NETWORK_RETRY, SETUP_TIMEOUT, fingerprint, first_line,
     human_duration,
 )
-from .workspace import TaughtCommands, Workspace
+lazy from .workspace import TaughtCommands, Workspace
 
 
 class Session:

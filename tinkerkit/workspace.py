@@ -1,17 +1,17 @@
 """The project on disk: its files, the commands that set it up, test, run, format and lint it, and what their output says."""
 
-import hashlib
-import os
+lazy import hashlib
+lazy import os
 import re
-import shlex
-import shutil
-import signal
-import socket
-import subprocess
-import time
-from pathlib import Path
+lazy import shlex
+lazy import shutil
+lazy import signal
+lazy import socket
+lazy import subprocess
+lazy import time
+lazy from pathlib import Path
 
-from .prompts import Part, Prompts, Reply
+lazy from .prompts import Part, Prompts, Reply
 from .settings import (
     COMMAND_TIMEOUT, Config, Console, ENV_EXAMPLE, ENV_FILE, Home, ONLINE_PROBES, OUTPUT_CHARS, SETUP_TIMEOUT, STATE_DIR,
     first_line, now_text,
@@ -294,7 +294,7 @@ class Workspace:
             return None
         output_file = self.root / STATE_DIR / "app-output.txt"
         output_file.parent.mkdir(parents=True, exist_ok=True)
-        with open(output_file, "w", encoding="utf-8") as out:
+        with open(output_file, "w") as out:
             proc = self.spawn(command, stdout=out)
         return proc, output_file
 
@@ -315,7 +315,7 @@ class Workspace:
 
     def read(self, rel_path):
         full = self.inside(rel_path)
-        return full.read_text(encoding="utf-8", errors="replace") if full and full.is_file() else ""
+        return full.read_text(errors="replace") if full and full.is_file() else ""
 
     def inside(self, rel_path):
         """The path in the project, or None when it is unusable or leaves the project."""
@@ -330,7 +330,7 @@ class Workspace:
     def write(self, rel_path, content):
         full = self.resolve(rel_path, for_write=True)
         full.parent.mkdir(parents=True, exist_ok=True)
-        full.write_text(content if not content or content.endswith("\n") else content + "\n", encoding="utf-8")
+        full.write_text(content if not content or content.endswith("\n") else content + "\n")
 
     def resolve(self, rel_path, for_write=False):
         self.check_usable(rel_path)
@@ -430,7 +430,7 @@ class Workspace:
             if text is None:
                 (self.root / path).unlink(missing_ok=True)
             else:
-                (self.root / path).write_text(text, encoding="utf-8")
+                (self.root / path).write_text(text)
 
     def prepare_env(self):
         """.env made once, from .env.example, with its obvious placeholder values blanked (it says which
@@ -438,9 +438,8 @@ class Workspace:
         example, env = self.root / ENV_EXAMPLE, self.root / ENV_FILE
         if not example.is_file() or env.is_file():
             return
-        env.write_text(self.env_without_placeholders(example.read_text(encoding="utf-8", errors="replace")),
-                       encoding="utf-8")
-        unset = [l.split("=")[0] for l in env.read_text(encoding="utf-8").splitlines() if l.endswith("=")]
+        env.write_text(self.env_without_placeholders(example.read_text(errors="replace")))
+        unset = [l.split("=")[0] for l in env.read_text().splitlines() if l.endswith("=")]
         print(f"  created {ENV_FILE} from {ENV_EXAMPLE}" + (f"; set {', '.join(unset)} in it" if unset else ""))
 
     @staticmethod
@@ -459,7 +458,7 @@ class Workspace:
     @staticmethod
     def is_placeholder(value):
         """A value that only shows where a real one goes (your_api_key_here, <key>, ...)."""
-        return not value or bool(Workspace.PLACEHOLDER_RE.match(value.strip().strip("'\"")))
+        return not value or bool(Workspace.PLACEHOLDER_RE.prefixmatch(value.strip().strip("'\"")))
 
 
 class Change:

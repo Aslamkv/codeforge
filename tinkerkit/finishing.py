@@ -2,15 +2,15 @@
 test), one final review as a person runs it, and the lessons for the next projects."""
 
 import re
-import time
-from pathlib import Path
+lazy import time
+lazy from pathlib import Path
 
-from .building import ToolchainRepair, Verifier
-from .model import OllamaError
+lazy from .building import ToolchainRepair, Verifier
+lazy from .model import OllamaError
 from .session import Phase
-from .prompts import Part, PromptTooLarge, Prompts
+lazy from .prompts import Part, PromptTooLarge, Prompts
 from .settings import ENV_EXAMPLE, ENV_FILE, FIX_FILES, first_line
-from .workspace import FileView, Output, TaughtCommands, TestRef, Toolchain
+lazy from .workspace import FileView, Output, TaughtCommands, TestRef, Toolchain
 
 
 class Tidy(Phase):

@@ -2,18 +2,18 @@
 and the run's one report (Tracker). A project's state is kept in its own database, in its .tinker
 folder; Tinker's home keeps only a pointer to each project."""
 
-import os
+lazy import os
 import re
-import secrets
-import shutil
-import time
-from pathlib import Path
+lazy import secrets
+lazy import shutil
+lazy import time
+lazy from pathlib import Path
 
-from .prompts import Part, Prompts, Reply
-from .settings import (
+lazy from .prompts import Part, Prompts, Reply
+lazy from .settings import (
     FIX_PHASES, Home, PHASES, PROJECT_DB, RUNS_KEPT, STATE_DIR, STATUS_TEXT, Store, confirmed, first_line, now_text, split_text,
 )
-from .workspace import TaughtCommands, TestRef, Toolchain
+lazy from .workspace import TaughtCommands, TestRef, Toolchain
 
 
 class RunChecks:
@@ -211,7 +211,7 @@ class Runs:
         spec_path = Path(path).expanduser()
         if not spec_path.is_file():
             raise SystemExit(f"Spec file not found: {path}")
-        return spec_path.read_text(encoding="utf-8"), spec_path.name
+        return spec_path.read_text(), spec_path.name
 
     @staticmethod
     def entries():
@@ -284,7 +284,7 @@ class Project:
 
     def save(self):
         self.store.put("spec", "plan", self.spec)
-        (self.workdir / "SPEC.md").write_text(SpecDocument(self).text(), encoding="utf-8")
+        (self.workdir / "SPEC.md").write_text(SpecDocument(self).text())
 
     @property
     def language(self):
@@ -376,7 +376,7 @@ class Project:
     def uses(self, path, depth=2):
         """The files a file uses, directly and (depth 2) one level down."""
         direct = self.files.get(path, {}).get("uses", [])
-        deeper = [u2 for u in direct for u2 in self.files.get(u, {}).get("uses", [])] if depth > 1 else []
+        deeper = [*self.files.get(u, {}).get("uses", []) for u in direct] if depth > 1 else []
         return list(dict.fromkeys(direct + deeper))
 
     def criteria_of(self, path, steps):
@@ -388,7 +388,7 @@ class Project:
         if not template:
             return direct
         renderers = [p for p, f in self.files.items() if path in f.get("uses", []) and p != path]
-        found = {s["id"]: s for s in direct + [s for p in renderers for s in self.criteria_of(p, steps)]}
+        found = {s["id"]: s for s in direct + [*self.criteria_of(p, steps) for p in renderers]}
         return list(found.values())
 
     def reached_by(self, path, criterion, template):
@@ -452,7 +452,7 @@ class SpecDocument:
         return lines
 
     def cycles(self):
-        return [line for cycle in self.p.cycles for line in self.cycle(cycle)]
+        return [*self.cycle(cycle) for cycle in self.p.cycles]
 
     @staticmethod
     def cycle(cycle):

@@ -15,27 +15,27 @@ Markup (bold, italic, code ...), each mark for what it means, and each kind show
 thing (a task, a research, a command, a chat's reply, an emergency) has one message, edited as it goes on
 (show), with when it was last updated; a new one is sent only for a new thing, or for what no longer fits.
 The one updated last is pinned where a chat pins, so its top says what moved last."""
-import fcntl
-import html
-import json
+lazy import fcntl
+lazy import html
+lazy import json
 import os
-import queue
+lazy import queue
 import re
-import shlex
+lazy import shlex
 import signal
-import subprocess
+lazy import subprocess
 import sys
-import threading
-import time
-import webbrowser
-from pathlib import Path
+lazy import threading
+lazy import time
+lazy import webbrowser
+lazy from pathlib import Path
 
 from .commands import COMMANDS, TERMINAL_ONLY, named, refs
-from .model import Models, Ollama, OllamaError
+lazy from .model import Models, Ollama, OllamaError
 from .project import Runs, Tracker, saved
-from .settings import Config, Home, human_duration
-from .web import Internet
-from .workspace import Toolchain
+lazy from .settings import Config, Home, human_duration
+lazy from .web import Internet
+lazy from .workspace import Toolchain
 
 
 # --- tasks, and the Tinkers that serve them --------------------------------------------------------------
@@ -74,7 +74,7 @@ ONE_WORD = tuple(c.name for c in COMMANDS if c.chat and c.words == "one")  # a c
 ANY_WORDS = tuple(c.name for c in COMMANDS if c.chat and c.words == "any")  # ... with any words after it
 SAID_BARE = tuple(c.name for c in COMMANDS if c.name)  # commands a conversation takes as their words
 BARE_RE = re.compile(r"(?<![/\w.-])tinker (?=(?:" + "|".join(sorted(SAID_BARE, key=len, reverse=True)) + r")\b)")
-USAGE = {c.name: f"✍️ Write `{c.synopsis}`" + (f", e.g. `{c.example}`" if c.example else "") for c in COMMANDS if c.name}
+USAGE = frozendict({c.name: f"✍️ Write `{c.synopsis}`" + (f", e.g. `{c.example}`" if c.example else "") for c in COMMANDS if c.name})
 EXIT = ("exit",)  # end the conversation (in a chat, once confirmed: it cannot be started again from there)
 START = "/start"  # what a chat app sends when a person first opens the bot
 WELCOME = """👋 **Hi, I'm Tinker!**

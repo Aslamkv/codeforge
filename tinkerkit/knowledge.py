@@ -4,19 +4,19 @@ Retriever, Embeddings). What it learns starts as a candidate: a cycle that succe
 and a failure in the step it was meant to help retires it (kept apart, never shown again). Each item
 keeps its history: the run that taught it, and the runs it helped or failed."""
 
-import collections
-import datetime
-import hashlib
-import math
+lazy import collections
+lazy import datetime
+lazy import hashlib
+lazy import math
 import re
-import tempfile
-import urllib.error
-import urllib.parse
-import urllib.request
-from pathlib import Path
+lazy import tempfile
+lazy import urllib.error
+lazy import urllib.parse
+lazy import urllib.request
+lazy from pathlib import Path
 
-from .model import Models, Ollama, OllamaError
-from .prompts import Part, PromptTooLarge, Prompts
+lazy from .model import Models, Ollama, OllamaError
+lazy from .prompts import Part, PromptTooLarge, Prompts
 from .settings import (
     Config, FACTS_PER_CHUNK, FACT_CHARS, FACT_PHASES, HISTORY_KEPT, Home, LESSONS_SHOWN, LESSON_PHASES, MAX_LESSONS,
     PAGE_CHUNKS, PLAYBOOK_RULES, RULE_CHARS, RULE_WHEN_CHARS,
@@ -24,7 +24,7 @@ from .settings import (
     SAME_FACT, SAME_LESSON, SEARCH_RESULTS, SIMILAR_FAILURE,
     VERSION_TIMEOUT, fingerprint, first_line, now_text, similarity, split_text, words,
 )
-from .workspace import Toolchain, Workspace
+lazy from .workspace import Toolchain, Workspace
 
 
 class Knowledge:
@@ -841,7 +841,7 @@ class Researcher:
         """What is saved: each fact with its question, its sources and its confidence (disputed: a
         contradiction finds it doubtful; corroborated: two or more sites state it; single: one does),
         and each finding no surer than its facts allow (supported)."""
-        disputed = {n for contradiction in analysis["contradictions"] for n in contradiction["doubtful"]}
+        disputed = {*contradiction["doubtful"] for contradiction in analysis["contradictions"]}
         kept = [self.kept_fact(fact, n in disputed) for n, fact in enumerate(facts, 1)]
         cited = lambda finding: [kept[n - 1] for n in finding["facts"]]
         findings = [dict(finding, confidence=self.supported(finding["confidence"], cited(finding)))
@@ -993,7 +993,7 @@ class Library:
         rules = entry.get("rules", [])
         if not rules:
             return entry["facts"]
-        cited = lambda given: {fact_id for rule in given for fact_id in rule.get("cites", [])}
+        cited = lambda given: {*rule.get("cites", []) for rule in given}
         reopened = cited(r for r in entry.get("retired", []) if r.get("was") == "rules") - cited(rules)
         return [fact for fact in entry["facts"] if Library.claim_id(fact, fact["text"]) in reopened]
 
@@ -1057,7 +1057,7 @@ class Retriever:
             return []
         terms, docs = set(words(query)), [words(text) for text in texts]
         average = sum(len(doc) for doc in docs) / len(docs) or 1
-        holding = collections.Counter(term for doc in docs for term in set(doc) & terms)
+        holding = collections.Counter(*(set(doc) & terms) for doc in docs)
         return [self.bm25(terms, doc, len(docs), holding, average) for doc in docs]
 
     def bm25(self, terms, doc, total, holding, average):

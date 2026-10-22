@@ -1,8 +1,8 @@
 """What the model is told and what it answers: prompt parts (Part), replies (Reply) and every system prompt (Prompts)."""
 
-import json
+lazy import json
 import re
-from pathlib import Path
+lazy from pathlib import Path
 
 from .settings import (
     ENV_EXAMPLE, ENV_FILE, FACTS_PER_CHUNK, FACTS_PER_SLOT, FACT_PHASES, LESSON_PHASES, MAX_COMMANDS, MAX_FILE_LINES,
@@ -94,7 +94,7 @@ class Reply:
         for index, (char, in_string) in enumerate(zip(text, inside)):
             if in_string:
                 pass
-            elif char == '"' and stack and stack[-1] == "]" and Reply.KEY_AFTER_RE.match(text, index):
+            elif char == '"' and stack and stack[-1] == "]" and Reply.KEY_AFTER_RE.prefixmatch(text, index):
                 Reply.close_list_before_last_comma(out, stack)
             elif char in "{[":
                 stack.append(Reply.closer(char))
@@ -232,7 +232,7 @@ class Reply:
     @classmethod
     def unnumbered(cls, lines):
         """The lines without the numbers they were shown with, when the model kept them."""
-        if lines and all(cls.NUMBERED_RE.match(line) or not line.strip() for line in lines):
+        if lines and all(cls.NUMBERED_RE.prefixmatch(line) or not line.strip() for line in lines):
             return [cls.NUMBERED_RE.sub("", line, count=1) for line in lines]
         return lines
 

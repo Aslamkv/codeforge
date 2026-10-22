@@ -4,18 +4,18 @@ asked at most once per domain delay, redirects and bytes are bounded, gzip is as
 by its charset. One page failing never stops the others. (Measured on docs.python.org, 12 pages: a new
 connection per page with a 0.5s delay took 6.5s; one kept-alive connection took 0.2s.)"""
 
-import codecs
-import concurrent.futures
+lazy import codecs
+lazy import concurrent.futures
 import http.client
 import re
-import ssl
-import threading
-import time
+lazy import ssl
+lazy import threading
+lazy import time
 import urllib.error
 import urllib.parse
 import urllib.request
 import urllib.robotparser
-import zlib
+lazy import zlib
 from dataclasses import dataclass
 
 from .settings import FETCH_USER_AGENT, MAX_REDIRECTS, first_line

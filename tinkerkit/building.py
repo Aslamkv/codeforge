@@ -1,19 +1,19 @@
 """Building a cycle: the test tool set up, the tests, the code, and fixing until every test passes."""
 
-import itertools
-import json
+lazy import itertools
+lazy import json
 import re
-import time
-from pathlib import Path
+lazy import time
+lazy from pathlib import Path
 
-from .planning import Designer, SpecWriter, asked
+lazy from .planning import Designer, SpecWriter, asked
 from .session import Phase, Worker
-from .prompts import Part, PromptTooLarge, Prompts, Reply
-from .settings import (
+lazy from .prompts import Part, PromptTooLarge, Prompts, Reply
+lazy from .settings import (
     BUILD_TRIES, Console, ENV_EXAMPLE, ENV_FILE, FIX_FILES, MAX_FILE_LINES, MAX_TRIES_PER_PASS,
     OUTPUT_CHARS, REVIEW_TRIES, TESTS_LOCKED, TESTS_MAX_TOKENS, TESTS_PER_CALL, first_line,
 )
-from .workspace import FileView, Output, TestRef, ToolError, Toolchain
+lazy from .workspace import FileView, Output, TestRef, ToolError, Toolchain
 
 
 class TestToolSetup(Phase):

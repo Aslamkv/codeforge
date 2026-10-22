@@ -16,7 +16,7 @@ Tell Tinker what you want. Tinker plans it, builds it, tests it, and learns some
 
 ## What You Need 🧰
 
-- Python 3.14 or newer (check with `python3 --version`; on a Mac, `brew install python`)
+- Python 3.15 or newer (check with `python3 --version`; on a Mac, `brew install python`)
 - macOS or Linux (on Windows, use [WSL](https://learn.microsoft.com/windows/wsl/))
 - [Ollama](https://ollama.com)
 

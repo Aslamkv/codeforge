@@ -2,16 +2,16 @@
 
 import html
 import html.parser
-import json
-import os
+lazy import json
+lazy import os
 import re
-import socket
-import time
-import urllib.error
-import urllib.parse
-import urllib.request
+lazy import socket
+lazy import time
+lazy import urllib.error
+lazy import urllib.parse
+lazy import urllib.request
 
-from .fetcher import Fetcher
+lazy from .fetcher import Fetcher
 from .settings import Config, first_line, is_number
 
 
