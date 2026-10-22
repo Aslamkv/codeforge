@@ -4,9 +4,9 @@ go to. One pool of passages serves every slot (Selector); a slot left without fa
 
 from dataclasses import dataclass
 
-from .knowledge import Embeddings, Retriever
-from .passages import repeats, shingles
-from .settings import MMR_BALANCE, SLOT_CANDIDATES, SLOT_RELEVANT
+lazy from .knowledge import Embeddings, Retriever
+lazy from .passages import repeats, shingles
+lazy from .settings import MMR_BALANCE, SLOT_CANDIDATES, SLOT_RELEVANT
 
 
 @dataclass(frozen=True)
@@ -47,7 +47,7 @@ def fill(text, plan, version):
 INSTALLED = Slot("installed", "Is {topic} installed here, and which version?", "", 0, 0, "toolchain", "machine")
 READINESS = Slot("readiness", "Does every slot above have facts?", "", 0, 0, "", "check")
 
-PROFILES = {
+PROFILES = frozendict({
     "language": (
         INSTALLED,
         Slot("toolchain", "Which test library, formatter, linter and package manager does {topic} use, and what are "
@@ -87,7 +87,7 @@ PROFILES = {
              docs="install installation integration testing plugins"),
         READINESS,
     ),
-}
+})
 
 
 TOOL_DOCS = "install installation getting started usage configuration command line options"  # a language's
@@ -129,7 +129,7 @@ class Selector:
         texts = [passage.searched() for passage in pool]
         queries = {slot.id: f"{slot.asked(plan, version)} {plan['name']} {version}" for slot in slots}
         shortlist = {slot.id: Retriever(None).by_words(queries[slot.id], texts)[:SLOT_CANDIDATES] for slot in slots}
-        vectors = self.vectors(texts, sorted({index for found in shortlist.values() for index in found}))
+        vectors = self.vectors(texts, sorted({*found for found in shortlist.values()}))
         return {slot.id: [pool[i] for i in self.diverse(
                     self.relevant(slot.keywords(), queries[slot.id], shortlist[slot.id], texts, vectors),
                     pool, vectors, slot.passages)]

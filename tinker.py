@@ -190,6 +190,15 @@ are the modules of tinkerkit/, one responsibility each, each using only those li
 Patterns and texts that only one class uses are defined in that class.
 """
 
+# Loaded on first use, so a quick command (tinker --help, tinker config) skips what only a run needs. Named
+# here, not by `lazy import`, so that an older Python can still read this file and reach the version check.
+__lazy_modules__ = [
+    "argparse", "datetime", "os", "secrets", "shutil", "time", "traceback", "webbrowser", "pathlib",
+    "tinkerkit.building", "tinkerkit.conversation", "tinkerkit.finishing", "tinkerkit.graph", "tinkerkit.knowledge",
+    "tinkerkit.learning", "tinkerkit.model", "tinkerkit.planning", "tinkerkit.project", "tinkerkit.prompts",
+    "tinkerkit.session", "tinkerkit.settings", "tinkerkit.web", "tinkerkit.workspace",
+]
+
 import argparse
 import datetime
 import os
@@ -203,9 +212,9 @@ import webbrowser
 from pathlib import Path
 
 # Checked before tinkerkit, which an older Python cannot even read; so that this check runs there, this file
-# keeps to syntax Python 3.9 reads (no match, no t-strings).
-if sys.version_info < (3, 14):
-    raise SystemExit(f"Tinker needs Python 3.14 or newer; this is {sys.version.split()[0]}. "
+# keeps to syntax Python 3.9 reads (no match, no t-strings, no lazy import).
+if sys.version_info < (3, 15):
+    raise SystemExit(f"Tinker needs Python 3.15 or newer; this is {sys.version.split()[0]}. "
                      f"On a Mac: brew install python")
 
 from tinkerkit.building import BugReproducer, CodeWriter, TestToolSetup, TestWriter, Verifier
@@ -1193,7 +1202,7 @@ class ProjectRun:
 
     def summary_done(self):
         project, run_id = self.session.project, self.record["id"]
-        failing = [item for c in project.cycles for item in c.get("readme_failures", [])]
+        failing = [*c.get("readme_failures", []) for c in project.cycles]
         if failing:  # the README's examples are how a person uses it: one that fails is said first
             headline = (f"Done, but {len(failing)} README example(s) do not print what they say (all "
                         f"{len(project.criteria)} spec tests pass)")

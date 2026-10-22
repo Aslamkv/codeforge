@@ -5,10 +5,10 @@ Each passage keeps the address it came from and when it was fetched."""
 
 import html.parser
 import re
-import urllib.parse
+lazy import urllib.parse
 from dataclasses import dataclass
 
-from .settings import LINK_ONLY, NEAR_DUPLICATE, PASSAGE_CHARS, USABLE_PAGE_CHARS, split_text, words
+lazy from .settings import LINK_ONLY, NEAR_DUPLICATE, PASSAGE_CHARS, USABLE_PAGE_CHARS, split_text, words
 from .web import PageText
 
 
@@ -72,7 +72,7 @@ class Cleaner:
         """The pages' passages, numbered on from the known ones: a site's repeated text dropped, and a
         passage that repeats another (or a known one) left out."""
         kept, seen = [], [shingles(passage.text) for passage in known]
-        for passage in (p for page in self.without_site_repeats(pages) for p in self.under_headings(page)):
+        for passage in (*self.under_headings(page) for page in self.without_site_repeats(pages)):
             marks = shingles(passage.text)
             if len(passage.text) >= self.TINY and not any(repeats(marks, other) for other in seen):
                 kept.append(passage)
@@ -254,7 +254,7 @@ def text_blocks(text):
             fence = None if fence else line
         elif fence:
             held.append(line)
-        elif re.match(r"#{1,6} ", line.strip()):
+        elif re.prefixmatch(r"#{1,6} ", line.strip()):
             close()
             blocks.append(Block("heading", line.strip().lstrip("#").strip()))
         elif not line.strip():

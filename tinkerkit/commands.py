@@ -10,7 +10,7 @@ class Option:
         self.flag, self.dest, self.metavar, self.help = flag, dest, metavar, help
 
 
-OPTIONS = {
+OPTIONS = frozendict({
     "spec": Option("--spec", "spec", "FILE", "a spec file, e.g. plan.md"),
     "feature_spec": Option("--spec", "spec_file", "FILE", "a spec file for the feature"),
     "web": Option("--web", "web", None, "may learn from the web what the rest of the cycle needs"),
@@ -22,7 +22,7 @@ OPTIONS = {
     "calls": Option("--calls", "calls", None, "the model calls, instead of what was printed"),
     "graph": Option("--graph", "graph", None, "as a graph to explore: a page that opens in the browser (in a chat: "
                                               "sent as a file)"),
-}
+})
 
 
 class Argument:
@@ -161,7 +161,7 @@ COMMANDS = [
                   ("channel disable NAME", "stop using it (channels start disabled)"),
                   ("channel start [NAME]", "read the chat: tasks, status, stop, emergency, commands, or just chat")]),
 ]
-BY_NAME = {command.name: command for command in COMMANDS if command.name}
+BY_NAME = frozendict({command.name: command for command in COMMANDS if command.name})
 GROUPS = ("Build", "Learn", "Set up", "Talk", "Channels")
 TERMINAL_ONLY = ("add", "remove", "start")  # tinker channel's actions that ask in a terminal (a token, a pairing)
 

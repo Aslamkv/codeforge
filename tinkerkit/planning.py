@@ -1,23 +1,23 @@
 """Planning a cycle: what was learned that it needs, the spec, and the contracts where files meet."""
 
 import ast
-import json
-import math
+lazy import json
+lazy import math
 import operator
 import re
-from pathlib import Path
+lazy from pathlib import Path
 
-from .knowledge import Embeddings, Library, Retriever, mentions
-from .learning import SlotLearner
-from .model import OllamaError
-from .prompts import Part, PromptTooLarge, Prompts
+lazy from .knowledge import Embeddings, Library, Retriever, mentions
+lazy from .learning import SlotLearner
+lazy from .model import OllamaError
+lazy from .prompts import Part, PromptTooLarge, Prompts
 from .session import Phase, Worker
-from .settings import (
+lazy from .settings import (
     CHECK_MAX_TOKENS, Config, ENV_EXAMPLE, ENV_FILE, FACT_PHASES, KINDS, RECALL_TOPICS, TOPIC_RELEVANT,
     after_what_they_use,
     first_line, groups_fitting, words,
 )
-from .workspace import TestRef, Toolchain
+lazy from .workspace import TestRef, Toolchain
 
 
 class Recaller(Phase):
@@ -416,7 +416,7 @@ class SpecWriter(Phase):
         command = " ".join(run.split()[:2]).lower()
         return ("main(" in lower or f"{stem}(" in lower or f"{stem}." in lower and "main" in lower
                 or bool(command) and command in lower
-                or bool(re.match(r"\s*`?[a-z][\w.-]*`?(?: [^\s(]+)*? (prints|outputs|shows|writes)\b", lower))
+                or bool(re.prefixmatch(r"\s*`?[a-z][\w.-]*`?(?: [^\s(]+)*? (prints|outputs|shows|writes)\b", lower))
                 or bool(re.search(r"\b(run|runs|running|ran|launch|launched|invoked?|executed?|stdin|stdout|"
                                   r"standard (input|output)|exit code|exits)\b", lower)))
 
@@ -684,7 +684,7 @@ class Designer(Phase):
     @staticmethod
     def give_templates_a_renderer(files, entry):
         """A template no file uses goes to the code file whose role names it, else to the entry point."""
-        used = {u for f in files for u in f["uses"]}
+        used = {*f["uses"] for f in files}
         code = [f for f in files if f["kind"] == "code"]
         for template in [f for f in files if f["kind"] == "template" and f["path"] not in used]:
             name = Path(template["path"]).name

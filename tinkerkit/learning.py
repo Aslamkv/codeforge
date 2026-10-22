@@ -18,26 +18,26 @@ usable pages:
   KEEP       saved (only now), the old proven copies retired, and indexed
 A gate that stops the run raises LearnStopped, and a model that fails ends it too: nothing is learned then."""
 
-import datetime
-import json
-import threading
-import time
-import urllib.parse
-from collections import Counter
+lazy import datetime
+lazy import json
+lazy import threading
+lazy import time
+lazy import urllib.parse
+lazy from collections import Counter
 
-from .docsite import DocSite
-from .knowledge import Learner, Library, Researcher, Retriever, language_key
-from .model import OllamaError
-from .passages import Cleaner, Page, text_blocks
-from .prompts import Part, PromptTooLarge, Prompts
-from .settings import (
+lazy from .docsite import DocSite
+lazy from .knowledge import Learner, Library, Researcher, Retriever, language_key
+lazy from .model import OllamaError
+lazy from .passages import Cleaner, Page, text_blocks
+lazy from .prompts import Part, PromptTooLarge, Prompts
+lazy from .settings import (
     BACKOFF_FIRST, Config, FACT_CHARS, FACT_PHASES, FACTS_PER_SLOT, FIRST_SEARCH, Home, LEARN_RESULTS, MAX_COMMANDS,
     TOOL_ROLES, first_line, now_text,
 )
-from .slots import PROFILES, TOOL_DOCS, Selector, fill, missing, short_slots, web_slots
-from .web import is_web_address
+lazy from .slots import PROFILES, TOOL_DOCS, Selector, fill, missing, short_slots, web_slots
+lazy from .web import is_web_address
 
-CAUSES = {  # why a learn stopped: (what happened, what to do next)
+CAUSES = frozendict({  # why a learn stopped: (what happened, what to do next)
     "plugin": ("the Internet plugin is off or cannot be reached",
                "check the network and tinker use-web (tinker config shows the web's state), then learn again"),
     "embeddings": ("no embedding model is selected", "select one with tinker embed NAME, then learn again"),
@@ -47,7 +47,7 @@ CAUSES = {  # why a learn stopped: (what happened, what to do next)
     "irrelevant": ("no search result is about the topic", "name the topic more fully (with its language, say)"),
     "pages": ("too few pages could be fetched", "learn again later: a site may refuse fetches or draw its pages with "
               "scripts (fetch_fallbacks lets the web plugin fetch more of those)"),
-}
+})
 
 
 class LearnStopped(SystemExit):
@@ -366,7 +366,7 @@ class SlotLearner:
         a language's earlier proven copies retired; indexed for recall."""
         slug, language = self.slug(plan), plan["kind"] == "language"
         gaps = missing(plan["profile"], facts, machine)
-        cited = {passage_id for fact in facts for passage_id in fact["passages"]}
+        cited = {*fact["passages"] for fact in facts}
         used = [passage for passage in pool if passage.id in cited]
         entry = {"topic": self.topic, "kind": plan["profile"], "name": plan["name"], "summary": plan["summary"],
                  "language": plan["language"] if language else "", "version": plan["version"],
@@ -553,7 +553,7 @@ class RequestLog:
         with self.lock:
             counts = self.tally.setdefault(kind, Counter())
             counts.update(requests=1, **{result: 1})
-            with self.path.open("a", encoding="utf-8") as log:
+            with self.path.open("a") as log:
                 log.write(line + "\n")
 
     def counts(self):

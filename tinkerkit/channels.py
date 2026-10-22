@@ -6,20 +6,20 @@ and the Tinker that listens (tinker channel start, or tinker in a terminal) read
 
 Only the chats a channel was paired with are listened to: a message from anyone else is ignored. Bot tokens
 are kept apart from the settings ("channel_secrets", in Tinker's database, which only its owner can read)."""
-import http.client
-import json
-import os
-import queue
-import re
-import secrets
-import sys
-import threading
-import time
-import urllib.parse
-from pathlib import Path
+lazy import http.client
+lazy import json
+lazy import os
+lazy import queue
+lazy import re
+lazy import secrets
+lazy import sys
+lazy import threading
+lazy import time
+lazy import urllib.parse
+lazy from pathlib import Path
 
 from .conversation import OFF, Channel, ChannelError, Desk, Markup, Message, first_words
-from .settings import Home
+lazy from .settings import Home
 
 
 PAIRING_WAIT = 120                             # seconds to wait for the first message when pairing a chat
@@ -460,7 +460,7 @@ class TelegramChannel(Channel):
         return connection
 
 
-KINDS = {kind.KIND: kind for kind in (TelegramChannel,)}
+KINDS = frozendict({kind.KIND: kind for kind in (TelegramChannel,)})
 
 
 def ask(question, default="", choices=None, secret=False):

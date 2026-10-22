@@ -1,16 +1,16 @@
 """The local model: Ollama's API, one request with its budgets and retries (Model), and measuring a
 model once, quickly (Calibrator)."""
 
-import json
-import secrets
-import subprocess
-import sys
-import time
-import urllib.error
-import urllib.parse
-import urllib.request
+lazy import json
+lazy import secrets
+lazy import subprocess
+lazy import sys
+lazy import time
+lazy import urllib.error
+lazy import urllib.parse
+lazy import urllib.request
 
-from .prompts import Part, Prompts, PromptTooLarge, Reply
+lazy from .prompts import Part, Prompts, PromptTooLarge, Reply
 from .settings import (
     CAPACITY_STEP,
     CHARS_PER_TOKEN,
@@ -45,7 +45,7 @@ from .settings import (
     first_line,
     now_text,
 )
-from .workspace import ToolError
+lazy from .workspace import ToolError
 
 
 class Model:
@@ -576,7 +576,7 @@ class Calibrator:
         try:
             if sys.platform == "darwin":
                 return int(subprocess.run(["sysctl", "-n", "hw.memsize"], capture_output=True, text=True).stdout)
-            with open("/proc/meminfo", encoding="utf-8") as info:
+            with open("/proc/meminfo") as info:
                 return int(next(line for line in info if line.startswith("MemTotal")).split()[1]) * 1024
         except OSError, ValueError, StopIteration:
             return None

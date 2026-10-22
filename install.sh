@@ -1,8 +1,8 @@
 #!/bin/sh
 # Link tinker into ~/.local/bin so it runs from any folder.
 set -e
-if ! python3 -c 'import sys; sys.exit(sys.version_info < (3, 14))' 2>/dev/null; then
-  echo "⚠️  Tinker needs Python 3.14 or newer; python3 here is: $(python3 --version 2>&1)"
+if ! python3 -c 'import sys; sys.exit(sys.version_info < (3, 15))' 2>/dev/null; then
+  echo "⚠️  Tinker needs Python 3.15 or newer; python3 here is: $(python3 --version 2>&1)"
   echo "   On a Mac: brew install python"
   exit 1
 fi
