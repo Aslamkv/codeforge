@@ -32,6 +32,7 @@ Usage (a project is named as @ID or @folder; without one, it is this folder's):
     tinker chat MESSAGE | tinker command WHAT | tinker research TOPIC | tinker stop | tinker emergency MESSAGE
     tinker learn WHAT                     learn a language, a tool or a domain (Tinker tells which)
     tinker learn NAME ["DEFINITION"]      a command of yours Tinker may use (an alias in your shell)
+    tinker exercise LANGUAGE | stop | status   practise a language on its own; it pauses whenever you ask
     tinker doctor                         what is missing or wrong, and the command that fixes it
     tinker models | tinker calibrate NAME | tinker use-model NAME | tinker embed NAME | tinker use-web NAME
     tinker config [KEY VALUE] | tinker memory | tinker clear PART... | tinker reset [--yes]
@@ -185,6 +186,7 @@ are the modules of tinkerkit/, one responsibility each, each using only those li
   channels   the chat plugin: Telegram, and tinker channel (TelegramChannel, Channels)
   knowledge  lessons (Knowledge) and learning (Learner, Researcher, Library, Retriever, Embeddings)
   teaching   asking what Tinker keeps (Asker), and teaching it, checked before anything changes (Teacher)
+  exercising practising a language on its own, giving way to the person (Exercise, Exercises)
   session    what every phase works through (Session), and the phase contract (Worker, Phase)
   planning   recall, the spec, the contracts where files meet, and their review
   building   setup, the tests, the code, and fixing until every test passes
@@ -196,7 +198,7 @@ Patterns and texts that only one class uses are defined in that class.
 # here, not by `lazy import`, so that an older Python can still read this file and reach the version check.
 __lazy_modules__ = [
     "argparse", "datetime", "os", "secrets", "shutil", "time", "traceback", "webbrowser", "pathlib",
-    "tinkerkit.building", "tinkerkit.conversation", "tinkerkit.finishing", "tinkerkit.graph", "tinkerkit.knowledge",
+    "tinkerkit.building", "tinkerkit.conversation", "tinkerkit.exercising", "tinkerkit.finishing", "tinkerkit.graph", "tinkerkit.knowledge",
     "tinkerkit.learning", "tinkerkit.model", "tinkerkit.planning", "tinkerkit.project", "tinkerkit.prompts",
     "tinkerkit.session", "tinkerkit.settings", "tinkerkit.teaching", "tinkerkit.web", "tinkerkit.workspace",
 ]
@@ -234,11 +236,11 @@ from tinkerkit.session import Session
 from tinkerkit.teaching import Asker, Memory, Teacher
 from tinkerkit.settings import (
     CONFIRM_AFTER, Config, DEFAULT_MAX_STALL, ENV_EXAMPLE, ENV_FILE, FIX_PHASES, FORMAT_AFTER, Home, Log,
-    PHASES, STATUS_TEXT, clock, first_line, now_text,
+    PHASES, STATUS_TEXT, clock, first_line, now_text, projects_folder,
 )
 from tinkerkit.web import Internet
 
-from tinkerkit import conversation
+from tinkerkit import conversation, exercising
 
 try:  # chat channels are a plugin: without tinkerkit/channels.py, Tinker works as it did, in the terminal
     from tinkerkit import channels
@@ -284,9 +286,9 @@ class Cli:
     RUNS = tuple(c.name for c in COMMANDS if c.run and c.name != "confirm")
     COMMANDS = tuple(c.name for c in COMMANDS if c.cli and c.group != "Talk" and c.name not in ("help", "channel",
                                                                                                 "confirm"))
-    LEARNING = ("learn",)  # the commands that load the model and read the web (but for teaching a command)
+    LEARNING = ("learn", "exercise")  # the commands that load the model for long (but for teaching a command)
     FIELDS = {"reset": False, "config": None, "models": False, "use_model": None, "embed": None, "use_web": None,
-              "calibrate": None, "learn": None, "ask": None, "teach": None, "memory": False, "runs": False, "status": None, "log": None,
+              "calibrate": None, "learn": None, "ask": None, "teach": None, "exercise": None, "memory": False, "runs": False, "status": None, "log": None,
               "doctor": False, "task": None, "spec": None, "spec_file": None, "restart": False, "resume": None,
               "amend": None, "add": None, "fix": None, "workdir": None, "web": False, "confirm": False,
               "rename": None, "yes": False, "calls": False, "graph": False}
@@ -477,7 +479,7 @@ class Cli:
             args.rename = Cli.renamed(given.words, parser)
         elif command == "learn":
             args.learn = Cli.learning(given.words, parser)
-        elif command in ("ask", "teach"):
+        elif command in ("ask", "teach", "exercise"):
             setattr(args, field, Cli.non_empty(" ".join(given.words), command, parser))
         elif command == "config":
             if len(given.words) not in (0, 2):
@@ -608,6 +610,8 @@ class Commands:
             self.ask()
         elif args.teach:
             self.teach()
+        elif args.exercise:
+            self.exercise()
         elif args.memory:
             self.show_memory(args.graph)
         elif args.runs:
@@ -816,11 +820,28 @@ class Commands:
         Commands.reported(f"Teaching: {first_line(teaching, 60)}", model,
                           lambda tracker: Teacher(model, internet, memory, tracker).teach(teaching))
 
+    def exercise(self):
+        """tinker exercise LANGUAGE: practice projects in that language, one after another, until it is stopped
+        (exercising.Exercise); tinker exercise stop stops the one that runs, everything kept; tinker exercise status
+        shows how each is going. Its tracker reports to the chats too, as a run's does."""
+        what = self.args.exercise
+        if what.lower() == "stop":
+            return exercising.stop()
+        if what.lower() == "status":
+            return exercising.show()
+        active = exercising.Exercises.active()
+        if active:
+            raise SystemExit(f"An exercise of {active['language']} runs already: tinker exercise stop first.")
+        model = Commands.model_in_use(*Commands.checked_model(), "exercise")
+        Commands.reported(f"Exercising {what}", model, lambda tracker: exercising.Exercise(model, tracker).run(what),
+                          chats=True)
+
     @staticmethod
-    def reported(title, model, work):
+    def reported(title, model, work, chats=False):
         """work(tracker) done with the model, its tracker told how it ended (work gives the ending) and how long it
-        took, however it ends; the model unloaded after."""
+        took, however it ends; the model unloaded after. chats: the tracker reports to the enabled chats too."""
         tracker = Commands.followed(title)
+        listening = conversation.attach(title, tracker) if chats else None
         started, ending = time.monotonic(), {"status": "stopped", "headline": f"{title} did not finish"}
         try:
             ending = work(tracker)
@@ -832,7 +853,11 @@ class Commands:
             Models.remember(model)
             took = time.monotonic() - started
             say.title(f"Time taken: {human_duration(took)}", "⏱️")
-            Commands.tracker_ended(tracker, ending, took)
+            if listening:  # the chats it reports to are told the end, and the tracker leaves the home
+                tracker.end(ending, took)
+                listening.end()
+            else:
+                Commands.tracker_ended(tracker, ending, took)
 
     @staticmethod
     def print_learned(topic, entry):
@@ -1481,7 +1506,7 @@ class ProjectFolder:
 
     @staticmethod
     def make(task):
-        root = Path(str(Config.get("projects") or "~/Projects")).expanduser().resolve()
+        root = projects_folder()
         root.mkdir(parents=True, exist_ok=True)
         name = ProjectFolder.named(task) or ProjectFolder.from_words(task)
         folder, count = root / name, 1

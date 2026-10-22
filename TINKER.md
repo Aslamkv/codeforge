@@ -287,6 +287,25 @@ tinker teach I prefer no mypy, our spec tests already catch what matters
 
 In zsh, a `?` in a command is a wildcard, so leave it out or quote the question.
 
+### Exercise 🏋️
+
+Let Tinker practise a language on its own, to write better code faster. It builds small practice projects
+one after another in `~/Projects/tinker-exercise`: each one is built, then given a feature. It measures each
+project (time, model calls, retried replies, fixes, what failed) and keeps lessons from its mistakes and slow
+steps. The next projects prove those lessons or retire them. A language it has not learned yet is learned
+first (this needs the web). Words that are not one language are said so, and nothing is done:
+
+```sh
+tinker exercise rust      # start, or go on from where it stopped
+tinker exercise status    # how it is going: each project's measures, and what it practises next
+tinker exercise stop      # stop it; everything is kept
+```
+
+You come first. Whenever you ask for something (a chat, a command, a task, or a `tinker` run in another
+terminal), its build stops and saves itself. The exercise goes on once Tinker has been idle for two minutes.
+It runs until you stop it. In a chat, `exercise rust` starts it in the background, so it keeps going after
+the conversation ends.
+
 ## Settings 🔧
 
 See the settings, or change one:

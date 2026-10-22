@@ -117,6 +117,17 @@ COMMANDS = [
             "web (tinker use-web).", chat="long", words="any",
             arguments=[Argument("words", "+", "WHAT", "what to correct, and why (no quotes needed)")],
             example="teach ruff formats Python as black does, so ruff alone is enough"),
+    Command("exercise", "Learn", "exercise LANGUAGE | stop | status",
+            "practise a language on its own: get better, faster, and learn from mistakes",
+            "Practise a language on its own, to write better code faster: Tinker learns the language first when it "
+            "has not, then builds small practice projects one after another in their own folders (in "
+            "tinker-exercise in the projects folder), each followed by a feature, measures each one (time, model "
+            "calls, fixes, what failed) and keeps lessons from its mistakes and slow steps; the next projects prove "
+            "them or retire them. It gives way to you: whatever you ask, it pauses, and goes on once Tinker is idle. "
+            "exercise stop stops it, everything kept (exercise LANGUAGE goes on from there); exercise status shows "
+            "how it is going. A word that is not one language (or could be several) is said so, and nothing is done.",
+            chat="own", words="any", arguments=[Argument("words", "+", "LANGUAGE | stop | status")],
+            example="exercise rust"),
     Command("memory", "Learn", "memory [--graph]", "what Tinker has learned (--graph: as a graph to explore)",
             "Show what Tinker has learned: toolchains, fixes, lessons, topics, your commands. --graph draws it as a "
             "graph in one page (opened in the browser; in a chat, sent as a file): each lesson, fact and fix linked "
