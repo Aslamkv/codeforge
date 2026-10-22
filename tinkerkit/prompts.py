@@ -6,8 +6,8 @@ lazy from pathlib import Path
 
 from .settings import (
     ENV_EXAMPLE, ENV_FILE, FACTS_PER_CHUNK, FACTS_PER_SLOT, FACT_PHASES, LESSON_PHASES, MAX_COMMANDS, MAX_FILE_LINES,
-    PLAYBOOK_RULES, RESEARCH_CHECKS, RESEARCH_GAPS, RESEARCH_QUERIES, RESEARCH_QUESTIONS, RULE_CHARS, TOOL_ROLES,
-    TRIM_FLOOR, first_line,
+    PLAYBOOK_RULES, RESEARCH_CHECKS, RESEARCH_GAPS, RESEARCH_QUERIES, RESEARCH_QUESTIONS, RULE_CHARS, TEACH_CLAIMS,
+    TEACH_COMMANDS, TEACH_SEARCHES, TOOL_ROLES, TRIM_FLOOR, first_line,
 )
 
 
@@ -803,6 +803,50 @@ example is run as written to check it, so it must work exactly as given.
 - serves: true when the run command keeps running until stopped (a server), else false.
 Reply with ONLY JSON: {"overview":"...","features":["..."],"requires":"Python 3.10 or newer",
 "usage":[{"what":"Add two numbers","command":"python3 calculator.py add 5 2","output":"7"}],"serves":false}"""
+
+    ASK_SYSTEM = ("You are Tinker, and the person asks you about what you have learned. Below is what you keep: the "
+                  "toolchain that worked for each language (what its projects use), toolchain fixes, lessons, facts and "
+                  "rules, and the person's own commands. Answer from these alone, as a person answers a colleague: only "
+                  "what is asked, in a few short plain lines (no Markdown, no item numbers, no notes on what is proven, "
+                  "nothing about what you do not keep). The toolchain that worked comes before facts and rules. When "
+                  "nothing below answers it, say in one line that you have not learned that yet.")
+
+    TEACH_SYSTEM = f"""The person teaches you, Tinker, something, to correct what you keep. Below is what you keep that
+is most related to it, numbered. Several things may be taught at once: split it into the claims it rests on and
+the changes it asks for, each change on its own.
+"claims": each claim, at most {TEACH_CLAIMS}, as {{"text": ..., "preference": true or false}}. A preference is only
+what the person marks with the word prefer ("I prefer no type checker", "prefer X over Y"): it is theirs, honored
+and never checked. Every other claim is a fact, checked first, however sure the person sounds.
+"commands": commands that show on this machine whether a fact holds (a tool's --version or --help), one command
+each, no shell operators, nothing installed or changed, at most {TEACH_COMMANDS};
+"searches": web searches that find independent sources for the facts, at most {TEACH_SEARCHES} ([] when every
+claim is a preference).
+"language": the language it is about, or "" when it holds for every language.
+"changes": each change, with "claims": the numbers of the claims it rests on, and one or more of:
+"retire": the numbers of the items it shows wrong;
+"toolchain": the language's toolchain commands to replace, by key (check, test_all, test_one, format, lint; setup
+is the whole list of its commands), each written as a person types it; a key goes in one change only (one that
+several claims affect rests on all of them);
+"lesson": what was taught, as one general imperative sentence, with the phase where it matters (one of
+{', '.join(LESSON_PHASES)}); never a project's names, files or data.
+Reply with ONLY JSON: {{"claims":[{{"text":"Tool A formats code as tool B does","preference":false}},
+{{"text":"I prefer no type checker in my projects","preference":true}}],"commands":["tool-a format --help"],
+"searches":["tool A replaces tool B formatter"],"language":"Python","changes":[{{"claims":[1],"retire":[2],
+"toolchain":{{"format":"tool-a format ."}},"lesson":{{"phase":"toolchain","text":"Format with tool A alone; tool B
+is not needed beside it"}}}},{{"claims":[2],"toolchain":{{"lint":"tool-a check ."}},"lesson":{{"phase":"toolchain",
+"text":"Run no type checker: the tests check what the spec asks"}}}}]}}"""
+
+    JUDGE_SYSTEM = """The person taught you, Tinker, something. Before you change what you keep, check it. Below are the
+facts it rests on, the person's preferences (theirs to make: honored, never checked), the changes the facts are
+for, and the evidence, numbered: what commands showed on this machine and what web pages say. Decide from the
+evidence alone, never from what you were trained on (it may be out of date). A tool a command does not find here
+may still be installed in a project's own environment: that says nothing about the tool itself.
+For each fact: "holds" only when the evidence states it (cite those numbers), "wrong" when the evidence
+contradicts it, "unsure" when it says too little.
+For each change: "follows" true only when every item it retires is shown wrong, and its toolchain commands and
+its lesson agree with the evidence and the preferences.
+Reply with ONLY JSON: {"claims":[{"claim":1,"verdict":"holds","why":"one short sentence","evidence":[1,3]}],
+"changes":[{"change":1,"follows":true,"why":"one short sentence"}]}"""
 
     README_FIX_SYSTEM = ("Some usage examples in a project's README do not print what the README says. For each, "
                          "decide what is wrong: the README (its command or the output it shows) or the code (it does "

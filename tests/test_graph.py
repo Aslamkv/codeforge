@@ -151,7 +151,8 @@ def test_memory_graph_writes_the_page_and_opens_it_only_in_a_terminal(memory, mo
 def test_memory_counts_what_is_retired(memory, capsys):
     Commands.show_memory()
     out = capsys.readouterr().out
-    assert "Retired: 1 item(s) that did not hold" in out and "See it as a graph: tinker memory --graph" in out
+    assert "♻️  1 item did not hold and was retired: never shown to the model again" in out
+    assert "Explore it     tinker memory --graph" in out
 
 
 @pytest.mark.spec("GRF-1")

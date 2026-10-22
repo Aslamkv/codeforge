@@ -158,6 +158,12 @@ RUNS_KEPT = 200                   # lines about runs kept in the home, the most 
 SIMILAR_MEANING = 0.75            # embedding similarity at which two lessons are linked as similar
 SIMILAR_WORDS = 0.5               # ... text similarity, when there are no embeddings
 
+# --- asking and teaching: tinker ask QUESTION, tinker teach WHAT --------------------------------------------
+MEMORY_SHOWN = 25                 # items of what Tinker keeps shown to one ask or teach, the most related first
+TEACH_CLAIMS = 4                  # claims a teaching is checked as
+TEACH_COMMANDS = 3                # commands that check it on this machine
+TEACH_SEARCHES = 3                # web searches that check it
+
 # --- learning from the web: tinker learn TOPIC, and the recall phase of a run --------------------------
 FACT_PHASES = ("spec", "design", "config", "tests", "code", "toolchain")  # where a learned fact is shown
 MAX_COMMANDS = 6                  # commands that show what of a topic is installed here

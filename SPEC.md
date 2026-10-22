@@ -72,6 +72,7 @@ responsibility, and each imports only the modules listed above it:
 | `docsite` | a topic's documentation site for its version: its map, each slot's pages, kept per topic and version (`DocSite`, `DocCache`) |
 | `learning` | learning a language or a tool by its slots (`SlotLearner`, `Throttle`, `RequestLog`, `LearnStopped`) |
 | `graph` | what Tinker knows as one graph of items and links (`Graph`), and the page that shows it (`GraphPage`) |
+| `teaching` | asking what Tinker keeps (`Asker`), and teaching it, checked before anything changes (`Teacher`, `Memory`, `Verdict`) |
 | `session` | what every phase works through (`Session`), and the phase contract (`Worker`, `Phase`) |
 | `planning` | recall, the spec, the contracts where files meet, and their review |
 | `building` | setup, the tests, the code, and fixing until every test passes |
@@ -107,6 +108,7 @@ database holds:
 | `channels`, `channel_secrets` | the chat channels and their tokens |
 | `listening`, `running` | the conversation's live state: its status messages, and each run's tracker |
 | log `learn` | every model call that `tinker learn` made |
+| log `teach` | every model call that `tinker ask` and `tinker teach` made |
 
 Each project keeps its own state in `<project>/.tinker/project.db`:
 
@@ -743,6 +745,42 @@ CONDENSE, KEEP. Domain research (`Researcher`), own-command learning and run les
   counts, and how lessons were found similar), and opens it in the browser only when printing to a
   terminal.
 
+## teaching
+
+`tinker ask QUESTION` answers from what Tinker keeps. `tinker teach WHAT` corrects it, and nothing changes until
+what was taught is checked: the model turns it into claims and the change it asks for, the claims are checked
+on this machine and on the web, the model weighs that evidence alone, and only then is anything changed.
+
+- **TCH-1** `Memory(embeddings).items` are the memory graph's toolchains, fixes, lessons, facts, findings, rules
+  and commands, without the retired. `about(text)` gives at most `MEMORY_SHOWN` of them, the most related first:
+  first the items whose kind and language (or topic) the text names. A language's toolchain counts as named with
+  its language, however the text calls it ("toolset").
+- **TCH-2** `Asker.answer(question)` makes one model call with the items numbered, and says the answer alone:
+  no steps and no sources, then the time taken (a terminal shows one status line while it thinks). With nothing kept it
+  makes no call and says so. It changes nothing.
+- **TCH-3** `read_plan` keeps at most `TEACH_CLAIMS` claims, each a fact or a preference (the person's own
+  choice). A preference is only what the person marks with the word prefer: a teaching without it (`marked`) has
+  facts alone, whatever the model says. It keeps at most `TEACH_COMMANDS` commands and `TEACH_SEARCHES` searches, and the changes: each rests on the
+  claims it names and retires items shown, replaces toolchain commands of `TOOLCHAIN_KEYS` or keeps a lesson with
+  a known phase (any other is dropped). Setup given as one line is split at `&&` into its commands; any other
+  command given as a list is joined with `&&`. A plan with no claim, facts that nothing checks, no change, a
+  toolchain key in two changes, or a toolchain key or value it cannot use is a `ValueError` (the model is asked
+  again with why).
+- **TCH-4** `Teacher.teach` checks the facts first. It runs only the commands that show what is installed (each
+  other one is skipped, and said; a tool not found here may be in a project's own environment), and reads the
+  pages the searches find. A preference is honored, never checked: with only preferences, nothing is run or
+  searched and the judge is not asked. Facts with no evidence are unsure, and the judge is not asked.
+- **TCH-5** `Verdict.read` needs a verdict for every fact (`holds`, `wrong` or `unsure`; one that holds with no
+  evidence it can cite is unsure), and whether each change a fact is for follows. Each change is made on its
+  own: when every claim it rests on holds or is a preference, and it follows. Each other one is said with why.
+  When no change is made, nothing changes.
+- **TCH-6** A change that is made retires the items it shows wrong (the reason names what was taught), replaces
+  the commands of the language's toolchain (only when it has one, and the result is usable), and keeps its
+  lesson as proven, with a `taught` event and its sources: the evidence its facts cite, and "your preference"
+  for a preference. A lesson like a known one proves that one instead of being added.
+- **TCH-7** `tinker teach` needs the Internet plugin, checked before any model call. Both commands report through
+  a tracker, and in the conversation they run as tasks.
+
 ## session
 
 - **SES-1** `Session` is what every phase works through: the model, the project, its workspace and
@@ -1020,8 +1058,11 @@ CONDENSE, KEEP. Domain research (`Researcher`), own-command learning and run les
   the model is doing (in plain words), its steps and its end (learned, with the summary, or why it
   stopped), so a chat that started it shows them; the tracker leaves the home at the end unless that
   conversation reads it last.
-- **CLI-11** `tinker memory` shows each language's toolchain, fixes and lessons, the lessons for any
-  language, the topics learned, the person's commands, and how many items are retired. `tinker models` lists Ollama's models
+- **CLI-11** `tinker memory` shows one part per language (built, or read from the web): how many projects built
+  it and when its docs were read, then the toolchain that worked (one command a row), its proven facts, fixes and
+  lessons (each marked proven or not yet). Then the lessons for any language, the other topics learned, the
+  person's commands, how many items are retired, and what to do next. A part with nothing in it is left out;
+  with nothing learned at all, it says how to start. `tinker models` lists Ollama's models
   with what was measured, and marks the one in use.
 - **CLI-12** `tinker task` builds straight through, with no confirmation. Given `--confirm`, it waits
   once its plan is made: it prints the plan to confirm and exits 0 as `awaiting`. `tinker confirm` builds it, and `tinker amend CHANGE` changes the plan and waits again.

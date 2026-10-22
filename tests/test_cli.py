@@ -610,11 +610,30 @@ def test_memory(home_store, capsys):
     capsys.readouterr()
     Commands.show_memory()
     out = capsys.readouterr().out
-    for line in ("Python (python), 0 project(s) finished", "  toolchain: setup -", "  fix: no module named calc -> "
-                 "pythonpath (helped 1; replayed without the model)", "  lesson [tests, candidate, seen 1x]: Use tmp_path",
-                 "Any language:\n  lesson [code, candidate, seen 1x]: Exit with 1", "  flask (topic): Flask, learned "
-                 "2026-10-01, 1 fact(s): A web framework.", "  act: stands for `echo hi` (given)"):
+    for line in ("📘 Python · nothing built yet", "   🧰 Toolchain\n", f"      test      {TOOLCHAIN['test_all']}",
+                 "   🔧 Fixes\n      • no module named calc → pythonpath (helped 1×)",
+                 "   📒 Lessons (✅ proven by a build, 🌱 not yet)\n      🌱 Use tmp_path in tests",
+                 "🌍 Any language\n   📒 Lessons", "      🌱 Exit with 1 after an error",
+                 "🔬 Topics learned\n   • Flask: A web framework. (read 1 Oct, 1 facts)",
+                 "⌨️  Your commands\n   • act: stands for `echo hi` (given)", "   Ask about it   tinker ask"):
         assert line in out, line
+    assert "setup" not in out.split("🧰 Toolchain")[1].split("🔧")[0]  # a row only for a command it has
+
+
+@pytest.mark.spec("CLI-11")
+def test_memory_of_a_language_read_from_the_web_only(home_store, capsys):
+    Library.save("go", {"name": "Go", "kind": "language", "language": "Go", "summary": "s",
+                        "learned": "2026-10-22 08:53", "facts": [{"phase": "code", "text": "x"}]})
+    Commands.show_memory()
+    out = capsys.readouterr().out
+    assert "📘 Go · nothing built yet · docs read 22 Oct (1 facts)" in out and "Topics learned" not in out
+
+
+@pytest.mark.spec("CLI-11")
+def test_memory_with_nothing_learned_says_how_to_start(home_store, capsys):
+    Commands.show_memory()
+    out = capsys.readouterr().out
+    assert "🌱 Nothing yet: it learns from every build" in out and "Any language" not in out
 
 
 @pytest.mark.spec("CLI-11")

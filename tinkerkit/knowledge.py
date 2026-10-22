@@ -285,8 +285,67 @@ class Knowledge:
         self.language_doc["projects"] = self.language_doc.get("projects", 0) + 1
         self.save()
 
+    def retire_item(self, key, reason):
+        """One of the language's lessons, proven facts or fixes, or a lesson for any language, retired by its
+        key (lesson:ID, known:ID, fix:FAILURE); whether it was. Only the list it left is saved."""
+        kind, _, rest = key.partition(":")
+        picks = {"lesson": ("lessons", lambda item: item.get("id") == rest),
+                 "known": ("facts", lambda item: item.get("id") == rest),
+                 "fix": ("fixes", lambda item: item.get("failure") == rest)}
+        if kind not in picks:
+            return False
+        name, gone = picks[kind]
+        if retire(self.language_doc, name, gone, reason, self.run):
+            self.save_language()
+            return True
+        if kind == "lesson" and retire(self.any_language_doc, name, gone, reason, self.run):
+            self.save_any_language()
+            return True
+        return False
+
+    def correct_toolchain(self, changes):
+        """The toolchain that worked, with the commands the person taught (and Tinker checked) in place of its
+        own; None when there is none to correct, or the corrected one is not usable."""
+        known = self.toolchain()
+        corrected = known.merged(changes) if known else None
+        if not corrected:
+            return None
+        self.language_doc["toolchain"], self.language_doc["toolchain_saved"] = corrected.to_dict(), now_text()
+        self.save_language()
+        return corrected
+
+    def taught_lesson(self, item, sources):
+        """A lesson the person taught and Tinker checked, kept as proven with the sources that showed it (one like
+        a known lesson proves that one instead); None when it is not a usable lesson. scope: language or any."""
+        known = self.known_lessons()
+        text = str(item.get("text", "")).strip()
+        lesson = next((lesson for lesson in known if similarity(lesson["text"], text) >= SAME_LESSON), None)
+        if lesson is None:
+            lesson = self.new_lesson(item, known, ())
+            if lesson is None:
+                return None
+            self.lessons_of(item.get("scope"))["lessons"].append(lesson)
+        lesson.update(status="proven", sources=list(dict.fromkeys(sources)))
+        record(lesson, "taught", self.run)
+        for doc in (self.language_doc, self.any_language_doc):
+            doc["lessons"] = self.keep(doc["lessons"], [lesson])
+        if any(kept is lesson for kept in self.language_doc["lessons"]):
+            self.save_language()
+        else:
+            self.save_any_language()
+        return lesson
+
+    def lessons_of(self, scope):
+        return self.language_doc if scope == "language" else self.any_language_doc
+
     def save(self):
+        self.save_language()
+        self.save_any_language()
+
+    def save_language(self):
         Home.store().put("languages", self.key, self.language_doc)
+
+    def save_any_language(self):
         Home.store().put("memory", "any", self.any_language_doc)
 
 
