@@ -47,7 +47,7 @@ def test_run_times_out_and_kills_the_process_group(ws, project_dir):
 def test_unsafe_commands_are_never_run(ws, project_dir, capsys):
     assert ws.run(f"sudo touch {project_dir}/x") == (None, Workspace.REFUSED)
     assert not (project_dir / "x").exists()
-    assert "REFUSED" in capsys.readouterr().out
+    assert "Refused `sudo touch" in capsys.readouterr().out
 
 
 @pytest.mark.spec("WS-2")

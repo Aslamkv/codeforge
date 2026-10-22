@@ -6,6 +6,7 @@ lazy import time
 lazy from pathlib import Path
 
 lazy from .building import ToolchainRepair, Verifier
+from .messages import say
 lazy from .model import OllamaError
 from .session import Phase
 lazy from .prompts import Part, PromptTooLarge, Prompts
@@ -24,28 +25,30 @@ class Tidy(Phase):
 
     def run(self, cycle):
         if not self.s.toolchain.lint:
-            print("  no lint command: nothing to tidy")
+            say.skip("No lint command: nothing to tidy")
             return None
         output = self.lint()
         reported = self.reported(output)
         if not reported:
             self.say_nothing_to_tidy(output)
             return None
-        print(f"  $ {self.s.toolchain.lint}: problems in {', '.join(reported)}")
+        say.info(f"$ {self.s.toolchain.lint}: problems in {', '.join(reported)}", "🧹")
         passing = Verifier(self.s).passing()
         for path in reported:
             self.tidy(path, output, passing)
         left = self.reported(self.lint())
-        print(f"  the linter still reports problems in {', '.join(left)}" if left
-              else "  the linter finds no problem now")
+        if left:
+            say.warn(f"The linter still reports problems in {', '.join(left)}")
+        else:
+            say.done("The linter finds no problem now")
         return None
 
     @staticmethod
     def say_nothing_to_tidy(output):
         if not output:
-            print("  the linter finds no problem")
+            say.done("The linter finds no problem")
         else:
-            print(f"  the linter reports problems, in no file Tinker wrote: {Output.key_line(output)}")
+            say.warn(f"The linter reports problems, in no file Tinker wrote: {Output.key_line(output)}")
 
     def lint(self):
         """What the linter reports ("" when nothing), after the formatter and its safe automatic
@@ -78,7 +81,7 @@ class Tidy(Phase):
         try:
             change, reply = self.tidied(path, parts, len(lines))
         except PromptTooLarge as exc:
-            print(f"  tidy {path}: the prompt does not fit ({exc})")
+            say.skip(f"Tidy {path}: the prompt does not fit ({exc})")
             return
         self.keep_if_better(path, change, reply, output, passing)
 
@@ -105,14 +108,14 @@ class Tidy(Phase):
     def keep_if_better(self, path, change, reply, output, passing):
         """The change kept when the linter finds less in the file and no test broke; else reverted."""
         if not change:
-            print(f"  tidy {path}: no usable change")
+            say.skip(f"Tidy {path}: no usable change")
         elif not self.fewer_findings(path, output):
             self.ws.revert(change)
-            print(f"  tidy {path}: the linter found as much or more in it afterwards; reverted")
+            say.warn(f"Tidy {path}: the linter found as much or more in it afterwards; reverted")
         elif self.broke(change, passing):
-            print(f"  tidy {path}: it broke a passing test; reverted")
+            say.warn(f"Tidy {path}: it broke a passing test; reverted")
         else:
-            print(f"  tidy {path}: changed  ({reply.cause() or 'lint problems fixed'})")
+            say.done(f"Tidy {path}: changed  ({reply.cause() or 'lint problems fixed'})")
 
     def fewer_findings(self, path, before):
         """Whether the linter now locates fewer problems in the file than before the change (a fix
@@ -154,7 +157,7 @@ class ReadmeWriter(Phase):
             cycle["serves"] = guide["serves"]
             self.ws.write(readme, self.text(guide))
             self.p.register([readme], "docs", "what it does, how to use, set up, run and test it")
-            print(f"  wrote {readme}")
+            say.done(f"Wrote {readme}")
             self.s.save()
         self.check(cycle, readme)
         return None
@@ -177,7 +180,7 @@ class ReadmeWriter(Phase):
             found = self.s.model.ask_until_usable(Prompts.README_SYSTEM, parts, "README", self.read, attempts=2,
                                                   think=False)  # it describes code that exists; its examples are run
         except (PromptTooLarge, OllamaError) as exc:
-            print(f"  README: {first_line(str(exc), 120)}; its features are the spec's criteria")
+            say.warn(f"README: {first_line(str(exc), 120)}; its features are the spec's criteria")
             found = None
         return found or {"overview": "", "features": [s["behaviour"] for s in self.p.criteria], "usage": [],
                          "serves": False}
@@ -242,14 +245,14 @@ class ReadmeWriter(Phase):
         for round_number in range(self.FIX_ROUNDS + 1):
             failures = self.failing(cycle, readme)
             if not failures:
-                print(f"  every example in {readme} does what it says")
+                say.done(f"Every example in {readme} does what it says")
                 return
             for command, expected, output in failures:
-                print(f"  {readme}: `{first_line(command, 80)}` does not print what it says")
+                say.fail(f"{readme}: `{first_line(command, 80)}` does not print what it says")
             if round_number == self.FIX_ROUNDS:
                 break
             note = self.fix(readme, failures, note)
-        print(f"  {len(failures)} example(s) in {readme} still do not do what it says (see SPEC.md)")
+        say.warn(f"{len(failures)} example(s) in {readme} still do not do what it says (see SPEC.md)")
         cycle["readme_failures"] = [f"`{command}`: {first_line(output, 160)}" for command, _, output in failures]
 
     def failing(self, cycle, readme):
@@ -348,7 +351,7 @@ class ReadmeWriter(Phase):
             reply = self.s.ask(Prompts.README_FIX_SYSTEM, view, "Fix the README's examples",
                                max_reply=self.s.model.fix_max)
         except PromptTooLarge as exc:
-            print(f"  README fix: the prompt does not fit ({exc})")
+            say.skip(f"README fix: the prompt does not fit ({exc})")
             return ""
         change = self.ws.apply(reply, lambda p, exists: None if exists and p in view.shown
                                and self.p.files.get(p, {}).get("kind") != "test" else "only the files shown change",
@@ -371,14 +374,14 @@ class ReadmeWriter(Phase):
         """The fix kept while every test that passed still passes; why it was not, for the next call."""
         if not change:
             why = "; ".join(change.notes) or "it changed no file shown"
-            print(f"  README fix: no usable change ({first_line(why, 160)})")
+            say.skip(f"README fix: no usable change ({first_line(why, 160)})")
             return f"Your last reply could not be used: {why}. Give each file you change complete."
         self.s.all_tests_run = None
         if not passing <= Verifier(self.s).passing():
             self.ws.revert(change)
-            print("  README fix: it broke a passing test; reverted")
+            say.warn("README fix: it broke a passing test; reverted")
             return "Your last change broke a passing test and was undone."
-        print(f"  README fix: changed {', '.join(change.files)}  ({reply.cause() or '?'})")
+        say.done(f"README fix: changed {', '.join(change.files)}  ({reply.cause() or '?'})")
         return ""
 
 
@@ -399,10 +402,10 @@ class FinalReview(Phase):
             problem, output = self.problem()
         if problem:
             self.s.review_problem = problem
-            print(f"  not done: {problem}")
+            say.fail(f"Not done: {problem}")
             return False
         green, _, total = self.p.counts()
-        print(f"  set up afresh; `{self.s.toolchain.test_all}` passes; {green}/{total} spec points tested and passing")
+        say.done(f"Set up afresh; `{self.s.toolchain.test_all}` passes; {green}/{total} spec points tested and passing")
         return True
 
     def problem(self):
@@ -448,16 +451,16 @@ class LessonWriter(Phase):
         if cycle["id"] == "base" and not cycle.get("counted"):
             self.keep_the_toolchain(cycle)
         if not events:
-            print("  no problems to learn from")
+            say.skip("No problems to learn from")
             return
         try:
             new, confirmed = self.ask_lessons(events)
         except (SystemExit, OllamaError) as exc:  # the project is built: lessons are a bonus
-            print(f"  {exc} Nothing learned this time.")
+            say.warn(f"{exc} Nothing learned this time.")
             return
         names = [Path(path).name for path in self.p.files] + [self.p.workdir.name]
         added = self.s.knowledge.add_lessons(new, confirmed, names)
-        print(f"  {added} new lesson(s), {len(confirmed)} confirmed: {self.s.knowledge.summary()}")
+        say.done(f"{added} new lesson(s), {len(confirmed)} confirmed: {self.s.knowledge.summary()}")
         self.p.spec["events"] = []
         self.s.save()
 
@@ -466,7 +469,7 @@ class LessonWriter(Phase):
         cycle["proven"] = True
         self.s.save()
         if proven:
-            print(f"  {proven} lesson(s) and fact(s) used here are proven now")
+            say.done(f"{proven} lesson(s) and fact(s) used here are proven now")
 
     def keep_the_toolchain(self, cycle):
         """A finished project's toolchain, kept for its language (counted once: a resumed lessons phase does

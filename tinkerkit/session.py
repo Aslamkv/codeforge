@@ -5,10 +5,10 @@ lazy import json
 lazy import time
 
 lazy from .knowledge import Knowledge, Library
+from .messages import human_duration, say
 lazy from .prompts import Part, Prompts, PromptTooLarge, Reply
 from .settings import (
     DEFAULT_MAX_STALL, ENV_EXAMPLE, ENV_FILE, NETWORK_NOTE, NETWORK_RETRY, SETUP_TIMEOUT, fingerprint, first_line,
-    human_duration,
 )
 lazy from .workspace import TaughtCommands, Workspace
 
@@ -35,8 +35,6 @@ class Session:
         # criteria parked when this session began: one retry each (a resume after a change)
         self.parked_at_start = {s["id"] for s in project.criteria if s.get("status") == "blocked"}
         self._knowledge = None
-        if tracker is not None:
-            model.watch = tracker.live
 
     @property
     def knowledge(self):
@@ -170,11 +168,11 @@ class Session:
         if not self.network_waiting:
             return
         began = time.monotonic()
-        print(f"  waiting for the network: {len(self.network_waiting)} setup command(s), tried every "
-              f"{NETWORK_RETRY}s (Ctrl+C stops; tinker resume goes on later)")
+        say.step(f"Waiting for the network: {len(self.network_waiting)} setup command(s), tried every "
+                 f"{NETWORK_RETRY}s (Ctrl+C stops; tinker resume goes on later)…", "📡")
         if not self.retried_until_online(began):
             return
-        print(f"  the network is back after {human_duration(time.monotonic() - began)}: setup done")
+        say.done(f"The network is back after {human_duration(time.monotonic() - began)}: setup done")
         self.setup_done()
 
     def retried_until_online(self, began):
@@ -188,7 +186,7 @@ class Session:
                 return False
             if self.network_waiting and time.monotonic() - noted >= NETWORK_NOTE:
                 noted = time.monotonic()
-                print(f"  still waiting for the network ({human_duration(noted - began)})")
+                say.step(f"Still waiting for the network ({human_duration(noted - began)})…", "📡")
         return True
 
     def format_code(self):
@@ -203,13 +201,13 @@ class Session:
             return
         code, output = self.ws.run(self.toolchain.shell(command), timeout=SETUP_TIMEOUT, quiet=True)
         if code == 0:
-            print(f"  formatted the code: $ {command}")
+            say.done(f"Formatted the code with `{command}`")
         else:
             self.drop_formatter(command, code, output)
 
     def drop_formatter(self, command, code, output):
-        print(f"  note: the formatter does not work ({first_line(output.strip(), 160) or f'exit code {code}'}); "
-              f"the code stays as written and the project goes on without `{command}`")
+        say.warn(f"The formatter does not work ({first_line(output.strip(), 160) or f'exit code {code}'}); "
+                 f"the code stays as written and the project goes on without `{command}`")
         self.project.spec["toolchain"] = dict(self.toolchain.to_dict(), format="")
         self.save()
 

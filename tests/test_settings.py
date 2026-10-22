@@ -11,8 +11,7 @@ import pytest
 
 import tinkerkit.settings as settings
 from tinkerkit.settings import (
-    Config, Console, Home, Store, Tee, after_what_they_use, first_line, fingerprint, groups_fitting,
-    human_duration, similarity, split_text, words,
+    Config, Home, Store, after_what_they_use, first_line, fingerprint, groups_fitting, similarity, split_text, words,
 )
 from conftest import REAL_HOME
 
@@ -166,7 +165,7 @@ def test_a_deleted_database_is_made_again(tmp_path):
 def test_ensure_makes_home_and_its_database(tinker_home, capsys):
     assert not tinker_home.exists()
     Home.ensure()
-    assert (tinker_home / "tinker.db").is_file() and "created" in capsys.readouterr().out
+    assert (tinker_home / "tinker.db").is_file() and "Created" in capsys.readouterr().out
     Home.ensure()
     assert capsys.readouterr().out == ""
 
@@ -255,12 +254,6 @@ def test_clear_outside_a_terminal_without_yes_deletes_nothing(home_store, monkey
 
 
 @pytest.mark.spec("SET-12")
-@pytest.mark.parametrize("seconds,text", [(42.5, "42s"), (1762.08, "29m 22s"), (4000, "1h 6m 40s"), (0, "0s")])
-def test_human_duration(seconds, text):
-    assert human_duration(seconds) == text
-
-
-@pytest.mark.spec("SET-12")
 def test_first_line():
     assert first_line("\n  hello world\nsecond") == "hello world"
     assert first_line(None) == "" and first_line("   ") == ""
@@ -311,47 +304,6 @@ def test_groups_fitting():
     assert groups_fitting(["a" * 10, "b"], 5) == [["a" * 10], ["b"]]
     assert groups_fitting([], 5) == []
     assert groups_fitting([3, 3, 3], 8, size=lambda n: n) == [[3, 3], [3]]
-
-
-@pytest.mark.spec("SET-16")
-def test_tee_writes_and_gives_whole_lines():
-    stream, seen = io.StringIO(), []
-
-    def see(line):
-        seen.append(line)
-        raise RuntimeError("the log failing")
-    tee = Tee(stream, see)
-    assert tee.write("one\ntw") == 6
-    tee.write("o\n")
-    assert stream.getvalue() == "one\ntwo\n" and seen == ["one", "two"]
-    assert tee.getvalue() == stream.getvalue()  # anything else is the stream's
-
-
-@pytest.mark.spec("SET-17")
-def test_console_step_format(capsys):
-    import time
-    Console.step("did it", time.perf_counter() - 61)
-    assert re.fullmatch(r"\[\d\d:\d\d:\d\d +1m 1s \(61\.\d\ds\)\] did it\n", capsys.readouterr().out)
-
-
-@pytest.mark.spec("SET-17")
-def test_console_mirror_gives_every_printed_line(monkeypatch):
-    out, seen = io.StringIO(), []
-    monkeypatch.setattr(sys, "stdout", out)
-    monkeypatch.setattr(sys, "stderr", io.StringIO())
-    Console.mirror(seen.append)
-    print("logged line")
-    print("to stderr", file=sys.stderr)
-    assert seen == ["logged line", "to stderr"] and out.getvalue() == "logged line\n"
-
-
-@pytest.mark.spec("SET-17")
-def test_the_live_line_is_drawn_on_a_terminal_only(monkeypatch):
-    piped = io.StringIO()
-    monkeypatch.setattr(sys, "__stdout__", piped)
-    Console.progress("     ⏳ thinking… 12s")
-    Console.clear_progress()
-    assert piped.getvalue() == ""
 
 
 @pytest.mark.spec("SET-18")

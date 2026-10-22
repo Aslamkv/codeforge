@@ -9,7 +9,7 @@ lazy import shutil
 lazy import time
 lazy from pathlib import Path
 
-lazy from .model import plainly
+lazy from .messages import say
 lazy from .prompts import Part, Prompts, Reply
 lazy from .settings import (
     FIX_PHASES, Home, PHASES, PROJECT_DB, RUNS_KEPT, STATE_DIR, STATUS_TEXT, Store, confirmed, first_line, now_text, split_text,
@@ -241,7 +241,7 @@ class Runs:
         for item in items:
             shutil.rmtree(item) if is_folder(item) else item.unlink()
         Runs.forget_runs_in(workdir)
-        print(f"Emptied {workdir}.")
+        say.done(f"Emptied {workdir}")
 
     @staticmethod
     def refuse_to_empty_a_shared_folder(workdir):
@@ -251,13 +251,14 @@ class Runs:
 
     @staticmethod
     def show_what_emptying_deletes(workdir, items, keep):
-        print(f"tinker restart deletes everything in {workdir} ({len(items)} items):")
-        for item in items[:20]:
-            print(f"  {item.name}{'/' if is_folder(item) else ''}")
-        if len(items) > 20:
-            print(f"  ... and {len(items) - 20} more")
+        say.warn(f"tinker restart deletes everything in {workdir} ({len(items)} items):")
+        with say.section():
+            for item in items[:20]:
+                say.item(f"{item.name}{'/' if is_folder(item) else ''}")
+            if len(items) > 20:
+                say.item(f"... and {len(items) - 20} more")
         if keep:
-            print(f"Kept: {keep.name} (it holds the spec file)")
+            say.info(f"Kept: {keep.name} (it holds the spec file)", "📌")
 
     @staticmethod
     def forget_runs_in(workdir):
@@ -561,7 +562,6 @@ class Tracker:
              "investigate": ("🔬 Reading and cross-checking sources", "🔬 Sources cross-checked"),
              "keep": ("💾 Saving what was learned", "💾 Saved")}
     STARTING = "🚀 Starting: the model loads"
-    ANSI_RE = re.compile(r"\x1b\[[0-9;]*[A-Za-z]")
     QUIET_EVERY = 1.0  # seconds between publishing changes that only move the latest line on
 
     def __init__(self, title, before=0.0):
@@ -569,6 +569,16 @@ class Tracker:
         self.state = {"title": title, "run": None, "folder": None, "step": None, "doing": self.STARTING,
                       "began": None, "steps": [], "passing": None, "live": "", "latest": "", "waiting": None,
                       "ended": None, "before": before, "seconds": 0.0, "paused": False, "pid": self.pid}
+
+    @classmethod
+    def icon(cls, phase):
+        """A phase's icon, as its steps show it: "spec" -> "📝"."""
+        return cls.STEPS[phase][0].split(" ", 1)[0] if phase in cls.STEPS else ""
+
+    @classmethod
+    def done_words(cls, phase):
+        """What a phase did, in words: "spec" -> "Spec written"."""
+        return cls.STEPS[phase][1].split(" ", 1)[1] if phase in cls.STEPS else phase
 
     def project(self, store, run_id, folder, title=None):
         """The run's project: its database (the progress log), its run ID and its folder."""
@@ -587,28 +597,15 @@ class Tracker:
         if total and self.state["passing"] != [passing, total]:
             self.change("points", passing=[passing, total])
 
-    def live(self, label, written, thinking, seconds):
-        """What the model writes now (a reply as it goes)."""
-        self.change("live", quiet=True,
-                    live=f"{label.split(' [')[0]}: {written} tok written, {thinking} tok thinking, {seconds:.0f}s")
-
-    def live_plainly(self, label, written, thinking, seconds):
-        """What the model is doing now, in plain words (tinker learn's)."""
-        self.change("live", quiet=True, live=plainly(written, thinking, seconds))
-
-    def printed(self, line):
-        """A line the run printed: kept in the project's output log, and shown as the latest."""
-        line = self.ANSI_RE.sub("", line).rstrip()
+    def heard(self, message):
+        """A message the run said (messages.say), as data: a live one is what goes on now; any other is kept
+        in the project's output log and shown as the latest."""
+        if message.kind == "live":
+            self.change("live", quiet=True, live=message.text)
+            return
         if self.store is not None:
-            self.store.append("output", {"line": line})
-        shown = self.without_clock(line)
-        if shown and not shown.startswith("..."):
-            self.change("printed", quiet=True, latest=shown[:300])
-
-    @staticmethod
-    def without_clock(line):
-        """A step's line without its [time duration] prefix."""
-        return line.split("] ", 1)[-1].strip() if line.startswith("[") else line.strip()
+            self.store.append("output", {"line": message.line, "kind": message.kind})
+        self.change("said", quiet=True, latest=message.line.strip()[:300])
 
     def wait(self, plan):
         """The plan waits for the person (plan: what to show them, as data)."""

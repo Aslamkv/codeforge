@@ -9,6 +9,7 @@ lazy from pathlib import Path
 
 lazy from .knowledge import Embeddings, Library, Retriever, mentions
 lazy from .learning import SlotLearner
+from .messages import say
 lazy from .model import OllamaError
 lazy from .prompts import Part, PromptTooLarge, Prompts
 from .session import Phase, Worker
@@ -35,7 +36,7 @@ class Recaller(Phase):
         known, internet = Library.topics(), self.s.internet
         can_learn = Config.get("learn_missing") if internet and internet.available() else 0
         if not known and not can_learn:
-            print("  nothing learned yet" + ("" if internet else " (with --web, a run learns what it needs)"))
+            say.info("Nothing learned yet" + ("" if internet else " (with --web, a run learns what it needs)"), "📭")
             cycle["topics"] = []
             return
         query = cycle["request"] + (f"\n{cycle['brief']}" if cycle.get("brief") else "")
@@ -48,7 +49,7 @@ class Recaller(Phase):
         cycle["topics"] = list(dict.fromkeys(learned + use))[:RECALL_TOPICS]  # what it just learned it needs most
         self.keep_facts(cycle, query, retriever)
         names = [(Library.read(slug) or {}).get("name", slug) for slug in cycle["topics"]]
-        print(f"  using what was learned about: {', '.join(names) or 'nothing'}")
+        say.info(f"Using what was learned about: {', '.join(names) or 'nothing'}", "🧠")
         self.use_language(cycle)
         self.s.save()
 
@@ -58,7 +59,7 @@ class Recaller(Phase):
         items = Library.items(known)
         order = retriever.rank(query, [Library.searched(item) for item in items], prune=True)
         if known:
-            print(f"  searched {len(items)} learned texts of {len(known)} topic(s) by {retriever.used}")
+            say.info(f"Searched {len(items)} learned texts of {len(known)} topic(s) by {retriever.used}", "🔍")
         return list(dict.fromkeys(items[index]["topic"] for index in order))
 
     def ask(self, cycle, query, known, ranked, can_learn):
@@ -75,7 +76,7 @@ class Recaller(Phase):
             return self.s.ask_until_usable(Prompts.RECALL_SYSTEM, parts, "Recall",
                                            lambda reply: self.read_choice(reply, known), attempts=2)
         except (SystemExit, OllamaError) as exc:  # what was learned only helps: the run goes on without it
-            print(f"  {exc} Going on without what was learned.")
+            say.warn(f"{exc} Going on without what was learned.")
             return [], []
 
     @staticmethod
@@ -120,12 +121,12 @@ class Recaller(Phase):
         optional: the run goes on); indexed with the embeddings the search uses (None after they
         failed: then not indexed)."""
         if not internet.available():
-            print(f"  not learning {topic}: {internet.why()}")
+            say.skip(f"Not learning {topic}: {internet.why()}")
             return None
         try:
             entry = SlotLearner(self.s.model, internet, retriever.embeddings).learn(topic)
         except (SystemExit, PromptTooLarge, OllamaError) as exc:
-            print(f"  could not learn {topic}: {exc}")
+            say.fail(f"Could not learn {topic}: {exc}")
             return None
         if not entry:
             return None
@@ -151,7 +152,7 @@ class Recaller(Phase):
         left_out = self.for_other_code(known) | self.needing_tools_missing_here(known)
         self.p.spec["inapplicable"] = sorted(left_out)
         if left_out:
-            print(f"  left out {len(left_out)} learned rule(s) or fact(s) this project does not need")
+            say.skip(f"Left out {len(left_out)} learned rule(s) or fact(s) this project does not need")
 
     def known_rules(self):
         """What was learned for the project: the chosen topics' items, and the language's proven facts once the
@@ -189,7 +190,7 @@ class Recaller(Phase):
         cycle["topics"] = [slug] + cycle.get("topics", [])[:RECALL_TOPICS - 1]
         query = cycle["request"] + (f"\n{cycle['brief']}" if cycle.get("brief") else "")
         self.keep_facts(cycle, query, Retriever(Embeddings.configured()))
-        print(f"  using the language as learned: {Library.read(slug).get('name', slug)}")
+        say.info(f"Using the language as learned: {Library.read(slug).get('name', slug)}", "🧠")
         self.s.save()
 
 
@@ -293,8 +294,8 @@ class SpecWriter(Phase):
                 continue
             source = str(item.get("source", "")).strip()
             if not self.traced(source, request):
-                print(f"  dropped a criterion the request does not ask for: {first_line(text, 90)} "
-                      f"(source: {first_line(source, 60) or 'none'})")
+                say.skip(f"Dropped a criterion the request does not ask for: {first_line(text, 90)} "
+                         f"(source: {first_line(source, 60) or 'none'})")
                 continue
             out.append(self.p.new_criterion("C", text[:80], text, self.test_id(item.get("test"), text, list(taken) + out),
                                             cycle["id"], source, "todo", self.effort(item.get("effort"))))
@@ -377,7 +378,7 @@ class SpecWriter(Phase):
         is about a setting (nothing is built that the spec does not need)."""
         if ENV_EXAMPLE not in files or ENV_EXAMPLE in self.p.files or any(map(self.about_a_setting, criteria)):
             return files
-        print(f"  left out {ENV_EXAMPLE}: no spec point is about a setting")
+        say.skip(f"Left out {ENV_EXAMPLE}: no spec point is about a setting")
         return {path: entry for path, entry in files.items() if path != ENV_EXAMPLE}
 
     @staticmethod
@@ -431,18 +432,19 @@ class SpecWriter(Phase):
         self.p.criteria.extend(plan["criteria"])
         self.keep_files(cycle, plan["files"], plan["entry"])
         if plan["entry"] and not self.p.toolchain.run:  # a program a person runs needs its run command
-            print(f"  the toolchain does not say how to start {plan['entry']}: asking for it")
+            say.step(f"The toolchain does not say how to start {plan['entry']}: asking for it", "🤔")
             self.p.toolchain = Designer(self.s).ask_toolchain()
         cycle["non_goals"] = self.strings(plan["data"].get("non_goals"), 12)
         cycle["constraints"] = self.strings(plan["data"].get("constraints"), 8)
         data = plan["data"].get("data", "")
         cycle["data"] = data if isinstance(data, str) else json.dumps(data)
         Designer(self.s).drop_adapter_criteria(cycle)
-        print(f"  language: {self.p.language}; {len(self.p.cycle_criteria(cycle))} criteria; files: "
-              f"{', '.join(cycle['files'])}" + (f"; a user starts {self.p.spec['entry']}" if self.p.spec.get("entry") else ""))
+        starts = f"; a user starts {self.p.spec['entry']}" if self.p.spec.get("entry") else ""
+        say.info(f"Language: {self.p.language}; {len(self.p.cycle_criteria(cycle))} criteria; files: "
+                 f"{', '.join(cycle['files'])}{starts}", "📋")
         if plan["toolchain"]:
-            print(f"  toolchain: {self.p.toolchain.summary()}")
-        print(f"  learned so far: {self.s.knowledge.summary()}")
+            say.info(f"Toolchain: {self.p.toolchain.summary()}", "🔧")
+        say.info(f"Learned so far: {self.s.knowledge.summary()}", "🧠")
         Recaller(self.s).keep_out_inapplicable()
         cycle["specified"] = True
         self.s.save()
@@ -628,7 +630,7 @@ class Designer(Phase):
         """A project planned without a toolchain (or before toolchains existed) gets one."""
         if not self.p.toolchain:
             self.p.toolchain = self.ask_toolchain()
-            print(f"  toolchain: {self.p.toolchain.summary()}")
+            say.info(f"Toolchain: {self.p.toolchain.summary()}", "🔧")
             self.s.save()
 
     def ask_toolchain(self):
@@ -651,9 +653,9 @@ class Designer(Phase):
         if entry and not toolchain.run:
             raise ValueError(f"toolchain.run is empty, but a user starts {entry}: give the command that starts it")
         for command in toolchain.dropped:
-            print(f"  toolchain: left out `{command}`: Tinker makes {ENV_FILE} itself, from {ENV_EXAMPLE}")
+            say.skip(f"Toolchain: left out `{command}`: Tinker makes {ENV_FILE} itself, from {ENV_EXAMPLE}")
         for command in toolchain.machine:
-            print(f"  toolchain: left out `{command}`: it changes the machine's own tools, not this project")
+            say.skip(f"Toolchain: left out `{command}`: it changes the machine's own tools, not this project")
         problems = toolchain.problems()
         if problems:
             raise ValueError("; ".join(problems))
@@ -668,8 +670,8 @@ class Designer(Phase):
             subject = step["behaviour"].lstrip("`'\" ").lower()
             if any(subject.startswith((Path(a).stem.lower() + ".", Path(a).name.lower())) for a in adapters):
                 self.p.criteria.remove(step)
-                print(f"  dropped {step['id']}: it tests an adapter to an external service "
-                      f"({first_line(step['behaviour'], 80)})")
+                say.skip(f"Dropped {step['id']}: it tests an adapter to an external service "
+                         f"({first_line(step['behaviour'], 80)})")
 
     @staticmethod
     def layout_file(item, test_files, ws):
@@ -758,7 +760,7 @@ class InterfaceReviewer(Phase):
             return self.s.ask_until_usable(Prompts.INTERFACE_SYSTEM, parts, label, self.read, attempts=2,
                                            max_reply=CHECK_MAX_TOKENS)
         except SystemExit as exc:
-            print(f"  {exc} Going on with this part of the plan as it is.")
+            say.warn(f"{exc} Going on with this part of the plan as it is.")
             return [], []
 
     def design_entry(self, path):
@@ -816,7 +818,7 @@ class InterfaceReviewer(Phase):
                 unresolved.setdefault(problem["file"], []).append(problem["problem"])
         writer, changed = ContractWriter(self.s), set()
         for path, items in unresolved.items():
-            print(f"  {path}: {len(items)} problem(s) named without a correction; writing its contract again")
+            say.step(f"{path}: {len(items)} problem(s) named without a correction; writing its contract again", "✍️")
             if writer.write(cycle, path, problems=items):
                 changed.add(path)
         return changed
@@ -824,9 +826,10 @@ class InterfaceReviewer(Phase):
     @staticmethod
     def say_review(review, changed):
         corrected = f"; {len(changed)} file(s) corrected" if changed else ""
-        print(f"  interface check: {len(review)} problem(s) found{corrected}")
-        for line in review[:10]:
-            print(f"    - {first_line(line, 160)}")
+        say.info(f"Interface check: {len(review)} problem(s) found{corrected}", "🔍")
+        with say.section():
+            for line in review[:10]:
+                say.item(first_line(line, 160))
 
 
 class ContractWriter(Worker):
@@ -880,7 +883,7 @@ class ContractWriter(Worker):
         if written is None:
             return False
         info["contract"], calls = written
-        print(f"  {path}: {len(info['contract'])} contract line(s)" + (f", from {calls} calls" if calls > 1 else ""))
+        say.done(f"{path}: {len(info['contract'])} contract line(s)" + (f", from {calls} calls" if calls > 1 else ""))
         return info["contract"] != before
 
     def written_in_parts(self, cycle, path, info, criteria, so_far, problems):
@@ -894,7 +897,7 @@ class ContractWriter(Worker):
             try:
                 so_far, uses = self.s.ask_until_usable(Prompts.CONTRACT_SYSTEM, parts, label, self.read, attempts=2)
             except SystemExit as exc:
-                print(f"  {exc} Its contract stays as it is.")
+                say.warn(f"{exc} Its contract stays as it is.")
                 return None
             info["uses"] = list(dict.fromkeys(info.get("uses", []) + [u for u in uses if u in self.p.files and u != path]))
         return so_far, calls
@@ -905,7 +908,7 @@ class ContractWriter(Worker):
         base = self.base_parts(path, info, so_far, problems)
         room = self.s.room(Prompts.CONTRACT_SYSTEM) - Part.total_size(base) - 60
         if room < 200:
-            print(f"  {path}: what its contract must use is larger than one prompt; it is shortened to fit")
+            say.warn(f"{path}: what its contract must use is larger than one prompt; it is shortened to fit")
             base = [Part(p.title, p.text, p.required, exact=False) for p in base]
         taken = groups_fitting(criteria, max(room, 200))[0] if criteria else []
         given = "\n".join(taken) or "none directly: it serves the files that use it"

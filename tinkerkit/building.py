@@ -6,11 +6,12 @@ import re
 lazy import time
 lazy from pathlib import Path
 
+from .messages import human_duration, say
 lazy from .planning import Designer, SpecWriter, asked
 from .session import Phase, Worker
 lazy from .prompts import Part, PromptTooLarge, Prompts, Reply
 lazy from .settings import (
-    BUILD_TRIES, Console, ENV_EXAMPLE, ENV_FILE, FIX_FILES, MAX_FILE_LINES, MAX_TRIES_PER_PASS,
+    BUILD_TRIES, ENV_EXAMPLE, ENV_FILE, FIX_FILES, MAX_FILE_LINES, MAX_TRIES_PER_PASS,
     OUTPUT_CHARS, REVIEW_TRIES, TESTS_LOCKED, TESTS_MAX_TOKENS, TESTS_PER_CALL, first_line,
 )
 lazy from .workspace import FileView, Output, TestRef, ToolError, Toolchain
@@ -28,7 +29,8 @@ class TestToolSetup(Phase):
         CodeWriter(self.s).write_configs_first(cycle)
         self.s.setup()
         if self.s.network_waiting:  # the tests and the code need no network: they are written meanwhile
-            print("  the test tool is checked once the network is back; writing the tests and the code meanwhile")
+            say.info("The test tool is checked once the network is back; writing the tests and the code meanwhile",
+                     "📡")
             return True
         return TestTool(self.s).works()
 
@@ -64,7 +66,7 @@ class TestWriter(Phase):
                                    f"{path} ({len(todo)})",
                                    max_reply=TESTS_MAX_TOKENS)  # past it, the thought is concluded
             except PromptTooLarge as exc:
-                print(f"  tests for {path} skipped: {exc}; verify writes them")
+                say.skip(f"Tests for {path} skipped: {exc}; verify writes them")
                 return
             note = self.take(reply, path, todo, current)
 
@@ -133,7 +135,7 @@ class TestWriter(Phase):
         for step in todo:
             text = corrected.get(TestRef(step["test"]).name)
             if text and text != step["behaviour"]:
-                print(f"  {step['id']} now reads: {first_line(text, 120)} (was: {first_line(step['behaviour'], 80)})")
+                say.info(f"{step['id']} now reads: {first_line(text, 120)} (was: {first_line(step['behaviour'], 80)})", "✏️")
                 step["behaviour"], step["title"] = text, text[:80]
 
     def follow_new_files(self, path, todo, change):
@@ -147,15 +149,15 @@ class TestWriter(Phase):
 
     def report_and_note(self, path, todo, change):
         for note in change.notes:
-            print(f"  skipped {note}")
+            say.skip(f"Skipped {note}")
         missing = [TestRef(s["test"]).name for s in todo if not TestRef(s["test"]).present(self.ws)]
         homes = sorted({TestRef(s["test"]).file for s in todo if TestRef(s["test"]).present(self.ws)})
         for step in todo:
             if TestRef(step["test"]).name in missing:
                 step["write_failures"] = step.get("write_failures", 0) + 1
                 step["last_error"] = ("its test could not be written: " + "; ".join(change.notes))[:400]
-        print(f"  {', '.join(homes) or path}: wrote {len(todo) - len(missing)}/{len(todo)} tests"
-              + (f"; missing {', '.join(missing)}" if missing else ""))
+        say.done(f"{', '.join(homes) or path}: wrote {len(todo) - len(missing)}/{len(todo)} tests"
+                 + (f"; missing {', '.join(missing)}" if missing else ""))
         return (f"These tests were not written: {', '.join(missing)}. " + "; ".join(change.notes))[:600] if missing else ""
 
 
@@ -170,7 +172,7 @@ class CodeWriter(Phase):
         self.write_all(cycle)
         ok, output = self.s.setup()
         if not ok:
-            print(f"  setup fails: {Output.key_line(output)} (verify fixes the toolchain first)")
+            say.fail(f"Setup fails: {Output.key_line(output)} (verify fixes the toolchain first)")
         self.check_wiring(cycle)
 
     def write_all(self, cycle):
@@ -211,7 +213,7 @@ class CodeWriter(Phase):
            done_when=Reply.wrote(paths))
         change = self.ws.apply(reply, lambda p, exists: None if p in paths else "only the config files listed now")
         missing = [p for p in paths if p not in change.backups]
-        print(f"  wrote {', '.join(change.files) or 'none'}" + (f"; missing {', '.join(missing)}" if missing else ""))
+        say.done(f"Wrote {', '.join(change.files) or 'none'}" + (f"; missing {', '.join(missing)}" if missing else ""))
         for path in paths:
             if path not in change.backups:  # one more try, on its own
                 self.write_file(cycle, path)
@@ -231,12 +233,12 @@ class CodeWriter(Phase):
                                    f"{'Change' if exists else 'Write'} {path}",
                                    done_when=Reply.files_complete if exists else Reply.wrote([path]))
             except PromptTooLarge as exc:
-                print(f"  {path}: skipped, the prompt does not fit ({exc}); verify works on it")
+                say.skip(f"{path}: skipped, the prompt does not fit ({exc}); verify works on it")
                 return
             change = self.ws.apply(self.addressed_to(reply.as_file(path), path, exists), self.may_write(path),
                                    view.windows)
             for text in change.notes:
-                print(f"  skipped {text}")
+                say.skip(f"Skipped {text}")
             note = self.unusable(path, change, attempt == 1 and info.get("kind") == "code")
             if not note:
                 self.say_written(path, change, exists)
@@ -245,7 +247,7 @@ class CodeWriter(Phase):
     def write_marker(self, path):
         """A file nothing asks anything of (a package marker): written empty, with no call."""
         self.ws.write(path, "")
-        print(f"  wrote {path} (empty: no contract or criterion asks anything of it)")
+        say.done(f"Wrote {path} (empty: no contract or criterion asks anything of it)")
 
     def criteria_for(self, path, cycle):
         """The criteria this file must meet (the same rule its contract was planned with); the entry
@@ -325,15 +327,15 @@ class CodeWriter(Phase):
         guidance still works (it is read in windows); a wordier language reaches it sooner."""
         lines = self.ws.lines(path)
         if lines > MAX_FILE_LINES * 2:
-            print(f"  {path}: {lines} lines; asking for smaller modules")
+            say.warn(f"{path}: {lines} lines; asking for smaller modules")
             return True
         return False
 
     def say_written(self, path, change, exists):
         self.p.register([p for p in change.created if p != path], "code", f"module split from {path}")
         others = [p for p in change.files if p != path]
-        print(f"  {'changed' if exists else 'wrote'} {path} ({self.ws.lines(path)} lines)"
-              + (f"; also {', '.join(others)}" if others else ""))
+        say.done(f"{'Changed' if exists else 'Wrote'} {path} ({self.ws.lines(path)} lines)"
+                 + (f"; also {', '.join(others)}" if others else ""))
 
     def check_wiring(self, cycle):
         """A code file must refer to each file its contract says it uses (by name or stem). One
@@ -352,7 +354,7 @@ class CodeWriter(Phase):
                 and Path(u).name not in text and Path(u).stem not in text]
 
     def rewire(self, path, problems):
-        print(f"  {path} is not wired as designed: {'; '.join(problems)}")
+        say.warn(f"{path} is not wired as designed: {'; '.join(problems)}")
         info = self.p.files[path]
         view = FileView(self.ws, [Part("Problems", "\n".join(problems), True),
                                   Part(f"Contract of {path}", self.p.contracts([path]), True)], [path],
@@ -360,7 +362,10 @@ class CodeWriter(Phase):
                         hints=" ".join(info.get("uses", [])), windows=1)
         reply = self.s.ask(Prompts.CHANGE_SYSTEM, view, f"Wire {path}")
         change = self.ws.apply(reply, lambda p, exists: None if p == path else f"only {path} changes now", view.windows)
-        print(f"  rewired {path}" if change else f"  {path}: no usable change")
+        if change:
+            say.done(f"Rewired {path}")
+        else:
+            say.skip(f"{path}: no usable change")
 
 
 class Verifier(Phase):
@@ -406,8 +411,8 @@ class Verifier(Phase):
         changed = [p for p, text in pending["files"].items() if self.ws.read(p) != (text or "")]
         if changed:
             self.roll_back(pending["files"])
-            print(f"  the last run stopped while {pending.get('criterion', 'a criterion')} was being worked on: "
-                  f"{', '.join(changed)} restored to how they were before it")
+            say.info(f"The last run stopped while {pending.get('criterion', 'a criterion')} was being worked on: "
+                     f"{', '.join(changed)} restored to how they were before it", "♻️")
         self.p.store.delete("restore", self.PENDING)
 
     def make_it_build(self):
@@ -422,9 +427,9 @@ class Verifier(Phase):
             if ok:
                 ok, output = self.s.toolchain.run_check(self.ws)
             if ok:
-                print("  the project builds now" if attempt else "  the project builds")
+                say.done("The project builds now" if attempt else "The project builds")
                 return True
-            print(f"  the project does not build: {Output.key_line(output)}")
+            say.fail(f"The project does not build: {Output.key_line(output)}")
             if attempt >= BUILD_TRIES and not thought:
                 break
             fix = BuildFix(self.s, output, tried, thought)
@@ -451,7 +456,8 @@ class Verifier(Phase):
             return set()  # it does not build: no test can pass
         else:
             result = {s["id"] for s in tests if self.evaluate(s, checked=True)[0] == "passes"}
-        Console.step(f"tests: {len(result)}/{len(self.p.criteria)} criteria pass", started)
+        took = human_duration(time.perf_counter() - started)
+        say.info(f"Tests: {len(result)}/{len(self.p.criteria)} criteria pass ({took})", "🧪")
         return result
 
     def work_through(self, steps, retry):
@@ -464,7 +470,10 @@ class Verifier(Phase):
                 self.mark_others_passing()
             self.s.save()
             green, _, total = self.p.counts()
-            print(f"  {step['id']} {'passes' if passed else 'is parked'} ({green}/{total} pass)")
+            if passed:
+                say.done(f"{step['id']} passes ({green}/{total} pass)")
+            else:
+                say.info(f"{step['id']} is parked ({green}/{total} pass)", "⏸️")
 
     def retry_parked(self, green_at_start):
         """The parked criteria get one more try when others passed since, else those parked by an earlier
@@ -472,23 +481,27 @@ class Verifier(Phase):
         parked = [s for s in self.p.criteria if s["status"] == "blocked"]
         earlier = [s for s in parked if s["id"] in self.s.parked_at_start]
         if parked and self.p.counts()[0] > green_at_start:
-            print(f"\nRetrying {len(parked)} parked criteria, now that others pass")
+            say.step(f"Retrying {len(parked)} parked criteria, now that others pass", "🔁")
             self.parked = {}
             self.work_through(parked, retry=True)
         elif earlier:
-            print(f"\nRetrying {len(earlier)} criteria parked by an earlier run, once (the project, its plan or "
-                  f"Tinker may have changed since)")
+            say.step(f"Retrying {len(earlier)} criteria parked by an earlier run, once (the project, its plan or "
+                     f"Tinker may have changed since)", "🔁")
             self.s.parked_at_start -= {s["id"] for s in earlier}
             self.parked = {}
             self.work_through(earlier, retry=True)
         elif parked:
-            print(f"  {len(parked)} criteria parked and nothing else passes yet: a retry would see the same project")
+            say.skip(f"{len(parked)} criteria parked and nothing else passes yet: a retry would see the same project")
 
     def work(self, step, retry):
         """Whether the criterion passes after fixes; parked (False) when nothing helps, the files
         then back to how they were."""
         green, _, total = self.p.counts()
-        print(f"\n{step['id']} ({green}/{total} pass): {step['title']}\n  test: {step['test']}")
+        with say.part(f"{step['id']} ({green}/{total} pass): {step['title']}", "🎯"):
+            say.info(f"Test: {step['test']}", "🧪")
+            return self.fixed(step, retry)
+
+    def fixed(self, step, retry):
         step["status"] = "active"
         state, output = self.first_look(step)
         if state in ("missing", "passes"):
@@ -496,12 +509,12 @@ class Verifier(Phase):
         same = self.failure_key(step, output)
         if same in self.parked:
             step["last_error"] = f"same failure as {self.parked[same]}"
-            print(f"  fails the same way as {self.parked[same]}, which nothing fixed; parked without new attempts")
+            say.skip(f"Fails the same way as {self.parked[same]}, which nothing fixed; parked without new attempts")
             return False
         if self.climb_safely(step, state, output, retry):
             return True
         self.parked.setdefault(same, step["id"])
-        print(f"  nothing helped; {step['id']} is back to how it was")
+        say.fail(f"Nothing helped; {step['id']} is back to how it was")
         return False
 
     def first_look(self, step):
@@ -511,7 +524,7 @@ class Verifier(Phase):
         if state == "missing":
             state, output = self.write_missing_test(step)
         if state == "fails" and self.flaky(step):
-            print("  its test passes and fails on reruns: the code is not deterministic")
+            say.warn("Its test passes and fails on reruns: the code is not deterministic")
             output += f"\n\n{self.FLAKY_NOTE}"
         return state, output
 
@@ -530,9 +543,9 @@ class Verifier(Phase):
         """Its test is written now, unless writing it already failed twice (asking the same again
         would fail the same way)."""
         if step.get("write_failures", 0) >= 2:
-            print(f"  its test could not be written in {step['write_failures']} tries; parked")
+            say.fail(f"Its test could not be written in {step['write_failures']} tries; parked")
             return "missing", step.get("last_error") or f"the test {step['test']} could not be written"
-        print("  its test is missing; writing it")
+        say.step("Its test is missing; writing it", "✍️")
         TestWriter(self.s).run(self.p.cycle(step.get("cycle") or "base") or {}, only=[step])
         state, output = self.evaluate(step)
         if state == "missing":
@@ -574,7 +587,7 @@ class Verifier(Phase):
             stall, concluding = 0, False  # concluding: the last attempt thought to its cap; its conclusion is due
             while (stall < patience or concluding) and total < MAX_TRIES_PER_PASS:
                 if approach == "fix" and self.test_unloadable(step, output):
-                    print("  the test file no longer loads: reviewing the test now")
+                    say.step("The test file no longer loads: reviewing the test now", "🔍")
                     break
                 total += 1
                 attempt = FixAttempt(self.s, self, step, approach, output, before)
@@ -586,7 +599,7 @@ class Verifier(Phase):
                 step["last_error"] = Output.key_line(output)
                 why = self.to_review(attempt, approach)
                 if why:
-                    print(f"  {why}: reviewing against the plan now")
+                    say.step(f"{why}: reviewing against the plan now", "🔍")
                     break
         return False
 
@@ -596,10 +609,11 @@ class Verifier(Phase):
         The review comes at once when the fault is likely the test's: it does not load, or fixes
         kept breaking other tests in an earlier pass."""
         if self.test_unloadable(step, output):
-            print(f"  the test file {TestRef(step['test']).file} itself does not load: reviewing the test now")
+            say.step(f"The test file {TestRef(step['test']).file} itself does not load: reviewing the test now", "🔍")
             return (("review", REVIEW_TRIES),)
         if sum(" broke " in line for line in step.get("history", [])) >= 2:
-            print("  earlier fixes kept breaking other tests (the tests may disagree): reviewing against the plan now")
+            say.step("Earlier fixes kept breaking other tests (the tests may disagree): reviewing against the plan now",
+                     "🔍")
             return (("review", REVIEW_TRIES),)
         return (("fix", 1), ("review", 1)) if retry else (("fix", self.s.max_stall), ("review", REVIEW_TRIES))
 
@@ -770,7 +784,7 @@ class FixAttempt(Worker):
         """The fix found the test wrong, not the code: nothing changes, and the review comes next."""
         self.blamed_test = True
         self.record(f"the test is wrong: {why}")
-        print(f"  {self.label}: the test is wrong ({first_line(why, 120)})")
+        say.warn(f"{self.label}: the test is wrong ({first_line(why, 120)})")
         return "fails", self.output
 
     def no_change(self, cause, change):
@@ -780,7 +794,7 @@ class FixAttempt(Worker):
                                  for n in change.notes)  # a test, or a new file beside them
         self.blamed_test = self.approach == "fix" and refused_near_tests
         self.record(f"{cause} -> {note}")
-        print(f"  {self.label}: {note}")
+        say.skip(f"{self.label}: {note}")
         return "fails", self.output
 
     def tested(self, change, reply, cause):
@@ -793,8 +807,8 @@ class FixAttempt(Worker):
         self.record(f"{cause} -> {state}")
         if state == "passes":
             self.passed(reply, cause)
-        print(f"  {self.label}: changed {', '.join(change.files)} -> {state}"
-              + (f"  ({cause})" if cause != "?" else ""))
+        say.info(f"{self.label}: changed {', '.join(change.files)} -> {state}"
+                 + (f"  ({cause})" if cause != "?" else ""), "🔧")
         return state, output
 
     def passed(self, reply, cause):
@@ -807,7 +821,7 @@ class FixAttempt(Worker):
     def correct_criterion(self, text):
         """The spec says what the corrected test checks: a criterion found wrong (a miscomputed value)
         is reworded with it, so SPEC.md, the source of truth, and the tests stay the same."""
-        print(f"  {self.step['id']} now reads: {first_line(text, 120)} (was: {first_line(self.step['behaviour'], 80)})")
+        say.info(f"{self.step['id']} now reads: {first_line(text, 120)} (was: {first_line(self.step['behaviour'], 80)})", "✏️")
         self.step["behaviour"], self.step["title"] = text, text[:80]
         self.s.save()
 
@@ -825,7 +839,7 @@ class FixAttempt(Worker):
         self.keep_passing(tests)
         names = ", ".join(tests[:2])
         self.record(f"{cause} -> broke {names}; reverted")
-        print(f"  {self.label}: broke {names}; reverted")
+        say.warn(f"{self.label}: broke {names}; reverted")
         return True
 
     def keep_passing(self, tests):
@@ -861,7 +875,7 @@ class BuildFix(Worker):
             reply = self.s.ask(Prompts.BUILD_SYSTEM, view, label, max_reply=self.s.model.fix_max, unthinking_retry=False,
                                think=False if self.concluding or not self.tried else None)
         except PromptTooLarge as exc:
-            print(f"  make it build: the prompt does not fit ({exc})")
+            say.skip(f"Make it build: the prompt does not fit ({exc})")
             return "the prompt did not fit"
         if self.s.model.overthought:
             self.thought = self.s.model.last_thought
@@ -895,9 +909,9 @@ class BuildFix(Worker):
     def said(self, change, cause):
         """What the fix did, said and noted for the lessons; one line, for the next try."""
         for note in change.notes:
-            print(f"  skipped {note}")
+            say.skip(f"Skipped {note}")
         did = f"changed {', '.join(change.files)}" if change else "no usable change"
-        print(f"  make it build: {did}" + (f"  ({cause})" if cause != "?" else ""))
+        say.info(f"Make it build: {did}" + (f"  ({cause})" if cause != "?" else ""), "🔧")
         if change and cause != "?":
             self.s.note("build", cause)
         return f"{cause} -> {did}"
@@ -920,11 +934,13 @@ class BugReproducer(Phase):
         for _ in range(2):
             step, state, output = self.write_test(cycle, note)
             if step and state == "fails" and not Toolchain.ran_no_test(output):
-                print(f"  reproduced: {first_line(step['behaviour'], 140)}\n  it fails now: {Output.key_line(output)}")
+                say.done(f"Reproduced: {first_line(step['behaviour'], 140)}")
+                with say.section():
+                    say.info(f"It fails now: {Output.key_line(output)}", "🐞")
                 self.s.save()
                 return True
             note = self.why_not(step, state, output)
-            print(f"  not reproduced: {note}")
+            say.fail(f"Not reproduced: {note}")
         self.drop(cycle)
         self.s.unreproduced = (f"the bug could not be reproduced with a test, so nothing was changed. Describe what "
                                f"you do, what happens and what should happen instead, then: tinker fix "
@@ -945,7 +961,7 @@ class BugReproducer(Phase):
         step = self.step_for(cycle, ref)
         change = self.ws.apply(reply, lambda path, exists: None if path == ref.file else "only the bug's test file")
         for line in change.notes:
-            print(f"  skipped {line}")
+            say.skip(f"Skipped {line}")
         expected = re.search(r"^\s*EXPECTED:\s*(.+)$", reply.text, re.M)
         if expected:
             step["behaviour"] = first_line(expected.group(1), 300)
@@ -1047,7 +1063,7 @@ class TestTool(Worker):
             if repair and repair[0] == "known":
                 self.s.knowledge.fix_result(repair[1], worked=False)
             problem = Output.key_line(output)
-            print(f"  {self.STAGE_TEXT[stage]}: {problem}")
+            say.fail(f"{self.STAGE_TEXT[stage]}: {problem}")
             repair = ToolchainRepair(self.s).run(output, tried) if attempt < 2 else None
             if repair is None:
                 break
@@ -1069,7 +1085,7 @@ class TestTool(Worker):
         if problem:
             return "tests", problem
         if not present:
-            print(f"  the test tool runs (no tests yet): $ {self.s.toolchain.test_all}")
+            say.done(f"The test tool runs (no tests yet): $ {self.s.toolchain.test_all}")
         return self.linter_runs()
 
     def test_tool_problem(self, code, output, present):
@@ -1078,7 +1094,7 @@ class TestTool(Worker):
         reached = self.reaches_code(output) or (not Toolchain.reached_no_test(code, output, present) if present
                                                 else self.ran_empty(code, output))
         if not reached:
-            print(f"  $ {self.s.toolchain.test_all}  [{'ran no test' if present else 'did not run'}: a tooling problem]")
+            say.fail(f"$ {self.s.toolchain.test_all}  [{'ran no test' if present else 'did not run'}: a tooling problem]")
             return output
         unseen = self.unseen_code(output) if present and code else ""
         if unseen:
@@ -1112,8 +1128,8 @@ class TestTool(Worker):
         missed = Output.misses_own_code(output, self.s.files_on_disk("code"))
         if not missed or not self.s.toolchain.run_check(self.ws)[0]:
             return ""
-        print(f"  $ {self.s.toolchain.test_all}  [the tests cannot import the project's own {missed}, which loads "
-              f"with the check command: a tooling problem]")
+        say.fail(f"$ {self.s.toolchain.test_all}  [the tests cannot import the project's own {missed}, which loads "
+                 f"with the check command: a tooling problem]")
         return output + (f"\n(The tests cannot import the project's own module {missed}, which loads fine with the "
                          f"check command: {Output.OWN_CODE_UNSEEN} when it runs from the project folder.)")
 
@@ -1130,7 +1146,7 @@ class TestTool(Worker):
         if self.unnamed(real_output, real.name) != self.unnamed(made_up_output, made_up.name):
             self.s.one_test_checked = toolchain.test_one
             return ""
-        print(f"  $ {real.command(toolchain.test_one)}  [answers a made-up test name the same way: a tooling problem]")
+        say.fail(f"$ {real.command(toolchain.test_one)}  [answers a made-up test name the same way: a tooling problem]")
         return (f"{real_output}\n(The one-test command `{toolchain.test_one}` answers a made-up test name the same "
                 f"way as the real test {real.name}: it does not run a test by its name, as the test tool needs it.)")
 
@@ -1147,7 +1163,7 @@ class TestTool(Worker):
             return "ok", ""
         code, output = self.ws.run(self.s.toolchain.shell(self.s.toolchain.lint), quiet=True)
         if code in (126, 127) or (code != 0 and self.MISSING_TOOL_RE.search(output) and not self.reaches_code(output)):
-            print(f"  $ {self.s.toolchain.lint}  [the linter does not run: a tooling problem]")
+            say.fail(f"$ {self.s.toolchain.lint}  [the linter does not run: a tooling problem]")
             return "lint", f"$ {self.s.toolchain.lint}\nthe linter does not run (exit code {code}):\n{output}"
         return "ok", ""
 
@@ -1173,7 +1189,7 @@ class ToolchainRepair(Worker):
         known = self.s.knowledge.known_fix(failure, tried)
         if known:
             tried.add(failure)
-            print(f"  applying a toolchain fix learned on an earlier project ({known['cause']})")
+            say.info(f"Applying a toolchain fix learned on an earlier project ({known['cause']})", "♻️")
             self.replay(known["replay"])
             return "known", known
         fix = self.ask_model(output, failure)
@@ -1199,7 +1215,7 @@ class ToolchainRepair(Worker):
         change = self.apply_fix(reply, configs)
         commands = {k: v for k, v in self.s.toolchain.to_dict().items() if v != before.get(k)}
         changed = (["toolchain"] if commands else []) + change.files
-        print(f"  toolchain fix: {', '.join(changed) or 'no usable change'}  ({reply.cause() or '?'})")
+        say.info(f"Toolchain fix: {', '.join(changed) or 'no usable change'}  ({reply.cause() or '?'})", "🔧")
         self.s.save()
         if not changed:
             return None
@@ -1228,7 +1244,7 @@ class ToolchainRepair(Worker):
                                else "only config files change now")
         self.p.register(change.created, "config", "added by the toolchain fix")
         for note in change.notes:
-            print(f"  skipped {note}")
+            say.skip(f"Skipped {note}")
         return change
 
     def learned(self, failure, reply, commands, change):

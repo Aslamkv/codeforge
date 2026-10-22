@@ -56,6 +56,7 @@ responsibility, and each imports only the modules listed above it:
 | Module | Responsibility |
 |---|---|
 | `settings` | every tunable number and fixed name; the Tinker home (`Home`), its database (`Store`) and `Config`; small helpers |
+| `messages` | everything Tinker tells the person, in one voice (`say`, `Messages`, `Message`): each message's kind gives its icon, sections nest it, followers (a tracker) get it as data, and details go to the log only |
 | `commands` | the one table of Tinker's commands, and project references (`@ID`, `@folder`) |
 | `prompts` | prompt parts (`Part`), replies (`Reply`), every system prompt (`Prompts`) |
 | `workspace` | the project's files and the commands run in it (`Workspace`, `Toolchain`, `TestRef`, `Output`, `FileView`, `TaughtCommands`) |
@@ -115,8 +116,8 @@ Each project keeps its own state in `<project>/.tinker/project.db`:
 | `spec` | the plan: criteria, cycles, files, toolchain, what was learned and used |
 | `texts` | the spec file's text and its brief |
 | `restore` | the restore point of the criterion being fixed |
-| log `events` | every model call and session event |
-| log `output` | everything the run printed |
+| log `events` | every model call, session event and detail |
+| log `output` | every message the run said |
 | log `progress` | every change of the run's tracker |
 
 A started server writes its output to `<project>/.tinker/app-output.txt`. The plan is also written as
@@ -179,8 +180,7 @@ phase, learn from the web what the rest of the cycle needs.
   `Home.clear(names, yes)` deletes only the named parts from the home database. It rejects an unknown
   part by listing the parts. When those parts are empty, it says there is nothing to clear. Without
   `yes`, and not in a terminal, it deletes nothing.
-- **SET-12** Helpers. `human_duration`: 42.5 gives `42s`, 1762.08 gives `29m 22s`, 4000 gives
-  `1h 6m 40s`. `first_line` gives the first line of the text with its ends stripped, cut to the limit
+- **SET-12** Helpers. `first_line` gives the first line of the text with its ends stripped, cut to the limit
   with `...`. `words` gives the lowercase alphanumeric words. `fingerprint` is the SHA-1 of the text.
   `similarity` is a case-insensitive ratio from 0 to 1.
 - **SET-13** `split_text(text, size)` gives chunks of at most `max(size, 200)` chars. It splits
@@ -190,12 +190,6 @@ phase, learn from the web what the rest of the cycle needs.
   it closes. A path that is not known is left out.
 - **SET-15** `groups_fitting(items, room, size)` keeps the items in order, in groups that each fit
   `room` (each item takes `size + 1`). An item larger than the room is a group of its own.
-- **SET-16** `Tee` writes to its stream and passes each whole line to its log, and it never fails for
-  the log.
-- **SET-17** `Console.step` prints `[HH:MM:SS <duration> (<seconds>s)] message`. `Console.mirror(see)`
-  gives every whole printed line to `see`. A run uses that to keep its output in its project log.
-  `Console.progress` redraws its live line on a terminal only; piped (a chat following the command), it
-  writes nothing.
 - **SET-18** `Home.keep_awake()` keeps the computer awake with `caffeinate` (macOS) or
   `systemd-inhibit` (Linux), tied to Tinker's process. It does nothing when neither tool is there,
   and it never raises.
@@ -204,6 +198,27 @@ phase, learn from the web what the rest of the cycle needs.
   `web_fallback`, `web_timeout`, `learn_missing`, the `learn_*`, `docs_*` and `fetch_*` settings, `projects`), reading
   the value by the key's type. A
   value that fails the checks is not kept, and the command ends with why.
+
+## messages
+
+Everything Tinker tells the person goes through one voice, `say` (a `Messages`). No other module prints.
+
+- **MSG-1** Each message has a kind, and its kind gives its icon: done ✅, warn ⚠️, fail ❌, retry 🔁,
+  skip ➖, stop 🛑, tip 💡, item •. A title, a step and an info take their own icon; plain text has
+  none. A line is its icon, a space and its words; after an emoji drawn with a variation selector
+  (⚠️), two spaces, so the words of every line stay in one column.
+- **MSG-2** A section nests what is said inside it three spaces deeper. A part is a title with a
+  section under it. A title at the top has a blank line before it. A summary is a part whose lines are
+  `label: value`, each with its icon. `took` says something done with how long it took.
+- **MSG-3** Every message is given, as data (`Message`: kind, text, depth, icon), to each follower.
+  A follower that fails never breaks what is said. A run's and a learn's `Tracker` follow: a message
+  becomes the latest and goes to the project's `output` log; a live one becomes what goes on now.
+- **MSG-4** `live` redraws one status line in place on a terminal only. Piped (a chat following the
+  command), it writes nothing; its followers are still told. The next message clears it first.
+- **MSG-5** `detail` goes to the log given to `keep_log` (a run's `events`, tinker learn's `learn`),
+  and is never printed. With no log, it is dropped.
+- **MSG-6** `human_duration`: 42.5 gives `42s`, 1762.08 gives `29m 22s`, 4000 gives `1h 6m 40s`.
+- **MSG-7** No module of Tinker but `messages` calls `print`.
 
 ## commands
 
@@ -416,7 +431,7 @@ phase, learn from the web what the rest of the cycle needs.
   error chunk is an `OllamaError`: a reply error with what came before, unless it is out of memory
   or a crash. Once `done_when(content)` says the reply is complete, the stream ends within
   `EARLY_STOP_GRACE` seconds, and the reply is the content as it was at that moment. While it goes,
-  it tells its watcher what has been written and thought so far. A reply whose last `LOOP_LINES`
+  its live line (`say.live`) says what the model is doing. A reply whose last `LOOP_LINES`
   finished lines are one non-blank line, again and again, is stopped there and is cut (`length`).
 - **MOD-10** `Calibrator.shared(context)` sets the prompt budget to `min(8192, max(512, context // 3))`,
   and the longest reply to `max(1024, min(16384, context - budget))`. `safe_ratio()` is
@@ -457,9 +472,9 @@ phase, learn from the web what the rest of the cycle needs.
 - **MOD-23** Calibration's first chat finds the think setting the model takes: `"high"`, else `true`,
   and none for a model that does not think. A model that does not run ends calibration with
   `SystemExit`.
-- **MOD-24** A quiet `Model` (tinker learn's) logs each call's step and details instead of printing
-  them. It prints only a short line when it asks again, and its live line says in plain words what the
-  model is doing (reading, thinking or writing its answer) and for how long ("1m 41s (101s)").
+- **MOD-24** `Model` keeps each call's step and details in its log and never prints them. The person
+  sees only a short line when it asks again, and its live line says in plain words what the model is
+  doing (reading, thinking or writing its answer) and for how long ("1m 41s (101s)").
 
 ## project
 
@@ -506,7 +521,7 @@ phase, learn from the web what the rest of the cycle needs.
 - **PRJ-12** `Outcome` starts as `stopped` with exit code 1. `done` and `awaiting` exit with 0, and
   `blocked` exits with 1.
 - **PRJ-13** `Tracker` is a run's one report. It keeps the title, run ID, folder, phase, steps done,
-  passing spec points, what the model is writing now, the latest line printed, a plan that waits, the
+  passing spec points, what the model is doing now, the latest message said, a plan that waits, the
   end, the seconds taken and whether the run is paused. Each change is published at once in the
   home's `running` under the run's process, and appended to the project's `progress` log.
 - **PRJ-14** The steps are named by phase (`STEPS`: what each phase is doing, and when done). The
@@ -514,8 +529,8 @@ phase, learn from the web what the rest of the cycle needs.
   plan that waits is kept as data: its project, run, language, how to start it, its kind, what
   changed, its criteria, its non-goals and its folder. The end is kept as data: its status, its
   headline, its details and the commands to go on.
-- **PRJ-15** A run keeps every model call in the project's `events` log, and everything it prints in
-  its `output` log.
+- **PRJ-15** A run keeps every model call and every detail in the project's `events` log, and every
+  message it says in its `output` log (its tracker follows `say`).
 - **PRJ-16** `Runs.remember(run, language)` keeps one line about the run in the home's `runs`: `{id, task,
   language, status, created, updated}`, at most `RUNS_KEPT`, the least recently updated dropped
   first. `tinker clear runs` deletes these lines with the pointers.
@@ -985,8 +1000,8 @@ CONDENSE, KEEP. Domain research (`Researcher`), own-command learning and run les
 - **CLI-5** `ProjectFolder.make(task)` makes a new folder in the projects folder. Its name comes from
   the model (when it is valid) or from the task's words, and it gets `-2`, `-3` … when the name is
   taken.
-- **CLI-6** `tinker log [@PROJECT]` prints what the project's last runs printed. `--calls` prints its
-  model calls instead.
+- **CLI-6** `tinker log [@PROJECT]` shows what the project's last runs said. `--calls` shows its
+  model calls and details instead.
 - **CLI-7** `CycleRunner.run` runs the phases from the saved one, in order, saving after each, and
   formats after verify. A run with `--web` that is past recall recalls first. It gives `blocked` when
   a phase stops, and then disproves the knowledge used in that step. It gives `awaiting` after the
@@ -1001,7 +1016,7 @@ CONDENSE, KEEP. Domain research (`Researcher`), own-command learning and run les
 - **CLI-10** `tinker learn NAME "DEFINITION"` (or an alias in the person's shell) keeps the command,
   with no model. `tinker learn WHAT` needs a measured model, an embedding model and the web, all
   checked before anything is loaded. Learning nothing ends with an error. However it ends, it prints
-  the time it took (`Time taken: 8m 34s`). It keeps a `Tracker` as a run does: its printed lines, what
+  the time it took (`Time taken: 8m 34s`). It keeps a `Tracker` as a run does: its messages, what
   the model is doing (in plain words), its steps and its end (learned, with the summary, or why it
   stopped), so a chat that started it shows them; the tracker leaves the home at the end unless that
   conversation reads it last.

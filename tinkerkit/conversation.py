@@ -31,9 +31,10 @@ lazy import webbrowser
 lazy from pathlib import Path
 
 from .commands import COMMANDS, TERMINAL_ONLY, named, refs
+lazy from .messages import human_duration, say
 lazy from .model import Models, Ollama, OllamaError
 from .project import Runs, Tracker, saved
-lazy from .settings import Config, Home, human_duration
+lazy from .settings import Config, Home
 lazy from .web import Internet
 lazy from .workspace import Toolchain
 
@@ -115,7 +116,7 @@ def session(root):
     try:
         chats = chat_channels()
     except SystemExit as exc:
-        print(f"  note: chats left out: {exc}")
+        say.warn(f"Chats left out: {exc}")
         chats = []
     Desk([ConsoleChannel()] + chats, root).run()
 
@@ -190,14 +191,14 @@ class Desk:
         self.say_status(anew=True)
         if not self.consoles:
             names = ", ".join(c.name for c in self.channels)
-            print(f"Listening on {names}; projects go in {self.root}. Ctrl-C stops.")
+            say.info(f"Listening on {names}; projects go in {self.root}. Ctrl-C stops.", "👂")
         try:
             self.listen_until_ended()
         except KeyboardInterrupt:
             self.stop_task()
             self.say_status("💤 **Tinker** · not listening")
             if not self.consoles:
-                print("\nStopped listening.")
+                say.title("Stopped listening.", "🛑")
 
     def claim_chats(self):
         """Each chat listened to by this Tinker alone: one another Tinker listens to is left out (served by
@@ -208,7 +209,7 @@ class Desk:
                 held = f"{channel.name} is listened to by another Tinker (process {channel.holder().get('pid', '?')})"
                 if not self.consoles:
                     raise SystemExit(f"tinker: {held}: stop it first")
-                print(f"  note: {held}: this one talks here only")
+                say.warn(f"{held}: this one talks here only")
                 self.channels.remove(channel)
 
     def say_status(self, text=None, anew=False):
@@ -266,7 +267,7 @@ class Desk:
         while not channel.closed:
             for message in channel.listened(timeout=1 if channel in self.consoles else 20):
                 if channel not in self.consoles:
-                    print(f"[{time.strftime('%H:%M:%S')}] {channel.name}: {message.text}")
+                    say.text(f"[{time.strftime('%H:%M:%S')}] {channel.name}: {message.text}")
                 self.hear(channel, message)
 
     def hear(self, channel, message):
@@ -916,7 +917,7 @@ class Talk:
                 Ollama.chat(name, [{"role": "user", "content": "hi"}], Config.keep_alive(Config.get("keep_alive")),
                             dict(options, num_predict=1), think=think, timeout=CHAT_TIMEOUT)
             except OllamaError as exc:
-                print(f"  note: the model did not load for chat: {first_words(exc)}")
+                say.warn(f"The model did not load for chat: {first_words(exc)}")
 
 
 class Shell:
@@ -1377,7 +1378,7 @@ class Attached:
         if not self.paused:
             self.tracker.close()
             return False
-        print("\nStopped for an emergency from the chat: going on once it is answered.")
+        say.title("Stopped for an emergency from the chat: going on once it is answered.", "🚨")
         self.tracker.pause()
         ends = time.monotonic() + RESUME_WAIT
         while Home.store().get("running", str(self.tracker.pid)) is not None and time.monotonic() < ends:
@@ -1392,7 +1393,7 @@ def attach(title, tracker):
     try:
         channels = chat_channels()
     except SystemExit as exc:
-        print(f"  note: channels left out: {exc}")
+        say.warn(f"Channels left out: {exc}")
         return None
     return Attached(channels, title, tracker).start() if channels else None
 
@@ -1533,7 +1534,7 @@ class Channel:
             messages = self.receive(timeout)
         except ChannelError as exc:
             if str(exc) != getattr(self, "refused", None):
-                print(f"  note: {self.name}: {exc}; trying again")
+                say.warn(f"{self.name}: {exc}; trying again")
             self.refused = str(exc)
             time.sleep(timeout)
             return []

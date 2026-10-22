@@ -19,6 +19,7 @@ lazy import urllib.parse
 lazy from pathlib import Path
 
 from .conversation import OFF, Channel, ChannelError, Desk, Markup, Message, first_words
+lazy from .messages import say
 lazy from .settings import Home
 
 
@@ -45,7 +46,7 @@ class ChannelCommand:
         actions = {"list": ChannelCommand.list, "add": ChannelCommand.add, "remove": ChannelCommand.remove,
                    "enable": ChannelCommand.enable, "disable": ChannelCommand.disable, "start": ChannelCommand.start}
         if action in ("help", "-h", "--help"):
-            print(ChannelCommand.USAGE)
+            say.text(ChannelCommand.USAGE)
             return
         if action not in actions:
             raise SystemExit(f"tinker channel: no action {action!r}\n{ChannelCommand.USAGE}")
@@ -55,12 +56,12 @@ class ChannelCommand:
     def list(rest):
         settings = Channels.settings()
         if not settings:
-            print(f"No channels yet. Add one: tinker channel add  (kinds: {', '.join(KINDS)})")
+            say.info(f"No channels yet. Add one: tinker channel add  (kinds: {', '.join(KINDS)})", "📭")
             return
         for name, s in settings.items():
             state = "enabled" if s.get("enabled") else "disabled"
             chats = ", ".join(map(str, s.get("allowed", []))) or "no chat paired"
-            print(f"  {name:<16} {s.get('kind', '?'):<10} {state:<9} chats: {chats}")
+            say.text(f"{name:<16} {s.get('kind', '?'):<10} {state:<9} chats: {chats}")
 
     @staticmethod
     def add(rest):
@@ -78,8 +79,8 @@ class ChannelCommand:
         chats = ([c.strip() for c in given["chat"].split(",")] if given.get("chat")
                  else ChannelCommand.pair(channel, who))
         Channels.keep(name, {"kind": kind, "enabled": False, "allowed": chats, "who": who}, secrets)
-        print(f"Added {name} ({kind}, {who}), serving chat(s) {', '.join(chats)}. "
-              f"It starts disabled: tinker channel enable {name}")
+        say.done(f"Added {name} ({kind}, {who}), serving chat(s) {', '.join(chats)}. "
+                 f"It starts disabled: tinker channel enable {name}")
 
     @staticmethod
     def options(rest):
@@ -113,7 +114,7 @@ class ChannelCommand:
     def pair(channel, who):
         """The chat that sends the channel a message now, once its sender confirms it here."""
         channel.skip_waiting()
-        print(f"Send any message to {who} now (waiting up to {PAIRING_WAIT}s)…")
+        say.step(f"Send any message to {who} now (waiting up to {PAIRING_WAIT}s)…", "📨")
         ends = time.monotonic() + PAIRING_WAIT
         while time.monotonic() < ends:
             for message in channel.receive(timeout=10):
@@ -128,13 +129,13 @@ class ChannelCommand:
     def remove(rest):
         name = ChannelCommand.named(rest, "remove")
         Channels.forget(name)
-        print(f"Removed {name}.")
+        say.done(f"Removed {name}.")
 
     @staticmethod
     def enable(rest, on=True):
         name = ChannelCommand.named(rest, "enable" if on else "disable")
         Channels.keep(name, dict(Channels.settings()[name], enabled=on))
-        print(f"{name} is {'enabled: tasks report to it; tinker channel start listens on it' if on else 'disabled'}.")
+        say.done(f"{name} is {'enabled: tasks report to it; tinker channel start listens on it' if on else 'disabled'}.")
 
     @staticmethod
     def disable(rest):
@@ -165,7 +166,7 @@ class ChannelCommand:
                 if tries == CHECK_TRIES:
                     raise SystemExit(f"tinker: channel {channel.name} cannot be reached ({exc}), tried {tries} "
                                      f"times: check the network and start it again") from None
-                print(f"  {channel.name} did not answer ({exc}); trying again ({tries + 1}/{CHECK_TRIES})")
+                say.retry(f"{channel.name} did not answer ({exc}); trying again ({tries + 1}/{CHECK_TRIES})")
                 time.sleep(5)
 
     @staticmethod

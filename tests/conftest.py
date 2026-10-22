@@ -10,6 +10,7 @@ from pathlib import Path
 import pytest
 
 import tinker  # noqa: F401  (the whole of Tinker loaded, as a run loads it)
+from tinkerkit.messages import say
 from tinkerkit.model import Model, Ollama
 from tinkerkit.project import Project
 from tinkerkit.settings import Home, Log, Store
@@ -27,6 +28,14 @@ def tinker_home(tmp_path, monkeypatch):
     home = tmp_path / "tinker-home" / ".tinker"
     monkeypatch.setattr(Home, "root", home)
     return home
+
+
+@pytest.fixture(autouse=True)
+def quiet_voice():
+    """Each test starts as a new process does: nobody follows what Tinker says and no log keeps its details."""
+    say.reset()
+    yield
+    say.reset()
 
 
 @pytest.fixture
@@ -70,8 +79,7 @@ class FakeOllama:
             self.queue.append((when, answer))
         return self
 
-    def chat(self, name, messages, keep_alive, options, think=None, label=None, done_when=None, timeout=None,
-             watch=None, quiet=False):
+    def chat(self, name, messages, keep_alive, options, think=None, label=None, done_when=None, timeout=None):
         if not messages:  # an unload
             self.unloaded.append(name)
             return {"message": {"content": "", "thinking": ""}}
