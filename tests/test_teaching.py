@@ -61,17 +61,29 @@ def numbered_item(memory, text, kind):
     return next(n for n, item in enumerate(items, 1) if item["kind"] == kind and "black" in item["text"])
 
 
+RUFF_FACT = {"text": "Ruff formats Python code as black does", "preference": False}
+NO_MYPY = {"text": "Our projects need no type checker: the spec's tests catch what matters", "preference": True}
+RUFF_CHANGE = {"claims": [1], "toolchain": {"format": "ruff format ."},
+               "lesson": {"phase": "toolchain", "text": "Format and lint Python with ruff alone; black is not needed"}}
+NO_MYPY_CHANGE = {"claims": [2], "toolchain": {"lint": "ruff check ."},
+                  "lesson": {"phase": "toolchain", "text": "Run no type checker in Python projects"}}
+
+
 def plan_reply(**changes):
-    plan = {"claims": ["Ruff formats Python code as black does"], "commands": [f'"{PY}" --version'],
-            "searches": ["ruff formatter replaces black"], "language": "Python", "retire": [],
-            "toolchain": {"format": "ruff format ."},
-            "lesson": {"phase": "toolchain", "text": "Format and lint Python with ruff alone; black is not needed"}}
+    plan = {"claims": [RUFF_FACT, NO_MYPY], "commands": [f'"{PY}" --version'],
+            "searches": ["ruff formatter replaces black"], "language": "Python",
+            "changes": [RUFF_CHANGE, NO_MYPY_CHANGE]}
     return json.dumps(dict(plan, **changes))
 
 
-def verdict_reply(verdict="holds", evidence=(2,), change=True):
+def verdict_reply(verdict="holds", evidence=(2,), follows=True):
     return json.dumps({"claims": [{"claim": 1, "verdict": verdict, "why": "the Ruff docs say so",
-                                   "evidence": list(evidence)}], "change": change, "why": "it follows"})
+                                   "evidence": list(evidence)}],
+                       "changes": [{"change": 1, "follows": follows, "why": "it agrees with the docs"}]})
+
+
+def lessons():
+    return [lesson["text"] for lesson in Home.store().get("languages", "python")["lessons"]]
 
 
 @pytest.mark.spec("TCH-1")
@@ -107,19 +119,26 @@ def test_ask_with_nothing_kept_asks_no_model(home_store, make_model, fake_ollama
 
 @pytest.mark.spec("TCH-3")
 def test_read_plan_keeps_what_is_usable_within_limits():
-    plan = read_plan({"claims": [f"claim {n}" for n in range(9)] + [""], "commands": ["ruff --version"],
-                      "searches": ["a", "b", "c", "d"], "language": "Python", "retire": [1, 3, 99, "2"],
-                      "toolchain": {"format": "ruff format .", "run": "python app.py", "lint": "",
-                                    "setup": ["pip install ruff", " "], "test_all": ["not", "a list"]},
-                      "lesson": {"phase": "toolchain", "text": "Use ruff"}}, count=3)
+    plan = read_plan({"claims": [f"claim {n}" for n in range(9)] + [{"text": "I prefer X", "preference": True}, ""],
+                      "commands": ["ruff --version"], "searches": ["a", "b", "c", "d"], "language": "Python",
+                      "changes": [{"claims": [1, 99], "retire": [1, 3, 99, "2"],
+                                   "toolchain": {"format": "ruff format .", "run": "python app.py", "lint": "",
+                                                 "setup": ["pip install ruff", " "], "test_all": ["not", "a list"]},
+                                   "lesson": {"phase": "toolchain", "text": "Use ruff"}},
+                                  {"claims": [], "lesson": {"phase": "code", "text": "rests on nothing"}},
+                                  {"claims": [2], "lesson": {"phase": "nowhere", "text": "changes nothing"}}]}, count=3)
     assert len(plan["claims"]) == TEACH_CLAIMS and len(plan["searches"]) == 3
-    assert plan["retire"] == [1, 3] and plan["toolchain"] == {"format": "ruff format .", "setup": ["pip install ruff"]}
-    assert plan["lesson"] == {"phase": "toolchain", "text": "Use ruff"}
-    assert read_plan({"claims": ["c"], "searches": ["s"], "lesson": {"phase": "nowhere", "text": "x"}, "retire": [1]},
-                     count=1)["lesson"] is None
-    for broken, why in [({"claims": [], "searches": ["s"], "retire": [1]}, "no claims"),
-                        ({"claims": ["c"], "retire": [1]}, "no command or web search"),
-                        ({"claims": ["c"], "searches": ["s"]}, "no change")]:
+    assert plan["claims"][0] == {"text": "claim 0", "preference": False}
+    assert plan["changes"] == [{"claims": [1], "retire": [1, 3], "lesson": {"phase": "toolchain", "text": "Use ruff"},
+                                "toolchain": {"format": "ruff format .", "setup": ["pip install ruff"]}}]
+    preferences = read_plan({"claims": [{"text": "I prefer X", "preference": True}],
+                             "changes": [{"claims": [1], "lesson": {"phase": "code", "text": "Use X"}}]}, count=0)
+    assert preferences["commands"] == preferences["searches"] == []  # a preference needs no check
+    for broken, why in [({"claims": [], "searches": ["s"], "changes": [RUFF_CHANGE]}, "no claims"),
+                        ({"claims": ["c"], "changes": [RUFF_CHANGE]}, "no command or web search"),
+                        ({"claims": ["c"], "searches": ["s"]}, "no change"),
+                        ({"claims": ["c", "d"], "searches": ["s"], "changes": [RUFF_CHANGE, dict(RUFF_CHANGE, claims=[2])]},
+                         "toolchain format is changed twice")]:
         with pytest.raises(ValueError, match=why):
             read_plan(broken, count=1)
 
@@ -127,59 +146,92 @@ def test_read_plan_keeps_what_is_usable_within_limits():
 @pytest.mark.spec("TCH-4")
 def test_teach_runs_only_safe_commands_and_reads_the_pages(kept, make_model, fake_ollama, capsys):
     web = FakeWeb()
-    fake_ollama.reply(plan_reply(commands=[f'"{PY}" --version', "pip install black"]), when="what to check")
+    fake_ollama.reply(plan_reply(commands=[f'"{PY}" --version', "pip install black", "no-such-tool --help"]),
+                      when="what to check")
     fake_ollama.reply(verdict_reply("unsure"), when="weigh the evidence")
-    Teacher(make_model(), web, kept).teach("ruff alone is enough, black is not needed")
+    Teacher(make_model(), web, kept).teach("ruff alone is enough, and we need no mypy")
     out = capsys.readouterr().out
     assert "Skipped `pip install black`" in out and "Python 3" in out
     judged = fake_ollama.calls[1]["messages"][1]["content"]
-    assert "[1] this machine" in judged and f"[2] {PAGE['url']}" in judged and "drop-in replacement" in judged
+    assert "[1] this machine" in judged and f"[3] {PAGE['url']}" in judged and "drop-in replacement" in judged
+    assert "not found here (a project's own environment may have it)" in judged
+    assert "## Facts\n1. Ruff formats" in judged and "## The person's preferences\n2. Our projects" in judged
+    assert "Change 1 (rests on claims 1)" in judged and "Change 2" not in judged  # a preference's change is not weighed
     assert web.queries == ["ruff formatter replaces black"]
 
 
 @pytest.mark.spec("TCH-4")
-def test_teach_with_no_evidence_changes_nothing_and_asks_no_more(kept, make_model, fake_ollama):
+def test_preferences_alone_are_honored_with_no_check(kept, make_model, fake_ollama, capsys):
+    fake_ollama.reply(plan_reply(claims=[NO_MYPY], commands=[], searches=[], changes=[dict(NO_MYPY_CHANGE, claims=[1])]),
+                      when="what to check")
+    web = FakeWeb()
+    ending = Teacher(make_model(), web, kept).teach("we need no mypy")
+    assert len(fake_ollama.calls) == 1 and web.queries == []
+    assert ending["status"] == "done" and "Run no type checker in Python projects" in lessons()
+    assert "👤 Your preference, honored: Our projects need no type checker" in capsys.readouterr().out
+
+
+@pytest.mark.spec("TCH-4")
+def test_facts_nothing_could_check_are_unsure_and_asked_no_more(kept, make_model, fake_ollama):
     fake_ollama.reply(plan_reply(commands=["rm -rf build"]), when="what to check")
-    ending = Teacher(make_model(), FakeWeb(pages=()), kept).teach("ruff alone is enough")
-    assert ending["status"] == "blocked" and "nothing could check it" in ending["headline"]
+    ending = Teacher(make_model(), FakeWeb(pages=()), kept).teach("ruff alone is enough, and we need no mypy")
     assert len(fake_ollama.calls) == 1
+    assert ("Unsure", "Ruff formats Python code as black does (nothing could check it)") in ending["details"]
+    assert Home.store().get("languages", "python")["toolchain"]["format"] == "black ."  # its change waits
+    assert Home.store().get("languages", "python")["toolchain"]["lint"] == "ruff check ."  # the preference's is made
+
+
+@pytest.mark.spec("TCH-5")
+def test_a_verdict_needs_every_fact_and_every_change_a_fact_is_for():
+    plan = read_plan(json.loads(plan_reply()), count=0)
+    read = lambda claims, changes=({"change": 1, "follows": True},): Verdict.read(
+        {"claims": claims, "changes": list(changes)}, plan, evidence=2)
+    holds = {"claim": 1, "verdict": "holds", "evidence": [1, 7]}
+    verdict = read([holds])
+    assert verdict.claims[1]["evidence"] == [1] and verdict.claims[2]["verdict"] == "preference"
+    assert verdict.why_not(1, plan["changes"][0]) == verdict.why_not(2, plan["changes"][1]) == ""
+    assert read([dict(holds, evidence=[9])]).why_not(1, plan["changes"][0]) == "claim 1 is unsure"  # nothing cited
+    assert read([dict(holds, verdict="wrong")]).why_not(1, plan["changes"][0]) == "claim 1 is wrong"
+    assert read([holds], [{"change": 1, "follows": False, "why": "the docs say otherwise"}]).why_not(
+        1, plan["changes"][0]) == "does not follow: the docs say otherwise"
+    with pytest.raises(ValueError, match="claim 1 has no verdict"):
+        read([])
+    with pytest.raises(ValueError, match="claim 1 has no verdict"):
+        read([dict(holds, verdict="maybe")])
+    with pytest.raises(ValueError, match="change 1 has no"):
+        read([holds], [])
+
+
+@pytest.mark.spec("TCH-5")
+def test_a_change_whose_fact_does_not_hold_waits_and_the_rest_are_made(kept, make_model, fake_ollama, capsys):
+    fake_ollama.reply(plan_reply(), when="what to check")
+    fake_ollama.reply(verdict_reply("wrong"), when="weigh the evidence")
+    ending = Teacher(make_model(), FakeWeb(), kept).teach("ruff alone is enough, and we need no mypy")
+    assert ending["status"] == "done" and ending["headline"] == "Corrected: 2 change(s)"
+    assert ("Wrong", "Ruff formats Python code as black does (the Ruff docs say so)") in ending["details"]
+    assert ("Not changed", "Format and lint Python with ruff alone; black is not needed (claim 1 is wrong)") \
+        in ending["details"]
     assert Home.store().get("languages", "python")["toolchain"]["format"] == "black ."
+    assert "Run no type checker in Python projects" in lessons()
+    out = capsys.readouterr().out
+    assert "❌ Wrong: Ruff formats" in out and "➖ Not changed: Format and lint" in out
 
 
 @pytest.mark.spec("TCH-5")
-def test_a_verdict_holds_only_when_every_claim_holds_on_evidence_and_the_change_follows():
-    claims = ["a", "b"]
-    read = lambda given, change=True: Verdict.read({"claims": given, "change": change}, claims, evidence=2)
-    holds = {"claim": 1, "verdict": "holds", "evidence": [1]}
-    assert read([holds, dict(holds, claim=2, evidence=[2, 7])]).holds()
-    assert read([holds, dict(holds, claim=2, evidence=[2, 7])]).claims[1]["evidence"] == [2]
-    assert not read([holds, dict(holds, claim=2, evidence=[9])]).holds()  # no evidence it can cite
-    assert not read([holds, dict(holds, claim=2, verdict="unsure")]).holds()
-    assert not read([holds, dict(holds, claim=2)], change=False).holds()
-    with pytest.raises(ValueError, match="claim 2 has no verdict"):
-        read([holds])
-    with pytest.raises(ValueError, match="claim 2 has no verdict"):
-        read([holds, dict(holds, claim=2, verdict="maybe")])
-
-
-@pytest.mark.spec("TCH-5")
-def test_a_teaching_that_does_not_hold_changes_nothing(kept, make_model, fake_ollama, capsys):
+def test_nothing_changes_when_no_change_can_be_made(kept, make_model, fake_ollama):
     before = {key: Home.store().get(*key) for key in [("languages", "python"), ("memory", "any")]}
-    lesson = numbered_item(kept, "ruff alone is enough, black is not needed", "lesson")
-    fake_ollama.reply(plan_reply(retire=[lesson]), when="what to check")
-    fake_ollama.reply(verdict_reply("wrong", evidence=(2,)), when="weigh the evidence")
-    ending = Teacher(make_model(), FakeWeb(), kept).teach("ruff alone is enough, black is not needed")
-    assert ending["status"] == "blocked" and ending["headline"] == "Nothing changed: the teaching did not hold"
-    assert ending["details"] == [("Wrong", "Ruff formats Python code as black does (the Ruff docs say so)")]
+    fake_ollama.reply(plan_reply(claims=[RUFF_FACT], changes=[RUFF_CHANGE]), when="what to check")
+    fake_ollama.reply(verdict_reply("unsure"), when="weigh the evidence")
+    ending = Teacher(make_model(), FakeWeb(), kept).teach("ruff alone is enough")
+    assert ending["status"] == "blocked" and ending["headline"] == "Nothing changed"
     assert {key: Home.store().get(*key) for key in before} == before
-    assert "❌ Wrong: Ruff formats Python code as black does" in capsys.readouterr().out
 
 
 @pytest.mark.spec("TCH-6")
 def test_a_teaching_that_holds_corrects_what_tinker_keeps(kept, make_model, fake_ollama):
-    teaching = "ruff alone is enough, black is not needed"
+    teaching = "ruff alone is enough, black is not needed, and we need no mypy"
     lesson = numbered_item(kept, teaching, "lesson")
-    fake_ollama.reply(plan_reply(retire=[lesson]), when="what to check")
+    fake_ollama.reply(plan_reply(changes=[dict(RUFF_CHANGE, retire=[lesson]), NO_MYPY_CHANGE]), when="what to check")
     fake_ollama.reply(verdict_reply(), when="weigh the evidence")
     ending = Teacher(make_model(), FakeWeb(), kept).teach(teaching)
     python = Home.store().get("languages", "python")
@@ -187,23 +239,12 @@ def test_a_teaching_that_holds_corrects_what_tinker_keeps(kept, make_model, fake
     retired = python["retired"][-1]
     assert retired["text"] == "Format Python with black before linting with ruff"
     assert retired["reason"] == f"corrected by what you taught: {teaching}"
-    taught = next(l for l in python["lessons"] if "ruff alone" in l["text"])
-    assert taught["status"] == "proven" and taught["sources"] == [PAGE["url"]]
-    assert taught["history"][-1]["event"] == "taught"
-    assert ending["status"] == "done" and ending["headline"] == "Corrected: 3 change(s)"
-
-
-@pytest.mark.spec("TCH-6")
-def test_a_taught_lesson_like_a_known_one_proves_it_and_no_toolchain_is_made(home_store):
-    known = Knowledge("Go", "r1")
-    known.add_lessons([{"text": "Run gofmt on every file before the tests", "phase": "toolchain", "scope": "language"}],
-                      [])
-    lesson = Knowledge("Go").taught_lesson({"text": "Run gofmt on every file before tests", "phase": "toolchain",
-                                            "scope": "language"}, ["https://go.dev"])
-    lessons = home_store.get("languages", "go")["lessons"]
-    assert len(lessons) == 1 and lesson["status"] == "proven" and lessons[0]["status"] == "proven"
-    assert Knowledge("Go").correct_toolchain({"format": "gofmt -w ."}) is None
-    assert home_store.get("languages", "go").get("toolchain") is None
+    taught = {l["text"]: l for l in python["lessons"]}
+    ruff, no_mypy = taught["Format and lint Python with ruff alone; black is not needed"], \
+        taught["Run no type checker in Python projects"]
+    assert ruff["status"] == no_mypy["status"] == "proven" and ruff["history"][-1]["event"] == "taught"
+    assert ruff["sources"] == [PAGE["url"]] and no_mypy["sources"] == ["your preference"]
+    assert ending["status"] == "done" and ending["headline"] == "Corrected: 5 change(s)"
 
 
 @pytest.mark.spec("TCH-7")

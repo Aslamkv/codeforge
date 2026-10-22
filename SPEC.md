@@ -758,19 +758,23 @@ on this machine and on the web, the model weighs that evidence alone, and only t
 - **TCH-2** `Asker.answer(question)` makes one model call with the items numbered, and says the answer alone:
   no steps and no sources, then the time taken (a terminal shows one status line while it thinks). With nothing kept it
   makes no call and says so. It changes nothing.
-- **TCH-3** `read_plan` keeps at most `TEACH_CLAIMS` claims, `TEACH_COMMANDS` commands and `TEACH_SEARCHES`
-  searches, the numbers of items shown to retire, the toolchain commands of `TOOLCHAIN_KEYS`, and a lesson with
-  a known phase. A plan with no claim, nothing that checks its claims, or no change is a `ValueError`.
-- **TCH-4** `Teacher.teach` checks first. It runs only the commands that show what is installed (each other one
-  is skipped, and said), and reads the pages the searches find. With no evidence it changes nothing and makes
-  no further call.
-- **TCH-5** `Verdict.read` needs a verdict for every claim (`holds`, `wrong` or `unsure`), and keeps only the
-  evidence numbers given. `holds()` is true only when every claim holds on evidence it cites and the change
-  follows. Otherwise nothing changes, and the ending gives each claim's verdict and why.
-- **TCH-6** A teaching that holds retires the items it shows wrong (the reason names what was taught), replaces
-  the commands of the language's toolchain (only when it has one, and the result is usable), and keeps the
-  lesson as proven, with a `taught` event and the sources the claims cite. A lesson like a known one proves
-  that one instead of being added.
+- **TCH-3** `read_plan` keeps at most `TEACH_CLAIMS` claims, each a fact or a preference (the person's own
+  choice), at most `TEACH_COMMANDS` commands and `TEACH_SEARCHES` searches, and the changes: each rests on the
+  claims it names and retires items shown, replaces toolchain commands of `TOOLCHAIN_KEYS` or keeps a lesson with
+  a known phase (any other is dropped). A plan with no claim, facts that nothing checks, no change, or a
+  toolchain key in two changes is a `ValueError`.
+- **TCH-4** `Teacher.teach` checks the facts first. It runs only the commands that show what is installed (each
+  other one is skipped, and said; a tool not found here may be in a project's own environment), and reads the
+  pages the searches find. A preference is honored, never checked: with only preferences, nothing is run or
+  searched and the judge is not asked. Facts with no evidence are unsure, and the judge is not asked.
+- **TCH-5** `Verdict.read` needs a verdict for every fact (`holds`, `wrong` or `unsure`; one that holds with no
+  evidence it can cite is unsure), and whether each change a fact is for follows. Each change is made on its
+  own: when every claim it rests on holds or is a preference, and it follows. Each other one is said with why.
+  When no change is made, nothing changes.
+- **TCH-6** A change that is made retires the items it shows wrong (the reason names what was taught), replaces
+  the commands of the language's toolchain (only when it has one, and the result is usable), and keeps its
+  lesson as proven, with a `taught` event and its sources: the evidence its facts cite, and "your preference"
+  for a preference. A lesson like a known one proves that one instead of being added.
 - **TCH-7** `tinker teach` needs the Internet plugin, checked before any model call. Both commands report through
   a tracker, and in the conversation they run as tasks.
 
