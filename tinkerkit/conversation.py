@@ -73,6 +73,7 @@ QUICK = named("quick")                         # what it prints is shown
 DELETES = tuple(c.name for c in COMMANDS if c.deletes)  # what it deletes is shown first; done once confirmed
 PLANNED = tuple(c.name for c in COMMANDS if "--confirm" in (o.flag for o in c.options))  # its plan waits here
 OWN = named("own")                             # the conversation's own
+LOOKS = ("exercise", "help", "status", "runs", "log", "memory", "doctor", "models")  # only shows: an exercise goes on
 ONE_WORD = tuple(c.name for c in COMMANDS if c.chat and c.words == "one")  # a command with one word after it
 ANY_WORDS = tuple(c.name for c in COMMANDS if c.chat and c.words == "any")  # ... with any words after it
 SAID_BARE = tuple(c.name for c in COMMANDS if c.name)  # commands a conversation takes as their words
@@ -286,7 +287,7 @@ class Desk:
             channel.send(message.chat, welcome())
             return
         command = command_of(message.text)
-        if command != "exercise":  # the person comes first: an exercise gives way
+        if command not in LOOKS:  # the person comes first: an exercise gives way
             Home.person_seen()
         if command == "confirm" and message.id:  # a one-time answer: it would only make the chat grow
             channel.delete(message.chat, message.id)
