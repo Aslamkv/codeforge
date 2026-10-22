@@ -660,6 +660,7 @@ class TaughtCommands:
 
 class TestRef:
     """A criterion's test: "tests/test_app.py::test_x" -> file tests/test_app.py, name test_x."""
+    __test__ = False  # not a pytest test class
 
     def __init__(self, test):
         file, _, name = str(test).rpartition("::")
