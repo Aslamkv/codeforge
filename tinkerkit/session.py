@@ -22,7 +22,7 @@ class Session:
     def __init__(self, model, project, max_stall=DEFAULT_MAX_STALL, internet=None, confirm=True, tracker=None):
         self.model, self.project, self.max_stall = model, project, max_stall
         self.internet = internet  # the Internet plugin: a run with --web only
-        self.confirm = confirm    # a plan waits for the person (no: --no-confirm)
+        self.confirm = confirm    # a plan waits for the person (--confirm)
         self.tracker = tracker    # the run's one report (Tracker), when it has one
         self.cycle = None         # the cycle being worked on (where the knowledge it uses is recorded)
         self.ws = Workspace(project.workdir)

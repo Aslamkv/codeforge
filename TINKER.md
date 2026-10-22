@@ -87,15 +87,17 @@ tinker models
 ## Build 🔨
 
 Build something new. It gets its own folder in `~/Projects`, named after the task (`calc-py`), and
-Tinker shows you the plan first:
+Tinker builds it straight through:
 
 ```sh
 tinker task a calculator in Python
 ```
 
-Build the plan, or change it first (it waits again). Name the project with `@` and its folder or ID:
+See the plan first (in the conversation, `tinker` alone, it always waits). Build it, or change it
+first (it waits again). Name the project with `@` and its folder or ID:
 
 ```sh
+tinker task a calculator in Python --confirm
 tinker confirm @calc-py
 tinker amend @calc-py also handle negative numbers
 ```
@@ -104,12 +106,6 @@ Give its folder another name before it is built:
 
 ```sh
 tinker rename @calc-py calculator
-```
-
-Build straight through, with no plan to confirm:
-
-```sh
-tinker task a todo list app --no-confirm
 ```
 
 Build from a spec you wrote:

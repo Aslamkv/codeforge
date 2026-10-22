@@ -513,7 +513,7 @@ def test_a_task_runs_as_its_own_tinker_and_its_plan_waits(desk, home_store):
     desk, channel, script = desk
     say(desk, channel, "task a calculator")
     wait_until(lambda: desk.waiting is not None)
-    assert calls_of(script) == ["help", "task a calculator"]
+    assert calls_of(script) == ["help", "task a calculator --confirm"]
     assert desk.waiting["run"] == "abc123" and desk.waiting["stage"] == "spec" and desk.waiting["new"]
     assert desk.waiting["spec"].startswith("📋 **Plan for calc** · run `abc123`")
     assert desk.status().startswith("🙋 **Tinker** · calc: a calculator waits for you")
