@@ -222,7 +222,7 @@ from tinkerkit.commands import BY_NAME, COMMANDS, GROUPS, refs
 from tinkerkit.finishing import FinalReview, LessonWriter, ReadmeWriter, Tidy
 from tinkerkit.graph import write_page
 from tinkerkit.knowledge import Embeddings, Library
-from tinkerkit.learning import SlotLearner
+from tinkerkit.learning import LearnStopped, SlotLearner
 from tinkerkit.model import Calibrator, Model, Models, Ollama, OllamaError
 from tinkerkit.planning import Designer, InterfaceReviewer, Recaller, SpecWriter
 from tinkerkit.project import Brief, Outcome, Project, RunChecks, Runs, Tracker, project_store, saved
@@ -709,23 +709,58 @@ class Commands:
         in use (SlotLearner tells a language, a tool and a domain apart), kept and indexed (an
         embedding model and the Internet plugin must be there; when one is not, nothing is loaded
         and it says why). A learn the web cannot feed stops before any model call, saving nothing
-        (learning.LearnStopped), and ends non-zero. However it ends, it says how long it took."""
+        (learning.LearnStopped), and ends non-zero. However it ends, it says how long it took. Its tracker
+        reports its steps and its end, as a run's does, so a chat that started it shows them."""
         args, option = self.args, "tinker learn"
         topic, definition = args.learn[0].strip(), (args.learn[1] if len(args.learn) > 1 else None)
         if definition is not None or TaughtCommands.alias(topic):
             TaughtCommands.teach(topic, definition)
             return
         model, embeddings, internet = self.learning_tools(option)
-        started = time.monotonic()
+        tracker = Commands.learn_tracker(topic, model)
+        started, ending = time.monotonic(), {"status": "stopped", "headline": f"Learning {topic} did not finish"}
         try:
-            entry = SlotLearner(model, internet, embeddings).learn(topic, deep=True)
+            ending = self.learned(topic, SlotLearner(model, internet, embeddings, tracker))
+        except SystemExit as stopped:
+            ending = Commands.learn_stopped(topic, stopped)
+            raise
         finally:
             model.unload()
             Models.remember(model)
-            print(f"\nTime taken: {human_duration(time.monotonic() - started)}")
+            took = time.monotonic() - started
+            print(f"\n⏱️  Time taken: {human_duration(took)}")
+            Commands.learn_ended(tracker, ending, took)
+
+    @staticmethod
+    def learn_tracker(topic, model):
+        """The learn's one report: what it prints and what the model is doing, as a run's tracker keeps them."""
+        tracker = Tracker(f"Learning {topic}")
+        Console.mirror(tracker.printed)
+        model.watch = tracker.live_plainly
+        return tracker
+
+    def learned(self, topic, learner):
+        """The topic learned and shown; its ending, for the tracker."""
+        entry = learner.learn(topic, deep=True)
         if entry is None:
             raise SystemExit(f"Nothing learned about {topic}; nothing saved.")
         self.print_learned(topic, entry)
+        return {"status": "done", "headline": f"Learned {entry['name']}",
+                "details": learner.recap or [("Findings", str(len(entry.get("findings", []))))],
+                "next": [("See it", "tinker memory")]}
+
+    @staticmethod
+    def learn_stopped(topic, stopped):
+        """The ending of a learn that stopped: why, and what to do next when it says."""
+        details = stopped.details if isinstance(stopped, LearnStopped) else [("Why", first_line(str(stopped), 200))]
+        return {"status": "blocked", "headline": f"Nothing learned about {topic}", "details": details}
+
+    @staticmethod
+    def learn_ended(tracker, ending, seconds):
+        """The end told to the tracker, which leaves the home unless the conversation that started it reads it last."""
+        tracker.end(ending, seconds)
+        if os.environ.get(conversation.OFF) != "off":
+            tracker.close()
 
     @staticmethod
     def learning_tools(option):
@@ -737,21 +772,21 @@ class Commands:
         embeddings = Embeddings.required(option)
         internet = Internet.required(option)
         model = Model(name, settings, Config.keep_alive(Config.get("keep_alive")), Log(Home.store(), "learn"),
-                      max_growth=float(Config.get("max_growth")))
+                      max_growth=float(Config.get("max_growth")), quiet=True)
         return model, embeddings, internet
 
     @staticmethod
     def print_learned(topic, entry):
-        print(f"\n{entry['name']}: {entry['summary']}")
+        print(f"\n📘 {entry['name']}: {entry['summary']}")
         for item in Library.items({Library.slug(entry.get("language") or topic): entry})[1:]:
-            print(f"  - [{item['phase']}] {item['text']}")
+            print(f"   • [{item['phase']}] {item['text']}")
         for contradiction in entry.get("contradictions", []):
-            print(f"  contradiction (facts {', '.join(map(str, contradiction['facts']))}): {contradiction['note']}")
+            print(f"   ⚖️  Facts {', '.join(map(str, contradiction['facts']))} disagree: {contradiction['note']}")
         for gap in entry.get("open", []):
-            print(f"  still open (Q{gap['question']}): {gap['missing'] or gap['search']}")
+            print(f"   ❓ Still open (Q{gap['question']}): {gap['missing'] or gap['search']}")
         for note in entry["notes"]:
-            print(f"  not learned: {note}")
-        print("A run uses this when its recall phase finds the request needs it; tinker memory lists what was learned.")
+            print(f"   ⚠️  Not learned: {note}")
+        print("💡 A run uses this whenever its request needs it. See everything Tinker learned with: tinker memory")
 
     @staticmethod
     def show_memory(graph=False):

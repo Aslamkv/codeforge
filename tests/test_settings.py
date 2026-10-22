@@ -345,6 +345,15 @@ def test_console_mirror_gives_every_printed_line(monkeypatch):
     assert seen == ["logged line", "to stderr"] and out.getvalue() == "logged line\n"
 
 
+@pytest.mark.spec("SET-17")
+def test_the_live_line_is_drawn_on_a_terminal_only(monkeypatch):
+    piped = io.StringIO()
+    monkeypatch.setattr(sys, "__stdout__", piped)
+    Console.progress("     ⏳ thinking… 12s")
+    Console.clear_progress()
+    assert piped.getvalue() == ""
+
+
 @pytest.mark.spec("SET-18")
 @pytest.mark.parametrize("tool,program", [("caffeinate", "caffeinate"), ("systemd-inhibit", "systemd-inhibit")])
 def test_keep_awake_uses_the_tool_there_is(monkeypatch, tool, program):

@@ -4,6 +4,7 @@ task built end to end (with a scripted model and real test runs). SES: the sessi
 import argparse
 import datetime
 import json
+import os
 import sys
 
 import pytest
@@ -15,7 +16,7 @@ from tinkerkit.model import Models, Ollama, OllamaError
 from tinkerkit.project import Runs, Tracker, project_store
 from tinkerkit.prompts import Part, PromptTooLarge, Prompts
 from tinkerkit.session import Phase
-from tinkerkit.settings import Config, FIX_PHASES, PHASES
+from tinkerkit.settings import Config, FIX_PHASES, Home, PHASES
 from conftest import MEASURED, MODEL, PY, TOOLCHAIN, criterion, file_block, plan_of, record_of
 
 
@@ -588,6 +589,7 @@ def test_learning_checks_everything_before_loading(measured_model, fake_ollama, 
         Commands(parse("learn", "Flask")).run()
     assert fake_ollama.calls == []
     assert "Time taken: 0s" in capsys.readouterr().out  # however it ends
+    assert Home.store().get("running", str(os.getpid())) is None  # its tracker left the home
     Config.save(model=None)
     with pytest.raises(SystemExit, match="No model in use"):
         Commands(parse("learn", "Flask")).run()

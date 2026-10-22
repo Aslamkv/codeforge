@@ -192,6 +192,8 @@ phase, learn from the web what the rest of the cycle needs.
   the log.
 - **SET-17** `Console.step` prints `[HH:MM:SS <duration> (<seconds>s)] message`. `Console.mirror(see)`
   gives every whole printed line to `see`. A run uses that to keep its output in its project log.
+  `Console.progress` redraws its live line on a terminal only; piped (a chat following the command), it
+  writes nothing.
 - **SET-18** `Home.keep_awake()` keeps the computer awake with `caffeinate` (macOS) or
   `systemd-inhibit` (Linux), tied to Tinker's process. It does nothing when neither tool is there,
   and it never raises.
@@ -452,6 +454,9 @@ phase, learn from the web what the rest of the cycle needs.
 - **MOD-23** Calibration's first chat finds the think setting the model takes: `"high"`, else `true`,
   and none for a model that does not think. A model that does not run ends calibration with
   `SystemExit`.
+- **MOD-24** A quiet `Model` (tinker learn's) logs each call's step and details instead of printing
+  them. It prints only a short line when it asks again, and its live line says in plain words what the
+  model is doing (reading, thinking or writing its answer) and for how long ("1m 41s (101s)").
 
 ## project
 
@@ -693,6 +698,11 @@ CONDENSE, KEEP. Domain research (`Researcher`), own-command learning and run les
   reads them from there before the web, so learning a version again fetches none of its documentation. A
   copy of the "latest" documentation is read again after `docs_latest_days`; a version's own is kept until
   `tinker clear docs`.
+- **LRN-18** Given a tracker, learning moves it through its steps (`Tracker.STEPS`: search, plan,
+  machine, documentation, digest, follow-up, condense, keep; a domain's frame and investigate), each
+  once in a row; without one (a run's recall phase), the run's own steps are left alone. The summary
+  is kept as data too (`recap`: answered, still open, documentation, pages, facts kept, web requests),
+  and a `LearnStopped` carries why it stopped and what to do next (`details`).
 
 ## graph
 
@@ -988,7 +998,10 @@ CONDENSE, KEEP. Domain research (`Researcher`), own-command learning and run les
 - **CLI-10** `tinker learn NAME "DEFINITION"` (or an alias in the person's shell) keeps the command,
   with no model. `tinker learn WHAT` needs a measured model, an embedding model and the web, all
   checked before anything is loaded. Learning nothing ends with an error. However it ends, it prints
-  the time it took (`Time taken: 8m 34s`).
+  the time it took (`Time taken: 8m 34s`). It keeps a `Tracker` as a run does: its printed lines, what
+  the model is doing (in plain words), its steps and its end (learned, with the summary, or why it
+  stopped), so a chat that started it shows them; the tracker leaves the home at the end unless that
+  conversation reads it last.
 - **CLI-11** `tinker memory` shows each language's toolchain, fixes and lessons, the lessons for any
   language, the topics learned, the person's commands, and how many items are retired. `tinker models` lists Ollama's models
   with what was measured, and marks the one in use.

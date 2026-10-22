@@ -43,6 +43,7 @@ from .settings import (
     Console,
     Home,
     first_line,
+    human_duration,
     now_text,
 )
 lazy from .workspace import ToolError
@@ -52,10 +53,12 @@ class Model:
     """The one model, with the settings its calibration measured: its context, its think setting,
     every prompt within its input budget, every reply up to the longest it writes (a fix: up to
     fix_max). Every exchange goes to its log (log.add(event)); watch(label, written, thinking,
-    seconds) is told how a reply goes while it is written."""
+    seconds) is told how a reply goes while it is written. quiet (tinker learn): the details of each
+    call go to the log only; the person sees a live line while it writes and a short one when it is
+    asked again."""
 
     def __init__(self, name, settings, keep_alive, log, exclusive=True,
-                 max_growth=DEFAULT_CONFIG["max_growth"]):
+                 max_growth=DEFAULT_CONFIG["max_growth"], quiet=False):
         self.name, self.settings = name, settings
         self.max_tokens, self.num_ctx = int(settings["max_prompt_tokens"]), int(settings["num_ctx"])
         self.think = settings.get("think")
@@ -64,7 +67,7 @@ class Model:
         self.max_reply, self.fix_max = int(settings["max_reply_tokens"]), int(settings["fix_max_tokens"])
         self.keep_alive = keep_alive
         self.options = {"num_batch": int(settings["num_batch"])} if settings.get("num_batch") else {}
-        self.log, self.exclusive, self.max_growth = log, exclusive, max_growth
+        self.log, self.exclusive, self.max_growth, self.quiet = log, exclusive, max_growth, quiet
         self.watch = None
         self.think_rejected = False
         self.overthought = False    # the last call thought to its cap without an answer
@@ -82,7 +85,7 @@ class Model:
         try:
             return self.ask_once(system, parts, label, **kw)
         except PromptTooLarge:
-            print(f"  {label}: the prompt is too large as it is; shortening every part")
+            self.note(f"{label}: the prompt is too large as it is; shortening every part")
         relaxed = lambda limit: [p.relaxed() for p in (parts(limit) if callable(parts) else parts)]
         return self.ask_once(system, relaxed, label, **kw)
 
@@ -131,7 +134,7 @@ class Model:
         """Unload every other model, so two never share memory (other apps reload theirs)."""
         for loaded, _ in Ollama.loaded_models() or []:
             if loaded and loaded != self.name:
-                print(f"  unloading {loaded} (exclusive mode: only one model in memory)")
+                self.note(f"unloading {loaded} (exclusive mode: only one model in memory)")
                 Ollama.unload(loaded)
 
     def think_now(self):
@@ -143,7 +146,7 @@ class Model:
         notes = []
         user = Part.assemble(parts(limit) if callable(parts) else parts, limit, notes)
         if notes:
-            print(f"  {label}: shortened {', '.join(notes)} to fit the prompt budget")
+            self.note(f"{label}: shortened {', '.join(notes)} to fit the prompt budget")
         return user
 
     @staticmethod
@@ -172,7 +175,7 @@ class Model:
     def send(self, system, user, tries, shown, done_when):
         return Ollama.chat(self.name, [{"role": "system", "content": system}, {"role": "user", "content": user}],
                            self.keep_alive, self.request_options(tries.budget), tries.think, shown, done_when,
-                           watch=self.watch)
+                           watch=self.watch, quiet=self.quiet)
 
     def request_options(self, budget):
         options = dict(self.options)
@@ -232,7 +235,8 @@ class Model:
     def crashed(self, exc, label, what, **facts):
         """Say what happened, log it, and give the crashed runner time to free its memory."""
         self.crashes += 1
-        print(f"  {label}: {self.name} {what} ({first_line(str(exc), 90)}); trying again in {CRASH_RECOVERY}s")
+        self.note(f"{label}: {self.name} {what} ({first_line(str(exc), 90)}); trying again in {CRASH_RECOVERY}s",
+                  f"🔁 {self.name} crashed; trying again in {CRASH_RECOVERY}s")
         self.log.add({"label": label, "model": self.name, "error": str(exc), **facts,
                       "budget_now": self.max_tokens, "max_reply_now": self.max_reply})
         Ollama.unload(self.name)
@@ -244,32 +248,34 @@ class Model:
         which the caller treats as an attempt with no change; the run goes on)."""
         self.log.add({"label": shown, "model": self.name, "error": str(exc), "reply": exc.partial})
         if tries <= REPLY_ERROR_RETRIES:
-            Console.step(f"{shown}  ({first_line(str(exc), 120)}; asking again)", started)
+            self.step(f"{shown}  ({first_line(str(exc), 120)}; asking again)", started)
             return False
-        Console.step(f"{shown}  ({first_line(str(exc), 120)} again; using the {len(exc.partial)} chars that came "
-                     f"before it)", started)
+        self.step(f"{shown}  ({first_line(str(exc), 120)} again; using the {len(exc.partial)} chars that came "
+                  f"before it)", started)
         return True
 
     def recover(self, exc, label, tries):
         """What to change before trying a failed request again; re-raises when nothing helps."""
         think = tries.think
         if self.building and think == self.build_think != self.think and "think" in str(exc).lower():
-            print(f"  {label}: {self.name} rejected think={think!r} for building; using {self.think!r} as for planning")
+            self.note(f"{label}: {self.name} rejected think={think!r} for building; using {self.think!r} as for planning")
             self.build_think = None
             tries.think = self.think
         elif exc.oom and tries.shrink < OOM_RETRIES:
-            print(f"  {label}: out of GPU memory; retrying this request with a prompt budget of "
-                  f"{int(self.max_tokens * OOM_SHRINK ** (tries.shrink + 1))} tokens")
+            self.note(f"{label}: out of GPU memory; retrying this request with a prompt budget of "
+                      f"{int(self.max_tokens * OOM_SHRINK ** (tries.shrink + 1))} tokens",
+                      "🔁 Out of GPU memory; trying again with a shorter prompt")
             tries.shrink += 1
         elif exc.stalled and tries.stalls < STALL_RETRIES:
-            print(f"  {label}: {exc}; reloading the model and retrying")
+            self.note(f"{label}: {exc}; reloading the model and retrying",
+                      f"🔁 {self.name} stopped responding; reloading it and trying again")
             Ollama.unload(self.name)
             tries.stalls += 1
         elif think not in (None, True, False) and "think" in str(exc).lower():
-            print(f"  {label}: {self.name} rejected think={think!r}; using think=true")
+            self.note(f"{label}: {self.name} rejected think={think!r}; using think=true")
             self.think = tries.think = True
         elif think is not None and "think" in str(exc).lower():
-            print(f"  {label}: {self.name} rejected the think setting; retrying without it")
+            self.note(f"{label}: {self.name} rejected the think setting; retrying without it")
             self.think, self.think_rejected, tries.think = None, True, None
         else:
             raise exc
@@ -305,7 +311,8 @@ class Model:
         """After a reply cut off while still thinking: True to ask again, with more room or without
         thinking (then given the thought so far to conclude: what was thought is not lost), or False
         to give up (an empty reply; self.overthought and self.last_thought say so)."""
-        action = self.after_cut(shown, data, started, tries.budget, cap, unthinking_retry)
+        action, said = self.after_cut(data, tries.budget, cap, unthinking_retry)
+        self.step(f"{shown}  ({said})", started)
         thought = data["message"].get("thinking", "")
         if action == "give up":
             self.overthought, self.last_thought = True, thought
@@ -317,32 +324,44 @@ class Model:
         return True
 
     @staticmethod
-    def after_cut(shown, data, started, budget, cap, unthinking_retry):
-        """A reply cut off while still thinking: "more" (twice the budget), "unthinking" (ask again
-        without thinking) or "give up" (it counts as an empty reply)."""
+    def after_cut(data, budget, cap, unthinking_retry):
+        """A reply cut off while still thinking: ("more" (twice the budget), "unthinking" (ask again
+        without thinking) or "give up" (it counts as an empty reply), what to say about it)."""
         tokens = data.get("eval_count", 0)
         if budget < cap:
-            Console.step(f"{shown}  (cut at {tokens} tokens while thinking; asking again with up to "
-                         f"{min(budget * 2, cap) // 1024}K tokens)", started)
-            return "more"
+            return "more", (f"cut at {tokens} tokens while thinking; asking again with up to "
+                            f"{min(budget * 2, cap) // 1024}K tokens")
         if unthinking_retry:
-            Console.step(f"{shown}  (cut at the most a reply may think; asking again without thinking)", started)
-            return "unthinking"
-        Console.step(f"{shown}  (thought to the {tokens}-token cap without an answer; counted as an attempt "
-                     f"with no change)", started)
-        return "give up"
+            return "unthinking", "cut at the most a reply may think; asking again without thinking"
+        return "give up", f"thought to the {tokens}-token cap without an answer; counted as an attempt with no change"
 
     def report(self, shown, data, started, cut):
         tokens_in, tokens_out = data.get("prompt_eval_count", 0), data.get("eval_count", 0)
         if tokens_in > self.max_tokens:
-            print(f"  note: prompt was {tokens_in} tokens, above the {self.max_tokens} budget estimate")
+            self.note(f"note: prompt was {tokens_in} tokens, above the {self.max_tokens} budget estimate")
         if data.get("early_stop"):
-            Console.step(f"{shown}  (stopped as soon as the reply was complete, ~{tokens_out} tok)", started)
+            self.step(f"{shown}  (stopped as soon as the reply was complete, ~{tokens_out} tok)", started)
         else:
-            Console.step(f"{shown}  (prompt {tokens_in} tok, gen {data.get('eval_duration', 0) / 1e9:.1f}s"
-                         f"/{tokens_out} tok, load {data.get('load_duration', 0) / 1e9:.1f}s)", started)
+            self.step(f"{shown}  (prompt {tokens_in} tok, gen {data.get('eval_duration', 0) / 1e9:.1f}s"
+                      f"/{tokens_out} tok, load {data.get('load_duration', 0) / 1e9:.1f}s)", started)
         if cut:
-            print(f"  reply cut at {tokens_out} tokens")
+            self.note(f"reply cut at {tokens_out} tokens")
+
+    def step(self, message, started):
+        """A call's step: printed with its time (Console.step), or, when quiet, logged."""
+        if self.quiet:
+            self.log.add({"note": message, "model": self.name, "seconds": round(time.perf_counter() - started, 1)})
+        else:
+            Console.step(message, started)
+
+    def note(self, detail, friendly=""):
+        """A detail of a call: printed, or, when quiet, logged, with only its friendly words (if any) printed."""
+        if not self.quiet:
+            print(f"  {detail}")
+            return
+        self.log.add({"note": detail, "model": self.name})
+        if friendly:
+            print(f"     {friendly}")
 
     def check_memory(self):
         """With the model kept loaded, unload it once it grows past max_growth x its first size."""
@@ -354,7 +373,7 @@ class Model:
         if self.base_gb is None:
             self.base_gb = size
         elif size > self.base_gb * self.max_growth:
-            print(f"  model grew {self.base_gb:.1f} -> {size:.1f} GB; unloading")
+            self.note(f"model grew {self.base_gb:.1f} -> {size:.1f} GB; unloading")
             self.unload()
 
     def loaded_size(self):
@@ -375,7 +394,8 @@ class Model:
             try:
                 return read(reply)
             except (ValueError, ToolError, AttributeError, TypeError, KeyError) as exc:
-                print(f"  {label.lower()} not usable: {exc}")
+                self.note(f"{label.lower()} not usable: {exc}",
+                          "🔁 That answer could not be used; asking again" if attempt < attempts else "")
                 parts = self.with_part(parts, Part("Note", f"Your previous reply was not usable ({exc}). Reply "
                                                            f"with ONLY the JSON.", True))
         return None
@@ -714,13 +734,13 @@ class Ollama:
 
     @staticmethod
     def chat(name, messages, keep_alive, options, think=None, label=None, done_when=None,
-             timeout=REQUEST_TIMEOUT, watch=None):
-        """Stream one chat request (live progress when labelled; watch(label, written, thinking,
-        seconds) is told as it goes). done_when(content) says when the reply is complete: the stream is
+             timeout=REQUEST_TIMEOUT, watch=None, quiet=False):
+        """Stream one chat request (live progress when labelled, in plain words when quiet; watch(label,
+        written, thinking, seconds) is told as it goes). done_when(content) says when the reply is complete: the stream is
         closed there, which stops Ollama generating. Returns the final stats chunk with message.content
         set to the reply."""
         payload = Ollama.chat_payload(name, messages, keep_alive, options, think)
-        stream = Stream(label, done_when, watch)
+        stream = Stream(label, done_when, watch, quiet)
         try:
             with urllib.request.urlopen(Ollama.request("/api/chat", payload), timeout=timeout) as response:
                 stream.read(response)
@@ -844,8 +864,8 @@ class Stream:
     stops early once done_when(content) says the reply is complete, or once the model loops (it writes
     one line again and again): that reply is cut, as one that ran out of room is."""
 
-    def __init__(self, label, done_when, watch=None):
-        self.label, self.done_when, self.watch = label, done_when, watch
+    def __init__(self, label, done_when, watch=None, quiet=False):
+        self.label, self.done_when, self.watch, self.quiet = label, done_when, watch, quiet
         self.content, self.written, self.thinking, self.final = "", 0, 0, {}
         self.thought = ""  # the end of what the model thought (kept for a reply cut while thinking)
         self.started = self.last_print = time.perf_counter()
@@ -896,10 +916,16 @@ class Stream:
         now = time.perf_counter()
         if self.label and now - self.last_print >= PROGRESS_EVERY:
             self.last_print, self.progressed = now, True
-            status = (f"{self.written} tok written, {self.thinking} tok thinking" if self.written or self.thinking
-                      else "loading model / reading prompt")
-            Console.progress(f"  ... {self.label}: {status}, {now - self.started:.0f}s")
+            Console.progress(self.plain_status(now) if self.quiet else self.status(now))
             self.tell_watcher(now - self.started)
+
+    def status(self, now):
+        doing = (f"{self.written} tok written, {self.thinking} tok thinking" if self.written or self.thinking
+                 else "loading model / reading prompt")
+        return f"  ... {self.label}: {doing}, {now - self.started:.0f}s"
+
+    def plain_status(self, now):
+        return f"     ⏳ {plainly(self.written, self.thinking, now - self.started)}"
 
     def tell_watcher(self, seconds):
         if not self.watch:
@@ -921,7 +947,8 @@ class Stream:
         return len(lines) == LOOP_LINES and bool(lines[0].strip()) and len(set(lines)) == 1
 
     def stop_looping(self):
-        print(f"  {self.label}: the model is writing one line again and again; stopped (as a cut reply)")
+        if not self.quiet:  # quiet: the cut shows in the logged exchange
+            print(f"  {self.label}: the model is writing one line again and again; stopped (as a cut reply)")
         self.final = {"done_reason": "length", "eval_count": self.written + self.thinking, "looped": True}
         return True
 
@@ -936,6 +963,13 @@ class Stream:
     def close(self):
         if self.progressed:
             Console.clear_progress()
+
+
+def plainly(written, thinking, seconds):
+    """What the model is doing and for how long, as a person reads it: "thinking… 1m 41s (101s)"."""
+    seconds = round(seconds)
+    doing = "writing its answer" if written else "thinking" if thinking else "reading"
+    return f"{doing}… {human_duration(seconds)}" + (f" ({seconds}s)" if seconds >= 60 else "")
 
 
 class OllamaError(Exception):
