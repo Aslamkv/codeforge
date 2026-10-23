@@ -19,6 +19,7 @@ lazy import urllib.parse
 lazy from pathlib import Path
 
 from .conversation import OFF, Channel, ChannelError, Desk, Markup, Message, first_words
+lazy from .ledger import ASKED_WAIT, Ledger
 lazy from .messages import say
 lazy from .settings import Home
 
@@ -232,6 +233,7 @@ class TelegramChannel(Channel):
         self.open_connections = queue.Queue()  # connections kept open between calls
         self.pinned, self.newest, self.heard = {}, {}, {}  # per chat: the pinned id, the newest id, the person's ids
         self.alive = {}  # per chat: the ids of the messages seen that are still in it (taken out: no more)
+        self.asked = {}  # per chat: (the person's last words, when) until a new thing answers them
 
     def who(self):
         return "@" + self.call("getMe")["username"]
@@ -248,6 +250,7 @@ class TelegramChannel(Channel):
             message = update.get("message") or {}
             if message.get("text"):
                 messages.append(self.message_of(message))
+                self.asked[str(message["chat"]["id"])] = (message["text"], time.monotonic())
             if message.get("message_id"):
                 self.seen(str(message["chat"]["id"]), message["message_id"], heard=True)
         return messages
@@ -274,16 +277,32 @@ class TelegramChannel(Channel):
         return sent
 
     def edit(self, chat, sent, text):
+        """sent edited to text; one that cannot be is taken out, and text sent anew in its place."""
         if sent is None:
             return self.send(chat, text)
         try:
             self.post("editMessageText", chat, text, message_id=sent)
         except ChannelError as exc:  # unchanged text is refused, harmlessly
             if "not modified" not in str(exc):
+                self.delete(chat, sent)
                 return self.send(chat, text)
         except OSError:
-            pass
+            return sent
+        Ledger.touched(self.name, str(chat), sent)
         return sent
+
+    def show(self, chat, shown, text, done=False, bottom=None, pin=False):
+        """The thing shown, and kept in the ledger as it is now (Tinker's status is not a thing)."""
+        thing = None if pin else Ledger.thing_of(self.name, str(chat), shown)
+        now = super().show(chat, shown, text, done, bottom, pin)
+        if not pin:
+            Ledger.shown(self.name, str(chat), thing, now, text, "" if thing else self.answered(chat))
+        return now
+
+    def answered(self, chat):
+        """The person's words a new thing answers: their last message, sent within ASKED_WAIT ("" for none)."""
+        words, when = self.asked.pop(str(chat), ("", 0.0))
+        return words if time.monotonic() - when <= ASKED_WAIT else ""
 
     def post(self, method, chat, text, **fields):
         """text sent (or edited) as Telegram shows Markup (HTML), commands in it said as the conversation takes
@@ -314,27 +333,58 @@ class TelegramChannel(Channel):
             pass
 
     def pin(self, chat, sent):
-        """sent pinned as the message updated last (the one before unpinned). Telegram adds a note to the
-        chat about each pin, as its next message: that note is taken out once it is surely not the
-        person's (they did not write it) nor Tinker's (a note cannot be edited)."""
+        """sent (Tinker's status) pinned, the one pin of the chat. The status kept from before is pinned already:
+        it is left as it is. A new one is pinned alone (every pin before taken out, so none piles up). Telegram
+        adds a note to the chat about each pin, as its next message: that note is taken out once it is surely not
+        the person's (they did not write it) nor Tinker's (a note cannot be edited)."""
         chat = str(chat)
         if self.pinned.get(chat) == sent:
             return
-        if self.pinned.get(chat):
-            self.unpin(chat, self.pinned[chat])
+        if Ledger.is_lasting(self.name, chat, sent) and self.pinned_now(chat) == sent:
+            self.pinned[chat] = sent
+            return
         after = self.newest.get(chat, 0)
         try:
+            self.call("unpinAllChatMessages", chat_id=chat)
             self.call("pinChatMessage", chat_id=chat, message_id=sent, disable_notification=True)
         except OSError, ChannelError:
             return
         self.pinned[chat] = sent
         threading.Thread(target=self.drop_pin_note, args=(chat, after), daemon=True).start()
 
-    def unpin(self, chat, sent):
-        try:  # one taken out (sent anew at the bottom) is unpinned already
-            self.call("unpinChatMessage", chat_id=chat, message_id=sent)
+    def pinned_now(self, chat):
+        """The id of the chat's pinned message (None for none, or when Telegram does not say)."""
+        try:
+            return (self.call("getChat", chat_id=chat).get("pinned_message") or {}).get("message_id")
         except OSError, ChannelError:
-            pass
+            return None
+
+    def lasting(self, chat, sent):
+        for message in sent:
+            if message is not None:
+                Ledger.lasting(self.name, str(chat), message)
+
+    def glance(self, chat, asked, sent, keep=None):
+        """sent only shows something, asked for by the person's message asked: that message taken out now, the
+        glance shown before too (one at a time), and sent in keep seconds (GLANCE_KEEP when not given)."""
+        self.asked.pop(str(chat), None)  # what it answered asks no thing
+        if asked:
+            self.delete(chat, asked)
+        for message in Ledger.glances(self.name, chat):
+            self.delete(chat, message)
+        Ledger.glance(self.name, str(chat), [message for message in sent if message is not None], keep)
+
+    def collect(self):
+        """The messages whose time is up, taken out of the chats."""
+        for chat, message in Ledger.due(self.name):
+            self.delete(chat, message)
+
+    def clear(self):
+        """Every message in the chats taken out but Tinker's status; how many."""
+        passing = Ledger.passing(self.name)
+        for chat, message in passing:
+            self.delete(chat, message)
+        return len(passing)
 
     def drop_pin_note(self, chat, after):
         time.sleep(PIN_NOTE_WAIT)  # so that a message the person sent meanwhile is heard first
@@ -358,25 +408,32 @@ class TelegramChannel(Channel):
         return None
 
     def delete(self, chat, sent):
-        """A message taken out: Tinker's own, or the person's (a bot may, in a private chat)."""
-        try:
-            self.call("deleteMessage", chat_id=chat, message_id=sent)
-        except OSError, ChannelError:
-            pass
+        """A message taken out: Tinker's own, or the person's (a bot may, in a private chat). Without a network it
+        stays in the ledger, to be taken out later; a refusal means it is gone, or too old for a bot to take out."""
         alive = self.alive.get(str(chat), [])
         if sent in alive:
             alive.remove(sent)
+        try:
+            self.call("deleteMessage", chat_id=chat, message_id=sent)
+        except OSError:
+            return
+        except ChannelError:
+            pass
+        Ledger.gone(self.name, str(chat), sent)
 
     def latest(self, chat, sent):
         """Whether no message still in the chat came after sent (of those seen here)."""
         return sent is not None and sent >= max(self.alive.get(str(chat), [0]), default=0)
 
     def seen(self, chat, message, heard=False):
-        """A message of the chat's: the newest id so far, and whether the person wrote it."""
+        """A message of the chat's: the newest id so far, and whether the person wrote it; one of a chat served
+        is kept in the ledger."""
         self.newest[chat] = max(self.newest.get(chat, 0), message)
         self.alive[chat] = (self.alive.get(chat, []) + [message])[-200:]
         if heard:
             self.heard[chat] = (self.heard.get(chat, []) + [message])[-50:]
+        if chat in map(str, self.allowed):
+            Ledger.kept(self.name, chat, message)
 
     def call(self, method, wait=30, file=None, **fields):
         """The Bot API's result (waiting up to wait seconds); a refused call is a ChannelError, a dropped

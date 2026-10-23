@@ -58,6 +58,7 @@ responsibility, and each imports only the modules listed above it:
 | `settings` | every tunable number and fixed name; the Tinker home (`Home`), its database (`Store`) and `Config`; small helpers |
 | `messages` | everything Tinker tells the person, in one voice (`say`, `Messages`, `Message`): each message's kind gives its icon, sections nest it, followers (a tracker) get it as data, and details go to the log only |
 | `jobs` | every long command as a job, listed, stopped and resumed (`Jobs`), and its journal of requests and answers (`Journal`, `journaled`) |
+| `ledger` | what is said in the chats, so a chat is only a view of it: each message with when it goes, each thing shown, numbered, for `history` (`Ledger`) |
 | `commands` | the one table of Tinker's commands, and project references (`@ID`, `@folder`) |
 | `prompts` | prompt parts (`Part`), replies (`Reply`), every system prompt (`Prompts`) |
 | `workspace` | the project's files and the commands run in it (`Workspace`, `Toolchain`, `TestRef`, `Output`, `FileView`, `TaughtCommands`) |
@@ -111,6 +112,8 @@ database holds:
 | `listening`, `running` | the conversation's live state: its status messages, and each run's tracker |
 | `exercise` | per language: its exercise's practice projects, what each measured, and the focus of the next |
 | `activity` | the person's requests being answered (`answering`), and the exercise that runs now |
+| `chat views` | each message in a chat (Tinker's and the person's): when it goes, and the thing it shows |
+| `chat history`, `chat history numbers` | each thing shown in a chat, as it was shown last, with what the person asked for it; the last number given |
 | `jobs`, `job numbers` | every job: its number, command, title, arguments, state, process and dates; the last number given |
 | log `learn` | every model call that `tinker learn` made |
 | log `teach` | every model call that `tinker ask` and `tinker teach` made |
@@ -185,7 +188,8 @@ phase, learn from the web what the rest of the cycle needs.
 - **SET-10** `Home.reset(yes)` deletes the home folder. It refuses a folder not named `.tinker`. It
   does nothing when the folder is missing. Without `yes`, and not in a terminal, it deletes nothing
   and exits.
-- **SET-11** `Home.parts()` names exactly: languages, memory, learned, docs, models, runs, commands, exercise.
+- **SET-11** `Home.parts()` names exactly: languages, memory, learned, docs, models, runs, commands, history,
+  exercise.
   `Home.clear(names, yes)` deletes only the named parts from the home database. It rejects an unknown
   part by listing the parts. When those parts are empty, it says there is nothing to clear. Without
   `yes`, and not in a terminal, it deletes nothing.
@@ -228,6 +232,16 @@ Everything Tinker tells the person goes through one voice, `say` (a `Messages`).
   and is never printed. With no log, it is dropped.
 - **MSG-6** `human_duration`: 42.5 gives `42s`, 1762.08 gives `29m 22s`, 4000 gives `1h 6m 40s`.
 - **MSG-7** No module of Tinker but `messages` calls `print`.
+
+## ledger
+
+- **LED-1** `Ledger` keeps each message by channel, chat and id: `kept` goes in `VIEW_KEEP`, `touched` moves
+  that on (but a glance's, or the status'), `glance` in `GLANCE_KEEP` (or the seconds given), `lasting`
+  never (`is_lasting` tells it). `due` gives the messages whose time is up, `passing` all but the status,
+  `glances` a chat's glances; `gone` forgets one.
+- **LED-2** `shown(channel, chat, thing, ids, text, asked)` keeps a thing as it was shown last; with no thing,
+  a new one is numbered, keeping what was asked. `thing_of(ids)` gives the thing messages show. `page(N)`
+  lists things newest first, `PAGE` to a page, with how many pages there are.
 
 ## jobs
 
@@ -1068,8 +1082,9 @@ person always comes first.
 - **CNV-15** `Desk.answer` handles a command. `task WHAT` starts a task, and a bare `task` gets its
   usage. A run that starts a cycle is given `--confirm`, so its plan waits for the person. `status` alone gives what runs. `stop`, `stop #N` and `resume [#N]` act on jobs (**JOB-7**), and
   `research TOPIC` runs as a task. A task started while another runs pauses it (**JOB-8**). A command that deletes shows what it
-  deletes and waits for `confirm`. `exit` asks first. A `channel` action that needs a terminal says
-  so. Any other command runs as `tinker`.
+  deletes and waits for `confirm`, but `clear chat`, which deletes no record (the history keeps it), is
+  done at once. `exit` asks first. A `channel` action that needs a terminal says so. Any other command
+  runs as `tinker`.
 - **CNV-16** `Desk.settle` runs what waits for a `confirm` (a deletion, a command line). Any other
   message cancels it and says so. `decide` builds or changes the plan that waits. For a new project,
   its first `confirm` asks for the folder's name.
@@ -1089,11 +1104,12 @@ person always comes first.
   command, it says so.
 - **CNV-21** `Desk.run` claims each chat channel. When another Tinker holds one, it stops if there is
   no terminal, and otherwise leaves that chat out. It shows its status, pinned in each chat, when it
-  starts listening, and `not listening` when it ends.
+  starts listening, and `not listening` when it ends: the one status message kept from before, edited in
+  place, and never taken out. While it listens it collects the messages whose time is up, every
+  `COLLECT_EVERY` seconds.
 - **CNV-22** `one_shot` says one of the conversation's commands once, in the terminal (`tinker chat`,
-  `command`, `research`, `run`). Each needs words after it, except `run`; `chat` and `command` pause the job that
-  runs (**JOB-10**). `command` runs nothing
-  without a yes at the terminal.
+  `command`, `research`, `run`, `history`). Each needs words after it, except `run` and `history`; `chat`
+  and `command` pause the job that runs (**JOB-10**). `command` runs nothing without a yes at the terminal.
 - **CNV-23** `research TOPIC` says when the web or the model is not usable. Otherwise it answers from the
   pages it read and lists them as numbered sources. It is a job: its tracker shows its steps (`searches`,
   `read`, `write`) and ends with its answer (the ending's `text`, which a chat's message shows).
@@ -1106,6 +1122,12 @@ person always comes first.
 - **CNV-26** `memory --graph` in a conversation makes the page (`tinker memory --graph`) and sends it
   with `send_file`, what tinker printed as its caption. The terminal opens the file in the browser and
   says where it is; a channel that cannot send files sends the caption with the file's path.
+- **CNV-27** A glance (a quick command, `help`, `history`, `exercise status`) is answered with `glance`: the
+  person's message goes at once, the answer in `GLANCE_KEEP`. `history [PAGE | #N]` lists the things
+  shown, newest first, with what was asked for each, or shows thing N again. `clear chat` takes every
+  message out of the chats but the status, said in a note that goes in `NOTE_KEEP`. `clear history`, once
+  confirmed, forgets the history and clears the chat the same way, and leaves nothing in the history, not
+  even what it said.
 
 ## channels
 
@@ -1124,8 +1146,8 @@ person always comes first.
 - **CHN-4** `receive` gives the text messages and moves the offset past every update. A network
   failure gives no messages.
 - **CHN-5** `send` and `edit` post Telegram HTML, and fall back to plain text when the HTML is
-  refused. An edit of unchanged text is harmless. A refused edit sends a new message. `latest`
-  tracks the newest message still in the chat. `pin` unpins the message pinned before.
+  refused. An edit of unchanged text is harmless. A refused edit takes the message out and sends a new one
+  in its place. `latest` tracks the newest message still in the chat.
 - **CHN-6** `ask` gives the default when there is no terminal, or ends with `SystemExit` when there
   is none. `ChannelCommand.check` ends with `SystemExit` on a refusal, and tries a dropped
   network again up to `CHECK_TRIES` times.
@@ -1134,6 +1156,14 @@ person always comes first.
 - **CHN-8** `send_file(chat, path, caption)` posts `sendDocument` as `multipart/form-data`: the chat, the
   file under its name, and the caption as Telegram HTML (at most 1024 chars). A failure sends the
   caption alone.
+- **CHN-9** Tinker's status is the chat's one pin. `pin` leaves the status kept from before as it is when it
+  is pinned already; a new one is pinned alone, every pin before taken out (`unpinAllChatMessages`).
+- **CHN-10** Every message of a chat served (Tinker's, and the person's) is kept in the ledger, going in a
+  day; an edit moves that on. `show` keeps the thing it shows, numbered, with the person's words it
+  answers (their message within `ASKED_WAIT`). `glance` takes the person's message out at once, and the
+  glance before it, and the glance goes in `GLANCE_KEEP`. `collect` takes out the messages whose time is
+  up, and `clear` every message but the status. A message taken out without a network stays in the
+  ledger; one Telegram refuses to take out is forgotten.
 
 ## command line (tinker.py)
 

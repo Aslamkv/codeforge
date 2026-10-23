@@ -173,12 +173,14 @@ COMMANDS = [
             "Show the settings a build uses, or set one: tinker config KEY VALUE (e.g. tinker config test_timeout 90).",
             chat="quick", words="any", arguments=[Argument("words", "*", "KEY VALUE", "the setting and its value")]),
     Command("clear", "Set up", "clear PART... [--yes]", "delete parts of what Tinker keeps: languages, memory, "
-            "learned, models, runs, commands",
+            "learned, models, runs, commands, history (clear chat: empty the chats)",
             "Delete parts of what Tinker keeps, e.g. tinker clear languages memory: languages (toolchains, fixes, "
             "lessons per language), memory (lessons for any language), learned (what tinker learn learned), docs (the "
-            "documentation it fetched, per version), models (measurements), runs (the list of projects), commands (your commands).", chat="quick", words="any",
+            "documentation it fetched, per version), models (measurements), runs (the list of projects), commands (your commands), "
+            "history (what the chats showed; in a chat its messages go too). In a conversation, clear chat takes every "
+            "message out of the chats but Tinker's status, at once: history keeps what they showed.", chat="quick", words="any",
             deletes=True, arguments=[Argument("parts", "+", "PART", "languages, memory, learned, docs, models, "
-                                                                    "runs or commands")], options=("yes",)),
+                                                                    "runs, commands or history")], options=("yes",)),
     Command("reset", "Set up", "reset [--yes]", "delete everything Tinker keeps (projects stay)",
             "Delete everything Tinker keeps (settings, measured models, what it learned, the list of projects); "
             "projects are not touched.", chat="quick", deletes=True, options=("yes",)),
@@ -194,6 +196,13 @@ COMMANDS = [
             words="any", example="research the newest Python release"),
     Command("run", "Talk", "run [@PROJECT] ARGS", "run a built project (the last one built, by default) with these "
             "arguments; <<< TEXT gives it input", chat="own", words="any", example="run 5 + 3"),
+    Command("history", "Talk", "history [PAGE | #N]", "what the chats showed, newest first; #N shows one again",
+            "List what Tinker showed in the chats (tasks, researches, replies ...), newest first, 10 to a page "
+            "(history 2: the second page), with what you asked for each; history #N shows one again. A chat keeps its "
+            "messages a day (a glance, like jobs or help, two minutes): the history keeps them all, until tinker clear "
+            "history.", chat="own", words="one", arguments=[Argument("words", "*", "[PAGE | #N]", "the page, from 1, or "
+                                                                                           "#N: the one to show again")],
+            example="history #3"),
     Command("exit", "Talk", "exit", "end the conversation (in a chat, once confirmed)", chat="own", cli=False),
     Command("channel", "Channels", "channel ACTION", "the chat channels", chat="quick", words="any",
             rows=[("channel list", "the chat channels (Telegram), and which are enabled"),

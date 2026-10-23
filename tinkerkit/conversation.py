@@ -14,7 +14,9 @@ the terminal, and the channels plugin adds the chat apps (TelegramChannel). Ever
 Markup (bold, italic, code ...), each mark for what it means, and each kind shows it its own way. Each
 thing (a task, a research, a command, a chat's reply) has one message, edited as it goes on
 (show), with when it was last updated; a new one is sent only for a new thing, or for what no longer fits.
-The one updated last is pinned where a chat pins, so its top says what moved last."""
+Tinker's status is the one message pinned, edited in place for ever. A chat is only a view of the ledger
+(ledger.py): its messages go after a while (a glance, like jobs or help, and the question it answered, at
+once), and history shows any thing again."""
 import contextlib
 lazy import fcntl
 lazy import html
@@ -33,6 +35,7 @@ lazy from pathlib import Path
 
 from .commands import COMMANDS, TERMINAL_ONLY, named, refs
 from .jobs import STOP, Jobs, job_number, paused_for_you, today
+lazy from .ledger import NOTE_KEEP, Ledger
 lazy from .messages import human_duration, say
 lazy from .model import Models, Ollama, OllamaError
 from .project import Runs, Tracker, saved
@@ -47,6 +50,7 @@ EDIT_EVERY = 5                                 # seconds between edits of a prog
 CLOCK_EVERY = 15                               # ... between edits that only move its clock on
 STOP_WAIT = 120                                # seconds a build is given to stop (and save) before it is killed
 STATUS_EVERY = 10                              # seconds between looks at what Tinker does, for its pinned status
+COLLECT_EVERY = 2                              # seconds between takings out of the messages whose time is up
 
 # --- a chat with the model ---------------------------------------------------------------------------------
 CHAT_KEPT = 12                                 # messages of one chat kept as the context of its next reply
@@ -68,6 +72,7 @@ RESEARCH_PAGE_CHARS = 3500                     # of each page, the parts most ab
 # --- tinker's commands, as the conversation takes them: from the one table (commands.py) -------------------
 LONG = named("long")                           # a task: its progress shown (one that runs is paused for it)
 QUICK = named("quick")                         # what it prints is shown
+GLANCES = QUICK + ("help", "history")          # what only shows something: its message goes soon, and its question at once
 DELETES = tuple(c.name for c in COMMANDS if c.deletes)  # what it deletes is shown first; done once confirmed
 PLANNED = tuple(c.name for c in COMMANDS if "--confirm" in (o.flag for o in c.options))  # its plan waits here
 OWN = named("own")                             # the conversation's own
@@ -121,11 +126,14 @@ def session(root):
 
 
 def one_shot(command, text):
-    """tinker chat|command|research|run ...: one of the conversation's own commands, said once in this terminal
+    """tinker chat|command|research|run|history ...: one of the conversation's own commands, said once in this terminal
     (command asks there before it runs anything). A chat or a command line pauses the job that runs. None, or why
     it could not."""
     console, talk = ConsoleChannel(bare=False), Talk(commands_brief())
     message, chat = Message(ConsoleChannel.CHAT, text, "you"), ConsoleChannel.CHAT
+    if command == "history":
+        console.send(chat, history_text(text.split()[:1]))
+        return None
     if not text and command != "run":
         return f"tinker {command} needs words after it, e.g. tinker {command} {'hello' if command == 'chat' else '...'}"
     if command == "chat":
@@ -225,16 +233,14 @@ class Desk:
 
     def say_status(self, text=None, anew=False):
         """Tinker's status, one message in each chat, pinned (the console: said at its start and end): text,
-        else what it does now, said only when it changed. anew (it starts listening): the one from before is
-        taken out, and this one sent at the bottom; their ids are kept for the next start (Tinker's
-        "listening")."""
+        else what it does now, said only when it changed (anew: it starts listening, said whatever it is)."""
         text = text or self.status()
         if text == self.said_status and not anew:
             return
         self.said_status = text
         for channel in self.channels:
             if channel not in self.consoles:
-                self.pin_status(channel, text, anew)
+                self.pin_status(channel, text)
             elif anew or text.startswith("💤"):
                 channel.show(ConsoleChannel.CHAT, None, text, done=True)
 
@@ -257,14 +263,14 @@ class Desk:
         return "🟢 **Tinker** · idle: send a task"
 
     @staticmethod
-    def pin_status(channel, text, anew):
-        """The status pinned in each of the channel's chats: its message edited (anew: sent anew)."""
+    def pin_status(channel, text):
+        """The status pinned in each of the channel's chats: the one message it has, kept from start to start
+        (Tinker's "listening"), edited in place; it never goes."""
         mine = Home.store().get("listening", channel.name) or {}
         for chat in channel.allowed:
             before = mine.get(chat)
-            if anew and before:
-                channel.delete(chat, before)
-            shown = channel.show(chat, None if anew or not before else [before], text, bottom=False, pin=True)
+            shown = channel.show(chat, [before] if before else None, text, bottom=False, pin=True)
+            channel.lasting(chat, shown)
             mine[chat] = shown[0] if shown else None
         Home.store().put("listening", channel.name, mine)
 
@@ -273,9 +279,13 @@ class Desk:
         threads = [threading.Thread(target=self.listen, args=(c,), daemon=True) for c in self.channels]
         for thread in threads:
             thread.start()
-        looked = 0.0
+        looked = collected = 0.0
         while any(t.is_alive() for t in threads) and not any(c.closed for c in self.channels):
             time.sleep(0.5)
+            if time.monotonic() - collected >= COLLECT_EVERY:
+                collected = time.monotonic()
+                for channel in self.channels:
+                    channel.collect()
             if time.monotonic() - looked >= STATUS_EVERY:
                 looked = time.monotonic()
                 self.say_status()  # what runs elsewhere (an exercise, a terminal's run) moves on by itself
@@ -314,7 +324,9 @@ class Desk:
             return
         reply = self.answer(message, channel)
         if reply:
-            channel.send(message.chat, reply)
+            sent = channel.send(message.chat, reply)
+            if command in GLANCES:
+                channel.glance(message.chat, message.id, [sent])
 
     def asked_with_words(self, channel, message, command):
         """command WHAT: answered in a thread (alone, how to say it)."""
@@ -360,11 +372,15 @@ class Desk:
         if command == "research":
             return self.start_task(words, self.root, " ".join(words)) if len(words) > 1 else USAGE["research"]
         if command == "exercise":
-            return self.exercise(channel, message.chat, words)
+            return self.exercise(channel, message, words)
         if command in ("runs", "status"):
             return self.report(command, words)
         if command == "help":
             return help_text(words[1:2])
+        if command == "history":
+            return history_text(words[1:2])
+        if command == "clear" and words[1:] == ["chat"]:
+            return self.clear_chat(channel, message.chat, "Chat cleared", " · `history` shows any of them again")
         if command in EXIT:  # the console ends on its own word (ConsoleChannel); a chat asks first
             return self.ask_to_exit(channel, message.chat, command)
         if command == "channel" and words[1:2] and words[1] in TERMINAL_ONLY:
@@ -378,16 +394,18 @@ class Desk:
         shown = self.tinker(words)
         return md(t"⚙️ **{' '.join(words)}**\n{shown:block}")
 
-    def exercise(self, channel, chat, words):
+    def exercise(self, channel, message, words):
         """exercise LANGUAGE: started as a tinker of its own that outlives this conversation (what it prints goes
         to the exercise folder's log), shown only in the exercise's one message. exercise status: what tinker says,
-        answered in a thread."""
+        answered in a thread, a glance."""
         if len(words) < 2:
             return USAGE["exercise"]
         if words[1].lower() != "status":
             return self.start_exercise(words)
-        threading.Thread(target=lambda: channel.send(chat, md(t"🏋️ **{' '.join(words)}**\n"
-                                                             t"{self.tinker(words):block}")), daemon=True).start()
+        def answer():
+            sent = channel.send(message.chat, md(t"🏋️ **{' '.join(words)}**\n{self.tinker(words):block}"))
+            channel.glance(message.chat, message.id, [sent])
+        threading.Thread(target=answer, daemon=True).start()
         return None
 
     def stop_exercise(self):
@@ -658,8 +676,20 @@ class Desk:
             if refused:
                 channel.show(chat, asking["shown"], refused, done=True)
             return
+        if words[0] == "clear" and "history" in words:  # nothing of it is left: not even what clearing it said
+            self.tinker(words)
+            self.clear_chat(channel, chat, md(t"{' '.join(asking['words'])}: done, and the chat"))
+            return
         channel.show(chat, asking["shown"], md(t"🗑 **{' '.join(asking['words'])}**\n{self.tinker(words):block}"),
                      done=True)
+
+    def clear_chat(self, channel, chat, cleared, after=""):
+        """clear chat: every message taken out of the chats but Tinker's status (history keeps what they showed),
+        said in a note of its own that goes in seconds. None: nothing more to say."""
+        taken = sum(each.clear() for each in self.channels)
+        sent = channel.send(chat, f"🧹 **{cleared}:** {taken} messages taken out{after}")
+        channel.glance(chat, None, [sent], NOTE_KEEP)
+        return None
 
     def run_app(self, channel, chat, said):
         """run [@PROJECT] ARGS... [<<< INPUT]: a built project run the way a person runs it (its run command,
@@ -1593,7 +1623,21 @@ class Channel:
         """Show chat that a reply is being written (a channel that cannot says nothing)."""
 
     def pin(self, chat, sent):
-        """Pin a message as the one updated last (a channel that cannot pins nothing)."""
+        """Pin Tinker's status, the chat's one pin (a channel that cannot pins nothing)."""
+
+    def lasting(self, chat, sent):
+        """The messages sent (Tinker's status) stay in the chat (a channel that keeps no ledger keeps all)."""
+
+    def glance(self, chat, asked, sent, keep=None):
+        """The messages sent only show something the person's message asked (its id) for: both go soon (the
+        messages in keep seconds, when given)."""
+
+    def collect(self):
+        """Take out of the chats the messages whose time is up."""
+
+    def clear(self):
+        """Take every message out of the chats but Tinker's status; how many."""
+        return 0
 
     def delete(self, chat, sent):
         """Take a message of Tinker's out of the chat (a channel that cannot leaves it)."""
@@ -1969,6 +2013,39 @@ def help_text(words=()):
         return "❓ `help` lists what you can send"
     shown = (done.stdout + done.stderr).strip()
     return shown if not words else md(t"❓ **help {' '.join(words)}**\n{shown:block}")
+
+
+def history_text(words=()):
+    """history [PAGE | #N] (Markup): the things shown in the chats, newest first, or the one numbered N as it was
+    shown last, with what the person asked for it."""
+    word = words[0] if words else ""
+    if word.startswith("#"):
+        return history_thing(word)
+    page = int(word) if word.isdigit() and int(word) > 0 else 1
+    things, pages = Ledger.page(page)
+    if not things:
+        return "📜 **History:** nothing shown in the chats yet"
+    lines = [f"📜 **History** · page {page} of {pages}"]
+    for thing in things:
+        asked = md(t" · _you: {first_words(thing['asked'], 40)}_") if thing.get("asked") else ""
+        lines.append(md(t"`#{thing['number']}` {thing['time'][5:]} · {headline(thing['text'])}") + asked)
+    older = f" · `history {page + 1}` older" if page < pages else ""
+    return "\n".join(lines + [f"👉 `history #N` shows one again{older}"])
+
+
+def history_thing(word):
+    """history #N (Markup): the thing as it was shown last, with what the person asked for it."""
+    thing = Ledger.thing(word[1:]) if word[1:].isdigit() else None
+    if thing is None:
+        return md(t"🤷 **No {word} in the history:** `history` lists what it keeps")
+    asked = md(t"💬 _you:_ {thing['asked']}\n") if thing.get("asked") else ""
+    return md(t"📜 **#{thing['number']}** · {thing['time']}\n") + asked + "\n" + thing["text"]
+
+
+def headline(text):
+    """A message's first line that says something, plain and short."""
+    lines = [line for line in Markup.plain(text).splitlines() if line.strip()]
+    return first_words(lines[0] if lines else "", 60)
 
 
 def commands_brief():
