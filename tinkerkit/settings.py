@@ -279,6 +279,8 @@ class Home:
                 "runs": (["projects", "runs"], [], "the list of projects and a line about each run (projects keep "
                                                    "their own .tinker)"),
                 "commands": (["commands"], [], "your commands Tinker may use"),
+                "history": (["chat history", "chat history numbers"], [], "what the chats showed, and what you asked "
+                                                                         "(their messages go from the chats in a day)"),
                 "exercise": (["exercise"], ["exercise"], "the exercises: each language's practice projects, what they "
                                                          "measured, and where each stopped")}
 

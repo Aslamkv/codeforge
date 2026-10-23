@@ -9,7 +9,7 @@ from pathlib import Path
 import pytest
 
 ROOT = Path(__file__).resolve().parent.parent
-LAYERS = ("messages", "settings", "jobs", "commands", "prompts", "workspace", "model", "project", "fetcher", "web", "passages", "conversation",
+LAYERS = ("messages", "settings", "jobs", "ledger", "commands", "prompts", "workspace", "model", "project", "fetcher", "web", "passages", "conversation",
           "channels", "knowledge", "slots", "docsite", "learning", "graph", "teaching", "exercising", "session", "planning", "building",
           "finishing")
 

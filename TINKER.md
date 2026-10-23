@@ -219,6 +219,21 @@ tinker channel disable telegram
 tinker channel remove telegram
 ```
 
+The chat stays tidy. Tinker's status is its one pin, edited in place, even after a restart. Each task has
+one message. Quick looks like `jobs` or `help` go after two minutes, and your question goes as soon as
+Tinker answers. Everything else goes after a day. Nothing is lost: Tinker keeps a history of what it showed.
+
+```sh
+history          # what the chat showed, newest first, with what you asked
+history 2        # the next page
+history #12      # show #12 again
+clear chat       # empty the chat now (the history stays)
+clear history    # forget the history too (asks first)
+```
+
+`tinker history` shows the same list in a terminal. For privacy, `clear history` deletes everything Tinker
+kept of the chat. Your projects, runs and jobs stay.
+
 ## Learn 🧠
 
 Teach Tinker a language, a tool, or a whole domain (it reads the web, and keeps what it learns):
@@ -367,6 +382,7 @@ Delete parts of what Tinker keeps, or all of it (your projects stay):
 
 ```sh
 tinker clear memory runs
+tinker clear history                # what the chats showed
 tinker reset
 ```
 

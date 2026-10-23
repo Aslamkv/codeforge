@@ -17,6 +17,8 @@ from tinkerkit.conversation import (
     Channel, ChannelError, ConsoleChannel, Desk, Markup, Message, Progress, Reporter, Research, Shell, Talk, after_word,
     built_project, command_of, described, first_lines, first_words, json_in, pieces, running, text_of, welcome,
 )
+from tinkerkit.ledger import NOTE_KEEP, Ledger
+from tinkerkit.settings import Home
 from tinkerkit.project import Tracker
 from tinkerkit.project import Runs
 from conftest import MODEL
@@ -563,6 +565,31 @@ def test_what_waits_for_confirm_is_cancelled_by_anything_else(desk, monkeypatch)
     assert desk.decide("amend", ["amend"]).startswith("✍️ Write `amend [@PROJECT] CHANGE`")
 
 
+@pytest.mark.spec("CNV-27")
+def test_a_glance_goes_soon_and_history_shows_things_again(desk, monkeypatch):
+    desk, channel, _ = desk
+    glances = []
+    monkeypatch.setattr(channel, "glance", lambda chat, asked, sent, keep=None: glances.append((chat, asked, sent, keep)))
+    monkeypatch.setattr(channel, "clear", lambda: 3)
+    desk.hear(channel, Message("1", "jobs", "you", id=7))
+    assert glances == [("1", 7, [101], None)]
+    assert desk.answer(Message("1", "history"), channel) == "📜 **History:** nothing shown in the chats yet"
+    Ledger.shown("rec", "1", None, [5], "🔨 **calc**\n▸ build", "task a calculator")
+    listed = desk.answer(Message("1", "history"), channel)
+    assert "`#1`" in listed and "🔨 calc" in listed and "_you: task a calculator_" in listed
+    again = desk.answer(Message("1", "history #1"), channel)
+    assert again.startswith("📜 **#1**") and "💬 _you:_ task a calculator" in again
+    assert again.endswith("🔨 **calc**\n▸ build") and "No #9" in desk.answer(Message("1", "history #9"), channel)
+    assert desk.answer(Message("1", "clear chat"), channel) is None
+    assert channel.texts()[-1].startswith("🧹 **Chat cleared:** 3 messages taken out") and glances[-1][3] == NOTE_KEEP
+    monkeypatch.setattr(desk, "tinker", lambda words: Home.clear(["history"], yes=True) or "Cleared history.")
+    desk.answer(Message("1", "clear history"), channel)
+    shown = len(channel.texts())
+    say(desk, channel, "confirm")
+    wait_until(lambda: len(channel.texts()) > shown)
+    assert channel.texts()[-1].startswith("🧹 **clear history: done, and the chat:** 3 messages taken out")
+    assert Ledger.page(1) == ([], 1)  # nothing is left, not even what clearing it said
+
 @pytest.mark.spec("CNV-17")
 def test_follow_reads_the_tasks_tracker(tmp_path, home_store):
     desk = Desk.__new__(Desk)
@@ -687,6 +714,19 @@ def test_desk_listens_until_the_chat_ends_it(desk):
 
 
 @pytest.mark.spec("CNV-21")
+def test_the_status_kept_from_before_is_edited_in_place_and_messages_are_collected(desk, home_store):
+    home_store.put("listening", "bot", {"1": 55})
+    channel = Listening("bot", inbox=[Message("1", "exit", id=1), Message("1", "confirm", id=2)])
+    collected = []
+    channel.collect = lambda: collected.append(True)
+    Desk([channel], Path.cwd()).run()
+    status = [(kind, sent) for kind, _, sent, text in channel.log if "**Tinker** ·" in text]
+    assert status and all(each == ("edit", 55) for each in status) and ("delete", "1", 55, "") not in channel.log
+    assert home_store.get("listening", "bot") == {"1": 55} and collected
+    channel.claimed.close()
+
+
+@pytest.mark.spec("CNV-21")
 def test_desk_refuses_a_chat_another_tinker_listens_to(desk):
     _, _, script = desk
     holder = Recorder("bot")
@@ -704,6 +744,8 @@ def test_one_shot_commands(monkeypatch, capsys):
     monkeypatch.setattr(sys, "stdin", io.StringIO(""))
     assert conversation.one_shot("chat", "") == "tinker chat needs words after it, e.g. tinker chat hello"
     assert conversation.one_shot("research", "") == "tinker research needs words after it, e.g. tinker research ..."
+    assert conversation.one_shot("history", "") is None
+    assert "nothing shown in the chats yet" in capsys.readouterr().out
     conversation.one_shot("chat", "hello")
     assert "No model is in use yet" in capsys.readouterr().out
 

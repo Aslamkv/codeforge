@@ -5,13 +5,16 @@ import json
 import re
 import stat
 import sys
+import time
 import urllib.parse
 
 import pytest
 
 import tinkerkit.channels as channels
+import tinkerkit.ledger as ledger
 from tinkerkit.channels import ChannelCommand, Channels, TelegramChannel, ask
 from tinkerkit.conversation import ChannelError
+from tinkerkit.ledger import Ledger
 from tinkerkit.settings import Store
 
 
@@ -201,11 +204,12 @@ def test_send_and_edit_post_html_with_a_plain_fallback():
     api.answers["sendMessage"] = [{"message_id": 9}]
     assert channel.edit("42", 8, "same") == 8  # unchanged text: harmless
     assert channel.edit("42", 8, "new text") == 9  # the message is gone: sent anew
+    assert [path.rsplit("/", 1)[1] for path, _ in api.calls[-2:]] == ["deleteMessage", "sendMessage"]
     assert channel.edit("42", None, "x") == 9
 
 
 @pytest.mark.spec("CHN-5")
-def test_latest_delete_and_pin():
+def test_latest_and_delete():
     api = BotAPI(sendMessage=[{"message_id": 1}, {"message_id": 2}, {"message_id": 3}])
     channel = telegram(api)
     for _ in range(3):
@@ -213,13 +217,49 @@ def test_latest_delete_and_pin():
     assert channel.latest("42", 3) and not channel.latest("42", 2) and not channel.latest("42", None)
     channel.delete("42", 3)
     assert channel.latest("42", 2) and api.calls[-1][0].endswith("/deleteMessage")
-    channel.pinned["42"] = 1
+
+def methods(api):
+    return [path.rsplit("/", 1)[1] for path, _ in api.calls]
+
+@pytest.mark.spec("CHN-9")
+def test_the_status_is_the_one_pin():
+    api = BotAPI(getChat={"pinned_message": {"message_id": 2}})
+    channel = telegram(api)
     channel.drop_pin_note = lambda chat, after: None
-    channel.pin("42", 2)
-    methods = [path.rsplit("/", 1)[1] for path, _ in api.calls[-2:]]
-    assert methods == ["unpinChatMessage", "pinChatMessage"] and channel.pinned["42"] == 2
-    channel.pin("42", 2)
-    assert len(api.calls) == 6  # pinned already: no call
+    channel.pin("42", 2)  # a status not kept before: pinned alone
+    assert methods(api) == ["unpinAllChatMessages", "pinChatMessage"] and channel.pinned["42"] == 2
+    channel.lasting("42", [2])
+    started_again = telegram(api)
+    api.calls.clear()
+    started_again.pin("42", 2)  # the status kept, pinned already: left as it is
+    started_again.pin("42", 2)
+    assert methods(api) == ["getChat"] and started_again.pinned["42"] == 2
+
+@pytest.mark.spec("CHN-10")
+def test_the_ledger_keeps_every_message_and_collects_them(monkeypatch):
+    update = {"update_id": 1, "message": {"message_id": 4, "text": "task calc", "chat": {"id": 42}}}
+    api = BotAPI(getUpdates=[[update]], sendMessage=[{"message_id": 1}, {"message_id": 2}, {"message_id": 3}])
+    channel = telegram(api)
+    channel.receive(1)
+    shown = channel.show("42", None, "🔨 calc")
+    assert shown == [1] and Ledger.thing(1)["asked"] == "task calc" and Ledger.thing(1)["text"] == "🔨 calc"
+    assert channel.show("42", shown, "🔨 calc ✅") == [1] and Ledger.thing(1)["text"] == "🔨 calc ✅"
+    assert sorted(message for _, message in Ledger.passing("bot")) == [1, 4]
+    channel.glance("42", 4, [channel.send("42", "jobs")])  # the person's message goes at once
+    channel.glance("42", None, [channel.send("42", "help")])  # the glance before goes too
+    assert Ledger.glances("bot", "42") == [3]
+    assert [fields["message_id"] for path, fields in api.calls if path.endswith("/deleteMessage")] == ["4", "2"]
+    now = time.time()
+    monkeypatch.setattr(ledger.time, "time", lambda: now + 200)
+    channel.collect()
+    assert sorted(message for _, message in Ledger.passing("bot")) == [1]  # the glance went, the task stays a day
+    api.answers["deleteMessage"] = [OSError("down")]
+    monkeypatch.setattr(ledger.time, "time", lambda: now + 2 * 24 * 3600)
+    channel.collect()
+    assert Ledger.due("bot") == [("42", 1)]  # no network: taken out later
+    api.answers["deleteMessage"] = [(400, "Bad Request: message can't be deleted")]
+    channel.collect()
+    assert channel.clear() == 0 and Ledger.thing(1)["text"] == "🔨 calc ✅"  # forgotten; the history stays
 
 
 @pytest.mark.spec("CHN-6")
