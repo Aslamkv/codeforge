@@ -57,6 +57,7 @@ responsibility, and each imports only the modules listed above it:
 |---|---|
 | `settings` | every tunable number and fixed name; the Tinker home (`Home`), its database (`Store`) and `Config`; small helpers |
 | `messages` | everything Tinker tells the person, in one voice (`say`, `Messages`, `Message`): each message's kind gives its icon, sections nest it, followers (a tracker) get it as data, and details go to the log only |
+| `jobs` | every long command as a job, listed, stopped and resumed (`Jobs`), and its journal of requests and answers (`Journal`, `journaled`) |
 | `commands` | the one table of Tinker's commands, and project references (`@ID`, `@folder`) |
 | `prompts` | prompt parts (`Part`), replies (`Reply`), every system prompt (`Prompts`) |
 | `workspace` | the project's files and the commands run in it (`Workspace`, `Toolchain`, `TestRef`, `Output`, `FileView`, `TaughtCommands`) |
@@ -109,10 +110,12 @@ database holds:
 | `channels`, `channel_secrets` | the chat channels and their tokens |
 | `listening`, `running` | the conversation's live state: its status messages, and each run's tracker |
 | `exercise` | per language: its exercise's practice projects, what each measured, and the focus of the next |
-| `activity` | when the person last asked for something, and the exercise that runs now |
+| `activity` | the person's requests being answered (`answering`), and the exercise that runs now |
+| `jobs`, `job numbers` | every job: its number, command, title, arguments, state, process and dates; the last number given |
 | log `learn` | every model call that `tinker learn` made |
 | log `teach` | every model call that `tinker ask` and `tinker teach` made |
 | log `exercise` | every model call that `tinker exercise` made itself (its builds keep theirs) |
+| log `journal #N` | job #N's requests (model calls, web searches, page fetches) with their answers, until it finishes |
 
 Each project keeps its own state in `<project>/.tinker/project.db`:
 
@@ -226,13 +229,68 @@ Everything Tinker tells the person goes through one voice, `say` (a `Messages`).
 - **MSG-6** `human_duration`: 42.5 gives `42s`, 1762.08 gives `29m 22s`, 4000 gives `1h 6m 40s`.
 - **MSG-7** No module of Tinker but `messages` calls `print`.
 
+## jobs
+
+Every long command is a job: it can be listed, stopped and resumed the same way, and a resumed job does not do
+again what it did. One job runs at a time, whatever kind it is: the job asked for last is the one that runs, and
+the one it paused goes on by itself once Tinker is idle. A chat or a command line the person asks for pauses it
+too: they are answered at once, so there is no emergency command.
+
+- **JOB-1** `is_job(argv)`: `task`, `restart`, `resume`, `confirm`, `amend`, `add`, `fix`, `learn`, `ask`,
+  `teach`, `research` and `exercise` are jobs; help, `exercise status`, `learn NAME "DEFINITION"` and a build an
+  exercise runs (`EXERCISE_ENV`) are not. `Jobs.running(argv)` runs a job as the next number (`#1`, `#2` ...),
+  kept in the home's `jobs` with its command, title, arguments, the day it started, its state `running` and its
+  process. Its process takes `STOP` (SIGUSR2) as Ctrl-C.
+- **JOB-2** A job ends `stopped` when it is interrupted (Ctrl-C, `STOP`) or its tracker ends with the status
+  `stopped` (`Tracker.end` tells `Jobs.ended`, which adds `("Go on", "tinker resume #N")` to the ending), and
+  `paused` when another job or the person paused it ("Paused for job #N", "Paused for you": its ending says so,
+  and its tracker's `doing`); otherwise it is
+  `finished`, and its journal is deleted. A `running` or `paused` job whose process is gone (killed, the computer
+  restarted) is read as `stopped`.
+- **JOB-3** `journaled(request, ask)` outside a job asks. In a job, a request made before, word for word, is
+  answered from the job's journal (log `journal #N`) in the order the answers were kept, and nothing is asked;
+  any other request is asked, and its answer kept unless it failed (`keep`). `Ollama.chat` (but an unload),
+  `Internet.search`, `Internet.fetch` and `Fetcher.fetch` go through it.
+- **JOB-4** `today()` is the day the job that runs started (today outside a job): the prompts that say the date
+  (learning's plan, research's frame, `research TOPIC`) say the same on the day a job is resumed.
+- **JOB-5** `Jobs.arguments`: `resume #N` runs job #N's arguments, as that job (its number, its journal);
+  `resume` alone runs the job stopped last, and with no job stopped it is the folder's run, as before;
+  `resume @PROJECT` is unchanged. An unknown job, one that runs in another process, and a finished one are
+  refused with why. A task's job is resumed as `resume @RUN` once its run is known (`Jobs.retarget`). A job that
+  goes on (`resume #N`) starts its tracker with `resumed`, so its message comes to the bottom of the chat.
+- **JOB-6** `tinker jobs [running|paused|stopped|finished] [PAGE]` lists the jobs newest first, `PAGE` (10) to
+  a page: with no state, the running ones, then the paused ones, then the stopped ones. A page that has more
+  after it names the command for the next. Any other words are an error.
+- **JOB-7** `tinker stop #N` sends job #N `STOP`, as Ctrl-C (one that neither runs nor is paused is an error);
+  `tinker stop` stops the job that runs, whatever it is. In the conversation, `stop #N` stops that job (the task
+  started here, the exercise in its own message, or one elsewhere) and `stop` the job that runs, and
+  `resume [#N]` starts `tinker resume #N` as a task (an exercise as the exercise). A paused job that is stopped
+  no longer goes on by itself.
+- **JOB-8** One job runs at a time, whatever kind it is. A job that starts (`Jobs.begin`) pauses every job that
+  runs: each is marked `paused_by` it and told to stop (`STOP`), and it waits, at most `PAUSE_WAIT` seconds, while
+  they save themselves. A paused job keeps its process: it waits there (`go_on_when_idle`). No rule refuses a job
+  because another runs: not the conversation's task, nor a second exercise.
+- **JOB-9** A paused job goes on by itself, at once, as `resume #N` in its own process, as soon as Tinker is idle
+  (`idle`: no job runs, and no request of the person's is being answered: `answering`, in the home's `activity`,
+  kept by `paused_for_you`; a request of a process that is gone does not count). There is no quiet time to wait
+  out. Of the paused jobs, the newest goes on first (`next_to_go_on`), so one at a time. `resume #N` of a paused
+  job makes it go on at once (`Jobs.wake`), in the process where it waits: a paused job never runs in a second
+  process.
+- **JOB-10** A request the model answers right away, a chat or `command WHAT` (in the conversation, or `tinker
+  chat` and `tinker command`), pauses the job that runs while it is answered (`paused_for_you`: paused by "you").
+  The request is marked as being answered before anything is paused, so the paused job does not go on the moment
+  it has saved itself. The person is answered as soon as it has, and the job goes on as soon as the answer is
+  written (a command line run once confirmed pauses it again while the model reads its output). A command that
+  only shows something pauses nothing, and a job asked for pauses it as **JOB-8** says. There is no `emergency`
+  command.
+
 ## commands
 
 - **CMD-1** `COMMANDS` is the one table of Tinker's commands. For each it gives the synopsis, the
   group, what it does, its kind (`run`, `long`, `quick`, `deletes`, `own`), the words it takes in a
   chat (`none`, `one`, `any`), its arguments and its options. The command line builds its parser and
   its help from it, and the conversation its commands.
-- **CMD-2** The runs are `task`, `restart`, `resume`, `confirm`, `amend`, `add` and `fix`. Every run
+- **CMD-2** The runs are `task`, `restart`, `confirm`, `amend`, `add`, `fix` and `resume`. Every run
   but `restart` takes `--web`. The runs that start a cycle (`task`, `restart`, `add`, `fix`) take
   `--confirm`, and the others do not. The commands that delete are `clear`, `reset` and
   `restart`.
@@ -528,7 +586,7 @@ Everything Tinker tells the person goes through one voice, `say` (a `Messages`).
   `blocked` exits with 1.
 - **PRJ-13** `Tracker` is a run's one report. It keeps the title, run ID, folder, phase, steps done,
   passing spec points, what the model is doing now, the latest message said, a plan that waits, the
-  end, the seconds taken and whether the run is paused. Each change is published at once in the
+  end, the seconds taken and when it went on (`resumed`). Each change is published at once in the
   home's `running` under the run's process, and appended to the project's `progress` log.
 - **PRJ-14** The steps are named by phase (`STEPS`: what each phase is doing, and when done). The
   passing count is taken from the project on every save, for every criterion (`C…` and `B…`). A
@@ -813,32 +871,28 @@ person always comes first.
   in all, README examples that failed, and the `slowest` steps (a step is its call's first word, so no file is
   named). `problems` lists, at most `EXERCISE_PROBLEMS`: what nothing made pass, failed README examples, failed,
   unusable and cut replies, and the warnings the runs said.
-- **EXR-6** The person comes first. `person_busy` is true for `EXERCISE_QUIET` seconds after they ask for
-  anything (`Home.person_seen`: every message of the conversation but one that only shows something (`exercise`,
-  `help`, `status`, `runs`, `log`, `memory`, `doctor`, `models`), a one-shot command, and a plan or deletion
-  waiting for them), and while any run of theirs works (a run an exercise started is marked
-  `exercise` in its tracker). Nothing starts while they are busy. A build that runs when they become busy is
-  stopped as Ctrl-C stops it (it saves itself) and started again, from where it was, once they are not. A model
-  call of the exercise's own (choosing a project, reflecting) is given up at once (`GaveWay`, the `PAUSE` signal
-  it sends itself) and asked again once they are not. A chat
-  never waits for an exercise (`Desk.now` leaves its runs out: no busy note names it). The
-  conversation never pauses or stops an exercise's runs for an emergency or a `stop`, and its status shows the
-  exercise when nothing else runs (looked at every `STATUS_EVERY` seconds, so it moves on by itself). The
-  exercise's tracker shows its build's: its step after the exercise's, what the model writes now, the spec points
-  passing and the latest line, and a practice project's steps only. Once the person is not busy, it says it goes
-  on, and its message comes to the bottom of the chat (the tracker's `resumed`). As a conversation starts (`adopt_exercise`), it keeps up the message of an exercise that runs, and an exercise
-  that ended without being stopped (killed, the computer restarted) goes on; either way its message is taken
-  out and sent anew at the bottom.
-- **EXR-7** One exercise runs at a time (`Exercises.claim`). Ctrl-C or `exercise stop` (the `STOP` signal) stops
-  its build, keeps everything, and ends with how to go on; `tinker exercise resume [LANGUAGE]` (or
-  `tinker exercise LANGUAGE`) goes on from there: with the language named, else the exercise left last
-  (`Exercises.resumed`; none yet says so). A second exercise does not start while one runs, and says how to switch.
-  `exercise status` shows each exercise: whether it runs, its focus, each recent project's measures, and what it
-  does now. `tinker exercise` takes a language, `resume [LANGUAGE]`, `stop` or `status`. In the conversation,
-  `exercise LANGUAGE` (or `exercise resume`) starts it as a tinker of its own that outlives the conversation, its
-  progress in its one message: every exercise has the same one (its ids kept in the home), started, stopped
-  (`exercise stop` shows only there) or resumed, and the person's `exercise LANGUAGE`, `resume` or `stop` message
-  is taken out. While one runs, it says so and starts nothing. One that ends before it keeps a
+- **EXR-6** The person comes first, as with every job: the exercise is one (**JOB-8**, **JOB-10**). A job of
+  theirs, a chat or a command line pauses it: its build is stopped as Ctrl-C stops it (it saves itself), and the
+  exercise goes on from where it was once Tinker is idle (**JOB-9**). It has no rule of its own for giving way. A
+  run an exercise started (its build) is marked `exercise` in its tracker and is not a job: the conversation leaves
+  it out of what runs (`persons_runs`, `Desk.now`), and its status shows the exercise when nothing else runs
+  (looked at every `STATUS_EVERY` seconds, so it moves on by itself). The exercise's tracker shows its build's: its
+  step after the exercise's, what the model writes now, the spec points passing and the latest line, and a
+  practice project's steps only. As a conversation starts (`adopt_exercise`), it keeps up the message of an
+  exercise that runs, and an exercise that ended without being stopped (killed, the computer restarted) goes on;
+  either way its message is taken out and sent anew at the bottom. While it listens, it adopts again an exercise
+  that went on by itself.
+- **EXR-7** One exercise runs at a time (`Exercises.claim`). It is a job: Ctrl-C or `stop #N` (the `STOP`
+  signal) stops its build, keeps everything, and ends `stopped` with how to go on (`resume #N`, or
+  `tinker exercise LANGUAGE`, goes on from there). A second exercise pauses the one that runs (**JOB-8**).
+  `exercise status` shows each exercise: whether it runs, is paused or stopped, its focus, each recent
+  project's measures, and what it does now. `tinker exercise` takes a language or `status`; `stop` and `resume` say they are now
+  `tinker stop #N` and `tinker resume #N`. In the conversation, `exercise LANGUAGE` (or `resume #N` of an
+  exercise's job) starts it as a tinker of its own that outlives the conversation, its progress in its one
+  message: every exercise has the same one (its ids kept in the home), started, stopped (`stop #N` shows only
+  there) or resumed, and the person's `exercise LANGUAGE` message is taken out; an exercise paused for another
+  hands it its message, and gets it back when it goes on (the conversation adopts it again). An exercise that
+  ended without being stopped goes on as its job resumed. One that ends before it keeps a
   tracker shows the last lines it printed. A conversation adopts an exercise whose tracker does not say it
   `reports` by itself (`Attached` says so).
 
@@ -999,8 +1053,8 @@ person always comes first.
   a one-line `brief`; how long it took (`took`); and its `ending`: the end's headline, details and
   next commands, or the plan that waits with its criteria and what to send next.
 - **CNV-9** `Reporter` shows one run's tracker in one message per chat. It reads the tracker every
-  `EDIT_EVERY` seconds and edits the message when it changed. It ends with the run's ending, unless
-  it is quiet.
+  `EDIT_EVERY` seconds and edits the message when it changed. It ends with the run's ending (with its
+  `text`: a research's answer). A command that keeps no tracker shows its latest printed line.
 - **CNV-11** `Talk.model()` is `None` until a measured model is in use. Otherwise it gives the chat
   options (no thinking for a thinking model). `reply` keeps the last `CHAT_KEPT` messages per chat,
   and it says plainly when no model is in use or the model failed.
@@ -1012,7 +1066,8 @@ person always comes first.
 - **CNV-14** `running(skip)` lists the runs whose trackers are in the home's `running`, but for its
   own process and those it skips. It removes the trackers of processes that have ended.
 - **CNV-15** `Desk.answer` handles a command. `task WHAT` starts a task, and a bare `task` gets its
-  usage. A run that starts a cycle is given `--confirm`, so its plan waits for the person. `status` alone gives what runs. `stop` stops the task. A command that deletes shows what it
+  usage. A run that starts a cycle is given `--confirm`, so its plan waits for the person. `status` alone gives what runs. `stop`, `stop #N` and `resume [#N]` act on jobs (**JOB-7**), and
+  `research TOPIC` runs as a task. A task started while another runs pauses it (**JOB-8**). A command that deletes shows what it
   deletes and waits for `confirm`. `exit` asks first. A `channel` action that needs a terminal says
   so. Any other command runs as `tinker`.
 - **CNV-16** `Desk.settle` runs what waits for a `confirm` (a deletion, a command line). Any other
@@ -1025,9 +1080,9 @@ person always comes first.
   and counts the rest. `first_words` collapses whitespace and cuts. `text_of` decodes bytes.
   `after_word` drops the command word. `built_project(name)` gives the project named (`Runs.find`),
   or without a name the one built last.
-- **CNV-19** `emergency MESSAGE` stops the task started here (it saves itself), answers the message
-  at once, and then resumes the task. A task run from another terminal is paused by a signal, and
-  it goes on in its own terminal. Only one emergency is answered at a time.
+- **CNV-19** A chat or a command line said while a job runs pauses the job while it is answered
+  (`Talk.pausing`, **JOB-10**); until the reply is written, its note says what is paused for it, and that it
+  goes on once they have their answer.
 - **CNV-20** `run [@PROJECT] ARGS [<<< INPUT]` runs a built project the way a person runs it: its run
   command, in its folder and environment, with the arguments quoted and the input given after `<<<`.
   The project is the one named, else the one built last. With no project built, or one with no run
@@ -1036,13 +1091,14 @@ person always comes first.
   no terminal, and otherwise leaves that chat out. It shows its status, pinned in each chat, when it
   starts listening, and `not listening` when it ends.
 - **CNV-22** `one_shot` says one of the conversation's commands once, in the terminal (`tinker chat`,
-  `command`, `research`, `run`, `stop`, `emergency`). Each needs words after it, except `run` and
-  `stop`. `command` runs nothing without a yes at the terminal.
-- **CNV-23** `research TOPIC` in a chat says when the web or the model is not usable. Otherwise it
-  answers from the pages it read and lists them as numbered sources.
+  `command`, `research`, `run`). Each needs words after it, except `run`; `chat` and `command` pause the job that
+  runs (**JOB-10**). `command` runs nothing
+  without a yes at the terminal.
+- **CNV-23** `research TOPIC` says when the web or the model is not usable. Otherwise it answers from the
+  pages it read and lists them as numbered sources. It is a job: its tracker shows its steps (`searches`,
+  `read`, `write`) and ends with its answer (the ending's `text`, which a chat's message shows).
 - **CNV-24** A task run from a terminal reports to the enabled chats (`Attached`). `STOP` (SIGUSR2)
-  stops it as Ctrl-C does. `PAUSE` (SIGUSR1) stops it for an emergency: its tracker says it is paused,
-  and it waits until its tracker is removed (at most `RESUME_WAIT` seconds), and then it goes on.
+  stops it as Ctrl-C does (a job is paused with it too), and its last state is shown once it ends.
 - **CNV-25** `/start` (what a chat app sends when a person first opens the bot) is answered with a
   welcome and a short, tldr-style guide for beginners in plain words: what Tinker does, then what to
   send, grouped by what a person does (build something, their projects, ask anything, while it

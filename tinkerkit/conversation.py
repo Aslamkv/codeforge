@@ -4,17 +4,18 @@ Every command works the same way everywhere: a task (its spec comes first, to co
 anything is built), a resume, the runs, their status, stop, and every other command of tinker's (one that
 deletes waits for confirm); anything else is a normal chat with the model in use (Talk), told at once when
 a task holds the model; `command WHAT` has the model name the command line that does it, run once the
-person confirms it (Shell); `research TOPIC` answers from the web, with the pages as sources (Research);
-and `emergency MESSAGE` stops the task (saved), answers at once and then goes on with the task. A task run
-from a terminal is served the same way: its tracker is kept in Tinker's home ("running"), and it is
-stopped or paused with a signal.
+person confirms it (Shell); `research TOPIC` answers from the web, with the pages as sources (Research).
+A chat or a command line asked while a job runs pauses it (jobs.paused_for_you): the person is answered at
+once, and the job goes on as soon as they are. A task run from a terminal is served the same way: its
+tracker is kept in Tinker's home ("running"), and it is stopped with a signal.
 
 Channel is what every kind of channel does (receive messages, send, edit what it sent); ConsoleChannel is
 the terminal, and the channels plugin adds the chat apps (TelegramChannel). Every message is written in
 Markup (bold, italic, code ...), each mark for what it means, and each kind shows it its own way. Each
-thing (a task, a research, a command, a chat's reply, an emergency) has one message, edited as it goes on
+thing (a task, a research, a command, a chat's reply) has one message, edited as it goes on
 (show), with when it was last updated; a new one is sent only for a new thing, or for what no longer fits.
 The one updated last is pinned where a chat pins, so its top says what moved last."""
+import contextlib
 lazy import fcntl
 lazy import html
 lazy import json
@@ -31,6 +32,7 @@ lazy import webbrowser
 lazy from pathlib import Path
 
 from .commands import COMMANDS, TERMINAL_ONLY, named, refs
+from .jobs import STOP, Jobs, job_number, paused_for_you, today
 lazy from .messages import human_duration, say
 lazy from .model import Models, Ollama, OllamaError
 from .project import Runs, Tracker, saved
@@ -43,21 +45,16 @@ lazy from .workspace import Toolchain
 OFF = "TINKER_CHANNELS"                        # =off: a run the conversation started does not report too
 EDIT_EVERY = 5                                 # seconds between edits of a progress message
 CLOCK_EVERY = 15                               # ... between edits that only move its clock on
-STOP_WAIT = 120                                # seconds a task is given to stop (and save) for an emergency
-PAUSE = signal.SIGUSR1                         # to a task run from a terminal: stop for an emergency, then go on
-STOP = signal.SIGUSR2                          # ... stop, as Ctrl-C (which a task started in the background ignores)
-RESUME_WAIT = 600                              # seconds such a task waits for the answer before it goes on anyway
-SEEN_EVERY = 30                                # seconds between marks that something waits for the person
+STOP_WAIT = 120                                # seconds a build is given to stop (and save) before it is killed
 STATUS_EVERY = 10                              # seconds between looks at what Tinker does, for its pinned status
 
 # --- a chat with the model ---------------------------------------------------------------------------------
 CHAT_KEPT = 12                                 # messages of one chat kept as the context of its next reply
 CHAT_REPLY_TOKENS = 1024                       # the longest chat reply
-CHAT_BUSY_TOKENS = 300                         # ... while a task runs, so the task waits as little as it can
 CHAT_TIMEOUT = 600                             # seconds a chat reply may take (a task may hold the model first)
 TYPING_EVERY = 4                               # seconds between "typing…" signs while a reply is written
 BUSY_AFTER = 5                                 # seconds a chat reply may take before a note says the model is busy
-BUSY_EDIT_EVERY = 30                           # seconds between updates of that note (the progress of what runs)
+BUSY_EDIT_EVERY = 30                           # seconds between updates of that note
 
 # --- command WHAT, research TOPIC --------------------------------------------------------------------------
 COMMAND_TOKENS = 300                           # the longest reply naming a command
@@ -69,12 +66,11 @@ RESEARCH_PAGES = 4                             # pages it reads (the first each 
 RESEARCH_PAGE_CHARS = 3500                     # of each page, the parts most about the topic
 
 # --- tinker's commands, as the conversation takes them: from the one table (commands.py) -------------------
-LONG = named("long")                           # a task: one at a time, its progress shown
+LONG = named("long")                           # a task: its progress shown (one that runs is paused for it)
 QUICK = named("quick")                         # what it prints is shown
 DELETES = tuple(c.name for c in COMMANDS if c.deletes)  # what it deletes is shown first; done once confirmed
 PLANNED = tuple(c.name for c in COMMANDS if "--confirm" in (o.flag for o in c.options))  # its plan waits here
 OWN = named("own")                             # the conversation's own
-LOOKS = ("exercise", "help", "status", "runs", "log", "memory", "doctor", "models")  # only shows: an exercise goes on
 ONE_WORD = tuple(c.name for c in COMMANDS if c.chat and c.words == "one")  # a command with one word after it
 ANY_WORDS = tuple(c.name for c in COMMANDS if c.chat and c.words == "any")  # ... with any words after it
 SAID_BARE = tuple(c.name for c in COMMANDS if c.name)  # commands a conversation takes as their words
@@ -105,8 +101,8 @@ I build small programs for you, on this computer, with an AI model that runs rig
 
 ⏳ **While I work**
 - `status` tells what I am doing
-- `stop` stops the build (it is saved: `resume @calc-py` goes on)
-- `emergency your question`: I pause, answer you, then go on
+- `stop` stops it (it is saved): `jobs` lists what runs and what stopped, `resume #3` goes on
+- Just write to me: I pause what runs, answer you, and go on with it
 
 ❓ `help` lists everything I can do, and `help task` explains one command."""  # what a chat app's /start gets
 
@@ -125,29 +121,39 @@ def session(root):
 
 
 def one_shot(command, text):
-    """tinker chat|command|research|run|stop|emergency ...: one of the conversation's own commands, said once in
-    this terminal (command asks there before it runs anything). None, or why it could not."""
+    """tinker chat|command|research|run ...: one of the conversation's own commands, said once in this terminal
+    (command asks there before it runs anything). A chat or a command line pauses the job that runs. None, or why
+    it could not."""
     console, talk = ConsoleChannel(bare=False), Talk(commands_brief())
     message, chat = Message(ConsoleChannel.CHAT, text, "you"), ConsoleChannel.CHAT
-    Home.person_seen()
-    if command == "stop":
-        elsewhere = stop_runs()
-        console.show(chat, None, md(t"⏹ **Stopping** {'; '.join(r.get('title', '') for r in elsewhere)}: saved; "
-                                    t"`resume` goes on later") if elsewhere else "💤 No task is running.", done=True)
-        return None
     if not text and command != "run":
         return f"tinker {command} needs words after it, e.g. tinker {command} {'hello' if command == 'chat' else '...'}"
     if command == "chat":
-        console.show(chat, None, talk.reply(console, message, "", CHAT_REPLY_TOKENS), done=True)
+        with paused_for_you():
+            console.show(chat, None, talk.reply(console, message, "", CHAT_REPLY_TOKENS), done=True)
     elif command == "research":
-        Research(talk).researching(console, chat, text, lambda: [described(state) for state in running()])
-    elif command == "emergency":
-        Desk([console], Path.cwd()).emergency(console, message)
+        research_once(console, talk, text)
     elif command == "run":
         Desk([console], Path.cwd()).run_app(console, chat, [text])
     else:
-        command_once(console, talk, message)
+        with paused_for_you():
+            command_once(console, talk, message)
     return None
+
+
+def research_once(console, talk, topic):
+    """tinker research TOPIC: researched in this terminal. It is a job: its tracker shows its steps where it was
+    started from (a chat), and ends with its answer, or how to go on once stopped."""
+    tracker, started = Tracker(f"Researching {topic}"), time.monotonic()
+    ending = {"status": "stopped", "headline": f"Research of {topic} stopped"}
+    try:
+        status, text = Research(talk, tracker).researching(console, ConsoleChannel.CHAT, topic,
+                                                          lambda: [described(state) for state in running()])
+        ending = {"status": status, "headline": "", "text": text}
+    finally:
+        tracker.end(ending, time.monotonic() - started)
+        if os.environ.get(OFF) != "off":  # the conversation that started it reads it last
+            tracker.close()
 
 
 def command_once(console, talk, message):
@@ -165,9 +171,9 @@ def command_once(console, talk, message):
 
 class Desk:
     """The conversation, one Tinker serving its channels at once: the terminal (tinker, with no command) and
-    the enabled chats (tinker channel start serves the chats alone). Every command of tinker's works here: one
-    task runs at a time, as its own tinker (which does not report too), followed by its tracker, its progress
-    in its one message; one that deletes shows what it deletes first, and waits for confirm. Tasks run from a
+    the enabled chats (tinker channel start serves the chats alone). Every command of tinker's works here: a
+    task runs as its own tinker (which does not report too; as every job, it pauses the one that runs), followed
+    by its tracker, its progress in its one message; one that deletes shows what it deletes first, and waits for confirm. Tasks run from a
     terminal are served too (running). Anything that is not a command is a normal chat."""
     COMMANDS = tuple(c.name for c in COMMANDS if c.chat)
     LOOK_EVERY = 1.0  # seconds between looks at a followed task's tracker (for its run and folder)
@@ -175,10 +181,9 @@ class Desk:
     def __init__(self, channels, root):
         self.channels, self.root = channels, Path(root).resolve()
         self.process = self.reporter = self.task = None  # task: {arguments, folder, title, run} of the last one
-        self.lock, self.talk = threading.Lock(), Talk(commands_brief())
+        self.followed = []  # every task started here whose process lives: the last one, and those it paused
+        self.lock, self.talk = threading.Lock(), Talk(commands_brief(), pausing=paused_for_you)
         self.shell = Shell(self.talk, self.root)
-        self.research = Research(self.talk)
-        self.urgent = False  # an emergency is being answered: no task starts meanwhile
         self.waiting = None  # {run, folder, title, spec, stage, new} of the plan that waits for confirm or amend
         self.boards = {}  # run -> its task's messages ({(channel, chat): ids}), kept from one of its runs to the next
         self.asking = {}  # (channel, chat) -> {words, shown}: a command that deletes, waiting for confirm
@@ -268,15 +273,14 @@ class Desk:
         threads = [threading.Thread(target=self.listen, args=(c,), daemon=True) for c in self.channels]
         for thread in threads:
             thread.start()
-        seen = looked = 0.0
+        looked = 0.0
         while any(t.is_alive() for t in threads) and not any(c.closed for c in self.channels):
             time.sleep(0.5)
-            if (self.waiting or self.asking) and time.monotonic() - seen >= SEEN_EVERY:
-                seen = time.monotonic()
-                Home.person_seen()  # what waits for the person is theirs: an exercise keeps away meanwhile
             if time.monotonic() - looked >= STATUS_EVERY:
                 looked = time.monotonic()
                 self.say_status()  # what runs elsewhere (an exercise, a terminal's run) moves on by itself
+                if self.exercising is None:
+                    self.adopt_exercise()  # a paused exercise that went on by itself has its message kept up again
         raise KeyboardInterrupt
 
     def listen(self, channel):
@@ -293,8 +297,6 @@ class Desk:
             channel.send(message.chat, welcome())
             return
         command = command_of(message.text)
-        if command not in LOOKS:  # the person comes first: an exercise gives way
-            Home.person_seen()
         if message.id and (command == "confirm" or exercise_switch(message.text)):  # its answer is in a message
             # already (the plan's, the exercise's): it would only make the chat grow
             channel.delete(message.chat, message.id)
@@ -307,7 +309,7 @@ class Desk:
             threading.Thread(target=self.run_app, args=(channel, message.chat, message.text.split(None, 1)[1:]),
                              daemon=True).start()
             return
-        if command in ("research", "command", "emergency"):
+        if command == "command":
             self.asked_with_words(channel, message, command)
             return
         reply = self.answer(message, channel)
@@ -315,15 +317,11 @@ class Desk:
             channel.send(message.chat, reply)
 
     def asked_with_words(self, channel, message, command):
-        """research TOPIC, command WHAT or emergency MESSAGE: answered in a thread (alone, how to say it)."""
+        """command WHAT: answered in a thread (alone, how to say it)."""
         if len(message.text.split()) == 1:
             channel.send(message.chat, USAGE[command])
-        elif command == "research":
-            self.research.answer(channel, message.chat, after_word(message).text, self.now)
-        elif command == "command":
-            self.shell.name(channel, after_word(message), self.now)
         else:
-            threading.Thread(target=self.emergency, args=(channel, after_word(message)), daemon=True).start()
+            self.shell.name(channel, after_word(message), self.now)
 
     def settle(self, channel, message, command):
         """What waits for this very message (a command that deletes, a command line): done when the message
@@ -358,7 +356,9 @@ class Desk:
         if command == "resume":
             return self.resume(words)
         if command == "stop":
-            return self.stop()
+            return self.stop(words)
+        if command == "research":
+            return self.start_task(words, self.root, " ".join(words)) if len(words) > 1 else USAGE["research"]
         if command == "exercise":
             return self.exercise(channel, message.chat, words)
         if command in ("runs", "status"):
@@ -379,13 +379,11 @@ class Desk:
         return md(t"⚙️ **{' '.join(words)}**\n{shown:block}")
 
     def exercise(self, channel, chat, words):
-        """exercise LANGUAGE and exercise resume [LANGUAGE]: started as a tinker of its own that outlives this
-        conversation (what it prints goes to the exercise folder's log); exercise stop: told to stop. Both show only
-        in the exercise's one message. exercise status: what tinker says, answered in a thread."""
+        """exercise LANGUAGE: started as a tinker of its own that outlives this conversation (what it prints goes
+        to the exercise folder's log), shown only in the exercise's one message. exercise status: what tinker says,
+        answered in a thread."""
         if len(words) < 2:
             return USAGE["exercise"]
-        if words[1].lower() == "stop":
-            return self.stop_exercise()
         if words[1].lower() != "status":
             return self.start_exercise(words)
         threading.Thread(target=lambda: channel.send(chat, md(t"🏋️ **{' '.join(words)}**\n"
@@ -396,19 +394,14 @@ class Desk:
         """The exercise told to stop (its build saves itself first); its message says how it ended."""
         running_one = exercising_now()
         if not running_one:
-            return "🤷 No exercise runs: `exercise resume` goes on with the last one"
+            return "🤷 No exercise runs: `resume #N` goes on with one (`jobs stopped` lists them)"
         signal_task(running_one["pid"], STOP)
         self.exercise_says("🛑 Stopping: its build saves itself first")
         return None
 
-    def start_exercise(self, words):
-        """The exercise started, unless one runs already (one at a time: its message comes to the bottom)."""
-        running_one = exercising_now()
-        if running_one and self.exercising:
-            self.exercise_says("🏋️ It runs already (one at a time): exercise stop first to switch")
-            return None
-        if running_one:
-            return md(t"🏋️ **{running_one['title']}** runs already (one at a time): `exercise stop` first to switch")
+    def start_exercise(self, words, title=None):
+        """The exercise started (words: exercise LANGUAGE, or resume #N): as every job, it pauses the one that runs.
+        Its message comes to the bottom."""
         log = projects_folder() / EXERCISE_FOLDER / "exercise.log"
         log.parent.mkdir(parents=True, exist_ok=True)
         start = log.stat().st_size if log.exists() else 0
@@ -417,18 +410,21 @@ class Desk:
                 process = tinker_process(words, self.root, output, **{OFF: "off", "NO_COLOR": "1"})
         except OSError as exc:
             return md(t"⚠️ **Could not start it:** {exc}")
-        self.follow_exercise(process.pid, " ".join(words), process.wait, (log, start), anew=True)
+        self.follow_exercise(process.pid, title or " ".join(words), process.wait, (log, start), anew=True)
         return None
 
     def adopt_exercise(self):
         """As this conversation starts: an exercise that runs and does not report by itself (one a conversation
         before this one started) has its message kept up here; one that ended without being stopped (its process
-        killed, the computer restarted) goes on. Either way its message comes anew at the bottom of the chat."""
+        killed, the computer restarted) goes on, as its job resumed. Either way its message comes anew at the bottom
+        of the chat."""
         exercise, left = exercising_now(), Home.store().get("activity", "exercise")
         if exercise and not exercise["reports"]:
             self.follow_exercise(exercise["pid"], exercise["title"], lambda: until_ended(exercise["pid"]), anew=True)
         elif not exercise and left and not alive(left["pid"]):
-            self.start_exercise(["exercise", "resume", left["language"]])
+            job = next((job for job in Jobs.listed("stopped") if job["command"] == "exercise"), None)
+            self.start_exercise(["resume", f"#{job['number']}"] if job else ["exercise", left["language"]],
+                                job["title"] if job else None)
 
     def follow_exercise(self, pid, title, ended, log=None, anew=False):
         """The exercise's message kept up (its tracker) until ended() returns: its ending shown, its tracker
@@ -438,12 +434,16 @@ class Desk:
         sent = exercise_board()
         if anew:
             self.take_out(sent)
+        if self.exercising is not None:  # paused for this one: its message is this one's until it goes on
+            self.exercising.ended = True
         reporter = self.exercising = Reporter(self.channels, title, pid=pid, sent=sent,
                                               on_step=lambda: (keep_exercise_board(sent), self.say_status()))
         reporter.refresh()
 
         def follow():
             ended()
+            if reporter is not self.exercising:  # its message went to another exercise (adopted again if it went on)
+                return
             printed = printed_since(*log) if log and reporter.tracked() is None else ""
             reporter.finish()
             if printed:
@@ -582,19 +582,47 @@ class Desk:
         waiting["spec"] = waiting["spec"].replace(f"📁 `{Path(old).name}`", f"📁 `{name}`")
 
     def resume(self, words):
+        """resume @PROJECT: its run goes on; resume [#N]: the job goes on where it stopped (with no number, the one
+        stopped last), an exercise as the exercise."""
         name, rest = refs(words[1:])
-        if not name or rest:
+        if name and not rest:
+            return self.start_task(["resume", f"@{name}"], self.root, f"resume @{name}")
+        number = job_number(words[1]) if len(words) == 2 else None
+        if len(words) > 2 or (len(words) == 2 and number is None):
             return USAGE["resume"]
-        return self.start_task(["resume", f"@{name}"], self.root, f"resume @{name}")
+        if Jobs.wake(number):
+            return md(t"▶️ **Job #{number}** goes on now.")
+        job, why = Jobs.resumable(number)
+        if job is None:
+            return md(t"🤷 {why.replace('tinker ', '')}")
+        again = ["resume", f"#{job['number']}"]
+        if job["command"] == "exercise":
+            return self.start_exercise(again, job["title"])
+        return self.start_task(again, self.root, job["title"])
 
-    def stop(self):
-        """The task started here stopped, else the runs in terminals (as Ctrl-C there: each saves itself)."""
-        if self.stop_task():
-            return "⏹ **Stopping the task:** it is saved; `resume` goes on later."
-        elsewhere = stop_runs(self.children())
-        if not elsewhere:
-            return "💤 No task is running."
-        return md(t"⏹ **Stopping** {'; '.join(r.get('title', '') for r in elsewhere)}: saved; `resume` goes on later.")
+    def stop(self, words):
+        """stop #N: that job; stop: the job that runs, whatever it is (as Ctrl-C: it saves itself)."""
+        if len(words) > 1:
+            number = job_number(words[1])
+            return self.stop_job(number) if number is not None else USAGE["stop"]
+        said = [self.stop_job(job["number"]) for job in Jobs.listed("running")]
+        return "\n".join(line for line in said if line) or (None if said else "💤 No job is running.")
+
+    def stop_job(self, number):
+        """Job #number stopped: the task started here, the exercise (said in its message), a job elsewhere, or a
+        paused one (where it waits: it no longer goes on by itself)."""
+        job = Jobs.get(number)
+        if job is None or job["state"] not in ("running", "paused"):
+            return f"🤷 Job #{number} is not running or paused: `jobs` lists them."
+        if job["state"] == "paused":
+            Jobs.stop(job)
+        elif self.busy() and job["pid"] == self.process.pid:
+            self.stop_task()
+        elif job["command"] == "exercise":
+            return self.stop_exercise()
+        else:
+            Jobs.stop(job)
+        return md(t"⏹ **Stopping #{number}** {job['title']}: it is saved; `resume #{number}` goes on later.")
 
     def report(self, command, words):
         """runs, status [@PROJECT]: tinker's own; status alone at once, from what the conversation knows."""
@@ -657,64 +685,6 @@ class Desk:
         channel.show(chat, shown, md(t"{'✅' if code == 0 else '❌'} **{title}** {line:code} · _exit {code}_{fed:md}\n"
                                      t"{printed:md}"), done=True)
 
-    def emergency(self, channel, message):
-        """Stop what runs (a task saves itself), answer message, then go on with the task: one started here
-        is resumed here, one run from a terminal resumes itself there."""
-        if self.urgent:
-            channel.send(message.chat, "🚨 An emergency is being answered: one at a time.")
-            return
-        say = Note(channel, message.chat, md(t"🚨 **Emergency:** {message.text}")).add
-        with self.lock:
-            self.urgent = True
-            stopped = self.stop_for_emergency(say)
-            paused = [run for run in (described(state) for state in persons_runs(self.children())) if self.pause(say, run)]
-        try:
-            say(f"\n{self.talk.reply(channel, message)}\n", done=not (stopped or paused))
-        finally:
-            self.urgent = False
-        self.go_on(stopped, paused, say)
-
-    def stop_for_emergency(self, say):
-        """The task started here stopped (it saves itself): the task, or None when none ran or it did not
-        stop in time (it goes on by itself, and the emergency is answered after its step, as a chat)."""
-        stopped = self.task if self.busy() else None
-        if not stopped:
-            return None
-        say(md(t"⏸ Stopping {stopped['title']} to answer: it is saved and goes on after."))
-        self.reporter.quiet = True
-        self.stop_task()
-        try:
-            self.process.wait(STOP_WAIT)
-        except subprocess.TimeoutExpired:
-            say(f"⚠️ The task did not stop in {STOP_WAIT}s; answering after its step.")
-            return None
-        return stopped
-
-    def pause(self, say, run):
-        """A task run from a terminal, stopped for an emergency: True once its tracker says it is paused."""
-        say(md(t"⏸ Stopping {run['title']} to answer: it is saved and goes on after."))
-        signal_task(run["pid"], PAUSE)
-        ends = time.monotonic() + STOP_WAIT
-        while time.monotonic() < ends:
-            now = next((r for r in running(self.children()) if r["pid"] == run["pid"]), None)
-            if now is None or now.get("paused"):
-                return now is not None
-            time.sleep(1)
-        say(md(t"⚠️ {run['title']} did not stop in {STOP_WAIT}s; answering after its step."))
-        return False
-
-    def go_on(self, stopped, paused, say):
-        """After the emergency, the tasks go on: one stopped here is resumed here; one paused in a terminal
-        goes on there once its tracker is removed."""
-        if stopped:
-            again = ["resume", f"@{stopped['run']}"] if stopped["run"] else stopped["arguments"]
-            self.start_task(again, stopped["folder"], stopped["title"], sent=self.reporter.sent,
-                            keep=self.reporter.keep)
-            say(md(t"▶️ **Going on** with {stopped['title']}"), done=not paused)
-        for run in paused:
-            Home.store().delete("running", str(run["pid"]))
-            say(md(t"▶️ **Going on** with {run['title']} _(in its terminal)_"), done=run is paused[-1])
-
     def start_task(self, arguments, folder, title, phase=Tracker.STARTING, sent=None, keep=""):
         """Start a task as its own tinker. Its message is the one its run had (by its ID: sent, else the
         boards), keeps keep at its top, and says phase first (Markup when Tinker says it: ✅ confirmed ...);
@@ -722,10 +692,6 @@ class Desk:
         run = self.run_named(arguments)
         sent = sent if sent is not None else self.boards.get(run) if run else None
         with self.lock:
-            if self.busy():
-                return "⏳ A task is running: wait for it, or `stop` it first."
-            if self.urgent:
-                return "🚨 An emergency is being answered: send it again in a moment."
             self.task = {"arguments": arguments, "folder": folder, "title": title, "run": run}
             self.reporter = Reporter(self.channels, title, sent=sent, phase=phase, keep=keep,
                                      before=self.spent.get(run, 0.0), on_step=self.say_status)
@@ -737,6 +703,7 @@ class Desk:
                 self.process = None
                 return md(t"⚠️ **Could not start it:** {exc}")
             self.reporter.pid = self.process.pid
+            self.followed = [p for p in self.followed if p.poll() is None] + [self.process]
         if self.waiting and self.waiting["folder"] == folder:
             self.waiting = None  # confirmed or being changed: it waits again only once its plan is shown
         threading.Thread(target=self.follow, args=(self.process, self.reporter, self.task), daemon=True).start()
@@ -811,14 +778,14 @@ class Desk:
 
     def now(self):
         """What runs now: the task started here, and any run from a terminal ({title, brief, text}). An exercise's
-        are left out: it gives way to the person, so nothing waits for it."""
+        builds are left out: they are not jobs (the exercise is, and is paused as one)."""
         progress = self.reporter.progress if self.busy() else None
         here = [{"title": progress.title, "brief": progress.brief(), "text": progress.text()}] if progress else []
         return here + [described(state) for state in persons_runs(self.children())]
 
     def children(self):
-        """The processes of the task started here (served as here, not as elsewhere)."""
-        return {self.process.pid} if self.process is not None else set()
+        """The processes of the tasks started here (served as here, not as elsewhere): the last, and those it paused."""
+        return {process.pid for process in self.followed}
 
     def tinker(self, arguments, timeout=120):
         """What one of tinker's quick commands prints: its columns as a chat reads them (" | "), its first 40
@@ -853,7 +820,7 @@ def command_words(text):
 
 
 def after_word(message):
-    """What a command word is followed by (the emergency's own message, the command described)."""
+    """What a command word is followed by (the command described)."""
     return Message(message.chat, message.text.split(None, 1)[1], message.sender)
 
 
@@ -875,25 +842,6 @@ def welcome():
     return WELCOME
 
 
-def stop_runs(skip=()):
-    """The runs in terminals (but those skipped) stopped, as Ctrl-C there: each saves itself. The runs."""
-    elsewhere = persons_runs(skip)
-    for run in elsewhere:
-        signal_task(run["pid"], STOP)
-    return elsewhere
-
-
-class Note:
-    """One message that grows a line at a time (an emergency's)."""
-
-    def __init__(self, channel, chat, first):
-        self.channel, self.chat, self.lines, self.shown = channel, chat, [first], None
-
-    def add(self, line, done=False):
-        self.lines.append(line)
-        self.shown = self.channel.show(self.chat, self.shown, "\n".join(self.lines), done)
-
-
 # === what a chat asks for: a chat, a command line, a research ====================================================
 
 class Talk:
@@ -901,9 +849,8 @@ class Talk:
     chat's last CHAT_KEPT messages (and what is running now) as context. It does not think, so a reply comes
     quickly, and its settings are a run's own (num_ctx), so a task and a chat share the loaded model: warm
     loads it as listening starts, and neither the first reply nor the next task waits for it to load.
-    While a task runs (here or elsewhere), the model is the task's: a chat is told so at once, and that note
-    becomes the (shorter) answer after the task's current step. Chats take turns, so an emergency waits for one
-    at most."""
+    A job that runs (here or elsewhere) is paused while the reply is written (pausing: jobs.paused_for_you), and a
+    note says so meanwhile; the job goes on once the reply is written. Chats take turns."""
     SYSTEM = ("You are Tinker, a friendly helper that builds small programs on this computer with a local model. "
               "You are chatting over {kind}, read on a phone: answer briefly, in short lines. Format for "
               "meaning, in Markdown: **bold** for what matters most, *italic* for an aside, `code` for "
@@ -911,22 +858,23 @@ class Talk:
               "(✅ done or fine, ⚠️ a problem, 💡 a tip, 👉 what to do next); never a heading or a table. Talk "
               "about anything. You cannot run anything yourself from the chat; these messages do:\n{commands}")
 
-    def __init__(self, commands):
+    def __init__(self, commands, pausing=contextlib.nullcontext):
         self.commands, self.said, self.lock, self.turn = commands, {}, threading.Lock(), threading.Lock()
+        self.pausing = pausing  # while a reply is written: what runs is paused for the person
 
     def answer(self, channel, message, now, waiting=lambda: "", write=None, on_shown=None):
         """The reply to message, sent when written (in a thread, so `stop` is heard meanwhile). now(): what
         runs now, [{title, brief, text}]; waiting(): a spec that waits for the person; write: what writes the
         reply (channel, message, context, tokens -> text), the chat's own by default; on_shown(ids): the
         ids of the reply's message, once it is written. When something runs, or the reply is not
-        written in BUSY_AFTER seconds, a note says so at once, updated every BUSY_EDIT_EVERY seconds with the
-        progress; the reply then takes its place."""
+        written in BUSY_AFTER seconds, a note says so at once (what is paused for it), updated every
+        BUSY_EDIT_EVERY seconds; the reply then takes its place."""
         threading.Thread(target=self.answering, args=(channel, message, now, waiting, write or self.reply,
                                                       on_shown), daemon=True).start()
 
     def answering(self, channel, message, now, waiting, write_reply, on_shown):
         running, written, reply = now(), threading.Event(), []
-        asked = (channel, message, self.context(running, waiting), CHAT_BUSY_TOKENS if running else CHAT_REPLY_TOKENS)
+        asked = (channel, message, self.context(running, waiting), CHAT_REPLY_TOKENS)
         threading.Thread(target=self.write, args=(write_reply, asked, reply, written), daemon=True).start()
         note = self.busy_until(written, running, now, channel, message.chat)
         note = channel.show(message.chat, note, reply[0] if reply else "⚠️ **The model did not answer.**", done=True)
@@ -942,9 +890,10 @@ class Talk:
         return "\n\n".join(c for c in context if c)
 
     def write(self, write_reply, asked, reply, written):
-        """The reply written (chats take turns) into reply; written is set once it is done, or failed."""
+        """The reply written (chats take turns, what runs paused first) into reply; written is set once it is done,
+        or failed."""
         try:
-            with self.turn:
+            with self.turn, self.pausing():
                 reply.append(write_reply(*asked))
         finally:
             written.set()
@@ -964,8 +913,8 @@ class Talk:
         if not running:
             lines = ["⏳ **The model is busy or loading.** I'll answer here as soon as it is free."]
         else:
-            lines = ["⏳ **Busy** with " + "; ".join(r["brief"] for r in running) + ".",
-                     "I'll answer here after the current step.", "🚨 An answer now: `emergency MESSAGE`"]
+            lines = ["⏸ **Pausing** " + "; ".join(r["brief"] for r in running) + " to answer you.",
+                     "It goes on once you have your answer."]
         return "\n".join(lines)
 
     def reply(self, channel, message, now="", tokens=CHAT_REPLY_TOKENS):
@@ -1067,7 +1016,7 @@ class Shell:
         self.shell = self.SHELL
 
     def name(self, channel, message, now):
-        """Have the model name the command (the reply comes as a chat's, busy note and all)."""
+        """Have the model name the command (the reply comes as a chat's: what runs paused, busy note and all)."""
         key = (channel.name, message.chat)
         self.proposed[key] = self.WRITING
 
@@ -1126,7 +1075,8 @@ class Shell:
         sent = channel.show(chat, sent, f"{head}\n{folded}", done=not tells)
         if not tells:
             return
-        told = self.told(channel, chat, proposed["asked"], line, code, output)
+        with self.talk.pausing():  # the model reads the output: what runs is paused for the person again
+            told = self.told(channel, chat, proposed["asked"], line, code, output)
         channel.show(chat, sent, f"{head}\n{told}\n{folded}" if told else f"{head}\n{folded}", done=True)
 
     @staticmethod
@@ -1165,8 +1115,9 @@ class Research:
     """research TOPIC: an answer from the web, with its sources. One quick call names the searches (up to
     RESEARCH_SEARCHES), the pages they find are read in turn (the first of each search, then the second
     ..., up to RESEARCH_PAGES; of each, the parts most about the topic), and one call writes the answer
-    from them alone, each claim citing its page. One message says how far it got, and becomes the answer.
-    (tinker learn researches a topic in depth, and keeps it for the builds.)"""
+    from them alone, each claim citing its page. One message says how far it got, and becomes the answer; its
+    tracker says the same, for a chat it runs for. (tinker learn researches a topic in depth, and keeps it for the
+    builds.)"""
     SEARCHES_SYSTEM = ("The person wants to know about a topic. Give the web searches that together answer it "
                        "best: two or three, each looking for something different, in the topic's language. Today "
                        "is {today}, and you were trained well before it: never assume what the latest version, "
@@ -1182,38 +1133,45 @@ class Research:
                      "only where it says something with less (✅ settled, ⚠️ a caveat or a disagreement, 📅 a "
                      "date, 💡 a tip). Never a heading or a table, and no list of sources (it is added).")
 
-    def __init__(self, talk):
-        self.talk = talk
-
-    def answer(self, channel, chat, topic, now):
-        """Research topic, in a thread: its message kept up to date, then the answer in it."""
-        threading.Thread(target=self.researching, args=(channel, chat, topic, now), daemon=True).start()
+    def __init__(self, talk, tracker=None):
+        self.talk, self.tracker = talk, tracker
 
     def researching(self, channel, chat, topic, now):
+        """The research, its message kept up to date: (how it ended, "done" or "blocked", and what it ends with)."""
         head = md(t"🔎 **{topic}**")
+        self.on("searches")
         sent = channel.show(chat, None, f"{head}\n⏳ _working out what to search_")
         internet = Internet()
         unusable = self.unusable(internet)
         if unusable:
-            channel.show(chat, sent, f"{head}\n{unusable}", done=True)
-            return
+            return self.ended(channel, chat, sent, "blocked", f"{head}\n{unusable}")
         busy = "; ".join(r["brief"] for r in now())
         waits = f"\n⏳ _the model is busy with_ {busy}_: it answers after the current step_" if busy else ""
         try:
             searches = self.searches(channel, chat, topic)
             searching = " · ".join(f"`{q}`" for q in searches)
+            self.on("read")
             sent = channel.show(chat, sent, f"{head}\n🌐 _searching:_ {searching}{waits}")
             pages = self.read(internet, searches)
             if not pages:
-                channel.show(chat, sent, md(t"{head:md}\n🤷 **Nothing found on the web** for it: {internet.why()}"),
-                             done=True)
-                return
+                return self.ended(channel, chat, sent, "blocked",
+                                  md(t"{head:md}\n🤷 **Nothing found on the web** for it: {internet.why()}"))
+            self.on("write")
             sent = channel.show(chat, sent, f"{head}\n📖 _read {len(pages)} pages; writing the answer_" + waits)
             told = self.answer_from(channel, chat, topic, pages)
         except OllamaError as exc:
-            channel.show(chat, sent, md(t"{head:md}\n⚠️ **The model did not answer:** {first_words(exc)}"), done=True)
-            return
-        channel.show(chat, sent, f"{head}\n{told}\n\n📚 **Sources**\n{self.sources(pages)}", done=True)
+            return self.ended(channel, chat, sent, "blocked",
+                              md(t"{head:md}\n⚠️ **The model did not answer:** {first_words(exc)}"))
+        return self.ended(channel, chat, sent, "done", f"{head}\n{told}\n\n📚 **Sources**\n{self.sources(pages)}")
+
+    def on(self, phase):
+        if self.tracker is not None:
+            self.tracker.phase(phase)
+
+    @staticmethod
+    def ended(channel, chat, sent, status, text):
+        channel.show(chat, sent, text, done=True)
+        return status, text
 
     def unusable(self, internet):
         """Why a research cannot be made ("" when it can): the web, or the model, not there."""
@@ -1226,8 +1184,8 @@ class Research:
     def searches(self, channel, chat, topic):
         """The web searches the model names for the topic (the topic itself when it names none)."""
         data = json_in(self.talk.ask(channel, chat, [
-            {"role": "system", "content": self.SEARCHES_SYSTEM.format(today=time.strftime("%d %B %Y"),
-                                                                    year=time.strftime("%Y"))},
+            {"role": "system", "content": self.SEARCHES_SYSTEM.format(today=today().strftime("%d %B %Y"),
+                                                                    year=today().strftime("%Y"))},
             {"role": "user", "content": topic}], COMMAND_TOKENS))
         found = [str(q).strip() for q in data.get("searches") or [] if str(q).strip()]
         return list(dict.fromkeys(found))[:RESEARCH_SEARCHES] or [topic]
@@ -1272,7 +1230,7 @@ class Research:
     def answer_from(self, channel, chat, topic, pages):
         """The model's answer from the pages alone, each claim citing its page."""
         return self.talk.ask(channel, chat, [
-            {"role": "system", "content": self.ANSWER_SYSTEM.format(today=time.strftime("%d %B %Y"))},
+            {"role": "system", "content": self.ANSWER_SYSTEM.format(today=today().strftime("%d %B %Y"))},
             {"role": "user", "content": f"The person asks: {topic}\n\n" + "\n\n".join(
                 f"[{n}] {page['title']} ({page['url']})\n{page['content']}" for n, page in enumerate(pages, 1))}],
             CHAT_REPLY_TOKENS)
@@ -1296,7 +1254,6 @@ class Reporter:
         self.on_step = on_step  # told when the message changes (Tinker's status follows it)
         self.keep = keep  # what stays at the top of the task's message (its confirmed plan), above its progress
         self.sent, self.last_edit, self.lock = ({} if sent is None else sent), 0.0, threading.Lock()
-        self.quiet = False  # the run stops for an emergency and goes on: no ending
         self.ended = False
         self.fresh = True  # its first update: the task (re)started from the person's message, below which it shows
         threading.Thread(target=self.keep_up, daemon=True).start()
@@ -1312,7 +1269,7 @@ class Reporter:
             if self.ended:
                 return
             state = self.tracked()
-            went_on = (state or {}).get("resumed", 0) > (self.progress.snapshot.get("resumed") or 0)
+            went_on = ((state or {}).get("resumed") or 0) > (self.progress.snapshot.get("resumed") or 0)
             self.fresh = self.fresh or went_on  # it went on by itself: shown at the bottom, where the person looks
             changed = self.progress.take(state)
             if changed or went_on or time.monotonic() - self.last_edit >= CLOCK_EVERY:
@@ -1349,7 +1306,7 @@ class Reporter:
         with self.lock:
             self.ended = True
             self.progress.take(snapshot or self.tracked())
-            if (self.progress.waiting() or self.progress.snapshot.get("ended")) and not self.quiet:
+            if self.progress.waiting() or self.progress.snapshot.get("ended"):
                 self.say(self.progress.ending(), done=True)
             else:
                 self.update()
@@ -1421,11 +1378,11 @@ class Progress:
         """How the run ended, how long it took, what it made and how to go on."""
         mark = {"done": "✅", "blocked": "⚠️"}.get(ended.get("status"), "⏸")
         took = f"⏱ **Done in {self.took()}**" if ended.get("status") == "done" else f"⏱ _so far: {self.took()}_"
-        lines = [md(t"{mark} **{ended.get('headline', '')}**"), took]
+        lines = ([md(t"{mark} **{ended['headline']}**")] if ended.get("headline") else []) + [took]
         lines += [self.detail(label, value) for label, value in ended.get("details", [])]
         lines += [" · ".join(f"{label}: `{command}`" for label, command in ended.get("next", []))] \
             if ended.get("next") else []
-        return lines
+        return lines + ([ended["text"]] if ended.get("text") else [])
 
     @staticmethod
     def detail(label, value):
@@ -1469,17 +1426,13 @@ class Progress:
 class Attached:
     """A task run from a terminal, reporting to the channels: its tracker (which the run keeps in Tinker's
     home) is shown in its progress message, and the conversation (which reads the chat) answers status from
-    it. That stops it with STOP, as Ctrl-C does (saved), and pauses it for an emergency with PAUSE: the run
-    stops the same way, its tracker says it is paused, it waits for the answer (its tracker is removed
-    then), and goes on here (resumed)."""
+    it. That stops it with STOP, as Ctrl-C does (saved); a job that is paused is stopped the same way."""
 
     def __init__(self, channels, title, tracker):
         self.tracker = tracker
         self.reporter = Reporter(channels, title, pid=os.getpid())
-        self.paused = False
 
     def start(self):
-        signal.signal(PAUSE, self.pause)
         signal.signal(STOP, self.stop)
         self.tracker.change("attached", reports=True)  # a conversation leaves its message to it
         with self.reporter.lock:
@@ -1487,26 +1440,13 @@ class Attached:
             self.reporter.update()
         return self
 
-    def pause(self, signum, frame):
-        self.paused = self.reporter.quiet = True
-        raise KeyboardInterrupt
-
     def stop(self, signum, frame):
         raise KeyboardInterrupt
 
     def end(self):
-        """Stop reporting; True when the run stopped for an emergency, now answered: it goes on."""
+        """Stop reporting: its last state shown, and its tracker taken out of the home."""
         self.reporter.finish(self.tracker.state)
-        if not self.paused:
-            self.tracker.close()
-            return False
-        say.title("Stopped for an emergency from the chat: going on once it is answered.", "🚨")
-        self.tracker.pause()
-        ends = time.monotonic() + RESUME_WAIT
-        while Home.store().get("running", str(self.tracker.pid)) is not None and time.monotonic() < ends:
-            time.sleep(min(1, RESUME_WAIT))
         self.tracker.close()
-        return True
 
 
 def attach(title, tracker):
@@ -1531,7 +1471,7 @@ def chat_channels():
 
 
 def persons_runs(skip=()):
-    """The runs the person started (running): an exercise's give way by themselves, and stop only by exercise stop."""
+    """The runs the person started (running), but an exercise's (its builds; the exercise itself is a job)."""
     return [state for state in running(skip) if not state.get("exercise")]
 
 
@@ -1568,7 +1508,7 @@ def alive(pid):
 
 
 def exercise_switch(text):
-    """True for exercise LANGUAGE, exercise resume and exercise stop: shown in the exercise's message alone."""
+    """True for exercise LANGUAGE: shown in the exercise's message alone."""
     words = text.split()
     return len(words) > 1 and words[0].lstrip("/").lower() == "exercise" and words[1].lower() != "status"
 
@@ -1597,16 +1537,16 @@ def until_ended(pid):
 
 
 def described(state):
-    """{title, brief, text, pid, paused, reports} of a run's tracker, as the conversation shows it (reports: the
-    run reports to the chats by itself)."""
+    """{title, brief, text, pid, reports} of a run's tracker, as the conversation shows it (reports: the run
+    reports to the chats by itself)."""
     progress = Progress(state.get("title") or "a task")
     progress.take(state)
     return {"title": progress.title, "brief": progress.brief(), "text": progress.text(), "pid": state.get("pid"),
-            "paused": bool(state.get("paused")), "reports": bool(state.get("reports"))}
+            "reports": bool(state.get("reports"))}
 
 
 def signal_task(pid, signum):
-    """Send a task run from a terminal a signal (PAUSE or STOP)."""
+    """Send a task run from a terminal a signal (STOP)."""
     try:
         os.kill(pid, signum)
     except ProcessLookupError, PermissionError:

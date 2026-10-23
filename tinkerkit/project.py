@@ -9,6 +9,7 @@ lazy import shutil
 lazy import time
 lazy from pathlib import Path
 
+lazy from .jobs import Jobs
 lazy from .messages import say
 lazy from .prompts import Part, Prompts, Reply
 lazy from .settings import (
@@ -573,7 +574,11 @@ class Tracker:
              "build": ("🔨 Building the practice project", "🔨 Practice project built"),
              "feature": ("➕ Adding a feature to it", "➕ Feature added"),
              "measure": ("📏 Measuring how it went", "📏 Measured"),
-             "reflect": ("📒 Learning from what went wrong and what was slow", "📒 Lessons kept")}
+             "reflect": ("📒 Learning from what went wrong and what was slow", "📒 Lessons kept"),
+             # tinker research's
+             "searches": ("🤔 Working out what to search", "🤔 Searches chosen"),
+             "read": ("🌐 Searching the web and reading the pages", "🌐 Pages read"),
+             "write": ("✍️ Writing the answer from the pages", "✍️ Answer written")}
     STARTING = "🚀 Starting: the model loads"
     QUIET_EVERY = 1.0  # seconds between publishing changes that only move the latest line on
 
@@ -581,7 +586,8 @@ class Tracker:
         self.pid, self.store, self.published = os.getpid(), None, 0.0
         self.state = {"title": title, "run": None, "folder": None, "step": None, "doing": self.STARTING,
                       "began": None, "steps": [], "passing": None, "live": "", "latest": "", "waiting": None,
-                      "ended": None, "before": before, "seconds": 0.0, "paused": False, "pid": self.pid,
+                      "ended": None, "before": before, "seconds": 0.0, "pid": self.pid,
+                      "resumed": time.time() if Jobs.resuming else None,
                       "exercise": os.environ.get(EXERCISE_ENV) == "1"}
 
     @classmethod
@@ -626,11 +632,11 @@ class Tracker:
         self.change("waiting", waiting=plan, live="")
 
     def end(self, ending, seconds):
-        """The run ended (ending: its status, headline, details and the commands to go on)."""
-        self.change("ended", ended=ending, seconds=seconds, live="")
-
-    def pause(self):
-        self.change("paused", paused=True)
+        """The run ended (ending: its status, headline, details and the commands to go on; a job stopped says
+        how to resume it)."""
+        ended = Jobs.ended(ending)
+        paused = {"doing": f"⏸ {ended['headline']}"} if ended.get("status") == "paused" else {}
+        self.change("ended", ended=ended, seconds=seconds, live="", **paused)
 
     def change(self, event, quiet=False, **values):
         self.state.update(values)

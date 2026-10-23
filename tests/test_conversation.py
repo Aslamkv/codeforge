@@ -1,5 +1,6 @@
 """CNV: the conversation: Markup, channels, a task's progress, a chat, a command line, research and the Desk."""
 
+import contextlib
 import io
 import os
 import subprocess
@@ -242,7 +243,7 @@ def snapshot(**state):
     """A run's tracker, as a run publishes it."""
     base = {"title": "calc: a calculator", "run": "abc123", "folder": "/tmp/projects/calc", "step": None,
             "doing": Tracker.STARTING, "began": None, "steps": [], "passing": None, "live": "", "latest": "",
-            "waiting": None, "ended": None, "before": 0.0, "seconds": 0.0, "paused": False}
+            "waiting": None, "ended": None, "before": 0.0, "seconds": 0.0}
     return dict(base, **state)
 
 
@@ -318,13 +319,9 @@ def test_reporter_shows_the_tracker_and_ends_with_its_ending(home_store, monkeyp
 
 
 @pytest.mark.spec("CNV-9")
-def test_a_quiet_reporter_ends_without_its_ending_and_one_without_a_tracker_shows_its_lines(monkeypatch):
+def test_a_reporter_without_a_tracker_shows_its_lines(monkeypatch):
     monkeypatch.setattr(conversation, "EDIT_EVERY", 1000)
     channel = Recorder()
-    reporter = Reporter([channel], "calc", keep="📋 the confirmed plan")
-    reporter.quiet = True
-    reporter.finish(snapshot(ended={"status": "stopped", "headline": "Interrupted", "details": [], "next": []}))
-    assert "Interrupted" not in channel.texts()[-1] and channel.texts()[-1].startswith("📋 the confirmed plan\n\n🔨")
     learning = Reporter([channel], "learn rust", pid=999999)
     learning.printed("  reading 4 pages")
     assert learning.progress.snapshot["latest"] == "reading 4 pages"
@@ -357,7 +354,7 @@ def test_talk_reply(measured_model, fake_ollama, monkeypatch):
 @pytest.mark.spec("CNV-11")
 def test_talk_without_a_model_says_so():
     assert Talk("cmds").reply(Recorder(), Message("1", "hi")).startswith("⚠️ **No model is in use yet**")
-    assert "Busy** with **calc**" in Talk.busy_note([{"brief": "**calc**"}])
+    assert Talk.busy_note([{"brief": "**calc**"}]) == "⏸ **Pausing** **calc** to answer you.\nIt goes on once you have your answer."
     assert "busy or loading" in Talk.busy_note([])
 
 
@@ -439,7 +436,7 @@ if args[:1] == ["help"]:
     sys.exit(0)
 state = {"title": "calc: a calculator", "run": "abc123", "folder": folder, "step": "spec", "doing": "📝 Writing the spec",
          "began": time.time(), "steps": [], "passing": None, "live": "", "latest": "", "waiting": None, "ended": None,
-         "before": 0.0, "seconds": 1.0, "paused": False}
+         "before": 0.0, "seconds": 1.0}
 store.put("running", str(os.getpid()), state)
 print("Plan: the spec (project)", flush=True)
 if args[:1] == ["slow"]:
@@ -489,10 +486,14 @@ def test_desk_answers_commands(desk):
     desk, channel, _ = desk
     assert desk.talk.commands == "task WHAT; status"  # the chat's prompt names tinker help's commands
     replies = {text: desk.answer(Message("1", text), channel) for text in
-               ("task", "status", "stop", "resume", "resume abc123", "channel add", "models", "/Runs")}
+               ("task", "status", "stop", "stop #9", "resume", "resume #9", "resume abc123", "channel add", "models",
+                "/Runs")}
     assert replies["task"].startswith("✍️ Write `task WHAT TO BUILD`")
-    assert replies["status"] == "🟢 **Tinker** · idle: send a task" and replies["stop"] == "💤 No task is running."
-    assert replies["resume"].startswith("✍️ Write `resume [@PROJECT]`") and replies["resume abc123"] == replies["resume"]
+    assert replies["status"] == "🟢 **Tinker** · idle: send a task" and replies["stop"] == "💤 No job is running."
+    assert replies["stop #9"] == "🤷 Job #9 is not running or paused: `jobs` lists them."
+    assert replies["resume"] == "🤷 No job is stopped (jobs lists them)."
+    assert replies["resume #9"] == "🤷 No job #9 (jobs lists them)."
+    assert replies["resume abc123"].startswith("✍️ Write `resume [#JOB | @PROJECT]`")
     assert "asks in a terminal" in replies["channel add"]
     assert replies["models"] == "⚙️ **models**\n```\noutput of models\n```"
     assert replies["/Runs"] == "📚 **Runs**\n```\noutput of runs\n```"
@@ -611,25 +612,28 @@ def test_built_project(tmp_path):
     assert built_project("ccc") is None and built_project("nothing") is None
 
 
-@pytest.mark.spec("CNV-19")
-def test_an_emergency_stops_the_task_answers_and_goes_on(desk):
-    desk, channel, script = desk
-    assert desk.start_task(["slow"], desk.root, "calc") is None
-    wait_until(lambda: desk.task["run"] == "abc123")
-    desk.emergency(channel, Message("1", "is my disk full?"))
-    wait_until(lambda: "resume @abc123" in calls_of(script))
-    assert calls_of(script)[-2:] == ["slow", "resume @abc123"]
-    emergency = next(t for t in reversed(channel.texts()) if t.startswith("🚨 **Emergency:**"))
-    assert "⏸ Stopping calc" in emergency and "No model is in use yet" in emergency and "▶️ **Going on** with" in emergency
-
-
-@pytest.mark.spec("CNV-19")
-def test_one_emergency_at_a_time(desk):
+@pytest.mark.spec("CNV-19", "JOB-10")
+def test_a_chat_pauses_the_job_that_runs_before_it_is_answered(desk, monkeypatch):
     desk, channel, _ = desk
-    desk.urgent = True
-    desk.emergency(channel, Message("1", "help"))
-    assert channel.texts()[-1] == "🚨 An emergency is being answered: one at a time."
-    assert desk.start_task(["task", "x"], desk.root, "x").startswith("🚨 An emergency is being answered")
+    order = []
+
+    @contextlib.contextmanager
+    def pausing():
+        order.append("paused")
+        yield
+        order.append("goes on")
+    monkeypatch.setattr(desk.talk, "pausing", pausing)
+    monkeypatch.setattr(desk.talk, "reply", lambda *asked: order.append("answered") or "the answer")
+    say(desk, channel, "hello there")
+    wait_until(lambda: any("the answer" in text for text in channel.texts()))
+    assert order == ["paused", "answered", "goes on"]
+    assert Desk([channel], desk.root).talk.pausing is conversation.paused_for_you
+
+
+@pytest.mark.spec("JOB-10")
+def test_there_is_no_emergency_command():
+    assert "emergency" not in [c.name for c in conversation.COMMANDS] and conversation.command_of("emergency help") == ""
+    assert not hasattr(Desk, "emergency")
 
 
 ECHO_APP = "import sys\nprint('args:', sys.argv[1:])\nprint('input:', sys.stdin.read().strip())\n"
@@ -698,8 +702,6 @@ def test_desk_refuses_a_chat_another_tinker_listens_to(desk):
 def test_one_shot_commands(monkeypatch, capsys):
     monkeypatch.setattr(conversation, "commands_brief", lambda: "cmds")
     monkeypatch.setattr(sys, "stdin", io.StringIO(""))
-    assert conversation.one_shot("stop", "") is None
-    assert "💤 No task is running." in capsys.readouterr().out
     assert conversation.one_shot("chat", "") == "tinker chat needs words after it, e.g. tinker chat hello"
     assert conversation.one_shot("research", "") == "tinker research needs words after it, e.g. tinker research ..."
     conversation.one_shot("chat", "hello")
@@ -756,7 +758,7 @@ def test_research_in_a_chat(measured_model, fake_ollama, monkeypatch):
 @pytest.fixture
 def attached(monkeypatch, home_store):
     import signal
-    handlers = {sig: signal.getsignal(sig) for sig in (conversation.PAUSE, conversation.STOP)}
+    handlers = {sig: signal.getsignal(sig) for sig in (conversation.STOP,)}
     monkeypatch.setattr(conversation, "EDIT_EVERY", 1000)
     started = []
     channel = Recorder()
@@ -782,31 +784,9 @@ def test_a_terminal_task_reports_and_stops_on_a_signal(attached, home_store):
     with pytest.raises(KeyboardInterrupt):
         os.kill(os.getpid(), conversation.STOP)
         time.sleep(1)
-    assert task.end() is False and home_store.get("running", str(os.getpid())) is None
+    task.end()
+    assert home_store.get("running", str(os.getpid())) is None
     assert "🧠 Recalling what Tinker has learned" in channel.texts()[-1]
-
-
-@pytest.mark.spec("CNV-24")
-def test_a_paused_task_waits_for_its_answer(attached, home_store, monkeypatch):
-    start, channel = attached
-    task = start()
-    with pytest.raises(KeyboardInterrupt):
-        os.kill(os.getpid(), conversation.PAUSE)
-        time.sleep(1)
-    seen = []
-
-    def answer():  # the conversation answers the emergency, then removes the tracker
-        wait_until(lambda: (home_store.get("running", str(os.getpid())) or {}).get("paused"))
-        seen.append(home_store.get("running", str(os.getpid())))
-        home_store.delete("running", str(os.getpid()))
-    threading.Thread(target=answer, daemon=True).start()
-    assert task.end() is True and seen[0]["paused"] and task.reporter.quiet
-    monkeypatch.setattr(conversation, "RESUME_WAIT", 0.2)
-    later = start("calc")
-    with pytest.raises(KeyboardInterrupt):
-        os.kill(os.getpid(), conversation.PAUSE)
-        time.sleep(1)
-    assert later.end() is True and home_store.get("running", str(os.getpid())) is None  # nobody answered: it goes on
 
 
 @pytest.mark.spec("CNV-25")
@@ -856,3 +836,20 @@ def test_the_terminal_opens_the_file_and_other_channels_send_where_it_is(monkeyp
     plain = Recorder()
     plain.send_file("1", page, "🧠 **Tinker's memory**")
     assert plain.texts() == [f"🧠 **Tinker's memory**\n📄 `{page}`"]
+
+
+@pytest.mark.spec("JOB-10")
+def test_a_command_line_run_once_confirmed_pauses_the_job_while_its_output_is_read(tmp_path, monkeypatch):
+    order = []
+
+    @contextlib.contextmanager
+    def pausing():
+        order.append("paused")
+        yield
+        order.append("goes on")
+    talk = Talk("cmds", pausing=pausing)
+    monkeypatch.setattr(talk, "model", lambda: ("m", {}, None))
+    monkeypatch.setattr(talk, "ask", lambda *asked: order.append("read") or "it says hi")
+    channel = Recorder()
+    Shell(talk, tmp_path).run(channel, "1", {"line": "echo hi", "asked": "say hi", "shown": None})
+    assert order == ["paused", "read", "goes on"] and "it says hi" in channel.texts()[-1]

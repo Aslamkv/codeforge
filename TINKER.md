@@ -156,7 +156,7 @@ tinker log @calc-py
 tinker log @calc-py --calls
 ```
 
-Go on with a run that stopped, or build a project again from scratch (it asks first):
+Go on with a project's run that stopped, or build a project again from scratch (it asks first):
 
 ```sh
 tinker resume @calc-py
@@ -190,12 +190,8 @@ tinker run @calc-py add 5 2
 
 In the conversation or a chat, give it input after `<<<`: `run @calc-py <<< 2+2`.
 
-Stop the tasks that run (they are saved), or stop them just long enough to answer you:
-
-```sh
-tinker stop
-tinker emergency how full is my disk
-```
+While a job runs, just ask: a chat or a command line pauses it (it saves itself), you are answered at once, and
+the job goes on as soon as you have your answer (see [Jobs](#jobs-)).
 
 ## Chat Channels 📡
 
@@ -298,20 +294,54 @@ first (this needs the web). Words that are not one language are said so, and not
 ```sh
 tinker exercise rust           # start, or go on from where it stopped
 tinker exercise status         # how it is going: each project's measures, and what it practises next
-tinker exercise stop           # stop it; everything is kept
-tinker exercise resume         # go on with the exercise you left last
-tinker exercise resume python  # go on with that language's exercise
 ```
 
-One exercise runs at a time, and each language keeps its own projects and lessons. To switch, stop the one
-that runs, then start or resume the other.
+An exercise is a [job](#jobs-): `tinker stop #N` stops it with everything kept, and `tinker resume #N` goes on.
+One exercise runs at a time, and each language keeps its own projects and lessons. Starting another pauses the
+one that runs.
 
-You come first. Whenever you ask for something (a chat, a command, a task, or a `tinker` run in another
-terminal), its build stops and saves itself. The exercise goes on once Tinker has been idle for two minutes.
+You come first, as with any job: a chat, a command line or a job you start pauses it (its build stops and
+saves itself), and the exercise goes on as soon as nothing else runs and you have your answer.
 It runs until you stop it. In a chat, `exercise rust` starts it in the background, so it keeps going after
 the conversation ends. It keeps one message, whether it is started, stopped or resumed, and that message shows
 what its build is doing right now, as a task's does. A conversation
 started later picks up the exercise's message again.
+
+## Jobs ⏯
+
+Everything that takes a while is a job: a task, `add`, `fix`, `learn`, `ask`, `teach`, `research` and
+`exercise`. Each gets a number (`#1`, `#2` ...).
+
+One job runs at a time. Start another, of any kind, or chat with Tinker, and the one that runs is paused: it
+saves itself and waits, and you are answered at once. As soon as Tinker is idle (no job runs, and nothing you
+asked is still being answered), the job paused last goes on by itself, then the one before it. There is no
+waiting time.
+
+List them, newest first, 10 to a page:
+
+```sh
+tinker jobs              # the running ones, then the paused ones, then the stopped ones
+tinker jobs paused       # only the paused ones (or running, stopped, finished)
+tinker jobs finished 2   # the second page
+```
+
+Stop one, or the one that runs. What it did is kept. A paused job you stop no longer goes on by itself:
+
+```sh
+tinker stop #3
+tinker stop
+```
+
+Go on where it stopped, even days later. What it already asked the model and the web is answered from the
+job's own journal, so no search or model call is made twice; it works live again from the first new step:
+
+```sh
+tinker resume #3         # a paused one goes on at once
+tinker resume            # the job stopped last
+```
+
+A job that was killed (or the computer restarted) shows as stopped, and resumes the same way. Once a job
+finishes, its journal is deleted. In a chat, the same words work: `jobs`, `stop #3`, `resume #3`.
 
 ## Settings 🔧
 
