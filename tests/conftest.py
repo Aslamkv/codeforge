@@ -2,6 +2,7 @@
 holds live settings, secrets and locks), with no network, and with a scripted Ollama when it needs a model."""
 
 import json
+import signal
 import socket
 import sys
 import time
@@ -37,6 +38,18 @@ def quiet_voice():
     yield
     say.reset()
 
+
+@pytest.fixture(autouse=True)
+def no_job():
+    """Each test starts as a process that runs no job (a job's state is kept on the class, for its process)."""
+    from tinkerkit.jobs import STOP, Jobs
+    handler = signal.getsignal(STOP)
+    Jobs.current = Jobs.journal = Jobs.ending = None
+    Jobs.resuming = False
+    yield
+    Jobs.current = Jobs.journal = Jobs.ending = None
+    Jobs.resuming = False
+    signal.signal(STOP, handler)
 
 @pytest.fixture
 def home_store(tinker_home):

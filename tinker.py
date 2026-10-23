@@ -24,15 +24,16 @@ Usage (a project is named as @ID or @folder; without one, it is this folder's):
     tinker                                talk with Tinker here: every command below, and a normal chat
     tinker task a calculator in Python [--spec plan.md] [--web] [--confirm]   plan it, then build it
     tinker restart [--yes]                build this folder's task again from scratch (asks first)
-    tinker resume [@PROJECT] | tinker confirm [@PROJECT] | tinker amend [@PROJECT] CHANGE
+    tinker confirm [@PROJECT] | tinker amend [@PROJECT] CHANGE
     tinker rename [@PROJECT] NAME         rename the folder of a project whose plan waits
     tinker add [@PROJECT] Add a feature [--spec feature.md] [--web] [--confirm]
     tinker fix [@PROJECT] Describe a bug: what you do, what happens, what should happen [--web] [--confirm]
     tinker status [@PROJECT] | tinker runs | tinker log [@PROJECT] [--calls]
-    tinker chat MESSAGE | tinker command WHAT | tinker research TOPIC | tinker stop | tinker emergency MESSAGE
+    tinker chat MESSAGE | tinker command WHAT | tinker research TOPIC   (each pauses the job that runs)
+    tinker jobs [running|paused|stopped|finished] [PAGE] | tinker stop [#JOB] | tinker resume [#JOB | @PROJECT]
     tinker learn WHAT                     learn a language, a tool or a domain (Tinker tells which)
     tinker learn NAME ["DEFINITION"]      a command of yours Tinker may use (an alias in your shell)
-    tinker exercise LANGUAGE | stop | status   practise a language on its own; it pauses whenever you ask
+    tinker exercise LANGUAGE | status    practise a language on its own; it pauses whenever you ask
     tinker doctor                         what is missing or wrong, and the command that fixes it
     tinker models | tinker calibrate NAME | tinker use-model NAME | tinker embed NAME | tinker use-web NAME
     tinker config [KEY VALUE] | tinker memory | tinker clear PART... | tinker reset [--yes]
@@ -225,6 +226,7 @@ from tinkerkit.building import BugReproducer, CodeWriter, TestToolSetup, TestWri
 from tinkerkit.commands import BY_NAME, COMMANDS, GROUPS, refs
 from tinkerkit.finishing import FinalReview, LessonWriter, ReadmeWriter, Tidy
 from tinkerkit.graph import write_page
+from tinkerkit.jobs import STATES, Jobs, job_number
 from tinkerkit.knowledge import Embeddings, Library
 from tinkerkit.learning import LearnStopped, SlotLearner
 from tinkerkit.messages import Messages, human_duration, say
@@ -255,21 +257,27 @@ def main():
     for a reason that is not a bug (Ollama, a file, Ctrl-C) ends with what happened, not a traceback."""
     script_started, started_at = time.perf_counter(), datetime.datetime.now()
     try:
-        args = Cli.parse()
-        if args.reset:
-            return Home.reset(args.yes)
-        Home.ensure()
-        if Cli.works_for_hours(args):
-            Home.keep_awake()
-        if Commands(args).run():
-            return
-        ProjectRun(args, script_started, started_at).execute()
+        argv = Jobs.arguments(sys.argv[1:])
+        with Jobs.running(argv):
+            run(Cli.parse(argv), script_started, started_at)
     except KeyboardInterrupt:  # Ctrl-C: what each part saves is saved as it goes
         raise SystemExit("\nInterrupted.")
     except OllamaError as exc:  # Ollama failed past every retry (a run handles it itself, and saves)
         raise SystemExit(f"\n{exc}")
     except OSError as exc:  # a file or folder that cannot be read or written (full disk, permissions)
         raise SystemExit(f"\n{exc.strerror or exc}: {exc.filename or ''}".rstrip(": "))
+
+
+def run(args, script_started, started_at):
+    """tinker reset, a command that shows or changes something (then it exits), or a run on a project."""
+    if args.reset:
+        return Home.reset(args.yes)
+    Home.ensure()
+    if Cli.works_for_hours(args):
+        Home.keep_awake()
+    if Commands(args).run():
+        return
+    ProjectRun(args, script_started, started_at).execute()
 
 
 class Cli:
@@ -281,14 +289,14 @@ class Cli:
     EXAMPLES = ("tinker", "tinker doctor", "tinker task a calculator in Python", "tinker add keep a history of results",
                 "tinker research the newest Python release", "tinker help task")
     TALK = tuple(c.name for c in COMMANDS if c.group == "Talk" and c.cli)  # the conversation's own (one_shot)
-    TITLES = {"Build": "🔨 Build", "Learn": "🧠 Learn", "Set up": "🔧 Set up", "Talk": "💬 Talk",
+    TITLES = {"Build": "🔨 Build", "Learn": "🧠 Learn", "Jobs": "⏯ Jobs", "Set up": "🔧 Set up", "Talk": "💬 Talk",
               "Channels": "📡 Channels"}
     RUNS = tuple(c.name for c in COMMANDS if c.run and c.name != "confirm")
     COMMANDS = tuple(c.name for c in COMMANDS if c.cli and c.group != "Talk" and c.name not in ("help", "channel",
                                                                                                 "confirm"))
     LEARNING = ("learn", "exercise")  # the commands that load the model for long (but for teaching a command)
     FIELDS = {"reset": False, "config": None, "models": False, "use_model": None, "embed": None, "use_web": None,
-              "calibrate": None, "learn": None, "ask": None, "teach": None, "exercise": None, "memory": False, "runs": False, "status": None, "log": None,
+              "calibrate": None, "learn": None, "ask": None, "teach": None, "exercise": None, "memory": False, "runs": False, "status": None, "log": None, "jobs": None, "stop": None,
               "doctor": False, "task": None, "spec": None, "spec_file": None, "restart": False, "resume": None,
               "amend": None, "add": None, "fix": None, "workdir": None, "web": False, "confirm": False,
               "rename": None, "yes": False, "calls": False, "graph": False}
@@ -479,6 +487,8 @@ class Cli:
             args.rename = Cli.renamed(given.words, parser)
         elif command == "learn":
             args.learn = Cli.learning(given.words, parser)
+        elif command in ("jobs", "stop"):
+            setattr(args, field, Cli.job_words(command, given.words, parser))
         elif command in ("ask", "teach", "exercise"):
             setattr(args, field, Cli.non_empty(" ".join(given.words), command, parser))
         elif command == "config":
@@ -507,6 +517,20 @@ class Cli:
             parser.error("use tinker rename NAME or tinker rename @PROJECT NAME; a name is letters, digits, - _ "
                          "and ., starting with a letter or digit")
         return name, rest[0]
+
+    @staticmethod
+    def job_words(command, words, parser):
+        """jobs [STATE] [PAGE]: (the state or None, the page); stop [#JOB]: the job's number or None."""
+        if command == "stop":
+            number = job_number(words[0]) if len(words) == 1 else None
+            if words and number is None:
+                parser.error("use tinker stop (every job of yours that runs) or tinker stop #N (tinker jobs lists them)")
+            return number
+        state = words[0] if words and words[0] in STATES else None
+        rest = words[1:] if state else words
+        if len(rest) > 1 or (rest and not (rest[0].isdigit() and int(rest[0]) >= 1)):
+            parser.error("use tinker jobs [running|paused|stopped|finished] [PAGE], e.g. tinker jobs finished 2")
+        return state, int(rest[0]) if rest else 1
 
     @staticmethod
     def learning(words, parser):
@@ -616,6 +640,10 @@ class Commands:
             self.show_memory(args.graph)
         elif args.runs:
             self.list_runs()
+        elif args.jobs is not None:
+            self.list_jobs(*args.jobs)
+        elif args.command == "stop":
+            self.stop(args.stop)
         elif args.status is not None:
             self.show_status(args.status, args.workdir)
         elif args.log is not None:
@@ -822,16 +850,13 @@ class Commands:
 
     def exercise(self):
         """tinker exercise LANGUAGE: practice projects in that language, one after another, until it is stopped
-        (exercising.Exercise); tinker exercise stop stops the one that runs, everything kept; tinker exercise resume
-        [LANGUAGE] goes on with the one named, else the one left last; tinker exercise status shows how each is going.
-        Its tracker reports to the chats too, as a run's does."""
+        (exercising.Exercise; a job: tinker stop #N stops it, everything kept, tinker resume #N goes on); tinker
+        exercise status shows how each is going. Its tracker reports to the chats too, as a run's does."""
         what = self.args.exercise
-        if what.lower() == "stop":
-            return exercising.stop()
         if what.lower() == "status":
             return exercising.show()
-        if what.split()[0].lower() == "resume":
-            what = exercising.Exercises.resumed(what.split()[1:])
+        if what.split()[0].lower() in ("stop", "resume"):
+            raise SystemExit(f"An exercise is a job: tinker {what.split()[0].lower()} #N (tinker jobs lists them).")
         active = exercising.Exercises.active()
         if active:
             raise SystemExit(exercising.already_running(active))
@@ -1025,6 +1050,41 @@ class Commands:
                      f"{Commands.short_folder(e.get('workdir', '')):32} {task[:60] + ('...' if len(task) > 60 else '')}")
 
     @staticmethod
+    def list_jobs(state, page):
+        """tinker jobs: the jobs in a state (none: the running, paused and stopped ones), newest first, a page
+        of them at a time."""
+        jobs = Jobs.listed(state)
+        if not jobs:
+            say.text(f"No {state or 'running, paused or stopped'} jobs.")
+            return
+        shown, pages = Jobs.page(jobs, page)
+        say.text(f"{'JOB':6} {'STATE':9} {'STARTED':17} COMMAND")
+        for job in shown:
+            title = job["title"][:70] + ("..." if len(job["title"]) > 70 else "")
+            say.text(f"{'#' + str(job['number']):6} {job['state']:9} {job['started']:17} {title}")
+        if page < pages:
+            say.text(f"\nPage {page} of {pages}: tinker jobs {(state + ' ') if state else ''}{page + 1} for more.")
+        elif pages > 1 or page > 1:
+            say.text(f"\nPage {page} of {pages}.")
+
+    @staticmethod
+    def stop(number):
+        """tinker stop #N: that job told to stop, as Ctrl-C stops it (it saves what it did); tinker stop: the job that
+        runs, whatever it is."""
+        if number is not None:
+            job = Jobs.get(number)
+            if job is None or job["state"] not in ("running", "paused"):
+                raise SystemExit(f"Job #{number} is not running or paused (tinker jobs lists them).")
+            jobs = [job]
+        else:
+            jobs = Jobs.listed("running")
+        if not jobs:
+            say.info("No job is running.", "💤")
+        for job in jobs:
+            Jobs.stop(job)
+            say.done(f"Stopping #{job['number']} {job['title']}: it saves itself; tinker resume #{job['number']} goes on.")
+
+    @staticmethod
     def short_folder(workdir):
         """The folder in at most 32 chars: under ~, and cut at its start (its name is what identifies it)."""
         home = str(Path.home())
@@ -1197,17 +1257,14 @@ class ProjectRun:
         say.follow(self.tracker.heard)
         self.open()
         listening = conversation.attach(self.tracker.state["title"], self.tracker)
-        urgent = False
         try:
             self.work_safely()
             self.finish()
         finally:  # the summary is printed first, so the channels show it too
             if listening:
-                urgent = listening.end()
+                listening.end()
             elif os.environ.get(conversation.OFF) != "off":  # the conversation that started it reads it last
                 self.tracker.close()
-        if urgent:
-            self.go_on_after_emergency()
         sys.exit(self.outcome.exit_code)
 
     def check_requirements(self):
@@ -1234,6 +1291,7 @@ class ProjectRun:
         self.record, workdir, self.spec_text, self.mode = Runs.open(args)
         project = Project.load(workdir, self.record)
         self.tracker.project(project.store, self.record["id"], workdir, f"{workdir.name}: {self.record['task']}")
+        Jobs.retarget(["resume", f"@{self.record['id']}"])
         self.log = Log(project.store, "events")
         say.keep_log(self.log)
         model = Model(model_name, settings, Config.keep_alive(Config.get("keep_alive")), self.log,
@@ -1490,12 +1548,6 @@ class ProjectRun:
         return [f"Stopped: {green}/{total} tests pass; {parked} parked after fixing and a review against the plan:"] + \
             [f"  {s['id']} {s['title']}: {first_line(s.get('last_error', ''), 160)}" for s in session.project.parked()] + \
             [f"Change what it cannot (the request, the plan, a dependency), then: tinker resume @{run_id}"]
-
-    def go_on_after_emergency(self):
-        """Stopped to answer an emergency from a chat, now answered: the run goes on, as tinker resume."""
-        say.title("An emergency from a chat is answered: resuming.", "🚨")
-        sys.stdout.flush()
-        os.execv(sys.executable, [sys.executable, str(Path(sys.argv[0]).resolve()), "resume", f"@{self.record['id']}"])
 
 
 class ProjectFolder:

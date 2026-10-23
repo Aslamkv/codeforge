@@ -62,10 +62,6 @@ COMMANDS = [
     Command("restart", "Build", "restart [--yes]", "build this folder's task again from scratch (asks first)",
             "Build this folder's task again from scratch: everything in it is deleted (after asking, or with --yes), "
             "but for its spec file.", chat="long", run=True, deletes=True, options=("yes", "confirm", "workdir")),
-    Command("resume", "Build", "resume [@PROJECT]", "continue a project's run (a plan that waits: build it)",
-            "Continue a run: this folder's, or the project named (@ID or @folder, from anywhere). A plan that waits "
-            "for confirmation is confirmed: building starts.", chat="long", words="one", run=True,
-            arguments=[PROJECT], options=RUN_OPTIONS, example="resume @calc-py"),
     Command("confirm", "Build", "confirm [@PROJECT]", "build the plan that waits for your confirmation",
             "Build the plan that waits for confirmation (as resume).", chat="own", words="one", run=True,
             arguments=[PROJECT], options=RUN_OPTIONS),
@@ -117,19 +113,39 @@ COMMANDS = [
             "web (tinker use-web).", chat="long", words="any",
             arguments=[Argument("words", "+", "WHAT", "what to correct, and why (no quotes needed)")],
             example="teach ruff formats Python as black does, so ruff alone is enough"),
-    Command("exercise", "Learn", "exercise LANGUAGE | resume [LANGUAGE] | stop | status",
+    Command("exercise", "Learn", "exercise LANGUAGE | status",
             "practise a language on its own: get better, faster, and learn from mistakes",
             "Practise a language on its own, to write better code faster: Tinker learns the language first when it "
             "has not, then builds small practice projects one after another in their own folders (in "
             "tinker-exercise in the projects folder), each followed by a feature, measures each one (time, model "
             "calls, fixes, what failed) and keeps lessons from its mistakes and slow steps; the next projects prove "
-            "them or retire them. It gives way to you: whatever you ask, it pauses, and goes on once Tinker is idle. "
-            "exercise stop stops it, everything kept; exercise resume goes on from there (with the language named, "
-            "else the exercise left last). One exercise runs at a time; each language keeps its own. exercise status "
-            "shows how each is going. A word that is not one language (or could be several) is said so, and nothing "
-            "is done.",
-            chat="own", words="any", arguments=[Argument("words", "+", "LANGUAGE | resume [LANGUAGE] | stop | status")],
+            "them or retire them. You come first, as with every job: a chat or a job of yours pauses it, and it goes on "
+            "once Tinker is idle. "
+            "It is a job: stop #N stops it, everything kept; resume #N (or exercise LANGUAGE) goes on from there. One "
+            "exercise runs at a time; each language keeps its own. exercise status shows how each is going. A word "
+            "that is not one language (or could be several) is said so, and nothing is done.",
+            chat="own", words="any", arguments=[Argument("words", "+", "LANGUAGE | status")],
             example="exercise rust"),
+    Command("jobs", "Jobs", "jobs [running|paused|stopped|finished] [PAGE]", "the long commands: running, paused, stopped",
+            "List the jobs: every long command (a task, add, fix, learn, ask, teach, research, exercise) is one, numbered "
+            "#1, #2 ... One runs at a time: a job you start pauses the one that runs, which goes on by itself once Tinker "
+            "is idle (resume #N: at once). Without a state, the running ones, the paused ones and the stopped ones; "
+            "running, paused, stopped or finished lists those alone. Newest first, 10 to a page (jobs stopped 2: the "
+            "second page).", chat="quick", words="any",
+            arguments=[Argument("words", "*", "[STATE] [PAGE]", "running, paused, stopped or finished; the page, from 1")],
+            example="jobs stopped"),
+    Command("stop", "Jobs", "stop [#JOB]", "stop a job (it is saved): the one that runs, or #N",
+            "Stop a job as Ctrl-C does: what it did is kept, and resume #N goes on from there. Without a number, the "
+            "job that runs, whatever it is. A paused job that is stopped no longer goes on by itself.",
+            chat="own", words="one", arguments=[Argument("words", "*", "[#JOB]", "the job, as jobs numbers it")],
+            example="stop #3"),
+    Command("resume", "Jobs", "resume [#JOB | @PROJECT]", "go on with a stopped job, or a project's run",
+            "Go on with a stopped job where it stopped (#N; without one, the job stopped last): what it asked the "
+            "model and the web before is answered from its journal, not asked again. resume @PROJECT continues a "
+            "project's run (@ID or @folder, from anywhere; with no job stopped, this folder's); a plan that waits for "
+            "confirmation is confirmed: building starts.", chat="long", words="one", run=True,
+            arguments=[Argument("words", "*", "[#JOB | @PROJECT]", "the job (#N) or the project (@ID or @folder)")],
+            options=RUN_OPTIONS, example="resume #3"),
     Command("memory", "Learn", "memory [--graph]", "what Tinker has learned (--graph: as a graph to explore)",
             "Show what Tinker has learned: toolchains, fixes, lessons, topics, your commands. --graph draws it as a "
             "graph in one page (opened in the browser; in a chat, sent as a file): each lesson, fact and fix linked "
@@ -170,16 +186,14 @@ COMMANDS = [
             words="one", arguments=[Argument("command", "?", "COMMAND")]),
     Command("", "Talk", "(no command)", "talk with Tinker here: every command, and a normal chat (exit ends it)",
             cli=False),
-    Command("chat", "Talk", "chat MESSAGE", "a normal chat with the model", words="any", example="chat hello"),
+    Command("chat", "Talk", "chat MESSAGE", "a normal chat with the model (the job that runs is paused for it)",
+            words="any", example="chat hello"),
     Command("command", "Talk", "command WHAT", "the command line that does it, run once you confirm", chat="own",
             words="any", example="command show the free disk space"),
     Command("research", "Talk", "research TOPIC", "the web searched, answered with its sources", chat="own",
             words="any", example="research the newest Python release"),
     Command("run", "Talk", "run [@PROJECT] ARGS", "run a built project (the last one built, by default) with these "
             "arguments; <<< TEXT gives it input", chat="own", words="any", example="run 5 + 3"),
-    Command("stop", "Talk", "stop", "stop the tasks that run (they are saved)", chat="own"),
-    Command("emergency", "Talk", "emergency MESSAGE", "stop what runs, answer now, then go on", chat="own",
-            words="any", example="emergency is my disk full?"),
     Command("exit", "Talk", "exit", "end the conversation (in a chat, once confirmed)", chat="own", cli=False),
     Command("channel", "Channels", "channel ACTION", "the chat channels", chat="quick", words="any",
             rows=[("channel list", "the chat channels (Telegram), and which are enabled"),
@@ -187,10 +201,10 @@ COMMANDS = [
                   ("channel remove NAME", "delete a channel and its token"),
                   ("channel enable NAME", "every task reports to it; tinker channel start reads it"),
                   ("channel disable NAME", "stop using it (channels start disabled)"),
-                  ("channel start [NAME]", "read the chat: tasks, status, stop, emergency, commands, or just chat")]),
+                  ("channel start [NAME]", "read the chat: tasks, status, jobs, stop, commands, or just chat")]),
 ]
 BY_NAME = frozendict({command.name: command for command in COMMANDS if command.name})
-GROUPS = ("Build", "Learn", "Set up", "Talk", "Channels")
+GROUPS = ("Build", "Learn", "Jobs", "Set up", "Talk", "Channels")
 TERMINAL_ONLY = ("add", "remove", "start")  # tinker channel's actions that ask in a terminal (a token, a pairing)
 
 

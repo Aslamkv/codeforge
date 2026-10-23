@@ -10,6 +10,7 @@ lazy import urllib.error
 lazy import urllib.parse
 lazy import urllib.request
 
+lazy from .jobs import journaled
 from .messages import human_duration, say
 lazy from .prompts import Part, Prompts, PromptTooLarge, Reply
 from .settings import (
@@ -734,7 +735,14 @@ class Ollama:
         """Stream one chat request (a live line in plain words when labelled, say.live). done_when(content)
         says when the reply is complete: the stream is
         closed there, which stops Ollama generating. Returns the final stats chunk with message.content
-        set to the reply."""
+        set to the reply. In a job, a request it made before is answered from its journal."""
+        if not messages:  # unloading the model
+            return Ollama.streamed(name, messages, keep_alive, options, think, label, done_when, timeout)
+        return journaled({"chat": name, "messages": messages, "options": options, "think": think},
+                         lambda: Ollama.streamed(name, messages, keep_alive, options, think, label, done_when, timeout))
+
+    @staticmethod
+    def streamed(name, messages, keep_alive, options, think, label, done_when, timeout):
         payload = Ollama.chat_payload(name, messages, keep_alive, options, think)
         stream = Stream(label, done_when)
         try:

@@ -18,7 +18,6 @@ usable pages:
   KEEP       saved (only now), the old proven copies retired, and indexed
 A gate that stops the run raises LearnStopped, and a model that fails ends it too: nothing is learned then."""
 
-lazy import datetime
 lazy import json
 lazy import threading
 lazy import time
@@ -26,6 +25,7 @@ lazy import urllib.parse
 lazy from collections import Counter
 
 lazy from .docsite import DocSite
+lazy from .jobs import today
 lazy from .knowledge import Learner, Library, Researcher, Retriever, language_key
 from .messages import Message, Messages, say
 lazy from .model import OllamaError
@@ -269,7 +269,7 @@ class SlotLearner:
         found = "\n".join(f"- {r['title']} ({r['url']}): {first_line(r['content'], 200)}" for r in results)
         slots = lambda profile: "\n".join(f"- {slot.id}: {fill(slot.question, {'name': self.topic}, '')}"
                                           for slot in web_slots(profile))
-        return [Part("Topic", self.topic, True), Part("Today", datetime.date.today().isoformat(), True),
+        return [Part("Topic", self.topic, True), Part("Today", today().isoformat(), True),
                 Part("Pages found", found, True), Part("Slots of a language", slots("language"), True),
                 Part("Slots of a tool", slots("tool"), True)]
 

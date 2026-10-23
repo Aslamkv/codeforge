@@ -12,6 +12,7 @@ lazy import urllib.parse
 lazy import urllib.request
 
 lazy from .fetcher import Fetcher
+lazy from .jobs import journaled
 from .messages import say
 from .settings import Config, first_line, is_number
 
@@ -145,7 +146,11 @@ class Internet:
                        int(Config.get("fetch_max_bytes")), float(Config.get("fetch_domain_delay")), log=log)
 
     def search(self, query, count):
-        """[{title, url, content}] the web search finds (web addresses only), or None."""
+        """[{title, url, content}] the web search finds (web addresses only), or None. In a job, a search it made
+        before is answered from its journal."""
+        return journaled({"search": query, "count": count}, lambda: self.searched(query, count))
+
+    def searched(self, query, count):
         found = self.call(query, lambda backend: backend.search(query, count),
                           lambda r: isinstance(r, list) or "its search gave no list")
         if found is None:
@@ -158,7 +163,11 @@ class Internet:
                 "content": str(found.get("content") or "")}
 
     def fetch(self, url):
-        """{title, url, content} of a web page, its main text, or None: from the backends in turn."""
+        """{title, url, content} of a web page, its main text, or None: from the backends in turn. In a job, a page
+        it fetched before is given from its journal."""
+        return journaled({"fetch": url}, lambda: self.fetched(url))
+
+    def fetched(self, url):
         usable = lambda page: (isinstance(page, dict) and bool(str(page.get("content") or "").strip())
                                or "its fetch gave no text")
         page = self.call(url, lambda backend: backend.fetch(url), usable)

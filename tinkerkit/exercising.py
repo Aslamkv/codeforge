@@ -6,28 +6,26 @@ the project, then one feature added to it. Each is measured (its time, model cal
 nothing made pass, README examples that failed, its slowest steps), and one call turns its problems into lessons
 for the language, kept as candidates: the next projects prove or retire them, as every build does.
 
-Each build is a tinker of its own, which saves itself as it goes. The person comes first: whatever they ask (a
-message, a command, a run of their own), the build stops, and the exercise goes on once Tinker has been idle for
-EXERCISE_QUIET seconds. Its tracker shows what the build does now, as the build's own tracker says it. tinker
-exercise stop stops it with everything kept; tinker exercise resume (or tinker exercise LANGUAGE) goes on from where
-it was."""
+Each build is a tinker of its own, which saves itself as it goes. The exercise is a job, so the person comes first
+as with every job: a chat, a command line or a job of theirs pauses it (its build stops, saving itself), and it
+goes on once Tinker is idle. Its tracker shows what the build does now, as the build's own tracker says it. tinker
+stop #N stops it with everything kept; tinker resume #N (or tinker exercise LANGUAGE) goes on from where it was."""
 
 import os
 import re
 import signal
 import subprocess
-import threading
 import time
-from contextlib import contextmanager
 from pathlib import Path
 
 from .messages import say
-lazy from .conversation import OFF, PAUSE, STOP, STOP_WAIT, alive, running, signal_task, tinker_process
+lazy from .conversation import OFF, STOP, STOP_WAIT, alive, tinker_process
+lazy from .jobs import Jobs
 lazy from .knowledge import Knowledge, Library, language_key
 lazy from .project import Project, saved
 lazy from .prompts import Part, Prompts
 lazy from .settings import (
-    EXERCISE_ENV, EXERCISE_FOLDER, EXERCISE_LOOK, EXERCISE_PROBLEMS, EXERCISE_QUIET, EXERCISE_SHOWN, Home, first_line,
+    EXERCISE_ENV, EXERCISE_FOLDER, EXERCISE_LOOK, EXERCISE_PROBLEMS, EXERCISE_SHOWN, Home, first_line,
     now_text, projects_folder, similarity,
 )
 
@@ -38,10 +36,6 @@ FOLDER_RE = re.compile(r"[a-z][a-z0-9]*(?:-[a-z0-9]+){0,3}")
 RETRIED_RE = re.compile(r"\(attempt [2-9]")
 
 
-class GaveWay(BaseException):
-    """The exercise's own model call, given up for the person (PAUSE, sent to itself)."""
-
-
 class Exercise:
     """One language's exercise, run until it is stopped (the module says how)."""
 
@@ -50,13 +44,11 @@ class Exercise:
         self.start = start or start_tinker  # how a build starts: start(arguments) -> its process
         self.process = None  # the build that runs now
         self.doing = ""  # what the exercise's own step does (a build's progress is shown after it)
-        self.calling = False  # a model call of its own runs: the person wanting Tinker gives it up
 
     def run(self, asked):
         """The exercise of the language the words name, until it is stopped; its ending."""
         signal.signal(STOP, interrupted)
-        signal.signal(PAUSE, self.give_way)
-        self.tracker.change("exercise", exercise=True)  # its own runs, not the person's: never paused or stopped as theirs
+        self.tracker.change("exercise", exercise=True)  # its own runs, not the person's: shown as the exercise
         self.on_to("identify")
         exercise = Exercises.of(identified(self.model, asked))
         Exercises.claim(exercise)
@@ -98,12 +90,11 @@ class Exercise:
 
     def picked(self, exercise):
         """The next practice project, chosen by one call: new, a little harder, practising the focus first."""
-        self.wait_until_quiet()
         self.on_to("pick")
         name, earlier = exercise["language"], [p["task"] for p in exercise["projects"]]
         parts = [Part("Language", name, True), Part("Focus", exercise.get("focus") or "(none yet)", True),
                  Part("Earlier projects", "\n".join(f"- {task}" for task in earlier[-30:]) or "(none yet)", True)]
-        choice = self.asked(Prompts.EXERCISE_PROJECT_SYSTEM, parts, "exercise: next project",
+        choice = self.model.ask_until_usable(Prompts.EXERCISE_PROJECT_SYSTEM, parts, "exercise: next project",
                             lambda reply: read_choice(reply.json(), name, earlier))
         if choice is None:
             raise SystemExit(f"{self.model.name} could not choose a practice project; the exercise stopped, "
@@ -143,11 +134,10 @@ class Exercise:
     def reflect(self, exercise, project):
         """One call turns what went wrong and what was slow into lessons for the language (candidates, proven or
         retired by the next builds), and says what the next project should practise."""
-        self.wait_until_quiet()
         self.on_to("reflect")
         folder = Path(project["folder"])
         knowledge = Knowledge(exercise["language"], (run_of(folder) or {}).get("id"))
-        reflection = self.asked(Prompts.EXERCISE_REFLECT_SYSTEM,
+        reflection = self.model.ask_until_usable(Prompts.EXERCISE_REFLECT_SYSTEM,
                                 reflection_parts(exercise, project, knowledge.known_lessons()),
                                 "exercise: lessons", lambda reply: read_reflection(reply.json()), attempts=2)
         if reflection is None:
@@ -159,61 +149,14 @@ class Exercise:
         say.done(f"{project['lessons']} new lesson(s), {len(reflection['confirmed'])} confirmed; next focus: "
                  f"{exercise['focus'] or '(none)'}")
 
-    def asked(self, *call, **options):
-        """One of the exercise's own model calls (model.ask_until_usable): whenever the person wants Tinker, it is
-        given up at once, as a build is, and asked again once Tinker is idle."""
-        while True:
-            self.wait_until_quiet()
-            try:
-                with self.giving_way():
-                    return self.model.ask_until_usable(*call, **options)
-            except GaveWay:
-                say.info("You come first: the exercise stops its call and asks again once Tinker is idle.", "⏸")
-
-    @contextmanager
-    def giving_way(self):
-        """While the block runs, the person wanting Tinker interrupts it (GaveWay)."""
-        done = threading.Event()
-
-        def watch():
-            while not done.wait(EXERCISE_LOOK):
-                if person_busy():
-                    os.kill(os.getpid(), PAUSE)
-                    return
-        self.calling = True
-        threading.Thread(target=watch, daemon=True).start()
-        try:
-            yield
-        finally:
-            self.calling = False
-            done.set()
-
-    def give_way(self, signum, frame):
-        if self.calling:  # a signal that comes once the call is over is left alone
-            self.calling = False
-            raise GaveWay
-
     def built(self, arguments):
-        """A tinker of its own (arguments() says how to start it, from where it is), run to its end: whenever the
-        person wants Tinker, it stops (saving itself) and starts again once Tinker is idle. Its exit code."""
-        while True:
-            self.wait_until_quiet()
-            self.process = self.start(arguments())
-            if self.ended_unasked(self.process):
-                return self.process.returncode
-            say.info("You come first: the practice build stops (it saves itself) and goes on once Tinker is idle.",
-                     "⏸")
-            self.stop_build()
-
-    def ended_unasked(self, process):
-        """True when the build ended before the person wanted Tinker; False as soon as they do. Meanwhile the
-        exercise's tracker shows what the build does."""
-        while process.poll() is None:
-            if person_busy():
-                return False
-            self.show_build(Home.store().get("running", str(process.pid)))
+        """A tinker of its own (arguments() says how to start it, from where it is), run to its end: its exit code.
+        Meanwhile the exercise's tracker shows what the build does."""
+        self.process = self.start(arguments())
+        while self.process.poll() is None:
+            self.show_build(Home.store().get("running", str(self.process.pid)))
             time.sleep(EXERCISE_LOOK)
-        return True
+        return self.process.returncode
 
     def show_build(self, build):
         """The build's tracker (None before it keeps one) shown in the exercise's: its step after the exercise's,
@@ -234,18 +177,6 @@ class Exercise:
         except subprocess.TimeoutExpired:
             os.killpg(process.pid, signal.SIGKILL)
             process.wait()
-
-    def wait_until_quiet(self):
-        """Nothing done while the person wants Tinker: the tracker says so, until Tinker is idle."""
-        if not person_busy():
-            return
-        doing = self.tracker.state["doing"]
-        self.tracker.change("doing", doing="⏸ Paused for you: it goes on once Tinker is idle")
-        while person_busy():
-            time.sleep(EXERCISE_LOOK)
-        self.tracker.change("doing", doing=doing, resumed=time.time())  # its message comes to the bottom
-        say.info("Tinker is idle: the exercise goes on.", "▶️")
-
 
 def identified(model, asked):
     """The language the words name: as Tinker learned it (no call), else as one call says. Words that are not one
@@ -331,14 +262,6 @@ def start_tinker(arguments):
     return tinker_process(arguments, **{EXERCISE_ENV: "1", OFF: "off"})
 
 
-def person_busy():
-    """The person wants Tinker now: they asked for something less than EXERCISE_QUIET seconds ago, or a run of
-    theirs works (any run but an exercise's)."""
-    if time.time() - Home.person_last_seen() < EXERCISE_QUIET:
-        return True
-    return any(not state.get("exercise") for state in running())
-
-
 def interrupted(signum, frame):
     raise KeyboardInterrupt
 
@@ -348,8 +271,7 @@ def stopped(exercise):
     done = len(Exercises.finished(exercise))
     say.title(f"Exercise of {exercise['language']} stopped: everything is kept.", "🛑")
     return {"status": "stopped", "headline": f"Exercise of {exercise['language']} stopped, everything kept",
-            "details": [("Practice projects done", str(done))],
-            "next": [("Go on", f"tinker exercise resume {exercise['language']}")]}
+            "details": [("Practice projects done", str(done))]}
 
 
 # === what a practice project measured, and what it teaches ===========================================================
@@ -452,17 +374,6 @@ class Exercises:
         Home.store().put("exercise", language_key(exercise["language"]), exercise)
 
     @staticmethod
-    def resumed(words):
-        """The language of the exercise tinker exercise resume goes on with: the one named, else the one left last."""
-        if words:
-            return " ".join(words)
-        exercises = Exercises.every()
-        if not exercises:
-            raise SystemExit("No exercise to resume yet: start one with tinker exercise LANGUAGE "
-                             "(e.g. tinker exercise python).")
-        return max(exercises, key=lambda e: e.get("left") or e["started"])["language"]
-
-    @staticmethod
     def every():
         return list(Home.store().items("exercise").values())
 
@@ -500,26 +411,17 @@ class Exercises:
 
 def already_running(active):
     """Why a second exercise does not start: one runs at a time, and how to switch."""
-    return (f"An exercise of {active['language']} runs already (one runs at a time): tinker exercise stop first; "
-            f"tinker exercise resume {active['language']} goes on with it later.")
+    return (f"An exercise of {active['language']} runs already: it did not pause in time (one runs at a time). "
+            f"Ask again in a moment.")
 
 
-# === tinker exercise stop, tinker exercise status ====================================================================
+# === tinker exercise status ====================================================================================
 
-def stop(wait=STOP_WAIT + 30):
-    """The exercise that runs told to stop (it stops its build, which saves itself, and keeps everything), waited for."""
-    active = Exercises.active()
-    if not active:
-        say.info("No exercise runs.")
-        return
-    say.step(f"Stopping the exercise of {active['language']}…", "🛑")
-    signal_task(active["pid"], STOP)
-    ends = time.monotonic() + wait
-    while alive(active["pid"]) and time.monotonic() < ends:
-        time.sleep(0.5)
-    if alive(active["pid"]):
-        raise SystemExit(f"The exercise did not stop in {wait}s (process {active['pid']}).")
-    say.done(f"Exercise of {active['language']} stopped, everything kept: tinker exercise resume goes on from there.")
+def job_state(exercise):
+    """How an exercise that does not run was left: paused (it goes on once Tinker is idle) or stopped."""
+    paused = [job for job in Jobs.listed("paused") if job["command"] == "exercise"
+              and language_key(" ".join(job["arguments"][1:])) == language_key(exercise["language"])]
+    return "paused" if paused else "stopped"
 
 
 def show():
@@ -530,7 +432,7 @@ def show():
         return
     for exercise in exercises:
         runs = active and language_key(active["language"]) == language_key(exercise["language"])
-        state = ("paused for you" if person_busy() else "running") if runs else "stopped"
+        state = "running" if runs else job_state(exercise)
         with say.part(f"{exercise['language']}: {state}, {len(Exercises.finished(exercise))} practice project(s) "
                       f"done since {exercise['started']}", "🏋️"):
             if exercise.get("focus"):
@@ -540,5 +442,5 @@ def show():
             current = Exercises.current(exercise)
             if current:
                 say.item(f"Now: {current['task']} ({current['step']})")
-    say.tip(f"Practice projects are in {exercise_folder()}. Stop with: tinker exercise stop; go on with: "
-            f"tinker exercise resume [LANGUAGE]")
+    say.tip(f"Practice projects are in {exercise_folder()}. Stop with: tinker stop #N; go on with: tinker resume #N "
+            f"(tinker jobs lists them)")

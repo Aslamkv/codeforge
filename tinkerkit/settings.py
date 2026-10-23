@@ -167,7 +167,6 @@ TEACH_SEARCHES = 3                # web searches that check it
 # --- tinker exercise LANGUAGE: practice projects that teach Tinker a language ---------------------------
 EXERCISE_FOLDER = "tinker-exercise"  # in the projects folder: one folder per practice project
 EXERCISE_ENV = "TINKER_EXERCISE"  # =1: a run an exercise started (its tracker says so; it never pauses one)
-EXERCISE_QUIET = 120              # seconds without a word from the person before an exercise goes on
 EXERCISE_LOOK = 2                 # seconds between looks for the person while an exercise builds
 EXERCISE_SHOWN = 8                # earlier projects' measures shown to the exercise's own calls
 EXERCISE_PROBLEMS = 12            # problems of one project its reflection sees
@@ -243,16 +242,6 @@ class Home:
         """The page tinker memory --graph writes: what Tinker knows, as a graph to open in a browser."""
         cls.root.mkdir(parents=True, exist_ok=True)
         return cls.root / "memory.html"
-
-    @classmethod
-    def person_seen(cls):
-        """The person just asked for something (a message, a command): an exercise gives way for a while."""
-        cls.store().put("activity", "person", time.time())
-
-    @classmethod
-    def person_last_seen(cls):
-        """When the person last asked for something (seconds since the epoch; 0 when never)."""
-        return float(cls.store().get("activity", "person", 0.0) or 0.0)
 
     @classmethod
     def lock_file(cls, name):

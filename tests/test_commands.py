@@ -32,7 +32,7 @@ def test_the_command_line_and_the_conversation_read_the_table():
 
 @pytest.mark.spec("CMD-2")
 def test_runs_and_what_deletes():
-    assert [c.name for c in COMMANDS if c.run] == ["task", "restart", "resume", "confirm", "amend", "add", "fix"]
+    assert [c.name for c in COMMANDS if c.run] == ["task", "restart", "confirm", "amend", "add", "fix", "resume"]
     for command in [c for c in COMMANDS if c.run and c.name != "restart"]:
         assert "--web" in {o.flag for o in command.options}, command.name
     assert [c.name for c in COMMANDS if "--confirm" in {o.flag for o in c.options}] == ["task", "restart", "add", "fix"]

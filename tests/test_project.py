@@ -332,9 +332,8 @@ def test_the_tracker_publishes_each_change(home_store, project_dir):
     tracker.points(1, 3)  # no change: nothing published
     assert len(store.entries("progress")) == 5
     tracker.end({"status": "done", "headline": "Done."}, 30.0)
-    tracker.pause()
     state = home_store.get("running", str(os.getpid()))
-    assert state["ended"]["status"] == "done" and state["seconds"] == 30.0 and state["paused"]
+    assert state["ended"]["status"] == "done" and state["seconds"] == 30.0 and state["resumed"] is None
     tracker.close()
     assert home_store.get("running", str(os.getpid())) is None
 

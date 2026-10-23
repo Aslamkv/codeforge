@@ -5,7 +5,6 @@ and a failure in the step it was meant to help retires it (kept apart, never sho
 keeps its history: the run that taught it, and the runs it helped or failed."""
 
 lazy import collections
-lazy import datetime
 lazy import hashlib
 lazy import math
 import re
@@ -15,6 +14,7 @@ lazy import urllib.parse
 lazy import urllib.request
 lazy from pathlib import Path
 
+lazy from .jobs import today
 from .messages import say
 lazy from .model import Models, Ollama, OllamaError
 lazy from .prompts import Part, PromptTooLarge, Prompts
@@ -709,7 +709,7 @@ class Researcher:
         """The topic's name, summary and research questions (each with its searches): as saved for
         it, else from the model."""
         self.learner.step("frame")
-        parts = [Part("Topic", topic, True), Part("Today", datetime.date.today().isoformat(), True)]
+        parts = [Part("Topic", topic, True), Part("Today", today().isoformat(), True)]
         frame, saved = self.learner.saved_or_asked(known, self.read_frame, Prompts.RESEARCH_PLAN_SYSTEM, parts,
                                                    "Frame the research", f"researching {topic}",
                                                    Library.slug(topic))

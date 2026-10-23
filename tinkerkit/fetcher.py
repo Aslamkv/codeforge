@@ -16,8 +16,9 @@ import urllib.parse
 import urllib.request
 import urllib.robotparser
 lazy import zlib
-from dataclasses import dataclass
+from dataclasses import asdict, dataclass
 
+lazy from .jobs import journaled
 from .settings import FETCH_USER_AGENT, MAX_REDIRECTS, first_line
 
 
@@ -77,6 +78,12 @@ class Fetcher:
             return [self.fetch(url, connections, kind) for url in urls]
 
     def fetch(self, url, connections, kind):
+        """What the address gave; in a job, a page it fetched before is given from its journal (a failure is
+        fetched again)."""
+        return journaled({"page": url, "kind": kind}, lambda: self.fetched(url, connections, kind),
+                         keep=lambda fetched: fetched.ok, dump=asdict, load=lambda kept: Fetched(**kept))
+
+    def fetched(self, url, connections, kind):
         try:
             if not self.allowed(url, connections):
                 return Fetched(url, final_url=url, error=Fetched.ROBOTS)
