@@ -91,6 +91,10 @@ listed above it:
   `Internet` (pages through its `page_fetcher`, the `fetcher` module). Every project command goes through `Workspace.run` or `Workspace.start`.
 - **ARCH-4** Only `settings.Home` knows where the home is. No other module names a path inside it.
   Every phase reaches the model, the project and its files through the `Session` only.
+- **ARCH-5** No module and no test has a comment or a docstring: names, types, tests and this spec say what
+  the code does. The `#!` line of `tinker.py` and `# noqa` pragmas are the only comments.
+- **ARCH-6** `tinker.py` refuses every Python below 3.15, on any platform, before it imports `tinkerkit`:
+  `Tinker needs Python 3.15 or newer; this is VERSION. On a Mac: brew install python`.
 
 ## State
 
