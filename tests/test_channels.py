@@ -109,16 +109,24 @@ def test_channel_command_list_enable_disable_remove(capsys):
     assert "bot" in listed and "telegram" in listed and "enabled" in listed and "chats: 42" in listed
     ChannelCommand.run(["disable", "bot"])
     assert Channels.settings()["bot"]["enabled"] is False
-    ChannelCommand.run(["remove", "bot"])
-    assert Channels.settings() == {} and Channels.secrets("bot") == {}
     with pytest.raises(SystemExit, match="no action 'fly'"):
         ChannelCommand.run(["fly"])
-    with pytest.raises(SystemExit, match="no channel 'bot'"):
-        ChannelCommand.run(["enable", "bot"])
+    with pytest.raises(SystemExit, match="no channel 'ghost'"):
+        ChannelCommand.run(["enable", "ghost"])
     with pytest.raises(SystemExit, match="tinker channel enable NAME"):
         ChannelCommand.run(["enable"])
     ChannelCommand.run(["help"])
     assert "tinker channel start" in capsys.readouterr().out
+
+
+@pytest.mark.spec("CHN-2")
+def test_removing_a_channel_asks_first():
+    Channels.keep("bot", {"kind": "telegram", "enabled": False, "allowed": ["42"]}, {"token": "t"})
+    with pytest.raises(SystemExit, match="Nothing deleted: run tinker channel remove bot in a terminal"):
+        ChannelCommand.run(["remove", "bot"])
+    assert "bot" in Channels.settings()
+    ChannelCommand.run(["remove", "bot", "--yes"])
+    assert Channels.settings() == {} and Channels.secrets("bot") == {}
 
 
 @pytest.mark.spec("CHN-2")

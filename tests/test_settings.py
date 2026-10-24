@@ -9,11 +9,17 @@ import pytest
 from conftest import REAL_HOME
 
 import tinkerkit.settings as settings
+from tinkerkit.commands import BY_NAME
 from tinkerkit.settings import (
+    PER_PAGE,
+    SETTINGS,
     Config,
     Home,
+    Numbered,
+    Paged,
     Store,
     after_what_they_use,
+    confirm_deletion,
     fingerprint,
     first_line,
     groups_fitting,
@@ -21,7 +27,6 @@ from tinkerkit.settings import (
     split_text,
     words,
 )
-from tinkerkit.web import Internet
 
 
 @pytest.mark.spec("SET-1")
@@ -109,28 +114,45 @@ def test_config_is_defaults_overridden_by_the_home(home_store):
         ("build_think", "true"),
         ("build_think", 1),
         ("learn_think", "max"),
+        ("test_timeout", 0),
+        ("test_timeout", 1.5),
+        ("test_timeout", "60"),
+        ("web", "bing"),
+        ("web_fallback", "x"),
+        ("web_timeout", 0),
+        ("web_timeout", True),
+        ("learn_missing", 0),
+        ("learn_missing", 1.5),
+        ("learn_missing", True),
+        ("learn_rate", 0),
+        ("learn_pages", 2.5),
+        ("learn_min_pages", 0),
+        ("learn_backoff", -1),
+        ("fetch_workers", True),
+        ("fetch_max_bytes", "big"),
     ],
 )
-def test_check_model_rejects_unusable_settings(key, value):
+def test_check_rejects_a_setting_outside_its_row(key, value):
     Config.save(**{key: value})
-    with pytest.raises(SystemExit, match=key):
-        Config.check_model(run=False)
+    with pytest.raises(SystemExit, match=f"^{key} must be"):
+        Config.check()
 
 
 @pytest.mark.spec("SET-5")
 @pytest.mark.parametrize("value", [0, 300, -1, "10m", "1h30m", "500ms"])
-def test_check_model_accepts_keep_alive_seconds_or_durations(value):
+def test_check_accepts_keep_alive_seconds_or_durations(value):
     Config.save(keep_alive=value)
-    Config.check_model(run=True)
+    Config.check()
 
 
 @pytest.mark.spec("SET-5")
-@pytest.mark.parametrize("value", [0, True, 1.5, "60"])
-def test_test_timeout_is_checked_for_a_run_only(value):
-    Config.save(test_timeout=value)
-    Config.check_model(run=False)
-    with pytest.raises(SystemExit, match="test_timeout"):
-        Config.check_model(run=True)
+def test_every_setting_has_one_row_with_its_owner():
+    assert list(SETTINGS) == list(settings.DEFAULT_CONFIG)
+    owned = {key: row.owner for key, row in SETTINGS.items() if row.owner != "config"}
+    assert owned == {"model": "use-model", "web": "use-web", "embed_model": "embed"}
+    Config.check()
+    Config.save(web="duckduckgo", web_fallback="", web_timeout=2.5, learn_missing=3)
+    Config.check()
 
 
 @pytest.mark.spec("SET-7")
@@ -273,19 +295,24 @@ def test_reset_outside_a_terminal_without_yes_deletes_nothing(tinker_home, monke
     assert tinker_home.exists()
 
 
-@pytest.mark.spec("SET-12")
-def test_parts_tinker_clear_knows():
-    assert list(Home.parts()) == [
-        "languages",
-        "memory",
-        "learned",
-        "docs",
-        "models",
-        "runs",
-        "commands",
-        "history",
-        "exercise",
-    ]
+@pytest.mark.spec("SET-11")
+def test_a_deletion_says_what_goes_then_asks(monkeypatch, capsys):
+    confirm_deletion("This deletes:", ["the notes", "the logs"], "tinker clear notes", yes=True)
+    said = capsys.readouterr().out
+    assert "This deletes:" in said and "the notes" in said and "the logs" in said
+    monkeypatch.setattr(sys.stdin, "isatty", lambda: False)
+    with pytest.raises(
+        SystemExit, match="Nothing archived: run tinker clear jobs #1 in a terminal to confirm"
+    ):
+        confirm_deletion("This archives:", ["#1"], "tinker clear jobs #1", verb="archive")
+    asked = []
+    monkeypatch.setattr(sys.stdin, "isatty", lambda: True)
+    monkeypatch.setattr("builtins.input", lambda question: asked.append(question) or "n")
+    with pytest.raises(SystemExit, match=r"^Nothing deleted\.$"):
+        confirm_deletion("This deletes:", ["the home"], "tinker reset")
+    monkeypatch.setattr("builtins.input", lambda question: asked.append(question) or "y")
+    confirm_deletion("This deletes:", ["the notes", "the logs"], "tinker clear notes")
+    assert asked == ["Delete it? [y/N] ", "Delete them? [y/N] "]
 
 
 @pytest.mark.spec("SET-12")
@@ -293,18 +320,17 @@ def test_clear_deletes_only_the_named_parts(home_store, capsys):
     home_store.put("languages", "python", {})
     home_store.put("memory", "any", {})
     home_store.put("models", "m", {})
-    home_store.append("learn", {"label": "x"})
     home_store.put("learned", "flask", {})
     Home.clear(["languages", "memory", "learned"], yes=True)
     assert home_store.items("languages") == {} and home_store.items("memory") == {}
-    assert home_store.items("learned") == {} and home_store.entries("learn") == []
+    assert home_store.items("learned") == {}
     assert home_store.items("models") == {"m": {}}
     assert "Cleared languages, memory, learned." in capsys.readouterr().out
 
 
 @pytest.mark.spec("SET-12")
 def test_clear_rejects_an_unknown_part():
-    with pytest.raises(SystemExit, match="the parts are: languages"):
+    with pytest.raises(SystemExit, match="the parts are: languages, .*, exercise, jobs, read$"):
         Home.clear(["everything"], yes=True)
 
 
@@ -416,7 +442,7 @@ def test_config_set_reads_and_checks_the_value():
 
 
 def config_set(key, text):
-    return Config.set(key, text, Internet.check)
+    return Config.set(key, text)
 
 
 @pytest.mark.spec("SET-6")
@@ -425,3 +451,30 @@ def test_config_set_only_the_settings_with_no_command_of_their_own():
         Config.set("model", "x")
     with pytest.raises(SystemExit, match="no setting 'colour'"):
         Config.set("colour", "red")
+
+
+@pytest.mark.spec("SET-6")
+def test_help_config_lists_the_settings_from_the_table():
+    about = BY_NAME["config"].about
+    assert "test_timeout (a whole number, 1 or more)" in about and "max_growth (a number above 1)" in about
+    assert "web_fallback (" in about and "embed_model" not in about and "model (" not in about
+
+
+@pytest.mark.spec("SET-18")
+def test_a_numbered_list_never_gives_a_number_again(home_store):
+    listed = Numbered("things", "thing numbers")
+    first, second = listed.add({"text": "a"}), listed.add({"text": "b"})
+    assert (first["number"], second["number"]) == (1, 2) and listed.get(2) == second
+    listed.delete(2)
+    home_store.delete("things")
+    assert listed.add({"text": "c"})["number"] == 3 and listed.get(2) is None
+    assert listed.update(3, lambda entry: dict(entry, text="d"))["text"] == "d"
+    listed.put(dict(first, text="e"))
+    assert [entry["text"] for entry in listed.newest()] == ["d", "e"]
+
+
+@pytest.mark.spec("SET-18")
+def test_a_list_comes_a_page_at_a_time():
+    entries = list(range(PER_PAGE * 2 + 1))
+    assert PER_PAGE == 10 and Numbered.page(entries, 1) == Paged(entries[:PER_PAGE], 3)
+    assert Numbered.page(entries, 3) == Paged([entries[-1]], 3) and Numbered.page([], 1) == Paged([], 1)

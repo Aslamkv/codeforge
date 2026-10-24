@@ -3,7 +3,8 @@ import time
 import pytest
 
 import tinkerkit.ledger as ledger
-from tinkerkit.ledger import GLANCE_KEPT_SECONDS, HISTORY_PER_PAGE, MESSAGE_KEPT_SECONDS, Ledger
+from tinkerkit.ledger import GLANCE_KEPT_SECONDS, MESSAGE_KEPT_SECONDS, Ledger
+from tinkerkit.settings import PER_PAGE, Home
 
 
 @pytest.fixture
@@ -41,8 +42,15 @@ def test_things_are_kept_as_shown_last_and_listed_newest_first():
     assert Ledger.shown("bot", "42", first, [1, 2], "🔨 calc ✅", "ignored") == 1
     assert Ledger.thing(1)["text"] == "🔨 calc ✅" and Ledger.thing(1)["asked"] == "task calc"
     assert Ledger.thing_of("bot", "42", [2]) == 1 and Ledger.thing_of("bot", "42", [9]) is None
-    for number in range(HISTORY_PER_PAGE + 1):
+    for number in range(PER_PAGE + 1):
         Ledger.shown("bot", "42", None, [10 + number], f"reply {number}")
     things, pages = Ledger.page(1)
-    assert pages == 2 and things[0]["text"] == f"reply {HISTORY_PER_PAGE}" and len(things) == HISTORY_PER_PAGE
+    assert pages == 2 and things[0]["text"] == f"reply {PER_PAGE}" and len(things) == PER_PAGE
     assert [thing["number"] for thing in Ledger.page(2)[0]] == [2, 1]
+
+
+@pytest.mark.spec("SET-18")
+def test_the_history_never_numbers_a_thing_again_once_cleared():
+    Ledger.shown("bot", "42", None, [1], "first")
+    Home.clear(["history"], yes=True)
+    assert Ledger.page(1).items == [] and Ledger.shown("bot", "42", None, [2], "second") == 2

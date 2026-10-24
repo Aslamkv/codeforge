@@ -6,6 +6,7 @@ from conftest import MODEL, TOOLCHAIN
 
 from tinkerkit import cli
 from tinkerkit.cli import Cli, Commands
+from tinkerkit.commands import kind_of
 from tinkerkit.knowledge import Knowledge, Library
 from tinkerkit.model import Ollama
 from tinkerkit.prompts import Prompts
@@ -386,10 +387,9 @@ def test_teach_needs_the_web_before_any_model_call(measured_model, fake_ollama, 
 
 
 @pytest.mark.spec("TCH-9")
-def test_ask_and_teach_report_through_a_tracker_and_run_as_tasks(
+def test_ask_and_teach_report_through_a_tracker_and_run_as_jobs(
     kept, measured_model, fake_ollama, monkeypatch, capsys
 ):
-    from tinkerkit import conversation
 
     monkeypatch.setattr(Ollama, "installed_models", staticmethod(lambda: [{"name": MODEL}]))
     monkeypatch.setattr(cli.Internet, "required", staticmethod(lambda option: FakeWeb()))
@@ -417,7 +417,7 @@ def test_ask_and_teach_report_through_a_tracker_and_run_as_tasks(
     assert any(
         step.startswith("🤔 Worked out what to check: ") and "claim(s)" in step for step in ended[1][2]
     )
-    assert "ask" in conversation.LONG_COMMANDS and "teach" in conversation.LONG_COMMANDS
+    assert kind_of(["ask", "q"]) == "job" and kind_of(["teach", "t"]) == "job"
 
 
 WRONG = "The Craft says to write tests after the code"

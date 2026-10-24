@@ -1,20 +1,20 @@
 from collections import namedtuple
 lazy import time
 
-lazy from .settings import Home, Paged
+lazy from .settings import Home, Numbered
 
 MESSAGE_KEPT_SECONDS = 24 * 3600
 GLANCE_KEPT_SECONDS = 120
 DONE_NOTE_KEPT_SECONDS = 5
 ANSWER_WINDOW_SECONDS = 60
-HISTORY_PER_PAGE = 10
 
 ChatMessage = namedtuple("ChatMessage", "chat message")
 View = namedtuple("View", "chat message view")
 
 
 class Ledger:
-    VIEWS, THINGS, NUMBERS = "chat views", "chat history", "chat history numbers"
+    VIEWS = "chat views"
+    HISTORY = Numbered("chat history", "chat history numbers")
 
     @classmethod
     def kept(cls, channel, chat, message):
@@ -90,10 +90,9 @@ class Ledger:
     @classmethod
     def shown(cls, channel, chat, thing, messages, text, asked=""):
         if thing is None:
-            thing = Home.store().update(cls.NUMBERS, "last", lambda last: (last or 0) + 1)
-        Home.store().update(
-            cls.THINGS,
-            str(thing),
+            thing = cls.HISTORY.next_number()
+        cls.HISTORY.update(
+            thing,
             lambda kept: dict(
                 kept or {"number": thing, "asked": asked}, time=time.strftime("%Y-%m-%d %H:%M"), text=text
             ),
@@ -105,15 +104,11 @@ class Ledger:
 
     @classmethod
     def thing(cls, number):
-        return Home.store().get(cls.THINGS, str(number))
+        return cls.HISTORY.get(number)
 
     @classmethod
     def page(cls, number):
-        things = sorted(
-            Home.store().items(cls.THINGS).values(), key=lambda thing: thing["number"], reverse=True
-        )
-        pages = max(1, -(-len(things) // HISTORY_PER_PAGE))
-        return Paged(things[(number - 1) * HISTORY_PER_PAGE : number * HISTORY_PER_PAGE], pages)
+        return Numbered.page(cls.HISTORY.newest(), number)
 
 
 def key(channel, chat, message):

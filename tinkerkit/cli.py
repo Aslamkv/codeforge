@@ -13,7 +13,7 @@ lazy from pathlib import Path
 
 from . import conversation, exercising, reading
 from .commands import BY_NAME, COMMANDS, GROUPS, refs
-from .jobs import STATES, Jobs, archived, job_number
+from .jobs import STATES, Jobs, archived, calls_log, job_number
 from .messages import Messages, human_duration, say
 from .reading import Reader
 lazy from .building import BugReproducer, CodeWriter, TestToolSetup, TestWriter, Verifier
@@ -23,7 +23,7 @@ lazy from .knowledge import Embeddings, Library
 lazy from .learning import LearnStopped, SlotLearner
 lazy from .model import Calibrator, Model, Models, Ollama, OllamaError, SelectedModel
 lazy from .planning import Designer, InterfaceReviewer, Recaller, SpecWriter
-lazy from .project import Brief, Outcome, Project, RunChecks, Runs, Tracker, project_store, saved
+lazy from .project import Brief, Outcome, Project, RunChecks, Runs, Steps, Tracker, project_store, saved
 lazy from .prompts import Prompts
 lazy from .session import Session
 lazy from .settings import (
@@ -33,11 +33,13 @@ lazy from .settings import (
     ENV_FILE,
     FIX_PHASES,
     FORMATTER_RUNS_AFTER,
+    NUMBERED_PARTS,
     PHASES,
     STATUS_TEXT,
     Config,
     Home,
     Log,
+    Numbered,
     clock,
     first_line,
     now_text,
@@ -112,7 +114,6 @@ class Cli:
         for command in COMMANDS
         if command.cli and command.group != "Talk" and command.name not in ("help", "channel", "confirm")
     )
-    LONG_MODEL_COMMANDS = ("learn", "exercise", "read")
     FIELDS = {
         "reset": False,
         "config": None,
@@ -197,7 +198,7 @@ class Cli:
 
     @staticmethod
     def cleared(parts, yes):
-        if parts[0] not in ("read", "jobs"):
+        if parts[0] not in NUMBERED_PARTS:
             return Home.clear(parts, yes)
         numbers = [job_number(word) for word in parts[1:]]
         if None in numbers and parts[0] == "jobs":
@@ -431,12 +432,18 @@ class Cli:
     @staticmethod
     def reading(words, parser):
         if words[0] in ("list", "show"):
-            if words == ["list"] or (words[0] == "show" and len(words) == 2 and job_number(words[1])):
+            if Cli.lists_readings(words) or (words[0] == "show" and len(words) == 2 and job_number(words[1])):
                 return words
-            parser.error("use tinker read list, or tinker read show #N")
+            parser.error("use tinker read list [PAGE], or tinker read show #N")
         if job_number(words[0]):
             return words[:1] + ([" ".join(words[1:]).strip(" \"'“”")] if words[1:] else [])
         return [Cli.non_empty(" ".join(words), "read", parser)]
+
+    @staticmethod
+    def lists_readings(words):
+        return words[0] == "list" and (
+            len(words) == 1 or (len(words) == 2 and words[1].isdigit() and int(words[1]) > 0)
+        )
 
     @staticmethod
     def non_empty(value, command, parser):
@@ -498,7 +505,7 @@ class Cli:
 
     @staticmethod
     def works_for_hours(args):
-        return args.command in Cli.RUNS + Cli.LONG_MODEL_COMMANDS
+        return BY_NAME[args.command].kind == "job"
 
 
 class Commands:
@@ -539,7 +546,7 @@ class Commands:
     @staticmethod
     def config(words):
         if words:
-            value = Config.set(words[0], words[1], Internet.check)
+            value = Config.set(words[0], words[1])
             say.done(f"{words[0]} is {value!r} now")
             return
         name = Config.get("model")
@@ -549,7 +556,7 @@ class Commands:
         say.text(f"model in use:    {Commands.model_state(name, settings)}")
         if settings:
             Commands.print_measured(settings)
-        for key in Config.SETTABLE:
+        for key in Config.settable():
             if key not in ("ollama_url",):
                 say.text(f"{key + ':':16} {Config.get(key)!r}")
         say.text(
@@ -702,18 +709,18 @@ class Commands:
         name, settings = Commands.checked_model()
         embeddings = Embeddings.required(option)
         internet = Internet.required(option)
-        return LearningTools(Commands.model_in_use(name, settings, "learn"), embeddings, internet)
+        return LearningTools(Commands.model_in_use(name, settings), embeddings, internet)
 
     @staticmethod
     def checked_model():
         name, settings = Models.selected()
         Models.installed(name)
-        Config.check_model(run=False)
+        Config.check()
         return SelectedModel(name, settings)
 
     @staticmethod
-    def model_in_use(name, settings, log_name):
-        log = Log(Home.store(), log_name)
+    def model_in_use(name, settings):
+        log = calls_log()
         say.keep_log(log)
         return Model(
             name,
@@ -725,7 +732,7 @@ class Commands:
 
     def ask(self):
         question = self.args.ask
-        model = Commands.model_in_use(*Commands.checked_model(), "teach")
+        model = Commands.model_in_use(*Commands.checked_model())
         memory = Memory(Embeddings.configured())
         Commands.reported(
             f"Asking: {first_line(question, 60)}",
@@ -737,7 +744,7 @@ class Commands:
         teaching = self.args.teach
         name, settings = Commands.checked_model()
         internet = Internet.required("tinker teach")
-        model, memory = Commands.model_in_use(name, settings, "teach"), Memory(Embeddings.configured())
+        model, memory = Commands.model_in_use(name, settings), Memory(Embeddings.configured())
         Commands.reported(
             f"Teaching: {first_line(teaching, 60)}",
             model,
@@ -746,8 +753,8 @@ class Commands:
 
     def read(self):
         words = self.args.read
-        if words == ["list"]:
-            return reading.show_list()
+        if words[0] == "list":
+            return reading.show_list(int(words[1]) if words[1:] else 1)
         if words[0] == "show":
             return reading.show(job_number(words[1]))
         number, focus = job_number(words[0]), " ".join(words[1:])
@@ -757,7 +764,7 @@ class Commands:
                 return
             Jobs.retarget(["read", f"#{number}"])
         title = reading.known_reading(number)["title"]
-        model = Commands.model_in_use(*Commands.checked_model(), "read")
+        model = Commands.model_in_use(*Commands.checked_model())
         Commands.reported(
             f"Reading #{number} {first_line(title, 50)}",
             model,
@@ -768,7 +775,7 @@ class Commands:
         what = self.args.exercise
         if what.lower() == "status":
             return exercising.show()
-        model = Commands.model_in_use(*Commands.checked_model(), "exercise")
+        model = Commands.model_in_use(*Commands.checked_model())
         Commands.reported(
             f"Exercising {what}",
             model,
@@ -1001,7 +1008,7 @@ class Commands:
         if not jobs:
             say.text(f"No {state or 'running, paused or stopped'} jobs.")
             return
-        shown, pages = Jobs.page(jobs, page)
+        shown, pages = Numbered.page(jobs, page)
         say.text(f"{'JOB':6} {'STATE':9} {'STARTED':17} COMMAND")
         for job in shown:
             title = job["title"][:70] + ("..." if len(job["title"]) > 70 else "")
@@ -1216,7 +1223,7 @@ class ProjectRun:
 
     def check_requirements(self):
         Models.installed(Models.selected()[0])
-        Config.check_model(run=True)
+        Config.check()
         TaughtCommands.stop_if_broken()
         if self.args.web:
             Embeddings.required("--web")
@@ -1626,29 +1633,36 @@ class CycleRunner:
         self.session, self.project = session, session.project
 
     def run(self, cycle, web=False):
-        phases = FIX_PHASES if cycle.get("kind") == "fix" else PHASES
+        steps = Steps(FIX_PHASES if cycle.get("kind") == "fix" else PHASES, self.session.tracker)
         self.session.cycle = cycle
         if web and cycle["phase"] not in ("recall", "done") and not cycle.get("awaiting"):
-            self.recall_first(cycle)
-        while cycle["phase"] != "done":
-            if cycle.get("awaiting"):
-                return "awaiting"
-            phase = cycle["phase"]
-            if self.session.tracker is not None:
-                self.session.tracker.phase(phase)
-            if self.run_phase(phase, cycle) is False:
-                self.disprove(cycle, phase)
-                return "blocked"
-            if phase in FORMATTER_RUNS_AFTER:
-                self.session.format_code()
-            self.done_with(phase, cycle, phases)
-            if phase == "review":
-                self.show_plan()
-        return "done"
+            self.recall_first(cycle, steps)
+        went = steps.run(
+            cycle["phase"],
+            lambda phase: self.phase_done(phase, cycle),
+            lambda phase: self.reached(phase, cycle),
+            waits=lambda: cycle.get("awaiting"),
+        )
+        return "awaiting" if went == "waiting" else went
 
-    def recall_first(self, cycle):
-        if self.session.tracker is not None:
-            self.session.tracker.phase("recall")
+    def phase_done(self, phase, cycle):
+        if self.run_phase(phase, cycle) is False:
+            self.disprove(cycle, phase)
+            return False
+        if phase in FORMATTER_RUNS_AFTER:
+            self.session.format_code()
+        if self.waits_for_confirm(phase, cycle):
+            cycle["awaiting"] = True
+        if phase == "review":
+            self.show_plan()
+        return True
+
+    def reached(self, phase, cycle):
+        cycle["phase"] = phase
+        self.session.save()
+
+    def recall_first(self, cycle, steps):
+        steps.enter("recall")
         with say.part(f"{Recaller.TITLE} (with --web, before {cycle['phase']})", Tracker.icon("recall")):
             Recaller(self.session).run(cycle)
 
@@ -1703,12 +1717,6 @@ class CycleRunner:
             "lessons": LessonWriter,
             "reproduce": BugReproducer,
         }[phase]
-
-    def done_with(self, phase, cycle, phases):
-        cycle["phase"] = phases[phases.index(phase) + 1]
-        if self.waits_for_confirm(phase, cycle):
-            cycle["awaiting"] = True
-        self.session.save()
 
     @staticmethod
     def waits_for_confirm(phase, cycle):

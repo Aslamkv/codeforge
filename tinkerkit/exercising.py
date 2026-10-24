@@ -14,7 +14,7 @@ lazy from .conversation import (
 )
 lazy from .jobs import Jobs
 lazy from .knowledge import Knowledge, Library, language_key
-lazy from .project import Project, saved
+lazy from .project import Project, Steps, saved
 lazy from .prompts import Part, Prompts
 lazy from .settings import (
     EARLIER_MEASURES_SHOWN,
@@ -84,11 +84,21 @@ class Exercise:
             step=None,
             passing=None,
         )
-        while project["step"] != "done":
-            getattr(self, project["step"])(exercise, project)
-            project["step"] = PRACTICE_STEPS[PRACTICE_STEPS.index(project["step"]) + 1]
-            Exercises.save(exercise)
+        Steps(PRACTICE_STEPS, self.tracker, only_if={"feature": lambda: built(project)}).run(
+            project["step"],
+            lambda step: self.practise_step(step, exercise, project),
+            lambda step: self.reached(step, exercise, project),
+        )
         say.done(told(exercise, project))
+
+    def practise_step(self, step, exercise, project):
+        self.own_step = self.tracker.state["doing"]
+        getattr(self, step)(exercise, project)
+
+    @staticmethod
+    def reached(step, exercise, project):
+        project["step"] = step
+        Exercises.save(exercise)
 
     def picked(self, exercise):
         self.on_to("pick")
@@ -121,7 +131,6 @@ class Exercise:
         return project
 
     def build(self, exercise, project):
-        self.on_to("build")
         folder = Path(project["folder"])
         folder.mkdir(parents=True, exist_ok=True)
         task = ["task", project["task"], "--workdir", str(folder)]
@@ -129,23 +138,17 @@ class Exercise:
 
     def feature(self, exercise, project):
         folder = Path(project["folder"])
-        if (run_of(folder) or {}).get("status") != "done":
-            say.skip("The project did not build, so no feature is added to it")
-            return
-        self.on_to("feature")
         before = project.setdefault("cycles", len(Project.load(folder).cycles))
         Exercises.save(exercise)
         add = ["add", project["feature"], "--workdir", str(folder)]
         self.built(lambda: going_on(folder) if len(Project.load(folder).cycles) > before else add)
 
     def measure(self, exercise, project):
-        self.on_to("measure")
         folder = Path(project["folder"])
         project["measures"], project["problems"] = measured(folder), problems(folder)
         project["ended"] = now_text()
 
     def reflect(self, exercise, project):
-        self.on_to("reflect")
         folder = Path(project["folder"])
         knowledge = Knowledge(exercise["language"], (run_of(folder) or {}).get("id"))
         with say.working_on(f"Learning from what went wrong and what was slow in {folder.name}"):
@@ -283,6 +286,13 @@ def exercise_folder():
 
 def run_of(folder):
     return saved(folder, "run", "record")
+
+
+def built(project):
+    if (run_of(Path(project["folder"])) or {}).get("status") == "done":
+        return True
+    say.skip("The project did not build, so no feature is added to it")
+    return False
 
 
 def going_on(folder):

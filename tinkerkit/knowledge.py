@@ -47,6 +47,7 @@ from .settings import (
 )
 lazy from .jobs import today
 lazy from .model import Models, Ollama, OllamaError
+lazy from .project import Steps
 lazy from .prompts import Part, Prompts, PromptTooLarge
 lazy from .workspace import Toolchain, Workspace
 
@@ -55,6 +56,19 @@ SafeCommands = namedtuple("SafeCommands", "kept dropped")
 Findings = namedtuple("Findings", "facts sources")
 Investigation = namedtuple("Investigation", "facts sources analysis")
 CrossCheck = namedtuple("CrossCheck", "support differ")
+LEARN_STEPS = (
+    "search",
+    "plan",
+    "machine",
+    "documentation",
+    "digest",
+    "follow-up",
+    "condense",
+    "frame",
+    "investigate",
+    "keep",
+    "done",
+)
 
 
 class Knowledge:
@@ -429,8 +443,7 @@ class Learner:
     def step(self, phase, said="", icon=""):
         if said:
             say.step(said, icon)
-        if self.tracker is not None and self.tracker.state["step"] != phase:
-            self.tracker.phase(phase)
+        Steps(LEARN_STEPS, self.tracker).enter(phase)
 
     def outcome(self, text):
         if self.tracker is not None:

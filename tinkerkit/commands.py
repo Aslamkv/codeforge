@@ -1,5 +1,7 @@
 from collections import namedtuple
 
+from .settings import SETTINGS
+
 Refs = namedtuple("Refs", "project words")
 
 
@@ -43,6 +45,15 @@ class Argument:
         self.dest, self.nargs, self.metavar, self.help, self.choices = dest, nargs, metavar, help, choices
 
 
+class Action(namedtuple("Action", "kind word words deletes", defaults=(None, None, False))):
+    __slots__ = ()
+
+    def fits(self, argv):
+        return (self.word is None or argv[1:2] == [self.word]) and (
+            self.words is None or len(argv) - 1 == self.words
+        )
+
+
 class Command:
     def __init__(
         self,
@@ -51,7 +62,9 @@ class Command:
         synopsis,
         what,
         about="",
-        chat=None,
+        kind="own",
+        chat=False,
+        actions=(),
         words="none",
         cli=True,
         run=False,
@@ -68,7 +81,8 @@ class Command:
             what,
             about or what,
         )
-        self.chat, self.words, self.cli, self.run, self.deletes = chat, words, cli, run, deletes
+        self.kind, self.chat, self.actions = kind, chat, tuple(actions)
+        self.words, self.cli, self.run, self.deletes = words, cli, run, deletes
         self.arguments, self.options, self.example = (
             list(arguments),
             [OPTIONS[option] for option in options],
@@ -90,7 +104,8 @@ COMMANDS = [
         "follow (its examples are run to check them). It builds straight through (--confirm: its plan waits for "
         "your confirm first, as it does in the conversation). It gets its own folder in the projects folder (tinker config projects), with a short "
         "name after the task (calc-py); --workdir DIR builds in DIR instead (--workdir . here).",
-        chat="own",
+        kind="job",
+        chat=True,
         words="any",
         run=True,
         arguments=[Argument("task", "+", "WHAT", "what to build (no quotes needed)")],
@@ -104,7 +119,8 @@ COMMANDS = [
         "build this folder's task again from scratch (asks first)",
         "Build this folder's task again from scratch: everything in it is deleted (after asking, or with --yes), "
         "but for its spec file.",
-        chat="long",
+        kind="job",
+        chat=True,
         run=True,
         deletes=True,
         options=("yes", "confirm", "workdir"),
@@ -115,7 +131,8 @@ COMMANDS = [
         "confirm [@PROJECT]",
         "build the plan that waits for your confirmation",
         "Build the plan that waits for confirmation (as resume).",
-        chat="own",
+        kind="job",
+        chat=True,
         words="one",
         run=True,
         arguments=[PROJECT],
@@ -128,7 +145,8 @@ COMMANDS = [
         "change a plan that waits for confirmation",
         "Change a plan that waits for confirmation, before anything is built: the spec is given again with the "
         "change and planned again, and it waits again (build it with tinker confirm).",
-        chat="own",
+        kind="job",
+        chat=True,
         words="any",
         run=True,
         arguments=[Argument("words", "+", "[@PROJECT] CHANGE", "the change")],
@@ -142,7 +160,8 @@ COMMANDS = [
         "rename the folder of a project whose plan waits",
         "Rename a project's folder while its plan waits for confirmation, before anything is built in it (what is "
         "built there may name its folder).",
-        chat="own",
+        kind="own",
+        chat=True,
         words="one",
         arguments=[Argument("words", "+", "[@PROJECT] NAME", "the folder's new name")],
         options=("workdir",),
@@ -155,7 +174,8 @@ COMMANDS = [
         "add a feature to a built project",
         "Add a feature to a built project (this folder's, or the project named). Its plan waits for your confirm "
         "first with --confirm (as in the conversation).",
-        chat="long",
+        kind="job",
+        chat=True,
         words="any",
         run=True,
         arguments=[Argument("words", "+", "[@PROJECT] FEATURE", "the feature")],
@@ -169,7 +189,8 @@ COMMANDS = [
         "fix a bug: what you do, what happens, what should",
         "Fix a bug: describe what you do, what happens and what should happen. A test shows the bug (with --confirm, it "
         "waits for your confirm); then the code is fixed so it passes and every other test still passes.",
-        chat="long",
+        kind="job",
+        chat=True,
         words="any",
         run=True,
         arguments=[Argument("words", "+", "[@PROJECT] BUG", "the bug")],
@@ -182,7 +203,8 @@ COMMANDS = [
         "status [@PROJECT]",
         "a project's spec points and whether they pass",
         "Show a project's spec points and whether their tests pass.",
-        chat="quick",
+        kind="glance",
+        chat=True,
         words="one",
         arguments=[PROJECT],
         options=("workdir",),
@@ -193,7 +215,8 @@ COMMANDS = [
         "runs",
         "every project, newest first",
         "List every project, newest first.",
-        chat="quick",
+        kind="glance",
+        chat=True,
     ),
     Command(
         "log",
@@ -201,7 +224,8 @@ COMMANDS = [
         "log [@PROJECT] [--calls]",
         "what a project's runs printed (or its model calls)",
         "Show what this folder's project (or the one named) printed in its runs; --calls shows its model calls.",
-        chat="quick",
+        kind="glance",
+        chat=True,
         words="one",
         arguments=[PROJECT],
         options=("calls", "workdir"),
@@ -214,7 +238,9 @@ COMMANDS = [
         "Learn something and keep it for the builds that need it. Tinker tells what it is: a language "
         '("Python 3.14"), a tool ("Flask"), a domain ("food bank inventory", researched with its sources '
         'cross-checked), or NAME "DEFINITION" (or an alias in your shell): a command of yours.',
-        chat="long",
+        kind="job",
+        actions=[Action("glance", words=2)],
+        chat=True,
         words="any",
         arguments=[Argument("words", "+", "WHAT [DEFINITION]")],
         example="learn rust",
@@ -230,7 +256,8 @@ COMMANDS = [
         "ask what Tinker has learned",
         "Ask what Tinker has learned: it answers just what you ask, from what it keeps alone (toolchains, fixes, "
         "lessons, facts, your commands). Nothing is changed.",
-        chat="long",
+        kind="job",
+        chat=True,
         words="any",
         arguments=[Argument("words", "+", "QUESTION", "the question (no quotes needed)")],
         example="ask what is your current toolchain for python",
@@ -246,7 +273,8 @@ COMMANDS = [
         "made once the facts it rests on hold: what you showed wrong is retired, the toolchain corrected and a "
         "lesson kept, with its sources. A change whose facts do not hold is not made, and it says why. Needs the "
         "web (tinker use-web).",
-        chat="long",
+        kind="job",
+        chat=True,
         words="any",
         arguments=[Argument("words", "+", "WHAT", "what to correct, and why (no quotes needed)")],
         example="teach ruff formats Python as black does, so ruff alone is enough",
@@ -264,7 +292,9 @@ COMMANDS = [
         "chapters most about WHAT again, with it in mind. Ask about it (tinker ask) and correct it (tinker teach): "
         "its own text is the evidence. What teaches how to build software guides the builds that need it. In a "
         "chat, attach the file.",
-        chat="long",
+        kind="job",
+        actions=[Action("glance", "list"), Action("glance", "show")],
+        chat=True,
         words="any",
         arguments=[
             Argument(
@@ -278,7 +308,10 @@ COMMANDS = [
         example='read #2 "the chapter on retries: when to give up"',
         rows=[
             ("read FILE | URL", "store a book, an article or a document, then learn from every chapter"),
-            ("read list", "the reading list: how much of each is read, what was learned"),
+            (
+                "read list [PAGE]",
+                "the reading list, a page at a time: how much of each is read, what was learned",
+            ),
             ("read show #N", "one reading: its chapters, read or not, and what each taught"),
             ('read #N ["WHAT"]', "go on with the chapters not read yet, or look again for WHAT"),
         ],
@@ -297,7 +330,9 @@ COMMANDS = [
         "It is a job: stop #N stops it, everything kept; resume #N (or exercise LANGUAGE) goes on from there. One "
         "exercise runs at a time; each language keeps its own. exercise status shows how each is going. A word "
         "that is not one language (or could be several) is said so, and nothing is done.",
-        chat="own",
+        kind="job",
+        actions=[Action("glance", "status")],
+        chat=True,
         words="any",
         arguments=[Argument("words", "+", "LANGUAGE | status")],
         example="exercise rust",
@@ -312,7 +347,8 @@ COMMANDS = [
         "is idle (resume #N: at once). Without a state, the running ones, the paused ones and the stopped ones; "
         "running, paused, stopped, finished or archived (by clear jobs) lists those alone. Newest first, 10 to a "
         "page (jobs stopped 2: the second page).",
-        chat="quick",
+        kind="glance",
+        chat=True,
         words="any",
         arguments=[
             Argument(
@@ -331,7 +367,8 @@ COMMANDS = [
         "stop a job (it is saved): the one that runs, or #N",
         "Stop a job as Ctrl-C does: what it did is kept, and resume #N goes on from there. Without a number, the "
         "job that runs, whatever it is. A paused job that is stopped no longer goes on by itself.",
-        chat="own",
+        kind="own",
+        chat=True,
         words="one",
         arguments=[Argument("words", "*", "[#JOB]", "the job, as jobs numbers it")],
         example="stop #3",
@@ -345,7 +382,8 @@ COMMANDS = [
         "model and the web before is answered from its journal, not asked again. resume @PROJECT continues a "
         "project's run (@ID or @folder, from anywhere; with no job stopped, this folder's); a plan that waits for "
         "confirmation is confirmed: building starts.",
-        chat="long",
+        kind="job",
+        chat=True,
         words="one",
         run=True,
         arguments=[
@@ -362,7 +400,8 @@ COMMANDS = [
         "Show what Tinker has learned: toolchains, fixes, lessons, topics, your commands. --graph draws it as a "
         "graph in one page (opened in the browser; in a chat, sent as a file): each lesson, fact and fix linked "
         "to its language or topic and to the runs that taught it, proved it or found it wrong.",
-        chat="quick",
+        kind="glance",
+        chat=True,
         words="one",
         options=("graph",),
         example="memory --graph",
@@ -374,7 +413,8 @@ COMMANDS = [
         "what is missing or wrong, and how to fix it",
         "Check what Tinker needs (Ollama, a measured model, an embedding model, the web) and say how to fix what "
         "is missing.",
-        chat="quick",
+        kind="glance",
+        chat=True,
     ),
     Command(
         "models",
@@ -382,7 +422,8 @@ COMMANDS = [
         "models",
         "the models Ollama has, and which are measured",
         "List the models Ollama has, and which are measured.",
-        chat="quick",
+        kind="glance",
+        chat=True,
     ),
     Command(
         "calibrate",
@@ -390,7 +431,8 @@ COMMANDS = [
         "calibrate NAME",
         "measure a model once (a minute or a few)",
         "Measure a model once: the largest prompt it reads and the longest reply it writes.",
-        chat="long",
+        kind="job",
+        chat=True,
         words="one",
         arguments=[Argument("name", None, None, "the model's name, as `tinker models` lists it")],
     ),
@@ -400,7 +442,8 @@ COMMANDS = [
         "use-model NAME",
         "the measured model every build uses",
         "Use this measured model for every build from now on.",
-        chat="quick",
+        kind="glance",
+        chat=True,
         words="one",
         arguments=[Argument("name", None, None, "the model's name, as `tinker models` lists it")],
     ),
@@ -410,7 +453,8 @@ COMMANDS = [
         "embed NAME",
         "the embedding model that indexes what is learned",
         "Use this embedding model to index what is learned, so builds find it by meaning.",
-        chat="quick",
+        kind="glance",
+        chat=True,
         words="one",
         arguments=[Argument("name", None, None, "the model's name, as `tinker models` lists it")],
     ),
@@ -421,7 +465,8 @@ COMMANDS = [
         "the web search tinker learn and --web use: ollama or duckduckgo",
         "Use this web search for tinker learn and --web from now on: ollama (Ollama's web search and fetch, with a "
         "free key in OLLAMA_API_KEY) or duckduckgo (no key).",
-        chat="quick",
+        kind="glance",
+        chat=True,
         words="one",
         arguments=[Argument("name", None, None, "the web search to use", choices="backends")],
     ),
@@ -430,8 +475,12 @@ COMMANDS = [
         "Set up",
         "config [KEY VALUE]",
         "the settings, or set one",
-        "Show the settings a build uses, or set one: tinker config KEY VALUE (e.g. tinker config test_timeout 90).",
-        chat="quick",
+        "Show the settings a build uses, or set one: tinker config KEY VALUE (e.g. tinker config test_timeout 90). "
+        "The settings: "
+        + ", ".join(f"{key} ({row.described()})" for key, row in SETTINGS.items() if row.owner == "config")
+        + ".",
+        kind="glance",
+        chat=True,
         words="any",
         arguments=[Argument("words", "*", "KEY VALUE", "the setting and its value")],
     ),
@@ -448,7 +497,8 @@ COMMANDS = [
         "deleted: jobs archived lists them, and they cannot be resumed; every stopped and finished one with no "
         "#N). In a conversation, clear chat takes every "
         "message out of the chats but Tinker's status, at once: history keeps what they showed.",
-        chat="quick",
+        kind="glance",
+        chat=True,
         words="any",
         deletes=True,
         arguments=[
@@ -488,7 +538,8 @@ COMMANDS = [
         "delete everything Tinker keeps (projects stay)",
         "Delete everything Tinker keeps (settings, measured models, what it learned, the list of projects); "
         "projects are not touched.",
-        chat="quick",
+        kind="glance",
+        chat=True,
         deletes=True,
         options=("yes",),
     ),
@@ -497,7 +548,8 @@ COMMANDS = [
         "Set up",
         "help [COMMAND]",
         "this list, or one command's arguments and options",
-        chat="own",
+        kind="glance",
+        chat=True,
         words="one",
         arguments=[Argument("command", "?", "COMMAND")],
     ),
@@ -513,6 +565,7 @@ COMMANDS = [
         "Talk",
         "chat MESSAGE",
         "a normal chat with the model (the job that runs is paused for it)",
+        kind="pauses",
         words="any",
         example="chat hello",
     ),
@@ -521,7 +574,8 @@ COMMANDS = [
         "Talk",
         "command WHAT",
         "the command line that does it, run once you confirm",
-        chat="own",
+        kind="pauses",
+        chat=True,
         words="any",
         example="command show the free disk space",
     ),
@@ -530,7 +584,8 @@ COMMANDS = [
         "Talk",
         "research TOPIC",
         "the web searched, answered with its sources",
-        chat="own",
+        kind="job",
+        chat=True,
         words="any",
         example="research the newest Python release",
     ),
@@ -539,7 +594,8 @@ COMMANDS = [
         "Talk",
         "run [@PROJECT] ARGS",
         "run a built project (the last one built, by default) with these arguments; <<< TEXT gives it input",
-        chat="own",
+        kind="own",
+        chat=True,
         words="any",
         example="run 5 + 3",
     ),
@@ -552,25 +608,34 @@ COMMANDS = [
         "(history 2: the second page), with what you asked for each; history #N shows one again. A chat keeps its "
         "messages a day (a glance, like jobs or help, two minutes): the history keeps them all, until tinker clear "
         "history.",
-        chat="own",
+        kind="glance",
+        chat=True,
         words="one",
         arguments=[Argument("words", "*", "[PAGE | #N]", "the page, from 1, or #N: the one to show again")],
         example="history #3",
     ),
     Command(
-        "exit", "Talk", "exit", "end the conversation (in a chat, once confirmed)", chat="own", cli=False
+        "exit",
+        "Talk",
+        "exit",
+        "end the conversation (in a chat, once confirmed)",
+        kind="own",
+        chat=True,
+        cli=False,
     ),
     Command(
         "channel",
         "Channels",
         "channel ACTION",
         "the chat channels",
-        chat="quick",
+        kind="glance",
+        actions=[Action("glance", "remove", deletes=True)],
+        chat=True,
         words="any",
         rows=[
             ("channel list", "the chat channels (Telegram), and which are enabled"),
             ("channel add", "add one: its kind, a name, its token; pairs your chat"),
-            ("channel remove NAME", "delete a channel and its token"),
+            ("channel remove NAME [--yes]", "delete a channel and its token, once you confirm"),
             ("channel enable NAME", "every task reports to it; tinker channel start reads it"),
             ("channel disable NAME", "stop using it (channels start disabled)"),
             ("channel start [NAME]", "read the chat: tasks, status, jobs, stop, commands, or just chat"),
@@ -582,12 +647,22 @@ GROUPS = ("Build", "Learn", "Jobs", "Set up", "Talk", "Channels")
 TERMINAL_ONLY_CHANNEL_ACTIONS = ("add", "remove", "start")
 
 
-def named(*kinds, words=None):
-    return tuple(
-        command.name
-        for command in COMMANDS
-        if command.chat in kinds and (words is None or command.words == words)
-    )
+def kind_of(argv):
+    action = action_of(argv)
+    return action.kind if action else None
+
+
+def deletes(argv):
+    action = action_of(argv)
+    return bool(action and action.deletes)
+
+
+def action_of(argv):
+    command = BY_NAME.get(argv[0]) if argv else None
+    if command is None:
+        return None
+    asked = next((action for action in command.actions if action.fits(argv)), None)
+    return asked or Action(command.kind, deletes=command.deletes)
 
 
 def ref(word):

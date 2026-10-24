@@ -12,7 +12,7 @@ from tinkerkit import conversation, jobs
 from tinkerkit.cli import Cli, Commands
 from tinkerkit.conversation import ConsoleChannel, Desk, Message, Progress, Research, research_once
 from tinkerkit.fetcher import Fetched, Fetcher
-from tinkerkit.jobs import JOB_STOP_SIGNAL, Jobs, is_job, journaled, today
+from tinkerkit.jobs import JOB_STOP_SIGNAL, Jobs, archived, calls_log, is_job, journaled, today
 from tinkerkit.learning import SlotLearner
 from tinkerkit.model import Ollama
 from tinkerkit.project import Tracker
@@ -50,6 +50,7 @@ def test_long_commands_are_jobs_and_the_rest_are_not():
         ["exercise", "rust"],
         ["confirm"],
         ["amend", "x"],
+        ["calibrate"],
         ["ask", "status", "of", "python"],
     ):
         assert is_job(argv), argv
@@ -61,6 +62,8 @@ def test_long_commands_are_jobs_and_the_rest_are_not():
         ["stop"],
         ["exercise", "status"],
         ["learn", "ll", "ls -l"],
+        ["read", "list"],
+        ["chat", "hi"],
         ["task", "--help"],
     ):
         assert not is_job(argv), argv
@@ -330,7 +333,7 @@ def test_stop_tells_a_job_or_every_one_of_the_persons(home_store, monkeypatch, c
 def test_clear_jobs_archives_them_listed_apart_and_never_resumed(home_store, capsys):
     keep_jobs(home_store, ["stopped", "finished", "running", "stopped"])
     home_store.append("journal #1", {"key": "k", "answer": "a"})
-    with pytest.raises(SystemExit, match="Nothing deleted: run tinker clear jobs #1"):
+    with pytest.raises(SystemExit, match="Nothing archived: run tinker clear jobs #1"):
         Cli.cleared(["jobs", "#1"], yes=False)
     Cli.cleared(["jobs", "#1"], yes=True)
     assert Jobs.get(1)["state"] == "archived" and Jobs.get(1)["archived_from"] == "stopped"
@@ -712,3 +715,13 @@ def test_a_new_jobs_message_is_kept_up_and_one_that_goes_on_comes_to_the_bottom(
     reporter.refresh()
     assert len([entry for entry in channel.log if entry[0] == "send"]) == sent + 1
     reporter.ended = True
+
+
+@pytest.mark.spec("JOB-12")
+def test_a_job_keeps_its_model_calls_in_its_own_log_until_it_is_archived(home_store):
+    calls_log().add({"note": "outside a job"})
+    with Jobs.running(["learn", "rust"]):
+        calls_log().add({"note": "a model call"})
+    assert [entry["note"] for _, entry in home_store.entries("calls #1")] == ["a model call"]
+    archived([1], yes=True)
+    assert home_store.entries("calls #1") == []

@@ -127,10 +127,10 @@ def test_on_a_terminal_the_next_message_clears_the_live_line(monkeypatch, capsys
 @pytest.mark.spec("MSG-5")
 def test_a_detail_goes_to_the_log_only(home_store, capsys):
     say.detail("dropped: no log is kept yet")
-    log = Log(home_store, "learn")
+    log = Log(home_store, "calls #1")
     say.keep_log(log)
     say.detail("prompt 812 tok", model="m")
-    entries = [entry for _, entry in home_store.entries("learn")]
+    entries = [entry for _, entry in home_store.entries("calls #1")]
     assert capsys.readouterr().out == ""
     assert len(entries) == 1 and entries[0]["note"] == "prompt 812 tok" and entries[0]["model"] == "m"
 

@@ -11,38 +11,20 @@ lazy import urllib.parse
 lazy import urllib.request
 
 from .messages import say
-from .settings import Config, first_line, is_number, number_from
+from .settings import Config, first_line
 lazy from .fetcher import Fetcher
 lazy from .jobs import journaled
-
-MAIN_CLOSED = -1
+lazy from .passages import MainBlocks
 
 Unreached = namedtuple("Unreached", "why timed_out")
 ReadyBackends = namedtuple("ReadyBackends", "ready reasons")
 BackendAnswer = namedtuple("BackendAnswer", "result why")
 Got = namedtuple("Got", "text content_type")
-Limit = namedtuple("Limit", "whole least")
 
 
 class Internet:
     RETRY_PAUSE_SECONDS = 3
     FAILURES_BEFORE_GONE = 2
-    LEARN_LIMITS = {
-        "learn_rate": Limit(False, 1),
-        "learn_backoff": Limit(False, 0),
-        "learn_cutoff": Limit(False, 0),
-        "learn_pages": Limit(True, 1),
-        "learn_min_pages": Limit(True, 1),
-        "learn_searches": Limit(True, 1),
-        "fetch_workers": Limit(True, 1),
-        "fetch_timeout": Limit(False, 1),
-        "fetch_max_bytes": Limit(True, 1000),
-        "fetch_domain_delay": Limit(False, 0),
-        "fetch_fallbacks": Limit(True, 0),
-        "docs_pages": Limit(True, 1),
-        "tool_docs_pages": Limit(True, 0),
-        "docs_latest_days": Limit(False, 0),
-    }
 
     def __init__(self):
         self.errors, self.failures, self.last_failure_status = {}, {}, {}
@@ -67,7 +49,7 @@ class Internet:
 
     @staticmethod
     def required(option):
-        Internet.check()
+        Config.check()
         internet = Internet()
         if not internet.available():
             raise SystemExit(f"{option} needs the Internet plugin: {internet.problem()}")
@@ -78,7 +60,7 @@ class Internet:
     @staticmethod
     def state():
         try:
-            Internet.check()
+            Config.check()
         except SystemExit as exc:
             return f"not usable: {exc}"
         internet = Internet()
@@ -88,45 +70,6 @@ class Internet:
             f"; not usable: {'; '.join(internet.unusable_backends)}" if internet.unusable_backends else ""
         )
         return f"ready: {internet.describe()}{skipped}"
-
-    @staticmethod
-    def check():
-        for key in ("web", "web_fallback"):
-            Internet.check_backend_name(key)
-        Internet.check_timeout()
-        Internet.check_learn_missing()
-        Internet.check_learn_limits()
-
-    @staticmethod
-    def check_backend_name(key):
-        if Config.get(key) not in ("", *Internet.backends()):
-            raise SystemExit(
-                f"{key} must be one of {', '.join(map(repr, Internet.backends()))} "
-                f'or "" (none); it is {Config.get(key)!r}'
-            )
-
-    @staticmethod
-    def check_timeout():
-        timeout = Config.get("web_timeout")
-        if not is_number(timeout) or timeout <= 0:
-            raise SystemExit(f"web_timeout must be a number of seconds above 0; it is {timeout!r}")
-
-    @staticmethod
-    def check_learn_missing():
-        missing = Config.get("learn_missing")
-        if not number_from(missing, 1):
-            raise SystemExit(
-                f"learn_missing must be a whole number, 1 or more (the topics a run "
-                f"with --web may learn); it is {missing!r}"
-            )
-
-    @staticmethod
-    def check_learn_limits():
-        for key, (whole, least) in Internet.LEARN_LIMITS.items():
-            value = Config.get(key)
-            if not number_from(value, least, whole):
-                kind = "a whole number" if whole else "a number"
-                raise SystemExit(f"{key} must be {kind}, {least} or more; it is {value!r}")
 
     @staticmethod
     def backends():
@@ -427,170 +370,30 @@ class DuckDuckGoWeb(WebBackend):
         return " ".join(html.unescape(cls.TAG_RE.sub("", fragment)).split())
 
 
-class PageText(html.parser.HTMLParser):
-    SKIP = {
-        "script",
-        "style",
-        "noscript",
-        "nav",
-        "header",
-        "footer",
-        "aside",
-        "form",
-        "svg",
-        "button",
-        "template",
-        "iframe",
-        "select",
-    }
-    BLOCKS = {
-        "p",
-        "div",
-        "section",
-        "article",
-        "main",
-        "li",
-        "tr",
-        "br",
-        "h1",
-        "h2",
-        "h3",
-        "h4",
-        "h5",
-        "h6",
-        "pre",
-        "table",
-        "ul",
-        "ol",
-        "dl",
-        "dt",
-        "dd",
-        "blockquote",
-        "hr",
-    }
-    VOID = {
-        "br",
-        "hr",
-        "img",
-        "input",
-        "meta",
-        "link",
-        "area",
-        "base",
-        "col",
-        "embed",
-        "source",
-        "track",
-        "wbr",
-    }
-    SKIP_ROLES = {"navigation", "banner", "contentinfo", "search", "menu", "menubar", "toolbar", "dialog"}
-    BULLETS_AND_SEPARATORS_RE = re.compile(r"[-*#|»›>·•\s]*")
+class PageText:
+    SEPARATORS_ONLY_RE = re.compile(r"[-*#|»›>·•\s]*")
 
-    def __init__(self):
-        super().__init__(convert_charrefs=True)
-        self.title, self.skipping, self.pre = "", 0, 0
-        self.in_title, self.depth = False, 0
-        self.all, self.main, self.main_opened_at = [], [], None
+    def __init__(self, title, blocks):
+        self.title = title
+        self.blocks = [block for block in blocks if not self.SEPARATORS_ONLY_RE.fullmatch(block.text)]
 
     @classmethod
     def of(cls, markup):
-        parser = cls()
-        read_what_it_can(parser, markup)
-        return parser
+        parsed = MainBlocks.parsed(markup)
+        return cls(parsed.title, parsed.content())
 
     def content(self):
-        main = self.lines(self.main)
-        return main if len(main) >= 400 else self.lines(self.all)
+        text = ""
+        for before, block in zip([None, *self.blocks], self.blocks):
+            together = before is not None and before.kind == block.kind == "item"
+            text += ("\n" if together else "\n\n" if text else "") + self.line(block)
+        return text
 
     @staticmethod
-    def lines(pieces):
-        text = "".join(pieces)
-        out, blank = [], False
-        for line in text.split("\n"):
-            line = line.rstrip()
-            if not PageText.BULLETS_AND_SEPARATORS_RE.fullmatch(line):
-                out.append(line)
-                blank = False
-            elif not blank and out:
-                out.append("")
-                blank = True
-        return "\n".join(out).strip()
-
-    def handle_starttag(self, tag, attrs):
-        if tag in self.VOID:
-            if tag == "br":
-                self.add("\n")
-            return
-        self.depth += 1
-        if tag == "title" and not self.title and not self.skipping:
-            self.in_title = True
-        attributes = dict(attrs)
-        if self.skipping or self.not_content(tag, attributes):
-            self.skipping += 1
-            return
-        if self.opens_main(tag, attributes) and self.main_opened_at is None:
-            self.main_opened_at = self.depth
-        if tag == "pre":
-            self.pre += 1
-        if tag in self.BLOCKS:
-            self.add("\n" + self.line_mark(tag))
-
-    @staticmethod
-    def opens_main(tag, attributes):
-        return tag in ("main", "article") or attributes.get("role") == "main"
-
-    def not_content(self, tag, attributes):
-        return (
-            tag in self.SKIP
-            or attributes.get("role") in self.SKIP_ROLES
-            or attributes.get("aria-hidden") == "true"
-            or "hidden" in attributes
-        )
-
-    @staticmethod
-    def line_mark(tag):
-        if tag in ("h1", "h2", "h3", "h4", "h5", "h6"):
-            return "#" * int(tag[1]) + " "
-        return "- " if tag == "li" else ""
-
-    def handle_endtag(self, tag):
-        if tag in self.VOID:
-            return
-        if tag == "title":
-            self.in_title = False
-        if self.skipping:
-            self.skipping -= 1
-        else:
-            if tag == "pre":
-                self.pre = max(0, self.pre - 1)
-            if tag in self.BLOCKS and tag != "li":
-                self.add("\n")
-            if self.main_opened_at is not None and self.depth == self.main_opened_at:
-                self.main_opened_at = MAIN_CLOSED
-        self.depth = max(0, self.depth - 1)
-
-    def handle_data(self, data):
-        if self.in_title:
-            self.title += data.strip()
-        if self.skipping or self.in_title:
-            return
-        if self.pre:
-            self.add(data)
-        elif not data.strip():
-            self.add(" " if data else "")
-        else:
-            self.add(self.collapsed(data))
-
-    @staticmethod
-    def collapsed(data):
-        return (
-            (" " if data[0].isspace() else "") + " ".join(data.split()) + (" " if data[-1].isspace() else "")
-        )
-
-    def add(self, text):
-        self.all.append(text)
-        if self.main_opened_at is not None and self.main_opened_at > 0:
-            self.main.append(text)
+    def line(block):
+        if block.kind == "heading":
+            return "#" * max(1, block.level) + " " + block.text
+        return "- " + block.text if block.kind == "item" else block.text
 
 
 class WebError(Exception):
@@ -606,11 +409,3 @@ def unreached(exc):
 
 def is_web_address(url):
     return str(url).startswith(("http://", "https://"))
-
-
-def read_what_it_can(parser, markup):
-    try:
-        parser.feed(markup)
-        parser.close()
-    except Exception:
-        pass

@@ -8,26 +8,12 @@ lazy import threading
 lazy import time
 lazy from pathlib import Path
 
+lazy from .commands import kind_of
 lazy from .messages import say
-lazy from .settings import EXERCISE_ENV, Home, Paged, confirmed, fingerprint, now_text
+lazy from .settings import EXERCISE_ENV, Home, Log, Numbered, confirm_deletion, fingerprint, now_text
 
-COMMANDS = (
-    "task",
-    "restart",
-    "resume",
-    "confirm",
-    "amend",
-    "add",
-    "fix",
-    "learn",
-    "ask",
-    "teach",
-    "read",
-    "research",
-    "exercise",
-)
+JOBS = Numbered("jobs", "job numbers")
 STATES = ("running", "paused", "stopped", "finished", "archived")
-JOBS_PER_PAGE = 10
 JOB_PAUSE_GRACE_SECONDS = 150
 PAUSED_JOB_IDLE_LOOK_SECONDS = 1.0
 JOB_STOP_SIGNAL = signal.SIGUSR2
@@ -60,6 +46,10 @@ def journaled(
     if Jobs.journal is None:
         return ask()
     return Jobs.journal.answer(request, ask, keep, dump, load)
+
+
+def calls_log():
+    return Log(Home.store(), f"calls #{Jobs.current['number']}" if Jobs.current else None)
 
 
 def today():
@@ -114,7 +104,7 @@ class Jobs:
 
     @classmethod
     def new(cls, argv):
-        number = Home.store().update("job numbers", "last", lambda last: (last or 0) + 1)
+        number = JOBS.next_number()
         title = " ".join(word for word in argv if not word.startswith("--"))
         return {
             "number": number,
@@ -163,29 +153,27 @@ class Jobs:
 
     @staticmethod
     def update(number, **changes):
-        return Home.store().update("jobs", str(number), lambda job: dict(job, **changes, updated=now_text()))
+        return JOBS.update(number, lambda job: dict(job, **changes, updated=now_text()))
 
     @staticmethod
     def save(job):
-        job = dict(job, updated=now_text())
-        Home.store().put("jobs", str(job["number"]), job)
-        return job
+        return JOBS.put(dict(job, updated=now_text()))
 
     @staticmethod
     def get(number):
-        job = Home.store().get("jobs", str(number))
+        job = JOBS.get(number)
         return settled(job) if job else None
 
     @staticmethod
     def every():
-        jobs = [settled(job) for job in Home.store().items("jobs").values()]
-        return sorted(jobs, key=lambda job: job["number"], reverse=True)
+        return [settled(job) for job in JOBS.newest()]
 
     @staticmethod
     def lost():
-        jobs = Home.store().items("jobs").values()
         return [
-            job for job in jobs if job.get("state") in ("running", "paused") and not alive(job.get("pid"))
+            job
+            for job in JOBS.newest()
+            if job.get("state") in ("running", "paused") and not alive(job.get("pid"))
         ]
 
     @staticmethod
@@ -193,11 +181,6 @@ class Jobs:
         jobs = Jobs.every()
         states = [state] if state else ["running", "paused", "stopped"]
         return [job for wanted in states for job in jobs if job["state"] == wanted]
-
-    @staticmethod
-    def page(jobs, number):
-        pages = max(1, -(-len(jobs) // JOBS_PER_PAGE))
-        return Paged(jobs[(number - 1) * JOBS_PER_PAGE : number * JOBS_PER_PAGE], pages)
 
     @staticmethod
     def resumable(number=None):
@@ -260,17 +243,18 @@ def archived(numbers, yes=False):
     if not jobs:
         say.info("Nothing to clear: no job is stopped or finished.")
         return
-    say.warn("This archives (tinker jobs archived lists them; they cannot be resumed):")
-    with say.section():
-        for job in jobs:
-            say.item(f"#{job['number']} {job['state']}: {job['title']}")
     numbered = " ".join(f"#{job['number']}" for job in jobs)
-    if not confirmed("Archive them?", f"tinker clear jobs {numbered}", yes):
-        say.info("Nothing archived.")
-        return
+    confirm_deletion(
+        "This archives (tinker jobs archived lists them; they cannot be resumed):",
+        [f"#{job['number']} {job['state']}: {job['title']}" for job in jobs],
+        f"tinker clear jobs {numbered}",
+        yes,
+        verb="archive",
+    )
     for job in jobs:
         Jobs.update(job["number"], state="archived", archived_from=job["state"])
         Home.store().drop_log(f"journal #{job['number']}")
+        Home.store().drop_log(f"calls #{job['number']}")
     say.done(f"Archived {numbered}.")
 
 
@@ -335,15 +319,9 @@ def signal_job(job):
 
 
 def is_job(argv):
-    if not argv or argv[0] not in COMMANDS or {"-h", "--help"} & set(argv):
+    if {"-h", "--help"} & set(argv) or os.environ.get(EXERCISE_ENV) == "1":
         return False
-    if os.environ.get(EXERCISE_ENV) == "1":
-        return False
-    return (
-        not (argv[0] == "learn" and len(argv) == 3)
-        and not (argv[0] == "exercise" and argv[1:2] == ["status"])
-        and not (argv[0] == "read" and argv[1:2] in (["list"], ["show"]))
-    )
+    return kind_of(argv) == "job"
 
 
 def job_number(word):

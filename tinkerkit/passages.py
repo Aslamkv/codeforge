@@ -3,7 +3,6 @@ import re
 from dataclasses import dataclass
 lazy import urllib.parse
 
-from .web import MAIN_CLOSED, PageText, read_what_it_can
 lazy from .settings import (
     MAX_PASSAGE_CHARS,
     MENU_LINK_SHARE,
@@ -18,6 +17,7 @@ lazy from .settings import (
 class Block:
     kind: str
     text: str
+    level: int = 0
 
 
 @dataclass
@@ -124,53 +124,111 @@ class Cleaner:
 
 
 class MainBlocks(html.parser.HTMLParser):
-    SKIP = PageText.SKIP | {"head"}
+    SKIP = {
+        "head",
+        "script",
+        "style",
+        "noscript",
+        "nav",
+        "header",
+        "footer",
+        "aside",
+        "form",
+        "svg",
+        "button",
+        "template",
+        "iframe",
+        "select",
+    }
     HEADINGS = {"h1", "h2", "h3", "h4", "h5", "h6"}
-    BLOCKS = PageText.BLOCKS - {"br", "hr"}
+    BLOCKS = HEADINGS | {
+        "p",
+        "div",
+        "section",
+        "article",
+        "main",
+        "li",
+        "tr",
+        "pre",
+        "table",
+        "ul",
+        "ol",
+        "dl",
+        "dt",
+        "dd",
+        "blockquote",
+    }
+    VOID = {
+        "br",
+        "hr",
+        "img",
+        "input",
+        "meta",
+        "link",
+        "area",
+        "base",
+        "col",
+        "embed",
+        "source",
+        "track",
+        "wbr",
+    }
+    SKIP_ROLES = {"navigation", "banner", "contentinfo", "search", "menu", "menubar", "toolbar", "dialog"}
 
     def __init__(self):
         super().__init__(convert_charrefs=True)
         self.skipping, self.pre, self.links, self.depth = 0, 0, 0, 0
-        self.kind, self.pieces, self.link_chars = "text", [], 0
+        self.kind, self.level, self.pieces, self.link_chars = "text", 0, [], 0
         self.all, self.main, self.main_opened_at = [], [], None
+        self.title, self.in_title = "", False
 
     @classmethod
     def of(cls, markup):
+        return cls.parsed(markup).content()
+
+    @classmethod
+    def parsed(cls, markup):
         parser = cls()
         read_what_it_can(parser, markup)
         parser.flush()
-        main_chars = sum(len(block.text) for block in parser.main if block.kind != "heading")
-        return parser.main if main_chars >= MIN_USABLE_PAGE_CHARS else parser.all
+        return parser
+
+    def content(self):
+        main_chars = sum(len(block.text) for block in self.main if block.kind != "heading")
+        return self.main if main_chars >= MIN_USABLE_PAGE_CHARS else self.all
 
     def handle_starttag(self, tag, attrs):
-        if tag in PageText.VOID:
+        if tag in self.VOID:
             return
         self.depth += 1
+        self.in_title = self.in_title or (tag == "title" and not self.title)
         attributes = dict(attrs)
         if self.skipping or self.not_content(tag, attributes):
             self.skipping += 1
             return
-        if PageText.opens_main(tag, attributes) and self.main_opened_at is None:
+        if opens_main(tag, attributes) and self.main_opened_at is None:
             self.main_opened_at = self.depth
         if tag == "a":
             self.links += 1
         if tag in self.BLOCKS and not self.pre:
             self.flush()
-            self.kind = "code" if tag == "pre" else "heading" if tag in self.HEADINGS else "text"
+            self.kind, self.level = block_kind(tag), int(tag[1]) if tag in self.HEADINGS else 0
         if tag == "pre":
             self.pre += 1
 
     def not_content(self, tag, attributes):
         return (
             tag in self.SKIP
-            or attributes.get("role") in PageText.SKIP_ROLES
+            or attributes.get("role") in self.SKIP_ROLES
             or attributes.get("aria-hidden") == "true"
             or "hidden" in attributes
         )
 
     def handle_endtag(self, tag):
-        if tag in PageText.VOID:
+        if tag in self.VOID:
             return
+        if tag == "title":
+            self.in_title = False
         if self.skipping:
             self.skipping -= 1
         else:
@@ -185,9 +243,11 @@ class MainBlocks(html.parser.HTMLParser):
         self.depth = max(0, self.depth - 1)
 
     def handle_data(self, data):
-        if self.skipping:
+        if self.in_title:
+            self.title += data.strip()
+        if self.skipping or self.in_title:
             return
-        text = data if self.pre else PageText.collapsed(data) if data.strip() else (" " if data else "")
+        text = data if self.pre else collapsed(data) if data.strip() else (" " if data else "")
         self.pieces.append(text)
         if self.links and not self.pre:
             self.link_chars += len(data.strip())
@@ -198,11 +258,40 @@ class MainBlocks(html.parser.HTMLParser):
             if self.kind == "code"
             else " ".join("".join(self.pieces).split())
         )
-        if text.strip() and (self.kind != "text" or not mostly_links(self.link_chars, text)):
-            self.all.append(Block(self.kind, text))
+        is_menu = self.kind in ("text", "item") and mostly_links(self.link_chars, text)
+        if text.strip() and not is_menu:
+            block = Block(self.kind, text, self.level)
+            self.all.append(block)
             if self.main_opened_at is not None and self.main_opened_at > 0:
-                self.main.append(Block(self.kind, text))
-        self.kind, self.pieces, self.link_chars = "text", [], 0
+                self.main.append(block)
+        self.kind, self.level, self.pieces, self.link_chars = "text", 0, [], 0
+
+
+MAIN_CLOSED = -1
+
+
+def block_kind(tag):
+    if tag == "pre":
+        return "code"
+    if tag in MainBlocks.HEADINGS:
+        return "heading"
+    return "item" if tag == "li" else "text"
+
+
+def opens_main(tag, attributes):
+    return tag in ("main", "article") or attributes.get("role") == "main"
+
+
+def collapsed(data):
+    return (" " if data[0].isspace() else "") + " ".join(data.split()) + (" " if data[-1].isspace() else "")
+
+
+def read_what_it_can(parser, markup):
+    try:
+        parser.feed(markup)
+        parser.close()
+    except Exception:
+        pass
 
 
 class Links(html.parser.HTMLParser):

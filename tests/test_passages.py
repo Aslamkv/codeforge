@@ -1,6 +1,6 @@
 import pytest
 
-from tinkerkit.passages import Block, Cleaner, Page, Passage, text_blocks
+from tinkerkit.passages import Block, Cleaner, MainBlocks, Page, Passage, text_blocks
 from tinkerkit.settings import MAX_PASSAGE_CHARS
 
 INSTALL = (
@@ -52,6 +52,20 @@ def test_a_page_keeps_its_main_content_as_blocks():
     ):
         assert left_out not in shown
     assert page.usable()
+
+
+@pytest.mark.spec("PAS-1")
+def test_a_page_keeps_its_title_its_heading_levels_and_its_list_items():
+    parsed = MainBlocks.parsed(
+        "<html><head><title>Tool docs</title></head><body><h3>Use</h3><ul><li>one</li>"
+        '<li><a href="/x">a menu link</a></li></ul><pre>a\n  b</pre></body></html>'
+    )
+    assert parsed.title == "Tool docs"
+    assert [(block.kind, block.text, block.level) for block in parsed.content()] == [
+        ("heading", "Use", 3),
+        ("item", "one", 0),
+        ("code", "a\n  b", 0),
+    ]
 
 
 @pytest.mark.spec("PAS-1")

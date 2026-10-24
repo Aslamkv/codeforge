@@ -19,7 +19,7 @@ lazy from .settings import (
     STATUS_TEXT,
     Home,
     Store,
-    confirmed,
+    confirm_deletion,
     first_line,
     now_text,
     split_text,
@@ -252,9 +252,12 @@ class Runs:
         items = sorted(item for item in workdir.iterdir() if item != keep)
         if not items:
             return
-        Runs.show_what_emptying_deletes(workdir, items, keep)
-        if not confirmed("Delete them and build the task again from scratch?", "tinker restart", yes):
-            raise SystemExit("Nothing deleted.")
+        confirm_deletion(
+            f"tinker restart deletes everything in {workdir}, to build the task again from scratch:",
+            Runs.listed_for_deletion(items, keep),
+            "tinker restart",
+            yes,
+        )
         for item in items:
             shutil.rmtree(item) if is_folder(item) else item.unlink()
         Runs.forget_runs_in(workdir)
@@ -268,15 +271,11 @@ class Runs:
             raise SystemExit(f"tinker restart will not empty {workdir}: run it in the project's own folder.")
 
     @staticmethod
-    def show_what_emptying_deletes(workdir, items, keep):
-        say.warn(f"tinker restart deletes everything in {workdir} ({len(items)} items):")
-        with say.section():
-            for item in items[:20]:
-                say.item(f"{item.name}{'/' if is_folder(item) else ''}")
-            if len(items) > 20:
-                say.item(f"... and {len(items) - 20} more")
-        if keep:
-            say.info(f"Kept: {keep.name} (it holds the spec file)", "📌")
+    def listed_for_deletion(items, keep):
+        listed = [f"{item.name}{'/' if is_folder(item) else ''}" for item in items[:20]]
+        more = [f"... and {len(items) - 20} more"] if len(items) > 20 else []
+        kept = [f"(kept: {keep.name}, which holds the spec file)"] if keep else []
+        return listed + more + kept
 
     @staticmethod
     def forget_runs_in(workdir):
@@ -766,6 +765,32 @@ class Tracker:
 
     def close(self):
         Home.store().delete("running", str(self.pid))
+
+
+class Steps:
+    def __init__(self, names, tracker=None, only_if=None):
+        self.names, self.tracker, self.only_if = tuple(names), tracker, only_if or {}
+
+    def run(self, at, step, save, waits=lambda: False):
+        while at != self.names[-1]:
+            if waits():
+                return "waiting"
+            if self.wanted(at):
+                self.enter(at)
+                if step(at) is False:
+                    return "blocked"
+            at = self.names[self.names.index(at) + 1]
+            save(at)
+        return "done"
+
+    def wanted(self, step):
+        return self.only_if.get(step, lambda: True)()
+
+    def enter(self, step):
+        if step not in self.names:
+            raise ValueError(f"no step {step!r}: the steps are {', '.join(self.names)}")
+        if self.tracker is not None and self.tracker.state["step"] != step:
+            self.tracker.phase(step)
 
 
 class Outcome:
