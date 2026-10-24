@@ -148,7 +148,8 @@ def test_pieces_lose_no_text_of_a_long_line():
                                           ("status of my build please", ""), ("task a calculator", "task"),
                                           ("models are getting better", ""), ("models", "models"), ("hello", ""),
                                           ("", ""), ("confirm", "confirm"), ("confirm abc123", "confirm"),
-                                          ("research the new python", "research")])
+                                          ("research the new python", "research"), ("/use_model", "use-model"),
+                                          ("/status@tinker_bot", "status")])
 def test_command_of(text, command):
     assert command_of(text, Desk.COMMANDS) == command
 

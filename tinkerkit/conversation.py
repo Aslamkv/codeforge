@@ -206,6 +206,7 @@ class Desk:
         self.talk.warm()
         for channel in self.channels:
             channel.skip_waiting()
+            channel.offer(offered())
         self.say_status(anew=True)
         self.adopt_exercise()
         if not self.consoles:
@@ -832,7 +833,7 @@ def command_of(text, commands=None):
     without a /), or "" when it is chat. A word alone is a command; one of ONE_WORD with one word after it
     is, and one of ANY_WORDS with any words after it ("models are getting better" is a chat)."""
     words = text.split()
-    first = words[0].lower().lstrip("/") if words else ""
+    first = command_word(words[0]) if words else ""
     if first not in (commands or Desk.COMMANDS):
         return ""
     if len(words) == 1 or first in ANY_WORDS or (first in ONE_WORD and len(words) == 2):
@@ -847,8 +848,19 @@ def command_words(text):
         words = shlex.split(text)
     except ValueError:
         words = text.split()
-    words[0] = words[0].lower().lstrip("/")
+    words[0] = command_word(words[0])
     return words
+
+
+def command_word(word):
+    """A command's name as it is sent: lowercase, and as a chat app's menu sends it too (/use_model, and
+    /use_model@bot in a group) the name it stands for (use-model)."""
+    return word.lower().lstrip("/").partition("@")[0].replace("_", "-")
+
+
+def offered():
+    """(name, what it does) of each command a chat takes, as its menu lists them."""
+    return [(c.name, c.what) for c in COMMANDS if c.chat]
 
 
 def after_word(message):
@@ -1676,6 +1688,9 @@ class Channel:
 
     def skip_waiting(self):
         """Forget the messages sent while nothing listened: a command sent hours ago is not run now."""
+
+    def offer(self, commands):
+        """The commands, (name, what it does) each, listed where the person types them (a chat app's menu)."""
 
     def listened(self, timeout):
         """The new messages from the chats this channel serves; the rest are ignored. A refusal (another

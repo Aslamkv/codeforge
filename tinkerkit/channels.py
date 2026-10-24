@@ -29,6 +29,7 @@ PIN_NOTE_WAIT = 2                              # seconds before Telegram's note 
 CHECK_TRIES = 3                                # tries of a channel's first call when it starts listening
 RATE_LIMIT_WAITS = 3                           # times a call waits out Telegram's "too many requests"
 CAPTION_CHARS = 1024                           # the longest caption Telegram takes on a file
+MENU_DESCRIPTION_CHARS = 256                   # the longest description of a command in a bot's menu
 BOT_DOWNLOAD_BYTES = 20_000_000                # the largest file Telegram lets a bot download
 DOWNLOAD_WAIT = 120                            # seconds a file sent in a chat may take to download
 FORM = "application/x-www-form-urlencoded"
@@ -304,6 +305,16 @@ class TelegramChannel(Channel):
         try:
             waiting = self.call("getUpdates", offset=-1)
             self.offset = waiting[-1]["update_id"] + 1 if waiting else None
+        except OSError, ChannelError:
+            pass
+
+    def offer(self, commands):
+        """The commands in the bot's menu (shown as the person types /): Telegram takes a-z, 0-9 and _ in a name,
+        so use-model is offered as /use_model (and taken back as use-model)."""
+        menu = [{"command": name.replace("-", "_"), "description": what[:MENU_DESCRIPTION_CHARS]}
+                for name, what in commands]
+        try:
+            self.call("setMyCommands", commands=json.dumps(menu))
         except OSError, ChannelError:
             pass
 
