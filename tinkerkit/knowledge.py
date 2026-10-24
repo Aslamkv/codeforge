@@ -651,7 +651,7 @@ class Learner:
         rules = {}
         given = (data.get("rules") or []) if isinstance(data, dict) else []
         declare = data.get("declare") if isinstance(data, dict) else None
-        if isinstance(declare, dict):  # what a new project declares, first: a rule for every program
+        if isinstance(declare, dict):
             given = [dict(declare, phase="config", when="")] + list(given)
         for item in given:
             if not isinstance(item, dict):
@@ -1241,7 +1241,7 @@ class Retriever:
             self.query_embeddings[query] = asked[0] if asked else None
         if not vectors or not self.query_embeddings.get(query):
             say.warn(f"Meaning search not used: {self.embeddings.failed}; the word search stands alone")
-            self.embeddings = None  # not asked again in this run
+            self.embeddings = None
             return []
         self.used = f"words and meaning ({self.embeddings.name})"
         similarity_of = [Embeddings.cosine(self.query_embeddings[query], vector) for vector in vectors]

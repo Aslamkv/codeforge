@@ -30,7 +30,7 @@ class TestToolSetup(Phase):
         Designer(self.session).ensure_toolchain()
         CodeWriter(self.session).write_configs_first(cycle)
         self.session.setup()
-        if self.session.waiting_for_network:  # the tests and the code need no network: they are written meanwhile
+        if self.session.waiting_for_network:
             say.info("The test tool is checked once the network is back; writing the tests and the code meanwhile",
                      "📡")
             return True
@@ -69,7 +69,7 @@ class TestWriter(Phase):
                     reply = self.session.ask(Prompts.SPEC_TESTS_SYSTEM, self.prompt(cycle, path, todo, current, note),
                                              f"Tests {'next to ' if current.strip() else ''}"
                                              f"{path} ({len(todo)})",
-                                             max_reply=TEST_FILE_MAX_TOKENS)  # past it, the thought is concluded
+                                             max_reply=TEST_FILE_MAX_TOKENS)
             except PromptTooLarge as exc:
                 say.skip(f"Tests for {path} skipped: {exc}; verify writes them")
                 return
@@ -121,8 +121,9 @@ class TestWriter(Phase):
         folder = str(Path(path).parent)
 
         def check(written, exists):
-            if str(Path(written).parent) == folder:
-                return None  # a test file next to it (one that had tests keeps them: keep_existing_tests)
+            next_to_it = str(Path(written).parent) == folder
+            if next_to_it:
+                return None
             return f"only test files next to {path} can be written now"
         return check
 
@@ -223,16 +224,15 @@ class CodeWriter(Phase):
             Part("Constraints", "\n".join(f"- {constraint}" for constraint in cycle.get("constraints", []))),
             Part("Project files", self.project.outline()),
             *self.session.knowledge_parts("config", "toolchain"),
-        ], f"Write {len(paths)} config files", think=False,  # short, conventional files: no thinking needed
+        ], f"Write {len(paths)} config files", think=False,
            done_when=Reply.wrote(paths))
         change = self.workspace.apply(reply,
                                       lambda config, exists: None if config in paths
                                       else "only the config files listed now")
         missing = [config for config in paths if config not in change.backups]
         say.done(f"Wrote {', '.join(change.files) or 'none'}" + (f"; missing {', '.join(missing)}" if missing else ""))
-        for path in paths:
-            if path not in change.backups:  # one more try, on its own
-                self.write_file(cycle, path)
+        for path in missing:
+            self.write_file(cycle, path)
 
     def write_file(self, cycle, path):
         info, exists = self.project.files.get(path, {}), self.workspace.exists(path)
@@ -492,13 +492,16 @@ class Verifier(Phase):
         tests = [criterion for criterion in self.project.criteria if TestRef(criterion["test"]).present(self.workspace)]
         if code == 0:
             result = {criterion["id"] for criterion in tests}
-        elif not self.session.toolchain.run_check(self.workspace)[0]:
-            return set()  # it does not build: no test can pass
+        elif not self.project_builds():
+            return set()
         else:
             result = {criterion["id"] for criterion in tests if self.evaluate(criterion, checked=True)[0] == "passes"}
         took = human_duration(time.perf_counter() - started)
         say.info(f"Tests: {len(result)}/{len(self.project.criteria)} criteria pass ({took})", "🧪")
         return result
+
+    def project_builds(self):
+        return self.session.toolchain.run_check(self.workspace)[0]
 
     def work_through(self, steps, retry):
         for step in steps:
@@ -607,18 +610,18 @@ class Verifier(Phase):
     def failure_key(step, output):
         """The failure without the test's own name: criteria failing alike share it."""
         ref = TestRef(step["test"])
-        unnamed = "\0"  # a test without a name: nothing in the output is replaced for it
-        return Output.signature(output.replace(str(ref), "#").replace(ref.name or unnamed, "#").replace(ref.file, "#"))
+        matches_nothing = "\0"
+        return Output.signature(output.replace(str(ref), "#").replace(ref.name or matches_nothing, "#").replace(ref.file, "#"))
 
     def climb_safely(self, step, state, output, retry):
         """climb, with a restore point kept on disk while it goes (a run stopped part way is put
         back on resume: recover_interrupted); the files go back if nothing helped."""
-        snapshot = self.workspace.snapshot(self.project.files)  # with its test: rolling back keeps the test just written
-        self.project.store.put("restore", self.RESTORE_POINT, {"criterion": step["id"], "files": snapshot})
+        files_with_its_test = self.workspace.snapshot(self.project.files)
+        self.project.store.put("restore", self.RESTORE_POINT, {"criterion": step["id"], "files": files_with_its_test})
         try:
             if self.climb(step, state, output, retry):
                 return True
-            self.roll_back(snapshot)
+            self.roll_back(files_with_its_test)
             return False
         finally:
             self.project.store.delete("restore", self.RESTORE_POINT)
@@ -630,8 +633,8 @@ class Verifier(Phase):
         before = {criterion["id"] for criterion in self.project.criteria if criterion["status"] == "green"}
         climb, total = Climb(state, output), 0
         for approach, patience in self.ladder(step, output, retry):
-            stall, concluding = 0, False  # concluding: the last attempt thought to its cap; its conclusion is due
-            while (stall < patience or concluding) and total < MAX_CALLS_PER_CRITERION_PASS:
+            stall, conclusion_due = 0, False
+            while (stall < patience or conclusion_due) and total < MAX_CALLS_PER_CRITERION_PASS:
                 if approach == "fix" and self.test_unloadable(step, output):
                     say.step("The test file no longer loads: reviewing the test now", "🔍")
                     break
@@ -641,7 +644,7 @@ class Verifier(Phase):
                 if state == "passes":
                     return True
                 stall = 0 if climb.progressed(state, output) else stall + 1
-                concluding = attempt.hit_thinking_cap
+                conclusion_due = attempt.hit_thinking_cap
                 step["last_error"] = Output.key_line(output)
                 why = self.to_review(attempt, approach)
                 if why:
@@ -680,10 +683,10 @@ class Verifier(Phase):
 
     def roll_back(self, snapshot):
         """The project as it was: its files, and its design (files created since are dropped)."""
-        for path in list(self.project.files):
-            if path not in snapshot:  # created since: it goes again
-                (self.workspace.root / path).unlink(missing_ok=True)
-                del self.project.files[path]
+        created_since = [path for path in self.project.files if path not in snapshot]
+        for path in created_since:
+            (self.workspace.root / path).unlink(missing_ok=True)
+            del self.project.files[path]
         self.workspace.restore(snapshot)
 
     def mark_others_passing(self):
@@ -723,7 +726,7 @@ class FixAttempt(Worker):
         self.only_wanted_test_change = False
         self.tests_may_disagree = False
         self.hit_thinking_cap = False
-        self.broken_test, self.broken_output = "", ""  # a test the change broke, and how it failed
+        self.broken_test, self.broken_output = "", ""
 
     def run(self):
         """(state, output) after the attempt; the output carries what went wrong."""
@@ -814,7 +817,7 @@ class FixAttempt(Worker):
 
     def may_change(self, view):
         def check(path, exists):
-            if not exists:  # the design is settled: a new file now would shadow or duplicate a planned one
+            if not exists:
                 return None if self.approach == "review" and Path(path).parent == Path(self.ref.file).parent \
                     else "no new files now; change the files shown"
             if self.project.kind_of(path) == "test" or path == self.ref.file:
@@ -839,7 +842,7 @@ class FixAttempt(Worker):
         note = "no usable change" + (f" ({'; '.join(change.notes)})" if change.notes else "")
         folder = str(Path(self.ref.file).parent)
         refused_near_tests = any(TESTS_LOCKED_REASON in note or str(Path(note.split(":", 1)[0]).parent) == folder
-                                 for note in change.notes)  # a test, or a new file beside them
+                                 for note in change.notes)
         self.only_wanted_test_change = self.approach == "fix" and refused_near_tests
         self.record(f"{cause} -> {note}")
         say.skip(f"{self.label}: {note}")

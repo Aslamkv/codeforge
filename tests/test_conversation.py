@@ -764,7 +764,7 @@ def test_the_status_is_sent_anew_as_tinker_starts_and_ends(desk, home_store):
 def test_every_status_is_sent_anew_the_one_before_taken_out(desk):
     channel = Recorder("bot")
     listening = Desk([channel], Path.cwd())
-    listening.ready.add(channel)
+    listening.chats_started.add(channel)
     listening.say_status("🔄 **Tinker** · working on calc\n▸ planning")
     listening.say_status("🔄 **Tinker** · working on calc\n▸ building")
     listening.say_status("🟢 **Tinker** · idle: send a task")

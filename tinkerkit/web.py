@@ -16,6 +16,7 @@ lazy from .jobs import journaled
 from .messages import say
 from .settings import Config, first_line, is_number, number_from
 
+MAIN_CLOSED = -1
 
 class Internet:
     """The Internet plugin: web search and web fetch through the backend the setting "web" names
@@ -36,7 +37,7 @@ class Internet:
         "docs_latest_days": (False, 0)}
 
     def __init__(self):
-        self.errors, self.failures, self.codes = {}, {}, {}  # codes: the HTTP status of a key's last failure
+        self.errors, self.failures, self.last_failure_status = {}, {}, {}
         self.backends_used, reasons = self.ready_backends()
         self.gone = "" if self.backends_used else ("; ".join(reasons) or "no web backend (tinker use-web NAME)")
         self.unusable_backends = reasons
@@ -129,7 +130,7 @@ class Internet:
 
     def rate_limited(self, key):
         """Whether the last failure for this key was a rate limit (HTTP 429)."""
-        return self.codes.get(key) == 429
+        return self.last_failure_status.get(key) == 429
 
     def describe(self):
         return " then ".join(backend.name for backend in self.backends_used)
@@ -186,11 +187,11 @@ class Internet:
         """What the first backend that answers gives (usable(result): True, or why not); None when
         none does (errors[key] says why)."""
         reasons = []
-        self.codes.pop(key, None)
+        self.last_failure_status.pop(key, None)
         for backend in list(self.backends_used):
             result, why = self.ask_backend(backend, action, usable, key)
             if not why:
-                self.codes.pop(key, None)  # answered: an earlier try's rate limit no longer counts
+                self.last_failure_status.pop(key, None)
                 return result
             reasons.append(f"{backend.name}: {why}")
         self.errors[key] = "; ".join(reasons) or self.gone or "no answer"
@@ -203,14 +204,14 @@ class Internet:
             try:
                 result = action(backend)
             except WebError as exc:
-                self.codes[key] = exc.code
+                self.last_failure_status[key] = exc.code
                 if exc.retry and attempt == 1:
                     time.sleep(self.RETRY_PAUSE_SECONDS)
                     continue
                 if exc.network:
                     self.lost(backend, str(exc))
                 return None, str(exc)
-            except Exception as exc:  # a backend's bug never stops Tinker
+            except Exception as exc:
                 return None, f"failed: {type(exc).__name__}: {exc}"
             self.failures[backend.name] = 0
             verdict = usable(result)
@@ -228,7 +229,7 @@ class Internet:
                 self.gone = why
 
 
-Config.checks.append(Internet.check)  # tinker config checks the web's settings too
+Config.checks.append(Internet.check)
 
 
 class WebBackend:
@@ -274,7 +275,7 @@ class OllamaWeb(WebBackend):
         data = self.post("/web_search", {"query": query, "max_results": count})
         if not isinstance(data.get("results"), list):
             raise WebError("ollama.com's web search answered without results")
-        return data["results"]  # the plugin keeps what is usable (Internet.search)
+        return data["results"]
 
     def fetch(self, url):
         return self.post("/web_fetch", {"url": url})
@@ -289,7 +290,7 @@ class OllamaWeb(WebBackend):
                 body = response.read(self.MAX_ANSWER_BYTES)
         except urllib.error.HTTPError as exc:
             raise self.refused(exc.code, path)
-        except Exception as exc:  # no answer at all: timeout, refused, no network
+        except Exception as exc:
             reason, timed_out = unreached(exc)
             raise WebError(f"ollama.com cannot be reached ({reason})", network=True, retry=timed_out)
         return self.json_object(body)
@@ -328,7 +329,7 @@ class DuckDuckGoWeb(WebBackend):
         return ""
 
     def search(self, query, count):
-        body = self.get(self.SEARCH, self.timeout, form={"q": query})[0]  # a GET is taken for a bot more often
+        body = self.get(self.SEARCH, self.timeout, form={"q": query})[0]
         results = self.results(body)
         if not results and self.bot_check(body):
             raise WebError("DuckDuckGo answered with its bot check instead of results (too many searches; it "
@@ -385,7 +386,7 @@ class DuckDuckGoWeb(WebBackend):
         except urllib.error.HTTPError as exc:
             raise WebError(f"{urllib.parse.urlsplit(url).netloc} answered HTTP {exc.code}",
                            retry=exc.code == 429 or exc.code >= 500, code=exc.code)
-        except Exception as exc:  # no answer: timeout, refused, no network
+        except Exception as exc:
             reason, timed_out = unreached(exc)
             host = urllib.parse.urlsplit(url).netloc
             raise WebError(f"{host} cannot be reached ({reason})", network=host in cls.SEARCH and not timed_out,
@@ -420,16 +421,12 @@ class PageText(html.parser.HTMLParser):
         super().__init__(convert_charrefs=True)
         self.title, self.skipping, self.pre = "", 0, 0
         self.in_title, self.depth = False, 0
-        self.all, self.main, self.main_depth = [], [], None  # main_depth: the depth <main>/<article> opened at
+        self.all, self.main, self.main_opened_at = [], [], None
 
     @classmethod
     def of(cls, markup):
         parser = cls()
-        try:
-            parser.feed(markup)
-            parser.close()
-        except Exception:  # broken HTML: what was read so far
-            pass
+        read_what_it_can(parser, markup)
         return parser
 
     def content(self):
@@ -462,8 +459,8 @@ class PageText(html.parser.HTMLParser):
         if self.skipping or self.not_content(tag, attributes):
             self.skipping += 1
             return
-        if self.opens_main(tag, attributes) and self.main_depth is None:
-            self.main_depth = self.depth
+        if self.opens_main(tag, attributes) and self.main_opened_at is None:
+            self.main_opened_at = self.depth
         if tag == "pre":
             self.pre += 1
         if tag in self.BLOCKS:
@@ -498,8 +495,8 @@ class PageText(html.parser.HTMLParser):
                 self.pre = max(0, self.pre - 1)
             if tag in self.BLOCKS and tag != "li":
                 self.add("\n")
-            if self.main_depth is not None and self.depth == self.main_depth:
-                self.main_depth = -1  # closed: what follows is not main any more
+            if self.main_opened_at is not None and self.depth == self.main_opened_at:
+                self.main_opened_at = MAIN_CLOSED
         self.depth = max(0, self.depth - 1)
 
     def handle_data(self, data):
@@ -521,7 +518,7 @@ class PageText(html.parser.HTMLParser):
 
     def add(self, text):
         self.all.append(text)
-        if self.main_depth is not None and self.main_depth > 0:
+        if self.main_opened_at is not None and self.main_opened_at > 0:
             self.main.append(text)
 
 
@@ -544,3 +541,11 @@ def unreached(exc):
 
 def is_web_address(url):
     return str(url).startswith(("http://", "https://"))
+
+
+def read_what_it_can(parser, markup):
+    try:
+        parser.feed(markup)
+        parser.close()
+    except Exception:
+        pass

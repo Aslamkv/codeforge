@@ -17,7 +17,7 @@ lazy import time
 lazy import urllib.parse
 lazy from pathlib import Path
 
-from .conversation import CHANNEL_REPORTS_ENV, Channel, ChannelError, Desk, Markup, Message, first_words
+from .conversation import Channel, ChannelError, Desk, Markup, Message, first_words, started_by_a_conversation
 lazy from .ledger import ANSWER_WINDOW_SECONDS, Ledger
 lazy from .messages import say
 lazy from .settings import Home
@@ -188,7 +188,7 @@ class Channels:
     @staticmethod
     def enabled():
         """The enabled channels, made; none when a run is told not to listen (tinker channel start's own)."""
-        if os.environ.get(CHANNEL_REPORTS_ENV) == "off":
+        if started_by_a_conversation():
             return []
         return [Channels.make(name) for name, channel_settings in Channels.settings().items()
                 if channel_settings.get("enabled")]
@@ -243,9 +243,8 @@ class TelegramChannel(Channel):
     def receive(self, timeout):
         try:
             updates = self.call("getUpdates", wait=timeout + 10, offset=self.offset, timeout=int(timeout))
-        except OSError:  # the network is gone for now: the messages wait at Telegram
-            time.sleep(min(timeout, 10))
-            return []
+        except OSError:
+            return self.nothing_while_the_network_is_gone(timeout)
         messages = []
         for update in updates:
             self.offset = update["update_id"] + 1
@@ -258,6 +257,11 @@ class TelegramChannel(Channel):
             if message.get("message_id"):
                 self.seen(str(message["chat"]["id"]), message["message_id"])
         return messages
+
+    @staticmethod
+    def nothing_while_the_network_is_gone(timeout):
+        time.sleep(min(timeout, 10))
+        return []
 
     def book_sent(self, message):
         """Whether a message is a file to read, sent by a chat Tinker serves."""
@@ -340,14 +344,18 @@ class TelegramChannel(Channel):
             return self.send(chat, text)
         try:
             self.post("editMessageText", chat, text, message_id=sent)
-        except ChannelError as exc:  # unchanged text is refused, harmlessly
-            if "not modified" not in str(exc):
+        except ChannelError as exc:
+            if not self.refused_as_unchanged(exc):
                 self.delete(chat, sent)
                 return self.send(chat, text)
         except OSError:
             return sent
         Ledger.touched(self.name, str(chat), sent)
         return sent
+
+    @staticmethod
+    def refused_as_unchanged(exc):
+        return "not modified" in str(exc)
 
     def show(self, chat, shown, text, done=False, bottom=None, status=False):
         """The thing shown, and kept in the ledger as it is now (Tinker's status is not a thing)."""
@@ -403,7 +411,7 @@ class TelegramChannel(Channel):
     def glance(self, chat, asked, sent, keep=None):
         """sent only shows something, asked for by the person's message asked: that message taken out now, the
         glance shown before too (one at a time), and sent in keep seconds (GLANCE_KEPT_SECONDS when not given)."""
-        self.last_words_by_chat.pop(str(chat), None)  # what it answered asks no thing
+        self.answered(chat)
         if asked:
             self.delete(chat, asked)
         for message in Ledger.glances(self.name, chat):

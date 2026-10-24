@@ -45,7 +45,8 @@ class Recaller(Phase):
         else:
             use, learn = self.relevant(known, query), []
         learned = [slug for slug in (self.learn(topic, internet, retriever) for topic in learn[:can_learn]) if slug]
-        cycle["topics"] = list(dict.fromkeys(learned + use))[:MAX_RECALL_TOPICS]  # what it just learned it needs most
+        just_learned_first = list(dict.fromkeys(learned + use))
+        cycle["topics"] = just_learned_first[:MAX_RECALL_TOPICS]
         self.keep_facts(cycle, query, retriever)
         self.say_used(cycle)
         self.use_language(cycle)
@@ -73,7 +74,7 @@ class Recaller(Phase):
         try:
             return self.session.ask_until_usable(Prompts.RECALL_SYSTEM, parts, "Recall",
                                                  lambda reply: self.read_choice(reply, known), attempts=2)
-        except (SystemExit, OllamaError) as exc:  # what was learned only helps: the run goes on without it
+        except (SystemExit, OllamaError) as exc:
             say.warn(f"{exc} Going on without what was learned.")
             return [], []
 
@@ -83,10 +84,9 @@ class Recaller(Phase):
                  Part("Project language", self.project.language if cycle["id"] != "base" else ""),
                  Part("Learning now", f"possible: name up to {can_learn} topics to learn" if can_learn
                       else "not possible: name none", True)]
-        # a long request is shortened, the topics keep half the room
         left = self.session.room(Prompts.RECALL_SYSTEM) - 60
-        room = max(left - Part.total_size(fixed), (left - sum(part.floor_size() for part in fixed)) // 2)
-        return fixed + [Part("Learned topics", self.topic_listing(known, ranked, room) or "(none yet)", True,
+        topics_room = max(left - Part.total_size(fixed), (left - sum(part.floor_size() for part in fixed)) // 2)
+        return fixed + [Part("Learned topics", self.topic_listing(known, ranked, topics_room) or "(none yet)", True,
                              exact=True)]
 
     @staticmethod
@@ -152,7 +152,7 @@ class Recaller(Phase):
         order = retriever.rank(query, [Library.searched(item) for item in items])
         ranked = self.essentials_first([items[index] for index in order])
         earlier = [item for item in self.project.spec.get("learned", []) if item["topic"] not in cycle["topics"]]
-        self.project.spec["learned"] = ranked + earlier  # a topic chosen again: its current facts only
+        self.project.spec["learned"] = ranked + earlier
         self.keep_out_inapplicable()
 
     def keep_out_inapplicable(self):
@@ -612,7 +612,7 @@ class Working:
             worked = [(part, value) for part, value in ((part, cls.value(part)) for part in parts) if value is not None]
             if len(worked) < 2 or not any(cls.does_arithmetic(expression) for expression, _ in worked):
                 continue
-            cut_short = plain[chain.end():].lstrip().startswith(("…", "..."))  # 37.777… goes on: not rounded
+            cut_short = plain[chain.end():].lstrip().startswith(("…", "..."))
             found += cls.wrong_parts(worked, cut_short)
         return found
 
@@ -873,7 +873,7 @@ class InterfaceReviewer(Phase):
                 changed.add(item["path"])
             self.project.files[item["path"]] = entry
             if item["path"] not in cycle["files"] and item["kind"] != "docs":
-                cycle["files"].append(item["path"])  # a file the check adds is built with the others
+                cycle["files"].append(item["path"])
         return changed
 
     def rewrite_unresolved(self, cycle, problems, corrected):
@@ -934,8 +934,8 @@ class ContractWriter(Worker):
         used = any(path in other.get("uses", []) for name, other in self.project.files.items()
                    if name != path and other.get("kind") in ("code", "template"))
         renders = any(self.project.kind_of(used) == "template" for used in info.get("uses", []))
-        started = bool(self.project.entry_files([path]))  # the program a person starts is never a marker
-        if not (used or renders or started) and not self.project.criteria_of(path, self.project.cycle_criteria(cycle)):
+        started_by_a_person = bool(self.project.entry_files([path]))
+        if not (used or renders or started_by_a_person) and not self.project.criteria_of(path, self.project.cycle_criteria(cycle)):
             info["marker"] = True
         return used or renders
 

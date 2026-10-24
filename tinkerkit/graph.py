@@ -201,7 +201,8 @@ class Graph:
         found = {}
         for node in self.nodes.values():
             kind = "retired" if node["status"] == "retired" else node["kind"]
-            if node["id"] != "any":  # any language is where lessons for every language go, not a language
+            stands_for_every_language = node["id"] == "any"
+            if not stands_for_every_language:
                 found[kind] = found.get(kind, 0) + 1
         return found
 

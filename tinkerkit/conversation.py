@@ -159,7 +159,7 @@ def research_once(console, talk, topic):
         ending = {"status": status, "headline": "", "text": text}
     finally:
         tracker.end(ending, time.monotonic() - started)
-        if os.environ.get(CHANNEL_REPORTS_ENV) != "off":  # the conversation that started it reads it last
+        if not started_by_a_conversation():
             tracker.close()
 
 
@@ -198,7 +198,7 @@ class Desk:
         self.seconds_by_run = {}
         self.consoles = [channel for channel in channels if isinstance(channel, ConsoleChannel)]
         self.said_status = None
-        self.ready, self.posting = set(), threading.Lock()  # the chats started (their status sent), one post at a time
+        self.chats_started, self.post_lock = set(), threading.Lock()
         self.stop_question = None
         self.exercise_reporter = None
         self.echo_to_terminal = not self.consoles
@@ -255,8 +255,8 @@ class Desk:
         self.said_status = text
         for channel in self.channels:
             if channel not in self.consoles:
-                with self.posting:
-                    if channel in self.ready:
+                with self.post_lock:
+                    if channel in self.chats_started:
                         self.post_status(channel, text)
             elif anew or text.startswith("💤"):
                 channel.show(ConsoleChannel.CHAT, None, text, done=True)
@@ -310,9 +310,9 @@ class Desk:
                     channel.collect()
             if time.monotonic() - looked >= STATUS_LOOK_SECONDS:
                 looked = time.monotonic()
-                self.say_status()  # what runs elsewhere (an exercise, a terminal's run) moves on by itself
+                self.say_status()
                 if self.exercise_reporter is None:
-                    self.adopt_exercise()  # a paused exercise that went on by itself has its message kept up again
+                    self.adopt_exercise()
         raise KeyboardInterrupt
 
     def listen(self, channel):
@@ -329,8 +329,8 @@ class Desk:
         nothing listened forgotten, the commands offered, the status sent."""
         channel.skip_waiting()
         channel.offer(offered())
-        with self.posting:
-            self.ready.add(channel)
+        with self.post_lock:
+            self.chats_started.add(channel)
             self.post_status(channel, self.said_status)
 
     def hear(self, channel, message):
@@ -341,8 +341,9 @@ class Desk:
             return
         message = self.with_words_wanted(channel, message)
         command = command_of(message.text)
-        if message.id and (command in ("confirm",) + EXIT_WORDS or exercise_switch(message.text)):  # its answer is in a
-            # message already (the plan's, the exercise's, the question to stop): it would only make the chat grow
+        already_answered_in_a_message = message.id and (command in ("confirm",) + EXIT_WORDS
+                                                        or exercise_switch(message.text))
+        if already_answered_in_a_message:
             channel.delete(message.chat, message.id)
         if self.settle(channel, message, command):
             return
@@ -418,7 +419,7 @@ class Desk:
             return handler()
         if command == "clear" and words[1:] == ["chat"]:
             return self.clear_chat(channel, message.chat, "Chat cleared", " · `history` shows any of them again")
-        if command in EXIT_WORDS:  # the console ends on its own word (ConsoleChannel); a chat asks first
+        if command in EXIT_WORDS:
             return self.ask_to_exit(channel, message.chat, command)
         if command == "channel" and words[1:2] and words[1] in TERMINAL_ONLY_CHANNEL_ACTIONS:
             return f"🖥 `channel {words[1]}` asks in a terminal: `tinker channel {words[1]}` there"
@@ -511,7 +512,7 @@ class Desk:
         sent = exercise_board()
         if anew:
             self.take_out(sent)
-        if self.exercise_reporter is not None:  # paused for this one: its message is this one's until it goes on
+        if self.exercise_reporter is not None:
             self.exercise_reporter.ended = True
         reporter = self.exercise_reporter = Reporter(self.channels, title, pid=pid, sent=sent,
                                               on_step=lambda: (keep_exercise_board(sent), self.say_status()))
@@ -519,7 +520,8 @@ class Desk:
 
         def follow():
             ended()
-            if reporter is not self.exercise_reporter:  # its message went to another exercise (adopted again if it went on)
+            went_to_another_exercise = reporter is not self.exercise_reporter
+            if went_to_another_exercise:
                 return
             printed = printed_since(*log) if log and reporter.tracked() is None else ""
             reporter.finish()
@@ -556,7 +558,8 @@ class Desk:
         page = Home.graph_page()
         before = page.stat().st_mtime_ns if page.exists() else None
         shown = self.tinker(words)
-        if not page.exists() or page.stat().st_mtime_ns == before:  # not written now: what went wrong is shown
+        written_now = page.exists() and page.stat().st_mtime_ns != before
+        if not written_now:
             return md(t"🧠 **{' '.join(words)}**\n{shown:block}")
         channel.send_file(chat, page, md(t"🧠 **Tinker's memory**\n{shown}"))
         return None
@@ -747,7 +750,8 @@ class Desk:
             if refused:
                 channel.show(chat, asking["shown"], refused, done=True)
             return
-        if words[0] == "clear" and "history" in words:  # nothing of it is left: not even what clearing it said
+        clears_history = words[0] == "clear" and "history" in words
+        if clears_history:
             self.tinker(words)
             self.clear_chat(channel, chat, md(t"{' '.join(asking['words'])}: done, and the chat"))
             return
@@ -805,8 +809,9 @@ class Desk:
                 return md(t"⚠️ **Could not start it:** {exc}")
             self.reporter.pid = self.last_task.pid
             self.live_tasks = [process for process in self.live_tasks if process.poll() is None] + [self.last_task]
-        if self.waiting_plan and self.waiting_plan["folder"] == folder:
-            self.waiting_plan = None  # confirmed or being changed: it waits again only once its plan is shown
+        its_plan_moves_on = self.waiting_plan and self.waiting_plan["folder"] == folder
+        if its_plan_moves_on:
+            self.waiting_plan = None
         threading.Thread(target=self.follow, args=(self.last_task, self.reporter, self.task), daemon=True).start()
         return None
 
@@ -871,7 +876,7 @@ class Desk:
     def stop_task(self):
         if not self.busy():
             return False
-        os.killpg(self.last_task.pid, signal.SIGINT)  # as Ctrl-C: the run saves itself
+        os.killpg(self.last_task.pid, signal.SIGINT)
         return True
 
     def busy(self):
@@ -1199,7 +1204,7 @@ class Shell:
         sent = channel.show(chat, sent, f"{head}\n{folded}", done=not tells)
         if not tells:
             return
-        with self.talk.pausing_jobs():  # the model reads the output: what runs is paused for the person again
+        with self.talk.pausing_jobs():
             told = self.told(channel, chat, proposed["asked"], line, code, output)
         channel.show(chat, sent, f"{head}\n{told}\n{folded}" if told else f"{head}\n{folded}", done=True)
 
@@ -1397,7 +1402,7 @@ class Reporter:
                 return
             state = self.tracked()
             went_on = ((state or {}).get("resumed") or 0) > (self.progress.snapshot.get("resumed") or 0)
-            self.send_at_bottom = self.send_at_bottom or went_on  # it went on by itself: shown at the bottom, where the person looks
+            self.send_at_bottom = self.send_at_bottom or went_on
             changed = self.progress.take(state)
             if changed or went_on or time.monotonic() - self.last_edit >= CLOCK_ONLY_EDIT_SECONDS:
                 self.update()
@@ -1587,7 +1592,7 @@ class Attached:
 
     def start(self):
         signal.signal(JOB_STOP_SIGNAL, self.stop)
-        self.tracker.change("attached", reports=True)  # a conversation leaves its message to it
+        self.tracker.change("attached", reports=True)
         with self.reporter.lock:
             self.reporter.progress.take(self.tracker.state)
             self.reporter.update()
@@ -1898,7 +1903,7 @@ class ConsoleChannel(Channel):
         webbrowser.open(Path(path).as_uri())
         return self.send(chat, f"{caption}\n📄 Opened in your browser: `{path}`")
 
-    def show(self, chat, shown, text, done=False, bottom=None, status=False):  # a terminal prints at its bottom
+    def show(self, chat, shown, text, done=False, bottom=None, status=False):
         sent, text = (shown or [None])[0] or self.new_id(), self.said(text)
         if done:
             self.show_whole(sent, text)
@@ -2189,6 +2194,10 @@ def tinker_process(arguments, folder=None, output=None, **env):
     return subprocess.Popen(tinker_command() + arguments, cwd=folder, env=dict(os.environ, PYTHONUNBUFFERED="1", **env),
                             stdin=subprocess.DEVNULL, stdout=output, stderr=subprocess.STDOUT if output else None,
                             start_new_session=True)
+
+
+def started_by_a_conversation():
+    return os.environ.get(CHANNEL_REPORTS_ENV) == "off"
 
 
 def json_in(text):

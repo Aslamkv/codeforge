@@ -760,7 +760,8 @@ class Ollama:
         says when the reply is complete: the stream is
         closed there, which stops Ollama generating. Returns the final stats chunk with message.content
         set to the reply. In a job, a request it made before is answered from its journal."""
-        if not messages:  # unloading the model
+        unloading = not messages
+        if unloading:
             return Ollama.streamed(name, messages, keep_alive, options, think, label, done_when, timeout)
         return journaled({"chat": name, "messages": messages, "options": options, "think": think},
                          lambda: Ollama.streamed(name, messages, keep_alive, options, think, label, done_when, timeout))
@@ -901,7 +902,7 @@ class Stream:
         self.thought_tail = ""
         self.started = self.last_print = time.perf_counter()
         self.progressed = False
-        self.answer, self.complete_at = None, None  # the reply as it was when complete, and when
+        self.answer, self.complete_at = None, None
 
     def read(self, response):
         for raw in response:
@@ -913,8 +914,9 @@ class Stream:
         (with the real prompt token count, which keeps the prompt budget right) is awaited a few
         seconds more; anything the model writes meanwhile is not part of the reply."""
         if "error" in chunk:
-            if self.answer is not None:
-                return self.stop_early()  # the reply was complete before Ollama failed on what followed
+            reply_was_complete = self.answer is not None
+            if reply_was_complete:
+                return self.stop_early()
             raise self.error(chunk["error"])
         piece = self.add(chunk.get("message") or {})
         self.show()

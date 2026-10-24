@@ -174,7 +174,7 @@ class Reply:
             path, body = self.real_path_and_body(path.strip(), after, body)
             if self.PLACEHOLDER_BODY_RE.fullmatch(body):
                 continue
-            markdown = path.lower().endswith((".md", ".markdown"))  # a fence around a whole doc may be the doc
+            markdown = path.lower().endswith((".md", ".markdown"))
             found.append((str(Path(path)), self.without_debris(body, fences=not markdown)))
         return found
 
@@ -346,7 +346,8 @@ class Part:
         """This optional part as it fits in room: whole, shortened (the room is then used up), or None."""
         if self.size() <= room:
             return self
-        text_room = room - len(self.render("")) - 2  # 2: the blank line before it
+        blank_line_before = 2
+        text_room = room - len(self.render("")) - blank_line_before
         if not self.atomic and text_room >= Part.SHORTEST_KEPT_CHARS:
             return self.shortened(text_room)
         return None

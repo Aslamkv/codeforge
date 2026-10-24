@@ -11,7 +11,7 @@ from dataclasses import dataclass
 lazy from .settings import (
     MAX_PASSAGE_CHARS, MENU_LINK_SHARE, MIN_USABLE_PAGE_CHARS, NEAR_DUPLICATE_OVERLAP, split_text, words,
 )
-from .web import PageText
+from .web import MAIN_CLOSED, PageText, read_what_it_can
 
 
 @dataclass
@@ -131,16 +131,12 @@ class MainBlocks(html.parser.HTMLParser):
         super().__init__(convert_charrefs=True)
         self.skipping, self.pre, self.links, self.depth = 0, 0, 0, 0
         self.kind, self.pieces, self.link_chars = "text", [], 0
-        self.all, self.main, self.main_depth = [], [], None
+        self.all, self.main, self.main_opened_at = [], [], None
 
     @classmethod
     def of(cls, markup):
         parser = cls()
-        try:
-            parser.feed(markup)
-            parser.close()
-        except Exception:  # broken HTML: what was read so far
-            pass
+        read_what_it_can(parser, markup)
         parser.flush()
         main_chars = sum(len(block.text) for block in parser.main if block.kind != "heading")
         return parser.main if main_chars >= MIN_USABLE_PAGE_CHARS else parser.all
@@ -153,8 +149,8 @@ class MainBlocks(html.parser.HTMLParser):
         if self.skipping or self.not_content(tag, attributes):
             self.skipping += 1
             return
-        if PageText.opens_main(tag, attributes) and self.main_depth is None:
-            self.main_depth = self.depth
+        if PageText.opens_main(tag, attributes) and self.main_opened_at is None:
+            self.main_opened_at = self.depth
         if tag == "a":
             self.links += 1
         if tag in self.BLOCKS and not self.pre:
@@ -179,8 +175,8 @@ class MainBlocks(html.parser.HTMLParser):
                 self.links -= 1
             if tag in self.BLOCKS and not self.pre:
                 self.flush()
-            if self.main_depth is not None and self.depth == self.main_depth:
-                self.main_depth = -1  # closed: what follows is not main any more
+            if self.main_opened_at is not None and self.depth == self.main_opened_at:
+                self.main_opened_at = MAIN_CLOSED
         self.depth = max(0, self.depth - 1)
 
     def handle_data(self, data):
@@ -197,7 +193,7 @@ class MainBlocks(html.parser.HTMLParser):
         text = "".join(self.pieces).strip("\n") if self.kind == "code" else " ".join("".join(self.pieces).split())
         if text.strip() and (self.kind != "text" or not mostly_links(self.link_chars, text)):
             self.all.append(Block(self.kind, text))
-            if self.main_depth is not None and self.main_depth > 0:
+            if self.main_opened_at is not None and self.main_opened_at > 0:
                 self.main.append(Block(self.kind, text))
         self.kind, self.pieces, self.link_chars = "text", [], 0
 
@@ -212,11 +208,7 @@ class Links(html.parser.HTMLParser):
     @classmethod
     def of(cls, markup, base):
         parser = cls(base)
-        try:
-            parser.feed(markup)
-            parser.close()
-        except Exception:  # broken HTML: what was read so far
-            pass
+        read_what_it_can(parser, markup)
         return list(parser.found.items())
 
     def handle_starttag(self, tag, attrs):

@@ -18,7 +18,7 @@ def test_every_command_is_defined_once_with_all_it_needs():
 
 @pytest.mark.spec("CMD-1")
 def test_the_command_line_and_the_conversation_read_the_table():
-    on_the_command_line = set(cli.Cli.COMMANDS) | set(cli.Cli.TALK) | {"help", "channel", "confirm"}
+    on_the_command_line = set(cli.Cli.COMMANDS) | set(cli.Cli.TALK_COMMANDS) | {"help", "channel", "confirm"}
     assert on_the_command_line == {command.name for command in COMMANDS if command.cli}
     assert set(conversation.Desk.COMMANDS) == {command.name for command in COMMANDS if command.chat}
     assert conversation.LONG_COMMANDS == tuple(command.name for command in COMMANDS if command.chat == "long")

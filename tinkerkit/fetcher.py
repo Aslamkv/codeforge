@@ -88,7 +88,7 @@ class Fetcher:
             if not self.allowed(url, connections):
                 return Fetched(url, final_url=url, error=Fetched.ROBOTS)
             return self.get(url, connections, kind)
-        except Exception as exc:  # one page's trouble never stops the others
+        except Exception as exc:
             return Fetched(url, final_url=url, error=f"{type(exc).__name__}: {first_line(str(exc), 160)}")
 
     def allowed(self, url, connections):
@@ -167,7 +167,7 @@ class Fetcher:
                 return Fetched(url, response.status, response.geturl(),
                                self.decoded(body, response.headers.get_content_charset()),
                                (response.headers.get_content_type() or "").lower())
-        except urllib.error.HTTPError as exc:  # a redirect past MAX_REDIRECTS is one too
+        except urllib.error.HTTPError as exc:
             return Fetched(url, exc.code, exc.geturl() or url, error=f"HTTP {exc.code}")
 
     def download(self, url, max_bytes):
@@ -235,7 +235,8 @@ class Connections:
         connection.request("GET", path, headers=headers)
         response = connection.getresponse()
         body = response.read(max_bytes)
-        if not response.isclosed():  # a body left unread spoils the connection: the next request opens a new one
+        body_left_unread = not response.isclosed()
+        if body_left_unread:
             connection.close()
         return response.status, response.headers, body
 

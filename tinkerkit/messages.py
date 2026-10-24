@@ -9,6 +9,8 @@ lazy import shutil
 lazy import sys
 from dataclasses import dataclass
 
+VARIATION_SELECTOR = "\ufe0f"
+
 
 @dataclass(frozen=True)
 class Message:
@@ -25,9 +27,8 @@ class Message:
 
 
 def space_after(icon):
-    # an emoji with a variation selector (⚠️) is drawn one column wide by many terminals: two spaces keep
-    # the words of every line in one column
-    return "  " if icon.endswith("\ufe0f") else " "
+    drawn_one_column_wide = icon.endswith(VARIATION_SELECTOR)
+    return "  " if drawn_one_column_wide else " "
 
 
 class Messages:
@@ -187,7 +188,7 @@ class Messages:
         for follower in self.followers:
             try:
                 follower(message)
-            except Exception:  # whoever follows must never break what is said
+            except Exception:
                 pass
 
     def reset(self):

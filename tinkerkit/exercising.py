@@ -48,7 +48,7 @@ class Exercise:
     def run(self, asked):
         """The exercise of the language the words name, until it is stopped; its ending."""
         signal.signal(JOB_STOP_SIGNAL, interrupted)
-        self.tracker.change("exercise", exercise=True)  # its own runs, not the person's: shown as the exercise
+        self.tracker.change("exercise", exercise=True)
         self.on_to("identify")
         exercise = Exercises.of(identified(self.model, asked))
         Exercises.claim(exercise)

@@ -379,7 +379,8 @@ class Workspace:
             return str(exc)
         if path in windows:
             return "it was shown in part: change it with a LINES block"
-        if not body.strip() and (not empty_ok or self.read(path).strip()):  # a new one may be (a package marker)
+        wrongly_empty = not body.strip() and (not empty_ok or self.read(path).strip())
+        if wrongly_empty:
             return "the reply gave it empty"
         return may_change(path, self.exists(path))
 
@@ -423,7 +424,8 @@ class Workspace:
 
     @staticmethod
     def edited(lines, edits):
-        for first, last, new in sorted(edits, key=lambda edit: edit[0], reverse=True):  # bottom up: numbers stay true
+        bottom_up = sorted(edits, key=lambda edit: edit[0], reverse=True)
+        for first, last, new in bottom_up:
             lines[first - 1:last] = new
         return lines
 
@@ -504,7 +506,7 @@ class TaughtCommands:
         """tinker learn NAME [DEFINITION]: NAME from now on, an alias of DEFINITION (checked as
         POSIX shell) or, without one, as the person's shell or PATH has it; "none" forgets it."""
         name = name.strip()
-        TaughtCommands.all()  # broken entries are reported before anything changes
+        TaughtCommands.stop_if_broken()
         if definition is not None and definition.strip().lower() == "none":
             TaughtCommands.forget(name)
             return
@@ -626,6 +628,10 @@ class TaughtCommands:
         return commands
 
     @staticmethod
+    def stop_if_broken():
+        TaughtCommands.all()
+
+    @staticmethod
     def aliases():
         return {name: entry["definition"] for name, entry in TaughtCommands.all().items() if entry["kind"] == "alias"}
 
@@ -694,8 +700,9 @@ class TestRef:
                   if position >= 0]
         line_start, end = self.span(text, names)
         first = text.rfind("\n", 0, min([start] + others)) + 1
-        if first >= line_start:
-            return text[:end].rstrip()  # the first test: the file's opening lines come with it
+        is_the_first_test = first >= line_start
+        if is_the_first_test:
+            return text[:end].rstrip()
         head = self.opening_lines(text[:first])
         return ("\n".join(head) + "\n...\n" if head else "") + text[line_start:end].rstrip()
 

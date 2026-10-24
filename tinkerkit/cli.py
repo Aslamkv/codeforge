@@ -51,7 +51,7 @@ lazy from .settings import (
 lazy from .web import Internet
 lazy from .workspace import TaughtCommands, TestRef, Toolchain
 
-try:  # chat channels are a plugin: without tinkerkit/channels.py, Tinker works as it did, in the terminal
+try:
     from . import channels
 except ImportError:
     channels = None
@@ -66,12 +66,16 @@ def main():
         argv = Jobs.arguments(sys.argv[1:])
         with Jobs.running(argv):
             run(Cli.parse(argv), script_started, started_at)
-    except KeyboardInterrupt:  # Ctrl-C: what each part saves is saved as it goes
+    except KeyboardInterrupt:
         raise SystemExit("\nInterrupted.")
-    except OllamaError as exc:  # Ollama failed past every retry (a run handles it itself, and saves)
+    except OllamaError as exc:
         raise SystemExit(f"\n{exc}")
-    except OSError as exc:  # a file or folder that cannot be read or written (full disk, permissions)
-        raise SystemExit(f"\n{exc.strerror or exc}: {exc.filename or ''}".rstrip(": "))
+    except OSError as exc:
+        raise SystemExit(cannot_read_or_write(exc))
+
+
+def cannot_read_or_write(exc):
+    return f"\n{exc.strerror or exc}: {exc.filename or ''}".rstrip(": ")
 
 
 def run(args, script_started, started_at):
@@ -94,7 +98,7 @@ class Cli:
     as @ID or @folder. The result has one shape for the rest of Tinker."""
     EXAMPLES = ("tinker", "tinker doctor", "tinker task a calculator in Python", "tinker add keep a history of results",
                 "tinker research the newest Python release", "tinker help task")
-    TALK = tuple(command.name for command in COMMANDS if command.group == "Talk" and command.cli)
+    TALK_COMMANDS = tuple(command.name for command in COMMANDS if command.group == "Talk" and command.cli)
     TITLES = {"Build": "🔨 Build", "Learn": "🧠 Learn", "Jobs": "⏯ Jobs", "Set up": "🔧 Set up", "Talk": "💬 Talk",
               "Channels": "📡 Channels"}
     RUNS = tuple(command.name for command in COMMANDS if command.run and command.name != "confirm")
@@ -113,7 +117,7 @@ class Cli:
         """The command line read and checked (a mistake exits with what to change)."""
         argv = sys.argv[1:] if argv is None else argv
         Cli.run_at_once(argv)
-        if argv[0] == "confirm":  # a plan that waits, confirmed: its run resumed
+        if argv[0] == "confirm":
             argv = ["resume"] + argv[1:]
         command = Cli.known_command(argv)
         parser = Cli.parser(command)
@@ -125,7 +129,8 @@ class Cli:
         Cli.read_command(command, given, args, parser)
         if command in Cli.RUNS:
             Cli.check_run(args, parser)
-        if command != "task":  # a new task without --workdir gets a folder of its own (ProjectFolder)
+        makes_its_own_folder = command == "task"
+        if not makes_its_own_folder:
             args.workdir = args.workdir or "."
         return args
 
@@ -140,7 +145,7 @@ class Cli:
             raise SystemExit(0)
         if argv[0] in ("help", "-h", "--help"):
             Cli.help(argv[1] if len(argv) > 1 else None)
-        if argv[0] in Cli.TALK:
+        if argv[0] in Cli.TALK_COMMANDS:
             if argv[1:2] in (["-h"], ["--help"]):
                 Cli.help(argv[0])
             Home.ensure()
@@ -189,7 +194,7 @@ class Cli:
         if command == "channel" and channels is not None:
             say.text(channels.ChannelCommand.USAGE)
             raise SystemExit(0)
-        if command in Cli.TALK:  # the conversation's own: as said in a session, a chat, or once (tinker COMMAND ...)
+        if command in Cli.TALK_COMMANDS:
             found = BY_NAME[command]
             say.text(f"usage: tinker {found.synopsis}\n\n{found.what[0].upper()}{found.what[1:]}.")
             raise SystemExit(0)
@@ -646,7 +651,7 @@ class Commands:
     def tracker_ended(tracker, ending, seconds):
         """The end told to the tracker, which leaves the home unless the conversation that started it reads it last."""
         tracker.end(ending, seconds)
-        if os.environ.get(conversation.CHANNEL_REPORTS_ENV) != "off":
+        if not conversation.started_by_a_conversation():
             tracker.close()
 
     @staticmethod
@@ -746,7 +751,7 @@ class Commands:
             Models.remember(model)
             took = time.monotonic() - started
             say.title(f"Time taken: {human_duration(took)}", "⏱️")
-            if listening:  # the chats it reports to are told the end, and the tracker leaves the home
+            if listening:
                 tracker.end(ending, took)
                 listening.end()
             else:
@@ -1118,7 +1123,7 @@ class ProjectRun:
         """Check what the run needs, prepare its folder, open it, work, and finish (exiting with
         its outcome)."""
         workdir = self.check_requirements()
-        if self.args.restart:  # this folder's task again, in the folder emptied first
+        if self.args.restart:
             spec = self.args.spec
             Runs.clear_folder(workdir, Path(spec).expanduser().resolve() if spec else None, self.args.yes)
         say.follow(self.tracker.heard)
@@ -1127,10 +1132,10 @@ class ProjectRun:
         try:
             self.work_safely()
             self.finish()
-        finally:  # the summary is printed first, so the channels show it too
+        finally:
             if listening:
                 listening.end()
-            elif os.environ.get(conversation.CHANNEL_REPORTS_ENV) != "off":  # the conversation that started it reads it last
+            elif not conversation.started_by_a_conversation():
                 self.tracker.close()
         sys.exit(self.outcome.exit_code)
 
@@ -1139,15 +1144,16 @@ class ProjectRun:
         or the model loaded, so what is missing stops it with nothing changed."""
         Models.installed(Models.selected()[0])
         Config.check_model(run=True)
-        TaughtCommands.all()  # a broken command stops here, not part way
-        if self.args.web:  # a run with --web learns what it needs: like tinker learn, it needs both
+        TaughtCommands.stop_if_broken()
+        if self.args.web:
             Embeddings.required("--web")
             self.internet = Internet.required("--web")
         else:
             Embeddings.check()
-        if self.args.workdir is None:  # a new task: its own folder in the projects folder, named after it
+        makes_its_own_folder = self.args.workdir is None
+        if makes_its_own_folder:
             if self.args.spec:
-                Runs.read_spec_file(self.args.spec)  # checked before a folder is made
+                Runs.read_spec_file(self.args.spec)
             self.args.workdir = str(ProjectFolder.make(self.args.task))
         return RunChecks.before_start(self.args)
 
@@ -1200,7 +1206,7 @@ class ProjectRun:
         except SystemExit as exc:
             if exc.code not in (None, 0) and isinstance(exc.code, str):
                 say.title(exc.code, Messages.ICONS["stop"])
-        except Exception as exc:  # a bug must not lose the run: report it, save, and say how to continue
+        except Exception as exc:
             details = traceback.format_exc()
             say.title(f"Unexpected error: {type(exc).__name__}: {first_line(str(exc), 300)}", Messages.ICONS["fail"])
             with say.section():
@@ -1228,7 +1234,7 @@ class ProjectRun:
         project itself. A new cycle's plan waits for confirmation only when the run was given --confirm."""
         project = self.session.project
         cycle = project.open_cycle()
-        if self.mode == "change":  # its project is open to a new cycle (RunChecks.before_start)
+        if self.mode == "change":
             cycle = self.new_change()
         elif cycle is None and not project.cycles:
             cycle = project.new_cycle("base", self.record["task"], brief)
@@ -1276,7 +1282,8 @@ class ProjectRun:
         """Whatever happened: the model unloaded, what the run learned about it kept, the run and
         the project saved."""
         model, project = self.session.model, self.session.project
-        if self.outcome.status != "awaiting":  # a plan that waits keeps the model loaded for the change asked next
+        plan_waits = self.outcome.status == "awaiting"
+        if not plan_waits:
             model.unload()
         Models.remember(model)
         self.record["status"] = self.outcome.status
@@ -1326,7 +1333,7 @@ class ProjectRun:
     def summary_done(self):
         project, run_id = self.session.project, self.record["id"]
         failing = [*cycle.get("readme_failures", []) for cycle in project.cycles]
-        if failing:  # the README's examples are how a person uses it: one that fails is said first
+        if failing:
             headline = (f"Done, but {len(failing)} README example(s) do not print what they say (all "
                         f"{len(project.criteria)} spec tests pass)")
             with say.part(f"{headline}:", Messages.ICONS["warn"]):

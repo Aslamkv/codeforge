@@ -131,7 +131,7 @@ class Runs:
         workdir = Path(args.workdir).expanduser().resolve()
         RunChecks.check_no_run(workdir)
         spec_text, spec_name = Runs.spec_of_new_run(args)
-        project_store(workdir).put("texts", "spec_text", spec_text)  # resume needs no spec file
+        project_store(workdir).put("texts", "spec_text", spec_text)
         run = Runs.new_record(args.task, workdir, spec_name)
         Runs.save(run, workdir)
         return run, workdir, spec_text, "new"
@@ -465,11 +465,11 @@ class SpecDocument:
         toolchain = self.project.toolchain
         if not toolchain:
             return []
-        out = TaughtCommands.spelled_out  # these commands work for anyone
-        lines = ["", "## Commands (run in the project folder)", ""] + [f"- setup: `{out(command)}`"
+        for_anyone = TaughtCommands.spelled_out
+        lines = ["", "## Commands (run in the project folder)", ""] + [f"- setup: `{for_anyone(command)}`"
                                                                        for command in toolchain.setup]
-        lines += [f"- activate: `{out(toolchain.activate)}`"] if toolchain.activate else []
-        lines += [f"- {key}: `{out(getattr(toolchain, key))}`" for key in Toolchain.COMMANDS if getattr(toolchain, key)]
+        lines += [f"- activate: `{for_anyone(toolchain.activate)}`"] if toolchain.activate else []
+        lines += [f"- {key}: `{for_anyone(getattr(toolchain, key))}`" for key in Toolchain.COMMANDS if getattr(toolchain, key)]
         return lines
 
     def cycles(self):

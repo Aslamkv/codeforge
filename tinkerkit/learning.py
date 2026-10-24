@@ -86,7 +86,7 @@ class SlotLearner:
 
     def __init__(self, model, internet, embeddings, tracker=None):
         self.learner = Learner(model, internet, embeddings)
-        self.learner.tracker = tracker  # tinker learn's report: its steps shown in the chats
+        self.learner.tracker = tracker
         self.model, self.internet, self.embeddings = model, internet, embeddings
         self.log = RequestLog()
         self.throttle = Throttle(Config.get("learn_rate"), Config.get("learn_backoff"))
@@ -120,8 +120,9 @@ class SlotLearner:
             say.info(f"{self.topic} is a broad subject, not one tool: researching it and cross-checking the sources",
                      "🧭")
             return Researcher(self.learner).research(self.topic)
-        machine = self.learner.look_at_machine(list(dict.fromkeys(
-            plan["commands"] + [tool["command"] for tool in plan["tools"] if tool["command"]])))  # each command once
+        each_command_once = list(dict.fromkeys(
+            plan["commands"] + [tool["command"] for tool in plan["tools"] if tool["command"]]))
+        machine = self.learner.look_at_machine(each_command_once)
         version = version_of(machine, plan["commands"]) or plan["version"]
         pages = self.enough_pages(pages + self.documentation(plan, machine, version))
         return self.learned(plan, version, machine, pages)

@@ -91,7 +91,6 @@ PROFILES = frozendict({
 
 
 TOOL_DOCS_QUERY = "install installation getting started usage configuration command line options"
-# tools' documentation: the pages that show how to run and set them up (they fill its toolchain slot)
 
 
 def web_slots(profile):
@@ -122,7 +121,7 @@ class Selector:
     slots."""
 
     def __init__(self, embeddings, budget):
-        self.embeddings, self.budget = embeddings, budget  # embeddings: None, the words alone
+        self.embeddings, self.budget = embeddings, budget
 
     def select(self, slots, pool, plan, version):
         """{slot id: [passages]} for each slot (version: the one installed, else the plan's)."""

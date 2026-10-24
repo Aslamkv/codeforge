@@ -179,7 +179,6 @@ class ReadmeWriter(Phase):
                  Part("Language", self.project.language, True),
                  *[Part(f"File {path}", self.workspace.read(path), atomic=True) for path in dict.fromkeys(entry + code)]]
         try:
-            # it describes code that exists; its examples are run
             found = self.session.model.ask_until_usable(Prompts.README_SYSTEM, parts, "README", self.read, attempts=2,
                                                         think=False)
         except (PromptTooLarge, OllamaError) as exc:
@@ -263,18 +262,18 @@ class ReadmeWriter(Phase):
         """[(command, expected lines, output)] of the examples that do not print what they say."""
         examples = self.examples(self.workspace.read(readme))
         tc = self.session.toolchain
-        ready = lambda command: " && ".join(tc.use + [command])  # as a person runs it, after getting started
+        as_a_person_runs_it = lambda command: " && ".join(tc.use + [command])
         run = TaughtCommands.spelled_out(tc.run) if tc.run else ""
         serves = run and (cycle.get("serves") or any(self.LOCAL_RE.search(command) for command, _ in examples))
-        # starting it is no example to check
-        examples = [example for example in examples if not (serves and example[0] == run)]
+        starts_it = lambda example: serves and example[0] == run
+        examples = [example for example in examples if not starts_it(example)]
         if not examples:
             return []
-        server = self.workspace.start(ready(tc.run)) if serves else None
+        server = self.workspace.start(as_a_person_runs_it(tc.run)) if serves else None
         try:
             if server:
                 self.wait_for(examples[0])
-            return self.run_examples(examples, ready)
+            return self.run_examples(examples, as_a_person_runs_it)
         finally:
             if server:
                 self.workspace.stop(server[0])
@@ -434,7 +433,6 @@ class FinalReview(Phase):
         if code != 0:
             return (f"`{self.session.toolchain.test_all}` fails when the whole suite runs: "
                     f"{Output.key_line(output)}"), output
-        # a test that passes by chance fails some runs
         again, output_again = self.session.toolchain.run_all(self.workspace)
         if again != 0:
             return (f"`{self.session.toolchain.test_all}` passed once and failed the next time: "
@@ -469,7 +467,7 @@ class LessonWriter(Phase):
             return
         try:
             new, confirmed = self.ask_lessons(events)
-        except (SystemExit, OllamaError) as exc:  # the project is built: lessons are a bonus
+        except (SystemExit, OllamaError) as exc:
             say.warn(f"{exc} Nothing learned this time.")
             return
         names = [Path(path).name for path in self.project.files] + [self.project.workdir.name]

@@ -129,7 +129,7 @@ class Jobs:
     @classmethod
     def new(cls, argv):
         number = Home.store().update("job numbers", "last", lambda last: (last or 0) + 1)
-        title = " ".join(word for word in argv if not word.startswith("--"))  # its words, not its options
+        title = " ".join(word for word in argv if not word.startswith("--"))
         return {"number": number, "command": argv[0], "title": title, "arguments": list(argv),
                 "started": now_text(), "today": datetime.date.today().isoformat()}
 
@@ -229,14 +229,16 @@ class Jobs:
         if argv[:1] != ["resume"] or len(argv) > 2:
             return argv
         number = job_number(argv[1]) if len(argv) == 2 else None
-        if len(argv) == 2 and number is None:
-            return argv  # resume @PROJECT
+        resumes_a_project = len(argv) == 2 and number is None
+        if resumes_a_project:
+            return argv
         if cls.wake(number):
             say.done(f"Job #{number} goes on now, in the process where it was paused.")
             raise SystemExit(0)
         job, why = cls.resumable(number)
-        if job is None and number is None:
-            return argv  # resume alone, with no job stopped: this folder's run
+        resumes_this_folders_run = job is None and number is None
+        if resumes_this_folders_run:
+            return argv
         if job is None:
             raise SystemExit(why)
         cls.current, cls.resumed_here = job, True

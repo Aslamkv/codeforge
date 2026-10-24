@@ -327,14 +327,14 @@ class Home:
             subprocess.Popen(command, stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
                              start_new_session=True)
         except OSError:
-            pass  # staying awake helps, it is not needed
+            pass
 
     @staticmethod
     def stay_awake_command(pid):
         """The command that keeps this computer awake while the process pid lives: caffeinate on macOS,
         systemd-inhibit on Linux; None elsewhere."""
         if shutil.which("caffeinate"):
-            return ["caffeinate", "-i", "-s", "-w", pid]  # -s: no system sleep either, on mains power
+            return ["caffeinate", "-i", "-s", "-w", pid]
         if shutil.which("systemd-inhibit"):
             return ["systemd-inhibit", "--what=idle:sleep", "--why=Tinker is working", "tail", f"--pid={pid}",
                     "-f", "/dev/null"]
@@ -574,7 +574,7 @@ class Store:
             db.execute("BEGIN IMMEDIATE" if write else "BEGIN")
             yield db
             db.execute("COMMIT")
-        except sqlite3.DatabaseError as exc:  # not a database (any more), or locked past LOCK_WAIT_SECONDS
+        except sqlite3.DatabaseError as exc:
             raise self.unreadable(exc) from None
         except BaseException:
             if db.in_transaction:
@@ -594,9 +594,9 @@ class Store:
 
     def connect(self):
         """A connection; the database is made on first use, readable by its owner only."""
-        if not self.path.exists():  # new, or deleted since (tinker reset)
+        if not self.path.exists():
             self.create_private_file()
-        elif not self.made:  # one made before it was kept private
+        elif not self.made:
             self.path.chmod(0o600)
         db = sqlite3.connect(self.path, timeout=self.LOCK_WAIT_SECONDS, isolation_level=None)
         if not self.made:
