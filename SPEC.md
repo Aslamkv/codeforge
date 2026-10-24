@@ -69,8 +69,8 @@ listed above it:
 | `model` | the local model: Ollama's API, one request with its budgets and retries (`Model`), measuring a model (`Calibrator`) |
 | `project` | the plan and its record (`Project`, `SpecDocument`, `Runs`, `RunChecks`, `Brief`, `Outcome`), and the run's `Tracker` |
 | `fetcher` | the Internet plugin's page fetcher: pages read straight from their sites, in parallel, with the standard library only (`Fetcher`, `Fetched`) |
-| `web` | the Internet plugin, the only part that goes on the web (`Internet`, `OllamaWeb`, `DuckDuckGoWeb`, `PageText`) |
 | `passages` | fetched pages as passages: main content, under headings, repeats dropped (`Cleaner`, `MainBlocks`, `Links`, `Page`, `Passage`) |
+| `web` | the Internet plugin, the only part that goes on the web (`Internet`, `OllamaWeb`, `DuckDuckGoWeb`, `PageText`) |
 | `conversation` | the terminal and the chats as one conversation (`Desk`, `Channel`, `Markup`, `Talk`, `Shell`, `Research`, `Progress`, `Reporter`) |
 | `channels` | the chat plugin: Telegram, and `tinker channel` |
 | `knowledge` | lessons and proven knowledge (`Knowledge`), and what learning shares (`Learner`, `Researcher`, `Library`, `Retriever`, `Embeddings`) |
@@ -125,7 +125,7 @@ the last column:
 | `learned` | what was learned from the web about each topic, with sources, and what each reading teaches | `learned` |
 | `embeddings` | the embedding of each learned text, per embedding model | `learned` |
 | `sources` | the cleaned documentation pages of each topic, per version (`slug@version`) | `docs` |
-| `readings`, `reading numbers` | the reading list: each source's whole text by chapter, each chapter's state, its survey; the last number given | `clear read` |
+| `readings`, `reading numbers` | the reading list: each source's whole text by chapter, each chapter's state, its survey; the last number given | `read` |
 | `commands` | the person's own commands (aliases, programs) | `commands` |
 | `projects` | a pointer to each project: its run ID, folder and task | `runs` |
 | `runs` | one line about each run: its task, language, status and dates (the last `RUNS_KEPT`) | `runs` |
@@ -135,12 +135,14 @@ the last column:
 | `activity` | the person's requests being answered (`answering`), and the ids of the exercise's one message (`exercise message`) | |
 | `chat views` | each message in a chat (Tinker's and the person's): when it goes, and the thing it shows | |
 | `chat history`, `chat history numbers` | each thing shown in a chat, as it was shown last, with what the person asked for it; the last number given | `history` |
-| `jobs`, `job numbers` | every job: its number, command, title, arguments, state, process and dates; the last number given | `clear jobs` |
-| log `learn` | every model call that `tinker learn` made | `learned` |
-| log `teach` | every model call that `tinker ask` and `tinker teach` made | |
-| log `read` | every model call that `tinker read` made | |
-| log `exercise` | every model call that `tinker exercise` made itself (its builds keep theirs) | `exercise` |
-| log `journal #N` | job #N's requests (model calls, web searches, page fetches) with their answers, until it finishes | |
+| `jobs`, `job numbers` | every job: its number, command, title, arguments, state, process and dates; the last number given | `jobs` |
+| log `calls #N` | every model call job #N made itself (a run's go to its project's `events`), until the job is archived | `jobs` |
+| log `journal #N` | job #N's requests (model calls, web searches, page fetches) with their answers, until it finishes | `jobs` |
+
+Jobs, readings and the chat history are numbered lists, kept the same way. Each new entry takes the next
+number, and a number is never given again, even after a clear. `#N` names an entry. A list shows them newest
+first, 10 to a page, and a page that has more after it names the command for the next. Clearing archives jobs
+(**JOB-11**), and deletes readings (**RDG-13**) and the history (**SET-12**).
 
 Each project keeps its own state in `<project>/.tinker/project.db`:
 
@@ -189,8 +191,8 @@ Everything Tinker tells the person goes through one voice, `say` (a `Messages`).
   and goes to the project's `output` log; a live one becomes what goes on now.
 - **MSG-4** `live` redraws one status line in place on a terminal only. Piped (a chat following the command),
   it writes nothing; its followers are still told. The next message clears it first.
-- **MSG-5** `detail` goes to the log given to `keep_log` (a run's `events`, tinker learn's `learn`), and is
-  never printed. With no log, it is dropped.
+- **MSG-5** `detail` goes to the log given to `keep_log` (a run's `events`, a job's `calls #N`), and is never
+  printed. With no log, it is dropped.
 - **MSG-6** `human_duration`: 42.5 gives `42s`, 1762.08 gives `29m 22s`, 4000 gives `1h 6m 40s`.
 - **MSG-7** No module of Tinker but `messages` calls `print`.
 
@@ -212,16 +214,17 @@ The home, its database, the settings, and small helpers every module shares.
   `CONFIRM_AFTER` is `review` for the project and a feature, and `reproduce` for a bug fix.
 - **SET-4** `Config` is `DEFAULT_CONFIG` overridden by the home's `config`. It is read from the database each
   time, so a change another Tinker made is seen at once. `Config.save(**changes)` keeps the changes.
-- **SET-5** `Config.check_model(run)` rejects with `SystemExit`: a keep_alive that is neither whole seconds nor
-  a duration (`10m`, `1h30m`); a max_growth that is not a number above 1 (booleans rejected); a build_think or
-  learn_think other than `"high"`, `"medium"`, `"low"`, `true`, `false` or `null`. For a run, it also rejects a
-  test_timeout that is not a whole number of at least 1. The web's settings are checked by `Internet.check`
-  (**WEB-3**).
-- **SET-6** `Config.set(key, text, *checks)` is `tinker config KEY VALUE`, which passes the web's checks. It
-  sets only the keys that have no command of their own (`ollama_url`, `keep_alive`, `max_growth`,
-  `build_think`, `test_timeout`, `web_fallback`, `web_timeout`, `learn_missing`, the `learn_*`, `docs_*` and
-  `fetch_*` settings, `projects`), reading the value by the key's type. A value that fails the model's or the
-  given checks is not kept, and the command ends with why.
+- **SET-5** `SETTINGS` is the one table of the settings: for each key of `DEFAULT_CONFIG`, its type, its
+  range and its owner, the command that sets it (`use-model` for model, `use-web` for web, `embed` for
+  embed_model, `config` for the rest). `Config.check()` checks every setting by its row, and rejects with
+  `SystemExit`: a keep_alive that is neither whole seconds nor a duration (`10m`, `1h30m`); a build_think or
+  learn_think other than `"high"`, `"medium"`, `"low"`, `true`, `false` or `null`; a web or web_fallback that
+  names no backend of `WEB_BACKENDS` (web_fallback may be empty); and a number outside its range, or not whole
+  where its row says so (max_growth above 1, web_timeout above 0, test_timeout and learn_missing at least 1,
+  and each `learn_*`, `docs_*` and `fetch_*` limit). A boolean is never a number.
+- **SET-6** `Config.set(key, text)` is `tinker config KEY VALUE`. It sets only the keys whose owner is
+  `config`, reading the value by the row's type. A value that fails its row's check is not kept, and the
+  command ends with why. `tinker help config` lists those keys with their type and range, from the table.
 - **SET-7** `Config.keep_alive(value)` gives whole seconds as an `int` and a duration as it is.
   `Config.ollama_url()` has no trailing slash.
 - **SET-8** `Store(path)` is one SQLite database of documents (JSON values) by collection and key. `get` gives
@@ -233,12 +236,15 @@ The home, its database, the settings, and small helpers every module shares.
   the entries after an ID, in order, with their IDs. A database file is made with mode 600.
 - **SET-10** `Home.ensure()` makes the home folder and its database on first use. A home that cannot be written
   ends with `SystemExit`.
-- **SET-11** `Home.reset(yes)` deletes the home folder. It refuses a folder not named `.tinker`. It does
-  nothing when the folder is missing. Without `yes`, and not in a terminal, it deletes nothing and exits.
-- **SET-12** `Home.parts()` names exactly: languages, memory, learned, docs, models, runs, commands, history,
-  exercise ([State](#state) shows what each holds). `Home.clear(names, yes)` deletes only the named parts from
-  the home database. It rejects an unknown part by listing the parts. When those parts are empty, it says there
-  is nothing to clear. Without `yes`, and not in a terminal, it deletes nothing.
+- **SET-11** Every deletion goes one way: it says what it deletes, asks, and only then deletes. With `yes`
+  (`--yes`, or `confirm` in a chat) it does not ask. With no terminal to ask in, it deletes nothing and exits,
+  saying how to confirm. With nothing to delete, it says so and asks nothing. `Home.reset(yes)` deletes the
+  home folder this way. It refuses a folder not named `.tinker`, and does nothing when the folder is missing.
+- **SET-12** `tinker clear PART` names exactly these parts: languages, memory, learned, docs, models, runs,
+  commands, history, exercise, jobs and read ([State](#state) shows what each holds). `jobs` and `read` take
+  numbers (`#N`), and their own modules clear them (**JOB-11**, **RDG-13**). `Home.clear(names, yes)` deletes
+  only the named parts from the home database, as a deletion (**SET-11**). It rejects an unknown part by
+  listing the parts.
 - **SET-13** `Home.keep_awake()` keeps the computer awake with `caffeinate` (macOS) or `systemd-inhibit`
   (Linux), tied to Tinker's process. It does nothing when neither tool is there, and it never raises.
 - **SET-14** Helpers. `first_line` gives the first line of the text with its ends stripped, cut to the limit
@@ -259,16 +265,17 @@ again what it did. One job runs at a time, whatever kind it is: the job asked fo
 and the one it paused goes on by itself once Tinker is idle. A chat or a command line the person asks for
 pauses it too, so the person is always answered at once.
 
-- **JOB-1** `is_job(argv)`: `task`, `restart`, `resume`, `confirm`, `amend`, `add`, `fix`, `learn`, `ask`,
-  `teach`, `read`, `research` and `exercise` are jobs; help, `exercise status`, `read list`, `read show #N`,
-  `learn NAME "DEFINITION"` and a build an exercise runs (`EXERCISE_ENV`) are not. `Jobs.running(argv)` runs
+- **JOB-1** `is_job(argv)` is true for a command of kind `job` (**CMD-1**): `task`, `restart`, `resume`,
+  `confirm`, `amend`, `add`, `fix`, `calibrate`, `learn`, `ask`, `teach`, `read`, `research` and `exercise`.
+  Help, and a build an exercise runs (`EXERCISE_ENV`), are never jobs. `Jobs.running(argv)` runs
   a job as the next number (`#1`, `#2` ...), kept in the home's `jobs` with its command, title, arguments, the
   day it started, its state `running` and its process. Its process takes `JOB_STOP_SIGNAL` (SIGUSR2) as
   Ctrl-C.
 - **JOB-2** A job ends `stopped` when it is interrupted (Ctrl-C, `JOB_STOP_SIGNAL`) or its tracker ends with
   the status `stopped` (`Tracker.end` tells `Jobs.ended`, which adds `("Go on", "tinker resume #N")` to the
   ending), and `paused` when another job or the person paused it ("Paused for job #N", "Paused for you": its
-  ending says so, and its tracker's `doing`); otherwise it is `finished`, and its journal is deleted. A
+  ending says so, and its tracker's `doing`); otherwise it is `finished`, and its journal is deleted (its
+  `calls #N` log is kept). A
   `running` or `paused` job whose process is gone (killed, the computer restarted) is read as `stopped`;
   `Jobs.lost()` gives those jobs.
 - **JOB-3** `journaled(request, ask)` outside a job asks. In a job, a request made before, word for word, is
@@ -283,13 +290,13 @@ pauses it too, so the person is always answered at once.
   unknown job, one that runs in another process, and a finished or archived one are refused with why. A
   task's job is resumed as `resume @RUN` once its run is known (`Jobs.retarget`). A job that goes on
   (`resume #N`) starts its tracker with `resumed`, so its message comes to the bottom of the chat.
-- **JOB-6** `tinker jobs [running|paused|stopped|finished|archived] [PAGE]` lists the jobs newest first,
-  `JOBS_PER_PAGE` (10) to a page: with no state, the running ones, then the paused ones, then the stopped ones.
-  A page that has more after it names the command for the next. Any other words are an error.
+- **JOB-6** `tinker jobs [running|paused|stopped|finished|archived] [PAGE]` lists the jobs by page
+  ([State](#state)): with no state, the running ones, then the paused ones, then the stopped ones. Any other
+  words are an error.
 - **JOB-7** `tinker stop #N` sends job #N `JOB_STOP_SIGNAL`, as Ctrl-C (one that neither runs nor is paused is
   an error); `tinker stop` stops the job that runs, whatever it is. In the conversation, `stop #N` stops that
   job (the task started here, the exercise in its own message, or one elsewhere) and `stop` the job that runs,
-  and `resume [#N]` starts `tinker resume #N` as a task (an exercise as the exercise). A paused job that is
+  and `resume [#N]` starts `tinker resume #N` as a job (an exercise as the exercise). A paused job that is
   stopped no longer goes on by itself.
 - **JOB-8** One job runs at a time, whatever kind it is. A job that starts (`Jobs.begin`) pauses every job that
   runs: each is marked `paused_by` it and told to stop (`JOB_STOP_SIGNAL`), and it waits, at most
@@ -309,8 +316,9 @@ pauses it too, so the person is always answered at once.
   the answer is written (a command line run once confirmed pauses it again while the model reads its output).
   A command that only shows something pauses nothing, and a job asked for pauses it as **JOB-8** says.
 - **JOB-11** `tinker clear jobs [#N...] [--yes]` archives those jobs (with no `#N`, every stopped and finished
-  one) once the person agrees: each is kept with the state `archived` (and `archived_from`, the state it had),
-  listed by `tinker jobs archived` and not without a state, and its journal is deleted. An archived job is not
+  one), as a deletion (**SET-11**): each is kept with the state `archived` (and `archived_from`, the state it
+  had), listed by `tinker jobs archived` and not without a state, and its journal and its `calls #N` log are
+  deleted. An archived job is not
   resumed (**JOB-5**). An unknown job, a running or paused one, one archived already, and any word but `#N`
   are refused with why.
 
@@ -324,17 +332,21 @@ What is said in the chats, kept so that a chat is only a view of it.
   the status, `glances` a chat's glances; `gone` forgets one.
 - **LED-2** `shown(channel, chat, thing, ids, text, asked)` keeps a thing as it was shown last; with no thing,
   a new one is numbered, keeping what was asked. `thing_of(ids)` gives the thing messages show. `page(N)` lists
-  things newest first, `HISTORY_PER_PAGE` to a page, with how many pages there are.
+  the things by page ([State](#state)), with how many pages there are.
 
 ## commands (CMD)
 
 - **CMD-1** `COMMANDS` is the one table of Tinker's commands. For each it gives the synopsis, the group, what
-  it does, how a chat runs it (`long`, `quick`, `own`, or not at all), whether it is a run, whether it
-  deletes, the words it takes in a chat (`none`, `one`, `any`), its arguments and its options. The command line builds its parser and its help from it, and the
-  conversation its commands.
+  it does, its kind, whether a chat offers it, whether it is a run, whether it deletes, the words it takes in
+  a chat (`none`, `one`, `any`), its arguments and its options. The kind is `job` (a long command, **JOB-1**),
+  `glance` (answered at once, pausing nothing, **CNV-14**), `pauses` (a request the model answers right away,
+  **JOB-10**) or `own` (the conversation answers it its own way). An action whose kind differs from its
+  command's has a row of its own: `read list`, `read show`, `exercise status`, `channel remove` and
+  `learn NAME "DEFINITION"`. The command line builds its parser and its help from the table, and the
+  conversation its commands. Nothing else lists commands by kind.
 - **CMD-2** The runs are `task`, `restart`, `confirm`, `amend`, `add`, `fix` and `resume`. Every run but
   `restart` takes `--web`. The runs that start a cycle (`task`, `restart`, `add`, `fix`) take `--confirm`, and
-  the others do not. The commands that delete are `clear`, `reset` and `restart`.
+  the others do not. The commands that delete are `clear`, `reset`, `restart` and `channel remove`.
 - **CMD-3** `ref(word)` reads a project reference: `@` followed by a run ID or a folder name. Any other word is
   not a reference. `refs(words)` takes a reference from the start of the words, and leaves the rest as they
   are.
@@ -547,8 +559,8 @@ What is said in the chats, kept so that a chat is only a view of it.
   database, saves a new record and gives the mode `"new"`. `Runs.open_existing` marks the run running. It
   gives the mode `"resume"` with the saved spec text, or `"change"` with the feature's spec file.
 - **PRJ-5** `Runs.clear_folder` refuses the home folder, the filesystem root, and any folder that holds
-  Tinker's home. It keeps the entry that holds the spec file. Without `yes`, and not in a terminal, it deletes
-  nothing. Otherwise it empties the folder and forgets the pointers to it.
+  Tinker's home. It keeps the entry that holds the spec file. It empties the folder and forgets the pointers
+  to it, as a deletion (**SET-11**).
 - **PRJ-6** `Runs.remember(run, language)` keeps one line about the run in the home's `runs`: `{id, task,
   language, status, created, updated}`, at most `RUNS_KEPT`, the least recently updated dropped first.
   `tinker clear runs` deletes these lines with the pointers.
@@ -605,6 +617,20 @@ The Internet plugin's page fetcher, with the standard library only.
   and its `Fetched` is `refused`. A missing robots.txt allows everything; one answered with 401 or 403 allows
   nothing.
 
+## passages (PAS)
+
+Fetched pages as passages: main content, under headings, repeats dropped.
+
+- **PAS-1** `Cleaner.page` takes an HTML page's main content as blocks (`<main>`/`<article>` when it holds
+  `MIN_USABLE_PAGE_CHARS`, else the body). It leaves out scripts, styles, navigation, headers, footers,
+  asides, forms, `hidden`, `aria-hidden`, navigation roles, and every paragraph that is at least
+  `MENU_LINK_SHARE` links. Broken HTML gives what was read before it broke. Plain text and Markdown are read
+  by their lines (`#` headings, ``` code).
+  `Cleaner.pool(pages, known)` gathers blocks under their heading into passages of up to `MAX_PASSAGE_CHARS`
+  (a code block whole), drops text a site repeats on several of its pages and a passage that repeats another
+  or a known one (`NEAR_DUPLICATE_OVERLAP`), and numbers them on from the known ones (`P1`, `P2`, ...), each
+  with its address and fetch time.
+
 ## web (WEB)
 
 The Internet plugin, the only part that goes on the web.
@@ -613,9 +639,8 @@ The Internet plugin, the only part that goes on the web.
 - **WEB-2** `Internet()` uses config `web`, then `web_fallback`. It skips empty and repeated names. A backend
   that is not ready is left out, and its reason goes in `unusable_backends`. With no backend left,
   `available()` is False and `problem()` says why.
-- **WEB-3** `Internet.check()` rejects with `SystemExit`: an unknown `web` or `web_fallback`; a `web_timeout`
-  that is not a number above 0; a `learn_missing` that is not a whole number of at least 1 (booleans
-  rejected); and a `learn_*`, `docs_*` or `fetch_*` limit that is not a number in its range (`LEARN_LIMITS`).
+- **WEB-3** The names of `Internet.backends()` are exactly `WEB_BACKENDS`, so the settings table checks `web`
+  and `web_fallback` without the web (**SET-5**).
 - **WEB-4** `Internet.required(option)` ends with `SystemExit` naming the option when no backend is usable.
   `Internet.state()` gives `ready: <backends>` (and any backends that are not usable), or why it is not
   usable.
@@ -638,22 +663,8 @@ The Internet plugin, the only part that goes on the web.
   worth asking again.
 - **WEB-11** `DuckDuckGoWeb.read_page` gives an HTML page as its main text (`PageText`). Plain text, JSON and
   XML stay as they are. Any other content type is a `WebError`.
-- **WEB-12** `PageText` gives a page's title and main text. It uses `<main>` or `<article>` when that holds at
-  least 400 chars, and the whole body otherwise. It leaves out scripts, styles, navigation, headers, footers,
-  asides, forms, `hidden`, `aria-hidden` and navigation roles. Headings become `# ` lines, list items become
-  `- ` lines, and `<pre>` keeps its layout. Broken HTML gives what was read before it broke.
-
-## passages (PAS)
-
-Fetched pages as passages: main content, under headings, repeats dropped.
-
-- **PAS-1** `Cleaner.page` takes an HTML page's main content as blocks (`<main>`/`<article>` when it holds
-  `MIN_USABLE_PAGE_CHARS`, else the body), leaving out what `PageText` leaves out and every paragraph that is
-  at least `MENU_LINK_SHARE` links; plain text and Markdown are read by their lines (`#` headings, ``` code).
-  `Cleaner.pool(pages, known)` gathers blocks under their heading into passages of up to `MAX_PASSAGE_CHARS`
-  (a code block whole), drops text a site repeats on several of its pages and a passage that repeats another
-  or a known one (`NEAR_DUPLICATE_OVERLAP`), and numbers them on from the known ones (`P1`, `P2`, ...), each
-  with its address and fetch time.
+- **WEB-12** `PageText` is a view over `Cleaner` (**PAS-1**): a page's title, and its main content's blocks
+  as text. Headings become `# ` lines, list items become `- ` lines, and `<pre>` keeps its layout.
 
 ## conversation (CNV)
 
@@ -697,8 +708,9 @@ The terminal and the chats are one conversation: the same commands, the same ans
 - **CNV-11** `Desk.answer` handles a command. `task WHAT` starts a task, and a bare `task` gets its usage. A
   run that starts a cycle is given `--confirm`, so its plan waits for the person. `status` alone gives what
   runs (`status @PROJECT` is that project's status, **CLI-3**). `stop`, `stop #N` and `resume [#N]` act on jobs
-  (**JOB-7**), and `research TOPIC` runs as a task. A command that deletes shows what it deletes and waits for
-  `confirm`, but `clear chat`, which deletes no record (the history keeps it), is done at once. `exit` asks
+  (**JOB-7**), and `research TOPIC` runs as a job. A command that deletes shows what it deletes and waits for
+  `confirm` (**SET-11**), but `clear chat`, which deletes no record (the history keeps it), is done at once.
+  `exit` asks
   first; the person's `exit` and `confirm` are taken out at once, and the question as Tinker ends (its status
   says it no longer listens). A `channel` action that needs a terminal says so. Any other command runs as
   `tinker`.
@@ -710,12 +722,12 @@ The terminal and the chats are one conversation: the same commands, the same ans
   one that starts with a command word. A command of its own instead (sent with its `/`, alone, or the same
   command, as a file sent to read is) drops the question. A command whose words are optional (`status`) runs
   at once.
-- **CNV-14** A glance (a quick command, `help`, `history`, `exercise status`) is answered with `glance`: the
-  person's message goes at once, the answer in `GLANCE_KEPT_SECONDS`. `history [PAGE | #N]` lists the things
-  shown, newest first, with what was asked for each, or shows thing N again. `clear chat` takes every message
-  out of the chats but the status, said in a note that goes in `DONE_NOTE_KEPT_SECONDS`. `clear history`, once
-  confirmed, forgets the history and clears the chat the same way, and leaves nothing in the history, not even
-  what it said.
+- **CNV-14** A glance (a command of kind `glance`, **CMD-1**) is answered with `glance`: the person's message
+  goes at once, the answer in `GLANCE_KEPT_SECONDS`. `history [PAGE | #N]` lists the things shown by page
+  ([State](#state)), with what was asked for each, or shows thing N again. `clear chat` takes every message out
+  of the chats but the status, said in a note that goes in `DONE_NOTE_KEPT_SECONDS`. `clear history` is
+  `tinker clear history` (**SET-12**): once confirmed, it forgets the history, clears the chat as `clear chat`
+  does, and leaves nothing in the history, not even what it said.
 - **CNV-15** `Desk.follow` follows a task by its tracker: its run ID, its folder (the title is named after it),
   and a plan that waits. Once the task ends, it reads the task's last state and removes its tracker.
 - **CNV-16** `running(skip)` lists the runs whose trackers are in the home's `running`, but for its own process
@@ -762,7 +774,8 @@ The chat plugin: Telegram, and `tinker channel`.
   `SystemExit`. `enabled()` gives nothing when `TINKER_CHANNELS=off`.
 - **CHN-2** `ChannelCommand.run` lists by default and rejects an unknown action. `list` shows each channel and
   its chats. `add` (from options or questions) checks the name, refuses a name taken, checks the token, and
-  saves the channel disabled. `remove` drops the settings and the secrets. `enable` and `disable` switch a
+  saves the channel disabled. `remove` drops the settings and the secrets, as a deletion (**SET-11**).
+  `enable` and `disable` switch a
   channel.
 - **CHN-3** `ask` gives the default when there is no terminal, or ends with `SystemExit` when there is none.
   `ChannelCommand.check` ends with `SystemExit` on a refusal, and tries a dropped network again up to
@@ -923,9 +936,8 @@ version.
 ## learning (LRN)
 
 `tinker learn TOPIC` and the recall phase of a run with `--web` learn a language or a tool by its slots
-(`SlotLearner`), from its own documentation for the version installed: PREFLIGHT, PLAN (saved; else SEARCH 1,
-GATE 1, PICK, FETCH, GATE 2 and the plan call), MACHINE, DOCS, GATE 2, CLEAN, SELECT, DIGEST, FOLLOW-UP,
-CONDENSE, KEEP. Domain research (`Researcher`), own-command learning and run lessons are apart.
+(`SlotLearner`), from its own documentation for the version installed, through the steps of **LRN-8**.
+Domain research (`Researcher`), own-command learning and run lessons are apart.
 
 - **LRN-1** `Throttle(rate, backoff)` lets at most `rate` requests a minute through (a token bucket, full at
   the start; an empty one waits). `call(request, limited)` asks again while `limited()` says HTTP 429, after
@@ -968,9 +980,12 @@ CONDENSE, KEEP. Domain research (`Researcher`), own-command learning and run les
   again. When a follow-up fails, the learn goes on, marked `incomplete`, with a warning and a note.
 - **LRN-7** A topic researched before is researched again when deep, else kept. A plan that says the topic is
   a domain hands it to `Researcher` when deep; otherwise it is learned like a tool.
-- **LRN-8** Given a tracker, learning moves it through its steps (`Tracker.DOING_AND_DONE`: search, plan,
-  machine, documentation, digest, follow-up, condense, keep; a domain's frame and investigate), each once in a
-  row; without one (a run's recall phase), the run's own steps are left alone. The summary is kept as data too
+- **LRN-8** Learning's steps are, in order: search, plan, machine, documentation, digest, follow-up, condense
+  and keep (a domain's: frame and investigate). A saved plan skips search; PREFLIGHT, GATE 1 and GATE 2
+  (**LRN-4**) are checks within them. A learn is not saved step by step: stopped, it goes on through its
+  job's journal (**JOB-3**), so nothing done is asked again. Given a tracker, learning moves it through its
+  steps (`Tracker.DOING_AND_DONE`), each once in a row; without one (a run's recall phase), the run's own steps
+  are left alone. The summary is kept as data too
   (`recap`: answered, still open, documentation, pages, facts kept, web requests), and a `LearnStopped` carries
   why it stopped and what to do next (`details`).
 
@@ -1056,10 +1071,10 @@ the core ones first, and saved as soon as it is read. What it teaches is a topic
   is fetched again. `read #N ["WHAT"]` needs a measured model and a known reading. Its tracker moves through
   survey, chapters (and condense) and ends with what was read now, the chapters read, what is kept, whether
   builds use it, and what to do next.
-- **RDG-13** `read list` shows each reading, the newest first, with how many chapters are read and the facts
-  kept; `read show #N` its source, summary and each chapter with its state and facts. Neither is a job; in a
-  chat they are answered at once. `clear read [#N...]` deletes those readings (every one with no number):
-  their text and their topic, once the person agrees.
+- **RDG-13** `read list [PAGE]` shows the readings by page ([State](#state)), each with how many chapters are
+  read and the facts kept; `read show #N` its source, summary and each chapter with its state and facts. Both
+  are glances (**CMD-1**). `clear read [#N...]` deletes those readings (every one with no number): their text
+  and their topic, as a deletion (**SET-11**).
 
 ## teaching (TCH)
 
@@ -1105,7 +1120,7 @@ then is anything changed.
   item shown (`about`): that item is retired, and the fact kept in its topic as proven
   (`Library.taught_fact`), with its phase, chapter and section, a `taught` event and its sources.
 - **TCH-9** `tinker teach` needs the Internet plugin, checked before any model call. Both commands report
-  through a tracker, and in the conversation they run as tasks.
+  through a tracker, and in the conversation they run as jobs.
 
 ## exercising (EXR)
 
