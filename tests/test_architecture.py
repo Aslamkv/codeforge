@@ -11,7 +11,7 @@ import pytest
 ROOT = Path(__file__).resolve().parent.parent
 LAYERS = ("messages", "settings", "jobs", "ledger", "commands", "prompts", "workspace", "model", "project", "fetcher", "web", "passages", "conversation",
           "channels", "knowledge", "slots", "docsite", "learning", "graph", "reading", "teaching", "exercising", "session", "planning", "building",
-          "finishing")
+          "finishing", "cli")
 
 
 def imports_of(module):
@@ -96,7 +96,7 @@ def test_every_phase_works_through_the_session():
     from tinkerkit.building import Verifier
     from tinkerkit.planning import SpecWriter
     assert issubclass(SpecWriter, session.Phase) and issubclass(Verifier, session.Worker)
-    for module in ("planning", "building", "finishing"):
+    for module in ("planning", "building", "finishing", "cli"):
         top, inner = imports_of(module)
         assert "session" in top, f"{module} takes its phases from the session"
     tinker_py = (ROOT / "tinker.py").read_text(encoding="utf-8")

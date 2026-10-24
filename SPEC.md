@@ -49,9 +49,9 @@ The tests in `tests/` enforce it.
 
 ## Architecture
 
-`tinker.py` is the main system: the command line (`Cli`, `Commands`, `Doctor`), one run (`ProjectRun`,
-`ProjectFolder`) and the cycle of phases (`CycleRunner`). It uses the `tinkerkit` modules. Each has one
-responsibility, and each imports only the modules listed above it:
+`tinker.py` only checks that Python is new enough, in syntax an older Python can still read, then starts
+`tinkerkit/cli.py`. The `tinkerkit` modules each have one responsibility, and each imports only the modules
+listed above it:
 
 | Module | Responsibility |
 |---|---|
@@ -81,6 +81,7 @@ responsibility, and each imports only the modules listed above it:
 | `planning` | recall, the spec, the contracts where files meet, and their review |
 | `building` | setup, the tests, the code, and fixing until every test passes |
 | `finishing` | tidy, the README, the final review and the lessons |
+| `cli` | the main system: the command line (`Cli`, `Commands`, `Doctor`), one run (`ProjectRun`, `ProjectFolder`) and the cycle of phases (`CycleRunner`) |
 
 - **ARCH-1** Each `tinkerkit` module imports only the modules listed above it in the table. The one
   exception is `conversation`, which imports the `channels` plugin lazily, inside a function.
@@ -1256,7 +1257,7 @@ person always comes first.
   the link Telegram gives a bot holds its token, so it is never passed on. A file over `BOT_DOWNLOAD_BYTES`, or one
   that cannot be downloaded, is said to the person, and nothing is read. A file from any other chat is ignored.
 
-## command line (tinker.py)
+## command line (cli)
 
 - **CLI-1** `Cli.parse`. Every command is a word (`tinker task …`), and the old `--task` form is an
   error. An unknown command is an error. `confirm` is `resume`. A project is named only as `@ID` or
