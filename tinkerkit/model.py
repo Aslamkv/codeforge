@@ -9,6 +9,7 @@ lazy import time
 lazy import urllib.error
 lazy import urllib.parse
 lazy import urllib.request
+from collections import namedtuple
 
 lazy from .jobs import journaled
 from .messages import human_duration, say
@@ -47,6 +48,12 @@ from .settings import (
     now_text,
 )
 lazy from .workspace import ToolError
+
+
+SelectedModel = namedtuple("SelectedModel", "name settings")
+Capacity = namedtuple("Capacity", "largest_that_reads smallest_that_failed")
+ContextSplit = namedtuple("ContextSplit", "prompt_budget longest_reply")
+LoadedModel = namedtuple("LoadedModel", "name size_bytes")
 
 
 class Model:
@@ -467,7 +474,7 @@ class Models:
         if broken:
             raise SystemExit(f"What was measured for {name} has no usable {', '.join(broken)}: measure the model "
                              f"again with tinker calibrate {name}")
-        return name, settings
+        return SelectedModel(name, settings)
 
     @staticmethod
     def unusable_measurements(settings):
@@ -650,7 +657,7 @@ class Calibrator:
         when it fails, halving the gap until it is within CAPACITY_SEARCH_PRECISION."""
         gguf = (facts.get("format") or "").lower() == "gguf"
         if self.reads(target, gguf):
-            return target, None
+            return Capacity(target, None)
         good, bad = 0, target
         while bad - good > CAPACITY_SEARCH_PRECISION * bad and bad > MIN_PROMPT_TOKENS + MIN_REPLY_TOKENS:
             middle = (good + bad) // 2
@@ -658,7 +665,7 @@ class Calibrator:
         if good < MIN_PROMPT_TOKENS + MIN_REPLY_TOKENS:
             raise SystemExit(f"{self.name} cannot hold even {MIN_PROMPT_TOKENS + MIN_REPLY_TOKENS} tokens of "
                              f"context on this machine: choose a smaller model or quantization.")
-        return good, bad
+        return Capacity(good, bad)
 
     def reads(self, context, gguf):
         """Whether the model, freshly loaded with this context, reads it: all of it (memory then
@@ -726,7 +733,7 @@ class Calibrator:
         """(prompt budget, longest reply) of a context: the prompt up to PROMPT_TARGET_TOKENS and no more
         than a third of it, the reply the rest, up to REPLY_TARGET_TOKENS."""
         budget = min(PROMPT_TARGET_TOKENS, max(MIN_PROMPT_TOKENS, context // 3))
-        return budget, max(MIN_REPLY_TOKENS, min(REPLY_TARGET_TOKENS, context - budget))
+        return ContextSplit(budget, max(MIN_REPLY_TOKENS, min(REPLY_TARGET_TOKENS, context - budget)))
 
     def settings(self, facts, think, budget, context, crash, max_reply):
         return {"model": self.name, "calibrated": now_text(),
@@ -858,7 +865,7 @@ class Ollama:
         data = Ollama.get_json("/api/ps")
         if data is None:
             return None
-        return [(model.get("name") or model.get("model") or "", model.get("size", 0))
+        return [LoadedModel(model.get("name") or model.get("model") or "", model.get("size", 0))
                 for model in data.get("models", [])]
 
     @staticmethod

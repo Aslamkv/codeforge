@@ -3,6 +3,7 @@ test), one final review as a person runs it, and the lessons for the next projec
 
 import re
 lazy import time
+from collections import namedtuple
 lazy from pathlib import Path
 
 lazy from .building import ToolchainRepair, Verifier
@@ -12,6 +13,14 @@ from .session import Phase
 lazy from .prompts import Part, PromptTooLarge, Prompts
 from .settings import ENV_EXAMPLE, ENV_FILE, FILES_SHOWN_PER_FIX, first_line
 lazy from .workspace import FileView, Output, TaughtCommands, TestRef, Toolchain
+
+
+Tidied = namedtuple("Tidied", "change reply")
+FailingExample = namedtuple("FailingExample", "command expected output")
+Example = namedtuple("Example", "command lines")
+Comparison = namedtuple("Comparison", "missing values")
+Problem = namedtuple("Problem", "what output")
+Lessons = namedtuple("Lessons", "new confirmed")
 
 
 class Tidy(Phase):
@@ -105,7 +114,7 @@ class Tidy(Phase):
                                           {path: (1, lines)})
             if change:
                 break
-        return change, reply
+        return Tidied(change, reply)
 
     def keep_if_better(self, path, change, reply, output, passing):
         """The change kept when the linter finds less in the file and no test broke; else reverted."""
@@ -287,7 +296,7 @@ class ReadmeWriter(Phase):
         for block in re.findall(r"```console\n(.*?)```", usage, re.S):
             for line in block.splitlines():
                 if line.startswith("$ "):
-                    found.append((line[2:].strip(), []))
+                    found.append(Example(line[2:].strip(), []))
                 elif found and line.strip():
                     found[-1][1].append(line.strip())
         return found
@@ -311,7 +320,7 @@ class ReadmeWriter(Phase):
             missing, shown = self.compare(expected, output)
             values.update(shown)
             if code is None or missing:
-                failures.append((command, expected, output if code is not None else
+                failures.append(FailingExample(command, expected, output if code is not None else
                                  f"{output}\n(it did not finish within {Toolchain.test_timeout()}s)"))
         return failures
 
@@ -337,7 +346,7 @@ class ReadmeWriter(Phase):
                 values.update(zip(cls.VARYING_VALUE_RE.findall(compact), found.groups()))
             else:
                 missing.append(line)
-        return missing, values
+        return Comparison(missing, values)
 
     @classmethod
     def line_pattern(cls, compact):
@@ -422,7 +431,7 @@ class FinalReview(Phase):
         """(what is wrong, its output), or ("", "") when the project passes the review."""
         ok, output = self.session.setup(force=True)
         if not ok:
-            return f"setup fails from the project's own files: {Output.key_line(output)}", output
+            return Problem(f"setup fails from the project's own files: {Output.key_line(output)}", output)
         self.session.wait_for_network()
         return self.suite_problem()
 
@@ -431,20 +440,20 @@ class FinalReview(Phase):
         self.session.last_all_tests_run = None
         code, output = self.session.run_all_tests()
         if code != 0:
-            return (f"`{self.session.toolchain.test_all}` fails when the whole suite runs: "
-                    f"{Output.key_line(output)}"), output
+            return Problem(f"`{self.session.toolchain.test_all}` fails when the whole suite runs: "
+                    f"{Output.key_line(output)}", output)
         again, output_again = self.session.toolchain.run_all(self.workspace)
         if again != 0:
-            return (f"`{self.session.toolchain.test_all}` passed once and failed the next time: "
+            return Problem(f"`{self.session.toolchain.test_all}` passed once and failed the next time: "
                     f"a test depends on chance (random output) or on order: "
-                    f"{Output.key_line(output_again)}"), output_again
+                    f"{Output.key_line(output_again)}", output_again)
         if Toolchain.ran_no_test(output):
-            return f"`{self.session.toolchain.test_all}` runs no test", output
+            return Problem(f"`{self.session.toolchain.test_all}` runs no test", output)
         untested = [criterion["id"] for criterion in self.project.criteria
                     if (not TestRef(criterion["test"]).present(self.workspace) or criterion["status"] != "green")]
         if untested:
-            return f"spec points without a passing test: {', '.join(untested)}", output
-        return "", ""
+            return Problem(f"spec points without a passing test: {', '.join(untested)}", output)
+        return Problem("", "")
 
 
 class LessonWriter(Phase):
@@ -507,7 +516,7 @@ class LessonWriter(Phase):
         data = reply.json()
         lessons = [item for item in data.get("lessons", []) if isinstance(item, dict)]
         confirmed = [number for number in data.get("confirmed", []) if isinstance(number, int)]
-        return lessons[:3], confirmed
+        return Lessons(lessons[:3], confirmed)
 
 
 def spelled(command):

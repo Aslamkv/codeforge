@@ -23,6 +23,7 @@ lazy import threading
 lazy import time
 lazy import urllib.parse
 lazy from collections import Counter
+from collections import namedtuple
 
 lazy from .docsite import DocSite
 lazy from .jobs import today
@@ -56,6 +57,11 @@ LEARN_STOP_PLACES = frozendict({
     "gate 2": "while reading pages",
 })
 RECAP_LINE_ICONS = ("✅", "❓", "📖", "📄", "🧩", "🌐")
+
+
+Tools = namedtuple("Tools", "tools dropped")
+PlanAndPages = namedtuple("PlanAndPages", "plan pages")
+UsablePages = namedtuple("UsablePages", "pages results")
 
 
 class LearnStopped(SystemExit):
@@ -140,9 +146,9 @@ class SlotLearner:
         its gates, then the model's plan."""
         saved = self.saved_plan()
         if saved:
-            return saved, []
+            return PlanAndPages(saved, [])
         pages, results = self.usable_pages(self.first_search())
-        return self.asked_plan(results), pages
+        return PlanAndPages(self.asked_plan(results), pages)
 
     def saved_plan(self):
         saved = (self.known or {}).get("plan")
@@ -228,7 +234,7 @@ class SlotLearner:
             self.tried.append(f"fetched {len(picked)} page(s), {len(usable)} with usable text")
             say.info(f"Read {len(usable)} of {len(picked)} page(s) found", "📄")
         self.outcome(f"{len(usable)} of {len(picked)} page(s) read")
-        return [page for page, _ in usable], [result for _, result in usable]
+        return UsablePages([page for page, _ in usable], [result for _, result in usable])
 
     def outcome(self, text):
         self.learner.outcome(text)
@@ -533,7 +539,7 @@ def read_tools(given):
                 kept, unsafe = Learner.safe_commands([tool.get("command") or ""])
                 dropped += unsafe
                 tools[role] = {"role": role, "name": name, "command": (kept or [""])[0], "docs": read_docs(tool.get("docs"))}
-    return list(tools.values()), dropped
+    return Tools(list(tools.values()), dropped)
 
 
 def read_docs(given):

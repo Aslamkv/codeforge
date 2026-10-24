@@ -4,6 +4,7 @@ lazy import itertools
 lazy import json
 import re
 lazy import time
+from collections import namedtuple
 lazy from pathlib import Path
 
 from .messages import human_duration, say
@@ -15,7 +16,11 @@ lazy from .settings import (
     MAX_CALLS_PER_CRITERION_PASS, MAX_FILE_LINES, STALLED_REVIEW_TRIES, TESTS_LOCKED_REASON, TESTS_PER_CALL,
     TEST_FILE_MAX_TOKENS, NotAPytestClass, first_line,
 )
-lazy from .workspace import FileView, Output, TestRef, ToolError, Toolchain
+lazy from .workspace import FileView, Output, TestOutcome, TestRef, ToolError, Toolchain
+
+
+WrittenTest = namedtuple("WrittenTest", "step state output")
+SetupOutcome = namedtuple("SetupOutcome", "stage output")
 
 
 class TestToolSetup(Phase, NotAPytestClass):
@@ -573,17 +578,17 @@ class Verifier(Phase):
         if state == "fails" and self.flaky(step):
             say.warn("Its test passes and fails on reruns: the code is not deterministic")
             output += f"\n\n{self.FLAKY_NOTE}"
-        return state, output
+        return TestOutcome(state, output)
 
     def evaluate(self, step, checked=False):
         """(state, output): missing / build (the check fails) / fails / passes."""
         ref = TestRef(step["test"])
         if not ref.present(self.workspace):
-            return "missing", f"the test {ref} does not exist"
+            return TestOutcome("missing", f"the test {ref} does not exist")
         if not checked:
             ok, output = self.session.toolchain.run_check(self.workspace)
             if not ok:
-                return "build", output
+                return TestOutcome("build", output)
         return self.session.toolchain.run_test(self.workspace, ref)
 
     def write_missing_test(self, step):
@@ -732,7 +737,7 @@ class FixAttempt(Worker):
         try:
             reply = self.ask(view)
         except PromptTooLarge as exc:
-            return "fails", self.output + f"\n(prompt too large: {exc})"
+            return TestOutcome("fails", self.output + f"\n(prompt too large: {exc})")
         if self.approach == "fix" and reply.test_wrong():
             return self.test_blamed(reply.test_wrong())
         change = self.workspace.apply(reply, self.may_change(view), view.windows)
@@ -834,7 +839,7 @@ class FixAttempt(Worker):
         self.only_wanted_test_change = True
         self.record(f"the test is wrong: {why}")
         say.warn(f"{self.label}: the test is wrong ({first_line(why, 120)})")
-        return "fails", self.output
+        return TestOutcome("fails", self.output)
 
     def no_change(self, cause, change):
         note = "no usable change" + (f" ({'; '.join(change.notes)})" if change.notes else "")
@@ -844,7 +849,7 @@ class FixAttempt(Worker):
         self.only_wanted_test_change = self.approach == "fix" and refused_near_tests
         self.record(f"{cause} -> {note}")
         say.skip(f"{self.label}: {note}")
-        return "fails", self.output
+        return TestOutcome("fails", self.output)
 
     def tested(self, change, reply, cause):
         """(state, output) with the change; passing or not, a change that breaks a passing test goes."""
@@ -853,13 +858,13 @@ class FixAttempt(Worker):
         self.session.setup()
         state, output = self.v.evaluate(self.step)
         if self.broke_others(change, cause):
-            return "fails", self.output + self.broken_note()
+            return TestOutcome("fails", self.output + self.broken_note())
         self.record(f"{cause} -> {state}")
         if state == "passes":
             self.passed(reply, cause)
         say.info(f"{self.label}: changed {', '.join(change.files)} -> {state}"
                  + (f"  ({cause})" if cause != "?" else ""), "🔧")
-        return state, output
+        return TestOutcome(state, output)
 
     def passed(self, reply, cause):
         """A review's corrected criterion taken; what solved it noted for the lessons."""
@@ -1015,11 +1020,11 @@ class BugReproducer(Phase):
         reply = self.session.ask(Prompts.REPRODUCE_SYSTEM, self.prompt(cycle, note), f"Reproduce bug {cycle['id']}")
         named = re.search(r"^\s*TEST:\s*(.+?)\s*$", reply.text, re.M)
         if not named:
-            return None, "missing", 'the reply has no line "TEST: <test file>::<test name>"'
+            return WrittenTest(None, "missing", 'the reply has no line "TEST: <test file>::<test name>"')
         ref = TestRef(named.group(1).strip("`'\" "))
         problem = self.unusable(cycle, ref)
         if problem:
-            return None, "missing", problem
+            return WrittenTest(None, "missing", problem)
         step = self.step_for(cycle, ref)
         change = self.workspace.apply(reply,
                                       lambda path, exists: None if path == ref.file else "only the bug's test file")
@@ -1028,7 +1033,7 @@ class BugReproducer(Phase):
         expected = re.search(r"^\s*EXPECTED:\s*(.+)$", reply.text, re.M)
         if expected:
             step["behaviour"] = first_line(expected.group(1), 300)
-        return (step, *Verifier(self.session).evaluate(step))
+        return WrittenTest(step, *Verifier(self.session).evaluate(step))
 
     def prompt(self, cycle, note):
         code = self.session.files_on_disk("code", "template")
@@ -1141,14 +1146,14 @@ class TestTool(Worker, NotAPytestClass):
         finds none) and they can import the app's own code; the linter runs."""
         ok, output = self.session.setup(force=attempt > 0)
         if not ok:
-            return "setup", output
+            return SetupOutcome("setup", output)
         self.session.wait_for_network()
         self.session.last_all_tests_run = None if attempt else self.session.last_all_tests_run
         code, output = self.session.run_all_tests()
         present = [ref for ref in self.project.refs() if ref.present(self.workspace)]
         problem = self.test_tool_problem(code, output, present)
         if problem:
-            return "tests", problem
+            return SetupOutcome("tests", problem)
         if not present:
             say.done(f"The test tool runs (no tests yet): $ {self.session.toolchain.test_all}")
         return self.linter_runs()
@@ -1226,12 +1231,12 @@ class TestTool(Worker, NotAPytestClass):
         a linter that is not installed or not found is a tooling problem, like a missing test tool;
         one that reaches the app's code and finds it does not compile runs (the build fixes that)."""
         if not self.session.toolchain.lint:
-            return "ok", ""
+            return SetupOutcome("ok", "")
         code, output = self.workspace.run(self.session.toolchain.shell(self.session.toolchain.lint), quiet=True)
         if self.linter_missing(code, output):
             say.fail(f"$ {self.session.toolchain.lint}  [the linter does not run: a tooling problem]")
-            return "lint", f"$ {self.session.toolchain.lint}\nthe linter does not run (exit code {code}):\n{output}"
-        return "ok", ""
+            return SetupOutcome("lint", f"$ {self.session.toolchain.lint}\nthe linter does not run (exit code {code}):\n{output}")
+        return SetupOutcome("ok", "")
 
     def linter_missing(self, code, output):
         """Whether the linter itself did not run: the shell found no such command (126, 127), or it failed

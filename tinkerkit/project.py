@@ -7,6 +7,7 @@ import re
 lazy import secrets
 lazy import shutil
 lazy import time
+from collections import namedtuple
 lazy from pathlib import Path
 
 lazy from .jobs import Jobs
@@ -16,6 +17,9 @@ lazy from .settings import (
     EXERCISE_ENV, FIX_PHASES, Home, PHASES, PROJECT_DB, RUNS_KEPT, STATE_DIR, STATUS_TEXT, Store, confirmed, first_line, now_text, split_text,
 )
 lazy from .workspace import TaughtCommands, TestRef, Toolchain
+
+
+SpecSource = namedtuple("SpecSource", "text name")
 
 
 class RunChecks:
@@ -140,8 +144,8 @@ class Runs:
     def spec_of_new_run(args):
         """(its text, its file's name): a restart's is the spec the run had, read before the folder was emptied."""
         if getattr(args, "restart", False):
-            return args.spec_text, args.spec_name
-        return Runs.read_spec_file(args.spec) if args.spec else ("", None)
+            return SpecSource(args.spec_text, args.spec_name)
+        return Runs.read_spec_file(args.spec) if args.spec else SpecSource("", None)
 
     @staticmethod
     def open_existing(args):
@@ -218,7 +222,7 @@ class Runs:
         spec_path = Path(path).expanduser()
         if not spec_path.is_file():
             raise SystemExit(f"Spec file not found: {path}")
-        return spec_path.read_text(), spec_path.name
+        return SpecSource(spec_path.read_text(), spec_path.name)
 
     @staticmethod
     def entries():

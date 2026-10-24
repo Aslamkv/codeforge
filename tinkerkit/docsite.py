@@ -8,9 +8,16 @@ and version (DocCache), so learning it again fetches nothing."""
 lazy import datetime
 lazy import re
 lazy import urllib.parse
+from collections import namedtuple
 
 lazy from .passages import Cleaner, Links, Page
 lazy from .settings import MAX_MAP_LINKS, SITE_MAP_FILES, Config, Home, now_text, words
+
+
+DocPages = namedtuple("DocPages", "pages version_key from_cache")
+Root = namedtuple("Root", "page version_key")
+Candidate = namedtuple("Candidate", "version_key address")
+MapLink = namedtuple("MapLink", "address title")
 
 
 class DocSite:
@@ -27,22 +34,22 @@ class DocSite:
         for key in version_keys(version):
             kept = DocCache.get(slug, key)
             if kept is not None:
-                return kept, key, True
+                return DocPages(kept, key, True)
         root, key = self.resolve(docs, version)
         if root is None:
-            return [], "", False
+            return DocPages([], "", False)
         pages = self.read(root, key, wanted, cap, version)
         if pages:
             DocCache.put(slug, key, root.final_url, pages)
-        return pages, key, False
+        return DocPages(pages, key, False)
 
     def resolve(self, docs, version):
         """(the root page of the first of the version's addresses that answers, its version key), or (None, "")."""
         for key, url in candidates(docs, version):
             root = self.fetcher.fetch_all([url], kind="probe")[0]
             if root.ok:
-                return root, key
-        return None, ""
+                return Root(root, key)
+        return Root(None, "")
 
     def read(self, root, key, wanted, cap, version=""):
         """The site's pages the slots want, at most cap, the root first, each one cleaned: picked from the site's
@@ -125,22 +132,23 @@ def matched(key, version):
 def candidates(docs, version):
     """(version key, address) to try, the most exact first; the root last, as "latest"."""
     versioned = docs.get("versioned") or ""
-    exact = [(key, versioned.replace("{version}", key)) for key in version_keys(version)[:-1] if "{version}" in versioned]
-    return exact + ([("latest", docs["root"])] if docs.get("root") else [])
+    exact = [Candidate(key, versioned.replace("{version}", key)) for key in version_keys(version)[:-1]
+             if "{version}" in versioned]
+    return exact + ([Candidate("latest", docs["root"])] if docs.get("root") else [])
 
 
 def map_links(name, text):
     """(address, title) listed in a site map: llms.txt's Markdown links, or sitemap.xml's <loc> addresses."""
     if name.endswith(".txt"):
-        return [(url, title) for title, url in re.findall(r"\[([^\]]*)\]\((https?://[^)\s]+)\)", text)]
-    return [(url, "") for url in re.findall(r"<loc>\s*([^<\s]+)\s*</loc>", text)]
+        return [MapLink(url, title) for title, url in re.findall(r"\[([^\]]*)\]\((https?://[^)\s]+)\)", text)]
+    return [MapLink(url, "") for url in re.findall(r"<loc>\s*([^<\s]+)\s*</loc>", text)]
 
 
 def under(links, base):
     """The links on the base's site and under its path, each once (all of the site's when none is under it)."""
     site = urllib.parse.urlsplit(base).netloc
-    same_site = [(url, title) for url, title in dict(links).items() if urllib.parse.urlsplit(url).netloc == site]
-    below = [(url, title) for url, title in same_site if url.startswith(base)]
+    same_site = [MapLink(url, title) for url, title in dict(links).items() if urllib.parse.urlsplit(url).netloc == site]
+    below = [link for link in same_site if link.address.startswith(base)]
     return below or same_site
 
 

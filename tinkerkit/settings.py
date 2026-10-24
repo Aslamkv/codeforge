@@ -12,6 +12,7 @@ lazy import sqlite3
 lazy import subprocess
 lazy import sys
 lazy import time
+from collections import namedtuple
 from pathlib import Path
 
 lazy from .messages import say
@@ -194,6 +195,10 @@ SAME_CLAIM_SIMILARITY = 0.8
 REPEAT_CLAIM_SIMILARITY = 0.9
 MAX_RECALL_TOPICS = 6
 TOPIC_RELEVANT_SIMILARITY = 0.6
+
+
+Paged = namedtuple("Paged", "items pages")
+LogEntry = namedtuple("LogEntry", "id entry")
 
 
 class Home:
@@ -556,7 +561,7 @@ class Store:
         with self.transaction() as db:
             rows = db.execute("SELECT id, time, entry FROM logs WHERE name = ? AND id > ? ORDER BY id",
                               (log, after)).fetchall()
-        return [(row_id, {"time": stamp, **json.loads(entry)}) for row_id, stamp, entry in rows]
+        return [LogEntry(row_id, {"time": stamp, **json.loads(entry)}) for row_id, stamp, entry in rows]
 
     def drop_log(self, log):
         with self.transaction(write=True) as db:

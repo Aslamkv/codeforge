@@ -10,6 +10,7 @@ lazy import time
 lazy import urllib.error
 lazy import urllib.parse
 lazy import urllib.request
+from collections import namedtuple
 
 lazy from .fetcher import Fetcher
 lazy from .jobs import journaled
@@ -17,6 +18,13 @@ from .messages import say
 from .settings import Config, first_line, is_number, number_from
 
 MAIN_CLOSED = -1
+
+Unreached = namedtuple("Unreached", "why timed_out")
+ReadyBackends = namedtuple("ReadyBackends", "ready reasons")
+BackendAnswer = namedtuple("BackendAnswer", "result why")
+Got = namedtuple("Got", "text content_type")
+Limit = namedtuple("Limit", "whole least")
+
 
 class Internet:
     """The Internet plugin: web search and web fetch through the backend the setting "web" names
@@ -29,12 +37,12 @@ class Internet:
     a row is not asked again by the same command, and once none is left the run carries on without."""
     RETRY_PAUSE_SECONDS = 3
     FAILURES_BEFORE_GONE = 2
-    LEARN_LIMITS = {     # the settings of learning from the web: (a whole number?, the least it may be)
-        "learn_rate": (False, 1), "learn_backoff": (False, 0), "learn_cutoff": (False, 0), "learn_pages": (True, 1),
-        "learn_min_pages": (True, 1), "learn_searches": (True, 1), "fetch_workers": (True, 1),
-        "fetch_timeout": (False, 1), "fetch_max_bytes": (True, 1000), "fetch_domain_delay": (False, 0),
-        "fetch_fallbacks": (True, 0), "docs_pages": (True, 1), "tool_docs_pages": (True, 0),
-        "docs_latest_days": (False, 0)}
+    LEARN_LIMITS = {
+        "learn_rate": Limit(False, 1), "learn_backoff": Limit(False, 0), "learn_cutoff": Limit(False, 0),
+        "learn_pages": Limit(True, 1), "learn_min_pages": Limit(True, 1), "learn_searches": Limit(True, 1),
+        "fetch_workers": Limit(True, 1), "fetch_timeout": Limit(False, 1), "fetch_max_bytes": Limit(True, 1000),
+        "fetch_domain_delay": Limit(False, 0), "fetch_fallbacks": Limit(True, 0), "docs_pages": Limit(True, 1),
+        "tool_docs_pages": Limit(True, 0), "docs_latest_days": Limit(False, 0)}
 
     def __init__(self):
         self.errors, self.failures, self.last_failure_status = {}, {}, {}
@@ -54,7 +62,7 @@ class Internet:
             else:
                 backend.name = name
                 ready.append(backend)
-        return ready, reasons
+        return ReadyBackends(ready, reasons)
 
     @staticmethod
     def required(option):
@@ -210,13 +218,13 @@ class Internet:
                     continue
                 if exc.network:
                     self.lost(backend, str(exc))
-                return None, str(exc)
+                return BackendAnswer(None, str(exc))
             except Exception as exc:
-                return None, f"failed: {type(exc).__name__}: {exc}"
+                return BackendAnswer(None, f"failed: {type(exc).__name__}: {exc}")
             self.failures[backend.name] = 0
             verdict = usable(result)
-            return (result, "") if verdict is True else (None, verdict)
-        return None, "no answer"
+            return BackendAnswer(result, "") if verdict is True else BackendAnswer(None, verdict)
+        return BackendAnswer(None, "no answer")
 
     def lost(self, backend, why):
         """A network failure: after FAILURES_BEFORE_GONE in a row, that backend is not asked again; once no
@@ -382,7 +390,7 @@ class DuckDuckGoWeb(WebBackend):
             with urllib.request.urlopen(request, timeout=timeout) as response:
                 kind = (response.headers.get_content_type() or "").lower()
                 charset = response.headers.get_content_charset() or "utf-8"
-                return response.read(cls.MAX_BYTES).decode(charset, errors="replace"), kind
+                return Got(response.read(cls.MAX_BYTES).decode(charset, errors="replace"), kind)
         except urllib.error.HTTPError as exc:
             raise WebError(f"{urllib.parse.urlsplit(url).netloc} answered HTTP {exc.code}",
                            retry=exc.code == 429 or exc.code >= 500, code=exc.code)
@@ -536,7 +544,7 @@ class WebError(Exception):
 def unreached(exc):
     """(why a request had no answer at all, whether it ran out of time)."""
     reason = first_line(str(getattr(exc, "reason", "") or exc) or type(exc).__name__, 160)
-    return reason, isinstance(exc, (TimeoutError, socket.timeout)) or "timed out" in reason
+    return Unreached(reason, isinstance(exc, (TimeoutError, socket.timeout)) or "timed out" in reason)
 
 
 def is_web_address(url):

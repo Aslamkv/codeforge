@@ -2,6 +2,11 @@
 conversation (the terminal session and the chats) its commands. A project is named in a command only as
 @ID (its full run ID) or @folder (its folder's name), never guessed from the command's other words."""
 
+from collections import namedtuple
+
+
+Refs = namedtuple("Refs", "project words")
+
 
 class Option:
     """An option a command takes: its flag, where it goes, the value it takes (none: a switch), what it does."""
@@ -260,4 +265,4 @@ def refs(words):
     """(the project the first word names, or "", the other words)."""
     words = [word for word in words if str(word).strip()]
     name = ref(words[0]) if words else None
-    return (name, words[1:]) if name else ("", words)
+    return Refs(name, words[1:]) if name else Refs("", words)

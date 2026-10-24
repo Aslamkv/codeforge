@@ -15,9 +15,10 @@ lazy import secrets
 lazy import sys
 lazy import time
 lazy import urllib.parse
+from collections import namedtuple
 lazy from pathlib import Path
 
-from .conversation import Channel, ChannelError, Desk, Markup, Message, first_words, started_by_a_conversation
+from .conversation import Channel, ChannelError, Desk, Markup, Message, Secret, first_words, started_by_a_conversation
 lazy from .ledger import ANSWER_WINDOW_SECONDS, Ledger
 lazy from .messages import say
 lazy from .settings import Home
@@ -32,6 +33,10 @@ TELEGRAM_MAX_PLACEHOLDER_CHARS = 64
 TELEGRAM_MAX_DOWNLOAD_BYTES = 20_000_000
 SENT_FILE_DOWNLOAD_TIMEOUT = 120
 FORM = "application/x-www-form-urlencoded"
+
+
+Upload = namedtuple("Upload", "body content_type")
+Answer = namedtuple("Answer", "status body")
 
 
 class ChannelCommand:
@@ -227,7 +232,7 @@ class Channels:
 class TelegramChannel(Channel):
     """A Telegram bot (made with @BotFather): its token is the one secret."""
     KIND = "telegram"
-    SECRETS = (("token", "Bot token (from @BotFather)"),)
+    SECRETS = (Secret("token", "Bot token (from @BotFather)"),)
     HOST = "api.telegram.org"
 
     def __init__(self, name, settings, secrets):
@@ -480,7 +485,7 @@ class TelegramChannel(Channel):
                  for name, value in fields.items()]
         parts.append(f'--{boundary}\r\nContent-Disposition: form-data; name="document"; filename="{file.name}"\r\n'
                      f'Content-Type: application/octet-stream\r\n\r\n'.encode() + file.read_bytes() + b"\r\n")
-        return b"".join(parts) + f"--{boundary}--\r\n".encode(), f"multipart/form-data; boundary={boundary}"
+        return Upload(b"".join(parts) + f"--{boundary}--\r\n".encode(), f"multipart/form-data; boundary={boundary}")
 
     def answer(self, method, path, data, wait, kind=FORM):
         """(status, body) of the call, on a connection opened again once when it dropped."""
@@ -507,7 +512,7 @@ class TelegramChannel(Channel):
         try:
             connection.request("POST", path, data, {"Content-Type": kind})
             response = connection.getresponse()
-            answer = response.status, response.read().decode(errors="replace")
+            answer = Answer(response.status, response.read().decode(errors="replace"))
         except http.client.HTTPException, OSError:
             connection.close()
             raise

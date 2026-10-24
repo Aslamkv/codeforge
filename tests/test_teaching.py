@@ -223,7 +223,7 @@ def test_a_verdict_needs_every_fact_and_every_change_a_fact_is_for():
         {"claims": claims, "changes": list(changes)}, plan, evidence=2)
     holds = {"claim": 1, "verdict": "holds", "evidence": [1, 7]}
     verdict = read([holds])
-    assert verdict.claims[1]["evidence"] == [1] and verdict.claims[2]["verdict"] == "preference"
+    assert verdict.claims_by_number[1]["evidence"] == [1] and verdict.claims_by_number[2]["verdict"] == "preference"
     assert verdict.why_not(1, plan["changes"][0]) == verdict.why_not(2, plan["changes"][1]) == ""
     cites_nothing_given = dict(holds, evidence=[9])
     assert read([cites_nothing_given]).why_not(1, plan["changes"][0]) == "claim 1 is unsure"

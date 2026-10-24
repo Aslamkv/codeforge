@@ -23,7 +23,7 @@ lazy import time
 lazy from pathlib import Path
 
 lazy from .messages import say
-lazy from .settings import EXERCISE_ENV, Home, confirmed, fingerprint, now_text
+lazy from .settings import EXERCISE_ENV, Home, Paged, confirmed, fingerprint, now_text
 
 COMMANDS = ("task", "restart", "resume", "confirm", "amend", "add", "fix", "learn", "ask", "teach", "read",
             "research", "exercise")
@@ -203,7 +203,7 @@ class Jobs:
     def page(jobs, number):
         """(the jobs on page number, from 1, and how many pages there are)."""
         pages = max(1, -(-len(jobs) // JOBS_PER_PAGE))
-        return jobs[(number - 1) * JOBS_PER_PAGE:number * JOBS_PER_PAGE], pages
+        return Paged(jobs[(number - 1) * JOBS_PER_PAGE:number * JOBS_PER_PAGE], pages)
 
     @staticmethod
     def resumable(number=None):

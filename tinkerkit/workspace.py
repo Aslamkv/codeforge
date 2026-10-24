@@ -9,6 +9,7 @@ lazy import signal
 lazy import socket
 lazy import subprocess
 lazy import time
+from collections import namedtuple
 lazy from pathlib import Path
 
 lazy from .messages import human_duration, say
@@ -17,6 +18,12 @@ from .settings import (
     COMMAND_TIMEOUT, ENV_EXAMPLE, ENV_FILE, FAILURE_OUTPUT_CHARS, ONLINE_PROBES, SETUP_TIMEOUT, STATE_DIR,
     Config, Home, NotAPytestClass, first_line, now_text,
 )
+
+
+TestOutcome = namedtuple("TestOutcome", "state output")
+CommandOutcome = namedtuple("CommandOutcome", "ok output")
+Finished = namedtuple("Finished", "code output ending")
+Span = namedtuple("Span", "start end")
 
 
 class Toolchain:
@@ -152,16 +159,16 @@ class Toolchain:
     def run_check(self, workspace):
         """(ok, output): the fast compile or lint, when the toolchain has one."""
         if not self.check:
-            return True, ""
+            return CommandOutcome(True, "")
         code, output = workspace.run(self.shell(self.check), quiet=True)
-        return code == 0, f"$ {self.check}\n{output}"
+        return CommandOutcome(code == 0, f"$ {self.check}\n{output}")
 
     def run_lint(self, workspace):
         """(ok, output) of the linter over the project, when the toolchain has one."""
         if not self.lint:
-            return True, ""
+            return CommandOutcome(True, "")
         code, output = workspace.run(self.shell(self.lint), timeout=SETUP_TIMEOUT, quiet=True)
-        return code == 0, output
+        return CommandOutcome(code == 0, output)
 
     def run_all(self, workspace):
         code, output = workspace.run(self.shell(self.test_all), timeout=self.suite_timeout(), quiet=True)
@@ -174,12 +181,12 @@ class Toolchain:
         command = ref.command(self.test_one)
         code, output = workspace.run(self.shell(command), timeout=self.test_timeout(), quiet=True)
         if timed_out(code, output):
-            return "fails", self.hang_report(command, output)
+            return TestOutcome("fails", self.hang_report(command, output))
         if code == 0 and not self.ran_no_test(output):
-            return "passes", output
+            return TestOutcome("passes", output)
         if code == 0:
-            return "fails", f"$ {command}\nthe command ran no test: is the test named {ref.name}?\n{output}"
-        return "fails", f"$ {command}\n{output}"
+            return TestOutcome("fails", f"$ {command}\nthe command ran no test: is the test named {ref.name}?\n{output}")
+        return TestOutcome("fails", f"$ {command}\n{output}")
 
     def hang_report(self, command, output):
         return (f"$ {command}\nthe test did not finish within {self.test_timeout()}s: it hangs (an "
@@ -267,11 +274,11 @@ class Workspace:
         """(exit code or None, output, how it ended) of a process given timeout seconds."""
         try:
             output, _ = proc.communicate(timeout=timeout)
-            return proc.returncode, output, f"exit code {proc.returncode}"
+            return Finished(proc.returncode, output, f"exit code {proc.returncode}")
         except subprocess.TimeoutExpired:
             self.kill(proc)
             output, _ = proc.communicate()
-            return None, output, f"timed out after {timeout}s"
+            return Finished(None, output, f"timed out after {timeout}s")
 
     @staticmethod
     def unsafe(command):
@@ -733,7 +740,7 @@ class TestRef(NotAPytestClass):
         later = sorted(position for position in (self.name_at(text, name) for name in names if name != self.name)
                        if position > start)
         end = self.definition_start(text, later[0]) if later else len(text)
-        return self.definition_start(text, start), end
+        return Span(self.definition_start(text, start), end)
 
     @staticmethod
     def name_at(text, name):

@@ -5,6 +5,7 @@ lazy import json
 lazy import math
 import operator
 import re
+from collections import namedtuple
 lazy from pathlib import Path
 
 lazy from .knowledge import Embeddings, Library, Retriever, mentions
@@ -18,6 +19,12 @@ lazy from .settings import (
     Config, after_what_they_use, first_line, groups_fitting, words,
 )
 lazy from .workspace import TestRef, Toolchain
+
+
+RecallChoice = namedtuple("RecallChoice", "use learn")
+CheckRound = namedtuple("CheckRound", "problems changed")
+WrittenContract = namedtuple("WrittenContract", "contract calls")
+ContractPrompt = namedtuple("ContractPrompt", "parts left")
 
 
 class Recaller(Phase):
@@ -76,7 +83,7 @@ class Recaller(Phase):
                                                  lambda reply: self.read_choice(reply, known), attempts=2)
         except (SystemExit, OllamaError) as exc:
             say.warn(f"{exc} Going on without what was learned.")
-            return [], []
+            return RecallChoice([], [])
 
     def recall_parts(self, cycle, query, known, ranked, can_learn):
         """The recall prompt: the request, the language, whether it may learn now, then the topics that fit."""
@@ -110,7 +117,7 @@ class Recaller(Phase):
         learn = [" ".join(str(topic).split())[:80] for topic in data.get("learn", []) if str(topic).strip()]
         learn = {Library.slug(topic): topic for topic in reversed(learn) if Library.slug(topic)
                  and Library.slug(topic) not in known}
-        return use, list(reversed(learn.values()))
+        return RecallChoice(use, list(reversed(learn.values())))
 
     @staticmethod
     def relevant(known, query):
@@ -808,7 +815,7 @@ class InterfaceReviewer(Phase):
             problems, corrections = self.check_file(cycle, path, callees, label)
             found += problems
             changed |= self.apply_corrections(cycle, corrections)
-        return found, changed | self.rewrite_unresolved(cycle, found, changed)
+        return CheckRound(found, changed | self.rewrite_unresolved(cycle, found, changed))
 
     def chunks(self, path):
         """The files it uses, in groups whose contracts fit one prompt next to its own entry."""
@@ -969,7 +976,7 @@ class ContractWriter(Worker):
                 return None
             info["uses"] = list(dict.fromkeys(info.get("uses", []) + [used for used in uses
                                                                       if used in self.project.files and used != path]))
-        return so_far, calls
+        return WrittenContract(so_far, calls)
 
     def prompt(self, cycle, path, info, criteria, so_far, problems):
         """(parts, the criteria left for the next call): the fixed parts whole, then as many
@@ -983,12 +990,12 @@ class ContractWriter(Worker):
         given = "\n".join(taken) or "none directly: it serves the files that use it"
         callers = [f"- {caller}: {caller_info.get('role', '')}" for caller, caller_info in self.project.files.items()
                    if path in caller_info.get("uses", [])]
-        return base + [Part("Criteria its tests check", given, True, exact=True),
+        return ContractPrompt(base + [Part("Criteria its tests check", given, True, exact=True),
                        Part("Files that use it", "\n".join(callers), atomic=True),
                        Part("External services: adapters and sample data", cycle.get("data", ""), atomic=True,
                             place="first"),
                        Part("Request", asked(cycle), atomic=True, place="first"),
-                       *self.session.knowledge_parts("design")], criteria[len(taken):]
+                       *self.session.knowledge_parts("design")], criteria[len(taken):])
 
     def base_parts(self, path, info, so_far, problems):
         uses = [used for used in info.get("uses", []) if self.project.kind_of(used) == "code"]

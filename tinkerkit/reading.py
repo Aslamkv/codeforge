@@ -14,6 +14,7 @@ import re
 lazy import urllib.parse
 lazy import xml.etree.ElementTree as ET
 lazy import zipfile
+from collections import namedtuple
 from dataclasses import dataclass
 lazy from pathlib import Path
 
@@ -45,6 +46,15 @@ PDF_REFUSED = ("This is a PDF. Tinker reads EPUB, Markdown and plain text: conve
                "`ebook-convert book.pdf book.epub` keeps its chapters), then tinker read book.epub.")
 WEB_PAGE = ("That gave a web page, not something to read. A share link (Google Drive, Dropbox, iCloud) needs its "
             "download link: Dropbox's ends in ?dl=1.")
+
+
+IndexTerm = namedtuple("IndexTerm", "term references")
+Located = namedtuple("Located", "path fragment")
+NcxEntry = namedtuple("NcxEntry", "depth title src")
+Added = namedtuple("Added", "number new")
+SpineText = namedtuple("SpineText", "text starts")
+ContentsEntry = namedtuple("ContentsEntry", "depth title where")
+ParsedText = namedtuple("ParsedText", "text ids")
 
 
 @dataclass
@@ -215,7 +225,7 @@ class Readings:
         key = fingerprint("\n\n".join(chapter.text for chapter in book.chapters))[:16]
         known = next((number for number, entry in Readings.all().items() if entry["fingerprint"] == key), None)
         if known is not None:
-            return known, False
+            return Added(known, False)
         number = Home.store().update("reading numbers", "last", lambda last: (last or 0) + 1)
         chapters = [dataclasses.asdict(dataclasses.replace(chapter, state="raw" if chapter.kind in ("index", "raw")
                                                            else "unread"))
@@ -223,7 +233,7 @@ class Readings:
         Readings.save({"number": number, "title": book.title, "author": book.author, "source": source,
                        "fingerprint": key, "added": now_text(), "topic": f"read-{number}", "survey": None,
                        "chapters": chapters})
-        return number, True
+        return Added(number, True)
 
     @staticmethod
     def get(number):
@@ -539,7 +549,7 @@ def index_terms(book, limit=READ_INDEX_TERMS):
     for chapter in book.of_kind("index"):
         for match in INDEX_LINE_RE.finditer(chapter.text):
             counts[match.group(1).strip()] += len(re.findall(r"\d+", match.group(2)))
-    return counts.most_common(limit)
+    return [IndexTerm(*counted) for counted in counts.most_common(limit)]
 
 
 def survey_parts(book):
@@ -639,7 +649,7 @@ class Epub:
             starts.update({(path, found): size + at for found, at in ids.items()})
             parts.append(text + "\n\n")
             size += len(text) + 2
-        return "".join(parts), starts
+        return SpineText("".join(parts), starts)
 
     def contents(self):
         """[(depth, title, (path, fragment))] of the table of contents: EPUB 3's navigation document, else the NCX."""
@@ -654,13 +664,13 @@ class Epub:
                 return []
             document = located(ncx.get("href"), self.opf_path)[0]
             entries = list(ncx_entries(self.xml(document).find(".//{*}navMap")))
-        return [(depth, title, located(href, document)) for depth, title, href in entries]
+        return [ContentsEntry(depth, title, located(href, document)) for depth, title, href in entries]
 
 
 def located(href, document):
     """(the path in the zip, the fragment) of an address relative to a document of the EPUB."""
     path, _, fragment = urllib.parse.unquote(href or "").partition("#")
-    return posixpath.normpath(posixpath.join(posixpath.dirname(document), path)) if path else document, fragment
+    return Located(posixpath.normpath(posixpath.join(posixpath.dirname(document), path)) if path else document, fragment)
 
 
 def contents_chapters(text, starts, contents):
@@ -682,7 +692,7 @@ def ncx_entries(parent, depth=1):
     for point in parent.findall("{*}navPoint"):
         label, content = point.find("{*}navLabel/{*}text"), point.find("{*}content")
         if label is not None and content is not None:
-            yield depth, " ".join((label.text or "").split()), content.get("src")
+            yield NcxEntry(depth, " ".join((label.text or "").split()), content.get("src"))
         yield from ncx_entries(point, depth + 1)
 
 
@@ -704,7 +714,7 @@ class XhtmlText(html.parser.HTMLParser):
         parser = cls()
         parser.feed(markup)
         parser.close()
-        return "".join(parser.parts), parser.ids
+        return ParsedText("".join(parser.parts), parser.ids)
 
     def handle_starttag(self, tag, attrs):
         if tag in self.HIDDEN:

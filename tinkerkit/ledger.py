@@ -8,14 +8,19 @@ Each thing shown (a task, a research, a chat's reply ...) is kept as it was show
 asked for it, numbered #1, #2 ...: history lists them and history #N shows one again. Nothing is lost when a chat
 is emptied (clear chat, or the chat app's own); clear history forgets it all."""
 lazy import time
+from collections import namedtuple
 
-lazy from .settings import Home
+lazy from .settings import Home, Paged
 
 MESSAGE_KEPT_SECONDS = 24 * 3600
 GLANCE_KEPT_SECONDS = 120
 DONE_NOTE_KEPT_SECONDS = 5
 ANSWER_WINDOW_SECONDS = 60
 HISTORY_PER_PAGE = 10
+
+ChatMessage = namedtuple("ChatMessage", "chat message")
+View = namedtuple("View", "chat message view")
+
 
 class Ledger:
     """The messages in the chats ("chat views": {until, thing, glance}, by channel, chat and id) and the things
@@ -62,7 +67,7 @@ class Ledger:
     @classmethod
     def due(cls, channel):
         """[(chat, id)] of the channel's messages whose time is up."""
-        return [(chat, message) for chat, message, view in cls.views(channel)
+        return [ChatMessage(chat, message) for chat, message, view in cls.views(channel)
                 if view.get("until") is not None and view["until"] <= time.time()]
 
     @classmethod
@@ -73,7 +78,7 @@ class Ledger:
     @classmethod
     def passing(cls, channel):
         """[(chat, id)] of the channel's messages but its status: what clear chat takes out."""
-        return [(chat, message) for chat, message, view in cls.views(channel) if view.get("until") is not None]
+        return [ChatMessage(chat, message) for chat, message, view in cls.views(channel) if view.get("until") is not None]
 
     @classmethod
     def views(cls, channel):
@@ -82,7 +87,7 @@ class Ledger:
         for each, view in Home.store().items(cls.VIEWS).items():
             name, chat, message = each.split("\t")
             if name == channel:
-                found.append((chat, int(message), view))
+                found.append(View(chat, int(message), view))
         return found
 
     @classmethod
@@ -116,7 +121,7 @@ class Ledger:
         """(the things on page number, from 1, newest first, and how many pages there are)."""
         things = sorted(Home.store().items(cls.THINGS).values(), key=lambda thing: thing["number"], reverse=True)
         pages = max(1, -(-len(things) // HISTORY_PER_PAGE))
-        return things[(number - 1) * HISTORY_PER_PAGE:number * HISTORY_PER_PAGE], pages
+        return Paged(things[(number - 1) * HISTORY_PER_PAGE:number * HISTORY_PER_PAGE], pages)
 
 def key(channel, chat, message):
     return f"{channel}\t{chat}\t{message}"

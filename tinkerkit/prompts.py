@@ -2,6 +2,7 @@
 
 lazy import json
 import re
+from collections import namedtuple
 lazy from pathlib import Path
 
 from .settings import (
@@ -10,6 +11,11 @@ from .settings import (
     READ_KEY_TERMS, RESEARCH_FACTS_CHECKED, RESEARCH_GAPS, RESEARCH_QUESTIONS, SEARCHES_PER_RESEARCH_QUESTION,
     TEACH_CHECK_COMMANDS, TEACH_CHECK_SEARCHES, TEACH_CLAIMS, TOOL_ROLES, first_line,
 )
+
+
+StringStates = namedtuple("StringStates", "states in_string")
+FileBlock = namedtuple("FileBlock", "path content")
+LineEdit = namedtuple("LineEdit", "path first last lines")
 
 
 class Reply:
@@ -141,7 +147,7 @@ class Reply:
                 escaped, in_string = (False, True) if escaped else (char == "\\", char != '"')
             elif char == '"':
                 in_string = True
-        return states, in_string
+        return StringStates(states, in_string)
 
     def spec_json(self):
         """The spec's JSON; when only its free-form "data" part (written last) is broken, that
@@ -175,7 +181,7 @@ class Reply:
             if self.PLACEHOLDER_BODY_RE.fullmatch(body):
                 continue
             markdown = path.lower().endswith((".md", ".markdown"))
-            found.append((str(Path(path)), self.without_debris(body, fences=not markdown)))
+            found.append(FileBlock(str(Path(path)), self.without_debris(body, fences=not markdown)))
         return found
 
     def real_path_and_body(self, path, after, body):
@@ -232,7 +238,7 @@ class Reply:
 
     def line_edits(self):
         """[(path, first, last, new lines)] of its LINES blocks."""
-        return [(str(Path(path.strip())), int(first), int(last), self.unnumbered(self.without_debris(body).splitlines()))
+        return [LineEdit(str(Path(path.strip())), int(first), int(last), self.unnumbered(self.without_debris(body).splitlines()))
                 for path, first, last, body in self.LINES_BLOCK_RE.findall(self.text)]
 
     @classmethod

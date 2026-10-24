@@ -12,6 +12,7 @@ lazy import tempfile
 lazy import urllib.error
 lazy import urllib.parse
 lazy import urllib.request
+from collections import namedtuple
 lazy from pathlib import Path
 
 lazy from .jobs import today
@@ -27,6 +28,13 @@ from .settings import (
     VERSION_TIMEOUT, Config, Home, fingerprint, first_line, now_text, similarity, split_text, words,
 )
 lazy from .workspace import Toolchain, Workspace
+
+
+SavedPlan = namedtuple("SavedPlan", "plan saved")
+SafeCommands = namedtuple("SafeCommands", "kept dropped")
+Findings = namedtuple("Findings", "facts sources")
+Investigation = namedtuple("Investigation", "facts sources analysis")
+CrossCheck = namedtuple("CrossCheck", "support differ")
 
 
 class Knowledge:
@@ -400,14 +408,14 @@ class Learner:
             try:
                 plan = read(known)
                 say.info(f"Using the plan saved last time ({saved_as})", "📋")
-                return plan, True
+                return SavedPlan(plan, True)
             except ValueError as exc:
                 say.warn(f"The plan saved last time cannot be used ({exc}), so making a new one")
         plan = self.model.ask_until_usable(system, parts, label, lambda reply: read(reply.json()), attempts=2)
         if plan is None:
             raise SystemExit(f"{self.model.name} gave no usable plan for {what}; see the log of its replies "
                              f"(tinker memory; its calls are in tinker learn's log)")
-        return plan, False
+        return SavedPlan(plan, False)
 
     @staticmethod
     def safe_commands(commands):
@@ -421,7 +429,7 @@ class Learner:
             unsafe = (Learner.SHELL_OPERATORS.search(command) or Learner.CHANGES.search(command)
                       or Workspace.UNSAFE_COMMAND.search(command))
             (dropped if unsafe else kept).append(command)
-        return kept, dropped
+        return SafeCommands(kept, dropped)
 
     def show_dropped(self, plan):
         with say.section():
@@ -498,7 +506,7 @@ class Learner:
             sources += [page["url"]] if found else []
             found = [dict(fact, section=page["section"]) if page["section"] else fact for fact in found]
             self.add_facts(facts, found)
-        return facts, sources
+        return Findings(facts, sources)
 
     def read_page(self, topic, page, number):
         """The facts one page states about what its search looks for, from the parts of its text
@@ -786,7 +794,7 @@ class Researcher:
             differ = self.cross_check(facts)
             analysis = self.analyse(frame, facts, differ) or analysis
             searches = self.next_searches(frame, facts, analysis)
-        return facts, sources, analysis
+        return Investigation(facts, sources, analysis)
 
     @staticmethod
     def first_searches(frame):
@@ -832,7 +840,7 @@ class Researcher:
                 support[second] |= sites[first]
             else:
                 differ.append((first + 1, second + 1))
-        return support, differ
+        return CrossCheck(support, differ)
 
     def fold_repeats(self, facts, vectors):
         """Each fact that repeats an earlier one, folded into it (in place, with its vector): its

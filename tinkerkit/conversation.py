@@ -31,6 +31,7 @@ import sys
 lazy import threading
 lazy import time
 lazy import webbrowser
+from collections import namedtuple
 lazy from pathlib import Path
 
 from .commands import COMMANDS, TERMINAL_ONLY_CHANNEL_ACTIONS, named, refs
@@ -111,6 +112,14 @@ I build small programs for you, on this computer, with an AI model that runs rig
 - Just write to me: I pause what runs, answer you, and go on with it
 
 ❓ `help` lists everything I can do, and `help task` explains one command."""
+
+
+MenuEntry = namedtuple("MenuEntry", "name what")
+WordsAsked = namedtuple("WordsAsked", "question example")
+AppRequest = namedtuple("AppRequest", "project args stdin")
+ShellRun = namedtuple("ShellRun", "code output")
+ChatModel = namedtuple("ChatModel", "name options think")
+Secret = namedtuple("Secret", "key question")
 
 
 def session(root):
@@ -938,7 +947,7 @@ def command_word(word):
 
 def offered():
     """(name, what it does) of each command a chat takes, as its menu lists them."""
-    return [(command.name, command.what) for command in COMMANDS if command.chat]
+    return [MenuEntry(command.name, command.what) for command in COMMANDS if command.chat]
 
 
 def words_asked(command):
@@ -947,7 +956,7 @@ def words_asked(command):
     needed = found.synopsis.split(None, 1)[1]
     example = found.example.split(None, 1)[1] if " " in found.example else ""
     question = md(t"✍️ **{command}** · {found.what}\nSend {needed:code} now")
-    return question + (md(t", e.g. {example:code}") if example else ""), example or needed
+    return WordsAsked(question + (md(t", e.g. {example:code}") if example else ""), example or needed)
 
 def after_word(message):
     """What a command word is followed by (the command described)."""
@@ -963,7 +972,7 @@ def app_request(given):
     except ValueError:
         words = words.split()
     name, args = refs(words)
-    return name, args, stdin
+    return AppRequest(name, args, stdin)
 
 
 def welcome():
@@ -1098,7 +1107,7 @@ class Talk:
         options = {"num_ctx": settings["num_ctx"], "num_predict": CHAT_MAX_REPLY_TOKENS}
         if settings.get("num_batch"):
             options["num_batch"] = settings["num_batch"]
-        return name, options, (False if settings.get("think") not in (None, False) else None)
+        return ChatModel(name, options, False if settings.get("think") not in (None, False) else None)
 
     def warm(self):
         """Load the model now, in the background."""
@@ -1233,11 +1242,11 @@ def in_shell(shell, line, folder, given=None):
     try:
         done = subprocess.run([shell, "-lc", line], cwd=folder, text=True, capture_output=True, input=given,
                               stdin=None if given else subprocess.DEVNULL, timeout=CHAT_COMMAND_TIMEOUT)
-        return done.returncode, (done.stdout + done.stderr).strip()
+        return ShellRun(done.returncode, (done.stdout + done.stderr).strip())
     except subprocess.TimeoutExpired as exc:
-        return f"stopped after {CHAT_COMMAND_TIMEOUT}s", (text_of(exc.stdout) + text_of(exc.stderr)).strip()
+        return ShellRun(f"stopped after {CHAT_COMMAND_TIMEOUT}s", (text_of(exc.stdout) + text_of(exc.stderr)).strip())
     except OSError as exc:
-        return "not started", str(exc)
+        return ShellRun("not started", str(exc))
 
 
 class Research:
@@ -1720,7 +1729,7 @@ class Channel:
     """What every kind of channel does. KIND names it; SECRETS are the settings asked for (and kept)
     apart, never shown. A dropped connection is not an error: receive returns nothing and tries again."""
     KIND = ""
-    SECRETS = ()     # [(key, what to ask)]
+    SECRETS = ()
 
     def __init__(self, name, settings, secrets):
         self.name, self.settings, self.secrets = name, settings, secrets

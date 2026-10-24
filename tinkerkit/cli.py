@@ -26,6 +26,7 @@ lazy import shutil
 lazy import time
 lazy import traceback
 lazy import webbrowser
+from collections import namedtuple
 lazy from pathlib import Path
 
 from . import conversation, exercising, reading
@@ -38,7 +39,7 @@ lazy from .finishing import FinalReview, LessonWriter, ReadmeWriter, Tidy
 lazy from .graph import write_page
 lazy from .knowledge import Embeddings, Library
 lazy from .learning import LearnStopped, SlotLearner
-lazy from .model import Calibrator, Model, Models, Ollama, OllamaError
+lazy from .model import Calibrator, Model, Models, Ollama, OllamaError, SelectedModel
 lazy from .planning import Designer, InterfaceReviewer, Recaller, SpecWriter
 lazy from .project import Brief, Outcome, Project, RunChecks, Runs, Tracker, project_store, saved
 lazy from .prompts import Prompts
@@ -55,6 +56,12 @@ try:
     from . import channels
 except ImportError:
     channels = None
+
+
+Renamed = namedtuple("Renamed", "project folder")
+LearningTools = namedtuple("LearningTools", "model embeddings internet")
+DoctorCheck = namedtuple("DoctorCheck", "required what check")
+CallSettings = namedtuple("CallSettings", "options think")
 
 
 def main():
@@ -356,7 +363,7 @@ class Cli:
         if len(rest) != 1 or not Cli.FOLDER_RE.fullmatch(rest[0]):
             parser.error("use tinker rename NAME or tinker rename @PROJECT NAME; a name is letters, digits, - _ "
                          "and ., starting with a letter or digit")
-        return name, rest[0]
+        return Renamed(name, rest[0])
 
     @staticmethod
     def job_words(command, words, parser):
@@ -661,7 +668,7 @@ class Commands:
         name, settings = Commands.checked_model()
         embeddings = Embeddings.required(option)
         internet = Internet.required(option)
-        return Commands.model_in_use(name, settings, "learn"), embeddings, internet
+        return LearningTools(Commands.model_in_use(name, settings, "learn"), embeddings, internet)
 
     @staticmethod
     def checked_model():
@@ -669,7 +676,7 @@ class Commands:
         name, settings = Models.selected()
         Models.installed(name)
         Config.check_model(run=False)
-        return name, settings
+        return SelectedModel(name, settings)
 
     @staticmethod
     def model_in_use(name, settings, log_name):
@@ -1057,10 +1064,10 @@ class Doctor:
 
     def checks(self):
         """(required, what, check): a check returns what it found or exits with what to do."""
-        return [(True, "Ollama", self.ollama), (True, "model", self.model),
-                (False, "embedding model (for tinker learn and --web)", self.embedding),
-                (False, "web (for tinker learn and --web)", self.web),
-                (False, "tinker command", self.command)]
+        return [DoctorCheck(True, "Ollama", self.ollama), DoctorCheck(True, "model", self.model),
+                DoctorCheck(False, "embedding model (for tinker learn and --web)", self.embedding),
+                DoctorCheck(False, "web (for tinker learn and --web)", self.web),
+                DoctorCheck(False, "tinker command", self.command)]
 
     @staticmethod
     def ollama():
@@ -1471,7 +1478,7 @@ class ProjectFolder:
         options = {"num_ctx": settings["num_ctx"], "num_predict": 24}
         if settings.get("num_batch"):
             options["num_batch"] = settings["num_batch"]
-        return options, (False if settings.get("think") not in (None, False) else None)
+        return CallSettings(options, False if settings.get("think") not in (None, False) else None)
 
     @staticmethod
     def from_words(task):

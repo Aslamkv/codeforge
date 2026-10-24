@@ -9,6 +9,7 @@ toolchain corrected and the lesson (or a book's corrected fact) kept, proven, wi
 changes nothing, and says why. An answer reads the passages of what Tinker read that it is about too."""
 
 import re
+from collections import namedtuple
 
 from .messages import say
 lazy from .conversation import Research
@@ -25,6 +26,12 @@ ITEM_KINDS = ("toolchain", "fix", "lesson", "fact", "finding", "rule", "command"
 TEACHABLE_TOOLCHAIN_KEYS = ("setup", "check", "test_all", "test_one", "format", "lint")
 VERDICTS = ("holds", "wrong", "unsure")
 PREFERENCE_RE = re.compile(r"\bprefer", re.I)
+
+
+JudgedChange = namedtuple("JudgedChange", "number change")
+Checked = namedtuple("Checked", "evidence verdict")
+Detail = namedtuple("Detail", "label value")
+Follows = namedtuple("Follows", "follows why")
 
 
 class Memory:
@@ -163,7 +170,7 @@ class Teacher:
             verdict = (self.judged(teaching, plan, items, evidence) if evidence
                        else Verdict.unchecked(plan["claims"], "nothing could check it"))
         verdict.show()
-        return evidence, verdict
+        return Checked(evidence, verdict)
 
     def on_machine(self, commands):
         """[{source, text}]: what each safe command shows here (the others are skipped, and said)."""
@@ -411,7 +418,7 @@ def read_fact(given, count):
 
 def judged_changes(plan):
     """(number, change) of the changes that rest on a fact: the judge weighs them (the others rest on preferences)."""
-    return [(number, change) for number, change in enumerate(plan["changes"], 1)
+    return [JudgedChange(number, change) for number, change in enumerate(plan["changes"], 1)
             if any(not plan["claims"][cited - 1]["preference"] for cited in change["claims"])]
 
 
@@ -459,7 +466,7 @@ class Verdict:
     cites), is wrong or is unsure, with why. And, for each change a fact is for, whether it follows (with why)."""
 
     def __init__(self, claims, follows):
-        self.claims, self.follows = claims, follows  # {n: {text, verdict, why, evidence}}, {n: (follows, why)}
+        self.claims_by_number, self.follows_by_change = claims, follows
 
     @classmethod
     def unchecked(cls, claims, why):
@@ -474,7 +481,7 @@ class Verdict:
         unsure), and whether each change a fact is for follows. ValueError when one is missing or unknown."""
         verdict = cls.unchecked(plan["claims"], "")
         given = {item.get("claim"): item for item in data.get("claims") or [] if isinstance(item, dict)}
-        for number, claim in verdict.claims.items():
+        for number, claim in verdict.claims_by_number.items():
             if claim["verdict"] == "preference":
                 continue
             item = given.get(number)
@@ -488,27 +495,27 @@ class Verdict:
         for number, _ in judged_changes(plan):
             if number not in said or not isinstance(said[number].get("follows"), bool):
                 raise ValueError(f"change {number} has no \"follows\" (true or false)")
-            verdict.follows[number] = (said[number]["follows"], str(said[number].get("why") or "").strip())
+            verdict.follows_by_change[number] = Follows(said[number]["follows"], str(said[number].get("why") or "").strip())
         return verdict
 
     def why_not(self, number, change):
         """Why a change is not made ("" when it is): a claim it rests on does not hold, or it does not follow."""
         for claim_number in change["claims"]:
-            if self.claims[claim_number]["verdict"] not in ("holds", "preference"):
-                return f"claim {claim_number} is {self.claims[claim_number]['verdict']}"
-        follows, why = self.follows.get(number, (True, ""))
+            if self.claims_by_number[claim_number]["verdict"] not in ("holds", "preference"):
+                return f"claim {claim_number} is {self.claims_by_number[claim_number]['verdict']}"
+        follows, why = self.follows_by_change.get(number, Follows(True, ""))
         return "" if follows else f"does not follow: {why or 'no reason given'}"
 
     def sources(self, change, evidence):
         """Where what a change rests on comes from: the evidence its facts cite, and the person for a preference."""
         found = [evidence[cited - 1]["source"] for number in change["claims"]
-                 for cited in self.claims[number]["evidence"]]
-        if any(self.claims[number]["verdict"] == "preference" for number in change["claims"]):
+                 for cited in self.claims_by_number[number]["evidence"]]
+        if any(self.claims_by_number[number]["verdict"] == "preference" for number in change["claims"]):
             found.append("your preference")
         return list(dict.fromkeys(found))
 
     def show(self):
-        for number, claim in self.claims.items():
+        for number, claim in self.claims_by_number.items():
             if claim["verdict"] == "preference":
                 say.info(f"Your preference, honored: {claim['text']}", "👤")
                 continue
@@ -518,5 +525,4 @@ class Verdict:
 
     def details(self):
         """(label, value) of each claim's verdict."""
-        return [("Your preference" if claim["verdict"] == "preference" else claim["verdict"].capitalize(),
-                 claim["text"] + (f" ({claim['why']})" if claim["why"] else "")) for claim in self.claims.values()]
+        return [Detail("Your preference" if claim["verdict"] == "preference" else claim["verdict"].capitalize(), claim["text"] + (f" ({claim['why']})" if claim["why"] else "")) for claim in self.claims_by_number.values()]

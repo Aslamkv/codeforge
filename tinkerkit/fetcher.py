@@ -16,10 +16,15 @@ import urllib.parse
 import urllib.request
 import urllib.robotparser
 lazy import zlib
+from collections import namedtuple
 from dataclasses import asdict, dataclass
 
 lazy from .jobs import journaled
 from .settings import FETCH_USER_AGENT, MAX_REDIRECTS, first_line
+
+
+Download = namedtuple("Download", "data why_failed")
+RawResponse = namedtuple("RawResponse", "status headers body")
 
 
 @dataclass
@@ -178,12 +183,12 @@ class Fetcher:
             with urllib.request.build_opener(LimitedRedirects).open(request, timeout=self.timeout) as response:
                 body = response.read(max_bytes + 1)
         except urllib.error.HTTPError as exc:
-            return b"", f"HTTP {exc.code}"
+            return Download(b"", f"HTTP {exc.code}")
         except (urllib.error.URLError, OSError, ValueError) as exc:
-            return b"", first_line(str(getattr(exc, "reason", exc)), 160)
+            return Download(b"", first_line(str(getattr(exc, "reason", exc)), 160))
         if len(body) > max_bytes:
-            return b"", f"it is larger than {max_bytes // 1_000_000} MB"
-        return body, ""
+            return Download(b"", f"it is larger than {max_bytes // 1_000_000} MB")
+        return Download(body, "")
 
     @classmethod
     def decoded(cls, body, charset):
@@ -238,7 +243,7 @@ class Connections:
         body_left_unread = not response.isclosed()
         if body_left_unread:
             connection.close()
-        return response.status, response.headers, body
+        return RawResponse(response.status, response.headers, body)
 
 
 class LimitedRedirects(urllib.request.HTTPRedirectHandler):
