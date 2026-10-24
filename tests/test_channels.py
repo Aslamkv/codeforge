@@ -180,7 +180,7 @@ def test_receive(monkeypatch):
     channel = telegram(api)
     messages = channel.receive(1)
     assert [(m.chat, m.text, m.sender, m.id) for m in messages] == [("42", "hello", "me", 5)]
-    assert channel.offset == 12 and channel.heard["42"] == [5, 6] and channel.newest["42"] == 6
+    assert channel.offset == 12 and channel.alive["42"] == [5, 6]
     monkeypatch.setattr(channels.time, "sleep", lambda s: None)
     assert telegram(BotAPI(getUpdates=[OSError("down"), OSError("down")])).receive(1) == []
 
@@ -235,29 +235,6 @@ def test_ask_for_opens_the_reply_box_with_a_hint():
     assert telegram(api).ask_for("42", "✍️ **fix**", "x" * 100) == 4
     reply = json.loads(api.calls[0][1]["reply_markup"])
     assert reply == {"force_reply": True, "input_field_placeholder": "x" * 64}
-
-def methods(api):
-    return [path.rsplit("/", 1)[1] for path, _ in api.calls]
-
-@pytest.mark.spec("CHN-9")
-def test_the_status_is_the_one_pin():
-    api = BotAPI(getChat=[{"pinned_message": {"message_id": 7}}, {"pinned_message": {"message_id": 5}}, {}])
-    channel = telegram(api)
-    notes = []
-    channel.drop_pin_note = lambda chat, after, wait=2: notes.append(wait)
-    channel.pin("42", 2)  # Tinker's first pin: every pin from before taken out, one at a time
-    assert methods(api) == ["getChat", "unpinChatMessage", "getChat", "unpinChatMessage", "getChat", "pinChatMessage"]
-    assert [fields["message_id"] for path, fields in api.calls if path.endswith("/unpinChatMessage")] == ["7", "5"]
-    api.calls.clear()
-    channel.closed = True
-    channel.pin("42", 3)  # a new status after it: the one before goes with its message
-    assert methods(api) == ["pinChatMessage"] and channel.pinned["42"] == 3 and notes == [2, 0]  # ending: the note at once
-    api.answers["getChat"] = [{"pinned_message": {"message_id": 3}}]
-    started_again = telegram(api)
-    api.calls.clear()
-    started_again.pin("42", 3)  # pinned already: left as it is
-    started_again.pin("42", 3)
-    assert methods(api) == ["getChat"] and started_again.pinned["42"] == 3
 
 @pytest.mark.spec("CHN-10")
 def test_the_ledger_keeps_every_message_and_collects_them(monkeypatch):

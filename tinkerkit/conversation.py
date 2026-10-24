@@ -14,7 +14,7 @@ the terminal, and the channels plugin adds the chat apps (TelegramChannel). Ever
 Markup (bold, italic, code ...), each mark for what it means, and each kind shows it its own way. Each
 thing (a task, a research, a command, a chat's reply) has one message, edited as it goes on
 (show), with when it was last updated; a new one is sent only for a new thing, or for what no longer fits.
-Tinker's status is the one message pinned, edited in place for ever. A chat is only a view of the ledger
+Tinker's status is one message, sent anew at the bottom each time it changes. A chat is only a view of the ledger
 (ledger.py): its messages go after a while (a glance, like jobs or help, and the question it answered, at
 once), and history shows any thing again."""
 import contextlib
@@ -49,7 +49,7 @@ OFF = "TINKER_CHANNELS"                        # =off: a run the conversation st
 EDIT_EVERY = 5                                 # seconds between edits of a progress message
 CLOCK_EVERY = 15                               # ... between edits that only move its clock on
 STOP_WAIT = 120                                # seconds a build is given to stop (and save) before it is killed
-STATUS_EVERY = 10                              # seconds between looks at what Tinker does, for its pinned status
+STATUS_EVERY = 10                              # seconds between looks at what Tinker does, for its status
 COLLECT_EVERY = 2                              # seconds between takings out of the messages whose time is up
 
 # --- a chat with the model ---------------------------------------------------------------------------------
@@ -201,7 +201,7 @@ class Desk:
         self.spent = {}  # run -> the seconds its runs took so far (a task's time: done in ...)
         self.consoles = [c for c in channels if isinstance(c, ConsoleChannel)]
         self.said_status = None  # the status said last (a status said again only when it changed)
-        self.ready, self.pinning = set(), threading.Lock()  # the chats started (their status pinned), one pin at a time
+        self.ready, self.posting = set(), threading.Lock()  # the chats started (their status sent), one post at a time
         self.leaving = None  # (channel, chat, ids) of the question to stop, confirmed: it goes as Tinker ends
         self.exercising = None  # the Reporter of the exercise this conversation follows
         self.echo = not self.consoles  # a task's printed lines go to the terminal too (not to a console's)
@@ -226,7 +226,6 @@ class Desk:
         """Each chat listened to by this Tinker alone: one another Tinker listens to is left out (served by
         that one; without a terminal here, there is nothing to serve)."""
         for channel in [c for c in self.channels if c not in self.consoles]:
-            channel.pins = True  # it hears the chat: it can tell the notes of its pins from the person's messages
             if not channel.claim({"pid": os.getpid()}):
                 held = f"{channel.name} is listened to by another Tinker (process {channel.holder().get('pid', '?')})"
                 if not self.consoles:
@@ -249,9 +248,9 @@ class Desk:
                 channel.delete(chat, message)
 
     def say_status(self, text=None, anew=False):
-        """Tinker's status, one message in each chat, pinned (the console: said at its start and end): text,
-        else what it does now, said only when it changed. One about something else (Tinker starts or ends, a task
-        starts, waits, ends) is sent anew at the bottom and pinned, to be seen; the same one goes on edited in place."""
+        """Tinker's status, one message in each chat (the console: said at its start and end, and when it is about
+        something else: Tinker starts or ends, a task starts, waits, ends): text, else what it does now, said only
+        when it changed. Each one said in a chat is sent anew at its bottom, the one before taken out."""
         text = text or self.status()
         if text == self.said_status and not anew:
             return
@@ -259,9 +258,9 @@ class Desk:
         self.said_status = text
         for channel in self.channels:
             if channel not in self.consoles:
-                with self.pinning:
+                with self.posting:
                     if channel in self.ready:
-                        self.pin_status(channel, text, anew)
+                        self.post_status(channel, text)
             elif anew or text.startswith("💤"):
                 channel.show(ConsoleChannel.CHAT, None, text, done=True)
 
@@ -284,16 +283,16 @@ class Desk:
         return "🟢 **Tinker** · idle: send a task"
 
     @staticmethod
-    def pin_status(channel, text, anew=False):
-        """The status pinned in each of the channel's chats, its one message (Tinker's "listening", kept from start
-        to start): edited in place, or anew sent at the bottom and pinned, the one before taken out meanwhile."""
+    def post_status(channel, text):
+        """The status sent anew at the bottom of each of the channel's chats, its one message (Tinker's "listening",
+        kept from start to start), the one before taken out meanwhile."""
         mine = Home.store().get("listening", channel.name) or {}
         for chat in channel.allowed:
             before = mine.get(chat)
             going = threading.Thread(target=channel.delete, args=(chat, before), daemon=True)
-            if anew and before:
+            if before:
                 going.start()
-            shown = channel.show(chat, None if anew or not before else [before], text, bottom=False, pin=True)
+            shown = channel.show(chat, None, text, bottom=False, status=True)
             channel.lasting(chat, shown)
             mine[chat] = shown[0] if shown else None
             if going.is_alive():
@@ -330,12 +329,12 @@ class Desk:
 
     def start_chat(self, channel):
         """A chat started in its own thread, so the terminal never waits on the network: the messages sent while
-        nothing listened forgotten, the commands offered, the status pinned."""
+        nothing listened forgotten, the commands offered, the status sent."""
         channel.skip_waiting()
         channel.offer(offered())
-        with self.pinning:
+        with self.posting:
             self.ready.add(channel)
-            self.pin_status(channel, self.said_status, anew=True)
+            self.post_status(channel, self.said_status)
 
     def hear(self, channel, message):
         """One message: a welcome for a person who just opened the bot; the answer to what waits for it; else
@@ -1673,7 +1672,6 @@ class Channel:
     def __init__(self, name, settings, secrets):
         self.name, self.settings, self.secrets = name, settings, secrets
         self.allowed = {str(chat) for chat in settings.get("allowed", [])}
-        self.pins = False  # may pin Tinker's status (the conversation's: it hears the chat, see pin)
         self.closed = False  # the person ended the conversation here (the console: exit)
         self.bare = True  # a conversation: commands are said as their words alone (said: no "tinker" before)
 
@@ -1701,9 +1699,6 @@ class Channel:
     def typing(self, chat):
         """Show chat that a reply is being written (a channel that cannot says nothing)."""
 
-    def pin(self, chat, sent):
-        """Pin Tinker's status, the chat's one pin (a channel that cannot pins nothing)."""
-
     def lasting(self, chat, sent):
         """The messages sent (Tinker's status) stay in the chat (a channel that keeps no ledger keeps all)."""
 
@@ -1725,11 +1720,10 @@ class Channel:
         """Whether sent is the chat's newest message (a channel that cannot tell: it is)."""
         return True
 
-    def show(self, chat, shown, text, done=False, bottom=None, pin=False):
+    def show(self, chat, shown, text, done=False, bottom=None, status=False):
         """One thing's message: text (Markup), with when it was updated as its footer, edited into the
         messages the thing has (shown: their ids, or None for a new thing); a new one only for what no
-        longer fits, and one it no longer needs taken out. pin: pinned (Tinker's status, the one message
-        pinned: a thing comes to the bottom of the chat instead). Its
+        longer fits, and one it no longer needs taken out. status: Tinker's status, not a thing. Its
         ids now. done: the thing's last update for now (the console shows it whole then). bottom (done, by
         default): where the person looks next, so a message that is no longer the newest is sent anew at
         the bottom (the one before taken out), seen and heard at once (an edit up the chat is not)."""
@@ -1743,8 +1737,6 @@ class Channel:
                for index, part in enumerate(parts)]
         for extra in shown[len(parts):]:
             self.delete(chat, extra)
-        if pin and self.pins and now and now[0] is not None:
-            self.pin(chat, now[0])
         return now
 
     def said(self, text):
@@ -1858,7 +1850,7 @@ class ConsoleChannel(Channel):
         webbrowser.open(Path(path).as_uri())
         return self.send(chat, f"{caption}\n📄 Opened in your browser: `{path}`")
 
-    def show(self, chat, shown, text, done=False, bottom=None, pin=False):  # a terminal prints at its bottom
+    def show(self, chat, shown, text, done=False, bottom=None, status=False):  # a terminal prints at its bottom
         sent, text = (shown or [None])[0] or self.new_id(), self.said(text)
         if done:
             self.show_whole(sent, text)
