@@ -1137,7 +1137,7 @@ person always comes first.
   `/use_model` is `use-model`, and `@bot` after the name (in a group) is dropped.
 - **CNV-5** `Channel.said` removes `tinker ` before a command in a conversation. `Channel.show` edits
   the thing's messages, sends parts that no longer fit, deletes the extra ones, adds the update
-  time, pins when asked, and sends the message again at the bottom when it is no longer the newest.
+  time, and sends the message again at the bottom when it is no longer the newest.
 - **CNV-6** `Channel.listened` gives only messages from allowed chats. It says a refusal once and
   gives nothing. `claim` lets only one process hold a channel's lock.
 - **CNV-7** `ConsoleChannel` prints a dim headline while a thing changes, the whole message when it
@@ -1185,11 +1185,10 @@ person always comes first.
   command, it says so.
 - **CNV-21** `Desk.run` claims each chat channel. When another Tinker holds one, it stops if there is
   no terminal, and otherwise leaves that chat out. The terminal never waits on a chat: each chat starts in its
-  own thread. Each chat has one status message, pinned: when Tinker starts listening, when it ends (`not
-  listening`), and when the status is about something else (a task starts, waits for the person, ends), it is
-  sent anew at the bottom and pinned, and the one before taken out; the same status going on (a task's
-  progress) is edited in place. While it listens it collects the messages whose time is up, every
-  `COLLECT_EVERY` seconds.
+  own thread. Each chat has one status message. Every time the status changes (Tinker starts listening, a
+  task moves on, waits for the person, ends, Tinker ends: `not listening`), the one before is taken out and the
+  new one is sent at the bottom. Tinker pins nothing. While it listens it collects the messages whose time is
+  up, every `COLLECT_EVERY` seconds.
 - **CNV-22** `one_shot` says one of the conversation's commands once, in the terminal (`tinker chat`,
   `command`, `research`, `run`, `history`). Each needs words after it, except `run` and `history`; `chat`
   and `command` pause the job that runs (**JOB-10**). `command` runs nothing without a yes at the terminal.
@@ -1247,10 +1246,6 @@ person always comes first.
 - **CHN-8** `send_file(chat, path, caption)` posts `sendDocument` as `multipart/form-data`: the chat, the
   file under its name, and the caption as Telegram HTML (at most 1024 chars). A failure sends the
   caption alone.
-- **CHN-9** Tinker's status is the chat's one pin. Tinker's first pin in a chat takes out every pin from before,
-  one at a time (`unpinChatMessage`, never `unpinAllChatMessages`, which Telegram makes wait), and leaves the
-  status as it is when it is pinned already; a later status is pinned, the one before going with its message.
-  Telegram's note about the pin is taken out after `PIN_NOTE_WAIT`, or at once when Tinker ends.
 - **CHN-10** Every message of a chat served (Tinker's, and the person's) is kept in the ledger, going in a
   day; an edit moves that on. `show` keeps the thing it shows, numbered, with the person's words it
   answers (their message within `ASKED_WAIT`). `glance` takes the person's message out at once, and the

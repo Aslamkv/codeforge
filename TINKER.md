@@ -230,7 +230,8 @@ runs
 
 Attach a book, an article or a document to the chat, and Tinker reads it: see [Read](#read-).
 
-The chat stays tidy. Tinker's status is its one pin, edited in place, even after a restart. Each task has
+The chat stays tidy. Tinker's status is one message: each new status replaces the one before, at the
+bottom of the chat, even after a restart. Each task has
 one message. Quick looks like `jobs` or `help` go after two minutes, and your question goes as soon as
 Tinker answers. Everything else goes after a day. Nothing is lost: Tinker keeps a history of what it showed.
 

@@ -57,9 +57,6 @@ class Recorder(Channel):
     def delete(self, chat, sent):
         self.log.append(("delete", chat, sent, ""))
 
-    def pin(self, chat, sent):
-        self.log.append(("pin", chat, sent, ""))
-
     def typing(self, chat):
         self.log.append(("typing", chat, None, ""))
 
@@ -164,12 +161,10 @@ def test_said_removes_tinker_before_a_command():
 
 
 @pytest.mark.spec("CNV-5")
-def test_show_edits_sends_deletes_and_pins(monkeypatch):
+def test_show_edits_sends_and_deletes(monkeypatch):
     channel = Recorder()
-    channel.pins = True
-    first = channel.show("1", None, "hello", pin=True)
+    first = channel.show("1", None, "hello", status=True)
     assert channel.log[0][:3] == ("send", "1", first[0]) and "🕒 _updated" in channel.log[0][3]
-    assert ("pin", "1", first[0], "") in channel.log
     monkeypatch.setattr(conversation, "pieces", lambda text, size=3500: [text[:10], text[10:]])
     two = channel.show("1", first, "a longer message now")
     assert two[0] == first[0] and channel.log[-2][0] == "edit" and channel.log[-1][0] == "send"
@@ -728,12 +723,12 @@ def test_desk_listens_until_the_chat_ends_it(desk):
     listening.run()
     statuses = [text for text in channel.texts() if "**Tinker** ·" in text]
     assert statuses[0].startswith("🟢 **Tinker** · idle: send a task") and statuses[-1].startswith("💤 **Tinker** · not listening")
-    assert ("pin", "1", 101, "") in channel.log and channel.closed
+    assert channel.closed
     channel.claimed.close()
 
 
 @pytest.mark.spec("CNV-21")
-def test_the_status_is_sent_anew_and_pinned_as_tinker_starts_and_ends(desk, home_store):
+def test_the_status_is_sent_anew_as_tinker_starts_and_ends(desk, home_store):
     home_store.put("listening", "bot", {"1": 55})
     channel = Listening("bot", inbox=[Message("1", "exit", id=1), Message("1", "confirm", id=2)])
     collected = []
@@ -741,7 +736,6 @@ def test_the_status_is_sent_anew_and_pinned_as_tinker_starts_and_ends(desk, home
     Desk([channel], Path.cwd()).run()
     status = [(kind, sent) for kind, _, sent, text in channel.log if "**Tinker** ·" in text]
     assert status == [("send", 101), ("send", 103)]  # 102: the question to stop
-    assert {("pin", 101), ("pin", 103)} <= {(kind, sent) for kind, _, sent, _ in channel.log}
     deleted = {sent for kind, _, sent, _ in channel.log if kind == "delete"}
     assert deleted == {55, 101, 1, 2, 102}  # the statuses before, the person's exit and confirm, the question
     assert not any("Stopping" in text for text in channel.texts())
@@ -750,17 +744,17 @@ def test_the_status_is_sent_anew_and_pinned_as_tinker_starts_and_ends(desk, home
 
 
 @pytest.mark.spec("CNV-21")
-def test_a_status_about_something_else_is_sent_anew_the_same_one_edited(desk):
+def test_every_status_is_sent_anew_the_one_before_taken_out(desk):
     channel = Recorder("bot")
     listening = Desk([channel], Path.cwd())
     listening.ready.add(channel)
-    channel.pins = True
     listening.say_status("🔄 **Tinker** · working on calc\n▸ planning")
     listening.say_status("🔄 **Tinker** · working on calc\n▸ building")
     listening.say_status("🟢 **Tinker** · idle: send a task")
     log = [(kind, sent) for kind, _, sent, _ in channel.log]
-    assert log[:4] == [("send", 101), ("pin", 101), ("edit", 101), ("pin", 101)]
-    assert sorted(log[4:]) == [("delete", 101), ("pin", 102), ("send", 102)]  # the one before goes meanwhile
+    assert log[0] == ("send", 101) and "edit" not in {kind for kind, _ in log}
+    assert sorted(log[1:3]) == [("delete", 101), ("send", 102)]  # the one before goes meanwhile
+    assert sorted(log[3:]) == [("delete", 102), ("send", 103)]
 
 
 @pytest.mark.spec("CNV-21")
