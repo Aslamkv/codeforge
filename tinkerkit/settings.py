@@ -634,6 +634,10 @@ class Log:
         self.store.append(self.name, event)
 
 
+class NotAPytestClass:
+    __test__ = False
+
+
 def projects_folder():
     """Where new projects get their own folders (tinker config projects)."""
     return Path(str(Config.get("projects") or "~/Projects")).expanduser().resolve()

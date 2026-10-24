@@ -15,7 +15,7 @@ lazy from .messages import human_duration, say
 lazy from .prompts import Part, Prompts, Reply
 from .settings import (
     COMMAND_TIMEOUT, ENV_EXAMPLE, ENV_FILE, FAILURE_OUTPUT_CHARS, ONLINE_PROBES, SETUP_TIMEOUT, STATE_DIR,
-    Config, Home, first_line, now_text,
+    Config, Home, NotAPytestClass, first_line, now_text,
 )
 
 
@@ -670,9 +670,8 @@ class TaughtCommands:
                     "\n".join(lines), atomic=True)
 
 
-class TestRef:
+class TestRef(NotAPytestClass):
     """A criterion's test: "tests/test_app.py::test_x" -> file tests/test_app.py, name test_x."""
-    __test__ = False  # not a pytest test class
 
     def __init__(self, test):
         file, _, name = str(test).rpartition("::")
