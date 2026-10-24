@@ -325,3 +325,29 @@ def test_send_file_uploads_a_document_with_its_caption(tmp_path):
     assert parts[-1] == b"--\r\n" and channel.alive["42"] == [12]
     failing = telegram(BotAPI(sendDocument=(400, "Bad Request: file too big"), sendMessage={"message_id": 13}))
     assert failing.send_file("42", page, "the caption") == 13
+
+def sent_file(chat=42, size=10, name="My Book.epub"):
+    return [[{"update_id": 1, "message": {"message_id": 5, "chat": {"id": chat}, "from": {"username": "me"},
+                                          "document": {"file_id": "F1", "file_name": name, "file_size": size}}}]]
+
+@pytest.mark.spec("CHN-11")
+def test_a_book_sent_in_a_chat_is_kept_and_read(tinker_home, home_store):
+    api = BotAPI(getUpdates=sent_file(), getFile={"file_path": "documents/file_1.epub"},
+                 **{"file_1.epub": (200, "EPUB BYTES")})
+    messages = telegram(api).receive(1)
+    path = tinker_home / "reading" / "My-Book.epub"
+    assert [m.text for m in messages] == [f"read {path}"] and path.read_bytes() == b"EPUB BYTES"
+    assert api.calls[-1][0] == "/file/botT0K/documents/file_1.epub" and "T0K" not in messages[0].text
+
+@pytest.mark.spec("CHN-11")
+def test_a_book_that_cannot_be_taken_is_said_and_one_from_a_stranger_ignored(tinker_home, home_store):
+    api = BotAPI(getUpdates=sent_file(size=30_000_000), sendMessage={"message_id": 9})
+    assert telegram(api).receive(1) == []
+    assert "larger than a bot may download" in api.calls[-1][1]["text"]
+    api = BotAPI(getUpdates=sent_file(), getFile={"file_path": "documents/file_1.epub"},
+                 sendMessage={"message_id": 9}, **{"file_1.epub": (404, "gone")})
+    assert telegram(api).receive(1) == []
+    assert "Could not take My Book.epub: Telegram answered 404" in api.calls[-1][1]["text"]
+    api = BotAPI(getUpdates=sent_file(chat=7))
+    assert telegram(api).receive(1) == [] and [path for path, _ in api.calls] == ["/botT0K/getUpdates"]
+    assert not (tinker_home / "reading").exists()

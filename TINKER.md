@@ -47,7 +47,8 @@ So Tinker uses Ollama's own **web search** and **web fetch** by default. It need
 export OLLAMA_API_KEY="your-key-here"
 ```
 
-Tinker only goes on the web when you ask: `tinker learn`, `tinker research`, or a run with `--web`.
+Tinker only goes on the web when you ask: `tinker learn`, `tinker research`, a run with `--web`, or `tinker read`
+of a link (that one needs no key: it only downloads the file).
 
 No key? Switch to DuckDuckGo, which needs none:
 
@@ -219,6 +220,8 @@ tinker channel disable telegram
 tinker channel remove telegram
 ```
 
+Attach a book, an article or a document to the chat, and Tinker reads it: see [Read](#read-).
+
 The chat stays tidy. Tinker's status is its one pin, edited in place, even after a restart. Each task has
 one message. Quick looks like `jobs` or `help` go after two minutes, and your question goes as soon as
 Tinker answers. Everything else goes after a day. Nothing is lost: Tinker keeps a history of what it showed.
@@ -298,6 +301,49 @@ tinker teach I prefer no mypy, our spec tests already catch what matters
 
 In zsh, a `?` in a command is a wildcard, so leave it out or quote the question.
 
+### Read 📚
+
+Give Tinker a book, an article or a document, and it learns what it teaches. Its whole text is stored first,
+numbered on your reading list (#1, #2 ...), so you never send it twice. Then Tinker reads every chapter, the core
+ones first: the contents, the foreword and the terms the index mentions most tell it which those are. Each chapter
+is saved as soon as it is read, so what it learned is there to ask about while it goes on.
+
+```sh
+tinker read ~/Books/clean-architecture.epub          # a file: EPUB, Markdown or plain text
+tinker read https://example.org/files/my-book.epub   # a link that downloads it
+tinker read list                                     # the reading list: how much of each is read
+tinker read show #1                                  # one reading: each chapter, read or not, and what it taught
+tinker read #1                                       # go on with the chapters not read yet
+tinker read #1 "the chapter on retries: when to give up"   # look again, with that in mind
+tinker clear read #1                                 # forget it: its text and what was learned from it
+```
+
+In a chat, just attach the file: Tinker stores it and starts reading. Telegram lets a bot download files of up to
+20 MB, so send a link for a bigger one. A share link (Google Drive, Dropbox, iCloud) must be its download link
+(Dropbox's ends in `?dl=1`).
+
+A PDF is refused: convert it to EPUB first, which keeps its chapters. Calibre does it:
+
+```sh
+ebook-convert book.pdf book.epub
+```
+
+Reading is a [job](#jobs-) with a job number of its own (`tinker jobs` shows it, apart from its reading number):
+it gives way to you like any job, and `tinker stop #J` stops it, everything read so far kept. `tinker resume #J`
+(or `tinker read #N`) goes on with the chapters not read yet, without downloading anything again.
+
+Ask about what it read, and correct it when it got something wrong. A correction is checked against the text
+itself, and the corrected fact is kept in place of the wrong one:
+
+```sh
+tinker ask what does Clean Architecture say about the dependency rule
+tinker teach Clean Architecture says entities never depend on use cases, not the other way round
+```
+
+What teaches how to build software also guides the builds that need it, like anything else Tinker learned: its
+lessons are shown to a build when the request needs them, and kept or retired by how the build goes. Anything else
+is there for asking only.
+
 ### Exercise 🏋️
 
 Let Tinker practise a language on its own, to write better code faster. It builds small practice projects
@@ -324,8 +370,8 @@ started later picks up the exercise's message again.
 
 ## Jobs ⏯
 
-Everything that takes a while is a job: a task, `add`, `fix`, `learn`, `ask`, `teach`, `research` and
-`exercise`. Each gets a number (`#1`, `#2` ...).
+Everything that takes a while is a job: a task, `add`, `fix`, `learn`, `ask`, `teach`, `read`, `research`
+and `exercise`. Each gets a number (`#1`, `#2` ...).
 
 One job runs at a time. Start another, of any kind, or chat with Tinker, and the one that runs is paused: it
 saves itself and waits, and you are answered at once. As soon as Tinker is idle (no job runs, and nothing you
@@ -378,12 +424,13 @@ tinker config docs_pages 50         # pages taken from a documentation site
 tinker config learn_think high      # think harder (and slower) while reading pages
 ```
 
-Delete parts of what Tinker keeps, or all of it (your projects stay):
+Delete parts of what Tinker keeps, or all of it (your projects stay). `tinker help clear` lists every part:
 
 ```sh
-tinker clear memory runs
+tinker clear memory runs            # lessons for any language, and the list of projects
+tinker clear read #2                # one reading: its text and what was learned from it
 tinker clear history                # what the chats showed
-tinker reset
+tinker reset                        # everything
 ```
 
 Get help:

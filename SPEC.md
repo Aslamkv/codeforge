@@ -74,6 +74,7 @@ responsibility, and each imports only the modules listed above it:
 | `docsite` | a topic's documentation site for its version: its map, each slot's pages, kept per topic and version (`DocSite`, `DocCache`) |
 | `learning` | learning a language or a tool by its slots (`SlotLearner`, `Throttle`, `RequestLog`, `LearnStopped`) |
 | `graph` | what Tinker knows as one graph of items and links (`Graph`), and the page that shows it (`GraphPage`) |
+| `reading` | what the person gives to read: stored whole on the reading list (`Readings`), then learned from chapter by chapter (`Reader`, `Epub`, `Book`) |
 | `teaching` | asking what Tinker keeps (`Asker`), and teaching it, checked before anything changes (`Teacher`, `Memory`, `Verdict`) |
 | `exercising` | practising a language on its own, giving way to the person (`Exercise`, `Exercises`) |
 | `session` | what every phase works through (`Session`), and the phase contract (`Worker`, `Phase`) |
@@ -94,7 +95,7 @@ responsibility, and each imports only the modules listed above it:
 
 The Tinker home is the `.tinker` folder next to the real `tinker.py` (symlinks resolved). It holds one
 SQLite database, `tinker.db` (mode 600), the lock files of the chat channels it listens to, and
-`memory.html`, the page `tinker memory --graph` writes. The
+`memory.html`, the page `tinker memory --graph` writes, and `reading/`, the files sent in a chat to read. The
 database holds:
 
 | Collection or log | What |
@@ -103,7 +104,8 @@ database holds:
 | `models` | what calibration measured for each model |
 | `languages` | per language: the toolchain that worked, toolchain fixes, lessons, proven facts |
 | `memory` | lessons for any language |
-| `learned` | what was learned from the web about each topic, with sources |
+| `learned` | what was learned from the web about each topic, with sources, and what each reading teaches |
+| `readings`, `reading numbers` | the reading list: each source's whole text by chapter, each chapter's state, its survey; the last number given |
 | `embeddings` | the embedding of each learned text, per embedding model |
 | `commands` | the person's own commands (aliases, programs) |
 | `projects` | a pointer to each project: its run ID, folder and task |
@@ -117,6 +119,7 @@ database holds:
 | `jobs`, `job numbers` | every job: its number, command, title, arguments, state, process and dates; the last number given |
 | log `learn` | every model call that `tinker learn` made |
 | log `teach` | every model call that `tinker ask` and `tinker teach` made |
+| log `read` | every model call that `tinker read` made |
 | log `exercise` | every model call that `tinker exercise` made itself (its builds keep theirs) |
 | log `journal #N` | job #N's requests (model calls, web searches, page fetches) with their answers, until it finishes |
 
@@ -251,8 +254,8 @@ the one it paused goes on by itself once Tinker is idle. A chat or a command lin
 too: they are answered at once, so there is no emergency command.
 
 - **JOB-1** `is_job(argv)`: `task`, `restart`, `resume`, `confirm`, `amend`, `add`, `fix`, `learn`, `ask`,
-  `teach`, `research` and `exercise` are jobs; help, `exercise status`, `learn NAME "DEFINITION"` and a build an
-  exercise runs (`EXERCISE_ENV`) are not. `Jobs.running(argv)` runs a job as the next number (`#1`, `#2` ...),
+  `teach`, `read`, `research` and `exercise` are jobs; help, `exercise status`, `read list`, `read show #N`,
+  `learn NAME "DEFINITION"` and a build an exercise runs (`EXERCISE_ENV`) are not. `Jobs.running(argv)` runs a job as the next number (`#1`, `#2` ...),
   kept in the home's `jobs` with its command, title, arguments, the day it started, its state `running` and its
   process. Its process takes `STOP` (SIGUSR2) as Ctrl-C.
 - **JOB-2** A job ends `stopped` when it is interrupted (Ctrl-C, `STOP`) or its tracker ends with the status
@@ -821,11 +824,73 @@ CONDENSE, KEEP. Domain research (`Researcher`), own-command learning and run les
   counts, and how lessons were found similar), and opens it in the browser only when printing to a
   terminal.
 
+## reading
+
+`tinker read FILE | URL` reads what the person gives: a book, an article, a document. Its whole text is stored first
+(no model), numbered on the reading list, so it is never sent twice; then every chapter is learned from, the core ones
+first, and saved as soon as it is read. What it teaches is a topic of the library (kind `reading`, slug `read-N`);
+its text stays for ask, teach and a focused read again (`read #N "WHAT"`).
+
+- **RDG-1** `opened(data, name)` reads a source by what its bytes hold, never by its name: a zip is an EPUB, other
+  text is Markdown or plain text (its title: a lone top heading, else the file's name). A PDF is refused, saying to
+  convert it to EPUB first (Calibre); a web page is refused, saying a share link needs its download link; any other
+  binary file is refused.
+- **RDG-2** An EPUB is read in its spine's order. Its contents (EPUB 3's navigation document, else EPUB 2's NCX) mark
+  where each chapter starts (an entry's fragment, else its document's start), at the shallowest depth that gives
+  `READ_CHAPTERS` chapters (else the deepest); what comes before the first is the opening pages. Its title and author
+  come from its metadata. An EPUB with no usable contents is split at its headings.
+- **RDG-3** A Markdown text is split at its headings, at the depth `chapter_depth` gives (a lone top heading is the
+  title, not a chapter). A plain text is split at its chapter lines ("Chapter 3", "Preface"), else into parts of
+  `READ_WINDOW_CHARS`. A piece that holds no more than its heading is no chapter.
+- **RDG-4** `kind_of(title)` gives a chapter's kind: `index`, `raw` (front or back matter: contents, copyright,
+  acknowledgements ...), `front` (foreword, preface, introduction ...: what the source says about itself) or `body`.
+  `index_terms(book)` gives the index's terms with how many pages each refers to, the most first, at most
+  `READ_INDEX_TERMS`.
+- **RDG-5** `stored(source)` stores the source's whole text before anything is read: on the reading list
+  (`Readings`, the home's `readings`) as the next number, with its title, author, source, the fingerprint of its
+  text, the day it was added and each chapter with its text, kind and state (`unread`; `raw` for an index and front
+  or back matter: kept, never read). A text stored before is that one: it says its number, and nothing else is done.
+- **RDG-6** The survey, made once per reading and kept with it, sees the contents (each chapter's kind and length),
+  the front chapters and the index terms. `read_survey` needs a summary; at most `READ_TERMS` terms; `software` is
+  true only when the reply says so; each chapter is `core`, `supporting` or `other` (left out: other). It orders the
+  reading and never skips a chapter: `in_order` gives the core ones, then the supporting, then the others, each in
+  the source's order.
+- **RDG-7** `Reader.read(N)` reads every unread chapter in that order, each in parts that fit the prompt
+  (`READ_TEXT_SHARE`), one call per part, each shown what was learned from the reading before (the latest kept when
+  the prompt is full). Each chapter is saved as soon as it is read: its new facts (one already kept is not kept
+  again) join the topic, each with its chapter, and it is marked read; so a reading stopped goes on with the
+  chapters not read yet. With every chapter read, it says so and asks nothing.
+- **RDG-8** `read #N "WHAT"` reads again the chapters WHAT names ("chapter 7"), then those most about it by its
+  words, `READ_FOCUS_CHAPTERS` in all, never a raw one: each shows its opening and its parts most about WHAT
+  (`excerpt`, `READ_CHUNKS` parts), and the prompt says what the person asks to look for. What it finds that is new
+  joins the topic.
+- **RDG-9** `read_points` keeps at most `READ_POINTS` points, each cut to `FACT_CHARS`. A point of a source about
+  building software keeps its phase when it is one of `FACT_PHASES`; every other point has the phase `book`, which
+  no build is shown. A reply with no list of points is not usable. Once every chapter is read, a source about
+  building software has its facts condensed into rules (again when a reading found something new); no other is.
+- **RDG-10** `book_bytes(source)` reads a file, or downloads a web address with `Internet.download` (the plugin's
+  fetcher; no web backend needed), at most `READ_MAX_BYTES`; a missing file, a failed download or a larger one is an
+  error that says so. `Fetcher.download` gives the bytes as they are, through the environment's proxy, and refuses
+  more than its limit.
+- **RDG-11** `Readings.about(text, items)` gives the readings the text names by title, then those whose items were
+  shown. `passages(numbers, query)` gives their passages (`PASSAGE_CHARS`) most about the query by its words, at
+  most `READ_PASSAGES`, each with its title and chapter.
+- **RDG-12** `tinker read FILE | URL` stores the source, then learns from it as `read #N`: its job's arguments become
+  `read #N` (`Jobs.retarget`), so a stopped or paused reading goes on with what is not read, and nothing is fetched
+  again. `read #N ["WHAT"]` needs a measured model and a known reading. Its tracker moves through survey, chapters
+  (and condense) and ends with what was read now, the chapters read, what is kept, whether builds use it, and what
+  to do next.
+- **RDG-13** `read list` shows each reading, the newest first, with how many chapters are read and the facts kept;
+  `read show #N` its source, summary and each chapter with its state and facts. Neither is a job; in a chat they are
+  answered at once. `clear read [#N...]` deletes those readings (every one with no number): their text and their
+  topic, once the person agrees.
+
 ## teaching
 
 `tinker ask QUESTION` answers from what Tinker keeps. `tinker teach WHAT` corrects it, and nothing changes until
 what was taught is checked: the model turns it into claims and the change it asks for, the claims are checked
-on this machine and on the web, the model weighs that evidence alone, and only then is anything changed.
+on this machine, on the web and in what Tinker read, the model weighs that evidence alone, and only then is
+anything changed.
 
 - **TCH-1** `Memory(embeddings).items` are the memory graph's toolchains, fixes, lessons, facts, findings, rules
   and commands, without the retired. `about(text)` gives at most `MEMORY_SHOWN` of them, the most related first:
@@ -836,10 +901,12 @@ on this machine and on the web, the model weighs that evidence alone, and only t
   makes no call and says so. It changes nothing.
 - **TCH-3** `read_plan` keeps at most `TEACH_CLAIMS` claims, each a fact or a preference (the person's own
   choice). A preference is only what the person marks with the word prefer: a teaching without it (`marked`) has
-  facts alone, whatever the model says. It keeps at most `TEACH_COMMANDS` commands and `TEACH_SEARCHES` searches, and the changes: each rests on the
-  claims it names and retires items shown, replaces toolchain commands of `TOOLCHAIN_KEYS` or keeps a lesson with
-  a known phase (any other is dropped). Setup given as one line is split at `&&` into its commands; any other
-  command given as a list is joined with `&&`. A plan with no claim, facts that nothing checks, no change, a
+  facts alone, whatever the model says. It keeps at most `TEACH_COMMANDS` commands and `TEACH_SEARCHES` searches,
+  and the changes: each rests on the claims it names and retires items shown, replaces toolchain commands of
+  `TOOLCHAIN_KEYS`, keeps a lesson with a known phase or keeps a fact in place of an item shown (**TCH-9**; any
+  other is dropped). Setup given as one line is split at `&&` into its commands; any other
+  command given as a list is joined with `&&`. A plan with no claim, facts that nothing checks (no command, no
+  search, and no reading it is about), no change, a
   toolchain key in two changes, or a toolchain key or value it cannot use is a `ValueError` (the model is asked
   again with why).
 - **TCH-4** `Teacher.teach` checks the facts first. It runs only the commands that show what is installed (each
@@ -852,10 +919,17 @@ on this machine and on the web, the model weighs that evidence alone, and only t
   When no change is made, nothing changes.
 - **TCH-6** A change that is made retires the items it shows wrong (the reason names what was taught), replaces
   the commands of the language's toolchain (only when it has one, and the result is usable), and keeps its
-  lesson as proven, with a `taught` event and its sources: the evidence its facts cite, and "your preference"
-  for a preference. A lesson like a known one proves that one instead of being added.
+  lesson (or its fact, **TCH-9**) as proven, with a `taught` event and its sources: the evidence its facts cite,
+  and "your preference" for a preference. A lesson like a known one proves that one instead of being added.
 - **TCH-7** `tinker teach` needs the Internet plugin, checked before any model call. Both commands report through
   a tracker, and in the conversation they run as tasks.
+- **TCH-8** An ask about a reading (named by its title, or whose items are shown) also sees its passages most about
+  the question (`Readings`), so it answers from the source's own words. With nothing kept and no passage, no
+  model is asked.
+- **TCH-9** A teaching about a reading is checked against its text: its passages most about each fact are evidence,
+  and a plan needs no command or search for its facts. A change may keep a `fact` in place of an item shown (`about`):
+  that item is retired, and the fact kept in its topic as proven (`Library.taught_fact`), with its phase, chapter
+  and section, a `taught` event and its sources.
 
 ## exercise
 
@@ -1143,7 +1217,8 @@ person always comes first.
   gives the result of an ok answer, and a refusal is a `ChannelError`. A dropped connection is
   tried once more, and then it is an `OSError`. Too many requests (429) is waited out for the
   `retry_after` seconds Telegram gives, up to 3 times, and then it is a `ChannelError`.
-- **CHN-4** `receive` gives the text messages and moves the offset past every update. A network
+- **CHN-4** `receive` gives the text messages (and a file sent, as **CHN-11** says) and moves the offset past
+  every update. A network
   failure gives no messages.
 - **CHN-5** `send` and `edit` post Telegram HTML, and fall back to plain text when the HTML is
   refused. An edit of unchanged text is harmless. A refused edit takes the message out and sends a new one
@@ -1164,6 +1239,9 @@ person always comes first.
   glance before it, and the glance goes in `GLANCE_KEEP`. `collect` takes out the messages whose time is
   up, and `clear` every message but the status. A message taken out without a network stays in the
   ledger; one Telegram refuses to take out is forgotten.
+- **CHN-11** A file sent in an allowed chat is downloaded into the home (`Home.reading_file`) and taken as `read PATH`:
+  the link Telegram gives a bot holds its token, so it is never passed on. A file over `BOT_DOWNLOAD_BYTES`, or one
+  that cannot be downloaded, is said to the person, and nothing is read. A file from any other chat is ignored.
 
 ## command line (tinker.py)
 

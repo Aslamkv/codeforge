@@ -10,6 +10,7 @@ from tinker import Cli, Commands
 from tinkerkit.knowledge import Knowledge, Library
 from tinkerkit.model import Ollama
 from tinkerkit.prompts import Prompts
+from tinkerkit.reading import Readings
 from tinkerkit.settings import Home, MEMORY_SHOWN, TEACH_CLAIMS
 from tinkerkit.teaching import Asker, Memory, Teacher, Verdict, marked, read_plan
 from tinkerkit.workspace import Toolchain
@@ -130,7 +131,7 @@ def test_read_plan_keeps_what_is_usable_within_limits():
     assert len(plan["claims"]) == TEACH_CLAIMS and len(plan["searches"]) == 3
     assert plan["claims"][0] == {"text": "claim 0", "preference": False}
     assert plan["changes"] == [{"claims": [1], "retire": [1, 3], "lesson": {"phase": "toolchain", "text": "Use ruff"},
-                                "toolchain": {"format": "ruff format .", "setup": ["pip install ruff"]}}]
+                                "toolchain": {"format": "ruff format .", "setup": ["pip install ruff"]}, "fact": None}]
     preferences = read_plan({"claims": [{"text": "I prefer X", "preference": True}],
                              "changes": [{"claims": [1], "lesson": {"phase": "code", "text": "Use X"}}]}, count=0)
     assert preferences["commands"] == preferences["searches"] == []  # a preference needs no check
@@ -297,3 +298,54 @@ def test_ask_and_teach_report_through_a_tracker_and_run_as_tasks(kept, measured_
     assert ended[1][:2] == ("Teaching: ruff alone is enough, I prefer no mypy", "done")
     assert "🤔 Worked out what to check" in ended[1][2] and "⚖️ Evidence weighed" in ended[1][2]
     assert "ask" in conversation.LONG and "teach" in conversation.LONG
+
+WRONG = "The Craft says to write tests after the code"
+
+def shelved():
+    """Something read: The Craft (#1), whose one fact got its chapter wrong (it says tests come first)."""
+    Readings.save({"number": 1, "title": "The Craft", "author": "", "source": "craft.md", "fingerprint": "f",
+                   "added": "2026-10-24 10:00", "topic": "read-1", "survey": None, "chapters": [
+                       {"number": 1, "title": "Testing", "kind": "body", "state": "read",
+                        "text": "Write one test for each behaviour before the code, then just enough code."}]})
+    Library.save("read-1", {"topic": "The Craft", "name": "The Craft", "kind": "reading", "reading": 1,
+                            "summary": "On small programs.",
+                            "facts": [{"text": WRONG, "phase": "tests", "chapter": 1, "slot": "chapter 1",
+                                       "section": "Order"}]})
+
+@pytest.mark.spec("TCH-8")
+def test_an_ask_about_a_book_sees_what_the_book_says(home_store, make_model, fake_ollama, capsys):
+    shelved()
+    fake_ollama.reply("Chapter 1 says each test comes before the code.", when="ask")
+    Asker(make_model(), Memory()).answer("when does The Craft write each test?")
+    prompt = fake_ollama.calls[0]["messages"][1]["content"]
+    assert "## From what you read\n[The Craft, chapter 1: Testing]\nWrite one test" in prompt
+    assert WRONG in prompt and capsys.readouterr().out.startswith("Chapter 1 says")
+
+@pytest.mark.spec("TCH-9")
+def test_a_teaching_about_a_book_is_checked_against_it_and_keeps_the_fact(home_store, make_model, fake_ollama):
+    shelved()
+    memory, teaching = Memory(), "The Craft says each test comes before the code, not after"
+    about = next(n for n, item in enumerate(memory.about(teaching), 1) if item["text"] == WRONG)
+    fake_ollama.reply(json.dumps({"claims": [{"text": "The Craft says to write each test before the code",
+                                              "preference": False}], "language": "",
+                                  "changes": [{"claims": [1], "fact": {"about": about,
+                                                                       "text": "Write each test before the code"}}]}),
+                      when="what to check")
+    fake_ollama.reply(json.dumps({"claims": [{"claim": 1, "verdict": "holds", "why": "chapter 1", "evidence": [1]}],
+                                  "changes": [{"change": 1, "follows": True, "why": "it agrees"}]}),
+                      when="weigh the evidence")
+    web = FakeWeb()
+    ending = Teacher(make_model(), web, memory).teach(teaching)
+    judged = fake_ollama.calls[1]["messages"][1]["content"]
+    assert "[1] The Craft, chapter 1: Testing\nWrite one test" in judged and f"Retire: [{about}]" in judged
+    assert web.queries == [] and ending["status"] == "done"
+    entry = Library.read("read-1")
+    assert [fact["text"] for fact in entry["retired"]] == [WRONG]
+    fact = entry["facts"][-1]
+    assert (fact["text"], fact["status"], fact["phase"], fact["chapter"], fact["section"]) == (
+        "Write each test before the code", "proven", "tests", 1, "Order")
+    assert fact["history"][-1]["event"] == "taught" and fact["sources"] == ["The Craft, chapter 1: Testing"]
+    no_check = {"claims": ["c"], "changes": [{"claims": [1], "fact": {"about": 1, "text": "t"}}]}
+    assert read_plan(no_check, count=1, readings=True)["changes"][0]["retire"] == [1]
+    with pytest.raises(ValueError, match="no command or web search"):
+        read_plan(no_check, count=1)

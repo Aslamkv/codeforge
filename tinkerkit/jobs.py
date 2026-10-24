@@ -23,8 +23,8 @@ lazy from pathlib import Path
 lazy from .messages import say
 lazy from .settings import EXERCISE_ENV, Home, fingerprint, now_text
 
-COMMANDS = ("task", "restart", "resume", "confirm", "amend", "add", "fix", "learn", "ask", "teach", "research",
-            "exercise")
+COMMANDS = ("task", "restart", "resume", "confirm", "amend", "add", "fix", "learn", "ask", "teach", "read",
+            "research", "exercise")
 STATES = ("running", "paused", "stopped", "finished")
 PAGE = 10              # jobs listed on one page
 PAUSE_WAIT = 150       # seconds a job is given to pause (save, and let go of the model) for one that starts
@@ -303,13 +303,14 @@ def signal_job(job):
 
 
 def is_job(argv):
-    """Whether a command line is a long command, run as a job: not one only shown (help, exercise status), not
-    learn NAME "DEFINITION" (kept at once), not a build an exercise runs (the exercise is the job)."""
+    """Whether a command line is a long command, run as a job: not one only shown (help, exercise status, read list,
+    read show), not learn NAME "DEFINITION" (kept at once), not a build an exercise runs (the exercise is the job)."""
     if not argv or argv[0] not in COMMANDS or {"-h", "--help"} & set(argv):
         return False
     if os.environ.get(EXERCISE_ENV) == "1":
         return False
-    return not (argv[0] == "learn" and len(argv) == 3) and not (argv[0] == "exercise" and argv[1:2] == ["status"])
+    return not (argv[0] == "learn" and len(argv) == 3) and not (argv[0] == "exercise" and argv[1:2] == ["status"]) \
+        and not (argv[0] == "read" and argv[1:2] in (["list"], ["show"]))
 
 
 def job_number(word):

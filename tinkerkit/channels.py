@@ -29,6 +29,8 @@ PIN_NOTE_WAIT = 2                              # seconds before Telegram's note 
 CHECK_TRIES = 3                                # tries of a channel's first call when it starts listening
 RATE_LIMIT_WAITS = 3                           # times a call waits out Telegram's "too many requests"
 CAPTION_CHARS = 1024                           # the longest caption Telegram takes on a file
+BOT_DOWNLOAD_BYTES = 20_000_000                # the largest file Telegram lets a bot download
+DOWNLOAD_WAIT = 120                            # seconds a file sent in a chat may take to download
 FORM = "application/x-www-form-urlencoded"
 
 
@@ -248,6 +250,8 @@ class TelegramChannel(Channel):
         for update in updates:
             self.offset = update["update_id"] + 1
             message = update.get("message") or {}
+            if message.get("document") and str(message["chat"]["id"]) in map(str, self.allowed):
+                message = self.book_in(message)
             if message.get("text"):
                 messages.append(self.message_of(message))
                 self.asked[str(message["chat"]["id"])] = (message["text"], time.monotonic())
@@ -260,6 +264,41 @@ class TelegramChannel(Channel):
         person = message.get("from") or {}
         sender = person.get("username") or person.get("first_name", "")
         return Message(message["chat"]["id"], message["text"], sender, message.get("message_id"))
+
+    def book_in(self, message):
+        """A file sent in an allowed chat, as the message to read it: read with the file kept in Tinker's home (the
+        link Telegram gives a bot carries its token, so it is never passed on). A file too large for a bot, or one
+        that cannot be downloaded, is said to the person, and the message has no text."""
+        chat, document = str(message["chat"]["id"]), message["document"]
+        name = document.get("file_name") or "book"
+        if document.get("file_size", 0) > BOT_DOWNLOAD_BYTES:
+            self.send(chat, f"{name} is larger than a bot may download from Telegram (20 MB): send a link that "
+                            f"downloads it instead (read URL).")
+            return dict(message, text="")
+        try:
+            path = self.downloaded(document["file_id"], name)
+        except (OSError, ChannelError, KeyError, TypeError) as exc:
+            self.send(chat, f"Could not take {name}: {exc}")
+            return dict(message, text="")
+        return dict(message, text=f"read {path}")
+
+    def downloaded(self, file_id, name):
+        """The file Telegram keeps for file_id, downloaded into Tinker's home as name (Home.reading_file); its path."""
+        found = self.call("getFile", file_id=file_id)["file_path"]
+        connection = self.connection(DOWNLOAD_WAIT)
+        try:
+            connection.request("GET", f"/file/bot{self.secrets.get('token', '')}/{found}", None, {})
+            response = connection.getresponse()
+            status, body = response.status, response.read()
+        except http.client.HTTPException, OSError:
+            raise OSError("Telegram did not send the file") from None
+        finally:
+            connection.close()
+        if status != 200:
+            raise ChannelError(f"Telegram answered {status} for the file")
+        path = Home.reading_file(name)
+        path.write_bytes(body)
+        return path
 
     def skip_waiting(self):
         try:

@@ -145,6 +145,12 @@ class Internet:
         return Fetcher(int(Config.get("fetch_workers")), float(Config.get("fetch_timeout")),
                        int(Config.get("fetch_max_bytes")), float(Config.get("fetch_domain_delay")), log=log)
 
+    @staticmethod
+    def download(url, max_bytes):
+        """(bytes, why it failed) of a file at a web address (a book to read), by the plugin's own fetcher: no web
+        backend is needed for it."""
+        return Internet.page_fetcher().download(url, max_bytes)
+
     def search(self, query, count):
         """[{title, url, content}] the web search finds (web addresses only), or None. In a job, a search it made
         before is answered from its journal."""

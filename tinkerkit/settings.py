@@ -164,6 +164,18 @@ TEACH_CLAIMS = 4                  # claims a teaching is checked as
 TEACH_COMMANDS = 3                # commands that check it on this machine
 TEACH_SEARCHES = 3                # web searches that check it
 
+# --- reading: tinker read SOURCE (a book, an article, a document) --------------------------------------------
+READ_MAX_BYTES = 50_000_000       # the largest file read (a link's download stops here)
+READ_CHAPTERS = 5                 # chapters a book is split into at least, when its contents go that deep
+READ_WINDOW_CHARS = 20_000        # a text with no chapter headings is read in parts this long
+READ_INDEX_TERMS = 40             # index terms the survey sees: those the index refers to most
+READ_TERMS = 12                   # key terms the survey names, followed through every chapter
+READ_FOCUS_CHAPTERS = 3           # chapters read again for read #N "WHAT": those most about it
+READ_TEXT_SHARE = 0.6             # share of a chapter's prompt its text may take (the rest: the book, notes)
+READ_CHUNKS = 3                   # parts of a chapter a focused read shows: its opening, then the most related
+READ_POINTS = 8                   # facts one chapter may give
+READ_PASSAGES = 4                 # passages of the books an ask or a teach sees, the most related first
+
 # --- tinker exercise LANGUAGE: practice projects that teach Tinker a language ---------------------------
 EXERCISE_FOLDER = "tinker-exercise"  # in the projects folder: one folder per practice project
 EXERCISE_ENV = "TINKER_EXERCISE"  # =1: a run an exercise started (its tracker says so; it never pauses one)
@@ -242,6 +254,13 @@ class Home:
         """The page tinker memory --graph writes: what Tinker knows, as a graph to open in a browser."""
         cls.root.mkdir(parents=True, exist_ok=True)
         return cls.root / "memory.html"
+
+    @classmethod
+    def reading_file(cls, name):
+        """Where a file sent in a chat is kept for tinker read: its name, made safe, in the home's reading folder."""
+        folder = cls.root / "reading"
+        folder.mkdir(parents=True, exist_ok=True)
+        return folder / (re.sub(r"[^\w.-]+", "-", Path(name).name).strip("-.") or "book")
 
     @classmethod
     def lock_file(cls, name):

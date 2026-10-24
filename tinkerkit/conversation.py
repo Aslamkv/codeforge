@@ -385,6 +385,8 @@ class Desk:
             return self.ask_to_exit(channel, message.chat, command)
         if command == "channel" and words[1:2] and words[1] in TERMINAL_ONLY:
             return f"🖥 `channel {words[1]}` asks in a terminal: `tinker channel {words[1]}` there"
+        if command == "read" and words[1:2] in (["list"], ["show"]):
+            return md(t"📚 **{' '.join(words)}**\n{self.tinker(words):block}")
         if command in DELETES and "--yes" not in words:
             return self.ask_first(channel, message.chat, words)
         if command in LONG:

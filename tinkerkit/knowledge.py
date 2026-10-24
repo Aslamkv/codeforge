@@ -1024,6 +1024,22 @@ class Library:
         return sum(gone)
 
     @staticmethod
+    def taught_fact(slug, about, text, sources):
+        """A fact the person taught in place of a claim of a topic (about: its id, retired or not), kept as proven with
+        its sources, where that claim was (its phase, chapter and section); None when the topic has no such claim."""
+        entry = Library.read(slug) or {}
+        old = next((claim for key in Library.CLAIMS + ("retired",) for claim in entry.get(key, [])
+                    if claim.get("id") == about), None)
+        if old is None:
+            return None
+        fact = {"text": text[:FACT_CHARS], "phase": old.get("phase", "book"), "status": "proven",
+                "sources": list(dict.fromkeys(sources)), "id": fingerprint(text)[:12],
+                **{key: old[key] for key in ("chapter", "slot", "section") if key in old}}
+        record(fact, "taught", None)
+        Home.store().update("learned", slug, lambda kept: dict(kept, facts=kept.get("facts", []) + [fact]))
+        return fact
+
+    @staticmethod
     def slug(topic):
         """"Test-driven development" -> test-driven-development, "C++" -> cpp, "Python 3.14" -> python-3-14."""
         text = topic.lower().replace("+", "p").replace("#", "sharp")

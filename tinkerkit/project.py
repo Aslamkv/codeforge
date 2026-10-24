@@ -562,6 +562,9 @@ class Tracker:
              "frame": ("📝 Framing the research questions", "📝 Questions framed"),
              "investigate": ("🔬 Reading and cross-checking sources", "🔬 Sources cross-checked"),
              "keep": ("💾 Saving what was learned", "💾 Saved"),
+             "open": ("📖 Opening the book", "📖 Book opened"),
+             "survey": ("🧭 Reading its contents, foreword and index", "🧭 Chose the chapters to read"),
+             "chapters": ("📚 Reading the chapters that matter", "📚 Chapters read"),
              # tinker ask's and tinker teach's
              "answer": ("💬 Answering from what Tinker keeps", "💬 Answered"),
              "understand": ("🤔 Working out what to check", "🤔 Worked out what to check"),

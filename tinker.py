@@ -33,6 +33,8 @@ Usage (a project is named as @ID or @folder; without one, it is this folder's):
     tinker jobs [running|paused|stopped|finished] [PAGE] | tinker stop [#JOB] | tinker resume [#JOB | @PROJECT]
     tinker learn WHAT                     learn a language, a tool or a domain (Tinker tells which)
     tinker learn NAME ["DEFINITION"]      a command of yours Tinker may use (an alias in your shell)
+    tinker read FILE | URL                store a book, an article or a document, then learn from every chapter
+    tinker read list | read show #N | read #N ["WHAT"]   the reading list; one reading; go on, or look again for WHAT
     tinker exercise LANGUAGE | status    practise a language on its own; it pauses whenever you ask
     tinker doctor                         what is missing or wrong, and the command that fixes it
     tinker models | tinker calibrate NAME | tinker use-model NAME | tinker embed NAME | tinker use-web NAME
@@ -234,6 +236,7 @@ from tinkerkit.model import Calibrator, Model, Models, Ollama, OllamaError
 from tinkerkit.planning import Designer, InterfaceReviewer, Recaller, SpecWriter
 from tinkerkit.project import Brief, Outcome, Project, RunChecks, Runs, Tracker, project_store, saved
 from tinkerkit.prompts import Prompts
+from tinkerkit.reading import Reader
 from tinkerkit.session import Session
 from tinkerkit.teaching import Asker, Memory, Teacher
 from tinkerkit.settings import (
@@ -242,7 +245,7 @@ from tinkerkit.settings import (
 )
 from tinkerkit.web import Internet
 
-from tinkerkit import conversation, exercising
+from tinkerkit import conversation, exercising, reading
 
 try:  # chat channels are a plugin: without tinkerkit/channels.py, Tinker works as it did, in the terminal
     from tinkerkit import channels
@@ -294,9 +297,9 @@ class Cli:
     RUNS = tuple(c.name for c in COMMANDS if c.run and c.name != "confirm")
     COMMANDS = tuple(c.name for c in COMMANDS if c.cli and c.group != "Talk" and c.name not in ("help", "channel",
                                                                                                 "confirm"))
-    LEARNING = ("learn", "exercise")  # the commands that load the model for long (but for teaching a command)
+    LEARNING = ("learn", "exercise", "read")  # the commands that load the model for long (but for teaching a command)
     FIELDS = {"reset": False, "config": None, "models": False, "use_model": None, "embed": None, "use_web": None,
-              "calibrate": None, "learn": None, "ask": None, "teach": None, "exercise": None, "memory": False, "runs": False, "status": None, "log": None, "jobs": None, "stop": None,
+              "calibrate": None, "learn": None, "ask": None, "teach": None, "read": None, "exercise": None, "memory": False, "runs": False, "status": None, "log": None, "jobs": None, "stop": None,
               "doctor": False, "task": None, "spec": None, "spec_file": None, "restart": False, "resume": None,
               "amend": None, "add": None, "fix": None, "workdir": None, "web": False, "confirm": False,
               "rename": None, "yes": False, "calls": False, "graph": False}
@@ -346,8 +349,18 @@ class Cli:
             raise SystemExit(0)
         if argv[0] == "clear":
             given = Cli.parser("clear").parse_args(argv[1:])
-            Home.clear(given.parts, given.yes)
+            Cli.cleared(given.parts, given.yes)
             raise SystemExit(0)
+
+    @staticmethod
+    def cleared(parts, yes):
+        """tinker clear PART... (Home's parts), or tinker clear read [#N...]: readings, alone."""
+        if parts[0] != "read":
+            return Home.clear(parts, yes)
+        numbers = [job_number(word) for word in parts[1:]]
+        if None in numbers:
+            raise SystemExit("tinker clear read takes reading numbers alone: tinker clear read #N (tinker read list)")
+        reading.forgotten(numbers, yes)
 
     @staticmethod
     def known_command(argv):
@@ -489,6 +502,8 @@ class Cli:
             args.learn = Cli.learning(given.words, parser)
         elif command in ("jobs", "stop"):
             setattr(args, field, Cli.job_words(command, given.words, parser))
+        elif command == "read":
+            args.read = Cli.reading(given.words, parser)
         elif command in ("ask", "teach", "exercise"):
             setattr(args, field, Cli.non_empty(" ".join(given.words), command, parser))
         elif command == "config":
@@ -538,6 +553,17 @@ class Cli:
             parser.error('use tinker learn WHAT (e.g. tinker learn Flask) or tinker learn NAME "DEFINITION" '
                          '(quote the definition)')
         return words
+
+    @staticmethod
+    def reading(words, parser):
+        """read's words, checked: list; show #N; #N [WHAT] (its quotes left out); else a source (its words, joined)."""
+        if words[0] in ("list", "show"):
+            if words == ["list"] or (words[0] == "show" and len(words) == 2 and job_number(words[1])):
+                return words
+            parser.error("use tinker read list, or tinker read show #N")
+        if job_number(words[0]):
+            return words[:1] + ([" ".join(words[1:]).strip(" \"'“”")] if words[1:] else [])
+        return [Cli.non_empty(" ".join(words), "read", parser)]
 
     @staticmethod
     def non_empty(value, command, parser):
@@ -608,7 +634,8 @@ class Cli:
 class Commands:
     """The commands that show or change Tinker's settings, models, what it knows and the projects, then
     exit: tinker config, tinker models, tinker use-model, tinker embed, tinker use-web, tinker calibrate,
-    tinker learn, tinker ask, tinker teach, tinker memory, tinker runs, tinker status, tinker log, tinker rename."""
+    tinker learn, tinker ask, tinker teach, tinker read, tinker memory, tinker runs, tinker status, tinker log,
+    tinker rename."""
 
     def __init__(self, args):
         self.args = args
@@ -634,6 +661,8 @@ class Commands:
             self.ask()
         elif args.teach:
             self.teach()
+        elif args.read:
+            self.read()
         elif args.exercise:
             self.exercise()
         elif args.memory:
@@ -847,6 +876,26 @@ class Commands:
         model, memory = Commands.model_in_use(name, settings, "teach"), Memory(Embeddings.configured())
         Commands.reported(f"Teaching: {first_line(teaching, 60)}", model,
                           lambda tracker: Teacher(model, internet, memory, tracker).teach(teaching))
+
+    def read(self):
+        """tinker read SOURCE: the source stored on the reading list (no model), then learned from as read #N, which
+        its job is from then on: stopped and resumed, it goes on with the chapters not read yet. tinker read #N
+        ["WHAT"]: go on, or look again for WHAT. tinker read list, tinker read show #N: show the reading list."""
+        words = self.args.read
+        if words == ["list"]:
+            return reading.show_list()
+        if words[0] == "show":
+            return reading.show(job_number(words[1]))
+        number, focus = job_number(words[0]), " ".join(words[1:])
+        if number is None:
+            number, new = reading.stored(words[0])
+            if not new:
+                return
+            Jobs.retarget(["read", f"#{number}"])
+        title = reading.known_reading(number)["title"]
+        model = Commands.model_in_use(*Commands.checked_model(), "read")
+        Commands.reported(f"Reading #{number} {first_line(title, 50)}", model,
+                          lambda tracker: Reader(model, tracker).read(number, focus))
 
     def exercise(self):
         """tinker exercise LANGUAGE: practice projects in that language, one after another, until it is stopped

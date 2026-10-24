@@ -113,6 +113,22 @@ COMMANDS = [
             "web (tinker use-web).", chat="long", words="any",
             arguments=[Argument("words", "+", "WHAT", "what to correct, and why (no quotes needed)")],
             example="teach ruff formats Python as black does, so ruff alone is enough"),
+    Command("read", "Learn", "read FILE | URL", "store a book, an article or a document, then learn from every chapter",
+            "Read what you give it: a book, an article or a document (EPUB, Markdown or plain text; a PDF is refused: "
+            "convert it to EPUB first, Calibre's ebook-convert keeps its chapters). Its whole text is stored first, "
+            "numbered on the reading list (#1, #2 ...), so you never send it twice; then every chapter is read, the "
+            "core ones first (its contents, foreword and index tell which), each saved as soon as it is read. It is a "
+            "job: stop it, and read #N (or resume) goes on with the chapters not read yet. read #N \"WHAT\" reads the "
+            "chapters most about WHAT again, with it in mind. Ask about it (tinker ask) and correct it (tinker teach): "
+            "its own text is the evidence. What teaches how to build software guides the builds that need it. In a "
+            "chat, attach the file.", chat="long", words="any",
+            arguments=[Argument("words", "+", "WORDS", "FILE | URL (what to read: a file, or a link that downloads "
+                                                       "it), list, show #N, or #N [WHAT] (go on; with WHAT, look again)")],
+            example='read #2 "the chapter on retries: when to give up"',
+            rows=[("read FILE | URL", "store a book, an article or a document, then learn from every chapter"),
+                  ("read list", "the reading list: how much of each is read, what was learned"),
+                  ("read show #N", "one reading: its chapters, read or not, and what each taught"),
+                  ('read #N ["WHAT"]', "go on with the chapters not read yet, or look again for WHAT")]),
     Command("exercise", "Learn", "exercise LANGUAGE | status",
             "practise a language on its own: get better, faster, and learn from mistakes",
             "Practise a language on its own, to write better code faster: Tinker learns the language first when it "
@@ -127,8 +143,8 @@ COMMANDS = [
             chat="own", words="any", arguments=[Argument("words", "+", "LANGUAGE | status")],
             example="exercise rust"),
     Command("jobs", "Jobs", "jobs [running|paused|stopped|finished] [PAGE]", "the long commands: running, paused, stopped",
-            "List the jobs: every long command (a task, add, fix, learn, ask, teach, research, exercise) is one, numbered "
-            "#1, #2 ... One runs at a time: a job you start pauses the one that runs, which goes on by itself once Tinker "
+            "List the jobs: every long command (a task, add, fix, learn, ask, teach, read, research, exercise) is one, "
+            "numbered #1, #2 ... One runs at a time: a job you start pauses the one that runs, which goes on by itself once Tinker "
             "is idle (resume #N: at once). Without a state, the running ones, the paused ones and the stopped ones; "
             "running, paused, stopped or finished lists those alone. Newest first, 10 to a page (jobs stopped 2: the "
             "second page).", chat="quick", words="any",
@@ -172,15 +188,23 @@ COMMANDS = [
     Command("config", "Set up", "config [KEY VALUE]", "the settings, or set one",
             "Show the settings a build uses, or set one: tinker config KEY VALUE (e.g. tinker config test_timeout 90).",
             chat="quick", words="any", arguments=[Argument("words", "*", "KEY VALUE", "the setting and its value")]),
-    Command("clear", "Set up", "clear PART... [--yes]", "delete parts of what Tinker keeps: languages, memory, "
-            "learned, models, runs, commands, history (clear chat: empty the chats)",
+    Command("clear", "Set up", "clear PART... [--yes]", "delete parts of what Tinker keeps (the parts below)",
             "Delete parts of what Tinker keeps, e.g. tinker clear languages memory: languages (toolchains, fixes, "
             "lessons per language), memory (lessons for any language), learned (what tinker learn learned), docs (the "
             "documentation it fetched, per version), models (measurements), runs (the list of projects), commands (your commands), "
-            "history (what the chats showed; in a chat its messages go too). In a conversation, clear chat takes every "
+            "history (what the chats showed; in a chat its messages go too), exercise (the exercises), read [#N...] "
+            "(readings: their text and what was learned from them; every one with no #N). In a conversation, clear "
+            "chat takes every "
             "message out of the chats but Tinker's status, at once: history keeps what they showed.", chat="quick", words="any",
             deletes=True, arguments=[Argument("parts", "+", "PART", "languages, memory, learned, docs, models, "
-                                                                    "runs, commands or history")], options=("yes",)),
+                                                                    "runs, commands, history, exercise, or read "
+                                                                    "[#N...]")], options=("yes",),
+            rows=[("clear languages | memory | learned", "what was learned: per language, for any language, by learn"),
+                  ("clear docs | models | runs | commands", "fetched docs, model measures, the project list, your commands"),
+                  ("clear exercise", "the exercises: their projects, measures and where each stopped"),
+                  ("clear read [#N...]", "readings: their text and what was learned from them (all, with no #N)"),
+                  ("clear history", "what the chats showed, and what you asked (the chat's messages go too)"),
+                  ("clear chat", "in a chat: take its messages out now; history keeps them")]),
     Command("reset", "Set up", "reset [--yes]", "delete everything Tinker keeps (projects stay)",
             "Delete everything Tinker keeps (settings, measured models, what it learned, the list of projects); "
             "projects are not touched.", chat="quick", deletes=True, options=("yes",)),
