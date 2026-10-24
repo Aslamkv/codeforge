@@ -5,7 +5,7 @@ import zipfile
 import pytest
 from conftest import MODEL
 
-from tinkerkit import cli, conversation, reading
+from tinkerkit import cli, conversation, reading, settings
 from tinkerkit.cli import Cli, Commands
 from tinkerkit.fetcher import Fetcher
 from tinkerkit.jobs import is_job
@@ -581,3 +581,19 @@ def test_the_reading_list_is_shown_and_cleared(
         cli.Cli.cleared(["read", "memory"], yes=True)
     cli.Cli.cleared(["read"], yes=True)
     assert Readings.all() == {}
+
+
+@pytest.mark.spec("RDG-13")
+def test_the_reading_list_comes_a_page_at_a_time(tmp_path, home_store, capsys, monkeypatch):
+    monkeypatch.setattr(settings, "PER_PAGE", 1)
+    stored(craft(tmp_path))
+    stored(craft(tmp_path, "other.md", MARKDOWN + "\nA second edition."))
+    capsys.readouterr()
+    show_list()
+    first = capsys.readouterr().out
+    assert "#2 The Craft" in first and "#1 " not in first and "tinker read list 2 for more" in first
+    show_list(2)
+    assert "#1 The Craft" in capsys.readouterr().out
+    assert Cli.parse(["read", "list", "2"]).read == ["list", "2"]
+    with pytest.raises(SystemExit):
+        Cli.parse(["read", "list", "two"])

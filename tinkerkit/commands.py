@@ -278,7 +278,10 @@ COMMANDS = [
         example='read #2 "the chapter on retries: when to give up"',
         rows=[
             ("read FILE | URL", "store a book, an article or a document, then learn from every chapter"),
-            ("read list", "the reading list: how much of each is read, what was learned"),
+            (
+                "read list [PAGE]",
+                "the reading list, a page at a time: how much of each is read, what was learned",
+            ),
             ("read show #N", "one reading: its chapters, read or not, and what each taught"),
             ('read #N ["WHAT"]', "go on with the chapters not read yet, or look again for WHAT"),
         ],

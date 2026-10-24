@@ -30,6 +30,7 @@ lazy from .settings import (
     READ_WINDOW_CHARS,
     Config,
     Home,
+    Numbered,
     confirmed,
     fingerprint,
     first_line,
@@ -40,6 +41,7 @@ lazy from .settings import (
 lazy from .web import Internet, is_web_address
 
 CHAPTER_ROLE_ORDER = ("core", "supporting", "other")
+READINGS = Numbered("readings", "reading numbers")
 CHAPTER_STATE_ICONS = {"read": "✅", "unread": "⏳", "raw": "📄"}
 ABOUT_CHAPTER_TITLES = (
     "foreword",
@@ -267,7 +269,7 @@ class Readings:
         )
         if known is not None:
             return Added(known, False)
-        number = Home.store().update("reading numbers", "last", lambda last: (last or 0) + 1)
+        number = READINGS.next_number()
         chapters = [
             dataclasses.asdict(
                 dataclasses.replace(chapter, state="raw" if chapter.kind in ("index", "raw") else "unread")
@@ -291,16 +293,15 @@ class Readings:
 
     @staticmethod
     def get(number):
-        return Home.store().get("readings", str(number))
+        return READINGS.get(number)
 
     @staticmethod
     def all():
-        found = {int(key): entry for key, entry in Home.store().items("readings").items()}
-        return dict(sorted(found.items(), reverse=True))
+        return {entry["number"]: entry for entry in READINGS.newest()}
 
     @staticmethod
     def save(entry):
-        Home.store().put("readings", str(entry["number"]), entry)
+        READINGS.put(entry)
 
     @staticmethod
     def surveyed(entry, survey):
@@ -354,7 +355,7 @@ class Readings:
     @staticmethod
     def forget(number):
         entry = Readings.get(number)
-        Home.store().delete("readings", str(number))
+        READINGS.delete(number)
         Home.store().delete("learned", entry["topic"])
 
     @staticmethod
@@ -411,14 +412,16 @@ def ending(entry, new, chapters):
     }
 
 
-def show_list():
-    readings = Readings.all()
+def show_list(page=1):
+    readings, pages = Numbered.page(READINGS.newest(), page)
     if not readings:
         say.info("Nothing on the reading list: tinker read FILE | URL adds one (in a chat: attach it).", "📭")
         return
     with say.part("Reading list", "📚"):
-        for number, entry in readings.items():
-            say.item(f"#{number} {entry['title']}: {progress(entry)} · added {entry['added']}")
+        for entry in readings:
+            say.item(f"#{entry['number']} {entry['title']}: {progress(entry)} · added {entry['added']}")
+    if page < pages:
+        say.info(f"Page {page} of {pages}: tinker read list {page + 1} for more.", "👉")
     say.info("tinker read show #N shows one; tinker read #N goes on with it.", "👉")
 
 

@@ -321,7 +321,7 @@ is saved as soon as it is read, so what it learned is there to ask about while i
 ```sh
 tinker read ~/Books/clean-architecture.epub          # a file: EPUB, Markdown or plain text
 tinker read https://example.org/files/my-book.epub   # a link that downloads it
-tinker read list                                     # the reading list: how much of each is read
+tinker read list [PAGE]                              # the reading list, a page at a time: how much of each is read
 tinker read show #1                                  # one reading: each chapter, read or not, and what it taught
 tinker read #1                                       # go on with the chapters not read yet
 tinker read #1 "the chapter on retries: when to give up"   # look again, with that in mind

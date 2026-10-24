@@ -194,6 +194,7 @@ SAME_CLAIM_SIMILARITY = 0.8
 REPEAT_CLAIM_SIMILARITY = 0.9
 MAX_RECALL_TOPICS = 6
 TOPIC_RELEVANT_SIMILARITY = 0.6
+PER_PAGE = 10
 
 
 Paged = namedtuple("Paged", "items pages")
@@ -275,7 +276,7 @@ class Home:
             ),
             "commands": (["commands"], [], "your commands Tinker may use"),
             "history": (
-                ["chat history", "chat history numbers"],
+                ["chat history"],
                 [],
                 "what the chats showed, and what you asked (their messages go from the chats in a day)",
             ),
@@ -670,6 +671,39 @@ class Store:
             "DO UPDATE SET value = excluded.value",
             (collection, key, json.dumps(value, ensure_ascii=False)),
         )
+
+
+class Numbered:
+    def __init__(self, collection, counter):
+        self.collection, self.counter = collection, counter
+
+    def add(self, entry):
+        return self.put(dict(entry, number=self.next_number()))
+
+    def next_number(self):
+        return Home.store().update(self.counter, "last", lambda last: (last or 0) + 1)
+
+    def get(self, number):
+        return Home.store().get(self.collection, str(number))
+
+    def put(self, entry):
+        Home.store().put(self.collection, str(entry["number"]), entry)
+        return entry
+
+    def update(self, number, change):
+        return Home.store().update(self.collection, str(number), change)
+
+    def delete(self, number):
+        Home.store().delete(self.collection, str(number))
+
+    def newest(self):
+        entries = Home.store().items(self.collection).values()
+        return sorted(entries, key=lambda entry: entry["number"], reverse=True)
+
+    @staticmethod
+    def page(entries, number):
+        pages = max(1, -(-len(entries) // PER_PAGE))
+        return Paged(entries[(number - 1) * PER_PAGE : number * PER_PAGE], pages)
 
 
 class Log:

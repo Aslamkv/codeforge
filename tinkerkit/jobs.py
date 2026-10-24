@@ -9,7 +9,7 @@ lazy import time
 lazy from pathlib import Path
 
 lazy from .messages import say
-lazy from .settings import EXERCISE_ENV, Home, Paged, confirmed, fingerprint, now_text
+lazy from .settings import EXERCISE_ENV, Home, Numbered, confirmed, fingerprint, now_text
 
 COMMANDS = (
     "task",
@@ -26,8 +26,8 @@ COMMANDS = (
     "research",
     "exercise",
 )
+JOBS = Numbered("jobs", "job numbers")
 STATES = ("running", "paused", "stopped", "finished", "archived")
-JOBS_PER_PAGE = 10
 JOB_PAUSE_GRACE_SECONDS = 150
 PAUSED_JOB_IDLE_LOOK_SECONDS = 1.0
 JOB_STOP_SIGNAL = signal.SIGUSR2
@@ -114,7 +114,7 @@ class Jobs:
 
     @classmethod
     def new(cls, argv):
-        number = Home.store().update("job numbers", "last", lambda last: (last or 0) + 1)
+        number = JOBS.next_number()
         title = " ".join(word for word in argv if not word.startswith("--"))
         return {
             "number": number,
@@ -163,29 +163,27 @@ class Jobs:
 
     @staticmethod
     def update(number, **changes):
-        return Home.store().update("jobs", str(number), lambda job: dict(job, **changes, updated=now_text()))
+        return JOBS.update(number, lambda job: dict(job, **changes, updated=now_text()))
 
     @staticmethod
     def save(job):
-        job = dict(job, updated=now_text())
-        Home.store().put("jobs", str(job["number"]), job)
-        return job
+        return JOBS.put(dict(job, updated=now_text()))
 
     @staticmethod
     def get(number):
-        job = Home.store().get("jobs", str(number))
+        job = JOBS.get(number)
         return settled(job) if job else None
 
     @staticmethod
     def every():
-        jobs = [settled(job) for job in Home.store().items("jobs").values()]
-        return sorted(jobs, key=lambda job: job["number"], reverse=True)
+        return [settled(job) for job in JOBS.newest()]
 
     @staticmethod
     def lost():
-        jobs = Home.store().items("jobs").values()
         return [
-            job for job in jobs if job.get("state") in ("running", "paused") and not alive(job.get("pid"))
+            job
+            for job in JOBS.newest()
+            if job.get("state") in ("running", "paused") and not alive(job.get("pid"))
         ]
 
     @staticmethod
@@ -193,11 +191,6 @@ class Jobs:
         jobs = Jobs.every()
         states = [state] if state else ["running", "paused", "stopped"]
         return [job for wanted in states for job in jobs if job["state"] == wanted]
-
-    @staticmethod
-    def page(jobs, number):
-        pages = max(1, -(-len(jobs) // JOBS_PER_PAGE))
-        return Paged(jobs[(number - 1) * JOBS_PER_PAGE : number * JOBS_PER_PAGE], pages)
 
     @staticmethod
     def resumable(number=None):

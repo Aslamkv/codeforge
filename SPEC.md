@@ -139,10 +139,9 @@ the last column:
 | log `calls #N` | every model call job #N made itself (a run's go to its project's `events`), until the job is archived | `jobs` |
 | log `journal #N` | job #N's requests (model calls, web searches, page fetches) with their answers, until it finishes | `jobs` |
 
-Jobs, readings and the chat history are numbered lists, kept the same way. Each new entry takes the next
-number, and a number is never given again, even after a clear. `#N` names an entry. A list shows them newest
-first, 10 to a page, and a page that has more after it names the command for the next. Clearing archives jobs
-(**JOB-11**), and deletes readings (**RDG-13**) and the history (**SET-12**).
+Jobs, readings and the chat history are numbered lists (`Numbered`, **SET-18**). `#N` names an entry. A list
+shows them newest first, a page at a time, and a page that has more after it names the command for the next.
+Clearing archives jobs (**JOB-11**), and deletes readings (**RDG-13**) and the history (**SET-12**).
 
 Each project keeps its own state in `<project>/.tinker/project.db`:
 
@@ -257,6 +256,11 @@ The home, its database, the settings, and small helpers every module shares.
   not known is left out.
 - **SET-17** `groups_fitting(items, room, size)` keeps the items in order, in groups that each fit `room` (each
   item takes `size + 1`). An item larger than the room is a group of its own.
+- **SET-18** `Numbered(collection, counter)` is one numbered list in the home database. `add(entry)` keeps the
+  entry under the next number (its `number`), and a number is never given again, even once its entry is
+  deleted or its list cleared. `get(N)`, `put(entry)`, `update(N, change)` and `delete(N)` work as named, and
+  `newest()` gives the entries newest first. `page(entries, N)` gives page N of the entries, `PER_PAGE` (10) to
+  a page, with how many pages there are (at least one).
 
 ## jobs (JOB)
 

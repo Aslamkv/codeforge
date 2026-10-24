@@ -38,6 +38,7 @@ lazy from .settings import (
     Config,
     Home,
     Log,
+    Numbered,
     clock,
     first_line,
     now_text,
@@ -431,12 +432,18 @@ class Cli:
     @staticmethod
     def reading(words, parser):
         if words[0] in ("list", "show"):
-            if words == ["list"] or (words[0] == "show" and len(words) == 2 and job_number(words[1])):
+            if Cli.lists_readings(words) or (words[0] == "show" and len(words) == 2 and job_number(words[1])):
                 return words
-            parser.error("use tinker read list, or tinker read show #N")
+            parser.error("use tinker read list [PAGE], or tinker read show #N")
         if job_number(words[0]):
             return words[:1] + ([" ".join(words[1:]).strip(" \"'“”")] if words[1:] else [])
         return [Cli.non_empty(" ".join(words), "read", parser)]
+
+    @staticmethod
+    def lists_readings(words):
+        return words[0] == "list" and (
+            len(words) == 1 or (len(words) == 2 and words[1].isdigit() and int(words[1]) > 0)
+        )
 
     @staticmethod
     def non_empty(value, command, parser):
@@ -746,8 +753,8 @@ class Commands:
 
     def read(self):
         words = self.args.read
-        if words == ["list"]:
-            return reading.show_list()
+        if words[0] == "list":
+            return reading.show_list(int(words[1]) if words[1:] else 1)
         if words[0] == "show":
             return reading.show(job_number(words[1]))
         number, focus = job_number(words[0]), " ".join(words[1:])
@@ -1001,7 +1008,7 @@ class Commands:
         if not jobs:
             say.text(f"No {state or 'running, paused or stopped'} jobs.")
             return
-        shown, pages = Jobs.page(jobs, page)
+        shown, pages = Numbered.page(jobs, page)
         say.text(f"{'JOB':6} {'STATE':9} {'STARTED':17} COMMAND")
         for job in shown:
             title = job["title"][:70] + ("..." if len(job["title"]) > 70 else "")

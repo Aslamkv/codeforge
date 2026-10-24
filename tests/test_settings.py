@@ -10,8 +10,11 @@ from conftest import REAL_HOME
 
 import tinkerkit.settings as settings
 from tinkerkit.settings import (
+    PER_PAGE,
     Config,
     Home,
+    Numbered,
+    Paged,
     Store,
     after_what_they_use,
     fingerprint,
@@ -400,3 +403,23 @@ def test_config_set_only_the_settings_with_no_command_of_their_own():
         Config.set("model", "x")
     with pytest.raises(SystemExit, match="no setting 'colour'"):
         Config.set("colour", "red")
+
+
+@pytest.mark.spec("SET-18")
+def test_a_numbered_list_never_gives_a_number_again(home_store):
+    listed = Numbered("things", "thing numbers")
+    first, second = listed.add({"text": "a"}), listed.add({"text": "b"})
+    assert (first["number"], second["number"]) == (1, 2) and listed.get(2) == second
+    listed.delete(2)
+    home_store.delete("things")
+    assert listed.add({"text": "c"})["number"] == 3 and listed.get(2) is None
+    assert listed.update(3, lambda entry: dict(entry, text="d"))["text"] == "d"
+    listed.put(dict(first, text="e"))
+    assert [entry["text"] for entry in listed.newest()] == ["d", "e"]
+
+
+@pytest.mark.spec("SET-18")
+def test_a_list_comes_a_page_at_a_time():
+    entries = list(range(PER_PAGE * 2 + 1))
+    assert PER_PAGE == 10 and Numbered.page(entries, 1) == Paged(entries[:PER_PAGE], 3)
+    assert Numbered.page(entries, 3) == Paged([entries[-1]], 3) and Numbered.page([], 1) == Paged([], 1)
