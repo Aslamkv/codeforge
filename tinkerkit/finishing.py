@@ -24,7 +24,7 @@ class Tidy(Phase):
     MAX_FILES = FIX_FILES  # files one tidy pass may change
 
     def run(self, cycle):
-        if not self.s.toolchain.lint:
+        if not self.session.toolchain.lint:
             say.skip("No lint command: nothing to tidy")
             return None
         output = self.lint()
@@ -32,8 +32,8 @@ class Tidy(Phase):
         if not reported:
             self.say_nothing_to_tidy(output)
             return None
-        say.info(f"$ {self.s.toolchain.lint}: problems in {', '.join(reported)}", "🧹")
-        passing = Verifier(self.s).passing()
+        say.info(f"$ {self.session.toolchain.lint}: problems in {', '.join(reported)}", "🧹")
+        passing = Verifier(self.session).passing()
         for path in reported:
             self.tidy(path, output, passing)
         left = self.reported(self.lint())
@@ -53,15 +53,16 @@ class Tidy(Phase):
     def lint(self):
         """What the linter reports ("" when nothing), after the formatter and its safe automatic
         fixes have run."""
-        self.s.format_code()
-        ok, output = self.s.toolchain.run_lint(self.ws)
+        self.session.format_code()
+        ok, output = self.session.toolchain.run_lint(self.workspace)
         return "" if ok else output
 
     def reported(self, output):
         """The project's code and test files the linter locates problems in, the most first (a file
         only quoted in another's problem, such as a script a test runs, is not one of them)."""
-        counted = [(self.findings(output, p), p) for p in self.s.files_on_disk("code", "test")] if output else []
-        return [p for n, p in sorted(counted, key=lambda pair: -pair[0]) if n][:self.MAX_FILES]
+        counted = [(self.findings(output, path), path)
+                   for path in self.session.files_on_disk("code", "test")] if output else []
+        return [path for count, path in sorted(counted, key=lambda pair: -pair[0]) if count][:self.MAX_FILES]
 
     @staticmethod
     def findings(output, path):
@@ -73,11 +74,11 @@ class Tidy(Phase):
         the reply changes only the lines reported (a few LINES blocks, not the file written again);
         reverted if a test breaks."""
         said = self.said_about(output, path)
-        lines = self.ws.read(path).splitlines()
-        numbered = "\n".join(f"{n:>4}| {line}" for n, line in enumerate(lines, 1))
+        lines = self.workspace.read(path).splitlines()
+        numbered = "\n".join(f"{number:>4}| {line}" for number, line in enumerate(lines, 1))
         parts = [Part(f"Linter output for {path}", Output.failure_text(said), True),
                  Part(f"File {path}, lines 1-{len(lines)} (numbered)", numbered, True, exact=True),
-                 Part("Language", self.p.language)]
+                 Part("Language", self.project.language)]
         try:
             change, reply = self.tidied(path, parts, len(lines))
         except PromptTooLarge as exc:
@@ -90,7 +91,7 @@ class Tidy(Phase):
         """What the linter says about one file: its blocks (linters print a problem, or a file's
         problems, as lines between blank ones: the message with its location and code) that name
         the file; the whole output when none is set apart."""
-        blocks = [b for b in re.split(r"\n\s*\n", output) if Output.names(b, path)]
+        blocks = [block for block in re.split(r"\n\s*\n", output) if Output.names(block, path)]
         return "\n\n".join(blocks) or output
 
     def tidied(self, path, parts, lines):
@@ -98,9 +99,10 @@ class Tidy(Phase):
         it gave no usable change."""
         change, reply = None, None
         for think in (False, None):
-            reply = self.s.ask(Prompts.TIDY_SYSTEM, parts, f"Tidy {path}", max_reply=self.s.model.fix_max,
-                               think=think)
-            change = self.ws.apply(reply, lambda p, exists: "only the lines shown may change", {path: (1, lines)})
+            reply = self.session.ask(Prompts.TIDY_SYSTEM, parts, f"Tidy {path}", max_reply=self.session.model.fix_max,
+                                     think=think)
+            change = self.workspace.apply(reply, lambda target, exists: "only the lines shown may change",
+                                          {path: (1, lines)})
             if change:
                 break
         return change, reply
@@ -110,7 +112,7 @@ class Tidy(Phase):
         if not change:
             say.skip(f"Tidy {path}: no usable change")
         elif not self.fewer_findings(path, output):
-            self.ws.revert(change)
+            self.workspace.revert(change)
             say.warn(f"Tidy {path}: the linter found as much or more in it afterwards; reverted")
         elif self.broke(change, passing):
             say.warn(f"Tidy {path}: it broke a passing test; reverted")
@@ -120,17 +122,17 @@ class Tidy(Phase):
     def fewer_findings(self, path, before):
         """Whether the linter now locates fewer problems in the file than before the change (a fix
         that leaves them, or makes a new one such as a name it removed but still uses, is no fix)."""
-        return self.findings(self.s.toolchain.run_lint(self.ws)[1], path) < self.findings(before, path)
+        return self.findings(self.session.toolchain.run_lint(self.workspace)[1], path) < self.findings(before, path)
 
     def broke(self, change, passing):
         """A test that passed fails now, or a test is gone from a test file it tidied."""
-        self.s.all_tests_run = None
-        tests_kept = all(TestRef.name_at(self.ws.read(path), name) >= 0 for path in change.files
-                         for name in self.p.test_names(path))
-        if tests_kept and passing <= Verifier(self.s).passing():
+        self.session.all_tests_run = None
+        tests_kept = all(TestRef.name_at(self.workspace.read(path), name) >= 0 for path in change.files
+                         for name in self.project.test_names(path))
+        if tests_kept and passing <= Verifier(self.session).passing():
             return False
-        self.ws.revert(change)
-        self.s.all_tests_run = None
+        self.workspace.revert(change)
+        self.session.all_tests_run = None
         return True
 
 
@@ -151,74 +153,76 @@ class ReadmeWriter(Phase):
     PLACEHOLDER_RE = re.compile(r"<[^<>\n]+>")  # a value that differs each run, e.g. <code>: any one matches
 
     def run(self, cycle):
-        readme = next((p for p, f in self.p.files.items() if f.get("kind") == "docs"), "README.md")
-        if not self.ws.exists(readme):
+        readme = next((path for path, info in self.project.files.items() if info.get("kind") == "docs"), "README.md")
+        if not self.workspace.exists(readme):
             guide = self.guide()
             cycle["serves"] = guide["serves"]
-            self.ws.write(readme, self.text(guide))
-            self.p.register([readme], "docs", "what it does, how to use, set up, run and test it")
+            self.workspace.write(readme, self.text(guide))
+            self.project.register([readme], "docs", "what it does, how to use, set up, run and test it")
             say.done(f"Wrote {readme}")
-            self.s.save()
+            self.session.save()
         self.check(cycle, readme)
         return None
 
     def guide(self):
         """{overview, features, usage: [{what, command, output}], serves} from one call; else the
         criteria as features, with no examples."""
-        code = [p for p in self.s.files_on_disk("code", "template") if p != ENV_FILE]
-        entry = self.p.entry_files(code)
-        parts = [Part("Request", self.p.run["task"], True, keep="head"),
-                 Part("What it does (its tested criteria)", "\n".join(f"- {s['behaviour']}" for s in self.p.criteria),
-                      True),
-                 Part("What a person runs once to use it", "\n".join(self.s.toolchain.use)
+        code = [path for path in self.session.files_on_disk("code", "template") if path != ENV_FILE]
+        entry = self.project.entry_files(code)
+        parts = [Part("Request", self.project.run["task"], True, keep="head"),
+                 Part("What it does (its tested criteria)",
+                      "\n".join(f"- {criterion['behaviour']}" for criterion in self.project.criteria), True),
+                 Part("What a person runs once to use it", "\n".join(self.session.toolchain.use)
                       or "(nothing: the language as installed is enough)", True),
-                 Part("How a person starts it, after that", self.s.toolchain.run or "(no entry point: it is used from "
-                                                                                    "code)", True),
-                 Part("Language", self.p.language, True),
-                 *[Part(f"File {p}", self.ws.read(p), atomic=True) for p in dict.fromkeys(entry + code)]]
+                 Part("How a person starts it, after that",
+                      self.session.toolchain.run or "(no entry point: it is used from code)", True),
+                 Part("Language", self.project.language, True),
+                 *[Part(f"File {path}", self.workspace.read(path), atomic=True) for path in dict.fromkeys(entry + code)]]
         try:
-            found = self.s.model.ask_until_usable(Prompts.README_SYSTEM, parts, "README", self.read, attempts=2,
-                                                  think=False)  # it describes code that exists; its examples are run
+            # it describes code that exists; its examples are run
+            found = self.session.model.ask_until_usable(Prompts.README_SYSTEM, parts, "README", self.read, attempts=2,
+                                                        think=False)
         except (PromptTooLarge, OllamaError) as exc:
             say.warn(f"README: {first_line(str(exc), 120)}; its features are the spec's criteria")
             found = None
-        return found or {"overview": "", "features": [s["behaviour"] for s in self.p.criteria], "usage": [],
+        return found or {"overview": "", "features": [criterion["behaviour"] for criterion in self.project.criteria],
+                         "usage": [],
                          "serves": False}
 
     def read(self, reply):
         data = reply.json()
         clean = lambda value: " ".join(str(value or "").split())
-        features = [clean(f) for f in data.get("features") or [] if clean(f)]
-        entries = [u for u in data.get("usage") or [] if isinstance(u, dict)]
-        usage = [{"what": clean(u.get("what")), "command": clean(u.get("command")),
-                  "output": str(u.get("output") or "").strip("\n")}
-                 for u in entries if clean(u.get("what")) and clean(u.get("command"))]
+        features = [clean(feature) for feature in data.get("features") or [] if clean(feature)]
+        entries = [use for use in data.get("usage") or [] if isinstance(use, dict)]
+        usage = [{"what": clean(use.get("what")), "command": clean(use.get("command")),
+                  "output": str(use.get("output") or "").strip("\n")}
+                 for use in entries if clean(use.get("what")) and clean(use.get("command"))]
         if not features or not usage:
             raise ValueError("it needs the features and at least one usage example")
-        serves = str(data.get("serves")).lower() in ("true", "yes") or any(self.LOCAL_RE.search(u["command"])
-                                                                          for u in usage)
+        serves = str(data.get("serves")).lower() in ("true", "yes") or any(self.LOCAL_RE.search(use["command"])
+                                                                          for use in usage)
         return {"overview": str(data.get("overview") or "").strip(), "features": features,
                 "usage": usage[:self.MAX_USAGE], "serves": serves, "requires": clean(data.get("requires"))}
 
     def text(self, guide):
         """What it is, its features, getting started (only what using it needs), usage as a person
         types it, settings, then development: setting it up for its tests, the tests, format and lint."""
-        sections = [f"# {self.p.workdir.name}", guide["overview"] or self.p.run["task"].strip(),
+        sections = [f"# {self.project.workdir.name}", guide["overview"] or self.project.run["task"].strip(),
                     "## Features", "\n".join(f"- {feature}" for feature in guide["features"])]
         started = self.getting_started(guide)
-        sections += ["## Getting started", *[s for s in started if s]] if any(started) else []
+        sections += ["## Getting started", *[step for step in started if step]] if any(started) else []
         if guide["usage"]:
-            sections += ["## Usage", "\n\n".join(f"- {u['what']}:\n\n```console\n$ {spelled(u['command'])}\n"
-                                                   f"{u['output']}".rstrip() + "\n```" for u in guide["usage"])]
-        if self.ws.exists(ENV_EXAMPLE):
+            sections += ["## Usage", "\n\n".join(f"- {use['what']}:\n\n```console\n$ {spelled(use['command'])}\n"
+                                                   f"{use['output']}".rstrip() + "\n```" for use in guide["usage"])]
+        if self.workspace.exists(ENV_EXAMPLE):
             sections += ["## Settings", f"Copy `{ENV_EXAMPLE}` to `{ENV_FILE}` and fill in what it asks for "
                                         f"(environment variables override it):",
-                         "```\n" + self.ws.read(ENV_EXAMPLE).strip() + "\n```"]
+                         "```\n" + self.workspace.read(ENV_EXAMPLE).strip() + "\n```"]
         return "\n\n".join(sections + self.development()) + "\n"
 
     def getting_started(self, guide):
         """Only what using it needs: what it requires, what to run once, how to start it."""
-        tc = self.s.toolchain
+        tc = self.session.toolchain
         started = [f"It needs {guide['requires']}." if guide.get("requires") else ""]
         started += ["Once, in the project folder:", shell_block(*tc.use)] if tc.use else []
         if tc.run and guide["serves"]:
@@ -229,7 +233,7 @@ class ReadmeWriter(Phase):
 
     def development(self):
         """Setting it up for its tests (activated after the environment is made), the tests, format and lint."""
-        tc = self.s.toolchain
+        tc = self.session.toolchain
         setup = tc.setup[:1] + [tc.activate] + tc.setup[1:] if tc.activate and tc.setup else tc.setup
         sections = ["## Development", "To change it, set it up once for development:", shell_block(*setup),
                     (f"In a new terminal, first `{spelled(tc.activate)}`. " if tc.activate else "") + "Run the tests:",
@@ -257,22 +261,23 @@ class ReadmeWriter(Phase):
 
     def failing(self, cycle, readme):
         """[(command, expected lines, output)] of the examples that do not print what they say."""
-        examples = self.examples(self.ws.read(readme))
-        tc = self.s.toolchain
+        examples = self.examples(self.workspace.read(readme))
+        tc = self.session.toolchain
         ready = lambda command: " && ".join(tc.use + [command])  # as a person runs it, after getting started
         run = TaughtCommands.spelled_out(tc.run) if tc.run else ""
         serves = run and (cycle.get("serves") or any(self.LOCAL_RE.search(command) for command, _ in examples))
-        examples = [e for e in examples if not (serves and e[0] == run)]  # starting it is no example to check
+        # starting it is no example to check
+        examples = [example for example in examples if not (serves and example[0] == run)]
         if not examples:
             return []
-        server = self.ws.start(ready(tc.run)) if serves else None
+        server = self.workspace.start(ready(tc.run)) if serves else None
         try:
             if server:
                 self.wait_for(examples[0])
             return self.run_examples(examples, ready)
         finally:
             if server:
-                self.ws.stop(server[0])
+                self.workspace.stop(server[0])
 
     @staticmethod
     def examples(text):
@@ -292,7 +297,7 @@ class ReadmeWriter(Phase):
         """Until a started server answers the first example (or SERVER_WAIT seconds pass)."""
         began = time.monotonic()
         while time.monotonic() - began < self.SERVER_WAIT:
-            code, output = self.ws.run(example[0], timeout=10, quiet=True)
+            code, output = self.workspace.run(example[0], timeout=10, quiet=True)
             if code == 0 and not self.missing(example[1], output):
                 return
             time.sleep(1)
@@ -302,8 +307,8 @@ class ReadmeWriter(Phase):
         one example showed fills the commands after it."""
         failures, values = [], {}
         for command, expected in examples:
-            filled = self.PLACEHOLDER_RE.sub(lambda m: values.get(m.group(0), m.group(0)), command)
-            code, output = self.ws.run(ready(filled), timeout=Toolchain.test_timeout(), quiet=True)
+            filled = self.PLACEHOLDER_RE.sub(lambda match: values.get(match.group(0), match.group(0)), command)
+            code, output = self.workspace.run(ready(filled), timeout=Toolchain.test_timeout(), quiet=True)
             missing, shown = self.compare(expected, output)
             values.update(shown)
             if code is None or missing:
@@ -328,7 +333,7 @@ class ReadmeWriter(Phase):
             if "..." in line:
                 continue
             compact = "".join(line.split())
-            found = next((m for m in map(cls.line_pattern(compact).fullmatch, said) if m), None)
+            found = next((match for match in map(cls.line_pattern(compact).fullmatch, said) if match), None)
             if found:
                 values.update(zip(cls.PLACEHOLDER_RE.findall(compact), found.groups()))
             else:
@@ -346,16 +351,16 @@ class ReadmeWriter(Phase):
         wrong); kept only while every test that passed still passes. Returns why a reply could not
         be used ("" otherwise), for the next call."""
         view = self.fix_prompt(readme, failures, note)
-        passing = Verifier(self.s).passing()
+        passing = Verifier(self.session).passing()
         try:
-            reply = self.s.ask(Prompts.README_FIX_SYSTEM, view, "Fix the README's examples",
-                               max_reply=self.s.model.fix_max)
+            reply = self.session.ask(Prompts.README_FIX_SYSTEM, view, "Fix the README's examples",
+                                     max_reply=self.session.model.fix_max)
         except PromptTooLarge as exc:
             say.skip(f"README fix: the prompt does not fit ({exc})")
             return ""
-        change = self.ws.apply(reply, lambda p, exists: None if exists and p in view.shown
-                               and self.p.files.get(p, {}).get("kind") != "test" else "only the files shown change",
-                               view.windows)
+        change = self.workspace.apply(reply, lambda path, exists: None if exists and path in view.shown
+                                      and self.project.files.get(path, {}).get("kind") != "test"
+                                      else "only the files shown change", view.windows)
         return self.kept(change, reply, passing)
 
     def fix_prompt(self, readme, failures, note):
@@ -363,12 +368,12 @@ class ReadmeWriter(Phase):
         shown = "\n\n".join(f"$ {command}\nThe README says it prints:\n" + ("\n".join(expected) or "(nothing)")
                              + f"\nIt printed:\n{Output.failure_text(output, 1200)}"
                              for command, expected, output in failures)
-        code = [p for p in self.s.files_on_disk("code", "template") if p != ENV_FILE]
-        fixed = [Part("Request", self.p.run["task"], True, keep="head"),
+        code = [path for path in self.session.files_on_disk("code", "template") if path != ENV_FILE]
+        fixed = [Part("Request", self.project.run["task"], True, keep="head"),
                  Part("Examples that do not do what the README says", shown, True, keep="head"),
                  Part("Note", note, place="last")]
-        return FileView(self.ws, fixed, [readme] + self.p.entry_files(code) + code, [Part("Language", self.p.language)],
-                        output=shown, hints=shown)
+        return FileView(self.workspace, fixed, [readme] + self.project.entry_files(code) + code,
+                        [Part("Language", self.project.language)], output=shown, hints=shown)
 
     def kept(self, change, reply, passing):
         """The fix kept while every test that passed still passes; why it was not, for the next call."""
@@ -376,9 +381,9 @@ class ReadmeWriter(Phase):
             why = "; ".join(change.notes) or "it changed no file shown"
             say.skip(f"README fix: no usable change ({first_line(why, 160)})")
             return f"Your last reply could not be used: {why}. Give each file you change complete."
-        self.s.all_tests_run = None
-        if not passing <= Verifier(self.s).passing():
-            self.ws.revert(change)
+        self.session.all_tests_run = None
+        if not passing <= Verifier(self.session).passing():
+            self.workspace.revert(change)
             say.warn("README fix: it broke a passing test; reverted")
             return "Your last change broke a passing test and was undone."
         say.done(f"README fix: changed {', '.join(change.files)}  ({reply.cause() or '?'})")
@@ -398,38 +403,42 @@ class FinalReview(Phase):
 
     def run(self, cycle):
         problem, output = self.problem()
-        if problem and "passed once and failed" not in problem and ToolchainRepair(self.s).run(output, set()):
+        if problem and "passed once and failed" not in problem and ToolchainRepair(self.session).run(output, set()):
             problem, output = self.problem()
         if problem:
-            self.s.review_problem = problem
+            self.session.review_problem = problem
             say.fail(f"Not done: {problem}")
             return False
-        green, _, total = self.p.counts()
-        say.done(f"Set up afresh; `{self.s.toolchain.test_all}` passes; {green}/{total} spec points tested and passing")
+        green, _, total = self.project.counts()
+        say.done(f"Set up afresh; `{self.session.toolchain.test_all}` passes; "
+                 f"{green}/{total} spec points tested and passing")
         return True
 
     def problem(self):
         """(what is wrong, its output), or ("", "") when the project passes the review."""
-        ok, output = self.s.setup(force=True)
+        ok, output = self.session.setup(force=True)
         if not ok:
             return f"setup fails from the project's own files: {Output.key_line(output)}", output
-        self.s.wait_for_network()
+        self.session.wait_for_network()
         return self.suite_problem()
 
     def suite_problem(self):
         """(what is wrong, its output) of the whole suite run twice as a person runs it, or ("", "")."""
-        self.s.all_tests_run = None
-        code, output = self.s.run_all_tests()
+        self.session.all_tests_run = None
+        code, output = self.session.run_all_tests()
         if code != 0:
-            return f"`{self.s.toolchain.test_all}` fails when the whole suite runs: {Output.key_line(output)}", output
-        again, output_again = self.s.toolchain.run_all(self.ws)  # a test that passes by chance fails some runs
+            return (f"`{self.session.toolchain.test_all}` fails when the whole suite runs: "
+                    f"{Output.key_line(output)}"), output
+        # a test that passes by chance fails some runs
+        again, output_again = self.session.toolchain.run_all(self.workspace)
         if again != 0:
-            return (f"`{self.s.toolchain.test_all}` passed once and failed the next time: a test depends on chance "
-                    f"(random output) or on order: {Output.key_line(output_again)}"), output_again
+            return (f"`{self.session.toolchain.test_all}` passed once and failed the next time: "
+                    f"a test depends on chance (random output) or on order: "
+                    f"{Output.key_line(output_again)}"), output_again
         if Toolchain.ran_no_test(output):
-            return f"`{self.s.toolchain.test_all}` runs no test", output
-        untested = [s["id"] for s in self.p.criteria
-                    if (not TestRef(s["test"]).present(self.ws) or s["status"] != "green")]
+            return f"`{self.session.toolchain.test_all}` runs no test", output
+        untested = [criterion["id"] for criterion in self.project.criteria
+                    if (not TestRef(criterion["test"]).present(self.workspace) or criterion["status"] != "green")]
         if untested:
             return f"spec points without a passing test: {', '.join(untested)}", output
         return "", ""
@@ -445,7 +454,7 @@ class LessonWriter(Phase):
         general, and is not kept. A finished project's toolchain is kept for its language: every
         command of it has worked by now (one test at a time, the whole suite, the linter), which is not
         so when the test tool first runs."""
-        events = self.p.spec.get("events", [])
+        events = self.project.spec.get("events", [])
         if not cycle.get("proven"):
             self.prove_what_was_used(cycle)
         if cycle["id"] == "base" and not cycle.get("counted"):
@@ -458,42 +467,43 @@ class LessonWriter(Phase):
         except (SystemExit, OllamaError) as exc:  # the project is built: lessons are a bonus
             say.warn(f"{exc} Nothing learned this time.")
             return
-        names = [Path(path).name for path in self.p.files] + [self.p.workdir.name]
-        added = self.s.knowledge.add_lessons(new, confirmed, names)
-        say.done(f"{added} new lesson(s), {len(confirmed)} confirmed: {self.s.knowledge.summary()}")
-        self.p.spec["events"] = []
-        self.s.save()
+        names = [Path(path).name for path in self.project.files] + [self.project.workdir.name]
+        added = self.session.knowledge.add_lessons(new, confirmed, names)
+        say.done(f"{added} new lesson(s), {len(confirmed)} confirmed: {self.session.knowledge.summary()}")
+        self.project.spec["events"] = []
+        self.session.save()
 
     def prove_what_was_used(self, cycle):
-        proven = self.s.knowledge.prove(cycle.get("used", {}))
+        proven = self.session.knowledge.prove(cycle.get("used", {}))
         cycle["proven"] = True
-        self.s.save()
+        self.session.save()
         if proven:
             say.done(f"{proven} lesson(s) and fact(s) used here are proven now")
 
     def keep_the_toolchain(self, cycle):
         """A finished project's toolchain, kept for its language (counted once: a resumed lessons phase does
         not count it again)."""
-        self.s.knowledge.remember_toolchain(self.s.toolchain)
-        self.s.knowledge.finished_project()
+        self.session.knowledge.remember_toolchain(self.session.toolchain)
+        self.session.knowledge.finished_project()
         cycle["counted"] = True
-        self.s.save()
+        self.session.save()
 
     def ask_lessons(self, events):
         """(new lessons, the numbers of the known ones confirmed) the problems teach."""
-        known = self.s.knowledge.known_lessons()
-        return self.s.ask_until_usable(Prompts.LESSONS_SYSTEM, [
-            Part("Language", self.p.language, True),
-            Part("Problems and how they were solved", "\n".join(f"- [{e['kind']}] {e['text']}" for e in events),
+        known = self.session.knowledge.known_lessons()
+        return self.session.ask_until_usable(Prompts.LESSONS_SYSTEM, [
+            Part("Language", self.project.language, True),
+            Part("Problems and how they were solved", "\n".join(f"- [{event['kind']}] {event['text']}"
+                                                                for event in events),
                  True, keep="tail"),
-            Part("Known lessons", "\n".join(f"{i}. {lesson['text']}" for i, lesson in enumerate(known, 1)))],
+            Part("Known lessons", "\n".join(f"{number}. {lesson['text']}" for number, lesson in enumerate(known, 1)))],
             "Lessons", self.read, attempts=2)
 
     @staticmethod
     def read(reply):
         data = reply.json()
         lessons = [item for item in data.get("lessons", []) if isinstance(item, dict)]
-        confirmed = [n for n in data.get("confirmed", []) if isinstance(n, int)]
+        confirmed = [number for number in data.get("confirmed", []) if isinstance(number, int)]
         return lessons[:3], confirmed
 
 
@@ -504,4 +514,4 @@ def spelled(command):
 
 def shell_block(*commands):
     """A shell block of the commands given (spelled out)."""
-    return "```sh\n" + "\n".join(spelled(c) for c in commands if c) + "\n```"
+    return "```sh\n" + "\n".join(spelled(command) for command in commands if command) + "\n```"

@@ -45,7 +45,7 @@ class Internet:
         """([the backends set, in order, that can be used], [why each of the others cannot])."""
         ready, reasons = [], []
         timeout = float(Config.get("web_timeout"))
-        for name in dict.fromkeys(n for n in (Config.get("web"), Config.get("web_fallback")) if n):
+        for name in dict.fromkeys(name for name in (Config.get("web"), Config.get("web_fallback")) if name):
             backend = self.backends()[name](timeout)
             why = backend.unready()
             if why:
@@ -132,7 +132,7 @@ class Internet:
         return self.codes.get(key) == 429
 
     def describe(self):
-        return " then ".join(b.name for b in self.backends_used)
+        return " then ".join(backend.name for backend in self.backends_used)
 
     @property
     def backend(self):
@@ -158,10 +158,11 @@ class Internet:
 
     def searched(self, query, count):
         found = self.call(query, lambda backend: backend.search(query, count),
-                          lambda r: isinstance(r, list) or "its search gave no list")
+                          lambda result: isinstance(result, list) or "its search gave no list")
         if found is None:
             return None
-        return [self.as_result(r) for r in found if isinstance(r, dict) and is_web_address(r.get("url", ""))]
+        return [self.as_result(result) for result in found if isinstance(result, dict)
+                and is_web_address(result.get("url", ""))]
 
     @staticmethod
     def as_result(found):

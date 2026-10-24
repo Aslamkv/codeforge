@@ -248,7 +248,7 @@ def test_the_session_holds_what_phases_need(make_project, make_session, make_mod
     assert (session.model, session.confirm, session.tracker, session.cycle) == (model, False, tracker, None)
     assert session.toolchain.test_all == TOOLCHAIN["test_all"]
     worker = Phase(session)
-    assert (worker.s, worker.p, worker.ws) == (session, session.project, session.ws)
+    assert (worker.session, worker.project, worker.workspace) == (session, session.project, session.workspace)
 
 
 @pytest.mark.spec("SES-2")

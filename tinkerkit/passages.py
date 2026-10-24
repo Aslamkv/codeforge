@@ -87,10 +87,10 @@ class Cleaner:
         code is kept, as a command repeated on two pages is still that command."""
         counts = {}
         for page in pages:
-            for key in {(site(page.url), normal(b.text)) for b in page.blocks if b.kind != "code"}:
+            for key in {(site(page.url), normal(block.text)) for block in page.blocks if block.kind != "code"}:
                 counts[key] = counts.get(key, 0) + 1
-        return [Page(page.url, page.fetched, [b for b in page.blocks if b.kind == "code"
-                                              or counts[(site(page.url), normal(b.text))] < 2])
+        return [Page(page.url, page.fetched, [block for block in page.blocks if block.kind == "code"
+                                              or counts[(site(page.url), normal(block.text))] < 2])
                 for page in pages]
 
     @staticmethod
@@ -243,7 +243,7 @@ def text_blocks(text):
 
     def close(kind="text"):
         paragraph = "\n".join(held).strip("\n") if kind == "code" else " ".join(" ".join(held).split())
-        linked = sum(len(m) for m in MARKDOWN_LINK.findall(paragraph))
+        linked = sum(len(link) for link in MARKDOWN_LINK.findall(paragraph))
         if paragraph.strip() and (kind == "code" or linked < LINK_ONLY * len(paragraph)):
             blocks.append(Block(kind, paragraph))
         held.clear()
@@ -268,7 +268,7 @@ def text_blocks(text):
 def shingles(text):
     """The text's 3-word runs (its words, when it has fewer than 3)."""
     found = words(text)
-    return {tuple(found[i:i + 3]) for i in range(len(found) - 2)} or {tuple(found)}
+    return {tuple(found[start:start + 3]) for start in range(len(found) - 2)} or {tuple(found)}
 
 
 def repeats(a, b):

@@ -108,17 +108,18 @@ class Graph:
     def add_similar(self, embeddings):
         """Lessons that say much the same, linked: by meaning with the embedding model, else by their words."""
         lessons = [node for node in self.nodes.values() if node["kind"] == "lesson" and node["status"] != "retired"]
-        vectors = embeddings.vectors([n["text"] for n in lessons], keep=False) if embeddings and lessons else None
+        vectors = embeddings.vectors([lesson["text"] for lesson in lessons],
+                                     keep=False) if embeddings and lessons else None
         if vectors:
             self.similar_by = f"meaning ({embeddings.name})"
-            alike = lambda a, b: Embeddings.cosine(vectors[a], vectors[b]) >= SIMILAR_MEANING
+            alike = lambda first, second: Embeddings.cosine(vectors[first], vectors[second]) >= SIMILAR_MEANING
         else:
             why = embeddings.failed if embeddings else "no embedding model selected (tinker embed NAME)"
             self.similar_by = f"words ({why})" if lessons else "words"
-            alike = lambda a, b: similarity(lessons[a]["text"], lessons[b]["text"]) >= SIMILAR_WORDS
-        for a, b in itertools.combinations(range(len(lessons)), 2):
-            if alike(a, b):
-                self.link(lessons[a]["id"], lessons[b]["id"], "similar")
+            alike = lambda first, second: similarity(lessons[first]["text"], lessons[second]["text"]) >= SIMILAR_WORDS
+        for first, second in itertools.combinations(range(len(lessons)), 2):
+            if alike(first, second):
+                self.link(lessons[first]["id"], lessons[second]["id"], "similar")
 
     def add_lesson(self, lesson, hub):
         details = [("phase", lesson.get("phase")), ("seen", lesson.get("seen", 1)), ("helped", lesson.get("helped", 0)),
@@ -131,8 +132,8 @@ class Graph:
         text = claim.get("text") or claim.get("answer", "")
         details = [("phase", claim.get("phase")), ("slot", claim.get("slot")), ("confidence", claim.get("confidence")),
                    ("helped", claim.get("helped", 0))]
-        sources = [s for s in [claim.get("source")] + list(claim.get("also", [])) + list(claim.get("sites", []))
-                   if isinstance(s, str) and s.startswith("http")]
+        sources = [source for source in [claim.get("source")] + list(claim.get("also", []))
+                   + list(claim.get("sites", [])) if isinstance(source, str) and source.startswith("http")]
         return self.item(node_id, kind, text, hub, claim.get("status", "candidate"), details,
                          history=claim.get("history", []), sources=sources)
 
@@ -167,7 +168,8 @@ class Graph:
 
     def node(self, node_id, kind, label, text, status, group, details):
         self.nodes[node_id] = {"id": node_id, "kind": kind, "label": label, "text": text, "status": status,
-                               "group": group, "details": [[k, str(v)] for k, v in details if v not in (None, "")],
+                               "group": group, "details": [[key, str(value)] for key, value in details
+                                                           if value not in (None, "")],
                                "sources": []}
         return self.nodes[node_id]
 
@@ -187,9 +189,9 @@ class Graph:
     def summary(self):
         """What the graph holds, in one line."""
         counts, many = self.counts(), {"fix": "fixes", "retired": "retired"}
-        shown = [f"{counts[k]} {k if counts[k] == 1 else many.get(k, k + 's')}" for k in
+        shown = [f"{counts[kind]} {kind if counts[kind] == 1 else many.get(kind, kind + 's')}" for kind in
                  ("language", "topic", "lesson", "rule", "fact", "finding", "fix", "toolchain", "command", "run", "retired")
-                 if counts.get(k)]
+                 if counts.get(kind)]
         return (", ".join(shown) or "nothing learned yet") + f"; {len(self.links)} links"
 
     def to_json(self):
@@ -220,7 +222,7 @@ class GraphPage:
 
     @classmethod
     def group_section(cls, group, nodes):
-        hubs = [n for n in nodes if n["kind"] in ("language", "topic", "commands")]
+        hubs = [node for node in nodes if node["kind"] in ("language", "topic", "commands")]
         title = hubs[0]["label"] if hubs else ("Runs" if group == "runs" else group)
         kinds = {}
         for node in nodes:
@@ -236,8 +238,9 @@ class GraphPage:
     @staticmethod
     def list_item(node):
         tags = [node["status"]] if node["status"] else []
-        tags += [f"{k} {v}" for k, v in node["details"] if k in ("phase", "seen", "helped", "why", "status")]
-        sources = "".join(f' <a href="{html.escape(s)}">source</a>' for s in node["sources"])
+        tags += [f"{key} {value}" for key, value in node["details"]
+                 if key in ("phase", "seen", "helped", "why", "status")]
+        sources = "".join(f' <a href="{html.escape(source)}">source</a>' for source in node["sources"])
         return (f"<li><span class=tags>{html.escape(' · '.join(tags))}</span> {html.escape(node['text'])}"
                 f"{sources}</li>")
 

@@ -313,7 +313,8 @@ def paused_for_you():
         Jobs.pause_running("you")
         yield
     finally:
-        Home.store().update("activity", "answering", lambda asked: {k: v for k, v in (asked or {}).items() if k != key})
+        Home.store().update("activity", "answering", lambda asked: {name: value for name, value in (asked or {}).items()
+                                                                    if name != key})
 
 
 def idle():

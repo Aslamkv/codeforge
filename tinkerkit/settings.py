@@ -322,7 +322,7 @@ class Home:
 
     @classmethod
     def known_parts(cls, names):
-        unknown = [n for n in names if n not in cls.parts()]
+        unknown = [name for name in names if name not in cls.parts()]
         if unknown:
             raise SystemExit(f"tinker clear: no part {', '.join(unknown)}; the parts are: {', '.join(cls.parts())}")
         return list(dict.fromkeys(names))
@@ -331,7 +331,7 @@ class Home:
     def entries_in(cls, name):
         collections, logs, _ = cls.parts()[name]
         store = cls.store()
-        return sum(store.count(c) for c in collections) + sum(store.logged(log) for log in logs)
+        return sum(store.count(collection) for collection in collections) + sum(store.logged(log) for log in logs)
 
     @classmethod
     def show_what_clearing_deletes(cls, held):

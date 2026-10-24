@@ -196,7 +196,7 @@ class SlotLearner:
         """PICK, with no model: the results about the topic by the words of their title and snippet (BM25 above
         learn_cutoff), in the order the search ranked them, each address once (none fetched before), at most
         learn_pages."""
-        scores = Retriever(None).word_scores(topic, [f"{r['title']} {r['content']}" for r in results])
+        scores = Retriever(None).word_scores(topic, [f"{result['title']} {result['content']}" for result in results])
         picked, cutoff, most = [], float(Config.get("learn_cutoff")), int(Config.get("learn_pages"))
         for result, score in zip(results, scores):
             key = address_key(result["url"])
@@ -272,7 +272,8 @@ class SlotLearner:
         return plan
 
     def plan_parts(self, results):
-        found = "\n".join(f"- {r['title']} ({r['url']}): {first_line(r['content'], 200)}" for r in results)
+        found = "\n".join(f"- {result['title']} ({result['url']}): {first_line(result['content'], 200)}"
+                          for result in results)
         slots = lambda profile: "\n".join(f"- {slot.id}: {fill(slot.question, {'name': self.topic}, '')}"
                                           for slot in web_slots(profile))
         return [Part("Topic", self.topic, True), Part("Today", today().isoformat(), True),
@@ -430,10 +431,11 @@ class SlotLearner:
         entry = {"topic": self.topic, "kind": plan["profile"], "name": plan["name"], "summary": plan["summary"],
                  "language": plan["language"] if language else "", "version": plan["version"],
                  "tools": [{"role": tool["role"], "name": tool["name"]} for tool in plan["tools"]],
-                 "commands": plan["commands"], "plan": {k: v for k, v in plan.items() if k != "dropped"},
+                 "commands": plan["commands"], "plan": {key: value for key, value in plan.items() if key != "dropped"},
                  "learned": now_text(), "model": self.model.name, "machine": machine, "facts": facts, "rules": rules,
                  "sources": list(dict.fromkeys(passage.url for passage in used)), "docs": self.docs,
-                 "passages": [{"id": p.id, "url": p.url, "fetched": p.fetched, "heading": p.heading} for p in used],
+                 "passages": [{"id": passage.id, "url": passage.url, "fetched": passage.fetched,
+                               "heading": passage.heading} for passage in used],
                  "status": "incomplete" if gaps or self.incomplete else "complete", "missing": gaps,
                  "requests": self.log.counts(), "notes": self.learner.notes}
         self.learner.step("keep")
@@ -480,7 +482,8 @@ def label(slot_id):
 
 def version_of(machine, commands):
     """The version the first of these commands that worked showed ("" when none did)."""
-    return next((m["version"] for m in machine if m["command"] in commands and m["found"] and m["version"]), "")
+    return next((tool["version"] for tool in machine if tool["command"] in commands and tool["found"]
+                 and tool["version"]), "")
 
 
 def read_plan(data):
@@ -546,7 +549,7 @@ def read_digest(data, slot, passages):
         if not isinstance(item, dict):
             continue
         text, phase = clean(item.get("text"), FACT_CHARS), clean(item.get("phase"), 20).lower()
-        cited = list(dict.fromkeys(str(c).strip("[] ") for c in item.get("cites") or []))
+        cited = list(dict.fromkeys(str(citation).strip("[] ") for citation in item.get("cites") or []))
         cited = [passage_id for passage_id in cited if passage_id in by_id]
         if not text or not cited or Learner.UNRELEASED.search(text):
             continue
@@ -630,6 +633,6 @@ class RequestLog:
         """"search 1, fetch 8 (2 failed), fallback 1; HTTP 429: 0", or "none"."""
         if not self.tally:
             return "none"
-        shown = [f"{kind} {c['requests']}" + (f" ({c['failed']} failed)" if c["failed"] else "")
-                 for kind, c in self.tally.items()]
-        return ", ".join(shown) + f"; HTTP 429: {sum(c['429'] for c in self.tally.values())}"
+        shown = [f"{kind} {counts['requests']}" + (f" ({counts['failed']} failed)" if counts["failed"] else "")
+                 for kind, counts in self.tally.items()]
+        return ", ".join(shown) + f"; HTTP 429: {sum(counts['429'] for counts in self.tally.values())}"

@@ -138,7 +138,7 @@ class Reader:
         if survey is None:
             raise SystemExit(f"{self.model.name} could not make a reading plan; its text stays stored.")
         Readings.surveyed(entry, survey)
-        core = [str(c.number) for c in book.chapters if order_of(survey, c) == "core"]
+        core = [str(chapter.number) for chapter in book.chapters if order_of(survey, chapter) == "core"]
         with say.section():
             say.found(survey["summary"])
             say.info(f"Core chapters, read first: {', '.join(core) or 'none named'}", "🧭")
@@ -207,12 +207,13 @@ class Readings:
     def add(book, source):
         """(its number on the reading list, whether it is new): a text added before is that one."""
         key = fingerprint("\n\n".join(chapter.text for chapter in book.chapters))[:16]
-        known = next((n for n, entry in Readings.all().items() if entry["fingerprint"] == key), None)
+        known = next((number for number, entry in Readings.all().items() if entry["fingerprint"] == key), None)
         if known is not None:
             return known, False
         number = Home.store().update("reading numbers", "last", lambda last: (last or 0) + 1)
-        chapters = [dataclasses.asdict(dataclasses.replace(c, state="raw" if c.kind in ("index", "raw") else "unread"))
-                    for c in book.chapters]
+        chapters = [dataclasses.asdict(dataclasses.replace(chapter, state="raw" if chapter.kind in ("index", "raw")
+                                                           else "unread"))
+                    for chapter in book.chapters]
         Readings.save({"number": number, "title": book.title, "author": book.author, "source": source,
                        "fingerprint": key, "added": now_text(), "topic": f"read-{number}", "survey": None,
                        "chapters": chapters})
@@ -279,8 +280,8 @@ class Readings:
         """The numbers of the readings a question or a teaching is about: those it names by title, then those whose
         items it was shown."""
         readings = Readings.all()
-        named = [n for n, entry in readings.items() if entry["title"] and mentions(text, entry["title"])]
-        topics = {entry["topic"]: n for n, entry in readings.items()}
+        named = [number for number, entry in readings.items() if entry["title"] and mentions(text, entry["title"])]
+        topics = {entry["topic"]: number for number, entry in readings.items()}
         shown = [topics[item["group"]] for item in items if item.get("group") in topics]
         return list(dict.fromkeys(named + shown))
 
@@ -301,7 +302,7 @@ class Readings:
 def ending(entry, new, chapters):
     """How a reading pass ended, for its tracker: what it read, what is kept, and what to do next."""
     book, topic = Book.of(entry), Library.read(entry["topic"]) or {}
-    readable = [c for c in book.chapters if c.state != "raw"]
+    readable = [chapter for chapter in book.chapters if chapter.state != "raw"]
     details = [("Read now", f"{len(chapters)} chapter(s), {new} new fact(s)"),
                ("Chapters read", f"{len(book.in_state('read'))} of {len(readable)}"),
                ("Kept", f"{len(topic.get('facts', []))} fact(s), {len(topic.get('rules', []))} rule(s)"),
@@ -347,7 +348,7 @@ def show(number):
 def forgotten(numbers, yes=False):
     """clear read [#N...]: those readings (every one, with none named) deleted, their text and what was learned from
     them, once the person agrees."""
-    numbers = [known_reading(n)["number"] for n in numbers] or list(Readings.all())
+    numbers = [known_reading(number)["number"] for number in numbers] or list(Readings.all())
     if not numbers:
         say.info("Nothing to clear: the reading list is empty.")
         return
@@ -361,11 +362,11 @@ def forgotten(numbers, yes=False):
         return
     for number in numbers:
         Readings.forget(number)
-    say.done(f"Cleared {', '.join(f'#{n}' for n in numbers)}.")
+    say.done(f"Cleared {', '.join(f'#{number}' for number in numbers)}.")
 
 
 def confirmed_delete(numbers, yes):
-    return confirmed("Delete them?", "tinker clear read " + " ".join(f"#{n}" for n in numbers), yes)
+    return confirmed("Delete them?", "tinker clear read " + " ".join(f"#{number}" for number in numbers), yes)
 
 
 def known_reading(number):
@@ -378,7 +379,7 @@ def known_reading(number):
 def progress(entry):
     """How much of a reading is read, and what was learned: "3 of 5 chapters read · 12 fact(s)"."""
     book = Book.of(entry)
-    readable = [c for c in book.chapters if c.state != "raw"]
+    readable = [chapter for chapter in book.chapters if chapter.state != "raw"]
     return f"{len(book.in_state('read'))} of {len(readable)} chapters read · {len(Readings.facts(entry))} fact(s)"
 
 
@@ -407,7 +408,7 @@ def chapter_parts(book, survey, chapter, text, look_for, known, focus):
 def in_order(chapters, survey):
     """Chapters in the survey's order: the core ones, then the supporting ones, then the others, each in the
     source's order."""
-    return sorted(chapters, key=lambda c: (ORDER.index(order_of(survey, c)), c.number))
+    return sorted(chapters, key=lambda chapter: (ORDER.index(order_of(survey, chapter)), chapter.number))
 
 
 def order_of(survey, chapter):
@@ -417,11 +418,12 @@ def order_of(survey, chapter):
 def focused(book, focus):
     """The chapters to read again for what the person asks: those it names ("chapter 7"), then those most about it
     by its words, READ_FOCUS_CHAPTERS in all, in the source's order; never the raw ones."""
-    readable = [c for c in book.chapters if c.state != "raw"]
-    named = {int(n) for n in NAMED_CHAPTER_RE.findall(focus)}
-    ranked = Retriever(None).by_words(focus, [c.text for c in readable])
-    chosen = [c for c in readable if c.number in named] + [readable[i] for i in ranked]
-    return sorted({c.number: c for c in chosen[:READ_FOCUS_CHAPTERS]}.values(), key=lambda c: c.number)
+    readable = [chapter for chapter in book.chapters if chapter.state != "raw"]
+    named = {int(number) for number in NAMED_CHAPTER_RE.findall(focus)}
+    ranked = Retriever(None).by_words(focus, [chapter.text for chapter in readable])
+    chosen = [chapter for chapter in readable if chapter.number in named] + [readable[index] for index in ranked]
+    return sorted({chapter.number: chapter for chapter in chosen[:READ_FOCUS_CHAPTERS]}.values(),
+                  key=lambda chapter: chapter.number)
 
 
 def book_bytes(source):
@@ -457,15 +459,16 @@ def opened(data, name):
 
 def lone_title(text):
     """The title of a text whose top heading is used once (# Title, then ## chapters); "" otherwise."""
-    headings = [(len(m.group(1)), m.group(2)) for m in HEADING_RE.finditer(text)]
-    top = [title for level, title in headings if level == min((l for l, _ in headings), default=0)]
+    headings = [(len(match.group(1)), match.group(2)) for match in HEADING_RE.finditer(text)]
+    top = [title for level, title in headings if level == min((heading_level for heading_level, _ in headings),
+                                                              default=0)]
     return top[0].strip() if len(top) == 1 and len(headings) > 1 else ""
 
 
 def headed_chapters(text):
     """The chapters of a text marked with Markdown headings (#), down to the level that gives READ_CHAPTERS (a lone
     top heading is its title, not a chapter); [] when it has no headings."""
-    headings = [(len(m.group(1)), m.group(2), m.start()) for m in HEADING_RE.finditer(text)]
+    headings = [(len(match.group(1)), match.group(2), match.start()) for match in HEADING_RE.finditer(text)]
     if lone_title(text):
         headings = [heading for heading in headings if heading[0] != min(level for level, _, _ in headings)]
     depth = chapter_depth([level for level, _, _ in headings])
@@ -474,17 +477,17 @@ def headed_chapters(text):
 
 def plain_chapters(text):
     """The chapters of a plain text: at its chapter lines ("Chapter 3", "Preface"), else parts of READ_WINDOW_CHARS."""
-    marks = {m.start(): m.group(0).strip() for m in CHAPTER_LINE_RE.finditer(text)}
+    marks = {match.start(): match.group(0).strip() for match in CHAPTER_LINE_RE.finditer(text)}
     if len(marks) >= 2:
         return sliced(text, marks)
-    return numbered([(f"Part {n}", piece) for n, piece in enumerate(split_text(text, READ_WINDOW_CHARS), 1)])
+    return numbered([(f"Part {number}", piece) for number, piece in enumerate(split_text(text, READ_WINDOW_CHARS), 1)])
 
 
 def chapter_depth(depths):
     """The depth of the contents (or of the headings) that chapters are split at: the shallowest that gives at least
     READ_CHAPTERS of them, else the deepest (a book of three parts is split at their chapters)."""
     for depth in sorted(set(depths)):
-        if sum(d <= depth for d in depths) >= READ_CHAPTERS:
+        if sum(level <= depth for level in depths) >= READ_CHAPTERS:
             return depth
     return max(depths, default=1)
 
@@ -504,7 +507,7 @@ def numbered(pieces):
     """Chapters numbered from 1, of the (title, text) pieces that hold more than a heading, each with its kind."""
     pieces = [(" ".join(title.split()), tidy(text)) for title, text in pieces]
     pieces = [(title, text) for title, text in pieces if len(words(text)) > len(words(title)) + 3]
-    return [Chapter(n, title, text, kind_of(title)) for n, (title, text) in enumerate(pieces, 1)]
+    return [Chapter(number, title, text, kind_of(title)) for number, (title, text) in enumerate(pieces, 1)]
 
 
 def tidy(text):
@@ -536,8 +539,9 @@ def index_terms(book, limit=READ_INDEX_TERMS):
 def survey_parts(book):
     """The survey's prompt: the book, its contents (each chapter's kind and length), what it says about itself and
     the terms its index refers to most."""
-    contents = "\n".join(f"{c.number}. {c.title} ({c.kind}, {c.size()} words)" for c in book.chapters)
-    about = "\n\n".join(f"## {c.title}\n{c.text}" for c in book.of_kind("front"))
+    contents = "\n".join(f"{chapter.number}. {chapter.title} ({chapter.kind}, {chapter.size()} words)"
+                         for chapter in book.chapters)
+    about = "\n\n".join(f"## {chapter.title}\n{chapter.text}" for chapter in book.of_kind("front"))
     terms = ", ".join(f"{term} ({count})" for term, count in index_terms(book))
     return [Part("The book", book.title + (f" by {book.author}" if book.author else ""), True),
             Part("Its contents", contents, True, exact=True),
@@ -551,7 +555,7 @@ def read_survey(data, book):
     summary = str(data.get("summary") or "").strip()
     if not summary:
         raise ValueError("no summary")
-    numbers, order = {c.number for c in book.chapters}, {}
+    numbers, order = {chapter.number for chapter in book.chapters}, {}
     for item in data.get("chapters") or []:
         if isinstance(item, dict) and type(item.get("chapter")) is int and item["chapter"] in numbers:
             order[str(item["chapter"])] = {"read": item.get("read") if item.get("read") in ORDER else "other",
@@ -567,7 +571,7 @@ def excerpt(text, room, wanted):
         return text
     chunks = split_text(text, room // READ_CHUNKS)
     matched = [index for index in Retriever(None).by_words(wanted, chunks) if index]
-    chosen = [0] + (matched + [i for i in range(1, len(chunks)) if i not in matched])[:READ_CHUNKS - 1]
+    chosen = [0] + (matched + [index for index in range(1, len(chunks)) if index not in matched])[:READ_CHUNKS - 1]
     return "\n\n[…]\n\n".join(chunks[index] for index in sorted(chosen))
 
 
@@ -740,7 +744,8 @@ class NavEntries(html.parser.HTMLParser):
         parser = cls()
         parser.feed(markup)
         parser.close()
-        tocs = [entries for toc, entries in parser.navs if toc and entries] or [e for _, e in parser.navs if e]
+        tocs = ([entries for toc, entries in parser.navs if toc and entries]
+                or [nav_entries for _, nav_entries in parser.navs if nav_entries])
         return tocs[0] if tocs else []
 
     def handle_starttag(self, tag, attrs):

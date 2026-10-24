@@ -55,11 +55,11 @@ class Memory:
 
 def numbered(items):
     """Items as a prompt and the person see them: [n] kind (where it belongs, status): text."""
-    return "\n".join(item_line(n, item) for n, item in enumerate(items, 1))
+    return "\n".join(item_line(number, item) for number, item in enumerate(items, 1))
 
 
-def item_line(n, item):
-    return f"[{n}] {item['kind']} ({item['group']}, {item['status'] or 'proven'}): {item['text']}"
+def item_line(number, item):
+    return f"[{number}] {item['kind']} ({item['group']}, {item['status'] or 'proven'}): {item['text']}"
 
 
 def moved_on(tracker, phase, said, icon):
@@ -202,12 +202,16 @@ class Teacher:
         moved_on(self.tracker, "judge", "Weighing the evidence…", "⚖️")
         claims = list(enumerate(plan["claims"], 1))
         parts = [Part("What the person teaches", teaching, True),
-                 Part("Facts", "\n".join(f"{n}. {c['text']}" for n, c in claims if not c["preference"]), True),
-                 Part("The person's preferences", "\n".join(f"{n}. {c['text']}" for n, c in claims if c["preference"])),
-                 Part("Changes", "\n\n".join(f"Change {n} (rests on claims {', '.join(map(str, change['claims']))}):\n"
+                 Part("Facts", "\n".join(f"{number}. {claim['text']}" for number, claim in claims
+                                         if not claim["preference"]), True),
+                 Part("The person's preferences", "\n".join(f"{number}. {claim['text']}" for number, claim in claims
+                                                            if claim["preference"])),
+                 Part("Changes", "\n\n".join(f"Change {number} "
+                                             f"(rests on claims {', '.join(map(str, change['claims']))}):\n"
                                              f"{change_text(change, plan['language'], items)}"
-                                             for n, change in judged_changes(plan)), True),
-                 Part("Evidence", "\n\n".join(f"[{n}] {e['source']}\n{e['text']}" for n, e in enumerate(evidence, 1)),
+                                             for number, change in judged_changes(plan)), True),
+                 Part("Evidence", "\n\n".join(f"[{number}] {piece['source']}\n{piece['text']}"
+                                              for number, piece in enumerate(evidence, 1)),
                       True)]
         facts = sum(not claim["preference"] for claim in plan["claims"])
         with say.working_on(f"Weighing {len(evidence)} piece(s) of evidence on {facts} fact(s) you taught"):
@@ -241,7 +245,7 @@ class Teacher:
     def made(self, change, language, items, reason, sources):
         """One change made: the items it shows wrong retired, the toolchain's commands replaced, the lesson kept;
         a line for each."""
-        lines = self.retired([items[n - 1] for n in change["retire"]], reason)
+        lines = self.retired([items[number - 1] for number in change["retire"]], reason)
         lines.append(self.toolchain_corrected(language, change["toolchain"]))
         lines.append(self.lesson_kept(language, change["lesson"], sources))
         lines.append(self.fact_kept(change["fact"], items, sources))
@@ -299,7 +303,7 @@ def read_plan(data, count, preferences=True, readings=False):
     check the facts (each within its limit), the language and the changes (read_changes; count: how many items
     were shown). ValueError when there is no claim, nothing checks the facts (readings: their passages do), or
     there is no change."""
-    texts = lambda key, limit: [str(t).strip() for t in data.get(key) or [] if str(t).strip()][:limit]
+    texts = lambda key, limit: [str(text).strip() for text in data.get(key) or [] if str(text).strip()][:limit]
     claims = [dict(claim, preference=claim["preference"] and preferences) for claim in read_claims(data.get("claims"))]
     plan = {"claims": claims, "commands": texts("commands", TEACH_COMMANDS),
             "searches": texts("searches", TEACH_SEARCHES), "language": str(data.get("language") or "").strip(),
@@ -349,7 +353,7 @@ def read_changes(given, claims, count):
 
 
 def numbers(given, highest):
-    return sorted({n for n in given or [] if isinstance(n, int) and 1 <= n <= highest})
+    return sorted({number for number in given or [] if isinstance(number, int) and 1 <= number <= highest})
 
 
 def read_toolchain(given):
@@ -396,13 +400,13 @@ def read_fact(given, count):
 
 def judged_changes(plan):
     """(number, change) of the changes that rest on a fact: the judge weighs them (the others rest on preferences)."""
-    return [(n, change) for n, change in enumerate(plan["changes"], 1)
-            if any(not plan["claims"][c - 1]["preference"] for c in change["claims"])]
+    return [(number, change) for number, change in enumerate(plan["changes"], 1)
+            if any(not plan["claims"][cited - 1]["preference"] for cited in change["claims"])]
 
 
 def change_text(change, language, items):
     """A change, as the judge reads it."""
-    lines = [f"Retire: {item_line(n, items[n - 1])}" for n in change["retire"]]
+    lines = [f"Retire: {item_line(number, items[number - 1])}" for number in change["retire"]]
     lines += [f"Toolchain of {language}: {key} becomes `{shown(command)}`" for key, command in change["toolchain"].items()]
     if change["lesson"]:
         lines.append(f"Keep the lesson ({change['lesson']['phase']}): {change['lesson']['text']}")
@@ -449,9 +453,9 @@ class Verdict:
     @classmethod
     def unchecked(cls, claims, why):
         """Nothing weighed the facts: each is unsure (why), each preference honored."""
-        return cls({n: {"text": claim["text"], "verdict": "preference" if claim["preference"] else "unsure",
-                        "why": "" if claim["preference"] else why, "evidence": []}
-                    for n, claim in enumerate(claims, 1)}, {})
+        return cls({number: {"text": claim["text"], "verdict": "preference" if claim["preference"] else "unsure",
+                             "why": "" if claim["preference"] else why, "evidence": []}
+                    for number, claim in enumerate(claims, 1)}, {})
 
     @classmethod
     def read(cls, data, plan, evidence):
@@ -459,40 +463,41 @@ class Verdict:
         unsure), and whether each change a fact is for follows. ValueError when one is missing or unknown."""
         verdict = cls.unchecked(plan["claims"], "")
         given = {item.get("claim"): item for item in data.get("claims") or [] if isinstance(item, dict)}
-        for n, claim in verdict.claims.items():
+        for number, claim in verdict.claims.items():
             if claim["verdict"] == "preference":
                 continue
-            item = given.get(n)
+            item = given.get(number)
             if item is None or item.get("verdict") not in VERDICTS:
-                raise ValueError(f"claim {n} has no verdict (one of {', '.join(VERDICTS)})")
+                raise ValueError(f"claim {number} has no verdict (one of {', '.join(VERDICTS)})")
             cites = numbers(item.get("evidence"), evidence)
             holds_bare = item["verdict"] == "holds" and not cites
             claim.update(verdict="unsure" if holds_bare else item["verdict"], evidence=cites,
                          why="no evidence cited" if holds_bare else str(item.get("why") or "").strip())
         said = {item.get("change"): item for item in data.get("changes") or [] if isinstance(item, dict)}
-        for n, _ in judged_changes(plan):
-            if n not in said or not isinstance(said[n].get("follows"), bool):
-                raise ValueError(f"change {n} has no \"follows\" (true or false)")
-            verdict.follows[n] = (said[n]["follows"], str(said[n].get("why") or "").strip())
+        for number, _ in judged_changes(plan):
+            if number not in said or not isinstance(said[number].get("follows"), bool):
+                raise ValueError(f"change {number} has no \"follows\" (true or false)")
+            verdict.follows[number] = (said[number]["follows"], str(said[number].get("why") or "").strip())
         return verdict
 
     def why_not(self, number, change):
         """Why a change is not made ("" when it is): a claim it rests on does not hold, or it does not follow."""
-        for n in change["claims"]:
-            if self.claims[n]["verdict"] not in ("holds", "preference"):
-                return f"claim {n} is {self.claims[n]['verdict']}"
+        for claim_number in change["claims"]:
+            if self.claims[claim_number]["verdict"] not in ("holds", "preference"):
+                return f"claim {claim_number} is {self.claims[claim_number]['verdict']}"
         follows, why = self.follows.get(number, (True, ""))
         return "" if follows else f"does not follow: {why or 'no reason given'}"
 
     def sources(self, change, evidence):
         """Where what a change rests on comes from: the evidence its facts cite, and the person for a preference."""
-        found = [evidence[e - 1]["source"] for n in change["claims"] for e in self.claims[n]["evidence"]]
-        if any(self.claims[n]["verdict"] == "preference" for n in change["claims"]):
+        found = [evidence[cited - 1]["source"] for number in change["claims"]
+                 for cited in self.claims[number]["evidence"]]
+        if any(self.claims[number]["verdict"] == "preference" for number in change["claims"]):
             found.append("your preference")
         return list(dict.fromkeys(found))
 
     def show(self):
-        for n, claim in self.claims.items():
+        for number, claim in self.claims.items():
             if claim["verdict"] == "preference":
                 say.info(f"Your preference, honored: {claim['text']}", "👤")
                 continue

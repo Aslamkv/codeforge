@@ -83,7 +83,7 @@ class Model:
             return self.ask_once(system, parts, label, **kw)
         except PromptTooLarge:
             self.note(f"{label}: the prompt is too large as it is; shortening every part")
-        relaxed = lambda limit: [p.relaxed() for p in (parts(limit) if callable(parts) else parts)]
+        relaxed = lambda limit: [part.relaxed() for part in (parts(limit) if callable(parts) else parts)]
         return self.ask_once(system, relaxed, label, **kw)
 
     def ask_once(self, system, parts, label, budget=None, done_when=None, max_reply=None, unthinking_retry=True,
@@ -368,7 +368,7 @@ class Model:
 
     def loaded_size(self):
         """Its size in memory, in GB (None when it is not loaded, or Ollama cannot tell)."""
-        return next((s / 1e9 for n, s in Ollama.loaded_models() or [] if n == self.name), None)
+        return next((size / 1e9 for model_name, size in Ollama.loaded_models() or [] if model_name == self.name), None)
 
     def unload(self):
         if self.keep_alive not in (0, "0"):
@@ -421,9 +421,9 @@ class Models:
         models = Ollama.installed_models()
         if models is None:
             raise SystemExit(f"Ollama does not answer at {Config.ollama_url()} (tinker config ollama_url URL).")
-        names = [m.get("name", "") for m in models]
+        names = [model.get("name", "") for model in models]
         if name not in names:
-            close = [n for n in names if name.lower() in n.lower()]
+            close = [candidate for candidate in names if name.lower() in candidate.lower()]
             hint = f" Did you mean {' or '.join(close)}?" if close else ""
             raise SystemExit(f"Ollama has no model named '{name}'.{hint} Installed: {', '.join(names) or 'none'}")
         return name
@@ -825,7 +825,7 @@ class Ollama:
     def installed_models():
         """[{name, size, details}] of the models Ollama has (None when Ollama does not answer)."""
         data = Ollama.get_json("/api/tags")
-        return None if data is None else sorted(data.get("models", []), key=lambda m: m.get("name", ""))
+        return None if data is None else sorted(data.get("models", []), key=lambda model: model.get("name", ""))
 
     @staticmethod
     def loaded_models():
@@ -833,15 +833,18 @@ class Ollama:
         data = Ollama.get_json("/api/ps")
         if data is None:
             return None
-        return [(m.get("name") or m.get("model") or "", m.get("size", 0)) for m in data.get("models", [])]
+        return [(model.get("name") or model.get("model") or "", model.get("size", 0))
+                for model in data.get("models", [])]
 
     @staticmethod
     def model_facts(name):
         """What Ollama says about a model: its longest context and what it can do (thinking...)."""
         data = Ollama.get_json("/api/show", {"model": name}, timeout=30) or {}
         info = data.get("model_info") or {}
-        context = next((v for k, v in info.items() if k.endswith(".context_length") and isinstance(v, int)), None)
-        size = next((m.get("size") for m in Ollama.installed_models() or [] if m.get("name") == name), None)
+        context = next((value for key, value in info.items() if key.endswith(".context_length")
+                        and isinstance(value, int)), None)
+        size = next((installed_model.get("size") for installed_model in Ollama.installed_models() or []
+                     if installed_model.get("name") == name), None)
         return {"context_length": context, "capabilities": data.get("capabilities") or [],
                 "format": (data.get("details") or {}).get("format") or "", "size": size}
 

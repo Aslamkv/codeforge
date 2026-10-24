@@ -192,7 +192,7 @@ def test_failure_key_and_roll_back(calc, project_dir):
     b = {"test": "t.py::test_two"}
     assert Verifier.failure_key(a, "t.py::test_one failed at line 3: KeyError") == \
         Verifier.failure_key(b, "t.py::test_two failed at line 9: KeyError")
-    snapshot = session.ws.snapshot(project.files)
+    snapshot = session.workspace.snapshot(project.files)
     (project_dir / "extra.py").write_text("x")
     project.register(["extra.py"], "code", "added by a fix")
     (project_dir / "calc.py").write_text("changed")

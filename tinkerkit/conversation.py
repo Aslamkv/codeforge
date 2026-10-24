@@ -73,15 +73,22 @@ RESEARCH_PAGE_CHARS = 3500                     # of each page, the parts most ab
 LONG = named("long")                           # a task: its progress shown (one that runs is paused for it)
 QUICK = named("quick")                         # what it prints is shown
 GLANCES = QUICK + ("help", "history")          # what only shows something: its message goes soon, and its question at once
-DELETES = tuple(c.name for c in COMMANDS if c.deletes)  # what it deletes is shown first; done once confirmed
-PLANNED = tuple(c.name for c in COMMANDS if "--confirm" in (o.flag for o in c.options))  # its plan waits here
+# what it deletes is shown first; done once confirmed
+DELETES = tuple(command.name for command in COMMANDS if command.deletes)
+# its plan waits here
+PLANNED = tuple(command.name for command in COMMANDS if "--confirm" in (option.flag for option in command.options))
 OWN = named("own")                             # the conversation's own
-ONE_WORD = tuple(c.name for c in COMMANDS if c.chat and c.words == "one")  # a command with one word after it
-ANY_WORDS = tuple(c.name for c in COMMANDS if c.chat and c.words == "any")  # ... with any words after it
-SAID_BARE = tuple(c.name for c in COMMANDS if c.name)  # commands a conversation takes as their words
+# a command with one word after it
+ONE_WORD = tuple(command.name for command in COMMANDS if command.chat and command.words == "one")
+# a command with any words after it
+ANY_WORDS = tuple(command.name for command in COMMANDS if command.chat and command.words == "any")
+SAID_BARE = tuple(command.name for command in COMMANDS if command.name)  # commands a conversation takes as their words
 BARE_RE = re.compile(r"(?<![/\w.-])tinker (?=(?:" + "|".join(sorted(SAID_BARE, key=len, reverse=True)) + r")\b)")
-USAGE = frozendict({c.name: f"✍️ Write `{c.synopsis}`" + (f", e.g. `{c.example}`" if c.example else "") for c in COMMANDS if c.name})
-ASKED = tuple(c.name for c in COMMANDS if c.chat and any(a.nargs in ("+", None) for a in c.arguments)) + (
+USAGE = frozendict({command.name: f"✍️ Write `{command.synopsis}`"
+                                  + (f", e.g. `{command.example}`" if command.example else "")
+                    for command in COMMANDS if command.name})
+ASKED = tuple(command.name for command in COMMANDS if command.chat and any(argument.nargs in ("+", None)
+                                                                           for argument in command.arguments)) + (
     "command", "research")  # sent alone (as a chat app's menu sends it): its words are asked for
 EXIT = ("exit",)  # end the conversation (in a chat, once confirmed: it cannot be started again from there)
 START = "/start"  # what a chat app sends when a person first opens the bot
@@ -185,7 +192,7 @@ class Desk:
     task runs as its own tinker (which does not report too; as every job, it pauses the one that runs), followed
     by its tracker, its progress in its one message; one that deletes shows what it deletes first, and waits for confirm. Tasks run from a
     terminal are served too (running). Anything that is not a command is a normal chat."""
-    COMMANDS = tuple(c.name for c in COMMANDS if c.chat)
+    COMMANDS = tuple(command.name for command in COMMANDS if command.chat)
     LOOK_EVERY = 1.0  # seconds between looks at a followed task's tracker (for its run and folder)
 
     def __init__(self, channels, root):
@@ -199,7 +206,7 @@ class Desk:
         self.asking = {}  # (channel, chat) -> {words, shown}: a command that deletes, waiting for confirm
         self.wanting = {}  # (channel, chat) -> a command sent alone, waiting for its words (ASKED)
         self.spent = {}  # run -> the seconds its runs took so far (a task's time: done in ...)
-        self.consoles = [c for c in channels if isinstance(c, ConsoleChannel)]
+        self.consoles = [channel for channel in channels if isinstance(channel, ConsoleChannel)]
         self.said_status = None  # the status said last (a status said again only when it changed)
         self.ready, self.posting = set(), threading.Lock()  # the chats started (their status sent), one post at a time
         self.leaving = None  # (channel, chat, ids) of the question to stop, confirmed: it goes as Tinker ends
@@ -212,7 +219,7 @@ class Desk:
         self.say_status(anew=True)
         self.adopt_exercise()
         if not self.consoles:
-            names = ", ".join(c.name for c in self.channels)
+            names = ", ".join(channel.name for channel in self.channels)
             say.info(f"Listening on {names}; projects go in {self.root}. Ctrl-C stops.", "👂")
         try:
             self.listen_until_ended()
@@ -225,7 +232,7 @@ class Desk:
     def claim_chats(self):
         """Each chat listened to by this Tinker alone: one another Tinker listens to is left out (served by
         that one; without a terminal here, there is nothing to serve)."""
-        for channel in [c for c in self.channels if c not in self.consoles]:
+        for channel in [channel for channel in self.channels if channel not in self.consoles]:
             if not channel.claim({"pid": os.getpid()}):
                 held = f"{channel.name} is listened to by another Tinker (process {channel.holder().get('pid', '?')})"
                 if not self.consoles:
@@ -276,7 +283,7 @@ class Desk:
             return md(t"🙋 **Tinker** · {self.waiting['title']} waits for you: {then:md}")
         elsewhere = [described(state) for state in persons_runs(self.children())]
         if elsewhere:
-            return "🔄 **Tinker** · working in a terminal: " + "; ".join(r["brief"] for r in elsewhere)
+            return "🔄 **Tinker** · working in a terminal: " + "; ".join(run["brief"] for run in elsewhere)
         exercise = exercising_now()
         if exercise:
             return f"🏋️ **Tinker** · {exercise['brief']}\n_It pauses whenever you ask for something._"
@@ -301,11 +308,11 @@ class Desk:
 
     def listen_until_ended(self):
         """Every channel listened to, each in its thread, until the person ends it (exit) or Ctrl-C."""
-        threads = [threading.Thread(target=self.listen, args=(c,), daemon=True) for c in self.channels]
+        threads = [threading.Thread(target=self.listen, args=(channel,), daemon=True) for channel in self.channels]
         for thread in threads:
             thread.start()
         looked = collected = 0.0
-        while any(t.is_alive() for t in threads) and not any(c.closed for c in self.channels):
+        while any(thread.is_alive() for thread in threads) and not any(channel.closed for channel in self.channels):
             time.sleep(0.5)
             if time.monotonic() - collected >= COLLECT_EVERY:
                 collected = time.monotonic()
@@ -698,7 +705,7 @@ class Desk:
     def report(self, command, words):
         """runs, status [@PROJECT]: tinker's own; status alone at once, from what the conversation knows."""
         if command == "status" and len(words) == 1:
-            return "\n\n".join([self.status()] + [r["text"] for r in self.now()])
+            return "\n\n".join([self.status()] + [run["text"] for run in self.now()])
         title = "📚 **Runs**" if command == "runs" else md(t"📊 **Status** {' '.join(words[1:2])}").rstrip()
         return f"{title}\n```\n{Markup.fenced(self.tinker([command] + words[1:2]))}\n```"
 
@@ -787,7 +794,7 @@ class Desk:
                 self.process = None
                 return md(t"⚠️ **Could not start it:** {exc}")
             self.reporter.pid = self.process.pid
-            self.followed = [p for p in self.followed if p.poll() is None] + [self.process]
+            self.followed = [process for process in self.followed if process.poll() is None] + [self.process]
         if self.waiting and self.waiting["folder"] == folder:
             self.waiting = None  # confirmed or being changed: it waits again only once its plan is shown
         threading.Thread(target=self.follow, args=(self.process, self.reporter, self.task), daemon=True).start()
@@ -911,12 +918,12 @@ def command_word(word):
 
 def offered():
     """(name, what it does) of each command a chat takes, as its menu lists them."""
-    return [(c.name, c.what) for c in COMMANDS if c.chat]
+    return [(command.name, command.what) for command in COMMANDS if command.chat]
 
 
 def words_asked(command):
     """(the question, an example answer) for the words a command sent alone needs."""
-    found = next(c for c in COMMANDS if c.name == command)
+    found = next(candidate for candidate in COMMANDS if candidate.name == command)
     needed = found.synopsis.split(None, 1)[1]
     example = found.example.split(None, 1)[1] if " " in found.example else ""
     question = md(t"✍️ **{command}** · {found.what}\nSend {needed:code} now")
@@ -987,10 +994,10 @@ class Talk:
     @staticmethod
     def context(running, waiting):
         """What goes on, for the model to know: what runs, and a spec that waits for the person."""
-        context = ["Running now:\n" + "\n\n".join(r["text"] for r in running)] if running else []
+        context = ["Running now:\n" + "\n\n".join(run["text"] for run in running)] if running else []
         context += [f"A spec waits for the person (confirm builds it, amend WHAT changes it):\n{waiting()}"
                     if waiting() else ""]
-        return "\n\n".join(c for c in context if c)
+        return "\n\n".join(piece for piece in context if piece)
 
     def write(self, write_reply, asked, reply, written):
         """The reply written (chats take turns, what runs paused first) into reply; written is set once it is done,
@@ -1017,7 +1024,7 @@ class Talk:
             lines = ["⏳ **Getting ready to answer** (the AI model is loading, or finishing something). "
                      "I'll answer here in a moment."]
         else:
-            lines = ["⏸ **Pausing** " + "; ".join(r["brief"] for r in running) + " to answer you.",
+            lines = ["⏸ **Pausing** " + "; ".join(run["brief"] for run in running) + " to answer you.",
                      "It goes on once you have your answer."]
         return "\n".join(lines)
 
@@ -1249,11 +1256,11 @@ class Research:
         unusable = self.unusable(internet)
         if unusable:
             return self.ended(channel, chat, sent, "blocked", f"{head}\n{unusable}")
-        busy = "; ".join(r["brief"] for r in now())
+        busy = "; ".join(run["brief"] for run in now())
         waits = f"\n⏸ _first finishing a step of_ {busy}_; your answer comes right after_" if busy else ""
         try:
             searches = self.searches(channel, chat, topic)
-            searching = " · ".join(f"`{q}`" for q in searches)
+            searching = " · ".join(f"`{search}`" for search in searches)
             self.on("read")
             sent = channel.show(chat, sent, f"{head}\n🌐 _searching:_ {searching}{waits}")
             pages = self.read(internet, searches)
@@ -1293,7 +1300,7 @@ class Research:
             {"role": "system", "content": self.SEARCHES_SYSTEM.format(today=today().strftime("%d %B %Y"),
                                                                     year=today().strftime("%Y"))},
             {"role": "user", "content": topic}], COMMAND_TOKENS))
-        found = [str(q).strip() for q in data.get("searches") or [] if str(q).strip()]
+        found = [str(search).strip() for search in data.get("searches") or [] if str(search).strip()]
         return list(dict.fromkeys(found))[:RESEARCH_SEARCHES] or [topic]
 
     def read(self, internet, searches):
@@ -1323,27 +1330,30 @@ class Research:
     def most_about(text, wanted):
         """Of a page, the paragraphs that share the most words with what was searched, in page order,
         up to RESEARCH_PAGE_CHARS."""
-        paragraphs = [p.strip() for p in re.split(r"\n\s*\n|\n(?=[#*-] )", text) if len(p.strip()) > 40]
-        score = lambda p: len(wanted & set(re.findall(r"[a-z0-9]{3,}", p.lower())))
+        paragraphs = [paragraph.strip() for paragraph in re.split(r"\n\s*\n|\n(?=[#*-] )", text)
+                      if len(paragraph.strip()) > 40]
+        score = lambda paragraph: len(wanted & set(re.findall(r"[a-z0-9]{3,}", paragraph.lower())))
         best, size = set(), 0
-        for index in sorted(range(len(paragraphs)), key=lambda i: -score(paragraphs[i])):
+        for index in sorted(range(len(paragraphs)), key=lambda position: -score(paragraphs[position])):
             if size + len(paragraphs[index]) > RESEARCH_PAGE_CHARS:
                 continue
             best.add(index)
             size += len(paragraphs[index])
-        return "\n\n".join(paragraphs[i] for i in sorted(best)) or text[:RESEARCH_PAGE_CHARS]
+        return "\n\n".join(paragraphs[position] for position in sorted(best)) or text[:RESEARCH_PAGE_CHARS]
 
     def answer_from(self, channel, chat, topic, pages):
         """The model's answer from the pages alone, each claim citing its page."""
         return self.talk.ask(channel, chat, [
             {"role": "system", "content": self.ANSWER_SYSTEM.format(today=today().strftime("%d %B %Y"))},
             {"role": "user", "content": f"The person asks: {topic}\n\n" + "\n\n".join(
-                f"[{n}] {page['title']} ({page['url']})\n{page['content']}" for n, page in enumerate(pages, 1))}],
+                f"[{number}] {page['title']} ({page['url']})\n{page['content']}"
+                for number, page in enumerate(pages, 1))}],
             CHAT_REPLY_TOKENS)
 
     @staticmethod
     def sources(pages):
-        return "\n".join(f"[{n}] [{page['title'][:70] or page['url']}]({page['url']})" for n, page in enumerate(pages, 1))
+        return "\n".join(f"[{number}] [{page['title'][:70] or page['url']}]({page['url']})" for number,
+                         page in enumerate(pages, 1))
 
 
 # === a task's one message ========================================================================================
@@ -1444,7 +1454,7 @@ class Progress:
         changed what the message says."""
         before = self.text()
         said = self.snapshot["doing"] if self.snapshot.get("step") is None else None
-        self.snapshot = dict(self.snapshot, **{k: v for k, v in (snapshot or {}).items() if k != "before"})
+        self.snapshot = dict(self.snapshot, **{key: value for key, value in (snapshot or {}).items() if key != "before"})
         if said and self.snapshot.get("step") is None:
             self.snapshot["doing"] = said
         return self.text() != before
@@ -1453,10 +1463,10 @@ class Progress:
         state = self.snapshot
         began = state.get("began")
         clock = f" · ⏱ {human_duration(time.time() - began)}" if began else ""
-        doing = self.on if self.on.startswith(self.SAID) else md(t"**{self.on}**")
+        doing = self.working_on if self.working_on.startswith(self.SAID) else md(t"**{self.working_on}**")
         lines = [md(t"🔨 **{state['title']}**")] + [f"✅ {step}" for step in state.get("steps", [])]
         lines += [f"▸ {doing}{clock} {self.HOURGLASS[self.turns % 2]}"]
-        lines += [md(t"📊 {self.got}")] if self.got else []
+        lines += [md(t"📊 {self.how_far}")] if self.how_far else []
         if state.get("found"):
             lines += [md(t"💡 {state['found']}")]
         elif state.get("latest"):
@@ -1468,7 +1478,7 @@ class Progress:
         return self.snapshot["title"]
 
     @property
-    def on(self):
+    def working_on(self):
         """What the run is on now: what it works on, with its phase's icon, else its phase."""
         state = self.snapshot
         if not state.get("working"):
@@ -1481,14 +1491,14 @@ class Progress:
         return f"{counts[0]}/{counts[1]} spec points pass" if counts else ""
 
     @property
-    def got(self):
+    def how_far(self):
         """How far the run got: its spec points passing, and what it tallies."""
         return " · ".join(part for part in (self.passing, self.snapshot.get("tally")) if part)
 
     def brief(self):
         """Markup: the title, with what it is on and how far it got."""
-        got = f", {self.got}" if self.got else ""
-        return md(t"**{self.title}** ({Markup.plain(self.on):md}{got})")
+        got = f", {self.how_far}" if self.how_far else ""
+        return md(t"**{self.title}** ({Markup.plain(self.working_on):md}{got})")
 
     def waiting(self):
         """The run ended with its plan waiting for the person to confirm or amend it."""
@@ -1701,7 +1711,7 @@ class Channel:
         self.closed = False  # the person ended the conversation here (the console: exit)
         self.bare = True  # a conversation: commands are said as their words alone (said: no "tinker" before)
 
-    def who(self):
+    def handle(self):
         """What the channel is called where it lives (a bot's @name); raises ChannelError when its
         secrets do not work."""
         raise NotImplementedError
@@ -1791,7 +1801,7 @@ class Channel:
             time.sleep(timeout)
             return []
         self.refused = None
-        return [m for m in messages if m.chat in self.allowed]
+        return [message for message in messages if message.chat in self.allowed]
 
     def claim(self, holder):
         """Become the one Tinker listening on this channel: True once it is, False when another one
@@ -1839,7 +1849,7 @@ class ConsoleChannel(Channel):
         self.lines, self.next_id, self.headlines, self.whole = queue.Queue(), 0, {}, {}
         self.reader, self.printing = None, threading.Lock()
 
-    def who(self):
+    def handle(self):
         return "this terminal"
 
     def receive(self, timeout):
@@ -1933,7 +1943,7 @@ def pieces(text, size=3500):
     """text in parts a chat message holds, split between lines (a line longer than a part, across parts)."""
     parts, part = [], ""
     for whole in text.splitlines():
-        for line in [whole[i:i + size] for i in range(0, len(whole), size)] or [""]:
+        for line in [whole[start:start + size] for start in range(0, len(whole), size)] or [""]:
             if part and len(part) + len(line) + 1 > size:
                 parts.append(part)
                 part = ""
@@ -2204,15 +2214,15 @@ def site_of(url):
 def built_project(name=""):
     """The project named (@ID or @folder, as Runs.find takes it), or without a name the one built last, from
     the projects Tinker points to ({id, workdir, task, status ...}). None when there is none."""
-    projects = [r for r in Runs.entries() if Path(str(r.get("workdir", ""))).is_dir()]
+    projects = [run for run in Runs.entries() if Path(str(run.get("workdir", ""))).is_dir()]
     if name:
         try:
             found = Runs.find(name)
         except SystemExit:
             return None
-        return next((r for r in projects if r.get("id") == found.get("id")), None)
-    done = [r for r in projects if r.get("status") == "done"]
-    return max(done, key=lambda r: str(r.get("updated", "")), default=None)
+        return next((run for run in projects if run.get("id") == found.get("id")), None)
+    done = [run for run in projects if run.get("status") == "done"]
+    return max(done, key=lambda run: str(run.get("updated", "")), default=None)
 
 
 def first_lines(text, count):

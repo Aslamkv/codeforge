@@ -189,14 +189,14 @@ class Runs:
     def find(name):
         """The project named exactly: by its full run ID, or by its folder's name (never by part of either)."""
         pointers = list(Home.store().items("projects").values())
-        found = [p for p in pointers if p.get("id") == name] or \
-                [p for p in pointers if Path(str(p.get("workdir", ""))).name == name]
+        found = [pointer for pointer in pointers if pointer.get("id") == name] or \
+                [pointer for pointer in pointers if Path(str(pointer.get("workdir", ""))).name == name]
         if not found:
             raise SystemExit(f"No project @{name}: name one by its full run ID or its folder's name (tinker runs "
                              f"lists them)")
         if len(found) > 1:
             raise SystemExit(f"Several projects are in folders named {name}: name one by its ID: "
-                             f"{', '.join('@' + p['id'] for p in found)}")
+                             f"{', '.join('@' + pointer['id'] for pointer in found)}")
         return found[0]
 
     @staticmethod
@@ -298,7 +298,7 @@ class Project:
         return self.spec.setdefault("cycles", [])
 
     def open_cycle(self):
-        return next((c for c in self.cycles if c.get("phase") != "done"), None)
+        return next((cycle for cycle in self.cycles if cycle.get("phase") != "done"), None)
 
     def new_cycle(self, cycle_id, request, brief="", kind="feature"):
         cycle = {"id": cycle_id, "request": request, "brief": brief, "kind": kind,
@@ -308,11 +308,11 @@ class Project:
         return cycle
 
     def cycle(self, cycle_id):
-        return next((c for c in self.cycles if c["id"] == cycle_id), None)
+        return next((cycle for cycle in self.cycles if cycle["id"] == cycle_id), None)
 
     def cycle_criteria(self, cycle):
         """The criteria of one cycle."""
-        return [s for s in self.criteria if s.get("cycle") == cycle["id"]]
+        return [criterion for criterion in self.criteria if criterion.get("cycle") == cycle["id"]]
 
     @property
     def criteria(self):
@@ -320,7 +320,7 @@ class Project:
         return self.spec.setdefault("steps", [])
 
     def criterion(self, criterion_id):
-        return next((s for s in self.criteria if s["id"] == criterion_id), None)
+        return next((criterion for criterion in self.criteria if criterion["id"] == criterion_id), None)
 
     def new_criterion(self, prefix, title, behaviour, test, cycle_id, source, status, effort=2):
         """A criterion with the next id: prefix C (spec), B (a bug)."""
@@ -330,22 +330,22 @@ class Project:
 
     def criterion_of_test(self, test):
         """The behaviour of the criterion a test checks ("" for a test no criterion owns)."""
-        return next((s["behaviour"] for s in self.criteria if s["test"] == test), "")
+        return next((criterion["behaviour"] for criterion in self.criteria if criterion["test"] == test), "")
 
     def counts(self):
-        green = sum(1 for s in self.criteria if s["status"] == "green")
-        parked = sum(1 for s in self.criteria if s["status"] == "blocked")
+        green = sum(1 for criterion in self.criteria if criterion["status"] == "green")
+        parked = sum(1 for criterion in self.criteria if criterion["status"] == "blocked")
         return green, parked, len(self.criteria)
 
     def parked(self):
         """The criteria that nothing made pass (stored as "blocked")."""
-        return [s for s in self.criteria if s["status"] == "blocked"]
+        return [criterion for criterion in self.criteria if criterion["status"] == "blocked"]
 
     def refs(self):
-        return [TestRef(s["test"]) for s in self.criteria]
+        return [TestRef(criterion["test"]) for criterion in self.criteria]
 
     def test_names(self, file):
-        return [r.name for r in self.refs() if r.file == file]
+        return [ref.name for ref in self.refs() if ref.file == file]
 
     @property
     def toolchain(self):
@@ -361,25 +361,26 @@ class Project:
         return self.spec.setdefault("files", {})
 
     def paths(self, *kinds):
-        return [p for p, f in self.files.items() if not kinds or f.get("kind") in kinds]
+        return [path for path, info in self.files.items() if not kinds or info.get("kind") in kinds]
 
     def outline(self):
         """The project's files by role (what the design says, not parsed code)."""
-        return "\n".join(f"- {p} ({f.get('kind', 'code')}): {f.get('role', '')}" for p, f in self.files.items())
+        return "\n".join(f"- {path} ({info.get('kind', 'code')}): {info.get('role', '')}"
+                         for path, info in self.files.items())
 
     def register(self, created, kind, role, uses=()):
         for path in created:
             self.files.setdefault(path, {"kind": kind, "role": role, "contract": [], "uses": list(uses)})
 
-    def remove_file(self, ws, path):
+    def remove_file(self, workspace, path):
         """A file of the project gone: from the disk and from the design."""
-        ws.restore({path: None})
+        workspace.restore({path: None})
         self.files.pop(path, None)
 
     def uses(self, path, depth=2):
         """The files a file uses, directly and (depth 2) one level down."""
         direct = self.files.get(path, {}).get("uses", [])
-        deeper = [*self.files.get(u, {}).get("uses", []) for u in direct] if depth > 1 else []
+        deeper = [*self.files.get(used, {}).get("uses", []) for used in direct] if depth > 1 else []
         return list(dict.fromkeys(direct + deeper))
 
     def criteria_of(self, path, steps):
@@ -387,11 +388,12 @@ class Project:
         names it ("playlist.songs", "app.py"); a template's are those of the files that render it.
         A file no test reaches (an adapter) has none: its contract says what it does."""
         template = self.files.get(path, {}).get("kind") == "template"
-        direct = [s for s in steps if self.reached_by(path, s, template)]
+        direct = [step for step in steps if self.reached_by(path, step, template)]
         if not template:
             return direct
-        renderers = [p for p, f in self.files.items() if path in f.get("uses", []) and p != path]
-        found = {s["id"]: s for s in direct + [*self.criteria_of(p, steps) for p in renderers]}
+        renderers = [renderer for renderer, info in self.files.items() if path in info.get("uses", [])
+                     and renderer != path]
+        found = {step["id"]: step for step in direct + [*self.criteria_of(renderer, steps) for renderer in renderers]}
         return list(found.values())
 
     def reached_by(self, path, criterion, template):
@@ -405,7 +407,8 @@ class Project:
         """Of these paths, the app's entry point: the file the design says a user starts, then any
         the run command names."""
         entry, run = self.spec.get("entry", ""), self.toolchain.run
-        return [p for p in paths if p == entry] + [p for p in paths if p != entry and Path(p).name in run]
+        return [path for path in paths if path == entry] + [path for path in paths if path != entry
+                                                            and Path(path).name in run]
 
     def contracts(self, paths):
         out = []
@@ -418,44 +421,46 @@ class Project:
     def dependencies(self, read):
         """The project's third-party dependencies: its dependency files (read(path) once written,
         else what the design says they hold). Empty when it has none."""
-        found = [p for p, f in self.files.items() if f.get("kind") == "config"
-                 and ("depend" in f.get("role", "").lower() or Path(p).name in self.DEPENDENCY_FILES)]
-        return "\n".join(f"{p}:\n{read(p) or self.files[p].get('role', '')}".strip() for p in found)
+        found = [path for path, info in self.files.items() if info.get("kind") == "config"
+                 and ("depend" in info.get("role", "").lower() or Path(path).name in self.DEPENDENCY_FILES)]
+        return "\n".join(f"{path}:\n{read(path) or self.files[path].get('role', '')}".strip() for path in found)
 
 
 class SpecDocument:
     """SPEC.md: the plan as a person reads it."""
 
     def __init__(self, project):
-        self.p = project
+        self.project = project
 
     def text(self):
         lines = self.heading() + self.table() + self.commands() + self.cycles() + self.design() + self.criteria()
         return "\n".join(lines) + "\n"
 
     def heading(self):
-        p = self.p
-        topics = list(dict.fromkeys(item["name"] for item in p.spec.get("learned", [])))
-        return [f"# Spec: {first_line(p.run['task'], 120)}", "",
-                f"Run {p.run['id']}. Language: {p.language or '?'}."
+        project = self.project
+        topics = list(dict.fromkeys(item["name"] for item in project.spec.get("learned", [])))
+        return [f"# Spec: {first_line(project.run['task'], 120)}", "",
+                f"Run {project.run['id']}. Language: {project.language or '?'}."
                 + (f" Learned from the web and used: {', '.join(topics)}." if topics else ""), ""]
 
     def table(self):
         return ["| ID | Criterion | Test | Status |", "|---|---|---|---|"] + \
-            [f"| {s['id']} | {s['title']} | `{s['test']}` | {status_text(s)} |" for s in self.p.criteria]
+            [f"| {criterion['id']} | {criterion['title']} | `{criterion['test']}` | {status_text(criterion)} |"
+             for criterion in self.project.criteria]
 
     def commands(self):
-        tc = self.p.toolchain
-        if not tc:
+        toolchain = self.project.toolchain
+        if not toolchain:
             return []
         out = TaughtCommands.spelled_out  # these commands work for anyone
-        lines = ["", "## Commands (run in the project folder)", ""] + [f"- setup: `{out(c)}`" for c in tc.setup]
-        lines += [f"- activate: `{out(tc.activate)}`"] if tc.activate else []
-        lines += [f"- {key}: `{out(getattr(tc, key))}`" for key in Toolchain.COMMANDS if getattr(tc, key)]
+        lines = ["", "## Commands (run in the project folder)", ""] + [f"- setup: `{out(command)}`"
+                                                                       for command in toolchain.setup]
+        lines += [f"- activate: `{out(toolchain.activate)}`"] if toolchain.activate else []
+        lines += [f"- {key}: `{out(getattr(toolchain, key))}`" for key in Toolchain.COMMANDS if getattr(toolchain, key)]
         return lines
 
     def cycles(self):
-        return [*self.cycle(cycle) for cycle in self.p.cycles]
+        return [*self.cycle(cycle) for cycle in self.project.cycles]
 
     @staticmethod
     def cycle(cycle):
@@ -471,29 +476,29 @@ class SpecDocument:
         return lines
 
     def design(self):
-        if not self.p.files:
+        if not self.project.files:
             return []
         lines = ["", "## Design (each file's contract; tests and code are written to it)", ""]
-        for path, f in self.p.files.items():
-            uses = f" (uses {', '.join(f['uses'])})" if f.get("uses") else ""
-            lines.append(f"- `{path}` [{f.get('kind', 'code')}]: {f.get('role', '')}{uses}")
-            lines += [f"    - {c}" for c in f.get("contract", [])]
+        for path, info in self.project.files.items():
+            uses = f" (uses {', '.join(info['uses'])})" if info.get("uses") else ""
+            lines.append(f"- `{path}` [{info.get('kind', 'code')}]: {info.get('role', '')}{uses}")
+            lines += [f"    - {line}" for line in info.get("contract", [])]
         return lines
 
     def criteria(self):
-        steps = self.p.criteria
+        steps = self.project.criteria
         return ["", "## Spec criteria (tests written first; the code passes them)", ""] + self.criteria_lines(steps) \
             if steps else []
 
     def criteria_lines(self, steps):
         lines = []
-        for s in steps:
-            lines += [f"### {s['id']} {s['title']}", "", s["behaviour"], ""]
-            if s.get("source"):
-                lines.append(f"- From the request: \"{s['source']}\"")
-            lines += [f"- Test: `{s['test']}`", f"- Status: {status_text(s)}"]
-            if s.get("last_error") and s["status"] != "green":
-                lines.append(f"- Last error: {first_line(s['last_error'], 300)}")
+        for step in steps:
+            lines += [f"### {step['id']} {step['title']}", "", step["behaviour"], ""]
+            if step.get("source"):
+                lines.append(f"- From the request: \"{step['source']}\"")
+            lines += [f"- Test: `{step['test']}`", f"- Status: {status_text(step)}"]
+            if step.get("last_error") and step["status"] != "green":
+                lines.append(f"- Last error: {first_line(step['last_error'], 300)}")
             lines.append("")
         return lines
 
@@ -525,8 +530,8 @@ class Brief:
         words_each = max(60, limit // 7 // len(chunks))
         notes = [Reply(model.ask(Prompts.BRIEF_SYSTEM.format(words=words_each),
                                  [Part("Task", task, True), Part("Spec excerpt", chunk, True)],
-                                 f"Brief {i}/{len(chunks)}")).text
-                 for i, chunk in enumerate(chunks, 1)]
+                                 f"Brief {number}/{len(chunks)}")).text
+                 for number, chunk in enumerate(chunks, 1)]
         text = "\n".join(notes)
         cut = text.rfind("\n", 0, limit)
         return text if len(text) <= limit else text[:cut if cut > 0 else limit]
@@ -655,7 +660,8 @@ class Tracker:
     def change(self, event, quiet=False, **values):
         self.state.update(values)
         if self.store is not None and not quiet:
-            self.store.append("progress", {"event": event, **{k: v for k, v in values.items() if k != "steps"}})
+            self.store.append("progress", {"event": event, **{key: value for key, value in values.items()
+                                                              if key != "steps"}})
         now = time.monotonic()
         if not quiet or now - self.published >= self.QUIET_EVERY:
             self.publish()
