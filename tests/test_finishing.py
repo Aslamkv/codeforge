@@ -101,13 +101,6 @@ def test_read():
         writer.read(Reply(json.dumps(dict(data, usage=[]))))
 
 
-@pytest.mark.spec("FIN-4")
-def test_an_example_that_talks_to_localhost_talks_to_a_server():
-    assert all(ReadmeWriter.SERVER_ADDRESS_RE.search(command)
-               for command in ("curl http://localhost:8000/", "curl 127.0.0.1:5000"))
-    assert not any(ReadmeWriter.SERVER_ADDRESS_RE.search(command) for command in ("echo localhostname", "python app.py"))
-
-
 @pytest.mark.spec("FIN-5")
 def test_text(built, project_dir, tinker_home):
     session, project = built

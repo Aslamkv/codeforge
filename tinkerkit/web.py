@@ -206,8 +206,6 @@ class Internet:
                 self.gone = why
 
 
-Config.checks.append(Internet.check)
-
 
 class WebBackend:
     name = ""

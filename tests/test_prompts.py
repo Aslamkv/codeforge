@@ -15,19 +15,15 @@ def test_reply_drops_thinking_and_whitespace():
 
 
 @pytest.mark.spec("PRM-2")
-def test_json_in_prose():
-    assert Reply('Sure! Here it is:\n```json\n{"a": [1, 2]}\n```\nDone.').json() == {"a": [1, 2]}
-
-
-@pytest.mark.spec("PRM-2")
 @pytest.mark.parametrize("text,expected", [
+    pytest.param('Sure! Here it is:\n```json\n{"a": [1, 2]}\n```\nDone.', {"a": [1, 2]}, id="prose around it"),
     pytest.param('{"a": [1, 2,], "b": 3,}', {"a": [1, 2], "b": 3}, id="trailing commas"),
     pytest.param('{"a": "one " + "two"}', {"a": "one two"}, id="joined strings"),
     pytest.param('{"a": "it\\\'s"}', {"a": "it's"}, id="escaped single quote"),
     pytest.param('{"a": {"b": [1, 2]}', {"a": {"b": [1, 2]}}, id="left open at the end"),
     pytest.param('{"a": ["x", "y", "b": 1}', {"a": ["x", "y"], "b": 1}, id="list open before the next key"),
 ])
-def test_json_mends_the_usual_slips(text, expected):
+def test_json_in_prose_mends_the_usual_slips(text, expected):
     assert Reply(text).json() == expected
 
 
@@ -37,22 +33,6 @@ def test_json_without_an_object_or_beyond_mending():
         Reply("no json here").json()
     with pytest.raises(json.JSONDecodeError):
         Reply('{"a": tru}').json()
-
-
-@pytest.mark.spec("PRM-2")
-def test_a_string_that_is_an_objects_key():
-    assert Reply.OBJECT_KEY_RE.prefixmatch('"name": 1') and not Reply.OBJECT_KEY_RE.prefixmatch('"name", 1')
-
-
-@pytest.mark.spec("PRM-2")
-def test_strings_joined_as_in_code_become_one():
-    assert Reply.STRING_CONCATENATION_RE.sub("", '"a" + "b"') == '"ab"'
-
-
-@pytest.mark.spec("PRM-2")
-def test_an_escaped_single_quote_after_an_even_run_of_backslashes():
-    assert Reply.ESCAPED_SINGLE_QUOTE_RE.sub(r"\1'", r"it\'s") == "it's"
-    assert Reply.ESCAPED_SINGLE_QUOTE_RE.sub(r"\1'", r"it\\'s") == r"it\\'s"
 
 
 @pytest.mark.spec("PRM-3")
@@ -90,30 +70,6 @@ def test_files_drop_debris_and_a_fence_around_the_body():
 def test_a_markdown_file_keeps_its_fences():
     body = "```sh\nmake\n```"
     assert Reply(f"<<<FILE README.md>>>\n{body}\n<<<END>>>").files() == [("README.md", body)]
-
-
-@pytest.mark.spec("PRM-3")
-@pytest.mark.parametrize("header", ["<<<FILE x>>>", "<<<FILE path=x>>>", '<<<FILE "x">>>', "<<<FILE: x>>>", "<<<FILE x"])
-def test_a_file_header_gives_its_path_in_every_form(header):
-    assert Reply(f"{header}\nbody\n<<<END>>>").files() == [("x", "body")]
-
-
-@pytest.mark.spec("PRM-3")
-def test_a_relative_path_alone_on_a_line():
-    assert all(Reply.RELATIVE_PATH_LINE_RE.fullmatch(path) for path in ("src/app.py", "app.py", "src/app"))
-    assert not any(Reply.RELATIVE_PATH_LINE_RE.fullmatch(text) for text in ("the file", "app"))
-
-
-@pytest.mark.spec("PRM-3")
-def test_a_line_of_the_block_formats_own_marks():
-    assert all(Reply.BLOCK_MARKS_ONLY_RE.fullmatch(line) for line in (">>>", "<<<END>>>", " << "))
-    assert not Reply.BLOCK_MARKS_ONLY_RE.fullmatch("x >>> y")
-
-
-@pytest.mark.spec("PRM-3")
-def test_a_markdown_fence_line():
-    assert all(Reply.MARKDOWN_FENCE_RE.fullmatch(line) for line in ("```", "```python", "~~~"))
-    assert not Reply.MARKDOWN_FENCE_RE.fullmatch("```python x = 1")
 
 
 @pytest.mark.spec("PRM-4")

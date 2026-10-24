@@ -125,10 +125,10 @@ def test_redirects_are_followed_up_to_the_limit(site):
 @pytest.mark.spec("LRN-4")
 def test_one_site_is_asked_once_per_domain_delay(site):
     web = site({"/a": (200, HTML, b"a"), "/b": (200, HTML, b"b")})
-    fetcher(domain_delay=0.2).fetch_all([f"{web.base}/a", f"{web.base}/b"])
+    fetcher(domain_delay=0.1).fetch_all([f"{web.base}/a", f"{web.base}/b"])
     times = sorted(at for _, _, at in web.seen)
     robots_then_the_two_pages = 3
-    assert len(times) == robots_then_the_two_pages and all(later - earlier >= 0.19 for earlier, later in zip(times, times[1:]))
+    assert len(times) == robots_then_the_two_pages and all(later - earlier >= 0.09 for earlier, later in zip(times, times[1:]))
 
 
 @pytest.mark.spec("LRN-5")

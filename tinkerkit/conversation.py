@@ -32,6 +32,7 @@ CLOCK_ONLY_EDIT_SECONDS = 15
 BUILD_STOP_GRACE_SECONDS = 120
 STATUS_LOOK_SECONDS = 10
 EXPIRED_MESSAGES_SWEEP_SECONDS = 2
+ENDED_LOOK_SECONDS = 0.5
 
 CHAT_CONTEXT_MESSAGES = 12
 CHAT_MAX_REPLY_TOKENS = 1024
@@ -269,7 +270,7 @@ class Desk:
             thread.start()
         looked = collected = 0.0
         while any(thread.is_alive() for thread in threads) and not any(channel.closed for channel in self.channels):
-            time.sleep(0.5)
+            time.sleep(ENDED_LOOK_SECONDS)
             if time.monotonic() - collected >= EXPIRED_MESSAGES_SWEEP_SECONDS:
                 collected = time.monotonic()
                 for channel in self.channels:
