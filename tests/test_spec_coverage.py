@@ -30,6 +30,17 @@ def test_every_test_names_a_spec_point():
     assert not unknown, f"tests name spec points SPEC.md does not have: {', '.join(unknown)}"
 
 
+def test_each_section_numbers_its_points_from_one_in_order():
+    defined = re.findall(
+        r"^- \*\*([A-Z]{2,4})-(\d+)\*\*", (ROOT / "SPEC.md").read_text(encoding="utf-8"), re.M
+    )
+    numbers = {}
+    for prefix, number in defined:
+        numbers.setdefault(prefix, []).append(int(number))
+    unordered = [prefix for prefix, found in numbers.items() if found != list(range(1, len(found) + 1))]
+    assert not unordered, f"sections not numbered 1, 2, 3 ... in order: {', '.join(unordered)}"
+
+
 def test_every_xfail_is_strict_and_names_its_issue():
     tests = "\n".join(path.read_text(encoding="utf-8") for path in (ROOT / "tests").glob("test_*.py"))
     marks = re.findall(r"mark\.xfail\(([^)]*)\)", tests)

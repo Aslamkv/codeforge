@@ -486,17 +486,14 @@ class Desk:
         return None
 
     def adopt_exercise(self):
-        exercise, left = exercising_now(), Home.store().get("activity", "exercise")
+        exercise = exercising_now()
+        lost = next((job for job in Jobs.lost() if job["command"] == "exercise"), None)
         if exercise and not exercise["reports"]:
             self.follow_exercise(
                 exercise["pid"], exercise["title"], lambda: until_ended(exercise["pid"]), anew=True
             )
-        elif not exercise and left and not alive(left["pid"]):
-            job = next((job for job in Jobs.listed("stopped") if job["command"] == "exercise"), None)
-            self.start_exercise(
-                ["resume", f"#{job['number']}"] if job else ["exercise", left["language"]],
-                job["title"] if job else None,
-            )
+        elif not exercise and lost:
+            self.start_exercise(["resume", f"#{lost['number']}"], lost["title"])
 
     def follow_exercise(self, pid, title, ended, log=None, anew=False):
         sent = exercise_board()
@@ -1741,8 +1738,8 @@ def persons_runs(skip=()):
 
 
 def exercising_now():
-    pid = (Home.store().get("activity", "exercise") or {}).get("pid")
-    state = next((state for state in running() if state["pid"] == pid), None) if pid else None
+    pids = {job["pid"] for job in Jobs.listed("running") if job["command"] == "exercise"}
+    state = next((state for state in running() if state["pid"] in pids), None)
     return described(state) if state else None
 
 

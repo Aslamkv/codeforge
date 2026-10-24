@@ -47,8 +47,8 @@ So Tinker uses Ollama's own **web search** and **web fetch** by default. It need
 export OLLAMA_API_KEY="your-key-here"
 ```
 
-Tinker only goes on the web when you ask: `tinker learn`, `tinker research`, a run with `--web`, or `tinker read`
-of a link (that one needs no key: it only downloads the file).
+Tinker only goes on the web when you ask: `tinker learn`, `tinker research`, `tinker teach`, a run with `--web`,
+or `tinker read` of a link (that one needs no key: it only downloads the file).
 
 No key? Switch to DuckDuckGo, which needs none:
 
@@ -96,7 +96,8 @@ Tinker builds it straight through:
 tinker task a calculator in Python
 ```
 
-It says each step as it goes, and how long it took (the ⏳ line is redrawn in place while the model works):
+It says each step as it goes, and how long it took. While the model works, one line is redrawn in place with
+what Tinker is working on and for how long:
 
 ```text
 📝 Plan: the spec (project)
@@ -105,7 +106,7 @@ It says each step as it goes, and how long it took (the ⏳ line is redrawn in p
 
 🔁 Verify (until every test passes)
    🎯 C2 (2/3 pass): calc.sub(5, 3) is 2
-      ⏳ thinking… 1m 4s
+      ⠋ Making C2 pass: calc.sub(5, 3) is 2… 1m 4s (64s)
    ✅ C2 passes (3/3 pass)
 ```
 
@@ -366,16 +367,15 @@ tinker exercise rust           # start, or go on from where it stopped
 tinker exercise status         # how it is going: each project's measures, and what it practises next
 ```
 
-An exercise is a [job](#jobs-): `tinker stop #N` stops it with everything kept, and `tinker resume #N` goes on.
-One exercise runs at a time, and each language keeps its own projects and lessons. Starting another pauses the
-one that runs.
+An exercise is a [job](#jobs-) like any other, and each language keeps its own projects and lessons.
+`tinker stop #N` stops it with everything kept, and `tinker resume #N` goes on. Anything you start, another
+exercise too, or a chat or a command line, pauses it (its build stops and saves itself), and the exercise goes
+on as soon as nothing else runs and you have your answer.
 
-You come first, as with any job: a chat, a command line or a job you start pauses it (its build stops and
-saves itself), and the exercise goes on as soon as nothing else runs and you have your answer.
-It runs until you stop it. In a chat, `exercise rust` starts it in the background, so it keeps going after
-the conversation ends. It keeps one message, whether it is started, stopped or resumed, and that message shows
-what its build is doing right now, as a task's does. A conversation
-started later picks up the exercise's message again.
+It runs until you stop it. In a chat, `exercise rust` starts it in the background, so it keeps going after the
+conversation ends. It keeps one message, whether it is started, stopped or resumed, and that message shows what
+its build is doing right now, as a task's does. A conversation started later picks up the exercise's message
+again, and an exercise that was killed (or the computer restarted) goes on by itself.
 
 ## Jobs ⏯
 
@@ -384,8 +384,8 @@ and `exercise`. Each gets a number (`#1`, `#2` ...).
 
 One job runs at a time. Start another, of any kind, or chat with Tinker, and the one that runs is paused: it
 saves itself and waits, and you are answered at once. As soon as Tinker is idle (no job runs, and nothing you
-asked is still being answered), the job paused last goes on by itself, then the one before it. There is no
-waiting time.
+asked is still being answered), the newest paused job goes on by itself, then the next. There is no waiting
+time.
 
 List them, newest first, 10 to a page:
 
@@ -407,8 +407,10 @@ job's own journal, so no search or model call is made twice; it works live again
 
 ```sh
 tinker resume #3         # a paused one goes on at once
-tinker resume            # the job stopped last
+tinker resume            # the job stopped last (with none stopped, this folder's run)
 ```
+
+`tinker confirm` is not a job's resume: it always builds the plan that waits in its folder.
 
 A job that was killed (or the computer restarted) shows as stopped, and resumes the same way. Once a job
 finishes, its journal is deleted. In a chat, the same words work: `jobs`, `stop #3`, `resume #3`.

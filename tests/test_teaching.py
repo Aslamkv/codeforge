@@ -155,7 +155,7 @@ def test_ask_with_nothing_kept_asks_no_model(home_store, make_model, fake_ollama
     assert fake_ollama.calls == [] and capsys.readouterr().out.startswith("I have not learned anything yet")
 
 
-@pytest.mark.spec("TCH-3")
+@pytest.mark.spec("TCH-4")
 def test_read_plan_keeps_what_is_usable_within_limits():
     plan = read_plan(
         {
@@ -222,7 +222,7 @@ def test_read_plan_keeps_what_is_usable_within_limits():
             read_plan(broken, count=1)
 
 
-@pytest.mark.spec("TCH-4")
+@pytest.mark.spec("TCH-5")
 def test_teach_runs_only_safe_commands_and_reads_the_pages(kept, make_model, fake_ollama, capsys):
     web = FakeWeb()
     fake_ollama.reply(
@@ -242,7 +242,7 @@ def test_teach_runs_only_safe_commands_and_reads_the_pages(kept, make_model, fak
     assert web.queries == ["ruff formatter replaces black"]
 
 
-@pytest.mark.spec("TCH-4")
+@pytest.mark.spec("TCH-5")
 def test_preferences_alone_are_honored_with_no_check(kept, make_model, fake_ollama, capsys):
     fake_ollama.reply(
         plan_reply(claims=[NO_MYPY], commands=[], searches=[], changes=[dict(NO_MYPY_CHANGE, claims=[1])]),
@@ -255,7 +255,7 @@ def test_preferences_alone_are_honored_with_no_check(kept, make_model, fake_olla
     assert "👤 Your preference, honored: Our projects need no type checker" in capsys.readouterr().out
 
 
-@pytest.mark.spec("TCH-3")
+@pytest.mark.spec("TCH-4")
 def test_toolchain_commands_are_read_in_either_form():
     change = {
         "claims": [1],
@@ -271,7 +271,7 @@ def test_toolchain_commands_are_read_in_either_form():
     }
 
 
-@pytest.mark.spec("TCH-3")
+@pytest.mark.spec("TCH-4")
 def test_only_a_teaching_marked_with_prefer_has_preferences():
     reply = json.loads(plan_reply())
     assert [claim["preference"] for claim in read_plan(reply, count=0, preferences=False)["claims"]] == [
@@ -283,7 +283,7 @@ def test_only_a_teaching_marked_with_prefer_has_preferences():
     assert not marked("we need no mypy")
 
 
-@pytest.mark.spec("TCH-4")
+@pytest.mark.spec("TCH-5")
 def test_facts_nothing_could_check_are_unsure_and_asked_no_more(kept, make_model, fake_ollama):
     fake_ollama.reply(plan_reply(commands=["rm -rf build"]), when="what to check")
     ending = Teacher(make_model(), FakeWeb(pages=()), kept).teach(
@@ -296,7 +296,7 @@ def test_facts_nothing_could_check_are_unsure_and_asked_no_more(kept, make_model
     assert Home.store().get("languages", "python")["toolchain"]["lint"] == the_preferences_change_is_made
 
 
-@pytest.mark.spec("TCH-5")
+@pytest.mark.spec("TCH-6")
 def test_a_verdict_needs_every_fact_and_every_change_a_fact_is_for():
     plan = read_plan(json.loads(plan_reply()), count=0)
     read = lambda claims, changes=({"change": 1, "follows": True},): Verdict.read(
@@ -326,7 +326,7 @@ def test_a_verdict_needs_every_fact_and_every_change_a_fact_is_for():
         read([holds], [])
 
 
-@pytest.mark.spec("TCH-5")
+@pytest.mark.spec("TCH-6")
 def test_a_change_whose_fact_does_not_hold_waits_and_the_rest_are_made(kept, make_model, fake_ollama, capsys):
     fake_ollama.reply(plan_reply(), when="what to check")
     fake_ollama.reply(verdict_reply("wrong"), when="weigh the evidence")
@@ -343,7 +343,7 @@ def test_a_change_whose_fact_does_not_hold_waits_and_the_rest_are_made(kept, mak
     assert "❌ Wrong: Ruff formats" in out and "➖ Not changed: Format and lint" in out
 
 
-@pytest.mark.spec("TCH-5")
+@pytest.mark.spec("TCH-6")
 def test_nothing_changes_when_no_change_can_be_made(kept, make_model, fake_ollama):
     before = {key: Home.store().get(*key) for key in [("languages", "python"), ("memory", "any")]}
     fake_ollama.reply(plan_reply(claims=[RUFF_FACT], changes=[RUFF_CHANGE]), when="what to check")
@@ -353,7 +353,7 @@ def test_nothing_changes_when_no_change_can_be_made(kept, make_model, fake_ollam
     assert {key: Home.store().get(*key) for key in before} == before
 
 
-@pytest.mark.spec("TCH-6")
+@pytest.mark.spec("TCH-7")
 def test_a_teaching_that_holds_corrects_what_tinker_keeps(kept, make_model, fake_ollama):
     teaching = "ruff alone is enough, black is not needed, and I prefer no mypy"
     lesson = numbered_item(kept, teaching, "lesson")
@@ -377,7 +377,7 @@ def test_a_teaching_that_holds_corrects_what_tinker_keeps(kept, make_model, fake
     assert ending["status"] == "done" and ending["headline"] == "Corrected: 5 change(s)"
 
 
-@pytest.mark.spec("TCH-7")
+@pytest.mark.spec("TCH-9")
 def test_teach_needs_the_web_before_any_model_call(measured_model, fake_ollama, monkeypatch):
     monkeypatch.setattr(Ollama, "installed_models", staticmethod(lambda: [{"name": MODEL}]))
     with pytest.raises(SystemExit, match="tinker teach needs the Internet plugin"):
@@ -385,7 +385,7 @@ def test_teach_needs_the_web_before_any_model_call(measured_model, fake_ollama, 
     assert fake_ollama.calls == []
 
 
-@pytest.mark.spec("TCH-7")
+@pytest.mark.spec("TCH-9")
 def test_ask_and_teach_report_through_a_tracker_and_run_as_tasks(
     kept, measured_model, fake_ollama, monkeypatch, capsys
 ):
@@ -460,7 +460,7 @@ def shelved():
     )
 
 
-@pytest.mark.spec("TCH-8")
+@pytest.mark.spec("TCH-3")
 def test_an_ask_about_a_book_sees_what_the_book_says(home_store, make_model, fake_ollama, capsys):
     shelved()
     fake_ollama.reply("Chapter 1 says each test comes before the code.", when="ask")
@@ -470,7 +470,7 @@ def test_an_ask_about_a_book_sees_what_the_book_says(home_store, make_model, fak
     assert WRONG in prompt and capsys.readouterr().out.startswith("Chapter 1 says")
 
 
-@pytest.mark.spec("TCH-9")
+@pytest.mark.spec("TCH-8")
 def test_a_teaching_about_a_book_is_checked_against_it_and_keeps_the_fact(
     home_store, make_model, fake_ollama
 ):

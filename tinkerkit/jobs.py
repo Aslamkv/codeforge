@@ -182,6 +182,13 @@ class Jobs:
         return sorted(jobs, key=lambda job: job["number"], reverse=True)
 
     @staticmethod
+    def lost():
+        jobs = Home.store().items("jobs").values()
+        return [
+            job for job in jobs if job.get("state") in ("running", "paused") and not alive(job.get("pid"))
+        ]
+
+    @staticmethod
     def listed(state=None):
         jobs = Jobs.every()
         states = [state] if state else ["running", "paused", "stopped"]

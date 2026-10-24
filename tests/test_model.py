@@ -355,7 +355,7 @@ def test_calibrate_writes_the_measured_settings(fake_ollama, monkeypatch, no_sle
     assert saved["probes"] == [[8192, "read"]] and 2.0 <= saved["chars_per_token"] <= 4.0
 
 
-@pytest.mark.spec("MOD-14")
+@pytest.mark.spec("MOD-16")
 def test_model_settings(make_model):
     model = make_model(num_batch=256, chars_per_token=9)
     assert (model.max_tokens, model.num_ctx, model.max_reply, model.fix_max) == (8192, 32768, 16384, 4096)
@@ -368,7 +368,7 @@ def test_model_settings(make_model):
     assert model.limit_chars("", tokens=1000) == int(1000 * PROMPT_BUDGET_SHARE * 4.0) - 40
 
 
-@pytest.mark.spec("MOD-15")
+@pytest.mark.spec("MOD-17")
 def test_ask_once(make_model, fake_ollama, model_log):
     fake_ollama.reply("the answer")
     model = make_model()
@@ -401,14 +401,14 @@ def cut(thinking="I was thinking about it"):
     return {"content": "", "thinking": thinking, "done_reason": "length", "eval_count": 4096}
 
 
-@pytest.mark.spec("MOD-16")
+@pytest.mark.spec("MOD-18")
 def test_a_reply_cut_while_thinking_gets_more_room(make_model, fake_ollama):
     fake_ollama.reply(cut()).reply("done")
     assert make_model().ask("s", [Part("Q", "q", True)], "Ask", budget=2048) == "done"
     assert [call["options"]["num_predict"] for call in fake_ollama.calls] == [2048, 4096]
 
 
-@pytest.mark.spec("MOD-16")
+@pytest.mark.spec("MOD-18")
 def test_then_it_is_asked_without_thinking_to_conclude(make_model, fake_ollama):
     fake_ollama.reply(cut("the plan is to add")).reply("concluded")
     assert make_model().ask("s", [Part("Q", "q", True)], "Ask") == "concluded"
@@ -416,7 +416,7 @@ def test_then_it_is_asked_without_thinking_to_conclude(make_model, fake_ollama):
     assert second["think"] is False and "the plan is to add" in second["messages"][1]["content"]
 
 
-@pytest.mark.spec("MOD-16")
+@pytest.mark.spec("MOD-18")
 def test_without_unthinking_retry_it_gives_up(make_model, fake_ollama):
     fake_ollama.reply(cut("half a thought"))
     model = make_model()
@@ -424,7 +424,7 @@ def test_without_unthinking_retry_it_gives_up(make_model, fake_ollama):
     assert model.hit_thinking_cap and model.last_unfinished_thought == "half a thought"
 
 
-@pytest.mark.spec("MOD-16")
+@pytest.mark.spec("MOD-18")
 def test_a_cut_reply_whose_blocks_have_ended_is_kept(make_model, fake_ollama):
     answer = "<<<FILE a.py>>>\nx = 1\n<<<END>>>\nI"
     fake_ollama.reply({"content": answer, "thinking": "t", "done_reason": "length", "eval_count": 4096})
@@ -432,7 +432,7 @@ def test_a_cut_reply_whose_blocks_have_ended_is_kept(make_model, fake_ollama):
     assert len(fake_ollama.calls) == 1
 
 
-@pytest.mark.spec("MOD-17")
+@pytest.mark.spec("MOD-19")
 def test_out_of_memory_shrinks_the_prompt_then_gives_up(make_model, fake_ollama, capsys):
     fake_ollama.reply(OllamaError("oom", oom=True)).reply("ok")
     assert make_model().ask("s", [Part("Q", "q", True)], "Ask") == "ok"
@@ -442,7 +442,7 @@ def test_out_of_memory_shrinks_the_prompt_then_gives_up(make_model, fake_ollama,
         make_model().ask("s", [Part("Q", "q", True)], "Ask")
 
 
-@pytest.mark.spec("MOD-17")
+@pytest.mark.spec("MOD-19")
 def test_a_stall_reloads_the_model(make_model, fake_ollama):
     fake_ollama.reply(OllamaError("stuck", stalled=True), times=2).reply("ok")
     assert make_model().ask("s", [Part("Q", "q", True)], "Ask") == "ok"
@@ -452,7 +452,7 @@ def test_a_stall_reloads_the_model(make_model, fake_ollama):
         make_model().ask("s", [Part("Q", "q", True)], "Ask")
 
 
-@pytest.mark.spec("MOD-17")
+@pytest.mark.spec("MOD-19")
 def test_a_rejected_think_level_falls_back(make_model, fake_ollama):
     fake_ollama.reply(OllamaError('invalid think value "high"')).reply(
         OllamaError("model does not support think")
@@ -464,7 +464,7 @@ def test_a_rejected_think_level_falls_back(make_model, fake_ollama):
     assert model.think is None and model.think_rejected
 
 
-@pytest.mark.spec("MOD-17")
+@pytest.mark.spec("MOD-19")
 def test_a_reply_error_is_asked_once_more_then_the_partial_is_used(make_model, fake_ollama, capsys):
     error = OllamaError("parse error", in_reply=True, partial="<<<FILE a.py>>>\nx")
     fake_ollama.reply(error, times=2)
@@ -472,7 +472,7 @@ def test_a_reply_error_is_asked_once_more_then_the_partial_is_used(make_model, f
     assert len(fake_ollama.calls) == 2
 
 
-@pytest.mark.spec("MOD-17")
+@pytest.mark.spec("MOD-19")
 def test_crashes_lower_a_limit_for_the_run_then_stop(make_model, fake_ollama, no_sleep, capsys):
     model = make_model(max_prompt_tokens=700)
     fake_ollama.reply(OllamaError("runner process has terminated", crashed=True), times=2).reply("ok")
@@ -484,7 +484,7 @@ def test_crashes_lower_a_limit_for_the_run_then_stop(make_model, fake_ollama, no
         make_model().ask("s", [Part("Q", "q", True)], "Ask")
 
 
-@pytest.mark.spec("MOD-17")
+@pytest.mark.spec("MOD-19")
 def test_a_crash_while_writing_lowers_the_longest_reply(make_model, fake_ollama, no_sleep):
     model = make_model()
     crash = OllamaError("runner failed", crashed=True, streamed=12000)
@@ -493,14 +493,14 @@ def test_a_crash_while_writing_lowers_the_longest_reply(make_model, fake_ollama,
     assert model.max_reply == int(16384 * 0.9) and model.max_tokens == 8192
 
 
-@pytest.mark.spec("MOD-17")
+@pytest.mark.spec("MOD-19")
 def test_any_other_error_is_raised(make_model, fake_ollama):
     fake_ollama.reply(OllamaError("model not found"))
     with pytest.raises(OllamaError, match="model not found"):
         make_model().ask("s", [Part("Q", "q", True)], "Ask")
 
 
-@pytest.mark.spec("MOD-18")
+@pytest.mark.spec("MOD-20")
 def test_a_prompt_too_large_is_relaxed_then_refused(make_model, fake_ollama, model_log):
     fake_ollama.reply("ok")
     model = make_model(max_prompt_tokens=512)
@@ -514,7 +514,7 @@ def test_a_prompt_too_large_is_relaxed_then_refused(make_model, fake_ollama, mod
         model.ask("s", [Part(f"P{number}", "p" * 1000, True) for number in range(10)], "Ask")
 
 
-@pytest.mark.spec("MOD-19")
+@pytest.mark.spec("MOD-21")
 def test_ask_until_usable(make_model, fake_ollama):
     fake_ollama.reply("not json").reply('{"ok": true}')
     result = make_model().ask_until_usable(
@@ -538,7 +538,7 @@ def test_ask_until_usable(make_model, fake_ollama):
     )
 
 
-@pytest.mark.spec("MOD-20")
+@pytest.mark.spec("MOD-22")
 def test_learn_chars_per_token(make_model):
     model = make_model()
     too_few_tokens = 40
@@ -554,7 +554,7 @@ def test_learn_chars_per_token(make_model):
     assert len(model.recent_chars_per_token) == 20 and model.chars_per_token == 3.0
 
 
-@pytest.mark.spec("MOD-21")
+@pytest.mark.spec("MOD-23")
 def test_other_models_are_unloaded_and_a_grown_model_too(make_model, fake_ollama, monkeypatch):
     monkeypatch.setattr(Ollama, "loaded_models", staticmethod(lambda: [("other", 1), (MODEL, 1)]))
     fake_ollama.reply("ok")
@@ -568,7 +568,7 @@ def test_other_models_are_unloaded_and_a_grown_model_too(make_model, fake_ollama
     assert fake_ollama.unloaded == ["other", MODEL]
 
 
-@pytest.mark.spec("MOD-22")
+@pytest.mark.spec("MOD-14")
 def test_a_failed_probe_is_recorded_and_waited_out(monkeypatch, fake_ollama, no_sleep, capsys):
     def crash(name, prompt, options, timeout=0):
         raise OllamaError("llama runner process has terminated", crashed=True)
@@ -587,7 +587,7 @@ def test_a_failed_probe_is_recorded_and_waited_out(monkeypatch, fake_ollama, no_
         calibrator.probe(4096, 8192)
 
 
-@pytest.mark.spec("MOD-22")
+@pytest.mark.spec("MOD-14")
 def test_a_gguf_model_that_crashes_is_read_in_pieces(monkeypatch, no_sleep, fake_ollama):
     reads = []
 
@@ -604,7 +604,7 @@ def test_a_gguf_model_that_crashes_is_read_in_pieces(monkeypatch, no_sleep, fake
     assert reads[0]["num_ctx"] == 16384 and reads[1]["num_batch"] == 256
 
 
-@pytest.mark.spec("MOD-23")
+@pytest.mark.spec("MOD-15")
 def test_the_first_chat_finds_the_think_setting(fake_ollama):
     fake_ollama.reply(OllamaError('invalid think value "high"')).reply(
         {"content": "OK", "prompt_eval_count": 300}

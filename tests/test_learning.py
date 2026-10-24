@@ -230,7 +230,7 @@ def learner(web, model=None, embeddings="default"):
     )
 
 
-@pytest.mark.spec("LRN-1")
+@pytest.mark.spec("SLT-1")
 def test_profiles_are_data_and_a_slot_takes_the_plans_hint_and_follow_up():
     assert [slot.id for slot in PROFILES["language"]] == [
         "installed",
@@ -269,7 +269,7 @@ def test_profiles_are_data_and_a_slot_takes_the_plans_hint_and_follow_up():
     )
 
 
-@pytest.mark.spec("LRN-2")
+@pytest.mark.spec("LRN-1")
 def test_the_throttle_lets_rate_requests_a_minute_through():
     clock = FakeClock()
     throttle = Throttle(2, 20, clock=clock.now, sleep=clock.sleep)
@@ -279,7 +279,7 @@ def test_the_throttle_lets_rate_requests_a_minute_through():
     assert clock.slept == half_a_minute_for_the_third
 
 
-@pytest.mark.spec("LRN-2")
+@pytest.mark.spec("LRN-1")
 def test_the_throttle_waits_out_429_within_its_budget():
     clock = FakeClock()
     with pytest.raises(RateLimited):
@@ -295,7 +295,7 @@ def test_the_throttle_waits_out_429_within_its_budget():
     assert clock.slept == []
 
 
-@pytest.mark.spec("LRN-3")
+@pytest.mark.spec("LRN-2")
 def test_every_request_is_logged_and_counted(tinker_home):
     log = RequestLog()
     log("search", "429", 0.5, "q")
@@ -320,7 +320,7 @@ FUNDAMENTALS = next(slot for slot in web_slots("language") if slot.id == "fundam
 LANGUAGE = {"name": "Lang", "language": "Lang"}
 
 
-@pytest.mark.spec("LRN-7")
+@pytest.mark.spec("SLT-2")
 def test_each_slot_draws_from_one_pool_and_mmr_passes_over_a_near_repeat():
     test_runner = "The test framework runs every test file; the formatter and linter run before each commit."
     pool = [
@@ -341,7 +341,7 @@ def test_each_slot_draws_from_one_pool_and_mmr_passes_over_a_near_repeat():
     assert len(tight["toolchain"]) == 1
 
 
-@pytest.mark.spec("LRN-7")
+@pytest.mark.spec("SLT-2")
 def test_meaning_finds_a_passage_with_no_shared_keyword():
     class Close(CountingEmbeddings):
         def vectors(self, texts, keep=True, prune=False):
@@ -354,7 +354,7 @@ def test_meaning_finds_a_passage_with_no_shared_keyword():
     assert [passage.id for passage in picked["toolchain"]] == ["P1"]
 
 
-@pytest.mark.spec("LRN-7")
+@pytest.mark.spec("SLT-2")
 def test_only_each_slots_shortlist_is_embedded():
     class Seen(CountingEmbeddings):
         def vectors(self, texts, keep=True, prune=False):
@@ -368,7 +368,7 @@ def test_only_each_slots_shortlist_is_embedded():
     assert embeddings.seen == SLOT_CANDIDATE_PASSAGES + the_question
 
 
-@pytest.mark.spec("LRN-8")
+@pytest.mark.spec("SLT-3")
 def test_short_slots_and_readiness():
     selected = {
         "toolchain": [passage(1, "a")],
@@ -389,7 +389,7 @@ def test_short_slots_and_readiness():
     assert "installed" not in missing("language", facts, machine=[{"command": "x", "found": False}])
 
 
-@pytest.mark.spec("LRN-9")
+@pytest.mark.spec("LRN-3")
 def test_read_plan_checks_the_plan():
     plan = read_plan(PLAN)
     assert (plan["kind"], plan["profile"], plan["language"], plan["used_with"]) == (
@@ -441,7 +441,7 @@ def test_read_plan_checks_the_plan():
             read_plan(bad)
 
 
-@pytest.mark.spec("LRN-9")
+@pytest.mark.spec("LRN-3")
 def test_read_digest_keeps_only_facts_that_cite_the_passages_given():
     slot, given = TOOLCHAIN, [passage(1, "a", "https://a.dev"), passage(2, "b", "https://b.dev")]
     facts = read_digest(
@@ -481,7 +481,7 @@ WEB_AND_WARNING_BY_CAUSE = {
 }
 
 
-@pytest.mark.spec("LRN-10")
+@pytest.mark.spec("LRN-4")
 @pytest.mark.parametrize("cause", WEB_AND_WARNING_BY_CAUSE)
 def test_a_learn_the_web_cannot_feed_stops_before_any_model_call(cause, tinker_home):
     web_settings, warning = WEB_AND_WARNING_BY_CAUSE[cause]
@@ -500,7 +500,7 @@ def test_a_learn_the_web_cannot_feed_stops_before_any_model_call(cause, tinker_h
     assert sum(clock.slept) <= 20
 
 
-@pytest.mark.spec("LRN-10")
+@pytest.mark.spec("LRN-4")
 def test_without_an_embedding_model_nothing_goes_online(tinker_home):
     web = FakeWeb([RESULTS], PAGES)
     with pytest.raises(LearnStopped, match="no embedding model"):
@@ -508,7 +508,7 @@ def test_without_an_embedding_model_nothing_goes_online(tinker_home):
     assert web.queries == []
 
 
-@pytest.mark.spec("LRN-10")
+@pytest.mark.spec("LRN-4")
 def test_a_stopped_learn_leaves_what_was_learned_before_untouched(tinker_home):
     Library.save(
         "widgetlib",
@@ -527,7 +527,7 @@ def test_a_stopped_learn_leaves_what_was_learned_before_untouched(tinker_home):
     assert Library.read("widgetlib") == before
 
 
-@pytest.mark.spec("LRN-11")
+@pytest.mark.spec("LRN-5")
 def test_a_tool_is_learned_from_its_versions_documentation_and_one_search(tinker_home, capsys):
     web, model, embeddings = (
         FakeWeb([RESULTS], {**PAGES, **MINOR_VERSION_DOC_PAGES}, FALLBACK),
@@ -564,7 +564,7 @@ def test_a_tool_is_learned_from_its_versions_documentation_and_one_search(tinker
     assert "Pages: 3 searched" in out and f"Facts kept: {len(entry['facts'])}" in out
 
 
-@pytest.mark.spec("LRN-18")
+@pytest.mark.spec("LRN-8")
 def test_learning_moves_its_tracker_through_its_steps_and_keeps_its_summary(tinker_home):
     tracker = Tracker("Learning Widgetlib")
     slot_learner = SlotLearner(
@@ -595,7 +595,7 @@ def test_learning_moves_its_tracker_through_its_steps_and_keeps_its_summary(tink
     assert recap["Facts kept"] == str(len(entry["facts"])) and recap["Documentation"] == "widgetlib 2.1"
 
 
-@pytest.mark.spec("LRN-18")
+@pytest.mark.spec("LRN-8")
 def test_a_stopped_learn_says_why_and_what_next_as_data(tinker_home):
     with pytest.raises(LearnStopped) as stopped:
         learner(FakeWeb([RESULTS], PAGES, FALLBACK), embeddings=None).learn("Widgetlib")
@@ -605,7 +605,7 @@ def test_a_stopped_learn_says_why_and_what_next_as_data(tinker_home):
     )
 
 
-@pytest.mark.spec("LRN-11", "LRN-17")
+@pytest.mark.spec("LRN-5", "DOC-4")
 def test_learning_again_reuses_the_saved_plan_and_the_kept_documentation_with_no_web(tinker_home):
     learner(FakeWeb([RESULTS], {**PAGES, **MINOR_VERSION_DOC_PAGES}, FALLBACK)).learn("Widgetlib")
     model, web = tool_model(), FakeWeb([RESULTS], {**PAGES, **MINOR_VERSION_DOC_PAGES}, FALLBACK)
@@ -616,7 +616,7 @@ def test_learning_again_reuses_the_saved_plan_and_the_kept_documentation_with_no
     assert web.queries == only_the_empty_slots_follow_up
 
 
-@pytest.mark.spec("LRN-10", "LRN-17")
+@pytest.mark.spec("LRN-4", "DOC-4")
 def test_a_saved_plan_whose_documentation_gives_too_little_searches_the_web(tinker_home):
     learner(FakeWeb([RESULTS], {**PAGES, **MINOR_VERSION_DOC_PAGES}, FALLBACK)).learn("Widgetlib")
     Home.store().delete("sources", "widgetlib@2.1")
@@ -633,7 +633,7 @@ def test_a_saved_plan_whose_documentation_gives_too_little_searches_the_web(tink
     assert model.calls == []
 
 
-@pytest.mark.spec("LRN-11")
+@pytest.mark.spec("LRN-5")
 def test_the_fallback_fetch_is_capped_and_never_for_a_page_robots_txt_refused(tinker_home):
     Config.save(fetch_fallbacks=1)
     thin = {url: PAGES[APP] for url in ("https://widgetlib.dev/a", "https://widgetlib.dev/b")}
@@ -648,7 +648,7 @@ def test_the_fallback_fetch_is_capped_and_never_for_a_page_robots_txt_refused(ti
     assert web.fallback_asked == ["https://widgetlib.dev/a"]
 
 
-@pytest.mark.spec("LRN-11")
+@pytest.mark.spec("LRN-5")
 def test_digest_and_condense_think_at_learn_think_and_the_plan_at_the_models_own(tinker_home):
     Config.save(learn_think="medium")
     model = tool_model()
@@ -668,7 +668,7 @@ PITFALLS_PAGE = html(
 )
 
 
-@pytest.mark.spec("LRN-12")
+@pytest.mark.spec("LRN-6")
 def test_a_slot_left_without_facts_gets_the_plans_follow_up_search(tinker_home):
     web = FakeWeb(
         [
@@ -685,7 +685,7 @@ def test_a_slot_left_without_facts_gets_the_plans_follow_up_search(tinker_home):
     assert len(web.queries) <= int(Config.get("learn_searches"))
 
 
-@pytest.mark.spec("LRN-12")
+@pytest.mark.spec("LRN-6")
 def test_follow_ups_stop_at_learn_searches(tinker_home):
     Config.save(learn_searches=1)
     web = FakeWeb(
@@ -700,7 +700,7 @@ def test_follow_ups_stop_at_learn_searches(tinker_home):
     )
 
 
-@pytest.mark.spec("LRN-12")
+@pytest.mark.spec("LRN-6")
 def test_a_failed_follow_up_keeps_the_run_alive_and_marks_it_incomplete(tinker_home, capsys):
     web = FakeWeb(
         [[result(START, "Widgetlib start"), result(GUIDE, "Widgetlib guide")], None],
@@ -769,7 +769,7 @@ def language_model():
     )
 
 
-@pytest.mark.spec("LRN-11", "KNW-24")
+@pytest.mark.spec("LRN-5", "KNW-21")
 def test_a_language_is_learned_under_its_key_and_replaces_what_its_earlier_learning_proved(tinker_home):
     Library.save(
         "lang",
@@ -804,7 +804,7 @@ def test_a_language_is_learned_under_its_key_and_replaces_what_its_earlier_learn
     )
 
 
-@pytest.mark.spec("LRN-13")
+@pytest.mark.spec("LRN-7")
 def test_a_domain_is_researched_when_deep(tinker_home, monkeypatch):
     researched = []
     monkeypatch.setattr(

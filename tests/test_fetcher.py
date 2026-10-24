@@ -80,7 +80,7 @@ def fetcher(**given):
     )
 
 
-@pytest.mark.spec("LRN-4")
+@pytest.mark.spec("FET-1")
 def test_sites_are_fetched_in_parallel_in_order_and_one_failure_blocks_none(site):
     together = threading.Barrier(2, timeout=3)
     one, other = (
@@ -108,7 +108,7 @@ def test_sites_are_fetched_in_parallel_in_order_and_one_failure_blocks_none(site
     assert all(agent == Fetcher(1, 1, 1, 0).user_agent for _, agent, _ in one.seen)
 
 
-@pytest.mark.spec("LRN-4")
+@pytest.mark.spec("FET-1")
 def test_one_sites_pages_share_one_kept_alive_connection_and_come_gzipped(site):
     web = site(
         {
@@ -125,7 +125,7 @@ def test_one_sites_pages_share_one_kept_alive_connection_and_come_gzipped(site):
     assert [(kind, result) for kind, result, _, _ in logged] == [("robots", "missing"), ("probe", "missing")]
 
 
-@pytest.mark.spec("LRN-4")
+@pytest.mark.spec("FET-1")
 def test_text_is_decoded_by_its_charset_and_cut_at_max_bytes(site):
     web = site(
         {
@@ -151,7 +151,7 @@ def test_text_is_decoded_by_its_charset_and_cut_at_max_bytes(site):
     assert len(got[3].text) == 1000
 
 
-@pytest.mark.spec("LRN-4")
+@pytest.mark.spec("FET-1")
 def test_redirects_are_followed_up_to_the_limit(site):
     hops = {
         f"/hop{number}": (302, {"Location": f"/hop{number + 1}"}, b"") for number in range(MAX_REDIRECTS + 2)
@@ -163,7 +163,7 @@ def test_redirects_are_followed_up_to_the_limit(site):
     assert f"/hop{MAX_REDIRECTS + 1}" not in web.paths()
 
 
-@pytest.mark.spec("LRN-4")
+@pytest.mark.spec("FET-1")
 def test_one_site_is_asked_once_per_domain_delay(site):
     web = site({"/a": (200, HTML, b"a"), "/b": (200, HTML, b"b")})
     fetcher(domain_delay=0.1).fetch_all([f"{web.base}/a", f"{web.base}/b"])
@@ -174,7 +174,7 @@ def test_one_site_is_asked_once_per_domain_delay(site):
     )
 
 
-@pytest.mark.spec("LRN-5")
+@pytest.mark.spec("FET-2")
 def test_robots_txt_is_honoured(site):
     web = site(
         {
@@ -189,7 +189,7 @@ def test_robots_txt_is_honoured(site):
     assert "/private/page" not in web.paths() and read_once_per_site
 
 
-@pytest.mark.spec("LRN-5")
+@pytest.mark.spec("FET-2")
 def test_a_missing_robots_txt_allows_all_and_a_refused_one_allows_none(site):
     open_site = site({"/page": (200, HTML, b"open")})
     closed_site = site({"/robots.txt": (403, {}, b"no"), "/page": (200, HTML, b"open")})

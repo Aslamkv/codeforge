@@ -24,7 +24,7 @@ def text(words):
     return f"<main><p>{(words + ' ') * 30}</p></main>"
 
 
-@pytest.mark.spec("LRN-14")
+@pytest.mark.spec("DOC-1")
 def test_the_versions_documentation_is_tried_most_exact_first():
     assert version_keys("3.15.1") == ["3.15.1", "3.15", "3", "latest"] and version_keys("") == ["latest"]
     docs = {"root": "https://docs.x.org/3/", "versioned": "https://docs.x.org/{version}/"}
@@ -43,7 +43,7 @@ def test_the_versions_documentation_is_tried_most_exact_first():
     assert DocSite(SiteFetcher({})).resolve(docs, "3.15.1") == (None, "")
 
 
-@pytest.mark.spec("LRN-15")
+@pytest.mark.spec("DOC-2")
 def test_the_sites_map_comes_from_llms_txt_then_sitemap_then_its_own_links():
     base = "https://docs.x.org/3.15/"
     llms = "# X\n- [What's new](https://docs.x.org/3.15/whatsnew/3.15.html)\n- [Blog](https://blog.x.org/a)"
@@ -70,7 +70,7 @@ def test_the_sites_map_comes_from_llms_txt_then_sitemap_then_its_own_links():
     assert DocSite(SiteFetcher({})).map(root, base) == its_own_links_on_its_site
 
 
-@pytest.mark.spec("LRN-15")
+@pytest.mark.spec("DOC-2")
 def test_each_slot_gets_its_pages_in_turn_the_versions_first():
     base = "https://docs.x.org/3.15/"
     another_versions_page = base + "whatsnew/3.14.html"
@@ -92,7 +92,7 @@ def test_each_slot_gets_its_pages_in_turn_the_versions_first():
     assert len(pick(links, wanted, "3.15", 2, base)) == 2
 
 
-@pytest.mark.spec("LRN-16")
+@pytest.mark.spec("DOC-3")
 def test_reading_a_site_follows_an_index_one_hop_to_its_versions_page():
     base = "https://docs.x.org/3.15/"
     pages = {
@@ -109,7 +109,7 @@ def test_reading_a_site_follows_an_index_one_hop_to_its_versions_page():
     assert base + "whatsnew/3.14.html" not in fetcher.asked
 
 
-@pytest.mark.spec("LRN-17")
+@pytest.mark.spec("DOC-4")
 def test_the_documentation_is_kept_per_topic_and_version(tinker_home):
     base = "https://docs.x.org/3.15/"
     fetcher = SiteFetcher({base: text("Overview of X")})
@@ -124,7 +124,7 @@ def test_the_documentation_is_kept_per_topic_and_version(tinker_home):
     assert Home.store().get("sources", "x@3.15")["root"] == base
 
 
-@pytest.mark.spec("LRN-17")
+@pytest.mark.spec("DOC-4")
 def test_a_copy_of_the_latest_documentation_is_read_again_after_docs_latest_days(tinker_home):
     page = Page("https://x.dev/", "t", [Block("text", "Overview")])
     DocCache.put("x", "latest", "https://x.dev/", [page])
@@ -139,7 +139,7 @@ def test_a_copy_of_the_latest_documentation_is_read_again_after_docs_latest_days
     assert DocCache.get("x", "latest") is not None
 
 
-@pytest.mark.spec("LRN-16")
+@pytest.mark.spec("DOC-3")
 def test_the_latest_documentation_is_matched_to_the_version_installed():
     base = "https://docs.x.org/3/"
     pages = {

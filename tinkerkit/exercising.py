@@ -10,7 +10,6 @@ lazy from .conversation import (
     BUILD_STOP_GRACE_SECONDS,
     CHANNEL_REPORTS_ENV,
     JOB_STOP_SIGNAL,
-    alive,
     tinker_process,
 )
 lazy from .jobs import Jobs
@@ -19,9 +18,9 @@ lazy from .project import Project, saved
 lazy from .prompts import Part, Prompts
 lazy from .settings import (
     EARLIER_MEASURES_SHOWN,
+    EXERCISE_BUILD_LOOK_SECONDS,
     EXERCISE_ENV,
     EXERCISE_FOLDER,
-    EXERCISE_PERSON_LOOK_SECONDS,
     REFLECTION_PROBLEMS,
     Home,
     first_line,
@@ -49,7 +48,7 @@ class Exercise:
         self.tracker.change("exercise", exercise=True)
         self.on_to("identify")
         exercise = Exercises.of(identified(self.model, asked))
-        Exercises.claim(exercise)
+        Exercises.save(exercise)
         try:
             self.knows(exercise["language"])
             while True:
@@ -58,7 +57,7 @@ class Exercise:
             self.stop_build()
             return stopped(exercise)
         finally:
-            Exercises.release(exercise)
+            Exercises.leave(exercise)
 
     def on_to(self, step):
         self.tracker.phase(step)
@@ -175,7 +174,7 @@ class Exercise:
         self.running_build = self.start_build(arguments())
         while self.running_build.poll() is None:
             self.show_build(Home.store().get("running", str(self.running_build.pid)))
-            time.sleep(EXERCISE_PERSON_LOOK_SECONDS)
+            time.sleep(EXERCISE_BUILD_LOOK_SECONDS)
         return self.running_build.returncode
 
     def show_build(self, build):
@@ -454,56 +453,29 @@ class Exercises:
         ]
 
     @staticmethod
-    def active():
-        state = Home.store().get("activity", "exercise")
-        pid = (state or {}).get("pid")
-        return state if pid and pid != os.getpid() and alive(pid) else None
-
-    @staticmethod
-    def claim(exercise):
-        running_one = Exercises.active()
-        if running_one:
-            raise SystemExit(already_running(running_one))
-        Exercises.save(exercise)
-        Home.store().put("activity", "exercise", {"pid": os.getpid(), "language": exercise["language"]})
-
-    @staticmethod
-    def release(exercise):
+    def leave(exercise):
         exercise["left"] = now_text()
         Exercises.save(exercise)
-        if Exercises.held_by_this_process():
-            Home.store().delete("activity", "exercise")
-
-    @staticmethod
-    def held_by_this_process():
-        return (Home.store().get("activity", "exercise") or {}).get("pid") == os.getpid()
-
-
-def already_running(active):
-    return (
-        f"An exercise of {active['language']} runs already: it did not pause in time (one runs at a time). "
-        f"Ask again in a moment."
-    )
 
 
 def job_state(exercise):
-    paused = [
+    jobs = [
         job
-        for job in Jobs.listed("paused")
+        for state in ("running", "paused")
+        for job in Jobs.listed(state)
         if job["command"] == "exercise"
         and language_key(" ".join(job["arguments"][1:])) == language_key(exercise["language"])
     ]
-    return "paused" if paused else "stopped"
+    return jobs[0]["state"] if jobs else "stopped"
 
 
 def show():
-    exercises, active = Exercises.every(), Exercises.active()
+    exercises = Exercises.every()
     if not exercises:
         say.info("No exercise yet: start one with tinker exercise LANGUAGE (e.g. tinker exercise python).")
         return
     for exercise in exercises:
-        runs = active and language_key(active["language"]) == language_key(exercise["language"])
-        state = "running" if runs else job_state(exercise)
+        state = job_state(exercise)
         with say.part(
             f"{exercise['language']}: {state}, {len(Exercises.finished(exercise))} practice project(s) "
             f"done since {exercise['started']}",

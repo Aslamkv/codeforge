@@ -129,6 +129,9 @@ def test_a_running_job_whose_process_is_gone_is_stopped(home_store):
         },
     )
     assert Jobs.get(3)["state"] == "stopped" and Jobs.listed("stopped")[0]["number"] == 3
+    assert [job["number"] for job in Jobs.lost()] == [3]
+    stopped_job(home_store, ["learn", "rust"])
+    assert [job["number"] for job in Jobs.lost()] == [3]
 
 
 @pytest.mark.spec("JOB-3")
@@ -233,6 +236,13 @@ def test_resume_runs_the_jobs_own_command_line(home_store):
     home_store.put("jobs", "1", dict(Jobs.get(1), state="finished"))
     with pytest.raises(SystemExit, match="Job #1 is finished"):
         Jobs.arguments(["resume", "#1"])
+
+
+@pytest.mark.spec("JOB-5")
+def test_confirm_builds_the_folders_plan_and_never_a_stopped_job(home_store):
+    stopped_job(home_store, ["learn", "rust"])
+    assert Jobs.arguments(["confirm"]) == ["confirm"] and Jobs.current is None
+    assert Cli.parse(["confirm"]).command == "resume"
 
 
 @pytest.mark.spec("JOB-5")
@@ -379,7 +389,7 @@ def test_the_conversation_stops_and_resumes_jobs(home_store, tmp_path, monkeypat
     ]
 
 
-@pytest.mark.spec("CNV-23")
+@pytest.mark.spec("CNV-24")
 def test_a_research_job_ends_with_its_answer():
     progress = Progress("Researching python")
     progress.take({"ended": {"status": "done", "headline": "", "text": "🔎 **python**\nThe answer [1]"}})
@@ -650,7 +660,7 @@ def test_a_job_that_does_not_pause_is_waited_for_at_most_pause_wait(home_store, 
         assert Jobs.get(1)["state"] == "running" and no_sleep == looked_at_50s_and_100s
 
 
-@pytest.mark.spec("CNV-23")
+@pytest.mark.spec("CNV-24")
 def test_a_research_job_says_its_steps_and_ends_with_its_answer(home_store, monkeypatch):
     monkeypatch.setenv(conversation.CHANNEL_REPORTS_ENV, "off")
     monkeypatch.setattr(

@@ -49,7 +49,6 @@ def test_task(tmp_path, monkeypatch):
 @pytest.mark.parametrize(
     "argv,why",
     [
-        (["--task", "x"], "commands are written without --"),
         (["fly"], "no command 'fly'"),
         (["task", "x", "--yes"], None),
         (["task", "x", "--plan-only"], None),
@@ -264,7 +263,7 @@ def test_doctor(monkeypatch, capsys):
     assert failed.value.code == 1 and "1 thing(s) to fix" in capsys.readouterr().out
 
 
-@pytest.mark.spec("CLI-5")
+@pytest.mark.spec("CLI-8")
 def test_project_folders(measured_model, fake_ollama, tmp_path):
     Config.save(projects=str(tmp_path / "Projects"))
     assert ProjectFolder.from_words("Build me a simple calculator app in Python") == "calculator-python"
@@ -469,7 +468,7 @@ def test_save_keeps_the_project_and_tells_the_tracker(make_project, make_session
     assert plan_of(project_dir)["steps"][0]["id"] == "C1" and tracker.state["passing"] == [1, 1]
 
 
-@pytest.mark.spec("SES-4")
+@pytest.mark.spec("CLI-11")
 def test_each_build_step_says_what_came_of_it(make_project, make_session):
     project = make_project([criterion("C1", "t.py::a", status="green"), criterion("C2", "t.py::b")])
     runner, cycle = (
@@ -502,7 +501,7 @@ def recording_phases(monkeypatch, stop_at=None):
     return ran
 
 
-@pytest.mark.spec("CLI-7")
+@pytest.mark.spec("CLI-11")
 def test_cycle_runs_its_phases_in_order(session, monkeypatch, project_dir):
     ran = recording_phases(monkeypatch)
     formatted = []
@@ -516,7 +515,7 @@ def test_cycle_runs_its_phases_in_order(session, monkeypatch, project_dir):
     assert CycleRunner(session).run(fix) == "done" and ran == list(FIX_PHASES[:-1])
 
 
-@pytest.mark.spec("CLI-7")
+@pytest.mark.spec("CLI-11")
 def test_cycle_waits_after_its_plan_unless_told_not_to(session, monkeypatch):
     ran = recording_phases(monkeypatch)
     cycle = dict(session.project.cycles[0], confirm=True)
@@ -534,7 +533,7 @@ def test_cycle_waits_after_its_plan_unless_told_not_to(session, monkeypatch):
     assert CycleRunner(session).run(feature) == "done"
 
 
-@pytest.mark.spec("CLI-7")
+@pytest.mark.spec("CLI-11")
 def test_a_blocked_cycle_disproves_what_it_used_there(session, monkeypatch):
     recording_phases(monkeypatch, stop_at="verify")
     knowledge = session.knowledge
@@ -554,7 +553,7 @@ def test_a_blocked_cycle_disproves_what_it_used_there(session, monkeypatch):
     ]
 
 
-@pytest.mark.spec("CLI-7")
+@pytest.mark.spec("CLI-11")
 def test_a_web_run_past_recall_recalls_first(session, monkeypatch):
     ran = recording_phases(monkeypatch)
     recalled = []
@@ -569,14 +568,14 @@ def test_a_web_run_past_recall_recalls_first(session, monkeypatch):
     assert recalled == []
 
 
-@pytest.mark.spec("CLI-7")
+@pytest.mark.spec("CLI-11")
 def test_every_phase_has_a_phase_class():
     for phase in set(PHASES + FIX_PHASES) - {"done"}:
         worker = CycleRunner.phase_class(phase)
         assert issubclass(worker, Phase) and worker.TITLE
 
 
-@pytest.mark.spec("CLI-8")
+@pytest.mark.spec("CLI-12")
 @pytest.mark.parametrize(
     "error,message",
     [
@@ -693,7 +692,7 @@ def printed(folder):
     return "\n".join(entry["line"] for _, entry in project_store(folder).entries("output"))
 
 
-@pytest.mark.spec("CLI-9")
+@pytest.mark.spec("CLI-13")
 def test_a_task_is_built_end_to_end(run_ready, fake_ollama, home_store):
     folder = run_ready
     fake_ollama.reply(json.dumps(SPEC_REPLY), when="Spec")
@@ -759,13 +758,13 @@ def test_a_task_is_built_end_to_end(run_ready, fake_ollama, home_store):
     assert progress[0] == "project" and "points" in progress and progress[-1] == "ended"
 
 
-@pytest.mark.spec("CLI-10")
+@pytest.mark.spec("CLI-7")
 def test_learn_a_command_of_yours_needs_no_model(home_store):
     Commands(parse("learn", "act", ". .venv/bin/activate")).run()
     assert home_store.get("commands", "act")["definition"] == ". .venv/bin/activate"
 
 
-@pytest.mark.spec("CLI-10")
+@pytest.mark.spec("CLI-7")
 def test_learning_checks_everything_before_loading(measured_model, fake_ollama, monkeypatch, capsys):
     from tinkerkit.workspace import TaughtCommands
 
@@ -790,7 +789,7 @@ def test_learning_checks_everything_before_loading(measured_model, fake_ollama, 
         Commands(parse("learn", "Flask")).run()
 
 
-@pytest.mark.spec("CLI-11")
+@pytest.mark.spec("CLI-5")
 def test_memory(home_store, capsys):
     known = Knowledge("Python")
     known.remember_toolchain(cli.Toolchain(TOOLCHAIN))
@@ -834,7 +833,7 @@ def test_memory(home_store, capsys):
     assert "setup" not in toolchain_rows
 
 
-@pytest.mark.spec("CLI-11")
+@pytest.mark.spec("CLI-5")
 def test_memory_of_a_language_read_from_the_web_only(home_store, capsys):
     Library.save(
         "go",
@@ -852,14 +851,14 @@ def test_memory_of_a_language_read_from_the_web_only(home_store, capsys):
     assert "📘 Go · nothing built yet · docs read 22 Oct (1 facts)" in out and "Topics learned" not in out
 
 
-@pytest.mark.spec("CLI-11")
+@pytest.mark.spec("CLI-5")
 def test_memory_with_nothing_learned_says_how_to_start(home_store, capsys):
     Commands.show_memory()
     out = capsys.readouterr().out
     assert "🌱 Nothing yet: it learns from every build" in out and "Any language" not in out
 
 
-@pytest.mark.spec("CLI-11")
+@pytest.mark.spec("CLI-5")
 def test_models(measured_model, monkeypatch, capsys):
     monkeypatch.setattr(
         Ollama,
@@ -875,7 +874,7 @@ def test_models(measured_model, monkeypatch, capsys):
         Commands.list_models()
 
 
-@pytest.mark.spec("CLI-12")
+@pytest.mark.spec("CLI-10")
 def test_a_task_waits_for_its_plan_then_confirm_builds_it(run_ready, fake_ollama, home_store):
     folder = run_ready
     fake_ollama.reply(json.dumps(SPEC_REPLY), when="Spec")
@@ -900,7 +899,7 @@ def test_a_task_waits_for_its_plan_then_confirm_builds_it(run_ready, fake_ollama
     assert record_of(folder)["status"] == "done" and fake_ollama.queue == []
 
 
-@pytest.mark.spec("CLI-12")
+@pytest.mark.spec("CLI-10")
 def test_amend_plans_again_and_waits_again(run_ready, fake_ollama):
     folder = run_ready
     fake_ollama.reply(json.dumps(SPEC_REPLY), when="Spec")
@@ -917,7 +916,7 @@ def test_amend_plans_again_and_waits_again(run_ready, fake_ollama):
     assert "+ C4 calc.mul(2, 3) is 6" in printed(folder) and not (folder / "calc.py").exists()
 
 
-@pytest.mark.spec("CLI-12")
+@pytest.mark.spec("CLI-10")
 @pytest.mark.parametrize(
     "problem,said",
     [
@@ -949,7 +948,7 @@ def test_a_blocked_run_says_why_and_how_to_go_on(make_project, make_session, cap
     assert run.ending["status"] == "blocked" and run.ending["headline"] in out
 
 
-@pytest.mark.spec("CLI-13")
+@pytest.mark.spec("CLI-9")
 def test_the_cycle_a_run_works_on(make_project, make_session):
     def run_on(project, mode, confirm=True, **given):
         run = ProjectRun.__new__(ProjectRun)

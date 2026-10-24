@@ -1,9 +1,7 @@
-import json
 import signal
 import socket
 import sys
 import time
-from pathlib import Path
 
 import pytest
 
@@ -240,10 +238,6 @@ def criterion(id, test, behaviour="does it", status="todo", cycle="base", **more
 
 def file_block(path, body):
     return f"<<<FILE {path}>>>\n{body}\n<<<END>>>"
-
-
-def read_json(path):
-    return json.loads(Path(path).read_text(encoding="utf-8"))
 
 
 def plan_of(folder):

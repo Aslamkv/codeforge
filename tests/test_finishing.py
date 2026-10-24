@@ -64,7 +64,7 @@ $ not an example
 """
 
 
-@pytest.mark.spec("FIN-1")
+@pytest.mark.spec("FIN-3")
 def test_examples():
     assert ReadmeWriter.examples(README) == [
         ("python3 calc.py add 2 3", ["5"]),
@@ -74,7 +74,7 @@ def test_examples():
     assert ReadmeWriter.examples("# no usage section\n```console\n$ x\n```") == []
 
 
-@pytest.mark.spec("FIN-2")
+@pytest.mark.spec("FIN-4")
 def test_compare():
     assert ReadmeWriter.compare(['{"a": 1}'], '{ "a" : 1 }\n') == ([], {})
     assert ReadmeWriter.compare(["Added <title> (id <id>)"], "Added Dune (id 7)") == (
@@ -86,18 +86,18 @@ def test_compare():
     assert ReadmeWriter.missing(["code <code>"], "code") == ["code <code>"]
 
 
-@pytest.mark.spec("FIN-3")
+@pytest.mark.spec("FIN-5")
 def test_an_expected_line_matches_only_a_whole_line():
     assert ReadmeWriter.missing(["80.33"], "80.33000000000004") == ["80.33"]
     assert ReadmeWriter.missing(["7"], "17") == ["7"]
 
 
-@pytest.mark.spec("FIN-3")
+@pytest.mark.spec("FIN-5")
 def test_a_whole_line_matches():
     assert ReadmeWriter.missing(["80.33"], "result:\n80.33\n") == []
 
 
-@pytest.mark.spec("FIN-4")
+@pytest.mark.spec("FIN-6")
 def test_read():
     writer = ReadmeWriter.__new__(ReadmeWriter)
     data = {
@@ -126,7 +126,7 @@ def test_read():
         writer.read(Reply(json.dumps(dict(data, usage=[]))))
 
 
-@pytest.mark.spec("FIN-5")
+@pytest.mark.spec("FIN-7")
 def test_text(built, project_dir, tinker_home):
     session, project = built
     TaughtCommands.teach("act", ". .venv/bin/activate")
@@ -169,7 +169,7 @@ def test_text(built, project_dir, tinker_home):
     assert "it keeps running, so use it from another terminal" in served
 
 
-@pytest.mark.spec("FIN-6")
+@pytest.mark.spec("FIN-1")
 def test_findings_said_about_and_reported(built):
     session, project = built
     output = (
@@ -184,13 +184,13 @@ def test_findings_said_about_and_reported(built):
     assert Tidy(session).reported("") == []
 
 
-@pytest.mark.spec("FIN-7")
+@pytest.mark.spec("FIN-9")
 def test_final_review_passes_a_built_project(built):
     session, project = built
     assert FinalReview(session).run(project.cycles[0]) is True and session.review_problem == ""
 
 
-@pytest.mark.spec("FIN-7")
+@pytest.mark.spec("FIN-9")
 def test_final_review_finds_what_is_wrong(built, project_dir):
     session, project = built
     project.criteria[1]["status"] = "blocked"
@@ -203,7 +203,7 @@ def test_final_review_finds_what_is_wrong(built, project_dir):
     assert problem.startswith("`") and "fails when the whole suite runs" in problem and output
 
 
-@pytest.mark.spec("FIN-7")
+@pytest.mark.spec("FIN-9")
 def test_final_review_needs_tests_to_run_and_setup_to_work(built, fake_ollama, monkeypatch):
     session, project = built
     project.spec["toolchain"]["test_all"] = "echo no tests ran"
@@ -215,7 +215,7 @@ def test_final_review_needs_tests_to_run_and_setup_to_work(built, fake_ollama, m
     assert session.review_problem.startswith("setup fails from the project's own files")
 
 
-@pytest.mark.spec("FIN-8")
+@pytest.mark.spec("FIN-10")
 def test_lessons_without_problems_make_no_call(built, fake_ollama, tinker_home):
     session, project = built
     cycle = project.cycles[0]
@@ -226,7 +226,7 @@ def test_lessons_without_problems_make_no_call(built, fake_ollama, tinker_home):
     assert fake_ollama.calls == []
 
 
-@pytest.mark.spec("FIN-8")
+@pytest.mark.spec("FIN-10")
 def test_lessons_from_the_problems_solved(built, fake_ollama):
     session, project = built
     session.note("fix", "sub added instead of subtracting | solved: use -")
@@ -250,7 +250,7 @@ def test_lessons_from_the_problems_solved(built, fake_ollama):
     assert LessonWriter.read(Reply('{"lessons": [], "confirmed": [2, "3"]}')) == ([], [2])
 
 
-@pytest.mark.spec("FIN-9")
+@pytest.mark.spec("FIN-8")
 def test_readme_examples_are_run_and_a_failing_one_fixed(built, fake_ollama, project_dir):
     session, project = built
     readme = "# calc\n\n## Usage\n\n```console\n$ echo 41\n42\n```\n\n```console\n$ echo hi\nhi\n```\n"
@@ -266,7 +266,7 @@ def test_readme_examples_are_run_and_a_failing_one_fixed(built, fake_ollama, pro
     assert "It printed:\n41" in fake_ollama.calls[0]["messages"][1]["content"]
 
 
-@pytest.mark.spec("FIN-9")
+@pytest.mark.spec("FIN-8")
 def test_readme_examples_that_stay_wrong_are_kept(built, fake_ollama, project_dir):
     session, project = built
     project.spec["toolchain"]["use"] = ["echo ready > used.txt"]
@@ -281,7 +281,7 @@ def test_readme_examples_that_stay_wrong_are_kept(built, fake_ollama, project_di
     assert "broke a passing test" in fake_ollama.calls[1]["messages"][1]["content"]
 
 
-@pytest.mark.spec("FIN-10")
+@pytest.mark.spec("FIN-2")
 def test_tidy_fixes_what_the_linter_reports(built, fake_ollama, project_dir):
     session, project = built
     (project_dir / "calc.py").write_text(FIXED + "# TODO tidy me\n")
@@ -295,7 +295,7 @@ def test_tidy_fixes_what_the_linter_reports(built, fake_ollama, project_dir):
     assert "   7| # TODO tidy me" in numbered and fake_ollama.calls[0]["think"] is False
 
 
-@pytest.mark.spec("FIN-10")
+@pytest.mark.spec("FIN-2")
 def test_tidy_reverts_a_change_that_breaks_a_test_or_finds_more(built, fake_ollama, project_dir):
     session, project = built
     (project_dir / "calc.py").write_text(FIXED + "# TODO tidy me\n")
@@ -310,7 +310,7 @@ def test_tidy_reverts_a_change_that_breaks_a_test_or_finds_more(built, fake_olla
     assert (project_dir / "calc.py").read_text() == FIXED + "# TODO tidy me\n"
 
 
-@pytest.mark.spec("FIN-8")
+@pytest.mark.spec("FIN-10")
 def test_the_lessons_step_proves_what_the_cycle_used(built, fake_ollama):
     session, project = built
     session.knowledge.add_lessons([{"text": "Seed random generators inside tests", "phase": "tests"}], [])
@@ -321,7 +321,7 @@ def test_the_lessons_step_proves_what_the_cycle_used(built, fake_ollama):
     assert session.knowledge.known_lessons()[0]["status"] == "proven" and cycle["proven"]
 
 
-@pytest.mark.spec("FIN-8")
+@pytest.mark.spec("FIN-10")
 def test_a_lesson_naming_the_project_is_dropped(built, fake_ollama):
     session, project = built
     session.note("fix", "sub added | solved: use -")
