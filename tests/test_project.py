@@ -16,6 +16,7 @@ from tinkerkit.project import (
     RunChecks,
     Runs,
     SpecDocument,
+    Steps,
     Tracker,
     project_store,
     saved,
@@ -540,3 +541,36 @@ def test_remember_keeps_a_line_about_each_run(home_store, monkeypatch):
     home_store.put("projects", "bbb222", {"id": "bbb222", "workdir": "/somewhere", "task": "task bbb222"})
     Home.clear(["runs"], yes=True)
     assert home_store.items("runs") == {} and home_store.items("projects") == {}
+
+
+@pytest.mark.spec("PRJ-17")
+def test_steps_go_on_from_the_one_reached_and_save_each_next_one():
+    tracker, ran, saved = Tracker("practice"), [], []
+    steps = Steps(("build", "feature", "measure", "done"), tracker)
+    assert steps.run("feature", ran.append, saved.append) == "done"
+    assert ran == ["feature", "measure"] and saved == ["measure", "done"]
+    assert tracker.state["step"] == "measure" and tracker.state["steps"] == ["➕ Feature added"]
+    assert steps.run("done", ran.append, saved.append) == "done" and ran == ["feature", "measure"]
+
+
+@pytest.mark.spec("PRJ-17")
+def test_a_step_passed_over_a_blocked_one_and_a_wait_stop_the_steps_as_they_say():
+    tracker, ran, saved = Tracker("practice"), [], []
+    steps = Steps(("build", "feature", "measure", "done"), tracker, only_if={"feature": lambda: False})
+    blocked = steps.run("build", lambda step: ran.append(step) or step != "measure", saved.append)
+    assert blocked == "blocked" and ran == ["build", "measure"] and saved == ["feature", "measure"]
+    assert tracker.state["steps"] == ["🔨 Practice project built"]
+    assert steps.run("build", ran.append, saved.append, waits=lambda: True) == "waiting"
+
+
+@pytest.mark.spec("PRJ-17")
+def test_entering_a_step_moves_the_tracker_once_in_a_row():
+    tracker = Tracker("reading")
+    steps = Steps(("survey", "chapters", "done"), tracker)
+    steps.enter("survey")
+    steps.enter("survey")
+    steps.enter("chapters")
+    assert tracker.state["steps"] == ["🧭 Chose the chapters to read"]
+    with pytest.raises(ValueError, match="no step 'fly'"):
+        steps.enter("fly")
+    Steps(("survey", "done")).enter("survey")

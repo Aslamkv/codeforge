@@ -767,6 +767,32 @@ class Tracker:
         Home.store().delete("running", str(self.pid))
 
 
+class Steps:
+    def __init__(self, names, tracker=None, only_if=None):
+        self.names, self.tracker, self.only_if = tuple(names), tracker, only_if or {}
+
+    def run(self, at, step, save, waits=lambda: False):
+        while at != self.names[-1]:
+            if waits():
+                return "waiting"
+            if self.wanted(at):
+                self.enter(at)
+                if step(at) is False:
+                    return "blocked"
+            at = self.names[self.names.index(at) + 1]
+            save(at)
+        return "done"
+
+    def wanted(self, step):
+        return self.only_if.get(step, lambda: True)()
+
+    def enter(self, step):
+        if step not in self.names:
+            raise ValueError(f"no step {step!r}: the steps are {', '.join(self.names)}")
+        if self.tracker is not None and self.tracker.state["step"] != step:
+            self.tracker.phase(step)
+
+
 class Outcome:
     def __init__(self):
         self.status, self.exit_code = "stopped", 1

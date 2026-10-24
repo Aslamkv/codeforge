@@ -607,6 +607,14 @@ What is said in the chats, kept so that a chat is only a view of it.
   commands to go on.
 - **PRJ-16** A run keeps every model call and every detail in the project's `events` log, and every message it
   says in its `output` log (its tracker follows `say`).
+- **PRJ-17** `Steps(names, tracker, only_if)` is one step pipeline: its steps are data, in order, and the last
+  is the end (`done`). `enter(step)` moves the tracker to a step of its own, once in a row, and an unknown step
+  is an error. `run(at, step, save, waits)` goes on from `at`, the step reached: it enters each step, runs it
+  (`step(name)`), and saves the next one (`save(next)`), until the end (`done`). A step whose `only_if` says no
+  is passed over, neither entered nor run. A step that gives False stops there, unsaved (`blocked`), and
+  `waits()` stops it before the next step (`waiting`). The cycle's phases (**CLI-11**) and a practice project's
+  steps (**EXR-4**) run this way. Learning (**LRN-8**) and reading (**RDG-12**) only enter their steps: a
+  learn goes on through its journal, and a reading by its chapters' states.
 
 ## fetcher (FET)
 
@@ -986,8 +994,8 @@ Domain research (`Researcher`), own-command learning and run lessons are apart.
   again. When a follow-up fails, the learn goes on, marked `incomplete`, with a warning and a note.
 - **LRN-7** A topic researched before is researched again when deep, else kept. A plan that says the topic is
   a domain hands it to `Researcher` when deep; otherwise it is learned like a tool.
-- **LRN-8** Learning's steps are, in order: search, plan, machine, documentation, digest, follow-up, condense
-  and keep (a domain's: frame and investigate). A saved plan skips search; PREFLIGHT, GATE 1 and GATE 2
+- **LRN-8** Learning's steps (`LEARN_STEPS`, **PRJ-17**) are, in order: search, plan, machine, documentation,
+  digest, follow-up, condense and keep (a domain's: frame and investigate). A saved plan skips search; PREFLIGHT, GATE 1 and GATE 2
   (**LRN-4**) are checks within them. A learn is not saved step by step: stopped, it goes on through its
   job's journal (**JOB-3**), so nothing done is asked again. Given a tracker, learning moves it through its
   steps (`Tracker.DOING_AND_DONE`), each once in a row; without one (a run's recall phase), the run's own steps
@@ -1074,9 +1082,9 @@ the core ones first, and saved as soon as it is read. What it teaches is a topic
   words, at most `BOOK_PASSAGES_SHOWN`, each with its title and chapter.
 - **RDG-12** `tinker read FILE | URL` stores the source, then learns from it as `read #N`: its job's arguments
   become `read #N` (`Jobs.retarget`), so a stopped or paused reading goes on with what is not read, and nothing
-  is fetched again. `read #N ["WHAT"]` needs a measured model and a known reading. Its tracker moves through
-  survey, chapters (and condense) and ends with what was read now, the chapters read, what is kept, whether
-  builds use it, and what to do next.
+  is fetched again. `read #N ["WHAT"]` needs a measured model and a known reading. Its tracker moves through its
+  steps (`READ_STEPS`, **PRJ-17**): survey, chapters (and condense), and ends with what was read now, the
+  chapters read, what is kept, whether builds use it, and what to do next.
 - **RDG-13** `read list [PAGE]` shows the readings by page ([State](#state)), each with how many chapters are
   read and the facts kept; `read show #N` its source, summary and each chapter with its state and facts. Both
   are glances (**CMD-1**). `clear read [#N...]` deletes those readings (every one with no number): their text

@@ -13,6 +13,7 @@ lazy from pathlib import Path
 
 from .messages import say
 lazy from .knowledge import Learner, Library, Retriever, mentions
+lazy from .project import Steps
 lazy from .prompts import Part, Prompts
 lazy from .settings import (
     BOOK_PASSAGES_SHOWN,
@@ -42,6 +43,7 @@ lazy from .web import Internet, is_web_address
 
 CHAPTER_ROLE_ORDER = ("core", "supporting", "other")
 READINGS = Numbered("readings", "reading numbers")
+READ_STEPS = ("survey", "chapters", "condense", "done")
 CHAPTER_STATE_ICONS = {"read": "✅", "unread": "⏳", "raw": "📄"}
 ABOUT_CHAPTER_TITLES = (
     "foreword",
@@ -171,8 +173,7 @@ class Reader:
 
     def step(self, phase, said, icon):
         say.step(said, icon)
-        if self.tracker is not None and self.tracker.state["step"] != phase:
-            self.tracker.phase(phase)
+        Steps(READ_STEPS, self.tracker).enter(phase)
 
     def surveyed(self, entry, book):
         self.step("survey", "Reading its contents, foreword and index…", "🧭")

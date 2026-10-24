@@ -23,7 +23,7 @@ lazy from .knowledge import Embeddings, Library
 lazy from .learning import LearnStopped, SlotLearner
 lazy from .model import Calibrator, Model, Models, Ollama, OllamaError, SelectedModel
 lazy from .planning import Designer, InterfaceReviewer, Recaller, SpecWriter
-lazy from .project import Brief, Outcome, Project, RunChecks, Runs, Tracker, project_store, saved
+lazy from .project import Brief, Outcome, Project, RunChecks, Runs, Steps, Tracker, project_store, saved
 lazy from .prompts import Prompts
 lazy from .session import Session
 lazy from .settings import (
@@ -1634,29 +1634,36 @@ class CycleRunner:
         self.session, self.project = session, session.project
 
     def run(self, cycle, web=False):
-        phases = FIX_PHASES if cycle.get("kind") == "fix" else PHASES
+        steps = Steps(FIX_PHASES if cycle.get("kind") == "fix" else PHASES, self.session.tracker)
         self.session.cycle = cycle
         if web and cycle["phase"] not in ("recall", "done") and not cycle.get("awaiting"):
-            self.recall_first(cycle)
-        while cycle["phase"] != "done":
-            if cycle.get("awaiting"):
-                return "awaiting"
-            phase = cycle["phase"]
-            if self.session.tracker is not None:
-                self.session.tracker.phase(phase)
-            if self.run_phase(phase, cycle) is False:
-                self.disprove(cycle, phase)
-                return "blocked"
-            if phase in FORMATTER_RUNS_AFTER:
-                self.session.format_code()
-            self.done_with(phase, cycle, phases)
-            if phase == "review":
-                self.show_plan()
-        return "done"
+            self.recall_first(cycle, steps)
+        went = steps.run(
+            cycle["phase"],
+            lambda phase: self.phase_done(phase, cycle),
+            lambda phase: self.reached(phase, cycle),
+            waits=lambda: cycle.get("awaiting"),
+        )
+        return "awaiting" if went == "waiting" else went
 
-    def recall_first(self, cycle):
-        if self.session.tracker is not None:
-            self.session.tracker.phase("recall")
+    def phase_done(self, phase, cycle):
+        if self.run_phase(phase, cycle) is False:
+            self.disprove(cycle, phase)
+            return False
+        if phase in FORMATTER_RUNS_AFTER:
+            self.session.format_code()
+        if self.waits_for_confirm(phase, cycle):
+            cycle["awaiting"] = True
+        if phase == "review":
+            self.show_plan()
+        return True
+
+    def reached(self, phase, cycle):
+        cycle["phase"] = phase
+        self.session.save()
+
+    def recall_first(self, cycle, steps):
+        steps.enter("recall")
         with say.part(f"{Recaller.TITLE} (with --web, before {cycle['phase']})", Tracker.icon("recall")):
             Recaller(self.session).run(cycle)
 
@@ -1711,12 +1718,6 @@ class CycleRunner:
             "lessons": LessonWriter,
             "reproduce": BugReproducer,
         }[phase]
-
-    def done_with(self, phase, cycle, phases):
-        cycle["phase"] = phases[phases.index(phase) + 1]
-        if self.waits_for_confirm(phase, cycle):
-            cycle["awaiting"] = True
-        self.session.save()
 
     @staticmethod
     def waits_for_confirm(phase, cycle):
