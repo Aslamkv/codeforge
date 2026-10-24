@@ -8,7 +8,8 @@ lazy from .knowledge import Knowledge, Library
 from .messages import human_duration, say
 lazy from .prompts import Part, Prompts, PromptTooLarge, Reply
 from .settings import (
-    DEFAULT_MAX_STALL, ENV_EXAMPLE, ENV_FILE, NETWORK_NOTE, NETWORK_RETRY, SETUP_TIMEOUT, fingerprint, first_line,
+    DEFAULT_MAX_STALL, ENV_EXAMPLE, ENV_FILE, NETWORK_RETRY_SECONDS, NETWORK_WAIT_NOTE_SECONDS, SETUP_TIMEOUT,
+    fingerprint, first_line,
 )
 lazy from .workspace import TaughtCommands, Workspace
 
@@ -164,13 +165,13 @@ class Session:
 
     def wait_for_network(self):
         """When all that needs no network is done and some setup still waits for it: that batch is
-        tried again every NETWORK_RETRY seconds until the network is back, then the run goes on by
+        tried again every NETWORK_RETRY_SECONDS seconds until the network is back, then the run goes on by
         itself (a person who will not wait stops it with Ctrl+C and runs tinker resume later)."""
         if not self.network_waiting:
             return
         began = time.monotonic()
         say.step(f"Waiting for the network: {len(self.network_waiting)} setup command(s), tried every "
-                 f"{NETWORK_RETRY}s (Ctrl+C stops; tinker resume goes on later)…", "📡")
+                 f"{NETWORK_RETRY_SECONDS}s (Ctrl+C stops; tinker resume goes on later)…", "📡")
         if not self.retried_until_online(began):
             return
         say.done(f"The network is back after {human_duration(time.monotonic() - began)}: setup done")
@@ -178,14 +179,14 @@ class Session:
 
     def retried_until_online(self, began):
         """The setup that waits tried again until it ran: True, or False once one reached the network and failed
-        for a reason of its own (the checks that follow report it). A line says so every NETWORK_NOTE seconds."""
+        for a reason of its own (the checks that follow report it). A line says so every NETWORK_WAIT_NOTE_SECONDS seconds."""
         noted = began
         while self.network_waiting:
-            time.sleep(NETWORK_RETRY)
+            time.sleep(NETWORK_RETRY_SECONDS)
             ok, output, self.network_waiting = self.toolchain.run_setup(self.workspace, self.network_waiting)
             if not ok:
                 return False
-            if self.network_waiting and time.monotonic() - noted >= NETWORK_NOTE:
+            if self.network_waiting and time.monotonic() - noted >= NETWORK_WAIT_NOTE_SECONDS:
                 noted = time.monotonic()
                 say.step(f"Still waiting for the network ({human_duration(noted - began)})…", "📡")
         return True

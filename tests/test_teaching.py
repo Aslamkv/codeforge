@@ -11,7 +11,7 @@ from tinkerkit.knowledge import Knowledge, Library
 from tinkerkit.model import Ollama
 from tinkerkit.prompts import Prompts
 from tinkerkit.reading import Readings
-from tinkerkit.settings import Home, MEMORY_SHOWN, TEACH_CLAIMS
+from tinkerkit.settings import MEMORY_ITEMS_SHOWN, TEACH_CLAIMS, Home
 from tinkerkit.teaching import Asker, Memory, Teacher, Verdict, marked, read_plan
 from tinkerkit.workspace import Toolchain
 from conftest import MODEL, TOOLCHAIN
@@ -97,7 +97,7 @@ def test_memory_is_what_tinker_keeps_but_the_retired_most_related_first(kept):
     assert first["kind"] == "toolchain" and "black" in first["text"]
     assert kept.about("which lessons do you have")[0]["kind"] == "lesson"
     assert kept.about("what is the current toolset you use for a python project")[0]["kind"] == "toolchain"
-    assert len(kept.about("anything", limit=2)) == 2 and MEMORY_SHOWN >= 20
+    assert len(kept.about("anything", limit=2)) == 2 and MEMORY_ITEMS_SHOWN >= 20
 
 
 @pytest.mark.spec("TCH-2")
@@ -300,7 +300,7 @@ def test_ask_and_teach_report_through_a_tracker_and_run_as_tasks(kept, measured_
     steps = [step.split(":")[0] for step in ended[1][2]]
     assert "🤔 Worked out what to check" in steps and "⚖️ Evidence weighed" in steps
     assert any(step.startswith("🤔 Worked out what to check: ") and "claim(s)" in step for step in ended[1][2])
-    assert "ask" in conversation.LONG and "teach" in conversation.LONG
+    assert "ask" in conversation.LONG_COMMANDS and "teach" in conversation.LONG_COMMANDS
 
 WRONG = "The Craft says to write tests after the code"
 

@@ -5,10 +5,10 @@ import re
 lazy from pathlib import Path
 
 from .settings import (
-    READ_POINTS, READ_TERMS, ENV_EXAMPLE, ENV_FILE, FACTS_PER_CHUNK, FACTS_PER_SLOT, FACT_PHASES, LESSON_PHASES,
-    MAX_COMMANDS, MAX_FILE_LINES,
-    PLAYBOOK_RULES, RESEARCH_CHECKS, RESEARCH_GAPS, RESEARCH_QUERIES, RESEARCH_QUESTIONS, RULE_CHARS, TEACH_CLAIMS,
-    TEACH_COMMANDS, TEACH_SEARCHES, TOOL_ROLES, TRIM_FLOOR, first_line,
+    ENV_EXAMPLE, ENV_FILE, FACTS_PER_CHUNK, FACTS_PER_SLOT, FACT_PHASES, LESSON_PHASES, MAX_FILE_LINES,
+    MAX_RULE_CHARS, MAX_VERSION_COMMANDS, MIN_TRIMMED_PROSE_CHARS, PLAYBOOK_RULES, READ_FACTS_PER_CHAPTER,
+    READ_KEY_TERMS, RESEARCH_FACTS_CHECKED, RESEARCH_GAPS, RESEARCH_QUESTIONS, SEARCHES_PER_RESEARCH_QUESTION,
+    TEACH_CHECK_COMMANDS, TEACH_CHECK_SEARCHES, TEACH_CLAIMS, TOOL_ROLES, first_line,
 )
 
 
@@ -313,7 +313,7 @@ class Part:
     place: "first" for what calls of a run share (lessons, learned facts, the spec's data), "last"
     for what changes from one try to the next (a failure, what was tried): a prompt is laid out
     first, then as given, then last, so Ollama re-reads only what follows the part it has cached."""
-    SHORTEST = 150  # chars an optional part keeps at least when it is shortened to fit (else it is left out)
+    SHORTEST_KEPT_CHARS = 150
     PLACES = {"first": 0, None: 1, "last": 2}
 
     def __init__(self, title, text, required=False, keep="head", exact=False, atomic=False, place=None):
@@ -347,7 +347,7 @@ class Part:
         if self.size() <= room:
             return self
         text_room = room - len(self.render("")) - 2  # 2: the blank line before it
-        if not self.atomic and text_room >= Part.SHORTEST:
+        if not self.atomic and text_room >= Part.SHORTEST_KEPT_CHARS:
             return self.shortened(text_room)
         return None
 
@@ -356,7 +356,7 @@ class Part:
         trimmed = set()
         while Part.required_size(parts) > limit:
             index = Part.longest_prose(parts, limit)
-            parts[index] = parts[index].shortened(max(TRIM_FLOOR,
+            parts[index] = parts[index].shortened(max(MIN_TRIMMED_PROSE_CHARS,
                                                       len(parts[index].text) - (Part.required_size(parts) - limit)))
             trimmed.add(parts[index].title)
         if trimmed and notes is not None:
@@ -371,7 +371,7 @@ class Part:
     def longest_prose(parts, limit):
         """The index of the longest required prose part that can still be shortened."""
         prose = [index for index, part in enumerate(parts) if part.required and not part.exact
-                 and len(part.text) > TRIM_FLOOR]
+                 and len(part.text) > MIN_TRIMMED_PROSE_CHARS]
         if not prose:
             exact = ", ".join(part.title for part in parts if part.exact) or "none"
             raise PromptTooLarge(f"required prompt parts need {Part.required_size(parts)} chars; budget allows "
@@ -387,7 +387,7 @@ class Part:
 
     def floor_size(self):
         """Its size once shortened as far as it may be."""
-        return self.size() if self.exact else min(self.size(), TRIM_FLOOR + len(self.title) + 12)
+        return self.size() if self.exact else min(self.size(), MIN_TRIMMED_PROSE_CHARS + len(self.title) + 12)
 
     def shortened(self, room):
         marker = "[...]"
@@ -407,7 +407,7 @@ class PromptTooLarge(Exception):
 class Prompts:
     """Every prompt text: language- and app-neutral (the examples are a small command-line notes
     tool). The *_SYSTEM ones are system prompts; the others are pieces of them and of user messages."""
-    NO_TOOL_CALLS = "\nReply in plain text; never call a tool or function."  # Ollama parses tool-call syntax
+    NO_TOOL_CALLS = "\nReply in plain text; never call a tool or function."
     FOLDER_NAME_SYSTEM = ("Name the folder of the project the person asks for: one to three short lowercase words "
                           "joined by hyphens, at most 20 characters, the shorter the better; shorten well-known "
                           "words (calc-py for a calculator in Python, todo for a todo app). Reply with the name "
@@ -415,10 +415,10 @@ class Prompts:
     SAME_CASES = ("Several similar cases (every line, every unit, each row of a table) are built from the values "
                   "the criterion names, with a loop or a small helper, never written out by hand one by one: a long "
                   "hand-made literal (a grid, a board, a list of positions) is where counting slips.")
-    FILE_BLOCK = "<<<FILE path>>>\nthe complete file\n<<<END>>>"  # how a reply gives a whole file
+    FILE_BLOCK_FORMAT = "<<<FILE path>>>\nthe complete file\n<<<END>>>"
 
     FILES_REPLY = (f"Reply with a line \"CAUSE: <one sentence>\", then each file you change, complete:\n"
-                   f"{FILE_BLOCK}\n"
+                   f"{FILE_BLOCK_FORMAT}\n"
                    f"Only the files shown may change; the project's other files exist. Files stay under "
                    f"{MAX_FILE_LINES} lines.")
 
@@ -575,10 +575,10 @@ Rules: {TOOLCHAIN_RULES}."""
                             f"framework, dependency or command), not a failing test. Fix the setup only: "
                             f"give each dependency or config file you change complete, and/or a line TOOLCHAIN: {{json}} "
                             f"with the corrected commands. Never change code or tests. {TOOLCHAIN_RULES}.\n"
-                            f"Reply with a line \"CAUSE: <one sentence>\", then the changes:\n{FILE_BLOCK}")
+                            f"Reply with a line \"CAUSE: <one sentence>\", then the changes:\n{FILE_BLOCK_FORMAT}")
 
     TESTS_REPLY = f"""Reply with the test file, complete:
-{FILE_BLOCK}
+{FILE_BLOCK_FORMAT}
 Rules: one test per criterion with exactly the given name; assert only what the criterion and the
 contracts state, and exactly: a value or line it states equals what is printed or returned (the whole
 line, not a part found in it: "80.33" in "80.33000000000004" passes wrongly), a clear error by what it
@@ -612,7 +612,7 @@ tests do, with sample data in place of each adapter: nothing outside the app run
 test file next to the project's tests; the file and the test are named as the project's test tool
 expects. Reply with a line "TEST: <test file>::<test name>", a line "EXPECTED: <the correct behaviour,
 one sentence>", then the test file, complete:
-{FILE_BLOCK}
+{FILE_BLOCK_FORMAT}
 Keep it short."""
 
     CODE_SYSTEM = f"""Write one file of a project, in its language. It must fulfil its contract exactly, make the
@@ -623,7 +623,7 @@ and is then reviewed). Use the contracts of the files it uses exactly; an adapte
 an external service only makes its call and returns the data. Keep it under {MAX_FILE_LINES} lines; if it
 needs more, move a part into a new small module and give that file too; never repeat other files.
 Reply with only:
-{FILE_BLOCK}"""
+{FILE_BLOCK_FORMAT}"""
 
     CONFIG_SYSTEM = f"""Write a project's small configuration files (dependencies, settings, tool settings), each
 complete, as its role and contract say, in the language's usual formats, before any test or code exists:
@@ -634,7 +634,7 @@ project needs, no packaging metadata or version limits it was not asked for. {EN
 each setting with a comment and its default (empty for a required one). Write only the files asked for
 (never the code or tests). Reply with one block per file and nothing else: the reply starts with the
 first block (no plan, notes or reasoning before it):
-{FILE_BLOCK}"""
+{FILE_BLOCK_FORMAT}"""
 
     CHANGE_SYSTEM = ("Change one file of an existing project so that it meets the given criteria or fixes the given "
                      "problems, with the smallest change; keep everything else as it is.\n" + FILES_REPLY)
@@ -698,7 +698,7 @@ Give its name, its newest stable version the pages name (else ""), and one sente
 "docs": its official documentation site: "root", the address of its newest documentation, and "versioned",
 the address of one version's documentation with {{version}} where the version goes ("" when the site has no
 such addresses);
-"commands": up to {MAX_COMMANDS} commands that show its installed version and exit (one command each: no shell
+"commands": up to {MAX_VERSION_COMMANDS} commands that show its installed version and exit (one command each: no shell
 operators, nothing installed or changed);
 "tools": for a language only, one per role it has, of {", ".join(TOOL_ROLES)}: the one the topic names, else
 the one most used today, each with the command that shows its version and its "docs" as above;
@@ -736,7 +736,7 @@ or {{"facts":[]}} when the excerpt states nothing like that."""
     PLAYBOOK_SYSTEM = f"""Condense what was learned about a programming language or a tool into the rules a code
 generator follows to write small programs with it that are correct, idiomatic, modern and efficient, quickly: at
 most {PLAYBOOK_RULES}, the most useful first. Each rule is one short imperative sentence (under
-{RULE_CHARS} chars) that changes what is written: the construct, library, command or setting to use
+{MAX_RULE_CHARS} chars) that changes what is written: the construct, library, command or setting to use
 (the newest stable form the facts show) and what it replaces or what to avoid; a short example in
 backticks when it helps. Rest every rule on the numbered facts and lessons given (cite their numbers;
 never your own knowledge); merge facts that say one thing; leave out what a small program never needs.
@@ -761,7 +761,7 @@ Decide from what is given below, never from what you were trained on.
 "summary": two sentences: what it is about, its main argument, and what a reader gets from it.
 "software": true only when it teaches how to plan, design, write, test or run software (then what it teaches may
 guide the projects you build); false for anything else.
-"terms": its key terms, at most {READ_TERMS}, the most central first: they are followed through every chapter.
+"terms": its key terms, at most {READ_KEY_TERMS}, the most central first: they are followed through every chapter.
 "chapters": every chapter by its number, with "read": "core" (where its main ideas are taught: what its foreword and
 its index point to), "supporting" (examples, applications or detail that add to the core) or "other" (the rest);
 the core chapters are read first, then the supporting ones, then the others, and "look_for": in a few words, what to
@@ -775,7 +775,7 @@ before, what the person asks you to look for (when they ask: find that above all
 for in it, and its text. List what this text teaches: its ideas, definitions, practices, rules of thumb and
 warnings, each one plain, self-contained sentence the text states or shows (never from your own knowledge), concrete
 (the names, numbers and examples it gives), the most important first; nothing you learned before, unless this text adds to it or changes
-it (then say how); at most {READ_POINTS}. "section": the heading it is under, or "".
+it (then say how); at most {READ_FACTS_PER_CHAPTER}. "section": the heading it is under, or "".
 "phase": where it matters when building software: spec (what to build and test), design (files, structure), config
 (dependencies, settings), tests, code, toolchain (commands and tools); or book when it does not change how software
 is built.
@@ -786,7 +786,7 @@ or {{"points":[]}} when the text teaches nothing new."""
 software for it. Split the topic into at most {RESEARCH_QUESTIONS} research questions that together cover it:
 what it is and its key terms; how it is done in practice (the steps, roles, records and rules); the
 numbers, limits and standards that matter; what is changing or disputed. Each question has
-{RESEARCH_QUERIES} web searches that would answer it from different, independent sources (name the year
+{SEARCHES_PER_RESEARCH_QUESTION} web searches that would answer it from different, independent sources (name the year
 when it helps). Give the topic's name and one sentence on what it is.
 Reply with ONLY JSON (this example is for "food bank inventory"):
 {{"name":"Food bank inventory","summary":"How food banks track donated food from intake to distribution.",
@@ -808,7 +808,7 @@ state it. Work only from these facts, never from your own knowledge.
   it; at most {RESEARCH_GAPS}, the most important first;
 - checks: the key facts the answers rest on that only one site states (above all figures, limits and
   rules), each with one web search that would find another, independent source for it; at most
-  {RESEARCH_CHECKS}, those the answers depend on most first.
+  {RESEARCH_FACTS_CHECKED}, those the answers depend on most first.
 Reply with ONLY JSON:
 {{"findings":[{{"question":1,"answer":"...","confidence":"high","facts":[1,4]}}],
  "contradictions":[{{"facts":[3,9,12],"doubtful":[9],"note":"..."}}],
@@ -884,8 +884,8 @@ the changes it asks for, each change on its own.
 what the person marks with the word prefer ("I prefer no type checker", "prefer X over Y"): it is theirs, honored
 and never checked. Every other claim is a fact, checked first, however sure the person sounds.
 "commands": commands that show on this machine whether a fact holds (a tool's --version or --help), one command
-each, no shell operators, nothing installed or changed, at most {TEACH_COMMANDS};
-"searches": web searches that find independent sources for the facts, at most {TEACH_SEARCHES} ([] when every
+each, no shell operators, nothing installed or changed, at most {TEACH_CHECK_COMMANDS};
+"searches": web searches that find independent sources for the facts, at most {TEACH_CHECK_SEARCHES} ([] when every
 claim is a preference). A fact about what something you read says is checked against its own text (its passages are
 found for you): it needs no command and no search.
 "language": the language it is about, or "" when it holds for every language.

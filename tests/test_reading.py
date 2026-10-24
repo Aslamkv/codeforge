@@ -18,7 +18,7 @@ from tinkerkit.reading import (
     Book, Chapter, Reader, Readings, book_bytes, excerpt, in_order, index_terms, kind_of, opened, read_points,
     read_survey, show, show_list, stored,
 )
-from tinkerkit.settings import FACT_CHARS, READ_CHUNKS, READ_POINTS, READ_TERMS, Home
+from tinkerkit.settings import MAX_FACT_CHARS, READ_FACTS_PER_CHAPTER, READ_FOCUS_CHUNKS, READ_KEY_TERMS, Home
 from conftest import MODEL
 
 CONTAINER = ('<?xml version="1.0"?><container xmlns="urn:oasis:names:tc:opendocument:xmlns:container" version="1.0">'
@@ -198,7 +198,7 @@ def test_a_source_is_stored_whole_before_anything_is_read(tmp_path, home_store, 
 def test_the_survey_orders_every_chapter_and_skips_none(tmp_path, home_store):
     book = opened(MARKDOWN.encode(), "craft.md")
     survey = read_survey(dict(json.loads(survey_reply()), terms=[f"t{number}" for number in range(30)]), book)
-    assert survey["software"] is True and len(survey["terms"]) == READ_TERMS
+    assert survey["software"] is True and len(survey["terms"]) == READ_KEY_TERMS
     assert survey["order"] == {"4": {"read": "core", "look_for": "what chapter 4 teaches"},
                                "2": {"read": "supporting", "look_for": "what chapter 2 teaches"}}
     assert [chapter.number for chapter in in_order(book.chapters, survey)] == [4, 2, 1, 3, 5]
@@ -268,7 +268,7 @@ def test_a_stopped_reading_goes_on_with_the_chapters_not_read(tmp_path, home_sto
 def test_a_long_chapter_is_read_in_every_part(tmp_path, home_store, make_model, fake_ollama, monkeypatch):
     long = "\n\n".join(f"Paragraph {number} of a long chapter about naming things well." for number in range(40))
     stored(craft(tmp_path, text=f"# Long\n\n## One\n\n{long}\n\n## Two\n\nA short second chapter, with more words."))
-    monkeypatch.setattr(reading, "READ_TEXT_SHARE", 0.05)
+    monkeypatch.setattr(reading, "READ_CHAPTER_TEXT_SHARE", 0.05)
     fake_ollama.reply(survey_reply(software=False, **{"1": "core"}), when="reading plan")
     fake_ollama.reply(points(), times=20)
     Reader(make_model()).read(1)
@@ -295,12 +295,12 @@ def test_read_again_with_a_focus_looks_where_it_is_asked(tmp_path, home_store, m
 @pytest.mark.spec("RDG-9")
 def test_a_chapter_gives_points_with_their_phase():
     reply = {"points": [{"text": "Name functions by what they do", "phase": "code", "section": "Names"},
-                        {"text": "x" * (FACT_CHARS + 50), "phase": "nowhere"}, {"text": " "}, "not a point"]
-             + [{"text": f"point {number}", "phase": "tests"} for number in range(READ_POINTS)]}
+                        {"text": "x" * (MAX_FACT_CHARS + 50), "phase": "nowhere"}, {"text": " "}, "not a point"]
+             + [{"text": f"point {number}", "phase": "tests"} for number in range(READ_FACTS_PER_CHAPTER)]}
     found = read_points(reply, software=True)
-    assert len(found) == READ_POINTS
+    assert len(found) == READ_FACTS_PER_CHAPTER
     assert found[0] == {"text": "Name functions by what they do", "phase": "code", "section": "Names"}
-    assert found[1]["phase"] == "book" and len(found[1]["text"]) == FACT_CHARS
+    assert found[1]["phase"] == "book" and len(found[1]["text"]) == MAX_FACT_CHARS
     assert {point["phase"] for point in read_points(reply, software=False)} == {"book"}
     with pytest.raises(ValueError, match="points"):
         read_points({"facts": []}, software=True)
@@ -351,7 +351,7 @@ def test_the_readings_find_what_a_source_says(tmp_path, home_store):
 
 @pytest.mark.spec("RDG-12")
 def test_tinker_read_stores_then_reads_as_its_own_job(tmp_path, measured_model, fake_ollama, monkeypatch, capsys):
-    assert is_job(["read", "book.epub"]) and is_job(["read", "#2", "retries"]) and "read" in conversation.LONG
+    assert is_job(["read", "book.epub"]) and is_job(["read", "#2", "retries"]) and "read" in conversation.LONG_COMMANDS
     assert Cli.parse(["read", "~/Books/the", "craft.epub"]).read == ["~/Books/the craft.epub"]
     assert Cli.parse(["read", "#2", '"retries,', 'when"']).read == ["#2", "retries, when"]
     assert Cli.parse(["read", "#2"]).read == ["#2"]

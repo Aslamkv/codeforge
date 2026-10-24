@@ -28,10 +28,10 @@ lazy from .settings import EXERCISE_ENV, Home, confirmed, fingerprint, now_text
 COMMANDS = ("task", "restart", "resume", "confirm", "amend", "add", "fix", "learn", "ask", "teach", "read",
             "research", "exercise")
 STATES = ("running", "paused", "stopped", "finished", "archived")
-PAGE = 10              # jobs listed on one page
-PAUSE_WAIT = 150       # seconds a job is given to pause (save, and let go of the model) for one that starts
-LOOK_EVERY = 1.0       # seconds between looks of a paused job at whether Tinker is idle
-STOP = signal.SIGUSR2  # to a job: stop as Ctrl-C does (which a job started in the background ignores)
+JOBS_PER_PAGE = 10
+JOB_PAUSE_GRACE_SECONDS = 150
+PAUSED_JOB_IDLE_LOOK_SECONDS = 1.0
+JOB_STOP_SIGNAL = signal.SIGUSR2
 
 
 class Journal:
@@ -90,7 +90,7 @@ class Jobs:
             yield
             return
         cls.begin(argv)
-        signal.signal(STOP, interrupted)
+        signal.signal(JOB_STOP_SIGNAL, interrupted)
         try:
             yield
         except KeyboardInterrupt:
@@ -110,13 +110,13 @@ class Jobs:
     @staticmethod
     def pause_running(by):
         """One job runs at a time: the ones that run are told to stop, paused by `by` (a job's number, or "you"),
-        and waited for while they save themselves (at most PAUSE_WAIT seconds). The jobs paused."""
+        and waited for while they save themselves (at most JOB_PAUSE_GRACE_SECONDS seconds). The jobs paused."""
         others = [job for job in Jobs.listed("running") if job["pid"] != os.getpid()]
         for job in others:
             say.info(f"Pausing #{job['number']} {job['title']}: it goes on once Tinker is idle", "⏸")
             Jobs.update(job["number"], paused_by=by)
             signal_job(job)
-        ends = time.monotonic() + PAUSE_WAIT
+        ends = time.monotonic() + JOB_PAUSE_GRACE_SECONDS
         while Jobs.still_running(others) and time.monotonic() < ends:
             time.sleep(0.5)
         return others
@@ -202,8 +202,8 @@ class Jobs:
     @staticmethod
     def page(jobs, number):
         """(the jobs on page number, from 1, and how many pages there are)."""
-        pages = max(1, -(-len(jobs) // PAGE))
-        return jobs[(number - 1) * PAGE:number * PAGE], pages
+        pages = max(1, -(-len(jobs) // JOBS_PER_PAGE))
+        return jobs[(number - 1) * JOBS_PER_PAGE:number * JOBS_PER_PAGE], pages
 
     @staticmethod
     def resumable(number=None):
@@ -306,7 +306,7 @@ def go_on_when_idle(number):
             return
         if job.get("go_now") or its_turn(number):
             break
-        time.sleep(LOOK_EVERY)
+        time.sleep(PAUSED_JOB_IDLE_LOOK_SECONDS)
     say.info(f"Going on with #{number} {job['title']}", "▶️")
     sys.stdout.flush()
     os.execv(sys.executable, [sys.executable, str(Path(sys.argv[0]).resolve()), "resume", f"#{number}"])
@@ -346,7 +346,7 @@ def next_to_go_on():
 
 def signal_job(job):
     try:
-        os.kill(job["pid"], STOP)
+        os.kill(job["pid"], JOB_STOP_SIGNAL)
     except ProcessLookupError, PermissionError:
         pass
 

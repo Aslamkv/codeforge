@@ -48,7 +48,7 @@ def internet_with(monkeypatch, *backends, web_name="a", fallback=""):
 
 @pytest.fixture(autouse=True)
 def no_pause(monkeypatch):
-    monkeypatch.setattr(Internet, "RETRY_PAUSE", 0)
+    monkeypatch.setattr(Internet, "RETRY_PAUSE_SECONDS", 0)
 
 
 @pytest.mark.spec("WEB-1")

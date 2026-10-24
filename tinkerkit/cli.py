@@ -45,8 +45,8 @@ lazy from .prompts import Prompts
 lazy from .session import Session
 lazy from .teaching import Asker, Memory, Teacher
 lazy from .settings import (
-    CONFIRM_AFTER, Config, DEFAULT_MAX_STALL, ENV_EXAMPLE, ENV_FILE, FIX_PHASES, FORMAT_AFTER, Home, Log,
-    PHASES, STATUS_TEXT, clock, first_line, now_text, projects_folder,
+    CONFIRM_AFTER, DEFAULT_MAX_STALL, ENV_EXAMPLE, ENV_FILE, FIX_PHASES, FORMATTER_RUNS_AFTER, PHASES,
+    STATUS_TEXT, Config, Home, Log, clock, first_line, now_text, projects_folder,
 )
 lazy from .web import Internet
 lazy from .workspace import TaughtCommands, TestRef, Toolchain
@@ -94,14 +94,13 @@ class Cli:
     as @ID or @folder. The result has one shape for the rest of Tinker."""
     EXAMPLES = ("tinker", "tinker doctor", "tinker task a calculator in Python", "tinker add keep a history of results",
                 "tinker research the newest Python release", "tinker help task")
-    # the conversation's own (one_shot)
     TALK = tuple(command.name for command in COMMANDS if command.group == "Talk" and command.cli)
     TITLES = {"Build": "🔨 Build", "Learn": "🧠 Learn", "Jobs": "⏯ Jobs", "Set up": "🔧 Set up", "Talk": "💬 Talk",
               "Channels": "📡 Channels"}
     RUNS = tuple(command.name for command in COMMANDS if command.run and command.name != "confirm")
     COMMANDS = tuple(command.name for command in COMMANDS if command.cli and command.group != "Talk"
                      and command.name not in ("help", "channel", "confirm"))
-    LEARNING = ("learn", "exercise", "read")  # the commands that load the model for long (but for teaching a command)
+    LONG_MODEL_COMMANDS = ("learn", "exercise", "read")
     FIELDS = {"reset": False, "config": None, "models": False, "use_model": None, "embed": None, "use_web": None,
               "calibrate": None, "learn": None, "ask": None, "teach": None, "read": None, "exercise": None, "memory": False, "runs": False, "status": None, "log": None, "jobs": None, "stop": None,
               "doctor": False, "task": None, "spec": None, "spec_file": None, "restart": False, "resume": None,
@@ -459,7 +458,7 @@ class Cli:
     @staticmethod
     def works_for_hours(args):
         """A run or learning: work the computer must not sleep through (the other commands are quick)."""
-        return args.command in Cli.RUNS + Cli.LEARNING
+        return args.command in Cli.RUNS + Cli.LONG_MODEL_COMMANDS
 
 
 class Commands:
@@ -647,7 +646,7 @@ class Commands:
     def tracker_ended(tracker, ending, seconds):
         """The end told to the tracker, which leaves the home unless the conversation that started it reads it last."""
         tracker.end(ending, seconds)
-        if os.environ.get(conversation.OFF) != "off":
+        if os.environ.get(conversation.CHANNEL_REPORTS_ENV) != "off":
             tracker.close()
 
     @staticmethod
@@ -1131,7 +1130,7 @@ class ProjectRun:
         finally:  # the summary is printed first, so the channels show it too
             if listening:
                 listening.end()
-            elif os.environ.get(conversation.OFF) != "off":  # the conversation that started it reads it last
+            elif os.environ.get(conversation.CHANNEL_REPORTS_ENV) != "off":  # the conversation that started it reads it last
                 self.tracker.close()
         sys.exit(self.outcome.exit_code)
 
@@ -1501,7 +1500,7 @@ class CycleRunner:
             if self.run_phase(phase, cycle) is False:
                 self.disprove(cycle, phase)
                 return "blocked"
-            if phase in FORMAT_AFTER:
+            if phase in FORMATTER_RUNS_AFTER:
                 self.session.format_code()
             self.done_with(phase, cycle, phases)
             if phase == "review":

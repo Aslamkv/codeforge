@@ -13,7 +13,7 @@ from tinkerkit.learning import LearnStopped, RateLimited, RequestLog, SlotLearne
 from tinkerkit.passages import Passage
 from tinkerkit.project import Tracker
 from tinkerkit.prompts import Reply
-from tinkerkit.settings import FACTS_PER_SLOT, SLOT_CANDIDATES, Config, Home
+from tinkerkit.settings import FACTS_PER_SLOT, SLOT_CANDIDATE_PASSAGES, Config, Home
 from tinkerkit.slots import PROFILES, Selector, missing, short_slots, web_slots
 
 
@@ -148,7 +148,7 @@ PLAN = {"kind": "tool", "name": "Widgetlib", "version": "2.0", "summary": "A wid
         "docs": {"root": DOCS + "latest/", "versioned": DOCS + "{version}/"},
         "followups": {"pitfalls-and-limits": "widgetlib common mistakes", "unknown-slot": "x"}}
 DOC_ROOT = DOCS + "2.1/"
-DOC_PAGES = {  # 2.1.0 has no documentation of its own: 2.1's is used
+MINOR_VERSION_DOC_PAGES = {
     DOC_ROOT: '<html><body><main><h1>Widgetlib 2.1</h1><p>' + "Widgetlib overview: its purpose is drawing widgets. " * 10
               + '</p><a href="quickstart.html">Quickstart</a> <a href="changelog/index.html">Changelog</a> '
               '<a href="configuration.html">Configuration</a> <a href="install.html">Installation</a> '
@@ -279,7 +279,7 @@ def test_only_each_slots_shortlist_is_embedded():
     pool = [passage(number, f"The linter number {number} checks the code.") for number in range(1, 400)]
     embeddings = Seen()
     Selector(embeddings, 100_000).select([TOOLCHAIN], pool, LANGUAGE, "1.0")
-    assert embeddings.seen == SLOT_CANDIDATES + 1  # the shortlist, and the question
+    assert embeddings.seen == SLOT_CANDIDATE_PASSAGES + 1  # the shortlist, and the question
 
 
 @pytest.mark.spec("LRN-8")
@@ -330,7 +330,7 @@ def test_read_digest_keeps_only_facts_that_cite_the_passages_given():
     assert facts[1]["phase"] == "toolchain" and len(facts) == FACTS_PER_SLOT  # the slot's section; the rest cut
 
 
-STOPS = {  # cause: (the web, what the warning says)
+WEB_AND_WARNING_BY_CAUSE = {
     "plugin off": (dict(up=False), "the Internet plugin is off"),
     "search error": (dict(answers=[None]), "the search failed"),
     "429 past the backoff": (dict(answers=["429"]), "rate limited (HTTP 429)"),
@@ -341,9 +341,9 @@ STOPS = {  # cause: (the web, what the warning says)
 
 
 @pytest.mark.spec("LRN-10")
-@pytest.mark.parametrize("cause", STOPS)
+@pytest.mark.parametrize("cause", WEB_AND_WARNING_BY_CAUSE)
 def test_a_learn_the_web_cannot_feed_stops_before_any_model_call(cause, tinker_home):
-    web_settings, warning = STOPS[cause]
+    web_settings, warning = WEB_AND_WARNING_BY_CAUSE[cause]
     model, embeddings, clock = tool_model(), CountingEmbeddings(), FakeClock()
     slot_learner = SlotLearner(model, FakeWeb(**web_settings), embeddings)
     slot_learner.throttle = Throttle(8, 20, clock=clock.now, sleep=clock.sleep)
@@ -378,7 +378,7 @@ def test_a_stopped_learn_leaves_what_was_learned_before_untouched(tinker_home):
 
 @pytest.mark.spec("LRN-11")
 def test_a_tool_is_learned_from_its_versions_documentation_and_one_search(tinker_home, capsys):
-    web, model, embeddings = FakeWeb([RESULTS], {**PAGES, **DOC_PAGES}, FALLBACK), tool_model(), CountingEmbeddings()
+    web, model, embeddings = FakeWeb([RESULTS], {**PAGES, **MINOR_VERSION_DOC_PAGES}, FALLBACK), tool_model(), CountingEmbeddings()
     entry = SlotLearner(model, web, embeddings).learn("Widgetlib")
     assert web.queries == ["Widgetlib official documentation"]
     assert web.fetched[:3] == [START, CHANGES, APP] and web.fallback_asked == [APP]  # off-topic and repeat left out
@@ -403,10 +403,10 @@ def test_a_tool_is_learned_from_its_versions_documentation_and_one_search(tinker
 @pytest.mark.spec("LRN-18")
 def test_learning_moves_its_tracker_through_its_steps_and_keeps_its_summary(tinker_home):
     tracker = Tracker("Learning Widgetlib")
-    slot_learner = SlotLearner(tool_model(), FakeWeb([RESULTS], {**PAGES, **DOC_PAGES}, FALLBACK), CountingEmbeddings(),
+    slot_learner = SlotLearner(tool_model(), FakeWeb([RESULTS], {**PAGES, **MINOR_VERSION_DOC_PAGES}, FALLBACK), CountingEmbeddings(),
                                tracker)
     entry = slot_learner.learn("Widgetlib")
-    done = [Tracker.STEPS[phase][1] for phase in ("search", "plan", "machine", "documentation", "digest")]
+    done = [Tracker.DOING_AND_DONE[phase][1] for phase in ("search", "plan", "machine", "documentation", "digest")]
     assert [step.split(":")[0] for step in tracker.state["steps"][:5]] == done and tracker.state["step"] == "keep"
     assert tracker.state["steps"][:5] == [  # each with what came of it
         "🔎 Web searched: 3 of 3 page(s) read", "🤔 Worked out what it is: Widgetlib, a tool",
@@ -428,8 +428,8 @@ def test_a_stopped_learn_says_why_and_what_next_as_data(tinker_home):
 
 @pytest.mark.spec("LRN-11", "LRN-17")
 def test_learning_again_reuses_the_saved_plan_and_the_kept_documentation_with_no_web(tinker_home):
-    learner(FakeWeb([RESULTS], {**PAGES, **DOC_PAGES}, FALLBACK)).learn("Widgetlib")
-    model, web = tool_model(), FakeWeb([RESULTS], {**PAGES, **DOC_PAGES}, FALLBACK)
+    learner(FakeWeb([RESULTS], {**PAGES, **MINOR_VERSION_DOC_PAGES}, FALLBACK)).learn("Widgetlib")
+    model, web = tool_model(), FakeWeb([RESULTS], {**PAGES, **MINOR_VERSION_DOC_PAGES}, FALLBACK)
     entry = learner(web, model).learn("Widgetlib")
     assert "Plan learning" not in model.calls and model.calls[0].startswith("Digest")
     assert not any(url.startswith(DOCS) for url in web.fetched) and entry["docs"] == {"widgetlib": "2.1"}  # kept
@@ -438,7 +438,7 @@ def test_learning_again_reuses_the_saved_plan_and_the_kept_documentation_with_no
 
 @pytest.mark.spec("LRN-10", "LRN-17")
 def test_a_saved_plan_whose_documentation_gives_too_little_searches_the_web(tinker_home):
-    learner(FakeWeb([RESULTS], {**PAGES, **DOC_PAGES}, FALLBACK)).learn("Widgetlib")
+    learner(FakeWeb([RESULTS], {**PAGES, **MINOR_VERSION_DOC_PAGES}, FALLBACK)).learn("Widgetlib")
     Home.store().delete("sources", "widgetlib@2.1")
     web = FakeWeb([RESULTS], PAGES, FALLBACK)  # the documentation site is gone
     learner(web).learn("Widgetlib")
@@ -465,7 +465,7 @@ def test_the_fallback_fetch_is_capped_and_never_for_a_page_robots_txt_refused(ti
 def test_digest_and_condense_think_at_learn_think_and_the_plan_at_the_models_own(tinker_home):
     Config.save(learn_think="medium")
     model = tool_model()
-    learner(FakeWeb([RESULTS], {**PAGES, **DOC_PAGES}, FALLBACK), model).learn("Widgetlib")
+    learner(FakeWeb([RESULTS], {**PAGES, **MINOR_VERSION_DOC_PAGES}, FALLBACK), model).learn("Widgetlib")
     assert ("Plan learning", None) in model.thinking
     assert all(think == "medium" for label, think in model.thinking if label != "Plan learning")
 
@@ -479,7 +479,7 @@ PITFALLS_PAGE = html(("Common mistakes", "Common mistakes: drawing outside the e
 @pytest.mark.spec("LRN-12")
 def test_a_slot_left_without_facts_gets_the_plans_follow_up_search(tinker_home):
     web = FakeWeb([[result(START, "Widgetlib start"), result(GUIDE, "Widgetlib guide")], [result(PITFALLS, "Widgetlib mistakes")]],
-                  {**NO_PITFALLS, **DOC_PAGES, PITFALLS: PITFALLS_PAGE})
+                  {**NO_PITFALLS, **MINOR_VERSION_DOC_PAGES, PITFALLS: PITFALLS_PAGE})
     entry = learner(web).learn("Widgetlib")
     assert web.queries == ["Widgetlib official documentation", "widgetlib common mistakes"]
     assert any(fact["source"] == PITFALLS and fact["slot"] == "pitfalls-and-limits" for fact in entry["facts"])
@@ -489,14 +489,14 @@ def test_a_slot_left_without_facts_gets_the_plans_follow_up_search(tinker_home):
 @pytest.mark.spec("LRN-12")
 def test_follow_ups_stop_at_learn_searches(tinker_home):
     Config.save(learn_searches=1)
-    web = FakeWeb([[result(START, "Widgetlib start"), result(GUIDE, "Widgetlib guide")]], {**NO_PITFALLS, **DOC_PAGES})
+    web = FakeWeb([[result(START, "Widgetlib start"), result(GUIDE, "Widgetlib guide")]], {**NO_PITFALLS, **MINOR_VERSION_DOC_PAGES})
     entry = learner(web).learn("Widgetlib")
     assert len(web.queries) == 1 and entry["status"] == "incomplete" and "pitfalls-and-limits" in entry["missing"]
 
 
 @pytest.mark.spec("LRN-12")
 def test_a_failed_follow_up_keeps_the_run_alive_and_marks_it_incomplete(tinker_home, capsys):
-    web = FakeWeb([[result(START, "Widgetlib start"), result(GUIDE, "Widgetlib guide")], None], {**NO_PITFALLS, **DOC_PAGES})
+    web = FakeWeb([[result(START, "Widgetlib start"), result(GUIDE, "Widgetlib guide")], None], {**NO_PITFALLS, **MINOR_VERSION_DOC_PAGES})
     model = tool_model()
     entry = learner(web, model).learn("Widgetlib")
     assert len(web.queries) >= 2 and entry["status"] == "incomplete" and Library.read("widgetlib")

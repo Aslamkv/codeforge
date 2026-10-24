@@ -340,7 +340,7 @@ def test_the_tracker_publishes_each_change(home_store, project_dir):
 
 @pytest.mark.spec("PRJ-14")
 def test_steps_live_progress_and_messages(home_store, project_dir, monkeypatch):
-    assert set(Tracker.STEPS) >= {"recall", "spec", "design", "review", "setup", "tests", "code", "verify", "tidy", "docs",
+    assert set(Tracker.DOING_AND_DONE) >= {"recall", "spec", "design", "review", "setup", "tests", "code", "verify", "tidy", "docs",
                                   "final_review", "lessons", "reproduce", "amend"}
     tracker = Tracker("calc")
     store = project_store(project_dir)
@@ -355,7 +355,7 @@ def test_steps_live_progress_and_messages(home_store, project_dir, monkeypatch):
     assert state["found"] == "2/0 gives a clear error" and state["latest"] == "💡 2/0 gives a clear error"
     assert [(entry["line"], entry["kind"]) for _, entry in store.entries("output")] == [
         ("   ✅ Wrote calc.py (12 lines)", "done"), ("   💡 2/0 gives a clear error", "found")]
-    monkeypatch.setattr(Tracker, "QUIET_EVERY", 1000)
+    monkeypatch.setattr(Tracker, "QUIET_PUBLISH_SECONDS", 1000)
     tracker.heard(Message("text", "next line"))  # a quiet change waits to be published with the next
     assert home_store.get("running", str(os.getpid()))["latest"] != "next line"
     tracker.phase("verify")

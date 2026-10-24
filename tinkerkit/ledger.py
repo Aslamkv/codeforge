@@ -1,6 +1,6 @@
 """The ledger: what is said in the chats, kept in Tinker's home, so that a chat is only a view of it. Every message
 in a chat (Tinker's, and the person's) is kept as its id and when it goes: a glance (what only shows something,
-like jobs or help) in GLANCE_KEEP, a note that the chat was cleared in NOTE_KEEP, the rest in VIEW_KEEP, Tinker's
+like jobs or help) in GLANCE_KEPT_SECONDS, a note that the chat was cleared in DONE_NOTE_KEPT_SECONDS, the rest in MESSAGE_KEPT_SECONDS, Tinker's
 status never. The chat's collector takes out the ones whose time is up, so a chat holds what is recent alone, and
 a bot may still take it out (Telegram lets it for two days).
 
@@ -11,11 +11,11 @@ lazy import time
 
 lazy from .settings import Home
 
-VIEW_KEEP = 24 * 3600                          # seconds a message stays in a chat
-GLANCE_KEEP = 120                              # ... a glance
-NOTE_KEEP = 5                                  # ... a note that only says something was done (the chat cleared)
-ASKED_WAIT = 60                                # seconds after the person's message in which a new thing answers it
-PAGE = 10                                      # things history lists on one page
+MESSAGE_KEPT_SECONDS = 24 * 3600
+GLANCE_KEPT_SECONDS = 120
+DONE_NOTE_KEPT_SECONDS = 5
+ANSWER_WINDOW_SECONDS = 60
+HISTORY_PER_PAGE = 10
 
 class Ledger:
     """The messages in the chats ("chat views": {until, thing, glance}, by channel, chat and id) and the things
@@ -24,21 +24,21 @@ class Ledger:
 
     @classmethod
     def kept(cls, channel, chat, message):
-        """A message now in a chat, going in VIEW_KEEP."""
-        cls.change(channel, chat, message, until=time.time() + VIEW_KEEP)
+        """A message now in a chat, going in MESSAGE_KEPT_SECONDS."""
+        cls.change(channel, chat, message, until=time.time() + MESSAGE_KEPT_SECONDS)
 
     @classmethod
     def touched(cls, channel, chat, message):
-        """A message edited: it goes VIEW_KEEP from now (a status, or a glance, goes as it went)."""
+        """A message edited: it goes MESSAGE_KEPT_SECONDS from now (a status, or a glance, goes as it went)."""
         view = Home.store().get(cls.VIEWS, key(channel, chat, message))
         if view and view.get("until") and not view.get("glance"):
-            cls.change(channel, chat, message, until=time.time() + VIEW_KEEP)
+            cls.change(channel, chat, message, until=time.time() + MESSAGE_KEPT_SECONDS)
 
     @classmethod
     def glance(cls, channel, chat, messages, keep=None):
-        """Messages that only show something, going in keep seconds (GLANCE_KEEP when not given)."""
+        """Messages that only show something, going in keep seconds (GLANCE_KEPT_SECONDS when not given)."""
         for message in messages:
-            cls.change(channel, chat, message, until=time.time() + (keep or GLANCE_KEEP), glance=True)
+            cls.change(channel, chat, message, until=time.time() + (keep or GLANCE_KEPT_SECONDS), glance=True)
 
     @classmethod
     def lasting(cls, channel, chat, message):
@@ -115,8 +115,8 @@ class Ledger:
     def page(cls, number):
         """(the things on page number, from 1, newest first, and how many pages there are)."""
         things = sorted(Home.store().items(cls.THINGS).values(), key=lambda thing: thing["number"], reverse=True)
-        pages = max(1, -(-len(things) // PAGE))
-        return things[(number - 1) * PAGE:number * PAGE], pages
+        pages = max(1, -(-len(things) // HISTORY_PER_PAGE))
+        return things[(number - 1) * HISTORY_PER_PAGE:number * HISTORY_PER_PAGE], pages
 
 def key(channel, chat, message):
     return f"{channel}\t{chat}\t{message}"

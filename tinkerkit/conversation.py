@@ -33,9 +33,9 @@ lazy import time
 lazy import webbrowser
 lazy from pathlib import Path
 
-from .commands import COMMANDS, TERMINAL_ONLY, named, refs
-from .jobs import STOP, Jobs, job_number, paused_for_you, today
-lazy from .ledger import NOTE_KEEP, Ledger
+from .commands import COMMANDS, TERMINAL_ONLY_CHANNEL_ACTIONS, named, refs
+from .jobs import JOB_STOP_SIGNAL, Jobs, job_number, paused_for_you, today
+lazy from .ledger import DONE_NOTE_KEPT_SECONDS, Ledger
 lazy from .messages import human_duration, say
 lazy from .model import Models, Ollama, OllamaError
 from .project import Runs, Tracker, saved
@@ -44,51 +44,47 @@ lazy from .web import Internet
 lazy from .workspace import Toolchain
 
 
-OFF = "TINKER_CHANNELS"                        # =off: a run the conversation started does not report too
-EDIT_EVERY = 5                                 # seconds between edits of a progress message
-CLOCK_EVERY = 15                               # ... between edits that only move its clock on
-STOP_WAIT = 120                                # seconds a build is given to stop (and save) before it is killed
-STATUS_EVERY = 10                              # seconds between looks at what Tinker does, for its status
-COLLECT_EVERY = 2                              # seconds between takings out of the messages whose time is up
+CHANNEL_REPORTS_ENV = "TINKER_CHANNELS"
+PROGRESS_EDIT_SECONDS = 5
+CLOCK_ONLY_EDIT_SECONDS = 15
+BUILD_STOP_GRACE_SECONDS = 120
+STATUS_LOOK_SECONDS = 10
+EXPIRED_MESSAGES_SWEEP_SECONDS = 2
 
-CHAT_KEPT = 12                                 # messages of one chat kept as the context of its next reply
-CHAT_REPLY_TOKENS = 1024                       # the longest chat reply
-CHAT_TIMEOUT = 600                             # seconds a chat reply may take (a task may hold the model first)
-TYPING_EVERY = 4                               # seconds between "typing…" signs while a reply is written
-BUSY_AFTER = 5                                 # seconds a chat reply may take before a note says the model is busy
-BUSY_EDIT_EVERY = 30                           # seconds between updates of that note
+CHAT_CONTEXT_MESSAGES = 12
+CHAT_MAX_REPLY_TOKENS = 1024
+CHAT_REPLY_TIMEOUT = 600
+TYPING_SIGN_SECONDS = 4
+MODEL_BUSY_NOTE_AFTER_SECONDS = 5
+MODEL_BUSY_NOTE_EDIT_SECONDS = 30
 
-COMMAND_TOKENS = 300                           # the longest reply naming a command
-COMMAND_TIMEOUT = 120                          # seconds a command run from the chat may take
-COMMAND_SHOWN = 3000                           # chars of its output sent back, folded (its end, when longer)
-COMMAND_READ = 6000                            # ... the model reads to tell what it says
-RESEARCH_SEARCHES = 3                          # web searches a research makes
-RESEARCH_PAGES = 4                             # pages it reads (the first each search finds, then the second ...)
-RESEARCH_PAGE_CHARS = 3500                     # of each page, the parts most about the topic
+COMMAND_NAMING_MAX_TOKENS = 300
+CHAT_COMMAND_TIMEOUT = 120
+CHAT_COMMAND_OUTPUT_SHOWN_CHARS = 3000
+CHAT_COMMAND_OUTPUT_READ_CHARS = 6000
+CHAT_RESEARCH_SEARCHES = 3
+CHAT_RESEARCH_PAGES = 4
+CHAT_RESEARCH_CHARS_PER_PAGE = 3500
 
-LONG = named("long")                           # a task: its progress shown (one that runs is paused for it)
-QUICK = named("quick")                         # what it prints is shown
-GLANCES = QUICK + ("help", "history")          # what only shows something: its message goes soon, and its question at once
-# what it deletes is shown first; done once confirmed
-DELETES = tuple(command.name for command in COMMANDS if command.deletes)
-# its plan waits here
-PLANNED = tuple(command.name for command in COMMANDS if "--confirm" in (option.flag for option in command.options))
-OWN = named("own")                             # the conversation's own
-# a command with one word after it
-ONE_WORD = tuple(command.name for command in COMMANDS if command.chat and command.words == "one")
-# a command with any words after it
-ANY_WORDS = tuple(command.name for command in COMMANDS if command.chat and command.words == "any")
-SAID_BARE = tuple(command.name for command in COMMANDS if command.name)  # commands a conversation takes as their words
-BARE_RE = re.compile(r"(?<![/\w.-])tinker (?=(?:" + "|".join(sorted(SAID_BARE, key=len, reverse=True)) + r")\b)")
+LONG_COMMANDS = named("long")
+QUICK_COMMANDS = named("quick")
+GLANCE_COMMANDS = QUICK_COMMANDS + ("help", "history")
+DELETING_COMMANDS = tuple(command.name for command in COMMANDS if command.deletes)
+PLAN_CONFIRMING_COMMANDS = tuple(command.name for command in COMMANDS if "--confirm" in (option.flag for option in command.options))
+CONVERSATION_OWN_COMMANDS = named("own")
+ONE_WORD_COMMANDS = tuple(command.name for command in COMMANDS if command.chat and command.words == "one")
+ANY_WORDS_COMMANDS = tuple(command.name for command in COMMANDS if command.chat and command.words == "any")
+COMMAND_NAMES = tuple(command.name for command in COMMANDS if command.name)
+BARE_RE = re.compile(r"(?<![/\w.-])tinker (?=(?:" + "|".join(sorted(COMMAND_NAMES, key=len, reverse=True)) + r")\b)")
 USAGE = frozendict({command.name: f"✍️ Write `{command.synopsis}`"
                                   + (f", e.g. `{command.example}`" if command.example else "")
                     for command in COMMANDS if command.name})
-ASKED = tuple(command.name for command in COMMANDS if command.chat and any(argument.nargs in ("+", None)
+COMMANDS_ASKING_FOR_WORDS = tuple(command.name for command in COMMANDS if command.chat and any(argument.nargs in ("+", None)
                                                                            for argument in command.arguments)) + (
-    "command", "research")  # sent alone (as a chat app's menu sends it): its words are asked for
-EXIT = ("exit",)  # end the conversation (in a chat, once confirmed: it cannot be started again from there)
-START = "/start"  # what a chat app sends when a person first opens the bot
-WELCOME = """👋 **Hi, I'm Tinker!**
+    "command", "research")
+EXIT_WORDS = ("exit",)
+CHAT_APP_START = "/start"
+START_WELCOME = """👋 **Hi, I'm Tinker!**
 I build small programs for you, on this computer, with an AI model that runs right here.
 
 🔨 **Build something**
@@ -114,7 +110,7 @@ I build small programs for you, on this computer, with an AI model that runs rig
 - `stop` stops it (it is saved): `jobs` lists what runs and what stopped, `resume #3` goes on
 - Just write to me: I pause what runs, answer you, and go on with it
 
-❓ `help` lists everything I can do, and `help task` explains one command."""  # what a chat app's /start gets
+❓ `help` lists everything I can do, and `help task` explains one command."""
 
 
 def session(root):
@@ -141,7 +137,7 @@ def one_shot(command, text):
         return f"tinker {command} needs words after it, e.g. tinker {command} {'hello' if command == 'chat' else '...'}"
     if command == "chat":
         with paused_for_you():
-            console.show(chat, None, talk.reply(console, message, "", CHAT_REPLY_TOKENS), done=True)
+            console.show(chat, None, talk.reply(console, message, "", CHAT_MAX_REPLY_TOKENS), done=True)
     elif command == "research":
         research_once(console, talk, text)
     elif command == "run":
@@ -163,14 +159,14 @@ def research_once(console, talk, topic):
         ending = {"status": status, "headline": "", "text": text}
     finally:
         tracker.end(ending, time.monotonic() - started)
-        if os.environ.get(OFF) != "off":  # the conversation that started it reads it last
+        if os.environ.get(CHANNEL_REPORTS_ENV) != "off":  # the conversation that started it reads it last
             tracker.close()
 
 
 def command_once(console, talk, message):
     """tinker command WHAT: the command line named, and run once the person agrees in this terminal."""
     chat, shell = ConsoleChannel.CHAT, Shell(talk, Path.cwd())
-    console.show(chat, None, shell.propose(console, message, "", COMMAND_TOKENS), done=True)
+    console.show(chat, None, shell.propose(console, message, "", COMMAND_NAMING_MAX_TOKENS), done=True)
     proposed = shell.take(console, chat)
     if not proposed:
         return
@@ -187,7 +183,7 @@ class Desk:
     by its tracker, its progress in its one message; one that deletes shows what it deletes first, and waits for confirm. Tasks run from a
     terminal are served too (running). Anything that is not a command is a normal chat."""
     COMMANDS = tuple(command.name for command in COMMANDS if command.chat)
-    LOOK_EVERY = 1.0  # seconds between looks at a followed task's tracker (for its run and folder)
+    TRACKER_LOOK_SECONDS = 1.0
 
     def __init__(self, channels, root):
         self.channels, self.root = channels, Path(root).resolve()
@@ -198,7 +194,7 @@ class Desk:
         self.waiting = None  # {run, folder, title, spec, stage, new} of the plan that waits for confirm or amend
         self.boards = {}  # run -> its task's messages ({(channel, chat): ids}), kept from one of its runs to the next
         self.asking = {}  # (channel, chat) -> {words, shown}: a command that deletes, waiting for confirm
-        self.wanting = {}  # (channel, chat) -> a command sent alone, waiting for its words (ASKED)
+        self.wanting = {}  # (channel, chat) -> a command sent alone, waiting for its words (COMMANDS_ASKING_FOR_WORDS)
         self.spent = {}  # run -> the seconds its runs took so far (a task's time: done in ...)
         self.consoles = [channel for channel in channels if isinstance(channel, ConsoleChannel)]
         self.said_status = None  # the status said last (a status said again only when it changed)
@@ -308,11 +304,11 @@ class Desk:
         looked = collected = 0.0
         while any(thread.is_alive() for thread in threads) and not any(channel.closed for channel in self.channels):
             time.sleep(0.5)
-            if time.monotonic() - collected >= COLLECT_EVERY:
+            if time.monotonic() - collected >= EXPIRED_MESSAGES_SWEEP_SECONDS:
                 collected = time.monotonic()
                 for channel in self.channels:
                     channel.collect()
-            if time.monotonic() - looked >= STATUS_EVERY:
+            if time.monotonic() - looked >= STATUS_LOOK_SECONDS:
                 looked = time.monotonic()
                 self.say_status()  # what runs elsewhere (an exercise, a terminal's run) moves on by itself
                 if self.exercising is None:
@@ -340,17 +336,17 @@ class Desk:
     def hear(self, channel, message):
         """One message: a welcome for a person who just opened the bot; the answer to what waits for it; else
         the command it gives (the slow ones in a thread, so the next message is heard meanwhile); else a chat."""
-        if message.text.split()[:1] == [START]:
+        if message.text.split()[:1] == [CHAT_APP_START]:
             channel.send(message.chat, welcome())
             return
         message = self.with_words_wanted(channel, message)
         command = command_of(message.text)
-        if message.id and (command in ("confirm",) + EXIT or exercise_switch(message.text)):  # its answer is in a
+        if message.id and (command in ("confirm",) + EXIT_WORDS or exercise_switch(message.text)):  # its answer is in a
             # message already (the plan's, the exercise's, the question to stop): it would only make the chat grow
             channel.delete(message.chat, message.id)
         if self.settle(channel, message, command):
             return
-        if command in ASKED and len(message.text.split()) == 1:
+        if command in COMMANDS_ASKING_FOR_WORDS and len(message.text.split()) == 1:
             self.wanting[(channel.name, message.chat)] = command
             channel.ask_for(message.chat, *words_asked(command))
             return
@@ -367,7 +363,7 @@ class Desk:
         reply = self.answer(message, channel)
         if reply:
             sent = channel.send(message.chat, reply)
-            if command in GLANCES:
+            if command in GLANCE_COMMANDS:
                 channel.glance(message.chat, message.id, [sent])
 
     def with_words_wanted(self, channel, message):
@@ -403,7 +399,7 @@ class Desk:
             channel.show(message.chat, asking["shown"], f"🚫 _Not done:_ `{' '.join(asking['words'])}`", done=True,
                          bottom=False)
         proposed = self.shell.take(channel, message.chat)
-        if proposed == Shell.WRITING and confirm:
+        if proposed == Shell.STILL_NAMING and confirm:
             channel.send(message.chat, "⏳ The command is still being worked out: `confirm` once it is shown.")
             return True
         if proposed and confirm:
@@ -422,15 +418,15 @@ class Desk:
             return handler()
         if command == "clear" and words[1:] == ["chat"]:
             return self.clear_chat(channel, message.chat, "Chat cleared", " · `history` shows any of them again")
-        if command in EXIT:  # the console ends on its own word (ConsoleChannel); a chat asks first
+        if command in EXIT_WORDS:  # the console ends on its own word (ConsoleChannel); a chat asks first
             return self.ask_to_exit(channel, message.chat, command)
-        if command == "channel" and words[1:2] and words[1] in TERMINAL_ONLY:
+        if command == "channel" and words[1:2] and words[1] in TERMINAL_ONLY_CHANNEL_ACTIONS:
             return f"🖥 `channel {words[1]}` asks in a terminal: `tinker channel {words[1]}` there"
         if command == "read" and words[1:2] in (["list"], ["show"]):
             return md(t"📚 **{' '.join(words)}**\n{self.tinker(words):block}")
-        if command in DELETES and "--yes" not in words:
+        if command in DELETING_COMMANDS and "--yes" not in words:
             return self.ask_first(channel, message.chat, words)
-        if command in LONG:
+        if command in LONG_COMMANDS:
             return self.start_task(words, self.root, " ".join(words))
         if command == "memory" and "--graph" in words:
             return self.memory_graph(channel, message.chat, words)
@@ -476,7 +472,7 @@ class Desk:
         running_one = exercising_now()
         if not running_one:
             return "🤷 No exercise runs: `resume #N` goes on with one (`jobs stopped` lists them)"
-        signal_task(running_one["pid"], STOP)
+        signal_task(running_one["pid"], JOB_STOP_SIGNAL)
         self.exercise_says("🛑 Stopping: its build saves itself first")
         return None
 
@@ -488,7 +484,7 @@ class Desk:
         start = log.stat().st_size if log.exists() else 0
         try:
             with open(log, "a", encoding="utf-8") as output:
-                process = tinker_process(words, self.root, output, **{OFF: "off", "NO_COLOR": "1"})
+                process = tinker_process(words, self.root, output, **{CHANNEL_REPORTS_ENV: "off", "NO_COLOR": "1"})
         except OSError as exc:
             return md(t"⚠️ **Could not start it:** {exc}")
         self.follow_exercise(process.pid, title or " ".join(words), process.wait, (log, start), anew=True)
@@ -740,13 +736,13 @@ class Desk:
     def delete(self, channel, chat, asking):
         """A command that deletes (or exit), confirmed: done (a restart as a task), in its message. exit's question
         goes as Tinker ends: its status says so."""
-        if asking["words"][0] in EXIT:
+        if asking["words"][0] in EXIT_WORDS:
             self.leaving = (channel, chat, asking["shown"])
             for each in self.channels:
                 each.closed = True
             return
         words = asking["words"] + ["--yes"]
-        if words[0] in LONG:
+        if words[0] in LONG_COMMANDS:
             refused = self.start_task(words, self.root, " ".join(asking["words"]))
             if refused:
                 channel.show(chat, asking["shown"], refused, done=True)
@@ -763,7 +759,7 @@ class Desk:
         said in a note of its own that goes in seconds. None: nothing more to say."""
         taken = sum(each.clear() for each in self.channels)
         sent = channel.send(chat, f"🧹 **{cleared}:** {taken} messages taken out{after}")
-        channel.glance(chat, None, [sent], NOTE_KEEP)
+        channel.glance(chat, None, [sent], DONE_NOTE_KEPT_SECONDS)
         return None
 
     def run_app(self, channel, chat, said):
@@ -784,9 +780,9 @@ class Desk:
             return
         line = " ".join([toolchain.run] + [shlex.quote(arg) for arg in args])
         shown = channel.show(chat, None, md(t"▶️ **{title}** {line:code} …"))
-        code, output = in_shell(Shell.SHELL, toolchain.shell(line), workdir, stdin)
+        code, output = in_shell(Shell.LOGIN_SHELL, toolchain.shell(line), workdir, stdin)
         fed = md(t"\n_input:_ `{stdin.strip()}`") if stdin else ""
-        printed = f"```\n{Markup.fenced(output[-COMMAND_SHOWN:])}\n```" if output else "_(it printed nothing)_"
+        printed = f"```\n{Markup.fenced(output[-CHAT_COMMAND_OUTPUT_SHOWN_CHARS:])}\n```" if output else "_(it printed nothing)_"
         channel.show(chat, shown, md(t"{'✅' if code == 0 else '❌'} **{title}** {line:code} · _exit {code}_{fed:md}\n"
                                      t"{printed:md}"), done=True)
 
@@ -823,8 +819,8 @@ class Desk:
     def spawn(self, arguments):
         """The task as its own tinker, from here (a new task makes its own folder, a run given by ID finds its
         own), reporting through this conversation only. A run that plans waits for its plan to be confirmed."""
-        arguments = arguments + ["--confirm"] if arguments[0] in PLANNED else arguments
-        env = dict(os.environ, **{OFF: "off", "PYTHONUNBUFFERED": "1", "NO_COLOR": "1"})
+        arguments = arguments + ["--confirm"] if arguments[0] in PLAN_CONFIRMING_COMMANDS else arguments
+        env = dict(os.environ, **{CHANNEL_REPORTS_ENV: "off", "PYTHONUNBUFFERED": "1", "NO_COLOR": "1"})
         return subprocess.Popen(tinker_command() + arguments, cwd=self.root, env=env, text=True,
                                 stdin=subprocess.DEVNULL, stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
                                 start_new_session=True)
@@ -838,7 +834,7 @@ class Desk:
             if self.echo:
                 sys.stdout.write(line)
             reporter.printed(line)
-            if time.monotonic() - looked >= self.LOOK_EVERY:
+            if time.monotonic() - looked >= self.TRACKER_LOOK_SECONDS:
                 looked = time.monotonic()
                 self.learn(task, reporter, reporter.tracked())
         process.wait()
@@ -902,8 +898,8 @@ class Desk:
 
 def command_of(text, commands=None):
     """The command a message gives (one of the conversation's commands, sent as its first word, with or
-    without a /), or "" when it is chat. A word alone is a command; one of ONE_WORD with one word after it
-    is, and one of ANY_WORDS with any words after it ("models are getting better" is a chat)."""
+    without a /), or "" when it is chat. A word alone is a command; one of ONE_WORD_COMMANDS with one word after it
+    is, and one of ANY_WORDS_COMMANDS with any words after it ("models are getting better" is a chat)."""
     words = text.split()
     first = command_word(words[0]) if words else ""
     if first not in (commands or Desk.COMMANDS):
@@ -914,8 +910,8 @@ def command_of(text, commands=None):
 
 
 def takes_these_words(first, words):
-    """Whether the command takes the words after it: none, any (ANY_WORDS), or one (ONE_WORD)."""
-    return len(words) == 1 or first in ANY_WORDS or (first in ONE_WORD and len(words) == 2)
+    """Whether the command takes the words after it: none, any (ANY_WORDS_COMMANDS), or one (ONE_WORD_COMMANDS)."""
+    return len(words) == 1 or first in ANY_WORDS_COMMANDS or (first in ONE_WORD_COMMANDS and len(words) == 2)
 
 
 def command_words(text):
@@ -968,12 +964,12 @@ def app_request(given):
 def welcome():
     """The welcome for a person who just opened the bot (/start): what Tinker is, and what to send, grouped by
     what a beginner does, in plain words."""
-    return WELCOME
+    return START_WELCOME
 
 
 class Talk:
     """A normal chat with the model in use: a message that is not a command is answered by it, with that
-    chat's last CHAT_KEPT messages (and what is running now) as context. It does not think, so a reply comes
+    chat's last CHAT_CONTEXT_MESSAGES messages (and what is running now) as context. It does not think, so a reply comes
     quickly, and its settings are a run's own (num_ctx), so a task and a chat share the loaded model: warm
     loads it as listening starts, and neither the first reply nor the next task waits for it to load.
     A job that runs (here or elsewhere) is paused while the reply is written (pausing: jobs.paused_for_you), and a
@@ -994,14 +990,14 @@ class Talk:
         runs now, [{title, brief, text}]; waiting(): a spec that waits for the person; write: what writes the
         reply (channel, message, context, tokens -> text), the chat's own by default; on_shown(ids): the
         ids of the reply's message, once it is written. When something runs, or the reply is not
-        written in BUSY_AFTER seconds, a note says so at once (what is paused for it), updated every
-        BUSY_EDIT_EVERY seconds; the reply then takes its place."""
+        written in MODEL_BUSY_NOTE_AFTER_SECONDS seconds, a note says so at once (what is paused for it), updated every
+        MODEL_BUSY_NOTE_EDIT_SECONDS seconds; the reply then takes its place."""
         threading.Thread(target=self.answering, args=(channel, message, now, waiting, write or self.reply,
                                                       on_shown), daemon=True).start()
 
     def answering(self, channel, message, now, waiting, write_reply, on_shown):
         running, written, reply = now(), threading.Event(), []
-        asked = (channel, message, self.context(running, waiting), CHAT_REPLY_TOKENS)
+        asked = (channel, message, self.context(running, waiting), CHAT_MAX_REPLY_TOKENS)
         threading.Thread(target=self.write, args=(write_reply, asked, reply, written), daemon=True).start()
         note = self.busy_until(written, running, now, channel, message.chat)
         note = channel.show(message.chat, note, reply[0] if reply else "⚠️ **The model did not answer.**", done=True)
@@ -1029,9 +1025,9 @@ class Talk:
         """While something runs, or the reply is slow, a note that says so, kept up to date until the reply
         is written: the note's ids (None when none was needed)."""
         note = None
-        if running or not written.wait(BUSY_AFTER):
+        if running or not written.wait(MODEL_BUSY_NOTE_AFTER_SECONDS):
             note = channel.show(chat, None, self.busy_note(running))
-            while not written.wait(BUSY_EDIT_EVERY):
+            while not written.wait(MODEL_BUSY_NOTE_EDIT_SECONDS):
                 note = channel.show(chat, note, self.busy_note(now()))
         return note
 
@@ -1045,7 +1041,7 @@ class Talk:
                      "It goes on once you have your answer."]
         return "\n".join(lines)
 
-    def reply(self, channel, message, now="", tokens=CHAT_REPLY_TOKENS):
+    def reply(self, channel, message, now="", tokens=CHAT_MAX_REPLY_TOKENS):
         """The model's reply to message; now: what is going on (what runs, a spec that waits)."""
         found = self.model()
         if not found:
@@ -1068,10 +1064,10 @@ class Talk:
             return self.said.setdefault((channel.name, chat), [])
 
     def remembered(self, said, role, text):
-        """The chat's last CHAT_KEPT messages, with this one."""
+        """The chat's last CHAT_CONTEXT_MESSAGES messages, with this one."""
         with self.lock:
             said.append({"role": role, "content": text})
-            del said[:-CHAT_KEPT]
+            del said[:-CHAT_CONTEXT_MESSAGES]
             return list(said)
 
     def ask(self, channel, chat, messages, tokens):
@@ -1082,7 +1078,7 @@ class Talk:
         threading.Thread(target=keep_typing, args=(channel, chat, done), daemon=True).start()
         try:
             data = Ollama.chat(name, messages, Config.keep_alive(Config.get("keep_alive")),
-                               dict(options, num_predict=tokens), think=think, timeout=CHAT_TIMEOUT)
+                               dict(options, num_predict=tokens), think=think, timeout=CHAT_REPLY_TIMEOUT)
         finally:
             done.set()
         return data["message"]["content"].strip()
@@ -1094,7 +1090,7 @@ class Talk:
         settings = (Models.settings(name) or {}) if name else {}
         if not settings.get("num_ctx"):
             return None
-        options = {"num_ctx": settings["num_ctx"], "num_predict": CHAT_REPLY_TOKENS}
+        options = {"num_ctx": settings["num_ctx"], "num_predict": CHAT_MAX_REPLY_TOKENS}
         if settings.get("num_batch"):
             options["num_batch"] = settings["num_batch"]
         return name, options, (False if settings.get("think") not in (None, False) else None)
@@ -1110,7 +1106,7 @@ class Talk:
             name, options, think = found
             try:
                 Ollama.chat(name, [{"role": "user", "content": "hi"}], Config.keep_alive(Config.get("keep_alive")),
-                            dict(options, num_predict=1), think=think, timeout=CHAT_TIMEOUT)
+                            dict(options, num_predict=1), think=think, timeout=CHAT_REPLY_TIMEOUT)
             except OllamaError as exc:
                 say.warn(f"The model did not load for chat: {first_words(exc)}")
 
@@ -1119,7 +1115,7 @@ class Shell:
     """command WHAT: the model names the one command line that does what the person describes, shown with
     what it does (and a warning when it changes or deletes things). `confirm` as the person's very next
     message runs it; anything else drops it. It runs in the conversation's folder, in the person's login
-    shell, with no input, for up to COMMAND_TIMEOUT seconds; its exit code and output (the
+    shell, with no input, for up to CHAT_COMMAND_TIMEOUT seconds; its exit code and output (the
     end of it, when long) come back folded, and the model then tells what it says, in a few lines."""
     SYSTEM = ("The person describes a command they want run on their computer ({system}, shell {shell}, in the "
               "folder {folder}). Reply with ONLY JSON: {{\"command\": \"the one command line that does it\", "
@@ -1129,8 +1125,8 @@ class Shell:
                             r"truncate)\b|(?<![\d&>])>(?!&)|\bgit\s+(push|reset|clean|checkout|rebase)\b|"
                             r"\b(brew|pip3?|npm|cargo)\s+(install|uninstall|remove)\b|\s-delete\b|-exec\s+(rm|mv)\b|"
                             r"\bxargs\s+(rm|mv)\b|\bsed\s+-i\b")
-    WRITING = ""  # a command still being named
-    SHELL = os.environ.get("SHELL") or "/bin/sh"  # the person's login shell: their PATH, their tools
+    STILL_NAMING = ""
+    LOGIN_SHELL = os.environ.get("SHELL") or "/bin/sh"
     TELL_SYSTEM = ("Tell the person what this command's output says, for a chat read on a phone: the answer to "
                    "what they asked first, then only what matters, in a few short lines. Format for meaning, in "
                    "Markdown: **bold** for the key values, `code` for names and paths, \"- \" for items; an emoji "
@@ -1140,13 +1136,13 @@ class Shell:
 
     def __init__(self, talk, folder):
         self.talk, self.folder = talk, folder
-        self.proposed = {}  # (channel, chat) -> {line, asked, shown} waiting for confirm (WRITING meanwhile)
-        self.shell = self.SHELL
+        self.proposed = {}  # (channel, chat) -> {line, asked, shown} waiting for confirm (STILL_NAMING meanwhile)
+        self.shell = self.LOGIN_SHELL
 
     def name(self, channel, message, now):
         """Have the model name the command (the reply comes as a chat's: what runs paused, busy note and all)."""
         key = (channel.name, message.chat)
-        self.proposed[key] = self.WRITING
+        self.proposed[key] = self.STILL_NAMING
 
         def shown(ids):
             if isinstance(self.proposed.get(key), dict):
@@ -1162,7 +1158,7 @@ class Shell:
         try:
             data = json_in(self.talk.ask(channel, message.chat, [{"role": "system", "content": system},
                                                                  {"role": "user", "content": message.text}],
-                                         COMMAND_TOKENS))
+                                         COMMAND_NAMING_MAX_TOKENS))
         except OllamaError as exc:
             self.proposed.pop(key, None)
             return md(t"⚠️ **The model did not answer:** {first_words(exc)}")
@@ -1180,10 +1176,10 @@ class Shell:
                   t"👉 `confirm` to run it · anything else cancels it")
 
     def take(self, channel, chat):
-        """The command waiting for this chat's next message (WRITING while it is named; None when none)."""
+        """The command waiting for this chat's next message (STILL_NAMING while it is named; None when none)."""
         key = (channel.name, chat)
         line = self.proposed.get(key)
-        if line != self.WRITING:
+        if line != self.STILL_NAMING:
             self.proposed.pop(key, None)
         return line
 
@@ -1212,7 +1208,7 @@ class Shell:
         """The output, folded (its end, when long), its columns as a chat reads them."""
         if not output:
             return "_(no output)_"
-        shown = output if len(output) <= COMMAND_SHOWN else "… (the start is left out)\n" + output[-COMMAND_SHOWN:]
+        shown = output if len(output) <= CHAT_COMMAND_OUTPUT_SHOWN_CHARS else "… (the start is left out)\n" + output[-CHAT_COMMAND_OUTPUT_SHOWN_CHARS:]
         return f"```output\n{Markup.fenced(Markup.columns(shown))}\n```"
 
     def told(self, channel, chat, asked, line, code, output):
@@ -1220,29 +1216,29 @@ class Shell:
         try:
             return self.talk.ask(channel, chat, [{"role": "system", "content": self.TELL_SYSTEM},
                                                  {"role": "user", "content": f"They asked: {asked}\nCommand: {line}\n"
-                                                  f"Exit code: {code}\nOutput:\n{output[-COMMAND_READ:]}"}],
-                                 CHAT_REPLY_TOKENS)
+                                                  f"Exit code: {code}\nOutput:\n{output[-CHAT_COMMAND_OUTPUT_READ_CHARS:]}"}],
+                                 CHAT_MAX_REPLY_TOKENS)
         except OllamaError:
             return ""
 
 
 def in_shell(shell, line, folder, given=None):
     """(exit code, or why it has none; output) of a command line run in the person's login shell, in folder,
-    with given as its input (none: no input), for up to COMMAND_TIMEOUT seconds."""
+    with given as its input (none: no input), for up to CHAT_COMMAND_TIMEOUT seconds."""
     try:
         done = subprocess.run([shell, "-lc", line], cwd=folder, text=True, capture_output=True, input=given,
-                              stdin=None if given else subprocess.DEVNULL, timeout=COMMAND_TIMEOUT)
+                              stdin=None if given else subprocess.DEVNULL, timeout=CHAT_COMMAND_TIMEOUT)
         return done.returncode, (done.stdout + done.stderr).strip()
     except subprocess.TimeoutExpired as exc:
-        return f"stopped after {COMMAND_TIMEOUT}s", (text_of(exc.stdout) + text_of(exc.stderr)).strip()
+        return f"stopped after {CHAT_COMMAND_TIMEOUT}s", (text_of(exc.stdout) + text_of(exc.stderr)).strip()
     except OSError as exc:
         return "not started", str(exc)
 
 
 class Research:
     """research TOPIC: an answer from the web, with its sources. One quick call names the searches (up to
-    RESEARCH_SEARCHES), the pages they find are read in turn (the first of each search, then the second
-    ..., up to RESEARCH_PAGES; of each, the parts most about the topic), and one call writes the answer
+    CHAT_RESEARCH_SEARCHES), the pages they find are read in turn (the first of each search, then the second
+    ..., up to CHAT_RESEARCH_PAGES; of each, the parts most about the topic), and one call writes the answer
     from them alone, each claim citing its page. One message says how far it got, and becomes the answer; its
     tracker says the same, for a chat it runs for. (tinker learn researches a topic in depth, and keeps it for the
     builds.)"""
@@ -1316,16 +1312,16 @@ class Research:
         data = json_in(self.talk.ask(channel, chat, [
             {"role": "system", "content": self.SEARCHES_SYSTEM.format(today=today().strftime("%d %B %Y"),
                                                                     year=today().strftime("%Y"))},
-            {"role": "user", "content": topic}], COMMAND_TOKENS))
+            {"role": "user", "content": topic}], COMMAND_NAMING_MAX_TOKENS))
         found = [str(search).strip() for search in data.get("searches") or [] if str(search).strip()]
-        return list(dict.fromkeys(found))[:RESEARCH_SEARCHES] or [topic]
+        return list(dict.fromkeys(found))[:CHAT_RESEARCH_SEARCHES] or [topic]
 
     def read(self, internet, searches):
         """[{title, url, content}] of the pages the searches find, in turn (a page that cannot be read
         gives the search's own excerpt), each cut to the parts most about what was searched."""
-        found = [internet.search(query, RESEARCH_PAGES) or [] for query in searches]
+        found = [internet.search(query, CHAT_RESEARCH_PAGES) or [] for query in searches]
         pages, wanted = [], set(re.findall(r"[a-z0-9]{3,}", " ".join(searches).lower()))
-        for result in self.in_turn(found)[:RESEARCH_PAGES]:
+        for result in self.in_turn(found)[:CHAT_RESEARCH_PAGES]:
             page = internet.fetch(result["url"]) or result
             content = self.most_about(page.get("content") or result.get("content", ""), wanted)
             if content.strip():
@@ -1336,7 +1332,7 @@ class Research:
     def in_turn(found):
         """The results of the searches taken in turn: the first of each, then the second ..., each page once."""
         order, seen = [], set()
-        for rank in range(RESEARCH_PAGES):
+        for rank in range(CHAT_RESEARCH_PAGES):
             for results in found:
                 if rank < len(results) and results[rank]["url"] not in seen:
                     seen.add(results[rank]["url"])
@@ -1346,17 +1342,17 @@ class Research:
     @staticmethod
     def most_about(text, wanted):
         """Of a page, the paragraphs that share the most words with what was searched, in page order,
-        up to RESEARCH_PAGE_CHARS."""
+        up to CHAT_RESEARCH_CHARS_PER_PAGE."""
         paragraphs = [paragraph.strip() for paragraph in re.split(r"\n\s*\n|\n(?=[#*-] )", text)
                       if len(paragraph.strip()) > 40]
         score = lambda paragraph: len(wanted & set(re.findall(r"[a-z0-9]{3,}", paragraph.lower())))
         best, size = set(), 0
         for index in sorted(range(len(paragraphs)), key=lambda position: -score(paragraphs[position])):
-            if size + len(paragraphs[index]) > RESEARCH_PAGE_CHARS:
+            if size + len(paragraphs[index]) > CHAT_RESEARCH_CHARS_PER_PAGE:
                 continue
             best.add(index)
             size += len(paragraphs[index])
-        return "\n\n".join(paragraphs[position] for position in sorted(best)) or text[:RESEARCH_PAGE_CHARS]
+        return "\n\n".join(paragraphs[position] for position in sorted(best)) or text[:CHAT_RESEARCH_CHARS_PER_PAGE]
 
     def answer_from(self, channel, chat, topic, pages):
         """The model's answer from the pages alone, each claim citing its page."""
@@ -1365,7 +1361,7 @@ class Research:
             {"role": "user", "content": f"The person asks: {topic}\n\n" + "\n\n".join(
                 f"[{number}] {page['title']} ({page['url']})\n{page['content']}"
                 for number, page in enumerate(pages, 1))}],
-            CHAT_REPLY_TOKENS)
+            CHAT_MAX_REPLY_TOKENS)
 
     @staticmethod
     def sources(pages):
@@ -1375,8 +1371,8 @@ class Research:
 
 class Reporter:
     """A run's tracker shown on the channels: the task's one message per chat (sent: kept from the task's
-    run before). It reads the tracker of the run's process (pid) every EDIT_EVERY seconds and edits the
-    message when it changed (its clock moves on every CLOCK_EVERY), and its ending is edited into it when
+    run before). It reads the tracker of the run's process (pid) every PROGRESS_EDIT_SECONDS seconds and edits the
+    message when it changed (its clock moves on every CLOCK_ONLY_EDIT_SECONDS), and its ending is edited into it when
     the run ends. A command that keeps no tracker (learn, calibrate) shows its latest printed line."""
 
     def __init__(self, channels, title, pid=None, sent=None, phase=Tracker.STARTING, keep="", before=0.0,
@@ -1391,7 +1387,7 @@ class Reporter:
 
     def keep_up(self):
         while not self.ended:
-            time.sleep(EDIT_EVERY)
+            time.sleep(PROGRESS_EDIT_SECONDS)
             self.refresh()
 
     def refresh(self):
@@ -1403,7 +1399,7 @@ class Reporter:
             went_on = ((state or {}).get("resumed") or 0) > (self.progress.snapshot.get("resumed") or 0)
             self.fresh = self.fresh or went_on  # it went on by itself: shown at the bottom, where the person looks
             changed = self.progress.take(state)
-            if changed or went_on or time.monotonic() - self.last_edit >= CLOCK_EVERY:
+            if changed or went_on or time.monotonic() - self.last_edit >= CLOCK_ONLY_EDIT_SECONDS:
                 self.update()
 
     def tracked(self):
@@ -1455,9 +1451,9 @@ class Progress:
     it found out, else its latest line) and, when the run ends, its ending: how it ended and how to go
     on, or the plan that waits for the person. It only shows the tracker's data: it never reads a run's
     printed text for meaning."""
-    SAID = ("✅", "✏️", "📁")  # a phase Tinker says itself (Markup), not a step of the run's
+    OWN_PHASE_ICONS = ("✅", "✏️", "📁")
     CHANGE_SIGNS = {"+": "➕", "~": "🔄"}
-    HOURGLASS = ("⏳", "⌛")  # flipped at each edit: the person sees it still goes on
+    HOURGLASS = ("⏳", "⌛")
 
     def __init__(self, title, phase=Tracker.STARTING, before=0.0):
         self.snapshot = {"title": title, "doing": phase, "step": None, "began": None, "steps": [], "passing": None,
@@ -1483,7 +1479,7 @@ class Progress:
         state = self.snapshot
         began = state.get("began")
         clock = f" · ⏱ {human_duration(time.time() - began)}" if began else ""
-        doing = self.working_on if self.working_on.startswith(self.SAID) else md(t"**{self.working_on}**")
+        doing = self.working_on if self.working_on.startswith(self.OWN_PHASE_ICONS) else md(t"**{self.working_on}**")
         lines = [md(t"🔨 **{state['title']}**")] + [f"✅ {step}" for step in state.get("steps", [])]
         lines += [f"▸ {doing}{clock} {self.HOURGLASS[self.turns % 2]}"]
         lines += [md(t"📊 {self.how_far}")] if self.how_far else []
@@ -1583,14 +1579,14 @@ class Progress:
 class Attached:
     """A task run from a terminal, reporting to the channels: its tracker (which the run keeps in Tinker's
     home) is shown in its progress message, and the conversation (which reads the chat) answers status from
-    it. That stops it with STOP, as Ctrl-C does (saved); a job that is paused is stopped the same way."""
+    it. That stops it with JOB_STOP_SIGNAL, as Ctrl-C does (saved); a job that is paused is stopped the same way."""
 
     def __init__(self, channels, title, tracker):
         self.tracker = tracker
         self.reporter = Reporter(channels, title, pid=os.getpid())
 
     def start(self):
-        signal.signal(STOP, self.stop)
+        signal.signal(JOB_STOP_SIGNAL, self.stop)
         self.tracker.change("attached", reports=True)  # a conversation leaves its message to it
         with self.reporter.lock:
             self.reporter.progress.take(self.tracker.state)
@@ -1695,7 +1691,7 @@ def printed_since(path, start):
 def until_ended(pid):
     """Back once the process (not this one's child) has ended."""
     while alive(pid):
-        time.sleep(EDIT_EVERY)
+        time.sleep(PROGRESS_EDIT_SECONDS)
 
 
 def described(state):
@@ -1708,7 +1704,7 @@ def described(state):
 
 
 def signal_task(pid, signum):
-    """Send a task run from a terminal a signal (STOP)."""
+    """Send a task run from a terminal a signal (JOB_STOP_SIGNAL)."""
     try:
         os.kill(pid, signum)
     except ProcessLookupError, PermissionError:
@@ -1857,7 +1853,7 @@ class ConsoleChannel(Channel):
     whole when it is done for now (only its new lines, when it grew by lines at its end since it was shown)."""
     KIND = "console"
     CHAT = "console"
-    PROMPT = "› " if sys.stdin.isatty() else ""  # typed lines are asked for in a terminal; piped ones are not
+    PROMPT = "› " if sys.stdin.isatty() else ""
 
     def __init__(self, bare=True):
         super().__init__("console", {"allowed": [self.CHAT]}, {})
@@ -1876,7 +1872,7 @@ class ConsoleChannel(Channel):
             line = self.lines.get(timeout=timeout)
         except queue.Empty:
             return []
-        if line is None or line.strip().lower() in EXIT:
+        if line is None or line.strip().lower() in EXIT_WORDS:
             self.closed = True
             return []
         return [Message(self.CHAT, line, "you")] if line.strip() else []
@@ -1982,8 +1978,8 @@ class Markup:
              (re.compile(r"(?<!\w)_(?=\S)(.+?)(?<=\S)_(?!\w)"), "i"))
     ITEM_RE = re.compile(r"(?m)^\s*[-*] (?=\S)")
     HEADING_RE = re.compile(r"(?m)^#{1,6} +(.+)$")
-    ANSI = {"b": ("1", "22"), "i": ("3", "23"), "s": ("9", "29")}  # a mark's terminal codes: on, off
-    OUTPUT_LINES = 30  # of a command's output, the lines a terminal shows (the start; the rest is counted)
+    ANSI_ON_OFF = {"b": ("1", "22"), "i": ("3", "23"), "s": ("9", "29")}
+    TERMINAL_OUTPUT_LINES = 30
 
     @classmethod
     def of(cls, template):
@@ -2080,7 +2076,7 @@ class Markup:
     @classmethod
     def ansi(cls, text):
         """The text as a terminal shows it: bold, italic, struck and code in its colours, a block indented,
-        a command's output dimmed (its first OUTPUT_LINES lines). Plain where colour is off (NO_COLOR, or
+        a command's output dimmed (its first TERMINAL_OUTPUT_LINES lines). Plain where colour is off (NO_COLOR, or
         not a terminal)."""
         if os.environ.get("NO_COLOR") or not sys.stdout.isatty():
             return cls.plain(text)
@@ -2089,12 +2085,12 @@ class Markup:
         def block(found):
             body = found.group(2).rstrip("\n").splitlines()
             if found.group(1) == "output":
-                more = len(body) - cls.OUTPUT_LINES
-                body = body[:cls.OUTPUT_LINES] + ([f"… {more} more lines"] if more > 0 else [])
+                more = len(body) - cls.TERMINAL_OUTPUT_LINES
+                body = body[:cls.TERMINAL_OUTPUT_LINES] + ([f"… {more} more lines"] if more > 0 else [])
                 return keep("\n".join(f"\033[2m  │ {line}\033[22m" for line in body))
             return keep("\n".join(f"    \033[36m{line}\033[39m" for line in body))
         return cls.render(text, block, lambda code: f"\033[36m{code}\033[39m", lambda plain: plain,
-                          lambda tag, inner: f"\033[{cls.ANSI[tag][0]}m{inner}\033[{cls.ANSI[tag][1]}m", keep,
+                          lambda tag, inner: f"\033[{cls.ANSI_ON_OFF[tag][0]}m{inner}\033[{cls.ANSI_ON_OFF[tag][1]}m", keep,
                           lambda words, url: f"\033[4m{words}\033[24m \033[2m({url})\033[22m")
 
     @classmethod
@@ -2213,7 +2209,7 @@ def keep_typing(channel, chat, done):
     """The chat's "typing…" sign, shown until done is set."""
     while not done.is_set():
         channel.typing(chat)
-        done.wait(TYPING_EVERY)
+        done.wait(TYPING_SIGN_SECONDS)
 
 
 def first_words(text, size=160):

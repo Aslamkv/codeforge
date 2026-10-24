@@ -6,7 +6,7 @@ import pytest
 
 from tinkerkit.knowledge import Embeddings, Knowledge, Learner, Library, Researcher, Retriever, language_key, record
 from tinkerkit.model import Ollama
-from tinkerkit.settings import Config, Home, MAX_LESSONS, PLAYBOOK_RULES, RULE_CHARS
+from tinkerkit.settings import MAX_LESSONS_PER_FILE, MAX_RULE_CHARS, PLAYBOOK_RULES, Config, Home
 from tinkerkit.workspace import Toolchain
 
 
@@ -120,13 +120,13 @@ def test_lessons_are_capped_and_ranked(tinker_home):
                 "Quote shell variables that hold paths", "Sort dictionary keys before comparing output",
                 "Seed random generators inside tests", "Use tmp_path for files the tests create",
                 "Flush stdout before the process exits"]
-    for text in distinct[:MAX_LESSONS]:
+    for text in distinct[:MAX_LESSONS_PER_FILE]:
         known.add_lessons([lesson(text)], [])
-    assert len(known.known_lessons()) == MAX_LESSONS
+    assert len(known.known_lessons()) == MAX_LESSONS_PER_FILE
     known.confirm(known.known_lessons()[3])
     assert known.add_lessons([lesson("a brand new rule that is unlike every other one")], []) == 1
     texts = [lesson["text"] for lesson in known.any_language_doc["lessons"]]
-    assert len(texts) == MAX_LESSONS and "a brand new rule that is unlike every other one" in texts
+    assert len(texts) == MAX_LESSONS_PER_FILE and "a brand new rule that is unlike every other one" in texts
     assert [lesson["text"] for lesson in known.lessons(("code",), limit=1)] == [known.known_lessons()[0]["text"]]
     assert known.known_lessons()[0]["seen"] == 2
     assert known.lessons(("design",)) == []
@@ -186,7 +186,7 @@ class EmbedServer:
 def test_embeddings_are_cached_per_model(tinker_home, monkeypatch):
     server = EmbedServer()
     monkeypatch.setattr(Ollama, "get_json", staticmethod(server))
-    monkeypatch.setattr(Embeddings, "BATCH", 2)
+    monkeypatch.setattr(Embeddings, "TEXTS_PER_REQUEST", 2)
     embeddings = Embeddings("embed-a")
     assert embeddings.vectors(["aa", "b", "ccc"]) == [[2.0, 2.5], [1.0, 0.5], [3.0, 0.5]]
     assert server.requests == [["aa", "b"], ["ccc"]]
@@ -368,7 +368,7 @@ def test_cross_check_supports_agreeing_facts_and_pairs_disagreeing_ones():
              fact("Crates hold 10 kg of food", "https://www.b.org/x"),
              fact("Crates hold 12 kg of food", "https://c.org/y"),
              fact("Volunteers sign in", "https://a.org/2")]
-    vectors = [[1, 0], [0.85, 0.53], [0.82, 0.57], [0, 1]]  # the same claim, but no repeat (below REPEAT_CLAIM)
+    vectors = [[1, 0], [0.85, 0.53], [0.82, 0.57], [0, 1]]  # the same claim, but no repeat (below REPEAT_CLAIM_SIMILARITY)
     differ = Researcher(type("L", (), {"model": None, **FakeLearner(vectors).__dict__})()).cross_check(facts)
     assert facts[0]["sites"] == ["a.org", "b.org"] and facts[1]["sites"] == ["a.org", "b.org"]
     assert facts[3]["sites"] == ["a.org"] and (1, 3) in differ and (2, 3) in differ
@@ -461,7 +461,7 @@ def test_read_rules_keeps_only_rules_that_rest_on_what_was_learned():
         {"phase": "tests", "text": "x" * 500, "cites": [2]}, "junk"]}, SOURCES)
     assert [(rule["phase"], rule["text"][:22], rule["cites"]) for rule in rules] == [
         ("code", "Use match for dispatch", ["fact1", "lesson1"]), ("tests", "x" * 22, ["fact2"])]
-    assert len(rules[1]["text"]) == RULE_CHARS and rules[0]["id"]
+    assert len(rules[1]["text"]) == MAX_RULE_CHARS and rules[0]["id"]
     many = Learner.read_rules({"rules": [{"phase": "code", "text": f"rule {number}", "cites": [1]}
                                          for number in range(40)]},
                               SOURCES)
@@ -638,7 +638,7 @@ def test_a_fix_keeps_its_history_and_history_is_capped(tinker_home, monkeypatch)
     again = Knowledge("Python", "r2")
     again.fix_result(again.known_fix("no module named calc"), worked=True)
     assert events(Knowledge("Python").known_fix("no module named calc")) == [("born", "r1"), ("helped", "r2")]
-    monkeypatch.setattr("tinkerkit.knowledge.HISTORY_KEPT", 3)
+    monkeypatch.setattr("tinkerkit.knowledge.EVENTS_KEPT_PER_ITEM", 3)
     item = {}
     for run in ("r1", "r2", "r3", "r4"):
         record(item, "helped", run)
@@ -677,7 +677,7 @@ def test_what_is_retired_is_kept_apart_with_why_and_never_shown(tinker_home, mon
     assert [fact["id"] for fact in entry["facts"]] == [route] and entry["retired"][0]["id"] == client
     assert Knowledge("Python").lessons(("tests",)) == [] and Knowledge("Python").known_fix("no module named calc") is None
     assert all(item["id"] != client for item in Library.items({"flask": entry}))
-    monkeypatch.setattr("tinkerkit.knowledge.RETIRED_KEPT", 1)
+    monkeypatch.setattr("tinkerkit.knowledge.RETIRED_KEPT_PER_LIST", 1)
     Knowledge("Python").disprove({f"fact:flask:{route}": ["code"]}, ("code",))
     assert [retired["id"] for retired in Library.read("flask")["retired"]] == [route]
 

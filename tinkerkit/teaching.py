@@ -17,11 +17,12 @@ lazy from .knowledge import Knowledge, Learner, Library, Retriever
 lazy from .prompts import Part, Prompts
 lazy from .reading import Readings
 lazy from .settings import (
-    LESSON_PHASES, MEMORY_SHOWN, TEACH_CLAIMS, TEACH_COMMANDS, TEACH_SEARCHES, first_line, words,
+    LESSON_PHASES, MEMORY_ITEMS_SHOWN, TEACH_CHECK_COMMANDS, TEACH_CHECK_SEARCHES, TEACH_CLAIMS, first_line,
+    words,
 )
 
 ITEM_KINDS = ("toolchain", "fix", "lesson", "fact", "finding", "rule", "command")
-TOOLCHAIN_KEYS = ("setup", "check", "test_all", "test_one", "format", "lint")  # what a teaching may replace
+TEACHABLE_TOOLCHAIN_KEYS = ("setup", "check", "test_all", "test_one", "format", "lint")
 VERDICTS = ("holds", "wrong", "unsure")
 PREFER_RE = re.compile(r"\bprefer", re.I)  # how a person marks a preference: prefer, preferred, preference
 
@@ -35,7 +36,7 @@ class Memory:
                       if node["kind"] in ITEM_KINDS and node["status"] != "retired"]
         self.retriever = Retriever(embeddings)
 
-    def about(self, text, limit=MEMORY_SHOWN):
+    def about(self, text, limit=MEMORY_ITEMS_SHOWN):
         """The items most related to text, the most related first: the more of an item's kind and language (or
         topic) the text names, the earlier it comes; alike ones in the order their words and meaning rank them."""
         ranking = self.retriever.rank(text, [item["text"] for item in self.items])
@@ -63,7 +64,7 @@ def item_line(number, item):
 
 
 def moved_on(tracker, phase, said, icon):
-    """On to a phase (Tracker.STEPS): said, and the tracker (when there is one) moved on, so the chats show it."""
+    """On to a phase (Tracker.DOING_AND_DONE): said, and the tracker (when there is one) moved on, so the chats show it."""
     say.step(said, icon)
     if tracker is not None:
         tracker.phase(phase)
@@ -305,8 +306,8 @@ def read_plan(data, count, preferences=True, readings=False):
     there is no change."""
     texts = lambda key, limit: [str(text).strip() for text in data.get(key) or [] if str(text).strip()][:limit]
     claims = [dict(claim, preference=claim["preference"] and preferences) for claim in read_claims(data.get("claims"))]
-    plan = {"claims": claims, "commands": texts("commands", TEACH_COMMANDS),
-            "searches": texts("searches", TEACH_SEARCHES), "language": str(data.get("language") or "").strip(),
+    plan = {"claims": claims, "commands": texts("commands", TEACH_CHECK_COMMANDS),
+            "searches": texts("searches", TEACH_CHECK_SEARCHES), "language": str(data.get("language") or "").strip(),
             "changes": read_changes(data.get("changes"), len(claims), count)}
     if not claims:
         raise ValueError("no claims")
@@ -367,7 +368,7 @@ def numbers(given, highest):
 
 
 def read_toolchain(given):
-    """{key: command} of TOOLCHAIN_KEYS (setup: a list of commands), the empty ones left out. ValueError for any other
+    """{key: command} of TEACHABLE_TOOLCHAIN_KEYS (setup: a list of commands), the empty ones left out. ValueError for any other
     key or form, so the model is asked again with why rather than a part of its change dropped unsaid."""
     if not given:
         return {}
@@ -375,8 +376,8 @@ def read_toolchain(given):
         raise ValueError("toolchain must be an object of key: command")
     found = {}
     for key, value in given.items():
-        if key not in TOOLCHAIN_KEYS:
-            raise ValueError(f"toolchain {key} cannot be changed (only {', '.join(TOOLCHAIN_KEYS)})")
+        if key not in TEACHABLE_TOOLCHAIN_KEYS:
+            raise ValueError(f"toolchain {key} cannot be changed (only {', '.join(TEACHABLE_TOOLCHAIN_KEYS)})")
         commands = command_list(key, value)
         if commands:
             found[key] = commands if key == "setup" else " && ".join(commands)

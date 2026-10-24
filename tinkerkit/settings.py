@@ -47,161 +47,153 @@ DEFAULT_CONFIG = frozendict({
     "projects": "~/Projects",
 })
 
-STATE_DIR = ".tinker"             # in each project: its database (project.db) and a started server's output
+STATE_DIR = ".tinker"
 PROJECT_DB = "project.db"
 ENV_FILE, ENV_EXAMPLE = ".env", ".env.example"
 
-# The idea, as the phases of one cycle: plan only what the request asks as a spec; turn every spec point into
-# a unit test, with the test tool installed first; write just enough code to pass them; review it once at
-# the end, the way a person will run it; then it is done.
 PHASES = (
-    "recall",        # what was learned that the request needs
-    "spec",          # plan: the spec points with their tests, the files, the toolchain (one call)
-    "design",        # plan: the contracts where files meet
-    "review",        # plan: a file checked against the contracts it uses (only where several meet)
-    "setup",         # the test tool and the dependencies installed, and shown to work, before any test
-    "tests",         # a test for every spec point, before any code
-    "code",          # just enough code to pass them
-    "verify",        # ... fixed until every spec test passes
-    "tidy",          # the language's linter over the code: what it finds fixed, every test still passing
-    "docs",          # the README, and its examples run as a user runs them
-    "final_review",  # once at the end: set up afresh, every test run the way a person runs them
-    "lessons",       # what the next projects should know
+    "recall",
+    "spec",
+    "design",
+    "review",
+    "setup",
+    "tests",
+    "code",
+    "verify",
+    "tidy",
+    "docs",
+    "final_review",
+    "lessons",
     "done")
-FIX_PHASES = ("recall", "reproduce", "verify", "final_review", "lessons", "done")  # tinker fix: a test that shows the bug, then the fix
-PLANNING_PHASES = ("recall", "spec", "design", "review")  # the phases that make the plan
-CONFIRM_AFTER = frozendict({"feature": "review", "fix": "reproduce"})  # by cycle kind: where its plan waits for the person
-FORMAT_AFTER = ("verify",)  # phases after which the toolchain's formatter runs (the model never formats)
+FIX_PHASES = ("recall", "reproduce", "verify", "final_review", "lessons", "done")
+PLANNING_PHASES = ("recall", "spec", "design", "review")
+CONFIRM_AFTER = frozendict({"feature": "review", "fix": "reproduce"})
+FORMATTER_RUNS_AFTER = ("verify",)
 STATUS_TEXT = frozendict({"green": "passes", "todo": "to do", "active": "in progress", "blocked": "parked"})
 KINDS = ("code", "test", "template", "config", "docs")
-MAX_FILE_LINES = 60               # design guidance: small modules (a bigger file still works, in windows)
+MAX_FILE_LINES = 60
 TESTS_PER_CALL = 10
 
-DEFAULT_MAX_STALL = 3             # fixes without progress before the review against the plan
-MAX_TRIES_PER_PASS = 8            # model calls on one criterion per pass, whatever "progress" says
-REVIEW_TRIES = 2                  # review calls when fixing stops making progress
-BUILD_TRIES = 3                   # fixes for a project that does not build before the run stops
-OUTPUT_CHARS = 1600               # the end of a failure output shown to the model
-TESTS_LOCKED = "tests do not change now"  # why a fix may not change a test (a fix that tries points at the test)
-FIX_FILES = 7                     # files a fix may be shown (the most related first)
+DEFAULT_MAX_STALL = 3
+MAX_CALLS_PER_CRITERION_PASS = 8
+STALLED_REVIEW_TRIES = 2
+BROKEN_BUILD_FIXES = 3
+FAILURE_OUTPUT_CHARS = 1600
+TESTS_LOCKED_REASON = "tests do not change now"
+FILES_SHOWN_PER_FIX = 7
 
-NETWORK_RETRY = 30                # seconds between tries of what waits for the network (a package to install)
-ONLINE_PROBES = (("1.1.1.1", 443), ("8.8.8.8", 443))  # opened and closed to see the internet is there
-NETWORK_NOTE = 600                # while a build waits for the network, a line says so this often
+NETWORK_RETRY_SECONDS = 30
+ONLINE_PROBES = (("1.1.1.1", 443), ("8.8.8.8", 443))
+NETWORK_WAIT_NOTE_SECONDS = 600
 SETUP_TIMEOUT = 900
-COMMAND_TIMEOUT = 300             # setup aside, the longest a command may run (all tests)
+COMMAND_TIMEOUT = 300
 
-CHARS_PER_TOKEN = 2.8             # the start (code ~2.9 chars/token); then learned from real prompts
-MIN_CHARS_PER_TOKEN = 2.0         # HTML and dense code have fewer chars per token; never assume fewer
-MAX_CHARS_PER_TOKEN = 4.0         # prose measured 4.1; never assume more
-PROMPT_HEADROOM = 0.95            # aim 5% under the budget: code has fewer chars per token than prose
-TRIM_FLOOR = 300                  # a shortened prose part keeps at least this many chars
-MIN_PROMPT_TOKENS = 512           # a run never lowers its prompt budget below this
+STARTING_CHARS_PER_TOKEN = 2.8
+MIN_CHARS_PER_TOKEN = 2.0
+MAX_CHARS_PER_TOKEN = 4.0
+PROMPT_BUDGET_SHARE = 0.95
+MIN_TRIMMED_PROSE_CHARS = 300
+MIN_PROMPT_TOKENS = 512
 
 MIN_REPLY_TOKENS = 1024
-EARLY_STOP_GRACE = 3.0            # seconds to await Ollama's last chunk (its token counts) once a reply is complete
-PROGRESS_EVERY = 2.0              # seconds between live progress updates
-LOOP_LINES = 20                   # the same line written this many times in a row: the model is looping
+LAST_CHUNK_WAIT_SECONDS = 3.0
+PROGRESS_UPDATE_SECONDS = 2.0
+LOOPING_REPEATED_LINES = 20
 
-DEFAULT_FIX_MAX = 4096            # a fix (measured: most that answer thinking need under 4K; past it, few do)
-TESTS_MAX_TOKENS = 8192           # a test file: room to think, and to write the whole file unthinking
-CHECK_MAX_TOKENS = 12288          # a check of a plan or an app (not its making)
-THOUGHT_KEPT = 4000               # chars of an unfinished thought passed on to conclude
+FIX_MAX_TOKENS = 4096
+TEST_FILE_MAX_TOKENS = 8192
+CHECK_MAX_TOKENS = 12288
+UNFINISHED_THOUGHT_KEPT_CHARS = 4000
 
-REQUEST_TIMEOUT = 600             # seconds of silence from Ollama before a call counts as stuck
+OLLAMA_SILENCE_TIMEOUT = 600
 STALL_RETRIES = 2
 OOM_RETRIES = 2
-OOM_SHRINK = 0.75                 # prompt budget factor for a retry after "out of memory" (that call only)
-REPLY_ERROR_RETRIES = 1           # Ollama failing on what the model wrote: ask once more, then use what came
-CRASH_RECOVERY = 10               # seconds a crashed runner gets to free its memory before the next call
-CRASH_RETRIES = 3                 # a run: calls retried after the runner crashed (the first at the same size)
-CRASH_SHRINK = 0.9                # a limit that crashed twice drops to this share of itself (a run: for that run
-                                  # only); calibration takes this share of a longest reply that varies
-CRASH_NEAR = 0.5                  # a run: a crash below this share of a limit is not about that limit
+OOM_RETRY_PROMPT_SHARE = 0.75
+REPLY_ERROR_RETRIES = 1
+CRASH_RECOVERY_SECONDS = 10
+CRASH_RETRIES = 3
+CRASHED_LIMIT_SHARE = 0.9
+CRASH_NEAR_LIMIT_SHARE = 0.5
 
-DEFAULT_THINK = "high"            # think hard once instead of reworking cheap guesses (if the model takes it)
-PROMPT_TARGET = 8192              # the largest prompt a run needs (whole files are small modules; a fix shows at
-                                  # most FIX_FILES of them)
-REPLY_TARGET = 16384              # the longest reply a run needs (thinking included: the longest calls think to it)
-CAPACITY_STEP = 0.1               # a context that does not fit is searched for to within this much (10%)
-MEMORY_OVERHEAD = 1.5e9           # bytes a runner needs besides the weights and the context
-PROBE_BATCH = 256                 # piece size tried when a whole prompt crashes a GGUF runner (num_batch)
+DEFAULT_THINK = "high"
+PROMPT_TARGET_TOKENS = 8192
+REPLY_TARGET_TOKENS = 16384
+CAPACITY_SEARCH_PRECISION = 0.1
+RUNNER_OVERHEAD_BYTES = 1.5e9
+PROBE_NUM_BATCH = 256
 
-LESSON_PHASES = ("design", "config", "tests", "code", "toolchain")  # where a lesson is shown
-MAX_LESSONS = 15                  # per file; the least confirmed go first
-LESSONS_SHOWN = 5                 # per prompt (an optional part: dropped first when the prompt is full)
-SAME_LESSON = 0.75                # text similarity at which a new lesson is an old one seen again
-SAME_FACT = 0.75                  # text similarity at which a fact learned from the web is a repeat
-SIMILAR_FAILURE = 0.7             # similarity at which a past toolchain fix is shown as a hint
-HISTORY_KEPT = 20                 # events an item keeps (born, confirmed, helped, failed), the newest
-RETIRED_KEPT = 50                 # retired items kept beside each list, for people to see (never prompts)
-RUNS_KEPT = 200                   # lines about runs kept in the home, the most recently updated
+LESSON_PHASES = ("design", "config", "tests", "code", "toolchain")
+MAX_LESSONS_PER_FILE = 15
+LESSONS_PER_PROMPT = 5
+SAME_LESSON_SIMILARITY = 0.75
+SAME_FACT_SIMILARITY = 0.75
+TOOLCHAIN_HINT_SIMILARITY = 0.7
+EVENTS_KEPT_PER_ITEM = 20
+RETIRED_KEPT_PER_LIST = 50
+RUNS_KEPT = 200
 
-SIMILAR_MEANING = 0.75            # embedding similarity at which two lessons are linked as similar
-SIMILAR_WORDS = 0.5               # ... text similarity, when there are no embeddings
+SIMILAR_LESSON_MEANING = 0.75
+SIMILAR_LESSON_WORDS = 0.5
 
-MEMORY_SHOWN = 25                 # items of what Tinker keeps shown to one ask or teach, the most related first
-TEACH_CLAIMS = 4                  # claims a teaching is checked as
-TEACH_COMMANDS = 3                # commands that check it on this machine
-TEACH_SEARCHES = 3                # web searches that check it
+MEMORY_ITEMS_SHOWN = 25
+TEACH_CLAIMS = 4
+TEACH_CHECK_COMMANDS = 3
+TEACH_CHECK_SEARCHES = 3
 
-READ_MAX_BYTES = 50_000_000       # the largest file read (a link's download stops here)
-READ_CHAPTERS = 5                 # chapters a book is split into at least, when its contents go that deep
-READ_WINDOW_CHARS = 20_000        # a text with no chapter headings is read in parts this long
-READ_INDEX_TERMS = 40             # index terms the survey sees: those the index refers to most
-READ_TERMS = 12                   # key terms the survey names, followed through every chapter
-READ_FOCUS_CHAPTERS = 3           # chapters read again for read #N "WHAT": those most about it
-READ_TEXT_SHARE = 0.6             # share of a chapter's prompt its text may take (the rest: the book, notes)
-READ_CHUNKS = 3                   # parts of a chapter a focused read shows: its opening, then the most related
-READ_POINTS = 8                   # facts one chapter may give
-READ_PASSAGES = 4                 # passages of the books an ask or a teach sees, the most related first
+READ_MAX_BYTES = 50_000_000
+READ_MIN_CHAPTERS = 5
+READ_WINDOW_CHARS = 20_000
+READ_INDEX_TERMS = 40
+READ_KEY_TERMS = 12
+READ_FOCUS_CHAPTERS = 3
+READ_CHAPTER_TEXT_SHARE = 0.6
+READ_FOCUS_CHUNKS = 3
+READ_FACTS_PER_CHAPTER = 8
+BOOK_PASSAGES_SHOWN = 4
 
-EXERCISE_FOLDER = "tinker-exercise"  # in the projects folder: one folder per practice project
-EXERCISE_ENV = "TINKER_EXERCISE"  # =1: a run an exercise started (its tracker says so; it never pauses one)
-EXERCISE_LOOK = 2                 # seconds between looks for the person while an exercise builds
-EXERCISE_SHOWN = 8                # earlier projects' measures shown to the exercise's own calls
-EXERCISE_PROBLEMS = 12            # problems of one project its reflection sees
+EXERCISE_FOLDER = "tinker-exercise"
+EXERCISE_ENV = "TINKER_EXERCISE"
+EXERCISE_PERSON_LOOK_SECONDS = 2
+EARLIER_MEASURES_SHOWN = 8
+REFLECTION_PROBLEMS = 12
 
-FACT_PHASES = ("spec", "design", "config", "tests", "code", "toolchain")  # where a learned fact is shown
-MAX_COMMANDS = 6                  # commands that show what of a topic is installed here
-VERSION_TIMEOUT = 20              # seconds such a command may take
-SEARCH_RESULTS = 3                # results taken from each search of research
-PAGE_CHUNKS = 2                   # prompt-sized chunks of a page condensed (its top, then the most related)
-FACTS_PER_CHUNK = 4               # facts one chunk may give
-FACT_CHARS = 400                  # the longest fact kept (room for its exact numbers, names and units)
-TOOL_ROLES = ("environment", "packages", "build", "tests", "format", "lint", "types")  # a language's tools, one per role
-PLAYBOOK_RULES = 16               # rules a topic's facts are condensed into (what its prompts show instead)
-RULE_CHARS = 200                  # the longest rule kept
-RULE_WHEN_CHARS = 80              # the longest "when" of a rule that applies only to some code
+FACT_PHASES = ("spec", "design", "config", "tests", "code", "toolchain")
+MAX_VERSION_COMMANDS = 6
+VERSION_TIMEOUT = 20
+RESULTS_PER_RESEARCH_SEARCH = 3
+CHUNKS_PER_PAGE = 2
+FACTS_PER_CHUNK = 4
+MAX_FACT_CHARS = 400
+TOOL_ROLES = ("environment", "packages", "build", "tests", "format", "lint", "types")
+PLAYBOOK_RULES = 16
+MAX_RULE_CHARS = 200
+MAX_RULE_WHEN_CHARS = 80
 
-FIRST_SEARCH = "{topic} official documentation"  # the first search, built from the topic alone: its docs site
-DOC_MAPS = ("llms.txt", "sitemap.xml")  # where a documentation site lists its pages (then its own links)
-MAX_MAP_LINKS = 5000              # links read from one site's map
-LEARN_RESULTS = 10                # results asked of one search (the best learn_pages are fetched)
-USABLE_PAGE_CHARS = 400           # a page's main text below this is too little (a page its scripts draw)
-MAX_REDIRECTS = 5                 # redirects one page fetch follows
+DOCS_SITE_SEARCH = "{topic} official documentation"
+SITE_MAP_FILES = ("llms.txt", "sitemap.xml")
+MAX_MAP_LINKS = 5000
+RESULTS_PER_LEARN_SEARCH = 10
+MIN_USABLE_PAGE_CHARS = 400
+MAX_REDIRECTS = 5
 FETCH_USER_AGENT = "Tinker/1.0 (a local coding agent learning from documentation)"
-PASSAGE_CHARS = 1200              # a passage under one heading is cut here (a code block is kept whole)
-LINK_ONLY = 0.8                   # share of a block's text inside links at which it is a menu, not content
-NEAR_DUPLICATE = 0.8              # word overlap (3-word shingles) at which a passage repeats another
-SLOT_RELEVANT = 0.6               # embedding similarity a passage needs to a slot's question (or a slot keyword;
-                                  # qwen3-embedding, as TOPIC_RELEVANT: related 0.65 and up, unrelated 0.52 and down)
-SLOT_CANDIDATES = 60              # passages per slot shortlisted by words before the embedding model sees them
-MMR_BALANCE = 0.7                 # relevance against novelty when picking a slot's passages (1: relevance only)
-FACTS_PER_SLOT = 6                # facts one slot's digest may give
-BACKOFF_FIRST = 1.0               # seconds of the first wait after HTTP 429 (then doubled, within learn_backoff)
+MAX_PASSAGE_CHARS = 1200
+MENU_LINK_SHARE = 0.8
+NEAR_DUPLICATE_OVERLAP = 0.8
+SLOT_RELEVANT_SIMILARITY = 0.6
+SLOT_CANDIDATE_PASSAGES = 60
+MMR_BALANCE = 0.7
+FACTS_PER_SLOT = 6
+FIRST_BACKOFF_SECONDS = 1.0
 
-RESEARCH_QUESTIONS = 4            # research questions a topic is split into
-RESEARCH_QUERIES = 2              # web searches per question, for independent sources
-RESEARCH_PAGES = (8, 6)           # pages read per round: the first round, then one for the gaps and checks
-RESEARCH_GAPS = 2                 # gaps the next round searches (the most important first)
-RESEARCH_CHECKS = 2               # key facts one site states that the next round looks for on other sites
-SAME_CLAIM = 0.8                  # embedding similarity at which two facts make the same claim
-                                  # (qwen3-embedding: paraphrases 0.86 and up, unrelated facts 0.67 and down)
-REPEAT_CLAIM = 0.9                # ... at which one fact repeats another (kept once, with the pages of both)
-RECALL_TOPICS = 6                 # learned topics one cycle uses at most
-TOPIC_RELEVANT = 0.6              # embedding similarity of a request and a topic it needs (qwen3-embedding:
-                                  # the topic a request is about 0.65 and up, unrelated topics 0.52 and down)
+RESEARCH_QUESTIONS = 4
+SEARCHES_PER_RESEARCH_QUESTION = 2
+RESEARCH_PAGES_PER_ROUND = (8, 6)
+RESEARCH_GAPS = 2
+RESEARCH_FACTS_CHECKED = 2
+SAME_CLAIM_SIMILARITY = 0.8
+REPEAT_CLAIM_SIMILARITY = 0.9
+MAX_RECALL_TOPICS = 6
+TOPIC_RELEVANT_SIMILARITY = 0.6
 
 
 class Home:
@@ -514,7 +506,7 @@ class Store:
               "PRIMARY KEY (collection, key))",
               "CREATE TABLE IF NOT EXISTS logs (id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT NOT NULL, "
               "time TEXT NOT NULL, entry TEXT NOT NULL)")
-    WAIT = 30  # seconds to wait for another Tinker's write
+    LOCK_WAIT_SECONDS = 30
 
     def __init__(self, path):
         self.path, self.made = Path(path), False
@@ -582,7 +574,7 @@ class Store:
             db.execute("BEGIN IMMEDIATE" if write else "BEGIN")
             yield db
             db.execute("COMMIT")
-        except sqlite3.DatabaseError as exc:  # not a database (any more), or locked past WAIT
+        except sqlite3.DatabaseError as exc:  # not a database (any more), or locked past LOCK_WAIT_SECONDS
             raise self.unreadable(exc) from None
         except BaseException:
             if db.in_transaction:
@@ -606,7 +598,7 @@ class Store:
             self.create_private_file()
         elif not self.made:  # one made before it was kept private
             self.path.chmod(0o600)
-        db = sqlite3.connect(self.path, timeout=self.WAIT, isolation_level=None)
+        db = sqlite3.connect(self.path, timeout=self.LOCK_WAIT_SECONDS, isolation_level=None)
         if not self.made:
             self.create_tables(db)
         return db

@@ -11,8 +11,9 @@ lazy from .planning import Designer, SpecWriter, asked
 from .session import Phase, Worker
 lazy from .prompts import Part, PromptTooLarge, Prompts, Reply
 lazy from .settings import (
-    BUILD_TRIES, ENV_EXAMPLE, ENV_FILE, FIX_FILES, MAX_FILE_LINES, MAX_TRIES_PER_PASS,
-    OUTPUT_CHARS, REVIEW_TRIES, TESTS_LOCKED, TESTS_MAX_TOKENS, TESTS_PER_CALL, first_line,
+    BROKEN_BUILD_FIXES, ENV_EXAMPLE, ENV_FILE, FAILURE_OUTPUT_CHARS, FILES_SHOWN_PER_FIX,
+    MAX_CALLS_PER_CRITERION_PASS, MAX_FILE_LINES, STALLED_REVIEW_TRIES, TESTS_LOCKED_REASON, TESTS_PER_CALL,
+    TEST_FILE_MAX_TOKENS, first_line,
 )
 lazy from .workspace import FileView, Output, TestRef, ToolError, Toolchain
 
@@ -68,7 +69,7 @@ class TestWriter(Phase):
                     reply = self.session.ask(Prompts.SPEC_TESTS_SYSTEM, self.prompt(cycle, path, todo, current, note),
                                              f"Tests {'next to ' if current.strip() else ''}"
                                              f"{path} ({len(todo)})",
-                                             max_reply=TESTS_MAX_TOKENS)  # past it, the thought is concluded
+                                             max_reply=TEST_FILE_MAX_TOKENS)  # past it, the thought is concluded
             except PromptTooLarge as exc:
                 say.skip(f"Tests for {path} skipped: {exc}; verify writes them")
                 return
@@ -416,8 +417,8 @@ class Verifier(Phase):
     BUILDS = True
     RANK = {"missing": -1, "build": 0, "fails": 1, "passes": 2}
 
-    PENDING = "verify"                      # the restore point: the files as they were before the criterion worked on
-    FLAKY_RERUNS = 3                        # reruns of a failed test that tell a flaky one
+    RESTORE_POINT = "verify"
+    FLAKY_RERUNS = 3
     FLAKY_NOTE = ("This test's result changes from one run to the next with no change to the code: the code "
                   "is not deterministic. Look for what can differ between runs: the order of an unordered "
                   "collection (a set, a hash map), randomness, the clock, or state shared between tests.")
@@ -443,7 +444,7 @@ class Verifier(Phase):
     def recover_interrupted(self):
         """A run stopped while a criterion was being worked on (Ctrl-C, a kill, a crash) may have
         left a change that was never checked: the files go back to how they were before it."""
-        pending = self.project.store.get("restore", self.PENDING)
+        pending = self.project.store.get("restore", self.RESTORE_POINT)
         if not isinstance(pending, dict) or not isinstance(pending.get("files"), dict):
             return
         changed = [path for path, text in pending["files"].items() if self.workspace.read(path) != (text or "")]
@@ -451,7 +452,7 @@ class Verifier(Phase):
             self.roll_back(pending["files"])
             say.info(f"The last run stopped while {pending.get('criterion', 'a criterion')} was being worked on: "
                      f"{', '.join(changed)} restored to how they were before it", "♻️")
-        self.project.store.delete("restore", self.PENDING)
+        self.project.store.delete("restore", self.RESTORE_POINT)
 
     def make_it_build(self):
         """The project builds and loads (its check command passes) before any criterion is worked
@@ -468,7 +469,7 @@ class Verifier(Phase):
                 say.done("The project builds now" if attempt else "The project builds")
                 return True
             say.fail(f"The project does not build: {Output.key_line(output)}")
-            if attempt >= BUILD_TRIES and not thought:
+            if attempt >= BROKEN_BUILD_FIXES and not thought:
                 break
             fix = BuildFix(self.session, output, tried, thought)
             tried.append(fix.run())
@@ -613,14 +614,14 @@ class Verifier(Phase):
         """climb, with a restore point kept on disk while it goes (a run stopped part way is put
         back on resume: recover_interrupted); the files go back if nothing helped."""
         snapshot = self.workspace.snapshot(self.project.files)  # with its test: rolling back keeps the test just written
-        self.project.store.put("restore", self.PENDING, {"criterion": step["id"], "files": snapshot})
+        self.project.store.put("restore", self.RESTORE_POINT, {"criterion": step["id"], "files": snapshot})
         try:
             if self.climb(step, state, output, retry):
                 return True
             self.roll_back(snapshot)
             return False
         finally:
-            self.project.store.delete("restore", self.PENDING)
+            self.project.store.delete("restore", self.RESTORE_POINT)
 
     def climb(self, step, state, output, retry):
         """Fixes until they stop making progress, then reviews against the plan (see ladder); a
@@ -630,7 +631,7 @@ class Verifier(Phase):
         climb, total = Climb(state, output), 0
         for approach, patience in self.ladder(step, output, retry):
             stall, concluding = 0, False  # concluding: the last attempt thought to its cap; its conclusion is due
-            while (stall < patience or concluding) and total < MAX_TRIES_PER_PASS:
+            while (stall < patience or concluding) and total < MAX_CALLS_PER_CRITERION_PASS:
                 if approach == "fix" and self.test_unloadable(step, output):
                     say.step("The test file no longer loads: reviewing the test now", "🔍")
                     break
@@ -655,12 +656,12 @@ class Verifier(Phase):
         kept breaking other tests in an earlier pass."""
         if self.test_unloadable(step, output):
             say.step(f"The test file {TestRef(step['test']).file} itself does not load: reviewing the test now", "🔍")
-            return (("review", REVIEW_TRIES),)
+            return (("review", STALLED_REVIEW_TRIES),)
         if sum(" broke " in line for line in step.get("history", [])) >= 2:
             say.step("Earlier fixes kept breaking other tests (the tests may disagree): reviewing against the plan now",
                      "🔍")
-            return (("review", REVIEW_TRIES),)
-        return (("fix", 1), ("review", 1)) if retry else (("fix", self.session.max_stall), ("review", REVIEW_TRIES))
+            return (("review", STALLED_REVIEW_TRIES),)
+        return (("fix", 1), ("review", 1)) if retry else (("fix", self.session.max_stall), ("review", STALLED_REVIEW_TRIES))
 
     @staticmethod
     def to_review(attempt, approach):
@@ -784,7 +785,7 @@ class FixAttempt(Worker):
         wanted = [path for path in self.step.get("want", []) if self.workspace.exists(path)]
         own_test = [self.ref.file] if self.approach == "review" else []
         uses = [path for path in self.project.uses(self.ref.file) if path in code]
-        return list(dict.fromkeys(wanted + own_test + named[:2] + uses + named + code))[:FIX_FILES]
+        return list(dict.fromkeys(wanted + own_test + named[:2] + uses + named + code))[:FILES_SHOWN_PER_FIX]
 
     def mentioned(self, paths):
         return Output.mentioned_in(self.output, paths)
@@ -817,7 +818,7 @@ class FixAttempt(Worker):
                 return None if self.approach == "review" and Path(path).parent == Path(self.ref.file).parent \
                     else "no new files now; change the files shown"
             if self.project.kind_of(path) == "test" or path == self.ref.file:
-                return None if self.approach == "review" and path in view.shown else TESTS_LOCKED
+                return None if self.approach == "review" and path in view.shown else TESTS_LOCKED_REASON
             return None if path in view.shown else "only the files shown may change"
         return check
 
@@ -837,7 +838,7 @@ class FixAttempt(Worker):
     def no_change(self, cause, change):
         note = "no usable change" + (f" ({'; '.join(change.notes)})" if change.notes else "")
         folder = str(Path(self.ref.file).parent)
-        refused_near_tests = any(TESTS_LOCKED in note or str(Path(note.split(":", 1)[0]).parent) == folder
+        refused_near_tests = any(TESTS_LOCKED_REASON in note or str(Path(note.split(":", 1)[0]).parent) == folder
                                  for note in change.notes)  # a test, or a new file beside them
         self.blamed_test = self.approach == "fix" and refused_near_tests
         self.record(f"{cause} -> {note}")
@@ -890,7 +891,7 @@ class FixAttempt(Worker):
         """How the first test it broke failed, read while the change is still there: the next try sees why."""
         first = self.project.criterion(criterion_id)
         self.broken_test = first["test"]
-        self.broken_output = Output.failure_text(self.v.evaluate(first)[1], OUTPUT_CHARS // 2)
+        self.broken_output = Output.failure_text(self.v.evaluate(first)[1], FAILURE_OUTPUT_CHARS // 2)
 
     def say_broken(self, tests, cause):
         names = ", ".join(tests[:2])
@@ -952,13 +953,13 @@ class BuildFix(Worker):
         """The files the error names, then the dependency and other config files, then the code."""
         files = [path for path in self.session.files_on_disk("code", "template", "config") if path != ENV_FILE]
         configs = [path for path in files if self.project.files[path].get("kind") == "config"]
-        return list(dict.fromkeys(Output.mentioned_in(self.output, files) + configs + files))[:FIX_FILES]
+        return list(dict.fromkeys(Output.mentioned_in(self.output, files) + configs + files))[:FILES_SHOWN_PER_FIX]
 
     def may_change(self, view):
         def check(path, exists):
             if not exists or path not in view.shown:
                 return "only the files shown may change now"
-            return TESTS_LOCKED if self.project.kind_of(path) == "test" else None
+            return TESTS_LOCKED_REASON if self.project.kind_of(path) == "test" else None
         return check
 
     def said(self, change, cause):

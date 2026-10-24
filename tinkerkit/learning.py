@@ -3,7 +3,7 @@ A fixed pipeline whose main source is the topic's own documentation, for the ver
 call (plan, digest, condense or embedding) until the web (or the documentation kept from before) has delivered
 usable pages:
   PREFLIGHT  the Internet plugin and an embedding model are there
-  PLAN       the plan saved with the topic; else SEARCH 1 (FIRST_SEARCH, throttled), GATE 1, PICK (the results
+  PLAN       the plan saved with the topic; else SEARCH 1 (DOCS_SITE_SEARCH, throttled), GATE 1, PICK (the results
              about the topic, BM25), FETCH (the plugin's fetcher), GATE 2, then the first model call: language,
              tool or domain, the version commands, the documentation sites, slot hints, follow-up searches
   MACHINE    the version commands run here: the version installed
@@ -32,13 +32,13 @@ lazy from .model import OllamaError
 lazy from .passages import Cleaner, Page, text_blocks
 lazy from .prompts import Part, PromptTooLarge, Prompts
 lazy from .settings import (
-    BACKOFF_FIRST, Config, FACT_CHARS, FACT_PHASES, FACTS_PER_SLOT, FIRST_SEARCH, Home, LEARN_RESULTS, MAX_COMMANDS,
-    TOOL_ROLES, first_line, now_text,
+    DOCS_SITE_SEARCH, FACTS_PER_SLOT, FACT_PHASES, FIRST_BACKOFF_SECONDS, MAX_FACT_CHARS,
+    MAX_VERSION_COMMANDS, RESULTS_PER_LEARN_SEARCH, TOOL_ROLES, Config, Home, first_line, now_text,
 )
-lazy from .slots import PROFILES, TOOL_DOCS, Selector, fill, missing, short_slots, web_slots
+lazy from .slots import PROFILES, TOOL_DOCS_QUERY, Selector, fill, missing, short_slots, web_slots
 lazy from .web import is_web_address
 
-CAUSES = frozendict({  # why a learn stopped: (what happened, what to do next)
+LEARN_STOP_CAUSES = frozendict({
     "plugin": ("the Internet plugin is off or cannot be reached",
                "check the network and tinker use-web (tinker config shows the web's state), then learn again"),
     "embeddings": ("no embedding model is selected", "select one with tinker embed NAME, then learn again"),
@@ -50,12 +50,12 @@ CAUSES = frozendict({  # why a learn stopped: (what happened, what to do next)
               "scripts (fetch_fallbacks lets the web plugin fetch more of those)"),
 })
 
-GATES = frozendict({  # where a learn stopped, as a person reads it
+LEARN_STOP_PLACES = frozendict({
     "preflight": "before starting",
     "gate 1": "at the first web search",
     "gate 2": "while reading pages",
 })
-RECAP_ICONS = ("✅", "❓", "📖", "📄", "🧩", "🌐")  # the summary's lines, in SlotLearner.recap_of's order
+RECAP_LINE_ICONS = ("✅", "❓", "📖", "📄", "🧩", "🌐")
 
 
 class LearnStopped(SystemExit):
@@ -108,7 +108,7 @@ class SlotLearner:
         with say.part(f"Learning {topic}", "📚"):
             entry = self.learned_by_slots(deep)
         if self.recap:
-            say.summary(f"Learned {entry['name']}", [(icon, *row) for icon, row in zip(RECAP_ICONS, self.recap)])
+            say.summary(f"Learned {entry['name']}", [(icon, *row) for icon, row in zip(RECAP_LINE_ICONS, self.recap)])
         return entry
 
     def learned_by_slots(self, deep):
@@ -159,7 +159,7 @@ class SlotLearner:
         """SEARCH 1, then GATE 1: the results about the topic, or the run stops."""
         self.learner.step("search", f"Searching the web for pages about {self.topic}…", "🔎")
         try:
-            results = self.search(FIRST_SEARCH.format(topic=self.topic))
+            results = self.search(DOCS_SITE_SEARCH.format(topic=self.topic))
         except SearchFailed as failed:
             self.stop("gate 1", failed.cause, failed.detail)
         picked = self.picked(self.topic, results)
@@ -172,7 +172,7 @@ class SlotLearner:
         self.searches += 1
         self.tried.append(f'search "{query}"')
         try:
-            found = self.throttle.call(lambda: self.timed("search", query, lambda: self.internet.search(query, LEARN_RESULTS)),
+            found = self.throttle.call(lambda: self.timed("search", query, lambda: self.internet.search(query, RESULTS_PER_LEARN_SEARCH)),
                                        lambda: self.internet.rate_limited(query))
         except RateLimited:
             raise SearchFailed("rate-limit", f"still after {Config.get('learn_backoff')}s of backoff")
@@ -293,7 +293,7 @@ class SlotLearner:
                                [slot.docs for slot in web_slots(plan["profile"])], int(Config.get("docs_pages")))
         for tool in {tool["docs"].get("root") or tool["name"]: tool for tool in plan["tools"]}.values():
             pages += self.doc_pages(site, Library.slug(tool["name"]), tool["docs"],
-                                    version_of(machine, [tool["command"]]), [TOOL_DOCS],
+                                    version_of(machine, [tool["command"]]), [TOOL_DOCS_QUERY],
                                     int(Config.get("tool_docs_pages")))
         self.outcome(f"{len(pages)} page(s)" + (f" of {plan['name']} {version}" if version else ""))
         return pages
@@ -411,7 +411,7 @@ class SlotLearner:
         try:
             picked = self.picked(plan["name"], self.search(query))
         except SearchFailed as failed:
-            return self.extra_failed(query, CAUSES[failed.cause][0])
+            return self.extra_failed(query, LEARN_STOP_CAUSES[failed.cause][0])
         pages = self.fetched(picked)[0] if picked else []
         return pages or self.extra_failed(query, "no result about the topic gave usable text")
 
@@ -472,17 +472,17 @@ class SlotLearner:
 
     def stop(self, gate, cause, detail=""):
         """The run stops here, before any model call: LearnStopped, with why and what to do next."""
-        what, next_step = CAUSES[cause]
+        what, next_step = LEARN_STOP_CAUSES[cause]
         before = (f"what was learned about it before ({self.known.get('learned', '?')}) is untouched" if self.known
                   else "there was no library for it before")
         raise LearnStopped("\n".join(message.line for message in [
-            Message("stop", f"Learning {self.topic} stopped {GATES[gate]}: {what}" + (f" ({detail})" if detail else "")
+            Message("stop", f"Learning {self.topic} stopped {LEARN_STOP_PLACES[gate]}: {what}" + (f" ({detail})" if detail else "")
                     + ".", 0, Messages.ICONS["stop"]),
             Message("info", f"Tried: {'; '.join(self.tried) or 'nothing yet'}", 1, "🔎"),
             Message("info", f"Web requests: {self.log.text()}", 1, "🌐"),
             Message("info", f"Nothing was learned or saved; {before}.", 1, "💾"),
             Message("tip", f"Next: {next_step}", 1, "👉")]),
-            [("Why", f"stopped {GATES[gate]}: {what}"), ("Next", next_step)])
+            [("Why", f"stopped {LEARN_STOP_PLACES[gate]}: {what}"), ("Next", next_step)])
 
 
 def label(slot_id):
@@ -498,7 +498,7 @@ def version_of(machine, commands):
 
 def read_plan(data):
     """A slot plan, checked: its kind (language, tool or domain) and profile, a name, its version and summary,
-    the language (a language's own; a tool's goes in used_with), its documentation site, up to MAX_COMMANDS
+    the language (a language's own; a tool's goes in used_with), its documentation site, up to MAX_VERSION_COMMANDS
     commands that only show what is installed (any other is "dropped"), a language's tools (one per role of
     TOOL_ROLES, each with its version command and documentation), and the hints and follow-up searches of its
     profile's slots."""
@@ -518,7 +518,7 @@ def read_plan(data):
             "summary": clean(data.get("summary"), 200) or name,
             "language": (language or name) if kind == "language" else "",
             "used_with": "" if kind == "language" else language or clean(data.get("used_with"), 40),
-            "docs": read_docs(data.get("docs")), "commands": commands[:MAX_COMMANDS], "dropped": dropped + tool_dropped,
+            "docs": read_docs(data.get("docs")), "commands": commands[:MAX_VERSION_COMMANDS], "dropped": dropped + tool_dropped,
             "tools": tools, "hints": by_slot(data.get("hints"), ids), "followups": by_slot(data.get("followups"), ids)}
 
 
@@ -550,7 +550,7 @@ def by_slot(given, ids):
 
 
 def read_digest(data, slot, passages):
-    """A slot's facts, checked: each with its text (cut to FACT_CHARS), a known phase (else the slot's section)
+    """A slot's facts, checked: each with its text (cut to MAX_FACT_CHARS), a known phase (else the slot's section)
     and the passages it cites among those given; a fact that cites none, or speaks of an unreleased version, is
     dropped. At most FACTS_PER_SLOT. Each keeps its slot, the passages it cites and their pages (source, also)."""
     by_id = {passage.id: passage for passage in passages}
@@ -558,7 +558,7 @@ def read_digest(data, slot, passages):
     for item in (data.get("facts") or []) if isinstance(data, dict) else []:
         if not isinstance(item, dict):
             continue
-        text, phase = clean(item.get("text"), FACT_CHARS), clean(item.get("phase"), 20).lower()
+        text, phase = clean(item.get("text"), MAX_FACT_CHARS), clean(item.get("phase"), 20).lower()
         cited = list(dict.fromkeys(str(citation).strip("[] ") for citation in item.get("cites") or []))
         cited = [passage_id for passage_id in cited if passage_id in by_id]
         if not text or not cited or Learner.UNRELEASED.search(text):
@@ -581,7 +581,7 @@ def address_key(url):
 
 class Throttle:
     """At most rate requests a minute: a token bucket, full at the start, so a learn's few requests go at once and
-    a burst waits its turn. HTTP 429 is waited out with growing pauses (BACKOFF_FIRST, doubled) for at most backoff
+    a burst waits its turn. HTTP 429 is waited out with growing pauses (FIRST_BACKOFF_SECONDS, doubled) for at most backoff
     seconds from the first one; past that, RateLimited, so a learn that cannot go on stops quickly."""
 
     def __init__(self, rate, backoff, clock=None, sleep=None):
@@ -591,7 +591,7 @@ class Throttle:
 
     def call(self, request, limited):
         """request()'s result, asked again while limited() says it was rate limited, within the budget."""
-        deadline, pause = None, BACKOFF_FIRST
+        deadline, pause = None, FIRST_BACKOFF_SECONDS
         while True:
             self.take()
             result = request()

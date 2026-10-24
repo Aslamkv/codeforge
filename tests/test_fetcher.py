@@ -11,7 +11,7 @@ import pytest
 from tinkerkit.fetcher import Fetched, Fetcher
 from tinkerkit.settings import MAX_REDIRECTS
 
-REAL_CONNECT = socket.socket.connect  # taken before the tests turn the network off
+REAL_CONNECT = socket.socket.connect
 
 
 class Site:

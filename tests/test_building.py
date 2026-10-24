@@ -7,11 +7,11 @@ import pytest
 
 from tinkerkit.building import BugReproducer, BuildFix, CodeWriter, FixAttempt, TestTool, TestWriter, ToolchainRepair, Verifier
 from tinkerkit.prompts import Reply
-from tinkerkit.settings import TESTS_LOCKED
+from tinkerkit.settings import TESTS_LOCKED_REASON
 from tinkerkit.workspace import Output, TestRef
 from conftest import criterion, file_block
 
-CALC = "def add(a, b):\n    return a + b\n\n\ndef sub(a, b):\n    return a + b\n"  # sub is wrong
+CALC_WITH_WRONG_SUB = "def add(a, b):\n    return a + b\n\n\ndef sub(a, b):\n    return a + b\n"
 FIXED = "def add(a, b):\n    return a + b\n\n\ndef sub(a, b):\n    return a - b\n"
 TESTS = ("import calc\n\n\ndef test_add():\n    assert calc.add(2, 3) == 5\n\n\n"
          "def test_sub():\n    assert calc.sub(5, 3) == 2\n")
@@ -22,7 +22,7 @@ FILES = {"calc.py": {"kind": "code", "role": "the calculator", "contract": [], "
 @pytest.fixture
 def calc(make_project, make_session, project_dir):
     """A calculator whose sub is wrong, with its two tests, as a planned project at the verify phase."""
-    (project_dir / "calc.py").write_text(CALC)
+    (project_dir / "calc.py").write_text(CALC_WITH_WRONG_SUB)
     (project_dir / "test_calc.py").write_text(TESTS)
     steps = [criterion("C1", "test_calc.py::test_add", "calc.add(2, 3) is 5"),
              criterion("C2", "test_calc.py::test_sub", "calc.sub(5, 3) is 2")]
@@ -157,10 +157,10 @@ def test_verify_parks_what_nothing_fixes_and_puts_the_files_back(calc, fake_olla
     assert Verifier(session).run(project.cycles[0]) is False
     step = steps_of(project)["C2"]
     assert step["status"] == "blocked" and steps_of(project)["C1"]["status"] == "green"
-    assert (project_dir / "calc.py").read_text() == CALC
+    assert (project_dir / "calc.py").read_text() == CALC_WITH_WRONG_SUB
     labels = [label.split(" [")[0] for label in fake_ollama.labels()]
     assert labels[0] == "Fix the code C2 (no thinking first)" and labels[-1].startswith("Review the test and the code against the plan C2")
-    assert len(labels) == 5 and project.store.get("restore", Verifier.PENDING) is None
+    assert len(labels) == 5 and project.store.get("restore", Verifier.RESTORE_POINT) is None
 
 
 @pytest.mark.spec("BLD-3")
@@ -177,11 +177,11 @@ def test_a_criterion_failing_like_a_parked_one_is_parked_at_once(calc, fake_olla
 @pytest.mark.spec("BLD-4")
 def test_a_stopped_run_is_put_back_from_its_restore_point(calc, project_dir, capsys):
     session, project = calc
-    project.store.put("restore", Verifier.PENDING, {"criterion": "C2", "files": {"calc.py": CALC, "test_calc.py": TESTS,
+    project.store.put("restore", Verifier.RESTORE_POINT, {"criterion": "C2", "files": {"calc.py": CALC_WITH_WRONG_SUB, "test_calc.py": TESTS,
                                                                                  "new.py": None}})
     (project_dir / "calc.py").write_text("half-done change\n")
     Verifier(session).recover_interrupted()
-    assert (project_dir / "calc.py").read_text() == CALC and project.store.get("restore", Verifier.PENDING) is None
+    assert (project_dir / "calc.py").read_text() == CALC_WITH_WRONG_SUB and project.store.get("restore", Verifier.RESTORE_POINT) is None
     assert "The last run stopped while C2 was being worked on: calc.py restored" in capsys.readouterr().out
 
 
@@ -198,7 +198,7 @@ def test_failure_key_and_roll_back(calc, project_dir):
     (project_dir / "calc.py").write_text("changed")
     Verifier(session).roll_back(snapshot)
     assert not (project_dir / "extra.py").exists() and "extra.py" not in project.files
-    assert (project_dir / "calc.py").read_text() == CALC
+    assert (project_dir / "calc.py").read_text() == CALC_WITH_WRONG_SUB
 
 
 @pytest.mark.spec("BLD-4")
@@ -225,7 +225,7 @@ def test_what_a_fix_and_a_review_may_change(calc):
     session, project = calc
     view = type("V", (), {"shown": {"calc.py", "test_calc.py"}})()
     fix = attempt(session, project).may_change(view)
-    assert fix("calc.py", True) is None and fix("test_calc.py", True) == TESTS_LOCKED
+    assert fix("calc.py", True) is None and fix("test_calc.py", True) == TESTS_LOCKED_REASON
     assert fix("other.py", True) == "only the files shown may change" and "no new files" in fix("new.py", False)
     review = attempt(session, project, "review").may_change(view)
     assert review("test_calc.py", True) is None and review("test_helper.py", False) is None
@@ -238,7 +238,7 @@ def test_a_fix_that_blames_the_test_changes_nothing(calc, fake_ollama, project_d
     fake_ollama.reply("TEST WRONG: 5 - 3 is 2, the test is fine actually\n" + file_block("calc.py", FIXED))
     fix = attempt(session, project)
     assert fix.run() == ("fails", "it fails") and fix.blamed_test
-    assert (project_dir / "calc.py").read_text() == CALC
+    assert (project_dir / "calc.py").read_text() == CALC_WITH_WRONG_SUB
 
 
 @pytest.mark.spec("BLD-5")
@@ -249,7 +249,7 @@ def test_a_change_that_breaks_a_passing_test_is_reverted(calc, fake_ollama, proj
     fix = attempt(session, project, before={"C1"})
     state, output = fix.run()
     assert state == "fails" and "Your last change broke test_calc.py::test_add" in output
-    assert (project_dir / "calc.py").read_text() == CALC
+    assert (project_dir / "calc.py").read_text() == CALC_WITH_WRONG_SUB
     assert steps_of(project)["C2"]["keep"] == ["test_calc.py::test_add"] and not fix.conflict
 
 
@@ -296,7 +296,7 @@ def test_a_fix_learned_before_is_replayed_without_the_model(calc, fake_ollama, p
                                                                                         "calc.py": "stolen"}}})
     assert ToolchainRepair(session).run(output, set())[0] == "known"
     assert project.toolchain.lint == "" and (project_dir / "setup.cfg").read_text() == "[flake8]\n"
-    assert (project_dir / "calc.py").read_text() == CALC  # a file of this project's own is never replaced
+    assert (project_dir / "calc.py").read_text() == CALC_WITH_WRONG_SUB  # a file of this project's own is never replaced
     assert project.files["setup.cfg"]["kind"] == "config" and fake_ollama.calls == []
 
 
@@ -306,7 +306,7 @@ def test_a_model_fix_changes_only_config_files_and_commands(calc, fake_ollama, p
     fake_ollama.reply("CAUSE: pytest needs a path\n" + file_block("pytest.ini", "[pytest]\npythonpath = .")
                       + file_block("calc.py", "hacked") + '\nTOOLCHAIN: {"test_all": "pytest -x"}')
     kind, fix = ToolchainRepair(session).run("ERROR: no module named calc", set())
-    assert kind == "model" and (project_dir / "pytest.ini").exists() and (project_dir / "calc.py").read_text() == CALC
+    assert kind == "model" and (project_dir / "pytest.ini").exists() and (project_dir / "calc.py").read_text() == CALC_WITH_WRONG_SUB
     assert project.toolchain.test_all == "pytest -x"
     assert fix["replay"] == {"toolchain": {"test_all": "pytest -x"}, "files": {"pytest.ini": "[pytest]\npythonpath = .\n"}}
 
@@ -324,7 +324,7 @@ def test_a_project_that_does_not_build_is_fixed(calc, fake_ollama, project_dir):
 def test_what_a_build_fix_may_change(calc):
     session, project = calc
     check = BuildFix(session, "output").may_change(type("V", (), {"shown": {"calc.py", "test_calc.py"}})())
-    assert check("calc.py", True) is None and check("test_calc.py", True) == TESTS_LOCKED
+    assert check("calc.py", True) is None and check("test_calc.py", True) == TESTS_LOCKED_REASON
     assert check("new.py", False) == "only the files shown may change now"
     assert check("hidden.py", True) == "only the files shown may change now"
 

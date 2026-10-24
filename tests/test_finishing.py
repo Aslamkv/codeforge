@@ -95,7 +95,7 @@ def test_read():
             "serves": False}
     guide = writer.read(Reply(json.dumps(data)))
     assert guide["features"] == ["Adds", "Subtracts numbers"] and guide["requires"] == "Python 3"
-    assert len(guide["usage"]) == ReadmeWriter.MAX_USAGE and guide["usage"][0]["output"] == "5"
+    assert len(guide["usage"]) == ReadmeWriter.MAX_USAGE_EXAMPLES and guide["usage"][0]["output"] == "5"
     assert guide["serves"] is False and guide["overview"] == "A calculator."
     served = dict(data, usage=[{"what": "Get", "command": "curl -s http://127.0.0.1:8000/"}])
     assert writer.read(Reply(json.dumps(served)))["serves"] is True

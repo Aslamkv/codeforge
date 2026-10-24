@@ -10,7 +10,7 @@ lazy import re
 lazy import urllib.parse
 
 lazy from .passages import Cleaner, Links, Page
-lazy from .settings import DOC_MAPS, MAX_MAP_LINKS, Config, Home, now_text, words
+lazy from .settings import MAX_MAP_LINKS, SITE_MAP_FILES, Config, Home, now_text, words
 
 
 class DocSite:
@@ -62,7 +62,7 @@ class DocSite:
     def map(self, root, base):
         """(address, title) of the site's pages under the root: from its llms.txt, else its sitemap.xml, else the
         root page's own links."""
-        for name in DOC_MAPS:
+        for name in SITE_MAP_FILES:
             got = self.fetcher.fetch_all([urllib.parse.urljoin(base, name)], kind="probe")[0]
             listed = under(map_links(name, got.text), base) if got.ok else []
             if listed:

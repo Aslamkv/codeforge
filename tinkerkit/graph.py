@@ -8,7 +8,7 @@ lazy import itertools
 lazy import json
 
 lazy from .knowledge import Embeddings, Library
-lazy from .settings import Home, SIMILAR_MEANING, SIMILAR_WORDS, first_line, similarity
+lazy from .settings import SIMILAR_LESSON_MEANING, SIMILAR_LESSON_WORDS, Home, first_line, similarity
 lazy from .workspace import TaughtCommands, Toolchain
 
 HISTORY_LINKS = frozendict({"born": "taught_by", "confirmed": "confirmed_in", "helped": "helped_in", "failed": "failed_in"})
@@ -131,11 +131,11 @@ class Graph:
                                      keep=False) if embeddings and lessons else None
         if vectors:
             self.similar_by = f"meaning ({embeddings.name})"
-            alike = lambda first, second: Embeddings.cosine(vectors[first], vectors[second]) >= SIMILAR_MEANING
+            alike = lambda first, second: Embeddings.cosine(vectors[first], vectors[second]) >= SIMILAR_LESSON_MEANING
         else:
             why = embeddings.failed if embeddings else "no embedding model selected (tinker embed NAME)"
             self.similar_by = f"words ({why})" if lessons else "words"
-            alike = lambda first, second: similarity(lessons[first]["text"], lessons[second]["text"]) >= SIMILAR_WORDS
+            alike = lambda first, second: similarity(lessons[first]["text"], lessons[second]["text"]) >= SIMILAR_LESSON_WORDS
         for first, second in itertools.combinations(range(len(lessons)), 2):
             if alike(first, second):
                 self.link(lessons[first]["id"], lessons[second]["id"], "similar")

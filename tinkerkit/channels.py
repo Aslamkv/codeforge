@@ -17,20 +17,20 @@ lazy import time
 lazy import urllib.parse
 lazy from pathlib import Path
 
-from .conversation import OFF, Channel, ChannelError, Desk, Markup, Message, first_words
-lazy from .ledger import ASKED_WAIT, Ledger
+from .conversation import CHANNEL_REPORTS_ENV, Channel, ChannelError, Desk, Markup, Message, first_words
+lazy from .ledger import ANSWER_WINDOW_SECONDS, Ledger
 lazy from .messages import say
 lazy from .settings import Home
 
 
-PAIRING_WAIT = 120                             # seconds to wait for the first message when pairing a chat
-CHECK_TRIES = 3                                # tries of a channel's first call when it starts listening
-RATE_LIMIT_WAITS = 3                           # times a call waits out Telegram's "too many requests"
-CAPTION_CHARS = 1024                           # the longest caption Telegram takes on a file
-MENU_DESCRIPTION_CHARS = 256                   # the longest description of a command in a bot's menu
-PLACEHOLDER_CHARS = 64                         # the longest hint Telegram shows in an empty reply box
-BOT_DOWNLOAD_BYTES = 20_000_000                # the largest file Telegram lets a bot download
-DOWNLOAD_WAIT = 120                            # seconds a file sent in a chat may take to download
+PAIRING_WAIT_SECONDS = 120
+FIRST_CALL_TRIES = 3
+TELEGRAM_RATE_LIMIT_WAITS = 3
+TELEGRAM_MAX_CAPTION_CHARS = 1024
+TELEGRAM_MAX_MENU_DESCRIPTION_CHARS = 256
+TELEGRAM_MAX_PLACEHOLDER_CHARS = 64
+TELEGRAM_MAX_DOWNLOAD_BYTES = 20_000_000
+SENT_FILE_DOWNLOAD_TIMEOUT = 120
 FORM = "application/x-www-form-urlencoded"
 
 
@@ -117,8 +117,8 @@ class ChannelCommand:
     def pair(channel, who):
         """The chat that sends the channel a message now, once its sender confirms it here."""
         channel.skip_waiting()
-        say.step(f"Send any message to {who} now (waiting up to {PAIRING_WAIT}s)…", "📨")
-        ends = time.monotonic() + PAIRING_WAIT
+        say.step(f"Send any message to {who} now (waiting up to {PAIRING_WAIT_SECONDS}s)…", "📨")
+        ends = time.monotonic() + PAIRING_WAIT_SECONDS
         while time.monotonic() < ends:
             for message in channel.receive(timeout=10):
                 answer = ask(f"Message from {message.sender or 'someone'} (chat {message.chat}): "
@@ -159,17 +159,17 @@ class ChannelCommand:
     @staticmethod
     def check(channel):
         """The channel answers: a refusal (a bad token) ends here, a slow or dropped network is asked
-        again, up to CHECK_TRIES times."""
-        for tries in range(1, CHECK_TRIES + 1):
+        again, up to FIRST_CALL_TRIES times."""
+        for tries in range(1, FIRST_CALL_TRIES + 1):
             try:
                 return channel.handle()
             except ChannelError as exc:
                 raise SystemExit(f"tinker: channel {channel.name} does not work: {exc}") from None
             except OSError as exc:
-                if tries == CHECK_TRIES:
+                if tries == FIRST_CALL_TRIES:
                     raise SystemExit(f"tinker: channel {channel.name} cannot be reached ({exc}), tried {tries} "
                                      f"times: check the network and start it again") from None
-                say.retry(f"{channel.name} did not answer ({exc}); trying again ({tries + 1}/{CHECK_TRIES})")
+                say.retry(f"{channel.name} did not answer ({exc}); trying again ({tries + 1}/{FIRST_CALL_TRIES})")
                 time.sleep(5)
 
     @staticmethod
@@ -188,7 +188,7 @@ class Channels:
     @staticmethod
     def enabled():
         """The enabled channels, made; none when a run is told not to listen (tinker channel start's own)."""
-        if os.environ.get(OFF) == "off":
+        if os.environ.get(CHANNEL_REPORTS_ENV) == "off":
             return []
         return [Channels.make(name) for name, channel_settings in Channels.settings().items()
                 if channel_settings.get("enabled")]
@@ -275,7 +275,7 @@ class TelegramChannel(Channel):
         that cannot be downloaded, is said to the person, and the message has no text."""
         chat, document = str(message["chat"]["id"]), message["document"]
         name = document.get("file_name") or "book"
-        if document.get("file_size", 0) > BOT_DOWNLOAD_BYTES:
+        if document.get("file_size", 0) > TELEGRAM_MAX_DOWNLOAD_BYTES:
             self.send(chat, f"{name} is larger than a bot may download from Telegram (20 MB): send a link that "
                             f"downloads it instead (read URL).")
             return dict(message, text="")
@@ -289,7 +289,7 @@ class TelegramChannel(Channel):
     def downloaded(self, file_id, name):
         """The file Telegram keeps for file_id, downloaded into Tinker's home as name (Home.reading_file); its path."""
         found = self.call("getFile", file_id=file_id)["file_path"]
-        connection = self.connection(DOWNLOAD_WAIT)
+        connection = self.connection(SENT_FILE_DOWNLOAD_TIMEOUT)
         try:
             connection.request("GET", f"/file/bot{self.secrets.get('token', '')}/{found}", None, {})
             response = connection.getresponse()
@@ -314,7 +314,7 @@ class TelegramChannel(Channel):
     def offer(self, commands):
         """The commands in the bot's menu (shown as the person types /): Telegram takes a-z, 0-9 and _ in a name,
         so use-model is offered as /use_model (and taken back as use-model)."""
-        menu = [{"command": name.replace("-", "_"), "description": what[:MENU_DESCRIPTION_CHARS]}
+        menu = [{"command": name.replace("-", "_"), "description": what[:TELEGRAM_MAX_MENU_DESCRIPTION_CHARS]}
                 for name, what in commands]
         try:
             self.call("setMyCommands", commands=json.dumps(menu))
@@ -323,7 +323,7 @@ class TelegramChannel(Channel):
 
     def ask_for(self, chat, question, hint):
         """question sent with the reply box open (ForceReply), hint in it until the person types."""
-        reply = {"force_reply": True, "input_field_placeholder": hint[:PLACEHOLDER_CHARS]}
+        reply = {"force_reply": True, "input_field_placeholder": hint[:TELEGRAM_MAX_PLACEHOLDER_CHARS]}
         return self.send(chat, question, reply_markup=json.dumps(reply))
 
     def send(self, chat, text, **fields):
@@ -358,9 +358,9 @@ class TelegramChannel(Channel):
         return now
 
     def answered(self, chat):
-        """The person's words a new thing answers: their last message, sent within ASKED_WAIT ("" for none)."""
+        """The person's words a new thing answers: their last message, sent within ANSWER_WINDOW_SECONDS ("" for none)."""
         words, when = self.asked.pop(str(chat), ("", 0.0))
-        return words if time.monotonic() - when <= ASKED_WAIT else ""
+        return words if time.monotonic() - when <= ANSWER_WINDOW_SECONDS else ""
 
     def post(self, method, chat, text, **fields):
         """text sent (or edited) as Telegram shows Markup (HTML), commands in it said as the conversation takes
@@ -383,7 +383,7 @@ class TelegramChannel(Channel):
         caption = self.said(caption)
         try:
             sent = self.call("sendDocument", wait=120, file=Path(path), chat_id=chat,
-                             caption=Markup.html(caption)[:CAPTION_CHARS], parse_mode="HTML")["message_id"]
+                             caption=Markup.html(caption)[:TELEGRAM_MAX_CAPTION_CHARS], parse_mode="HTML")["message_id"]
         except OSError, ChannelError:
             return self.send(chat, caption)
         self.seen(str(chat), sent)
@@ -402,7 +402,7 @@ class TelegramChannel(Channel):
 
     def glance(self, chat, asked, sent, keep=None):
         """sent only shows something, asked for by the person's message asked: that message taken out now, the
-        glance shown before too (one at a time), and sent in keep seconds (GLANCE_KEEP when not given)."""
+        glance shown before too (one at a time), and sent in keep seconds (GLANCE_KEPT_SECONDS when not given)."""
         self.asked.pop(str(chat), None)  # what it answered asks no thing
         if asked:
             self.delete(chat, asked)
@@ -456,7 +456,7 @@ class TelegramChannel(Channel):
         fields = {key: value for key, value in fields.items() if value is not None}
         data, kind = self.multipart(fields, file) if file else (urllib.parse.urlencode(fields), FORM)
         status, body = self.answer(method, path, data, wait, kind)
-        for _ in range(RATE_LIMIT_WAITS):
+        for _ in range(TELEGRAM_RATE_LIMIT_WAITS):
             pause = self.retry_after(status, body)
             if pause is None:
                 break

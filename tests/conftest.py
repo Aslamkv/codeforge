@@ -42,14 +42,14 @@ def quiet_voice():
 @pytest.fixture(autouse=True)
 def no_job():
     """Each test starts as a process that runs no job (a job's state is kept on the class, for its process)."""
-    from tinkerkit.jobs import STOP, Jobs
-    handler = signal.getsignal(STOP)
+    from tinkerkit.jobs import JOB_STOP_SIGNAL, Jobs
+    handler = signal.getsignal(JOB_STOP_SIGNAL)
     Jobs.current = Jobs.journal = Jobs.ending = None
     Jobs.resuming = False
     yield
     Jobs.current = Jobs.journal = Jobs.ending = None
     Jobs.resuming = False
-    signal.signal(STOP, handler)
+    signal.signal(JOB_STOP_SIGNAL, handler)
 
 @pytest.fixture
 def home_store(tinker_home):

@@ -40,7 +40,7 @@ class Messages:
     the model never names what it does (thinking, writing): that means nothing to the person."""
     ICONS = frozendict({"done": "✅", "warn": "⚠️", "fail": "❌", "retry": "🔁", "skip": "➖", "stop": "🛑",
                         "tip": "💡", "item": "•", "found": "💡"})
-    SPINNER = "⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏"  # the live line's icon on a terminal, one on at each redraw: it still goes on
+    SPINNER = "⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏"
 
     def __init__(self):
         self.depth, self.followers, self.log, self.drawn, self.frame = 0, [], None, False, 0

@@ -14,8 +14,8 @@ lazy from pathlib import Path
 lazy from .messages import human_duration, say
 lazy from .prompts import Part, Prompts, Reply
 from .settings import (
-    COMMAND_TIMEOUT, Config, ENV_EXAMPLE, ENV_FILE, Home, ONLINE_PROBES, OUTPUT_CHARS, SETUP_TIMEOUT, STATE_DIR,
-    first_line, now_text,
+    COMMAND_TIMEOUT, ENV_EXAMPLE, ENV_FILE, FAILURE_OUTPUT_CHARS, ONLINE_PROBES, SETUP_TIMEOUT, STATE_DIR,
+    Config, Home, first_line, now_text,
 )
 
 
@@ -220,7 +220,7 @@ class Toolchain:
 
 def timed_out(code, output):
     """A command that ran out of time (a refused one has no exit code either)."""
-    return code is None and output != Workspace.REFUSED
+    return code is None and output != Workspace.REFUSED_OUTPUT
 
 
 def online():
@@ -238,7 +238,7 @@ def online():
 
 class Workspace:
     """The project folder: its files (paths kept inside it) and the commands run in it."""
-    REFUSED = "refused: the command is unsafe"  # the output of a command that is never run
+    REFUSED_OUTPUT = "refused: the command is unsafe"
     UNSAFE_COMMAND = re.compile(r"(^|[;&|]\s*)sudo\b|\brm\s+-[a-z]*r[a-z]*f?\s+(/|~|\.\.)|\bmkfs\b|\bdd\s+if=|"
                                 r"(curl|wget)\b[^|]*\|\s*(ba|z)?sh\b|>\s*/(etc|usr|bin|dev/sd)")
     PLACEHOLDER_RE = re.compile(r"^(<.*>|your[_-][\w-]*|[\w-]*_here|change[-_ ]?me|replace[-_ ]?me|x{3,}|\*{3,}|"
@@ -253,7 +253,7 @@ class Workspace:
         with the person's aliases it uses defined first (TaughtCommands). Returns (exit code, or
         None if refused or timed out; output)."""
         if self.unsafe(command):
-            return None, Workspace.REFUSED
+            return None, Workspace.REFUSED_OUTPUT
         started = time.perf_counter()
         proc = self.spawn(command, stdout=subprocess.PIPE, text=True, errors="replace")
         code, output, status = self.finished(proc, timeout)
@@ -498,7 +498,7 @@ class TaughtCommands:
     for anyone. tinker memory lists them; tinker learn NAME none forgets one."""
     NAME_RE = re.compile(r"[A-Za-z_][A-Za-z0-9_]*")  # a name a POSIX shell function can have
     SOURCE_RE = re.compile(r"(^|[;&|(]\s*)source\s+")  # "source" is not POSIX: "." is
-    LOOKUP_TIMEOUT = 10  # seconds the person's shell may take to say what an alias stands for
+    ALIAS_LOOKUP_TIMEOUT = 10
 
     @staticmethod
     def teach(name, definition=None):
@@ -574,7 +574,7 @@ class TaughtCommands:
             return None
         try:
             proc = subprocess.run([shell, "-i", "-c", f"alias {name}"], capture_output=True, text=True,
-                                  stdin=subprocess.DEVNULL, timeout=TaughtCommands.LOOKUP_TIMEOUT)
+                                  stdin=subprocess.DEVNULL, timeout=TaughtCommands.ALIAS_LOOKUP_TIMEOUT)
         except OSError, subprocess.TimeoutExpired:
             return None
         definition = TaughtCommands.alias_definition(name, proc.stdout)
@@ -604,7 +604,7 @@ class TaughtCommands:
         """Why NAME() { DEFINITION } is not valid POSIX shell ("" when it is), checked by sh -n."""
         try:
             proc = subprocess.run(["sh", "-n", "-c", TaughtCommands.function(name, definition)], capture_output=True,
-                                  text=True, stdin=subprocess.DEVNULL, timeout=TaughtCommands.LOOKUP_TIMEOUT)
+                                  text=True, stdin=subprocess.DEVNULL, timeout=TaughtCommands.ALIAS_LOOKUP_TIMEOUT)
         except (OSError, subprocess.TimeoutExpired) as exc:
             return f"sh could not check it: {exc}"
         return "" if proc.returncode == 0 else first_line(proc.stderr, 160) or f"sh -n exited with {proc.returncode}"
@@ -781,7 +781,7 @@ class Output:
         return sum(char in "=-_*~#+ " for char in line) >= len(line) / 2
 
     @staticmethod
-    def failure_text(output, limit=OUTPUT_CHARS):
+    def failure_text(output, limit=FAILURE_OUTPUT_CHARS):
         """The end of a command's output, where runners print failures and their summary."""
         text = "\n".join(line for line in Output.compact_lines(output.strip()).splitlines() if line.strip())
         return text if len(text) <= limit else "[...]\n" + text[-(limit - 6):]

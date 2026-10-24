@@ -554,8 +554,8 @@ class Tracker:
     """A run's one report: what it does, kept as data (never read back out of printed text). Each
     change is published at once in Tinker's home ("running", under the run's process), where the
     terminal and the chats read it, and appended to the project's "progress" log. The steps are named
-    by phase (STEPS: what it is doing, and what it did)."""
-    STEPS = {"recall": ("🧠 Recalling what Tinker has learned", "🧠 Recalled what Tinker has learned"),
+    by phase (DOING_AND_DONE: what it is doing, and what it did)."""
+    DOING_AND_DONE = {"recall": ("🧠 Recalling what Tinker has learned", "🧠 Recalled what Tinker has learned"),
              "amend": ("✏️ Changing the plan", "✏️ Plan changed"),
              "spec": ("📝 Writing the spec", "📝 Spec written"),
              "design": ("📐 Designing where the files meet", "📐 Design done"),
@@ -569,7 +569,6 @@ class Tracker:
              "final_review": ("🏁 Final review, as a person runs it", "🏁 Final review done"),
              "lessons": ("📒 Keeping lessons for the next projects", "📒 Lessons kept"),
              "reproduce": ("🐞 Showing the bug with a test", "🐞 Bug shown by a test"),
-             # tinker learn's
              "search": ("🔎 Searching the web", "🔎 Web searched"),
              "plan": ("🤔 Working out what it is", "🤔 Worked out what it is"),
              "machine": ("💻 Checking what is installed", "💻 Checked what is installed"),
@@ -583,12 +582,10 @@ class Tracker:
              "open": ("📖 Opening the book", "📖 Book opened"),
              "survey": ("🧭 Reading its contents, foreword and index", "🧭 Chose the chapters to read"),
              "chapters": ("📚 Reading the chapters that matter", "📚 Chapters read"),
-             # tinker ask's and tinker teach's
              "answer": ("💬 Answering from what Tinker keeps", "💬 Answered"),
              "understand": ("🤔 Working out what to check", "🤔 Worked out what to check"),
              "judge": ("⚖️ Weighing the evidence", "⚖️ Evidence weighed"),
              "correct": ("✏️ Correcting what Tinker keeps", "✏️ Corrected"),
-             # tinker exercise's
              "identify": ("🔤 Making sure it is a language", "🔤 It is a language"),
              "learn": ("📚 Learning the language first", "📚 Language learned"),
              "pick": ("🎯 Choosing the next practice project", "🎯 Practice project chosen"),
@@ -596,12 +593,11 @@ class Tracker:
              "feature": ("➕ Adding a feature to it", "➕ Feature added"),
              "measure": ("📏 Measuring how it went", "📏 Measured"),
              "reflect": ("📒 Learning from what went wrong and what was slow", "📒 Lessons kept"),
-             # tinker research's
              "searches": ("🤔 Working out what to search", "🤔 Searches chosen"),
              "read": ("🌐 Searching the web and reading the pages", "🌐 Pages read"),
              "write": ("✍️ Writing the answer from the pages", "✍️ Answer written")}
     STARTING = "🚀 Starting: the model loads"
-    QUIET_EVERY = 1.0  # seconds between publishing changes that only move the latest line on
+    QUIET_PUBLISH_SECONDS = 1.0
 
     def __init__(self, title, before=0.0):
         self.pid, self.store, self.published = os.getpid(), None, 0.0
@@ -615,12 +611,12 @@ class Tracker:
     @classmethod
     def icon(cls, phase):
         """A phase's icon, as its steps show it: "spec" -> "📝"."""
-        return cls.STEPS[phase][0].split(" ", 1)[0] if phase in cls.STEPS else ""
+        return cls.DOING_AND_DONE[phase][0].split(" ", 1)[0] if phase in cls.DOING_AND_DONE else ""
 
     @classmethod
     def done_words(cls, phase):
         """What a phase did, in words: "spec" -> "Spec written"."""
-        return cls.STEPS[phase][1].split(" ", 1)[1] if phase in cls.STEPS else phase
+        return cls.DOING_AND_DONE[phase][1].split(" ", 1)[1] if phase in cls.DOING_AND_DONE else phase
 
     def project(self, store, run_id, folder, title=None):
         """The run's project: its database (the progress log), its run ID and its folder."""
@@ -630,10 +626,10 @@ class Tracker:
     def phase(self, phase):
         """The run is on to a phase: the one before is done, with what came of it (outcome)."""
         steps = list(self.state["steps"])
-        if self.state["step"] in self.STEPS:
+        if self.state["step"] in self.DOING_AND_DONE:
             outcome = self.state.get("outcome")
-            steps.append(self.STEPS[self.state["step"]][1] + (f": {outcome}" if outcome else ""))
-        doing = self.STEPS.get(phase, (phase, phase))[0]
+            steps.append(self.DOING_AND_DONE[self.state["step"]][1] + (f": {outcome}" if outcome else ""))
+        doing = self.DOING_AND_DONE.get(phase, (phase, phase))[0]
         self.change("phase", phase=phase, step=phase, doing=doing, began=time.time(), steps=steps, working="",
                     found="", outcome="", latest="")
 
@@ -676,7 +672,7 @@ class Tracker:
             self.store.append("progress", {"event": event, **{key: value for key, value in values.items()
                                                               if key != "steps"}})
         now = time.monotonic()
-        if not quiet or now - self.published >= self.QUIET_EVERY:
+        if not quiet or now - self.published >= self.QUIET_PUBLISH_SECONDS:
             self.publish()
 
     def publish(self):

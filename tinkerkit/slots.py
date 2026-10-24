@@ -6,7 +6,7 @@ from dataclasses import dataclass
 
 lazy from .knowledge import Embeddings, Retriever
 lazy from .passages import repeats, shingles
-lazy from .settings import MMR_BALANCE, SLOT_CANDIDATES, SLOT_RELEVANT
+lazy from .settings import MMR_BALANCE, SLOT_CANDIDATE_PASSAGES, SLOT_RELEVANT_SIMILARITY
 
 
 @dataclass(frozen=True)
@@ -90,7 +90,7 @@ PROFILES = frozendict({
 })
 
 
-TOOL_DOCS = "install installation getting started usage configuration command line options"  # a language's
+TOOL_DOCS_QUERY = "install installation getting started usage configuration command line options"
 # tools' documentation: the pages that show how to run and set them up (they fill its toolchain slot)
 
 
@@ -113,10 +113,10 @@ def missing(profile, facts, machine):
 
 
 class Selector:
-    """Each slot's passages from one shared pool, with no model call: the slot's best SLOT_CANDIDATES by the words
+    """Each slot's passages from one shared pool, with no model call: the slot's best SLOT_CANDIDATE_PASSAGES by the words
     of its question, the topic and its version (BM25) are shortlisted, and only those are embedded (a pool of a
     thousand passages costs no more); of them, only a passage that holds a keyword of the slot (Slot.keywords) or
-    is close in meaning to its question (SLOT_RELEVANT) counts; those are ranked by words and meaning fused, as the
+    is close in meaning to its question (SLOT_RELEVANT_SIMILARITY) counts; those are ranked by words and meaning fused, as the
     recall phase fuses them, then picked by maximal marginal relevance (MMR_BALANCE), so a near-repeat of a
     passage taken is passed over; at most the slot's count, within budget chars. A passage may serve several
     slots."""
@@ -128,7 +128,7 @@ class Selector:
         """{slot id: [passages]} for each slot (version: the one installed, else the plan's)."""
         texts = [passage.searched() for passage in pool]
         queries = {slot.id: f"{slot.asked(plan, version)} {plan['name']} {version}" for slot in slots}
-        shortlist = {slot.id: Retriever(None).by_words(queries[slot.id], texts)[:SLOT_CANDIDATES] for slot in slots}
+        shortlist = {slot.id: Retriever(None).by_words(queries[slot.id], texts)[:SLOT_CANDIDATE_PASSAGES] for slot in slots}
         vectors = self.vectors(texts, sorted({*found for found in shortlist.values()}))
         return {slot.id: [pool[index] for index in self.diverse(
                     self.relevant(slot.keywords(), queries[slot.id], shortlist[slot.id], texts, vectors),
@@ -146,7 +146,7 @@ class Selector:
         """{index: fused score} of the shortlisted passages that hold a keyword or are close to the query in meaning."""
         closeness = self.closeness(query, vectors)
         holding = set(Retriever(None).by_words(keywords, texts))
-        counted = [index for index in shortlist if index in holding or closeness.get(index, 0.0) >= SLOT_RELEVANT]
+        counted = [index for index in shortlist if index in holding or closeness.get(index, 0.0) >= SLOT_RELEVANT_SIMILARITY]
         fused = {}
         for ranking in (counted, sorted(counted, key=lambda index: -closeness.get(index, 0.0))):
             for position, index in enumerate(ranking):

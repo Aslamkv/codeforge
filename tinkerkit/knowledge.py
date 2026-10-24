@@ -19,11 +19,12 @@ from .messages import say
 lazy from .model import Models, Ollama, OllamaError
 lazy from .prompts import Part, PromptTooLarge, Prompts
 from .settings import (
-    Config, FACTS_PER_CHUNK, FACT_CHARS, FACT_PHASES, HISTORY_KEPT, Home, LESSONS_SHOWN, LESSON_PHASES, MAX_LESSONS,
-    PAGE_CHUNKS, PLAYBOOK_RULES, RULE_CHARS, RULE_WHEN_CHARS,
-    REPEAT_CLAIM, RETIRED_KEPT, RESEARCH_CHECKS, RESEARCH_GAPS, RESEARCH_PAGES, RESEARCH_QUERIES, RESEARCH_QUESTIONS, SAME_CLAIM,
-    SAME_FACT, SAME_LESSON, SEARCH_RESULTS, SIMILAR_FAILURE,
-    VERSION_TIMEOUT, fingerprint, first_line, now_text, similarity, split_text, words,
+    CHUNKS_PER_PAGE, EVENTS_KEPT_PER_ITEM, FACTS_PER_CHUNK, FACT_PHASES, LESSONS_PER_PROMPT, LESSON_PHASES,
+    MAX_FACT_CHARS, MAX_LESSONS_PER_FILE, MAX_RULE_CHARS, MAX_RULE_WHEN_CHARS, PLAYBOOK_RULES,
+    REPEAT_CLAIM_SIMILARITY, RESEARCH_FACTS_CHECKED, RESEARCH_GAPS, RESEARCH_PAGES_PER_ROUND,
+    RESEARCH_QUESTIONS, RESULTS_PER_RESEARCH_SEARCH, RETIRED_KEPT_PER_LIST, SAME_CLAIM_SIMILARITY,
+    SAME_FACT_SIMILARITY, SAME_LESSON_SIMILARITY, SEARCHES_PER_RESEARCH_QUESTION, TOOLCHAIN_HINT_SIMILARITY,
+    VERSION_TIMEOUT, Config, Home, fingerprint, first_line, now_text, similarity, split_text, words,
 )
 lazy from .workspace import Toolchain, Workspace
 
@@ -64,7 +65,7 @@ class Knowledge:
                  f"{lessons} lesson(s)" if lessons else "", f"{facts} proven fact(s)" if facts else ""]
         return f"{self.language}: " + (", ".join(topic for topic in known if topic) or "nothing learned yet")
 
-    def lessons(self, phases, limit=LESSONS_SHOWN):
+    def lessons(self, phases, limit=LESSONS_PER_PROMPT):
         """The lessons for these phases, the most confirmed first: [{id, text, ...}]."""
         pool = [lesson for lesson in self.known_lessons() if lesson.get("phase") in phases]
         pool.sort(key=Knowledge.rank, reverse=True)
@@ -111,7 +112,7 @@ class Knowledge:
         text, phase = str(item.get("text", "")).strip()[:240], str(item.get("phase", "")).strip().lower()
         if not text or phase not in LESSON_PHASES or self.names_project(text, names):
             return None
-        same = next((lesson for lesson in known if similarity(lesson["text"], text) >= SAME_LESSON), None)
+        same = next((lesson for lesson in known if similarity(lesson["text"], text) >= SAME_LESSON_SIMILARITY), None)
         if same:
             self.confirm(same)
             return None
@@ -130,13 +131,13 @@ class Knowledge:
 
     @staticmethod
     def keep(lessons, new):
-        """At most MAX_LESSONS, the most confirmed first; the new ones always stay (the least
+        """At most MAX_LESSONS_PER_FILE, the most confirmed first; the new ones always stay (the least
         confirmed older ones go to make room)."""
         rank = Knowledge.rank
         fresh = [lesson for lesson in lessons if any(lesson is new_lesson for new_lesson in new)]
         older = sorted((lesson for lesson in lessons if not any(lesson is new_lesson for new_lesson in new)), key=rank,
                        reverse=True)
-        return sorted(fresh + older[:max(0, MAX_LESSONS - len(fresh))], key=rank, reverse=True)
+        return sorted(fresh + older[:max(0, MAX_LESSONS_PER_FILE - len(fresh))], key=rank, reverse=True)
 
     def prove(self, used):
         """A cycle that used these succeeded: candidate lessons, facts and findings are proven, and the
@@ -164,7 +165,7 @@ class Knowledge:
         proven, known = 0, {fact["id"] for fact in self.language_doc.setdefault("facts", [])}
         for slug, ids in self.used_facts(used).items():
             entry = Library.read(slug) or {}
-            claims = [claim for key in Library.CLAIMS for claim in entry.get(key, []) if claim.get("id") in ids]
+            claims = [claim for key in Library.CLAIM_KINDS for claim in entry.get(key, []) if claim.get("id") in ids]
             proven += sum(claim.get("status") != "proven" for claim in claims)
             Library.claims(slug, ids, lambda claim: record(dict(claim, status="proven"), "helped", self.run))
             for claim in claims:
@@ -267,7 +268,7 @@ class Knowledge:
     def similar_fix(self, failure):
         scored = [(similarity(fix["failure"], failure), fix) for fix in self.language_doc.get("fixes", [])]
         best = max(scored, key=lambda pair: pair[0], default=(0, None))
-        return best[1] if best[0] >= SIMILAR_FAILURE else None
+        return best[1] if best[0] >= TOOLCHAIN_HINT_SIMILARITY else None
 
     def remember_fix(self, fix):
         fixes = [kept for kept in self.language_doc.setdefault("fixes", []) if kept["failure"] != fix["failure"]]
@@ -322,7 +323,7 @@ class Knowledge:
         a known lesson proves that one instead); None when it is not a usable lesson. scope: language or any."""
         known = self.known_lessons()
         text = str(item.get("text", "")).strip()
-        lesson = next((lesson for lesson in known if similarity(lesson["text"], text) >= SAME_LESSON), None)
+        lesson = next((lesson for lesson in known if similarity(lesson["text"], text) >= SAME_LESSON_SIMILARITY), None)
         if lesson is None:
             lesson = self.new_lesson(item, known, ())
             if lesson is None:
@@ -378,7 +379,7 @@ class Learner:
         self.tracker = None  # tinker learn's report (Tracker); a run's recall phase keeps its own steps
 
     def step(self, phase, said="", icon=""):
-        """Learning is on to a phase (Tracker.STEPS): said, when there is something to say, and its
+        """Learning is on to a phase (Tracker.DOING_AND_DONE): said, when there is something to say, and its
         tracker (when it has one) moved on, so the chats show it."""
         if said:
             say.step(said, icon)
@@ -469,7 +470,7 @@ class Learner:
 
     def results(self, search):
         """The pages a search finds, as many as it reads (none, with a note, when the search fails)."""
-        found = self.internet.search(search["query"], SEARCH_RESULTS)
+        found = self.internet.search(search["query"], RESULTS_PER_RESEARCH_SEARCH)
         if found is None:
             self.notes.append(f"search '{search['query']}': {self.internet.problem(search['query'])}")
             with say.section():
@@ -481,7 +482,7 @@ class Learner:
         """The pages taken in turn (each search's first, then each one's second, ...), each once, with its
         search's section and what it looks for."""
         pages, seen = [], set()
-        for rank in range(SEARCH_RESULTS):
+        for rank in range(RESULTS_PER_RESEARCH_SEARCH):
             for search, found in zip(searches, results):
                 if rank < len(found) and found[rank]["url"] not in seen and len(pages) < max_pages:
                     seen.add(found[rank]["url"])
@@ -534,14 +535,14 @@ class Learner:
 
     @staticmethod
     def relevant_chunks(text, room, wanted):
-        """Up to PAGE_CHUNKS prompt-sized chunks of a page: its first (where a page says what it is
+        """Up to CHUNKS_PER_PAGE prompt-sized chunks of a page: its first (where a page says what it is
         about), then those the word search ranks the most related to what is looked for (the next
         ones when none matches), in page order: a long page's useful part is rarely all at its top."""
         chunks = split_text(text, room)
-        if len(chunks) <= PAGE_CHUNKS:
+        if len(chunks) <= CHUNKS_PER_PAGE:
             return chunks
         matched = [index for index in Retriever(None).by_words(wanted, chunks) if index]
-        chosen = [0] + (matched + [index for index in range(1, len(chunks)) if index not in matched])[:PAGE_CHUNKS - 1]
+        chosen = [0] + (matched + [index for index in range(1, len(chunks)) if index not in matched])[:CHUNKS_PER_PAGE - 1]
         return [chunks[index] for index in sorted(chosen)]
 
     def facts_in(self, parts, page, number, part):
@@ -564,7 +565,7 @@ class Learner:
         for item in reply.json().get("facts", []):
             if not isinstance(item, dict):
                 continue
-            text, phase = str(item.get("text", "")).strip()[:FACT_CHARS], str(item.get("phase", "")).strip().lower()
+            text, phase = str(item.get("text", "")).strip()[:MAX_FACT_CHARS], str(item.get("phase", "")).strip().lower()
             if text and phase in FACT_PHASES:
                 facts.append({"phase": phase, "text": text})
         return facts[:FACTS_PER_CHUNK]
@@ -574,7 +575,7 @@ class Learner:
         """The found facts added to facts: a fact stated again is kept once, and when another page
         states it, that page joins its sources ("also")."""
         for fact in found:
-            same = next((known for known in facts if similarity(fact["text"], known["text"]) >= SAME_FACT), None)
+            same = next((known for known in facts if similarity(fact["text"], known["text"]) >= SAME_FACT_SIMILARITY), None)
             if same is None:
                 facts.append(fact)
             elif fact["source"] not in Learner.pages_of(same):
@@ -643,7 +644,7 @@ class Learner:
 
     @staticmethod
     def read_rules(data, sources):
-        """The rules, checked: each with a known phase, its text (cut to RULE_CHARS), when it applies ("" for
+        """The rules, checked: each with a known phase, its text (cut to MAX_RULE_CHARS), when it applies ("" for
         every program) and the ids of the sources it cites by number; a rule that rests on none is dropped
         (never the model's own knowledge). What a new project declares (to get the newest version) is the first
         rule, for every program. At most PLAYBOOK_RULES, one per text."""
@@ -655,10 +656,10 @@ class Learner:
         for item in given:
             if not isinstance(item, dict):
                 continue
-            text, phase = " ".join(str(item.get("text") or "").split())[:RULE_CHARS], str(item.get("phase") or "").lower()
+            text, phase = " ".join(str(item.get("text") or "").split())[:MAX_RULE_CHARS], str(item.get("phase") or "").lower()
             cites = list(dict.fromkeys(sources[number - 1]["id"] for number in item.get("cites") or []
                                        if isinstance(number, int) and 1 <= number <= len(sources)))
-            when = " ".join(str(item.get("when") or "").split())[:RULE_WHEN_CHARS]
+            when = " ".join(str(item.get("when") or "").split())[:MAX_RULE_WHEN_CHARS]
             if text and phase in FACT_PHASES and cites and text not in rules:
                 rules[text] = {"id": fingerprint(text)[:12], "phase": phase, "text": text, "when": when, "cites": cites}
         if not rules:
@@ -695,7 +696,7 @@ class Researcher:
     the saved questions (edit them there)."""
     NUMBER_RE = re.compile(r"\d+(?:[.,]\d+)*")
     EMPTY_ANALYSIS = {"findings": [], "contradictions": [], "gaps": [], "checks": []}
-    LEVELS = ("low", "medium", "high")  # how sure a finding is
+    CONFIDENCE_LEVELS = ("low", "medium", "high")
 
     def __init__(self, learner):
         self.learner, self.model = learner, learner.model
@@ -748,7 +749,7 @@ class Researcher:
     @staticmethod
     def read_frame(data):
         """A research frame, checked: a name, a summary and up to RESEARCH_QUESTIONS questions, each
-        with up to RESEARCH_QUERIES searches."""
+        with up to SEARCHES_PER_RESEARCH_QUESTION searches."""
         if not isinstance(data, dict):
             raise ValueError("not a JSON object")
         name, summary = str(data.get("name") or "").strip()[:80], " ".join(str(data.get("summary") or "").split())[:200]
@@ -758,7 +759,7 @@ class Researcher:
                 continue
             question = " ".join(str(item.get("question") or "").split())[:200]
             queries = [" ".join(str(query).split()) for query in item.get("queries") or []
-                       if str(query).strip()][:RESEARCH_QUERIES]
+                       if str(query).strip()][:SEARCHES_PER_RESEARCH_QUESTION]
             if question and queries:
                 questions.append({"question": question, "queries": queries})
         if not name or not questions:
@@ -766,12 +767,12 @@ class Researcher:
         return {"name": name, "summary": summary, "questions": questions[:RESEARCH_QUESTIONS]}
 
     def investigate(self, frame):
-        """(facts, sources, analysis) after each round of RESEARCH_PAGES: the first round searches
+        """(facts, sources, analysis) after each round of RESEARCH_PAGES_PER_ROUND: the first round searches
         every question, each next one the gaps and checks the last analysis named. It ends early
         when none is left, or the web or the model is lost."""
         searches = self.first_searches(frame)
         facts, sources, analysis = [], [], self.EMPTY_ANALYSIS
-        for round_number, pages in enumerate(RESEARCH_PAGES, 1):
+        for round_number, pages in enumerate(RESEARCH_PAGES_PER_ROUND, 1):
             if not searches:
                 break
             self.learner.step("investigate", f"Round {round_number}: {len(searches)} search(es), reading up to "
@@ -791,7 +792,7 @@ class Researcher:
     @staticmethod
     def first_searches(frame):
         """The first round's searches: each query of each question, the question as what to look for."""
-        return [{"query": query, "section": str(number), "pages": SEARCH_RESULTS, "focus": question["question"]}
+        return [{"query": query, "section": str(number), "pages": RESULTS_PER_RESEARCH_SEARCH, "focus": question["question"]}
                 for number, question in enumerate(frame["questions"], 1) for query in question["queries"]]
 
     def say_round(self, facts, sources, found):
@@ -802,9 +803,9 @@ class Researcher:
         self.learner.outcome(f"{len(facts)} fact(s) from {len(sources)} page(s)")
 
     def cross_check(self, facts):
-        """Each fact's sites, with no model call. A fact that repeats another (REPEAT_CLAIM, numbers
+        """Each fact's sites, with no model call. A fact that repeats another (REPEAT_CLAIM_SIMILARITY, numbers
         agreeing) is folded into it. A fact making the same claim as one on another site
-        (SAME_CLAIM) shares its sites when their numbers agree; when they do not, the pair is
+        (SAME_CLAIM_SIMILARITY) shares its sites when their numbers agree; when they do not, the pair is
         returned, for the analysis to judge (facts about other things, versions or dates differ
         without contradicting). Without embeddings only the pages that repeat a fact count."""
         vectors = self.learner.embeddings.vectors([fact["text"] for fact in facts], keep=False) \
@@ -840,7 +841,7 @@ class Researcher:
         index = 0
         while index < len(facts):
             kept = next((earlier for earlier in range(index)
-                         if self.same_claim(vectors[earlier], vectors[index], REPEAT_CLAIM)
+                         if self.same_claim(vectors[earlier], vectors[index], REPEAT_CLAIM_SIMILARITY)
                          and self.agree(facts[earlier], facts[index])), None)
             if kept is None:
                 index += 1
@@ -861,7 +862,7 @@ class Researcher:
         return (len(self.numbers(fact)), len(fact["text"])) > (len(self.numbers(other)), len(other["text"]))
 
     @staticmethod
-    def same_claim(a, b, threshold=SAME_CLAIM):
+    def same_claim(a, b, threshold=SAME_CLAIM_SIMILARITY):
         return a is not None and b is not None and Embeddings.cosine(a, b) >= threshold
 
     @classmethod
@@ -920,7 +921,7 @@ class Researcher:
     def read_analysis(data, fact_count, question_count):
         """The analysis, checked: findings for known questions citing known facts, contradictions
         between known facts (with the doubtful ones among them), up to RESEARCH_GAPS gaps and
-        RESEARCH_CHECKS checks, with a search each."""
+        RESEARCH_FACTS_CHECKED checks, with a search each."""
         if not isinstance(data, dict):
             raise ValueError("not a JSON object")
         cited = lambda numbers: sorted({number for number in numbers or [] if isinstance(number, int)
@@ -933,7 +934,7 @@ class Researcher:
         return {"findings": findings, "contradictions": Researcher.read_contradictions(data.get("contradictions") or [],
                                                                                        cited),
                 "gaps": Researcher.read_gaps(data.get("gaps") or [], asked)[:RESEARCH_GAPS],
-                "checks": Researcher.read_checks(data.get("checks") or [], fact_count)[:RESEARCH_CHECKS]}
+                "checks": Researcher.read_checks(data.get("checks") or [], fact_count)[:RESEARCH_FACTS_CHECKED]}
 
     @staticmethod
     def read_findings(given, cited, asked):
@@ -1007,7 +1008,7 @@ class Researcher:
         corroborated = sum(fact["confidence"] == "corroborated" for fact in cited)
         disputed = any(fact["confidence"] == "disputed" for fact in cited)
         ceiling = "high" if cited and not disputed and 2 * corroborated >= len(cited) else "medium" if cited else "low"
-        return min(stated, ceiling, key=cls.LEVELS.index)
+        return min(stated, ceiling, key=cls.CONFIDENCE_LEVELS.index)
 
 
 class Library:
@@ -1017,7 +1018,7 @@ class Library:
     topics its recall phase chose (ranked in the project's "learned") in the prompts of the phases they
     concern, as an optional part. A language's rules (its playbook) are claims too, shown in place of the
     facts they cite."""
-    CLAIMS = ("facts", "findings", "rules")  # what in a topic is proven or retired
+    CLAIM_KINDS = ("facts", "findings", "rules")
 
     @staticmethod
     def topics():
@@ -1054,7 +1055,7 @@ class Library:
         def changed(entry):
             if not entry:
                 return entry
-            for key in Library.CLAIMS:
+            for key in Library.CLAIM_KINDS:
                 entry[key] = [kept for kept in (change(claim) if claim.get("id") in ids else claim
                                                 for claim in entry.get(key, []))
                               if kept is not None]
@@ -1069,7 +1070,7 @@ class Library:
         def retired_in(entry):
             if entry:
                 gone.append(sum(retire(entry, key, lambda claim: claim.get("id") in ids, reason, run)
-                                for key in Library.CLAIMS))
+                                for key in Library.CLAIM_KINDS))
             return entry
         if Library.read(slug):
             Home.store().update("learned", slug, retired_in)
@@ -1080,11 +1081,11 @@ class Library:
         """A fact the person taught in place of a claim of a topic (about: its id, retired or not), kept as proven with
         its sources, where that claim was (its phase, chapter and section); None when the topic has no such claim."""
         entry = Library.read(slug) or {}
-        old = next((claim for key in Library.CLAIMS + ("retired",) for claim in entry.get(key, [])
+        old = next((claim for key in Library.CLAIM_KINDS + ("retired",) for claim in entry.get(key, [])
                     if claim.get("id") == about), None)
         if old is None:
             return None
-        fact = {"text": text[:FACT_CHARS], "phase": old.get("phase", "book"), "status": "proven",
+        fact = {"text": text[:MAX_FACT_CHARS], "phase": old.get("phase", "book"), "status": "proven",
                 "sources": list(dict.fromkeys(sources)), "id": fingerprint(text)[:12],
                 **{key: old[key] for key in ("chapter", "slot", "section") if key in old}}
         record(fact, "taught", None)
@@ -1185,7 +1186,7 @@ class Retriever:
     search by meaning (cosine similarity: "web framework" finds Flask). The two rankings are fused
     (reciprocal rank fusion): what either finds ranks high, what both find ranks highest, and what
     neither finds comes last, never dropped."""
-    RRF_K = 60     # the usual constant of reciprocal rank fusion: rank 1 counts 1/61, rank 10 1/70
+    RRF_K = 60
     BM25_K1, BM25_B = 1.5, 0.75
 
     def __init__(self, embeddings):
@@ -1251,7 +1252,7 @@ class Embeddings:
     """Embeddings from the embedding model selected with tinker embed NAME (none: the word search
     works alone), kept in Tinker's "embeddings" by text, per model, so each text is embedded once.
     Local: nothing goes online."""
-    BATCH = 32  # texts per request
+    TEXTS_PER_REQUEST = 32
 
     def __init__(self, name):
         self.name, self.failed = name, ""
@@ -1293,8 +1294,8 @@ class Embeddings:
         keys = [self.key(text) for text in texts]
         missing = list(dict.fromkeys(text for text, key in zip(texts, keys) if key not in stored))
         fresh = {}
-        for start in range(0, len(missing), self.BATCH):
-            batch = missing[start:start + self.BATCH]
+        for start in range(0, len(missing), self.TEXTS_PER_REQUEST):
+            batch = missing[start:start + self.TEXTS_PER_REQUEST]
             found = self.embedded(batch)
             if found is None:
                 return None
@@ -1348,16 +1349,16 @@ class Embeddings:
 
 
 def record(item, event, run):
-    """An event in an item's history (born, confirmed, helped, failed), the last HISTORY_KEPT; helped is
+    """An event in an item's history (born, confirmed, helped, failed), the last EVENTS_KEPT_PER_ITEM; helped is
     also counted, beyond them. The item, changed."""
-    item["history"] = (item.get("history", []) + [{"event": event, "run": run, "at": now_text()}])[-HISTORY_KEPT:]
+    item["history"] = (item.get("history", []) + [{"event": event, "run": run, "at": now_text()}])[-EVENTS_KEPT_PER_ITEM:]
     if event == "helped":
         item["helped"] = item.get("helped", 0) + 1
     return item
 
 
 def retire(doc, key, gone, reason, run):
-    """The items of doc[key] that gone(item) picks, moved to doc["retired"] (the last RETIRED_KEPT) with why
+    """The items of doc[key] that gone(item) picks, moved to doc["retired"] (the last RETIRED_KEPT_PER_LIST) with why
     and the run: never shown again, kept for people to see. How many."""
     items = doc.get(key, [])
     leaving = [item for item in items if gone(item)]
@@ -1365,7 +1366,7 @@ def retire(doc, key, gone, reason, run):
     retired = [record(dict(item, status="retired", reason=reason, retired=now_text(), was=key), "failed", run)
                for item in leaving]
     if retired:
-        doc["retired"] = (doc.get("retired", []) + retired)[-RETIRED_KEPT:]
+        doc["retired"] = (doc.get("retired", []) + retired)[-RETIRED_KEPT_PER_LIST:]
     return len(retired)
 
 

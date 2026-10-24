@@ -14,7 +14,7 @@ from tinkerkit.cli import Cli, Commands, ProjectRun
 from tinkerkit import conversation, jobs
 from tinkerkit.conversation import ConsoleChannel, Desk, Message, Progress, Research, research_once
 from tinkerkit.fetcher import Fetched, Fetcher
-from tinkerkit.jobs import STOP, Jobs, is_job, journaled, today
+from tinkerkit.jobs import JOB_STOP_SIGNAL, Jobs, is_job, journaled, today
 from tinkerkit.learning import SlotLearner
 from tinkerkit.model import Ollama
 from tinkerkit.project import Tracker
@@ -22,7 +22,7 @@ from tinkerkit.settings import Home
 from tinkerkit.web import Internet
 from test_conversation import Recorder
 
-GONE = 999999999  # a process that does not run
+DEAD_PID = 999999999
 
 
 def stopped_job(home_store, argv, answers=()):
@@ -60,7 +60,7 @@ def test_a_job_is_numbered_and_kept_while_it_runs(home_store):
         job = Jobs.get(1)
         assert job["state"] == "running" and job["pid"] == os.getpid() and job["arguments"] == ["learn", "rust"]
         assert job["today"] == datetime.date.today().isoformat() and job["title"] == "learn rust"
-        assert signal.getsignal(STOP) is jobs.interrupted
+        assert signal.getsignal(JOB_STOP_SIGNAL) is jobs.interrupted
     with Jobs.running(["task", "a", "calculator", "--confirm"]):
         assert Jobs.current["number"] == 2 and Jobs.current["title"] == "task a calculator"
     with Jobs.running(["runs"]):
@@ -94,7 +94,7 @@ def test_a_tracker_that_ends_stopped_stops_the_job_and_says_how_to_go_on(home_st
 
 @pytest.mark.spec("JOB-2")
 def test_a_running_job_whose_process_is_gone_is_stopped(home_store):
-    home_store.put("jobs", "3", {"number": 3, "command": "learn", "title": "learn go", "state": "running", "pid": GONE,
+    home_store.put("jobs", "3", {"number": 3, "command": "learn", "title": "learn go", "state": "running", "pid": DEAD_PID,
                                  "arguments": ["learn", "go"], "started": "x", "updated": "x"})
     assert Jobs.get(3)["state"] == "stopped" and Jobs.listed("stopped")[0]["number"] == 3
 
@@ -152,7 +152,7 @@ def test_model_calls_and_page_fetches_go_through_the_journal(home_store, monkeyp
 def test_a_job_says_the_day_it_started(home_store):
     assert today() == datetime.date.today()
     home_store.put("jobs", "1", {"number": 1, "command": "learn", "title": "learn rust", "state": "stopped",
-                                 "pid": GONE, "arguments": ["learn", "rust"], "today": "2026-01-02", "updated": "x"})
+                                 "pid": DEAD_PID, "arguments": ["learn", "rust"], "today": "2026-01-02", "updated": "x"})
     with Jobs.running(Jobs.arguments(["resume", "#1"])):
         assert today() == datetime.date(2026, 1, 2)
 
@@ -186,7 +186,7 @@ def test_a_tasks_job_is_resumed_as_its_run(home_store):
 def keep_jobs(home_store, states):
     for number, state in enumerate(states, 1):
         home_store.put("jobs", str(number), {"number": number, "command": "learn", "title": f"learn topic {number}",
-                                             "state": state, "pid": os.getpid() if state == "running" else GONE,
+                                             "state": state, "pid": os.getpid() if state == "running" else DEAD_PID,
                                              "arguments": ["learn", f"topic {number}"], "started": "2026-10-23 09:00",
                                              "updated": "2026-10-23 09:00"})
 
@@ -321,7 +321,7 @@ def test_a_paused_job_says_so_and_waits_where_it_is(home_store, monkeypatch):
     assert ended["status"] == "paused" and ended["headline"] == "Paused for job #2: it goes on once Tinker is idle"
     assert tracker.state["doing"].startswith("⏸ Paused for job #2") and ended["next"] == [("Go on now", "tinker resume #1")]
     assert Jobs.get(1)["state"] == "paused" and waited == [1]
-    home_store.put("jobs", "1", dict(Jobs.get(1), pid=GONE))  # its process killed while it waits
+    home_store.put("jobs", "1", dict(Jobs.get(1), pid=DEAD_PID))  # its process killed while it waits
     assert Jobs.get(1)["state"] == "stopped"
 
 
@@ -365,7 +365,7 @@ def test_tinker_is_idle_when_no_job_runs_and_nothing_asked_is_being_answered(hom
     home_store.delete("jobs")
     home_store.put("activity", "answering", {"a chat": os.getpid()})
     assert not jobs.idle()
-    home_store.put("activity", "answering", {"a chat of a Tinker that is gone": GONE})
+    home_store.put("activity", "answering", {"a chat of a Tinker that is gone": DEAD_PID})
     assert jobs.idle()  # no quiet time to wait out
 
 
@@ -428,7 +428,7 @@ def test_web_searches_and_fetches_go_through_the_journal(home_store, monkeypatch
 @pytest.mark.spec("JOB-4")
 def test_the_prompts_that_say_the_date_say_the_jobs(home_store):
     home_store.put("jobs", "1", {"number": 1, "command": "research", "title": "research go", "state": "stopped",
-                                 "pid": GONE, "arguments": ["research", "go"], "today": "2026-01-02", "updated": "x"})
+                                 "pid": DEAD_PID, "arguments": ["research", "go"], "today": "2026-01-02", "updated": "x"})
     asked = []
 
     class Talk:
@@ -518,7 +518,7 @@ def test_an_exercise_paused_for_another_hands_it_its_message(home_store, tmp_pat
 
 @pytest.mark.spec("JOB-5")
 def test_a_new_jobs_message_is_kept_up_and_one_that_goes_on_comes_to_the_bottom(home_store, monkeypatch):
-    monkeypatch.setattr(conversation, "EDIT_EVERY", 1000)
+    monkeypatch.setattr(conversation, "PROGRESS_EDIT_SECONDS", 1000)
     channel = Recorder()
     Tracker("learn html5").publish()  # a new job: it did not go on from a pause (resumed is None)
     reporter = conversation.Reporter([channel], "learn html5", pid=os.getpid())

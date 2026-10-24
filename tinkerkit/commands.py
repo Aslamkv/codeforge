@@ -241,7 +241,7 @@ COMMANDS = [
 ]
 BY_NAME = frozendict({command.name: command for command in COMMANDS if command.name})
 GROUPS = ("Build", "Learn", "Jobs", "Set up", "Talk", "Channels")
-TERMINAL_ONLY = ("add", "remove", "start")  # tinker channel's actions that ask in a terminal (a token, a pairing)
+TERMINAL_ONLY_CHANNEL_ACTIONS = ("add", "remove", "start")
 
 
 def named(*kinds, words=None):

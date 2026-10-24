@@ -3,7 +3,7 @@
 import pytest
 
 from tinkerkit.passages import Block, Cleaner, Page, Passage, text_blocks
-from tinkerkit.settings import PASSAGE_CHARS
+from tinkerkit.settings import MAX_PASSAGE_CHARS
 
 INSTALL = "Install the tool with the package manager, then run it from the project folder to check every file. "
 CONFIGURE = "Settings live in one file at the project root; each key has a default that suits most projects. "
@@ -61,7 +61,7 @@ def test_the_pool_gathers_passages_under_headings_and_numbers_them():
     assert [(passage.id, passage.heading) for passage in pool][:2] == [("P1", "Install"), ("P2", "Use")]
     assert pool[0].text == f"{INSTALL.strip()}\n\ntool install" and pool[0].url == "https://a.dev/1"
     assert pool[0].fetched == "2026-10-21 10:00"
-    assert all(len(passage.text) <= PASSAGE_CHARS for passage in pool if passage.text != long_code)
+    assert all(len(passage.text) <= MAX_PASSAGE_CHARS for passage in pool if passage.text != long_code)
     assert any(passage.text == long_code for passage in pool)  # a code block is never cut
 
 

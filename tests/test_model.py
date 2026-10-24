@@ -11,7 +11,7 @@ import tinkerkit.model as model_module
 from tinkerkit.messages import say
 from tinkerkit.model import Calibrator, Model, Models, Ollama, OllamaError, Stream
 from tinkerkit.prompts import Part, Prompts, PromptTooLarge, Reply
-from tinkerkit.settings import CHARS_PER_TOKEN, Config, Home, PROMPT_HEADROOM
+from tinkerkit.settings import PROMPT_BUDGET_SHARE, STARTING_CHARS_PER_TOKEN, Config, Home
 from conftest import MEASURED, MODEL
 
 
@@ -157,7 +157,7 @@ def test_chat_without_ollama():
 
 @pytest.mark.spec("MOD-9")
 def test_stream_keeps_the_end_of_the_thought(monkeypatch):
-    monkeypatch.setattr(model_module, "THOUGHT_KEPT", 10)
+    monkeypatch.setattr(model_module, "UNFINISHED_THOUGHT_KEPT_CHARS", 10)
     stream = Stream(None, None)
     for piece in ("a" * 8, "b" * 8):
         stream.take({"message": {"thinking": piece}})
@@ -196,7 +196,7 @@ def test_what_the_command_works_on_is_said_live_and_heard(monkeypatch):
 
 @pytest.mark.spec("MOD-9")
 def test_a_stream_that_writes_one_line_again_and_again_is_cut(monkeypatch):
-    monkeypatch.setattr(model_module, "LOOP_LINES", 4)
+    monkeypatch.setattr(model_module, "LOOPING_REPEATED_LINES", 4)
     stream = Stream(None, None)
     ends = [stream.take({"message": {"content": line}}) for line in ["[tool]\n", "x = 1\n", "x = 1\n", "x = 1\n"]]
     assert ends == [False] * 4
@@ -239,7 +239,7 @@ def test_shared(context, shared):
 @pytest.mark.spec("MOD-10")
 def test_safe_ratio():
     calibrator = Calibrator("m")
-    assert calibrator.safe_ratio() == CHARS_PER_TOKEN
+    assert calibrator.safe_ratio() == STARTING_CHARS_PER_TOKEN
     calibrator.measured_ratio = 3.0
     assert calibrator.safe_ratio() == 2.91
     calibrator.measured_ratio = 9.0
@@ -309,8 +309,8 @@ def test_model_settings(make_model):
     model.building = True
     assert model.think_now() == "medium"
     assert make_model(think=None).build_think is None
-    assert model.limit_chars("s" * 100) == int(8192 * PROMPT_HEADROOM * 4.0) - 140
-    assert model.limit_chars("", tokens=1000) == int(1000 * PROMPT_HEADROOM * 4.0) - 40
+    assert model.limit_chars("s" * 100) == int(8192 * PROMPT_BUDGET_SHARE * 4.0) - 140
+    assert model.limit_chars("", tokens=1000) == int(1000 * PROMPT_BUDGET_SHARE * 4.0) - 40
 
 
 @pytest.mark.spec("MOD-15")
@@ -419,7 +419,7 @@ def test_crashes_lower_a_limit_for_the_run_then_stop(make_model, fake_ollama, no
     fake_ollama.reply(OllamaError("runner process has terminated", crashed=True), times=2).reply("ok")
     assert model.ask("s", [Part("Q", "q" * 1000, True)], "Ask") == "ok"
     assert model.max_tokens == 630 and model.crashes == 2 and model.calibrated[0] == 700
-    assert no_sleep.count(model_module.CRASH_RECOVERY) == 2
+    assert no_sleep.count(model_module.CRASH_RECOVERY_SECONDS) == 2
     fake_ollama.reply(OllamaError("runner failed", crashed=True), times=4)
     with pytest.raises(OllamaError, match="crashed 4 times on this call"):
         make_model().ask("s", [Part("Q", "q", True)], "Ask")
@@ -502,7 +502,7 @@ def test_a_failed_probe_is_recorded_and_waited_out(monkeypatch, fake_ollama, no_
     monkeypatch.setattr(Ollama, "installed_models", staticmethod(lambda: [{"name": "m"}]))
     calibrator = Calibrator("m")
     assert calibrator.probe(4096, 8192) is None
-    assert calibrator.history == [[4096, "crashed"]] and model_module.CRASH_RECOVERY in no_sleep
+    assert calibrator.history == [[4096, "crashed"]] and model_module.CRASH_RECOVERY_SECONDS in no_sleep
     assert fake_ollama.unloaded == ["m"] and "Could not read it (llama runner process has terminated)" in capsys.readouterr().out
     monkeypatch.setattr(Ollama, "installed_models", staticmethod(lambda: None))
     with pytest.raises(SystemExit, match="Ollama stopped answering during calibration"):

@@ -19,19 +19,19 @@ import time
 from pathlib import Path
 
 from .messages import say
-lazy from .conversation import OFF, STOP, STOP_WAIT, alive, tinker_process
+lazy from .conversation import BUILD_STOP_GRACE_SECONDS, CHANNEL_REPORTS_ENV, JOB_STOP_SIGNAL, alive, tinker_process
 lazy from .jobs import Jobs
 lazy from .knowledge import Knowledge, Library, language_key
 lazy from .project import Project, saved
 lazy from .prompts import Part, Prompts
 lazy from .settings import (
-    EXERCISE_ENV, EXERCISE_FOLDER, EXERCISE_LOOK, EXERCISE_PROBLEMS, EXERCISE_SHOWN, Home, first_line,
-    now_text, projects_folder, similarity,
+    EARLIER_MEASURES_SHOWN, EXERCISE_ENV, EXERCISE_FOLDER, EXERCISE_PERSON_LOOK_SECONDS, REFLECTION_PROBLEMS,
+    Home, first_line, now_text, projects_folder, similarity,
 )
 
 VERDICTS = ("language", "ambiguous", "other")
-STEPS = ("build", "feature", "measure", "reflect", "done")  # a practice project's, in order
-SAME_PROJECT = 0.8  # a task this alike to an earlier one repeats it
+PRACTICE_STEPS = ("build", "feature", "measure", "reflect", "done")
+SAME_PRACTICE_TASK_SIMILARITY = 0.8
 FOLDER_RE = re.compile(r"[a-z][a-z0-9]*(?:-[a-z0-9]+){0,3}")
 RETRIED_RE = re.compile(r"\(attempt [2-9]")
 
@@ -47,7 +47,7 @@ class Exercise:
 
     def run(self, asked):
         """The exercise of the language the words name, until it is stopped; its ending."""
-        signal.signal(STOP, interrupted)
+        signal.signal(JOB_STOP_SIGNAL, interrupted)
         self.tracker.change("exercise", exercise=True)  # its own runs, not the person's: shown as the exercise
         self.on_to("identify")
         exercise = Exercises.of(identified(self.model, asked))
@@ -84,7 +84,7 @@ class Exercise:
                             steps=[], step=None, passing=None)
         while project["step"] != "done":
             getattr(self, project["step"])(exercise, project)
-            project["step"] = STEPS[STEPS.index(project["step"]) + 1]
+            project["step"] = PRACTICE_STEPS[PRACTICE_STEPS.index(project["step"]) + 1]
             Exercises.save(exercise)
         say.done(told(exercise, project))
 
@@ -101,7 +101,7 @@ class Exercise:
         if choice is None:
             raise SystemExit(f"{self.model.name} could not choose a practice project; the exercise stopped, "
                              f"everything kept.")
-        project = dict(choice, folder=str(free_folder(choice["folder"])), step=STEPS[0], started=now_text())
+        project = dict(choice, folder=str(free_folder(choice["folder"])), step=PRACTICE_STEPS[0], started=now_text())
         exercise["projects"].append(project)
         Exercises.save(exercise)
         say.found(f"Next practice: {project['task']}")
@@ -162,7 +162,7 @@ class Exercise:
         self.process = self.start(arguments())
         while self.process.poll() is None:
             self.show_build(Home.store().get("running", str(self.process.pid)))
-            time.sleep(EXERCISE_LOOK)
+            time.sleep(EXERCISE_PERSON_LOOK_SECONDS)
         return self.process.returncode
 
     def show_build(self, build):
@@ -181,7 +181,7 @@ class Exercise:
             return
         os.killpg(process.pid, signal.SIGINT)
         try:
-            process.wait(STOP_WAIT)
+            process.wait(BUILD_STOP_GRACE_SECONDS)
         except subprocess.TimeoutExpired:
             os.killpg(process.pid, signal.SIGKILL)
             process.wait()
@@ -230,7 +230,7 @@ def read_choice(data, language, earlier):
     task, feature = str(data.get("task") or "").strip(), str(data.get("feature") or "").strip()
     if not task or not feature:
         raise ValueError('a practice project needs a "task" and a "feature"')
-    repeated = next((before for before in earlier if similarity(before, task) >= SAME_PROJECT), None)
+    repeated = next((before for before in earlier if similarity(before, task) >= SAME_PRACTICE_TASK_SIMILARITY), None)
     if repeated:
         raise ValueError(f"it repeats an earlier project ({first_line(repeated, 80)}): choose another")
     if language.lower() not in task.lower():
@@ -267,7 +267,7 @@ def going_on(folder):
 
 def start_tinker(arguments):
     """A tinker of its own, as an exercise's (its tracker says so, and it reports to no chat), printing here."""
-    return tinker_process(arguments, **{EXERCISE_ENV: "1", OFF: "off"})
+    return tinker_process(arguments, **{EXERCISE_ENV: "1", CHANNEL_REPORTS_ENV: "off"})
 
 
 def interrupted(signum, frame):
@@ -314,7 +314,7 @@ def slowest(calls, count=3):
 
 
 def problems(folder):
-    """What went wrong in the project's runs, at most EXERCISE_PROBLEMS: criteria nothing made pass, README examples
+    """What went wrong in the project's runs, at most REFLECTION_PROBLEMS: criteria nothing made pass, README examples
     that failed, failed and unusable or cut model replies, and the warnings it said (tools that failed among them)."""
     project = Project.load(folder)
     events = [entry for _, entry in project.store.entries("events")]
@@ -325,11 +325,11 @@ def problems(folder):
     found += [f"reply cut short: {event.get('label', '')}" for event in events if event.get("cut")]
     found += [f"warning: {event['line'].strip()}" for _, event in project.store.entries("output")
               if event.get("kind") == "warn"]
-    return list(dict.fromkeys(first_line(problem, 240) for problem in found))[:EXERCISE_PROBLEMS]
+    return list(dict.fromkeys(first_line(problem, 240) for problem in found))[:REFLECTION_PROBLEMS]
 
 
 def reflection_parts(exercise, project, known):
-    earlier = Exercises.finished(exercise)[-EXERCISE_SHOWN:]
+    earlier = Exercises.finished(exercise)[-EARLIER_MEASURES_SHOWN:]
     measures = project["measures"]
     return [Part("Language", exercise["language"], True),
             Part("This project's measures", f"{measures_line(measures)}\nslowest steps: "
@@ -447,7 +447,7 @@ def show():
                       f"done since {exercise['started']}", "🏋️"):
             if exercise.get("focus"):
                 say.item(f"Next focus: {exercise['focus']}")
-            for project in Exercises.finished(exercise)[-EXERCISE_SHOWN:]:
+            for project in Exercises.finished(exercise)[-EARLIER_MEASURES_SHOWN:]:
                 say.item(f"{Path(project['folder']).name}: {measures_line(project['measures'])}")
             current = Exercises.current(exercise)
             if current:

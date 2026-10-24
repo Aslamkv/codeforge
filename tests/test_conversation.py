@@ -17,7 +17,7 @@ from tinkerkit.conversation import (
     Channel, ChannelError, ConsoleChannel, Desk, Markup, Message, Progress, Reporter, Research, Shell, Talk, after_word,
     built_project, command_of, described, first_lines, first_words, json_in, pieces, running, text_of, welcome,
 )
-from tinkerkit.ledger import NOTE_KEEP, Ledger
+from tinkerkit.ledger import DONE_NOTE_KEPT_SECONDS, Ledger
 from tinkerkit.settings import Home
 from tinkerkit.project import Tracker
 from tinkerkit.project import Runs
@@ -250,7 +250,7 @@ def test_progress_shows_the_tracker():
     progress = Progress("a calculator", phase="✅ **Confirmed:** building it")
     assert progress.text().splitlines() == ["🔨 **a calculator**", "▸ ✅ **Confirmed:** building it ⏳"]
     assert progress.take(snapshot()) and "▸ ✅ **Confirmed:** building it" in progress.text()  # said until a step
-    progress.take(snapshot(step="verify", doing=Tracker.STEPS["verify"][0], began=time.time() - 65,
+    progress.take(snapshot(step="verify", doing=Tracker.DOING_AND_DONE["verify"][0], began=time.time() - 65,
                            steps=["🧠 Recalled what Tinker has learned", "📝 Spec written"], passing=[2, 3],
                            latest="wrote calc.py"))
     assert progress.text().splitlines() == [
@@ -263,7 +263,7 @@ def test_progress_shows_the_tracker():
 @pytest.mark.spec("CNV-8")
 def test_progress_says_what_the_run_works_on_how_far_it_got_and_what_it_found():
     progress = Progress("Reading Atomic Habits")
-    progress.take(snapshot(title="Reading Atomic Habits", step="chapters", doing=Tracker.STEPS["chapters"][0],
+    progress.take(snapshot(title="Reading Atomic Habits", step="chapters", doing=Tracker.DOING_AND_DONE["chapters"][0],
                            began=time.time() - 12, steps=["🧭 Chose the chapters to read: 3 core chapter(s) of 20"],
                            working="Reading chapter 3, The 1% Rule (2 of 7)", tally="1/7 chapters · 4 things learned",
                            found="Small habits compound like interest", latest="📖 Chapter 1: 4 things learned"))
@@ -317,11 +317,11 @@ def test_progress_ending_of_a_plan_that_waits():
 @pytest.mark.spec("CNV-9")
 def test_reporter_shows_the_tracker_and_ends_with_its_ending(home_store, monkeypatch):
     channel = Recorder(chats=("1", "2"))
-    monkeypatch.setattr(conversation, "EDIT_EVERY", 1000)  # no background edits: the test refreshes it
+    monkeypatch.setattr(conversation, "PROGRESS_EDIT_SECONDS", 1000)  # no background edits: the test refreshes it
     reporter = Reporter([channel], "a calculator", pid=4242)
     reporter.update()
     assert len(channel.texts("send")) == 2  # one message per chat
-    home_store.put("running", "4242", snapshot(step="spec", doing=Tracker.STEPS["spec"][0]))
+    home_store.put("running", "4242", snapshot(step="spec", doing=Tracker.DOING_AND_DONE["spec"][0]))
     reporter.refresh()
     assert "📝 Writing the spec" in channel.texts()[-1] and channel.log[-1][0] == "edit"
     edits = len(channel.log)
@@ -334,7 +334,7 @@ def test_reporter_shows_the_tracker_and_ends_with_its_ending(home_store, monkeyp
 
 @pytest.mark.spec("CNV-9")
 def test_a_reporter_without_a_tracker_shows_its_lines(monkeypatch):
-    monkeypatch.setattr(conversation, "EDIT_EVERY", 1000)
+    monkeypatch.setattr(conversation, "PROGRESS_EDIT_SECONDS", 1000)
     channel = Recorder()
     learning = Reporter([channel], "learn rust", pid=999999)
     learning.printed("  reading 4 pages")
@@ -351,7 +351,7 @@ def test_talk_model_needs_a_measured_model(measured_model, tinker_home):
 
 @pytest.mark.spec("CNV-11")
 def test_talk_reply(measured_model, fake_ollama, monkeypatch):
-    monkeypatch.setattr(conversation, "CHAT_KEPT", 4)
+    monkeypatch.setattr(conversation, "CHAT_CONTEXT_MESSAGES", 4)
     talk, channel = Talk("task; status"), Recorder()
     for number in range(3):
         fake_ollama.reply(f"answer {number}")
@@ -407,7 +407,7 @@ def test_research_reads_what_is_most_about_the_searches(monkeypatch):
     text = "\n\n".join(paragraphs)
     wanted = {"python", "release", "notes", "free", "threading"}
     assert Research.most_about(text, wanted) == "\n\n".join(paragraph.strip() for paragraph in paragraphs)
-    monkeypatch.setattr(conversation, "RESEARCH_PAGE_CHARS", len(paragraphs[0]) + len(paragraphs[2]))
+    monkeypatch.setattr(conversation, "CHAT_RESEARCH_CHARS_PER_PAGE", len(paragraphs[0]) + len(paragraphs[2]))
     assert Research.most_about(text, wanted) == paragraphs[0].strip() + "\n\n" + paragraphs[2].strip()
     assert Research.most_about("tiny", wanted) == "tiny"
 
@@ -473,7 +473,7 @@ def desk(tmp_path, monkeypatch, home_store):
     monkeypatch.setenv("TINKER_SOURCE", str(Path(__file__).resolve().parent.parent))
     monkeypatch.setenv("FAKE_TINKER_DB", str(home_store.path))
     monkeypatch.setattr(conversation, "tinker_command", lambda: [sys.executable, str(script)])
-    monkeypatch.setattr(conversation, "EDIT_EVERY", 0.2)
+    monkeypatch.setattr(conversation, "PROGRESS_EDIT_SECONDS", 0.2)
     channel = Recorder(chats=("1",))
     desk = Desk([channel], tmp_path)
     desk.ran = []
@@ -611,7 +611,7 @@ def test_a_glance_goes_soon_and_history_shows_things_again(desk, monkeypatch):
     assert again.startswith("📜 **#1**") and "💬 _you:_ task a calculator" in again
     assert again.endswith("🔨 **calc**\n▸ build") and "No #9" in desk.answer(Message("1", "history #9"), channel)
     assert desk.answer(Message("1", "clear chat"), channel) is None
-    assert channel.texts()[-1].startswith("🧹 **Chat cleared:** 3 messages taken out") and glances[-1][3] == NOTE_KEEP
+    assert channel.texts()[-1].startswith("🧹 **Chat cleared:** 3 messages taken out") and glances[-1][3] == DONE_NOTE_KEPT_SECONDS
     monkeypatch.setattr(desk, "tinker", lambda words: Home.clear(["history"], yes=True) or "Cleared history.")
     desk.answer(Message("1", "clear history"), channel)
     shown = len(channel.texts())
@@ -850,8 +850,8 @@ def test_research_in_a_chat(measured_model, fake_ollama, monkeypatch):
 @pytest.fixture
 def attached(monkeypatch, home_store):
     import signal
-    handlers = {sig: signal.getsignal(sig) for sig in (conversation.STOP,)}
-    monkeypatch.setattr(conversation, "EDIT_EVERY", 1000)
+    handlers = {sig: signal.getsignal(sig) for sig in (conversation.JOB_STOP_SIGNAL,)}
+    monkeypatch.setattr(conversation, "PROGRESS_EDIT_SECONDS", 1000)
     started = []
     channel = Recorder()
 
@@ -874,7 +874,7 @@ def test_a_terminal_task_reports_and_stops_on_a_signal(attached, home_store):
     assert channel.texts()[0].startswith("🔨 **calc: a calculator**")
     task.tracker.phase("recall")
     with pytest.raises(KeyboardInterrupt):
-        os.kill(os.getpid(), conversation.STOP)
+        os.kill(os.getpid(), conversation.JOB_STOP_SIGNAL)
         time.sleep(1)
     task.end()
     assert home_store.get("running", str(os.getpid())) is None

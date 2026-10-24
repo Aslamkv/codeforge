@@ -21,8 +21,8 @@ def test_the_command_line_and_the_conversation_read_the_table():
     on_the_command_line = set(cli.Cli.COMMANDS) | set(cli.Cli.TALK) | {"help", "channel", "confirm"}
     assert on_the_command_line == {command.name for command in COMMANDS if command.cli}
     assert set(conversation.Desk.COMMANDS) == {command.name for command in COMMANDS if command.chat}
-    assert conversation.LONG == tuple(command.name for command in COMMANDS if command.chat == "long")
-    assert set(conversation.ONE_WORD) == {command.name for command in COMMANDS if command.chat
+    assert conversation.LONG_COMMANDS == tuple(command.name for command in COMMANDS if command.chat == "long")
+    assert set(conversation.ONE_WORD_COMMANDS) == {command.name for command in COMMANDS if command.chat
                                           and command.words == "one"}
     assert conversation.USAGE["task"] == "✍️ Write `task WHAT TO BUILD`, e.g. `task a calculator in Python`"
     for command in cli.Cli.COMMANDS:
@@ -41,7 +41,7 @@ def test_runs_and_what_deletes():
     assert [command.name for command in COMMANDS
             if "--confirm" in {option.flag for option in command.options}] == ["task", "restart", "add", "fix"]
     assert [command.name for command in COMMANDS if command.deletes] == ["restart", "clear", "reset"]
-    assert conversation.DELETES == ("restart", "clear", "reset")
+    assert conversation.DELETING_COMMANDS == ("restart", "clear", "reset")
 
 
 @pytest.mark.spec("CMD-3")

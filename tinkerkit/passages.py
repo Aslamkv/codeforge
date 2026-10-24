@@ -8,7 +8,9 @@ import re
 lazy import urllib.parse
 from dataclasses import dataclass
 
-lazy from .settings import LINK_ONLY, NEAR_DUPLICATE, PASSAGE_CHARS, USABLE_PAGE_CHARS, split_text, words
+lazy from .settings import (
+    MAX_PASSAGE_CHARS, MENU_LINK_SHARE, MIN_USABLE_PAGE_CHARS, NEAR_DUPLICATE_OVERLAP, split_text, words,
+)
 from .web import PageText
 
 
@@ -30,7 +32,7 @@ class Page:
         return sum(len(block.text) for block in self.blocks if block.kind != "heading")
 
     def usable(self):
-        return self.chars() >= USABLE_PAGE_CHARS
+        return self.chars() >= MIN_USABLE_PAGE_CHARS
 
     def as_dict(self):
         """The page as it is kept (DocCache): its address, when it was fetched, and its blocks."""
@@ -60,7 +62,7 @@ class Passage:
 class Cleaner:
     """Pages to passages, with no model: page() reads one page's main content, pool() turns pages into
     passages that repeat nothing (nor anything already known)."""
-    TINY = 30  # chars below which a passage says nothing on its own ("Next", "Edit this page")
+    TINY_PASSAGE_CHARS = 30
 
     @staticmethod
     def page(url, text, kind, fetched):
@@ -74,7 +76,7 @@ class Cleaner:
         kept, seen = [], [shingles(passage.text) for passage in known]
         for passage in (*self.under_headings(page) for page in self.without_site_repeats(pages)):
             marks = shingles(passage.text)
-            if len(passage.text) >= self.TINY and not any(repeats(marks, other) for other in seen):
+            if len(passage.text) >= self.TINY_PASSAGE_CHARS and not any(repeats(marks, other) for other in seen):
                 kept.append(passage)
                 seen.append(marks)
         for number, passage in enumerate(kept, len(known) + 1):
@@ -95,7 +97,7 @@ class Cleaner:
 
     @staticmethod
     def under_headings(page):
-        """A page's passages: its blocks gathered under their heading up to PASSAGE_CHARS each; a longer
+        """A page's passages: its blocks gathered under their heading up to MAX_PASSAGE_CHARS each; a longer
         paragraph is cut, a code block never."""
         passages, heading, held = [], "", []
 
@@ -109,8 +111,8 @@ class Cleaner:
                 close()
                 heading = block.text
                 continue
-            for piece in [block.text] if block.kind == "code" else split_text(block.text, PASSAGE_CHARS):
-                if held and len("\n\n".join(held)) + 2 + len(piece) > PASSAGE_CHARS:
+            for piece in [block.text] if block.kind == "code" else split_text(block.text, MAX_PASSAGE_CHARS):
+                if held and len("\n\n".join(held)) + 2 + len(piece) > MAX_PASSAGE_CHARS:
                     close()
                 held.append(piece)
         close()
@@ -141,7 +143,7 @@ class MainBlocks(html.parser.HTMLParser):
             pass
         parser.flush()
         main_chars = sum(len(block.text) for block in parser.main if block.kind != "heading")
-        return parser.main if main_chars >= USABLE_PAGE_CHARS else parser.all
+        return parser.main if main_chars >= MIN_USABLE_PAGE_CHARS else parser.all
 
     def handle_starttag(self, tag, attrs):
         if tag in PageText.VOID:
@@ -267,7 +269,7 @@ def text_blocks(text):
 
 def mostly_links(link_chars, text):
     """Whether a paragraph is mostly the words of its links (a list of links, not prose)."""
-    return link_chars >= LINK_ONLY * len(text)
+    return link_chars >= MENU_LINK_SHARE * len(text)
 
 
 def shingles(text):
@@ -277,8 +279,8 @@ def shingles(text):
 
 
 def repeats(a, b):
-    """Whether two passages' shingles overlap at least NEAR_DUPLICATE (Jaccard)."""
-    return len(a & b) >= NEAR_DUPLICATE * len(a | b) if a | b else True
+    """Whether two passages' shingles overlap at least NEAR_DUPLICATE_OVERLAP (Jaccard)."""
+    return len(a & b) >= NEAR_DUPLICATE_OVERLAP * len(a | b) if a | b else True
 
 
 def site(url):

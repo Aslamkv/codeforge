@@ -26,8 +26,8 @@ class Internet:
     anything starts. Its calls never raise: what fails gives None and why() says why. A moment's
     trouble (a timeout, a rate limit) is asked again once; a backend that cannot be reached twice in
     a row is not asked again by the same command, and once none is left the run carries on without."""
-    RETRY_PAUSE = 3      # seconds before asking again after a moment's trouble
-    GONE_AFTER = 2       # network failures in a row after which a backend is not asked again
+    RETRY_PAUSE_SECONDS = 3
+    FAILURES_BEFORE_GONE = 2
     LEARN_LIMITS = {     # the settings of learning from the web: (a whole number?, the least it may be)
         "learn_rate": (False, 1), "learn_backoff": (False, 0), "learn_cutoff": (False, 0), "learn_pages": (True, 1),
         "learn_min_pages": (True, 1), "learn_searches": (True, 1), "fetch_workers": (True, 1),
@@ -205,7 +205,7 @@ class Internet:
             except WebError as exc:
                 self.codes[key] = exc.code
                 if exc.retry and attempt == 1:
-                    time.sleep(self.RETRY_PAUSE)
+                    time.sleep(self.RETRY_PAUSE_SECONDS)
                     continue
                 if exc.network:
                     self.lost(backend, str(exc))
@@ -218,10 +218,10 @@ class Internet:
         return None, "no answer"
 
     def lost(self, backend, why):
-        """A network failure: after GONE_AFTER in a row, that backend is not asked again; once no
+        """A network failure: after FAILURES_BEFORE_GONE in a row, that backend is not asked again; once no
         backend is left, the plugin is gone."""
         self.failures[backend.name] = self.failures.get(backend.name, 0) + 1
-        if self.failures[backend.name] >= self.GONE_AFTER and backend in self.backends_used:
+        if self.failures[backend.name] >= self.FAILURES_BEFORE_GONE and backend in self.backends_used:
             self.backends_used.remove(backend)
             say.warn(f"Web: not asking {backend.name} again ({first_line(why, 120)})")
             if not self.backends_used:
@@ -260,7 +260,7 @@ class OllamaWeb(WebBackend):
     environment variable, as Ollama's own tools take it."""
     BASE = "https://ollama.com/api"
     KEY_ENV = "OLLAMA_API_KEY"
-    MAX_BYTES = 2_000_000  # the most of one answer read
+    MAX_ANSWER_BYTES = 2_000_000
 
     def __init__(self, timeout):
         super().__init__(timeout)
@@ -286,7 +286,7 @@ class OllamaWeb(WebBackend):
                                                   "Content-Type": "application/json", "User-Agent": "Tinker"})
         try:
             with urllib.request.urlopen(request, timeout=self.timeout) as response:
-                body = response.read(self.MAX_BYTES)
+                body = response.read(self.MAX_ANSWER_BYTES)
         except urllib.error.HTTPError as exc:
             raise self.refused(exc.code, path)
         except Exception as exc:  # no answer at all: timeout, refused, no network

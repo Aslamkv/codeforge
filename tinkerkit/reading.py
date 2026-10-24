@@ -21,19 +21,20 @@ from .messages import say
 lazy from .knowledge import Learner, Library, Retriever, mentions
 lazy from .prompts import Part, Prompts
 lazy from .settings import (
-    Config, FACT_CHARS, FACT_PHASES, Home, PASSAGE_CHARS, READ_CHAPTERS, READ_CHUNKS, READ_FOCUS_CHAPTERS,
-    READ_INDEX_TERMS, READ_MAX_BYTES, READ_PASSAGES, READ_POINTS, READ_TERMS, READ_TEXT_SHARE, READ_WINDOW_CHARS,
-    confirmed, fingerprint, first_line, now_text, split_text, words,
+    BOOK_PASSAGES_SHOWN, FACT_PHASES, MAX_FACT_CHARS, MAX_PASSAGE_CHARS, READ_CHAPTER_TEXT_SHARE,
+    READ_FACTS_PER_CHAPTER, READ_FOCUS_CHAPTERS, READ_FOCUS_CHUNKS, READ_INDEX_TERMS, READ_KEY_TERMS,
+    READ_MAX_BYTES, READ_MIN_CHAPTERS, READ_WINDOW_CHARS, Config, Home, confirmed, fingerprint, first_line,
+    now_text, split_text, words,
 )
 lazy from .web import Internet, is_web_address
 
-ORDER = ("core", "supporting", "other")  # how the survey orders the chapters: what the source is about first
-STATES = {"read": "✅", "unread": "⏳", "raw": "📄"}  # a chapter's state, as a reading is shown
-FRONT = ("foreword", "preface", "introduction", "prologue", "about this book", "how to read", "how to use",
-         "overview", "summary", "who this book is for")  # a chapter that says what the source is about
-RAW = ("cover", "title page", "copyright", "dedication", "contents", "acknowledg", "about the author", "also by",
+CHAPTER_ROLE_ORDER = ("core", "supporting", "other")
+CHAPTER_STATE_ICONS = {"read": "✅", "unread": "⏳", "raw": "📄"}
+ABOUT_CHAPTER_TITLES = ("foreword", "preface", "introduction", "prologue", "about this book", "how to read", "how to use",
+         "overview", "summary", "who this book is for")
+UNREAD_MATTER_TITLES = ("cover", "title page", "copyright", "dedication", "contents", "acknowledg", "about the author", "also by",
        "praise for", "colophon", "bibliography", "references", "endnotes", "further reading", "list of figures",
-       "list of tables")  # front or back matter: kept as text, never read
+       "list of tables")
 HEADING_RE = re.compile(r"^(#{1,6})[ \t]+(.+?)[ \t#]*$", re.M)
 CHAPTER_LINE_RE = re.compile(r"^[ \t]*(?:(?:chapter|part|book|section|appendix)[ \t]+[\w.-]+|preface|foreword|"
                              r"introduction|prologue|epilogue|conclusion|index|contents)\b[^\n]{0,80}$", re.I | re.M)
@@ -162,7 +163,7 @@ class Reader:
     @staticmethod
     def say_chapter(chapter, facts, done, found):
         """What a chapter gave, the first of it, and how far the reading is (done: "3/12")."""
-        say.info(f"Chapter {chapter.number}, {chapter.title}: {learned(len(facts))}", STATES["read"])
+        say.info(f"Chapter {chapter.number}, {chapter.title}: {learned(len(facts))}", CHAPTER_STATE_ICONS["read"])
         if facts:
             say.found(first_line(facts[0]["text"], 200))
         say.tally(f"{done} chapters · {learned(len(found)) if found else 'nothing learned yet'}")
@@ -174,7 +175,7 @@ class Reader:
     def chapter_read(self, entry, book, survey, chapter, focus):
         """What one chapter teaches: each part of it in turn (with a focus, its parts most about it), given the
         source, what was learned before (the latest kept when the prompt is full) and what to look for."""
-        room = int(self.model.limit_chars(Prompts.READ_CHAPTER_SYSTEM) * READ_TEXT_SHARE)
+        room = int(self.model.limit_chars(Prompts.READ_CHAPTER_SYSTEM) * READ_CHAPTER_TEXT_SHARE)
         look_for = survey["order"].get(str(chapter.number), {}).get("look_for") or "what it teaches"
         texts = [excerpt(chapter.text, room, focus)] if focus else split_text(chapter.text, room)
         found = []
@@ -291,7 +292,7 @@ class Readings:
         return list(dict.fromkeys(named + shown))
 
     @staticmethod
-    def passages(numbers, query, count=READ_PASSAGES):
+    def passages(numbers, query, count=BOOK_PASSAGES_SHOWN):
         """[{source, text}] of the readings' passages most about the query (by its words), the best first, each with
         its title and chapter."""
         found = []
@@ -299,7 +300,7 @@ class Readings:
             entry = Readings.get(number) or {"chapters": []}
             for chapter in entry["chapters"]:
                 source = f"{entry['title']}, chapter {chapter['number']}: {chapter['title']}"
-                found += [{"source": source, "text": piece} for piece in split_text(chapter["text"], PASSAGE_CHARS)]
+                found += [{"source": source, "text": piece} for piece in split_text(chapter["text"], MAX_PASSAGE_CHARS)]
         order = Retriever(None).by_words(query, [passage["text"] for passage in found])
         return [found[index] for index in order[:count]]
 
@@ -345,7 +346,7 @@ def show(number):
             say.info(entry["survey"]["summary"], "📝")
         for chapter in Book.of(entry).chapters:
             note = {"raw": "text only", "unread": "not read yet"}.get(chapter.state, f"{facts[chapter.number]} fact(s)")
-            say.item(f"{STATES[chapter.state]} {chapter.number}. {chapter.title} ({note})")
+            say.item(f"{CHAPTER_STATE_ICONS[chapter.state]} {chapter.number}. {chapter.title} ({note})")
     say.info(f'tinker read #{number} goes on · tinker read #{number} "WHAT" looks again · tinker clear read '
              f"#{number} deletes it", "👉")
 
@@ -413,7 +414,7 @@ def chapter_parts(book, survey, chapter, text, look_for, known, focus):
 def in_order(chapters, survey):
     """Chapters in the survey's order: the core ones, then the supporting ones, then the others, each in the
     source's order."""
-    return sorted(chapters, key=lambda chapter: (ORDER.index(order_of(survey, chapter)), chapter.number))
+    return sorted(chapters, key=lambda chapter: (CHAPTER_ROLE_ORDER.index(order_of(survey, chapter)), chapter.number))
 
 
 def order_of(survey, chapter):
@@ -471,7 +472,7 @@ def lone_title(text):
 
 
 def headed_chapters(text):
-    """The chapters of a text marked with Markdown headings (#), down to the level that gives READ_CHAPTERS (a lone
+    """The chapters of a text marked with Markdown headings (#), down to the level that gives READ_MIN_CHAPTERS (a lone
     top heading is its title, not a chapter); [] when it has no headings."""
     headings = [(len(match.group(1)), match.group(2), match.start()) for match in HEADING_RE.finditer(text)]
     if lone_title(text):
@@ -490,9 +491,9 @@ def plain_chapters(text):
 
 def chapter_depth(depths):
     """The depth of the contents (or of the headings) that chapters are split at: the shallowest that gives at least
-    READ_CHAPTERS of them, else the deepest (a book of three parts is split at their chapters)."""
+    READ_MIN_CHAPTERS of them, else the deepest (a book of three parts is split at their chapters)."""
     for depth in sorted(set(depths)):
-        if sum(level <= depth for level in depths) >= READ_CHAPTERS:
+        if sum(level <= depth for level in depths) >= READ_MIN_CHAPTERS:
             return depth
     return max(depths, default=1)
 
@@ -527,9 +528,9 @@ def kind_of(title):
     name = title.lower()
     if re.search(r"\bindex\b", name):
         return "index"
-    if any(word in name for word in RAW):
+    if any(word in name for word in UNREAD_MATTER_TITLES):
         return "raw"
-    return "front" if any(word in name for word in FRONT) else "body"
+    return "front" if any(word in name for word in ABOUT_CHAPTER_TITLES) else "body"
 
 
 def index_terms(book, limit=READ_INDEX_TERMS):
@@ -563,25 +564,25 @@ def read_survey(data, book):
     numbers, order = {chapter.number for chapter in book.chapters}, {}
     for item in data.get("chapters") or []:
         if isinstance(item, dict) and type(item.get("chapter")) is int and item["chapter"] in numbers:
-            order[str(item["chapter"])] = {"read": item.get("read") if item.get("read") in ORDER else "other",
+            order[str(item["chapter"])] = {"read": item.get("read") if item.get("read") in CHAPTER_ROLE_ORDER else "other",
                                       "look_for": first_line(str(item.get("look_for") or ""), 200)}
-    terms = [first_line(str(term), 60) for term in data.get("terms") or [] if str(term).strip()][:READ_TERMS]
+    terms = [first_line(str(term), 60) for term in data.get("terms") or [] if str(term).strip()][:READ_KEY_TERMS]
     return {"summary": summary, "software": data.get("software") is True, "terms": terms, "order": order}
 
 
 def excerpt(text, room, wanted):
     """A chapter as its prompt shows it: whole when it fits room; else its opening and the parts most about what is
-    wanted, READ_CHUNKS in all, in the chapter's order."""
+    wanted, READ_FOCUS_CHUNKS in all, in the chapter's order."""
     if len(text) <= room:
         return text
-    chunks = split_text(text, room // READ_CHUNKS)
+    chunks = split_text(text, room // READ_FOCUS_CHUNKS)
     matched = [index for index in Retriever(None).by_words(wanted, chunks) if index]
-    chosen = [0] + (matched + [index for index in range(1, len(chunks)) if index not in matched])[:READ_CHUNKS - 1]
+    chosen = [0] + (matched + [index for index in range(1, len(chunks)) if index not in matched])[:READ_FOCUS_CHUNKS - 1]
     return "\n\n[…]\n\n".join(chunks[index] for index in sorted(chosen))
 
 
 def read_points(data, software):
-    """[{text, phase, section}] of a chapter's reply, at most READ_POINTS. A point that does not change how software
+    """[{text, phase, section}] of a chapter's reply, at most READ_FACTS_PER_CHAPTER. A point that does not change how software
     is built, and every point of a source not about building it, has the phase book: no build is shown it."""
     if not isinstance(data.get("points"), list):
         raise ValueError('no "points" list')
@@ -590,9 +591,9 @@ def read_points(data, software):
         text = str(point.get("text") or "").strip() if isinstance(point, dict) else ""
         if text:
             phase = str(point.get("phase") or "").strip().lower()
-            points.append({"text": text[:FACT_CHARS], "phase": phase if software and phase in FACT_PHASES else "book",
+            points.append({"text": text[:MAX_FACT_CHARS], "phase": phase if software and phase in FACT_PHASES else "book",
                            "section": first_line(str(point.get("section") or ""), 80)})
-    return points[:READ_POINTS]
+    return points[:READ_FACTS_PER_CHAPTER]
 
 
 class Epub:
@@ -663,7 +664,7 @@ def located(href, document):
 
 
 def contents_chapters(text, starts, contents):
-    """The chapters the contents mark in the text: each entry down to the depth that gives READ_CHAPTERS, from where
+    """The chapters the contents mark in the text: each entry down to the depth that gives READ_MIN_CHAPTERS, from where
     its target starts (its document's start when the fragment is not found) to where the next one does."""
     depth = chapter_depth([entry_depth for entry_depth, _, _ in contents])
     marks = {}

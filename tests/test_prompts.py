@@ -6,7 +6,7 @@ import re
 import pytest
 
 from tinkerkit.prompts import Part, Prompts, PromptTooLarge, Reply
-from tinkerkit.settings import TRIM_FLOOR
+from tinkerkit.settings import MIN_TRIMMED_PROSE_CHARS
 from tinkerkit.workspace import Toolchain
 
 
@@ -201,8 +201,8 @@ def test_exact_parts_are_never_shortened():
 def test_prose_is_never_cut_below_the_floor():
     with pytest.raises(PromptTooLarge):
         Part.assemble([Part("Prose", "p" * 3000, True)], 100)
-    shortened = Part("P", "p" * 3000, True).shortened(TRIM_FLOOR)
-    assert len(shortened.text) <= TRIM_FLOOR and shortened.text.endswith("[...]")
+    shortened = Part("P", "p" * 3000, True).shortened(MIN_TRIMMED_PROSE_CHARS)
+    assert len(shortened.text) <= MIN_TRIMMED_PROSE_CHARS and shortened.text.endswith("[...]")
 
 
 @pytest.mark.spec("PRM-13")

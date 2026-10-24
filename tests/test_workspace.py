@@ -45,7 +45,7 @@ def test_run_times_out_and_kills_the_process_group(workspace, project_dir):
 
 @pytest.mark.spec("WS-1")
 def test_unsafe_commands_are_never_run(workspace, project_dir, capsys):
-    assert workspace.run(f"sudo touch {project_dir}/x") == (None, Workspace.REFUSED)
+    assert workspace.run(f"sudo touch {project_dir}/x") == (None, Workspace.REFUSED_OUTPUT)
     assert not (project_dir / "x").exists()
     assert "Refused `sudo touch" in capsys.readouterr().out
 
@@ -430,7 +430,7 @@ def test_reached_no_test():
     refs = [TestRef("tests/test_a.py::test_x")]
     assert not Toolchain.reached_no_test(0, "", refs)
     assert not Toolchain.reached_no_test(None, "...", refs)  # a timeout: a test hangs
-    assert Toolchain.reached_no_test(None, Workspace.REFUSED, refs)
+    assert Toolchain.reached_no_test(None, Workspace.REFUSED_OUTPUT, refs)
     assert Toolchain.reached_no_test(127, "pytest: command not found tests/test_a.py", refs)
     assert Toolchain.reached_no_test(1, "ModuleNotFoundError: no module named pytest", refs)
     assert not Toolchain.reached_no_test(1, "FAILED tests/test_a.py::test_x", refs)

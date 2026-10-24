@@ -14,9 +14,8 @@ lazy from .model import OllamaError
 lazy from .prompts import Part, PromptTooLarge, Prompts
 from .session import Phase, Worker
 lazy from .settings import (
-    CHECK_MAX_TOKENS, Config, ENV_EXAMPLE, ENV_FILE, FACT_PHASES, KINDS, RECALL_TOPICS, TOPIC_RELEVANT,
-    after_what_they_use,
-    first_line, groups_fitting, words,
+    CHECK_MAX_TOKENS, ENV_EXAMPLE, ENV_FILE, FACT_PHASES, KINDS, MAX_RECALL_TOPICS, TOPIC_RELEVANT_SIMILARITY,
+    Config, after_what_they_use, first_line, groups_fitting, words,
 )
 lazy from .workspace import TestRef, Toolchain
 
@@ -46,7 +45,7 @@ class Recaller(Phase):
         else:
             use, learn = self.relevant(known, query), []
         learned = [slug for slug in (self.learn(topic, internet, retriever) for topic in learn[:can_learn]) if slug]
-        cycle["topics"] = list(dict.fromkeys(learned + use))[:RECALL_TOPICS]  # what it just learned it needs most
+        cycle["topics"] = list(dict.fromkeys(learned + use))[:MAX_RECALL_TOPICS]  # what it just learned it needs most
         self.keep_facts(cycle, query, retriever)
         self.say_used(cycle)
         self.use_language(cycle)
@@ -116,7 +115,7 @@ class Recaller(Phase):
     @staticmethod
     def relevant(known, query):
         """The learned topics a request needs, with no model call: those whose name it says, and
-        those close to it in meaning (TOPIC_RELEVANT, by the embedding model when there is one)."""
+        those close to it in meaning (TOPIC_RELEVANT_SIMILARITY, by the embedding model when there is one)."""
         text = query.lower()
         named = [slug for slug, entry in known.items()
                  if any(mentions(text, name) for name in (str(entry.get("name") or slug), entry.get("language") or slug))]
@@ -124,7 +123,7 @@ class Recaller(Phase):
         about = [f"{entry.get('name') or slug}: {entry.get('summary', '')}" for slug, entry in known.items()]
         vectors = embeddings.vectors([query] + about, keep=False) if embeddings and known else None
         close = [slug for slug, vector in zip(known, (vectors or [])[1:])
-                 if Embeddings.cosine(vectors[0], vector) >= TOPIC_RELEVANT]
+                 if Embeddings.cosine(vectors[0], vector) >= TOPIC_RELEVANT_SIMILARITY]
         return list(dict.fromkeys(named + close))
 
     def learn(self, topic, internet, retriever):
@@ -200,7 +199,7 @@ class Recaller(Phase):
         slug = Library.language(self.project.language)
         if not slug or slug in cycle.get("topics", []):
             return
-        cycle["topics"] = [slug] + cycle.get("topics", [])[:RECALL_TOPICS - 1]
+        cycle["topics"] = [slug] + cycle.get("topics", [])[:MAX_RECALL_TOPICS - 1]
         query = cycle["request"] + (f"\n{cycle['brief']}" if cycle.get("brief") else "")
         self.keep_facts(cycle, query, Retriever(Embeddings.configured()))
         say.info(f"Using the language as learned: {Library.read(slug).get('name', slug)}", "🧠")

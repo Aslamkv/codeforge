@@ -19,7 +19,7 @@ from tinkerkit.project import Tracker, project_store
 from tinkerkit.settings import Config, Home
 from test_conversation import Recorder
 
-ALIVE = os.getppid()  # a process that runs while the tests do, and is not this one
+OTHER_LIVE_PID = os.getppid()
 RUST = {"topic": "rust", "kind": "language", "name": "Rust", "summary": "A systems language.",
         "machine": [{"command": "cargo --version", "found": True, "version": "1.90"}]}
 CHOICE = {"task": "A word counter for text files in Rust", "feature": "also count lines", "folder": "word-count",
@@ -230,10 +230,10 @@ def test_the_exercise_has_no_rule_of_its_own_for_giving_way(make_model, home_sto
 @pytest.mark.spec("EXR-6")
 def test_the_exercise_shows_what_its_build_does(make_model, home_store, monkeypatch):
     build = FakeBuild(polls=1)
-    build.pid = ALIVE  # a build that runs: its tracker is kept
+    build.pid = OTHER_LIVE_PID  # a build that runs: its tracker is kept
     exercise = Exercise(make_model(), Tracker("Exercising rust"), start=lambda arguments: build)
     exercise.on_to("build")
-    home_store.put("running", str(ALIVE), {"doing": "💻 Writing the code", "working": "Writing a.py",
+    home_store.put("running", str(OTHER_LIVE_PID), {"doing": "💻 Writing the code", "working": "Writing a.py",
                                          "latest": "✅ Wrote a.py", "passing": [2, 5], "exercise": True})
     monkeypatch.setattr(time, "sleep", lambda seconds: None)
     exercise.built(lambda: ["task", "t"])
@@ -245,13 +245,13 @@ def test_the_exercise_shows_what_its_build_does(make_model, home_store, monkeypa
 @pytest.mark.spec("EXR-6")
 def test_an_exercise_that_goes_on_by_itself_comes_to_the_bottom(home_store):
     channel = Recorder()
-    home_store.put("running", str(ALIVE), {"title": "Exercising Rust", "exercise": True, "doing": "🔨 Building"})
-    reporter = conversation.Reporter([channel], "Exercising Rust", pid=ALIVE)
+    home_store.put("running", str(OTHER_LIVE_PID), {"title": "Exercising Rust", "exercise": True, "doing": "🔨 Building"})
+    reporter = conversation.Reporter([channel], "Exercising Rust", pid=OTHER_LIVE_PID)
     reporter.refresh()
     reporter.ended = True  # no updates of its own meanwhile
     channel.send("1", "hello")  # the person's message: the exercise's is no longer the newest
     reporter.ended = False
-    home_store.put("running", str(ALIVE), {"title": "Exercising Rust", "exercise": True, "doing": "🔨 Building",
+    home_store.put("running", str(OTHER_LIVE_PID), {"title": "Exercising Rust", "exercise": True, "doing": "🔨 Building",
                                            "resumed": time.time()})
     reporter.refresh()
     assert channel.log[-1][0] == "send" and "Exercising Rust" in channel.log[-1][3]
@@ -279,13 +279,13 @@ def test_the_conversation_adopts_an_exercise_a_conversation_before_it_started(ho
     desk = Desk([channel], tmp_path)
     followed = []
     monkeypatch.setattr(desk, "follow_exercise", lambda pid, title, ended, anew: followed.append((pid, title, anew)))
-    home_store.put("activity", "exercise", {"pid": ALIVE, "language": "Rust"})
-    home_store.put("running", str(ALIVE), {"title": "Exercising Rust", "exercise": True, "reports": True})
+    home_store.put("activity", "exercise", {"pid": OTHER_LIVE_PID, "language": "Rust"})
+    home_store.put("running", str(OTHER_LIVE_PID), {"title": "Exercising Rust", "exercise": True, "reports": True})
     desk.adopt_exercise()
     assert followed == []  # one run from a terminal with chats reports by itself
-    home_store.put("running", str(ALIVE), {"title": "Exercising Rust", "exercise": True, "doing": "🔨 Building"})
+    home_store.put("running", str(OTHER_LIVE_PID), {"title": "Exercising Rust", "exercise": True, "doing": "🔨 Building"})
     desk.adopt_exercise()
-    assert followed == [(ALIVE, "Exercising Rust", True)]
+    assert followed == [(OTHER_LIVE_PID, "Exercising Rust", True)]
 
 
 @pytest.mark.spec("EXR-6")
@@ -306,8 +306,8 @@ def test_an_adopted_exercise_takes_its_message_out_and_sends_it_at_the_bottom(ho
     channel = Recorder()
     desk = Desk([channel], tmp_path)
     conversation.keep_exercise_board({("rec", "1"): [7]})
-    home_store.put("running", str(ALIVE), {"title": "Exercising Rust", "exercise": True, "doing": "🔨 Building"})
-    desk.follow_exercise(ALIVE, "Exercising Rust", lambda: time.sleep(0.2), anew=True)
+    home_store.put("running", str(OTHER_LIVE_PID), {"title": "Exercising Rust", "exercise": True, "doing": "🔨 Building"})
+    desk.follow_exercise(OTHER_LIVE_PID, "Exercising Rust", lambda: time.sleep(0.2), anew=True)
     after = channel.log[channel.log.index(("delete", "1", 7, "")):]
     assert any(kind == "send" and "Exercising Rust" in text for kind, _, _, text in after)
 
@@ -320,7 +320,7 @@ def test_an_exercise_that_ends_before_it_keeps_a_tracker_shows_what_it_printed(h
     log.write_text("before\n")
     start = log.stat().st_size
     log.write_text("before\n'cobol' is not a programming language. Nothing done.\n")
-    desk.follow_exercise(ALIVE + 999999, "exercise cobol", lambda: None, (log, start))
+    desk.follow_exercise(OTHER_LIVE_PID + 999999, "exercise cobol", lambda: None, (log, start))
     ends = time.monotonic() + 5
     while not channel.log or "Nothing done" not in channel.log[-1][3]:
         assert time.monotonic() < ends, channel.log
@@ -331,9 +331,9 @@ def test_an_exercise_that_ends_before_it_keeps_a_tracker_shows_what_it_printed(h
 @pytest.mark.spec("EXR-6")
 def test_the_conversation_leaves_exercise_runs_alone(home_store, tmp_path):
     desk = Desk([Recorder()], tmp_path)
-    home_store.put("running", str(ALIVE), {"title": "Exercising Rust", "exercise": True, "doing": "🔨 Building"})
+    home_store.put("running", str(OTHER_LIVE_PID), {"title": "Exercising Rust", "exercise": True, "doing": "🔨 Building"})
     assert persons_runs() == []
-    home_store.put("activity", "exercise", {"pid": ALIVE, "language": "Rust"})
+    home_store.put("activity", "exercise", {"pid": OTHER_LIVE_PID, "language": "Rust"})
     assert desk.status().startswith("🏋️ **Tinker** · **Exercising Rust**")
 
 
@@ -354,7 +354,7 @@ def test_a_stopped_exercise_stops_its_build_and_keeps_everything(make_model, hom
 
 @pytest.mark.spec("EXR-7")
 def test_only_one_exercise_runs_at_a_time(home_store):
-    home_store.put("activity", "exercise", {"pid": ALIVE, "language": "Go"})
+    home_store.put("activity", "exercise", {"pid": OTHER_LIVE_PID, "language": "Go"})
     with pytest.raises(SystemExit, match="An exercise of Go runs already"):
         Exercises.claim(Exercises.of("Rust"))
 
@@ -393,7 +393,7 @@ def test_tinker_exercise_takes_a_language_or_status():
 @pytest.mark.spec("EXR-6")
 def test_a_chat_never_waits_for_an_exercise(home_store, tmp_path):
     desk = Desk([Recorder()], tmp_path)
-    home_store.put("running", str(ALIVE), {"title": "Exercising Rust", "exercise": True, "doing": "🔨 Building"})
+    home_store.put("running", str(OTHER_LIVE_PID), {"title": "Exercising Rust", "exercise": True, "doing": "🔨 Building"})
     assert desk.running_now() == []
 
 
@@ -404,16 +404,16 @@ def test_every_exercise_keeps_one_message_started_stopped_or_resumed(home_store,
     told = []
     monkeypatch.setattr(conversation, "signal_task", lambda pid, signum: told.append((pid, signum)))
     assert desk.stop_exercise().startswith("🤷 No exercise runs")
-    home_store.put("activity", "exercise", {"pid": ALIVE, "language": "Rust"})
-    home_store.put("running", str(ALIVE), {"title": "Exercising Rust", "exercise": True, "doing": "🔨 Building"})
+    home_store.put("activity", "exercise", {"pid": OTHER_LIVE_PID, "language": "Rust"})
+    home_store.put("running", str(OTHER_LIVE_PID), {"title": "Exercising Rust", "exercise": True, "doing": "🔨 Building"})
     first_ended = []
-    desk.follow_exercise(ALIVE, "Exercising Rust", lambda: first_ended.append(True) or time.sleep(0.2))
-    assert desk.stop_exercise() is None and told == [(ALIVE, conversation.STOP)]
+    desk.follow_exercise(OTHER_LIVE_PID, "Exercising Rust", lambda: first_ended.append(True) or time.sleep(0.2))
+    assert desk.stop_exercise() is None and told == [(OTHER_LIVE_PID, conversation.JOB_STOP_SIGNAL)]
     for _ in range(100):
         if desk.exercising is None:
             break
         time.sleep(0.05)
-    desk.follow_exercise(ALIVE, "resume #4", lambda: None)  # the next exercise: the same message
+    desk.follow_exercise(OTHER_LIVE_PID, "resume #4", lambda: None)  # the next exercise: the same message
     for _ in range(100):
         if desk.exercising is None:
             break

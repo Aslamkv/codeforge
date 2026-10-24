@@ -10,7 +10,7 @@ from .messages import say
 lazy from .model import OllamaError
 from .session import Phase
 lazy from .prompts import Part, PromptTooLarge, Prompts
-from .settings import ENV_EXAMPLE, ENV_FILE, FIX_FILES, first_line
+from .settings import ENV_EXAMPLE, ENV_FILE, FILES_SHOWN_PER_FIX, first_line
 lazy from .workspace import FileView, Output, TaughtCommands, TestRef, Toolchain
 
 
@@ -21,7 +21,7 @@ class Tidy(Phase):
     function: tidying never stops the run, and what it cannot fix is said plainly."""
     TITLE = "Tidy (the linter over the code)"
     BUILDS = True
-    MAX_FILES = FIX_FILES  # files one tidy pass may change
+    MAX_FILES_PER_PASS = FILES_SHOWN_PER_FIX
 
     def run(self, cycle):
         if not self.session.toolchain.lint:
@@ -62,7 +62,7 @@ class Tidy(Phase):
         only quoted in another's problem, such as a script a test runs, is not one of them)."""
         counted = [(self.findings(output, path), path)
                    for path in self.session.files_on_disk("code", "test")] if output else []
-        return [path for count, path in sorted(counted, key=lambda pair: -pair[0]) if count][:self.MAX_FILES]
+        return [path for count, path in sorted(counted, key=lambda pair: -pair[0]) if count][:self.MAX_FILES_PER_PASS]
 
     @staticmethod
     def findings(output, path):
@@ -146,9 +146,9 @@ class ReadmeWriter(Phase):
     test passes; what still fails is said plainly. It never stops the run."""
     TITLE = "README (and its examples run, as a user would)"
     BUILDS = True
-    MAX_USAGE = 12      # usage examples kept
-    FIX_ROUNDS = 2      # fix calls for examples that do not do what the README says
-    SERVER_WAIT = 20    # seconds a started server has to answer the first example
+    MAX_USAGE_EXAMPLES = 12
+    EXAMPLE_FIX_ROUNDS = 2
+    SERVER_ANSWER_TIMEOUT = 20
     LOCAL_RE = re.compile(r"\b(127\.0\.0\.1|localhost)\b")  # an example that talks to the app as a server
     PLACEHOLDER_RE = re.compile(r"<[^<>\n]+>")  # a value that differs each run, e.g. <code>: any one matches
 
@@ -202,7 +202,7 @@ class ReadmeWriter(Phase):
         serves = str(data.get("serves")).lower() in ("true", "yes") or any(self.LOCAL_RE.search(use["command"])
                                                                           for use in usage)
         return {"overview": str(data.get("overview") or "").strip(), "features": features,
-                "usage": usage[:self.MAX_USAGE], "serves": serves, "requires": clean(data.get("requires"))}
+                "usage": usage[:self.MAX_USAGE_EXAMPLES], "serves": serves, "requires": clean(data.get("requires"))}
 
     def text(self, guide):
         """What it is, its features, getting started (only what using it needs), usage as a person
@@ -243,17 +243,17 @@ class ReadmeWriter(Phase):
         return sections
 
     def check(self, cycle, readme):
-        """Every example run as a user runs it; a failing one fixed (fix), up to FIX_ROUNDS times
+        """Every example run as a user runs it; a failing one fixed (fix), up to EXAMPLE_FIX_ROUNDS times
         (a reply that could not be used is told why, the next time)."""
         note = ""
-        for round_number in range(self.FIX_ROUNDS + 1):
+        for round_number in range(self.EXAMPLE_FIX_ROUNDS + 1):
             failures = self.failing(cycle, readme)
             if not failures:
                 say.done(f"Every example in {readme} does what it says")
                 return
             for command, expected, output in failures:
                 say.fail(f"{readme}: `{first_line(command, 80)}` does not print what it says")
-            if round_number == self.FIX_ROUNDS:
+            if round_number == self.EXAMPLE_FIX_ROUNDS:
                 break
             note = self.fix(readme, failures, note)
         say.warn(f"{len(failures)} example(s) in {readme} still do not do what it says (see SPEC.md)")
@@ -294,9 +294,9 @@ class ReadmeWriter(Phase):
         return found
 
     def wait_for(self, example):
-        """Until a started server answers the first example (or SERVER_WAIT seconds pass)."""
+        """Until a started server answers the first example (or SERVER_ANSWER_TIMEOUT seconds pass)."""
         began = time.monotonic()
-        while time.monotonic() - began < self.SERVER_WAIT:
+        while time.monotonic() - began < self.SERVER_ANSWER_TIMEOUT:
             code, output = self.workspace.run(example[0], timeout=10, quiet=True)
             if code == 0 and not self.missing(example[1], output):
                 return
