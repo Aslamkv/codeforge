@@ -80,8 +80,6 @@ def exercise_of(make_model, builds, title="Exercising rust"):
     return Exercise(make_model(), Tracker(title), start=builds)
 
 
-# --- EXR-1: the words must name one language ------------------------------------------------------------------------
-
 @pytest.mark.spec("EXR-1")
 def test_a_learned_language_needs_no_call(make_model, fake_ollama, home_store):
     Library.save("rust", RUST)
@@ -112,8 +110,6 @@ def test_read_verdict_needs_a_known_verdict_and_a_language_its_name():
         read_verdict({"verdict": "language"})
 
 
-# --- EXR-2: learned first, installed here ---------------------------------------------------------------------------
-
 @pytest.mark.spec("EXR-2")
 def test_a_language_not_learned_is_learned_first(make_model, fake_ollama):
     fake_ollama.reply(json.dumps({"verdict": "language", "name": "Rust"}), when="which language")
@@ -132,8 +128,6 @@ def test_a_language_not_installed_is_said_and_nothing_is_practised(make_model, h
     assert builds.started == []
 
 
-# --- EXR-3: the next practice project -------------------------------------------------------------------------------
-
 @pytest.mark.spec("EXR-3")
 def test_read_choice_names_the_language_and_never_repeats_a_project():
     choice = read_choice({"task": "A todo list", "feature": "due dates", "folder": "Bad Name!"}, "Rust", [])
@@ -150,8 +144,6 @@ def test_each_practice_project_gets_a_folder_of_its_own(projects):
     assert free_folder("word-count") == projects / "word-count-2"
     assert free_folder("csv-stats") == projects / "csv-stats"
 
-
-# --- EXR-4: build, feature, measure, reflect, each step kept --------------------------------------------------------
 
 @pytest.mark.spec("EXR-4")
 def test_a_practice_project_is_built_then_given_its_feature(make_model, fake_ollama, home_store, projects):
@@ -193,8 +185,6 @@ def test_an_exercise_goes_on_from_the_step_it_reached(make_model, fake_ollama, h
     assert "next project" not in " ".join(fake_ollama.labels())
 
 
-# --- EXR-5: what a project measured ---------------------------------------------------------------------------------
-
 @pytest.mark.spec("EXR-5")
 def test_measured_and_problems_come_from_the_projects_own_database(make_project, project_dir):
     from conftest import criterion
@@ -225,8 +215,6 @@ def test_measured_and_problems_come_from_the_projects_own_database(make_project,
 def test_slowest_never_names_a_file():
     assert slowest([{"label": "Write notes.py", "seconds": 5}]) == ["Write: 5s in 1 call"]
 
-
-# --- EXR-6: the person comes first ----------------------------------------------------------------------------------
 
 @pytest.mark.spec("EXR-6")
 def test_the_exercise_has_no_rule_of_its_own_for_giving_way(make_model, home_store, monkeypatch, no_sleep):
@@ -348,8 +336,6 @@ def test_the_conversation_leaves_exercise_runs_alone(home_store, tmp_path):
     home_store.put("activity", "exercise", {"pid": ALIVE, "language": "Rust"})
     assert desk.status().startswith("🏋️ **Tinker** · **Exercising Rust**")
 
-
-# --- EXR-7: one at a time, stopped with everything kept -------------------------------------------------------------
 
 @pytest.mark.spec("EXR-7")
 def test_a_stopped_exercise_stops_its_build_and_keeps_everything(make_model, home_store, projects,

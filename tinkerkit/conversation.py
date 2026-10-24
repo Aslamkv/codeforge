@@ -44,7 +44,6 @@ lazy from .web import Internet
 lazy from .workspace import Toolchain
 
 
-# --- tasks, and the Tinkers that serve them --------------------------------------------------------------
 OFF = "TINKER_CHANNELS"                        # =off: a run the conversation started does not report too
 EDIT_EVERY = 5                                 # seconds between edits of a progress message
 CLOCK_EVERY = 15                               # ... between edits that only move its clock on
@@ -52,7 +51,6 @@ STOP_WAIT = 120                                # seconds a build is given to sto
 STATUS_EVERY = 10                              # seconds between looks at what Tinker does, for its status
 COLLECT_EVERY = 2                              # seconds between takings out of the messages whose time is up
 
-# --- a chat with the model ---------------------------------------------------------------------------------
 CHAT_KEPT = 12                                 # messages of one chat kept as the context of its next reply
 CHAT_REPLY_TOKENS = 1024                       # the longest chat reply
 CHAT_TIMEOUT = 600                             # seconds a chat reply may take (a task may hold the model first)
@@ -60,7 +58,6 @@ TYPING_EVERY = 4                               # seconds between "typing…" sig
 BUSY_AFTER = 5                                 # seconds a chat reply may take before a note says the model is busy
 BUSY_EDIT_EVERY = 30                           # seconds between updates of that note
 
-# --- command WHAT, research TOPIC --------------------------------------------------------------------------
 COMMAND_TOKENS = 300                           # the longest reply naming a command
 COMMAND_TIMEOUT = 120                          # seconds a command run from the chat may take
 COMMAND_SHOWN = 3000                           # chars of its output sent back, folded (its end, when longer)
@@ -69,7 +66,6 @@ RESEARCH_SEARCHES = 3                          # web searches a research makes
 RESEARCH_PAGES = 4                             # pages it reads (the first each search finds, then the second ...)
 RESEARCH_PAGE_CHARS = 3500                     # of each page, the parts most about the topic
 
-# --- tinker's commands, as the conversation takes them: from the one table (commands.py) -------------------
 LONG = named("long")                           # a task: its progress shown (one that runs is paused for it)
 QUICK = named("quick")                         # what it prints is shown
 GLANCES = QUICK + ("help", "history")          # what only shows something: its message goes soon, and its question at once
@@ -120,8 +116,6 @@ I build small programs for you, on this computer, with an AI model that runs rig
 
 ❓ `help` lists everything I can do, and `help task` explains one command."""  # what a chat app's /start gets
 
-
-# === the conversation ============================================================================================
 
 def session(root):
     """tinker with no command: the conversation in this terminal, and in the enabled chats too: one Tinker
@@ -977,8 +971,6 @@ def welcome():
     return WELCOME
 
 
-# === what a chat asks for: a chat, a command line, a research ====================================================
-
 class Talk:
     """A normal chat with the model in use: a message that is not a command is answered by it, with that
     chat's last CHAT_KEPT messages (and what is running now) as context. It does not think, so a reply comes
@@ -1381,8 +1373,6 @@ class Research:
                          page in enumerate(pages, 1))
 
 
-# === a task's one message ========================================================================================
-
 class Reporter:
     """A run's tracker shown on the channels: the task's one message per chat (sent: kept from the task's
     run before). It reads the tracker of the run's process (pid) every EDIT_EVERY seconds and edits the
@@ -1590,8 +1580,6 @@ class Progress:
         return md(t"{Progress.CHANGE_SIGNS.get(change[:1], '•')} {change[2:]}")
 
 
-# === tasks run from a terminal ===================================================================================
-
 class Attached:
     """A task run from a terminal, reporting to the channels: its tracker (which the run keeps in Tinker's
     home) is shown in its progress message, and the conversation (which reads the chat) answers status from
@@ -1726,8 +1714,6 @@ def signal_task(pid, signum):
     except ProcessLookupError, PermissionError:
         pass
 
-
-# === how a message is written, and the channels it goes through ==================================================
 
 class Channel:
     """What every kind of channel does. KIND names it; SECRETS are the settings asked for (and kept)
@@ -2145,8 +2131,6 @@ class Markup:
 
 md = Markup.of
 
-
-# === small helpers ===============================================================================================
 
 def help_text(words=()):
     """tinker help (of one command: words), as a conversation shows it: tinker's own (Markup)."""

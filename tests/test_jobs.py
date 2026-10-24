@@ -41,8 +41,6 @@ def asked(answer, calls):
     return ask
 
 
-# --- JOB-1: what a job is --------------------------------------------------------------------------------------------
-
 @pytest.mark.spec("JOB-1")
 def test_long_commands_are_jobs_and_the_rest_are_not(monkeypatch):
     for argv in (["task", "a", "calculator"], ["resume", "@calc"], ["add", "x"], ["learn", "rust"], ["ask", "q"],
@@ -68,8 +66,6 @@ def test_a_job_is_numbered_and_kept_while_it_runs(home_store):
     with Jobs.running(["runs"]):
         assert Jobs.current is None
 
-
-# --- JOB-2: how it ends ----------------------------------------------------------------------------------------------
 
 @pytest.mark.spec("JOB-2")
 def test_an_interrupted_job_is_stopped_with_its_journal_kept(home_store):
@@ -102,8 +98,6 @@ def test_a_running_job_whose_process_is_gone_is_stopped(home_store):
                                  "arguments": ["learn", "go"], "started": "x", "updated": "x"})
     assert Jobs.get(3)["state"] == "stopped" and Jobs.listed("stopped")[0]["number"] == 3
 
-
-# --- JOB-3: the journal ----------------------------------------------------------------------------------------------
 
 @pytest.mark.spec("JOB-3")
 def test_a_resumed_job_is_answered_from_its_journal_and_asks_only_what_is_new(home_store):
@@ -154,8 +148,6 @@ def test_model_calls_and_page_fetches_go_through_the_journal(home_store, monkeyp
     assert calls == ["https://bad.example", []]
 
 
-# --- JOB-4: the job's day --------------------------------------------------------------------------------------------
-
 @pytest.mark.spec("JOB-4")
 def test_a_job_says_the_day_it_started(home_store):
     assert today() == datetime.date.today()
@@ -164,8 +156,6 @@ def test_a_job_says_the_day_it_started(home_store):
     with Jobs.running(Jobs.arguments(["resume", "#1"])):
         assert today() == datetime.date(2026, 1, 2)
 
-
-# --- JOB-5: resume ---------------------------------------------------------------------------------------------------
 
 @pytest.mark.spec("JOB-5")
 def test_resume_runs_the_jobs_own_command_line(home_store):
@@ -192,8 +182,6 @@ def test_a_tasks_job_is_resumed_as_its_run(home_store):
     Jobs.retarget(["resume", "@other"])  # outside a job: nothing to change
     assert Jobs.get(1)["arguments"] == ["resume", "@a1b2"]
 
-
-# --- JOB-6: tinker jobs ----------------------------------------------------------------------------------------------
 
 def keep_jobs(home_store, states):
     for number, state in enumerate(states, 1):
@@ -235,8 +223,6 @@ def test_tinker_jobs_takes_a_state_and_a_page():
         with pytest.raises(SystemExit):
             Cli.parse(words)
 
-
-# --- JOB-7: stop -----------------------------------------------------------------------------------------------------
 
 @pytest.mark.spec("JOB-7")
 def test_stop_tells_a_job_or_every_one_of_the_persons(home_store, monkeypatch, capsys):
@@ -305,8 +291,6 @@ def test_a_research_job_ends_with_its_answer():
     assert progress.ending().endswith("The answer [1]") and "****" not in progress.ending()
 
 
-# --- JOB-8: one job at a time ----------------------------------------------------------------------------------------
-
 def other_running(home_store, number=1, command="learn", title="learn go"):
     """A job another process runs (the test's parent process: alive, not this one)."""
     home_store.put("jobs", str(number), {"number": number, "command": command, "title": title, "state": "running",
@@ -361,8 +345,6 @@ def test_the_conversation_starts_a_task_while_another_runs(home_store, tmp_path,
     assert spawned == [["learn", "go"], ["exercise", "python"]] and len(desk.followed) == 2
     desk.reporter.ended = True
 
-
-# --- JOB-9: a paused job goes on once Tinker is idle -----------------------------------------------------------------
 
 class Execd(Exception):
     pass

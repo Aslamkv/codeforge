@@ -165,7 +165,10 @@ phase, learn from the web what the rest of the cycle needs.
   web_timeout `30`, learn_missing `2`, learn_rate `8`, learn_backoff `20`, learn_cutoff `0.0`, learn_pages
   `8`, learn_min_pages `2`, learn_searches `3`, learn_think `"low"`, docs_pages `30`, tool_docs_pages `5`,
   docs_latest_days `30`, fetch_workers `6`, fetch_timeout `15`, fetch_max_bytes `2000000`,
-  fetch_domain_delay `0.1`, fetch_fallbacks `2`, embed_model `""`, projects `"~/Projects"`.
+  fetch_domain_delay `0.1`, fetch_fallbacks `2`, embed_model `""`, projects `"~/Projects"`. learn_rate
+  is the `Throttle`'s rate; fetch_workers, fetch_timeout, fetch_max_bytes and fetch_domain_delay are the
+  `Fetcher`'s workers, timeout, max_bytes and domain_delay; embed_model is the model `tinker embed NAME`
+  selects.
 - **SET-3** `PHASES`, `FIX_PHASES` and `PLANNING_PHASES` are the phase lists given in
   [The cycle](#the-cycle). `CONFIRM_AFTER` is `review` for the project and a feature, and `reproduce`
   for a bug fix.

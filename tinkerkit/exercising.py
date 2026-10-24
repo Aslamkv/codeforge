@@ -282,8 +282,6 @@ def stopped(exercise):
             "details": [("Practice projects done", str(done))]}
 
 
-# === what a practice project measured, and what it teaches ===========================================================
-
 def measured(folder):
     """What the project's runs measured, from its own database: its status, minutes, model calls (and the retried
     ones), reply tokens, spec points passing and parked, README examples that failed, and its slowest steps."""
@@ -367,8 +365,6 @@ def told(exercise, project):
     return line
 
 
-# === where exercises are kept ========================================================================================
-
 class Exercises:
     """Every language's exercise, kept in the home ("exercise", by the language's key): {language, started,
     projects, focus, left}, each project {task, feature, folder, practises, step, started, ended, measures, problems,
@@ -430,8 +426,6 @@ def already_running(active):
     return (f"An exercise of {active['language']} runs already: it did not pause in time (one runs at a time). "
             f"Ask again in a moment.")
 
-
-# === tinker exercise status ====================================================================================
 
 def job_state(exercise):
     """How an exercise that does not run was left: paused (it goes on once Tinker is idle) or stopped."""

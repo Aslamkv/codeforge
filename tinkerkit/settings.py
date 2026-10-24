@@ -17,48 +17,40 @@ from pathlib import Path
 lazy from .messages import say
 
 
-DEFAULT_CONFIG = frozendict({                      # the settings: what the home's "config" holds overrides these
-    "model": None,                      # the model every run uses: none until tinker use-model NAME selects one
-    "ollama_url": "http://localhost:11434",  # where Ollama listens (Ollama's own default)
-    "keep_alive": 0,                    # unload after every call: a model kept loaded can keep growing
-    "max_growth": 1.15,                 # with keep_alive, unload once the model grows 15% past its first size
-    "build_think": "medium",            # think level for building (tests, code, fixes); planning uses the model's
-    "test_timeout": 60,                 # seconds one test may take: longer means it hangs
-    "web": "ollama",                    # the Internet plugin's backend, used by tinker learn and --web only:
-                                        # "ollama" (its key in OLLAMA_API_KEY), "duckduckgo" (no key), or ""
-    "web_fallback": "",                 # opt-in: a backend asked whatever the first cannot answer (and alone
-                                        # when the first is not usable), e.g. "duckduckgo"; "" for none
-    "web_timeout": 30,                  # seconds one web search or fetch may take
-    "learn_missing": 2,                 # topics the recall phase of a run with --web may learn
-    "learn_rate": 8,                    # web requests per minute while learning (a token bucket)
-    "learn_backoff": 20,                # the most seconds one learn waits out HTTP 429 before it stops
-    "learn_cutoff": 0.0,                # the word score (BM25) a search result's title and snippet need
-    "learn_pages": 8,                   # search results fetched per search, the best first
-    "learn_min_pages": 2,               # pages with usable text a learn needs, else it stops
-    "learn_searches": 3,                # web searches per learn: the first, then one per slot left without facts
-    "learn_think": "low",               # think level for reading pages into facts and condensing them (the plan
-                                        # thinks at the model's own)
-    "docs_pages": 30,                   # pages taken from a topic's documentation site
-    "tool_docs_pages": 5,               # pages taken from the documentation of each of a language's tools
-    "docs_latest_days": 30,             # days a copy of unversioned ("latest") documentation is kept before it
-                                        # is fetched again (a version's own documentation is kept until cleared)
-    "fetch_workers": 6,                 # pages fetched at once
-    "fetch_timeout": 15,                # seconds one page may take
-    "fetch_max_bytes": 2000000,         # the most of one page read
-    "fetch_domain_delay": 0.1,          # seconds between two requests to one site (its pages go one at a time)
-    "fetch_fallbacks": 2,               # pages per learn the web plugin fetches when a site gives too little text
-    "embed_model": "",                  # the embedding model that indexes what is learned (tinker embed NAME);
-                                        # tinker learn and --web need one
-    "projects": "~/Projects",           # where tinker task makes a new project's own folder (named after the
-                                        # task), unless --workdir names one
+DEFAULT_CONFIG = frozendict({
+    "model": None,
+    "ollama_url": "http://localhost:11434",
+    "keep_alive": 0,
+    "max_growth": 1.15,
+    "build_think": "medium",
+    "test_timeout": 60,
+    "web": "ollama",
+    "web_fallback": "",
+    "web_timeout": 30,
+    "learn_missing": 2,
+    "learn_rate": 8,
+    "learn_backoff": 20,
+    "learn_cutoff": 0.0,
+    "learn_pages": 8,
+    "learn_min_pages": 2,
+    "learn_searches": 3,
+    "learn_think": "low",
+    "docs_pages": 30,
+    "tool_docs_pages": 5,
+    "docs_latest_days": 30,
+    "fetch_workers": 6,
+    "fetch_timeout": 15,
+    "fetch_max_bytes": 2000000,
+    "fetch_domain_delay": 0.1,
+    "fetch_fallbacks": 2,
+    "embed_model": "",
+    "projects": "~/Projects",
 })
 
-# --- each project's own state ------------------------------------------------------------------
 STATE_DIR = ".tinker"             # in each project: its database (project.db) and a started server's output
 PROJECT_DB = "project.db"
 ENV_FILE, ENV_EXAMPLE = ".env", ".env.example"
 
-# --- the work: cycles, phases, criteria, files -------------------------------------------------
 # The idea, as the phases of one cycle: plan only what the request asks as a spec; turn every spec point into
 # a unit test, with the test tool installed first; write just enough code to pass them; review it once at
 # the end, the way a person will run it; then it is done.
@@ -85,7 +77,6 @@ KINDS = ("code", "test", "template", "config", "docs")
 MAX_FILE_LINES = 60               # design guidance: small modules (a bigger file still works, in windows)
 TESTS_PER_CALL = 10
 
-# --- fixing: until each criterion's test passes ------------------------------------------------
 DEFAULT_MAX_STALL = 3             # fixes without progress before the review against the plan
 MAX_TRIES_PER_PASS = 8            # model calls on one criterion per pass, whatever "progress" says
 REVIEW_TRIES = 2                  # review calls when fixing stops making progress
@@ -94,14 +85,12 @@ OUTPUT_CHARS = 1600               # the end of a failure output shown to the mod
 TESTS_LOCKED = "tests do not change now"  # why a fix may not change a test (a fix that tries points at the test)
 FIX_FILES = 7                     # files a fix may be shown (the most related first)
 
-# --- the project's commands (one test's limit is test_timeout in config.json) ------------------
 NETWORK_RETRY = 30                # seconds between tries of what waits for the network (a package to install)
 ONLINE_PROBES = (("1.1.1.1", 443), ("8.8.8.8", 443))  # opened and closed to see the internet is there
 NETWORK_NOTE = 600                # while a build waits for the network, a line says so this often
 SETUP_TIMEOUT = 900
 COMMAND_TIMEOUT = 300             # setup aside, the longest a command may run (all tests)
 
-# --- prompts: within the model's input budget --------------------------------------------------
 CHARS_PER_TOKEN = 2.8             # the start (code ~2.9 chars/token); then learned from real prompts
 MIN_CHARS_PER_TOKEN = 2.0         # HTML and dense code have fewer chars per token; never assume fewer
 MAX_CHARS_PER_TOKEN = 4.0         # prose measured 4.1; never assume more
@@ -109,20 +98,16 @@ PROMPT_HEADROOM = 0.95            # aim 5% under the budget: code has fewer char
 TRIM_FLOOR = 300                  # a shortened prose part keeps at least this many chars
 MIN_PROMPT_TOKENS = 512           # a run never lowers its prompt budget below this
 
-# --- replies -----------------------------------------------------------------------------------
 MIN_REPLY_TOKENS = 1024
 EARLY_STOP_GRACE = 3.0            # seconds to await Ollama's last chunk (its token counts) once a reply is complete
 PROGRESS_EVERY = 2.0              # seconds between live progress updates
 LOOP_LINES = 20                   # the same line written this many times in a row: the model is looping
 
-# --- thinking budgets: a reply cut off while still thinking is asked again unthinking, given the
-# thought so far to conclude (THOUGHT_KEPT chars of it), so a lower budget costs no answer ----------
 DEFAULT_FIX_MAX = 4096            # a fix (measured: most that answer thinking need under 4K; past it, few do)
 TESTS_MAX_TOKENS = 8192           # a test file: room to think, and to write the whole file unthinking
 CHECK_MAX_TOKENS = 12288          # a check of a plan or an app (not its making)
 THOUGHT_KEPT = 4000               # chars of an unfinished thought passed on to conclude
 
-# --- Ollama calls that fail --------------------------------------------------------------------
 REQUEST_TIMEOUT = 600             # seconds of silence from Ollama before a call counts as stuck
 STALL_RETRIES = 2
 OOM_RETRIES = 2
@@ -134,7 +119,6 @@ CRASH_SHRINK = 0.9                # a limit that crashed twice drops to this sha
                                   # only); calibration takes this share of a longest reply that varies
 CRASH_NEAR = 0.5                  # a run: a crash below this share of a limit is not about that limit
 
-# --- calibration: a model's settings, measured once per model (models/<model>.json) ------------
 DEFAULT_THINK = "high"            # think hard once instead of reworking cheap guesses (if the model takes it)
 PROMPT_TARGET = 8192              # the largest prompt a run needs (whole files are small modules; a fix shows at
                                   # most FIX_FILES of them)
@@ -143,7 +127,6 @@ CAPACITY_STEP = 0.1               # a context that does not fit is searched for 
 MEMORY_OVERHEAD = 1.5e9           # bytes a runner needs besides the weights and the context
 PROBE_BATCH = 256                 # piece size tried when a whole prompt crashes a GGUF runner (num_batch)
 
-# --- learning: what earlier projects taught (Tinker's "languages" and "memory") ---------------
 LESSON_PHASES = ("design", "config", "tests", "code", "toolchain")  # where a lesson is shown
 MAX_LESSONS = 15                  # per file; the least confirmed go first
 LESSONS_SHOWN = 5                 # per prompt (an optional part: dropped first when the prompt is full)
@@ -154,17 +137,14 @@ HISTORY_KEPT = 20                 # events an item keeps (born, confirmed, helpe
 RETIRED_KEPT = 50                 # retired items kept beside each list, for people to see (never prompts)
 RUNS_KEPT = 200                   # lines about runs kept in the home, the most recently updated
 
-# --- the memory graph: tinker memory --graph --------------------------------------------------------------
 SIMILAR_MEANING = 0.75            # embedding similarity at which two lessons are linked as similar
 SIMILAR_WORDS = 0.5               # ... text similarity, when there are no embeddings
 
-# --- asking and teaching: tinker ask QUESTION, tinker teach WHAT --------------------------------------------
 MEMORY_SHOWN = 25                 # items of what Tinker keeps shown to one ask or teach, the most related first
 TEACH_CLAIMS = 4                  # claims a teaching is checked as
 TEACH_COMMANDS = 3                # commands that check it on this machine
 TEACH_SEARCHES = 3                # web searches that check it
 
-# --- reading: tinker read SOURCE (a book, an article, a document) --------------------------------------------
 READ_MAX_BYTES = 50_000_000       # the largest file read (a link's download stops here)
 READ_CHAPTERS = 5                 # chapters a book is split into at least, when its contents go that deep
 READ_WINDOW_CHARS = 20_000        # a text with no chapter headings is read in parts this long
@@ -176,14 +156,12 @@ READ_CHUNKS = 3                   # parts of a chapter a focused read shows: its
 READ_POINTS = 8                   # facts one chapter may give
 READ_PASSAGES = 4                 # passages of the books an ask or a teach sees, the most related first
 
-# --- tinker exercise LANGUAGE: practice projects that teach Tinker a language ---------------------------
 EXERCISE_FOLDER = "tinker-exercise"  # in the projects folder: one folder per practice project
 EXERCISE_ENV = "TINKER_EXERCISE"  # =1: a run an exercise started (its tracker says so; it never pauses one)
 EXERCISE_LOOK = 2                 # seconds between looks for the person while an exercise builds
 EXERCISE_SHOWN = 8                # earlier projects' measures shown to the exercise's own calls
 EXERCISE_PROBLEMS = 12            # problems of one project its reflection sees
 
-# --- learning from the web: tinker learn TOPIC, and the recall phase of a run --------------------------
 FACT_PHASES = ("spec", "design", "config", "tests", "code", "toolchain")  # where a learned fact is shown
 MAX_COMMANDS = 6                  # commands that show what of a topic is installed here
 VERSION_TIMEOUT = 20              # seconds such a command may take
@@ -196,7 +174,6 @@ PLAYBOOK_RULES = 16               # rules a topic's facts are condensed into (wh
 RULE_CHARS = 200                  # the longest rule kept
 RULE_WHEN_CHARS = 80              # the longest "when" of a rule that applies only to some code
 
-# --- learning a language or a tool by its slots: tinker learn TOPIC (the limits a person tunes are in config)
 FIRST_SEARCH = "{topic} official documentation"  # the first search, built from the topic alone: its docs site
 DOC_MAPS = ("llms.txt", "sitemap.xml")  # where a documentation site lists its pages (then its own links)
 MAX_MAP_LINKS = 5000              # links read from one site's map
@@ -214,7 +191,6 @@ MMR_BALANCE = 0.7                 # relevance against novelty when picking a slo
 FACTS_PER_SLOT = 6                # facts one slot's digest may give
 BACKOFF_FIRST = 1.0               # seconds of the first wait after HTTP 429 (then doubled, within learn_backoff)
 
-# --- research: tinker learn of a domain (Researcher) ----------------------------------------------------
 RESEARCH_QUESTIONS = 4            # research questions a topic is split into
 RESEARCH_QUERIES = 2              # web searches per question, for independent sources
 RESEARCH_PAGES = (8, 6)           # pages read per round: the first round, then one for the gaps and checks
