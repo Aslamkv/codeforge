@@ -1,5 +1,3 @@
-"""PRJ: the project's plan and record: runs, the checks before a run, the spec and SPEC.md."""
-
 import argparse
 import io
 import os
@@ -142,7 +140,8 @@ def test_clear_folder_refuses_the_wrong_folders(tmp_path, monkeypatch, tinker_ho
 def test_before_start_for_a_new_run(tmp_path, monkeypatch):
     monkeypatch.chdir(tmp_path)
     assert RunChecks.before_start(run_args(workdir=".")) == tmp_path.resolve()
-    assert not (tmp_path / ".tinker").exists()  # checking makes nothing
+    nothing_made = not (tmp_path / ".tinker").exists()
+    assert nothing_made
     with pytest.raises(SystemExit, match="Spec file not found"):
         RunChecks.before_start(run_args(workdir=".", spec="missing.md"))
     with pytest.raises(SystemExit, match="does not exist"):
@@ -329,7 +328,8 @@ def test_the_tracker_publishes_each_change(home_store, project_dir):
     assert state["waiting"] == {"name": "calc", "kind": "project"} and state["pid"] == os.getpid()
     events = [event["event"] for _, event in store.entries("progress")]
     assert events == ["project", "phase", "phase", "points", "waiting"]
-    tracker.points(1, 3)  # no change: nothing published
+    the_same_points = (1, 3)
+    tracker.points(*the_same_points)
     assert len(store.entries("progress")) == 5
     tracker.end({"status": "done", "headline": "Done."}, 30.0)
     state = home_store.get("running", str(os.getpid()))
@@ -340,7 +340,7 @@ def test_the_tracker_publishes_each_change(home_store, project_dir):
 
 @pytest.mark.spec("PRJ-14")
 def test_steps_live_progress_and_messages(home_store, project_dir, monkeypatch):
-    assert set(Tracker.STEPS) >= {"recall", "spec", "design", "review", "setup", "tests", "code", "verify", "tidy", "docs",
+    assert set(Tracker.DOING_AND_DONE) >= {"recall", "spec", "design", "review", "setup", "tests", "code", "verify", "tidy", "docs",
                                   "final_review", "lessons", "reproduce", "amend"}
     tracker = Tracker("calc")
     store = project_store(project_dir)
@@ -355,8 +355,9 @@ def test_steps_live_progress_and_messages(home_store, project_dir, monkeypatch):
     assert state["found"] == "2/0 gives a clear error" and state["latest"] == "💡 2/0 gives a clear error"
     assert [(entry["line"], entry["kind"]) for _, entry in store.entries("output")] == [
         ("   ✅ Wrote calc.py (12 lines)", "done"), ("   💡 2/0 gives a clear error", "found")]
-    monkeypatch.setattr(Tracker, "QUIET_EVERY", 1000)
-    tracker.heard(Message("text", "next line"))  # a quiet change waits to be published with the next
+    monkeypatch.setattr(Tracker, "QUIET_PUBLISH_SECONDS", 1000)
+    a_quiet_change = Message("text", "next line")
+    tracker.heard(a_quiet_change)
     assert home_store.get("running", str(os.getpid()))["latest"] != "next line"
     tracker.phase("verify")
     state = home_store.get("running", str(os.getpid()))

@@ -1,5 +1,3 @@
-"""MSG: everything Tinker tells the person, in one voice."""
-
 import ast
 import io
 import os
@@ -50,7 +48,8 @@ def test_sections_nest_and_a_top_title_stands_apart(capsys):
 def test_followers_are_given_each_message_as_data(capsys):
     heard = []
     say.follow(heard.append)
-    say.follow(lambda message: 1 / 0)  # one that fails breaks nothing
+    a_follower_that_fails = lambda message: 1 / 0
+    say.follow(a_follower_that_fails)
     with say.section():
         say.warn("No network")
     assert heard == [Message("warn", "No network", 1, "⚠️")] and "No network" in capsys.readouterr().out
@@ -64,7 +63,8 @@ def test_a_tracker_keeps_what_is_said_as_its_latest_and_in_the_output_log(home_s
     say.follow(tracker.heard)
     with say.section():
         say.done("Wrote calc.py (12 lines)")
-    say.live("Writing calc.py… 12s")  # only a terminal's clock: never kept
+    a_terminal_clock = "Writing calc.py… 12s"
+    say.live(a_terminal_clock)
     assert tracker.state["latest"] == "✅ Wrote calc.py (12 lines)" and "live" not in tracker.state
     assert [entry["line"] for _, entry in store.entries("output")] == ["   ✅ Wrote calc.py (12 lines)"]
 
@@ -80,7 +80,7 @@ def test_what_a_command_works_on_its_tally_and_what_it_found_reach_the_tracker(h
     state = tracker.state
     assert state["working"] == "" and state["tally"] == "1/2 chapters · 4 things learned"
     assert state["found"] == "Small habits compound like interest"
-    assert capsys.readouterr().out == "💡 Small habits compound like interest\n"  # the tally is the chat's only
+    assert capsys.readouterr().out == "💡 Small habits compound like interest\n"
 
 
 @pytest.mark.spec("MSG-4")
@@ -103,7 +103,7 @@ def test_on_a_terminal_the_next_message_clears_the_live_line(monkeypatch, capsys
     say.live("Writing the spec… 12s")
     say.live("Writing the spec… 14s")
     say.done("Answered")
-    assert terminal.getvalue().startswith("\r   ⠋ Writing the spec… 12s\033[K\r   ⠙ Writing the spec… 14s")  # it spins
+    assert terminal.getvalue().startswith("\r   ⠋ Writing the spec… 12s\033[K\r   ⠙ Writing the spec… 14s")
     assert terminal.getvalue().endswith("\r\033[K") and capsys.readouterr().out == "✅ Answered\n"
 
 

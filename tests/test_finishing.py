@@ -1,5 +1,3 @@
-"""FIN: finishing a cycle: tidy, the README and its examples, the final review and the lessons."""
-
 import json
 
 import pytest
@@ -19,7 +17,6 @@ FILES = {"calc.py": {"kind": "code", "role": "the calculator", "contract": [], "
 
 @pytest.fixture
 def built(make_project, make_session, project_dir):
-    """A built calculator: both criteria pass."""
     (project_dir / "calc.py").write_text(FIXED)
     (project_dir / "test_calc.py").write_text(TESTS)
     steps = [criterion("C1", "test_calc.py::test_add", "calc.add(2, 3) is 5", status="green"),
@@ -95,13 +92,20 @@ def test_read():
             "serves": False}
     guide = writer.read(Reply(json.dumps(data)))
     assert guide["features"] == ["Adds", "Subtracts numbers"] and guide["requires"] == "Python 3"
-    assert len(guide["usage"]) == ReadmeWriter.MAX_USAGE and guide["usage"][0]["output"] == "5"
+    assert len(guide["usage"]) == ReadmeWriter.MAX_USAGE_EXAMPLES and guide["usage"][0]["output"] == "5"
     assert guide["serves"] is False and guide["overview"] == "A calculator."
     served = dict(data, usage=[{"what": "Get", "command": "curl -s http://127.0.0.1:8000/"}])
     assert writer.read(Reply(json.dumps(served)))["serves"] is True
     assert writer.read(Reply(json.dumps(dict(data, serves="yes"))))["serves"] is True
     with pytest.raises(ValueError, match="features and at least one usage"):
         writer.read(Reply(json.dumps(dict(data, usage=[]))))
+
+
+@pytest.mark.spec("FIN-4")
+def test_an_example_that_talks_to_localhost_talks_to_a_server():
+    assert all(ReadmeWriter.SERVER_ADDRESS_RE.search(command)
+               for command in ("curl http://localhost:8000/", "curl 127.0.0.1:5000"))
+    assert not any(ReadmeWriter.SERVER_ADDRESS_RE.search(command) for command in ("echo localhostname", "python app.py"))
 
 
 @pytest.mark.spec("FIN-5")
@@ -221,7 +225,8 @@ def test_readme_examples_that_stay_wrong_are_kept(built, fake_ollama, project_di
     cycle = project.cycles[0]
     ReadmeWriter(session).check(cycle, "README.md")
     assert cycle["readme_failures"] == ["`cat used.txt && echo 1`: ready"]
-    assert (project_dir / "calc.py").read_text() == FIXED  # a fix that broke a passing test was undone
+    as_before_the_breaking_fix = FIXED
+    assert (project_dir / "calc.py").read_text() == as_before_the_breaking_fix
     assert "broke a passing test" in fake_ollama.calls[1]["messages"][1]["content"]
 
 

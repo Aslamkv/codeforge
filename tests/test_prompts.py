@@ -1,12 +1,10 @@
-"""PRM: prompt parts, replies and the system prompts."""
-
 import json
 import re
 
 import pytest
 
 from tinkerkit.prompts import Part, Prompts, PromptTooLarge, Reply
-from tinkerkit.settings import TRIM_FLOOR
+from tinkerkit.settings import MIN_TRIMMED_PROSE_CHARS
 from tinkerkit.workspace import Toolchain
 
 
@@ -23,11 +21,11 @@ def test_json_in_prose():
 
 @pytest.mark.spec("PRM-2")
 @pytest.mark.parametrize("text,expected", [
-    ('{"a": [1, 2,], "b": 3,}', {"a": [1, 2], "b": 3}),                       # trailing commas
-    ('{"a": "one " + "two"}', {"a": "one two"}),                               # joined strings
-    ('{"a": "it\\\'s"}', {"a": "it's"}),                                        # \' escape
-    ('{"a": {"b": [1, 2]}', {"a": {"b": [1, 2]}}),                              # left open at the end
-    ('{"a": ["x", "y", "b": 1}', {"a": ["x", "y"], "b": 1}),                   # list open before the next key
+    pytest.param('{"a": [1, 2,], "b": 3,}', {"a": [1, 2], "b": 3}, id="trailing commas"),
+    pytest.param('{"a": "one " + "two"}', {"a": "one two"}, id="joined strings"),
+    pytest.param('{"a": "it\\\'s"}', {"a": "it's"}, id="escaped single quote"),
+    pytest.param('{"a": {"b": [1, 2]}', {"a": {"b": [1, 2]}}, id="left open at the end"),
+    pytest.param('{"a": ["x", "y", "b": 1}', {"a": ["x", "y"], "b": 1}, id="list open before the next key"),
 ])
 def test_json_mends_the_usual_slips(text, expected):
     assert Reply(text).json() == expected
@@ -39,6 +37,22 @@ def test_json_without_an_object_or_beyond_mending():
         Reply("no json here").json()
     with pytest.raises(json.JSONDecodeError):
         Reply('{"a": tru}').json()
+
+
+@pytest.mark.spec("PRM-2")
+def test_a_string_that_is_an_objects_key():
+    assert Reply.OBJECT_KEY_RE.prefixmatch('"name": 1') and not Reply.OBJECT_KEY_RE.prefixmatch('"name", 1')
+
+
+@pytest.mark.spec("PRM-2")
+def test_strings_joined_as_in_code_become_one():
+    assert Reply.STRING_CONCATENATION_RE.sub("", '"a" + "b"') == '"ab"'
+
+
+@pytest.mark.spec("PRM-2")
+def test_an_escaped_single_quote_after_an_even_run_of_backslashes():
+    assert Reply.ESCAPED_SINGLE_QUOTE_RE.sub(r"\1'", r"it\'s") == "it's"
+    assert Reply.ESCAPED_SINGLE_QUOTE_RE.sub(r"\1'", r"it\\'s") == r"it\\'s"
 
 
 @pytest.mark.spec("PRM-3")
@@ -76,6 +90,30 @@ def test_files_drop_debris_and_a_fence_around_the_body():
 def test_a_markdown_file_keeps_its_fences():
     body = "```sh\nmake\n```"
     assert Reply(f"<<<FILE README.md>>>\n{body}\n<<<END>>>").files() == [("README.md", body)]
+
+
+@pytest.mark.spec("PRM-3")
+@pytest.mark.parametrize("header", ["<<<FILE x>>>", "<<<FILE path=x>>>", '<<<FILE "x">>>', "<<<FILE: x>>>", "<<<FILE x"])
+def test_a_file_header_gives_its_path_in_every_form(header):
+    assert Reply(f"{header}\nbody\n<<<END>>>").files() == [("x", "body")]
+
+
+@pytest.mark.spec("PRM-3")
+def test_a_relative_path_alone_on_a_line():
+    assert all(Reply.RELATIVE_PATH_LINE_RE.fullmatch(path) for path in ("src/app.py", "app.py", "src/app"))
+    assert not any(Reply.RELATIVE_PATH_LINE_RE.fullmatch(text) for text in ("the file", "app"))
+
+
+@pytest.mark.spec("PRM-3")
+def test_a_line_of_the_block_formats_own_marks():
+    assert all(Reply.BLOCK_MARKS_ONLY_RE.fullmatch(line) for line in (">>>", "<<<END>>>", " << "))
+    assert not Reply.BLOCK_MARKS_ONLY_RE.fullmatch("x >>> y")
+
+
+@pytest.mark.spec("PRM-3")
+def test_a_markdown_fence_line():
+    assert all(Reply.MARKDOWN_FENCE_RE.fullmatch(line) for line in ("```", "```python", "~~~"))
+    assert not Reply.MARKDOWN_FENCE_RE.fullmatch("```python x = 1")
 
 
 @pytest.mark.spec("PRM-4")
@@ -168,8 +206,8 @@ def test_assemble_fits_optional_parts_while_they_fit():
     parts = [Part("R", "r" * 100, True), Part("Atomic", "a" * 500, atomic=True), Part("Prose", "p" * 1000)]
     text = Part.assemble(parts, 600)
     assert len(text) <= 600
-    assert "## Atomic" not in text  # whole or nothing
-    assert "## Prose\n" + "p" * 100 in text and "[...]" in text  # shortened to the room left
+    assert "## Atomic" not in text
+    assert "## Prose\n" + "p" * 100 in text and "[...]" in text
 
 
 @pytest.mark.spec("PRM-11")
@@ -201,8 +239,8 @@ def test_exact_parts_are_never_shortened():
 def test_prose_is_never_cut_below_the_floor():
     with pytest.raises(PromptTooLarge):
         Part.assemble([Part("Prose", "p" * 3000, True)], 100)
-    shortened = Part("P", "p" * 3000, True).shortened(TRIM_FLOOR)
-    assert len(shortened.text) <= TRIM_FLOOR and shortened.text.endswith("[...]")
+    shortened = Part("P", "p" * 3000, True).shortened(MIN_TRIMMED_PROSE_CHARS)
+    assert len(shortened.text) <= MIN_TRIMMED_PROSE_CHARS and shortened.text.endswith("[...]")
 
 
 @pytest.mark.spec("PRM-13")

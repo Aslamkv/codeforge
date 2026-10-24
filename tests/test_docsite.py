@@ -1,5 +1,3 @@
-"""A documentation site read with no model: the version's root, the site's map, each slot's pages, the cache."""
-
 import pytest
 
 from tinkerkit.docsite import DocCache, DocSite, candidates, map_links, pick, under, version_keys
@@ -9,8 +7,6 @@ from tinkerkit.settings import Config, Home
 
 
 class SiteFetcher:
-    """A fetcher over {url: HTML or text}; a missing address answers HTTP 404. It keeps what it was asked."""
-
     def __init__(self, pages):
         self.pages, self.asked = pages, []
 
@@ -50,19 +46,20 @@ def test_the_sites_map_comes_from_llms_txt_then_sitemap_then_its_own_links():
     assert [url for url, _ in DocSite(with_llms).map(root, base)] == ["https://docs.x.org/3.15/whatsnew/3.15.html"]
     with_sitemap = SiteFetcher({base + "sitemap.xml": sitemap})
     assert [url for url, _ in DocSite(with_sitemap).map(root, base)] == ["https://docs.x.org/3.15/tutorial/"]
-    assert DocSite(SiteFetcher({})).map(root, base) == [(base + "faq.html", "FAQ")]  # its own links, on its site
+    its_own_links_on_its_site = [(base + "faq.html", "FAQ")]
+    assert DocSite(SiteFetcher({})).map(root, base) == its_own_links_on_its_site
 
 
 @pytest.mark.spec("LRN-15")
 def test_each_slot_gets_its_pages_in_turn_the_versions_first():
     base = "https://docs.x.org/3.15/"
-    links = [(base + "whatsnew/3.14.html", "What's new in 3.14"), (base + "whatsnew/3.15.html", "What's new in 3.15"),
+    another_versions_page = base + "whatsnew/3.14.html"
+    links = [(another_versions_page, "What's new in 3.14"), (base + "whatsnew/3.15.html", "What's new in 3.15"),
              (base + "tutorial/index.html", "Tutorial"), (base + "tutorial/classes.html", "Classes"),
              (base + "faq/design.html", "Design FAQ"), (base + "license.html", "License")]
     wanted = ["whatsnew changelog", "tutorial reference", "faq design"]
     assert pick(links, wanted, "3.15", 10, base) == [base + "whatsnew/3.15.html", base + "tutorial/index.html",
                                                      base + "faq/design.html", base + "tutorial/classes.html"]
-    # whatsnew/3.14.html names another version: never picked for 3.15
     assert len(pick(links, wanted, "3.15", 2, base)) == 2
 
 
@@ -75,7 +72,8 @@ def test_reading_a_site_follows_an_index_one_hop_to_its_versions_page():
              base + "whatsnew/3.14.html": text("New in 3.14")}
     fetcher = SiteFetcher(pages)
     read = DocSite(fetcher).read(fetcher.fetch_all([base])[0], "3.15", ["whatsnew"], 10)
-    assert [page.url for page in read] == [base, base + "whatsnew/3.15.html"]  # the index itself has no text left
+    the_index_and_its_versions_page = [base, base + "whatsnew/3.15.html"]
+    assert [page.url for page in read] == the_index_and_its_versions_page
     assert base + "whatsnew/3.14.html" not in fetcher.asked
 
 
@@ -101,7 +99,8 @@ def test_a_copy_of_the_latest_documentation_is_read_again_after_docs_latest_days
     assert DocCache.get("x", "latest") is None
     DocCache.put("x", "1.0", "https://x.dev/1.0/", [page])
     Home.store().update("sources", "x@1.0", lambda kept: dict(kept, kept="2020-01-01 10:00"))
-    assert DocCache.get("x", "1.0") is not None  # a version's own documentation does not change
+    a_versions_own_documentation = DocCache.get("x", "1.0")
+    assert a_versions_own_documentation is not None
     Config.save(docs_latest_days=100000)
     assert DocCache.get("x", "latest") is not None
 

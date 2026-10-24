@@ -1,27 +1,22 @@
-"""Fetched pages as passages a slot can draw on: each page's main content (no menus, headers, footers,
-asides, scripts, styles, forms or blocks of links) split under its headings, code blocks kept whole; then
-across pages, what a site repeats on every page is dropped, and so is a passage that repeats another.
-Each passage keeps the address it came from and when it was fetched."""
-
 import html.parser
 import re
 lazy import urllib.parse
 from dataclasses import dataclass
 
-lazy from .settings import LINK_ONLY, NEAR_DUPLICATE, PASSAGE_CHARS, USABLE_PAGE_CHARS, split_text, words
-from .web import PageText
+lazy from .settings import (
+    MAX_PASSAGE_CHARS, MENU_LINK_SHARE, MIN_USABLE_PAGE_CHARS, NEAR_DUPLICATE_OVERLAP, split_text, words,
+)
+from .web import MAIN_CLOSED, PageText, read_what_it_can
 
 
 @dataclass
 class Block:
-    """One piece of a page: a heading, a paragraph of text, or a code block."""
     kind: str
     text: str
 
 
 @dataclass
 class Page:
-    """A fetched page's main content as blocks, with where and when it was fetched."""
     url: str
     fetched: str
     blocks: list
@@ -30,10 +25,9 @@ class Page:
         return sum(len(block.text) for block in self.blocks if block.kind != "heading")
 
     def usable(self):
-        return self.chars() >= USABLE_PAGE_CHARS
+        return self.chars() >= MIN_USABLE_PAGE_CHARS
 
     def as_dict(self):
-        """The page as it is kept (DocCache): its address, when it was fetched, and its blocks."""
         return {"url": self.url, "fetched": self.fetched, "blocks": [[block.kind, block.text] for block in self.blocks]}
 
     @staticmethod
@@ -43,7 +37,6 @@ class Page:
 
 @dataclass
 class Passage:
-    """Some text under one heading of a page; id: its number in the pool (P1, P2, ...)."""
     url: str
     fetched: str
     heading: str
@@ -58,23 +51,18 @@ class Passage:
 
 
 class Cleaner:
-    """Pages to passages, with no model: page() reads one page's main content, pool() turns pages into
-    passages that repeat nothing (nor anything already known)."""
-    TINY = 30  # chars below which a passage says nothing on its own ("Next", "Edit this page")
+    TINY_PASSAGE_CHARS = 30
 
     @staticmethod
     def page(url, text, kind, fetched):
-        """A page's main content: HTML read by its tags, anything else (plain text, Markdown) by its lines."""
         is_html = "html" in kind or text.lstrip()[:200].lower().startswith(("<!doctype html", "<html"))
         return Page(url, fetched, MainBlocks.of(text) if is_html else text_blocks(text))
 
     def pool(self, pages, known=()):
-        """The pages' passages, numbered on from the known ones: a site's repeated text dropped, and a
-        passage that repeats another (or a known one) left out."""
         kept, seen = [], [shingles(passage.text) for passage in known]
         for passage in (*self.under_headings(page) for page in self.without_site_repeats(pages)):
             marks = shingles(passage.text)
-            if len(passage.text) >= self.TINY and not any(repeats(marks, other) for other in seen):
+            if len(passage.text) >= self.TINY_PASSAGE_CHARS and not any(repeats(marks, other) for other in seen):
                 kept.append(passage)
                 seen.append(marks)
         for number, passage in enumerate(kept, len(known) + 1):
@@ -83,8 +71,6 @@ class Cleaner:
 
     @staticmethod
     def without_site_repeats(pages):
-        """The pages without the headings and text their site shows on more than one of them (its chrome);
-        code is kept, as a command repeated on two pages is still that command."""
         counts = {}
         for page in pages:
             for key in {(site(page.url), normal(block.text)) for block in page.blocks if block.kind != "code"}:
@@ -95,8 +81,6 @@ class Cleaner:
 
     @staticmethod
     def under_headings(page):
-        """A page's passages: its blocks gathered under their heading up to PASSAGE_CHARS each; a longer
-        paragraph is cut, a code block never."""
         passages, heading, held = [], "", []
 
         def close():
@@ -109,8 +93,8 @@ class Cleaner:
                 close()
                 heading = block.text
                 continue
-            for piece in [block.text] if block.kind == "code" else split_text(block.text, PASSAGE_CHARS):
-                if held and len("\n\n".join(held)) + 2 + len(piece) > PASSAGE_CHARS:
+            for piece in [block.text] if block.kind == "code" else split_text(block.text, MAX_PASSAGE_CHARS):
+                if held and len("\n\n".join(held)) + 2 + len(piece) > MAX_PASSAGE_CHARS:
                     close()
                 held.append(piece)
         close()
@@ -118,9 +102,6 @@ class Cleaner:
 
 
 class MainBlocks(html.parser.HTMLParser):
-    """An HTML page's main content as blocks: what is in <main> or <article> when it holds enough text,
-    else the body; never what PageText leaves out (scripts, styles, menus, headers, footers, asides,
-    forms, what is hidden), nor a block that is mostly links."""
     SKIP = PageText.SKIP | {"head"}
     HEADINGS = {"h1", "h2", "h3", "h4", "h5", "h6"}
     BLOCKS = PageText.BLOCKS - {"br", "hr"}
@@ -129,19 +110,15 @@ class MainBlocks(html.parser.HTMLParser):
         super().__init__(convert_charrefs=True)
         self.skipping, self.pre, self.links, self.depth = 0, 0, 0, 0
         self.kind, self.pieces, self.link_chars = "text", [], 0
-        self.all, self.main, self.main_depth = [], [], None
+        self.all, self.main, self.main_opened_at = [], [], None
 
     @classmethod
     def of(cls, markup):
         parser = cls()
-        try:
-            parser.feed(markup)
-            parser.close()
-        except Exception:  # broken HTML: what was read so far
-            pass
+        read_what_it_can(parser, markup)
         parser.flush()
         main_chars = sum(len(block.text) for block in parser.main if block.kind != "heading")
-        return parser.main if main_chars >= USABLE_PAGE_CHARS else parser.all
+        return parser.main if main_chars >= MIN_USABLE_PAGE_CHARS else parser.all
 
     def handle_starttag(self, tag, attrs):
         if tag in PageText.VOID:
@@ -151,8 +128,8 @@ class MainBlocks(html.parser.HTMLParser):
         if self.skipping or self.not_content(tag, attributes):
             self.skipping += 1
             return
-        if PageText.opens_main(tag, attributes) and self.main_depth is None:
-            self.main_depth = self.depth
+        if PageText.opens_main(tag, attributes) and self.main_opened_at is None:
+            self.main_opened_at = self.depth
         if tag == "a":
             self.links += 1
         if tag in self.BLOCKS and not self.pre:
@@ -177,8 +154,8 @@ class MainBlocks(html.parser.HTMLParser):
                 self.links -= 1
             if tag in self.BLOCKS and not self.pre:
                 self.flush()
-            if self.main_depth is not None and self.depth == self.main_depth:
-                self.main_depth = -1  # closed: what follows is not main any more
+            if self.main_opened_at is not None and self.depth == self.main_opened_at:
+                self.main_opened_at = MAIN_CLOSED
         self.depth = max(0, self.depth - 1)
 
     def handle_data(self, data):
@@ -190,19 +167,15 @@ class MainBlocks(html.parser.HTMLParser):
             self.link_chars += len(data.strip())
 
     def flush(self):
-        """The block read so far, kept unless it is empty or a paragraph that is mostly links (a heading
-        that links to itself is still a heading)."""
         text = "".join(self.pieces).strip("\n") if self.kind == "code" else " ".join("".join(self.pieces).split())
         if text.strip() and (self.kind != "text" or not mostly_links(self.link_chars, text)):
             self.all.append(Block(self.kind, text))
-            if self.main_depth is not None and self.main_depth > 0:
+            if self.main_opened_at is not None and self.main_opened_at > 0:
                 self.main.append(Block(self.kind, text))
         self.kind, self.pieces, self.link_chars = "text", [], 0
 
 
 class Links(html.parser.HTMLParser):
-    """A page's links as (absolute address without its #fragment, text), each address once, in page order."""
-
     def __init__(self, base):
         super().__init__(convert_charrefs=True)
         self.base, self.found, self.href, self.text = base, {}, None, []
@@ -210,11 +183,7 @@ class Links(html.parser.HTMLParser):
     @classmethod
     def of(cls, markup, base):
         parser = cls(base)
-        try:
-            parser.feed(markup)
-            parser.close()
-        except Exception:  # broken HTML: what was read so far
-            pass
+        read_what_it_can(parser, markup)
         return list(parser.found.items())
 
     def handle_starttag(self, tag, attrs):
@@ -237,8 +206,6 @@ MARKDOWN_LINK = re.compile(r"\[[^\]]*\]\([^)]*\)")
 
 
 def text_blocks(text):
-    """Plain text or Markdown as blocks: "#" lines are headings, ``` fences hold code, blank lines end a
-    paragraph, and a paragraph that is mostly links is left out."""
     blocks, held, fence = [], [], None
 
     def close(kind="text"):
@@ -266,19 +233,16 @@ def text_blocks(text):
 
 
 def mostly_links(link_chars, text):
-    """Whether a paragraph is mostly the words of its links (a list of links, not prose)."""
-    return link_chars >= LINK_ONLY * len(text)
+    return link_chars >= MENU_LINK_SHARE * len(text)
 
 
 def shingles(text):
-    """The text's 3-word runs (its words, when it has fewer than 3)."""
     found = words(text)
     return {tuple(found[start:start + 3]) for start in range(len(found) - 2)} or {tuple(found)}
 
 
 def repeats(a, b):
-    """Whether two passages' shingles overlap at least NEAR_DUPLICATE (Jaccard)."""
-    return len(a & b) >= NEAR_DUPLICATE * len(a | b) if a | b else True
+    return len(a & b) >= NEAR_DUPLICATE_OVERLAP * len(a | b) if a | b else True
 
 
 def site(url):

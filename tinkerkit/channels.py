@@ -1,11 +1,3 @@
-"""Channels: talking to Tinker from a chat app, a plugin like the web. With no channel enabled nothing of
-this runs. A channel is enabled with tinker channel enable NAME; then every task reports its progress there,
-and the Tinker that listens (tinker channel start, or tinker in a terminal) reads the chat: one at a time
-(Telegram lets one program read a bot). What a chat can ask and how it is answered is the conversation's
-(conversation.py); this is the chat apps themselves (TelegramChannel), their settings and tinker channel.
-
-Only the chats a channel was paired with are listened to: a message from anyone else is ignored. Bot tokens
-are kept apart from the settings ("channel_secrets", in Tinker's database, which only its owner can read)."""
 lazy import http.client
 lazy import json
 lazy import os
@@ -15,27 +7,31 @@ lazy import secrets
 lazy import sys
 lazy import time
 lazy import urllib.parse
+from collections import namedtuple
 lazy from pathlib import Path
 
-from .conversation import OFF, Channel, ChannelError, Desk, Markup, Message, first_words
-lazy from .ledger import ASKED_WAIT, Ledger
+from .conversation import Channel, ChannelError, Desk, Markup, Message, Secret, first_words, started_by_a_conversation
+lazy from .ledger import ANSWER_WINDOW_SECONDS, Ledger
 lazy from .messages import say
 lazy from .settings import Home
 
 
-PAIRING_WAIT = 120                             # seconds to wait for the first message when pairing a chat
-CHECK_TRIES = 3                                # tries of a channel's first call when it starts listening
-RATE_LIMIT_WAITS = 3                           # times a call waits out Telegram's "too many requests"
-CAPTION_CHARS = 1024                           # the longest caption Telegram takes on a file
-MENU_DESCRIPTION_CHARS = 256                   # the longest description of a command in a bot's menu
-PLACEHOLDER_CHARS = 64                         # the longest hint Telegram shows in an empty reply box
-BOT_DOWNLOAD_BYTES = 20_000_000                # the largest file Telegram lets a bot download
-DOWNLOAD_WAIT = 120                            # seconds a file sent in a chat may take to download
+PAIRING_WAIT_SECONDS = 120
+FIRST_CALL_TRIES = 3
+TELEGRAM_RATE_LIMIT_WAITS = 3
+TELEGRAM_MAX_CAPTION_CHARS = 1024
+TELEGRAM_MAX_MENU_DESCRIPTION_CHARS = 256
+TELEGRAM_MAX_PLACEHOLDER_CHARS = 64
+TELEGRAM_MAX_DOWNLOAD_BYTES = 20_000_000
+SENT_FILE_DOWNLOAD_TIMEOUT = 120
 FORM = "application/x-www-form-urlencoded"
 
 
+Upload = namedtuple("Upload", "body content_type")
+Answer = namedtuple("Answer", "status body")
+
+
 class ChannelCommand:
-    """tinker channel list | add | remove NAME | enable NAME | disable NAME | start [NAME]."""
     USAGE = ("tinker channel list                 the channels, and whether each is enabled\n"
              "tinker channel add                  add one (asks its kind, a name, its secrets, and pairs your chat)\n"
              "tinker channel remove NAME          delete it, secrets included\n"
@@ -68,8 +64,6 @@ class ChannelCommand:
 
     @staticmethod
     def add(rest):
-        """Asks the kind, a name and the kind's secrets; checks them; pairs the chat(s) it will serve.
-        Each answer can come as an option instead: --kind, --name, --token (any secret), --chat."""
         given = ChannelCommand.options(rest)
         kind = ChannelCommand.kind(given)
         name = ChannelCommand.new_name(given, kind)
@@ -105,7 +99,6 @@ class ChannelCommand:
 
     @staticmethod
     def new_name(given, kind):
-        """A name for the new channel: a short word, not a channel's already."""
         name = given.get("name") or ask("Channel name", kind)
         if not re.fullmatch(r"[A-Za-z0-9][\w-]{0,31}", name):
             raise SystemExit("tinker: a channel name is letters, digits, - and _ (up to 32)")
@@ -115,10 +108,9 @@ class ChannelCommand:
 
     @staticmethod
     def pair(channel, who):
-        """The chat that sends the channel a message now, once its sender confirms it here."""
         channel.skip_waiting()
-        say.step(f"Send any message to {who} now (waiting up to {PAIRING_WAIT}s)…", "📨")
-        ends = time.monotonic() + PAIRING_WAIT
+        say.step(f"Send any message to {who} now (waiting up to {PAIRING_WAIT_SECONDS}s)…", "📨")
+        ends = time.monotonic() + PAIRING_WAIT_SECONDS
         while time.monotonic() < ends:
             for message in channel.receive(timeout=10):
                 answer = ask(f"Message from {message.sender or 'someone'} (chat {message.chat}): "
@@ -158,18 +150,16 @@ class ChannelCommand:
 
     @staticmethod
     def check(channel):
-        """The channel answers: a refusal (a bad token) ends here, a slow or dropped network is asked
-        again, up to CHECK_TRIES times."""
-        for tries in range(1, CHECK_TRIES + 1):
+        for tries in range(1, FIRST_CALL_TRIES + 1):
             try:
                 return channel.handle()
             except ChannelError as exc:
                 raise SystemExit(f"tinker: channel {channel.name} does not work: {exc}") from None
             except OSError as exc:
-                if tries == CHECK_TRIES:
+                if tries == FIRST_CALL_TRIES:
                     raise SystemExit(f"tinker: channel {channel.name} cannot be reached ({exc}), tried {tries} "
                                      f"times: check the network and start it again") from None
-                say.retry(f"{channel.name} did not answer ({exc}); trying again ({tries + 1}/{CHECK_TRIES})")
+                say.retry(f"{channel.name} did not answer ({exc}); trying again ({tries + 1}/{FIRST_CALL_TRIES})")
                 time.sleep(5)
 
     @staticmethod
@@ -182,13 +172,9 @@ class ChannelCommand:
 
 
 class Channels:
-    """The channels Tinker has: their settings (kind, enabled, the chats they serve) in Tinker's
-    "channels", their secrets apart in its "channel_secrets" (never printed)."""
-
     @staticmethod
     def enabled():
-        """The enabled channels, made; none when a run is told not to listen (tinker channel start's own)."""
-        if os.environ.get(OFF) == "off":
+        if started_by_a_conversation():
             return []
         return [Channels.make(name) for name, channel_settings in Channels.settings().items()
                 if channel_settings.get("enabled")]
@@ -205,7 +191,6 @@ class Channels:
 
     @staticmethod
     def settings():
-        """{name: settings} of every channel."""
         return Home.store().items("channels")
 
     @staticmethod
@@ -225,17 +210,16 @@ class Channels:
 
 
 class TelegramChannel(Channel):
-    """A Telegram bot (made with @BotFather): its token is the one secret."""
     KIND = "telegram"
-    SECRETS = (("token", "Bot token (from @BotFather)"),)
+    SECRETS = (Secret("token", "Bot token (from @BotFather)"),)
     HOST = "api.telegram.org"
 
     def __init__(self, name, settings, secrets):
         super().__init__(name, settings, secrets)
         self.offset = None
-        self.open_connections = queue.Queue()  # connections kept open between calls
-        self.alive = {}  # per chat: the ids of the messages seen that are still in it (taken out: no more)
-        self.asked = {}  # per chat: (the person's last words, when) until a new thing answers them
+        self.open_connections = queue.Queue()
+        self.live_message_ids = {}
+        self.last_words_by_chat = {}
 
     def handle(self):
         return "@" + self.call("getMe")["username"]
@@ -243,9 +227,8 @@ class TelegramChannel(Channel):
     def receive(self, timeout):
         try:
             updates = self.call("getUpdates", wait=timeout + 10, offset=self.offset, timeout=int(timeout))
-        except OSError:  # the network is gone for now: the messages wait at Telegram
-            time.sleep(min(timeout, 10))
-            return []
+        except OSError:
+            return self.nothing_while_the_network_is_gone(timeout)
         messages = []
         for update in updates:
             self.offset = update["update_id"] + 1
@@ -254,13 +237,17 @@ class TelegramChannel(Channel):
                 message = self.book_in(message)
             if message.get("text"):
                 messages.append(self.message_of(message))
-                self.asked[str(message["chat"]["id"])] = (message["text"], time.monotonic())
+                self.last_words_by_chat[str(message["chat"]["id"])] = (message["text"], time.monotonic())
             if message.get("message_id"):
                 self.seen(str(message["chat"]["id"]), message["message_id"])
         return messages
 
+    @staticmethod
+    def nothing_while_the_network_is_gone(timeout):
+        time.sleep(min(timeout, 10))
+        return []
+
     def book_sent(self, message):
-        """Whether a message is a file to read, sent by a chat Tinker serves."""
         return message.get("document") and str(message["chat"]["id"]) in map(str, self.allowed)
 
     @staticmethod
@@ -270,12 +257,9 @@ class TelegramChannel(Channel):
         return Message(message["chat"]["id"], message["text"], sender, message.get("message_id"))
 
     def book_in(self, message):
-        """A file sent in an allowed chat, as the message to read it: read with the file kept in Tinker's home (the
-        link Telegram gives a bot carries its token, so it is never passed on). A file too large for a bot, or one
-        that cannot be downloaded, is said to the person, and the message has no text."""
         chat, document = str(message["chat"]["id"]), message["document"]
         name = document.get("file_name") or "book"
-        if document.get("file_size", 0) > BOT_DOWNLOAD_BYTES:
+        if document.get("file_size", 0) > TELEGRAM_MAX_DOWNLOAD_BYTES:
             self.send(chat, f"{name} is larger than a bot may download from Telegram (20 MB): send a link that "
                             f"downloads it instead (read URL).")
             return dict(message, text="")
@@ -287,9 +271,8 @@ class TelegramChannel(Channel):
         return dict(message, text=f"read {path}")
 
     def downloaded(self, file_id, name):
-        """The file Telegram keeps for file_id, downloaded into Tinker's home as name (Home.reading_file); its path."""
         found = self.call("getFile", file_id=file_id)["file_path"]
-        connection = self.connection(DOWNLOAD_WAIT)
+        connection = self.connection(SENT_FILE_DOWNLOAD_TIMEOUT)
         try:
             connection.request("GET", f"/file/bot{self.secrets.get('token', '')}/{found}", None, {})
             response = connection.getresponse()
@@ -312,9 +295,7 @@ class TelegramChannel(Channel):
             pass
 
     def offer(self, commands):
-        """The commands in the bot's menu (shown as the person types /): Telegram takes a-z, 0-9 and _ in a name,
-        so use-model is offered as /use_model (and taken back as use-model)."""
-        menu = [{"command": name.replace("-", "_"), "description": what[:MENU_DESCRIPTION_CHARS]}
+        menu = [{"command": name.replace("-", "_"), "description": what[:TELEGRAM_MAX_MENU_DESCRIPTION_CHARS]}
                 for name, what in commands]
         try:
             self.call("setMyCommands", commands=json.dumps(menu))
@@ -322,8 +303,7 @@ class TelegramChannel(Channel):
             pass
 
     def ask_for(self, chat, question, hint):
-        """question sent with the reply box open (ForceReply), hint in it until the person types."""
-        reply = {"force_reply": True, "input_field_placeholder": hint[:PLACEHOLDER_CHARS]}
+        reply = {"force_reply": True, "input_field_placeholder": hint[:TELEGRAM_MAX_PLACEHOLDER_CHARS]}
         return self.send(chat, question, reply_markup=json.dumps(reply))
 
     def send(self, chat, text, **fields):
@@ -335,13 +315,12 @@ class TelegramChannel(Channel):
         return sent
 
     def edit(self, chat, sent, text):
-        """sent edited to text; one that cannot be is taken out, and text sent anew in its place."""
         if sent is None:
             return self.send(chat, text)
         try:
             self.post("editMessageText", chat, text, message_id=sent)
-        except ChannelError as exc:  # unchanged text is refused, harmlessly
-            if "not modified" not in str(exc):
+        except ChannelError as exc:
+            if not self.refused_as_unchanged(exc):
                 self.delete(chat, sent)
                 return self.send(chat, text)
         except OSError:
@@ -349,8 +328,11 @@ class TelegramChannel(Channel):
         Ledger.touched(self.name, str(chat), sent)
         return sent
 
+    @staticmethod
+    def refused_as_unchanged(exc):
+        return "not modified" in str(exc)
+
     def show(self, chat, shown, text, done=False, bottom=None, status=False):
-        """The thing shown, and kept in the ledger as it is now (Tinker's status is not a thing)."""
         thing = None if status else Ledger.thing_of(self.name, str(chat), shown)
         now = super().show(chat, shown, text, done, bottom, status)
         if not status:
@@ -358,13 +340,10 @@ class TelegramChannel(Channel):
         return now
 
     def answered(self, chat):
-        """The person's words a new thing answers: their last message, sent within ASKED_WAIT ("" for none)."""
-        words, when = self.asked.pop(str(chat), ("", 0.0))
-        return words if time.monotonic() - when <= ASKED_WAIT else ""
+        words, when = self.last_words_by_chat.pop(str(chat), ("", 0.0))
+        return words if time.monotonic() - when <= ANSWER_WINDOW_SECONDS else ""
 
     def post(self, method, chat, text, **fields):
-        """text sent (or edited) as Telegram shows Markup (HTML), commands in it said as the conversation takes
-        them; what it cannot read as HTML goes plain."""
         text = self.said(text)
         try:
             return self.call(method, chat_id=chat, text=Markup.html(text)[:4096], parse_mode="HTML", **fields)
@@ -375,15 +354,13 @@ class TelegramChannel(Channel):
 
     @staticmethod
     def html_refused(exc):
-        """Whether Telegram refused the message's HTML (it could not parse its entities)."""
         return "parse" in str(exc) or "entit" in str(exc)
 
     def send_file(self, chat, path, caption):
-        """The file sent as a document, caption (Markup) under it; a failure sends the caption alone."""
         caption = self.said(caption)
         try:
             sent = self.call("sendDocument", wait=120, file=Path(path), chat_id=chat,
-                             caption=Markup.html(caption)[:CAPTION_CHARS], parse_mode="HTML")["message_id"]
+                             caption=Markup.html(caption)[:TELEGRAM_MAX_CAPTION_CHARS], parse_mode="HTML")["message_id"]
         except OSError, ChannelError:
             return self.send(chat, caption)
         self.seen(str(chat), sent)
@@ -401,9 +378,7 @@ class TelegramChannel(Channel):
                 Ledger.lasting(self.name, str(chat), message)
 
     def glance(self, chat, asked, sent, keep=None):
-        """sent only shows something, asked for by the person's message asked: that message taken out now, the
-        glance shown before too (one at a time), and sent in keep seconds (GLANCE_KEEP when not given)."""
-        self.asked.pop(str(chat), None)  # what it answered asks no thing
+        self.answered(chat)
         if asked:
             self.delete(chat, asked)
         for message in Ledger.glances(self.name, chat):
@@ -411,21 +386,17 @@ class TelegramChannel(Channel):
         Ledger.glance(self.name, str(chat), [message for message in sent if message is not None], keep)
 
     def collect(self):
-        """The messages whose time is up, taken out of the chats."""
         for chat, message in Ledger.due(self.name):
             self.delete(chat, message)
 
     def clear(self):
-        """Every message in the chats taken out but Tinker's status; how many."""
         passing = Ledger.passing(self.name)
         for chat, message in passing:
             self.delete(chat, message)
         return len(passing)
 
     def delete(self, chat, sent):
-        """A message taken out: Tinker's own, or the person's (a bot may, in a private chat). Without a network it
-        stays in the ledger, to be taken out later; a refusal means it is gone, or too old for a bot to take out."""
-        alive = self.alive.get(str(chat), [])
+        alive = self.live_message_ids.get(str(chat), [])
         if sent in alive:
             alive.remove(sent)
         try:
@@ -437,26 +408,19 @@ class TelegramChannel(Channel):
         Ledger.gone(self.name, str(chat), sent)
 
     def latest(self, chat, sent):
-        """Whether no message still in the chat came after sent (of those seen here)."""
-        return sent is not None and sent >= max(self.alive.get(str(chat), [0]), default=0)
+        return sent is not None and sent >= max(self.live_message_ids.get(str(chat), [0]), default=0)
 
     def seen(self, chat, message):
-        """A message of the chat's, still in it; one of a chat served is kept in the ledger."""
-        self.alive[chat] = (self.alive.get(chat, []) + [message])[-200:]
+        self.live_message_ids[chat] = (self.live_message_ids.get(chat, []) + [message])[-200:]
         if chat in map(str, self.allowed):
             Ledger.kept(self.name, chat, message)
 
     def call(self, method, wait=30, file=None, **fields):
-        """The Bot API's result (waiting up to wait seconds); a refused call is a ChannelError, a dropped
-        connection an OSError. Calls go over connections kept open (a new one per call costs a name lookup
-        and a handshake: seconds, where a call on an open one takes a fraction of one); one that dropped
-        meanwhile is opened again, once. Too many requests (429) is waited out as long as Telegram asks.
-        file: a document (a Path) uploaded with the fields, as a form with parts."""
         path = f"/bot{self.secrets.get('token', '')}/{method}"
         fields = {key: value for key, value in fields.items() if value is not None}
         data, kind = self.multipart(fields, file) if file else (urllib.parse.urlencode(fields), FORM)
         status, body = self.answer(method, path, data, wait, kind)
-        for _ in range(RATE_LIMIT_WAITS):
+        for _ in range(TELEGRAM_RATE_LIMIT_WAITS):
             pause = self.retry_after(status, body)
             if pause is None:
                 break
@@ -466,16 +430,14 @@ class TelegramChannel(Channel):
 
     @staticmethod
     def multipart(fields, file):
-        """(body, content type) of a multipart/form-data upload: each field, then the file as "document"."""
         boundary = f"tinker-{secrets.token_hex(12)}"
         parts = [f'--{boundary}\r\nContent-Disposition: form-data; name="{name}"\r\n\r\n{value}\r\n'.encode()
                  for name, value in fields.items()]
         parts.append(f'--{boundary}\r\nContent-Disposition: form-data; name="document"; filename="{file.name}"\r\n'
                      f'Content-Type: application/octet-stream\r\n\r\n'.encode() + file.read_bytes() + b"\r\n")
-        return b"".join(parts) + f"--{boundary}--\r\n".encode(), f"multipart/form-data; boundary={boundary}"
+        return Upload(b"".join(parts) + f"--{boundary}--\r\n".encode(), f"multipart/form-data; boundary={boundary}")
 
     def answer(self, method, path, data, wait, kind=FORM):
-        """(status, body) of the call, on a connection opened again once when it dropped."""
         for attempt in (1, 2):
             try:
                 return self.exchange(path, data, wait, kind)
@@ -485,7 +447,6 @@ class TelegramChannel(Channel):
 
     @staticmethod
     def retry_after(status, body):
-        """The seconds Telegram asks to wait before calling again; None when it did not ask."""
         if status != 429:
             return None
         try:
@@ -494,12 +455,11 @@ class TelegramChannel(Channel):
             return 1
 
     def exchange(self, path, data, wait, kind=FORM):
-        """(status, body) of one POST over an open connection, kept open for the next call (closed when it failed)."""
         connection = self.connection(wait)
         try:
             connection.request("POST", path, data, {"Content-Type": kind})
             response = connection.getresponse()
-            answer = response.status, response.read().decode(errors="replace")
+            answer = Answer(response.status, response.read().decode(errors="replace"))
         except http.client.HTTPException, OSError:
             connection.close()
             raise
@@ -517,8 +477,6 @@ class TelegramChannel(Channel):
         return reply.get("result")
 
     def connection(self, wait):
-        """An open connection to Telegram (one kept from a call before, else a new one), for a call of up
-        to wait seconds."""
         try:
             connection = self.open_connections.get_nowait()
         except queue.Empty:
@@ -533,7 +491,6 @@ KINDS = frozendict({kind.KIND: kind for kind in (TelegramChannel,)})
 
 
 def ask(question, default="", choices=None, secret=False):
-    """One answer from the person at the terminal (default when they just press Enter)."""
     shown = f"{question}" + (f" ({'/'.join(choices)})" if choices else "") + (f" [{default}]" if default else "")
     if not sys.stdin.isatty():
         if default:

@@ -1,5 +1,3 @@
-"""CNV: the conversation: Markup, channels, a task's progress, a chat, a command line, research and the Desk."""
-
 import contextlib
 import io
 import os
@@ -17,7 +15,7 @@ from tinkerkit.conversation import (
     Channel, ChannelError, ConsoleChannel, Desk, Markup, Message, Progress, Reporter, Research, Shell, Talk, after_word,
     built_project, command_of, described, first_lines, first_words, json_in, pieces, running, text_of, welcome,
 )
-from tinkerkit.ledger import NOTE_KEEP, Ledger
+from tinkerkit.ledger import DONE_NOTE_KEPT_SECONDS, Ledger
 from tinkerkit.settings import Home
 from tinkerkit.project import Tracker
 from tinkerkit.project import Runs
@@ -34,7 +32,6 @@ def wait_until(condition, timeout=15):
 
 
 class Recorder(Channel):
-    """A chat channel that keeps what it was asked to do: [(action, chat, id, text)]."""
     KIND = "recorder"
 
     def __init__(self, name="rec", chats=("1",), inbox=()):
@@ -91,8 +88,9 @@ def test_markup_html():
 
 @pytest.mark.spec("CNV-1")
 def test_markup_ansi_and_literal(monkeypatch):
-    monkeypatch.setattr(sys, "stdout", io.StringIO())
-    assert Markup.ansi("**b**") == "b"  # not a terminal: plain
+    not_a_terminal = io.StringIO()
+    monkeypatch.setattr(sys, "stdout", not_a_terminal)
+    assert Markup.ansi("**b**") == "b"
     tty = io.StringIO()
     tty.isatty = lambda: True
     monkeypatch.setattr(sys, "stdout", tty)
@@ -156,7 +154,7 @@ def test_said_removes_tinker_before_a_command():
     channel = Recorder()
     assert channel.said("Build it: tinker resume abc (or tinker   amend)") == "Build it: resume abc (or tinker   amend)"
     assert channel.said("the tinker tool and /x/tinker task") == "the tinker tool and /x/tinker task"
-    channel.bare = False
+    channel.commands_without_tinker = False
     assert channel.said("tinker resume abc") == "tinker resume abc"
 
 
@@ -225,7 +223,8 @@ def test_console_shows_headlines_then_the_whole_message(monkeypatch):
 @pytest.mark.spec("CNV-7")
 def test_console_receives_lines_until_exit():
     console = ConsoleChannel()
-    console.reader = object()  # no input thread: lines are queued by hand
+    no_input_thread = object()
+    console.reader = no_input_thread
     for line in ("hello", "  ", "exit"):
         console.lines.put(line)
     assert [message.text for message in console.receive(0)] == ["hello"]
@@ -238,7 +237,6 @@ def test_console_receives_lines_until_exit():
 
 
 def snapshot(**state):
-    """A run's tracker, as a run publishes it."""
     base = {"title": "calc: a calculator", "run": "abc123", "folder": "/tmp/projects/calc", "step": None,
             "doing": Tracker.STARTING, "began": None, "steps": [], "passing": None, "working": "", "tally": "",
             "found": "", "latest": "", "waiting": None, "ended": None, "before": 0.0, "seconds": 0.0}
@@ -249,21 +247,22 @@ def snapshot(**state):
 def test_progress_shows_the_tracker():
     progress = Progress("a calculator", phase="✅ **Confirmed:** building it")
     assert progress.text().splitlines() == ["🔨 **a calculator**", "▸ ✅ **Confirmed:** building it ⏳"]
-    assert progress.take(snapshot()) and "▸ ✅ **Confirmed:** building it" in progress.text()  # said until a step
-    progress.take(snapshot(step="verify", doing=Tracker.STEPS["verify"][0], began=time.time() - 65,
+    before_any_step = snapshot()
+    assert progress.take(before_any_step) and "▸ ✅ **Confirmed:** building it" in progress.text()
+    progress.take(snapshot(step="verify", doing=Tracker.DOING_AND_DONE["verify"][0], began=time.time() - 65,
                            steps=["🧠 Recalled what Tinker has learned", "📝 Spec written"], passing=[2, 3],
                            latest="wrote calc.py"))
     assert progress.text().splitlines() == [
         "🔨 **calc: a calculator**", "✅ 🧠 Recalled what Tinker has learned", "✅ 📝 Spec written",
         "▸ **🔁 Fixing until every test passes** · ⏱ 1m 5s ⏳", "📊 2/3 spec points pass", "… wrote calc.py"]
     assert progress.brief() == "**calc: a calculator** (🔁 Fixing until every test passes, 2/3 spec points pass)"
-    assert not progress.take(progress.snapshot)  # nothing changed
+    assert not progress.take(progress.snapshot)
 
 
 @pytest.mark.spec("CNV-8")
 def test_progress_says_what_the_run_works_on_how_far_it_got_and_what_it_found():
     progress = Progress("Reading Atomic Habits")
-    progress.take(snapshot(title="Reading Atomic Habits", step="chapters", doing=Tracker.STEPS["chapters"][0],
+    progress.take(snapshot(title="Reading Atomic Habits", step="chapters", doing=Tracker.DOING_AND_DONE["chapters"][0],
                            began=time.time() - 12, steps=["🧭 Chose the chapters to read: 3 core chapter(s) of 20"],
                            working="Reading chapter 3, The 1% Rule (2 of 7)", tally="1/7 chapters · 4 things learned",
                            found="Small habits compound like interest", latest="📖 Chapter 1: 4 things learned"))
@@ -273,7 +272,7 @@ def test_progress_says_what_the_run_works_on_how_far_it_got_and_what_it_found():
         "💡 Small habits compound like interest"]
     assert progress.brief() == ("**Reading Atomic Habits** (📚 Reading chapter 3, The 1% Rule (2 of 7), "
                                 "1/7 chapters · 4 things learned)")
-    progress.turn()  # the next edit: the hourglass flipped
+    progress.turn()
     assert progress.text().splitlines()[2].endswith(" ⌛") and not progress.take(progress.snapshot)
 
 
@@ -316,16 +315,19 @@ def test_progress_ending_of_a_plan_that_waits():
 
 @pytest.mark.spec("CNV-9")
 def test_reporter_shows_the_tracker_and_ends_with_its_ending(home_store, monkeypatch):
-    channel = Recorder(chats=("1", "2"))
-    monkeypatch.setattr(conversation, "EDIT_EVERY", 1000)  # no background edits: the test refreshes it
+    chats = ("1", "2")
+    channel = Recorder(chats=chats)
+    no_background_edits = 1000
+    monkeypatch.setattr(conversation, "PROGRESS_EDIT_SECONDS", no_background_edits)
     reporter = Reporter([channel], "a calculator", pid=4242)
     reporter.update()
-    assert len(channel.texts("send")) == 2  # one message per chat
-    home_store.put("running", "4242", snapshot(step="spec", doing=Tracker.STEPS["spec"][0]))
+    one_per_chat = len(chats)
+    assert len(channel.texts("send")) == one_per_chat
+    home_store.put("running", "4242", snapshot(step="spec", doing=Tracker.DOING_AND_DONE["spec"][0]))
     reporter.refresh()
     assert "📝 Writing the spec" in channel.texts()[-1] and channel.log[-1][0] == "edit"
     edits = len(channel.log)
-    reporter.refresh()  # unchanged, and its clock not due: no edit
+    reporter.refresh()
     assert len(channel.log) == edits
     reporter.finish(snapshot(ended={"status": "done", "headline": "Done.", "details": [], "next": []}))
     assert reporter.ended and "✅ **Done.**" in channel.texts()[-1]
@@ -334,7 +336,7 @@ def test_reporter_shows_the_tracker_and_ends_with_its_ending(home_store, monkeyp
 
 @pytest.mark.spec("CNV-9")
 def test_a_reporter_without_a_tracker_shows_its_lines(monkeypatch):
-    monkeypatch.setattr(conversation, "EDIT_EVERY", 1000)
+    monkeypatch.setattr(conversation, "PROGRESS_EDIT_SECONDS", 1000)
     channel = Recorder()
     learning = Reporter([channel], "learn rust", pid=999999)
     learning.printed("  reading 4 pages")
@@ -351,7 +353,7 @@ def test_talk_model_needs_a_measured_model(measured_model, tinker_home):
 
 @pytest.mark.spec("CNV-11")
 def test_talk_reply(measured_model, fake_ollama, monkeypatch):
-    monkeypatch.setattr(conversation, "CHAT_KEPT", 4)
+    monkeypatch.setattr(conversation, "CHAT_CONTEXT_MESSAGES", 4)
     talk, channel = Talk("task; status"), Recorder()
     for number in range(3):
         fake_ollama.reply(f"answer {number}")
@@ -407,7 +409,7 @@ def test_research_reads_what_is_most_about_the_searches(monkeypatch):
     text = "\n\n".join(paragraphs)
     wanted = {"python", "release", "notes", "free", "threading"}
     assert Research.most_about(text, wanted) == "\n\n".join(paragraph.strip() for paragraph in paragraphs)
-    monkeypatch.setattr(conversation, "RESEARCH_PAGE_CHARS", len(paragraphs[0]) + len(paragraphs[2]))
+    monkeypatch.setattr(conversation, "CHAT_RESEARCH_CHARS_PER_PAGE", len(paragraphs[0]) + len(paragraphs[2]))
     assert Research.most_about(text, wanted) == paragraphs[0].strip() + "\n\n" + paragraphs[2].strip()
     assert Research.most_about("tiny", wanted) == "tiny"
 
@@ -467,21 +469,20 @@ store.put("running", str(os.getpid()), state)
 
 @pytest.fixture
 def desk(tmp_path, monkeypatch, home_store):
-    """A Desk on a recorder channel, whose tinker is a small script that publishes a tracker as a run does."""
     script = tmp_path / "fake_tinker.py"
     script.write_text(textwrap.dedent(FAKE_TINKER))
     monkeypatch.setenv("TINKER_SOURCE", str(Path(__file__).resolve().parent.parent))
     monkeypatch.setenv("FAKE_TINKER_DB", str(home_store.path))
     monkeypatch.setattr(conversation, "tinker_command", lambda: [sys.executable, str(script)])
-    monkeypatch.setattr(conversation, "EDIT_EVERY", 0.2)
+    monkeypatch.setattr(conversation, "PROGRESS_EDIT_SECONDS", 0.2)
     channel = Recorder(chats=("1",))
     desk = Desk([channel], tmp_path)
     desk.ran = []
     monkeypatch.setattr(desk, "tinker", lambda words: desk.ran.append(words) or f"output of {' '.join(words)}")
     yield desk, channel, script
     desk.stop_task()
-    if desk.process:
-        desk.process.wait(10)
+    if desk.last_task:
+        desk.last_task.wait(10)
     if desk.reporter:
         desk.reporter.ended = True
 
@@ -498,7 +499,7 @@ def calls_of(script):
 @pytest.mark.spec("CNV-15")
 def test_desk_answers_commands(desk):
     desk, channel, _ = desk
-    assert desk.talk.commands == "task WHAT; status"  # the chat's prompt names tinker help's commands
+    assert desk.talk.commands == "task WHAT; status"
     replies = {text: desk.answer(Message("1", text), channel) for text in
                ("task", "status", "stop", "stop #9", "resume", "resume #9", "resume abc123", "channel add", "models",
                 "/Runs")}
@@ -527,36 +528,36 @@ def test_a_command_that_deletes_and_exit_ask_first(desk):
 def test_a_task_runs_as_its_own_tinker_and_its_plan_waits(desk, home_store):
     desk, channel, script = desk
     say(desk, channel, "task a calculator")
-    wait_until(lambda: desk.waiting is not None)
+    wait_until(lambda: desk.waiting_plan is not None)
     assert calls_of(script) == ["help", "task a calculator --confirm"]
-    assert desk.waiting["run"] == "abc123" and desk.waiting["stage"] == "spec" and desk.waiting["new"]
-    assert desk.waiting["spec"].startswith("📋 **Plan for calc** · run `abc123`")
+    assert desk.waiting_plan["run"] == "abc123" and desk.waiting_plan["stage"] == "spec" and desk.waiting_plan["new"]
+    assert desk.waiting_plan["spec"].startswith("📋 **Plan for calc** · run `abc123`")
     assert desk.status().startswith("🙋 **Tinker** · calc: a calculator waits for you")
-    assert home_store.items("running") == {}  # the task's tracker is read last, then removed
+    assert home_store.items("running") == {}
 
 
 @pytest.mark.spec("CNV-16")
 def test_confirm_asks_a_new_projects_folder_once_then_builds(desk):
     desk, channel, script = desk
     say(desk, channel, "task a calculator")
-    wait_until(lambda: desk.waiting is not None)
+    wait_until(lambda: desk.waiting_plan is not None)
     say(desk, channel, "confirm")
-    assert desk.waiting["stage"] == "name" and any("📁 **Its folder:** `calc`" in text for text in channel.texts()[-3:])
+    assert desk.waiting_plan["stage"] == "name" and any("📁 **Its folder:** `calc`" in text for text in channel.texts()[-3:])
     say(desk, channel, "confirm")
     wait_until(lambda: "resume @abc123" in calls_of(script))
     wait_until(lambda: not desk.busy())
-    assert desk.waiting is None
+    assert desk.waiting_plan is None
 
 
 @pytest.mark.spec("CNV-16")
 def test_confirm_of_a_feature_builds_at_once_and_amend_changes_it(desk):
     desk, channel, script = desk
-    desk.waiting = {"run": "abc123", "folder": desk.root / "calc", "title": "calc: history", "spec": "📋 plan",
+    desk.waiting_plan = {"run": "abc123", "folder": desk.root / "calc", "title": "calc: history", "spec": "📋 plan",
                     "stage": "spec", "new": False}
     say(desk, channel, "amend also keep the date")
     wait_until(lambda: "amend @abc123 also keep the date" in calls_of(script))
     wait_until(lambda: not desk.busy())
-    desk.waiting = {"run": "abc123", "folder": desk.root / "calc", "title": "calc: history", "spec": "📋 plan",
+    desk.waiting_plan = {"run": "abc123", "folder": desk.root / "calc", "title": "calc: history", "spec": "📋 plan",
                     "stage": "spec", "new": False}
     say(desk, channel, "confirm @calc")
     wait_until(lambda: "resume @abc123" in calls_of(script))
@@ -585,14 +586,17 @@ def test_a_command_sent_alone_asks_for_its_words(desk, monkeypatch):
     assert answered == [] and channel.texts()[-1].startswith("✍️ **fix** · fix a bug")
     say(desk, channel, "typing 2/0 crashes")
     say(desk, channel, "ask")
-    say(desk, channel, "help me")  # a reply that starts with a command word is still the words
+    starts_with_a_command_word = "help me"
+    say(desk, channel, starts_with_a_command_word)
     say(desk, channel, "/read")
-    say(desk, channel, "read /tmp/book.epub")  # a file sent to read
+    a_file_to_read = "read /tmp/book.epub"
+    say(desk, channel, a_file_to_read)
     say(desk, channel, "/teach")
-    say(desk, channel, "/status")  # a command of its own: the words are no longer waited for
+    a_command_of_its_own = "/status"
+    say(desk, channel, a_command_of_its_own)
     say(desk, channel, "status")
     assert answered == ["fix typing 2/0 crashes", "ask help me", "read /tmp/book.epub", "/status", "status"]
-    assert desk.wanting == {}
+    assert desk.commands_wanting_words == {}
 
 
 @pytest.mark.spec("CNV-27")
@@ -611,19 +615,20 @@ def test_a_glance_goes_soon_and_history_shows_things_again(desk, monkeypatch):
     assert again.startswith("📜 **#1**") and "💬 _you:_ task a calculator" in again
     assert again.endswith("🔨 **calc**\n▸ build") and "No #9" in desk.answer(Message("1", "history #9"), channel)
     assert desk.answer(Message("1", "clear chat"), channel) is None
-    assert channel.texts()[-1].startswith("🧹 **Chat cleared:** 3 messages taken out") and glances[-1][3] == NOTE_KEEP
+    assert channel.texts()[-1].startswith("🧹 **Chat cleared:** 3 messages taken out") and glances[-1][3] == DONE_NOTE_KEPT_SECONDS
     monkeypatch.setattr(desk, "tinker", lambda words: Home.clear(["history"], yes=True) or "Cleared history.")
     desk.answer(Message("1", "clear history"), channel)
     shown = len(channel.texts())
     say(desk, channel, "confirm")
     wait_until(lambda: len(channel.texts()) > shown)
     assert channel.texts()[-1].startswith("🧹 **clear history: done, and the chat:** 3 messages taken out")
-    assert Ledger.page(1) == ([], 1)  # nothing is left, not even what clearing it said
+    nothing_left = ([], 1)
+    assert Ledger.page(1) == nothing_left
 
 @pytest.mark.spec("CNV-17")
 def test_follow_reads_the_tasks_tracker(tmp_path, home_store):
     desk = Desk.__new__(Desk)
-    desk.echo, desk.boards, desk.spent, desk.waiting = False, {}, {}, None
+    desk.echo_to_terminal, desk.messages_by_run, desk.seconds_by_run, desk.waiting_plan = False, {}, {}, None
     desk.say_status = lambda *args, **kwargs: None
     reporter = Reporter([Recorder()], "a calculator", pid=4343)
     home_store.put("running", "4343", snapshot(folder="/tmp/projects/calc", waiting=PLAN))
@@ -633,7 +638,7 @@ def test_follow_reads_the_tasks_tracker(tmp_path, home_store):
     desk.follow(process, reporter, task)
     assert task["run"] == "abc123" and task["folder"] == Path("/tmp/projects/calc")
     assert task["title"] == "calc: a calculator" == reporter.progress.title
-    assert desk.waiting["run"] == "abc123" and desk.boards["abc123"] is reporter.sent
+    assert desk.waiting_plan["run"] == "abc123" and desk.messages_by_run["abc123"] is reporter.sent
     assert home_store.get("running", "4343") is None
 
 
@@ -648,7 +653,6 @@ def test_helpers(tmp_path):
 
 
 def built(tmp_path, name, run_id, run, status="done", updated="2026-10-01 10:00"):
-    """A built project Tinker points to, with its toolchain's run command."""
     from tinkerkit.project import project_store
     folder = tmp_path / name
     folder.mkdir(parents=True)
@@ -664,7 +668,8 @@ def test_built_project(tmp_path):
     built(tmp_path, "calc", "aaa111", "x", updated="2026-10-01 10:00")
     built(tmp_path, "notes", "bbb222", "x", updated="2026-10-02 10:00")
     built(tmp_path, "todo", "ccc333", "x", status="blocked", updated="2026-10-03 10:00")
-    assert built_project("")["id"] == "bbb222"  # the one built last
+    last_built = "bbb222"
+    assert built_project("")["id"] == last_built
     assert built_project("calc")["id"] == "aaa111" and built_project("ccc333")["id"] == "ccc333"
     assert built_project("ccc") is None and built_project("nothing") is None
 
@@ -679,12 +684,12 @@ def test_a_chat_pauses_the_job_that_runs_before_it_is_answered(desk, monkeypatch
         order.append("paused")
         yield
         order.append("goes on")
-    monkeypatch.setattr(desk.talk, "pausing", pausing)
+    monkeypatch.setattr(desk.talk, "pausing_jobs", pausing)
     monkeypatch.setattr(desk.talk, "reply", lambda *asked: order.append("answered") or "the answer")
     say(desk, channel, "hello there")
     wait_until(lambda: any("the answer" in text for text in channel.texts()))
     assert order == ["paused", "answered", "goes on"]
-    assert Desk([channel], desk.root).talk.pausing is conversation.paused_for_you
+    assert Desk([channel], desk.root).talk.pausing_jobs is conversation.paused_for_you
 
 
 @pytest.mark.spec("JOB-10")
@@ -706,7 +711,8 @@ def test_run_a_built_project(desk, tmp_path):
     final = channel.texts()[-1]
     assert final.startswith("✅ **calc** `") and "add 'two words'` · _exit 0_" in final
     assert "_input:_ `hello there`" in final and "args: ['add', 'two words']" in final and "input: hello there" in final
-    desk.run_app(channel, "1", ["5 + 3"])  # no project named: the one built last, every word an argument
+    no_project_named = ["5 + 3"]
+    desk.run_app(channel, "1", no_project_named)
     assert "args: ['5', '+', '3']" in channel.texts()[-1]
 
 
@@ -720,13 +726,12 @@ def test_run_with_nothing_to_run(desk, tmp_path):
     assert channel.texts()[-1].startswith("🤷 **lib has no run command:**")
     desk.run_app(channel, "1", ["@nothing 1 2"])
     assert channel.texts()[-1].startswith("🤷 **No project @nothing:**")
-    desk.run_app(channel, "1", ["lib 1 2"])  # a word that is a folder's name is an argument, not a project
+    a_folders_name_as_an_argument = ["lib 1 2"]
+    desk.run_app(channel, "1", a_folders_name_as_an_argument)
     assert "lib" in channel.texts()[-1] and "has no run command" in channel.texts()[-1]
 
 
 class Listening(Recorder):
-    """A chat whose messages come one at a time, as a person sends them."""
-
     def receive(self, timeout):
         time.sleep(0.05)
         return [self.inbox.pop(0)] if self.inbox else []
@@ -746,17 +751,20 @@ def test_desk_listens_until_the_chat_ends_it(desk):
 
 @pytest.mark.spec("CNV-21")
 def test_the_status_is_sent_anew_as_tinker_starts_and_ends(desk, home_store):
-    home_store.put("listening", "bot", {"1": 55})
-    channel = Listening("bot", inbox=[Message("1", "exit", id=1), Message("1", "confirm", id=2)])
+    status_before = 55
+    home_store.put("listening", "bot", {"1": status_before})
+    exit_said, confirm_said = Message("1", "exit", id=1), Message("1", "confirm", id=2)
+    channel = Listening("bot", inbox=[exit_said, confirm_said])
     collected = []
     channel.collect = lambda: collected.append(True)
     Desk([channel], Path.cwd()).run()
+    first_status, the_question_to_stop, last_status = 101, 102, 103
     status = [(kind, sent) for kind, _, sent, text in channel.log if "**Tinker** ·" in text]
-    assert status == [("send", 101), ("send", 103)]  # 102: the question to stop
+    assert status == [("send", first_status), ("send", last_status)]
     deleted = {sent for kind, _, sent, _ in channel.log if kind == "delete"}
-    assert deleted == {55, 101, 1, 2, 102}  # the statuses before, the person's exit and confirm, the question
+    assert deleted == {status_before, first_status, exit_said.id, confirm_said.id, the_question_to_stop}
     assert not any("Stopping" in text for text in channel.texts())
-    assert home_store.get("listening", "bot") == {"1": 103} and collected
+    assert home_store.get("listening", "bot") == {"1": last_status} and collected
     channel.claimed.close()
 
 
@@ -764,13 +772,13 @@ def test_the_status_is_sent_anew_as_tinker_starts_and_ends(desk, home_store):
 def test_every_status_is_sent_anew_the_one_before_taken_out(desk):
     channel = Recorder("bot")
     listening = Desk([channel], Path.cwd())
-    listening.ready.add(channel)
+    listening.chats_started.add(channel)
     listening.say_status("🔄 **Tinker** · working on calc\n▸ planning")
     listening.say_status("🔄 **Tinker** · working on calc\n▸ building")
     listening.say_status("🟢 **Tinker** · idle: send a task")
     log = [(kind, sent) for kind, _, sent, _ in channel.log]
     assert log[0] == ("send", 101) and "edit" not in {kind for kind, _ in log}
-    assert sorted(log[1:3]) == [("delete", 101), ("send", 102)]  # the one before goes meanwhile
+    assert sorted(log[1:3]) == [("delete", 101), ("send", 102)]
     assert sorted(log[3:]) == [("delete", 102), ("send", 103)]
 
 
@@ -810,8 +818,6 @@ def test_one_shot_command_runs_nothing_without_a_yes(monkeypatch, measured_model
 
 
 class Pages:
-    """The Internet plugin, with a few pages."""
-
     def __init__(self, up=True):
         self.up = up
 
@@ -850,8 +856,8 @@ def test_research_in_a_chat(measured_model, fake_ollama, monkeypatch):
 @pytest.fixture
 def attached(monkeypatch, home_store):
     import signal
-    handlers = {sig: signal.getsignal(sig) for sig in (conversation.STOP,)}
-    monkeypatch.setattr(conversation, "EDIT_EVERY", 1000)
+    handlers = {sig: signal.getsignal(sig) for sig in (conversation.JOB_STOP_SIGNAL,)}
+    monkeypatch.setattr(conversation, "PROGRESS_EDIT_SECONDS", 1000)
     started = []
     channel = Recorder()
 
@@ -874,7 +880,7 @@ def test_a_terminal_task_reports_and_stops_on_a_signal(attached, home_store):
     assert channel.texts()[0].startswith("🔨 **calc: a calculator**")
     task.tracker.phase("recall")
     with pytest.raises(KeyboardInterrupt):
-        os.kill(os.getpid(), conversation.STOP)
+        os.kill(os.getpid(), conversation.JOB_STOP_SIGNAL)
         time.sleep(1)
     task.end()
     assert home_store.get("running", str(os.getpid())) is None
@@ -890,8 +896,9 @@ def test_start_is_answered_with_a_welcome(desk):
     for section in ("🔨 **Build something**", "📂 **Your projects**", "💬 **Ask me anything**", "⏳ **While I work**"):
         assert section in text
     assert "`task a calculator in Python`" in text and "normal chat" in text and "`help`" in text
-    assert calls_of(script) == ["help"] and desk.process is None  # no task, no chat
-    say(desk, channel, "/start abcdef")  # a start link with a payload is a start too
+    assert calls_of(script) == ["help"] and desk.last_task is None
+    a_start_link_with_a_payload = "/start abcdef"
+    say(desk, channel, a_start_link_with_a_payload)
     assert channel.texts()[-1] == welcome()
 
 
@@ -939,7 +946,7 @@ def test_a_command_line_run_once_confirmed_pauses_the_job_while_its_output_is_re
         order.append("paused")
         yield
         order.append("goes on")
-    talk = Talk("cmds", pausing=pausing)
+    talk = Talk("cmds", pausing_jobs=pausing)
     monkeypatch.setattr(talk, "model", lambda: ("m", {}, None))
     monkeypatch.setattr(talk, "ask", lambda *asked: order.append("read") or "it says hi")
     channel = Recorder()

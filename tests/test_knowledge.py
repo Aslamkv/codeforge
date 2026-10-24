@@ -1,12 +1,10 @@
-"""KNW: what Tinker knows beyond the model: lessons, toolchain fixes, and what it learns from the web."""
-
 import json
 
 import pytest
 
 from tinkerkit.knowledge import Embeddings, Knowledge, Learner, Library, Researcher, Retriever, language_key, record
 from tinkerkit.model import Ollama
-from tinkerkit.settings import Config, Home, MAX_LESSONS, PLAYBOOK_RULES, RULE_CHARS
+from tinkerkit.settings import MAX_LESSONS_PER_FILE, MAX_RULE_CHARS, PLAYBOOK_RULES, Config, Home
 from tinkerkit.workspace import Toolchain
 
 
@@ -120,13 +118,13 @@ def test_lessons_are_capped_and_ranked(tinker_home):
                 "Quote shell variables that hold paths", "Sort dictionary keys before comparing output",
                 "Seed random generators inside tests", "Use tmp_path for files the tests create",
                 "Flush stdout before the process exits"]
-    for text in distinct[:MAX_LESSONS]:
+    for text in distinct[:MAX_LESSONS_PER_FILE]:
         known.add_lessons([lesson(text)], [])
-    assert len(known.known_lessons()) == MAX_LESSONS
+    assert len(known.known_lessons()) == MAX_LESSONS_PER_FILE
     known.confirm(known.known_lessons()[3])
     assert known.add_lessons([lesson("a brand new rule that is unlike every other one")], []) == 1
     texts = [lesson["text"] for lesson in known.any_language_doc["lessons"]]
-    assert len(texts) == MAX_LESSONS and "a brand new rule that is unlike every other one" in texts
+    assert len(texts) == MAX_LESSONS_PER_FILE and "a brand new rule that is unlike every other one" in texts
     assert [lesson["text"] for lesson in known.lessons(("code",), limit=1)] == [known.known_lessons()[0]["text"]]
     assert known.known_lessons()[0]["seen"] == 2
     assert known.lessons(("design",)) == []
@@ -144,7 +142,8 @@ def test_toolchain_fixes(tinker_home):
     known.fix_result(stored, worked=True)
     assert known.known_fix("no module named pytest")["used"] == 2
     known.fix_result(stored, worked=False)
-    assert known.known_fix("no module named pytest") is None  # a failed replay disproves it: gone at once
+    gone_at_once = known.known_fix("no module named pytest") is None
+    assert gone_at_once
     assert Knowledge("Python").language_doc["fixes"] == []
     known.remember_fix(fix)
     assert known.similar_fix("no module named pytests")["cause"] == "pytest missing"
@@ -170,8 +169,6 @@ def test_remember_toolchain_without_its_project_commands(tinker_home):
 
 
 class EmbedServer:
-    """Ollama's /api/embed: a vector per text (its length and its count of 'a'), counting the requests."""
-
     def __init__(self, broken=False):
         self.requests, self.broken = [], broken
 
@@ -186,16 +183,18 @@ class EmbedServer:
 def test_embeddings_are_cached_per_model(tinker_home, monkeypatch):
     server = EmbedServer()
     monkeypatch.setattr(Ollama, "get_json", staticmethod(server))
-    monkeypatch.setattr(Embeddings, "BATCH", 2)
+    monkeypatch.setattr(Embeddings, "TEXTS_PER_REQUEST", 2)
     embeddings = Embeddings("embed-a")
     assert embeddings.vectors(["aa", "b", "ccc"]) == [[2.0, 2.5], [1.0, 0.5], [3.0, 0.5]]
     assert server.requests == [["aa", "b"], ["ccc"]]
     assert Embeddings("embed-a").vectors(["b", "dddd"])[0] == [1.0, 0.5]
     assert server.requests[-1] == ["dddd"]
     Embeddings("embed-b").vectors(["b"])
-    assert server.requests[-1] == ["b"]  # another model: embedded again
+    embedded_again = ["b"]
+    assert server.requests[-1] == embedded_again
     assert list(Home.store().get("embeddings", "embed-b")) == [Embeddings.key("b")]
-    assert len(Home.store().get("embeddings", "embed-a")) == 4  # each model keeps its own
+    each_model_keeps_its_own = 4
+    assert len(Home.store().get("embeddings", "embed-a")) == each_model_keeps_its_own
 
 
 @pytest.mark.spec("KNW-7")
@@ -289,12 +288,10 @@ def test_relevant_chunks():
     chunks = Learner.relevant_chunks("\n\n".join(paragraphs), 250, "pip install")
     assert len(chunks) == 2 and chunks[0].startswith("intro") and chunks[1].startswith("install with pip")
     assert Learner.relevant_chunks("short page", 250, "x") == ["short page"]
-    assert Learner.UNRELEASED.search("Flask 4.0 is in development") and not Learner.UNRELEASED.search("Flask 3.1 adds")
+    assert Learner.UNRELEASED_RE.search("Flask 4.0 is in development") and not Learner.UNRELEASED_RE.search("Flask 3.1 adds")
 
 
 class FakeInternet:
-    """The Internet plugin, answering from a script of pages."""
-
     def __init__(self, pages=None, up=True):
         self.pages, self.up = pages or {}, up
 
@@ -368,8 +365,8 @@ def test_cross_check_supports_agreeing_facts_and_pairs_disagreeing_ones():
              fact("Crates hold 10 kg of food", "https://www.b.org/x"),
              fact("Crates hold 12 kg of food", "https://c.org/y"),
              fact("Volunteers sign in", "https://a.org/2")]
-    vectors = [[1, 0], [0.85, 0.53], [0.82, 0.57], [0, 1]]  # the same claim, but no repeat (below REPEAT_CLAIM)
-    differ = Researcher(type("L", (), {"model": None, **FakeLearner(vectors).__dict__})()).cross_check(facts)
+    same_claim_but_no_repeat = [[1, 0], [0.85, 0.53], [0.82, 0.57], [0, 1]]
+    differ = Researcher(type("L", (), {"model": None, **FakeLearner(same_claim_but_no_repeat).__dict__})()).cross_check(facts)
     assert facts[0]["sites"] == ["a.org", "b.org"] and facts[1]["sites"] == ["a.org", "b.org"]
     assert facts[3]["sites"] == ["a.org"] and (1, 3) in differ and (2, 3) in differ
 
@@ -461,7 +458,7 @@ def test_read_rules_keeps_only_rules_that_rest_on_what_was_learned():
         {"phase": "tests", "text": "x" * 500, "cites": [2]}, "junk"]}, SOURCES)
     assert [(rule["phase"], rule["text"][:22], rule["cites"]) for rule in rules] == [
         ("code", "Use match for dispatch", ["fact1", "lesson1"]), ("tests", "x" * 22, ["fact2"])]
-    assert len(rules[1]["text"]) == RULE_CHARS and rules[0]["id"]
+    assert len(rules[1]["text"]) == MAX_RULE_CHARS and rules[0]["id"]
     many = Learner.read_rules({"rules": [{"phase": "code", "text": f"rule {number}", "cites": [1]}
                                          for number in range(40)]},
                               SOURCES)
@@ -495,7 +492,8 @@ def test_condensing_folds_in_the_lessons_the_language_proved(make_model, fake_ol
     rules = Learner(make_model(), FakeInternet(), None).condense(plan, facts)
     prompt = fake_ollama.calls[-1]["messages"][-1]["content"]
     assert "1. [this-version, code] Go 1.25 has generic type aliases" in prompt and "2. Name the module after its folder" in prompt
-    assert "Read the spec twice" not in prompt  # a candidate lesson is not folded in
+    a_candidate_lesson = "Read the spec twice"
+    assert a_candidate_lesson not in prompt
     assert rules[0]["cites"] == [known.language_doc["lessons"][0]["id"]]
 
 
@@ -527,7 +525,8 @@ def test_rules_are_shown_in_place_of_the_facts_they_cite(tinker_home):
         ("code", "Use generic type aliases", "rule"), ("tests", "Run one test with go test -run", "rule")]
     assert items[1]["id"] == aliases and items[1]["status"] == "candidate"
     plain = {key: value for key, value in Library.read("go").items() if key != "rules"}
-    assert len(Library.items({"go": plain})) == 4  # no playbook: every fact is shown
+    every_fact_without_a_playbook = 4
+    assert len(Library.items({"go": plain})) == every_fact_without_a_playbook
 
 
 @pytest.mark.spec("KNW-22")
@@ -541,7 +540,8 @@ def test_a_rule_is_proven_and_retired_like_a_fact(tinker_home):
     assert [rule["text"]
             for rule in entry["rules"]] == ["Use generic type aliases"] and entry["retired"][0]["was"] == "rules"
     shown = [item["text"] for item in Library.items({"go": entry})]
-    assert "go test -run picks tests" in shown  # what only the retired rule cited is shown again
+    cited_only_by_the_retired_rule = "go test -run picks tests"
+    assert cited_only_by_the_retired_rule in shown
     assert "Aliases may be generic" not in shown and "Go 1.25 has a new GC" not in shown
 
 
@@ -578,7 +578,8 @@ def test_knowledge_starts_as_a_candidate_and_a_success_proves_it(tinker_home):
     facts = [{key: value for key, value in fact.items() if key != "history"} for fact in again.language_doc["facts"]]
     assert facts == [{"id": route, "phase": "code", "text": "Flask routes use @app.route", "topic": "flask",
                       "status": "proven"}]
-    assert again.prove(used) == 0  # proven once is enough
+    proven_again = again.prove(used)
+    assert proven_again == 0
 
 
 @pytest.mark.spec("KNW-17")
@@ -591,11 +592,12 @@ def test_a_failure_retires_what_was_used_in_that_step(tinker_home):
     known.prove({f"fact:flask:{route}": ["code"], f"lesson:{paths}": ["code"]})
     used = {f"lesson:{seed}": ["tests"], f"lesson:{paths}": ["code"], f"known:{route}": ["code"],
             f"fact:flask:{client}": ["tests"]}
-    assert known.disprove(used, ("toolchain", "config")) == 0  # none was shown there
+    none_shown_there = ("toolchain", "config")
+    assert known.disprove(used, none_shown_there) == 0
     gone = Knowledge("Python").disprove(used, ("code",))
     after = Knowledge("Python")
     assert gone == 2 and [lesson["text"] for lesson in after.known_lessons()] == ["Seed random generators inside tests"]
-    assert after.language_doc["facts"] == []  # proven before, retired all the same
+    assert after.language_doc["facts"] == []
     assert after.disprove(used, ("tests",)) == 2
     assert Knowledge("Python").known_lessons() == [] and [fact["id"]
                                                           for fact in Library.read("flask")["facts"]] == [route]
@@ -638,7 +640,7 @@ def test_a_fix_keeps_its_history_and_history_is_capped(tinker_home, monkeypatch)
     again = Knowledge("Python", "r2")
     again.fix_result(again.known_fix("no module named calc"), worked=True)
     assert events(Knowledge("Python").known_fix("no module named calc")) == [("born", "r1"), ("helped", "r2")]
-    monkeypatch.setattr("tinkerkit.knowledge.HISTORY_KEPT", 3)
+    monkeypatch.setattr("tinkerkit.knowledge.EVENTS_KEPT_PER_ITEM", 3)
     item = {}
     for run in ("r1", "r2", "r3", "r4"):
         record(item, "helped", run)
@@ -677,7 +679,7 @@ def test_what_is_retired_is_kept_apart_with_why_and_never_shown(tinker_home, mon
     assert [fact["id"] for fact in entry["facts"]] == [route] and entry["retired"][0]["id"] == client
     assert Knowledge("Python").lessons(("tests",)) == [] and Knowledge("Python").known_fix("no module named calc") is None
     assert all(item["id"] != client for item in Library.items({"flask": entry}))
-    monkeypatch.setattr("tinkerkit.knowledge.RETIRED_KEPT", 1)
+    monkeypatch.setattr("tinkerkit.knowledge.RETIRED_KEPT_PER_LIST", 1)
     Knowledge("Python").disprove({f"fact:flask:{route}": ["code"]}, ("code",))
     assert [retired["id"] for retired in Library.read("flask")["retired"]] == [route]
 
@@ -699,9 +701,11 @@ def test_the_checks_a_reused_toolchain_lacks_and_the_tools_it_cannot_count_on(ti
             machine=[{"command": "uv --version", "found": False}, {"command": "ruff --version", "found": False},
                      {"command": "mypy --version", "found": False}])
     known = Knowledge("Python")
-    assert known.missing_checks() == [] and known.unavailable_tools() == ["uv", "ruff", "mypy"]  # no toolchain yet
+    every_tool_with_no_toolchain_yet = ["uv", "ruff", "mypy"]
+    assert known.missing_checks() == [] and known.unavailable_tools() == every_tool_with_no_toolchain_yet
     known.remember_toolchain(Toolchain({"setup": ["python3 -m venv .venv", "pip install pytest ruff"],
                                         "test_all": "pytest", "test_one": "pytest {file}", "lint": "ruff check ."}))
     assert known.missing_checks() == ["types mypy", "format black"]
-    assert known.unavailable_tools() == ["uv"]  # the toolchain installs ruff, and mypy is to be added
+    neither_installed_nor_to_be_added = ["uv"]
+    assert known.unavailable_tools() == neither_installed_nor_to_be_added
     assert "add the learned types mypy, format black it lacks" in known.toolchain_title("reuse it")

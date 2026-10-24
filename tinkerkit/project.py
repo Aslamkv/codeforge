@@ -1,12 +1,9 @@
-"""The project's plan and record: the spec (Project, SpecDocument), its runs, the checks before a run,
-and the run's one report (Tracker). A project's state is kept in its own database, in its .tinker
-folder; Tinker's home keeps only a pointer to each project."""
-
 lazy import os
 import re
 lazy import secrets
 lazy import shutil
 lazy import time
+from collections import namedtuple
 lazy from pathlib import Path
 
 lazy from .jobs import Jobs
@@ -18,17 +15,12 @@ lazy from .settings import (
 lazy from .workspace import TaughtCommands, TestRef, Toolchain
 
 
-class RunChecks:
-    """What a run needs that must be there already, checked before anything starts (no folder
-    emptied, no model loaded): its folder, its saved state, and that the options fit it."""
+SpecSource = namedtuple("SpecSource", "text name")
 
+
+class RunChecks:
     @staticmethod
     def before_start(args):
-        """What a run needs that must be there already, checked before anything starts (no folder
-        emptied, no model loaded or measured): a new run's folder (with no run in it) and spec file;
-        for tinker restart, the folder's run (its task and spec are built again); an existing run, its
-        folder and its saved state; for tinker add and tinker fix a project whose cycles are all done;
-        for tinker amend a plan that waits. Returns the project's folder."""
         if args.restart:
             return RunChecks.restarting(args)
         if args.resume is None:
@@ -37,8 +29,6 @@ class RunChecks:
 
     @staticmethod
     def restarting(args):
-        """tinker restart: the folder's run read before anything is deleted (its task, its spec's
-        text, its spec file when it is in the folder, which stays); its folder. No run: an error."""
         workdir = Runs.workdir("", args.workdir)
         run = saved(workdir, "run", "record")
         if not RunChecks.has_task(run):
@@ -52,7 +42,6 @@ class RunChecks:
 
     @staticmethod
     def has_task(run):
-        """Whether a saved run holds a task to build again."""
         return isinstance(run, dict) and str(run.get("task") or "").strip()
 
     @staticmethod
@@ -78,7 +67,6 @@ class RunChecks:
 
     @staticmethod
     def check_no_run(workdir):
-        """A new run needs a folder without one (tinker resume, tinker add or tinker fix work on the one there)."""
         existing = saved(workdir, "run", "record")
         if existing is not None:
             raise SystemExit(f"{workdir} already holds run {existing.get('id', '?')}. Continue it with tinker resume, add "
@@ -86,7 +74,6 @@ class RunChecks:
 
     @staticmethod
     def check_phases(project):
-        """Each saved cycle is at one of its phases (PHASES, or FIX_PHASES for a bug fix)."""
         for cycle in project.cycles:
             phases = FIX_PHASES if cycle.get("kind") == "fix" else PHASES
             if cycle.get("phase") not in phases:
@@ -95,7 +82,6 @@ class RunChecks:
 
     @staticmethod
     def check_open_to_add(project):
-        """tinker add and tinker fix start a new cycle: the project's own must exist, and none may be unfinished."""
         run_id, cycle = project.run.get("id", "?"), project.open_cycle()
         if cycle is not None:
             what = "project" if cycle["id"] == "base" else cycle.get("kind", "feature")
@@ -106,7 +92,6 @@ class RunChecks:
 
     @staticmethod
     def check_awaiting(project, what="tinker amend changes"):
-        """tinker amend, tinker rename: the open cycle's plan waits for the person to confirm it."""
         cycle = project.open_cycle()
         if cycle is None or not cycle.get("awaiting"):
             raise SystemExit(f"{what} a plan that waits for confirmation, and run {project.run.get('id', '?')} has "
@@ -114,14 +99,8 @@ class RunChecks:
 
 
 class Runs:
-    """The runs: each kept in its project's database, and pointed to from Tinker's home ("projects":
-    its run ID, folder and task), so @ID and @folder work from any folder; one line about each run kept
-    in the home ("runs"), so what it taught is traced after its folder is gone; a run opened (a new one,
-    or a saved one resumed or changed); a folder emptied for tinker restart."""
-
     @staticmethod
     def open(args):
-        """Returns (run, workdir, spec_text, mode): mode new, resume, or change (tinker add, tinker fix)."""
         if args.resume is None:
             return Runs.open_new(args)
         return Runs.open_existing(args)
@@ -131,17 +110,16 @@ class Runs:
         workdir = Path(args.workdir).expanduser().resolve()
         RunChecks.check_no_run(workdir)
         spec_text, spec_name = Runs.spec_of_new_run(args)
-        project_store(workdir).put("texts", "spec_text", spec_text)  # resume needs no spec file
+        project_store(workdir).put("texts", "spec_text", spec_text)
         run = Runs.new_record(args.task, workdir, spec_name)
         Runs.save(run, workdir)
         return run, workdir, spec_text, "new"
 
     @staticmethod
     def spec_of_new_run(args):
-        """(its text, its file's name): a restart's is the spec the run had, read before the folder was emptied."""
         if getattr(args, "restart", False):
-            return args.spec_text, args.spec_name
-        return Runs.read_spec_file(args.spec) if args.spec else ("", None)
+            return SpecSource(args.spec_text, args.spec_name)
+        return Runs.read_spec_file(args.spec) if args.spec else SpecSource("", None)
 
     @staticmethod
     def open_existing(args):
@@ -163,14 +141,12 @@ class Runs:
 
     @staticmethod
     def save(run, workdir):
-        """The run kept in its project, and pointed to from Tinker's home (its ID, folder and task only)."""
         run["updated"] = now_text()
         project_store(workdir).put("run", "record", run)
         Home.store().put("projects", run["id"], {"id": run["id"], "workdir": str(workdir), "task": run.get("task", "")})
 
     @staticmethod
     def remember(run, language):
-        """One line about the run in Tinker's home, the last RUNS_KEPT (the least recently updated go first)."""
         line = {key: run.get(key, "") for key in ("id", "task", "status", "created", "updated")}
         Home.store().put("runs", run["id"], dict(line, language=language or ""))
         lines = Home.store().items("runs")
@@ -179,7 +155,6 @@ class Runs:
 
     @staticmethod
     def workdir(name, workdir_arg):
-        """The project folder: the named project's (@ID or @folder), else the one given (--workdir, else this one)."""
         if name:
             workdir = Path(Runs.find(name)["workdir"])
             if not workdir.is_dir():
@@ -192,7 +167,6 @@ class Runs:
 
     @staticmethod
     def find(name):
-        """The project named exactly: by its full run ID, or by its folder's name (never by part of either)."""
         pointers = list(Home.store().items("projects").values())
         found = [pointer for pointer in pointers if pointer.get("id") == name] or \
                 [pointer for pointer in pointers if Path(str(pointer.get("workdir", ""))).name == name]
@@ -206,7 +180,6 @@ class Runs:
 
     @staticmethod
     def read_record(workdir):
-        """The run kept in a project folder."""
         run = saved(workdir, "run", "record")
         if run is None:
             raise SystemExit(f'No saved run in {workdir}. Name one with @PROJECT (tinker runs lists them), '
@@ -218,11 +191,10 @@ class Runs:
         spec_path = Path(path).expanduser()
         if not spec_path.is_file():
             raise SystemExit(f"Spec file not found: {path}")
-        return spec_path.read_text(), spec_path.name
+        return SpecSource(spec_path.read_text(), spec_path.name)
 
     @staticmethod
     def entries():
-        """Each project pointed to, with its own record when its folder is still there (else "missing")."""
         return [{**pointer, **(Runs.record_pointed_to(pointer) or {"status": "missing"})}
                 for pointer in Home.store().items("projects").values()]
 
@@ -233,9 +205,6 @@ class Runs:
 
     @staticmethod
     def clear_folder(workdir, spec, yes=False):
-        """Delete what is in workdir, after showing it and asking (in a terminal only; yes: without asking).
-        The entry that holds the spec file stays. Refuses the home folder, the filesystem root and the folder
-        Tinker itself lives in."""
         Runs.refuse_to_empty_a_shared_folder(workdir)
         keep = next((item for item in workdir.iterdir() if spec and spec.is_relative_to(item.resolve())), None)
         items = sorted(item for item in workdir.iterdir() if item != keep)
@@ -251,7 +220,6 @@ class Runs:
 
     @staticmethod
     def refuse_to_empty_a_shared_folder(workdir):
-        """The home folder, the filesystem root and the folder Tinker lives in are never emptied."""
         if workdir in (Path.home().resolve(), Path(workdir.anchor)) or Home.root.resolve().is_relative_to(workdir):
             raise SystemExit(f"tinker restart will not empty {workdir}: run it in the project's own folder.")
 
@@ -268,15 +236,12 @@ class Runs:
 
     @staticmethod
     def forget_runs_in(workdir):
-        """Drop the pointers to a folder that was emptied: they lead nowhere now."""
         for run_id, pointer in Home.store().items("projects").items():
             if pointer.get("workdir") == str(workdir):
                 Home.store().delete("projects", run_id)
 
 
 class Project:
-    """Everything planned and done, kept in the project's database (and shown in SPEC.md).
-    Criteria are dicts: id, title, behaviour, test, effort, source, status, cycle, history."""
     DEPENDENCY_FILES = {"requirements.txt", "pyproject.toml", "setup.cfg", "Pipfile", "package.json", "go.mod",
                         "Cargo.toml", "Gemfile", "pom.xml", "build.gradle", "build.gradle.kts", "composer.json", "mix.exs"}
 
@@ -287,7 +252,6 @@ class Project:
 
     @classmethod
     def load(cls, workdir, run=None):
-        """The project kept in a folder (its run read from it, unless given)."""
         return cls(workdir, run or Runs.read_record(workdir), saved(workdir, "spec", "plan", {"steps": [], "counter": 0}))
 
     def save(self):
@@ -316,25 +280,21 @@ class Project:
         return next((cycle for cycle in self.cycles if cycle["id"] == cycle_id), None)
 
     def cycle_criteria(self, cycle):
-        """The criteria of one cycle."""
         return [criterion for criterion in self.criteria if criterion.get("cycle") == cycle["id"]]
 
     @property
     def criteria(self):
-        """Every criterion, in plan order (saved as "steps")."""
         return self.spec.setdefault("steps", [])
 
     def criterion(self, criterion_id):
         return next((criterion for criterion in self.criteria if criterion["id"] == criterion_id), None)
 
     def new_criterion(self, prefix, title, behaviour, test, cycle_id, source, status, effort=2):
-        """A criterion with the next id: prefix C (spec), B (a bug)."""
         self.spec["counter"] = self.spec.get("counter", 0) + 1
         return {"id": f"{prefix}{self.spec['counter']}", "title": title, "behaviour": behaviour, "test": test,
                 "effort": effort, "source": source, "status": status, "cycle": cycle_id, "history": []}
 
     def criterion_of_test(self, test):
-        """The behaviour of the criterion a test checks ("" for a test no criterion owns)."""
         return next((criterion["behaviour"] for criterion in self.criteria if criterion["test"] == test), "")
 
     def counts(self):
@@ -343,7 +303,6 @@ class Project:
         return green, parked, len(self.criteria)
 
     def parked(self):
-        """The criteria that nothing made pass (stored as "blocked")."""
         return [criterion for criterion in self.criteria if criterion["status"] == "blocked"]
 
     def refs(self):
@@ -362,22 +321,18 @@ class Project:
 
     @property
     def files(self):
-        """Every project file: path -> {kind, role, contract, uses}."""
         return self.spec.setdefault("files", {})
 
     def has_adapters(self):
-        """Whether the design puts an external service behind an adapter (its tests use sample data)."""
         return any(info.get("role", "").lower().startswith("adapter") for info in self.files.values())
 
     def kind_of(self, path):
-        """The kind of file the design says path is (None when the design has no such file)."""
         return self.files.get(path, {}).get("kind")
 
     def paths(self, *kinds):
         return [path for path, info in self.files.items() if not kinds or info.get("kind") in kinds]
 
     def outline(self):
-        """The project's files by role (what the design says, not parsed code)."""
         return "\n".join(f"- {path} ({info.get('kind', 'code')}): {info.get('role', '')}"
                          for path, info in self.files.items())
 
@@ -386,20 +341,15 @@ class Project:
             self.files.setdefault(path, {"kind": kind, "role": role, "contract": [], "uses": list(uses)})
 
     def remove_file(self, workspace, path):
-        """A file of the project gone: from the disk and from the design."""
         workspace.restore({path: None})
         self.files.pop(path, None)
 
     def uses(self, path, depth=2):
-        """The files a file uses, directly and (depth 2) one level down."""
         direct = self.files.get(path, {}).get("uses", [])
         deeper = [*self.files.get(used, {}).get("uses", []) for used in direct] if depth > 1 else []
         return list(dict.fromkeys(direct + deeper))
 
     def criteria_of(self, path, steps):
-        """The criteria (of steps) a file must meet: those whose tests call it directly, or whose text
-        names it ("playlist.songs", "app.py"); a template's are those of the files that render it.
-        A file no test reaches (an adapter) has none: its contract says what it does."""
         template = self.kind_of(path) == "template"
         direct = [step for step in steps if self.reached_by(path, step, template)]
         if not template:
@@ -410,15 +360,12 @@ class Project:
         return list(found.values())
 
     def reached_by(self, path, criterion, template):
-        """Whether the criterion's test uses the file, or its text names it (a template by its file name only)."""
         behaviour = criterion["behaviour"].lower()
         return path in self.files.get(TestRef(criterion["test"]).file, {}).get("uses", []) \
             or Path(path).name.lower() in behaviour \
             or (not template and re.search(rf"\b{re.escape(Path(path).stem.lower())}\.\w", behaviour) is not None)
 
     def entry_files(self, paths):
-        """Of these paths, the app's entry point: the file the design says a user starts, then any
-        the run command names."""
         entry, run = self.spec.get("entry", ""), self.toolchain.run
         return [path for path in paths if path == entry] + [path for path in paths if path != entry
                                                             and Path(path).name in run]
@@ -432,16 +379,12 @@ class Project:
         return "\n".join(out)
 
     def dependencies(self, read):
-        """The project's third-party dependencies: its dependency files (read(path) once written,
-        else what the design says they hold). Empty when it has none."""
         found = [path for path, info in self.files.items() if info.get("kind") == "config"
                  and ("depend" in info.get("role", "").lower() or Path(path).name in self.DEPENDENCY_FILES)]
         return "\n".join(f"{path}:\n{read(path) or self.files[path].get('role', '')}".strip() for path in found)
 
 
 class SpecDocument:
-    """SPEC.md: the plan as a person reads it."""
-
     def __init__(self, project):
         self.project = project
 
@@ -465,11 +408,11 @@ class SpecDocument:
         toolchain = self.project.toolchain
         if not toolchain:
             return []
-        out = TaughtCommands.spelled_out  # these commands work for anyone
-        lines = ["", "## Commands (run in the project folder)", ""] + [f"- setup: `{out(command)}`"
+        for_anyone = TaughtCommands.spelled_out
+        lines = ["", "## Commands (run in the project folder)", ""] + [f"- setup: `{for_anyone(command)}`"
                                                                        for command in toolchain.setup]
-        lines += [f"- activate: `{out(toolchain.activate)}`"] if toolchain.activate else []
-        lines += [f"- {key}: `{out(getattr(toolchain, key))}`" for key in Toolchain.COMMANDS if getattr(toolchain, key)]
+        lines += [f"- activate: `{for_anyone(toolchain.activate)}`"] if toolchain.activate else []
+        lines += [f"- {key}: `{for_anyone(getattr(toolchain, key))}`" for key in Toolchain.COMMANDS if getattr(toolchain, key)]
         return lines
 
     def cycles(self):
@@ -517,13 +460,8 @@ class SpecDocument:
 
 
 class Brief:
-    """A long spec file condensed into a brief that fits the spec prompt (kept in the project's
-    database, so a resumed run reads it again without asking)."""
-
     @staticmethod
     def load(model, store, mode, task, spec_text):
-        """The brief of the project's spec file (none for a change: a feature's spec is condensed
-        with its request)."""
         if mode == "change":
             return ""
         kept = store.get("texts", "brief")
@@ -535,7 +473,6 @@ class Brief:
 
     @staticmethod
     def make(model, task, spec):
-        """A long spec read in prompt-sized chunks, each condensed, so it fits the spec prompt."""
         limit = max(400, model.limit_chars(Prompts.SPEC_SYSTEM) - len(task) - 300)
         if len(spec) <= limit:
             return spec.strip()
@@ -551,11 +488,7 @@ class Brief:
 
 
 class Tracker:
-    """A run's one report: what it does, kept as data (never read back out of printed text). Each
-    change is published at once in Tinker's home ("running", under the run's process), where the
-    terminal and the chats read it, and appended to the project's "progress" log. The steps are named
-    by phase (STEPS: what it is doing, and what it did)."""
-    STEPS = {"recall": ("🧠 Recalling what Tinker has learned", "🧠 Recalled what Tinker has learned"),
+    DOING_AND_DONE = {"recall": ("🧠 Recalling what Tinker has learned", "🧠 Recalled what Tinker has learned"),
              "amend": ("✏️ Changing the plan", "✏️ Plan changed"),
              "spec": ("📝 Writing the spec", "📝 Spec written"),
              "design": ("📐 Designing where the files meet", "📐 Design done"),
@@ -569,7 +502,6 @@ class Tracker:
              "final_review": ("🏁 Final review, as a person runs it", "🏁 Final review done"),
              "lessons": ("📒 Keeping lessons for the next projects", "📒 Lessons kept"),
              "reproduce": ("🐞 Showing the bug with a test", "🐞 Bug shown by a test"),
-             # tinker learn's
              "search": ("🔎 Searching the web", "🔎 Web searched"),
              "plan": ("🤔 Working out what it is", "🤔 Worked out what it is"),
              "machine": ("💻 Checking what is installed", "💻 Checked what is installed"),
@@ -583,12 +515,10 @@ class Tracker:
              "open": ("📖 Opening the book", "📖 Book opened"),
              "survey": ("🧭 Reading its contents, foreword and index", "🧭 Chose the chapters to read"),
              "chapters": ("📚 Reading the chapters that matter", "📚 Chapters read"),
-             # tinker ask's and tinker teach's
              "answer": ("💬 Answering from what Tinker keeps", "💬 Answered"),
              "understand": ("🤔 Working out what to check", "🤔 Worked out what to check"),
              "judge": ("⚖️ Weighing the evidence", "⚖️ Evidence weighed"),
              "correct": ("✏️ Correcting what Tinker keeps", "✏️ Corrected"),
-             # tinker exercise's
              "identify": ("🔤 Making sure it is a language", "🔤 It is a language"),
              "learn": ("📚 Learning the language first", "📚 Language learned"),
              "pick": ("🎯 Choosing the next practice project", "🎯 Practice project chosen"),
@@ -596,12 +526,11 @@ class Tracker:
              "feature": ("➕ Adding a feature to it", "➕ Feature added"),
              "measure": ("📏 Measuring how it went", "📏 Measured"),
              "reflect": ("📒 Learning from what went wrong and what was slow", "📒 Lessons kept"),
-             # tinker research's
              "searches": ("🤔 Working out what to search", "🤔 Searches chosen"),
              "read": ("🌐 Searching the web and reading the pages", "🌐 Pages read"),
              "write": ("✍️ Writing the answer from the pages", "✍️ Answer written")}
     STARTING = "🚀 Starting: the model loads"
-    QUIET_EVERY = 1.0  # seconds between publishing changes that only move the latest line on
+    QUIET_PUBLISH_SECONDS = 1.0
 
     def __init__(self, title, before=0.0):
         self.pid, self.store, self.published = os.getpid(), None, 0.0
@@ -609,31 +538,27 @@ class Tracker:
                       "began": None, "steps": [], "passing": None, "working": "", "tally": "", "found": "",
                       "outcome": "", "latest": "", "waiting": None,
                       "ended": None, "before": before, "seconds": 0.0, "pid": self.pid,
-                      "resumed": time.time() if Jobs.resuming else None,
+                      "resumed": time.time() if Jobs.resumed_here else None,
                       "exercise": os.environ.get(EXERCISE_ENV) == "1"}
 
     @classmethod
     def icon(cls, phase):
-        """A phase's icon, as its steps show it: "spec" -> "📝"."""
-        return cls.STEPS[phase][0].split(" ", 1)[0] if phase in cls.STEPS else ""
+        return cls.DOING_AND_DONE[phase][0].split(" ", 1)[0] if phase in cls.DOING_AND_DONE else ""
 
     @classmethod
     def done_words(cls, phase):
-        """What a phase did, in words: "spec" -> "Spec written"."""
-        return cls.STEPS[phase][1].split(" ", 1)[1] if phase in cls.STEPS else phase
+        return cls.DOING_AND_DONE[phase][1].split(" ", 1)[1] if phase in cls.DOING_AND_DONE else phase
 
     def project(self, store, run_id, folder, title=None):
-        """The run's project: its database (the progress log), its run ID and its folder."""
         self.store = store
         self.change("project", run=run_id, folder=str(folder), title=title or self.state["title"])
 
     def phase(self, phase):
-        """The run is on to a phase: the one before is done, with what came of it (outcome)."""
         steps = list(self.state["steps"])
-        if self.state["step"] in self.STEPS:
+        if self.state["step"] in self.DOING_AND_DONE:
             outcome = self.state.get("outcome")
-            steps.append(self.STEPS[self.state["step"]][1] + (f": {outcome}" if outcome else ""))
-        doing = self.STEPS.get(phase, (phase, phase))[0]
+            steps.append(self.DOING_AND_DONE[self.state["step"]][1] + (f": {outcome}" if outcome else ""))
+        doing = self.DOING_AND_DONE.get(phase, (phase, phase))[0]
         self.change("phase", phase=phase, step=phase, doing=doing, began=time.time(), steps=steps, working="",
                     found="", outcome="", latest="")
 
@@ -642,13 +567,9 @@ class Tracker:
             self.change("points", passing=[passing, total])
 
     def outcome(self, text):
-        """What came of the phase the run is on ("7 of 20 chapters chosen"): said with it once it is done."""
         self.change("outcome", outcome=text)
 
     def heard(self, message):
-        """A message the run said (messages.say), as data: what it works on now, how far it got, the latest
-        thing it found out; the live line only moves a terminal's clock on. Any other is kept in the
-        project's output log and shown as the latest."""
         if message.kind in ("working", "tally"):
             self.change(message.kind, quiet=message.kind == "tally", **{message.kind: message.text})
             return
@@ -660,12 +581,9 @@ class Tracker:
         self.change("said", quiet=True, latest=message.line.strip()[:300], **found)
 
     def wait(self, plan):
-        """The plan waits for the person (plan: what to show them, as data)."""
         self.change("waiting", waiting=plan, working="")
 
     def end(self, ending, seconds):
-        """The run ended (ending: its status, headline, details and the commands to go on; a job stopped says
-        how to resume it)."""
         ended = Jobs.ended(ending)
         paused = {"doing": f"⏸ {ended['headline']}"} if ended.get("status") == "paused" else {}
         self.change("ended", ended=ended, seconds=seconds, working="", **paused)
@@ -676,7 +594,7 @@ class Tracker:
             self.store.append("progress", {"event": event, **{key: value for key, value in values.items()
                                                               if key != "steps"}})
         now = time.monotonic()
-        if not quiet or now - self.published >= self.QUIET_EVERY:
+        if not quiet or now - self.published >= self.QUIET_PUBLISH_SECONDS:
             self.publish()
 
     def publish(self):
@@ -684,28 +602,22 @@ class Tracker:
         Home.store().put("running", str(self.pid), self.state)
 
     def close(self):
-        """The run's report taken out of the home (it ended, and nobody waits to read it)."""
         Home.store().delete("running", str(self.pid))
 
 
 class Outcome:
-    """How a session ended, for the summary."""
-
     def __init__(self):
         self.status, self.exit_code = "stopped", 1
 
     def set(self, status):
-        """"done" or "awaiting" (exit code 0), or "blocked" (1)."""
         self.status, self.exit_code = status, (1 if status == "blocked" else 0)
 
 
 def project_store(workdir):
-    """The database of the project in a folder (made when first written)."""
     return Store(Path(workdir) / STATE_DIR / PROJECT_DB)
 
 
 def saved(workdir, collection, key, default=None):
-    """What a project keeps, read without making a database in a folder that has none."""
     path = Path(workdir) / STATE_DIR / PROJECT_DB
     return project_store(workdir).get(collection, key, default) if path.is_file() else default
 

@@ -1,6 +1,3 @@
-"""Tinker's settings: where it keeps what it knows (its home and its database), the limits it works
-within, and the small helpers every part uses."""
-
 import contextlib
 lazy import difflib
 lazy import hashlib
@@ -12,227 +9,197 @@ lazy import sqlite3
 lazy import subprocess
 lazy import sys
 lazy import time
+from collections import namedtuple
 from pathlib import Path
 
 lazy from .messages import say
 
 
-DEFAULT_CONFIG = frozendict({                      # the settings: what the home's "config" holds overrides these
-    "model": None,                      # the model every run uses: none until tinker use-model NAME selects one
-    "ollama_url": "http://localhost:11434",  # where Ollama listens (Ollama's own default)
-    "keep_alive": 0,                    # unload after every call: a model kept loaded can keep growing
-    "max_growth": 1.15,                 # with keep_alive, unload once the model grows 15% past its first size
-    "build_think": "medium",            # think level for building (tests, code, fixes); planning uses the model's
-    "test_timeout": 60,                 # seconds one test may take: longer means it hangs
-    "web": "ollama",                    # the Internet plugin's backend, used by tinker learn and --web only:
-                                        # "ollama" (its key in OLLAMA_API_KEY), "duckduckgo" (no key), or ""
-    "web_fallback": "",                 # opt-in: a backend asked whatever the first cannot answer (and alone
-                                        # when the first is not usable), e.g. "duckduckgo"; "" for none
-    "web_timeout": 30,                  # seconds one web search or fetch may take
-    "learn_missing": 2,                 # topics the recall phase of a run with --web may learn
-    "learn_rate": 8,                    # web requests per minute while learning (a token bucket)
-    "learn_backoff": 20,                # the most seconds one learn waits out HTTP 429 before it stops
-    "learn_cutoff": 0.0,                # the word score (BM25) a search result's title and snippet need
-    "learn_pages": 8,                   # search results fetched per search, the best first
-    "learn_min_pages": 2,               # pages with usable text a learn needs, else it stops
-    "learn_searches": 3,                # web searches per learn: the first, then one per slot left without facts
-    "learn_think": "low",               # think level for reading pages into facts and condensing them (the plan
-                                        # thinks at the model's own)
-    "docs_pages": 30,                   # pages taken from a topic's documentation site
-    "tool_docs_pages": 5,               # pages taken from the documentation of each of a language's tools
-    "docs_latest_days": 30,             # days a copy of unversioned ("latest") documentation is kept before it
-                                        # is fetched again (a version's own documentation is kept until cleared)
-    "fetch_workers": 6,                 # pages fetched at once
-    "fetch_timeout": 15,                # seconds one page may take
-    "fetch_max_bytes": 2000000,         # the most of one page read
-    "fetch_domain_delay": 0.1,          # seconds between two requests to one site (its pages go one at a time)
-    "fetch_fallbacks": 2,               # pages per learn the web plugin fetches when a site gives too little text
-    "embed_model": "",                  # the embedding model that indexes what is learned (tinker embed NAME);
-                                        # tinker learn and --web need one
-    "projects": "~/Projects",           # where tinker task makes a new project's own folder (named after the
-                                        # task), unless --workdir names one
+DEFAULT_CONFIG = frozendict({
+    "model": None,
+    "ollama_url": "http://localhost:11434",
+    "keep_alive": 0,
+    "max_growth": 1.15,
+    "build_think": "medium",
+    "test_timeout": 60,
+    "web": "ollama",
+    "web_fallback": "",
+    "web_timeout": 30,
+    "learn_missing": 2,
+    "learn_rate": 8,
+    "learn_backoff": 20,
+    "learn_cutoff": 0.0,
+    "learn_pages": 8,
+    "learn_min_pages": 2,
+    "learn_searches": 3,
+    "learn_think": "low",
+    "docs_pages": 30,
+    "tool_docs_pages": 5,
+    "docs_latest_days": 30,
+    "fetch_workers": 6,
+    "fetch_timeout": 15,
+    "fetch_max_bytes": 2000000,
+    "fetch_domain_delay": 0.1,
+    "fetch_fallbacks": 2,
+    "embed_model": "",
+    "projects": "~/Projects",
 })
 
-# --- each project's own state ------------------------------------------------------------------
-STATE_DIR = ".tinker"             # in each project: its database (project.db) and a started server's output
+STATE_DIR = ".tinker"
 PROJECT_DB = "project.db"
 ENV_FILE, ENV_EXAMPLE = ".env", ".env.example"
 
-# --- the work: cycles, phases, criteria, files -------------------------------------------------
-# The idea, as the phases of one cycle: plan only what the request asks as a spec; turn every spec point into
-# a unit test, with the test tool installed first; write just enough code to pass them; review it once at
-# the end, the way a person will run it; then it is done.
 PHASES = (
-    "recall",        # what was learned that the request needs
-    "spec",          # plan: the spec points with their tests, the files, the toolchain (one call)
-    "design",        # plan: the contracts where files meet
-    "review",        # plan: a file checked against the contracts it uses (only where several meet)
-    "setup",         # the test tool and the dependencies installed, and shown to work, before any test
-    "tests",         # a test for every spec point, before any code
-    "code",          # just enough code to pass them
-    "verify",        # ... fixed until every spec test passes
-    "tidy",          # the language's linter over the code: what it finds fixed, every test still passing
-    "docs",          # the README, and its examples run as a user runs them
-    "final_review",  # once at the end: set up afresh, every test run the way a person runs them
-    "lessons",       # what the next projects should know
+    "recall",
+    "spec",
+    "design",
+    "review",
+    "setup",
+    "tests",
+    "code",
+    "verify",
+    "tidy",
+    "docs",
+    "final_review",
+    "lessons",
     "done")
-FIX_PHASES = ("recall", "reproduce", "verify", "final_review", "lessons", "done")  # tinker fix: a test that shows the bug, then the fix
-PLANNING_PHASES = ("recall", "spec", "design", "review")  # the phases that make the plan
-CONFIRM_AFTER = frozendict({"feature": "review", "fix": "reproduce"})  # by cycle kind: where its plan waits for the person
-FORMAT_AFTER = ("verify",)  # phases after which the toolchain's formatter runs (the model never formats)
+FIX_PHASES = ("recall", "reproduce", "verify", "final_review", "lessons", "done")
+PLANNING_PHASES = ("recall", "spec", "design", "review")
+CONFIRM_AFTER = frozendict({"feature": "review", "fix": "reproduce"})
+FORMATTER_RUNS_AFTER = ("verify",)
 STATUS_TEXT = frozendict({"green": "passes", "todo": "to do", "active": "in progress", "blocked": "parked"})
 KINDS = ("code", "test", "template", "config", "docs")
-MAX_FILE_LINES = 60               # design guidance: small modules (a bigger file still works, in windows)
+MAX_FILE_LINES = 60
 TESTS_PER_CALL = 10
 
-# --- fixing: until each criterion's test passes ------------------------------------------------
-DEFAULT_MAX_STALL = 3             # fixes without progress before the review against the plan
-MAX_TRIES_PER_PASS = 8            # model calls on one criterion per pass, whatever "progress" says
-REVIEW_TRIES = 2                  # review calls when fixing stops making progress
-BUILD_TRIES = 3                   # fixes for a project that does not build before the run stops
-OUTPUT_CHARS = 1600               # the end of a failure output shown to the model
-TESTS_LOCKED = "tests do not change now"  # why a fix may not change a test (a fix that tries points at the test)
-FIX_FILES = 7                     # files a fix may be shown (the most related first)
+DEFAULT_MAX_STALL = 3
+MAX_CALLS_PER_CRITERION_PASS = 8
+STALLED_REVIEW_TRIES = 2
+BROKEN_BUILD_FIXES = 3
+FAILURE_OUTPUT_CHARS = 1600
+TESTS_LOCKED_REASON = "tests do not change now"
+FILES_SHOWN_PER_FIX = 7
 
-# --- the project's commands (one test's limit is test_timeout in config.json) ------------------
-NETWORK_RETRY = 30                # seconds between tries of what waits for the network (a package to install)
-ONLINE_PROBES = (("1.1.1.1", 443), ("8.8.8.8", 443))  # opened and closed to see the internet is there
-NETWORK_NOTE = 600                # while a build waits for the network, a line says so this often
+NETWORK_RETRY_SECONDS = 30
+ONLINE_PROBES = (("1.1.1.1", 443), ("8.8.8.8", 443))
+NETWORK_WAIT_NOTE_SECONDS = 600
 SETUP_TIMEOUT = 900
-COMMAND_TIMEOUT = 300             # setup aside, the longest a command may run (all tests)
+COMMAND_TIMEOUT = 300
 
-# --- prompts: within the model's input budget --------------------------------------------------
-CHARS_PER_TOKEN = 2.8             # the start (code ~2.9 chars/token); then learned from real prompts
-MIN_CHARS_PER_TOKEN = 2.0         # HTML and dense code have fewer chars per token; never assume fewer
-MAX_CHARS_PER_TOKEN = 4.0         # prose measured 4.1; never assume more
-PROMPT_HEADROOM = 0.95            # aim 5% under the budget: code has fewer chars per token than prose
-TRIM_FLOOR = 300                  # a shortened prose part keeps at least this many chars
-MIN_PROMPT_TOKENS = 512           # a run never lowers its prompt budget below this
+STARTING_CHARS_PER_TOKEN = 2.8
+MIN_CHARS_PER_TOKEN = 2.0
+MAX_CHARS_PER_TOKEN = 4.0
+PROMPT_BUDGET_SHARE = 0.95
+MIN_TRIMMED_PROSE_CHARS = 300
+MIN_PROMPT_TOKENS = 512
 
-# --- replies -----------------------------------------------------------------------------------
 MIN_REPLY_TOKENS = 1024
-EARLY_STOP_GRACE = 3.0            # seconds to await Ollama's last chunk (its token counts) once a reply is complete
-PROGRESS_EVERY = 2.0              # seconds between live progress updates
-LOOP_LINES = 20                   # the same line written this many times in a row: the model is looping
+LAST_CHUNK_WAIT_SECONDS = 3.0
+PROGRESS_UPDATE_SECONDS = 2.0
+LOOPING_REPEATED_LINES = 20
 
-# --- thinking budgets: a reply cut off while still thinking is asked again unthinking, given the
-# thought so far to conclude (THOUGHT_KEPT chars of it), so a lower budget costs no answer ----------
-DEFAULT_FIX_MAX = 4096            # a fix (measured: most that answer thinking need under 4K; past it, few do)
-TESTS_MAX_TOKENS = 8192           # a test file: room to think, and to write the whole file unthinking
-CHECK_MAX_TOKENS = 12288          # a check of a plan or an app (not its making)
-THOUGHT_KEPT = 4000               # chars of an unfinished thought passed on to conclude
+FIX_MAX_TOKENS = 4096
+TEST_FILE_MAX_TOKENS = 8192
+CHECK_MAX_TOKENS = 12288
+UNFINISHED_THOUGHT_KEPT_CHARS = 4000
 
-# --- Ollama calls that fail --------------------------------------------------------------------
-REQUEST_TIMEOUT = 600             # seconds of silence from Ollama before a call counts as stuck
+OLLAMA_SILENCE_TIMEOUT = 600
 STALL_RETRIES = 2
 OOM_RETRIES = 2
-OOM_SHRINK = 0.75                 # prompt budget factor for a retry after "out of memory" (that call only)
-REPLY_ERROR_RETRIES = 1           # Ollama failing on what the model wrote: ask once more, then use what came
-CRASH_RECOVERY = 10               # seconds a crashed runner gets to free its memory before the next call
-CRASH_RETRIES = 3                 # a run: calls retried after the runner crashed (the first at the same size)
-CRASH_SHRINK = 0.9                # a limit that crashed twice drops to this share of itself (a run: for that run
-                                  # only); calibration takes this share of a longest reply that varies
-CRASH_NEAR = 0.5                  # a run: a crash below this share of a limit is not about that limit
+OOM_RETRY_PROMPT_SHARE = 0.75
+REPLY_ERROR_RETRIES = 1
+CRASH_RECOVERY_SECONDS = 10
+CRASH_RETRIES = 3
+CRASHED_LIMIT_SHARE = 0.9
+CRASH_NEAR_LIMIT_SHARE = 0.5
 
-# --- calibration: a model's settings, measured once per model (models/<model>.json) ------------
-DEFAULT_THINK = "high"            # think hard once instead of reworking cheap guesses (if the model takes it)
-PROMPT_TARGET = 8192              # the largest prompt a run needs (whole files are small modules; a fix shows at
-                                  # most FIX_FILES of them)
-REPLY_TARGET = 16384              # the longest reply a run needs (thinking included: the longest calls think to it)
-CAPACITY_STEP = 0.1               # a context that does not fit is searched for to within this much (10%)
-MEMORY_OVERHEAD = 1.5e9           # bytes a runner needs besides the weights and the context
-PROBE_BATCH = 256                 # piece size tried when a whole prompt crashes a GGUF runner (num_batch)
+DEFAULT_THINK = "high"
+PROMPT_TARGET_TOKENS = 8192
+REPLY_TARGET_TOKENS = 16384
+CAPACITY_SEARCH_PRECISION = 0.1
+RUNNER_OVERHEAD_BYTES = 1.5e9
+PROBE_NUM_BATCH = 256
 
-# --- learning: what earlier projects taught (Tinker's "languages" and "memory") ---------------
-LESSON_PHASES = ("design", "config", "tests", "code", "toolchain")  # where a lesson is shown
-MAX_LESSONS = 15                  # per file; the least confirmed go first
-LESSONS_SHOWN = 5                 # per prompt (an optional part: dropped first when the prompt is full)
-SAME_LESSON = 0.75                # text similarity at which a new lesson is an old one seen again
-SAME_FACT = 0.75                  # text similarity at which a fact learned from the web is a repeat
-SIMILAR_FAILURE = 0.7             # similarity at which a past toolchain fix is shown as a hint
-HISTORY_KEPT = 20                 # events an item keeps (born, confirmed, helped, failed), the newest
-RETIRED_KEPT = 50                 # retired items kept beside each list, for people to see (never prompts)
-RUNS_KEPT = 200                   # lines about runs kept in the home, the most recently updated
+LESSON_PHASES = ("design", "config", "tests", "code", "toolchain")
+MAX_LESSONS_PER_FILE = 15
+LESSONS_PER_PROMPT = 5
+SAME_LESSON_SIMILARITY = 0.75
+SAME_FACT_SIMILARITY = 0.75
+TOOLCHAIN_HINT_SIMILARITY = 0.7
+EVENTS_KEPT_PER_ITEM = 20
+RETIRED_KEPT_PER_LIST = 50
+RUNS_KEPT = 200
 
-# --- the memory graph: tinker memory --graph --------------------------------------------------------------
-SIMILAR_MEANING = 0.75            # embedding similarity at which two lessons are linked as similar
-SIMILAR_WORDS = 0.5               # ... text similarity, when there are no embeddings
+SIMILAR_LESSON_MEANING = 0.75
+SIMILAR_LESSON_WORDS = 0.5
 
-# --- asking and teaching: tinker ask QUESTION, tinker teach WHAT --------------------------------------------
-MEMORY_SHOWN = 25                 # items of what Tinker keeps shown to one ask or teach, the most related first
-TEACH_CLAIMS = 4                  # claims a teaching is checked as
-TEACH_COMMANDS = 3                # commands that check it on this machine
-TEACH_SEARCHES = 3                # web searches that check it
+MEMORY_ITEMS_SHOWN = 25
+TEACH_CLAIMS = 4
+TEACH_CHECK_COMMANDS = 3
+TEACH_CHECK_SEARCHES = 3
 
-# --- reading: tinker read SOURCE (a book, an article, a document) --------------------------------------------
-READ_MAX_BYTES = 50_000_000       # the largest file read (a link's download stops here)
-READ_CHAPTERS = 5                 # chapters a book is split into at least, when its contents go that deep
-READ_WINDOW_CHARS = 20_000        # a text with no chapter headings is read in parts this long
-READ_INDEX_TERMS = 40             # index terms the survey sees: those the index refers to most
-READ_TERMS = 12                   # key terms the survey names, followed through every chapter
-READ_FOCUS_CHAPTERS = 3           # chapters read again for read #N "WHAT": those most about it
-READ_TEXT_SHARE = 0.6             # share of a chapter's prompt its text may take (the rest: the book, notes)
-READ_CHUNKS = 3                   # parts of a chapter a focused read shows: its opening, then the most related
-READ_POINTS = 8                   # facts one chapter may give
-READ_PASSAGES = 4                 # passages of the books an ask or a teach sees, the most related first
+READ_MAX_BYTES = 50_000_000
+READ_MIN_CHAPTERS = 5
+READ_WINDOW_CHARS = 20_000
+READ_INDEX_TERMS = 40
+READ_KEY_TERMS = 12
+READ_FOCUS_CHAPTERS = 3
+READ_CHAPTER_TEXT_SHARE = 0.6
+READ_FOCUS_CHUNKS = 3
+READ_FACTS_PER_CHAPTER = 8
+BOOK_PASSAGES_SHOWN = 4
 
-# --- tinker exercise LANGUAGE: practice projects that teach Tinker a language ---------------------------
-EXERCISE_FOLDER = "tinker-exercise"  # in the projects folder: one folder per practice project
-EXERCISE_ENV = "TINKER_EXERCISE"  # =1: a run an exercise started (its tracker says so; it never pauses one)
-EXERCISE_LOOK = 2                 # seconds between looks for the person while an exercise builds
-EXERCISE_SHOWN = 8                # earlier projects' measures shown to the exercise's own calls
-EXERCISE_PROBLEMS = 12            # problems of one project its reflection sees
+EXERCISE_FOLDER = "tinker-exercise"
+EXERCISE_ENV = "TINKER_EXERCISE"
+EXERCISE_PERSON_LOOK_SECONDS = 2
+EARLIER_MEASURES_SHOWN = 8
+REFLECTION_PROBLEMS = 12
 
-# --- learning from the web: tinker learn TOPIC, and the recall phase of a run --------------------------
-FACT_PHASES = ("spec", "design", "config", "tests", "code", "toolchain")  # where a learned fact is shown
-MAX_COMMANDS = 6                  # commands that show what of a topic is installed here
-VERSION_TIMEOUT = 20              # seconds such a command may take
-SEARCH_RESULTS = 3                # results taken from each search of research
-PAGE_CHUNKS = 2                   # prompt-sized chunks of a page condensed (its top, then the most related)
-FACTS_PER_CHUNK = 4               # facts one chunk may give
-FACT_CHARS = 400                  # the longest fact kept (room for its exact numbers, names and units)
-TOOL_ROLES = ("environment", "packages", "build", "tests", "format", "lint", "types")  # a language's tools, one per role
-PLAYBOOK_RULES = 16               # rules a topic's facts are condensed into (what its prompts show instead)
-RULE_CHARS = 200                  # the longest rule kept
-RULE_WHEN_CHARS = 80              # the longest "when" of a rule that applies only to some code
+FACT_PHASES = ("spec", "design", "config", "tests", "code", "toolchain")
+MAX_VERSION_COMMANDS = 6
+VERSION_TIMEOUT = 20
+RESULTS_PER_RESEARCH_SEARCH = 3
+CHUNKS_PER_PAGE = 2
+FACTS_PER_CHUNK = 4
+MAX_FACT_CHARS = 400
+TOOL_ROLES = ("environment", "packages", "build", "tests", "format", "lint", "types")
+PLAYBOOK_RULES = 16
+MAX_RULE_CHARS = 200
+MAX_RULE_WHEN_CHARS = 80
 
-# --- learning a language or a tool by its slots: tinker learn TOPIC (the limits a person tunes are in config)
-FIRST_SEARCH = "{topic} official documentation"  # the first search, built from the topic alone: its docs site
-DOC_MAPS = ("llms.txt", "sitemap.xml")  # where a documentation site lists its pages (then its own links)
-MAX_MAP_LINKS = 5000              # links read from one site's map
-LEARN_RESULTS = 10                # results asked of one search (the best learn_pages are fetched)
-USABLE_PAGE_CHARS = 400           # a page's main text below this is too little (a page its scripts draw)
-MAX_REDIRECTS = 5                 # redirects one page fetch follows
+DOCS_SITE_SEARCH = "{topic} official documentation"
+SITE_MAP_FILES = ("llms.txt", "sitemap.xml")
+MAX_MAP_LINKS = 5000
+RESULTS_PER_LEARN_SEARCH = 10
+MIN_USABLE_PAGE_CHARS = 400
+MAX_REDIRECTS = 5
 FETCH_USER_AGENT = "Tinker/1.0 (a local coding agent learning from documentation)"
-PASSAGE_CHARS = 1200              # a passage under one heading is cut here (a code block is kept whole)
-LINK_ONLY = 0.8                   # share of a block's text inside links at which it is a menu, not content
-NEAR_DUPLICATE = 0.8              # word overlap (3-word shingles) at which a passage repeats another
-SLOT_RELEVANT = 0.6               # embedding similarity a passage needs to a slot's question (or a slot keyword;
-                                  # qwen3-embedding, as TOPIC_RELEVANT: related 0.65 and up, unrelated 0.52 and down)
-SLOT_CANDIDATES = 60              # passages per slot shortlisted by words before the embedding model sees them
-MMR_BALANCE = 0.7                 # relevance against novelty when picking a slot's passages (1: relevance only)
-FACTS_PER_SLOT = 6                # facts one slot's digest may give
-BACKOFF_FIRST = 1.0               # seconds of the first wait after HTTP 429 (then doubled, within learn_backoff)
+MAX_PASSAGE_CHARS = 1200
+MENU_LINK_SHARE = 0.8
+NEAR_DUPLICATE_OVERLAP = 0.8
+SLOT_RELEVANT_SIMILARITY = 0.6
+SLOT_CANDIDATE_PASSAGES = 60
+MMR_BALANCE = 0.7
+FACTS_PER_SLOT = 6
+FIRST_BACKOFF_SECONDS = 1.0
 
-# --- research: tinker learn of a domain (Researcher) ----------------------------------------------------
-RESEARCH_QUESTIONS = 4            # research questions a topic is split into
-RESEARCH_QUERIES = 2              # web searches per question, for independent sources
-RESEARCH_PAGES = (8, 6)           # pages read per round: the first round, then one for the gaps and checks
-RESEARCH_GAPS = 2                 # gaps the next round searches (the most important first)
-RESEARCH_CHECKS = 2               # key facts one site states that the next round looks for on other sites
-SAME_CLAIM = 0.8                  # embedding similarity at which two facts make the same claim
-                                  # (qwen3-embedding: paraphrases 0.86 and up, unrelated facts 0.67 and down)
-REPEAT_CLAIM = 0.9                # ... at which one fact repeats another (kept once, with the pages of both)
-RECALL_TOPICS = 6                 # learned topics one cycle uses at most
-TOPIC_RELEVANT = 0.6              # embedding similarity of a request and a topic it needs (qwen3-embedding:
-                                  # the topic a request is about 0.65 and up, unrelated topics 0.52 and down)
+RESEARCH_QUESTIONS = 4
+SEARCHES_PER_RESEARCH_QUESTION = 2
+RESEARCH_PAGES_PER_ROUND = (8, 6)
+RESEARCH_GAPS = 2
+RESEARCH_FACTS_CHECKED = 2
+SAME_CLAIM_SIMILARITY = 0.8
+REPEAT_CLAIM_SIMILARITY = 0.9
+MAX_RECALL_TOPICS = 6
+TOPIC_RELEVANT_SIMILARITY = 0.6
+
+
+Paged = namedtuple("Paged", "items pages")
+LogEntry = namedtuple("LogEntry", "id entry")
 
 
 class Home:
-    """Tinker's own folder next to the script (.tinker): its database, tinker.db (settings, measured
-    models, what it knows, the projects it points to, the channels), and the channels' lock files.
-    Only Home knows where it is; tinker reset deletes it."""
-    root = Path(__file__).resolve().parent.parent / STATE_DIR  # next to the script (its real file, not a link)
+    root = Path(__file__).resolve().parent.parent / STATE_DIR
     stores = {}
 
     @classmethod
@@ -245,33 +212,27 @@ class Home:
 
     @classmethod
     def web_log(cls):
-        """Where learning logs every web request it makes (one JSON line each: kind, result, seconds, address)."""
         cls.root.mkdir(parents=True, exist_ok=True)
         return cls.root / "web-requests.log"
 
     @classmethod
     def graph_page(cls):
-        """The page tinker memory --graph writes: what Tinker knows, as a graph to open in a browser."""
         cls.root.mkdir(parents=True, exist_ok=True)
         return cls.root / "memory.html"
 
     @classmethod
     def reading_file(cls, name):
-        """Where a file sent in a chat is kept for tinker read: its name, made safe, in the home's reading folder."""
         folder = cls.root / "reading"
         folder.mkdir(parents=True, exist_ok=True)
         return folder / (re.sub(r"[^\w.-]+", "-", Path(name).name).strip("-.") or "book")
 
     @classmethod
     def lock_file(cls, name):
-        """The lock a Tinker holds while it listens on a channel (released when its process ends)."""
         cls.root.mkdir(parents=True, exist_ok=True)
         return cls.root / f"channel-{name}.lock"
 
     @classmethod
     def reset(cls, yes=False):
-        """tinker reset: delete Tinker's folder next to the script, after asking (yes: without); the next
-        command starts fresh. Projects keep their own .tinker folders, so tinker resume works inside them."""
         home = cls.root
         if not home.is_dir():
             say.info(f"Nothing to reset: {home} does not exist.")
@@ -289,7 +250,6 @@ class Home:
 
     @staticmethod
     def parts():
-        """What tinker clear can delete: {name: (its collections, its logs, what it is)}."""
         return {"languages": (["languages"], [], "per language: the toolchain that worked, its fixes, its lessons"),
                 "memory": (["memory"], [], "lessons that hold for any language"),
                 "learned": (["learned", "embeddings"], ["learn"], "what tinker learn learned, and its index"),
@@ -305,8 +265,6 @@ class Home:
 
     @classmethod
     def clear(cls, names, yes=False):
-        """tinker clear PART...: delete those parts of what Tinker keeps, after asking (yes: without
-        asking); everything else stays."""
         names = cls.known_parts(names)
         held = {name: cls.entries_in(name) for name in names}
         if not any(held.values()):
@@ -350,8 +308,6 @@ class Home:
 
     @classmethod
     def keep_awake(cls):
-        """Keep the computer from sleeping while Tinker works (it stops with Tinker). Idle sleep would
-        pause a run for as long as nobody touches the computer."""
         command = cls.stay_awake_command(str(os.getpid()))
         if not command:
             return
@@ -359,14 +315,12 @@ class Home:
             subprocess.Popen(command, stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
                              start_new_session=True)
         except OSError:
-            pass  # staying awake helps, it is not needed
+            pass
 
     @staticmethod
     def stay_awake_command(pid):
-        """The command that keeps this computer awake while the process pid lives: caffeinate on macOS,
-        systemd-inhibit on Linux; None elsewhere."""
         if shutil.which("caffeinate"):
-            return ["caffeinate", "-i", "-s", "-w", pid]  # -s: no system sleep either, on mains power
+            return ["caffeinate", "-i", "-s", "-w", pid]
         if shutil.which("systemd-inhibit"):
             return ["systemd-inhibit", "--what=idle:sleep", "--why=Tinker is working", "tail", f"--pid={pid}",
                     "-f", "/dev/null"]
@@ -374,7 +328,6 @@ class Home:
 
     @classmethod
     def ensure(cls):
-        """Tinker's folder next to the script, with its database, made on first use."""
         try:
             new = not cls.database().exists()
             cls.store().connect().close()
@@ -385,17 +338,14 @@ class Home:
 
 
 class Config:
-    """The settings: DEFAULT_CONFIG, overridden by the home's "config" (read each time, so what another
-    Tinker changed is seen at once). They change through Tinker's commands only: use-model, embed,
-    use-web, and tinker config KEY VALUE for the rest."""
-    KEEP_ALIVE_RE = re.compile(r"-?\d+|-?(\d+(\.\d+)?(ns|us|ms|s|m|h))+")  # seconds, or a duration: 10m, 1h30m
+    SECONDS_OR_DURATION_RE = re.compile(r"-?\d+|-?(\d+(\.\d+)?(ns|us|ms|s|m|h))+")
     SETTABLE = ("ollama_url", "keep_alive", "max_growth", "build_think", "test_timeout", "web_fallback",
                 "web_timeout", "learn_missing", "learn_rate", "learn_backoff", "learn_cutoff", "learn_pages",
                 "learn_min_pages", "learn_searches", "learn_think", "docs_pages", "tool_docs_pages",
                 "docs_latest_days", "fetch_workers", "fetch_timeout", "fetch_max_bytes",
                 "fetch_domain_delay", "fetch_fallbacks", "projects")
     OWN_COMMAND = {"model": "use-model", "embed_model": "embed", "web": "use-web"}
-    checks = []  # more checks of the settings, from the parts that use them (the Internet plugin's)
+    checks = []
 
     @staticmethod
     def load():
@@ -412,7 +362,6 @@ class Config:
 
     @classmethod
     def set(cls, key, text):
-        """tinker config KEY VALUE: one setting, read by its type and checked; kept only when it passes."""
         cls.refuse_unsettable(key)
         value = cls.parse(key, text.strip())
         before = Home.store().get("config", key)
@@ -433,7 +382,6 @@ class Config:
 
     @staticmethod
     def parse(key, text):
-        """A setting's value from its text: numbers as numbers, true/false/null as such, else the text."""
         known = {"true": True, "false": False, "null": None}
         if text.lower() in known and key in ("build_think", "learn_think"):
             return known[text.lower()]
@@ -460,9 +408,6 @@ class Config:
 
     @classmethod
     def check_model(cls, run):
-        """The settings a model takes (Tinker decides them; a person may tune them with tinker config),
-        and for a run also its tests' timeout: checked before anything starts. A command that loads no
-        model never reads them."""
         cls.check_keep_alive()
         cls.check_max_growth()
         cls.check_build_think()
@@ -471,7 +416,7 @@ class Config:
 
     @classmethod
     def check_keep_alive(cls):
-        if not cls.KEEP_ALIVE_RE.fullmatch(str(cls.get("keep_alive"))):
+        if not cls.SECONDS_OR_DURATION_RE.fullmatch(str(cls.get("keep_alive"))):
             raise SystemExit(f"keep_alive must be seconds (0, 300; -1 keeps the model loaded) or a duration (10m, "
                              f"1h); it is {cls.get('keep_alive')!r} (tinker config keep_alive VALUE)")
 
@@ -491,8 +436,6 @@ class Config:
 
     @staticmethod
     def is_think_setting(think):
-        """Whether think is one Ollama takes: a level, true, false or null (0 and 1 equal false and true, but are
-        not them)."""
         return think in ("high", "medium", "low", True, False, None) and not (think in (0, 1)
                                                                              and not isinstance(think, bool))
 
@@ -508,13 +451,10 @@ class Config:
 
     @staticmethod
     def keep_alive(value):
-        """keep_alive as Ollama takes it: seconds as a number, a duration (10m) as it is."""
         return int(value) if re.fullmatch(r"-?\d+", str(value)) else value
 
 
 def confirmed(question, command, yes=False):
-    """Whether the person agrees to what was just shown (yes: agreed beforehand). Only a terminal can
-    ask: elsewhere nothing is done, and it says how to agree."""
     if yes:
         return True
     if not sys.stdin.isatty():
@@ -527,18 +467,15 @@ def is_number(value):
 
 
 def number_from(value, least, whole=True):
-    """Whether a setting is a number (a whole one, when whole) of least or more."""
     return is_number(value) and (not whole or isinstance(value, int)) and not value < least
 
 
 class Store:
-    """One SQLite database: documents (JSON values) by collection and key, and logs of entries. What
-    is written is written whole or not at all, and several Tinkers may use one database at once."""
     SCHEMA = ("CREATE TABLE IF NOT EXISTS docs (collection TEXT NOT NULL, key TEXT NOT NULL, value TEXT NOT NULL, "
               "PRIMARY KEY (collection, key))",
               "CREATE TABLE IF NOT EXISTS logs (id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT NOT NULL, "
               "time TEXT NOT NULL, entry TEXT NOT NULL)")
-    WAIT = 30  # seconds to wait for another Tinker's write
+    LOCK_WAIT_SECONDS = 30
 
     def __init__(self, path):
         self.path, self.made = Path(path), False
@@ -552,15 +489,12 @@ class Store:
             self.write(db, collection, key, value)
 
     def update(self, collection, key, change, default=None):
-        """The document changed by change(value) -> value, read and written in one transaction (no other
-        Tinker writes in between); the new value."""
         with self.transaction(write=True) as db:
             value = change(self.read(db, collection, key, default))
             self.write(db, collection, key, value)
         return value
 
     def delete(self, collection, key=None):
-        """One document, or (key None) the whole collection."""
         with self.transaction(write=True) as db:
             if key is None:
                 db.execute("DELETE FROM docs WHERE collection = ?", (collection,))
@@ -568,7 +502,6 @@ class Store:
                 db.execute("DELETE FROM docs WHERE collection = ? AND key = ?", (collection, key))
 
     def items(self, collection):
-        """{key: value} of a collection, in the order they were first written."""
         with self.transaction() as db:
             rows = db.execute("SELECT key, value FROM docs WHERE collection = ? ORDER BY rowid", (collection,)).fetchall()
         return {key: json.loads(value) for key, value in rows}
@@ -578,17 +511,15 @@ class Store:
             return db.execute("SELECT COUNT(*) FROM docs WHERE collection = ?", (collection,)).fetchone()[0]
 
     def append(self, log, entry):
-        """An entry added to a log, with its time; its id."""
         with self.transaction(write=True) as db:
             return db.execute("INSERT INTO logs (name, time, entry) VALUES (?, ?, ?)",
                               (log, time.strftime("%Y-%m-%d %H:%M:%S"), json.dumps(entry, ensure_ascii=False))).lastrowid
 
     def entries(self, log, after=0):
-        """[(id, entry with its "time")] of a log after an id, in order."""
         with self.transaction() as db:
             rows = db.execute("SELECT id, time, entry FROM logs WHERE name = ? AND id > ? ORDER BY id",
                               (log, after)).fetchall()
-        return [(row_id, {"time": stamp, **json.loads(entry)}) for row_id, stamp, entry in rows]
+        return [LogEntry(row_id, {"time": stamp, **json.loads(entry)}) for row_id, stamp, entry in rows]
 
     def drop_log(self, log):
         with self.transaction(write=True) as db:
@@ -600,13 +531,12 @@ class Store:
 
     @contextlib.contextmanager
     def transaction(self, write=False):
-        """A connection, in one transaction (a write's: taken at once, so a read-modify-write is whole)."""
         db = self.opened()
         try:
             db.execute("BEGIN IMMEDIATE" if write else "BEGIN")
             yield db
             db.execute("COMMIT")
-        except sqlite3.DatabaseError as exc:  # not a database (any more), or locked past WAIT
+        except sqlite3.DatabaseError as exc:
             raise self.unreadable(exc) from None
         except BaseException:
             if db.in_transaction:
@@ -625,12 +555,11 @@ class Store:
         return SystemExit(f"{self.path} cannot be read ({exc})")
 
     def connect(self):
-        """A connection; the database is made on first use, readable by its owner only."""
-        if not self.path.exists():  # new, or deleted since (tinker reset)
+        if not self.path.exists():
             self.create_private_file()
-        elif not self.made:  # one made before it was kept private
+        elif not self.made:
             self.path.chmod(0o600)
-        db = sqlite3.connect(self.path, timeout=self.WAIT, isolation_level=None)
+        db = sqlite3.connect(self.path, timeout=self.LOCK_WAIT_SECONDS, isolation_level=None)
         if not self.made:
             self.create_tables(db)
         return db
@@ -657,8 +586,6 @@ class Store:
 
 
 class Log:
-    """One log of a database (a run's model calls, tinker learn's): add(event) appends to it."""
-
     def __init__(self, store, name):
         self.store, self.name = store, name
 
@@ -666,8 +593,11 @@ class Log:
         self.store.append(self.name, event)
 
 
+class NotAPytestClass:
+    __test__ = False
+
+
 def projects_folder():
-    """Where new projects get their own folders (tinker config projects)."""
     return Path(str(Config.get("projects") or "~/Projects")).expanduser().resolve()
 
 
@@ -689,8 +619,6 @@ def words(text):
 
 
 def split_text(text, size):
-    """Text in chunks of at most size chars (at least 200), split between paragraphs where it can
-    (a longer paragraph is cut)."""
     size, chunks, current = max(size, 200), [], ""
     for para in re.split(r"\n\s*\n", text):
         para = para.strip()
@@ -707,14 +635,10 @@ def split_text(text, size):
 
 
 def fingerprint(text):
-    """A short fixed key for some text: the same text, the same key."""
     return hashlib.sha1(text.encode("utf-8")).hexdigest()
 
 
 def after_what_they_use(starts, uses, known):
-    """Paths in an order where each comes after the paths it uses (depth first from starts, in
-    their order; a cycle is broken where it closes). uses(path): the paths it uses; known(path):
-    whether a path takes part at all."""
     order, seen = [], set()
 
     def visit(path, trail=()):
@@ -735,8 +659,6 @@ def similarity(a, b):
 
 
 def groups_fitting(items, room, size=len):
-    """Items in order, grouped so that each group fits in room chars (an item larger than room is
-    a group of its own): size(item) chars each, and one more for its line break."""
     groups, used = [], room + 1
     for item in items:
         need = size(item) + 1

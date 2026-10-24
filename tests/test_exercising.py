@@ -1,5 +1,3 @@
-"""EXR: tinker exercise LANGUAGE: practice projects that teach Tinker a language, giving way to the person."""
-
 import json
 import os
 import signal
@@ -19,7 +17,7 @@ from tinkerkit.project import Tracker, project_store
 from tinkerkit.settings import Config, Home
 from test_conversation import Recorder
 
-ALIVE = os.getppid()  # a process that runs while the tests do, and is not this one
+OTHER_LIVE_PID = os.getppid()
 RUST = {"topic": "rust", "kind": "language", "name": "Rust", "summary": "A systems language.",
         "machine": [{"command": "cargo --version", "found": True, "version": "1.90"}]}
 CHOICE = {"task": "A word counter for text files in Rust", "feature": "also count lines", "folder": "word-count",
@@ -29,8 +27,6 @@ REFLECTION = {"lessons": [{"phase": "code", "scope": "language", "text": "Read w
 
 
 class FakeBuild:
-    """A build's process: it runs for polls looks, then ends with code."""
-
     def __init__(self, polls=0, code=0):
         self.polls, self.code, self.returncode, self.pid = polls, code, None, 424242
 
@@ -47,9 +43,6 @@ class FakeBuild:
 
 
 class Builds:
-    """How an exercise starts its builds, scripted: each start is kept, and does to the project's folder what the
-    real command would (a task keeps a run that is done, an add a new cycle, a learn the language)."""
-
     def __init__(self, status="done"):
         self.started, self.status = [], status
 
@@ -77,10 +70,8 @@ def projects(tmp_path, home_store):
 
 
 def exercise_of(make_model, builds, title="Exercising rust"):
-    return Exercise(make_model(), Tracker(title), start=builds)
+    return Exercise(make_model(), Tracker(title), start_build=builds)
 
-
-# --- EXR-1: the words must name one language ------------------------------------------------------------------------
 
 @pytest.mark.spec("EXR-1")
 def test_a_learned_language_needs_no_call(make_model, fake_ollama, home_store):
@@ -112,8 +103,6 @@ def test_read_verdict_needs_a_known_verdict_and_a_language_its_name():
         read_verdict({"verdict": "language"})
 
 
-# --- EXR-2: learned first, installed here ---------------------------------------------------------------------------
-
 @pytest.mark.spec("EXR-2")
 def test_a_language_not_learned_is_learned_first(make_model, fake_ollama):
     fake_ollama.reply(json.dumps({"verdict": "language", "name": "Rust"}), when="which language")
@@ -132,8 +121,6 @@ def test_a_language_not_installed_is_said_and_nothing_is_practised(make_model, h
     assert builds.started == []
 
 
-# --- EXR-3: the next practice project -------------------------------------------------------------------------------
-
 @pytest.mark.spec("EXR-3")
 def test_read_choice_names_the_language_and_never_repeats_a_project():
     choice = read_choice({"task": "A todo list", "feature": "due dates", "folder": "Bad Name!"}, "Rust", [])
@@ -150,8 +137,6 @@ def test_each_practice_project_gets_a_folder_of_its_own(projects):
     assert free_folder("word-count") == projects / "word-count-2"
     assert free_folder("csv-stats") == projects / "csv-stats"
 
-
-# --- EXR-4: build, feature, measure, reflect, each step kept --------------------------------------------------------
 
 @pytest.mark.spec("EXR-4")
 def test_a_practice_project_is_built_then_given_its_feature(make_model, fake_ollama, home_store, projects):
@@ -193,8 +178,6 @@ def test_an_exercise_goes_on_from_the_step_it_reached(make_model, fake_ollama, h
     assert "next project" not in " ".join(fake_ollama.labels())
 
 
-# --- EXR-5: what a project measured ---------------------------------------------------------------------------------
-
 @pytest.mark.spec("EXR-5")
 def test_measured_and_problems_come_from_the_projects_own_database(make_project, project_dir):
     from conftest import criterion
@@ -226,14 +209,13 @@ def test_slowest_never_names_a_file():
     assert slowest([{"label": "Write notes.py", "seconds": 5}]) == ["Write: 5s in 1 call"]
 
 
-# --- EXR-6: the person comes first ----------------------------------------------------------------------------------
-
 @pytest.mark.spec("EXR-6")
 def test_the_exercise_has_no_rule_of_its_own_for_giving_way(make_model, home_store, monkeypatch, no_sleep):
     signals = []
     monkeypatch.setattr(os, "killpg", lambda pid, signum: signals.append(signum))
-    home_store.put("activity", "answering", {"a chat": os.getpid()})  # the person is answered: that pauses it as a job
-    code = Exercise(make_model(), Tracker("Exercising rust"), start=lambda arguments: FakeBuild(polls=3, code=0)).built(
+    the_person_is_answered = {"a chat": os.getpid()}
+    home_store.put("activity", "answering", the_person_is_answered)
+    code = Exercise(make_model(), Tracker("Exercising rust"), start_build=lambda arguments: FakeBuild(polls=3, code=0)).built(
         lambda: ["task", "t"])
     assert code == 0 and signals == []
     assert not hasattr(exercising, "person_busy") and not hasattr(Exercise, "wait_until_quiet")
@@ -242,10 +224,10 @@ def test_the_exercise_has_no_rule_of_its_own_for_giving_way(make_model, home_sto
 @pytest.mark.spec("EXR-6")
 def test_the_exercise_shows_what_its_build_does(make_model, home_store, monkeypatch):
     build = FakeBuild(polls=1)
-    build.pid = ALIVE  # a build that runs: its tracker is kept
-    exercise = Exercise(make_model(), Tracker("Exercising rust"), start=lambda arguments: build)
+    build.pid = OTHER_LIVE_PID
+    exercise = Exercise(make_model(), Tracker("Exercising rust"), start_build=lambda arguments: build)
     exercise.on_to("build")
-    home_store.put("running", str(ALIVE), {"doing": "💻 Writing the code", "working": "Writing a.py",
+    home_store.put("running", str(OTHER_LIVE_PID), {"doing": "💻 Writing the code", "working": "Writing a.py",
                                          "latest": "✅ Wrote a.py", "passing": [2, 5], "exercise": True})
     monkeypatch.setattr(time, "sleep", lambda seconds: None)
     exercise.built(lambda: ["task", "t"])
@@ -257,13 +239,14 @@ def test_the_exercise_shows_what_its_build_does(make_model, home_store, monkeypa
 @pytest.mark.spec("EXR-6")
 def test_an_exercise_that_goes_on_by_itself_comes_to_the_bottom(home_store):
     channel = Recorder()
-    home_store.put("running", str(ALIVE), {"title": "Exercising Rust", "exercise": True, "doing": "🔨 Building"})
-    reporter = conversation.Reporter([channel], "Exercising Rust", pid=ALIVE)
+    home_store.put("running", str(OTHER_LIVE_PID), {"title": "Exercising Rust", "exercise": True, "doing": "🔨 Building"})
+    reporter = conversation.Reporter([channel], "Exercising Rust", pid=OTHER_LIVE_PID)
     reporter.refresh()
-    reporter.ended = True  # no updates of its own meanwhile
-    channel.send("1", "hello")  # the person's message: the exercise's is no longer the newest
+    reporter.ended = True
+    the_persons_message = "hello"
+    channel.send("1", the_persons_message)
     reporter.ended = False
-    home_store.put("running", str(ALIVE), {"title": "Exercising Rust", "exercise": True, "doing": "🔨 Building",
+    home_store.put("running", str(OTHER_LIVE_PID), {"title": "Exercising Rust", "exercise": True, "doing": "🔨 Building",
                                            "resumed": time.time()})
     reporter.refresh()
     assert channel.log[-1][0] == "send" and "Exercising Rust" in channel.log[-1][3]
@@ -291,13 +274,14 @@ def test_the_conversation_adopts_an_exercise_a_conversation_before_it_started(ho
     desk = Desk([channel], tmp_path)
     followed = []
     monkeypatch.setattr(desk, "follow_exercise", lambda pid, title, ended, anew: followed.append((pid, title, anew)))
-    home_store.put("activity", "exercise", {"pid": ALIVE, "language": "Rust"})
-    home_store.put("running", str(ALIVE), {"title": "Exercising Rust", "exercise": True, "reports": True})
+    home_store.put("activity", "exercise", {"pid": OTHER_LIVE_PID, "language": "Rust"})
+    reports_by_itself = {"title": "Exercising Rust", "exercise": True, "reports": True}
+    home_store.put("running", str(OTHER_LIVE_PID), reports_by_itself)
     desk.adopt_exercise()
-    assert followed == []  # one run from a terminal with chats reports by itself
-    home_store.put("running", str(ALIVE), {"title": "Exercising Rust", "exercise": True, "doing": "🔨 Building"})
+    assert followed == []
+    home_store.put("running", str(OTHER_LIVE_PID), {"title": "Exercising Rust", "exercise": True, "doing": "🔨 Building"})
     desk.adopt_exercise()
-    assert followed == [(ALIVE, "Exercising Rust", True)]
+    assert followed == [(OTHER_LIVE_PID, "Exercising Rust", True)]
 
 
 @pytest.mark.spec("EXR-6")
@@ -305,11 +289,13 @@ def test_an_exercise_that_ended_unstopped_goes_on_as_the_conversation_starts(hom
     desk = Desk([Recorder()], tmp_path)
     started = []
     monkeypatch.setattr(desk, "start_exercise", lambda words, title=None: started.append((words, title)))
-    home_store.put("activity", "exercise", {"pid": 999999999, "language": "Rust"})  # killed: never released
+    killed_never_released = {"pid": 999999999, "language": "Rust"}
+    home_store.put("activity", "exercise", killed_never_released)
     desk.adopt_exercise()
-    home_store.put("jobs", "4", {"number": 4, "command": "exercise", "title": "exercise rust", "state": "running",
-                                 "pid": 999999999, "arguments": ["exercise", "rust"], "updated": "2026-10-23 09:00"})
-    desk.adopt_exercise()  # its job, killed too: resumed, its journal kept
+    its_job_killed_too = {"number": 4, "command": "exercise", "title": "exercise rust", "state": "running",
+                          "pid": 999999999, "arguments": ["exercise", "rust"], "updated": "2026-10-23 09:00"}
+    home_store.put("jobs", "4", its_job_killed_too)
+    desk.adopt_exercise()
     assert started == [(["exercise", "Rust"], None), (["resume", "#4"], "exercise rust")]
 
 
@@ -318,8 +304,8 @@ def test_an_adopted_exercise_takes_its_message_out_and_sends_it_at_the_bottom(ho
     channel = Recorder()
     desk = Desk([channel], tmp_path)
     conversation.keep_exercise_board({("rec", "1"): [7]})
-    home_store.put("running", str(ALIVE), {"title": "Exercising Rust", "exercise": True, "doing": "🔨 Building"})
-    desk.follow_exercise(ALIVE, "Exercising Rust", lambda: time.sleep(0.2), anew=True)
+    home_store.put("running", str(OTHER_LIVE_PID), {"title": "Exercising Rust", "exercise": True, "doing": "🔨 Building"})
+    desk.follow_exercise(OTHER_LIVE_PID, "Exercising Rust", lambda: time.sleep(0.2), anew=True)
     after = channel.log[channel.log.index(("delete", "1", 7, "")):]
     assert any(kind == "send" and "Exercising Rust" in text for kind, _, _, text in after)
 
@@ -332,7 +318,7 @@ def test_an_exercise_that_ends_before_it_keeps_a_tracker_shows_what_it_printed(h
     log.write_text("before\n")
     start = log.stat().st_size
     log.write_text("before\n'cobol' is not a programming language. Nothing done.\n")
-    desk.follow_exercise(ALIVE + 999999, "exercise cobol", lambda: None, (log, start))
+    desk.follow_exercise(OTHER_LIVE_PID + 999999, "exercise cobol", lambda: None, (log, start))
     ends = time.monotonic() + 5
     while not channel.log or "Nothing done" not in channel.log[-1][3]:
         assert time.monotonic() < ends, channel.log
@@ -343,13 +329,11 @@ def test_an_exercise_that_ends_before_it_keeps_a_tracker_shows_what_it_printed(h
 @pytest.mark.spec("EXR-6")
 def test_the_conversation_leaves_exercise_runs_alone(home_store, tmp_path):
     desk = Desk([Recorder()], tmp_path)
-    home_store.put("running", str(ALIVE), {"title": "Exercising Rust", "exercise": True, "doing": "🔨 Building"})
+    home_store.put("running", str(OTHER_LIVE_PID), {"title": "Exercising Rust", "exercise": True, "doing": "🔨 Building"})
     assert persons_runs() == []
-    home_store.put("activity", "exercise", {"pid": ALIVE, "language": "Rust"})
+    home_store.put("activity", "exercise", {"pid": OTHER_LIVE_PID, "language": "Rust"})
     assert desk.status().startswith("🏋️ **Tinker** · **Exercising Rust**")
 
-
-# --- EXR-7: one at a time, stopped with everything kept -------------------------------------------------------------
 
 @pytest.mark.spec("EXR-7")
 def test_a_stopped_exercise_stops_its_build_and_keeps_everything(make_model, home_store, projects,
@@ -360,7 +344,7 @@ def test_a_stopped_exercise_stops_its_build_and_keeps_everything(make_model, hom
     monkeypatch.setattr(exercise, "practise", lambda kept: (_ for _ in ()).throw(KeyboardInterrupt))
     monkeypatch.setattr(exercise, "stop_build", lambda: stopped_builds.append(True))
     ending = exercise.run("rust")
-    assert ending["status"] == "stopped"  # how to go on: the job's (Jobs.ended)
+    assert ending["status"] == "stopped"
     assert stopped_builds == [True] and home_store.get("exercise", "rust")["language"] == "Rust"
     assert home_store.get("activity", "exercise") is None and exercise.tracker.state["exercise"]
     assert home_store.get("exercise", "rust")["left"]
@@ -368,7 +352,7 @@ def test_a_stopped_exercise_stops_its_build_and_keeps_everything(make_model, hom
 
 @pytest.mark.spec("EXR-7")
 def test_only_one_exercise_runs_at_a_time(home_store):
-    home_store.put("activity", "exercise", {"pid": ALIVE, "language": "Go"})
+    home_store.put("activity", "exercise", {"pid": OTHER_LIVE_PID, "language": "Go"})
     with pytest.raises(SystemExit, match="An exercise of Go runs already"):
         Exercises.claim(Exercises.of("Rust"))
 
@@ -407,7 +391,7 @@ def test_tinker_exercise_takes_a_language_or_status():
 @pytest.mark.spec("EXR-6")
 def test_a_chat_never_waits_for_an_exercise(home_store, tmp_path):
     desk = Desk([Recorder()], tmp_path)
-    home_store.put("running", str(ALIVE), {"title": "Exercising Rust", "exercise": True, "doing": "🔨 Building"})
+    home_store.put("running", str(OTHER_LIVE_PID), {"title": "Exercising Rust", "exercise": True, "doing": "🔨 Building"})
     assert desk.running_now() == []
 
 
@@ -418,18 +402,19 @@ def test_every_exercise_keeps_one_message_started_stopped_or_resumed(home_store,
     told = []
     monkeypatch.setattr(conversation, "signal_task", lambda pid, signum: told.append((pid, signum)))
     assert desk.stop_exercise().startswith("🤷 No exercise runs")
-    home_store.put("activity", "exercise", {"pid": ALIVE, "language": "Rust"})
-    home_store.put("running", str(ALIVE), {"title": "Exercising Rust", "exercise": True, "doing": "🔨 Building"})
+    home_store.put("activity", "exercise", {"pid": OTHER_LIVE_PID, "language": "Rust"})
+    home_store.put("running", str(OTHER_LIVE_PID), {"title": "Exercising Rust", "exercise": True, "doing": "🔨 Building"})
     first_ended = []
-    desk.follow_exercise(ALIVE, "Exercising Rust", lambda: first_ended.append(True) or time.sleep(0.2))
-    assert desk.stop_exercise() is None and told == [(ALIVE, conversation.STOP)]
+    desk.follow_exercise(OTHER_LIVE_PID, "Exercising Rust", lambda: first_ended.append(True) or time.sleep(0.2))
+    assert desk.stop_exercise() is None and told == [(OTHER_LIVE_PID, conversation.JOB_STOP_SIGNAL)]
     for _ in range(100):
-        if desk.exercising is None:
+        if desk.exercise_reporter is None:
             break
         time.sleep(0.05)
-    desk.follow_exercise(ALIVE, "resume #4", lambda: None)  # the next exercise: the same message
+    the_next_exercise = "resume #4"
+    desk.follow_exercise(OTHER_LIVE_PID, the_next_exercise, lambda: None)
     for _ in range(100):
-        if desk.exercising is None:
+        if desk.exercise_reporter is None:
             break
         time.sleep(0.05)
     sent = {entry[2] for entry in channel.log if entry[0] == "send" and "🔨 **" in entry[3]}

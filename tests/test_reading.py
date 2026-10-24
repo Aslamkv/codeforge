@@ -1,6 +1,3 @@
-"""RDG: reading what the person gives: stored whole on the reading list first, then every chapter learned from, the
-core ones first, saved as it is read; read #N "WHAT" looks again."""
-
 import io
 import json
 import zipfile
@@ -18,7 +15,7 @@ from tinkerkit.reading import (
     Book, Chapter, Reader, Readings, book_bytes, excerpt, in_order, index_terms, kind_of, opened, read_points,
     read_survey, show, show_list, stored,
 )
-from tinkerkit.settings import FACT_CHARS, READ_CHUNKS, READ_POINTS, READ_TERMS, Home
+from tinkerkit.settings import MAX_FACT_CHARS, READ_FACTS_PER_CHAPTER, READ_FOCUS_CHUNKS, READ_KEY_TERMS, Home
 from conftest import MODEL
 
 CONTAINER = ('<?xml version="1.0"?><container xmlns="urn:oasis:names:tc:opendocument:xmlns:container" version="1.0">'
@@ -49,8 +46,6 @@ DOCUMENTS = {"cover.xhtml": "<h1>The Craft</h1>",
                             + "</ul>"}
 
 def epub(nav=True):
-    """An EPUB of The Craft (cover, foreword, a part of two chapters in one document, an index): its contents in an
-    EPUB 3 navigation document, else in an EPUB 2 NCX."""
     manifest = "".join(f'<item id="d{number}" href="text/{name}" media-type="application/xhtml+xml"/>'
                        for number, name in enumerate(DOCUMENTS))
     manifest += ('<item id="nav" href="nav.xhtml" media-type="application/xhtml+xml" properties="nav"/>' if nav
@@ -146,7 +141,6 @@ def test_chapters_have_kinds_and_the_index_names_what_matters():
     assert index_terms(opened(MARKDOWN.encode(), "craft.md")) == [("naming", 3), ("testing", 3), ("coupling", 1)]
 
 def craft(tmp_path, name="craft.md", text=MARKDOWN):
-    """The Craft, as a Markdown file: 1 Foreword, 2 Naming, 3 Stories, 4 Testing, 5 Index."""
     path = tmp_path / name
     path.write_text(text)
     return str(path)
@@ -162,8 +156,6 @@ def points(*texts, phase="code"):
     return json.dumps({"points": [{"text": text, "phase": phase, "section": ""} for text in texts]})
 
 class Steps:
-    """A tracker that only remembers the steps it was moved through, and what came of each."""
-
     def __init__(self):
         self.steps, self.outcomes, self.state = [], {}, {"step": None}
 
@@ -198,7 +190,7 @@ def test_a_source_is_stored_whole_before_anything_is_read(tmp_path, home_store, 
 def test_the_survey_orders_every_chapter_and_skips_none(tmp_path, home_store):
     book = opened(MARKDOWN.encode(), "craft.md")
     survey = read_survey(dict(json.loads(survey_reply()), terms=[f"t{number}" for number in range(30)]), book)
-    assert survey["software"] is True and len(survey["terms"]) == READ_TERMS
+    assert survey["software"] is True and len(survey["terms"]) == READ_KEY_TERMS
     assert survey["order"] == {"4": {"read": "core", "look_for": "what chapter 4 teaches"},
                                "2": {"read": "supporting", "look_for": "what chapter 2 teaches"}}
     assert [chapter.number for chapter in in_order(book.chapters, survey)] == [4, 2, 1, 3, 5]
@@ -209,7 +201,6 @@ def test_the_survey_orders_every_chapter_and_skips_none(tmp_path, home_store):
         read_survey({"chapters": []}, book)
 
 def read_craft(tmp_path, make_model, fake_ollama, software=True):
-    """The Craft stored and read whole: chapter 4 is core, 2 supporting, then 1 and 3."""
     stored(craft(tmp_path))
     fake_ollama.reply(survey_reply(software), when="reading plan")
     fake_ollama.reply(points("Write a test for each behaviour first", phase="tests"), when="chapter 4")
@@ -230,12 +221,13 @@ def test_every_chapter_is_read_in_order_and_saved_as_it_is_read(tmp_path, home_s
     sent = prompts(fake_ollama)
     assert "1. Foreword (front" in sent[0] and FOREWORD in sent[0] and "testing (3)" in sent[0]
     assert TESTING in sent[1] and "- Write a test for each behaviour first" in sent[2]
-    assert all("coupling, 11" not in prompt for prompt in sent[1:])  # the index is kept, never read
+    the_index = "coupling, 11"
+    assert all(the_index not in prompt for prompt in sent[1:])
     topic = Library.read("read-1")
     assert topic["kind"] == "reading" and topic["reading"] == 1 and topic["software"] is True
-    assert [(fact["text"], fact["chapter"]) for fact in topic["facts"]] == [  # chapter 3 repeated chapter 4: kept once
-        ("Write a test for each behaviour first", 4), ("Name each function after what it does", 2),
-        ("Small programs stay easy to change", 1)]
+    chapter_3s_repeat_kept_once = [("Write a test for each behaviour first", 4),
+                                   ("Name each function after what it does", 2), ("Small programs stay easy to change", 1)]
+    assert [(fact["text"], fact["chapter"]) for fact in topic["facts"]] == chapter_3s_repeat_kept_once
     assert [rule["text"] for rule in topic["rules"]] == ["Name functions by what they do"]
     assert {chapter["state"] for chapter in Readings.get(1)["chapters"][:4]} == {"read"}
     assert tracker.steps == ["survey", "chapters", "condense"]
@@ -261,14 +253,14 @@ def test_a_stopped_reading_goes_on_with_the_chapters_not_read(tmp_path, home_sto
     for chapter in (2, 1, 3):
         fake_ollama.reply(points(), when=f"chapter {chapter}")
     fake_ollama.reply(json.dumps({"rules": [{"phase": "tests", "text": "Test first", "cites": [1]}]}), when="Condense")
-    Reader(make_model()).read(1)  # complete now: its rules are made, though this pass found nothing new
+    Reader(make_model()).read(1)
     assert labels(fake_ollama) == ["Read: chapter 2", "Read: chapter 1", "Read: chapter 3", "Condense the facts"]
 
 @pytest.mark.spec("RDG-7")
 def test_a_long_chapter_is_read_in_every_part(tmp_path, home_store, make_model, fake_ollama, monkeypatch):
     long = "\n\n".join(f"Paragraph {number} of a long chapter about naming things well." for number in range(40))
     stored(craft(tmp_path, text=f"# Long\n\n## One\n\n{long}\n\n## Two\n\nA short second chapter, with more words."))
-    monkeypatch.setattr(reading, "READ_TEXT_SHARE", 0.05)
+    monkeypatch.setattr(reading, "READ_CHAPTER_TEXT_SHARE", 0.05)
     fake_ollama.reply(survey_reply(software=False, **{"1": "core"}), when="reading plan")
     fake_ollama.reply(points(), times=20)
     Reader(make_model()).read(1)
@@ -295,12 +287,12 @@ def test_read_again_with_a_focus_looks_where_it_is_asked(tmp_path, home_store, m
 @pytest.mark.spec("RDG-9")
 def test_a_chapter_gives_points_with_their_phase():
     reply = {"points": [{"text": "Name functions by what they do", "phase": "code", "section": "Names"},
-                        {"text": "x" * (FACT_CHARS + 50), "phase": "nowhere"}, {"text": " "}, "not a point"]
-             + [{"text": f"point {number}", "phase": "tests"} for number in range(READ_POINTS)]}
+                        {"text": "x" * (MAX_FACT_CHARS + 50), "phase": "nowhere"}, {"text": " "}, "not a point"]
+             + [{"text": f"point {number}", "phase": "tests"} for number in range(READ_FACTS_PER_CHAPTER)]}
     found = read_points(reply, software=True)
-    assert len(found) == READ_POINTS
+    assert len(found) == READ_FACTS_PER_CHAPTER
     assert found[0] == {"text": "Name functions by what they do", "phase": "code", "section": "Names"}
-    assert found[1]["phase"] == "book" and len(found[1]["text"]) == FACT_CHARS
+    assert found[1]["phase"] == "book" and len(found[1]["text"]) == MAX_FACT_CHARS
     assert {point["phase"] for point in read_points(reply, software=False)} == {"book"}
     with pytest.raises(ValueError, match="points"):
         read_points({"facts": []}, software=True)
@@ -351,7 +343,7 @@ def test_the_readings_find_what_a_source_says(tmp_path, home_store):
 
 @pytest.mark.spec("RDG-12")
 def test_tinker_read_stores_then_reads_as_its_own_job(tmp_path, measured_model, fake_ollama, monkeypatch, capsys):
-    assert is_job(["read", "book.epub"]) and is_job(["read", "#2", "retries"]) and "read" in conversation.LONG
+    assert is_job(["read", "book.epub"]) and is_job(["read", "#2", "retries"]) and "read" in conversation.LONG_COMMANDS
     assert Cli.parse(["read", "~/Books/the", "craft.epub"]).read == ["~/Books/the craft.epub"]
     assert Cli.parse(["read", "#2", '"retries,', 'when"']).read == ["#2", "retries, when"]
     assert Cli.parse(["read", "#2"]).read == ["#2"]
@@ -374,7 +366,8 @@ def test_tinker_read_stores_then_reads_as_its_own_job(tmp_path, measured_model, 
     assert any(step.startswith("🧭 Chose the chapters to read") for step in steps)
     assert "Time taken" in capsys.readouterr().out
     assert Home.store().entries("read")
-    Commands(Cli.parse(["read", "craft.md"])).run()  # stored before: said, and nothing read
+    stored_before = Cli.parse(["read", "craft.md"])
+    Commands(stored_before).run()
     assert len(ended) == 1 and "Already on the reading list as #1" in capsys.readouterr().out
     with pytest.raises(SystemExit, match="No reading #9"):
         Commands(Cli.parse(["read", "#9"])).run()

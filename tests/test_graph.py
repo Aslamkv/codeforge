@@ -1,5 +1,3 @@
-"""GRF: the memory graph: what Tinker knows as nodes and links, and the page that shows it."""
-
 import json
 import re
 import sys
@@ -22,8 +20,6 @@ def lesson(text, phase="tests", scope="any"):
 
 @pytest.fixture
 def memory(home_store):
-    """A home that knows a little of everything: Python's toolchain, a fix, lessons, a fact proven from a topic,
-    a research finding, a retired lesson, a command of the person's, and one run with its line kept."""
     Library.save("flask", {"topic": "flask", "name": "Flask", "summary": "A web framework.", "kind": "research",
                            "questions": [{"question": "How?"}],
                            "facts": [{"phase": "code", "text": "Flask routes use @app.route", "source": "https://a.org/x"},
@@ -111,7 +107,8 @@ def test_similar_lessons_by_meaning_else_by_words(home_store):
     ids = {lesson["text"]: f"lesson:{lesson['id']}" for lesson in Knowledge("Python").known_lessons()}
     similar = lambda graph: {frozenset((link["source"], link["target"])) for link in graph.links
                              if link["kind"] == "similar"}
-    meaning = dict(zip(texts, ([1.0, 0, 0], [0, 1.0, 0], [0, 0, 1.0], [0.9, 0.1, 0])))  # the first and the last alike
+    first, unlike, also_unlike, like_the_first = [1.0, 0, 0], [0, 1.0, 0], [0, 0, 1.0], [0.9, 0.1, 0]
+    meaning = dict(zip(texts, (first, unlike, also_unlike, like_the_first)))
     by_meaning = Graph.build(FakeEmbeddings(meaning))
     assert by_meaning.similar_by == "meaning (embed-model)"
     assert similar(by_meaning) == {frozenset((ids[texts[0]], ids[texts[3]]))}

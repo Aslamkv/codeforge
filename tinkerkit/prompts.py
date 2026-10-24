@@ -1,59 +1,55 @@
-"""What the model is told and what it answers: prompt parts (Part), replies (Reply) and every system prompt (Prompts)."""
-
 lazy import json
 import re
+from collections import namedtuple
 lazy from pathlib import Path
 
 from .settings import (
-    READ_POINTS, READ_TERMS, ENV_EXAMPLE, ENV_FILE, FACTS_PER_CHUNK, FACTS_PER_SLOT, FACT_PHASES, LESSON_PHASES,
-    MAX_COMMANDS, MAX_FILE_LINES,
-    PLAYBOOK_RULES, RESEARCH_CHECKS, RESEARCH_GAPS, RESEARCH_QUERIES, RESEARCH_QUESTIONS, RULE_CHARS, TEACH_CLAIMS,
-    TEACH_COMMANDS, TEACH_SEARCHES, TOOL_ROLES, TRIM_FLOOR, first_line,
+    ENV_EXAMPLE, ENV_FILE, FACTS_PER_CHUNK, FACTS_PER_SLOT, FACT_PHASES, LESSON_PHASES, MAX_FILE_LINES,
+    MAX_RULE_CHARS, MAX_VERSION_COMMANDS, MIN_TRIMMED_PROSE_CHARS, PLAYBOOK_RULES, READ_FACTS_PER_CHAPTER,
+    READ_KEY_TERMS, RESEARCH_FACTS_CHECKED, RESEARCH_GAPS, RESEARCH_QUESTIONS, SEARCHES_PER_RESEARCH_QUESTION,
+    TEACH_CHECK_COMMANDS, TEACH_CHECK_SEARCHES, TEACH_CLAIMS, TOOL_ROLES, first_line,
 )
 
 
+StringStates = namedtuple("StringStates", "states in_string")
+FileBlock = namedtuple("FileBlock", "path content")
+LineEdit = namedtuple("LineEdit", "path first last lines")
+
+
 class Reply:
-    """What the model answered, and the structured parts in it."""
     THINK_RE = re.compile(r"<think>.*?</think>", re.S)
-    HEADER_PATH = r"[ \t:]+(?:(?:path|file)[ \t]*[=:][ \t]*)?[\"'`]?([^\s<>\"'`]+?)[\"'`]?"  # FILE x, FILE path=x, FILE "x"
+    HEADER_PATH = r"[ \t:]+(?:(?:path|file)[ \t]*[=:][ \t]*)?[\"'`]?([^\s<>\"'`]+?)[\"'`]?"
     FILE_BLOCK_RE = re.compile(r"<<<FILE" + HEADER_PATH + r"[ \t]*(?:>>>[ \t]*([^\s<>]*))?[ \t]*\n(.*?)\n?<<<END>>>",
-                               re.S)  # the header's >>> may be missing: the path then ends with its line
+                               re.S)
     LINES_BLOCK_RE = re.compile(r"<<<LINES" + HEADER_PATH + r"[ \t]+(?:lines[ \t]*=[ \t]*)?(\d+)\s*-\s*(\d+)[ \t]*>>>[ \t]*\n"
                                 r"(.*?)\n?<<<END>>>", re.S)
     NUMBERED_RE = re.compile(r"^\s*\d+\| ?")
     PLACEHOLDER_PATHS = {"path", "path/to/file", "file", "filename", "key"}
     PLACEHOLDER_BODY_RE = re.compile(r"\s*[<\[(]?\s*(the\s+)?(complete\s+|whole\s+|full\s+)?(file\s+)?(content|contents|"
                                      r"code|text|file|\.\.\.|…)\s*(here|goes here)?\s*[>\])]?\s*", re.I)
-    PATH_LINE_RE = re.compile(r"[\w.-]+(?:/[\w.-]+)*\.[\w]+|[\w.-]+(?:/[\w.-]+)+")  # a relative path, alone on a line
-    KEY_AFTER_RE = re.compile(r'"(?:[^"\\]|\\.)*"\s*:')  # a string that is an object's key
-    JOINED_STRINGS_RE = re.compile(r'(?<!\\)"\s*\+\s*"')  # "a" + "b", as in code: one string "ab"
-    DEBRIS_RE = re.compile(r"\s*(<{2,}|>{2,}|<<<\w*>>>)\s*")  # a line of the block format's own marks, no content
-    FENCE_RE = re.compile(r"\s*(`{3,}|~{3,})[\w+#.-]*\s*")      # a markdown fence line: ``` or ```python
-    QUOTE_ESCAPE_RE = re.compile(r"(?<!\\)((?:\\\\)*)\\'")      # \' after an even run of backslashes
+    RELATIVE_PATH_LINE_RE = re.compile(r"[\w.-]+(?:/[\w.-]+)*\.[\w]+|[\w.-]+(?:/[\w.-]+)+")
+    OBJECT_KEY_RE = re.compile(r'"(?:[^"\\]|\\.)*"\s*:')
+    STRING_CONCATENATION_RE = re.compile(r'(?<!\\)"\s*\+\s*"')
+    BLOCK_MARKS_ONLY_RE = re.compile(r"\s*(<{2,}|>{2,}|<<<\w*>>>)\s*")
+    MARKDOWN_FENCE_RE = re.compile(r"\s*(`{3,}|~{3,})[\w+#.-]*\s*")
+    ESCAPED_SINGLE_QUOTE_RE = re.compile(r"(?<!\\)((?:\\\\)*)\\'")
 
     def __init__(self, raw):
         self.text = self.THINK_RE.sub("", raw or "").strip()
 
     def json(self):
-        """The JSON object in the reply. A model's usual slips are mended in turn, each only when
-        the reply does not parse without it: a comma before a closing bracket, strings joined with
-        + as in code, a single quote escaped as in code (\\' is not JSON), the last brackets left
-        open, a list left open before the next key."""
         start, end = self.text.find("{"), self.text.rfind("}")
         if start == -1 or end <= start:
             raise ValueError("no JSON object in reply")
         return self.first_parsed(self.json_candidates(self.text[start:end + 1], self.text[start:]))
 
     def json_candidates(self, whole, to_the_end):
-        """The object as written, then mended, then (from its start to the reply's end) with its
-        brackets closed or put right."""
         to_the_end = to_the_end.rstrip().rstrip("`").rstrip()
         return [whole, self.mended(whole), self.closed(self.mended(to_the_end)),
                 self.balanced(self.mended(to_the_end))]
 
     @staticmethod
     def first_parsed(candidates):
-        """The first candidate that parses; else the error of the first one (the reply as written)."""
         problem = None
         for candidate in filter(None, candidates):
             try:
@@ -64,14 +60,10 @@ class Reply:
 
     @classmethod
     def mended(cls, text):
-        """Code habits undone: strings joined with +, \' escapes, commas before a closing bracket."""
-        return cls.strip_trailing_commas(cls.QUOTE_ESCAPE_RE.sub(r"\1'", cls.JOINED_STRINGS_RE.sub("", text)))
+        return cls.strip_trailing_commas(cls.ESCAPED_SINGLE_QUOTE_RE.sub(r"\1'", cls.STRING_CONCATENATION_RE.sub("", text)))
 
     @staticmethod
     def closed(text):
-        """The JSON text with the brackets it left open closed at its end (a model that wrote the
-        whole answer and forgot the last brace or two), or None when it ends inside a string or
-        closes a bracket it never opened."""
         inside, ends_inside = Reply.string_states(text)
         stack = []
         for char, in_string in zip(text, inside):
@@ -87,15 +79,12 @@ class Reply:
 
     @staticmethod
     def balanced(text):
-        """The JSON text with its brackets put right: a list left open when the next key of its
-        object begins ("a":["x","b":1) is closed before that key, a closing bracket that closes
-        nothing open is dropped, and what is left open at the end is closed."""
         inside, ends_inside = Reply.string_states(text)
         out, stack = [], []
         for index, (char, in_string) in enumerate(zip(text, inside)):
             if in_string:
                 pass
-            elif char == '"' and stack and stack[-1] == "]" and Reply.KEY_AFTER_RE.prefixmatch(text, index):
+            elif char == '"' and stack and stack[-1] == "]" and Reply.OBJECT_KEY_RE.prefixmatch(text, index):
                 Reply.close_list_before_last_comma(out, stack)
             elif char in "{[":
                 stack.append(Reply.closer(char))
@@ -118,22 +107,18 @@ class Reply:
 
     @staticmethod
     def close_until(char, out, stack):
-        """What is open inside the bracket char closes is closed first."""
         while stack[-1] != char:
             out.append(stack.pop())
         stack.pop()
 
     @staticmethod
     def strip_trailing_commas(text):
-        """Remove commas directly before ] or } outside JSON strings."""
         inside, _ = Reply.string_states(text)
         return "".join(char for index, (char, in_string) in enumerate(zip(text, inside))
                        if in_string or not (char == "," and text[index + 1:].lstrip()[:1] in ("]", "}")))
 
     @staticmethod
     def string_states(text):
-        """([whether each char is inside a JSON string: its closing quote is, its opening one is not],
-        whether the text ends inside one)."""
         states, in_string, escaped = [], False, False
         for char in text:
             states.append(in_string)
@@ -141,11 +126,9 @@ class Reply:
                 escaped, in_string = (False, True) if escaped else (char == "\\", char != '"')
             elif char == '"':
                 in_string = True
-        return states, in_string
+        return StringStates(states, in_string)
 
     def spec_json(self):
-        """The spec's JSON; when only its free-form "data" part (written last) is broken, that
-        part is kept as text instead of asking again."""
         try:
             return self.json()
         except ValueError as problem:
@@ -155,7 +138,6 @@ class Reply:
             return data
 
     def spec_with_data_as_text(self):
-        """The spec before its "data" key, with data as the text after it; None when that does not parse."""
         start, at = self.text.find("{"), self.text.rfind('"data"')
         if start < 0 or at <= start:
             return None
@@ -167,49 +149,40 @@ class Reply:
         return data
 
     def files(self):
-        """[(path, content)] of its FILE blocks. A block whose body is only the format's placeholder
-        ("content") is the model musing about the format, not a file."""
         found = []
         for path, after, body in self.FILE_BLOCK_RE.findall(self.text):
             path, body = self.real_path_and_body(path.strip(), after, body)
             if self.PLACEHOLDER_BODY_RE.fullmatch(body):
                 continue
-            markdown = path.lower().endswith((".md", ".markdown"))  # a fence around a whole doc may be the doc
-            found.append((str(Path(path)), self.without_debris(body, fences=not markdown)))
+            markdown = path.lower().endswith((".md", ".markdown"))
+            found.append(FileBlock(str(Path(path)), self.without_debris(body, fences=not markdown)))
         return found
 
     def real_path_and_body(self, path, after, body):
-        """A header that copied the format's placeholder (<<<FILE path>>>) with the real path right after
-        it, or as the block's first line, is read as that path; text after the header began the file."""
         first, _, rest = body.partition("\n")
-        if path.lower() in self.PLACEHOLDER_PATHS and self.PATH_LINE_RE.fullmatch(after):
+        if path.lower() in self.PLACEHOLDER_PATHS and self.RELATIVE_PATH_LINE_RE.fullmatch(after):
             return after, body
         if after:
             return path, after + "\n" + body
-        if path.lower() in self.PLACEHOLDER_PATHS and self.PATH_LINE_RE.fullmatch(first.strip()):
+        if path.lower() in self.PLACEHOLDER_PATHS and self.RELATIVE_PATH_LINE_RE.fullmatch(first.strip()):
             return first.strip(), rest
         return path, body
 
     @classmethod
     def without_debris(cls, body, fences=True):
-        """A block's body without what the model wrapped around it: lines of the block format's
-        own marks at its ends (a stray >>> before <<<END>>>), and a markdown fence around the whole
-        body. These are never content in any language, and kept they break the file (the stray
-        >>> was a syntax error a fix could not see, in a test it could not change)."""
         lines = cls.without_mark_lines(body.split("\n"))
         return "\n".join(cls.unfenced(lines) if fences else lines)
 
     @classmethod
     def without_mark_lines(cls, lines):
-        while lines and cls.DEBRIS_RE.fullmatch(lines[-1]):
+        while lines and cls.BLOCK_MARKS_ONLY_RE.fullmatch(lines[-1]):
             lines.pop()
-        while lines and cls.DEBRIS_RE.fullmatch(lines[0]):
+        while lines and cls.BLOCK_MARKS_ONLY_RE.fullmatch(lines[0]):
             lines.pop(0)
         return lines
 
     @classmethod
     def unfenced(cls, lines):
-        """The lines inside one fence pair around them all (a fence inside is content: docs)."""
         filled = [index for index, line in enumerate(lines) if line.strip()]
         if cls.one_fence_around(lines, filled):
             return lines[filled[0] + 1:filled[-1]]
@@ -217,27 +190,22 @@ class Reply:
 
     @classmethod
     def one_fence_around(cls, lines, filled):
-        """Whether the filled lines open and close with a fence, with no fence between them."""
-        fence_at = lambda index: cls.FENCE_RE.fullmatch(lines[index])
+        fence_at = lambda index: cls.MARKDOWN_FENCE_RE.fullmatch(lines[index])
         return len(filled) >= 2 and fence_at(filled[0]) and fence_at(filled[-1]) \
             and not any(fence_at(index) for index in filled[1:-1])
 
     def as_file(self, path):
-        """The reply as a FILE block for path when it has none but one fenced code block (a model
-        that answered with the file and forgot the block format); else the reply as it is."""
         if self.files():
             return self
         blocks = re.findall(r"^(`{3,}|~{3,})[\w+#.-]*[ \t]*\n(.*?)^\1[ \t]*$", self.text, re.S | re.M)
         return Reply(f"<<<FILE {path}>>>\n{blocks[0][1].rstrip()}\n<<<END>>>") if len(blocks) == 1 else self
 
     def line_edits(self):
-        """[(path, first, last, new lines)] of its LINES blocks."""
-        return [(str(Path(path.strip())), int(first), int(last), self.unnumbered(self.without_debris(body).splitlines()))
+        return [LineEdit(str(Path(path.strip())), int(first), int(last), self.unnumbered(self.without_debris(body).splitlines()))
                 for path, first, last, body in self.LINES_BLOCK_RE.findall(self.text)]
 
     @classmethod
     def unnumbered(cls, lines):
-        """The lines without the numbers they were shown with, when the model kept them."""
         if lines and all(cls.NUMBERED_RE.prefixmatch(line) or not line.strip() for line in lines):
             return [cls.NUMBERED_RE.sub("", line, count=1) for line in lines]
         return lines
@@ -249,20 +217,16 @@ class Reply:
         return first_line(self.marked("CAUSE"), 160)
 
     def test_wrong(self):
-        """Why the reply says the test itself is wrong ("" when it does not): a line TEST WRONG: why."""
         return first_line(self.marked("TEST WRONG"), 200)
 
     def criterion(self):
-        """The criterion as the reply says it should read ("" when it keeps it): a line CRITERION: text."""
         return self.marked("CRITERION").strip()
 
     def marked(self, mark):
-        """The text after the first line that starts with MARK: ("" when none does)."""
         match = re.search(rf"^\s*{mark}:\s*(.+)$", self.text, re.M)
         return match.group(1) if match else ""
 
     def corrected_criteria(self):
-        """{test name: the criterion as it should read} from lines CRITERION <test name>: text."""
         return {name: text.strip() for name, text in re.findall(r"^\s*CRITERION\s+([^\s:]+):\s*(.+)$", self.text, re.M)}
 
     def toolchain_line(self):
@@ -271,22 +235,16 @@ class Reply:
 
     @staticmethod
     def files_ended(content):
-        """A reply of FILE/LINES blocks has ended when its last block has, and nothing after it
-        begins another one."""
         end = content.rfind("<<<END>>>")
         rest = content[end + 9:] if end >= 0 else ""
         return end >= 0 and "<<<FILE" not in rest and "<<<LINES" not in rest
 
     @staticmethod
     def files_complete(content):
-        """A streamed reply of FILE/LINES blocks can stop once it has ended and the model runs on
-        (300+ chars of junk after its answer): it may still be between two blocks before that."""
         return Reply.files_ended(content) and len(content[content.rfind("<<<END>>>") + 9:].strip()) >= 300
 
     @staticmethod
     def wrote(paths):
-        """When a reply asked for these files is complete: once each has its block, as soon as the
-        last one ends (models run on with files nobody asked for), or as files_complete says."""
         wanted = {str(Path(path)) for path in paths}
 
         def done(content):
@@ -295,7 +253,6 @@ class Reply:
 
     @staticmethod
     def json_complete(content):
-        """A JSON reply is complete once the object that opened it closes and parses."""
         start = content.find("{")
         if start < 0 or not content.rstrip().endswith("}"):
             return False
@@ -307,13 +264,7 @@ class Reply:
 
 
 class Part:
-    """A section of a prompt. Optional parts are cut or dropped to fit; required ones are always
-    sent: prose ones (a request, a failure) are shortened at their less useful end, exact ones
-    (a whole file) are sent as they are. An atomic optional part is sent whole or not at all.
-    place: "first" for what calls of a run share (lessons, learned facts, the spec's data), "last"
-    for what changes from one try to the next (a failure, what was tried): a prompt is laid out
-    first, then as given, then last, so Ollama re-reads only what follows the part it has cached."""
-    SHORTEST = 150  # chars an optional part keeps at least when it is shortened to fit (else it is left out)
+    SHORTEST_KEPT_CHARS = 150
     PLACES = {"first": 0, None: 1, "last": 2}
 
     def __init__(self, title, text, required=False, keep="head", exact=False, atomic=False, place=None):
@@ -324,13 +275,10 @@ class Part:
 
     @staticmethod
     def total_size(parts):
-        """The chars a list of parts takes in a prompt (empty optional parts are left out)."""
         return sum(part.size() for part in parts if part.text or part.required)
 
     @staticmethod
     def assemble(parts, limit, notes=None):
-        """The user message: required parts first fitted (shortening prose ones), then optional
-        parts while they fit. Raises PromptTooLarge when the required parts cannot fit."""
         parts = Part.shorten_required(sorted(parts, key=lambda part: Part.PLACES[part.place]), limit, notes)
         room = limit - Part.required_size(parts)
         blocks = []
@@ -343,11 +291,11 @@ class Part:
         return "\n\n".join(blocks)
 
     def fitted(self, room):
-        """This optional part as it fits in room: whole, shortened (the room is then used up), or None."""
         if self.size() <= room:
             return self
-        text_room = room - len(self.render("")) - 2  # 2: the blank line before it
-        if not self.atomic and text_room >= Part.SHORTEST:
+        blank_line_before = 2
+        text_room = room - len(self.render("")) - blank_line_before
+        if not self.atomic and text_room >= Part.SHORTEST_KEPT_CHARS:
             return self.shortened(text_room)
         return None
 
@@ -356,7 +304,7 @@ class Part:
         trimmed = set()
         while Part.required_size(parts) > limit:
             index = Part.longest_prose(parts, limit)
-            parts[index] = parts[index].shortened(max(TRIM_FLOOR,
+            parts[index] = parts[index].shortened(max(MIN_TRIMMED_PROSE_CHARS,
                                                       len(parts[index].text) - (Part.required_size(parts) - limit)))
             trimmed.add(parts[index].title)
         if trimmed and notes is not None:
@@ -369,9 +317,8 @@ class Part:
 
     @staticmethod
     def longest_prose(parts, limit):
-        """The index of the longest required prose part that can still be shortened."""
         prose = [index for index, part in enumerate(parts) if part.required and not part.exact
-                 and len(part.text) > TRIM_FLOOR]
+                 and len(part.text) > MIN_TRIMMED_PROSE_CHARS]
         if not prose:
             exact = ", ".join(part.title for part in parts if part.exact) or "none"
             raise PromptTooLarge(f"required prompt parts need {Part.required_size(parts)} chars; budget allows "
@@ -386,8 +333,7 @@ class Part:
         return len(self.render()) + 2
 
     def floor_size(self):
-        """Its size once shortened as far as it may be."""
-        return self.size() if self.exact else min(self.size(), TRIM_FLOOR + len(self.title) + 12)
+        return self.size() if self.exact else min(self.size(), MIN_TRIMMED_PROSE_CHARS + len(self.title) + 12)
 
     def shortened(self, room):
         marker = "[...]"
@@ -401,13 +347,11 @@ class Part:
 
 
 class PromptTooLarge(Exception):
-    """The required parts of a prompt do not fit the budget."""
+    pass
 
 
 class Prompts:
-    """Every prompt text: language- and app-neutral (the examples are a small command-line notes
-    tool). The *_SYSTEM ones are system prompts; the others are pieces of them and of user messages."""
-    NO_TOOL_CALLS = "\nReply in plain text; never call a tool or function."  # Ollama parses tool-call syntax
+    NO_TOOL_CALLS = "\nReply in plain text; never call a tool or function."
     FOLDER_NAME_SYSTEM = ("Name the folder of the project the person asks for: one to three short lowercase words "
                           "joined by hyphens, at most 20 characters, the shorter the better; shorten well-known "
                           "words (calc-py for a calculator in Python, todo for a todo app). Reply with the name "
@@ -415,10 +359,10 @@ class Prompts:
     SAME_CASES = ("Several similar cases (every line, every unit, each row of a table) are built from the values "
                   "the criterion names, with a loop or a small helper, never written out by hand one by one: a long "
                   "hand-made literal (a grid, a board, a list of positions) is where counting slips.")
-    FILE_BLOCK = "<<<FILE path>>>\nthe complete file\n<<<END>>>"  # how a reply gives a whole file
+    FILE_BLOCK_FORMAT = "<<<FILE path>>>\nthe complete file\n<<<END>>>"
 
     FILES_REPLY = (f"Reply with a line \"CAUSE: <one sentence>\", then each file you change, complete:\n"
-                   f"{FILE_BLOCK}\n"
+                   f"{FILE_BLOCK_FORMAT}\n"
                    f"Only the files shown may change; the project's other files exist. Files stay under "
                    f"{MAX_FILE_LINES} lines.")
 
@@ -575,10 +519,10 @@ Rules: {TOOLCHAIN_RULES}."""
                             f"framework, dependency or command), not a failing test. Fix the setup only: "
                             f"give each dependency or config file you change complete, and/or a line TOOLCHAIN: {{json}} "
                             f"with the corrected commands. Never change code or tests. {TOOLCHAIN_RULES}.\n"
-                            f"Reply with a line \"CAUSE: <one sentence>\", then the changes:\n{FILE_BLOCK}")
+                            f"Reply with a line \"CAUSE: <one sentence>\", then the changes:\n{FILE_BLOCK_FORMAT}")
 
     TESTS_REPLY = f"""Reply with the test file, complete:
-{FILE_BLOCK}
+{FILE_BLOCK_FORMAT}
 Rules: one test per criterion with exactly the given name; assert only what the criterion and the
 contracts state, and exactly: a value or line it states equals what is printed or returned (the whole
 line, not a part found in it: "80.33" in "80.33000000000004" passes wrongly), a clear error by what it
@@ -612,7 +556,7 @@ tests do, with sample data in place of each adapter: nothing outside the app run
 test file next to the project's tests; the file and the test are named as the project's test tool
 expects. Reply with a line "TEST: <test file>::<test name>", a line "EXPECTED: <the correct behaviour,
 one sentence>", then the test file, complete:
-{FILE_BLOCK}
+{FILE_BLOCK_FORMAT}
 Keep it short."""
 
     CODE_SYSTEM = f"""Write one file of a project, in its language. It must fulfil its contract exactly, make the
@@ -623,7 +567,7 @@ and is then reviewed). Use the contracts of the files it uses exactly; an adapte
 an external service only makes its call and returns the data. Keep it under {MAX_FILE_LINES} lines; if it
 needs more, move a part into a new small module and give that file too; never repeat other files.
 Reply with only:
-{FILE_BLOCK}"""
+{FILE_BLOCK_FORMAT}"""
 
     CONFIG_SYSTEM = f"""Write a project's small configuration files (dependencies, settings, tool settings), each
 complete, as its role and contract say, in the language's usual formats, before any test or code exists:
@@ -634,7 +578,7 @@ project needs, no packaging metadata or version limits it was not asked for. {EN
 each setting with a comment and its default (empty for a required one). Write only the files asked for
 (never the code or tests). Reply with one block per file and nothing else: the reply starts with the
 first block (no plan, notes or reasoning before it):
-{FILE_BLOCK}"""
+{FILE_BLOCK_FORMAT}"""
 
     CHANGE_SYSTEM = ("Change one file of an existing project so that it meets the given criteria or fixes the given "
                      "problems, with the smallest change; keep everything else as it is.\n" + FILES_REPLY)
@@ -698,7 +642,7 @@ Give its name, its newest stable version the pages name (else ""), and one sente
 "docs": its official documentation site: "root", the address of its newest documentation, and "versioned",
 the address of one version's documentation with {{version}} where the version goes ("" when the site has no
 such addresses);
-"commands": up to {MAX_COMMANDS} commands that show its installed version and exit (one command each: no shell
+"commands": up to {MAX_VERSION_COMMANDS} commands that show its installed version and exit (one command each: no shell
 operators, nothing installed or changed);
 "tools": for a language only, one per role it has, of {", ".join(TOOL_ROLES)}: the one the topic names, else
 the one most used today, each with the command that shows its version and its "docs" as above;
@@ -736,7 +680,7 @@ or {{"facts":[]}} when the excerpt states nothing like that."""
     PLAYBOOK_SYSTEM = f"""Condense what was learned about a programming language or a tool into the rules a code
 generator follows to write small programs with it that are correct, idiomatic, modern and efficient, quickly: at
 most {PLAYBOOK_RULES}, the most useful first. Each rule is one short imperative sentence (under
-{RULE_CHARS} chars) that changes what is written: the construct, library, command or setting to use
+{MAX_RULE_CHARS} chars) that changes what is written: the construct, library, command or setting to use
 (the newest stable form the facts show) and what it replaces or what to avoid; a short example in
 backticks when it helps. Rest every rule on the numbered facts and lessons given (cite their numbers;
 never your own knowledge); merge facts that say one thing; leave out what a small program never needs.
@@ -761,7 +705,7 @@ Decide from what is given below, never from what you were trained on.
 "summary": two sentences: what it is about, its main argument, and what a reader gets from it.
 "software": true only when it teaches how to plan, design, write, test or run software (then what it teaches may
 guide the projects you build); false for anything else.
-"terms": its key terms, at most {READ_TERMS}, the most central first: they are followed through every chapter.
+"terms": its key terms, at most {READ_KEY_TERMS}, the most central first: they are followed through every chapter.
 "chapters": every chapter by its number, with "read": "core" (where its main ideas are taught: what its foreword and
 its index point to), "supporting" (examples, applications or detail that add to the core) or "other" (the rest);
 the core chapters are read first, then the supporting ones, then the others, and "look_for": in a few words, what to
@@ -775,7 +719,7 @@ before, what the person asks you to look for (when they ask: find that above all
 for in it, and its text. List what this text teaches: its ideas, definitions, practices, rules of thumb and
 warnings, each one plain, self-contained sentence the text states or shows (never from your own knowledge), concrete
 (the names, numbers and examples it gives), the most important first; nothing you learned before, unless this text adds to it or changes
-it (then say how); at most {READ_POINTS}. "section": the heading it is under, or "".
+it (then say how); at most {READ_FACTS_PER_CHAPTER}. "section": the heading it is under, or "".
 "phase": where it matters when building software: spec (what to build and test), design (files, structure), config
 (dependencies, settings), tests, code, toolchain (commands and tools); or book when it does not change how software
 is built.
@@ -786,7 +730,7 @@ or {{"points":[]}} when the text teaches nothing new."""
 software for it. Split the topic into at most {RESEARCH_QUESTIONS} research questions that together cover it:
 what it is and its key terms; how it is done in practice (the steps, roles, records and rules); the
 numbers, limits and standards that matter; what is changing or disputed. Each question has
-{RESEARCH_QUERIES} web searches that would answer it from different, independent sources (name the year
+{SEARCHES_PER_RESEARCH_QUESTION} web searches that would answer it from different, independent sources (name the year
 when it helps). Give the topic's name and one sentence on what it is.
 Reply with ONLY JSON (this example is for "food bank inventory"):
 {{"name":"Food bank inventory","summary":"How food banks track donated food from intake to distribution.",
@@ -808,7 +752,7 @@ state it. Work only from these facts, never from your own knowledge.
   it; at most {RESEARCH_GAPS}, the most important first;
 - checks: the key facts the answers rest on that only one site states (above all figures, limits and
   rules), each with one web search that would find another, independent source for it; at most
-  {RESEARCH_CHECKS}, those the answers depend on most first.
+  {RESEARCH_FACTS_CHECKED}, those the answers depend on most first.
 Reply with ONLY JSON:
 {{"findings":[{{"question":1,"answer":"...","confidence":"high","facts":[1,4]}}],
  "contradictions":[{{"facts":[3,9,12],"doubtful":[9],"note":"..."}}],
@@ -884,8 +828,8 @@ the changes it asks for, each change on its own.
 what the person marks with the word prefer ("I prefer no type checker", "prefer X over Y"): it is theirs, honored
 and never checked. Every other claim is a fact, checked first, however sure the person sounds.
 "commands": commands that show on this machine whether a fact holds (a tool's --version or --help), one command
-each, no shell operators, nothing installed or changed, at most {TEACH_COMMANDS};
-"searches": web searches that find independent sources for the facts, at most {TEACH_SEARCHES} ([] when every
+each, no shell operators, nothing installed or changed, at most {TEACH_CHECK_COMMANDS};
+"searches": web searches that find independent sources for the facts, at most {TEACH_CHECK_SEARCHES} ([] when every
 claim is a preference). A fact about what something you read says is checked against its own text (its passages are
 found for you): it needs no command and no search.
 "language": the language it is about, or "" when it holds for every language.

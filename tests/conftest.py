@@ -1,6 +1,3 @@
-"""Shared fixtures. Every test runs with its own Tinker home (never the real .tinker next to tinker.py, which
-holds live settings, secrets and locks), with no network, and with a scripted Ollama when it needs a model."""
-
 import json
 import signal
 import socket
@@ -10,7 +7,7 @@ from pathlib import Path
 
 import pytest
 
-import tinkerkit.cli  # noqa: F401  (the whole of Tinker loaded, as a run loads it)
+import tinkerkit.cli  # noqa: F401
 from tinkerkit.messages import say
 from tinkerkit.model import Model, Ollama
 from tinkerkit.project import Project
@@ -24,8 +21,6 @@ MEASURED = {"model": MODEL, "calibrated": "2026-10-20 10:00", "max_prompt_tokens
 
 @pytest.fixture(autouse=True)
 def tinker_home(tmp_path, monkeypatch):
-    """Tinker's home moved into the test's own folder (never the real .tinker next to tinker.py, which holds
-    live settings, secrets and locks): Home owns where it is, so this is all it takes."""
     home = tmp_path / "tinker-home" / ".tinker"
     monkeypatch.setattr(Home, "root", home)
     return home
@@ -33,7 +28,6 @@ def tinker_home(tmp_path, monkeypatch):
 
 @pytest.fixture(autouse=True)
 def quiet_voice():
-    """Each test starts as a new process does: nobody follows what Tinker says and no log keeps its details."""
     say.reset()
     yield
     say.reset()
@@ -41,15 +35,14 @@ def quiet_voice():
 
 @pytest.fixture(autouse=True)
 def no_job():
-    """Each test starts as a process that runs no job (a job's state is kept on the class, for its process)."""
-    from tinkerkit.jobs import STOP, Jobs
-    handler = signal.getsignal(STOP)
-    Jobs.current = Jobs.journal = Jobs.ending = None
-    Jobs.resuming = False
+    from tinkerkit.jobs import JOB_STOP_SIGNAL, Jobs
+    handler = signal.getsignal(JOB_STOP_SIGNAL)
+    Jobs.current = Jobs.journal = Jobs.ended_status = None
+    Jobs.resumed_here = False
     yield
-    Jobs.current = Jobs.journal = Jobs.ending = None
-    Jobs.resuming = False
-    signal.signal(STOP, handler)
+    Jobs.current = Jobs.journal = Jobs.ended_status = None
+    Jobs.resumed_here = False
+    signal.signal(JOB_STOP_SIGNAL, handler)
 
 @pytest.fixture
 def home_store(tinker_home):
@@ -58,32 +51,26 @@ def home_store(tinker_home):
 
 @pytest.fixture(autouse=True)
 def offline(monkeypatch):
-    """No test reaches the network or the person's Ollama: a connection in this process fails as if there
-    were no network (a test that needs an answer fakes the call it makes)."""
     def refuse(self, address):
         raise OSError(f"network is off in tests ({address})")
     monkeypatch.setattr(socket.socket, "connect", refuse)
     for name in ("OLLAMA_API_KEY", "TINKER_CHANNELS", "NO_COLOR", "TINKER_FORMAT"):
         monkeypatch.delenv(name, raising=False)
-    # a project file rewritten within the second its last test run compiled it, at the same size, would load its
-    # stale bytecode (a test-speed artifact: a real model call takes longer than that)
+    no_stale_bytecode(monkeypatch)
+
+
+def no_stale_bytecode(monkeypatch):
     monkeypatch.setenv("PYTHONDONTWRITEBYTECODE", "1")
 
 
 @pytest.fixture
 def no_sleep(monkeypatch):
-    """time.sleep returns at once (retries, crash recovery and waits take no time); the seconds asked are
-    kept in the list it returns."""
     slept = []
     monkeypatch.setattr(time, "sleep", lambda seconds: slept.append(seconds))
     return slept
 
 
 class FakeOllama:
-    """Ollama's chat, scripted: each call takes the first queued answer whose `when` is in the call's
-    label (or that has none). An answer is the reply's text, a dict (the final chunk, merged), an
-    exception (raised), or a function of the messages that gives one of those."""
-
     def __init__(self):
         self.queue, self.calls, self.unloaded = [], [], []
 
@@ -93,7 +80,8 @@ class FakeOllama:
         return self
 
     def chat(self, name, messages, keep_alive, options, think=None, label=None, done_when=None, timeout=None):
-        if not messages:  # an unload
+        unloading = not messages
+        if unloading:
             self.unloaded.append(name)
             return {"message": {"content": "", "thinking": ""}}
         self.calls.append({"name": name, "messages": messages, "options": options, "think": think,
@@ -124,7 +112,6 @@ class FakeOllama:
 
 @pytest.fixture
 def fake_ollama(monkeypatch):
-    """Ollama's chat, scripted (FakeOllama); no other model is loaded."""
     fake = FakeOllama()
     monkeypatch.setattr(Ollama, "chat", staticmethod(fake.chat))
     monkeypatch.setattr(Ollama, "loaded_models", staticmethod(lambda: []))
@@ -133,13 +120,11 @@ def fake_ollama(monkeypatch):
 
 @pytest.fixture
 def model_log(tmp_path):
-    """The log a test's model writes its calls to (model_log.store.entries("calls") reads them)."""
     return Log(Store(tmp_path / "model-log.db"), "calls")
 
 
 @pytest.fixture
 def make_model(model_log, fake_ollama):
-    """A real Model on the scripted Ollama, with measured settings (overridable)."""
     def make(**overrides):
         return Model(MODEL, dict(MEASURED, **overrides), 0, model_log)
     return make
@@ -147,7 +132,6 @@ def make_model(model_log, fake_ollama):
 
 @pytest.fixture
 def measured_model(home_store):
-    """The fake model selected and measured (as tinker calibrate and tinker use-model leave it)."""
     home_store.put("config", "model", MODEL)
     home_store.put("models", MODEL, MEASURED)
     return MODEL
@@ -168,7 +152,6 @@ TOOLCHAIN = {"setup": [], "activate": "", "use": [], "run": f'"{PY}" calc.py', "
 
 @pytest.fixture
 def make_project(project_dir):
-    """A Project with a run record and a spec (criteria, files, cycles and toolchain may be given)."""
     def make(criteria=(), files=None, cycles=None, toolchain=None, **spec):
         run = {"id": "abc123", "task": "a calculator", "workdir": str(project_dir), "status": "running"}
         data = {"steps": [dict(criterion) for criterion in criteria], "counter": len(criteria), "files": files or {},
@@ -181,7 +164,6 @@ def make_project(project_dir):
 
 @pytest.fixture
 def make_session(make_model):
-    """A real Session on a Project and the scripted model."""
     from tinkerkit.session import Session
 
     def make(project, model=None, internet=None, confirm=True, tracker=None):
@@ -203,7 +185,6 @@ def read_json(path):
 
 
 def plan_of(folder):
-    """The plan a project keeps in its database."""
     from tinkerkit.project import saved
     return saved(folder, "spec", "plan")
 

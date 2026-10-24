@@ -91,6 +91,10 @@ listed above it:
   `Internet` (pages through its `page_fetcher`, the `fetcher` module). Every project command goes through `Workspace.run` or `Workspace.start`.
 - **ARCH-4** Only `settings.Home` knows where the home is. No other module names a path inside it.
   Every phase reaches the model, the project and its files through the `Session` only.
+- **ARCH-5** No module and no test has a comment or a docstring: names, types, tests and this spec say what
+  the code does. The `#!` line of `tinker.py` and `# noqa` pragmas are the only comments.
+- **ARCH-6** `tinker.py` refuses every Python below 3.15, on any platform, before it imports `tinkerkit`:
+  `Tinker needs Python 3.15 or newer; this is VERSION. On a Mac: brew install python`.
 
 ## State
 
@@ -165,7 +169,10 @@ phase, learn from the web what the rest of the cycle needs.
   web_timeout `30`, learn_missing `2`, learn_rate `8`, learn_backoff `20`, learn_cutoff `0.0`, learn_pages
   `8`, learn_min_pages `2`, learn_searches `3`, learn_think `"low"`, docs_pages `30`, tool_docs_pages `5`,
   docs_latest_days `30`, fetch_workers `6`, fetch_timeout `15`, fetch_max_bytes `2000000`,
-  fetch_domain_delay `0.1`, fetch_fallbacks `2`, embed_model `""`, projects `"~/Projects"`.
+  fetch_domain_delay `0.1`, fetch_fallbacks `2`, embed_model `""`, projects `"~/Projects"`. learn_rate
+  is the `Throttle`'s rate; fetch_workers, fetch_timeout, fetch_max_bytes and fetch_domain_delay are the
+  `Fetcher`'s workers, timeout, max_bytes and domain_delay; embed_model is the model `tinker embed NAME`
+  selects.
 - **SET-3** `PHASES`, `FIX_PHASES` and `PLANNING_PHASES` are the phase lists given in
   [The cycle](#the-cycle). `CONFIRM_AFTER` is `review` for the project and a feature, and `reproduce`
   for a bug fix.
@@ -239,13 +246,13 @@ Everything Tinker tells the person goes through one voice, `say` (a `Messages`).
 
 ## ledger
 
-- **LED-1** `Ledger` keeps each message by channel, chat and id: `kept` goes in `VIEW_KEEP`, `touched` moves
-  that on (but a glance's, or the status'), `glance` in `GLANCE_KEEP` (or the seconds given), `lasting`
+- **LED-1** `Ledger` keeps each message by channel, chat and id: `kept` goes in `MESSAGE_KEPT_SECONDS`, `touched` moves
+  that on (but a glance's, or the status'), `glance` in `GLANCE_KEPT_SECONDS` (or the seconds given), `lasting`
   never (`is_lasting` tells it). `due` gives the messages whose time is up, `passing` all but the status,
   `glances` a chat's glances; `gone` forgets one.
 - **LED-2** `shown(channel, chat, thing, ids, text, asked)` keeps a thing as it was shown last; with no thing,
   a new one is numbered, keeping what was asked. `thing_of(ids)` gives the thing messages show. `page(N)`
-  lists things newest first, `PAGE` to a page, with how many pages there are.
+  lists things newest first, `HISTORY_PER_PAGE` to a page, with how many pages there are.
 
 ## jobs
 
@@ -258,8 +265,8 @@ too: they are answered at once, so there is no emergency command.
   `teach`, `read`, `research` and `exercise` are jobs; help, `exercise status`, `read list`, `read show #N`,
   `learn NAME "DEFINITION"` and a build an exercise runs (`EXERCISE_ENV`) are not. `Jobs.running(argv)` runs a job as the next number (`#1`, `#2` ...),
   kept in the home's `jobs` with its command, title, arguments, the day it started, its state `running` and its
-  process. Its process takes `STOP` (SIGUSR2) as Ctrl-C.
-- **JOB-2** A job ends `stopped` when it is interrupted (Ctrl-C, `STOP`) or its tracker ends with the status
+  process. Its process takes `JOB_STOP_SIGNAL` (SIGUSR2) as Ctrl-C.
+- **JOB-2** A job ends `stopped` when it is interrupted (Ctrl-C, `JOB_STOP_SIGNAL`) or its tracker ends with the status
   `stopped` (`Tracker.end` tells `Jobs.ended`, which adds `("Go on", "tinker resume #N")` to the ending), and
   `paused` when another job or the person paused it ("Paused for job #N", "Paused for you": its ending says so,
   and its tracker's `doing`); otherwise it is
@@ -276,16 +283,16 @@ too: they are answered at once, so there is no emergency command.
   `resume @PROJECT` is unchanged. An unknown job, one that runs in another process, and a finished one are
   refused with why. A task's job is resumed as `resume @RUN` once its run is known (`Jobs.retarget`). A job that
   goes on (`resume #N`) starts its tracker with `resumed`, so its message comes to the bottom of the chat.
-- **JOB-6** `tinker jobs [running|paused|stopped|finished] [PAGE]` lists the jobs newest first, `PAGE` (10) to
+- **JOB-6** `tinker jobs [running|paused|stopped|finished] [PAGE]` lists the jobs newest first, `JOBS_PER_PAGE` (10) to
   a page: with no state, the running ones, then the paused ones, then the stopped ones. A page that has more
   after it names the command for the next. Any other words are an error.
-- **JOB-7** `tinker stop #N` sends job #N `STOP`, as Ctrl-C (one that neither runs nor is paused is an error);
+- **JOB-7** `tinker stop #N` sends job #N `JOB_STOP_SIGNAL`, as Ctrl-C (one that neither runs nor is paused is an error);
   `tinker stop` stops the job that runs, whatever it is. In the conversation, `stop #N` stops that job (the task
   started here, the exercise in its own message, or one elsewhere) and `stop` the job that runs, and
   `resume [#N]` starts `tinker resume #N` as a task (an exercise as the exercise). A paused job that is stopped
   no longer goes on by itself.
 - **JOB-8** One job runs at a time, whatever kind it is. A job that starts (`Jobs.begin`) pauses every job that
-  runs: each is marked `paused_by` it and told to stop (`STOP`), and it waits, at most `PAUSE_WAIT` seconds, while
+  runs: each is marked `paused_by` it and told to stop (`JOB_STOP_SIGNAL`), and it waits, at most `JOB_PAUSE_GRACE_SECONDS` seconds, while
   they save themselves. A paused job keeps its process: it waits there (`go_on_when_idle`). No rule refuses a job
   because another runs: not the conversation's task, nor a second exercise.
 - **JOB-9** A paused job goes on by itself, at once, as `resume #N` in its own process, as soon as Tinker is idle
@@ -325,7 +332,7 @@ too: they are answered at once, so there is no emergency command.
 
 - **WEB-1** `Internet.backends()` is `{"ollama": OllamaWeb, "duckduckgo": DuckDuckGoWeb}`.
 - **WEB-2** `Internet()` uses config `web`, then `web_fallback`. It skips empty and repeated names.
-  A backend that is not ready is left out, and its reason goes in `skipped`. With no backend
+  A backend that is not ready is left out, and its reason goes in `unusable_backends`. With no backend
   left, `available()` is False and `why()` gives the reasons.
 - **WEB-3** `Internet.check()` rejects with `SystemExit`: an unknown `web` or `web_fallback`; a
   `web_timeout` that is not a number above 0; a `learn_missing` that is not a whole number of at
@@ -338,9 +345,9 @@ too: they are answered at once, so there is no emergency command.
   only when its content has text. When no backend answers, either one gives `None`, and
   `why(key)` gives each backend's reason.
 - **WEB-6** When a backend fails, the next backend is asked. A `WebError(retry=True)` is asked once
-  more after `RETRY_PAUSE`. Any other exception from a backend counts as a failure; it is never
+  more after `RETRY_PAUSE_SECONDS`. Any other exception from a backend counts as a failure; it is never
   raised.
-- **WEB-7** After `GONE_AFTER` network failures in a row, a backend is not asked again. A success
+- **WEB-7** After `FAILURES_BEFORE_GONE` network failures in a row, a backend is not asked again. A success
   resets its count. Once no backend is left, the plugin is gone.
 - **WEB-8** `OllamaWeb` is not ready without `OLLAMA_API_KEY`. It POSTs JSON with
   `Authorization: Bearer <key>` to `/web_search` and `/web_fetch`. HTTP 401, 403 and 429 are
@@ -393,10 +400,10 @@ too: they are answered at once, so there is no emergency command.
 - **PRM-11** `Part.assemble(parts, limit)` lays parts out by `place`: `"first"`, then unplaced, then
   `"last"`, each group in its given order. Required parts are always included. An empty optional
   part is left out. Optional parts are added while they fit. A non-atomic optional part is
-  shortened to the room left (if at least `SHORTEST` chars). An atomic one is whole or left out.
+  shortened to the room left (if at least `SHORTEST_KEPT_CHARS` chars). An atomic one is whole or left out.
   When the required parts fit, the result fits the limit.
 - **PRM-12** When the required parts do not fit, the longest prose part is shortened first, never
-  below `TRIM_FLOOR`. A `head` part keeps its start, a `tail` part its end, with a `[...]` mark.
+  below `MIN_TRIMMED_PROSE_CHARS`. A `head` part keeps its start, a `tail` part its end, with a `[...]` mark.
   Exact parts are never shortened. When nothing more can be shortened, `PromptTooLarge` names the
   exact parts. The shortened titles are added to `notes`.
 - **PRM-13** A part is `exact` only when it is required, and `atomic` only when it is optional.
@@ -414,7 +421,7 @@ too: they are answered at once, so there is no emergency command.
 - **WS-1** `Workspace.run(command)` runs one command in a POSIX shell in the project folder. Input
   comes from `/dev/null`. stdout and stderr are merged, and the project folder's path is removed from
   the output. It gives `(exit code, output)`. A command that times out gives `(None, output)`, and its
-  whole process group is killed. An unsafe command is never run: it gives `(None, REFUSED)`.
+  whole process group is killed. An unsafe command is never run: it gives `(None, REFUSED_OUTPUT)`.
 - **WS-2** These commands are unsafe: `sudo`; `rm -rf` of `/`, `~` or `..`; `mkfs`; `dd if=`; a
   download piped into a shell; a redirect into `/etc`, `/usr`, `/bin` or `/dev/sd*`. Ordinary
   build and test commands are not.
@@ -449,7 +456,7 @@ too: they are answered at once, so there is no emergency command.
   shell functions, the aliases the command uses. `Workspace.run` puts the prelude first, so a taught
   alias works in a project's commands.
 - **WS-11** `Toolchain(data)` makes lists of `setup` and `use`. It leaves out the setup commands that
-  write `.env` (kept in `dropped`) and those that change the machine's own tools (kept in `machine`).
+  write `.env` (kept in `env_commands_dropped`) and those that change the machine's own tools (kept in `machine_changing_commands`).
   A lint of `"none"` means the language has no linter: `lint` is `""`, and `to_dict()` gives
   `"none"` back. A toolchain is true only with both `test_all` and `test_one`.
 - **WS-12** `shell(command)` runs the command after `activate`, when there is one.
@@ -514,30 +521,30 @@ too: they are answered at once, so there is no emergency command.
   gives the final chunk, with `message.content` and `message.thinking`. An HTTP error is an
   `OllamaError` flagged out of memory or crashed when it is either. An unreachable Ollama is an
   `OllamaError`.
-- **MOD-9** `Stream` collects the reply and keeps the last `THOUGHT_KEPT` chars of the thinking. An
+- **MOD-9** `Stream` collects the reply and keeps the last `UNFINISHED_THOUGHT_KEPT_CHARS` chars of the thinking. An
   error chunk is an `OllamaError`: a reply error with what came before, unless it is out of memory
   or a crash. Once `done_when(content)` says the reply is complete, the stream ends within
-  `EARLY_STOP_GRACE` seconds, and the reply is the content as it was at that moment. While it goes,
-  its live line (`say.live`) says what the model is doing. A reply whose last `LOOP_LINES`
+  `LAST_CHUNK_WAIT_SECONDS` seconds, and the reply is the content as it was at that moment. While it goes,
+  its live line (`say.live`) says what the model is doing. A reply whose last `LOOPING_REPEATED_LINES`
   finished lines are one non-blank line, again and again, is stopped there and is cut (`length`).
 - **MOD-10** `Calibrator.shared(context)` sets the prompt budget to `min(8192, max(512, context // 3))`,
   and the longest reply to `max(1024, min(16384, context - budget))`. `safe_ratio()` is
-  `CHARS_PER_TOKEN` until measured, and then 97% of the measure, within [2, 4], to 2 decimals.
+  `STARTING_CHARS_PER_TOKEN` until measured, and then 97% of the measure, within [2, 4], to 2 decimals.
 - **MOD-11** `Calibrator.capacity(target)` gives `(target, None)` when the target reads. Otherwise it
-  halves the gap until it is within `CAPACITY_STEP`, and gives `(largest that read, smallest that
+  halves the gap until it is within `CAPACITY_SEARCH_PRECISION`, and gives `(largest that read, smallest that
   failed)`. Below the smallest usable context it ends with `SystemExit`.
-- **MOD-12** `Calibrator.check_fit` ends with `SystemExit` when the weights and `MEMORY_OVERHEAD` are
+- **MOD-12** `Calibrator.check_fit` ends with `SystemExit` when the weights and `RUNNER_OVERHEAD_BYTES` are
   more than the GPU memory. With either size unknown, it checks nothing.
 - **MOD-13** `Calibrator.run()` measures the model and keeps, in the home's `models`, a prompt budget,
   a context, a longest reply, a longest fix, a think setting and chars per token.
 - **MOD-14** `Model` takes its limits from the measured settings. It builds at `build_think` only
   when the model thinks. Its chars per token stay within [2, 4]. `limit_chars(system)` is
-  `tokens × PROMPT_HEADROOM × chars_per_token − len(system) − 40`.
+  `tokens × PROMPT_BUDGET_SHARE × chars_per_token − len(system) − 40`.
 - **MOD-15** `Model.ask_once` adds `NO_TOOL_CALLS` to the system prompt. It fits the user message to
   the prompt budget, gives the reply's content, and logs the exchange to its log.
 - **MOD-16** A reply cut off while it is still thinking is asked again: first with twice the budget,
   up to the cap; then, if `unthinking_retry`, without thinking, with the thought so far to
-  conclude. Otherwise the result is `""`, with `overthought` set and `last_thought` kept. A cut
+  conclude. Otherwise the result is `""`, with `hit_thinking_cap` set and `last_unfinished_thought` kept. A cut
   reply is finished, and kept, when its `done_when` says so or its blocks have all ended.
 - **MOD-17** A failed request is tried again after what the failure calls for. Out of memory: a
   smaller prompt budget, up to `OOM_RETRIES` times. A stall: the model is reloaded, up to
@@ -611,7 +618,7 @@ too: they are answered at once, so there is no emergency command.
   passing spec points, what the model is doing now, the latest message said, a plan that waits, the
   end, the seconds taken and when it went on (`resumed`). Each change is published at once in the
   home's `running` under the run's process, and appended to the project's `progress` log.
-- **PRJ-14** The steps are named by phase (`STEPS`: what each phase is doing, and when done). The
+- **PRJ-14** The steps are named by phase (`DOING_AND_DONE`: what each phase is doing, and when done). The
   passing count is taken from the project on every save, for every criterion (`C…` and `B…`). A
   plan that waits is kept as data: its project, run, language, how to start it, its kind, what
   changed, its criteria, its non-goals and its folder. The end is kept as data: its status, its
@@ -641,15 +648,15 @@ too: they are answered at once, so there is no emergency command.
 - **KNW-5** `add_lessons(new, confirmed)` confirms known lessons by number. It confirms instead of
   adding a lesson that is like a known one. It skips a lesson with no text, an unknown phase, or one
   that names the project (`names`). A new lesson is a candidate. A lesson goes to the language or to
-  any language by its scope. A store keeps at most `MAX_LESSONS`, and new lessons always stay. It
+  any language by its scope. A store keeps at most `MAX_LESSONS_PER_FILE`, and new lessons always stay. It
   gives how many were new. `lessons(phases)` gives the best evidenced first: the times seen plus the
   times helped, then the most recently seen.
 - **KNW-6** Toolchain fixes. `known_fix` replays only a fix for exactly this failure, not tried yet.
   A replay that fails retires that fix at once. `remember_fix` keeps the last 20, one per failure.
-  `similar_fix` needs a similarity of at least `SIMILAR_FAILURE`. `remember_toolchain` keeps the
+  `similar_fix` needs a similarity of at least `TOOLCHAIN_HINT_SIMILARITY`. `remember_toolchain` keeps the
   toolchain without its `run` and `check`.
 - **KNW-7** `Embeddings` keeps each text's vector by its key, per embedding model, in the home
-  database. Only missing texts are asked for, in batches of `BATCH`. A wrong reply gives `None`, and
+  database. Only missing texts are asked for, in batches of `TEXTS_PER_REQUEST`. A wrong reply gives `None`, and
   `failed` says why. `prune` keeps only the texts asked for. `cosine` is the cosine similarity, and 0
   for a zero vector.
 - **KNW-8** `Retriever.by_words` ranks the texts that hold the query's words with BM25, best first.
@@ -657,7 +664,7 @@ too: they are answered at once, so there is no emergency command.
   last. When embeddings fail, the meaning search is turned off for the rest of the run.
 - **KNW-9** `Learner.safe_commands` drops a command with a shell operator, a command that changes
   something, and an unsafe command.
-- **KNW-10** `Learner.read_facts` keeps facts of a known phase, cut to `FACT_CHARS`, at most
+- **KNW-10** `Learner.read_facts` keeps facts of a known phase, cut to `MAX_FACT_CHARS`, at most
   `FACTS_PER_CHUNK`. `add_facts` keeps a repeated fact once and adds the other page to its `also`.
   `relevant_chunks` gives the page's first chunk and then the best-matching ones, in page order.
   Facts about unreleased versions are dropped.
@@ -680,23 +687,23 @@ too: they are answered at once, so there is no emergency command.
   those phases' prompts, whether it was proven or not.
 - **KNW-18** `facts(phases)` gives the language's proven facts for the prompts of those phases.
 - **KNW-19** `Knowledge(language, run)` records each item's history as `{event, run, at}`, the last
-  `HISTORY_KEPT`: a new lesson or fix is `born`, a lesson seen again is `confirmed`, every item a
+  `EVENTS_KEPT_PER_ITEM`: a new lesson or fix is `born`, a lesson seen again is `confirmed`, every item a
   succeeding cycle used `helped` (counted in `helped`, proven before or not), and a retired one
   `failed`. A replayed fix that works `helped`.
 - **KNW-20** A retired item leaves the lessons, facts, findings or fixes it was among for the
   `retired` list beside them, with status `retired`, its `reason` and the run. That list keeps the
-  last `RETIRED_KEPT`. Nothing retired is shown in a prompt.
+  last `RETIRED_KEPT_PER_LIST`. Nothing retired is shown in a prompt.
 - **KNW-21** `Library.save` gives each research finding `cites`: the IDs of the facts it cites by
   number, so the link holds when a fact is retired.
 - **KNW-22** A topic's playbook. `condense(plan, facts)` asks one call to turn the topic's facts (a
   language's with the lessons its own projects proved; candidates are left out) into at most
   `PLAYBOOK_RULES` rules, at the think setting it is given (learning's `learn_think`). `read_rules` keeps a rule only with a known phase and at least one cited fact or lesson,
-  cuts its text to `RULE_CHARS`, keeps one per text and gives each the IDs it cites. When the model
+  cuts its text to `MAX_RULE_CHARS`, keeps one per text and gives each the IDs it cites. When the model
   gives no usable rules, there are none and the facts are shown as they are. `Library.items` gives
   each rule (kind `rule`), and the rules stand in for the facts: none is shown but those a retired
   rule cited and no rule in use cites. A rule is a claim like a fact: it is proven and copied into
   the language's facts, or retired.
-  Each rule says when it applies (`when`, at most `RULE_WHEN_CHARS`): "" for every program, else
+  Each rule says when it applies (`when`, at most `MAX_RULE_WHEN_CHARS`): "" for every program, else
   the kind of code it is for, which a proven copy keeps. What the reply says a new project declares
   to get the newest version (`declare`) is the first rule, for every program.
 - **KNW-24** Learning a language again (LRN-11) replaces what its earlier learning proved: `supersede` retires
@@ -718,12 +725,12 @@ CONDENSE, KEEP. Domain research (`Researcher`), own-command learning and run les
   core-usage, this-version, pitfalls-and-limits, conventions, fit and readiness. Each `Slot` has an id, a
   question, a query hint, a passage count, a minimum, the section (fact phase) it fills, its source
   (`web`, `machine` for installed, `check` for readiness), and its `docs` words: what a documentation
-  site's addresses and titles call its pages (`whatsnew`, `changelog`). `TOOL_DOCS` are those of a
+  site's addresses and titles call its pages (`whatsnew`, `changelog`). `TOOL_DOCS_QUERY` are those of a
   language's tools' pages. `asked(plan, version)` is its question with the
   plan's hint; `search(plan, version)` is the plan's follow-up search for it, else its own query.
 - **LRN-2** `Throttle(rate, backoff)` lets at most `rate` requests a minute through (a token bucket, full
   at the start; an empty one waits). `call(request, limited)` asks again while `limited()` says HTTP 429,
-  after pauses of `BACKOFF_FIRST` seconds, doubled, and raises `RateLimited` once `backoff` seconds have
+  after pauses of `FIRST_BACKOFF_SECONDS` seconds, doubled, and raises `RateLimited` once `backoff` seconds have
   passed since the first 429: it never waits longer than that in all.
 - **LRN-3** `RequestLog` appends every web request of a learn to `Home.web_log()` as one JSON line
   `{at, kind, result, seconds, target}` (kind search, fetch, robots, probe or fallback; result ok, 429,
@@ -740,23 +747,23 @@ CONDENSE, KEEP. Domain research (`Researcher`), own-command learning and run les
   fetched, and its `Fetched` is `refused`. A missing robots.txt allows everything; one answered with 401
   or 403 allows nothing.
 - **LRN-6** `Cleaner.page` takes an HTML page's main content as blocks (`<main>`/`<article>` when it holds
-  `USABLE_PAGE_CHARS`, else the body), leaving out what `PageText` leaves out and every paragraph that is
-  at least `LINK_ONLY` links; plain text and Markdown are read by their lines (`#` headings, ``` code).
-  `Cleaner.pool(pages, known)` gathers blocks under their heading into passages of up to `PASSAGE_CHARS`
+  `MIN_USABLE_PAGE_CHARS`, else the body), leaving out what `PageText` leaves out and every paragraph that is
+  at least `MENU_LINK_SHARE` links; plain text and Markdown are read by their lines (`#` headings, ``` code).
+  `Cleaner.pool(pages, known)` gathers blocks under their heading into passages of up to `MAX_PASSAGE_CHARS`
   (a code block whole), drops text a site repeats on several of its pages and a passage that repeats
-  another or a known one (`NEAR_DUPLICATE`), and numbers them on from the known ones (`P1`, `P2`, ...),
+  another or a known one (`NEAR_DUPLICATE_OVERLAP`), and numbers them on from the known ones (`P1`, `P2`, ...),
   each with its address and fetch time.
 - **LRN-7** `Selector.select(slots, pool, plan, version)` gives each slot its passages from the one pool:
-  its best `SLOT_CANDIDATES` by the words of its question, the topic and the version are shortlisted, and
+  its best `SLOT_CANDIDATE_PASSAGES` by the words of its question, the topic and the version are shortlisted, and
   only those are embedded; of them, only those that hold a keyword of its own search (`Slot.keywords`,
-  without the topic) or are close to its question in meaning (`SLOT_RELEVANT`) count. They are ranked by
+  without the topic) or are close to its question in meaning (`SLOT_RELEVANT_SIMILARITY`) count. They are ranked by
   words and meaning fused, taken by MMR so a near-repeat of a passage taken is passed over, at most the
   slot's count and within the digest's room. A passage may serve several slots.
 - **LRN-8** `short_slots(profile, selected)` gives the web slots below their minimum, the emptiest first.
   Readiness, `missing(profile, facts, machine)`, gives installed when no version command ran and each web
   slot without a fact.
 - **LRN-9** `read_plan` needs a kind (language, tool or domain) and a name. It keeps safe commands only
-  (`MAX_COMMANDS`), its documentation site (`docs`: web addresses only, `versioned` only with `{version}`
+  (`MAX_VERSION_COMMANDS`), its documentation site (`docs`: web addresses only, `versioned` only with `{version}`
   in it), a language's tools (one per role of `TOOL_ROLES`, each with a safe version command and its
   `docs`), and hints and follow-ups for its profile's slots only; a tool's language is `used_with`. `read_digest` keeps a fact only when it cites a
   passage given and speaks of no unreleased version; each keeps its slot, the passages it cites, their
@@ -769,14 +776,14 @@ CONDENSE, KEEP. Domain research (`Researcher`), own-command learning and run les
   search 1 when they are too few. Then it raises `LearnStopped` (a `SystemExit`: a non-zero exit) naming
   the cause, what was tried and the requests made, saying nothing was learned or saved and what was learned
   before is untouched, and the next step; nothing is written to Tinker's database.
-- **LRN-11** A first learn makes one search (`FIRST_SEARCH`, from the topic alone), picks the results whose
+- **LRN-11** A first learn makes one search (`DOCS_SITE_SEARCH`, from the topic alone), picks the results whose
   title and snippet score above `learn_cutoff` (BM25), each address once, at most `learn_pages`, and
   fetches them with the plugin's fetcher. A page that gives too little text is fetched by the plugin
   instead (logged as a fallback), at most `fetch_fallbacks` per learn, never one robots.txt refused. Only
   then does the plan call run (at the model's own think setting); it names the documentation site and,
   for a language, each tool's version command and documentation. A saved plan is reused with no search
   and no call. The version commands (each run once) give the version installed; the documentation of that version (LRN-14
-  to LRN-17) and of a language's tools (`TOOL_DOCS`, at most `tool_docs_pages`) joins the pool. Each slot's
+  to LRN-17) and of a language's tools (`TOOL_DOCS_QUERY`, at most `tool_docs_pages`) joins the pool. Each slot's
   passages are digested into facts (candidates, each with its slot) and condensed into rules, both at
   `learn_think`, and kept only after both succeed, under the language's key or the topic's slug, with its
   plan, machine, documentation versions, sources, cited passages, status (`complete` or `incomplete`),
@@ -803,7 +810,7 @@ CONDENSE, KEEP. Domain research (`Researcher`), own-command learning and run les
   reads them from there before the web, so learning a version again fetches none of its documentation. A
   copy of the "latest" documentation is read again after `docs_latest_days`; a version's own is kept until
   `tinker clear docs`.
-- **LRN-18** Given a tracker, learning moves it through its steps (`Tracker.STEPS`: search, plan,
+- **LRN-18** Given a tracker, learning moves it through its steps (`Tracker.DOING_AND_DONE`: search, plan,
   machine, documentation, digest, follow-up, condense, keep; a domain's frame and investigate), each
   once in a row; without one (a run's recall phase), the run's own steps are left alone. The summary
   is kept as data too (`recap`: answered, still open, documentation, pages, facts kept, web requests),
@@ -820,8 +827,8 @@ CONDENSE, KEEP. Domain research (`Researcher`), own-command learning and run les
   commands; `cites` from a finding to its facts and from a language's rule to its facts and lessons; `became` from a web fact to the language's proven
   fact it was copied into; and `taught_by`, `confirmed_in`, `helped_in` and `failed_in` from an item
   to the runs in its history. A run is a node with its line from `runs`, or marked as having none.
-- **GRF-3** `similar` links join lessons by meaning (cosine at least `SIMILAR_MEANING`) when the
-  embedding model gives their embeddings, else by words (at least `SIMILAR_WORDS`). `similar_by`
+- **GRF-3** `similar` links join lessons by meaning (cosine at least `SIMILAR_LESSON_MEANING`) when the
+  embedding model gives their embeddings, else by words (at least `SIMILAR_LESSON_WORDS`). `similar_by`
   says which, and why words were used.
 - **GRF-4** `GraphPage.html(graph)` is one self-contained page: the graph as JSON inside it, and no
   script, style, font or image from elsewhere. It holds a plain list of every node by group (readable
@@ -843,7 +850,7 @@ its text stays for ask, teach and a focused read again (`read #N "WHAT"`).
   binary file is refused.
 - **RDG-2** An EPUB is read in its spine's order. Its contents (EPUB 3's navigation document, else EPUB 2's NCX) mark
   where each chapter starts (an entry's fragment, else its document's start), at the shallowest depth that gives
-  `READ_CHAPTERS` chapters (else the deepest); what comes before the first is the opening pages. Its title and author
+  `READ_MIN_CHAPTERS` chapters (else the deepest); what comes before the first is the opening pages. Its title and author
   come from its metadata. An EPUB with no usable contents is split at its headings.
 - **RDG-3** A Markdown text is split at its headings, at the depth `chapter_depth` gives (a lone top heading is the
   title, not a chapter). A plain text is split at its chapter lines ("Chapter 3", "Preface"), else into parts of
@@ -857,20 +864,20 @@ its text stays for ask, teach and a focused read again (`read #N "WHAT"`).
   text, the day it was added and each chapter with its text, kind and state (`unread`; `raw` for an index and front
   or back matter: kept, never read). A text stored before is that one: it says its number, and nothing else is done.
 - **RDG-6** The survey, made once per reading and kept with it, sees the contents (each chapter's kind and length),
-  the front chapters and the index terms. `read_survey` needs a summary; at most `READ_TERMS` terms; `software` is
+  the front chapters and the index terms. `read_survey` needs a summary; at most `READ_KEY_TERMS` terms; `software` is
   true only when the reply says so; each chapter is `core`, `supporting` or `other` (left out: other). It orders the
   reading and never skips a chapter: `in_order` gives the core ones, then the supporting, then the others, each in
   the source's order.
 - **RDG-7** `Reader.read(N)` reads every unread chapter in that order, each in parts that fit the prompt
-  (`READ_TEXT_SHARE`), one call per part, each shown what was learned from the reading before (the latest kept when
+  (`READ_CHAPTER_TEXT_SHARE`), one call per part, each shown what was learned from the reading before (the latest kept when
   the prompt is full). Each chapter is saved as soon as it is read: its new facts (one already kept is not kept
   again) join the topic, each with its chapter, and it is marked read; so a reading stopped goes on with the
   chapters not read yet. With every chapter read, it says so and asks nothing.
 - **RDG-8** `read #N "WHAT"` reads again the chapters WHAT names ("chapter 7"), then those most about it by its
   words, `READ_FOCUS_CHAPTERS` in all, never a raw one: each shows its opening and its parts most about WHAT
-  (`excerpt`, `READ_CHUNKS` parts), and the prompt says what the person asks to look for. What it finds that is new
+  (`excerpt`, `READ_FOCUS_CHUNKS` parts), and the prompt says what the person asks to look for. What it finds that is new
   joins the topic.
-- **RDG-9** `read_points` keeps at most `READ_POINTS` points, each cut to `FACT_CHARS`. A point of a source about
+- **RDG-9** `read_points` keeps at most `READ_FACTS_PER_CHAPTER` points, each cut to `MAX_FACT_CHARS`. A point of a source about
   building software keeps its phase when it is one of `FACT_PHASES`; every other point has the phase `book`, which
   no build is shown. A reply with no list of points is not usable. Once every chapter is read, a source about
   building software has its facts condensed into rules (again when a reading found something new); no other is.
@@ -879,8 +886,8 @@ its text stays for ask, teach and a focused read again (`read #N "WHAT"`).
   error that says so. `Fetcher.download` gives the bytes as they are, through the environment's proxy, and refuses
   more than its limit.
 - **RDG-11** `Readings.about(text, items)` gives the readings the text names by title, then those whose items were
-  shown. `passages(numbers, query)` gives their passages (`PASSAGE_CHARS`) most about the query by its words, at
-  most `READ_PASSAGES`, each with its title and chapter.
+  shown. `passages(numbers, query)` gives their passages (`MAX_PASSAGE_CHARS`) most about the query by its words, at
+  most `BOOK_PASSAGES_SHOWN`, each with its title and chapter.
 - **RDG-12** `tinker read FILE | URL` stores the source, then learns from it as `read #N`: its job's arguments become
   `read #N` (`Jobs.retarget`), so a stopped or paused reading goes on with what is not read, and nothing is fetched
   again. `read #N ["WHAT"]` needs a measured model and a known reading. Its tracker moves through survey, chapters
@@ -899,7 +906,7 @@ on this machine, on the web and in what Tinker read, the model weighs that evide
 anything changed.
 
 - **TCH-1** `Memory(embeddings).items` are the memory graph's toolchains, fixes, lessons, facts, findings, rules
-  and commands, without the retired. `about(text)` gives at most `MEMORY_SHOWN` of them, the most related first:
+  and commands, without the retired. `about(text)` gives at most `MEMORY_ITEMS_SHOWN` of them, the most related first:
   first the items whose kind and language (or topic) the text names. A language's toolchain counts as named with
   its language, however the text calls it ("toolset").
 - **TCH-2** `Asker.answer(question)` makes one model call with the items numbered, and says the answer alone:
@@ -907,9 +914,9 @@ anything changed.
   makes no call and says so. It changes nothing.
 - **TCH-3** `read_plan` keeps at most `TEACH_CLAIMS` claims, each a fact or a preference (the person's own
   choice). A preference is only what the person marks with the word prefer: a teaching without it (`marked`) has
-  facts alone, whatever the model says. It keeps at most `TEACH_COMMANDS` commands and `TEACH_SEARCHES` searches,
+  facts alone, whatever the model says. It keeps at most `TEACH_CHECK_COMMANDS` commands and `TEACH_CHECK_SEARCHES` searches,
   and the changes: each rests on the claims it names and retires items shown, replaces toolchain commands of
-  `TOOLCHAIN_KEYS`, keeps a lesson with a known phase or keeps a fact in place of an item shown (**TCH-9**; any
+  `TEACHABLE_TOOLCHAIN_KEYS`, keeps a lesson with a known phase or keeps a fact in place of an item shown (**TCH-9**; any
   other is dropped). Setup given as one line is split at `&&` into its commands; any other
   command given as a list is joined with `&&`. A plan with no claim, facts that nothing checks (no command, no
   search, and no reading it is about), no change, a
@@ -950,7 +957,7 @@ person always comes first.
 - **EXR-2** `knows(name)`: a language Tinker has not learned is learned first (`tinker learn`, as a build of the
   exercise). A language whose learned machine commands all failed is not installed here: it says so and ends
   before anything is practised.
-- **EXR-3** `read_choice` needs a task and a feature, rejects a task like an earlier project's (`SAME_PROJECT`),
+- **EXR-3** `read_choice` needs a task and a feature, rejects a task like an earlier project's (`SAME_PRACTICE_TASK_SIMILARITY`),
   adds the language to a task that does not name it, and makes a folder name from the task when the one given
   does not fit. `free_folder` gives a folder of the exercise folder (`EXERCISE_FOLDER` in the projects folder)
   that no project has yet.
@@ -963,20 +970,20 @@ person always comes first.
 - **EXR-5** `measured(folder)` reads the project's own database: its status, its minutes (every session's wall
   time), its model calls, the retried ones (attempt 2 and later), reply tokens, spec points passing, parked and
   in all, README examples that failed, and the `slowest` steps (a step is its call's first word, so no file is
-  named). `problems` lists, at most `EXERCISE_PROBLEMS`: what nothing made pass, failed README examples, failed,
+  named). `problems` lists, at most `REFLECTION_PROBLEMS`: what nothing made pass, failed README examples, failed,
   unusable and cut replies, and the warnings the runs said.
 - **EXR-6** The person comes first, as with every job: the exercise is one (**JOB-8**, **JOB-10**). A job of
   theirs, a chat or a command line pauses it: its build is stopped as Ctrl-C stops it (it saves itself), and the
   exercise goes on from where it was once Tinker is idle (**JOB-9**). It has no rule of its own for giving way. A
   run an exercise started (its build) is marked `exercise` in its tracker and is not a job: the conversation leaves
   it out of what runs (`persons_runs`, `Desk.now`), and its status shows the exercise when nothing else runs
-  (looked at every `STATUS_EVERY` seconds, so it moves on by itself). The exercise's tracker shows its build's: its
+  (looked at every `STATUS_LOOK_SECONDS` seconds, so it moves on by itself). The exercise's tracker shows its build's: its
   step after the exercise's, what the model writes now, the spec points passing and the latest line, and a
   practice project's steps only. As a conversation starts (`adopt_exercise`), it keeps up the message of an
   exercise that runs, and an exercise that ended without being stopped (killed, the computer restarted) goes on;
   either way its message is taken out and sent anew at the bottom. While it listens, it adopts again an exercise
   that went on by itself.
-- **EXR-7** One exercise runs at a time (`Exercises.claim`). It is a job: Ctrl-C or `stop #N` (the `STOP`
+- **EXR-7** One exercise runs at a time (`Exercises.claim`). It is a job: Ctrl-C or `stop #N` (the `JOB_STOP_SIGNAL`
   signal) stops its build, keeps everything, and ends `stopped` with how to go on (`resume #N`, or
   `tinker exercise LANGUAGE`, goes on from there). A second exercise pauses the one that runs (**JOB-8**).
   `exercise status` shows each exercise: whether it runs, is paused or stopped, its focus, each recent
@@ -1100,7 +1107,7 @@ person always comes first.
 - **FIN-3** An expected line matches only a whole output line: `80.33` does not match
   `80.33000000000004`, and `7` does not match `17`.
 - **FIN-4** `ReadmeWriter.read` needs features and at least one usage example. It keeps at most
-  `MAX_USAGE` examples. A run command is served when the reply says so, or when an example talks
+  `MAX_USAGE_EXAMPLES` examples. A run command is served when the reply says so, or when an example talks
   to localhost.
 - **FIN-5** `ReadmeWriter.text` writes: the title, the overview, the features, getting started (the
   `use` commands, how to run it), usage as console sessions, the settings (from `.env.example`), and
@@ -1113,7 +1120,7 @@ person always comes first.
   keeps its toolchain once. With no problems noted, it makes no call. Otherwise it keeps at most 3
   new lessons, never one that names the project's files, and clears the noted problems.
 - **FIN-9** Every README example runs as a person runs it: after the `use` commands, with a server
-  started first when the app serves. A failing example gets up to `FIX_ROUNDS` fixes, to the code or
+  started first when the app serves. A failing example gets up to `EXAMPLE_FIX_ROUNDS` fixes, to the code or
   to the README. A fix stays only while every passing test still passes. What still fails is kept in
   the cycle's `readme_failures`.
 - **FIN-10** `Tidy` gives each file the linter reports one call, with the file as numbered lines. A
@@ -1148,16 +1155,16 @@ person always comes first.
   a one-line `brief`; how long it took (`took`); and its `ending`: the end's headline, details and
   next commands, or the plan that waits with its criteria and what to send next.
 - **CNV-9** `Reporter` shows one run's tracker in one message per chat. It reads the tracker every
-  `EDIT_EVERY` seconds and edits the message when it changed. It ends with the run's ending (with its
+  `PROGRESS_EDIT_SECONDS` seconds and edits the message when it changed. It ends with the run's ending (with its
   `text`: a research's answer). A command that keeps no tracker shows its latest printed line.
 - **CNV-11** `Talk.model()` is `None` until a measured model is in use. Otherwise it gives the chat
-  options (no thinking for a thinking model). `reply` keeps the last `CHAT_KEPT` messages per chat,
+  options (no thinking for a thinking model). `reply` keeps the last `CHAT_CONTEXT_MESSAGES` messages per chat,
   and it says plainly when no model is in use or the model failed.
 - **CNV-12** `Shell.propose` gives one command line to confirm, with a warning when it changes or
   deletes things. It gives no command for an empty, multi-line or failed reply. `take` hands the
   proposal over once. `run` runs it in the person's shell and shows the exit code and output.
 - **CNV-13** `Research.most_about` keeps the paragraphs that share the most words with the searches,
-  in page order, up to `RESEARCH_PAGE_CHARS`. `searches` falls back to the topic itself.
+  in page order, up to `CHAT_RESEARCH_CHARS_PER_PAGE`. `searches` falls back to the topic itself.
 - **CNV-14** `running(skip)` lists the runs whose trackers are in the home's `running`, but for its
   own process and those it skips. It removes the trackers of processes that have ended.
 - **CNV-15** `Desk.answer` handles a command. `task WHAT` starts a task, and a bare `task` gets its
@@ -1178,7 +1185,7 @@ person always comes first.
   `after_word` drops the command word. `built_project(name)` gives the project named (`Runs.find`),
   or without a name the one built last.
 - **CNV-19** A chat or a command line said while a job runs pauses the job while it is answered
-  (`Talk.pausing`, **JOB-10**); until the reply is written, its note says what is paused for it, and that it
+  (`Talk.pausing_jobs`, **JOB-10**); until the reply is written, its note says what is paused for it, and that it
   goes on once they have their answer.
 - **CNV-20** `run [@PROJECT] ARGS [<<< INPUT]` runs a built project the way a person runs it: its run
   command, in its folder and environment, with the arguments quoted and the input given after `<<<`.
@@ -1189,14 +1196,14 @@ person always comes first.
   own thread. Each chat has one status message. Every time the status changes (Tinker starts listening, a
   task moves on, waits for the person, ends, Tinker ends: `not listening`), the one before is taken out and the
   new one is sent at the bottom. Tinker pins nothing. While it listens it collects the messages whose time is
-  up, every `COLLECT_EVERY` seconds.
+  up, every `EXPIRED_MESSAGES_SWEEP_SECONDS` seconds.
 - **CNV-22** `one_shot` says one of the conversation's commands once, in the terminal (`tinker chat`,
   `command`, `research`, `run`, `history`). Each needs words after it, except `run` and `history`; `chat`
   and `command` pause the job that runs (**JOB-10**). `command` runs nothing without a yes at the terminal.
 - **CNV-23** `research TOPIC` says when the web or the model is not usable. Otherwise it answers from the
   pages it read and lists them as numbered sources. It is a job: its tracker shows its steps (`searches`,
   `read`, `write`) and ends with its answer (the ending's `text`, which a chat's message shows).
-- **CNV-24** A task run from a terminal reports to the enabled chats (`Attached`). `STOP` (SIGUSR2)
+- **CNV-24** A task run from a terminal reports to the enabled chats (`Attached`). `JOB_STOP_SIGNAL` (SIGUSR2)
   stops it as Ctrl-C does (a job is paused with it too), and its last state is shown once it ends.
 - **CNV-25** `/start` (what a chat app sends when a person first opens the bot) is answered with a
   welcome and a short, tldr-style guide for beginners in plain words: what Tinker does, then what to
@@ -1206,9 +1213,9 @@ person always comes first.
   with `send_file`, what tinker printed as its caption. The terminal opens the file in the browser and
   says where it is; a channel that cannot send files sends the caption with the file's path.
 - **CNV-27** A glance (a quick command, `help`, `history`, `exercise status`) is answered with `glance`: the
-  person's message goes at once, the answer in `GLANCE_KEEP`. `history [PAGE | #N]` lists the things
+  person's message goes at once, the answer in `GLANCE_KEPT_SECONDS`. `history [PAGE | #N]` lists the things
   shown, newest first, with what was asked for each, or shows thing N again. `clear chat` takes every
-  message out of the chats but the status, said in a note that goes in `NOTE_KEEP`. `clear history`, once
+  message out of the chats but the status, said in a note that goes in `DONE_NOTE_KEPT_SECONDS`. `clear history`, once
   confirmed, forgets the history and clears the chat the same way, and leaves nothing in the history, not
   even what it said.
 - **CNV-28** A command that needs words, sent alone (as a chat app's menu sends it: `/fix`), asks for them
@@ -1241,7 +1248,7 @@ person always comes first.
   the question with the reply box open (`force_reply`), the hint in it cut to 64 characters.
 - **CHN-6** `ask` gives the default when there is no terminal, or ends with `SystemExit` when there
   is none. `ChannelCommand.check` ends with `SystemExit` on a refusal, and tries a dropped
-  network again up to `CHECK_TRIES` times.
+  network again up to `FIRST_CALL_TRIES` times.
 - **CHN-7** `pair` serves the chat whose sender says yes at the terminal. `start` needs an enabled
   channel (or the one named), and checks each one before listening.
 - **CHN-8** `send_file(chat, path, caption)` posts `sendDocument` as `multipart/form-data`: the chat, the
@@ -1249,12 +1256,12 @@ person always comes first.
   caption alone.
 - **CHN-10** Every message of a chat served (Tinker's, and the person's) is kept in the ledger, going in a
   day; an edit moves that on. `show` keeps the thing it shows, numbered, with the person's words it
-  answers (their message within `ASKED_WAIT`). `glance` takes the person's message out at once, and the
-  glance before it, and the glance goes in `GLANCE_KEEP`. `collect` takes out the messages whose time is
+  answers (their message within `ANSWER_WINDOW_SECONDS`). `glance` takes the person's message out at once, and the
+  glance before it, and the glance goes in `GLANCE_KEPT_SECONDS`. `collect` takes out the messages whose time is
   up, and `clear` every message but the status. A message taken out without a network stays in the
   ledger; one Telegram refuses to take out is forgotten.
 - **CHN-11** A file sent in an allowed chat is downloaded into the home (`Home.reading_file`) and taken as `read PATH`:
-  the link Telegram gives a bot holds its token, so it is never passed on. A file over `BOT_DOWNLOAD_BYTES`, or one
+  the link Telegram gives a bot holds its token, so it is never passed on. A file over `TELEGRAM_MAX_DOWNLOAD_BYTES`, or one
   that cannot be downloaded, is said to the person, and nothing is read. A file from any other chat is ignored.
 
 ## command line (cli)

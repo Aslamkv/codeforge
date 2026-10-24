@@ -1,29 +1,20 @@
-"""What Tinker knows, as one graph (Graph): each language, topic, lesson, fact, finding, fix and run is a node,
-linked to what it belongs to, what it cites, and the runs that taught it, proved it or found it wrong. The
-page that shows it (GraphPage) is one file a browser opens with no network: the graph drawn when scripts
-run, and a plain list of everything when they do not (a phone's file preview)."""
-
 lazy import html
 lazy import itertools
 lazy import json
 
 lazy from .knowledge import Embeddings, Library
-lazy from .settings import Home, SIMILAR_MEANING, SIMILAR_WORDS, first_line, similarity
+lazy from .settings import SIMILAR_LESSON_MEANING, SIMILAR_LESSON_WORDS, Home, first_line, similarity
 lazy from .workspace import TaughtCommands, Toolchain
 
 HISTORY_LINKS = frozendict({"born": "taught_by", "confirmed": "confirmed_in", "helped": "helped_in", "failed": "failed_in"})
 
 
 class Graph:
-    """Nodes {id, kind, label, text, status, group, details, sources} and links {source, target, kind}, read
-    from Tinker's home. similar_by says how lessons were found similar (by meaning, or by words and why)."""
-
     def __init__(self):
         self.nodes, self.links, self.similar_by = {}, [], ""
 
     @classmethod
     def build(cls, embeddings=None):
-        """The graph of everything Tinker keeps; embeddings (or None) find the lessons that are alike."""
         graph = cls()
         graph.add_languages()
         graph.add_any_language()
@@ -56,8 +47,6 @@ class Graph:
         self.add_retired(doc, hub, "any")
 
     def add_topics(self):
-        """Each topic learned from the web: a language's joins its language's node; its facts link to the proven
-        facts they became, its findings to the facts they cite, and its rules to the facts and lessons they rest on."""
         for slug, entry in Library.topics().items():
             self.add_topic(slug, entry)
 
@@ -69,7 +58,6 @@ class Graph:
         self.add_retired(entry, hub, slug)
 
     def topic_hub(self, slug, entry):
-        """The topic's own node (a language's is its language's), with when it was learned and what it misses."""
         hub = f"lang:{slug}" if entry.get("kind") == "language" else f"topic:{slug}"
         details = [("learned", entry.get("learned", "?")), ("summary", entry.get("summary", "")),
                    ("missing", ", ".join(entry.get("missing", [])) or None)]
@@ -77,21 +65,18 @@ class Graph:
                         details)
 
     def add_topic_facts(self, slug, entry, hub):
-        """The topic's facts, each linked to the proven fact it became."""
         for fact in entry.get("facts", []):
             self.add_claim(f"fact:{slug}:{fact['id']}", "fact", fact, hub)
             if f"known:{fact['id']}" in self.nodes:
                 self.link(f"fact:{slug}:{fact['id']}", f"known:{fact['id']}", "became")
 
     def add_findings(self, slug, entry, hub):
-        """The topic's findings, each linked to the facts it cites."""
         for finding in entry.get("findings", []):
             node = self.add_claim(f"finding:{slug}:{finding['id']}", "finding", finding, hub)
             for fact_id in finding.get("cites", []):
                 self.link(node, f"fact:{slug}:{fact_id}", "cites")
 
     def add_rules(self, slug, entry, hub):
-        """The topic's rules, each linked to the facts or lessons it rests on."""
         for rule in entry.get("rules", []):
             node = self.add_claim(f"rule:{slug}:{rule['id']}", "rule", rule, hub)
             for cited in rule.get("cites", []):
@@ -107,8 +92,6 @@ class Graph:
                           status="proven")
 
     def add_runs(self):
-        """A node for each run an item's history names (with its line from "runs", when one is kept), linked
-        from the items it taught, confirmed, helped or failed."""
         lines = Home.store().items("runs")
         for node in list(self.nodes.values()):
             for event in node.pop("history", []):
@@ -125,17 +108,16 @@ class Graph:
         self.node(f"run:{run_id}", "run", f"@{run_id}", text, line.get("status") if line else None, "runs", details)
 
     def add_similar(self, embeddings):
-        """Lessons that say much the same, linked: by meaning with the embedding model, else by their words."""
         lessons = [node for node in self.nodes.values() if node["kind"] == "lesson" and node["status"] != "retired"]
         vectors = embeddings.vectors([lesson["text"] for lesson in lessons],
                                      keep=False) if embeddings and lessons else None
         if vectors:
             self.similar_by = f"meaning ({embeddings.name})"
-            alike = lambda first, second: Embeddings.cosine(vectors[first], vectors[second]) >= SIMILAR_MEANING
+            alike = lambda first, second: Embeddings.cosine(vectors[first], vectors[second]) >= SIMILAR_LESSON_MEANING
         else:
             why = embeddings.failed if embeddings else "no embedding model selected (tinker embed NAME)"
             self.similar_by = f"words ({why})" if lessons else "words"
-            alike = lambda first, second: similarity(lessons[first]["text"], lessons[second]["text"]) >= SIMILAR_WORDS
+            alike = lambda first, second: similarity(lessons[first]["text"], lessons[second]["text"]) >= SIMILAR_LESSON_WORDS
         for first, second in itertools.combinations(range(len(lessons)), 2):
             if alike(first, second):
                 self.link(lessons[first]["id"], lessons[second]["id"], "similar")
@@ -147,7 +129,6 @@ class Graph:
                          details, history=lesson.get("history", []))
 
     def add_claim(self, node_id, kind, claim, hub):
-        """A fact, a finding or a rule, with its confidence and its pages."""
         text = claim.get("text") or claim.get("answer", "")
         details = [("phase", claim.get("phase")), ("slot", claim.get("slot")), ("confidence", claim.get("confidence")),
                    ("helped", claim.get("helped", 0))]
@@ -163,7 +144,6 @@ class Graph:
                          fix.get("status", "proven"), details, history=fix.get("history", []))
 
     def add_retired(self, doc, hub, key):
-        """What was retired from this language or topic: shown for people, with why."""
         for number, item in enumerate(doc.get("retired", [])):
             kind = {"lessons": "lesson", "fixes": "fix", "findings": "finding", "rules": "rule"}.get(item.get("was"), "fact")
             text = item.get("text") or item.get("answer") or f"{item.get('failure', '')} → {item.get('cause', '')}"
@@ -172,7 +152,6 @@ class Graph:
             self.item(f"retired:{key}:{number}", kind, text, hub, "retired", details, history=item.get("history", []))
 
     def hub(self, node_id, kind, label, group, details):
-        """A language, a topic, any language or the person's commands: what the items belong to."""
         if node_id in self.nodes:
             self.nodes[node_id]["details"] += details
         else:
@@ -197,16 +176,15 @@ class Graph:
             self.links.append({"source": source, "target": target, "kind": kind})
 
     def counts(self):
-        """{kind: how many}, the runs and the retired apart."""
         found = {}
         for node in self.nodes.values():
             kind = "retired" if node["status"] == "retired" else node["kind"]
-            if node["id"] != "any":  # any language is where lessons for every language go, not a language
+            stands_for_every_language = node["id"] == "any"
+            if not stands_for_every_language:
                 found[kind] = found.get(kind, 0) + 1
         return found
 
     def summary(self):
-        """What the graph holds, in one line."""
         counts, many = self.counts(), {"fix": "fixes", "retired": "retired"}
         shown = [f"{counts[kind]} {kind if counts[kind] == 1 else many.get(kind, kind + 's')}" for kind in
                  ("language", "topic", "lesson", "rule", "fact", "finding", "fix", "toolchain", "command", "run", "retired")
@@ -218,8 +196,6 @@ class Graph:
 
 
 class GraphPage:
-    """The page: the graph as data inside it, a plain list of every node (readable without scripts), and the
-    script that draws the graph. Nothing is fetched from elsewhere."""
     KIND_NAMES = {"language": "Languages", "topic": "Topics", "commands": "Your commands", "lesson": "Lessons",
                   "rule": "Rules", "fact": "Facts", "finding": "Findings", "fix": "Toolchain fixes", "toolchain": "Toolchains",
                   "command": "Commands", "run": "Runs"}
@@ -233,7 +209,6 @@ class GraphPage:
 
     @classmethod
     def plain_list(cls, graph):
-        """Every node by its group (a language, a topic, the runs), then by kind."""
         groups = {}
         for node in graph.nodes.values():
             groups.setdefault(node["group"], []).append(node)
@@ -265,7 +240,6 @@ class GraphPage:
 
 
 def write_page(embeddings=None):
-    """The page written to Tinker's home; the graph it shows."""
     graph = Graph.build(embeddings)
     Home.graph_page().write_text(GraphPage.html(graph))
     return graph

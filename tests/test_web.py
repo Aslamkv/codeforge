@@ -1,5 +1,3 @@
-"""WEB: the Internet plugin and its backends."""
-
 import io
 import json
 import urllib.error
@@ -14,8 +12,6 @@ from tinkerkit.web import DuckDuckGoWeb, Internet, OllamaWeb, PageText, WebBacke
 
 
 class Scripted(WebBackend):
-    """A backend that answers from a script: each call takes the next answer (a value, or an exception)."""
-
     def __init__(self, timeout, answers=(), ready=""):
         super().__init__(timeout)
         self.answers, self.ready, self.calls = list(answers), ready, 0
@@ -38,7 +34,6 @@ class Scripted(WebBackend):
 
 
 def internet_with(monkeypatch, *backends, web_name="a", fallback=""):
-    """An Internet plugin whose config names backends a and b (given as Scripted instances)."""
     named = dict(zip(("a", "b"), backends))
     monkeypatch.setattr(Internet, "backends", staticmethod(lambda: {name: (lambda timeout, backend=backend: backend)
                                                                     for name, backend in named.items()}))
@@ -48,7 +43,7 @@ def internet_with(monkeypatch, *backends, web_name="a", fallback=""):
 
 @pytest.fixture(autouse=True)
 def no_pause(monkeypatch):
-    monkeypatch.setattr(Internet, "RETRY_PAUSE", 0)
+    monkeypatch.setattr(Internet, "RETRY_PAUSE_SECONDS", 0)
 
 
 @pytest.mark.spec("WEB-1")
@@ -69,7 +64,7 @@ def test_web_then_fallback_skipping_repeats_and_empty(monkeypatch):
 def test_a_backend_not_ready_is_skipped_with_its_reason(monkeypatch):
     first, second = Scripted(1, ready="no key"), Scripted(1)
     internet = internet_with(monkeypatch, first, second, web_name="a", fallback="b")
-    assert internet.backends_used == [second] and internet.skipped == ["a: no key"] and internet.available()
+    assert internet.backends_used == [second] and internet.unusable_backends == ["a: no key"] and internet.available()
 
 
 @pytest.mark.spec("WEB-2")
@@ -98,7 +93,7 @@ def test_check_accepts_the_defaults_and_duckduckgo():
 
 @pytest.mark.spec("WEB-4")
 def test_required_names_the_option_when_no_backend_works():
-    Config.save(web="ollama")  # no OLLAMA_API_KEY in tests
+    Config.save(web="ollama")
     with pytest.raises(SystemExit, match="--web needs the Internet plugin: ollama: no Ollama API key"):
         Internet.required("--web")
 
@@ -191,8 +186,6 @@ def test_a_success_resets_the_count(monkeypatch):
 
 
 class Response(io.BytesIO):
-    """What urlopen gives: a readable body with headers."""
-
     def __init__(self, body, content_type="application/json"):
         super().__init__(body if isinstance(body, bytes) else body.encode())
         self.headers = Message()
@@ -261,7 +254,7 @@ def test_ollama_web_unusable_answers(monkeypatch):
 @pytest.mark.spec("WEB-8")
 def test_ollama_web_unreachable_is_a_network_failure():
     with pytest.raises(WebError, match="cannot be reached") as error:
-        OllamaWeb(5).post("/web_search", {})  # the network is off in tests
+        OllamaWeb(5).post("/web_search", {})
     assert error.value.network
 
 
@@ -313,6 +306,12 @@ def test_duckduckgo_get_errors(monkeypatch):
     assert error.value.retry and not error.value.network
 
 
+@pytest.mark.spec("WEB-10")
+def test_a_line_of_bullets_and_separators_only_is_left_of_a_menu():
+    assert all(PageText.BULLETS_AND_SEPARATORS_RE.fullmatch(line) for line in ("• · »", "---", "", "|"))
+    assert not PageText.BULLETS_AND_SEPARATORS_RE.fullmatch("Home")
+
+
 ARTICLE = "<article><h2>Install</h2><p>" + "Run pip install thing to get it. " * 15 + "</p><ul><li>one</li><li>two</li></ul>" \
           "<pre>def f():\n    return 1</pre></article>"
 
@@ -349,9 +348,10 @@ def test_a_rate_limit_is_told_apart_from_other_failures(monkeypatch):
                                                        [{"url": "https://ok"}]]))
     assert internet.search("q", 1) is None and internet.rate_limited("q")
     assert internet.search("r", 1) is None and not internet.rate_limited("r")
-    assert internet.search("q", 1) and not internet.rate_limited("q")  # a later answer clears it
-    waited = internet_with(monkeypatch, Scripted(1, [WebError("busy", retry=True, code=429), [{"url": "https://ok"}]]))
-    assert waited.search("q", 1) and not waited.rate_limited("q")  # asked again within the call, and answered
+    answered_later = internet.search("q", 1)
+    assert answered_later and not internet.rate_limited("q")
+    asked_again_and_answered = internet_with(monkeypatch, Scripted(1, [WebError("busy", retry=True, code=429), [{"url": "https://ok"}]]))
+    assert asked_again_and_answered.search("q", 1) and not asked_again_and_answered.rate_limited("q")
     def urlopen(request, timeout):
         raise http_error(429)
     monkeypatch.setattr(urllib.request, "urlopen", urlopen)

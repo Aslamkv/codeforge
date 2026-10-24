@@ -1,5 +1,3 @@
-"""TCH: asking what Tinker keeps, and teaching it: checked on this machine and the web before anything changes."""
-
 import json
 import sys
 
@@ -11,7 +9,7 @@ from tinkerkit.knowledge import Knowledge, Library
 from tinkerkit.model import Ollama
 from tinkerkit.prompts import Prompts
 from tinkerkit.reading import Readings
-from tinkerkit.settings import Home, MEMORY_SHOWN, TEACH_CLAIMS
+from tinkerkit.settings import MEMORY_ITEMS_SHOWN, TEACH_CLAIMS, Home
 from tinkerkit.teaching import Asker, Memory, Teacher, Verdict, marked, read_plan
 from tinkerkit.workspace import Toolchain
 from conftest import MODEL, TOOLCHAIN
@@ -23,8 +21,6 @@ PAGE = {"title": "Ruff formatter", "url": "https://docs.astral.sh/ruff/formatter
 
 
 class FakeWeb:
-    """The Internet plugin, scripted: every search finds the pages given, and each is fetched as it is."""
-
     def __init__(self, pages=(PAGE,)):
         self.pages, self.queries = list(pages), []
 
@@ -44,8 +40,6 @@ class FakeWeb:
 
 @pytest.fixture
 def kept(home_store):
-    """Python's toolchain, which formats with black and lints with ruff, a lesson that says to use both, and a fact
-    learned about Flask."""
     python = Knowledge("Python", "r1")
     python.remember_toolchain(Toolchain(BLACK_AND_RUFF))
     python.add_lessons([{"text": "Format Python with black before linting with ruff", "phase": "toolchain",
@@ -57,7 +51,6 @@ def kept(home_store):
 
 
 def numbered_item(memory, text, kind):
-    """The number an item is shown with to a teaching about text."""
     items = memory.about(text)
     return next(number for number, item in enumerate(items, 1) if item["kind"] == kind and "black" in item["text"])
 
@@ -97,7 +90,7 @@ def test_memory_is_what_tinker_keeps_but_the_retired_most_related_first(kept):
     assert first["kind"] == "toolchain" and "black" in first["text"]
     assert kept.about("which lessons do you have")[0]["kind"] == "lesson"
     assert kept.about("what is the current toolset you use for a python project")[0]["kind"] == "toolchain"
-    assert len(kept.about("anything", limit=2)) == 2 and MEMORY_SHOWN >= 20
+    assert len(kept.about("anything", limit=2)) == 2 and MEMORY_ITEMS_SHOWN >= 20
 
 
 @pytest.mark.spec("TCH-2")
@@ -109,7 +102,8 @@ def test_ask_says_the_answer_alone(kept, make_model, fake_ollama, capsys):
     assert asked[0]["content"].startswith(Prompts.ASK_SYSTEM) and "[1] toolchain (python, proven)" in asked[1]["content"]
     assert capsys.readouterr().out == answer + "\n"
     assert ending == {"status": "done", "headline": "Answered", "details": [("Answer", answer)]}
-    assert Home.store().get("languages", "python")["toolchain"]["format"] == "black ."  # nothing changed
+    unchanged = "black ."
+    assert Home.store().get("languages", "python")["toolchain"]["format"] == unchanged
 
 
 @pytest.mark.spec("TCH-2")
@@ -135,7 +129,8 @@ def test_read_plan_keeps_what_is_usable_within_limits():
                                 "toolchain": {"format": "ruff format .", "setup": ["pip install ruff"]}, "fact": None}]
     preferences = read_plan({"claims": [{"text": "I prefer X", "preference": True}],
                              "changes": [{"claims": [1], "lesson": {"phase": "code", "text": "Use X"}}]}, count=0)
-    assert preferences["commands"] == preferences["searches"] == []  # a preference needs no check
+    nothing_to_check = []
+    assert preferences["commands"] == preferences["searches"] == nothing_to_check
     for broken, why in [({"claims": [], "searches": ["s"], "changes": [RUFF_CHANGE]}, "no claims"),
                         ({"claims": ["c"], "changes": [RUFF_CHANGE]}, "no command or web search"),
                         ({"claims": ["c"], "searches": ["s"]}, "no change"),
@@ -162,7 +157,8 @@ def test_teach_runs_only_safe_commands_and_reads_the_pages(kept, make_model, fak
     assert "[1] this machine" in judged and f"[3] {PAGE['url']}" in judged and "drop-in replacement" in judged
     assert "not found here (a project's own environment may have it)" in judged
     assert "## Facts\n1. Ruff formats" in judged and "## The person's preferences\n2. Our projects" in judged
-    assert "Change 1 (rests on claims 1)" in judged and "Change 2" not in judged  # a preference's change is not weighed
+    a_preferences_change = "Change 2"
+    assert "Change 1 (rests on claims 1)" in judged and a_preferences_change not in judged
     assert web.queries == ["ruff formatter replaces black"]
 
 
@@ -195,14 +191,22 @@ def test_only_a_teaching_marked_with_prefer_has_preferences():
     assert not marked("we need no mypy")
 
 
+@pytest.mark.spec("TCH-3")
+@pytest.mark.parametrize("teaching,preference", [("I prefer ruff", True), ("ruff is preferred", True),
+                                                ("my preference is ruff", True), ("use ruff", False)])
+def test_a_preference_is_marked_by_any_form_of_prefer(teaching, preference):
+    assert marked(teaching) is preference
+
+
 @pytest.mark.spec("TCH-4")
 def test_facts_nothing_could_check_are_unsure_and_asked_no_more(kept, make_model, fake_ollama):
     fake_ollama.reply(plan_reply(commands=["rm -rf build"]), when="what to check")
     ending = Teacher(make_model(), FakeWeb(pages=()), kept).teach("ruff alone is enough, and I prefer no mypy")
     assert len(fake_ollama.calls) == 1
     assert ("Unsure", "Ruff formats Python code as black does (nothing could check it)") in ending["details"]
-    assert Home.store().get("languages", "python")["toolchain"]["format"] == "black ."  # its change waits
-    assert Home.store().get("languages", "python")["toolchain"]["lint"] == "ruff check ."  # the preference's is made
+    its_change_waits, the_preferences_change_is_made = "black .", "ruff check ."
+    assert Home.store().get("languages", "python")["toolchain"]["format"] == its_change_waits
+    assert Home.store().get("languages", "python")["toolchain"]["lint"] == the_preferences_change_is_made
 
 
 @pytest.mark.spec("TCH-5")
@@ -212,9 +216,10 @@ def test_a_verdict_needs_every_fact_and_every_change_a_fact_is_for():
         {"claims": claims, "changes": list(changes)}, plan, evidence=2)
     holds = {"claim": 1, "verdict": "holds", "evidence": [1, 7]}
     verdict = read([holds])
-    assert verdict.claims[1]["evidence"] == [1] and verdict.claims[2]["verdict"] == "preference"
+    assert verdict.claims_by_number[1]["evidence"] == [1] and verdict.claims_by_number[2]["verdict"] == "preference"
     assert verdict.why_not(1, plan["changes"][0]) == verdict.why_not(2, plan["changes"][1]) == ""
-    assert read([dict(holds, evidence=[9])]).why_not(1, plan["changes"][0]) == "claim 1 is unsure"  # nothing cited
+    cites_nothing_given = dict(holds, evidence=[9])
+    assert read([cites_nothing_given]).why_not(1, plan["changes"][0]) == "claim 1 is unsure"
     assert read([dict(holds, verdict="wrong")]).why_not(1, plan["changes"][0]) == "claim 1 is wrong"
     assert read([holds], [{"change": 1, "follows": False, "why": "the docs say otherwise"}]).why_not(
         1, plan["changes"][0]) == "does not follow: the docs say otherwise"
@@ -300,12 +305,11 @@ def test_ask_and_teach_report_through_a_tracker_and_run_as_tasks(kept, measured_
     steps = [step.split(":")[0] for step in ended[1][2]]
     assert "🤔 Worked out what to check" in steps and "⚖️ Evidence weighed" in steps
     assert any(step.startswith("🤔 Worked out what to check: ") and "claim(s)" in step for step in ended[1][2])
-    assert "ask" in conversation.LONG and "teach" in conversation.LONG
+    assert "ask" in conversation.LONG_COMMANDS and "teach" in conversation.LONG_COMMANDS
 
 WRONG = "The Craft says to write tests after the code"
 
 def shelved():
-    """Something read: The Craft (#1), whose one fact got its chapter wrong (it says tests come first)."""
     Readings.save({"number": 1, "title": "The Craft", "author": "", "source": "craft.md", "fingerprint": "f",
                    "added": "2026-10-24 10:00", "topic": "read-1", "survey": None, "chapters": [
                        {"number": 1, "title": "Testing", "kind": "body", "state": "read",
