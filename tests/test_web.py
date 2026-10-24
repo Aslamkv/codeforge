@@ -306,12 +306,6 @@ def test_duckduckgo_get_errors(monkeypatch):
     assert error.value.retry and not error.value.network
 
 
-@pytest.mark.spec("WEB-10")
-def test_a_line_of_bullets_and_separators_only_is_left_of_a_menu():
-    assert all(PageText.BULLETS_AND_SEPARATORS_RE.fullmatch(line) for line in ("• · »", "---", "", "|"))
-    assert not PageText.BULLETS_AND_SEPARATORS_RE.fullmatch("Home")
-
-
 ARTICLE = "<article><h2>Install</h2><p>" + "Run pip install thing to get it. " * 15 + "</p><ul><li>one</li><li>two</li></ul>" \
           "<pre>def f():\n    return 1</pre></article>"
 

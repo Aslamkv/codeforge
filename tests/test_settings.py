@@ -11,6 +11,7 @@ import tinkerkit.settings as settings
 from tinkerkit.settings import (
     Config, Home, Store, after_what_they_use, first_line, fingerprint, groups_fitting, similarity, split_text, words,
 )
+from tinkerkit.web import Internet
 from conftest import REAL_HOME
 
 
@@ -288,16 +289,11 @@ def test_split_text_cuts_a_long_paragraph_and_never_below_200():
 
 
 @pytest.mark.spec("SET-14")
-def test_after_what_they_use_orders_dependencies_first():
-    uses = {"app": ["db", "util"], "db": ["util"], "util": [], "x": ["app"]}
-    order = after_what_they_use(["app", "x"], lambda name: uses[name], lambda name: name in uses)
-    assert order == ["util", "db", "app", "x"]
-
-
-@pytest.mark.spec("SET-14")
-def test_after_what_they_use_breaks_cycles_and_skips_unknown():
-    uses = {"a": ["b", "ghost"], "b": ["a"]}
-    assert after_what_they_use(["a"], lambda name: uses[name], lambda name: name in uses) == ["b", "a"]
+def test_after_what_they_use_orders_dependencies_first_breaks_cycles_and_skips_unknown():
+    uses = {"app": ["db", "util"], "db": ["util"], "util": [], "x": ["app"], "a": ["b", "ghost"], "b": ["a"]}
+    known = lambda name: name in uses
+    assert after_what_they_use(["app", "x"], lambda name: uses[name], known) == ["util", "db", "app", "x"]
+    assert after_what_they_use(["a"], lambda name: uses[name], known) == ["b", "a"]
 
 
 @pytest.mark.spec("SET-15")
@@ -331,22 +327,25 @@ def test_keep_awake_without_a_tool_or_failing_does_nothing(monkeypatch):
 
 
 @pytest.mark.spec("SET-19")
-def test_config_set_reads_and_checks_the_value(capsys):
-    assert Config.set("test_timeout", "90") == 90 and Config.get("test_timeout") == 90
-    assert Config.set("keep_alive", "10m") == "10m" and Config.set("keep_alive", "300") == 300
-    assert Config.set("build_think", "false") is False and Config.set("max_growth", "1.5") == 1.5
-    assert Config.set("learn_think", "false") is False and Config.set("docs_pages", "12") == 12
-    assert Config.set("web_fallback", "duckduckgo") == "duckduckgo"
+def test_config_set_reads_and_checks_the_value():
+    assert config_set("test_timeout", "90") == 90 and Config.get("test_timeout") == 90
+    assert config_set("keep_alive", "10m") == "10m" and config_set("keep_alive", "300") == 300
+    assert config_set("build_think", "false") is False and config_set("max_growth", "1.5") == 1.5
+    assert config_set("learn_think", "false") is False and config_set("docs_pages", "12") == 12
+    assert config_set("web_fallback", "duckduckgo") == "duckduckgo"
     with pytest.raises(SystemExit, match="test_timeout must be a whole number"):
-        Config.set("test_timeout", "soon")
+        config_set("test_timeout", "soon")
     assert Config.get("test_timeout") == 90
     with pytest.raises(SystemExit, match="web_fallback must be one of"):
-        Config.set("web_fallback", "bing")
+        config_set("web_fallback", "bing")
     assert Config.get("web_fallback") == "duckduckgo"
     with pytest.raises(SystemExit, match="learn_missing"):
-        Config.set("learn_missing", "0")
-    the_default = settings.DEFAULT_CONFIG["learn_missing"]
-    assert Config.get("learn_missing") == the_default
+        config_set("learn_missing", "0")
+    assert Config.get("learn_missing") == settings.DEFAULT_CONFIG["learn_missing"]
+
+
+def config_set(key, text):
+    return Config.set(key, text, Internet.check)
 
 
 @pytest.mark.spec("SET-19")

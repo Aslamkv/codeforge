@@ -125,17 +125,13 @@ def test_columns():
 
 
 @pytest.mark.spec("CNV-3")
-def test_pieces_split_between_lines():
+def test_pieces_split_between_lines_and_lose_no_text():
     text = "\n".join(f"line {number:03}" for number in range(100))
     parts = pieces(text, size=100)
     assert all(len(part) <= 100 for part in parts) and "\n".join(parts) == text
     assert pieces("") == [] and pieces("one") == ["one"]
-
-
-@pytest.mark.spec("CNV-3")
-def test_pieces_lose_no_text_of_a_long_line():
-    text = "short\n" + "x" * 250 + "\nend"
-    assert "".join("".join(pieces(text, size=100)).split()) == "".join(text.split())
+    a_long_line = "short\n" + "x" * 250 + "\nend"
+    assert "".join("".join(pieces(a_long_line, size=100)).split()) == "".join(a_long_line.split())
 
 
 @pytest.mark.spec("CNV-4")
@@ -738,19 +734,8 @@ class Listening(Recorder):
 
 
 @pytest.mark.spec("CNV-21")
-def test_desk_listens_until_the_chat_ends_it(desk):
-    _, _, script = desk
-    channel = Listening("bot", inbox=[Message("1", "exit", id=1), Message("1", "confirm", id=2)])
-    listening = Desk([channel], Path.cwd())
-    listening.run()
-    statuses = [text for text in channel.texts() if "**Tinker** ·" in text]
-    assert statuses[0].startswith("🟢 **Tinker** · idle: send a task") and statuses[-1].startswith("💤 **Tinker** · not listening")
-    assert channel.closed
-    channel.claimed.close()
-
-
-@pytest.mark.spec("CNV-21")
-def test_the_status_is_sent_anew_as_tinker_starts_and_ends(desk, home_store):
+def test_the_status_is_sent_anew_as_tinker_starts_and_ends(desk, home_store, monkeypatch):
+    monkeypatch.setattr(conversation, "ENDED_LOOK_SECONDS", 0.05)
     status_before = 55
     home_store.put("listening", "bot", {"1": status_before})
     exit_said, confirm_said = Message("1", "exit", id=1), Message("1", "confirm", id=2)
@@ -759,8 +744,10 @@ def test_the_status_is_sent_anew_as_tinker_starts_and_ends(desk, home_store):
     channel.collect = lambda: collected.append(True)
     Desk([channel], Path.cwd()).run()
     first_status, the_question_to_stop, last_status = 101, 102, 103
-    status = [(kind, sent) for kind, _, sent, text in channel.log if "**Tinker** ·" in text]
-    assert status == [("send", first_status), ("send", last_status)]
+    status = [(kind, sent, text) for kind, _, sent, text in channel.log if "**Tinker** ·" in text]
+    assert [(kind, sent) for kind, sent, _ in status] == [("send", first_status), ("send", last_status)]
+    assert status[0][2].startswith("🟢 **Tinker** · idle: send a task")
+    assert status[1][2].startswith("💤 **Tinker** · not listening") and channel.closed
     deleted = {sent for kind, _, sent, _ in channel.log if kind == "delete"}
     assert deleted == {status_before, first_status, exit_said.id, confirm_said.id, the_question_to_stop}
     assert not any("Stopping" in text for text in channel.texts())

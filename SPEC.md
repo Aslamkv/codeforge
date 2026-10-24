@@ -217,11 +217,11 @@ phase, learn from the web what the rest of the cycle needs.
 - **SET-18** `Home.keep_awake()` keeps the computer awake with `caffeinate` (macOS) or
   `systemd-inhibit` (Linux), tied to Tinker's process. It does nothing when neither tool is there,
   and it never raises.
-- **SET-19** `Config.set(key, text)` is `tinker config KEY VALUE`. It sets only the keys that have no
+- **SET-19** `Config.set(key, text, *checks)` is `tinker config KEY VALUE`, which passes the web's checks. It sets only the keys that have no
   command of their own (`ollama_url`, `keep_alive`, `max_growth`, `build_think`, `test_timeout`,
   `web_fallback`, `web_timeout`, `learn_missing`, the `learn_*`, `docs_*` and `fetch_*` settings, `projects`), reading
   the value by the key's type. A
-  value that fails the checks is not kept, and the command ends with why.
+  value that fails the model's or the given checks is not kept, and the command ends with why.
 
 ## messages
 
@@ -1089,7 +1089,8 @@ person always comes first.
 - **BLD-6** `TestTool.ran_empty` is true when a test command, run before any test exists, exits 0,
   or says it found no test, or prints nothing that looks like an error. It is false for exit codes
   126 and 127 and for a timeout. `works()` is true when setup, the test command and the linter run.
-  A linter that is not installed is a tooling problem.
+  A linter that is not installed is a tooling problem, and so is a one-test command that answers a
+  made-up test name the same way as a real one.
 - **BLD-7** `ToolchainRepair` replays a fix learned for exactly this failure, with no model call.
   Otherwise one model call may change only config files and the commands, and a fix that only made
   new files and commands is kept to replay.

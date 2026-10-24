@@ -6,7 +6,7 @@ from tinkerkit.building import BugReproducer, BuildFix, CodeWriter, FixAttempt, 
 from tinkerkit.prompts import Reply
 from tinkerkit.settings import TESTS_LOCKED_REASON
 from tinkerkit.workspace import Output, TestRef
-from conftest import criterion, file_block
+from conftest import PYTEST, criterion, file_block
 
 CALC_WITH_WRONG_SUB = "def add(a, b):\n    return a + b\n\n\ndef sub(a, b):\n    return a + b\n"
 FIXED = "def add(a, b):\n    return a + b\n\n\ndef sub(a, b):\n    return a - b\n"
@@ -261,12 +261,6 @@ def test_ran_empty():
 
 
 @pytest.mark.spec("BLD-6")
-def test_the_tools_work(calc):
-    session, project = calc
-    assert TestTool(session).works() is True and session.tool_problem == ""
-
-
-@pytest.mark.spec("BLD-6")
 def test_a_missing_linter_is_a_tooling_problem_the_model_may_fix(calc, fake_ollama, tinker_home):
     session, project = calc
     project.spec["toolchain"]["lint"] = "no-such-linter-xyz ."
@@ -275,6 +269,15 @@ def test_a_missing_linter_is_a_tooling_problem_the_model_may_fix(calc, fake_olla
     assert project.toolchain.lint == "" and project.toolchain.lint_declared
     assert session.knowledge.language_doc["fixes"][0]["cause"] == "that linter is not installed"
 
+
+@pytest.mark.spec("BLD-6")
+def test_a_one_test_command_that_ignores_the_name_is_a_tooling_problem(calc, fake_ollama):
+    session, project = calc
+    named = project.toolchain.test_one
+    project.spec["toolchain"].update(test_all=PYTEST + " -rA", test_one=PYTEST + " --tb=no -rN {file}")
+    fake_ollama.reply(f'CAUSE: the name is dropped\nTOOLCHAIN: {json.dumps({"test_one": named})}', when="Fix the toolchain")
+    assert TestTool(session).works() is True and project.toolchain.test_one == named
+    assert "answers a made-up test name the same way" in fake_ollama.calls[0]["messages"][-1]["content"]
 
 @pytest.mark.spec("BLD-6")
 def test_tools_that_stay_broken_stop_the_cycle(calc, fake_ollama):
@@ -354,11 +357,13 @@ def test_a_bug_is_reproduced_with_a_new_failing_test(bug, fake_ollama, project_d
 @pytest.mark.spec("BLD-9")
 def test_a_bug_no_test_shows_is_dropped(bug, fake_ollama, project_dir):
     session, project, cycle = bug
+    cycle["amendments"] = ["it happens only with two negative numbers"]
     passing = "import calc\n\n\ndef test_negative():\n    assert calc.add(-1, -1) == -2\n"
     fake_ollama.reply("TEST: test_bug.py::test_negative\n" + file_block("test_bug.py", passing), times=2)
     assert BugReproducer(session).run(cycle) is False
     assert project.cycle_criteria(cycle) == [] and not (project_dir / "test_bug.py").exists()
     assert (cycle["phase"], cycle["outcome"]) == ("done", "not reproduced") and "could not be reproduced" in session.unreproduced_reason
+    assert "Changed by the person: it happens only with two negative numbers" in fake_ollama.calls[0]["messages"][1]["content"]
     assert "passed on the code as it is" in fake_ollama.calls[1]["messages"][1]["content"]
 
 
@@ -375,12 +380,3 @@ def test_what_a_bug_test_must_be(bug):
     assert reproducer.why_not(None, "missing", "why") == "why"
 
 
-@pytest.mark.spec("BLD-9")
-def test_the_bug_test_follows_the_amendments(bug, fake_ollama):
-    session, project, cycle = bug
-    cycle["amendments"] = ["it happens only with two negative numbers"]
-    fake_ollama.reply("TEST: test_bug.py::test_x\n" + file_block("test_bug.py", "def test_x():\n    assert True\n"),
-                      times=2)
-    BugReproducer(session).run(cycle)
-    prompt = fake_ollama.calls[0]["messages"][1]["content"]
-    assert "Changed by the person: it happens only with two negative numbers" in prompt

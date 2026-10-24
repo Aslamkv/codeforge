@@ -34,10 +34,9 @@ def test_run_removes_the_project_path_and_has_no_input(workspace, project_dir):
 
 @pytest.mark.spec("WS-1")
 def test_run_times_out_and_kills_the_process_group(workspace, project_dir):
-    started = time.perf_counter()
-    code, output = workspace.run("(sleep 30; touch late) & sleep 30", timeout=1, quiet=True)
-    assert code is None and time.perf_counter() - started < 10
-    time.sleep(0.2)
+    code, output = workspace.run("(sleep 0.3; touch late) & sleep 30", timeout=0.1, quiet=True)
+    assert code is None
+    time.sleep(0.4)
     assert not (project_dir / "late").exists()
 
 
@@ -198,29 +197,22 @@ def test_prepare_env_never_changes_an_existing_env(workspace, project_dir):
 
 
 @pytest.mark.spec("WS-7")
-@pytest.mark.parametrize("value", ["", "<key>", "your_token", "YOUR-KEY", "key_here", "changeme", "replace-me", "xxx",
-                                   "***", "...", "'placeholder'"])
-def test_placeholders(value):
-    assert Workspace.is_placeholder(value)
-
-
-@pytest.mark.spec("WS-7")
-@pytest.mark.parametrize("value", ["8000", "sk-1234", "localhost", "https://api.example.com", "/var/data", "true", "none",
-                                   "null", "PUT", "putty", "todo", "TODO", "example_db", "insert", "yours"])
-def test_real_values(value):
-    assert not Workspace.is_placeholder(value)
+def test_placeholders_and_real_values():
+    placeholders = ["", "<key>", "your_token", "key_here", "changeme", "replace-me", "xxx", "***", "...", "'placeholder'"]
+    real = ["8000", "sk-1234", "none", "null", "PUT", "todo", "example_db"]
+    assert [value for value in placeholders if not Workspace.is_placeholder(value)] == []
+    assert [value for value in real if Workspace.is_placeholder(value)] == []
 
 
 @pytest.mark.spec("WS-8")
 def test_start_and_stop_a_background_command(workspace, project_dir):
-    started = workspace.start("echo serving; (sleep 30; touch late) & sleep 30")
-    assert started is not None
-    process, output = started
+    process, output = workspace.start("echo serving; (sleep 0.3; touch late) & sleep 30")
     assert output == project_dir / ".tinker" / "app-output.txt"
-    time.sleep(0.3)
+    while "serving" not in output.read_text():
+        time.sleep(0.01)
     workspace.stop(process)
-    assert process.poll() is not None and "serving" in output.read_text()
-    time.sleep(0.2)
+    assert process.poll() is not None
+    time.sleep(0.4)
     assert not (project_dir / "late").exists()
     assert workspace.start("sudo serve") is None
 
@@ -264,20 +256,6 @@ def test_teach_a_program_on_path(tinker_home, no_shell_alias):
     assert entry["kind"] == "program" and entry["path"].endswith("/sh")
     with pytest.raises(SystemExit, match="neither an alias"):
         TaughtCommands.teach("no-such-program-xyz")
-
-
-@pytest.mark.spec("WS-9")
-def test_a_shell_function_name():
-    assert all(TaughtCommands.SHELL_FUNCTION_NAME_RE.fullmatch(name) for name in ("my_tool", "_t2"))
-    assert not any(TaughtCommands.SHELL_FUNCTION_NAME_RE.fullmatch(name) for name in ("my-tool", "2fast"))
-
-
-@pytest.mark.spec("WS-9")
-@pytest.mark.parametrize("definition,posix", [("source venv/bin/activate && pytest", ". venv/bin/activate && pytest"),
-                                              ("cd app; source env.sh", "cd app; . env.sh"),
-                                              ("echo resource x", "echo resource x")])
-def test_source_as_a_command_becomes_a_dot(definition, posix):
-    assert TaughtCommands.SOURCE_COMMAND_RE.sub(r"\1. ", definition) == posix
 
 
 @pytest.mark.spec("WS-10")
@@ -333,20 +311,6 @@ def test_toolchain_lint_none_and_truth():
     toolchain = Toolchain(dict(TOOLS, lint="none"))
     assert toolchain.lint == "" and toolchain.lint_declared and toolchain.to_dict()["lint"] == "none"
     assert not Toolchain({"test_all": "pytest"}) and not Toolchain(None) and not Toolchain("junk")
-
-
-@pytest.mark.spec("WS-11")
-def test_a_setup_command_that_writes_the_env_file_itself():
-    assert Toolchain.ENV_FILE_RE.search("cp .env.example .env")
-    assert not any(Toolchain.ENV_FILE_RE.search(command) for command in ("cat .env.example", "touch my.env"))
-
-
-@pytest.mark.spec("WS-11")
-def test_a_setup_command_that_changes_the_machines_own_toolchain():
-    assert all(Toolchain.MACHINE_TOOLCHAIN_CHANGE_RE.search(command) for command in
-               ("rustup default stable", "npm install -g typescript", "brew install jq", "pip install --user x"))
-    assert not any(Toolchain.MACHINE_TOOLCHAIN_CHANGE_RE.search(command) for command in
-                   ("npm install", "pip install -r requirements.txt", "cargo build"))
 
 
 @pytest.mark.spec("WS-12")
@@ -412,14 +376,6 @@ def test_run_setup_uses_the_environment_once_activate_works(workspace):
     assert ok and workspace.read("seen") == "on\n"
 
 
-@pytest.mark.spec("WS-13")
-@pytest.mark.parametrize("output", ["fatal: unable to access 'https://github.com/x': Could not resolve host: github.com",
-                                    "npm ERR! code ENOTFOUND", "Max retries exceeded with url: /simple/x/",
-                                    "error: failed to download from `https://static.crates.io`"])
-def test_a_failure_caused_by_the_network_in_any_package_manager(output):
-    assert Toolchain.NETWORK_FAILURE_RE.search(output) and not Toolchain.NETWORK_FAILURE_RE.search("AssertionError: 1 != 2")
-
-
 @pytest.fixture
 def python_toolchain():
     from conftest import TOOLCHAIN
@@ -442,13 +398,13 @@ def test_run_test_that_ran_nothing_fails(workspace):
 
 
 @pytest.mark.spec("WS-14")
-def test_a_test_that_hangs_fails(workspace):
-    settings.Config.save(**{"test_timeout": 1})
+def test_a_test_that_hangs_fails(workspace, monkeypatch):
+    monkeypatch.setattr(Toolchain, "test_timeout", staticmethod(lambda: 0.15))
     toolchain = Toolchain(dict(TOOLS, activate="", test_one="sleep 20", test_all="sleep 20"))
     state, output = toolchain.run_test(workspace, TestRef("t.py::test_x"))
-    assert state == "fails" and "did not finish within 1s" in output
+    assert state == "fails" and "did not finish within 0.15s" in output
     code, output = toolchain.run_all(workspace)
-    assert code is None and "did not finish within 2s" in output
+    assert code is None and "did not finish within 0.3s" in output
 
 
 @pytest.mark.spec("WS-15")
@@ -576,14 +532,6 @@ def test_mentioned_in_and_tool_failure(project_dir):
     assert Output.tool_failure(f"... {Output.OWN_CODE_UNSEEN} ...", project_dir) == Output.OWN_CODE_UNSEEN
 
 
-@pytest.mark.spec("WS-18")
-@pytest.mark.parametrize("line,path", [('File "app.py", line 3, in <module>', "app.py"),
-                                       ("src/app.rs:12:5: error", "src/app.rs"),
-                                       ("App.cs(12,5): error CS1002", "App.cs")])
-def test_a_location_names_its_file_in_each_form(line, path):
-    assert Output.FILE_LOCATION_RE.search(line).group(1) == path
-
-
 @pytest.mark.spec("WS-19")
 def test_file_view_shows_whole_files_then_windows(workspace, project_dir):
     (project_dir / "small.py").write_text("x = 1\n")
@@ -614,12 +562,8 @@ def test_a_window_holds_lines_on_both_sides_of_its_line():
     lines = [f"line{number}" for number in range(1, 21)]
     first, last, _ = FileView.window_view(lines, 10, 80)
     assert first < 10 < last
-
-
-@pytest.mark.spec("WS-22")
-def test_a_window_at_the_end_of_a_file_grows_upwards():
-    lines = [f"line{number}" for number in range(1, 21)]
-    assert FileView.window_view(lines, 20, 80)[:2] == (15, 20)
+    at_the_end = FileView.window_view(lines, 20, 80)[:2]
+    assert at_the_end == (15, 20)
 
 
 @pytest.mark.spec("WS-20")

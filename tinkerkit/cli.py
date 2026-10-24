@@ -449,7 +449,7 @@ class Commands:
     @staticmethod
     def config(words):
         if words:
-            value = Config.set(words[0], words[1])
+            value = Config.set(words[0], words[1], Internet.check)
             say.done(f"{words[0]} is {value!r} now")
             return
         name = Config.get("model")

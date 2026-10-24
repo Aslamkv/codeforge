@@ -345,7 +345,6 @@ class Config:
                 "docs_latest_days", "fetch_workers", "fetch_timeout", "fetch_max_bytes",
                 "fetch_domain_delay", "fetch_fallbacks", "projects")
     OWN_COMMAND = {"model": "use-model", "embed_model": "embed", "web": "use-web"}
-    checks = []
 
     @staticmethod
     def load():
@@ -361,13 +360,13 @@ class Config:
         return Home.store().get("config", key, DEFAULT_CONFIG[key])
 
     @classmethod
-    def set(cls, key, text):
+    def set(cls, key, text, *checks):
         cls.refuse_unsettable(key)
         value = cls.parse(key, text.strip())
         before = Home.store().get("config", key)
         cls.save(**{key: value})
         try:
-            cls.check_all()
+            cls.check_all(checks)
         except SystemExit:
             cls.restore(key, before)
             raise
@@ -394,9 +393,9 @@ class Config:
         return text
 
     @classmethod
-    def check_all(cls):
+    def check_all(cls, checks):
         cls.check_model(run=True)
-        for check in cls.checks:
+        for check in checks:
             check()
 
     @classmethod
