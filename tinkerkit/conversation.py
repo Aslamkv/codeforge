@@ -423,24 +423,9 @@ class Desk:
         """What a command asks for, done; the reply (None when the reply comes as progress)."""
         words = command_words(message.text)
         command = words[0]
-        if command == "task":
-            return self.new_task(words)
-        if command in ("confirm", "amend", "rename"):
-            return self.decide(command, words)
-        if command == "resume":
-            return self.resume(words)
-        if command == "stop":
-            return self.stop(words)
-        if command == "research":
-            return self.start_task(words, self.root, " ".join(words)) if len(words) > 1 else USAGE["research"]
-        if command == "exercise":
-            return self.exercise(channel, message, words)
-        if command in ("runs", "status"):
-            return self.report(command, words)
-        if command == "help":
-            return help_text(words[1:2])
-        if command == "history":
-            return history_text(words[1:2])
+        handler = self.handlers(channel, message, words).get(command)
+        if handler is not None:
+            return handler()
         if command == "clear" and words[1:] == ["chat"]:
             return self.clear_chat(channel, message.chat, "Chat cleared", " · `history` shows any of them again")
         if command in EXIT:  # the console ends on its own word (ConsoleChannel); a chat asks first
@@ -457,6 +442,26 @@ class Desk:
             return self.memory_graph(channel, message.chat, words)
         shown = self.tinker(words)
         return md(t"⚙️ **{' '.join(words)}**\n{shown:block}")
+
+    def handlers(self, channel, message, words):
+        """What answers each command the conversation handles itself, whatever its words."""
+        command = words[0]
+        return {"task": lambda: self.new_task(words),
+                "confirm": lambda: self.decide(command, words),
+                "amend": lambda: self.decide(command, words),
+                "rename": lambda: self.decide(command, words),
+                "resume": lambda: self.resume(words),
+                "stop": lambda: self.stop(words),
+                "research": lambda: self.research(words),
+                "exercise": lambda: self.exercise(channel, message, words),
+                "runs": lambda: self.report(command, words),
+                "status": lambda: self.report(command, words),
+                "help": lambda: help_text(words[1:2]),
+                "history": lambda: history_text(words[1:2])}
+
+    def research(self, words):
+        """research TOPIC: a task of its own; with no topic, how to say it."""
+        return self.start_task(words, self.root, " ".join(words)) if len(words) > 1 else USAGE["research"]
 
     def exercise(self, channel, message, words):
         """exercise LANGUAGE: started as a tinker of its own that outlives this conversation (what it prints goes

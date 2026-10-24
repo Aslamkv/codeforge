@@ -295,36 +295,47 @@ class Cli:
     @staticmethod
     def read_command(command, given, args, parser):
         """The command's arguments in the fields the rest of Tinker reads, checked."""
-        field = command.replace("-", "_")
-        if command in ("reset", "models", "memory", "runs", "doctor"):
-            setattr(args, field, True)
-        elif command in ("use-model", "calibrate", "embed", "use-web"):
-            setattr(args, field, Cli.non_empty(given.name, command, parser))
-        elif command in ("resume", "status", "log"):
-            setattr(args, field, Cli.project_named(given.words, parser))
-        elif command == "restart":
-            args.restart = True
-        elif command in ("add", "fix", "amend"):
-            setattr(args, field, given.words)
-        elif command == "rename":
-            args.rename = Cli.renamed(given.words, parser)
-        elif command == "learn":
-            args.learn = Cli.learning(given.words, parser)
-        elif command in ("jobs", "stop"):
-            setattr(args, field, Cli.job_words(command, given.words, parser))
-        elif command == "read":
-            args.read = Cli.reading(given.words, parser)
-        elif command in ("ask", "teach", "exercise"):
-            setattr(args, field, Cli.non_empty(" ".join(given.words), command, parser))
-        elif command == "config":
-            if len(given.words) not in (0, 2):
-                parser.error("use tinker config (the settings) or tinker config KEY VALUE")
-            args.config = given.words
+        value = Cli.command_value(command, given, parser)
+        if value is not None:
+            setattr(args, command.replace("-", "_"), value)
         if command in ("restart", "reset"):
             args.yes = given.yes
         named = {"status": args.status, "log": args.log, "rename": (args.rename or ("",))[0]}.get(command)
         if named and args.workdir is not None:
             parser.error(Cli.finds_its_folder(f"tinker {command}"))
+
+    @staticmethod
+    def command_value(command, given, parser):
+        """What a command's words say, checked, for its own field (None: it has none, or they say nothing)."""
+        match command:
+            case "reset" | "restart" | "models" | "memory" | "runs" | "doctor":
+                return True
+            case "use-model" | "calibrate" | "embed" | "use-web":
+                return Cli.non_empty(given.name, command, parser)
+            case "resume" | "status" | "log":
+                return Cli.project_named(given.words, parser)
+            case "add" | "fix" | "amend":
+                return given.words
+            case "rename":
+                return Cli.renamed(given.words, parser)
+            case "learn":
+                return Cli.learning(given.words, parser)
+            case "jobs" | "stop":
+                return Cli.job_words(command, given.words, parser)
+            case "read":
+                return Cli.reading(given.words, parser)
+            case "ask" | "teach" | "exercise":
+                return Cli.non_empty(" ".join(given.words), command, parser)
+            case "config":
+                return Cli.config_words(given.words, parser)
+        return None
+
+    @staticmethod
+    def config_words(words, parser):
+        """config's words: none (the settings), or a KEY and its VALUE."""
+        if len(words) not in (0, 2):
+            parser.error("use tinker config (the settings) or tinker config KEY VALUE")
+        return words
 
     @staticmethod
     def project_named(words, parser):
@@ -462,48 +473,34 @@ class Commands:
 
     def run(self):
         """Runs the command the command line gives; False when it gives none (a run then)."""
-        args = self.args
-        if args.config is not None:
-            self.config(args.config)
-        elif args.models:
-            self.list_models()
-        elif args.use_model:
-            self.use_model(args.use_model)
-        elif args.embed:
-            self.embed(args.embed)
-        elif args.use_web:
-            self.use_web(args.use_web)
-        elif args.calibrate is not None:
-            self.calibrate()
-        elif args.learn:
-            self.learn()
-        elif args.ask:
-            self.ask()
-        elif args.teach:
-            self.teach()
-        elif args.read:
-            self.read()
-        elif args.exercise:
-            self.exercise()
-        elif args.memory:
-            self.show_memory(args.graph)
-        elif args.runs:
-            self.list_runs()
-        elif args.jobs is not None:
-            self.list_jobs(*args.jobs)
-        elif args.command == "stop":
-            self.stop(args.stop)
-        elif args.status is not None:
-            self.show_status(args.status, args.workdir)
-        elif args.log is not None:
-            self.show_log(args.log, args.workdir, args.calls)
-        elif args.rename:
-            self.rename(*args.rename, args.workdir)
-        elif args.doctor:
-            Doctor().run()
-        else:
+        run = self.handlers().get(self.args.command)
+        if run is None:
             return False
+        run()
         return True
+
+    def handlers(self):
+        """What runs each command that shows or changes something (Tinker exits after it)."""
+        args = self.args
+        return {"config": lambda: self.config(args.config),
+                "models": self.list_models,
+                "use-model": lambda: self.use_model(args.use_model),
+                "embed": lambda: self.embed(args.embed),
+                "use-web": lambda: self.use_web(args.use_web),
+                "calibrate": self.calibrate,
+                "learn": self.learn,
+                "ask": self.ask,
+                "teach": self.teach,
+                "read": self.read,
+                "exercise": self.exercise,
+                "memory": lambda: self.show_memory(args.graph),
+                "runs": self.list_runs,
+                "jobs": lambda: self.list_jobs(*args.jobs),
+                "stop": lambda: self.stop(args.stop),
+                "status": lambda: self.show_status(args.status, args.workdir),
+                "log": lambda: self.show_log(args.log, args.workdir, args.calls),
+                "rename": lambda: self.rename(*args.rename, args.workdir),
+                "doctor": lambda: Doctor().run()}
 
     @staticmethod
     def config(words):
