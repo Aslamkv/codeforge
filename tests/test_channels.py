@@ -234,17 +234,23 @@ def methods(api):
 
 @pytest.mark.spec("CHN-9")
 def test_the_status_is_the_one_pin():
-    api = BotAPI(getChat={"pinned_message": {"message_id": 2}})
+    api = BotAPI(getChat=[{"pinned_message": {"message_id": 7}}, {"pinned_message": {"message_id": 5}}, {}])
     channel = telegram(api)
-    channel.drop_pin_note = lambda chat, after: None
-    channel.pin("42", 2)  # a status not kept before: pinned alone
-    assert methods(api) == ["unpinAllChatMessages", "pinChatMessage"] and channel.pinned["42"] == 2
-    channel.lasting("42", [2])
+    notes = []
+    channel.drop_pin_note = lambda chat, after, wait=2: notes.append(wait)
+    channel.pin("42", 2)  # Tinker's first pin: every pin from before taken out, one at a time
+    assert methods(api) == ["getChat", "unpinChatMessage", "getChat", "unpinChatMessage", "getChat", "pinChatMessage"]
+    assert [fields["message_id"] for path, fields in api.calls if path.endswith("/unpinChatMessage")] == ["7", "5"]
+    api.calls.clear()
+    channel.closed = True
+    channel.pin("42", 3)  # a new status after it: the one before goes with its message
+    assert methods(api) == ["pinChatMessage"] and channel.pinned["42"] == 3 and notes == [2, 0]  # ending: the note at once
+    api.answers["getChat"] = [{"pinned_message": {"message_id": 3}}]
     started_again = telegram(api)
     api.calls.clear()
-    started_again.pin("42", 2)  # the status kept, pinned already: left as it is
-    started_again.pin("42", 2)
-    assert methods(api) == ["getChat"] and started_again.pinned["42"] == 2
+    started_again.pin("42", 3)  # pinned already: left as it is
+    started_again.pin("42", 3)
+    assert methods(api) == ["getChat"] and started_again.pinned["42"] == 3
 
 @pytest.mark.spec("CHN-10")
 def test_the_ledger_keeps_every_message_and_collects_them(monkeypatch):

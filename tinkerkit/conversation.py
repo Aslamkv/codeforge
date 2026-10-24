@@ -198,15 +198,14 @@ class Desk:
         self.spent = {}  # run -> the seconds its runs took so far (a task's time: done in ...)
         self.consoles = [c for c in channels if isinstance(c, ConsoleChannel)]
         self.said_status = None  # the status said last (a status said again only when it changed)
+        self.ready, self.pinning = set(), threading.Lock()  # the chats started (their status pinned), one pin at a time
+        self.leaving = None  # (channel, chat, ids) of the question to stop, confirmed: it goes as Tinker ends
         self.exercising = None  # the Reporter of the exercise this conversation follows
         self.echo = not self.consoles  # a task's printed lines go to the terminal too (not to a console's)
 
     def run(self):
         self.claim_chats()
         self.talk.warm()
-        for channel in self.channels:
-            channel.skip_waiting()
-            channel.offer(offered())
         self.say_status(anew=True)
         self.adopt_exercise()
         if not self.consoles:
@@ -216,7 +215,7 @@ class Desk:
             self.listen_until_ended()
         except KeyboardInterrupt:
             self.stop_task()
-            self.say_status("💤 **Tinker** · not listening")
+            self.say_goodbye()
             if not self.consoles:
                 say.title("Stopped listening.", "🛑")
 
@@ -232,16 +231,34 @@ class Desk:
                 say.warn(f"{held}: this one talks here only")
                 self.channels.remove(channel)
 
+    def say_goodbye(self):
+        """Tinker ends: its status says it no longer listens, while the question that ended it goes (each a round
+        trip to the chat, so the two at once)."""
+        leaving = threading.Thread(target=self.take_out_question, daemon=True)
+        leaving.start()
+        self.say_status("💤 **Tinker** · not listening")
+        leaving.join()
+
+    def take_out_question(self):
+        if self.leaving:
+            channel, chat, shown = self.leaving
+            for message in shown:
+                channel.delete(chat, message)
+
     def say_status(self, text=None, anew=False):
         """Tinker's status, one message in each chat, pinned (the console: said at its start and end): text,
-        else what it does now, said only when it changed (anew: it starts listening, said whatever it is)."""
+        else what it does now, said only when it changed. One about something else (Tinker starts or ends, a task
+        starts, waits, ends) is sent anew at the bottom and pinned, to be seen; the same one goes on edited in place."""
         text = text or self.status()
         if text == self.said_status and not anew:
             return
+        anew = anew or headline(text) != headline(self.said_status)
         self.said_status = text
         for channel in self.channels:
             if channel not in self.consoles:
-                self.pin_status(channel, text)
+                with self.pinning:
+                    if channel in self.ready:
+                        self.pin_status(channel, text, anew)
             elif anew or text.startswith("💤"):
                 channel.show(ConsoleChannel.CHAT, None, text, done=True)
 
@@ -264,15 +281,20 @@ class Desk:
         return "🟢 **Tinker** · idle: send a task"
 
     @staticmethod
-    def pin_status(channel, text):
-        """The status pinned in each of the channel's chats: the one message it has, kept from start to start
-        (Tinker's "listening"), edited in place; it never goes."""
+    def pin_status(channel, text, anew=False):
+        """The status pinned in each of the channel's chats, its one message (Tinker's "listening", kept from start
+        to start): edited in place, or anew sent at the bottom and pinned, the one before taken out meanwhile."""
         mine = Home.store().get("listening", channel.name) or {}
         for chat in channel.allowed:
             before = mine.get(chat)
-            shown = channel.show(chat, [before] if before else None, text, bottom=False, pin=True)
+            going = threading.Thread(target=channel.delete, args=(chat, before), daemon=True)
+            if anew and before:
+                going.start()
+            shown = channel.show(chat, None if anew or not before else [before], text, bottom=False, pin=True)
             channel.lasting(chat, shown)
             mine[chat] = shown[0] if shown else None
+            if going.is_alive():
+                going.join()
         Home.store().put("listening", channel.name, mine)
 
     def listen_until_ended(self):
@@ -295,11 +317,22 @@ class Desk:
         raise KeyboardInterrupt
 
     def listen(self, channel):
+        if channel not in self.consoles:
+            self.start_chat(channel)
         while not channel.closed:
             for message in channel.listened(timeout=1 if channel in self.consoles else 20):
                 if channel not in self.consoles:
                     say.text(f"[{time.strftime('%H:%M:%S')}] {channel.name}: {message.text}")
                 self.hear(channel, message)
+
+    def start_chat(self, channel):
+        """A chat started in its own thread, so the terminal never waits on the network: the messages sent while
+        nothing listened forgotten, the commands offered, the status pinned."""
+        channel.skip_waiting()
+        channel.offer(offered())
+        with self.pinning:
+            self.ready.add(channel)
+            self.pin_status(channel, self.said_status, anew=True)
 
     def hear(self, channel, message):
         """One message: a welcome for a person who just opened the bot; the answer to what waits for it; else
@@ -308,8 +341,8 @@ class Desk:
             channel.send(message.chat, welcome())
             return
         command = command_of(message.text)
-        if message.id and (command == "confirm" or exercise_switch(message.text)):  # its answer is in a message
-            # already (the plan's, the exercise's): it would only make the chat grow
+        if message.id and (command in ("confirm",) + EXIT or exercise_switch(message.text)):  # its answer is in a
+            # message already (the plan's, the exercise's, the question to stop): it would only make the chat grow
             channel.delete(message.chat, message.id)
         if self.settle(channel, message, command):
             return
@@ -667,9 +700,10 @@ class Desk:
         return None
 
     def delete(self, channel, chat, asking):
-        """A command that deletes (or exit), confirmed: done (a restart as a task), in its message."""
+        """A command that deletes (or exit), confirmed: done (a restart as a task), in its message. exit's question
+        goes as Tinker ends: its status says so."""
         if asking["words"][0] in EXIT:
-            channel.show(chat, asking["shown"], "🛑 **Stopping Tinker.**", done=True)
+            self.leaving = (channel, chat, asking["shown"])
             for each in self.channels:
                 each.closed = True
             return
@@ -1555,6 +1589,11 @@ def exercise_switch(text):
     """True for exercise LANGUAGE: shown in the exercise's message alone."""
     words = text.split()
     return len(words) > 1 and words[0].lstrip("/").lower() == "exercise" and words[1].lower() != "status"
+
+
+def headline(status):
+    """What a status is about: its first line, without how far it got (after a colon, or in brackets)."""
+    return re.split(r":| \(", (status or "").split("\n")[0])[0]
 
 
 def exercise_board():

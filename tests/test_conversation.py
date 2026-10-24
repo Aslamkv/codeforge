@@ -715,16 +715,34 @@ def test_desk_listens_until_the_chat_ends_it(desk):
 
 
 @pytest.mark.spec("CNV-21")
-def test_the_status_kept_from_before_is_edited_in_place_and_messages_are_collected(desk, home_store):
+def test_the_status_is_sent_anew_and_pinned_as_tinker_starts_and_ends(desk, home_store):
     home_store.put("listening", "bot", {"1": 55})
     channel = Listening("bot", inbox=[Message("1", "exit", id=1), Message("1", "confirm", id=2)])
     collected = []
     channel.collect = lambda: collected.append(True)
     Desk([channel], Path.cwd()).run()
     status = [(kind, sent) for kind, _, sent, text in channel.log if "**Tinker** ·" in text]
-    assert status and all(each == ("edit", 55) for each in status) and ("delete", "1", 55, "") not in channel.log
-    assert home_store.get("listening", "bot") == {"1": 55} and collected
+    assert status == [("send", 101), ("send", 103)]  # 102: the question to stop
+    assert {("pin", 101), ("pin", 103)} <= {(kind, sent) for kind, _, sent, _ in channel.log}
+    deleted = {sent for kind, _, sent, _ in channel.log if kind == "delete"}
+    assert deleted == {55, 101, 1, 2, 102}  # the statuses before, the person's exit and confirm, the question
+    assert not any("Stopping" in text for text in channel.texts())
+    assert home_store.get("listening", "bot") == {"1": 103} and collected
     channel.claimed.close()
+
+
+@pytest.mark.spec("CNV-21")
+def test_a_status_about_something_else_is_sent_anew_the_same_one_edited(desk):
+    channel = Recorder("bot")
+    listening = Desk([channel], Path.cwd())
+    listening.ready.add(channel)
+    channel.pins = True
+    listening.say_status("🔄 **Tinker** · working on calc\n▸ planning")
+    listening.say_status("🔄 **Tinker** · working on calc\n▸ building")
+    listening.say_status("🟢 **Tinker** · idle: send a task")
+    log = [(kind, sent) for kind, _, sent, _ in channel.log]
+    assert log[:4] == [("send", 101), ("pin", 101), ("edit", 101), ("pin", 101)]
+    assert sorted(log[4:]) == [("delete", 101), ("pin", 102), ("send", 102)]  # the one before goes meanwhile
 
 
 @pytest.mark.spec("CNV-21")
