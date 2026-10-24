@@ -33,6 +33,7 @@ lazy from .settings import (
     ENV_FILE,
     FIX_PHASES,
     FORMATTER_RUNS_AFTER,
+    NUMBERED_PARTS,
     PHASES,
     STATUS_TEXT,
     Config,
@@ -198,7 +199,7 @@ class Cli:
 
     @staticmethod
     def cleared(parts, yes):
-        if parts[0] not in ("read", "jobs"):
+        if parts[0] not in NUMBERED_PARTS:
             return Home.clear(parts, yes)
         numbers = [job_number(word) for word in parts[1:]]
         if None in numbers and parts[0] == "jobs":

@@ -573,7 +573,7 @@ COMMANDS = [
         rows=[
             ("channel list", "the chat channels (Telegram), and which are enabled"),
             ("channel add", "add one: its kind, a name, its token; pairs your chat"),
-            ("channel remove NAME", "delete a channel and its token"),
+            ("channel remove NAME [--yes]", "delete a channel and its token, once you confirm"),
             ("channel enable NAME", "every task reports to it; tinker channel start reads it"),
             ("channel disable NAME", "stop using it (channels start disabled)"),
             ("channel start [NAME]", "read the chat: tasks, status, jobs, stop, commands, or just chat"),

@@ -120,6 +120,16 @@ def test_channel_command_list_enable_disable_remove(capsys):
 
 
 @pytest.mark.spec("CHN-2")
+def test_removing_a_channel_asks_first():
+    Channels.keep("bot", {"kind": "telegram", "enabled": False, "allowed": ["42"]}, {"token": "t"})
+    with pytest.raises(SystemExit, match="Nothing deleted: run tinker channel remove bot in a terminal"):
+        ChannelCommand.run(["remove", "bot"])
+    assert "bot" in Channels.settings()
+    ChannelCommand.run(["remove", "bot", "--yes"])
+    assert Channels.settings() == {} and Channels.secrets("bot") == {}
+
+
+@pytest.mark.spec("CHN-2")
 def test_channel_add_from_options(monkeypatch, capsys):
     api = BotAPI(getMe={"username": "my_bot"})
     monkeypatch.setattr(TelegramChannel, "connection", lambda self, wait: api.connection(wait))

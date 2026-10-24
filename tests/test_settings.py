@@ -17,6 +17,7 @@ from tinkerkit.settings import (
     Paged,
     Store,
     after_what_they_use,
+    confirm_deletion,
     fingerprint,
     first_line,
     groups_fitting,
@@ -267,6 +268,26 @@ def test_reset_outside_a_terminal_without_yes_deletes_nothing(tinker_home, monke
     assert tinker_home.exists()
 
 
+@pytest.mark.spec("SET-11")
+def test_a_deletion_says_what_goes_then_asks(monkeypatch, capsys):
+    confirm_deletion("This deletes:", ["the notes", "the logs"], "tinker clear notes", yes=True)
+    said = capsys.readouterr().out
+    assert "This deletes:" in said and "the notes" in said and "the logs" in said
+    monkeypatch.setattr(sys.stdin, "isatty", lambda: False)
+    with pytest.raises(
+        SystemExit, match="Nothing archived: run tinker clear jobs #1 in a terminal to confirm"
+    ):
+        confirm_deletion("This archives:", ["#1"], "tinker clear jobs #1", verb="archive")
+    asked = []
+    monkeypatch.setattr(sys.stdin, "isatty", lambda: True)
+    monkeypatch.setattr("builtins.input", lambda question: asked.append(question) or "n")
+    with pytest.raises(SystemExit, match=r"^Nothing deleted\.$"):
+        confirm_deletion("This deletes:", ["the home"], "tinker reset")
+    monkeypatch.setattr("builtins.input", lambda question: asked.append(question) or "y")
+    confirm_deletion("This deletes:", ["the notes", "the logs"], "tinker clear notes")
+    assert asked == ["Delete it? [y/N] ", "Delete them? [y/N] "]
+
+
 @pytest.mark.spec("SET-12")
 def test_clear_deletes_only_the_named_parts(home_store, capsys):
     home_store.put("languages", "python", {})
@@ -282,7 +303,7 @@ def test_clear_deletes_only_the_named_parts(home_store, capsys):
 
 @pytest.mark.spec("SET-12")
 def test_clear_rejects_an_unknown_part():
-    with pytest.raises(SystemExit, match="the parts are: languages"):
+    with pytest.raises(SystemExit, match="the parts are: languages, .*, exercise, jobs, read$"):
         Home.clear(["everything"], yes=True)
 
 

@@ -31,7 +31,7 @@ lazy from .settings import (
     Config,
     Home,
     Numbered,
-    confirmed,
+    confirm_deletion,
     fingerprint,
     first_line,
     now_text,
@@ -452,21 +452,18 @@ def forgotten(numbers, yes=False):
     if not numbers:
         say.info("Nothing to clear: the reading list is empty.")
         return
-    say.warn("This deletes:")
-    with say.section():
-        for number in numbers:
-            entry = Readings.get(number)
-            say.item(f"#{number} {entry['title']}: its text and what was learned from it ({progress(entry)})")
-    if not confirmed_delete(numbers, yes):
-        say.info("Nothing deleted.")
-        return
+    confirm_deletion(
+        "This deletes:",
+        [
+            f"#{number} {entry['title']}: its text and what was learned from it ({progress(entry)})"
+            for number, entry in ((number, Readings.get(number)) for number in numbers)
+        ],
+        "tinker clear read " + " ".join(f"#{number}" for number in numbers),
+        yes,
+    )
     for number in numbers:
         Readings.forget(number)
     say.done(f"Cleared {', '.join(f'#{number}' for number in numbers)}.")
-
-
-def confirmed_delete(numbers, yes):
-    return confirmed("Delete them?", "tinker clear read " + " ".join(f"#{number}" for number in numbers), yes)
 
 
 def known_reading(number):

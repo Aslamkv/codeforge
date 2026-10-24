@@ -9,7 +9,7 @@ lazy import time
 lazy from pathlib import Path
 
 lazy from .messages import say
-lazy from .settings import EXERCISE_ENV, Home, Numbered, confirmed, fingerprint, now_text
+lazy from .settings import EXERCISE_ENV, Home, Numbered, confirm_deletion, fingerprint, now_text
 
 COMMANDS = (
     "task",
@@ -253,14 +253,14 @@ def archived(numbers, yes=False):
     if not jobs:
         say.info("Nothing to clear: no job is stopped or finished.")
         return
-    say.warn("This archives (tinker jobs archived lists them; they cannot be resumed):")
-    with say.section():
-        for job in jobs:
-            say.item(f"#{job['number']} {job['state']}: {job['title']}")
     numbered = " ".join(f"#{job['number']}" for job in jobs)
-    if not confirmed("Archive them?", f"tinker clear jobs {numbered}", yes):
-        say.info("Nothing archived.")
-        return
+    confirm_deletion(
+        "This archives (tinker jobs archived lists them; they cannot be resumed):",
+        [f"#{job['number']} {job['state']}: {job['title']}" for job in jobs],
+        f"tinker clear jobs {numbered}",
+        yes,
+        verb="archive",
+    )
     for job in jobs:
         Jobs.update(job["number"], state="archived", archived_from=job["state"])
         Home.store().drop_log(f"journal #{job['number']}")

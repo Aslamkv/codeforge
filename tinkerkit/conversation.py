@@ -735,7 +735,7 @@ class Desk:
 
     def ask_first(self, channel, chat, words):
         preview = "\n".join(
-            line for line in self.tinker(words).splitlines() if not line.startswith("Nothing deleted")
+            line for line in self.tinker(words).splitlines() if "in a terminal to confirm" not in line
         )
         shown = channel.show(
             chat,

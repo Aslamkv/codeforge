@@ -195,6 +195,7 @@ REPEAT_CLAIM_SIMILARITY = 0.9
 MAX_RECALL_TOPICS = 6
 TOPIC_RELEVANT_SIMILARITY = 0.6
 PER_PAGE = 10
+NUMBERED_PARTS = ("jobs", "read")
 
 
 Paged = namedtuple("Paged", "items pages")
@@ -242,13 +243,13 @@ class Home:
             return
         if home.name != STATE_DIR:
             raise SystemExit(f"Not deleting {home}: it is not a .tinker folder.")
-        say.warn(
-            f"This deletes {home}: Tinker's settings, measured models, what it knows and its list of projects."
-        )
         say.info("Projects are not touched (each keeps its own .tinker folder).", "📁")
-        if not confirmed("Delete it?", "tinker reset", yes):
-            say.info("Nothing deleted.")
-            return
+        confirm_deletion(
+            "This deletes:",
+            [f"{home}: Tinker's settings, measured models, what it knows and its list of projects"],
+            "tinker reset",
+            yes,
+        )
         shutil.rmtree(home)
         cls.stores.pop(cls.database(), None)
         say.done(f"Deleted {home}. The next command starts fresh.")
@@ -301,10 +302,12 @@ class Home:
                 + " empty."
             )
             return
-        cls.show_what_clearing_deletes(held)
-        if not confirmed("Delete them?", "it", yes):
-            say.info("Nothing deleted.")
-            return
+        confirm_deletion(
+            "This deletes:",
+            [f"{name}: {cls.parts()[name][2]} ({entries} entries)" for name, entries in held.items()],
+            f"tinker clear {' '.join(names)}",
+            yes,
+        )
         for name in names:
             cls.delete_part(name)
         say.done(f"Cleared {', '.join(names)}.")
@@ -314,7 +317,8 @@ class Home:
         unknown = [name for name in names if name not in cls.parts()]
         if unknown:
             raise SystemExit(
-                f"tinker clear: no part {', '.join(unknown)}; the parts are: {', '.join(cls.parts())}"
+                f"tinker clear: no part {', '.join(unknown)}; the parts are: "
+                + ", ".join([*cls.parts(), *NUMBERED_PARTS])
             )
         return list(dict.fromkeys(names))
 
@@ -325,13 +329,6 @@ class Home:
         return sum(store.count(collection) for collection in collections) + sum(
             store.logged(log) for log in logs
         )
-
-    @classmethod
-    def show_what_clearing_deletes(cls, held):
-        say.warn("This deletes:")
-        with say.section():
-            for name, entries in held.items():
-                say.item(f"{name}: {cls.parts()[name][2]} ({entries} entries)")
 
     @classmethod
     def delete_part(cls, name):
@@ -530,12 +527,18 @@ class Config:
         return int(value) if re.fullmatch(r"-?\d+", str(value)) else value
 
 
-def confirmed(question, command, yes=False):
+def confirm_deletion(said, items, command, yes=False, verb="delete"):
+    say.warn(said)
+    with say.section():
+        for item in items:
+            say.item(item)
     if yes:
-        return True
+        return
     if not sys.stdin.isatty():
-        raise SystemExit(f"Nothing deleted: run {command} in a terminal to confirm, or add --yes.")
-    return input(f"{question} [y/N] ").strip().lower() in ("y", "yes")
+        raise SystemExit(f"Nothing {verb}d: run {command} in a terminal to confirm, or add --yes.")
+    question = f"{verb.capitalize()} {'it' if len(items) == 1 else 'them'}? [y/N] "
+    if input(question).strip().lower() not in ("y", "yes"):
+        raise SystemExit(f"Nothing {verb}d.")
 
 
 def is_number(value):

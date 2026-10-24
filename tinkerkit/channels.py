@@ -21,7 +21,7 @@ from .conversation import (
 )
 lazy from .ledger import ANSWER_WINDOW_SECONDS, Ledger
 lazy from .messages import say
-lazy from .settings import Home
+lazy from .settings import Home, confirm_deletion
 
 PAIRING_WAIT_SECONDS = 120
 FIRST_CALL_TRIES = 3
@@ -42,7 +42,7 @@ class ChannelCommand:
     USAGE = (
         "tinker channel list                 the channels, and whether each is enabled\n"
         "tinker channel add                  add one (asks its kind, a name, its secrets, and pairs your chat)\n"
-        "tinker channel remove NAME          delete it, secrets included\n"
+        "tinker channel remove NAME [--yes] delete it, secrets included, once you confirm\n"
         "tinker channel enable NAME          every task reports to it; tinker channel start reads it\n"
         "tinker channel disable NAME         stop using it (new channels start disabled)\n"
         "tinker channel start [NAME]         listen on enabled channels (or NAME): ask for tasks, or just chat"
@@ -147,7 +147,13 @@ class ChannelCommand:
 
     @staticmethod
     def remove(rest):
-        name = ChannelCommand.named(rest, "remove")
+        name = ChannelCommand.named([word for word in rest if word != "--yes"], "remove")
+        confirm_deletion(
+            "This deletes:",
+            [f"channel {name}: its settings and its secrets"],
+            f"tinker channel remove {name}",
+            "--yes" in rest,
+        )
         Channels.forget(name)
         say.done(f"Removed {name}.")
 

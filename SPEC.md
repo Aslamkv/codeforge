@@ -235,10 +235,12 @@ The home, its database, the settings, and small helpers every module shares.
   the entries after an ID, in order, with their IDs. A database file is made with mode 600.
 - **SET-10** `Home.ensure()` makes the home folder and its database on first use. A home that cannot be written
   ends with `SystemExit`.
-- **SET-11** Every deletion goes one way: it says what it deletes, asks, and only then deletes. With `yes`
-  (`--yes`, or `confirm` in a chat) it does not ask. With no terminal to ask in, it deletes nothing and exits,
-  saying how to confirm. With nothing to delete, it says so and asks nothing. `Home.reset(yes)` deletes the
-  home folder this way. It refuses a folder not named `.tinker`, and does nothing when the folder is missing.
+- **SET-11** Every deletion goes one way, `confirm_deletion(said, items, command, yes, verb)`: it says what it
+  deletes (or archives), item by item, asks, and only then deletes. With `yes` (`--yes`, or `confirm` in a
+  chat) it does not ask. With no terminal to ask in, it deletes nothing and exits, saying how to confirm
+  (`Nothing deleted: run COMMAND in a terminal to confirm, or add --yes.`); a no exits with `Nothing
+  deleted.` With nothing to delete, it says so and asks nothing. `Home.reset(yes)` deletes the home folder this
+  way. It refuses a folder not named `.tinker`, and does nothing when the folder is missing.
 - **SET-12** `tinker clear PART` names exactly these parts: languages, memory, learned, docs, models, runs,
   commands, history, exercise, jobs and read ([State](#state) shows what each holds). `jobs` and `read` take
   numbers (`#N`), and their own modules clear them (**JOB-11**, **RDG-13**). `Home.clear(names, yes)` deletes

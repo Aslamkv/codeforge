@@ -330,7 +330,7 @@ def test_stop_tells_a_job_or_every_one_of_the_persons(home_store, monkeypatch, c
 def test_clear_jobs_archives_them_listed_apart_and_never_resumed(home_store, capsys):
     keep_jobs(home_store, ["stopped", "finished", "running", "stopped"])
     home_store.append("journal #1", {"key": "k", "answer": "a"})
-    with pytest.raises(SystemExit, match="Nothing deleted: run tinker clear jobs #1"):
+    with pytest.raises(SystemExit, match="Nothing archived: run tinker clear jobs #1"):
         Cli.cleared(["jobs", "#1"], yes=False)
     Cli.cleared(["jobs", "#1"], yes=True)
     assert Jobs.get(1)["state"] == "archived" and Jobs.get(1)["archived_from"] == "stopped"
