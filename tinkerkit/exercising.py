@@ -39,11 +39,11 @@ RETRIED_RE = re.compile(r"\(attempt [2-9]")
 class Exercise:
     """One language's exercise, run until it is stopped (the module says how)."""
 
-    def __init__(self, model, tracker, start=None):
+    def __init__(self, model, tracker, start_build=None):
         self.model, self.tracker = model, tracker
-        self.start = start or start_tinker  # how a build starts: start(arguments) -> its process
-        self.process = None  # the build that runs now
-        self.doing = ""  # what the exercise's own step does (a build's progress is shown after it)
+        self.start_build = start_build or start_tinker
+        self.running_build = None
+        self.own_step = ""
 
     def run(self, asked):
         """The exercise of the language the words name, until it is stopped; its ending."""
@@ -64,7 +64,7 @@ class Exercise:
 
     def on_to(self, step):
         self.tracker.phase(step)
-        self.doing = self.tracker.state["doing"]
+        self.own_step = self.tracker.state["doing"]
 
     def knows(self, name):
         """The language learned first when Tinker has not (tinker learn, as a build of its own), and installed here."""
@@ -159,24 +159,24 @@ class Exercise:
     def built(self, arguments):
         """A tinker of its own (arguments() says how to start it, from where it is), run to its end: its exit code.
         Meanwhile the exercise's tracker shows what the build does."""
-        self.process = self.start(arguments())
-        while self.process.poll() is None:
-            self.show_build(Home.store().get("running", str(self.process.pid)))
+        self.running_build = self.start_build(arguments())
+        while self.running_build.poll() is None:
+            self.show_build(Home.store().get("running", str(self.running_build.pid)))
             time.sleep(EXERCISE_PERSON_LOOK_SECONDS)
-        return self.process.returncode
+        return self.running_build.returncode
 
     def show_build(self, build):
         """The build's tracker (None before it keeps one) shown in the exercise's: its step after the exercise's,
         what it works on now, its spec points passing, what it found out and its latest line."""
         if not build:
             return
-        self.tracker.change("build", quiet=True, doing=f"{self.doing} · {build.get('doing', '')}",
+        self.tracker.change("build", quiet=True, doing=f"{self.own_step} · {build.get('doing', '')}",
                             **{key: build.get(key, "") for key in ("working", "tally", "found", "latest")},
                             passing=build.get("passing"))
 
     def stop_build(self):
         """The build that runs stopped as Ctrl-C stops it (it saves itself); killed when it does not stop in time."""
-        process = self.process
+        process = self.running_build
         if process is None or process.poll() is not None:
             return
         os.killpg(process.pid, signal.SIGINT)

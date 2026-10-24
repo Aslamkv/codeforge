@@ -605,7 +605,7 @@ class Tracker:
                       "began": None, "steps": [], "passing": None, "working": "", "tally": "", "found": "",
                       "outcome": "", "latest": "", "waiting": None,
                       "ended": None, "before": before, "seconds": 0.0, "pid": self.pid,
-                      "resumed": time.time() if Jobs.resuming else None,
+                      "resumed": time.time() if Jobs.resumed_here else None,
                       "exercise": os.environ.get(EXERCISE_ENV) == "1"}
 
     @classmethod

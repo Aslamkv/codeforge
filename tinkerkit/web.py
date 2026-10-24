@@ -39,7 +39,7 @@ class Internet:
         self.errors, self.failures, self.codes = {}, {}, {}  # codes: the HTTP status of a key's last failure
         self.backends_used, reasons = self.ready_backends()
         self.gone = "" if self.backends_used else ("; ".join(reasons) or "no web backend (tinker use-web NAME)")
-        self.skipped = reasons  # backends set but not usable (said once, when the plugin is in use)
+        self.unusable_backends = reasons
 
     def ready_backends(self):
         """([the backends set, in order, that can be used], [why each of the others cannot])."""
@@ -63,7 +63,7 @@ class Internet:
         internet = Internet()
         if not internet.available():
             raise SystemExit(f"{option} needs the Internet plugin: {internet.problem()}")
-        for reason in internet.skipped:
+        for reason in internet.unusable_backends:
             say.warn(f"Web: {reason}; using {internet.describe()}")
         return internet
 
@@ -77,7 +77,7 @@ class Internet:
         internet = Internet()
         if not internet.available():
             return internet.problem()
-        skipped = f"; not usable: {'; '.join(internet.skipped)}" if internet.skipped else ""
+        skipped = f"; not usable: {'; '.join(internet.unusable_backends)}" if internet.unusable_backends else ""
         return f"ready: {internet.describe()}{skipped}"
 
     @staticmethod
@@ -236,7 +236,7 @@ class WebBackend:
     three methods, and is added to Internet.backends() under the name the setting "web" uses.
     search() and fetch() raise WebError when they cannot answer."""
 
-    name = ""  # the name the setting "web" gives it (set when the plugin takes it)
+    name = ""
 
     def __init__(self, timeout):
         self.timeout = timeout
@@ -457,7 +457,7 @@ class PageText(html.parser.HTMLParser):
             return
         self.depth += 1
         if tag == "title" and not self.title and not self.skipping:
-            self.in_title = True  # the page's own title (an icon's <title> is skipped with its <svg>)
+            self.in_title = True
         attributes = dict(attrs)
         if self.skipping or self.not_content(tag, attributes):
             self.skipping += 1

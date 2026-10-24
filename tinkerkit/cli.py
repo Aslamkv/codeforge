@@ -1108,8 +1108,8 @@ class ProjectRun:
     def __init__(self, args, script_started, started_at):
         self.args = args
         self.script_started, self.started_at = script_started, started_at
-        self.session = self.record = self.mode = self.log = None  # record: the run's record
-        self.internet = None  # the Internet plugin, with --web only
+        self.session = self.record = self.mode = self.log = None
+        self.internet = None
         self.spec_text = ""
         self.outcome = Outcome()
         self.tracker = Tracker(args.task or "a task")
@@ -1401,8 +1401,8 @@ class ProjectRun:
     @staticmethod
     def why_blocked(session, run_id):
         """The lines that say why it stopped (the first is the headline) and how to go on."""
-        if session.unreproduced:
-            return [f"Not fixed: {session.unreproduced}"]
+        if session.unreproduced_reason:
+            return [f"Not fixed: {session.unreproduced_reason}"]
         if session.review_problem:
             return [f"Not done: the final review found {session.review_problem}",
                     f"Correct it (or the request), then: tinker resume @{run_id}"]
@@ -1519,7 +1519,7 @@ class CycleRunner:
         the cycle (they return False). The plan is made at the model's full think setting; building
         from it at build_think."""
         worker = self.phase_class(phase)(self.session)
-        self.session.model.building = worker.BUILDS
+        self.session.model.is_building = worker.BUILDS
         if not worker.TITLE:
             return worker.run(cycle)
         started = time.perf_counter()

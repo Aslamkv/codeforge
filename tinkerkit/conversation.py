@@ -128,7 +128,7 @@ def one_shot(command, text):
     """tinker chat|command|research|run|history ...: one of the conversation's own commands, said once in this terminal
     (command asks there before it runs anything). A chat or a command line pauses the job that runs. None, or why
     it could not."""
-    console, talk = ConsoleChannel(bare=False), Talk(commands_brief())
+    console, talk = ConsoleChannel(commands_without_tinker=False), Talk(commands_brief())
     message, chat = Message(ConsoleChannel.CHAT, text, "you"), ConsoleChannel.CHAT
     if command == "history":
         console.send(chat, history_text(text.split()[:1]))
@@ -187,21 +187,21 @@ class Desk:
 
     def __init__(self, channels, root):
         self.channels, self.root = channels, Path(root).resolve()
-        self.process = self.reporter = self.task = None  # task: {arguments, folder, title, run} of the last one
-        self.followed = []  # every task started here whose process lives: the last one, and those it paused
-        self.lock, self.talk = threading.Lock(), Talk(commands_brief(), pausing=paused_for_you)
+        self.last_task = self.reporter = self.task = None
+        self.live_tasks = []
+        self.lock, self.talk = threading.Lock(), Talk(commands_brief(), pausing_jobs=paused_for_you)
         self.shell = Shell(self.talk, self.root)
-        self.waiting = None  # {run, folder, title, spec, stage, new} of the plan that waits for confirm or amend
-        self.boards = {}  # run -> its task's messages ({(channel, chat): ids}), kept from one of its runs to the next
-        self.asking = {}  # (channel, chat) -> {words, shown}: a command that deletes, waiting for confirm
-        self.wanting = {}  # (channel, chat) -> a command sent alone, waiting for its words (COMMANDS_ASKING_FOR_WORDS)
-        self.spent = {}  # run -> the seconds its runs took so far (a task's time: done in ...)
+        self.waiting_plan = None
+        self.messages_by_run = {}
+        self.deletes_to_confirm = {}
+        self.commands_wanting_words = {}
+        self.seconds_by_run = {}
         self.consoles = [channel for channel in channels if isinstance(channel, ConsoleChannel)]
-        self.said_status = None  # the status said last (a status said again only when it changed)
+        self.said_status = None
         self.ready, self.posting = set(), threading.Lock()  # the chats started (their status sent), one post at a time
-        self.leaving = None  # (channel, chat, ids) of the question to stop, confirmed: it goes as Tinker ends
-        self.exercising = None  # the Reporter of the exercise this conversation follows
-        self.echo = not self.consoles  # a task's printed lines go to the terminal too (not to a console's)
+        self.stop_question = None
+        self.exercise_reporter = None
+        self.echo_to_terminal = not self.consoles
 
     def run(self):
         self.claim_chats()
@@ -239,8 +239,8 @@ class Desk:
         leaving.join()
 
     def take_out_question(self):
-        if self.leaving:
-            channel, chat, shown = self.leaving
+        if self.stop_question:
+            channel, chat, shown = self.stop_question
             for message in shown:
                 channel.delete(chat, message)
 
@@ -268,9 +268,9 @@ class Desk:
             passing = f" · {progress.passing}" if progress.passing else ""
             return md(t"🔄 **Tinker** · working on {progress.title}\n▸ {Markup.plain(progress.snapshot['doing']):md}"
                       t"{passing}")
-        if self.waiting:
-            then = "`confirm` · `rename NAME`" if self.waiting.get("stage") == "name" else "`confirm` · `amend WHAT`"
-            return md(t"🙋 **Tinker** · {self.waiting['title']} waits for you: {then:md}")
+        if self.waiting_plan:
+            then = "`confirm` · `rename NAME`" if self.waiting_plan.get("stage") == "name" else "`confirm` · `amend WHAT`"
+            return md(t"🙋 **Tinker** · {self.waiting_plan['title']} waits for you: {then:md}")
         elsewhere = [described(state) for state in persons_runs(self.children())]
         if elsewhere:
             return "🔄 **Tinker** · working in a terminal: " + "; ".join(run["brief"] for run in elsewhere)
@@ -311,7 +311,7 @@ class Desk:
             if time.monotonic() - looked >= STATUS_LOOK_SECONDS:
                 looked = time.monotonic()
                 self.say_status()  # what runs elsewhere (an exercise, a terminal's run) moves on by itself
-                if self.exercising is None:
+                if self.exercise_reporter is None:
                     self.adopt_exercise()  # a paused exercise that went on by itself has its message kept up again
         raise KeyboardInterrupt
 
@@ -347,11 +347,11 @@ class Desk:
         if self.settle(channel, message, command):
             return
         if command in COMMANDS_ASKING_FOR_WORDS and len(message.text.split()) == 1:
-            self.wanting[(channel.name, message.chat)] = command
+            self.commands_wanting_words[(channel.name, message.chat)] = command
             channel.ask_for(message.chat, *words_asked(command))
             return
         if not command:
-            self.talk.answer(channel, message, self.running_now, lambda: (self.waiting or {}).get("spec", ""))
+            self.talk.answer(channel, message, self.running_now, lambda: (self.waiting_plan or {}).get("spec", ""))
             return
         if command == "run":
             threading.Thread(target=self.run_app, args=(channel, message.chat, message.text.split(None, 1)[1:]),
@@ -369,7 +369,7 @@ class Desk:
     def with_words_wanted(self, channel, message):
         """message as the words of the command that waits for them; a command of its own (sent with its /, alone,
         or the very command waiting, as a file sent to read is) takes its place instead."""
-        wanted = self.wanting.pop((channel.name, message.chat), None)
+        wanted = self.commands_wanting_words.pop((channel.name, message.chat), None)
         command = command_of(message.text)
         if not wanted or self.command_of_its_own(message, command, wanted):
             return message
@@ -391,7 +391,7 @@ class Desk:
         """What waits for this very message (a command that deletes, a command line): done when the message
         is confirm, else left undone. True when the message was that confirm."""
         confirm = command == "confirm" and len(message.text.split()) == 1
-        asking = self.asking.pop((channel.name, message.chat), None)
+        asking = self.deletes_to_confirm.pop((channel.name, message.chat), None)
         if asking and confirm:
             threading.Thread(target=self.delete, args=(channel, message.chat, asking), daemon=True).start()
             return True
@@ -511,23 +511,23 @@ class Desk:
         sent = exercise_board()
         if anew:
             self.take_out(sent)
-        if self.exercising is not None:  # paused for this one: its message is this one's until it goes on
-            self.exercising.ended = True
-        reporter = self.exercising = Reporter(self.channels, title, pid=pid, sent=sent,
+        if self.exercise_reporter is not None:  # paused for this one: its message is this one's until it goes on
+            self.exercise_reporter.ended = True
+        reporter = self.exercise_reporter = Reporter(self.channels, title, pid=pid, sent=sent,
                                               on_step=lambda: (keep_exercise_board(sent), self.say_status()))
         reporter.refresh()
 
         def follow():
             ended()
-            if reporter is not self.exercising:  # its message went to another exercise (adopted again if it went on)
+            if reporter is not self.exercise_reporter:  # its message went to another exercise (adopted again if it went on)
                 return
             printed = printed_since(*log) if log and reporter.tracked() is None else ""
             reporter.finish()
             if printed:
                 reporter.say(md(t"⚠️ **{title}**\n{printed:block}"), done=True)
             keep_exercise_board(sent)
-            if self.exercising is reporter:
-                self.exercising = None
+            if self.exercise_reporter is reporter:
+                self.exercise_reporter = None
             Home.store().delete("running", str(pid))
             self.say_status()
         threading.Thread(target=follow, daemon=True).start()
@@ -543,12 +543,12 @@ class Desk:
 
     def exercise_says(self, line):
         """A line shown as the latest of the exercise's message, which comes to the bottom of the chat."""
-        reporter = self.exercising
+        reporter = self.exercise_reporter
         if reporter is None:
             return
         with reporter.lock:
             reporter.progress.snapshot["latest"] = line
-            reporter.fresh = True
+            reporter.send_at_bottom = True
             reporter.update()
 
     def memory_graph(self, channel, chat, words):
@@ -572,7 +572,7 @@ class Desk:
         """confirm [@PROJECT]: build the plan that waits (a new project's folder name is asked once first:
         confirm again, or rename NAME, builds it); amend [@PROJECT] WHAT: change it (it waits again); rename
         NAME: rename its folder."""
-        waiting = self.waiting or {}
+        waiting = self.waiting_plan or {}
         if command == "rename":
             return self.rename(waiting, words)
         name, rest = refs(words[1:])
@@ -628,7 +628,7 @@ class Desk:
 
     def on_board(self, waiting, text):
         """text shown in the message of the task whose plan waits (Tinker's status follows it)."""
-        board = self.boards.setdefault(waiting["run"], {})
+        board = self.messages_by_run.setdefault(waiting["run"], {})
         for channel in self.channels:
             for chat in channel.allowed:
                 board[(channel.name, chat)] = channel.show(chat, board.get((channel.name, chat)), text, done=True)
@@ -704,7 +704,7 @@ class Desk:
             return f"🤷 Job #{number} is not running or paused: `jobs` lists them."
         if job["state"] == "paused":
             Jobs.stop(job)
-        elif self.busy() and job["pid"] == self.process.pid:
+        elif self.busy() and job["pid"] == self.last_task.pid:
             self.stop_task()
         elif job["command"] == "exercise":
             return self.stop_exercise()
@@ -722,7 +722,7 @@ class Desk:
     def ask_to_exit(self, channel, chat, command):
         shown = channel.show(chat, None, "🛑 **Stop Tinker?** It cannot be started again from here.\n"
                                          "👉 `confirm` to stop it · anything else keeps it", done=True)
-        self.asking[(channel.name, chat)] = {"words": [command], "shown": shown}
+        self.deletes_to_confirm[(channel.name, chat)] = {"words": [command], "shown": shown}
         return None
 
     def ask_first(self, channel, chat, words):
@@ -730,14 +730,14 @@ class Desk:
         preview = "\n".join(line for line in self.tinker(words).splitlines() if not line.startswith("Nothing deleted"))
         shown = channel.show(chat, None, md(t"🗑 **{' '.join(words)}**\n{preview:block}\n"
                                             t"👉 `confirm` to delete it · anything else cancels it"), done=True)
-        self.asking[(channel.name, chat)] = {"words": words, "shown": shown}
+        self.deletes_to_confirm[(channel.name, chat)] = {"words": words, "shown": shown}
         return None
 
     def delete(self, channel, chat, asking):
         """A command that deletes (or exit), confirmed: done (a restart as a task), in its message. exit's question
         goes as Tinker ends: its status says so."""
         if asking["words"][0] in EXIT_WORDS:
-            self.leaving = (channel, chat, asking["shown"])
+            self.stop_question = (channel, chat, asking["shown"])
             for each in self.channels:
                 each.closed = True
             return
@@ -791,29 +791,29 @@ class Desk:
         boards), keeps keep at its top, and says phase first (Markup when Tinker says it: ✅ confirmed ...);
         it is shown before the run's tracker is, so it is one message."""
         run = self.run_named(arguments)
-        sent = sent if sent is not None else self.boards.get(run) if run else None
+        sent = sent if sent is not None else self.messages_by_run.get(run) if run else None
         with self.lock:
             self.task = {"arguments": arguments, "folder": folder, "title": title, "run": run}
-            self.reporter = Reporter(self.channels, title, sent=sent, phase=phase, keep=keep,
-                                     before=self.spent.get(run, 0.0), on_step=self.say_status)
+            self.reporter = Reporter(self.channels, title, sent=sent, phase=phase, plan_on_top=keep,
+                                     before=self.seconds_by_run.get(run, 0.0), on_step=self.say_status)
             with self.reporter.lock:
                 self.reporter.update()
             try:
-                self.process = self.spawn(arguments)
+                self.last_task = self.spawn(arguments)
             except OSError as exc:
-                self.process = None
+                self.last_task = None
                 return md(t"⚠️ **Could not start it:** {exc}")
-            self.reporter.pid = self.process.pid
-            self.followed = [process for process in self.followed if process.poll() is None] + [self.process]
-        if self.waiting and self.waiting["folder"] == folder:
-            self.waiting = None  # confirmed or being changed: it waits again only once its plan is shown
-        threading.Thread(target=self.follow, args=(self.process, self.reporter, self.task), daemon=True).start()
+            self.reporter.pid = self.last_task.pid
+            self.live_tasks = [process for process in self.live_tasks if process.poll() is None] + [self.last_task]
+        if self.waiting_plan and self.waiting_plan["folder"] == folder:
+            self.waiting_plan = None  # confirmed or being changed: it waits again only once its plan is shown
+        threading.Thread(target=self.follow, args=(self.last_task, self.reporter, self.task), daemon=True).start()
         return None
 
     def run_named(self, arguments):
         """The run a resume or amend names (the waiting one, named by its folder), else None."""
         name = refs(arguments[1:2])[0] if arguments[0] in ("resume", "amend") else ""
-        waiting = self.waiting or {}
+        waiting = self.waiting_plan or {}
         return waiting.get("run") if name and name == Path(str(waiting.get("folder", ""))).name else name or None
 
     def spawn(self, arguments):
@@ -831,7 +831,7 @@ class Desk:
         shown, a plan that waits kept, and its tracker removed."""
         looked = 0.0
         for line in process.stdout:
-            if self.echo:
+            if self.echo_to_terminal:
                 sys.stdout.write(line)
             reporter.printed(line)
             if time.monotonic() - looked >= self.TRACKER_LOOK_SECONDS:
@@ -846,7 +846,7 @@ class Desk:
             return
         if state.get("run"):
             task["run"] = state["run"]
-            self.boards[task["run"]] = reporter.sent
+            self.messages_by_run[task["run"]] = reporter.sent
         if state.get("folder"):
             task["folder"] = Path(state["folder"])
         if state.get("title"):
@@ -858,24 +858,24 @@ class Desk:
         final = reporter.tracked()
         self.learn(task, reporter, final)
         if task["run"]:
-            self.spent[task["run"]] = reporter.progress.snapshot.get("before", 0.0) + (final or {}).get("seconds", 0.0)
+            self.seconds_by_run[task["run"]] = reporter.progress.snapshot.get("before", 0.0) + (final or {}).get("seconds", 0.0)
         reporter.finish(final)
         if final is not None:
             Home.store().delete("running", str(process.pid))
         if task["run"] and reporter.progress.waiting():
             plan = reporter.progress.snapshot["waiting"]
-            self.waiting = {"run": task["run"], "folder": task["folder"], "title": task["title"],
+            self.waiting_plan = {"run": task["run"], "folder": task["folder"], "title": task["title"],
                             "spec": reporter.progress.ending(), "stage": "spec", "new": plan.get("kind") == "project"}
         self.say_status()
 
     def stop_task(self):
         if not self.busy():
             return False
-        os.killpg(self.process.pid, signal.SIGINT)  # as Ctrl-C: the run saves itself
+        os.killpg(self.last_task.pid, signal.SIGINT)  # as Ctrl-C: the run saves itself
         return True
 
     def busy(self):
-        return self.process is not None and self.process.poll() is None
+        return self.last_task is not None and self.last_task.poll() is None
 
     def running_now(self):
         """What runs now: the task started here, and any run from a terminal ({title, brief, text}). An exercise's
@@ -886,7 +886,7 @@ class Desk:
 
     def children(self):
         """The processes of the tasks started here (served as here, not as elsewhere): the last, and those it paused."""
-        return {process.pid for process in self.followed}
+        return {process.pid for process in self.live_tasks}
 
     def tinker(self, arguments, timeout=120):
         """What one of tinker's quick commands prints: its columns as a chat reads them (" | "), its first 40
@@ -981,9 +981,9 @@ class Talk:
               "(✅ done or fine, ⚠️ a problem, 💡 a tip, 👉 what to do next); never a heading or a table. Talk "
               "about anything. You cannot run anything yourself from the chat; these messages do:\n{commands}")
 
-    def __init__(self, commands, pausing=contextlib.nullcontext):
+    def __init__(self, commands, pausing_jobs=contextlib.nullcontext):
         self.commands, self.said, self.lock, self.turn = commands, {}, threading.Lock(), threading.Lock()
-        self.pausing = pausing  # while a reply is written: what runs is paused for the person
+        self.pausing_jobs = pausing_jobs
 
     def answer(self, channel, message, now, waiting=lambda: "", write=None, on_shown=None):
         """The reply to message, sent when written (in a thread, so `stop` is heard meanwhile). now(): what
@@ -1016,7 +1016,7 @@ class Talk:
         """The reply written (chats take turns, what runs paused first) into reply; written is set once it is done,
         or failed."""
         try:
-            with self.turn, self.pausing():
+            with self.turn, self.pausing_jobs():
                 reply.append(write_reply(*asked))
         finally:
             written.set()
@@ -1136,23 +1136,23 @@ class Shell:
 
     def __init__(self, talk, folder):
         self.talk, self.folder = talk, folder
-        self.proposed = {}  # (channel, chat) -> {line, asked, shown} waiting for confirm (STILL_NAMING meanwhile)
+        self.commands_to_confirm = {}
         self.shell = self.LOGIN_SHELL
 
     def name(self, channel, message, now):
         """Have the model name the command (the reply comes as a chat's: what runs paused, busy note and all)."""
         key = (channel.name, message.chat)
-        self.proposed[key] = self.STILL_NAMING
+        self.commands_to_confirm[key] = self.STILL_NAMING
 
         def shown(ids):
-            if isinstance(self.proposed.get(key), dict):
-                self.proposed[key]["shown"] = ids
+            if isinstance(self.commands_to_confirm.get(key), dict):
+                self.commands_to_confirm[key]["shown"] = ids
         self.talk.answer(channel, message, now, write=self.propose, on_shown=shown)
 
     def propose(self, channel, message, context, tokens):
         key = (channel.name, message.chat)
         if not self.talk.model():
-            self.proposed.pop(key, None)
+            self.commands_to_confirm.pop(key, None)
             return "⚠️ **No model is in use yet:** `tinker calibrate NAME`, then `tinker use-model NAME`."
         system = self.SYSTEM.format(system=os.uname().sysname, shell=Path(self.shell).name, folder=self.folder)
         try:
@@ -1160,13 +1160,13 @@ class Shell:
                                                                  {"role": "user", "content": message.text}],
                                          COMMAND_NAMING_MAX_TOKENS))
         except OllamaError as exc:
-            self.proposed.pop(key, None)
+            self.commands_to_confirm.pop(key, None)
             return md(t"⚠️ **The model did not answer:** {first_words(exc)}")
         line, does = str(data.get("command") or "").strip(), str(data.get("does") or "").strip()
         if not line or "\n" in line:
-            self.proposed.pop(key, None)
+            self.commands_to_confirm.pop(key, None)
             return md(t"🤷 **No command found:** {does or 'describe it another way'}")
-        self.proposed[key] = {"line": line, "asked": message.text, "shown": None}
+        self.commands_to_confirm[key] = {"line": line, "asked": message.text, "shown": None}
         return self.proposal(line, does)
 
     def proposal(self, line, does):
@@ -1178,9 +1178,9 @@ class Shell:
     def take(self, channel, chat):
         """The command waiting for this chat's next message (STILL_NAMING while it is named; None when none)."""
         key = (channel.name, chat)
-        line = self.proposed.get(key)
+        line = self.commands_to_confirm.get(key)
         if line != self.STILL_NAMING:
-            self.proposed.pop(key, None)
+            self.commands_to_confirm.pop(key, None)
         return line
 
     def drop(self, channel, chat, proposed):
@@ -1199,7 +1199,7 @@ class Shell:
         sent = channel.show(chat, sent, f"{head}\n{folded}", done=not tells)
         if not tells:
             return
-        with self.talk.pausing():  # the model reads the output: what runs is paused for the person again
+        with self.talk.pausing_jobs():  # the model reads the output: what runs is paused for the person again
             told = self.told(channel, chat, proposed["asked"], line, code, output)
         channel.show(chat, sent, f"{head}\n{told}\n{folded}" if told else f"{head}\n{folded}", done=True)
 
@@ -1375,14 +1375,14 @@ class Reporter:
     message when it changed (its clock moves on every CLOCK_ONLY_EDIT_SECONDS), and its ending is edited into it when
     the run ends. A command that keeps no tracker (learn, calibrate) shows its latest printed line."""
 
-    def __init__(self, channels, title, pid=None, sent=None, phase=Tracker.STARTING, keep="", before=0.0,
+    def __init__(self, channels, title, pid=None, sent=None, phase=Tracker.STARTING, plan_on_top="", before=0.0,
                  on_step=None):
         self.channels, self.progress, self.pid = channels, Progress(title, phase, before), pid
-        self.on_step = on_step  # told when the message changes (Tinker's status follows it)
-        self.keep = keep  # what stays at the top of the task's message (its confirmed plan), above its progress
+        self.on_step = on_step
+        self.plan_on_top = plan_on_top
         self.sent, self.last_edit, self.lock = ({} if sent is None else sent), 0.0, threading.Lock()
         self.ended = False
-        self.fresh = True  # its first update: the task (re)started from the person's message, below which it shows
+        self.send_at_bottom = True
         threading.Thread(target=self.keep_up, daemon=True).start()
 
     def keep_up(self):
@@ -1397,7 +1397,7 @@ class Reporter:
                 return
             state = self.tracked()
             went_on = ((state or {}).get("resumed") or 0) > (self.progress.snapshot.get("resumed") or 0)
-            self.fresh = self.fresh or went_on  # it went on by itself: shown at the bottom, where the person looks
+            self.send_at_bottom = self.send_at_bottom or went_on  # it went on by itself: shown at the bottom, where the person looks
             changed = self.progress.take(state)
             if changed or went_on or time.monotonic() - self.last_edit >= CLOCK_ONLY_EDIT_SECONDS:
                 self.update()
@@ -1416,8 +1416,8 @@ class Reporter:
     def say(self, text, done=False):
         """text shown in the task's message (Markup), under what it keeps; done: its last update. Its first
         update and its last come to the bottom of the chat (the task (re)started, or done: look here)."""
-        text = f"{self.keep}\n\n{text}" if self.keep else text
-        bottom, self.fresh = done or self.fresh, False
+        text = f"{self.plan_on_top}\n\n{text}" if self.plan_on_top else text
+        bottom, self.send_at_bottom = done or self.send_at_bottom, False
         for channel in self.channels:
             for chat in channel.allowed:
                 key = (channel.name, chat)
@@ -1720,8 +1720,8 @@ class Channel:
     def __init__(self, name, settings, secrets):
         self.name, self.settings, self.secrets = name, settings, secrets
         self.allowed = {str(chat) for chat in settings.get("allowed", [])}
-        self.closed = False  # the person ended the conversation here (the console: exit)
-        self.bare = True  # a conversation: commands are said as their words alone (said: no "tinker" before)
+        self.closed = False
+        self.commands_without_tinker = True
 
     def handle(self):
         """What the channel is called where it lives (a bot's @name); raises ChannelError when its
@@ -1789,7 +1789,7 @@ class Channel:
 
     def said(self, text):
         """text as this interface takes commands: in a conversation without "tinker" before them."""
-        return BARE_RE.sub("", text) if self.bare else text
+        return BARE_RE.sub("", text) if self.commands_without_tinker else text
 
     def skip_waiting(self):
         """Forget the messages sent while nothing listened: a command sent hours ago is not run now."""
@@ -1855,9 +1855,9 @@ class ConsoleChannel(Channel):
     CHAT = "console"
     PROMPT = "› " if sys.stdin.isatty() else ""
 
-    def __init__(self, bare=True):
+    def __init__(self, commands_without_tinker=True):
         super().__init__("console", {"allowed": [self.CHAT]}, {})
-        self.bare = bare  # a session: commands said as their words; said once (tinker COMMAND): as tinker ...
+        self.commands_without_tinker = commands_without_tinker
         self.lines, self.next_id, self.headlines, self.whole = queue.Queue(), 0, {}, {}
         self.reader, self.printing = None, threading.Lock()
 

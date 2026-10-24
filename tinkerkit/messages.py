@@ -44,8 +44,8 @@ class Messages:
 
     def __init__(self):
         self.depth, self.followers, self.log, self.drawn, self.frame = 0, [], None, False, 0
-        self.doing = ""  # what the command works on now, as it named it (see working_on)
-        self.stepping = ""  # the step said last: what the live line says goes on when nothing is named
+        self.doing = ""
+        self.last_step = ""
 
     def title(self, text, icon=""):
         """A part of the output begins: at the top, a blank line sets it apart."""
@@ -65,7 +65,7 @@ class Messages:
         self.say("text", text)
 
     def step(self, text, icon=""):
-        self.stepping = text.rstrip(".…")
+        self.last_step = text.rstrip(".…")
         self.say("step", text, icon)
 
     def info(self, text, icon=""):
@@ -162,7 +162,7 @@ class Messages:
 
     def going_on(self):
         """What the live line says goes on: what the command works on, else the step it said last."""
-        return self.doing or self.stepping or "Working on it"
+        return self.doing or self.last_step or "Working on it"
 
     def end_live(self):
         if self.drawn:

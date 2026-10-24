@@ -200,7 +200,7 @@ class Home:
     """Tinker's own folder next to the script (.tinker): its database, tinker.db (settings, measured
     models, what it knows, the projects it points to, the channels), and the channels' lock files.
     Only Home knows where it is; tinker reset deletes it."""
-    root = Path(__file__).resolve().parent.parent / STATE_DIR  # next to the script (its real file, not a link)
+    root = Path(__file__).resolve().parent.parent / STATE_DIR
     stores = {}
 
     @classmethod
@@ -363,7 +363,7 @@ class Config:
                 "docs_latest_days", "fetch_workers", "fetch_timeout", "fetch_max_bytes",
                 "fetch_domain_delay", "fetch_fallbacks", "projects")
     OWN_COMMAND = {"model": "use-model", "embed_model": "embed", "web": "use-web"}
-    checks = []  # more checks of the settings, from the parts that use them (the Internet plugin's)
+    checks = []
 
     @staticmethod
     def load():

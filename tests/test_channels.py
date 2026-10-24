@@ -181,7 +181,7 @@ def test_receive(monkeypatch):
     messages = channel.receive(1)
     assert [(message.chat, message.text, message.sender, message.id)
             for message in messages] == [("42", "hello", "me", 5)]
-    assert channel.offset == 12 and channel.alive["42"] == [5, 6]
+    assert channel.offset == 12 and channel.live_message_ids["42"] == [5, 6]
     monkeypatch.setattr(channels.time, "sleep", lambda seconds: None)
     assert telegram(BotAPI(getUpdates=[OSError("down"), OSError("down")])).receive(1) == []
 
@@ -324,7 +324,7 @@ def test_send_file_uploads_a_document_with_its_caption(tmp_path):
     assert named["chat_id"] == b"42" and named["parse_mode"] == b"HTML"
     assert named["caption"].startswith(b"<b>Tinker's memory</b> xx") and len(named["caption"].decode()) == 1024
     assert named["document"] == b"<!doctype html><p>graph</p>" and b'filename="memory.html"' in body
-    assert parts[-1] == b"--\r\n" and channel.alive["42"] == [12]
+    assert parts[-1] == b"--\r\n" and channel.live_message_ids["42"] == [12]
     failing = telegram(BotAPI(sendDocument=(400, "Bad Request: file too big"), sendMessage={"message_id": 13}))
     assert failing.send_file("42", page, "the caption") == 13
 

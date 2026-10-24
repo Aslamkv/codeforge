@@ -126,13 +126,13 @@ class Tidy(Phase):
 
     def broke(self, change, passing):
         """A test that passed fails now, or a test is gone from a test file it tidied."""
-        self.session.all_tests_run = None
+        self.session.last_all_tests_run = None
         tests_kept = all(TestRef.name_at(self.workspace.read(path), name) >= 0 for path in change.files
                          for name in self.project.test_names(path))
         if tests_kept and passing <= Verifier(self.session).passing():
             return False
         self.workspace.revert(change)
-        self.session.all_tests_run = None
+        self.session.last_all_tests_run = None
         return True
 
 
@@ -381,7 +381,7 @@ class ReadmeWriter(Phase):
             why = "; ".join(change.notes) or "it changed no file shown"
             say.skip(f"README fix: no usable change ({first_line(why, 160)})")
             return f"Your last reply could not be used: {why}. Give each file you change complete."
-        self.session.all_tests_run = None
+        self.session.last_all_tests_run = None
         if not passing <= Verifier(self.session).passing():
             self.workspace.revert(change)
             say.warn("README fix: it broke a passing test; reverted")
@@ -429,7 +429,7 @@ class FinalReview(Phase):
 
     def suite_problem(self):
         """(what is wrong, its output) of the whole suite run twice as a person runs it, or ("", "")."""
-        self.session.all_tests_run = None
+        self.session.last_all_tests_run = None
         code, output = self.session.run_all_tests()
         if code != 0:
             return (f"`{self.session.toolchain.test_all}` fails when the whole suite runs: "

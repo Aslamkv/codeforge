@@ -310,15 +310,15 @@ TOOLS = {"setup": ["python3 -m venv .venv", "cp .env.example .env", "brew instal
 def test_toolchain_reads_and_filters_setup():
     toolchain = Toolchain(TOOLS)
     assert toolchain.setup == ["python3 -m venv .venv", "pip install -r requirements.txt"]
-    assert toolchain.dropped == ["cp .env.example .env"]
-    assert toolchain.machine == ["brew install x", "pip install --user y", "npm install -g z"]
+    assert toolchain.env_commands_dropped == ["cp .env.example .env"]
+    assert toolchain.machine_changing_commands == ["brew install x", "pip install --user y", "npm install -g z"]
     assert toolchain.use == ["make"] and toolchain.run == "python3 app.py" and toolchain
 
 
 @pytest.mark.spec("WS-11")
 def test_toolchain_lint_none_and_truth():
     toolchain = Toolchain(dict(TOOLS, lint="none"))
-    assert toolchain.lint == "" and toolchain.lint_named and toolchain.to_dict()["lint"] == "none"
+    assert toolchain.lint == "" and toolchain.lint_declared and toolchain.to_dict()["lint"] == "none"
     assert not Toolchain({"test_all": "pytest"}) and not Toolchain(None) and not Toolchain("junk")
 
 

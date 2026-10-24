@@ -540,7 +540,7 @@ too: they are answered at once, so there is no emergency command.
   the prompt budget, gives the reply's content, and logs the exchange to its log.
 - **MOD-16** A reply cut off while it is still thinking is asked again: first with twice the budget,
   up to the cap; then, if `unthinking_retry`, without thinking, with the thought so far to
-  conclude. Otherwise the result is `""`, with `overthought` set and `last_thought` kept. A cut
+  conclude. Otherwise the result is `""`, with `hit_thinking_cap` set and `last_unfinished_thought` kept. A cut
   reply is finished, and kept, when its `done_when` says so or its blocks have all ended.
 - **MOD-17** A failed request is tried again after what the failure calls for. Out of memory: a
   smaller prompt budget, up to `OOM_RETRIES` times. A stall: the model is reloaded, up to

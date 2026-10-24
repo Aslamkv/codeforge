@@ -91,11 +91,11 @@ class SlotLearner:
         self.log = RequestLog()
         self.throttle = Throttle(Config.get("learn_rate"), Config.get("learn_backoff"))
         self.cleaner = Cleaner()
-        self.fetcher = None  # the plugin's page fetcher, once the plugin is known to be there
+        self.fetcher = None
         self.topic, self.known, self.tried, self.seen, self.docs = "", None, [], set(), {}
         self.searches, self.fallbacks, self.saw_429, self.incomplete = 0, 0, False, False
         self.pages = Counter()
-        self.recap = []  # the summary as (label, value), once learned
+        self.recap = []
 
     def learn(self, topic, deep=False):
         """The topic learned and saved (its entry); a topic researched before is researched again when deep,

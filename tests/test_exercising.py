@@ -77,7 +77,7 @@ def projects(tmp_path, home_store):
 
 
 def exercise_of(make_model, builds, title="Exercising rust"):
-    return Exercise(make_model(), Tracker(title), start=builds)
+    return Exercise(make_model(), Tracker(title), start_build=builds)
 
 
 @pytest.mark.spec("EXR-1")
@@ -221,7 +221,7 @@ def test_the_exercise_has_no_rule_of_its_own_for_giving_way(make_model, home_sto
     signals = []
     monkeypatch.setattr(os, "killpg", lambda pid, signum: signals.append(signum))
     home_store.put("activity", "answering", {"a chat": os.getpid()})  # the person is answered: that pauses it as a job
-    code = Exercise(make_model(), Tracker("Exercising rust"), start=lambda arguments: FakeBuild(polls=3, code=0)).built(
+    code = Exercise(make_model(), Tracker("Exercising rust"), start_build=lambda arguments: FakeBuild(polls=3, code=0)).built(
         lambda: ["task", "t"])
     assert code == 0 and signals == []
     assert not hasattr(exercising, "person_busy") and not hasattr(Exercise, "wait_until_quiet")
@@ -231,7 +231,7 @@ def test_the_exercise_has_no_rule_of_its_own_for_giving_way(make_model, home_sto
 def test_the_exercise_shows_what_its_build_does(make_model, home_store, monkeypatch):
     build = FakeBuild(polls=1)
     build.pid = OTHER_LIVE_PID  # a build that runs: its tracker is kept
-    exercise = Exercise(make_model(), Tracker("Exercising rust"), start=lambda arguments: build)
+    exercise = Exercise(make_model(), Tracker("Exercising rust"), start_build=lambda arguments: build)
     exercise.on_to("build")
     home_store.put("running", str(OTHER_LIVE_PID), {"doing": "💻 Writing the code", "working": "Writing a.py",
                                          "latest": "✅ Wrote a.py", "passing": [2, 5], "exercise": True})
@@ -410,12 +410,12 @@ def test_every_exercise_keeps_one_message_started_stopped_or_resumed(home_store,
     desk.follow_exercise(OTHER_LIVE_PID, "Exercising Rust", lambda: first_ended.append(True) or time.sleep(0.2))
     assert desk.stop_exercise() is None and told == [(OTHER_LIVE_PID, conversation.JOB_STOP_SIGNAL)]
     for _ in range(100):
-        if desk.exercising is None:
+        if desk.exercise_reporter is None:
             break
         time.sleep(0.05)
     desk.follow_exercise(OTHER_LIVE_PID, "resume #4", lambda: None)  # the next exercise: the same message
     for _ in range(100):
-        if desk.exercising is None:
+        if desk.exercise_reporter is None:
             break
         time.sleep(0.05)
     sent = {entry[2] for entry in channel.log if entry[0] == "send" and "🔨 **" in entry[3]}

@@ -156,7 +156,7 @@ def test_said_removes_tinker_before_a_command():
     channel = Recorder()
     assert channel.said("Build it: tinker resume abc (or tinker   amend)") == "Build it: resume abc (or tinker   amend)"
     assert channel.said("the tinker tool and /x/tinker task") == "the tinker tool and /x/tinker task"
-    channel.bare = False
+    channel.commands_without_tinker = False
     assert channel.said("tinker resume abc") == "tinker resume abc"
 
 
@@ -480,8 +480,8 @@ def desk(tmp_path, monkeypatch, home_store):
     monkeypatch.setattr(desk, "tinker", lambda words: desk.ran.append(words) or f"output of {' '.join(words)}")
     yield desk, channel, script
     desk.stop_task()
-    if desk.process:
-        desk.process.wait(10)
+    if desk.last_task:
+        desk.last_task.wait(10)
     if desk.reporter:
         desk.reporter.ended = True
 
@@ -527,10 +527,10 @@ def test_a_command_that_deletes_and_exit_ask_first(desk):
 def test_a_task_runs_as_its_own_tinker_and_its_plan_waits(desk, home_store):
     desk, channel, script = desk
     say(desk, channel, "task a calculator")
-    wait_until(lambda: desk.waiting is not None)
+    wait_until(lambda: desk.waiting_plan is not None)
     assert calls_of(script) == ["help", "task a calculator --confirm"]
-    assert desk.waiting["run"] == "abc123" and desk.waiting["stage"] == "spec" and desk.waiting["new"]
-    assert desk.waiting["spec"].startswith("📋 **Plan for calc** · run `abc123`")
+    assert desk.waiting_plan["run"] == "abc123" and desk.waiting_plan["stage"] == "spec" and desk.waiting_plan["new"]
+    assert desk.waiting_plan["spec"].startswith("📋 **Plan for calc** · run `abc123`")
     assert desk.status().startswith("🙋 **Tinker** · calc: a calculator waits for you")
     assert home_store.items("running") == {}  # the task's tracker is read last, then removed
 
@@ -539,24 +539,24 @@ def test_a_task_runs_as_its_own_tinker_and_its_plan_waits(desk, home_store):
 def test_confirm_asks_a_new_projects_folder_once_then_builds(desk):
     desk, channel, script = desk
     say(desk, channel, "task a calculator")
-    wait_until(lambda: desk.waiting is not None)
+    wait_until(lambda: desk.waiting_plan is not None)
     say(desk, channel, "confirm")
-    assert desk.waiting["stage"] == "name" and any("📁 **Its folder:** `calc`" in text for text in channel.texts()[-3:])
+    assert desk.waiting_plan["stage"] == "name" and any("📁 **Its folder:** `calc`" in text for text in channel.texts()[-3:])
     say(desk, channel, "confirm")
     wait_until(lambda: "resume @abc123" in calls_of(script))
     wait_until(lambda: not desk.busy())
-    assert desk.waiting is None
+    assert desk.waiting_plan is None
 
 
 @pytest.mark.spec("CNV-16")
 def test_confirm_of_a_feature_builds_at_once_and_amend_changes_it(desk):
     desk, channel, script = desk
-    desk.waiting = {"run": "abc123", "folder": desk.root / "calc", "title": "calc: history", "spec": "📋 plan",
+    desk.waiting_plan = {"run": "abc123", "folder": desk.root / "calc", "title": "calc: history", "spec": "📋 plan",
                     "stage": "spec", "new": False}
     say(desk, channel, "amend also keep the date")
     wait_until(lambda: "amend @abc123 also keep the date" in calls_of(script))
     wait_until(lambda: not desk.busy())
-    desk.waiting = {"run": "abc123", "folder": desk.root / "calc", "title": "calc: history", "spec": "📋 plan",
+    desk.waiting_plan = {"run": "abc123", "folder": desk.root / "calc", "title": "calc: history", "spec": "📋 plan",
                     "stage": "spec", "new": False}
     say(desk, channel, "confirm @calc")
     wait_until(lambda: "resume @abc123" in calls_of(script))
@@ -592,7 +592,7 @@ def test_a_command_sent_alone_asks_for_its_words(desk, monkeypatch):
     say(desk, channel, "/status")  # a command of its own: the words are no longer waited for
     say(desk, channel, "status")
     assert answered == ["fix typing 2/0 crashes", "ask help me", "read /tmp/book.epub", "/status", "status"]
-    assert desk.wanting == {}
+    assert desk.commands_wanting_words == {}
 
 
 @pytest.mark.spec("CNV-27")
@@ -623,7 +623,7 @@ def test_a_glance_goes_soon_and_history_shows_things_again(desk, monkeypatch):
 @pytest.mark.spec("CNV-17")
 def test_follow_reads_the_tasks_tracker(tmp_path, home_store):
     desk = Desk.__new__(Desk)
-    desk.echo, desk.boards, desk.spent, desk.waiting = False, {}, {}, None
+    desk.echo_to_terminal, desk.messages_by_run, desk.seconds_by_run, desk.waiting_plan = False, {}, {}, None
     desk.say_status = lambda *args, **kwargs: None
     reporter = Reporter([Recorder()], "a calculator", pid=4343)
     home_store.put("running", "4343", snapshot(folder="/tmp/projects/calc", waiting=PLAN))
@@ -633,7 +633,7 @@ def test_follow_reads_the_tasks_tracker(tmp_path, home_store):
     desk.follow(process, reporter, task)
     assert task["run"] == "abc123" and task["folder"] == Path("/tmp/projects/calc")
     assert task["title"] == "calc: a calculator" == reporter.progress.title
-    assert desk.waiting["run"] == "abc123" and desk.boards["abc123"] is reporter.sent
+    assert desk.waiting_plan["run"] == "abc123" and desk.messages_by_run["abc123"] is reporter.sent
     assert home_store.get("running", "4343") is None
 
 
@@ -679,12 +679,12 @@ def test_a_chat_pauses_the_job_that_runs_before_it_is_answered(desk, monkeypatch
         order.append("paused")
         yield
         order.append("goes on")
-    monkeypatch.setattr(desk.talk, "pausing", pausing)
+    monkeypatch.setattr(desk.talk, "pausing_jobs", pausing)
     monkeypatch.setattr(desk.talk, "reply", lambda *asked: order.append("answered") or "the answer")
     say(desk, channel, "hello there")
     wait_until(lambda: any("the answer" in text for text in channel.texts()))
     assert order == ["paused", "answered", "goes on"]
-    assert Desk([channel], desk.root).talk.pausing is conversation.paused_for_you
+    assert Desk([channel], desk.root).talk.pausing_jobs is conversation.paused_for_you
 
 
 @pytest.mark.spec("JOB-10")
@@ -890,7 +890,7 @@ def test_start_is_answered_with_a_welcome(desk):
     for section in ("🔨 **Build something**", "📂 **Your projects**", "💬 **Ask me anything**", "⏳ **While I work**"):
         assert section in text
     assert "`task a calculator in Python`" in text and "normal chat" in text and "`help`" in text
-    assert calls_of(script) == ["help"] and desk.process is None  # no task, no chat
+    assert calls_of(script) == ["help"] and desk.last_task is None  # no task, no chat
     say(desk, channel, "/start abcdef")  # a start link with a payload is a start too
     assert channel.texts()[-1] == welcome()
 
@@ -939,7 +939,7 @@ def test_a_command_line_run_once_confirmed_pauses_the_job_while_its_output_is_re
         order.append("paused")
         yield
         order.append("goes on")
-    talk = Talk("cmds", pausing=pausing)
+    talk = Talk("cmds", pausing_jobs=pausing)
     monkeypatch.setattr(talk, "model", lambda: ("m", {}, None))
     monkeypatch.setattr(talk, "ask", lambda *asked: order.append("read") or "it says hi")
     channel = Recorder()

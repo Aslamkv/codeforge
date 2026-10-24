@@ -77,13 +77,13 @@ def test_context_for_and_reply_limits():
 @pytest.mark.spec("MOD-5")
 def test_remember_keeps_the_learned_chars_per_token(measured_model, make_model, capsys):
     model = make_model()
-    model.ratios = [3.5, 2.9, 3.1, 3.3, 3.0]
+    model.recent_chars_per_token = [3.5, 2.9, 3.1, 3.3, 3.0]
     model.crashes = 2
     model.max_tokens = 5000
     Models.remember(model)
     assert Models.settings(MODEL)["chars_per_token"] == 2.9
     assert "crashed 2 time(s)" in capsys.readouterr().out
-    model.ratios = [3.0] * 4  # too few to learn from
+    model.recent_chars_per_token = [3.0] * 4  # too few to learn from
     Models.remember(model)
     assert Models.settings(MODEL)["chars_per_token"] == 2.9
 
@@ -161,7 +161,7 @@ def test_stream_keeps_the_end_of_the_thought(monkeypatch):
     stream = Stream(None, None)
     for piece in ("a" * 8, "b" * 8):
         stream.take({"message": {"thinking": piece}})
-    assert stream.thought == "aa" + "b" * 8 and stream.thinking == 2
+    assert stream.thought_tail == "aa" + "b" * 8 and stream.thinking == 2
 
 
 @pytest.mark.spec("MOD-9")
@@ -240,11 +240,11 @@ def test_shared(context, shared):
 def test_safe_ratio():
     calibrator = Calibrator("m")
     assert calibrator.safe_ratio() == STARTING_CHARS_PER_TOKEN
-    calibrator.measured_ratio = 3.0
+    calibrator.measured_chars_per_token = 3.0
     assert calibrator.safe_ratio() == 2.91
-    calibrator.measured_ratio = 9.0
+    calibrator.measured_chars_per_token = 9.0
     assert calibrator.safe_ratio() == 4.0
-    calibrator.measured_ratio = 1.0
+    calibrator.measured_chars_per_token = 1.0
     assert calibrator.safe_ratio() == 2.0
 
 
@@ -306,7 +306,7 @@ def test_model_settings(make_model):
     assert (model.max_tokens, model.num_ctx, model.max_reply, model.fix_max) == (8192, 32768, 16384, 4096)
     assert model.options == {"num_batch": 256} and model.chars_per_token == 4.0
     assert model.build_think == "medium" and model.think_now() == "high"
-    model.building = True
+    model.is_building = True
     assert model.think_now() == "medium"
     assert make_model(think=None).build_think is None
     assert model.limit_chars("s" * 100) == int(8192 * PROMPT_BUDGET_SHARE * 4.0) - 140
@@ -364,7 +364,7 @@ def test_without_unthinking_retry_it_gives_up(make_model, fake_ollama):
     fake_ollama.reply(cut("half a thought"))
     model = make_model()
     assert model.ask("s", [Part("Q", "q", True)], "Ask", unthinking_retry=False) == ""
-    assert model.overthought and model.last_thought == "half a thought"
+    assert model.hit_thinking_cap and model.last_unfinished_thought == "half a thought"
 
 
 @pytest.mark.spec("MOD-16")
@@ -469,7 +469,7 @@ def test_ask_until_usable(make_model, fake_ollama):
 def test_learn_chars_per_token(make_model):
     model = make_model()
     model.learn_chars_per_token(3000, 40)  # too few tokens to tell
-    assert model.ratios == [] and model.learned_chars_per_token() is None
+    assert model.recent_chars_per_token == [] and model.learned_chars_per_token() is None
     for chars in (3100, 2900, 3300, 3500, 3200):
         model.learn_chars_per_token(chars, 1000)
     assert model.chars_per_token == 2.9 and model.learned_chars_per_token() == 2.9
@@ -477,7 +477,7 @@ def test_learn_chars_per_token(make_model):
     assert model.chars_per_token == 2.0
     for _ in range(25):
         model.learn_chars_per_token(3000, 1000)
-    assert len(model.ratios) == 20 and model.chars_per_token == 3.0
+    assert len(model.recent_chars_per_token) == 20 and model.chars_per_token == 3.0
 
 
 @pytest.mark.spec("MOD-21")
@@ -502,7 +502,7 @@ def test_a_failed_probe_is_recorded_and_waited_out(monkeypatch, fake_ollama, no_
     monkeypatch.setattr(Ollama, "installed_models", staticmethod(lambda: [{"name": "m"}]))
     calibrator = Calibrator("m")
     assert calibrator.probe(4096, 8192) is None
-    assert calibrator.history == [[4096, "crashed"]] and model_module.CRASH_RECOVERY_SECONDS in no_sleep
+    assert calibrator.probe_history == [[4096, "crashed"]] and model_module.CRASH_RECOVERY_SECONDS in no_sleep
     assert fake_ollama.unloaded == ["m"] and "Could not read it (llama runner process has terminated)" in capsys.readouterr().out
     monkeypatch.setattr(Ollama, "installed_models", staticmethod(lambda: None))
     with pytest.raises(SystemExit, match="Ollama stopped answering during calibration"):

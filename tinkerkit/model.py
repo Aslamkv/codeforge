@@ -61,20 +61,20 @@ class Model:
         self.max_tokens, self.num_ctx = int(settings["max_prompt_tokens"]), int(settings["num_ctx"])
         self.think = settings.get("think")
         self.build_think = Config.get("build_think") if self.think not in (None, False) else None
-        self.building = False  # set per phase: building calls think at build_think, planning at think
+        self.is_building = False
         self.max_reply, self.fix_max = int(settings["max_reply_tokens"]), int(settings["fix_max_tokens"])
         self.keep_alive = keep_alive
         self.options = {"num_batch": int(settings["num_batch"])} if settings.get("num_batch") else {}
         self.log, self.exclusive, self.max_growth = log, exclusive, max_growth
         self.think_rejected = False
-        self.overthought = False    # the last call thought to its cap without an answer
-        self.last_thought = ""      # ... and the end of what it thought
-        self.crashes = 0            # runner crashes in this run (limits lowered after them hold for this run only)
+        self.hit_thinking_cap = False
+        self.last_unfinished_thought = ""
+        self.crashes = 0
         self.calibrated = (self.max_tokens, self.max_reply)
         self.base_gb = None
         self.chars_per_token = max(MIN_CHARS_PER_TOKEN, min(float(settings.get("chars_per_token") or STARTING_CHARS_PER_TOKEN),
                                                             MAX_CHARS_PER_TOKEN))
-        self.ratios = []  # chars per real token of recent prompts
+        self.recent_chars_per_token = []
 
     def ask(self, system, parts, label, **kw):
         """One request (ask_once); a prompt too large as it is gets every part shortened (exact
@@ -94,12 +94,12 @@ class Model:
         is cut is asked again from the start.
         A reply cut off while still thinking is asked again with twice the budget up to max_reply,
         then (if unthinking_retry) without thinking; otherwise it counts as an empty reply (and
-        self.overthought says so). A cut reply is finished when done_when says so or its blocks have
+        self.hit_thinking_cap says so). A cut reply is finished when done_when says so or its blocks have
         all ended (done_when may wait for the model to run on). think: this call's think setting
         instead of the phase's."""
         if self.exclusive:
             self.evict_others()
-        self.overthought = False
+        self.hit_thinking_cap = False
         chosen = self.think_now() if think is None else think
         tries = Tries(None if self.think_rejected else chosen, budget or self.max_reply)
         request = (system + Prompts.NO_TOOL_CALLS, parts, label, done_when, max_reply or self.max_reply,
@@ -111,7 +111,7 @@ class Model:
 
     def one_try(self, tries, system, parts, label, done_when, max_reply, unthinking_retry):
         """One try of a request: its reply, or None to try again (after what went wrong calls for)."""
-        user = self.user_message(system, self.with_thought(parts, tries.thought), label, tries.shrink)
+        user = self.user_message(system, self.with_thought(parts, tries.unfinished_thought), label, tries.shrink)
         cap = min(self.reply_room(system, user), self.max_reply, max_reply)
         tries.budget = max(MIN_REPLY_TOKENS, min(tries.budget, cap))
         shown = self.call_label(label, tries.think, tries.budget)
@@ -136,7 +136,7 @@ class Model:
 
     def think_now(self):
         """The think setting for the current phase: planning at the model's, building at build_think."""
-        return self.build_think if self.building and self.build_think else self.think
+        return self.build_think if self.is_building and self.build_think else self.think
 
     def user_message(self, system, parts, label, shrink):
         limit = self.limit_chars(system, int(self.max_tokens * OOM_RETRY_PROMPT_SHARE ** shrink))
@@ -299,7 +299,7 @@ class Model:
 
     def build_thinking_rejected(self, exc, think):
         """Whether the model refused the think setting kept for building, which differs from planning's."""
-        return self.building and think == self.build_think != self.think and exc.about_thinking
+        return self.is_building and think == self.build_think != self.think and exc.about_thinking
 
     def prompt_tokens(self, system, user):
         """The most tokens system + user can be (the lowest chars per token seen)."""
@@ -320,8 +320,8 @@ class Model:
     def learn_chars_per_token(self, chars, tokens):
         """Learn chars per token from real prompts: the lowest recent ratio, capped."""
         if tokens and chars and tokens > 50:
-            self.ratios = (self.ratios + [chars / tokens])[-20:]
-            self.chars_per_token = max(MIN_CHARS_PER_TOKEN, min(min(self.ratios), MAX_CHARS_PER_TOKEN))
+            self.recent_chars_per_token = (self.recent_chars_per_token + [chars / tokens])[-20:]
+            self.chars_per_token = max(MIN_CHARS_PER_TOKEN, min(min(self.recent_chars_per_token), MAX_CHARS_PER_TOKEN))
 
     @staticmethod
     def unfinished(content, done_when):
@@ -331,17 +331,17 @@ class Model:
     def think_again(self, tries, data, shown, started, cap, unthinking_retry):
         """After a reply cut off while still thinking: True to ask again, with more room or without
         thinking (then given the thought so far to conclude: what was thought is not lost), or False
-        to give up (an empty reply; self.overthought and self.last_thought say so)."""
+        to give up (an empty reply; self.hit_thinking_cap and self.last_unfinished_thought say so)."""
         action, said = self.after_cut(data, tries.budget, cap, unthinking_retry)
         self.step(f"{shown}  ({said})", started)
         thought = data["message"].get("thinking", "")
         if action == "give up":
-            self.overthought, self.last_thought = True, thought
+            self.hit_thinking_cap, self.last_unfinished_thought = True, thought
             return False
         if action == "more":
             tries.budget = min(tries.budget * 2, cap)
         else:
-            tries.think, tries.thought = False, thought
+            tries.think, tries.unfinished_thought = False, thought
         return True
 
     @staticmethod
@@ -421,7 +421,7 @@ class Model:
 
     def learned_chars_per_token(self):
         """What this run's prompts showed (None until enough were seen): the next run starts there."""
-        return round(min(self.ratios), 2) if len(self.ratios) >= 5 else None
+        return round(min(self.recent_chars_per_token), 2) if len(self.recent_chars_per_token) >= 5 else None
 
 
 class Tries:
@@ -432,7 +432,7 @@ class Tries:
     def __init__(self, think, budget):
         self.think, self.budget = think, budget
         self.shrink = self.stalls = self.crashes = self.reply_errors = 0
-        self.thought = ""  # what a try cut off while thinking had thought (the next one concludes it)
+        self.unfinished_thought = ""
 
 
 class Models:
@@ -548,13 +548,13 @@ class Calibrator:
 
     def __init__(self, name):
         self.name = name
-        self.tokens_per_digit = 1.0  # a digit is one token in most tokenizers; measured by each read
-        self.best = {}               # Ollama's stats for the largest prompt read
+        self.tokens_per_digit = 1.0
+        self.largest_read_stats = {}
         self.load_seconds = None
-        self.options = {}            # num_batch, when reading a prompt in pieces avoids a crash
-        self.measured_ratio = None   # chars per token of prompt-like text
-        self.history = []            # [tokens, "read" | "crashed"] of every probe, kept in the settings
-        self.write_tps = None        # tokens written per second
+        self.options = {}
+        self.measured_chars_per_token = None
+        self.probe_history = []
+        self.write_tokens_per_second = None
 
     def run(self):
         say.title(f"Calibrating {self.name} (once per model; a few minutes)", "📏")
@@ -632,7 +632,7 @@ class Calibrator:
                 raise SystemExit(f"{self.name} does not run: {exc}")
             self.measure_chat(content, data)
             with say.section():
-                say.info(f"Thinks with {think!r}; {self.safe_ratio()} chars per token; writes {self.write_tps} "
+                say.info(f"Thinks with {think!r}; {self.safe_ratio()} chars per token; writes {self.write_tokens_per_second} "
                          f"tokens a second", "🧠")
             return think
         return None
@@ -641,9 +641,9 @@ class Calibrator:
         """From a chat's stats: how long the model took to load, its chars per token, how fast it writes."""
         self.load_seconds = round(data.get("load_duration", 0) / 1e9, 1)
         read, written = data.get("prompt_eval_count") or 0, data.get("eval_count") or 0
-        self.measured_ratio = len(content) / read if read > 50 else None
+        self.measured_chars_per_token = len(content) / read if read > 50 else None
         seconds = (data.get("eval_duration") or 0) / 1e9
-        self.write_tps = round(written / seconds, 1) if written and seconds else None
+        self.write_tokens_per_second = round(written / seconds, 1) if written and seconds else None
 
     def capacity(self, target, facts):
         """(the largest context that reads, the smallest that failed or None): the target first;
@@ -700,7 +700,7 @@ class Calibrator:
             raise SystemExit(f"Ollama stopped answering during calibration: {exc}")
         with say.section(), say.section():
             say.fail(f"Could not read it ({first_line(str(exc), 100)})")
-        self.history.append([tokens, "crashed"])
+        self.probe_history.append([tokens, "crashed"])
         Ollama.unload(self.name)
         time.sleep(CRASH_RECOVERY_SECONDS)
 
@@ -708,18 +708,18 @@ class Calibrator:
         """The tokens read, noted with what they teach: tokens per digit, and the largest read so far."""
         read = data.get("prompt_eval_count") or tokens
         self.tokens_per_digit = read / digits
-        self.history.append([read, "read"])
-        if read >= self.best.get("prompt_eval_count", 0):
-            self.best = data
+        self.probe_history.append([read, "read"])
+        if read >= self.largest_read_stats.get("prompt_eval_count", 0):
+            self.largest_read_stats = data
         with say.section(), say.section():
             say.done(f"Read {read} tokens in {data.get('prompt_eval_duration', 0) / 1e9:.0f}s")
         return read
 
     def read_speed(self):
         """Tokens a second it reads (from the last read; at first a guess from how fast it writes)."""
-        if self.best.get("prompt_eval_duration"):
-            return self.best["prompt_eval_count"] / self.best["prompt_eval_duration"] * 1e9
-        return (self.write_tps or 25) * 4
+        if self.largest_read_stats.get("prompt_eval_duration"):
+            return self.largest_read_stats["prompt_eval_count"] / self.largest_read_stats["prompt_eval_duration"] * 1e9
+        return (self.write_tokens_per_second or 25) * 4
 
     @staticmethod
     def shared(context):
@@ -734,16 +734,16 @@ class Calibrator:
                 "num_ctx": Models.context_for(budget, max_reply, facts["context_length"]),
                 "context_length": facts["context_length"], "think": think, **Models.reply_limits(max_reply),
                 "chars_per_token": self.safe_ratio(), "num_batch": self.options.get("num_batch"),
-                "read_tokens_per_s": round(self.read_speed()) if self.best else None,
-                "write_tokens_per_s": self.write_tps, "load_seconds": self.load_seconds, "probes": self.history,
+                "read_tokens_per_s": round(self.read_speed()) if self.largest_read_stats else None,
+                "write_tokens_per_s": self.write_tokens_per_second, "load_seconds": self.load_seconds, "probes": self.probe_history,
                 "tokens_per_digit": round(self.tokens_per_digit, 4)}
 
     def safe_ratio(self):
         """The chars per token prompts are sized with: what was measured, 3% lower (prompts with
         more markup have fewer chars per token; each run then learns the real ones)."""
-        if not self.measured_ratio:
+        if not self.measured_chars_per_token:
             return STARTING_CHARS_PER_TOKEN
-        return round(max(MIN_CHARS_PER_TOKEN, min(self.measured_ratio * 0.97, MAX_CHARS_PER_TOKEN)), 2)
+        return round(max(MIN_CHARS_PER_TOKEN, min(self.measured_chars_per_token * 0.97, MAX_CHARS_PER_TOKEN)), 2)
 
 
 class Ollama:
@@ -782,7 +782,7 @@ class Ollama:
                               stalled=True)
         finally:
             stream.close()
-        stream.final["message"] = {"role": "assistant", "content": stream.reply, "thinking": stream.thought}
+        stream.final["message"] = {"role": "assistant", "content": stream.reply, "thinking": stream.thought_tail}
         return stream.final
 
     @staticmethod
@@ -898,7 +898,7 @@ class Stream:
     def __init__(self, label, done_when):
         self.label, self.done_when = label, done_when
         self.content, self.written, self.thinking, self.final = "", 0, 0, {}
-        self.thought = ""  # the end of what the model thought (kept for a reply cut while thinking)
+        self.thought_tail = ""
         self.started = self.last_print = time.perf_counter()
         self.progressed = False
         self.answer, self.complete_at = None, None  # the reply as it was when complete, and when
@@ -940,7 +940,7 @@ class Stream:
         self.content += piece
         self.written += bool(piece)
         self.thinking += bool(message.get("thinking"))
-        self.thought = (self.thought + (message.get("thinking") or ""))[-UNFINISHED_THOUGHT_KEPT_CHARS:]
+        self.thought_tail = (self.thought_tail + (message.get("thinking") or ""))[-UNFINISHED_THOUGHT_KEPT_CHARS:]
         return piece
 
     def show(self):
@@ -1000,7 +1000,7 @@ class OllamaError(Exception):
         super().__init__(message)
         self.oom, self.stalled, self.crashed = oom, stalled, crashed
         self.in_reply, self.partial = in_reply, partial
-        self.streamed = streamed  # tokens the model had written (thinking included) when it failed
+        self.streamed = streamed
 
     @property
     def about_thinking(self):

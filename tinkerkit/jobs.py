@@ -78,8 +78,8 @@ class Jobs:
     updated, today, paused_by}. current: the job this process runs; journal: its journal."""
     current = None
     journal = None
-    ending = None  # the status the job's tracker ended with ("stopped", "paused": it can go on)
-    resuming = False  # this process goes on with a job (resume #N): its message comes to the bottom
+    ended_status = None
+    resumed_here = False
 
     @classmethod
     @contextlib.contextmanager
@@ -94,7 +94,7 @@ class Jobs:
         try:
             yield
         except KeyboardInterrupt:
-            cls.ending = cls.ending or "stopped"
+            cls.ended_status = cls.ended_status or "stopped"
             raise
         finally:
             cls.close()
@@ -104,7 +104,7 @@ class Jobs:
         """This process runs the job: the one resumed (arguments), else a new one; the job that runs is paused."""
         job = cls.current or cls.new(argv)
         cls.current = cls.save(dict(job, state="running", pid=os.getpid(), paused_by=None, go_now=False))
-        cls.journal, cls.ending = Journal(job["number"]), None
+        cls.journal, cls.ended_status = Journal(job["number"]), None
         cls.pause_running(job["number"])
 
     @staticmethod
@@ -137,7 +137,7 @@ class Jobs:
     def close(cls):
         """The job's state as it ended: paused (it then waits, and goes on), stopped, or finished (its journal
         dropped)."""
-        number, paused = cls.current["number"], cls.ending in ("stopped", "paused")
+        number, paused = cls.current["number"], cls.ended_status in ("stopped", "paused")
         paused_by = (Jobs.get(number) or {}).get("paused_by") if paused else None
         state = "paused" if paused_by else "stopped" if paused else "finished"
         cls.update(number, state=state)
@@ -153,12 +153,12 @@ class Jobs:
         how to go on added to a stopped one's."""
         if cls.current is None:
             return ending
-        cls.ending, number = ending.get("status"), cls.current["number"]
-        if cls.ending != "stopped":
+        cls.ended_status, number = ending.get("status"), cls.current["number"]
+        if cls.ended_status != "stopped":
             return ending
         paused_by = (Jobs.get(number) or {}).get("paused_by")
         if paused_by:
-            cls.ending = "paused"
+            cls.ended_status = "paused"
             asker = "you" if paused_by == "you" else f"job #{paused_by}"
             return dict(ending, status="paused", headline=f"Paused for {asker}: it goes on once Tinker is idle",
                         next=[("Go on now", f"tinker resume #{number}")])
@@ -239,7 +239,7 @@ class Jobs:
             return argv  # resume alone, with no job stopped: this folder's run
         if job is None:
             raise SystemExit(why)
-        cls.current, cls.resuming = job, True
+        cls.current, cls.resumed_here = job, True
         return job["arguments"]
 
     @staticmethod

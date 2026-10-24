@@ -169,7 +169,7 @@ def test_a_criterion_failing_like_a_parked_one_is_parked_at_once(calc, fake_olla
     verifier = Verifier(session)
     step = steps_of(project)["C2"]
     _, output = verifier.evaluate(step)
-    verifier.parked[Verifier.failure_key(step, output)] = "C9"
+    verifier.parked_by_failure[Verifier.failure_key(step, output)] = "C9"
     assert verifier.work(step, retry=False) is False
     assert step["last_error"] == "same failure as C9" and fake_ollama.calls == []
 
@@ -212,7 +212,7 @@ def test_ladder_and_to_review(calc):
     assert verifier.ladder(step, broken, retry=False) == (("review", 2),)
     step["history"] = ["fix: x -> broke a; reverted", "fix: y -> broke b; reverted"]
     assert verifier.ladder(step, "", retry=False) == (("review", 2),)
-    attempt = type("A", (), {"blamed_test": False, "conflict": True})()
+    attempt = type("A", (), {"only_wanted_test_change": False, "tests_may_disagree": True})()
     assert "fixes keep breaking" in Verifier.to_review(attempt, "fix") and Verifier.to_review(attempt, "review") == ""
 
 
@@ -237,7 +237,7 @@ def test_a_fix_that_blames_the_test_changes_nothing(calc, fake_ollama, project_d
     session, project = calc
     fake_ollama.reply("TEST WRONG: 5 - 3 is 2, the test is fine actually\n" + file_block("calc.py", FIXED))
     fix = attempt(session, project)
-    assert fix.run() == ("fails", "it fails") and fix.blamed_test
+    assert fix.run() == ("fails", "it fails") and fix.only_wanted_test_change
     assert (project_dir / "calc.py").read_text() == CALC_WITH_WRONG_SUB
 
 
@@ -250,7 +250,7 @@ def test_a_change_that_breaks_a_passing_test_is_reverted(calc, fake_ollama, proj
     state, output = fix.run()
     assert state == "fails" and "Your last change broke test_calc.py::test_add" in output
     assert (project_dir / "calc.py").read_text() == CALC_WITH_WRONG_SUB
-    assert steps_of(project)["C2"]["keep"] == ["test_calc.py::test_add"] and not fix.conflict
+    assert steps_of(project)["C2"]["keep"] == ["test_calc.py::test_add"] and not fix.tests_may_disagree
 
 
 @pytest.mark.spec("BLD-6")
@@ -274,7 +274,7 @@ def test_a_missing_linter_is_a_tooling_problem_the_model_may_fix(calc, fake_olla
     project.spec["toolchain"]["lint"] = "no-such-linter-xyz ."
     fake_ollama.reply('CAUSE: that linter is not installed\nTOOLCHAIN: {"lint": "none"}', when="Fix the toolchain")
     assert TestTool(session).works() is True
-    assert project.toolchain.lint == "" and project.toolchain.lint_named
+    assert project.toolchain.lint == "" and project.toolchain.lint_declared
     assert session.knowledge.language_doc["fixes"][0]["cause"] == "that linter is not installed"
 
 
@@ -360,7 +360,7 @@ def test_a_bug_no_test_shows_is_dropped(bug, fake_ollama, project_dir):
     fake_ollama.reply("TEST: test_bug.py::test_negative\n" + file_block("test_bug.py", passing), times=2)
     assert BugReproducer(session).run(cycle) is False
     assert project.cycle_criteria(cycle) == [] and not (project_dir / "test_bug.py").exists()
-    assert (cycle["phase"], cycle["outcome"]) == ("done", "not reproduced") and "could not be reproduced" in session.unreproduced
+    assert (cycle["phase"], cycle["outcome"]) == ("done", "not reproduced") and "could not be reproduced" in session.unreproduced_reason
     assert "passed on the code as it is" in fake_ollama.calls[1]["messages"][1]["content"]
 
 

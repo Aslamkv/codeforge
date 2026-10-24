@@ -342,7 +342,7 @@ def test_the_conversation_starts_a_task_while_another_runs(home_store, tmp_path,
     monkeypatch.setattr(desk, "follow", lambda process, reporter, task: None)
     assert desk.start_task(["learn", "go"], tmp_path, "learn go") is None
     assert desk.start_task(["exercise", "python"], tmp_path, "exercise python") is None  # the job pauses the other
-    assert spawned == [["learn", "go"], ["exercise", "python"]] and len(desk.followed) == 2
+    assert spawned == [["learn", "go"], ["exercise", "python"]] and len(desk.live_tasks) == 2
     desk.reporter.ended = True
 
 
@@ -495,7 +495,7 @@ def test_a_research_job_says_its_steps_and_ends_with_its_answer(home_store, monk
     monkeypatch.setenv("TINKER_CHANNELS", "off")  # a conversation started it: its tracker stays for it to read
     monkeypatch.setattr(Research, "researching", lambda self, channel, chat, topic, now: (
         self.enter("searches"), self.enter("read"), self.enter("write"), ("done", "🔎 **go**\nGo 1.25 [1]"))[-1])
-    research_once(ConsoleChannel(bare=False), None, "go")
+    research_once(ConsoleChannel(commands_without_tinker=False), None, "go")
     state = home_store.get("running", str(os.getpid()))
     assert state["steps"] == ["🤔 Searches chosen", "🌐 Pages read"] and state["doing"].startswith("✍️")
     assert state["ended"] == {"status": "done", "headline": "", "text": "🔎 **go**\nGo 1.25 [1]"}
@@ -507,13 +507,13 @@ def test_an_exercise_paused_for_another_hands_it_its_message(home_store, tmp_pat
     home_store.put("running", str(os.getpid()), {"title": "Exercising Rust", "exercise": True, "doing": "🔨"})
     first_ends = threading.Event()
     desk.follow_exercise(os.getpid(), "exercise rust", first_ends.wait)
-    first = desk.exercising
+    first = desk.exercise_reporter
     desk.follow_exercise(os.getpid(), "exercise python", lambda: time.sleep(5))
-    assert first.ended and desk.exercising is not first
+    assert first.ended and desk.exercise_reporter is not first
     first_ends.set()  # the paused one ends: it leaves the message to the one that has it
     time.sleep(0.2)
-    assert desk.exercising is not None and desk.exercising is not first
-    desk.exercising.ended = True
+    assert desk.exercise_reporter is not None and desk.exercise_reporter is not first
+    desk.exercise_reporter.ended = True
 
 
 @pytest.mark.spec("JOB-5")
@@ -526,7 +526,7 @@ def test_a_new_jobs_message_is_kept_up_and_one_that_goes_on_comes_to_the_bottom(
     reporter.refresh()
     channel.send("1", "learn tailwind")  # the person's message: the job's is no longer the newest
     sent = len([entry for entry in channel.log if entry[0] == "send"])
-    Jobs.resuming = True
+    Jobs.resumed_here = True
     Tracker("learn html5").publish()  # the job went on: its message comes to the bottom
     reporter.refresh()
     assert len([entry for entry in channel.log if entry[0] == "send"]) == sent + 1

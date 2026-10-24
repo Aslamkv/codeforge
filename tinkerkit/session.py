@@ -22,18 +22,17 @@ class Session:
 
     def __init__(self, model, project, max_stall=DEFAULT_MAX_STALL, internet=None, confirm=True, tracker=None):
         self.model, self.project, self.max_stall = model, project, max_stall
-        self.internet = internet  # the Internet plugin: a run with --web only
-        self.confirm = confirm    # a plan waits for the person (--confirm)
-        self.tracker = tracker    # the run's one report (Tracker), when it has one
-        self.cycle = None         # the cycle being worked on (where the knowledge it uses is recorded)
+        self.internet = internet
+        self.confirm = confirm
+        self.tracker = tracker
+        self.cycle = None
         self.workspace = Workspace(project.workdir)
         self.tool_problem = ""
         self.build_problem = ""
-        self.unreproduced = ""  # tinker fix: why the bug could not be shown by a test
-        self.review_problem = ""  # why the final review found the project not done
-        self.network_waiting = []  # setup commands that failed because the network did: done when it is back
-        self.all_tests_run = None  # (files key, (code, output)) of the last run of all tests
-        # criteria parked when this session began: one retry each (a resume after a change)
+        self.unreproduced_reason = ""
+        self.review_problem = ""
+        self.waiting_for_network = []
+        self.last_all_tests_run = None
         self.parked_at_start = {criterion["id"] for criterion in project.criteria
                                 if criterion.get("status") == "blocked"}
         self._knowledge = None
@@ -149,8 +148,8 @@ class Session:
         self.workspace.prepare_env()
         if not force and self.setup_key() == self.project.spec.get("setup_key"):
             return True, ""
-        ok, output, self.network_waiting = self.toolchain.run_setup(self.workspace)
-        if ok and not self.network_waiting:
+        ok, output, self.waiting_for_network = self.toolchain.run_setup(self.workspace)
+        if ok and not self.waiting_for_network:
             self.setup_done()
         return ok, output
 
@@ -167,10 +166,10 @@ class Session:
         """When all that needs no network is done and some setup still waits for it: that batch is
         tried again every NETWORK_RETRY_SECONDS seconds until the network is back, then the run goes on by
         itself (a person who will not wait stops it with Ctrl+C and runs tinker resume later)."""
-        if not self.network_waiting:
+        if not self.waiting_for_network:
             return
         began = time.monotonic()
-        say.step(f"Waiting for the network: {len(self.network_waiting)} setup command(s), tried every "
+        say.step(f"Waiting for the network: {len(self.waiting_for_network)} setup command(s), tried every "
                  f"{NETWORK_RETRY_SECONDS}s (Ctrl+C stops; tinker resume goes on later)…", "📡")
         if not self.retried_until_online(began):
             return
@@ -181,12 +180,12 @@ class Session:
         """The setup that waits tried again until it ran: True, or False once one reached the network and failed
         for a reason of its own (the checks that follow report it). A line says so every NETWORK_WAIT_NOTE_SECONDS seconds."""
         noted = began
-        while self.network_waiting:
+        while self.waiting_for_network:
             time.sleep(NETWORK_RETRY_SECONDS)
-            ok, output, self.network_waiting = self.toolchain.run_setup(self.workspace, self.network_waiting)
+            ok, output, self.waiting_for_network = self.toolchain.run_setup(self.workspace, self.waiting_for_network)
             if not ok:
                 return False
-            if self.network_waiting and time.monotonic() - noted >= NETWORK_WAIT_NOTE_SECONDS:
+            if self.waiting_for_network and time.monotonic() - noted >= NETWORK_WAIT_NOTE_SECONDS:
                 noted = time.monotonic()
                 say.step(f"Still waiting for the network ({human_duration(noted - began)})…", "📡")
         return True
@@ -216,10 +215,10 @@ class Session:
     def run_all_tests(self):
         """All tests, once per state of the project's files: a slow or hanging suite is not run twice."""
         key = fingerprint("".join(path + self.workspace.read(path) for path in sorted(self.project.files)))
-        if self.all_tests_run and self.all_tests_run[0] == key:
-            return self.all_tests_run[1]
+        if self.last_all_tests_run and self.last_all_tests_run[0] == key:
+            return self.last_all_tests_run[1]
         result = self.toolchain.run_all(self.workspace)
-        self.all_tests_run = (key, result)
+        self.last_all_tests_run = (key, result)
         return result
 
     def files_on_disk(self, *kinds):

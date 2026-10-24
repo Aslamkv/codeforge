@@ -30,7 +30,7 @@ class TestToolSetup(Phase):
         Designer(self.session).ensure_toolchain()
         CodeWriter(self.session).write_configs_first(cycle)
         self.session.setup()
-        if self.session.network_waiting:  # the tests and the code need no network: they are written meanwhile
+        if self.session.waiting_for_network:  # the tests and the code need no network: they are written meanwhile
             say.info("The test tool is checked once the network is back; writing the tests and the code meanwhile",
                      "📡")
             return True
@@ -425,7 +425,7 @@ class Verifier(Phase):
 
     def __init__(self, session):
         super().__init__(session)
-        self.parked = {}  # failure signature -> the criterion parked with it
+        self.parked_by_failure = {}
 
     def run(self, cycle):
         """True when every criterion passes, False when some are parked."""
@@ -473,8 +473,8 @@ class Verifier(Phase):
                 break
             fix = BuildFix(self.session, output, tried, thought)
             tried.append(fix.run())
-            thought = fix.thought
-            self.session.all_tests_run = None
+            thought = fix.unfinished_thought
+            self.session.last_all_tests_run = None
         self.session.build_problem = f"the project does not build after {len(tried)} fixes: {Output.key_line(output)}"
         return False
 
@@ -527,13 +527,13 @@ class Verifier(Phase):
         earlier = [criterion for criterion in parked if criterion["id"] in self.session.parked_at_start]
         if parked and self.project.counts()[0] > green_at_start:
             say.step(f"Retrying {len(parked)} parked criteria, now that others pass", "🔁")
-            self.parked = {}
+            self.parked_by_failure = {}
             self.work_through(parked, retry=True)
         elif earlier:
             say.step(f"Retrying {len(earlier)} criteria parked by an earlier run, once (the project, its plan or "
                      f"Tinker may have changed since)", "🔁")
             self.session.parked_at_start -= {criterion["id"] for criterion in earlier}
-            self.parked = {}
+            self.parked_by_failure = {}
             self.work_through(earlier, retry=True)
         elif parked:
             say.skip(f"{len(parked)} criteria parked and nothing else passes yet: a retry would see the same project")
@@ -553,13 +553,13 @@ class Verifier(Phase):
         if state in ("missing", "passes"):
             return state == "passes"
         same = self.failure_key(step, output)
-        if same in self.parked:
-            step["last_error"] = f"same failure as {self.parked[same]}"
-            say.skip(f"Fails the same way as {self.parked[same]}, which nothing fixed; parked without new attempts")
+        if same in self.parked_by_failure:
+            step["last_error"] = f"same failure as {self.parked_by_failure[same]}"
+            say.skip(f"Fails the same way as {self.parked_by_failure[same]}, which nothing fixed; parked without new attempts")
             return False
         if self.climb_safely(step, state, output, retry):
             return True
-        self.parked.setdefault(same, step["id"])
+        self.parked_by_failure.setdefault(same, step["id"])
         say.fail(f"Nothing helped; {step['id']} is back to how it was")
         return False
 
@@ -641,7 +641,7 @@ class Verifier(Phase):
                 if state == "passes":
                     return True
                 stall = 0 if climb.progressed(state, output) else stall + 1
-                concluding = attempt.overthought
+                concluding = attempt.hit_thinking_cap
                 step["last_error"] = Output.key_line(output)
                 why = self.to_review(attempt, approach)
                 if why:
@@ -667,9 +667,9 @@ class Verifier(Phase):
     def to_review(attempt, approach):
         """Why fixing should stop for a review, or "": the fix wanted to change the test, or fixes
         keep breaking the same other test (the two tests may disagree)."""
-        if attempt.blamed_test:
+        if attempt.only_wanted_test_change:
             return "the fix points at the test, not the code"
-        if attempt.conflict and approach == "fix":
+        if attempt.tests_may_disagree and approach == "fix":
             return "fixes keep breaking the same other test (the tests may disagree)"
         return ""
 
@@ -720,9 +720,9 @@ class FixAttempt(Worker):
         self.step, self.approach, self.output, self.before = step, approach, output, before
         self.ref = TestRef(step["test"])
         self.label = f"{self.APPROACH_TEXT[approach].capitalize()} {step['id']}"
-        self.blamed_test = False  # a fix that changed nothing because it only wanted to change a test
-        self.conflict = False     # it broke a test an earlier fix broke too: the two tests may disagree
-        self.overthought = False  # it thought to its cap without an answer
+        self.only_wanted_test_change = False
+        self.tests_may_disagree = False
+        self.hit_thinking_cap = False
         self.broken_test, self.broken_output = "", ""  # a test the change broke, and how it failed
 
     def run(self):
@@ -804,9 +804,9 @@ class FixAttempt(Worker):
                               else " (no thinking first)" if first else "")
         reply = self.session.ask(self.system(), view, label, max_reply=self.session.model.fix_max,
                                  unthinking_retry=False, think=think)
-        self.overthought = self.session.model.overthought
-        if self.overthought:
-            self.step[key], self.step["unfinished_thought"] = True, self.session.model.last_thought
+        self.hit_thinking_cap = self.session.model.hit_thinking_cap
+        if self.hit_thinking_cap:
+            self.step[key], self.step["unfinished_thought"] = True, self.session.model.last_unfinished_thought
         return reply
 
     def system(self):
@@ -830,7 +830,7 @@ class FixAttempt(Worker):
 
     def test_blamed(self, why):
         """The fix found the test wrong, not the code: nothing changes, and the review comes next."""
-        self.blamed_test = True
+        self.only_wanted_test_change = True
         self.record(f"the test is wrong: {why}")
         say.warn(f"{self.label}: the test is wrong ({first_line(why, 120)})")
         return "fails", self.output
@@ -840,7 +840,7 @@ class FixAttempt(Worker):
         folder = str(Path(self.ref.file).parent)
         refused_near_tests = any(TESTS_LOCKED_REASON in note or str(Path(note.split(":", 1)[0]).parent) == folder
                                  for note in change.notes)  # a test, or a new file beside them
-        self.blamed_test = self.approach == "fix" and refused_near_tests
+        self.only_wanted_test_change = self.approach == "fix" and refused_near_tests
         self.record(f"{cause} -> {note}")
         say.skip(f"{self.label}: {note}")
         return "fails", self.output
@@ -901,7 +901,7 @@ class FixAttempt(Worker):
     def keep_passing(self, tests):
         """Tests the next tries must keep passing; one broken before too means the two tests may disagree."""
         kept = self.step.setdefault("keep", [])
-        self.conflict = any(test in kept for test in tests)
+        self.tests_may_disagree = any(test in kept for test in tests)
         kept.extend(test for test in tests if test not in kept)
 
     def broken_note(self):
@@ -920,7 +920,7 @@ class BuildFix(Worker):
     def __init__(self, session, output, tried=(), concluding=""):
         super().__init__(session)
         self.output, self.tried, self.concluding = output, tried, concluding
-        self.thought = ""  # its thought when it thought to its cap without an answer: the next fix concludes it
+        self.unfinished_thought = ""
 
     def run(self):
         """What it did, one line (for the next try). The first fix does not think; the next ones do,
@@ -933,8 +933,8 @@ class BuildFix(Worker):
         except PromptTooLarge as exc:
             say.skip(f"Make it build: the prompt does not fit ({exc})")
             return "the prompt did not fit"
-        if self.session.model.overthought:
-            self.thought = self.session.model.last_thought
+        if self.session.model.hit_thinking_cap:
+            self.unfinished_thought = self.session.model.last_unfinished_thought
         change = self.workspace.apply(reply, self.may_change(view), view.windows)
         return self.said(change, reply.cause() or "?")
 
@@ -998,7 +998,7 @@ class BugReproducer(Phase):
             note = self.why_not(step, state, output)
             say.fail(f"Not reproduced: {note}")
         self.drop(cycle)
-        self.session.unreproduced = (f"the bug could not be reproduced with a test, so nothing was changed. "
+        self.session.unreproduced_reason = (f"the bug could not be reproduced with a test, so nothing was changed. "
                                      f"Describe what you do, what happens and what should happen instead, then: "
                                      f"tinker fix {self.project.run['id']} \"...\"")
         return False
@@ -1143,7 +1143,7 @@ class TestTool(Worker):
         if not ok:
             return "setup", output
         self.session.wait_for_network()
-        self.session.all_tests_run = None if attempt else self.session.all_tests_run
+        self.session.last_all_tests_run = None if attempt else self.session.last_all_tests_run
         code, output = self.session.run_all_tests()
         present = [ref for ref in self.project.refs() if ref.present(self.workspace)]
         problem = self.test_tool_problem(code, output, present)

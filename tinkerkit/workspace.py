@@ -51,14 +51,13 @@ class Toolchain:
         setup = self.command_list(data.get("setup"))
         self.setup = [command for command in setup if not self.ENV_TARGET.search(command)
                       and not self.MACHINE_RE.search(command)]
-        self.dropped = [command for command in setup if self.ENV_TARGET.search(command)]  # Tinker makes .env itself
-        # never run: it changes the machine
-        self.machine = [command for command in setup if self.MACHINE_RE.search(command)]
+        self.env_commands_dropped = [command for command in setup if self.ENV_TARGET.search(command)]
+        self.machine_changing_commands = [command for command in setup if self.MACHINE_RE.search(command)]
         self.use = self.command_list(data.get("use"))
         self.activate = str(data.get("activate") or "").strip()
         for key in self.COMMANDS:
             setattr(self, key, str(data.get(key) or "").strip())
-        self.lint_named = bool(self.lint)  # a linter, or "none" for a language that has none
+        self.lint_declared = bool(self.lint)
         self.lint = "" if self.lint.lower() == "none" else self.lint
 
     @staticmethod
@@ -78,7 +77,7 @@ class Toolchain:
     def to_dict(self):
         data = {"setup": self.setup, "activate": self.activate, "use": self.use,
                 **{key: getattr(self, key) for key in self.COMMANDS}}
-        if self.lint_named and not self.lint:
+        if self.lint_declared and not self.lint:
             data["lint"] = "none"
         return data
 
@@ -94,7 +93,7 @@ class Toolchain:
 
     def problems(self):
         problems = [f"toolchain.{key} is missing" for key in self.REQUIRED if not getattr(self, key)]
-        if not self.lint_named:
+        if not self.lint_declared:
             problems.append('toolchain.lint is missing: the language\'s usual linter, or "none" when it has none')
         if self.test_one and "{name}" not in self.test_one and "{file}" not in self.test_one:
             problems.append("toolchain.test_one must contain {name} (and {file} if the runner needs it)")
@@ -246,7 +245,7 @@ class Workspace:
     UNUSABLE_PATH_CHARS = "\n\r\t`<>|*?\"'"
 
     def __init__(self, root):
-        self.root = Path(root).resolve()  # a path is inside it when its resolved form is
+        self.root = Path(root).resolve()
 
     def run(self, command, timeout=COMMAND_TIMEOUT, quiet=False):
         """Run one planned command in a POSIX shell in the project folder,

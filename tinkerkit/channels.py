@@ -233,9 +233,9 @@ class TelegramChannel(Channel):
     def __init__(self, name, settings, secrets):
         super().__init__(name, settings, secrets)
         self.offset = None
-        self.open_connections = queue.Queue()  # connections kept open between calls
-        self.alive = {}  # per chat: the ids of the messages seen that are still in it (taken out: no more)
-        self.asked = {}  # per chat: (the person's last words, when) until a new thing answers them
+        self.open_connections = queue.Queue()
+        self.live_message_ids = {}
+        self.last_words_by_chat = {}
 
     def handle(self):
         return "@" + self.call("getMe")["username"]
@@ -254,7 +254,7 @@ class TelegramChannel(Channel):
                 message = self.book_in(message)
             if message.get("text"):
                 messages.append(self.message_of(message))
-                self.asked[str(message["chat"]["id"])] = (message["text"], time.monotonic())
+                self.last_words_by_chat[str(message["chat"]["id"])] = (message["text"], time.monotonic())
             if message.get("message_id"):
                 self.seen(str(message["chat"]["id"]), message["message_id"])
         return messages
@@ -359,7 +359,7 @@ class TelegramChannel(Channel):
 
     def answered(self, chat):
         """The person's words a new thing answers: their last message, sent within ANSWER_WINDOW_SECONDS ("" for none)."""
-        words, when = self.asked.pop(str(chat), ("", 0.0))
+        words, when = self.last_words_by_chat.pop(str(chat), ("", 0.0))
         return words if time.monotonic() - when <= ANSWER_WINDOW_SECONDS else ""
 
     def post(self, method, chat, text, **fields):
@@ -403,7 +403,7 @@ class TelegramChannel(Channel):
     def glance(self, chat, asked, sent, keep=None):
         """sent only shows something, asked for by the person's message asked: that message taken out now, the
         glance shown before too (one at a time), and sent in keep seconds (GLANCE_KEPT_SECONDS when not given)."""
-        self.asked.pop(str(chat), None)  # what it answered asks no thing
+        self.last_words_by_chat.pop(str(chat), None)  # what it answered asks no thing
         if asked:
             self.delete(chat, asked)
         for message in Ledger.glances(self.name, chat):
@@ -425,7 +425,7 @@ class TelegramChannel(Channel):
     def delete(self, chat, sent):
         """A message taken out: Tinker's own, or the person's (a bot may, in a private chat). Without a network it
         stays in the ledger, to be taken out later; a refusal means it is gone, or too old for a bot to take out."""
-        alive = self.alive.get(str(chat), [])
+        alive = self.live_message_ids.get(str(chat), [])
         if sent in alive:
             alive.remove(sent)
         try:
@@ -438,11 +438,11 @@ class TelegramChannel(Channel):
 
     def latest(self, chat, sent):
         """Whether no message still in the chat came after sent (of those seen here)."""
-        return sent is not None and sent >= max(self.alive.get(str(chat), [0]), default=0)
+        return sent is not None and sent >= max(self.live_message_ids.get(str(chat), [0]), default=0)
 
     def seen(self, chat, message):
         """A message of the chat's, still in it; one of a chat served is kept in the ledger."""
-        self.alive[chat] = (self.alive.get(chat, []) + [message])[-200:]
+        self.live_message_ids[chat] = (self.live_message_ids.get(chat, []) + [message])[-200:]
         if chat in map(str, self.allowed):
             Ledger.kept(self.name, chat, message)
 

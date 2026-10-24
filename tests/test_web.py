@@ -69,7 +69,7 @@ def test_web_then_fallback_skipping_repeats_and_empty(monkeypatch):
 def test_a_backend_not_ready_is_skipped_with_its_reason(monkeypatch):
     first, second = Scripted(1, ready="no key"), Scripted(1)
     internet = internet_with(monkeypatch, first, second, web_name="a", fallback="b")
-    assert internet.backends_used == [second] and internet.skipped == ["a: no key"] and internet.available()
+    assert internet.backends_used == [second] and internet.unusable_backends == ["a: no key"] and internet.available()
 
 
 @pytest.mark.spec("WEB-2")

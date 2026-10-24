@@ -707,9 +707,9 @@ class Designer(Phase):
         toolchain = Toolchain(data if isinstance(data, dict) else {})
         if entry and not toolchain.run:
             raise ValueError(f"toolchain.run is empty, but a user starts {entry}: give the command that starts it")
-        for command in toolchain.dropped:
+        for command in toolchain.env_commands_dropped:
             say.skip(f"Toolchain: left out `{command}`: Tinker makes {ENV_FILE} itself, from {ENV_EXAMPLE}")
-        for command in toolchain.machine:
+        for command in toolchain.machine_changing_commands:
             say.skip(f"Toolchain: left out `{command}`: it changes the machine's own tools, not this project")
         problems = toolchain.problems()
         if problems:

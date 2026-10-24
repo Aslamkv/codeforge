@@ -120,7 +120,7 @@ class Teacher:
         self.model, self.internet, self.memory, self.tracker = model, internet, memory, tracker
         self.learner = Learner(model, internet, None)
         self.learner.tracker = tracker
-        self.readings = []  # the readings the teaching is about: their passages are evidence
+        self.readings = []
 
     def teach(self, teaching):
         """The teaching checked, then each change it asks for made when its claims hold; the ending."""

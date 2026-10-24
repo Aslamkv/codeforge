@@ -44,11 +44,11 @@ def no_job():
     """Each test starts as a process that runs no job (a job's state is kept on the class, for its process)."""
     from tinkerkit.jobs import JOB_STOP_SIGNAL, Jobs
     handler = signal.getsignal(JOB_STOP_SIGNAL)
-    Jobs.current = Jobs.journal = Jobs.ending = None
-    Jobs.resuming = False
+    Jobs.current = Jobs.journal = Jobs.ended_status = None
+    Jobs.resumed_here = False
     yield
-    Jobs.current = Jobs.journal = Jobs.ending = None
-    Jobs.resuming = False
+    Jobs.current = Jobs.journal = Jobs.ended_status = None
+    Jobs.resumed_here = False
     signal.signal(JOB_STOP_SIGNAL, handler)
 
 @pytest.fixture

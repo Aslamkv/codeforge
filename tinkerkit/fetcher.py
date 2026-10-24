@@ -55,7 +55,7 @@ class Fetcher:
     def __init__(self, workers, timeout, max_bytes, domain_delay, log=None, user_agent=FETCH_USER_AGENT):
         self.workers, self.timeout, self.max_bytes, self.domain_delay = workers, timeout, max_bytes, domain_delay
         self.log, self.user_agent = log, user_agent
-        self.robots = {}  # site -> its robots.txt rules, read once
+        self.robots_by_site = {}
         self.next_turn, self.turn_lock = {}, threading.Lock()
 
     def fetch_all(self, urls, kind="fetch"):
@@ -94,9 +94,9 @@ class Fetcher:
     def allowed(self, url, connections):
         """Whether the site's robots.txt lets this User-Agent fetch the address (read once per site)."""
         site = site_of(url)
-        if site not in self.robots:
-            self.robots[site] = self.read_robots(site, connections)
-        return self.robots[site].can_fetch(self.user_agent, url)
+        if site not in self.robots_by_site:
+            self.robots_by_site[site] = self.read_robots(site, connections)
+        return self.robots_by_site[site].can_fetch(self.user_agent, url)
 
     def read_robots(self, site, connections):
         """A site's robots.txt rules, read as urllib.robotparser reads them: refused (401, 403) allows

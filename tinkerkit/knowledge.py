@@ -372,11 +372,11 @@ class Learner:
 
     def __init__(self, model, internet, embeddings):
         self.model, self.internet = model, internet
-        self.embeddings = embeddings  # None in a run whose embedding model failed: then not indexed
-        self.model_failed = ""  # why the model stopped answering while reading pages (then reading ends)
-        self.notes = []  # what could not be learned, and why
-        self.kept_earlier = False  # reading was cut short, so the topic as learned before was kept
-        self.tracker = None  # tinker learn's report (Tracker); a run's recall phase keeps its own steps
+        self.embeddings = embeddings
+        self.model_failure = ""
+        self.notes = []
+        self.kept_earlier_topic = False
+        self.tracker = None
 
     def step(self, phase, said="", icon=""):
         """Learning is on to a phase (Tracker.DOING_AND_DONE): said, when there is something to say, and its
@@ -392,7 +392,7 @@ class Learner:
             self.tracker.outcome(text)
 
     def start(self):
-        self.notes, self.model_failed, self.kept_earlier = [], "", False
+        self.notes, self.model_failure, self.kept_earlier_topic = [], "", False
 
     def saved_or_asked(self, known, read, system, parts, label, what, saved_as):
         """(plan, whether it was saved): the plan saved before (known, as read reads it), else the
@@ -493,7 +493,7 @@ class Learner:
         """(facts, sources) of the pages read until the model is lost."""
         facts, sources = [], []
         for number, page in enumerate(pages, 1):
-            if self.model_failed:
+            if self.model_failure:
                 break
             found = self.read_page(name, page, f"{number}/{len(pages)}")
             sources += [page["url"]] if found else []
@@ -554,9 +554,9 @@ class Learner:
         except PromptTooLarge as exc:
             self.notes.append(f"page {page['url']}: {first_line(str(exc), 160)}")
         except OllamaError as exc:
-            self.model_failed = first_line(str(exc), 200)
+            self.model_failure = first_line(str(exc), 200)
             self.notes.append(f"the model stopped answering at page {number}; the pages after it were not read")
-            say.warn(f"{self.notes[-1]} ({self.model_failed})")
+            say.warn(f"{self.notes[-1]} ({self.model_failure})")
         return None
 
     @staticmethod
@@ -592,8 +592,8 @@ class Learner:
         model was lost on the way. Learning that was cut short never replaces what was learned before."""
         if not self.internet.available():
             return f"the web was lost ({self.internet.problem()})"
-        if self.model_failed:
-            return f"the model stopped answering ({self.model_failed})"
+        if self.model_failure:
+            return f"the model stopped answering ({self.model_failure})"
         return ""
 
     def condense(self, plan, facts, think=None):
@@ -716,7 +716,7 @@ class Researcher:
         if known and (learner.cut_short() or not facts):
             say.warn(f"{learner.cut_short() or 'No page gave facts'}; kept what was found before "
                      f"({known.get('learned', '?')})")
-            learner.kept_earlier = True
+            learner.kept_earlier_topic = True
             return known
         if not facts:
             say.fail(f"Nothing found about {topic}: " + ("; ".join(learner.notes) or "the pages stated nothing useful"))
@@ -1190,9 +1190,9 @@ class Retriever:
     BM25_K1, BM25_B = 1.5, 0.75
 
     def __init__(self, embeddings):
-        self.embeddings = embeddings  # None: the word search alone
+        self.embeddings = embeddings
         self.used = "words"
-        self.queries = {}  # query -> its embedding
+        self.query_embeddings = {}
 
     def rank(self, query, texts, prune=False):
         """The indexes of texts, the most related to query first (all of them)."""
@@ -1236,15 +1236,15 @@ class Retriever:
         if self.embeddings is None:
             return []
         vectors = self.embeddings.vectors(texts, prune=prune)
-        if vectors and query not in self.queries:
+        if vectors and query not in self.query_embeddings:
             asked = self.embeddings.vectors([query], keep=False)
-            self.queries[query] = asked[0] if asked else None
-        if not vectors or not self.queries.get(query):
+            self.query_embeddings[query] = asked[0] if asked else None
+        if not vectors or not self.query_embeddings.get(query):
             say.warn(f"Meaning search not used: {self.embeddings.failed}; the word search stands alone")
             self.embeddings = None  # not asked again in this run
             return []
         self.used = f"words and meaning ({self.embeddings.name})"
-        similarity_of = [Embeddings.cosine(self.queries[query], vector) for vector in vectors]
+        similarity_of = [Embeddings.cosine(self.query_embeddings[query], vector) for vector in vectors]
         return sorted(range(len(texts)), key=lambda index: (-similarity_of[index], index))
 
 

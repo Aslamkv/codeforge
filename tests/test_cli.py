@@ -695,7 +695,7 @@ def test_amend_plans_again_and_waits_again(run_ready, fake_ollama):
 
 @pytest.mark.spec("CLI-12")
 @pytest.mark.parametrize("problem,said", [
-    ({"unreproduced": 'the bug could not be reproduced ... then: tinker fix @abc123 "..."'},
+    ({"unreproduced_reason": 'the bug could not be reproduced ... then: tinker fix @abc123 "..."'},
      "Not fixed: the bug could not be reproduced"),
     ({"review_problem": "`pytest` fails"}, "Not done: the final review found `pytest` fails"),
     ({"build_problem": "it does not build"}, "Stopped before working on criteria: it does not build"),
