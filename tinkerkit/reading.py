@@ -155,12 +155,17 @@ class Reader:
             with say.working_on(f"Reading chapter {chapter.number}, {chapter.title} ({done} of {len(chapters)})"):
                 facts = self.chapter_read(entry, book, survey, chapter, focus)
             found += Readings.learned(entry["number"], chapter.number, facts)
-            say.info(f"Chapter {chapter.number}, {chapter.title}: {learned(len(facts))}", STATES["read"])
-            if facts:
-                say.found(first_line(facts[0]["text"], 200))
-            say.tally(f"{done}/{len(chapters)} chapters · {learned(len(found)) if found else 'nothing learned yet'}")
+            self.say_chapter(chapter, facts, f"{done}/{len(chapters)}", found)
         self.outcome(f"{len(chapters)} chapter(s), {learned(len(found))}")
         return found
+
+    @staticmethod
+    def say_chapter(chapter, facts, done, found):
+        """What a chapter gave, the first of it, and how far the reading is (done: "3/12")."""
+        say.info(f"Chapter {chapter.number}, {chapter.title}: {learned(len(facts))}", STATES["read"])
+        if facts:
+            say.found(first_line(facts[0]["text"], 200))
+        say.tally(f"{done} chapters · {learned(len(found)) if found else 'nothing learned yet'}")
 
     def outcome(self, text):
         if self.tracker is not None:

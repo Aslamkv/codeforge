@@ -647,11 +647,8 @@ class Desk:
             return "🤷 No plan waits for confirmation, so no folder can be renamed (once built, it stays)."
         if self.busy():
             return self.on_task(waiting, "⏳ A task is running: wait for it, or `stop` it first.")
-        done = subprocess.run(tinker_command() + ["rename", f"@{waiting['run']}", words[1]], cwd=self.root, text=True,
-                              capture_output=True, stdin=subprocess.DEVNULL, env=dict(os.environ, NO_COLOR="1"),
-                              timeout=60)
-        if done.returncode:
-            why = first_lines((done.stdout + done.stderr).strip(), 10).splitlines()[-1]
+        why = self.rename_folder(waiting, words[1])
+        if why is not None:
             return self.on_task(waiting, md(t"⚠️ **Not renamed:** {why}"))
         self.renamed(waiting, words[1])
         if waiting.get("stage") != "name":
@@ -660,6 +657,15 @@ class Desk:
         return self.on_task(waiting, self.start_task(["resume", f"@{waiting['run']}"], waiting["folder"],
                                                      waiting["title"], f"✅ **Renamed** to `{words[1]}`: building it",
                                                      keep=self.kept(waiting)))
+
+    def rename_folder(self, waiting, name):
+        """The waiting project's folder renamed by tinker rename; None when it was, else why not."""
+        done = subprocess.run(tinker_command() + ["rename", f"@{waiting['run']}", name], cwd=self.root, text=True,
+                              capture_output=True, stdin=subprocess.DEVNULL, env=dict(os.environ, NO_COLOR="1"),
+                              timeout=60)
+        if done.returncode:
+            return first_lines((done.stdout + done.stderr).strip(), 10).splitlines()[-1]
+        return None
 
     @staticmethod
     def renamed(waiting, name):

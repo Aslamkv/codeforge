@@ -1317,12 +1317,15 @@ class ProjectRun:
         elif status == "blocked":
             self.summary_blocked()
         else:
-            run_id = self.record["id"]
-            self.ending["headline"] = f"Run {run_id} is not finished. Progress is saved"
-            self.ending["next"] = [("Continue it", f"tinker resume @{run_id}")]
-            say.title(self.ending["headline"], "⏸️")
-            say.tip(f"Continue with: tinker resume @{run_id}")
+            self.summary_unfinished()
         say.tip(f"Everything it said: tinker log @{self.record['id']}")
+
+    def summary_unfinished(self):
+        run_id = self.record["id"]
+        self.ending["headline"] = f"Run {run_id} is not finished. Progress is saved"
+        self.ending["next"] = [("Continue it", f"tinker resume @{run_id}")]
+        say.title(self.ending["headline"], "⏸️")
+        say.tip(f"Continue with: tinker resume @{run_id}")
 
     def summary_done(self):
         project, run_id = self.session.project, self.record["id"]

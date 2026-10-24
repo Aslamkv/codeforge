@@ -263,13 +263,17 @@ class SlotLearner:
                                                lambda reply: read_plan(reply.json()), attempts=2)
         if plan is None:
             raise SystemExit(f"{self.model.name} gave no usable plan for learning {self.topic}. Nothing was saved.")
+        self.say_plan(plan)
+        return plan
+
+    def say_plan(self, plan):
+        """What the plan says the topic is, where its documentation is, and what it left out."""
         say.found(f"{plan['name']} is a {plan['kind']}: {plan['summary']}")
         self.outcome(f"{plan['name']}, a {plan['kind']}")
         if plan["docs"]["root"]:
             with say.section():
                 say.info(f"Documentation: {plan['docs']['root']}", "📍")
         self.learner.show_dropped(plan)
-        return plan
 
     def plan_parts(self, results):
         found = "\n".join(f"- {result['title']} ({result['url']}): {first_line(result['content'], 200)}"
@@ -425,19 +429,7 @@ class SlotLearner:
         """KEEP: the entry saved under the language's key or the topic's slug, with what readiness found missing;
         a language's earlier proven copies retired; indexed for recall."""
         slug, language = self.slug(plan), plan["kind"] == "language"
-        gaps = missing(plan["profile"], facts, machine)
-        cited = {*fact["passages"] for fact in facts}
-        used = [passage for passage in pool if passage.id in cited]
-        entry = {"topic": self.topic, "kind": plan["profile"], "name": plan["name"], "summary": plan["summary"],
-                 "language": plan["language"] if language else "", "version": plan["version"],
-                 "tools": [{"role": tool["role"], "name": tool["name"]} for tool in plan["tools"]],
-                 "commands": plan["commands"], "plan": {key: value for key, value in plan.items() if key != "dropped"},
-                 "learned": now_text(), "model": self.model.name, "machine": machine, "facts": facts, "rules": rules,
-                 "sources": list(dict.fromkeys(passage.url for passage in used)), "docs": self.docs,
-                 "passages": [{"id": passage.id, "url": passage.url, "fetched": passage.fetched,
-                               "heading": passage.heading} for passage in used],
-                 "status": "incomplete" if gaps or self.incomplete else "complete", "missing": gaps,
-                 "requests": self.log.counts(), "notes": self.learner.notes}
+        entry = self.entry(plan, machine, facts, rules, pool)
         self.learner.step("keep")
         Library.save(slug, entry)
         say.info(f"Saved {len(facts)} fact(s) about {plan['name']} from {len(entry['sources'])} page(s) as {slug}"
@@ -447,6 +439,24 @@ class SlotLearner:
             self.learner.replace_proven(slug, entry)
         self.learner.index(slug, entry)
         return entry
+
+    def entry(self, plan, machine, facts, rules, pool):
+        """What is kept of a topic learned: the plan, the facts and rules with the passages they cite, what is
+        missing, and how the learning went."""
+        language = plan["kind"] == "language"
+        gaps = missing(plan["profile"], facts, machine)
+        cited = {*fact["passages"] for fact in facts}
+        used = [passage for passage in pool if passage.id in cited]
+        return {"topic": self.topic, "kind": plan["profile"], "name": plan["name"], "summary": plan["summary"],
+                "language": plan["language"] if language else "", "version": plan["version"],
+                "tools": [{"role": tool["role"], "name": tool["name"]} for tool in plan["tools"]],
+                "commands": plan["commands"], "plan": {key: value for key, value in plan.items() if key != "dropped"},
+                "learned": now_text(), "model": self.model.name, "machine": machine, "facts": facts, "rules": rules,
+                "sources": list(dict.fromkeys(passage.url for passage in used)), "docs": self.docs,
+                "passages": [{"id": passage.id, "url": passage.url, "fetched": passage.fetched,
+                              "heading": passage.heading} for passage in used],
+                "status": "incomplete" if gaps or self.incomplete else "complete", "missing": gaps,
+                "requests": self.log.counts(), "notes": self.learner.notes}
 
     def recap_of(self, entry, profile):
         """READINESS and the run in a few lines, as data (the summary, which the chats show too): the slots

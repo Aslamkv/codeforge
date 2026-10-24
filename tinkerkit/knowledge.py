@@ -507,14 +507,10 @@ class Learner:
         got = self.internet.fetch(page["url"])
         text = (got or {}).get("content") or page.get("content") or ""
         if not text.strip():
-            why = f"{page['url']}: {self.internet.why(page['url'])}"
-            self.notes.append(f"page {why}")
-            with say.section():
-                say.fail(f"Could not read page {number}: {why}")
-            return []
+            return self.unreadable(page, number)
         source = Part("Page", f"{(got or {}).get('title') or page.get('title', '')}\n{page['url']}", True)
         focus = Part("Look for", page["focus"], True)
-        room = self.model.limit_chars(Prompts.FACTS_SYSTEM) - source.size() - focus.size() - len(topic) - 200
+        room = self.room_for_excerpts(topic, source, focus)
         found = []
         for chunk_number, chunk in enumerate(self.relevant_chunks(text, room, f"{topic} {page['focus']}"), 1):
             parts = [Part("Topic", topic, True), focus, source, Part("Excerpt", chunk, True)]
@@ -523,6 +519,18 @@ class Learner:
                 break
             found += [dict(fact, source=page["url"]) for fact in facts if not self.UNRELEASED.search(fact["text"])]
         return found
+
+    def unreadable(self, page, number):
+        """No facts from a page that cannot be read: why is noted and said."""
+        why = f"{page['url']}: {self.internet.why(page['url'])}"
+        self.notes.append(f"page {why}")
+        with say.section():
+            say.fail(f"Could not read page {number}: {why}")
+        return []
+
+    def room_for_excerpts(self, topic, source, focus):
+        """The characters a page's excerpt may take, next to the prompt and what it always shows."""
+        return self.model.limit_chars(Prompts.FACTS_SYSTEM) - source.size() - focus.size() - len(topic) - 200
 
     @staticmethod
     def relevant_chunks(text, room, wanted):
@@ -601,6 +609,11 @@ class Learner:
                                                 "Condense the facts",
                                                 lambda reply: self.read_rules(reply.json(), sources), attempts=2,
                                                 think=think)
+        self.say_rules(rules, facts)
+        return rules or []
+
+    def say_rules(self, rules, facts):
+        """What condensing gave: the rules and the first of them, or that the facts stay as they are."""
         if not rules:
             self.notes.append("the facts were not condensed into rules (no usable reply)")
         with say.section():
@@ -610,7 +623,6 @@ class Learner:
             else:
                 say.warn("Could not make rules: the facts are kept as they are")
         self.outcome(f"{len(rules or [])} rule(s) from {len(facts)} fact(s)")
-        return rules or []
 
     @staticmethod
     def rule_sources(facts, lessons):
@@ -757,8 +769,7 @@ class Researcher:
         """(facts, sources, analysis) after each round of RESEARCH_PAGES: the first round searches
         every question, each next one the gaps and checks the last analysis named. It ends early
         when none is left, or the web or the model is lost."""
-        searches = [{"query": query, "section": str(number), "pages": SEARCH_RESULTS, "focus": question["question"]}
-                    for number, question in enumerate(frame["questions"], 1) for query in question["queries"]]
+        searches = self.first_searches(frame)
         facts, sources, analysis = [], [], self.EMPTY_ANALYSIS
         for round_number, pages in enumerate(RESEARCH_PAGES, 1):
             if not searches:
@@ -769,16 +780,26 @@ class Researcher:
                 found, read = self.learner.read_web(frame["name"], searches, pages)
             self.learner.add_facts(facts, found)
             sources += [url for url in read if url not in sources]
-            say.tally(f"{len(sources)} page(s) read · {len(facts)} fact(s)")
-            if found:
-                say.found(first_line(found[0]["text"], 200))
-            self.learner.outcome(f"{len(facts)} fact(s) from {len(sources)} page(s)")
+            self.say_round(facts, sources, found)
             if self.learner.cut_short() or not facts:
                 break
             differ = self.cross_check(facts)
             analysis = self.analyse(frame, facts, differ) or analysis
             searches = self.next_searches(frame, facts, analysis)
         return facts, sources, analysis
+
+    @staticmethod
+    def first_searches(frame):
+        """The first round's searches: each query of each question, the question as what to look for."""
+        return [{"query": query, "section": str(number), "pages": SEARCH_RESULTS, "focus": question["question"]}
+                for number, question in enumerate(frame["questions"], 1) for query in question["queries"]]
+
+    def say_round(self, facts, sources, found):
+        """How far the research got after a round: pages read, facts found, the first of them."""
+        say.tally(f"{len(sources)} page(s) read · {len(facts)} fact(s)")
+        if found:
+            say.found(first_line(found[0]["text"], 200))
+        self.learner.outcome(f"{len(facts)} fact(s) from {len(sources)} page(s)")
 
     def cross_check(self, facts):
         """Each fact's sites, with no model call. A fact that repeats another (REPEAT_CLAIM, numbers
@@ -862,13 +883,7 @@ class Researcher:
         """The findings (each question answered from the facts, citing them, with how sure it is),
         the contradictions and the gaps (each with a search), from one call; None when the model
         gives no usable reply. The facts most sites state are shown first when not all fit."""
-        questions = "\n".join(f"Q{number}. {question['question']}" for number, question in enumerate(frame["questions"],
-                                                                                                     1))
-        pairs = "\n".join(f"F{first} / F{second}" for first, second in differ) or "(none)"
-        fixed = [Part("Topic", frame["name"], True), Part("Questions", questions, True),
-                 Part("Facts that may disagree", pairs, True)]
-        room = self.model.limit_chars(Prompts.RESEARCH_ANALYSIS_SYSTEM) - Part.total_size(fixed) - 200
-        parts = fixed + [Part("Facts", self.fact_listing(facts, room), True, exact=True)]
+        parts = self.analysis_parts(frame, facts, differ)
         try:
             return self.model.ask_until_usable(Prompts.RESEARCH_ANALYSIS_SYSTEM, parts, "Analyse the findings",
                                                lambda reply: self.read_analysis(reply.json(), len(facts),
@@ -877,6 +892,16 @@ class Researcher:
             self.learner.notes.append(f"the findings could not be analysed ({first_line(str(exc), 160)})")
             say.warn(self.learner.notes[-1])
             return None
+
+    def analysis_parts(self, frame, facts, differ):
+        """The analysis prompt: the topic, its questions, the facts that may disagree, then as many facts as fit."""
+        questions = "\n".join(f"Q{number}. {question['question']}"
+                              for number, question in enumerate(frame["questions"], 1))
+        pairs = "\n".join(f"F{first} / F{second}" for first, second in differ) or "(none)"
+        fixed = [Part("Topic", frame["name"], True), Part("Questions", questions, True),
+                 Part("Facts that may disagree", pairs, True)]
+        room = self.model.limit_chars(Prompts.RESEARCH_ANALYSIS_SYSTEM) - Part.total_size(fixed) - 200
+        return fixed + [Part("Facts", self.fact_listing(facts, room), True, exact=True)]
 
     @staticmethod
     def fact_listing(facts, room):
@@ -1273,11 +1298,15 @@ class Embeddings:
             found = self.embedded(batch)
             if found is None:
                 return None
-            fresh.update({self.key(text): [round(number, 5) for number in vector] for text, vector in zip(batch, found)})
+            fresh.update(self.keyed(batch, found))
         result = [stored.get(key) or fresh[key] for key in keys]
         if keep and (fresh or prune):
             self.kept(fresh, keys if prune else None)
         return result
+
+    def keyed(self, texts, vectors):
+        """Each text's vector under its cache key, rounded to 5 places (it keeps the cache small)."""
+        return {self.key(text): [round(number, 5) for number in vector] for text, vector in zip(texts, vectors)}
 
     def embedded(self, batch):
         """The batch's embeddings, as the model gives them; None when it gives none (failed says why)."""

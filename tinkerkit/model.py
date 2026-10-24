@@ -254,27 +254,48 @@ class Model:
         """What to change before trying a failed request again; re-raises when nothing helps."""
         think = tries.think
         if self.build_thinking_rejected(exc, think):
-            self.note(f"{label}: {self.name} rejected think={think!r} for building; using {self.think!r} as for planning")
-            self.build_think = None
-            tries.think = self.think
+            self.think_as_planning(label, tries)
         elif exc.oom and tries.shrink < OOM_RETRIES:
-            self.note(f"{label}: out of GPU memory; retrying this request with a prompt budget of "
-                      f"{int(self.max_tokens * OOM_SHRINK ** (tries.shrink + 1))} tokens",
-                      "Out of GPU memory; trying again with a shorter prompt")
-            tries.shrink += 1
+            self.shorter_prompt(label, tries)
         elif exc.stalled and tries.stalls < STALL_RETRIES:
-            self.note(f"{label}: {exc}; reloading the model and retrying",
-                      f"{self.name} stopped responding; reloading it and trying again")
-            Ollama.unload(self.name)
-            tries.stalls += 1
+            self.reload_model(exc, label, tries)
         elif think not in (None, True, False) and exc.about_thinking:
-            self.note(f"{label}: {self.name} rejected think={think!r}; using think=true")
-            self.think = tries.think = True
+            self.think_true(label, tries)
         elif think is not None and exc.about_thinking:
-            self.note(f"{label}: {self.name} rejected the think setting; retrying without it")
-            self.think, self.think_rejected, tries.think = None, True, None
+            self.without_thinking(label, tries)
         else:
             raise exc
+
+    def think_as_planning(self, label, tries):
+        """The think setting for building refused: building thinks as planning does from now on."""
+        self.note(f"{label}: {self.name} rejected think={tries.think!r} for building; using {self.think!r} as for "
+                  f"planning")
+        self.build_think = None
+        tries.think = self.think
+
+    def shorter_prompt(self, label, tries):
+        """Out of GPU memory: the request is tried again with a smaller prompt budget."""
+        self.note(f"{label}: out of GPU memory; retrying this request with a prompt budget of "
+                  f"{int(self.max_tokens * OOM_SHRINK ** (tries.shrink + 1))} tokens",
+                  "Out of GPU memory; trying again with a shorter prompt")
+        tries.shrink += 1
+
+    def reload_model(self, exc, label, tries):
+        """The model stopped answering: it is unloaded, so the next try loads it afresh."""
+        self.note(f"{label}: {exc}; reloading the model and retrying",
+                  f"{self.name} stopped responding; reloading it and trying again")
+        Ollama.unload(self.name)
+        tries.stalls += 1
+
+    def think_true(self, label, tries):
+        """A thinking level refused: the model thinks with true from now on."""
+        self.note(f"{label}: {self.name} rejected think={tries.think!r}; using think=true")
+        self.think = tries.think = True
+
+    def without_thinking(self, label, tries):
+        """The think setting refused altogether: the model is asked without one from now on."""
+        self.note(f"{label}: {self.name} rejected the think setting; retrying without it")
+        self.think, self.think_rejected, tries.think = None, True, None
 
     def build_thinking_rejected(self, exc, think):
         """Whether the model refused the think setting kept for building, which differs from planning's."""

@@ -59,25 +59,44 @@ class Graph:
         """Each topic learned from the web: a language's joins its language's node; its facts link to the proven
         facts they became, its findings to the facts they cite, and its rules to the facts and lessons they rest on."""
         for slug, entry in Library.topics().items():
-            hub = f"lang:{slug}" if entry.get("kind") == "language" else f"topic:{slug}"
-            details = [("learned", entry.get("learned", "?")), ("summary", entry.get("summary", "")),
-                       ("missing", ", ".join(entry.get("missing", [])) or None)]
-            hub = self.hub(hub, "language" if hub.startswith("lang:") else "topic", entry.get("name", slug), slug,
-                           details)
-            for fact in entry.get("facts", []):
-                self.add_claim(f"fact:{slug}:{fact['id']}", "fact", fact, hub)
-                if f"known:{fact['id']}" in self.nodes:
-                    self.link(f"fact:{slug}:{fact['id']}", f"known:{fact['id']}", "became")
-            for finding in entry.get("findings", []):
-                node = self.add_claim(f"finding:{slug}:{finding['id']}", "finding", finding, hub)
-                for fact_id in finding.get("cites", []):
-                    self.link(node, f"fact:{slug}:{fact_id}", "cites")
-            for rule in entry.get("rules", []):
-                node = self.add_claim(f"rule:{slug}:{rule['id']}", "rule", rule, hub)
-                for cited in rule.get("cites", []):
-                    self.link(node, f"fact:{slug}:{cited}" if f"fact:{slug}:{cited}" in self.nodes
-                              else f"lesson:{cited}", "cites")
-            self.add_retired(entry, hub, slug)
+            self.add_topic(slug, entry)
+
+    def add_topic(self, slug, entry):
+        hub = self.topic_hub(slug, entry)
+        self.add_topic_facts(slug, entry, hub)
+        self.add_findings(slug, entry, hub)
+        self.add_rules(slug, entry, hub)
+        self.add_retired(entry, hub, slug)
+
+    def topic_hub(self, slug, entry):
+        """The topic's own node (a language's is its language's), with when it was learned and what it misses."""
+        hub = f"lang:{slug}" if entry.get("kind") == "language" else f"topic:{slug}"
+        details = [("learned", entry.get("learned", "?")), ("summary", entry.get("summary", "")),
+                   ("missing", ", ".join(entry.get("missing", [])) or None)]
+        return self.hub(hub, "language" if hub.startswith("lang:") else "topic", entry.get("name", slug), slug,
+                        details)
+
+    def add_topic_facts(self, slug, entry, hub):
+        """The topic's facts, each linked to the proven fact it became."""
+        for fact in entry.get("facts", []):
+            self.add_claim(f"fact:{slug}:{fact['id']}", "fact", fact, hub)
+            if f"known:{fact['id']}" in self.nodes:
+                self.link(f"fact:{slug}:{fact['id']}", f"known:{fact['id']}", "became")
+
+    def add_findings(self, slug, entry, hub):
+        """The topic's findings, each linked to the facts it cites."""
+        for finding in entry.get("findings", []):
+            node = self.add_claim(f"finding:{slug}:{finding['id']}", "finding", finding, hub)
+            for fact_id in finding.get("cites", []):
+                self.link(node, f"fact:{slug}:{fact_id}", "cites")
+
+    def add_rules(self, slug, entry, hub):
+        """The topic's rules, each linked to the facts or lessons it rests on."""
+        for rule in entry.get("rules", []):
+            node = self.add_claim(f"rule:{slug}:{rule['id']}", "rule", rule, hub)
+            for cited in rule.get("cites", []):
+                self.link(node, f"fact:{slug}:{cited}" if f"fact:{slug}:{cited}" in self.nodes
+                          else f"lesson:{cited}", "cites")
 
     def add_commands(self):
         taught = TaughtCommands.all()

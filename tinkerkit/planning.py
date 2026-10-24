@@ -48,10 +48,15 @@ class Recaller(Phase):
         learned = [slug for slug in (self.learn(topic, internet, retriever) for topic in learn[:can_learn]) if slug]
         cycle["topics"] = list(dict.fromkeys(learned + use))[:RECALL_TOPICS]  # what it just learned it needs most
         self.keep_facts(cycle, query, retriever)
-        names = [(Library.read(slug) or {}).get("name", slug) for slug in cycle["topics"]]
-        say.info(f"Using what was learned about: {', '.join(names) or 'nothing'}", "🧠")
+        self.say_used(cycle)
         self.use_language(cycle)
         self.session.save()
+
+    @staticmethod
+    def say_used(cycle):
+        """The topics the cycle uses, by their names."""
+        names = [(Library.read(slug) or {}).get("name", slug) for slug in cycle["topics"]]
+        say.info(f"Using what was learned about: {', '.join(names) or 'nothing'}", "🧠")
 
     @staticmethod
     def ranked_topics(known, query, retriever):
@@ -65,6 +70,16 @@ class Recaller(Phase):
     def ask(self, cycle, query, known, ranked, can_learn):
         """(slugs of learned topics to use, topics to learn now). The topics are listed the most
         related to the request first (Retriever), as many as fit."""
+        parts = self.recall_parts(cycle, query, known, ranked, can_learn)
+        try:
+            return self.session.ask_until_usable(Prompts.RECALL_SYSTEM, parts, "Recall",
+                                                 lambda reply: self.read_choice(reply, known), attempts=2)
+        except (SystemExit, OllamaError) as exc:  # what was learned only helps: the run goes on without it
+            say.warn(f"{exc} Going on without what was learned.")
+            return [], []
+
+    def recall_parts(self, cycle, query, known, ranked, can_learn):
+        """The recall prompt: the request, the language, whether it may learn now, then the topics that fit."""
         fixed = [Part("Request", query, True, keep="head"),
                  Part("Project language", self.project.language if cycle["id"] != "base" else ""),
                  Part("Learning now", f"possible: name up to {can_learn} topics to learn" if can_learn
@@ -72,13 +87,8 @@ class Recaller(Phase):
         # a long request is shortened, the topics keep half the room
         left = self.session.room(Prompts.RECALL_SYSTEM) - 60
         room = max(left - Part.total_size(fixed), (left - sum(part.floor_size() for part in fixed)) // 2)
-        parts = fixed + [Part("Learned topics", self.topic_listing(known, ranked, room) or "(none yet)", True, exact=True)]
-        try:
-            return self.session.ask_until_usable(Prompts.RECALL_SYSTEM, parts, "Recall",
-                                                 lambda reply: self.read_choice(reply, known), attempts=2)
-        except (SystemExit, OllamaError) as exc:  # what was learned only helps: the run goes on without it
-            say.warn(f"{exc} Going on without what was learned.")
-            return [], []
+        return fixed + [Part("Learned topics", self.topic_listing(known, ranked, room) or "(none yet)", True,
+                             exact=True)]
 
     @staticmethod
     def topic_listing(known, ranked, room):
@@ -450,23 +460,35 @@ class SpecWriter(Phase):
             self.project.toolchain = plan["toolchain"]
         self.project.criteria.extend(plan["criteria"])
         self.keep_files(cycle, plan["files"], plan["entry"])
-        if plan["entry"] and not self.project.toolchain.run:  # a program a person runs needs its run command
-            say.step(f"The toolchain does not say how to start {plan['entry']}: asking for it", "🤔")
-            self.project.toolchain = Designer(self.session).ask_toolchain()
-        cycle["non_goals"] = self.strings(plan["data"].get("non_goals"), 12)
-        cycle["constraints"] = self.strings(plan["data"].get("constraints"), 8)
-        data = plan["data"].get("data", "")
-        cycle["data"] = data if isinstance(data, str) else json.dumps(data)
+        self.ensure_run_command(plan["entry"])
+        self.keep_scope(cycle, plan["data"])
         Designer(self.session).drop_adapter_criteria(cycle)
+        self.say_planned(cycle, plan)
+        Recaller(self.session).keep_out_inapplicable()
+        cycle["specified"] = True
+        self.session.save()
+
+    def ensure_run_command(self, entry):
+        """A program a person runs needs its run command: one the toolchain lacks is asked for."""
+        if entry and not self.project.toolchain.run:
+            say.step(f"The toolchain does not say how to start {entry}: asking for it", "🤔")
+            self.project.toolchain = Designer(self.session).ask_toolchain()
+
+    def keep_scope(self, cycle, data):
+        """What the cycle must not do, the constraints it keeps, and the sample data its adapters stand for."""
+        cycle["non_goals"] = self.strings(data.get("non_goals"), 12)
+        cycle["constraints"] = self.strings(data.get("constraints"), 8)
+        sample = data.get("data", "")
+        cycle["data"] = sample if isinstance(sample, str) else json.dumps(sample)
+
+    def say_planned(self, cycle, plan):
+        """The plan in a few lines: its language, criteria and files, its toolchain when new, what is known."""
         starts = f"; a user starts {self.project.spec['entry']}" if self.project.spec.get("entry") else ""
         say.info(f"Language: {self.project.language}; {len(self.project.cycle_criteria(cycle))} criteria; files: "
                  f"{', '.join(cycle['files'])}{starts}", "📋")
         if plan["toolchain"]:
             say.info(f"Toolchain: {self.project.toolchain.summary()}", "🔧")
         say.info(f"Learned so far: {self.session.knowledge.summary()}", "🧠")
-        Recaller(self.session).keep_out_inapplicable()
-        cycle["specified"] = True
-        self.session.save()
 
     def keep_files(self, cycle, files, entry):
         """The planned files go into the design (a file planned before keeps what it had), in

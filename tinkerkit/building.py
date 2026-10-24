@@ -240,25 +240,37 @@ class CodeWriter(Phase):
             return self.write_marker(path)
         note = ""
         for attempt in (1, 2):
-            view = FileView(self.workspace, self.fixed_parts(path, info, criteria, note), [path] if exists else [],
-                            self.context_parts(cycle, info, criteria), hints="\n".join(criterion["behaviour"]
-                                                                                       for criterion in criteria),
-                            windows=1)
+            view = self.file_view(cycle, path, info, criteria, note, exists)
             try:
-                reply = self.session.ask(Prompts.CHANGE_SYSTEM if exists else Prompts.CODE_SYSTEM, view,
-                                         f"{'Change' if exists else 'Write'} {path}",
-                                         done_when=Reply.files_complete if exists else Reply.wrote([path]))
+                reply = self.ask_for_file(path, view, exists)
             except PromptTooLarge as exc:
                 say.skip(f"{path}: skipped, the prompt does not fit ({exc}); verify works on it")
                 return
-            change = self.workspace.apply(self.addressed_to(reply.as_file(path), path, exists), self.may_write(path),
-                                          view.windows)
-            for text in change.notes:
-                say.skip(f"Skipped {text}")
+            change = self.applied(reply, path, exists, view)
             note = self.unusable(path, change, attempt == 1 and info.get("kind") == "code")
             if not note:
                 self.say_written(path, change, exists)
                 return
+
+    def file_view(self, cycle, path, info, criteria, note, exists):
+        """What the model sees to write the file: the file itself when it exists, and what it must serve."""
+        return FileView(self.workspace, self.fixed_parts(path, info, criteria, note), [path] if exists else [],
+                        self.context_parts(cycle, info, criteria),
+                        hints="\n".join(criterion["behaviour"] for criterion in criteria), windows=1)
+
+    def ask_for_file(self, path, view, exists):
+        """The model's reply: the file written, or changed when it exists."""
+        return self.session.ask(Prompts.CHANGE_SYSTEM if exists else Prompts.CODE_SYSTEM, view,
+                                f"{'Change' if exists else 'Write'} {path}",
+                                done_when=Reply.files_complete if exists else Reply.wrote([path]))
+
+    def applied(self, reply, path, exists, view):
+        """The reply written to the project (what it may write only), and what was skipped said."""
+        change = self.workspace.apply(self.addressed_to(reply.as_file(path), path, exists), self.may_write(path),
+                                      view.windows)
+        for text in change.notes:
+            say.skip(f"Skipped {text}")
+        return change
 
     def write_marker(self, path):
         """A file nothing asks anything of (a package marker): written empty, with no call."""
@@ -496,12 +508,16 @@ class Verifier(Phase):
             if passed:
                 self.mark_others_passing()
             self.session.save()
-            green, _, total = self.project.counts()
-            if passed:
-                say.done(f"{step['id']} passes ({green}/{total} pass)")
-                say.found(f"Works now: {step['title']}")
-            else:
-                say.info(f"{step['id']} is parked ({green}/{total} pass)", "⏸️")
+            self.say_worked(step, passed)
+
+    def say_worked(self, step, passed):
+        """Whether the criterion passes now or is parked, with how many pass."""
+        green, _, total = self.project.counts()
+        if passed:
+            say.done(f"{step['id']} passes ({green}/{total} pass)")
+            say.found(f"Works now: {step['title']}")
+        else:
+            say.info(f"{step['id']} is parked ({green}/{total} pass)", "⏸️")
 
     def retry_parked(self, green_at_start):
         """The parked criteria get one more try when others passed since, else those parked by an earlier
@@ -863,17 +879,23 @@ class FixAttempt(Worker):
         broken = sorted(self.before - self.v.passing())
         if not broken:
             return False
-        # how it failed, while the change is still there: the next try sees why
-        first = self.project.criterion(broken[0])
-        self.broken_test = first["test"]
-        self.broken_output = Output.failure_text(self.v.evaluate(first)[1], OUTPUT_CHARS // 2)
+        self.remember_how_it_broke(broken[0])
         self.workspace.revert(change)
         tests = [self.project.criterion(criterion_id)["test"] for criterion_id in broken]
         self.keep_passing(tests)
+        self.say_broken(tests, cause)
+        return True
+
+    def remember_how_it_broke(self, criterion_id):
+        """How the first test it broke failed, read while the change is still there: the next try sees why."""
+        first = self.project.criterion(criterion_id)
+        self.broken_test = first["test"]
+        self.broken_output = Output.failure_text(self.v.evaluate(first)[1], OUTPUT_CHARS // 2)
+
+    def say_broken(self, tests, cause):
         names = ", ".join(tests[:2])
         self.record(f"{cause} -> broke {names}; reverted")
         say.warn(f"{self.label}: broke {names}; reverted")
-        return True
 
     def keep_passing(self, tests):
         """Tests the next tries must keep passing; one broken before too means the two tests may disagree."""
