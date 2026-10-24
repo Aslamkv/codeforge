@@ -213,7 +213,7 @@ tinker channel enable telegram
 tinker channel start
 ```
 
-Only your paired chat is listened to. Manage your channels:
+Only your paired chat is listened to. Manage your channels (removing one asks first; `--yes` skips that):
 
 ```sh
 tinker channel list
@@ -249,12 +249,13 @@ kept of the chat. Your projects, runs and jobs stay.
 
 ## Learn 🧠
 
-Teach Tinker a language, a tool, or a whole domain (it reads the web, and keeps what it learns):
+Teach Tinker a language, a tool, or a whole domain (it reads the web, and keeps what it learns). Quote a name of
+more than one word, since two words teach a command of yours (below):
 
 ```sh
 tinker learn rust
 tinker learn Flask
-tinker learn food bank inventory
+tinker learn "food bank inventory"
 ```
 
 A language or a tool is learned mainly from its own documentation, for the version you have installed
@@ -413,10 +414,12 @@ tinker resume            # the job stopped last (with none stopped, this folder'
 `tinker confirm` is not a job's resume: it always builds the plan that waits in its folder.
 
 A job that was killed (or the computer restarted) shows as stopped, and resumes the same way. Once a job
-finishes, its journal is deleted. In a chat, the same words work: `jobs`, `stop #3`, `resume #3`.
+finishes, its journal is deleted. While a job runs, the computer stays awake. In a chat, the same words work:
+`jobs`, `stop #3`, `resume #3`.
 
-Clear the jobs you are done with. They are archived, not deleted: `tinker jobs` no longer shows them, but
-`tinker jobs archived` does. An archived job cannot be resumed:
+Clear the jobs you are done with (it asks first). They are archived, not deleted: `tinker jobs` no longer shows
+them, but `tinker jobs archived` does. An archived job cannot be resumed, and its journal and its log of model
+calls are deleted:
 
 ```sh
 tinker clear jobs #3 #5     # archive these two (stop a running one first)
@@ -431,7 +434,10 @@ See the settings, or change one:
 ```sh
 tinker config
 tinker config test_timeout 90
+tinker help config                  # every setting you can change, with what it takes
 ```
+
+A value that does not fit is refused, with what the setting takes, and the old value stays.
 
 Tune how `tinker learn` uses the web:
 
@@ -444,7 +450,8 @@ tinker config docs_pages 50         # pages taken from a documentation site
 tinker config learn_think high      # think harder (and slower) while reading pages
 ```
 
-Delete parts of what Tinker keeps, or all of it (your projects stay). `tinker help clear` lists every part:
+Delete parts of what Tinker keeps, or all of it (your projects stay). Each shows what it deletes and asks
+first (`--yes` skips that). `tinker help clear` lists every part:
 
 ```sh
 tinker clear memory runs            # lessons for any language, and the list of projects
