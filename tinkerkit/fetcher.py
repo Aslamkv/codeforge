@@ -170,6 +170,21 @@ class Fetcher:
         except urllib.error.HTTPError as exc:  # a redirect past MAX_REDIRECTS is one too
             return Fetched(url, exc.code, exc.geturl() or url, error=f"HTTP {exc.code}")
 
+    def download(self, url, max_bytes):
+        """(bytes, why it failed) of a file at a web address (a book: binary, never decoded), at most max_bytes, through
+        the proxy the environment sets; redirects are followed (at most MAX_REDIRECTS)."""
+        request = urllib.request.Request(url, headers={"User-Agent": self.user_agent})
+        try:
+            with urllib.request.build_opener(LimitedRedirects).open(request, timeout=self.timeout) as response:
+                body = response.read(max_bytes + 1)
+        except urllib.error.HTTPError as exc:
+            return b"", f"HTTP {exc.code}"
+        except (urllib.error.URLError, OSError, ValueError) as exc:
+            return b"", first_line(str(getattr(exc, "reason", exc)), 160)
+        if len(body) > max_bytes:
+            return b"", f"it is larger than {max_bytes // 1_000_000} MB"
+        return body, ""
+
     @classmethod
     def decoded(cls, body, charset):
         """The body as text, in the charset its headers name, else the one its <meta> names, else UTF-8."""

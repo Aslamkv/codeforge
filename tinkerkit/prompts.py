@@ -5,7 +5,8 @@ import re
 lazy from pathlib import Path
 
 from .settings import (
-    ENV_EXAMPLE, ENV_FILE, FACTS_PER_CHUNK, FACTS_PER_SLOT, FACT_PHASES, LESSON_PHASES, MAX_COMMANDS, MAX_FILE_LINES,
+    READ_POINTS, READ_TERMS, ENV_EXAMPLE, ENV_FILE, FACTS_PER_CHUNK, FACTS_PER_SLOT, FACT_PHASES, LESSON_PHASES,
+    MAX_COMMANDS, MAX_FILE_LINES,
     PLAYBOOK_RULES, RESEARCH_CHECKS, RESEARCH_GAPS, RESEARCH_QUERIES, RESEARCH_QUESTIONS, RULE_CHARS, TEACH_CLAIMS,
     TEACH_COMMANDS, TEACH_SEARCHES, TOOL_ROLES, TRIM_FLOOR, first_line,
 )
@@ -746,6 +747,34 @@ where (one sentence, citing its facts), or null when the facts name none.
 Reply with ONLY JSON: {{"rules":[{{"phase":"code","text":"Use `match` for dispatch on a value's shape, not
 if/elif chains","when":"","cites":[3,7]}}],"declare":{{"text":"Declare `go 1.25` in go.mod","cites":[2]}}}}"""
 
+    READ_SURVEY_SYSTEM = f"""You, Tinker, are about to read what the person gave you (a book, an article, a document),
+every chapter of it, as a careful reader does: first its contents, what it says about itself (its foreword, preface,
+introduction or summary) and the terms its index refers to most, to know what it is about and what to read first.
+Decide from what is given below, never from what you were trained on.
+"summary": two sentences: what it is about, its main argument, and what a reader gets from it.
+"software": true only when it teaches how to plan, design, write, test or run software (then what it teaches may
+guide the projects you build); false for anything else.
+"terms": its key terms, at most {READ_TERMS}, the most central first: they are followed through every chapter.
+"chapters": every chapter by its number, with "read": "core" (where its main ideas are taught: what its foreword and
+its index point to), "supporting" (examples, applications or detail that add to the core) or "other" (the rest);
+the core chapters are read first, then the supporting ones, then the others, and "look_for": in a few words, what to
+find in it.
+Reply with ONLY JSON: {{"summary":"...","software":true,"terms":["..."],
+"chapters":[{{"chapter":1,"read":"other","look_for":"..."}},{{"chapter":2,"read":"core","look_for":"..."}}]}}"""
+
+    READ_CHAPTER_SYSTEM = f"""You, Tinker, are reading what the person gave you, one part of a chapter at a time, to
+learn what it teaches and keep it. Below are the source (its summary and key terms), what you learned from it
+before, what the person asks you to look for (when they ask: find that above all), and the chapter: what to look
+for in it, and its text. List what this text teaches: its ideas, definitions, practices, rules of thumb and
+warnings, each one plain, self-contained sentence the text states or shows (never from your own knowledge), concrete
+(the names, numbers and examples it gives), the most important first; nothing you learned before, unless this text adds to it or changes
+it (then say how); at most {READ_POINTS}. "section": the heading it is under, or "".
+"phase": where it matters when building software: spec (what to build and test), design (files, structure), config
+(dependencies, settings), tests, code, toolchain (commands and tools); or book when it does not change how software
+is built.
+Reply with ONLY JSON: {{"points":[{{"text":"...","section":"...","phase":"one of {', '.join(FACT_PHASES)}, book"}}]}}
+or {{"points":[]}} when the text teaches nothing new."""
+
     RESEARCH_PLAN_SYSTEM = f"""Plan research on a topic for a code generator that must understand it well to build
 software for it. Split the topic into at most {RESEARCH_QUESTIONS} research questions that together cover it:
 what it is and its key terms; how it is done in practice (the steps, roles, records and rules); the
@@ -806,10 +835,11 @@ Reply with ONLY JSON: {"overview":"...","features":["..."],"requires":"Python 3.
 
     ASK_SYSTEM = ("You are Tinker, and the person asks you about what you have learned. Below is what you keep: the "
                   "toolchain that worked for each language (what its projects use), toolchain fixes, lessons, facts and "
-                  "rules, and the person's own commands. Answer from these alone, as a person answers a colleague: only "
-                  "what is asked, in a few short plain lines (no Markdown, no item numbers, no notes on what is proven, "
-                  "nothing about what you do not keep). The toolchain that worked comes before facts and rules. When "
-                  "nothing below answers it, say in one line that you have not learned that yet.")
+                  "rules, the person's own commands, and passages of what you read. Answer from these alone, as a "
+                  "person answers a colleague: only what is asked, in a few short plain lines (no Markdown, no item "
+                  "numbers, no notes on what is proven, nothing about what you do not keep). The toolchain that worked "
+                  "comes before facts and rules. What something you read says names its chapter. When nothing below "
+                  "answers it, say in one line that you have not learned that yet.")
 
     EXERCISE_LANGUAGE_SYSTEM = """The person asks Tinker, a code generator, to practise a programming language, named by the
 words below. Say what the words name. "language": exactly one programming language that programs are written and
@@ -849,7 +879,8 @@ and never checked. Every other claim is a fact, checked first, however sure the 
 "commands": commands that show on this machine whether a fact holds (a tool's --version or --help), one command
 each, no shell operators, nothing installed or changed, at most {TEACH_COMMANDS};
 "searches": web searches that find independent sources for the facts, at most {TEACH_SEARCHES} ([] when every
-claim is a preference).
+claim is a preference). A fact about what something you read says is checked against its own text (its passages are
+found for you): it needs no command and no search.
 "language": the language it is about, or "" when it holds for every language.
 "changes": each change, with "claims": the numbers of the claims it rests on, and one or more of:
 "retire": the numbers of the items it shows wrong;
@@ -857,7 +888,9 @@ claim is a preference).
 is the whole list of its commands), each written as a person types it; a key goes in one change only (one that
 several claims affect rests on all of them);
 "lesson": what was taught, as one general imperative sentence, with the phase where it matters (one of
-{', '.join(LESSON_PHASES)}); never a project's names, files or data.
+{', '.join(LESSON_PHASES)}); never a project's names, files or data;
+"fact": what something you read really says, in place of an item of it that it corrects: {{"about": that item's number,
+"text": one plain sentence}}.
 Reply with ONLY JSON: {{"claims":[{{"text":"Tool A formats code as tool B does","preference":false}},
 {{"text":"I prefer no type checker in my projects","preference":true}}],"commands":["tool-a format --help"],
 "searches":["tool A replaces tool B formatter"],"language":"Python","changes":[{{"claims":[1],"retire":[2],
@@ -867,13 +900,14 @@ is not needed beside it"}}}},{{"claims":[2],"toolchain":{{"lint":"tool-a check .
 
     JUDGE_SYSTEM = """The person taught you, Tinker, something. Before you change what you keep, check it. Below are the
 facts it rests on, the person's preferences (theirs to make: honored, never checked), the changes the facts are
-for, and the evidence, numbered: what commands showed on this machine and what web pages say. Decide from the
-evidence alone, never from what you were trained on (it may be out of date). A tool a command does not find here
+for, and the evidence, numbered: what commands showed on this machine, what web pages say and what the things you
+read say. Decide from the evidence alone, never from what you were trained on (it may be out of date). A tool a
+command does not find here
 may still be installed in a project's own environment: that says nothing about the tool itself.
 For each fact: "holds" only when the evidence states it (cite those numbers), "wrong" when the evidence
 contradicts it, "unsure" when it says too little.
 For each change: "follows" true only when every item it retires is shown wrong, and its toolchain commands and
-its lesson agree with the evidence and the preferences.
+its lesson and its fact agree with the evidence and the preferences.
 Reply with ONLY JSON: {"claims":[{"claim":1,"verdict":"holds","why":"one short sentence","evidence":[1,3]}],
 "changes":[{"change":1,"follows":true,"why":"one short sentence"}]}"""
 

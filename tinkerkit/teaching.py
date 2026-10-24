@@ -2,10 +2,11 @@
 items (Memory: each toolchain, fix, lesson, fact, finding, rule and command of the memory graph, the retired
 left out), the most related first. An answer comes from those items alone, each claim citing its item. A
 teaching changes nothing until it is checked: the model turns it into claims and the change it asks for, the
-claims are checked on this machine (commands that only show what is installed) and on the web (pages of
-independent searches), and the model weighs that evidence alone. Only when every claim holds on it, and the
-change follows from them, are the items shown wrong retired, the toolchain corrected and the lesson kept,
-proven, with its sources. Anything less changes nothing, and says why."""
+claims are checked on this machine (commands that only show what is installed), on the web (pages of
+independent searches) and in what Tinker read (its passages), and the model weighs that evidence alone.
+Only when every claim holds on it, and the change follows from them, are the items shown wrong retired, the
+toolchain corrected and the lesson (or a book's corrected fact) kept, proven, with its sources. Anything less
+changes nothing, and says why. An answer reads the passages of what Tinker read that it is about too."""
 
 import re
 
@@ -14,6 +15,7 @@ lazy from .conversation import Research
 lazy from .graph import Graph
 lazy from .knowledge import Knowledge, Learner, Library, Retriever
 lazy from .prompts import Part, Prompts
+lazy from .reading import Readings
 lazy from .settings import (
     LESSON_PHASES, MEMORY_SHOWN, TEACH_CLAIMS, TEACH_COMMANDS, TEACH_SEARCHES, first_line, words,
 )
@@ -83,18 +85,21 @@ class Asker:
         """The answer said, and nothing else; the ending."""
         self.thinking("recall")
         items = self.memory.about(question)
-        if not items:
-            return self.said("I have not learned anything yet: I learn from builds (tinker task) and tinker learn.")
+        passages = Readings.passages(Readings.about(question, items), question)
+        if not items and not passages:
+            return self.said("I have not learned anything yet: I learn from builds (tinker task), tinker learn and "
+                             "tinker read.")
         self.thinking("answer")
-        return self.said(self.asked(question, items))
+        return self.said(self.asked(question, items, passages))
 
     def thinking(self, phase):
         say.live("Thinking…")
         if self.tracker is not None:
             self.tracker.phase(phase)
 
-    def asked(self, question, items):
-        parts = [Part("What Tinker keeps", numbered(items), True), Part("The question", question, True)]
+    def asked(self, question, items, passages):
+        parts = [Part("What Tinker keeps", numbered(items) or "(nothing)", True),
+                 Part("From what you read", quoted(passages)), Part("The question", question, True)]
         return self.model.ask(Prompts.ASK_SYSTEM, parts, "ask").strip()
 
     @staticmethod
@@ -112,6 +117,7 @@ class Teacher:
         self.model, self.internet, self.memory, self.tracker = model, internet, memory, tracker
         self.learner = Learner(model, internet, None)
         self.learner.tracker = tracker
+        self.readings = []  # the readings the teaching is about: their passages are evidence
 
     def teach(self, teaching):
         """The teaching checked, then each change it asks for made when its claims hold; the ending."""
@@ -122,7 +128,9 @@ class Teacher:
 
     def recalled(self, teaching):
         moved_on(self.tracker, "recall", "Recalling what Tinker keeps about it…", "🧠")
-        return self.memory.about(teaching)
+        items = self.memory.about(teaching)
+        self.readings = Readings.about(teaching, items)
+        return items
 
     def understood(self, teaching, items):
         """The claims (facts and preferences), what checks the facts, and the changes, read by read_plan."""
@@ -130,7 +138,8 @@ class Teacher:
         parts = [Part("What Tinker keeps", numbered(items) or "(nothing yet)", True),
                  Part("What the person teaches", teaching, True)]
         plan = self.model.ask_until_usable(Prompts.TEACH_SYSTEM, parts, "teach: what to check",
-                                           lambda reply: read_plan(reply.json(), len(items), marked(teaching)))
+                                           lambda reply: read_plan(reply.json(), len(items), marked(teaching),
+                                                                       bool(self.readings)))
         if plan is None:
             raise SystemExit(f"{self.model.name} could not work out what to check; nothing changed")
         with say.part("What you taught", "📝"):
@@ -144,7 +153,8 @@ class Teacher:
         if not any(not claim["preference"] for claim in plan["claims"]):
             evidence, verdict = [], Verdict.unchecked(plan["claims"], "")
         else:
-            evidence = self.on_machine(plan["commands"]) + self.on_web(plan["searches"])
+            evidence = (self.on_machine(plan["commands"]) + self.on_web(plan["searches"])
+                        + self.in_readings(plan["claims"]))
             verdict = (self.judged(teaching, plan, items, evidence) if evidence
                        else Verdict.unchecked(plan["claims"], "nothing could check it"))
         verdict.show()
@@ -170,6 +180,16 @@ class Teacher:
         for page in pages:
             say.info(f"Read {page['title'] or page['url']}", "📖")
         return [{"source": page["url"], "text": f"{page['title']}\n{page['content']}"} for page in pages]
+
+    def in_readings(self, claims):
+        """[{source, text}]: of the readings the teaching is about, the passages most about each fact, each once."""
+        if not self.readings:
+            return []
+        found = [passage for claim in claims if not claim["preference"]
+                 for passage in Readings.passages(self.readings, claim["text"])]
+        found = list({passage["text"]: passage for passage in found}.values())
+        say.info(f"Found {len(found)} passage(s) of what was read about it", "📖")
+        return found
 
     def judged(self, teaching, plan, items, evidence):
         """The model's verdict on each fact and on each change a fact is for, from the evidence alone (Verdict)."""
@@ -216,6 +236,7 @@ class Teacher:
         lines = self.retired([items[n - 1] for n in change["retire"]], reason)
         lines.append(self.toolchain_corrected(language, change["toolchain"]))
         lines.append(self.lesson_kept(language, change["lesson"], sources))
+        lines.append(self.fact_kept(change["fact"], items, sources))
         return [line for line in lines if line]
 
     @staticmethod
@@ -242,15 +263,34 @@ class Teacher:
         return f"Lesson kept for {language or 'any language'}: {kept['text']}" if kept else ""
 
 
+    @staticmethod
+    def fact_kept(fact, items, sources):
+        """What a book (or another topic) really says, kept in place of the item it corrects; a line, or ""."""
+        if not fact:
+            return ""
+        kind, _, rest = items[fact["about"] - 1]["id"].partition(":")
+        slug, _, claim_id = rest.rpartition(":")
+        kept = (Library.taught_fact(slug, claim_id, fact["text"], sources) if kind in ("fact", "rule", "finding")
+                else None)
+        if kept is None:
+            say.skip(f"No book or topic to keep it in: {first_line(fact['text'], 80)}")
+            return ""
+        return f"Fact kept for {(Library.read(slug) or {}).get('name', slug)}: {kept['text']}"
+
+def quoted(passages):
+    """Passages of what was read, as a prompt shows them: each under its title and chapter."""
+    return "\n\n".join(f"[{passage['source']}]\n{passage['text']}" for passage in passages)
+
 def marked(teaching):
     """Whether the person marked a preference in what they taught (the word prefer): else every claim is a fact."""
     return bool(PREFER_RE.search(teaching))
 
 
-def read_plan(data, count, preferences=True):
+def read_plan(data, count, preferences=True, readings=False):
     """The claims ({text, preference}; with preferences false, each is a fact), the commands and searches that
     check the facts (each within its limit), the language and the changes (read_changes; count: how many items
-    were shown). ValueError when there is no claim, nothing checks the facts, or there is no change."""
+    were shown). ValueError when there is no claim, nothing checks the facts (readings: their passages do), or
+    there is no change."""
     texts = lambda key, limit: [str(t).strip() for t in data.get(key) or [] if str(t).strip()][:limit]
     claims = [dict(claim, preference=claim["preference"] and preferences) for claim in read_claims(data.get("claims"))]
     plan = {"claims": claims, "commands": texts("commands", TEACH_COMMANDS),
@@ -258,7 +298,7 @@ def read_plan(data, count, preferences=True):
             "changes": read_changes(data.get("changes"), len(claims), count)}
     if not claims:
         raise ValueError("no claims")
-    if any(not claim["preference"] for claim in claims) and not (plan["commands"] or plan["searches"]):
+    if any(not claim["preference"] for claim in claims) and not (plan["commands"] or plan["searches"] or readings):
         raise ValueError("no command or web search checks the facts")
     if not plan["changes"]:
         raise ValueError("no change: none rests on a claim and retires, replaces or keeps something")
@@ -277,14 +317,18 @@ def read_claims(given):
 
 
 def read_changes(given, claims, count):
-    """[{claims, retire, toolchain, lesson}]: each change that rests on a claim (1 to claims) and retires an item
-    shown (1 to count), replaces toolchain commands or keeps a lesson. ValueError when two change one toolchain key."""
+    """[{claims, retire, toolchain, lesson, fact}]: each change that rests on a claim (1 to claims) and retires an
+    item shown (1 to count), replaces toolchain commands, keeps a lesson or keeps a fact in place of an item shown
+    (which it retires). ValueError when two change one toolchain key."""
     changes, keys = [], set()
     for change in given if isinstance(given, list) else []:
         if not isinstance(change, dict):
             continue
         read = {"claims": numbers(change.get("claims"), claims), "retire": numbers(change.get("retire"), count),
-                "toolchain": read_toolchain(change.get("toolchain")), "lesson": read_lesson(change.get("lesson"))}
+                "toolchain": read_toolchain(change.get("toolchain")), "lesson": read_lesson(change.get("lesson")),
+                "fact": read_fact(change.get("fact"), count)}
+        if read["fact"]:
+            read["retire"] = sorted(set(read["retire"]) | {read["fact"]["about"]})
         if not read["claims"] or not (read["retire"] or read["toolchain"] or read["lesson"]):
             continue
         twice = keys & set(read["toolchain"])
@@ -336,6 +380,12 @@ def read_lesson(given):
     return {"phase": phase, "text": text} if text and phase in LESSON_PHASES else None
 
 
+def read_fact(given, count):
+    """{about, text} of a fact kept in place of an item shown (about: 1 to count), else None."""
+    given = given if isinstance(given, dict) else {}
+    text, about = str(given.get("text") or "").strip(), given.get("about")
+    return {"about": about, "text": text} if text and type(about) is int and 1 <= about <= count else None
+
 def judged_changes(plan):
     """(number, change) of the changes that rest on a fact: the judge weighs them (the others rest on preferences)."""
     return [(n, change) for n, change in enumerate(plan["changes"], 1)
@@ -348,6 +398,8 @@ def change_text(change, language, items):
     lines += [f"Toolchain of {language}: {key} becomes `{shown(command)}`" for key, command in change["toolchain"].items()]
     if change["lesson"]:
         lines.append(f"Keep the lesson ({change['lesson']['phase']}): {change['lesson']['text']}")
+    if change["fact"]:
+        lines.append(f"Keep the fact, in place of [{change['fact']['about']}]: {change['fact']['text']}")
     return "\n".join(lines)
 
 
@@ -355,6 +407,8 @@ def change_summary(change):
     """A change in a few words, for the person: its lesson, else what it replaces or retires."""
     if change["lesson"]:
         return first_line(change["lesson"]["text"], 100)
+    if change["fact"]:
+        return first_line(change["fact"]["text"], 100)
     if change["toolchain"]:
         return f"toolchain {', '.join(change['toolchain'])}"
     return f"retire {len(change['retire'])} item(s)"

@@ -895,3 +895,10 @@ def test_a_command_line_run_once_confirmed_pauses_the_job_while_its_output_is_re
     channel = Recorder()
     Shell(talk, tmp_path).run(channel, "1", {"line": "echo hi", "asked": "say hi", "shown": None})
     assert order == ["paused", "read", "goes on"] and "it says hi" in channel.texts()[-1]
+
+@pytest.mark.spec("RDG-13")
+def test_the_reading_list_is_answered_at_once_in_a_chat(desk):
+    desk, channel, _ = desk
+    assert desk.answer(Message("1", "read list"), channel) == "📚 **read list**\n```\noutput of read list\n```"
+    assert desk.answer(Message("1", "read show #2"), channel).startswith("📚 **read show #2**")
+    assert desk.ran == [["read", "list"], ["read", "show", "#2"]]
