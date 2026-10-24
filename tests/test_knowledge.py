@@ -52,12 +52,12 @@ def test_items(capsys):
              "facts": [{"phase": "code", "text": "match is a soft keyword"},
                        {"phase": "spec", "text": "a claim", "confidence": "corroborated"}]}
     items = Library.items({"py": entry, "bad": {"facts": [{"phase": "code"}], "name": "Bad"}})
-    assert [(i["phase"], i["text"]) for i in items] == [
+    assert [(item["phase"], item["text"]) for item in items] == [
         ("summary", "A language."), ("tools", "its tools: tests pytest, format black"),
         ("machine", "on this machine: Python 3.14.0; `black --version` fails (not installed)"),
         ("findings", "What is new? Free threading. (high confidence)"),
         ("code", "match is a soft keyword"), ("spec", "a claim (corroborated)")]
-    assert all(i["topic"] == "py" and i["name"] == "Python 3.14" for i in items)
+    assert all(item["topic"] == "py" and item["name"] == "Python 3.14" for item in items)
     assert "What was learned about bad is not readable" in capsys.readouterr().out
     assert Library.searched(items[0]) == "Python 3.14: A language."
 
@@ -97,12 +97,14 @@ def test_add_lessons(tinker_home):
                                lesson("Keep each module under sixty lines", "design"),
                                lesson("", "code"), lesson("text", "nowhere")], [])
     assert added == 2
-    assert [l["text"] for l in Home.store().get("languages", "python")["lessons"]] == ["Use tmp_path for files a test makes"]
-    assert [l["text"] for l in Home.store().get("memory", "any")["lessons"]] == ["Keep each module under sixty lines"]
-    assert all(l["status"] == "candidate" and len(l["id"]) == 12 for l in known.known_lessons())
+    assert [lesson["text"]
+            for lesson in Home.store().get("languages", "python")["lessons"]] == ["Use tmp_path for files a test makes"]
+    assert [lesson["text"]
+            for lesson in Home.store().get("memory", "any")["lessons"]] == ["Keep each module under sixty lines"]
+    assert all(lesson["status"] == "candidate" and len(lesson["id"]) == 12 for lesson in known.known_lessons())
     again = Knowledge("Python")
     assert again.add_lessons([lesson("Use tmp_path for the files a test makes", "tests")], [2]) == 0
-    seen = {l["text"]: l["seen"] for l in again.known_lessons()}
+    seen = {lesson["text"]: lesson["seen"] for lesson in again.known_lessons()}
     assert seen == {"Use tmp_path for files a test makes": 2, "Keep each module under sixty lines": 2}
     assert "2 lesson(s)" in again.summary()
 
@@ -123,9 +125,9 @@ def test_lessons_are_capped_and_ranked(tinker_home):
     assert len(known.known_lessons()) == MAX_LESSONS
     known.confirm(known.known_lessons()[3])
     assert known.add_lessons([lesson("a brand new rule that is unlike every other one")], []) == 1
-    texts = [l["text"] for l in known.any_language_doc["lessons"]]
+    texts = [lesson["text"] for lesson in known.any_language_doc["lessons"]]
     assert len(texts) == MAX_LESSONS and "a brand new rule that is unlike every other one" in texts
-    assert [l["text"] for l in known.lessons(("code",), limit=1)] == [known.known_lessons()[0]["text"]]
+    assert [lesson["text"] for lesson in known.lessons(("code",), limit=1)] == [known.known_lessons()[0]["text"]]
     assert known.known_lessons()[0]["seen"] == 2
     assert known.lessons(("design",)) == []
 
@@ -147,11 +149,11 @@ def test_toolchain_fixes(tinker_home):
     known.remember_fix(fix)
     assert known.similar_fix("no module named pytests")["cause"] == "pytest missing"
     assert known.similar_fix("completely different failure") is None
-    for i in range(25):
-        known.remember_fix({"failure": f"failure {i}", "cause": "c", "replay": None})
+    for number in range(25):
+        known.remember_fix({"failure": f"failure {number}", "cause": "c", "replay": None})
     assert len(known.language_doc["fixes"]) == 20
     known.remember_fix({"failure": "failure 24", "cause": "new", "replay": None})
-    assert [f["cause"] for f in known.language_doc["fixes"] if f["failure"] == "failure 24"] == ["new"]
+    assert [fix["cause"] for fix in known.language_doc["fixes"] if fix["failure"] == "failure 24"] == ["new"]
 
 
 @pytest.mark.spec("KNW-6")
@@ -177,7 +179,7 @@ class EmbedServer:
         self.requests.append(payload["input"])
         if self.broken:
             return {"error": "not an embedding model"}
-        return {"embeddings": [[float(len(t)), float(t.count("a")) + 0.5] for t in payload["input"]]}
+        return {"embeddings": [[float(len(text)), float(text.count("a")) + 0.5] for text in payload["input"]]}
 
 
 @pytest.mark.spec("KNW-7")
@@ -241,7 +243,7 @@ def test_rank_fuses_meaning(monkeypatch, capsys):
 
         def vectors(self, texts, keep=True, prune=False):
             table = {"web framework": [1, 0], "Flask is a small tool": [0.9, 0.1], "Django ORM": [0, 1], "pandas": [0.1, 1]}
-            return [table[t] for t in texts]
+            return [table[text] for text in texts]
     retriever = Retriever(Meaning())
     assert retriever.rank("web framework", ["Django ORM", "Flask is a small tool", "pandas"]) == [1, 2, 0]
     assert retriever.used == "words and meaning (e)"
@@ -271,7 +273,7 @@ def test_read_facts_and_add_facts():
         {"phase": "code", "text": "x" * 500}, {"phase": "nowhere", "text": "dropped"}, "junk",
         {"phase": "TESTS", "text": "pytest -q"}, {"phase": "code", "text": "c"}, {"phase": "code", "text": "d"},
         {"phase": "code", "text": "e"}]})))
-    assert [f["phase"] for f in facts] == ["code", "tests", "code", "code"] and len(facts[0]["text"]) == 400
+    assert [fact["phase"] for fact in facts] == ["code", "tests", "code", "code"] and len(facts[0]["text"]) == 400
     kept = Learner.add_facts([], [{"text": "Flask 3.1 needs Python 3.9", "source": "https://a"}])
     Learner.add_facts(kept, [{"text": "Flask 3.1 needs Python 3.9.", "source": "https://b"},
                              {"text": "Flask 3.1 needs Python 3.9", "source": "https://a"},
@@ -282,7 +284,8 @@ def test_read_facts_and_add_facts():
 
 @pytest.mark.spec("KNW-10")
 def test_relevant_chunks():
-    paragraphs = ["intro about the page " * 10] + [f"filler {i} " * 25 for i in range(6)] + ["install with pip " * 10]
+    paragraphs = ["intro about the page " * 10] + [f"filler {number} " * 25
+                                                   for number in range(6)] + ["install with pip " * 10]
     chunks = Learner.relevant_chunks("\n\n".join(paragraphs), 250, "pip install")
     assert len(chunks) == 2 and chunks[0].startswith("intro") and chunks[1].startswith("install with pip")
     assert Learner.relevant_chunks("short page", 250, "x") == ["short page"]
@@ -298,7 +301,7 @@ class FakeInternet:
     def available(self):
         return self.up
 
-    def why(self, key=None):
+    def problem(self, key=None):
         return "offline" if not self.up else "no answer"
 
     def search(self, query, count):
@@ -323,7 +326,8 @@ def test_look_at_machine(make_model):
 def test_read_frame():
     frame = Researcher.read_frame({"name": "Food banks", "summary": "s", "questions": [
         {"question": "How is food recorded?", "queries": ["a", "b", "c"]}, {"question": "", "queries": ["x"]},
-        {"question": "No searches?", "queries": []}, "junk"] + [{"question": f"Q{i}", "queries": ["q"]} for i in range(9)]})
+        {"question": "No searches?", "queries": []}, "junk"] + [{"question": f"Q{number}", "queries": ["q"]}
+                                                                for number in range(9)]})
     assert frame["questions"][0] == {"question": "How is food recorded?", "queries": ["a", "b"]}
     assert len(frame["questions"]) == 4
     with pytest.raises(ValueError):
@@ -343,7 +347,8 @@ def test_read_analysis():
     assert analysis["findings"] == [{"question": 1, "answer": "Weighed at intake.", "confidence": "low", "facts": [1]}]
     assert analysis["contradictions"] == [{"facts": [1, 2], "doubtful": [2], "note": "n"},
                                           {"facts": [1, 3], "doubtful": [1, 3], "note": ""}]
-    assert [g["search"] for g in analysis["gaps"]] == ["s1", "s2"] and [c["fact"] for c in analysis["checks"]] == [1, 2]
+    assert [gap["search"] for gap in analysis["gaps"]] == ["s1", "s2"] and [check["fact"]
+                                                                            for check in analysis["checks"]] == [1, 2]
     with pytest.raises(ValueError, match="finding"):
         Researcher.read_analysis({"findings": []}, 3, 2)
 
@@ -382,7 +387,8 @@ def test_fold_repeats_keeps_the_more_detailed_text():
 
 @pytest.mark.spec("KNW-14")
 def test_supported_and_entry():
-    corroborated, single, disputed = ({"confidence": c} for c in ("corroborated", "single", "disputed"))
+    corroborated, single, disputed = ({"confidence": confidence}
+                                      for confidence in ("corroborated", "single", "disputed"))
     assert Researcher.supported("high", [corroborated, single]) == "high"
     assert Researcher.supported("high", [corroborated, single, single]) == "medium"
     assert Researcher.supported("high", [corroborated, disputed]) == "medium"
@@ -394,7 +400,7 @@ def test_supported_and_entry():
                 "contradictions": [{"facts": [2, 3], "doubtful": [3], "note": ""}], "gaps": [], "checks": []}
     frame = {"name": "T", "summary": "s", "questions": [{"question": "q1"}, {"question": "q2"}]}
     entry = Researcher(learner).entry("t", frame, facts, ["https://a"], analysis)
-    assert [(f["confidence"], f["question"]) for f in entry["facts"]] == \
+    assert [(fact["confidence"], fact["question"]) for fact in entry["facts"]] == \
         [("corroborated", 1), ("single", 2), ("disputed", 1)]
     assert entry["findings"][0]["confidence"] == "medium" and entry["kind"] == "research"
     assert "section" not in entry["facts"][0]
@@ -453,10 +459,11 @@ def test_read_rules_keeps_only_rules_that_rest_on_what_was_learned():
         {"phase": "dreams", "text": "Unknown phase", "cites": [1]},
         {"phase": "code", "text": "Use match for dispatch", "cites": [2]},
         {"phase": "tests", "text": "x" * 500, "cites": [2]}, "junk"]}, SOURCES)
-    assert [(r["phase"], r["text"][:22], r["cites"]) for r in rules] == [
+    assert [(rule["phase"], rule["text"][:22], rule["cites"]) for rule in rules] == [
         ("code", "Use match for dispatch", ["fact1", "lesson1"]), ("tests", "x" * 22, ["fact2"])]
     assert len(rules[1]["text"]) == RULE_CHARS and rules[0]["id"]
-    many = Learner.read_rules({"rules": [{"phase": "code", "text": f"rule {n}", "cites": [1]} for n in range(40)]},
+    many = Learner.read_rules({"rules": [{"phase": "code", "text": f"rule {number}", "cites": [1]}
+                                         for number in range(40)]},
                               SOURCES)
     assert len(many) == PLAYBOOK_RULES
     with pytest.raises(ValueError, match="cites"):
@@ -468,7 +475,8 @@ def test_a_rule_says_when_it_applies_and_what_a_new_project_declares_comes_first
     rules = Learner.read_rules({"rules": [{"phase": "code", "text": "Await in async code", "when": "async code " * 20,
                                            "cites": [1]}],
                                 "declare": {"text": "Set edition 2024 in Cargo.toml", "cites": [2]}}, SOURCES)
-    assert [(r["phase"], r["text"], r["when"]) for r in rules][0] == ("config", "Set edition 2024 in Cargo.toml", "")
+    assert [(rule["phase"], rule["text"], rule["when"])
+            for rule in rules][0] == ("config", "Set edition 2024 in Cargo.toml", "")
     assert rules[1]["when"].startswith("async code") and len(rules[1]["when"]) <= 80
     assert Learner.read_rules({"rules": [{"phase": "code", "text": "x", "cites": [1]}], "declare": None},
                               SOURCES)[0]["when"] == ""
@@ -515,10 +523,10 @@ def language_with_rules():
 def test_rules_are_shown_in_place_of_the_facts_they_cite(tinker_home):
     aliases, _ = language_with_rules()
     items = Library.items({"go": Library.read("go")})
-    assert [(i["phase"], i["text"], i.get("kind")) for i in items[1:]] == [
+    assert [(item["phase"], item["text"], item.get("kind")) for item in items[1:]] == [
         ("code", "Use generic type aliases", "rule"), ("tests", "Run one test with go test -run", "rule")]
     assert items[1]["id"] == aliases and items[1]["status"] == "candidate"
-    plain = {k: v for k, v in Library.read("go").items() if k != "rules"}
+    plain = {key: value for key, value in Library.read("go").items() if key != "rules"}
     assert len(Library.items({"go": plain})) == 4  # no playbook: every fact is shown
 
 
@@ -527,11 +535,12 @@ def test_a_rule_is_proven_and_retired_like_a_fact(tinker_home):
     aliases, run = language_with_rules()
     Knowledge("Go").prove({f"fact:go:{aliases}": ["code"]})
     assert Library.read("go")["rules"][0]["status"] == "proven"
-    assert [f["text"] for f in Knowledge("Go").facts(("code",))] == ["Use generic type aliases"]
+    assert [fact["text"] for fact in Knowledge("Go").facts(("code",))] == ["Use generic type aliases"]
     assert Knowledge("Go").disprove({f"fact:go:{run}": ["tests"]}, ("tests",)) == 1
     entry = Library.read("go")
-    assert [r["text"] for r in entry["rules"]] == ["Use generic type aliases"] and entry["retired"][0]["was"] == "rules"
-    shown = [i["text"] for i in Library.items({"go": entry})]
+    assert [rule["text"]
+            for rule in entry["rules"]] == ["Use generic type aliases"] and entry["retired"][0]["was"] == "rules"
+    shown = [item["text"] for item in Library.items({"go": entry})]
     assert "go test -run picks tests" in shown  # what only the retired rule cited is shown again
     assert "Aliases may be generic" not in shown and "Go 1.25 has a new GC" not in shown
 
@@ -543,19 +552,20 @@ def test_a_lesson_that_names_the_project_is_not_kept(tinker_home):
                                lesson("In calc-py, store results in history.json"),
                                lesson("Keep a parser apart from the arithmetic it calls")], [],
                               names=["calc.py", "history.json", "calc-py"])
-    assert added == 1 and [l["text"] for l in known.known_lessons()] == ["Keep a parser apart from the arithmetic it calls"]
+    assert added == 1 and [lesson["text"]
+                           for lesson in known.known_lessons()] == ["Keep a parser apart from the arithmetic it calls"]
 
 
 def topic_with_facts():
     Library.save("flask", {"topic": "flask", "name": "Flask", "summary": "s", "facts": [
         {"phase": "code", "text": "Flask routes use @app.route"}, {"phase": "tests", "text": "Use app.test_client()"}]})
-    return [f["id"] for f in Library.read("flask")["facts"]]
+    return [fact["id"] for fact in Library.read("flask")["facts"]]
 
 
 @pytest.mark.spec("KNW-17")
 def test_knowledge_starts_as_a_candidate_and_a_success_proves_it(tinker_home):
     route, client = topic_with_facts()
-    assert all(f["status"] == "candidate" for f in Library.read("flask")["facts"])
+    assert all(fact["status"] == "candidate" for fact in Library.read("flask")["facts"])
     known = Knowledge("Python")
     known.add_lessons([lesson("Seed random generators inside tests", "tests")], [])
     lesson_id = known.known_lessons()[0]["id"]
@@ -563,9 +573,9 @@ def test_knowledge_starts_as_a_candidate_and_a_success_proves_it(tinker_home):
     assert known.prove(used) == 2
     again = Knowledge("Python")
     assert again.known_lessons()[0]["status"] == "proven"
-    statuses = {f["id"]: f["status"] for f in Library.read("flask")["facts"]}
+    statuses = {fact["id"]: fact["status"] for fact in Library.read("flask")["facts"]}
     assert statuses == {route: "proven", client: "candidate"}
-    facts = [{k: v for k, v in f.items() if k != "history"} for f in again.language_doc["facts"]]
+    facts = [{key: value for key, value in fact.items() if key != "history"} for fact in again.language_doc["facts"]]
     assert facts == [{"id": route, "phase": "code", "text": "Flask routes use @app.route", "topic": "flask",
                       "status": "proven"}]
     assert again.prove(used) == 0  # proven once is enough
@@ -577,17 +587,18 @@ def test_a_failure_retires_what_was_used_in_that_step(tinker_home):
     known = Knowledge("Python")
     known.add_lessons([lesson("Seed random generators inside tests", "tests"),
                        lesson("Prefer pathlib over os.path joins", "code")], [])
-    seed, paths = (l["id"] for l in known.known_lessons())
+    seed, paths = (lesson["id"] for lesson in known.known_lessons())
     known.prove({f"fact:flask:{route}": ["code"], f"lesson:{paths}": ["code"]})
     used = {f"lesson:{seed}": ["tests"], f"lesson:{paths}": ["code"], f"known:{route}": ["code"],
             f"fact:flask:{client}": ["tests"]}
     assert known.disprove(used, ("toolchain", "config")) == 0  # none was shown there
     gone = Knowledge("Python").disprove(used, ("code",))
     after = Knowledge("Python")
-    assert gone == 2 and [l["text"] for l in after.known_lessons()] == ["Seed random generators inside tests"]
+    assert gone == 2 and [lesson["text"] for lesson in after.known_lessons()] == ["Seed random generators inside tests"]
     assert after.language_doc["facts"] == []  # proven before, retired all the same
     assert after.disprove(used, ("tests",)) == 2
-    assert Knowledge("Python").known_lessons() == [] and [f["id"] for f in Library.read("flask")["facts"]] == [route]
+    assert Knowledge("Python").known_lessons() == [] and [fact["id"]
+                                                          for fact in Library.read("flask")["facts"]] == [route]
 
 
 @pytest.mark.spec("KNW-18")
@@ -595,7 +606,7 @@ def test_proven_facts_are_shown_for_their_phase(tinker_home):
     route, client = topic_with_facts()
     known = Knowledge("Python 3.13")
     known.prove({f"fact:flask:{route}": ["code"]})
-    assert [f["text"] for f in Knowledge("Python").facts(("code",))] == ["Flask routes use @app.route"]
+    assert [fact["text"] for fact in Knowledge("Python").facts(("code",))] == ["Flask routes use @app.route"]
     assert Knowledge("Python").facts(("tests",)) == []
 
 
@@ -642,7 +653,8 @@ def test_lessons_rank_by_times_seen_and_helped(tinker_home):
     seed, name = known.lessons(("tests",))
     known.prove({f"lesson:{seed['id']}": ["tests"]})
     known.prove({f"lesson:{seed['id']}": ["tests"]})
-    assert [l["text"] for l in Knowledge("Python").lessons(("tests",))][0] == "Seed random generators inside tests"
+    assert [lesson["text"]
+            for lesson in Knowledge("Python").lessons(("tests",))][0] == "Seed random generators inside tests"
 
 
 @pytest.mark.spec("KNW-20")
@@ -662,12 +674,12 @@ def test_what_is_retired_is_kept_apart_with_why_and_never_shown(tinker_home, mon
     fix = Knowledge("Python").language_doc["retired"][0]
     assert fix["reason"] == "its replay failed" and events(fix)[-1] == ("failed", "r3")
     entry = Library.read("flask")
-    assert [f["id"] for f in entry["facts"]] == [route] and entry["retired"][0]["id"] == client
+    assert [fact["id"] for fact in entry["facts"]] == [route] and entry["retired"][0]["id"] == client
     assert Knowledge("Python").lessons(("tests",)) == [] and Knowledge("Python").known_fix("no module named calc") is None
     assert all(item["id"] != client for item in Library.items({"flask": entry}))
     monkeypatch.setattr("tinkerkit.knowledge.RETIRED_KEPT", 1)
     Knowledge("Python").disprove({f"fact:flask:{route}": ["code"]}, ("code",))
-    assert [f["id"] for f in Library.read("flask")["retired"]] == [route]
+    assert [retired["id"] for retired in Library.read("flask")["retired"]] == [route]
 
 
 @pytest.mark.spec("KNW-21")

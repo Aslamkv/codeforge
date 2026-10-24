@@ -68,7 +68,7 @@ def test_channels_settings_and_secrets(tinker_home, home_store):
     assert "secret" not in json.dumps(Channels.settings()) and Channels.secrets("bot") == {"token": "secret"}
     made = Channels.make("bot")
     assert isinstance(made, TelegramChannel) and made.secrets == {"token": "secret"} and made.allowed == {"42"}
-    assert [c.name for c in Channels.enabled()] == ["bot"]
+    assert [channel.name for channel in Channels.enabled()] == ["bot"]
     with pytest.raises(SystemExit, match="no channel 'other'"):
         Channels.make("other")
     Channels.keep("odd", {"kind": "pigeon"})
@@ -179,9 +179,10 @@ def test_receive(monkeypatch):
     api = BotAPI(getUpdates=[updates])
     channel = telegram(api)
     messages = channel.receive(1)
-    assert [(m.chat, m.text, m.sender, m.id) for m in messages] == [("42", "hello", "me", 5)]
+    assert [(message.chat, message.text, message.sender, message.id)
+            for message in messages] == [("42", "hello", "me", 5)]
     assert channel.offset == 12 and channel.alive["42"] == [5, 6]
-    monkeypatch.setattr(channels.time, "sleep", lambda s: None)
+    monkeypatch.setattr(channels.time, "sleep", lambda seconds: None)
     assert telegram(BotAPI(getUpdates=[OSError("down"), OSError("down")])).receive(1) == []
 
 
@@ -198,7 +199,7 @@ def test_offer_lists_the_commands_in_the_bots_menu():
     telegram(api).offer([("use-model", "the model every build uses"), ("help", "x" * 300)])
     path, fields = api.calls[-1]
     menu = json.loads(fields["commands"])
-    assert path.endswith("/setMyCommands") and [m["command"] for m in menu] == ["use_model", "help"]
+    assert path.endswith("/setMyCommands") and [item["command"] for item in menu] == ["use_model", "help"]
     assert len(menu[1]["description"]) == 256
     telegram(BotAPI(setMyCommands=OSError("down"))).offer([("help", "this list")])
 
@@ -273,7 +274,7 @@ def test_ask_without_a_terminal(monkeypatch):
 
 @pytest.mark.spec("CHN-6")
 def test_check_tries_a_dropped_network_again(monkeypatch, capsys):
-    monkeypatch.setattr(channels.time, "sleep", lambda s: None)
+    monkeypatch.setattr(channels.time, "sleep", lambda seconds: None)
     flaky = telegram(BotAPI(getMe=[OSError("x"), OSError("x"), {"username": "b"}]))
     assert ChannelCommand.check(flaky) == "@b" and "trying again (2/3)" in capsys.readouterr().out
     down = telegram(BotAPI(getMe=OSError("down")))
@@ -290,7 +291,7 @@ def test_pair_serves_the_chat_its_sender_confirms(monkeypatch, capsys):
                                             "from": {"username": "owner"}}}]
     api = BotAPI(getUpdates=[[], updates], sendMessage={"message_id": 3})
     answers = iter(["n", "y"])
-    monkeypatch.setattr(channels, "ask", lambda question, default="", **kw: next(answers))
+    monkeypatch.setattr(channels, "ask", lambda question, default="", **kwargs: next(answers))
     assert ChannelCommand.pair(telegram(api, chats=()), "@my_bot") == ["42"]
     sent = [fields for path, fields in api.calls if path.endswith("/sendMessage")]
     assert sent and sent[0]["chat_id"] == "42" and "Paired with Tinker" in sent[0]["text"]
@@ -337,7 +338,7 @@ def test_a_book_sent_in_a_chat_is_kept_and_read(tinker_home, home_store):
                  **{"file_1.epub": (200, "EPUB BYTES")})
     messages = telegram(api).receive(1)
     path = tinker_home / "reading" / "My-Book.epub"
-    assert [m.text for m in messages] == [f"read {path}"] and path.read_bytes() == b"EPUB BYTES"
+    assert [message.text for message in messages] == [f"read {path}"] and path.read_bytes() == b"EPUB BYTES"
     assert api.calls[-1][0] == "/file/botT0K/documents/file_1.epub" and "T0K" not in messages[0].text
 
 @pytest.mark.spec("CHN-11")

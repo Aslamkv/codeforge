@@ -13,10 +13,5 @@ if sys.version_info < (3, 15):
 
 from tinkerkit import cli
 
-
-def __getattr__(name):  # the tests still import Tinker's names from here, until they import them from tinkerkit.cli
-    return getattr(cli, name)
-
-
 if __name__ == "__main__":
     cli.main()

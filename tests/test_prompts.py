@@ -237,15 +237,15 @@ def test_the_prompts_example_json_parses_and_its_toolchain_works():
 @pytest.mark.spec("PRM-14")
 def test_the_templates_format():
     assert "60 words" in Prompts.BRIEF_SYSTEM.format(words=60)
-    systems = [v for k, v in vars(Prompts).items() if k.endswith("_SYSTEM")]
-    assert len(systems) >= 25 and all(isinstance(s, str) and s.strip() for s in systems)
+    systems = [value for key, value in vars(Prompts).items() if key.endswith("_SYSTEM")]
+    assert len(systems) >= 25 and all(isinstance(system, str) and system.strip() for system in systems)
 
 
 @pytest.mark.spec("PRM-15")
 def test_the_example_toolchain_commands_are_real_commands():
     toolchain = example("{" + Prompts.TOOLCHAIN_JSON + "}")["toolchain"]
-    commands = toolchain["setup"] + [v for k, v in toolchain.items() if isinstance(v, str)]
-    assert not [c for c in commands if re.search(r"\btinker\b", c)]
+    commands = toolchain["setup"] + [value for key, value in toolchain.items() if isinstance(value, str)]
+    assert not [command for command in commands if re.search(r"\btinker\b", command)]
 
 
 @pytest.mark.spec("PRM-16")

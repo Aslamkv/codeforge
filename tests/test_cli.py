@@ -9,8 +9,8 @@ import sys
 
 import pytest
 
-import tinker
-from tinker import Cli, Commands, CycleRunner, Doctor, ProjectFolder, ProjectRun
+from tinkerkit import cli
+from tinkerkit.cli import Cli, Commands, CycleRunner, Doctor, ProjectFolder, ProjectRun
 from tinkerkit.knowledge import Knowledge, Library
 from tinkerkit.model import Models, Ollama, OllamaError
 from tinkerkit.project import Runs, Tracker, project_store
@@ -282,8 +282,8 @@ def test_the_suite_runs_once_per_state_of_the_files(session, project_dir):
 
 @pytest.mark.spec("SES-2")
 def test_note_ask_until_usable_and_room(session, fake_ollama, monkeypatch):
-    for i in range(35):
-        session.note("fix", f"problem {i}")
+    for number in range(35):
+        session.note("fix", f"problem {number}")
     assert len(session.project.spec["events"]) == 30 and session.project.spec["events"][0]["text"] == "problem 5"
     fake_ollama.reply("nope", times=3)
     with pytest.raises(SystemExit, match="Could not get a usable plan. See the model calls: tinker log --calls"):
@@ -313,16 +313,16 @@ def test_knowledge_parts_record_what_they_show(session, home_store):
     knowledge.add_lessons([{"text": "Use tmp_path in tests", "phase": "tests", "scope": "any"}], [])
     Library.save("flask", {"topic": "flask", "name": "Flask", "summary": "s", "facts": [
         {"phase": "tests", "text": "use the test client"}, {"phase": "code", "text": "routes use decorators"}]})
-    proven, client = (f["id"] for f in reversed(Library.read("flask")["facts"]))
+    proven, client = (fact["id"] for fact in reversed(Library.read("flask")["facts"]))
     knowledge.prove({f"fact:flask:{proven}": ["code"]})
-    session.project.spec["learned"] = [i for i in Library.items({"flask": Library.read("flask")}) if i["id"]]
+    session.project.spec["learned"] = [item for item in Library.items({"flask": Library.read("flask")}) if item["id"]]
     session.cycle = cycle = session.project.cycles[0]
     parts = session.knowledge_parts("tests", "code")
-    assert [p.title for p in parts] == ["Lessons from earlier projects (follow them)",
-                                        "Learned from the web (current; newer than what you were trained on)"]
+    assert [part.title for part in parts] == ["Lessons from earlier projects (follow them)",
+                                              "Learned from the web (current; newer than what you were trained on)"]
     assert parts[0].text == "- Use tmp_path in tests"
     assert parts[1].text == "- [Python] routes use decorators\n- [Flask] use the test client"  # proven once, not twice
-    assert all(not p.required and p.place == "first" for p in parts)
+    assert all(not part.required and part.place == "first" for part in parts)
     lesson_id = knowledge.known_lessons()[0]["id"]
     assert cycle["used"] == {f"lesson:{lesson_id}": ["code", "tests"], f"known:{proven}": ["code", "tests"],
                              f"fact:flask:{client}": ["code", "tests"]}
@@ -332,11 +332,11 @@ def test_knowledge_parts_record_what_they_show(session, home_store):
 @pytest.mark.spec("SES-3")
 def test_code_and_tests_are_told_the_checks_they_must_pass(session):
     session.project.spec["toolchain"]["lint"] = "ruff check . && mypy --strict ."
-    checks = [p for p in session.knowledge_parts("code") if p.title.startswith("Checks")]
-    assert [p.text for p in checks] == ["$ ruff check . && mypy --strict ."]
-    assert not [p for p in session.knowledge_parts("design", "toolchain") if p.title.startswith("Checks")]
+    checks = [part for part in session.knowledge_parts("code") if part.title.startswith("Checks")]
+    assert [part.text for part in checks] == ["$ ruff check . && mypy --strict ."]
+    assert not [part for part in session.knowledge_parts("design", "toolchain") if part.title.startswith("Checks")]
     session.project.spec["toolchain"]["lint"] = "none"
-    assert not [p for p in session.knowledge_parts("tests") if p.title.startswith("Checks")]
+    assert not [part for part in session.knowledge_parts("tests") if part.title.startswith("Checks")]
 
 
 @pytest.mark.spec("SES-5")
@@ -430,18 +430,18 @@ def test_a_blocked_cycle_disproves_what_it_used_there(session, monkeypatch):
     knowledge = session.knowledge
     knowledge.add_lessons([{"text": "Seed random generators inside tests", "phase": "tests"},
                            {"text": "Pin the toolchain versions", "phase": "toolchain"}], [])
-    seed, pin = (l["id"] for l in knowledge.known_lessons())
+    seed, pin = (lesson["id"] for lesson in knowledge.known_lessons())
     cycle = session.project.cycles[0]
     cycle["used"] = {f"lesson:{seed}": ["tests"], f"lesson:{pin}": ["toolchain"]}
     assert CycleRunner(session).run(cycle) == "blocked" and cycle["phase"] == "verify"
-    assert [l["text"] for l in Knowledge("Python").known_lessons()] == ["Pin the toolchain versions"]
+    assert [lesson["text"] for lesson in Knowledge("Python").known_lessons()] == ["Pin the toolchain versions"]
 
 
 @pytest.mark.spec("CLI-7")
 def test_a_web_run_past_recall_recalls_first(session, monkeypatch):
     ran = recording_phases(monkeypatch)
     recalled = []
-    monkeypatch.setattr(tinker.Recaller, "run", lambda self, cycle: recalled.append(cycle["phase"]))
+    monkeypatch.setattr(cli.Recaller, "run", lambda self, cycle: recalled.append(cycle["phase"]))
     cycle = dict(session.project.cycles[0], phase="code")
     session.project.cycles[0] = cycle
     assert CycleRunner(session).run(cycle, web=True) == "done"
@@ -468,7 +468,7 @@ def test_main_ends_cleanly(monkeypatch, error, message):
         raise error
     monkeypatch.setattr(Cli, "parse", staticmethod(fail))
     with pytest.raises(SystemExit) as ended:
-        tinker.main()
+        cli.main()
     assert ended.value.code == message
 
 
@@ -562,7 +562,8 @@ def test_a_task_is_built_end_to_end(run_ready, fake_ollama, home_store):
     assert fake_ollama.queue == [] and fake_ollama.calls[0]["think"] == "high"  # no confirm: no quick draft
     assert "return a - b" in (folder / "calc.py").read_text()
     spec = plan_of(folder)
-    assert [(s["id"], s["status"]) for s in spec["steps"]] == [("C1", "green"), ("C2", "green"), ("C3", "green")]
+    assert [(criterion["id"], criterion["status"]) for criterion in spec["steps"]] == [("C1", "green"), ("C2", "green"),
+                                                                                       ("C3", "green")]
     assert spec["cycles"][0]["phase"] == "done" and "readme_failures" not in spec["cycles"][0]
     assert "| C2 | calc.sub(5, 3) is 2 | `test_calc.py::test_sub` | passes |" in (folder / "SPEC.md").read_text()
     assert "calc.py sub 5 3\n2\n```" in (folder / "README.md").read_text()
@@ -572,9 +573,10 @@ def test_a_task_is_built_end_to_end(run_ready, fake_ollama, home_store):
     assert home_store.get("languages", "python")["projects"] == 1
     assert home_store.get("memory", "any")["lessons"][0]["text"] == "Subtract with the minus operator"
     assert "Done. All 3 spec tests pass (SPEC.md)." in printed(folder)
-    assert sorted(p.name for p in folder.iterdir()) == [".tinker", "README.md", "SPEC.md", "calc.py", "test_calc.py"]
+    assert sorted(path.name for path in folder.iterdir()) == [
+        ".tinker", "README.md", "SPEC.md", "calc.py", "test_calc.py"]
     assert home_store.items("running") == {}  # its tracker is gone once it ended
-    progress = [e["event"] for _, e in project_store(folder).entries("progress")]
+    progress = [event["event"] for _, event in project_store(folder).entries("progress")]
     assert progress[0] == "project" and "points" in progress and progress[-1] == "ended"
 
 
@@ -595,7 +597,7 @@ def test_learning_checks_everything_before_loading(measured_model, fake_ollama, 
     with pytest.raises(SystemExit, match="tinker learn needs the Internet plugin"):
         Commands(parse("learn", "Flask")).run()
     Config.save(web="duckduckgo")
-    monkeypatch.setattr(tinker.SlotLearner, "learn", lambda self, topic, deep=False: None)
+    monkeypatch.setattr(cli.SlotLearner, "learn", lambda self, topic, deep=False: None)
     with pytest.raises(SystemExit, match="Nothing learned about Flask; nothing saved."):
         Commands(parse("learn", "Flask")).run()
     assert fake_ollama.calls == []
@@ -609,7 +611,7 @@ def test_learning_checks_everything_before_loading(measured_model, fake_ollama, 
 @pytest.mark.spec("CLI-11")
 def test_memory(home_store, capsys):
     known = Knowledge("Python")
-    known.remember_toolchain(tinker.Toolchain(TOOLCHAIN))
+    known.remember_toolchain(cli.Toolchain(TOOLCHAIN))
     known.remember_fix({"failure": "no module named calc", "cause": "pythonpath", "replay": {"toolchain": {}}})
     known.add_lessons([{"text": "Use tmp_path in tests", "phase": "tests", "scope": "language"},
                        {"text": "Exit with 1 after an error", "phase": "code", "scope": "any"}], [])
@@ -707,7 +709,7 @@ def test_a_blocked_run_says_why_and_how_to_go_on(make_project, make_session, cap
         setattr(session, key, value)
     run = ProjectRun.__new__(ProjectRun)
     run.session, run.record, run.tracker = session, {"id": "abc123"}, Tracker("calc")
-    run.outcome = tinker.Outcome()
+    run.outcome = cli.Outcome()
     run.outcome.set("blocked")
     run.print_summary()
     out = capsys.readouterr().out
@@ -734,5 +736,6 @@ def test_the_cycle_a_run_works_on(make_project, make_session):
     fix = run_on(project, "change", bug=True, change_request="2/0 crashes")
     assert (feature["kind"], feature["confirm"], fix["kind"], fix["phase"], fix["confirm"]) == \
         ("feature", False, "fix", "recall", True)
-    assert [(f["kind"], f["request"]) for f in project.run["features"]] == [("feature", "keep a history"),
-                                                                            ("fix", "2/0 crashes")]
+    assert [(feature["kind"], feature["request"])
+            for feature in project.run["features"]] == [("feature", "keep a history"),
+                                                                                              ("fix", "2/0 crashes")]

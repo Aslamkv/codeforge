@@ -90,7 +90,8 @@ def test_read():
     writer = ReadmeWriter.__new__(ReadmeWriter)
     data = {"overview": " A calculator. ", "features": ["Adds", " ", "Subtracts  numbers"], "requires": "Python  3",
             "usage": [{"what": "Add", "command": "python3 calc.py add 2 3", "output": "5\n"}, {"what": "", "command": "x"},
-                      "junk"] + [{"what": f"Use {i}", "command": f"python3 calc.py {i}", "output": ""} for i in range(15)],
+                      "junk"] + [{"what": f"Use {number}", "command": f"python3 calc.py {number}", "output": ""}
+                                 for number in range(15)],
             "serves": False}
     guide = writer.read(Reply(json.dumps(data)))
     assert guide["features"] == ["Adds", "Subtracts numbers"] and guide["requires"] == "Python 3"
@@ -268,4 +269,4 @@ def test_a_lesson_naming_the_project_is_dropped(built, fake_ollama):
                                               {"phase": "code", "scope": "any", "text": "Name tests after criteria"}],
                                   "confirmed": []}), when="Lessons")
     LessonWriter(session).run(project.cycles[0])
-    assert [l["text"] for l in session.knowledge.known_lessons()] == ["Name tests after criteria"]
+    assert [lesson["text"] for lesson in session.knowledge.known_lessons()] == ["Name tests after criteria"]

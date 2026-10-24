@@ -29,7 +29,7 @@ class FakeWeb:
     def available(self):
         return self.up
 
-    def why(self, key=None):
+    def problem(self, key=None):
         return "offline" if not self.up else "HTTP 429" if self.limited else "the backend broke"
 
     def search(self, query, count):
@@ -98,8 +98,8 @@ class CountingEmbeddings:
 
     def vectors(self, texts, keep=True, prune=False):
         self.calls += 1
-        return [[1.0 if bit == "1" else -1.0 for bit in bin(int(hashlib.sha1(t.encode()).hexdigest(), 16))[2:66]]
-                for t in texts]
+        return [[1.0 if bit == "1" else -1.0 for bit in bin(int(hashlib.sha1(text.encode()).hexdigest(), 16))[2:66]]
+                for text in texts]
 
 
 class FakeClock:
@@ -120,7 +120,8 @@ def result(url, title, snippet=""):
 
 def html(*sections):
     """A page of sections (heading, paragraph), each paragraph long enough to count."""
-    return "<html><body><main>" + "".join(f"<h2>{h}</h2><p>{(p + ' ') * 10}</p>" for h, p in sections) + \
+    return "<html><body><main>" + "".join(f"<h2>{heading}</h2><p>{(paragraph + ' ') * 10}</p>"
+                                          for heading, paragraph in sections) + \
            "</main></body></html>"
 
 
@@ -182,16 +183,17 @@ def learner(web, model=None, embeddings="default"):
 
 @pytest.mark.spec("LRN-1")
 def test_profiles_are_data_and_a_slot_takes_the_plans_hint_and_follow_up():
-    assert [s.id for s in PROFILES["language"]] == ["installed", "toolchain", "fundamentals", "this-version",
-                                                    "limitations", "best-use-cases", "readiness"]
-    assert [s.id for s in PROFILES["tool"]] == ["installed", "purpose", "core-usage", "this-version",
-                                                "pitfalls-and-limits", "conventions", "fit", "readiness"]
-    assert [s.source for s in PROFILES["tool"]][::7] == ["machine", "check"]
+    assert [slot.id for slot in PROFILES["language"]] == ["installed", "toolchain", "fundamentals", "this-version",
+                                                          "limitations", "best-use-cases", "readiness"]
+    assert [slot.id for slot in PROFILES["tool"]] == ["installed", "purpose", "core-usage", "this-version",
+                                                      "pitfalls-and-limits", "conventions", "fit", "readiness"]
+    assert [slot.source for slot in PROFILES["tool"]][::7] == ["machine", "check"]
     plan = read_plan(PLAN)
-    core, this_version = (next(s for s in web_slots("tool") if s.id == key) for key in ("core-usage", "this-version"))
+    core, this_version = (next(slot for slot in web_slots("tool") if slot.id == key)
+                          for key in ("core-usage", "this-version"))
     assert core.asked(plan, "2.1").endswith("(look for: the Widget class)") and "Widgetlib" in core.asked(plan, "2.1")
     assert this_version.search(plan, "2.1") == "Widgetlib 2.1 changelog deprecations"  # the plan gives none: its own
-    pitfalls = next(s for s in web_slots("tool") if s.id == "pitfalls-and-limits")
+    pitfalls = next(slot for slot in web_slots("tool") if slot.id == "pitfalls-and-limits")
     assert pitfalls.search(plan, "2.1") == "widgetlib common mistakes"
     assert core.search(plan, "2.1") == "Widgetlib getting started tutorial API" and core.keywords() == "getting started tutorial API"
 
@@ -226,7 +228,8 @@ def test_every_request_is_logged_and_counted(tinker_home):
     log("search", "ok", 0.4, "q")
     log("fetch", "failed", 1.0, "https://a")
     lines = [json.loads(line) for line in Home.web_log().read_text().splitlines()]
-    assert [(l["kind"], l["result"], l["target"]) for l in lines] == [("search", "429", "q"), ("search", "ok", "q"),
+    assert [(line["kind"], line["result"], line["target"]) for line in lines] == [("search", "429", "q"),
+                                                                                  ("search", "ok", "q"),
                                                                        ("fetch", "failed", "https://a")]
     assert log.counts()["search"] == {"requests": 2, "429": 1, "ok": 1}
     assert log.text() == "search 2, fetch 1 (1 failed); HTTP 429: 1" and RequestLog().text() == "none"
@@ -236,8 +239,8 @@ def passage(number, text, url="https://x.dev/doc"):
     return Passage(url, "t", "", text, f"P{number}")
 
 
-TOOLCHAIN = next(s for s in web_slots("language") if s.id == "toolchain")
-FUNDAMENTALS = next(s for s in web_slots("language") if s.id == "fundamentals")
+TOOLCHAIN = next(slot for slot in web_slots("language") if slot.id == "toolchain")
+FUNDAMENTALS = next(slot for slot in web_slots("language") if slot.id == "fundamentals")
 LANGUAGE = {"name": "Lang", "language": "Lang"}
 
 
@@ -248,9 +251,9 @@ def test_each_slot_draws_from_one_pool_and_mmr_passes_over_a_near_repeat():
             "commands and the linter."), passage(4, "Keywords and syntax: basic types are int and str; the linter "
             "checks them."), passage(5, "Gardening is fun.")]
     picked = Selector(None, 10_000).select([TOOLCHAIN, FUNDAMENTALS], pool, LANGUAGE, "1.0")
-    toolchain = [p.id for p in picked["toolchain"]]
+    toolchain = [passage.id for passage in picked["toolchain"]]
     assert "P5" not in toolchain and set(toolchain[:2]) & {"P1", "P2"} and toolchain.index("P3") < 2  # a repeat waits
-    assert [p.id for p in picked["fundamentals"]][0] == "P4" and "P4" in toolchain  # one passage, two slots
+    assert [passage.id for passage in picked["fundamentals"]][0] == "P4" and "P4" in toolchain  # one passage, two slots
     tight = Selector(None, len(pool[0].listing()) + 2).select([TOOLCHAIN], pool, LANGUAGE, "1.0")
     assert len(tight["toolchain"]) == 1  # within the digest's room
 
@@ -260,10 +263,11 @@ def test_meaning_finds_a_passage_with_no_shared_keyword():
     class Close(CountingEmbeddings):
         def vectors(self, texts, keep=True, prune=False):
             self.calls += 1
-            return [[1.0, 0.0] if "check" in t or "test" in t else [0.0, 1.0] for t in texts]  # tests, checks: close
+            # tests, checks: close
+            return [[1.0, 0.0] if "check" in text or "test" in text else [0.0, 1.0] for text in texts]
     pool = [passage(1, "Its unit checks run with one command."), passage(2, "Gardening is fun.")]
     picked = Selector(Close(), 10_000).select([TOOLCHAIN], pool, LANGUAGE, "1.0")
-    assert [p.id for p in picked["toolchain"]] == ["P1"]
+    assert [passage.id for passage in picked["toolchain"]] == ["P1"]
 
 
 @pytest.mark.spec("LRN-7")
@@ -272,7 +276,7 @@ def test_only_each_slots_shortlist_is_embedded():
         def vectors(self, texts, keep=True, prune=False):
             self.seen = getattr(self, "seen", 0) + len(texts)
             return super().vectors(texts, keep, prune)
-    pool = [passage(n, f"The linter number {n} checks the code.") for n in range(1, 400)]
+    pool = [passage(number, f"The linter number {number} checks the code.") for number in range(1, 400)]
     embeddings = Seen()
     Selector(embeddings, 100_000).select([TOOLCHAIN], pool, LANGUAGE, "1.0")
     assert embeddings.seen == SLOT_CANDIDATES + 1  # the shortlist, and the question
@@ -282,7 +286,7 @@ def test_only_each_slots_shortlist_is_embedded():
 def test_short_slots_and_readiness():
     selected = {"toolchain": [passage(1, "a")], "fundamentals": [], "this-version": [passage(2, "b")] * 2,
                 "limitations": [passage(3, "c")], "best-use-cases": [passage(4, "d")]}
-    assert [s.id for s in short_slots("language", selected)] == ["fundamentals", "toolchain"]  # emptiest first
+    assert [slot.id for slot in short_slots("language", selected)] == ["fundamentals", "toolchain"]  # emptiest first
     facts = [{"slot": "toolchain"}, {"slot": "fundamentals"}]
     assert missing("language", facts, machine=[]) == ["installed", "this-version", "limitations", "best-use-cases"]
     assert "installed" not in missing("language", facts, machine=[{"command": "x", "found": False}])
@@ -320,7 +324,7 @@ def test_read_digest_keeps_only_facts_that_cite_the_passages_given():
                                    {"phase": "code", "text": "Trust me", "cites": []},
                                    {"phase": "code", "text": "Made up", "cites": ["P9"]},
                                    {"phase": "code", "text": "Lang 9 is in development", "cites": ["P1"]}, "junk"]
-                         + [{"text": f"fact {n}", "cites": ["P1"]} for n in range(10)]}, slot, given)
+                         + [{"text": f"fact {number}", "cites": ["P1"]} for number in range(10)]}, slot, given)
     assert facts[0] == {"phase": "tests", "text": "Run tests with langtest", "slot": "toolchain",
                         "passages": ["P1", "P2"], "source": "https://a.dev", "also": ["https://b.dev"]}
     assert facts[1]["phase"] == "toolchain" and len(facts) == FACTS_PER_SLOT  # the slot's section; the rest cut
@@ -382,14 +386,15 @@ def test_a_tool_is_learned_from_its_versions_documentation_and_one_search(tinker
     assert "https://elsewhere.org/x" not in web.fetched and entry["docs"] == {"widgetlib": "2.1"}
     assert model.calls[0] == "Plan learning" and model.calls[-1] == "Condense the facts" and embeddings.calls
     assert entry["kind"] == "tool" and entry["machine"][0]["version"] == "2.1.0" and entry["language"] == ""
-    assert any(f["source"].startswith(DOC_ROOT) for f in entry["facts"])
-    assert all(f["passages"] and f["source"].startswith("https://widgetlib.dev") for f in entry["facts"])
-    assert "Uncited claim" not in [f["text"] for f in entry["facts"]]
-    assert all(p["fetched"] for p in entry["passages"]) and [r["text"] for r in entry["rules"]] == ["Create a Widget, then show it"]
+    assert any(fact["source"].startswith(DOC_ROOT) for fact in entry["facts"])
+    assert all(fact["passages"] and fact["source"].startswith("https://widgetlib.dev") for fact in entry["facts"])
+    assert "Uncited claim" not in [fact["text"] for fact in entry["facts"]]
+    assert all(passage["fetched"] for passage in entry["passages"])
+    assert [rule["text"] for rule in entry["rules"]] == ["Create a Widget, then show it"]
     assert entry["requests"]["search"]["requests"] == 1 and entry["requests"]["fallback"]["requests"] == 1
     assert entry["status"] == ("incomplete" if entry["missing"] else "complete") and "readiness" not in entry["missing"]
     saved = Library.read("widgetlib")
-    assert saved["plan"]["docs"]["versioned"] and all(f["status"] == "candidate" for f in saved["facts"])
+    assert saved["plan"]["docs"]["versioned"] and all(fact["status"] == "candidate" for fact in saved["facts"])
     out = capsys.readouterr().out
     assert "Documentation: widgetlib 2.1" in out and "Web requests: search 1" in out
     assert "Pages: 3 searched" in out and f"Facts kept: {len(entry['facts'])}" in out
@@ -477,7 +482,7 @@ def test_a_slot_left_without_facts_gets_the_plans_follow_up_search(tinker_home):
                   {**NO_PITFALLS, **DOC_PAGES, PITFALLS: PITFALLS_PAGE})
     entry = learner(web).learn("Widgetlib")
     assert web.queries == ["Widgetlib official documentation", "widgetlib common mistakes"]
-    assert any(f["source"] == PITFALLS and f["slot"] == "pitfalls-and-limits" for f in entry["facts"])
+    assert any(fact["source"] == PITFALLS and fact["slot"] == "pitfalls-and-limits" for fact in entry["facts"])
     assert len(web.queries) <= int(Config.get("learn_searches"))
 
 

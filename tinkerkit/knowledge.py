@@ -471,7 +471,7 @@ class Learner:
         """The pages a search finds, as many as it reads (none, with a note, when the search fails)."""
         found = self.internet.search(search["query"], SEARCH_RESULTS)
         if found is None:
-            self.notes.append(f"search '{search['query']}': {self.internet.why(search['query'])}")
+            self.notes.append(f"search '{search['query']}': {self.internet.problem(search['query'])}")
             with say.section():
                 say.warn(self.notes[-1])
         return (found or [])[:search["pages"]]
@@ -522,7 +522,7 @@ class Learner:
 
     def unreadable(self, page, number):
         """No facts from a page that cannot be read: why is noted and said."""
-        why = f"{page['url']}: {self.internet.why(page['url'])}"
+        why = f"{page['url']}: {self.internet.problem(page['url'])}"
         self.notes.append(f"page {why}")
         with say.section():
             say.fail(f"Could not read page {number}: {why}")
@@ -590,7 +590,7 @@ class Learner:
         """Why the reading ended before every page was read ("" when it did not): the web or the
         model was lost on the way. Learning that was cut short never replaces what was learned before."""
         if not self.internet.available():
-            return f"the web was lost ({self.internet.why()})"
+            return f"the web was lost ({self.internet.problem()})"
         if self.model_failed:
             return f"the model stopped answering ({self.model_failed})"
         return ""

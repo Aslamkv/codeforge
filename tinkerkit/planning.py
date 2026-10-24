@@ -133,7 +133,7 @@ class Recaller(Phase):
         optional: the run goes on); indexed with the embeddings the search uses (None after they
         failed: then not indexed)."""
         if not internet.available():
-            say.skip(f"Not learning {topic}: {internet.why()}")
+            say.skip(f"Not learning {topic}: {internet.problem()}")
             return None
         try:
             entry = SlotLearner(self.session.model, internet, retriever.embeddings).learn(topic)

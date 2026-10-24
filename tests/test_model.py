@@ -24,7 +24,7 @@ class Body(io.BytesIO):
 
 
 def stream_of(*chunks):
-    return Body(b"".join(json.dumps(c).encode() + b"\n" for c in chunks))
+    return Body(b"".join(json.dumps(chunk).encode() + b"\n" for chunk in chunks))
 
 
 def http_error(code, body=b""):
@@ -222,8 +222,8 @@ def test_stream_stops_soon_after_the_reply_is_complete(monkeypatch):
     clock = iter(range(0, 1000))
     monkeypatch.setattr(model_module.time, "perf_counter", lambda: next(clock))
     stream = Stream(None, lambda content: content.endswith("}"))
-    response = [json.dumps({"message": {"content": c}}).encode() for c in ['{"a": 1', "}", " junk", " more junk",
-                                                                           " and more", " and more"]]
+    response = [json.dumps({"message": {"content": piece}}).encode() for piece in ['{"a": 1', "}", " junk", " more junk",
+                                                                                   " and more", " and more"]]
     stream.read(response)
     assert stream.reply == '{"a": 1}' and stream.final["early_stop"] and stream.final["done_reason"] == "complete"
     assert stream.content.startswith('{"a": 1} junk')
@@ -348,7 +348,7 @@ def cut(thinking="I was thinking about it"):
 def test_a_reply_cut_while_thinking_gets_more_room(make_model, fake_ollama):
     fake_ollama.reply(cut()).reply("done")
     assert make_model().ask("s", [Part("Q", "q", True)], "Ask", budget=2048) == "done"
-    assert [c["options"]["num_predict"] for c in fake_ollama.calls] == [2048, 4096]
+    assert [call["options"]["num_predict"] for call in fake_ollama.calls] == [2048, 4096]
 
 
 @pytest.mark.spec("MOD-16")
@@ -401,7 +401,7 @@ def test_a_rejected_think_level_falls_back(make_model, fake_ollama):
     fake_ollama.reply("ok")
     model = make_model()
     assert model.ask("s", [Part("Q", "q", True)], "Ask") == "ok"
-    assert [c["think"] for c in fake_ollama.calls] == ["high", True, None]
+    assert [call["think"] for call in fake_ollama.calls] == ["high", True, None]
     assert model.think is None and model.think_rejected
 
 
@@ -450,7 +450,7 @@ def test_a_prompt_too_large_is_relaxed_then_refused(make_model, fake_ollama, mod
     assert any("shortening every part" in entry.get("note", "") for _, entry in model_log.store.entries("calls"))
     assert "[...]" in fake_ollama.calls[0]["messages"][1]["content"]
     with pytest.raises(PromptTooLarge):
-        model.ask("s", [Part(f"P{i}", "p" * 1000, True) for i in range(10)], "Ask")
+        model.ask("s", [Part(f"P{number}", "p" * 1000, True) for number in range(10)], "Ask")
 
 
 @pytest.mark.spec("MOD-19")
@@ -459,9 +459,10 @@ def test_ask_until_usable(make_model, fake_ollama):
     result = make_model().ask_until_usable("s", [Part("Q", "q", True)], "Plan", lambda reply: reply.json()["ok"])
     assert result is True
     assert "Your previous reply was not usable (no JSON object in reply)" in fake_ollama.calls[1]["messages"][1]["content"]
-    assert [c["label"].split(" [")[0] for c in fake_ollama.calls] == ["Plan (attempt 1)", "Plan (attempt 2)"]
+    assert [call["label"].split(" [")[0] for call in fake_ollama.calls] == ["Plan (attempt 1)", "Plan (attempt 2)"]
     fake_ollama.reply("no", times=2)
-    assert make_model().ask_until_usable("s", [Part("Q", "q", True)], "Plan", lambda r: r.json(), attempts=2) is None
+    assert make_model().ask_until_usable("s", [Part("Q", "q", True)], "Plan", lambda reply: reply.json(),
+                                         attempts=2) is None
 
 
 @pytest.mark.spec("MOD-20")
@@ -528,7 +529,7 @@ def test_a_gguf_model_that_crashes_is_read_in_pieces(monkeypatch, no_sleep, fake
 def test_the_first_chat_finds_the_think_setting(fake_ollama):
     fake_ollama.reply(OllamaError('invalid think value "high"')).reply({"content": "OK", "prompt_eval_count": 300})
     assert Calibrator("m").first_chat({"capabilities": ["thinking"]}) is True
-    assert [c["think"] for c in fake_ollama.calls] == ["high", True]
+    assert [call["think"] for call in fake_ollama.calls] == ["high", True]
     fake_ollama.reply("OK")
     assert Calibrator("m").first_chat({"capabilities": ["completion"]}) is None
     assert fake_ollama.calls[-1]["think"] is None

@@ -6,8 +6,8 @@ import sys
 
 import pytest
 
-import tinker
-from tinker import Cli, Commands
+from tinkerkit import cli
+from tinkerkit.cli import Cli, Commands
 from tinkerkit.graph import Graph, GraphPage
 from tinkerkit.knowledge import Knowledge, Library
 from tinkerkit.project import Runs
@@ -37,7 +37,7 @@ def memory(home_store):
     known.add_lessons([lesson("Seed random generators inside tests", scope="language"),
                        lesson("Name each test after the behaviour it checks"),
                        lesson("Exit with code 1 after an error <b>", "code")], [])
-    seed, name, _ = (l["id"] for l in known.known_lessons())
+    seed, name, _ = (lesson["id"] for lesson in known.known_lessons())
     Knowledge("Python", "r2").prove({f"lesson:{seed}": ["tests"], f"fact:flask:{route}": ["code"]})
     Knowledge("Python", "r2").disprove({f"lesson:{name}": ["tests"]}, ("tests",))
     Runs.remember({"id": "r1", "task": "a calculator", "status": "done", "created": "c", "updated": "u"}, "Python")
@@ -54,7 +54,7 @@ def test_one_node_per_thing_tinker_knows(memory):
     assert kinds["toolchain:python"] == "toolchain" and kinds["fix:python:no module named calc"] == "fix"
     assert kinds[f"lesson:{memory['seed']}"] == "lesson" and kinds[f"known:{memory['route']}"] == "fact"
     assert kinds[f"fact:flask:{memory['route']}"] == "fact"
-    assert [n["kind"] for n in nodes.values() if n["id"].startswith("finding:flask:")] == ["finding"]
+    assert [node["kind"] for node in nodes.values() if node["id"].startswith("finding:flask:")] == ["finding"]
     retired = nodes["retired:any:0"]
     assert retired["status"] == "retired" and retired["text"] == "Name each test after the behaviour it checks"
     assert ["why", "shown in the tests prompts of a step that failed"] in retired["details"]
@@ -67,9 +67,9 @@ def test_one_node_per_thing_tinker_knows(memory):
 @pytest.mark.spec("GRF-2")
 def test_links_join_items_to_what_they_belong_to_and_to_their_runs(memory):
     graph = Graph.build()
-    links = {(l["source"], l["target"], l["kind"]) for l in graph.links}
+    links = {(link["source"], link["target"], link["kind"]) for link in graph.links}
     seed, route = f"lesson:{memory['seed']}", memory["route"]
-    finding = next(n for n in graph.nodes if n.startswith("finding:"))
+    finding = next(node for node in graph.nodes if node.startswith("finding:"))
     assert {(seed, "lang:python", "belongs_to"), ("command:act", "commands", "belongs_to"),
             (finding, f"fact:flask:{route}", "cites"), (f"fact:flask:{route}", f"known:{route}", "became"),
             (seed, "run:r1", "taught_by"), (seed, "run:r2", "helped_in"),
@@ -84,8 +84,8 @@ def test_a_rule_links_to_the_facts_and_lessons_it_rests_on(memory):
     entry["rules"] = [{"phase": "code", "text": "Route with @app.route", "cites": [memory["route"], memory["seed"]]}]
     Library.save("flask", entry)
     graph = Graph.build()
-    rule = next(n for n in graph.nodes if n.startswith("rule:"))
-    links = {(l["source"], l["target"], l["kind"]) for l in graph.links}
+    rule = next(node for node in graph.nodes if node.startswith("rule:"))
+    links = {(link["source"], link["target"], link["kind"]) for link in graph.links}
     assert {(rule, f"fact:flask:{memory['route']}", "cites"), (rule, f"lesson:{memory['seed']}", "cites")} <= links
     assert graph.nodes[rule]["kind"] == "rule" and "1 rule" in graph.summary()
 
@@ -109,7 +109,8 @@ def test_similar_lessons_by_meaning_else_by_words(home_store):
              "Exit with code 1 after an error", "Mock the clock in tests that read the time"]
     Knowledge("Python").add_lessons([lesson(text) for text in texts], [])
     ids = {lesson["text"]: f"lesson:{lesson['id']}" for lesson in Knowledge("Python").known_lessons()}
-    similar = lambda graph: {frozenset((l["source"], l["target"])) for l in graph.links if l["kind"] == "similar"}
+    similar = lambda graph: {frozenset((link["source"], link["target"])) for link in graph.links
+                             if link["kind"] == "similar"}
     meaning = dict(zip(texts, ([1.0, 0, 0], [0, 1.0, 0], [0, 0, 1.0], [0.9, 0.1, 0])))  # the first and the last alike
     by_meaning = Graph.build(FakeEmbeddings(meaning))
     assert by_meaning.similar_by == "meaning (embed-model)"
@@ -125,7 +126,7 @@ def test_the_page_is_self_contained_with_a_plain_list(memory):
     page = GraphPage.html(Graph.build())
     assert not re.search(r"<script[^>]+src=|<link[^>]+href=|@import|url\(|<img", page)
     data = json.loads(re.search(r'<script type="application/json" id="data">(.*?)</script>', page, re.S).group(1))
-    assert {n["id"] for n in data["nodes"]} == set(Graph.build().nodes) and data["links"]
+    assert {node["id"] for node in data["nodes"]} == set(Graph.build().nodes) and data["links"]
     main = re.search(r'<main id="list">(.*?)</main>', page, re.S).group(1)
     assert "<h2>Python</h2>" in main and "<h2>Any language</h2>" in main and "Seed random generators inside tests" in main
     assert "Exit with code 1 after an error &lt;b&gt;" in main and "<b>" not in main
@@ -136,7 +137,7 @@ def test_the_page_is_self_contained_with_a_plain_list(memory):
 def test_memory_graph_writes_the_page_and_opens_it_only_in_a_terminal(memory, monkeypatch, capsys):
     assert Cli.parse(["memory", "--graph"]).graph is True and Cli.parse(["memory"]).graph is False
     opened = []
-    monkeypatch.setattr(tinker.webbrowser, "open", opened.append)
+    monkeypatch.setattr(cli.webbrowser, "open", opened.append)
     Commands.show_memory(graph=True)
     out = capsys.readouterr().out
     assert Home.graph_page().read_text().startswith("<!doctype html>") and opened == []
@@ -162,7 +163,7 @@ def test_a_facts_slot_and_a_topics_missing_slots_are_in_their_details(home_store
                                "facts": [{"phase": "code", "text": "Create a Widget", "slot": "core-usage",
                                           "passages": ["P1"], "source": "https://widgetlib.dev/start"}]})
     nodes = Graph.build().nodes
-    fact = next(n for n in nodes.values() if n["id"].startswith("fact:widgetlib:"))
+    fact = next(node for node in nodes.values() if node["id"].startswith("fact:widgetlib:"))
     assert ["slot", "core-usage"] in fact["details"] and fact["sources"] == ["https://widgetlib.dev/start"]
     assert ["missing", "this-version, fit"] in nodes["topic:widgetlib"]["details"]
     assert "Create a Widget" in GraphPage.html(Graph.build())

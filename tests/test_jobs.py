@@ -10,7 +10,7 @@ import time
 
 import pytest
 
-from tinker import Cli, Commands, ProjectRun
+from tinkerkit.cli import Cli, Commands, ProjectRun
 from tinkerkit import conversation, jobs
 from tinkerkit.conversation import ConsoleChannel, Desk, Message, Progress, Research, research_once
 from tinkerkit.fetcher import Fetched, Fetcher
@@ -280,7 +280,8 @@ def test_clear_jobs_archives_them_listed_apart_and_never_resumed(home_store, cap
 def test_the_conversation_stops_and_resumes_jobs(home_store, tmp_path, monkeypatch):
     desk = Desk([Recorder()], tmp_path)
     started, told = [], []
-    monkeypatch.setattr(desk, "start_task", lambda arguments, folder, title, *rest, **kw: started.append((arguments, title)))
+    monkeypatch.setattr(desk, "start_task", lambda arguments, folder, title, *rest,
+                        **kwargs: started.append((arguments, title)))
     monkeypatch.setattr(desk, "start_exercise", lambda words, title=None: started.append((words, title)))
     monkeypatch.setattr(desk, "stop_exercise", lambda: told.append("exercise"))
     monkeypatch.setattr(Jobs, "stop", staticmethod(lambda job: told.append(job["number"])))
@@ -511,7 +512,7 @@ def test_a_job_that_does_not_pause_is_waited_for_at_most_pause_wait(home_store, 
 def test_a_research_job_says_its_steps_and_ends_with_its_answer(home_store, monkeypatch):
     monkeypatch.setenv("TINKER_CHANNELS", "off")  # a conversation started it: its tracker stays for it to read
     monkeypatch.setattr(Research, "researching", lambda self, channel, chat, topic, now: (
-        self.on("searches"), self.on("read"), self.on("write"), ("done", "🔎 **go**\nGo 1.25 [1]"))[-1])
+        self.enter("searches"), self.enter("read"), self.enter("write"), ("done", "🔎 **go**\nGo 1.25 [1]"))[-1])
     research_once(ConsoleChannel(bare=False), None, "go")
     state = home_store.get("running", str(os.getpid()))
     assert state["steps"] == ["🤔 Searches chosen", "🌐 Pages read"] and state["doing"].startswith("✍️")

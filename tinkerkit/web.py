@@ -62,7 +62,7 @@ class Internet:
         Internet.check()
         internet = Internet()
         if not internet.available():
-            raise SystemExit(f"{option} needs the Internet plugin: {internet.why()}")
+            raise SystemExit(f"{option} needs the Internet plugin: {internet.problem()}")
         for reason in internet.skipped:
             say.warn(f"Web: {reason}; using {internet.describe()}")
         return internet
@@ -76,7 +76,7 @@ class Internet:
             return f"not usable: {exc}"
         internet = Internet()
         if not internet.available():
-            return internet.why()
+            return internet.problem()
         skipped = f"; not usable: {'; '.join(internet.skipped)}" if internet.skipped else ""
         return f"ready: {internet.describe()}{skipped}"
 
@@ -124,7 +124,7 @@ class Internet:
     def available(self):
         return not self.gone
 
-    def why(self, key=None):
+    def problem(self, key=None):
         return self.gone or self.errors.get(key) or "no answer"
 
     def rate_limited(self, key):

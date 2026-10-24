@@ -129,7 +129,7 @@ class SlotLearner:
     def preflight(self):
         """The Internet plugin and an embedding model are there, before anything goes online."""
         if self.internet is None or not self.internet.available():
-            self.stop("preflight", "plugin", self.internet.why() if self.internet else "")
+            self.stop("preflight", "plugin", self.internet.problem() if self.internet else "")
         if self.embeddings is None:
             self.stop("preflight", "embeddings")
         self.fetcher = self.internet.page_fetcher(self.log)
@@ -178,7 +178,7 @@ class SlotLearner:
             raise SearchFailed("rate-limit", f"still after {Config.get('learn_backoff')}s of backoff")
         if found is None:
             cause = "rate-limit" if self.saw_429 else "error" if self.internet.available() else "plugin"
-            raise SearchFailed(cause, first_line(self.internet.why(query), 160))
+            raise SearchFailed(cause, first_line(self.internet.problem(query), 160))
         if not found:
             raise SearchFailed("no-results")
         return found

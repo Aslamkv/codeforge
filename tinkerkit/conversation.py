@@ -361,7 +361,7 @@ class Desk:
             channel.ask_for(message.chat, *words_asked(command))
             return
         if not command:
-            self.talk.answer(channel, message, self.now, lambda: (self.waiting or {}).get("spec", ""))
+            self.talk.answer(channel, message, self.running_now, lambda: (self.waiting or {}).get("spec", ""))
             return
         if command == "run":
             threading.Thread(target=self.run_app, args=(channel, message.chat, message.text.split(None, 1)[1:]),
@@ -395,7 +395,7 @@ class Desk:
         if len(message.text.split()) == 1:
             channel.send(message.chat, USAGE[command])
         else:
-            self.shell.name(channel, after_word(message), self.now)
+            self.shell.name(channel, after_word(message), self.running_now)
 
     def settle(self, channel, message, command):
         """What waits for this very message (a command that deletes, a command line): done when the message
@@ -725,7 +725,7 @@ class Desk:
     def report(self, command, words):
         """runs, status [@PROJECT]: tinker's own; status alone at once, from what the conversation knows."""
         if command == "status" and len(words) == 1:
-            return "\n\n".join([self.status()] + [run["text"] for run in self.now()])
+            return "\n\n".join([self.status()] + [run["text"] for run in self.running_now()])
         title = "📚 **Runs**" if command == "runs" else md(t"📊 **Status** {' '.join(words[1:2])}").rstrip()
         return f"{title}\n```\n{Markup.fenced(self.tinker([command] + words[1:2]))}\n```"
 
@@ -887,7 +887,7 @@ class Desk:
     def busy(self):
         return self.process is not None and self.process.poll() is None
 
-    def now(self):
+    def running_now(self):
         """What runs now: the task started here, and any run from a terminal ({title, brief, text}). An exercise's
         builds are left out: they are not jobs (the exercise is, and is paused as one)."""
         progress = self.reporter.progress if self.busy() else None
@@ -1275,7 +1275,7 @@ class Research:
     def researching(self, channel, chat, topic, now):
         """The research, its message kept up to date: (how it ended, "done" or "blocked", and what it ends with)."""
         head = md(t"🔎 **{topic}**")
-        self.on("searches")
+        self.enter("searches")
         sent = channel.show(chat, None, f"{head}\n⏳ _working out what to search_")
         internet = Internet()
         unusable = self.unusable(internet)
@@ -1286,13 +1286,13 @@ class Research:
         try:
             searches = self.searches(channel, chat, topic)
             searching = " · ".join(f"`{search}`" for search in searches)
-            self.on("read")
+            self.enter("read")
             sent = channel.show(chat, sent, f"{head}\n🌐 _searching:_ {searching}{waits}")
             pages = self.read(internet, searches)
             if not pages:
                 return self.ended(channel, chat, sent, "blocked",
-                                  md(t"{head:md}\n🤷 **Nothing found on the web** for it: {internet.why()}"))
-            self.on("write")
+                                  md(t"{head:md}\n🤷 **Nothing found on the web** for it: {internet.problem()}"))
+            self.enter("write")
             sites = " · ".join(dict.fromkeys(site_of(page["url"]) for page in pages))
             sent = channel.show(chat, sent, md(t"{head:md}\n📖 _read {len(pages)} pages:_ {sites}\n"
                                                t"⏳ _answering from what they say_") + waits)
@@ -1302,7 +1302,7 @@ class Research:
                               md(t"{head:md}\n⚠️ **The model did not answer:** {first_words(exc)}"))
         return self.ended(channel, chat, sent, "done", f"{head}\n{told}\n\n📚 **Sources**\n{self.sources(pages)}")
 
-    def on(self, phase):
+    def enter(self, phase):
         if self.tracker is not None:
             self.tracker.phase(phase)
 
@@ -1314,7 +1314,7 @@ class Research:
     def unusable(self, internet):
         """Why a research cannot be made ("" when it can): the web, or the model, not there."""
         if not internet.available():
-            return md(t"⚠️ **The web is not usable:** {internet.why()}")
+            return md(t"⚠️ **The web is not usable:** {internet.problem()}")
         if not self.talk.model():
             return "⚠️ **No model is in use yet:** `tinker use-model NAME`"
         return ""
@@ -1537,7 +1537,7 @@ class Progress:
     def ending(self):
         """The ending for the chat (Markup): the plan that waits, or how the run ended and how to go on."""
         if self.waiting():
-            return self.plan(self.snapshot["waiting"]) + f"\n⏱ _so far: {self.took()}_"
+            return self.plan(self.snapshot["waiting"]) + f"\n⏱ _so far: {self.time_taken()}_"
         ended = self.snapshot.get("ended")
         if not ended:
             return md(t"🏁 **{self.title}**")
@@ -1546,7 +1546,7 @@ class Progress:
     def ended_lines(self, ended):
         """How the run ended, how long it took, what it made and how to go on."""
         mark = {"done": "✅", "blocked": "⚠️"}.get(ended.get("status"), "⏸")
-        took = f"⏱ **Done in {self.took()}**" if ended.get("status") == "done" else f"⏱ _so far: {self.took()}_"
+        took = f"⏱ **Done in {self.time_taken()}**" if ended.get("status") == "done" else f"⏱ _so far: {self.time_taken()}_"
         lines = ([md(t"{mark} **{ended['headline']}**")] if ended.get("headline") else []) + [took]
         lines += [self.detail(label, value) for label, value in ended.get("details", [])]
         lines += [" · ".join(f"{label}: `{command}`" for label, command in ended.get("next", []))] \
@@ -1560,7 +1560,7 @@ class Progress:
             return md(t"▶️ {label}: {value:code}")
         return md(t"• {label}: {value}")
 
-    def took(self):
+    def time_taken(self):
         """How long the task has taken, in its runs (the time a plan waits for the person left out)."""
         seconds = self.snapshot.get("before", 0.0) + self.snapshot.get("seconds", 0.0)
         return f"{human_duration(seconds)} ({round(seconds)} seconds)"
