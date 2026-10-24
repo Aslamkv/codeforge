@@ -30,7 +30,7 @@ Usage (a project is named as @ID or @folder; without one, it is this folder's):
     tinker fix [@PROJECT] Describe a bug: what you do, what happens, what should happen [--web] [--confirm]
     tinker status [@PROJECT] | tinker runs | tinker log [@PROJECT] [--calls]
     tinker chat MESSAGE | tinker command WHAT | tinker research TOPIC   (each pauses the job that runs)
-    tinker jobs [running|paused|stopped|finished] [PAGE] | tinker stop [#JOB] | tinker resume [#JOB | @PROJECT]
+    tinker jobs [running|paused|stopped|finished|archived] [PAGE] | tinker stop [#JOB] | tinker resume [#JOB | @PROJECT]
     tinker learn WHAT                     learn a language, a tool or a domain (Tinker tells which)
     tinker learn NAME ["DEFINITION"]      a command of yours Tinker may use (an alias in your shell)
     tinker read FILE | URL                store a book, an article or a document, then learn from every chapter
@@ -228,7 +228,7 @@ from tinkerkit.building import BugReproducer, CodeWriter, TestToolSetup, TestWri
 from tinkerkit.commands import BY_NAME, COMMANDS, GROUPS, refs
 from tinkerkit.finishing import FinalReview, LessonWriter, ReadmeWriter, Tidy
 from tinkerkit.graph import write_page
-from tinkerkit.jobs import STATES, Jobs, job_number
+from tinkerkit.jobs import STATES, Jobs, archived, job_number
 from tinkerkit.knowledge import Embeddings, Library
 from tinkerkit.learning import LearnStopped, SlotLearner
 from tinkerkit.messages import Messages, human_duration, say
@@ -354,12 +354,17 @@ class Cli:
 
     @staticmethod
     def cleared(parts, yes):
-        """tinker clear PART... (Home's parts), or tinker clear read [#N...]: readings, alone."""
-        if parts[0] != "read":
+        """tinker clear PART... (Home's parts), or, alone, tinker clear read [#N...] (readings deleted) or tinker
+        clear jobs [#N...] (jobs archived)."""
+        if parts[0] not in ("read", "jobs"):
             return Home.clear(parts, yes)
         numbers = [job_number(word) for word in parts[1:]]
+        if None in numbers and parts[0] == "jobs":
+            raise SystemExit("tinker clear jobs takes job numbers alone: tinker clear jobs #N (tinker jobs)")
         if None in numbers:
             raise SystemExit("tinker clear read takes reading numbers alone: tinker clear read #N (tinker read list)")
+        if parts[0] == "jobs":
+            return archived(numbers, yes)
         reading.forgotten(numbers, yes)
 
     @staticmethod
@@ -544,7 +549,7 @@ class Cli:
         state = words[0] if words and words[0] in STATES else None
         rest = words[1:] if state else words
         if len(rest) > 1 or (rest and not (rest[0].isdigit() and int(rest[0]) >= 1)):
-            parser.error("use tinker jobs [running|paused|stopped|finished] [PAGE], e.g. tinker jobs finished 2")
+            parser.error("use tinker jobs [running|paused|stopped|finished|archived] [PAGE], e.g. tinker jobs finished 2")
         return state, int(rest[0]) if rest else 1
 
     @staticmethod

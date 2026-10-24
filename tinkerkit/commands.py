@@ -142,13 +142,14 @@ COMMANDS = [
             "that is not one language (or could be several) is said so, and nothing is done.",
             chat="own", words="any", arguments=[Argument("words", "+", "LANGUAGE | status")],
             example="exercise rust"),
-    Command("jobs", "Jobs", "jobs [running|paused|stopped|finished] [PAGE]", "the long commands: running, paused, stopped",
+    Command("jobs", "Jobs", "jobs [running|paused|stopped|finished|archived] [PAGE]", "the long commands: running, paused, stopped",
             "List the jobs: every long command (a task, add, fix, learn, ask, teach, read, research, exercise) is one, "
             "numbered #1, #2 ... One runs at a time: a job you start pauses the one that runs, which goes on by itself once Tinker "
             "is idle (resume #N: at once). Without a state, the running ones, the paused ones and the stopped ones; "
-            "running, paused, stopped or finished lists those alone. Newest first, 10 to a page (jobs stopped 2: the "
-            "second page).", chat="quick", words="any",
-            arguments=[Argument("words", "*", "[STATE] [PAGE]", "running, paused, stopped or finished; the page, from 1")],
+            "running, paused, stopped, finished or archived (by clear jobs) lists those alone. Newest first, 10 to a "
+            "page (jobs stopped 2: the second page).", chat="quick", words="any",
+            arguments=[Argument("words", "*", "[STATE] [PAGE]",
+                                "running, paused, stopped, finished or archived; the page, from 1")],
             example="jobs stopped"),
     Command("stop", "Jobs", "stop [#JOB]", "stop a job (it is saved): the one that runs, or #N",
             "Stop a job as Ctrl-C does: what it did is kept, and resume #N goes on from there. Without a number, the "
@@ -193,16 +194,18 @@ COMMANDS = [
             "lessons per language), memory (lessons for any language), learned (what tinker learn learned), docs (the "
             "documentation it fetched, per version), models (measurements), runs (the list of projects), commands (your commands), "
             "history (what the chats showed; in a chat its messages go too), exercise (the exercises), read [#N...] "
-            "(readings: their text and what was learned from them; every one with no #N). In a conversation, clear "
-            "chat takes every "
+            "(readings: their text and what was learned from them; every one with no #N), jobs [#N...] (archived, not "
+            "deleted: jobs archived lists them, and they cannot be resumed; every stopped and finished one with no "
+            "#N). In a conversation, clear chat takes every "
             "message out of the chats but Tinker's status, at once: history keeps what they showed.", chat="quick", words="any",
             deletes=True, arguments=[Argument("parts", "+", "PART", "languages, memory, learned, docs, models, "
-                                                                    "runs, commands, history, exercise, or read "
-                                                                    "[#N...]")], options=("yes",),
+                                                                    "runs, commands, history, exercise, read "
+                                                                    "[#N...] or jobs [#N...]")], options=("yes",),
             rows=[("clear languages | memory | learned", "what was learned: per language, for any language, by learn"),
                   ("clear docs | models | runs | commands", "fetched docs, model measures, the project list, your commands"),
                   ("clear exercise", "the exercises: their projects, measures and where each stopped"),
                   ("clear read [#N...]", "readings: their text and what was learned from them (all, with no #N)"),
+                  ("clear jobs [#N...]", "archive jobs: jobs archived lists them (stopped, finished: all, with no #N)"),
                   ("clear history", "what the chats showed, and what you asked (the chat's messages go too)"),
                   ("clear chat", "in a chat: take its messages out now; history keeps them")]),
     Command("reset", "Set up", "reset [--yes]", "delete everything Tinker keeps (projects stay)",

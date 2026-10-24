@@ -300,6 +300,11 @@ too: they are answered at once, so there is no emergency command.
   written (a command line run once confirmed pauses it again while the model reads its output). A command that
   only shows something pauses nothing, and a job asked for pauses it as **JOB-8** says. There is no `emergency`
   command.
+- **JOB-11** `tinker clear jobs [#N...] [--yes]` archives those jobs (with no `#N`, every stopped and finished
+  one) once the person agrees: each is kept with the state `archived` (and `archived_from`, the state it had),
+  listed by `tinker jobs archived` and not without a state, and its journal is deleted. An archived job is not
+  resumed (**JOB-5**). An unknown job, a running or paused one, one archived already, and any word but `#N` are
+  refused with why.
 
 ## commands
 

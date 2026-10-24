@@ -8,7 +8,9 @@ handed over. The job keeps the date it started, so prompts that say today's date
 One job runs at a time, whatever kind it is: a job that starts pauses the one that runs, and so does the person's
 chat (paused_for_you: what runs is paused while they are answered). A paused job saves itself (as on stop) and
 waits in its own process; once Tinker is idle (no job runs, and no request is being answered), the job paused last
-goes on by itself at once, as resume #N. resume #N makes a paused job go on at once too."""
+goes on by itself at once, as resume #N. resume #N makes a paused job go on at once too.
+
+clear jobs #N archives a stopped or finished job: it is kept, and listed by jobs archived, but never resumed."""
 
 import contextlib
 lazy import datetime
@@ -21,11 +23,11 @@ lazy import time
 lazy from pathlib import Path
 
 lazy from .messages import say
-lazy from .settings import EXERCISE_ENV, Home, fingerprint, now_text
+lazy from .settings import EXERCISE_ENV, Home, confirmed, fingerprint, now_text
 
 COMMANDS = ("task", "restart", "resume", "confirm", "amend", "add", "fix", "learn", "ask", "teach", "read",
             "research", "exercise")
-STATES = ("running", "paused", "stopped", "finished")
+STATES = ("running", "paused", "stopped", "finished", "archived")
 PAGE = 10              # jobs listed on one page
 PAUSE_WAIT = 150       # seconds a job is given to pause (save, and let go of the model) for one that starts
 LOOK_EVERY = 1.0       # seconds between looks of a paused job at whether Tinker is idle
@@ -211,8 +213,8 @@ class Jobs:
             return None, f"Job #{number} is running (stop it with tinker stop #{number})."
         if job["state"] == "paused" and job["pid"] != os.getpid():
             return None, f"Job #{number} is paused: it goes on by itself once Tinker is idle."
-        if job["state"] == "finished":
-            return None, f"Job #{number} is finished: there is nothing left to resume."
+        if job["state"] in ("finished", "archived"):
+            return None, f"Job #{number} is {job['state']}: there is nothing left to resume."
         return job, ""
 
     @classmethod
@@ -252,6 +254,37 @@ class Jobs:
             Jobs.update(job["number"], state="stopped", paused_by=None)
         else:
             signal_job(job)
+
+def archived(numbers, yes=False):
+    """clear jobs [#N...]: those jobs (every stopped and finished one, with none named) archived once the person
+    agrees: kept, and listed by jobs archived, but never resumed (a stopped one's journal goes)."""
+    jobs = [archivable(number) for number in numbers] or Jobs.listed("stopped") + Jobs.listed("finished")
+    if not jobs:
+        say.info("Nothing to clear: no job is stopped or finished.")
+        return
+    say.warn("This archives (tinker jobs archived lists them; they cannot be resumed):")
+    with say.section():
+        for job in jobs:
+            say.item(f"#{job['number']} {job['state']}: {job['title']}")
+    numbered = " ".join(f"#{job['number']}" for job in jobs)
+    if not confirmed("Archive them?", f"tinker clear jobs {numbered}", yes):
+        say.info("Nothing archived.")
+        return
+    for job in jobs:
+        Jobs.update(job["number"], state="archived", archived_from=job["state"])
+        Home.store().drop_log(f"journal #{job['number']}")
+    say.done(f"Archived {numbered}.")
+
+def archivable(number):
+    """Job #number, one that can be archived: neither running nor paused, nor archived already."""
+    job = Jobs.get(number)
+    if job is None:
+        raise SystemExit(f"No job #{number} (tinker jobs lists them).")
+    if job["state"] in ("running", "paused"):
+        raise SystemExit(f"Job #{number} is {job['state']}: stop it first (tinker stop #{number}).")
+    if job["state"] == "archived":
+        raise SystemExit(f"Job #{number} is archived already (tinker jobs archived lists them).")
+    return job
 
 
 def go_on_when_idle(number):
