@@ -12,7 +12,7 @@ from tinkerkit import conversation, jobs
 from tinkerkit.cli import Cli, Commands
 from tinkerkit.conversation import ConsoleChannel, Desk, Message, Progress, Research, research_once
 from tinkerkit.fetcher import Fetched, Fetcher
-from tinkerkit.jobs import JOB_STOP_SIGNAL, Jobs, is_job, journaled, today
+from tinkerkit.jobs import JOB_STOP_SIGNAL, Jobs, archived, calls_log, is_job, journaled, today
 from tinkerkit.learning import SlotLearner
 from tinkerkit.model import Ollama
 from tinkerkit.project import Tracker
@@ -715,3 +715,13 @@ def test_a_new_jobs_message_is_kept_up_and_one_that_goes_on_comes_to_the_bottom(
     reporter.refresh()
     assert len([entry for entry in channel.log if entry[0] == "send"]) == sent + 1
     reporter.ended = True
+
+
+@pytest.mark.spec("JOB-12")
+def test_a_job_keeps_its_model_calls_in_its_own_log_until_it_is_archived(home_store):
+    calls_log().add({"note": "outside a job"})
+    with Jobs.running(["learn", "rust"]):
+        calls_log().add({"note": "a model call"})
+    assert [entry["note"] for _, entry in home_store.entries("calls #1")] == ["a model call"]
+    archived([1], yes=True)
+    assert home_store.entries("calls #1") == []

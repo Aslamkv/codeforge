@@ -10,7 +10,7 @@ lazy from pathlib import Path
 
 lazy from .commands import kind_of
 lazy from .messages import say
-lazy from .settings import EXERCISE_ENV, Home, Numbered, confirm_deletion, fingerprint, now_text
+lazy from .settings import EXERCISE_ENV, Home, Log, Numbered, confirm_deletion, fingerprint, now_text
 
 JOBS = Numbered("jobs", "job numbers")
 STATES = ("running", "paused", "stopped", "finished", "archived")
@@ -46,6 +46,10 @@ def journaled(
     if Jobs.journal is None:
         return ask()
     return Jobs.journal.answer(request, ask, keep, dump, load)
+
+
+def calls_log():
+    return Log(Home.store(), f"calls #{Jobs.current['number']}" if Jobs.current else None)
 
 
 def today():
@@ -250,6 +254,7 @@ def archived(numbers, yes=False):
     for job in jobs:
         Jobs.update(job["number"], state="archived", archived_from=job["state"])
         Home.store().drop_log(f"journal #{job['number']}")
+        Home.store().drop_log(f"calls #{job['number']}")
     say.done(f"Archived {numbered}.")
 
 

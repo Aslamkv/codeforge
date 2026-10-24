@@ -13,7 +13,7 @@ lazy from pathlib import Path
 
 from . import conversation, exercising, reading
 from .commands import BY_NAME, COMMANDS, GROUPS, refs
-from .jobs import STATES, Jobs, archived, job_number
+from .jobs import STATES, Jobs, archived, calls_log, job_number
 from .messages import Messages, human_duration, say
 from .reading import Reader
 lazy from .building import BugReproducer, CodeWriter, TestToolSetup, TestWriter, Verifier
@@ -709,7 +709,7 @@ class Commands:
         name, settings = Commands.checked_model()
         embeddings = Embeddings.required(option)
         internet = Internet.required(option)
-        return LearningTools(Commands.model_in_use(name, settings, "learn"), embeddings, internet)
+        return LearningTools(Commands.model_in_use(name, settings), embeddings, internet)
 
     @staticmethod
     def checked_model():
@@ -719,8 +719,8 @@ class Commands:
         return SelectedModel(name, settings)
 
     @staticmethod
-    def model_in_use(name, settings, log_name):
-        log = Log(Home.store(), log_name)
+    def model_in_use(name, settings):
+        log = calls_log()
         say.keep_log(log)
         return Model(
             name,
@@ -732,7 +732,7 @@ class Commands:
 
     def ask(self):
         question = self.args.ask
-        model = Commands.model_in_use(*Commands.checked_model(), "teach")
+        model = Commands.model_in_use(*Commands.checked_model())
         memory = Memory(Embeddings.configured())
         Commands.reported(
             f"Asking: {first_line(question, 60)}",
@@ -744,7 +744,7 @@ class Commands:
         teaching = self.args.teach
         name, settings = Commands.checked_model()
         internet = Internet.required("tinker teach")
-        model, memory = Commands.model_in_use(name, settings, "teach"), Memory(Embeddings.configured())
+        model, memory = Commands.model_in_use(name, settings), Memory(Embeddings.configured())
         Commands.reported(
             f"Teaching: {first_line(teaching, 60)}",
             model,
@@ -764,7 +764,7 @@ class Commands:
                 return
             Jobs.retarget(["read", f"#{number}"])
         title = reading.known_reading(number)["title"]
-        model = Commands.model_in_use(*Commands.checked_model(), "read")
+        model = Commands.model_in_use(*Commands.checked_model())
         Commands.reported(
             f"Reading #{number} {first_line(title, 50)}",
             model,
@@ -775,7 +775,7 @@ class Commands:
         what = self.args.exercise
         if what.lower() == "status":
             return exercising.show()
-        model = Commands.model_in_use(*Commands.checked_model(), "exercise")
+        model = Commands.model_in_use(*Commands.checked_model())
         Commands.reported(
             f"Exercising {what}",
             model,

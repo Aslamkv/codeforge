@@ -136,7 +136,7 @@ the last column:
 | `chat views` | each message in a chat (Tinker's and the person's): when it goes, and the thing it shows | |
 | `chat history`, `chat history numbers` | each thing shown in a chat, as it was shown last, with what the person asked for it; the last number given | `history` |
 | `jobs`, `job numbers` | every job: its number, command, title, arguments, state, process and dates; the last number given | `jobs` |
-| log `calls #N` | every model call job #N made itself (a run's go to its project's `events`), until the job is archived | `jobs` |
+| log `calls #N` | the model calls and details of job #N (a run's go to its project's `events`), until the job is archived (**JOB-12**) | `jobs` |
 | log `journal #N` | job #N's requests (model calls, web searches, page fetches) with their answers, until it finishes | `jobs` |
 
 Jobs, readings and the chat history are numbered lists (`Numbered`, **SET-18**). `#N` names an entry. A list
@@ -347,6 +347,9 @@ pauses it too, so the person is always answered at once.
   deleted. An archived job is not
   resumed (**JOB-5**). An unknown job, a running or paused one, one archived already, and any word but `#N`
   are refused with why.
+- **JOB-12** `calls_log()` is the one log of a job's model calls: `calls #N` for the job that runs, kept when
+  it finishes and deleted when it is archived (**JOB-11**). Outside a job it keeps nothing. `learn`, `ask`,
+  `teach`, `read` and `exercise` give it to their model and to `say` (`detail`, **MSG-5**).
 
 ## ledger (LED)
 

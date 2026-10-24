@@ -348,7 +348,7 @@ class Home:
                 "per language: the toolchain that worked, its fixes, its lessons",
             ),
             "memory": (["memory"], [], "lessons that hold for any language"),
-            "learned": (["learned", "embeddings"], ["learn"], "what tinker learn learned, and its index"),
+            "learned": (["learned", "embeddings"], [], "what tinker learn learned, and its index"),
             "docs": (
                 ["sources"],
                 [],
@@ -368,7 +368,7 @@ class Home:
             ),
             "exercise": (
                 ["exercise"],
-                ["exercise"],
+                [],
                 "the exercises: each language's practice projects, what they "
                 "measured, and where each stopped",
             ),
@@ -707,7 +707,8 @@ class Log:
         self.store, self.name = store, name
 
     def add(self, event):
-        self.store.append(self.name, event)
+        if self.name:
+            self.store.append(self.name, event)
 
 
 class NotAPytestClass:
