@@ -5,8 +5,8 @@ import sys
 
 import pytest
 
-import tinker
-from tinker import Cli, Commands
+from tinkerkit import cli
+from tinkerkit.cli import Cli, Commands
 from tinkerkit.knowledge import Knowledge, Library
 from tinkerkit.model import Ollama
 from tinkerkit.prompts import Prompts
@@ -31,7 +31,7 @@ class FakeWeb:
     def available(self):
         return True
 
-    def why(self, key=None):
+    def problem(self, key=None):
         return "nothing found"
 
     def search(self, query, count):
@@ -59,7 +59,7 @@ def kept(home_store):
 def numbered_item(memory, text, kind):
     """The number an item is shown with to a teaching about text."""
     items = memory.about(text)
-    return next(n for n, item in enumerate(items, 1) if item["kind"] == kind and "black" in item["text"])
+    return next(number for number, item in enumerate(items, 1) if item["kind"] == kind and "black" in item["text"])
 
 
 RUFF_FACT = {"text": "Ruff formats Python code as black does", "preference": False}
@@ -120,7 +120,8 @@ def test_ask_with_nothing_kept_asks_no_model(home_store, make_model, fake_ollama
 
 @pytest.mark.spec("TCH-3")
 def test_read_plan_keeps_what_is_usable_within_limits():
-    plan = read_plan({"claims": [f"claim {n}" for n in range(9)] + [{"text": "I prefer X", "preference": True}, ""],
+    plan = read_plan({"claims": [f"claim {number}" for number in range(9)]
+                                + [{"text": "I prefer X", "preference": True}, ""],
                       "commands": ["ruff --version"], "searches": ["a", "b", "c", "d"], "language": "Python",
                       "changes": [{"claims": [1, 99], "retire": [1, 3, 99, "2"],
                                    "toolchain": {"format": "ruff format .", "lint": "",
@@ -188,8 +189,8 @@ def test_toolchain_commands_are_read_in_either_form():
 @pytest.mark.spec("TCH-3")
 def test_only_a_teaching_marked_with_prefer_has_preferences():
     reply = json.loads(plan_reply())
-    assert [c["preference"] for c in read_plan(reply, count=0, preferences=False)["claims"]] == [False, False]
-    assert [c["preference"] for c in read_plan(reply, count=0)["claims"]] == [False, True]
+    assert [claim["preference"] for claim in read_plan(reply, count=0, preferences=False)["claims"]] == [False, False]
+    assert [claim["preference"] for claim in read_plan(reply, count=0)["claims"]] == [False, True]
     assert marked("I prefer no mypy") and marked("my preference: no mypy") and marked("Preferred: ruff")
     assert not marked("we need no mypy")
 
@@ -262,7 +263,7 @@ def test_a_teaching_that_holds_corrects_what_tinker_keeps(kept, make_model, fake
     retired = python["retired"][-1]
     assert retired["text"] == "Format Python with black before linting with ruff"
     assert retired["reason"] == f"corrected by what you taught: {teaching}"
-    taught = {l["text"]: l for l in python["lessons"]}
+    taught = {lesson["text"]: lesson for lesson in python["lessons"]}
     ruff, no_mypy = taught["Format and lint Python with ruff alone; black is not needed"], \
         taught["Run no type checker in Python projects"]
     assert ruff["status"] == no_mypy["status"] == "proven" and ruff["history"][-1]["event"] == "taught"
@@ -283,7 +284,7 @@ def test_ask_and_teach_report_through_a_tracker_and_run_as_tasks(kept, measured_
                                                                  capsys):
     from tinkerkit import conversation
     monkeypatch.setattr(Ollama, "installed_models", staticmethod(lambda: [{"name": MODEL}]))
-    monkeypatch.setattr(tinker.Internet, "required", staticmethod(lambda option: FakeWeb()))
+    monkeypatch.setattr(cli.Internet, "required", staticmethod(lambda option: FakeWeb()))
     ended = []
     monkeypatch.setattr(Commands, "tracker_ended", staticmethod(lambda tracker, ending, took: ended.append(
         (tracker.state["title"], ending["status"], tracker.state["steps"]))))
@@ -327,7 +328,7 @@ def test_an_ask_about_a_book_sees_what_the_book_says(home_store, make_model, fak
 def test_a_teaching_about_a_book_is_checked_against_it_and_keeps_the_fact(home_store, make_model, fake_ollama):
     shelved()
     memory, teaching = Memory(), "The Craft says each test comes before the code, not after"
-    about = next(n for n, item in enumerate(memory.about(teaching), 1) if item["text"] == WRONG)
+    about = next(number for number, item in enumerate(memory.about(teaching), 1) if item["text"] == WRONG)
     fake_ollama.reply(json.dumps({"claims": [{"text": "The Craft says to write each test before the code",
                                               "preference": False}], "language": "",
                                   "changes": [{"claims": [1], "fact": {"about": about,

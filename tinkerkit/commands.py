@@ -44,7 +44,7 @@ class Command:
                  deletes=False, arguments=(), options=(), example="", rows=()):
         self.name, self.group, self.synopsis, self.what, self.about = name, group, synopsis, what, about or what
         self.chat, self.words, self.cli, self.run, self.deletes = chat, words, cli, run, deletes
-        self.arguments, self.options, self.example = list(arguments), [OPTIONS[o] for o in options], example
+        self.arguments, self.options, self.example = list(arguments), [OPTIONS[option] for option in options], example
         self.rows = list(rows) or [(synopsis, what)]
 
 
@@ -246,7 +246,8 @@ TERMINAL_ONLY = ("add", "remove", "start")  # tinker channel's actions that ask 
 
 def named(*kinds, words=None):
     """The names of the commands a conversation takes as one of these kinds (and these words after it)."""
-    return tuple(c.name for c in COMMANDS if c.chat in kinds and (words is None or c.words == words))
+    return tuple(command.name for command in COMMANDS if command.chat in kinds and (words is None
+                                                                                    or command.words == words))
 
 
 def ref(word):
@@ -257,6 +258,6 @@ def ref(word):
 
 def refs(words):
     """(the project the first word names, or "", the other words)."""
-    words = [w for w in words if str(w).strip()]
+    words = [word for word in words if str(word).strip()]
     name = ref(words[0]) if words else None
     return (name, words[1:]) if name else ("", words)

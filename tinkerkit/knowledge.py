@@ -51,7 +51,8 @@ class Knowledge:
         names; None when it names none."""
         known = [doc.get("language") for doc in Home.store().items("languages").values()] + \
                 [entry.get("language") for entry in Library.topics().values() if entry.get("kind") == "language"]
-        named = [name for name in dict.fromkeys(n for n in known if n) if mentions(text or "", name)]
+        named = [name for name in dict.fromkeys(known_name for known_name in known if known_name)
+                 if mentions(text or "", name)]
         return min(named, key=lambda name: (text or "").lower().index(name.lower()), default=None)
 
     def summary(self):
@@ -61,7 +62,7 @@ class Knowledge:
                  if self.language_doc.get("toolchain") else "",
                  f"{len(self.language_doc.get('fixes', []))} toolchain fix(es)" if self.language_doc.get("fixes") else "",
                  f"{lessons} lesson(s)" if lessons else "", f"{facts} proven fact(s)" if facts else ""]
-        return f"{self.language}: " + (", ".join(k for k in known if k) or "nothing learned yet")
+        return f"{self.language}: " + (", ".join(topic for topic in known if topic) or "nothing learned yet")
 
     def lessons(self, phases, limit=LESSONS_SHOWN):
         """The lessons for these phases, the most confirmed first: [{id, text, ...}]."""
@@ -132,8 +133,9 @@ class Knowledge:
         """At most MAX_LESSONS, the most confirmed first; the new ones always stay (the least
         confirmed older ones go to make room)."""
         rank = Knowledge.rank
-        fresh = [lesson for lesson in lessons if any(lesson is n for n in new)]
-        older = sorted((lesson for lesson in lessons if not any(lesson is n for n in new)), key=rank, reverse=True)
+        fresh = [lesson for lesson in lessons if any(lesson is new_lesson for new_lesson in new)]
+        older = sorted((lesson for lesson in lessons if not any(lesson is new_lesson for new_lesson in new)), key=rank,
+                       reverse=True)
         return sorted(fresh + older[:max(0, MAX_LESSONS - len(fresh))], key=rank, reverse=True)
 
     def prove(self, used):
@@ -162,8 +164,8 @@ class Knowledge:
         proven, known = 0, {fact["id"] for fact in self.language_doc.setdefault("facts", [])}
         for slug, ids in self.used_facts(used).items():
             entry = Library.read(slug) or {}
-            claims = [c for key in Library.CLAIMS for c in entry.get(key, []) if c.get("id") in ids]
-            proven += sum(c.get("status") != "proven" for c in claims)
+            claims = [claim for key in Library.CLAIMS for claim in entry.get(key, []) if claim.get("id") in ids]
+            proven += sum(claim.get("status") != "proven" for claim in claims)
             Library.claims(slug, ids, lambda claim: record(dict(claim, status="proven"), "helped", self.run))
             for claim in claims:
                 if claim["id"] not in known and claim.get("phase"):
@@ -234,7 +236,7 @@ class Knowledge:
         neither installed nor run by the toolchain that worked, nor a check it lacks (to be added)."""
         slug = Library.language(self.language)
         entry, known = (Library.read(slug) if slug else None) or {}, self.toolchain()
-        failed = " ".join(m["command"] for m in entry.get("machine", []) if not m.get("found"))
+        failed = " ".join(tool["command"] for tool in entry.get("machine", []) if not tool.get("found"))
         used = " ".join(([*known.setup, known.format, known.lint, known.test_all] if known else [])
                         + self.missing_checks())
         names = dict.fromkeys(str(tool.get("name") or "").split(" ")[0] for tool in entry.get("tools", []))
@@ -259,16 +261,16 @@ class Knowledge:
 
     def known_fix(self, failure, tried=()):
         """A replayable fix for exactly this failure, not tried yet in this run."""
-        return next((f for f in self.language_doc.get("fixes", []) if f["failure"] == failure and f.get("replay")
-                     and f["failure"] not in tried), None)
+        return next((fix for fix in self.language_doc.get("fixes", []) if fix["failure"] == failure and fix.get("replay")
+                     and fix["failure"] not in tried), None)
 
     def similar_fix(self, failure):
-        scored = [(similarity(f["failure"], failure), f) for f in self.language_doc.get("fixes", [])]
+        scored = [(similarity(fix["failure"], failure), fix) for fix in self.language_doc.get("fixes", [])]
         best = max(scored, key=lambda pair: pair[0], default=(0, None))
         return best[1] if best[0] >= SIMILAR_FAILURE else None
 
     def remember_fix(self, fix):
-        fixes = [f for f in self.language_doc.setdefault("fixes", []) if f["failure"] != fix["failure"]]
+        fixes = [kept for kept in self.language_doc.setdefault("fixes", []) if kept["failure"] != fix["failure"]]
         self.language_doc["fixes"] = (fixes + [record(dict(fix, used=1, added=now_text()), "born", self.run)])[-20:]
         self.save()
 
@@ -278,7 +280,8 @@ class Knowledge:
             fix["used"] = fix.get("used", 0) + 1
             record(fix, "helped", self.run)
         else:
-            retire(self.language_doc, "fixes", lambda f: f["failure"] == fix["failure"], "its replay failed", self.run)
+            retire(self.language_doc, "fixes", lambda known: known["failure"] == fix["failure"], "its replay failed",
+                   self.run)
         self.save()
 
     def finished_project(self):
@@ -440,11 +443,11 @@ class Learner:
         if commands:
             self.step("machine", "Checking what is installed on this machine…", "💻")
         with tempfile.TemporaryDirectory(prefix="tinker-learn-") as folder, say.section():
-            ws = Workspace(Path(folder))
-            return [self.what_shows(ws, command) for command in commands]
+            workspace = Workspace(Path(folder))
+            return [self.what_shows(workspace, command) for command in commands]
 
-    def what_shows(self, ws, command):
-        code, output = ws.run(command, timeout=VERSION_TIMEOUT, quiet=True)
+    def what_shows(self, workspace, command):
+        code, output = workspace.run(command, timeout=VERSION_TIMEOUT, quiet=True)
         lines = [line.strip() for line in output.splitlines() if line.strip()]
         version = self.VERSION_RE.search(" ".join(lines[:5])) if code == 0 else None
         shown = {"command": command, "found": code == 0, "version": version.group(0) if version else "",
@@ -468,7 +471,7 @@ class Learner:
         """The pages a search finds, as many as it reads (none, with a note, when the search fails)."""
         found = self.internet.search(search["query"], SEARCH_RESULTS)
         if found is None:
-            self.notes.append(f"search '{search['query']}': {self.internet.why(search['query'])}")
+            self.notes.append(f"search '{search['query']}': {self.internet.problem(search['query'])}")
             with say.section():
                 say.warn(self.notes[-1])
         return (found or [])[:search["pages"]]
@@ -493,7 +496,7 @@ class Learner:
                 break
             found = self.read_page(name, page, f"{number}/{len(pages)}")
             sources += [page["url"]] if found else []
-            found = [dict(f, section=page["section"]) if page["section"] else f for f in found]
+            found = [dict(fact, section=page["section"]) if page["section"] else fact for fact in found]
             self.add_facts(facts, found)
         return facts, sources
 
@@ -504,22 +507,30 @@ class Learner:
         got = self.internet.fetch(page["url"])
         text = (got or {}).get("content") or page.get("content") or ""
         if not text.strip():
-            why = f"{page['url']}: {self.internet.why(page['url'])}"
-            self.notes.append(f"page {why}")
-            with say.section():
-                say.fail(f"Could not read page {number}: {why}")
-            return []
+            return self.unreadable(page, number)
         source = Part("Page", f"{(got or {}).get('title') or page.get('title', '')}\n{page['url']}", True)
         focus = Part("Look for", page["focus"], True)
-        room = self.model.limit_chars(Prompts.FACTS_SYSTEM) - source.size() - focus.size() - len(topic) - 200
+        room = self.room_for_excerpts(topic, source, focus)
         found = []
-        for i, chunk in enumerate(self.relevant_chunks(text, room, f"{topic} {page['focus']}"), 1):
+        for chunk_number, chunk in enumerate(self.relevant_chunks(text, room, f"{topic} {page['focus']}"), 1):
             parts = [Part("Topic", topic, True), focus, source, Part("Excerpt", chunk, True)]
-            facts = self.facts_in(parts, page, number, i)
+            facts = self.facts_in(parts, page, number, chunk_number)
             if facts is None:
                 break
-            found += [dict(f, source=page["url"]) for f in facts if not self.UNRELEASED.search(f["text"])]
+            found += [dict(fact, source=page["url"]) for fact in facts if not self.UNRELEASED.search(fact["text"])]
         return found
+
+    def unreadable(self, page, number):
+        """No facts from a page that cannot be read: why is noted and said."""
+        why = f"{page['url']}: {self.internet.problem(page['url'])}"
+        self.notes.append(f"page {why}")
+        with say.section():
+            say.fail(f"Could not read page {number}: {why}")
+        return []
+
+    def room_for_excerpts(self, topic, source, focus):
+        """The characters a page's excerpt may take, next to the prompt and what it always shows."""
+        return self.model.limit_chars(Prompts.FACTS_SYSTEM) - source.size() - focus.size() - len(topic) - 200
 
     @staticmethod
     def relevant_chunks(text, room, wanted):
@@ -529,9 +540,9 @@ class Learner:
         chunks = split_text(text, room)
         if len(chunks) <= PAGE_CHUNKS:
             return chunks
-        matched = [i for i in Retriever(None).by_words(wanted, chunks) if i]
-        chosen = [0] + (matched + [i for i in range(1, len(chunks)) if i not in matched])[:PAGE_CHUNKS - 1]
-        return [chunks[i] for i in sorted(chosen)]
+        matched = [index for index in Retriever(None).by_words(wanted, chunks) if index]
+        chosen = [0] + (matched + [index for index in range(1, len(chunks)) if index not in matched])[:PAGE_CHUNKS - 1]
+        return [chunks[index] for index in sorted(chosen)]
 
     def facts_in(self, parts, page, number, part):
         """The facts the model reads in one chunk of a page; None when the page cannot be read on (a chunk too
@@ -579,7 +590,7 @@ class Learner:
         """Why the reading ended before every page was read ("" when it did not): the web or the
         model was lost on the way. Learning that was cut short never replaces what was learned before."""
         if not self.internet.available():
-            return f"the web was lost ({self.internet.why()})"
+            return f"the web was lost ({self.internet.problem()})"
         if self.model_failed:
             return f"the model stopped answering ({self.model_failed})"
         return ""
@@ -598,6 +609,11 @@ class Learner:
                                                 "Condense the facts",
                                                 lambda reply: self.read_rules(reply.json(), sources), attempts=2,
                                                 think=think)
+        self.say_rules(rules, facts)
+        return rules or []
+
+    def say_rules(self, rules, facts):
+        """What condensing gave: the rules and the first of them, or that the facts stay as they are."""
         if not rules:
             self.notes.append("the facts were not condensed into rules (no usable reply)")
         with say.section():
@@ -607,7 +623,6 @@ class Learner:
             else:
                 say.warn("Could not make rules: the facts are kept as they are")
         self.outcome(f"{len(rules or [])} rule(s) from {len(facts)} fact(s)")
-        return rules or []
 
     @staticmethod
     def rule_sources(facts, lessons):
@@ -618,9 +633,9 @@ class Learner:
     @staticmethod
     def playbook_parts(plan, facts, lessons):
         """The topic and its tools, its facts (with their slot and phase), then its lessons, numbered on."""
-        listing = "\n".join(f"{n}. [{fact.get('slot', '')}, {fact['phase']}] {fact['text']}"
-                            for n, fact in enumerate(facts, 1))
-        proved = "\n".join(f"{n}. {lesson['text']}" for n, lesson in enumerate(lessons, len(facts) + 1))
+        listing = "\n".join(f"{number}. [{fact.get('slot', '')}, {fact['phase']}] {fact['text']}"
+                            for number, fact in enumerate(facts, 1))
+        proved = "\n".join(f"{number}. {lesson['text']}" for number, lesson in enumerate(lessons, len(facts) + 1))
         tools = Library.tools_text(plan.get("tools", [])) or "none named"
         return [Part("Topic", f"{plan['name']} ({plan.get('kind', 'tool')}); its tools: {tools}", True),
                 Part("Facts learned from the web", listing, True, exact=True),
@@ -641,8 +656,8 @@ class Learner:
             if not isinstance(item, dict):
                 continue
             text, phase = " ".join(str(item.get("text") or "").split())[:RULE_CHARS], str(item.get("phase") or "").lower()
-            cites = list(dict.fromkeys(sources[n - 1]["id"] for n in item.get("cites") or []
-                                       if isinstance(n, int) and 1 <= n <= len(sources)))
+            cites = list(dict.fromkeys(sources[number - 1]["id"] for number in item.get("cites") or []
+                                       if isinstance(number, int) and 1 <= number <= len(sources)))
             when = " ".join(str(item.get("when") or "").split())[:RULE_WHEN_CHARS]
             if text and phase in FACT_PHASES and cites and text not in rules:
                 rules[text] = {"id": fingerprint(text)[:12], "phase": phase, "text": text, "when": when, "cites": cites}
@@ -742,7 +757,8 @@ class Researcher:
             if not isinstance(item, dict):
                 continue
             question = " ".join(str(item.get("question") or "").split())[:200]
-            queries = [" ".join(str(q).split()) for q in item.get("queries") or [] if str(q).strip()][:RESEARCH_QUERIES]
+            queries = [" ".join(str(query).split()) for query in item.get("queries") or []
+                       if str(query).strip()][:RESEARCH_QUERIES]
             if question and queries:
                 questions.append({"question": question, "queries": queries})
         if not name or not questions:
@@ -753,8 +769,7 @@ class Researcher:
         """(facts, sources, analysis) after each round of RESEARCH_PAGES: the first round searches
         every question, each next one the gaps and checks the last analysis named. It ends early
         when none is left, or the web or the model is lost."""
-        searches = [{"query": query, "section": str(number), "pages": SEARCH_RESULTS, "focus": question["question"]}
-                    for number, question in enumerate(frame["questions"], 1) for query in question["queries"]]
+        searches = self.first_searches(frame)
         facts, sources, analysis = [], [], self.EMPTY_ANALYSIS
         for round_number, pages in enumerate(RESEARCH_PAGES, 1):
             if not searches:
@@ -765,16 +780,26 @@ class Researcher:
                 found, read = self.learner.read_web(frame["name"], searches, pages)
             self.learner.add_facts(facts, found)
             sources += [url for url in read if url not in sources]
-            say.tally(f"{len(sources)} page(s) read · {len(facts)} fact(s)")
-            if found:
-                say.found(first_line(found[0]["text"], 200))
-            self.learner.outcome(f"{len(facts)} fact(s) from {len(sources)} page(s)")
+            self.say_round(facts, sources, found)
             if self.learner.cut_short() or not facts:
                 break
             differ = self.cross_check(facts)
             analysis = self.analyse(frame, facts, differ) or analysis
             searches = self.next_searches(frame, facts, analysis)
         return facts, sources, analysis
+
+    @staticmethod
+    def first_searches(frame):
+        """The first round's searches: each query of each question, the question as what to look for."""
+        return [{"query": query, "section": str(number), "pages": SEARCH_RESULTS, "focus": question["question"]}
+                for number, question in enumerate(frame["questions"], 1) for query in question["queries"]]
+
+    def say_round(self, facts, sources, found):
+        """How far the research got after a round: pages read, facts found, the first of them."""
+        say.tally(f"{len(sources)} page(s) read · {len(facts)} fact(s)")
+        if found:
+            say.found(first_line(found[0]["text"], 200))
+        self.learner.outcome(f"{len(facts)} fact(s) from {len(sources)} page(s)")
 
     def cross_check(self, facts):
         """Each fact's sites, with no model call. A fact that repeats another (REPEAT_CLAIM, numbers
@@ -798,37 +823,42 @@ class Researcher:
     def compared(self, facts, vectors, sites):
         """([each fact's sites, with those of the facts on other sites that make its claim with the same
         numbers], [(n, m) of the facts that make one claim with other numbers])."""
-        support, differ = [set(s) for s in sites], []
-        for i, j in ((i, j) for i in range(len(facts)) for j in range(i + 1, len(facts))):
-            if not self.same_claim(vectors[i], vectors[j]) or sites[i] & sites[j]:
+        support, differ = [set(site) for site in sites], []
+        for first, second in ((first, second) for first in range(len(facts)) for second in range(first + 1, len(facts))):
+            if not self.same_claim(vectors[first], vectors[second]) or sites[first] & sites[second]:
                 continue
-            if self.agree(facts[i], facts[j]):
-                support[i] |= sites[j]
-                support[j] |= sites[i]
+            if self.agree(facts[first], facts[second]):
+                support[first] |= sites[second]
+                support[second] |= sites[first]
             else:
-                differ.append((i + 1, j + 1))
+                differ.append((first + 1, second + 1))
         return support, differ
 
     def fold_repeats(self, facts, vectors):
         """Each fact that repeats an earlier one, folded into it (in place, with its vector): its
         pages join the earlier one's, and the more detailed text is kept."""
-        i = 0
-        while i < len(facts):
-            kept = next((k for k in range(i) if self.same_claim(vectors[k], vectors[i], REPEAT_CLAIM)
-                         and self.agree(facts[k], facts[i])), None)
+        index = 0
+        while index < len(facts):
+            kept = next((earlier for earlier in range(index)
+                         if self.same_claim(vectors[earlier], vectors[index], REPEAT_CLAIM)
+                         and self.agree(facts[earlier], facts[index])), None)
             if kept is None:
-                i += 1
+                index += 1
                 continue
-            vectors.pop(i)
-            self.fold(facts[kept], facts.pop(i))
+            vectors.pop(index)
+            self.fold(facts[kept], facts.pop(index))
 
     def fold(self, original, repeat):
         """A repeat's pages join the original's, and the more detailed text is kept."""
-        if (len(self.numbers(repeat)), len(repeat["text"])) > (len(self.numbers(original)), len(original["text"])):
+        if self.more_detailed(repeat, original):
             original["text"] = repeat["text"]
         for url in Learner.pages_of(repeat):
             if url not in Learner.pages_of(original):
                 original["also"] = original.get("also", []) + [url]
+
+    def more_detailed(self, fact, other):
+        """Whether a fact says more than another: more numbers, else a longer text."""
+        return (len(self.numbers(fact)), len(fact["text"])) > (len(self.numbers(other)), len(other["text"]))
 
     @staticmethod
     def same_claim(a, b, threshold=SAME_CLAIM):
@@ -853,12 +883,7 @@ class Researcher:
         """The findings (each question answered from the facts, citing them, with how sure it is),
         the contradictions and the gaps (each with a search), from one call; None when the model
         gives no usable reply. The facts most sites state are shown first when not all fit."""
-        questions = "\n".join(f"Q{n}. {q['question']}" for n, q in enumerate(frame["questions"], 1))
-        pairs = "\n".join(f"F{a} / F{b}" for a, b in differ) or "(none)"
-        fixed = [Part("Topic", frame["name"], True), Part("Questions", questions, True),
-                 Part("Facts that may disagree", pairs, True)]
-        room = self.model.limit_chars(Prompts.RESEARCH_ANALYSIS_SYSTEM) - Part.total_size(fixed) - 200
-        parts = fixed + [Part("Facts", self.fact_listing(facts, room), True, exact=True)]
+        parts = self.analysis_parts(frame, facts, differ)
         try:
             return self.model.ask_until_usable(Prompts.RESEARCH_ANALYSIS_SYSTEM, parts, "Analyse the findings",
                                                lambda reply: self.read_analysis(reply.json(), len(facts),
@@ -868,18 +893,28 @@ class Researcher:
             say.warn(self.learner.notes[-1])
             return None
 
+    def analysis_parts(self, frame, facts, differ):
+        """The analysis prompt: the topic, its questions, the facts that may disagree, then as many facts as fit."""
+        questions = "\n".join(f"Q{number}. {question['question']}"
+                              for number, question in enumerate(frame["questions"], 1))
+        pairs = "\n".join(f"F{first} / F{second}" for first, second in differ) or "(none)"
+        fixed = [Part("Topic", frame["name"], True), Part("Questions", questions, True),
+                 Part("Facts that may disagree", pairs, True)]
+        room = self.model.limit_chars(Prompts.RESEARCH_ANALYSIS_SYSTEM) - Part.total_size(fixed) - 200
+        return fixed + [Part("Facts", self.fact_listing(facts, room), True, exact=True)]
+
     @staticmethod
     def fact_listing(facts, room):
         """One line per fact, "F<n> [Q<question>, <k> site(s)] text", in their own order: as many
         as fit in room chars, the facts most sites state kept first."""
-        lines = {n: f"F{n} [Q{fact.get('section', '?')}, {len(fact.get('sites', []))} site(s)] {fact['text']}"
-                 for n, fact in enumerate(facts, 1)}
+        lines = {number: f"F{number} [Q{fact.get('section', '?')}, {len(fact.get('sites', []))} site(s)] {fact['text']}"
+                 for number, fact in enumerate(facts, 1)}
         kept, used = set(), 0
-        for n in sorted(lines, key=lambda n: -len(facts[n - 1].get("sites", []))):
-            if used + len(lines[n]) + 1 <= room:
-                kept.add(n)
-                used += len(lines[n]) + 1
-        return "\n".join(lines[n] for n in sorted(kept))
+        for number in sorted(lines, key=lambda number: -len(facts[number - 1].get("sites", []))):
+            if used + len(lines[number]) + 1 <= room:
+                kept.add(number)
+                used += len(lines[number]) + 1
+        return "\n".join(lines[number] for number in sorted(kept))
 
     @staticmethod
     def read_analysis(data, fact_count, question_count):
@@ -888,7 +923,8 @@ class Researcher:
         RESEARCH_CHECKS checks, with a search each."""
         if not isinstance(data, dict):
             raise ValueError("not a JSON object")
-        cited = lambda numbers: sorted({n for n in numbers or [] if isinstance(n, int) and 1 <= n <= fact_count})
+        cited = lambda numbers: sorted({number for number in numbers or [] if isinstance(number, int)
+                                        and 1 <= number <= fact_count})
         asked = lambda item: isinstance(item, dict) and isinstance(item.get("question"), int) \
             and 1 <= item["question"] <= question_count
         findings = Researcher.read_findings(data.get("findings") or [], cited, asked)
@@ -901,10 +937,11 @@ class Researcher:
 
     @staticmethod
     def read_findings(given, cited, asked):
-        return [{"question": f["question"], "answer": " ".join(str(f.get("answer") or "").split())[:600],
-                 "confidence": f.get("confidence") if f.get("confidence") in ("high", "medium", "low") else "low",
-                 "facts": cited(f.get("facts"))}
-                for f in given if asked(f) and str(f.get("answer") or "").strip()]
+        return [{"question": finding["question"], "answer": " ".join(str(finding.get("answer") or "").split())[:600],
+                 "confidence": finding.get("confidence") if finding.get("confidence") in ("high", "medium", "low")
+                 else "low",
+                 "facts": cited(finding.get("facts"))}
+                for finding in given if asked(finding) and str(finding.get("answer") or "").strip()]
 
     @staticmethod
     def read_contradictions(given, cited):
@@ -913,22 +950,22 @@ class Researcher:
         for item in given:
             if isinstance(item, dict) and len(cited(item.get("facts"))) >= 2:
                 facts = cited(item["facts"])
-                doubtful = [n for n in cited(item.get("doubtful")) if n in facts] or facts
+                doubtful = [number for number in cited(item.get("doubtful")) if number in facts] or facts
                 contradictions.append({"facts": facts, "doubtful": doubtful,
                                        "note": " ".join(str(item.get("note") or "").split())[:300]})
         return contradictions
 
     @staticmethod
     def read_gaps(given, asked):
-        return [{"question": g["question"], "missing": " ".join(str(g.get("missing") or "").split())[:200],
-                 "search": " ".join(str(g.get("search") or "").split())[:160]}
-                for g in given if asked(g) and str(g.get("search") or "").strip()]
+        return [{"question": gap["question"], "missing": " ".join(str(gap.get("missing") or "").split())[:200],
+                 "search": " ".join(str(gap.get("search") or "").split())[:160]}
+                for gap in given if asked(gap) and str(gap.get("search") or "").strip()]
 
     @staticmethod
     def read_checks(given, fact_count):
-        return [{"fact": c["fact"], "search": " ".join(str(c.get("search") or "").split())[:160]}
-                for c in given if isinstance(c, dict) and isinstance(c.get("fact"), int)
-                and 1 <= c["fact"] <= fact_count and str(c.get("search") or "").strip()]
+        return [{"fact": check["fact"], "search": " ".join(str(check.get("search") or "").split())[:160]}
+                for check in given if isinstance(check, dict) and isinstance(check.get("fact"), int)
+                and 1 <= check["fact"] <= fact_count and str(check.get("search") or "").strip()]
 
     @staticmethod
     def next_searches(frame, facts, analysis):
@@ -946,8 +983,8 @@ class Researcher:
         contradiction finds it doubtful; corroborated: two or more sites state it; single: one does),
         and each finding no surer than its facts allow (supported)."""
         disputed = {*contradiction["doubtful"] for contradiction in analysis["contradictions"]}
-        kept = [self.kept_fact(fact, n in disputed) for n, fact in enumerate(facts, 1)]
-        cited = lambda finding: [kept[n - 1] for n in finding["facts"]]
+        kept = [self.kept_fact(fact, number in disputed) for number, fact in enumerate(facts, 1)]
+        cited = lambda finding: [kept[number - 1] for number in finding["facts"]]
         findings = [dict(finding, confidence=self.supported(finding["confidence"], cited(finding)))
                     for finding in analysis["findings"]]
         return {"topic": topic, "kind": "research", "name": frame["name"], "summary": frame["summary"],
@@ -960,7 +997,7 @@ class Researcher:
         """A fact as it is kept: with its question, its sites and how sure it is."""
         sites = fact.pop("sites", [])
         confidence = "disputed" if disputed else "corroborated" if len(sites) >= 2 else "single"
-        return {**{k: v for k, v in fact.items() if k != "section"}, "question": int(fact["section"]),
+        return {**{key: value for key, value in fact.items() if key != "section"}, "question": int(fact["section"]),
                 "sites": sites, "confidence": confidence}
 
     @classmethod
@@ -1001,14 +1038,14 @@ class Library:
     def save(slug, entry):
         """A topic kept: each fact, finding and rule with an id and a status (a candidate until proven), and each
         finding with the ids of the facts it cites (its numbers no longer count once a fact is retired)."""
-        for claim, text in [(f, f.get("text", "")) for f in entry.get("facts", []) + entry.get("rules", [])] + \
-                           [(f, f.get("answer", "")) for f in entry.get("findings", [])]:
+        for claim, text in [(item, item.get("text", "")) for item in entry.get("facts", []) + entry.get("rules", [])] + \
+                           [(item, item.get("answer", "")) for item in entry.get("findings", [])]:
             claim.setdefault("id", fingerprint(str(text))[:12])
             claim.setdefault("status", "candidate")
         facts = entry.get("facts", [])
         for finding in entry.get("findings", []):
-            finding.setdefault("cites", [facts[n - 1]["id"] for n in finding.get("facts", [])
-                                         if isinstance(n, int) and 1 <= n <= len(facts)])
+            finding.setdefault("cites", [facts[number - 1]["id"] for number in finding.get("facts", [])
+                                         if isinstance(number, int) and 1 <= number <= len(facts)])
         Home.store().put("learned", slug, entry)
 
     @staticmethod
@@ -1018,7 +1055,8 @@ class Library:
             if not entry:
                 return entry
             for key in Library.CLAIMS:
-                entry[key] = [kept for kept in (change(c) if c.get("id") in ids else c for c in entry.get(key, []))
+                entry[key] = [kept for kept in (change(claim) if claim.get("id") in ids else claim
+                                                for claim in entry.get(key, []))
                               if kept is not None]
             return entry
         if Library.read(slug):
@@ -1089,21 +1127,21 @@ class Library:
         items = [plain("summary", str(entry.get("summary") or name))]
         if entry.get("tools"):
             items.append(plain("tools", f"its tools: {Library.tools_text(entry['tools'])}"))
-        installed = [(m["output"] if m["found"] else f"`{m['command']}` fails (not installed)")
-                     for m in entry.get("machine", [])]
+        installed = [(tool["output"] if tool["found"] else f"`{tool['command']}` fails (not installed)")
+                     for tool in entry.get("machine", [])]
         if installed:
             items.append(plain("machine", f"on this machine: {'; '.join(installed)}"))
         items += [{"topic": slug, "name": name, "phase": "findings",
-                   "text": f"{entry['questions'][f['question'] - 1]['question']} {f['answer']} "
-                           f"({f['confidence']} confidence)", "id": Library.claim_id(f, f["answer"]),
-                   "status": f.get("status", "candidate")} for f in entry.get("findings", [])]
-        items += [{"topic": slug, "name": name, "phase": str(r["phase"]), "text": str(r["text"]), "kind": "rule",
-                   "when": str(r.get("when") or ""), "id": Library.claim_id(r, r["text"]),
-                   "status": r.get("status", "candidate")} for r in entry.get("rules", [])]
-        return items + [{"topic": slug, "name": name, "phase": str(f["phase"]),
-                         "text": str(f["text"]) + (f" ({f['confidence']})" if f.get("confidence") else ""),
-                         "id": Library.claim_id(f, f["text"]), "status": f.get("status", "candidate")}
-                        for f in Library.facts_shown(entry)]
+                   "text": f"{entry['questions'][finding['question'] - 1]['question']} {finding['answer']} "
+                           f"({finding['confidence']} confidence)", "id": Library.claim_id(finding, finding["answer"]),
+                   "status": finding.get("status", "candidate")} for finding in entry.get("findings", [])]
+        items += [{"topic": slug, "name": name, "phase": str(rule["phase"]), "text": str(rule["text"]), "kind": "rule",
+                   "when": str(rule.get("when") or ""), "id": Library.claim_id(rule, rule["text"]),
+                   "status": rule.get("status", "candidate")} for rule in entry.get("rules", [])]
+        return items + [{"topic": slug, "name": name, "phase": str(fact["phase"]),
+                         "text": str(fact["text"]) + (f" ({fact['confidence']})" if fact.get("confidence") else ""),
+                         "id": Library.claim_id(fact, fact["text"]), "status": fact.get("status", "candidate")}
+                        for fact in Library.facts_shown(entry)]
 
     @staticmethod
     def facts_shown(entry):
@@ -1114,7 +1152,7 @@ class Library:
         if not rules:
             return entry["facts"]
         cited = lambda given: {*rule.get("cites", []) for rule in given}
-        reopened = cited(r for r in entry.get("retired", []) if r.get("was") == "rules") - cited(rules)
+        reopened = cited(retired for retired in entry.get("retired", []) if retired.get("was") == "rules") - cited(rules)
         return [fact for fact in entry["facts"] if Library.claim_id(fact, fact["text"]) in reopened]
 
     @staticmethod
@@ -1169,7 +1207,8 @@ class Retriever:
     def by_words(self, query, texts):
         """BM25: the texts holding the query's words, the best match first (the others not at all)."""
         scores = [(score, index) for index, score in enumerate(self.word_scores(query, texts))]
-        return [index for _, index in sorted((s for s in scores if s[0] > 0), key=lambda pair: (-pair[0], pair[1]))]
+        return [index for _, index in sorted((scored for scored in scores if scored[0] > 0),
+                                             key=lambda pair: (-pair[0], pair[1]))]
 
     def word_scores(self, query, texts):
         """Each text's BM25 score for the query's words, in order (0 for a text that holds none)."""
@@ -1178,9 +1217,9 @@ class Retriever:
         terms, docs = set(words(query)), [words(text) for text in texts]
         average = sum(len(doc) for doc in docs) / len(docs) or 1
         holding = collections.Counter(*(set(doc) & terms) for doc in docs)
-        return [self.bm25(terms, doc, len(docs), holding, average) for doc in docs]
+        return [self.relevance(terms, doc, len(docs), holding, average) for doc in docs]
 
-    def bm25(self, terms, doc, total, holding, average):
+    def relevance(self, terms, doc, total, holding, average):
         """One text's score: each query term it holds, weighed by how rare the term is and how often the
         text says it, for its length."""
         counts, score = collections.Counter(doc), 0.0
@@ -1259,26 +1298,34 @@ class Embeddings:
             found = self.embedded(batch)
             if found is None:
                 return None
-            fresh.update({self.key(text): [round(x, 5) for x in vector] for text, vector in zip(batch, found)})
+            fresh.update(self.keyed(batch, found))
         result = [stored.get(key) or fresh[key] for key in keys]
         if keep and (fresh or prune):
             self.kept(fresh, keys if prune else None)
         return result
+
+    def keyed(self, texts, vectors):
+        """Each text's vector under its cache key, rounded to 5 places (it keeps the cache small)."""
+        return {self.key(text): [round(number, 5) for number in vector] for text, vector in zip(texts, vectors)}
 
     def embedded(self, batch):
         """The batch's embeddings, as the model gives them; None when it gives none (failed says why)."""
         data = Ollama.get_json("/api/embed", {"model": self.name, "input": batch, "keep_alive": 0}, timeout=300,
                                errors=True)
         found = data.get("embeddings") if isinstance(data, dict) else None
-        if isinstance(found, list) and len(found) == len(batch) and all(self.is_vector(v) for v in found):
+        if self.one_vector_each(found, batch):
             return found
         self.failed = f"{self.name} gave no embeddings" + (f" ({data['error']})" if isinstance(data, dict)
                                                            and data.get("error") else "")
         return None
 
+    def one_vector_each(self, found, batch):
+        """Whether the model gave one vector for each text of the batch."""
+        return isinstance(found, list) and len(found) == len(batch) and all(self.is_vector(vector) for vector in found)
+
     @staticmethod
     def is_vector(value):
-        return isinstance(value, list) and value and all(isinstance(x, (int, float)) for x in value)
+        return isinstance(value, list) and value and all(isinstance(number, (int, float)) for number in value)
 
     def kept(self, fresh, only=None):
         """The fresh embeddings cached; only: the cache then keeps these keys alone."""

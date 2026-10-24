@@ -10,7 +10,7 @@ from pathlib import Path
 
 import pytest
 
-import tinker  # noqa: F401  (the whole of Tinker loaded, as a run loads it)
+import tinkerkit.cli  # noqa: F401  (the whole of Tinker loaded, as a run loads it)
 from tinkerkit.messages import say
 from tinkerkit.model import Model, Ollama
 from tinkerkit.project import Project
@@ -98,19 +98,20 @@ class FakeOllama:
             return {"message": {"content": "", "thinking": ""}}
         self.calls.append({"name": name, "messages": messages, "options": options, "think": think,
                            "label": label or "", "keep_alive": keep_alive})
-        index = next((i for i, (when, _) in enumerate(self.queue) if when is None or when in (label or "")), None)
+        index = next((position for position, (when, _) in enumerate(self.queue) if when is None
+                      or when in (label or "")), None)
         if index is None:
-            raise AssertionError(f"no scripted reply for the call {label!r}; queued: {[w for w, _ in self.queue]}")
+            raise AssertionError(f"no scripted reply for the call {label!r}; queued: {[when for when, _ in self.queue]}")
         answer = self.queue.pop(index)[1]
         if callable(answer) and not isinstance(answer, type):
             answer = answer(messages)
         if isinstance(answer, BaseException):
             raise answer
-        prompt = sum(len(m["content"]) for m in messages)
+        prompt = sum(len(message["content"]) for message in messages)
         final = {"done": True, "done_reason": "stop", "prompt_eval_count": max(60, prompt // 3), "eval_count": 20,
                  "eval_duration": 10 ** 8, "load_duration": 0}
         if isinstance(answer, dict):
-            final.update({k: v for k, v in answer.items() if k != "content"})
+            final.update({key: value for key, value in answer.items() if key != "content"})
             content, thinking = answer.get("content", ""), answer.get("thinking", "")
         else:
             content, thinking = answer, ""
@@ -170,7 +171,7 @@ def make_project(project_dir):
     """A Project with a run record and a spec (criteria, files, cycles and toolchain may be given)."""
     def make(criteria=(), files=None, cycles=None, toolchain=None, **spec):
         run = {"id": "abc123", "task": "a calculator", "workdir": str(project_dir), "status": "running"}
-        data = {"steps": [dict(c) for c in criteria], "counter": len(criteria), "files": files or {},
+        data = {"steps": [dict(criterion) for criterion in criteria], "counter": len(criteria), "files": files or {},
                 "cycles": cycles if cycles is not None else [{"id": "base", "request": "a calculator", "phase": "recall",
                                                                "kind": "feature"}],
                 "language": "Python", "toolchain": toolchain if toolchain is not None else dict(TOOLCHAIN), **spec}

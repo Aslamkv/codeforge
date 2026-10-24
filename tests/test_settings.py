@@ -104,7 +104,7 @@ def test_store_documents(tmp_path):
 def add_many(path, times):
     store = Store(path)
     for _ in range(times):
-        store.update("c", "n", lambda n: n + 1, 0)
+        store.update("c", "n", lambda count: count + 1, 0)
 
 
 @pytest.mark.spec("SET-7")
@@ -143,8 +143,8 @@ def test_store_logs_and_mode(tmp_path):
     store.append("log", {"label": "two", "x": "é"})
     store.append("other", {"label": "no"})
     entries = store.entries("log")
-    assert [e["label"] for _, e in entries] == ["one", "two"] and all("time" in e for _, e in entries)
-    assert [e["label"] for _, e in store.entries("log", after=first)] == ["two"]
+    assert [entry["label"] for _, entry in entries] == ["one", "two"] and all("time" in entry for _, entry in entries)
+    assert [entry["label"] for _, entry in store.entries("log", after=first)] == ["two"]
     assert store.logged("log") == 2
     store.drop_log("log")
     assert store.entries("log") == [] and store.logged("other") == 1
@@ -272,7 +272,7 @@ def test_words_fingerprint_and_similarity():
 
 @pytest.mark.spec("SET-13")
 def test_split_text_keeps_paragraphs_together_within_the_size():
-    text = "\n\n".join(f"paragraph {i} " + "word " * 30 for i in range(10))
+    text = "\n\n".join(f"paragraph {number} " + "word " * 30 for number in range(10))
     chunks = split_text(text, 400)
     assert all(len(chunk) <= 400 for chunk in chunks)
     assert len(chunks) > 1
@@ -283,20 +283,20 @@ def test_split_text_keeps_paragraphs_together_within_the_size():
 @pytest.mark.spec("SET-13")
 def test_split_text_cuts_a_long_paragraph_and_never_below_200():
     chunks = split_text("x" * 1000, 50)
-    assert [len(c) for c in chunks] == [200] * 5
+    assert [len(chunk) for chunk in chunks] == [200] * 5
 
 
 @pytest.mark.spec("SET-14")
 def test_after_what_they_use_orders_dependencies_first():
     uses = {"app": ["db", "util"], "db": ["util"], "util": [], "x": ["app"]}
-    order = after_what_they_use(["app", "x"], lambda p: uses[p], lambda p: p in uses)
+    order = after_what_they_use(["app", "x"], lambda name: uses[name], lambda name: name in uses)
     assert order == ["util", "db", "app", "x"]
 
 
 @pytest.mark.spec("SET-14")
 def test_after_what_they_use_breaks_cycles_and_skips_unknown():
     uses = {"a": ["b", "ghost"], "b": ["a"]}
-    assert after_what_they_use(["a"], lambda p: uses[p], lambda p: p in uses) == ["b", "a"]
+    assert after_what_they_use(["a"], lambda name: uses[name], lambda name: name in uses) == ["b", "a"]
 
 
 @pytest.mark.spec("SET-15")
@@ -304,7 +304,7 @@ def test_groups_fitting():
     assert groups_fitting(["aa", "bb", "cc"], 6) == [["aa", "bb"], ["cc"]]
     assert groups_fitting(["a" * 10, "b"], 5) == [["a" * 10], ["b"]]
     assert groups_fitting([], 5) == []
-    assert groups_fitting([3, 3, 3], 8, size=lambda n: n) == [[3, 3], [3]]
+    assert groups_fitting([3, 3, 3], 8, size=lambda value: value) == [[3, 3], [3]]
 
 
 @pytest.mark.spec("SET-18")
@@ -312,7 +312,7 @@ def test_groups_fitting():
 def test_keep_awake_uses_the_tool_there_is(monkeypatch, tool, program):
     started = []
     monkeypatch.setattr(settings.shutil, "which", lambda name: "/bin/" + name if name == tool else None)
-    monkeypatch.setattr(settings.subprocess, "Popen", lambda command, **kw: started.append(command))
+    monkeypatch.setattr(settings.subprocess, "Popen", lambda command, **kwargs: started.append(command))
     Home.keep_awake()
     assert started and started[0][0] == program and str(settings.os.getpid()) in " ".join(started[0])
 
@@ -323,7 +323,7 @@ def test_keep_awake_without_a_tool_or_failing_does_nothing(monkeypatch):
     Home.keep_awake()
     monkeypatch.setattr(settings.shutil, "which", lambda name: "/bin/caffeinate")
 
-    def broken(*a, **k):
+    def broken(*args, **kwargs):
         raise OSError("cannot start")
     monkeypatch.setattr(settings.subprocess, "Popen", broken)
     Home.keep_awake()  # never raises

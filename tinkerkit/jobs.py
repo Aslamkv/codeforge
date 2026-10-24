@@ -117,9 +117,14 @@ class Jobs:
             Jobs.update(job["number"], paused_by=by)
             signal_job(job)
         ends = time.monotonic() + PAUSE_WAIT
-        while any(Jobs.get(job["number"])["state"] == "running" for job in others) and time.monotonic() < ends:
+        while Jobs.still_running(others) and time.monotonic() < ends:
             time.sleep(0.5)
         return others
+
+    @staticmethod
+    def still_running(jobs):
+        """Whether any of the jobs runs still."""
+        return any(Jobs.get(job["number"])["state"] == "running" for job in jobs)
 
     @classmethod
     def new(cls, argv):
@@ -241,10 +246,15 @@ class Jobs:
     def wake(number):
         """A paused job told to go on now (where it waits, in its own process): True when one was."""
         job = Jobs.get(number) if number is not None else None
-        if not job or job["state"] != "paused" or job["pid"] == os.getpid():
+        if not Jobs.paused_elsewhere(job):
             return False
         Jobs.update(number, go_now=True)
         return True
+
+    @staticmethod
+    def paused_elsewhere(job):
+        """Whether a job is paused, in a process other than this one."""
+        return job and job["state"] == "paused" and job["pid"] != os.getpid()
 
     @staticmethod
     def stop(job):
@@ -294,12 +304,17 @@ def go_on_when_idle(number):
         job = Jobs.get(number)
         if job["state"] != "paused":
             return
-        if job.get("go_now") or (idle() and next_to_go_on() == number):
+        if job.get("go_now") or its_turn(number):
             break
         time.sleep(LOOK_EVERY)
     say.info(f"Going on with #{number} {job['title']}", "▶️")
     sys.stdout.flush()
     os.execv(sys.executable, [sys.executable, str(Path(sys.argv[0]).resolve()), "resume", f"#{number}"])
+
+
+def its_turn(number):
+    """Whether a paused job may go on: Tinker is idle, and it is the job paused last."""
+    return idle() and next_to_go_on() == number
 
 
 @contextlib.contextmanager
@@ -313,7 +328,8 @@ def paused_for_you():
         Jobs.pause_running("you")
         yield
     finally:
-        Home.store().update("activity", "answering", lambda asked: {k: v for k, v in (asked or {}).items() if k != key})
+        Home.store().update("activity", "answering", lambda asked: {name: value for name, value in (asked or {}).items()
+                                                                    if name != key})
 
 
 def idle():

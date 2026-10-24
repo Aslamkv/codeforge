@@ -21,10 +21,10 @@ class Message:
     @property
     def line(self):
         """The message as printed: indented by its depth, its icon before its words."""
-        return "   " * self.depth + (f"{self.icon}{gap(self.icon)}{self.text}" if self.icon else self.text)
+        return "   " * self.depth + (f"{self.icon}{space_after(self.icon)}{self.text}" if self.icon else self.text)
 
 
-def gap(icon):
+def space_after(icon):
     # an emoji with a variation selector (⚠️) is drawn one column wide by many terminals: two spaces keep
     # the words of every line in one column
     return "  " if icon.endswith("\ufe0f") else " "

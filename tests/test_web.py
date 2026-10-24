@@ -40,7 +40,8 @@ class Scripted(WebBackend):
 def internet_with(monkeypatch, *backends, web_name="a", fallback=""):
     """An Internet plugin whose config names backends a and b (given as Scripted instances)."""
     named = dict(zip(("a", "b"), backends))
-    monkeypatch.setattr(Internet, "backends", staticmethod(lambda: {name: (lambda t, b=b: b) for name, b in named.items()}))
+    monkeypatch.setattr(Internet, "backends", staticmethod(lambda: {name: (lambda timeout, backend=backend: backend)
+                                                                    for name, backend in named.items()}))
     Config.save(web=web_name, web_fallback=fallback)
     return Internet()
 
@@ -57,24 +58,24 @@ def test_backends():
 
 @pytest.mark.spec("WEB-2")
 def test_web_then_fallback_skipping_repeats_and_empty(monkeypatch):
-    a, b = Scripted(1), Scripted(1)
-    internet = internet_with(monkeypatch, a, b, web_name="a", fallback="b")
-    assert internet.backends_used == [a, b] and internet.describe() == "a then b"
-    assert internet_with(monkeypatch, a, b, web_name="a", fallback="a").backends_used == [a]
-    assert internet_with(monkeypatch, a, b, web_name="", fallback="b").backends_used == [b]
+    first, second = Scripted(1), Scripted(1)
+    internet = internet_with(monkeypatch, first, second, web_name="a", fallback="b")
+    assert internet.backends_used == [first, second] and internet.describe() == "a then b"
+    assert internet_with(monkeypatch, first, second, web_name="a", fallback="a").backends_used == [first]
+    assert internet_with(monkeypatch, first, second, web_name="", fallback="b").backends_used == [second]
 
 
 @pytest.mark.spec("WEB-2")
 def test_a_backend_not_ready_is_skipped_with_its_reason(monkeypatch):
-    a, b = Scripted(1, ready="no key"), Scripted(1)
-    internet = internet_with(monkeypatch, a, b, web_name="a", fallback="b")
-    assert internet.backends_used == [b] and internet.skipped == ["a: no key"] and internet.available()
+    first, second = Scripted(1, ready="no key"), Scripted(1)
+    internet = internet_with(monkeypatch, first, second, web_name="a", fallback="b")
+    assert internet.backends_used == [second] and internet.skipped == ["a: no key"] and internet.available()
 
 
 @pytest.mark.spec("WEB-2")
 def test_no_backend_left_is_not_available(monkeypatch):
     internet = internet_with(monkeypatch, Scripted(1, ready="no key"), web_name="a")
-    assert not internet.available() and internet.why() == "a: no key"
+    assert not internet.available() and internet.problem() == "a: no key"
     assert not internet_with(monkeypatch, Scripted(1), web_name="").available()
 
 
@@ -134,54 +135,54 @@ def test_fetch_needs_text_and_keeps_the_address_asked(monkeypatch):
                                                        {"content": "   "}]))
     assert internet.fetch("https://a") == {"title": "P", "url": "https://a", "content": "text"}
     assert internet.fetch("https://b") is None
-    assert "its fetch gave no text" in internet.why("https://b")
+    assert "its fetch gave no text" in internet.problem("https://b")
 
 
 @pytest.mark.spec("WEB-5")
 def test_search_gives_none_with_why_when_nothing_answers(monkeypatch):
     internet = internet_with(monkeypatch, Scripted(1, [WebError("down")]))
-    assert internet.search("q", 3) is None and internet.why("q") == "a: down"
+    assert internet.search("q", 3) is None and internet.problem("q") == "a: down"
 
 
 @pytest.mark.spec("WEB-6")
 def test_the_next_backend_is_asked_when_one_fails(monkeypatch):
-    a, b = Scripted(1, [WebError("a broke")]), Scripted(1, [[{"url": "https://ok"}]])
-    internet = internet_with(monkeypatch, a, b, web_name="a", fallback="b")
+    first, second = Scripted(1, [WebError("a broke")]), Scripted(1, [[{"url": "https://ok"}]])
+    internet = internet_with(monkeypatch, first, second, web_name="a", fallback="b")
     assert internet.search("q", 1) == [{"title": "", "url": "https://ok", "content": ""}]
 
 
 @pytest.mark.spec("WEB-6")
 def test_a_moments_trouble_is_asked_again_once(monkeypatch):
-    a = Scripted(1, [WebError("rate", retry=True), [{"url": "https://ok"}]])
-    assert internet_with(monkeypatch, a).search("q", 1) and a.calls == 2
-    b = Scripted(1, [WebError("rate", retry=True), WebError("rate", retry=True)])
-    assert internet_with(monkeypatch, b).search("q", 1) is None and b.calls == 2
+    first = Scripted(1, [WebError("rate", retry=True), [{"url": "https://ok"}]])
+    assert internet_with(monkeypatch, first).search("q", 1) and first.calls == 2
+    second = Scripted(1, [WebError("rate", retry=True), WebError("rate", retry=True)])
+    assert internet_with(monkeypatch, second).search("q", 1) is None and second.calls == 2
 
 
 @pytest.mark.spec("WEB-6")
 def test_a_backend_bug_is_a_failure_never_raised(monkeypatch):
     internet = internet_with(monkeypatch, Scripted(1, [KeyError("oops")]))
     assert internet.search("q", 1) is None
-    assert "failed: KeyError" in internet.why("q")
+    assert "failed: KeyError" in internet.problem("q")
 
 
 @pytest.mark.spec("WEB-7")
 def test_a_backend_lost_twice_in_a_row_is_left(monkeypatch, capsys):
     gone = WebError("unreachable", network=True)
-    a = Scripted(1, [gone, gone])
-    internet = internet_with(monkeypatch, a)
+    backend = Scripted(1, [gone, gone])
+    internet = internet_with(monkeypatch, backend)
     internet.search("1", 1)
     assert internet.available()
     internet.search("2", 1)
-    assert not internet.available() and internet.why() == "unreachable"
+    assert not internet.available() and internet.problem() == "unreachable"
     assert "not asking a again" in capsys.readouterr().out
 
 
 @pytest.mark.spec("WEB-7")
 def test_a_success_resets_the_count(monkeypatch):
     gone = WebError("unreachable", network=True)
-    a = Scripted(1, [gone, [{"url": "https://x"}], gone, gone])
-    internet = internet_with(monkeypatch, a)
+    backend = Scripted(1, [gone, [{"url": "https://x"}], gone, gone])
+    internet = internet_with(monkeypatch, backend)
     for _ in range(3):
         internet.search("q", 1)
     assert internet.available()

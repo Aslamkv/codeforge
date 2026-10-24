@@ -61,7 +61,7 @@ def test_runs_program(text, ok):
 
 @pytest.mark.spec("PLN-5")
 def test_effort_strings_and_changes():
-    assert [SpecWriter.effort(v) for v in (0, 2, "3", 9, None, "hard")] == [1, 2, 3, 3, 2, 2]
+    assert [SpecWriter.effort(value) for value in (0, 2, "3", 9, None, "hard")] == [1, 2, 3, 3, 2, 2]
     assert SpecWriter.strings(["a", " ", 3, None, "b"], 2) == ["a", "3"]
     before = [{"id": "C1", "test": "t::a", "behaviour": "adds"}, {"id": "C2", "test": "t::b", "behaviour": "subtracts"}]
     after = [{"id": "C1", "test": "t::a", "behaviour": "adds two"}, {"id": "C3", "test": "t::c", "behaviour": "divides"}]
@@ -99,8 +99,9 @@ def planner(make_project, make_session):
 def test_read_spec_traces_criteria_and_checks_the_plan(planner):
     session, project, cycle = planner
     plan = SpecWriter(session).read_spec(Reply(spec_reply()), cycle)
-    assert [c["test"] for c in plan["criteria"]] == ["tests/test_calc.py::test_add", "tests/test_calc.py::test_main"]
-    assert [c["effort"] for c in plan["criteria"]] == [1, 3] and plan["entry"] == "calc.py"
+    assert [criterion["test"] for criterion in plan["criteria"]] == ["tests/test_calc.py::test_add",
+                                                                     "tests/test_calc.py::test_main"]
+    assert [criterion["effort"] for criterion in plan["criteria"]] == [1, 3] and plan["entry"] == "calc.py"
     assert plan["language"] == "Python" and plan["toolchain"].run.endswith("calc.py")
     assert SpecWriter(session).read_spec(Reply(spec_reply(language="")), cycle)["language"] == "Python"
 
@@ -158,8 +159,8 @@ def test_spec_phase_makes_the_plan_the_cycles_spec(planner, fake_ollama):
     session, project, cycle = planner
     fake_ollama.reply(spec_reply(), when="Spec")
     SpecWriter(session).run(cycle)
-    assert [s["id"] for s in project.criteria] == ["C1", "C2"]
-    assert all(s["status"] == "todo" and s["cycle"] == "base" for s in project.criteria)
+    assert [criterion["id"] for criterion in project.criteria] == ["C1", "C2"]
+    assert all(criterion["status"] == "todo" and criterion["cycle"] == "base" for criterion in project.criteria)
     assert cycle["files"] == ["calc.py", "tests/test_calc.py", "README.md"]
     assert project.files["README.md"]["kind"] == "docs"
     assert project.files["tests/test_calc.py"]["uses"] == ["calc.py"]
@@ -192,7 +193,7 @@ def test_amend_replaces_the_cycles_criteria(planner, fake_ollama):
         {"text": "calc.sub(5, 3) is 2", "source": "also subtract", "test": "tests/test_calc.py::test_sub"}])
     fake_ollama.reply(amended, when="Amend the spec")
     SpecWriter(session).amend(cycle, "also subtract")
-    assert [s["id"] for s in project.criteria] == ["C1", "C2", "C3"]
+    assert [criterion["id"] for criterion in project.criteria] == ["C1", "C2", "C3"]
     assert cycle["amendments"] == ["also subtract"]
     assert cycle["changes"] == ["~ C1 calc.add(2, 3) is 5 and calc.add(-1, 1) is 0", "+ C3 calc.sub(5, 3) is 2"]
     assert fake_ollama.calls[-1]["think"] is False
@@ -259,7 +260,7 @@ def test_adapter_criteria_are_dropped(make_project, make_session):
              criterion("C2", "t.py::b", "app.forecast('Oslo') says Sunny")]
     project = make_project(steps, files=files)
     Designer(make_session(project)).drop_adapter_criteria(project.cycles[0])
-    assert [s["id"] for s in project.criteria] == ["C2"]
+    assert [criterion["id"] for criterion in project.criteria] == ["C2"]
 
 
 @pytest.mark.spec("PLN-8")
@@ -358,8 +359,8 @@ def test_recall_without_the_web_uses_the_topics_named_and_the_language(make_proj
     Recaller(make_session(project)).run(cycle)
     assert cycle["topics"] == ["python", "flask"] and fake_ollama.calls == []
     learned = project.spec["learned"]
-    assert learned[0]["phase"] == "tools" and {i["topic"] for i in learned} == {"python", "flask"}
-    assert all(i["phase"] != "summary" for i in learned)
+    assert learned[0]["phase"] == "tools" and {item["topic"] for item in learned} == {"python", "flask"}
+    assert all(item["phase"] != "summary" for item in learned)
 
 
 @pytest.mark.spec("PLN-11")
@@ -372,7 +373,7 @@ def test_recall_keeps_a_languages_rules_before_its_other_facts(make_project, mak
     Library.save("python", entry)
     project = make_project(cycles=[{"id": "base", "request": "a calculator in Python", "phase": "recall"}])
     Recaller(make_session(project)).run(project.cycles[0])
-    assert [i["text"] for i in project.spec["learned"]] == [
+    assert [item["text"] for item in project.spec["learned"]] == [
         "its tools: tests pytest", "Use match for dispatch"]  # the rules stand in for the facts
 
 
@@ -387,7 +388,7 @@ class Web:
     def available(self):
         return True
 
-    def why(self, key=None):
+    def problem(self, key=None):
         return ""
 
 
@@ -503,9 +504,9 @@ def test_a_settings_file_is_planned_only_for_a_spec_point_about_a_setting(planne
     files = [{"path": "calc.py", "kind": "code"}, {"path": "tests/test_calc.py", "kind": "test"},
              {"path": ".env.example", "kind": "template", "role": "(none needed)"}]
     plan = SpecWriter(session).read_spec(Reply(spec_reply(files=files)), cycle)
-    assert ".env.example" not in [f["path"] for f in plan["files"]]
+    assert ".env.example" not in [file["path"] for file in plan["files"]]
     setting = {"text": "with PRECISION=3 in .env, divide prints 3 decimals", "source": "a calculator that adds",
                "test": "tests/test_calc.py::test_precision"}
     criteria = json.loads(spec_reply())["criteria"][:2] + [setting]
     plan = SpecWriter(session).read_spec(Reply(spec_reply(files=files, criteria=criteria)), cycle)
-    assert ".env.example" in [f["path"] for f in plan["files"]]
+    assert ".env.example" in [file["path"] for file in plan["files"]]

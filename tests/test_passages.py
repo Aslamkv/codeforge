@@ -54,15 +54,15 @@ def page(url, *blocks):
 
 @pytest.mark.spec("LRN-6")
 def test_the_pool_gathers_passages_under_headings_and_numbers_them():
-    long_code = "\n".join(f"line {n} of a long example" for n in range(80))
+    long_code = "\n".join(f"line {number} of a long example" for number in range(80))
     pool = Cleaner().pool([page("https://a.dev/1", Block("heading", "Install"), Block("text", INSTALL),
                                 Block("code", "tool install"), Block("heading", "Use"), Block("text", "x " * 900),
                                 Block("code", long_code))])
-    assert [(p.id, p.heading) for p in pool][:2] == [("P1", "Install"), ("P2", "Use")]
+    assert [(passage.id, passage.heading) for passage in pool][:2] == [("P1", "Install"), ("P2", "Use")]
     assert pool[0].text == f"{INSTALL.strip()}\n\ntool install" and pool[0].url == "https://a.dev/1"
     assert pool[0].fetched == "2026-10-21 10:00"
-    assert all(len(p.text) <= PASSAGE_CHARS for p in pool if p.text != long_code)
-    assert any(p.text == long_code for p in pool)  # a code block is never cut
+    assert all(len(passage.text) <= PASSAGE_CHARS for passage in pool if passage.text != long_code)
+    assert any(passage.text == long_code for passage in pool)  # a code block is never cut
 
 
 @pytest.mark.spec("LRN-6")
@@ -73,9 +73,10 @@ def test_the_pool_drops_a_sites_repeats_and_near_duplicates():
              page("https://b.org/copy", Block("text", INSTALL + "Really.")),
              page("https://b.org/tiny", Block("text", "Next"))]
     pool = Cleaner().pool(pages)
-    assert [p.url for p in pool] == ["https://a.dev/1", "https://a.dev/2"]
-    assert all("Edit this page" not in p.text for p in pool)
+    assert [passage.url for passage in pool] == ["https://a.dev/1", "https://a.dev/2"]
+    assert all("Edit this page" not in passage.text for passage in pool)
     known = [Passage("https://a.dev/1", "t", "", INSTALL, "P1")]
     more = Cleaner().pool([page("https://c.net/x", Block("text", INSTALL)), page("https://c.net/y", Block("text", CONFIGURE))],
                           known=known)
-    assert [(p.id, p.url) for p in more] == [("P2", "https://c.net/y")]  # numbered on from the known ones
+    # numbered on from the known ones
+    assert [(passage.id, passage.url) for passage in more] == [("P2", "https://c.net/y")]

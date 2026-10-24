@@ -210,12 +210,17 @@ class Reply:
     @classmethod
     def unfenced(cls, lines):
         """The lines inside one fence pair around them all (a fence inside is content: docs)."""
-        filled = [i for i, line in enumerate(lines) if line.strip()]
-        fence_at = lambda i: cls.FENCE_RE.fullmatch(lines[i])
-        if len(filled) >= 2 and fence_at(filled[0]) and fence_at(filled[-1]) \
-                and not any(fence_at(i) for i in filled[1:-1]):
+        filled = [index for index, line in enumerate(lines) if line.strip()]
+        if cls.one_fence_around(lines, filled):
             return lines[filled[0] + 1:filled[-1]]
         return lines
+
+    @classmethod
+    def one_fence_around(cls, lines, filled):
+        """Whether the filled lines open and close with a fence, with no fence between them."""
+        fence_at = lambda index: cls.FENCE_RE.fullmatch(lines[index])
+        return len(filled) >= 2 and fence_at(filled[0]) and fence_at(filled[-1]) \
+            and not any(fence_at(index) for index in filled[1:-1])
 
     def as_file(self, path):
         """The reply as a FILE block for path when it has none but one fenced code block (a model
@@ -227,8 +232,8 @@ class Reply:
 
     def line_edits(self):
         """[(path, first, last, new lines)] of its LINES blocks."""
-        return [(str(Path(path.strip())), int(a), int(b), self.unnumbered(self.without_debris(body).splitlines()))
-                for path, a, b, body in self.LINES_BLOCK_RE.findall(self.text)]
+        return [(str(Path(path.strip())), int(first), int(last), self.unnumbered(self.without_debris(body).splitlines()))
+                for path, first, last, body in self.LINES_BLOCK_RE.findall(self.text)]
 
     @classmethod
     def unnumbered(cls, lines):
@@ -238,7 +243,7 @@ class Reply:
         return lines
 
     def named_paths(self):
-        return list(dict.fromkeys([p for p, _ in self.files()] + [e[0] for e in self.line_edits()]))
+        return list(dict.fromkeys([path for path, _ in self.files()] + [edit[0] for edit in self.line_edits()]))
 
     def cause(self):
         return first_line(self.marked("CAUSE"), 160)
@@ -282,7 +287,7 @@ class Reply:
     def wrote(paths):
         """When a reply asked for these files is complete: once each has its block, as soon as the
         last one ends (models run on with files nobody asked for), or as files_complete says."""
-        wanted = {str(Path(p)) for p in paths}
+        wanted = {str(Path(path)) for path in paths}
 
         def done(content):
             return wanted <= {path for path, _ in Reply(content).files()} or Reply.files_complete(content)
@@ -320,21 +325,21 @@ class Part:
     @staticmethod
     def total_size(parts):
         """The chars a list of parts takes in a prompt (empty optional parts are left out)."""
-        return sum(p.size() for p in parts if p.text or p.required)
+        return sum(part.size() for part in parts if part.text or part.required)
 
     @staticmethod
     def assemble(parts, limit, notes=None):
         """The user message: required parts first fitted (shortening prose ones), then optional
         parts while they fit. Raises PromptTooLarge when the required parts cannot fit."""
-        parts = Part.shorten_required(sorted(parts, key=lambda p: Part.PLACES[p.place]), limit, notes)
+        parts = Part.shorten_required(sorted(parts, key=lambda part: Part.PLACES[part.place]), limit, notes)
         room = limit - Part.required_size(parts)
         blocks = []
-        for p in parts:
-            if p.required:
-                blocks.append(p.render())
-            elif p.text and (fitted := p.fitted(room)):
+        for part in parts:
+            if part.required:
+                blocks.append(part.render())
+            elif part.text and (fitted := part.fitted(room)):
                 blocks.append(fitted.render())
-                room = room - p.size() if fitted is p else 0
+                room = room - part.size() if fitted is part else 0
         return "\n\n".join(blocks)
 
     def fitted(self, room):
@@ -350,26 +355,28 @@ class Part:
     def shorten_required(parts, limit, notes):
         trimmed = set()
         while Part.required_size(parts) > limit:
-            i = Part.longest_prose(parts, limit)
-            parts[i] = parts[i].shortened(max(TRIM_FLOOR, len(parts[i].text) - (Part.required_size(parts) - limit)))
-            trimmed.add(parts[i].title)
+            index = Part.longest_prose(parts, limit)
+            parts[index] = parts[index].shortened(max(TRIM_FLOOR,
+                                                      len(parts[index].text) - (Part.required_size(parts) - limit)))
+            trimmed.add(parts[index].title)
         if trimmed and notes is not None:
             notes.extend(sorted(trimmed))
         return parts
 
     @staticmethod
     def required_size(parts):
-        return sum(p.size() for p in parts if p.required)
+        return sum(part.size() for part in parts if part.required)
 
     @staticmethod
     def longest_prose(parts, limit):
         """The index of the longest required prose part that can still be shortened."""
-        prose = [i for i, p in enumerate(parts) if p.required and not p.exact and len(p.text) > TRIM_FLOOR]
+        prose = [index for index, part in enumerate(parts) if part.required and not part.exact
+                 and len(part.text) > TRIM_FLOOR]
         if not prose:
-            exact = ", ".join(p.title for p in parts if p.exact) or "none"
+            exact = ", ".join(part.title for part in parts if part.exact) or "none"
             raise PromptTooLarge(f"required prompt parts need {Part.required_size(parts)} chars; budget allows "
                                  f"{limit} (parts that cannot be shortened: {exact})")
-        return max(prose, key=lambda k: len(parts[k].text))
+        return max(prose, key=lambda chosen: len(parts[chosen].text))
 
     def render(self, text=None):
         text = self.text if text is None else text

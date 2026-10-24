@@ -130,7 +130,7 @@ class Selector:
         queries = {slot.id: f"{slot.asked(plan, version)} {plan['name']} {version}" for slot in slots}
         shortlist = {slot.id: Retriever(None).by_words(queries[slot.id], texts)[:SLOT_CANDIDATES] for slot in slots}
         vectors = self.vectors(texts, sorted({*found for found in shortlist.values()}))
-        return {slot.id: [pool[i] for i in self.diverse(
+        return {slot.id: [pool[index] for index in self.diverse(
                     self.relevant(slot.keywords(), queries[slot.id], shortlist[slot.id], texts, vectors),
                     pool, vectors, slot.passages)]
                 for slot in slots}
@@ -146,9 +146,9 @@ class Selector:
         """{index: fused score} of the shortlisted passages that hold a keyword or are close to the query in meaning."""
         closeness = self.closeness(query, vectors)
         holding = set(Retriever(None).by_words(keywords, texts))
-        counted = [i for i in shortlist if i in holding or closeness.get(i, 0.0) >= SLOT_RELEVANT]
+        counted = [index for index in shortlist if index in holding or closeness.get(index, 0.0) >= SLOT_RELEVANT]
         fused = {}
-        for ranking in (counted, sorted(counted, key=lambda i: -closeness.get(i, 0.0))):
+        for ranking in (counted, sorted(counted, key=lambda index: -closeness.get(index, 0.0))):
             for position, index in enumerate(ranking):
                 fused[index] = fused.get(index, 0.0) + 1.0 / (Retriever.RRF_K + position + 1)
         return fused
@@ -164,10 +164,10 @@ class Selector:
             return []
         top, taken, room = max(scores.values()), [], self.budget
         marks = None if vectors else [shingles(passage.text) for passage in pool]
-        left = sorted(scores, key=lambda i: (-scores[i], i))
+        left = sorted(scores, key=lambda index: (-scores[index], index))
         while left and len(taken) < count:
-            best = max(left, key=lambda i: MMR_BALANCE * scores[i] / top
-                       - (1 - MMR_BALANCE) * self.most_alike(i, taken, vectors, marks))
+            best = max(left, key=lambda index: MMR_BALANCE * scores[index] / top
+                       - (1 - MMR_BALANCE) * self.most_alike(index, taken, vectors, marks))
             left.remove(best)
             size = len(pool[best].listing()) + 2
             if size <= room:

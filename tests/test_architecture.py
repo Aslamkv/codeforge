@@ -11,22 +11,22 @@ import pytest
 ROOT = Path(__file__).resolve().parent.parent
 LAYERS = ("messages", "settings", "jobs", "ledger", "commands", "prompts", "workspace", "model", "project", "fetcher", "web", "passages", "conversation",
           "channels", "knowledge", "slots", "docsite", "learning", "graph", "reading", "teaching", "exercising", "session", "planning", "building",
-          "finishing")
+          "finishing", "cli")
 
 
 def imports_of(module):
     """(module-level imports, imports inside functions) of tinkerkit modules, by their short names."""
     tree = ast.parse((ROOT / "tinkerkit" / f"{module}.py").read_text(encoding="utf-8"))
     top, inner = set(), set()
-    nested = {id(node) for fn in ast.walk(tree) if isinstance(fn, (ast.FunctionDef, ast.AsyncFunctionDef))
-              for node in ast.walk(fn) if node is not fn}
+    nested = {id(node) for function in ast.walk(tree) if isinstance(function, (ast.FunctionDef, ast.AsyncFunctionDef))
+              for node in ast.walk(function) if node is not function}
     for node in ast.walk(tree):
         names = []
         if isinstance(node, ast.ImportFrom) and node.level == 1:
             names = [node.module] if node.module else [alias.name for alias in node.names]
         elif isinstance(node, ast.ImportFrom) and (node.module or "").startswith("tinkerkit"):
-            names = [node.module.split(".", 1)[1]] if "." in node.module else [a.name for a in node.names]
-        (inner if id(node) in nested else top).update(n.split(".")[0] for n in names)
+            names = [node.module.split(".", 1)[1]] if "." in node.module else [alias.name for alias in node.names]
+        (inner if id(node) in nested else top).update(module_name.split(".")[0] for module_name in names)
     return top, inner
 
 
@@ -42,7 +42,7 @@ def test_each_module_imports_only_the_modules_listed_above_it(module):
 
 @pytest.mark.spec("ARCH-1")
 def test_every_module_of_the_package_is_in_the_layers():
-    modules = {p.stem for p in (ROOT / "tinkerkit").glob("*.py") if p.stem != "__init__"}
+    modules = {path.stem for path in (ROOT / "tinkerkit").glob("*.py") if path.stem != "__init__"}
     assert modules == set(LAYERS)
 
 
@@ -75,8 +75,8 @@ def test_only_the_model_web_and_channel_modules_open_connections():
     assert users <= {"model", "web", "fetcher", "channels", "knowledge"}, users
     knowledge = (ROOT / "tinkerkit" / "knowledge.py").read_text(encoding="utf-8")
     assert "urlopen(" not in knowledge, "knowledge goes online only through Internet and Ollama"
-    runners = {p.stem for p in [*(ROOT / "tinkerkit").glob("*.py"), ROOT / "tinker.py"]
-               if "subprocess.Popen(" in p.read_text(encoding="utf-8")}
+    runners = {path.stem for path in [*(ROOT / "tinkerkit").glob("*.py"), ROOT / "tinker.py"]
+               if "subprocess.Popen(" in path.read_text(encoding="utf-8")}
     assert runners <= {"workspace", "settings", "conversation"}, runners
 
 
@@ -96,7 +96,7 @@ def test_every_phase_works_through_the_session():
     from tinkerkit.building import Verifier
     from tinkerkit.planning import SpecWriter
     assert issubclass(SpecWriter, session.Phase) and issubclass(Verifier, session.Worker)
-    for module in ("planning", "building", "finishing"):
+    for module in ("planning", "building", "finishing", "cli"):
         top, inner = imports_of(module)
         assert "session" in top, f"{module} takes its phases from the session"
     tinker_py = (ROOT / "tinker.py").read_text(encoding="utf-8")

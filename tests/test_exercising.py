@@ -8,7 +8,7 @@ from pathlib import Path
 
 import pytest
 
-from tinker import Cli, Commands
+from tinkerkit.cli import Cli, Commands
 from tinkerkit import conversation, exercising
 from tinkerkit.conversation import Desk, Message, persons_runs
 from tinkerkit.exercising import (
@@ -209,7 +209,8 @@ def test_measured_and_problems_come_from_the_projects_own_database(make_project,
         project.store.append("events", event)
     project.store.append("output", {"line": "⚠️ ruff is not installed", "kind": "warn"})
     measures = measured(project_dir)
-    assert {k: measures[k] for k in ("status", "minutes", "calls", "retried", "tokens", "passing", "parked", "points",
+    assert {key: measures[key] for key in ("status", "minutes", "calls", "retried", "tokens", "passing", "parked",
+                                           "points",
                                       "readme_failures")} == {"status": "done", "minutes": 5.0, "calls": 3, "retried": 1,
                                                               "tokens": 480, "passing": 1, "parked": 1, "points": 2,
                                                               "readme_failures": 1}
@@ -407,7 +408,7 @@ def test_tinker_exercise_takes_a_language_or_status():
 def test_a_chat_never_waits_for_an_exercise(home_store, tmp_path):
     desk = Desk([Recorder()], tmp_path)
     home_store.put("running", str(ALIVE), {"title": "Exercising Rust", "exercise": True, "doing": "🔨 Building"})
-    assert desk.now() == []
+    assert desk.running_now() == []
 
 
 @pytest.mark.spec("EXR-7")

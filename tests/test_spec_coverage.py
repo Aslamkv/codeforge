@@ -22,7 +22,7 @@ def points_tested():
 
 
 def test_every_spec_point_has_a_test():
-    missing = sorted(spec_points() - points_tested(), key=lambda p: (p.split("-")[0], int(p.split("-")[1])))
+    missing = sorted(spec_points() - points_tested(), key=lambda point: (point.split("-")[0], int(point.split("-")[1])))
     assert not missing, f"spec points with no test: {', '.join(missing)}"
 
 
@@ -34,6 +34,6 @@ def test_every_test_names_a_spec_point():
 def test_every_xfail_is_strict_and_names_its_issue():
     """A test the code does not pass yet is a known issue (tracked outside the spec): it fails as soon as the code
     is fixed, so its marker is removed and the point is enforced from then on."""
-    tests = "\n".join(p.read_text(encoding="utf-8") for p in (ROOT / "tests").glob("test_*.py"))
+    tests = "\n".join(path.read_text(encoding="utf-8") for path in (ROOT / "tests").glob("test_*.py"))
     marks = re.findall(r"mark\.xfail\(([^)]*)\)", tests)
     assert all(re.search(r'strict=True, reason="ISSUE-\d+: ', mark) for mark in marks), marks

@@ -84,7 +84,8 @@ def test_sites_are_fetched_in_parallel_in_order_and_one_failure_blocks_none(site
     logged = []
     got = fetcher(log=lambda *entry: logged.append(entry)).fetch_all(
         [f"{one.base}/together", f"{one.base}/gone", "http://127.0.0.1:1/refused", f"{other.base}/together"])
-    assert [g.text for g in got] == ["<p>a</p>", "", "", "<p>b</p>"]  # both sites answered together: in parallel
+    # both sites answered together: in parallel
+    assert [fetched.text for fetched in got] == ["<p>a</p>", "", "", "<p>b</p>"]
     assert got[0].ok and got[0].status == 200 and got[0].kind == "text/html" and got[0].final_url.endswith("/together")
     assert got[1].status == 404 and got[1].error == "HTTP 404"
     assert got[2].status is None and got[2].error
@@ -97,7 +98,7 @@ def test_one_sites_pages_share_one_kept_alive_connection_and_come_gzipped(site):
     web = site({"/a": (200, HTML, b"<p>a</p>"), "/b": (200, {**HTML, "Content-Encoding": "gzip"}, gzip.compress(b"<p>b</p>")),
                 "/c": (200, HTML, b"<p>c</p>")})
     got = fetcher().fetch_all([f"{web.base}/a", f"{web.base}/b", f"{web.base}/c"])
-    assert [g.text for g in got] == ["<p>a</p>", "<p>b</p>", "<p>c</p>"]
+    assert [fetched.text for fetched in got] == ["<p>a</p>", "<p>b</p>", "<p>c</p>"]
     assert len(web.clients) == 1 and web.paths() == ["/robots.txt", "/a", "/b", "/c"]  # one after another, one connection
     logged = []
     fetcher(log=lambda *entry: logged.append(entry)).fetch_all([f"{web.base}/llms.txt"], kind="probe")
@@ -111,14 +112,14 @@ def test_text_is_decoded_by_its_charset_and_cut_at_max_bytes(site):
                           '<meta charset="windows-1252"><p>naïve</p>'.encode("cp1252")),
                 "/plain": (200, {"Content-Type": "text/plain"}, "über".encode("utf-8")),
                 "/big": (200, HTML, b"x" * 5000)})
-    got = fetcher(max_bytes=1000).fetch_all([f"{web.base}/{p}" for p in ("latin", "meta", "plain", "big")])
+    got = fetcher(max_bytes=1000).fetch_all([f"{web.base}/{path}" for path in ("latin", "meta", "plain", "big")])
     assert got[0].text == "café" and "naïve" in got[1].text and got[2].text == "über" and got[2].kind == "text/plain"
     assert len(got[3].text) == 1000
 
 
 @pytest.mark.spec("LRN-4")
 def test_redirects_are_followed_up_to_the_limit(site):
-    hops = {f"/hop{n}": (302, {"Location": f"/hop{n + 1}"}, b"") for n in range(MAX_REDIRECTS + 2)}
+    hops = {f"/hop{number}": (302, {"Location": f"/hop{number + 1}"}, b"") for number in range(MAX_REDIRECTS + 2)}
     web = site({"/old": (301, {"Location": "/new"}, b""), "/new": (200, HTML, b"<p>new</p>"), **hops})
     moved, looping = fetcher().fetch_all([f"{web.base}/old", f"{web.base}/hop0"])
     assert moved.ok and moved.final_url == f"{web.base}/new" and moved.text == "<p>new</p>"

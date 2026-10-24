@@ -97,7 +97,7 @@ def test_markup_ansi_and_literal(monkeypatch):
     tty.isatty = lambda: True
     monkeypatch.setattr(sys, "stdout", tty)
     assert Markup.ansi("**b** `c`") == "\033[1mb\033[22m \033[36mc\033[39m"
-    output = Markup.ansi("```output\n" + "\n".join(str(i) for i in range(40)) + "\n```")
+    output = Markup.ansi("```output\n" + "\n".join(str(number) for number in range(40)) + "\n```")
     assert "\033[2m  │ 29\033[22m" in output and "… 10 more lines" in output and "│ 30" not in output
     monkeypatch.setenv("NO_COLOR", "1")
     assert Markup.ansi("**b**") == "b"
@@ -128,9 +128,9 @@ def test_columns():
 
 @pytest.mark.spec("CNV-3")
 def test_pieces_split_between_lines():
-    text = "\n".join(f"line {i:03}" for i in range(100))
+    text = "\n".join(f"line {number:03}" for number in range(100))
     parts = pieces(text, size=100)
-    assert all(len(p) <= 100 for p in parts) and "\n".join(parts) == text
+    assert all(len(part) <= 100 for part in parts) and "\n".join(parts) == text
     assert pieces("") == [] and pieces("one") == ["one"]
 
 
@@ -186,8 +186,8 @@ def test_show_done_comes_to_the_bottom():
 @pytest.mark.spec("CNV-6")
 def test_listened_filters_chats_and_says_a_refusal_once(monkeypatch, capsys):
     channel = Recorder(chats=("1",), inbox=[Message("1", "hi"), Message("2", "stranger")])
-    assert [m.text for m in channel.listened(0)] == ["hi"]
-    monkeypatch.setattr(conversation.time, "sleep", lambda s: None)
+    assert [message.text for message in channel.listened(0)] == ["hi"]
+    monkeypatch.setattr(conversation.time, "sleep", lambda seconds: None)
 
     def refused(timeout):
         raise ChannelError("409 Conflict")
@@ -228,7 +228,7 @@ def test_console_receives_lines_until_exit():
     console.reader = object()  # no input thread: lines are queued by hand
     for line in ("hello", "  ", "exit"):
         console.lines.put(line)
-    assert [m.text for m in console.receive(0)] == ["hello"]
+    assert [message.text for message in console.receive(0)] == ["hello"]
     assert console.receive(0) == [] and not console.closed
     assert console.receive(0) == [] and console.closed
     eof = ConsoleChannel()
@@ -284,7 +284,7 @@ def test_progress_ending_of_a_done_run():
                                                 "details": [["Run it", "python3 calc.py"]],
                                                 "next": [["➕ Add a feature", 'tinker add @abc123 "..."'],
                                                          ["🐞 fix a bug", 'tinker fix @abc123 "..."']]}))
-    assert progress.took() == "1m 30s (90 seconds)" and not progress.waiting()
+    assert progress.time_taken() == "1m 30s (90 seconds)" and not progress.waiting()
     assert progress.ending().splitlines() == [
         "🏁 **calc: a calculator**", "✅ **Done. All 2 spec tests pass (SPEC.md).**", "⏱ **Done in 1m 30s (90 seconds)**",
         "▶️ Run it: `python3 calc.py`",
@@ -353,12 +353,12 @@ def test_talk_model_needs_a_measured_model(measured_model, tinker_home):
 def test_talk_reply(measured_model, fake_ollama, monkeypatch):
     monkeypatch.setattr(conversation, "CHAT_KEPT", 4)
     talk, channel = Talk("task; status"), Recorder()
-    for i in range(3):
-        fake_ollama.reply(f"answer {i}")
-        assert talk.reply(channel, Message("1", f"question {i}")) == f"answer {i}"
+    for number in range(3):
+        fake_ollama.reply(f"answer {number}")
+        assert talk.reply(channel, Message("1", f"question {number}")) == f"answer {number}"
     messages = fake_ollama.calls[-1]["messages"]
     assert messages[0]["role"] == "system" and "task; status" in messages[0]["content"]
-    assert [m["content"] for m in messages[1:]] == ["answer 0", "question 1", "answer 1", "question 2"]
+    assert [message["content"] for message in messages[1:]] == ["answer 0", "question 1", "answer 1", "question 2"]
     assert fake_ollama.calls[-1]["think"] is False and fake_ollama.calls[-1]["options"]["num_predict"] == 1024
     from tinkerkit.model import OllamaError
     fake_ollama.reply(OllamaError("runner failed"))
@@ -406,7 +406,7 @@ def test_research_reads_what_is_most_about_the_searches(monkeypatch):
                   "The release notes for python list every change in detail " * 2]
     text = "\n\n".join(paragraphs)
     wanted = {"python", "release", "notes", "free", "threading"}
-    assert Research.most_about(text, wanted) == "\n\n".join(p.strip() for p in paragraphs)
+    assert Research.most_about(text, wanted) == "\n\n".join(paragraph.strip() for paragraph in paragraphs)
     monkeypatch.setattr(conversation, "RESEARCH_PAGE_CHARS", len(paragraphs[0]) + len(paragraphs[2]))
     assert Research.most_about(text, wanted) == paragraphs[0].strip() + "\n\n" + paragraphs[2].strip()
     assert Research.most_about("tiny", wanted) == "tiny"
@@ -429,7 +429,7 @@ def test_running(home_store):
     home_store.put("running", str(os.getpid()), snapshot(title="mine"))
     home_store.put("running", str(os.getppid()), snapshot(title="calc"))
     home_store.put("running", "notapid", {})
-    assert [r["title"] for r in running()] == ["calc"] and running()[0]["pid"] == os.getppid()
+    assert [run["title"] for run in running()] == ["calc"] and running()[0]["pid"] == os.getppid()
     assert running(skip={os.getppid()}) == []
     assert home_store.get("running", str(ended.pid)) is None
     shown = described(running()[0])
@@ -541,7 +541,7 @@ def test_confirm_asks_a_new_projects_folder_once_then_builds(desk):
     say(desk, channel, "task a calculator")
     wait_until(lambda: desk.waiting is not None)
     say(desk, channel, "confirm")
-    assert desk.waiting["stage"] == "name" and any("📁 **Its folder:** `calc`" in t for t in channel.texts()[-3:])
+    assert desk.waiting["stage"] == "name" and any("📁 **Its folder:** `calc`" in text for text in channel.texts()[-3:])
     say(desk, channel, "confirm")
     wait_until(lambda: "resume @abc123" in calls_of(script))
     wait_until(lambda: not desk.busy())
@@ -565,7 +565,7 @@ def test_confirm_of_a_feature_builds_at_once_and_amend_changes_it(desk):
 @pytest.mark.spec("CNV-16")
 def test_what_waits_for_confirm_is_cancelled_by_anything_else(desk, monkeypatch):
     desk, channel, _ = desk
-    monkeypatch.setattr(desk.talk, "answer", lambda *args, **kw: None)
+    monkeypatch.setattr(desk.talk, "answer", lambda *args, **kwargs: None)
     desk.answer(Message("1", "clear memory"), channel)
     say(desk, channel, "no thanks")
     assert "🚫 _Not done:_ `clear memory`" in channel.texts()[-1] and desk.ran == [["clear", "memory"]]
@@ -624,7 +624,7 @@ def test_a_glance_goes_soon_and_history_shows_things_again(desk, monkeypatch):
 def test_follow_reads_the_tasks_tracker(tmp_path, home_store):
     desk = Desk.__new__(Desk)
     desk.echo, desk.boards, desk.spent, desk.waiting = False, {}, {}, None
-    desk.say_status = lambda *a, **k: None
+    desk.say_status = lambda *args, **kwargs: None
     reporter = Reporter([Recorder()], "a calculator", pid=4343)
     home_store.put("running", "4343", snapshot(folder="/tmp/projects/calc", waiting=PLAN))
     process = type("P", (), {"stdout": io.StringIO("Plan: the spec\n📋 printed text is never read\n"), "pid": 4343,
@@ -689,7 +689,8 @@ def test_a_chat_pauses_the_job_that_runs_before_it_is_answered(desk, monkeypatch
 
 @pytest.mark.spec("JOB-10")
 def test_there_is_no_emergency_command():
-    assert "emergency" not in [c.name for c in conversation.COMMANDS] and conversation.command_of("emergency help") == ""
+    assert "emergency" not in [command.name
+                               for command in conversation.COMMANDS] and conversation.command_of("emergency help") == ""
     assert not hasattr(Desk, "emergency")
 
 
@@ -817,12 +818,13 @@ class Pages:
     def available(self):
         return self.up
 
-    def why(self, key=None):
+    def problem(self, key=None):
         return "no key" if not self.up else "no answer"
 
     def search(self, query, count):
-        return [{"title": f"Page {n}", "url": f"https://site{n}.org/{query.replace(' ', '-')}", "content": "excerpt"}
-                for n in (1, 2)]
+        return [{"title": f"Page {number}", "url": f"https://site{number}.org/{query.replace(' ', '-')}",
+                 "content": "excerpt"}
+                for number in (1, 2)]
 
     def fetch(self, url):
         return {"title": "", "url": url, "content": "Python 3.14 was released in October with free threading."}

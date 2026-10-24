@@ -25,7 +25,7 @@ class Session:
         self.confirm = confirm    # a plan waits for the person (--confirm)
         self.tracker = tracker    # the run's one report (Tracker), when it has one
         self.cycle = None         # the cycle being worked on (where the knowledge it uses is recorded)
-        self.ws = Workspace(project.workdir)
+        self.workspace = Workspace(project.workdir)
         self.tool_problem = ""
         self.build_problem = ""
         self.unreproduced = ""  # tinker fix: why the bug could not be shown by a test
@@ -33,7 +33,8 @@ class Session:
         self.network_waiting = []  # setup commands that failed because the network did: done when it is back
         self.all_tests_run = None  # (files key, (code, output)) of the last run of all tests
         # criteria parked when this session began: one retry each (a resume after a change)
-        self.parked_at_start = {s["id"] for s in project.criteria if s.get("status") == "blocked"}
+        self.parked_at_start = {criterion["id"] for criterion in project.criteria
+                                if criterion.get("status") == "blocked"}
         self._knowledge = None
 
     @property
@@ -144,18 +145,18 @@ class Session:
 
     def setup(self, force=False):
         """Run the setup commands when they or the config files changed; prepare .env."""
-        self.ws.prepare_env()
+        self.workspace.prepare_env()
         if not force and self.setup_key() == self.project.spec.get("setup_key"):
             return True, ""
-        ok, output, self.network_waiting = self.toolchain.run_setup(self.ws)
+        ok, output, self.network_waiting = self.toolchain.run_setup(self.workspace)
         if ok and not self.network_waiting:
             self.setup_done()
         return ok, output
 
     def setup_key(self):
         """What setup depends on: its commands and the config files."""
-        configs = sorted(p for p in self.project.paths("config") if p not in (ENV_FILE, ENV_EXAMPLE))
-        return fingerprint(json.dumps(self.toolchain.setup) + "".join(self.ws.read(p) for p in configs))
+        configs = sorted(path for path in self.project.paths("config") if path not in (ENV_FILE, ENV_EXAMPLE))
+        return fingerprint(json.dumps(self.toolchain.setup) + "".join(self.workspace.read(path) for path in configs))
 
     def setup_done(self):
         self.project.spec["setup_key"] = self.setup_key()
@@ -181,7 +182,7 @@ class Session:
         noted = began
         while self.network_waiting:
             time.sleep(NETWORK_RETRY)
-            ok, output, self.network_waiting = self.toolchain.run_setup(self.ws, self.network_waiting)
+            ok, output, self.network_waiting = self.toolchain.run_setup(self.workspace, self.network_waiting)
             if not ok:
                 return False
             if self.network_waiting and time.monotonic() - noted >= NETWORK_NOTE:
@@ -199,7 +200,7 @@ class Session:
         ok, failed = self.setup()
         if not ok:
             return
-        code, output = self.ws.run(self.toolchain.shell(command), timeout=SETUP_TIMEOUT, quiet=True)
+        code, output = self.workspace.run(self.toolchain.shell(command), timeout=SETUP_TIMEOUT, quiet=True)
         if code == 0:
             say.done(f"Formatted the code with `{command}`")
         else:
@@ -213,15 +214,15 @@ class Session:
 
     def run_all_tests(self):
         """All tests, once per state of the project's files: a slow or hanging suite is not run twice."""
-        key = fingerprint("".join(p + self.ws.read(p) for p in sorted(self.project.files)))
+        key = fingerprint("".join(path + self.workspace.read(path) for path in sorted(self.project.files)))
         if self.all_tests_run and self.all_tests_run[0] == key:
             return self.all_tests_run[1]
-        result = self.toolchain.run_all(self.ws)
+        result = self.toolchain.run_all(self.workspace)
         self.all_tests_run = (key, result)
         return result
 
     def files_on_disk(self, *kinds):
-        return [p for p in self.project.paths(*kinds) if self.ws.exists(p)]
+        return [path for path in self.project.paths(*kinds) if self.workspace.exists(path)]
 
 
 class Worker:
@@ -230,7 +231,7 @@ class Worker:
     and the commands run in it)."""
 
     def __init__(self, session):
-        self.s, self.p, self.ws = session, session.project, session.ws
+        self.session, self.project, self.workspace = session, session.project, session.workspace
 
 
 class Phase(Worker):

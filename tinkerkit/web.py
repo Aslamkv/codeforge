@@ -14,7 +14,7 @@ lazy import urllib.request
 lazy from .fetcher import Fetcher
 lazy from .jobs import journaled
 from .messages import say
-from .settings import Config, first_line, is_number
+from .settings import Config, first_line, is_number, number_from
 
 
 class Internet:
@@ -45,7 +45,7 @@ class Internet:
         """([the backends set, in order, that can be used], [why each of the others cannot])."""
         ready, reasons = [], []
         timeout = float(Config.get("web_timeout"))
-        for name in dict.fromkeys(n for n in (Config.get("web"), Config.get("web_fallback")) if n):
+        for name in dict.fromkeys(name for name in (Config.get("web"), Config.get("web_fallback")) if name):
             backend = self.backends()[name](timeout)
             why = backend.unready()
             if why:
@@ -62,7 +62,7 @@ class Internet:
         Internet.check()
         internet = Internet()
         if not internet.available():
-            raise SystemExit(f"{option} needs the Internet plugin: {internet.why()}")
+            raise SystemExit(f"{option} needs the Internet plugin: {internet.problem()}")
         for reason in internet.skipped:
             say.warn(f"Web: {reason}; using {internet.describe()}")
         return internet
@@ -76,7 +76,7 @@ class Internet:
             return f"not usable: {exc}"
         internet = Internet()
         if not internet.available():
-            return internet.why()
+            return internet.problem()
         skipped = f"; not usable: {'; '.join(internet.skipped)}" if internet.skipped else ""
         return f"ready: {internet.describe()}{skipped}"
 
@@ -104,7 +104,7 @@ class Internet:
     @staticmethod
     def check_learn_missing():
         missing = Config.get("learn_missing")
-        if not is_number(missing) or not isinstance(missing, int) or missing < 1:
+        if not number_from(missing, 1):
             raise SystemExit(f"learn_missing must be a whole number, 1 or more (the topics a run "
                              f"with --web may learn); it is {missing!r}")
 
@@ -112,7 +112,7 @@ class Internet:
     def check_learn_limits():
         for key, (whole, least) in Internet.LEARN_LIMITS.items():
             value = Config.get(key)
-            if not is_number(value) or (whole and not isinstance(value, int)) or value < least:
+            if not number_from(value, least, whole):
                 kind = "a whole number" if whole else "a number"
                 raise SystemExit(f"{key} must be {kind}, {least} or more; it is {value!r}")
 
@@ -124,7 +124,7 @@ class Internet:
     def available(self):
         return not self.gone
 
-    def why(self, key=None):
+    def problem(self, key=None):
         return self.gone or self.errors.get(key) or "no answer"
 
     def rate_limited(self, key):
@@ -132,7 +132,7 @@ class Internet:
         return self.codes.get(key) == 429
 
     def describe(self):
-        return " then ".join(b.name for b in self.backends_used)
+        return " then ".join(backend.name for backend in self.backends_used)
 
     @property
     def backend(self):
@@ -158,10 +158,11 @@ class Internet:
 
     def searched(self, query, count):
         found = self.call(query, lambda backend: backend.search(query, count),
-                          lambda r: isinstance(r, list) or "its search gave no list")
+                          lambda result: isinstance(result, list) or "its search gave no list")
         if found is None:
             return None
-        return [self.as_result(r) for r in found if isinstance(r, dict) and is_web_address(r.get("url", ""))]
+        return [self.as_result(result) for result in found if isinstance(result, dict)
+                and is_web_address(result.get("url", ""))]
 
     @staticmethod
     def as_result(found):
@@ -329,10 +330,15 @@ class DuckDuckGoWeb(WebBackend):
     def search(self, query, count):
         body = self.get(self.SEARCH, self.timeout, form={"q": query})[0]  # a GET is taken for a bot more often
         results = self.results(body)
-        if not results and ("anomaly" in body.lower() or "result__a" not in body):
+        if not results and self.bot_check(body):
             raise WebError("DuckDuckGo answered with its bot check instead of results (too many searches; it "
                            "passes after a while)", retry=True)
         return results[:count]
+
+    @staticmethod
+    def bot_check(body):
+        """Whether the page is DuckDuckGo asking whether a person searches, not its results."""
+        return "anomaly" in body.lower() or "result__a" not in body
 
     def results(self, body):
         """The results of a results page, without its ads (they link to DuckDuckGo itself)."""
@@ -353,12 +359,17 @@ class DuckDuckGoWeb(WebBackend):
         """{"title", "url", "content"} of a page read from its own server: HTML as its main text,
         plain text and Markdown as they are."""
         body, kind = cls.get(url, timeout)
-        if "html" in kind or body.lstrip()[:200].lower().startswith(("<!doctype html", "<html")):
+        if cls.is_html(body, kind):
             text = PageText.of(body)
             return {"title": text.title, "url": url, "content": text.content()}
         if kind.startswith("text/") or kind in ("", "application/json", "application/xml"):
             return {"title": "", "url": url, "content": body}
         raise WebError(f"{url} is not a text page ({kind})")
+
+    @staticmethod
+    def is_html(body, kind):
+        """Whether a page is HTML, by its content type or, when a server names none, by how it starts."""
+        return "html" in kind or body.lstrip()[:200].lower().startswith(("<!doctype html", "<html"))
 
     @classmethod
     def get(cls, url, timeout, form=None):
@@ -451,12 +462,17 @@ class PageText(html.parser.HTMLParser):
         if self.skipping or self.not_content(tag, attributes):
             self.skipping += 1
             return
-        if (tag in ("main", "article") or attributes.get("role") == "main") and self.main_depth is None:
+        if self.opens_main(tag, attributes) and self.main_depth is None:
             self.main_depth = self.depth
         if tag == "pre":
             self.pre += 1
         if tag in self.BLOCKS:
             self.add("\n" + self.line_mark(tag))
+
+    @staticmethod
+    def opens_main(tag, attributes):
+        """Whether a tag opens the page's main content."""
+        return tag in ("main", "article") or attributes.get("role") == "main"
 
     def not_content(self, tag, attributes):
         """A script, a menu, a header or footer, or something hidden."""

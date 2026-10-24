@@ -91,7 +91,7 @@ class Exercise:
     def picked(self, exercise):
         """The next practice project, chosen by one call: new, a little harder, practising the focus first."""
         self.on_to("pick")
-        name, earlier = exercise["language"], [p["task"] for p in exercise["projects"]]
+        name, earlier = exercise["language"], [practice["task"] for practice in exercise["projects"]]
         parts = [Part("Language", name, True), Part("Focus", exercise.get("focus") or "(none yet)", True),
                  Part("Earlier projects", "\n".join(f"- {task}" for task in earlier[-30:]) or "(none yet)", True)]
         focus = f", practising {exercise['focus']}" if exercise.get("focus") else ""
@@ -214,7 +214,7 @@ def read_verdict(data):
     name = str(data.get("name") or "").strip()[:40]
     if verdict == "language" and not name:
         raise ValueError('a language needs its "name"')
-    choices = [str(c).strip()[:40] for c in data.get("choices") or [] if str(c).strip()][:6]
+    choices = [str(choice).strip()[:40] for choice in data.get("choices") or [] if str(choice).strip()][:6]
     return {"verdict": verdict, "name": name, "choices": choices, "why": first_line(str(data.get("why") or ""), 160)}
 
 
@@ -238,7 +238,7 @@ def read_choice(data, language, earlier):
     folder = str(data.get("folder") or "").strip().lower()
     if not FOLDER_RE.fullmatch(folder) or len(folder) > 30:
         folder = "-".join(re.findall(r"[a-z][a-z0-9]*", task.lower())[:3]) or "practice"
-    practises = [first_line(str(p), 60) for p in data.get("practises") or [] if str(p).strip()][:5]
+    practises = [first_line(str(practice), 60) for practice in data.get("practises") or [] if str(practice).strip()][:5]
     return {"task": task[:400], "feature": feature[:300], "folder": folder, "practises": practises}
 
 
@@ -292,9 +292,10 @@ def measured(folder):
     calls = [entry for entry in events if "reply_tokens" in entry]
     passing, parked, points = project.counts()
     return {"status": (run_of(folder) or {}).get("status", "unknown"),
-            "minutes": round(sum(e.get("wall_seconds", 0) for e in events if e.get("label") == "session end") / 60, 1),
-            "calls": len(calls), "retried": sum(1 for e in calls if RETRIED_RE.search(e.get("label", ""))),
-            "tokens": sum(e.get("reply_tokens") or 0 for e in calls), "passing": passing, "parked": parked,
+            "minutes": round(sum(event.get("wall_seconds", 0) for event in events
+                                 if event.get("label") == "session end") / 60, 1),
+            "calls": len(calls), "retried": sum(1 for event in calls if RETRIED_RE.search(event.get("label", ""))),
+            "tokens": sum(event.get("reply_tokens") or 0 for event in calls), "passing": passing, "parked": parked,
             "points": points, "readme_failures": len(readme_failures(project)), "slowest": slowest(calls)}
 
 
@@ -321,10 +322,11 @@ def problems(folder):
     events = [entry for _, entry in project.store.entries("events")]
     found = [f"nothing made this pass: {step['behaviour']}" for step in project.parked()]
     found += [f"README example failed: {failure}" for failure in readme_failures(project)]
-    found += [f"model call failed: {e.get('label', '')}: {e['error']}" for e in events if e.get("error")]
-    found += [f"reply not usable: {e['note']}" for e in events if "not usable" in str(e.get("note", ""))]
-    found += [f"reply cut short: {e.get('label', '')}" for e in events if e.get("cut")]
-    found += [f"warning: {e['line'].strip()}" for _, e in project.store.entries("output") if e.get("kind") == "warn"]
+    found += [f"model call failed: {event.get('label', '')}: {event['error']}" for event in events if event.get("error")]
+    found += [f"reply not usable: {event['note']}" for event in events if "not usable" in str(event.get("note", ""))]
+    found += [f"reply cut short: {event.get('label', '')}" for event in events if event.get("cut")]
+    found += [f"warning: {event['line'].strip()}" for _, event in project.store.entries("output")
+              if event.get("kind") == "warn"]
     return list(dict.fromkeys(first_line(problem, 240) for problem in found))[:EXERCISE_PROBLEMS]
 
 
@@ -334,16 +336,17 @@ def reflection_parts(exercise, project, known):
     return [Part("Language", exercise["language"], True),
             Part("This project's measures", f"{measures_line(measures)}\nslowest steps: "
                                             f"{'; '.join(measures['slowest']) or '(none)'}", True),
-            Part("Earlier projects' measures", "\n".join(f"- {measures_line(p['measures'])}" for p in earlier)
+            Part("Earlier projects' measures", "\n".join(f"- {measures_line(practice['measures'])}"
+                                                         for practice in earlier)
                  or "(none yet)"),
             Part("Problems", "\n".join(f"- {problem}" for problem in project["problems"]) or "(none)", True, keep="tail"),
-            Part("Known lessons", "\n".join(f"{n}. {lesson['text']}" for n, lesson in enumerate(known, 1)))]
+            Part("Known lessons", "\n".join(f"{number}. {lesson['text']}" for number, lesson in enumerate(known, 1)))]
 
 
 def read_reflection(data):
     """{lessons (at most 3), confirmed (numbers), focus} of a reflection."""
     lessons = [item for item in data.get("lessons") or [] if isinstance(item, dict)][:3]
-    confirmed = [n for n in data.get("confirmed") or [] if isinstance(n, int)]
+    confirmed = [number for number in data.get("confirmed") or [] if isinstance(number, int)]
     return {"lessons": lessons, "confirmed": confirmed, "focus": first_line(str(data.get("focus") or ""), 200)}
 
 
@@ -387,11 +390,11 @@ class Exercises:
 
     @staticmethod
     def current(exercise):
-        return next((p for p in exercise["projects"] if p["step"] != "done"), None)
+        return next((project for project in exercise["projects"] if project["step"] != "done"), None)
 
     @staticmethod
     def finished(exercise):
-        return [p for p in exercise["projects"] if p["step"] == "done" and p.get("measures")]
+        return [project for project in exercise["projects"] if project["step"] == "done" and project.get("measures")]
 
     @staticmethod
     def active():
@@ -413,8 +416,13 @@ class Exercises:
     def release(exercise):
         exercise["left"] = now_text()
         Exercises.save(exercise)
-        if (Home.store().get("activity", "exercise") or {}).get("pid") == os.getpid():
+        if Exercises.held_by_this_process():
             Home.store().delete("activity", "exercise")
+
+    @staticmethod
+    def held_by_this_process():
+        """Whether the exercise that runs is this process's."""
+        return (Home.store().get("activity", "exercise") or {}).get("pid") == os.getpid()
 
 
 def already_running(active):

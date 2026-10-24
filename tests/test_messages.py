@@ -66,7 +66,7 @@ def test_a_tracker_keeps_what_is_said_as_its_latest_and_in_the_output_log(home_s
         say.done("Wrote calc.py (12 lines)")
     say.live("Writing calc.py… 12s")  # only a terminal's clock: never kept
     assert tracker.state["latest"] == "✅ Wrote calc.py (12 lines)" and "live" not in tracker.state
-    assert [e["line"] for _, e in store.entries("output")] == ["   ✅ Wrote calc.py (12 lines)"]
+    assert [entry["line"] for _, entry in store.entries("output")] == ["   ✅ Wrote calc.py (12 lines)"]
 
 
 @pytest.mark.spec("MSG-3")

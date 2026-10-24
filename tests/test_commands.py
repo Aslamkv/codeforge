@@ -2,14 +2,14 @@
 
 import pytest
 
-import tinker
+from tinkerkit import cli
 from tinkerkit import conversation
 from tinkerkit.commands import BY_NAME, COMMANDS, GROUPS, ref, refs
 
 
 @pytest.mark.spec("CMD-1")
 def test_every_command_is_defined_once_with_all_it_needs():
-    names = [c.name for c in COMMANDS if c.name]
+    names = [command.name for command in COMMANDS if command.name]
     assert len(names) == len(set(names))
     for command in COMMANDS:
         assert command.group in GROUPS and command.synopsis and command.what and command.rows
@@ -18,25 +18,29 @@ def test_every_command_is_defined_once_with_all_it_needs():
 
 @pytest.mark.spec("CMD-1")
 def test_the_command_line_and_the_conversation_read_the_table():
-    cli = set(tinker.Cli.COMMANDS) | set(tinker.Cli.TALK) | {"help", "channel", "confirm"}
-    assert cli == {c.name for c in COMMANDS if c.cli}
-    assert set(conversation.Desk.COMMANDS) == {c.name for c in COMMANDS if c.chat}
-    assert conversation.LONG == tuple(c.name for c in COMMANDS if c.chat == "long")
-    assert set(conversation.ONE_WORD) == {c.name for c in COMMANDS if c.chat and c.words == "one"}
+    on_the_command_line = set(cli.Cli.COMMANDS) | set(cli.Cli.TALK) | {"help", "channel", "confirm"}
+    assert on_the_command_line == {command.name for command in COMMANDS if command.cli}
+    assert set(conversation.Desk.COMMANDS) == {command.name for command in COMMANDS if command.chat}
+    assert conversation.LONG == tuple(command.name for command in COMMANDS if command.chat == "long")
+    assert set(conversation.ONE_WORD) == {command.name for command in COMMANDS if command.chat
+                                          and command.words == "one"}
     assert conversation.USAGE["task"] == "✍️ Write `task WHAT TO BUILD`, e.g. `task a calculator in Python`"
-    for command in tinker.Cli.COMMANDS:
-        parser = tinker.Cli.parser(command)
+    for command in cli.Cli.COMMANDS:
+        parser = cli.Cli.parser(command)
         assert parser.description == BY_NAME[command].about
-        assert {o.flag for o in BY_NAME[command].options} <= {s for a in parser._actions for s in a.option_strings}
+        assert {option.flag for option in BY_NAME[command].options} <= {flag for action in parser._actions
+                                                                        for flag in action.option_strings}
 
 
 @pytest.mark.spec("CMD-2")
 def test_runs_and_what_deletes():
-    assert [c.name for c in COMMANDS if c.run] == ["task", "restart", "confirm", "amend", "add", "fix", "resume"]
-    for command in [c for c in COMMANDS if c.run and c.name != "restart"]:
-        assert "--web" in {o.flag for o in command.options}, command.name
-    assert [c.name for c in COMMANDS if "--confirm" in {o.flag for o in c.options}] == ["task", "restart", "add", "fix"]
-    assert [c.name for c in COMMANDS if c.deletes] == ["restart", "clear", "reset"]
+    assert [command.name for command in COMMANDS if command.run] == [
+        "task", "restart", "confirm", "amend", "add", "fix", "resume"]
+    for command in [command for command in COMMANDS if command.run and command.name != "restart"]:
+        assert "--web" in {option.flag for option in command.options}, command.name
+    assert [command.name for command in COMMANDS
+            if "--confirm" in {option.flag for option in command.options}] == ["task", "restart", "add", "fix"]
+    assert [command.name for command in COMMANDS if command.deletes] == ["restart", "clear", "reset"]
     assert conversation.DELETES == ("restart", "clear", "reset")
 
 

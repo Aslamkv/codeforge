@@ -85,9 +85,14 @@ class DocCache:
         kept = Home.store().get("sources", f"{slug}@{key}")
         if not isinstance(kept, dict) or not kept.get("pages"):
             return None
-        if key == "latest" and DocCache.age_days(kept.get("kept", "")) > float(Config.get("docs_latest_days")):
+        if key == "latest" and DocCache.stale(kept):
             return None
         return [Page.of_dict(page) for page in kept["pages"]]
+
+    @staticmethod
+    def stale(kept):
+        """Whether pages kept are older than the docs_latest_days setting allows."""
+        return DocCache.age_days(kept.get("kept", "")) > float(Config.get("docs_latest_days"))
 
     @staticmethod
     def put(slug, key, root, pages):
@@ -105,7 +110,8 @@ class DocCache:
 def version_keys(version):
     """The keys a version's documentation may be under, the most exact first: 3.15.1, 3.15, 3, then latest."""
     numbers = re.findall(r"\d+", version or "")
-    return list(dict.fromkeys(".".join(numbers[:n]) for n in (len(numbers), 2, 1) if 0 < n <= len(numbers))) + ["latest"]
+    return list(dict.fromkeys(".".join(numbers[:parts]) for parts in (len(numbers), 2, 1)
+                              if 0 < parts <= len(numbers))) + ["latest"]
 
 
 def matched(key, version):
@@ -144,7 +150,7 @@ def pick(links, wanted, key, cap, base):
     (wanted: one string per slot); one that names the version comes first."""
     ranked = [rank(links, set(words(slot_words)), key, base) for slot_words in wanted if slot_words.strip()]
     picked = []
-    for turn in range(max((len(r) for r in ranked), default=0)):
+    for turn in range(max((len(slot_links) for slot_links in ranked), default=0)):
         for ranking in ranked:
             if turn < len(ranking) and ranking[turn] not in picked and len(picked) < cap:
                 picked.append(ranking[turn])

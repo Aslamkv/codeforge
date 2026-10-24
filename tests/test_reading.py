@@ -7,8 +7,8 @@ import zipfile
 
 import pytest
 
-import tinker
-from tinker import Cli, Commands
+from tinkerkit import cli
+from tinkerkit.cli import Cli, Commands
 from tinkerkit import conversation, reading
 from tinkerkit.fetcher import Fetcher
 from tinkerkit.jobs import is_job
@@ -51,11 +51,11 @@ DOCUMENTS = {"cover.xhtml": "<h1>The Craft</h1>",
 def epub(nav=True):
     """An EPUB of The Craft (cover, foreword, a part of two chapters in one document, an index): its contents in an
     EPUB 3 navigation document, else in an EPUB 2 NCX."""
-    manifest = "".join(f'<item id="d{n}" href="text/{name}" media-type="application/xhtml+xml"/>'
-                       for n, name in enumerate(DOCUMENTS))
+    manifest = "".join(f'<item id="d{number}" href="text/{name}" media-type="application/xhtml+xml"/>'
+                       for number, name in enumerate(DOCUMENTS))
     manifest += ('<item id="nav" href="nav.xhtml" media-type="application/xhtml+xml" properties="nav"/>' if nav
                  else '<item id="ncx" href="toc.ncx" media-type="application/x-dtbncx+xml"/>')
-    spine = "".join(f'<itemref idref="d{n}"/>' for n in range(len(DOCUMENTS)))
+    spine = "".join(f'<itemref idref="d{number}"/>' for number in range(len(DOCUMENTS)))
     opf = ('<?xml version="1.0"?><package xmlns="http://www.idpf.org/2007/opf" version="3.0">'
            '<metadata xmlns:dc="http://purl.org/dc/elements/1.1/"><dc:title>The Craft of Small Programs</dc:title>'
            f'<dc:creator>A. Writer</dc:creator></metadata><manifest>{manifest}</manifest>'
@@ -155,8 +155,8 @@ def survey_reply(software=True, **reads):
     reads = reads or {"4": "core", "2": "supporting"}
     return json.dumps({"summary": "Small programs stay easy to change when named well and tested first.",
                        "software": software, "terms": ["naming", "testing"],
-                       "chapters": [{"chapter": int(n), "read": read, "look_for": f"what chapter {n} teaches"}
-                                    for n, read in reads.items()]})
+                       "chapters": [{"chapter": int(number), "read": read, "look_for": f"what chapter {number} teaches"}
+                                    for number, read in reads.items()]})
 
 def points(*texts, phase="code"):
     return json.dumps({"points": [{"text": text, "phase": phase, "section": ""} for text in texts]})
@@ -186,7 +186,7 @@ def test_a_source_is_stored_whole_before_anything_is_read(tmp_path, home_store, 
     entry = Readings.get(1)
     assert (entry["title"], entry["source"], entry["topic"], entry["survey"]) == (
         "The Craft of Small Programs", str(tmp_path / "craft.md"), "read-1", None)
-    assert [(c["title"], c["state"]) for c in entry["chapters"]] == [
+    assert [(chapter["title"], chapter["state"]) for chapter in entry["chapters"]] == [
         ("Foreword", "unread"), ("Naming", "unread"), ("Stories", "unread"), ("Testing", "unread"), ("Index", "raw")]
     assert entry["chapters"][1]["text"].endswith(NAMING)
     assert stored(craft(tmp_path, "same-text.md")) == (1, False)
@@ -197,11 +197,11 @@ def test_a_source_is_stored_whole_before_anything_is_read(tmp_path, home_store, 
 @pytest.mark.spec("RDG-6")
 def test_the_survey_orders_every_chapter_and_skips_none(tmp_path, home_store):
     book = opened(MARKDOWN.encode(), "craft.md")
-    survey = read_survey(dict(json.loads(survey_reply()), terms=[f"t{n}" for n in range(30)]), book)
+    survey = read_survey(dict(json.loads(survey_reply()), terms=[f"t{number}" for number in range(30)]), book)
     assert survey["software"] is True and len(survey["terms"]) == READ_TERMS
     assert survey["order"] == {"4": {"read": "core", "look_for": "what chapter 4 teaches"},
                                "2": {"read": "supporting", "look_for": "what chapter 2 teaches"}}
-    assert [c.number for c in in_order(book.chapters, survey)] == [4, 2, 1, 3, 5]
+    assert [chapter.number for chapter in in_order(book.chapters, survey)] == [4, 2, 1, 3, 5]
     odd = read_survey(json.loads(survey_reply(**{"1": "skip"})), book)
     assert odd["order"]["1"]["read"] == "other"
     assert read_survey(dict(json.loads(survey_reply()), software="yes"), book)["software"] is False
@@ -233,11 +233,11 @@ def test_every_chapter_is_read_in_order_and_saved_as_it_is_read(tmp_path, home_s
     assert all("coupling, 11" not in prompt for prompt in sent[1:])  # the index is kept, never read
     topic = Library.read("read-1")
     assert topic["kind"] == "reading" and topic["reading"] == 1 and topic["software"] is True
-    assert [(f["text"], f["chapter"]) for f in topic["facts"]] == [  # chapter 3 repeated chapter 4: kept once
+    assert [(fact["text"], fact["chapter"]) for fact in topic["facts"]] == [  # chapter 3 repeated chapter 4: kept once
         ("Write a test for each behaviour first", 4), ("Name each function after what it does", 2),
         ("Small programs stay easy to change", 1)]
-    assert [r["text"] for r in topic["rules"]] == ["Name functions by what they do"]
-    assert {c["state"] for c in Readings.get(1)["chapters"][:4]} == {"read"}
+    assert [rule["text"] for rule in topic["rules"]] == ["Name functions by what they do"]
+    assert {chapter["state"] for chapter in Readings.get(1)["chapters"][:4]} == {"read"}
     assert tracker.steps == ["survey", "chapters", "condense"]
     assert tracker.outcomes["survey"] == "1 core chapter(s) of 5, read first"
     assert tracker.outcomes["chapters"] == "4 chapter(s), 3 things learned"
@@ -255,8 +255,8 @@ def test_a_stopped_reading_goes_on_with_the_chapters_not_read(tmp_path, home_sto
     fake_ollama.reply(KeyboardInterrupt(), when="chapter 2")
     with pytest.raises(KeyboardInterrupt):
         Reader(make_model()).read(1)
-    assert [c["state"] for c in Readings.get(1)["chapters"]] == ["unread", "unread", "unread", "read", "raw"]
-    assert [f["text"] for f in Library.read("read-1")["facts"]] == ["Write a test for each behaviour first"]
+    assert [chapter["state"] for chapter in Readings.get(1)["chapters"]] == ["unread", "unread", "unread", "read", "raw"]
+    assert [fact["text"] for fact in Library.read("read-1")["facts"]] == ["Write a test for each behaviour first"]
     fake_ollama.calls.clear()
     for chapter in (2, 1, 3):
         fake_ollama.reply(points(), when=f"chapter {chapter}")
@@ -266,7 +266,7 @@ def test_a_stopped_reading_goes_on_with_the_chapters_not_read(tmp_path, home_sto
 
 @pytest.mark.spec("RDG-7")
 def test_a_long_chapter_is_read_in_every_part(tmp_path, home_store, make_model, fake_ollama, monkeypatch):
-    long = "\n\n".join(f"Paragraph {n} of a long chapter about naming things well." for n in range(40))
+    long = "\n\n".join(f"Paragraph {number} of a long chapter about naming things well." for number in range(40))
     stored(craft(tmp_path, text=f"# Long\n\n## One\n\n{long}\n\n## Two\n\nA short second chapter, with more words."))
     monkeypatch.setattr(reading, "READ_TEXT_SHARE", 0.05)
     fake_ollama.reply(survey_reply(software=False, **{"1": "core"}), when="reading plan")
@@ -296,12 +296,12 @@ def test_read_again_with_a_focus_looks_where_it_is_asked(tmp_path, home_store, m
 def test_a_chapter_gives_points_with_their_phase():
     reply = {"points": [{"text": "Name functions by what they do", "phase": "code", "section": "Names"},
                         {"text": "x" * (FACT_CHARS + 50), "phase": "nowhere"}, {"text": " "}, "not a point"]
-             + [{"text": f"point {n}", "phase": "tests"} for n in range(READ_POINTS)]}
+             + [{"text": f"point {number}", "phase": "tests"} for number in range(READ_POINTS)]}
     found = read_points(reply, software=True)
     assert len(found) == READ_POINTS
     assert found[0] == {"text": "Name functions by what they do", "phase": "code", "section": "Names"}
     assert found[1]["phase"] == "book" and len(found[1]["text"]) == FACT_CHARS
-    assert {p["phase"] for p in read_points(reply, software=False)} == {"book"}
+    assert {point["phase"] for point in read_points(reply, software=False)} == {"book"}
     with pytest.raises(ValueError, match="points"):
         read_points({"facts": []}, software=True)
 
@@ -309,7 +309,7 @@ def test_a_chapter_gives_points_with_their_phase():
 def test_what_is_not_about_software_is_kept_for_asking_alone(tmp_path, home_store, make_model, fake_ollama):
     ending, tracker = read_craft(tmp_path, make_model, fake_ollama, software=False)
     topic = Library.read("read-1")
-    assert {f["phase"] for f in topic["facts"]} == {"book"} and topic["rules"] == []
+    assert {fact["phase"] for fact in topic["facts"]} == {"book"} and topic["rules"] == []
     assert "condense" not in tracker.steps and "Condense the facts" not in labels(fake_ollama)
     assert ("Builds", "never use it: it is not about building software") in ending["details"]
 
@@ -359,7 +359,7 @@ def test_tinker_read_stores_then_reads_as_its_own_job(tmp_path, measured_model, 
         Cli.parse(["read", "show"])
     monkeypatch.setattr(Ollama, "installed_models", staticmethod(lambda: [{"name": MODEL}]))
     retargeted, ended = [], []
-    monkeypatch.setattr(tinker.Jobs, "retarget", staticmethod(lambda arguments: retargeted.append(arguments)))
+    monkeypatch.setattr(cli.Jobs, "retarget", staticmethod(lambda arguments: retargeted.append(arguments)))
     monkeypatch.setattr(Commands, "tracker_ended", staticmethod(lambda tracker, ending, took: ended.append(
         (tracker.state["title"], ending, tracker.state["steps"]))))
     monkeypatch.chdir(tmp_path)
@@ -395,10 +395,10 @@ def test_the_reading_list_is_shown_and_cleared(tmp_path, home_store, make_model,
     assert "✅ 2. Naming (1 fact(s))" in shown and "📄 5. Index (text only)" in shown
     assert "Small programs stay" in shown
     with pytest.raises(SystemExit, match="Nothing deleted: run tinker clear read #1"):
-        tinker.Cli.cleared(["read", "#1"], yes=False)
-    tinker.Cli.cleared(["read", "#1"], yes=True)
+        cli.Cli.cleared(["read", "#1"], yes=False)
+    cli.Cli.cleared(["read", "#1"], yes=True)
     assert Readings.get(1) is None and Library.read("read-1") is None and list(Readings.all()) == [2]
     with pytest.raises(SystemExit, match="reading numbers alone"):
-        tinker.Cli.cleared(["read", "memory"], yes=True)
-    tinker.Cli.cleared(["read"], yes=True)
+        cli.Cli.cleared(["read", "memory"], yes=True)
+    cli.Cli.cleared(["read"], yes=True)
     assert Readings.all() == {}

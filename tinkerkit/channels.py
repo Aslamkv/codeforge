@@ -61,10 +61,10 @@ class ChannelCommand:
         if not settings:
             say.info(f"No channels yet. Add one: tinker channel add  (kinds: {', '.join(KINDS)})", "📭")
             return
-        for name, s in settings.items():
-            state = "enabled" if s.get("enabled") else "disabled"
-            chats = ", ".join(map(str, s.get("allowed", []))) or "no chat paired"
-            say.text(f"{name:<16} {s.get('kind', '?'):<10} {state:<9} chats: {chats}")
+        for name, channel_settings in settings.items():
+            state = "enabled" if channel_settings.get("enabled") else "disabled"
+            chats = ", ".join(map(str, channel_settings.get("allowed", []))) or "no chat paired"
+            say.text(f"{name:<16} {channel_settings.get('kind', '?'):<10} {state:<9} chats: {chats}")
 
     @staticmethod
     def add(rest):
@@ -76,10 +76,10 @@ class ChannelCommand:
         secrets = {key: given.get(key) or ask(what, secret=True) for key, what in KINDS[kind].SECRETS}
         channel = KINDS[kind](name, {}, secrets)
         try:
-            who = channel.who()
+            who = channel.handle()
         except (ChannelError, OSError) as exc:
             raise SystemExit(f"tinker: the {kind} channel does not work with that: {exc}") from None
-        chats = ([c.strip() for c in given["chat"].split(",")] if given.get("chat")
+        chats = ([chat.strip() for chat in given["chat"].split(",")] if given.get("chat")
                  else ChannelCommand.pair(channel, who))
         Channels.keep(name, {"kind": kind, "enabled": False, "allowed": chats, "who": who}, secrets)
         say.done(f"Added {name} ({kind}, {who}), serving chat(s) {', '.join(chats)}. "
@@ -162,7 +162,7 @@ class ChannelCommand:
         again, up to CHECK_TRIES times."""
         for tries in range(1, CHECK_TRIES + 1):
             try:
-                return channel.who()
+                return channel.handle()
             except ChannelError as exc:
                 raise SystemExit(f"tinker: channel {channel.name} does not work: {exc}") from None
             except OSError as exc:
@@ -190,7 +190,8 @@ class Channels:
         """The enabled channels, made; none when a run is told not to listen (tinker channel start's own)."""
         if os.environ.get(OFF) == "off":
             return []
-        return [Channels.make(name) for name, s in Channels.settings().items() if s.get("enabled")]
+        return [Channels.make(name) for name, channel_settings in Channels.settings().items()
+                if channel_settings.get("enabled")]
 
     @staticmethod
     def make(name):
@@ -236,7 +237,7 @@ class TelegramChannel(Channel):
         self.alive = {}  # per chat: the ids of the messages seen that are still in it (taken out: no more)
         self.asked = {}  # per chat: (the person's last words, when) until a new thing answers them
 
-    def who(self):
+    def handle(self):
         return "@" + self.call("getMe")["username"]
 
     def receive(self, timeout):
@@ -249,7 +250,7 @@ class TelegramChannel(Channel):
         for update in updates:
             self.offset = update["update_id"] + 1
             message = update.get("message") or {}
-            if message.get("document") and str(message["chat"]["id"]) in map(str, self.allowed):
+            if self.book_sent(message):
                 message = self.book_in(message)
             if message.get("text"):
                 messages.append(self.message_of(message))
@@ -257,6 +258,10 @@ class TelegramChannel(Channel):
             if message.get("message_id"):
                 self.seen(str(message["chat"]["id"]), message["message_id"])
         return messages
+
+    def book_sent(self, message):
+        """Whether a message is a file to read, sent by a chat Tinker serves."""
+        return message.get("document") and str(message["chat"]["id"]) in map(str, self.allowed)
 
     @staticmethod
     def message_of(message):
@@ -364,9 +369,14 @@ class TelegramChannel(Channel):
         try:
             return self.call(method, chat_id=chat, text=Markup.html(text)[:4096], parse_mode="HTML", **fields)
         except ChannelError as exc:
-            if "parse" not in str(exc) and "entit" not in str(exc):
+            if not self.html_refused(exc):
                 raise
             return self.call(method, chat_id=chat, text=Markup.plain(text)[:4096], **fields)
+
+    @staticmethod
+    def html_refused(exc):
+        """Whether Telegram refused the message's HTML (it could not parse its entities)."""
+        return "parse" in str(exc) or "entit" in str(exc)
 
     def send_file(self, chat, path, caption):
         """The file sent as a document, caption (Markup) under it; a failure sends the caption alone."""
@@ -443,7 +453,7 @@ class TelegramChannel(Channel):
         meanwhile is opened again, once. Too many requests (429) is waited out as long as Telegram asks.
         file: a document (a Path) uploaded with the fields, as a form with parts."""
         path = f"/bot{self.secrets.get('token', '')}/{method}"
-        fields = {k: v for k, v in fields.items() if v is not None}
+        fields = {key: value for key, value in fields.items() if value is not None}
         data, kind = self.multipart(fields, file) if file else (urllib.parse.urlencode(fields), FORM)
         status, body = self.answer(method, path, data, wait, kind)
         for _ in range(RATE_LIMIT_WAITS):

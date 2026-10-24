@@ -32,7 +32,7 @@ def calc(make_project, make_session, project_dir):
 
 
 def steps_of(project):
-    return {s["id"]: s for s in project.criteria}
+    return {criterion["id"]: criterion for criterion in project.criteria}
 
 
 @pytest.mark.spec("BLD-1")
@@ -144,7 +144,7 @@ def test_verify_fixes_a_failing_criterion(calc, fake_ollama, project_dir):
     session, project = calc
     fake_ollama.reply("CAUSE: sub added\n" + file_block("calc.py", FIXED), when="Fix the code C2")
     assert Verifier(session).run(project.cycles[0]) is True
-    assert {s["status"] for s in project.criteria} == {"green"}
+    assert {criterion["status"] for criterion in project.criteria} == {"green"}
     assert (project_dir / "calc.py").read_text() == FIXED
     assert steps_of(project)["C2"]["history"] == ["fix: sub added -> passes"]
     assert project.spec["events"] == [{"kind": "fix", "text": "calc.sub(5, 3) is 2 | solved: sub added"}]
@@ -188,11 +188,11 @@ def test_a_stopped_run_is_put_back_from_its_restore_point(calc, project_dir, cap
 @pytest.mark.spec("BLD-4")
 def test_failure_key_and_roll_back(calc, project_dir):
     session, project = calc
-    a = {"test": "t.py::test_one"}
-    b = {"test": "t.py::test_two"}
-    assert Verifier.failure_key(a, "t.py::test_one failed at line 3: KeyError") == \
-        Verifier.failure_key(b, "t.py::test_two failed at line 9: KeyError")
-    snapshot = session.ws.snapshot(project.files)
+    first = {"test": "t.py::test_one"}
+    second = {"test": "t.py::test_two"}
+    assert Verifier.failure_key(first, "t.py::test_one failed at line 3: KeyError") == \
+        Verifier.failure_key(second, "t.py::test_two failed at line 9: KeyError")
+    snapshot = session.workspace.snapshot(project.files)
     (project_dir / "extra.py").write_text("x")
     project.register(["extra.py"], "code", "added by a fix")
     (project_dir / "calc.py").write_text("changed")

@@ -26,14 +26,14 @@ class TestToolSetup(Phase):
     BUILDS = True
 
     def run(self, cycle):
-        Designer(self.s).ensure_toolchain()
-        CodeWriter(self.s).write_configs_first(cycle)
-        self.s.setup()
-        if self.s.network_waiting:  # the tests and the code need no network: they are written meanwhile
+        Designer(self.session).ensure_toolchain()
+        CodeWriter(self.session).write_configs_first(cycle)
+        self.session.setup()
+        if self.session.network_waiting:  # the tests and the code need no network: they are written meanwhile
             say.info("The test tool is checked once the network is back; writing the tests and the code meanwhile",
                      "📡")
             return True
-        return TestTool(self.s).works()
+        return TestTool(self.session).works()
 
 
 class TestWriter(Phase):
@@ -46,28 +46,29 @@ class TestWriter(Phase):
         """A few criteria per call, before the code. A test file that already holds tests is never sent back to be rewritten (it may
         be too big, and rewriting risks its tests): the next tests go into a new file next to it, and
         their criteria follow them there."""
-        steps = [s for s in (only or self.p.cycle_criteria(cycle)) if not TestRef(s["test"]).present(self.ws)]
+        steps = [step for step in (only or self.project.cycle_criteria(cycle))
+                 if not TestRef(step["test"]).present(self.workspace)]
         by_file = {}
         for step in steps:
             by_file.setdefault(TestRef(step["test"]).file, []).append(step)
         for path, group in by_file.items():
             for batch in itertools.batched(group, TESTS_PER_CALL):
                 self.write_batch(cycle, path, list(batch))
-        self.s.save()
+        self.session.save()
 
     def write_batch(self, cycle, path, batch):
         note = ""
         for _ in (1, 2):
-            todo = [s for s in batch if not TestRef(s["test"]).present(self.ws)]
+            todo = [step for step in batch if not TestRef(step["test"]).present(self.workspace)]
             if not todo:
                 return
-            current = self.ws.read(path)
+            current = self.workspace.read(path)
             try:
-                with say.working_on(f"Writing {len(todo)} test(s) in {path}: {', '.join(s['id'] for s in todo)}"):
-                    reply = self.s.ask(Prompts.SPEC_TESTS_SYSTEM, self.prompt(cycle, path, todo, current, note),
-                                       f"Tests {'next to ' if current.strip() else ''}"
-                                       f"{path} ({len(todo)})",
-                                       max_reply=TESTS_MAX_TOKENS)  # past it, the thought is concluded
+                with say.working_on(f"Writing {len(todo)} test(s) in {path}: {', '.join(step['id'] for step in todo)}"):
+                    reply = self.session.ask(Prompts.SPEC_TESTS_SYSTEM, self.prompt(cycle, path, todo, current, note),
+                                             f"Tests {'next to ' if current.strip() else ''}"
+                                             f"{path} ({len(todo)})",
+                                             max_reply=TESTS_MAX_TOKENS)  # past it, the thought is concluded
             except PromptTooLarge as exc:
                 say.skip(f"Tests for {path} skipped: {exc}; verify writes them")
                 return
@@ -76,29 +77,30 @@ class TestWriter(Phase):
     def prompt(self, cycle, path, todo, current, note):
         where = (f"a NEW test file next to {path} (do not change {path}; name it by the language's test "
                  f"conventions)" if current.strip() else path)
-        uses = self.p.files.get(path, {}).get("uses") or self.p.paths("code", "template")
+        uses = self.project.files.get(path, {}).get("uses") or self.project.paths("code", "template")
         parts = [Part(f"Tests to write in {where} (name: criterion)",
-                      "\n".join(f"- {TestRef(s['test']).name}: {s['behaviour']}" for s in todo), True),
-                 Part("Test command", self.s.toolchain.test_one, True, place="first"),
+                      "\n".join(f"- {TestRef(step['test']).name}: {step['behaviour']}" for step in todo), True),
+                 Part("Test command", self.session.toolchain.test_one, True, place="first"),
                  Part("Note", note, place="last"),
                  Part("External services: adapters and sample data (tests pass the sample data)", cycle.get("data", ""),
                       place="first")]
-        configs = [c for c in self.s.files_on_disk("config") if c not in (ENV_FILE, ENV_EXAMPLE)]
+        configs = [config for config in self.session.files_on_disk("config") if config not in (ENV_FILE, ENV_EXAMPLE)]
         return parts + [
                 Part("The project's config files (the tests use the names they give: the package, the library, "
-                     "the program)", "\n\n".join(f"{c}:\n{self.ws.read(c)}" for c in configs), atomic=True,
+                     "the program)", "\n\n".join(f"{config}:\n{self.workspace.read(config)}" for config in configs),
+                     atomic=True,
                      place="first"),
-                Part("Contracts of the files these tests use", self.p.contracts(uses)),
+                Part("Contracts of the files these tests use", self.project.contracts(uses)),
                 Part(f"Start of {path} (its imports and shared setup; it stays as it is; a fake of the app's own "
                      f"code in it is not to be used)",
                      "\n".join(current.splitlines()[:30])),
-                Part("Project files", self.p.outline(), place="first"),
-                *self.s.knowledge_parts("tests")]
+                Part("Project files", self.project.outline(), place="first"),
+                *self.session.knowledge_parts("tests")]
 
     def take(self, reply, path, todo, current):
         """The tests the reply wrote, kept where they belong; what to tell the next call ("" when all were)."""
-        change = self.ws.apply(reply.as_file(self.new_file_next_to(path) if current.strip() else path),
-                               self.may_write(path), empty_ok=False)
+        change = self.workspace.apply(reply.as_file(self.new_file_next_to(path) if current.strip() else path),
+                                      self.may_write(path), empty_ok=False)
         self.keep_existing_tests(change)
         self.correct_criteria(todo, reply.corrected_criteria())
         self.follow_new_files(path, todo, change)
@@ -109,7 +111,7 @@ class TestWriter(Phase):
         with a number: test_use.py -> test_use_2.py)."""
         stem, suffix = Path(path).stem, Path(path).suffix
         number = 2
-        while self.ws.exists(str(Path(path).with_name(f"{stem}_{number}{suffix}"))):
+        while self.workspace.exists(str(Path(path).with_name(f"{stem}_{number}{suffix}"))):
             number += 1
         return str(Path(path).with_name(f"{stem}_{number}{suffix}"))
 
@@ -117,8 +119,8 @@ class TestWriter(Phase):
     def may_write(path):
         folder = str(Path(path).parent)
 
-        def check(p, exists):
-            if str(Path(p).parent) == folder:
+        def check(written, exists):
+            if str(Path(written).parent) == folder:
                 return None  # a test file next to it (one that had tests keeps them: keep_existing_tests)
             return f"only test files next to {path} can be written now"
         return check
@@ -126,10 +128,10 @@ class TestWriter(Phase):
     def keep_existing_tests(self, change):
         """A rewrite of a test file stays only if every test it had is still there."""
         for path, old in list(change.backups.items()):
-            had = [n for n in self.p.test_names(path) if old and TestRef.name_at(old, n) >= 0]
-            lost = [n for n in had if TestRef.name_at(self.ws.read(path), n) < 0]
+            had = [name for name in self.project.test_names(path) if old and TestRef.name_at(old, name) >= 0]
+            lost = [name for name in had if TestRef.name_at(self.workspace.read(path), name) < 0]
             if lost:
-                self.ws.restore({path: change.backups.pop(path)})
+                self.workspace.restore({path: change.backups.pop(path)})
                 change.notes.append(f"{path} lost its tests {', '.join(lost)}; write the new tests in a new file")
 
     def correct_criteria(self, todo, corrected):
@@ -145,16 +147,18 @@ class TestWriter(Phase):
         """Tests written into a new file: their criteria point there; the file joins the project."""
         for step in todo:
             ref = TestRef(step["test"])
-            home = next((p for p in change.created if TestRef.name_at(self.ws.read(p), ref.name) >= 0), None)
-            if home and not ref.present(self.ws):
+            home = next((new_file for new_file in change.created if TestRef.name_at(self.workspace.read(new_file),
+                                                                                    ref.name) >= 0), None)
+            if home and not ref.present(self.workspace):
                 step["test"] = f"{home}::{ref.name}"
-        self.p.register(change.created, "test", f"tests (with {path})", self.p.files.get(path, {}).get("uses", []))
+        self.project.register(change.created, "test", f"tests (with {path})",
+                              self.project.files.get(path, {}).get("uses", []))
 
     def report_and_note(self, path, todo, change):
         for note in change.notes:
             say.skip(f"Skipped {note}")
-        missing = [TestRef(s["test"]).name for s in todo if not TestRef(s["test"]).present(self.ws)]
-        homes = sorted({TestRef(s["test"]).file for s in todo if TestRef(s["test"]).present(self.ws)})
+        missing = [TestRef(step["test"]).name for step in todo if not TestRef(step["test"]).present(self.workspace)]
+        homes = sorted({TestRef(step["test"]).file for step in todo if TestRef(step["test"]).present(self.workspace)})
         for step in todo:
             if TestRef(step["test"]).name in missing:
                 step["write_failures"] = step.get("write_failures", 0) + 1
@@ -173,7 +177,7 @@ class CodeWriter(Phase):
 
     def run(self, cycle):
         self.write_all(cycle)
-        ok, output = self.s.setup()
+        ok, output = self.session.setup()
         if not ok:
             say.fail(f"Setup fails: {Output.key_line(output)} (verify fixes the toolchain first)")
         self.check_wiring(cycle)
@@ -184,119 +188,141 @@ class CodeWriter(Phase):
         self.write_configs_first(cycle)
         pending = self.pending(cycle, lambda kind: kind not in ("test", "docs"))
         for done, path in enumerate(pending, 1):
-            role = first_line(self.p.files.get(path, {}).get("role", ""), 60)
+            role = first_line(self.project.files.get(path, {}).get("role", ""), 60)
             with say.working_on(f"Writing {path} ({done} of {len(pending)})" + (f": {role}" if role else "")):
                 self.write_file(cycle, path)
             cycle["code_done"].append(path)
-            self.s.save()
+            self.session.save()
             say.tally(f"{done}/{len(pending)} files written")
 
     def write_configs_first(self, cycle):
         """The setup phase: the cycle's new config files (dependencies, the test tool's settings)
         in one call, before any test or code is written."""
-        configs = [p for p in self.pending(cycle, lambda kind: kind == "config") if not self.ws.exists(p)]
+        configs = [path for path in self.pending(cycle, lambda kind: kind == "config")
+                   if not self.workspace.exists(path)]
         if configs:
             self.write_configs(cycle, configs)
         cycle["code_done"].extend(configs)
-        self.s.save()
+        self.session.save()
 
     def pending(self, cycle, wanted):
         """The cycle's files of a wanted kind not written yet, in design order (never .env)."""
         done = cycle.setdefault("code_done", [])
-        return [p for p in cycle["files"]
-                if p not in done and p != ENV_FILE and wanted(self.p.files.get(p, {}).get("kind"))]
+        return [path for path in cycle["files"]
+                if path not in done and path != ENV_FILE and wanted(self.project.kind_of(path))]
 
     def write_configs(self, cycle, paths):
         """Small files (dependencies, settings, tool settings): one call for all of them."""
-        listing = "\n".join(f"- {p}: {self.p.files[p].get('role', '')}" + "".join(
-            f"\n    - {c}" for c in self.p.files[p].get("contract", [])) for p in paths)
-        reply = self.s.ask(Prompts.CONFIG_SYSTEM, [
+        listing = "\n".join(f"- {config}: {self.project.files[config].get('role', '')}" + "".join(
+            f"\n    - {line}" for line in self.project.files[config].get("contract", [])) for config in paths)
+        reply = self.session.ask(Prompts.CONFIG_SYSTEM, [
             Part("Files to write", listing, True),
-            Part("Language and toolchain", f"{self.p.language}\n{json.dumps(self.s.toolchain.to_dict())}", True),
-            Part("Constraints", "\n".join(f"- {c}" for c in cycle.get("constraints", []))),
-            Part("Project files", self.p.outline()),
-            *self.s.knowledge_parts("config", "toolchain"),
+            Part("Language and toolchain",
+                 f"{self.project.language}\n{json.dumps(self.session.toolchain.to_dict())}", True),
+            Part("Constraints", "\n".join(f"- {constraint}" for constraint in cycle.get("constraints", []))),
+            Part("Project files", self.project.outline()),
+            *self.session.knowledge_parts("config", "toolchain"),
         ], f"Write {len(paths)} config files", think=False,  # short, conventional files: no thinking needed
            done_when=Reply.wrote(paths))
-        change = self.ws.apply(reply, lambda p, exists: None if p in paths else "only the config files listed now")
-        missing = [p for p in paths if p not in change.backups]
+        change = self.workspace.apply(reply,
+                                      lambda config, exists: None if config in paths
+                                      else "only the config files listed now")
+        missing = [config for config in paths if config not in change.backups]
         say.done(f"Wrote {', '.join(change.files) or 'none'}" + (f"; missing {', '.join(missing)}" if missing else ""))
         for path in paths:
             if path not in change.backups:  # one more try, on its own
                 self.write_file(cycle, path)
 
     def write_file(self, cycle, path):
-        info, exists = self.p.files.get(path, {}), self.ws.exists(path)
+        info, exists = self.project.files.get(path, {}), self.workspace.exists(path)
         criteria = self.criteria_for(path, cycle)
         if not exists and info.get("marker") and not criteria:
             return self.write_marker(path)
         note = ""
         for attempt in (1, 2):
-            view = FileView(self.ws, self.fixed_parts(path, info, criteria, note), [path] if exists else [],
-                            self.context_parts(cycle, info, criteria), hints="\n".join(s["behaviour"] for s in criteria),
-                            windows=1)
+            view = self.file_view(cycle, path, info, criteria, note, exists)
             try:
-                reply = self.s.ask(Prompts.CHANGE_SYSTEM if exists else Prompts.CODE_SYSTEM, view,
-                                   f"{'Change' if exists else 'Write'} {path}",
-                                   done_when=Reply.files_complete if exists else Reply.wrote([path]))
+                reply = self.ask_for_file(path, view, exists)
             except PromptTooLarge as exc:
                 say.skip(f"{path}: skipped, the prompt does not fit ({exc}); verify works on it")
                 return
-            change = self.ws.apply(self.addressed_to(reply.as_file(path), path, exists), self.may_write(path),
-                                   view.windows)
-            for text in change.notes:
-                say.skip(f"Skipped {text}")
+            change = self.applied(reply, path, exists, view)
             note = self.unusable(path, change, attempt == 1 and info.get("kind") == "code")
             if not note:
                 self.say_written(path, change, exists)
                 return
 
+    def file_view(self, cycle, path, info, criteria, note, exists):
+        """What the model sees to write the file: the file itself when it exists, and what it must serve."""
+        return FileView(self.workspace, self.fixed_parts(path, info, criteria, note), [path] if exists else [],
+                        self.context_parts(cycle, info, criteria),
+                        hints="\n".join(criterion["behaviour"] for criterion in criteria), windows=1)
+
+    def ask_for_file(self, path, view, exists):
+        """The model's reply: the file written, or changed when it exists."""
+        return self.session.ask(Prompts.CHANGE_SYSTEM if exists else Prompts.CODE_SYSTEM, view,
+                                f"{'Change' if exists else 'Write'} {path}",
+                                done_when=Reply.files_complete if exists else Reply.wrote([path]))
+
+    def applied(self, reply, path, exists, view):
+        """The reply written to the project (what it may write only), and what was skipped said."""
+        change = self.workspace.apply(self.addressed_to(reply.as_file(path), path, exists), self.may_write(path),
+                                      view.windows)
+        for text in change.notes:
+            say.skip(f"Skipped {text}")
+        return change
+
     def write_marker(self, path):
         """A file nothing asks anything of (a package marker): written empty, with no call."""
-        self.ws.write(path, "")
+        self.workspace.write(path, "")
         say.done(f"Wrote {path} (empty: no contract or criterion asks anything of it)")
 
     def criteria_for(self, path, cycle):
         """The criteria this file must meet (the same rule its contract was planned with); the entry
         point's are also those that run the program as a person does ("running the binary with ...")."""
-        steps = self.p.cycle_criteria(cycle)
-        own = self.p.criteria_of(path, steps)
-        if self.p.entry_files([path]):
-            own += [s for s in steps if s not in own and SpecWriter.runs_program(s["behaviour"], path, self.s.toolchain.run)]
+        steps = self.project.cycle_criteria(cycle)
+        own = self.project.criteria_of(path, steps)
+        if self.project.entry_files([path]):
+            own += [step for step in steps if step not in own and SpecWriter.runs_program(step["behaviour"], path,
+                                                                                          self.session.toolchain.run)]
         return own
 
     def fixed_parts(self, path, info, criteria, note):
-        renderers = [p for p, f in self.p.files.items() if path in f.get("uses", []) and f.get("kind") == "code"]
+        renderers = [renderer for renderer, entry in self.project.files.items() if path in entry.get("uses", [])
+                     and entry.get("kind") == "code"]
         template = info.get("kind") == "template"
-        parts = [Part("Language", self.p.language, True, place="first"),
+        parts = [Part("Language", self.project.language, True, place="first"),
                  Part("File", f"{path} ({info.get('kind', 'code')})\nRole: {info.get('role', '')}", True),
-                 Part("Its contract", self.p.contracts([path]), bool(info.get("contract"))),
+                 Part("Its contract", self.project.contracts([path]), bool(info.get("contract"))),
                  Part("Contracts of the files that render it (what it is given and must show)",
-                      self.p.contracts(renderers) if template else "", template and bool(renderers)),
-                 Part("Criteria it serves", "\n".join(f"- {s['behaviour']}" for s in criteria)
+                      self.project.contracts(renderers) if template else "", template and bool(renderers)),
+                 Part("Criteria it serves", "\n".join(f"- {criterion['behaviour']}" for criterion in criteria)
                       or "none directly: its contract says what it does", True),
-                 Part("How a user starts it (it is the entry point)", self.s.toolchain.run, True)
-                 if path == self.p.spec.get("entry") and self.s.toolchain.run else Part("How a user starts it", "")]
+                 Part("How a user starts it (it is the entry point)", self.session.toolchain.run, True)
+                 if path == self.project.spec.get("entry") and self.session.toolchain.run
+                 else Part("How a user starts it", "")]
         return parts + ([Part("Note", note, True)] if note else [])
 
     def context_parts(self, cycle, info, criteria):
-        deps = self.p.dependencies(lambda p: self.ws.read(p) if self.ws.exists(p) else "")
-        parts = [Part("Contracts of the files it uses", self.p.contracts(info.get("uses", []))),
+        deps = self.project.dependencies(lambda path: self.workspace.read(path) if self.workspace.exists(path) else "")
+        parts = [Part("Contracts of the files it uses", self.project.contracts(info.get("uses", []))),
                  Part(Prompts.DEPENDENCIES_TITLE, deps if info.get("kind") == "code" else "", atomic=True,
                       place="first"),
                  Part("External services: adapters and sample data", cycle.get("data", ""), place="first")]
         if info.get("kind") in ("code", "template"):
-            names = [TestRef(s["test"]).name for s in self.p.criteria]
-            parts += [Part(f"Test {i} ({s['test']})", TestRef(s["test"]).excerpt(self.ws, names), atomic=True)
-                      for i, s in enumerate(criteria[:5], 1)]
+            names = [TestRef(criterion["test"]).name for criterion in self.project.criteria]
+            parts += [Part(f"Test {number} ({criterion['test']})",
+                           TestRef(criterion["test"]).excerpt(self.workspace, names), atomic=True)
+                      for number, criterion in enumerate(criteria[:5], 1)]
         settings = (f"read from {ENV_FILE} (defaults in {ENV_EXAMPLE}); environment variables override it. Read it "
                     f"with a listed dependency, or with a few lines of standard-library code when none reads it")
-        has_settings = info.get("kind") == "code" and ENV_EXAMPLE in self.p.files
+        has_settings = info.get("kind") == "code" and ENV_EXAMPLE in self.project.files
         return parts + [Part("Settings", settings if has_settings else "", place="first"),
-                        Part("Other files", self.p.outline(), place="first"),
-                        Part("Not wanted (non-goals)", "\n".join(f"- {g}" for g in cycle.get("non_goals", [])),
+                        Part("Other files", self.project.outline(), place="first"),
+                        Part("Not wanted (non-goals)",
+                             "\n".join(f"- {non_goal}" for non_goal in cycle.get("non_goals", [])),
                              place="first"),
-                        *self.s.knowledge_parts("config" if info.get("kind") == "config" else "code")]
+                        *self.session.knowledge_parts("config" if info.get("kind") == "config" else "code")]
 
     @staticmethod
     def addressed_to(reply, path, exists):
@@ -309,8 +335,8 @@ class CodeWriter(Phase):
     def may_write(self, path):
         """The file itself, or a new module it splits off; a planned file is written in its own
         call, from its own contract."""
-        def check(p, exists):
-            if p == path or (not exists and p not in self.p.files):
+        def check(written, exists):
+            if written == path or (not exists and written not in self.project.files):
                 return None
             return f"only {path} (and new modules split off it) can be written now"
         return check
@@ -322,9 +348,9 @@ class CodeWriter(Phase):
             return ("Your reply could not be used: " + "; ".join(change.notes))[:600] if change.notes else \
                 f"Your reply had no usable <<<FILE {path}>>> block."
         if first_code and self.too_long(path):
-            note = (f"Your {path} had {self.ws.lines(path)} lines; keep it under {MAX_FILE_LINES} by moving a "
+            note = (f"Your {path} had {self.workspace.lines(path)} lines; keep it under {MAX_FILE_LINES} by moving a "
                     f"part into a new small module (give that file too).")
-            self.ws.revert(change)
+            self.workspace.revert(change)
             return note
         return ""
 
@@ -332,43 +358,47 @@ class CodeWriter(Phase):
         """A code file far past MAX_FILE_LINES (twice it): it is asked for again, in smaller modules. Only
         then: a rewrite into modules is a long call (minutes of thinking), and a file a little past the
         guidance still works (it is read in windows); a wordier language reaches it sooner."""
-        lines = self.ws.lines(path)
+        lines = self.workspace.lines(path)
         if lines > MAX_FILE_LINES * 2:
             say.warn(f"{path}: {lines} lines; asking for smaller modules")
             return True
         return False
 
     def say_written(self, path, change, exists):
-        self.p.register([p for p in change.created if p != path], "code", f"module split from {path}")
-        others = [p for p in change.files if p != path]
-        say.done(f"{'Changed' if exists else 'Wrote'} {path} ({self.ws.lines(path)} lines)"
+        self.project.register([created for created in change.created if created != path], "code",
+                              f"module split from {path}")
+        others = [other for other in change.files if other != path]
+        say.done(f"{'Changed' if exists else 'Wrote'} {path} ({self.workspace.lines(path)} lines)"
                  + (f"; also {', '.join(others)}" if others else ""))
 
     def check_wiring(self, cycle):
         """A code file must refer to each file its contract says it uses (by name or stem). One
         change call per file that does not."""
         for path in cycle["files"]:
-            if self.p.files.get(path, {}).get("kind") != "code" or not self.ws.exists(path):
+            if self.project.kind_of(path) != "code" or not self.workspace.exists(path):
                 continue
             problems = self.wiring_problems(path)
             if problems:
                 self.rewire(path, problems)
 
     def wiring_problems(self, path):
-        text = self.ws.read(path)
-        return [f"it must use {u} (refer to it by name), as its contract says" for u in self.p.files[path].get("uses", [])
-                if self.p.files.get(u, {}).get("kind") in ("code", "template")
-                and Path(u).name not in text and Path(u).stem not in text]
+        text = self.workspace.read(path)
+        return [f"it must use {used} (refer to it by name), as its contract says"
+                for used in self.project.files[path].get("uses", [])
+                if self.project.kind_of(used) in ("code", "template")
+                and Path(used).name not in text and Path(used).stem not in text]
 
     def rewire(self, path, problems):
         say.warn(f"{path} is not wired as designed: {'; '.join(problems)}")
-        info = self.p.files[path]
-        view = FileView(self.ws, [Part("Problems", "\n".join(problems), True),
-                                  Part(f"Contract of {path}", self.p.contracts([path]), True)], [path],
-                        [Part("Contracts of the files it uses", self.p.contracts(info.get("uses", [])))],
+        info = self.project.files[path]
+        view = FileView(self.workspace, [Part("Problems", "\n".join(problems), True),
+                                         Part(f"Contract of {path}", self.project.contracts([path]), True)], [path],
+                        [Part("Contracts of the files it uses", self.project.contracts(info.get("uses", [])))],
                         hints=" ".join(info.get("uses", [])), windows=1)
-        reply = self.s.ask(Prompts.CHANGE_SYSTEM, view, f"Wire {path}")
-        change = self.ws.apply(reply, lambda p, exists: None if p == path else f"only {path} changes now", view.windows)
+        reply = self.session.ask(Prompts.CHANGE_SYSTEM, view, f"Wire {path}")
+        change = self.workspace.apply(reply, lambda target, exists: None if target == path
+                                      else f"only {path} changes now",
+                                      view.windows)
         if change:
             say.done(f"Rewired {path}")
         else:
@@ -399,28 +429,29 @@ class Verifier(Phase):
     def run(self, cycle):
         """True when every criterion passes, False when some are parked."""
         self.recover_interrupted()
-        Designer(self.s).ensure_toolchain()
-        if not TestTool(self.s).works() or not self.make_it_build():
+        Designer(self.session).ensure_toolchain()
+        if not TestTool(self.session).works() or not self.make_it_build():
             return False
         self.mark_passing()
-        green_at_start = self.p.counts()[0]
-        self.work_through([s for s in self.p.criteria if s["status"] in ("todo", "active")], retry=False)
+        green_at_start = self.project.counts()[0]
+        self.work_through([criterion for criterion in self.project.criteria
+                           if criterion["status"] in ("todo", "active")], retry=False)
         self.retry_parked(green_at_start)
-        green, _, total = self.p.counts()
+        green, _, total = self.project.counts()
         return green == total
 
     def recover_interrupted(self):
         """A run stopped while a criterion was being worked on (Ctrl-C, a kill, a crash) may have
         left a change that was never checked: the files go back to how they were before it."""
-        pending = self.p.store.get("restore", self.PENDING)
+        pending = self.project.store.get("restore", self.PENDING)
         if not isinstance(pending, dict) or not isinstance(pending.get("files"), dict):
             return
-        changed = [p for p, text in pending["files"].items() if self.ws.read(p) != (text or "")]
+        changed = [path for path, text in pending["files"].items() if self.workspace.read(path) != (text or "")]
         if changed:
             self.roll_back(pending["files"])
             say.info(f"The last run stopped while {pending.get('criterion', 'a criterion')} was being worked on: "
                      f"{', '.join(changed)} restored to how they were before it", "♻️")
-        self.p.store.delete("restore", self.PENDING)
+        self.project.store.delete("restore", self.PENDING)
 
     def make_it_build(self):
         """The project builds and loads (its check command passes) before any criterion is worked
@@ -430,41 +461,42 @@ class Verifier(Phase):
         thought to its cap gets its conclusion, even past the fixes allowed."""
         tried, thought = [], ""
         for attempt in itertools.count():
-            ok, output = self.s.setup()
+            ok, output = self.session.setup()
             if ok:
-                ok, output = self.s.toolchain.run_check(self.ws)
+                ok, output = self.session.toolchain.run_check(self.workspace)
             if ok:
                 say.done("The project builds now" if attempt else "The project builds")
                 return True
             say.fail(f"The project does not build: {Output.key_line(output)}")
             if attempt >= BUILD_TRIES and not thought:
                 break
-            fix = BuildFix(self.s, output, tried, thought)
+            fix = BuildFix(self.session, output, tried, thought)
             tried.append(fix.run())
             thought = fix.thought
-            self.s.all_tests_run = None
-        self.s.build_problem = f"the project does not build after {len(tried)} fixes: {Output.key_line(output)}"
+            self.session.all_tests_run = None
+        self.session.build_problem = f"the project does not build after {len(tried)} fixes: {Output.key_line(output)}"
         return False
 
     def mark_passing(self):
         green = self.passing()
-        for s in self.p.criteria:
-            s["status"] = "green" if s["id"] in green else ("blocked" if s["status"] == "blocked" else "todo")
-        self.s.save()
+        for criterion in self.project.criteria:
+            criterion["status"] = ("green" if criterion["id"] in green
+                                   else "blocked" if criterion["status"] == "blocked" else "todo")
+        self.session.save()
 
     def passing(self):
         """The criteria whose tests pass now: one run of all tests; one per test only when some fail."""
         started = time.perf_counter()
-        code, _ = self.s.run_all_tests()
-        tests = [s for s in self.p.criteria if TestRef(s["test"]).present(self.ws)]
+        code, _ = self.session.run_all_tests()
+        tests = [criterion for criterion in self.project.criteria if TestRef(criterion["test"]).present(self.workspace)]
         if code == 0:
-            result = {s["id"] for s in tests}
-        elif not self.s.toolchain.run_check(self.ws)[0]:
+            result = {criterion["id"] for criterion in tests}
+        elif not self.session.toolchain.run_check(self.workspace)[0]:
             return set()  # it does not build: no test can pass
         else:
-            result = {s["id"] for s in tests if self.evaluate(s, checked=True)[0] == "passes"}
+            result = {criterion["id"] for criterion in tests if self.evaluate(criterion, checked=True)[0] == "passes"}
         took = human_duration(time.perf_counter() - started)
-        say.info(f"Tests: {len(result)}/{len(self.p.criteria)} criteria pass ({took})", "🧪")
+        say.info(f"Tests: {len(result)}/{len(self.project.criteria)} criteria pass ({took})", "🧪")
         return result
 
     def work_through(self, steps, retry):
@@ -475,27 +507,31 @@ class Verifier(Phase):
             step["status"] = "green" if passed else "blocked"
             if passed:
                 self.mark_others_passing()
-            self.s.save()
-            green, _, total = self.p.counts()
-            if passed:
-                say.done(f"{step['id']} passes ({green}/{total} pass)")
-                say.found(f"Works now: {step['title']}")
-            else:
-                say.info(f"{step['id']} is parked ({green}/{total} pass)", "⏸️")
+            self.session.save()
+            self.say_worked(step, passed)
+
+    def say_worked(self, step, passed):
+        """Whether the criterion passes now or is parked, with how many pass."""
+        green, _, total = self.project.counts()
+        if passed:
+            say.done(f"{step['id']} passes ({green}/{total} pass)")
+            say.found(f"Works now: {step['title']}")
+        else:
+            say.info(f"{step['id']} is parked ({green}/{total} pass)", "⏸️")
 
     def retry_parked(self, green_at_start):
         """The parked criteria get one more try when others passed since, else those parked by an earlier
         run once (the project, its plan or Tinker may have changed since)."""
-        parked = [s for s in self.p.criteria if s["status"] == "blocked"]
-        earlier = [s for s in parked if s["id"] in self.s.parked_at_start]
-        if parked and self.p.counts()[0] > green_at_start:
+        parked = [criterion for criterion in self.project.criteria if criterion["status"] == "blocked"]
+        earlier = [criterion for criterion in parked if criterion["id"] in self.session.parked_at_start]
+        if parked and self.project.counts()[0] > green_at_start:
             say.step(f"Retrying {len(parked)} parked criteria, now that others pass", "🔁")
             self.parked = {}
             self.work_through(parked, retry=True)
         elif earlier:
             say.step(f"Retrying {len(earlier)} criteria parked by an earlier run, once (the project, its plan or "
                      f"Tinker may have changed since)", "🔁")
-            self.s.parked_at_start -= {s["id"] for s in earlier}
+            self.session.parked_at_start -= {criterion["id"] for criterion in earlier}
             self.parked = {}
             self.work_through(earlier, retry=True)
         elif parked:
@@ -504,7 +540,7 @@ class Verifier(Phase):
     def work(self, step, retry):
         """Whether the criterion passes after fixes; parked (False) when nothing helps, the files
         then back to how they were."""
-        green, _, total = self.p.counts()
+        green, _, total = self.project.counts()
         with say.part(f"{step['id']} ({green}/{total} pass): {step['title']}", "🎯"), \
                 say.working_on(f"Making {step['id']} pass: {first_line(step['title'], 80)}"):
             say.info(f"Test: {step['test']}", "🧪")
@@ -540,13 +576,13 @@ class Verifier(Phase):
     def evaluate(self, step, checked=False):
         """(state, output): missing / build (the check fails) / fails / passes."""
         ref = TestRef(step["test"])
-        if not ref.present(self.ws):
+        if not ref.present(self.workspace):
             return "missing", f"the test {ref} does not exist"
         if not checked:
-            ok, output = self.s.toolchain.run_check(self.ws)
+            ok, output = self.session.toolchain.run_check(self.workspace)
             if not ok:
                 return "build", output
-        return self.s.toolchain.run_test(self.ws, ref)
+        return self.session.toolchain.run_test(self.workspace, ref)
 
     def write_missing_test(self, step):
         """Its test is written now, unless writing it already failed twice (asking the same again
@@ -555,7 +591,7 @@ class Verifier(Phase):
             say.fail(f"Its test could not be written in {step['write_failures']} tries; parked")
             return "missing", step.get("last_error") or f"the test {step['test']} could not be written"
         say.step("Its test is missing; writing it", "✍️")
-        TestWriter(self.s).run(self.p.cycle(step.get("cycle") or "base") or {}, only=[step])
+        TestWriter(self.session).run(self.project.cycle(step.get("cycle") or "base") or {}, only=[step])
         state, output = self.evaluate(step)
         if state == "missing":
             step["last_error"] = output
@@ -564,7 +600,7 @@ class Verifier(Phase):
     def flaky(self, step):
         """Whether the criterion's test, which just failed, passes on one of a few reruns."""
         ref = TestRef(step["test"])
-        return any(self.s.toolchain.run_test(self.ws, ref)[0] == "passes" for _ in range(self.FLAKY_RERUNS))
+        return any(self.session.toolchain.run_test(self.workspace, ref)[0] == "passes" for _ in range(self.FLAKY_RERUNS))
 
     @staticmethod
     def failure_key(step, output):
@@ -576,21 +612,21 @@ class Verifier(Phase):
     def climb_safely(self, step, state, output, retry):
         """climb, with a restore point kept on disk while it goes (a run stopped part way is put
         back on resume: recover_interrupted); the files go back if nothing helped."""
-        snapshot = self.ws.snapshot(self.p.files)  # with its test: rolling back keeps the test just written
-        self.p.store.put("restore", self.PENDING, {"criterion": step["id"], "files": snapshot})
+        snapshot = self.workspace.snapshot(self.project.files)  # with its test: rolling back keeps the test just written
+        self.project.store.put("restore", self.PENDING, {"criterion": step["id"], "files": snapshot})
         try:
             if self.climb(step, state, output, retry):
                 return True
             self.roll_back(snapshot)
             return False
         finally:
-            self.p.store.delete("restore", self.PENDING)
+            self.project.store.delete("restore", self.PENDING)
 
     def climb(self, step, state, output, retry):
         """Fixes until they stop making progress, then reviews against the plan (see ladder); a
         reason to review sooner (see to_review) cuts the fixing short. An attempt that thought to its
         cap always gets its conclusion, even past the attempts allowed. True when the test passes."""
-        before = {s["id"] for s in self.p.criteria if s["status"] == "green"}
+        before = {criterion["id"] for criterion in self.project.criteria if criterion["status"] == "green"}
         climb, total = Climb(state, output), 0
         for approach, patience in self.ladder(step, output, retry):
             stall, concluding = 0, False  # concluding: the last attempt thought to its cap; its conclusion is due
@@ -599,7 +635,7 @@ class Verifier(Phase):
                     say.step("The test file no longer loads: reviewing the test now", "🔍")
                     break
                 total += 1
-                attempt = FixAttempt(self.s, self, step, approach, output, before)
+                attempt = FixAttempt(self.session, self, step, approach, output, before)
                 state, output = attempt.run()
                 if state == "passes":
                     return True
@@ -624,7 +660,7 @@ class Verifier(Phase):
             say.step("Earlier fixes kept breaking other tests (the tests may disagree): reviewing against the plan now",
                      "🔍")
             return (("review", REVIEW_TRIES),)
-        return (("fix", 1), ("review", 1)) if retry else (("fix", self.s.max_stall), ("review", REVIEW_TRIES))
+        return (("fix", 1), ("review", 1)) if retry else (("fix", self.session.max_stall), ("review", REVIEW_TRIES))
 
     @staticmethod
     def to_review(attempt, approach):
@@ -643,15 +679,15 @@ class Verifier(Phase):
 
     def roll_back(self, snapshot):
         """The project as it was: its files, and its design (files created since are dropped)."""
-        for path in list(self.p.files):
+        for path in list(self.project.files):
             if path not in snapshot:  # created since: it goes again
-                (self.ws.root / path).unlink(missing_ok=True)
-                del self.p.files[path]
-        self.ws.restore(snapshot)
+                (self.workspace.root / path).unlink(missing_ok=True)
+                del self.project.files[path]
+        self.workspace.restore(snapshot)
 
     def mark_others_passing(self):
         """A fix may have made other criteria pass too."""
-        for other in self.p.criteria:
+        for other in self.project.criteria:
             if other["status"] != "green" and self.evaluate(other)[0] == "passes":
                 other["status"] = "green"
 
@@ -697,7 +733,7 @@ class FixAttempt(Worker):
             return "fails", self.output + f"\n(prompt too large: {exc})"
         if self.approach == "fix" and reply.test_wrong():
             return self.test_blamed(reply.test_wrong())
-        change = self.ws.apply(reply, self.may_change(view), view.windows)
+        change = self.workspace.apply(reply, self.may_change(view), view.windows)
         self.remember_wanted_files(reply, change, view)
         cause = reply.cause() or "?"
         if not change:
@@ -708,10 +744,10 @@ class FixAttempt(Worker):
         """The criterion, the files that exist, the failure and the test first (and, after a call
         that thought to its cap, that thought); then the files most likely involved, whole while
         they fit (see FileView)."""
-        excerpt = self.ref.excerpt(self.ws, self.p.test_names(self.ref.file))
+        excerpt = self.ref.excerpt(self.workspace, self.project.test_names(self.ref.file))
         fixed = [Part("Criterion", self.step["behaviour"], True),
                  Part("Project files (all exist; only those shown below may change)",
-                      ", ".join(p for p in self.p.files if self.ws.exists(p)), True),
+                      ", ".join(path for path in self.project.files if self.workspace.exists(path)), True),
                  Part("Failure output", Output.failure_text(self.output), True, keep="tail", place="last"),
                  Part(f"Test {self.ref}", excerpt, True)] + self.kept_tests()
         if self.approach == "review":
@@ -720,33 +756,34 @@ class FixAttempt(Worker):
         fixed += [Part("Your analysis so far (it ran out of room before an answer: conclude it and answer now)",
                        thought, True, keep="tail", place="last")] if thought else []
         candidates = self.candidates()
-        tail = [Part("Contracts", self.p.contracts(candidates[:4])),
+        tail = [Part("Contracts", self.project.contracts(candidates[:4])),
                 Part("Already tried", "\n".join(self.step.get("history", [])[-4:]), keep="tail", place="last"),
-                Part("Language", self.p.language, place="first"),
-                *self.s.knowledge_parts(*(("code", "tests") if self.approach == "review" else ("code",)))]
-        return FileView(self.ws, fixed, candidates, tail, output=self.output, hints=excerpt)
+                Part("Language", self.project.language, place="first"),
+                *self.session.knowledge_parts(*(("code", "tests") if self.approach == "review" else ("code",)))]
+        return FileView(self.workspace, fixed, candidates, tail, output=self.output, hints=excerpt)
 
     def kept_tests(self):
         """The tests an earlier change broke (up to two): they pass now and must keep passing."""
-        return [Part(f"Test {ref} (it passes now and must keep passing)", ref.excerpt(self.ws, self.p.test_names(ref.file)),
-                     True, atomic=True) for ref in map(TestRef, self.step.get("keep", [])[:2]) if ref.present(self.ws)]
+        return [Part(f"Test {ref} (it passes now and must keep passing)",
+                     ref.excerpt(self.workspace, self.project.test_names(ref.file)), True, atomic=True)
+                for ref in map(TestRef, self.step.get("keep", [])[:2]) if ref.present(self.workspace)]
 
     def plan_parts(self):
         """For a review: the request, which decides when the plan contradicts itself, and the criteria of the
         tests that must keep passing."""
-        return [Part("Request", self.p.run["task"], True, keep="head", place="first")] + \
-            [Part(f"Criterion of {ref}", self.p.criterion_of_test(str(ref)), True)
-             for ref in map(TestRef, self.step.get("keep", [])[:2]) if self.p.criterion_of_test(str(ref))]
+        return [Part("Request", self.project.run["task"], True, keep="head", place="first")] + \
+            [Part(f"Criterion of {ref}", self.project.criterion_of_test(str(ref)), True)
+             for ref in map(TestRef, self.step.get("keep", [])[:2]) if self.project.criterion_of_test(str(ref))]
 
     def candidates(self):
         """Files the model asked for last time first, then those the failure names, then the
         files the test uses, then the rest (the test file
         itself only in a review)."""
-        code = [p for p in self.s.files_on_disk("code", "template", "config") if p != ENV_FILE]
-        named = [p for p in self.mentioned(code) if p in code]
-        wanted = [p for p in self.step.get("want", []) if self.ws.exists(p)]
+        code = [path for path in self.session.files_on_disk("code", "template", "config") if path != ENV_FILE]
+        named = [path for path in self.mentioned(code) if path in code]
+        wanted = [path for path in self.step.get("want", []) if self.workspace.exists(path)]
         own_test = [self.ref.file] if self.approach == "review" else []
-        uses = [p for p in self.p.uses(self.ref.file) if p in code]
+        uses = [path for path in self.project.uses(self.ref.file) if path in code]
         return list(dict.fromkeys(wanted + own_test + named[:2] + uses + named + code))[:FIX_FILES]
 
     def mentioned(self, paths):
@@ -764,11 +801,11 @@ class FixAttempt(Worker):
         think = False if first or concluding else None
         label = self.label + (" (no thinking: concluding the last one's thought)" if concluding
                               else " (no thinking first)" if first else "")
-        reply = self.s.ask(self.system(), view, label, max_reply=self.s.model.fix_max, unthinking_retry=False,
-                           think=think)
-        self.overthought = self.s.model.overthought
+        reply = self.session.ask(self.system(), view, label, max_reply=self.session.model.fix_max,
+                                 unthinking_retry=False, think=think)
+        self.overthought = self.session.model.overthought
         if self.overthought:
-            self.step[key], self.step["unfinished_thought"] = True, self.s.model.last_thought
+            self.step[key], self.step["unfinished_thought"] = True, self.session.model.last_thought
         return reply
 
     def system(self):
@@ -779,15 +816,16 @@ class FixAttempt(Worker):
             if not exists:  # the design is settled: a new file now would shadow or duplicate a planned one
                 return None if self.approach == "review" and Path(path).parent == Path(self.ref.file).parent \
                     else "no new files now; change the files shown"
-            if self.p.files.get(path, {}).get("kind") == "test" or path == self.ref.file:
+            if self.project.kind_of(path) == "test" or path == self.ref.file:
                 return None if self.approach == "review" and path in view.shown else TESTS_LOCKED
             return None if path in view.shown else "only the files shown may change"
         return check
 
     def remember_wanted_files(self, reply, change, view):
         """A file it tried to change without seeing it whole is shown first next time."""
-        self.step["want"] = [p for p in reply.named_paths() if p not in change.backups and self.ws.exists(p)
-                             and p not in view.whole][:2]
+        self.step["want"] = [path for path in reply.named_paths() if path not in change.backups
+                             and self.workspace.exists(path)
+                             and path not in view.whole][:2]
 
     def test_blamed(self, why):
         """The fix found the test wrong, not the code: nothing changes, and the review comes next."""
@@ -799,8 +837,8 @@ class FixAttempt(Worker):
     def no_change(self, cause, change):
         note = "no usable change" + (f" ({'; '.join(change.notes)})" if change.notes else "")
         folder = str(Path(self.ref.file).parent)
-        refused_near_tests = any(TESTS_LOCKED in n or str(Path(n.split(":", 1)[0]).parent) == folder
-                                 for n in change.notes)  # a test, or a new file beside them
+        refused_near_tests = any(TESTS_LOCKED in note or str(Path(note.split(":", 1)[0]).parent) == folder
+                                 for note in change.notes)  # a test, or a new file beside them
         self.blamed_test = self.approach == "fix" and refused_near_tests
         self.record(f"{cause} -> {note}")
         say.skip(f"{self.label}: {note}")
@@ -808,8 +846,9 @@ class FixAttempt(Worker):
 
     def tested(self, change, reply, cause):
         """(state, output) with the change; passing or not, a change that breaks a passing test goes."""
-        self.p.register(change.created, "test" if self.approach == "review" else "code", f"added for {self.step['id']}")
-        self.s.setup()
+        self.project.register(change.created, "test" if self.approach == "review" else "code",
+                              f"added for {self.step['id']}")
+        self.session.setup()
         state, output = self.v.evaluate(self.step)
         if self.broke_others(change, cause):
             return "fails", self.output + self.broken_note()
@@ -825,14 +864,14 @@ class FixAttempt(Worker):
         if self.approach == "review" and reply.criterion():
             self.correct_criterion(reply.criterion())
         if cause != "?":
-            self.s.note(self.approach, f"{self.step['behaviour'][:120]} | solved: {cause}")
+            self.session.note(self.approach, f"{self.step['behaviour'][:120]} | solved: {cause}")
 
     def correct_criterion(self, text):
         """The spec says what the corrected test checks: a criterion found wrong (a miscomputed value)
         is reworded with it, so SPEC.md, the source of truth, and the tests stay the same."""
         say.info(f"{self.step['id']} now reads: {first_line(text, 120)} (was: {first_line(self.step['behaviour'], 80)})", "✏️")
         self.step["behaviour"], self.step["title"] = text, text[:80]
-        self.s.save()
+        self.session.save()
 
     def broke_others(self, change, cause):
         if not self.before:
@@ -840,22 +879,29 @@ class FixAttempt(Worker):
         broken = sorted(self.before - self.v.passing())
         if not broken:
             return False
-        first = self.p.criterion(broken[0])  # how it failed, while the change is still there: the next try sees why
+        self.remember_how_it_broke(broken[0])
+        self.workspace.revert(change)
+        tests = [self.project.criterion(criterion_id)["test"] for criterion_id in broken]
+        self.keep_passing(tests)
+        self.say_broken(tests, cause)
+        return True
+
+    def remember_how_it_broke(self, criterion_id):
+        """How the first test it broke failed, read while the change is still there: the next try sees why."""
+        first = self.project.criterion(criterion_id)
         self.broken_test = first["test"]
         self.broken_output = Output.failure_text(self.v.evaluate(first)[1], OUTPUT_CHARS // 2)
-        self.ws.revert(change)
-        tests = [self.p.criterion(b)["test"] for b in broken]
-        self.keep_passing(tests)
+
+    def say_broken(self, tests, cause):
         names = ", ".join(tests[:2])
         self.record(f"{cause} -> broke {names}; reverted")
         say.warn(f"{self.label}: broke {names}; reverted")
-        return True
 
     def keep_passing(self, tests):
         """Tests the next tries must keep passing; one broken before too means the two tests may disagree."""
         kept = self.step.setdefault("keep", [])
-        self.conflict = any(t in kept for t in tests)
-        kept.extend(t for t in tests if t not in kept)
+        self.conflict = any(test in kept for test in tests)
+        kept.extend(test for test in tests if test not in kept)
 
     def broken_note(self):
         return (f"\n\nYour last change broke {', '.join(self.step['keep'])} (shown below); "
@@ -881,38 +927,38 @@ class BuildFix(Worker):
         view = self.prompt()
         try:
             label = "Make it build" + (" (no thinking: concluding the last one's thought)" if self.concluding else "")
-            reply = self.s.ask(Prompts.BUILD_SYSTEM, view, label, max_reply=self.s.model.fix_max, unthinking_retry=False,
-                               think=False if self.concluding or not self.tried else None)
+            reply = self.session.ask(Prompts.BUILD_SYSTEM, view, label, max_reply=self.session.model.fix_max,
+                                     unthinking_retry=False, think=False if self.concluding or not self.tried else None)
         except PromptTooLarge as exc:
             say.skip(f"Make it build: the prompt does not fit ({exc})")
             return "the prompt did not fit"
-        if self.s.model.overthought:
-            self.thought = self.s.model.last_thought
-        change = self.ws.apply(reply, self.may_change(view), view.windows)
+        if self.session.model.overthought:
+            self.thought = self.session.model.last_thought
+        change = self.workspace.apply(reply, self.may_change(view), view.windows)
         return self.said(change, reply.cause() or "?")
 
     def prompt(self):
         """What failed, the files there are (and a thought to conclude); then the files most likely involved."""
         fixed = [Part("What failed", Output.failure_text(self.output), True, keep="tail"),
                  Part("Project files (all exist; only those shown below may change)",
-                      ", ".join(p for p in self.p.files if self.ws.exists(p)), True)]
+                      ", ".join(path for path in self.project.files if self.workspace.exists(path)), True)]
         fixed += [Part("Your analysis so far (it ran out of room before an answer: conclude it and answer now)",
                        self.concluding, True, keep="tail", place="last")] if self.concluding else []
-        tail = [Part("Already tried (it still failed)", "\n".join(f"- {t}" for t in self.tried)),
-                Part("Language", self.p.language), *self.s.knowledge_parts("code", "config")]
-        return FileView(self.ws, fixed, self.candidates(), tail, output=self.output, hints=self.output)
+        tail = [Part("Already tried (it still failed)", "\n".join(f"- {attempt}" for attempt in self.tried)),
+                Part("Language", self.project.language), *self.session.knowledge_parts("code", "config")]
+        return FileView(self.workspace, fixed, self.candidates(), tail, output=self.output, hints=self.output)
 
     def candidates(self):
         """The files the error names, then the dependency and other config files, then the code."""
-        files = [p for p in self.s.files_on_disk("code", "template", "config") if p != ENV_FILE]
-        configs = [p for p in files if self.p.files[p].get("kind") == "config"]
+        files = [path for path in self.session.files_on_disk("code", "template", "config") if path != ENV_FILE]
+        configs = [path for path in files if self.project.files[path].get("kind") == "config"]
         return list(dict.fromkeys(Output.mentioned_in(self.output, files) + configs + files))[:FIX_FILES]
 
     def may_change(self, view):
         def check(path, exists):
             if not exists or path not in view.shown:
                 return "only the files shown may change now"
-            return TESTS_LOCKED if self.p.files.get(path, {}).get("kind") == "test" else None
+            return TESTS_LOCKED if self.project.kind_of(path) == "test" else None
         return check
 
     def said(self, change, cause):
@@ -922,7 +968,7 @@ class BuildFix(Worker):
         did = f"changed {', '.join(change.files)}" if change else "no usable change"
         say.info(f"Make it build: {did}" + (f"  ({cause})" if cause != "?" else ""), "🔧")
         if change and cause != "?":
-            self.s.note("build", cause)
+            self.session.note("build", cause)
         return f"{cause} -> {did}"
 
 
@@ -936,30 +982,35 @@ class BugReproducer(Phase):
     TITLE = "Reproduce the bug (a test that fails now)"
 
     def run(self, cycle):
-        Designer(self.s).ensure_toolchain()
-        if not TestTool(self.s).works() or not Verifier(self.s).make_it_build():
+        Designer(self.session).ensure_toolchain()
+        if not TestTool(self.session).works() or not Verifier(self.session).make_it_build():
             return False
         note = ""
         for _ in range(2):
             step, state, output = self.write_test(cycle, note)
-            if step and state == "fails" and not Toolchain.ran_no_test(output):
+            if self.reproduced(step, state, output):
                 say.done(f"Reproduced: {first_line(step['behaviour'], 140)}")
                 with say.section():
                     say.info(f"It fails now: {Output.key_line(output)}", "🐞")
-                self.s.save()
+                self.session.save()
                 return True
             note = self.why_not(step, state, output)
             say.fail(f"Not reproduced: {note}")
         self.drop(cycle)
-        self.s.unreproduced = (f"the bug could not be reproduced with a test, so nothing was changed. Describe what "
-                               f"you do, what happens and what should happen instead, then: tinker fix "
-                               f"{self.p.run['id']} \"...\"")
+        self.session.unreproduced = (f"the bug could not be reproduced with a test, so nothing was changed. "
+                                     f"Describe what you do, what happens and what should happen instead, then: "
+                                     f"tinker fix {self.project.run['id']} \"...\"")
         return False
+
+    @staticmethod
+    def reproduced(step, state, output):
+        """Whether the test written shows the bug: it ran, and it fails."""
+        return step and state == "fails" and not Toolchain.ran_no_test(output)
 
     def write_test(self, cycle, note):
         """(step, state, output): the test the model wrote, evaluated; (None, "missing", why) when
         its reply names no usable test."""
-        reply = self.s.ask(Prompts.REPRODUCE_SYSTEM, self.prompt(cycle, note), f"Reproduce bug {cycle['id']}")
+        reply = self.session.ask(Prompts.REPRODUCE_SYSTEM, self.prompt(cycle, note), f"Reproduce bug {cycle['id']}")
         named = re.search(r"^\s*TEST:\s*(.+?)\s*$", reply.text, re.M)
         if not named:
             return None, "missing", 'the reply has no line "TEST: <test file>::<test name>"'
@@ -968,31 +1019,34 @@ class BugReproducer(Phase):
         if problem:
             return None, "missing", problem
         step = self.step_for(cycle, ref)
-        change = self.ws.apply(reply, lambda path, exists: None if path == ref.file else "only the bug's test file")
+        change = self.workspace.apply(reply,
+                                      lambda path, exists: None if path == ref.file else "only the bug's test file")
         for line in change.notes:
             say.skip(f"Skipped {line}")
         expected = re.search(r"^\s*EXPECTED:\s*(.+)$", reply.text, re.M)
         if expected:
             step["behaviour"] = first_line(expected.group(1), 300)
-        return (step, *Verifier(self.s).evaluate(step))
+        return (step, *Verifier(self.session).evaluate(step))
 
     def prompt(self, cycle, note):
-        code = self.s.files_on_disk("code", "template")
+        code = self.session.files_on_disk("code", "template")
         named = Output.mentioned_in(asked(cycle), code)
-        entry = self.p.entry_files(code)
-        tests = self.s.files_on_disk("test")
+        entry = self.project.entry_files(code)
+        tests = self.session.files_on_disk("test")
         return [Part("Bug report", asked(cycle), True),
                 Part("The project's test files (the new one goes next to them)", "\n".join(tests) or "none yet", True),
                 Part("Note", note, bool(note)),
-                Part("Test command", self.s.toolchain.test_one, True),
-                Part("Contracts of the code", self.p.contracts([p for p in code if self.p.files[p].get("contract")])),
-                *[Part(f"File {p}", self.ws.read(p), atomic=True) for p in dict.fromkeys(named + entry)][:2],
+                Part("Test command", self.session.toolchain.test_one, True),
+                Part("Contracts of the code",
+                     self.project.contracts([path for path in code if self.project.files[path].get("contract")])),
+                *[Part(f"File {path}", self.workspace.read(path), atomic=True)
+                  for path in dict.fromkeys(named + entry)][:2],
                 Part(f"Start of {tests[0]} (how the project's tests are written)",
-                     "\n".join(self.ws.read(tests[0]).splitlines()[:30]) if tests else ""),
+                     "\n".join(self.workspace.read(tests[0]).splitlines()[:30]) if tests else ""),
                 Part("External services: adapters and sample data",
-                     next((c.get("data", "") for c in self.p.cycles if c["id"] == "base"), "")),
-                Part("Project files", self.p.outline()),
-                *self.s.knowledge_parts("tests")]
+                     next((cycle.get("data", "") for cycle in self.project.cycles if cycle["id"] == "base"), "")),
+                Part("Project files", self.project.outline()),
+                *self.session.knowledge_parts("tests")]
 
     def unusable(self, cycle, ref):
         """Why a named test cannot be the bug's ("" when it can): it needs a file and a name, in the
@@ -1000,29 +1054,29 @@ class BugReproducer(Phase):
         if not ref.file or not ref.name:
             return f"TEST: {ref} names no file and test (<test file>::<test name>)"
         try:
-            self.ws.resolve(ref.file, for_write=True)
+            self.workspace.resolve(ref.file, for_write=True)
         except ToolError as exc:
             return f"TEST: {ref.file}: {exc}"
-        mine = {TestRef(s["test"]).file for s in self.p.cycle_criteria(cycle)}
-        if (ref.file in self.p.files or self.ws.exists(ref.file)) and ref.file not in mine:
+        mine = {TestRef(criterion["test"]).file for criterion in self.project.cycle_criteria(cycle)}
+        if (ref.file in self.project.files or self.workspace.exists(ref.file)) and ref.file not in mine:
             return f"TEST: {ref.file} is a file the project has; the bug's test goes in a new file next to its tests"
         return ""
 
     def step_for(self, cycle, ref):
         """The bug's criterion, with the test the model named (one made earlier for this bug keeps
         its id; its earlier test file goes)."""
-        existing = self.p.cycle_criteria(cycle)
+        existing = self.project.cycle_criteria(cycle)
         if existing:
             step = existing[0]
             old = TestRef(step["test"]).file
             if old != ref.file:
-                self.p.remove_file(self.ws, old)
+                self.project.remove_file(self.workspace, old)
             step["test"] = str(ref)
         else:
-            step = self.p.new_criterion("B", first_line(cycle["request"], 80), cycle["request"], str(ref),
-                                        cycle["id"], "bug report", "todo")
-            self.p.criteria.append(step)
-        self.p.register([ref.file], "test", f"reproduces bug {cycle['id']}", self.p.paths("code"))
+            step = self.project.new_criterion("B", first_line(cycle["request"], 80), cycle["request"], str(ref),
+                                              cycle["id"], "bug report", "todo")
+            self.project.criteria.append(step)
+        self.project.register([ref.file], "test", f"reproduces bug {cycle['id']}", self.project.paths("code"))
         return step
 
     def why_not(self, step, state, output):
@@ -1045,11 +1099,11 @@ class BugReproducer(Phase):
     def drop(self, cycle):
         """A report no test could show: its test and criterion go, and the cycle closes (nothing
         was changed in the code), so the next tinker fix or tinker add can start."""
-        for step in self.p.cycle_criteria(cycle):
-            self.p.remove_file(self.ws, TestRef(step["test"]).file)
-            self.p.criteria.remove(step)
+        for step in self.project.cycle_criteria(cycle):
+            self.project.remove_file(self.workspace, TestRef(step["test"]).file)
+            self.project.criteria.remove(step)
         cycle["phase"], cycle["outcome"] = "done", "not reproduced"
-        self.s.save()
+        self.session.save()
 
 
 class TestTool(Worker):
@@ -1071,31 +1125,31 @@ class TestTool(Worker):
                 self.remember_what_worked(repair)
                 return True
             if repair and repair[0] == "known":
-                self.s.knowledge.fix_result(repair[1], worked=False)
+                self.session.knowledge.fix_result(repair[1], worked=False)
             problem = Output.key_line(output)
             say.fail(f"{self.STAGE_TEXT[stage]}: {problem}")
-            repair = ToolchainRepair(self.s).run(output, tried) if attempt < 2 else None
+            repair = ToolchainRepair(self.session).run(output, tried) if attempt < 2 else None
             if repair is None:
                 break
-        self.s.tool_problem = f"the project's tools do not work: {problem}"
+        self.session.tool_problem = f"the project's tools do not work: {problem}"
         return False
 
     def check(self, attempt):
         """("ok" | "setup" | "tests" | "lint", output): setup runs (what needs the network once it
         is there); the test command reaches the tests written so far (with none yet, it runs and
         finds none) and they can import the app's own code; the linter runs."""
-        ok, output = self.s.setup(force=attempt > 0)
+        ok, output = self.session.setup(force=attempt > 0)
         if not ok:
             return "setup", output
-        self.s.wait_for_network()
-        self.s.all_tests_run = None if attempt else self.s.all_tests_run
-        code, output = self.s.run_all_tests()
-        present = [r for r in self.p.refs() if r.present(self.ws)]
+        self.session.wait_for_network()
+        self.session.all_tests_run = None if attempt else self.session.all_tests_run
+        code, output = self.session.run_all_tests()
+        present = [ref for ref in self.project.refs() if ref.present(self.workspace)]
         problem = self.test_tool_problem(code, output, present)
         if problem:
             return "tests", problem
         if not present:
-            say.done(f"The test tool runs (no tests yet): $ {self.s.toolchain.test_all}")
+            say.done(f"The test tool runs (no tests yet): $ {self.session.toolchain.test_all}")
         return self.linter_runs()
 
     def test_tool_problem(self, code, output, present):
@@ -1104,7 +1158,8 @@ class TestTool(Worker):
         reached = self.reaches_code(output) or (not Toolchain.reached_no_test(code, output, present) if present
                                                 else self.ran_empty(code, output))
         if not reached:
-            say.fail(f"$ {self.s.toolchain.test_all}  [{'ran no test' if present else 'did not run'}: a tooling problem]")
+            say.fail(f"$ {self.session.toolchain.test_all}  "
+                     f"[{'ran no test' if present else 'did not run'}: a tooling problem]")
             return output
         unseen = self.unseen_code(output) if present and code else ""
         if unseen:
@@ -1115,7 +1170,7 @@ class TestTool(Worker):
         """Whether the test command got as far as the app's own code: it names a code file of the
         plan, one not written yet or one that does not compile (a compiled language builds all of
         it before any test runs). The tool works; what fails is the code, which the build fixes."""
-        return any(path in output for path in self.p.paths("code"))
+        return any(path in output for path in self.project.paths("code"))
 
     @staticmethod
     def ran_empty(code, output):
@@ -1133,13 +1188,13 @@ class TestTool(Worker):
         that the check command loads (a test tool not seeing the project, which no code change
         fixes); else "". Once a test has passed, the tool sees the code: a module not found then
         is a test's own doing (one that runs the app from elsewhere)."""
-        if any(s.get("status") == "green" for s in self.p.criteria):
+        if any(criterion.get("status") == "green" for criterion in self.project.criteria):
             return ""
-        missed = Output.misses_own_code(output, self.s.files_on_disk("code"))
-        if not missed or not self.s.toolchain.run_check(self.ws)[0]:
+        missed = Output.misses_own_code(output, self.session.files_on_disk("code"))
+        if not missed or not self.session.toolchain.run_check(self.workspace)[0]:
             return ""
-        say.fail(f"$ {self.s.toolchain.test_all}  [the tests cannot import the project's own {missed}, which loads "
-                 f"with the check command: a tooling problem]")
+        say.fail(f"$ {self.session.toolchain.test_all}  [the tests cannot import the project's own {missed}, "
+                 f"which loads with the check command: a tooling problem]")
         return output + (f"\n(The tests cannot import the project's own module {missed}, which loads fine with the "
                          f"check command: {Output.OWN_CODE_UNSEEN} when it runs from the project folder.)")
 
@@ -1147,14 +1202,14 @@ class TestTool(Worker):
         """"" when the one-test command runs a test by its name, else why not: a command that answers
         a made-up test name as it answers a real one does not pick tests, and every test it runs
         would look failing. Checked once per command, when the whole suite has run that test."""
-        toolchain = self.s.toolchain
-        if getattr(self.s, "one_test_checked", None) == toolchain.test_one:
+        toolchain = self.session.toolchain
+        if getattr(self.session, "one_test_checked", None) == toolchain.test_one:
             return ""
         made_up = TestRef(f"{real.file}::tinker_made_up_test")
-        _, real_output = toolchain.run_test(self.ws, real)
-        _, made_up_output = toolchain.run_test(self.ws, made_up)
+        _, real_output = toolchain.run_test(self.workspace, real)
+        _, made_up_output = toolchain.run_test(self.workspace, made_up)
         if self.unnamed(real_output, real.name) != self.unnamed(made_up_output, made_up.name):
-            self.s.one_test_checked = toolchain.test_one
+            self.session.one_test_checked = toolchain.test_one
             return ""
         say.fail(f"$ {real.command(toolchain.test_one)}  [answers a made-up test name the same way: a tooling problem]")
         return (f"{real_output}\n(The one-test command `{toolchain.test_one}` answers a made-up test name the same "
@@ -1169,23 +1224,29 @@ class TestTool(Worker):
         """("ok", "") when the linter runs (what it finds does not matter here), else ("lint", why):
         a linter that is not installed or not found is a tooling problem, like a missing test tool;
         one that reaches the app's code and finds it does not compile runs (the build fixes that)."""
-        if not self.s.toolchain.lint:
+        if not self.session.toolchain.lint:
             return "ok", ""
-        code, output = self.ws.run(self.s.toolchain.shell(self.s.toolchain.lint), quiet=True)
-        if code in (126, 127) or (code != 0 and self.MISSING_TOOL_RE.search(output) and not self.reaches_code(output)):
-            say.fail(f"$ {self.s.toolchain.lint}  [the linter does not run: a tooling problem]")
-            return "lint", f"$ {self.s.toolchain.lint}\nthe linter does not run (exit code {code}):\n{output}"
+        code, output = self.workspace.run(self.session.toolchain.shell(self.session.toolchain.lint), quiet=True)
+        if self.linter_missing(code, output):
+            say.fail(f"$ {self.session.toolchain.lint}  [the linter does not run: a tooling problem]")
+            return "lint", f"$ {self.session.toolchain.lint}\nthe linter does not run (exit code {code}):\n{output}"
         return "ok", ""
+
+    def linter_missing(self, code, output):
+        """Whether the linter itself did not run: the shell found no such command (126, 127), or it failed
+        naming a missing tool before it reached the code."""
+        return code in (126, 127) or (code != 0 and self.MISSING_TOOL_RE.search(output)
+                                      and not self.reaches_code(output))
 
     def remember_what_worked(self, repair):
         """The repair that made the tools work, for the next projects (the toolchain itself is kept
         once the project is done: only then has every command of it worked)."""
-        knowledge = self.s.knowledge
+        knowledge = self.session.knowledge
         if repair and repair[0] == "known":
             knowledge.fix_result(repair[1], worked=True)
         elif repair:
             knowledge.remember_fix(repair[1])
-            self.s.note("toolchain", repair[1]["cause"])
+            self.session.note("toolchain", repair[1]["cause"])
 
 
 class ToolchainRepair(Worker):
@@ -1195,8 +1256,8 @@ class ToolchainRepair(Worker):
 
     def run(self, output, tried):
         """Returns ("known" or "model", the fix), or None when nothing changed."""
-        failure = Output.tool_failure(output, self.ws.root)
-        known = self.s.knowledge.known_fix(failure, tried)
+        failure = Output.tool_failure(output, self.workspace.root)
+        known = self.session.knowledge.known_fix(failure, tried)
         if known:
             tried.add(failure)
             say.info(f"Applying a toolchain fix learned on an earlier project ({known['cause']})", "♻️")
@@ -1209,38 +1270,38 @@ class ToolchainRepair(Worker):
         """A learned fix: its commands, and the config files it created (an existing file is kept;
         a file this project plans as code or tests is its own to write, never another project's)."""
         if replay.get("toolchain"):
-            self.p.toolchain = self.s.toolchain.merged(replay["toolchain"])
+            self.project.toolchain = self.session.toolchain.merged(replay["toolchain"])
         for path, content in (replay.get("files") or {}).items():
-            if not self.ws.exists(path) and self.p.files.get(path, {}).get("kind") in (None, "config"):
-                self.ws.write(path, content)
-                self.p.register([path], "config", "added by a learned toolchain fix")
-        self.s.save()
+            if not self.workspace.exists(path) and self.project.kind_of(path) in (None, "config"):
+                self.workspace.write(path, content)
+                self.project.register([path], "config", "added by a learned toolchain fix")
+        self.session.save()
 
     def ask_model(self, output, failure):
         """One call that may change only config files and the commands. Returns the fix (for
         knowledge: replayable when it only changed commands or created files), or None."""
-        configs = [p for p in self.s.files_on_disk("config") if p != ENV_FILE]
-        before = self.s.toolchain.to_dict()
+        configs = [path for path in self.session.files_on_disk("config") if path != ENV_FILE]
+        before = self.session.toolchain.to_dict()
         reply = self.ask_fix(output, failure, configs, before)
         change = self.apply_fix(reply, configs)
-        commands = {k: v for k, v in self.s.toolchain.to_dict().items() if v != before.get(k)}
+        commands = {key: value for key, value in self.session.toolchain.to_dict().items() if value != before.get(key)}
         changed = (["toolchain"] if commands else []) + change.files
         say.info(f"Toolchain fix: {', '.join(changed) or 'no usable change'}  ({reply.cause() or '?'})", "🔧")
-        self.s.save()
+        self.session.save()
         if not changed:
             return None
         return self.learned(failure, reply, commands, change)
 
     def ask_fix(self, output, failure, configs, before):
-        similar = self.s.knowledge.similar_fix(failure)
-        return self.s.ask(Prompts.TOOLCHAIN_FIX_SYSTEM, [
+        similar = self.session.knowledge.similar_fix(failure)
+        return self.session.ask(Prompts.TOOLCHAIN_FIX_SYSTEM, [
             Part("Output", Output.failure_text(output), True, keep="tail"),
             Part("Toolchain", json.dumps(before), True),
-            Part("Language", self.p.language),
+            Part("Language", self.project.language),
             Part("A similar failure on an earlier project was fixed by", similar["cause"] if similar else ""),
-            *[Part(f"File {p}", self.ws.read(p), atomic=True) for p in configs],
-            *self.s.knowledge_parts("toolchain", "config"),
-        ], "Fix the toolchain", max_reply=self.s.model.fix_max, unthinking_retry=False)
+            *[Part(f"File {config}", self.workspace.read(config), atomic=True) for config in configs],
+            *self.session.knowledge_parts("toolchain", "config"),
+        ], "Fix the toolchain", max_reply=self.session.model.fix_max, unthinking_retry=False)
 
     def apply_fix(self, reply, configs):
         """The commands the reply gives, and its config files (new ones, or those shown): the change."""
@@ -1249,10 +1310,10 @@ class ToolchainRepair(Worker):
         except ValueError:
             given = None
         if given:
-            self.p.toolchain = self.s.toolchain.merged(given)
-        change = self.ws.apply(reply, lambda p, exists: None if p in configs or not exists
-                               else "only config files change now")
-        self.p.register(change.created, "config", "added by the toolchain fix")
+            self.project.toolchain = self.session.toolchain.merged(given)
+        change = self.workspace.apply(reply, lambda path, exists: None if path in configs or not exists
+                                      else "only config files change now")
+        self.project.register(change.created, "config", "added by the toolchain fix")
         for note in change.notes:
             say.skip(f"Skipped {note}")
         return change
@@ -1261,6 +1322,7 @@ class ToolchainRepair(Worker):
         """The fix as knowledge keeps it: replayable when it only changed commands or created files (code it
         made to get going belongs to this project: only its config files are kept)."""
         replayable = set(change.files) == set(change.created)
-        files = {p: self.ws.read(p) for p in change.created if self.p.files.get(p, {}).get("kind") == "config"}
+        files = {path: self.workspace.read(path) for path in change.created
+                 if self.project.kind_of(path) == "config"}
         return {"failure": failure, "cause": reply.cause() or "?",
                 "replay": {"toolchain": commands, "files": files} if replayable else None}

@@ -34,7 +34,7 @@ def saved_run(folder, run_id="abc123", cycles=(), steps=()):
 def test_new_record_and_save(home_store, project_dir):
     run = Runs.new_record("a task", project_dir, "plan.md")
     assert re.fullmatch(r"[0-9a-f]{6}", run["id"])
-    assert {k: run[k] for k in ("task", "workdir", "spec", "status")} == \
+    assert {key: run[key] for key in ("task", "workdir", "spec", "status")} == \
         {"task": "a task", "workdir": str(project_dir), "spec": "plan.md", "status": "running"}
     Runs.save(run, project_dir)
     assert record_of(project_dir) == run and "updated" in run
@@ -68,7 +68,7 @@ def test_entries_have_each_projects_own_record(tmp_path):
     import shutil
     saved_run(tmp_path / "gone", "fff000")
     shutil.rmtree(tmp_path / "gone")
-    entries = {e["id"]: e for e in Runs.entries()}
+    entries = {entry["id"]: entry for entry in Runs.entries()}
     assert entries["abc123"]["status"] == "running" and "updated" in entries["abc123"]
     assert entries["fff000"]["status"] == "missing"
 
@@ -120,7 +120,7 @@ def test_clear_folder_keeps_the_spec_file_and_forgets_its_pointers(tmp_path):
     (folder / "docs").mkdir()
     (folder / "docs" / "plan.md").write_text("spec")
     Runs.clear_folder(folder, (folder / "docs" / "plan.md").resolve(), yes=True)
-    assert [p.name for p in folder.iterdir()] == ["docs"]
+    assert [path.name for path in folder.iterdir()] == ["docs"]
     assert Runs.entries() == []
 
 
@@ -201,14 +201,14 @@ def test_project_cycles_and_criteria(make_project, project_dir):
     bug = project.new_criterion("B", "t", "fixes", "tests/test_b.py::test_b", "f1", "bug report", "todo")
     assert (first["id"], bug["id"]) == ("C1", "B2") and first["history"] == []
     project.criteria.extend([dict(first, status="green"), dict(bug, status="blocked")])
-    assert project.counts() == (1, 1, 2) and [s["id"] for s in project.parked()] == ["B2"]
-    assert [s["id"] for s in project.cycle_criteria(fix)] == ["B2"]
+    assert project.counts() == (1, 1, 2) and [criterion["id"] for criterion in project.parked()] == ["B2"]
+    assert [criterion["id"] for criterion in project.cycle_criteria(fix)] == ["B2"]
     assert project.criterion("B2")["status"] == "blocked" and project.criterion("C9") is None
     project.save()
     assert plan_of(project_dir)["steps"][0]["id"] == "C1"
     assert Project.load(project_dir, project.run).criteria[0]["id"] == "C1"
     assert (project_dir / "SPEC.md").read_text().startswith("# Spec: a calculator")
-    assert sorted(p.name for p in project_dir.iterdir()) == [".tinker", "SPEC.md"]
+    assert sorted(path.name for path in project_dir.iterdir()) == [".tinker", "SPEC.md"]
 
 
 FILES = {"calc.py": {"kind": "code", "role": "the calculator", "contract": ["add(a, b) -> int"], "uses": ["util.py"]},
@@ -228,9 +228,9 @@ def test_criteria_of(make_project):
              criterion("C3", "tests/test_web.py::test_page", "GET / shows the title"),
              criterion("C4", "tests/test_other.py::test_y", "nothing related")]
     project = make_project(steps, files=FILES)
-    assert [s["id"] for s in project.criteria_of("calc.py", steps)] == ["C1"]
-    assert [s["id"] for s in project.criteria_of("util.py", steps)] == ["C2"]
-    assert [s["id"] for s in project.criteria_of("templates/page.html", steps)] == ["C3"]
+    assert [criterion["id"] for criterion in project.criteria_of("calc.py", steps)] == ["C1"]
+    assert [criterion["id"] for criterion in project.criteria_of("util.py", steps)] == ["C2"]
+    assert [criterion["id"] for criterion in project.criteria_of("templates/page.html", steps)] == ["C3"]
     assert project.criteria_of("deep.py", steps) == []
 
 
@@ -243,15 +243,15 @@ def test_design_helpers(make_project, project_dir):
     project.register(["calc.py", "new.py"], "code", "split off", ["calc.py"])
     assert project.files["calc.py"]["role"] == "the calculator" and project.files["new.py"]["uses"] == ["calc.py"]
     (project_dir / "requirements.txt").write_text("flask\n")
-    assert project.dependencies(lambda p: (project_dir / p).read_text()) == "requirements.txt:\nflask"
-    assert project.dependencies(lambda p: "") == "requirements.txt:\ndependencies"
+    assert project.dependencies(lambda path: (project_dir / path).read_text()) == "requirements.txt:\nflask"
+    assert project.dependencies(lambda path: "") == "requirements.txt:\ndependencies"
     assert project.uses("calc.py") == ["util.py", "deep.py"] and project.uses("calc.py", depth=1) == ["util.py"]
     assert project.paths("test") == ["tests/test_calc.py", "tests/test_web.py"]
     assert project.outline().startswith("- calc.py (code): the calculator")
-    ws = Workspace(project_dir)
-    ws.write("util.py", "x")
-    project.remove_file(ws, "util.py")
-    assert not ws.exists("util.py") and "util.py" not in project.files
+    workspace = Workspace(project_dir)
+    workspace.write("util.py", "x")
+    project.remove_file(workspace, "util.py")
+    assert not workspace.exists("util.py") and "util.py" not in project.files
 
 
 @pytest.mark.spec("PRJ-9")
@@ -327,7 +327,7 @@ def test_the_tracker_publishes_each_change(home_store, project_dir):
     assert state["step"] == "spec" and state["doing"] == "📝 Writing the spec" and state["before"] == 12.0
     assert state["steps"] == ["🧠 Recalled what Tinker has learned"] and state["passing"] == [1, 3]
     assert state["waiting"] == {"name": "calc", "kind": "project"} and state["pid"] == os.getpid()
-    events = [e["event"] for _, e in store.entries("progress")]
+    events = [event["event"] for _, event in store.entries("progress")]
     assert events == ["project", "phase", "phase", "points", "waiting"]
     tracker.points(1, 3)  # no change: nothing published
     assert len(store.entries("progress")) == 5
@@ -353,7 +353,7 @@ def test_steps_live_progress_and_messages(home_store, project_dir, monkeypatch):
     state = tracker.state
     assert state["working"] == "Writing calc.py" and state["tally"] == "1/2 files"
     assert state["found"] == "2/0 gives a clear error" and state["latest"] == "💡 2/0 gives a clear error"
-    assert [(e["line"], e["kind"]) for _, e in store.entries("output")] == [
+    assert [(entry["line"], entry["kind"]) for _, entry in store.entries("output")] == [
         ("   ✅ Wrote calc.py (12 lines)", "done"), ("   💡 2/0 gives a clear error", "found")]
     monkeypatch.setattr(Tracker, "QUIET_EVERY", 1000)
     tracker.heard(Message("text", "next line"))  # a quiet change waits to be published with the next
@@ -395,12 +395,12 @@ def test_a_run_keeps_its_calls_and_output_in_its_project(project_dir, make_model
     model.log = Log(store, "events")
     fake_ollama.reply("ok")
     model.ask("s", [Part("Q", "q", True)], "Ask")
-    assert [e["reply"] for _, e in store.entries("events") if "reply" in e] == ["ok"]
+    assert [event["reply"] for _, event in store.entries("events") if "reply" in event] == ["ok"]
     tracker = Tracker("calc")
     tracker.project(store, "abc123", project_dir)
     say.follow(tracker.heard)
     say.done("Wrote calc.py")
-    assert [e["line"] for _, e in store.entries("output")] == ["✅ Wrote calc.py"]
+    assert [event["line"] for _, event in store.entries("output")] == ["✅ Wrote calc.py"]
 
 
 @pytest.mark.spec("PRJ-16")

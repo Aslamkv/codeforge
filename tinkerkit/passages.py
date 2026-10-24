@@ -87,10 +87,10 @@ class Cleaner:
         code is kept, as a command repeated on two pages is still that command."""
         counts = {}
         for page in pages:
-            for key in {(site(page.url), normal(b.text)) for b in page.blocks if b.kind != "code"}:
+            for key in {(site(page.url), normal(block.text)) for block in page.blocks if block.kind != "code"}:
                 counts[key] = counts.get(key, 0) + 1
-        return [Page(page.url, page.fetched, [b for b in page.blocks if b.kind == "code"
-                                              or counts[(site(page.url), normal(b.text))] < 2])
+        return [Page(page.url, page.fetched, [block for block in page.blocks if block.kind == "code"
+                                              or counts[(site(page.url), normal(block.text))] < 2])
                 for page in pages]
 
     @staticmethod
@@ -151,7 +151,7 @@ class MainBlocks(html.parser.HTMLParser):
         if self.skipping or self.not_content(tag, attributes):
             self.skipping += 1
             return
-        if (tag in ("main", "article") or attributes.get("role") == "main") and self.main_depth is None:
+        if PageText.opens_main(tag, attributes) and self.main_depth is None:
             self.main_depth = self.depth
         if tag == "a":
             self.links += 1
@@ -193,7 +193,7 @@ class MainBlocks(html.parser.HTMLParser):
         """The block read so far, kept unless it is empty or a paragraph that is mostly links (a heading
         that links to itself is still a heading)."""
         text = "".join(self.pieces).strip("\n") if self.kind == "code" else " ".join("".join(self.pieces).split())
-        if text.strip() and (self.kind != "text" or self.link_chars < LINK_ONLY * len(text)):
+        if text.strip() and (self.kind != "text" or not mostly_links(self.link_chars, text)):
             self.all.append(Block(self.kind, text))
             if self.main_depth is not None and self.main_depth > 0:
                 self.main.append(Block(self.kind, text))
@@ -243,8 +243,8 @@ def text_blocks(text):
 
     def close(kind="text"):
         paragraph = "\n".join(held).strip("\n") if kind == "code" else " ".join(" ".join(held).split())
-        linked = sum(len(m) for m in MARKDOWN_LINK.findall(paragraph))
-        if paragraph.strip() and (kind == "code" or linked < LINK_ONLY * len(paragraph)):
+        linked = sum(len(link) for link in MARKDOWN_LINK.findall(paragraph))
+        if paragraph.strip() and (kind == "code" or not mostly_links(linked, paragraph)):
             blocks.append(Block(kind, paragraph))
         held.clear()
 
@@ -265,10 +265,15 @@ def text_blocks(text):
     return blocks
 
 
+def mostly_links(link_chars, text):
+    """Whether a paragraph is mostly the words of its links (a list of links, not prose)."""
+    return link_chars >= LINK_ONLY * len(text)
+
+
 def shingles(text):
     """The text's 3-word runs (its words, when it has fewer than 3)."""
     found = words(text)
-    return {tuple(found[i:i + 3]) for i in range(len(found) - 2)} or {tuple(found)}
+    return {tuple(found[start:start + 3]) for start in range(len(found) - 2)} or {tuple(found)}
 
 
 def repeats(a, b):

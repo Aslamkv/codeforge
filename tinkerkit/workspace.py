@@ -49,9 +49,11 @@ class Toolchain:
     def __init__(self, data=None):
         data = data if isinstance(data, dict) else {}
         setup = self.command_list(data.get("setup"))
-        self.setup = [c for c in setup if not self.ENV_TARGET.search(c) and not self.MACHINE_RE.search(c)]
-        self.dropped = [c for c in setup if self.ENV_TARGET.search(c)]  # Tinker makes .env itself
-        self.machine = [c for c in setup if self.MACHINE_RE.search(c)]  # never run: it changes the machine
+        self.setup = [command for command in setup if not self.ENV_TARGET.search(command)
+                      and not self.MACHINE_RE.search(command)]
+        self.dropped = [command for command in setup if self.ENV_TARGET.search(command)]  # Tinker makes .env itself
+        # never run: it changes the machine
+        self.machine = [command for command in setup if self.MACHINE_RE.search(command)]
         self.use = self.command_list(data.get("use"))
         self.activate = str(data.get("activate") or "").strip()
         for key in self.COMMANDS:
@@ -62,7 +64,8 @@ class Toolchain:
     @staticmethod
     def command_list(value):
         commands = value or []
-        return [str(c) for c in (commands if isinstance(commands, list) else [commands]) if str(c).strip()]
+        return [str(command) for command in (commands if isinstance(commands, list) else [commands])
+                if str(command).strip()]
 
     def __bool__(self):
         return bool(self.test_all and self.test_one)
@@ -101,7 +104,7 @@ class Toolchain:
         """The command as a person runs it: in the activated environment, when there is one."""
         return f"{self.activate} && {command}" if self.activate else command
 
-    def run_setup(self, ws, commands=None):
+    def run_setup(self, workspace, commands=None):
         """Run the setup commands (or only these of them, quietly: a try again): (ok, what failed, the
         commands that wait for the network). A command that failed because the network did is set
         aside (the network is a plugin: it may come back) and the rest run; any other failure stops
@@ -109,10 +112,10 @@ class Toolchain:
         command failed even when it printed nothing."""
         waiting, again = [], commands is not None
         for command in commands if again else self.setup:
-            shell_command = self.in_environment_once_made(ws, command)
-            before = {p.name for p in Path(ws.root).iterdir()}
-            code, output = ws.run(shell_command, timeout=SETUP_TIMEOUT, quiet=again)
-            nested = self.new_project_made(Path(ws.root), before)
+            shell_command = self.in_environment_once_made(workspace, command)
+            before = {entry.name for entry in Path(workspace.root).iterdir()}
+            code, output = workspace.run(shell_command, timeout=SETUP_TIMEOUT, quiet=again)
+            nested = self.new_project_made(Path(workspace.root), before)
             if nested:
                 return False, self.nested_project_problem(command, nested), waiting
             if code != 0 and self.failed_for_the_network(output):
@@ -123,18 +126,18 @@ class Toolchain:
                 return False, self.setup_failure(command, code, output), waiting
         return True, "", waiting
 
-    def in_environment_once_made(self, ws, command):
+    def in_environment_once_made(self, workspace, command):
         """The command in the project's environment as soon as the setup has made it."""
-        active = self.activate and ws.run(self.activate, timeout=SETUP_TIMEOUT, quiet=True)[0] == 0
+        active = self.activate and workspace.run(self.activate, timeout=SETUP_TIMEOUT, quiet=True)[0] == 0
         return self.shell(command) if active else command
 
     @staticmethod
     def new_project_made(root, before):
         """The folder a setup command just made that holds a project of its own (a file named as one
         of this project's own top files, such as a second dependency file), or ""."""
-        own = {p.name for p in root.iterdir() if p.is_file()}
-        made = [p for p in root.iterdir() if p.is_dir() and p.name not in before]
-        return next((p.name for p in made if any((p / name).is_file() for name in own)), "")
+        own = {entry.name for entry in root.iterdir() if entry.is_file()}
+        made = [entry for entry in root.iterdir() if entry.is_dir() and entry.name not in before]
+        return next((entry.name for entry in made if any((entry / name).is_file() for name in own)), "")
 
     @staticmethod
     def nested_project_problem(command, nested):
@@ -149,30 +152,30 @@ class Toolchain:
         ended = f"timed out after {SETUP_TIMEOUT}s" if code is None else f"exit code {code}"
         return f"$ {command}  failed ({ended})\n{output.strip() or '(it printed nothing)'}"
 
-    def run_check(self, ws):
+    def run_check(self, workspace):
         """(ok, output): the fast compile or lint, when the toolchain has one."""
         if not self.check:
             return True, ""
-        code, output = ws.run(self.shell(self.check), quiet=True)
+        code, output = workspace.run(self.shell(self.check), quiet=True)
         return code == 0, f"$ {self.check}\n{output}"
 
-    def run_lint(self, ws):
+    def run_lint(self, workspace):
         """(ok, output) of the linter over the project, when the toolchain has one."""
         if not self.lint:
             return True, ""
-        code, output = ws.run(self.shell(self.lint), timeout=SETUP_TIMEOUT, quiet=True)
+        code, output = workspace.run(self.shell(self.lint), timeout=SETUP_TIMEOUT, quiet=True)
         return code == 0, output
 
-    def run_all(self, ws):
-        code, output = ws.run(self.shell(self.test_all), timeout=self.suite_timeout(), quiet=True)
+    def run_all(self, workspace):
+        code, output = workspace.run(self.shell(self.test_all), timeout=self.suite_timeout(), quiet=True)
         if timed_out(code, output):
             output += f"\n(the tests did not finish within {self.suite_timeout()}s: some test hangs)"
         return code, output
 
-    def run_test(self, ws, ref):
+    def run_test(self, workspace, ref):
         """(state, output) for one test: passes / fails; "no test ran" and "did not finish" are failures."""
         command = ref.command(self.test_one)
-        code, output = ws.run(self.shell(command), timeout=self.test_timeout(), quiet=True)
+        code, output = workspace.run(self.shell(command), timeout=self.test_timeout(), quiet=True)
         if timed_out(code, output):
             return "fails", self.hang_report(command, output)
         if code == 0 and not self.ran_no_test(output):
@@ -202,7 +205,7 @@ class Toolchain:
             return False
         if code in (126, 127) or code is None:
             return True
-        return not any(r.file in output or (r.name and r.name in output) for r in refs)
+        return not any(ref.file in output or (ref.name and ref.name in output) for ref in refs)
 
     @staticmethod
     def suite_timeout():
@@ -393,35 +396,40 @@ class Workspace:
         """{path: [(first, last, new lines)]} of the reply's LINES blocks that stay inside the lines
         shown (a file shown in part never takes a FILE block: refusal)."""
         edits = {}
-        for path, a, b, new in reply.line_edits():
+        for path, first, last, new in reply.line_edits():
             shown = windows.get(path)
             if not shown:
                 notes.append(f"{path}: LINES blocks only change files shown as numbered lines")
-            elif not shown[0] <= a <= b <= shown[1]:
-                notes.append(f"{path}: lines {a}-{b} are outside the lines shown ({shown[0]}-{shown[1]})")
+            elif not shown[0] <= first <= last <= shown[1]:
+                notes.append(f"{path}: lines {first}-{last} are outside the lines shown ({shown[0]}-{shown[1]})")
             else:
-                edits.setdefault(path, []).append((a, b, new))
+                edits.setdefault(path, []).append((first, last, new))
         return edits
 
     @staticmethod
     def without_overlaps(path, edits, notes):
         """The edits, but one that overlaps an earlier one."""
         taken = []
-        for a, b, new in edits:
-            if any(not (b < x or a > y) for x, y, _ in taken):
-                notes.append(f"{path}: lines {a}-{b} overlap an earlier LINES block; kept the earlier one")
+        for first, last, new in edits:
+            if any(Workspace.overlap(first, last, taken_first, taken_last) for taken_first, taken_last, _ in taken):
+                notes.append(f"{path}: lines {first}-{last} overlap an earlier LINES block; kept the earlier one")
             else:
-                taken.append((a, b, new))
+                taken.append((first, last, new))
         return taken
 
     @staticmethod
+    def overlap(first, last, other_first, other_last):
+        """Whether two ranges of lines share a line."""
+        return not (last < other_first or first > other_last)
+
+    @staticmethod
     def edited(lines, edits):
-        for a, b, new in sorted(edits, key=lambda edit: edit[0], reverse=True):  # bottom up: numbers stay true
-            lines[a - 1:b] = new
+        for first, last, new in sorted(edits, key=lambda edit: edit[0], reverse=True):  # bottom up: numbers stay true
+            lines[first - 1:last] = new
         return lines
 
     def snapshot(self, paths):
-        return {p: (self.read(p) if self.exists(p) else None) for p in paths}
+        return {path: (self.read(path) if self.exists(path) else None) for path in paths}
 
     def revert(self, change):
         self.restore(change.backups)
@@ -440,7 +448,7 @@ class Workspace:
         if not example.is_file() or env.is_file():
             return
         env.write_text(self.env_without_placeholders(example.read_text(errors="replace")))
-        unset = [l.split("=")[0] for l in env.read_text().splitlines() if l.endswith("=")]
+        unset = [line.split("=")[0] for line in env.read_text().splitlines() if line.endswith("=")]
         say.done(f"Created {ENV_FILE} from {ENV_EXAMPLE}" + (f"; set {', '.join(unset)} in it" if unset else ""))
 
     @staticmethod
@@ -477,7 +485,7 @@ class Change:
 
     @property
     def created(self):
-        return [p for p, old in self.backups.items() if old is None]
+        return [path for path, old in self.backups.items() if old is None]
 
 
 class TaughtCommands:
@@ -611,7 +619,8 @@ class TaughtCommands:
     def all():
         """{name: entry} of the commands taught (one that is not an alias or a program is an error)."""
         commands = Home.store().items("commands")
-        broken = [name for name, e in commands.items() if not (isinstance(e, dict) and e.get("kind") in ("alias", "program"))]
+        broken = [name for name, entry in commands.items() if not (isinstance(entry, dict)
+                                                                   and entry.get("kind") in ("alias", "program"))]
         if broken:
             raise SystemExit(f"Tinker's commands {', '.join(broken)} are neither an alias nor a program: forget them "
                              f"with tinker learn NAME none, and teach them again")
@@ -626,7 +635,7 @@ class TaughtCommands:
         """The command with each alias it uses replaced by what it stands for (for SPEC.md and the
         README: they work for anyone)."""
         for name, definition in TaughtCommands.aliases().items():
-            command = TaughtCommands.name_re(name).sub(lambda m, meant=definition: meant, command)
+            command = TaughtCommands.name_re(name).sub(lambda match, meant=definition: meant, command)
         return command
 
     @staticmethod
@@ -672,17 +681,18 @@ class TestRef:
     def command(self, template):
         return template.replace("{file}", self.file).replace("{name}", self.name).replace("{id}", str(self))
 
-    def present(self, ws):
-        return ws.exists(self.file) and (not self.name or self.name_at(ws.read(self.file), self.name) >= 0)
+    def present(self, workspace):
+        return workspace.exists(self.file) and (not self.name or self.name_at(workspace.read(self.file), self.name) >= 0)
 
-    def excerpt(self, ws, names):
+    def excerpt(self, workspace, names):
         """The test's own lines (from its name to the next known test of the file), after the
         file's opening lines (imports, shared setup)."""
-        text = ws.read(self.file)
+        text = workspace.read(self.file)
         start = self.name_at(text, self.name)
         if start < 0:
             return text
-        others = [p for p in (self.name_at(text, n) for n in names if n != self.name) if p >= 0]
+        others = [position for position in (self.name_at(text, name) for name in names if name != self.name)
+                  if position >= 0]
         line_start, end = self.span(text, names)
         first = text.rfind("\n", 0, min([start] + others)) + 1
         if first >= line_start:
@@ -694,17 +704,22 @@ class TestRef:
     def opening_lines(before_first_test):
         """The file's first lines, without the blank lines and decorators of its first test."""
         head = before_first_test.splitlines()[:15]
-        while head and (not head[-1].strip() or head[-1].strip().startswith(("@", "#[", "["))):
+        while head and TestRef.blank_or_decorator(head[-1]):
             head.pop()
         return head
 
-    def remove(self, ws, names):
+    @staticmethod
+    def blank_or_decorator(line):
+        """Whether a line is blank or a decorator (@ in Python, #[ in Rust, [ in C#)."""
+        return not line.strip() or line.strip().startswith(("@", "#[", "["))
+
+    def remove(self, workspace, names):
         """The test's own lines cut from its file (a test of a withdrawn criterion); True if it was there."""
-        text = ws.read(self.file)
+        text = workspace.read(self.file)
         if not self.name or self.name_at(text, self.name) < 0:
             return False
         start, end = self.span(text, names)
-        ws.write(self.file, text[:start].rstrip() + "\n\n\n" + text[end:].lstrip() if text[end:].strip()
+        workspace.write(self.file, text[:start].rstrip() + "\n\n\n" + text[end:].lstrip() if text[end:].strip()
                  else text[:start].rstrip() + "\n")
         return True
 
@@ -712,7 +727,8 @@ class TestRef:
         """(start, end) of the test's own lines in its file's text: from its definition (with the
         decorators above it) to the definition of the next known test, or the end of the file."""
         start = self.name_at(text, self.name)
-        later = sorted(p for p in (self.name_at(text, n) for n in names if n != self.name) if p > start)
+        later = sorted(position for position in (self.name_at(text, name) for name in names if name != self.name)
+                       if position > start)
         end = self.definition_start(text, later[0]) if later else len(text)
         return self.definition_start(text, start), end
 
@@ -752,16 +768,17 @@ class Output:
     def key_line(output, limit=200):
         """The line that says what went wrong: the last error or exception line, else the first
         failure-looking line, else the last line (banners such as === FAILURES === skipped)."""
-        lines = [l.strip(" #") for l in output.splitlines() if l.strip(" #") and not Output.is_banner(l.strip(" #"))]
-        exact = [l for l in lines if Output.EXACT_ERROR_RE.search(l)]
+        lines = [line.strip(" #") for line in output.splitlines() if line.strip(" #")
+                 and not Output.is_banner(line.strip(" #"))]
+        exact = [line for line in lines if Output.EXACT_ERROR_RE.search(line)]
         if exact:
             return first_line(exact[-1], limit)
-        loose = [l for l in lines if Output.ERROR_LINE_RE.search(l)]
+        loose = [line for line in lines if Output.ERROR_LINE_RE.search(line)]
         return first_line((loose[:1] or lines[-1:] or ["no output"])[0], limit)
 
     @staticmethod
     def is_banner(line):
-        return sum(c in "=-_*~#+ " for c in line) >= len(line) / 2
+        return sum(char in "=-_*~#+ " for char in line) >= len(line) / 2
 
     @staticmethod
     def failure_text(output, limit=OUTPUT_CHARS):
@@ -779,8 +796,8 @@ class Output:
     @staticmethod
     def signature(output):
         """What identifies a failure, without timings, addresses and counts."""
-        lines = [l.strip() for l in output.splitlines() if l.strip()]
-        errors = [l for l in lines if Output.ERROR_LINE_RE.search(l)]
+        lines = [line.strip() for line in output.splitlines() if line.strip()]
+        errors = [line for line in lines if Output.ERROR_LINE_RE.search(line)]
         key = "\n".join((errors or lines)[-4:])
         return hashlib.sha1(Output.NOISE_RE.sub("#", key).encode()).hexdigest()[:12]
 
@@ -799,10 +816,10 @@ class Output:
         find module './moods'", ...) when it is one of `paths`: the test tool does not see the app's
         code (a search path, a package setting), which no change to the code fixes. Language-
         neutral: the usual not-found wordings, the name matched against the project's file names."""
-        stems = {Path(p).stem.lower() for p in paths} | {Path(p).parent.name.lower() for p in paths}
+        stems = {Path(path).stem.lower() for path in paths} | {Path(path).parent.name.lower() for path in paths}
         stems.discard("")
         for match in Output.NOT_FOUND_RE.finditer(output):
-            name = next(g for g in match.groups() if g).strip("./\\")
+            name = next(group for group in match.groups() if group).strip("./\\")
             if Output.names_a_module_of(name, stems):
                 return name
         return ""
@@ -828,8 +845,8 @@ class Output:
     def nearest_location(lines, index, reach=6):
         """The file named by the location nearest to lines[index] (within reach lines), or ""."""
         around = range(max(0, index - reach), min(len(lines), index + reach + 1))
-        for i in sorted(around, key=lambda i: abs(i - index)):
-            match = Output.LOCATION_RE.search(lines[i])
+        for candidate in sorted(around, key=lambda candidate: abs(candidate - index)):
+            match = Output.LOCATION_RE.search(lines[candidate])
             if match:
                 return match.group(1)
         return ""
@@ -844,8 +861,8 @@ class Output:
         """Project files an output refers to, most mentioned first: by their path (also within a
         longer one, such as an absolute path), else by their name alone; never inside another file's
         name (count.py is not mentioned by tests/test_count.py)."""
-        counts = [(-n, path) for path in paths if (n := Output.mentions(output, path))]
-        return [p for _, p in sorted(counts)]
+        counts = [(-count, path) for path in paths if (count := Output.mentions(output, path))]
+        return [path for _, path in sorted(counts)]
 
     @staticmethod
     def mentions(output, path):
@@ -860,14 +877,14 @@ class FileView:
     a file shown in part is much harder to change. Records what was shown."""
 
     def __init__(self, workspace, fixed, candidates, tail=(), output="", hints="", windows=2):
-        self.ws, self.fixed, self.tail = workspace, list(fixed), list(tail)
+        self.workspace, self.fixed, self.tail = workspace, list(fixed), list(tail)
         self.candidates = list(dict.fromkeys(candidates))
         self.output, self.hints, self.max_windows = output, hints, windows
         self.whole, self.windows = set(), {}
 
     def __call__(self, limit):
         self.whole, self.windows = set(), {}
-        files = self.file_parts(room=limit - sum(p.floor_size() for p in self.fixed if p.required) - 300)
+        files = self.file_parts(room=limit - sum(part.floor_size() for part in self.fixed if part.required) - 300)
         how = [Part("Changing a file shown in part", Prompts.LINES_HOWTO, True)] if self.windows else []
         return self.fixed + files + how + self.tail
 
@@ -875,7 +892,7 @@ class FileView:
         """Each candidate whole, or in a window, while there is room."""
         files = []
         for path in self.candidates:
-            if room < 250 or not self.ws.exists(path):
+            if room < 250 or not self.workspace.exists(path):
                 continue
             part = self.whole_file(path, room) or self.window(path, room)
             if part:
@@ -888,7 +905,7 @@ class FileView:
         return self.whole | set(self.windows)
 
     def whole_file(self, path, room):
-        part = Part(f"File {path}", self.ws.read(path), True, exact=True)
+        part = Part(f"File {path}", self.workspace.read(path), True, exact=True)
         if part.size() <= room:
             self.whole.add(path)
             return part
@@ -897,7 +914,7 @@ class FileView:
     def window(self, path, room):
         if len(self.windows) >= self.max_windows or room < 700:
             return None
-        lines = self.ws.read(path).splitlines()
+        lines = self.workspace.read(path).splitlines()
         first, last, body = self.window_view(lines, self.focus_line(path, lines, self.output, self.hints), room - 140)
         self.windows[path] = (first, last)
         return Part(f"File {path}, lines {first}-{last} of {len(lines)} (numbered; the rest is not shown)",
@@ -930,7 +947,7 @@ class FileView:
     def window_view(lines, center, room):
         """Numbered lines around `center` that fit in `room` chars: (first, last, text)."""
         start = end = max(1, min(center, len(lines)))
-        size = lambda a, b: sum(len(lines[i - 1]) + 7 for i in range(a, b + 1))
+        size = lambda first, last: sum(len(lines[line_number - 1]) + 7 for line_number in range(first, last + 1))
         grown = True
         while grown:
             grown = False
@@ -938,7 +955,8 @@ class FileView:
                 start, grown = start - 1, True
             if end < len(lines) and size(start, end + 1) <= room:
                 end, grown = end + 1, True
-        return start, end, "\n".join(f"{i:>4}| {lines[i - 1]}" for i in range(start, end + 1))
+        return start, end, "\n".join(f"{line_number:>4}| {lines[line_number - 1]}"
+                                     for line_number in range(start, end + 1))
 
 
 class ToolError(Exception):

@@ -66,8 +66,8 @@ class Fetcher:
             sites.setdefault(site_of(url), []).append(index)
         results = [None] * len(urls)
         with concurrent.futures.ThreadPoolExecutor(max_workers=max(1, min(self.workers, len(sites) or 1))) as pool:
-            for indexes, got in zip(sites.values(), pool.map(lambda found: self.fetch_site([urls[i] for i in found], kind),
-                                                             sites.values())):
+            fetched_sites = pool.map(lambda found: self.fetch_site([urls[at] for at in found], kind), sites.values())
+            for indexes, got in zip(sites.values(), fetched_sites):
                 for index, fetched in zip(indexes, got):
                     results[index] = fetched
         return results
@@ -216,12 +216,12 @@ class Connections:
         parts = urllib.parse.urlsplit(url)
         path = (parts.path or "/") + (f"?{parts.query}" if parts.query else "")
         try:
-            return self.ask(self.to(parts), path, headers, max_bytes)
+            return self.response(self.connection_to(parts), path, headers, max_bytes)
         except self.DROPPED:
             self.open.pop((parts.scheme, parts.netloc)).close()
-            return self.ask(self.to(parts), path, headers, max_bytes)
+            return self.response(self.connection_to(parts), path, headers, max_bytes)
 
-    def to(self, parts):
+    def connection_to(self, parts):
         key = (parts.scheme, parts.netloc)
         if key not in self.open:
             self.open[key] = (http.client.HTTPSConnection(parts.netloc, timeout=self.timeout,
@@ -231,7 +231,7 @@ class Connections:
         return self.open[key]
 
     @staticmethod
-    def ask(connection, path, headers, max_bytes):
+    def response(connection, path, headers, max_bytes):
         connection.request("GET", path, headers=headers)
         response = connection.getresponse()
         body = response.read(max_bytes)
