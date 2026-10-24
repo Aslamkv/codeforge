@@ -226,7 +226,11 @@ class SlotLearner:
             self.pages.update(searched=len(usable), failed=len(pages) - len(usable))
             self.tried.append(f"fetched {len(picked)} page(s), {len(usable)} with usable text")
             say.info(f"Read {len(usable)} of {len(picked)} page(s) found", "📄")
+        self.outcome(f"{len(usable)} of {len(picked)} page(s) read")
         return [page for page, _ in usable], [result for _, result in usable]
+
+    def outcome(self, text):
+        self.learner.outcome(text)
 
     @staticmethod
     def page_of(fetched):
@@ -252,13 +256,15 @@ class SlotLearner:
 
     def asked_plan(self, results):
         """The model's plan (the first model call), from the topic and the titles and snippets of the pages fetched."""
-        self.learner.step("plan", f"{self.model.name} reads what was found to tell what {self.topic} is, how to "
-                                  f"check the version you have, and which site is its documentation…", "🤔")
-        plan = self.model.ask_until_usable(Prompts.SLOT_PLAN_SYSTEM, self.plan_parts(results), "Plan learning",
-                                           lambda reply: read_plan(reply.json()), attempts=2)
+        self.learner.step("plan", f"Working out what {self.topic} is, how to check the version you have, and where "
+                                  f"its documentation is…", "🤔")
+        with say.working_on(f"Working out what {self.topic} is, from {len(results)} page(s) found"):
+            plan = self.model.ask_until_usable(Prompts.SLOT_PLAN_SYSTEM, self.plan_parts(results), "Plan learning",
+                                               lambda reply: read_plan(reply.json()), attempts=2)
         if plan is None:
             raise SystemExit(f"{self.model.name} gave no usable plan for learning {self.topic}. Nothing was saved.")
-        say.info(f"{plan['name']} is a {plan['kind']}: {plan['summary']}", "🧭")
+        say.found(f"{plan['name']} is a {plan['kind']}: {plan['summary']}")
+        self.outcome(f"{plan['name']}, a {plan['kind']}")
         if plan["docs"]["root"]:
             with say.section():
                 say.info(f"Documentation: {plan['docs']['root']}", "📍")
@@ -284,12 +290,14 @@ class SlotLearner:
             pages += self.doc_pages(site, Library.slug(tool["name"]), tool["docs"],
                                     version_of(machine, [tool["command"]]), [TOOL_DOCS],
                                     int(Config.get("tool_docs_pages")))
+        self.outcome(f"{len(pages)} page(s)" + (f" of {plan['name']} {version}" if version else ""))
         return pages
 
     def doc_pages(self, site, slug, docs, version, wanted, cap):
         if not (docs.get("root") or docs.get("versioned")) or cap <= 0:
             return []
-        pages, key, kept = site.pages(slug, docs, version, wanted, cap)
+        with say.working_on(f"Reading the {slug} documentation" + (f" for {version}" if version else "")):
+            pages, key, kept = site.pages(slug, docs, version, wanted, cap)
         self.docs[slug] = key or "not reachable"
         self.pages.update(**{"kept docs" if kept else "docs": len(pages)})
         where = "the copy saved last time" if kept else docs.get("versioned") or docs.get("root")
@@ -342,12 +350,16 @@ class SlotLearner:
     def digested(self, plan, version, selected):
         """DIGEST: each slot's passages read for the facts that answer its question (one call per slot that has
         passages), each fact citing its passages."""
-        self.learner.step("digest", f"{self.model.name} is reading the passages, one question at a time "
-                                    f"(the slow part)…", "🧠")
-        facts = []
-        for slot in web_slots(plan["profile"]):
-            if selected.get(slot.id):
-                facts += self.slot_facts(slot, plan, version, selected[slot.id])
+        self.learner.step("digest", "Reading the passages for answers, one question at a time (the slow part)…",
+                          "🧠")
+        asked = [slot for slot in web_slots(plan["profile"]) if selected.get(slot.id)]
+        facts, answered = [], 0
+        for done, slot in enumerate(asked, 1):
+            with say.working_on(f"Learning about {label(slot.id)} ({done} of {len(asked)})"):
+                found = self.slot_facts(slot, plan, version, selected[slot.id])
+            facts, answered = facts + found, answered + bool(found)
+            say.tally(f"{done}/{len(asked)} questions · {len(facts)} fact(s)")
+        self.outcome(f"{answered} of {len(asked)} question(s) answered, {len(facts)} fact(s)")
         return facts
 
     def slot_facts(self, slot, plan, version, passages):
@@ -360,6 +372,7 @@ class SlotLearner:
         with say.section():
             if found:
                 say.done(f"{label(slot.id)}: {len(found)} fact(s) from {len(passages)} passage(s)")
+                say.found(first_line(found[0]["text"], 200))
             else:
                 say.skip(f"{label(slot.id)}: nothing found in {len(passages)} passage(s)")
         return Learner.add_facts([], found)
@@ -384,7 +397,8 @@ class SlotLearner:
             if pages:
                 pool += self.cleaner.pool(pages, known=pool)
                 passages = self.selected(selector, plan, version, pool, [slot])[slot.id]
-                found += self.slot_facts(slot, plan, version, passages) if passages else []
+                with say.working_on(f"Learning about {label(slot.id)} from {len(pages)} more page(s)"):
+                    found += self.slot_facts(slot, plan, version, passages) if passages else []
         return found
 
     def extra_pages(self, query, plan):
@@ -426,6 +440,7 @@ class SlotLearner:
         Library.save(slug, entry)
         say.info(f"Saved {len(facts)} fact(s) about {plan['name']} from {len(entry['sources'])} page(s) as {slug}"
                  + (" (some questions are still open)" if entry["status"] == "incomplete" else ""), "💾")
+        self.outcome(f"{len(facts)} fact(s) and {len(rules)} rule(s)")
         if language:
             self.learner.replace_proven(slug, entry)
         self.learner.index(slug, entry)

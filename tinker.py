@@ -251,7 +251,7 @@ try:  # chat channels are a plugin: without tinkerkit/channels.py, Tinker works 
     from tinkerkit import channels
 except ImportError:
     channels = None
-from tinkerkit.workspace import TaughtCommands, Toolchain
+from tinkerkit.workspace import TaughtCommands, TestRef, Toolchain
 
 
 def main():
@@ -1711,7 +1711,20 @@ class CycleRunner:
             went = worker.run(cycle)
             if went is not False:
                 say.took(Tracker.done_words(phase), time.perf_counter() - started)
+        if self.s.tracker is not None:
+            self.s.tracker.outcome(self.outcome(phase, cycle))
         return went
+
+    def outcome(self, phase, cycle):
+        """What came of a phase, as the person counts it: "9 point(s) to test", "4 file(s)", "6/9 spec points pass"."""
+        criteria = self.p.cycle_criteria(cycle)
+        green, _, total = self.p.counts()
+        return {"spec": f"{len(criteria)} point(s) to test",
+                "design": f"{len(cycle.get('files', []))} file(s)",
+                "tests": f"{sum(TestRef(s['test']).present(self.s.ws) for s in criteria)}/{len(criteria)} "
+                         f"test(s) written",
+                "code": f"{len(cycle.get('code_done', []))} file(s) written",
+                "verify": f"{green}/{total} spec points pass"}.get(phase, "")
 
     @staticmethod
     def phase_class(phase):

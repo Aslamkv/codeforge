@@ -76,24 +76,26 @@ def ending(status, headline, details=()):
 
 class Asker:
     """tinker ask QUESTION: answered from what Tinker keeps alone (no web), as a person answers: only what is
-    asked, nothing more. While it thinks, one status line says so (on a terminal), and the tracker moves on."""
+    asked, nothing more. While it works, one status line says what on (on a terminal), and the tracker moves on."""
 
     def __init__(self, model, memory, tracker=None):
         self.model, self.memory, self.tracker = model, memory, tracker
 
     def answer(self, question):
         """The answer said, and nothing else; the ending."""
-        self.thinking("recall")
-        items = self.memory.about(question)
-        passages = Readings.passages(Readings.about(question, items), question)
+        self.on_to("recall")
+        with say.working_on(f"Looking through what Tinker keeps for: {first_line(question, 60)}"):
+            items = self.memory.about(question)
+            passages = Readings.passages(Readings.about(question, items), question)
         if not items and not passages:
             return self.said("I have not learned anything yet: I learn from builds (tinker task), tinker learn and "
                              "tinker read.")
-        self.thinking("answer")
-        return self.said(self.asked(question, items, passages))
+        self.on_to("answer")
+        read = f" and {len(passages)} passage(s) of what you gave it to read" if passages else ""
+        with say.working_on(f"Answering from {len(items)} thing(s) Tinker keeps{read}"):
+            return self.said(self.asked(question, items, passages))
 
-    def thinking(self, phase):
-        say.live("Thinking…")
+    def on_to(self, phase):
         if self.tracker is not None:
             self.tracker.phase(phase)
 
@@ -137,14 +139,16 @@ class Teacher:
         moved_on(self.tracker, "understand", "Working out what to check…", "🤔")
         parts = [Part("What Tinker keeps", numbered(items) or "(nothing yet)", True),
                  Part("What the person teaches", teaching, True)]
-        plan = self.model.ask_until_usable(Prompts.TEACH_SYSTEM, parts, "teach: what to check",
-                                           lambda reply: read_plan(reply.json(), len(items), marked(teaching),
+        with say.working_on(f"Working out what to check in what you taught, against {len(items)} thing(s) Tinker keeps"):
+            plan = self.model.ask_until_usable(Prompts.TEACH_SYSTEM, parts, "teach: what to check",
+                                               lambda reply: read_plan(reply.json(), len(items), marked(teaching),
                                                                        bool(self.readings)))
         if plan is None:
             raise SystemExit(f"{self.model.name} could not work out what to check; nothing changed")
         with say.part("What you taught", "📝"):
             for claim in plan["claims"]:
                 say.info(claim["text"], "👤" if claim["preference"] else "🔍")
+        self.learner.outcome(f"{len(plan['claims'])} claim(s), {len(plan['changes'])} change(s) asked for")
         return plan
 
     def checked(self, teaching, plan, items):
@@ -174,11 +178,13 @@ class Teacher:
         if not searches:
             return []
         moved_on(self.tracker, "search", "Searching the web for sources…", "🔎")
-        pages = Research(None).read(self.internet, searches)
+        with say.working_on(f"Reading the web: {len(searches)} search(es)"):
+            pages = Research(None).read(self.internet, searches)
         if not pages:
             say.warn(f"No web page found: {self.internet.why()}")
         for page in pages:
             say.info(f"Read {page['title'] or page['url']}", "📖")
+        self.learner.outcome(f"{len(pages)} page(s) read")
         return [{"source": page["url"], "text": f"{page['title']}\n{page['content']}"} for page in pages]
 
     def in_readings(self, claims):
@@ -203,8 +209,10 @@ class Teacher:
                                              for n, change in judged_changes(plan)), True),
                  Part("Evidence", "\n\n".join(f"[{n}] {e['source']}\n{e['text']}" for n, e in enumerate(evidence, 1)),
                       True)]
-        verdict = self.model.ask_until_usable(Prompts.JUDGE_SYSTEM, parts, "teach: weigh the evidence",
-                                              lambda reply: Verdict.read(reply.json(), plan, len(evidence)))
+        facts = sum(not claim["preference"] for claim in plan["claims"])
+        with say.working_on(f"Weighing {len(evidence)} piece(s) of evidence on {facts} fact(s) you taught"):
+            verdict = self.model.ask_until_usable(Prompts.JUDGE_SYSTEM, parts, "teach: weigh the evidence",
+                                                  lambda reply: Verdict.read(reply.json(), plan, len(evidence)))
         if verdict is None:
             raise SystemExit(f"{self.model.name} could not weigh the evidence; nothing changed")
         return verdict

@@ -94,15 +94,18 @@ class Exercise:
         name, earlier = exercise["language"], [p["task"] for p in exercise["projects"]]
         parts = [Part("Language", name, True), Part("Focus", exercise.get("focus") or "(none yet)", True),
                  Part("Earlier projects", "\n".join(f"- {task}" for task in earlier[-30:]) or "(none yet)", True)]
-        choice = self.model.ask_until_usable(Prompts.EXERCISE_PROJECT_SYSTEM, parts, "exercise: next project",
-                            lambda reply: read_choice(reply.json(), name, earlier))
+        focus = f", practising {exercise['focus']}" if exercise.get("focus") else ""
+        with say.working_on(f"Choosing practice project {len(earlier) + 1} in {name}{focus}"):
+            choice = self.model.ask_until_usable(Prompts.EXERCISE_PROJECT_SYSTEM, parts, "exercise: next project",
+                                lambda reply: read_choice(reply.json(), name, earlier))
         if choice is None:
             raise SystemExit(f"{self.model.name} could not choose a practice project; the exercise stopped, "
                              f"everything kept.")
         project = dict(choice, folder=str(free_folder(choice["folder"])), step=STEPS[0], started=now_text())
         exercise["projects"].append(project)
         Exercises.save(exercise)
-        say.info(f"Next practice: {project['task']}", "🎯")
+        say.found(f"Next practice: {project['task']}")
+        self.tracker.outcome(first_line(project["task"], 80))
         return project
 
     def build(self, exercise, project):
@@ -137,17 +140,21 @@ class Exercise:
         self.on_to("reflect")
         folder = Path(project["folder"])
         knowledge = Knowledge(exercise["language"], (run_of(folder) or {}).get("id"))
-        reflection = self.model.ask_until_usable(Prompts.EXERCISE_REFLECT_SYSTEM,
-                                reflection_parts(exercise, project, knowledge.known_lessons()),
-                                "exercise: lessons", lambda reply: read_reflection(reply.json()), attempts=2)
+        with say.working_on(f"Learning from what went wrong and what was slow in {folder.name}"):
+            reflection = self.model.ask_until_usable(Prompts.EXERCISE_REFLECT_SYSTEM,
+                                    reflection_parts(exercise, project, knowledge.known_lessons()),
+                                    "exercise: lessons", lambda reply: read_reflection(reply.json()), attempts=2)
         if reflection is None:
-            say.warn("No lessons from this project: the model gave nothing usable.")
+            say.warn("No lessons from this project: nothing usable came of looking back at it.")
             return
         names = [folder.name] + [Path(path).name for path in Project.load(folder).files]
         project["lessons"] = knowledge.add_lessons(reflection["lessons"], reflection["confirmed"], names)
         exercise["focus"] = reflection["focus"] or exercise.get("focus", "")
         say.done(f"{project['lessons']} new lesson(s), {len(reflection['confirmed'])} confirmed; next focus: "
                  f"{exercise['focus'] or '(none)'}")
+        lessons = [str(item.get("text", "")).strip() for item in reflection["lessons"]]
+        if any(lessons):
+            say.found(first_line(next(text for text in lessons if text), 200))
 
     def built(self, arguments):
         """A tinker of its own (arguments() says how to start it, from where it is), run to its end: its exit code.
@@ -160,11 +167,12 @@ class Exercise:
 
     def show_build(self, build):
         """The build's tracker (None before it keeps one) shown in the exercise's: its step after the exercise's,
-        what the model writes now, its spec points passing and its latest line."""
+        what it works on now, its spec points passing, what it found out and its latest line."""
         if not build:
             return
         self.tracker.change("build", quiet=True, doing=f"{self.doing} · {build.get('doing', '')}",
-                            live=build.get("live", ""), latest=build.get("latest", ""), passing=build.get("passing"))
+                            **{key: build.get(key, "") for key in ("working", "tally", "found", "latest")},
+                            passing=build.get("passing"))
 
     def stop_build(self):
         """The build that runs stopped as Ctrl-C stops it (it saves itself); killed when it does not stop in time."""

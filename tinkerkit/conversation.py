@@ -1014,7 +1014,8 @@ class Talk:
     @staticmethod
     def busy_note(running):
         if not running:
-            lines = ["⏳ **The model is busy or loading.** I'll answer here as soon as it is free."]
+            lines = ["⏳ **Getting ready to answer** (the AI model is loading, or finishing something). "
+                     "I'll answer here in a moment."]
         else:
             lines = ["⏸ **Pausing** " + "; ".join(r["brief"] for r in running) + " to answer you.",
                      "It goes on once you have your answer."]
@@ -1249,7 +1250,7 @@ class Research:
         if unusable:
             return self.ended(channel, chat, sent, "blocked", f"{head}\n{unusable}")
         busy = "; ".join(r["brief"] for r in now())
-        waits = f"\n⏳ _the model is busy with_ {busy}_: it answers after the current step_" if busy else ""
+        waits = f"\n⏸ _first finishing a step of_ {busy}_; your answer comes right after_" if busy else ""
         try:
             searches = self.searches(channel, chat, topic)
             searching = " · ".join(f"`{q}`" for q in searches)
@@ -1260,7 +1261,9 @@ class Research:
                 return self.ended(channel, chat, sent, "blocked",
                                   md(t"{head:md}\n🤷 **Nothing found on the web** for it: {internet.why()}"))
             self.on("write")
-            sent = channel.show(chat, sent, f"{head}\n📖 _read {len(pages)} pages; writing the answer_" + waits)
+            sites = " · ".join(dict.fromkeys(site_of(page["url"]) for page in pages))
+            sent = channel.show(chat, sent, md(t"{head:md}\n📖 _read {len(pages)} pages:_ {sites}\n"
+                                               t"⏳ _answering from what they say_") + waits)
             told = self.answer_from(channel, chat, topic, pages)
         except OllamaError as exc:
             return self.ended(channel, chat, sent, "blocked",
@@ -1384,6 +1387,7 @@ class Reporter:
 
     def update(self):
         self.last_edit = time.monotonic()
+        self.progress.turn()
         self.say(self.progress.text())
         if self.on_step:
             self.on_step()
@@ -1417,16 +1421,23 @@ class Reporter:
 
 class Progress:
     """A run's tracker (its snapshot), shown short for a chat: one message kept up to date (the steps
-    done, the one it is on with its clock, what the model is writing right now, how many spec points
-    pass, the latest line) and, when the run ends, its ending: how it ended and how to go on, or the
-    plan that waits for the person. It only shows the tracker's data: it never reads a run's printed
-    text for meaning."""
+    done and what came of them, what it works on now with its clock, how far it got, the latest thing
+    it found out, else its latest line) and, when the run ends, its ending: how it ended and how to go
+    on, or the plan that waits for the person. It only shows the tracker's data: it never reads a run's
+    printed text for meaning."""
     SAID = ("✅", "✏️", "📁")  # a phase Tinker says itself (Markup), not a step of the run's
     CHANGE_SIGNS = {"+": "➕", "~": "🔄"}
+    HOURGLASS = ("⏳", "⌛")  # flipped at each edit: the person sees it still goes on
 
     def __init__(self, title, phase=Tracker.STARTING, before=0.0):
         self.snapshot = {"title": title, "doing": phase, "step": None, "began": None, "steps": [], "passing": None,
-                         "live": "", "latest": "", "waiting": None, "ended": None, "before": before, "seconds": 0.0}
+                         "working": "", "tally": "", "found": "", "latest": "", "waiting": None, "ended": None,
+                         "before": before, "seconds": 0.0}
+        self.turns = 0
+
+    def turn(self):
+        """The hourglass flipped, for the next edit of the message."""
+        self.turns += 1
 
     def take(self, snapshot):
         """The tracker as it is now (the phase Tinker said stays until the run is on a step); True when that
@@ -1442,12 +1453,14 @@ class Progress:
         state = self.snapshot
         began = state.get("began")
         clock = f" · ⏱ {human_duration(time.time() - began)}" if began else ""
-        doing = state["doing"] if state["doing"].startswith(self.SAID) else md(t"**{state['doing']}**")
+        doing = self.on if self.on.startswith(self.SAID) else md(t"**{self.on}**")
         lines = [md(t"🔨 **{state['title']}**")] + [f"✅ {step}" for step in state.get("steps", [])]
-        lines += [f"▸ {doing}{clock}"]
-        lines += [md(t"⏳ _{state['live']}_")] if state.get("live") else []
-        lines += [md(t"📊 {self.passing}")] if self.passing else []
-        lines += [md(t"… {state['latest']}")] if state.get("latest") else []
+        lines += [f"▸ {doing}{clock} {self.HOURGLASS[self.turns % 2]}"]
+        lines += [md(t"📊 {self.got}")] if self.got else []
+        if state.get("found"):
+            lines += [md(t"💡 {state['found']}")]
+        elif state.get("latest"):
+            lines += [md(t"… {state['latest']}")]
         return "\n".join(lines)
 
     @property
@@ -1455,14 +1468,27 @@ class Progress:
         return self.snapshot["title"]
 
     @property
+    def on(self):
+        """What the run is on now: what it works on, with its phase's icon, else its phase."""
+        state = self.snapshot
+        if not state.get("working"):
+            return state["doing"]
+        return f"{Tracker.icon(state.get('step'))} {state['working']}".strip()
+
+    @property
     def passing(self):
         counts = self.snapshot.get("passing")
         return f"{counts[0]}/{counts[1]} spec points pass" if counts else ""
 
+    @property
+    def got(self):
+        """How far the run got: its spec points passing, and what it tallies."""
+        return " · ".join(part for part in (self.passing, self.snapshot.get("tally")) if part)
+
     def brief(self):
-        """Markup: the title, with the phase and the passing points."""
-        passing = f", {self.passing}" if self.passing else ""
-        return md(t"**{self.title}** ({Markup.plain(self.snapshot['doing']):md}{passing})")
+        """Markup: the title, with what it is on and how far it got."""
+        got = f", {self.got}" if self.got else ""
+        return md(t"**{self.title}** ({Markup.plain(self.on):md}{got})")
 
     def waiting(self):
         """The run ended with its plan waiting for the person to confirm or amend it."""
@@ -2168,6 +2194,11 @@ def keep_typing(channel, chat, done):
 
 def first_words(text, size=160):
     return " ".join(str(text).split())[:size]
+
+
+def site_of(url):
+    """The site a page is on, as a person names it: "https://www.python.org/downloads/" -> "python.org"."""
+    return re.sub(r"^(?:[a-z]+://)?(?:www\.)?", "", url).split("/", 1)[0]
 
 
 def built_project(name=""):

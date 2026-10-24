@@ -63,10 +63,11 @@ class TestWriter(Phase):
                 return
             current = self.ws.read(path)
             try:
-                reply = self.s.ask(Prompts.SPEC_TESTS_SYSTEM, self.prompt(cycle, path, todo, current, note),
-                                   f"Tests {'next to ' if current.strip() else ''}"
-                                   f"{path} ({len(todo)})",
-                                   max_reply=TESTS_MAX_TOKENS)  # past it, the thought is concluded
+                with say.working_on(f"Writing {len(todo)} test(s) in {path}: {', '.join(s['id'] for s in todo)}"):
+                    reply = self.s.ask(Prompts.SPEC_TESTS_SYSTEM, self.prompt(cycle, path, todo, current, note),
+                                       f"Tests {'next to ' if current.strip() else ''}"
+                                       f"{path} ({len(todo)})",
+                                       max_reply=TESTS_MAX_TOKENS)  # past it, the thought is concluded
             except PromptTooLarge as exc:
                 say.skip(f"Tests for {path} skipped: {exc}; verify writes them")
                 return
@@ -181,10 +182,14 @@ class CodeWriter(Phase):
         """The config files still missing (in one call), then one call per other file (not tests,
         not docs), in design order. .env is made by Tinker from .env.example, never by the model."""
         self.write_configs_first(cycle)
-        for path in self.pending(cycle, lambda kind: kind not in ("test", "docs")):
-            self.write_file(cycle, path)
+        pending = self.pending(cycle, lambda kind: kind not in ("test", "docs"))
+        for done, path in enumerate(pending, 1):
+            role = first_line(self.p.files.get(path, {}).get("role", ""), 60)
+            with say.working_on(f"Writing {path} ({done} of {len(pending)})" + (f": {role}" if role else "")):
+                self.write_file(cycle, path)
             cycle["code_done"].append(path)
             self.s.save()
+            say.tally(f"{done}/{len(pending)} files written")
 
     def write_configs_first(self, cycle):
         """The setup phase: the cycle's new config files (dependencies, the test tool's settings)
@@ -474,6 +479,7 @@ class Verifier(Phase):
             green, _, total = self.p.counts()
             if passed:
                 say.done(f"{step['id']} passes ({green}/{total} pass)")
+                say.found(f"Works now: {step['title']}")
             else:
                 say.info(f"{step['id']} is parked ({green}/{total} pass)", "⏸️")
 
@@ -499,7 +505,8 @@ class Verifier(Phase):
         """Whether the criterion passes after fixes; parked (False) when nothing helps, the files
         then back to how they were."""
         green, _, total = self.p.counts()
-        with say.part(f"{step['id']} ({green}/{total} pass): {step['title']}", "🎯"):
+        with say.part(f"{step['id']} ({green}/{total} pass): {step['title']}", "🎯"), \
+                say.working_on(f"Making {step['id']} pass: {first_line(step['title'], 80)}"):
             say.info(f"Test: {step['test']}", "🧪")
             return self.fixed(step, retry)
 

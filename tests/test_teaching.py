@@ -296,7 +296,9 @@ def test_ask_and_teach_report_through_a_tracker_and_run_as_tasks(kept, measured_
     out = capsys.readouterr().out
     assert out.startswith("Black formats it [1].") and out.count("Time taken") == 2
     assert ended[1][:2] == ("Teaching: ruff alone is enough, I prefer no mypy", "done")
-    assert "🤔 Worked out what to check" in ended[1][2] and "⚖️ Evidence weighed" in ended[1][2]
+    steps = [step.split(":")[0] for step in ended[1][2]]
+    assert "🤔 Worked out what to check" in steps and "⚖️ Evidence weighed" in steps
+    assert any(step.startswith("🤔 Worked out what to check: ") and "claim(s)" in step for step in ended[1][2])
     assert "ask" in conversation.LONG and "teach" in conversation.LONG
 
 WRONG = "The Craft says to write tests after the code"

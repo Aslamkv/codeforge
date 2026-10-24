@@ -385,7 +385,7 @@ class Model:
                 return read(reply)
             except (ValueError, ToolError, AttributeError, TypeError, KeyError) as exc:
                 self.note(f"{label.lower()} not usable: {exc}",
-                          "That answer could not be used; asking again" if attempt < attempts else "")
+                          f"{say.going_on()}: no usable result yet, trying again" if attempt < attempts else "")
                 parts = self.with_part(parts, Part("Note", f"Your previous reply was not usable ({exc}). Reply "
                                                            f"with ONLY the JSON.", True))
         return None
@@ -923,7 +923,7 @@ class Stream:
             say.live(self.status(now))
 
     def status(self, now):
-        return plainly(self.written, self.thinking, now - self.started, say.doing)
+        return plainly(say.going_on(), now - self.started)
 
     def complete(self, piece):
         """Checked when a piece may end a block or an object (or every 40 pieces)."""
@@ -953,11 +953,9 @@ class Stream:
             say.end_live()
 
 
-def plainly(written, thinking, seconds, doing=""):
-    """What the model is doing (or what the command named) and for how long, as a person reads it:
-    "thinking… 1m 41s (101s)"."""
+def plainly(doing, seconds):
+    """What goes on, as the command named it, and for how long: "Writing the spec… 1m 41s (101s)"."""
     seconds = round(seconds)
-    doing = doing or ("writing its answer" if written else "thinking" if thinking else "reading")
     return f"{doing}… {human_duration(seconds)}" + (f" ({seconds}s)" if seconds >= 60 else "")
 
 

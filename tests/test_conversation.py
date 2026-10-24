@@ -240,25 +240,41 @@ def test_console_receives_lines_until_exit():
 def snapshot(**state):
     """A run's tracker, as a run publishes it."""
     base = {"title": "calc: a calculator", "run": "abc123", "folder": "/tmp/projects/calc", "step": None,
-            "doing": Tracker.STARTING, "began": None, "steps": [], "passing": None, "live": "", "latest": "",
-            "waiting": None, "ended": None, "before": 0.0, "seconds": 0.0}
+            "doing": Tracker.STARTING, "began": None, "steps": [], "passing": None, "working": "", "tally": "",
+            "found": "", "latest": "", "waiting": None, "ended": None, "before": 0.0, "seconds": 0.0}
     return dict(base, **state)
 
 
 @pytest.mark.spec("CNV-8")
 def test_progress_shows_the_tracker():
     progress = Progress("a calculator", phase="✅ **Confirmed:** building it")
-    assert progress.text().splitlines() == ["🔨 **a calculator**", "▸ ✅ **Confirmed:** building it"]
+    assert progress.text().splitlines() == ["🔨 **a calculator**", "▸ ✅ **Confirmed:** building it ⏳"]
     assert progress.take(snapshot()) and "▸ ✅ **Confirmed:** building it" in progress.text()  # said until a step
     progress.take(snapshot(step="verify", doing=Tracker.STEPS["verify"][0], began=time.time() - 65,
                            steps=["🧠 Recalled what Tinker has learned", "📝 Spec written"], passing=[2, 3],
-                           live="Fix the code C2: 120 tok written, 0 tok thinking, 14s", latest="wrote calc.py"))
+                           latest="wrote calc.py"))
     assert progress.text().splitlines() == [
         "🔨 **calc: a calculator**", "✅ 🧠 Recalled what Tinker has learned", "✅ 📝 Spec written",
-        "▸ **🔁 Fixing until every test passes** · ⏱ 1m 5s", "⏳ _Fix the code C2: 120 tok written, 0 tok thinking, 14s_",
-        "📊 2/3 spec points pass", "… wrote calc.py"]
+        "▸ **🔁 Fixing until every test passes** · ⏱ 1m 5s ⏳", "📊 2/3 spec points pass", "… wrote calc.py"]
     assert progress.brief() == "**calc: a calculator** (🔁 Fixing until every test passes, 2/3 spec points pass)"
     assert not progress.take(progress.snapshot)  # nothing changed
+
+
+@pytest.mark.spec("CNV-8")
+def test_progress_says_what_the_run_works_on_how_far_it_got_and_what_it_found():
+    progress = Progress("Reading Atomic Habits")
+    progress.take(snapshot(title="Reading Atomic Habits", step="chapters", doing=Tracker.STEPS["chapters"][0],
+                           began=time.time() - 12, steps=["🧭 Chose the chapters to read: 3 core chapter(s) of 20"],
+                           working="Reading chapter 3, The 1% Rule (2 of 7)", tally="1/7 chapters · 4 things learned",
+                           found="Small habits compound like interest", latest="📖 Chapter 1: 4 things learned"))
+    assert progress.text().splitlines() == [
+        "🔨 **Reading Atomic Habits**", "✅ 🧭 Chose the chapters to read: 3 core chapter(s) of 20",
+        "▸ **📚 Reading chapter 3, The 1% Rule (2 of 7)** · ⏱ 12s ⏳", "📊 1/7 chapters · 4 things learned",
+        "💡 Small habits compound like interest"]
+    assert progress.brief() == ("**Reading Atomic Habits** (📚 Reading chapter 3, The 1% Rule (2 of 7), "
+                                "1/7 chapters · 4 things learned)")
+    progress.turn()  # the next edit: the hourglass flipped
+    assert progress.text().splitlines()[2].endswith(" ⌛") and not progress.take(progress.snapshot)
 
 
 @pytest.mark.spec("CNV-8")
@@ -353,7 +369,7 @@ def test_talk_reply(measured_model, fake_ollama, monkeypatch):
 def test_talk_without_a_model_says_so():
     assert Talk("cmds").reply(Recorder(), Message("1", "hi")).startswith("⚠️ **No model is in use yet**")
     assert Talk.busy_note([{"brief": "**calc**"}]) == "⏸ **Pausing** **calc** to answer you.\nIt goes on once you have your answer."
-    assert "busy or loading" in Talk.busy_note([])
+    assert "Getting ready to answer" in Talk.busy_note([])
 
 
 @pytest.mark.spec("CNV-12")
@@ -822,6 +838,7 @@ def test_research_in_a_chat(measured_model, fake_ollama, monkeypatch):
     fake_ollama.reply('{"searches": ["python release"]}').reply("**Python 3.14** came out in October [1].")
     Research(Talk("cmds")).researching(channel, "1", "the newest Python", lambda: [])
     final = channel.texts()[-1]
+    assert "📖 _read 2 pages:_ site1.org · site2.org\n⏳ _answering from what they say_" in channel.texts()[-2]
     assert final.startswith("🔎 **the newest Python**\n**Python 3.14** came out in October [1].")
     assert "📚 **Sources**\n[1] [Page 1](https://site1.org/python-release)\n[2] [Page 2](https://site2.org/python-release)" in final
     assert "[1] Page 1 (https://site1.org/python-release)\nPython 3.14 was released" in \
