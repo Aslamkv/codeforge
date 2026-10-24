@@ -131,8 +131,10 @@ class Reader:
         JSON keeps it: each number as text); its
         topic made, with nothing learned yet."""
         self.step("survey", "Reading its contents, foreword and index…", "🧭")
-        survey = self.model.ask_until_usable(Prompts.READ_SURVEY_SYSTEM, survey_parts(book), "Read: the reading plan",
-                                             lambda reply: read_survey(reply.json(), book), think=think())
+        with say.naming("getting to know it"):
+            survey = self.model.ask_until_usable(Prompts.READ_SURVEY_SYSTEM, survey_parts(book),
+                                                 "Read: the reading plan",
+                                                 lambda reply: read_survey(reply.json(), book), think=think())
         if survey is None:
             raise SystemExit(f"{self.model.name} could not make a reading plan; its text stays stored.")
         Readings.surveyed(entry, survey)
@@ -148,9 +150,10 @@ class Reader:
                                                                        else "") + "…", "📚")
         found = []
         for chapter in chapters:
-            facts = self.chapter_read(entry, book, survey, chapter, focus)
+            with say.naming(f"Chapter {chapter.number}, {chapter.title}: reading"):
+                facts = self.chapter_read(entry, book, survey, chapter, focus)
             found += Readings.learned(entry["number"], chapter.number, facts)
-            say.info(f"Chapter {chapter.number}, {chapter.title}: {len(facts)} fact(s)", "📖")
+            say.info(f"Chapter {chapter.number}, {chapter.title}: {learned(len(facts))}", STATES["read"])
         return found
 
     def chapter_read(self, entry, book, survey, chapter, focus):
@@ -367,6 +370,13 @@ def progress(entry):
     book = Book.of(entry)
     readable = [c for c in book.chapters if c.state != "raw"]
     return f"{len(book.in_state('read'))} of {len(readable)} chapters read · {len(Readings.facts(entry))} fact(s)"
+
+
+def learned(count):
+    """What a chapter taught, as the person reads it: "nothing new", "1 thing learned", "4 things learned"."""
+    if not count:
+        return "nothing new"
+    return f"{count} thing{'s' if count > 1 else ''} learned"
 
 
 def think():

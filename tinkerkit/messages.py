@@ -41,6 +41,7 @@ class Messages:
 
     def __init__(self):
         self.depth, self.followers, self.log, self.drawn = 0, [], None, False
+        self.doing = ""  # what the live line says goes on, when a command names it (see naming)
 
     def title(self, text, icon=""):
         """A part of the output begins: at the top, a blank line sets it apart."""
@@ -126,6 +127,16 @@ class Messages:
             sys.__stdout__.flush()
             self.drawn = True
         self.tell(message)
+
+    @contextlib.contextmanager
+    def naming(self, doing):
+        """Inside, the live line says doing ("Chapter 2, Habits: reading"), as the person sees it, instead of what
+        the model does (thinking, writing)."""
+        before, self.doing = self.doing, doing
+        try:
+            yield
+        finally:
+            self.doing = before
 
     def end_live(self):
         if self.drawn:

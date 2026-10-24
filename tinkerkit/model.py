@@ -923,7 +923,7 @@ class Stream:
             say.live(self.status(now))
 
     def status(self, now):
-        return plainly(self.written, self.thinking, now - self.started)
+        return plainly(self.written, self.thinking, now - self.started, say.doing)
 
     def complete(self, piece):
         """Checked when a piece may end a block or an object (or every 40 pieces)."""
@@ -953,10 +953,11 @@ class Stream:
             say.end_live()
 
 
-def plainly(written, thinking, seconds):
-    """What the model is doing and for how long, as a person reads it: "thinking… 1m 41s (101s)"."""
+def plainly(written, thinking, seconds, doing=""):
+    """What the model is doing (or what the command named) and for how long, as a person reads it:
+    "thinking… 1m 41s (101s)"."""
     seconds = round(seconds)
-    doing = "writing its answer" if written else "thinking" if thinking else "reading"
+    doing = doing or ("writing its answer" if written else "thinking" if thinking else "reading")
     return f"{doing}… {human_duration(seconds)}" + (f" ({seconds}s)" if seconds >= 60 else "")
 
 

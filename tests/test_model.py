@@ -177,6 +177,20 @@ def test_stream_says_live_what_the_model_is_doing(monkeypatch):
 
 
 @pytest.mark.spec("MOD-9")
+def test_a_named_activity_is_said_instead_of_what_the_model_is_doing(monkeypatch):
+    clock = iter([0, 3, 6])
+    monkeypatch.setattr(model_module.time, "perf_counter", lambda: next(clock))
+    seen = []
+    say.follow(lambda message: seen.append(message.text) if message.kind == "live" else None)
+    stream = Stream("Read: chapter 2", None)
+    with say.naming("Chapter 2, Habits: reading"):
+        stream.take({"message": {"thinking": "hm"}})
+        stream.take({"message": {"content": "x"}})
+    assert seen == ["Chapter 2, Habits: reading… 3s", "Chapter 2, Habits: reading… 6s"]
+    assert say.doing == ""
+
+
+@pytest.mark.spec("MOD-9")
 def test_a_stream_that_writes_one_line_again_and_again_is_cut(monkeypatch):
     monkeypatch.setattr(model_module, "LOOP_LINES", 4)
     stream = Stream(None, None)
