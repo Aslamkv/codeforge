@@ -157,14 +157,14 @@ def test_channel_add_with_a_token_that_does_not_work(monkeypatch):
     assert Channels.settings() == {}
 
 
-@pytest.mark.spec("CHN-3")
+@pytest.mark.spec("CHN-5")
 def test_call_posts_form_fields_and_gives_the_result():
     api = BotAPI(sendMessage={"message_id": 7})
     assert telegram(api).call("sendMessage", chat_id="42", text="hi", parse_mode=None) == {"message_id": 7}
     assert api.calls == [("/botT0K/sendMessage", {"chat_id": "42", "text": "hi"})]
 
 
-@pytest.mark.spec("CHN-3")
+@pytest.mark.spec("CHN-5")
 def test_call_refused_and_dropped():
     with pytest.raises(ChannelError, match="Telegram refused getMe: 409"):
         telegram(BotAPI(getMe=(409, "Conflict"))).call("getMe")
@@ -174,7 +174,7 @@ def test_call_refused_and_dropped():
         telegram(BotAPI(getMe=[OSError("reset"), OSError("reset")])).call("getMe")
 
 
-@pytest.mark.spec("CHN-3")
+@pytest.mark.spec("CHN-5")
 def test_call_waits_out_too_many_requests(monkeypatch):
     slept = []
     monkeypatch.setattr(channels.time, "sleep", slept.append)
@@ -185,7 +185,7 @@ def test_call_waits_out_too_many_requests(monkeypatch):
         telegram(BotAPI(getMe=busy)).call("getMe")
 
 
-@pytest.mark.spec("CHN-4")
+@pytest.mark.spec("CHN-6")
 def test_receive(monkeypatch):
     updates = [
         {
@@ -205,14 +205,14 @@ def test_receive(monkeypatch):
     assert telegram(BotAPI(getUpdates=[OSError("down"), OSError("down")])).receive(1) == []
 
 
-@pytest.mark.spec("CHN-4")
+@pytest.mark.spec("CHN-6")
 def test_skip_waiting_moves_past_old_messages():
     channel = telegram(BotAPI(getUpdates=[[{"update_id": 99}]]))
     channel.skip_waiting()
     assert channel.offset == 100
 
 
-@pytest.mark.spec("CHN-4")
+@pytest.mark.spec("CHN-6")
 def test_offer_lists_the_commands_in_the_bots_menu():
     api = BotAPI(setMyCommands=True)
     telegram(api).offer([("use-model", "the model every build uses"), ("help", "x" * 300)])
@@ -223,7 +223,7 @@ def test_offer_lists_the_commands_in_the_bots_menu():
     telegram(BotAPI(setMyCommands=OSError("down"))).offer([("help", "this list")])
 
 
-@pytest.mark.spec("CHN-5")
+@pytest.mark.spec("CHN-7")
 def test_send_and_edit_post_html_with_a_plain_fallback():
     api = BotAPI(
         sendMessage=[(400, "Bad Request: can't parse entities"), {"message_id": 8}],
@@ -242,7 +242,7 @@ def test_send_and_edit_post_html_with_a_plain_fallback():
     assert channel.edit("42", None, "x") == 9
 
 
-@pytest.mark.spec("CHN-5")
+@pytest.mark.spec("CHN-7")
 def test_latest_and_delete():
     api = BotAPI(sendMessage=[{"message_id": 1}, {"message_id": 2}, {"message_id": 3}])
     channel = telegram(api)
@@ -253,7 +253,7 @@ def test_latest_and_delete():
     assert channel.latest("42", 2) and api.calls[-1][0].endswith("/deleteMessage")
 
 
-@pytest.mark.spec("CHN-5")
+@pytest.mark.spec("CHN-7")
 def test_ask_for_opens_the_reply_box_with_a_hint():
     api = BotAPI(sendMessage={"message_id": 4})
     assert telegram(api).ask_for("42", "✍️ **fix**", "x" * 100) == 4
@@ -261,7 +261,7 @@ def test_ask_for_opens_the_reply_box_with_a_hint():
     assert reply == {"force_reply": True, "input_field_placeholder": "x" * 64}
 
 
-@pytest.mark.spec("CHN-10")
+@pytest.mark.spec("CHN-9")
 def test_the_ledger_keeps_every_message_and_collects_them(monkeypatch):
     update = {"update_id": 1, "message": {"message_id": 4, "text": "task calc", "chat": {"id": 42}}}
     api = BotAPI(getUpdates=[[update]], sendMessage=[{"message_id": 1}, {"message_id": 2}, {"message_id": 3}])
@@ -295,7 +295,7 @@ def test_the_ledger_keeps_every_message_and_collects_them(monkeypatch):
     assert channel.clear() == 0 and Ledger.thing(1)["text"] == the_history_stays
 
 
-@pytest.mark.spec("CHN-6")
+@pytest.mark.spec("CHN-3")
 def test_ask_without_a_terminal(monkeypatch):
     monkeypatch.setattr(sys, "stdin", io.StringIO(""))
     assert ask("Channel name", "telegram") == "telegram"
@@ -303,7 +303,7 @@ def test_ask_without_a_terminal(monkeypatch):
         ask("Bot token", secret=True)
 
 
-@pytest.mark.spec("CHN-6")
+@pytest.mark.spec("CHN-3")
 def test_check_tries_a_dropped_network_again(monkeypatch, capsys):
     monkeypatch.setattr(channels.time, "sleep", lambda seconds: None)
     flaky = telegram(BotAPI(getMe=[OSError("x"), OSError("x"), {"username": "b"}]))
@@ -315,7 +315,7 @@ def test_check_tries_a_dropped_network_again(monkeypatch, capsys):
         ChannelCommand.check(telegram(BotAPI(getMe=(401, "no"))))
 
 
-@pytest.mark.spec("CHN-7")
+@pytest.mark.spec("CHN-4")
 def test_pair_serves_the_chat_its_sender_confirms(monkeypatch, capsys):
     updates = [
         {
@@ -335,7 +335,7 @@ def test_pair_serves_the_chat_its_sender_confirms(monkeypatch, capsys):
     assert sent and sent[0]["chat_id"] == "42" and "Paired with Tinker" in sent[0]["text"]
 
 
-@pytest.mark.spec("CHN-7")
+@pytest.mark.spec("CHN-4")
 def test_start_needs_a_channel_and_checks_it(monkeypatch):
     with pytest.raises(SystemExit, match="no channel is enabled"):
         ChannelCommand.run(["start"])
@@ -392,7 +392,7 @@ def sent_file(chat=42, size=10, name="My Book.epub"):
     ]
 
 
-@pytest.mark.spec("CHN-11")
+@pytest.mark.spec("CHN-10")
 def test_a_book_sent_in_a_chat_is_kept_and_read(tinker_home, home_store):
     api = BotAPI(
         getUpdates=sent_file(),
@@ -405,7 +405,7 @@ def test_a_book_sent_in_a_chat_is_kept_and_read(tinker_home, home_store):
     assert api.calls[-1][0] == "/file/botT0K/documents/file_1.epub" and "T0K" not in messages[0].text
 
 
-@pytest.mark.spec("CHN-11")
+@pytest.mark.spec("CHN-10")
 def test_a_book_that_cannot_be_taken_is_said_and_one_from_a_stranger_ignored(tinker_home, home_store):
     api = BotAPI(getUpdates=sent_file(size=30_000_000), sendMessage={"message_id": 9})
     assert telegram(api).receive(1) == []

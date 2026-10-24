@@ -212,11 +212,6 @@ class Cli:
 
     @staticmethod
     def known_command(argv):
-        old = next((word for word in argv if word.startswith("--") and word[2:] in Cli.COMMANDS), None)
-        if old:
-            raise SystemExit(
-                f"tinker: commands are written without --: tinker {old[2:]} (tinker help lists them)"
-            )
         if argv[0] not in Cli.COMMANDS:
             raise SystemExit(f"tinker: no command {argv[0]!r} (tinker help lists them)")
         return argv[0]
@@ -773,13 +768,6 @@ class Commands:
         what = self.args.exercise
         if what.lower() == "status":
             return exercising.show()
-        if what.split()[0].lower() in ("stop", "resume"):
-            raise SystemExit(
-                f"An exercise is a job: tinker {what.split()[0].lower()} #N (tinker jobs lists them)."
-            )
-        active = exercising.Exercises.active()
-        if active:
-            raise SystemExit(exercising.already_running(active))
         model = Commands.model_in_use(*Commands.checked_model(), "exercise")
         Commands.reported(
             f"Exercising {what}",

@@ -161,7 +161,7 @@ def test_pieces_split_between_lines_and_lose_no_text():
     assert "".join("".join(pieces(a_long_line, size=100)).split()) == "".join(a_long_line.split())
 
 
-@pytest.mark.spec("CNV-4")
+@pytest.mark.spec("CNV-5")
 @pytest.mark.parametrize(
     "text,command",
     [
@@ -185,7 +185,7 @@ def test_command_of(text, command):
     assert command_of(text, Desk.COMMANDS) == command
 
 
-@pytest.mark.spec("CNV-5")
+@pytest.mark.spec("CNV-6")
 def test_said_removes_tinker_before_a_command():
     channel = Recorder()
     assert (
@@ -197,7 +197,7 @@ def test_said_removes_tinker_before_a_command():
     assert channel.said("tinker resume abc") == "tinker resume abc"
 
 
-@pytest.mark.spec("CNV-5")
+@pytest.mark.spec("CNV-6")
 def test_show_edits_sends_and_deletes(monkeypatch):
     channel = Recorder()
     first = channel.show("1", None, "hello", status=True)
@@ -209,7 +209,7 @@ def test_show_edits_sends_and_deletes(monkeypatch):
     assert channel.show("1", two, "short") == [first[0]] and channel.log[-1] == ("delete", "1", two[1], "")
 
 
-@pytest.mark.spec("CNV-5")
+@pytest.mark.spec("CNV-6")
 def test_show_done_comes_to_the_bottom():
     channel = Recorder()
     old = channel.show("1", None, "working")
@@ -220,7 +220,7 @@ def test_show_done_comes_to_the_bottom():
     assert kept == new
 
 
-@pytest.mark.spec("CNV-6")
+@pytest.mark.spec("CNV-7")
 def test_listened_filters_chats_and_says_a_refusal_once(monkeypatch, capsys):
     channel = Recorder(chats=("1",), inbox=[Message("1", "hi"), Message("2", "stranger")])
     assert [message.text for message in channel.listened(0)] == ["hi"]
@@ -234,7 +234,7 @@ def test_listened_filters_chats_and_says_a_refusal_once(monkeypatch, capsys):
     assert capsys.readouterr().out.count("409 Conflict") == 1
 
 
-@pytest.mark.spec("CNV-6")
+@pytest.mark.spec("CNV-7")
 def test_only_one_process_claims_a_channel():
     one, two = Recorder("bot"), Recorder("bot")
     assert one.claim({"pid": 123}) is True
@@ -245,7 +245,7 @@ def test_only_one_process_claims_a_channel():
     assert Recorder("other").holder() == {}
 
 
-@pytest.mark.spec("CNV-7")
+@pytest.mark.spec("CNV-8")
 def test_console_shows_headlines_then_the_whole_message(monkeypatch):
     out = io.StringIO()
     monkeypatch.setattr(sys, "stdout", out)
@@ -260,7 +260,7 @@ def test_console_shows_headlines_then_the_whole_message(monkeypatch):
     assert out.getvalue().splitlines()[4].startswith("line two")
 
 
-@pytest.mark.spec("CNV-7")
+@pytest.mark.spec("CNV-8")
 def test_console_receives_lines_until_exit():
     console = ConsoleChannel()
     no_input_thread = object()
@@ -298,7 +298,7 @@ def snapshot(**state):
     return dict(base, **state)
 
 
-@pytest.mark.spec("CNV-8")
+@pytest.mark.spec("CNV-17")
 def test_progress_shows_the_tracker():
     progress = Progress("a calculator", phase="✅ **Confirmed:** building it")
     assert progress.text().splitlines() == ["🔨 **a calculator**", "▸ ✅ **Confirmed:** building it ⏳"]
@@ -328,7 +328,7 @@ def test_progress_shows_the_tracker():
     assert not progress.take(progress.snapshot)
 
 
-@pytest.mark.spec("CNV-8")
+@pytest.mark.spec("CNV-17")
 def test_progress_says_what_the_run_works_on_how_far_it_got_and_what_it_found():
     progress = Progress("Reading Atomic Habits")
     progress.take(
@@ -359,7 +359,7 @@ def test_progress_says_what_the_run_works_on_how_far_it_got_and_what_it_found():
     assert progress.text().splitlines()[2].endswith(" ⌛") and not progress.take(progress.snapshot)
 
 
-@pytest.mark.spec("CNV-8")
+@pytest.mark.spec("CNV-17")
 def test_progress_ending_of_a_done_run():
     progress = Progress("calc", before=60)
     progress.take(
@@ -408,7 +408,7 @@ PLAN = {
 }
 
 
-@pytest.mark.spec("CNV-8")
+@pytest.mark.spec("CNV-17")
 def test_progress_ending_of_a_plan_that_waits():
     progress = Progress("calc")
     progress.take(snapshot(waiting=PLAN))
@@ -431,7 +431,7 @@ def test_progress_ending_of_a_plan_that_waits():
     assert Progress.plan(dict(PLAN, kind="fix")).startswith("🐞 **Bug shown for calc**")
 
 
-@pytest.mark.spec("CNV-9")
+@pytest.mark.spec("CNV-18")
 def test_reporter_shows_the_tracker_and_ends_with_its_ending(home_store, monkeypatch):
     chats = ("1", "2")
     channel = Recorder(chats=chats)
@@ -452,7 +452,7 @@ def test_reporter_shows_the_tracker_and_ends_with_its_ending(home_store, monkeyp
     assert set(reporter.sent) == {("rec", "1"), ("rec", "2")}
 
 
-@pytest.mark.spec("CNV-9")
+@pytest.mark.spec("CNV-18")
 def test_a_reporter_without_a_tracker_shows_its_lines(monkeypatch):
     monkeypatch.setattr(conversation, "PROGRESS_EDIT_SECONDS", 1000)
     channel = Recorder()
@@ -461,7 +461,7 @@ def test_a_reporter_without_a_tracker_shows_its_lines(monkeypatch):
     assert learning.progress.snapshot["latest"] == "reading 4 pages"
 
 
-@pytest.mark.spec("CNV-11")
+@pytest.mark.spec("CNV-20")
 def test_talk_model_needs_a_measured_model(measured_model, tinker_home):
     from tinkerkit.settings import Config
 
@@ -470,7 +470,7 @@ def test_talk_model_needs_a_measured_model(measured_model, tinker_home):
     assert Talk.model() is None
 
 
-@pytest.mark.spec("CNV-11")
+@pytest.mark.spec("CNV-20")
 def test_talk_reply(measured_model, fake_ollama, monkeypatch):
     monkeypatch.setattr(conversation, "CHAT_CONTEXT_MESSAGES", 4)
     talk, channel = Talk("task; status"), Recorder()
@@ -492,7 +492,7 @@ def test_talk_reply(measured_model, fake_ollama, monkeypatch):
     assert talk.reply(channel, Message("1", "x")).startswith("⚠️ **The model did not answer:**")
 
 
-@pytest.mark.spec("CNV-11")
+@pytest.mark.spec("CNV-20")
 def test_talk_without_a_model_says_so():
     assert Talk("cmds").reply(Recorder(), Message("1", "hi")).startswith("⚠️ **No model is in use yet**")
     assert (
@@ -502,7 +502,7 @@ def test_talk_without_a_model_says_so():
     assert "Getting ready to answer" in Talk.busy_note([])
 
 
-@pytest.mark.spec("CNV-12")
+@pytest.mark.spec("CNV-22")
 def test_shell_proposes_one_command(measured_model, fake_ollama):
     shell, channel = Shell(Talk("cmds"), Path.cwd()), Recorder()
     fake_ollama.reply('{"command": "rm -rf build", "does": "deletes the build folder"}')
@@ -521,7 +521,7 @@ def test_shell_proposes_one_command(measured_model, fake_ollama):
     assert "It changes" not in shell.propose(channel, Message("1", "disk"), "", 300)
 
 
-@pytest.mark.spec("CNV-12")
+@pytest.mark.spec("CNV-22")
 def test_shell_runs_the_confirmed_command(tmp_path):
     shell, channel = Shell(Talk("cmds"), tmp_path), Recorder()
     shell.shell = "/bin/sh"
@@ -537,7 +537,7 @@ def test_shell_runs_the_confirmed_command(tmp_path):
     assert "🚫 _Not run:_ `ls`" in channel.texts()[-1]
 
 
-@pytest.mark.spec("CNV-13")
+@pytest.mark.spec("CNV-23")
 def test_research_reads_what_is_most_about_the_searches(monkeypatch):
     paragraphs = [
         "Python 3.14 released with free threading support and more " * 2,
@@ -552,7 +552,7 @@ def test_research_reads_what_is_most_about_the_searches(monkeypatch):
     assert Research.most_about("tiny", wanted) == "tiny"
 
 
-@pytest.mark.spec("CNV-13")
+@pytest.mark.spec("CNV-23")
 def test_research_searches_fall_back_to_the_topic(measured_model, fake_ollama):
     research = Research(Talk("cmds"))
     fake_ollama.reply("I would search the web.")
@@ -561,7 +561,7 @@ def test_research_searches_fall_back_to_the_topic(measured_model, fake_ollama):
     assert research.searches(Recorder(), "1", "python news") == ["a", "b", "c"]
 
 
-@pytest.mark.spec("CNV-14")
+@pytest.mark.spec("CNV-16")
 def test_running(home_store):
     ended = subprocess.Popen([sys.executable, "-c", "pass"])
     ended.wait()
@@ -636,7 +636,7 @@ def calls_of(script):
     return path.read_text().splitlines() if path.exists() else []
 
 
-@pytest.mark.spec("CNV-15")
+@pytest.mark.spec("CNV-11")
 def test_desk_answers_commands(desk):
     desk, channel, _ = desk
     assert desk.talk.commands == "task WHAT; status"
@@ -669,7 +669,7 @@ def test_desk_answers_commands(desk):
     assert replies["/Runs"] == "📚 **Runs**\n```\noutput of runs\n```"
 
 
-@pytest.mark.spec("CNV-15")
+@pytest.mark.spec("CNV-11")
 def test_a_command_that_deletes_and_exit_ask_first(desk):
     desk, channel, _ = desk
     assert desk.answer(Message("1", "clear memory"), channel) is None
@@ -679,7 +679,7 @@ def test_a_command_that_deletes_and_exit_ask_first(desk):
     wait_until(lambda: channel.closed)
 
 
-@pytest.mark.spec("CNV-15")
+@pytest.mark.spec("CNV-11")
 def test_a_task_runs_as_its_own_tinker_and_its_plan_waits(desk, home_store):
     desk, channel, script = desk
     say(desk, channel, "task a calculator")
@@ -695,7 +695,7 @@ def test_a_task_runs_as_its_own_tinker_and_its_plan_waits(desk, home_store):
     assert home_store.items("running") == {}
 
 
-@pytest.mark.spec("CNV-16")
+@pytest.mark.spec("CNV-12")
 def test_confirm_asks_a_new_projects_folder_once_then_builds(desk):
     desk, channel, script = desk
     say(desk, channel, "task a calculator")
@@ -710,7 +710,7 @@ def test_confirm_asks_a_new_projects_folder_once_then_builds(desk):
     assert desk.waiting_plan is None
 
 
-@pytest.mark.spec("CNV-16")
+@pytest.mark.spec("CNV-12")
 def test_confirm_of_a_feature_builds_at_once_and_amend_changes_it(desk):
     desk, channel, script = desk
     desk.waiting_plan = {
@@ -736,7 +736,7 @@ def test_confirm_of_a_feature_builds_at_once_and_amend_changes_it(desk):
     wait_until(lambda: "resume @abc123" in calls_of(script))
 
 
-@pytest.mark.spec("CNV-16")
+@pytest.mark.spec("CNV-12")
 def test_what_waits_for_confirm_is_cancelled_by_anything_else(desk, monkeypatch):
     desk, channel, _ = desk
     monkeypatch.setattr(desk.talk, "answer", lambda *args, **kwargs: None)
@@ -751,7 +751,7 @@ def test_what_waits_for_confirm_is_cancelled_by_anything_else(desk, monkeypatch)
     assert desk.decide("amend", ["amend"]).startswith("✍️ Write `amend [@PROJECT] CHANGE`")
 
 
-@pytest.mark.spec("CNV-28")
+@pytest.mark.spec("CNV-13")
 def test_a_command_sent_alone_asks_for_its_words(desk, monkeypatch):
     desk, channel, _ = desk
     answered = []
@@ -773,7 +773,7 @@ def test_a_command_sent_alone_asks_for_its_words(desk, monkeypatch):
     assert desk.commands_wanting_words == {}
 
 
-@pytest.mark.spec("CNV-27")
+@pytest.mark.spec("CNV-14")
 def test_a_glance_goes_soon_and_history_shows_things_again(desk, monkeypatch):
     desk, channel, _ = desk
     glances = []
@@ -807,7 +807,7 @@ def test_a_glance_goes_soon_and_history_shows_things_again(desk, monkeypatch):
     assert Ledger.page(1) == nothing_left
 
 
-@pytest.mark.spec("CNV-17")
+@pytest.mark.spec("CNV-15")
 def test_follow_reads_the_tasks_tracker(tmp_path, home_store):
     desk = Desk.__new__(Desk)
     desk.echo_to_terminal, desk.messages_by_run, desk.seconds_by_run, desk.waiting_plan = False, {}, {}, None
@@ -831,7 +831,7 @@ def test_follow_reads_the_tasks_tracker(tmp_path, home_store):
     assert home_store.get("running", "4343") is None
 
 
-@pytest.mark.spec("CNV-18")
+@pytest.mark.spec("CNV-4")
 def test_helpers(tmp_path):
     assert json_in('Sure: {"a": 1} ok') == {"a": 1} and json_in("none") == {} and json_in("{bad}") == {}
     assert json_in("[1]") == {}
@@ -853,7 +853,7 @@ def built(tmp_path, name, run_id, run, status="done", updated="2026-10-01 10:00"
     return folder
 
 
-@pytest.mark.spec("CNV-18")
+@pytest.mark.spec("CNV-4")
 def test_built_project(tmp_path):
     built(tmp_path, "calc", "aaa111", "x", updated="2026-10-01 10:00")
     built(tmp_path, "notes", "bbb222", "x", updated="2026-10-02 10:00")
@@ -864,7 +864,7 @@ def test_built_project(tmp_path):
     assert built_project("ccc") is None and built_project("nothing") is None
 
 
-@pytest.mark.spec("CNV-19", "JOB-10")
+@pytest.mark.spec("CNV-21", "JOB-10")
 def test_a_chat_pauses_the_job_that_runs_before_it_is_answered(desk, monkeypatch):
     desk, channel, _ = desk
     order = []
@@ -883,19 +883,10 @@ def test_a_chat_pauses_the_job_that_runs_before_it_is_answered(desk, monkeypatch
     assert Desk([channel], desk.root).talk.pausing_jobs is conversation.paused_for_you
 
 
-@pytest.mark.spec("JOB-10")
-def test_there_is_no_emergency_command():
-    assert (
-        "emergency" not in [command.name for command in conversation.COMMANDS]
-        and conversation.command_of("emergency help") == ""
-    )
-    assert not hasattr(Desk, "emergency")
-
-
 ECHO_APP = "import sys\nprint('args:', sys.argv[1:])\nprint('input:', sys.stdin.read().strip())\n"
 
 
-@pytest.mark.spec("CNV-20")
+@pytest.mark.spec("CNV-25")
 def test_run_a_built_project(desk, tmp_path):
     desk, channel, _ = desk
     folder = built(tmp_path, "calc", "aaa111", f'"{sys.executable}" app.py')
@@ -913,7 +904,7 @@ def test_run_a_built_project(desk, tmp_path):
     assert "args: ['5', '+', '3']" in channel.texts()[-1]
 
 
-@pytest.mark.spec("CNV-20")
+@pytest.mark.spec("CNV-25")
 def test_run_with_nothing_to_run(desk, tmp_path):
     desk, channel, _ = desk
     desk.run_app(channel, "1", ["x"])
@@ -934,7 +925,7 @@ class Listening(Recorder):
         return [self.inbox.pop(0)] if self.inbox else []
 
 
-@pytest.mark.spec("CNV-21")
+@pytest.mark.spec("CNV-9")
 def test_the_status_is_sent_anew_as_tinker_starts_and_ends(desk, home_store, monkeypatch):
     monkeypatch.setattr(conversation, "ENDED_LOOK_SECONDS", 0.05)
     status_before = 55
@@ -956,7 +947,7 @@ def test_the_status_is_sent_anew_as_tinker_starts_and_ends(desk, home_store, mon
     channel.claimed.close()
 
 
-@pytest.mark.spec("CNV-21")
+@pytest.mark.spec("CNV-9")
 def test_every_status_is_sent_anew_the_one_before_taken_out(desk):
     channel = Recorder("bot")
     listening = Desk([channel], Path.cwd())
@@ -970,7 +961,7 @@ def test_every_status_is_sent_anew_the_one_before_taken_out(desk):
     assert sorted(log[3:]) == [("delete", 102), ("send", 103)]
 
 
-@pytest.mark.spec("CNV-21")
+@pytest.mark.spec("CNV-9")
 def test_desk_refuses_a_chat_another_tinker_listens_to(desk):
     _, _, script = desk
     holder = Recorder("bot")
@@ -982,7 +973,7 @@ def test_desk_refuses_a_chat_another_tinker_listens_to(desk):
         holder.claimed.close()
 
 
-@pytest.mark.spec("CNV-22")
+@pytest.mark.spec("CNV-26")
 def test_one_shot_commands(monkeypatch, capsys):
     monkeypatch.setattr(conversation, "commands_brief", lambda: "cmds")
     monkeypatch.setattr(sys, "stdin", io.StringIO(""))
@@ -997,7 +988,7 @@ def test_one_shot_commands(monkeypatch, capsys):
     assert "No model is in use yet" in capsys.readouterr().out
 
 
-@pytest.mark.spec("CNV-22")
+@pytest.mark.spec("CNV-26")
 def test_one_shot_command_runs_nothing_without_a_yes(
     monkeypatch, measured_model, fake_ollama, capsys, tmp_path
 ):
@@ -1038,7 +1029,7 @@ class Pages:
         }
 
 
-@pytest.mark.spec("CNV-23")
+@pytest.mark.spec("CNV-24")
 def test_research_in_a_chat(measured_model, fake_ollama, monkeypatch):
     channel = Recorder()
     monkeypatch.setattr(conversation, "Internet", lambda: Pages(up=False))
@@ -1084,7 +1075,7 @@ def attached(monkeypatch, home_store):
         signal.signal(sig, handler)
 
 
-@pytest.mark.spec("CNV-24")
+@pytest.mark.spec("CNV-19")
 def test_a_terminal_task_reports_and_stops_on_a_signal(attached, home_store):
     start, channel = attached
     task = start()
@@ -1098,7 +1089,7 @@ def test_a_terminal_task_reports_and_stops_on_a_signal(attached, home_store):
     assert "🧠 Recalling what Tinker has learned" in channel.texts()[-1]
 
 
-@pytest.mark.spec("CNV-25")
+@pytest.mark.spec("CNV-10")
 def test_start_is_answered_with_a_welcome(desk):
     desk, channel, script = desk
     say(desk, channel, "/start")
@@ -1118,7 +1109,7 @@ def test_start_is_answered_with_a_welcome(desk):
     assert channel.texts()[-1] == welcome()
 
 
-@pytest.mark.spec("CNV-26")
+@pytest.mark.spec("CNV-27")
 def test_memory_graph_is_sent_as_a_file(desk, monkeypatch):
     desk, channel, _ = desk
     sent = []
@@ -1143,7 +1134,7 @@ def test_memory_graph_is_sent_as_a_file(desk, monkeypatch):
     )
 
 
-@pytest.mark.spec("CNV-26")
+@pytest.mark.spec("CNV-27")
 def test_the_terminal_opens_the_file_and_other_channels_send_where_it_is(monkeypatch, tmp_path):
     opened, printed = [], []
     monkeypatch.setattr(conversation.webbrowser, "open", opened.append)

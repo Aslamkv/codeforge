@@ -26,7 +26,7 @@ PAGE = f"""<!doctype html><html><head><title>Tool docs</title><style>p {{ color:
 </body></html>"""
 
 
-@pytest.mark.spec("LRN-6")
+@pytest.mark.spec("PAS-1")
 def test_a_page_keeps_its_main_content_as_blocks():
     page = Cleaner.page("https://tool.dev/start", PAGE, "text/html", "2026-10-21 10:00")
     kinds = [(block.kind, block.text[:15]) for block in page.blocks]
@@ -54,7 +54,7 @@ def test_a_page_keeps_its_main_content_as_blocks():
     assert page.usable()
 
 
-@pytest.mark.spec("LRN-6")
+@pytest.mark.spec("PAS-1")
 def test_plain_text_and_markdown_are_read_by_their_lines():
     blocks = text_blocks(
         "# Title\n\nSome text\nthat goes on.\n\n```\ncode line\n  indented\n```\n\n"
@@ -76,7 +76,7 @@ def page(url, *blocks):
     return Page(url, "2026-10-21 10:00", list(blocks))
 
 
-@pytest.mark.spec("LRN-6")
+@pytest.mark.spec("PAS-1")
 def test_the_pool_gathers_passages_under_headings_and_numbers_them():
     long_code = "\n".join(f"line {number} of a long example" for number in range(80))
     pool = Cleaner().pool(
@@ -99,7 +99,7 @@ def test_the_pool_gathers_passages_under_headings_and_numbers_them():
     assert any(passage.text == long_code for passage in pool)
 
 
-@pytest.mark.spec("LRN-6")
+@pytest.mark.spec("PAS-1")
 def test_the_pool_drops_a_sites_repeats_and_near_duplicates():
     chrome = Block("text", "Edit this page on the project's own site, or report a problem with it.")
     pages = [

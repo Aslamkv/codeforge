@@ -176,7 +176,7 @@ def test_the_page_is_self_contained_with_a_plain_list(memory):
     assert "Retired (1)" in main and '<a href="https://a.org/x">source</a>' in main
 
 
-@pytest.mark.spec("GRF-5", "CLI-11")
+@pytest.mark.spec("GRF-5", "CLI-5")
 def test_memory_graph_writes_the_page_and_opens_it_only_in_a_terminal(memory, monkeypatch, capsys):
     assert Cli.parse(["memory", "--graph"]).graph is True and Cli.parse(["memory"]).graph is False
     opened = []
@@ -191,7 +191,7 @@ def test_memory_graph_writes_the_page_and_opens_it_only_in_a_terminal(memory, mo
     assert opened == [Home.graph_page().as_uri()]
 
 
-@pytest.mark.spec("CLI-11")
+@pytest.mark.spec("CLI-5")
 def test_memory_counts_what_is_retired(memory, capsys):
     Commands.show_memory()
     out = capsys.readouterr().out

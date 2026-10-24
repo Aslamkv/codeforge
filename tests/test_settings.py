@@ -133,7 +133,7 @@ def test_test_timeout_is_checked_for_a_run_only(value):
         Config.check_model(run=True)
 
 
-@pytest.mark.spec("SET-6")
+@pytest.mark.spec("SET-7")
 def test_keep_alive_and_ollama_url_as_ollama_takes_them():
     assert Config.keep_alive("300") == 300 and Config.keep_alive(-1) == -1
     assert Config.keep_alive("10m") == "10m"
@@ -141,7 +141,7 @@ def test_keep_alive_and_ollama_url_as_ollama_takes_them():
     assert Config.ollama_url() == "http://host:1"
 
 
-@pytest.mark.spec("SET-7")
+@pytest.mark.spec("SET-8")
 def test_store_documents(tmp_path):
     store = Store(tmp_path / "a" / "x.db")
     assert store.get("c", "k") is None and store.get("c", "k", {"d": 1}) == {"d": 1}
@@ -162,7 +162,7 @@ def add_many(path, times):
         store.update("c", "n", lambda count: count + 1, 0)
 
 
-@pytest.mark.spec("SET-7")
+@pytest.mark.spec("SET-8")
 def test_store_updates_from_two_processes_lose_nothing(tmp_path):
     path = tmp_path / "x.db"
     Store(path).put("c", "n", 0)
@@ -176,7 +176,7 @@ def test_store_updates_from_two_processes_lose_nothing(tmp_path):
     assert Store(path).get("c", "n") == 150
 
 
-@pytest.mark.spec("SET-7")
+@pytest.mark.spec("SET-8")
 def test_a_failed_write_leaves_the_old_value(tmp_path):
     store = Store(tmp_path / "x.db")
     store.put("c", "k", "old")
@@ -193,7 +193,7 @@ def test_a_failed_write_leaves_the_old_value(tmp_path):
     assert store.get("c", "k") == "old"
 
 
-@pytest.mark.spec("SET-8")
+@pytest.mark.spec("SET-9")
 def test_store_logs_and_mode(tmp_path):
     store = Store(tmp_path / "x.db")
     first = store.append("log", {"label": "one"})
@@ -210,7 +210,7 @@ def test_store_logs_and_mode(tmp_path):
     assert stat.S_IMODE((tmp_path / "x.db").stat().st_mode) == 0o600
 
 
-@pytest.mark.spec("SET-8")
+@pytest.mark.spec("SET-9")
 def test_a_deleted_database_is_made_again(tmp_path):
     store = Store(tmp_path / "x.db")
     store.put("c", "k", 1)
@@ -220,7 +220,7 @@ def test_a_deleted_database_is_made_again(tmp_path):
     assert store.get("c", "k") == 2
 
 
-@pytest.mark.spec("SET-9")
+@pytest.mark.spec("SET-10")
 def test_ensure_makes_home_and_its_database(tinker_home, capsys):
     assert not tinker_home.exists()
     Home.ensure()
@@ -229,7 +229,7 @@ def test_ensure_makes_home_and_its_database(tinker_home, capsys):
     assert capsys.readouterr().out == ""
 
 
-@pytest.mark.spec("SET-9")
+@pytest.mark.spec("SET-10")
 def test_ensure_stops_when_home_cannot_be_written(tinker_home, monkeypatch):
     def refuse(*args, **kwargs):
         raise PermissionError("read-only")
@@ -239,7 +239,7 @@ def test_ensure_stops_when_home_cannot_be_written(tinker_home, monkeypatch):
         Home.ensure()
 
 
-@pytest.mark.spec("SET-10")
+@pytest.mark.spec("SET-11")
 def test_reset_with_yes_deletes_home(tinker_home):
     Home.ensure()
     Home.reset(yes=True)
@@ -248,13 +248,13 @@ def test_reset_with_yes_deletes_home(tinker_home):
     assert Config.get("model") == "m"
 
 
-@pytest.mark.spec("SET-10")
+@pytest.mark.spec("SET-11")
 def test_reset_without_home_does_nothing(tinker_home, capsys):
     Home.reset(yes=True)
     assert "Nothing to reset" in capsys.readouterr().out
 
 
-@pytest.mark.spec("SET-10")
+@pytest.mark.spec("SET-11")
 def test_reset_refuses_a_folder_not_named_dot_tinker(tmp_path, monkeypatch):
     other = tmp_path / "precious"
     other.mkdir()
@@ -264,7 +264,7 @@ def test_reset_refuses_a_folder_not_named_dot_tinker(tmp_path, monkeypatch):
     assert other.exists()
 
 
-@pytest.mark.spec("SET-10")
+@pytest.mark.spec("SET-11")
 def test_reset_outside_a_terminal_without_yes_deletes_nothing(tinker_home, monkeypatch):
     Home.ensure()
     monkeypatch.setattr(sys, "stdin", io.StringIO(""))
@@ -273,7 +273,7 @@ def test_reset_outside_a_terminal_without_yes_deletes_nothing(tinker_home, monke
     assert tinker_home.exists()
 
 
-@pytest.mark.spec("SET-11")
+@pytest.mark.spec("SET-12")
 def test_parts_tinker_clear_knows():
     assert list(Home.parts()) == [
         "languages",
@@ -288,7 +288,7 @@ def test_parts_tinker_clear_knows():
     ]
 
 
-@pytest.mark.spec("SET-11")
+@pytest.mark.spec("SET-12")
 def test_clear_deletes_only_the_named_parts(home_store, capsys):
     home_store.put("languages", "python", {})
     home_store.put("memory", "any", {})
@@ -302,19 +302,19 @@ def test_clear_deletes_only_the_named_parts(home_store, capsys):
     assert "Cleared languages, memory, learned." in capsys.readouterr().out
 
 
-@pytest.mark.spec("SET-11")
+@pytest.mark.spec("SET-12")
 def test_clear_rejects_an_unknown_part():
     with pytest.raises(SystemExit, match="the parts are: languages"):
         Home.clear(["everything"], yes=True)
 
 
-@pytest.mark.spec("SET-11")
+@pytest.mark.spec("SET-12")
 def test_clear_with_nothing_there(capsys):
     Home.clear(["runs"], yes=True)
     assert "Nothing to clear: runs is empty" in capsys.readouterr().out
 
 
-@pytest.mark.spec("SET-11")
+@pytest.mark.spec("SET-12")
 def test_clear_outside_a_terminal_without_yes_deletes_nothing(home_store, monkeypatch):
     home_store.put("memory", "any", {})
     monkeypatch.setattr(sys, "stdin", io.StringIO(""))
@@ -323,14 +323,14 @@ def test_clear_outside_a_terminal_without_yes_deletes_nothing(home_store, monkey
     assert home_store.items("memory") == {"any": {}}
 
 
-@pytest.mark.spec("SET-12")
+@pytest.mark.spec("SET-14")
 def test_first_line():
     assert first_line("\n  hello world\nsecond") == "hello world"
     assert first_line(None) == "" and first_line("   ") == ""
     assert first_line("x" * 200, 10) == "xxxxxxx..."
 
 
-@pytest.mark.spec("SET-12")
+@pytest.mark.spec("SET-14")
 def test_words_fingerprint_and_similarity():
     assert words("Hello, World 42!") == ["hello", "world", "42"]
     assert words(None) == []
@@ -339,7 +339,7 @@ def test_words_fingerprint_and_similarity():
     assert similarity("ABC", "abc") == 1.0 and similarity("abc", "xyz") == 0.0
 
 
-@pytest.mark.spec("SET-13")
+@pytest.mark.spec("SET-15")
 def test_split_text_keeps_paragraphs_together_within_the_size():
     text = "\n\n".join(f"paragraph {number} " + "word " * 30 for number in range(10))
     chunks = split_text(text, 400)
@@ -350,13 +350,13 @@ def test_split_text_keeps_paragraphs_together_within_the_size():
     assert nothing_lost and split_between_paragraphs
 
 
-@pytest.mark.spec("SET-13")
+@pytest.mark.spec("SET-15")
 def test_split_text_cuts_a_long_paragraph_and_never_below_200():
     chunks = split_text("x" * 1000, 50)
     assert [len(chunk) for chunk in chunks] == [200] * 5
 
 
-@pytest.mark.spec("SET-14")
+@pytest.mark.spec("SET-16")
 def test_after_what_they_use_orders_dependencies_first_breaks_cycles_and_skips_unknown():
     uses = {"app": ["db", "util"], "db": ["util"], "util": [], "x": ["app"], "a": ["b", "ghost"], "b": ["a"]}
     known = lambda name: name in uses
@@ -364,7 +364,7 @@ def test_after_what_they_use_orders_dependencies_first_breaks_cycles_and_skips_u
     assert after_what_they_use(["a"], lambda name: uses[name], known) == ["b", "a"]
 
 
-@pytest.mark.spec("SET-15")
+@pytest.mark.spec("SET-17")
 def test_groups_fitting():
     assert groups_fitting(["aa", "bb", "cc"], 6) == [["aa", "bb"], ["cc"]]
     assert groups_fitting(["a" * 10, "b"], 5) == [["a" * 10], ["b"]]
@@ -372,7 +372,7 @@ def test_groups_fitting():
     assert groups_fitting([3, 3, 3], 8, size=lambda value: value) == [[3, 3], [3]]
 
 
-@pytest.mark.spec("SET-18")
+@pytest.mark.spec("SET-13")
 @pytest.mark.parametrize(
     "tool,program", [("caffeinate", "caffeinate"), ("systemd-inhibit", "systemd-inhibit")]
 )
@@ -384,7 +384,7 @@ def test_keep_awake_uses_the_tool_there_is(monkeypatch, tool, program):
     assert started and started[0][0] == program and str(settings.os.getpid()) in " ".join(started[0])
 
 
-@pytest.mark.spec("SET-18")
+@pytest.mark.spec("SET-13")
 def test_keep_awake_without_a_tool_or_failing_does_nothing(monkeypatch):
     monkeypatch.setattr(settings.shutil, "which", lambda name: None)
     Home.keep_awake()
@@ -397,7 +397,7 @@ def test_keep_awake_without_a_tool_or_failing_does_nothing(monkeypatch):
     Home.keep_awake()
 
 
-@pytest.mark.spec("SET-19")
+@pytest.mark.spec("SET-6")
 def test_config_set_reads_and_checks_the_value():
     assert config_set("test_timeout", "90") == 90 and Config.get("test_timeout") == 90
     assert config_set("keep_alive", "10m") == "10m" and config_set("keep_alive", "300") == 300
@@ -419,7 +419,7 @@ def config_set(key, text):
     return Config.set(key, text, Internet.check)
 
 
-@pytest.mark.spec("SET-19")
+@pytest.mark.spec("SET-6")
 def test_config_set_only_the_settings_with_no_command_of_their_own():
     with pytest.raises(SystemExit, match="model is set with tinker use-model NAME"):
         Config.set("model", "x")

@@ -127,7 +127,7 @@ def titles(book):
     return [(chapter.title, chapter.kind) for chapter in book.chapters]
 
 
-@pytest.mark.spec("RDG-1")
+@pytest.mark.spec("RDG-2")
 def test_a_book_is_read_by_what_its_bytes_hold():
     assert opened(epub(), "anything.txt").title == "The Craft of Small Programs"
     assert opened(MARKDOWN.encode(), "craft.md").title == "The Craft of Small Programs"
@@ -142,7 +142,7 @@ def test_a_book_is_read_by_what_its_bytes_hold():
         opened(b"PK\x03\x04 broken", "book.epub")
 
 
-@pytest.mark.spec("RDG-2")
+@pytest.mark.spec("RDG-3")
 @pytest.mark.parametrize("nav", [True, False], ids=["epub3-nav", "epub2-ncx"])
 def test_an_epub_is_split_where_its_contents_say(nav):
     book = opened(epub(nav), "book.epub")
@@ -158,14 +158,14 @@ def test_an_epub_is_split_where_its_contents_say(nav):
     assert NAMING in naming.text and TESTING not in naming.text and "p{}" not in naming.text
 
 
-@pytest.mark.spec("RDG-2")
+@pytest.mark.spec("RDG-3")
 def test_an_epub_with_no_usable_contents_is_split_at_its_headings(monkeypatch):
     monkeypatch.setattr(reading.Epub, "contents", lambda self: [])
     book = opened(epub(), "book.epub")
     assert [title for title, _ in titles(book)] == ["Foreword", "Part I", "Naming", "Testing", "Index"]
 
 
-@pytest.mark.spec("RDG-3")
+@pytest.mark.spec("RDG-4")
 def test_markdown_and_plain_text_are_split_into_chapters():
     assert titles(opened(MARKDOWN.encode(), "craft.md")) == [
         ("Foreword", "front"),
@@ -186,7 +186,7 @@ def test_markdown_and_plain_text_are_split_into_chapters():
     assert [chapter.title for chapter in parts.chapters][:2] == ["Part 1", "Part 2"]
 
 
-@pytest.mark.spec("RDG-4")
+@pytest.mark.spec("RDG-5")
 def test_chapters_have_kinds_and_the_index_names_what_matters():
     assert [
         kind_of(title)
@@ -251,7 +251,7 @@ def prompts(fake_ollama):
     return [call["messages"][1]["content"] for call in fake_ollama.calls]
 
 
-@pytest.mark.spec("RDG-5")
+@pytest.mark.spec("RDG-6")
 def test_a_source_is_stored_whole_before_anything_is_read(tmp_path, home_store, capsys):
     assert stored(craft(tmp_path)) == (1, True)
     entry = Readings.get(1)
@@ -278,7 +278,7 @@ def test_a_source_is_stored_whole_before_anything_is_read(tmp_path, home_store, 
     assert list(Readings.all()) == [2, 1]
 
 
-@pytest.mark.spec("RDG-6")
+@pytest.mark.spec("RDG-7")
 def test_the_survey_orders_every_chapter_and_skips_none(tmp_path, home_store):
     book = opened(MARKDOWN.encode(), "craft.md")
     survey = read_survey(dict(json.loads(survey_reply()), terms=[f"t{number}" for number in range(30)]), book)
@@ -318,7 +318,7 @@ def read_craft(tmp_path, make_model, fake_ollama, software=True):
     return Reader(make_model(), tracker).read(1), tracker
 
 
-@pytest.mark.spec("RDG-7")
+@pytest.mark.spec("RDG-8")
 def test_every_chapter_is_read_in_order_and_saved_as_it_is_read(
     tmp_path, home_store, make_model, fake_ollama
 ):
@@ -356,7 +356,7 @@ def test_every_chapter_is_read_in_order_and_saved_as_it_is_read(
     assert fake_ollama.calls == []
 
 
-@pytest.mark.spec("RDG-7")
+@pytest.mark.spec("RDG-8")
 def test_a_stopped_reading_goes_on_with_the_chapters_not_read(tmp_path, home_store, make_model, fake_ollama):
     stored(craft(tmp_path))
     fake_ollama.reply(survey_reply(), when="reading plan")
@@ -389,7 +389,7 @@ def test_a_stopped_reading_goes_on_with_the_chapters_not_read(tmp_path, home_sto
     ]
 
 
-@pytest.mark.spec("RDG-7")
+@pytest.mark.spec("RDG-8")
 def test_a_long_chapter_is_read_in_every_part(tmp_path, home_store, make_model, fake_ollama, monkeypatch):
     long = "\n\n".join(
         f"Paragraph {number} of a long chapter about naming things well." for number in range(40)
@@ -409,7 +409,7 @@ def test_a_long_chapter_is_read_in_every_part(tmp_path, home_store, make_model, 
     assert "Paragraph 0 " in shown and "Paragraph 39 " in shown
 
 
-@pytest.mark.spec("RDG-8")
+@pytest.mark.spec("RDG-9")
 def test_read_again_with_a_focus_looks_where_it_is_asked(
     tmp_path, home_store, make_model, fake_ollama, monkeypatch
 ):
@@ -431,7 +431,7 @@ def test_read_again_with_a_focus_looks_where_it_is_asked(
     assert Library.read("read-1")["facts"][-1]["text"] == "Run every test after each change"
 
 
-@pytest.mark.spec("RDG-9")
+@pytest.mark.spec("RDG-10")
 def test_a_chapter_gives_points_with_their_phase():
     reply = {
         "points": [
@@ -451,7 +451,7 @@ def test_a_chapter_gives_points_with_their_phase():
         read_points({"facts": []}, software=True)
 
 
-@pytest.mark.spec("RDG-9")
+@pytest.mark.spec("RDG-10")
 def test_what_is_not_about_software_is_kept_for_asking_alone(tmp_path, home_store, make_model, fake_ollama):
     ending, tracker = read_craft(tmp_path, make_model, fake_ollama, software=False)
     topic = Library.read("read-1")
@@ -460,7 +460,7 @@ def test_what_is_not_about_software_is_kept_for_asking_alone(tmp_path, home_stor
     assert ("Builds", "never use it: it is not about building software") in ending["details"]
 
 
-@pytest.mark.spec("RDG-10")
+@pytest.mark.spec("RDG-1")
 def test_a_source_comes_from_a_file_or_a_web_address(tmp_path, monkeypatch):
     path = tmp_path / "craft.md"
     path.write_text("words")
@@ -486,7 +486,7 @@ def test_a_source_comes_from_a_file_or_a_web_address(tmp_path, monkeypatch):
         book_bytes(str(path))
 
 
-@pytest.mark.spec("RDG-10")
+@pytest.mark.spec("RDG-1")
 def test_the_fetcher_downloads_bytes_as_they_are_within_its_limit(tmp_path):
     path = tmp_path / "book.epub"
     path.write_bytes(b"PK\x03\x04\x00\xff binary")

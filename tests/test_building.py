@@ -106,7 +106,7 @@ def test_new_file_next_to_and_may_write(make_project, make_session, project_dir)
     assert check("tests/test_b.py", False) is None and "only test files next to" in check("test_b.py", False)
 
 
-@pytest.mark.spec("BLD-2")
+@pytest.mark.spec("BLD-4")
 def test_config_files_come_first_in_one_call(make_project, make_session, fake_ollama, project_dir):
     files = {
         "pyproject.toml": {"kind": "config", "role": "pytest settings", "uses": []},
@@ -130,7 +130,7 @@ def test_config_files_come_first_in_one_call(make_project, make_session, fake_ol
     )
 
 
-@pytest.mark.spec("BLD-2")
+@pytest.mark.spec("BLD-4")
 def test_code_files_one_call_each_with_markers_written_empty(
     make_project, make_session, fake_ollama, project_dir
 ):
@@ -150,7 +150,7 @@ def test_code_files_one_call_each_with_markers_written_empty(
     assert len(fake_ollama.calls) == 1 and cycle["code_done"] == ["pkg/__init__.py", "pkg/calc.py"]
 
 
-@pytest.mark.spec("BLD-2")
+@pytest.mark.spec("BLD-4")
 def test_a_file_far_too_long_is_asked_for_again(make_project, make_session, fake_ollama, project_dir):
     project = make_project(files={"calc.py": FILES["calc.py"]})
     fake_ollama.reply(file_block("calc.py", "x = 1\n" * 130), when="Write calc.py")
@@ -160,7 +160,7 @@ def test_a_file_far_too_long_is_asked_for_again(make_project, make_session, fake
     assert "had 130 lines; keep it under 60" in fake_ollama.calls[1]["messages"][1]["content"]
 
 
-@pytest.mark.spec("BLD-2")
+@pytest.mark.spec("BLD-4")
 def test_wiring(make_project, make_session, fake_ollama, project_dir):
     files = {
         "app.py": {"kind": "code", "role": "app", "contract": ["main()"], "uses": ["store.py", "README.md"]},
@@ -186,7 +186,7 @@ def test_wiring(make_project, make_session, fake_ollama, project_dir):
     assert "only app.py" in writer.may_write("app.py")("store.py", True)
 
 
-@pytest.mark.spec("BLD-3")
+@pytest.mark.spec("BLD-6")
 def test_verify_fixes_a_failing_criterion(calc, fake_ollama, project_dir):
     session, project = calc
     fake_ollama.reply("CAUSE: sub added\n" + file_block("calc.py", FIXED), when="Fix the code C2")
@@ -197,7 +197,7 @@ def test_verify_fixes_a_failing_criterion(calc, fake_ollama, project_dir):
     assert project.spec["events"] == [{"kind": "fix", "text": "calc.sub(5, 3) is 2 | solved: sub added"}]
 
 
-@pytest.mark.spec("BLD-3")
+@pytest.mark.spec("BLD-6")
 def test_verify_parks_what_nothing_fixes_and_puts_the_files_back(calc, fake_ollama, project_dir):
     session, project = calc
     fake_ollama.reply("I am not sure what to change.", times=5)
@@ -212,7 +212,7 @@ def test_verify_parks_what_nothing_fixes_and_puts_the_files_back(calc, fake_olla
     assert len(labels) == 5 and project.store.get("restore", Verifier.RESTORE_POINT) is None
 
 
-@pytest.mark.spec("BLD-3")
+@pytest.mark.spec("BLD-6")
 def test_a_criterion_failing_like_a_parked_one_is_parked_at_once(calc, fake_ollama):
     session, project = calc
     verifier = Verifier(session)
@@ -223,7 +223,7 @@ def test_a_criterion_failing_like_a_parked_one_is_parked_at_once(calc, fake_olla
     assert step["last_error"] == "same failure as C9" and fake_ollama.calls == []
 
 
-@pytest.mark.spec("BLD-4")
+@pytest.mark.spec("BLD-7")
 def test_a_stopped_run_is_put_back_from_its_restore_point(calc, project_dir, capsys):
     session, project = calc
     project.store.put(
@@ -239,7 +239,7 @@ def test_a_stopped_run_is_put_back_from_its_restore_point(calc, project_dir, cap
     assert "The last run stopped while C2 was being worked on: calc.py restored" in capsys.readouterr().out
 
 
-@pytest.mark.spec("BLD-4")
+@pytest.mark.spec("BLD-7")
 def test_failure_key_and_roll_back(calc, project_dir):
     session, project = calc
     first = {"test": "t.py::test_one"}
@@ -256,7 +256,7 @@ def test_failure_key_and_roll_back(calc, project_dir):
     assert (project_dir / "calc.py").read_text() == CALC_WITH_WRONG_SUB
 
 
-@pytest.mark.spec("BLD-4")
+@pytest.mark.spec("BLD-6")
 def test_ladder_and_to_review(calc):
     session, project = calc
     verifier = Verifier(session)
@@ -278,7 +278,7 @@ def attempt(session, project, approach="fix", output="it fails", before=()):
     return FixAttempt(session, Verifier(session), steps_of(project)["C2"], approach, output, set(before))
 
 
-@pytest.mark.spec("BLD-5")
+@pytest.mark.spec("BLD-8")
 def test_what_a_fix_and_a_review_may_change(calc):
     session, project = calc
     view = type("V", (), {"shown": {"calc.py", "test_calc.py"}})()
@@ -292,7 +292,7 @@ def test_what_a_fix_and_a_review_may_change(calc):
     assert review("sub/new.py", False) == "no new files now; change the files shown"
 
 
-@pytest.mark.spec("BLD-5")
+@pytest.mark.spec("BLD-8")
 def test_a_fix_that_blames_the_test_changes_nothing(calc, fake_ollama, project_dir):
     session, project = calc
     fake_ollama.reply("TEST WRONG: 5 - 3 is 2, the test is fine actually\n" + file_block("calc.py", FIXED))
@@ -301,7 +301,7 @@ def test_a_fix_that_blames_the_test_changes_nothing(calc, fake_ollama, project_d
     assert (project_dir / "calc.py").read_text() == CALC_WITH_WRONG_SUB
 
 
-@pytest.mark.spec("BLD-5")
+@pytest.mark.spec("BLD-8")
 def test_a_change_that_breaks_a_passing_test_is_reverted(calc, fake_ollama, project_dir):
     session, project = calc
     broken = "def add(a, b):\n    return 0\n\n\ndef sub(a, b):\n    return a - b\n"
@@ -313,7 +313,7 @@ def test_a_change_that_breaks_a_passing_test_is_reverted(calc, fake_ollama, proj
     assert steps_of(project)["C2"]["keep"] == ["test_calc.py::test_add"] and not fix.tests_may_disagree
 
 
-@pytest.mark.spec("BLD-6")
+@pytest.mark.spec("BLD-2")
 def test_ran_empty():
     assert TestTool.ran_empty(0, "")
     assert TestTool.ran_empty(5, "no tests ran in 0.01s")
@@ -322,7 +322,7 @@ def test_ran_empty():
     assert not TestTool.ran_empty(127, "") and not TestTool.ran_empty(None, "")
 
 
-@pytest.mark.spec("BLD-6")
+@pytest.mark.spec("BLD-2")
 def test_a_missing_linter_is_a_tooling_problem_the_model_may_fix(calc, fake_ollama, tinker_home):
     session, project = calc
     project.spec["toolchain"]["lint"] = "no-such-linter-xyz ."
@@ -334,7 +334,7 @@ def test_a_missing_linter_is_a_tooling_problem_the_model_may_fix(calc, fake_olla
     assert session.knowledge.language_doc["fixes"][0]["cause"] == "that linter is not installed"
 
 
-@pytest.mark.spec("BLD-6")
+@pytest.mark.spec("BLD-2")
 def test_a_one_test_command_that_ignores_the_name_is_a_tooling_problem(calc, fake_ollama):
     session, project = calc
     named = project.toolchain.test_one
@@ -346,7 +346,7 @@ def test_a_one_test_command_that_ignores_the_name_is_a_tooling_problem(calc, fak
     assert "answers a made-up test name the same way" in fake_ollama.calls[0]["messages"][-1]["content"]
 
 
-@pytest.mark.spec("BLD-6")
+@pytest.mark.spec("BLD-2")
 def test_tools_that_stay_broken_stop_the_cycle(calc, fake_ollama):
     session, project = calc
     project.spec["toolchain"]["lint"] = "no-such-linter-xyz ."
@@ -355,7 +355,7 @@ def test_tools_that_stay_broken_stop_the_cycle(calc, fake_ollama):
     assert session.tool_problem.startswith("the project's tools do not work:")
 
 
-@pytest.mark.spec("BLD-7")
+@pytest.mark.spec("BLD-3")
 def test_a_fix_learned_before_is_replayed_without_the_model(calc, fake_ollama, project_dir):
     session, project = calc
     output = "$ ruff check .\nruff: command not found"
@@ -376,7 +376,7 @@ def test_a_fix_learned_before_is_replayed_without_the_model(calc, fake_ollama, p
     assert project.files["setup.cfg"]["kind"] == "config" and fake_ollama.calls == []
 
 
-@pytest.mark.spec("BLD-7")
+@pytest.mark.spec("BLD-3")
 def test_a_model_fix_changes_only_config_files_and_commands(calc, fake_ollama, project_dir):
     session, project = calc
     fake_ollama.reply(
@@ -398,7 +398,7 @@ def test_a_model_fix_changes_only_config_files_and_commands(calc, fake_ollama, p
     }
 
 
-@pytest.mark.spec("BLD-8")
+@pytest.mark.spec("BLD-5")
 def test_a_project_that_does_not_build_is_fixed(calc, fake_ollama, project_dir):
     session, project = calc
     (project_dir / "calc.py").write_text("def add(a, b)\n    return a + b\n")
@@ -407,7 +407,7 @@ def test_a_project_that_does_not_build_is_fixed(calc, fake_ollama, project_dir):
     assert (project_dir / "calc.py").read_text() == FIXED and fake_ollama.calls[0]["think"] is False
 
 
-@pytest.mark.spec("BLD-8")
+@pytest.mark.spec("BLD-5")
 def test_what_a_build_fix_may_change(calc):
     session, project = calc
     check = BuildFix(session, "output").may_change(type("V", (), {"shown": {"calc.py", "test_calc.py"}})())

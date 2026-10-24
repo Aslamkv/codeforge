@@ -171,7 +171,7 @@ def test_clear_folder_refuses_the_wrong_folders(tmp_path, monkeypatch, tinker_ho
     assert (folder / "keep.txt").exists()
 
 
-@pytest.mark.spec("PRJ-6")
+@pytest.mark.spec("PRJ-7")
 def test_before_start_for_a_new_run(tmp_path, monkeypatch):
     monkeypatch.chdir(tmp_path)
     assert RunChecks.before_start(run_args(workdir=".")) == tmp_path.resolve()
@@ -186,7 +186,7 @@ def test_before_start_for_a_new_run(tmp_path, monkeypatch):
         RunChecks.before_start(run_args(workdir="."))
 
 
-@pytest.mark.spec("PRJ-6")
+@pytest.mark.spec("PRJ-7")
 def test_before_start_for_a_saved_run(tmp_path):
     folder = tmp_path / "p"
     saved_run(folder, cycles=[{"id": "base", "request": "x", "phase": "nonsense"}])
@@ -205,10 +205,9 @@ def test_before_start_for_a_saved_run(tmp_path):
     assert RunChecks.before_start(run_args(resume="", workdir=str(folder), add=["more"])) == folder
     saved_run(folder, cycles=[{"id": "base", "request": "x", "phase": "setup", "awaiting": True}])
     assert RunChecks.before_start(run_args(resume="", workdir=str(folder), amend="change")) == folder
-    assert not hasattr(RunChecks, "check_planning") and not hasattr(RunChecks, "check_recall_ahead")
 
 
-@pytest.mark.spec("PRJ-6")
+@pytest.mark.spec("PRJ-7")
 def test_restart_reads_the_task_and_spec_first(tmp_path, monkeypatch):
     folder = tmp_path / "p"
     saved_run(folder)
@@ -221,7 +220,7 @@ def test_restart_reads_the_task_and_spec_first(tmp_path, monkeypatch):
         RunChecks.before_start(run_args(restart=True, workdir="."))
 
 
-@pytest.mark.spec("PRJ-7")
+@pytest.mark.spec("PRJ-8")
 def test_project_cycles_and_criteria(make_project, project_dir):
     project = make_project(cycles=[])
     base = project.new_cycle("base", "a calculator")
@@ -262,7 +261,7 @@ FILES = {
 }
 
 
-@pytest.mark.spec("PRJ-8")
+@pytest.mark.spec("PRJ-9")
 def test_criteria_of(make_project):
     steps = [
         criterion("C1", "tests/test_calc.py::test_add", "add(2, 3) is 5"),
@@ -277,7 +276,7 @@ def test_criteria_of(make_project):
     assert project.criteria_of("deep.py", steps) == []
 
 
-@pytest.mark.spec("PRJ-9")
+@pytest.mark.spec("PRJ-10")
 def test_design_helpers(make_project, project_dir):
     project = make_project(files=dict(FILES), entry="calc.py")
     project.spec["toolchain"]["run"] = "python3 web.py"
@@ -301,7 +300,7 @@ def test_design_helpers(make_project, project_dir):
     assert not workspace.exists("util.py") and "util.py" not in project.files
 
 
-@pytest.mark.spec("PRJ-9")
+@pytest.mark.spec("PRJ-8")
 def test_test_names_and_criterion_of_test(make_project):
     steps = [criterion("C1", "t.py::test_a", "adds"), criterion("C2", "t.py::test_b", "subtracts")]
     project = make_project(steps)
@@ -309,7 +308,7 @@ def test_test_names_and_criterion_of_test(make_project):
     assert project.criterion_of_test("t.py::test_b") == "subtracts" and project.criterion_of_test("x") == ""
 
 
-@pytest.mark.spec("PRJ-10")
+@pytest.mark.spec("PRJ-11")
 def test_spec_document(make_project, tinker_home):
     TaughtCommands.teach("act", ". .venv/bin/activate")
     steps = [
@@ -367,7 +366,7 @@ def test_spec_document(make_project, tinker_home):
     assert "- Last error: ZeroDivisionError" in text and text.count("Last error") == 1
 
 
-@pytest.mark.spec("PRJ-11")
+@pytest.mark.spec("PRJ-12")
 def test_brief(project_dir, make_model, fake_ollama):
     model = make_model(max_prompt_tokens=1024)
     store = project_store(project_dir)
@@ -383,7 +382,7 @@ def test_brief(project_dir, make_model, fake_ollama):
     assert all(label.startswith("Brief ") for label in fake_ollama.labels())
 
 
-@pytest.mark.spec("PRJ-12")
+@pytest.mark.spec("PRJ-13")
 def test_outcome():
     outcome = Outcome()
     assert (outcome.status, outcome.exit_code) == ("stopped", 1)
@@ -392,7 +391,7 @@ def test_outcome():
         assert (outcome.status, outcome.exit_code) == (status, code)
 
 
-@pytest.mark.spec("PRJ-13")
+@pytest.mark.spec("PRJ-14")
 def test_the_tracker_publishes_each_change(home_store, project_dir):
     tracker = Tracker("a calculator", before=12.0)
     store = project_store(project_dir)
@@ -422,7 +421,7 @@ def test_the_tracker_publishes_each_change(home_store, project_dir):
     assert home_store.get("running", str(os.getpid())) is None
 
 
-@pytest.mark.spec("PRJ-14")
+@pytest.mark.spec("PRJ-15")
 def test_steps_live_progress_and_messages(home_store, project_dir, monkeypatch):
     assert set(Tracker.DOING_AND_DONE) >= {
         "recall",
@@ -464,7 +463,7 @@ def test_steps_live_progress_and_messages(home_store, project_dir, monkeypatch):
     assert state["latest"] == state["found"] == state["working"] == "" and state["tally"] == "1/2 files"
 
 
-@pytest.mark.spec("PRJ-14")
+@pytest.mark.spec("PRJ-15")
 def test_a_step_done_says_what_came_of_it(home_store):
     tracker = Tracker("reading")
     tracker.phase("survey")
@@ -477,7 +476,7 @@ def test_a_step_done_says_what_came_of_it(home_store):
     ]
 
 
-@pytest.mark.spec("PRJ-14")
+@pytest.mark.spec("PRJ-15")
 def test_the_passing_count_follows_every_save(make_project, make_session):
     steps = [
         criterion("C1", "t.py::a", status="green"),
@@ -492,7 +491,7 @@ def test_the_passing_count_follows_every_save(make_project, make_session):
     assert tracker.state["passing"] == [2, 2]
 
 
-@pytest.mark.spec("PRJ-15")
+@pytest.mark.spec("PRJ-16")
 def test_a_run_keeps_its_calls_and_output_in_its_project(project_dir, make_model, fake_ollama):
     from tinkerkit.prompts import Part
     from tinkerkit.settings import Log
@@ -510,7 +509,7 @@ def test_a_run_keeps_its_calls_and_output_in_its_project(project_dir, make_model
     assert [event["line"] for _, event in store.entries("output")] == ["✅ Wrote calc.py"]
 
 
-@pytest.mark.spec("PRJ-16")
+@pytest.mark.spec("PRJ-6")
 def test_remember_keeps_a_line_about_each_run(home_store, monkeypatch):
     monkeypatch.setattr("tinkerkit.project.RUNS_KEPT", 2)
     for run_id, updated in (

@@ -168,10 +168,6 @@ def test_strip_trailing_commas_outside_strings_only():
     assert Reply.strip_trailing_commas('{"a": [1, 2, ], "s": "x, ]",}') == '{"a": [1, 2 ], "s": "x, ]"}'
 
 
-def parts_text(parts, limit):
-    return Part.assemble(parts, limit)
-
-
 @pytest.mark.spec("PRM-11")
 def test_assemble_orders_by_place_and_leaves_out_empty_optional_parts():
     parts = [

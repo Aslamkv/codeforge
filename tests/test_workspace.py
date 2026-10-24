@@ -235,7 +235,7 @@ def test_a_file_shown_in_part_takes_line_edits_not_a_file_block(workspace, proje
     assert workspace.read("a.py") == "1\nB\n" and any("LINES block" in note for note in change.notes)
 
 
-@pytest.mark.spec("WS-7")
+@pytest.mark.spec("WS-8")
 def test_prepare_env_from_the_example(workspace, project_dir, capsys):
     (project_dir / ".env.example").write_text(
         "# settings\nAPI_KEY=your_api_key_here\nPORT=8000\nNAME=<name>\n"
@@ -245,7 +245,7 @@ def test_prepare_env_from_the_example(workspace, project_dir, capsys):
     assert "set API_KEY, NAME in it" in capsys.readouterr().out
 
 
-@pytest.mark.spec("WS-7")
+@pytest.mark.spec("WS-8")
 def test_prepare_env_never_changes_an_existing_env(workspace, project_dir):
     (project_dir / ".env.example").write_text("TOKEN=<token>\n")
     (project_dir / ".env").write_text("TOKEN=changeme\nLOG_LEVEL=none\n")
@@ -253,7 +253,7 @@ def test_prepare_env_never_changes_an_existing_env(workspace, project_dir):
     assert workspace.read(".env") == "TOKEN=changeme\nLOG_LEVEL=none\n"
 
 
-@pytest.mark.spec("WS-7")
+@pytest.mark.spec("WS-8")
 def test_placeholders_and_real_values():
     placeholders = [
         "",
@@ -272,7 +272,7 @@ def test_placeholders_and_real_values():
     assert [value for value in real if Workspace.is_placeholder(value)] == []
 
 
-@pytest.mark.spec("WS-8")
+@pytest.mark.spec("WS-9")
 def test_start_and_stop_a_background_command(workspace, project_dir):
     process, output = workspace.start("echo serving; (sleep 0.3; touch late) & sleep 30")
     assert output == project_dir / ".tinker" / "app-output.txt"
@@ -290,7 +290,7 @@ def no_shell_alias(monkeypatch):
     monkeypatch.setattr(TaughtCommands, "alias", staticmethod(lambda name: None))
 
 
-@pytest.mark.spec("WS-9")
+@pytest.mark.spec("WS-10")
 def test_teach_an_alias(tinker_home):
     TaughtCommands.teach("activate", "source .venv/bin/activate")
     entry = settings.Home.store().get("commands", "activate")
@@ -301,7 +301,7 @@ def test_teach_an_alias(tinker_home):
     )
 
 
-@pytest.mark.spec("WS-9")
+@pytest.mark.spec("WS-10")
 def test_teach_rejects_bad_shell_names_and_empty(tinker_home):
     with pytest.raises(SystemExit, match="not valid POSIX shell"):
         TaughtCommands.teach("broken", "if then fi (")
@@ -312,7 +312,7 @@ def test_teach_rejects_bad_shell_names_and_empty(tinker_home):
     assert settings.Home.store().items("commands") == {}
 
 
-@pytest.mark.spec("WS-9")
+@pytest.mark.spec("WS-10")
 def test_forget_with_none(tinker_home):
     TaughtCommands.teach("hi", "echo hi")
     TaughtCommands.teach("hi", "none")
@@ -321,7 +321,7 @@ def test_forget_with_none(tinker_home):
         TaughtCommands.teach("hi", "none")
 
 
-@pytest.mark.spec("WS-9")
+@pytest.mark.spec("WS-10")
 def test_teach_a_program_on_path(tinker_home, no_shell_alias):
     TaughtCommands.teach("sh")
     entry = TaughtCommands.all()["sh"]
@@ -330,14 +330,14 @@ def test_teach_a_program_on_path(tinker_home, no_shell_alias):
         TaughtCommands.teach("no-such-program-xyz")
 
 
-@pytest.mark.spec("WS-10")
+@pytest.mark.spec("WS-11")
 def test_all_rejects_a_broken_commands_file(tinker_home):
     settings.Home.store().put("commands", "x", {"kind": "magic"})
     with pytest.raises(SystemExit, match="x are neither an alias nor a program"):
         TaughtCommands.all()
 
 
-@pytest.mark.spec("WS-10")
+@pytest.mark.spec("WS-11")
 def test_spelled_out_prelude_and_uses(tinker_home):
     TaughtCommands.teach("act", ". .venv/bin/activate")
     assert TaughtCommands.spelled_out("act && pytest") == ". .venv/bin/activate && pytest"
@@ -347,13 +347,13 @@ def test_spelled_out_prelude_and_uses(tinker_home):
     assert TaughtCommands.uses("x; act", "act") and not TaughtCommands.uses("action", "act")
 
 
-@pytest.mark.spec("WS-10")
+@pytest.mark.spec("WS-11")
 def test_a_taught_alias_works_in_project_commands(tinker_home, workspace):
     TaughtCommands.teach("greet", "echo hello from alias")
     assert workspace.run("greet", quiet=True) == (0, "hello from alias\n")
 
 
-@pytest.mark.spec("WS-10")
+@pytest.mark.spec("WS-11")
 def test_describe_unquote_and_the_prompt_part(tinker_home):
     assert TaughtCommands.unquote("'source x'") == "source x"
     assert TaughtCommands.unquote("ls -la") == "ls -la"
@@ -383,7 +383,7 @@ TOOLS = {
 }
 
 
-@pytest.mark.spec("WS-11")
+@pytest.mark.spec("WS-12")
 def test_toolchain_reads_and_filters_setup():
     toolchain = Toolchain(TOOLS)
     assert toolchain.setup == ["python3 -m venv .venv", "pip install -r requirements.txt"]
@@ -396,14 +396,14 @@ def test_toolchain_reads_and_filters_setup():
     assert toolchain.use == ["make"] and toolchain.run == "python3 app.py" and toolchain
 
 
-@pytest.mark.spec("WS-11")
+@pytest.mark.spec("WS-12")
 def test_toolchain_lint_none_and_truth():
     toolchain = Toolchain(dict(TOOLS, lint="none"))
     assert toolchain.lint == "" and toolchain.lint_declared and toolchain.to_dict()["lint"] == "none"
     assert not Toolchain({"test_all": "pytest"}) and not Toolchain(None) and not Toolchain("junk")
 
 
-@pytest.mark.spec("WS-12")
+@pytest.mark.spec("WS-13")
 def test_shell_merged_and_to_dict():
     toolchain = Toolchain(TOOLS)
     assert toolchain.shell("pytest") == ". .venv/bin/activate && pytest"
@@ -413,7 +413,7 @@ def test_shell_merged_and_to_dict():
     assert Toolchain(toolchain.to_dict()).to_dict() == toolchain.to_dict()
 
 
-@pytest.mark.spec("WS-12")
+@pytest.mark.spec("WS-13")
 def test_problems():
     assert Toolchain(TOOLS).problems() == []
     problems = Toolchain({"test_one": "pytest -q"}).problems()
@@ -422,7 +422,7 @@ def test_problems():
     assert any("must contain {name}" in problem for problem in problems)
 
 
-@pytest.mark.spec("WS-13")
+@pytest.mark.spec("WS-14")
 def test_run_setup_runs_in_order(workspace, project_dir):
     ok, output, waiting = Toolchain(dict(TOOLS, activate="", setup=["echo one > a", "cat a > b"])).run_setup(
         workspace
@@ -430,7 +430,7 @@ def test_run_setup_runs_in_order(workspace, project_dir):
     assert (ok, waiting) == (True, []) and workspace.read("b") == "one\n"
 
 
-@pytest.mark.spec("WS-13")
+@pytest.mark.spec("WS-14")
 def test_run_setup_stops_at_a_failure(workspace, monkeypatch):
     monkeypatch.setattr(workspace_module, "online", lambda: True)
     ok, output, waiting = Toolchain(
@@ -445,7 +445,7 @@ def test_run_setup_stops_at_a_failure(workspace, monkeypatch):
     assert output.endswith("(it printed nothing)")
 
 
-@pytest.mark.spec("WS-13")
+@pytest.mark.spec("WS-14")
 def test_run_setup_sets_network_failures_aside(workspace, monkeypatch):
     monkeypatch.setattr(workspace_module, "online", lambda: True)
     toolchain = Toolchain(
@@ -458,7 +458,7 @@ def test_run_setup_sets_network_failures_aside(workspace, monkeypatch):
     assert ok and waiting == ["exit 1"]
 
 
-@pytest.mark.spec("WS-13")
+@pytest.mark.spec("WS-14")
 def test_run_setup_refuses_a_command_that_starts_a_new_project(workspace, project_dir):
     (project_dir / "Cargo.toml").write_text("[package]\n")
     toolchain = Toolchain(dict(TOOLS, activate="", setup=["mkdir app && touch app/Cargo.toml"]))
@@ -466,7 +466,7 @@ def test_run_setup_refuses_a_command_that_starts_a_new_project(workspace, projec
     assert not ok and "made a new project in app/" in output
 
 
-@pytest.mark.spec("WS-13")
+@pytest.mark.spec("WS-14")
 def test_run_setup_uses_the_environment_once_activate_works(workspace):
     toolchain = Toolchain(
         dict(TOOLS, activate=". ./env.sh", setup=["echo 'export MARK=on' > env.sh", "echo $MARK > seen"])
@@ -482,7 +482,7 @@ def python_toolchain():
     return Toolchain(TOOLCHAIN)
 
 
-@pytest.mark.spec("WS-14")
+@pytest.mark.spec("WS-15")
 def test_run_test_passes_and_fails(workspace, project_dir, python_toolchain):
     (project_dir / "test_a.py").write_text(
         "def test_ok():\n    assert True\n\ndef test_bad():\n    assert 1 == 2\n"
@@ -492,14 +492,14 @@ def test_run_test_passes_and_fails(workspace, project_dir, python_toolchain):
     assert state == "fails" and "assert 1 == 2" in output and output.startswith("$ ")
 
 
-@pytest.mark.spec("WS-14")
+@pytest.mark.spec("WS-15")
 def test_run_test_that_ran_nothing_fails(workspace):
     toolchain = Toolchain(dict(TOOLS, activate="", test_one="echo 'no tests ran'"))
     state, output = toolchain.run_test(workspace, TestRef("t.py::test_x"))
     assert state == "fails" and "ran no test: is the test named test_x?" in output
 
 
-@pytest.mark.spec("WS-14")
+@pytest.mark.spec("WS-15")
 def test_a_test_that_hangs_fails(workspace, monkeypatch):
     monkeypatch.setattr(Toolchain, "test_timeout", staticmethod(lambda: 0.15))
     toolchain = Toolchain(dict(TOOLS, activate="", test_one="sleep 20", test_all="sleep 20"))
@@ -509,7 +509,7 @@ def test_a_test_that_hangs_fails(workspace, monkeypatch):
     assert code is None and "did not finish within 0.3s" in output
 
 
-@pytest.mark.spec("WS-15")
+@pytest.mark.spec("WS-16")
 @pytest.mark.parametrize(
     "output,none",
     [
@@ -526,7 +526,7 @@ def test_ran_no_test(output, none):
     assert Toolchain.ran_no_test(output) is none
 
 
-@pytest.mark.spec("WS-15")
+@pytest.mark.spec("WS-16")
 def test_reached_no_test():
     refs = [TestRef("tests/test_a.py::test_x")]
     assert not Toolchain.reached_no_test(0, "", refs)
@@ -538,7 +538,7 @@ def test_reached_no_test():
     assert not Toolchain.reached_no_test(1, "FAILED tests/test_a.py::test_x", refs)
 
 
-@pytest.mark.spec("WS-16")
+@pytest.mark.spec("WS-17")
 def test_test_ref():
     ref = TestRef("tests/test_a.py::test_add")
     assert (ref.file, ref.name, str(ref)) == ("tests/test_a.py", "test_add", "tests/test_a.py::test_add")
@@ -551,7 +551,7 @@ def test_test_ref():
     assert TestRef("mod::sub::test_x").file == "mod::sub"
 
 
-@pytest.mark.spec("WS-16")
+@pytest.mark.spec("WS-17")
 def test_present_and_name_at(workspace, project_dir):
     (project_dir / "t.py").write_text("def test_add_two():\n    pass\n")
     assert not TestRef("t.py::test_add").present(workspace)
@@ -577,7 +577,7 @@ def test_three():
 """
 
 
-@pytest.mark.spec("WS-16")
+@pytest.mark.spec("WS-17")
 def test_excerpt_and_remove(workspace, project_dir):
     (project_dir / "t.py").write_text(TEST_FILE)
     names = ["test_one", "test_two", "test_three"]
@@ -597,7 +597,7 @@ def test_excerpt_and_remove(workspace, project_dir):
     assert not TestRef("t.py::test_two").remove(workspace, names)
 
 
-@pytest.mark.spec("WS-17")
+@pytest.mark.spec("WS-18")
 def test_key_line():
     output = "===== FAILURES =====\nsetup ok\nAssertionError: 3 != 4\nFAILED t.py::x\n----"
     assert Output.key_line(output) == "AssertionError: 3 != 4"
@@ -606,7 +606,7 @@ def test_key_line():
     assert Output.key_line("") == "no output"
 
 
-@pytest.mark.spec("WS-17")
+@pytest.mark.spec("WS-18")
 def test_signature_ignores_numbers_and_times():
     first = "FAILED test_x - assert 3 == 4 (took 0.52s at 0x7f3a)"
     second = "FAILED test_x - assert 9 == 12 (took 1.1s at 0x1b2c)"
@@ -617,7 +617,7 @@ def test_signature_ignores_numbers_and_times():
     )
 
 
-@pytest.mark.spec("WS-17")
+@pytest.mark.spec("WS-18")
 def test_failure_text_and_compact_lines():
     long = "\n".join(f"line {number}" for number in range(500))
     text = Output.failure_text(long, 200)
@@ -627,7 +627,7 @@ def test_failure_text_and_compact_lines():
     assert len(line) < 200 and "chars]" in line
 
 
-@pytest.mark.spec("WS-18")
+@pytest.mark.spec("WS-19")
 def test_misses_own_code():
     paths = ["moods.py", "src/app/main.py"]
     assert Output.misses_own_code("ModuleNotFoundError: No module named 'moods'", paths) == "moods"
@@ -635,7 +635,7 @@ def test_misses_own_code():
     assert Output.misses_own_code("No module named 'requests'", paths) == ""
 
 
-@pytest.mark.spec("WS-18")
+@pytest.mark.spec("WS-19")
 def test_unloadable():
     out = '  File "tests/test_a.py", line 3\n    def x(\n        ^\nSyntaxError: unexpected EOF while parsing'
     assert Output.unloadable(out, "tests/test_a.py")
@@ -644,7 +644,7 @@ def test_unloadable():
     assert not Output.unloadable(out, "")
 
 
-@pytest.mark.spec("WS-18")
+@pytest.mark.spec("WS-19")
 def test_mentioned_in_and_tool_failure(project_dir):
     output = "count.py:3 error\n/abs/proj/count.py:9 error\ntests/test_count.py failed"
     assert Output.mentioned_in(output, ["tests/test_count.py", "count.py", "other.py"]) == [
@@ -656,7 +656,7 @@ def test_mentioned_in_and_tool_failure(project_dir):
     assert Output.tool_failure(f"... {Output.OWN_CODE_UNSEEN} ...", project_dir) == Output.OWN_CODE_UNSEEN
 
 
-@pytest.mark.spec("WS-19")
+@pytest.mark.spec("WS-20")
 def test_file_view_shows_whole_files_then_windows(workspace, project_dir):
     (project_dir / "small.py").write_text("x = 1\n")
     (project_dir / "big.py").write_text("".join(f"line_{number} = {number}\n" for number in range(1, 400)))
@@ -677,7 +677,7 @@ def test_file_view_shows_whole_files_then_windows(workspace, project_dir):
     assert view.shown == {"small.py", "big.py"}
 
 
-@pytest.mark.spec("WS-19")
+@pytest.mark.spec("WS-20")
 def test_file_view_without_windows_has_no_howto(workspace, project_dir):
     (project_dir / "a.py").write_text("a = 1\n")
     parts = FileView(workspace, [], ["a.py"])(5000)
@@ -686,7 +686,7 @@ def test_file_view_without_windows_has_no_howto(workspace, project_dir):
     assert FileView.window_view(["a", "b", "c"], 2, 1000) == (1, 3, "   1| a\n   2| b\n   3| c")
 
 
-@pytest.mark.spec("WS-22")
+@pytest.mark.spec("WS-21")
 def test_a_window_holds_lines_on_both_sides_of_its_line():
     lines = [f"line{number}" for number in range(1, 21)]
     first, last, _ = FileView.window_view(lines, 10, 80)
@@ -695,7 +695,7 @@ def test_a_window_holds_lines_on_both_sides_of_its_line():
     assert at_the_end == (15, 20)
 
 
-@pytest.mark.spec("WS-20")
+@pytest.mark.spec("WS-7")
 def test_change():
     change = Change()
     assert not change and change.files == [] and change.created == []
@@ -703,7 +703,7 @@ def test_change():
     assert change and change.files == ["a.py", "b.py"] and change.created == ["b.py"]
 
 
-@pytest.mark.spec("WS-21")
+@pytest.mark.spec("WS-22")
 def test_online(monkeypatch):
     assert workspace_module.online() is False
     opened = []

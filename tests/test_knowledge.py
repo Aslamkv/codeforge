@@ -104,7 +104,7 @@ def test_shown_in():
     assert shown("code", ("code", "tests")) and not shown("code", ("spec",))
 
 
-@pytest.mark.spec("KNW-4")
+@pytest.mark.spec("KNW-2")
 @pytest.mark.parametrize(
     "language,slug",
     [
@@ -120,7 +120,7 @@ def test_language_key(language, slug):
     assert language_key(language) == slug
 
 
-@pytest.mark.spec("KNW-4")
+@pytest.mark.spec("KNW-2")
 def test_a_new_language_starts_empty(tinker_home):
     known = Knowledge(None)
     assert known.language == "Python" and known.key == "python"
@@ -132,7 +132,7 @@ def lesson(text, phase="code", scope="any"):
     return {"text": text, "phase": phase, "scope": scope}
 
 
-@pytest.mark.spec("KNW-5")
+@pytest.mark.spec("KNW-4")
 def test_add_lessons(tinker_home):
     known = Knowledge("Python")
     added = known.add_lessons(
@@ -161,7 +161,7 @@ def test_add_lessons(tinker_home):
     assert "2 lesson(s)" in again.summary()
 
 
-@pytest.mark.spec("KNW-5")
+@pytest.mark.spec("KNW-4")
 def test_lessons_are_capped_and_ranked(tinker_home):
     known = Knowledge("Python")
     distinct = [
@@ -195,7 +195,7 @@ def test_lessons_are_capped_and_ranked(tinker_home):
     assert known.lessons(("design",)) == []
 
 
-@pytest.mark.spec("KNW-6")
+@pytest.mark.spec("KNW-5")
 def test_toolchain_fixes(tinker_home):
     known = Knowledge("Python")
     fix = {
@@ -224,7 +224,7 @@ def test_toolchain_fixes(tinker_home):
     assert [fix["cause"] for fix in known.language_doc["fixes"] if fix["failure"] == "failure 24"] == ["new"]
 
 
-@pytest.mark.spec("KNW-6")
+@pytest.mark.spec("KNW-5")
 def test_remember_toolchain_without_its_project_commands(tinker_home):
     known = Knowledge("Python")
     toolchain = Toolchain(
@@ -258,7 +258,7 @@ class EmbedServer:
         return {"embeddings": [[float(len(text)), float(text.count("a")) + 0.5] for text in payload["input"]]}
 
 
-@pytest.mark.spec("KNW-7")
+@pytest.mark.spec("KNW-11")
 def test_embeddings_are_cached_per_model(tinker_home, monkeypatch):
     server = EmbedServer()
     monkeypatch.setattr(Ollama, "get_json", staticmethod(server))
@@ -276,7 +276,7 @@ def test_embeddings_are_cached_per_model(tinker_home, monkeypatch):
     assert len(Home.store().get("embeddings", "embed-a")) == each_model_keeps_its_own
 
 
-@pytest.mark.spec("KNW-7")
+@pytest.mark.spec("KNW-11")
 def test_embeddings_keep_prune_and_failure(tinker_home, monkeypatch):
     monkeypatch.setattr(Ollama, "get_json", staticmethod(EmbedServer()))
     embeddings = Embeddings("e")
@@ -294,7 +294,7 @@ def test_embeddings_keep_prune_and_failure(tinker_home, monkeypatch):
     assert Embeddings.cosine([0, 0], [1, 1]) == 0.0
 
 
-@pytest.mark.spec("KNW-7")
+@pytest.mark.spec("KNW-11")
 def test_embeddings_required_check_and_configured(monkeypatch):
     assert Embeddings.configured() is None
     with pytest.raises(SystemExit, match="needs an embedding model"):
@@ -307,7 +307,7 @@ def test_embeddings_required_check_and_configured(monkeypatch):
     assert Embeddings.required("--web").name == "nomic" and Embeddings.configured().name == "nomic"
 
 
-@pytest.mark.spec("KNW-8")
+@pytest.mark.spec("KNW-12")
 def test_by_words_and_rank():
     texts = ["Flask routes and templates", "Django models", "Flask Flask Flask quickstart", "nothing here"]
     retriever = Retriever(None)
@@ -316,7 +316,7 @@ def test_by_words_and_rank():
     assert retriever.rank("q", []) == [] and retriever.used == "words"
 
 
-@pytest.mark.spec("KNW-8")
+@pytest.mark.spec("KNW-12")
 def test_rank_fuses_meaning(monkeypatch, capsys):
     class Meaning:
         name, failed = "e", ""
@@ -345,7 +345,7 @@ def test_rank_fuses_meaning(monkeypatch, capsys):
     assert retriever.embeddings is None and "Meaning search not used: it broke" in capsys.readouterr().out
 
 
-@pytest.mark.spec("KNW-9")
+@pytest.mark.spec("KNW-13")
 def test_safe_commands():
     kept, dropped = Learner.safe_commands(
         [
@@ -362,7 +362,7 @@ def test_safe_commands():
     assert dropped == ["npm install x", "cargo --version; rm x", "echo $HOME", "sudo ls"]
 
 
-@pytest.mark.spec("KNW-10")
+@pytest.mark.spec("KNW-14")
 def test_read_facts_and_add_facts():
     from tinkerkit.prompts import Reply
 
@@ -399,7 +399,7 @@ def test_read_facts_and_add_facts():
     assert Learner.pages_of(kept[0]) == ["https://a", "https://b"]
 
 
-@pytest.mark.spec("KNW-10")
+@pytest.mark.spec("KNW-14")
 def test_relevant_chunks():
     paragraphs = (
         ["intro about the page " * 10]
@@ -433,7 +433,7 @@ class FakeInternet:
         return {"title": url, "url": url, "content": self.pages[url]} if self.up else None
 
 
-@pytest.mark.spec("KNW-12")
+@pytest.mark.spec("KNW-15")
 def test_look_at_machine(make_model):
     found = Learner(make_model(), FakeInternet(), None).look_at_machine(
         ["pwd", "echo tool version 2.4.1", "exit 3"]
@@ -448,7 +448,7 @@ def test_look_at_machine(make_model):
     assert found[2]["found"] is False and found[2]["version"] == ""
 
 
-@pytest.mark.spec("KNW-13")
+@pytest.mark.spec("KNW-16")
 def test_read_frame():
     frame = Researcher.read_frame(
         {
@@ -469,7 +469,7 @@ def test_read_frame():
         Researcher.read_frame({"name": "X", "questions": []})
 
 
-@pytest.mark.spec("KNW-13")
+@pytest.mark.spec("KNW-16")
 def test_read_analysis():
     analysis = Researcher.read_analysis(
         {
@@ -527,7 +527,7 @@ def fact(text, source, section="1"):
     return {"text": text, "source": source, "section": section}
 
 
-@pytest.mark.spec("KNW-14")
+@pytest.mark.spec("KNW-17")
 def test_cross_check_supports_agreeing_facts_and_pairs_disagreeing_ones():
     facts = [
         fact("Food is weighed in 10 kg crates", "https://a.org/1"),
@@ -543,7 +543,7 @@ def test_cross_check_supports_agreeing_facts_and_pairs_disagreeing_ones():
     assert facts[3]["sites"] == ["a.org"] and (1, 3) in differ and (2, 3) in differ
 
 
-@pytest.mark.spec("KNW-14")
+@pytest.mark.spec("KNW-17")
 def test_fold_repeats_keeps_the_more_detailed_text():
     facts = [fact("Open on Mondays", "https://a.org"), fact("Open on Mondays from 9 to 5", "https://b.org")]
     vectors = [[1, 0], [1, 0.01]]
@@ -560,7 +560,7 @@ def test_fold_repeats_keeps_the_more_detailed_text():
     assert Researcher.site("https://www.Example.org/x") == "example.org"
 
 
-@pytest.mark.spec("KNW-14")
+@pytest.mark.spec("KNW-17")
 def test_supported_and_entry():
     corroborated, single, disputed = (
         {"confidence": confidence} for confidence in ("corroborated", "single", "disputed")
@@ -592,7 +592,7 @@ def test_supported_and_entry():
     assert "section" not in entry["facts"][0]
 
 
-@pytest.mark.spec("KNW-14")
+@pytest.mark.spec("KNW-17")
 def test_next_searches_and_fact_listing():
     frame = {"questions": [{"question": "q1"}, {"question": "q2"}]}
     facts = [fact("a", "u", "2"), fact("b", "u", "1")]
@@ -635,7 +635,7 @@ def analysis(gaps=()):
     )
 
 
-@pytest.mark.spec("KNW-15")
+@pytest.mark.spec("KNW-18")
 def test_research_a_domain(make_model, fake_ollama, tinker_home):
     pages = {
         "https://a.org/intake": "Donations are weighed at intake.",
@@ -669,7 +669,7 @@ def test_research_a_domain(make_model, fake_ollama, tinker_home):
 SOURCES = [{"id": "fact1", "text": "a"}, {"id": "fact2", "text": "b"}, {"id": "lesson1", "text": "c"}]
 
 
-@pytest.mark.spec("KNW-22")
+@pytest.mark.spec("KNW-20")
 def test_read_rules_keeps_only_rules_that_rest_on_what_was_learned():
     rules = Learner.read_rules(
         {
@@ -698,7 +698,7 @@ def test_read_rules_keeps_only_rules_that_rest_on_what_was_learned():
         Learner.read_rules({"rules": [{"phase": "code", "text": "Trust me"}]}, SOURCES)
 
 
-@pytest.mark.spec("KNW-22")
+@pytest.mark.spec("KNW-20")
 def test_a_rule_says_when_it_applies_and_what_a_new_project_declares_comes_first():
     rules = Learner.read_rules(
         {
@@ -723,7 +723,7 @@ def test_a_rule_says_when_it_applies_and_what_a_new_project_declares_comes_first
     )
 
 
-@pytest.mark.spec("KNW-22")
+@pytest.mark.spec("KNW-20")
 def test_condensing_folds_in_the_lessons_the_language_proved(make_model, fake_ollama, tinker_home):
     known = Knowledge("Go")
     known.add_lessons(
@@ -758,7 +758,7 @@ def test_condensing_folds_in_the_lessons_the_language_proved(make_model, fake_ol
     assert rules[0]["cites"] == [known.language_doc["lessons"][0]["id"]]
 
 
-@pytest.mark.spec("KNW-22")
+@pytest.mark.spec("KNW-20")
 def test_a_playbook_the_model_cannot_give_leaves_the_facts_as_they_are(make_model, fake_ollama, tinker_home):
     fake_ollama.reply(json.dumps({"rules": []}), when="Condense", times=2)
     learner = Learner(make_model(), FakeInternet(), None)
@@ -794,7 +794,7 @@ def language_with_rules():
     return [rule["id"] for rule in Library.read("go")["rules"]]
 
 
-@pytest.mark.spec("KNW-22")
+@pytest.mark.spec("KNW-20")
 def test_rules_are_shown_in_place_of_the_facts_they_cite(tinker_home):
     aliases, _ = language_with_rules()
     items = Library.items({"go": Library.read("go")})
@@ -808,7 +808,7 @@ def test_rules_are_shown_in_place_of_the_facts_they_cite(tinker_home):
     assert len(Library.items({"go": plain})) == every_fact_without_a_playbook
 
 
-@pytest.mark.spec("KNW-22")
+@pytest.mark.spec("KNW-20")
 def test_a_rule_is_proven_and_retired_like_a_fact(tinker_home):
     aliases, run = language_with_rules()
     Knowledge("Go").prove({f"fact:go:{aliases}": ["code"]})
@@ -825,7 +825,7 @@ def test_a_rule_is_proven_and_retired_like_a_fact(tinker_home):
     assert "Aliases may be generic" not in shown and "Go 1.25 has a new GC" not in shown
 
 
-@pytest.mark.spec("KNW-5")
+@pytest.mark.spec("KNW-4")
 def test_a_lesson_that_names_the_project_is_not_kept(tinker_home):
     known = Knowledge("Python")
     added = known.add_lessons(
@@ -858,7 +858,7 @@ def topic_with_facts():
     return [fact["id"] for fact in Library.read("flask")["facts"]]
 
 
-@pytest.mark.spec("KNW-17")
+@pytest.mark.spec("KNW-7")
 def test_knowledge_starts_as_a_candidate_and_a_success_proves_it(tinker_home):
     route, client = topic_with_facts()
     assert all(fact["status"] == "candidate" for fact in Library.read("flask")["facts"])
@@ -888,7 +888,7 @@ def test_knowledge_starts_as_a_candidate_and_a_success_proves_it(tinker_home):
     assert proven_again == 0
 
 
-@pytest.mark.spec("KNW-17")
+@pytest.mark.spec("KNW-7")
 def test_a_failure_retires_what_was_used_in_that_step(tinker_home):
     route, client = topic_with_facts()
     known = Knowledge("Python")
@@ -921,7 +921,7 @@ def test_a_failure_retires_what_was_used_in_that_step(tinker_home):
     ] == [route]
 
 
-@pytest.mark.spec("KNW-18")
+@pytest.mark.spec("KNW-8")
 def test_proven_facts_are_shown_for_their_phase(tinker_home):
     route, client = topic_with_facts()
     known = Knowledge("Python 3.13")
@@ -934,7 +934,7 @@ def events(item):
     return [(event["event"], event["run"]) for event in item.get("history", [])]
 
 
-@pytest.mark.spec("KNW-19")
+@pytest.mark.spec("KNW-9")
 def test_each_item_keeps_its_history_by_run(tinker_home):
     route, _ = topic_with_facts()
     Knowledge("Python", "r1").add_lessons([lesson("Seed random generators inside tests", "tests")], [])
@@ -951,7 +951,7 @@ def test_each_item_keeps_its_history_by_run(tinker_home):
     assert events(after.language_doc["facts"][0]) == [("born", "r3"), ("helped", "r4")]
 
 
-@pytest.mark.spec("KNW-19")
+@pytest.mark.spec("KNW-9")
 def test_a_fix_keeps_its_history_and_history_is_capped(tinker_home, monkeypatch):
     Knowledge("Python", "r1").remember_fix(
         {"failure": "no module named calc", "cause": "pythonpath", "replay": {"toolchain": {}}}
@@ -966,7 +966,7 @@ def test_a_fix_keeps_its_history_and_history_is_capped(tinker_home, monkeypatch)
     assert [run for _, run in events(item)] == ["r2", "r3", "r4"] and item["helped"] == 4
 
 
-@pytest.mark.spec("KNW-5", "KNW-19")
+@pytest.mark.spec("KNW-4", "KNW-9")
 def test_lessons_rank_by_times_seen_and_helped(tinker_home):
     known = Knowledge("Python")
     known.add_lessons(
@@ -984,7 +984,7 @@ def test_lessons_rank_by_times_seen_and_helped(tinker_home):
     ] == "Seed random generators inside tests"
 
 
-@pytest.mark.spec("KNW-20")
+@pytest.mark.spec("KNW-10")
 def test_what_is_retired_is_kept_apart_with_why_and_never_shown(tinker_home, monkeypatch):
     route, client = topic_with_facts()
     known = Knowledge("Python", "r1")
@@ -1019,7 +1019,7 @@ def test_what_is_retired_is_kept_apart_with_why_and_never_shown(tinker_home, mon
     assert [retired["id"] for retired in Library.read("flask")["retired"]] == [route]
 
 
-@pytest.mark.spec("KNW-21")
+@pytest.mark.spec("KNW-19")
 def test_a_finding_cites_its_facts_by_id(tinker_home):
     Library.save(
         "food",
@@ -1036,7 +1036,7 @@ def test_a_finding_cites_its_facts_by_id(tinker_home):
     assert entry["findings"][0]["cites"] == [entry["facts"][1]["id"]]
 
 
-@pytest.mark.spec("KNW-25")
+@pytest.mark.spec("KNW-6")
 def test_the_checks_a_reused_toolchain_lacks_and_the_tools_it_cannot_count_on(tinker_home):
     learned(
         "python",
