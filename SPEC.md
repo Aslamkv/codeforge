@@ -1163,7 +1163,8 @@ person always comes first.
   usage. A run that starts a cycle is given `--confirm`, so its plan waits for the person. `status` alone gives what runs. `stop`, `stop #N` and `resume [#N]` act on jobs (**JOB-7**), and
   `research TOPIC` runs as a task. A task started while another runs pauses it (**JOB-8**). A command that deletes shows what it
   deletes and waits for `confirm`, but `clear chat`, which deletes no record (the history keeps it), is
-  done at once. `exit` asks first. A `channel` action that needs a terminal says so. Any other command
+  done at once. `exit` asks first; the person's `exit` and `confirm` are taken out at once, and the question as
+  Tinker ends (its status says it no longer listens). A `channel` action that needs a terminal says so. Any other command
   runs as `tinker`.
 - **CNV-16** `Desk.settle` runs what waits for a `confirm` (a deletion, a command line). Any other
   message cancels it and says so. `decide` builds or changes the plan that waits. For a new project,
@@ -1183,9 +1184,11 @@ person always comes first.
   The project is the one named, else the one built last. With no project built, or one with no run
   command, it says so.
 - **CNV-21** `Desk.run` claims each chat channel. When another Tinker holds one, it stops if there is
-  no terminal, and otherwise leaves that chat out. It shows its status, pinned in each chat, when it
-  starts listening, and `not listening` when it ends: the one status message kept from before, edited in
-  place, and never taken out. While it listens it collects the messages whose time is up, every
+  no terminal, and otherwise leaves that chat out. The terminal never waits on a chat: each chat starts in its
+  own thread. Each chat has one status message, pinned: when Tinker starts listening, when it ends (`not
+  listening`), and when the status is about something else (a task starts, waits for the person, ends), it is
+  sent anew at the bottom and pinned, and the one before taken out; the same status going on (a task's
+  progress) is edited in place. While it listens it collects the messages whose time is up, every
   `COLLECT_EVERY` seconds.
 - **CNV-22** `one_shot` says one of the conversation's commands once, in the terminal (`tinker chat`,
   `command`, `research`, `run`, `history`). Each needs words after it, except `run` and `history`; `chat`
@@ -1238,8 +1241,10 @@ person always comes first.
 - **CHN-8** `send_file(chat, path, caption)` posts `sendDocument` as `multipart/form-data`: the chat, the
   file under its name, and the caption as Telegram HTML (at most 1024 chars). A failure sends the
   caption alone.
-- **CHN-9** Tinker's status is the chat's one pin. `pin` leaves the status kept from before as it is when it
-  is pinned already; a new one is pinned alone, every pin before taken out (`unpinAllChatMessages`).
+- **CHN-9** Tinker's status is the chat's one pin. Tinker's first pin in a chat takes out every pin from before,
+  one at a time (`unpinChatMessage`, never `unpinAllChatMessages`, which Telegram makes wait), and leaves the
+  status as it is when it is pinned already; a later status is pinned, the one before going with its message.
+  Telegram's note about the pin is taken out after `PIN_NOTE_WAIT`, or at once when Tinker ends.
 - **CHN-10** Every message of a chat served (Tinker's, and the person's) is kept in the ledger, going in a
   day; an edit moves that on. `show` keeps the thing it shows, numbered, with the person's words it
   answers (their message within `ASKED_WAIT`). `glance` takes the person's message out at once, and the

@@ -26,6 +26,7 @@ lazy from .settings import Home
 
 PAIRING_WAIT = 120                             # seconds to wait for the first message when pairing a chat
 PIN_NOTE_WAIT = 2                              # seconds before Telegram's note about a pin is taken out
+OLD_PINS = 10                                  # pins from before taken out at most, one at a time
 CHECK_TRIES = 3                                # tries of a channel's first call when it starts listening
 RATE_LIMIT_WAITS = 3                           # times a call waits out Telegram's "too many requests"
 CAPTION_CHARS = 1024                           # the longest caption Telegram takes on a file
@@ -383,24 +384,39 @@ class TelegramChannel(Channel):
             pass
 
     def pin(self, chat, sent):
-        """sent (Tinker's status) pinned, the one pin of the chat. The status kept from before is pinned already:
-        it is left as it is. A new one is pinned alone (every pin before taken out, so none piles up). Telegram
+        """sent (Tinker's status) pinned, the one pin of the chat. The first pin of this Tinker takes out the pins
+        from before; after it, the status before goes with its message (a message taken out is unpinned). Telegram
         adds a note to the chat about each pin, as its next message: that note is taken out once it is surely not
-        the person's (they did not write it) nor Tinker's (a note cannot be edited)."""
+        the person's (they did not write it) nor Tinker's (a note cannot be edited); at once when Tinker ends."""
         chat = str(chat)
         if self.pinned.get(chat) == sent:
             return
-        if Ledger.is_lasting(self.name, chat, sent) and self.pinned_now(chat) == sent:
+        if chat not in self.pinned and self.unpin_all(chat, sent) == sent:
             self.pinned[chat] = sent
             return
         after = self.newest.get(chat, 0)
         try:
-            self.call("unpinAllChatMessages", chat_id=chat)
             self.call("pinChatMessage", chat_id=chat, message_id=sent, disable_notification=True)
         except OSError, ChannelError:
             return
         self.pinned[chat] = sent
-        threading.Thread(target=self.drop_pin_note, args=(chat, after), daemon=True).start()
+        if self.closed:
+            self.drop_pin_note(chat, after, wait=0)
+        else:
+            threading.Thread(target=self.drop_pin_note, args=(chat, after), daemon=True).start()
+
+    def unpin_all(self, chat, sent):
+        """Every pin of the chat taken out, newest first, until sent is the one pinned (its id) or none is (None).
+        One at a time: Telegram makes unpinAllChatMessages wait, for half a minute and more."""
+        for _ in range(OLD_PINS):
+            pinned = self.pinned_now(chat)
+            if pinned in (None, sent):
+                return pinned
+            try:
+                self.call("unpinChatMessage", chat_id=chat, message_id=pinned)
+            except OSError, ChannelError:
+                return None
+        return None
 
     def pinned_now(self, chat):
         """The id of the chat's pinned message (None for none, or when Telegram does not say)."""
@@ -436,8 +452,8 @@ class TelegramChannel(Channel):
             self.delete(chat, message)
         return len(passing)
 
-    def drop_pin_note(self, chat, after):
-        time.sleep(PIN_NOTE_WAIT)  # so that a message the person sent meanwhile is heard first
+    def drop_pin_note(self, chat, after, wait=PIN_NOTE_WAIT):
+        time.sleep(wait)  # so that a message the person sent meanwhile is heard first
         note = self.pin_note(chat, after)
         if note:
             self.delete(chat, note)
