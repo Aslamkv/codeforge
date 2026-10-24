@@ -114,7 +114,6 @@ class Cli:
         for command in COMMANDS
         if command.cli and command.group != "Talk" and command.name not in ("help", "channel", "confirm")
     )
-    LONG_MODEL_COMMANDS = ("learn", "exercise", "read")
     FIELDS = {
         "reset": False,
         "config": None,
@@ -506,7 +505,7 @@ class Cli:
 
     @staticmethod
     def works_for_hours(args):
-        return args.command in Cli.RUNS + Cli.LONG_MODEL_COMMANDS
+        return BY_NAME[args.command].kind == "job"
 
 
 class Commands:

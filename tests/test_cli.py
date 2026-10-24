@@ -982,3 +982,10 @@ def test_the_cycle_a_run_works_on(make_project, make_session):
         ("feature", "keep a history"),
         ("fix", "2/0 crashes"),
     ]
+
+
+@pytest.mark.spec("JOB-1")
+def test_a_job_keeps_the_computer_awake_and_a_glance_does_not():
+    assert Cli.works_for_hours(Cli.parse(["ask", "what", "formats", "python"]))
+    assert Cli.works_for_hours(Cli.parse(["calibrate", "qwen3"]))
+    assert not Cli.works_for_hours(Cli.parse(["runs"]))

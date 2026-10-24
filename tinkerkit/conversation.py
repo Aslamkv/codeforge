@@ -15,7 +15,7 @@ lazy import time
 lazy import webbrowser
 lazy from pathlib import Path
 
-from .commands import COMMANDS, TERMINAL_ONLY_CHANNEL_ACTIONS, named, refs
+from .commands import COMMANDS, TERMINAL_ONLY_CHANNEL_ACTIONS, deletes, kind_of, refs
 from .jobs import JOB_STOP_SIGNAL, Jobs, job_number, paused_for_you, today
 from .project import Runs, Tracker, saved
 lazy from .ledger import DONE_NOTE_KEPT_SECONDS, Ledger
@@ -48,14 +48,9 @@ CHAT_RESEARCH_SEARCHES = 3
 CHAT_RESEARCH_PAGES = 4
 CHAT_RESEARCH_CHARS_PER_PAGE = 3500
 
-LONG_COMMANDS = named("long")
-QUICK_COMMANDS = named("quick")
-GLANCE_COMMANDS = QUICK_COMMANDS + ("help", "history")
-DELETING_COMMANDS = tuple(command.name for command in COMMANDS if command.deletes)
 PLAN_CONFIRMING_COMMANDS = tuple(
     command.name for command in COMMANDS if "--confirm" in (option.flag for option in command.options)
 )
-CONVERSATION_OWN_COMMANDS = named("own")
 ONE_WORD_COMMANDS = tuple(command.name for command in COMMANDS if command.chat and command.words == "one")
 ANY_WORDS_COMMANDS = tuple(command.name for command in COMMANDS if command.chat and command.words == "any")
 COMMAND_NAMES = tuple(command.name for command in COMMANDS if command.name)
@@ -354,7 +349,7 @@ class Desk:
         reply = self.answer(message, channel)
         if reply:
             sent = channel.send(message.chat, reply)
-            if command in GLANCE_COMMANDS:
+            if kind_of(command_words(message.text)) == "glance":
                 channel.glance(message.chat, message.id, [sent])
 
     def with_words_wanted(self, channel, message):
@@ -421,9 +416,9 @@ class Desk:
             return f"🖥 `channel {words[1]}` asks in a terminal: `tinker channel {words[1]}` there"
         if command == "read" and words[1:2] in (["list"], ["show"]):
             return md(t"📚 **{' '.join(words)}**\n{self.tinker(words):block}")
-        if command in DELETING_COMMANDS and "--yes" not in words:
+        if deletes(words) and "--yes" not in words:
             return self.ask_first(channel, message.chat, words)
-        if command in LONG_COMMANDS:
+        if kind_of(words) == "job":
             return self.start_task(words, self.root, " ".join(words))
         if command == "memory" and "--graph" in words:
             return self.memory_graph(channel, message.chat, words)
@@ -756,7 +751,7 @@ class Desk:
                 each.closed = True
             return
         words = asking["words"] + ["--yes"]
-        if words[0] in LONG_COMMANDS:
+        if kind_of(words) == "job":
             refused = self.start_task(words, self.root, " ".join(asking["words"]))
             if refused:
                 channel.show(chat, asking["shown"], refused, done=True)

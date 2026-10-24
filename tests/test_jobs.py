@@ -50,6 +50,7 @@ def test_long_commands_are_jobs_and_the_rest_are_not():
         ["exercise", "rust"],
         ["confirm"],
         ["amend", "x"],
+        ["calibrate"],
         ["ask", "status", "of", "python"],
     ):
         assert is_job(argv), argv
@@ -61,6 +62,8 @@ def test_long_commands_are_jobs_and_the_rest_are_not():
         ["stop"],
         ["exercise", "status"],
         ["learn", "ll", "ls -l"],
+        ["read", "list"],
+        ["chat", "hi"],
         ["task", "--help"],
     ):
         assert not is_job(argv), argv

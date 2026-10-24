@@ -13,9 +13,9 @@ ROOT = Path(__file__).resolve().parent.parent
 LAYERS = (
     "messages",
     "settings",
+    "commands",
     "jobs",
     "ledger",
-    "commands",
     "prompts",
     "workspace",
     "model",

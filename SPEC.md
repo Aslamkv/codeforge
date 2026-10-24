@@ -61,9 +61,9 @@ listed above it:
 |---|---|
 | `messages` | everything Tinker tells the person, in one voice (`say`, `Messages`, `Message`): each message's kind gives its icon, sections nest it, followers (a tracker) get it as data, and details go to the log only |
 | `settings` | every tunable number and fixed name; the Tinker home (`Home`), its database (`Store`) and `Config`; small helpers |
+| `commands` | the one table of Tinker's commands, and project references (`@ID`, `@folder`) |
 | `jobs` | every long command as a job, listed, stopped and resumed (`Jobs`), and its journal of requests and answers (`Journal`, `journaled`) |
 | `ledger` | what is said in the chats, so a chat is only a view of it: each message with when it goes, each thing shown, numbered, for `history` (`Ledger`) |
-| `commands` | the one table of Tinker's commands, and project references (`@ID`, `@folder`) |
 | `prompts` | prompt parts (`Part`), replies (`Reply`), every system prompt (`Prompts`) |
 | `workspace` | the project's files and the commands run in it (`Workspace`, `Toolchain`, `TestRef`, `Output`, `FileView`, `TaughtCommands`) |
 | `model` | the local model: Ollama's API, one request with its budgets and retries (`Model`), measuring a model (`Calibrator`) |
@@ -265,6 +265,24 @@ The home, its database, the settings, and small helpers every module shares.
   `newest()` gives the entries newest first. `page(entries, N)` gives page N of the entries, `PER_PAGE` (10) to
   a page, with how many pages there are (at least one).
 
+## commands (CMD)
+
+- **CMD-1** `COMMANDS` is the one table of Tinker's commands. For each it gives the synopsis, the group, what
+  it does, its kind, whether a chat offers it, whether it is a run, whether it deletes, the words it takes in
+  a chat (`none`, `one`, `any`), its arguments and its options. The kind is `job` (a long command, **JOB-1**),
+  `glance` (answered at once, pausing nothing, **CNV-14**), `pauses` (a request the model answers right away,
+  **JOB-10**) or `own` (the conversation answers it its own way). An action whose kind differs from its
+  command's is an `Action` of that command, with its own kind: `read list`, `read show`, `exercise status`,
+  `channel remove` and `learn NAME "DEFINITION"` (two words). `kind_of(argv)` gives the kind of what the words
+  ask for, and `deletes(argv)` whether it deletes. The command line builds its parser and its help from the
+  table, and the conversation its commands. Nothing else lists commands by kind.
+- **CMD-2** The runs are `task`, `restart`, `confirm`, `amend`, `add`, `fix` and `resume`. Every run but
+  `restart` takes `--web`. The runs that start a cycle (`task`, `restart`, `add`, `fix`) take `--confirm`, and
+  the others do not. The commands that delete are `clear`, `reset`, `restart` and `channel remove`.
+- **CMD-3** `ref(word)` reads a project reference: `@` followed by a run ID or a folder name. Any other word is
+  not a reference. `refs(words)` takes a reference from the start of the words, and leaves the rest as they
+  are.
+
 ## jobs (JOB)
 
 Every long command is a job: it can be listed, stopped and resumed the same way, and a resumed job does not do
@@ -274,7 +292,8 @@ pauses it too, so the person is always answered at once.
 
 - **JOB-1** `is_job(argv)` is true for a command of kind `job` (**CMD-1**): `task`, `restart`, `resume`,
   `confirm`, `amend`, `add`, `fix`, `calibrate`, `learn`, `ask`, `teach`, `read`, `research` and `exercise`.
-  Help, and a build an exercise runs (`EXERCISE_ENV`), are never jobs. `Jobs.running(argv)` runs
+  Help, and a build an exercise runs (`EXERCISE_ENV`), are never jobs. A job keeps the computer awake while it
+  runs (**SET-13**). `Jobs.running(argv)` runs
   a job as the next number (`#1`, `#2` ...), kept in the home's `jobs` with its command, title, arguments, the
   day it started, its state `running` and its process. Its process takes `JOB_STOP_SIGNAL` (SIGUSR2) as
   Ctrl-C.
@@ -340,23 +359,6 @@ What is said in the chats, kept so that a chat is only a view of it.
 - **LED-2** `shown(channel, chat, thing, ids, text, asked)` keeps a thing as it was shown last; with no thing,
   a new one is numbered, keeping what was asked. `thing_of(ids)` gives the thing messages show. `page(N)` lists
   the things by page ([State](#state)), with how many pages there are.
-
-## commands (CMD)
-
-- **CMD-1** `COMMANDS` is the one table of Tinker's commands. For each it gives the synopsis, the group, what
-  it does, its kind, whether a chat offers it, whether it is a run, whether it deletes, the words it takes in
-  a chat (`none`, `one`, `any`), its arguments and its options. The kind is `job` (a long command, **JOB-1**),
-  `glance` (answered at once, pausing nothing, **CNV-14**), `pauses` (a request the model answers right away,
-  **JOB-10**) or `own` (the conversation answers it its own way). An action whose kind differs from its
-  command's has a row of its own: `read list`, `read show`, `exercise status`, `channel remove` and
-  `learn NAME "DEFINITION"`. The command line builds its parser and its help from the table, and the
-  conversation its commands. Nothing else lists commands by kind.
-- **CMD-2** The runs are `task`, `restart`, `confirm`, `amend`, `add`, `fix` and `resume`. Every run but
-  `restart` takes `--web`. The runs that start a cycle (`task`, `restart`, `add`, `fix`) take `--confirm`, and
-  the others do not. The commands that delete are `clear`, `reset`, `restart` and `channel remove`.
-- **CMD-3** `ref(word)` reads a project reference: `@` followed by a run ID or a folder name. Any other word is
-  not a reference. `refs(words)` takes a reference from the start of the words, and leaves the rest as they
-  are.
 
 ## prompts (PRM)
 

@@ -8,24 +8,10 @@ lazy import threading
 lazy import time
 lazy from pathlib import Path
 
+lazy from .commands import kind_of
 lazy from .messages import say
 lazy from .settings import EXERCISE_ENV, Home, Numbered, confirm_deletion, fingerprint, now_text
 
-COMMANDS = (
-    "task",
-    "restart",
-    "resume",
-    "confirm",
-    "amend",
-    "add",
-    "fix",
-    "learn",
-    "ask",
-    "teach",
-    "read",
-    "research",
-    "exercise",
-)
 JOBS = Numbered("jobs", "job numbers")
 STATES = ("running", "paused", "stopped", "finished", "archived")
 JOB_PAUSE_GRACE_SECONDS = 150
@@ -328,15 +314,9 @@ def signal_job(job):
 
 
 def is_job(argv):
-    if not argv or argv[0] not in COMMANDS or {"-h", "--help"} & set(argv):
+    if {"-h", "--help"} & set(argv) or os.environ.get(EXERCISE_ENV) == "1":
         return False
-    if os.environ.get(EXERCISE_ENV) == "1":
-        return False
-    return (
-        not (argv[0] == "learn" and len(argv) == 3)
-        and not (argv[0] == "exercise" and argv[1:2] == ["status"])
-        and not (argv[0] == "read" and argv[1:2] in (["list"], ["show"]))
-    )
+    return kind_of(argv) == "job"
 
 
 def job_number(word):

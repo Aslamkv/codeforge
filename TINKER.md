@@ -379,8 +379,8 @@ again, and an exercise that was killed (or the computer restarted) goes on by it
 
 ## Jobs ⏯
 
-Everything that takes a while is a job: a task, `add`, `fix`, `learn`, `ask`, `teach`, `read`, `research`
-and `exercise`. Each gets a number (`#1`, `#2` ...).
+Everything that takes a while is a job: a task, `add`, `fix`, `calibrate`, `learn`, `ask`, `teach`, `read`,
+`research` and `exercise`. Each gets a number (`#1`, `#2` ...).
 
 One job runs at a time. Start another, of any kind, or chat with Tinker, and the one that runs is paused: it
 saves itself and waits, and you are answered at once. As soon as Tinker is idle (no job runs, and nothing you

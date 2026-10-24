@@ -5,7 +5,7 @@ import zipfile
 import pytest
 from conftest import MODEL
 
-from tinkerkit import cli, conversation, reading, settings
+from tinkerkit import cli, commands, reading, settings
 from tinkerkit.cli import Cli, Commands
 from tinkerkit.fetcher import Fetcher
 from tinkerkit.jobs import is_job
@@ -516,7 +516,7 @@ def test_tinker_read_stores_then_reads_as_its_own_job(
     assert (
         is_job(["read", "book.epub"])
         and is_job(["read", "#2", "retries"])
-        and "read" in conversation.LONG_COMMANDS
+        and commands.kind_of(["read", "book.epub"]) == "job"
     )
     assert Cli.parse(["read", "~/Books/the", "craft.epub"]).read == ["~/Books/the craft.epub"]
     assert Cli.parse(["read", "#2", '"retries,', 'when"']).read == ["#2", "retries, when"]
