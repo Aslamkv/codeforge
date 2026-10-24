@@ -588,7 +588,8 @@ class Tracker:
     def __init__(self, title, before=0.0):
         self.pid, self.store, self.published = os.getpid(), None, 0.0
         self.state = {"title": title, "run": None, "folder": None, "step": None, "doing": self.STARTING,
-                      "began": None, "steps": [], "passing": None, "live": "", "latest": "", "waiting": None,
+                      "began": None, "steps": [], "passing": None, "working": "", "tally": "", "found": "",
+                      "outcome": "", "latest": "", "waiting": None,
                       "ended": None, "before": before, "seconds": 0.0, "pid": self.pid,
                       "resumed": time.time() if Jobs.resuming else None,
                       "exercise": os.environ.get(EXERCISE_ENV) == "1"}
@@ -609,37 +610,47 @@ class Tracker:
         self.change("project", run=run_id, folder=str(folder), title=title or self.state["title"])
 
     def phase(self, phase):
-        """The run is on to a phase: the one before is done."""
+        """The run is on to a phase: the one before is done, with what came of it (outcome)."""
         steps = list(self.state["steps"])
         if self.state["step"] in self.STEPS:
-            steps.append(self.STEPS[self.state["step"]][1])
+            outcome = self.state.get("outcome")
+            steps.append(self.STEPS[self.state["step"]][1] + (f": {outcome}" if outcome else ""))
         doing = self.STEPS.get(phase, (phase, phase))[0]
-        self.change("phase", phase=phase, step=phase, doing=doing, began=time.time(), steps=steps, live="", latest="")
+        self.change("phase", phase=phase, step=phase, doing=doing, began=time.time(), steps=steps, working="",
+                    found="", outcome="", latest="")
 
     def points(self, passing, total):
         if total and self.state["passing"] != [passing, total]:
             self.change("points", passing=[passing, total])
 
+    def outcome(self, text):
+        """What came of the phase the run is on ("7 of 20 chapters chosen"): said with it once it is done."""
+        self.change("outcome", outcome=text)
+
     def heard(self, message):
-        """A message the run said (messages.say), as data: a live one is what goes on now; any other is kept
-        in the project's output log and shown as the latest."""
+        """A message the run said (messages.say), as data: what it works on now, how far it got, the latest
+        thing it found out; the live line only moves a terminal's clock on. Any other is kept in the
+        project's output log and shown as the latest."""
+        if message.kind in ("working", "tally"):
+            self.change(message.kind, quiet=message.kind == "tally", **{message.kind: message.text})
+            return
         if message.kind == "live":
-            self.change("live", quiet=True, live=message.text)
             return
         if self.store is not None:
             self.store.append("output", {"line": message.line, "kind": message.kind})
-        self.change("said", quiet=True, latest=message.line.strip()[:300])
+        found = {"found": message.text[:300]} if message.kind == "found" else {}
+        self.change("said", quiet=True, latest=message.line.strip()[:300], **found)
 
     def wait(self, plan):
         """The plan waits for the person (plan: what to show them, as data)."""
-        self.change("waiting", waiting=plan, live="")
+        self.change("waiting", waiting=plan, working="")
 
     def end(self, ending, seconds):
         """The run ended (ending: its status, headline, details and the commands to go on; a job stopped says
         how to resume it)."""
         ended = Jobs.ended(ending)
         paused = {"doing": f"⏸ {ended['headline']}"} if ended.get("status") == "paused" else {}
-        self.change("ended", ended=ended, seconds=seconds, live="", **paused)
+        self.change("ended", ended=ended, seconds=seconds, working="", **paused)
 
     def change(self, event, quiet=False, **values):
         self.state.update(values)

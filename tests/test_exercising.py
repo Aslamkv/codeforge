@@ -244,13 +244,13 @@ def test_the_exercise_shows_what_its_build_does(make_model, home_store, monkeypa
     build.pid = ALIVE  # a build that runs: its tracker is kept
     exercise = Exercise(make_model(), Tracker("Exercising rust"), start=lambda arguments: build)
     exercise.on_to("build")
-    home_store.put("running", str(ALIVE), {"doing": "💻 Writing the code", "live": "writing… 5s", "latest": "✅ Wrote a.py",
-                                         "passing": [2, 5], "exercise": True})
+    home_store.put("running", str(ALIVE), {"doing": "💻 Writing the code", "working": "Writing a.py",
+                                         "latest": "✅ Wrote a.py", "passing": [2, 5], "exercise": True})
     monkeypatch.setattr(time, "sleep", lambda seconds: None)
     exercise.built(lambda: ["task", "t"])
     state = exercise.tracker.state
     assert state["doing"] == "🔨 Building the practice project · 💻 Writing the code"
-    assert (state["live"], state["latest"], state["passing"]) == ("writing… 5s", "✅ Wrote a.py", [2, 5])
+    assert (state["working"], state["latest"], state["passing"]) == ("Writing a.py", "✅ Wrote a.py", [2, 5])
 
 
 @pytest.mark.spec("EXR-6")

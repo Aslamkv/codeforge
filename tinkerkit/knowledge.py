@@ -382,6 +382,11 @@ class Learner:
         if self.tracker is not None and self.tracker.state["step"] != phase:
             self.tracker.phase(phase)
 
+    def outcome(self, text):
+        """What came of the phase learning is on, for its tracker (when it has one)."""
+        if self.tracker is not None:
+            self.tracker.outcome(text)
+
     def start(self):
         self.notes, self.model_failed, self.kept_earlier = [], "", False
 
@@ -588,17 +593,20 @@ class Learner:
         lessons = Knowledge(plan["language"]).proven_lessons() if plan.get("kind") == "language" else []
         sources = self.rule_sources(facts, lessons)
         self.step("condense", f"Turning {len(facts)} fact(s) into rules a code writer can follow…", "✍️")
-        rules = self.model.ask_until_usable(Prompts.PLAYBOOK_SYSTEM, self.playbook_parts(plan, facts, lessons),
-                                            "Condense the facts",
-                                            lambda reply: self.read_rules(reply.json(), sources), attempts=2,
-                                            think=think)
+        with say.working_on(f"Turning {len(facts)} fact(s) about {plan['name']} into rules"):
+            rules = self.model.ask_until_usable(Prompts.PLAYBOOK_SYSTEM, self.playbook_parts(plan, facts, lessons),
+                                                "Condense the facts",
+                                                lambda reply: self.read_rules(reply.json(), sources), attempts=2,
+                                                think=think)
         if not rules:
             self.notes.append("the facts were not condensed into rules (no usable reply)")
         with say.section():
             if rules:
                 say.done(f"{len(rules)} rule(s)")
+                say.found(first_line(rules[0]["text"], 200))
             else:
                 say.warn("Could not make rules: the facts are kept as they are")
+        self.outcome(f"{len(rules or [])} rule(s) from {len(facts)} fact(s)")
         return rules or []
 
     @staticmethod
@@ -714,11 +722,12 @@ class Researcher:
                                                    "Frame the research", f"researching {topic}",
                                                    Library.slug(topic))
         if not saved:
-            say.info(f"{frame['name']}: {frame['summary']}", "🧭")
+            say.found(f"{frame['name']}: {frame['summary']}")
         say.info("Questions to answer:", "📝")
         with say.section():
             for number, question in enumerate(frame["questions"], 1):
                 say.info(f"Q{number}. {question['question']}")
+        self.learner.outcome(f"{len(frame['questions'])} question(s) to answer")
         return frame
 
     @staticmethod
@@ -752,9 +761,14 @@ class Researcher:
                 break
             self.learner.step("investigate", f"Round {round_number}: {len(searches)} search(es), reading up to "
                                              f"{pages} page(s)…", "🔎")
-            found, read = self.learner.read_web(frame["name"], searches, pages)
+            with say.working_on(f"Reading up to {pages} page(s) about {frame['name']}, round {round_number}"):
+                found, read = self.learner.read_web(frame["name"], searches, pages)
             self.learner.add_facts(facts, found)
             sources += [url for url in read if url not in sources]
+            say.tally(f"{len(sources)} page(s) read · {len(facts)} fact(s)")
+            if found:
+                say.found(first_line(found[0]["text"], 200))
+            self.learner.outcome(f"{len(facts)} fact(s) from {len(sources)} page(s)")
             if self.learner.cut_short() or not facts:
                 break
             differ = self.cross_check(facts)

@@ -64,9 +64,23 @@ def test_a_tracker_keeps_what_is_said_as_its_latest_and_in_the_output_log(home_s
     say.follow(tracker.heard)
     with say.section():
         say.done("Wrote calc.py (12 lines)")
-    say.live("thinking… 12s")
-    assert tracker.state["latest"] == "✅ Wrote calc.py (12 lines)" and tracker.state["live"] == "thinking… 12s"
+    say.live("Writing calc.py… 12s")  # only a terminal's clock: never kept
+    assert tracker.state["latest"] == "✅ Wrote calc.py (12 lines)" and "live" not in tracker.state
     assert [e["line"] for _, e in store.entries("output")] == ["   ✅ Wrote calc.py (12 lines)"]
+
+
+@pytest.mark.spec("MSG-3")
+def test_what_a_command_works_on_its_tally_and_what_it_found_reach_the_tracker(home_store, capsys):
+    tracker = Tracker("reading")
+    say.follow(tracker.heard)
+    with say.working_on("Reading chapter 1, Habits (1 of 2)"):
+        assert tracker.state["working"] == "Reading chapter 1, Habits (1 of 2)"
+    say.tally("1/2 chapters · 4 things learned")
+    say.found("Small habits compound like interest")
+    state = tracker.state
+    assert state["working"] == "" and state["tally"] == "1/2 chapters · 4 things learned"
+    assert state["found"] == "Small habits compound like interest"
+    assert capsys.readouterr().out == "💡 Small habits compound like interest\n"  # the tally is the chat's only
 
 
 @pytest.mark.spec("MSG-4")
@@ -86,10 +100,11 @@ def test_on_a_terminal_the_next_message_clears_the_live_line(monkeypatch, capsys
             return True
     terminal = Terminal()
     monkeypatch.setattr(sys, "__stdout__", terminal)
-    say.live("thinking… 12s")
+    say.live("Writing the spec… 12s")
+    say.live("Writing the spec… 14s")
     say.done("Answered")
-    assert terminal.getvalue().startswith("\r   ⏳ thinking… 12s") and terminal.getvalue().endswith("\r\033[K")
-    assert capsys.readouterr().out == "✅ Answered\n"
+    assert terminal.getvalue().startswith("\r   ⠋ Writing the spec… 12s\033[K\r   ⠙ Writing the spec… 14s")  # it spins
+    assert terminal.getvalue().endswith("\r\033[K") and capsys.readouterr().out == "✅ Answered\n"
 
 
 @pytest.mark.spec("MSG-5")

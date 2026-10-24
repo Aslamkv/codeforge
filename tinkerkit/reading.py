@@ -131,17 +131,18 @@ class Reader:
         JSON keeps it: each number as text); its
         topic made, with nothing learned yet."""
         self.step("survey", "Reading its contents, foreword and index…", "🧭")
-        with say.naming("getting to know it"):
+        with say.working_on(f"Getting to know {entry['title']} from its {len(book.chapters)} chapters"):
             survey = self.model.ask_until_usable(Prompts.READ_SURVEY_SYSTEM, survey_parts(book),
                                                  "Read: the reading plan",
                                                  lambda reply: read_survey(reply.json(), book), think=think())
         if survey is None:
             raise SystemExit(f"{self.model.name} could not make a reading plan; its text stays stored.")
         Readings.surveyed(entry, survey)
+        core = [str(c.number) for c in book.chapters if order_of(survey, c) == "core"]
         with say.section():
-            say.info(survey["summary"], "📘")
-            core = [str(c.number) for c in book.chapters if order_of(survey, c) == "core"]
+            say.found(survey["summary"])
             say.info(f"Core chapters, read first: {', '.join(core) or 'none named'}", "🧭")
+        self.outcome(f"{len(core)} core chapter(s) of {len(book.chapters)}, read first" if core else "")
         return survey
 
     def chapters_read(self, entry, book, survey, chapters, focus):
@@ -149,12 +150,21 @@ class Reader:
         self.step("chapters", f"Reading {len(chapters)} chapter(s)" + (f" for: {first_line(focus, 60)}" if focus
                                                                        else "") + "…", "📚")
         found = []
-        for chapter in chapters:
-            with say.naming(f"Chapter {chapter.number}, {chapter.title}: reading"):
+        say.tally(f"0/{len(chapters)} chapters")
+        for done, chapter in enumerate(chapters, 1):
+            with say.working_on(f"Reading chapter {chapter.number}, {chapter.title} ({done} of {len(chapters)})"):
                 facts = self.chapter_read(entry, book, survey, chapter, focus)
             found += Readings.learned(entry["number"], chapter.number, facts)
             say.info(f"Chapter {chapter.number}, {chapter.title}: {learned(len(facts))}", STATES["read"])
+            if facts:
+                say.found(first_line(facts[0]["text"], 200))
+            say.tally(f"{done}/{len(chapters)} chapters · {learned(len(found)) if found else 'nothing learned yet'}")
+        self.outcome(f"{len(chapters)} chapter(s), {learned(len(found))}")
         return found
+
+    def outcome(self, text):
+        if self.tracker is not None:
+            self.tracker.outcome(text)
 
     def chapter_read(self, entry, book, survey, chapter, focus):
         """What one chapter teaches: each part of it in turn (with a focus, its parts most about it), given the

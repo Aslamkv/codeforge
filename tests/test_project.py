@@ -345,16 +345,33 @@ def test_steps_live_progress_and_messages(home_store, project_dir, monkeypatch):
     tracker = Tracker("calc")
     store = project_store(project_dir)
     tracker.project(store, "abc123", project_dir)
-    tracker.heard(Message("live", "writing its answer… 14s", 2, "⏳"))
+    tracker.heard(Message("working", "Writing calc.py", 1))
+    tracker.heard(Message("live", "Writing calc.py… 14s", 2, "⏳"))
+    tracker.heard(Message("tally", "1/2 files"))
     tracker.heard(Message("done", "Wrote calc.py (12 lines)", 1, "✅"))
+    tracker.heard(Message("found", "2/0 gives a clear error", 1, "💡"))
     state = tracker.state
-    assert state["live"] == "writing its answer… 14s" and state["latest"] == "✅ Wrote calc.py (12 lines)"
-    assert [(e["line"], e["kind"]) for _, e in store.entries("output")] == [("   ✅ Wrote calc.py (12 lines)", "done")]
+    assert state["working"] == "Writing calc.py" and state["tally"] == "1/2 files"
+    assert state["found"] == "2/0 gives a clear error" and state["latest"] == "💡 2/0 gives a clear error"
+    assert [(e["line"], e["kind"]) for _, e in store.entries("output")] == [
+        ("   ✅ Wrote calc.py (12 lines)", "done"), ("   💡 2/0 gives a clear error", "found")]
     monkeypatch.setattr(Tracker, "QUIET_EVERY", 1000)
     tracker.heard(Message("text", "next line"))  # a quiet change waits to be published with the next
     assert home_store.get("running", str(os.getpid()))["latest"] != "next line"
     tracker.phase("verify")
-    assert home_store.get("running", str(os.getpid()))["latest"] == ""
+    state = home_store.get("running", str(os.getpid()))
+    assert state["latest"] == state["found"] == state["working"] == "" and state["tally"] == "1/2 files"
+
+
+@pytest.mark.spec("PRJ-14")
+def test_a_step_done_says_what_came_of_it(home_store):
+    tracker = Tracker("reading")
+    tracker.phase("survey")
+    tracker.outcome("3 core chapter(s) of 20, read first")
+    tracker.phase("chapters")
+    tracker.phase("keep")
+    assert tracker.state["steps"] == ["🧭 Chose the chapters to read: 3 core chapter(s) of 20, read first",
+                                      "📚 Chapters read"]
 
 
 @pytest.mark.spec("PRJ-14")

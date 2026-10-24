@@ -165,28 +165,32 @@ def test_stream_keeps_the_end_of_the_thought(monkeypatch):
 
 
 @pytest.mark.spec("MOD-9")
-def test_stream_says_live_what_the_model_is_doing(monkeypatch):
+def test_stream_says_live_the_step_never_what_the_model_is_doing(monkeypatch):
     clock = iter([0, 3, 6])
     monkeypatch.setattr(model_module.time, "perf_counter", lambda: next(clock))
     seen = []
     say.follow(lambda message: seen.append(message.text) if message.kind == "live" else None)
+    say.step("Writing the spec…", "📝")
     stream = Stream("Write calc.py", None)
     stream.take({"message": {"thinking": "hm"}})
     stream.take({"message": {"content": "x"}})
-    assert seen == ["thinking… 3s", "writing its answer… 6s"]
+    assert seen == ["Writing the spec… 3s", "Writing the spec… 6s"]
 
 
 @pytest.mark.spec("MOD-9")
-def test_a_named_activity_is_said_instead_of_what_the_model_is_doing(monkeypatch):
+def test_what_the_command_works_on_is_said_live_and_heard(monkeypatch):
     clock = iter([0, 3, 6])
     monkeypatch.setattr(model_module.time, "perf_counter", lambda: next(clock))
     seen = []
-    say.follow(lambda message: seen.append(message.text) if message.kind == "live" else None)
+    say.follow(lambda message: seen.append((message.kind, message.text)) if message.kind in ("live", "working")
+               else None)
     stream = Stream("Read: chapter 2", None)
-    with say.naming("Chapter 2, Habits: reading"):
+    with say.working_on("Reading chapter 2, Habits (1 of 3)"):
         stream.take({"message": {"thinking": "hm"}})
         stream.take({"message": {"content": "x"}})
-    assert seen == ["Chapter 2, Habits: reading… 3s", "Chapter 2, Habits: reading… 6s"]
+    assert seen == [("working", "Reading chapter 2, Habits (1 of 3)"), ("live", "Reading chapter 2, Habits (1 of 3)"),
+                    ("live", "Reading chapter 2, Habits (1 of 3)… 3s"),
+                    ("live", "Reading chapter 2, Habits (1 of 3)… 6s"), ("working", "")]
     assert say.doing == ""
 
 
@@ -327,13 +331,13 @@ def test_a_model_logs_its_details_and_says_only_when_it_asks_again(model_log, fa
     fake_ollama.reply("not json").reply('{"ok": 1}')
     model = Model(MODEL, MEASURED, 0, model_log)
     assert model.ask_until_usable("s", [Part("Q", "q", True)], "Plan", lambda reply: reply.json()["ok"]) == 1
-    assert capsys.readouterr().out == "🔁 That answer could not be used; asking again\n"
+    assert capsys.readouterr().out == "🔁 Working on it: no usable result yet, trying again\n"
     notes = [entry["note"] for _, entry in model_log.store.entries("calls") if "note" in entry]
     assert any(note.startswith("Plan (attempt 1)") for note in notes) and any("not usable" in note for note in notes)
     stream = Stream("Plan", None)
     stream.thinking = 3
-    assert stream.status(stream.started + 12) == "thinking… 12s"
-    assert stream.status(stream.started + 101) == "thinking… 1m 41s (101s)"
+    assert stream.status(stream.started + 12) == "Working on it… 12s"  # no step said yet
+    assert stream.status(stream.started + 101) == "Working on it… 1m 41s (101s)"
 
 
 def cut(thinking="I was thinking about it"):

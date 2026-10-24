@@ -162,14 +162,17 @@ def points(*texts, phase="code"):
     return json.dumps({"points": [{"text": text, "phase": phase, "section": ""} for text in texts]})
 
 class Steps:
-    """A tracker that only remembers the steps it was moved through."""
+    """A tracker that only remembers the steps it was moved through, and what came of each."""
 
     def __init__(self):
-        self.steps, self.state = [], {"step": None}
+        self.steps, self.outcomes, self.state = [], {}, {"step": None}
 
     def phase(self, phase):
         self.steps.append(phase)
         self.state["step"] = phase
+
+    def outcome(self, text):
+        self.outcomes[self.state["step"]] = text
 
 def labels(fake_ollama):
     return [call["label"].split(" (")[0] for call in fake_ollama.calls]
@@ -236,6 +239,8 @@ def test_every_chapter_is_read_in_order_and_saved_as_it_is_read(tmp_path, home_s
     assert [r["text"] for r in topic["rules"]] == ["Name functions by what they do"]
     assert {c["state"] for c in Readings.get(1)["chapters"][:4]} == {"read"}
     assert tracker.steps == ["survey", "chapters", "condense"]
+    assert tracker.outcomes["survey"] == "1 core chapter(s) of 5, read first"
+    assert tracker.outcomes["chapters"] == "4 chapter(s), 3 things learned"
     assert ("Chapters read", "4 of 4") in ending["details"]
     assert ending["headline"] == "Read #1 The Craft of Small Programs"
     fake_ollama.calls.clear()
@@ -366,7 +371,8 @@ def test_tinker_read_stores_then_reads_as_its_own_job(tmp_path, measured_model, 
     title, ending, steps = ended[0]
     assert title == "Reading #1 The Craft of Small Programs" and ending["status"] == "done"
     assert ('Look again', 'tinker read #1 "what to look for"') in ending["next"]
-    assert "🧭 Chose the chapters to read" in steps and "Time taken" in capsys.readouterr().out
+    assert any(step.startswith("🧭 Chose the chapters to read") for step in steps)
+    assert "Time taken" in capsys.readouterr().out
     assert Home.store().entries("read")
     Commands(Cli.parse(["read", "craft.md"])).run()  # stored before: said, and nothing read
     assert len(ended) == 1 and "Already on the reading list as #1" in capsys.readouterr().out

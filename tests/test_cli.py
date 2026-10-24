@@ -370,6 +370,15 @@ def test_save_keeps_the_project_and_tells_the_tracker(make_project, make_session
     assert plan_of(project_dir)["steps"][0]["id"] == "C1" and tracker.state["passing"] == [1, 1]
 
 
+@pytest.mark.spec("SES-4")
+def test_each_build_step_says_what_came_of_it(make_project, make_session):
+    project = make_project([criterion("C1", "t.py::a", status="green"), criterion("C2", "t.py::b")])
+    runner, cycle = CycleRunner(make_session(project)), {"id": "base", "files": ["calc.py", "t.py"],
+                                                          "code_done": ["calc.py"]}
+    assert [runner.outcome(phase, cycle) for phase in ("spec", "design", "tests", "code", "verify", "tidy")] == [
+        "2 point(s) to test", "2 file(s)", "0/2 test(s) written", "1 file(s) written", "1/2 spec points pass", ""]
+
+
 def recording_phases(monkeypatch, stop_at=None):
     ran = []
 

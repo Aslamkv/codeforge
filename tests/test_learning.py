@@ -402,7 +402,11 @@ def test_learning_moves_its_tracker_through_its_steps_and_keeps_its_summary(tink
                                tracker)
     entry = slot_learner.learn("Widgetlib")
     done = [Tracker.STEPS[phase][1] for phase in ("search", "plan", "machine", "documentation", "digest")]
-    assert tracker.state["steps"][:5] == done and tracker.state["step"] == "keep"
+    assert [step.split(":")[0] for step in tracker.state["steps"][:5]] == done and tracker.state["step"] == "keep"
+    assert tracker.state["steps"][:5] == [  # each with what came of it
+        "🔎 Web searched: 3 of 3 page(s) read", "🤔 Worked out what it is: Widgetlib, a tool",
+        "💻 Checked what is installed", "📖 Documentation read: 5 page(s) of Widgetlib 2.1.0",
+        f"🧠 Passages read: 6 of 6 question(s) answered, {len(entry['facts'])} fact(s)"]
     assert len(tracker.state["steps"]) == len(set(tracker.state["steps"]))  # each step once in a row
     recap = dict(slot_learner.recap)
     assert list(recap) == ["Answered", "Still open", "Documentation", "Pages", "Facts kept", "Web requests"]

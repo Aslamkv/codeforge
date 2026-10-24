@@ -35,13 +35,17 @@ class Messages:
     text is plain output (a table, a list, help); step says what Tinker is doing; info states a fact;
     done, warn, fail, retry, skip, stop, tip and item say how something went, each with its own icon;
     summary is a titled list of (icon, label, value); live redraws one status line (on a terminal
-    only); detail is kept in the log only."""
+    only); detail is kept in the log only. What goes on is the command's to say, in the person's words:
+    working_on (what it works on now), tally (how far it got) and found (the latest thing it found out);
+    the model never names what it does (thinking, writing): that means nothing to the person."""
     ICONS = frozendict({"done": "✅", "warn": "⚠️", "fail": "❌", "retry": "🔁", "skip": "➖", "stop": "🛑",
-                        "tip": "💡", "item": "•"})
+                        "tip": "💡", "item": "•", "found": "💡"})
+    SPINNER = "⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏"  # the live line's icon on a terminal, one on at each redraw: it still goes on
 
     def __init__(self):
-        self.depth, self.followers, self.log, self.drawn = 0, [], None, False
-        self.doing = ""  # what the live line says goes on, when a command names it (see naming)
+        self.depth, self.followers, self.log, self.drawn, self.frame = 0, [], None, False, 0
+        self.doing = ""  # what the command works on now, as it named it (see working_on)
+        self.stepping = ""  # the step said last: what the live line says goes on when nothing is named
 
     def title(self, text, icon=""):
         """A part of the output begins: at the top, a blank line sets it apart."""
@@ -61,6 +65,7 @@ class Messages:
         self.say("text", text)
 
     def step(self, text, icon=""):
+        self.stepping = text.rstrip(".…")
         self.say("step", text, icon)
 
     def info(self, text, icon=""):
@@ -90,6 +95,15 @@ class Messages:
     def item(self, text):
         self.say("item", text)
 
+    def found(self, text):
+        """The latest thing the command found out, as it is: "Small habits compound like interest"."""
+        self.say("found", text)
+
+    def tally(self, text):
+        """How far the command got, in one line: "2/7 chapters · 14 things learned". For whoever follows
+        only: the terminal says each part as it is done."""
+        self.tell(Message("tally", text, self.depth))
+
     def took(self, text, seconds):
         """Something done, with how long it took: "✅ Tests written (1m 4s)"."""
         self.done(f"{text} ({human_duration(seconds)})")
@@ -116,27 +130,39 @@ class Messages:
         self.tell(message)
 
     def live(self, text):
-        """The one status line of what goes on now (the model reading, thinking, writing): redrawn in
-        place on a terminal; piped (a chat following the command), never written, as its lines would
-        reach the reader as lines of their own. Cut to the terminal's width, as a wrapped line cannot be
-        redrawn."""
+        """The one status line of what goes on now, with its clock: redrawn in place on a terminal; piped
+        (a chat following the command), never written, as its lines would reach the reader as lines of
+        their own. Cut to the terminal's width, as a wrapped line cannot be redrawn."""
         message = Message("live", text, self.depth + 1, "⏳")
         if sys.__stdout__.isatty():
             width = shutil.get_terminal_size((80, 24)).columns
-            sys.__stdout__.write("\r" + message.line[:max(width - 1, 10)] + "\033[K")
+            drawn = Message("live", text, self.depth + 1, self.SPINNER[self.frame % len(self.SPINNER)])
+            self.frame += 1
+            sys.__stdout__.write("\r" + drawn.line[:max(width - 1, 10)] + "\033[K")
             sys.__stdout__.flush()
             self.drawn = True
         self.tell(message)
 
     @contextlib.contextmanager
-    def naming(self, doing):
-        """Inside, the live line says doing ("Chapter 2, Habits: reading"), as the person sees it, instead of what
-        the model does (thinking, writing)."""
-        before, self.doing = self.doing, doing
+    def working_on(self, doing):
+        """Inside, the person is told the command works on doing ("Reading chapter 3 of 7: Habits"): the live
+        line says it, and whoever follows hears it (a chat shows it as the step it is on)."""
+        before = self.doing
+        self.now_on(doing)
         try:
             yield
         finally:
-            self.doing = before
+            self.now_on(before)
+
+    def now_on(self, doing):
+        self.doing = doing
+        self.tell(Message("working", doing, self.depth))
+        if doing:
+            self.live(doing)
+
+    def going_on(self):
+        """What the live line says goes on: what the command works on, else the step it said last."""
+        return self.doing or self.stepping or "Working on it"
 
     def end_live(self):
         if self.drawn:
