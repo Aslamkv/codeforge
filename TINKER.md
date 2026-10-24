@@ -220,6 +220,14 @@ tinker channel disable telegram
 tinker channel remove telegram
 ```
 
+Type `/` in the chat to pick any command from the bot's menu. With or without the `/`, it works the same:
+
+```text
+/status
+runs
+/use_model qwen3:8b
+```
+
 Attach a book, an article or a document to the chat, and Tinker reads it: see [Read](#read-).
 
 The chat stays tidy. Tinker's status is its one pin, edited in place, even after a restart. Each task has

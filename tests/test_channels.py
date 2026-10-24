@@ -192,6 +192,17 @@ def test_skip_waiting_moves_past_old_messages():
     assert channel.offset == 100
 
 
+@pytest.mark.spec("CHN-4")
+def test_offer_lists_the_commands_in_the_bots_menu():
+    api = BotAPI(setMyCommands=True)
+    telegram(api).offer([("use-model", "the model every build uses"), ("help", "x" * 300)])
+    path, fields = api.calls[-1]
+    menu = json.loads(fields["commands"])
+    assert path.endswith("/setMyCommands") and [m["command"] for m in menu] == ["use_model", "help"]
+    assert len(menu[1]["description"]) == 256
+    telegram(BotAPI(setMyCommands=OSError("down"))).offer([("help", "this list")])
+
+
 @pytest.mark.spec("CHN-5")
 def test_send_and_edit_post_html_with_a_plain_fallback():
     api = BotAPI(sendMessage=[(400, "Bad Request: can't parse entities"), {"message_id": 8}],

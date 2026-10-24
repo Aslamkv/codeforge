@@ -1133,7 +1133,8 @@ person always comes first.
   and loses no text.
 - **CNV-4** `command_of(text)` gives the command a message starts with (`/` allowed), by the command
   table. It is a command when the word is alone, when the command takes any words, or when it takes
-  one word and exactly one follows. Otherwise the message is a chat (`""`).
+  one word and exactly one follows. Otherwise the message is a chat (`""`). A menu's form is taken too:
+  `/use_model` is `use-model`, and `@bot` after the name (in a group) is dropped.
 - **CNV-5** `Channel.said` removes `tinker ` before a command in a conversation. `Channel.show` edits
   the thing's messages, sends parts that no longer fit, deletes the extra ones, adds the update
   time, pins when asked, and sends the message again at the bottom when it is no longer the newest.
@@ -1224,7 +1225,8 @@ person always comes first.
   `retry_after` seconds Telegram gives, up to 3 times, and then it is a `ChannelError`.
 - **CHN-4** `receive` gives the text messages (and a file sent, as **CHN-11** says) and moves the offset past
   every update. A network
-  failure gives no messages.
+  failure gives no messages. `offer` lists every chat command in the bot's menu (`setMyCommands`, so
+  typing `/` autofills them), `-` as `_`, each description cut to 256 characters; a failure is ignored.
 - **CHN-5** `send` and `edit` post Telegram HTML, and fall back to plain text when the HTML is
   refused. An edit of unchanged text is harmless. A refused edit takes the message out and sends a new one
   in its place. `latest` tracks the newest message still in the chat.
