@@ -220,7 +220,8 @@ def test_slowest_never_names_a_file():
 def test_the_exercise_has_no_rule_of_its_own_for_giving_way(make_model, home_store, monkeypatch, no_sleep):
     signals = []
     monkeypatch.setattr(os, "killpg", lambda pid, signum: signals.append(signum))
-    home_store.put("activity", "answering", {"a chat": os.getpid()})  # the person is answered: that pauses it as a job
+    the_person_is_answered = {"a chat": os.getpid()}
+    home_store.put("activity", "answering", the_person_is_answered)
     code = Exercise(make_model(), Tracker("Exercising rust"), start_build=lambda arguments: FakeBuild(polls=3, code=0)).built(
         lambda: ["task", "t"])
     assert code == 0 and signals == []
@@ -230,7 +231,7 @@ def test_the_exercise_has_no_rule_of_its_own_for_giving_way(make_model, home_sto
 @pytest.mark.spec("EXR-6")
 def test_the_exercise_shows_what_its_build_does(make_model, home_store, monkeypatch):
     build = FakeBuild(polls=1)
-    build.pid = OTHER_LIVE_PID  # a build that runs: its tracker is kept
+    build.pid = OTHER_LIVE_PID
     exercise = Exercise(make_model(), Tracker("Exercising rust"), start_build=lambda arguments: build)
     exercise.on_to("build")
     home_store.put("running", str(OTHER_LIVE_PID), {"doing": "💻 Writing the code", "working": "Writing a.py",
@@ -248,8 +249,9 @@ def test_an_exercise_that_goes_on_by_itself_comes_to_the_bottom(home_store):
     home_store.put("running", str(OTHER_LIVE_PID), {"title": "Exercising Rust", "exercise": True, "doing": "🔨 Building"})
     reporter = conversation.Reporter([channel], "Exercising Rust", pid=OTHER_LIVE_PID)
     reporter.refresh()
-    reporter.ended = True  # no updates of its own meanwhile
-    channel.send("1", "hello")  # the person's message: the exercise's is no longer the newest
+    reporter.ended = True
+    the_persons_message = "hello"
+    channel.send("1", the_persons_message)
     reporter.ended = False
     home_store.put("running", str(OTHER_LIVE_PID), {"title": "Exercising Rust", "exercise": True, "doing": "🔨 Building",
                                            "resumed": time.time()})
@@ -280,9 +282,10 @@ def test_the_conversation_adopts_an_exercise_a_conversation_before_it_started(ho
     followed = []
     monkeypatch.setattr(desk, "follow_exercise", lambda pid, title, ended, anew: followed.append((pid, title, anew)))
     home_store.put("activity", "exercise", {"pid": OTHER_LIVE_PID, "language": "Rust"})
-    home_store.put("running", str(OTHER_LIVE_PID), {"title": "Exercising Rust", "exercise": True, "reports": True})
+    reports_by_itself = {"title": "Exercising Rust", "exercise": True, "reports": True}
+    home_store.put("running", str(OTHER_LIVE_PID), reports_by_itself)
     desk.adopt_exercise()
-    assert followed == []  # one run from a terminal with chats reports by itself
+    assert followed == []
     home_store.put("running", str(OTHER_LIVE_PID), {"title": "Exercising Rust", "exercise": True, "doing": "🔨 Building"})
     desk.adopt_exercise()
     assert followed == [(OTHER_LIVE_PID, "Exercising Rust", True)]
@@ -293,11 +296,13 @@ def test_an_exercise_that_ended_unstopped_goes_on_as_the_conversation_starts(hom
     desk = Desk([Recorder()], tmp_path)
     started = []
     monkeypatch.setattr(desk, "start_exercise", lambda words, title=None: started.append((words, title)))
-    home_store.put("activity", "exercise", {"pid": 999999999, "language": "Rust"})  # killed: never released
+    killed_never_released = {"pid": 999999999, "language": "Rust"}
+    home_store.put("activity", "exercise", killed_never_released)
     desk.adopt_exercise()
-    home_store.put("jobs", "4", {"number": 4, "command": "exercise", "title": "exercise rust", "state": "running",
-                                 "pid": 999999999, "arguments": ["exercise", "rust"], "updated": "2026-10-23 09:00"})
-    desk.adopt_exercise()  # its job, killed too: resumed, its journal kept
+    its_job_killed_too = {"number": 4, "command": "exercise", "title": "exercise rust", "state": "running",
+                          "pid": 999999999, "arguments": ["exercise", "rust"], "updated": "2026-10-23 09:00"}
+    home_store.put("jobs", "4", its_job_killed_too)
+    desk.adopt_exercise()
     assert started == [(["exercise", "Rust"], None), (["resume", "#4"], "exercise rust")]
 
 
@@ -346,7 +351,7 @@ def test_a_stopped_exercise_stops_its_build_and_keeps_everything(make_model, hom
     monkeypatch.setattr(exercise, "practise", lambda kept: (_ for _ in ()).throw(KeyboardInterrupt))
     monkeypatch.setattr(exercise, "stop_build", lambda: stopped_builds.append(True))
     ending = exercise.run("rust")
-    assert ending["status"] == "stopped"  # how to go on: the job's (Jobs.ended)
+    assert ending["status"] == "stopped"
     assert stopped_builds == [True] and home_store.get("exercise", "rust")["language"] == "Rust"
     assert home_store.get("activity", "exercise") is None and exercise.tracker.state["exercise"]
     assert home_store.get("exercise", "rust")["left"]
@@ -413,7 +418,8 @@ def test_every_exercise_keeps_one_message_started_stopped_or_resumed(home_store,
         if desk.exercise_reporter is None:
             break
         time.sleep(0.05)
-    desk.follow_exercise(OTHER_LIVE_PID, "resume #4", lambda: None)  # the next exercise: the same message
+    the_next_exercise = "resume #4"
+    desk.follow_exercise(OTHER_LIVE_PID, the_next_exercise, lambda: None)
     for _ in range(100):
         if desk.exercise_reporter is None:
             break

@@ -228,7 +228,8 @@ def test_readme_examples_that_stay_wrong_are_kept(built, fake_ollama, project_di
     cycle = project.cycles[0]
     ReadmeWriter(session).check(cycle, "README.md")
     assert cycle["readme_failures"] == ["`cat used.txt && echo 1`: ready"]
-    assert (project_dir / "calc.py").read_text() == FIXED  # a fix that broke a passing test was undone
+    as_before_the_breaking_fix = FIXED
+    assert (project_dir / "calc.py").read_text() == as_before_the_breaking_fix
     assert "broke a passing test" in fake_ollama.calls[1]["messages"][1]["content"]
 
 

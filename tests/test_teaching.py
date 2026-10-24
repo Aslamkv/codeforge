@@ -109,7 +109,8 @@ def test_ask_says_the_answer_alone(kept, make_model, fake_ollama, capsys):
     assert asked[0]["content"].startswith(Prompts.ASK_SYSTEM) and "[1] toolchain (python, proven)" in asked[1]["content"]
     assert capsys.readouterr().out == answer + "\n"
     assert ending == {"status": "done", "headline": "Answered", "details": [("Answer", answer)]}
-    assert Home.store().get("languages", "python")["toolchain"]["format"] == "black ."  # nothing changed
+    unchanged = "black ."
+    assert Home.store().get("languages", "python")["toolchain"]["format"] == unchanged
 
 
 @pytest.mark.spec("TCH-2")
@@ -135,7 +136,8 @@ def test_read_plan_keeps_what_is_usable_within_limits():
                                 "toolchain": {"format": "ruff format .", "setup": ["pip install ruff"]}, "fact": None}]
     preferences = read_plan({"claims": [{"text": "I prefer X", "preference": True}],
                              "changes": [{"claims": [1], "lesson": {"phase": "code", "text": "Use X"}}]}, count=0)
-    assert preferences["commands"] == preferences["searches"] == []  # a preference needs no check
+    nothing_to_check = []
+    assert preferences["commands"] == preferences["searches"] == nothing_to_check
     for broken, why in [({"claims": [], "searches": ["s"], "changes": [RUFF_CHANGE]}, "no claims"),
                         ({"claims": ["c"], "changes": [RUFF_CHANGE]}, "no command or web search"),
                         ({"claims": ["c"], "searches": ["s"]}, "no change"),
@@ -162,7 +164,8 @@ def test_teach_runs_only_safe_commands_and_reads_the_pages(kept, make_model, fak
     assert "[1] this machine" in judged and f"[3] {PAGE['url']}" in judged and "drop-in replacement" in judged
     assert "not found here (a project's own environment may have it)" in judged
     assert "## Facts\n1. Ruff formats" in judged and "## The person's preferences\n2. Our projects" in judged
-    assert "Change 1 (rests on claims 1)" in judged and "Change 2" not in judged  # a preference's change is not weighed
+    a_preferences_change = "Change 2"
+    assert "Change 1 (rests on claims 1)" in judged and a_preferences_change not in judged
     assert web.queries == ["ruff formatter replaces black"]
 
 
@@ -208,8 +211,9 @@ def test_facts_nothing_could_check_are_unsure_and_asked_no_more(kept, make_model
     ending = Teacher(make_model(), FakeWeb(pages=()), kept).teach("ruff alone is enough, and I prefer no mypy")
     assert len(fake_ollama.calls) == 1
     assert ("Unsure", "Ruff formats Python code as black does (nothing could check it)") in ending["details"]
-    assert Home.store().get("languages", "python")["toolchain"]["format"] == "black ."  # its change waits
-    assert Home.store().get("languages", "python")["toolchain"]["lint"] == "ruff check ."  # the preference's is made
+    its_change_waits, the_preferences_change_is_made = "black .", "ruff check ."
+    assert Home.store().get("languages", "python")["toolchain"]["format"] == its_change_waits
+    assert Home.store().get("languages", "python")["toolchain"]["lint"] == the_preferences_change_is_made
 
 
 @pytest.mark.spec("TCH-5")
@@ -221,7 +225,8 @@ def test_a_verdict_needs_every_fact_and_every_change_a_fact_is_for():
     verdict = read([holds])
     assert verdict.claims[1]["evidence"] == [1] and verdict.claims[2]["verdict"] == "preference"
     assert verdict.why_not(1, plan["changes"][0]) == verdict.why_not(2, plan["changes"][1]) == ""
-    assert read([dict(holds, evidence=[9])]).why_not(1, plan["changes"][0]) == "claim 1 is unsure"  # nothing cited
+    cites_nothing_given = dict(holds, evidence=[9])
+    assert read([cites_nothing_given]).why_not(1, plan["changes"][0]) == "claim 1 is unsure"
     assert read([dict(holds, verdict="wrong")]).why_not(1, plan["changes"][0]) == "claim 1 is wrong"
     assert read([holds], [{"change": 1, "follows": False, "why": "the docs say otherwise"}]).why_not(
         1, plan["changes"][0]) == "does not follow: the docs say otherwise"

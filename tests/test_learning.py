@@ -131,6 +131,7 @@ APP = "https://widgetlib.dev/app"
 OFF_TOPIC = result("https://cooking.example/soup", "Soup recipes", "How to cook a soup")
 RESULTS = [result(START, "Widgetlib getting started"), result(START + "#install", "Widgetlib install"), OFF_TOPIC,
            result(CHANGES, "Widgetlib changelog"), result(APP, "Widgetlib app")]
+DRAWN_BY_ITS_SCRIPTS = "<html><body><div id='app'></div><script>render()</script></body></html>"
 PAGES = {
     START: html(("Overview", "Widgetlib overview: its purpose is drawing widgets in a window from code."),
                 ("Getting started", "This tutorial shows the API: create a Widget, then call show on it."),
@@ -139,7 +140,7 @@ PAGES = {
                 ("Testing", "Install widgetlib in the test environment, then run testing with the headless mode.")),
     CHANGES: html(("Changelog", "Version 2.1 deprecations: Window.draw is replaced by Window.render."),
                   ("Common mistakes", "A common mistake is drawing outside the event loop; limitations include one window.")),
-    APP: "<html><body><div id='app'></div><script>render()</script></body></html>",  # drawn by its scripts
+    APP: DRAWN_BY_ITS_SCRIPTS,
 }
 FALLBACK = {APP: "# App guide\n\n" + "Widgetlib apps install with pip and run testing with the headless mode. " * 8}
 DOCS = "https://widgetlib.dev/docs/"
@@ -192,7 +193,8 @@ def test_profiles_are_data_and_a_slot_takes_the_plans_hint_and_follow_up():
     core, this_version = (next(slot for slot in web_slots("tool") if slot.id == key)
                           for key in ("core-usage", "this-version"))
     assert core.asked(plan, "2.1").endswith("(look for: the Widget class)") and "Widgetlib" in core.asked(plan, "2.1")
-    assert this_version.search(plan, "2.1") == "Widgetlib 2.1 changelog deprecations"  # the plan gives none: its own
+    its_own_search = "Widgetlib 2.1 changelog deprecations"
+    assert this_version.search(plan, "2.1") == its_own_search
     pitfalls = next(slot for slot in web_slots("tool") if slot.id == "pitfalls-and-limits")
     assert pitfalls.search(plan, "2.1") == "widgetlib common mistakes"
     assert core.search(plan, "2.1") == "Widgetlib getting started tutorial API" and core.keywords() == "getting started tutorial API"
@@ -204,7 +206,8 @@ def test_the_throttle_lets_rate_requests_a_minute_through():
     throttle = Throttle(2, 20, clock=clock.now, sleep=clock.sleep)
     for _ in range(3):
         throttle.call(lambda: "ok", lambda: False)
-    assert clock.slept == [30.0]  # full at the start: the third waits for half a minute's token
+    half_a_minute_for_the_third = [30.0]
+    assert clock.slept == half_a_minute_for_the_third
 
 
 @pytest.mark.spec("LRN-2")
@@ -252,10 +255,13 @@ def test_each_slot_draws_from_one_pool_and_mmr_passes_over_a_near_repeat():
             "checks them."), passage(5, "Gardening is fun.")]
     picked = Selector(None, 10_000).select([TOOLCHAIN, FUNDAMENTALS], pool, LANGUAGE, "1.0")
     toolchain = [passage.id for passage in picked["toolchain"]]
-    assert "P5" not in toolchain and set(toolchain[:2]) & {"P1", "P2"} and toolchain.index("P3") < 2  # a repeat waits
-    assert [passage.id for passage in picked["fundamentals"]][0] == "P4" and "P4" in toolchain  # one passage, two slots
-    tight = Selector(None, len(pool[0].listing()) + 2).select([TOOLCHAIN], pool, LANGUAGE, "1.0")
-    assert len(tight["toolchain"]) == 1  # within the digest's room
+    the_near_repeat_waits = toolchain.index("P3") < 2
+    assert "P5" not in toolchain and set(toolchain[:2]) & {"P1", "P2"} and the_near_repeat_waits
+    first_fundamental = [passage.id for passage in picked["fundamentals"]][0]
+    assert first_fundamental == "P4" and first_fundamental in toolchain
+    digest_room = len(pool[0].listing()) + 2
+    tight = Selector(None, digest_room).select([TOOLCHAIN], pool, LANGUAGE, "1.0")
+    assert len(tight["toolchain"]) == 1
 
 
 @pytest.mark.spec("LRN-7")
@@ -263,8 +269,8 @@ def test_meaning_finds_a_passage_with_no_shared_keyword():
     class Close(CountingEmbeddings):
         def vectors(self, texts, keep=True, prune=False):
             self.calls += 1
-            # tests, checks: close
-            return [[1.0, 0.0] if "check" in text or "test" in text else [0.0, 1.0] for text in texts]
+            close, far = [1.0, 0.0], [0.0, 1.0]
+            return [close if "check" in text or "test" in text else far for text in texts]
     pool = [passage(1, "Its unit checks run with one command."), passage(2, "Gardening is fun.")]
     picked = Selector(Close(), 10_000).select([TOOLCHAIN], pool, LANGUAGE, "1.0")
     assert [passage.id for passage in picked["toolchain"]] == ["P1"]
@@ -279,14 +285,16 @@ def test_only_each_slots_shortlist_is_embedded():
     pool = [passage(number, f"The linter number {number} checks the code.") for number in range(1, 400)]
     embeddings = Seen()
     Selector(embeddings, 100_000).select([TOOLCHAIN], pool, LANGUAGE, "1.0")
-    assert embeddings.seen == SLOT_CANDIDATE_PASSAGES + 1  # the shortlist, and the question
+    the_question = 1
+    assert embeddings.seen == SLOT_CANDIDATE_PASSAGES + the_question
 
 
 @pytest.mark.spec("LRN-8")
 def test_short_slots_and_readiness():
     selected = {"toolchain": [passage(1, "a")], "fundamentals": [], "this-version": [passage(2, "b")] * 2,
                 "limitations": [passage(3, "c")], "best-use-cases": [passage(4, "d")]}
-    assert [slot.id for slot in short_slots("language", selected)] == ["fundamentals", "toolchain"]  # emptiest first
+    emptiest_first = ["fundamentals", "toolchain"]
+    assert [slot.id for slot in short_slots("language", selected)] == emptiest_first
     facts = [{"slot": "toolchain"}, {"slot": "fundamentals"}]
     assert missing("language", facts, machine=[]) == ["installed", "this-version", "limitations", "best-use-cases"]
     assert "installed" not in missing("language", facts, machine=[{"command": "x", "found": False}])
@@ -327,7 +335,8 @@ def test_read_digest_keeps_only_facts_that_cite_the_passages_given():
                          + [{"text": f"fact {number}", "cites": ["P1"]} for number in range(10)]}, slot, given)
     assert facts[0] == {"phase": "tests", "text": "Run tests with langtest", "slot": "toolchain",
                         "passages": ["P1", "P2"], "source": "https://a.dev", "also": ["https://b.dev"]}
-    assert facts[1]["phase"] == "toolchain" and len(facts) == FACTS_PER_SLOT  # the slot's section; the rest cut
+    the_slots_section = "toolchain"
+    assert facts[1]["phase"] == the_slots_section and len(facts) == FACTS_PER_SLOT
 
 
 WEB_AND_WARNING_BY_CAUSE = {
@@ -350,7 +359,8 @@ def test_a_learn_the_web_cannot_feed_stops_before_any_model_call(cause, tinker_h
     with pytest.raises(LearnStopped) as stopped:
         slot_learner.learn("Widgetlib")
     message = str(stopped.value)
-    assert isinstance(stopped.value, SystemExit) and stopped.value.code  # tinker learn ends non-zero
+    exit_code = stopped.value.code
+    assert isinstance(stopped.value, SystemExit) and exit_code
     assert warning in message and "Nothing was learned or saved" in message and "Next: " in message
     assert "Web requests: " in message and "Tried: " in message
     assert model.calls == [] and embeddings.calls == 0
@@ -381,8 +391,10 @@ def test_a_tool_is_learned_from_its_versions_documentation_and_one_search(tinker
     web, model, embeddings = FakeWeb([RESULTS], {**PAGES, **MINOR_VERSION_DOC_PAGES}, FALLBACK), tool_model(), CountingEmbeddings()
     entry = SlotLearner(model, web, embeddings).learn("Widgetlib")
     assert web.queries == ["Widgetlib official documentation"]
-    assert web.fetched[:3] == [START, CHANGES, APP] and web.fallback_asked == [APP]  # off-topic and repeat left out
-    assert DOCS + "2.1.0/" in web.fetched and DOC_ROOT + "changelog/2.1.html" in web.fetched  # one hop behind the index
+    without_off_topic_and_repeat = [START, CHANGES, APP]
+    assert web.fetched[:3] == without_off_topic_and_repeat and web.fallback_asked == [APP]
+    one_hop_behind_the_index = [DOCS + "2.1.0/", DOC_ROOT + "changelog/2.1.html"]
+    assert all(url in web.fetched for url in one_hop_behind_the_index)
     assert "https://elsewhere.org/x" not in web.fetched and entry["docs"] == {"widgetlib": "2.1"}
     assert model.calls[0] == "Plan learning" and model.calls[-1] == "Condense the facts" and embeddings.calls
     assert entry["kind"] == "tool" and entry["machine"][0]["version"] == "2.1.0" and entry["language"] == ""
@@ -408,11 +420,13 @@ def test_learning_moves_its_tracker_through_its_steps_and_keeps_its_summary(tink
     entry = slot_learner.learn("Widgetlib")
     done = [Tracker.DOING_AND_DONE[phase][1] for phase in ("search", "plan", "machine", "documentation", "digest")]
     assert [step.split(":")[0] for step in tracker.state["steps"][:5]] == done and tracker.state["step"] == "keep"
-    assert tracker.state["steps"][:5] == [  # each with what came of it
+    each_with_what_came_of_it = [
         "🔎 Web searched: 3 of 3 page(s) read", "🤔 Worked out what it is: Widgetlib, a tool",
         "💻 Checked what is installed", "📖 Documentation read: 5 page(s) of Widgetlib 2.1.0",
         f"🧠 Passages read: 6 of 6 question(s) answered, {len(entry['facts'])} fact(s)"]
-    assert len(tracker.state["steps"]) == len(set(tracker.state["steps"]))  # each step once in a row
+    assert tracker.state["steps"][:5] == each_with_what_came_of_it
+    each_step_once = len(tracker.state["steps"]) == len(set(tracker.state["steps"]))
+    assert each_step_once
     recap = dict(slot_learner.recap)
     assert list(recap) == ["Answered", "Still open", "Documentation", "Pages", "Facts kept", "Web requests"]
     assert recap["Facts kept"] == str(len(entry["facts"])) and recap["Documentation"] == "widgetlib 2.1"
@@ -432,22 +446,23 @@ def test_learning_again_reuses_the_saved_plan_and_the_kept_documentation_with_no
     model, web = tool_model(), FakeWeb([RESULTS], {**PAGES, **MINOR_VERSION_DOC_PAGES}, FALLBACK)
     entry = learner(web, model).learn("Widgetlib")
     assert "Plan learning" not in model.calls and model.calls[0].startswith("Digest")
-    assert not any(url.startswith(DOCS) for url in web.fetched) and entry["docs"] == {"widgetlib": "2.1"}  # kept
-    assert web.queries == ["widgetlib common mistakes"]  # no first search: only the follow-up of the slot left empty
+    assert not any(url.startswith(DOCS) for url in web.fetched) and entry["docs"] == {"widgetlib": "2.1"}
+    only_the_empty_slots_follow_up = ["widgetlib common mistakes"]
+    assert web.queries == only_the_empty_slots_follow_up
 
 
 @pytest.mark.spec("LRN-10", "LRN-17")
 def test_a_saved_plan_whose_documentation_gives_too_little_searches_the_web(tinker_home):
     learner(FakeWeb([RESULTS], {**PAGES, **MINOR_VERSION_DOC_PAGES}, FALLBACK)).learn("Widgetlib")
     Home.store().delete("sources", "widgetlib@2.1")
-    web = FakeWeb([RESULTS], PAGES, FALLBACK)  # the documentation site is gone
-    learner(web).learn("Widgetlib")
-    assert web.queries[0] == "Widgetlib official documentation" and START in web.fetched
+    web_without_the_docs = FakeWeb([RESULTS], PAGES, FALLBACK)
+    learner(web_without_the_docs).learn("Widgetlib")
+    assert web_without_the_docs.queries[0] == "Widgetlib official documentation" and START in web_without_the_docs.fetched
     model, offline = tool_model(), FakeWeb([None], {})
     Home.store().delete("sources", "widgetlib@2.1")
     with pytest.raises(LearnStopped, match="the search failed"):
         learner(offline, model).learn("Widgetlib")
-    assert model.calls == []  # a saved plan: still no model call before the web gave pages
+    assert model.calls == []
 
 
 @pytest.mark.spec("LRN-11")
@@ -536,7 +551,8 @@ def test_a_language_is_learned_under_its_key_and_replaces_what_its_earlier_learn
     entry = SlotLearner(language_model(), web, CountingEmbeddings()).learn("Lang")
     assert entry["kind"] == "language" and entry["language"] == "Lang" and Library.language("Lang") == "lang"
     assert entry["tools"] == [{"role": "tests", "name": "langtest"}] and entry["machine"][1]["version"] == "1.2.0"
-    assert len(entry["machine"]) == 2  # a command the plan names twice runs once
+    each_command_once = 2
+    assert len(entry["machine"]) == each_command_once
     assert "https://langtest.dev/usage.html" in web.fetched and "https://langtest.dev/blog.html" not in web.fetched
     assert entry["docs"] == {"langtest": "latest"} and Home.store().get("sources", "langtest@latest")["pages"]
     assert Knowledge("Lang").language_doc["retired"][0]["reason"] == "replaced when the language was learned again"
@@ -553,4 +569,5 @@ def test_a_domain_is_researched_when_deep(tinker_home, monkeypatch):
     assert learner(web, model).learn("food bank inventory", deep=True) == {"kind": "research"}
     assert researched == ["food bank inventory"]
     Library.save("food-bank-inventory", {"topic": "food bank inventory", "kind": "research", "name": "F", "facts": []})
-    assert learner(FakeWeb(up=False)).learn("food bank inventory")["kind"] == "research"  # kept, nothing asked
+    nothing_asked = FakeWeb(up=False)
+    assert learner(nothing_asked).learn("food bank inventory")["kind"] == "research"

@@ -23,8 +23,9 @@ def test_each_message_goes_when_its_time_is_up(clock):
     clock[0] += GLANCE_KEPT_SECONDS
     assert Ledger.due("bot") == [("42", 2)]
     clock[0] += MESSAGE_KEPT_SECONDS - GLANCE_KEPT_SECONDS - 10
-    Ledger.touched("bot", "42", 1)  # edited: it goes a day from now
-    Ledger.touched("bot", "42", 3)  # the status never goes
+    edited, the_status = 1, 3
+    Ledger.touched("bot", "42", edited)
+    Ledger.touched("bot", "42", the_status)
     clock[0] += 20
     assert Ledger.due("bot") == [("42", 2)] and Ledger.is_lasting("bot", "42", 3)
     Ledger.gone("bot", "42", 2)

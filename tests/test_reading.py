@@ -230,12 +230,13 @@ def test_every_chapter_is_read_in_order_and_saved_as_it_is_read(tmp_path, home_s
     sent = prompts(fake_ollama)
     assert "1. Foreword (front" in sent[0] and FOREWORD in sent[0] and "testing (3)" in sent[0]
     assert TESTING in sent[1] and "- Write a test for each behaviour first" in sent[2]
-    assert all("coupling, 11" not in prompt for prompt in sent[1:])  # the index is kept, never read
+    the_index = "coupling, 11"
+    assert all(the_index not in prompt for prompt in sent[1:])
     topic = Library.read("read-1")
     assert topic["kind"] == "reading" and topic["reading"] == 1 and topic["software"] is True
-    assert [(fact["text"], fact["chapter"]) for fact in topic["facts"]] == [  # chapter 3 repeated chapter 4: kept once
-        ("Write a test for each behaviour first", 4), ("Name each function after what it does", 2),
-        ("Small programs stay easy to change", 1)]
+    chapter_3s_repeat_kept_once = [("Write a test for each behaviour first", 4),
+                                   ("Name each function after what it does", 2), ("Small programs stay easy to change", 1)]
+    assert [(fact["text"], fact["chapter"]) for fact in topic["facts"]] == chapter_3s_repeat_kept_once
     assert [rule["text"] for rule in topic["rules"]] == ["Name functions by what they do"]
     assert {chapter["state"] for chapter in Readings.get(1)["chapters"][:4]} == {"read"}
     assert tracker.steps == ["survey", "chapters", "condense"]
@@ -261,7 +262,7 @@ def test_a_stopped_reading_goes_on_with_the_chapters_not_read(tmp_path, home_sto
     for chapter in (2, 1, 3):
         fake_ollama.reply(points(), when=f"chapter {chapter}")
     fake_ollama.reply(json.dumps({"rules": [{"phase": "tests", "text": "Test first", "cites": [1]}]}), when="Condense")
-    Reader(make_model()).read(1)  # complete now: its rules are made, though this pass found nothing new
+    Reader(make_model()).read(1)
     assert labels(fake_ollama) == ["Read: chapter 2", "Read: chapter 1", "Read: chapter 3", "Condense the facts"]
 
 @pytest.mark.spec("RDG-7")
@@ -374,7 +375,8 @@ def test_tinker_read_stores_then_reads_as_its_own_job(tmp_path, measured_model, 
     assert any(step.startswith("🧭 Chose the chapters to read") for step in steps)
     assert "Time taken" in capsys.readouterr().out
     assert Home.store().entries("read")
-    Commands(Cli.parse(["read", "craft.md"])).run()  # stored before: said, and nothing read
+    stored_before = Cli.parse(["read", "craft.md"])
+    Commands(stored_before).run()
     assert len(ended) == 1 and "Already on the reading list as #1" in capsys.readouterr().out
     with pytest.raises(SystemExit, match="No reading #9"):
         Commands(Cli.parse(["read", "#9"])).run()

@@ -49,5 +49,6 @@ def test_project_references():
     assert ref("@calc-py") == "calc-py" and ref("@a1b2c3") == "a1b2c3"
     assert ref("calc") is None and ref("@") is None and ref("") is None and ref("100") is None
     assert refs(["@calc", "add", "2"]) == ("calc", ["add", "2"])
-    assert refs(["add", "@calc"]) == ("", ["add", "@calc"])  # only the first word names a project
+    a_project_after_the_first_word = ["add", "@calc"]
+    assert refs(a_project_after_the_first_word) == ("", a_project_after_the_first_word)
     assert refs([]) == ("", [])

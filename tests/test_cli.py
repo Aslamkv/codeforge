@@ -39,7 +39,8 @@ def test_task(tmp_path, monkeypatch):
     (tmp_path / "plan.md").write_text("spec")
     args = parse("task", "a calculator", "plan.md")
     assert (args.task, args.spec) == ("a calculator", "plan.md")
-    assert parse("task", "notes about plan.txt").task == "notes about plan.txt"  # not a file: a word
+    not_a_file = "notes about plan.txt"
+    assert parse("task", not_a_file).task == not_a_file
 
 
 @pytest.mark.spec("CLI-1")
@@ -66,7 +67,8 @@ def test_projects_are_named_with_an_at(tmp_path):
     args = parse("add", "@calc", "keep", "a", "history")
     assert (args.resume, args.change_request, args.add, args.bug) == ("calc", "keep a history", ["keep a history"], False)
     registered(tmp_path / "add", "add123")
-    args = parse("add", "add", "a", "history")  # a word, even one naming a project, is part of the request
+    names_a_project_too = "add"
+    args = parse("add", names_a_project_too, "a", "history")
     assert (args.resume, args.change_request) == ("", "add a history")
     args = parse("fix", "100", "divided", "by", "0", "crashes")
     assert (args.bug, args.change_request, args.fix, args.resume) == (True, "100 divided by 0 crashes", None, "")
@@ -188,7 +190,7 @@ def test_doctor(monkeypatch, capsys):
     assert [name for _, name, _ in Doctor().checks()] == ["Ollama", "model", "embedding model (for tinker learn and --web)",
                                                           "web (for tinker learn and --web)", "tinker command"]
     with pytest.raises(SystemExit, match="does not answer"):
-        Doctor.ollama()  # the network is off in tests
+        Doctor.ollama()
     ok = lambda: "fine"
 
     def missing():
@@ -321,7 +323,8 @@ def test_knowledge_parts_record_what_they_show(session, home_store):
     assert [part.title for part in parts] == ["Lessons from earlier projects (follow them)",
                                               "Learned from the web (current; newer than what you were trained on)"]
     assert parts[0].text == "- Use tmp_path in tests"
-    assert parts[1].text == "- [Python] routes use decorators\n- [Flask] use the test client"  # proven once, not twice
+    each_proven_fact_once = "- [Python] routes use decorators\n- [Flask] use the test client"
+    assert parts[1].text == each_proven_fact_once
     assert all(not part.required and part.place == "first" for part in parts)
     lesson_id = knowledge.known_lessons()[0]["id"]
     assert cycle["used"] == {f"lesson:{lesson_id}": ["code", "tests"], f"known:{proven}": ["code", "tests"],
@@ -350,7 +353,7 @@ def test_before_the_spec_names_the_language_knowledge_is_for_the_one_the_request
         assert session.knowledge.language == language
     session.project.spec["language"] = "Rust"
     session.project.cycles[0]["request"] = "a calculator in Go"
-    assert session.knowledge.language == "Rust"  # the spec named it
+    assert session.knowledge.language == "Rust"
 
 
 @pytest.mark.spec("SES-3")
@@ -447,9 +450,9 @@ def test_a_web_run_past_recall_recalls_first(session, monkeypatch):
     assert CycleRunner(session).run(cycle, web=True) == "done"
     assert recalled == ["code"] and ran[0] == "code"
     recalled.clear()
-    fresh = dict(session.project.new_cycle("f1", "more"), phase="recall")
-    CycleRunner(session).run(fresh, web=True)
-    assert recalled == []  # at recall already: no extra recall
+    at_recall_already = dict(session.project.new_cycle("f1", "more"), phase="recall")
+    CycleRunner(session).run(at_recall_already, web=True)
+    assert recalled == []
 
 
 @pytest.mark.spec("CLI-7")
@@ -559,7 +562,8 @@ def test_a_task_is_built_end_to_end(run_ready, fake_ollama, home_store):
     labels = [label.split(" [")[0] for label in fake_ollama.labels()]
     assert labels == ["Spec (attempt 1)", "Tests test_calc.py (3)", "Write calc.py", "Fix the code C2 (no thinking first)",
                       "README (attempt 1)", "Lessons (attempt 1)"]
-    assert fake_ollama.queue == [] and fake_ollama.calls[0]["think"] == "high"  # no confirm: no quick draft
+    no_quick_draft = fake_ollama.calls[0]["think"] == "high"
+    assert fake_ollama.queue == [] and no_quick_draft
     assert "return a - b" in (folder / "calc.py").read_text()
     spec = plan_of(folder)
     assert [(criterion["id"], criterion["status"]) for criterion in spec["steps"]] == [("C1", "green"), ("C2", "green"),
@@ -575,7 +579,7 @@ def test_a_task_is_built_end_to_end(run_ready, fake_ollama, home_store):
     assert "Done. All 3 spec tests pass (SPEC.md)." in printed(folder)
     assert sorted(path.name for path in folder.iterdir()) == [
         ".tinker", "README.md", "SPEC.md", "calc.py", "test_calc.py"]
-    assert home_store.items("running") == {}  # its tracker is gone once it ended
+    assert home_store.items("running") == {}
     progress = [event["event"] for _, event in project_store(folder).entries("progress")]
     assert progress[0] == "project" and "points" in progress and progress[-1] == "ended"
 
@@ -601,8 +605,8 @@ def test_learning_checks_everything_before_loading(measured_model, fake_ollama, 
     with pytest.raises(SystemExit, match="Nothing learned about Flask; nothing saved."):
         Commands(parse("learn", "Flask")).run()
     assert fake_ollama.calls == []
-    assert "Time taken: 0s" in capsys.readouterr().out  # however it ends
-    assert Home.store().get("running", str(os.getpid())) is None  # its tracker left the home
+    assert "Time taken: 0s" in capsys.readouterr().out
+    assert Home.store().get("running", str(os.getpid())) is None
     Config.save(model=None)
     with pytest.raises(SystemExit, match="No model in use"):
         Commands(parse("learn", "Flask")).run()
@@ -628,7 +632,8 @@ def test_memory(home_store, capsys):
                  "🔬 Topics learned\n   • Flask: A web framework. (read 1 Oct, 1 facts)",
                  "⌨️  Your commands\n   • act: stands for `echo hi` (given)", "   Ask about it   tinker ask"):
         assert line in out, line
-    assert "setup" not in out.split("🧰 Toolchain")[1].split("🔧")[0]  # a row only for a command it has
+    toolchain_rows = out.split("🧰 Toolchain")[1].split("🔧")[0]
+    assert "setup" not in toolchain_rows
 
 
 @pytest.mark.spec("CLI-11")

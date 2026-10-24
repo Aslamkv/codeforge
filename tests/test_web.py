@@ -98,7 +98,7 @@ def test_check_accepts_the_defaults_and_duckduckgo():
 
 @pytest.mark.spec("WEB-4")
 def test_required_names_the_option_when_no_backend_works():
-    Config.save(web="ollama")  # no OLLAMA_API_KEY in tests
+    Config.save(web="ollama")
     with pytest.raises(SystemExit, match="--web needs the Internet plugin: ollama: no Ollama API key"):
         Internet.required("--web")
 
@@ -261,7 +261,7 @@ def test_ollama_web_unusable_answers(monkeypatch):
 @pytest.mark.spec("WEB-8")
 def test_ollama_web_unreachable_is_a_network_failure():
     with pytest.raises(WebError, match="cannot be reached") as error:
-        OllamaWeb(5).post("/web_search", {})  # the network is off in tests
+        OllamaWeb(5).post("/web_search", {})
     assert error.value.network
 
 
@@ -355,9 +355,10 @@ def test_a_rate_limit_is_told_apart_from_other_failures(monkeypatch):
                                                        [{"url": "https://ok"}]]))
     assert internet.search("q", 1) is None and internet.rate_limited("q")
     assert internet.search("r", 1) is None and not internet.rate_limited("r")
-    assert internet.search("q", 1) and not internet.rate_limited("q")  # a later answer clears it
-    waited = internet_with(monkeypatch, Scripted(1, [WebError("busy", retry=True, code=429), [{"url": "https://ok"}]]))
-    assert waited.search("q", 1) and not waited.rate_limited("q")  # asked again within the call, and answered
+    answered_later = internet.search("q", 1)
+    assert answered_later and not internet.rate_limited("q")
+    asked_again_and_answered = internet_with(monkeypatch, Scripted(1, [WebError("busy", retry=True, code=429), [{"url": "https://ok"}]]))
+    assert asked_again_and_answered.search("q", 1) and not asked_again_and_answered.rate_limited("q")
     def urlopen(request, timeout):
         raise http_error(429)
     monkeypatch.setattr(urllib.request, "urlopen", urlopen)

@@ -111,7 +111,8 @@ def test_similar_lessons_by_meaning_else_by_words(home_store):
     ids = {lesson["text"]: f"lesson:{lesson['id']}" for lesson in Knowledge("Python").known_lessons()}
     similar = lambda graph: {frozenset((link["source"], link["target"])) for link in graph.links
                              if link["kind"] == "similar"}
-    meaning = dict(zip(texts, ([1.0, 0, 0], [0, 1.0, 0], [0, 0, 1.0], [0.9, 0.1, 0])))  # the first and the last alike
+    first, unlike, also_unlike, like_the_first = [1.0, 0, 0], [0, 1.0, 0], [0, 0, 1.0], [0.9, 0.1, 0]
+    meaning = dict(zip(texts, (first, unlike, also_unlike, like_the_first)))
     by_meaning = Graph.build(FakeEmbeddings(meaning))
     assert by_meaning.similar_by == "meaning (embed-model)"
     assert similar(by_meaning) == {frozenset((ids[texts[0]], ids[texts[3]]))}

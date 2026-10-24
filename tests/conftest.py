@@ -10,7 +10,7 @@ from pathlib import Path
 
 import pytest
 
-import tinkerkit.cli  # noqa: F401  (the whole of Tinker loaded, as a run loads it)
+import tinkerkit.cli  # noqa: F401
 from tinkerkit.messages import say
 from tinkerkit.model import Model, Ollama
 from tinkerkit.project import Project
@@ -65,8 +65,10 @@ def offline(monkeypatch):
     monkeypatch.setattr(socket.socket, "connect", refuse)
     for name in ("OLLAMA_API_KEY", "TINKER_CHANNELS", "NO_COLOR", "TINKER_FORMAT"):
         monkeypatch.delenv(name, raising=False)
-    # a project file rewritten within the second its last test run compiled it, at the same size, would load its
-    # stale bytecode (a test-speed artifact: a real model call takes longer than that)
+    no_stale_bytecode(monkeypatch)
+
+
+def no_stale_bytecode(monkeypatch):
     monkeypatch.setenv("PYTHONDONTWRITEBYTECODE", "1")
 
 
@@ -93,7 +95,8 @@ class FakeOllama:
         return self
 
     def chat(self, name, messages, keep_alive, options, think=None, label=None, done_when=None, timeout=None):
-        if not messages:  # an unload
+        unloading = not messages
+        if unloading:
             self.unloaded.append(name)
             return {"message": {"content": "", "thinking": ""}}
         self.calls.append({"name": name, "messages": messages, "options": options, "think": think,

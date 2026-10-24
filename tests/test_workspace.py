@@ -70,7 +70,7 @@ def test_safe(command):
 def test_resolve_inside_the_project(workspace, project_dir):
     assert workspace.resolve("src/app.py") == project_dir / "src" / "app.py"
     assert workspace.resolve("a/../b.py") == project_dir / "b.py"
-    assert workspace.resolve(".tinker/spec.json") == project_dir / ".tinker" / "spec.json"  # read: allowed
+    assert workspace.resolve(".tinker/spec.json") == project_dir / ".tinker" / "spec.json"
 
 
 @pytest.mark.spec("WS-3")
@@ -141,7 +141,8 @@ def test_apply_refuses_with_notes(workspace, project_dir):
     assert "shown.py: it was shown in part" in notes
     assert "full.py: the reply gave it empty" in notes
     assert "denied.py: not now" in notes
-    assert change.files == ["new_empty.py"]  # a new file may be empty (a package marker)
+    a_package_marker = ["new_empty.py"]
+    assert change.files == a_package_marker
 
 
 @pytest.mark.spec("WS-5")
@@ -394,7 +395,7 @@ def test_run_setup_sets_network_failures_aside(workspace, monkeypatch):
     assert ok and waiting == [toolchain.setup[0]] and workspace.exists("after")
     monkeypatch.setattr(workspace_module, "online", lambda: False)
     ok, _, waiting = Toolchain(dict(TOOLS, activate="", setup=["exit 1"])).run_setup(workspace)
-    assert ok and waiting == ["exit 1"]  # offline: whatever failed waits for the network
+    assert ok and waiting == ["exit 1"]
 
 
 @pytest.mark.spec("WS-13")
@@ -465,7 +466,8 @@ def test_ran_no_test(output, none):
 def test_reached_no_test():
     refs = [TestRef("tests/test_a.py::test_x")]
     assert not Toolchain.reached_no_test(0, "", refs)
-    assert not Toolchain.reached_no_test(None, "...", refs)  # a timeout: a test hangs
+    a_timeout = None
+    assert not Toolchain.reached_no_test(a_timeout, "...", refs)
     assert Toolchain.reached_no_test(None, Workspace.REFUSED_OUTPUT, refs)
     assert Toolchain.reached_no_test(127, "pytest: command not found tests/test_a.py", refs)
     assert Toolchain.reached_no_test(1, "ModuleNotFoundError: no module named pytest", refs)
@@ -632,7 +634,7 @@ def test_change():
 
 @pytest.mark.spec("WS-21")
 def test_online(monkeypatch):
-    assert workspace_module.online() is False  # the network is off in tests
+    assert workspace_module.online() is False
     opened = []
 
     class Connection:

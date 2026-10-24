@@ -55,7 +55,8 @@ def test_a_test_file_with_tests_is_never_rewritten(make_project, make_session, f
     steps = [criterion("C0", "tests/test_calc.py::test_old", "old", status="green"),
              criterion("C1", "tests/test_calc.py::test_add", "calc.add(2, 3) is 5")]
     project = make_project(steps, files={"tests/test_calc.py": {"kind": "test", "role": "tests", "uses": ["calc.py"]}})
-    fake_ollama.reply(file_block("tests/test_calc.py", "def test_add():\n    pass\n"), when="Tests")  # loses test_old
+    loses_test_old = file_block("tests/test_calc.py", "def test_add():\n    pass\n")
+    fake_ollama.reply(loses_test_old, when="Tests")
     fake_ollama.reply(file_block("tests/test_calc_2.py", "def test_add():\n    pass\n"), when="Tests")
     TestWriter(make_session(project)).run(project.cycles[0])
     assert "test_old" in (project_dir / "tests" / "test_calc.py").read_text()
@@ -104,7 +105,8 @@ def test_code_files_one_call_each_with_markers_written_empty(make_project, make_
              "README.md": {"kind": "docs", "role": "readme", "uses": []}}
     project = make_project(files=files)
     cycle = dict(project.cycles[0], files=list(files))
-    fake_ollama.reply(file_block("calc.py", FIXED), when="Write pkg/calc.py")  # a new file goes where the design says
+    named_without_its_folder = file_block("calc.py", FIXED)
+    fake_ollama.reply(named_without_its_folder, when="Write pkg/calc.py")
     CodeWriter(make_session(project)).write_all(cycle)
     assert (project_dir / "pkg" / "__init__.py").read_text() == ""
     assert (project_dir / "pkg" / "calc.py").read_text() == FIXED and not (project_dir / "calc.py").exists()
@@ -296,7 +298,8 @@ def test_a_fix_learned_before_is_replayed_without_the_model(calc, fake_ollama, p
                                                                                         "calc.py": "stolen"}}})
     assert ToolchainRepair(session).run(output, set())[0] == "known"
     assert project.toolchain.lint == "" and (project_dir / "setup.cfg").read_text() == "[flake8]\n"
-    assert (project_dir / "calc.py").read_text() == CALC_WITH_WRONG_SUB  # a file of this project's own is never replaced
+    never_replaced = CALC_WITH_WRONG_SUB
+    assert (project_dir / "calc.py").read_text() == never_replaced
     assert project.files["setup.cfg"]["kind"] == "config" and fake_ollama.calls == []
 
 

@@ -23,11 +23,11 @@ def test_json_in_prose():
 
 @pytest.mark.spec("PRM-2")
 @pytest.mark.parametrize("text,expected", [
-    ('{"a": [1, 2,], "b": 3,}', {"a": [1, 2], "b": 3}),                       # trailing commas
-    ('{"a": "one " + "two"}', {"a": "one two"}),                               # joined strings
-    ('{"a": "it\\\'s"}', {"a": "it's"}),                                        # \' escape
-    ('{"a": {"b": [1, 2]}', {"a": {"b": [1, 2]}}),                              # left open at the end
-    ('{"a": ["x", "y", "b": 1}', {"a": ["x", "y"], "b": 1}),                   # list open before the next key
+    pytest.param('{"a": [1, 2,], "b": 3,}', {"a": [1, 2], "b": 3}, id="trailing commas"),
+    pytest.param('{"a": "one " + "two"}', {"a": "one two"}, id="joined strings"),
+    pytest.param('{"a": "it\\\'s"}', {"a": "it's"}, id="escaped single quote"),
+    pytest.param('{"a": {"b": [1, 2]}', {"a": {"b": [1, 2]}}, id="left open at the end"),
+    pytest.param('{"a": ["x", "y", "b": 1}', {"a": ["x", "y"], "b": 1}, id="list open before the next key"),
 ])
 def test_json_mends_the_usual_slips(text, expected):
     assert Reply(text).json() == expected
@@ -208,8 +208,8 @@ def test_assemble_fits_optional_parts_while_they_fit():
     parts = [Part("R", "r" * 100, True), Part("Atomic", "a" * 500, atomic=True), Part("Prose", "p" * 1000)]
     text = Part.assemble(parts, 600)
     assert len(text) <= 600
-    assert "## Atomic" not in text  # whole or nothing
-    assert "## Prose\n" + "p" * 100 in text and "[...]" in text  # shortened to the room left
+    assert "## Atomic" not in text
+    assert "## Prose\n" + "p" * 100 in text and "[...]" in text
 
 
 @pytest.mark.spec("PRM-11")

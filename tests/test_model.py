@@ -83,7 +83,8 @@ def test_remember_keeps_the_learned_chars_per_token(measured_model, make_model, 
     Models.remember(model)
     assert Models.settings(MODEL)["chars_per_token"] == 2.9
     assert "crashed 2 time(s)" in capsys.readouterr().out
-    model.recent_chars_per_token = [3.0] * 4  # too few to learn from
+    too_few_to_learn_from = [3.0] * 4
+    model.recent_chars_per_token = too_few_to_learn_from
     Models.remember(model)
     assert Models.settings(MODEL)["chars_per_token"] == 2.9
 
@@ -117,7 +118,7 @@ def test_get_json(monkeypatch):
 
 @pytest.mark.spec("MOD-7")
 def test_get_json_without_ollama_gives_none():
-    assert Ollama.get_json("/api/tags") is None  # the network is off in tests
+    assert Ollama.get_json("/api/tags") is None
     assert Ollama.installed_models() is None and Ollama.loaded_models() is None
 
 
@@ -336,7 +337,7 @@ def test_a_model_logs_its_details_and_says_only_when_it_asks_again(model_log, fa
     assert any(note.startswith("Plan (attempt 1)") for note in notes) and any("not usable" in note for note in notes)
     stream = Stream("Plan", None)
     stream.thinking = 3
-    assert stream.status(stream.started + 12) == "Working on it… 12s"  # no step said yet
+    assert stream.status(stream.started + 12) == "Working on it… 12s"
     assert stream.status(stream.started + 101) == "Working on it… 1m 41s (101s)"
 
 
@@ -468,7 +469,8 @@ def test_ask_until_usable(make_model, fake_ollama):
 @pytest.mark.spec("MOD-20")
 def test_learn_chars_per_token(make_model):
     model = make_model()
-    model.learn_chars_per_token(3000, 40)  # too few tokens to tell
+    too_few_tokens = 40
+    model.learn_chars_per_token(3000, too_few_tokens)
     assert model.recent_chars_per_token == [] and model.learned_chars_per_token() is None
     for chars in (3100, 2900, 3300, 3500, 3200):
         model.learn_chars_per_token(chars, 1000)

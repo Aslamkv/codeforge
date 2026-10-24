@@ -11,6 +11,7 @@ import pytest
 from tinkerkit.fetcher import Fetched, Fetcher
 from tinkerkit.settings import MAX_REDIRECTS
 
+KEEP_ALIVE_PROTOCOL = "HTTP/1.1"
 REAL_CONNECT = socket.socket.connect
 
 
@@ -22,13 +23,13 @@ class Site:
         site = self
 
         class Handler(http.server.BaseHTTPRequestHandler):
-            protocol_version = "HTTP/1.1"  # keeps the connection open between requests
+            protocol_version = KEEP_ALIVE_PROTOCOL
 
             def do_GET(self):
                 site.seen.append((self.path, self.headers.get("User-Agent"), time.monotonic()))
                 site.clients.add(self.client_address)
                 if site.barrier and self.path.startswith("/together"):
-                    site.barrier.wait()  # answers only when both sites are asked at once
+                    site.barrier.wait()
                 status, headers, body = site.routes.get(self.path, (404, {}, b"not here"))
                 self.send_response(status)
                 for name, value in headers.items():
@@ -84,7 +85,6 @@ def test_sites_are_fetched_in_parallel_in_order_and_one_failure_blocks_none(site
     logged = []
     got = fetcher(log=lambda *entry: logged.append(entry)).fetch_all(
         [f"{one.base}/together", f"{one.base}/gone", "http://127.0.0.1:1/refused", f"{other.base}/together"])
-    # both sites answered together: in parallel
     assert [fetched.text for fetched in got] == ["<p>a</p>", "", "", "<p>b</p>"]
     assert got[0].ok and got[0].status == 200 and got[0].kind == "text/html" and got[0].final_url.endswith("/together")
     assert got[1].status == 404 and got[1].error == "HTTP 404"
@@ -99,7 +99,7 @@ def test_one_sites_pages_share_one_kept_alive_connection_and_come_gzipped(site):
                 "/c": (200, HTML, b"<p>c</p>")})
     got = fetcher().fetch_all([f"{web.base}/a", f"{web.base}/b", f"{web.base}/c"])
     assert [fetched.text for fetched in got] == ["<p>a</p>", "<p>b</p>", "<p>c</p>"]
-    assert len(web.clients) == 1 and web.paths() == ["/robots.txt", "/a", "/b", "/c"]  # one after another, one connection
+    assert len(web.clients) == 1 and web.paths() == ["/robots.txt", "/a", "/b", "/c"]
     logged = []
     fetcher(log=lambda *entry: logged.append(entry)).fetch_all([f"{web.base}/llms.txt"], kind="probe")
     assert [(kind, result) for kind, result, _, _ in logged] == [("robots", "missing"), ("probe", "missing")]
@@ -131,8 +131,9 @@ def test_redirects_are_followed_up_to_the_limit(site):
 def test_one_site_is_asked_once_per_domain_delay(site):
     web = site({"/a": (200, HTML, b"a"), "/b": (200, HTML, b"b")})
     fetcher(domain_delay=0.2).fetch_all([f"{web.base}/a", f"{web.base}/b"])
-    times = sorted(at for _, _, at in web.seen)  # robots.txt, then the two pages
-    assert len(times) == 3 and all(later - earlier >= 0.19 for earlier, later in zip(times, times[1:]))
+    times = sorted(at for _, _, at in web.seen)
+    robots_then_the_two_pages = 3
+    assert len(times) == robots_then_the_two_pages and all(later - earlier >= 0.19 for earlier, later in zip(times, times[1:]))
 
 
 @pytest.mark.spec("LRN-5")
@@ -141,7 +142,8 @@ def test_robots_txt_is_honoured(site):
                 "/public": (200, HTML, b"open"), "/private/page": (200, HTML, b"secret")})
     public, private = fetcher().fetch_all([f"{web.base}/public", f"{web.base}/private/page"])
     assert public.ok and private.refused and private.error == Fetched.ROBOTS
-    assert "/private/page" not in web.paths() and web.paths().count("/robots.txt") == 1  # read once per site
+    read_once_per_site = web.paths().count("/robots.txt") == 1
+    assert "/private/page" not in web.paths() and read_once_per_site
 
 
 @pytest.mark.spec("LRN-5")

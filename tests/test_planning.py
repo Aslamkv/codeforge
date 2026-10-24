@@ -168,7 +168,7 @@ def test_spec_phase_makes_the_plan_the_cycles_spec(planner, fake_ollama):
     assert cycle["non_goals"] == ["a window"] and cycle["constraints"] == ["standard library only"]
     assert cycle["specified"] and project.language == "Python"
     assert (project.workdir / "SPEC.md").is_file()
-    SpecWriter(session).run(cycle)  # specified: not planned again
+    SpecWriter(session).run(cycle)
     assert len(fake_ollama.calls) == 1
 
 
@@ -197,7 +197,7 @@ def test_amend_replaces_the_cycles_criteria(planner, fake_ollama):
     assert cycle["amendments"] == ["also subtract"]
     assert cycle["changes"] == ["~ C1 calc.add(2, 3) is 5 and calc.add(-1, 1) is 0", "+ C3 calc.sub(5, 3) is 2"]
     assert fake_ollama.calls[-1]["think"] is False
-    assert (cycle["phase"], cycle["awaiting"], cycle["contracts_done"]) == ("design", False, [])  # planned again
+    assert (cycle["phase"], cycle["awaiting"], cycle["contracts_done"]) == ("design", False, [])
 
 
 @pytest.mark.spec("PLN-7")
@@ -325,7 +325,8 @@ def test_interface_review_corrects_and_checks_again(make_project, make_session, 
     assert project.files["app.py"]["contract"] == ["main() calls a.f() and b.load(path)"]
     assert project.files["app.py"]["uses"] == ["a.py", "b.py"] and project.files["app.py"]["kind"] == "code"
     assert cycle["review"] == ["app.py: b has load, not g"]
-    assert len(fake_ollama.calls) == 2  # solo.py uses one contracted file only: not checked
+    app_py_checked_and_checked_again = 2
+    assert len(fake_ollama.calls) == app_py_checked_and_checked_again
 
 
 @pytest.mark.spec("PLN-10")
@@ -373,8 +374,8 @@ def test_recall_keeps_a_languages_rules_before_its_other_facts(make_project, mak
     Library.save("python", entry)
     project = make_project(cycles=[{"id": "base", "request": "a calculator in Python", "phase": "recall"}])
     Recaller(make_session(project)).run(project.cycles[0])
-    assert [item["text"] for item in project.spec["learned"]] == [
-        "its tools: tests pytest", "Use match for dispatch"]  # the rules stand in for the facts
+    the_rules_stand_in_for_the_facts = ["its tools: tests pytest", "Use match for dispatch"]
+    assert [item["text"] for item in project.spec["learned"]] == the_rules_stand_in_for_the_facts
 
 
 @pytest.mark.spec("PLN-11")
@@ -460,10 +461,11 @@ def test_rules_for_code_the_project_does_not_have_stay_out_of_its_prompts(make_p
                                     "kind": "feature"}], toolchain={}, language="")
     session, cycle = make_session(project), project.cycles[0]
     Recaller(session).run(cycle)
-    assert cycle["topics"] == ["python"]  # named in the request, without its version
+    named_without_its_version = ["python"]
+    assert cycle["topics"] == named_without_its_version
+    uv_not_installed_here = ids["Set build-backend uv_build"]
     assert set(project.spec["inapplicable"]) == {ids["Use inspect.iscoroutinefunction"],
-                                                 ids["Open text files with an encoding"],
-                                                 ids["Set build-backend uv_build"]}  # uv is not installed here
+                                                 ids["Open text files with an encoding"], uv_not_installed_here}
     fake_ollama.reply(choose("code that reads files"), when="Spec")
     SpecWriter(session).run(cycle)
     assert project.spec["situations"] == ["code that reads files"]

@@ -46,8 +46,9 @@ def test_phase_lists():
 def test_config_is_defaults_overridden_by_the_home(home_store):
     home_store.put("config", "model", "m1")
     assert Config.get("model") == "m1" and Config.get("web") == "ollama"
-    home_store.put("config", "model", "changed")  # another Tinker changed it: seen at once
-    assert Config.get("model") == "changed"
+    changed_by_another_tinker = "changed"
+    home_store.put("config", "model", changed_by_another_tinker)
+    assert Config.get("model") == changed_by_another_tinker
     Config.save(web="duckduckgo", test_timeout=5)
     assert Config.load() == dict(settings.DEFAULT_CONFIG, model="changed", web="duckduckgo", test_timeout=5)
 
@@ -92,7 +93,7 @@ def test_store_documents(tmp_path):
     assert store.get("c", "k") is None and store.get("c", "k", {"d": 1}) == {"d": 1}
     store.put("c", "b", {"name": "café", "n": [1]})
     store.put("c", "a", 2)
-    store.put("c", "b", {"name": "again"})  # replaced, keeping its place
+    store.put("c", "b", {"name": "again"})
     store.put("other", "z", 3)
     assert store.items("c") == {"b": {"name": "again"}, "a": 2} and store.count("c") == 2
     store.delete("c", "b")
@@ -132,7 +133,8 @@ def test_a_failed_write_leaves_the_old_value(tmp_path):
         store.update("c", "k", broken)
     assert store.get("c", "k") == "old"
     with pytest.raises(TypeError):
-        store.put("c", "k", object())  # not JSON: nothing written
+        not_json = object()
+        store.put("c", "k", not_json)
     assert store.get("c", "k") == "old"
 
 
@@ -184,7 +186,7 @@ def test_reset_with_yes_deletes_home(tinker_home):
     Home.ensure()
     Home.reset(yes=True)
     assert not tinker_home.exists()
-    Config.save(model="m")  # the next command starts fresh
+    Config.save(model="m")
     assert Config.get("model") == "m"
 
 
@@ -276,8 +278,9 @@ def test_split_text_keeps_paragraphs_together_within_the_size():
     chunks = split_text(text, 400)
     assert all(len(chunk) <= 400 for chunk in chunks)
     assert len(chunks) > 1
-    assert "".join(text.split()) == "".join("".join(chunks).split())  # nothing lost
-    assert all(chunk.startswith("paragraph") for chunk in chunks)  # split between paragraphs
+    nothing_lost = "".join(text.split()) == "".join("".join(chunks).split())
+    split_between_paragraphs = all(chunk.startswith("paragraph") for chunk in chunks)
+    assert nothing_lost and split_between_paragraphs
 
 
 @pytest.mark.spec("SET-13")
@@ -326,7 +329,7 @@ def test_keep_awake_without_a_tool_or_failing_does_nothing(monkeypatch):
     def broken(*args, **kwargs):
         raise OSError("cannot start")
     monkeypatch.setattr(settings.subprocess, "Popen", broken)
-    Home.keep_awake()  # never raises
+    Home.keep_awake()
 
 
 @pytest.mark.spec("SET-19")
@@ -338,13 +341,14 @@ def test_config_set_reads_and_checks_the_value(capsys):
     assert Config.set("web_fallback", "duckduckgo") == "duckduckgo"
     with pytest.raises(SystemExit, match="test_timeout must be a whole number"):
         Config.set("test_timeout", "soon")
-    assert Config.get("test_timeout") == 90  # what failed is not kept
+    assert Config.get("test_timeout") == 90
     with pytest.raises(SystemExit, match="web_fallback must be one of"):
         Config.set("web_fallback", "bing")
     assert Config.get("web_fallback") == "duckduckgo"
     with pytest.raises(SystemExit, match="learn_missing"):
         Config.set("learn_missing", "0")
-    assert Config.get("learn_missing") == 2  # never set before: back to the default
+    the_default = settings.DEFAULT_CONFIG["learn_missing"]
+    assert Config.get("learn_missing") == the_default
 
 
 @pytest.mark.spec("SET-19")

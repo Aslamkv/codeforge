@@ -32,7 +32,8 @@ def test_a_page_keeps_its_main_content_as_blocks():
     kinds = [(block.kind, block.text[:15]) for block in page.blocks]
     assert kinds == [("heading", "Getting started"), ("text", INSTALL[:15]), ("code", "tool check .\n  "),
                      ("heading", "Configure"), ("text", CONFIGURE[:15])]
-    assert page.blocks[2].text == "tool check .\n    --strict"  # code keeps its layout
+    code_keeps_its_layout = "tool check .\n    --strict"
+    assert page.blocks[2].text == code_keeps_its_layout
     shown = " ".join(block.text for block in page.blocks)
     for left_out in ("Home", "Site header", "Link one", "Search the docs", "Sponsored", "Copyright", "alert", "color"):
         assert left_out not in shown
@@ -62,7 +63,7 @@ def test_the_pool_gathers_passages_under_headings_and_numbers_them():
     assert pool[0].text == f"{INSTALL.strip()}\n\ntool install" and pool[0].url == "https://a.dev/1"
     assert pool[0].fetched == "2026-10-21 10:00"
     assert all(len(passage.text) <= MAX_PASSAGE_CHARS for passage in pool if passage.text != long_code)
-    assert any(passage.text == long_code for passage in pool)  # a code block is never cut
+    assert any(passage.text == long_code for passage in pool)
 
 
 @pytest.mark.spec("LRN-6")
@@ -78,5 +79,5 @@ def test_the_pool_drops_a_sites_repeats_and_near_duplicates():
     known = [Passage("https://a.dev/1", "t", "", INSTALL, "P1")]
     more = Cleaner().pool([page("https://c.net/x", Block("text", INSTALL)), page("https://c.net/y", Block("text", CONFIGURE))],
                           known=known)
-    # numbered on from the known ones
-    assert [(passage.id, passage.url) for passage in more] == [("P2", "https://c.net/y")]
+    numbered_on_from_the_known_ones = [("P2", "https://c.net/y")]
+    assert [(passage.id, passage.url) for passage in more] == numbered_on_from_the_known_ones

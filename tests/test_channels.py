@@ -23,7 +23,7 @@ class BotAPI:
 
     def __init__(self, **answers):
         self.answers = {name: list(value) if isinstance(value, list) else [value] for name, value in answers.items()}
-        self.calls, self.raw = [], []  # raw: (headers, body) of each request
+        self.calls, self.headers_and_bodies = [], []
 
     def connection(self, wait):
         return Connection(self)
@@ -37,7 +37,7 @@ class Connection:
 
     def request(self, method, path, data, headers):
         name = path.rsplit("/", 1)[1]
-        self.api.raw.append((headers, data))
+        self.api.headers_and_bodies.append((headers, data))
         self.api.calls.append((path, dict(urllib.parse.parse_qsl(data)) if isinstance(data, str) else {}))
         queue = self.api.answers.get(name, [{}])
         answer = queue.pop(0) if len(queue) > 1 else queue[0]
@@ -214,8 +214,9 @@ def test_send_and_edit_post_html_with_a_plain_fallback():
     assert html_call["text"] == "<b>hi</b> resume abc" and html_call["parse_mode"] == "HTML"
     assert plain_call["text"] == "hi resume abc" and "parse_mode" not in plain_call
     api.answers["sendMessage"] = [{"message_id": 9}]
-    assert channel.edit("42", 8, "same") == 8  # unchanged text: harmless
-    assert channel.edit("42", 8, "new text") == 9  # the message is gone: sent anew
+    unchanged_keeps_its_message, gone_is_sent_anew = 8, 9
+    assert channel.edit("42", 8, "same") == unchanged_keeps_its_message
+    assert channel.edit("42", 8, "new text") == gone_is_sent_anew
     assert [path.rsplit("/", 1)[1] for path, _ in api.calls[-2:]] == ["deleteMessage", "sendMessage"]
     assert channel.edit("42", None, "x") == 9
 
@@ -247,21 +248,25 @@ def test_the_ledger_keeps_every_message_and_collects_them(monkeypatch):
     assert shown == [1] and Ledger.thing(1)["asked"] == "task calc" and Ledger.thing(1)["text"] == "🔨 calc"
     assert channel.show("42", shown, "🔨 calc ✅") == [1] and Ledger.thing(1)["text"] == "🔨 calc ✅"
     assert sorted(message for _, message in Ledger.passing("bot")) == [1, 4]
-    channel.glance("42", 4, [channel.send("42", "jobs")])  # the person's message goes at once
-    channel.glance("42", None, [channel.send("42", "help")])  # the glance before goes too
+    the_persons_message = 4
+    channel.glance("42", the_persons_message, [channel.send("42", "jobs")])
+    channel.glance("42", None, [channel.send("42", "help")])
     assert Ledger.glances("bot", "42") == [3]
     assert [fields["message_id"] for path, fields in api.calls if path.endswith("/deleteMessage")] == ["4", "2"]
     now = time.time()
     monkeypatch.setattr(ledger.time, "time", lambda: now + 200)
     channel.collect()
-    assert sorted(message for _, message in Ledger.passing("bot")) == [1]  # the glance went, the task stays a day
+    the_task_stays_a_day = [1]
+    assert sorted(message for _, message in Ledger.passing("bot")) == the_task_stays_a_day
     api.answers["deleteMessage"] = [OSError("down")]
     monkeypatch.setattr(ledger.time, "time", lambda: now + 2 * 24 * 3600)
     channel.collect()
-    assert Ledger.due("bot") == [("42", 1)]  # no network: taken out later
+    taken_out_later = [("42", 1)]
+    assert Ledger.due("bot") == taken_out_later
     api.answers["deleteMessage"] = [(400, "Bad Request: message can't be deleted")]
     channel.collect()
-    assert channel.clear() == 0 and Ledger.thing(1)["text"] == "🔨 calc ✅"  # forgotten; the history stays
+    the_history_stays = "🔨 calc ✅"
+    assert channel.clear() == 0 and Ledger.thing(1)["text"] == the_history_stays
 
 
 @pytest.mark.spec("CHN-6")
@@ -315,7 +320,7 @@ def test_send_file_uploads_a_document_with_its_caption(tmp_path):
     api = BotAPI(sendDocument={"message_id": 12})
     channel = telegram(api)
     assert channel.send_file("42", page, "**Tinker's memory** " + "x" * 2000) == 12
-    (headers, body), = api.raw
+    (headers, body), = api.headers_and_bodies
     boundary = headers["Content-Type"].split("boundary=")[1]
     assert headers["Content-Type"].startswith("multipart/form-data") and api.calls[0][0] == "/botT0K/sendDocument"
     parts = body.split(f"--{boundary}".encode())

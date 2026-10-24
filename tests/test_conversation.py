@@ -91,8 +91,9 @@ def test_markup_html():
 
 @pytest.mark.spec("CNV-1")
 def test_markup_ansi_and_literal(monkeypatch):
-    monkeypatch.setattr(sys, "stdout", io.StringIO())
-    assert Markup.ansi("**b**") == "b"  # not a terminal: plain
+    not_a_terminal = io.StringIO()
+    monkeypatch.setattr(sys, "stdout", not_a_terminal)
+    assert Markup.ansi("**b**") == "b"
     tty = io.StringIO()
     tty.isatty = lambda: True
     monkeypatch.setattr(sys, "stdout", tty)
@@ -225,7 +226,8 @@ def test_console_shows_headlines_then_the_whole_message(monkeypatch):
 @pytest.mark.spec("CNV-7")
 def test_console_receives_lines_until_exit():
     console = ConsoleChannel()
-    console.reader = object()  # no input thread: lines are queued by hand
+    no_input_thread = object()
+    console.reader = no_input_thread
     for line in ("hello", "  ", "exit"):
         console.lines.put(line)
     assert [message.text for message in console.receive(0)] == ["hello"]
@@ -249,7 +251,8 @@ def snapshot(**state):
 def test_progress_shows_the_tracker():
     progress = Progress("a calculator", phase="✅ **Confirmed:** building it")
     assert progress.text().splitlines() == ["🔨 **a calculator**", "▸ ✅ **Confirmed:** building it ⏳"]
-    assert progress.take(snapshot()) and "▸ ✅ **Confirmed:** building it" in progress.text()  # said until a step
+    before_any_step = snapshot()
+    assert progress.take(before_any_step) and "▸ ✅ **Confirmed:** building it" in progress.text()
     progress.take(snapshot(step="verify", doing=Tracker.DOING_AND_DONE["verify"][0], began=time.time() - 65,
                            steps=["🧠 Recalled what Tinker has learned", "📝 Spec written"], passing=[2, 3],
                            latest="wrote calc.py"))
@@ -257,7 +260,7 @@ def test_progress_shows_the_tracker():
         "🔨 **calc: a calculator**", "✅ 🧠 Recalled what Tinker has learned", "✅ 📝 Spec written",
         "▸ **🔁 Fixing until every test passes** · ⏱ 1m 5s ⏳", "📊 2/3 spec points pass", "… wrote calc.py"]
     assert progress.brief() == "**calc: a calculator** (🔁 Fixing until every test passes, 2/3 spec points pass)"
-    assert not progress.take(progress.snapshot)  # nothing changed
+    assert not progress.take(progress.snapshot)
 
 
 @pytest.mark.spec("CNV-8")
@@ -273,7 +276,7 @@ def test_progress_says_what_the_run_works_on_how_far_it_got_and_what_it_found():
         "💡 Small habits compound like interest"]
     assert progress.brief() == ("**Reading Atomic Habits** (📚 Reading chapter 3, The 1% Rule (2 of 7), "
                                 "1/7 chapters · 4 things learned)")
-    progress.turn()  # the next edit: the hourglass flipped
+    progress.turn()
     assert progress.text().splitlines()[2].endswith(" ⌛") and not progress.take(progress.snapshot)
 
 
@@ -316,16 +319,19 @@ def test_progress_ending_of_a_plan_that_waits():
 
 @pytest.mark.spec("CNV-9")
 def test_reporter_shows_the_tracker_and_ends_with_its_ending(home_store, monkeypatch):
-    channel = Recorder(chats=("1", "2"))
-    monkeypatch.setattr(conversation, "PROGRESS_EDIT_SECONDS", 1000)  # no background edits: the test refreshes it
+    chats = ("1", "2")
+    channel = Recorder(chats=chats)
+    no_background_edits = 1000
+    monkeypatch.setattr(conversation, "PROGRESS_EDIT_SECONDS", no_background_edits)
     reporter = Reporter([channel], "a calculator", pid=4242)
     reporter.update()
-    assert len(channel.texts("send")) == 2  # one message per chat
+    one_per_chat = len(chats)
+    assert len(channel.texts("send")) == one_per_chat
     home_store.put("running", "4242", snapshot(step="spec", doing=Tracker.DOING_AND_DONE["spec"][0]))
     reporter.refresh()
     assert "📝 Writing the spec" in channel.texts()[-1] and channel.log[-1][0] == "edit"
     edits = len(channel.log)
-    reporter.refresh()  # unchanged, and its clock not due: no edit
+    reporter.refresh()
     assert len(channel.log) == edits
     reporter.finish(snapshot(ended={"status": "done", "headline": "Done.", "details": [], "next": []}))
     assert reporter.ended and "✅ **Done.**" in channel.texts()[-1]
@@ -498,7 +504,7 @@ def calls_of(script):
 @pytest.mark.spec("CNV-15")
 def test_desk_answers_commands(desk):
     desk, channel, _ = desk
-    assert desk.talk.commands == "task WHAT; status"  # the chat's prompt names tinker help's commands
+    assert desk.talk.commands == "task WHAT; status"
     replies = {text: desk.answer(Message("1", text), channel) for text in
                ("task", "status", "stop", "stop #9", "resume", "resume #9", "resume abc123", "channel add", "models",
                 "/Runs")}
@@ -532,7 +538,7 @@ def test_a_task_runs_as_its_own_tinker_and_its_plan_waits(desk, home_store):
     assert desk.waiting_plan["run"] == "abc123" and desk.waiting_plan["stage"] == "spec" and desk.waiting_plan["new"]
     assert desk.waiting_plan["spec"].startswith("📋 **Plan for calc** · run `abc123`")
     assert desk.status().startswith("🙋 **Tinker** · calc: a calculator waits for you")
-    assert home_store.items("running") == {}  # the task's tracker is read last, then removed
+    assert home_store.items("running") == {}
 
 
 @pytest.mark.spec("CNV-16")
@@ -585,11 +591,14 @@ def test_a_command_sent_alone_asks_for_its_words(desk, monkeypatch):
     assert answered == [] and channel.texts()[-1].startswith("✍️ **fix** · fix a bug")
     say(desk, channel, "typing 2/0 crashes")
     say(desk, channel, "ask")
-    say(desk, channel, "help me")  # a reply that starts with a command word is still the words
+    starts_with_a_command_word = "help me"
+    say(desk, channel, starts_with_a_command_word)
     say(desk, channel, "/read")
-    say(desk, channel, "read /tmp/book.epub")  # a file sent to read
+    a_file_to_read = "read /tmp/book.epub"
+    say(desk, channel, a_file_to_read)
     say(desk, channel, "/teach")
-    say(desk, channel, "/status")  # a command of its own: the words are no longer waited for
+    a_command_of_its_own = "/status"
+    say(desk, channel, a_command_of_its_own)
     say(desk, channel, "status")
     assert answered == ["fix typing 2/0 crashes", "ask help me", "read /tmp/book.epub", "/status", "status"]
     assert desk.commands_wanting_words == {}
@@ -618,7 +627,8 @@ def test_a_glance_goes_soon_and_history_shows_things_again(desk, monkeypatch):
     say(desk, channel, "confirm")
     wait_until(lambda: len(channel.texts()) > shown)
     assert channel.texts()[-1].startswith("🧹 **clear history: done, and the chat:** 3 messages taken out")
-    assert Ledger.page(1) == ([], 1)  # nothing is left, not even what clearing it said
+    nothing_left = ([], 1)
+    assert Ledger.page(1) == nothing_left
 
 @pytest.mark.spec("CNV-17")
 def test_follow_reads_the_tasks_tracker(tmp_path, home_store):
@@ -664,7 +674,8 @@ def test_built_project(tmp_path):
     built(tmp_path, "calc", "aaa111", "x", updated="2026-10-01 10:00")
     built(tmp_path, "notes", "bbb222", "x", updated="2026-10-02 10:00")
     built(tmp_path, "todo", "ccc333", "x", status="blocked", updated="2026-10-03 10:00")
-    assert built_project("")["id"] == "bbb222"  # the one built last
+    last_built = "bbb222"
+    assert built_project("")["id"] == last_built
     assert built_project("calc")["id"] == "aaa111" and built_project("ccc333")["id"] == "ccc333"
     assert built_project("ccc") is None and built_project("nothing") is None
 
@@ -706,7 +717,8 @@ def test_run_a_built_project(desk, tmp_path):
     final = channel.texts()[-1]
     assert final.startswith("✅ **calc** `") and "add 'two words'` · _exit 0_" in final
     assert "_input:_ `hello there`" in final and "args: ['add', 'two words']" in final and "input: hello there" in final
-    desk.run_app(channel, "1", ["5 + 3"])  # no project named: the one built last, every word an argument
+    no_project_named = ["5 + 3"]
+    desk.run_app(channel, "1", no_project_named)
     assert "args: ['5', '+', '3']" in channel.texts()[-1]
 
 
@@ -720,7 +732,8 @@ def test_run_with_nothing_to_run(desk, tmp_path):
     assert channel.texts()[-1].startswith("🤷 **lib has no run command:**")
     desk.run_app(channel, "1", ["@nothing 1 2"])
     assert channel.texts()[-1].startswith("🤷 **No project @nothing:**")
-    desk.run_app(channel, "1", ["lib 1 2"])  # a word that is a folder's name is an argument, not a project
+    a_folders_name_as_an_argument = ["lib 1 2"]
+    desk.run_app(channel, "1", a_folders_name_as_an_argument)
     assert "lib" in channel.texts()[-1] and "has no run command" in channel.texts()[-1]
 
 
@@ -746,17 +759,20 @@ def test_desk_listens_until_the_chat_ends_it(desk):
 
 @pytest.mark.spec("CNV-21")
 def test_the_status_is_sent_anew_as_tinker_starts_and_ends(desk, home_store):
-    home_store.put("listening", "bot", {"1": 55})
-    channel = Listening("bot", inbox=[Message("1", "exit", id=1), Message("1", "confirm", id=2)])
+    status_before = 55
+    home_store.put("listening", "bot", {"1": status_before})
+    exit_said, confirm_said = Message("1", "exit", id=1), Message("1", "confirm", id=2)
+    channel = Listening("bot", inbox=[exit_said, confirm_said])
     collected = []
     channel.collect = lambda: collected.append(True)
     Desk([channel], Path.cwd()).run()
+    first_status, the_question_to_stop, last_status = 101, 102, 103
     status = [(kind, sent) for kind, _, sent, text in channel.log if "**Tinker** ·" in text]
-    assert status == [("send", 101), ("send", 103)]  # 102: the question to stop
+    assert status == [("send", first_status), ("send", last_status)]
     deleted = {sent for kind, _, sent, _ in channel.log if kind == "delete"}
-    assert deleted == {55, 101, 1, 2, 102}  # the statuses before, the person's exit and confirm, the question
+    assert deleted == {status_before, first_status, exit_said.id, confirm_said.id, the_question_to_stop}
     assert not any("Stopping" in text for text in channel.texts())
-    assert home_store.get("listening", "bot") == {"1": 103} and collected
+    assert home_store.get("listening", "bot") == {"1": last_status} and collected
     channel.claimed.close()
 
 
@@ -770,7 +786,7 @@ def test_every_status_is_sent_anew_the_one_before_taken_out(desk):
     listening.say_status("🟢 **Tinker** · idle: send a task")
     log = [(kind, sent) for kind, _, sent, _ in channel.log]
     assert log[0] == ("send", 101) and "edit" not in {kind for kind, _ in log}
-    assert sorted(log[1:3]) == [("delete", 101), ("send", 102)]  # the one before goes meanwhile
+    assert sorted(log[1:3]) == [("delete", 101), ("send", 102)]
     assert sorted(log[3:]) == [("delete", 102), ("send", 103)]
 
 
@@ -890,8 +906,9 @@ def test_start_is_answered_with_a_welcome(desk):
     for section in ("🔨 **Build something**", "📂 **Your projects**", "💬 **Ask me anything**", "⏳ **While I work**"):
         assert section in text
     assert "`task a calculator in Python`" in text and "normal chat" in text and "`help`" in text
-    assert calls_of(script) == ["help"] and desk.last_task is None  # no task, no chat
-    say(desk, channel, "/start abcdef")  # a start link with a payload is a start too
+    assert calls_of(script) == ["help"] and desk.last_task is None
+    a_start_link_with_a_payload = "/start abcdef"
+    say(desk, channel, a_start_link_with_a_payload)
     assert channel.texts()[-1] == welcome()
 
 
