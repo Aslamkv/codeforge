@@ -310,11 +310,16 @@ def read_plan(data, count, preferences=True, readings=False):
             "changes": read_changes(data.get("changes"), len(claims), count)}
     if not claims:
         raise ValueError("no claims")
-    if any(not claim["preference"] for claim in claims) and not (plan["commands"] or plan["searches"] or readings):
+    if states_facts(claims) and not (plan["commands"] or plan["searches"] or readings):
         raise ValueError("no command or web search checks the facts")
     if not plan["changes"]:
         raise ValueError("no change: none rests on a claim and retires, replaces or keeps something")
     return plan
+
+
+def states_facts(claims):
+    """Whether any claim is a fact (the rest are the person's preferences, which need no check)."""
+    return any(not claim["preference"] for claim in claims)
 
 
 def read_claims(given):
@@ -341,7 +346,7 @@ def read_changes(given, claims, count):
                 "fact": read_fact(change.get("fact"), count)}
         if read["fact"]:
             read["retire"] = sorted(set(read["retire"]) | {read["fact"]["about"]})
-        if not read["claims"] or not (read["retire"] or read["toolchain"] or read["lesson"]):
+        if not changes_something(read):
             continue
         twice = keys & set(read["toolchain"])
         if twice:
@@ -350,6 +355,11 @@ def read_changes(given, claims, count):
         keys |= set(read["toolchain"])
         changes.append(read)
     return changes
+
+
+def changes_something(change):
+    """Whether a change rests on a claim and retires, replaces or keeps something."""
+    return change["claims"] and (change["retire"] or change["toolchain"] or change["lesson"])
 
 
 def numbers(given, highest):

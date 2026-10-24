@@ -411,11 +411,16 @@ class Workspace:
         """The edits, but one that overlaps an earlier one."""
         taken = []
         for first, last, new in edits:
-            if any(not (last < taken_first or first > taken_last) for taken_first, taken_last, _ in taken):
+            if any(Workspace.overlap(first, last, taken_first, taken_last) for taken_first, taken_last, _ in taken):
                 notes.append(f"{path}: lines {first}-{last} overlap an earlier LINES block; kept the earlier one")
             else:
                 taken.append((first, last, new))
         return taken
+
+    @staticmethod
+    def overlap(first, last, other_first, other_last):
+        """Whether two ranges of lines share a line."""
+        return not (last < other_first or first > other_last)
 
     @staticmethod
     def edited(lines, edits):
@@ -699,9 +704,14 @@ class TestRef:
     def opening_lines(before_first_test):
         """The file's first lines, without the blank lines and decorators of its first test."""
         head = before_first_test.splitlines()[:15]
-        while head and (not head[-1].strip() or head[-1].strip().startswith(("@", "#[", "["))):
+        while head and TestRef.blank_or_decorator(head[-1]):
             head.pop()
         return head
+
+    @staticmethod
+    def blank_or_decorator(line):
+        """Whether a line is blank or a decorator (@ in Python, #[ in Rust, [ in C#)."""
+        return not line.strip() or line.strip().startswith(("@", "#[", "["))
 
     def remove(self, workspace, names):
         """The test's own lines cut from its file (a test of a withdrawn criterion); True if it was there."""

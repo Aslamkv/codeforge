@@ -209,7 +209,7 @@ class CodeWriter(Phase):
         """The cycle's files of a wanted kind not written yet, in design order (never .env)."""
         done = cycle.setdefault("code_done", [])
         return [path for path in cycle["files"]
-                if path not in done and path != ENV_FILE and wanted(self.project.files.get(path, {}).get("kind"))]
+                if path not in done and path != ENV_FILE and wanted(self.project.kind_of(path))]
 
     def write_configs(self, cycle, paths):
         """Small files (dependencies, settings, tool settings): one call for all of them."""
@@ -363,7 +363,7 @@ class CodeWriter(Phase):
         """A code file must refer to each file its contract says it uses (by name or stem). One
         change call per file that does not."""
         for path in cycle["files"]:
-            if self.project.files.get(path, {}).get("kind") != "code" or not self.workspace.exists(path):
+            if self.project.kind_of(path) != "code" or not self.workspace.exists(path):
                 continue
             problems = self.wiring_problems(path)
             if problems:
@@ -373,7 +373,7 @@ class CodeWriter(Phase):
         text = self.workspace.read(path)
         return [f"it must use {used} (refer to it by name), as its contract says"
                 for used in self.project.files[path].get("uses", [])
-                if self.project.files.get(used, {}).get("kind") in ("code", "template")
+                if self.project.kind_of(used) in ("code", "template")
                 and Path(used).name not in text and Path(used).stem not in text]
 
     def rewire(self, path, problems):
@@ -800,7 +800,7 @@ class FixAttempt(Worker):
             if not exists:  # the design is settled: a new file now would shadow or duplicate a planned one
                 return None if self.approach == "review" and Path(path).parent == Path(self.ref.file).parent \
                     else "no new files now; change the files shown"
-            if self.project.files.get(path, {}).get("kind") == "test" or path == self.ref.file:
+            if self.project.kind_of(path) == "test" or path == self.ref.file:
                 return None if self.approach == "review" and path in view.shown else TESTS_LOCKED
             return None if path in view.shown else "only the files shown may change"
         return check
@@ -936,7 +936,7 @@ class BuildFix(Worker):
         def check(path, exists):
             if not exists or path not in view.shown:
                 return "only the files shown may change now"
-            return TESTS_LOCKED if self.project.files.get(path, {}).get("kind") == "test" else None
+            return TESTS_LOCKED if self.project.kind_of(path) == "test" else None
         return check
 
     def said(self, change, cause):
@@ -966,7 +966,7 @@ class BugReproducer(Phase):
         note = ""
         for _ in range(2):
             step, state, output = self.write_test(cycle, note)
-            if step and state == "fails" and not Toolchain.ran_no_test(output):
+            if self.reproduced(step, state, output):
                 say.done(f"Reproduced: {first_line(step['behaviour'], 140)}")
                 with say.section():
                     say.info(f"It fails now: {Output.key_line(output)}", "🐞")
@@ -979,6 +979,11 @@ class BugReproducer(Phase):
                                      f"Describe what you do, what happens and what should happen instead, then: "
                                      f"tinker fix {self.project.run['id']} \"...\"")
         return False
+
+    @staticmethod
+    def reproduced(step, state, output):
+        """Whether the test written shows the bug: it ran, and it fails."""
+        return step and state == "fails" and not Toolchain.ran_no_test(output)
 
     def write_test(self, cycle, note):
         """(step, state, output): the test the model wrote, evaluated; (None, "missing", why) when
@@ -1200,10 +1205,16 @@ class TestTool(Worker):
         if not self.session.toolchain.lint:
             return "ok", ""
         code, output = self.workspace.run(self.session.toolchain.shell(self.session.toolchain.lint), quiet=True)
-        if code in (126, 127) or (code != 0 and self.MISSING_TOOL_RE.search(output) and not self.reaches_code(output)):
+        if self.linter_missing(code, output):
             say.fail(f"$ {self.session.toolchain.lint}  [the linter does not run: a tooling problem]")
             return "lint", f"$ {self.session.toolchain.lint}\nthe linter does not run (exit code {code}):\n{output}"
         return "ok", ""
+
+    def linter_missing(self, code, output):
+        """Whether the linter itself did not run: the shell found no such command (126, 127), or it failed
+        naming a missing tool before it reached the code."""
+        return code in (126, 127) or (code != 0 and self.MISSING_TOOL_RE.search(output)
+                                      and not self.reaches_code(output))
 
     def remember_what_worked(self, repair):
         """The repair that made the tools work, for the next projects (the toolchain itself is kept
@@ -1239,7 +1250,7 @@ class ToolchainRepair(Worker):
         if replay.get("toolchain"):
             self.project.toolchain = self.session.toolchain.merged(replay["toolchain"])
         for path, content in (replay.get("files") or {}).items():
-            if not self.workspace.exists(path) and self.project.files.get(path, {}).get("kind") in (None, "config"):
+            if not self.workspace.exists(path) and self.project.kind_of(path) in (None, "config"):
                 self.workspace.write(path, content)
                 self.project.register([path], "config", "added by a learned toolchain fix")
         self.session.save()
@@ -1290,6 +1301,6 @@ class ToolchainRepair(Worker):
         made to get going belongs to this project: only its config files are kept)."""
         replayable = set(change.files) == set(change.created)
         files = {path: self.workspace.read(path) for path in change.created
-                 if self.project.files.get(path, {}).get("kind") == "config"}
+                 if self.project.kind_of(path) == "config"}
         return {"failure": failure, "cause": reply.cause() or "?",
                 "replay": {"toolchain": commands, "files": files} if replayable else None}

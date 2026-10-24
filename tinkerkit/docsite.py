@@ -85,9 +85,14 @@ class DocCache:
         kept = Home.store().get("sources", f"{slug}@{key}")
         if not isinstance(kept, dict) or not kept.get("pages"):
             return None
-        if key == "latest" and DocCache.age_days(kept.get("kept", "")) > float(Config.get("docs_latest_days")):
+        if key == "latest" and DocCache.stale(kept):
             return None
         return [Page.of_dict(page) for page in kept["pages"]]
+
+    @staticmethod
+    def stale(kept):
+        """Whether pages kept are older than the docs_latest_days setting allows."""
+        return DocCache.age_days(kept.get("kept", "")) > float(Config.get("docs_latest_days"))
 
     @staticmethod
     def put(slug, key, root, pages):

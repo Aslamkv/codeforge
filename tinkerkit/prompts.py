@@ -211,11 +211,16 @@ class Reply:
     def unfenced(cls, lines):
         """The lines inside one fence pair around them all (a fence inside is content: docs)."""
         filled = [index for index, line in enumerate(lines) if line.strip()]
-        fence_at = lambda index: cls.FENCE_RE.fullmatch(lines[index])
-        if len(filled) >= 2 and fence_at(filled[0]) and fence_at(filled[-1]) \
-                and not any(fence_at(index) for index in filled[1:-1]):
+        if cls.one_fence_around(lines, filled):
             return lines[filled[0] + 1:filled[-1]]
         return lines
+
+    @classmethod
+    def one_fence_around(cls, lines, filled):
+        """Whether the filled lines open and close with a fence, with no fence between them."""
+        fence_at = lambda index: cls.FENCE_RE.fullmatch(lines[index])
+        return len(filled) >= 2 and fence_at(filled[0]) and fence_at(filled[-1]) \
+            and not any(fence_at(index) for index in filled[1:-1])
 
     def as_file(self, path):
         """The reply as a FILE block for path when it has none but one fenced code block (a model

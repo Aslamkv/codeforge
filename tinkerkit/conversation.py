@@ -381,10 +381,14 @@ class Desk:
         or the very command waiting, as a file sent to read is) takes its place instead."""
         wanted = self.wanting.pop((channel.name, message.chat), None)
         command = command_of(message.text)
-        if not wanted or (command and (message.text.startswith("/") or len(message.text.split()) == 1
-                                       or command == wanted)):
+        if not wanted or self.command_of_its_own(message, command, wanted):
             return message
         return Message(message.chat, f"{wanted} {message.text}", message.sender, message.id)
+
+    @staticmethod
+    def command_of_its_own(message, command, wanted):
+        """Whether a message is a command in its own right: sent with its /, alone, or the very command waiting."""
+        return command and (message.text.startswith("/") or len(message.text.split()) == 1 or command == wanted)
 
     def asked_with_words(self, channel, message, command):
         """command WHAT: answered in a thread (alone, how to say it)."""
@@ -579,7 +583,7 @@ class Desk:
         name, rest = refs(words[1:])
         if command == "amend" and not rest:
             return USAGE["amend"]
-        if command == "confirm" and not name and waiting.get("stage") == "spec" and waiting.get("new"):
+        if self.confirms_a_new_project(command, name, waiting):
             return self.ask_folder_name(waiting)
         target = name or waiting.get("run")
         if not target:
@@ -594,6 +598,11 @@ class Desk:
         change = " ".join(rest)
         return self.on_task(waiting if mine else {}, self.start_task(
             ["amend", f"@{target}", change], folder, title, md(t"✏️ **Changing the plan:** {change}")))
+
+    @staticmethod
+    def confirms_a_new_project(command, name, waiting):
+        """Whether confirm is said to the plan of a new project that waits here (its folder's name comes first)."""
+        return command == "confirm" and not name and waiting.get("stage") == "spec" and waiting.get("new")
 
     def ask_folder_name(self, waiting):
         """A new project's plan confirmed: its folder's name is asked once, before it is built."""
@@ -894,9 +903,14 @@ def command_of(text, commands=None):
     first = command_word(words[0]) if words else ""
     if first not in (commands or Desk.COMMANDS):
         return ""
-    if len(words) == 1 or first in ANY_WORDS or (first in ONE_WORD and len(words) == 2):
+    if takes_these_words(first, words):
         return first
     return ""
+
+
+def takes_these_words(first, words):
+    """Whether the command takes the words after it: none, any (ANY_WORDS), or one (ONE_WORD)."""
+    return len(words) == 1 or first in ANY_WORDS or (first in ONE_WORD and len(words) == 2)
 
 
 def command_words(text):
@@ -1414,9 +1428,14 @@ class Reporter:
 
     def printed(self, line):
         """A line a command printed: shown as its latest, when the command keeps no tracker."""
-        if self.tracked() is None and line.strip() and not line.lstrip().startswith("..."):
+        if self.tracked() is None and self.says_something(line):
             with self.lock:
                 self.progress.snapshot["latest"] = line.strip()[:300]
+
+    @staticmethod
+    def says_something(line):
+        """Whether a printed line says something: not blank, and not a "..." line of progress."""
+        return line.strip() and not line.lstrip().startswith("...")
 
     def finish(self, snapshot=None):
         """The run ended: its last tracker (given, or read now) shown, with its ending unless quiet."""

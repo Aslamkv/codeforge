@@ -253,7 +253,7 @@ class Model:
     def recover(self, exc, label, tries):
         """What to change before trying a failed request again; re-raises when nothing helps."""
         think = tries.think
-        if self.building and think == self.build_think != self.think and "think" in str(exc).lower():
+        if self.build_thinking_rejected(exc, think):
             self.note(f"{label}: {self.name} rejected think={think!r} for building; using {self.think!r} as for planning")
             self.build_think = None
             tries.think = self.think
@@ -267,14 +267,18 @@ class Model:
                       f"{self.name} stopped responding; reloading it and trying again")
             Ollama.unload(self.name)
             tries.stalls += 1
-        elif think not in (None, True, False) and "think" in str(exc).lower():
+        elif think not in (None, True, False) and exc.about_thinking:
             self.note(f"{label}: {self.name} rejected think={think!r}; using think=true")
             self.think = tries.think = True
-        elif think is not None and "think" in str(exc).lower():
+        elif think is not None and exc.about_thinking:
             self.note(f"{label}: {self.name} rejected the think setting; retrying without it")
             self.think, self.think_rejected, tries.think = None, True, None
         else:
             raise exc
+
+    def build_thinking_rejected(self, exc, think):
+        """Whether the model refused the think setting kept for building, which differs from planning's."""
+        return self.building and think == self.build_think != self.think and exc.about_thinking
 
     def prompt_tokens(self, system, user):
         """The most tokens system + user can be (the lowest chars per token seen)."""
@@ -603,7 +607,7 @@ class Calibrator:
                 data = Ollama.chat(self.name, [{"role": "user", "content": content + "\nSay OK."}], 0,
                                    {"num_ctx": 4096, "num_predict": 64}, think)
             except OllamaError as exc:
-                if think is not None and "think" in str(exc).lower():
+                if think is not None and exc.about_thinking:
                     continue
                 raise SystemExit(f"{self.name} does not run: {exc}")
             self.measure_chat(content, data)
@@ -930,9 +934,13 @@ class Stream:
 
     def complete(self, piece):
         """Checked when a piece may end a block or an object (or every 40 pieces)."""
-        if not self.done_when or not (">" in piece or "}" in piece or self.written % 40 == 0):
+        if not self.done_when or not self.may_end_here(piece):
             return False
         return self.done_when(self.content)
+
+    def may_end_here(self, piece):
+        """Whether the piece may close a block or an object (or it is time for the every-40-pieces look)."""
+        return ">" in piece or "}" in piece or self.written % 40 == 0
 
     def looping(self):
         """Whether the last LOOP_LINES finished lines of the reply are one line, written again and again."""
@@ -973,3 +981,8 @@ class OllamaError(Exception):
         self.oom, self.stalled, self.crashed = oom, stalled, crashed
         self.in_reply, self.partial = in_reply, partial
         self.streamed = streamed  # tokens the model had written (thinking included) when it failed
+
+    @property
+    def about_thinking(self):
+        """Whether Ollama refused the think setting (its message names it)."""
+        return "think" in str(self).lower()

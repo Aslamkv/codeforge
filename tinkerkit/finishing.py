@@ -359,7 +359,7 @@ class ReadmeWriter(Phase):
             say.skip(f"README fix: the prompt does not fit ({exc})")
             return ""
         change = self.workspace.apply(reply, lambda path, exists: None if exists and path in view.shown
-                                      and self.project.files.get(path, {}).get("kind") != "test"
+                                      and self.project.kind_of(path) != "test"
                                       else "only the files shown change", view.windows)
         return self.kept(change, reply, passing)
 
@@ -403,7 +403,7 @@ class FinalReview(Phase):
 
     def run(self, cycle):
         problem, output = self.problem()
-        if problem and "passed once and failed" not in problem and ToolchainRepair(self.session).run(output, set()):
+        if problem and not self.by_chance(problem) and ToolchainRepair(self.session).run(output, set()):
             problem, output = self.problem()
         if problem:
             self.session.review_problem = problem
@@ -413,6 +413,11 @@ class FinalReview(Phase):
         say.done(f"Set up afresh; `{self.session.toolchain.test_all}` passes; "
                  f"{green}/{total} spec points tested and passing")
         return True
+
+    @staticmethod
+    def by_chance(problem):
+        """Whether the problem is a test that passes by chance (no repair of the tools fixes that)."""
+        return "passed once and failed" in problem
 
     def problem(self):
         """(what is wrong, its output), or ("", "") when the project passes the review."""

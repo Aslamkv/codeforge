@@ -416,8 +416,13 @@ class Exercises:
     def release(exercise):
         exercise["left"] = now_text()
         Exercises.save(exercise)
-        if (Home.store().get("activity", "exercise") or {}).get("pid") == os.getpid():
+        if Exercises.held_by_this_process():
             Home.store().delete("activity", "exercise")
+
+    @staticmethod
+    def held_by_this_process():
+        """Whether the exercise that runs is this process's."""
+        return (Home.store().get("activity", "exercise") or {}).get("pid") == os.getpid()
 
 
 def already_running(active):

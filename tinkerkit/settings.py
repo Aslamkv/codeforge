@@ -486,13 +486,20 @@ class Config:
     def check_build_think(cls):
         for key in ("build_think", "learn_think"):
             think = cls.get(key)
-            if think not in ("high", "medium", "low", True, False, None) or think in (0, 1) and not isinstance(think, bool):
+            if not cls.is_think_setting(think):
                 raise SystemExit(f'{key} must be "high", "medium", "low", true, false or null; it is {think!r}')
+
+    @staticmethod
+    def is_think_setting(think):
+        """Whether think is one Ollama takes: a level, true, false or null (0 and 1 equal false and true, but are
+        not them)."""
+        return think in ("high", "medium", "low", True, False, None) and not (think in (0, 1)
+                                                                             and not isinstance(think, bool))
 
     @classmethod
     def check_test_timeout(cls):
         timeout = cls.get("test_timeout")
-        if not is_number(timeout) or not isinstance(timeout, int) or timeout < 1:
+        if not number_from(timeout, 1):
             raise SystemExit(f"test_timeout must be a whole number of seconds, 1 or more; it is {timeout!r}")
 
     @classmethod
@@ -517,6 +524,11 @@ def confirmed(question, command, yes=False):
 
 def is_number(value):
     return isinstance(value, (int, float)) and not isinstance(value, bool)
+
+
+def number_from(value, least, whole=True):
+    """Whether a setting is a number (a whole one, when whole) of least or more."""
+    return is_number(value) and (not whole or isinstance(value, int)) and not value < least
 
 
 class Store:

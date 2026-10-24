@@ -250,7 +250,7 @@ class TelegramChannel(Channel):
         for update in updates:
             self.offset = update["update_id"] + 1
             message = update.get("message") or {}
-            if message.get("document") and str(message["chat"]["id"]) in map(str, self.allowed):
+            if self.book_sent(message):
                 message = self.book_in(message)
             if message.get("text"):
                 messages.append(self.message_of(message))
@@ -258,6 +258,10 @@ class TelegramChannel(Channel):
             if message.get("message_id"):
                 self.seen(str(message["chat"]["id"]), message["message_id"])
         return messages
+
+    def book_sent(self, message):
+        """Whether a message is a file to read, sent by a chat Tinker serves."""
+        return message.get("document") and str(message["chat"]["id"]) in map(str, self.allowed)
 
     @staticmethod
     def message_of(message):
@@ -365,9 +369,14 @@ class TelegramChannel(Channel):
         try:
             return self.call(method, chat_id=chat, text=Markup.html(text)[:4096], parse_mode="HTML", **fields)
         except ChannelError as exc:
-            if "parse" not in str(exc) and "entit" not in str(exc):
+            if not self.html_refused(exc):
                 raise
             return self.call(method, chat_id=chat, text=Markup.plain(text)[:4096], **fields)
+
+    @staticmethod
+    def html_refused(exc):
+        """Whether Telegram refused the message's HTML (it could not parse its entities)."""
+        return "parse" in str(exc) or "entit" in str(exc)
 
     def send_file(self, chat, path, caption):
         """The file sent as a document, caption (Markup) under it; a failure sends the caption alone."""

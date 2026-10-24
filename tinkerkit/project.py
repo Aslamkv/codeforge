@@ -41,7 +41,7 @@ class RunChecks:
         text, its spec file when it is in the folder, which stays); its folder. No run: an error."""
         workdir = Runs.workdir("", args.workdir)
         run = saved(workdir, "run", "record")
-        if not isinstance(run, dict) or not str(run.get("task") or "").strip():
+        if not RunChecks.has_task(run):
             raise SystemExit(f"{workdir} has no task to restart: start one with tinker task \"...\"")
         args.task = run["task"]
         args.spec_text = saved(workdir, "texts", "spec_text", "")
@@ -49,6 +49,11 @@ class RunChecks:
         named = Path(run["spec"]) if run.get("spec") else None
         args.spec = str(named) if named and named.is_file() else None
         return workdir
+
+    @staticmethod
+    def has_task(run):
+        """Whether a saved run holds a task to build again."""
+        return isinstance(run, dict) and str(run.get("task") or "").strip()
 
     @staticmethod
     def new_run(args):
@@ -360,6 +365,14 @@ class Project:
         """Every project file: path -> {kind, role, contract, uses}."""
         return self.spec.setdefault("files", {})
 
+    def has_adapters(self):
+        """Whether the design puts an external service behind an adapter (its tests use sample data)."""
+        return any(info.get("role", "").lower().startswith("adapter") for info in self.files.values())
+
+    def kind_of(self, path):
+        """The kind of file the design says path is (None when the design has no such file)."""
+        return self.files.get(path, {}).get("kind")
+
     def paths(self, *kinds):
         return [path for path, info in self.files.items() if not kinds or info.get("kind") in kinds]
 
@@ -387,7 +400,7 @@ class Project:
         """The criteria (of steps) a file must meet: those whose tests call it directly, or whose text
         names it ("playlist.songs", "app.py"); a template's are those of the files that render it.
         A file no test reaches (an adapter) has none: its contract says what it does."""
-        template = self.files.get(path, {}).get("kind") == "template"
+        template = self.kind_of(path) == "template"
         direct = [step for step in steps if self.reached_by(path, step, template)]
         if not template:
             return direct

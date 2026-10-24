@@ -353,9 +353,14 @@ class Cli:
             return number
         state = words[0] if words and words[0] in STATES else None
         rest = words[1:] if state else words
-        if len(rest) > 1 or (rest and not (rest[0].isdigit() and int(rest[0]) >= 1)):
+        if len(rest) > 1 or (rest and not Cli.is_page(rest[0])):
             parser.error("use tinker jobs [running|paused|stopped|finished|archived] [PAGE], e.g. tinker jobs finished 2")
         return state, int(rest[0]) if rest else 1
+
+    @staticmethod
+    def is_page(word):
+        """Whether a word is a page number (1 or more)."""
+        return word.isdigit() and int(word) >= 1
 
     @staticmethod
     def learning(words, parser):
@@ -402,11 +407,16 @@ class Cli:
         """The task's words, quoted or not (an older spec file given last as a word is still one)."""
         words = list(args.task)
         last = Path(words[-1])
-        if len(words) > 1 and not args.spec and last.suffix in (".md", ".txt") and last.is_file():
+        if len(words) > 1 and not args.spec and Cli.is_spec_file(last):
             args.spec = words.pop()
         args.task = " ".join(words).strip()
         if not args.task:
             parser.error("give a task, e.g. tinker task a calculator in Python")
+
+    @staticmethod
+    def is_spec_file(path):
+        """Whether a word names a spec file here (Markdown or text)."""
+        return path.suffix in (".md", ".txt") and path.is_file()
 
     @staticmethod
     def check_request(kind, args, parser):
@@ -1333,7 +1343,7 @@ class ProjectRun:
         if (project.workdir / ENV_EXAMPLE).is_file():
             say.info(f"Settings: {ENV_FILE} (defaults in {ENV_EXAMPLE}).", "⚙️")
             self.ending["details"].append(("Settings", f"{ENV_FILE} (defaults in {ENV_EXAMPLE})"))
-        if any(info.get("role", "").lower().startswith("adapter") for info in project.files.values()):
+        if project.has_adapters():
             say.tip("The tests use sample data instead of external services: try those by hand with real settings.")
         say.tip(f'Add a feature with: tinker add @{run_id} "..."; fix a bug with: tinker fix @{run_id} "..."')
         self.ending["next"] = [("➕ Add a feature", f'tinker add @{run_id} "..."'),
@@ -1555,9 +1565,16 @@ class CycleRunner:
         """The cycle on to its next phase, saved; past the phase its plan waits after, it waits for the person
         to confirm it (tinker confirm) or change it (tinker amend), when its run was given --confirm."""
         cycle["phase"] = phases[phases.index(phase) + 1]
-        if phase == CONFIRM_AFTER[cycle.get("kind", "feature")] and cycle.get("confirm") and not cycle.get("confirmed"):
+        if self.waits_for_confirm(phase, cycle):
             cycle["awaiting"] = True
         self.session.save()
+
+    @staticmethod
+    def waits_for_confirm(phase, cycle):
+        """Whether the cycle's plan, once past this phase, waits for the person: its run was given --confirm,
+        and it is not confirmed yet."""
+        return (phase == CONFIRM_AFTER[cycle.get("kind", "feature")] and cycle.get("confirm")
+                and not cycle.get("confirmed"))
 
     def disprove(self, cycle, phase):
         """The knowledge used in a step that failed is discarded (it did not hold)."""

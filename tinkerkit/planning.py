@@ -356,11 +356,16 @@ class SpecWriter(Phase):
         for criterion in criteria:
             ref = TestRef(criterion["test"])
             ref = TestRef(f"{self.listed_test_file(ref.file, listed_tests)}::{ref.name}")
-            if "::" in ref.file or not Path(ref.file).suffix or ref.file in listed_code:
+            if self.outside_a_test_file(ref, listed_code):
                 raise ValueError(f"test {criterion['test']} is not in a test file of its own: write it as "
                                  f"<test file path>::<test name> (e.g. tests/test_app.py::test_add), and put the "
                                  f"code it calls where that test file can reach it")
             criterion["test"] = str(ref)
+
+    @staticmethod
+    def outside_a_test_file(ref, listed_code):
+        """Whether a test is not in a test file of its own: no file named, no file type, or a code file."""
+        return "::" in ref.file or not Path(ref.file).suffix or ref.file in listed_code
 
     def listed_test_file(self, file, listed_tests):
         """The test file a criterion names, as the plan lists it: a test named the language's own
@@ -401,10 +406,14 @@ class SpecWriter(Phase):
         has it), or none."""
         entry = str(Path(str(given or "").strip())) if str(given or "").strip() else ""
         named = [path for path in list(files) + list(self.project.files) if Path(path).name == entry]
-        entry = named[0] if entry not in files and entry not in self.project.files and len(set(named)) == 1 else entry
-        if entry and entry not in files and entry not in self.project.files:
+        entry = named[0] if self.unplanned(entry, files) and len(set(named)) == 1 else entry
+        if entry and self.unplanned(entry, files):
             raise ValueError(f"entry {entry} is not one of the files")
         return entry
+
+    def unplanned(self, path, files):
+        """Whether a file is neither planned now nor in the design."""
+        return path not in files and path not in self.project.files
 
     def send_back_unrun_program(self, criteria, entry, toolchain):
         """A program a person runs is checked as it is run: a plan with no criterion that runs it is sent back,
@@ -462,7 +471,7 @@ class SpecWriter(Phase):
     def keep_files(self, cycle, files, entry):
         """The planned files go into the design (a file planned before keeps what it had), in
         build order; a new project gets a README."""
-        if cycle["id"] == "base" and not any(file["kind"] == "docs" for file in files):
+        if cycle["id"] == "base" and not self.has_docs(files):
             files.append({"path": "README.md", "kind": "docs", "role": "how to set up, run and test it",
                           "contract": [], "uses": []})
         paths = {file["path"] for file in files} | set(self.project.files)
@@ -477,6 +486,11 @@ class SpecWriter(Phase):
         if entry or cycle["id"] == "base":
             self.project.spec["entry"] = entry
         cycle["files"] = Designer.order([file for file in files if file["path"] != ENV_FILE])
+
+    @staticmethod
+    def has_docs(files):
+        """Whether one of the files is documentation (a README)."""
+        return any(file["kind"] == "docs" for file in files)
 
     @staticmethod
     def strings(items, limit):
@@ -575,11 +589,16 @@ class Working:
         for chain in cls.CHAIN_RE.finditer(plain):
             parts = [cls.balanced(part) for part in chain.group(0).split("=")]
             worked = [(part, value) for part, value in ((part, cls.value(part)) for part in parts) if value is not None]
-            if len(worked) < 2 or not any(re.search(r"[\d)]\s*[-+*/]\s*[\d(]", expression) for expression, _ in worked):
+            if len(worked) < 2 or not any(cls.does_arithmetic(expression) for expression, _ in worked):
                 continue
             cut_short = plain[chain.end():].lstrip().startswith(("…", "..."))  # 37.777… goes on: not rounded
             found += cls.wrong_parts(worked, cut_short)
         return found
+
+    @staticmethod
+    def does_arithmetic(expression):
+        """Whether an expression works something out: a sign between two numbers (or brackets)."""
+        return re.search(r"[\d)]\s*[-+*/]\s*[\d(]", expression)
 
     @classmethod
     def plain(cls, text):
@@ -683,11 +702,16 @@ class Designer(Phase):
                     and info.get("role", "").strip().lower().startswith("adapter")]
         for step in list(self.project.cycle_criteria(cycle)):
             subject = step["behaviour"].lstrip("`'\" ").lower()
-            if any(subject.startswith((Path(adapter).stem.lower() + ".", Path(adapter).name.lower()))
-                   for adapter in adapters):
+            if self.about_an_adapter(subject, adapters):
                 self.project.criteria.remove(step)
                 say.skip(f"Dropped {step['id']}: it tests an adapter to an external service "
                          f"({first_line(step['behaviour'], 80)})")
+
+    @staticmethod
+    def about_an_adapter(subject, adapters):
+        """Whether a criterion's subject is one of the adapters (named as a module, or by its file)."""
+        return any(subject.startswith((Path(adapter).stem.lower() + ".", Path(adapter).name.lower()))
+                   for adapter in adapters)
 
     @staticmethod
     def layout_file(item, test_files, workspace):
@@ -752,7 +776,7 @@ class InterfaceReviewer(Phase):
     def callees(self, path):
         """The code files it uses (not itself)."""
         uses = self.project.files[path].get("uses", [])
-        return [used for used in uses if used != path and self.project.files.get(used, {}).get("kind") == "code"]
+        return [used for used in uses if used != path and self.project.kind_of(used) == "code"]
 
     def check_round(self, cycle, paths, again):
         """(problems, the files whose contracts changed)."""
@@ -835,7 +859,7 @@ class InterfaceReviewer(Phase):
         """Problems named in a file without a correction: that file's contract is written again."""
         unresolved = {}
         for problem in problems:
-            if problem["file"] not in corrected and self.project.files.get(problem["file"], {}).get("kind") == "code":
+            if problem["file"] not in corrected and self.project.kind_of(problem["file"]) == "code":
                 unresolved.setdefault(problem["file"], []).append(problem["problem"])
         writer, changed = ContractWriter(self.session), set()
         for path, items in unresolved.items():
@@ -888,7 +912,7 @@ class ContractWriter(Worker):
         info = self.project.files[path]
         used = any(path in other.get("uses", []) for name, other in self.project.files.items()
                    if name != path and other.get("kind") in ("code", "template"))
-        renders = any(self.project.files.get(used, {}).get("kind") == "template" for used in info.get("uses", []))
+        renders = any(self.project.kind_of(used) == "template" for used in info.get("uses", []))
         started = bool(self.project.entry_files([path]))  # the program a person starts is never a marker
         if not (used or renders or started) and not self.project.criteria_of(path, self.project.cycle_criteria(cycle)):
             info["marker"] = True
@@ -946,8 +970,8 @@ class ContractWriter(Worker):
                        *self.session.knowledge_parts("design")], criteria[len(taken):]
 
     def base_parts(self, path, info, so_far, problems):
-        uses = [used for used in info.get("uses", []) if self.project.files.get(used, {}).get("kind") == "code"]
-        templates = [used for used in info.get("uses", []) if self.project.files.get(used, {}).get("kind") == "template"]
+        uses = [used for used in info.get("uses", []) if self.project.kind_of(used) == "code"]
+        templates = [used for used in info.get("uses", []) if self.project.kind_of(used) == "template"]
         given = Part("Contracts of the files it uses (use them exactly)", self.project.contracts(uses), bool(uses),
                      exact=True)
         deps = self.project.dependencies(lambda dependency: self.workspace.read(dependency)

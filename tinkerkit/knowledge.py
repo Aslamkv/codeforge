@@ -829,11 +829,15 @@ class Researcher:
 
     def fold(self, original, repeat):
         """A repeat's pages join the original's, and the more detailed text is kept."""
-        if (len(self.numbers(repeat)), len(repeat["text"])) > (len(self.numbers(original)), len(original["text"])):
+        if self.more_detailed(repeat, original):
             original["text"] = repeat["text"]
         for url in Learner.pages_of(repeat):
             if url not in Learner.pages_of(original):
                 original["also"] = original.get("also", []) + [url]
+
+    def more_detailed(self, fact, other):
+        """Whether a fact says more than another: more numbers, else a longer text."""
+        return (len(self.numbers(fact)), len(fact["text"])) > (len(self.numbers(other)), len(other["text"]))
 
     @staticmethod
     def same_claim(a, b, threshold=SAME_CLAIM):
@@ -1280,11 +1284,15 @@ class Embeddings:
         data = Ollama.get_json("/api/embed", {"model": self.name, "input": batch, "keep_alive": 0}, timeout=300,
                                errors=True)
         found = data.get("embeddings") if isinstance(data, dict) else None
-        if isinstance(found, list) and len(found) == len(batch) and all(self.is_vector(vector) for vector in found):
+        if self.one_vector_each(found, batch):
             return found
         self.failed = f"{self.name} gave no embeddings" + (f" ({data['error']})" if isinstance(data, dict)
                                                            and data.get("error") else "")
         return None
+
+    def one_vector_each(self, found, batch):
+        """Whether the model gave one vector for each text of the batch."""
+        return isinstance(found, list) and len(found) == len(batch) and all(self.is_vector(vector) for vector in found)
 
     @staticmethod
     def is_vector(value):

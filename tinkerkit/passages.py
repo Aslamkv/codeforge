@@ -151,7 +151,7 @@ class MainBlocks(html.parser.HTMLParser):
         if self.skipping or self.not_content(tag, attributes):
             self.skipping += 1
             return
-        if (tag in ("main", "article") or attributes.get("role") == "main") and self.main_depth is None:
+        if PageText.opens_main(tag, attributes) and self.main_depth is None:
             self.main_depth = self.depth
         if tag == "a":
             self.links += 1
@@ -193,7 +193,7 @@ class MainBlocks(html.parser.HTMLParser):
         """The block read so far, kept unless it is empty or a paragraph that is mostly links (a heading
         that links to itself is still a heading)."""
         text = "".join(self.pieces).strip("\n") if self.kind == "code" else " ".join("".join(self.pieces).split())
-        if text.strip() and (self.kind != "text" or self.link_chars < LINK_ONLY * len(text)):
+        if text.strip() and (self.kind != "text" or not mostly_links(self.link_chars, text)):
             self.all.append(Block(self.kind, text))
             if self.main_depth is not None and self.main_depth > 0:
                 self.main.append(Block(self.kind, text))
@@ -244,7 +244,7 @@ def text_blocks(text):
     def close(kind="text"):
         paragraph = "\n".join(held).strip("\n") if kind == "code" else " ".join(" ".join(held).split())
         linked = sum(len(link) for link in MARKDOWN_LINK.findall(paragraph))
-        if paragraph.strip() and (kind == "code" or linked < LINK_ONLY * len(paragraph)):
+        if paragraph.strip() and (kind == "code" or not mostly_links(linked, paragraph)):
             blocks.append(Block(kind, paragraph))
         held.clear()
 
@@ -263,6 +263,11 @@ def text_blocks(text):
             held.append(line)
     close("code" if fence else "text")
     return blocks
+
+
+def mostly_links(link_chars, text):
+    """Whether a paragraph is mostly the words of its links (a list of links, not prose)."""
+    return link_chars >= LINK_ONLY * len(text)
 
 
 def shingles(text):
