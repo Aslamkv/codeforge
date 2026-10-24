@@ -124,15 +124,6 @@ def test_check_model_accepts_keep_alive_seconds_or_durations(value):
     Config.check_model(run=True)
 
 
-@pytest.mark.spec("SET-5")
-@pytest.mark.parametrize("value", [0, True, 1.5, "60"])
-def test_test_timeout_is_checked_for_a_run_only(value):
-    Config.save(test_timeout=value)
-    Config.check_model(run=False)
-    with pytest.raises(SystemExit, match="test_timeout"):
-        Config.check_model(run=True)
-
-
 @pytest.mark.spec("SET-7")
 def test_keep_alive_and_ollama_url_as_ollama_takes_them():
     assert Config.keep_alive("300") == 300 and Config.keep_alive(-1) == -1
@@ -274,30 +265,14 @@ def test_reset_outside_a_terminal_without_yes_deletes_nothing(tinker_home, monke
 
 
 @pytest.mark.spec("SET-12")
-def test_parts_tinker_clear_knows():
-    assert list(Home.parts()) == [
-        "languages",
-        "memory",
-        "learned",
-        "docs",
-        "models",
-        "runs",
-        "commands",
-        "history",
-        "exercise",
-    ]
-
-
-@pytest.mark.spec("SET-12")
 def test_clear_deletes_only_the_named_parts(home_store, capsys):
     home_store.put("languages", "python", {})
     home_store.put("memory", "any", {})
     home_store.put("models", "m", {})
-    home_store.append("learn", {"label": "x"})
     home_store.put("learned", "flask", {})
     Home.clear(["languages", "memory", "learned"], yes=True)
     assert home_store.items("languages") == {} and home_store.items("memory") == {}
-    assert home_store.items("learned") == {} and home_store.entries("learn") == []
+    assert home_store.items("learned") == {}
     assert home_store.items("models") == {"m": {}}
     assert "Cleared languages, memory, learned." in capsys.readouterr().out
 

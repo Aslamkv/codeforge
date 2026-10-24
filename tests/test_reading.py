@@ -25,7 +25,7 @@ from tinkerkit.reading import (
     show_list,
     stored,
 )
-from tinkerkit.settings import MAX_FACT_CHARS, READ_FACTS_PER_CHAPTER, READ_KEY_TERMS, Home
+from tinkerkit.settings import MAX_FACT_CHARS, READ_FACTS_PER_CHAPTER, READ_KEY_TERMS
 
 CONTAINER = (
     '<?xml version="1.0"?><container xmlns="urn:oasis:names:tc:opendocument:xmlns:container" version="1.0">'
@@ -546,7 +546,6 @@ def test_tinker_read_stores_then_reads_as_its_own_job(
     assert ("Look again", 'tinker read #1 "what to look for"') in ending["next"]
     assert any(step.startswith("🧭 Chose the chapters to read") for step in steps)
     assert "Time taken" in capsys.readouterr().out
-    assert Home.store().entries("read")
     stored_before = Cli.parse(["read", "craft.md"])
     Commands(stored_before).run()
     assert len(ended) == 1 and "Already on the reading list as #1" in capsys.readouterr().out

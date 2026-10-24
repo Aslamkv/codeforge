@@ -386,7 +386,7 @@ def test_teach_needs_the_web_before_any_model_call(measured_model, fake_ollama, 
 
 
 @pytest.mark.spec("TCH-9")
-def test_ask_and_teach_report_through_a_tracker_and_run_as_tasks(
+def test_ask_and_teach_report_through_a_tracker_and_run_as_jobs(
     kept, measured_model, fake_ollama, monkeypatch, capsys
 ):
     from tinkerkit import conversation

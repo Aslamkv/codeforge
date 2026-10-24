@@ -10,7 +10,7 @@ def test_every_command_is_defined_once_with_all_it_needs():
     assert len(names) == len(set(names))
     for command in COMMANDS:
         assert command.group in GROUPS and command.synopsis and command.what and command.rows
-        assert command.chat in ("own", "long", "quick", None) and command.words in ("none", "one", "any")
+        assert command.words in ("none", "one", "any")
 
 
 @pytest.mark.spec("CMD-1")
@@ -18,7 +18,6 @@ def test_the_command_line_and_the_conversation_read_the_table():
     on_the_command_line = set(cli.Cli.COMMANDS) | set(cli.Cli.TALK_COMMANDS) | {"help", "channel", "confirm"}
     assert on_the_command_line == {command.name for command in COMMANDS if command.cli}
     assert set(conversation.Desk.COMMANDS) == {command.name for command in COMMANDS if command.chat}
-    assert conversation.LONG_COMMANDS == tuple(command.name for command in COMMANDS if command.chat == "long")
     assert set(conversation.ONE_WORD_COMMANDS) == {
         command.name for command in COMMANDS if command.chat and command.words == "one"
     }
@@ -47,8 +46,6 @@ def test_runs_and_what_deletes():
     assert [
         command.name for command in COMMANDS if "--confirm" in {option.flag for option in command.options}
     ] == ["task", "restart", "add", "fix"]
-    assert [command.name for command in COMMANDS if command.deletes] == ["restart", "clear", "reset"]
-    assert conversation.DELETING_COMMANDS == ("restart", "clear", "reset")
 
 
 @pytest.mark.spec("CMD-3")

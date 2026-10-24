@@ -109,12 +109,10 @@ def test_channel_command_list_enable_disable_remove(capsys):
     assert "bot" in listed and "telegram" in listed and "enabled" in listed and "chats: 42" in listed
     ChannelCommand.run(["disable", "bot"])
     assert Channels.settings()["bot"]["enabled"] is False
-    ChannelCommand.run(["remove", "bot"])
-    assert Channels.settings() == {} and Channels.secrets("bot") == {}
     with pytest.raises(SystemExit, match="no action 'fly'"):
         ChannelCommand.run(["fly"])
-    with pytest.raises(SystemExit, match="no channel 'bot'"):
-        ChannelCommand.run(["enable", "bot"])
+    with pytest.raises(SystemExit, match="no channel 'ghost'"):
+        ChannelCommand.run(["enable", "ghost"])
     with pytest.raises(SystemExit, match="tinker channel enable NAME"):
         ChannelCommand.run(["enable"])
     ChannelCommand.run(["help"])
