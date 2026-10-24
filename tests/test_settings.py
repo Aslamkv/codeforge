@@ -6,13 +6,22 @@ import sys
 from pathlib import Path
 
 import pytest
+from conftest import REAL_HOME
 
 import tinkerkit.settings as settings
 from tinkerkit.settings import (
-    Config, Home, Store, after_what_they_use, first_line, fingerprint, groups_fitting, similarity, split_text, words,
+    Config,
+    Home,
+    Store,
+    after_what_they_use,
+    fingerprint,
+    first_line,
+    groups_fitting,
+    similarity,
+    split_text,
+    words,
 )
 from tinkerkit.web import Internet
-from conftest import REAL_HOME
 
 
 @pytest.mark.spec("SET-1")
@@ -24,18 +33,53 @@ def test_home_is_dot_tinker_next_to_the_real_script(tinker_home):
 @pytest.mark.spec("SET-2")
 def test_default_config():
     assert settings.DEFAULT_CONFIG == {
-        "model": None, "ollama_url": "http://localhost:11434", "keep_alive": 0, "max_growth": 1.15,
-        "build_think": "medium", "test_timeout": 60, "web": "ollama", "web_fallback": "", "web_timeout": 30,
-        "learn_missing": 2, "learn_rate": 8, "learn_backoff": 20, "learn_cutoff": 0.0, "learn_pages": 8,
-        "learn_min_pages": 2, "learn_searches": 3, "learn_think": "low", "docs_pages": 30, "tool_docs_pages": 5,
-        "docs_latest_days": 30, "fetch_workers": 6, "fetch_timeout": 15, "fetch_max_bytes": 2000000,
-        "fetch_domain_delay": 0.1, "fetch_fallbacks": 2, "embed_model": "", "projects": "~/Projects"}
+        "model": None,
+        "ollama_url": "http://localhost:11434",
+        "keep_alive": 0,
+        "max_growth": 1.15,
+        "build_think": "medium",
+        "test_timeout": 60,
+        "web": "ollama",
+        "web_fallback": "",
+        "web_timeout": 30,
+        "learn_missing": 2,
+        "learn_rate": 8,
+        "learn_backoff": 20,
+        "learn_cutoff": 0.0,
+        "learn_pages": 8,
+        "learn_min_pages": 2,
+        "learn_searches": 3,
+        "learn_think": "low",
+        "docs_pages": 30,
+        "tool_docs_pages": 5,
+        "docs_latest_days": 30,
+        "fetch_workers": 6,
+        "fetch_timeout": 15,
+        "fetch_max_bytes": 2000000,
+        "fetch_domain_delay": 0.1,
+        "fetch_fallbacks": 2,
+        "embed_model": "",
+        "projects": "~/Projects",
+    }
 
 
 @pytest.mark.spec("SET-3")
 def test_phase_lists():
-    assert settings.PHASES == ("recall", "spec", "design", "review", "setup", "tests", "code", "verify", "tidy",
-                               "docs", "final_review", "lessons", "done")
+    assert settings.PHASES == (
+        "recall",
+        "spec",
+        "design",
+        "review",
+        "setup",
+        "tests",
+        "code",
+        "verify",
+        "tidy",
+        "docs",
+        "final_review",
+        "lessons",
+        "done",
+    )
     assert settings.FIX_PHASES == ("recall", "reproduce", "verify", "final_review", "lessons", "done")
     assert settings.PLANNING_PHASES == ("recall", "spec", "design", "review")
     assert settings.CONFIRM_AFTER == {"feature": "review", "fix": "reproduce"}
@@ -53,9 +97,20 @@ def test_config_is_defaults_overridden_by_the_home(home_store):
 
 
 @pytest.mark.spec("SET-5")
-@pytest.mark.parametrize("key,value", [("keep_alive", "soon"), ("keep_alive", "10 m"), ("max_growth", 1),
-                                       ("max_growth", True), ("max_growth", "2"), ("build_think", "max"),
-                                       ("build_think", "true"), ("build_think", 1), ("learn_think", "max")])
+@pytest.mark.parametrize(
+    "key,value",
+    [
+        ("keep_alive", "soon"),
+        ("keep_alive", "10 m"),
+        ("max_growth", 1),
+        ("max_growth", True),
+        ("max_growth", "2"),
+        ("build_think", "max"),
+        ("build_think", "true"),
+        ("build_think", 1),
+        ("learn_think", "max"),
+    ],
+)
 def test_check_model_rejects_unusable_settings(key, value):
     Config.save(**{key: value})
     with pytest.raises(SystemExit, match=key):
@@ -128,6 +183,7 @@ def test_a_failed_write_leaves_the_old_value(tmp_path):
 
     def broken(value):
         raise RuntimeError("crash in the middle")
+
     with pytest.raises(RuntimeError):
         store.update("c", "k", broken)
     assert store.get("c", "k") == "old"
@@ -144,7 +200,9 @@ def test_store_logs_and_mode(tmp_path):
     store.append("log", {"label": "two", "x": "é"})
     store.append("other", {"label": "no"})
     entries = store.entries("log")
-    assert [entry["label"] for _, entry in entries] == ["one", "two"] and all("time" in entry for _, entry in entries)
+    assert [entry["label"] for _, entry in entries] == ["one", "two"] and all(
+        "time" in entry for _, entry in entries
+    )
     assert [entry["label"] for _, entry in store.entries("log", after=first)] == ["two"]
     assert store.logged("log") == 2
     store.drop_log("log")
@@ -175,6 +233,7 @@ def test_ensure_makes_home_and_its_database(tinker_home, capsys):
 def test_ensure_stops_when_home_cannot_be_written(tinker_home, monkeypatch):
     def refuse(*args, **kwargs):
         raise PermissionError("read-only")
+
     monkeypatch.setattr(Path, "mkdir", refuse)
     with pytest.raises(SystemExit, match="cannot be written"):
         Home.ensure()
@@ -216,8 +275,17 @@ def test_reset_outside_a_terminal_without_yes_deletes_nothing(tinker_home, monke
 
 @pytest.mark.spec("SET-11")
 def test_parts_tinker_clear_knows():
-    assert list(Home.parts()) == ["languages", "memory", "learned", "docs", "models", "runs", "commands", "history",
-                                 "exercise"]
+    assert list(Home.parts()) == [
+        "languages",
+        "memory",
+        "learned",
+        "docs",
+        "models",
+        "runs",
+        "commands",
+        "history",
+        "exercise",
+    ]
 
 
 @pytest.mark.spec("SET-11")
@@ -305,7 +373,9 @@ def test_groups_fitting():
 
 
 @pytest.mark.spec("SET-18")
-@pytest.mark.parametrize("tool,program", [("caffeinate", "caffeinate"), ("systemd-inhibit", "systemd-inhibit")])
+@pytest.mark.parametrize(
+    "tool,program", [("caffeinate", "caffeinate"), ("systemd-inhibit", "systemd-inhibit")]
+)
 def test_keep_awake_uses_the_tool_there_is(monkeypatch, tool, program):
     started = []
     monkeypatch.setattr(settings.shutil, "which", lambda name: "/bin/" + name if name == tool else None)
@@ -322,6 +392,7 @@ def test_keep_awake_without_a_tool_or_failing_does_nothing(monkeypatch):
 
     def broken(*args, **kwargs):
         raise OSError("cannot start")
+
     monkeypatch.setattr(settings.subprocess, "Popen", broken)
     Home.keep_awake()
 

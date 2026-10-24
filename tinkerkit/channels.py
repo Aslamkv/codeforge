@@ -1,20 +1,27 @@
+from collections import namedtuple
 lazy import http.client
 lazy import json
-lazy import os
 lazy import queue
 lazy import re
 lazy import secrets
 lazy import sys
 lazy import time
 lazy import urllib.parse
-from collections import namedtuple
 lazy from pathlib import Path
 
-from .conversation import Channel, ChannelError, Desk, Markup, Message, Secret, first_words, started_by_a_conversation
+from .conversation import (
+    Channel,
+    ChannelError,
+    Desk,
+    Markup,
+    Message,
+    Secret,
+    first_words,
+    started_by_a_conversation,
+)
 lazy from .ledger import ANSWER_WINDOW_SECONDS, Ledger
 lazy from .messages import say
 lazy from .settings import Home
-
 
 PAIRING_WAIT_SECONDS = 120
 FIRST_CALL_TRIES = 3
@@ -32,18 +39,26 @@ Answer = namedtuple("Answer", "status body")
 
 
 class ChannelCommand:
-    USAGE = ("tinker channel list                 the channels, and whether each is enabled\n"
-             "tinker channel add                  add one (asks its kind, a name, its secrets, and pairs your chat)\n"
-             "tinker channel remove NAME          delete it, secrets included\n"
-             "tinker channel enable NAME          every task reports to it; tinker channel start reads it\n"
-             "tinker channel disable NAME         stop using it (new channels start disabled)\n"
-             "tinker channel start [NAME]         listen on enabled channels (or NAME): ask for tasks, or just chat")
+    USAGE = (
+        "tinker channel list                 the channels, and whether each is enabled\n"
+        "tinker channel add                  add one (asks its kind, a name, its secrets, and pairs your chat)\n"
+        "tinker channel remove NAME          delete it, secrets included\n"
+        "tinker channel enable NAME          every task reports to it; tinker channel start reads it\n"
+        "tinker channel disable NAME         stop using it (new channels start disabled)\n"
+        "tinker channel start [NAME]         listen on enabled channels (or NAME): ask for tasks, or just chat"
+    )
 
     @staticmethod
     def run(argv):
         action, rest = (argv[0], argv[1:]) if argv else ("list", [])
-        actions = {"list": ChannelCommand.list, "add": ChannelCommand.add, "remove": ChannelCommand.remove,
-                   "enable": ChannelCommand.enable, "disable": ChannelCommand.disable, "start": ChannelCommand.start}
+        actions = {
+            "list": ChannelCommand.list,
+            "add": ChannelCommand.add,
+            "remove": ChannelCommand.remove,
+            "enable": ChannelCommand.enable,
+            "disable": ChannelCommand.disable,
+            "start": ChannelCommand.start,
+        }
         if action in ("help", "-h", "--help"):
             say.text(ChannelCommand.USAGE)
             return
@@ -73,11 +88,16 @@ class ChannelCommand:
             who = channel.handle()
         except (ChannelError, OSError) as exc:
             raise SystemExit(f"tinker: the {kind} channel does not work with that: {exc}") from None
-        chats = ([chat.strip() for chat in given["chat"].split(",")] if given.get("chat")
-                 else ChannelCommand.pair(channel, who))
+        chats = (
+            [chat.strip() for chat in given["chat"].split(",")]
+            if given.get("chat")
+            else ChannelCommand.pair(channel, who)
+        )
         Channels.keep(name, {"kind": kind, "enabled": False, "allowed": chats, "who": who}, secrets)
-        say.done(f"Added {name} ({kind}, {who}), serving chat(s) {', '.join(chats)}. "
-                 f"It starts disabled: tinker channel enable {name}")
+        say.done(
+            f"Added {name} ({kind}, {who}), serving chat(s) {', '.join(chats)}. "
+            f"It starts disabled: tinker channel enable {name}"
+        )
 
     @staticmethod
     def options(rest):
@@ -85,7 +105,9 @@ class ChannelCommand:
         while items:
             item = items.pop(0)
             if not item.startswith("--") or not items:
-                raise SystemExit(f"tinker channel add: unexpected {item!r} (options: --kind --name --token --chat)")
+                raise SystemExit(
+                    f"tinker channel add: unexpected {item!r} (options: --kind --name --token --chat)"
+                )
             found[item[2:]] = items.pop(0)
         return found
 
@@ -113,8 +135,11 @@ class ChannelCommand:
         ends = time.monotonic() + PAIRING_WAIT_SECONDS
         while time.monotonic() < ends:
             for message in channel.receive(timeout=10):
-                answer = ask(f"Message from {message.sender or 'someone'} (chat {message.chat}): "
-                             f"{first_words(message.text, 40)!r}. Is that you? [y/N]", "n")
+                answer = ask(
+                    f"Message from {message.sender or 'someone'} (chat {message.chat}): "
+                    f"{first_words(message.text, 40)!r}. Is that you? [y/N]",
+                    "n",
+                )
                 if answer.lower().startswith("y"):
                     channel.send(message.chat, "✅ **Paired with Tinker.** Only this chat is listened to.")
                     return [message.chat]
@@ -130,7 +155,9 @@ class ChannelCommand:
     def enable(rest, on=True):
         name = ChannelCommand.named(rest, "enable" if on else "disable")
         Channels.keep(name, dict(Channels.settings()[name], enabled=on))
-        say.done(f"{name} is {'enabled: tasks report to it; tinker channel start listens on it' if on else 'disabled'}.")
+        say.done(
+            f"{name} is {'enabled: tasks report to it; tinker channel start listens on it' if on else 'disabled'}."
+        )
 
     @staticmethod
     def disable(rest):
@@ -157,9 +184,13 @@ class ChannelCommand:
                 raise SystemExit(f"tinker: channel {channel.name} does not work: {exc}") from None
             except OSError as exc:
                 if tries == FIRST_CALL_TRIES:
-                    raise SystemExit(f"tinker: channel {channel.name} cannot be reached ({exc}), tried {tries} "
-                                     f"times: check the network and start it again") from None
-                say.retry(f"{channel.name} did not answer ({exc}); trying again ({tries + 1}/{FIRST_CALL_TRIES})")
+                    raise SystemExit(
+                        f"tinker: channel {channel.name} cannot be reached ({exc}), tried {tries} "
+                        f"times: check the network and start it again"
+                    ) from None
+                say.retry(
+                    f"{channel.name} did not answer ({exc}); trying again ({tries + 1}/{FIRST_CALL_TRIES})"
+                )
                 time.sleep(5)
 
     @staticmethod
@@ -176,8 +207,11 @@ class Channels:
     def enabled():
         if started_by_a_conversation():
             return []
-        return [Channels.make(name) for name, channel_settings in Channels.settings().items()
-                if channel_settings.get("enabled")]
+        return [
+            Channels.make(name)
+            for name, channel_settings in Channels.settings().items()
+            if channel_settings.get("enabled")
+        ]
 
     @staticmethod
     def make(name):
@@ -260,8 +294,11 @@ class TelegramChannel(Channel):
         chat, document = str(message["chat"]["id"]), message["document"]
         name = document.get("file_name") or "book"
         if document.get("file_size", 0) > TELEGRAM_MAX_DOWNLOAD_BYTES:
-            self.send(chat, f"{name} is larger than a bot may download from Telegram (20 MB): send a link that "
-                            f"downloads it instead (read URL).")
+            self.send(
+                chat,
+                f"{name} is larger than a bot may download from Telegram (20 MB): send a link that "
+                f"downloads it instead (read URL).",
+            )
             return dict(message, text="")
         try:
             path = self.downloaded(document["file_id"], name)
@@ -295,8 +332,10 @@ class TelegramChannel(Channel):
             pass
 
     def offer(self, commands):
-        menu = [{"command": name.replace("-", "_"), "description": what[:TELEGRAM_MAX_MENU_DESCRIPTION_CHARS]}
-                for name, what in commands]
+        menu = [
+            {"command": name.replace("-", "_"), "description": what[:TELEGRAM_MAX_MENU_DESCRIPTION_CHARS]}
+            for name, what in commands
+        ]
         try:
             self.call("setMyCommands", commands=json.dumps(menu))
         except OSError, ChannelError:
@@ -359,8 +398,14 @@ class TelegramChannel(Channel):
     def send_file(self, chat, path, caption):
         caption = self.said(caption)
         try:
-            sent = self.call("sendDocument", wait=120, file=Path(path), chat_id=chat,
-                             caption=Markup.html(caption)[:TELEGRAM_MAX_CAPTION_CHARS], parse_mode="HTML")["message_id"]
+            sent = self.call(
+                "sendDocument",
+                wait=120,
+                file=Path(path),
+                chat_id=chat,
+                caption=Markup.html(caption)[:TELEGRAM_MAX_CAPTION_CHARS],
+                parse_mode="HTML",
+            )["message_id"]
         except OSError, ChannelError:
             return self.send(chat, caption)
         self.seen(str(chat), sent)
@@ -431,11 +476,19 @@ class TelegramChannel(Channel):
     @staticmethod
     def multipart(fields, file):
         boundary = f"tinker-{secrets.token_hex(12)}"
-        parts = [f'--{boundary}\r\nContent-Disposition: form-data; name="{name}"\r\n\r\n{value}\r\n'.encode()
-                 for name, value in fields.items()]
-        parts.append(f'--{boundary}\r\nContent-Disposition: form-data; name="document"; filename="{file.name}"\r\n'
-                     f'Content-Type: application/octet-stream\r\n\r\n'.encode() + file.read_bytes() + b"\r\n")
-        return Upload(b"".join(parts) + f"--{boundary}--\r\n".encode(), f"multipart/form-data; boundary={boundary}")
+        parts = [
+            f'--{boundary}\r\nContent-Disposition: form-data; name="{name}"\r\n\r\n{value}\r\n'.encode()
+            for name, value in fields.items()
+        ]
+        parts.append(
+            f'--{boundary}\r\nContent-Disposition: form-data; name="document"; filename="{file.name}"\r\n'
+            f"Content-Type: application/octet-stream\r\n\r\n".encode()
+            + file.read_bytes()
+            + b"\r\n"
+        )
+        return Upload(
+            b"".join(parts) + f"--{boundary}--\r\n".encode(), f"multipart/form-data; boundary={boundary}"
+        )
 
     def answer(self, method, path, data, wait, kind=FORM):
         for attempt in (1, 2):
@@ -491,13 +544,18 @@ KINDS = frozendict({kind.KIND: kind for kind in (TelegramChannel,)})
 
 
 def ask(question, default="", choices=None, secret=False):
-    shown = f"{question}" + (f" ({'/'.join(choices)})" if choices else "") + (f" [{default}]" if default else "")
+    shown = (
+        f"{question}" + (f" ({'/'.join(choices)})" if choices else "") + (f" [{default}]" if default else "")
+    )
     if not sys.stdin.isatty():
         if default:
             return default
-        raise SystemExit(f"tinker channel: {question} is needed (run it in a terminal, or give it as an option)")
+        raise SystemExit(
+            f"tinker channel: {question} is needed (run it in a terminal, or give it as an option)"
+        )
     if secret:
         import getpass
+
         answer = getpass.getpass(f"{shown}: ")
     else:
         answer = input(f"{shown}: ")

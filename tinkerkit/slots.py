@@ -32,50 +32,123 @@ def fill(text, plan, version):
     return " ".join(text.format(topic=plan["name"], version=version, language=language).split())
 
 
-INSTALLED = Slot("installed", "Is {topic} installed here, and which version?", "", 0, 0, "toolchain", "machine")
+INSTALLED = Slot(
+    "installed", "Is {topic} installed here, and which version?", "", 0, 0, "toolchain", "machine"
+)
 READINESS = Slot("readiness", "Does every slot above have facts?", "", 0, 0, "", "check")
 
-PROFILES = frozendict({
-    "language": (
-        INSTALLED,
-        Slot("toolchain", "Which test library, formatter, linter and package manager does {topic} use, and what are "
-             "the exact commands to run each?", "{topic} test framework formatter linter package manager commands",
-             6, 2, "toolchain", docs="installing install packaging venv development tools testing"),
-        Slot("fundamentals", "What are {topic}'s reserved keywords, core syntax, basic types and program structure?",
-             "{topic} keywords syntax basic types", 5, 2, "code",
-             docs="tutorial introduction reference lexical keywords syntax datatypes types controlflow"),
-        Slot("this-version", "What is new or special in {topic} {version} that improves code quality or execution "
-             "speed?", "{topic} {version} release notes new features", 5, 2, "code",
-             docs="whatsnew changelog changes release notes migration porting deprecated removed"),
-        Slot("limitations", "What are the real limits of the {topic} runtime and language?",
-             "{topic} limitations runtime performance", 4, 1, "design",
-             docs="faq design limitations performance threading memory"),
-        Slot("best-use-cases", "What is {topic} well suited for, and what does it not suit?",
-             "{topic} use cases strengths weaknesses", 3, 1, "spec", docs="faq general about appetite overview"),
-        READINESS,
-    ),
-    "tool": (
-        INSTALLED,
-        Slot("purpose", "What is {topic} for, and when should it be chosen?", "{topic} overview purpose", 3, 1,
-             "spec", docs="overview introduction about index why"),
-        Slot("core-usage", "What are {topic}'s main APIs, and the standard way to set it up and use it?",
-             "{topic} getting started tutorial API", 6, 2, "code",
-             docs="quickstart tutorial getting started usage guide api reference"),
-        Slot("this-version", "What changed or was deprecated in {topic} {version}?",
-             "{topic} {version} changelog deprecations", 4, 1, "code",
-             docs="changelog changes release history whatsnew migration deprecations upgrading"),
-        Slot("pitfalls-and-limits", "What mistakes are common with {topic}, and what are its real limitations?",
-             "{topic} common mistakes limitations", 4, 1, "code",
-             docs="faq troubleshooting limitations caveats gotchas known issues"),
-        Slot("conventions", "What project layout, patterns and configuration does {topic} recommend?",
-             "{topic} project structure configuration best practices", 4, 1, "design",
-             docs="configuration structure layout best practices patterns settings"),
-        Slot("fit", "How does {topic} work with the {language} toolchain: testing, formatting, installing?",
-             "{topic} {language} testing install", 3, 1, "toolchain",
-             docs="install installation integration testing plugins"),
-        READINESS,
-    ),
-})
+PROFILES = frozendict(
+    {
+        "language": (
+            INSTALLED,
+            Slot(
+                "toolchain",
+                "Which test library, formatter, linter and package manager does {topic} use, and what are "
+                "the exact commands to run each?",
+                "{topic} test framework formatter linter package manager commands",
+                6,
+                2,
+                "toolchain",
+                docs="installing install packaging venv development tools testing",
+            ),
+            Slot(
+                "fundamentals",
+                "What are {topic}'s reserved keywords, core syntax, basic types and program structure?",
+                "{topic} keywords syntax basic types",
+                5,
+                2,
+                "code",
+                docs="tutorial introduction reference lexical keywords syntax datatypes types controlflow",
+            ),
+            Slot(
+                "this-version",
+                "What is new or special in {topic} {version} that improves code quality or execution speed?",
+                "{topic} {version} release notes new features",
+                5,
+                2,
+                "code",
+                docs="whatsnew changelog changes release notes migration porting deprecated removed",
+            ),
+            Slot(
+                "limitations",
+                "What are the real limits of the {topic} runtime and language?",
+                "{topic} limitations runtime performance",
+                4,
+                1,
+                "design",
+                docs="faq design limitations performance threading memory",
+            ),
+            Slot(
+                "best-use-cases",
+                "What is {topic} well suited for, and what does it not suit?",
+                "{topic} use cases strengths weaknesses",
+                3,
+                1,
+                "spec",
+                docs="faq general about appetite overview",
+            ),
+            READINESS,
+        ),
+        "tool": (
+            INSTALLED,
+            Slot(
+                "purpose",
+                "What is {topic} for, and when should it be chosen?",
+                "{topic} overview purpose",
+                3,
+                1,
+                "spec",
+                docs="overview introduction about index why",
+            ),
+            Slot(
+                "core-usage",
+                "What are {topic}'s main APIs, and the standard way to set it up and use it?",
+                "{topic} getting started tutorial API",
+                6,
+                2,
+                "code",
+                docs="quickstart tutorial getting started usage guide api reference",
+            ),
+            Slot(
+                "this-version",
+                "What changed or was deprecated in {topic} {version}?",
+                "{topic} {version} changelog deprecations",
+                4,
+                1,
+                "code",
+                docs="changelog changes release history whatsnew migration deprecations upgrading",
+            ),
+            Slot(
+                "pitfalls-and-limits",
+                "What mistakes are common with {topic}, and what are its real limitations?",
+                "{topic} common mistakes limitations",
+                4,
+                1,
+                "code",
+                docs="faq troubleshooting limitations caveats gotchas known issues",
+            ),
+            Slot(
+                "conventions",
+                "What project layout, patterns and configuration does {topic} recommend?",
+                "{topic} project structure configuration best practices",
+                4,
+                1,
+                "design",
+                docs="configuration structure layout best practices patterns settings",
+            ),
+            Slot(
+                "fit",
+                "How does {topic} work with the {language} toolchain: testing, formatting, installing?",
+                "{topic} {language} testing install",
+                3,
+                1,
+                "toolchain",
+                docs="install installation integration testing plugins",
+            ),
+            READINESS,
+        ),
+    }
+)
 
 
 TOOL_DOCS_QUERY = "install installation getting started usage configuration command line options"
@@ -92,8 +165,11 @@ def short_slots(profile, selected):
 
 def missing(profile, facts, machine):
     filled = {fact.get("slot") for fact in facts}
-    return [slot.id for slot in PROFILES[profile]
-            if (slot.source == "machine" and not machine) or (slot.source == "web" and slot.id not in filled)]
+    return [
+        slot.id
+        for slot in PROFILES[profile]
+        if (slot.source == "machine" and not machine) or (slot.source == "web" and slot.id not in filled)
+    ]
 
 
 class Selector:
@@ -103,12 +179,23 @@ class Selector:
     def select(self, slots, pool, plan, version):
         texts = [passage.searched() for passage in pool]
         queries = {slot.id: f"{slot.asked(plan, version)} {plan['name']} {version}" for slot in slots}
-        shortlist = {slot.id: Retriever(None).by_words(queries[slot.id], texts)[:SLOT_CANDIDATE_PASSAGES] for slot in slots}
+        shortlist = {
+            slot.id: Retriever(None).by_words(queries[slot.id], texts)[:SLOT_CANDIDATE_PASSAGES]
+            for slot in slots
+        }
         vectors = self.vectors(texts, sorted({*found for found in shortlist.values()}))
-        return {slot.id: [pool[index] for index in self.diverse(
+        return {
+            slot.id: [
+                pool[index]
+                for index in self.diverse(
                     self.relevant(slot.keywords(), queries[slot.id], shortlist[slot.id], texts, vectors),
-                    pool, vectors, slot.passages)]
-                for slot in slots}
+                    pool,
+                    vectors,
+                    slot.passages,
+                )
+            ]
+            for slot in slots
+        }
 
     def vectors(self, texts, indexes):
         if self.embeddings is None or not indexes:
@@ -119,7 +206,11 @@ class Selector:
     def relevant(self, keywords, query, shortlist, texts, vectors):
         closeness = self.closeness(query, vectors)
         holding = set(Retriever(None).by_words(keywords, texts))
-        counted = [index for index in shortlist if index in holding or closeness.get(index, 0.0) >= SLOT_RELEVANT_SIMILARITY]
+        counted = [
+            index
+            for index in shortlist
+            if index in holding or closeness.get(index, 0.0) >= SLOT_RELEVANT_SIMILARITY
+        ]
         fused = {}
         for ranking in (counted, sorted(counted, key=lambda index: -closeness.get(index, 0.0))):
             for position, index in enumerate(ranking):
@@ -128,7 +219,9 @@ class Selector:
 
     def closeness(self, query, vectors):
         asked = self.embeddings.vectors([query], keep=False) if vectors else None
-        return {index: Embeddings.cosine(asked[0], vector) for index, vector in vectors.items()} if asked else {}
+        return (
+            {index: Embeddings.cosine(asked[0], vector) for index, vector in vectors.items()} if asked else {}
+        )
 
     def diverse(self, scores, pool, vectors, count):
         if not scores:
@@ -137,8 +230,13 @@ class Selector:
         marks = None if vectors else [shingles(passage.text) for passage in pool]
         left = sorted(scores, key=lambda index: (-scores[index], index))
         while left and len(taken) < count:
-            best = max(left, key=lambda index: MMR_BALANCE * scores[index] / top
-                       - (1 - MMR_BALANCE) * self.most_alike(index, taken, vectors, marks))
+            best = max(
+                left,
+                key=lambda index: (
+                    MMR_BALANCE * scores[index] / top
+                    - (1 - MMR_BALANCE) * self.most_alike(index, taken, vectors, marks)
+                ),
+            )
             left.remove(best)
             size = len(pool[best].listing()) + 2
             if size <= room:

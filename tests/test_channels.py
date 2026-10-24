@@ -18,7 +18,9 @@ from tinkerkit.settings import Store
 
 class BotAPI:
     def __init__(self, **answers):
-        self.answers = {name: list(value) if isinstance(value, list) else [value] for name, value in answers.items()}
+        self.answers = {
+            name: list(value) if isinstance(value, list) else [value] for name, value in answers.items()
+        }
         self.calls, self.headers_and_bodies = [], []
 
     def connection(self, wait):
@@ -39,7 +41,9 @@ class Connection:
         answer = queue.pop(0) if len(queue) > 1 else queue[0]
         if isinstance(answer, BaseException):
             raise answer
-        status, body = answer if isinstance(answer, tuple) else (200, json.dumps({"ok": True, "result": answer}))
+        status, body = (
+            answer if isinstance(answer, tuple) else (200, json.dumps({"ok": True, "result": answer}))
+        )
         self.response = io.BytesIO(body.encode())
         self.response.status = status
 
@@ -63,7 +67,9 @@ def test_channels_settings_and_secrets(tinker_home, home_store):
     assert stat.S_IMODE((tinker_home / "tinker.db").stat().st_mode) == 0o600
     assert "secret" not in json.dumps(Channels.settings()) and Channels.secrets("bot") == {"token": "secret"}
     made = Channels.make("bot")
-    assert isinstance(made, TelegramChannel) and made.secrets == {"token": "secret"} and made.allowed == {"42"}
+    assert (
+        isinstance(made, TelegramChannel) and made.secrets == {"token": "secret"} and made.allowed == {"42"}
+    )
     assert [channel.name for channel in Channels.enabled()] == ["bot"]
     with pytest.raises(SystemExit, match="no channel 'other'"):
         Channels.make("other")
@@ -120,14 +126,26 @@ def test_channel_add_from_options(monkeypatch, capsys):
     api = BotAPI(getMe={"username": "my_bot"})
     monkeypatch.setattr(TelegramChannel, "connection", lambda self, wait: api.connection(wait))
     ChannelCommand.run(["add", "--kind", "telegram", "--name", "home", "--token", "abc", "--chat", "42, 43"])
-    assert Channels.settings()["home"] == {"kind": "telegram", "enabled": False, "allowed": ["42", "43"], "who": "@my_bot"}
+    assert Channels.settings()["home"] == {
+        "kind": "telegram",
+        "enabled": False,
+        "allowed": ["42", "43"],
+        "who": "@my_bot",
+    }
     assert Channels.secrets("home") == {"token": "abc"}
     assert api.calls[0][0] == "/botabc/getMe" and "It starts disabled" in capsys.readouterr().out
-    for argv, why in ((["--name", "home"], "exists"), (["--name", "-bad"], "letters, digits"),
-                      (["--kind", "pigeon"], "no channel kind"), (["oops"], "unexpected 'oops'")):
+    for argv, why in (
+        (["--name", "home"], "exists"),
+        (["--name", "-bad"], "letters, digits"),
+        (["--kind", "pigeon"], "no channel kind"),
+        (["oops"], "unexpected 'oops'"),
+    ):
         with pytest.raises(SystemExit, match=why):
-            ChannelCommand.run(["add", "--kind", "telegram", "--token", "abc", "--chat", "1"] + argv
-                               if argv[0] != "--kind" and argv[0] != "oops" else ["add"] + argv)
+            ChannelCommand.run(
+                ["add", "--kind", "telegram", "--token", "abc", "--chat", "1"] + argv
+                if argv[0] != "--kind" and argv[0] != "oops"
+                else ["add"] + argv
+            )
 
 
 @pytest.mark.spec("CHN-2")
@@ -169,14 +187,19 @@ def test_call_waits_out_too_many_requests(monkeypatch):
 
 @pytest.mark.spec("CHN-4")
 def test_receive(monkeypatch):
-    updates = [{"update_id": 10, "message": {"message_id": 5, "text": "hello", "chat": {"id": 42},
-                                             "from": {"username": "me"}}},
-               {"update_id": 11, "message": {"message_id": 6, "chat": {"id": 42}, "photo": []}}]
+    updates = [
+        {
+            "update_id": 10,
+            "message": {"message_id": 5, "text": "hello", "chat": {"id": 42}, "from": {"username": "me"}},
+        },
+        {"update_id": 11, "message": {"message_id": 6, "chat": {"id": 42}, "photo": []}},
+    ]
     api = BotAPI(getUpdates=[updates])
     channel = telegram(api)
     messages = channel.receive(1)
-    assert [(message.chat, message.text, message.sender, message.id)
-            for message in messages] == [("42", "hello", "me", 5)]
+    assert [(message.chat, message.text, message.sender, message.id) for message in messages] == [
+        ("42", "hello", "me", 5)
+    ]
     assert channel.offset == 12 and channel.live_message_ids["42"] == [5, 6]
     monkeypatch.setattr(channels.time, "sleep", lambda seconds: None)
     assert telegram(BotAPI(getUpdates=[OSError("down"), OSError("down")])).receive(1) == []
@@ -202,8 +225,10 @@ def test_offer_lists_the_commands_in_the_bots_menu():
 
 @pytest.mark.spec("CHN-5")
 def test_send_and_edit_post_html_with_a_plain_fallback():
-    api = BotAPI(sendMessage=[(400, "Bad Request: can't parse entities"), {"message_id": 8}],
-                 editMessageText=[(400, "message is not modified"), (400, "message to edit not found")])
+    api = BotAPI(
+        sendMessage=[(400, "Bad Request: can't parse entities"), {"message_id": 8}],
+        editMessageText=[(400, "message is not modified"), (400, "message to edit not found")],
+    )
     channel = telegram(api)
     assert channel.send("42", "**hi** tinker resume abc") == 8
     html_call, plain_call = api.calls[0][1], api.calls[1][1]
@@ -227,12 +252,14 @@ def test_latest_and_delete():
     channel.delete("42", 3)
     assert channel.latest("42", 2) and api.calls[-1][0].endswith("/deleteMessage")
 
+
 @pytest.mark.spec("CHN-5")
 def test_ask_for_opens_the_reply_box_with_a_hint():
     api = BotAPI(sendMessage={"message_id": 4})
     assert telegram(api).ask_for("42", "✍️ **fix**", "x" * 100) == 4
     reply = json.loads(api.calls[0][1]["reply_markup"])
     assert reply == {"force_reply": True, "input_field_placeholder": "x" * 64}
+
 
 @pytest.mark.spec("CHN-10")
 def test_the_ledger_keeps_every_message_and_collects_them(monkeypatch):
@@ -248,7 +275,10 @@ def test_the_ledger_keeps_every_message_and_collects_them(monkeypatch):
     channel.glance("42", the_persons_message, [channel.send("42", "jobs")])
     channel.glance("42", None, [channel.send("42", "help")])
     assert Ledger.glances("bot", "42") == [3]
-    assert [fields["message_id"] for path, fields in api.calls if path.endswith("/deleteMessage")] == ["4", "2"]
+    assert [fields["message_id"] for path, fields in api.calls if path.endswith("/deleteMessage")] == [
+        "4",
+        "2",
+    ]
     now = time.time()
     monkeypatch.setattr(ledger.time, "time", lambda: now + 200)
     channel.collect()
@@ -287,9 +317,16 @@ def test_check_tries_a_dropped_network_again(monkeypatch, capsys):
 
 @pytest.mark.spec("CHN-7")
 def test_pair_serves_the_chat_its_sender_confirms(monkeypatch, capsys):
-    updates = [{"update_id": 1, "message": {"message_id": 1, "text": "hi", "chat": {"id": 7}, "from": {"username": "eve"}}},
-               {"update_id": 2, "message": {"message_id": 2, "text": "me!", "chat": {"id": 42},
-                                            "from": {"username": "owner"}}}]
+    updates = [
+        {
+            "update_id": 1,
+            "message": {"message_id": 1, "text": "hi", "chat": {"id": 7}, "from": {"username": "eve"}},
+        },
+        {
+            "update_id": 2,
+            "message": {"message_id": 2, "text": "me!", "chat": {"id": 42}, "from": {"username": "owner"}},
+        },
+    ]
     api = BotAPI(getUpdates=[[], updates], sendMessage={"message_id": 3})
     answers = iter(["n", "y"])
     monkeypatch.setattr(channels, "ask", lambda question, default="", **kwargs: next(answers))
@@ -316,39 +353,69 @@ def test_send_file_uploads_a_document_with_its_caption(tmp_path):
     api = BotAPI(sendDocument={"message_id": 12})
     channel = telegram(api)
     assert channel.send_file("42", page, "**Tinker's memory** " + "x" * 2000) == 12
-    (headers, body), = api.headers_and_bodies
+    ((headers, body),) = api.headers_and_bodies
     boundary = headers["Content-Type"].split("boundary=")[1]
-    assert headers["Content-Type"].startswith("multipart/form-data") and api.calls[0][0] == "/botT0K/sendDocument"
+    assert (
+        headers["Content-Type"].startswith("multipart/form-data")
+        and api.calls[0][0] == "/botT0K/sendDocument"
+    )
     parts = body.split(f"--{boundary}".encode())
-    named = {re.search(rb'name="(\w+)"', part).group(1).decode(): part.split(b"\r\n\r\n", 1)[1][:-2]
-             for part in parts[1:-1]}
+    named = {
+        re.search(rb'name="(\w+)"', part).group(1).decode(): part.split(b"\r\n\r\n", 1)[1][:-2]
+        for part in parts[1:-1]
+    }
     assert named["chat_id"] == b"42" and named["parse_mode"] == b"HTML"
-    assert named["caption"].startswith(b"<b>Tinker's memory</b> xx") and len(named["caption"].decode()) == 1024
+    assert (
+        named["caption"].startswith(b"<b>Tinker's memory</b> xx") and len(named["caption"].decode()) == 1024
+    )
     assert named["document"] == b"<!doctype html><p>graph</p>" and b'filename="memory.html"' in body
     assert parts[-1] == b"--\r\n" and channel.live_message_ids["42"] == [12]
-    failing = telegram(BotAPI(sendDocument=(400, "Bad Request: file too big"), sendMessage={"message_id": 13}))
+    failing = telegram(
+        BotAPI(sendDocument=(400, "Bad Request: file too big"), sendMessage={"message_id": 13})
+    )
     assert failing.send_file("42", page, "the caption") == 13
 
+
 def sent_file(chat=42, size=10, name="My Book.epub"):
-    return [[{"update_id": 1, "message": {"message_id": 5, "chat": {"id": chat}, "from": {"username": "me"},
-                                          "document": {"file_id": "F1", "file_name": name, "file_size": size}}}]]
+    return [
+        [
+            {
+                "update_id": 1,
+                "message": {
+                    "message_id": 5,
+                    "chat": {"id": chat},
+                    "from": {"username": "me"},
+                    "document": {"file_id": "F1", "file_name": name, "file_size": size},
+                },
+            }
+        ]
+    ]
+
 
 @pytest.mark.spec("CHN-11")
 def test_a_book_sent_in_a_chat_is_kept_and_read(tinker_home, home_store):
-    api = BotAPI(getUpdates=sent_file(), getFile={"file_path": "documents/file_1.epub"},
-                 **{"file_1.epub": (200, "EPUB BYTES")})
+    api = BotAPI(
+        getUpdates=sent_file(),
+        getFile={"file_path": "documents/file_1.epub"},
+        **{"file_1.epub": (200, "EPUB BYTES")},
+    )
     messages = telegram(api).receive(1)
     path = tinker_home / "reading" / "My-Book.epub"
     assert [message.text for message in messages] == [f"read {path}"] and path.read_bytes() == b"EPUB BYTES"
     assert api.calls[-1][0] == "/file/botT0K/documents/file_1.epub" and "T0K" not in messages[0].text
+
 
 @pytest.mark.spec("CHN-11")
 def test_a_book_that_cannot_be_taken_is_said_and_one_from_a_stranger_ignored(tinker_home, home_store):
     api = BotAPI(getUpdates=sent_file(size=30_000_000), sendMessage={"message_id": 9})
     assert telegram(api).receive(1) == []
     assert "larger than a bot may download" in api.calls[-1][1]["text"]
-    api = BotAPI(getUpdates=sent_file(), getFile={"file_path": "documents/file_1.epub"},
-                 sendMessage={"message_id": 9}, **{"file_1.epub": (404, "gone")})
+    api = BotAPI(
+        getUpdates=sent_file(),
+        getFile={"file_path": "documents/file_1.epub"},
+        sendMessage={"message_id": 9},
+        **{"file_1.epub": (404, "gone")},
+    )
     assert telegram(api).receive(1) == []
     assert "Could not take My Book.epub: Telegram answered 404" in api.calls[-1][1]["text"]
     api = BotAPI(getUpdates=sent_file(chat=7))

@@ -6,7 +6,9 @@ lazy from .knowledge import Embeddings, Library
 lazy from .settings import SIMILAR_LESSON_MEANING, SIMILAR_LESSON_WORDS, Home, first_line, similarity
 lazy from .workspace import TaughtCommands, Toolchain
 
-HISTORY_LINKS = frozendict({"born": "taught_by", "confirmed": "confirmed_in", "helped": "helped_in", "failed": "failed_in"})
+HISTORY_LINKS = frozendict(
+    {"born": "taught_by", "confirmed": "confirmed_in", "helped": "helped_in", "failed": "failed_in"}
+)
 
 
 class Graph:
@@ -26,11 +28,22 @@ class Graph:
 
     def add_languages(self):
         for key, doc in Home.store().items("languages").items():
-            hub = self.hub(f"lang:{key}", "language", doc.get("language", key), key,
-                           [("projects finished", doc.get("projects", 0))])
+            hub = self.hub(
+                f"lang:{key}",
+                "language",
+                doc.get("language", key),
+                key,
+                [("projects finished", doc.get("projects", 0))],
+            )
             if Toolchain(doc.get("toolchain")):
-                self.item(f"toolchain:{key}", "toolchain", Toolchain(doc["toolchain"]).summary(), hub,
-                          status="proven", details=[("saved", doc.get("toolchain_saved", "?"))])
+                self.item(
+                    f"toolchain:{key}",
+                    "toolchain",
+                    Toolchain(doc["toolchain"]).summary(),
+                    hub,
+                    status="proven",
+                    details=[("saved", doc.get("toolchain_saved", "?"))],
+                )
             for fix in doc.get("fixes", []):
                 self.add_fix(key, fix, hub)
             for fact in doc.get("facts", []):
@@ -59,10 +72,14 @@ class Graph:
 
     def topic_hub(self, slug, entry):
         hub = f"lang:{slug}" if entry.get("kind") == "language" else f"topic:{slug}"
-        details = [("learned", entry.get("learned", "?")), ("summary", entry.get("summary", "")),
-                   ("missing", ", ".join(entry.get("missing", [])) or None)]
-        return self.hub(hub, "language" if hub.startswith("lang:") else "topic", entry.get("name", slug), slug,
-                        details)
+        details = [
+            ("learned", entry.get("learned", "?")),
+            ("summary", entry.get("summary", "")),
+            ("missing", ", ".join(entry.get("missing", [])) or None),
+        ]
+        return self.hub(
+            hub, "language" if hub.startswith("lang:") else "topic", entry.get("name", slug), slug, details
+        )
 
     def add_topic_facts(self, slug, entry, hub):
         for fact in entry.get("facts", []):
@@ -80,16 +97,24 @@ class Graph:
         for rule in entry.get("rules", []):
             node = self.add_claim(f"rule:{slug}:{rule['id']}", "rule", rule, hub)
             for cited in rule.get("cites", []):
-                self.link(node, f"fact:{slug}:{cited}" if f"fact:{slug}:{cited}" in self.nodes
-                          else f"lesson:{cited}", "cites")
+                self.link(
+                    node,
+                    f"fact:{slug}:{cited}" if f"fact:{slug}:{cited}" in self.nodes else f"lesson:{cited}",
+                    "cites",
+                )
 
     def add_commands(self):
         taught = TaughtCommands.all()
         if taught:
             hub = self.hub("commands", "commands", "Your commands", "commands", [])
             for name, entry in taught.items():
-                self.item(f"command:{name}", "command", f"{name}: {TaughtCommands.describe(entry)}", hub,
-                          status="proven")
+                self.item(
+                    f"command:{name}",
+                    "command",
+                    f"{name}: {TaughtCommands.describe(entry)}",
+                    hub,
+                    status="proven",
+                )
 
     def add_runs(self):
         lines = Home.store().items("runs")
@@ -97,59 +122,137 @@ class Graph:
             for event in node.pop("history", []):
                 if event.get("run"):
                     self.add_run(event["run"], lines.get(event["run"]))
-                    self.link(node["id"], f"run:{event['run']}", HISTORY_LINKS.get(event.get("event"), "taught_by"))
+                    self.link(
+                        node["id"], f"run:{event['run']}", HISTORY_LINKS.get(event.get("event"), "taught_by")
+                    )
 
     def add_run(self, run_id, line):
         if f"run:{run_id}" in self.nodes:
             return
-        text = line.get("task", "") if line else "no line about this run is kept (tinker clear runs, or older)"
-        details = [("status", line.get("status", "")), ("language", line.get("language", "")),
-                   ("started", line.get("created", "")), ("updated", line.get("updated", ""))] if line else []
-        self.node(f"run:{run_id}", "run", f"@{run_id}", text, line.get("status") if line else None, "runs", details)
+        text = (
+            line.get("task", "") if line else "no line about this run is kept (tinker clear runs, or older)"
+        )
+        details = (
+            [
+                ("status", line.get("status", "")),
+                ("language", line.get("language", "")),
+                ("started", line.get("created", "")),
+                ("updated", line.get("updated", "")),
+            ]
+            if line
+            else []
+        )
+        self.node(
+            f"run:{run_id}", "run", f"@{run_id}", text, line.get("status") if line else None, "runs", details
+        )
 
     def add_similar(self, embeddings):
-        lessons = [node for node in self.nodes.values() if node["kind"] == "lesson" and node["status"] != "retired"]
-        vectors = embeddings.vectors([lesson["text"] for lesson in lessons],
-                                     keep=False) if embeddings and lessons else None
+        lessons = [
+            node for node in self.nodes.values() if node["kind"] == "lesson" and node["status"] != "retired"
+        ]
+        vectors = (
+            embeddings.vectors([lesson["text"] for lesson in lessons], keep=False)
+            if embeddings and lessons
+            else None
+        )
         if vectors:
             self.similar_by = f"meaning ({embeddings.name})"
-            alike = lambda first, second: Embeddings.cosine(vectors[first], vectors[second]) >= SIMILAR_LESSON_MEANING
+            alike = lambda first, second: (
+                Embeddings.cosine(vectors[first], vectors[second]) >= SIMILAR_LESSON_MEANING
+            )
         else:
             why = embeddings.failed if embeddings else "no embedding model selected (tinker embed NAME)"
             self.similar_by = f"words ({why})" if lessons else "words"
-            alike = lambda first, second: similarity(lessons[first]["text"], lessons[second]["text"]) >= SIMILAR_LESSON_WORDS
+            alike = lambda first, second: (
+                similarity(lessons[first]["text"], lessons[second]["text"]) >= SIMILAR_LESSON_WORDS
+            )
         for first, second in itertools.combinations(range(len(lessons)), 2):
             if alike(first, second):
                 self.link(lessons[first]["id"], lessons[second]["id"], "similar")
 
     def add_lesson(self, lesson, hub):
-        details = [("phase", lesson.get("phase")), ("seen", lesson.get("seen", 1)), ("helped", lesson.get("helped", 0)),
-                   ("added", lesson.get("added")), ("last seen", lesson.get("last_seen"))]
-        return self.item(f"lesson:{lesson['id']}", "lesson", lesson["text"], hub, lesson.get("status", "candidate"),
-                         details, history=lesson.get("history", []))
+        details = [
+            ("phase", lesson.get("phase")),
+            ("seen", lesson.get("seen", 1)),
+            ("helped", lesson.get("helped", 0)),
+            ("added", lesson.get("added")),
+            ("last seen", lesson.get("last_seen")),
+        ]
+        return self.item(
+            f"lesson:{lesson['id']}",
+            "lesson",
+            lesson["text"],
+            hub,
+            lesson.get("status", "candidate"),
+            details,
+            history=lesson.get("history", []),
+        )
 
     def add_claim(self, node_id, kind, claim, hub):
         text = claim.get("text") or claim.get("answer", "")
-        details = [("phase", claim.get("phase")), ("slot", claim.get("slot")), ("confidence", claim.get("confidence")),
-                   ("helped", claim.get("helped", 0))]
-        sources = [source for source in [claim.get("source")] + list(claim.get("also", []))
-                   + list(claim.get("sites", [])) if isinstance(source, str) and source.startswith("http")]
-        return self.item(node_id, kind, text, hub, claim.get("status", "candidate"), details,
-                         history=claim.get("history", []), sources=sources)
+        details = [
+            ("phase", claim.get("phase")),
+            ("slot", claim.get("slot")),
+            ("confidence", claim.get("confidence")),
+            ("helped", claim.get("helped", 0)),
+        ]
+        sources = [
+            source
+            for source in [claim.get("source")] + list(claim.get("also", [])) + list(claim.get("sites", []))
+            if isinstance(source, str) and source.startswith("http")
+        ]
+        return self.item(
+            node_id,
+            kind,
+            text,
+            hub,
+            claim.get("status", "candidate"),
+            details,
+            history=claim.get("history", []),
+            sources=sources,
+        )
 
     def add_fix(self, key, fix, hub):
-        details = [("helped", fix.get("used", 0)), ("added", fix.get("added")),
-                   ("replayed without the model", "yes" if fix.get("replay") else "no")]
-        return self.item(f"fix:{key}:{fix['failure']}", "fix", f"{fix['failure']} → {fix.get('cause', '')}", hub,
-                         fix.get("status", "proven"), details, history=fix.get("history", []))
+        details = [
+            ("helped", fix.get("used", 0)),
+            ("added", fix.get("added")),
+            ("replayed without the model", "yes" if fix.get("replay") else "no"),
+        ]
+        return self.item(
+            f"fix:{key}:{fix['failure']}",
+            "fix",
+            f"{fix['failure']} → {fix.get('cause', '')}",
+            hub,
+            fix.get("status", "proven"),
+            details,
+            history=fix.get("history", []),
+        )
 
     def add_retired(self, doc, hub, key):
         for number, item in enumerate(doc.get("retired", [])):
-            kind = {"lessons": "lesson", "fixes": "fix", "findings": "finding", "rules": "rule"}.get(item.get("was"), "fact")
-            text = item.get("text") or item.get("answer") or f"{item.get('failure', '')} → {item.get('cause', '')}"
-            details = [("was", item.get("was")), ("why", item.get("reason")), ("retired", item.get("retired")),
-                       ("phase", item.get("phase"))]
-            self.item(f"retired:{key}:{number}", kind, text, hub, "retired", details, history=item.get("history", []))
+            kind = {"lessons": "lesson", "fixes": "fix", "findings": "finding", "rules": "rule"}.get(
+                item.get("was"), "fact"
+            )
+            text = (
+                item.get("text")
+                or item.get("answer")
+                or f"{item.get('failure', '')} → {item.get('cause', '')}"
+            )
+            details = [
+                ("was", item.get("was")),
+                ("why", item.get("reason")),
+                ("retired", item.get("retired")),
+                ("phase", item.get("phase")),
+            ]
+            self.item(
+                f"retired:{key}:{number}",
+                kind,
+                text,
+                hub,
+                "retired",
+                details,
+                history=item.get("history", []),
+            )
 
     def hub(self, node_id, kind, label, group, details):
         if node_id in self.nodes:
@@ -165,10 +268,16 @@ class Graph:
         return node_id
 
     def node(self, node_id, kind, label, text, status, group, details):
-        self.nodes[node_id] = {"id": node_id, "kind": kind, "label": label, "text": text, "status": status,
-                               "group": group, "details": [[key, str(value)] for key, value in details
-                                                           if value not in (None, "")],
-                               "sources": []}
+        self.nodes[node_id] = {
+            "id": node_id,
+            "kind": kind,
+            "label": label,
+            "text": text,
+            "status": status,
+            "group": group,
+            "details": [[key, str(value)] for key, value in details if value not in (None, "")],
+            "sources": [],
+        }
         return self.nodes[node_id]
 
     def link(self, source, target, kind):
@@ -186,9 +295,23 @@ class Graph:
 
     def summary(self):
         counts, many = self.counts(), {"fix": "fixes", "retired": "retired"}
-        shown = [f"{counts[kind]} {kind if counts[kind] == 1 else many.get(kind, kind + 's')}" for kind in
-                 ("language", "topic", "lesson", "rule", "fact", "finding", "fix", "toolchain", "command", "run", "retired")
-                 if counts.get(kind)]
+        shown = [
+            f"{counts[kind]} {kind if counts[kind] == 1 else many.get(kind, kind + 's')}"
+            for kind in (
+                "language",
+                "topic",
+                "lesson",
+                "rule",
+                "fact",
+                "finding",
+                "fix",
+                "toolchain",
+                "command",
+                "run",
+                "retired",
+            )
+            if counts.get(kind)
+        ]
         return (", ".join(shown) or "nothing learned yet") + f"; {len(self.links)} links"
 
     def to_json(self):
@@ -196,16 +319,29 @@ class Graph:
 
 
 class GraphPage:
-    KIND_NAMES = {"language": "Languages", "topic": "Topics", "commands": "Your commands", "lesson": "Lessons",
-                  "rule": "Rules", "fact": "Facts", "finding": "Findings", "fix": "Toolchain fixes", "toolchain": "Toolchains",
-                  "command": "Commands", "run": "Runs"}
+    KIND_NAMES = {
+        "language": "Languages",
+        "topic": "Topics",
+        "commands": "Your commands",
+        "lesson": "Lessons",
+        "rule": "Rules",
+        "fact": "Facts",
+        "finding": "Findings",
+        "fix": "Toolchain fixes",
+        "toolchain": "Toolchains",
+        "command": "Commands",
+        "run": "Runs",
+    }
 
     @classmethod
     def html(cls, graph):
         data = json.dumps(graph.to_json(), ensure_ascii=False).replace("</", "<\\/")
-        return (PAGE.replace("__SUMMARY__", html.escape(graph.summary()))
-                .replace("__SIMILAR__", html.escape(graph.similar_by or "words"))
-                .replace("__LIST__", cls.plain_list(graph)).replace("__DATA__", data))
+        return (
+            PAGE.replace("__SUMMARY__", html.escape(graph.summary()))
+            .replace("__SIMILAR__", html.escape(graph.similar_by or "words"))
+            .replace("__LIST__", cls.plain_list(graph))
+            .replace("__DATA__", data)
+        )
 
     @classmethod
     def plain_list(cls, graph):
@@ -226,17 +362,24 @@ class GraphPage:
         for kind, members in kinds.items():
             name = "Retired" if kind == "retired" else cls.KIND_NAMES.get(kind, kind)
             items = "".join(cls.list_item(node) for node in members)
-            parts.append(f"<details><summary>{html.escape(name)} ({len(members)})</summary><ul>{items}</ul></details>")
+            parts.append(
+                f"<details><summary>{html.escape(name)} ({len(members)})</summary><ul>{items}</ul></details>"
+            )
         return "".join(parts) + "</section>"
 
     @staticmethod
     def list_item(node):
         tags = [node["status"]] if node["status"] else []
-        tags += [f"{key} {value}" for key, value in node["details"]
-                 if key in ("phase", "seen", "helped", "why", "status")]
+        tags += [
+            f"{key} {value}"
+            for key, value in node["details"]
+            if key in ("phase", "seen", "helped", "why", "status")
+        ]
         sources = "".join(f' <a href="{html.escape(source)}">source</a>' for source in node["sources"])
-        return (f"<li><span class=tags>{html.escape(' · '.join(tags))}</span> {html.escape(node['text'])}"
-                f"{sources}</li>")
+        return (
+            f"<li><span class=tags>{html.escape(' · '.join(tags))}</span> {html.escape(node['text'])}"
+            f"{sources}</li>"
+        )
 
 
 def write_page(embeddings=None):

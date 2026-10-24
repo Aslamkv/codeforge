@@ -6,17 +6,37 @@ import sys
 from pathlib import Path
 
 import pytest
+from conftest import criterion, plan_of, record_of
 
 from tinkerkit.messages import Message, say
-from tinkerkit.project import Brief, Outcome, Project, RunChecks, Runs, SpecDocument, Tracker, project_store, saved
+from tinkerkit.project import (
+    Brief,
+    Outcome,
+    Project,
+    RunChecks,
+    Runs,
+    SpecDocument,
+    Tracker,
+    project_store,
+    saved,
+)
 from tinkerkit.settings import Home
 from tinkerkit.workspace import TaughtCommands, Workspace
-from conftest import criterion, plan_of, record_of
 
 
 def run_args(**given):
-    defaults = {"restart": False, "resume": None, "workdir": ".", "spec": None, "spec_file": None, "add": None,
-                "amend": None, "web": False, "task": "a calculator", "yes": False}
+    defaults = {
+        "restart": False,
+        "resume": None,
+        "workdir": ".",
+        "spec": None,
+        "spec_file": None,
+        "add": None,
+        "amend": None,
+        "web": False,
+        "task": "a calculator",
+        "yes": False,
+    }
     return argparse.Namespace(**dict(defaults, **given))
 
 
@@ -24,7 +44,9 @@ def saved_run(folder, run_id="abc123", cycles=(), steps=()):
     folder.mkdir(parents=True, exist_ok=True)
     run = dict(Runs.new_record("a calculator", folder, None), id=run_id)
     Runs.save(run, folder)
-    project_store(folder).put("spec", "plan", {"steps": list(steps), "counter": len(steps), "cycles": list(cycles)})
+    project_store(folder).put(
+        "spec", "plan", {"steps": list(steps), "counter": len(steps), "cycles": list(cycles)}
+    )
     return run
 
 
@@ -32,11 +54,19 @@ def saved_run(folder, run_id="abc123", cycles=(), steps=()):
 def test_new_record_and_save(home_store, project_dir):
     run = Runs.new_record("a task", project_dir, "plan.md")
     assert re.fullmatch(r"[0-9a-f]{6}", run["id"])
-    assert {key: run[key] for key in ("task", "workdir", "spec", "status")} == \
-        {"task": "a task", "workdir": str(project_dir), "spec": "plan.md", "status": "running"}
+    assert {key: run[key] for key in ("task", "workdir", "spec", "status")} == {
+        "task": "a task",
+        "workdir": str(project_dir),
+        "spec": "plan.md",
+        "status": "running",
+    }
     Runs.save(run, project_dir)
     assert record_of(project_dir) == run and "updated" in run
-    assert home_store.get("projects", run["id"]) == {"id": run["id"], "workdir": str(project_dir), "task": "a task"}
+    assert home_store.get("projects", run["id"]) == {
+        "id": run["id"],
+        "workdir": str(project_dir),
+        "task": "a task",
+    }
 
 
 @pytest.mark.spec("PRJ-2")
@@ -54,8 +84,9 @@ def test_find_by_full_id_or_folder_name_only(tmp_path):
 def test_two_folders_of_one_name_need_the_id(tmp_path):
     saved_run(tmp_path / "a" / "calc", "aaa111")
     saved_run(tmp_path / "b" / "calc", "bbb222")
-    with pytest.raises(SystemExit, match="Several projects are in folders named calc: name one by its ID: @aaa111, "
-                                         "@bbb222"):
+    with pytest.raises(
+        SystemExit, match="Several projects are in folders named calc: name one by its ID: @aaa111, @bbb222"
+    ):
         Runs.find("calc")
     assert Runs.find("bbb222")["workdir"] == str(tmp_path / "b" / "calc")
 
@@ -64,6 +95,7 @@ def test_two_folders_of_one_name_need_the_id(tmp_path):
 def test_entries_have_each_projects_own_record(tmp_path):
     saved_run(tmp_path / "calc", "abc123")
     import shutil
+
     saved_run(tmp_path / "gone", "fff000")
     shutil.rmtree(tmp_path / "gone")
     entries = {entry["id"]: entry for entry in Runs.entries()}
@@ -80,6 +112,7 @@ def test_workdir(tmp_path, monkeypatch):
     with pytest.raises(SystemExit, match="does not exist"):
         Runs.workdir("", "nowhere")
     import shutil
+
     shutil.rmtree(tmp_path / "p")
     with pytest.raises(SystemExit, match="no longer exists"):
         Runs.workdir("abc123", None)
@@ -106,7 +139,9 @@ def test_open_existing(tmp_path):
     run, _, text, mode = Runs.open(run_args(resume="", workdir=str(folder)))
     assert (mode, text, run["status"]) == ("resume", "saved spec", "running")
     (tmp_path / "feature.md").write_text("feature spec")
-    _, _, text, mode = Runs.open(run_args(resume="", workdir=str(folder), add=["x"], spec_file=str(tmp_path / "feature.md")))
+    _, _, text, mode = Runs.open(
+        run_args(resume="", workdir=str(folder), add=["x"], spec_file=str(tmp_path / "feature.md"))
+    )
     assert (mode, text) == ("change", "feature spec")
 
 
@@ -210,22 +245,31 @@ def test_project_cycles_and_criteria(make_project, project_dir):
     assert sorted(path.name for path in project_dir.iterdir()) == [".tinker", "SPEC.md"]
 
 
-FILES = {"calc.py": {"kind": "code", "role": "the calculator", "contract": ["add(a, b) -> int"], "uses": ["util.py"]},
-         "util.py": {"kind": "code", "role": "helpers", "contract": [], "uses": ["deep.py"]},
-         "deep.py": {"kind": "code", "role": "deeper", "contract": [], "uses": []},
-         "templates/page.html": {"kind": "template", "role": "the page", "contract": [], "uses": []},
-         "web.py": {"kind": "code", "role": "renders page.html", "contract": [], "uses": ["templates/page.html"]},
-         "tests/test_calc.py": {"kind": "test", "role": "tests", "contract": [], "uses": ["calc.py"]},
-         "tests/test_web.py": {"kind": "test", "role": "tests", "contract": [], "uses": ["web.py"]},
-         "requirements.txt": {"kind": "config", "role": "dependencies", "contract": [], "uses": []}}
+FILES = {
+    "calc.py": {
+        "kind": "code",
+        "role": "the calculator",
+        "contract": ["add(a, b) -> int"],
+        "uses": ["util.py"],
+    },
+    "util.py": {"kind": "code", "role": "helpers", "contract": [], "uses": ["deep.py"]},
+    "deep.py": {"kind": "code", "role": "deeper", "contract": [], "uses": []},
+    "templates/page.html": {"kind": "template", "role": "the page", "contract": [], "uses": []},
+    "web.py": {"kind": "code", "role": "renders page.html", "contract": [], "uses": ["templates/page.html"]},
+    "tests/test_calc.py": {"kind": "test", "role": "tests", "contract": [], "uses": ["calc.py"]},
+    "tests/test_web.py": {"kind": "test", "role": "tests", "contract": [], "uses": ["web.py"]},
+    "requirements.txt": {"kind": "config", "role": "dependencies", "contract": [], "uses": []},
+}
 
 
 @pytest.mark.spec("PRJ-8")
 def test_criteria_of(make_project):
-    steps = [criterion("C1", "tests/test_calc.py::test_add", "add(2, 3) is 5"),
-             criterion("C2", "tests/test_other.py::test_x", "util.clean(' a ') is 'a'"),
-             criterion("C3", "tests/test_web.py::test_page", "GET / shows the title"),
-             criterion("C4", "tests/test_other.py::test_y", "nothing related")]
+    steps = [
+        criterion("C1", "tests/test_calc.py::test_add", "add(2, 3) is 5"),
+        criterion("C2", "tests/test_other.py::test_x", "util.clean(' a ') is 'a'"),
+        criterion("C3", "tests/test_web.py::test_page", "GET / shows the title"),
+        criterion("C4", "tests/test_other.py::test_y", "nothing related"),
+    ]
     project = make_project(steps, files=FILES)
     assert [criterion["id"] for criterion in project.criteria_of("calc.py", steps)] == ["C1"]
     assert [criterion["id"] for criterion in project.criteria_of("util.py", steps)] == ["C2"]
@@ -240,11 +284,15 @@ def test_design_helpers(make_project, project_dir):
     assert project.entry_files(["web.py", "calc.py", "util.py"]) == ["calc.py", "web.py"]
     assert project.contracts(["calc.py", "util.py"]) == "calc.py:\n  - add(a, b) -> int"
     project.register(["calc.py", "new.py"], "code", "split off", ["calc.py"])
-    assert project.files["calc.py"]["role"] == "the calculator" and project.files["new.py"]["uses"] == ["calc.py"]
+    assert project.files["calc.py"]["role"] == "the calculator" and project.files["new.py"]["uses"] == [
+        "calc.py"
+    ]
     (project_dir / "requirements.txt").write_text("flask\n")
     assert project.dependencies(lambda path: (project_dir / path).read_text()) == "requirements.txt:\nflask"
     assert project.dependencies(lambda path: "") == "requirements.txt:\ndependencies"
-    assert project.uses("calc.py") == ["util.py", "deep.py"] and project.uses("calc.py", depth=1) == ["util.py"]
+    assert project.uses("calc.py") == ["util.py", "deep.py"] and project.uses("calc.py", depth=1) == [
+        "util.py"
+    ]
     assert project.paths("test") == ["tests/test_calc.py", "tests/test_web.py"]
     assert project.outline().startswith("- calc.py (code): the calculator")
     workspace = Workspace(project_dir)
@@ -264,23 +312,55 @@ def test_test_names_and_criterion_of_test(make_project):
 @pytest.mark.spec("PRJ-10")
 def test_spec_document(make_project, tinker_home):
     TaughtCommands.teach("act", ". .venv/bin/activate")
-    steps = [criterion("C1", "t.py::test_add", "add(2, 3) is 5", status="green", source="adds numbers"),
-             criterion("C2", "t.py::test_div", "div(1, 0) says no", status="blocked", last_error="ZeroDivisionError")]
-    cycles = [{"id": "base", "request": "a calculator", "phase": "verify", "constraints": ["stdlib only"],
-               "non_goals": ["a GUI"], "review": ["calc.py: fine"], "data": "SAMPLE = {}"}]
-    toolchain = {"setup": ["python3 -m venv .venv"], "activate": "act", "test_all": "act && pytest -q",
-                 "test_one": "pytest -q {file}::{name}", "lint": "none"}
-    project = make_project(steps, files=dict(FILES), cycles=cycles, toolchain=toolchain,
-                           learned=[{"name": "Flask", "topic": "flask", "phase": "code", "text": "x"}])
+    steps = [
+        criterion("C1", "t.py::test_add", "add(2, 3) is 5", status="green", source="adds numbers"),
+        criterion(
+            "C2", "t.py::test_div", "div(1, 0) says no", status="blocked", last_error="ZeroDivisionError"
+        ),
+    ]
+    cycles = [
+        {
+            "id": "base",
+            "request": "a calculator",
+            "phase": "verify",
+            "constraints": ["stdlib only"],
+            "non_goals": ["a GUI"],
+            "review": ["calc.py: fine"],
+            "data": "SAMPLE = {}",
+        }
+    ]
+    toolchain = {
+        "setup": ["python3 -m venv .venv"],
+        "activate": "act",
+        "test_all": "act && pytest -q",
+        "test_one": "pytest -q {file}::{name}",
+        "lint": "none",
+    }
+    project = make_project(
+        steps,
+        files=dict(FILES),
+        cycles=cycles,
+        toolchain=toolchain,
+        learned=[{"name": "Flask", "topic": "flask", "phase": "code", "text": "x"}],
+    )
     text = SpecDocument(project).text()
-    assert text.startswith("# Spec: a calculator\n\nRun abc123. Language: Python. Learned from the web and used: Flask.")
+    assert text.startswith(
+        "# Spec: a calculator\n\nRun abc123. Language: Python. Learned from the web and used: Flask."
+    )
     assert "| C1 | add(2, 3) is 5 | `t.py::test_add` | passes |" in text
     assert "| C2 | div(1, 0) says no | `t.py::test_div` | parked |" in text
-    assert "- test_all: `. .venv/bin/activate && pytest -q`" in text and "- setup: `python3 -m venv .venv`" in text
+    assert (
+        "- test_all: `. .venv/bin/activate && pytest -q`" in text
+        and "- setup: `python3 -m venv .venv`" in text
+    )
     assert "- activate: `. .venv/bin/activate`" in text
     assert "## Project: a calculator" in text and "Phase: verify" in text
-    for line in ("Constraints:\n- stdlib only", "Not wanted (non-goals):\n- a GUI", "Interface check:\n- calc.py: fine",
-                 "```\nSAMPLE = {}\n```"):
+    for line in (
+        "Constraints:\n- stdlib only",
+        "Not wanted (non-goals):\n- a GUI",
+        "Interface check:\n- calc.py: fine",
+        "```\nSAMPLE = {}\n```",
+    ):
         assert line in text
     assert "- `calc.py` [code]: the calculator (uses util.py)\n    - add(a, b) -> int" in text
     assert "### C1 add(2, 3) is 5" in text and '- From the request: "adds numbers"' in text
@@ -322,7 +402,11 @@ def test_the_tracker_publishes_each_change(home_store, project_dir):
     tracker.points(1, 3)
     tracker.wait({"name": "calc", "kind": "project"})
     state = home_store.get("running", str(os.getpid()))
-    assert state["title"] == "calc: a calculator" and state["run"] == "abc123" and state["folder"] == str(project_dir)
+    assert (
+        state["title"] == "calc: a calculator"
+        and state["run"] == "abc123"
+        and state["folder"] == str(project_dir)
+    )
     assert state["step"] == "spec" and state["doing"] == "📝 Writing the spec" and state["before"] == 12.0
     assert state["steps"] == ["🧠 Recalled what Tinker has learned"] and state["passing"] == [1, 3]
     assert state["waiting"] == {"name": "calc", "kind": "project"} and state["pid"] == os.getpid()
@@ -340,8 +424,22 @@ def test_the_tracker_publishes_each_change(home_store, project_dir):
 
 @pytest.mark.spec("PRJ-14")
 def test_steps_live_progress_and_messages(home_store, project_dir, monkeypatch):
-    assert set(Tracker.DOING_AND_DONE) >= {"recall", "spec", "design", "review", "setup", "tests", "code", "verify", "tidy", "docs",
-                                  "final_review", "lessons", "reproduce", "amend"}
+    assert set(Tracker.DOING_AND_DONE) >= {
+        "recall",
+        "spec",
+        "design",
+        "review",
+        "setup",
+        "tests",
+        "code",
+        "verify",
+        "tidy",
+        "docs",
+        "final_review",
+        "lessons",
+        "reproduce",
+        "amend",
+    }
     tracker = Tracker("calc")
     store = project_store(project_dir)
     tracker.project(store, "abc123", project_dir)
@@ -354,7 +452,9 @@ def test_steps_live_progress_and_messages(home_store, project_dir, monkeypatch):
     assert state["working"] == "Writing calc.py" and state["tally"] == "1/2 files"
     assert state["found"] == "2/0 gives a clear error" and state["latest"] == "💡 2/0 gives a clear error"
     assert [(entry["line"], entry["kind"]) for _, entry in store.entries("output")] == [
-        ("   ✅ Wrote calc.py (12 lines)", "done"), ("   💡 2/0 gives a clear error", "found")]
+        ("   ✅ Wrote calc.py (12 lines)", "done"),
+        ("   💡 2/0 gives a clear error", "found"),
+    ]
     monkeypatch.setattr(Tracker, "QUIET_PUBLISH_SECONDS", 1000)
     a_quiet_change = Message("text", "next line")
     tracker.heard(a_quiet_change)
@@ -371,13 +471,18 @@ def test_a_step_done_says_what_came_of_it(home_store):
     tracker.outcome("3 core chapter(s) of 20, read first")
     tracker.phase("chapters")
     tracker.phase("keep")
-    assert tracker.state["steps"] == ["🧭 Chose the chapters to read: 3 core chapter(s) of 20, read first",
-                                      "📚 Chapters read"]
+    assert tracker.state["steps"] == [
+        "🧭 Chose the chapters to read: 3 core chapter(s) of 20, read first",
+        "📚 Chapters read",
+    ]
 
 
 @pytest.mark.spec("PRJ-14")
 def test_the_passing_count_follows_every_save(make_project, make_session):
-    steps = [criterion("C1", "t.py::a", status="green"), criterion("B2", "t.py::b", status="todo", cycle="f1")]
+    steps = [
+        criterion("C1", "t.py::a", status="green"),
+        criterion("B2", "t.py::b", status="todo", cycle="f1"),
+    ]
     tracker = Tracker("calc")
     session = make_session(make_project(steps), tracker=tracker)
     session.save()
@@ -391,6 +496,7 @@ def test_the_passing_count_follows_every_save(make_project, make_session):
 def test_a_run_keeps_its_calls_and_output_in_its_project(project_dir, make_model, fake_ollama):
     from tinkerkit.prompts import Part
     from tinkerkit.settings import Log
+
     store = project_store(project_dir)
     model = make_model()
     model.log = Log(store, "events")
@@ -407,13 +513,31 @@ def test_a_run_keeps_its_calls_and_output_in_its_project(project_dir, make_model
 @pytest.mark.spec("PRJ-16")
 def test_remember_keeps_a_line_about_each_run(home_store, monkeypatch):
     monkeypatch.setattr("tinkerkit.project.RUNS_KEPT", 2)
-    for run_id, updated in (("aaa111", "2026-10-01 10:00"), ("bbb222", "2026-10-03 10:00"), ("ccc333", "2026-10-02 10:00")):
-        Runs.remember({"id": run_id, "task": f"task {run_id}", "status": "done", "created": "2026-10-01 09:00",
-                       "updated": updated, "workdir": "/somewhere"}, "Python")
+    for run_id, updated in (
+        ("aaa111", "2026-10-01 10:00"),
+        ("bbb222", "2026-10-03 10:00"),
+        ("ccc333", "2026-10-02 10:00"),
+    ):
+        Runs.remember(
+            {
+                "id": run_id,
+                "task": f"task {run_id}",
+                "status": "done",
+                "created": "2026-10-01 09:00",
+                "updated": updated,
+                "workdir": "/somewhere",
+            },
+            "Python",
+        )
     assert sorted(home_store.items("runs")) == ["bbb222", "ccc333"]
-    assert home_store.get("runs", "bbb222") == {"id": "bbb222", "task": "task bbb222", "status": "done",
-                                                "created": "2026-10-01 09:00", "updated": "2026-10-03 10:00",
-                                                "language": "Python"}
+    assert home_store.get("runs", "bbb222") == {
+        "id": "bbb222",
+        "task": "task bbb222",
+        "status": "done",
+        "created": "2026-10-01 09:00",
+        "updated": "2026-10-03 10:00",
+        "language": "Python",
+    }
     home_store.put("projects", "bbb222", {"id": "bbb222", "workdir": "/somewhere", "task": "task bbb222"})
     Home.clear(["runs"], yes=True)
     assert home_store.items("runs") == {} and home_store.items("projects") == {}

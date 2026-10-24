@@ -6,18 +6,17 @@ import threading
 import time
 
 import pytest
+from test_conversation import Recorder
 
-from tinkerkit.cli import Cli, Commands, ProjectRun
 from tinkerkit import conversation, jobs
+from tinkerkit.cli import Cli, Commands
 from tinkerkit.conversation import ConsoleChannel, Desk, Message, Progress, Research, research_once
 from tinkerkit.fetcher import Fetched, Fetcher
 from tinkerkit.jobs import JOB_STOP_SIGNAL, Jobs, is_job, journaled, today
 from tinkerkit.learning import SlotLearner
 from tinkerkit.model import Ollama
 from tinkerkit.project import Tracker
-from tinkerkit.settings import Home
 from tinkerkit.web import Internet
-from test_conversation import Recorder
 
 DEAD_PID = 999999999
 
@@ -25,7 +24,7 @@ DEAD_PID = 999999999
 def stopped_job(home_store, argv, answers=()):
     with pytest.raises(KeyboardInterrupt), Jobs.running(argv):
         for request, answer in answers:
-            journaled(request, lambda: answer)
+            journaled(request, lambda answer=answer: answer)
         raise KeyboardInterrupt
     return Jobs.get(1)
 
@@ -34,17 +33,36 @@ def asked(answer, calls):
     def ask():
         calls.append(answer)
         return answer
+
     return ask
 
 
 @pytest.mark.spec("JOB-1")
 def test_long_commands_are_jobs_and_the_rest_are_not():
-    for argv in (["task", "a", "calculator"], ["resume", "@calc"], ["add", "x"], ["learn", "rust"], ["ask", "q"],
-                 ["teach", "t"], ["research", "python"], ["exercise", "rust"], ["confirm"], ["amend", "x"],
-                 ["ask", "status", "of", "python"]):
+    for argv in (
+        ["task", "a", "calculator"],
+        ["resume", "@calc"],
+        ["add", "x"],
+        ["learn", "rust"],
+        ["ask", "q"],
+        ["teach", "t"],
+        ["research", "python"],
+        ["exercise", "rust"],
+        ["confirm"],
+        ["amend", "x"],
+        ["ask", "status", "of", "python"],
+    ):
         assert is_job(argv), argv
-    for argv in ([], ["help"], ["runs"], ["jobs"], ["stop"], ["exercise", "status"], ["learn", "ll", "ls -l"],
-                 ["task", "--help"]):
+    for argv in (
+        [],
+        ["help"],
+        ["runs"],
+        ["jobs"],
+        ["stop"],
+        ["exercise", "status"],
+        ["learn", "ll", "ls -l"],
+        ["task", "--help"],
+    ):
         assert not is_job(argv), argv
 
 
@@ -58,7 +76,9 @@ def test_an_exercises_build_is_not_a_job_of_its_own(monkeypatch):
 def test_a_job_is_numbered_and_kept_while_it_runs(home_store):
     with Jobs.running(["learn", "rust"]):
         job = Jobs.get(1)
-        assert job["state"] == "running" and job["pid"] == os.getpid() and job["arguments"] == ["learn", "rust"]
+        assert (
+            job["state"] == "running" and job["pid"] == os.getpid() and job["arguments"] == ["learn", "rust"]
+        )
         assert job["today"] == datetime.date.today().isoformat() and job["title"] == "learn rust"
         assert signal.getsignal(JOB_STOP_SIGNAL) is jobs.interrupted
     with Jobs.running(["task", "a", "calculator", "--confirm"]):
@@ -94,8 +114,20 @@ def test_a_tracker_that_ends_stopped_stops_the_job_and_says_how_to_go_on(home_st
 
 @pytest.mark.spec("JOB-2")
 def test_a_running_job_whose_process_is_gone_is_stopped(home_store):
-    home_store.put("jobs", "3", {"number": 3, "command": "learn", "title": "learn go", "state": "running", "pid": DEAD_PID,
-                                 "arguments": ["learn", "go"], "started": "x", "updated": "x"})
+    home_store.put(
+        "jobs",
+        "3",
+        {
+            "number": 3,
+            "command": "learn",
+            "title": "learn go",
+            "state": "running",
+            "pid": DEAD_PID,
+            "arguments": ["learn", "go"],
+            "started": "x",
+            "updated": "x",
+        },
+    )
     assert Jobs.get(3)["state"] == "stopped" and Jobs.listed("stopped")[0]["number"] == 3
 
 
@@ -116,7 +148,9 @@ def test_a_resumed_job_is_answered_from_its_journal_and_asks_only_what_is_new(ho
 @pytest.mark.spec("JOB-3")
 def test_outside_a_job_and_after_a_failure_it_asks(home_store):
     calls = []
-    assert journaled({"search": "x"}, asked(["a"], calls)) == ["a"] and journaled({"search": "x"}, asked(["a"], calls))
+    assert journaled({"search": "x"}, asked(["a"], calls)) == ["a"] and journaled(
+        {"search": "x"}, asked(["a"], calls)
+    )
     assert len(calls) == 2
     failed_search = ({"search": "x"}, None)
     stopped_job(home_store, ["research", "x"], [failed_search])
@@ -130,10 +164,17 @@ def test_model_calls_and_page_fetches_go_through_the_journal(home_store, monkeyp
     def streamed(name, messages, *rest):
         calls.append(messages)
         return {"message": {"content": "hi"}}
+
     monkeypatch.setattr(Ollama, "streamed", staticmethod(streamed))
     fetcher = Fetcher(1, 1.0, 1000, 0.0)
-    monkeypatch.setattr(fetcher, "fetched", lambda url, connections, kind: calls.append(url) or (
-        Fetched(url, 200, url, "text") if "good" in url else Fetched(url, error="refused")))
+    monkeypatch.setattr(
+        fetcher,
+        "fetched",
+        lambda url, connections, kind: (
+            calls.append(url)
+            or (Fetched(url, 200, url, "text") if "good" in url else Fetched(url, error="refused"))
+        ),
+    )
     say_hi = [{"role": "user", "content": "hi"}]
     with pytest.raises(KeyboardInterrupt), Jobs.running(["ask", "hi"]):
         Ollama.chat("m", say_hi, 0, {})
@@ -144,8 +185,9 @@ def test_model_calls_and_page_fetches_go_through_the_journal(home_store, monkeyp
     a_different_keep_alive, an_unload = 300, []
     with Jobs.running(Jobs.arguments(["resume", "#1"])):
         assert Ollama.chat("m", say_hi, a_different_keep_alive, {})["message"]["content"] == "hi"
-        assert fetcher.fetch("https://good.example", None, "fetch") == Fetched("https://good.example", 200,
-                                                                               "https://good.example", "text")
+        assert fetcher.fetch("https://good.example", None, "fetch") == Fetched(
+            "https://good.example", 200, "https://good.example", "text"
+        )
         assert not fetcher.fetch("https://bad.example", None, "fetch").ok
         Ollama.chat("m", an_unload, 0, None)
     assert calls == ["https://bad.example", an_unload]
@@ -154,8 +196,20 @@ def test_model_calls_and_page_fetches_go_through_the_journal(home_store, monkeyp
 @pytest.mark.spec("JOB-4")
 def test_a_job_says_the_day_it_started(home_store):
     assert today() == datetime.date.today()
-    home_store.put("jobs", "1", {"number": 1, "command": "learn", "title": "learn rust", "state": "stopped",
-                                 "pid": DEAD_PID, "arguments": ["learn", "rust"], "today": "2026-01-02", "updated": "x"})
+    home_store.put(
+        "jobs",
+        "1",
+        {
+            "number": 1,
+            "command": "learn",
+            "title": "learn rust",
+            "state": "stopped",
+            "pid": DEAD_PID,
+            "arguments": ["learn", "rust"],
+            "today": "2026-01-02",
+            "updated": "x",
+        },
+    )
     with Jobs.running(Jobs.arguments(["resume", "#1"])):
         assert today() == datetime.date(2026, 1, 2)
 
@@ -164,7 +218,10 @@ def test_a_job_says_the_day_it_started(home_store):
 def test_resume_runs_the_jobs_own_command_line(home_store):
     this_folders_run = ["resume"]
     assert Jobs.arguments(this_folders_run) == this_folders_run
-    assert Jobs.arguments(["resume", "@calc"]) == ["resume", "@calc"] and Jobs.arguments(["task", "x"]) == ["task", "x"]
+    assert Jobs.arguments(["resume", "@calc"]) == ["resume", "@calc"] and Jobs.arguments(["task", "x"]) == [
+        "task",
+        "x",
+    ]
     with pytest.raises(SystemExit, match="No job #4"):
         Jobs.arguments(["resume", "#4"])
     stopped_job(home_store, ["learn", "rust"])
@@ -189,10 +246,20 @@ def test_a_tasks_job_is_resumed_as_its_run(home_store):
 
 def keep_jobs(home_store, states):
     for number, state in enumerate(states, 1):
-        home_store.put("jobs", str(number), {"number": number, "command": "learn", "title": f"learn topic {number}",
-                                             "state": state, "pid": os.getpid() if state == "running" else DEAD_PID,
-                                             "arguments": ["learn", f"topic {number}"], "started": "2026-10-23 09:00",
-                                             "updated": "2026-10-23 09:00"})
+        home_store.put(
+            "jobs",
+            str(number),
+            {
+                "number": number,
+                "command": "learn",
+                "title": f"learn topic {number}",
+                "state": state,
+                "pid": os.getpid() if state == "running" else DEAD_PID,
+                "arguments": ["learn", f"topic {number}"],
+                "started": "2026-10-23 09:00",
+                "updated": "2026-10-23 09:00",
+            },
+        )
 
 
 @pytest.mark.spec("JOB-6")
@@ -222,7 +289,10 @@ def test_jobs_come_a_page_at_a_time(home_store, capsys):
 def test_tinker_jobs_takes_a_state_and_a_page():
     assert Cli.parse(["jobs"]).jobs == (None, 1)
     assert Cli.parse(["jobs", "stopped"]).jobs == ("stopped", 1)
-    assert Cli.parse(["jobs", "finished", "2"]).jobs == ("finished", 2) and Cli.parse(["jobs", "3"]).jobs == (None, 3)
+    assert Cli.parse(["jobs", "finished", "2"]).jobs == ("finished", 2) and Cli.parse(["jobs", "3"]).jobs == (
+        None,
+        3,
+    )
     for words in (["jobs", "done"], ["jobs", "0"], ["jobs", "running", "1", "2"]):
         with pytest.raises(SystemExit):
             Cli.parse(words)
@@ -245,6 +315,7 @@ def test_stop_tells_a_job_or_every_one_of_the_persons(home_store, monkeypatch, c
     with pytest.raises(SystemExit):
         Cli.parse(["stop", "3"])
 
+
 @pytest.mark.spec("JOB-11")
 def test_clear_jobs_archives_them_listed_apart_and_never_resumed(home_store, capsys):
     keep_jobs(home_store, ["stopped", "finished", "running", "stopped"])
@@ -254,15 +325,23 @@ def test_clear_jobs_archives_them_listed_apart_and_never_resumed(home_store, cap
     Cli.cleared(["jobs", "#1"], yes=True)
     assert Jobs.get(1)["state"] == "archived" and Jobs.get(1)["archived_from"] == "stopped"
     assert home_store.logged("journal #1") == 0
-    assert [job["number"] for job in Jobs.listed()] == [3, 4] and [job["number"] for job in Jobs.listed("archived")] == [1]
+    assert [job["number"] for job in Jobs.listed()] == [3, 4] and [
+        job["number"] for job in Jobs.listed("archived")
+    ] == [1]
     assert Jobs.resumable(1) == (None, "Job #1 is archived: there is nothing left to resume.")
-    for words, why in ((["jobs", "#3"], "Job #3 is running: stop it first"), (["jobs", "#1"], "archived already"),
-                       (["jobs", "#9"], "No job #9"), (["jobs", "memory"], "job numbers alone")):
+    for words, why in (
+        (["jobs", "#3"], "Job #3 is running: stop it first"),
+        (["jobs", "#1"], "archived already"),
+        (["jobs", "#9"], "No job #9"),
+        (["jobs", "memory"], "job numbers alone"),
+    ):
         with pytest.raises(SystemExit, match=why):
             Cli.cleared(words, yes=True)
     every_stopped_and_finished = ["jobs"]
     Cli.cleared(every_stopped_and_finished, yes=True)
-    assert [job["number"] for job in Jobs.listed("archived")] == [4, 2, 1] and Jobs.get(3)["state"] == "running"
+    assert [job["number"] for job in Jobs.listed("archived")] == [4, 2, 1] and Jobs.get(3)[
+        "state"
+    ] == "running"
     Cli.cleared(["jobs"], yes=True)
     assert "Nothing to clear: no job is stopped or finished." in capsys.readouterr().out
     assert Cli.parse(["jobs", "archived"]).jobs == ("archived", 1)
@@ -272,8 +351,11 @@ def test_clear_jobs_archives_them_listed_apart_and_never_resumed(home_store, cap
 def test_the_conversation_stops_and_resumes_jobs(home_store, tmp_path, monkeypatch):
     desk = Desk([Recorder()], tmp_path)
     started, told = [], []
-    monkeypatch.setattr(desk, "start_task", lambda arguments, folder, title, *rest,
-                        **kwargs: started.append((arguments, title)))
+    monkeypatch.setattr(
+        desk,
+        "start_task",
+        lambda arguments, folder, title, *rest, **kwargs: started.append((arguments, title)),
+    )
     monkeypatch.setattr(desk, "start_exercise", lambda words, title=None: started.append((words, title)))
     monkeypatch.setattr(desk, "stop_exercise", lambda: told.append("exercise"))
     monkeypatch.setattr(Jobs, "stop", staticmethod(lambda job: told.append(job["number"])))
@@ -281,13 +363,20 @@ def test_the_conversation_stops_and_resumes_jobs(home_store, tmp_path, monkeypat
     home_store.put("jobs", "3", dict(Jobs.get(3), command="exercise", title="exercise rust"))
     home_store.put("jobs", "4", dict(Jobs.get(4), command="exercise"))
     answer = lambda text: desk.answer(Message("1", text), desk.channels[0])
-    assert answer("stop #2").startswith("⏹ **Stopping #2**") and answer("stop #4") is None and told == [2, "exercise"]
+    assert (
+        answer("stop #2").startswith("⏹ **Stopping #2**")
+        and answer("stop #4") is None
+        and told == [2, "exercise"]
+    )
     assert answer("stop").startswith("⏹ **Stopping #2**") and told == [2, "exercise", "exercise", 2]
     answer("resume #1")
     answer("resume #3")
     answer("resume @calc")
-    assert started == [(["resume", "#1"], "learn topic 1"), (["resume", "#3"], "exercise rust"),
-                       (["resume", "@calc"], "resume @calc")]
+    assert started == [
+        (["resume", "#1"], "learn topic 1"),
+        (["resume", "#3"], "exercise rust"),
+        (["resume", "@calc"], "resume @calc"),
+    ]
 
 
 @pytest.mark.spec("CNV-23")
@@ -298,8 +387,20 @@ def test_a_research_job_ends_with_its_answer():
 
 
 def other_running(home_store, number=1, command="learn", title="learn go"):
-    home_store.put("jobs", str(number), {"number": number, "command": command, "title": title, "state": "running",
-                                         "pid": os.getppid(), "arguments": title.split(), "started": "x", "updated": "x"})
+    home_store.put(
+        "jobs",
+        str(number),
+        {
+            "number": number,
+            "command": command,
+            "title": title,
+            "state": "running",
+            "pid": os.getppid(),
+            "arguments": title.split(),
+            "started": "x",
+            "updated": "x",
+        },
+    )
     home_store.put("job numbers", "last", number)
 
 
@@ -307,7 +408,9 @@ def other_running(home_store, number=1, command="learn", title="learn go"):
 def test_a_job_that_starts_pauses_the_one_that_runs(home_store, monkeypatch, capsys):
     other_running(home_store)
     told = []
-    monkeypatch.setattr(jobs, "signal_job", lambda job: told.append(job["number"]) or Jobs.update(1, state="paused"))
+    monkeypatch.setattr(
+        jobs, "signal_job", lambda job: told.append(job["number"]) or Jobs.update(1, state="paused")
+    )
     with Jobs.running(["exercise", "python"]):
         assert told == [1] and Jobs.get(1)["paused_by"] == 2 and Jobs.current["state"] == "running"
     assert "Pausing #1 learn go: it goes on once Tinker is idle" in capsys.readouterr().out
@@ -324,8 +427,13 @@ def test_a_paused_job_says_so_and_waits_where_it_is(home_store, monkeypatch):
         tracker.end({"status": "stopped", "headline": "Learning go did not finish"}, 1.0)
         raise KeyboardInterrupt
     ended = tracker.state["ended"]
-    assert ended["status"] == "paused" and ended["headline"] == "Paused for job #2: it goes on once Tinker is idle"
-    assert tracker.state["doing"].startswith("⏸ Paused for job #2") and ended["next"] == [("Go on now", "tinker resume #1")]
+    assert (
+        ended["status"] == "paused"
+        and ended["headline"] == "Paused for job #2: it goes on once Tinker is idle"
+    )
+    assert tracker.state["doing"].startswith("⏸ Paused for job #2") and ended["next"] == [
+        ("Go on now", "tinker resume #1")
+    ]
     assert Jobs.get(1)["state"] == "paused" and waited == [1]
     killed_while_waiting = dict(Jobs.get(1), pid=DEAD_PID)
     home_store.put("jobs", "1", killed_while_waiting)
@@ -345,6 +453,7 @@ def test_the_conversation_starts_a_task_while_another_runs(home_store, tmp_path,
 
         def wait(self, timeout=None):
             return 0
+
     monkeypatch.setattr(desk, "spawn", lambda arguments: spawned.append(arguments) or Running())
     monkeypatch.setattr(desk, "follow", lambda process, reporter, task: None)
     assert desk.start_task(["learn", "go"], tmp_path, "learn go") is None
@@ -358,10 +467,24 @@ class Execd(Exception):
 
 
 def paused_job(home_store, number, pid=None, **more):
-    home_store.put("jobs", str(number), dict({"number": number, "command": "learn", "title": f"learn {number}",
-                                              "state": "paused", "pid": pid or os.getpid(), "paused_by": 9,
-                                              "arguments": ["learn", str(number)], "started": "x", "updated": "x"},
-                                             **more))
+    home_store.put(
+        "jobs",
+        str(number),
+        dict(
+            {
+                "number": number,
+                "command": "learn",
+                "title": f"learn {number}",
+                "state": "paused",
+                "pid": pid or os.getpid(),
+                "paused_by": 9,
+                "arguments": ["learn", str(number)],
+                "started": "x",
+                "updated": "x",
+            },
+            **more,
+        ),
+    )
 
 
 @pytest.mark.spec("JOB-9")
@@ -380,6 +503,7 @@ def test_tinker_is_idle_when_no_job_runs_and_nothing_asked_is_being_answered(hom
 def test_the_newest_paused_job_goes_on_by_itself_once_tinker_is_idle(home_store, monkeypatch, no_sleep):
     def execv(path, argv):
         raise Execd(argv[-2:])
+
     monkeypatch.setattr(os, "execv", execv)
     paused_job(home_store, 1)
     paused_job(home_store, 3)
@@ -405,9 +529,14 @@ def test_resume_makes_a_paused_job_go_on_at_once_and_stop_keeps_it_stopped(home_
         jobs.go_on_when_idle(1)
     stopped_meanwhile = 2
     paused_job(home_store, stopped_meanwhile, pid=os.getppid())
-    assert Jobs.resumable(stopped_meanwhile) == (None, "Job #2 is paused: it goes on by itself once Tinker is idle.")
+    assert Jobs.resumable(stopped_meanwhile) == (
+        None,
+        "Job #2 is paused: it goes on by itself once Tinker is idle.",
+    )
     Jobs.stop(Jobs.get(stopped_meanwhile))
-    assert Jobs.get(stopped_meanwhile)["state"] == "stopped" and Jobs.get(stopped_meanwhile)["paused_by"] is None
+    assert (
+        Jobs.get(stopped_meanwhile)["state"] == "stopped" and Jobs.get(stopped_meanwhile)["paused_by"] is None
+    )
     jobs.go_on_when_idle(stopped_meanwhile)
 
 
@@ -415,14 +544,19 @@ def test_resume_makes_a_paused_job_go_on_at_once_and_stop_keeps_it_stopped(home_
 def test_paused_jobs_are_listed_between_running_and_stopped(home_store):
     keep_jobs(home_store, ["stopped", "running"])
     paused_job(home_store, 3)
-    assert [job["number"] for job in Jobs.listed()] == [2, 3, 1] and Cli.parse(["jobs", "paused"]).jobs == ("paused", 1)
+    assert [job["number"] for job in Jobs.listed()] == [2, 3, 1] and Cli.parse(["jobs", "paused"]).jobs == (
+        "paused",
+        1,
+    )
 
 
 @pytest.mark.spec("JOB-3")
 def test_web_searches_and_fetches_go_through_the_journal(home_store, monkeypatch):
     calls = []
     internet = Internet.__new__(Internet)
-    monkeypatch.setattr(internet, "searched", lambda query, count: calls.append(query) or [{"url": "https://a.example"}])
+    monkeypatch.setattr(
+        internet, "searched", lambda query, count: calls.append(query) or [{"url": "https://a.example"}]
+    )
     monkeypatch.setattr(internet, "fetched", lambda url: calls.append(url) or {"url": url, "content": "text"})
     with pytest.raises(KeyboardInterrupt), Jobs.running(["research", "go"]):
         internet.search("go", 5), internet.fetch("https://a.example")
@@ -437,14 +571,27 @@ def test_web_searches_and_fetches_go_through_the_journal(home_store, monkeypatch
 
 @pytest.mark.spec("JOB-4")
 def test_the_prompts_that_say_the_date_say_the_jobs(home_store):
-    home_store.put("jobs", "1", {"number": 1, "command": "research", "title": "research go", "state": "stopped",
-                                 "pid": DEAD_PID, "arguments": ["research", "go"], "today": "2026-01-02", "updated": "x"})
+    home_store.put(
+        "jobs",
+        "1",
+        {
+            "number": 1,
+            "command": "research",
+            "title": "research go",
+            "state": "stopped",
+            "pid": DEAD_PID,
+            "arguments": ["research", "go"],
+            "today": "2026-01-02",
+            "updated": "x",
+        },
+    )
     asked = []
 
     class Talk:
         def ask(self, channel, chat, messages, tokens):
             asked.append(messages[0]["content"])
             return '{"searches": ["go"]}'
+
     learner = SlotLearner.__new__(SlotLearner)
     learner.topic = "go"
     with Jobs.running(Jobs.arguments(["resume", "#1"])):
@@ -470,6 +617,7 @@ def test_a_chat_pauses_the_job_that_runs_while_it_is_answered(home_store, monkey
     def told_to_pause(job):
         seen.append(jobs.idle())
         Jobs.update(1, state="paused")
+
     monkeypatch.setattr(jobs, "signal_job", told_to_pause)
     with jobs.paused_for_you():
         assert Jobs.get(1)["paused_by"] == "you" and not jobs.idle()
@@ -505,8 +653,16 @@ def test_a_job_that_does_not_pause_is_waited_for_at_most_pause_wait(home_store, 
 @pytest.mark.spec("CNV-23")
 def test_a_research_job_says_its_steps_and_ends_with_its_answer(home_store, monkeypatch):
     monkeypatch.setenv(conversation.CHANNEL_REPORTS_ENV, "off")
-    monkeypatch.setattr(Research, "researching", lambda self, channel, chat, topic, now: (
-        self.enter("searches"), self.enter("read"), self.enter("write"), ("done", "🔎 **go**\nGo 1.25 [1]"))[-1])
+    monkeypatch.setattr(
+        Research,
+        "researching",
+        lambda self, channel, chat, topic, now: (
+            self.enter("searches"),
+            self.enter("read"),
+            self.enter("write"),
+            ("done", "🔎 **go**\nGo 1.25 [1]"),
+        )[-1],
+    )
     research_once(ConsoleChannel(commands_without_tinker=False), None, "go")
     state = home_store.get("running", str(os.getpid()))
     assert state["steps"] == ["🤔 Searches chosen", "🌐 Pages read"] and state["doing"].startswith("✍️")

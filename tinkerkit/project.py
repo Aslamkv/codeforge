@@ -1,19 +1,30 @@
-lazy import os
 import re
+from collections import namedtuple
+lazy import os
 lazy import secrets
 lazy import shutil
 lazy import time
-from collections import namedtuple
 lazy from pathlib import Path
 
 lazy from .jobs import Jobs
 lazy from .messages import say
 lazy from .prompts import Part, Prompts, Reply
 lazy from .settings import (
-    EXERCISE_ENV, FIX_PHASES, Home, PHASES, PROJECT_DB, RUNS_KEPT, STATE_DIR, STATUS_TEXT, Store, confirmed, first_line, now_text, split_text,
+    EXERCISE_ENV,
+    FIX_PHASES,
+    PHASES,
+    PROJECT_DB,
+    RUNS_KEPT,
+    STATE_DIR,
+    STATUS_TEXT,
+    Home,
+    Store,
+    confirmed,
+    first_line,
+    now_text,
+    split_text,
 )
 lazy from .workspace import TaughtCommands, TestRef, Toolchain
-
 
 SpecSource = namedtuple("SpecSource", "text name")
 
@@ -32,7 +43,7 @@ class RunChecks:
         workdir = Runs.workdir("", args.workdir)
         run = saved(workdir, "run", "record")
         if not RunChecks.has_task(run):
-            raise SystemExit(f"{workdir} has no task to restart: start one with tinker task \"...\"")
+            raise SystemExit(f'{workdir} has no task to restart: start one with tinker task "..."')
         args.task = run["task"]
         args.spec_text = saved(workdir, "texts", "spec_text", "")
         args.spec_name = run.get("spec")
@@ -69,24 +80,30 @@ class RunChecks:
     def check_no_run(workdir):
         existing = saved(workdir, "run", "record")
         if existing is not None:
-            raise SystemExit(f"{workdir} already holds run {existing.get('id', '?')}. Continue it with tinker resume, add "
-                             f'to it with tinker add "...", or start the new project in another folder (--workdir).')
+            raise SystemExit(
+                f"{workdir} already holds run {existing.get('id', '?')}. Continue it with tinker resume, add "
+                f'to it with tinker add "...", or start the new project in another folder (--workdir).'
+            )
 
     @staticmethod
     def check_phases(project):
         for cycle in project.cycles:
             phases = FIX_PHASES if cycle.get("kind") == "fix" else PHASES
             if cycle.get("phase") not in phases:
-                raise SystemExit(f"The saved phase '{cycle.get('phase')}' of cycle {cycle.get('id')} is not one of its "
-                                 f"phases ({', '.join(phases)}): restart the project, or tell it as a bug")
+                raise SystemExit(
+                    f"The saved phase '{cycle.get('phase')}' of cycle {cycle.get('id')} is not one of its "
+                    f"phases ({', '.join(phases)}): restart the project, or tell it as a bug"
+                )
 
     @staticmethod
     def check_open_to_add(project):
         run_id, cycle = project.run.get("id", "?"), project.open_cycle()
         if cycle is not None:
             what = "project" if cycle["id"] == "base" else cycle.get("kind", "feature")
-            raise SystemExit(f"Run {run_id} has an unfinished {what} ({first_line(cycle['request'], 80)}). "
-                             f"Finish it first with: tinker resume @{run_id}")
+            raise SystemExit(
+                f"Run {run_id} has an unfinished {what} ({first_line(cycle['request'], 80)}). "
+                f"Finish it first with: tinker resume @{run_id}"
+            )
         if not project.cycles:
             raise SystemExit(f"Run {run_id} has no project spec yet; continue it with tinker resume first.")
 
@@ -94,8 +111,10 @@ class RunChecks:
     def check_awaiting(project, what="tinker amend changes"):
         cycle = project.open_cycle()
         if cycle is None or not cycle.get("awaiting"):
-            raise SystemExit(f"{what} a plan that waits for confirmation, and run {project.run.get('id', '?')} has "
-                             f"none waiting: change a built project with tinker add or tinker fix")
+            raise SystemExit(
+                f"{what} a plan that waits for confirmation, and run {project.run.get('id', '?')} has "
+                f"none waiting: change a built project with tinker add or tinker fix"
+            )
 
 
 class Runs:
@@ -136,21 +155,31 @@ class Runs:
 
     @staticmethod
     def new_record(task, workdir, spec_name):
-        return {"id": secrets.token_hex(3), "task": task, "workdir": str(workdir), "spec": spec_name,
-                "created": now_text(), "status": "running"}
+        return {
+            "id": secrets.token_hex(3),
+            "task": task,
+            "workdir": str(workdir),
+            "spec": spec_name,
+            "created": now_text(),
+            "status": "running",
+        }
 
     @staticmethod
     def save(run, workdir):
         run["updated"] = now_text()
         project_store(workdir).put("run", "record", run)
-        Home.store().put("projects", run["id"], {"id": run["id"], "workdir": str(workdir), "task": run.get("task", "")})
+        Home.store().put(
+            "projects", run["id"], {"id": run["id"], "workdir": str(workdir), "task": run.get("task", "")}
+        )
 
     @staticmethod
     def remember(run, language):
         line = {key: run.get(key, "") for key in ("id", "task", "status", "created", "updated")}
         Home.store().put("runs", run["id"], dict(line, language=language or ""))
         lines = Home.store().items("runs")
-        for run_id in sorted(lines, key=lambda key: lines[key].get("updated", ""))[:max(0, len(lines) - RUNS_KEPT)]:
+        for run_id in sorted(lines, key=lambda key: lines[key].get("updated", ""))[
+            : max(0, len(lines) - RUNS_KEPT)
+        ]:
             Home.store().delete("runs", run_id)
 
     @staticmethod
@@ -162,28 +191,37 @@ class Runs:
             return workdir
         workdir = Path(workdir_arg).expanduser().resolve()
         if not workdir.is_dir():
-            raise SystemExit(f"The project folder {workdir} does not exist: create it first, or give another --workdir.")
+            raise SystemExit(
+                f"The project folder {workdir} does not exist: create it first, or give another --workdir."
+            )
         return workdir
 
     @staticmethod
     def find(name):
         pointers = list(Home.store().items("projects").values())
-        found = [pointer for pointer in pointers if pointer.get("id") == name] or \
-                [pointer for pointer in pointers if Path(str(pointer.get("workdir", ""))).name == name]
+        found = [pointer for pointer in pointers if pointer.get("id") == name] or [
+            pointer for pointer in pointers if Path(str(pointer.get("workdir", ""))).name == name
+        ]
         if not found:
-            raise SystemExit(f"No project @{name}: name one by its full run ID or its folder's name (tinker runs "
-                             f"lists them)")
+            raise SystemExit(
+                f"No project @{name}: name one by its full run ID or its folder's name (tinker runs "
+                f"lists them)"
+            )
         if len(found) > 1:
-            raise SystemExit(f"Several projects are in folders named {name}: name one by its ID: "
-                             f"{', '.join('@' + pointer['id'] for pointer in found)}")
+            raise SystemExit(
+                f"Several projects are in folders named {name}: name one by its ID: "
+                f"{', '.join('@' + pointer['id'] for pointer in found)}"
+            )
         return found[0]
 
     @staticmethod
     def read_record(workdir):
         run = saved(workdir, "run", "record")
         if run is None:
-            raise SystemExit(f'No saved run in {workdir}. Name one with @PROJECT (tinker runs lists them), '
-                             f'or start one with: tinker task "..." --workdir {workdir}')
+            raise SystemExit(
+                f"No saved run in {workdir}. Name one with @PROJECT (tinker runs lists them), "
+                f'or start one with: tinker task "..." --workdir {workdir}'
+            )
         return run
 
     @staticmethod
@@ -195,8 +233,10 @@ class Runs:
 
     @staticmethod
     def entries():
-        return [{**pointer, **(Runs.record_pointed_to(pointer) or {"status": "missing"})}
-                for pointer in Home.store().items("projects").values()]
+        return [
+            {**pointer, **(Runs.record_pointed_to(pointer) or {"status": "missing"})}
+            for pointer in Home.store().items("projects").values()
+        ]
 
     @staticmethod
     def record_pointed_to(pointer):
@@ -206,7 +246,9 @@ class Runs:
     @staticmethod
     def clear_folder(workdir, spec, yes=False):
         Runs.refuse_to_empty_a_shared_folder(workdir)
-        keep = next((item for item in workdir.iterdir() if spec and spec.is_relative_to(item.resolve())), None)
+        keep = next(
+            (item for item in workdir.iterdir() if spec and spec.is_relative_to(item.resolve())), None
+        )
         items = sorted(item for item in workdir.iterdir() if item != keep)
         if not items:
             return
@@ -220,7 +262,9 @@ class Runs:
 
     @staticmethod
     def refuse_to_empty_a_shared_folder(workdir):
-        if workdir in (Path.home().resolve(), Path(workdir.anchor)) or Home.root.resolve().is_relative_to(workdir):
+        if workdir in (Path.home().resolve(), Path(workdir.anchor)) or Home.root.resolve().is_relative_to(
+            workdir
+        ):
             raise SystemExit(f"tinker restart will not empty {workdir}: run it in the project's own folder.")
 
     @staticmethod
@@ -242,8 +286,21 @@ class Runs:
 
 
 class Project:
-    DEPENDENCY_FILES = {"requirements.txt", "pyproject.toml", "setup.cfg", "Pipfile", "package.json", "go.mod",
-                        "Cargo.toml", "Gemfile", "pom.xml", "build.gradle", "build.gradle.kts", "composer.json", "mix.exs"}
+    DEPENDENCY_FILES = {
+        "requirements.txt",
+        "pyproject.toml",
+        "setup.cfg",
+        "Pipfile",
+        "package.json",
+        "go.mod",
+        "Cargo.toml",
+        "Gemfile",
+        "pom.xml",
+        "build.gradle",
+        "build.gradle.kts",
+        "composer.json",
+        "mix.exs",
+    }
 
     def __init__(self, workdir, run, spec):
         self.workdir, self.run, self.spec = workdir, run, spec
@@ -252,7 +309,11 @@ class Project:
 
     @classmethod
     def load(cls, workdir, run=None):
-        return cls(workdir, run or Runs.read_record(workdir), saved(workdir, "spec", "plan", {"steps": [], "counter": 0}))
+        return cls(
+            workdir,
+            run or Runs.read_record(workdir),
+            saved(workdir, "spec", "plan", {"steps": [], "counter": 0}),
+        )
 
     def save(self):
         self.store.put("spec", "plan", self.spec)
@@ -270,8 +331,14 @@ class Project:
         return next((cycle for cycle in self.cycles if cycle.get("phase") != "done"), None)
 
     def new_cycle(self, cycle_id, request, brief="", kind="feature"):
-        cycle = {"id": cycle_id, "request": request, "brief": brief, "kind": kind,
-                 "phase": FIX_PHASES[0] if kind == "fix" else PHASES[0], "created": now_text()}
+        cycle = {
+            "id": cycle_id,
+            "request": request,
+            "brief": brief,
+            "kind": kind,
+            "phase": FIX_PHASES[0] if kind == "fix" else PHASES[0],
+            "created": now_text(),
+        }
         self.cycles.append(cycle)
         self.save()
         return cycle
@@ -291,8 +358,17 @@ class Project:
 
     def new_criterion(self, prefix, title, behaviour, test, cycle_id, source, status, effort=2):
         self.spec["counter"] = self.spec.get("counter", 0) + 1
-        return {"id": f"{prefix}{self.spec['counter']}", "title": title, "behaviour": behaviour, "test": test,
-                "effort": effort, "source": source, "status": status, "cycle": cycle_id, "history": []}
+        return {
+            "id": f"{prefix}{self.spec['counter']}",
+            "title": title,
+            "behaviour": behaviour,
+            "test": test,
+            "effort": effort,
+            "source": source,
+            "status": status,
+            "cycle": cycle_id,
+            "history": [],
+        }
 
     def criterion_of_test(self, test):
         return next((criterion["behaviour"] for criterion in self.criteria if criterion["test"] == test), "")
@@ -333,8 +409,10 @@ class Project:
         return [path for path, info in self.files.items() if not kinds or info.get("kind") in kinds]
 
     def outline(self):
-        return "\n".join(f"- {path} ({info.get('kind', 'code')}): {info.get('role', '')}"
-                         for path, info in self.files.items())
+        return "\n".join(
+            f"- {path} ({info.get('kind', 'code')}): {info.get('role', '')}"
+            for path, info in self.files.items()
+        )
 
     def register(self, created, kind, role, uses=()):
         for path in created:
@@ -354,21 +432,33 @@ class Project:
         direct = [step for step in steps if self.reached_by(path, step, template)]
         if not template:
             return direct
-        renderers = [renderer for renderer, info in self.files.items() if path in info.get("uses", [])
-                     and renderer != path]
-        found = {step["id"]: step for step in direct + [*self.criteria_of(renderer, steps) for renderer in renderers]}
+        renderers = [
+            renderer
+            for renderer, info in self.files.items()
+            if path in info.get("uses", []) and renderer != path
+        ]
+        found = {
+            step["id"]: step
+            for step in direct + [*self.criteria_of(renderer, steps) for renderer in renderers]
+        }
         return list(found.values())
 
     def reached_by(self, path, criterion, template):
         behaviour = criterion["behaviour"].lower()
-        return path in self.files.get(TestRef(criterion["test"]).file, {}).get("uses", []) \
-            or Path(path).name.lower() in behaviour \
-            or (not template and re.search(rf"\b{re.escape(Path(path).stem.lower())}\.\w", behaviour) is not None)
+        return (
+            path in self.files.get(TestRef(criterion["test"]).file, {}).get("uses", [])
+            or Path(path).name.lower() in behaviour
+            or (
+                not template
+                and re.search(rf"\b{re.escape(Path(path).stem.lower())}\.\w", behaviour) is not None
+            )
+        )
 
     def entry_files(self, paths):
         entry, run = self.spec.get("entry", ""), self.toolchain.run
-        return [path for path in paths if path == entry] + [path for path in paths if path != entry
-                                                            and Path(path).name in run]
+        return [path for path in paths if path == entry] + [
+            path for path in paths if path != entry and Path(path).name in run
+        ]
 
     def contracts(self, paths):
         out = []
@@ -379,9 +469,15 @@ class Project:
         return "\n".join(out)
 
     def dependencies(self, read):
-        found = [path for path, info in self.files.items() if info.get("kind") == "config"
-                 and ("depend" in info.get("role", "").lower() or Path(path).name in self.DEPENDENCY_FILES)]
-        return "\n".join(f"{path}:\n{read(path) or self.files[path].get('role', '')}".strip() for path in found)
+        found = [
+            path
+            for path, info in self.files.items()
+            if info.get("kind") == "config"
+            and ("depend" in info.get("role", "").lower() or Path(path).name in self.DEPENDENCY_FILES)
+        ]
+        return "\n".join(
+            f"{path}:\n{read(path) or self.files[path].get('role', '')}".strip() for path in found
+        )
 
 
 class SpecDocument:
@@ -389,30 +485,42 @@ class SpecDocument:
         self.project = project
 
     def text(self):
-        lines = self.heading() + self.table() + self.commands() + self.cycles() + self.design() + self.criteria()
+        lines = (
+            self.heading() + self.table() + self.commands() + self.cycles() + self.design() + self.criteria()
+        )
         return "\n".join(lines) + "\n"
 
     def heading(self):
         project = self.project
         topics = list(dict.fromkeys(item["name"] for item in project.spec.get("learned", [])))
-        return [f"# Spec: {first_line(project.run['task'], 120)}", "",
-                f"Run {project.run['id']}. Language: {project.language or '?'}."
-                + (f" Learned from the web and used: {', '.join(topics)}." if topics else ""), ""]
+        return [
+            f"# Spec: {first_line(project.run['task'], 120)}",
+            "",
+            f"Run {project.run['id']}. Language: {project.language or '?'}."
+            + (f" Learned from the web and used: {', '.join(topics)}." if topics else ""),
+            "",
+        ]
 
     def table(self):
-        return ["| ID | Criterion | Test | Status |", "|---|---|---|---|"] + \
-            [f"| {criterion['id']} | {criterion['title']} | `{criterion['test']}` | {status_text(criterion)} |"
-             for criterion in self.project.criteria]
+        return ["| ID | Criterion | Test | Status |", "|---|---|---|---|"] + [
+            f"| {criterion['id']} | {criterion['title']} | `{criterion['test']}` | {status_text(criterion)} |"
+            for criterion in self.project.criteria
+        ]
 
     def commands(self):
         toolchain = self.project.toolchain
         if not toolchain:
             return []
         for_anyone = TaughtCommands.spelled_out
-        lines = ["", "## Commands (run in the project folder)", ""] + [f"- setup: `{for_anyone(command)}`"
-                                                                       for command in toolchain.setup]
+        lines = ["", "## Commands (run in the project folder)", ""] + [
+            f"- setup: `{for_anyone(command)}`" for command in toolchain.setup
+        ]
         lines += [f"- activate: `{for_anyone(toolchain.activate)}`"] if toolchain.activate else []
-        lines += [f"- {key}: `{for_anyone(getattr(toolchain, key))}`" for key in Toolchain.COMMANDS if getattr(toolchain, key)]
+        lines += [
+            f"- {key}: `{for_anyone(getattr(toolchain, key))}`"
+            for key in Toolchain.COMMANDS
+            if getattr(toolchain, key)
+        ]
         return lines
 
     def cycles(self):
@@ -420,15 +528,30 @@ class SpecDocument:
 
     @staticmethod
     def cycle(cycle):
-        lines = ["", f"## {'Project' if cycle['id'] == 'base' else 'Feature ' + cycle['id']}: "
-                     f"{first_line(cycle['request'], 120)}", "", f"Phase: {cycle.get('phase')}", ""]
-        for title, key in (("Constraints", "constraints"), ("Not wanted (non-goals)", "non_goals"),
-                           ("Interface check", "review")):
+        lines = [
+            "",
+            f"## {'Project' if cycle['id'] == 'base' else 'Feature ' + cycle['id']}: "
+            f"{first_line(cycle['request'], 120)}",
+            "",
+            f"Phase: {cycle.get('phase')}",
+            "",
+        ]
+        for title, key in (
+            ("Constraints", "constraints"),
+            ("Not wanted (non-goals)", "non_goals"),
+            ("Interface check", "review"),
+        ):
             if cycle.get(key):
                 lines += [f"{title}:"] + [f"- {item}" for item in cycle[key]] + [""]
         if cycle.get("data"):
-            lines += ["External services: adapters and the sample data tests pass instead:", "",
-                      "```", cycle["data"], "```", ""]
+            lines += [
+                "External services: adapters and the sample data tests pass instead:",
+                "",
+                "```",
+                cycle["data"],
+                "```",
+                "",
+            ]
         return lines
 
     def design(self):
@@ -443,15 +566,19 @@ class SpecDocument:
 
     def criteria(self):
         steps = self.project.criteria
-        return ["", "## Spec criteria (tests written first; the code passes them)", ""] + self.criteria_lines(steps) \
-            if steps else []
+        return (
+            ["", "## Spec criteria (tests written first; the code passes them)", ""]
+            + self.criteria_lines(steps)
+            if steps
+            else []
+        )
 
     def criteria_lines(self, steps):
         lines = []
         for step in steps:
             lines += [f"### {step['id']} {step['title']}", "", step["behaviour"], ""]
             if step.get("source"):
-                lines.append(f"- From the request: \"{step['source']}\"")
+                lines.append(f'- From the request: "{step["source"]}"')
             lines += [f"- Test: `{step['test']}`", f"- Status: {status_text(step)}"]
             if step.get("last_error") and step["status"] != "green":
                 lines.append(f"- Last error: {first_line(step['last_error'], 300)}")
@@ -478,68 +605,92 @@ class Brief:
             return spec.strip()
         chunks = split_text(spec, model.limit_chars(Prompts.BRIEF_SYSTEM) - len(task) - 120)
         words_each = max(60, limit // 7 // len(chunks))
-        notes = [Reply(model.ask(Prompts.BRIEF_SYSTEM.format(words=words_each),
-                                 [Part("Task", task, True), Part("Spec excerpt", chunk, True)],
-                                 f"Brief {number}/{len(chunks)}")).text
-                 for number, chunk in enumerate(chunks, 1)]
+        notes = [
+            Reply(
+                model.ask(
+                    Prompts.BRIEF_SYSTEM.format(words=words_each),
+                    [Part("Task", task, True), Part("Spec excerpt", chunk, True)],
+                    f"Brief {number}/{len(chunks)}",
+                )
+            ).text
+            for number, chunk in enumerate(chunks, 1)
+        ]
         text = "\n".join(notes)
         cut = text.rfind("\n", 0, limit)
-        return text if len(text) <= limit else text[:cut if cut > 0 else limit]
+        return text if len(text) <= limit else text[: cut if cut > 0 else limit]
 
 
 class Tracker:
-    DOING_AND_DONE = {"recall": ("🧠 Recalling what Tinker has learned", "🧠 Recalled what Tinker has learned"),
-             "amend": ("✏️ Changing the plan", "✏️ Plan changed"),
-             "spec": ("📝 Writing the spec", "📝 Spec written"),
-             "design": ("📐 Designing where the files meet", "📐 Design done"),
-             "review": ("🔍 Reviewing the design", "🔍 Design reviewed"),
-             "setup": ("🔧 Setting up the test tool", "🔧 Test tool set up"),
-             "tests": ("🧪 Writing a test for every spec point", "🧪 Tests written"),
-             "code": ("💻 Writing the code", "💻 Code written"),
-             "verify": ("🔁 Fixing until every test passes", "🔁 Verified"),
-             "tidy": ("🧹 Tidying the code", "🧹 Code tidied"),
-             "docs": ("📖 Writing the README", "📖 README written"),
-             "final_review": ("🏁 Final review, as a person runs it", "🏁 Final review done"),
-             "lessons": ("📒 Keeping lessons for the next projects", "📒 Lessons kept"),
-             "reproduce": ("🐞 Showing the bug with a test", "🐞 Bug shown by a test"),
-             "search": ("🔎 Searching the web", "🔎 Web searched"),
-             "plan": ("🤔 Working out what it is", "🤔 Worked out what it is"),
-             "machine": ("💻 Checking what is installed", "💻 Checked what is installed"),
-             "documentation": ("📖 Reading its documentation", "📖 Documentation read"),
-             "digest": ("🧠 Reading the passages for answers", "🧠 Passages read"),
-             "follow-up": ("🔁 Searching for what is still missing", "🔁 Searched for what was missing"),
-             "condense": ("✍️ Turning the facts into rules", "✍️ Rules written"),
-             "frame": ("📝 Framing the research questions", "📝 Questions framed"),
-             "investigate": ("🔬 Reading and cross-checking sources", "🔬 Sources cross-checked"),
-             "keep": ("💾 Saving what was learned", "💾 Saved"),
-             "open": ("📖 Opening the book", "📖 Book opened"),
-             "survey": ("🧭 Reading its contents, foreword and index", "🧭 Chose the chapters to read"),
-             "chapters": ("📚 Reading the chapters that matter", "📚 Chapters read"),
-             "answer": ("💬 Answering from what Tinker keeps", "💬 Answered"),
-             "understand": ("🤔 Working out what to check", "🤔 Worked out what to check"),
-             "judge": ("⚖️ Weighing the evidence", "⚖️ Evidence weighed"),
-             "correct": ("✏️ Correcting what Tinker keeps", "✏️ Corrected"),
-             "identify": ("🔤 Making sure it is a language", "🔤 It is a language"),
-             "learn": ("📚 Learning the language first", "📚 Language learned"),
-             "pick": ("🎯 Choosing the next practice project", "🎯 Practice project chosen"),
-             "build": ("🔨 Building the practice project", "🔨 Practice project built"),
-             "feature": ("➕ Adding a feature to it", "➕ Feature added"),
-             "measure": ("📏 Measuring how it went", "📏 Measured"),
-             "reflect": ("📒 Learning from what went wrong and what was slow", "📒 Lessons kept"),
-             "searches": ("🤔 Working out what to search", "🤔 Searches chosen"),
-             "read": ("🌐 Searching the web and reading the pages", "🌐 Pages read"),
-             "write": ("✍️ Writing the answer from the pages", "✍️ Answer written")}
+    DOING_AND_DONE = {
+        "recall": ("🧠 Recalling what Tinker has learned", "🧠 Recalled what Tinker has learned"),
+        "amend": ("✏️ Changing the plan", "✏️ Plan changed"),
+        "spec": ("📝 Writing the spec", "📝 Spec written"),
+        "design": ("📐 Designing where the files meet", "📐 Design done"),
+        "review": ("🔍 Reviewing the design", "🔍 Design reviewed"),
+        "setup": ("🔧 Setting up the test tool", "🔧 Test tool set up"),
+        "tests": ("🧪 Writing a test for every spec point", "🧪 Tests written"),
+        "code": ("💻 Writing the code", "💻 Code written"),
+        "verify": ("🔁 Fixing until every test passes", "🔁 Verified"),
+        "tidy": ("🧹 Tidying the code", "🧹 Code tidied"),
+        "docs": ("📖 Writing the README", "📖 README written"),
+        "final_review": ("🏁 Final review, as a person runs it", "🏁 Final review done"),
+        "lessons": ("📒 Keeping lessons for the next projects", "📒 Lessons kept"),
+        "reproduce": ("🐞 Showing the bug with a test", "🐞 Bug shown by a test"),
+        "search": ("🔎 Searching the web", "🔎 Web searched"),
+        "plan": ("🤔 Working out what it is", "🤔 Worked out what it is"),
+        "machine": ("💻 Checking what is installed", "💻 Checked what is installed"),
+        "documentation": ("📖 Reading its documentation", "📖 Documentation read"),
+        "digest": ("🧠 Reading the passages for answers", "🧠 Passages read"),
+        "follow-up": ("🔁 Searching for what is still missing", "🔁 Searched for what was missing"),
+        "condense": ("✍️ Turning the facts into rules", "✍️ Rules written"),
+        "frame": ("📝 Framing the research questions", "📝 Questions framed"),
+        "investigate": ("🔬 Reading and cross-checking sources", "🔬 Sources cross-checked"),
+        "keep": ("💾 Saving what was learned", "💾 Saved"),
+        "open": ("📖 Opening the book", "📖 Book opened"),
+        "survey": ("🧭 Reading its contents, foreword and index", "🧭 Chose the chapters to read"),
+        "chapters": ("📚 Reading the chapters that matter", "📚 Chapters read"),
+        "answer": ("💬 Answering from what Tinker keeps", "💬 Answered"),
+        "understand": ("🤔 Working out what to check", "🤔 Worked out what to check"),
+        "judge": ("⚖️ Weighing the evidence", "⚖️ Evidence weighed"),
+        "correct": ("✏️ Correcting what Tinker keeps", "✏️ Corrected"),
+        "identify": ("🔤 Making sure it is a language", "🔤 It is a language"),
+        "learn": ("📚 Learning the language first", "📚 Language learned"),
+        "pick": ("🎯 Choosing the next practice project", "🎯 Practice project chosen"),
+        "build": ("🔨 Building the practice project", "🔨 Practice project built"),
+        "feature": ("➕ Adding a feature to it", "➕ Feature added"),
+        "measure": ("📏 Measuring how it went", "📏 Measured"),
+        "reflect": ("📒 Learning from what went wrong and what was slow", "📒 Lessons kept"),
+        "searches": ("🤔 Working out what to search", "🤔 Searches chosen"),
+        "read": ("🌐 Searching the web and reading the pages", "🌐 Pages read"),
+        "write": ("✍️ Writing the answer from the pages", "✍️ Answer written"),
+    }
     STARTING = "🚀 Starting: the model loads"
     QUIET_PUBLISH_SECONDS = 1.0
 
     def __init__(self, title, before=0.0):
         self.pid, self.store, self.published = os.getpid(), None, 0.0
-        self.state = {"title": title, "run": None, "folder": None, "step": None, "doing": self.STARTING,
-                      "began": None, "steps": [], "passing": None, "working": "", "tally": "", "found": "",
-                      "outcome": "", "latest": "", "waiting": None,
-                      "ended": None, "before": before, "seconds": 0.0, "pid": self.pid,
-                      "resumed": time.time() if Jobs.resumed_here else None,
-                      "exercise": os.environ.get(EXERCISE_ENV) == "1"}
+        self.state = {
+            "title": title,
+            "run": None,
+            "folder": None,
+            "step": None,
+            "doing": self.STARTING,
+            "began": None,
+            "steps": [],
+            "passing": None,
+            "working": "",
+            "tally": "",
+            "found": "",
+            "outcome": "",
+            "latest": "",
+            "waiting": None,
+            "ended": None,
+            "before": before,
+            "seconds": 0.0,
+            "pid": self.pid,
+            "resumed": time.time() if Jobs.resumed_here else None,
+            "exercise": os.environ.get(EXERCISE_ENV) == "1",
+        }
 
     @classmethod
     def icon(cls, phase):
@@ -559,8 +710,18 @@ class Tracker:
             outcome = self.state.get("outcome")
             steps.append(self.DOING_AND_DONE[self.state["step"]][1] + (f": {outcome}" if outcome else ""))
         doing = self.DOING_AND_DONE.get(phase, (phase, phase))[0]
-        self.change("phase", phase=phase, step=phase, doing=doing, began=time.time(), steps=steps, working="",
-                    found="", outcome="", latest="")
+        self.change(
+            "phase",
+            phase=phase,
+            step=phase,
+            doing=doing,
+            began=time.time(),
+            steps=steps,
+            working="",
+            found="",
+            outcome="",
+            latest="",
+        )
 
     def points(self, passing, total):
         if total and self.state["passing"] != [passing, total]:
@@ -591,8 +752,10 @@ class Tracker:
     def change(self, event, quiet=False, **values):
         self.state.update(values)
         if self.store is not None and not quiet:
-            self.store.append("progress", {"event": event, **{key: value for key, value in values.items()
-                                                              if key != "steps"}})
+            self.store.append(
+                "progress",
+                {"event": event, **{key: value for key, value in values.items() if key != "steps"}},
+            )
         now = time.monotonic()
         if not quiet or now - self.published >= self.QUIET_PUBLISH_SECONDS:
             self.publish()

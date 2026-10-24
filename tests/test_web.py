@@ -6,8 +6,8 @@ from email.message import Message
 
 import pytest
 
-from tinkerkit.settings import Config
 from tinkerkit.fetcher import Fetcher
+from tinkerkit.settings import Config
 from tinkerkit.web import DuckDuckGoWeb, Internet, OllamaWeb, PageText, WebBackend, WebError
 
 
@@ -35,8 +35,13 @@ class Scripted(WebBackend):
 
 def internet_with(monkeypatch, *backends, web_name="a", fallback=""):
     named = dict(zip(("a", "b"), backends))
-    monkeypatch.setattr(Internet, "backends", staticmethod(lambda: {name: (lambda timeout, backend=backend: backend)
-                                                                    for name, backend in named.items()}))
+    monkeypatch.setattr(
+        Internet,
+        "backends",
+        staticmethod(
+            lambda: {name: (lambda timeout, backend=backend: backend) for name, backend in named.items()}
+        ),
+    )
     Config.save(web=web_name, web_fallback=fallback)
     return Internet()
 
@@ -64,7 +69,11 @@ def test_web_then_fallback_skipping_repeats_and_empty(monkeypatch):
 def test_a_backend_not_ready_is_skipped_with_its_reason(monkeypatch):
     first, second = Scripted(1, ready="no key"), Scripted(1)
     internet = internet_with(monkeypatch, first, second, web_name="a", fallback="b")
-    assert internet.backends_used == [second] and internet.unusable_backends == ["a: no key"] and internet.available()
+    assert (
+        internet.backends_used == [second]
+        and internet.unusable_backends == ["a: no key"]
+        and internet.available()
+    )
 
 
 @pytest.mark.spec("WEB-2")
@@ -75,9 +84,18 @@ def test_no_backend_left_is_not_available(monkeypatch):
 
 
 @pytest.mark.spec("WEB-3")
-@pytest.mark.parametrize("key,value", [("web", "bing"), ("web_fallback", "x"), ("web_timeout", 0),
-                                       ("web_timeout", True), ("learn_missing", 0), ("learn_missing", 1.5),
-                                       ("learn_missing", True)])
+@pytest.mark.parametrize(
+    "key,value",
+    [
+        ("web", "bing"),
+        ("web_fallback", "x"),
+        ("web_timeout", 0),
+        ("web_timeout", True),
+        ("learn_missing", 0),
+        ("learn_missing", 1.5),
+        ("learn_missing", True),
+    ],
+)
 def test_check_rejects_unusable_web_settings(key, value):
     Config.save(**{key: value})
     with pytest.raises(SystemExit, match=key):
@@ -117,17 +135,24 @@ def test_state_when_not_usable():
 
 @pytest.mark.spec("WEB-5")
 def test_search_keeps_web_addresses_as_strings(monkeypatch):
-    found = [{"title": "T", "url": "https://x.org", "content": None}, {"url": "ftp://x"}, "junk",
-             {"title": 5, "url": "http://y.org"}]
+    found = [
+        {"title": "T", "url": "https://x.org", "content": None},
+        {"url": "ftp://x"},
+        "junk",
+        {"title": 5, "url": "http://y.org"},
+    ]
     internet = internet_with(monkeypatch, Scripted(1, [found]))
-    assert internet.search("q", 3) == [{"title": "T", "url": "https://x.org", "content": ""},
-                                       {"title": "5", "url": "http://y.org", "content": ""}]
+    assert internet.search("q", 3) == [
+        {"title": "T", "url": "https://x.org", "content": ""},
+        {"title": "5", "url": "http://y.org", "content": ""},
+    ]
 
 
 @pytest.mark.spec("WEB-5")
 def test_fetch_needs_text_and_keeps_the_address_asked(monkeypatch):
-    internet = internet_with(monkeypatch, Scripted(1, [{"title": "P", "url": "other", "content": "text"},
-                                                       {"content": "   "}]))
+    internet = internet_with(
+        monkeypatch, Scripted(1, [{"title": "P", "url": "other", "content": "text"}, {"content": "   "}])
+    )
     assert internet.fetch("https://a") == {"title": "P", "url": "https://a", "content": "text"}
     assert internet.fetch("https://b") is None
     assert "its fetch gave no text" in internet.problem("https://b")
@@ -217,6 +242,7 @@ def test_ollama_web_posts_json_with_its_key(monkeypatch):
     def urlopen(request, timeout):
         sent.append(request)
         return Response(json.dumps({"results": [{"url": "https://r"}]}))
+
     monkeypatch.setattr(urllib.request, "urlopen", urlopen)
     assert OllamaWeb(5).search("python", 2) == [{"url": "https://r"}]
     request = sent[0]
@@ -226,12 +252,21 @@ def test_ollama_web_posts_json_with_its_key(monkeypatch):
 
 
 @pytest.mark.spec("WEB-8")
-@pytest.mark.parametrize("code,path,network,retry", [(401, "/web_search", True, False), (403, "/web_fetch", True, False),
-                                                     (429, "/web_search", True, True), (500, "/web_search", True, True),
-                                                     (503, "/web_fetch", False, True), (404, "/web_fetch", False, False)])
+@pytest.mark.parametrize(
+    "code,path,network,retry",
+    [
+        (401, "/web_search", True, False),
+        (403, "/web_fetch", True, False),
+        (429, "/web_search", True, True),
+        (500, "/web_search", True, True),
+        (503, "/web_fetch", False, True),
+        (404, "/web_fetch", False, False),
+    ],
+)
 def test_ollama_web_http_errors(monkeypatch, code, path, network, retry):
     def urlopen(request, timeout):
         raise http_error(code)
+
     monkeypatch.setattr(urllib.request, "urlopen", urlopen)
     with pytest.raises(WebError) as error:
         OllamaWeb(5).post(path, {})
@@ -268,18 +303,23 @@ RESULTS = """<html><body>
 
 @pytest.mark.spec("WEB-9")
 def test_duckduckgo_reads_its_results(monkeypatch):
-    monkeypatch.setattr(DuckDuckGoWeb, "get", classmethod(lambda cls, url, timeout, form=None: (RESULTS, "text/html")))
+    monkeypatch.setattr(
+        DuckDuckGoWeb, "get", classmethod(lambda cls, url, timeout, form=None: (RESULTS, "text/html"))
+    )
     backend = DuckDuckGoWeb(5)
     assert backend.unready() == ""
     assert backend.search("python", 5) == [
         {"url": "https://python.org/docs", "title": "Python Docs", "content": "The official docs"},
-        {"url": "https://example.com/page", "title": "Example", "content": ""}]
+        {"url": "https://example.com/page", "title": "Example", "content": ""},
+    ]
     assert len(backend.search("python", 1)) == 1
 
 
 @pytest.mark.spec("WEB-9")
 def test_duckduckgo_bot_check_is_worth_asking_again(monkeypatch):
-    monkeypatch.setattr(DuckDuckGoWeb, "get", classmethod(lambda cls, url, timeout, form=None: ("anomaly", "text/html")))
+    monkeypatch.setattr(
+        DuckDuckGoWeb, "get", classmethod(lambda cls, url, timeout, form=None: ("anomaly", "text/html"))
+    )
     with pytest.raises(WebError, match="bot check") as error:
         DuckDuckGoWeb(5).search("q", 3)
     assert error.value.retry
@@ -287,11 +327,18 @@ def test_duckduckgo_bot_check_is_worth_asking_again(monkeypatch):
 
 @pytest.mark.spec("WEB-10")
 def test_read_page_by_content_type(monkeypatch):
-    pages = {"https://h": ("<html><title>T</title><body><p>Hello there</p></body></html>", "text/html"),
-             "https://t": ("plain words", "text/plain"), "https://j": ('{"a": 1}', "application/json"),
-             "https://i": ("\x89PNG", "image/png")}
+    pages = {
+        "https://h": ("<html><title>T</title><body><p>Hello there</p></body></html>", "text/html"),
+        "https://t": ("plain words", "text/plain"),
+        "https://j": ('{"a": 1}', "application/json"),
+        "https://i": ("\x89PNG", "image/png"),
+    }
     monkeypatch.setattr(DuckDuckGoWeb, "get", classmethod(lambda cls, url, timeout, form=None: pages[url]))
-    assert DuckDuckGoWeb.read_page("https://h", 5) == {"title": "T", "url": "https://h", "content": "Hello there"}
+    assert DuckDuckGoWeb.read_page("https://h", 5) == {
+        "title": "T",
+        "url": "https://h",
+        "content": "Hello there",
+    }
     assert DuckDuckGoWeb.read_page("https://t", 5)["content"] == "plain words"
     assert DuckDuckGoWeb.read_page("https://j", 5)["content"] == '{"a": 1}'
     with pytest.raises(WebError, match="not a text page"):
@@ -300,14 +347,20 @@ def test_read_page_by_content_type(monkeypatch):
 
 @pytest.mark.spec("WEB-10")
 def test_duckduckgo_get_errors(monkeypatch):
-    monkeypatch.setattr(urllib.request, "urlopen", lambda request, timeout: (_ for _ in ()).throw(http_error(503)))
+    monkeypatch.setattr(
+        urllib.request, "urlopen", lambda request, timeout: (_ for _ in ()).throw(http_error(503))
+    )
     with pytest.raises(WebError, match="answered HTTP 503") as error:
         DuckDuckGoWeb.get("https://site.org/x", 5)
     assert error.value.retry and not error.value.network
 
 
-ARTICLE = "<article><h2>Install</h2><p>" + "Run pip install thing to get it. " * 15 + "</p><ul><li>one</li><li>two</li></ul>" \
-          "<pre>def f():\n    return 1</pre></article>"
+ARTICLE = (
+    "<article><h2>Install</h2><p>"
+    + "Run pip install thing to get it. " * 15
+    + "</p><ul><li>one</li><li>two</li></ul>"
+    "<pre>def f():\n    return 1</pre></article>"
+)
 
 
 @pytest.mark.spec("WEB-11")
@@ -320,7 +373,18 @@ def test_page_text_takes_the_main_part_without_the_noise():
     assert page.title == "My Page"
     assert text.startswith("## Install\n")
     assert "- one\n- two" in text and "def f():\n    return 1" in text
-    for noise in ("Home", "Site header", "secret", "icons", "menu", "related", "(c) site", "search", "x()", "p{}"):
+    for noise in (
+        "Home",
+        "Site header",
+        "secret",
+        "icons",
+        "menu",
+        "related",
+        "(c) site",
+        "search",
+        "x()",
+        "p{}",
+    ):
         assert noise not in text
 
 
@@ -338,16 +402,22 @@ def test_page_text_survives_broken_html():
 
 @pytest.mark.spec("WEB-12")
 def test_a_rate_limit_is_told_apart_from_other_failures(monkeypatch):
-    internet = internet_with(monkeypatch, Scripted(1, [WebError("busy", code=429), WebError("down", code=503),
-                                                       [{"url": "https://ok"}]]))
+    internet = internet_with(
+        monkeypatch,
+        Scripted(1, [WebError("busy", code=429), WebError("down", code=503), [{"url": "https://ok"}]]),
+    )
     assert internet.search("q", 1) is None and internet.rate_limited("q")
     assert internet.search("r", 1) is None and not internet.rate_limited("r")
     answered_later = internet.search("q", 1)
     assert answered_later and not internet.rate_limited("q")
-    asked_again_and_answered = internet_with(monkeypatch, Scripted(1, [WebError("busy", retry=True, code=429), [{"url": "https://ok"}]]))
+    asked_again_and_answered = internet_with(
+        monkeypatch, Scripted(1, [WebError("busy", retry=True, code=429), [{"url": "https://ok"}]])
+    )
     assert asked_again_and_answered.search("q", 1) and not asked_again_and_answered.rate_limited("q")
+
     def urlopen(request, timeout):
         raise http_error(429)
+
     monkeypatch.setattr(urllib.request, "urlopen", urlopen)
     with pytest.raises(WebError) as error:
         OllamaWeb(5).post("/web_search", {})
@@ -363,8 +433,17 @@ def test_the_page_fetcher_follows_the_fetch_settings():
 
 
 @pytest.mark.spec("WEB-12")
-@pytest.mark.parametrize("key,value", [("learn_rate", 0), ("learn_pages", 2.5), ("learn_min_pages", 0),
-                                       ("learn_backoff", -1), ("fetch_workers", True), ("fetch_max_bytes", "big")])
+@pytest.mark.parametrize(
+    "key,value",
+    [
+        ("learn_rate", 0),
+        ("learn_pages", 2.5),
+        ("learn_min_pages", 0),
+        ("learn_backoff", -1),
+        ("fetch_workers", True),
+        ("fetch_max_bytes", "big"),
+    ],
+)
 def test_check_rejects_learn_limits_out_of_range(key, value):
     Config.save(**{key: value})
     with pytest.raises(SystemExit, match=key):

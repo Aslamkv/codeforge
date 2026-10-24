@@ -4,13 +4,13 @@ import urllib.error
 import urllib.request
 
 import pytest
+from conftest import MEASURED, MODEL
 
 import tinkerkit.model as model_module
 from tinkerkit.messages import say
 from tinkerkit.model import Calibrator, Model, Models, Ollama, OllamaError, Stream
 from tinkerkit.prompts import Part, Prompts, PromptTooLarge, Reply
 from tinkerkit.settings import PROMPT_BUDGET_SHARE, STARTING_CHARS_PER_TOKEN, Config, Home
-from conftest import MEASURED, MODEL
 
 
 class Body(io.BytesIO):
@@ -33,7 +33,9 @@ def http_error(code, body=b""):
 def test_measured_settings_are_kept_by_model_name(home_store):
     assert Models.settings("qwen3:8b") is None
     Models.keep("qwen3:8b", {"num_ctx": 1})
-    assert Models.settings("qwen3:8b") == {"num_ctx": 1} and home_store.get("models", "qwen3:8b") == {"num_ctx": 1}
+    assert Models.settings("qwen3:8b") == {"num_ctx": 1} and home_store.get("models", "qwen3:8b") == {
+        "num_ctx": 1
+    }
     home_store.put("models", "broken", "not a dict")
     assert Models.settings("broken") is None
 
@@ -57,7 +59,9 @@ def test_installed(monkeypatch):
     monkeypatch.setattr(Ollama, "installed_models", staticmethod(lambda: None))
     with pytest.raises(SystemExit, match="Ollama does not answer"):
         Models.installed("qwen3")
-    monkeypatch.setattr(Ollama, "installed_models", staticmethod(lambda: [{"name": "qwen3:8b"}, {"name": "llama3"}]))
+    monkeypatch.setattr(
+        Ollama, "installed_models", staticmethod(lambda: [{"name": "qwen3:8b"}, {"name": "llama3"}])
+    )
     assert Models.installed("llama3") == "llama3"
     with pytest.raises(SystemExit, match="Did you mean qwen3:8b"):
         Models.installed("qwen3")
@@ -89,10 +93,16 @@ def test_remember_keeps_the_learned_chars_per_token(measured_model, make_model, 
 
 @pytest.mark.spec("MOD-6")
 def test_error_kinds():
-    assert Ollama.is_oom("CUDA error: out of memory") and Ollama.is_oom("model requires more system memory: "
-                                                                        "insufficient memory")
+    assert Ollama.is_oom("CUDA error: out of memory") and Ollama.is_oom(
+        "model requires more system memory: insufficient memory"
+    )
     assert not Ollama.is_oom(None)
-    for crash in ("llama runner process has terminated: signal: killed", "runner failed", "panic: x", "Segmentation fault"):
+    for crash in (
+        "llama runner process has terminated: signal: killed",
+        "runner failed",
+        "panic: x",
+        "Segmentation fault",
+    ):
         assert Ollama.is_crash(crash)
     assert not Ollama.is_crash("model not found")
 
@@ -104,12 +114,14 @@ def test_get_json(monkeypatch):
 
     def fail(request, timeout):
         raise http_error(404, b'{"error": "no such model"}')
+
     monkeypatch.setattr(urllib.request, "urlopen", fail)
     assert Ollama.get_json("/api/show", {"model": "x"}) is None
     assert Ollama.get_json("/api/show", {"model": "x"}, errors=True) == {"error": "no such model"}
 
     def fail_plain(request, timeout):
         raise http_error(500, b"<html>")
+
     monkeypatch.setattr(urllib.request, "urlopen", fail_plain)
     assert Ollama.get_json("/api/embed", {}, errors=True) == {"error": "HTTP 500"}
 
@@ -126,14 +138,25 @@ def test_chat_streams_and_gives_the_final_chunk(monkeypatch):
 
     def urlopen(request, timeout):
         sent.append(json.loads(request.data))
-        return stream_of({"message": {"content": "", "thinking": "let me "}}, {"message": {"content": "Hel"}},
-                         {"message": {"content": "lo"}}, {"done": True, "done_reason": "stop", "eval_count": 3})
+        return stream_of(
+            {"message": {"content": "", "thinking": "let me "}},
+            {"message": {"content": "Hel"}},
+            {"message": {"content": "lo"}},
+            {"done": True, "done_reason": "stop", "eval_count": 3},
+        )
+
     monkeypatch.setattr(urllib.request, "urlopen", urlopen)
     final = Ollama.chat("m", [{"role": "user", "content": "hi"}], 0, {"num_ctx": 2048}, think="high")
     assert final["message"] == {"role": "assistant", "content": "Hello", "thinking": "let me "}
     assert final["done_reason"] == "stop"
-    assert sent[0] == {"model": "m", "messages": [{"role": "user", "content": "hi"}], "stream": True, "keep_alive": 0,
-                       "think": "high", "options": {"num_ctx": 2048}}
+    assert sent[0] == {
+        "model": "m",
+        "messages": [{"role": "user", "content": "hi"}],
+        "stream": True,
+        "keep_alive": 0,
+        "think": "high",
+        "options": {"num_ctx": 2048},
+    }
     Ollama.chat("m", [], "5m", None)
     assert "think" not in sent[1] and "options" not in sent[1] and sent[1]["keep_alive"] == "5m"
 
@@ -142,6 +165,7 @@ def test_chat_streams_and_gives_the_final_chunk(monkeypatch):
 def test_chat_errors(monkeypatch):
     def oom(request, timeout):
         raise http_error(500, b'{"error":"model requires more system memory: out of memory"}')
+
     monkeypatch.setattr(urllib.request, "urlopen", oom)
     with pytest.raises(OllamaError) as error:
         Ollama.chat("m", [], 0, None)
@@ -181,15 +205,22 @@ def test_what_the_command_works_on_is_said_live_and_heard(monkeypatch):
     clock = iter([0, 3, 6])
     monkeypatch.setattr(model_module.time, "perf_counter", lambda: next(clock))
     seen = []
-    say.follow(lambda message: seen.append((message.kind, message.text)) if message.kind in ("live", "working")
-               else None)
+    say.follow(
+        lambda message: (
+            seen.append((message.kind, message.text)) if message.kind in ("live", "working") else None
+        )
+    )
     stream = Stream("Read: chapter 2", None)
     with say.working_on("Reading chapter 2, Habits (1 of 3)"):
         stream.take({"message": {"thinking": "hm"}})
         stream.take({"message": {"content": "x"}})
-    assert seen == [("working", "Reading chapter 2, Habits (1 of 3)"), ("live", "Reading chapter 2, Habits (1 of 3)"),
-                    ("live", "Reading chapter 2, Habits (1 of 3)… 3s"),
-                    ("live", "Reading chapter 2, Habits (1 of 3)… 6s"), ("working", "")]
+    assert seen == [
+        ("working", "Reading chapter 2, Habits (1 of 3)"),
+        ("live", "Reading chapter 2, Habits (1 of 3)"),
+        ("live", "Reading chapter 2, Habits (1 of 3)… 3s"),
+        ("live", "Reading chapter 2, Habits (1 of 3)… 6s"),
+        ("working", ""),
+    ]
     assert say.doing == ""
 
 
@@ -197,7 +228,9 @@ def test_what_the_command_works_on_is_said_live_and_heard(monkeypatch):
 def test_a_stream_that_writes_one_line_again_and_again_is_cut(monkeypatch):
     monkeypatch.setattr(model_module, "LOOPING_REPEATED_LINES", 4)
     stream = Stream(None, None)
-    ends = [stream.take({"message": {"content": line}}) for line in ["[tool]\n", "x = 1\n", "x = 1\n", "x = 1\n"]]
+    ends = [
+        stream.take({"message": {"content": line}}) for line in ["[tool]\n", "x = 1\n", "x = 1\n", "x = 1\n"]
+    ]
     assert ends == [False] * 4
     assert stream.take({"message": {"content": "x = 1\n"}}) and stream.final["done_reason"] == "length"
     calm = Stream(None, None)
@@ -221,16 +254,24 @@ def test_stream_stops_soon_after_the_reply_is_complete(monkeypatch):
     clock = iter(range(0, 1000))
     monkeypatch.setattr(model_module.time, "perf_counter", lambda: next(clock))
     stream = Stream(None, lambda content: content.endswith("}"))
-    response = [json.dumps({"message": {"content": piece}}).encode() for piece in ['{"a": 1', "}", " junk", " more junk",
-                                                                                   " and more", " and more"]]
+    response = [
+        json.dumps({"message": {"content": piece}}).encode()
+        for piece in ['{"a": 1', "}", " junk", " more junk", " and more", " and more"]
+    ]
     stream.read(response)
-    assert stream.reply == '{"a": 1}' and stream.final["early_stop"] and stream.final["done_reason"] == "complete"
+    assert (
+        stream.reply == '{"a": 1}'
+        and stream.final["early_stop"]
+        and stream.final["done_reason"] == "complete"
+    )
     assert stream.content.startswith('{"a": 1} junk')
 
 
 @pytest.mark.spec("MOD-10")
-@pytest.mark.parametrize("context,shared", [(24576, (8192, 16384)), (4096, (1365, 2731)), (1200, (512, 1024)),
-                                            (100000, (8192, 16384))])
+@pytest.mark.parametrize(
+    "context,shared",
+    [(24576, (8192, 16384)), (4096, (1365, 2731)), (1200, (512, 1024)), (100000, (8192, 16384))],
+)
 def test_shared(context, shared):
     assert Calibrator.shared(context) == shared
 
@@ -282,12 +323,29 @@ def test_check_fit(monkeypatch):
 
 @pytest.mark.spec("MOD-13")
 def test_calibrate_writes_the_measured_settings(fake_ollama, monkeypatch, no_sleep, tinker_home):
-    monkeypatch.setattr(Ollama, "model_facts", staticmethod(
-        lambda name: {"context_length": 40960, "capabilities": ["completion", "thinking"], "format": "gguf",
-                      "size": 5e9}))
+    monkeypatch.setattr(
+        Ollama,
+        "model_facts",
+        staticmethod(
+            lambda name: {
+                "context_length": 40960,
+                "capabilities": ["completion", "thinking"],
+                "format": "gguf",
+                "size": 5e9,
+            }
+        ),
+    )
     monkeypatch.setattr(Calibrator, "gpu_memory", classmethod(lambda cls: 20e9))
-    monkeypatch.setattr(Ollama, "read_raw", staticmethod(
-        lambda name, prompt, options, timeout=0: {"prompt_eval_count": len(prompt), "prompt_eval_duration": 2e9}))
+    monkeypatch.setattr(
+        Ollama,
+        "read_raw",
+        staticmethod(
+            lambda name, prompt, options, timeout=0: {
+                "prompt_eval_count": len(prompt),
+                "prompt_eval_duration": 2e9,
+            }
+        ),
+    )
     fake_ollama.reply({"content": "OK", "prompt_eval_count": 400, "eval_count": 2, "eval_duration": 1e8})
     settings = Calibrator("m").run()
     saved = Models.settings("m")
@@ -330,7 +388,9 @@ def test_a_model_logs_its_details_and_says_only_when_it_asks_again(model_log, fa
     assert model.ask_until_usable("s", [Part("Q", "q", True)], "Plan", lambda reply: reply.json()["ok"]) == 1
     assert capsys.readouterr().out == "🔁 Working on it: no usable result yet, trying again\n"
     notes = [entry["note"] for _, entry in model_log.store.entries("calls") if "note" in entry]
-    assert any(note.startswith("Plan (attempt 1)") for note in notes) and any("not usable" in note for note in notes)
+    assert any(note.startswith("Plan (attempt 1)") for note in notes) and any(
+        "not usable" in note for note in notes
+    )
     stream = Stream("Plan", None)
     stream.thinking = 3
     assert stream.status(stream.started + 12) == "Working on it… 12s"
@@ -394,7 +454,9 @@ def test_a_stall_reloads_the_model(make_model, fake_ollama):
 
 @pytest.mark.spec("MOD-17")
 def test_a_rejected_think_level_falls_back(make_model, fake_ollama):
-    fake_ollama.reply(OllamaError('invalid think value "high"')).reply(OllamaError("model does not support think"))
+    fake_ollama.reply(OllamaError('invalid think value "high"')).reply(
+        OllamaError("model does not support think")
+    )
     fake_ollama.reply("ok")
     model = make_model()
     assert model.ask("s", [Part("Q", "q", True)], "Ask") == "ok"
@@ -444,7 +506,9 @@ def test_a_prompt_too_large_is_relaxed_then_refused(make_model, fake_ollama, mod
     model = make_model(max_prompt_tokens=512)
     exact = Part("File", "c" * 3000, True, exact=True)
     assert model.ask("s", [exact], "Ask") == "ok"
-    assert any("shortening every part" in entry.get("note", "") for _, entry in model_log.store.entries("calls"))
+    assert any(
+        "shortening every part" in entry.get("note", "") for _, entry in model_log.store.entries("calls")
+    )
     assert "[...]" in fake_ollama.calls[0]["messages"][1]["content"]
     with pytest.raises(PromptTooLarge):
         model.ask("s", [Part(f"P{number}", "p" * 1000, True) for number in range(10)], "Ask")
@@ -453,13 +517,25 @@ def test_a_prompt_too_large_is_relaxed_then_refused(make_model, fake_ollama, mod
 @pytest.mark.spec("MOD-19")
 def test_ask_until_usable(make_model, fake_ollama):
     fake_ollama.reply("not json").reply('{"ok": true}')
-    result = make_model().ask_until_usable("s", [Part("Q", "q", True)], "Plan", lambda reply: reply.json()["ok"])
+    result = make_model().ask_until_usable(
+        "s", [Part("Q", "q", True)], "Plan", lambda reply: reply.json()["ok"]
+    )
     assert result is True
-    assert "Your previous reply was not usable (no JSON object in reply)" in fake_ollama.calls[1]["messages"][1]["content"]
-    assert [call["label"].split(" [")[0] for call in fake_ollama.calls] == ["Plan (attempt 1)", "Plan (attempt 2)"]
+    assert (
+        "Your previous reply was not usable (no JSON object in reply)"
+        in fake_ollama.calls[1]["messages"][1]["content"]
+    )
+    assert [call["label"].split(" [")[0] for call in fake_ollama.calls] == [
+        "Plan (attempt 1)",
+        "Plan (attempt 2)",
+    ]
     fake_ollama.reply("no", times=2)
-    assert make_model().ask_until_usable("s", [Part("Q", "q", True)], "Plan", lambda reply: reply.json(),
-                                         attempts=2) is None
+    assert (
+        make_model().ask_until_usable(
+            "s", [Part("Q", "q", True)], "Plan", lambda reply: reply.json(), attempts=2
+        )
+        is None
+    )
 
 
 @pytest.mark.spec("MOD-20")
@@ -496,12 +572,16 @@ def test_other_models_are_unloaded_and_a_grown_model_too(make_model, fake_ollama
 def test_a_failed_probe_is_recorded_and_waited_out(monkeypatch, fake_ollama, no_sleep, capsys):
     def crash(name, prompt, options, timeout=0):
         raise OllamaError("llama runner process has terminated", crashed=True)
+
     monkeypatch.setattr(Ollama, "read_raw", staticmethod(crash))
     monkeypatch.setattr(Ollama, "installed_models", staticmethod(lambda: [{"name": "m"}]))
     calibrator = Calibrator("m")
     assert calibrator.probe(4096, 8192) is None
     assert calibrator.probe_history == [[4096, "crashed"]] and model_module.CRASH_RECOVERY_SECONDS in no_sleep
-    assert fake_ollama.unloaded == ["m"] and "Could not read it (llama runner process has terminated)" in capsys.readouterr().out
+    assert (
+        fake_ollama.unloaded == ["m"]
+        and "Could not read it (llama runner process has terminated)" in capsys.readouterr().out
+    )
     monkeypatch.setattr(Ollama, "installed_models", staticmethod(lambda: None))
     with pytest.raises(SystemExit, match="Ollama stopped answering during calibration"):
         calibrator.probe(4096, 8192)
@@ -516,6 +596,7 @@ def test_a_gguf_model_that_crashes_is_read_in_pieces(monkeypatch, no_sleep, fake
         if "num_batch" not in options:
             raise OllamaError("runner failed", crashed=True)
         return {"prompt_eval_count": len(prompt), "prompt_eval_duration": 1e9}
+
     monkeypatch.setattr(Ollama, "read_raw", staticmethod(read))
     monkeypatch.setattr(Ollama, "installed_models", staticmethod(lambda: [{"name": "m"}]))
     calibrator = Calibrator("m")
@@ -525,7 +606,9 @@ def test_a_gguf_model_that_crashes_is_read_in_pieces(monkeypatch, no_sleep, fake
 
 @pytest.mark.spec("MOD-23")
 def test_the_first_chat_finds_the_think_setting(fake_ollama):
-    fake_ollama.reply(OllamaError('invalid think value "high"')).reply({"content": "OK", "prompt_eval_count": 300})
+    fake_ollama.reply(OllamaError('invalid think value "high"')).reply(
+        {"content": "OK", "prompt_eval_count": 300}
+    )
     assert Calibrator("m").first_chat({"capabilities": ["thinking"]}) is True
     assert [call["think"] for call in fake_ollama.calls] == ["high", True]
     fake_ollama.reply("OK")

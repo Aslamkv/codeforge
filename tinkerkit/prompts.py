@@ -1,15 +1,32 @@
-lazy import json
 import re
 from collections import namedtuple
+lazy import json
 lazy from pathlib import Path
 
 from .settings import (
-    ENV_EXAMPLE, ENV_FILE, FACTS_PER_CHUNK, FACTS_PER_SLOT, FACT_PHASES, LESSON_PHASES, MAX_FILE_LINES,
-    MAX_RULE_CHARS, MAX_VERSION_COMMANDS, MIN_TRIMMED_PROSE_CHARS, PLAYBOOK_RULES, READ_FACTS_PER_CHAPTER,
-    READ_KEY_TERMS, RESEARCH_FACTS_CHECKED, RESEARCH_GAPS, RESEARCH_QUESTIONS, SEARCHES_PER_RESEARCH_QUESTION,
-    TEACH_CHECK_COMMANDS, TEACH_CHECK_SEARCHES, TEACH_CLAIMS, TOOL_ROLES, first_line,
+    ENV_EXAMPLE,
+    ENV_FILE,
+    FACT_PHASES,
+    FACTS_PER_CHUNK,
+    FACTS_PER_SLOT,
+    LESSON_PHASES,
+    MAX_FILE_LINES,
+    MAX_RULE_CHARS,
+    MAX_VERSION_COMMANDS,
+    MIN_TRIMMED_PROSE_CHARS,
+    PLAYBOOK_RULES,
+    READ_FACTS_PER_CHAPTER,
+    READ_KEY_TERMS,
+    RESEARCH_FACTS_CHECKED,
+    RESEARCH_GAPS,
+    RESEARCH_QUESTIONS,
+    SEARCHES_PER_RESEARCH_QUESTION,
+    TEACH_CHECK_COMMANDS,
+    TEACH_CHECK_SEARCHES,
+    TEACH_CLAIMS,
+    TOOL_ROLES,
+    first_line,
 )
-
 
 StringStates = namedtuple("StringStates", "states in_string")
 FileBlock = namedtuple("FileBlock", "path content")
@@ -19,14 +36,21 @@ LineEdit = namedtuple("LineEdit", "path first last lines")
 class Reply:
     THINK_RE = re.compile(r"<think>.*?</think>", re.S)
     HEADER_PATH = r"[ \t:]+(?:(?:path|file)[ \t]*[=:][ \t]*)?[\"'`]?([^\s<>\"'`]+?)[\"'`]?"
-    FILE_BLOCK_RE = re.compile(r"<<<FILE" + HEADER_PATH + r"[ \t]*(?:>>>[ \t]*([^\s<>]*))?[ \t]*\n(.*?)\n?<<<END>>>",
-                               re.S)
-    LINES_BLOCK_RE = re.compile(r"<<<LINES" + HEADER_PATH + r"[ \t]+(?:lines[ \t]*=[ \t]*)?(\d+)\s*-\s*(\d+)[ \t]*>>>[ \t]*\n"
-                                r"(.*?)\n?<<<END>>>", re.S)
+    FILE_BLOCK_RE = re.compile(
+        r"<<<FILE" + HEADER_PATH + r"[ \t]*(?:>>>[ \t]*([^\s<>]*))?[ \t]*\n(.*?)\n?<<<END>>>", re.S
+    )
+    LINES_BLOCK_RE = re.compile(
+        r"<<<LINES" + HEADER_PATH + r"[ \t]+(?:lines[ \t]*=[ \t]*)?(\d+)\s*-\s*(\d+)[ \t]*>>>[ \t]*\n"
+        r"(.*?)\n?<<<END>>>",
+        re.S,
+    )
     NUMBERED_RE = re.compile(r"^\s*\d+\| ?")
     PLACEHOLDER_PATHS = {"path", "path/to/file", "file", "filename", "key"}
-    PLACEHOLDER_BODY_RE = re.compile(r"\s*[<\[(]?\s*(the\s+)?(complete\s+|whole\s+|full\s+)?(file\s+)?(content|contents|"
-                                     r"code|text|file|\.\.\.|…)\s*(here|goes here)?\s*[>\])]?\s*", re.I)
+    PLACEHOLDER_BODY_RE = re.compile(
+        r"\s*[<\[(]?\s*(the\s+)?(complete\s+|whole\s+|full\s+)?(file\s+)?(content|contents|"
+        r"code|text|file|\.\.\.|…)\s*(here|goes here)?\s*[>\])]?\s*",
+        re.I,
+    )
     RELATIVE_PATH_LINE_RE = re.compile(r"[\w.-]+(?:/[\w.-]+)*\.[\w]+|[\w.-]+(?:/[\w.-]+)+")
     OBJECT_KEY_RE = re.compile(r'"(?:[^"\\]|\\.)*"\s*:')
     STRING_CONCATENATION_RE = re.compile(r'(?<!\\)"\s*\+\s*"')
@@ -41,12 +65,16 @@ class Reply:
         start, end = self.text.find("{"), self.text.rfind("}")
         if start == -1 or end <= start:
             raise ValueError("no JSON object in reply")
-        return self.first_parsed(self.json_candidates(self.text[start:end + 1], self.text[start:]))
+        return self.first_parsed(self.json_candidates(self.text[start : end + 1], self.text[start:]))
 
     def json_candidates(self, whole, to_the_end):
         to_the_end = to_the_end.rstrip().rstrip("`").rstrip()
-        return [whole, self.mended(whole), self.closed(self.mended(to_the_end)),
-                self.balanced(self.mended(to_the_end))]
+        return [
+            whole,
+            self.mended(whole),
+            self.closed(self.mended(to_the_end)),
+            self.balanced(self.mended(to_the_end)),
+        ]
 
     @staticmethod
     def first_parsed(candidates):
@@ -60,7 +88,9 @@ class Reply:
 
     @classmethod
     def mended(cls, text):
-        return cls.strip_trailing_commas(cls.ESCAPED_SINGLE_QUOTE_RE.sub(r"\1'", cls.STRING_CONCATENATION_RE.sub("", text)))
+        return cls.strip_trailing_commas(
+            cls.ESCAPED_SINGLE_QUOTE_RE.sub(r"\1'", cls.STRING_CONCATENATION_RE.sub("", text))
+        )
 
     @staticmethod
     def closed(text):
@@ -114,8 +144,11 @@ class Reply:
     @staticmethod
     def strip_trailing_commas(text):
         inside, _ = Reply.string_states(text)
-        return "".join(char for index, (char, in_string) in enumerate(zip(text, inside))
-                       if in_string or not (char == "," and text[index + 1:].lstrip()[:1] in ("]", "}")))
+        return "".join(
+            char
+            for index, (char, in_string) in enumerate(zip(text, inside))
+            if in_string or not (char == "," and text[index + 1 :].lstrip()[:1] in ("]", "}"))
+        )
 
     @staticmethod
     def string_states(text):
@@ -185,14 +218,18 @@ class Reply:
     def unfenced(cls, lines):
         filled = [index for index, line in enumerate(lines) if line.strip()]
         if cls.one_fence_around(lines, filled):
-            return lines[filled[0] + 1:filled[-1]]
+            return lines[filled[0] + 1 : filled[-1]]
         return lines
 
     @classmethod
     def one_fence_around(cls, lines, filled):
         fence_at = lambda index: cls.MARKDOWN_FENCE_RE.fullmatch(lines[index])
-        return len(filled) >= 2 and fence_at(filled[0]) and fence_at(filled[-1]) \
+        return (
+            len(filled) >= 2
+            and fence_at(filled[0])
+            and fence_at(filled[-1])
             and not any(fence_at(index) for index in filled[1:-1])
+        )
 
     def as_file(self, path):
         if self.files():
@@ -201,8 +238,15 @@ class Reply:
         return Reply(f"<<<FILE {path}>>>\n{blocks[0][1].rstrip()}\n<<<END>>>") if len(blocks) == 1 else self
 
     def line_edits(self):
-        return [LineEdit(str(Path(path.strip())), int(first), int(last), self.unnumbered(self.without_debris(body).splitlines()))
-                for path, first, last, body in self.LINES_BLOCK_RE.findall(self.text)]
+        return [
+            LineEdit(
+                str(Path(path.strip())),
+                int(first),
+                int(last),
+                self.unnumbered(self.without_debris(body).splitlines()),
+            )
+            for path, first, last, body in self.LINES_BLOCK_RE.findall(self.text)
+        ]
 
     @classmethod
     def unnumbered(cls, lines):
@@ -211,7 +255,9 @@ class Reply:
         return lines
 
     def named_paths(self):
-        return list(dict.fromkeys([path for path, _ in self.files()] + [edit[0] for edit in self.line_edits()]))
+        return list(
+            dict.fromkeys([path for path, _ in self.files()] + [edit[0] for edit in self.line_edits()])
+        )
 
     def cause(self):
         return first_line(self.marked("CAUSE"), 160)
@@ -227,7 +273,10 @@ class Reply:
         return match.group(1) if match else ""
 
     def corrected_criteria(self):
-        return {name: text.strip() for name, text in re.findall(r"^\s*CRITERION\s+([^\s:]+):\s*(.+)$", self.text, re.M)}
+        return {
+            name: text.strip()
+            for name, text in re.findall(r"^\s*CRITERION\s+([^\s:]+):\s*(.+)$", self.text, re.M)
+        }
 
     def toolchain_line(self):
         match = re.search(r"^\s*TOOLCHAIN:\s*(\{.*\})\s*$", self.text, re.M)
@@ -236,12 +285,12 @@ class Reply:
     @staticmethod
     def files_ended(content):
         end = content.rfind("<<<END>>>")
-        rest = content[end + 9:] if end >= 0 else ""
+        rest = content[end + 9 :] if end >= 0 else ""
         return end >= 0 and "<<<FILE" not in rest and "<<<LINES" not in rest
 
     @staticmethod
     def files_complete(content):
-        return Reply.files_ended(content) and len(content[content.rfind("<<<END>>>") + 9:].strip()) >= 300
+        return Reply.files_ended(content) and len(content[content.rfind("<<<END>>>") + 9 :].strip()) >= 300
 
     @staticmethod
     def wrote(paths):
@@ -249,6 +298,7 @@ class Reply:
 
         def done(content):
             return wanted <= {path for path, _ in Reply(content).files()} or Reply.files_complete(content)
+
         return done
 
     @staticmethod
@@ -304,8 +354,9 @@ class Part:
         trimmed = set()
         while Part.required_size(parts) > limit:
             index = Part.longest_prose(parts, limit)
-            parts[index] = parts[index].shortened(max(MIN_TRIMMED_PROSE_CHARS,
-                                                      len(parts[index].text) - (Part.required_size(parts) - limit)))
+            parts[index] = parts[index].shortened(
+                max(MIN_TRIMMED_PROSE_CHARS, len(parts[index].text) - (Part.required_size(parts) - limit))
+            )
             trimmed.add(parts[index].title)
         if trimmed and notes is not None:
             notes.extend(sorted(trimmed))
@@ -317,12 +368,17 @@ class Part:
 
     @staticmethod
     def longest_prose(parts, limit):
-        prose = [index for index, part in enumerate(parts) if part.required and not part.exact
-                 and len(part.text) > MIN_TRIMMED_PROSE_CHARS]
+        prose = [
+            index
+            for index, part in enumerate(parts)
+            if part.required and not part.exact and len(part.text) > MIN_TRIMMED_PROSE_CHARS
+        ]
         if not prose:
             exact = ", ".join(part.title for part in parts if part.exact) or "none"
-            raise PromptTooLarge(f"required prompt parts need {Part.required_size(parts)} chars; budget allows "
-                                 f"{limit} (parts that cannot be shortened: {exact})")
+            raise PromptTooLarge(
+                f"required prompt parts need {Part.required_size(parts)} chars; budget allows "
+                f"{limit} (parts that cannot be shortened: {exact})"
+            )
         return max(prose, key=lambda chosen: len(parts[chosen].text))
 
     def render(self, text=None):
@@ -338,12 +394,19 @@ class Part:
     def shortened(self, room):
         marker = "[...]"
         room -= len(marker) + 1
-        text = "" if room <= 0 else (self.text[:room] + "\n" + marker if self.keep == "head"
-                                     else marker + "\n" + self.text[-room:])
+        text = (
+            ""
+            if room <= 0
+            else (
+                self.text[:room] + "\n" + marker if self.keep == "head" else marker + "\n" + self.text[-room:]
+            )
+        )
         return Part(self.title, text, self.required, self.keep, self.exact, self.atomic, self.place)
 
     def relaxed(self):
-        return Part(self.title, self.text, self.required, self.keep, exact=False, atomic=self.atomic, place=self.place)
+        return Part(
+            self.title, self.text, self.required, self.keep, exact=False, atomic=self.atomic, place=self.place
+        )
 
 
 class PromptTooLarge(Exception):
@@ -352,42 +415,54 @@ class PromptTooLarge(Exception):
 
 class Prompts:
     NO_TOOL_CALLS = "\nReply in plain text; never call a tool or function."
-    FOLDER_NAME_SYSTEM = ("Name the folder of the project the person asks for: one to three short lowercase words "
-                          "joined by hyphens, at most 20 characters, the shorter the better; shorten well-known "
-                          "words (calc-py for a calculator in Python, todo for a todo app). Reply with the name "
-                          "only.")
-    SAME_CASES = ("Several similar cases (every line, every unit, each row of a table) are built from the values "
-                  "the criterion names, with a loop or a small helper, never written out by hand one by one: a long "
-                  "hand-made literal (a grid, a board, a list of positions) is where counting slips.")
+    FOLDER_NAME_SYSTEM = (
+        "Name the folder of the project the person asks for: one to three short lowercase words "
+        "joined by hyphens, at most 20 characters, the shorter the better; shorten well-known "
+        "words (calc-py for a calculator in Python, todo for a todo app). Reply with the name "
+        "only."
+    )
+    SAME_CASES = (
+        "Several similar cases (every line, every unit, each row of a table) are built from the values "
+        "the criterion names, with a loop or a small helper, never written out by hand one by one: a long "
+        "hand-made literal (a grid, a board, a list of positions) is where counting slips."
+    )
     FILE_BLOCK_FORMAT = "<<<FILE path>>>\nthe complete file\n<<<END>>>"
 
-    FILES_REPLY = (f"Reply with a line \"CAUSE: <one sentence>\", then each file you change, complete:\n"
-                   f"{FILE_BLOCK_FORMAT}\n"
-                   f"Only the files shown may change; the project's other files exist. Files stay under "
-                   f"{MAX_FILE_LINES} lines.")
+    FILES_REPLY = (
+        f'Reply with a line "CAUSE: <one sentence>", then each file you change, complete:\n'
+        f"{FILE_BLOCK_FORMAT}\n"
+        f"Only the files shown may change; the project's other files exist. Files stay under "
+        f"{MAX_FILE_LINES} lines."
+    )
 
-    LINES_HOWTO = ("A file shown as numbered lines is changed with: <<<LINES path A-B>>>, then the new text for its "
-                   "lines A to B (within the range shown, without the line numbers), then <<<END>>>. Give a whole "
-                   "file only for files shown in full.")
+    LINES_HOWTO = (
+        "A file shown as numbered lines is changed with: <<<LINES path A-B>>>, then the new text for its "
+        "lines A to B (within the range shown, without the line numbers), then <<<END>>>. Give a whole "
+        "file only for files shown in full."
+    )
 
-    DEPENDENCIES_TITLE = ("Third-party dependencies (the only ones it may import; everything else is the standard "
-                          "library or the project's own files)")
+    DEPENDENCIES_TITLE = (
+        "Third-party dependencies (the only ones it may import; everything else is the standard "
+        "library or the project's own files)"
+    )
 
-    SPEC_JSON = ('{"language":"Python",\n'
-                 ' "criteria":[{"text":"tip.split(\\"60.00\\", 15, 3) is 23.00 (60.00 + 15% = 69.00, / 3)",'
-                 '"source":"words copied from the request","test":"tests/test_tip.py::test_split","effort":1},\n'
-                 ' {"text":"tip.main([\\"60.50\\", \\"--tip\\", \\"15\\", \\"--people\\", \\"3\\"]) prints \\"23.19 each\\" '
-                 '(60.50 + 15% = 69.575, / 3 = 23.19)","source":"...","test":"tests/test_tip.py::test_main_split","effort":1},\n'
-                 ' {"text":"tip.main([]) prints a clear error (the amount is missing) and exits with 1","source":"...",'
-                 '"test":"tests/test_tip.py::test_main_missing_amount","effort":1},\n'
-                 ' {"text":"tip.main([\\"abc\\"]) prints a clear error and exits with 1","source":"...",'
-                 '"test":"tests/test_tip.py::test_main_bad_amount","effort":1}],\n'
-                 ' "files":[{"path":"tip.py","kind":"code","role":"the tip calculator and its command line","uses":[]},\n'
-                 '  {"path":"tests/test_tip.py","kind":"test","role":"its tests","uses":["tip.py"]},\n'
-                 '  {"path":"pyproject.toml","kind":"config","role":"tells the test tool where the code is","uses":[]}],\n'
-                 ' "entry":"tip.py",\n'
-                 ' "constraints":["how the request says to build it"],"non_goals":["what a typical version adds unasked"],\n'
-                 ' "data":""')
+    SPEC_JSON = (
+        '{"language":"Python",\n'
+        ' "criteria":[{"text":"tip.split(\\"60.00\\", 15, 3) is 23.00 (60.00 + 15% = 69.00, / 3)",'
+        '"source":"words copied from the request","test":"tests/test_tip.py::test_split","effort":1},\n'
+        ' {"text":"tip.main([\\"60.50\\", \\"--tip\\", \\"15\\", \\"--people\\", \\"3\\"]) prints \\"23.19 each\\" '
+        '(60.50 + 15% = 69.575, / 3 = 23.19)","source":"...","test":"tests/test_tip.py::test_main_split","effort":1},\n'
+        ' {"text":"tip.main([]) prints a clear error (the amount is missing) and exits with 1","source":"...",'
+        '"test":"tests/test_tip.py::test_main_missing_amount","effort":1},\n'
+        ' {"text":"tip.main([\\"abc\\"]) prints a clear error and exits with 1","source":"...",'
+        '"test":"tests/test_tip.py::test_main_bad_amount","effort":1}],\n'
+        ' "files":[{"path":"tip.py","kind":"code","role":"the tip calculator and its command line","uses":[]},\n'
+        '  {"path":"tests/test_tip.py","kind":"test","role":"its tests","uses":["tip.py"]},\n'
+        '  {"path":"pyproject.toml","kind":"config","role":"tells the test tool where the code is","uses":[]}],\n'
+        ' "entry":"tip.py",\n'
+        ' "constraints":["how the request says to build it"],"non_goals":["what a typical version adds unasked"],\n'
+        ' "data":""'
+    )
 
     SPEC_RULES = f"""Rules:
 - build only what the request clearly asks for; everything else waits until the user asks for it, so
@@ -447,34 +522,38 @@ class Prompts:
   service returns; "data" names each adapter function and that sample data ("" when there is none);
 - effort: 1 trivial, 2 ordinary, 3 tricky."""
 
-    TOOLCHAIN_JSON = ('"toolchain":{"setup":["python3 -m venv .venv","pip install pytest ruff black"],'
-                      '"activate":". .venv/bin/activate","use":[],"run":"python3 tip.py",'
-                      '"check":"python -c \\"import tip\\"","test_all":"pytest -q",'
-                      '"test_one":"pytest -q {file}::{name}","format":"ruff check --fix --exit-zero . && black .",'
-                      '"lint":"ruff check ."}')
+    TOOLCHAIN_JSON = (
+        '"toolchain":{"setup":["python3 -m venv .venv","pip install pytest ruff black"],'
+        '"activate":". .venv/bin/activate","use":[],"run":"python3 tip.py",'
+        '"check":"python -c \\"import tip\\"","test_all":"pytest -q",'
+        '"test_one":"pytest -q {file}::{name}","format":"ruff check --fix --exit-zero . && black .",'
+        '"lint":"ruff check ."}'
+    )
 
-    TOOLCHAIN_RULES = ("toolchain: the language's usual tools, every command written the way a person types it in "
-                       "the project folder; setup: what prepares it for development, in order (the project's own "
-                       "environment when the language keeps dependencies in one, then the test framework, the "
-                       "formatter, the linter and the dependency file's packages), creating no project file (the files "
-                       "listed are written for it: never a command that starts a new project) and changing nothing "
-                       "outside the project folder (never the machine's default toolchain, a global install or "
-                       "a global setting: what is installed already is used as it is); "
-                       "activate: what makes a shell use that environment (\"\" when the language needs none), "
-                       "run before every command but setup's first; use: only what a person must run once to use "
-                       "it ([] when the language as installed is enough, e.g. a Python app on the standard library "
-                       "alone; else e.g. make and activate the environment and install the dependency file); run: "
-                       "how a person starts it after that, with no arguments (they add them), by the command name that "
-                       "works wherever the language is installed (e.g. python3 calculator.py), printing only what the "
-                       "program prints (a tool that reports its own building runs quietly), \"\" when there is "
-                       "no entry point; check quickly builds or loads every code file, so a missing import or "
-                       "dependency fails it; test_all and test_one: the test tool's own command as a person types "
-                       "it (e.g. pytest -q), never a wrapper; it must find the project's code (the project config "
-                       "file says where, when the tool alone does not); test_one runs one test given {file} and "
-                       "{name}; format formats the code with the language's formatter after the linter's own safe "
-                       "fixes (\"\" when it has none); lint: the language's usual linter over the code, exiting "
-                       "non-zero when it finds a problem, each reported with its file and line (\"none\" when it "
-                       "has none)")
+    TOOLCHAIN_RULES = (
+        "toolchain: the language's usual tools, every command written the way a person types it in "
+        "the project folder; setup: what prepares it for development, in order (the project's own "
+        "environment when the language keeps dependencies in one, then the test framework, the "
+        "formatter, the linter and the dependency file's packages), creating no project file (the files "
+        "listed are written for it: never a command that starts a new project) and changing nothing "
+        "outside the project folder (never the machine's default toolchain, a global install or "
+        "a global setting: what is installed already is used as it is); "
+        'activate: what makes a shell use that environment ("" when the language needs none), '
+        "run before every command but setup's first; use: only what a person must run once to use "
+        "it ([] when the language as installed is enough, e.g. a Python app on the standard library "
+        "alone; else e.g. make and activate the environment and install the dependency file); run: "
+        "how a person starts it after that, with no arguments (they add them), by the command name that "
+        "works wherever the language is installed (e.g. python3 calculator.py), printing only what the "
+        'program prints (a tool that reports its own building runs quietly), "" when there is '
+        "no entry point; check quickly builds or loads every code file, so a missing import or "
+        "dependency fails it; test_all and test_one: the test tool's own command as a person types "
+        "it (e.g. pytest -q), never a wrapper; it must find the project's code (the project config "
+        "file says where, when the tool alone does not); test_one runs one test given {file} and "
+        "{name}; format formats the code with the language's formatter after the linter's own safe "
+        'fixes ("" when it has none); lint: the language\'s usual linter over the code, exiting '
+        'non-zero when it finds a problem, each reported with its file and line ("none" when it '
+        "has none)"
+    )
 
     SPEC_SYSTEM = f"""Plan a project before any code exists, as a small, testable spec: the code will be written to
 pass exactly these tests and nothing more.
@@ -515,11 +594,13 @@ or {"problems":[],"files":[]} when they match."""
 Reply with ONLY JSON: {{{TOOLCHAIN_JSON}}} (the example is for a Python project with no entry point).
 Rules: {TOOLCHAIN_RULES}."""
 
-    TOOLCHAIN_FIX_SYSTEM = (f"The project's tools do not work: the output shows a tooling problem (a missing test "
-                            f"framework, dependency or command), not a failing test. Fix the setup only: "
-                            f"give each dependency or config file you change complete, and/or a line TOOLCHAIN: {{json}} "
-                            f"with the corrected commands. Never change code or tests. {TOOLCHAIN_RULES}.\n"
-                            f"Reply with a line \"CAUSE: <one sentence>\", then the changes:\n{FILE_BLOCK_FORMAT}")
+    TOOLCHAIN_FIX_SYSTEM = (
+        f"The project's tools do not work: the output shows a tooling problem (a missing test "
+        f"framework, dependency or command), not a failing test. Fix the setup only: "
+        f"give each dependency or config file you change complete, and/or a line TOOLCHAIN: {{json}} "
+        f"with the corrected commands. Never change code or tests. {TOOLCHAIN_RULES}.\n"
+        f'Reply with a line "CAUSE: <one sentence>", then the changes:\n{FILE_BLOCK_FORMAT}'
+    )
 
     TESTS_REPLY = f"""Reply with the test file, complete:
 {FILE_BLOCK_FORMAT}
@@ -544,10 +625,15 @@ keep each test short. A criterion whose own value is wrong by the request's rule
 miscalculation) is tested with the right value and corrected, so the spec and its test say the same:
 before the file, a line "CRITERION <test name>: <the criterion as it should read>"."""
 
-    SPEC_TESTS_SYSTEM = """Write the spec tests for the given criteria before the code exists, in the project's language
+    SPEC_TESTS_SYSTEM = (
+        """Write the spec tests for the given criteria before the code exists, in the project's language
 and test framework (as the test command runs them). Each test checks its criterion through the public
 interface of the module the contracts name: the code will be written to pass these tests and nothing more.
-""" + SAME_CASES + "\n" + TESTS_REPLY
+"""
+        + SAME_CASES
+        + "\n"
+        + TESTS_REPLY
+    )
 
     REPRODUCE_SYSTEM = f"""A user reports a bug in a project that is built and whose tests pass. Write ONE test that
 shows the bug: it checks the correct behaviour the report implies, so it fails on the code as it is now
@@ -580,31 +666,41 @@ each setting with a comment and its default (empty for a required one). Write on
 first block (no plan, notes or reasoning before it):
 {FILE_BLOCK_FORMAT}"""
 
-    CHANGE_SYSTEM = ("Change one file of an existing project so that it meets the given criteria or fixes the given "
-                     "problems, with the smallest change; keep everything else as it is.\n" + FILES_REPLY)
+    CHANGE_SYSTEM = (
+        "Change one file of an existing project so that it meets the given criteria or fixes the given "
+        "problems, with the smallest change; keep everything else as it is.\n" + FILES_REPLY
+    )
 
-    BUILD_SYSTEM = ("The project does not build or load: the output shows why (a missing dependency, an import of a "
-                    "module or name that does not exist, a syntax error). Fix the cause in the files shown: a missing "
-                    "dependency goes into the dependency file; an import or the code is corrected, keeping every "
-                    "contract. Do not change tests.\n" + FILES_REPLY)
+    BUILD_SYSTEM = (
+        "The project does not build or load: the output shows why (a missing dependency, an import of a "
+        "module or name that does not exist, a syntax error). Fix the cause in the files shown: a missing "
+        "dependency goes into the dependency file; an import or the code is corrected, keeping every "
+        "contract. Do not change tests.\n" + FILES_REPLY
+    )
 
-    FIX_SYSTEM = ("A test fails. Find the cause in the failure output and change the code so that the test passes, "
-                  "keeping the contracts and adding nothing the test does not need: change only the files the cause "
-                  "is in (usually one), and leave the rest of the design as it is. Do not change tests. Make the "
-                  "code right, not the test pass: never a special case that only serves the test's example. When the "
-                  "test itself is wrong (it expects what the request does not say, such as a miscalculated value), "
-                  "change nothing and reply only with a line \"TEST WRONG: <why>\": the test is then reviewed.\n"
-                  + FILES_REPLY)
+    FIX_SYSTEM = (
+        "A test fails. Find the cause in the failure output and change the code so that the test passes, "
+        "keeping the contracts and adding nothing the test does not need: change only the files the cause "
+        "is in (usually one), and leave the rest of the design as it is. Do not change tests. Make the "
+        "code right, not the test pass: never a special case that only serves the test's example. When the "
+        "test itself is wrong (it expects what the request does not say, such as a miscalculated value), "
+        'change nothing and reply only with a line "TEST WRONG: <why>": the test is then reviewed.\n'
+        + FILES_REPLY
+    )
 
-    REVIEW_SYSTEM = ("A test still fails after several fixes, so the test or the code is wrong against the plan. "
-                     "Compare both with the criterion and the contracts, decide which one is wrong and correct it "
-                     "(a test keeps its name and tests the criterion through the app's interface). The request "
-                     "decides: a criterion or test that contradicts its rules (a wrong computed value, a rule "
-                     "misread) is what is wrong, whatever the criterion says. A test that replaces the app's own "
-                     "code with a fake of it (anything but an adapter to an external service) is wrong: it must "
-                     "use the real code. When the criterion itself is wrong, also reply with a line \"CRITERION: "
-                     "<the criterion as it should read>\": the spec and its test must say the same. "
-                     + SAME_CASES + "\n" + FILES_REPLY)
+    REVIEW_SYSTEM = (
+        "A test still fails after several fixes, so the test or the code is wrong against the plan. "
+        "Compare both with the criterion and the contracts, decide which one is wrong and correct it "
+        "(a test keeps its name and tests the criterion through the app's interface). The request "
+        "decides: a criterion or test that contradicts its rules (a wrong computed value, a rule "
+        "misread) is what is wrong, whatever the criterion says. A test that replaces the app's own "
+        "code with a fake of it (anything but an adapter to an external service) is wrong: it must "
+        'use the real code. When the criterion itself is wrong, also reply with a line "CRITERION: '
+        '<the criterion as it should read>": the spec and its test must say the same. '
+        + SAME_CASES
+        + "\n"
+        + FILES_REPLY
+    )
 
     LESSONS_SYSTEM = f"""A code generator just built a project. Below are the problems it hit and how each was
 solved. Write the lessons that would have avoided such problems in OTHER projects, so the generator gets
@@ -614,16 +710,18 @@ never name this project, its files, its names, its features or its data. Skip an
 already say.
 "scope" is "any" only when the lesson holds in every language as written; a lesson that names this
 language's own tools, libraries or syntax is "language".
-Reply with ONLY JSON: {{"lessons":[{{"phase":"one of {', '.join(LESSON_PHASES)}","scope":"language (only
+Reply with ONLY JSON: {{"lessons":[{{"phase":"one of {", ".join(LESSON_PHASES)}","scope":"language (only
 this language) or any","text":"the lesson"}}],"confirmed":[numbers of known lessons these problems show
 again]}} or {{"lessons":[],"confirmed":[]}} when nothing generalizes."""
 
-    TIDY_SYSTEM = ("The project's linter reports problems in one file of a working project whose tests pass. Fix "
-                   "each problem reported, keeping its behaviour, its contract and every test passing: the smallest "
-                   "change, no new features, no disabling the linter with comments or settings. Change only the "
-                   "lines the problems are in (and lines they need, such as an import), each with a block "
-                   "<<<LINES path A-B>>>, then the new text for lines A to B (without the line numbers), then "
-                   "<<<END>>>. Reply with a line \"CAUSE: <one sentence>\", then the blocks.")
+    TIDY_SYSTEM = (
+        "The project's linter reports problems in one file of a working project whose tests pass. Fix "
+        "each problem reported, keeping its behaviour, its contract and every test passing: the smallest "
+        "change, no new features, no disabling the linter with comments or settings. Change only the "
+        "lines the problems are in (and lines they need, such as an import), each with a block "
+        "<<<LINES path A-B>>>, then the new text for lines A to B (without the line numbers), then "
+        '<<<END>>>. Reply with a line "CAUSE: <one sentence>", then the blocks.'
+    )
 
     RECALL_SYSTEM = """Before a project is planned, choose what a code generator should know for it. It knows only
 what it was trained on; what it has learned from the web since is listed below, one topic per line.
@@ -662,7 +760,7 @@ and versions they give; the ones that change how code is written first; nothing 
 (alpha, beta, release candidate, dev, draft); at most {FACTS_PER_SLOT}. "cites": the ids of the passages that
 state it; a fact no passage states is left out. "phase" is where it matters: spec (what to build and test),
 design (files, structure), config (dependencies, settings), tests, code, toolchain (commands and tools).
-Reply with ONLY JSON: {{"facts":[{{"phase":"one of {', '.join(FACT_PHASES)}","text":"the fact","cites":["P3"]}}]}}
+Reply with ONLY JSON: {{"facts":[{{"phase":"one of {", ".join(FACT_PHASES)}","text":"the fact","cites":["P3"]}}]}}
 or {{"facts":[]}} when the passages do not answer it."""
 
     FACTS_SYSTEM = f"""Read part of a web page for a code generator that knows only what it was trained on. List what
@@ -674,7 +772,7 @@ nothing about one particular project, nothing about an unreleased version (alpha
 candidate, dev, draft); at most {FACTS_PER_CHUNK}. "phase" is
 where it matters: spec (what to build and test), design (files, structure), config (dependencies,
 settings), tests, code, toolchain (commands and tools).
-Reply with ONLY JSON: {{"facts":[{{"phase":"one of {', '.join(FACT_PHASES)}","text":"the fact"}}]}}
+Reply with ONLY JSON: {{"facts":[{{"phase":"one of {", ".join(FACT_PHASES)}","text":"the fact"}}]}}
 or {{"facts":[]}} when the excerpt states nothing like that."""
 
     PLAYBOOK_SYSTEM = f"""Condense what was learned about a programming language or a tool into the rules a code
@@ -689,7 +787,7 @@ Where the facts give alternatives, the rule names only the one that adds no file
 A rule that needs a package or tool beyond the language's own install and its tools listed is never for
 every program: its "when" names that package or tool ("projects that use uv").
 A rule never tells to create or add a file (the plan decides the files): it says what to write.
-"phase" is where it matters: {', '.join(FACT_PHASES)} (toolchain: commands and tools).
+"phase" is where it matters: {", ".join(FACT_PHASES)} (toolchain: commands and tools).
 "when": "" for a rule that holds for every program in the language; else a few words naming the code it
 applies to ("async code", "a package published to an index", "code that reads files"), so a program that
 has no such code never sees it.
@@ -723,7 +821,7 @@ it (then say how); at most {READ_FACTS_PER_CHAPTER}. "section": the heading it i
 "phase": where it matters when building software: spec (what to build and test), design (files, structure), config
 (dependencies, settings), tests, code, toolchain (commands and tools); or book when it does not change how software
 is built.
-Reply with ONLY JSON: {{"points":[{{"text":"...","section":"...","phase":"one of {', '.join(FACT_PHASES)}, book"}}]}}
+Reply with ONLY JSON: {{"points":[{{"text":"...","section":"...","phase":"one of {", ".join(FACT_PHASES)}, book"}}]}}
 or {{"points":[]}} when the text teaches nothing new."""
 
     RESEARCH_PLAN_SYSTEM = f"""Plan research on a topic for a code generator that must understand it well to build
@@ -784,13 +882,15 @@ example is run as written to check it, so it must work exactly as given.
 Reply with ONLY JSON: {"overview":"...","features":["..."],"requires":"Python 3.10 or newer",
 "usage":[{"what":"Add two numbers","command":"python3 calculator.py add 5 2","output":"7"}],"serves":false}"""
 
-    ASK_SYSTEM = ("You are Tinker, and the person asks you about what you have learned. Below is what you keep: the "
-                  "toolchain that worked for each language (what its projects use), toolchain fixes, lessons, facts and "
-                  "rules, the person's own commands, and passages of what you read. Answer from these alone, as a "
-                  "person answers a colleague: only what is asked, in a few short plain lines (no Markdown, no item "
-                  "numbers, no notes on what is proven, nothing about what you do not keep). The toolchain that worked "
-                  "comes before facts and rules. What something you read says names its chapter. When nothing below "
-                  "answers it, say in one line that you have not learned that yet.")
+    ASK_SYSTEM = (
+        "You are Tinker, and the person asks you about what you have learned. Below is what you keep: the "
+        "toolchain that worked for each language (what its projects use), toolchain fixes, lessons, facts and "
+        "rules, the person's own commands, and passages of what you read. Answer from these alone, as a "
+        "person answers a colleague: only what is asked, in a few short plain lines (no Markdown, no item "
+        "numbers, no notes on what is proven, nothing about what you do not keep). The toolchain that worked "
+        "comes before facts and rules. What something you read says names its chapter. When nothing below "
+        "answers it, say in one line that you have not learned that yet."
+    )
 
     EXERCISE_LANGUAGE_SYSTEM = """The person asks Tinker, a code generator, to practise a programming language, named by the
 words below. Say what the words name. "language": exactly one programming language that programs are written and
@@ -818,7 +918,7 @@ at most 3, each one imperative sentence naming the concrete technique, tool usag
 lesson is general: never name this project, its files, its names, its features or its data. Skip anything the
 known lessons already say. "scope" is "any" only when the lesson holds in every language as written. "focus" is
 one sentence on what the next practice project should exercise, from what went worst here.
-Reply with ONLY JSON: {{"lessons":[{{"phase":"one of {', '.join(LESSON_PHASES)}","scope":"language or any",
+Reply with ONLY JSON: {{"lessons":[{{"phase":"one of {", ".join(LESSON_PHASES)}","scope":"language or any",
 "text":"the lesson"}}],"confirmed":[numbers of known lessons these problems show again],"focus":"..."}}"""
 
     TEACH_SYSTEM = f"""The person teaches you, Tinker, something, to correct what you keep. Below is what you keep that
@@ -839,7 +939,7 @@ found for you): it needs no command and no search.
 is the whole list of its commands), each written as a person types it; a key goes in one change only (one that
 several claims affect rests on all of them);
 "lesson": what was taught, as one general imperative sentence, with the phase where it matters (one of
-{', '.join(LESSON_PHASES)}); never a project's names, files or data;
+{", ".join(LESSON_PHASES)}); never a project's names, files or data;
 "fact": what something you read really says, in place of an item of it that it corrects: {{"about": that item's number,
 "text": one plain sentence}}.
 Reply with ONLY JSON: {{"claims":[{{"text":"Tool A formats code as tool B does","preference":false}},
@@ -862,19 +962,22 @@ its lesson and its fact agree with the evidence and the preferences.
 Reply with ONLY JSON: {"claims":[{"claim":1,"verdict":"holds","why":"one short sentence","evidence":[1,3]}],
 "changes":[{"change":1,"follows":true,"why":"one short sentence"}]}"""
 
-    README_FIX_SYSTEM = ("Some usage examples in a project's README do not print what the README says. For each, "
-                         "decide what is wrong: the README (its command or the output it shows) or the code (it does "
-                         "not do what the request and the README say), and correct that with the smallest change. "
-                         "The README and the code files shown may change, never the tests; every test must keep "
-                         "passing. \"It printed\" is everything the command wrote, errors included; a README "
-                         "line that is a note about the output (such as an exit code) is a README mistake. The "
-                         "commands run in a POSIX sh (echo -e prints its -e there: printf makes a file alike "
-                         "everywhere). A tool's own messages in the output (building, running) are the "
-                         "README's mistake: its command gets the tool's quiet option, before the program's own "
-                         "arguments. Input piped in is not echoed: a "
-                         "prompt runs on into the next output on the same line.\n"
-                         + FILES_REPLY)
+    README_FIX_SYSTEM = (
+        "Some usage examples in a project's README do not print what the README says. For each, "
+        "decide what is wrong: the README (its command or the output it shows) or the code (it does "
+        "not do what the request and the README say), and correct that with the smallest change. "
+        "The README and the code files shown may change, never the tests; every test must keep "
+        'passing. "It printed" is everything the command wrote, errors included; a README '
+        "line that is a note about the output (such as an exit code) is a README mistake. The "
+        "commands run in a POSIX sh (echo -e prints its -e there: printf makes a file alike "
+        "everywhere). A tool's own messages in the output (building, running) are the "
+        "README's mistake: its command gets the tool's quiet option, before the program's own "
+        "arguments. Input piped in is not echoed: a "
+        "prompt runs on into the next output on the same line.\n" + FILES_REPLY
+    )
 
-    BRIEF_SYSTEM = ("You condense part of a software spec. Output terse bullets of concrete requirements only: "
-                    "features, interfaces, data, storage, libraries, constraints, edge cases. No prose, no code. "
-                    "At most {words} words.")
+    BRIEF_SYSTEM = (
+        "You condense part of a software spec. Output terse bullets of concrete requirements only: "
+        "features, interfaces, data, storage, libraries, constraints, edge cases. No prose, no code. "
+        "At most {words} words."
+    )

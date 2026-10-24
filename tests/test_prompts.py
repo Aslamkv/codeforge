@@ -15,14 +15,21 @@ def test_reply_drops_thinking_and_whitespace():
 
 
 @pytest.mark.spec("PRM-2")
-@pytest.mark.parametrize("text,expected", [
-    pytest.param('Sure! Here it is:\n```json\n{"a": [1, 2]}\n```\nDone.', {"a": [1, 2]}, id="prose around it"),
-    pytest.param('{"a": [1, 2,], "b": 3,}', {"a": [1, 2], "b": 3}, id="trailing commas"),
-    pytest.param('{"a": "one " + "two"}', {"a": "one two"}, id="joined strings"),
-    pytest.param('{"a": "it\\\'s"}', {"a": "it's"}, id="escaped single quote"),
-    pytest.param('{"a": {"b": [1, 2]}', {"a": {"b": [1, 2]}}, id="left open at the end"),
-    pytest.param('{"a": ["x", "y", "b": 1}', {"a": ["x", "y"], "b": 1}, id="list open before the next key"),
-])
+@pytest.mark.parametrize(
+    "text,expected",
+    [
+        pytest.param(
+            'Sure! Here it is:\n```json\n{"a": [1, 2]}\n```\nDone.', {"a": [1, 2]}, id="prose around it"
+        ),
+        pytest.param('{"a": [1, 2,], "b": 3,}', {"a": [1, 2], "b": 3}, id="trailing commas"),
+        pytest.param('{"a": "one " + "two"}', {"a": "one two"}, id="joined strings"),
+        pytest.param('{"a": "it\\\'s"}', {"a": "it's"}, id="escaped single quote"),
+        pytest.param('{"a": {"b": [1, 2]}', {"a": {"b": [1, 2]}}, id="left open at the end"),
+        pytest.param(
+            '{"a": ["x", "y", "b": 1}', {"a": ["x", "y"], "b": 1}, id="list open before the next key"
+        ),
+    ],
+)
 def test_json_in_prose_mends_the_usual_slips(text, expected):
     assert Reply(text).json() == expected
 
@@ -36,15 +43,26 @@ def test_json_without_an_object_or_beyond_mending():
 
 
 @pytest.mark.spec("PRM-3")
-@pytest.mark.parametrize("header", ["<<<FILE app.py>>>", "<<<FILE path=app.py>>>", "<<<FILE: app.py>>>",
-                                    '<<<FILE "app.py">>>', "<<<FILE app.py", "<<<FILE file: app.py>>>"])
+@pytest.mark.parametrize(
+    "header",
+    [
+        "<<<FILE app.py>>>",
+        "<<<FILE path=app.py>>>",
+        "<<<FILE: app.py>>>",
+        '<<<FILE "app.py">>>',
+        "<<<FILE app.py",
+        "<<<FILE file: app.py>>>",
+    ],
+)
 def test_files_read_every_header_form(header):
     assert Reply(f"{header}\nprint(1)\n<<<END>>>").files() == [("app.py", "print(1)")]
 
 
 @pytest.mark.spec("PRM-3")
 def test_files_several_blocks_with_normalized_paths():
-    reply = Reply("<<<FILE ./src/a.py>>>\na = 1\n<<<END>>>\ntext\n<<<FILE tests/test_a.py>>>\nimport a\n<<<END>>>")
+    reply = Reply(
+        "<<<FILE ./src/a.py>>>\na = 1\n<<<END>>>\ntext\n<<<FILE tests/test_a.py>>>\nimport a\n<<<END>>>"
+    )
     assert reply.files() == [("src/a.py", "a = 1"), ("tests/test_a.py", "import a")]
 
 
@@ -74,7 +92,9 @@ def test_a_markdown_file_keeps_its_fences():
 
 @pytest.mark.spec("PRM-4")
 def test_line_edits():
-    reply = Reply("<<<LINES app.py 3-4>>>\n  3| a = 1\n  4| b = 2\n<<<END>>>\n<<<LINES lib.py lines=7-7>>>\nx\n<<<END>>>")
+    reply = Reply(
+        "<<<LINES app.py 3-4>>>\n  3| a = 1\n  4| b = 2\n<<<END>>>\n<<<LINES lib.py lines=7-7>>>\nx\n<<<END>>>"
+    )
     assert reply.line_edits() == [("app.py", 3, 4, ["a = 1", "b = 2"]), ("lib.py", 7, 7, ["x"])]
 
 
@@ -100,7 +120,9 @@ def test_files_complete_only_once_the_model_runs_on():
 def test_files_ended_once_the_last_block_ends():
     answer = "<<<FILE a.py>>>\nx = 1\n<<<END>>>"
     assert Reply.files_ended(answer) and Reply.files_ended(answer + "\nthat is all")
-    assert not Reply.files_ended("<<<FILE a.py>>>\nx = 1") and not Reply.files_ended(answer + "\n<<<LINES b.py 1-2>>>")
+    assert not Reply.files_ended("<<<FILE a.py>>>\nx = 1") and not Reply.files_ended(
+        answer + "\n<<<LINES b.py 1-2>>>"
+    )
 
 
 @pytest.mark.spec("PRM-6")
@@ -121,9 +143,11 @@ def test_json_complete():
 
 @pytest.mark.spec("PRM-8")
 def test_marker_lines():
-    reply = Reply("CAUSE: the sum was wrong\nTEST WRONG: expects 6 for 2+3\nCRITERION: add(2, 3) is 5\n"
-                  "CRITERION test_add: add(2, 3) is 5\nTOOLCHAIN: {\"lint\": \"ruff check .\"}\n"
-                  "<<<FILE a.py>>>\n1\n<<<END>>>\n<<<LINES a.py 1-1>>>\n2\n<<<END>>>\n<<<LINES b.py 1-1>>>\n3\n<<<END>>>")
+    reply = Reply(
+        "CAUSE: the sum was wrong\nTEST WRONG: expects 6 for 2+3\nCRITERION: add(2, 3) is 5\n"
+        'CRITERION test_add: add(2, 3) is 5\nTOOLCHAIN: {"lint": "ruff check ."}\n'
+        "<<<FILE a.py>>>\n1\n<<<END>>>\n<<<LINES a.py 1-1>>>\n2\n<<<END>>>\n<<<LINES b.py 1-1>>>\n3\n<<<END>>>"
+    )
     assert reply.cause() == "the sum was wrong"
     assert reply.test_wrong() == "expects 6 for 2+3"
     assert reply.criterion() == "add(2, 3) is 5"
@@ -150,11 +174,20 @@ def parts_text(parts, limit):
 
 @pytest.mark.spec("PRM-11")
 def test_assemble_orders_by_place_and_leaves_out_empty_optional_parts():
-    parts = [Part("Middle", "m", True), Part("Last", "l", True, place="last"), Part("Empty", ""),
-             Part("First", "f", place="first"), Part("Required empty", "", True)]
+    parts = [
+        Part("Middle", "m", True),
+        Part("Last", "l", True, place="last"),
+        Part("Empty", ""),
+        Part("First", "f", place="first"),
+        Part("Required empty", "", True),
+    ]
     text = Part.assemble(parts, 1000)
-    assert [line for line in text.splitlines() if line.startswith("##")] == \
-        ["## First", "## Middle", "## Required empty", "## Last"]
+    assert [line for line in text.splitlines() if line.startswith("##")] == [
+        "## First",
+        "## Middle",
+        "## Required empty",
+        "## Last",
+    ]
 
 
 @pytest.mark.spec("PRM-11")
@@ -208,8 +241,10 @@ def test_part_flags_render_and_size():
     part = Part("Title", " text ")
     assert part.render() == "## Title\ntext" and part.size() == len("## Title\ntext") + 2
     assert Part("", "bare").render() == "bare"
-    assert Part.total_size([Part("a", "x"), Part("b", ""), Part("c", "", True)]) == \
-        Part("a", "x").size() + Part("c", "", True).size()
+    assert (
+        Part.total_size([Part("a", "x"), Part("b", ""), Part("c", "", True)])
+        == Part("a", "x").size() + Part("c", "", True).size()
+    )
 
 
 def example(text):
@@ -225,7 +260,9 @@ def test_the_prompts_example_json_parses_and_its_toolchain_works():
     assert example("{" + Prompts.TOOLCHAIN_JSON + "}")["toolchain"]["test_all"] == "pytest -q"
     readme = re.search(r"Reply with ONLY JSON: (\{.*\})", Prompts.README_SYSTEM, re.S).group(1)
     assert example(readme)["usage"][0]["command"] == "python3 calculator.py add 5 2"
-    assert Prompts.SPEC_JSON[:-1] in Prompts.SPEC_SYSTEM and Prompts.TOOLCHAIN_JSON in Prompts.TOOLCHAIN_SYSTEM
+    assert (
+        Prompts.SPEC_JSON[:-1] in Prompts.SPEC_SYSTEM and Prompts.TOOLCHAIN_JSON in Prompts.TOOLCHAIN_SYSTEM
+    )
 
 
 @pytest.mark.spec("PRM-14")
@@ -244,5 +281,6 @@ def test_the_example_toolchain_commands_are_real_commands():
 
 @pytest.mark.spec("PRM-16")
 def test_the_lessons_prompt_asks_for_general_lessons():
-    assert "never name this project, its files, its names, its features or its data" in \
-        " ".join(Prompts.LESSONS_SYSTEM.split())
+    assert "never name this project, its files, its names, its features or its data" in " ".join(
+        Prompts.LESSONS_SYSTEM.split()
+    )

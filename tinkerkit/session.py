@@ -1,18 +1,26 @@
 lazy import json
 lazy import time
 
-lazy from .knowledge import Knowledge, Library
 from .messages import human_duration, say
-lazy from .prompts import Part, Prompts, PromptTooLarge, Reply
 from .settings import (
-    DEFAULT_MAX_STALL, ENV_EXAMPLE, ENV_FILE, NETWORK_RETRY_SECONDS, NETWORK_WAIT_NOTE_SECONDS, SETUP_TIMEOUT,
-    fingerprint, first_line,
+    DEFAULT_MAX_STALL,
+    ENV_EXAMPLE,
+    ENV_FILE,
+    NETWORK_RETRY_SECONDS,
+    NETWORK_WAIT_NOTE_SECONDS,
+    SETUP_TIMEOUT,
+    fingerprint,
+    first_line,
 )
+lazy from .knowledge import Knowledge, Library
+lazy from .prompts import Part, Prompts, PromptTooLarge, Reply
 lazy from .workspace import TaughtCommands, Workspace
 
 
 class Session:
-    def __init__(self, model, project, max_stall=DEFAULT_MAX_STALL, internet=None, confirm=True, tracker=None):
+    def __init__(
+        self, model, project, max_stall=DEFAULT_MAX_STALL, internet=None, confirm=True, tracker=None
+    ):
         self.model, self.project, self.max_stall = model, project, max_stall
         self.internet = internet
         self.confirm = confirm
@@ -25,8 +33,9 @@ class Session:
         self.review_problem = ""
         self.waiting_for_network = []
         self.last_all_tests_run = None
-        self.parked_at_start = {criterion["id"] for criterion in project.criteria
-                                if criterion.get("status") == "blocked"}
+        self.parked_at_start = {
+            criterion["id"] for criterion in project.criteria if criterion.get("status") == "blocked"
+        }
         self._knowledge = None
 
     @property
@@ -55,11 +64,15 @@ class Session:
         try:
             result = self.model.ask_until_usable(system, parts, label, read, attempts, think, max_reply)
         except PromptTooLarge as exc:
-            raise SystemExit(f"{label}: even shortened, the prompt does not fit {self.model.name}'s input budget "
-                             f"of {self.model.max_tokens} tokens ({exc}). Measure the model again (tinker calibrate) "
-                             f"or use one that reads longer prompts (tinker models).")
+            raise SystemExit(
+                f"{label}: even shortened, the prompt does not fit {self.model.name}'s input budget "
+                f"of {self.model.max_tokens} tokens ({exc}). Measure the model again (tinker calibrate) "
+                f"or use one that reads longer prompts (tinker models)."
+            )
         if result is None:
-            raise SystemExit(f"Could not get a usable {label.lower()}. See the model calls: tinker log --calls")
+            raise SystemExit(
+                f"Could not get a usable {label.lower()}. See the model calls: tinker log --calls"
+            )
         return result
 
     def room(self, system):
@@ -69,15 +82,33 @@ class Session:
         lessons = self.knowledge.lessons(phases)
         proven = [fact for fact in self.knowledge.facts(phases) if fact["id"] not in self.inapplicable()]
         learned = self.learned_for(phases, {fact["id"] for fact in proven})
-        self.used([f"lesson:{lesson['id']}" for lesson in lessons] + [f"known:{fact['id']}" for fact in proven]
-                  + [f"fact:{item['topic']}:{item['id']}" for item in learned if item.get("id")], phases)
-        facts = [f"- [{self.project.language or 'the language'}] {fact['text']}" for fact in proven] + \
-                [f"- [{item['name']}] {item['text']}" for item in learned]
-        parts = [Part("Lessons from earlier projects (follow them)",
-                      "\n".join(f"- {lesson['text']}" for lesson in lessons), atomic=True, place="first"),
-                 Part("Learned from the web (current; newer than what you were trained on)", "\n".join(facts),
-                      place="first")]
-        return parts + ([TaughtCommands.prompt_part()] if "toolchain" in phases else []) + self.checks_part(phases)
+        self.used(
+            [f"lesson:{lesson['id']}" for lesson in lessons]
+            + [f"known:{fact['id']}" for fact in proven]
+            + [f"fact:{item['topic']}:{item['id']}" for item in learned if item.get("id")],
+            phases,
+        )
+        facts = [f"- [{self.project.language or 'the language'}] {fact['text']}" for fact in proven] + [
+            f"- [{item['name']}] {item['text']}" for item in learned
+        ]
+        parts = [
+            Part(
+                "Lessons from earlier projects (follow them)",
+                "\n".join(f"- {lesson['text']}" for lesson in lessons),
+                atomic=True,
+                place="first",
+            ),
+            Part(
+                "Learned from the web (current; newer than what you were trained on)",
+                "\n".join(facts),
+                place="first",
+            ),
+        ]
+        return (
+            parts
+            + ([TaughtCommands.prompt_part()] if "toolchain" in phases else [])
+            + self.checks_part(phases)
+        )
 
     def checks_part(self, phases):
         lint = self.project.toolchain.lint if self.project.toolchain else ""
@@ -86,8 +117,11 @@ class Session:
         return [Part("Checks the code and tests must pass (write them so these find nothing)", f"$ {lint}")]
 
     def learned_for(self, phases, proven):
-        return [item for item in self.project.spec.get("learned", [])
-                if Library.shown_in(item, phases) and item.get("id") not in proven | self.inapplicable()]
+        return [
+            item
+            for item in self.project.spec.get("learned", [])
+            if Library.shown_in(item, phases) and item.get("id") not in proven | self.inapplicable()
+        ]
 
     def inapplicable(self):
         return set(self.project.spec.get("inapplicable", []))
@@ -124,7 +158,9 @@ class Session:
 
     def setup_key(self):
         configs = sorted(path for path in self.project.paths("config") if path not in (ENV_FILE, ENV_EXAMPLE))
-        return fingerprint(json.dumps(self.toolchain.setup) + "".join(self.workspace.read(path) for path in configs))
+        return fingerprint(
+            json.dumps(self.toolchain.setup) + "".join(self.workspace.read(path) for path in configs)
+        )
 
     def setup_done(self):
         self.project.spec["setup_key"] = self.setup_key()
@@ -134,8 +170,11 @@ class Session:
         if not self.waiting_for_network:
             return
         began = time.monotonic()
-        say.step(f"Waiting for the network: {len(self.waiting_for_network)} setup command(s), tried every "
-                 f"{NETWORK_RETRY_SECONDS}s (Ctrl+C stops; tinker resume goes on later)…", "📡")
+        say.step(
+            f"Waiting for the network: {len(self.waiting_for_network)} setup command(s), tried every "
+            f"{NETWORK_RETRY_SECONDS}s (Ctrl+C stops; tinker resume goes on later)…",
+            "📡",
+        )
         if not self.retried_until_online(began):
             return
         say.done(f"The network is back after {human_duration(time.monotonic() - began)}: setup done")
@@ -145,7 +184,9 @@ class Session:
         noted = began
         while self.waiting_for_network:
             time.sleep(NETWORK_RETRY_SECONDS)
-            ok, output, self.waiting_for_network = self.toolchain.run_setup(self.workspace, self.waiting_for_network)
+            ok, output, self.waiting_for_network = self.toolchain.run_setup(
+                self.workspace, self.waiting_for_network
+            )
             if not ok:
                 return False
             if self.waiting_for_network and time.monotonic() - noted >= NETWORK_WAIT_NOTE_SECONDS:
@@ -167,8 +208,10 @@ class Session:
             self.drop_formatter(command, code, output)
 
     def drop_formatter(self, command, code, output):
-        say.warn(f"The formatter does not work ({first_line(output.strip(), 160) or f'exit code {code}'}); "
-                 f"the code stays as written and the project goes on without `{command}`")
+        say.warn(
+            f"The formatter does not work ({first_line(output.strip(), 160) or f'exit code {code}'}); "
+            f"the code stays as written and the project goes on without `{command}`"
+        )
         self.project.spec["toolchain"] = dict(self.toolchain.to_dict(), format="")
         self.save()
 

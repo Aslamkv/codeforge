@@ -10,22 +10,55 @@ from pathlib import Path
 import pytest
 
 ROOT = Path(__file__).resolve().parent.parent
-LAYERS = ("messages", "settings", "jobs", "ledger", "commands", "prompts", "workspace", "model", "project", "fetcher", "web", "passages", "conversation",
-          "channels", "knowledge", "slots", "docsite", "learning", "graph", "reading", "teaching", "exercising", "session", "planning", "building",
-          "finishing", "cli")
+LAYERS = (
+    "messages",
+    "settings",
+    "jobs",
+    "ledger",
+    "commands",
+    "prompts",
+    "workspace",
+    "model",
+    "project",
+    "fetcher",
+    "web",
+    "passages",
+    "conversation",
+    "channels",
+    "knowledge",
+    "slots",
+    "docsite",
+    "learning",
+    "graph",
+    "reading",
+    "teaching",
+    "exercising",
+    "session",
+    "planning",
+    "building",
+    "finishing",
+    "cli",
+)
 
 
 def imports_of(module):
     tree = ast.parse((ROOT / "tinkerkit" / f"{module}.py").read_text(encoding="utf-8"))
     top, inner = set(), set()
-    nested = {id(node) for function in ast.walk(tree) if isinstance(function, (ast.FunctionDef, ast.AsyncFunctionDef))
-              for node in ast.walk(function) if node is not function}
+    nested = {
+        id(node)
+        for function in ast.walk(tree)
+        if isinstance(function, (ast.FunctionDef, ast.AsyncFunctionDef))
+        for node in ast.walk(function)
+        if node is not function
+    }
     for node in ast.walk(tree):
         names = []
         if isinstance(node, ast.ImportFrom) and node.level == 1:
             names = [node.module] if node.module else [alias.name for alias in node.names]
         elif isinstance(node, ast.ImportFrom) and (node.module or "").startswith("tinkerkit"):
-            names = [node.module.split(".", 1)[1]] if "." in node.module else [alias.name for alias in node.names]
+            names = (
+                [node.module.split(".", 1)[1]] if "." in node.module else [alias.name for alias in node.names]
+            )
         (inner if id(node) in nested else top).update(module_name.split(".")[0] for module_name in names)
     return top, inner
 
@@ -33,7 +66,7 @@ def imports_of(module):
 @pytest.mark.spec("ARCH-1")
 @pytest.mark.parametrize("module", LAYERS)
 def test_each_module_imports_only_the_modules_listed_above_it(module):
-    above = set(LAYERS[:LAYERS.index(module)])
+    above = set(LAYERS[: LAYERS.index(module)])
     top, inner = imports_of(module)
     assert top <= above, f"{module} imports {sorted(top - above)} at module level"
     allowed_inner = above | ({"channels"} if module == "conversation" else set())
@@ -49,12 +82,14 @@ def test_every_module_of_the_package_is_in_the_layers():
 @pytest.mark.spec("ARCH-2")
 def test_without_the_channels_plugin_the_conversation_has_no_chats(monkeypatch):
     from tinkerkit import conversation
+
     real_import = builtins.__import__
 
     def no_channels(name, globals=None, locals=None, fromlist=(), level=0):
         if name == "channels" and level == 1 or name == "tinkerkit.channels":
             raise ImportError("no plugin")
         return real_import(name, globals, locals, fromlist, level)
+
     monkeypatch.delitem(sys.modules, "tinkerkit.channels", raising=False)
     monkeypatch.setattr(builtins, "__import__", no_channels)
     assert conversation.chat_channels() == []
@@ -72,8 +107,11 @@ def test_only_the_model_web_and_channel_modules_open_connections():
     assert users <= {"model", "web", "fetcher", "channels", "knowledge"}, users
     knowledge = (ROOT / "tinkerkit" / "knowledge.py").read_text(encoding="utf-8")
     assert "urlopen(" not in knowledge, "knowledge goes online only through Internet and Ollama"
-    runners = {path.stem for path in [*(ROOT / "tinkerkit").glob("*.py"), ROOT / "tinker.py"]
-               if "subprocess.Popen(" in path.read_text(encoding="utf-8")}
+    runners = {
+        path.stem
+        for path in [*(ROOT / "tinkerkit").glob("*.py"), ROOT / "tinker.py"]
+        if "subprocess.Popen(" in path.read_text(encoding="utf-8")
+    }
     assert runners <= {"workspace", "settings", "conversation"}, runners
 
 
@@ -83,7 +121,9 @@ def test_only_home_knows_where_the_home_is():
         if path.stem == "settings":
             continue
         text = path.read_text(encoding="utf-8")
-        assert "Home.root /" not in text and '"tinker.db"' not in text, f"{path.name} names a path inside the home"
+        assert "Home.root /" not in text and '"tinker.db"' not in text, (
+            f"{path.name} names a path inside the home"
+        )
         assert not re.search(r"\b[A-Z_]+_(FILE|DIR)\s*=\s*HOME\b", text), path.name
 
 
@@ -92,12 +132,14 @@ def test_every_phase_works_through_the_session():
     from tinkerkit import session
     from tinkerkit.building import Verifier
     from tinkerkit.planning import SpecWriter
+
     assert issubclass(SpecWriter, session.Phase) and issubclass(Verifier, session.Worker)
     for module in ("planning", "building", "finishing", "cli"):
         top, inner = imports_of(module)
         assert "session" in top, f"{module} takes its phases from the session"
     tinker_py = (ROOT / "tinker.py").read_text(encoding="utf-8")
     assert "class Session" not in tinker_py
+
 
 PRAGMA_RE = re.compile(r"# noqa(: [A-Z]+\d+(, [A-Z]+\d+)*)?")
 
@@ -108,8 +150,11 @@ def every_source_file():
 
 def comments_of(path):
     text = path.read_text(encoding="utf-8")
-    return [(token.start[0], token.string) for token in tokenize.generate_tokens(io.StringIO(text).readline)
-            if token.type == tokenize.COMMENT]
+    return [
+        (token.start[0], token.string)
+        for token in tokenize.generate_tokens(io.StringIO(text).readline)
+        if token.type == tokenize.COMMENT
+    ]
 
 
 def allowed(path, line, comment):
@@ -119,9 +164,12 @@ def allowed(path, line, comment):
 
 def docstrings_of(path):
     tree = ast.parse(path.read_text(encoding="utf-8"))
-    return [getattr(node, "name", "the module") for node in ast.walk(tree)
-            if isinstance(node, (ast.Module, ast.ClassDef, ast.FunctionDef, ast.AsyncFunctionDef))
-            and ast.get_docstring(node, clean=False) is not None]
+    return [
+        getattr(node, "name", "the module")
+        for node in ast.walk(tree)
+        if isinstance(node, (ast.Module, ast.ClassDef, ast.FunctionDef, ast.AsyncFunctionDef))
+        and ast.get_docstring(node, clean=False) is not None
+    ]
 
 
 @pytest.mark.spec("ARCH-5")
@@ -148,7 +196,10 @@ def test_tinker_py_refuses_every_python_below_3_15_before_importing_tinkerkit(mo
     monkeypatch.setitem(sys.modules, "tinkerkit", None)
     with pytest.raises(SystemExit) as refused:
         runpy.run_path(str(ROOT / "tinker.py"), run_name="tinker")
-    assert refused.value.code == f"Tinker needs Python 3.15 or newer; this is {said}. On a Mac: brew install python"
+    assert (
+        refused.value.code
+        == f"Tinker needs Python 3.15 or newer; this is {said}. On a Mac: brew install python"
+    )
 
 
 @pytest.mark.spec("ARCH-6")

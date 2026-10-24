@@ -3,6 +3,7 @@ import re
 import sys
 
 import pytest
+from conftest import TOOLCHAIN
 
 from tinkerkit import cli
 from tinkerkit.cli import Cli, Commands
@@ -11,7 +12,6 @@ from tinkerkit.knowledge import Knowledge, Library
 from tinkerkit.project import Runs
 from tinkerkit.settings import Home
 from tinkerkit.workspace import TaughtCommands, Toolchain
-from conftest import TOOLCHAIN
 
 
 def lesson(text, phase="tests", scope="any"):
@@ -20,23 +20,43 @@ def lesson(text, phase="tests", scope="any"):
 
 @pytest.fixture
 def memory(home_store):
-    Library.save("flask", {"topic": "flask", "name": "Flask", "summary": "A web framework.", "kind": "research",
-                           "questions": [{"question": "How?"}],
-                           "facts": [{"phase": "code", "text": "Flask routes use @app.route", "source": "https://a.org/x"},
-                                     {"phase": "tests", "text": "Use app.test_client()", "sites": ["https://b.org"]}],
-                           "findings": [{"question": 1, "answer": "Routes and a test client", "facts": [1, 2],
-                                         "confidence": "medium"}]})
+    Library.save(
+        "flask",
+        {
+            "topic": "flask",
+            "name": "Flask",
+            "summary": "A web framework.",
+            "kind": "research",
+            "questions": [{"question": "How?"}],
+            "facts": [
+                {"phase": "code", "text": "Flask routes use @app.route", "source": "https://a.org/x"},
+                {"phase": "tests", "text": "Use app.test_client()", "sites": ["https://b.org"]},
+            ],
+            "findings": [
+                {"question": 1, "answer": "Routes and a test client", "facts": [1, 2], "confidence": "medium"}
+            ],
+        },
+    )
     route = Library.read("flask")["facts"][0]["id"]
     known = Knowledge("Python", "r1")
     known.remember_toolchain(Toolchain(TOOLCHAIN))
-    known.remember_fix({"failure": "no module named calc", "cause": "pythonpath", "replay": {"toolchain": {}}})
-    known.add_lessons([lesson("Seed random generators inside tests", scope="language"),
-                       lesson("Name each test after the behaviour it checks"),
-                       lesson("Exit with code 1 after an error <b>", "code")], [])
+    known.remember_fix(
+        {"failure": "no module named calc", "cause": "pythonpath", "replay": {"toolchain": {}}}
+    )
+    known.add_lessons(
+        [
+            lesson("Seed random generators inside tests", scope="language"),
+            lesson("Name each test after the behaviour it checks"),
+            lesson("Exit with code 1 after an error <b>", "code"),
+        ],
+        [],
+    )
     seed, name, _ = (lesson["id"] for lesson in known.known_lessons())
     Knowledge("Python", "r2").prove({f"lesson:{seed}": ["tests"], f"fact:flask:{route}": ["code"]})
     Knowledge("Python", "r2").disprove({f"lesson:{name}": ["tests"]}, ("tests",))
-    Runs.remember({"id": "r1", "task": "a calculator", "status": "done", "created": "c", "updated": "u"}, "Python")
+    Runs.remember(
+        {"id": "r1", "task": "a calculator", "status": "done", "created": "c", "updated": "u"}, "Python"
+    )
     TaughtCommands.teach("act", "echo hi")
     return {"route": route, "seed": seed, "name": name}
 
@@ -52,7 +72,9 @@ def test_one_node_per_thing_tinker_knows(memory):
     assert kinds[f"fact:flask:{memory['route']}"] == "fact"
     assert [node["kind"] for node in nodes.values() if node["id"].startswith("finding:flask:")] == ["finding"]
     retired = nodes["retired:any:0"]
-    assert retired["status"] == "retired" and retired["text"] == "Name each test after the behaviour it checks"
+    assert (
+        retired["status"] == "retired" and retired["text"] == "Name each test after the behaviour it checks"
+    )
     assert ["why", "shown in the tests prompts of a step that failed"] in retired["details"]
     seed = nodes[f"lesson:{memory['seed']}"]
     assert set(seed) == {"id", "kind", "label", "text", "status", "group", "details", "sources"}
@@ -66,23 +88,36 @@ def test_links_join_items_to_what_they_belong_to_and_to_their_runs(memory):
     links = {(link["source"], link["target"], link["kind"]) for link in graph.links}
     seed, route = f"lesson:{memory['seed']}", memory["route"]
     finding = next(node for node in graph.nodes if node.startswith("finding:"))
-    assert {(seed, "lang:python", "belongs_to"), ("command:act", "commands", "belongs_to"),
-            (finding, f"fact:flask:{route}", "cites"), (f"fact:flask:{route}", f"known:{route}", "became"),
-            (seed, "run:r1", "taught_by"), (seed, "run:r2", "helped_in"),
-            ("retired:any:0", "run:r2", "failed_in")} <= links
-    assert graph.nodes["run:r1"]["text"] == "a calculator" and ["status", "done"] in graph.nodes["run:r1"]["details"]
+    assert {
+        (seed, "lang:python", "belongs_to"),
+        ("command:act", "commands", "belongs_to"),
+        (finding, f"fact:flask:{route}", "cites"),
+        (f"fact:flask:{route}", f"known:{route}", "became"),
+        (seed, "run:r1", "taught_by"),
+        (seed, "run:r2", "helped_in"),
+        ("retired:any:0", "run:r2", "failed_in"),
+    } <= links
+    assert (
+        graph.nodes["run:r1"]["text"] == "a calculator"
+        and ["status", "done"] in graph.nodes["run:r1"]["details"]
+    )
     assert graph.nodes["run:r2"]["text"].startswith("no line about this run is kept")
 
 
 @pytest.mark.spec("GRF-2")
 def test_a_rule_links_to_the_facts_and_lessons_it_rests_on(memory):
     entry = Library.read("flask")
-    entry["rules"] = [{"phase": "code", "text": "Route with @app.route", "cites": [memory["route"], memory["seed"]]}]
+    entry["rules"] = [
+        {"phase": "code", "text": "Route with @app.route", "cites": [memory["route"], memory["seed"]]}
+    ]
     Library.save("flask", entry)
     graph = Graph.build()
     rule = next(node for node in graph.nodes if node.startswith("rule:"))
     links = {(link["source"], link["target"], link["kind"]) for link in graph.links}
-    assert {(rule, f"fact:flask:{memory['route']}", "cites"), (rule, f"lesson:{memory['seed']}", "cites")} <= links
+    assert {
+        (rule, f"fact:flask:{memory['route']}", "cites"),
+        (rule, f"lesson:{memory['seed']}", "cites"),
+    } <= links
     assert graph.nodes[rule]["kind"] == "rule" and "1 rule" in graph.summary()
 
 
@@ -101,12 +136,17 @@ class FakeEmbeddings:
 
 @pytest.mark.spec("GRF-3")
 def test_similar_lessons_by_meaning_else_by_words(home_store):
-    texts = ["Seed random generators inside tests", "Always seed random generators before tests run",
-             "Exit with code 1 after an error", "Mock the clock in tests that read the time"]
+    texts = [
+        "Seed random generators inside tests",
+        "Always seed random generators before tests run",
+        "Exit with code 1 after an error",
+        "Mock the clock in tests that read the time",
+    ]
     Knowledge("Python").add_lessons([lesson(text) for text in texts], [])
     ids = {lesson["text"]: f"lesson:{lesson['id']}" for lesson in Knowledge("Python").known_lessons()}
-    similar = lambda graph: {frozenset((link["source"], link["target"])) for link in graph.links
-                             if link["kind"] == "similar"}
+    similar = lambda graph: {
+        frozenset((link["source"], link["target"])) for link in graph.links if link["kind"] == "similar"
+    }
     first, unlike, also_unlike, like_the_first = [1.0, 0, 0], [0, 1.0, 0], [0, 0, 1.0], [0.9, 0.1, 0]
     meaning = dict(zip(texts, (first, unlike, also_unlike, like_the_first)))
     by_meaning = Graph.build(FakeEmbeddings(meaning))
@@ -122,10 +162,16 @@ def test_similar_lessons_by_meaning_else_by_words(home_store):
 def test_the_page_is_self_contained_with_a_plain_list(memory):
     page = GraphPage.html(Graph.build())
     assert not re.search(r"<script[^>]+src=|<link[^>]+href=|@import|url\(|<img", page)
-    data = json.loads(re.search(r'<script type="application/json" id="data">(.*?)</script>', page, re.S).group(1))
+    data = json.loads(
+        re.search(r'<script type="application/json" id="data">(.*?)</script>', page, re.S).group(1)
+    )
     assert {node["id"] for node in data["nodes"]} == set(Graph.build().nodes) and data["links"]
     main = re.search(r'<main id="list">(.*?)</main>', page, re.S).group(1)
-    assert "<h2>Python</h2>" in main and "<h2>Any language</h2>" in main and "Seed random generators inside tests" in main
+    assert (
+        "<h2>Python</h2>" in main
+        and "<h2>Any language</h2>" in main
+        and "Seed random generators inside tests" in main
+    )
     assert "Exit with code 1 after an error &lt;b&gt;" in main and "<b>" not in main
     assert "Retired (1)" in main and '<a href="https://a.org/x">source</a>' in main
 
@@ -155,10 +201,27 @@ def test_memory_counts_what_is_retired(memory, capsys):
 
 @pytest.mark.spec("GRF-1")
 def test_a_facts_slot_and_a_topics_missing_slots_are_in_their_details(home_store):
-    Library.save("widgetlib", {"topic": "Widgetlib", "kind": "tool", "name": "Widgetlib", "summary": "s",
-                               "status": "incomplete", "missing": ["this-version", "fit"], "passages": [{"id": "P1"}],
-                               "facts": [{"phase": "code", "text": "Create a Widget", "slot": "core-usage",
-                                          "passages": ["P1"], "source": "https://widgetlib.dev/start"}]})
+    Library.save(
+        "widgetlib",
+        {
+            "topic": "Widgetlib",
+            "kind": "tool",
+            "name": "Widgetlib",
+            "summary": "s",
+            "status": "incomplete",
+            "missing": ["this-version", "fit"],
+            "passages": [{"id": "P1"}],
+            "facts": [
+                {
+                    "phase": "code",
+                    "text": "Create a Widget",
+                    "slot": "core-usage",
+                    "passages": ["P1"],
+                    "source": "https://widgetlib.dev/start",
+                }
+            ],
+        },
+    )
     nodes = Graph.build().nodes
     fact = next(node for node in nodes.values() if node["id"].startswith("fact:widgetlib:"))
     assert ["slot", "core-usage"] in fact["details"] and fact["sources"] == ["https://widgetlib.dev/start"]

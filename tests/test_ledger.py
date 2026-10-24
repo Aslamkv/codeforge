@@ -5,18 +5,22 @@ import pytest
 import tinkerkit.ledger as ledger
 from tinkerkit.ledger import GLANCE_KEPT_SECONDS, HISTORY_PER_PAGE, MESSAGE_KEPT_SECONDS, Ledger
 
+
 @pytest.fixture
 def clock(monkeypatch):
     now = [time.time()]
     monkeypatch.setattr(ledger.time, "time", lambda: now[0])
     return now
 
+
 @pytest.mark.spec("LED-1")
 def test_each_message_goes_when_its_time_is_up(clock):
     Ledger.kept("bot", "42", 1)
     Ledger.glance("bot", "42", [2])
     Ledger.lasting("bot", "42", 3)
-    assert Ledger.due("bot") == [] and Ledger.glances("bot", "42") == [2] and Ledger.is_lasting("bot", "42", 3)
+    assert (
+        Ledger.due("bot") == [] and Ledger.glances("bot", "42") == [2] and Ledger.is_lasting("bot", "42", 3)
+    )
     assert sorted(message for _, message in Ledger.passing("bot")) == [1, 2]
     clock[0] += GLANCE_KEPT_SECONDS
     assert Ledger.due("bot") == [("42", 2)]
@@ -28,6 +32,7 @@ def test_each_message_goes_when_its_time_is_up(clock):
     assert Ledger.due("bot") == [("42", 2)] and Ledger.is_lasting("bot", "42", 3)
     Ledger.gone("bot", "42", 2)
     assert Ledger.due("bot") == [] and Ledger.due("other") == []
+
 
 @pytest.mark.spec("LED-2")
 def test_things_are_kept_as_shown_last_and_listed_newest_first():

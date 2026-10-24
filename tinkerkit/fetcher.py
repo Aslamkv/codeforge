@@ -1,21 +1,20 @@
-lazy import codecs
-lazy import concurrent.futures
 import http.client
 import re
-lazy import ssl
-lazy import threading
-lazy import time
 import urllib.error
 import urllib.parse
 import urllib.request
 import urllib.robotparser
-lazy import zlib
 from collections import namedtuple
 from dataclasses import asdict, dataclass
+lazy import codecs
+lazy import concurrent.futures
+lazy import ssl
+lazy import threading
+lazy import time
+lazy import zlib
 
-lazy from .jobs import journaled
 from .settings import FETCH_USER_AGENT, MAX_REDIRECTS, first_line
-
+lazy from .jobs import journaled
 
 Download = namedtuple("Download", "data why_failed")
 RawResponse = namedtuple("RawResponse", "status headers body")
@@ -45,7 +44,12 @@ class Fetcher:
     REDIRECTS = (301, 302, 303, 307, 308)
 
     def __init__(self, workers, timeout, max_bytes, domain_delay, log=None, user_agent=FETCH_USER_AGENT):
-        self.workers, self.timeout, self.max_bytes, self.domain_delay = workers, timeout, max_bytes, domain_delay
+        self.workers, self.timeout, self.max_bytes, self.domain_delay = (
+            workers,
+            timeout,
+            max_bytes,
+            domain_delay,
+        )
         self.log, self.user_agent = log, user_agent
         self.robots_by_site = {}
         self.next_turn, self.turn_lock = {}, threading.Lock()
@@ -55,8 +59,12 @@ class Fetcher:
         for index, url in enumerate(urls):
             sites.setdefault(site_of(url), []).append(index)
         results = [None] * len(urls)
-        with concurrent.futures.ThreadPoolExecutor(max_workers=max(1, min(self.workers, len(sites) or 1))) as pool:
-            fetched_sites = pool.map(lambda found: self.fetch_site([urls[at] for at in found], kind), sites.values())
+        with concurrent.futures.ThreadPoolExecutor(
+            max_workers=max(1, min(self.workers, len(sites) or 1))
+        ) as pool:
+            fetched_sites = pool.map(
+                lambda found: self.fetch_site([urls[at] for at in found], kind), sites.values()
+            )
             for indexes, got in zip(sites.values(), fetched_sites):
                 for index, fetched in zip(indexes, got):
                     results[index] = fetched
@@ -67,8 +75,13 @@ class Fetcher:
             return [self.fetch(url, connections, kind) for url in urls]
 
     def fetch(self, url, connections, kind):
-        return journaled({"page": url, "kind": kind}, lambda: self.fetched(url, connections, kind),
-                         keep=lambda fetched: fetched.ok, dump=asdict, load=lambda kept: Fetched(**kept))
+        return journaled(
+            {"page": url, "kind": kind},
+            lambda: self.fetched(url, connections, kind),
+            keep=lambda fetched: fetched.ok,
+            dump=asdict,
+            load=lambda kept: Fetched(**kept),
+        )
 
     def fetched(self, url, connections, kind):
         try:
@@ -135,25 +148,36 @@ class Fetcher:
     def answered(self, url, final_url, status, headers, body):
         if status >= 400:
             return Fetched(url, status, final_url, error=f"HTTP {status}")
-        text = self.decoded(unzipped(body, headers.get("Content-Encoding", ""), self.max_bytes),
-                            headers.get_content_charset())
+        text = self.decoded(
+            unzipped(body, headers.get("Content-Encoding", ""), self.max_bytes), headers.get_content_charset()
+        )
         return Fetched(url, status, final_url, text, (headers.get_content_type() or "").lower())
 
     def through_proxy(self, url):
-        request = urllib.request.Request(url, headers={"User-Agent": self.user_agent, "Accept-Language": "en"})
+        request = urllib.request.Request(
+            url, headers={"User-Agent": self.user_agent, "Accept-Language": "en"}
+        )
         try:
-            with urllib.request.build_opener(LimitedRedirects).open(request, timeout=self.timeout) as response:
+            with urllib.request.build_opener(LimitedRedirects).open(
+                request, timeout=self.timeout
+            ) as response:
                 body = response.read(self.max_bytes)
-                return Fetched(url, response.status, response.geturl(),
-                               self.decoded(body, response.headers.get_content_charset()),
-                               (response.headers.get_content_type() or "").lower())
+                return Fetched(
+                    url,
+                    response.status,
+                    response.geturl(),
+                    self.decoded(body, response.headers.get_content_charset()),
+                    (response.headers.get_content_type() or "").lower(),
+                )
         except urllib.error.HTTPError as exc:
             return Fetched(url, exc.code, exc.geturl() or url, error=f"HTTP {exc.code}")
 
     def download(self, url, max_bytes):
         request = urllib.request.Request(url, headers={"User-Agent": self.user_agent})
         try:
-            with urllib.request.build_opener(LimitedRedirects).open(request, timeout=self.timeout) as response:
+            with urllib.request.build_opener(LimitedRedirects).open(
+                request, timeout=self.timeout
+            ) as response:
                 body = response.read(max_bytes + 1)
         except urllib.error.HTTPError as exc:
             return Download(b"", f"HTTP {exc.code}")
@@ -173,7 +197,12 @@ class Fetcher:
 
 
 class Connections:
-    DROPPED = (http.client.RemoteDisconnected, http.client.CannotSendRequest, ConnectionResetError, BrokenPipeError)
+    DROPPED = (
+        http.client.RemoteDisconnected,
+        http.client.CannotSendRequest,
+        ConnectionResetError,
+        BrokenPipeError,
+    )
 
     def __init__(self, timeout):
         self.timeout, self.open = timeout, {}
@@ -198,10 +227,13 @@ class Connections:
     def connection_to(self, parts):
         key = (parts.scheme, parts.netloc)
         if key not in self.open:
-            self.open[key] = (http.client.HTTPSConnection(parts.netloc, timeout=self.timeout,
-                                                          context=ssl.create_default_context())
-                              if parts.scheme == "https" else
-                              http.client.HTTPConnection(parts.netloc, timeout=self.timeout))
+            self.open[key] = (
+                http.client.HTTPSConnection(
+                    parts.netloc, timeout=self.timeout, context=ssl.create_default_context()
+                )
+                if parts.scheme == "https"
+                else http.client.HTTPConnection(parts.netloc, timeout=self.timeout)
+            )
         return self.open[key]
 
     @staticmethod
@@ -223,7 +255,7 @@ def unzipped(body, encoding, max_bytes):
     encoding = encoding.lower().strip()
     if encoding not in ("gzip", "x-gzip", "deflate"):
         return body
-    for window in ((16 + zlib.MAX_WBITS,) if "gzip" in encoding else (zlib.MAX_WBITS, -zlib.MAX_WBITS)):
+    for window in (16 + zlib.MAX_WBITS,) if "gzip" in encoding else (zlib.MAX_WBITS, -zlib.MAX_WBITS):
         try:
             return zlib.decompressobj(window).decompress(body, max_bytes)
         except zlib.error:
@@ -238,7 +270,9 @@ def site_of(url):
 
 def behind_proxy(url):
     parts = urllib.parse.urlsplit(url)
-    return bool(urllib.request.getproxies().get(parts.scheme)) and not urllib.request.proxy_bypass(parts.hostname or "")
+    return bool(urllib.request.getproxies().get(parts.scheme)) and not urllib.request.proxy_bypass(
+        parts.hostname or ""
+    )
 
 
 def known_codec(name):

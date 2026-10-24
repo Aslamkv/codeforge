@@ -1,49 +1,50 @@
 import contextlib
+import re
+from collections import namedtuple
+from pathlib import Path
 lazy import difflib
 lazy import hashlib
 lazy import json
 lazy import os
-import re
 lazy import shutil
 lazy import sqlite3
 lazy import subprocess
 lazy import sys
 lazy import time
-from collections import namedtuple
-from pathlib import Path
 
 lazy from .messages import say
 
-
-DEFAULT_CONFIG = frozendict({
-    "model": None,
-    "ollama_url": "http://localhost:11434",
-    "keep_alive": 0,
-    "max_growth": 1.15,
-    "build_think": "medium",
-    "test_timeout": 60,
-    "web": "ollama",
-    "web_fallback": "",
-    "web_timeout": 30,
-    "learn_missing": 2,
-    "learn_rate": 8,
-    "learn_backoff": 20,
-    "learn_cutoff": 0.0,
-    "learn_pages": 8,
-    "learn_min_pages": 2,
-    "learn_searches": 3,
-    "learn_think": "low",
-    "docs_pages": 30,
-    "tool_docs_pages": 5,
-    "docs_latest_days": 30,
-    "fetch_workers": 6,
-    "fetch_timeout": 15,
-    "fetch_max_bytes": 2000000,
-    "fetch_domain_delay": 0.1,
-    "fetch_fallbacks": 2,
-    "embed_model": "",
-    "projects": "~/Projects",
-})
+DEFAULT_CONFIG = frozendict(
+    {
+        "model": None,
+        "ollama_url": "http://localhost:11434",
+        "keep_alive": 0,
+        "max_growth": 1.15,
+        "build_think": "medium",
+        "test_timeout": 60,
+        "web": "ollama",
+        "web_fallback": "",
+        "web_timeout": 30,
+        "learn_missing": 2,
+        "learn_rate": 8,
+        "learn_backoff": 20,
+        "learn_cutoff": 0.0,
+        "learn_pages": 8,
+        "learn_min_pages": 2,
+        "learn_searches": 3,
+        "learn_think": "low",
+        "docs_pages": 30,
+        "tool_docs_pages": 5,
+        "docs_latest_days": 30,
+        "fetch_workers": 6,
+        "fetch_timeout": 15,
+        "fetch_max_bytes": 2000000,
+        "fetch_domain_delay": 0.1,
+        "fetch_fallbacks": 2,
+        "embed_model": "",
+        "projects": "~/Projects",
+    }
+)
 
 STATE_DIR = ".tinker"
 PROJECT_DB = "project.db"
@@ -62,7 +63,8 @@ PHASES = (
     "docs",
     "final_review",
     "lessons",
-    "done")
+    "done",
+)
 FIX_PHASES = ("recall", "reproduce", "verify", "final_review", "lessons", "done")
 PLANNING_PHASES = ("recall", "spec", "design", "review")
 CONFIRM_AFTER = frozendict({"feature": "review", "fix": "reproduce"})
@@ -239,7 +241,9 @@ class Home:
             return
         if home.name != STATE_DIR:
             raise SystemExit(f"Not deleting {home}: it is not a .tinker folder.")
-        say.warn(f"This deletes {home}: Tinker's settings, measured models, what it knows and its list of projects.")
+        say.warn(
+            f"This deletes {home}: Tinker's settings, measured models, what it knows and its list of projects."
+        )
         say.info("Projects are not touched (each keeps its own .tinker folder).", "📁")
         if not confirmed("Delete it?", "tinker reset", yes):
             say.info("Nothing deleted.")
@@ -250,25 +254,51 @@ class Home:
 
     @staticmethod
     def parts():
-        return {"languages": (["languages"], [], "per language: the toolchain that worked, its fixes, its lessons"),
-                "memory": (["memory"], [], "lessons that hold for any language"),
-                "learned": (["learned", "embeddings"], ["learn"], "what tinker learn learned, and its index"),
-                "docs": (["sources"], [], "the documentation pages tinker learn fetched, cleaned, per topic and version"),
-                "models": (["models"], [], "what calibration measured for each model"),
-                "runs": (["projects", "runs"], [], "the list of projects and a line about each run (projects keep "
-                                                   "their own .tinker)"),
-                "commands": (["commands"], [], "your commands Tinker may use"),
-                "history": (["chat history", "chat history numbers"], [], "what the chats showed, and what you asked "
-                                                                         "(their messages go from the chats in a day)"),
-                "exercise": (["exercise"], ["exercise"], "the exercises: each language's practice projects, what they "
-                                                         "measured, and where each stopped")}
+        return {
+            "languages": (
+                ["languages"],
+                [],
+                "per language: the toolchain that worked, its fixes, its lessons",
+            ),
+            "memory": (["memory"], [], "lessons that hold for any language"),
+            "learned": (["learned", "embeddings"], ["learn"], "what tinker learn learned, and its index"),
+            "docs": (
+                ["sources"],
+                [],
+                "the documentation pages tinker learn fetched, cleaned, per topic and version",
+            ),
+            "models": (["models"], [], "what calibration measured for each model"),
+            "runs": (
+                ["projects", "runs"],
+                [],
+                "the list of projects and a line about each run (projects keep their own .tinker)",
+            ),
+            "commands": (["commands"], [], "your commands Tinker may use"),
+            "history": (
+                ["chat history", "chat history numbers"],
+                [],
+                "what the chats showed, and what you asked (their messages go from the chats in a day)",
+            ),
+            "exercise": (
+                ["exercise"],
+                ["exercise"],
+                "the exercises: each language's practice projects, what they "
+                "measured, and where each stopped",
+            ),
+        }
 
     @classmethod
     def clear(cls, names, yes=False):
         names = cls.known_parts(names)
         held = {name: cls.entries_in(name) for name in names}
         if not any(held.values()):
-            say.info("Nothing to clear: " + ", ".join(names) + " " + ("is" if len(names) == 1 else "are") + " empty.")
+            say.info(
+                "Nothing to clear: "
+                + ", ".join(names)
+                + " "
+                + ("is" if len(names) == 1 else "are")
+                + " empty."
+            )
             return
         cls.show_what_clearing_deletes(held)
         if not confirmed("Delete them?", "it", yes):
@@ -282,14 +312,18 @@ class Home:
     def known_parts(cls, names):
         unknown = [name for name in names if name not in cls.parts()]
         if unknown:
-            raise SystemExit(f"tinker clear: no part {', '.join(unknown)}; the parts are: {', '.join(cls.parts())}")
+            raise SystemExit(
+                f"tinker clear: no part {', '.join(unknown)}; the parts are: {', '.join(cls.parts())}"
+            )
         return list(dict.fromkeys(names))
 
     @classmethod
     def entries_in(cls, name):
         collections, logs, _ = cls.parts()[name]
         store = cls.store()
-        return sum(store.count(collection) for collection in collections) + sum(store.logged(log) for log in logs)
+        return sum(store.count(collection) for collection in collections) + sum(
+            store.logged(log) for log in logs
+        )
 
     @classmethod
     def show_what_clearing_deletes(cls, held):
@@ -312,8 +346,13 @@ class Home:
         if not command:
             return
         try:
-            subprocess.Popen(command, stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
-                             start_new_session=True)
+            subprocess.Popen(
+                command,
+                stdin=subprocess.DEVNULL,
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+                start_new_session=True,
+            )
         except OSError:
             pass
 
@@ -322,8 +361,15 @@ class Home:
         if shutil.which("caffeinate"):
             return ["caffeinate", "-i", "-s", "-w", pid]
         if shutil.which("systemd-inhibit"):
-            return ["systemd-inhibit", "--what=idle:sleep", "--why=Tinker is working", "tail", f"--pid={pid}",
-                    "-f", "/dev/null"]
+            return [
+                "systemd-inhibit",
+                "--what=idle:sleep",
+                "--why=Tinker is working",
+                "tail",
+                f"--pid={pid}",
+                "-f",
+                "/dev/null",
+            ]
         return None
 
     @classmethod
@@ -339,11 +385,32 @@ class Home:
 
 class Config:
     SECONDS_OR_DURATION_RE = re.compile(r"-?\d+|-?(\d+(\.\d+)?(ns|us|ms|s|m|h))+")
-    SETTABLE = ("ollama_url", "keep_alive", "max_growth", "build_think", "test_timeout", "web_fallback",
-                "web_timeout", "learn_missing", "learn_rate", "learn_backoff", "learn_cutoff", "learn_pages",
-                "learn_min_pages", "learn_searches", "learn_think", "docs_pages", "tool_docs_pages",
-                "docs_latest_days", "fetch_workers", "fetch_timeout", "fetch_max_bytes",
-                "fetch_domain_delay", "fetch_fallbacks", "projects")
+    SETTABLE = (
+        "ollama_url",
+        "keep_alive",
+        "max_growth",
+        "build_think",
+        "test_timeout",
+        "web_fallback",
+        "web_timeout",
+        "learn_missing",
+        "learn_rate",
+        "learn_backoff",
+        "learn_cutoff",
+        "learn_pages",
+        "learn_min_pages",
+        "learn_searches",
+        "learn_think",
+        "docs_pages",
+        "tool_docs_pages",
+        "docs_latest_days",
+        "fetch_workers",
+        "fetch_timeout",
+        "fetch_max_bytes",
+        "fetch_domain_delay",
+        "fetch_fallbacks",
+        "projects",
+    )
     OWN_COMMAND = {"model": "use-model", "embed_model": "embed", "web": "use-web"}
 
     @staticmethod
@@ -377,7 +444,9 @@ class Config:
         if key in cls.OWN_COMMAND:
             raise SystemExit(f"tinker config: {key} is set with tinker {cls.OWN_COMMAND[key]} NAME")
         if key not in cls.SETTABLE:
-            raise SystemExit(f"tinker config: no setting {key!r}; the settings are: {', '.join(cls.SETTABLE)}")
+            raise SystemExit(
+                f"tinker config: no setting {key!r}; the settings are: {', '.join(cls.SETTABLE)}"
+            )
 
     @staticmethod
     def parse(key, text):
@@ -416,27 +485,34 @@ class Config:
     @classmethod
     def check_keep_alive(cls):
         if not cls.SECONDS_OR_DURATION_RE.fullmatch(str(cls.get("keep_alive"))):
-            raise SystemExit(f"keep_alive must be seconds (0, 300; -1 keeps the model loaded) or a duration (10m, "
-                             f"1h); it is {cls.get('keep_alive')!r} (tinker config keep_alive VALUE)")
+            raise SystemExit(
+                f"keep_alive must be seconds (0, 300; -1 keeps the model loaded) or a duration (10m, "
+                f"1h); it is {cls.get('keep_alive')!r} (tinker config keep_alive VALUE)"
+            )
 
     @classmethod
     def check_max_growth(cls):
         growth = cls.get("max_growth")
         if not is_number(growth) or growth <= 1:
-            raise SystemExit(f"max_growth must be a number above 1 (1.15 unloads the model once it is 15% larger); "
-                             f"it is {growth!r}")
+            raise SystemExit(
+                f"max_growth must be a number above 1 (1.15 unloads the model once it is 15% larger); "
+                f"it is {growth!r}"
+            )
 
     @classmethod
     def check_build_think(cls):
         for key in ("build_think", "learn_think"):
             think = cls.get(key)
             if not cls.is_think_setting(think):
-                raise SystemExit(f'{key} must be "high", "medium", "low", true, false or null; it is {think!r}')
+                raise SystemExit(
+                    f'{key} must be "high", "medium", "low", true, false or null; it is {think!r}'
+                )
 
     @staticmethod
     def is_think_setting(think):
-        return think in ("high", "medium", "low", True, False, None) and not (think in (0, 1)
-                                                                             and not isinstance(think, bool))
+        return think in ("high", "medium", "low", True, False, None) and not (
+            think in (0, 1) and not isinstance(think, bool)
+        )
 
     @classmethod
     def check_test_timeout(cls):
@@ -470,10 +546,12 @@ def number_from(value, least, whole=True):
 
 
 class Store:
-    SCHEMA = ("CREATE TABLE IF NOT EXISTS docs (collection TEXT NOT NULL, key TEXT NOT NULL, value TEXT NOT NULL, "
-              "PRIMARY KEY (collection, key))",
-              "CREATE TABLE IF NOT EXISTS logs (id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT NOT NULL, "
-              "time TEXT NOT NULL, entry TEXT NOT NULL)")
+    SCHEMA = (
+        "CREATE TABLE IF NOT EXISTS docs (collection TEXT NOT NULL, key TEXT NOT NULL, value TEXT NOT NULL, "
+        "PRIMARY KEY (collection, key))",
+        "CREATE TABLE IF NOT EXISTS logs (id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT NOT NULL, "
+        "time TEXT NOT NULL, entry TEXT NOT NULL)",
+    )
     LOCK_WAIT_SECONDS = 30
 
     def __init__(self, path):
@@ -502,7 +580,9 @@ class Store:
 
     def items(self, collection):
         with self.transaction() as db:
-            rows = db.execute("SELECT key, value FROM docs WHERE collection = ? ORDER BY rowid", (collection,)).fetchall()
+            rows = db.execute(
+                "SELECT key, value FROM docs WHERE collection = ? ORDER BY rowid", (collection,)
+            ).fetchall()
         return {key: json.loads(value) for key, value in rows}
 
     def count(self, collection):
@@ -511,13 +591,16 @@ class Store:
 
     def append(self, log, entry):
         with self.transaction(write=True) as db:
-            return db.execute("INSERT INTO logs (name, time, entry) VALUES (?, ?, ?)",
-                              (log, time.strftime("%Y-%m-%d %H:%M:%S"), json.dumps(entry, ensure_ascii=False))).lastrowid
+            return db.execute(
+                "INSERT INTO logs (name, time, entry) VALUES (?, ?, ?)",
+                (log, time.strftime("%Y-%m-%d %H:%M:%S"), json.dumps(entry, ensure_ascii=False)),
+            ).lastrowid
 
     def entries(self, log, after=0):
         with self.transaction() as db:
-            rows = db.execute("SELECT id, time, entry FROM logs WHERE name = ? AND id > ? ORDER BY id",
-                              (log, after)).fetchall()
+            rows = db.execute(
+                "SELECT id, time, entry FROM logs WHERE name = ? AND id > ? ORDER BY id", (log, after)
+            ).fetchall()
         return [LogEntry(row_id, {"time": stamp, **json.loads(entry)}) for row_id, stamp, entry in rows]
 
     def drop_log(self, log):
@@ -575,13 +658,18 @@ class Store:
 
     @staticmethod
     def read(db, collection, key, default):
-        row = db.execute("SELECT value FROM docs WHERE collection = ? AND key = ?", (collection, key)).fetchone()
+        row = db.execute(
+            "SELECT value FROM docs WHERE collection = ? AND key = ?", (collection, key)
+        ).fetchone()
         return json.loads(row[0]) if row else default
 
     @staticmethod
     def write(db, collection, key, value):
-        db.execute("INSERT INTO docs (collection, key, value) VALUES (?, ?, ?) ON CONFLICT (collection, key) "
-                   "DO UPDATE SET value = excluded.value", (collection, key, json.dumps(value, ensure_ascii=False)))
+        db.execute(
+            "INSERT INTO docs (collection, key, value) VALUES (?, ?, ?) ON CONFLICT (collection, key) "
+            "DO UPDATE SET value = excluded.value",
+            (collection, key, json.dumps(value, ensure_ascii=False)),
+        )
 
 
 class Log:
@@ -602,7 +690,7 @@ def projects_folder():
 
 def first_line(text, limit=140):
     line = (text or "").strip().splitlines()[0] if (text or "").strip() else ""
-    return line if len(line) <= limit else line[:limit - 3] + "..."
+    return line if len(line) <= limit else line[: limit - 3] + "..."
 
 
 def now_text():

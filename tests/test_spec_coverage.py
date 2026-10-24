@@ -19,7 +19,9 @@ def points_tested():
 
 
 def test_every_spec_point_has_a_test():
-    missing = sorted(spec_points() - points_tested(), key=lambda point: (point.split("-")[0], int(point.split("-")[1])))
+    missing = sorted(
+        spec_points() - points_tested(), key=lambda point: (point.split("-")[0], int(point.split("-")[1]))
+    )
     assert not missing, f"spec points with no test: {', '.join(missing)}"
 
 

@@ -478,3 +478,9 @@ python3 -m venv .venv && source .venv/bin/activate
 pip install -r requirements.txt
 python -m pytest
 ```
+
+Ruff keeps the code in one style. Format and lint before you commit:
+
+```sh
+ruff format . && ruff check --fix .
+```

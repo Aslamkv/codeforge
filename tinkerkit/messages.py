@@ -1,7 +1,7 @@
 import contextlib
+from dataclasses import dataclass
 lazy import shutil
 lazy import sys
-from dataclasses import dataclass
 
 VARIATION_SELECTOR = "\ufe0f"
 
@@ -15,7 +15,9 @@ class Message:
 
     @property
     def line(self):
-        return "   " * self.depth + (f"{self.icon}{space_after(self.icon)}{self.text}" if self.icon else self.text)
+        return "   " * self.depth + (
+            f"{self.icon}{space_after(self.icon)}{self.text}" if self.icon else self.text
+        )
 
 
 def space_after(icon):
@@ -24,8 +26,19 @@ def space_after(icon):
 
 
 class Messages:
-    ICONS = frozendict({"done": "✅", "warn": "⚠️", "fail": "❌", "retry": "🔁", "skip": "➖", "stop": "🛑",
-                        "tip": "💡", "item": "•", "found": "💡"})
+    ICONS = frozendict(
+        {
+            "done": "✅",
+            "warn": "⚠️",
+            "fail": "❌",
+            "retry": "🔁",
+            "skip": "➖",
+            "stop": "🛑",
+            "tip": "💡",
+            "item": "•",
+            "found": "💡",
+        }
+    )
     SPINNER = "⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏"
 
     def __init__(self):
@@ -112,7 +125,7 @@ class Messages:
             width = shutil.get_terminal_size((80, 24)).columns
             drawn = Message("live", text, self.depth + 1, self.SPINNER[self.frame % len(self.SPINNER)])
             self.frame += 1
-            sys.__stdout__.write("\r" + drawn.line[:max(width - 1, 10)] + "\033[K")
+            sys.__stdout__.write("\r" + drawn.line[: max(width - 1, 10)] + "\033[K")
             sys.__stdout__.flush()
             self.drawn = True
         self.tell(message)
