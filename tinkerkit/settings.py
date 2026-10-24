@@ -45,6 +45,91 @@ DEFAULT_CONFIG = frozendict(
         "projects": "~/Projects",
     }
 )
+WEB_BACKENDS = ("ollama", "duckduckgo")
+
+
+class Setting(namedtuple("Setting", "kind owner least whole above", defaults=("config", None, False, False))):
+    __slots__ = ()
+    SECONDS_OR_DURATION_RE = re.compile(r"-?\d+|-?(\d+(\.\d+)?(ns|us|ms|s|m|h))+")
+    THINK_WORDS = frozendict({"true": True, "false": False, "null": None})
+
+    def read(self, text):
+        if self.kind == "think" and text.lower() in self.THINK_WORDS:
+            return self.THINK_WORDS[text.lower()]
+        if self.kind == "duration" and re.fullmatch(r"-?\d+", text):
+            return int(text)
+        if self.kind == "number":
+            for kind in (int, float):
+                try:
+                    return kind(text)
+                except ValueError:
+                    continue
+        return text
+
+    def fits(self, value):
+        match self.kind:
+            case "number":
+                return self.in_range(value)
+            case "duration":
+                return bool(self.SECONDS_OR_DURATION_RE.fullmatch(str(value)))
+            case "think":
+                return value in ("high", "medium", "low", True, False, None) and not (
+                    value in (0, 1) and not isinstance(value, bool)
+                )
+            case "backend":
+                return value in ("", *WEB_BACKENDS)
+        return value is None or isinstance(value, str)
+
+    def in_range(self, value):
+        if not is_number(value) or (self.whole and not isinstance(value, int)):
+            return False
+        return value > self.least if self.above else value >= self.least
+
+    def described(self):
+        match self.kind:
+            case "number":
+                whole = "a whole number" if self.whole else "a number"
+                return f"{whole} above {self.least}" if self.above else f"{whole}, {self.least} or more"
+            case "duration":
+                return "seconds (0, 300; -1 keeps the model loaded) or a duration (10m, 1h)"
+            case "think":
+                return '"high", "medium", "low", true, false or null'
+            case "backend":
+                return "one of " + ", ".join(map(repr, WEB_BACKENDS)) + ' or "" (none)'
+        return "text"
+
+
+SETTINGS = frozendict(
+    {
+        "model": Setting("text", "use-model"),
+        "ollama_url": Setting("text"),
+        "keep_alive": Setting("duration"),
+        "max_growth": Setting("number", least=1, above=True),
+        "build_think": Setting("think"),
+        "test_timeout": Setting("number", least=1, whole=True),
+        "web": Setting("backend", "use-web"),
+        "web_fallback": Setting("backend"),
+        "web_timeout": Setting("number", least=0, above=True),
+        "learn_missing": Setting("number", least=1, whole=True),
+        "learn_rate": Setting("number", least=1),
+        "learn_backoff": Setting("number", least=0),
+        "learn_cutoff": Setting("number", least=0),
+        "learn_pages": Setting("number", least=1, whole=True),
+        "learn_min_pages": Setting("number", least=1, whole=True),
+        "learn_searches": Setting("number", least=1, whole=True),
+        "learn_think": Setting("think"),
+        "docs_pages": Setting("number", least=1, whole=True),
+        "tool_docs_pages": Setting("number", least=0, whole=True),
+        "docs_latest_days": Setting("number", least=0),
+        "fetch_workers": Setting("number", least=1, whole=True),
+        "fetch_timeout": Setting("number", least=1),
+        "fetch_max_bytes": Setting("number", least=1000, whole=True),
+        "fetch_domain_delay": Setting("number", least=0),
+        "fetch_fallbacks": Setting("number", least=0, whole=True),
+        "embed_model": Setting("text", "embed"),
+        "projects": Setting("text"),
+    }
+)
 
 STATE_DIR = ".tinker"
 PROJECT_DB = "project.db"
@@ -382,35 +467,6 @@ class Home:
 
 
 class Config:
-    SECONDS_OR_DURATION_RE = re.compile(r"-?\d+|-?(\d+(\.\d+)?(ns|us|ms|s|m|h))+")
-    SETTABLE = (
-        "ollama_url",
-        "keep_alive",
-        "max_growth",
-        "build_think",
-        "test_timeout",
-        "web_fallback",
-        "web_timeout",
-        "learn_missing",
-        "learn_rate",
-        "learn_backoff",
-        "learn_cutoff",
-        "learn_pages",
-        "learn_min_pages",
-        "learn_searches",
-        "learn_think",
-        "docs_pages",
-        "tool_docs_pages",
-        "docs_latest_days",
-        "fetch_workers",
-        "fetch_timeout",
-        "fetch_max_bytes",
-        "fetch_domain_delay",
-        "fetch_fallbacks",
-        "projects",
-    )
-    OWN_COMMAND = {"model": "use-model", "embed_model": "embed", "web": "use-web"}
-
     @staticmethod
     def load():
         return {**DEFAULT_CONFIG, **Home.store().items("config")}
@@ -424,99 +480,36 @@ class Config:
     def get(cls, key):
         return Home.store().get("config", key, DEFAULT_CONFIG[key])
 
+    @staticmethod
+    def settable():
+        return [key for key, row in SETTINGS.items() if row.owner == "config"]
+
     @classmethod
-    def set(cls, key, text, *checks):
+    def set(cls, key, text):
         cls.refuse_unsettable(key)
-        value = cls.parse(key, text.strip())
-        before = Home.store().get("config", key)
+        value = SETTINGS[key].read(text.strip())
+        cls.check_one(key, value)
         cls.save(**{key: value})
-        try:
-            cls.check_all(checks)
-        except SystemExit:
-            cls.restore(key, before)
-            raise
         return value
 
     @classmethod
     def refuse_unsettable(cls, key):
-        if key in cls.OWN_COMMAND:
-            raise SystemExit(f"tinker config: {key} is set with tinker {cls.OWN_COMMAND[key]} NAME")
-        if key not in cls.SETTABLE:
+        if key in SETTINGS and SETTINGS[key].owner != "config":
+            raise SystemExit(f"tinker config: {key} is set with tinker {SETTINGS[key].owner} NAME")
+        if key not in SETTINGS:
             raise SystemExit(
-                f"tinker config: no setting {key!r}; the settings are: {', '.join(cls.SETTABLE)}"
+                f"tinker config: no setting {key!r}; the settings are: {', '.join(cls.settable())}"
             )
+
+    @classmethod
+    def check(cls):
+        for key in SETTINGS:
+            cls.check_one(key, cls.get(key))
 
     @staticmethod
-    def parse(key, text):
-        known = {"true": True, "false": False, "null": None}
-        if text.lower() in known and key in ("build_think", "learn_think"):
-            return known[text.lower()]
-        if is_number(DEFAULT_CONFIG[key]):
-            for kind in (int, float):
-                try:
-                    return kind(text)
-                except ValueError:
-                    continue
-        return text
-
-    @classmethod
-    def check_all(cls, checks):
-        cls.check_model(run=True)
-        for check in checks:
-            check()
-
-    @classmethod
-    def restore(cls, key, before):
-        if before is None:
-            Home.store().delete("config", key)
-        else:
-            cls.save(**{key: before})
-
-    @classmethod
-    def check_model(cls, run):
-        cls.check_keep_alive()
-        cls.check_max_growth()
-        cls.check_build_think()
-        if run:
-            cls.check_test_timeout()
-
-    @classmethod
-    def check_keep_alive(cls):
-        if not cls.SECONDS_OR_DURATION_RE.fullmatch(str(cls.get("keep_alive"))):
-            raise SystemExit(
-                f"keep_alive must be seconds (0, 300; -1 keeps the model loaded) or a duration (10m, "
-                f"1h); it is {cls.get('keep_alive')!r} (tinker config keep_alive VALUE)"
-            )
-
-    @classmethod
-    def check_max_growth(cls):
-        growth = cls.get("max_growth")
-        if not is_number(growth) or growth <= 1:
-            raise SystemExit(
-                f"max_growth must be a number above 1 (1.15 unloads the model once it is 15% larger); "
-                f"it is {growth!r}"
-            )
-
-    @classmethod
-    def check_build_think(cls):
-        for key in ("build_think", "learn_think"):
-            think = cls.get(key)
-            if not cls.is_think_setting(think):
-                raise SystemExit(
-                    f'{key} must be "high", "medium", "low", true, false or null; it is {think!r}'
-                )
-
-    @staticmethod
-    def is_think_setting(think):
-        return think in ("high", "medium", "low", True, False, None) and not (
-            think in (0, 1) and not isinstance(think, bool)
-        )
-
-    @classmethod
-    def check_test_timeout(cls):
-        timeout = cls.get("test_timeout")
-        if not number_from(timeout, 1):
-            raise SystemExit(f"test_timeout must be a whole number of seconds, 1 or more; it is {timeout!r}")
+    def check_one(key, value):
+        if not SETTINGS[key].fits(value):
+            raise SystemExit(f"{key} must be {SETTINGS[key].described()}; it is {value!r}")
 
     @classmethod
     def ollama_url(cls):

@@ -7,7 +7,7 @@ from email.message import Message
 import pytest
 
 from tinkerkit.fetcher import Fetcher
-from tinkerkit.settings import Config
+from tinkerkit.settings import WEB_BACKENDS, Config
 from tinkerkit.web import DuckDuckGoWeb, Internet, OllamaWeb, PageText, WebBackend, WebError
 
 
@@ -84,29 +84,8 @@ def test_no_backend_left_is_not_available(monkeypatch):
 
 
 @pytest.mark.spec("WEB-3")
-@pytest.mark.parametrize(
-    "key,value",
-    [
-        ("web", "bing"),
-        ("web_fallback", "x"),
-        ("web_timeout", 0),
-        ("web_timeout", True),
-        ("learn_missing", 0),
-        ("learn_missing", 1.5),
-        ("learn_missing", True),
-    ],
-)
-def test_check_rejects_unusable_web_settings(key, value):
-    Config.save(**{key: value})
-    with pytest.raises(SystemExit, match=key):
-        Internet.check()
-
-
-@pytest.mark.spec("WEB-3")
-def test_check_accepts_the_defaults_and_duckduckgo():
-    Internet.check()
-    Config.save(web="duckduckgo", web_fallback="ollama", web_timeout=2.5, learn_missing=3)
-    Internet.check()
+def test_the_web_backends_are_the_ones_the_settings_name():
+    assert tuple(Internet.backends()) == WEB_BACKENDS
 
 
 @pytest.mark.spec("WEB-4")
@@ -430,21 +409,3 @@ def test_the_page_fetcher_follows_the_fetch_settings():
     fetcher = Internet.page_fetcher(log=print)
     assert isinstance(fetcher, Fetcher) and fetcher.log is print
     assert (fetcher.workers, fetcher.timeout, fetcher.max_bytes, fetcher.domain_delay) == (3, 7.0, 5000, 0.25)
-
-
-@pytest.mark.spec("WEB-3")
-@pytest.mark.parametrize(
-    "key,value",
-    [
-        ("learn_rate", 0),
-        ("learn_pages", 2.5),
-        ("learn_min_pages", 0),
-        ("learn_backoff", -1),
-        ("fetch_workers", True),
-        ("fetch_max_bytes", "big"),
-    ],
-)
-def test_check_rejects_learn_limits_out_of_range(key, value):
-    Config.save(**{key: value})
-    with pytest.raises(SystemExit, match=key):
-        Internet.check()

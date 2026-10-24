@@ -11,7 +11,7 @@ lazy import urllib.parse
 lazy import urllib.request
 
 from .messages import say
-from .settings import Config, first_line, is_number, number_from
+from .settings import Config, first_line
 lazy from .fetcher import Fetcher
 lazy from .jobs import journaled
 
@@ -21,28 +21,11 @@ Unreached = namedtuple("Unreached", "why timed_out")
 ReadyBackends = namedtuple("ReadyBackends", "ready reasons")
 BackendAnswer = namedtuple("BackendAnswer", "result why")
 Got = namedtuple("Got", "text content_type")
-Limit = namedtuple("Limit", "whole least")
 
 
 class Internet:
     RETRY_PAUSE_SECONDS = 3
     FAILURES_BEFORE_GONE = 2
-    LEARN_LIMITS = {
-        "learn_rate": Limit(False, 1),
-        "learn_backoff": Limit(False, 0),
-        "learn_cutoff": Limit(False, 0),
-        "learn_pages": Limit(True, 1),
-        "learn_min_pages": Limit(True, 1),
-        "learn_searches": Limit(True, 1),
-        "fetch_workers": Limit(True, 1),
-        "fetch_timeout": Limit(False, 1),
-        "fetch_max_bytes": Limit(True, 1000),
-        "fetch_domain_delay": Limit(False, 0),
-        "fetch_fallbacks": Limit(True, 0),
-        "docs_pages": Limit(True, 1),
-        "tool_docs_pages": Limit(True, 0),
-        "docs_latest_days": Limit(False, 0),
-    }
 
     def __init__(self):
         self.errors, self.failures, self.last_failure_status = {}, {}, {}
@@ -67,7 +50,7 @@ class Internet:
 
     @staticmethod
     def required(option):
-        Internet.check()
+        Config.check()
         internet = Internet()
         if not internet.available():
             raise SystemExit(f"{option} needs the Internet plugin: {internet.problem()}")
@@ -78,7 +61,7 @@ class Internet:
     @staticmethod
     def state():
         try:
-            Internet.check()
+            Config.check()
         except SystemExit as exc:
             return f"not usable: {exc}"
         internet = Internet()
@@ -88,45 +71,6 @@ class Internet:
             f"; not usable: {'; '.join(internet.unusable_backends)}" if internet.unusable_backends else ""
         )
         return f"ready: {internet.describe()}{skipped}"
-
-    @staticmethod
-    def check():
-        for key in ("web", "web_fallback"):
-            Internet.check_backend_name(key)
-        Internet.check_timeout()
-        Internet.check_learn_missing()
-        Internet.check_learn_limits()
-
-    @staticmethod
-    def check_backend_name(key):
-        if Config.get(key) not in ("", *Internet.backends()):
-            raise SystemExit(
-                f"{key} must be one of {', '.join(map(repr, Internet.backends()))} "
-                f'or "" (none); it is {Config.get(key)!r}'
-            )
-
-    @staticmethod
-    def check_timeout():
-        timeout = Config.get("web_timeout")
-        if not is_number(timeout) or timeout <= 0:
-            raise SystemExit(f"web_timeout must be a number of seconds above 0; it is {timeout!r}")
-
-    @staticmethod
-    def check_learn_missing():
-        missing = Config.get("learn_missing")
-        if not number_from(missing, 1):
-            raise SystemExit(
-                f"learn_missing must be a whole number, 1 or more (the topics a run "
-                f"with --web may learn); it is {missing!r}"
-            )
-
-    @staticmethod
-    def check_learn_limits():
-        for key, (whole, least) in Internet.LEARN_LIMITS.items():
-            value = Config.get(key)
-            if not number_from(value, least, whole):
-                kind = "a whole number" if whole else "a number"
-                raise SystemExit(f"{key} must be {kind}, {least} or more; it is {value!r}")
 
     @staticmethod
     def backends():

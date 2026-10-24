@@ -547,7 +547,7 @@ class Commands:
     @staticmethod
     def config(words):
         if words:
-            value = Config.set(words[0], words[1], Internet.check)
+            value = Config.set(words[0], words[1])
             say.done(f"{words[0]} is {value!r} now")
             return
         name = Config.get("model")
@@ -557,7 +557,7 @@ class Commands:
         say.text(f"model in use:    {Commands.model_state(name, settings)}")
         if settings:
             Commands.print_measured(settings)
-        for key in Config.SETTABLE:
+        for key in Config.settable():
             if key not in ("ollama_url",):
                 say.text(f"{key + ':':16} {Config.get(key)!r}")
         say.text(
@@ -716,7 +716,7 @@ class Commands:
     def checked_model():
         name, settings = Models.selected()
         Models.installed(name)
-        Config.check_model(run=False)
+        Config.check()
         return SelectedModel(name, settings)
 
     @staticmethod
@@ -1224,7 +1224,7 @@ class ProjectRun:
 
     def check_requirements(self):
         Models.installed(Models.selected()[0])
-        Config.check_model(run=True)
+        Config.check()
         TaughtCommands.stop_if_broken()
         if self.args.web:
             Embeddings.required("--web")

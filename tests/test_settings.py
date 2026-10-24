@@ -9,8 +9,10 @@ import pytest
 from conftest import REAL_HOME
 
 import tinkerkit.settings as settings
+from tinkerkit.commands import BY_NAME
 from tinkerkit.settings import (
     PER_PAGE,
+    SETTINGS,
     Config,
     Home,
     Numbered,
@@ -25,7 +27,6 @@ from tinkerkit.settings import (
     split_text,
     words,
 )
-from tinkerkit.web import Internet
 
 
 @pytest.mark.spec("SET-1")
@@ -113,19 +114,45 @@ def test_config_is_defaults_overridden_by_the_home(home_store):
         ("build_think", "true"),
         ("build_think", 1),
         ("learn_think", "max"),
+        ("test_timeout", 0),
+        ("test_timeout", 1.5),
+        ("test_timeout", "60"),
+        ("web", "bing"),
+        ("web_fallback", "x"),
+        ("web_timeout", 0),
+        ("web_timeout", True),
+        ("learn_missing", 0),
+        ("learn_missing", 1.5),
+        ("learn_missing", True),
+        ("learn_rate", 0),
+        ("learn_pages", 2.5),
+        ("learn_min_pages", 0),
+        ("learn_backoff", -1),
+        ("fetch_workers", True),
+        ("fetch_max_bytes", "big"),
     ],
 )
-def test_check_model_rejects_unusable_settings(key, value):
+def test_check_rejects_a_setting_outside_its_row(key, value):
     Config.save(**{key: value})
-    with pytest.raises(SystemExit, match=key):
-        Config.check_model(run=False)
+    with pytest.raises(SystemExit, match=f"^{key} must be"):
+        Config.check()
 
 
 @pytest.mark.spec("SET-5")
 @pytest.mark.parametrize("value", [0, 300, -1, "10m", "1h30m", "500ms"])
-def test_check_model_accepts_keep_alive_seconds_or_durations(value):
+def test_check_accepts_keep_alive_seconds_or_durations(value):
     Config.save(keep_alive=value)
-    Config.check_model(run=True)
+    Config.check()
+
+
+@pytest.mark.spec("SET-5")
+def test_every_setting_has_one_row_with_its_owner():
+    assert list(SETTINGS) == list(settings.DEFAULT_CONFIG)
+    owned = {key: row.owner for key, row in SETTINGS.items() if row.owner != "config"}
+    assert owned == {"model": "use-model", "web": "use-web", "embed_model": "embed"}
+    Config.check()
+    Config.save(web="duckduckgo", web_fallback="", web_timeout=2.5, learn_missing=3)
+    Config.check()
 
 
 @pytest.mark.spec("SET-7")
@@ -415,7 +442,7 @@ def test_config_set_reads_and_checks_the_value():
 
 
 def config_set(key, text):
-    return Config.set(key, text, Internet.check)
+    return Config.set(key, text)
 
 
 @pytest.mark.spec("SET-6")
@@ -424,6 +451,13 @@ def test_config_set_only_the_settings_with_no_command_of_their_own():
         Config.set("model", "x")
     with pytest.raises(SystemExit, match="no setting 'colour'"):
         Config.set("colour", "red")
+
+
+@pytest.mark.spec("SET-6")
+def test_help_config_lists_the_settings_from_the_table():
+    about = BY_NAME["config"].about
+    assert "test_timeout (a whole number, 1 or more)" in about and "max_growth (a number above 1)" in about
+    assert "web_fallback (" in about and "embed_model" not in about and "model (" not in about
 
 
 @pytest.mark.spec("SET-18")

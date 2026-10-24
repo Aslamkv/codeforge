@@ -218,9 +218,10 @@ The home, its database, the settings, and small helpers every module shares.
   embed_model, `config` for the rest). `Config.check()` checks every setting by its row, and rejects with
   `SystemExit`: a keep_alive that is neither whole seconds nor a duration (`10m`, `1h30m`); a build_think or
   learn_think other than `"high"`, `"medium"`, `"low"`, `true`, `false` or `null`; a web or web_fallback that
-  names no backend of `WEB_BACKENDS` (web_fallback may be empty); and a number outside its range, or not whole
+  names no backend of `WEB_BACKENDS` (either may be empty: none); and a number outside its range, or not whole
   where its row says so (max_growth above 1, web_timeout above 0, test_timeout and learn_missing at least 1,
-  and each `learn_*`, `docs_*` and `fetch_*` limit). A boolean is never a number.
+  and each `learn_*`, `docs_*` and `fetch_*` limit). A boolean is never a number. Every command that needs the
+  model or the web checks them first.
 - **SET-6** `Config.set(key, text)` is `tinker config KEY VALUE`. It sets only the keys whose owner is
   `config`, reading the value by the row's type. A value that fails its row's check is not kept, and the
   command ends with why. `tinker help config` lists those keys with their type and range, from the table.

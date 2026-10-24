@@ -1,5 +1,7 @@
 from collections import namedtuple
 
+from .settings import SETTINGS
+
 Refs = namedtuple("Refs", "project words")
 
 
@@ -433,7 +435,10 @@ COMMANDS = [
         "Set up",
         "config [KEY VALUE]",
         "the settings, or set one",
-        "Show the settings a build uses, or set one: tinker config KEY VALUE (e.g. tinker config test_timeout 90).",
+        "Show the settings a build uses, or set one: tinker config KEY VALUE (e.g. tinker config test_timeout 90). "
+        "The settings: "
+        + ", ".join(f"{key} ({row.described()})" for key, row in SETTINGS.items() if row.owner == "config")
+        + ".",
         chat="quick",
         words="any",
         arguments=[Argument("words", "*", "KEY VALUE", "the setting and its value")],
