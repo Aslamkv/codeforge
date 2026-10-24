@@ -254,6 +254,27 @@ def test_stop_tells_a_job_or_every_one_of_the_persons(home_store, monkeypatch, c
     with pytest.raises(SystemExit):
         Cli.parse(["stop", "3"])
 
+@pytest.mark.spec("JOB-11")
+def test_clear_jobs_archives_them_listed_apart_and_never_resumed(home_store, capsys):
+    keep_jobs(home_store, ["stopped", "finished", "running", "stopped"])
+    home_store.append("journal #1", {"key": "k", "answer": "a"})
+    with pytest.raises(SystemExit, match="Nothing deleted: run tinker clear jobs #1"):
+        Cli.cleared(["jobs", "#1"], yes=False)
+    Cli.cleared(["jobs", "#1"], yes=True)
+    assert Jobs.get(1)["state"] == "archived" and Jobs.get(1)["archived_from"] == "stopped"
+    assert home_store.logged("journal #1") == 0
+    assert [job["number"] for job in Jobs.listed()] == [3, 4] and [job["number"] for job in Jobs.listed("archived")] == [1]
+    assert Jobs.resumable(1) == (None, "Job #1 is archived: there is nothing left to resume.")
+    for words, why in ((["jobs", "#3"], "Job #3 is running: stop it first"), (["jobs", "#1"], "archived already"),
+                       (["jobs", "#9"], "No job #9"), (["jobs", "memory"], "job numbers alone")):
+        with pytest.raises(SystemExit, match=why):
+            Cli.cleared(words, yes=True)
+    Cli.cleared(["jobs"], yes=True)  # every stopped and finished one
+    assert [job["number"] for job in Jobs.listed("archived")] == [4, 2, 1] and Jobs.get(3)["state"] == "running"
+    Cli.cleared(["jobs"], yes=True)
+    assert "Nothing to clear: no job is stopped or finished." in capsys.readouterr().out
+    assert Cli.parse(["jobs", "archived"]).jobs == ("archived", 1)
+
 
 @pytest.mark.spec("JOB-7")
 def test_the_conversation_stops_and_resumes_jobs(home_store, tmp_path, monkeypatch):

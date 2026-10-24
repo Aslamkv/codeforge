@@ -382,7 +382,7 @@ List them, newest first, 10 to a page:
 
 ```sh
 tinker jobs              # the running ones, then the paused ones, then the stopped ones
-tinker jobs paused       # only the paused ones (or running, stopped, finished)
+tinker jobs paused       # only the paused ones (or running, stopped, finished, archived)
 tinker jobs finished 2   # the second page
 ```
 
@@ -403,6 +403,15 @@ tinker resume            # the job stopped last
 
 A job that was killed (or the computer restarted) shows as stopped, and resumes the same way. Once a job
 finishes, its journal is deleted. In a chat, the same words work: `jobs`, `stop #3`, `resume #3`.
+
+Clear the jobs you are done with. They are archived, not deleted: `tinker jobs` no longer shows them, but
+`tinker jobs archived` does. An archived job cannot be resumed:
+
+```sh
+tinker clear jobs #3 #5     # archive these two (stop a running one first)
+tinker clear jobs           # archive every stopped and finished job
+tinker jobs archived        # list them
+```
 
 ## Settings 🔧
 
