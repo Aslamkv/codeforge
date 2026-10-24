@@ -641,8 +641,10 @@ Fetched pages as passages: main content, under headings, repeats dropped.
 - **PAS-1** `Cleaner.page` takes an HTML page's main content as blocks (`<main>`/`<article>` when it holds
   `MIN_USABLE_PAGE_CHARS`, else the body). It leaves out scripts, styles, navigation, headers, footers,
   asides, forms, `hidden`, `aria-hidden`, navigation roles, and every paragraph that is at least
-  `MENU_LINK_SHARE` links. Broken HTML gives what was read before it broke. Plain text and Markdown are read
-  by their lines (`#` headings, ``` code).
+  `MENU_LINK_SHARE` links. A heading keeps its level, a list item is a block of its own (`item`), `<pre>` is a
+  code block that keeps its layout, and the page's `<title>` is kept apart (`MainBlocks.parsed`). Broken HTML
+  gives what was read before it broke. Plain text and Markdown are read by their lines (`#` headings, ```
+  code).
   `Cleaner.pool(pages, known)` gathers blocks under their heading into passages of up to `MAX_PASSAGE_CHARS`
   (a code block whole), drops text a site repeats on several of its pages and a passage that repeats another
   or a known one (`NEAR_DUPLICATE_OVERLAP`), and numbers them on from the known ones (`P1`, `P2`, ...), each
@@ -680,8 +682,9 @@ The Internet plugin, the only part that goes on the web.
   worth asking again.
 - **WEB-11** `DuckDuckGoWeb.read_page` gives an HTML page as its main text (`PageText`). Plain text, JSON and
   XML stay as they are. Any other content type is a `WebError`.
-- **WEB-12** `PageText` is a view over `Cleaner` (**PAS-1**): a page's title, and its main content's blocks
-  as text. Headings become `# ` lines, list items become `- ` lines, and `<pre>` keeps its layout.
+- **WEB-12** `PageText` is a view over `Cleaner`'s blocks (**PAS-1**): a page's title, and its main content's
+  blocks as text, a blank line between them. A heading becomes a `#` line of its level, list items become `- `
+  lines one under another, and a code block keeps its layout.
 
 ## conversation (CNV)
 
