@@ -67,7 +67,7 @@ class Tidy(Phase):
     @staticmethod
     def findings(output, path):
         """The problems a linter's output locates in a file (path:line or path, line N)."""
-        return sum(1 for match in Output.LOCATION_RE.finditer(output) if Output.names(match.group(1), path))
+        return sum(1 for match in Output.FILE_LOCATION_RE.finditer(output) if Output.names(match.group(1), path))
 
     def tidy(self, path, output, passing):
         """One call for one file: what the linter says about it, and the file as numbered lines, so
@@ -149,8 +149,8 @@ class ReadmeWriter(Phase):
     MAX_USAGE_EXAMPLES = 12
     EXAMPLE_FIX_ROUNDS = 2
     SERVER_ANSWER_TIMEOUT = 20
-    LOCAL_RE = re.compile(r"\b(127\.0\.0\.1|localhost)\b")  # an example that talks to the app as a server
-    PLACEHOLDER_RE = re.compile(r"<[^<>\n]+>")  # a value that differs each run, e.g. <code>: any one matches
+    SERVER_ADDRESS_RE = re.compile(r"\b(127\.0\.0\.1|localhost)\b")
+    VARYING_VALUE_RE = re.compile(r"<[^<>\n]+>")
 
     def run(self, cycle):
         readme = next((path for path, info in self.project.files.items() if info.get("kind") == "docs"), "README.md")
@@ -198,7 +198,7 @@ class ReadmeWriter(Phase):
                  for use in entries if clean(use.get("what")) and clean(use.get("command"))]
         if not features or not usage:
             raise ValueError("it needs the features and at least one usage example")
-        serves = str(data.get("serves")).lower() in ("true", "yes") or any(self.LOCAL_RE.search(use["command"])
+        serves = str(data.get("serves")).lower() in ("true", "yes") or any(self.SERVER_ADDRESS_RE.search(use["command"])
                                                                           for use in usage)
         return {"overview": str(data.get("overview") or "").strip(), "features": features,
                 "usage": usage[:self.MAX_USAGE_EXAMPLES], "serves": serves, "requires": clean(data.get("requires"))}
@@ -264,7 +264,7 @@ class ReadmeWriter(Phase):
         tc = self.session.toolchain
         as_a_person_runs_it = lambda command: " && ".join(tc.use + [command])
         run = TaughtCommands.spelled_out(tc.run) if tc.run else ""
-        serves = run and (cycle.get("serves") or any(self.LOCAL_RE.search(command) for command, _ in examples))
+        serves = run and (cycle.get("serves") or any(self.SERVER_ADDRESS_RE.search(command) for command, _ in examples))
         starts_it = lambda example: serves and example[0] == run
         examples = [example for example in examples if not starts_it(example)]
         if not examples:
@@ -306,7 +306,7 @@ class ReadmeWriter(Phase):
         one example showed fills the commands after it."""
         failures, values = [], {}
         for command, expected in examples:
-            filled = self.PLACEHOLDER_RE.sub(lambda match: values.get(match.group(0), match.group(0)), command)
+            filled = self.VARYING_VALUE_RE.sub(lambda match: values.get(match.group(0), match.group(0)), command)
             code, output = self.workspace.run(ready(filled), timeout=Toolchain.test_timeout(), quiet=True)
             missing, shown = self.compare(expected, output)
             values.update(shown)
@@ -334,7 +334,7 @@ class ReadmeWriter(Phase):
             compact = "".join(line.split())
             found = next((match for match in map(cls.line_pattern(compact).fullmatch, said) if match), None)
             if found:
-                values.update(zip(cls.PLACEHOLDER_RE.findall(compact), found.groups()))
+                values.update(zip(cls.VARYING_VALUE_RE.findall(compact), found.groups()))
             else:
                 missing.append(line)
         return missing, values
@@ -342,7 +342,7 @@ class ReadmeWriter(Phase):
     @classmethod
     def line_pattern(cls, compact):
         """A documented line as a pattern: its text as it is, each <placeholder> any value."""
-        parts = [re.escape(part) for part in cls.PLACEHOLDER_RE.split(compact)]
+        parts = [re.escape(part) for part in cls.VARYING_VALUE_RE.split(compact)]
         return re.compile(parts[0] + "".join(r"(\S+?)" + part for part in parts[1:]))
 
     def fix(self, readme, failures, note=""):

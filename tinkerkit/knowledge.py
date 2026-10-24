@@ -364,8 +364,7 @@ class Learner:
     embedding model."""
     VERSION_RE = re.compile(r"\d+(?:\.\d+)+")
     SHELL_OPERATORS = re.compile(r"[;&|<>`$\n\\]")
-    # a fact about what is not out yet: never kept
-    UNRELEASED = re.compile(r"\b(unreleased|not (yet )?released|(pre|future|upcoming)[- ]release|release candidate|"
+    UNRELEASED_RE = re.compile(r"\b(unreleased|not (yet )?released|(pre|future|upcoming)[- ]release|release candidate|"
                             r"draft(?![\w-])|in development|nightly)\b", re.I)
     CHANGES = re.compile(r"\b(install|uninstall|remove|delete|update|upgrade|add|rm|init|new|create|run|exec|"
                          r"download|fetch|get|set|config)\b", re.I)
@@ -518,7 +517,7 @@ class Learner:
             facts = self.facts_in(parts, page, number, chunk_number)
             if facts is None:
                 break
-            found += [dict(fact, source=page["url"]) for fact in facts if not self.UNRELEASED.search(fact["text"])]
+            found += [dict(fact, source=page["url"]) for fact in facts if not self.UNRELEASED_RE.search(fact["text"])]
         return found
 
     def unreadable(self, page, number):

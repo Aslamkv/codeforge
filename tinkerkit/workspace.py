@@ -32,14 +32,12 @@ class Toolchain:
     NO_TESTS_RE = re.compile(r"\bno tests? (ran|run|to run|found|collected|matched)\b|\b0 (tests|passed)\b|"
                              r"\bran 0 tests\b|\btests?\s*0\b|\b\d+ deselected\b", re.I)
     TESTS_RAN_RE = re.compile(r"\b[1-9]\d* (tests?|passed|passing|failed|failing)\b|\bran [1-9]\d* tests?\b", re.I)
-    ENV_TARGET = re.compile(r"(?<![\w.-])\.env(?![\w.-])")  # the settings file itself, not .env.example
-    # a command that changes the machine's own toolchain, not the project: what is installed is used as it is
-    MACHINE_RE = re.compile(r"\brustup\s+(default|override|update|toolchain|component|target)\b|\bcargo\s+install\b|"
+    ENV_FILE_RE = re.compile(r"(?<![\w.-])\.env(?![\w.-])")
+    MACHINE_TOOLCHAIN_CHANGE_RE = re.compile(r"\brustup\s+(default|override|update|toolchain|component|target)\b|\bcargo\s+install\b|"
                             r"\b(npm|pnpm|yarn)\s+(i|install|add)\b[^&|;]*\s(-g|--global)\b|\byarn\s+global\b|"
                             r"\bpip3?\s+install\b[^&|;]*\s--user\b|\b(brew|apt|apt-get|dnf|yum|pacman|port)\s+install\b|"
                             r"\b(go|gem)\s+install\b|\b(pyenv|nvm|asdf)\s+(install|global|use)\b")
-    # a command that failed because the network did (any package manager): it waits for the network, nothing more
-    NETWORK_RE = re.compile(r"could not resolve|resolve host|name or service not known|nodename nor servname|"
+    NETWORK_FAILURE_RE = re.compile(r"could not resolve|resolve host|name or service not known|nodename nor servname|"
                             r"temporary failure in name resolution|network is unreachable|no route to host|"
                             r"connection (refused|reset|aborted|timed out)|failed to establish a new connection|"
                             r"newconnectionerror|max retries exceeded|read timed out|\b(enotfound|eai_again|"
@@ -49,10 +47,10 @@ class Toolchain:
     def __init__(self, data=None):
         data = data if isinstance(data, dict) else {}
         setup = self.command_list(data.get("setup"))
-        self.setup = [command for command in setup if not self.ENV_TARGET.search(command)
-                      and not self.MACHINE_RE.search(command)]
-        self.env_commands_dropped = [command for command in setup if self.ENV_TARGET.search(command)]
-        self.machine_changing_commands = [command for command in setup if self.MACHINE_RE.search(command)]
+        self.setup = [command for command in setup if not self.ENV_FILE_RE.search(command)
+                      and not self.MACHINE_TOOLCHAIN_CHANGE_RE.search(command)]
+        self.env_commands_dropped = [command for command in setup if self.ENV_FILE_RE.search(command)]
+        self.machine_changing_commands = [command for command in setup if self.MACHINE_TOOLCHAIN_CHANGE_RE.search(command)]
         self.use = self.command_list(data.get("use"))
         self.activate = str(data.get("activate") or "").strip()
         for key in self.COMMANDS:
@@ -144,7 +142,7 @@ class Toolchain:
                 f"(its files are written for it), so this command is not one of its setup")
 
     def failed_for_the_network(self, output):
-        return bool(self.NETWORK_RE.search(output)) or not online()
+        return bool(self.NETWORK_FAILURE_RE.search(output)) or not online()
 
     @staticmethod
     def setup_failure(command, code, output):
@@ -240,8 +238,8 @@ class Workspace:
     REFUSED_OUTPUT = "refused: the command is unsafe"
     UNSAFE_COMMAND = re.compile(r"(^|[;&|]\s*)sudo\b|\brm\s+-[a-z]*r[a-z]*f?\s+(/|~|\.\.)|\bmkfs\b|\bdd\s+if=|"
                                 r"(curl|wget)\b[^|]*\|\s*(ba|z)?sh\b|>\s*/(etc|usr|bin|dev/sd)")
-    PLACEHOLDER_RE = re.compile(r"^(<.*>|your[_-][\w-]*|[\w-]*_here|change[-_ ]?me|replace[-_ ]?me|x{3,}|\*{3,}|"
-                                r"\.\.\.|placeholder)$", re.I)  # only what plainly marks where a value goes
+    PLAIN_PLACEHOLDER_RE = re.compile(r"^(<.*>|your[_-][\w-]*|[\w-]*_here|change[-_ ]?me|replace[-_ ]?me|x{3,}|\*{3,}|"
+                                r"\.\.\.|placeholder)$", re.I)
     UNUSABLE_PATH_CHARS = "\n\r\t`<>|*?\"'"
 
     def __init__(self, root):
@@ -468,7 +466,7 @@ class Workspace:
     @staticmethod
     def is_placeholder(value):
         """A value that only shows where a real one goes (your_api_key_here, <key>, ...)."""
-        return not value or bool(Workspace.PLACEHOLDER_RE.prefixmatch(value.strip().strip("'\"")))
+        return not value or bool(Workspace.PLAIN_PLACEHOLDER_RE.prefixmatch(value.strip().strip("'\"")))
 
 
 class Change:
@@ -497,8 +495,8 @@ class TaughtCommands:
     the person's aliases do not exist, so a command that uses an alias gets its definition first, as
     a shell function. SPEC.md and the README show commands with aliases spelled out, so they work
     for anyone. tinker memory lists them; tinker learn NAME none forgets one."""
-    NAME_RE = re.compile(r"[A-Za-z_][A-Za-z0-9_]*")  # a name a POSIX shell function can have
-    SOURCE_RE = re.compile(r"(^|[;&|(]\s*)source\s+")  # "source" is not POSIX: "." is
+    SHELL_FUNCTION_NAME_RE = re.compile(r"[A-Za-z_][A-Za-z0-9_]*")
+    SOURCE_COMMAND_RE = re.compile(r"(^|[;&|(]\s*)source\s+")
     ALIAS_LOOKUP_TIMEOUT = 10
 
     @staticmethod
@@ -535,10 +533,10 @@ class TaughtCommands:
     @staticmethod
     def check_alias(name, entry):
         """An alias Tinker can define: a shell function's name, and valid POSIX shell ("source" made ".")."""
-        if not TaughtCommands.NAME_RE.fullmatch(name):
+        if not TaughtCommands.SHELL_FUNCTION_NAME_RE.fullmatch(name):
             raise SystemExit(f"{name!r} cannot be an alias Tinker defines: letters, digits and _ only, not starting "
                              f"with a digit")
-        entry["definition"] = TaughtCommands.SOURCE_RE.sub(r"\1. ", entry["definition"])
+        entry["definition"] = TaughtCommands.SOURCE_COMMAND_RE.sub(r"\1. ", entry["definition"])
         problem = TaughtCommands.syntax_problem(name, entry["definition"])
         if problem:
             raise SystemExit(f"{name} stands for `{entry['definition']}`, which is not valid POSIX shell "
@@ -571,7 +569,7 @@ class TaughtCommands:
         """NAME as an alias in the person's shell ({kind, definition, from}), or None: a name of
         one word only, asked of their interactive shell once, now."""
         shell = os.environ.get("SHELL", "")
-        if not shell or not TaughtCommands.NAME_RE.fullmatch(name):
+        if not shell or not TaughtCommands.SHELL_FUNCTION_NAME_RE.fullmatch(name):
             return None
         try:
             proc = subprocess.run([shell, "-i", "-c", f"alias {name}"], capture_output=True, text=True,
@@ -762,7 +760,7 @@ class Output:
     EXACT_ERROR_RE = re.compile(r"\b\w*(Error|Exception|Panic)\b|\bassert", re.I)
     NOISE_RE = re.compile(r"0x[0-9a-f]+|\d+(\.\d+)?\s*(ms|s|sec|seconds)\b|\b\d+\b", re.I)
     OWN_CODE_UNSEEN = "the test tool does not find the project's code"
-    LOCATION_RE = re.compile(r"([\w./\\-]+\.\w+)[\"']?(?:, line |:|\()\d+")  # path, line N / path:N / path(N
+    FILE_LOCATION_RE = re.compile(r"([\w./\\-]+\.\w+)[\"']?(?:, line |:|\()\d+")
     NOT_FOUND_RE = re.compile(r"No module named ['\"]?([\w.]+)|Cannot find module ['\"]([^'\"]+)|"
                               r"cannot find package ['\"]([^'\"]+)|unresolved import `?([\w:]+)|"
                               r"Could not resolve ['\"]([^'\"]+)|cannot load such file -- (\S+)", re.I)
@@ -852,7 +850,7 @@ class Output:
         """The file named by the location nearest to lines[index] (within reach lines), or ""."""
         around = range(max(0, index - reach), min(len(lines), index + reach + 1))
         for candidate in sorted(around, key=lambda candidate: abs(candidate - index)):
-            match = Output.LOCATION_RE.search(lines[candidate])
+            match = Output.FILE_LOCATION_RE.search(lines[candidate])
             if match:
                 return match.group(1)
         return ""

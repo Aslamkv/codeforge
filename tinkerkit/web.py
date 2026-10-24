@@ -415,7 +415,7 @@ class PageText(html.parser.HTMLParser):
               "pre", "table", "ul", "ol", "dl", "dt", "dd", "blockquote", "hr"}
     VOID = {"br", "hr", "img", "input", "meta", "link", "area", "base", "col", "embed", "source", "track", "wbr"}
     SKIP_ROLES = {"navigation", "banner", "contentinfo", "search", "menu", "menubar", "toolbar", "dialog"}
-    EMPTY_LINE_RE = re.compile(r"[-*#|»›>·•\s]*")  # a line left of a menu: bullets and separators only
+    BULLETS_AND_SEPARATORS_RE = re.compile(r"[-*#|»›>·•\s]*")
 
     def __init__(self):
         super().__init__(convert_charrefs=True)
@@ -439,7 +439,7 @@ class PageText(html.parser.HTMLParser):
         out, blank = [], False
         for line in text.split("\n"):
             line = line.rstrip()
-            if not PageText.EMPTY_LINE_RE.fullmatch(line):
+            if not PageText.BULLETS_AND_SEPARATORS_RE.fullmatch(line):
                 out.append(line)
                 blank = False
             elif not blank and out:

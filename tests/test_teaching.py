@@ -195,6 +195,13 @@ def test_only_a_teaching_marked_with_prefer_has_preferences():
     assert not marked("we need no mypy")
 
 
+@pytest.mark.spec("TCH-3")
+@pytest.mark.parametrize("teaching,preference", [("I prefer ruff", True), ("ruff is preferred", True),
+                                                ("my preference is ruff", True), ("use ruff", False)])
+def test_a_preference_is_marked_by_any_form_of_prefer(teaching, preference):
+    assert marked(teaching) is preference
+
+
 @pytest.mark.spec("TCH-4")
 def test_facts_nothing_could_check_are_unsure_and_asked_no_more(kept, make_model, fake_ollama):
     fake_ollama.reply(plan_reply(commands=["rm -rf build"]), when="what to check")

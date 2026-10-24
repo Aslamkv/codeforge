@@ -15,21 +15,21 @@ from .settings import (
 class Reply:
     """What the model answered, and the structured parts in it."""
     THINK_RE = re.compile(r"<think>.*?</think>", re.S)
-    HEADER_PATH = r"[ \t:]+(?:(?:path|file)[ \t]*[=:][ \t]*)?[\"'`]?([^\s<>\"'`]+?)[\"'`]?"  # FILE x, FILE path=x, FILE "x"
+    HEADER_PATH = r"[ \t:]+(?:(?:path|file)[ \t]*[=:][ \t]*)?[\"'`]?([^\s<>\"'`]+?)[\"'`]?"
     FILE_BLOCK_RE = re.compile(r"<<<FILE" + HEADER_PATH + r"[ \t]*(?:>>>[ \t]*([^\s<>]*))?[ \t]*\n(.*?)\n?<<<END>>>",
-                               re.S)  # the header's >>> may be missing: the path then ends with its line
+                               re.S)
     LINES_BLOCK_RE = re.compile(r"<<<LINES" + HEADER_PATH + r"[ \t]+(?:lines[ \t]*=[ \t]*)?(\d+)\s*-\s*(\d+)[ \t]*>>>[ \t]*\n"
                                 r"(.*?)\n?<<<END>>>", re.S)
     NUMBERED_RE = re.compile(r"^\s*\d+\| ?")
     PLACEHOLDER_PATHS = {"path", "path/to/file", "file", "filename", "key"}
     PLACEHOLDER_BODY_RE = re.compile(r"\s*[<\[(]?\s*(the\s+)?(complete\s+|whole\s+|full\s+)?(file\s+)?(content|contents|"
                                      r"code|text|file|\.\.\.|…)\s*(here|goes here)?\s*[>\])]?\s*", re.I)
-    PATH_LINE_RE = re.compile(r"[\w.-]+(?:/[\w.-]+)*\.[\w]+|[\w.-]+(?:/[\w.-]+)+")  # a relative path, alone on a line
-    KEY_AFTER_RE = re.compile(r'"(?:[^"\\]|\\.)*"\s*:')  # a string that is an object's key
-    JOINED_STRINGS_RE = re.compile(r'(?<!\\)"\s*\+\s*"')  # "a" + "b", as in code: one string "ab"
-    DEBRIS_RE = re.compile(r"\s*(<{2,}|>{2,}|<<<\w*>>>)\s*")  # a line of the block format's own marks, no content
-    FENCE_RE = re.compile(r"\s*(`{3,}|~{3,})[\w+#.-]*\s*")      # a markdown fence line: ``` or ```python
-    QUOTE_ESCAPE_RE = re.compile(r"(?<!\\)((?:\\\\)*)\\'")      # \' after an even run of backslashes
+    RELATIVE_PATH_LINE_RE = re.compile(r"[\w.-]+(?:/[\w.-]+)*\.[\w]+|[\w.-]+(?:/[\w.-]+)+")
+    OBJECT_KEY_RE = re.compile(r'"(?:[^"\\]|\\.)*"\s*:')
+    STRING_CONCATENATION_RE = re.compile(r'(?<!\\)"\s*\+\s*"')
+    BLOCK_MARKS_ONLY_RE = re.compile(r"\s*(<{2,}|>{2,}|<<<\w*>>>)\s*")
+    MARKDOWN_FENCE_RE = re.compile(r"\s*(`{3,}|~{3,})[\w+#.-]*\s*")
+    ESCAPED_SINGLE_QUOTE_RE = re.compile(r"(?<!\\)((?:\\\\)*)\\'")
 
     def __init__(self, raw):
         self.text = self.THINK_RE.sub("", raw or "").strip()
@@ -65,7 +65,7 @@ class Reply:
     @classmethod
     def mended(cls, text):
         """Code habits undone: strings joined with +, \' escapes, commas before a closing bracket."""
-        return cls.strip_trailing_commas(cls.QUOTE_ESCAPE_RE.sub(r"\1'", cls.JOINED_STRINGS_RE.sub("", text)))
+        return cls.strip_trailing_commas(cls.ESCAPED_SINGLE_QUOTE_RE.sub(r"\1'", cls.STRING_CONCATENATION_RE.sub("", text)))
 
     @staticmethod
     def closed(text):
@@ -95,7 +95,7 @@ class Reply:
         for index, (char, in_string) in enumerate(zip(text, inside)):
             if in_string:
                 pass
-            elif char == '"' and stack and stack[-1] == "]" and Reply.KEY_AFTER_RE.prefixmatch(text, index):
+            elif char == '"' and stack and stack[-1] == "]" and Reply.OBJECT_KEY_RE.prefixmatch(text, index):
                 Reply.close_list_before_last_comma(out, stack)
             elif char in "{[":
                 stack.append(Reply.closer(char))
@@ -182,11 +182,11 @@ class Reply:
         """A header that copied the format's placeholder (<<<FILE path>>>) with the real path right after
         it, or as the block's first line, is read as that path; text after the header began the file."""
         first, _, rest = body.partition("\n")
-        if path.lower() in self.PLACEHOLDER_PATHS and self.PATH_LINE_RE.fullmatch(after):
+        if path.lower() in self.PLACEHOLDER_PATHS and self.RELATIVE_PATH_LINE_RE.fullmatch(after):
             return after, body
         if after:
             return path, after + "\n" + body
-        if path.lower() in self.PLACEHOLDER_PATHS and self.PATH_LINE_RE.fullmatch(first.strip()):
+        if path.lower() in self.PLACEHOLDER_PATHS and self.RELATIVE_PATH_LINE_RE.fullmatch(first.strip()):
             return first.strip(), rest
         return path, body
 
@@ -201,9 +201,9 @@ class Reply:
 
     @classmethod
     def without_mark_lines(cls, lines):
-        while lines and cls.DEBRIS_RE.fullmatch(lines[-1]):
+        while lines and cls.BLOCK_MARKS_ONLY_RE.fullmatch(lines[-1]):
             lines.pop()
-        while lines and cls.DEBRIS_RE.fullmatch(lines[0]):
+        while lines and cls.BLOCK_MARKS_ONLY_RE.fullmatch(lines[0]):
             lines.pop(0)
         return lines
 
@@ -218,7 +218,7 @@ class Reply:
     @classmethod
     def one_fence_around(cls, lines, filled):
         """Whether the filled lines open and close with a fence, with no fence between them."""
-        fence_at = lambda index: cls.FENCE_RE.fullmatch(lines[index])
+        fence_at = lambda index: cls.MARKDOWN_FENCE_RE.fullmatch(lines[index])
         return len(filled) >= 2 and fence_at(filled[0]) and fence_at(filled[-1]) \
             and not any(fence_at(index) for index in filled[1:-1])
 

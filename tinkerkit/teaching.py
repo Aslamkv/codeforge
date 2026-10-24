@@ -24,7 +24,7 @@ lazy from .settings import (
 ITEM_KINDS = ("toolchain", "fix", "lesson", "fact", "finding", "rule", "command")
 TEACHABLE_TOOLCHAIN_KEYS = ("setup", "check", "test_all", "test_one", "format", "lint")
 VERDICTS = ("holds", "wrong", "unsure")
-PREFER_RE = re.compile(r"\bprefer", re.I)  # how a person marks a preference: prefer, preferred, preference
+PREFERENCE_RE = re.compile(r"\bprefer", re.I)
 
 
 class Memory:
@@ -296,7 +296,7 @@ def quoted(passages):
 
 def marked(teaching):
     """Whether the person marked a preference in what they taught (the word prefer): else every claim is a fact."""
-    return bool(PREFER_RE.search(teaching))
+    return bool(PREFERENCE_RE.search(teaching))
 
 
 def read_plan(data, count, preferences=True, readings=False):

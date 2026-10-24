@@ -562,7 +562,7 @@ def read_digest(data, slot, passages):
         text, phase = clean(item.get("text"), MAX_FACT_CHARS), clean(item.get("phase"), 20).lower()
         cited = list(dict.fromkeys(str(citation).strip("[] ") for citation in item.get("cites") or []))
         cited = [passage_id for passage_id in cited if passage_id in by_id]
-        if not text or not cited or Learner.UNRELEASED.search(text):
+        if not text or not cited or Learner.UNRELEASED_RE.search(text):
             continue
         pages = list(dict.fromkeys(by_id[passage_id].url for passage_id in cited))
         facts.append({"phase": phase if phase in FACT_PHASES else slot.section, "text": text, "slot": slot.id,

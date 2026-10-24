@@ -289,7 +289,7 @@ def test_relevant_chunks():
     chunks = Learner.relevant_chunks("\n\n".join(paragraphs), 250, "pip install")
     assert len(chunks) == 2 and chunks[0].startswith("intro") and chunks[1].startswith("install with pip")
     assert Learner.relevant_chunks("short page", 250, "x") == ["short page"]
-    assert Learner.UNRELEASED.search("Flask 4.0 is in development") and not Learner.UNRELEASED.search("Flask 3.1 adds")
+    assert Learner.UNRELEASED_RE.search("Flask 4.0 is in development") and not Learner.UNRELEASED_RE.search("Flask 3.1 adds")
 
 
 class FakeInternet:

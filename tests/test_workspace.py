@@ -267,6 +267,20 @@ def test_teach_a_program_on_path(tinker_home, no_shell_alias):
         TaughtCommands.teach("no-such-program-xyz")
 
 
+@pytest.mark.spec("WS-9")
+def test_a_shell_function_name():
+    assert all(TaughtCommands.SHELL_FUNCTION_NAME_RE.fullmatch(name) for name in ("my_tool", "_t2"))
+    assert not any(TaughtCommands.SHELL_FUNCTION_NAME_RE.fullmatch(name) for name in ("my-tool", "2fast"))
+
+
+@pytest.mark.spec("WS-9")
+@pytest.mark.parametrize("definition,posix", [("source venv/bin/activate && pytest", ". venv/bin/activate && pytest"),
+                                              ("cd app; source env.sh", "cd app; . env.sh"),
+                                              ("echo resource x", "echo resource x")])
+def test_source_as_a_command_becomes_a_dot(definition, posix):
+    assert TaughtCommands.SOURCE_COMMAND_RE.sub(r"\1. ", definition) == posix
+
+
 @pytest.mark.spec("WS-10")
 def test_all_rejects_a_broken_commands_file(tinker_home):
     settings.Home.store().put("commands", "x", {"kind": "magic"})
@@ -320,6 +334,20 @@ def test_toolchain_lint_none_and_truth():
     toolchain = Toolchain(dict(TOOLS, lint="none"))
     assert toolchain.lint == "" and toolchain.lint_declared and toolchain.to_dict()["lint"] == "none"
     assert not Toolchain({"test_all": "pytest"}) and not Toolchain(None) and not Toolchain("junk")
+
+
+@pytest.mark.spec("WS-11")
+def test_a_setup_command_that_writes_the_env_file_itself():
+    assert Toolchain.ENV_FILE_RE.search("cp .env.example .env")
+    assert not any(Toolchain.ENV_FILE_RE.search(command) for command in ("cat .env.example", "touch my.env"))
+
+
+@pytest.mark.spec("WS-11")
+def test_a_setup_command_that_changes_the_machines_own_toolchain():
+    assert all(Toolchain.MACHINE_TOOLCHAIN_CHANGE_RE.search(command) for command in
+               ("rustup default stable", "npm install -g typescript", "brew install jq", "pip install --user x"))
+    assert not any(Toolchain.MACHINE_TOOLCHAIN_CHANGE_RE.search(command) for command in
+                   ("npm install", "pip install -r requirements.txt", "cargo build"))
 
 
 @pytest.mark.spec("WS-12")
@@ -383,6 +411,14 @@ def test_run_setup_uses_the_environment_once_activate_works(workspace):
                                                                     "echo $MARK > seen"]))
     ok, _, _ = toolchain.run_setup(workspace)
     assert ok and workspace.read("seen") == "on\n"
+
+
+@pytest.mark.spec("WS-13")
+@pytest.mark.parametrize("output", ["fatal: unable to access 'https://github.com/x': Could not resolve host: github.com",
+                                    "npm ERR! code ENOTFOUND", "Max retries exceeded with url: /simple/x/",
+                                    "error: failed to download from `https://static.crates.io`"])
+def test_a_failure_caused_by_the_network_in_any_package_manager(output):
+    assert Toolchain.NETWORK_FAILURE_RE.search(output) and not Toolchain.NETWORK_FAILURE_RE.search("AssertionError: 1 != 2")
 
 
 @pytest.fixture
@@ -538,6 +574,14 @@ def test_mentioned_in_and_tool_failure(project_dir):
     failure = Output.tool_failure(f"{project_dir}/x.py:12: error: missing pytest after 3.2s", project_dir)
     assert str(project_dir) not in failure and "12" not in failure and "missing pytest" in failure
     assert Output.tool_failure(f"... {Output.OWN_CODE_UNSEEN} ...", project_dir) == Output.OWN_CODE_UNSEEN
+
+
+@pytest.mark.spec("WS-18")
+@pytest.mark.parametrize("line,path", [('File "app.py", line 3, in <module>', "app.py"),
+                                       ("src/app.rs:12:5: error", "src/app.rs"),
+                                       ("App.cs(12,5): error CS1002", "App.cs")])
+def test_a_location_names_its_file_in_each_form(line, path):
+    assert Output.FILE_LOCATION_RE.search(line).group(1) == path
 
 
 @pytest.mark.spec("WS-19")

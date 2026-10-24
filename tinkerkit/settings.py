@@ -356,7 +356,7 @@ class Config:
     """The settings: DEFAULT_CONFIG, overridden by the home's "config" (read each time, so what another
     Tinker changed is seen at once). They change through Tinker's commands only: use-model, embed,
     use-web, and tinker config KEY VALUE for the rest."""
-    KEEP_ALIVE_RE = re.compile(r"-?\d+|-?(\d+(\.\d+)?(ns|us|ms|s|m|h))+")  # seconds, or a duration: 10m, 1h30m
+    SECONDS_OR_DURATION_RE = re.compile(r"-?\d+|-?(\d+(\.\d+)?(ns|us|ms|s|m|h))+")
     SETTABLE = ("ollama_url", "keep_alive", "max_growth", "build_think", "test_timeout", "web_fallback",
                 "web_timeout", "learn_missing", "learn_rate", "learn_backoff", "learn_cutoff", "learn_pages",
                 "learn_min_pages", "learn_searches", "learn_think", "docs_pages", "tool_docs_pages",
@@ -439,7 +439,7 @@ class Config:
 
     @classmethod
     def check_keep_alive(cls):
-        if not cls.KEEP_ALIVE_RE.fullmatch(str(cls.get("keep_alive"))):
+        if not cls.SECONDS_OR_DURATION_RE.fullmatch(str(cls.get("keep_alive"))):
             raise SystemExit(f"keep_alive must be seconds (0, 300; -1 keeps the model loaded) or a duration (10m, "
                              f"1h); it is {cls.get('keep_alive')!r} (tinker config keep_alive VALUE)")
 

@@ -328,7 +328,7 @@ too: they are answered at once, so there is no emergency command.
 
 - **WEB-1** `Internet.backends()` is `{"ollama": OllamaWeb, "duckduckgo": DuckDuckGoWeb}`.
 - **WEB-2** `Internet()` uses config `web`, then `web_fallback`. It skips empty and repeated names.
-  A backend that is not ready is left out, and its reason goes in `skipped`. With no backend
+  A backend that is not ready is left out, and its reason goes in `unusable_backends`. With no backend
   left, `available()` is False and `why()` gives the reasons.
 - **WEB-3** `Internet.check()` rejects with `SystemExit`: an unknown `web` or `web_fallback`; a
   `web_timeout` that is not a number above 0; a `learn_missing` that is not a whole number of at
@@ -452,7 +452,7 @@ too: they are answered at once, so there is no emergency command.
   shell functions, the aliases the command uses. `Workspace.run` puts the prelude first, so a taught
   alias works in a project's commands.
 - **WS-11** `Toolchain(data)` makes lists of `setup` and `use`. It leaves out the setup commands that
-  write `.env` (kept in `dropped`) and those that change the machine's own tools (kept in `machine`).
+  write `.env` (kept in `env_commands_dropped`) and those that change the machine's own tools (kept in `machine_changing_commands`).
   A lint of `"none"` means the language has no linter: `lint` is `""`, and `to_dict()` gives
   `"none"` back. A toolchain is true only with both `test_all` and `test_one`.
 - **WS-12** `shell(command)` runs the command after `activate`, when there is one.
@@ -1181,7 +1181,7 @@ person always comes first.
   `after_word` drops the command word. `built_project(name)` gives the project named (`Runs.find`),
   or without a name the one built last.
 - **CNV-19** A chat or a command line said while a job runs pauses the job while it is answered
-  (`Talk.pausing`, **JOB-10**); until the reply is written, its note says what is paused for it, and that it
+  (`Talk.pausing_jobs`, **JOB-10**); until the reply is written, its note says what is paused for it, and that it
   goes on once they have their answer.
 - **CNV-20** `run [@PROJECT] ARGS [<<< INPUT]` runs a built project the way a person runs it: its run
   command, in its folder and environment, with the arguments quoted and the input given after `<<<`.
