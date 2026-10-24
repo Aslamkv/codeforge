@@ -81,6 +81,8 @@ ANY_WORDS = tuple(c.name for c in COMMANDS if c.chat and c.words == "any")  # ..
 SAID_BARE = tuple(c.name for c in COMMANDS if c.name)  # commands a conversation takes as their words
 BARE_RE = re.compile(r"(?<![/\w.-])tinker (?=(?:" + "|".join(sorted(SAID_BARE, key=len, reverse=True)) + r")\b)")
 USAGE = frozendict({c.name: f"✍️ Write `{c.synopsis}`" + (f", e.g. `{c.example}`" if c.example else "") for c in COMMANDS if c.name})
+ASKED = tuple(c.name for c in COMMANDS if c.chat and any(a.nargs in ("+", None) for a in c.arguments)) + (
+    "command", "research")  # sent alone (as a chat app's menu sends it): its words are asked for
 EXIT = ("exit",)  # end the conversation (in a chat, once confirmed: it cannot be started again from there)
 START = "/start"  # what a chat app sends when a person first opens the bot
 WELCOME = """👋 **Hi, I'm Tinker!**
@@ -195,6 +197,7 @@ class Desk:
         self.waiting = None  # {run, folder, title, spec, stage, new} of the plan that waits for confirm or amend
         self.boards = {}  # run -> its task's messages ({(channel, chat): ids}), kept from one of its runs to the next
         self.asking = {}  # (channel, chat) -> {words, shown}: a command that deletes, waiting for confirm
+        self.wanting = {}  # (channel, chat) -> a command sent alone, waiting for its words (ASKED)
         self.spent = {}  # run -> the seconds its runs took so far (a task's time: done in ...)
         self.consoles = [c for c in channels if isinstance(c, ConsoleChannel)]
         self.said_status = None  # the status said last (a status said again only when it changed)
@@ -340,11 +343,16 @@ class Desk:
         if message.text.split()[:1] == [START]:
             channel.send(message.chat, welcome())
             return
+        message = self.with_words_wanted(channel, message)
         command = command_of(message.text)
         if message.id and (command in ("confirm",) + EXIT or exercise_switch(message.text)):  # its answer is in a
             # message already (the plan's, the exercise's, the question to stop): it would only make the chat grow
             channel.delete(message.chat, message.id)
         if self.settle(channel, message, command):
+            return
+        if command in ASKED and len(message.text.split()) == 1:
+            self.wanting[(channel.name, message.chat)] = command
+            channel.ask_for(message.chat, *words_asked(command))
             return
         if not command:
             self.talk.answer(channel, message, self.now, lambda: (self.waiting or {}).get("spec", ""))
@@ -361,6 +369,16 @@ class Desk:
             sent = channel.send(message.chat, reply)
             if command in GLANCES:
                 channel.glance(message.chat, message.id, [sent])
+
+    def with_words_wanted(self, channel, message):
+        """message as the words of the command that waits for them; a command of its own (sent with its /, alone,
+        or the very command waiting, as a file sent to read is) takes its place instead."""
+        wanted = self.wanting.pop((channel.name, message.chat), None)
+        command = command_of(message.text)
+        if not wanted or (command and (message.text.startswith("/") or len(message.text.split()) == 1
+                                       or command == wanted)):
+            return message
+        return Message(message.chat, f"{wanted} {message.text}", message.sender, message.id)
 
     def asked_with_words(self, channel, message, command):
         """command WHAT: answered in a thread (alone, how to say it)."""
@@ -896,6 +914,14 @@ def offered():
     """(name, what it does) of each command a chat takes, as its menu lists them."""
     return [(c.name, c.what) for c in COMMANDS if c.chat]
 
+
+def words_asked(command):
+    """(the question, an example answer) for the words a command sent alone needs."""
+    found = next(c for c in COMMANDS if c.name == command)
+    needed = found.synopsis.split(None, 1)[1]
+    example = found.example.split(None, 1)[1] if " " in found.example else ""
+    question = md(t"✍️ **{command}** · {found.what}\nSend {needed:code} now")
+    return question + (md(t", e.g. {example:code}") if example else ""), example or needed
 
 def after_word(message):
     """What a command word is followed by (the command described)."""
@@ -1730,6 +1756,10 @@ class Channel:
 
     def offer(self, commands):
         """The commands, (name, what it does) each, listed where the person types them (a chat app's menu)."""
+
+    def ask_for(self, chat, question, hint):
+        """question sent, its answer the person's next message; hint shows where it is typed (in a chat app)."""
+        return self.send(chat, question)
 
     def listened(self, timeout):
         """The new messages from the chats this channel serves; the rest are ignored. A refusal (another

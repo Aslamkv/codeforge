@@ -1211,6 +1211,11 @@ person always comes first.
   message out of the chats but the status, said in a note that goes in `NOTE_KEEP`. `clear history`, once
   confirmed, forgets the history and clears the chat the same way, and leaves nothing in the history, not
   even what it said.
+- **CNV-28** A command that needs words, sent alone (as a chat app's menu sends it: `/fix`), asks for them
+  (`ask_for`: what it does, what to send, an example) and takes the next message as them (`fix MESSAGE`),
+  even one that starts with a command word. A command of its own instead (sent with its `/`, alone, or the
+  same command, as a file sent to read is) drops the question. A command whose words are optional
+  (`status`) runs at once.
 
 ## channels
 
@@ -1232,7 +1237,8 @@ person always comes first.
   typing `/` autofills them), `-` as `_`, each description cut to 256 characters; a failure is ignored.
 - **CHN-5** `send` and `edit` post Telegram HTML, and fall back to plain text when the HTML is
   refused. An edit of unchanged text is harmless. A refused edit takes the message out and sends a new one
-  in its place. `latest` tracks the newest message still in the chat.
+  in its place. `latest` tracks the newest message still in the chat. `ask_for(chat, question, hint)` sends
+  the question with the reply box open (`force_reply`), the hint in it cut to 64 characters.
 - **CHN-6** `ask` gives the default when there is no terminal, or ends with `SystemExit` when there
   is none. `ChannelCommand.check` ends with `SystemExit` on a refusal, and tries a dropped
   network again up to `CHECK_TRIES` times.

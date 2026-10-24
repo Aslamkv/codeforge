@@ -31,6 +31,7 @@ CHECK_TRIES = 3                                # tries of a channel's first call
 RATE_LIMIT_WAITS = 3                           # times a call waits out Telegram's "too many requests"
 CAPTION_CHARS = 1024                           # the longest caption Telegram takes on a file
 MENU_DESCRIPTION_CHARS = 256                   # the longest description of a command in a bot's menu
+PLACEHOLDER_CHARS = 64                         # the longest hint Telegram shows in an empty reply box
 BOT_DOWNLOAD_BYTES = 20_000_000                # the largest file Telegram lets a bot download
 DOWNLOAD_WAIT = 120                            # seconds a file sent in a chat may take to download
 FORM = "application/x-www-form-urlencoded"
@@ -319,9 +320,14 @@ class TelegramChannel(Channel):
         except OSError, ChannelError:
             pass
 
-    def send(self, chat, text):
+    def ask_for(self, chat, question, hint):
+        """question sent with the reply box open (ForceReply), hint in it until the person types."""
+        reply = {"force_reply": True, "input_field_placeholder": hint[:PLACEHOLDER_CHARS]}
+        return self.send(chat, question, reply_markup=json.dumps(reply))
+
+    def send(self, chat, text, **fields):
         try:
-            sent = self.post("sendMessage", chat, text)["message_id"]
+            sent = self.post("sendMessage", chat, text, **fields)["message_id"]
         except OSError, ChannelError:
             return None
         self.seen(str(chat), sent)

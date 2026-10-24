@@ -565,6 +565,24 @@ def test_what_waits_for_confirm_is_cancelled_by_anything_else(desk, monkeypatch)
     assert desk.rename({}, ["rename", "x"]).startswith("🤷 No plan waits")
     assert desk.decide("amend", ["amend"]).startswith("✍️ Write `amend [@PROJECT] CHANGE`")
 
+@pytest.mark.spec("CNV-28")
+def test_a_command_sent_alone_asks_for_its_words(desk, monkeypatch):
+    desk, channel, _ = desk
+    answered = []
+    monkeypatch.setattr(desk, "answer", lambda message, channel: answered.append(message.text))
+    say(desk, channel, "/fix")
+    assert answered == [] and channel.texts()[-1].startswith("✍️ **fix** · fix a bug")
+    say(desk, channel, "typing 2/0 crashes")
+    say(desk, channel, "ask")
+    say(desk, channel, "help me")  # a reply that starts with a command word is still the words
+    say(desk, channel, "/read")
+    say(desk, channel, "read /tmp/book.epub")  # a file sent to read
+    say(desk, channel, "/teach")
+    say(desk, channel, "/status")  # a command of its own: the words are no longer waited for
+    say(desk, channel, "status")
+    assert answered == ["fix typing 2/0 crashes", "ask help me", "read /tmp/book.epub", "/status", "status"]
+    assert desk.wanting == {}
+
 
 @pytest.mark.spec("CNV-27")
 def test_a_glance_goes_soon_and_history_shows_things_again(desk, monkeypatch):

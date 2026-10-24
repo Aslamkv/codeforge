@@ -229,6 +229,13 @@ def test_latest_and_delete():
     channel.delete("42", 3)
     assert channel.latest("42", 2) and api.calls[-1][0].endswith("/deleteMessage")
 
+@pytest.mark.spec("CHN-5")
+def test_ask_for_opens_the_reply_box_with_a_hint():
+    api = BotAPI(sendMessage={"message_id": 4})
+    assert telegram(api).ask_for("42", "✍️ **fix**", "x" * 100) == 4
+    reply = json.loads(api.calls[0][1]["reply_markup"])
+    assert reply == {"force_reply": True, "input_field_placeholder": "x" * 64}
+
 def methods(api):
     return [path.rsplit("/", 1)[1] for path, _ in api.calls]
 
