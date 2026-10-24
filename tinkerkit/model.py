@@ -1,3 +1,4 @@
+from collections import namedtuple
 lazy import json
 lazy import secrets
 lazy import subprocess
@@ -6,17 +7,14 @@ lazy import time
 lazy import urllib.error
 lazy import urllib.parse
 lazy import urllib.request
-from collections import namedtuple
 
-lazy from .jobs import journaled
 from .messages import human_duration, say
-lazy from .prompts import Part, Prompts, PromptTooLarge, Reply
 from .settings import (
     CAPACITY_SEARCH_PRECISION,
-    CRASHED_LIMIT_SHARE,
     CRASH_NEAR_LIMIT_SHARE,
     CRASH_RECOVERY_SECONDS,
     CRASH_RETRIES,
+    CRASHED_LIMIT_SHARE,
     DEFAULT_CONFIG,
     DEFAULT_THINK,
     FIX_MAX_TOKENS,
@@ -44,8 +42,9 @@ from .settings import (
     first_line,
     now_text,
 )
+lazy from .jobs import journaled
+lazy from .prompts import Part, Prompts, PromptTooLarge, Reply
 lazy from .workspace import ToolError
-
 
 SelectedModel = namedtuple("SelectedModel", "name settings")
 Capacity = namedtuple("Capacity", "largest_that_reads smallest_that_failed")
@@ -54,8 +53,9 @@ LoadedModel = namedtuple("LoadedModel", "name size_bytes")
 
 
 class Model:
-    def __init__(self, name, settings, keep_alive, log, exclusive=True,
-                 max_growth=DEFAULT_CONFIG["max_growth"]):
+    def __init__(
+        self, name, settings, keep_alive, log, exclusive=True, max_growth=DEFAULT_CONFIG["max_growth"]
+    ):
         self.name, self.settings = name, settings
         self.max_tokens, self.num_ctx = int(settings["max_prompt_tokens"]), int(settings["num_ctx"])
         self.think = settings.get("think")
@@ -71,8 +71,10 @@ class Model:
         self.crashes = 0
         self.calibrated = (self.max_tokens, self.max_reply)
         self.base_gb = None
-        self.chars_per_token = max(MIN_CHARS_PER_TOKEN, min(float(settings.get("chars_per_token") or STARTING_CHARS_PER_TOKEN),
-                                                            MAX_CHARS_PER_TOKEN))
+        self.chars_per_token = max(
+            MIN_CHARS_PER_TOKEN,
+            min(float(settings.get("chars_per_token") or STARTING_CHARS_PER_TOKEN), MAX_CHARS_PER_TOKEN),
+        )
         self.recent_chars_per_token = []
 
     def ask(self, system, parts, label, **kw):
@@ -83,22 +85,39 @@ class Model:
         relaxed = lambda limit: [part.relaxed() for part in (parts(limit) if callable(parts) else parts)]
         return self.ask_once(system, relaxed, label, **kw)
 
-    def ask_once(self, system, parts, label, budget=None, done_when=None, max_reply=None, unthinking_retry=True,
-                 think=None):
+    def ask_once(
+        self,
+        system,
+        parts,
+        label,
+        budget=None,
+        done_when=None,
+        max_reply=None,
+        unthinking_retry=True,
+        think=None,
+    ):
         if self.exclusive:
             self.evict_others()
         self.hit_thinking_cap = False
         chosen = self.think_now() if think is None else think
         tries = Tries(None if self.think_rejected else chosen, budget or self.max_reply)
-        request = (system + Prompts.NO_TOOL_CALLS, parts, label, done_when, max_reply or self.max_reply,
-                   unthinking_retry)
+        request = (
+            system + Prompts.NO_TOOL_CALLS,
+            parts,
+            label,
+            done_when,
+            max_reply or self.max_reply,
+            unthinking_retry,
+        )
         reply = None
         while reply is None:
             reply = self.one_try(tries, *request)
         return reply
 
     def one_try(self, tries, system, parts, label, done_when, max_reply, unthinking_retry):
-        user = self.user_message(system, self.with_thought(parts, tries.unfinished_thought), label, tries.shrink)
+        user = self.user_message(
+            system, self.with_thought(parts, tries.unfinished_thought), label, tries.shrink
+        )
         cap = min(self.reply_room(system, user), self.max_reply, max_reply)
         tries.budget = max(MIN_REPLY_TOKENS, min(tries.budget, cap))
         shown = self.call_label(label, tries.think, tries.budget)
@@ -124,7 +143,7 @@ class Model:
         return self.build_think if self.is_building and self.build_think else self.think
 
     def user_message(self, system, parts, label, shrink):
-        limit = self.limit_chars(system, int(self.max_tokens * OOM_RETRY_PROMPT_SHARE ** shrink))
+        limit = self.limit_chars(system, int(self.max_tokens * OOM_RETRY_PROMPT_SHARE**shrink))
         notes = []
         user = Part.assemble(parts(limit) if callable(parts) else parts, limit, notes)
         if notes:
@@ -135,9 +154,16 @@ class Model:
     def with_thought(parts, thought):
         if not thought.strip():
             return parts
-        return Model.with_part(parts, Part("Your analysis so far (it ran out of room before an answer: conclude it "
-                                           "and answer now, in exactly the reply format the instructions give)",
-                                           thought, keep="tail", place="last"))
+        return Model.with_part(
+            parts,
+            Part(
+                "Your analysis so far (it ran out of room before an answer: conclude it "
+                "and answer now, in exactly the reply format the instructions give)",
+                thought,
+                keep="tail",
+                place="last",
+            ),
+        )
 
     @staticmethod
     def with_part(parts, part):
@@ -152,8 +178,15 @@ class Model:
         return f"{label} [{mode}, reply up to {budget // 1024}K tok]"
 
     def send(self, system, user, tries, shown, done_when):
-        return Ollama.chat(self.name, [{"role": "system", "content": system}, {"role": "user", "content": user}],
-                           self.keep_alive, self.request_options(tries.budget), tries.think, shown, done_when)
+        return Ollama.chat(
+            self.name,
+            [{"role": "system", "content": system}, {"role": "user", "content": user}],
+            self.keep_alive,
+            self.request_options(tries.budget),
+            tries.think,
+            shown,
+            done_when,
+        )
 
     def request_options(self, budget):
         options = dict(self.options)
@@ -195,15 +228,28 @@ class Model:
 
     def stop_after(self, exc, crashes, last):
         if crashes > CRASH_RETRIES:
-            raise OllamaError(f"{exc}\n{self.name} crashed {crashes} times on this call, {last}. If this keeps "
-                              f"happening, measure the model again: tinker calibrate {self.name}", crashed=True)
+            raise OllamaError(
+                f"{exc}\n{self.name} crashed {crashes} times on this call, {last}. If this keeps "
+                f"happening, measure the model again: tinker calibrate {self.name}",
+                crashed=True,
+            )
 
     def crashed(self, exc, label, what, **facts):
         self.crashes += 1
-        self.note(f"{label}: {self.name} {what} ({first_line(str(exc), 90)}); trying again in {CRASH_RECOVERY_SECONDS}s",
-                  f"{self.name} crashed; trying again in {CRASH_RECOVERY_SECONDS}s")
-        self.log.add({"label": label, "model": self.name, "error": str(exc), **facts,
-                      "budget_now": self.max_tokens, "max_reply_now": self.max_reply})
+        self.note(
+            f"{label}: {self.name} {what} ({first_line(str(exc), 90)}); trying again in {CRASH_RECOVERY_SECONDS}s",
+            f"{self.name} crashed; trying again in {CRASH_RECOVERY_SECONDS}s",
+        )
+        self.log.add(
+            {
+                "label": label,
+                "model": self.name,
+                "error": str(exc),
+                **facts,
+                "budget_now": self.max_tokens,
+                "max_reply_now": self.max_reply,
+            }
+        )
         Ollama.unload(self.name)
         time.sleep(CRASH_RECOVERY_SECONDS)
 
@@ -212,8 +258,11 @@ class Model:
         if tries <= REPLY_ERROR_RETRIES:
             self.step(f"{shown}  ({first_line(str(exc), 120)}; asking again)", started)
             return False
-        self.step(f"{shown}  ({first_line(str(exc), 120)} again; using the {len(exc.partial)} chars that came "
-                  f"before it)", started)
+        self.step(
+            f"{shown}  ({first_line(str(exc), 120)} again; using the {len(exc.partial)} chars that came "
+            f"before it)",
+            started,
+        )
         return True
 
     def recover(self, exc, label, tries):
@@ -232,20 +281,26 @@ class Model:
             raise exc
 
     def think_as_planning(self, label, tries):
-        self.note(f"{label}: {self.name} rejected think={tries.think!r} for building; using {self.think!r} as for "
-                  f"planning")
+        self.note(
+            f"{label}: {self.name} rejected think={tries.think!r} for building; using {self.think!r} as for "
+            f"planning"
+        )
         self.build_think = None
         tries.think = self.think
 
     def shorter_prompt(self, label, tries):
-        self.note(f"{label}: out of GPU memory; retrying this request with a prompt budget of "
-                  f"{int(self.max_tokens * OOM_RETRY_PROMPT_SHARE ** (tries.shrink + 1))} tokens",
-                  "Out of GPU memory; trying again with a shorter prompt")
+        self.note(
+            f"{label}: out of GPU memory; retrying this request with a prompt budget of "
+            f"{int(self.max_tokens * OOM_RETRY_PROMPT_SHARE ** (tries.shrink + 1))} tokens",
+            "Out of GPU memory; trying again with a shorter prompt",
+        )
         tries.shrink += 1
 
     def reload_model(self, exc, label, tries):
-        self.note(f"{label}: {exc}; reloading the model and retrying",
-                  f"{self.name} stopped responding; reloading it and trying again")
+        self.note(
+            f"{label}: {exc}; reloading the model and retrying",
+            f"{self.name} stopped responding; reloading it and trying again",
+        )
         Ollama.unload(self.name)
         tries.stalls += 1
 
@@ -267,22 +322,35 @@ class Model:
         content = data.get("message", {}).get("content") or ""
         cut = data.get("done_reason") == "length"
         self.learn_chars_per_token(len(system) + len(user), data.get("prompt_eval_count", 0))
-        self.log.add({"label": shown, "model": self.name, "system": system, "user": user,
-                      "prompt_tokens": data.get("prompt_eval_count", 0),
-                      "reply_tokens": data.get("eval_count", 0), "budget": budget, "cut": cut,
-                      "seconds": round(time.perf_counter() - started, 1),
-                      "load_seconds": round(data.get("load_duration", 0) / 1e9, 1), "reply": content})
+        self.log.add(
+            {
+                "label": shown,
+                "model": self.name,
+                "system": system,
+                "user": user,
+                "prompt_tokens": data.get("prompt_eval_count", 0),
+                "reply_tokens": data.get("eval_count", 0),
+                "budget": budget,
+                "cut": cut,
+                "seconds": round(time.perf_counter() - started, 1),
+                "load_seconds": round(data.get("load_duration", 0) / 1e9, 1),
+                "reply": content,
+            }
+        )
         return content, cut
 
     def learn_chars_per_token(self, chars, tokens):
         if tokens and chars and tokens > 50:
             self.recent_chars_per_token = (self.recent_chars_per_token + [chars / tokens])[-20:]
-            self.chars_per_token = max(MIN_CHARS_PER_TOKEN, min(min(self.recent_chars_per_token), MAX_CHARS_PER_TOKEN))
+            self.chars_per_token = max(
+                MIN_CHARS_PER_TOKEN, min(min(self.recent_chars_per_token), MAX_CHARS_PER_TOKEN)
+            )
 
     @staticmethod
     def unfinished(content, done_when):
-        return not content.strip() or (done_when is not None and not done_when(content)
-                                       and not Reply.files_ended(content))
+        return not content.strip() or (
+            done_when is not None and not done_when(content) and not Reply.files_ended(content)
+        )
 
     def think_again(self, tries, data, shown, started, cap, unthinking_retry):
         action, said = self.after_cut(data, tries.budget, cap, unthinking_retry)
@@ -301,11 +369,16 @@ class Model:
     def after_cut(data, budget, cap, unthinking_retry):
         tokens = data.get("eval_count", 0)
         if budget < cap:
-            return "more", (f"cut at {tokens} tokens while thinking; asking again with up to "
-                            f"{min(budget * 2, cap) // 1024}K tokens")
+            return "more", (
+                f"cut at {tokens} tokens while thinking; asking again with up to "
+                f"{min(budget * 2, cap) // 1024}K tokens"
+            )
         if unthinking_retry:
             return "unthinking", "cut at the most a reply may think; asking again without thinking"
-        return "give up", f"thought to the {tokens}-token cap without an answer; counted as an attempt with no change"
+        return (
+            "give up",
+            f"thought to the {tokens}-token cap without an answer; counted as an attempt with no change",
+        )
 
     def report(self, shown, data, started, cut):
         tokens_in, tokens_out = data.get("prompt_eval_count", 0), data.get("eval_count", 0)
@@ -314,13 +387,18 @@ class Model:
         if data.get("early_stop"):
             self.step(f"{shown}  (stopped as soon as the reply was complete, ~{tokens_out} tok)", started)
         else:
-            self.step(f"{shown}  (prompt {tokens_in} tok, gen {data.get('eval_duration', 0) / 1e9:.1f}s"
-                      f"/{tokens_out} tok, load {data.get('load_duration', 0) / 1e9:.1f}s)", started)
+            self.step(
+                f"{shown}  (prompt {tokens_in} tok, gen {data.get('eval_duration', 0) / 1e9:.1f}s"
+                f"/{tokens_out} tok, load {data.get('load_duration', 0) / 1e9:.1f}s)",
+                started,
+            )
         if cut:
             self.note(f"reply cut at {tokens_out} tokens")
 
     def step(self, message, started):
-        self.log.add({"note": message, "model": self.name, "seconds": round(time.perf_counter() - started, 1)})
+        self.log.add(
+            {"note": message, "model": self.name, "seconds": round(time.perf_counter() - started, 1)}
+        )
 
     def note(self, detail, retry=""):
         self.log.add({"note": detail, "model": self.name})
@@ -340,7 +418,9 @@ class Model:
             self.unload()
 
     def loaded_size(self):
-        return next((size / 1e9 for model_name, size in Ollama.loaded_models() or [] if model_name == self.name), None)
+        return next(
+            (size / 1e9 for model_name, size in Ollama.loaded_models() or [] if model_name == self.name), None
+        )
 
     def unload(self):
         if self.keep_alive not in (0, "0"):
@@ -348,19 +428,35 @@ class Model:
 
     def ask_until_usable(self, system, parts, label, read, attempts=3, think=None, max_reply=None):
         for attempt in range(1, attempts + 1):
-            reply = Reply(self.ask(system, parts, f"{label} (attempt {attempt})", done_when=Reply.json_complete,
-                                   think=think, max_reply=max_reply))
+            reply = Reply(
+                self.ask(
+                    system,
+                    parts,
+                    f"{label} (attempt {attempt})",
+                    done_when=Reply.json_complete,
+                    think=think,
+                    max_reply=max_reply,
+                )
+            )
             try:
                 return read(reply)
             except (ValueError, ToolError, AttributeError, TypeError, KeyError) as exc:
-                self.note(f"{label.lower()} not usable: {exc}",
-                          f"{say.going_on()}: no usable result yet, trying again" if attempt < attempts else "")
-                parts = self.with_part(parts, Part("Note", f"Your previous reply was not usable ({exc}). Reply "
-                                                           f"with ONLY the JSON.", True))
+                self.note(
+                    f"{label.lower()} not usable: {exc}",
+                    f"{say.going_on()}: no usable result yet, trying again" if attempt < attempts else "",
+                )
+                parts = self.with_part(
+                    parts,
+                    Part(
+                        "Note", f"Your previous reply was not usable ({exc}). Reply with ONLY the JSON.", True
+                    ),
+                )
         return None
 
     def limit_chars(self, system, tokens=None):
-        return int((tokens or self.max_tokens) * PROMPT_BUDGET_SHARE * self.chars_per_token) - len(system) - 40
+        return (
+            int((tokens or self.max_tokens) * PROMPT_BUDGET_SHARE * self.chars_per_token) - len(system) - 40
+        )
 
     def learned_chars_per_token(self):
         return round(min(self.recent_chars_per_token), 2) if len(self.recent_chars_per_token) >= 5 else None
@@ -380,33 +476,46 @@ class Models:
     def installed(name):
         models = Ollama.installed_models()
         if models is None:
-            raise SystemExit(f"Ollama does not answer at {Config.ollama_url()} (tinker config ollama_url URL).")
+            raise SystemExit(
+                f"Ollama does not answer at {Config.ollama_url()} (tinker config ollama_url URL)."
+            )
         names = [model.get("name", "") for model in models]
         if name not in names:
             close = [candidate for candidate in names if name.lower() in candidate.lower()]
             hint = f" Did you mean {' or '.join(close)}?" if close else ""
-            raise SystemExit(f"Ollama has no model named '{name}'.{hint} Installed: {', '.join(names) or 'none'}")
+            raise SystemExit(
+                f"Ollama has no model named '{name}'.{hint} Installed: {', '.join(names) or 'none'}"
+            )
         return name
 
     @staticmethod
     def selected():
         name = Config.get("model")
         if not name:
-            raise SystemExit("No model in use. Measure one Ollama has with tinker calibrate NAME, then select it with "
-                             "tinker use-model NAME (tinker models lists them).")
+            raise SystemExit(
+                "No model in use. Measure one Ollama has with tinker calibrate NAME, then select it with "
+                "tinker use-model NAME (tinker models lists them)."
+            )
         settings = Models.settings(name)
         if settings is None:
             raise SystemExit(f"{name}, the model in use, has not been measured: tinker calibrate {name}")
         broken = Models.unusable_measurements(settings)
         if broken:
-            raise SystemExit(f"What was measured for {name} has no usable {', '.join(broken)}: measure the model "
-                             f"again with tinker calibrate {name}")
+            raise SystemExit(
+                f"What was measured for {name} has no usable {', '.join(broken)}: measure the model "
+                f"again with tinker calibrate {name}"
+            )
         return SelectedModel(name, settings)
 
     @staticmethod
     def unusable_measurements(settings):
-        return [key for key in Models.MEASURED_LIMITS if isinstance(settings.get(key), bool)
-                or not isinstance(settings.get(key), int) or settings[key] < 1]
+        return [
+            key
+            for key in Models.MEASURED_LIMITS
+            if isinstance(settings.get(key), bool)
+            or not isinstance(settings.get(key), int)
+            or settings[key] < 1
+        ]
 
     @staticmethod
     def settings(name):
@@ -423,16 +532,26 @@ class Models:
             Models.say_crashes(model)
         learned, settings = model.learned_chars_per_token(), Models.settings(model.name)
         if learned and settings and settings.get("chars_per_token") != learned:
-            Home.store().update("models", model.name, lambda kept: dict(kept or settings, chars_per_token=learned))
+            Home.store().update(
+                "models", model.name, lambda kept: dict(kept or settings, chars_per_token=learned)
+            )
 
     @staticmethod
     def say_crashes(model):
-        lowered = [f"{name} {now} (measured {was})" for name, now, was in
-                   (("prompt budget", model.max_tokens, model.calibrated[0]),
-                    ("longest reply", model.max_reply, model.calibrated[1])) if now < was]
-        say.warn(f"{model.name} crashed {model.crashes} time(s) this run" + (f"; lowered for this run only: "
-                 f"{', '.join(lowered)}" if lowered else "") + f". If crashes keep happening, measure it again: "
-                 f"tinker calibrate {model.name}")
+        lowered = [
+            f"{name} {now} (measured {was})"
+            for name, now, was in (
+                ("prompt budget", model.max_tokens, model.calibrated[0]),
+                ("longest reply", model.max_reply, model.calibrated[1]),
+            )
+            if now < was
+        ]
+        say.warn(
+            f"{model.name} crashed {model.crashes} time(s) this run"
+            + (f"; lowered for this run only: {', '.join(lowered)}" if lowered else "")
+            + f". If crashes keep happening, measure it again: "
+            f"tinker calibrate {model.name}"
+        )
 
     @staticmethod
     def context_for(budget, max_reply, context_length):
@@ -441,8 +560,7 @@ class Models:
 
     @staticmethod
     def reply_limits(max_reply):
-        return {"max_reply_tokens": max_reply,
-                "fix_max_tokens": min(FIX_MAX_TOKENS, max_reply)}
+        return {"max_reply_tokens": max_reply, "fix_max_tokens": min(FIX_MAX_TOKENS, max_reply)}
 
 
 class Calibrator:
@@ -471,14 +589,19 @@ class Calibrator:
         facts = Ollama.model_facts(self.name)
         self.check_fit(facts)
         think = self.first_chat(facts)
-        target = min(PROMPT_TARGET_TOKENS + REPLY_TARGET_TOKENS, facts["context_length"] or PROMPT_TARGET_TOKENS + REPLY_TARGET_TOKENS)
+        target = min(
+            PROMPT_TARGET_TOKENS + REPLY_TARGET_TOKENS,
+            facts["context_length"] or PROMPT_TARGET_TOKENS + REPLY_TARGET_TOKENS,
+        )
         context, crash = self.capacity(target, facts)
         budget, max_reply = self.shared(context)
         settings = self.settings(facts, think, budget, context, crash, max_reply)
         Ollama.unload(self.name)
         Models.keep(self.name, settings)
-        say.took(f"Calibrated {self.name}: prompts up to {budget} tokens, replies up to {max_reply}, think {think}",
-                 time.perf_counter() - started)
+        say.took(
+            f"Calibrated {self.name}: prompts up to {budget} tokens, replies up to {max_reply}, think {think}",
+            time.perf_counter() - started,
+        )
         return settings
 
     def check_fit(self, facts):
@@ -491,11 +614,17 @@ class Calibrator:
             raise SystemExit(self.does_not_fit(size, memory))
 
     def does_not_fit(self, size, memory):
-        return (f"{self.name} needs {size / 1e9:.1f} GB for its weights alone, and the GPU may use "
-                f"{memory / 1e9:.1f} GB: choose a smaller model or quantization"
-                + (f", or let the GPU use more memory (e.g. sudo sysctl iogpu.wired_limit_mb="
-                   f"{int(self.total_memory() * 0.9 / 2**20)})" if sys.platform == "darwin" else "")
-                + ".")
+        return (
+            f"{self.name} needs {size / 1e9:.1f} GB for its weights alone, and the GPU may use "
+            f"{memory / 1e9:.1f} GB: choose a smaller model or quantization"
+            + (
+                f", or let the GPU use more memory (e.g. sudo sysctl iogpu.wired_limit_mb="
+                f"{int(self.total_memory() * 0.9 / 2**20)})"
+                if sys.platform == "darwin"
+                else ""
+            )
+            + "."
+        )
 
     @classmethod
     def gpu_memory(cls):
@@ -503,8 +632,12 @@ class Calibrator:
         if sys.platform != "darwin" or not total:
             return total
         try:
-            limit = int(subprocess.run(["sysctl", "-n", "iogpu.wired_limit_mb"], capture_output=True,
-                                       text=True).stdout or 0)
+            limit = int(
+                subprocess.run(
+                    ["sysctl", "-n", "iogpu.wired_limit_mb"], capture_output=True, text=True
+                ).stdout
+                or 0
+            )
         except OSError, ValueError:
             limit = 0
         return limit * 2**20 if limit > 0 else int(total * (0.75 if total > 36e9 else 0.67))
@@ -513,7 +646,9 @@ class Calibrator:
     def total_memory():
         try:
             if sys.platform == "darwin":
-                return int(subprocess.run(["sysctl", "-n", "hw.memsize"], capture_output=True, text=True).stdout)
+                return int(
+                    subprocess.run(["sysctl", "-n", "hw.memsize"], capture_output=True, text=True).stdout
+                )
             with open("/proc/meminfo") as info:
                 return int(next(line for line in info if line.startswith("MemTotal")).split()[1]) * 1024
         except OSError, ValueError, StopIteration:
@@ -522,18 +657,26 @@ class Calibrator:
     def first_chat(self, facts):
         thinks = not facts["capabilities"] or "thinking" in facts["capabilities"]
         content = self.FILLER * 4
-        for think in ((DEFAULT_THINK, True) if thinks else (None,)):
+        for think in (DEFAULT_THINK, True) if thinks else (None,):
             try:
-                data = Ollama.chat(self.name, [{"role": "user", "content": content + "\nSay OK."}], 0,
-                                   {"num_ctx": 4096, "num_predict": 64}, think)
+                data = Ollama.chat(
+                    self.name,
+                    [{"role": "user", "content": content + "\nSay OK."}],
+                    0,
+                    {"num_ctx": 4096, "num_predict": 64},
+                    think,
+                )
             except OllamaError as exc:
                 if think is not None and exc.about_thinking:
                     continue
                 raise SystemExit(f"{self.name} does not run: {exc}")
             self.measure_chat(content, data)
             with say.section():
-                say.info(f"Thinks with {think!r}; {self.safe_ratio()} chars per token; writes {self.write_tokens_per_second} "
-                         f"tokens a second", "🧠")
+                say.info(
+                    f"Thinks with {think!r}; {self.safe_ratio()} chars per token; writes {self.write_tokens_per_second} "
+                    f"tokens a second",
+                    "🧠",
+                )
             return think
         return None
 
@@ -553,15 +696,20 @@ class Calibrator:
             middle = (good + bad) // 2
             good, bad = (middle, bad) if self.reads(middle, gguf) else (good, middle)
         if good < MIN_PROMPT_TOKENS + MIN_REPLY_TOKENS:
-            raise SystemExit(f"{self.name} cannot hold even {MIN_PROMPT_TOKENS + MIN_REPLY_TOKENS} tokens of "
-                             f"context on this machine: choose a smaller model or quantization.")
+            raise SystemExit(
+                f"{self.name} cannot hold even {MIN_PROMPT_TOKENS + MIN_REPLY_TOKENS} tokens of "
+                f"context on this machine: choose a smaller model or quantization."
+            )
         return Capacity(good, bad)
 
     def reads(self, context, gguf):
         tokens = min(context, PROMPT_TARGET_TOKENS) if gguf else context
         with say.section():
-            say.step(f"Reading {tokens} tokens with a context of {context} (about "
-                     f"{round(tokens / max(self.read_speed(), 1))}s)…", "📏")
+            say.step(
+                f"Reading {tokens} tokens with a context of {context} (about "
+                f"{round(tokens / max(self.read_speed(), 1))}s)…",
+                "📏",
+            )
         if self.probe(tokens, context):
             return True
         if gguf and not self.options:
@@ -578,7 +726,9 @@ class Calibrator:
         prompt = "".join(secrets.choice("0123456789") for _ in range(digits))
         timeout = max(OLLAMA_SILENCE_TIMEOUT, int(tokens / max(self.read_speed() / 3, 1)))
         try:
-            data = Ollama.read_raw(self.name, prompt, {"num_ctx": num_ctx, "num_predict": 1, **self.options}, timeout)
+            data = Ollama.read_raw(
+                self.name, prompt, {"num_ctx": num_ctx, "num_predict": 1, **self.options}, timeout
+            )
         except OllamaError as exc:
             self.probe_failed(exc, tokens)
             return None
@@ -605,7 +755,11 @@ class Calibrator:
 
     def read_speed(self):
         if self.largest_read_stats.get("prompt_eval_duration"):
-            return self.largest_read_stats["prompt_eval_count"] / self.largest_read_stats["prompt_eval_duration"] * 1e9
+            return (
+                self.largest_read_stats["prompt_eval_count"]
+                / self.largest_read_stats["prompt_eval_duration"]
+                * 1e9
+            )
         return (self.write_tokens_per_second or 25) * 4
 
     @staticmethod
@@ -614,34 +768,63 @@ class Calibrator:
         return ContextSplit(budget, max(MIN_REPLY_TOKENS, min(REPLY_TARGET_TOKENS, context - budget)))
 
     def settings(self, facts, think, budget, context, crash, max_reply):
-        return {"model": self.name, "calibrated": now_text(),
-                "max_prompt_tokens": budget, "largest_prompt_read": context, "crashed_reading": crash,
-                "num_ctx": Models.context_for(budget, max_reply, facts["context_length"]),
-                "context_length": facts["context_length"], "think": think, **Models.reply_limits(max_reply),
-                "chars_per_token": self.safe_ratio(), "num_batch": self.options.get("num_batch"),
-                "read_tokens_per_s": round(self.read_speed()) if self.largest_read_stats else None,
-                "write_tokens_per_s": self.write_tokens_per_second, "load_seconds": self.load_seconds, "probes": self.probe_history,
-                "tokens_per_digit": round(self.tokens_per_digit, 4)}
+        return {
+            "model": self.name,
+            "calibrated": now_text(),
+            "max_prompt_tokens": budget,
+            "largest_prompt_read": context,
+            "crashed_reading": crash,
+            "num_ctx": Models.context_for(budget, max_reply, facts["context_length"]),
+            "context_length": facts["context_length"],
+            "think": think,
+            **Models.reply_limits(max_reply),
+            "chars_per_token": self.safe_ratio(),
+            "num_batch": self.options.get("num_batch"),
+            "read_tokens_per_s": round(self.read_speed()) if self.largest_read_stats else None,
+            "write_tokens_per_s": self.write_tokens_per_second,
+            "load_seconds": self.load_seconds,
+            "probes": self.probe_history,
+            "tokens_per_digit": round(self.tokens_per_digit, 4),
+        }
 
     def safe_ratio(self):
         if not self.measured_chars_per_token:
             return STARTING_CHARS_PER_TOKEN
-        return round(max(MIN_CHARS_PER_TOKEN, min(self.measured_chars_per_token * 0.97, MAX_CHARS_PER_TOKEN)), 2)
+        return round(
+            max(MIN_CHARS_PER_TOKEN, min(self.measured_chars_per_token * 0.97, MAX_CHARS_PER_TOKEN)), 2
+        )
 
 
 class Ollama:
-    RUNNER_CRASHES = ("runner failed", "runner process has terminated", "runner process no longer running",
-                      "command buffer execution failed", "panic:", "signal: abort", "signal: killed",
-                      "segmentation fault")
+    RUNNER_CRASHES = (
+        "runner failed",
+        "runner process has terminated",
+        "runner process no longer running",
+        "command buffer execution failed",
+        "panic:",
+        "signal: abort",
+        "signal: killed",
+        "segmentation fault",
+    )
 
     @staticmethod
-    def chat(name, messages, keep_alive, options, think=None, label=None, done_when=None,
-             timeout=OLLAMA_SILENCE_TIMEOUT):
+    def chat(
+        name,
+        messages,
+        keep_alive,
+        options,
+        think=None,
+        label=None,
+        done_when=None,
+        timeout=OLLAMA_SILENCE_TIMEOUT,
+    ):
         unloading = not messages
         if unloading:
             return Ollama.streamed(name, messages, keep_alive, options, think, label, done_when, timeout)
-        return journaled({"chat": name, "messages": messages, "options": options, "think": think},
-                         lambda: Ollama.streamed(name, messages, keep_alive, options, think, label, done_when, timeout))
+        return journaled(
+            {"chat": name, "messages": messages, "options": options, "think": think},
+            lambda: Ollama.streamed(name, messages, keep_alive, options, think, label, done_when, timeout),
+        )
 
     @staticmethod
     def streamed(name, messages, keep_alive, options, think, label, done_when, timeout):
@@ -653,14 +836,21 @@ class Ollama:
         except urllib.error.HTTPError as exc:
             raise Ollama.http_error(exc)
         except urllib.error.URLError as exc:
-            raise OllamaError(f"Could not reach Ollama at {Config.ollama_url()}: {exc.reason}",
-                              stalled=isinstance(exc.reason, TimeoutError))
+            raise OllamaError(
+                f"Could not reach Ollama at {Config.ollama_url()}: {exc.reason}",
+                stalled=isinstance(exc.reason, TimeoutError),
+            )
         except (TimeoutError, ConnectionError) as exc:
-            raise OllamaError(f"Ollama stopped responding ({exc or 'no data for ' + str(timeout) + 's'})",
-                              stalled=True)
+            raise OllamaError(
+                f"Ollama stopped responding ({exc or 'no data for ' + str(timeout) + 's'})", stalled=True
+            )
         finally:
             stream.close()
-        stream.final["message"] = {"role": "assistant", "content": stream.reply, "thinking": stream.thought_tail}
+        stream.final["message"] = {
+            "role": "assistant",
+            "content": stream.reply,
+            "thinking": stream.thought_tail,
+        }
         return stream.final
 
     @staticmethod
@@ -675,14 +865,22 @@ class Ollama:
     @staticmethod
     def request(path, payload=None):
         data = None if payload is None else json.dumps(payload).encode("utf-8")
-        return urllib.request.Request(Config.ollama_url() + path, data=data, headers={"Content-Type": "application/json"},
-                                      method="GET" if payload is None else "POST")
+        return urllib.request.Request(
+            Config.ollama_url() + path,
+            data=data,
+            headers={"Content-Type": "application/json"},
+            method="GET" if payload is None else "POST",
+        )
 
     @staticmethod
     def http_error(exc, streamed=0):
         body = exc.read().decode("utf-8", errors="replace").strip()
-        return OllamaError(f"Ollama returned HTTP {exc.code}: {body or exc.reason}", oom=Ollama.is_oom(body),
-                           crashed=Ollama.is_crash(body), streamed=streamed)
+        return OllamaError(
+            f"Ollama returned HTTP {exc.code}: {body or exc.reason}",
+            oom=Ollama.is_oom(body),
+            crashed=Ollama.is_crash(body),
+            streamed=streamed,
+        )
 
     @staticmethod
     def is_oom(text):
@@ -696,9 +894,18 @@ class Ollama:
 
     @staticmethod
     def read_raw(name, prompt, options, timeout=OLLAMA_SILENCE_TIMEOUT):
-        payload = {"model": name, "prompt": prompt, "raw": True, "stream": False, "keep_alive": 0, "options": options}
+        payload = {
+            "model": name,
+            "prompt": prompt,
+            "raw": True,
+            "stream": False,
+            "keep_alive": 0,
+            "options": options,
+        }
         try:
-            with urllib.request.urlopen(Ollama.request("/api/generate", payload), timeout=timeout) as response:
+            with urllib.request.urlopen(
+                Ollama.request("/api/generate", payload), timeout=timeout
+            ) as response:
                 data = json.loads(response.read().decode("utf-8"))
         except urllib.error.HTTPError as exc:
             raise Ollama.http_error(exc)
@@ -707,8 +914,11 @@ class Ollama:
         except (TimeoutError, ConnectionError) as exc:
             raise OllamaError(f"Ollama stopped responding ({exc})", stalled=True)
         if data.get("error"):
-            raise OllamaError(f"Ollama error: {data['error']}", oom=Ollama.is_oom(data["error"]),
-                              crashed=Ollama.is_crash(data["error"]))
+            raise OllamaError(
+                f"Ollama error: {data['error']}",
+                oom=Ollama.is_oom(data["error"]),
+                crashed=Ollama.is_crash(data["error"]),
+            )
         return data
 
     @staticmethod
@@ -721,26 +931,46 @@ class Ollama:
     @staticmethod
     def installed_models():
         data = Ollama.get_json("/api/tags")
-        return None if data is None else sorted(data.get("models", []), key=lambda model: model.get("name", ""))
+        return (
+            None if data is None else sorted(data.get("models", []), key=lambda model: model.get("name", ""))
+        )
 
     @staticmethod
     def loaded_models():
         data = Ollama.get_json("/api/ps")
         if data is None:
             return None
-        return [LoadedModel(model.get("name") or model.get("model") or "", model.get("size", 0))
-                for model in data.get("models", [])]
+        return [
+            LoadedModel(model.get("name") or model.get("model") or "", model.get("size", 0))
+            for model in data.get("models", [])
+        ]
 
     @staticmethod
     def model_facts(name):
         data = Ollama.get_json("/api/show", {"model": name}, timeout=30) or {}
         info = data.get("model_info") or {}
-        context = next((value for key, value in info.items() if key.endswith(".context_length")
-                        and isinstance(value, int)), None)
-        size = next((installed_model.get("size") for installed_model in Ollama.installed_models() or []
-                     if installed_model.get("name") == name), None)
-        return {"context_length": context, "capabilities": data.get("capabilities") or [],
-                "format": (data.get("details") or {}).get("format") or "", "size": size}
+        context = next(
+            (
+                value
+                for key, value in info.items()
+                if key.endswith(".context_length") and isinstance(value, int)
+            ),
+            None,
+        )
+        size = next(
+            (
+                installed_model.get("size")
+                for installed_model in Ollama.installed_models() or []
+                if installed_model.get("name") == name
+            ),
+            None,
+        )
+        return {
+            "context_length": context,
+            "capabilities": data.get("capabilities") or [],
+            "format": (data.get("details") or {}).get("format") or "",
+            "size": size,
+        }
 
     @staticmethod
     def get_json(path, payload=None, timeout=10, errors=False):
@@ -793,15 +1023,23 @@ class Stream:
 
     def error(self, said):
         oom, crashed = Ollama.is_oom(str(said)), Ollama.is_crash(str(said))
-        return OllamaError(f"Ollama error: {said}", oom=oom, crashed=crashed, in_reply=not (oom or crashed),
-                           partial=self.content, streamed=self.written + self.thinking)
+        return OllamaError(
+            f"Ollama error: {said}",
+            oom=oom,
+            crashed=crashed,
+            in_reply=not (oom or crashed),
+            partial=self.content,
+            streamed=self.written + self.thinking,
+        )
 
     def add(self, message):
         piece = message.get("content") or ""
         self.content += piece
         self.written += bool(piece)
         self.thinking += bool(message.get("thinking"))
-        self.thought_tail = (self.thought_tail + (message.get("thinking") or ""))[-UNFINISHED_THOUGHT_KEPT_CHARS:]
+        self.thought_tail = (self.thought_tail + (message.get("thinking") or ""))[
+            -UNFINISHED_THOUGHT_KEPT_CHARS:
+        ]
         return piece
 
     def show(self):
@@ -822,7 +1060,7 @@ class Stream:
         return ">" in piece or "}" in piece or self.written % 40 == 0
 
     def looping(self):
-        lines = self.content.rsplit("\n", LOOPING_REPEATED_LINES + 1)[-LOOPING_REPEATED_LINES - 1:-1]
+        lines = self.content.rsplit("\n", LOOPING_REPEATED_LINES + 1)[-LOOPING_REPEATED_LINES - 1 : -1]
         return len(lines) == LOOPING_REPEATED_LINES and bool(lines[0].strip()) and len(set(lines)) == 1
 
     def stop_looping(self):
@@ -830,7 +1068,11 @@ class Stream:
         return True
 
     def stop_early(self):
-        self.final = {"done_reason": "complete", "eval_count": self.written + self.thinking, "early_stop": True}
+        self.final = {
+            "done_reason": "complete",
+            "eval_count": self.written + self.thinking,
+            "early_stop": True,
+        }
         return True
 
     @property
@@ -848,7 +1090,9 @@ def plainly(doing, seconds):
 
 
 class OllamaError(Exception):
-    def __init__(self, message, oom=False, stalled=False, in_reply=False, partial="", crashed=False, streamed=0):
+    def __init__(
+        self, message, oom=False, stalled=False, in_reply=False, partial="", crashed=False, streamed=0
+    ):
         super().__init__(message)
         self.oom, self.stalled, self.crashed = oom, stalled, crashed
         self.in_reply, self.partial = in_reply, partial

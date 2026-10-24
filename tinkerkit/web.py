@@ -1,19 +1,19 @@
 import html
 import html.parser
+import re
+from collections import namedtuple
 lazy import json
 lazy import os
-import re
 lazy import socket
 lazy import time
 lazy import urllib.error
 lazy import urllib.parse
 lazy import urllib.request
-from collections import namedtuple
 
-lazy from .fetcher import Fetcher
-lazy from .jobs import journaled
 from .messages import say
 from .settings import Config, first_line, is_number, number_from
+lazy from .fetcher import Fetcher
+lazy from .jobs import journaled
 
 MAIN_CLOSED = -1
 
@@ -28,16 +28,28 @@ class Internet:
     RETRY_PAUSE_SECONDS = 3
     FAILURES_BEFORE_GONE = 2
     LEARN_LIMITS = {
-        "learn_rate": Limit(False, 1), "learn_backoff": Limit(False, 0), "learn_cutoff": Limit(False, 0),
-        "learn_pages": Limit(True, 1), "learn_min_pages": Limit(True, 1), "learn_searches": Limit(True, 1),
-        "fetch_workers": Limit(True, 1), "fetch_timeout": Limit(False, 1), "fetch_max_bytes": Limit(True, 1000),
-        "fetch_domain_delay": Limit(False, 0), "fetch_fallbacks": Limit(True, 0), "docs_pages": Limit(True, 1),
-        "tool_docs_pages": Limit(True, 0), "docs_latest_days": Limit(False, 0)}
+        "learn_rate": Limit(False, 1),
+        "learn_backoff": Limit(False, 0),
+        "learn_cutoff": Limit(False, 0),
+        "learn_pages": Limit(True, 1),
+        "learn_min_pages": Limit(True, 1),
+        "learn_searches": Limit(True, 1),
+        "fetch_workers": Limit(True, 1),
+        "fetch_timeout": Limit(False, 1),
+        "fetch_max_bytes": Limit(True, 1000),
+        "fetch_domain_delay": Limit(False, 0),
+        "fetch_fallbacks": Limit(True, 0),
+        "docs_pages": Limit(True, 1),
+        "tool_docs_pages": Limit(True, 0),
+        "docs_latest_days": Limit(False, 0),
+    }
 
     def __init__(self):
         self.errors, self.failures, self.last_failure_status = {}, {}, {}
         self.backends_used, reasons = self.ready_backends()
-        self.gone = "" if self.backends_used else ("; ".join(reasons) or "no web backend (tinker use-web NAME)")
+        self.gone = (
+            "" if self.backends_used else ("; ".join(reasons) or "no web backend (tinker use-web NAME)")
+        )
         self.unusable_backends = reasons
 
     def ready_backends(self):
@@ -72,7 +84,9 @@ class Internet:
         internet = Internet()
         if not internet.available():
             return internet.problem()
-        skipped = f"; not usable: {'; '.join(internet.unusable_backends)}" if internet.unusable_backends else ""
+        skipped = (
+            f"; not usable: {'; '.join(internet.unusable_backends)}" if internet.unusable_backends else ""
+        )
         return f"ready: {internet.describe()}{skipped}"
 
     @staticmethod
@@ -86,8 +100,10 @@ class Internet:
     @staticmethod
     def check_backend_name(key):
         if Config.get(key) not in ("", *Internet.backends()):
-            raise SystemExit(f"{key} must be one of {', '.join(map(repr, Internet.backends()))} "
-                             f'or "" (none); it is {Config.get(key)!r}')
+            raise SystemExit(
+                f"{key} must be one of {', '.join(map(repr, Internet.backends()))} "
+                f'or "" (none); it is {Config.get(key)!r}'
+            )
 
     @staticmethod
     def check_timeout():
@@ -99,8 +115,10 @@ class Internet:
     def check_learn_missing():
         missing = Config.get("learn_missing")
         if not number_from(missing, 1):
-            raise SystemExit(f"learn_missing must be a whole number, 1 or more (the topics a run "
-                             f"with --web may learn); it is {missing!r}")
+            raise SystemExit(
+                f"learn_missing must be a whole number, 1 or more (the topics a run "
+                f"with --web may learn); it is {missing!r}"
+            )
 
     @staticmethod
     def check_learn_limits():
@@ -132,8 +150,13 @@ class Internet:
 
     @staticmethod
     def page_fetcher(log=None):
-        return Fetcher(int(Config.get("fetch_workers")), float(Config.get("fetch_timeout")),
-                       int(Config.get("fetch_max_bytes")), float(Config.get("fetch_domain_delay")), log=log)
+        return Fetcher(
+            int(Config.get("fetch_workers")),
+            float(Config.get("fetch_timeout")),
+            int(Config.get("fetch_max_bytes")),
+            float(Config.get("fetch_domain_delay")),
+            log=log,
+        )
 
     @staticmethod
     def download(url, max_bytes):
@@ -143,24 +166,36 @@ class Internet:
         return journaled({"search": query, "count": count}, lambda: self.searched(query, count))
 
     def searched(self, query, count):
-        found = self.call(query, lambda backend: backend.search(query, count),
-                          lambda result: isinstance(result, list) or "its search gave no list")
+        found = self.call(
+            query,
+            lambda backend: backend.search(query, count),
+            lambda result: isinstance(result, list) or "its search gave no list",
+        )
         if found is None:
             return None
-        return [self.as_result(result) for result in found if isinstance(result, dict)
-                and is_web_address(result.get("url", ""))]
+        return [
+            self.as_result(result)
+            for result in found
+            if isinstance(result, dict) and is_web_address(result.get("url", ""))
+        ]
 
     @staticmethod
     def as_result(found):
-        return {"title": str(found.get("title") or ""), "url": str(found["url"]),
-                "content": str(found.get("content") or "")}
+        return {
+            "title": str(found.get("title") or ""),
+            "url": str(found["url"]),
+            "content": str(found.get("content") or ""),
+        }
 
     def fetch(self, url):
         return journaled({"fetch": url}, lambda: self.fetched(url))
 
     def fetched(self, url):
-        usable = lambda page: (isinstance(page, dict) and bool(str(page.get("content") or "").strip())
-                               or "its fetch gave no text")
+        usable = lambda page: (
+            isinstance(page, dict)
+            and bool(str(page.get("content") or "").strip())
+            or "its fetch gave no text"
+        )
         page = self.call(url, lambda backend: backend.fetch(url), usable)
         if page is None:
             return None
@@ -206,7 +241,6 @@ class Internet:
                 self.gone = why
 
 
-
 class WebBackend:
     name = ""
 
@@ -233,8 +267,14 @@ class OllamaWeb(WebBackend):
         self.key = os.environ.get(self.KEY_ENV, "").strip()
 
     def unready(self):
-        return "" if self.key else (f"no Ollama API key: set {self.KEY_ENV} (a free key from "
-                                    f"ollama.com/settings/keys), or tinker use-web duckduckgo (no key)")
+        return (
+            ""
+            if self.key
+            else (
+                f"no Ollama API key: set {self.KEY_ENV} (a free key from "
+                f"ollama.com/settings/keys), or tinker use-web duckduckgo (no key)"
+            )
+        )
 
     def search(self, query, count):
         data = self.post("/web_search", {"query": query, "max_results": count})
@@ -246,9 +286,16 @@ class OllamaWeb(WebBackend):
         return self.post("/web_fetch", {"url": url})
 
     def post(self, path, payload):
-        request = urllib.request.Request(self.BASE + path, data=json.dumps(payload).encode("utf-8"), method="POST",
-                                         headers={"Authorization": f"Bearer {self.key}",
-                                                  "Content-Type": "application/json", "User-Agent": "Tinker"})
+        request = urllib.request.Request(
+            self.BASE + path,
+            data=json.dumps(payload).encode("utf-8"),
+            method="POST",
+            headers={
+                "Authorization": f"Bearer {self.key}",
+                "Content-Type": "application/json",
+                "User-Agent": "Tinker",
+            },
+        )
         try:
             with urllib.request.urlopen(request, timeout=self.timeout) as response:
                 body = response.read(self.MAX_ANSWER_BYTES)
@@ -260,10 +307,17 @@ class OllamaWeb(WebBackend):
         return self.json_object(body)
 
     def refused(self, code, path):
-        hint = {401: f": check {self.KEY_ENV}", 403: f": check {self.KEY_ENV}", 429: ": its rate limit, try later"}
-        return WebError(f"ollama.com answered HTTP {code}{hint.get(code, '')}",
-                        network=code in (401, 403, 429) or (code >= 500 and path != "/web_fetch"),
-                        retry=code == 429 or code >= 500, code=code)
+        hint = {
+            401: f": check {self.KEY_ENV}",
+            403: f": check {self.KEY_ENV}",
+            429: ": its rate limit, try later",
+        }
+        return WebError(
+            f"ollama.com answered HTTP {code}{hint.get(code, '')}",
+            network=code in (401, 403, 429) or (code >= 500 and path != "/web_fetch"),
+            retry=code == 429 or code >= 500,
+            code=code,
+        )
 
     @staticmethod
     def json_object(body):
@@ -280,7 +334,9 @@ class DuckDuckGoWeb(WebBackend):
     SEARCH = "https://html.duckduckgo.com/html/"
     USER_AGENT = "Mozilla/5.0 (compatible; Tinker)"
     MAX_BYTES = 2_000_000
-    RESULT_RE = re.compile(r'class="result__a"[^>]*href="([^"]+)"[^>]*>(.*?)</a>(.*?)(?=class="result__a"|$)', re.S)
+    RESULT_RE = re.compile(
+        r'class="result__a"[^>]*href="([^"]+)"[^>]*>(.*?)</a>(.*?)(?=class="result__a"|$)', re.S
+    )
     SNIPPET_RE = re.compile(r'class="result__snippet"[^>]*>(.*?)</a>', re.S)
     TAG_RE = re.compile(r"<[^>]+>")
 
@@ -291,8 +347,11 @@ class DuckDuckGoWeb(WebBackend):
         body = self.get(self.SEARCH, self.timeout, form={"q": query})[0]
         results = self.results(body)
         if not results and self.bot_check(body):
-            raise WebError("DuckDuckGo answered with its bot check instead of results (too many searches; it "
-                           "passes after a while)", retry=True)
+            raise WebError(
+                "DuckDuckGo answered with its bot check instead of results (too many searches; it "
+                "passes after a while)",
+                retry=True,
+            )
         return results[:count]
 
     @staticmethod
@@ -305,8 +364,13 @@ class DuckDuckGoWeb(WebBackend):
             url = self.target(html.unescape(href))
             snippet = self.SNIPPET_RE.search(rest)
             if url and "duckduckgo.com/y.js" not in url:
-                results.append({"url": url, "title": self.plain(title),
-                                "content": self.plain(snippet.group(1)) if snippet else ""})
+                results.append(
+                    {
+                        "url": url,
+                        "title": self.plain(title),
+                        "content": self.plain(snippet.group(1)) if snippet else "",
+                    }
+                )
         return results
 
     def fetch(self, url):
@@ -337,13 +401,19 @@ class DuckDuckGoWeb(WebBackend):
                 charset = response.headers.get_content_charset() or "utf-8"
                 return Got(response.read(cls.MAX_BYTES).decode(charset, errors="replace"), kind)
         except urllib.error.HTTPError as exc:
-            raise WebError(f"{urllib.parse.urlsplit(url).netloc} answered HTTP {exc.code}",
-                           retry=exc.code == 429 or exc.code >= 500, code=exc.code)
+            raise WebError(
+                f"{urllib.parse.urlsplit(url).netloc} answered HTTP {exc.code}",
+                retry=exc.code == 429 or exc.code >= 500,
+                code=exc.code,
+            )
         except Exception as exc:
             reason, timed_out = unreached(exc)
             host = urllib.parse.urlsplit(url).netloc
-            raise WebError(f"{host} cannot be reached ({reason})", network=host in cls.SEARCH and not timed_out,
-                           retry=timed_out)
+            raise WebError(
+                f"{host} cannot be reached ({reason})",
+                network=host in cls.SEARCH and not timed_out,
+                retry=timed_out,
+            )
 
     @staticmethod
     def target(href):
@@ -358,11 +428,61 @@ class DuckDuckGoWeb(WebBackend):
 
 
 class PageText(html.parser.HTMLParser):
-    SKIP = {"script", "style", "noscript", "nav", "header", "footer", "aside", "form", "svg", "button", "template",
-            "iframe", "select"}
-    BLOCKS = {"p", "div", "section", "article", "main", "li", "tr", "br", "h1", "h2", "h3", "h4", "h5", "h6",
-              "pre", "table", "ul", "ol", "dl", "dt", "dd", "blockquote", "hr"}
-    VOID = {"br", "hr", "img", "input", "meta", "link", "area", "base", "col", "embed", "source", "track", "wbr"}
+    SKIP = {
+        "script",
+        "style",
+        "noscript",
+        "nav",
+        "header",
+        "footer",
+        "aside",
+        "form",
+        "svg",
+        "button",
+        "template",
+        "iframe",
+        "select",
+    }
+    BLOCKS = {
+        "p",
+        "div",
+        "section",
+        "article",
+        "main",
+        "li",
+        "tr",
+        "br",
+        "h1",
+        "h2",
+        "h3",
+        "h4",
+        "h5",
+        "h6",
+        "pre",
+        "table",
+        "ul",
+        "ol",
+        "dl",
+        "dt",
+        "dd",
+        "blockquote",
+        "hr",
+    }
+    VOID = {
+        "br",
+        "hr",
+        "img",
+        "input",
+        "meta",
+        "link",
+        "area",
+        "base",
+        "col",
+        "embed",
+        "source",
+        "track",
+        "wbr",
+    }
     SKIP_ROLES = {"navigation", "banner", "contentinfo", "search", "menu", "menubar", "toolbar", "dialog"}
     BULLETS_AND_SEPARATORS_RE = re.compile(r"[-*#|»›>·•\s]*")
 
@@ -420,8 +540,12 @@ class PageText(html.parser.HTMLParser):
         return tag in ("main", "article") or attributes.get("role") == "main"
 
     def not_content(self, tag, attributes):
-        return tag in self.SKIP or attributes.get("role") in self.SKIP_ROLES \
-            or attributes.get("aria-hidden") == "true" or "hidden" in attributes
+        return (
+            tag in self.SKIP
+            or attributes.get("role") in self.SKIP_ROLES
+            or attributes.get("aria-hidden") == "true"
+            or "hidden" in attributes
+        )
 
     @staticmethod
     def line_mark(tag):
@@ -459,7 +583,9 @@ class PageText(html.parser.HTMLParser):
 
     @staticmethod
     def collapsed(data):
-        return (" " if data[0].isspace() else "") + " ".join(data.split()) + (" " if data[-1].isspace() else "")
+        return (
+            (" " if data[0].isspace() else "") + " ".join(data.split()) + (" " if data[-1].isspace() else "")
+        )
 
     def add(self, text):
         self.all.append(text)

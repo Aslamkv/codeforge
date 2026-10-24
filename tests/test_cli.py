@@ -5,16 +5,16 @@ import os
 import sys
 
 import pytest
+from conftest import MEASURED, MODEL, PY, TOOLCHAIN, criterion, file_block, plan_of, record_of
 
 from tinkerkit import cli
 from tinkerkit.cli import Cli, Commands, CycleRunner, Doctor, ProjectFolder, ProjectRun
 from tinkerkit.knowledge import Knowledge, Library
 from tinkerkit.model import Models, Ollama, OllamaError
 from tinkerkit.project import Runs, Tracker, project_store
-from tinkerkit.prompts import Part, PromptTooLarge, Prompts
+from tinkerkit.prompts import Part, Prompts, PromptTooLarge
 from tinkerkit.session import Phase
-from tinkerkit.settings import Config, FIX_PHASES, Home, PHASES
-from conftest import MEASURED, MODEL, PY, TOOLCHAIN, criterion, file_block, plan_of, record_of
+from tinkerkit.settings import FIX_PHASES, PHASES, Config, Home
 
 
 def parse(*argv):
@@ -30,8 +30,13 @@ def registered(folder, run_id="abc123", **record):
 def test_task(tmp_path, monkeypatch):
     monkeypatch.chdir(tmp_path)
     args = parse("task", "a", "calculator", "in", "Python", "--web", "--confirm")
-    assert (args.command, args.task, args.workdir, args.web, args.confirm) == \
-        ("task", "a calculator in Python", None, True, True)
+    assert (args.command, args.task, args.workdir, args.web, args.confirm) == (
+        "task",
+        "a calculator in Python",
+        None,
+        True,
+        True,
+    )
     assert parse("task", "x").confirm is False
     (tmp_path / "plan.md").write_text("spec")
     args = parse("task", "a calculator", "plan.md")
@@ -41,13 +46,25 @@ def test_task(tmp_path, monkeypatch):
 
 
 @pytest.mark.spec("CLI-1")
-@pytest.mark.parametrize("argv,why", [(["--task", "x"], "commands are written without --"), (["fly"], "no command 'fly'"),
-                                      (["task", "x", "--yes"], None), (["task", "x", "--plan-only"], None),
-                                      (["task", "x", "--no-confirm"], None), (["resume", "abc123"], None),
-                                      (["status", "@abc", "--workdir", "x"], None), (["rename", "bad name!"], None),
-                                      (["learn", "a", "b", "c"], None), (["use-web", "bing"], None),
-                                      (["resume", "@abc", "--workdir", "x"], None), (["add"], None),
-                                      (["config", "only-a-key"], None), (["list-config"], "no command 'list-config'")])
+@pytest.mark.parametrize(
+    "argv,why",
+    [
+        (["--task", "x"], "commands are written without --"),
+        (["fly"], "no command 'fly'"),
+        (["task", "x", "--yes"], None),
+        (["task", "x", "--plan-only"], None),
+        (["task", "x", "--no-confirm"], None),
+        (["resume", "abc123"], None),
+        (["status", "@abc", "--workdir", "x"], None),
+        (["rename", "bad name!"], None),
+        (["learn", "a", "b", "c"], None),
+        (["use-web", "bing"], None),
+        (["resume", "@abc", "--workdir", "x"], None),
+        (["add"], None),
+        (["config", "only-a-key"], None),
+        (["list-config"], "no command 'list-config'"),
+    ],
+)
 def test_mistakes_are_errors(argv, why, capsys):
     with pytest.raises(SystemExit) as error:
         parse(*argv)
@@ -62,13 +79,23 @@ def test_projects_are_named_with_an_at(tmp_path):
     args = parse("confirm", "@abc123")
     assert (args.command, args.resume, args.workdir) == ("resume", "abc123", ".")
     args = parse("add", "@calc", "keep", "a", "history")
-    assert (args.resume, args.change_request, args.add, args.bug) == ("calc", "keep a history", ["keep a history"], False)
+    assert (args.resume, args.change_request, args.add, args.bug) == (
+        "calc",
+        "keep a history",
+        ["keep a history"],
+        False,
+    )
     registered(tmp_path / "add", "add123")
     names_a_project_too = "add"
     args = parse("add", names_a_project_too, "a", "history")
     assert (args.resume, args.change_request) == ("", "add a history")
     args = parse("fix", "100", "divided", "by", "0", "crashes")
-    assert (args.bug, args.change_request, args.fix, args.resume) == (True, "100 divided by 0 crashes", None, "")
+    assert (args.bug, args.change_request, args.fix, args.resume) == (
+        True,
+        "100 divided by 0 crashes",
+        None,
+        "",
+    )
     args = parse("amend", "@abc123", "also", "divide")
     assert (args.amend, args.resume) == ("also divide", "abc123")
     with pytest.raises(SystemExit):
@@ -76,10 +103,17 @@ def test_projects_are_named_with_an_at(tmp_path):
     assert parse("rename", "@abc123", "calc").rename == ("abc123", "calc")
     assert parse("rename", "calc").rename == ("", "calc")
     assert parse("learn", "act", ". .venv/bin/activate").learn == ["act", ". .venv/bin/activate"]
-    assert parse("status").status == "" and parse("status", "@calc").status == "calc" and parse("runs").runs is True
+    assert (
+        parse("status").status == ""
+        and parse("status", "@calc").status == "calc"
+        and parse("runs").runs is True
+    )
     assert parse("log", "@calc", "--calls").log == "calc" and parse("log").calls is False
     assert parse("use-web", "duckduckgo").use_web == "duckduckgo"
-    assert parse("config").config == [] and parse("config", "test_timeout", "90").config == ["test_timeout", "90"]
+    assert parse("config").config == [] and parse("config", "test_timeout", "90").config == [
+        "test_timeout",
+        "90",
+    ]
 
 
 @pytest.mark.spec("CLI-1")
@@ -96,6 +130,7 @@ def test_help_overview(capsys):
         parse("help")
     out = capsys.readouterr().out
     from tinkerkit.commands import COMMANDS
+
     for command in COMMANDS:
         for synopsis, what in command.rows:
             assert synopsis.split()[0] in out and what in out
@@ -143,11 +178,22 @@ def test_runs_and_status(tmp_path, capsys):
         store.put("run", "record", dict(store.get("run", "record"), updated=updated))
     Commands.list_runs()
     lines = capsys.readouterr().out.splitlines()
-    assert lines[0].startswith("PROJECT") and lines[1].startswith("@bbb222") and lines[2].startswith("@aaa111")
-    steps = [criterion("C1", "t.py::test_a", "adds", status="green"),
-             criterion("C2", "t.py::test_b", "subtracts", status="blocked", last_error="AssertionError: 8 != 2")]
-    project_store(tmp_path / "older").put("spec", "plan", {"steps": steps, "language": "Python", "cycles": [
-        {"id": "base", "phase": "setup", "awaiting": True}]})
+    assert (
+        lines[0].startswith("PROJECT") and lines[1].startswith("@bbb222") and lines[2].startswith("@aaa111")
+    )
+    steps = [
+        criterion("C1", "t.py::test_a", "adds", status="green"),
+        criterion("C2", "t.py::test_b", "subtracts", status="blocked", last_error="AssertionError: 8 != 2"),
+    ]
+    project_store(tmp_path / "older").put(
+        "spec",
+        "plan",
+        {
+            "steps": steps,
+            "language": "Python",
+            "cycles": [{"id": "base", "phase": "setup", "awaiting": True}],
+        },
+    )
     Commands.show_status("older", None)
     out = capsys.readouterr().out
     assert "1/2 criteria pass" in out and "last error: AssertionError: 8 != 2" in out
@@ -158,10 +204,15 @@ def test_runs_and_status(tmp_path, capsys):
 def test_rename_a_folder_whose_plan_waits(tmp_path):
     folder = tmp_path / "calc-py"
     registered(folder)
-    project_store(folder).put("spec", "plan", {"cycles": [{"id": "base", "phase": "setup", "awaiting": True}]})
+    project_store(folder).put(
+        "spec", "plan", {"cycles": [{"id": "base", "phase": "setup", "awaiting": True}]}
+    )
     Commands.rename("abc123", "calculator", None)
     assert not folder.exists() and (tmp_path / "calculator" / ".tinker" / "project.db").is_file()
-    assert Runs.find("abc123")["workdir"] == str(tmp_path / "calculator") and Runs.find("calculator")["id"] == "abc123"
+    assert (
+        Runs.find("abc123")["workdir"] == str(tmp_path / "calculator")
+        and Runs.find("calculator")["id"] == "abc123"
+    )
     (tmp_path / "taken").mkdir()
     with pytest.raises(SystemExit, match="already exists"):
         Commands.rename("abc123", "taken", None)
@@ -174,9 +225,15 @@ def test_rename_a_folder_whose_plan_waits(tmp_path):
 def test_config(measured_model, capsys):
     Commands(parse("config")).run()
     out = capsys.readouterr().out
-    for line in (f"model in use:    {MODEL} (calibrated", "input budget:    8192 tokens", "context:         32768 tokens",
-                 "think:           high for planning, medium for building", "keep_alive:      0",
-                 "test_timeout:    60", "web:             ollama"):
+    for line in (
+        f"model in use:    {MODEL} (calibrated",
+        "input budget:    8192 tokens",
+        "context:         32768 tokens",
+        "think:           high for planning, medium for building",
+        "keep_alive:      0",
+        "test_timeout:    60",
+        "web:             ollama",
+    ):
         assert line in out, line
     Commands(parse("config", "test_timeout", "90")).run()
     assert Config.get("test_timeout") == 90 and "test_timeout is 90 now" in capsys.readouterr().out
@@ -184,14 +241,20 @@ def test_config(measured_model, capsys):
 
 @pytest.mark.spec("CLI-4")
 def test_doctor(monkeypatch, capsys):
-    assert [name for _, name, _ in Doctor().checks()] == ["Ollama", "model", "embedding model (for tinker learn and --web)",
-                                                          "web (for tinker learn and --web)", "tinker command"]
+    assert [name for _, name, _ in Doctor().checks()] == [
+        "Ollama",
+        "model",
+        "embedding model (for tinker learn and --web)",
+        "web (for tinker learn and --web)",
+        "tinker command",
+    ]
     with pytest.raises(SystemExit, match="does not answer"):
         Doctor.ollama()
     ok = lambda: "fine"
 
     def missing():
         raise SystemExit("not there")
+
     monkeypatch.setattr(Doctor, "checks", lambda self: [(True, "Ollama", ok), (False, "web", missing)])
     Doctor().run()
     assert "Everything Tinker needs is there." in capsys.readouterr().out
@@ -230,13 +293,19 @@ def test_log_prints_the_output_or_the_model_calls(tmp_path, capsys):
     assert capsys.readouterr().out == "Run abc123 (new): a calculator\nDone.\n"
     Commands(parse("log", "@abc123", "--calls")).run()
     out = capsys.readouterr().out
-    assert "] Spec (attempt 1)\n    {\"language\": \"Python\"}" in out and "Write calc.py  error: runner failed" in out
+    assert (
+        '] Spec (attempt 1)\n    {"language": "Python"}' in out
+        and "Write calc.py  error: runner failed" in out
+    )
 
 
 @pytest.fixture
 def session(make_project, make_session, project_dir):
-    return make_session(make_project(toolchain=dict(TOOLCHAIN, setup=["echo ran >> setups.txt"],
-                                                    test_all="echo run >> runs.txt")))
+    return make_session(
+        make_project(
+            toolchain=dict(TOOLCHAIN, setup=["echo ran >> setups.txt"], test_all="echo run >> runs.txt")
+        )
+    )
 
 
 @pytest.mark.spec("SES-1")
@@ -283,13 +352,18 @@ def test_the_suite_runs_once_per_state_of_the_files(session, project_dir):
 def test_note_ask_until_usable_and_room(session, fake_ollama, monkeypatch):
     for number in range(35):
         session.note("fix", f"problem {number}")
-    assert len(session.project.spec["events"]) == 30 and session.project.spec["events"][0]["text"] == "problem 5"
+    assert (
+        len(session.project.spec["events"]) == 30 and session.project.spec["events"][0]["text"] == "problem 5"
+    )
     fake_ollama.reply("nope", times=3)
-    with pytest.raises(SystemExit, match="Could not get a usable plan. See the model calls: tinker log --calls"):
+    with pytest.raises(
+        SystemExit, match="Could not get a usable plan. See the model calls: tinker log --calls"
+    ):
         session.ask_until_usable("s", [Part("Q", "q", True)], "Plan", lambda reply: reply.json())
 
     def too_large(*args, **kwargs):
         raise PromptTooLarge("too big")
+
     monkeypatch.setattr(session.model, "ask_until_usable", too_large)
     with pytest.raises(SystemExit, match="even shortened, the prompt does not fit"):
         session.ask_until_usable("s", [], "Plan", lambda reply: reply)
@@ -310,22 +384,39 @@ def test_format_code_drops_a_formatter_that_fails(session, project_dir, capsys):
 def test_knowledge_parts_record_what_they_show(session, home_store):
     knowledge = Knowledge("Python")
     knowledge.add_lessons([{"text": "Use tmp_path in tests", "phase": "tests", "scope": "any"}], [])
-    Library.save("flask", {"topic": "flask", "name": "Flask", "summary": "s", "facts": [
-        {"phase": "tests", "text": "use the test client"}, {"phase": "code", "text": "routes use decorators"}]})
+    Library.save(
+        "flask",
+        {
+            "topic": "flask",
+            "name": "Flask",
+            "summary": "s",
+            "facts": [
+                {"phase": "tests", "text": "use the test client"},
+                {"phase": "code", "text": "routes use decorators"},
+            ],
+        },
+    )
     proven, client = (fact["id"] for fact in reversed(Library.read("flask")["facts"]))
     knowledge.prove({f"fact:flask:{proven}": ["code"]})
-    session.project.spec["learned"] = [item for item in Library.items({"flask": Library.read("flask")}) if item["id"]]
+    session.project.spec["learned"] = [
+        item for item in Library.items({"flask": Library.read("flask")}) if item["id"]
+    ]
     session.cycle = cycle = session.project.cycles[0]
     parts = session.knowledge_parts("tests", "code")
-    assert [part.title for part in parts] == ["Lessons from earlier projects (follow them)",
-                                              "Learned from the web (current; newer than what you were trained on)"]
+    assert [part.title for part in parts] == [
+        "Lessons from earlier projects (follow them)",
+        "Learned from the web (current; newer than what you were trained on)",
+    ]
     assert parts[0].text == "- Use tmp_path in tests"
     each_proven_fact_once = "- [Python] routes use decorators\n- [Flask] use the test client"
     assert parts[1].text == each_proven_fact_once
     assert all(not part.required and part.place == "first" for part in parts)
     lesson_id = knowledge.known_lessons()[0]["id"]
-    assert cycle["used"] == {f"lesson:{lesson_id}": ["code", "tests"], f"known:{proven}": ["code", "tests"],
-                             f"fact:flask:{client}": ["code", "tests"]}
+    assert cycle["used"] == {
+        f"lesson:{lesson_id}": ["code", "tests"],
+        f"known:{proven}": ["code", "tests"],
+        f"fact:flask:{client}": ["code", "tests"],
+    }
     assert len(session.knowledge_parts("toolchain")) == 3
 
 
@@ -334,18 +425,26 @@ def test_code_and_tests_are_told_the_checks_they_must_pass(session):
     session.project.spec["toolchain"]["lint"] = "ruff check . && mypy --strict ."
     checks = [part for part in session.knowledge_parts("code") if part.title.startswith("Checks")]
     assert [part.text for part in checks] == ["$ ruff check . && mypy --strict ."]
-    assert not [part for part in session.knowledge_parts("design", "toolchain") if part.title.startswith("Checks")]
+    assert not [
+        part for part in session.knowledge_parts("design", "toolchain") if part.title.startswith("Checks")
+    ]
     session.project.spec["toolchain"]["lint"] = "none"
     assert not [part for part in session.knowledge_parts("tests") if part.title.startswith("Checks")]
 
 
 @pytest.mark.spec("SES-5")
 def test_before_the_spec_names_the_language_knowledge_is_for_the_one_the_request_names(session, home_store):
-    Library.save("rust", {"topic": "rust", "kind": "language", "language": "Rust", "name": "Rust 1.95", "facts": []})
+    Library.save(
+        "rust", {"topic": "rust", "kind": "language", "language": "Rust", "name": "Rust 1.95", "facts": []}
+    )
     Knowledge("Go").finished_project()
     session.project.spec["language"] = ""
-    for request, language in [("a calculator in Rust", "Rust"), ("a Go tool, later ported to Rust", "Go"),
-                              ("a calculator", "Python"), ("a trusty calculator", "Python")]:
+    for request, language in [
+        ("a calculator in Rust", "Rust"),
+        ("a Go tool, later ported to Rust", "Go"),
+        ("a calculator", "Python"),
+        ("a trusty calculator", "Python"),
+    ]:
         session.project.cycles[0]["request"] = request
         assert session.knowledge.language == language
     session.project.spec["language"] = "Rust"
@@ -373,10 +472,20 @@ def test_save_keeps_the_project_and_tells_the_tracker(make_project, make_session
 @pytest.mark.spec("SES-4")
 def test_each_build_step_says_what_came_of_it(make_project, make_session):
     project = make_project([criterion("C1", "t.py::a", status="green"), criterion("C2", "t.py::b")])
-    runner, cycle = CycleRunner(make_session(project)), {"id": "base", "files": ["calc.py", "t.py"],
-                                                          "code_done": ["calc.py"]}
-    assert [runner.outcome(phase, cycle) for phase in ("spec", "design", "tests", "code", "verify", "tidy")] == [
-        "2 point(s) to test", "2 file(s)", "0/2 test(s) written", "1 file(s) written", "1/2 spec points pass", ""]
+    runner, cycle = (
+        CycleRunner(make_session(project)),
+        {"id": "base", "files": ["calc.py", "t.py"], "code_done": ["calc.py"]},
+    )
+    assert [
+        runner.outcome(phase, cycle) for phase in ("spec", "design", "tests", "code", "verify", "tidy")
+    ] == [
+        "2 point(s) to test",
+        "2 file(s)",
+        "0/2 test(s) written",
+        "1 file(s) written",
+        "1/2 spec points pass",
+        "",
+    ]
 
 
 def recording_phases(monkeypatch, stop_at=None):
@@ -388,6 +497,7 @@ def recording_phases(monkeypatch, stop_at=None):
         def run(self, cycle):
             ran.append(cycle["phase"])
             return False if cycle["phase"] == stop_at else None
+
     monkeypatch.setattr(CycleRunner, "phase_class", staticmethod(lambda phase: Recorded))
     return ran
 
@@ -428,13 +538,20 @@ def test_cycle_waits_after_its_plan_unless_told_not_to(session, monkeypatch):
 def test_a_blocked_cycle_disproves_what_it_used_there(session, monkeypatch):
     recording_phases(monkeypatch, stop_at="verify")
     knowledge = session.knowledge
-    knowledge.add_lessons([{"text": "Seed random generators inside tests", "phase": "tests"},
-                           {"text": "Pin the toolchain versions", "phase": "toolchain"}], [])
+    knowledge.add_lessons(
+        [
+            {"text": "Seed random generators inside tests", "phase": "tests"},
+            {"text": "Pin the toolchain versions", "phase": "toolchain"},
+        ],
+        [],
+    )
     seed, pin = (lesson["id"] for lesson in knowledge.known_lessons())
     cycle = session.project.cycles[0]
     cycle["used"] = {f"lesson:{seed}": ["tests"], f"lesson:{pin}": ["toolchain"]}
     assert CycleRunner(session).run(cycle) == "blocked" and cycle["phase"] == "verify"
-    assert [lesson["text"] for lesson in Knowledge("Python").known_lessons()] == ["Pin the toolchain versions"]
+    assert [lesson["text"] for lesson in Knowledge("Python").known_lessons()] == [
+        "Pin the toolchain versions"
+    ]
 
 
 @pytest.mark.spec("CLI-7")
@@ -460,12 +577,18 @@ def test_every_phase_has_a_phase_class():
 
 
 @pytest.mark.spec("CLI-8")
-@pytest.mark.parametrize("error,message", [(KeyboardInterrupt(), "\nInterrupted."),
-                                           (OllamaError("Ollama returned HTTP 500"), "\nOllama returned HTTP 500"),
-                                           (PermissionError(13, "Permission denied", "/x/y"), "\nPermission denied: /x/y")])
+@pytest.mark.parametrize(
+    "error,message",
+    [
+        (KeyboardInterrupt(), "\nInterrupted."),
+        (OllamaError("Ollama returned HTTP 500"), "\nOllama returned HTTP 500"),
+        (PermissionError(13, "Permission denied", "/x/y"), "\nPermission denied: /x/y"),
+    ],
+)
 def test_main_ends_cleanly(monkeypatch, error, message):
     def fail(argv=None):
         raise error
+
     monkeypatch.setattr(Cli, "parse", staticmethod(fail))
     with pytest.raises(SystemExit) as ended:
         cli.main()
@@ -474,16 +597,37 @@ def test_main_ends_cleanly(monkeypatch, error, message):
 
 SPEC_REPLY = {
     "language": "Python",
-    "criteria": [{"text": "calc.add(2, 3) is 5", "source": "a calculator that adds", "test": "test_calc.py::test_add",
-                  "effort": 1},
-                 {"text": "calc.sub(5, 3) is 2", "source": "and subtracts", "test": "test_calc.py::test_sub", "effort": 1},
-                 {"text": 'calc.main(["add", "2", "3"]) prints 5', "source": "a calculator that adds",
-                  "test": "test_calc.py::test_main", "effort": 1}],
-    "files": [{"path": "calc.py", "kind": "code", "role": "the calculator and its command line", "uses": []},
-              {"path": "test_calc.py", "kind": "test", "role": "its tests", "uses": ["calc.py"]}],
-    "entry": "calc.py", "constraints": ["the standard library only"], "non_goals": ["a GUI"], "data": "",
-    "toolchain": TOOLCHAIN}
-TESTS = '''import calc
+    "criteria": [
+        {
+            "text": "calc.add(2, 3) is 5",
+            "source": "a calculator that adds",
+            "test": "test_calc.py::test_add",
+            "effort": 1,
+        },
+        {
+            "text": "calc.sub(5, 3) is 2",
+            "source": "and subtracts",
+            "test": "test_calc.py::test_sub",
+            "effort": 1,
+        },
+        {
+            "text": 'calc.main(["add", "2", "3"]) prints 5',
+            "source": "a calculator that adds",
+            "test": "test_calc.py::test_main",
+            "effort": 1,
+        },
+    ],
+    "files": [
+        {"path": "calc.py", "kind": "code", "role": "the calculator and its command line", "uses": []},
+        {"path": "test_calc.py", "kind": "test", "role": "its tests", "uses": ["calc.py"]},
+    ],
+    "entry": "calc.py",
+    "constraints": ["the standard library only"],
+    "non_goals": ["a GUI"],
+    "data": "",
+    "toolchain": TOOLCHAIN,
+}
+TESTS = """import calc
 
 
 def test_add():
@@ -497,8 +641,8 @@ def test_sub():
 def test_main(capsys):
     calc.main(["add", "2", "3"])
     assert capsys.readouterr().out == "5\\n"
-'''
-CODE = '''import sys
+"""
+CODE = """import sys
 
 
 def add(a, b):
@@ -516,11 +660,17 @@ def main(argv):
 
 if __name__ == "__main__":
     main(sys.argv[1:])
-'''
-README = {"overview": "A calculator for the command line.", "features": ["Adds two numbers", "Subtracts two numbers"],
-          "requires": "Python 3",
-          "usage": [{"what": "Add", "command": f'"{PY}" calc.py add 2 3', "output": "5"},
-                    {"what": "Subtract", "command": f'"{PY}" calc.py sub 5 3', "output": "2"}], "serves": False}
+"""
+README = {
+    "overview": "A calculator for the command line.",
+    "features": ["Adds two numbers", "Subtracts two numbers"],
+    "requires": "Python 3",
+    "usage": [
+        {"what": "Add", "command": f'"{PY}" calc.py add 2 3', "output": "5"},
+        {"what": "Subtract", "command": f'"{PY}" calc.py sub 5 3', "output": "2"},
+    ],
+    "serves": False,
+}
 
 
 def build(*argv):
@@ -549,32 +699,61 @@ def test_a_task_is_built_end_to_end(run_ready, fake_ollama, home_store):
     fake_ollama.reply(json.dumps(SPEC_REPLY), when="Spec")
     fake_ollama.reply(file_block("test_calc.py", TESTS), when="Tests test_calc.py")
     fake_ollama.reply(file_block("calc.py", CODE), when="Write calc.py")
-    fake_ollama.reply("CAUSE: sub added instead of subtracting\n" + file_block("calc.py", CODE.replace("a + b\n\n\ndef main",
-                      "a - b\n\n\ndef main")), when="Fix the code C2")
+    fake_ollama.reply(
+        "CAUSE: sub added instead of subtracting\n"
+        + file_block("calc.py", CODE.replace("a + b\n\n\ndef main", "a - b\n\n\ndef main")),
+        when="Fix the code C2",
+    )
     fake_ollama.reply(json.dumps(README), when="README")
-    fake_ollama.reply(json.dumps({"lessons": [{"phase": "code", "scope": "any", "text": "Subtract with the minus operator"}],
-                                  "confirmed": []}), when="Lessons")
+    fake_ollama.reply(
+        json.dumps(
+            {
+                "lessons": [{"phase": "code", "scope": "any", "text": "Subtract with the minus operator"}],
+                "confirmed": [],
+            }
+        ),
+        when="Lessons",
+    )
     assert build("task", "a calculator that adds and subtracts", "--workdir", str(folder)) == 0
     labels = [label.split(" [")[0] for label in fake_ollama.labels()]
-    assert labels == ["Spec (attempt 1)", "Tests test_calc.py (3)", "Write calc.py", "Fix the code C2 (no thinking first)",
-                      "README (attempt 1)", "Lessons (attempt 1)"]
+    assert labels == [
+        "Spec (attempt 1)",
+        "Tests test_calc.py (3)",
+        "Write calc.py",
+        "Fix the code C2 (no thinking first)",
+        "README (attempt 1)",
+        "Lessons (attempt 1)",
+    ]
     no_quick_draft = fake_ollama.calls[0]["think"] == "high"
     assert fake_ollama.queue == [] and no_quick_draft
     assert "return a - b" in (folder / "calc.py").read_text()
     spec = plan_of(folder)
-    assert [(criterion["id"], criterion["status"]) for criterion in spec["steps"]] == [("C1", "green"), ("C2", "green"),
-                                                                                       ("C3", "green")]
+    assert [(criterion["id"], criterion["status"]) for criterion in spec["steps"]] == [
+        ("C1", "green"),
+        ("C2", "green"),
+        ("C3", "green"),
+    ]
     assert spec["cycles"][0]["phase"] == "done" and "readme_failures" not in spec["cycles"][0]
-    assert "| C2 | calc.sub(5, 3) is 2 | `test_calc.py::test_sub` | passes |" in (folder / "SPEC.md").read_text()
+    assert (
+        "| C2 | calc.sub(5, 3) is 2 | `test_calc.py::test_sub` | passes |" in (folder / "SPEC.md").read_text()
+    )
     assert "calc.py sub 5 3\n2\n```" in (folder / "README.md").read_text()
     run = record_of(folder)
-    assert run["status"] == "done" and home_store.get("projects", run["id"]) == \
-        {"id": run["id"], "workdir": str(folder), "task": "a calculator that adds and subtracts"}
+    assert run["status"] == "done" and home_store.get("projects", run["id"]) == {
+        "id": run["id"],
+        "workdir": str(folder),
+        "task": "a calculator that adds and subtracts",
+    }
     assert home_store.get("languages", "python")["projects"] == 1
     assert home_store.get("memory", "any")["lessons"][0]["text"] == "Subtract with the minus operator"
     assert "Done. All 3 spec tests pass (SPEC.md)." in printed(folder)
     assert sorted(path.name for path in folder.iterdir()) == [
-        ".tinker", "README.md", "SPEC.md", "calc.py", "test_calc.py"]
+        ".tinker",
+        "README.md",
+        "SPEC.md",
+        "calc.py",
+        "test_calc.py",
+    ]
     assert home_store.items("running") == {}
     progress = [event["event"] for _, event in project_store(folder).entries("progress")]
     assert progress[0] == "project" and "points" in progress and progress[-1] == "ended"
@@ -589,8 +768,11 @@ def test_learn_a_command_of_yours_needs_no_model(home_store):
 @pytest.mark.spec("CLI-10")
 def test_learning_checks_everything_before_loading(measured_model, fake_ollama, monkeypatch, capsys):
     from tinkerkit.workspace import TaughtCommands
+
     monkeypatch.setattr(TaughtCommands, "alias", staticmethod(lambda name: None))
-    monkeypatch.setattr(Ollama, "installed_models", staticmethod(lambda: [{"name": MODEL}, {"name": "embedder"}]))
+    monkeypatch.setattr(
+        Ollama, "installed_models", staticmethod(lambda: [{"name": MODEL}, {"name": "embedder"}])
+    )
     with pytest.raises(SystemExit, match="tinker learn needs an embedding model"):
         Commands(parse("learn", "Flask")).run()
     Config.save(embed_model="embedder")
@@ -612,21 +794,41 @@ def test_learning_checks_everything_before_loading(measured_model, fake_ollama, 
 def test_memory(home_store, capsys):
     known = Knowledge("Python")
     known.remember_toolchain(cli.Toolchain(TOOLCHAIN))
-    known.remember_fix({"failure": "no module named calc", "cause": "pythonpath", "replay": {"toolchain": {}}})
-    known.add_lessons([{"text": "Use tmp_path in tests", "phase": "tests", "scope": "language"},
-                       {"text": "Exit with 1 after an error", "phase": "code", "scope": "any"}], [])
-    Library.save("flask", {"name": "Flask", "summary": "A web framework.", "learned": "2026-10-01",
-                           "facts": [{"phase": "code", "text": "x"}]})
+    known.remember_fix(
+        {"failure": "no module named calc", "cause": "pythonpath", "replay": {"toolchain": {}}}
+    )
+    known.add_lessons(
+        [
+            {"text": "Use tmp_path in tests", "phase": "tests", "scope": "language"},
+            {"text": "Exit with 1 after an error", "phase": "code", "scope": "any"},
+        ],
+        [],
+    )
+    Library.save(
+        "flask",
+        {
+            "name": "Flask",
+            "summary": "A web framework.",
+            "learned": "2026-10-01",
+            "facts": [{"phase": "code", "text": "x"}],
+        },
+    )
     Commands(parse("learn", "act", "echo hi")).run()
     capsys.readouterr()
     Commands.show_memory()
     out = capsys.readouterr().out
-    for line in ("📘 Python · nothing built yet", "   🧰 Toolchain\n", f"      test      {TOOLCHAIN['test_all']}",
-                 "   🔧 Fixes\n      • no module named calc → pythonpath (helped 1×)",
-                 "   📒 Lessons (✅ proven by a build, 🌱 not yet)\n      🌱 Use tmp_path in tests",
-                 "🌍 Any language\n   📒 Lessons", "      🌱 Exit with 1 after an error",
-                 "🔬 Topics learned\n   • Flask: A web framework. (read 1 Oct, 1 facts)",
-                 "⌨️  Your commands\n   • act: stands for `echo hi` (given)", "   Ask about it   tinker ask"):
+    for line in (
+        "📘 Python · nothing built yet",
+        "   🧰 Toolchain\n",
+        f"      test      {TOOLCHAIN['test_all']}",
+        "   🔧 Fixes\n      • no module named calc → pythonpath (helped 1×)",
+        "   📒 Lessons (✅ proven by a build, 🌱 not yet)\n      🌱 Use tmp_path in tests",
+        "🌍 Any language\n   📒 Lessons",
+        "      🌱 Exit with 1 after an error",
+        "🔬 Topics learned\n   • Flask: A web framework. (read 1 Oct, 1 facts)",
+        "⌨️  Your commands\n   • act: stands for `echo hi` (given)",
+        "   Ask about it   tinker ask",
+    ):
         assert line in out, line
     toolchain_rows = out.split("🧰 Toolchain")[1].split("🔧")[0]
     assert "setup" not in toolchain_rows
@@ -634,8 +836,17 @@ def test_memory(home_store, capsys):
 
 @pytest.mark.spec("CLI-11")
 def test_memory_of_a_language_read_from_the_web_only(home_store, capsys):
-    Library.save("go", {"name": "Go", "kind": "language", "language": "Go", "summary": "s",
-                        "learned": "2026-10-22 08:53", "facts": [{"phase": "code", "text": "x"}]})
+    Library.save(
+        "go",
+        {
+            "name": "Go",
+            "kind": "language",
+            "language": "Go",
+            "summary": "s",
+            "learned": "2026-10-22 08:53",
+            "facts": [{"phase": "code", "text": "x"}],
+        },
+    )
     Commands.show_memory()
     out = capsys.readouterr().out
     assert "📘 Go · nothing built yet · docs read 22 Oct (1 facts)" in out and "Topics learned" not in out
@@ -650,8 +861,11 @@ def test_memory_with_nothing_learned_says_how_to_start(home_store, capsys):
 
 @pytest.mark.spec("CLI-11")
 def test_models(measured_model, monkeypatch, capsys):
-    monkeypatch.setattr(Ollama, "installed_models", staticmethod(lambda: [{"name": MODEL, "size": 5.2e9},
-                                                                          {"name": "other", "size": 1e9}]))
+    monkeypatch.setattr(
+        Ollama,
+        "installed_models",
+        staticmethod(lambda: [{"name": MODEL, "size": 5.2e9}, {"name": "other", "size": 1e9}]),
+    )
     Commands.list_models()
     lines = capsys.readouterr().out.splitlines()
     assert lines[1].startswith(f"* {MODEL}") and "5.2G" in lines[1] and "8192" in lines[1]
@@ -667,13 +881,19 @@ def test_a_task_waits_for_its_plan_then_confirm_builds_it(run_ready, fake_ollama
     fake_ollama.reply(json.dumps(SPEC_REPLY), when="Spec")
     assert build("task", "a calculator that adds and subtracts", "--confirm", "--workdir", str(folder)) == 0
     out = printed(folder)
-    assert "📋 Plan for calc (run " in out and "  C2  calc.sub(5, 3) is 2" in out and "Not included: a GUI" in out
+    assert (
+        "📋 Plan for calc (run " in out
+        and "  C2  calc.sub(5, 3) is 2" in out
+        and "Not included: a GUI" in out
+    )
     assert fake_ollama.calls[0]["think"] == "low" and not (folder / "calc.py").exists()
     run = record_of(folder)
     assert run["status"] == "awaiting" and plan_of(folder)["cycles"][0]["phase"] == "setup"
     assert f"Build it: tinker confirm @{run['id']}" in out
     fixed = CODE.replace("a + b\n\n\ndef main", "a - b\n\n\ndef main")
-    fake_ollama.reply(file_block("test_calc.py", TESTS), when="Tests").reply(file_block("calc.py", fixed), when="Write")
+    fake_ollama.reply(file_block("test_calc.py", TESTS), when="Tests").reply(
+        file_block("calc.py", fixed), when="Write"
+    )
     fake_ollama.reply(json.dumps(README), when="README")
     assert build("confirm", f"@{run['id']}") == 0
     assert "Plan confirmed: building it" in printed(folder)
@@ -685,8 +905,11 @@ def test_amend_plans_again_and_waits_again(run_ready, fake_ollama):
     folder = run_ready
     fake_ollama.reply(json.dumps(SPEC_REPLY), when="Spec")
     build("task", "a calculator that adds and subtracts", "--confirm", "--workdir", str(folder))
-    more = dict(SPEC_REPLY, criteria=SPEC_REPLY["criteria"] + [{"text": "calc.mul(2, 3) is 6", "source": "adds",
-                                                                "test": "test_calc.py::test_mul"}])
+    more = dict(
+        SPEC_REPLY,
+        criteria=SPEC_REPLY["criteria"]
+        + [{"text": "calc.mul(2, 3) is 6", "source": "adds", "test": "test_calc.py::test_mul"}],
+    )
     fake_ollama.reply(json.dumps(more), when="Amend the spec")
     assert build("amend", "also multiply", "--workdir", str(folder)) == 0
     cycle = plan_of(folder)["cycles"][0]
@@ -695,16 +918,24 @@ def test_amend_plans_again_and_waits_again(run_ready, fake_ollama):
 
 
 @pytest.mark.spec("CLI-12")
-@pytest.mark.parametrize("problem,said", [
-    ({"unreproduced_reason": 'the bug could not be reproduced ... then: tinker fix @abc123 "..."'},
-     "Not fixed: the bug could not be reproduced"),
-    ({"review_problem": "`pytest` fails"}, "Not done: the final review found `pytest` fails"),
-    ({"build_problem": "it does not build"}, "Stopped before working on criteria: it does not build"),
-    ({"tool_problem": "the tools do not work"}, "No code change can fix that."),
-    ({}, "Stopped: 1/2 tests pass; 1 parked after fixing and a review against the plan:")])
+@pytest.mark.parametrize(
+    "problem,said",
+    [
+        (
+            {"unreproduced_reason": 'the bug could not be reproduced ... then: tinker fix @abc123 "..."'},
+            "Not fixed: the bug could not be reproduced",
+        ),
+        ({"review_problem": "`pytest` fails"}, "Not done: the final review found `pytest` fails"),
+        ({"build_problem": "it does not build"}, "Stopped before working on criteria: it does not build"),
+        ({"tool_problem": "the tools do not work"}, "No code change can fix that."),
+        ({}, "Stopped: 1/2 tests pass; 1 parked after fixing and a review against the plan:"),
+    ],
+)
 def test_a_blocked_run_says_why_and_how_to_go_on(make_project, make_session, capsys, problem, said):
-    steps = [criterion("C1", "t.py::a", "adds", status="green"),
-             criterion("C2", "t.py::b", "subtracts", status="blocked", last_error="AssertionError")]
+    steps = [
+        criterion("C1", "t.py::a", "adds", status="green"),
+        criterion("C2", "t.py::b", "subtracts", status="blocked", last_error="AssertionError"),
+    ]
     session = make_session(make_project(steps))
     for key, value in problem.items():
         setattr(session, key, value)
@@ -724,8 +955,14 @@ def test_the_cycle_a_run_works_on(make_project, make_session):
         run = ProjectRun.__new__(ProjectRun)
         defaults = {"bug": False, "change_request": "keep a history"}
         run.args = argparse.Namespace(**dict(defaults, **given))
-        run.session, run.record, run.mode, run.spec_text = make_session(project, confirm=confirm), project.run, mode, ""
+        run.session, run.record, run.mode, run.spec_text = (
+            make_session(project, confirm=confirm),
+            project.run,
+            mode,
+            "",
+        )
         return run.choose_cycle("")
+
     project = make_project(cycles=[])
     base = run_on(project, "new")
     assert (base["id"], base["phase"], base["confirm"]) == ("base", "recall", True)
@@ -735,8 +972,14 @@ def test_the_cycle_a_run_works_on(make_project, make_session):
     feature = run_on(project, "change", confirm=False)
     feature["phase"] = "done"
     fix = run_on(project, "change", bug=True, change_request="2/0 crashes")
-    assert (feature["kind"], feature["confirm"], fix["kind"], fix["phase"], fix["confirm"]) == \
-        ("feature", False, "fix", "recall", True)
-    assert [(feature["kind"], feature["request"])
-            for feature in project.run["features"]] == [("feature", "keep a history"),
-                                                                                              ("fix", "2/0 crashes")]
+    assert (feature["kind"], feature["confirm"], fix["kind"], fix["phase"], fix["confirm"]) == (
+        "feature",
+        False,
+        "fix",
+        "recall",
+        True,
+    )
+    assert [(feature["kind"], feature["request"]) for feature in project.run["features"]] == [
+        ("feature", "keep a history"),
+        ("fix", "2/0 crashes"),
+    ]

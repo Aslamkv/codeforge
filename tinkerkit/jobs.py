@@ -1,8 +1,8 @@
 import contextlib
-lazy import datetime
-lazy import json
 import os
 import signal
+lazy import datetime
+lazy import json
 lazy import sys
 lazy import threading
 lazy import time
@@ -11,8 +11,21 @@ lazy from pathlib import Path
 lazy from .messages import say
 lazy from .settings import EXERCISE_ENV, Home, Paged, confirmed, fingerprint, now_text
 
-COMMANDS = ("task", "restart", "resume", "confirm", "amend", "add", "fix", "learn", "ask", "teach", "read",
-            "research", "exercise")
+COMMANDS = (
+    "task",
+    "restart",
+    "resume",
+    "confirm",
+    "amend",
+    "add",
+    "fix",
+    "learn",
+    "ask",
+    "teach",
+    "read",
+    "research",
+    "exercise",
+)
 STATES = ("running", "paused", "stopped", "finished", "archived")
 JOBS_PER_PAGE = 10
 JOB_PAUSE_GRACE_SECONDS = 150
@@ -41,8 +54,9 @@ class Journal:
         Home.store().drop_log(self.log)
 
 
-def journaled(request, ask, keep=lambda answer: answer is not None, dump=lambda answer: answer,
-              load=lambda kept: kept):
+def journaled(
+    request, ask, keep=lambda answer: answer is not None, dump=lambda answer: answer, load=lambda kept: kept
+):
     if Jobs.journal is None:
         return ask()
     return Jobs.journal.answer(request, ask, keep, dump, load)
@@ -102,8 +116,14 @@ class Jobs:
     def new(cls, argv):
         number = Home.store().update("job numbers", "last", lambda last: (last or 0) + 1)
         title = " ".join(word for word in argv if not word.startswith("--"))
-        return {"number": number, "command": argv[0], "title": title, "arguments": list(argv),
-                "started": now_text(), "today": datetime.date.today().isoformat()}
+        return {
+            "number": number,
+            "command": argv[0],
+            "title": title,
+            "arguments": list(argv),
+            "started": now_text(),
+            "today": datetime.date.today().isoformat(),
+        }
 
     @classmethod
     def close(cls):
@@ -128,8 +148,12 @@ class Jobs:
         if paused_by:
             cls.ended_status = "paused"
             asker = "you" if paused_by == "you" else f"job #{paused_by}"
-            return dict(ending, status="paused", headline=f"Paused for {asker}: it goes on once Tinker is idle",
-                        next=[("Go on now", f"tinker resume #{number}")])
+            return dict(
+                ending,
+                status="paused",
+                headline=f"Paused for {asker}: it goes on once Tinker is idle",
+                next=[("Go on now", f"tinker resume #{number}")],
+            )
         return dict(ending, next=list(ending.get("next") or []) + [("Go on", f"tinker resume #{number}")])
 
     @classmethod
@@ -166,7 +190,7 @@ class Jobs:
     @staticmethod
     def page(jobs, number):
         pages = max(1, -(-len(jobs) // JOBS_PER_PAGE))
-        return Paged(jobs[(number - 1) * JOBS_PER_PAGE:number * JOBS_PER_PAGE], pages)
+        return Paged(jobs[(number - 1) * JOBS_PER_PAGE : number * JOBS_PER_PAGE], pages)
 
     @staticmethod
     def resumable(number=None):
@@ -223,6 +247,7 @@ class Jobs:
         else:
             signal_job(job)
 
+
 def archived(numbers, yes=False):
     jobs = [archivable(number) for number in numbers] or Jobs.listed("stopped") + Jobs.listed("finished")
     if not jobs:
@@ -240,6 +265,7 @@ def archived(numbers, yes=False):
         Jobs.update(job["number"], state="archived", archived_from=job["state"])
         Home.store().drop_log(f"journal #{job['number']}")
     say.done(f"Archived {numbered}.")
+
 
 def archivable(number):
     job = Jobs.get(number)
@@ -277,8 +303,11 @@ def paused_for_you():
         Jobs.pause_running("you")
         yield
     finally:
-        Home.store().update("activity", "answering", lambda asked: {name: value for name, value in (asked or {}).items()
-                                                                    if name != key})
+        Home.store().update(
+            "activity",
+            "answering",
+            lambda asked: {name: value for name, value in (asked or {}).items() if name != key},
+        )
 
 
 def idle():
@@ -303,8 +332,11 @@ def is_job(argv):
         return False
     if os.environ.get(EXERCISE_ENV) == "1":
         return False
-    return not (argv[0] == "learn" and len(argv) == 3) and not (argv[0] == "exercise" and argv[1:2] == ["status"]) \
+    return (
+        not (argv[0] == "learn" and len(argv) == 3)
+        and not (argv[0] == "exercise" and argv[1:2] == ["status"])
         and not (argv[0] == "read" and argv[1:2] in (["list"], ["show"]))
+    )
 
 
 def job_number(word):

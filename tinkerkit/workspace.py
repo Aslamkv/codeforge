@@ -1,22 +1,31 @@
+import re
+from collections import namedtuple
 lazy import hashlib
 lazy import os
-import re
 lazy import shlex
 lazy import shutil
 lazy import signal
 lazy import socket
 lazy import subprocess
 lazy import time
-from collections import namedtuple
 lazy from pathlib import Path
 
+from .settings import (
+    COMMAND_TIMEOUT,
+    ENV_EXAMPLE,
+    ENV_FILE,
+    FAILURE_OUTPUT_CHARS,
+    ONLINE_PROBES,
+    SETUP_TIMEOUT,
+    STATE_DIR,
+    Config,
+    Home,
+    NotAPytestClass,
+    first_line,
+    now_text,
+)
 lazy from .messages import human_duration, say
 lazy from .prompts import Part, Prompts, Reply
-from .settings import (
-    COMMAND_TIMEOUT, ENV_EXAMPLE, ENV_FILE, FAILURE_OUTPUT_CHARS, ONLINE_PROBES, SETUP_TIMEOUT, STATE_DIR,
-    Config, Home, NotAPytestClass, first_line, now_text,
-)
-
 
 TestOutcome = namedtuple("TestOutcome", "state output")
 CommandOutcome = namedtuple("CommandOutcome", "ok output")
@@ -27,28 +36,43 @@ Span = namedtuple("Span", "start end")
 class Toolchain:
     COMMANDS = ("check", "test_all", "test_one", "run", "format", "lint")
     REQUIRED = ("test_all", "test_one")
-    NO_TESTS_RE = re.compile(r"\bno tests? (ran|run|to run|found|collected|matched)\b|\b0 (tests|passed)\b|"
-                             r"\bran 0 tests\b|\btests?\s*0\b|\b\d+ deselected\b", re.I)
-    TESTS_RAN_RE = re.compile(r"\b[1-9]\d* (tests?|passed|passing|failed|failing)\b|\bran [1-9]\d* tests?\b", re.I)
+    NO_TESTS_RE = re.compile(
+        r"\bno tests? (ran|run|to run|found|collected|matched)\b|\b0 (tests|passed)\b|"
+        r"\bran 0 tests\b|\btests?\s*0\b|\b\d+ deselected\b",
+        re.I,
+    )
+    TESTS_RAN_RE = re.compile(
+        r"\b[1-9]\d* (tests?|passed|passing|failed|failing)\b|\bran [1-9]\d* tests?\b", re.I
+    )
     ENV_FILE_RE = re.compile(r"(?<![\w.-])\.env(?![\w.-])")
-    MACHINE_TOOLCHAIN_CHANGE_RE = re.compile(r"\brustup\s+(default|override|update|toolchain|component|target)\b|\bcargo\s+install\b|"
-                            r"\b(npm|pnpm|yarn)\s+(i|install|add)\b[^&|;]*\s(-g|--global)\b|\byarn\s+global\b|"
-                            r"\bpip3?\s+install\b[^&|;]*\s--user\b|\b(brew|apt|apt-get|dnf|yum|pacman|port)\s+install\b|"
-                            r"\b(go|gem)\s+install\b|\b(pyenv|nvm|asdf)\s+(install|global|use)\b")
-    NETWORK_FAILURE_RE = re.compile(r"could not resolve|resolve host|name or service not known|nodename nor servname|"
-                            r"temporary failure in name resolution|network is unreachable|no route to host|"
-                            r"connection (refused|reset|aborted|timed out)|failed to establish a new connection|"
-                            r"newconnectionerror|max retries exceeded|read timed out|\b(enotfound|eai_again|"
-                            r"econnrefused|econnreset|etimedout)\b|spurious network error|failed to download|"
-                            r"could not fetch url|unable to (connect|reach)|you are offline|network error", re.I)
+    MACHINE_TOOLCHAIN_CHANGE_RE = re.compile(
+        r"\brustup\s+(default|override|update|toolchain|component|target)\b|\bcargo\s+install\b|"
+        r"\b(npm|pnpm|yarn)\s+(i|install|add)\b[^&|;]*\s(-g|--global)\b|\byarn\s+global\b|"
+        r"\bpip3?\s+install\b[^&|;]*\s--user\b|\b(brew|apt|apt-get|dnf|yum|pacman|port)\s+install\b|"
+        r"\b(go|gem)\s+install\b|\b(pyenv|nvm|asdf)\s+(install|global|use)\b"
+    )
+    NETWORK_FAILURE_RE = re.compile(
+        r"could not resolve|resolve host|name or service not known|nodename nor servname|"
+        r"temporary failure in name resolution|network is unreachable|no route to host|"
+        r"connection (refused|reset|aborted|timed out)|failed to establish a new connection|"
+        r"newconnectionerror|max retries exceeded|read timed out|\b(enotfound|eai_again|"
+        r"econnrefused|econnreset|etimedout)\b|spurious network error|failed to download|"
+        r"could not fetch url|unable to (connect|reach)|you are offline|network error",
+        re.I,
+    )
 
     def __init__(self, data=None):
         data = data if isinstance(data, dict) else {}
         setup = self.command_list(data.get("setup"))
-        self.setup = [command for command in setup if not self.ENV_FILE_RE.search(command)
-                      and not self.MACHINE_TOOLCHAIN_CHANGE_RE.search(command)]
+        self.setup = [
+            command
+            for command in setup
+            if not self.ENV_FILE_RE.search(command) and not self.MACHINE_TOOLCHAIN_CHANGE_RE.search(command)
+        ]
         self.env_commands_dropped = [command for command in setup if self.ENV_FILE_RE.search(command)]
-        self.machine_changing_commands = [command for command in setup if self.MACHINE_TOOLCHAIN_CHANGE_RE.search(command)]
+        self.machine_changing_commands = [
+            command for command in setup if self.MACHINE_TOOLCHAIN_CHANGE_RE.search(command)
+        ]
         self.use = self.command_list(data.get("use"))
         self.activate = str(data.get("activate") or "").strip()
         for key in self.COMMANDS:
@@ -59,20 +83,29 @@ class Toolchain:
     @staticmethod
     def command_list(value):
         commands = value or []
-        return [str(command) for command in (commands if isinstance(commands, list) else [commands])
-                if str(command).strip()]
+        return [
+            str(command)
+            for command in (commands if isinstance(commands, list) else [commands])
+            if str(command).strip()
+        ]
 
     def __bool__(self):
         return bool(self.test_all and self.test_one)
 
     def summary(self):
-        return (f"setup {' && '.join(self.setup) or '-'} | activate {self.activate or '-'} | check "
-                f"{self.check or '-'} | tests {self.test_all} | use {' && '.join(self.use) or '-'} | run "
-                f"{self.run or '-'} | format {self.format or '-'} | lint {self.lint or '-'}")
+        return (
+            f"setup {' && '.join(self.setup) or '-'} | activate {self.activate or '-'} | check "
+            f"{self.check or '-'} | tests {self.test_all} | use {' && '.join(self.use) or '-'} | run "
+            f"{self.run or '-'} | format {self.format or '-'} | lint {self.lint or '-'}"
+        )
 
     def to_dict(self):
-        data = {"setup": self.setup, "activate": self.activate, "use": self.use,
-                **{key: getattr(self, key) for key in self.COMMANDS}}
+        data = {
+            "setup": self.setup,
+            "activate": self.activate,
+            "use": self.use,
+            **{key: getattr(self, key) for key in self.COMMANDS},
+        }
         if self.lint_declared and not self.lint:
             data["lint"] = "none"
         return data
@@ -87,7 +120,9 @@ class Toolchain:
     def problems(self):
         problems = [f"toolchain.{key} is missing" for key in self.REQUIRED if not getattr(self, key)]
         if not self.lint_declared:
-            problems.append('toolchain.lint is missing: the language\'s usual linter, or "none" when it has none')
+            problems.append(
+                'toolchain.lint is missing: the language\'s usual linter, or "none" when it has none'
+            )
         if self.test_one and "{name}" not in self.test_one and "{file}" not in self.test_one:
             problems.append("toolchain.test_one must contain {name} (and {file} if the runner needs it)")
         return problems
@@ -124,8 +159,10 @@ class Toolchain:
 
     @staticmethod
     def nested_project_problem(command, nested):
-        return (f"$ {command}  made a new project in {nested}/: setup only prepares this project "
-                f"(its files are written for it), so this command is not one of its setup")
+        return (
+            f"$ {command}  made a new project in {nested}/: setup only prepares this project "
+            f"(its files are written for it), so this command is not one of its setup"
+        )
 
     def failed_for_the_network(self, output):
         return bool(self.NETWORK_FAILURE_RE.search(output)) or not online()
@@ -161,13 +198,17 @@ class Toolchain:
         if code == 0 and not self.ran_no_test(output):
             return TestOutcome("passes", output)
         if code == 0:
-            return TestOutcome("fails", f"$ {command}\nthe command ran no test: is the test named {ref.name}?\n{output}")
+            return TestOutcome(
+                "fails", f"$ {command}\nthe command ran no test: is the test named {ref.name}?\n{output}"
+            )
         return TestOutcome("fails", f"$ {command}\n{output}")
 
     def hang_report(self, command, output):
-        return (f"$ {command}\nthe test did not finish within {self.test_timeout()}s: it hangs (an "
-                f"endless loop, a wait for input, a program or server left running, or a real network call). "
-                f"Output so far:\n{output}")
+        return (
+            f"$ {command}\nthe test did not finish within {self.test_timeout()}s: it hangs (an "
+            f"endless loop, a wait for input, a program or server left running, or a real network call). "
+            f"Output so far:\n{output}"
+        )
 
     @staticmethod
     def ran_no_test(output):
@@ -206,10 +247,15 @@ def online():
 
 class Workspace:
     REFUSED_OUTPUT = "refused: the command is unsafe"
-    UNSAFE_COMMAND = re.compile(r"(^|[;&|]\s*)sudo\b|\brm\s+-[a-z]*r[a-z]*f?\s+(/|~|\.\.)|\bmkfs\b|\bdd\s+if=|"
-                                r"(curl|wget)\b[^|]*\|\s*(ba|z)?sh\b|>\s*/(etc|usr|bin|dev/sd)")
-    PLAIN_PLACEHOLDER_RE = re.compile(r"^(<.*>|your[_-][\w-]*|[\w-]*_here|change[-_ ]?me|replace[-_ ]?me|x{3,}|\*{3,}|"
-                                r"\.\.\.|placeholder)$", re.I)
+    UNSAFE_COMMAND = re.compile(
+        r"(^|[;&|]\s*)sudo\b|\brm\s+-[a-z]*r[a-z]*f?\s+(/|~|\.\.)|\bmkfs\b|\bdd\s+if=|"
+        r"(curl|wget)\b[^|]*\|\s*(ba|z)?sh\b|>\s*/(etc|usr|bin|dev/sd)"
+    )
+    PLAIN_PLACEHOLDER_RE = re.compile(
+        r"^(<.*>|your[_-][\w-]*|[\w-]*_here|change[-_ ]?me|replace[-_ ]?me|x{3,}|\*{3,}|"
+        r"\.\.\.|placeholder)$",
+        re.I,
+    )
     UNUSABLE_PATH_CHARS = "\n\r\t`<>|*?\"'"
 
     def __init__(self, root):
@@ -226,9 +272,16 @@ class Workspace:
         return code, (output or "").replace(str(self.root) + os.sep, "")
 
     def spawn(self, command, stdout, **text):
-        return subprocess.Popen(TaughtCommands.prelude(command) + command, shell=True, cwd=self.root,
-                                stdin=subprocess.DEVNULL, stdout=stdout, stderr=subprocess.STDOUT,
-                                start_new_session=(os.name != "nt"), **text)
+        return subprocess.Popen(
+            TaughtCommands.prelude(command) + command,
+            shell=True,
+            cwd=self.root,
+            stdin=subprocess.DEVNULL,
+            stdout=stdout,
+            stderr=subprocess.STDOUT,
+            start_new_session=(os.name != "nt"),
+            **text,
+        )
 
     def finished(self, proc, timeout):
         try:
@@ -242,8 +295,10 @@ class Workspace:
     @staticmethod
     def unsafe(command):
         if Workspace.UNSAFE_COMMAND.search(command):
-            say.stop(f"Refused `{command}`: sudo, deleting outside the project, piping a download into a "
-                     f"shell or writing to the system are never run")
+            say.stop(
+                f"Refused `{command}`: sudo, deleting outside the project, piping a download into a "
+                f"shell or writing to the system are never run"
+            )
             return True
         return False
 
@@ -308,8 +363,11 @@ class Workspace:
         if not rel_path or not isinstance(rel_path, str):
             raise ToolError("path is required")
         candidate = Path(rel_path.strip())
-        if len(rel_path) > 300 or any(len(piece) > 120 for piece in candidate.parts) or \
-                any(ch in rel_path for ch in self.UNUSABLE_PATH_CHARS):
+        if (
+            len(rel_path) > 300
+            or any(len(piece) > 120 for piece in candidate.parts)
+            or any(ch in rel_path for ch in self.UNUSABLE_PATH_CHARS)
+        ):
             raise ToolError(f"'{first_line(rel_path, 60)}' is not a usable file path")
         if candidate.is_absolute() or rel_path.strip().startswith("~"):
             raise ToolError(f"path '{rel_path}' must be relative to the project")
@@ -344,8 +402,11 @@ class Workspace:
         for path, edits in self.edits_inside_windows(reply, windows, change.notes).items():
             old = self.read(path)
             change.backups[path] = old
-            self.write(path, "\n".join(self.edited(old.splitlines(), self.without_overlaps(path, edits, change.notes)))
-                       + "\n")
+            self.write(
+                path,
+                "\n".join(self.edited(old.splitlines(), self.without_overlaps(path, edits, change.notes)))
+                + "\n",
+            )
 
     @staticmethod
     def edits_inside_windows(reply, windows, notes):
@@ -355,7 +416,9 @@ class Workspace:
             if not shown:
                 notes.append(f"{path}: LINES blocks only change files shown as numbered lines")
             elif not shown[0] <= first <= last <= shown[1]:
-                notes.append(f"{path}: lines {first}-{last} are outside the lines shown ({shown[0]}-{shown[1]})")
+                notes.append(
+                    f"{path}: lines {first}-{last} are outside the lines shown ({shown[0]}-{shown[1]})"
+                )
             else:
                 edits.setdefault(path, []).append((first, last, new))
         return edits
@@ -364,8 +427,13 @@ class Workspace:
     def without_overlaps(path, edits, notes):
         taken = []
         for first, last, new in edits:
-            if any(Workspace.overlap(first, last, taken_first, taken_last) for taken_first, taken_last, _ in taken):
-                notes.append(f"{path}: lines {first}-{last} overlap an earlier LINES block; kept the earlier one")
+            if any(
+                Workspace.overlap(first, last, taken_first, taken_last)
+                for taken_first, taken_last, _ in taken
+            ):
+                notes.append(
+                    f"{path}: lines {first}-{last} overlap an earlier LINES block; kept the earlier one"
+                )
             else:
                 taken.append((first, last, new))
         return taken
@@ -378,7 +446,7 @@ class Workspace:
     def edited(lines, edits):
         bottom_up = sorted(edits, key=lambda edit: edit[0], reverse=True)
         for first, last, new in bottom_up:
-            lines[first - 1:last] = new
+            lines[first - 1 : last] = new
         return lines
 
     def snapshot(self, paths):
@@ -400,7 +468,9 @@ class Workspace:
             return
         env.write_text(self.env_without_placeholders(example.read_text(errors="replace")))
         unset = [line.split("=")[0] for line in env.read_text().splitlines() if line.endswith("=")]
-        say.done(f"Created {ENV_FILE} from {ENV_EXAMPLE}" + (f"; set {', '.join(unset)} in it" if unset else ""))
+        say.done(
+            f"Created {ENV_FILE} from {ENV_EXAMPLE}" + (f"; set {', '.join(unset)} in it" if unset else "")
+        )
 
     @staticmethod
     def env_without_placeholders(text):
@@ -464,28 +534,36 @@ class TaughtCommands:
         if definition is None:
             return TaughtCommands.look_up(name)
         if not definition.strip():
-            raise SystemExit(f"tinker learn {name}: the definition is empty: give what {name} stands for, or leave "
-                             f"it out to read it from your shell")
+            raise SystemExit(
+                f"tinker learn {name}: the definition is empty: give what {name} stands for, or leave "
+                f"it out to read it from your shell"
+            )
         return {"kind": "alias", "definition": definition.strip(), "from": "given"}
 
     @staticmethod
     def check_alias(name, entry):
         if not TaughtCommands.SHELL_FUNCTION_NAME_RE.fullmatch(name):
-            raise SystemExit(f"{name!r} cannot be an alias Tinker defines: letters, digits and _ only, not starting "
-                             f"with a digit")
+            raise SystemExit(
+                f"{name!r} cannot be an alias Tinker defines: letters, digits and _ only, not starting "
+                f"with a digit"
+            )
         entry["definition"] = TaughtCommands.SOURCE_COMMAND_RE.sub(r"\1. ", entry["definition"])
         problem = TaughtCommands.syntax_problem(name, entry["definition"])
         if problem:
-            raise SystemExit(f"{name} stands for `{entry['definition']}`, which is not valid POSIX shell "
-                             f"({problem}); give a definition that is")
+            raise SystemExit(
+                f"{name} stands for `{entry['definition']}`, which is not valid POSIX shell "
+                f"({problem}); give a definition that is"
+            )
 
     @staticmethod
     def remember(name, entry):
         entry = dict(entry, taught=now_text())
         Home.store().put("commands", name, entry)
         say.done(f"Learned the command {name}: {TaughtCommands.describe(entry)}")
-        say.tip("The toolchain uses it where it fits (each command runs in a new shell: e.g. "
-                f"`{name} && ...`); SPEC.md and README show it spelled out.")
+        say.tip(
+            "The toolchain uses it where it fits (each command runs in a new shell: e.g. "
+            f"`{name} && ...`); SPEC.md and README show it spelled out."
+        )
 
     @staticmethod
     def look_up(name):
@@ -496,8 +574,10 @@ class TaughtCommands:
         if path:
             return {"kind": "program", "path": path, "from": "PATH"}
         shell = os.environ.get("SHELL", "")
-        raise SystemExit(f"{name} is neither an alias in your shell ({shell or 'SHELL is not set'}) nor a program on "
-                         f"PATH: give what it stands for, e.g. tinker learn {name} \". .venv/bin/activate\"")
+        raise SystemExit(
+            f"{name} is neither an alias in your shell ({shell or 'SHELL is not set'}) nor a program on "
+            f'PATH: give what it stands for, e.g. tinker learn {name} ". .venv/bin/activate"'
+        )
 
     @staticmethod
     def alias(name):
@@ -505,13 +585,21 @@ class TaughtCommands:
         if not shell or not TaughtCommands.SHELL_FUNCTION_NAME_RE.fullmatch(name):
             return None
         try:
-            proc = subprocess.run([shell, "-i", "-c", f"alias {name}"], capture_output=True, text=True,
-                                  stdin=subprocess.DEVNULL, timeout=TaughtCommands.ALIAS_LOOKUP_TIMEOUT)
+            proc = subprocess.run(
+                [shell, "-i", "-c", f"alias {name}"],
+                capture_output=True,
+                text=True,
+                stdin=subprocess.DEVNULL,
+                timeout=TaughtCommands.ALIAS_LOOKUP_TIMEOUT,
+            )
         except OSError, subprocess.TimeoutExpired:
             return None
         definition = TaughtCommands.alias_definition(name, proc.stdout)
-        return None if definition is None else {"kind": "alias", "definition": definition,
-                                                "from": f"your {Path(shell).name} alias"}
+        return (
+            None
+            if definition is None
+            else {"kind": "alias", "definition": definition, "from": f"your {Path(shell).name} alias"}
+        )
 
     @staticmethod
     def alias_definition(name, printed):
@@ -532,11 +620,20 @@ class TaughtCommands:
     @staticmethod
     def syntax_problem(name, definition):
         try:
-            proc = subprocess.run(["sh", "-n", "-c", TaughtCommands.function(name, definition)], capture_output=True,
-                                  text=True, stdin=subprocess.DEVNULL, timeout=TaughtCommands.ALIAS_LOOKUP_TIMEOUT)
+            proc = subprocess.run(
+                ["sh", "-n", "-c", TaughtCommands.function(name, definition)],
+                capture_output=True,
+                text=True,
+                stdin=subprocess.DEVNULL,
+                timeout=TaughtCommands.ALIAS_LOOKUP_TIMEOUT,
+            )
         except (OSError, subprocess.TimeoutExpired) as exc:
             return f"sh could not check it: {exc}"
-        return "" if proc.returncode == 0 else first_line(proc.stderr, 160) or f"sh -n exited with {proc.returncode}"
+        return (
+            ""
+            if proc.returncode == 0
+            else first_line(proc.stderr, 160) or f"sh -n exited with {proc.returncode}"
+        )
 
     @staticmethod
     def describe(entry):
@@ -547,11 +644,16 @@ class TaughtCommands:
     @staticmethod
     def all():
         commands = Home.store().items("commands")
-        broken = [name for name, entry in commands.items() if not (isinstance(entry, dict)
-                                                                   and entry.get("kind") in ("alias", "program"))]
+        broken = [
+            name
+            for name, entry in commands.items()
+            if not (isinstance(entry, dict) and entry.get("kind") in ("alias", "program"))
+        ]
         if broken:
-            raise SystemExit(f"Tinker's commands {', '.join(broken)} are neither an alias nor a program: forget them "
-                             f"with tinker learn NAME none, and teach them again")
+            raise SystemExit(
+                f"Tinker's commands {', '.join(broken)} are neither an alias nor a program: forget them "
+                f"with tinker learn NAME none, and teach them again"
+            )
         return commands
 
     @staticmethod
@@ -560,7 +662,11 @@ class TaughtCommands:
 
     @staticmethod
     def aliases():
-        return {name: entry["definition"] for name, entry in TaughtCommands.all().items() if entry["kind"] == "alias"}
+        return {
+            name: entry["definition"]
+            for name, entry in TaughtCommands.all().items()
+            if entry["kind"] == "alias"
+        }
 
     @staticmethod
     def spelled_out(command):
@@ -570,8 +676,11 @@ class TaughtCommands:
 
     @staticmethod
     def prelude(command):
-        return "".join(TaughtCommands.function(name, definition)
-                       for name, definition in TaughtCommands.aliases().items() if TaughtCommands.uses(command, name))
+        return "".join(
+            TaughtCommands.function(name, definition)
+            for name, definition in TaughtCommands.aliases().items()
+            if TaughtCommands.uses(command, name)
+        )
 
     @staticmethod
     def uses(command, name):
@@ -587,11 +696,20 @@ class TaughtCommands:
 
     @staticmethod
     def prompt_part():
-        lines = [f"- {name}: " + ("a program on this machine" if entry["kind"] == "program"
-                                  else f"stands for `{entry['definition']}`")
-                 for name, entry in TaughtCommands.all().items()]
-        return Part("The person's own commands (use them where they fit; each command runs in a new shell)",
-                    "\n".join(lines), atomic=True)
+        lines = [
+            f"- {name}: "
+            + (
+                "a program on this machine"
+                if entry["kind"] == "program"
+                else f"stands for `{entry['definition']}`"
+            )
+            for name, entry in TaughtCommands.all().items()
+        ]
+        return Part(
+            "The person's own commands (use them where they fit; each command runs in a new shell)",
+            "\n".join(lines),
+            atomic=True,
+        )
 
 
 class TestRef(NotAPytestClass):
@@ -606,15 +724,20 @@ class TestRef(NotAPytestClass):
         return template.replace("{file}", self.file).replace("{name}", self.name).replace("{id}", str(self))
 
     def present(self, workspace):
-        return workspace.exists(self.file) and (not self.name or self.name_at(workspace.read(self.file), self.name) >= 0)
+        return workspace.exists(self.file) and (
+            not self.name or self.name_at(workspace.read(self.file), self.name) >= 0
+        )
 
     def excerpt(self, workspace, names):
         text = workspace.read(self.file)
         start = self.name_at(text, self.name)
         if start < 0:
             return text
-        others = [position for position in (self.name_at(text, name) for name in names if name != self.name)
-                  if position >= 0]
+        others = [
+            position
+            for position in (self.name_at(text, name) for name in names if name != self.name)
+            if position >= 0
+        ]
         line_start, end = self.span(text, names)
         first = text.rfind("\n", 0, min([start] + others)) + 1
         is_the_first_test = first >= line_start
@@ -639,14 +762,21 @@ class TestRef(NotAPytestClass):
         if not self.name or self.name_at(text, self.name) < 0:
             return False
         start, end = self.span(text, names)
-        workspace.write(self.file, text[:start].rstrip() + "\n\n\n" + text[end:].lstrip() if text[end:].strip()
-                 else text[:start].rstrip() + "\n")
+        workspace.write(
+            self.file,
+            text[:start].rstrip() + "\n\n\n" + text[end:].lstrip()
+            if text[end:].strip()
+            else text[:start].rstrip() + "\n",
+        )
         return True
 
     def span(self, text, names):
         start = self.name_at(text, self.name)
-        later = sorted(position for position in (self.name_at(text, name) for name in names if name != self.name)
-                       if position > start)
+        later = sorted(
+            position
+            for position in (self.name_at(text, name) for name in names if name != self.name)
+            if position > start
+        )
         end = self.definition_start(text, later[0]) if later else len(text)
         return Span(self.definition_start(text, start), end)
 
@@ -666,23 +796,35 @@ class TestRef(NotAPytestClass):
 
 
 class Output:
-    ERROR_LINE_RE = re.compile(r"error|fail|assert|exception|expected|panic|undefined|cannot|not found|"
-                               r"no module|missing", re.I)
+    ERROR_LINE_RE = re.compile(
+        r"error|fail|assert|exception|expected|panic|undefined|cannot|not found|"
+        r"no module|missing",
+        re.I,
+    )
     EXACT_ERROR_RE = re.compile(r"\b\w*(Error|Exception|Panic)\b|\bassert", re.I)
     NOISE_RE = re.compile(r"0x[0-9a-f]+|\d+(\.\d+)?\s*(ms|s|sec|seconds)\b|\b\d+\b", re.I)
     OWN_CODE_UNSEEN = "the test tool does not find the project's code"
     FILE_LOCATION_RE = re.compile(r"([\w./\\-]+\.\w+)[\"']?(?:, line |:|\()\d+")
-    NOT_FOUND_RE = re.compile(r"No module named ['\"]?([\w.]+)|Cannot find module ['\"]([^'\"]+)|"
-                              r"cannot find package ['\"]([^'\"]+)|unresolved import `?([\w:]+)|"
-                              r"Could not resolve ['\"]([^'\"]+)|cannot load such file -- (\S+)", re.I)
-    UNLOADABLE_RE = re.compile(r"syntax\s*error|parse\s*error|indentation\s*error|unexpected (token|end|eof|indent)|"
-                               r"unterminated|invalid syntax|compil(e|ation) (error|failed)|(can|could)\s*not compile|"
-                               r"unexpected character", re.I)
+    NOT_FOUND_RE = re.compile(
+        r"No module named ['\"]?([\w.]+)|Cannot find module ['\"]([^'\"]+)|"
+        r"cannot find package ['\"]([^'\"]+)|unresolved import `?([\w:]+)|"
+        r"Could not resolve ['\"]([^'\"]+)|cannot load such file -- (\S+)",
+        re.I,
+    )
+    UNLOADABLE_RE = re.compile(
+        r"syntax\s*error|parse\s*error|indentation\s*error|unexpected (token|end|eof|indent)|"
+        r"unterminated|invalid syntax|compil(e|ation) (error|failed)|(can|could)\s*not compile|"
+        r"unexpected character",
+        re.I,
+    )
 
     @staticmethod
     def key_line(output, limit=200):
-        lines = [line.strip(" #") for line in output.splitlines() if line.strip(" #")
-                 and not Output.is_banner(line.strip(" #"))]
+        lines = [
+            line.strip(" #")
+            for line in output.splitlines()
+            if line.strip(" #") and not Output.is_banner(line.strip(" #"))
+        ]
         exact = [line for line in lines if Output.EXACT_ERROR_RE.search(line)]
         if exact:
             return first_line(exact[-1], limit)
@@ -696,13 +838,16 @@ class Output:
     @staticmethod
     def failure_text(output, limit=FAILURE_OUTPUT_CHARS):
         text = "\n".join(line for line in Output.compact_lines(output.strip()).splitlines() if line.strip())
-        return text if len(text) <= limit else "[...]\n" + text[-(limit - 6):]
+        return text if len(text) <= limit else "[...]\n" + text[-(limit - 6) :]
 
     @staticmethod
     def compact_lines(text, limit=360):
-        return "\n".join(line if len(line) <= limit else
-                         f"{line[:limit * 2 // 3]} ...[{len(line) - limit} chars]... {line[-limit // 3:]}"
-                         for line in text.splitlines())
+        return "\n".join(
+            line
+            if len(line) <= limit
+            else f"{line[: limit * 2 // 3]} ...[{len(line) - limit} chars]... {line[-limit // 3 :]}"
+            for line in text.splitlines()
+        )
 
     @staticmethod
     def signature(output):
@@ -719,7 +864,9 @@ class Output:
 
     @staticmethod
     def misses_own_code(output, paths):
-        stems = {Path(path).stem.lower() for path in paths} | {Path(path).parent.name.lower() for path in paths}
+        stems = {Path(path).stem.lower() for path in paths} | {
+            Path(path).parent.name.lower() for path in paths
+        }
         stems.discard("")
         for match in Output.NOT_FOUND_RE.finditer(output):
             name = next(group for group in match.groups() if group).strip("./\\")
@@ -736,9 +883,10 @@ class Output:
     def unloadable(output, path):
         lines = output.splitlines()
         return bool(path) and any(
-            Output.UNLOADABLE_RE.search(line) and
-            (Output.names(line, path) or Output.names(Output.nearest_location(lines, index), path))
-            for index, line in enumerate(lines))
+            Output.UNLOADABLE_RE.search(line)
+            and (Output.names(line, path) or Output.names(Output.nearest_location(lines, index), path))
+            for index, line in enumerate(lines)
+        )
 
     @staticmethod
     def nearest_location(lines, index, reach=6):
@@ -760,8 +908,9 @@ class Output:
 
     @staticmethod
     def mentions(output, path):
-        return len(re.findall(rf"(?<![\w.-]){re.escape(path)}(?![\w-])", output)) or \
-            len(re.findall(rf"(?<![\w./-]){re.escape(Path(path).name)}(?![\w-])", output))
+        return len(re.findall(rf"(?<![\w.-]){re.escape(path)}(?![\w-])", output)) or len(
+            re.findall(rf"(?<![\w./-]){re.escape(Path(path).name)}(?![\w-])", output)
+        )
 
 
 class FileView:
@@ -773,7 +922,9 @@ class FileView:
 
     def __call__(self, limit):
         self.whole, self.windows = set(), {}
-        files = self.file_parts(room=limit - sum(part.floor_size() for part in self.fixed if part.required) - 300)
+        files = self.file_parts(
+            room=limit - sum(part.floor_size() for part in self.fixed if part.required) - 300
+        )
         how = [Part("Changing a file shown in part", Prompts.LINES_HOWTO, True)] if self.windows else []
         return self.fixed + files + how + self.tail
 
@@ -803,14 +954,22 @@ class FileView:
         if len(self.windows) >= self.max_windows or room < 700:
             return None
         lines = self.workspace.read(path).splitlines()
-        first, last, body = self.window_view(lines, self.focus_line(path, lines, self.output, self.hints), room - 140)
+        first, last, body = self.window_view(
+            lines, self.focus_line(path, lines, self.output, self.hints), room - 140
+        )
         self.windows[path] = (first, last)
-        return Part(f"File {path}, lines {first}-{last} of {len(lines)} (numbered; the rest is not shown)",
-                    body, True, exact=True)
+        return Part(
+            f"File {path}, lines {first}-{last} of {len(lines)} (numbered; the rest is not shown)",
+            body,
+            True,
+            exact=True,
+        )
 
     @staticmethod
     def focus_line(path, lines, output, hints):
-        return FileView.line_pointed_at(path, len(lines), output) or FileView.first_line_using(lines, hints) or 1
+        return (
+            FileView.line_pointed_at(path, len(lines), output) or FileView.first_line_using(lines, hints) or 1
+        )
 
     @staticmethod
     def line_pointed_at(path, count, output):
@@ -831,7 +990,9 @@ class FileView:
     @staticmethod
     def window_view(lines, center, room):
         start = end = max(1, min(center, len(lines)))
-        size = lambda first, last: sum(len(lines[line_number - 1]) + 7 for line_number in range(first, last + 1))
+        size = lambda first, last: sum(
+            len(lines[line_number - 1]) + 7 for line_number in range(first, last + 1)
+        )
         grown = True
         while grown:
             grown = False
@@ -839,8 +1000,11 @@ class FileView:
                 start, grown = start - 1, True
             if end < len(lines) and size(start, end + 1) <= room:
                 end, grown = end + 1, True
-        return start, end, "\n".join(f"{line_number:>4}| {lines[line_number - 1]}"
-                                     for line_number in range(start, end + 1))
+        return (
+            start,
+            end,
+            "\n".join(f"{line_number:>4}| {lines[line_number - 1]}" for line_number in range(start, end + 1)),
+        )
 
 
 class ToolError(Exception):

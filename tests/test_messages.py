@@ -1,6 +1,5 @@
 import ast
 import io
-import os
 import sys
 from pathlib import Path
 
@@ -8,7 +7,7 @@ import pytest
 
 from tinkerkit.messages import Message, Messages, human_duration, say
 from tinkerkit.project import Tracker, project_store
-from tinkerkit.settings import Home, Log
+from tinkerkit.settings import Log
 
 ROOT = Path(__file__).resolve().parent.parent
 
@@ -27,8 +26,18 @@ def test_each_kind_says_its_words_after_its_icon(capsys):
     say.info("A fact")
     say.text("PROJECT  STATUS")
     assert capsys.readouterr().out.splitlines() == [
-        "✅ Tests written", "⚠️  No network", "❌ Could not open it", "🔁 Asking again", "➖ Nothing found",
-        "🛑 Stopped", "💡 tinker memory", "• a fact", "🔎 Searching…", "A fact", "PROJECT  STATUS"]
+        "✅ Tests written",
+        "⚠️  No network",
+        "❌ Could not open it",
+        "🔁 Asking again",
+        "➖ Nothing found",
+        "🛑 Stopped",
+        "💡 tinker memory",
+        "• a fact",
+        "🔎 Searching…",
+        "A fact",
+        "PROJECT  STATUS",
+    ]
 
 
 @pytest.mark.spec("MSG-2")
@@ -40,8 +49,15 @@ def test_sections_nest_and_a_top_title_stands_apart(capsys):
     say.summary("Learned Flask", [("🧩", "Facts kept", "12")])
     say.took("Spec written", 64)
     assert capsys.readouterr().out.splitlines() == [
-        "", "📚 Learning Flask", "   🔎 Searching the web…", "      ✅ Read 3 pages",
-        "", "✨ Learned Flask", "   🧩 Facts kept: 12", "✅ Spec written (1m 4s)"]
+        "",
+        "📚 Learning Flask",
+        "   🔎 Searching the web…",
+        "      ✅ Read 3 pages",
+        "",
+        "✨ Learned Flask",
+        "   🧩 Facts kept: 12",
+        "✅ Spec written (1m 4s)",
+    ]
 
 
 @pytest.mark.spec("MSG-3")
@@ -98,6 +114,7 @@ def test_on_a_terminal_the_next_message_clears_the_live_line(monkeypatch, capsys
     class Terminal(io.StringIO):
         def isatty(self):
             return True
+
     terminal = Terminal()
     monkeypatch.setattr(sys, "__stdout__", terminal)
     say.live("Writing the spec… 12s")
@@ -119,15 +136,20 @@ def test_a_detail_goes_to_the_log_only(home_store, capsys):
 
 
 @pytest.mark.spec("MSG-6")
-@pytest.mark.parametrize("seconds,text", [(42.5, "42s"), (1762.08, "29m 22s"), (4000, "1h 6m 40s"), (0, "0s")])
+@pytest.mark.parametrize(
+    "seconds,text", [(42.5, "42s"), (1762.08, "29m 22s"), (4000, "1h 6m 40s"), (0, "0s")]
+)
 def test_human_duration(seconds, text):
     assert human_duration(seconds) == text
 
 
 def printing(path):
     tree = ast.parse(path.read_text(encoding="utf-8"))
-    return [node.lineno for node in ast.walk(tree)
-            if isinstance(node, ast.Call) and isinstance(node.func, ast.Name) and node.func.id == "print"]
+    return [
+        node.lineno
+        for node in ast.walk(tree)
+        if isinstance(node, ast.Call) and isinstance(node.func, ast.Name) and node.func.id == "print"
+    ]
 
 
 @pytest.mark.spec("MSG-7")

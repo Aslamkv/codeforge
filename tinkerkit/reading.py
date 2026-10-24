@@ -1,44 +1,93 @@
 import collections
 import dataclasses
+import re
+from collections import namedtuple
+from dataclasses import dataclass
 lazy import html.parser
 lazy import io
 lazy import posixpath
-import re
 lazy import urllib.parse
 lazy import xml.etree.ElementTree as ET
 lazy import zipfile
-from collections import namedtuple
-from dataclasses import dataclass
 lazy from pathlib import Path
 
 from .messages import say
 lazy from .knowledge import Learner, Library, Retriever, mentions
 lazy from .prompts import Part, Prompts
 lazy from .settings import (
-    BOOK_PASSAGES_SHOWN, FACT_PHASES, MAX_FACT_CHARS, MAX_PASSAGE_CHARS, READ_CHAPTER_TEXT_SHARE,
-    READ_FACTS_PER_CHAPTER, READ_FOCUS_CHAPTERS, READ_FOCUS_CHUNKS, READ_INDEX_TERMS, READ_KEY_TERMS,
-    READ_MAX_BYTES, READ_MIN_CHAPTERS, READ_WINDOW_CHARS, Config, Home, confirmed, fingerprint, first_line,
-    now_text, split_text, words,
+    BOOK_PASSAGES_SHOWN,
+    FACT_PHASES,
+    MAX_FACT_CHARS,
+    MAX_PASSAGE_CHARS,
+    READ_CHAPTER_TEXT_SHARE,
+    READ_FACTS_PER_CHAPTER,
+    READ_FOCUS_CHAPTERS,
+    READ_FOCUS_CHUNKS,
+    READ_INDEX_TERMS,
+    READ_KEY_TERMS,
+    READ_MAX_BYTES,
+    READ_MIN_CHAPTERS,
+    READ_WINDOW_CHARS,
+    Config,
+    Home,
+    confirmed,
+    fingerprint,
+    first_line,
+    now_text,
+    split_text,
+    words,
 )
 lazy from .web import Internet, is_web_address
 
 CHAPTER_ROLE_ORDER = ("core", "supporting", "other")
 CHAPTER_STATE_ICONS = {"read": "✅", "unread": "⏳", "raw": "📄"}
-ABOUT_CHAPTER_TITLES = ("foreword", "preface", "introduction", "prologue", "about this book", "how to read", "how to use",
-         "overview", "summary", "who this book is for")
-UNREAD_MATTER_TITLES = ("cover", "title page", "copyright", "dedication", "contents", "acknowledg", "about the author", "also by",
-       "praise for", "colophon", "bibliography", "references", "endnotes", "further reading", "list of figures",
-       "list of tables")
+ABOUT_CHAPTER_TITLES = (
+    "foreword",
+    "preface",
+    "introduction",
+    "prologue",
+    "about this book",
+    "how to read",
+    "how to use",
+    "overview",
+    "summary",
+    "who this book is for",
+)
+UNREAD_MATTER_TITLES = (
+    "cover",
+    "title page",
+    "copyright",
+    "dedication",
+    "contents",
+    "acknowledg",
+    "about the author",
+    "also by",
+    "praise for",
+    "colophon",
+    "bibliography",
+    "references",
+    "endnotes",
+    "further reading",
+    "list of figures",
+    "list of tables",
+)
 HEADING_RE = re.compile(r"^(#{1,6})[ \t]+(.+?)[ \t#]*$", re.M)
-CHAPTER_LINE_RE = re.compile(r"^[ \t]*(?:(?:chapter|part|book|section|appendix)[ \t]+[\w.-]+|preface|foreword|"
-                             r"introduction|prologue|epilogue|conclusion|index|contents)\b[^\n]{0,80}$", re.I | re.M)
+CHAPTER_LINE_RE = re.compile(
+    r"^[ \t]*(?:(?:chapter|part|book|section|appendix)[ \t]+[\w.-]+|preface|foreword|"
+    r"introduction|prologue|epilogue|conclusion|index|contents)\b[^\n]{0,80}$",
+    re.I | re.M,
+)
 NAMED_CHAPTER_RE = re.compile(r"\bchapters?\s+(\d+)", re.I)
 INDEX_LINE_RE = re.compile(r"^[-\s]*([^\d\n,;:]{2,60}?)[\s,;:]+((?:\d+(?:\s*[-–]\s*\d+)?[\s,;]*)+)$", re.M)
 HTML_RE = re.compile(r"\s*(<!doctype html|<html)", re.I)
-PDF_REFUSED = ("This is a PDF. Tinker reads EPUB, Markdown and plain text: convert it first (Calibre's "
-               "`ebook-convert book.pdf book.epub` keeps its chapters), then tinker read book.epub.")
-WEB_PAGE = ("That gave a web page, not something to read. A share link (Google Drive, Dropbox, iCloud) needs its "
-            "download link: Dropbox's ends in ?dl=1.")
+PDF_REFUSED = (
+    "This is a PDF. Tinker reads EPUB, Markdown and plain text: convert it first (Calibre's "
+    "`ebook-convert book.pdf book.epub` keeps its chapters), then tinker read book.epub."
+)
+WEB_PAGE = (
+    "That gave a web page, not something to read. A share link (Google Drive, Dropbox, iCloud) needs its "
+    "download link: Dropbox's ends in ?dl=1."
+)
 
 
 IndexTerm = namedtuple("IndexTerm", "term references")
@@ -87,11 +136,16 @@ def stored(source):
     number, new = Readings.add(book, source)
     with say.section():
         if not new:
-            say.info(f"Already on the reading list as #{number}: read #{number} goes on with it, "
-                     f'read #{number} "WHAT" reads it again with a focus', "📚")
+            say.info(
+                f"Already on the reading list as #{number}: read #{number} goes on with it, "
+                f'read #{number} "WHAT" reads it again with a focus',
+                "📚",
+            )
             return number, False
-        say.done(f"#{number} {book.title}{f' by {book.author}' if book.author else ''}: "
-                 f"{len(book.chapters)} chapter(s), {len(book.in_state('raw'))} kept as text only")
+        say.done(
+            f"#{number} {book.title}{f' by {book.author}' if book.author else ''}: "
+            f"{len(book.chapters)} chapter(s), {len(book.in_state('raw'))} kept as text only"
+        )
     return number, True
 
 
@@ -105,7 +159,9 @@ class Reader:
         survey = entry["survey"] or self.surveyed(entry, book)
         chapters = focused(book, focus) if focus else in_order(book.in_state("unread"), survey)
         if not chapters:
-            say.info(f"Every chapter of #{number} is read: read #{number} \"WHAT\" reads it again with a focus", "📚")
+            say.info(
+                f'Every chapter of #{number} is read: read #{number} "WHAT" reads it again with a focus', "📚"
+            )
             return ending(Readings.get(number), 0, [])
         found = self.chapters_read(entry, book, survey, chapters, focus)
         self.condensed(Readings.get(number), survey, found)
@@ -119,9 +175,13 @@ class Reader:
     def surveyed(self, entry, book):
         self.step("survey", "Reading its contents, foreword and index…", "🧭")
         with say.working_on(f"Getting to know {entry['title']} from its {len(book.chapters)} chapters"):
-            survey = self.model.ask_until_usable(Prompts.READ_SURVEY_SYSTEM, survey_parts(book),
-                                                 "Read: the reading plan",
-                                                 lambda reply: read_survey(reply.json(), book), think=think())
+            survey = self.model.ask_until_usable(
+                Prompts.READ_SURVEY_SYSTEM,
+                survey_parts(book),
+                "Read: the reading plan",
+                lambda reply: read_survey(reply.json(), book),
+                think=think(),
+            )
         if survey is None:
             raise SystemExit(f"{self.model.name} could not make a reading plan; its text stays stored.")
         Readings.surveyed(entry, survey)
@@ -133,12 +193,17 @@ class Reader:
         return survey
 
     def chapters_read(self, entry, book, survey, chapters, focus):
-        self.step("chapters", f"Reading {len(chapters)} chapter(s)" + (f" for: {first_line(focus, 60)}" if focus
-                                                                       else "") + "…", "📚")
+        self.step(
+            "chapters",
+            f"Reading {len(chapters)} chapter(s)" + (f" for: {first_line(focus, 60)}" if focus else "") + "…",
+            "📚",
+        )
         found = []
         say.tally(f"0/{len(chapters)} chapters")
         for done, chapter in enumerate(chapters, 1):
-            with say.working_on(f"Reading chapter {chapter.number}, {chapter.title} ({done} of {len(chapters)})"):
+            with say.working_on(
+                f"Reading chapter {chapter.number}, {chapter.title} ({done} of {len(chapters)})"
+            ):
                 facts = self.chapter_read(entry, book, survey, chapter, focus)
             found += Readings.learned(entry["number"], chapter.number, facts)
             self.say_chapter(chapter, facts, f"{done}/{len(chapters)}", found)
@@ -147,7 +212,9 @@ class Reader:
 
     @staticmethod
     def say_chapter(chapter, facts, done, found):
-        say.info(f"Chapter {chapter.number}, {chapter.title}: {learned(len(facts))}", CHAPTER_STATE_ICONS["read"])
+        say.info(
+            f"Chapter {chapter.number}, {chapter.title}: {learned(len(facts))}", CHAPTER_STATE_ICONS["read"]
+        )
         if facts:
             say.found(first_line(facts[0]["text"], 200))
         say.tally(f"{done} chapters · {learned(len(found)) if found else 'nothing learned yet'}")
@@ -164,11 +231,18 @@ class Reader:
         for part, text in enumerate(texts, 1):
             known = Readings.facts(entry) + [fact["text"] for fact in found]
             label = f"Read: chapter {chapter.number}" + (f" part {part}" if len(texts) > 1 else "")
-            points = self.model.ask_until_usable(Prompts.READ_CHAPTER_SYSTEM,
-                                                 chapter_parts(book, survey, chapter, text, look_for, known, focus),
-                                                 label, lambda reply: read_points(reply.json(), survey["software"]),
-                                                 attempts=2, think=think())
-            found += [dict(point, chapter=chapter.number, slot=f"chapter {chapter.number}") for point in points or []]
+            points = self.model.ask_until_usable(
+                Prompts.READ_CHAPTER_SYSTEM,
+                chapter_parts(book, survey, chapter, text, look_for, known, focus),
+                label,
+                lambda reply: read_points(reply.json(), survey["software"]),
+                attempts=2,
+                think=think(),
+            )
+            found += [
+                dict(point, chapter=chapter.number, slot=f"chapter {chapter.number}")
+                for point in points or []
+            ]
         return found
 
     def condensed(self, entry, survey, found):
@@ -188,16 +262,31 @@ class Readings:
     @staticmethod
     def add(book, source):
         key = fingerprint("\n\n".join(chapter.text for chapter in book.chapters))[:16]
-        known = next((number for number, entry in Readings.all().items() if entry["fingerprint"] == key), None)
+        known = next(
+            (number for number, entry in Readings.all().items() if entry["fingerprint"] == key), None
+        )
         if known is not None:
             return Added(known, False)
         number = Home.store().update("reading numbers", "last", lambda last: (last or 0) + 1)
-        chapters = [dataclasses.asdict(dataclasses.replace(chapter, state="raw" if chapter.kind in ("index", "raw")
-                                                           else "unread"))
-                    for chapter in book.chapters]
-        Readings.save({"number": number, "title": book.title, "author": book.author, "source": source,
-                       "fingerprint": key, "added": now_text(), "topic": f"read-{number}", "survey": None,
-                       "chapters": chapters})
+        chapters = [
+            dataclasses.asdict(
+                dataclasses.replace(chapter, state="raw" if chapter.kind in ("index", "raw") else "unread")
+            )
+            for chapter in book.chapters
+        ]
+        Readings.save(
+            {
+                "number": number,
+                "title": book.title,
+                "author": book.author,
+                "source": source,
+                "fingerprint": key,
+                "added": now_text(),
+                "topic": f"read-{number}",
+                "survey": None,
+                "chapters": chapters,
+            }
+        )
         return Added(number, True)
 
     @staticmethod
@@ -216,19 +305,37 @@ class Readings:
     @staticmethod
     def surveyed(entry, survey):
         Readings.save(dict(entry, survey=survey))
-        Library.save(entry["topic"], {"topic": entry["title"], "name": entry["title"], "kind": "reading",
-                                      "reading": entry["number"], "author": entry["author"],
-                                      "summary": survey["summary"], "software": survey["software"],
-                                      "terms": survey["terms"], "source": entry["source"], "learned": now_text(),
-                                      "facts": [], "rules": []})
+        Library.save(
+            entry["topic"],
+            {
+                "topic": entry["title"],
+                "name": entry["title"],
+                "kind": "reading",
+                "reading": entry["number"],
+                "author": entry["author"],
+                "summary": survey["summary"],
+                "software": survey["software"],
+                "terms": survey["terms"],
+                "source": entry["source"],
+                "learned": now_text(),
+                "facts": [],
+                "rules": [],
+            },
+        )
 
     @staticmethod
     def learned(number, chapter, facts):
         entry = Readings.get(number)
         known = set(Readings.facts(entry))
         new = [fact for fact in {fact["text"]: fact for fact in facts}.values() if fact["text"] not in known]
-        Library.save(entry["topic"], dict(Library.read(entry["topic"]), learned=now_text(),
-                                          facts=Library.read(entry["topic"])["facts"] + new))
+        Library.save(
+            entry["topic"],
+            dict(
+                Library.read(entry["topic"]),
+                learned=now_text(),
+                facts=Library.read(entry["topic"])["facts"] + new,
+            ),
+        )
         for kept in entry["chapters"]:
             if kept["number"] == chapter:
                 kept["state"] = "read"
@@ -253,7 +360,9 @@ class Readings:
     @staticmethod
     def about(text, items):
         readings = Readings.all()
-        named = [number for number, entry in readings.items() if entry["title"] and mentions(text, entry["title"])]
+        named = [
+            number for number, entry in readings.items() if entry["title"] and mentions(text, entry["title"])
+        ]
         topics = {entry["topic"]: number for number, entry in readings.items()}
         shown = [topics[item["group"]] for item in items if item.get("group") in topics]
         return list(dict.fromkeys(named + shown))
@@ -265,7 +374,10 @@ class Readings:
             entry = Readings.get(number) or {"chapters": []}
             for chapter in entry["chapters"]:
                 source = f"{entry['title']}, chapter {chapter['number']}: {chapter['title']}"
-                found += [{"source": source, "text": piece} for piece in split_text(chapter["text"], MAX_PASSAGE_CHARS)]
+                found += [
+                    {"source": source, "text": piece}
+                    for piece in split_text(chapter["text"], MAX_PASSAGE_CHARS)
+                ]
         order = Retriever(None).by_words(query, [passage["text"] for passage in found])
         return [found[index] for index in order[:count]]
 
@@ -273,18 +385,30 @@ class Readings:
 def ending(entry, new, chapters):
     book, topic = Book.of(entry), Library.read(entry["topic"]) or {}
     readable = [chapter for chapter in book.chapters if chapter.state != "raw"]
-    details = [("Read now", f"{len(chapters)} chapter(s), {new} new fact(s)"),
-               ("Chapters read", f"{len(book.in_state('read'))} of {len(readable)}"),
-               ("Kept", f"{len(topic.get('facts', []))} fact(s), {len(topic.get('rules', []))} rule(s)"),
-               ("Builds", "use it when a request needs it" if topic.get("software")
-                else "never use it: it is not about building software")]
+    details = [
+        ("Read now", f"{len(chapters)} chapter(s), {new} new fact(s)"),
+        ("Chapters read", f"{len(book.in_state('read'))} of {len(readable)}"),
+        ("Kept", f"{len(topic.get('facts', []))} fact(s), {len(topic.get('rules', []))} rule(s)"),
+        (
+            "Builds",
+            "use it when a request needs it"
+            if topic.get("software")
+            else "never use it: it is not about building software",
+        ),
+    ]
     for label, value in details:
         say.done(f"{label}: {value}")
     number = entry["number"]
-    return {"status": "done", "headline": f"Read #{number} {entry['title']}", "details": details,
-            "next": [("Ask about it", f"tinker ask what does {entry['title']} say about …"),
-                     ("Look again", f'tinker read #{number} "what to look for"'),
-                     ("See it", f"tinker read show #{number}")]}
+    return {
+        "status": "done",
+        "headline": f"Read #{number} {entry['title']}",
+        "details": details,
+        "next": [
+            ("Ask about it", f"tinker ask what does {entry['title']} say about …"),
+            ("Look again", f'tinker read #{number} "what to look for"'),
+            ("See it", f"tinker read show #{number}"),
+        ],
+    }
 
 
 def show_list():
@@ -302,15 +426,22 @@ def show(number):
     entry = known_reading(number)
     topic = Library.read(entry["topic"]) or {}
     facts = collections.Counter(fact.get("chapter") for fact in topic.get("facts", []))
-    with say.part(f"#{number} {entry['title']}" + (f" by {entry['author']}" if entry["author"] else ""), "📘"):
+    with say.part(
+        f"#{number} {entry['title']}" + (f" by {entry['author']}" if entry["author"] else ""), "📘"
+    ):
         say.info(f"From {entry['source']}, added {entry['added']}: {progress(entry)}", "📥")
         if entry["survey"]:
             say.info(entry["survey"]["summary"], "📝")
         for chapter in Book.of(entry).chapters:
-            note = {"raw": "text only", "unread": "not read yet"}.get(chapter.state, f"{facts[chapter.number]} fact(s)")
+            note = {"raw": "text only", "unread": "not read yet"}.get(
+                chapter.state, f"{facts[chapter.number]} fact(s)"
+            )
             say.item(f"{CHAPTER_STATE_ICONS[chapter.state]} {chapter.number}. {chapter.title} ({note})")
-    say.info(f'tinker read #{number} goes on · tinker read #{number} "WHAT" looks again · tinker clear read '
-             f"#{number} deletes it", "👉")
+    say.info(
+        f'tinker read #{number} goes on · tinker read #{number} "WHAT" looks again · tinker clear read '
+        f"#{number} deletes it",
+        "👉",
+    )
 
 
 def forgotten(numbers, yes=False):
@@ -359,16 +490,23 @@ def think():
 
 
 def chapter_parts(book, survey, chapter, text, look_for, known, focus):
-    return [Part("The source", f"{book.title}: {survey['summary']}\nIts key terms: "
-                               f"{', '.join(survey['terms']) or 'none named'}", True),
-            Part("What you learned from it before", "\n".join(f"- {text}" for text in known), keep="tail"),
-            Part("What the person asks you to look for", focus, bool(focus)),
-            Part(f"Chapter {chapter.number}: {chapter.title}", f"Look for: {look_for}", True),
-            Part("Its text", text, True)]
+    return [
+        Part(
+            "The source",
+            f"{book.title}: {survey['summary']}\nIts key terms: {', '.join(survey['terms']) or 'none named'}",
+            True,
+        ),
+        Part("What you learned from it before", "\n".join(f"- {text}" for text in known), keep="tail"),
+        Part("What the person asks you to look for", focus, bool(focus)),
+        Part(f"Chapter {chapter.number}: {chapter.title}", f"Look for: {look_for}", True),
+        Part("Its text", text, True),
+    ]
 
 
 def in_order(chapters, survey):
-    return sorted(chapters, key=lambda chapter: (CHAPTER_ROLE_ORDER.index(order_of(survey, chapter)), chapter.number))
+    return sorted(
+        chapters, key=lambda chapter: (CHAPTER_ROLE_ORDER.index(order_of(survey, chapter)), chapter.number)
+    )
 
 
 def order_of(survey, chapter):
@@ -379,9 +517,13 @@ def focused(book, focus):
     readable = [chapter for chapter in book.chapters if chapter.state != "raw"]
     named = {int(number) for number in NAMED_CHAPTER_RE.findall(focus)}
     ranked = Retriever(None).by_words(focus, [chapter.text for chapter in readable])
-    chosen = [chapter for chapter in readable if chapter.number in named] + [readable[index] for index in ranked]
-    return sorted({chapter.number: chapter for chapter in chosen[:READ_FOCUS_CHAPTERS]}.values(),
-                  key=lambda chapter: chapter.number)
+    chosen = [chapter for chapter in readable if chapter.number in named] + [
+        readable[index] for index in ranked
+    ]
+    return sorted(
+        {chapter.number: chapter for chapter in chosen[:READ_FOCUS_CHAPTERS]}.values(),
+        key=lambda chapter: chapter.number,
+    )
 
 
 def book_bytes(source):
@@ -414,8 +556,11 @@ def opened(data, name):
 
 def lone_title(text):
     headings = [(len(match.group(1)), match.group(2)) for match in HEADING_RE.finditer(text)]
-    top = [title for level, title in headings if level == min((heading_level for heading_level, _ in headings),
-                                                              default=0)]
+    top = [
+        title
+        for level, title in headings
+        if level == min((heading_level for heading_level, _ in headings), default=0)
+    ]
     return top[0].strip() if len(top) == 1 and len(headings) > 1 else ""
 
 
@@ -431,7 +576,9 @@ def plain_chapters(text):
     marks = {match.start(): match.group(0).strip() for match in CHAPTER_LINE_RE.finditer(text)}
     if len(marks) >= 2:
         return sliced(text, marks)
-    return numbered([(f"Part {number}", piece) for number, piece in enumerate(split_text(text, READ_WINDOW_CHARS), 1)])
+    return numbered(
+        [(f"Part {number}", piece) for number, piece in enumerate(split_text(text, READ_WINDOW_CHARS), 1)]
+    )
 
 
 def chapter_depth(depths):
@@ -445,7 +592,7 @@ def sliced(text, marks):
     if not marks:
         return []
     starts = sorted(marks)
-    pieces = [("Opening pages", text[:starts[0]])] if starts[0] > 0 else []
+    pieces = [("Opening pages", text[: starts[0]])] if starts[0] > 0 else []
     pieces += [(marks[start], text[start:end]) for start, end in zip(starts, starts[1:] + [len(text)])]
     return numbered(pieces)
 
@@ -479,14 +626,18 @@ def index_terms(book, limit=READ_INDEX_TERMS):
 
 
 def survey_parts(book):
-    contents = "\n".join(f"{chapter.number}. {chapter.title} ({chapter.kind}, {chapter.size()} words)"
-                         for chapter in book.chapters)
+    contents = "\n".join(
+        f"{chapter.number}. {chapter.title} ({chapter.kind}, {chapter.size()} words)"
+        for chapter in book.chapters
+    )
     about = "\n\n".join(f"## {chapter.title}\n{chapter.text}" for chapter in book.of_kind("front"))
     terms = ", ".join(f"{term} ({count})" for term, count in index_terms(book))
-    return [Part("The book", book.title + (f" by {book.author}" if book.author else ""), True),
-            Part("Its contents", contents, True, exact=True),
-            Part("What it says about itself", about or "(no foreword, preface or introduction)", True),
-            Part("The terms its index refers to most (how often)", terms)]
+    return [
+        Part("The book", book.title + (f" by {book.author}" if book.author else ""), True),
+        Part("Its contents", contents, True, exact=True),
+        Part("What it says about itself", about or "(no foreword, preface or introduction)", True),
+        Part("The terms its index refers to most (how often)", terms),
+    ]
 
 
 def read_survey(data, book):
@@ -496,9 +647,13 @@ def read_survey(data, book):
     numbers, order = {chapter.number for chapter in book.chapters}, {}
     for item in data.get("chapters") or []:
         if isinstance(item, dict) and type(item.get("chapter")) is int and item["chapter"] in numbers:
-            order[str(item["chapter"])] = {"read": item.get("read") if item.get("read") in CHAPTER_ROLE_ORDER else "other",
-                                      "look_for": first_line(str(item.get("look_for") or ""), 200)}
-    terms = [first_line(str(term), 60) for term in data.get("terms") or [] if str(term).strip()][:READ_KEY_TERMS]
+            order[str(item["chapter"])] = {
+                "read": item.get("read") if item.get("read") in CHAPTER_ROLE_ORDER else "other",
+                "look_for": first_line(str(item.get("look_for") or ""), 200),
+            }
+    terms = [first_line(str(term), 60) for term in data.get("terms") or [] if str(term).strip()][
+        :READ_KEY_TERMS
+    ]
     return {"summary": summary, "software": data.get("software") is True, "terms": terms, "order": order}
 
 
@@ -507,7 +662,9 @@ def excerpt(text, room, wanted):
         return text
     chunks = split_text(text, room // READ_FOCUS_CHUNKS)
     matched = [index for index in Retriever(None).by_words(wanted, chunks) if index]
-    chosen = [0] + (matched + [index for index in range(1, len(chunks)) if index not in matched])[:READ_FOCUS_CHUNKS - 1]
+    chosen = [0] + (matched + [index for index in range(1, len(chunks)) if index not in matched])[
+        : READ_FOCUS_CHUNKS - 1
+    ]
     return "\n\n[…]\n\n".join(chunks[index] for index in sorted(chosen))
 
 
@@ -519,8 +676,13 @@ def read_points(data, software):
         text = str(point.get("text") or "").strip() if isinstance(point, dict) else ""
         if text:
             phase = str(point.get("phase") or "").strip().lower()
-            points.append({"text": text[:MAX_FACT_CHARS], "phase": phase if software and phase in FACT_PHASES else "book",
-                           "section": first_line(str(point.get("section") or ""), 80)})
+            points.append(
+                {
+                    "text": text[:MAX_FACT_CHARS],
+                    "phase": phase if software and phase in FACT_PHASES else "book",
+                    "section": first_line(str(point.get("section") or ""), 80),
+                }
+            )
     return points[:READ_FACTS_PER_CHAPTER]
 
 
@@ -536,7 +698,9 @@ class Epub:
 
     def book(self, title):
         text, starts = self.spine_text()
-        chapters = contents_chapters(text, starts, self.contents()) or headed_chapters(text) or plain_chapters(text)
+        chapters = (
+            contents_chapters(text, starts, self.contents()) or headed_chapters(text) or plain_chapters(text)
+        )
         return Book(self.metadata("title") or title, self.metadata("creator"), chapters)
 
     def xml(self, path):
@@ -564,13 +728,21 @@ class Epub:
         return SpineText("".join(parts), starts)
 
     def contents(self):
-        nav = next((item for item in self.manifest.values() if "nav" in (item.get("properties") or "").split()), None)
+        nav = next(
+            (item for item in self.manifest.values() if "nav" in (item.get("properties") or "").split()), None
+        )
         if nav is not None:
             document = located(nav.get("href"), self.opf_path)[0]
             entries = NavEntries.of(self.text_of(document))
         else:
-            ncx = next((item for item in self.manifest.values()
-                        if item.get("media-type") == "application/x-dtbncx+xml"), None)
+            ncx = next(
+                (
+                    item
+                    for item in self.manifest.values()
+                    if item.get("media-type") == "application/x-dtbncx+xml"
+                ),
+                None,
+            )
             if ncx is None:
                 return []
             document = located(ncx.get("href"), self.opf_path)[0]
@@ -580,7 +752,9 @@ class Epub:
 
 def located(href, document):
     path, _, fragment = urllib.parse.unquote(href or "").partition("#")
-    return Located(posixpath.normpath(posixpath.join(posixpath.dirname(document), path)) if path else document, fragment)
+    return Located(
+        posixpath.normpath(posixpath.join(posixpath.dirname(document), path)) if path else document, fragment
+    )
 
 
 def contents_chapters(text, starts, contents):
@@ -604,8 +778,28 @@ def ncx_entries(parent, depth=1):
 
 
 class XhtmlText(html.parser.HTMLParser):
-    BLOCKS = {"p", "div", "section", "article", "aside", "blockquote", "pre", "table", "tr", "ul", "ol", "dl", "dt",
-              "dd", "figure", "figcaption", "hr", "header", "footer", "body"}
+    BLOCKS = {
+        "p",
+        "div",
+        "section",
+        "article",
+        "aside",
+        "blockquote",
+        "pre",
+        "table",
+        "tr",
+        "ul",
+        "ol",
+        "dl",
+        "dt",
+        "dd",
+        "figure",
+        "figcaption",
+        "hr",
+        "header",
+        "footer",
+        "body",
+    }
     HEADINGS = {f"h{level}": level for level in range(1, 7)}
     HIDDEN = {"head", "script", "style"}
 
@@ -661,8 +855,9 @@ class NavEntries(html.parser.HTMLParser):
         parser = cls()
         parser.feed(markup)
         parser.close()
-        tocs = ([entries for toc, entries in parser.navs if toc and entries]
-                or [nav_entries for _, nav_entries in parser.navs if nav_entries])
+        tocs = [entries for toc, entries in parser.navs if toc and entries] or [
+            nav_entries for _, nav_entries in parser.navs if nav_entries
+        ]
         return tocs[0] if tocs else []
 
     def handle_starttag(self, tag, attrs):

@@ -1,5 +1,5 @@
-lazy import time
 from collections import namedtuple
+lazy import time
 
 lazy from .settings import Home, Paged
 
@@ -50,16 +50,25 @@ class Ledger:
 
     @classmethod
     def due(cls, channel):
-        return [ChatMessage(chat, message) for chat, message, view in cls.views(channel)
-                if view.get("until") is not None and view["until"] <= time.time()]
+        return [
+            ChatMessage(chat, message)
+            for chat, message, view in cls.views(channel)
+            if view.get("until") is not None and view["until"] <= time.time()
+        ]
 
     @classmethod
     def glances(cls, channel, chat):
-        return [message for each, message, view in cls.views(channel) if each == str(chat) and view.get("glance")]
+        return [
+            message for each, message, view in cls.views(channel) if each == str(chat) and view.get("glance")
+        ]
 
     @classmethod
     def passing(cls, channel):
-        return [ChatMessage(chat, message) for chat, message, view in cls.views(channel) if view.get("until") is not None]
+        return [
+            ChatMessage(chat, message)
+            for chat, message, view in cls.views(channel)
+            if view.get("until") is not None
+        ]
 
     @classmethod
     def views(cls, channel):
@@ -82,8 +91,13 @@ class Ledger:
     def shown(cls, channel, chat, thing, messages, text, asked=""):
         if thing is None:
             thing = Home.store().update(cls.NUMBERS, "last", lambda last: (last or 0) + 1)
-        Home.store().update(cls.THINGS, str(thing), lambda kept: dict(
-            kept or {"number": thing, "asked": asked}, time=time.strftime("%Y-%m-%d %H:%M"), text=text))
+        Home.store().update(
+            cls.THINGS,
+            str(thing),
+            lambda kept: dict(
+                kept or {"number": thing, "asked": asked}, time=time.strftime("%Y-%m-%d %H:%M"), text=text
+            ),
+        )
         for message in messages:
             if message is not None:
                 cls.change(channel, chat, message, thing=thing)
@@ -95,9 +109,12 @@ class Ledger:
 
     @classmethod
     def page(cls, number):
-        things = sorted(Home.store().items(cls.THINGS).values(), key=lambda thing: thing["number"], reverse=True)
+        things = sorted(
+            Home.store().items(cls.THINGS).values(), key=lambda thing: thing["number"], reverse=True
+        )
         pages = max(1, -(-len(things) // HISTORY_PER_PAGE))
-        return Paged(things[(number - 1) * HISTORY_PER_PAGE:number * HISTORY_PER_PAGE], pages)
+        return Paged(things[(number - 1) * HISTORY_PER_PAGE : number * HISTORY_PER_PAGE], pages)
+
 
 def key(channel, chat, message):
     return f"{channel}\t{chat}\t{message}"

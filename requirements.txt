@@ -1,2 +1,3 @@
-# Tinker needs nothing beyond Python. This is for running its tests.
+# Tinker needs nothing beyond Python. This is for running its tests and linting its code.
 pytest>=9.1
+ruff>=0.17

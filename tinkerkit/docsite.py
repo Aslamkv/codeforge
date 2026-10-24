@@ -1,11 +1,10 @@
+from collections import namedtuple
 lazy import datetime
 lazy import re
 lazy import urllib.parse
-from collections import namedtuple
 
 lazy from .passages import Cleaner, Links, Page
 lazy from .settings import MAX_MAP_LINKS, SITE_MAP_FILES, Config, Home, now_text, words
-
 
 DocPages = namedtuple("DocPages", "pages version_key from_cache")
 Root = namedtuple("Root", "page version_key")
@@ -41,11 +40,15 @@ class DocSite:
         base, key = base_of(root.final_url), matched(key, version)
         fetched = [root] + self.fetched(self.map(root, base), wanted, key, cap - 1, base, {root.final_url})
         deeper = [*under(Links.of(got.text, got.final_url), base) for got in fetched if got.ok]
-        fetched += self.fetched(deeper, wanted, key, cap - len(fetched), base, {got.final_url for got in fetched})
+        fetched += self.fetched(
+            deeper, wanted, key, cap - len(fetched), base, {got.final_url for got in fetched}
+        )
         return [page for page in (self.page_of(got) for got in fetched) if page.blocks]
 
     def fetched(self, links, wanted, key, room, base, seen):
-        picked = [url for url in pick(links, wanted, key, room + len(seen), base) if url not in seen][:max(room, 0)]
+        picked = [url for url in pick(links, wanted, key, room + len(seen), base) if url not in seen][
+            : max(room, 0)
+        ]
         return self.fetcher.fetch_all(picked) if picked else []
 
     def map(self, root, base):
@@ -58,7 +61,11 @@ class DocSite:
 
     @staticmethod
     def page_of(got):
-        return Cleaner.page(got.final_url, got.text, got.kind, now_text()) if got.ok else Page(got.url, now_text(), [])
+        return (
+            Cleaner.page(got.final_url, got.text, got.kind, now_text())
+            if got.ok
+            else Page(got.url, now_text(), [])
+        )
 
 
 class DocCache:
@@ -77,8 +84,11 @@ class DocCache:
 
     @staticmethod
     def put(slug, key, root, pages):
-        Home.store().put("sources", f"{slug}@{key}", {"root": root, "version": key, "kept": now_text(),
-                                                      "pages": [page.as_dict() for page in pages]})
+        Home.store().put(
+            "sources",
+            f"{slug}@{key}",
+            {"root": root, "version": key, "kept": now_text(), "pages": [page.as_dict() for page in pages]},
+        )
 
     @staticmethod
     def age_days(kept):
@@ -90,8 +100,11 @@ class DocCache:
 
 def version_keys(version):
     numbers = re.findall(r"\d+", version or "")
-    return list(dict.fromkeys(".".join(numbers[:parts]) for parts in (len(numbers), 2, 1)
-                              if 0 < parts <= len(numbers))) + ["latest"]
+    return list(
+        dict.fromkeys(
+            ".".join(numbers[:parts]) for parts in (len(numbers), 2, 1) if 0 < parts <= len(numbers)
+        )
+    ) + ["latest"]
 
 
 def matched(key, version):
@@ -103,8 +116,11 @@ def matched(key, version):
 
 def candidates(docs, version):
     versioned = docs.get("versioned") or ""
-    exact = [Candidate(key, versioned.replace("{version}", key)) for key in version_keys(version)[:-1]
-             if "{version}" in versioned]
+    exact = [
+        Candidate(key, versioned.replace("{version}", key))
+        for key in version_keys(version)[:-1]
+        if "{version}" in versioned
+    ]
     return exact + ([Candidate("latest", docs["root"])] if docs.get("root") else [])
 
 
@@ -116,7 +132,9 @@ def map_links(name, text):
 
 def under(links, base):
     site = urllib.parse.urlsplit(base).netloc
-    same_site = [MapLink(url, title) for url, title in dict(links).items() if urllib.parse.urlsplit(url).netloc == site]
+    same_site = [
+        MapLink(url, title) for url, title in dict(links).items() if urllib.parse.urlsplit(url).netloc == site
+    ]
     below = [link for link in same_site if link.address.startswith(base)]
     return below or same_site
 
@@ -146,12 +164,18 @@ def names_version(url, key, base):
 
 def names_other_version(url, key, base):
     named = re.findall(r"(?<![\d.])\d+\.\d+(?:\.\d+)*(?![\d])", below(url, base))
-    return any(not (key + ".").startswith(version + ".") and not (version + ".").startswith(key + ".")
-               for version in named) if key != "latest" else False
+    return (
+        any(
+            not (key + ".").startswith(version + ".") and not (version + ".").startswith(key + ".")
+            for version in named
+        )
+        if key != "latest"
+        else False
+    )
 
 
 def below(url, base):
-    return url[len(base):] if url.startswith(base) else urllib.parse.urlsplit(url).path
+    return url[len(base) :] if url.startswith(base) else urllib.parse.urlsplit(url).path
 
 
 def base_of(url):

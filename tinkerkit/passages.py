@@ -1,12 +1,17 @@
 import html.parser
 import re
-lazy import urllib.parse
 from dataclasses import dataclass
+lazy import urllib.parse
 
-lazy from .settings import (
-    MAX_PASSAGE_CHARS, MENU_LINK_SHARE, MIN_USABLE_PAGE_CHARS, NEAR_DUPLICATE_OVERLAP, split_text, words,
-)
 from .web import MAIN_CLOSED, PageText, read_what_it_can
+lazy from .settings import (
+    MAX_PASSAGE_CHARS,
+    MENU_LINK_SHARE,
+    MIN_USABLE_PAGE_CHARS,
+    NEAR_DUPLICATE_OVERLAP,
+    split_text,
+    words,
+)
 
 
 @dataclass
@@ -28,7 +33,11 @@ class Page:
         return self.chars() >= MIN_USABLE_PAGE_CHARS
 
     def as_dict(self):
-        return {"url": self.url, "fetched": self.fetched, "blocks": [[block.kind, block.text] for block in self.blocks]}
+        return {
+            "url": self.url,
+            "fetched": self.fetched,
+            "blocks": [[block.kind, block.text] for block in self.blocks],
+        }
 
     @staticmethod
     def of_dict(kept):
@@ -62,7 +71,9 @@ class Cleaner:
         kept, seen = [], [shingles(passage.text) for passage in known]
         for passage in (*self.under_headings(page) for page in self.without_site_repeats(pages)):
             marks = shingles(passage.text)
-            if len(passage.text) >= self.TINY_PASSAGE_CHARS and not any(repeats(marks, other) for other in seen):
+            if len(passage.text) >= self.TINY_PASSAGE_CHARS and not any(
+                repeats(marks, other) for other in seen
+            ):
                 kept.append(passage)
                 seen.append(marks)
         for number, passage in enumerate(kept, len(known) + 1):
@@ -73,11 +84,22 @@ class Cleaner:
     def without_site_repeats(pages):
         counts = {}
         for page in pages:
-            for key in {(site(page.url), normal(block.text)) for block in page.blocks if block.kind != "code"}:
+            for key in {
+                (site(page.url), normal(block.text)) for block in page.blocks if block.kind != "code"
+            }:
                 counts[key] = counts.get(key, 0) + 1
-        return [Page(page.url, page.fetched, [block for block in page.blocks if block.kind == "code"
-                                              or counts[(site(page.url), normal(block.text))] < 2])
-                for page in pages]
+        return [
+            Page(
+                page.url,
+                page.fetched,
+                [
+                    block
+                    for block in page.blocks
+                    if block.kind == "code" or counts[(site(page.url), normal(block.text))] < 2
+                ],
+            )
+            for page in pages
+        ]
 
     @staticmethod
     def under_headings(page):
@@ -139,8 +161,12 @@ class MainBlocks(html.parser.HTMLParser):
             self.pre += 1
 
     def not_content(self, tag, attributes):
-        return tag in self.SKIP or attributes.get("role") in PageText.SKIP_ROLES \
-            or attributes.get("aria-hidden") == "true" or "hidden" in attributes
+        return (
+            tag in self.SKIP
+            or attributes.get("role") in PageText.SKIP_ROLES
+            or attributes.get("aria-hidden") == "true"
+            or "hidden" in attributes
+        )
 
     def handle_endtag(self, tag):
         if tag in PageText.VOID:
@@ -167,7 +193,11 @@ class MainBlocks(html.parser.HTMLParser):
             self.link_chars += len(data.strip())
 
     def flush(self):
-        text = "".join(self.pieces).strip("\n") if self.kind == "code" else " ".join("".join(self.pieces).split())
+        text = (
+            "".join(self.pieces).strip("\n")
+            if self.kind == "code"
+            else " ".join("".join(self.pieces).split())
+        )
         if text.strip() and (self.kind != "text" or not mostly_links(self.link_chars, text)):
             self.all.append(Block(self.kind, text))
             if self.main_opened_at is not None and self.main_opened_at > 0:
@@ -238,7 +268,7 @@ def mostly_links(link_chars, text):
 
 def shingles(text):
     found = words(text)
-    return {tuple(found[start:start + 3]) for start in range(len(found) - 2)} or {tuple(found)}
+    return {tuple(found[start : start + 3]) for start in range(len(found) - 2)} or {tuple(found)}
 
 
 def repeats(a, b):

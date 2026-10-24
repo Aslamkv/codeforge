@@ -1,7 +1,6 @@
 import pytest
 
-from tinkerkit import cli
-from tinkerkit import conversation
+from tinkerkit import cli, conversation
 from tinkerkit.commands import BY_NAME, COMMANDS, GROUPS, ref, refs
 
 
@@ -20,24 +19,34 @@ def test_the_command_line_and_the_conversation_read_the_table():
     assert on_the_command_line == {command.name for command in COMMANDS if command.cli}
     assert set(conversation.Desk.COMMANDS) == {command.name for command in COMMANDS if command.chat}
     assert conversation.LONG_COMMANDS == tuple(command.name for command in COMMANDS if command.chat == "long")
-    assert set(conversation.ONE_WORD_COMMANDS) == {command.name for command in COMMANDS if command.chat
-                                          and command.words == "one"}
+    assert set(conversation.ONE_WORD_COMMANDS) == {
+        command.name for command in COMMANDS if command.chat and command.words == "one"
+    }
     assert conversation.USAGE["task"] == "✍️ Write `task WHAT TO BUILD`, e.g. `task a calculator in Python`"
     for command in cli.Cli.COMMANDS:
         parser = cli.Cli.parser(command)
         assert parser.description == BY_NAME[command].about
-        assert {option.flag for option in BY_NAME[command].options} <= {flag for action in parser._actions
-                                                                        for flag in action.option_strings}
+        assert {option.flag for option in BY_NAME[command].options} <= {
+            flag for action in parser._actions for flag in action.option_strings
+        }
 
 
 @pytest.mark.spec("CMD-2")
 def test_runs_and_what_deletes():
     assert [command.name for command in COMMANDS if command.run] == [
-        "task", "restart", "confirm", "amend", "add", "fix", "resume"]
+        "task",
+        "restart",
+        "confirm",
+        "amend",
+        "add",
+        "fix",
+        "resume",
+    ]
     for command in [command for command in COMMANDS if command.run and command.name != "restart"]:
         assert "--web" in {option.flag for option in command.options}, command.name
-    assert [command.name for command in COMMANDS
-            if "--confirm" in {option.flag for option in command.options}] == ["task", "restart", "add", "fix"]
+    assert [
+        command.name for command in COMMANDS if "--confirm" in {option.flag for option in command.options}
+    ] == ["task", "restart", "add", "fix"]
     assert [command.name for command in COMMANDS if command.deletes] == ["restart", "clear", "reset"]
     assert conversation.DELETING_COMMANDS == ("restart", "clear", "reset")
 

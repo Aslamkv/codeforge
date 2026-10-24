@@ -8,7 +8,12 @@ lazy from .knowledge import Knowledge, Learner, Library, Retriever
 lazy from .prompts import Part, Prompts
 lazy from .reading import Readings
 lazy from .settings import (
-    LESSON_PHASES, MEMORY_ITEMS_SHOWN, TEACH_CHECK_COMMANDS, TEACH_CHECK_SEARCHES, TEACH_CLAIMS, first_line,
+    LESSON_PHASES,
+    MEMORY_ITEMS_SHOWN,
+    TEACH_CHECK_COMMANDS,
+    TEACH_CHECK_SEARCHES,
+    TEACH_CLAIMS,
+    first_line,
     words,
 )
 
@@ -26,8 +31,11 @@ Follows = namedtuple("Follows", "follows why")
 
 class Memory:
     def __init__(self, embeddings=None):
-        self.items = [node for node in Graph.build().nodes.values()
-                      if node["kind"] in ITEM_KINDS and node["status"] != "retired"]
+        self.items = [
+            node
+            for node in Graph.build().nodes.values()
+            if node["kind"] in ITEM_KINDS and node["status"] != "retired"
+        ]
         self.retriever = Retriever(embeddings)
 
     def about(self, text, limit=MEMORY_ITEMS_SHOWN):
@@ -71,8 +79,10 @@ class Asker:
             items = self.memory.about(question)
             passages = Readings.passages(Readings.about(question, items), question)
         if not items and not passages:
-            return self.said("I have not learned anything yet: I learn from builds (tinker task), tinker learn and "
-                             "tinker read.")
+            return self.said(
+                "I have not learned anything yet: I learn from builds (tinker task), tinker learn and "
+                "tinker read."
+            )
         self.on_to("answer")
         read = f" and {len(passages)} passage(s) of what you gave it to read" if passages else ""
         with say.working_on(f"Answering from {len(items)} thing(s) Tinker keeps{read}"):
@@ -83,8 +93,11 @@ class Asker:
             self.tracker.phase(phase)
 
     def asked(self, question, items, passages):
-        parts = [Part("What Tinker keeps", numbered(items) or "(nothing)", True),
-                 Part("From what you read", quoted(passages)), Part("The question", question, True)]
+        parts = [
+            Part("What Tinker keeps", numbered(items) or "(nothing)", True),
+            Part("From what you read", quoted(passages)),
+            Part("The question", question, True),
+        ]
         return self.model.ask(Prompts.ASK_SYSTEM, parts, "ask").strip()
 
     @staticmethod
@@ -115,12 +128,19 @@ class Teacher:
 
     def understood(self, teaching, items):
         moved_on(self.tracker, "understand", "Working out what to check…", "🤔")
-        parts = [Part("What Tinker keeps", numbered(items) or "(nothing yet)", True),
-                 Part("What the person teaches", teaching, True)]
-        with say.working_on(f"Working out what to check in what you taught, against {len(items)} thing(s) Tinker keeps"):
-            plan = self.model.ask_until_usable(Prompts.TEACH_SYSTEM, parts, "teach: what to check",
-                                               lambda reply: read_plan(reply.json(), len(items), marked(teaching),
-                                                                       bool(self.readings)))
+        parts = [
+            Part("What Tinker keeps", numbered(items) or "(nothing yet)", True),
+            Part("What the person teaches", teaching, True),
+        ]
+        with say.working_on(
+            f"Working out what to check in what you taught, against {len(items)} thing(s) Tinker keeps"
+        ):
+            plan = self.model.ask_until_usable(
+                Prompts.TEACH_SYSTEM,
+                parts,
+                "teach: what to check",
+                lambda reply: read_plan(reply.json(), len(items), marked(teaching), bool(self.readings)),
+            )
         if plan is None:
             raise SystemExit(f"{self.model.name} could not work out what to check; nothing changed")
         with say.part("What you taught", "📝"):
@@ -133,10 +153,16 @@ class Teacher:
         if not any(not claim["preference"] for claim in plan["claims"]):
             evidence, verdict = [], Verdict.unchecked(plan["claims"], "")
         else:
-            evidence = (self.on_machine(plan["commands"]) + self.on_web(plan["searches"])
-                        + self.in_readings(plan["claims"]))
-            verdict = (self.judged(teaching, plan, items, evidence) if evidence
-                       else Verdict.unchecked(plan["claims"], "nothing could check it"))
+            evidence = (
+                self.on_machine(plan["commands"])
+                + self.on_web(plan["searches"])
+                + self.in_readings(plan["claims"])
+            )
+            verdict = (
+                self.judged(teaching, plan, items, evidence)
+                if evidence
+                else Verdict.unchecked(plan["claims"], "nothing could check it")
+            )
         verdict.show()
         return Checked(evidence, verdict)
 
@@ -144,9 +170,18 @@ class Teacher:
         kept, dropped = Learner.safe_commands(commands)
         for command in dropped:
             say.skip(f"Skipped `{command}`: only commands that show what is installed are run")
-        return [{"source": "this machine", "text": f"`{shown['command']}` → "
-                 + (shown["output"] if shown["found"] else "not found here (a project's own environment may have it)")}
-                for shown in self.learner.look_at_machine(kept)]
+        return [
+            {
+                "source": "this machine",
+                "text": f"`{shown['command']}` → "
+                + (
+                    shown["output"]
+                    if shown["found"]
+                    else "not found here (a project's own environment may have it)"
+                ),
+            }
+            for shown in self.learner.look_at_machine(kept)
+        ]
 
     def on_web(self, searches):
         if not searches:
@@ -164,8 +199,12 @@ class Teacher:
     def in_readings(self, claims):
         if not self.readings:
             return []
-        found = [passage for claim in claims if not claim["preference"]
-                 for passage in Readings.passages(self.readings, claim["text"])]
+        found = [
+            passage
+            for claim in claims
+            if not claim["preference"]
+            for passage in Readings.passages(self.readings, claim["text"])
+        ]
         found = list({passage["text"]: passage for passage in found}.values())
         say.info(f"Found {len(found)} passage(s) of what was read about it", "📖")
         return found
@@ -173,22 +212,46 @@ class Teacher:
     def judged(self, teaching, plan, items, evidence):
         moved_on(self.tracker, "judge", "Weighing the evidence…", "⚖️")
         claims = list(enumerate(plan["claims"], 1))
-        parts = [Part("What the person teaches", teaching, True),
-                 Part("Facts", "\n".join(f"{number}. {claim['text']}" for number, claim in claims
-                                         if not claim["preference"]), True),
-                 Part("The person's preferences", "\n".join(f"{number}. {claim['text']}" for number, claim in claims
-                                                            if claim["preference"])),
-                 Part("Changes", "\n\n".join(f"Change {number} "
-                                             f"(rests on claims {', '.join(map(str, change['claims']))}):\n"
-                                             f"{change_text(change, plan['language'], items)}"
-                                             for number, change in judged_changes(plan)), True),
-                 Part("Evidence", "\n\n".join(f"[{number}] {piece['source']}\n{piece['text']}"
-                                              for number, piece in enumerate(evidence, 1)),
-                      True)]
+        parts = [
+            Part("What the person teaches", teaching, True),
+            Part(
+                "Facts",
+                "\n".join(
+                    f"{number}. {claim['text']}" for number, claim in claims if not claim["preference"]
+                ),
+                True,
+            ),
+            Part(
+                "The person's preferences",
+                "\n".join(f"{number}. {claim['text']}" for number, claim in claims if claim["preference"]),
+            ),
+            Part(
+                "Changes",
+                "\n\n".join(
+                    f"Change {number} "
+                    f"(rests on claims {', '.join(map(str, change['claims']))}):\n"
+                    f"{change_text(change, plan['language'], items)}"
+                    for number, change in judged_changes(plan)
+                ),
+                True,
+            ),
+            Part(
+                "Evidence",
+                "\n\n".join(
+                    f"[{number}] {piece['source']}\n{piece['text']}"
+                    for number, piece in enumerate(evidence, 1)
+                ),
+                True,
+            ),
+        ]
         facts = sum(not claim["preference"] for claim in plan["claims"])
         with say.working_on(f"Weighing {len(evidence)} piece(s) of evidence on {facts} fact(s) you taught"):
-            verdict = self.model.ask_until_usable(Prompts.JUDGE_SYSTEM, parts, "teach: weigh the evidence",
-                                                  lambda reply: Verdict.read(reply.json(), plan, len(evidence)))
+            verdict = self.model.ask_until_usable(
+                Prompts.JUDGE_SYSTEM,
+                parts,
+                "teach: weigh the evidence",
+                lambda reply: Verdict.read(reply.json(), plan, len(evidence)),
+            )
         if verdict is None:
             raise SystemExit(f"{self.model.name} could not weigh the evidence; nothing changed")
         return verdict
@@ -207,7 +270,11 @@ class Teacher:
             say.done(line)
         for line in skipped:
             say.skip(f"Not changed: {line}")
-        details = verdict.details() + [("Changed", line) for line in made] + [("Not changed", line) for line in skipped]
+        details = (
+            verdict.details()
+            + [("Changed", line) for line in made]
+            + [("Not changed", line) for line in skipped]
+        )
         if not made:
             say.stop("Nothing changed")
             return ending("blocked", "Nothing changed", details)
@@ -222,8 +289,11 @@ class Teacher:
 
     @staticmethod
     def retired(items, reason):
-        return [f"Retired {item['kind']}: {first_line(item['text'], 100)}" for item in items
-                if retire_item(item, reason)]
+        return [
+            f"Retired {item['kind']}: {first_line(item['text'], 100)}"
+            for item in items
+            if retire_item(item, reason)
+        ]
 
     @staticmethod
     def toolchain_corrected(language, commands):
@@ -232,7 +302,9 @@ class Teacher:
         if not language or not Knowledge(language).correct_toolchain(commands):
             say.skip(f"No toolchain kept for {language or 'that language'} to correct")
             return ""
-        return f"Toolchain for {language}: " + ", ".join(f"{key} → {shown(command)}" for key, command in commands.items())
+        return f"Toolchain for {language}: " + ", ".join(
+            f"{key} → {shown(command)}" for key, command in commands.items()
+        )
 
     @staticmethod
     def lesson_kept(language, lesson, sources):
@@ -242,33 +314,46 @@ class Teacher:
         kept = Knowledge(language or None).taught_lesson(dict(lesson, scope=scope), sources)
         return f"Lesson kept for {language or 'any language'}: {kept['text']}" if kept else ""
 
-
     @staticmethod
     def fact_kept(fact, items, sources):
         if not fact:
             return ""
         kind, _, rest = items[fact["about"] - 1]["id"].partition(":")
         slug, _, claim_id = rest.rpartition(":")
-        kept = (Library.taught_fact(slug, claim_id, fact["text"], sources) if kind in ("fact", "rule", "finding")
-                else None)
+        kept = (
+            Library.taught_fact(slug, claim_id, fact["text"], sources)
+            if kind in ("fact", "rule", "finding")
+            else None
+        )
         if kept is None:
             say.skip(f"No book or topic to keep it in: {first_line(fact['text'], 80)}")
             return ""
         return f"Fact kept for {(Library.read(slug) or {}).get('name', slug)}: {kept['text']}"
 
+
 def quoted(passages):
     return "\n\n".join(f"[{passage['source']}]\n{passage['text']}" for passage in passages)
+
 
 def marked(teaching):
     return bool(PREFERENCE_RE.search(teaching))
 
 
 def read_plan(data, count, preferences=True, readings=False):
-    texts = lambda key, limit: [str(text).strip() for text in data.get(key) or [] if str(text).strip()][:limit]
-    claims = [dict(claim, preference=claim["preference"] and preferences) for claim in read_claims(data.get("claims"))]
-    plan = {"claims": claims, "commands": texts("commands", TEACH_CHECK_COMMANDS),
-            "searches": texts("searches", TEACH_CHECK_SEARCHES), "language": str(data.get("language") or "").strip(),
-            "changes": read_changes(data.get("changes"), len(claims), count)}
+    texts = lambda key, limit: [str(text).strip() for text in data.get(key) or [] if str(text).strip()][
+        :limit
+    ]
+    claims = [
+        dict(claim, preference=claim["preference"] and preferences)
+        for claim in read_claims(data.get("claims"))
+    ]
+    plan = {
+        "claims": claims,
+        "commands": texts("commands", TEACH_CHECK_COMMANDS),
+        "searches": texts("searches", TEACH_CHECK_SEARCHES),
+        "language": str(data.get("language") or "").strip(),
+        "changes": read_changes(data.get("changes"), len(claims), count),
+    }
     if not claims:
         raise ValueError("no claims")
     if states_facts(claims) and not (plan["commands"] or plan["searches"] or readings):
@@ -297,17 +382,23 @@ def read_changes(given, claims, count):
     for change in given if isinstance(given, list) else []:
         if not isinstance(change, dict):
             continue
-        read = {"claims": numbers(change.get("claims"), claims), "retire": numbers(change.get("retire"), count),
-                "toolchain": read_toolchain(change.get("toolchain")), "lesson": read_lesson(change.get("lesson")),
-                "fact": read_fact(change.get("fact"), count)}
+        read = {
+            "claims": numbers(change.get("claims"), claims),
+            "retire": numbers(change.get("retire"), count),
+            "toolchain": read_toolchain(change.get("toolchain")),
+            "lesson": read_lesson(change.get("lesson")),
+            "fact": read_fact(change.get("fact"), count),
+        }
         if read["fact"]:
             read["retire"] = sorted(set(read["retire"]) | {read["fact"]["about"]})
         if not changes_something(read):
             continue
         twice = keys & set(read["toolchain"])
         if twice:
-            raise ValueError(f"toolchain {', '.join(sorted(twice))} is changed twice: put it in one change that "
-                             f"rests on all its claims")
+            raise ValueError(
+                f"toolchain {', '.join(sorted(twice))} is changed twice: put it in one change that "
+                f"rests on all its claims"
+            )
         keys |= set(read["toolchain"])
         changes.append(read)
     return changes
@@ -329,7 +420,9 @@ def read_toolchain(given):
     found = {}
     for key, value in given.items():
         if key not in TEACHABLE_TOOLCHAIN_KEYS:
-            raise ValueError(f"toolchain {key} cannot be changed (only {', '.join(TEACHABLE_TOOLCHAIN_KEYS)})")
+            raise ValueError(
+                f"toolchain {key} cannot be changed (only {', '.join(TEACHABLE_TOOLCHAIN_KEYS)})"
+            )
         commands = command_list(key, value)
         if commands:
             found[key] = commands if key == "setup" else " && ".join(commands)
@@ -357,14 +450,21 @@ def read_fact(given, count):
     text, about = str(given.get("text") or "").strip(), given.get("about")
     return {"about": about, "text": text} if text and type(about) is int and 1 <= about <= count else None
 
+
 def judged_changes(plan):
-    return [JudgedChange(number, change) for number, change in enumerate(plan["changes"], 1)
-            if any(not plan["claims"][cited - 1]["preference"] for cited in change["claims"])]
+    return [
+        JudgedChange(number, change)
+        for number, change in enumerate(plan["changes"], 1)
+        if any(not plan["claims"][cited - 1]["preference"] for cited in change["claims"])
+    ]
 
 
 def change_text(change, language, items):
     lines = [f"Retire: {item_line(number, items[number - 1])}" for number in change["retire"]]
-    lines += [f"Toolchain of {language}: {key} becomes `{shown(command)}`" for key, command in change["toolchain"].items()]
+    lines += [
+        f"Toolchain of {language}: {key} becomes `{shown(command)}`"
+        for key, command in change["toolchain"].items()
+    ]
     if change["lesson"]:
         lines.append(f"Keep the lesson ({change['lesson']['phase']}): {change['lesson']['text']}")
     if change["fact"]:
@@ -403,9 +503,18 @@ class Verdict:
 
     @classmethod
     def unchecked(cls, claims, why):
-        return cls({number: {"text": claim["text"], "verdict": "preference" if claim["preference"] else "unsure",
-                             "why": "" if claim["preference"] else why, "evidence": []}
-                    for number, claim in enumerate(claims, 1)}, {})
+        return cls(
+            {
+                number: {
+                    "text": claim["text"],
+                    "verdict": "preference" if claim["preference"] else "unsure",
+                    "why": "" if claim["preference"] else why,
+                    "evidence": [],
+                }
+                for number, claim in enumerate(claims, 1)
+            },
+            {},
+        )
 
     @classmethod
     def read(cls, data, plan, evidence):
@@ -419,13 +528,18 @@ class Verdict:
                 raise ValueError(f"claim {number} has no verdict (one of {', '.join(VERDICTS)})")
             cites = numbers(item.get("evidence"), evidence)
             holds_bare = item["verdict"] == "holds" and not cites
-            claim.update(verdict="unsure" if holds_bare else item["verdict"], evidence=cites,
-                         why="no evidence cited" if holds_bare else str(item.get("why") or "").strip())
+            claim.update(
+                verdict="unsure" if holds_bare else item["verdict"],
+                evidence=cites,
+                why="no evidence cited" if holds_bare else str(item.get("why") or "").strip(),
+            )
         said = {item.get("change"): item for item in data.get("changes") or [] if isinstance(item, dict)}
         for number, _ in judged_changes(plan):
             if number not in said or not isinstance(said[number].get("follows"), bool):
-                raise ValueError(f"change {number} has no \"follows\" (true or false)")
-            verdict.follows_by_change[number] = Follows(said[number]["follows"], str(said[number].get("why") or "").strip())
+                raise ValueError(f'change {number} has no "follows" (true or false)')
+            verdict.follows_by_change[number] = Follows(
+                said[number]["follows"], str(said[number].get("why") or "").strip()
+            )
         return verdict
 
     def why_not(self, number, change):
@@ -436,14 +550,17 @@ class Verdict:
         return "" if follows else f"does not follow: {why or 'no reason given'}"
 
     def sources(self, change, evidence):
-        found = [evidence[cited - 1]["source"] for number in change["claims"]
-                 for cited in self.claims_by_number[number]["evidence"]]
+        found = [
+            evidence[cited - 1]["source"]
+            for number in change["claims"]
+            for cited in self.claims_by_number[number]["evidence"]
+        ]
         if any(self.claims_by_number[number]["verdict"] == "preference" for number in change["claims"]):
             found.append("your preference")
         return list(dict.fromkeys(found))
 
     def show(self):
-        for number, claim in self.claims_by_number.items():
+        for claim in self.claims_by_number.values():
             if claim["verdict"] == "preference":
                 say.info(f"Your preference, honored: {claim['text']}", "👤")
                 continue
@@ -452,4 +569,10 @@ class Verdict:
             {"holds": say.done, "wrong": say.fail}.get(claim["verdict"], say.warn)(line)
 
     def details(self):
-        return [Detail("Your preference" if claim["verdict"] == "preference" else claim["verdict"].capitalize(), claim["text"] + (f" ({claim['why']})" if claim["why"] else "")) for claim in self.claims_by_number.values()]
+        return [
+            Detail(
+                "Your preference" if claim["verdict"] == "preference" else claim["verdict"].capitalize(),
+                claim["text"] + (f" ({claim['why']})" if claim["why"] else ""),
+            )
+            for claim in self.claims_by_number.values()
+        ]

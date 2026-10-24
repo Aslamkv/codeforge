@@ -1,28 +1,54 @@
+import re
+from collections import namedtuple
+from itertools import combinations
 lazy import collections
 lazy import hashlib
 lazy import math
-import re
 lazy import tempfile
 lazy import urllib.error
 lazy import urllib.parse
 lazy import urllib.request
-from collections import namedtuple
 lazy from pathlib import Path
 
-lazy from .jobs import today
 from .messages import say
-lazy from .model import Models, Ollama, OllamaError
-lazy from .prompts import Part, PromptTooLarge, Prompts
 from .settings import (
-    CHUNKS_PER_PAGE, EVENTS_KEPT_PER_ITEM, FACTS_PER_CHUNK, FACT_PHASES, LESSONS_PER_PROMPT, LESSON_PHASES,
-    MAX_FACT_CHARS, MAX_LESSONS_PER_FILE, MAX_RULE_CHARS, MAX_RULE_WHEN_CHARS, PLAYBOOK_RULES,
-    REPEAT_CLAIM_SIMILARITY, RESEARCH_FACTS_CHECKED, RESEARCH_GAPS, RESEARCH_PAGES_PER_ROUND,
-    RESEARCH_QUESTIONS, RESULTS_PER_RESEARCH_SEARCH, RETIRED_KEPT_PER_LIST, SAME_CLAIM_SIMILARITY,
-    SAME_FACT_SIMILARITY, SAME_LESSON_SIMILARITY, SEARCHES_PER_RESEARCH_QUESTION, TOOLCHAIN_HINT_SIMILARITY,
-    VERSION_TIMEOUT, Config, Home, fingerprint, first_line, now_text, similarity, split_text, words,
+    CHUNKS_PER_PAGE,
+    EVENTS_KEPT_PER_ITEM,
+    FACT_PHASES,
+    FACTS_PER_CHUNK,
+    LESSON_PHASES,
+    LESSONS_PER_PROMPT,
+    MAX_FACT_CHARS,
+    MAX_LESSONS_PER_FILE,
+    MAX_RULE_CHARS,
+    MAX_RULE_WHEN_CHARS,
+    PLAYBOOK_RULES,
+    REPEAT_CLAIM_SIMILARITY,
+    RESEARCH_FACTS_CHECKED,
+    RESEARCH_GAPS,
+    RESEARCH_PAGES_PER_ROUND,
+    RESEARCH_QUESTIONS,
+    RESULTS_PER_RESEARCH_SEARCH,
+    RETIRED_KEPT_PER_LIST,
+    SAME_CLAIM_SIMILARITY,
+    SAME_FACT_SIMILARITY,
+    SAME_LESSON_SIMILARITY,
+    SEARCHES_PER_RESEARCH_QUESTION,
+    TOOLCHAIN_HINT_SIMILARITY,
+    VERSION_TIMEOUT,
+    Config,
+    Home,
+    fingerprint,
+    first_line,
+    now_text,
+    similarity,
+    split_text,
+    words,
 )
+lazy from .jobs import today
+lazy from .model import Models, Ollama, OllamaError
+lazy from .prompts import Part, Prompts, PromptTooLarge
 lazy from .workspace import Toolchain, Workspace
-
 
 SavedPlan = namedtuple("SavedPlan", "plan saved")
 SafeCommands = namedtuple("SafeCommands", "kept dropped")
@@ -37,30 +63,48 @@ class Knowledge:
         self.key = language_key(self.language)
         self.run = run
         self.language_doc = Home.store().get("languages", self.key) or {
-            "language": self.language, "projects": 0, "toolchain": None, "fixes": [], "lessons": [], "facts": []}
+            "language": self.language,
+            "projects": 0,
+            "toolchain": None,
+            "fixes": [],
+            "lessons": [],
+            "facts": [],
+        }
         self.any_language_doc = Home.store().get("memory", "any") or {"lessons": []}
 
     @staticmethod
     def named_in(text):
-        known = [doc.get("language") for doc in Home.store().items("languages").values()] + \
-                [entry.get("language") for entry in Library.topics().values() if entry.get("kind") == "language"]
-        named = [name for name in dict.fromkeys(known_name for known_name in known if known_name)
-                 if mentions(text or "", name)]
+        known = [doc.get("language") for doc in Home.store().items("languages").values()] + [
+            entry.get("language") for entry in Library.topics().values() if entry.get("kind") == "language"
+        ]
+        named = [
+            name
+            for name in dict.fromkeys(known_name for known_name in known if known_name)
+            if mentions(text or "", name)
+        ]
         return min(named, key=lambda name: (text or "").lower().index(name.lower()), default=None)
 
     def summary(self):
         lessons = len(self.language_doc.get("lessons", [])) + len(self.any_language_doc.get("lessons", []))
         projects, facts = self.language_doc.get("projects", 0), len(self.language_doc.get("facts", []))
-        known = [("the toolchain that worked" + (f" ({projects} finished project(s))" if projects else ""))
-                 if self.language_doc.get("toolchain") else "",
-                 f"{len(self.language_doc.get('fixes', []))} toolchain fix(es)" if self.language_doc.get("fixes") else "",
-                 f"{lessons} lesson(s)" if lessons else "", f"{facts} proven fact(s)" if facts else ""]
+        known = [
+            ("the toolchain that worked" + (f" ({projects} finished project(s))" if projects else ""))
+            if self.language_doc.get("toolchain")
+            else "",
+            f"{len(self.language_doc.get('fixes', []))} toolchain fix(es)"
+            if self.language_doc.get("fixes")
+            else "",
+            f"{lessons} lesson(s)" if lessons else "",
+            f"{facts} proven fact(s)" if facts else "",
+        ]
         return f"{self.language}: " + (", ".join(topic for topic in known if topic) or "nothing learned yet")
 
     def lessons(self, phases, limit=LESSONS_PER_PROMPT):
         pool = [lesson for lesson in self.known_lessons() if lesson.get("phase") in phases]
         pool.sort(key=Knowledge.rank, reverse=True)
-        return [dict(lesson, id=lesson.get("id") or fingerprint(lesson["text"])[:12]) for lesson in pool[:limit]]
+        return [
+            dict(lesson, id=lesson.get("id") or fingerprint(lesson["text"])[:12]) for lesson in pool[:limit]
+        ]
 
     @staticmethod
     def rank(lesson):
@@ -83,11 +127,13 @@ class Knowledge:
         for item in new:
             lesson = self.new_lesson(item, known, names)
             if lesson:
-                (self.language_doc if item.get("scope") == "language" else self.any_language_doc)["lessons"].append(lesson)
+                (self.language_doc if item.get("scope") == "language" else self.any_language_doc)[
+                    "lessons"
+                ].append(lesson)
                 known.append(lesson)
                 added += 1
         for doc in (self.language_doc, self.any_language_doc):
-            doc["lessons"] = self.keep(doc["lessons"], known[len(known) - added:])
+            doc["lessons"] = self.keep(doc["lessons"], known[len(known) - added :])
         self.save()
         return added
 
@@ -95,12 +141,21 @@ class Knowledge:
         text, phase = str(item.get("text", "")).strip()[:240], str(item.get("phase", "")).strip().lower()
         if not text or phase not in LESSON_PHASES or self.names_project(text, names):
             return None
-        same = next((lesson for lesson in known if similarity(lesson["text"], text) >= SAME_LESSON_SIMILARITY), None)
+        same = next(
+            (lesson for lesson in known if similarity(lesson["text"], text) >= SAME_LESSON_SIMILARITY), None
+        )
         if same:
             self.confirm(same)
             return None
-        lesson = {"id": fingerprint(text)[:12], "phase": phase, "text": text, "status": "candidate", "seen": 1,
-                  "added": now_text(), "last_seen": now_text()}
+        lesson = {
+            "id": fingerprint(text)[:12],
+            "phase": phase,
+            "text": text,
+            "status": "candidate",
+            "seen": 1,
+            "added": now_text(),
+            "last_seen": now_text(),
+        }
         return record(lesson, "born", self.run)
 
     @staticmethod
@@ -115,9 +170,12 @@ class Knowledge:
     def keep(lessons, new):
         rank = Knowledge.rank
         fresh = [lesson for lesson in lessons if any(lesson is new_lesson for new_lesson in new)]
-        older = sorted((lesson for lesson in lessons if not any(lesson is new_lesson for new_lesson in new)), key=rank,
-                       reverse=True)
-        return sorted(fresh + older[:max(0, MAX_LESSONS_PER_FILE - len(fresh))], key=rank, reverse=True)
+        older = sorted(
+            (lesson for lesson in lessons if not any(lesson is new_lesson for new_lesson in new)),
+            key=rank,
+            reverse=True,
+        )
+        return sorted(fresh + older[: max(0, MAX_LESSONS_PER_FILE - len(fresh))], key=rank, reverse=True)
 
     def prove(self, used):
         proven = self.prove_lessons(used) + self.prove_web_facts(used)
@@ -139,13 +197,21 @@ class Knowledge:
         proven, known = 0, {fact["id"] for fact in self.language_doc.setdefault("facts", [])}
         for slug, ids in self.used_facts(used).items():
             entry = Library.read(slug) or {}
-            claims = [claim for key in Library.CLAIM_KINDS for claim in entry.get(key, []) if claim.get("id") in ids]
+            claims = [
+                claim for key in Library.CLAIM_KINDS for claim in entry.get(key, []) if claim.get("id") in ids
+            ]
             proven += sum(claim.get("status") != "proven" for claim in claims)
             Library.claims(slug, ids, lambda claim: record(dict(claim, status="proven"), "helped", self.run))
             for claim in claims:
                 if claim["id"] not in known and claim.get("phase"):
-                    fact = {"id": claim["id"], "phase": claim["phase"], "text": claim["text"], "topic": slug,
-                            "status": "proven", **({"when": claim["when"]} if claim.get("when") else {})}
+                    fact = {
+                        "id": claim["id"],
+                        "phase": claim["phase"],
+                        "text": claim["text"],
+                        "topic": slug,
+                        "status": "proven",
+                        **({"when": claim["when"]} if claim.get("when") else {}),
+                    }
                     self.language_doc["facts"].append(record(fact, "born", self.run))
                     known.add(claim["id"])
         return proven
@@ -163,8 +229,10 @@ class Knowledge:
         return gone
 
     def retire_lessons(self, shown, reason):
-        return sum(retire(doc, "lessons", lambda lesson: f"lesson:{lesson.get('id')}" in shown, reason, self.run)
-                   for doc in (self.language_doc, self.any_language_doc))
+        return sum(
+            retire(doc, "lessons", lambda lesson: f"lesson:{lesson.get('id')}" in shown, reason, self.run)
+            for doc in (self.language_doc, self.any_language_doc)
+        )
 
     @staticmethod
     def used_facts(used):
@@ -178,8 +246,13 @@ class Knowledge:
 
     def supersede(self, slug, shown):
         reason = "replaced when the language was learned again"
-        gone = retire(self.language_doc, "facts", lambda fact: fact.get("topic") == slug and fact["id"] not in shown,
-                      reason, self.run)
+        gone = retire(
+            self.language_doc,
+            "facts",
+            lambda fact: fact.get("topic") == slug and fact["id"] not in shown,
+            reason,
+            self.run,
+        )
         self.save()
         return gone
 
@@ -192,23 +265,33 @@ class Knowledge:
         if not known or not slug:
             return []
         runs = " ".join([*known.setup, known.format, known.lint]).lower()
-        missing = lambda tool: (tool["role"] == "types" and tool["name"].split()[0].lower() not in runs) or \
-            (tool["role"] in ("lint", "format") and not getattr(known, tool["role"]))
-        return [f"{tool['role']} {tool['name']}" for tool in Library.read(slug).get("tools", []) if missing(tool)]
+        missing = lambda tool: (
+            (tool["role"] == "types" and tool["name"].split()[0].lower() not in runs)
+            or (tool["role"] in ("lint", "format") and not getattr(known, tool["role"]))
+        )
+        return [
+            f"{tool['role']} {tool['name']}" for tool in Library.read(slug).get("tools", []) if missing(tool)
+        ]
 
     def unavailable_tools(self):
         slug = Library.language(self.language)
         entry, known = (Library.read(slug) if slug else None) or {}, self.toolchain()
         failed = " ".join(tool["command"] for tool in entry.get("machine", []) if not tool.get("found"))
-        used = " ".join(([*known.setup, known.format, known.lint, known.test_all] if known else [])
-                        + self.missing_checks())
+        used = " ".join(
+            ([*known.setup, known.format, known.lint, known.test_all] if known else [])
+            + self.missing_checks()
+        )
         names = dict.fromkeys(str(tool.get("name") or "").split(" ")[0] for tool in entry.get("tools", []))
         return [name for name in names if name and mentions(failed, name) and not mentions(used, name)]
 
     def toolchain_title(self, reuse):
         missing = self.missing_checks()
-        add = f"; add the learned {', '.join(missing)} it lacks (setup installs it, lint runs it with its strictest " \
-              f"useful settings)" if missing else ""
+        add = (
+            f"; add the learned {', '.join(missing)} it lacks (setup installs it, lint runs it with its strictest "
+            f"useful settings)"
+            if missing
+            else ""
+        )
         return f"Toolchain that worked for {self.language} before ({reuse}{add})"
 
     def remember_toolchain(self, toolchain):
@@ -218,8 +301,14 @@ class Knowledge:
             self.save()
 
     def known_fix(self, failure, tried=()):
-        return next((fix for fix in self.language_doc.get("fixes", []) if fix["failure"] == failure and fix.get("replay")
-                     and fix["failure"] not in tried), None)
+        return next(
+            (
+                fix
+                for fix in self.language_doc.get("fixes", [])
+                if fix["failure"] == failure and fix.get("replay") and fix["failure"] not in tried
+            ),
+            None,
+        )
 
     def similar_fix(self, failure):
         scored = [(similarity(fix["failure"], failure), fix) for fix in self.language_doc.get("fixes", [])]
@@ -227,8 +316,12 @@ class Knowledge:
         return best[1] if best[0] >= TOOLCHAIN_HINT_SIMILARITY else None
 
     def remember_fix(self, fix):
-        fixes = [kept for kept in self.language_doc.setdefault("fixes", []) if kept["failure"] != fix["failure"]]
-        self.language_doc["fixes"] = (fixes + [record(dict(fix, used=1, added=now_text()), "born", self.run)])[-20:]
+        fixes = [
+            kept for kept in self.language_doc.setdefault("fixes", []) if kept["failure"] != fix["failure"]
+        ]
+        self.language_doc["fixes"] = (
+            fixes + [record(dict(fix, used=1, added=now_text()), "born", self.run)]
+        )[-20:]
         self.save()
 
     def fix_result(self, fix, worked):
@@ -236,8 +329,13 @@ class Knowledge:
             fix["used"] = fix.get("used", 0) + 1
             record(fix, "helped", self.run)
         else:
-            retire(self.language_doc, "fixes", lambda known: known["failure"] == fix["failure"], "its replay failed",
-                   self.run)
+            retire(
+                self.language_doc,
+                "fixes",
+                lambda known: known["failure"] == fix["failure"],
+                "its replay failed",
+                self.run,
+            )
         self.save()
 
     def finished_project(self):
@@ -246,9 +344,11 @@ class Knowledge:
 
     def retire_item(self, key, reason):
         kind, _, rest = key.partition(":")
-        picks = {"lesson": ("lessons", lambda item: item.get("id") == rest),
-                 "known": ("facts", lambda item: item.get("id") == rest),
-                 "fix": ("fixes", lambda item: item.get("failure") == rest)}
+        picks = {
+            "lesson": ("lessons", lambda item: item.get("id") == rest),
+            "known": ("facts", lambda item: item.get("id") == rest),
+            "fix": ("fixes", lambda item: item.get("failure") == rest),
+        }
         if kind not in picks:
             return False
         name, gone = picks[kind]
@@ -272,7 +372,9 @@ class Knowledge:
     def taught_lesson(self, item, sources):
         known = self.known_lessons()
         text = str(item.get("text", "")).strip()
-        lesson = next((lesson for lesson in known if similarity(lesson["text"], text) >= SAME_LESSON_SIMILARITY), None)
+        lesson = next(
+            (lesson for lesson in known if similarity(lesson["text"], text) >= SAME_LESSON_SIMILARITY), None
+        )
         if lesson is None:
             lesson = self.new_lesson(item, known, ())
             if lesson is None:
@@ -305,10 +407,16 @@ class Knowledge:
 class Learner:
     VERSION_RE = re.compile(r"\d+(?:\.\d+)+")
     SHELL_OPERATORS = re.compile(r"[;&|<>`$\n\\]")
-    UNRELEASED_RE = re.compile(r"\b(unreleased|not (yet )?released|(pre|future|upcoming)[- ]release|release candidate|"
-                            r"draft(?![\w-])|in development|nightly)\b", re.I)
-    CHANGES = re.compile(r"\b(install|uninstall|remove|delete|update|upgrade|add|rm|init|new|create|run|exec|"
-                         r"download|fetch|get|set|config)\b", re.I)
+    UNRELEASED_RE = re.compile(
+        r"\b(unreleased|not (yet )?released|(pre|future|upcoming)[- ]release|release candidate|"
+        r"draft(?![\w-])|in development|nightly)\b",
+        re.I,
+    )
+    CHANGES = re.compile(
+        r"\b(install|uninstall|remove|delete|update|upgrade|add|rm|init|new|create|run|exec|"
+        r"download|fetch|get|set|config)\b",
+        re.I,
+    )
 
     def __init__(self, model, internet, embeddings):
         self.model, self.internet = model, internet
@@ -341,8 +449,10 @@ class Learner:
                 say.warn(f"The plan saved last time cannot be used ({exc}), so making a new one")
         plan = self.model.ask_until_usable(system, parts, label, lambda reply: read(reply.json()), attempts=2)
         if plan is None:
-            raise SystemExit(f"{self.model.name} gave no usable plan for {what}; see the log of its replies "
-                             f"(tinker memory; its calls are in tinker learn's log)")
+            raise SystemExit(
+                f"{self.model.name} gave no usable plan for {what}; see the log of its replies "
+                f"(tinker memory; its calls are in tinker learn's log)"
+            )
         return SavedPlan(plan, False)
 
     @staticmethod
@@ -352,16 +462,22 @@ class Learner:
             command = " ".join(str(command).split())
             if not command:
                 continue
-            unsafe = (Learner.SHELL_OPERATORS.search(command) or Learner.CHANGES.search(command)
-                      or Workspace.UNSAFE_COMMAND.search(command))
+            unsafe = (
+                Learner.SHELL_OPERATORS.search(command)
+                or Learner.CHANGES.search(command)
+                or Workspace.UNSAFE_COMMAND.search(command)
+            )
             (dropped if unsafe else kept).append(command)
         return SafeCommands(kept, dropped)
 
     def show_dropped(self, plan):
         with say.section():
             for command in plan["dropped"]:
-                say.info(f"Skipped `{command}`: Tinker only runs commands that show what is installed (one command, "
-                         f"no shell operators, nothing installed or changed)", "🚫")
+                say.info(
+                    f"Skipped `{command}`: Tinker only runs commands that show what is installed (one command, "
+                    f"no shell operators, nothing installed or changed)",
+                    "🚫",
+                )
 
     @staticmethod
     def replace_proven(slug, entry):
@@ -381,8 +497,12 @@ class Learner:
         code, output = workspace.run(command, timeout=VERSION_TIMEOUT, quiet=True)
         lines = [line.strip() for line in output.splitlines() if line.strip()]
         version = self.VERSION_RE.search(" ".join(lines[:5])) if code == 0 else None
-        shown = {"command": command, "found": code == 0, "version": version.group(0) if version else "",
-                 "output": (lines[0] if lines else "")[:160]}
+        shown = {
+            "command": command,
+            "found": code == 0,
+            "version": version.group(0) if version else "",
+            "output": (lines[0] if lines else "")[:160],
+        }
         failed = "did not finish" if code is None else f"exit code {code}"
         if code == 0:
             say.done(f"{command} → {shown['output'][:100]}")
@@ -400,7 +520,7 @@ class Learner:
             self.notes.append(f"search '{search['query']}': {self.internet.problem(search['query'])}")
             with say.section():
                 say.warn(self.notes[-1])
-        return (found or [])[:search["pages"]]
+        return (found or [])[: search["pages"]]
 
     @staticmethod
     def in_turn(searches, results, max_pages):
@@ -437,7 +557,11 @@ class Learner:
             facts = self.facts_in(parts, page, number, chunk_number)
             if facts is None:
                 break
-            found += [dict(fact, source=page["url"]) for fact in facts if not self.UNRELEASED_RE.search(fact["text"])]
+            found += [
+                dict(fact, source=page["url"])
+                for fact in facts
+                if not self.UNRELEASED_RE.search(fact["text"])
+            ]
         return found
 
     def unreadable(self, page, number):
@@ -456,18 +580,30 @@ class Learner:
         if len(chunks) <= CHUNKS_PER_PAGE:
             return chunks
         matched = [index for index in Retriever(None).by_words(wanted, chunks) if index]
-        chosen = [0] + (matched + [index for index in range(1, len(chunks)) if index not in matched])[:CHUNKS_PER_PAGE - 1]
+        chosen = [0] + (matched + [index for index in range(1, len(chunks)) if index not in matched])[
+            : CHUNKS_PER_PAGE - 1
+        ]
         return [chunks[index] for index in sorted(chosen)]
 
     def facts_in(self, parts, page, number, part):
         try:
-            return self.model.ask_until_usable(Prompts.FACTS_SYSTEM, parts, f"Facts, page {number} part {part}",
-                                               self.read_facts, attempts=2) or []
+            return (
+                self.model.ask_until_usable(
+                    Prompts.FACTS_SYSTEM,
+                    parts,
+                    f"Facts, page {number} part {part}",
+                    self.read_facts,
+                    attempts=2,
+                )
+                or []
+            )
         except PromptTooLarge as exc:
             self.notes.append(f"page {page['url']}: {first_line(str(exc), 160)}")
         except OllamaError as exc:
             self.model_failure = first_line(str(exc), 200)
-            self.notes.append(f"the model stopped answering at page {number}; the pages after it were not read")
+            self.notes.append(
+                f"the model stopped answering at page {number}; the pages after it were not read"
+            )
             say.warn(f"{self.notes[-1]} ({self.model_failure})")
         return None
 
@@ -477,7 +613,10 @@ class Learner:
         for item in reply.json().get("facts", []):
             if not isinstance(item, dict):
                 continue
-            text, phase = str(item.get("text", "")).strip()[:MAX_FACT_CHARS], str(item.get("phase", "")).strip().lower()
+            text, phase = (
+                str(item.get("text", "")).strip()[:MAX_FACT_CHARS],
+                str(item.get("phase", "")).strip().lower(),
+            )
             if text and phase in FACT_PHASES:
                 facts.append({"phase": phase, "text": text})
         return facts[:FACTS_PER_CHUNK]
@@ -485,7 +624,10 @@ class Learner:
     @staticmethod
     def add_facts(facts, found):
         for fact in found:
-            same = next((known for known in facts if similarity(fact["text"], known["text"]) >= SAME_FACT_SIMILARITY), None)
+            same = next(
+                (known for known in facts if similarity(fact["text"], known["text"]) >= SAME_FACT_SIMILARITY),
+                None,
+            )
             if same is None:
                 facts.append(fact)
             elif fact["source"] not in Learner.pages_of(same):
@@ -508,10 +650,14 @@ class Learner:
         sources = self.rule_sources(facts, lessons)
         self.step("condense", f"Turning {len(facts)} fact(s) into rules a code writer can follow…", "✍️")
         with say.working_on(f"Turning {len(facts)} fact(s) about {plan['name']} into rules"):
-            rules = self.model.ask_until_usable(Prompts.PLAYBOOK_SYSTEM, self.playbook_parts(plan, facts, lessons),
-                                                "Condense the facts",
-                                                lambda reply: self.read_rules(reply.json(), sources), attempts=2,
-                                                think=think)
+            rules = self.model.ask_until_usable(
+                Prompts.PLAYBOOK_SYSTEM,
+                self.playbook_parts(plan, facts, lessons),
+                "Condense the facts",
+                lambda reply: self.read_rules(reply.json(), sources),
+                attempts=2,
+                think=think,
+            )
         self.say_rules(rules, facts)
         return rules or []
 
@@ -528,18 +674,26 @@ class Learner:
 
     @staticmethod
     def rule_sources(facts, lessons):
-        return [{"id": Library.claim_id(fact, fact["text"]), "text": fact["text"]} for fact in facts] + \
-               [{"id": lesson.get("id") or fingerprint(lesson["text"])[:12], "text": lesson["text"]} for lesson in lessons]
+        return [{"id": Library.claim_id(fact, fact["text"]), "text": fact["text"]} for fact in facts] + [
+            {"id": lesson.get("id") or fingerprint(lesson["text"])[:12], "text": lesson["text"]}
+            for lesson in lessons
+        ]
 
     @staticmethod
     def playbook_parts(plan, facts, lessons):
-        listing = "\n".join(f"{number}. [{fact.get('slot', '')}, {fact['phase']}] {fact['text']}"
-                            for number, fact in enumerate(facts, 1))
-        proved = "\n".join(f"{number}. {lesson['text']}" for number, lesson in enumerate(lessons, len(facts) + 1))
+        listing = "\n".join(
+            f"{number}. [{fact.get('slot', '')}, {fact['phase']}] {fact['text']}"
+            for number, fact in enumerate(facts, 1)
+        )
+        proved = "\n".join(
+            f"{number}. {lesson['text']}" for number, lesson in enumerate(lessons, len(facts) + 1)
+        )
         tools = Library.tools_text(plan.get("tools", [])) or "none named"
-        return [Part("Topic", f"{plan['name']} ({plan.get('kind', 'tool')}); its tools: {tools}", True),
-                Part("Facts learned from the web", listing, True, exact=True),
-                Part("Lessons its projects proved", proved or "(none yet)", True, exact=True)]
+        return [
+            Part("Topic", f"{plan['name']} ({plan.get('kind', 'tool')}); its tools: {tools}", True),
+            Part("Facts learned from the web", listing, True, exact=True),
+            Part("Lessons its projects proved", proved or "(none yet)", True, exact=True),
+        ]
 
     @staticmethod
     def read_rules(data, sources):
@@ -551,12 +705,26 @@ class Learner:
         for item in given:
             if not isinstance(item, dict):
                 continue
-            text, phase = " ".join(str(item.get("text") or "").split())[:MAX_RULE_CHARS], str(item.get("phase") or "").lower()
-            cites = list(dict.fromkeys(sources[number - 1]["id"] for number in item.get("cites") or []
-                                       if isinstance(number, int) and 1 <= number <= len(sources)))
+            text, phase = (
+                " ".join(str(item.get("text") or "").split())[:MAX_RULE_CHARS],
+                str(item.get("phase") or "").lower(),
+            )
+            cites = list(
+                dict.fromkeys(
+                    sources[number - 1]["id"]
+                    for number in item.get("cites") or []
+                    if isinstance(number, int) and 1 <= number <= len(sources)
+                )
+            )
             when = " ".join(str(item.get("when") or "").split())[:MAX_RULE_WHEN_CHARS]
             if text and phase in FACT_PHASES and cites and text not in rules:
-                rules[text] = {"id": fingerprint(text)[:12], "phase": phase, "text": text, "when": when, "cites": cites}
+                rules[text] = {
+                    "id": fingerprint(text)[:12],
+                    "phase": phase,
+                    "text": text,
+                    "when": when,
+                    "cites": cites,
+                }
         if not rules:
             raise ValueError("it needs at least one rule that cites the facts")
         return list(rules.values())[:PLAYBOOK_RULES]
@@ -590,27 +758,41 @@ class Researcher:
         frame = self.frame(topic, known if (known or {}).get("kind") == "research" else None)
         facts, sources, analysis = self.investigate(frame)
         if known and (learner.cut_short() or not facts):
-            say.warn(f"{learner.cut_short() or 'No page gave facts'}; kept what was found before "
-                     f"({known.get('learned', '?')})")
+            say.warn(
+                f"{learner.cut_short() or 'No page gave facts'}; kept what was found before "
+                f"({known.get('learned', '?')})"
+            )
             learner.kept_earlier_topic = True
             return known
         if not facts:
-            say.fail(f"Nothing found about {topic}: " + ("; ".join(learner.notes) or "the pages stated nothing useful"))
+            say.fail(
+                f"Nothing found about {topic}: "
+                + ("; ".join(learner.notes) or "the pages stated nothing useful")
+            )
             return None
         entry = self.entry(topic, frame, facts, sources, analysis)
         learner.step("keep")
         Library.save(slug, entry)
-        say.info(f"Saved {len(entry['findings'])} finding(s) from {len(facts)} fact(s) on {len(sources)} page(s) "
-                 f"as {slug}", "💾")
+        say.info(
+            f"Saved {len(entry['findings'])} finding(s) from {len(facts)} fact(s) on {len(sources)} page(s) "
+            f"as {slug}",
+            "💾",
+        )
         learner.index(slug, entry)
         return entry
 
     def frame(self, topic, known):
         self.learner.step("frame")
         parts = [Part("Topic", topic, True), Part("Today", today().isoformat(), True)]
-        frame, saved = self.learner.saved_or_asked(known, self.read_frame, Prompts.RESEARCH_PLAN_SYSTEM, parts,
-                                                   "Frame the research", f"researching {topic}",
-                                                   Library.slug(topic))
+        frame, saved = self.learner.saved_or_asked(
+            known,
+            self.read_frame,
+            Prompts.RESEARCH_PLAN_SYSTEM,
+            parts,
+            "Frame the research",
+            f"researching {topic}",
+            Library.slug(topic),
+        )
         if not saved:
             say.found(f"{frame['name']}: {frame['summary']}")
         say.info("Questions to answer:", "📝")
@@ -624,14 +806,18 @@ class Researcher:
     def read_frame(data):
         if not isinstance(data, dict):
             raise ValueError("not a JSON object")
-        name, summary = str(data.get("name") or "").strip()[:80], " ".join(str(data.get("summary") or "").split())[:200]
+        name, summary = (
+            str(data.get("name") or "").strip()[:80],
+            " ".join(str(data.get("summary") or "").split())[:200],
+        )
         questions = []
         for item in data.get("questions") or []:
             if not isinstance(item, dict):
                 continue
             question = " ".join(str(item.get("question") or "").split())[:200]
-            queries = [" ".join(str(query).split()) for query in item.get("queries") or []
-                       if str(query).strip()][:SEARCHES_PER_RESEARCH_QUESTION]
+            queries = [
+                " ".join(str(query).split()) for query in item.get("queries") or [] if str(query).strip()
+            ][:SEARCHES_PER_RESEARCH_QUESTION]
             if question and queries:
                 questions.append({"question": question, "queries": queries})
         if not name or not questions:
@@ -644,8 +830,11 @@ class Researcher:
         for round_number, pages in enumerate(RESEARCH_PAGES_PER_ROUND, 1):
             if not searches:
                 break
-            self.learner.step("investigate", f"Round {round_number}: {len(searches)} search(es), reading up to "
-                                             f"{pages} page(s)…", "🔎")
+            self.learner.step(
+                "investigate",
+                f"Round {round_number}: {len(searches)} search(es), reading up to {pages} page(s)…",
+                "🔎",
+            )
             with say.working_on(f"Reading up to {pages} page(s) about {frame['name']}, round {round_number}"):
                 found, read = self.learner.read_web(frame["name"], searches, pages)
             self.learner.add_facts(facts, found)
@@ -660,8 +849,16 @@ class Researcher:
 
     @staticmethod
     def first_searches(frame):
-        return [{"query": query, "section": str(number), "pages": RESULTS_PER_RESEARCH_SEARCH, "focus": question["question"]}
-                for number, question in enumerate(frame["questions"], 1) for query in question["queries"]]
+        return [
+            {
+                "query": query,
+                "section": str(number),
+                "pages": RESULTS_PER_RESEARCH_SEARCH,
+                "focus": question["question"],
+            }
+            for number, question in enumerate(frame["questions"], 1)
+            for query in question["queries"]
+        ]
 
     def say_round(self, facts, sources, found):
         say.tally(f"{len(sources)} page(s) read · {len(facts)} fact(s)")
@@ -670,8 +867,11 @@ class Researcher:
         self.learner.outcome(f"{len(facts)} fact(s) from {len(sources)} page(s)")
 
     def cross_check(self, facts):
-        vectors = self.learner.embeddings.vectors([fact["text"] for fact in facts], keep=False) \
-            if self.learner.embeddings else None
+        vectors = (
+            self.learner.embeddings.vectors([fact["text"] for fact in facts], keep=False)
+            if self.learner.embeddings
+            else None
+        )
         if vectors is None:
             say.warn("Cross-checking by repeats only: the embedding model gave no embeddings")
             vectors = [None] * len(facts)
@@ -685,7 +885,7 @@ class Researcher:
 
     def compared(self, facts, vectors, sites):
         support, differ = [set(site) for site in sites], []
-        for first, second in ((first, second) for first in range(len(facts)) for second in range(first + 1, len(facts))):
+        for first, second in combinations(range(len(facts)), 2):
             if not self.same_claim(vectors[first], vectors[second]) or sites[first] & sites[second]:
                 continue
             if self.agree(facts[first], facts[second]):
@@ -698,9 +898,15 @@ class Researcher:
     def fold_repeats(self, facts, vectors):
         index = 0
         while index < len(facts):
-            kept = next((earlier for earlier in range(index)
-                         if self.same_claim(vectors[earlier], vectors[index], REPEAT_CLAIM_SIMILARITY)
-                         and self.agree(facts[earlier], facts[index])), None)
+            kept = next(
+                (
+                    earlier
+                    for earlier in range(index)
+                    if self.same_claim(vectors[earlier], vectors[index], REPEAT_CLAIM_SIMILARITY)
+                    and self.agree(facts[earlier], facts[index])
+                ),
+                None,
+            )
             if kept is None:
                 index += 1
                 continue
@@ -737,27 +943,37 @@ class Researcher:
     def analyse(self, frame, facts, differ):
         parts = self.analysis_parts(frame, facts, differ)
         try:
-            return self.model.ask_until_usable(Prompts.RESEARCH_ANALYSIS_SYSTEM, parts, "Analyse the findings",
-                                               lambda reply: self.read_analysis(reply.json(), len(facts),
-                                                                                len(frame["questions"])), attempts=2)
+            return self.model.ask_until_usable(
+                Prompts.RESEARCH_ANALYSIS_SYSTEM,
+                parts,
+                "Analyse the findings",
+                lambda reply: self.read_analysis(reply.json(), len(facts), len(frame["questions"])),
+                attempts=2,
+            )
         except (PromptTooLarge, OllamaError) as exc:
             self.learner.notes.append(f"the findings could not be analysed ({first_line(str(exc), 160)})")
             say.warn(self.learner.notes[-1])
             return None
 
     def analysis_parts(self, frame, facts, differ):
-        questions = "\n".join(f"Q{number}. {question['question']}"
-                              for number, question in enumerate(frame["questions"], 1))
+        questions = "\n".join(
+            f"Q{number}. {question['question']}" for number, question in enumerate(frame["questions"], 1)
+        )
         pairs = "\n".join(f"F{first} / F{second}" for first, second in differ) or "(none)"
-        fixed = [Part("Topic", frame["name"], True), Part("Questions", questions, True),
-                 Part("Facts that may disagree", pairs, True)]
+        fixed = [
+            Part("Topic", frame["name"], True),
+            Part("Questions", questions, True),
+            Part("Facts that may disagree", pairs, True),
+        ]
         room = self.model.limit_chars(Prompts.RESEARCH_ANALYSIS_SYSTEM) - Part.total_size(fixed) - 200
         return fixed + [Part("Facts", self.fact_listing(facts, room), True, exact=True)]
 
     @staticmethod
     def fact_listing(facts, room):
-        lines = {number: f"F{number} [Q{fact.get('section', '?')}, {len(fact.get('sites', []))} site(s)] {fact['text']}"
-                 for number, fact in enumerate(facts, 1)}
+        lines = {
+            number: f"F{number} [Q{fact.get('section', '?')}, {len(fact.get('sites', []))} site(s)] {fact['text']}"
+            for number, fact in enumerate(facts, 1)
+        }
         kept, used = set(), 0
         for number in sorted(lines, key=lambda number: -len(facts[number - 1].get("sites", []))):
             if used + len(lines[number]) + 1 <= room:
@@ -769,25 +985,38 @@ class Researcher:
     def read_analysis(data, fact_count, question_count):
         if not isinstance(data, dict):
             raise ValueError("not a JSON object")
-        cited = lambda numbers: sorted({number for number in numbers or [] if isinstance(number, int)
-                                        and 1 <= number <= fact_count})
-        asked = lambda item: isinstance(item, dict) and isinstance(item.get("question"), int) \
+        cited = lambda numbers: sorted(
+            {number for number in numbers or [] if isinstance(number, int) and 1 <= number <= fact_count}
+        )
+        asked = lambda item: (
+            isinstance(item, dict)
+            and isinstance(item.get("question"), int)
             and 1 <= item["question"] <= question_count
+        )
         findings = Researcher.read_findings(data.get("findings") or [], cited, asked)
         if not findings:
             raise ValueError("it needs a finding for at least one question")
-        return {"findings": findings, "contradictions": Researcher.read_contradictions(data.get("contradictions") or [],
-                                                                                       cited),
-                "gaps": Researcher.read_gaps(data.get("gaps") or [], asked)[:RESEARCH_GAPS],
-                "checks": Researcher.read_checks(data.get("checks") or [], fact_count)[:RESEARCH_FACTS_CHECKED]}
+        return {
+            "findings": findings,
+            "contradictions": Researcher.read_contradictions(data.get("contradictions") or [], cited),
+            "gaps": Researcher.read_gaps(data.get("gaps") or [], asked)[:RESEARCH_GAPS],
+            "checks": Researcher.read_checks(data.get("checks") or [], fact_count)[:RESEARCH_FACTS_CHECKED],
+        }
 
     @staticmethod
     def read_findings(given, cited, asked):
-        return [{"question": finding["question"], "answer": " ".join(str(finding.get("answer") or "").split())[:600],
-                 "confidence": finding.get("confidence") if finding.get("confidence") in ("high", "medium", "low")
-                 else "low",
-                 "facts": cited(finding.get("facts"))}
-                for finding in given if asked(finding) and str(finding.get("answer") or "").strip()]
+        return [
+            {
+                "question": finding["question"],
+                "answer": " ".join(str(finding.get("answer") or "").split())[:600],
+                "confidence": finding.get("confidence")
+                if finding.get("confidence") in ("high", "medium", "low")
+                else "low",
+                "facts": cited(finding.get("facts")),
+            }
+            for finding in given
+            if asked(finding) and str(finding.get("answer") or "").strip()
+        ]
 
     @staticmethod
     def read_contradictions(given, cited):
@@ -796,54 +1025,107 @@ class Researcher:
             if isinstance(item, dict) and len(cited(item.get("facts"))) >= 2:
                 facts = cited(item["facts"])
                 doubtful = [number for number in cited(item.get("doubtful")) if number in facts] or facts
-                contradictions.append({"facts": facts, "doubtful": doubtful,
-                                       "note": " ".join(str(item.get("note") or "").split())[:300]})
+                contradictions.append(
+                    {
+                        "facts": facts,
+                        "doubtful": doubtful,
+                        "note": " ".join(str(item.get("note") or "").split())[:300],
+                    }
+                )
         return contradictions
 
     @staticmethod
     def read_gaps(given, asked):
-        return [{"question": gap["question"], "missing": " ".join(str(gap.get("missing") or "").split())[:200],
-                 "search": " ".join(str(gap.get("search") or "").split())[:160]}
-                for gap in given if asked(gap) and str(gap.get("search") or "").strip()]
+        return [
+            {
+                "question": gap["question"],
+                "missing": " ".join(str(gap.get("missing") or "").split())[:200],
+                "search": " ".join(str(gap.get("search") or "").split())[:160],
+            }
+            for gap in given
+            if asked(gap) and str(gap.get("search") or "").strip()
+        ]
 
     @staticmethod
     def read_checks(given, fact_count):
-        return [{"fact": check["fact"], "search": " ".join(str(check.get("search") or "").split())[:160]}
-                for check in given if isinstance(check, dict) and isinstance(check.get("fact"), int)
-                and 1 <= check["fact"] <= fact_count and str(check.get("search") or "").strip()]
+        return [
+            {"fact": check["fact"], "search": " ".join(str(check.get("search") or "").split())[:160]}
+            for check in given
+            if isinstance(check, dict)
+            and isinstance(check.get("fact"), int)
+            and 1 <= check["fact"] <= fact_count
+            and str(check.get("search") or "").strip()
+        ]
 
     @staticmethod
     def next_searches(frame, facts, analysis):
-        gaps = [{"query": gap["search"], "section": str(gap["question"]), "pages": 1,
-                 "focus": frame["questions"][gap["question"] - 1]["question"]} for gap in analysis["gaps"]]
-        checks = [{"query": check["search"], "section": facts[check["fact"] - 1]["section"], "pages": 2,
-                   "focus": f"whether this is so, and the exact figures: {facts[check['fact'] - 1]['text']}"}
-                  for check in analysis["checks"]]
+        gaps = [
+            {
+                "query": gap["search"],
+                "section": str(gap["question"]),
+                "pages": 1,
+                "focus": frame["questions"][gap["question"] - 1]["question"],
+            }
+            for gap in analysis["gaps"]
+        ]
+        checks = [
+            {
+                "query": check["search"],
+                "section": facts[check["fact"] - 1]["section"],
+                "pages": 2,
+                "focus": f"whether this is so, and the exact figures: {facts[check['fact'] - 1]['text']}",
+            }
+            for check in analysis["checks"]
+        ]
         return gaps + checks
 
     def entry(self, topic, frame, facts, sources, analysis):
         disputed = {*contradiction["doubtful"] for contradiction in analysis["contradictions"]}
         kept = [self.kept_fact(fact, number in disputed) for number, fact in enumerate(facts, 1)]
         cited = lambda finding: [kept[number - 1] for number in finding["facts"]]
-        findings = [dict(finding, confidence=self.supported(finding["confidence"], cited(finding)))
-                    for finding in analysis["findings"]]
-        return {"topic": topic, "kind": "research", "name": frame["name"], "summary": frame["summary"],
-                "questions": frame["questions"], "learned": now_text(), "model": self.model.name, "machine": [],
-                "findings": findings, "contradictions": analysis["contradictions"],
-                "open": analysis["gaps"], "facts": kept, "sources": sources, "notes": self.learner.notes}
+        findings = [
+            dict(finding, confidence=self.supported(finding["confidence"], cited(finding)))
+            for finding in analysis["findings"]
+        ]
+        return {
+            "topic": topic,
+            "kind": "research",
+            "name": frame["name"],
+            "summary": frame["summary"],
+            "questions": frame["questions"],
+            "learned": now_text(),
+            "model": self.model.name,
+            "machine": [],
+            "findings": findings,
+            "contradictions": analysis["contradictions"],
+            "open": analysis["gaps"],
+            "facts": kept,
+            "sources": sources,
+            "notes": self.learner.notes,
+        }
 
     @staticmethod
     def kept_fact(fact, disputed):
         sites = fact.pop("sites", [])
         confidence = "disputed" if disputed else "corroborated" if len(sites) >= 2 else "single"
-        return {**{key: value for key, value in fact.items() if key != "section"}, "question": int(fact["section"]),
-                "sites": sites, "confidence": confidence}
+        return {
+            **{key: value for key, value in fact.items() if key != "section"},
+            "question": int(fact["section"]),
+            "sites": sites,
+            "confidence": confidence,
+        }
 
     @classmethod
     def supported(cls, stated, cited):
         corroborated = sum(fact["confidence"] == "corroborated" for fact in cited)
         disputed = any(fact["confidence"] == "disputed" for fact in cited)
-        ceiling = "high" if cited and not disputed and 2 * corroborated >= len(cited) else "medium" if cited else "low"
+        ceiling = (
+            "high"
+            if cited and not disputed and 2 * corroborated >= len(cited)
+            else "medium"
+            if cited
+            else "low"
+        )
         return min(stated, ceiling, key=cls.CONFIDENCE_LEVELS.index)
 
 
@@ -852,7 +1134,9 @@ class Library:
 
     @staticmethod
     def topics():
-        return {slug: entry for slug, entry in Home.store().items("learned").items() if Library.readable(entry)}
+        return {
+            slug: entry for slug, entry in Home.store().items("learned").items() if Library.readable(entry)
+        }
 
     @staticmethod
     def read(slug):
@@ -865,14 +1149,21 @@ class Library:
 
     @staticmethod
     def save(slug, entry):
-        for claim, text in [(item, item.get("text", "")) for item in entry.get("facts", []) + entry.get("rules", [])] + \
-                           [(item, item.get("answer", "")) for item in entry.get("findings", [])]:
+        for claim, text in [
+            (item, item.get("text", "")) for item in entry.get("facts", []) + entry.get("rules", [])
+        ] + [(item, item.get("answer", "")) for item in entry.get("findings", [])]:
             claim.setdefault("id", fingerprint(str(text))[:12])
             claim.setdefault("status", "candidate")
         facts = entry.get("facts", [])
         for finding in entry.get("findings", []):
-            finding.setdefault("cites", [facts[number - 1]["id"] for number in finding.get("facts", [])
-                                         if isinstance(number, int) and 1 <= number <= len(facts)])
+            finding.setdefault(
+                "cites",
+                [
+                    facts[number - 1]["id"]
+                    for number in finding.get("facts", [])
+                    if isinstance(number, int) and 1 <= number <= len(facts)
+                ],
+            )
         Home.store().put("learned", slug, entry)
 
     @staticmethod
@@ -881,21 +1172,32 @@ class Library:
             if not entry:
                 return entry
             for key in Library.CLAIM_KINDS:
-                entry[key] = [kept for kept in (change(claim) if claim.get("id") in ids else claim
-                                                for claim in entry.get(key, []))
-                              if kept is not None]
+                entry[key] = [
+                    kept
+                    for kept in (
+                        change(claim) if claim.get("id") in ids else claim for claim in entry.get(key, [])
+                    )
+                    if kept is not None
+                ]
             return entry
+
         if Library.read(slug):
             Home.store().update("learned", slug, changed)
 
     @staticmethod
     def retire(slug, ids, reason, run):
         gone = []
+
         def retired_in(entry):
             if entry:
-                gone.append(sum(retire(entry, key, lambda claim: claim.get("id") in ids, reason, run)
-                                for key in Library.CLAIM_KINDS))
+                gone.append(
+                    sum(
+                        retire(entry, key, lambda claim: claim.get("id") in ids, reason, run)
+                        for key in Library.CLAIM_KINDS
+                    )
+                )
             return entry
+
         if Library.read(slug):
             Home.store().update("learned", slug, retired_in)
         return sum(gone)
@@ -903,13 +1205,25 @@ class Library:
     @staticmethod
     def taught_fact(slug, about, text, sources):
         entry = Library.read(slug) or {}
-        old = next((claim for key in Library.CLAIM_KINDS + ("retired",) for claim in entry.get(key, [])
-                    if claim.get("id") == about), None)
+        old = next(
+            (
+                claim
+                for key in Library.CLAIM_KINDS + ("retired",)
+                for claim in entry.get(key, [])
+                if claim.get("id") == about
+            ),
+            None,
+        )
         if old is None:
             return None
-        fact = {"text": text[:MAX_FACT_CHARS], "phase": old.get("phase", "book"), "status": "proven",
-                "sources": list(dict.fromkeys(sources)), "id": fingerprint(text)[:12],
-                **{key: old[key] for key in ("chapter", "slot", "section") if key in old}}
+        fact = {
+            "text": text[:MAX_FACT_CHARS],
+            "phase": old.get("phase", "book"),
+            "status": "proven",
+            "sources": list(dict.fromkeys(sources)),
+            "id": fingerprint(text)[:12],
+            **{key: old[key] for key in ("chapter", "slot", "section") if key in old},
+        }
         record(fact, "taught", None)
         Home.store().update("learned", slug, lambda kept: dict(kept, facts=kept.get("facts", []) + [fact]))
         return fact
@@ -932,32 +1246,67 @@ class Library:
             try:
                 found += Library.topic_items(slug, entry)
             except (KeyError, IndexError, TypeError, AttributeError) as exc:
-                say.warn(f"What was learned about {slug} is not readable ({type(exc).__name__}: {exc}); left out")
+                say.warn(
+                    f"What was learned about {slug} is not readable ({type(exc).__name__}: {exc}); left out"
+                )
         return found
 
     @staticmethod
     def topic_items(slug, entry):
         name = str(entry.get("name") or entry["topic"])
-        plain = lambda phase, text: {"topic": slug, "name": name, "phase": phase, "text": text, "id": None,
-                                     "status": None}
+        plain = lambda phase, text: {
+            "topic": slug,
+            "name": name,
+            "phase": phase,
+            "text": text,
+            "id": None,
+            "status": None,
+        }
         items = [plain("summary", str(entry.get("summary") or name))]
         if entry.get("tools"):
             items.append(plain("tools", f"its tools: {Library.tools_text(entry['tools'])}"))
-        installed = [(tool["output"] if tool["found"] else f"`{tool['command']}` fails (not installed)")
-                     for tool in entry.get("machine", [])]
+        installed = [
+            (tool["output"] if tool["found"] else f"`{tool['command']}` fails (not installed)")
+            for tool in entry.get("machine", [])
+        ]
         if installed:
             items.append(plain("machine", f"on this machine: {'; '.join(installed)}"))
-        items += [{"topic": slug, "name": name, "phase": "findings",
-                   "text": f"{entry['questions'][finding['question'] - 1]['question']} {finding['answer']} "
-                           f"({finding['confidence']} confidence)", "id": Library.claim_id(finding, finding["answer"]),
-                   "status": finding.get("status", "candidate")} for finding in entry.get("findings", [])]
-        items += [{"topic": slug, "name": name, "phase": str(rule["phase"]), "text": str(rule["text"]), "kind": "rule",
-                   "when": str(rule.get("when") or ""), "id": Library.claim_id(rule, rule["text"]),
-                   "status": rule.get("status", "candidate")} for rule in entry.get("rules", [])]
-        return items + [{"topic": slug, "name": name, "phase": str(fact["phase"]),
-                         "text": str(fact["text"]) + (f" ({fact['confidence']})" if fact.get("confidence") else ""),
-                         "id": Library.claim_id(fact, fact["text"]), "status": fact.get("status", "candidate")}
-                        for fact in Library.facts_shown(entry)]
+        items += [
+            {
+                "topic": slug,
+                "name": name,
+                "phase": "findings",
+                "text": f"{entry['questions'][finding['question'] - 1]['question']} {finding['answer']} "
+                f"({finding['confidence']} confidence)",
+                "id": Library.claim_id(finding, finding["answer"]),
+                "status": finding.get("status", "candidate"),
+            }
+            for finding in entry.get("findings", [])
+        ]
+        items += [
+            {
+                "topic": slug,
+                "name": name,
+                "phase": str(rule["phase"]),
+                "text": str(rule["text"]),
+                "kind": "rule",
+                "when": str(rule.get("when") or ""),
+                "id": Library.claim_id(rule, rule["text"]),
+                "status": rule.get("status", "candidate"),
+            }
+            for rule in entry.get("rules", [])
+        ]
+        return items + [
+            {
+                "topic": slug,
+                "name": name,
+                "phase": str(fact["phase"]),
+                "text": str(fact["text"]) + (f" ({fact['confidence']})" if fact.get("confidence") else ""),
+                "id": Library.claim_id(fact, fact["text"]),
+                "status": fact.get("status", "candidate"),
+            }
+            for fact in Library.facts_shown(entry)
+        ]
 
     @staticmethod
     def facts_shown(entry):
@@ -965,7 +1314,9 @@ class Library:
         if not rules:
             return entry["facts"]
         cited = lambda given: {*rule.get("cites", []) for rule in given}
-        reopened = cited(retired for retired in entry.get("retired", []) if retired.get("was") == "rules") - cited(rules)
+        reopened = cited(
+            retired for retired in entry.get("retired", []) if retired.get("was") == "rules"
+        ) - cited(rules)
         return [fact for fact in entry["facts"] if Library.claim_id(fact, fact["text"]) in reopened]
 
     @staticmethod
@@ -974,7 +1325,9 @@ class Library:
 
     @staticmethod
     def tools_text(tools):
-        return ", ".join(f"{tool['role']} {tool['name']}" for tool in tools if isinstance(tool, dict) and tool.get("name"))
+        return ", ".join(
+            f"{tool['role']} {tool['name']}" for tool in tools if isinstance(tool, dict) and tool.get("name")
+        )
 
     @staticmethod
     def searched(item):
@@ -982,8 +1335,11 @@ class Library:
 
     @staticmethod
     def shown_in(item, phases):
-        shown = {"machine": {"toolchain", "config"}, "tools": {"toolchain", "config", "tests"},
-                 "findings": {"spec", "design"}}.get(item["phase"])
+        shown = {
+            "machine": {"toolchain", "config"},
+            "tools": {"toolchain", "config", "tests"},
+            "findings": {"spec", "design"},
+        }.get(item["phase"])
         return item["phase"] in phases or bool(shown and shown & set(phases))
 
 
@@ -1008,8 +1364,12 @@ class Retriever:
 
     def by_words(self, query, texts):
         scores = [(score, index) for index, score in enumerate(self.word_scores(query, texts))]
-        return [index for _, index in sorted((scored for scored in scores if scored[0] > 0),
-                                             key=lambda pair: (-pair[0], pair[1]))]
+        return [
+            index
+            for _, index in sorted(
+                (scored for scored in scores if scored[0] > 0), key=lambda pair: (-pair[0], pair[1])
+            )
+        ]
 
     def word_scores(self, query, texts):
         if not texts:
@@ -1024,7 +1384,9 @@ class Retriever:
         for term in terms & counts.keys():
             idf = math.log(1 + (total - holding[term] + 0.5) / (holding[term] + 0.5))
             tf, length = counts[term], len(doc) / average
-            score += idf * tf * (self.BM25_K1 + 1) / (tf + self.BM25_K1 * (1 - self.BM25_B + self.BM25_B * length))
+            score += (
+                idf * tf * (self.BM25_K1 + 1) / (tf + self.BM25_K1 * (1 - self.BM25_B + self.BM25_B * length))
+            )
         return score
 
     def by_meaning(self, query, texts, prune):
@@ -1053,8 +1415,10 @@ class Embeddings:
     @staticmethod
     def required(option):
         if not Config.get("embed_model"):
-            raise SystemExit(f"{option} needs an embedding model, which indexes what it learns: select one Ollama "
-                             f"has with tinker embed NAME (tinker models lists them)")
+            raise SystemExit(
+                f"{option} needs an embedding model, which indexes what it learns: select one Ollama "
+                f"has with tinker embed NAME (tinker models lists them)"
+            )
         Embeddings.check()
         return Embeddings(Config.get("embed_model"))
 
@@ -1080,7 +1444,7 @@ class Embeddings:
         missing = list(dict.fromkeys(text for text, key in zip(texts, keys) if key not in stored))
         fresh = {}
         for start in range(0, len(missing), self.TEXTS_PER_REQUEST):
-            batch = missing[start:start + self.TEXTS_PER_REQUEST]
+            batch = missing[start : start + self.TEXTS_PER_REQUEST]
             found = self.embedded(batch)
             if found is None:
                 return None
@@ -1091,20 +1455,28 @@ class Embeddings:
         return result
 
     def keyed(self, texts, vectors):
-        return {self.key(text): [round(number, 5) for number in vector] for text, vector in zip(texts, vectors)}
+        return {
+            self.key(text): [round(number, 5) for number in vector] for text, vector in zip(texts, vectors)
+        }
 
     def embedded(self, batch):
-        data = Ollama.get_json("/api/embed", {"model": self.name, "input": batch, "keep_alive": 0}, timeout=300,
-                               errors=True)
+        data = Ollama.get_json(
+            "/api/embed", {"model": self.name, "input": batch, "keep_alive": 0}, timeout=300, errors=True
+        )
         found = data.get("embeddings") if isinstance(data, dict) else None
         if self.one_vector_each(found, batch):
             return found
-        self.failed = f"{self.name} gave no embeddings" + (f" ({data['error']})" if isinstance(data, dict)
-                                                           and data.get("error") else "")
+        self.failed = f"{self.name} gave no embeddings" + (
+            f" ({data['error']})" if isinstance(data, dict) and data.get("error") else ""
+        )
         return None
 
     def one_vector_each(self, found, batch):
-        return isinstance(found, list) and len(found) == len(batch) and all(self.is_vector(vector) for vector in found)
+        return (
+            isinstance(found, list)
+            and len(found) == len(batch)
+            and all(self.is_vector(vector) for vector in found)
+        )
 
     @staticmethod
     def is_vector(value):
@@ -1116,7 +1488,9 @@ class Embeddings:
         if only is not None:
             self.cache["vectors"] = {key: stored[key] for key in only}
         kept = self.cache["vectors"]
-        Home.store().update("embeddings", self.name, lambda saved: {**({} if only is not None else saved or {}), **kept})
+        Home.store().update(
+            "embeddings", self.name, lambda saved: {**({} if only is not None else saved or {}), **kept}
+        )
 
     @staticmethod
     def key(text):
@@ -1130,7 +1504,9 @@ class Embeddings:
 
 
 def record(item, event, run):
-    item["history"] = (item.get("history", []) + [{"event": event, "run": run, "at": now_text()}])[-EVENTS_KEPT_PER_ITEM:]
+    item["history"] = (item.get("history", []) + [{"event": event, "run": run, "at": now_text()}])[
+        -EVENTS_KEPT_PER_ITEM:
+    ]
     if event == "helped":
         item["helped"] = item.get("helped", 0) + 1
     return item
@@ -1140,8 +1516,10 @@ def retire(doc, key, gone, reason, run):
     items = doc.get(key, [])
     leaving = [item for item in items if gone(item)]
     doc[key] = [item for item in items if not gone(item)]
-    retired = [record(dict(item, status="retired", reason=reason, retired=now_text(), was=key), "failed", run)
-               for item in leaving]
+    retired = [
+        record(dict(item, status="retired", reason=reason, retired=now_text(), was=key), "failed", run)
+        for item in leaving
+    ]
     if retired:
         doc["retired"] = (doc.get("retired", []) + retired)[-RETIRED_KEPT_PER_LIST:]
     return len(retired)
