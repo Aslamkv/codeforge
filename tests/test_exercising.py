@@ -1,5 +1,3 @@
-"""EXR: tinker exercise LANGUAGE: practice projects that teach Tinker a language, giving way to the person."""
-
 import json
 import os
 import signal
@@ -29,8 +27,6 @@ REFLECTION = {"lessons": [{"phase": "code", "scope": "language", "text": "Read w
 
 
 class FakeBuild:
-    """A build's process: it runs for polls looks, then ends with code."""
-
     def __init__(self, polls=0, code=0):
         self.polls, self.code, self.returncode, self.pid = polls, code, None, 424242
 
@@ -47,9 +43,6 @@ class FakeBuild:
 
 
 class Builds:
-    """How an exercise starts its builds, scripted: each start is kept, and does to the project's folder what the
-    real command would (a task keeps a run that is done, an add a new cycle, a learn the language)."""
-
     def __init__(self, status="done"):
         self.started, self.status = [], status
 

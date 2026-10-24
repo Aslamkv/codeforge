@@ -1,5 +1,3 @@
-"""WEB: the Internet plugin and its backends."""
-
 import io
 import json
 import urllib.error
@@ -14,8 +12,6 @@ from tinkerkit.web import DuckDuckGoWeb, Internet, OllamaWeb, PageText, WebBacke
 
 
 class Scripted(WebBackend):
-    """A backend that answers from a script: each call takes the next answer (a value, or an exception)."""
-
     def __init__(self, timeout, answers=(), ready=""):
         super().__init__(timeout)
         self.answers, self.ready, self.calls = list(answers), ready, 0
@@ -38,7 +34,6 @@ class Scripted(WebBackend):
 
 
 def internet_with(monkeypatch, *backends, web_name="a", fallback=""):
-    """An Internet plugin whose config names backends a and b (given as Scripted instances)."""
     named = dict(zip(("a", "b"), backends))
     monkeypatch.setattr(Internet, "backends", staticmethod(lambda: {name: (lambda timeout, backend=backend: backend)
                                                                     for name, backend in named.items()}))
@@ -191,8 +186,6 @@ def test_a_success_resets_the_count(monkeypatch):
 
 
 class Response(io.BytesIO):
-    """What urlopen gives: a readable body with headers."""
-
     def __init__(self, body, content_type="application/json"):
         super().__init__(body if isinstance(body, bytes) else body.encode())
         self.headers = Message()

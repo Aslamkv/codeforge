@@ -1,5 +1,3 @@
-"""FIN: finishing a cycle: tidy, the README and its examples, the final review and the lessons."""
-
 import json
 
 import pytest
@@ -19,7 +17,6 @@ FILES = {"calc.py": {"kind": "code", "role": "the calculator", "contract": [], "
 
 @pytest.fixture
 def built(make_project, make_session, project_dir):
-    """A built calculator: both criteria pass."""
     (project_dir / "calc.py").write_text(FIXED)
     (project_dir / "test_calc.py").write_text(TESTS)
     steps = [criterion("C1", "test_calc.py::test_add", "calc.add(2, 3) is 5", status="green"),

@@ -1,16 +1,3 @@
-"""Tinker practising a language on its own (tinker exercise LANGUAGE), to write better code faster. It makes sure the
-words name one language: words that are not one, or could be several, are said so, and nothing is done. It learns
-the language first when Tinker has not, and needs it installed here. Then it builds practice projects one after
-another, each in its own folder in the exercise folder, each chosen for what the earlier ones did not practise:
-the project, then one feature added to it. Each is measured (its time, model calls, retried replies, criteria
-nothing made pass, README examples that failed, its slowest steps), and one call turns its problems into lessons
-for the language, kept as candidates: the next projects prove or retire them, as every build does.
-
-Each build is a tinker of its own, which saves itself as it goes. The exercise is a job, so the person comes first
-as with every job: a chat, a command line or a job of theirs pauses it (its build stops, saving itself), and it
-goes on once Tinker is idle. Its tracker shows what the build does now, as the build's own tracker says it. tinker
-stop #N stops it with everything kept; tinker resume #N (or tinker exercise LANGUAGE) goes on from where it was."""
-
 import os
 import re
 import signal
@@ -37,8 +24,6 @@ RETRIED_RE = re.compile(r"\(attempt [2-9]")
 
 
 class Exercise:
-    """One language's exercise, run until it is stopped (the module says how)."""
-
     def __init__(self, model, tracker, start_build=None):
         self.model, self.tracker = model, tracker
         self.start_build = start_build or start_tinker
@@ -46,7 +31,6 @@ class Exercise:
         self.own_step = ""
 
     def run(self, asked):
-        """The exercise of the language the words name, until it is stopped; its ending."""
         signal.signal(JOB_STOP_SIGNAL, interrupted)
         self.tracker.change("exercise", exercise=True)
         self.on_to("identify")
@@ -67,7 +51,6 @@ class Exercise:
         self.own_step = self.tracker.state["doing"]
 
     def knows(self, name):
-        """The language learned first when Tinker has not (tinker learn, as a build of its own), and installed here."""
         if not Library.language(name):
             self.on_to("learn")
             say.info(f"Tinker has not learned {name} yet: learning it first.", "📚")
@@ -78,7 +61,6 @@ class Exercise:
             raise SystemExit(f"{name} is not installed here: install it, then tinker exercise {name}. Nothing practised.")
 
     def practise(self, exercise):
-        """One practice project, from the step it reached to its end, each step saved as it ends."""
         project = Exercises.current(exercise) or self.picked(exercise)
         self.tracker.change("project", title=f"Exercising {exercise['language']}: {Path(project['folder']).name}",
                             steps=[], step=None, passing=None)
@@ -89,7 +71,6 @@ class Exercise:
         say.done(told(exercise, project))
 
     def picked(self, exercise):
-        """The next practice project, chosen by one call: new, a little harder, practising the focus first."""
         self.on_to("pick")
         name, earlier = exercise["language"], [practice["task"] for practice in exercise["projects"]]
         parts = [Part("Language", name, True), Part("Focus", exercise.get("focus") or "(none yet)", True),
@@ -109,7 +90,6 @@ class Exercise:
         return project
 
     def build(self, exercise, project):
-        """The project built from its task, in its own folder (once its run is kept, a build goes on with it)."""
         self.on_to("build")
         folder = Path(project["folder"])
         folder.mkdir(parents=True, exist_ok=True)
@@ -117,7 +97,6 @@ class Exercise:
         self.built(lambda: going_on(folder) if run_of(folder) else task)
 
     def feature(self, exercise, project):
-        """Its feature added, once the project is built (one that did not build gets none)."""
         folder = Path(project["folder"])
         if (run_of(folder) or {}).get("status") != "done":
             say.skip("The project did not build, so no feature is added to it")
@@ -135,8 +114,6 @@ class Exercise:
         project["ended"] = now_text()
 
     def reflect(self, exercise, project):
-        """One call turns what went wrong and what was slow into lessons for the language (candidates, proven or
-        retired by the next builds), and says what the next project should practise."""
         self.on_to("reflect")
         folder = Path(project["folder"])
         knowledge = Knowledge(exercise["language"], (run_of(folder) or {}).get("id"))
@@ -157,8 +134,6 @@ class Exercise:
             say.found(first_line(next(text for text in lessons if text), 200))
 
     def built(self, arguments):
-        """A tinker of its own (arguments() says how to start it, from where it is), run to its end: its exit code.
-        Meanwhile the exercise's tracker shows what the build does."""
         self.running_build = self.start_build(arguments())
         while self.running_build.poll() is None:
             self.show_build(Home.store().get("running", str(self.running_build.pid)))
@@ -166,8 +141,6 @@ class Exercise:
         return self.running_build.returncode
 
     def show_build(self, build):
-        """The build's tracker (None before it keeps one) shown in the exercise's: its step after the exercise's,
-        what it works on now, its spec points passing, what it found out and its latest line."""
         if not build:
             return
         self.tracker.change("build", quiet=True, doing=f"{self.own_step} · {build.get('doing', '')}",
@@ -175,7 +148,6 @@ class Exercise:
                             passing=build.get("passing"))
 
     def stop_build(self):
-        """The build that runs stopped as Ctrl-C stops it (it saves itself); killed when it does not stop in time."""
         process = self.running_build
         if process is None or process.poll() is not None:
             return
@@ -187,8 +159,6 @@ class Exercise:
             process.wait()
 
 def identified(model, asked):
-    """The language the words name: as Tinker learned it (no call), else as one call says. Words that are not one
-    language end the exercise with why (SystemExit), and nothing is done."""
     key = Library.language(asked)
     if key:
         return Library.read(key)["name"]
@@ -207,7 +177,6 @@ def identified(model, asked):
 
 
 def read_verdict(data):
-    """{verdict, name, choices, why} of what the words name (a language needs its name)."""
     verdict = str(data.get("verdict", "")).strip().lower()
     if verdict not in VERDICTS:
         raise ValueError(f'"verdict" must be one of {", ".join(VERDICTS)}')
@@ -219,14 +188,11 @@ def read_verdict(data):
 
 
 def installed(entry):
-    """True when what learning found on this machine has the language (nothing checked counts as there)."""
     machine = (entry or {}).get("machine") or []
     return not machine or any(found.get("found") for found in machine)
 
 
 def read_choice(data, language, earlier):
-    """{task, feature, folder, practises} of the next practice project: a task that names the language, never one
-    that repeats an earlier project, and a folder name that fits (else one from the task's words)."""
     task, feature = str(data.get("task") or "").strip(), str(data.get("feature") or "").strip()
     if not task or not feature:
         raise ValueError('a practice project needs a "task" and a "feature"')
@@ -243,7 +209,6 @@ def read_choice(data, language, earlier):
 
 
 def free_folder(name):
-    """A folder of the exercise folder no project has yet: name, else name-2, name-3 ..."""
     root = exercise_folder()
     folder, count = root / name, 1
     while folder.exists():
@@ -257,7 +222,6 @@ def exercise_folder():
 
 
 def run_of(folder):
-    """The run kept in a practice project's folder (None before its build kept one)."""
     return saved(folder, "run", "record")
 
 
@@ -266,7 +230,6 @@ def going_on(folder):
 
 
 def start_tinker(arguments):
-    """A tinker of its own, as an exercise's (its tracker says so, and it reports to no chat), printing here."""
     return tinker_process(arguments, **{EXERCISE_ENV: "1", CHANNEL_REPORTS_ENV: "off"})
 
 
@@ -275,7 +238,6 @@ def interrupted(signum, frame):
 
 
 def stopped(exercise):
-    """The ending of an exercise stopped by the person: everything kept, and how to go on."""
     done = len(Exercises.finished(exercise))
     say.title(f"Exercise of {exercise['language']} stopped: everything is kept.", "🛑")
     return {"status": "stopped", "headline": f"Exercise of {exercise['language']} stopped, everything kept",
@@ -283,8 +245,6 @@ def stopped(exercise):
 
 
 def measured(folder):
-    """What the project's runs measured, from its own database: its status, minutes, model calls (and the retried
-    ones), reply tokens, spec points passing and parked, README examples that failed, and its slowest steps."""
     project = Project.load(folder)
     events = [entry for _, entry in project.store.entries("events")]
     calls = [entry for entry in events if "reply_tokens" in entry]
@@ -302,8 +262,6 @@ def readme_failures(project):
 
 
 def slowest(calls, count=3):
-    """The steps that took the most model time, as "Write: 177s in 2 calls" (a step is its call's first word, so no
-    file is named)."""
     steps = {}
     for call in calls:
         step = (call.get("label") or "call").split()[0]
@@ -314,8 +272,6 @@ def slowest(calls, count=3):
 
 
 def problems(folder):
-    """What went wrong in the project's runs, at most REFLECTION_PROBLEMS: criteria nothing made pass, README examples
-    that failed, failed and unusable or cut model replies, and the warnings it said (tools that failed among them)."""
     project = Project.load(folder)
     events = [entry for _, entry in project.store.entries("events")]
     found = [f"nothing made this pass: {step['behaviour']}" for step in project.parked()]
@@ -342,21 +298,18 @@ def reflection_parts(exercise, project, known):
 
 
 def read_reflection(data):
-    """{lessons (at most 3), confirmed (numbers), focus} of a reflection."""
     lessons = [item for item in data.get("lessons") or [] if isinstance(item, dict)][:3]
     confirmed = [number for number in data.get("confirmed") or [] if isinstance(number, int)]
     return {"lessons": lessons, "confirmed": confirmed, "focus": first_line(str(data.get("focus") or ""), 200)}
 
 
 def measures_line(measures):
-    """A project's measures in one line: "done, 9.5 min, 31 model calls (2 retried), 6/6 spec points pass ..."."""
     return (f"{measures['status']}, {measures['minutes']} min, {measures['calls']} model calls "
             f"({measures['retried']} retried), {measures['passing']}/{measures['points']} spec points pass, "
             f"{measures['parked']} parked, {measures['readme_failures']} README examples failed")
 
 
 def told(exercise, project):
-    """What one practice project came to, against the one before: "csv-stats: done, 9.5 min (12.0 before) ..."."""
     line = f"{Path(project['folder']).name}: {measures_line(project['measures'])}"
     earlier = Exercises.finished(exercise)[:-1]
     if earlier:
@@ -366,13 +319,8 @@ def told(exercise, project):
 
 
 class Exercises:
-    """Every language's exercise, kept in the home ("exercise", by the language's key): {language, started,
-    projects, focus, left}, each project {task, feature, folder, practises, step, started, ended, measures, problems,
-    lessons}. The exercise that runs now is kept in the home's "activity" (its process and language)."""
-
     @staticmethod
     def of(name):
-        """The language's exercise as it was left, or a new one."""
         return Home.store().get("exercise", language_key(name)) or {"language": name, "started": now_text(),
                                                                      "projects": [], "focus": ""}
 
@@ -394,14 +342,12 @@ class Exercises:
 
     @staticmethod
     def active():
-        """{pid, language} of the exercise that runs now (None when none does)."""
         state = Home.store().get("activity", "exercise")
         pid = (state or {}).get("pid")
         return state if pid and pid != os.getpid() and alive(pid) else None
 
     @staticmethod
     def claim(exercise):
-        """This process runs the exercise now: one at a time."""
         running_one = Exercises.active()
         if running_one:
             raise SystemExit(already_running(running_one))
@@ -417,25 +363,21 @@ class Exercises:
 
     @staticmethod
     def held_by_this_process():
-        """Whether the exercise that runs is this process's."""
         return (Home.store().get("activity", "exercise") or {}).get("pid") == os.getpid()
 
 
 def already_running(active):
-    """Why a second exercise does not start: one runs at a time, and how to switch."""
     return (f"An exercise of {active['language']} runs already: it did not pause in time (one runs at a time). "
             f"Ask again in a moment.")
 
 
 def job_state(exercise):
-    """How an exercise that does not run was left: paused (it goes on once Tinker is idle) or stopped."""
     paused = [job for job in Jobs.listed("paused") if job["command"] == "exercise"
               and language_key(" ".join(job["arguments"][1:])) == language_key(exercise["language"])]
     return "paused" if paused else "stopped"
 
 
 def show():
-    """Every exercise: whether it runs, its focus, and each recent practice project's measures."""
     exercises, active = Exercises.every(), Exercises.active()
     if not exercises:
         say.info("No exercise yet: start one with tinker exercise LANGUAGE (e.g. tinker exercise python).")

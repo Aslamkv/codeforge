@@ -1,5 +1,3 @@
-"""PRJ: the project's plan and record: runs, the checks before a run, the spec and SPEC.md."""
-
 import argparse
 import io
 import os

@@ -1,5 +1,3 @@
-"""ARCH: how the parts of Tinker depend on each other."""
-
 import ast
 import builtins
 import re
@@ -15,7 +13,6 @@ LAYERS = ("messages", "settings", "jobs", "ledger", "commands", "prompts", "work
 
 
 def imports_of(module):
-    """(module-level imports, imports inside functions) of tinkerkit modules, by their short names."""
     tree = ast.parse((ROOT / "tinkerkit" / f"{module}.py").read_text(encoding="utf-8"))
     top, inner = set(), set()
     nested = {id(node) for function in ast.walk(tree) if isinstance(function, (ast.FunctionDef, ast.AsyncFunctionDef))
@@ -63,9 +60,6 @@ def test_without_the_channels_plugin_the_conversation_has_no_chats(monkeypatch):
 
 @pytest.mark.spec("ARCH-3")
 def test_only_the_model_web_and_channel_modules_open_connections():
-    """Network clients are used in model (Ollama), web and fetcher (the Internet plugin and its page fetcher) and
-    channels (Telegram) only;
-    project commands are started only by the workspace (and the conversation's own shell and tasks)."""
     network = {"urllib.request", "http.client", "urlopen", "HTTPSConnection"}
     users = set()
     for path in [*(ROOT / "tinkerkit").glob("*.py"), ROOT / "tinker.py"]:

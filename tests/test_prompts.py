@@ -1,5 +1,3 @@
-"""PRM: prompt parts, replies and the system prompts."""
-
 import json
 import re
 

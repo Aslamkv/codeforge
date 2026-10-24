@@ -1,6 +1,3 @@
-"""Tinker's settings: where it keeps what it knows (its home and its database), the limits it works
-within, and the small helpers every part uses."""
-
 import contextlib
 lazy import difflib
 lazy import hashlib
@@ -202,9 +199,6 @@ LogEntry = namedtuple("LogEntry", "id entry")
 
 
 class Home:
-    """Tinker's own folder next to the script (.tinker): its database, tinker.db (settings, measured
-    models, what it knows, the projects it points to, the channels), and the channels' lock files.
-    Only Home knows where it is; tinker reset deletes it."""
     root = Path(__file__).resolve().parent.parent / STATE_DIR
     stores = {}
 
@@ -218,33 +212,27 @@ class Home:
 
     @classmethod
     def web_log(cls):
-        """Where learning logs every web request it makes (one JSON line each: kind, result, seconds, address)."""
         cls.root.mkdir(parents=True, exist_ok=True)
         return cls.root / "web-requests.log"
 
     @classmethod
     def graph_page(cls):
-        """The page tinker memory --graph writes: what Tinker knows, as a graph to open in a browser."""
         cls.root.mkdir(parents=True, exist_ok=True)
         return cls.root / "memory.html"
 
     @classmethod
     def reading_file(cls, name):
-        """Where a file sent in a chat is kept for tinker read: its name, made safe, in the home's reading folder."""
         folder = cls.root / "reading"
         folder.mkdir(parents=True, exist_ok=True)
         return folder / (re.sub(r"[^\w.-]+", "-", Path(name).name).strip("-.") or "book")
 
     @classmethod
     def lock_file(cls, name):
-        """The lock a Tinker holds while it listens on a channel (released when its process ends)."""
         cls.root.mkdir(parents=True, exist_ok=True)
         return cls.root / f"channel-{name}.lock"
 
     @classmethod
     def reset(cls, yes=False):
-        """tinker reset: delete Tinker's folder next to the script, after asking (yes: without); the next
-        command starts fresh. Projects keep their own .tinker folders, so tinker resume works inside them."""
         home = cls.root
         if not home.is_dir():
             say.info(f"Nothing to reset: {home} does not exist.")
@@ -262,7 +250,6 @@ class Home:
 
     @staticmethod
     def parts():
-        """What tinker clear can delete: {name: (its collections, its logs, what it is)}."""
         return {"languages": (["languages"], [], "per language: the toolchain that worked, its fixes, its lessons"),
                 "memory": (["memory"], [], "lessons that hold for any language"),
                 "learned": (["learned", "embeddings"], ["learn"], "what tinker learn learned, and its index"),
@@ -278,8 +265,6 @@ class Home:
 
     @classmethod
     def clear(cls, names, yes=False):
-        """tinker clear PART...: delete those parts of what Tinker keeps, after asking (yes: without
-        asking); everything else stays."""
         names = cls.known_parts(names)
         held = {name: cls.entries_in(name) for name in names}
         if not any(held.values()):
@@ -323,8 +308,6 @@ class Home:
 
     @classmethod
     def keep_awake(cls):
-        """Keep the computer from sleeping while Tinker works (it stops with Tinker). Idle sleep would
-        pause a run for as long as nobody touches the computer."""
         command = cls.stay_awake_command(str(os.getpid()))
         if not command:
             return
@@ -336,8 +319,6 @@ class Home:
 
     @staticmethod
     def stay_awake_command(pid):
-        """The command that keeps this computer awake while the process pid lives: caffeinate on macOS,
-        systemd-inhibit on Linux; None elsewhere."""
         if shutil.which("caffeinate"):
             return ["caffeinate", "-i", "-s", "-w", pid]
         if shutil.which("systemd-inhibit"):
@@ -347,7 +328,6 @@ class Home:
 
     @classmethod
     def ensure(cls):
-        """Tinker's folder next to the script, with its database, made on first use."""
         try:
             new = not cls.database().exists()
             cls.store().connect().close()
@@ -358,9 +338,6 @@ class Home:
 
 
 class Config:
-    """The settings: DEFAULT_CONFIG, overridden by the home's "config" (read each time, so what another
-    Tinker changed is seen at once). They change through Tinker's commands only: use-model, embed,
-    use-web, and tinker config KEY VALUE for the rest."""
     SECONDS_OR_DURATION_RE = re.compile(r"-?\d+|-?(\d+(\.\d+)?(ns|us|ms|s|m|h))+")
     SETTABLE = ("ollama_url", "keep_alive", "max_growth", "build_think", "test_timeout", "web_fallback",
                 "web_timeout", "learn_missing", "learn_rate", "learn_backoff", "learn_cutoff", "learn_pages",
@@ -385,7 +362,6 @@ class Config:
 
     @classmethod
     def set(cls, key, text):
-        """tinker config KEY VALUE: one setting, read by its type and checked; kept only when it passes."""
         cls.refuse_unsettable(key)
         value = cls.parse(key, text.strip())
         before = Home.store().get("config", key)
@@ -406,7 +382,6 @@ class Config:
 
     @staticmethod
     def parse(key, text):
-        """A setting's value from its text: numbers as numbers, true/false/null as such, else the text."""
         known = {"true": True, "false": False, "null": None}
         if text.lower() in known and key in ("build_think", "learn_think"):
             return known[text.lower()]
@@ -433,9 +408,6 @@ class Config:
 
     @classmethod
     def check_model(cls, run):
-        """The settings a model takes (Tinker decides them; a person may tune them with tinker config),
-        and for a run also its tests' timeout: checked before anything starts. A command that loads no
-        model never reads them."""
         cls.check_keep_alive()
         cls.check_max_growth()
         cls.check_build_think()
@@ -464,8 +436,6 @@ class Config:
 
     @staticmethod
     def is_think_setting(think):
-        """Whether think is one Ollama takes: a level, true, false or null (0 and 1 equal false and true, but are
-        not them)."""
         return think in ("high", "medium", "low", True, False, None) and not (think in (0, 1)
                                                                              and not isinstance(think, bool))
 
@@ -481,13 +451,10 @@ class Config:
 
     @staticmethod
     def keep_alive(value):
-        """keep_alive as Ollama takes it: seconds as a number, a duration (10m) as it is."""
         return int(value) if re.fullmatch(r"-?\d+", str(value)) else value
 
 
 def confirmed(question, command, yes=False):
-    """Whether the person agrees to what was just shown (yes: agreed beforehand). Only a terminal can
-    ask: elsewhere nothing is done, and it says how to agree."""
     if yes:
         return True
     if not sys.stdin.isatty():
@@ -500,13 +467,10 @@ def is_number(value):
 
 
 def number_from(value, least, whole=True):
-    """Whether a setting is a number (a whole one, when whole) of least or more."""
     return is_number(value) and (not whole or isinstance(value, int)) and not value < least
 
 
 class Store:
-    """One SQLite database: documents (JSON values) by collection and key, and logs of entries. What
-    is written is written whole or not at all, and several Tinkers may use one database at once."""
     SCHEMA = ("CREATE TABLE IF NOT EXISTS docs (collection TEXT NOT NULL, key TEXT NOT NULL, value TEXT NOT NULL, "
               "PRIMARY KEY (collection, key))",
               "CREATE TABLE IF NOT EXISTS logs (id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT NOT NULL, "
@@ -525,15 +489,12 @@ class Store:
             self.write(db, collection, key, value)
 
     def update(self, collection, key, change, default=None):
-        """The document changed by change(value) -> value, read and written in one transaction (no other
-        Tinker writes in between); the new value."""
         with self.transaction(write=True) as db:
             value = change(self.read(db, collection, key, default))
             self.write(db, collection, key, value)
         return value
 
     def delete(self, collection, key=None):
-        """One document, or (key None) the whole collection."""
         with self.transaction(write=True) as db:
             if key is None:
                 db.execute("DELETE FROM docs WHERE collection = ?", (collection,))
@@ -541,7 +502,6 @@ class Store:
                 db.execute("DELETE FROM docs WHERE collection = ? AND key = ?", (collection, key))
 
     def items(self, collection):
-        """{key: value} of a collection, in the order they were first written."""
         with self.transaction() as db:
             rows = db.execute("SELECT key, value FROM docs WHERE collection = ? ORDER BY rowid", (collection,)).fetchall()
         return {key: json.loads(value) for key, value in rows}
@@ -551,13 +511,11 @@ class Store:
             return db.execute("SELECT COUNT(*) FROM docs WHERE collection = ?", (collection,)).fetchone()[0]
 
     def append(self, log, entry):
-        """An entry added to a log, with its time; its id."""
         with self.transaction(write=True) as db:
             return db.execute("INSERT INTO logs (name, time, entry) VALUES (?, ?, ?)",
                               (log, time.strftime("%Y-%m-%d %H:%M:%S"), json.dumps(entry, ensure_ascii=False))).lastrowid
 
     def entries(self, log, after=0):
-        """[(id, entry with its "time")] of a log after an id, in order."""
         with self.transaction() as db:
             rows = db.execute("SELECT id, time, entry FROM logs WHERE name = ? AND id > ? ORDER BY id",
                               (log, after)).fetchall()
@@ -573,7 +531,6 @@ class Store:
 
     @contextlib.contextmanager
     def transaction(self, write=False):
-        """A connection, in one transaction (a write's: taken at once, so a read-modify-write is whole)."""
         db = self.opened()
         try:
             db.execute("BEGIN IMMEDIATE" if write else "BEGIN")
@@ -598,7 +555,6 @@ class Store:
         return SystemExit(f"{self.path} cannot be read ({exc})")
 
     def connect(self):
-        """A connection; the database is made on first use, readable by its owner only."""
         if not self.path.exists():
             self.create_private_file()
         elif not self.made:
@@ -630,8 +586,6 @@ class Store:
 
 
 class Log:
-    """One log of a database (a run's model calls, tinker learn's): add(event) appends to it."""
-
     def __init__(self, store, name):
         self.store, self.name = store, name
 
@@ -644,7 +598,6 @@ class NotAPytestClass:
 
 
 def projects_folder():
-    """Where new projects get their own folders (tinker config projects)."""
     return Path(str(Config.get("projects") or "~/Projects")).expanduser().resolve()
 
 
@@ -666,8 +619,6 @@ def words(text):
 
 
 def split_text(text, size):
-    """Text in chunks of at most size chars (at least 200), split between paragraphs where it can
-    (a longer paragraph is cut)."""
     size, chunks, current = max(size, 200), [], ""
     for para in re.split(r"\n\s*\n", text):
         para = para.strip()
@@ -684,14 +635,10 @@ def split_text(text, size):
 
 
 def fingerprint(text):
-    """A short fixed key for some text: the same text, the same key."""
     return hashlib.sha1(text.encode("utf-8")).hexdigest()
 
 
 def after_what_they_use(starts, uses, known):
-    """Paths in an order where each comes after the paths it uses (depth first from starts, in
-    their order; a cycle is broken where it closes). uses(path): the paths it uses; known(path):
-    whether a path takes part at all."""
     order, seen = [], set()
 
     def visit(path, trail=()):
@@ -712,8 +659,6 @@ def similarity(a, b):
 
 
 def groups_fitting(items, room, size=len):
-    """Items in order, grouped so that each group fits in room chars (an item larger than room is
-    a group of its own): size(item) chars each, and one more for its line break."""
     groups, used = [], room + 1
     for item in items:
         need = size(item) + 1

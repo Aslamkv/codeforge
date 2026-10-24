@@ -1,5 +1,3 @@
-"""KNW: what Tinker knows beyond the model: lessons, toolchain fixes, and what it learns from the web."""
-
 import json
 
 import pytest
@@ -171,8 +169,6 @@ def test_remember_toolchain_without_its_project_commands(tinker_home):
 
 
 class EmbedServer:
-    """Ollama's /api/embed: a vector per text (its length and its count of 'a'), counting the requests."""
-
     def __init__(self, broken=False):
         self.requests, self.broken = [], broken
 
@@ -296,8 +292,6 @@ def test_relevant_chunks():
 
 
 class FakeInternet:
-    """The Internet plugin, answering from a script of pages."""
-
     def __init__(self, pages=None, up=True):
         self.pages, self.up = pages or {}, up
 

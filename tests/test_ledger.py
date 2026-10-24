@@ -1,5 +1,3 @@
-"""LED: the ledger: each message in a chat with when it goes, and each thing shown, for history."""
-
 import time
 
 import pytest

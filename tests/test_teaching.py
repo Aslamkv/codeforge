@@ -1,5 +1,3 @@
-"""TCH: asking what Tinker keeps, and teaching it: checked on this machine and the web before anything changes."""
-
 import json
 import sys
 
@@ -23,8 +21,6 @@ PAGE = {"title": "Ruff formatter", "url": "https://docs.astral.sh/ruff/formatter
 
 
 class FakeWeb:
-    """The Internet plugin, scripted: every search finds the pages given, and each is fetched as it is."""
-
     def __init__(self, pages=(PAGE,)):
         self.pages, self.queries = list(pages), []
 
@@ -44,8 +40,6 @@ class FakeWeb:
 
 @pytest.fixture
 def kept(home_store):
-    """Python's toolchain, which formats with black and lints with ruff, a lesson that says to use both, and a fact
-    learned about Flask."""
     python = Knowledge("Python", "r1")
     python.remember_toolchain(Toolchain(BLACK_AND_RUFF))
     python.add_lessons([{"text": "Format Python with black before linting with ruff", "phase": "toolchain",
@@ -57,7 +51,6 @@ def kept(home_store):
 
 
 def numbered_item(memory, text, kind):
-    """The number an item is shown with to a teaching about text."""
     items = memory.about(text)
     return next(number for number, item in enumerate(items, 1) if item["kind"] == kind and "black" in item["text"])
 
@@ -317,7 +310,6 @@ def test_ask_and_teach_report_through_a_tracker_and_run_as_tasks(kept, measured_
 WRONG = "The Craft says to write tests after the code"
 
 def shelved():
-    """Something read: The Craft (#1), whose one fact got its chapter wrong (it says tests come first)."""
     Readings.save({"number": 1, "title": "The Craft", "author": "", "source": "craft.md", "fingerprint": "f",
                    "added": "2026-10-24 10:00", "topic": "read-1", "survey": None, "chapters": [
                        {"number": 1, "title": "Testing", "kind": "body", "state": "read",

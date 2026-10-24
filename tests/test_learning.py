@@ -1,6 +1,3 @@
-"""Learning a language or a tool by its slots, with a scripted web plugin, a model and embeddings that count their
-calls, and no real network."""
-
 import hashlib
 import json
 import re
@@ -18,10 +15,6 @@ from tinkerkit.slots import PROFILES, Selector, missing, short_slots, web_slots
 
 
 class FakeWeb:
-    """The Internet plugin, scripted. answers: what each search gives in turn (a list of results, None for a
-    failure, "429" for a rate limit; the last repeats); pages: {url: HTML} its fetcher reads (a missing one
-    answers HTTP 404, None is refused by robots.txt); fallback: {url: text} the plugin's own fetch gives."""
-
     def __init__(self, answers=((),), pages=None, fallback=None, up=True):
         self.answers, self.pages, self.fallback, self.up = list(answers), pages or {}, fallback or {}, up
         self.queries, self.fetched, self.fallback_asked, self.limited = [], [], [], False
@@ -70,7 +63,6 @@ class FakeFetcher:
 
 
 class CountingModel:
-    """A model that counts its calls; replies: {label start: data, or a function of the prompt's parts}."""
     name = "fake-model"
 
     def __init__(self, replies=None):
@@ -90,7 +82,6 @@ class CountingModel:
 
 
 class CountingEmbeddings:
-    """Embeddings that count their calls: each text a vector of its hash, so only the same text is close."""
     name, failed = "fake-embed", ""
 
     def __init__(self):
@@ -119,7 +110,6 @@ def result(url, title, snippet=""):
 
 
 def html(*sections):
-    """A page of sections (heading, paragraph), each paragraph long enough to count."""
     return "<html><body><main>" + "".join(f"<h2>{heading}</h2><p>{(paragraph + ' ') * 10}</p>"
                                           for heading, paragraph in sections) + \
            "</main></body></html>"
@@ -165,7 +155,6 @@ MINOR_VERSION_DOC_PAGES = {
 
 
 def digest(parts):
-    """A digest reply: a fact citing the first passage given, and one citing none (dropped)."""
     passages = next(part.text for part in parts if part.title == "Passages")
     question = next(part.text for part in parts if part.title == "Question")
     first = re.search(r"\[(P\d+)\]", passages).group(1)

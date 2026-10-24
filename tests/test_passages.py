@@ -1,5 +1,3 @@
-"""Fetched pages as passages: main content, under headings, code whole, repeats dropped."""
-
 import pytest
 
 from tinkerkit.passages import Block, Cleaner, Page, Passage, text_blocks

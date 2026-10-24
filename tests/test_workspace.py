@@ -1,5 +1,3 @@
-"""WS: the project's files, the commands run in it, and what their output says."""
-
 import time
 
 import pytest

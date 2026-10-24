@@ -1,5 +1,3 @@
-"""The Internet plugin: web search and page reading through a backend."""
-
 import html
 import html.parser
 lazy import json
@@ -27,14 +25,6 @@ Limit = namedtuple("Limit", "whole least")
 
 
 class Internet:
-    """The Internet plugin: web search and web fetch through the backend the setting "web" names
-    (one of backends()), and, only when set, its "web_fallback": what the first cannot answer, the
-    fallback is asked, and a first backend that is not usable (no key) leaves the fallback alone.
-    Used only when asked: by tinker learn, by the recall phase of a run started with --web, and by research
-    TOPIC from a chat (channels); nothing else goes online. Asked for and not usable, it says why before
-    anything starts. Its calls never raise: what fails gives None and why() says why. A moment's
-    trouble (a timeout, a rate limit) is asked again once; a backend that cannot be reached twice in
-    a row is not asked again by the same command, and once none is left the run carries on without."""
     RETRY_PAUSE_SECONDS = 3
     FAILURES_BEFORE_GONE = 2
     LEARN_LIMITS = {
@@ -51,7 +41,6 @@ class Internet:
         self.unusable_backends = reasons
 
     def ready_backends(self):
-        """([the backends set, in order, that can be used], [why each of the others cannot])."""
         ready, reasons = [], []
         timeout = float(Config.get("web_timeout"))
         for name in dict.fromkeys(name for name in (Config.get("web"), Config.get("web_fallback")) if name):
@@ -66,8 +55,6 @@ class Internet:
 
     @staticmethod
     def required(option):
-        """The plugin, for the option that asks for it: its settings checked and a backend ready
-        (else an error that says why, before anything starts)."""
         Internet.check()
         internet = Internet()
         if not internet.available():
@@ -78,7 +65,6 @@ class Internet:
 
     @staticmethod
     def state():
-        """"ready" (with the backends in use), or why the plugin would not work."""
         try:
             Internet.check()
         except SystemExit as exc:
@@ -91,7 +77,6 @@ class Internet:
 
     @staticmethod
     def check():
-        """web, web_fallback, web_timeout, learn_missing and the limits of learning are usable."""
         for key in ("web", "web_fallback"):
             Internet.check_backend_name(key)
         Internet.check_timeout()
@@ -127,7 +112,6 @@ class Internet:
 
     @staticmethod
     def backends():
-        """The web backends, by the name the setting "web" gives one: add a new one here."""
         return {"ollama": OllamaWeb, "duckduckgo": DuckDuckGoWeb}
 
     def available(self):
@@ -137,7 +121,6 @@ class Internet:
         return self.gone or self.errors.get(key) or "no answer"
 
     def rate_limited(self, key):
-        """Whether the last failure for this key was a rate limit (HTTP 429)."""
         return self.last_failure_status.get(key) == 429
 
     def describe(self):
@@ -149,20 +132,14 @@ class Internet:
 
     @staticmethod
     def page_fetcher(log=None):
-        """The plugin's own page fetcher (fetcher.Fetcher), set up from the fetch_* settings: pages read
-        straight from their sites, many at once. log hears of every request."""
         return Fetcher(int(Config.get("fetch_workers")), float(Config.get("fetch_timeout")),
                        int(Config.get("fetch_max_bytes")), float(Config.get("fetch_domain_delay")), log=log)
 
     @staticmethod
     def download(url, max_bytes):
-        """(bytes, why it failed) of a file at a web address (a book to read), by the plugin's own fetcher: no web
-        backend is needed for it."""
         return Internet.page_fetcher().download(url, max_bytes)
 
     def search(self, query, count):
-        """[{title, url, content}] the web search finds (web addresses only), or None. In a job, a search it made
-        before is answered from its journal."""
         return journaled({"search": query, "count": count}, lambda: self.searched(query, count))
 
     def searched(self, query, count):
@@ -179,8 +156,6 @@ class Internet:
                 "content": str(found.get("content") or "")}
 
     def fetch(self, url):
-        """{title, url, content} of a web page, its main text, or None: from the backends in turn. In a job, a page
-        it fetched before is given from its journal."""
         return journaled({"fetch": url}, lambda: self.fetched(url))
 
     def fetched(self, url):
@@ -192,8 +167,6 @@ class Internet:
         return {"title": str(page.get("title") or ""), "url": url, "content": str(page.get("content") or "")}
 
     def call(self, key, action, usable):
-        """What the first backend that answers gives (usable(result): True, or why not); None when
-        none does (errors[key] says why)."""
         reasons = []
         self.last_failure_status.pop(key, None)
         for backend in list(self.backends_used):
@@ -206,8 +179,6 @@ class Internet:
         return None
 
     def ask_backend(self, backend, action, usable, key):
-        """(result, "") from one backend, asked again once after a moment's trouble, or (None, why
-        not). A network failure counts towards leaving the backend (lost)."""
         for attempt in (1, 2):
             try:
                 result = action(backend)
@@ -227,8 +198,6 @@ class Internet:
         return BackendAnswer(None, "no answer")
 
     def lost(self, backend, why):
-        """A network failure: after FAILURES_BEFORE_GONE in a row, that backend is not asked again; once no
-        backend is left, the plugin is gone."""
         self.failures[backend.name] = self.failures.get(backend.name, 0) + 1
         if self.failures[backend.name] >= self.FAILURES_BEFORE_GONE and backend in self.backends_used:
             self.backends_used.remove(backend)
@@ -241,32 +210,22 @@ Config.checks.append(Internet.check)
 
 
 class WebBackend:
-    """What a web backend gives the Internet plugin. A new one subclasses this, implements its
-    three methods, and is added to Internet.backends() under the name the setting "web" uses.
-    search() and fetch() raise WebError when they cannot answer."""
-
     name = ""
 
     def __init__(self, timeout):
         self.timeout = timeout
 
     def unready(self):
-        """Why it cannot be used ("" when it can), found without going online (a missing key)."""
         raise NotImplementedError
 
     def search(self, query, count):
-        """[{"title", "url", "content"}]: up to count results for the query."""
         raise NotImplementedError
 
     def fetch(self, url):
-        """{"title", "url", "content"}: the page's main text."""
         raise NotImplementedError
 
 
 class OllamaWeb(WebBackend):
-    """Ollama's web search and web fetch (ollama.com/api/web_search and /api/web_fetch), with the
-    API key of a free ollama.com account (ollama.com/settings/keys) in the OLLAMA_API_KEY
-    environment variable, as Ollama's own tools take it."""
     BASE = "https://ollama.com/api"
     KEY_ENV = "OLLAMA_API_KEY"
     MAX_ANSWER_BYTES = 2_000_000
@@ -289,7 +248,6 @@ class OllamaWeb(WebBackend):
         return self.post("/web_fetch", {"url": url})
 
     def post(self, path, payload):
-        """The JSON ollama.com answers with; WebError when it does not."""
         request = urllib.request.Request(self.BASE + path, data=json.dumps(payload).encode("utf-8"), method="POST",
                                          headers={"Authorization": f"Bearer {self.key}",
                                                   "Content-Type": "application/json", "User-Agent": "Tinker"})
@@ -304,8 +262,6 @@ class OllamaWeb(WebBackend):
         return self.json_object(body)
 
     def refused(self, code, path):
-        """The WebError of an HTTP error: a key refused, a rate limit or the service down is the network
-        failing; a fetch's 5xx is that page, not the service."""
         hint = {401: f": check {self.KEY_ENV}", 403: f": check {self.KEY_ENV}", 429: ": its rate limit, try later"}
         return WebError(f"ollama.com answered HTTP {code}{hint.get(code, '')}",
                         network=code in (401, 403, 429) or (code >= 500 and path != "/web_fetch"),
@@ -323,9 +279,6 @@ class OllamaWeb(WebBackend):
 
 
 class DuckDuckGoWeb(WebBackend):
-    """Web search without a key or an account: DuckDuckGo's HTML results page; a page is fetched
-    from its own server and its main text taken from its HTML (no scripts, styles, menus). Only
-    the standard library: nothing to install."""
     SEARCH = "https://html.duckduckgo.com/html/"
     USER_AGENT = "Mozilla/5.0 (compatible; Tinker)"
     MAX_BYTES = 2_000_000
@@ -346,11 +299,9 @@ class DuckDuckGoWeb(WebBackend):
 
     @staticmethod
     def bot_check(body):
-        """Whether the page is DuckDuckGo asking whether a person searches, not its results."""
         return "anomaly" in body.lower() or "result__a" not in body
 
     def results(self, body):
-        """The results of a results page, without its ads (they link to DuckDuckGo itself)."""
         results = []
         for href, title, rest in self.RESULT_RE.findall(body):
             url = self.target(html.unescape(href))
@@ -365,8 +316,6 @@ class DuckDuckGoWeb(WebBackend):
 
     @classmethod
     def read_page(cls, url, timeout):
-        """{"title", "url", "content"} of a page read from its own server: HTML as its main text,
-        plain text and Markdown as they are."""
         body, kind = cls.get(url, timeout)
         if cls.is_html(body, kind):
             text = PageText.of(body)
@@ -377,12 +326,10 @@ class DuckDuckGoWeb(WebBackend):
 
     @staticmethod
     def is_html(body, kind):
-        """Whether a page is HTML, by its content type or, when a server names none, by how it starts."""
         return "html" in kind or body.lstrip()[:200].lower().startswith(("<!doctype html", "<html"))
 
     @classmethod
     def get(cls, url, timeout, form=None):
-        """(text, content type) of a GET (a POST of the form, if given); WebError when it fails."""
         data = urllib.parse.urlencode(form).encode("utf-8") if form else None
         headers = {"User-Agent": cls.USER_AGENT, "Accept-Language": "en"}
         request = urllib.request.Request(url, data=data, headers=headers)
@@ -402,7 +349,6 @@ class DuckDuckGoWeb(WebBackend):
 
     @staticmethod
     def target(href):
-        """The address a result links to (DuckDuckGo wraps it in its own redirect)."""
         if href.startswith("//"):
             href = "https:" + href
         query = urllib.parse.parse_qs(urllib.parse.urlsplit(href).query)
@@ -414,9 +360,6 @@ class DuckDuckGoWeb(WebBackend):
 
 
 class PageText(html.parser.HTMLParser):
-    """A web page's main text from its HTML: what is in <main> or <article> when it has one, else
-    the body; never scripts, styles, menus, headers, footers or forms. Headings, list items, code
-    blocks and paragraphs keep their own lines (code keeps its layout)."""
     SKIP = {"script", "style", "noscript", "nav", "header", "footer", "aside", "form", "svg", "button", "template",
             "iframe", "select"}
     BLOCKS = {"p", "div", "section", "article", "main", "li", "tr", "br", "h1", "h2", "h3", "h4", "h5", "h6",
@@ -476,17 +419,14 @@ class PageText(html.parser.HTMLParser):
 
     @staticmethod
     def opens_main(tag, attributes):
-        """Whether a tag opens the page's main content."""
         return tag in ("main", "article") or attributes.get("role") == "main"
 
     def not_content(self, tag, attributes):
-        """A script, a menu, a header or footer, or something hidden."""
         return tag in self.SKIP or attributes.get("role") in self.SKIP_ROLES \
             or attributes.get("aria-hidden") == "true" or "hidden" in attributes
 
     @staticmethod
     def line_mark(tag):
-        """How a block's line begins: a heading's #s, a list item's dash."""
         if tag in ("h1", "h2", "h3", "h4", "h5", "h6"):
             return "#" * int(tag[1]) + " "
         return "- " if tag == "li" else ""
@@ -521,7 +461,6 @@ class PageText(html.parser.HTMLParser):
 
     @staticmethod
     def collapsed(data):
-        """Text with its whitespace runs made one space (a run at either end kept as one)."""
         return (" " if data[0].isspace() else "") + " ".join(data.split()) + (" " if data[-1].isspace() else "")
 
     def add(self, text):
@@ -531,18 +470,12 @@ class PageText(html.parser.HTMLParser):
 
 
 class WebError(Exception):
-    """A web backend that could not answer; network: the backend cannot be reached at all (no
-    network, its service is down, its key refused), so it is not asked again once that repeats;
-    retry: it may answer if asked again in a moment (a timeout, its rate limit, a server error);
-    code: the HTTP status it answered with, if any."""
-
     def __init__(self, message, network=False, retry=False, code=None):
         super().__init__(message)
         self.network, self.retry, self.code = network, retry, code
 
 
 def unreached(exc):
-    """(why a request had no answer at all, whether it ran out of time)."""
     reason = first_line(str(getattr(exc, "reason", "") or exc) or type(exc).__name__, 160)
     return Unreached(reason, isinstance(exc, (TimeoutError, socket.timeout)) or "timed out" in reason)
 

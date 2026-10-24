@@ -1,13 +1,3 @@
-"""Asking Tinker what it keeps (Asker), and teaching it (Teacher). Both read what Tinker keeps as one list of
-items (Memory: each toolchain, fix, lesson, fact, finding, rule and command of the memory graph, the retired
-left out), the most related first. An answer comes from those items alone, each claim citing its item. A
-teaching changes nothing until it is checked: the model turns it into claims and the change it asks for, the
-claims are checked on this machine (commands that only show what is installed), on the web (pages of
-independent searches) and in what Tinker read (its passages), and the model weighs that evidence alone.
-Only when every claim holds on it, and the change follows from them, are the items shown wrong retired, the
-toolchain corrected and the lesson (or a book's corrected fact) kept, proven, with its sources. Anything less
-changes nothing, and says why. An answer reads the passages of what Tinker read that it is about too."""
-
 import re
 from collections import namedtuple
 
@@ -35,17 +25,12 @@ Follows = namedtuple("Follows", "follows why")
 
 
 class Memory:
-    """What Tinker keeps, as items a person asks about or corrects: {id, kind, text, status, group}, as the memory
-    graph has them, the retired left out."""
-
     def __init__(self, embeddings=None):
         self.items = [node for node in Graph.build().nodes.values()
                       if node["kind"] in ITEM_KINDS and node["status"] != "retired"]
         self.retriever = Retriever(embeddings)
 
     def about(self, text, limit=MEMORY_ITEMS_SHOWN):
-        """The items most related to text, the most related first: the more of an item's kind and language (or
-        topic) the text names, the earlier it comes; alike ones in the order their words and meaning rank them."""
         ranking = self.retriever.rank(text, [item["text"] for item in self.items])
         named = set(words(text))
         ranking.sort(key=lambda index: -self.named_in(self.items[index], named))
@@ -53,16 +38,12 @@ class Memory:
 
     @staticmethod
     def named_in(item, named):
-        """How many of an item's kind and language (or topic) the words name ("toolchains" names toolchain). A
-        language's toolchain counts its kind as named with its language: it is what that language's projects use,
-        however the words call it (tools, toolset, setup)."""
         group = item["group"] in named
         kind = any(word.startswith(item["kind"]) for word in named) or (group and item["kind"] == "toolchain")
         return group + kind
 
 
 def numbered(items):
-    """Items as a prompt and the person see them: [n] kind (where it belongs, status): text."""
     return "\n".join(item_line(number, item) for number, item in enumerate(items, 1))
 
 
@@ -71,26 +52,20 @@ def item_line(number, item):
 
 
 def moved_on(tracker, phase, said, icon):
-    """On to a phase (Tracker.DOING_AND_DONE): said, and the tracker (when there is one) moved on, so the chats show it."""
     say.step(said, icon)
     if tracker is not None:
         tracker.phase(phase)
 
 
 def ending(status, headline, details=()):
-    """How an ask or a teach ended, for its tracker (and so for the chats)."""
     return {"status": status, "headline": headline, "details": list(details)}
 
 
 class Asker:
-    """tinker ask QUESTION: answered from what Tinker keeps alone (no web), as a person answers: only what is
-    asked, nothing more. While it works, one status line says what on (on a terminal), and the tracker moves on."""
-
     def __init__(self, model, memory, tracker=None):
         self.model, self.memory, self.tracker = model, memory, tracker
 
     def answer(self, question):
-        """The answer said, and nothing else; the ending."""
         self.on_to("recall")
         with say.working_on(f"Looking through what Tinker keeps for: {first_line(question, 60)}"):
             items = self.memory.about(question)
@@ -120,9 +95,6 @@ class Asker:
 
 
 class Teacher:
-    """tinker teach WHAT: what Tinker keeps corrected by the person, once checked (the module says how). Several
-    things may be taught at once: each change is made when the claims it rests on hold, the others are said."""
-
     def __init__(self, model, internet, memory, tracker=None):
         self.model, self.internet, self.memory, self.tracker = model, internet, memory, tracker
         self.learner = Learner(model, internet, None)
@@ -130,7 +102,6 @@ class Teacher:
         self.readings = []
 
     def teach(self, teaching):
-        """The teaching checked, then each change it asks for made when its claims hold; the ending."""
         items = self.recalled(teaching)
         plan = self.understood(teaching, items)
         evidence, verdict = self.checked(teaching, plan, items)
@@ -143,7 +114,6 @@ class Teacher:
         return items
 
     def understood(self, teaching, items):
-        """The claims (facts and preferences), what checks the facts, and the changes, read by read_plan."""
         moved_on(self.tracker, "understand", "Working out what to check…", "🤔")
         parts = [Part("What Tinker keeps", numbered(items) or "(nothing yet)", True),
                  Part("What the person teaches", teaching, True)]
@@ -160,8 +130,6 @@ class Teacher:
         return plan
 
     def checked(self, teaching, plan, items):
-        """(evidence, verdict): the facts weighed on what this machine and the web show (unsure when nothing could
-        check them); the preferences honored as they are."""
         if not any(not claim["preference"] for claim in plan["claims"]):
             evidence, verdict = [], Verdict.unchecked(plan["claims"], "")
         else:
@@ -173,7 +141,6 @@ class Teacher:
         return Checked(evidence, verdict)
 
     def on_machine(self, commands):
-        """[{source, text}]: what each safe command shows here (the others are skipped, and said)."""
         kept, dropped = Learner.safe_commands(commands)
         for command in dropped:
             say.skip(f"Skipped `{command}`: only commands that show what is installed are run")
@@ -182,7 +149,6 @@ class Teacher:
                 for shown in self.learner.look_at_machine(kept)]
 
     def on_web(self, searches):
-        """[{source, text}]: of each page the searches find, the parts most about them."""
         if not searches:
             return []
         moved_on(self.tracker, "search", "Searching the web for sources…", "🔎")
@@ -196,7 +162,6 @@ class Teacher:
         return [{"source": page["url"], "text": f"{page['title']}\n{page['content']}"} for page in pages]
 
     def in_readings(self, claims):
-        """[{source, text}]: of the readings the teaching is about, the passages most about each fact, each once."""
         if not self.readings:
             return []
         found = [passage for claim in claims if not claim["preference"]
@@ -206,7 +171,6 @@ class Teacher:
         return found
 
     def judged(self, teaching, plan, items, evidence):
-        """The model's verdict on each fact and on each change a fact is for, from the evidence alone (Verdict)."""
         moved_on(self.tracker, "judge", "Weighing the evidence…", "⚖️")
         claims = list(enumerate(plan["claims"], 1))
         parts = [Part("What the person teaches", teaching, True),
@@ -230,7 +194,6 @@ class Teacher:
         return verdict
 
     def corrected(self, teaching, plan, items, evidence, verdict):
-        """Each change made whose claims hold (its lines said), the others said with why; the ending."""
         moved_on(self.tracker, "correct", "Correcting what Tinker keeps…", "✏️")
         reason = f"corrected by what you taught: {first_line(teaching, 120)}"
         made, skipped = [], []
@@ -251,8 +214,6 @@ class Teacher:
         return ending("done", f"Corrected: {len(made)} change(s)", details)
 
     def made(self, change, language, items, reason, sources):
-        """One change made: the items it shows wrong retired, the toolchain's commands replaced, the lesson kept;
-        a line for each."""
         lines = self.retired([items[number - 1] for number in change["retire"]], reason)
         lines.append(self.toolchain_corrected(language, change["toolchain"]))
         lines.append(self.lesson_kept(language, change["lesson"], sources))
@@ -261,7 +222,6 @@ class Teacher:
 
     @staticmethod
     def retired(items, reason):
-        """A line for each item retired (a toolchain and the person's commands are corrected, never retired)."""
         return [f"Retired {item['kind']}: {first_line(item['text'], 100)}" for item in items
                 if retire_item(item, reason)]
 
@@ -285,7 +245,6 @@ class Teacher:
 
     @staticmethod
     def fact_kept(fact, items, sources):
-        """What a book (or another topic) really says, kept in place of the item it corrects; a line, or ""."""
         if not fact:
             return ""
         kind, _, rest = items[fact["about"] - 1]["id"].partition(":")
@@ -298,19 +257,13 @@ class Teacher:
         return f"Fact kept for {(Library.read(slug) or {}).get('name', slug)}: {kept['text']}"
 
 def quoted(passages):
-    """Passages of what was read, as a prompt shows them: each under its title and chapter."""
     return "\n\n".join(f"[{passage['source']}]\n{passage['text']}" for passage in passages)
 
 def marked(teaching):
-    """Whether the person marked a preference in what they taught (the word prefer): else every claim is a fact."""
     return bool(PREFERENCE_RE.search(teaching))
 
 
 def read_plan(data, count, preferences=True, readings=False):
-    """The claims ({text, preference}; with preferences false, each is a fact), the commands and searches that
-    check the facts (each within its limit), the language and the changes (read_changes; count: how many items
-    were shown). ValueError when there is no claim, nothing checks the facts (readings: their passages do), or
-    there is no change."""
     texts = lambda key, limit: [str(text).strip() for text in data.get(key) or [] if str(text).strip()][:limit]
     claims = [dict(claim, preference=claim["preference"] and preferences) for claim in read_claims(data.get("claims"))]
     plan = {"claims": claims, "commands": texts("commands", TEACH_CHECK_COMMANDS),
@@ -326,12 +279,10 @@ def read_plan(data, count, preferences=True, readings=False):
 
 
 def states_facts(claims):
-    """Whether any claim is a fact (the rest are the person's preferences, which need no check)."""
     return any(not claim["preference"] for claim in claims)
 
 
 def read_claims(given):
-    """[{text, preference}], at most TEACH_CLAIMS; a claim given as text alone is a fact."""
     claims = []
     for claim in given if isinstance(given, list) else []:
         claim = claim if isinstance(claim, dict) else {"text": claim}
@@ -342,9 +293,6 @@ def read_claims(given):
 
 
 def read_changes(given, claims, count):
-    """[{claims, retire, toolchain, lesson, fact}]: each change that rests on a claim (1 to claims) and retires an
-    item shown (1 to count), replaces toolchain commands, keeps a lesson or keeps a fact in place of an item shown
-    (which it retires). ValueError when two change one toolchain key."""
     changes, keys = [], set()
     for change in given if isinstance(given, list) else []:
         if not isinstance(change, dict):
@@ -366,7 +314,6 @@ def read_changes(given, claims, count):
 
 
 def changes_something(change):
-    """Whether a change rests on a claim and retires, replaces or keeps something."""
     return change["claims"] and (change["retire"] or change["toolchain"] or change["lesson"])
 
 
@@ -375,8 +322,6 @@ def numbers(given, highest):
 
 
 def read_toolchain(given):
-    """{key: command} of TEACHABLE_TOOLCHAIN_KEYS (setup: a list of commands), the empty ones left out. ValueError for any other
-    key or form, so the model is asked again with why rather than a part of its change dropped unsaid."""
     if not given:
         return {}
     if not isinstance(given, dict):
@@ -392,8 +337,6 @@ def read_toolchain(given):
 
 
 def command_list(key, value):
-    """The commands a toolchain value gives: a list as it is; setup's line split at && (it is a list of commands);
-    any other line whole. ValueError when it is neither text nor a list."""
     if isinstance(value, list):
         commands = value
     elif isinstance(value, str):
@@ -404,26 +347,22 @@ def command_list(key, value):
 
 
 def read_lesson(given):
-    """{phase, text} of a usable lesson, else None."""
     given = given if isinstance(given, dict) else {}
     text, phase = str(given.get("text") or "").strip(), str(given.get("phase") or "").strip().lower()
     return {"phase": phase, "text": text} if text and phase in LESSON_PHASES else None
 
 
 def read_fact(given, count):
-    """{about, text} of a fact kept in place of an item shown (about: 1 to count), else None."""
     given = given if isinstance(given, dict) else {}
     text, about = str(given.get("text") or "").strip(), given.get("about")
     return {"about": about, "text": text} if text and type(about) is int and 1 <= about <= count else None
 
 def judged_changes(plan):
-    """(number, change) of the changes that rest on a fact: the judge weighs them (the others rest on preferences)."""
     return [JudgedChange(number, change) for number, change in enumerate(plan["changes"], 1)
             if any(not plan["claims"][cited - 1]["preference"] for cited in change["claims"])]
 
 
 def change_text(change, language, items):
-    """A change, as the judge reads it."""
     lines = [f"Retire: {item_line(number, items[number - 1])}" for number in change["retire"]]
     lines += [f"Toolchain of {language}: {key} becomes `{shown(command)}`" for key, command in change["toolchain"].items()]
     if change["lesson"]:
@@ -434,7 +373,6 @@ def change_text(change, language, items):
 
 
 def change_summary(change):
-    """A change in a few words, for the person: its lesson, else what it replaces or retires."""
     if change["lesson"]:
         return first_line(change["lesson"]["text"], 100)
     if change["fact"]:
@@ -445,12 +383,10 @@ def change_summary(change):
 
 
 def shown(command):
-    """A toolchain command as a person reads it (setup's list joined as a shell runs it)."""
     return " && ".join(command) if isinstance(command, list) else command
 
 
 def retire_item(item, reason):
-    """An item (as Memory gives it) retired where it is kept; whether it was. A toolchain or a command is not."""
     kind, _, rest = item["id"].partition(":")
     if kind in ("fact", "finding", "rule"):
         slug, _, claim_id = rest.rpartition(":")
@@ -462,23 +398,17 @@ def retire_item(item, reason):
 
 
 class Verdict:
-    """The verdict on a teaching's claims, by number: a preference is honored; a fact holds (on the evidence it
-    cites), is wrong or is unsure, with why. And, for each change a fact is for, whether it follows (with why)."""
-
     def __init__(self, claims, follows):
         self.claims_by_number, self.follows_by_change = claims, follows
 
     @classmethod
     def unchecked(cls, claims, why):
-        """Nothing weighed the facts: each is unsure (why), each preference honored."""
         return cls({number: {"text": claim["text"], "verdict": "preference" if claim["preference"] else "unsure",
                              "why": "" if claim["preference"] else why, "evidence": []}
                     for number, claim in enumerate(claims, 1)}, {})
 
     @classmethod
     def read(cls, data, plan, evidence):
-        """The verdict in the judge's reply: one for each fact (a fact said to hold with no evidence it can cite is
-        unsure), and whether each change a fact is for follows. ValueError when one is missing or unknown."""
         verdict = cls.unchecked(plan["claims"], "")
         given = {item.get("claim"): item for item in data.get("claims") or [] if isinstance(item, dict)}
         for number, claim in verdict.claims_by_number.items():
@@ -499,7 +429,6 @@ class Verdict:
         return verdict
 
     def why_not(self, number, change):
-        """Why a change is not made ("" when it is): a claim it rests on does not hold, or it does not follow."""
         for claim_number in change["claims"]:
             if self.claims_by_number[claim_number]["verdict"] not in ("holds", "preference"):
                 return f"claim {claim_number} is {self.claims_by_number[claim_number]['verdict']}"
@@ -507,7 +436,6 @@ class Verdict:
         return "" if follows else f"does not follow: {why or 'no reason given'}"
 
     def sources(self, change, evidence):
-        """Where what a change rests on comes from: the evidence its facts cite, and the person for a preference."""
         found = [evidence[cited - 1]["source"] for number in change["claims"]
                  for cited in self.claims_by_number[number]["evidence"]]
         if any(self.claims_by_number[number]["verdict"] == "preference" for number in change["claims"]):
@@ -524,5 +452,4 @@ class Verdict:
             {"holds": say.done, "wrong": say.fail}.get(claim["verdict"], say.warn)(line)
 
     def details(self):
-        """(label, value) of each claim's verdict."""
         return [Detail("Your preference" if claim["verdict"] == "preference" else claim["verdict"].capitalize(), claim["text"] + (f" ({claim['why']})" if claim["why"] else "")) for claim in self.claims_by_number.values()]

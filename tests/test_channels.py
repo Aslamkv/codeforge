@@ -1,5 +1,3 @@
-"""CHN: the chat plugin: Telegram, the channels' settings and tinker channel (the Bot API is faked)."""
-
 import io
 import json
 import re
@@ -19,8 +17,6 @@ from tinkerkit.settings import Store
 
 
 class BotAPI:
-    """Telegram's Bot API, scripted per method: an answer is a result, (status, body) or an exception."""
-
     def __init__(self, **answers):
         self.answers = {name: list(value) if isinstance(value, list) else [value] for name, value in answers.items()}
         self.calls, self.headers_and_bodies = [], []

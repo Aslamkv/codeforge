@@ -1,5 +1,3 @@
-"""Planning a cycle: what was learned that it needs, the spec, and the contracts where files meet."""
-
 import ast
 lazy import json
 lazy import math
@@ -28,14 +26,6 @@ ContractPrompt = namedtuple("ContractPrompt", "parts left")
 
 
 class Recaller(Phase):
-    """0. Recall: before planning, everything learned is searched for what the request needs, by
-    words and by meaning (Retriever), so the call that follows sees the most related topics first:
-    it decides which this cycle uses and, in a run with --web, which it should learn now that it has
-    not (up to the setting learn_missing): a framework the request names, a technique, the
-    language. Those are learned (SlotLearner); the chosen topics' facts, ranked by the same search, are
-    kept in the project ("learned"), so they go into its prompts and a resumed run uses the same.
-    Without --web there is nothing to learn, so no call: the topics used are those the request names
-    or is close to in meaning (relevant)."""
     TITLE = "Recall (what Tinker has learned)"
 
     def run(self, cycle):
@@ -61,13 +51,11 @@ class Recaller(Phase):
 
     @staticmethod
     def say_used(cycle):
-        """The topics the cycle uses, by their names."""
         names = [(Library.read(slug) or {}).get("name", slug) for slug in cycle["topics"]]
         say.info(f"Using what was learned about: {', '.join(names) or 'nothing'}", "🧠")
 
     @staticmethod
     def ranked_topics(known, query, retriever):
-        """The learned topics, the most related to the request first, by what they hold."""
         items = Library.items(known)
         order = retriever.rank(query, [Library.searched(item) for item in items], prune=True)
         if known:
@@ -75,8 +63,6 @@ class Recaller(Phase):
         return list(dict.fromkeys(items[index]["topic"] for index in order))
 
     def ask(self, cycle, query, known, ranked, can_learn):
-        """(slugs of learned topics to use, topics to learn now). The topics are listed the most
-        related to the request first (Retriever), as many as fit."""
         parts = self.recall_parts(cycle, query, known, ranked, can_learn)
         try:
             return self.session.ask_until_usable(Prompts.RECALL_SYSTEM, parts, "Recall",
@@ -86,7 +72,6 @@ class Recaller(Phase):
             return RecallChoice([], [])
 
     def recall_parts(self, cycle, query, known, ranked, can_learn):
-        """The recall prompt: the request, the language, whether it may learn now, then the topics that fit."""
         fixed = [Part("Request", query, True, keep="head"),
                  Part("Project language", self.project.language if cycle["id"] != "base" else ""),
                  Part("Learning now", f"possible: name up to {can_learn} topics to learn" if can_learn
@@ -98,7 +83,6 @@ class Recaller(Phase):
 
     @staticmethod
     def topic_listing(known, ranked, room):
-        """One line per topic ("slug: name, summary"), in the order given, as many as fit room."""
         lines, used = [], 0
         for slug in ranked:
             entry = known[slug]
@@ -111,7 +95,6 @@ class Recaller(Phase):
 
     @staticmethod
     def read_choice(reply, known):
-        """(the known topics to use, the topics to learn: one per topic, as Flask and flask are one)."""
         data = reply.json()
         use = [str(slug).strip() for slug in data.get("use", []) if str(slug).strip() in known]
         learn = [" ".join(str(topic).split())[:80] for topic in data.get("learn", []) if str(topic).strip()]
@@ -121,8 +104,6 @@ class Recaller(Phase):
 
     @staticmethod
     def relevant(known, query):
-        """The learned topics a request needs, with no model call: those whose name it says, and
-        those close to it in meaning (TOPIC_RELEVANT_SIMILARITY, by the embedding model when there is one)."""
         text = query.lower()
         named = [slug for slug, entry in known.items()
                  if any(mentions(text, name) for name in (str(entry.get("name") or slug), entry.get("language") or slug))]
@@ -134,10 +115,6 @@ class Recaller(Phase):
         return list(dict.fromkeys(named + close))
 
     def learn(self, topic, internet, retriever):
-        """The slug of what was learned now for a topic (a topic that is a language: that language's
-        slug, which it may have been learned under already), or None and why not (learning is
-        optional: the run goes on); indexed with the embeddings the search uses (None after they
-        failed: then not indexed)."""
         if not internet.available():
             say.skip(f"Not learning {topic}: {internet.problem()}")
             return None
@@ -151,8 +128,6 @@ class Recaller(Phase):
         return Library.language(entry["language"]) if entry.get("kind") == "language" else Library.slug(topic)
 
     def keep_facts(self, cycle, query, retriever):
-        """The facts of the chosen topics, the most related to the request first, kept in the
-        project ("learned", with earlier cycles' after them) for the prompts of every phase."""
         chosen = {slug: Library.read(slug) for slug in cycle["topics"]}
         items = [item for item in Library.items({slug: entry for slug, entry in chosen.items() if entry})
                  if item["phase"] != "summary"]
@@ -163,9 +138,6 @@ class Recaller(Phase):
         self.keep_out_inapplicable()
 
     def keep_out_inapplicable(self):
-        """What the project does not need is kept out of its prompts ("inapplicable"), proven or not: what
-        applies only to code (its "when") the spec did not say the project has (the spec's "situations"), and
-        what names a tool a project here cannot count on."""
         known = self.known_rules()
         left_out = self.for_other_code(known) | self.needing_tools_missing_here(known)
         self.project.spec["inapplicable"] = sorted(left_out)
@@ -173,36 +145,26 @@ class Recaller(Phase):
             say.skip(f"Left out {len(left_out)} learned rule(s) or fact(s) this project does not need")
 
     def known_rules(self):
-        """What was learned for the project: the chosen topics' items, and the language's proven facts once the
-        language is known."""
         return self.project.spec.get("learned", []) + (self.session.knowledge.facts(FACT_PHASES)
                                                        if self.project.language else [])
 
     def situations(self):
-        """The distinct kinds of code learned rules apply only to (their "when"), for the spec to choose from."""
         return list(dict.fromkeys(item["when"] for item in self.known_rules() if item.get("when")))
 
     def for_other_code(self, known):
-        """The ids of what applies only to code the spec did not say the project has."""
         has = set(self.project.spec.get("situations", []))
         return {item["id"] for item in known if item.get("when") and item.get("id") and item["when"] not in has}
 
     def needing_tools_missing_here(self, known):
-        """The ids of what names a learned tool a project here cannot count on (Knowledge.unavailable_tools)."""
         missing = self.session.knowledge.unavailable_tools()
         return {item["id"] for item in known if item.get("id") and any(mentions(item["text"], name) for name in missing)}
 
     @staticmethod
     def essentials_first(ranked):
-        """What the toolchain is built from (the tools, what is installed), then a language's rules, then the
-        facts: a full prompt drops its last lines first."""
         order = lambda item: 0 if item["phase"] in ("tools", "machine") else 1 if item.get("kind") == "rule" else 2
         return sorted(ranked, key=order)
 
     def use_language(self, cycle):
-        """The project's language as learned (tinker learn): used by every cycle of a project
-        in it, not left to the search; once the spec has named the language, its facts join the
-        cycle's (the spec phase calls this for a new project)."""
         slug = Library.language(self.project.language)
         if not slug or slug in cycle.get("topics", []):
             return
@@ -214,14 +176,6 @@ class Recaller(Phase):
 
 
 class SpecWriter(Phase):
-    """1. Spec: one call plans the project as a small, testable spec: the criteria (each one
-    behaviour the request clearly asks for, with one unit test), the files that hold them and
-    what uses what, the file a person starts (what a person uses has one, with the simplest
-    interface that fits; only code for other code has none) and,
-    for a new project, the toolchain (the one that worked before for the language, reused). What
-    the request does not ask for waits until the user asks (tinker add, tinker fix).
-    A plan the person confirms before anything is built (the conversation's way; --confirm) is a quick
-    draft (thinking low): the person reviews it, and changes it with tinker amend."""
     TITLE = "Plan: the spec"
 
     def run(self, cycle):
@@ -238,8 +192,6 @@ class SpecWriter(Phase):
         return system, parts + [self.situations_part()]
 
     def situations_part(self):
-        """The kinds of code some learned rules apply to, numbered, for the spec to say which this project has
-        (its other rules stay out of the prompts)."""
         listing = "\n".join(f"{number}. {when}" for number, when in enumerate(self.listed, 1))
         return Part('Code some learned rules are for: add "situations": [the numbers of those this project\'s code '
                     'will have] to the reply', listing, atomic=True)
@@ -269,16 +221,12 @@ class SpecWriter(Phase):
         ]
 
     def thinking(self, level):
-        """A think setting below the model's own: level when the model takes levels, off for "none"."""
         think = self.session.model.think
         if think in (None, False):
             return think
         return False if level == "none" else level if isinstance(think, str) else think
 
     def read_spec(self, reply, cycle):
-        """The plan, checked: criteria traced to the request, files (each with its kind, role and
-        the files it uses), the entry point (one of the files, or none) and, for a new project, a
-        usable toolchain."""
         data = reply.spec_json()
         criteria = self.criteria_from(data.get("criteria"), cycle)
         if not criteria:
@@ -302,12 +250,10 @@ class SpecWriter(Phase):
                 "toolchain": toolchain, "situations": self.chosen_situations(data.get("situations")), "data": data}
 
     def chosen_situations(self, numbers):
-        """The listed kinds of code the reply says the project has (by number)."""
         listed = getattr(self, "listed", [])
         return [listed[number - 1] for number in numbers or [] if isinstance(number, int) and 1 <= number <= len(listed)]
 
     def criteria_from(self, items, cycle, taken=()):
-        """The criteria the reply gives, each traced to the request (else dropped)."""
         request = asked(cycle) + "\n" + cycle.get("brief", "")
         out = []
         for item in items if isinstance(items, list) else []:
@@ -326,9 +272,6 @@ class SpecWriter(Phase):
 
     @staticmethod
     def traced(source, request):
-        """Whether a criterion's source is copied from the request: "setting" (a required setting's
-        message) or at least 60% of its words of 3+ letters appear in the request. A note in brackets
-        after the quote (what the criterion adds to the words it quotes) is not part of the quote."""
         if source.strip().lower().strip('"') == "setting":
             return True
         quoted = re.sub(r"\([^)]*\)", " ", source)
@@ -353,8 +296,6 @@ class SpecWriter(Phase):
             return 2
 
     def send_back_wrong_working(self, criteria):
-        """A criterion whose working is wrong is sent back, twice at most (then the review of a failing test
-        is left to find it)."""
         wrong = [f"in \"{criterion['behaviour']}\" the working {mistake}" for criterion in criteria
                  for mistake in Working.mistakes(criterion["behaviour"])]
         self.sent_back = getattr(self, "sent_back", 0) + bool(wrong)
@@ -364,7 +305,6 @@ class SpecWriter(Phase):
                              "and file stays as it was")
 
     def place_tests(self, criteria, listed):
-        """Each criterion's test in a test file of its own, as the plan lists its test files."""
         listed_tests = [str(Path(str(item.get("path", "")).strip())) for item in listed
                         if isinstance(item, dict) and str(item.get("kind") or "").strip().lower() == "test"]
         listed_code = {str(Path(str(item.get("path", "")).strip())) for item in listed
@@ -380,19 +320,15 @@ class SpecWriter(Phase):
 
     @staticmethod
     def outside_a_test_file(ref, listed_code):
-        """Whether a test is not in a test file of its own: no file named, no file type, or a code file."""
         return "::" in ref.file or not Path(ref.file).suffix or ref.file in listed_code
 
     def listed_test_file(self, file, listed_tests):
-        """The test file a criterion names, as the plan lists it: a test named the language's own
-        way ("calculator::test_add" for tests/calculator.rs) names its file by the file's stem."""
         if file in listed_tests or file in self.project.files or not listed_tests:
             return file
         same_stem = [path for path in listed_tests if Path(path).stem == Path(file).stem]
         return same_stem[0] if same_stem else listed_tests[0] if len(listed_tests) == 1 else file
 
     def planned_files(self, listed, test_files):
-        """{path: entry} of the files the plan lists, and of each test file the criteria name."""
         files = {}
         for item in listed:
             if isinstance(item, (dict, str)):
@@ -404,8 +340,6 @@ class SpecWriter(Phase):
         return files
 
     def without_unneeded_settings(self, files, criteria):
-        """The files planned, without a settings file no spec point needs: one is planned only when a criterion
-        is about a setting (nothing is built that the spec does not need)."""
         if ENV_EXAMPLE not in files or ENV_EXAMPLE in self.project.files or any(map(self.about_a_setting, criteria)):
             return files
         say.skip(f"Left out {ENV_EXAMPLE}: no spec point is about a setting")
@@ -418,8 +352,6 @@ class SpecWriter(Phase):
             or bool(re.search(r"\bsettings?\b", text))
 
     def planned_entry(self, given, files):
-        """The file a person starts: one of the files (named by its path, or by its name alone when only one
-        has it), or none."""
         entry = str(Path(str(given or "").strip())) if str(given or "").strip() else ""
         named = [path for path in list(files) + list(self.project.files) if Path(path).name == entry]
         entry = named[0] if self.unplanned(entry, files) and len(set(named)) == 1 else entry
@@ -428,12 +360,9 @@ class SpecWriter(Phase):
         return entry
 
     def unplanned(self, path, files):
-        """Whether a file is neither planned now nor in the design."""
         return path not in files and path not in self.project.files
 
     def send_back_unrun_program(self, criteria, entry, toolchain):
-        """A program a person runs is checked as it is run: a plan with no criterion that runs it is sent back,
-        twice at most."""
         run = str((toolchain or {}).get("run") or "") if isinstance(toolchain, dict) else ""
         unrun = not any(self.runs_program(criterion["behaviour"], entry, run) for criterion in criteria)
         self.sent_back = getattr(self, "sent_back", 0) + unrun
@@ -444,9 +373,6 @@ class SpecWriter(Phase):
 
     @staticmethod
     def runs_program(text, entry, run):
-        """Whether a criterion uses the program as a person runs it: it calls its entry point (main(),
-        the entry module's own function), names its run command, is written as a command line
-        ("roman 42 prints XLII"), says it runs it, or is about its input, output or exit code."""
         lower, stem = text.lower(), Path(entry).stem.lower()
         command = " ".join(run.split()[:2]).lower()
         return ("main(" in lower or f"{stem}(" in lower or f"{stem}." in lower and "main" in lower
@@ -456,7 +382,6 @@ class SpecWriter(Phase):
                                   r"standard (input|output)|exit code|exits)\b", lower)))
 
     def take(self, cycle, plan):
-        """A plan read from a spec reply, made the cycle's spec."""
         self.project.spec["situations"] = list(dict.fromkeys(self.project.spec.get("situations", [])
                                                              + plan["situations"]))
         if cycle["id"] == "base" or not self.project.language:
@@ -475,20 +400,17 @@ class SpecWriter(Phase):
         self.session.save()
 
     def ensure_run_command(self, entry):
-        """A program a person runs needs its run command: one the toolchain lacks is asked for."""
         if entry and not self.project.toolchain.run:
             say.step(f"The toolchain does not say how to start {entry}: asking for it", "🤔")
             self.project.toolchain = Designer(self.session).ask_toolchain()
 
     def keep_scope(self, cycle, data):
-        """What the cycle must not do, the constraints it keeps, and the sample data its adapters stand for."""
         cycle["non_goals"] = self.strings(data.get("non_goals"), 12)
         cycle["constraints"] = self.strings(data.get("constraints"), 8)
         sample = data.get("data", "")
         cycle["data"] = sample if isinstance(sample, str) else json.dumps(sample)
 
     def say_planned(self, cycle, plan):
-        """The plan in a few lines: its language, criteria and files, its toolchain when new, what is known."""
         starts = f"; a user starts {self.project.spec['entry']}" if self.project.spec.get("entry") else ""
         say.info(f"Language: {self.project.language}; {len(self.project.cycle_criteria(cycle))} criteria; files: "
                  f"{', '.join(cycle['files'])}{starts}", "📋")
@@ -497,8 +419,6 @@ class SpecWriter(Phase):
         say.info(f"Learned so far: {self.session.knowledge.summary()}", "🧠")
 
     def keep_files(self, cycle, files, entry):
-        """The planned files go into the design (a file planned before keeps what it had), in
-        build order; a new project gets a README."""
         if cycle["id"] == "base" and not self.has_docs(files):
             files.append({"path": "README.md", "kind": "docs", "role": "how to set up, run and test it",
                           "contract": [], "uses": []})
@@ -517,7 +437,6 @@ class SpecWriter(Phase):
 
     @staticmethod
     def has_docs(files):
-        """Whether one of the files is documentation (a README)."""
         return any(file["kind"] == "docs" for file in files)
 
     @staticmethod
@@ -525,11 +444,6 @@ class SpecWriter(Phase):
         return [str(item) for item in (items or []) if str(item).strip()][:limit]
 
     def amend(self, cycle, change):
-        """The waiting plan changed as the person asks, before anything is built: one call without thinking
-        gives the whole spec again, from the spec as it is and the change, checked as the first one was and
-        numbered from where the cycle began; then the cycle plans its design and review again (they wait
-        once more). What changed (+ added, ~ changed, - removed) is kept for the summary; a reply that
-        never works leaves the plan as it was."""
         before = self.project.cycle_criteria(cycle)
         current = self.current_spec(cycle, before)
         saved = (list(self.project.criteria), self.project.spec.get("counter", 0), dict(self.project.files))
@@ -553,7 +467,6 @@ class SpecWriter(Phase):
         self.session.save()
 
     def current_spec(self, cycle, criteria):
-        """The cycle's spec in the JSON a spec reply gives."""
         files = [{"path": path, "kind": self.project.files[path]["kind"],
                   "role": self.project.files[path].get("role", ""), "uses": self.project.files[path].get("uses", [])}
                  for path in cycle.get("files", []) if path in self.project.files]
@@ -568,8 +481,6 @@ class SpecWriter(Phase):
         return spec
 
     def forget(self, cycle):
-        """The cycle's spec taken back, as if never planned: its criteria (numbered again from where they
-        began) and the files it planned that are not written yet."""
         self.project.criteria[:] = [criterion for criterion in self.project.criteria
                                     if criterion.get("cycle") != cycle["id"]]
         self.project.spec["counter"] = max([int(number) for criterion in self.project.criteria
@@ -580,7 +491,6 @@ class SpecWriter(Phase):
         cycle["specified"] = False
 
     def restore(self, cycle, saved):
-        """The plan as it was before a change that did not work."""
         self.project.criteria[:], self.project.spec["counter"] = saved[0], saved[1]
         self.project.files.clear()
         self.project.files.update(saved[2])
@@ -589,7 +499,6 @@ class SpecWriter(Phase):
 
     @staticmethod
     def changes(before, after):
-        """What a change did to the criteria, matched by their tests: + added, ~ changed, - removed."""
         was = {criterion["test"]: criterion["behaviour"] for criterion in before}
         now = {criterion["test"] for criterion in after}
         lines = [f"{'+' if criterion['test'] not in was else '~'} {criterion['id']} {criterion['behaviour']}"
@@ -600,9 +509,6 @@ class SpecWriter(Phase):
 
 
 class Working:
-    """The arithmetic a criterion shows for a value it states ("(300 − 273.15) × 9/5 + 32 = 80.33"),
-    worked out here: a model's sums go wrong, and a wrong value in a criterion becomes a test the
-    right code cannot pass. Only plain arithmetic is checked (numbers, + − × ÷ and brackets)."""
     ARITHMETIC = r"[\d.\s()+\-*/]"
     CHAIN_RE = re.compile(rf"{ARITHMETIC}+(?:={ARITHMETIC}+)+")
     SIGNS = {"×": "*", "÷": "/", "−": "-", "–": "-"}
@@ -610,8 +516,6 @@ class Working:
 
     @classmethod
     def mistakes(cls, text):
-        """Each chain of sums in text ("100 × 9/5 + 32 = 180 + 32 = 212") with a part whose value
-        is not the chain's last one (within the rounding the last one is written with)."""
         plain = cls.plain(text)
         found = []
         for chain in cls.CHAIN_RE.finditer(plain):
@@ -625,19 +529,16 @@ class Working:
 
     @staticmethod
     def does_arithmetic(expression):
-        """Whether an expression works something out: a sign between two numbers (or brackets)."""
         return re.search(r"[\d)]\s*[-+*/]\s*[\d(]", expression)
 
     @classmethod
     def plain(cls, text):
-        """The text with its signs as Python writes them (× is *, ÷ is /, 2 x 3 is 2 * 3)."""
         for sign, same in cls.SIGNS.items():
             text = text.replace(sign, same)
         return re.sub(r"(?<=[\d)])\s*x\s*(?=[\d(])", " * ", text)
 
     @staticmethod
     def balanced(part):
-        """A part of a chain without the brackets around it that belong to the sentence."""
         part = part.strip()
         while part.startswith("(") and part.count("(") > part.count(")"):
             part = part[1:].strip()
@@ -647,7 +548,6 @@ class Working:
 
     @classmethod
     def value(cls, sum_):
-        """The value of plain arithmetic, or None when it is not that (or divides by zero)."""
         def worked(node):
             match node:
                 case ast.Constant(value=int() | float() as number):
@@ -666,7 +566,6 @@ class Working:
 
     @staticmethod
     def wrong_parts(worked, cut_short):
-        """Each part of a chain whose value is not its last one's, within the places that one is written to."""
         last, result = worked[-1]
         places = len(last.partition(".")[2]) if re.fullmatch(r"-?\d+(\.\d+)?", last) else 6
         found = []
@@ -679,9 +578,6 @@ class Working:
 
 
 class Designer(Phase):
-    """2. Design, only where files meet: the contract of each code file other files use (the
-    exact names, signatures and data the two sides must agree on), written callee first. A file
-    no other file uses needs none: its tests say what it does."""
     TITLE = "Plan: the design"
 
     def run(self, cycle):
@@ -689,7 +585,6 @@ class Designer(Phase):
         ContractWriter(self.session).write_all(cycle)
 
     def ensure_toolchain(self):
-        """A project planned without a toolchain (or before toolchains existed) gets one."""
         if not self.project.toolchain:
             self.project.toolchain = self.ask_toolchain()
             say.info(f"Toolchain: {self.project.toolchain.summary()}", "🔧")
@@ -710,7 +605,6 @@ class Designer(Phase):
 
     @staticmethod
     def read_toolchain_data(data, entry=""):
-        """A usable toolchain (one with a run command when a user starts a file), or ValueError."""
         toolchain = Toolchain(data if isinstance(data, dict) else {})
         if entry and not toolchain.run:
             raise ValueError(f"toolchain.run is empty, but a user starts {entry}: give the command that starts it")
@@ -724,8 +618,6 @@ class Designer(Phase):
         return toolchain
 
     def drop_adapter_criteria(self, cycle):
-        """An adapter to an external service has no criteria: one about it is dropped (the user
-        tries the service by hand; everything else is tested with sample data)."""
         adapters = [path for path, info in self.project.files.items() if info.get("kind") == "code"
                     and info.get("role", "").strip().lower().startswith("adapter")]
         for step in list(self.project.cycle_criteria(cycle)):
@@ -737,7 +629,6 @@ class Designer(Phase):
 
     @staticmethod
     def about_an_adapter(subject, adapters):
-        """Whether a criterion's subject is one of the adapters (named as a module, or by its file)."""
         return any(subject.startswith((Path(adapter).stem.lower() + ".", Path(adapter).name.lower()))
                    for adapter in adapters)
 
@@ -753,7 +644,6 @@ class Designer(Phase):
 
     @staticmethod
     def give_templates_a_renderer(files, entry):
-        """A template no file uses goes to the code file whose role names it, else to the entry point."""
         used = {*file["uses"] for file in files}
         code = [file for file in files if file["kind"] == "code"]
         for template in [file for file in files if file["kind"] == "template" and file["path"] not in used]:
@@ -766,7 +656,6 @@ class Designer(Phase):
 
     @staticmethod
     def order(files):
-        """Config first, then each file after the files it uses; tests and docs last."""
         by_path = {file["path"]: file for file in files}
         starts = [file["path"] for kind in ("config", "template", "code") for file in files if file["kind"] == kind]
         order = after_what_they_use(starts, lambda path: by_path[path]["uses"], lambda path: path in by_path)
@@ -774,11 +663,6 @@ class Designer(Phase):
 
 
 class InterfaceReviewer(Phase):
-    """3. Review: each file that uses other code files, against their contracts. Contracts are
-    written callee first, so a file should already match the files it uses; what does not is
-    corrected now, before tests or code exist. A problem named without a correction gets that
-    file's contract written again; files that changed are checked once more. One call per such
-    file, more when the contracts it uses do not fit one prompt whole."""
     TITLE = "Plan: review (each file against the contracts it uses)"
 
     def run(self, cycle):
@@ -797,17 +681,14 @@ class InterfaceReviewer(Phase):
         self.session.save()
 
     def meets_two_contracts(self, path):
-        """A file with a contract that uses two or more files with contracts: where the plan may disagree."""
         return bool(self.project.files.get(path, {}).get("contract")) \
             and len([callee for callee in self.callees(path) if self.project.files[callee].get("contract")]) >= 2
 
     def callees(self, path):
-        """The code files it uses (not itself)."""
         uses = self.project.files[path].get("uses", [])
         return [used for used in uses if used != path and self.project.kind_of(used) == "code"]
 
     def check_round(self, cycle, paths, again):
-        """(problems, the files whose contracts changed)."""
         calls = [(path, chunk) for path in paths for chunk in self.chunks(path)]
         found, changed = [], set()
         for number, (path, callees) in enumerate(calls, 1):
@@ -818,7 +699,6 @@ class InterfaceReviewer(Phase):
         return CheckRound(found, changed | self.rewrite_unresolved(cycle, found, changed))
 
     def chunks(self, path):
-        """The files it uses, in groups whose contracts fit one prompt next to its own entry."""
         room = self.session.room(Prompts.INTERFACE_SYSTEM) - len(self.design_entry(path)) - 120
         return groups_fitting(self.callees(path), room, size=lambda callee: len(self.design_entry(callee)))
 
@@ -848,7 +728,6 @@ class InterfaceReviewer(Phase):
 
     @staticmethod
     def problem(item):
-        """{file, problem} of a problem the check names (a file of its own, or none); None for an empty one."""
         match item:
             case {"problem": problem} if str(problem).strip():
                 file = str(item.get("file") or "").strip()
@@ -858,7 +737,6 @@ class InterfaceReviewer(Phase):
         return None
 
     def corrected_file(self, item):
-        """A file entry from the check, keeping what it does not restate; "uses" of unknown files dropped."""
         path = str(Path(str(item.get("path", "")).strip()))
         self.workspace.resolve(path, for_write=True)
         known = self.project.files.get(path, {})
@@ -872,7 +750,6 @@ class InterfaceReviewer(Phase):
                 "uses": [used for used in uses if used in self.project.files or used == path]}
 
     def apply_corrections(self, cycle, corrections):
-        """The corrected entries go into the design; returns the files that changed."""
         changed = set()
         for item in corrections:
             entry = {key: item[key] for key in ("kind", "role", "contract", "uses")}
@@ -884,7 +761,6 @@ class InterfaceReviewer(Phase):
         return changed
 
     def rewrite_unresolved(self, cycle, problems, corrected):
-        """Problems named in a file without a correction: that file's contract is written again."""
         unresolved = {}
         for problem in problems:
             if problem["file"] not in corrected and self.project.kind_of(problem["file"]) == "code":
@@ -906,15 +782,7 @@ class InterfaceReviewer(Phase):
 
 
 class ContractWriter(Worker):
-    """A code file's contract: the exact names, signatures, data shapes and strings its criteria's
-    tests check and the files using it rely on, and for each template it renders, what it gives it
-    and what the page must show. Written after the code it uses (whose contracts it sees whole).
-    Criteria that do not fit one prompt are given over several calls, each extending the contract
-    so far."""
-
     def write_all(self, cycle):
-        """The contract of each code file where files meet (needed); the others have none: their
-        tests say what they do."""
         done = cycle.setdefault("contracts_done", [])
         for path in self.order(self.project.files, cycle["files"]):
             if path not in done:
@@ -925,18 +793,12 @@ class ContractWriter(Worker):
 
     @staticmethod
     def order(files, paths):
-        """The code files' contracts, each after the code it imports or calls (whose contracts it
-        then sees exactly). A template has none: the file rendering it says what it is given and
-        what the page must show."""
         is_code = lambda path: files.get(path, {}).get("kind") == "code"
         uses = lambda path: [used for used in files[path].get("uses", []) if is_code(used)]
         wanted = set(paths)
         return [path for path in after_what_they_use(paths, uses, is_code) if path in wanted]
 
     def needed(self, cycle, path):
-        """Whether two sides must agree on the file: another file uses it, or it renders a template
-        (what the page is given). A file that is neither, with no criterion of its own and not the entry
-        point, is a marker."""
         info = self.project.files[path]
         used = any(path in other.get("uses", []) for name, other in self.project.files.items()
                    if name != path and other.get("kind") in ("code", "template"))
@@ -947,7 +809,6 @@ class ContractWriter(Worker):
         return used or renders
 
     def write(self, cycle, path, problems=()):
-        """Writes the file's contract (problems: what the review found in it). Returns whether it changed."""
         info = self.project.files[path]
         before = list(info.get("contract", []))
         criteria = [f"- {criterion['behaviour']} [{criterion['test']}]"
@@ -961,8 +822,6 @@ class ContractWriter(Worker):
         return info["contract"] != before
 
     def written_in_parts(self, cycle, path, info, criteria, so_far, problems):
-        """(the contract, the calls it took): one call at least, more while criteria are left over, each
-        extending the contract so far; None when one gives no usable contract (it stays as it is)."""
         calls = 0
         while calls == 0 or criteria:
             calls += 1
@@ -979,8 +838,6 @@ class ContractWriter(Worker):
         return WrittenContract(so_far, calls)
 
     def prompt(self, cycle, path, info, criteria, so_far, problems):
-        """(parts, the criteria left for the next call): the fixed parts whole, then as many
-        criteria as fit."""
         base = self.base_parts(path, info, so_far, problems)
         room = self.session.room(Prompts.CONTRACT_SYSTEM) - Part.total_size(base) - 60
         if room < 200:
@@ -1025,6 +882,4 @@ class ContractWriter(Worker):
 
 
 def asked(cycle):
-    """What a cycle asks for: its request, and each change the person asked for while its spec waited
-    for confirmation (tinker amend)."""
     return cycle["request"] + "".join(f"\nChanged by the person: {change}" for change in cycle.get("amendments", []))

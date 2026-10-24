@@ -1,7 +1,3 @@
-"""Tinker's commands, defined once: the command line builds its parser and its help from them, and the
-conversation (the terminal session and the chats) its commands. A project is named in a command only as
-@ID (its full run ID) or @folder (its folder's name), never guessed from the command's other words."""
-
 from collections import namedtuple
 
 
@@ -9,8 +5,6 @@ Refs = namedtuple("Refs", "project words")
 
 
 class Option:
-    """An option a command takes: its flag, where it goes, the value it takes (none: a switch), what it does."""
-
     def __init__(self, flag, dest, metavar, help):
         self.flag, self.dest, self.metavar, self.help = flag, dest, metavar, help
 
@@ -32,19 +26,11 @@ OPTIONS = frozendict({
 
 
 class Argument:
-    """An argument a command takes: where it goes, how many words (argparse's nargs), how it is shown."""
-
     def __init__(self, dest, nargs=None, metavar=None, help="", choices=None):
         self.dest, self.nargs, self.metavar, self.help, self.choices = dest, nargs, metavar, help, choices
 
 
 class Command:
-    """One command. group: where help lists it. chat: how the conversation takes it: "own" (its own
-    handling), "long" (it runs as a task, its progress shown), "quick" (what it prints is shown), or None
-    (not in a conversation). words: what may follow it in a chat for it to be the command ("none", "one",
-    "any"). cli: a command of the command line (tinker NAME). run: it runs a cycle of a project. deletes: it
-    deletes something (in a chat, shown first and done once confirmed). rows: help's lines, when more than one."""
-
     def __init__(self, name, group, synopsis, what, about="", chat=None, words="none", cli=True, run=False,
                  deletes=False, arguments=(), options=(), example="", rows=()):
         self.name, self.group, self.synopsis, self.what, self.about = name, group, synopsis, what, about or what
@@ -250,19 +236,16 @@ TERMINAL_ONLY_CHANNEL_ACTIONS = ("add", "remove", "start")
 
 
 def named(*kinds, words=None):
-    """The names of the commands a conversation takes as one of these kinds (and these words after it)."""
     return tuple(command.name for command in COMMANDS if command.chat in kinds and (words is None
                                                                                     or command.words == words))
 
 
 def ref(word):
-    """The project a word names, as @ID or @folder (without its @); None for any other word."""
     word = str(word or "").strip()
     return word[1:] if word.startswith("@") and len(word) > 1 else None
 
 
 def refs(words):
-    """(the project the first word names, or "", the other words)."""
     words = [word for word in words if str(word).strip()]
     name = ref(words[0]) if words else None
     return Refs(name, words[1:]) if name else Refs("", words)

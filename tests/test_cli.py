@@ -1,6 +1,3 @@
-"""CLI: tinker.py: the command line, the commands that show or change settings, a run and its cycle, and a whole
-task built end to end (with a scripted model and real test runs). SES: the session every phase works through."""
-
 import argparse
 import datetime
 import json
@@ -534,7 +531,6 @@ def build(*argv):
 
 @pytest.fixture
 def run_ready(measured_model, fake_ollama, tmp_path, monkeypatch):
-    """A machine ready for a run: the model installed, the output restored after the run, a project folder."""
     monkeypatch.setattr(Ollama, "installed_models", staticmethod(lambda: [{"name": MODEL}]))
     monkeypatch.setattr(sys, "stdout", sys.stdout)
     monkeypatch.setattr(sys, "stderr", sys.stderr)

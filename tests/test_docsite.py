@@ -1,5 +1,3 @@
-"""A documentation site read with no model: the version's root, the site's map, each slot's pages, the cache."""
-
 import pytest
 
 from tinkerkit.docsite import DocCache, DocSite, candidates, map_links, pick, under, version_keys
@@ -9,8 +7,6 @@ from tinkerkit.settings import Config, Home
 
 
 class SiteFetcher:
-    """A fetcher over {url: HTML or text}; a missing address answers HTTP 404. It keeps what it was asked."""
-
     def __init__(self, pages):
         self.pages, self.asked = pages, []
 

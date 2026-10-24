@@ -1,5 +1,3 @@
-"""MSG: everything Tinker tells the person, in one voice."""
-
 import ast
 import io
 import os

@@ -1,5 +1,3 @@
-"""The page fetcher, against a local web site (http.server on 127.0.0.1): no real internet."""
-
 import gzip
 import http.server
 import socket
@@ -16,8 +14,6 @@ REAL_CONNECT = socket.socket.connect
 
 
 class Site:
-    """A local web site: routes {path: (status, headers, body)}; it keeps each request's path, User-Agent and time."""
-
     def __init__(self, routes, barrier=None):
         self.routes, self.seen, self.barrier, self.clients = routes, [], barrier, set()
         site = self
@@ -51,7 +47,6 @@ class Site:
 
 @pytest.fixture
 def site(monkeypatch):
-    """A local site; connections to 127.0.0.1 are allowed, everything else stays off."""
     def local_only(sock, address):
         if address[0] != "127.0.0.1":
             raise OSError(f"network is off in tests ({address})")

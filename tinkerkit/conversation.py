@@ -1,22 +1,3 @@
-"""The conversation: talking to Tinker the way a person does, in the terminal (tinker, with no command) or
-in a chat app (the channels plugin: tinker channel start), one Tinker serving them all at once (Desk).
-Every command works the same way everywhere: a task (its spec comes first, to confirm or amend before
-anything is built), a resume, the runs, their status, stop, and every other command of tinker's (one that
-deletes waits for confirm); anything else is a normal chat with the model in use (Talk), told at once when
-a task holds the model; `command WHAT` has the model name the command line that does it, run once the
-person confirms it (Shell); `research TOPIC` answers from the web, with the pages as sources (Research).
-A chat or a command line asked while a job runs pauses it (jobs.paused_for_you): the person is answered at
-once, and the job goes on as soon as they are. A task run from a terminal is served the same way: its
-tracker is kept in Tinker's home ("running"), and it is stopped with a signal.
-
-Channel is what every kind of channel does (receive messages, send, edit what it sent); ConsoleChannel is
-the terminal, and the channels plugin adds the chat apps (TelegramChannel). Every message is written in
-Markup (bold, italic, code ...), each mark for what it means, and each kind shows it its own way. Each
-thing (a task, a research, a command, a chat's reply) has one message, edited as it goes on
-(show), with when it was last updated; a new one is sent only for a new thing, or for what no longer fits.
-Tinker's status is one message, sent anew at the bottom each time it changes. A chat is only a view of the ledger
-(ledger.py): its messages go after a while (a glance, like jobs or help, and the question it answered, at
-once), and history shows any thing again."""
 import contextlib
 lazy import fcntl
 lazy import html
@@ -123,8 +104,6 @@ Secret = namedtuple("Secret", "key question")
 
 
 def session(root):
-    """tinker with no command: the conversation in this terminal, and in the enabled chats too: one Tinker
-    serving them all, so a task started in one is seen, stopped and answered from the others."""
     try:
         chats = chat_channels()
     except SystemExit as exc:
@@ -134,9 +113,6 @@ def session(root):
 
 
 def one_shot(command, text):
-    """tinker chat|command|research|run|history ...: one of the conversation's own commands, said once in this terminal
-    (command asks there before it runs anything). A chat or a command line pauses the job that runs. None, or why
-    it could not."""
     console, talk = ConsoleChannel(commands_without_tinker=False), Talk(commands_brief())
     message, chat = Message(ConsoleChannel.CHAT, text, "you"), ConsoleChannel.CHAT
     if command == "history":
@@ -158,8 +134,6 @@ def one_shot(command, text):
 
 
 def research_once(console, talk, topic):
-    """tinker research TOPIC: researched in this terminal. It is a job: its tracker shows its steps where it was
-    started from (a chat), and ends with its answer, or how to go on once stopped."""
     tracker, started = Tracker(f"Researching {topic}"), time.monotonic()
     ending = {"status": "stopped", "headline": f"Research of {topic} stopped"}
     try:
@@ -173,7 +147,6 @@ def research_once(console, talk, topic):
 
 
 def command_once(console, talk, message):
-    """tinker command WHAT: the command line named, and run once the person agrees in this terminal."""
     chat, shell = ConsoleChannel.CHAT, Shell(talk, Path.cwd())
     console.show(chat, None, shell.propose(console, message, "", COMMAND_NAMING_MAX_TOKENS), done=True)
     proposed = shell.take(console, chat)
@@ -186,11 +159,6 @@ def command_once(console, talk, message):
 
 
 class Desk:
-    """The conversation, one Tinker serving its channels at once: the terminal (tinker, with no command) and
-    the enabled chats (tinker channel start serves the chats alone). Every command of tinker's works here: a
-    task runs as its own tinker (which does not report too; as every job, it pauses the one that runs), followed
-    by its tracker, its progress in its one message; one that deletes shows what it deletes first, and waits for confirm. Tasks run from a
-    terminal are served too (running). Anything that is not a command is a normal chat."""
     COMMANDS = tuple(command.name for command in COMMANDS if command.chat)
     TRACKER_LOOK_SECONDS = 1.0
 
@@ -229,8 +197,6 @@ class Desk:
                 say.title("Stopped listening.", "🛑")
 
     def claim_chats(self):
-        """Each chat listened to by this Tinker alone: one another Tinker listens to is left out (served by
-        that one; without a terminal here, there is nothing to serve)."""
         for channel in [channel for channel in self.channels if channel not in self.consoles]:
             if not channel.claim({"pid": os.getpid()}):
                 held = f"{channel.name} is listened to by another Tinker (process {channel.holder().get('pid', '?')})"
@@ -240,8 +206,6 @@ class Desk:
                 self.channels.remove(channel)
 
     def say_goodbye(self):
-        """Tinker ends: its status says it no longer listens, while the question that ended it goes (each a round
-        trip to the chat, so the two at once)."""
         leaving = threading.Thread(target=self.take_out_question, daemon=True)
         leaving.start()
         self.say_status("💤 **Tinker** · not listening")
@@ -254,9 +218,6 @@ class Desk:
                 channel.delete(chat, message)
 
     def say_status(self, text=None, anew=False):
-        """Tinker's status, one message in each chat (the console: said at its start and end, and when it is about
-        something else: Tinker starts or ends, a task starts, waits, ends): text, else what it does now, said only
-        when it changed. Each one said in a chat is sent anew at its bottom, the one before taken out."""
         text = text or self.status()
         if text == self.said_status and not anew:
             return
@@ -271,7 +232,6 @@ class Desk:
                 channel.show(ConsoleChannel.CHAT, None, text, done=True)
 
     def status(self):
-        """What Tinker is doing now, as its status says it (Markup): working, waiting for the person, or idle."""
         if self.busy():
             progress = self.reporter.progress
             passing = f" · {progress.passing}" if progress.passing else ""
@@ -290,8 +250,6 @@ class Desk:
 
     @staticmethod
     def post_status(channel, text):
-        """The status sent anew at the bottom of each of the channel's chats, its one message (Tinker's "listening",
-        kept from start to start), the one before taken out meanwhile."""
         mine = Home.store().get("listening", channel.name) or {}
         for chat in channel.allowed:
             before = mine.get(chat)
@@ -306,7 +264,6 @@ class Desk:
         Home.store().put("listening", channel.name, mine)
 
     def listen_until_ended(self):
-        """Every channel listened to, each in its thread, until the person ends it (exit) or Ctrl-C."""
         threads = [threading.Thread(target=self.listen, args=(channel,), daemon=True) for channel in self.channels]
         for thread in threads:
             thread.start()
@@ -334,8 +291,6 @@ class Desk:
                 self.hear(channel, message)
 
     def start_chat(self, channel):
-        """A chat started in its own thread, so the terminal never waits on the network: the messages sent while
-        nothing listened forgotten, the commands offered, the status sent."""
         channel.skip_waiting()
         channel.offer(offered())
         with self.post_lock:
@@ -343,8 +298,6 @@ class Desk:
             self.post_status(channel, self.said_status)
 
     def hear(self, channel, message):
-        """One message: a welcome for a person who just opened the bot; the answer to what waits for it; else
-        the command it gives (the slow ones in a thread, so the next message is heard meanwhile); else a chat."""
         if message.text.split()[:1] == [CHAT_APP_START]:
             channel.send(message.chat, welcome())
             return
@@ -377,8 +330,6 @@ class Desk:
                 channel.glance(message.chat, message.id, [sent])
 
     def with_words_wanted(self, channel, message):
-        """message as the words of the command that waits for them; a command of its own (sent with its /, alone,
-        or the very command waiting, as a file sent to read is) takes its place instead."""
         wanted = self.commands_wanting_words.pop((channel.name, message.chat), None)
         command = command_of(message.text)
         if not wanted or self.command_of_its_own(message, command, wanted):
@@ -387,19 +338,15 @@ class Desk:
 
     @staticmethod
     def command_of_its_own(message, command, wanted):
-        """Whether a message is a command in its own right: sent with its /, alone, or the very command waiting."""
         return command and (message.text.startswith("/") or len(message.text.split()) == 1 or command == wanted)
 
     def asked_with_words(self, channel, message, command):
-        """command WHAT: answered in a thread (alone, how to say it)."""
         if len(message.text.split()) == 1:
             channel.send(message.chat, USAGE[command])
         else:
             self.shell.name(channel, after_word(message), self.running_now)
 
     def settle(self, channel, message, command):
-        """What waits for this very message (a command that deletes, a command line): done when the message
-        is confirm, else left undone. True when the message was that confirm."""
         confirm = command == "confirm" and len(message.text.split()) == 1
         asking = self.deletes_to_confirm.pop((channel.name, message.chat), None)
         if asking and confirm:
@@ -420,7 +367,6 @@ class Desk:
         return False
 
     def answer(self, message, channel):
-        """What a command asks for, done; the reply (None when the reply comes as progress)."""
         words = command_words(message.text)
         command = words[0]
         handler = self.handlers(channel, message, words).get(command)
@@ -444,7 +390,6 @@ class Desk:
         return md(t"⚙️ **{' '.join(words)}**\n{shown:block}")
 
     def handlers(self, channel, message, words):
-        """What answers each command the conversation handles itself, whatever its words."""
         command = words[0]
         return {"task": lambda: self.new_task(words),
                 "confirm": lambda: self.decide(command, words),
@@ -460,13 +405,9 @@ class Desk:
                 "history": lambda: history_text(words[1:2])}
 
     def research(self, words):
-        """research TOPIC: a task of its own; with no topic, how to say it."""
         return self.start_task(words, self.root, " ".join(words)) if len(words) > 1 else USAGE["research"]
 
     def exercise(self, channel, message, words):
-        """exercise LANGUAGE: started as a tinker of its own that outlives this conversation (what it prints goes
-        to the exercise folder's log), shown only in the exercise's one message. exercise status: what tinker says,
-        answered in a thread, a glance."""
         if len(words) < 2:
             return USAGE["exercise"]
         if words[1].lower() != "status":
@@ -478,7 +419,6 @@ class Desk:
         return None
 
     def stop_exercise(self):
-        """The exercise told to stop (its build saves itself first); its message says how it ended."""
         running_one = exercising_now()
         if not running_one:
             return "🤷 No exercise runs: `resume #N` goes on with one (`jobs stopped` lists them)"
@@ -487,8 +427,6 @@ class Desk:
         return None
 
     def start_exercise(self, words, title=None):
-        """The exercise started (words: exercise LANGUAGE, or resume #N): as every job, it pauses the one that runs.
-        Its message comes to the bottom."""
         log = projects_folder() / EXERCISE_FOLDER / "exercise.log"
         log.parent.mkdir(parents=True, exist_ok=True)
         start = log.stat().st_size if log.exists() else 0
@@ -501,10 +439,6 @@ class Desk:
         return None
 
     def adopt_exercise(self):
-        """As this conversation starts: an exercise that runs and does not report by itself (one a conversation
-        before this one started) has its message kept up here; one that ended without being stopped (its process
-        killed, the computer restarted) goes on, as its job resumed. Either way its message comes anew at the bottom
-        of the chat."""
         exercise, left = exercising_now(), Home.store().get("activity", "exercise")
         if exercise and not exercise["reports"]:
             self.follow_exercise(exercise["pid"], exercise["title"], lambda: until_ended(exercise["pid"]), anew=True)
@@ -514,10 +448,6 @@ class Desk:
                                 job["title"] if job else None)
 
     def follow_exercise(self, pid, title, ended, log=None, anew=False):
-        """The exercise's message kept up (its tracker) until ended() returns: its ending shown, its tracker
-        removed. One that ended before it kept a tracker shows what it printed to log ((path, from offset)).
-        Every exercise has the one message (its ids kept in the home, "activity"), started, stopped or resumed;
-        anew: the one before is taken out, and it is sent at the bottom."""
         sent = exercise_board()
         if anew:
             self.take_out(sent)
@@ -544,7 +474,6 @@ class Desk:
         threading.Thread(target=follow, daemon=True).start()
 
     def take_out(self, sent):
-        """The messages of sent ({(channel, chat): ids}) taken out of their chats, and forgotten."""
         for channel in self.channels:
             for (name, chat), ids in list(sent.items()):
                 if name == channel.name:
@@ -553,7 +482,6 @@ class Desk:
                     del sent[(name, chat)]
 
     def exercise_says(self, line):
-        """A line shown as the latest of the exercise's message, which comes to the bottom of the chat."""
         reporter = self.exercise_reporter
         if reporter is None:
             return
@@ -563,7 +491,6 @@ class Desk:
             reporter.update()
 
     def memory_graph(self, channel, chat, words):
-        """memory --graph: the page made (tinker memory --graph) and sent as a file, what tinker printed under it."""
         page = Home.graph_page()
         before = page.stat().st_mtime_ns if page.exists() else None
         shown = self.tinker(words)
@@ -574,16 +501,12 @@ class Desk:
         return None
 
     def new_task(self, words):
-        """task WHAT: Tinker makes its folder in the projects folder, named after it."""
         if len(words) < 2:
             return USAGE["task"]
         request = " ".join(words[1:])
         return self.start_task(["task", request], self.root, request)
 
     def decide(self, command, words):
-        """confirm [@PROJECT]: build the plan that waits (a new project's folder name is asked once first:
-        confirm again, or rename NAME, builds it); amend [@PROJECT] WHAT: change it (it waits again); rename
-        NAME: rename its folder."""
         waiting = self.waiting_plan or {}
         if command == "rename":
             return self.rename(waiting, words)
@@ -608,18 +531,14 @@ class Desk:
 
     @staticmethod
     def confirms_a_new_project(command, name, waiting):
-        """Whether confirm is said to the plan of a new project that waits here (its folder's name comes first)."""
         return command == "confirm" and not name and waiting.get("stage") == "spec" and waiting.get("new")
 
     def ask_folder_name(self, waiting):
-        """A new project's plan confirmed: its folder's name is asked once, before it is built."""
         waiting["stage"] = "name"
         self.on_board(waiting, self.asked(waiting))
         return None
 
     def on_task(self, waiting, said):
-        """What was said about the task whose plan waits (a refusal), in its message rather than apart, under
-        what it waits for."""
         if said and waiting:
             self.on_board(waiting, f"{self.asked(waiting)}\n\n{said}")
             return None
@@ -627,7 +546,6 @@ class Desk:
 
     @staticmethod
     def asked(waiting):
-        """The waiting plan, with what it waits for: its folder's name, once a new project's plan is confirmed."""
         if waiting.get("stage") != "name":
             return waiting["spec"]
         return (f"{waiting['spec']}\n\n📁 **Its folder:** `{Path(waiting['folder']).name}`\n👉 `confirm` to build it "
@@ -635,11 +553,9 @@ class Desk:
 
     @staticmethod
     def kept(waiting):
-        """Of a waiting plan, what stays in the task's message once it is built: all but what to send next."""
         return "\n".join(line for line in waiting["spec"].splitlines() if not line.startswith(("👉", "⏱"))).strip()
 
     def on_board(self, waiting, text):
-        """text shown in the message of the task whose plan waits (Tinker's status follows it)."""
         board = self.messages_by_run.setdefault(waiting["run"], {})
         for channel in self.channels:
             for chat in channel.allowed:
@@ -647,7 +563,6 @@ class Desk:
         self.say_status()
 
     def rename(self, waiting, words):
-        """rename NAME: the waiting project's folder renamed (tinker rename); asked for its name, it builds."""
         if len(words) != 2:
             return USAGE["rename"]
         if not waiting:
@@ -666,7 +581,6 @@ class Desk:
                                                      keep=self.kept(waiting)))
 
     def rename_folder(self, waiting, name):
-        """The waiting project's folder renamed by tinker rename; None when it was, else why not."""
         done = subprocess.run(tinker_command() + ["rename", f"@{waiting['run']}", name], cwd=self.root, text=True,
                               capture_output=True, stdin=subprocess.DEVNULL, env=dict(os.environ, NO_COLOR="1"),
                               timeout=60)
@@ -676,14 +590,11 @@ class Desk:
 
     @staticmethod
     def renamed(waiting, name):
-        """The waiting plan as its folder's new name says it."""
         old, waiting["folder"] = waiting["folder"], Path(waiting["folder"]).parent / name
         waiting["title"] = f"{name}: {waiting['title'].split(': ', 1)[-1]}"
         waiting["spec"] = waiting["spec"].replace(f"📁 `{Path(old).name}`", f"📁 `{name}`")
 
     def resume(self, words):
-        """resume @PROJECT: its run goes on; resume [#N]: the job goes on where it stopped (with no number, the one
-        stopped last), an exercise as the exercise."""
         name, rest = refs(words[1:])
         if name and not rest:
             return self.start_task(["resume", f"@{name}"], self.root, f"resume @{name}")
@@ -701,7 +612,6 @@ class Desk:
         return self.start_task(again, self.root, job["title"])
 
     def stop(self, words):
-        """stop #N: that job; stop: the job that runs, whatever it is (as Ctrl-C: it saves itself)."""
         if len(words) > 1:
             number = job_number(words[1])
             return self.stop_job(number) if number is not None else USAGE["stop"]
@@ -709,8 +619,6 @@ class Desk:
         return "\n".join(line for line in said if line) or (None if said else "💤 No job is running.")
 
     def stop_job(self, number):
-        """Job #number stopped: the task started here, the exercise (said in its message), a job elsewhere, or a
-        paused one (where it waits: it no longer goes on by itself)."""
         job = Jobs.get(number)
         if job is None or job["state"] not in ("running", "paused"):
             return f"🤷 Job #{number} is not running or paused: `jobs` lists them."
@@ -725,7 +633,6 @@ class Desk:
         return md(t"⏹ **Stopping #{number}** {job['title']}: it is saved; `resume #{number}` goes on later.")
 
     def report(self, command, words):
-        """runs, status [@PROJECT]: tinker's own; status alone at once, from what the conversation knows."""
         if command == "status" and len(words) == 1:
             return "\n\n".join([self.status()] + [run["text"] for run in self.running_now()])
         title = "📚 **Runs**" if command == "runs" else md(t"📊 **Status** {' '.join(words[1:2])}").rstrip()
@@ -738,7 +645,6 @@ class Desk:
         return None
 
     def ask_first(self, channel, chat, words):
-        """A command that deletes: what it would delete (tinker's own list of it), waiting for confirm."""
         preview = "\n".join(line for line in self.tinker(words).splitlines() if not line.startswith("Nothing deleted"))
         shown = channel.show(chat, None, md(t"🗑 **{' '.join(words)}**\n{preview:block}\n"
                                             t"👉 `confirm` to delete it · anything else cancels it"), done=True)
@@ -746,8 +652,6 @@ class Desk:
         return None
 
     def delete(self, channel, chat, asking):
-        """A command that deletes (or exit), confirmed: done (a restart as a task), in its message. exit's question
-        goes as Tinker ends: its status says so."""
         if asking["words"][0] in EXIT_WORDS:
             self.stop_question = (channel, chat, asking["shown"])
             for each in self.channels:
@@ -768,17 +672,12 @@ class Desk:
                      done=True)
 
     def clear_chat(self, channel, chat, cleared, after=""):
-        """clear chat: every message taken out of the chats but Tinker's status (history keeps what they showed),
-        said in a note of its own that goes in seconds. None: nothing more to say."""
         taken = sum(each.clear() for each in self.channels)
         sent = channel.send(chat, f"🧹 **{cleared}:** {taken} messages taken out{after}")
         channel.glance(chat, None, [sent], DONE_NOTE_KEPT_SECONDS)
         return None
 
     def run_app(self, channel, chat, said):
-        """run [@PROJECT] ARGS... [<<< INPUT]: a built project run the way a person runs it (its run command,
-        in its folder and environment), with the person's arguments (and input), and what it printed. The
-        project is the one named (@ID or @folder), else the one built last."""
         name, args, stdin = app_request(said[0] if said else "")
         project = built_project(name)
         if project is None:
@@ -800,9 +699,6 @@ class Desk:
                                      t"{printed:md}"), done=True)
 
     def start_task(self, arguments, folder, title, phase=Tracker.STARTING, sent=None, keep=""):
-        """Start a task as its own tinker. Its message is the one its run had (by its ID: sent, else the
-        boards), keeps keep at its top, and says phase first (Markup when Tinker says it: ✅ confirmed ...);
-        it is shown before the run's tracker is, so it is one message."""
         run = self.run_named(arguments)
         sent = sent if sent is not None else self.messages_by_run.get(run) if run else None
         with self.lock:
@@ -825,14 +721,11 @@ class Desk:
         return None
 
     def run_named(self, arguments):
-        """The run a resume or amend names (the waiting one, named by its folder), else None."""
         name = refs(arguments[1:2])[0] if arguments[0] in ("resume", "amend") else ""
         waiting = self.waiting_plan or {}
         return waiting.get("run") if name and name == Path(str(waiting.get("folder", ""))).name else name or None
 
     def spawn(self, arguments):
-        """The task as its own tinker, from here (a new task makes its own folder, a run given by ID finds its
-        own), reporting through this conversation only. A run that plans waits for its plan to be confirmed."""
         arguments = arguments + ["--confirm"] if arguments[0] in PLAN_CONFIRMING_COMMANDS else arguments
         env = dict(os.environ, **{CHANNEL_REPORTS_ENV: "off", "PYTHONUNBUFFERED": "1", "NO_COLOR": "1"})
         return subprocess.Popen(tinker_command() + arguments, cwd=self.root, env=env, text=True,
@@ -840,9 +733,6 @@ class Desk:
                                 start_new_session=True)
 
     def follow(self, process, reporter, task):
-        """The task's printed lines to the terminal (and as its latest line, when it keeps no tracker); its
-        run and folder from its tracker (the title is named after the folder). Once it ends: its last state
-        shown, a plan that waits kept, and its tracker removed."""
         looked = 0.0
         for line in process.stdout:
             if self.echo_to_terminal:
@@ -855,7 +745,6 @@ class Desk:
         self.ended(process, reporter, task)
 
     def learn(self, task, reporter, state):
-        """A followed task's run, folder and title, as its tracker says them."""
         if not state:
             return
         if state.get("run"):
@@ -867,8 +756,6 @@ class Desk:
             task["title"] = state["title"]
 
     def ended(self, process, reporter, task):
-        """A followed task ended: its last state shown, its time kept, a plan that waits kept, and its tracker
-        removed."""
         final = reporter.tracked()
         self.learn(task, reporter, final)
         if task["run"]:
@@ -892,28 +779,20 @@ class Desk:
         return self.last_task is not None and self.last_task.poll() is None
 
     def running_now(self):
-        """What runs now: the task started here, and any run from a terminal ({title, brief, text}). An exercise's
-        builds are left out: they are not jobs (the exercise is, and is paused as one)."""
         progress = self.reporter.progress if self.busy() else None
         here = [{"title": progress.title, "brief": progress.brief(), "text": progress.text()}] if progress else []
         return here + [described(state) for state in persons_runs(self.children())]
 
     def children(self):
-        """The processes of the tasks started here (served as here, not as elsewhere): the last, and those it paused."""
         return {process.pid for process in self.live_tasks}
 
     def tinker(self, arguments, timeout=120):
-        """What one of tinker's quick commands prints: its columns as a chat reads them (" | "), its first 40
-        lines."""
         done = subprocess.run(tinker_command() + arguments, cwd=self.root, text=True, capture_output=True,
                               stdin=subprocess.DEVNULL, env=dict(os.environ, NO_COLOR="1"), timeout=timeout)
         return first_lines(Markup.columns((done.stdout + done.stderr).strip()) or "(nothing)", 40)
 
 
 def command_of(text, commands=None):
-    """The command a message gives (one of the conversation's commands, sent as its first word, with or
-    without a /), or "" when it is chat. A word alone is a command; one of ONE_WORD_COMMANDS with one word after it
-    is, and one of ANY_WORDS_COMMANDS with any words after it ("models are getting better" is a chat)."""
     words = text.split()
     first = command_word(words[0]) if words else ""
     if first not in (commands or Desk.COMMANDS):
@@ -924,13 +803,10 @@ def command_of(text, commands=None):
 
 
 def takes_these_words(first, words):
-    """Whether the command takes the words after it: none, any (ANY_WORDS_COMMANDS), or one (ONE_WORD_COMMANDS)."""
     return len(words) == 1 or first in ANY_WORDS_COMMANDS or (first in ONE_WORD_COMMANDS and len(words) == 2)
 
 
 def command_words(text):
-    """A command's words, as a shell splits them (as they come, when it cannot), the command itself lowercase
-    and without its /."""
     try:
         words = shlex.split(text)
     except ValueError:
@@ -940,18 +816,14 @@ def command_words(text):
 
 
 def command_word(word):
-    """A command's name as it is sent: lowercase, and as a chat app's menu sends it too (/use_model, and
-    /use_model@bot in a group) the name it stands for (use-model)."""
     return word.lower().lstrip("/").partition("@")[0].replace("_", "-")
 
 
 def offered():
-    """(name, what it does) of each command a chat takes, as its menu lists them."""
     return [MenuEntry(command.name, command.what) for command in COMMANDS if command.chat]
 
 
 def words_asked(command):
-    """(the question, an example answer) for the words a command sent alone needs."""
     found = next(candidate for candidate in COMMANDS if candidate.name == command)
     needed = found.synopsis.split(None, 1)[1]
     example = found.example.split(None, 1)[1] if " " in found.example else ""
@@ -959,12 +831,10 @@ def words_asked(command):
     return WordsAsked(question + (md(t", e.g. {example:code}") if example else ""), example or needed)
 
 def after_word(message):
-    """What a command word is followed by (the command described)."""
     return Message(message.chat, message.text.split(None, 1)[1], message.sender)
 
 
 def app_request(given):
-    """(the project named, the arguments, the input after <<< or None) of run [@PROJECT] ARGS... [<<< INPUT]."""
     words, _, fed = given.partition("<<<")
     stdin = fed.strip() + "\n" if "<<<" in given else None
     try:
@@ -976,18 +846,10 @@ def app_request(given):
 
 
 def welcome():
-    """The welcome for a person who just opened the bot (/start): what Tinker is, and what to send, grouped by
-    what a beginner does, in plain words."""
     return START_WELCOME
 
 
 class Talk:
-    """A normal chat with the model in use: a message that is not a command is answered by it, with that
-    chat's last CHAT_CONTEXT_MESSAGES messages (and what is running now) as context. It does not think, so a reply comes
-    quickly, and its settings are a run's own (num_ctx), so a task and a chat share the loaded model: warm
-    loads it as listening starts, and neither the first reply nor the next task waits for it to load.
-    A job that runs (here or elsewhere) is paused while the reply is written (pausing: jobs.paused_for_you), and a
-    note says so meanwhile; the job goes on once the reply is written. Chats take turns."""
     SYSTEM = ("You are Tinker, a friendly helper that builds small programs on this computer with a local model. "
               "You are chatting over {kind}, read on a phone: answer briefly, in short lines. Format for "
               "meaning, in Markdown: **bold** for what matters most, *italic* for an aside, `code` for "
@@ -1000,12 +862,6 @@ class Talk:
         self.pausing_jobs = pausing_jobs
 
     def answer(self, channel, message, now, waiting=lambda: "", write=None, on_shown=None):
-        """The reply to message, sent when written (in a thread, so `stop` is heard meanwhile). now(): what
-        runs now, [{title, brief, text}]; waiting(): a spec that waits for the person; write: what writes the
-        reply (channel, message, context, tokens -> text), the chat's own by default; on_shown(ids): the
-        ids of the reply's message, once it is written. When something runs, or the reply is not
-        written in MODEL_BUSY_NOTE_AFTER_SECONDS seconds, a note says so at once (what is paused for it), updated every
-        MODEL_BUSY_NOTE_EDIT_SECONDS seconds; the reply then takes its place."""
         threading.Thread(target=self.answering, args=(channel, message, now, waiting, write or self.reply,
                                                       on_shown), daemon=True).start()
 
@@ -1020,15 +876,12 @@ class Talk:
 
     @staticmethod
     def context(running, waiting):
-        """What goes on, for the model to know: what runs, and a spec that waits for the person."""
         context = ["Running now:\n" + "\n\n".join(run["text"] for run in running)] if running else []
         context += [f"A spec waits for the person (confirm builds it, amend WHAT changes it):\n{waiting()}"
                     if waiting() else ""]
         return "\n\n".join(piece for piece in context if piece)
 
     def write(self, write_reply, asked, reply, written):
-        """The reply written (chats take turns, what runs paused first) into reply; written is set once it is done,
-        or failed."""
         try:
             with self.turn, self.pausing_jobs():
                 reply.append(write_reply(*asked))
@@ -1036,8 +889,6 @@ class Talk:
             written.set()
 
     def busy_until(self, written, running, now, channel, chat):
-        """While something runs, or the reply is slow, a note that says so, kept up to date until the reply
-        is written: the note's ids (None when none was needed)."""
         note = None
         if running or not written.wait(MODEL_BUSY_NOTE_AFTER_SECONDS):
             note = channel.show(chat, None, self.busy_note(running))
@@ -1056,7 +907,6 @@ class Talk:
         return "\n".join(lines)
 
     def reply(self, channel, message, now="", tokens=CHAT_MAX_REPLY_TOKENS):
-        """The model's reply to message; now: what is going on (what runs, a spec that waits)."""
         found = self.model()
         if not found:
             return ("⚠️ **No model is in use yet**, so I cannot chat: `tinker calibrate NAME`, then "
@@ -1078,15 +928,12 @@ class Talk:
             return self.said.setdefault((channel.name, chat), [])
 
     def remembered(self, said, role, text):
-        """The chat's last CHAT_CONTEXT_MESSAGES messages, with this one."""
         with self.lock:
             said.append({"role": role, "content": text})
             del said[:-CHAT_CONTEXT_MESSAGES]
             return list(said)
 
     def ask(self, channel, chat, messages, tokens):
-        """The model's reply to messages (it does not think), "typing…" shown meanwhile; OllamaError when it
-        fails. Only called once model() found the model."""
         name, options, think = self.model()
         done = threading.Event()
         threading.Thread(target=keep_typing, args=(channel, chat, done), daemon=True).start()
@@ -1099,7 +946,6 @@ class Talk:
 
     @staticmethod
     def model():
-        """(name, options, think) for a chat with the model in use; None when no measured model is in use."""
         name = Config.get("model")
         settings = (Models.settings(name) or {}) if name else {}
         if not settings.get("num_ctx"):
@@ -1110,11 +956,9 @@ class Talk:
         return ChatModel(name, options, False if settings.get("think") not in (None, False) else None)
 
     def warm(self):
-        """Load the model now, in the background."""
         threading.Thread(target=self.load, daemon=True).start()
 
     def load(self):
-        """The model loaded, and one token written (a loaded model's first reply is much slower than the next)."""
         found = self.model()
         if found:
             name, options, think = found
@@ -1126,11 +970,6 @@ class Talk:
 
 
 class Shell:
-    """command WHAT: the model names the one command line that does what the person describes, shown with
-    what it does (and a warning when it changes or deletes things). `confirm` as the person's very next
-    message runs it; anything else drops it. It runs in the conversation's folder, in the person's login
-    shell, with no input, for up to CHAT_COMMAND_TIMEOUT seconds; its exit code and output (the
-    end of it, when long) come back folded, and the model then tells what it says, in a few lines."""
     SYSTEM = ("The person describes a command they want run on their computer ({system}, shell {shell}, in the "
               "folder {folder}). Reply with ONLY JSON: {{\"command\": \"the one command line that does it\", "
               "\"does\": \"what it does, in one short sentence\"}}, or {{\"command\": \"\", \"does\": \"why no "
@@ -1154,7 +993,6 @@ class Shell:
         self.shell = self.LOGIN_SHELL
 
     def name(self, channel, message, now):
-        """Have the model name the command (the reply comes as a chat's: what runs paused, busy note and all)."""
         key = (channel.name, message.chat)
         self.commands_to_confirm[key] = self.STILL_NAMING
 
@@ -1190,7 +1028,6 @@ class Shell:
                   t"👉 `confirm` to run it · anything else cancels it")
 
     def take(self, channel, chat):
-        """The command waiting for this chat's next message (STILL_NAMING while it is named; None when none)."""
         key = (channel.name, chat)
         line = self.commands_to_confirm.get(key)
         if line != self.STILL_NAMING:
@@ -1198,12 +1035,9 @@ class Shell:
         return line
 
     def drop(self, channel, chat, proposed):
-        """A command not confirmed: its message says it was not run."""
         channel.show(chat, proposed["shown"], f"🚫 _Not run:_ `{proposed['line']}`", done=True)
 
     def run(self, channel, chat, proposed):
-        """Run the command, in its message: its output comes at once, folded, and what it says once the
-        model has read it."""
         line = proposed["line"]
         sent = channel.show(chat, proposed["shown"], f"▶️ **Running** `{line}` …")
         code, output = in_shell(self.shell, line, self.folder)
@@ -1219,14 +1053,12 @@ class Shell:
 
     @staticmethod
     def folded(output):
-        """The output, folded (its end, when long), its columns as a chat reads them."""
         if not output:
             return "_(no output)_"
         shown = output if len(output) <= CHAT_COMMAND_OUTPUT_SHOWN_CHARS else "… (the start is left out)\n" + output[-CHAT_COMMAND_OUTPUT_SHOWN_CHARS:]
         return f"```output\n{Markup.fenced(Markup.columns(shown))}\n```"
 
     def told(self, channel, chat, asked, line, code, output):
-        """What the output says, as the model tells it ("" when it does not answer)."""
         try:
             return self.talk.ask(channel, chat, [{"role": "system", "content": self.TELL_SYSTEM},
                                                  {"role": "user", "content": f"They asked: {asked}\nCommand: {line}\n"
@@ -1237,8 +1069,6 @@ class Shell:
 
 
 def in_shell(shell, line, folder, given=None):
-    """(exit code, or why it has none; output) of a command line run in the person's login shell, in folder,
-    with given as its input (none: no input), for up to CHAT_COMMAND_TIMEOUT seconds."""
     try:
         done = subprocess.run([shell, "-lc", line], cwd=folder, text=True, capture_output=True, input=given,
                               stdin=None if given else subprocess.DEVNULL, timeout=CHAT_COMMAND_TIMEOUT)
@@ -1250,12 +1080,6 @@ def in_shell(shell, line, folder, given=None):
 
 
 class Research:
-    """research TOPIC: an answer from the web, with its sources. One quick call names the searches (up to
-    CHAT_RESEARCH_SEARCHES), the pages they find are read in turn (the first of each search, then the second
-    ..., up to CHAT_RESEARCH_PAGES; of each, the parts most about the topic), and one call writes the answer
-    from them alone, each claim citing its page. One message says how far it got, and becomes the answer; its
-    tracker says the same, for a chat it runs for. (tinker learn researches a topic in depth, and keeps it for the
-    builds.)"""
     SEARCHES_SYSTEM = ("The person wants to know about a topic. Give the web searches that together answer it "
                        "best: two or three, each looking for something different, in the topic's language. Today "
                        "is {today}, and you were trained well before it: never assume what the latest version, "
@@ -1275,7 +1099,6 @@ class Research:
         self.talk, self.tracker = talk, tracker
 
     def researching(self, channel, chat, topic, now):
-        """The research, its message kept up to date: (how it ended, "done" or "blocked", and what it ends with)."""
         head = md(t"🔎 **{topic}**")
         self.enter("searches")
         sent = channel.show(chat, None, f"{head}\n⏳ _working out what to search_")
@@ -1314,7 +1137,6 @@ class Research:
         return status, text
 
     def unusable(self, internet):
-        """Why a research cannot be made ("" when it can): the web, or the model, not there."""
         if not internet.available():
             return md(t"⚠️ **The web is not usable:** {internet.problem()}")
         if not self.talk.model():
@@ -1322,7 +1144,6 @@ class Research:
         return ""
 
     def searches(self, channel, chat, topic):
-        """The web searches the model names for the topic (the topic itself when it names none)."""
         data = json_in(self.talk.ask(channel, chat, [
             {"role": "system", "content": self.SEARCHES_SYSTEM.format(today=today().strftime("%d %B %Y"),
                                                                     year=today().strftime("%Y"))},
@@ -1331,8 +1152,6 @@ class Research:
         return list(dict.fromkeys(found))[:CHAT_RESEARCH_SEARCHES] or [topic]
 
     def read(self, internet, searches):
-        """[{title, url, content}] of the pages the searches find, in turn (a page that cannot be read
-        gives the search's own excerpt), each cut to the parts most about what was searched."""
         found = [internet.search(query, CHAT_RESEARCH_PAGES) or [] for query in searches]
         pages, wanted = [], set(re.findall(r"[a-z0-9]{3,}", " ".join(searches).lower()))
         for result in self.in_turn(found)[:CHAT_RESEARCH_PAGES]:
@@ -1344,7 +1163,6 @@ class Research:
 
     @staticmethod
     def in_turn(found):
-        """The results of the searches taken in turn: the first of each, then the second ..., each page once."""
         order, seen = [], set()
         for rank in range(CHAT_RESEARCH_PAGES):
             for results in found:
@@ -1355,8 +1173,6 @@ class Research:
 
     @staticmethod
     def most_about(text, wanted):
-        """Of a page, the paragraphs that share the most words with what was searched, in page order,
-        up to CHAT_RESEARCH_CHARS_PER_PAGE."""
         paragraphs = [paragraph.strip() for paragraph in re.split(r"\n\s*\n|\n(?=[#*-] )", text)
                       if len(paragraph.strip()) > 40]
         score = lambda paragraph: len(wanted & set(re.findall(r"[a-z0-9]{3,}", paragraph.lower())))
@@ -1369,7 +1185,6 @@ class Research:
         return "\n\n".join(paragraphs[position] for position in sorted(best)) or text[:CHAT_RESEARCH_CHARS_PER_PAGE]
 
     def answer_from(self, channel, chat, topic, pages):
-        """The model's answer from the pages alone, each claim citing its page."""
         return self.talk.ask(channel, chat, [
             {"role": "system", "content": self.ANSWER_SYSTEM.format(today=today().strftime("%d %B %Y"))},
             {"role": "user", "content": f"The person asks: {topic}\n\n" + "\n\n".join(
@@ -1384,11 +1199,6 @@ class Research:
 
 
 class Reporter:
-    """A run's tracker shown on the channels: the task's one message per chat (sent: kept from the task's
-    run before). It reads the tracker of the run's process (pid) every PROGRESS_EDIT_SECONDS seconds and edits the
-    message when it changed (its clock moves on every CLOCK_ONLY_EDIT_SECONDS), and its ending is edited into it when
-    the run ends. A command that keeps no tracker (learn, calibrate) shows its latest printed line."""
-
     def __init__(self, channels, title, pid=None, sent=None, phase=Tracker.STARTING, plan_on_top="", before=0.0,
                  on_step=None):
         self.channels, self.progress, self.pid = channels, Progress(title, phase, before), pid
@@ -1405,7 +1215,6 @@ class Reporter:
             self.refresh()
 
     def refresh(self):
-        """The message edited when the tracker changed, or its clock is due to move on."""
         with self.lock:
             if self.ended:
                 return
@@ -1417,7 +1226,6 @@ class Reporter:
                 self.update()
 
     def tracked(self):
-        """The run's tracker as it is now (None when it keeps none, or not yet)."""
         return Home.store().get("running", str(self.pid)) if self.pid else None
 
     def update(self):
@@ -1428,8 +1236,6 @@ class Reporter:
             self.on_step()
 
     def say(self, text, done=False):
-        """text shown in the task's message (Markup), under what it keeps; done: its last update. Its first
-        update and its last come to the bottom of the chat (the task (re)started, or done: look here)."""
         text = f"{self.plan_on_top}\n\n{text}" if self.plan_on_top else text
         bottom, self.send_at_bottom = done or self.send_at_bottom, False
         for channel in self.channels:
@@ -1438,18 +1244,15 @@ class Reporter:
                 self.sent[key] = channel.show(chat, self.sent.get(key), text, done, bottom)
 
     def printed(self, line):
-        """A line a command printed: shown as its latest, when the command keeps no tracker."""
         if self.tracked() is None and self.says_something(line):
             with self.lock:
                 self.progress.snapshot["latest"] = line.strip()[:300]
 
     @staticmethod
     def says_something(line):
-        """Whether a printed line says something: not blank, and not a "..." line of progress."""
         return line.strip() and not line.lstrip().startswith("...")
 
     def finish(self, snapshot=None):
-        """The run ended: its last tracker (given, or read now) shown, with its ending unless quiet."""
         with self.lock:
             self.ended = True
             self.progress.take(snapshot or self.tracked())
@@ -1460,11 +1263,6 @@ class Reporter:
 
 
 class Progress:
-    """A run's tracker (its snapshot), shown short for a chat: one message kept up to date (the steps
-    done and what came of them, what it works on now with its clock, how far it got, the latest thing
-    it found out, else its latest line) and, when the run ends, its ending: how it ended and how to go
-    on, or the plan that waits for the person. It only shows the tracker's data: it never reads a run's
-    printed text for meaning."""
     OWN_PHASE_ICONS = ("✅", "✏️", "📁")
     CHANGE_SIGNS = {"+": "➕", "~": "🔄"}
     HOURGLASS = ("⏳", "⌛")
@@ -1476,12 +1274,9 @@ class Progress:
         self.turns = 0
 
     def turn(self):
-        """The hourglass flipped, for the next edit of the message."""
         self.turns += 1
 
     def take(self, snapshot):
-        """The tracker as it is now (the phase Tinker said stays until the run is on a step); True when that
-        changed what the message says."""
         before = self.text()
         said = self.snapshot["doing"] if self.snapshot.get("step") is None else None
         self.snapshot = dict(self.snapshot, **{key: value for key, value in (snapshot or {}).items() if key != "before"})
@@ -1509,7 +1304,6 @@ class Progress:
 
     @property
     def working_on(self):
-        """What the run is on now: what it works on, with its phase's icon, else its phase."""
         state = self.snapshot
         if not state.get("working"):
             return state["doing"]
@@ -1522,20 +1316,16 @@ class Progress:
 
     @property
     def how_far(self):
-        """How far the run got: its spec points passing, and what it tallies."""
         return " · ".join(part for part in (self.passing, self.snapshot.get("tally")) if part)
 
     def brief(self):
-        """Markup: the title, with what it is on and how far it got."""
         got = f", {self.how_far}" if self.how_far else ""
         return md(t"**{self.title}** ({Markup.plain(self.working_on):md}{got})")
 
     def waiting(self):
-        """The run ended with its plan waiting for the person to confirm or amend it."""
         return bool(self.snapshot.get("waiting"))
 
     def ending(self):
-        """The ending for the chat (Markup): the plan that waits, or how the run ended and how to go on."""
         if self.waiting():
             return self.plan(self.snapshot["waiting"]) + f"\n⏱ _so far: {self.time_taken()}_"
         ended = self.snapshot.get("ended")
@@ -1544,7 +1334,6 @@ class Progress:
         return "\n".join([md(t"🏁 **{self.title}**")] + self.ended_lines(ended))
 
     def ended_lines(self, ended):
-        """How the run ended, how long it took, what it made and how to go on."""
         mark = {"done": "✅", "blocked": "⚠️"}.get(ended.get("status"), "⏸")
         took = f"⏱ **Done in {self.time_taken()}**" if ended.get("status") == "done" else f"⏱ _so far: {self.time_taken()}_"
         lines = ([md(t"{mark} **{ended['headline']}**")] if ended.get("headline") else []) + [took]
@@ -1555,19 +1344,16 @@ class Progress:
 
     @staticmethod
     def detail(label, value):
-        """One detail of how the run ended: the command that runs it as code."""
         if label == "Run it":
             return md(t"▶️ {label}: {value:code}")
         return md(t"• {label}: {value}")
 
     def time_taken(self):
-        """How long the task has taken, in its runs (the time a plan waits for the person left out)."""
         seconds = self.snapshot.get("before", 0.0) + self.snapshot.get("seconds", 0.0)
         return f"{human_duration(seconds)} ({round(seconds)} seconds)"
 
     @staticmethod
     def plan(plan):
-        """A plan that waits for the person (Markup), from the tracker's data."""
         heading = "🐞 **Bug shown for" if plan.get("kind") == "fix" else "📋 **Plan for"
         start = f" · ▶️ `{plan['start']}`" if plan.get("start") else ""
         lines = [md(t"{heading:md} {plan.get('name', '')}** · run {plan.get('run', ''):code}"),
@@ -1584,17 +1370,12 @@ class Progress:
 
     @staticmethod
     def change_line(change):
-        """A change to the plan ("+ added", "- dropped", "~ changed"), with its sign."""
         if change.startswith("- "):
             return md(t"➖ ~~{change[2:]}~~")
         return md(t"{Progress.CHANGE_SIGNS.get(change[:1], '•')} {change[2:]}")
 
 
 class Attached:
-    """A task run from a terminal, reporting to the channels: its tracker (which the run keeps in Tinker's
-    home) is shown in its progress message, and the conversation (which reads the chat) answers status from
-    it. That stops it with JOB_STOP_SIGNAL, as Ctrl-C does (saved); a job that is paused is stopped the same way."""
-
     def __init__(self, channels, title, tracker):
         self.tracker = tracker
         self.reporter = Reporter(channels, title, pid=os.getpid())
@@ -1611,14 +1392,11 @@ class Attached:
         raise KeyboardInterrupt
 
     def end(self):
-        """Stop reporting: its last state shown, and its tracker taken out of the home."""
         self.reporter.finish(self.tracker.state)
         self.tracker.close()
 
 
 def attach(title, tracker):
-    """The enabled channels the run about to start reports to (None when there are none). A channel that
-    does not work is said once and left out: a run never fails for its channel."""
     try:
         channels = chat_channels()
     except SystemExit as exc:
@@ -1628,8 +1406,6 @@ def attach(title, tracker):
 
 
 def chat_channels():
-    """The enabled chat channels (the channels plugin's), made: none without the plugin, or when a run is told
-    not to report (one the conversation runs reports through it)."""
     try:
         from .channels import Channels
     except ImportError:
@@ -1638,20 +1414,16 @@ def chat_channels():
 
 
 def persons_runs(skip=()):
-    """The runs the person started (running), but an exercise's (its builds; the exercise itself is a job)."""
     return [state for state in running(skip) if not state.get("exercise")]
 
 
 def exercising_now():
-    """The exercise that runs, as the conversation shows it (described), or None."""
     pid = (Home.store().get("activity", "exercise") or {}).get("pid")
     state = next((state for state in running() if state["pid"] == pid), None) if pid else None
     return described(state) if state else None
 
 
 def running(skip=()):
-    """[a run's tracker, with its pid] of the runs in Tinker's home ("running"), but for this process and the
-    processes skipped. The tracker of a process that ended is removed."""
     found = []
     for key, state in Home.store().items("running").items():
         pid = int(key) if key.isdigit() else 0
@@ -1675,18 +1447,15 @@ def alive(pid):
 
 
 def exercise_switch(text):
-    """True for exercise LANGUAGE: shown in the exercise's message alone."""
     words = text.split()
     return len(words) > 1 and words[0].lstrip("/").lower() == "exercise" and words[1].lower() != "status"
 
 
 def headline(status):
-    """What a status is about: its first line, without how far it got (after a colon, or in brackets)."""
     return re.split(r":| \(", (status or "").split("\n")[0])[0]
 
 
 def exercise_board():
-    """The exercise's message ids, as a Reporter keeps them ({(channel, chat): ids})."""
     kept = Home.store().get("activity", "exercise message") or {}
     return {tuple(key.split("\t", 1)): ids for key, ids in kept.items()}
 
@@ -1696,21 +1465,17 @@ def keep_exercise_board(sent):
 
 
 def printed_since(path, start):
-    """The last lines written to a file after offset start."""
     with open(path, encoding="utf-8", errors="replace") as file:
         file.seek(start)
         return "\n".join(file.read().strip().splitlines()[-10:])
 
 
 def until_ended(pid):
-    """Back once the process (not this one's child) has ended."""
     while alive(pid):
         time.sleep(PROGRESS_EDIT_SECONDS)
 
 
 def described(state):
-    """{title, brief, text, pid, reports} of a run's tracker, as the conversation shows it (reports: the run
-    reports to the chats by itself)."""
     progress = Progress(state.get("title") or "a task")
     progress.take(state)
     return {"title": progress.title, "brief": progress.brief(), "text": progress.text(), "pid": state.get("pid"),
@@ -1718,7 +1483,6 @@ def described(state):
 
 
 def signal_task(pid, signum):
-    """Send a task run from a terminal a signal (JOB_STOP_SIGNAL)."""
     try:
         os.kill(pid, signum)
     except ProcessLookupError, PermissionError:
@@ -1726,8 +1490,6 @@ def signal_task(pid, signum):
 
 
 class Channel:
-    """What every kind of channel does. KIND names it; SECRETS are the settings asked for (and kept)
-    apart, never shown. A dropped connection is not an error: receive returns nothing and tries again."""
     KIND = ""
     SECRETS = ()
 
@@ -1738,57 +1500,42 @@ class Channel:
         self.commands_without_tinker = True
 
     def handle(self):
-        """What the channel is called where it lives (a bot's @name); raises ChannelError when its
-        secrets do not work."""
         raise NotImplementedError
 
     def receive(self, timeout):
-        """The new messages, waiting up to timeout seconds for one: [Message]."""
         raise NotImplementedError
 
     def send(self, chat, text):
-        """Send text (Markup) to chat; what edit needs to change it later (or None)."""
         raise NotImplementedError
 
     def edit(self, chat, sent, text):
-        """Change a message sent before (a channel that cannot edit sends a new one)."""
         return self.send(chat, text)
 
     def send_file(self, chat, path, caption):
-        """Send a file with caption (Markup) under it; a channel that cannot sends the caption and where the file is."""
         return self.send(chat, f"{caption}\n📄 `{path}`")
 
     def typing(self, chat):
-        """Show chat that a reply is being written (a channel that cannot says nothing)."""
+        pass
 
     def lasting(self, chat, sent):
-        """The messages sent (Tinker's status) stay in the chat (a channel that keeps no ledger keeps all)."""
+        pass
 
     def glance(self, chat, asked, sent, keep=None):
-        """The messages sent only show something the person's message asked (its id) for: both go soon (the
-        messages in keep seconds, when given)."""
+        pass
 
     def collect(self):
-        """Take out of the chats the messages whose time is up."""
+        pass
 
     def clear(self):
-        """Take every message out of the chats but Tinker's status; how many."""
         return 0
 
     def delete(self, chat, sent):
-        """Take a message of Tinker's out of the chat (a channel that cannot leaves it)."""
+        pass
 
     def latest(self, chat, sent):
-        """Whether sent is the chat's newest message (a channel that cannot tell: it is)."""
         return True
 
     def show(self, chat, shown, text, done=False, bottom=None, status=False):
-        """One thing's message: text (Markup), with when it was updated as its footer, edited into the
-        messages the thing has (shown: their ids, or None for a new thing); a new one only for what no
-        longer fits, and one it no longer needs taken out. status: Tinker's status, not a thing. Its
-        ids now. done: the thing's last update for now (the console shows it whole then). bottom (done, by
-        default): where the person looks next, so a message that is no longer the newest is sent anew at
-        the bottom (the one before taken out), seen and heard at once (an edit up the chat is not)."""
         shown = list(shown or [])
         if (done if bottom is None else bottom) and shown and not self.latest(chat, shown[-1]):
             for old in shown:
@@ -1802,22 +1549,18 @@ class Channel:
         return now
 
     def said(self, text):
-        """text as this interface takes commands: in a conversation without "tinker" before them."""
         return BARE_RE.sub("", text) if self.commands_without_tinker else text
 
     def skip_waiting(self):
-        """Forget the messages sent while nothing listened: a command sent hours ago is not run now."""
+        pass
 
     def offer(self, commands):
-        """The commands, (name, what it does) each, listed where the person types them (a chat app's menu)."""
+        pass
 
     def ask_for(self, chat, question, hint):
-        """question sent, its answer the person's next message; hint shows where it is typed (in a chat app)."""
         return self.send(chat, question)
 
     def listened(self, timeout):
-        """The new messages from the chats this channel serves; the rest are ignored. A refusal (another
-        program reading this bot's messages, a revoked token) is said once and waited out."""
         try:
             messages = self.receive(timeout)
         except ChannelError as exc:
@@ -1830,9 +1573,6 @@ class Channel:
         return [message for message in messages if message.chat in self.allowed]
 
     def claim(self, holder):
-        """Become the one Tinker listening on this channel: True once it is, False when another one
-        listens. Held until this process ends, even when it crashes. holder: what this one is (its
-        process), kept in the lock for the next one to read."""
         self.claimed = open(self.lock_file(), "a")
         try:
             fcntl.flock(self.claimed, fcntl.LOCK_EX | fcntl.LOCK_NB)
@@ -1845,7 +1585,6 @@ class Channel:
         return True
 
     def holder(self):
-        """What the Tinker listening on this channel said it is ({} when that cannot be read)."""
         try:
             holder = json.loads(self.lock_file().read_text() or "{}")
         except OSError, ValueError:
@@ -1857,14 +1596,10 @@ class Channel:
 
 
 class ChannelError(Exception):
-    """A channel that cannot work as set up (a refused token, a refused chat)."""
+    pass
 
 
 class ConsoleChannel(Channel):
-    """The terminal, as a channel: the lines the person types are its messages (exit, or Ctrl-D, ends it),
-    and what Tinker says is printed, in the terminal's colours. A terminal cannot edit what it printed: a
-    thing that goes on shows a dim line each time its headline (its title, and what it does now) changes, and is shown
-    whole when it is done for now (only its new lines, when it grew by lines at its end since it was shown)."""
     KIND = "console"
     CHAT = "console"
     PROMPT = "› " if sys.stdin.isatty() else ""
@@ -1908,7 +1643,6 @@ class ConsoleChannel(Channel):
         return sent
 
     def send_file(self, chat, path, caption):
-        """The file opened in the browser (a terminal is on this computer), and where it is."""
         webbrowser.open(Path(path).as_uri())
         return self.send(chat, f"{caption}\n📄 Opened in your browser: `{path}`")
 
@@ -1921,14 +1655,12 @@ class ConsoleChannel(Channel):
         return [sent]
 
     def show_whole(self, sent, text):
-        """The thing whole, or only its new lines when it grew by lines at its end since it was shown."""
         self.headlines.pop(sent, None)
         before, self.whole[sent] = self.whole.get(sent), text
         grew = before is not None and text.startswith(before + "\n")
         self.print(Markup.ansi(text[len(before) + 1:].lstrip("\n") if grew else text))
 
     def show_headline(self, sent, text):
-        """A dim line, when the thing's headline (its title, and what it does now) changed."""
         headline = self.headline(text)
         if self.headlines.get(sent) != headline:
             self.headlines[sent] = headline
@@ -1942,7 +1674,6 @@ class ConsoleChannel(Channel):
         return " · ".join(line for line in (lines[:1] + [doing.split(" · ⏱")[0]]) if line)
 
     def print(self, text):
-        """text printed above the prompt (the line being typed is shown again under it)."""
         out = sys.stdout
         with self.printing:
             if out.isatty():
@@ -1959,14 +1690,11 @@ class ConsoleChannel(Channel):
 
 
 class Message:
-    """One message to Tinker: who sent it (the chat to answer), what it says, and its id in the chat."""
-
     def __init__(self, chat, text, sender="", id=None):
         self.chat, self.text, self.sender, self.id = str(chat), (text or "").strip(), sender, id
 
 
 def pieces(text, size=3500):
-    """text in parts a chat message holds, split between lines (a line longer than a part, across parts)."""
     parts, part = [], ""
     for whole in text.splitlines():
         for line in [whole[start:start + size] for start in range(0, len(whole), size)] or [""]:
@@ -1978,11 +1706,6 @@ def pieces(text, size=3500):
 
 
 class Markup:
-    """The marks a chat message is written with, as in Markdown, each for what it means: **bold** for what
-    matters most, *italic* (or _italic_) for an aside, ~~struck~~ for what is gone, `code` for what is typed
-    or named exactly (a command, a path), [a link](https://...), ```a block``` of code, and ```output for a
-    command's output (folded where the chat can fold it); "- " starts an item. A mark meant as itself is
-    escaped (literal)."""
     FENCE_RE = re.compile(r"```(\w*)\n?(.*?)(?:\n?```|\Z)", re.S)
     CODE_RE = re.compile(r"`([^`\n]+)`")
     LINK_RE = re.compile(r"\[([^\]\n]+)\]\((https?://[^)\s]+)\)")
@@ -1997,8 +1720,6 @@ class Markup:
 
     @classmethod
     def of(cls, template):
-        """A message from a t-string, each value as its format says: none, shown as it is (its marks escaped);
-        :md, Markup already; :code, a code span; :block, a fenced block."""
         return "".join(part if isinstance(part, str) else cls.formatted(part) for part in template)
 
     @classmethod
@@ -2017,22 +1738,14 @@ class Markup:
 
     @staticmethod
     def literal(text):
-        """text shown as it is: its marks escaped."""
         return re.sub(r"([*_`~\\])", r"\\\1", str(text))
 
     @staticmethod
     def fenced(text):
-        """text safe inside a block: a fence in it cannot end the block."""
         return str(text).replace("```", "ˋˋˋ")
 
     @staticmethod
     def columns(text):
-        """Text in columns, as a terminal lines them up with spaces and tabs, as a chat reads it best: each
-        line's columns joined by " | ". A column ends where the lines are blank at the same place (a short
-        line counts as blank past its end; of 4 lines or more, one value may run into the gap, and its cut
-        moves to the space after it). The line of fewest words (of three or more) shapes them: its last word
-        starts the last column, which runs to the end of each line (spaces and all), and a gap with none of
-        its words on one side is inside a column (a date and its time). Text not in columns stays as it is."""
         lines = str(text).expandtabs().splitlines()
         rows = [line for line in lines if len(line.split()) >= 3]
         cuts = Markup.column_cuts(rows) if len(rows) >= 2 else []
@@ -2042,7 +1755,6 @@ class Markup:
 
     @staticmethod
     def column_cuts(rows):
-        """Where the columns of these rows begin, as the row of fewest words shapes them."""
         shape = min(rows, key=lambda line: len(line.split()))
         last = list(re.finditer(r"\S+", shape))[-1].start()
         tolerated = 1 if len(rows) >= 4 else 0
@@ -2058,7 +1770,6 @@ class Markup:
 
     @staticmethod
     def in_columns(line, cuts):
-        """The line's columns joined by " | " (a value running into a gap is cut after it)."""
         parts, begin = [], 0
         for cut in cuts:
             if cut >= len(line):
@@ -2075,7 +1786,6 @@ class Markup:
 
     @classmethod
     def html(cls, text):
-        """The text as Telegram's HTML shows it."""
         keep = cls.keeper()
 
         def block(found):
@@ -2089,9 +1799,6 @@ class Markup:
 
     @classmethod
     def ansi(cls, text):
-        """The text as a terminal shows it: bold, italic, struck and code in its colours, a block indented,
-        a command's output dimmed (its first TERMINAL_OUTPUT_LINES lines). Plain where colour is off (NO_COLOR, or
-        not a terminal)."""
         if os.environ.get("NO_COLOR") or not sys.stdout.isatty():
             return cls.plain(text)
         keep = cls.keeper()
@@ -2109,15 +1816,12 @@ class Markup:
 
     @classmethod
     def plain(cls, text):
-        """The text with its marks taken off, for a chat that shows none."""
         keep = cls.keeper()
         return cls.render(text, lambda found: keep(found.group(2).rstrip("\n")), lambda code: code,
                           lambda plain: plain, lambda tag, inner: inner, keep, lambda words, url: f"{words} ({url})")
 
     @classmethod
     def render(cls, text, block, code, plain, mark, keep, link):
-        """text shown with block(fence match), code(text), plain(text), mark(tag, inner) and link(words, url);
-        what is shown as it is (blocks, code, links, escaped marks) is kept apart until the rest is marked."""
         text = cls.FENCE_RE.sub(block, str(text))
         text = cls.LINK_RE.sub(lambda found: keep(link(found.group(1), found.group(2))), text)
         text = cls.ESCAPED_RE.sub(lambda found: keep(plain(found.group(1))), text)
@@ -2143,7 +1847,6 @@ md = Markup.of
 
 
 def help_text(words=()):
-    """tinker help (of one command: words), as a conversation shows it: tinker's own (Markup)."""
     try:
         done = subprocess.run(tinker_command() + ["help", *words], text=True, capture_output=True, timeout=30,
                               stdin=subprocess.DEVNULL, env=dict(os.environ, NO_COLOR="1", TINKER_FORMAT="markup"))
@@ -2154,8 +1857,6 @@ def help_text(words=()):
 
 
 def history_text(words=()):
-    """history [PAGE | #N] (Markup): the things shown in the chats, newest first, or the one numbered N as it was
-    shown last, with what the person asked for it."""
     word = words[0] if words else ""
     if word.startswith("#"):
         return history_thing(word)
@@ -2172,7 +1873,6 @@ def history_text(words=()):
 
 
 def history_thing(word):
-    """history #N (Markup): the thing as it was shown last, with what the person asked for it."""
     thing = Ledger.thing(word[1:]) if word[1:].isdigit() else None
     if thing is None:
         return md(t"🤷 **No {word} in the history:** `history` lists what it keeps")
@@ -2181,25 +1881,19 @@ def history_thing(word):
 
 
 def headline(text):
-    """A message's first line that says something, plain and short."""
     lines = [line for line in Markup.plain(text).splitlines() if line.strip()]
     return first_words(lines[0] if lines else "", 60)
 
 
 def commands_brief():
-    """The commands, as the chat's prompt names them: their synopses alone (the whole help would slow every
-    reply)."""
     return "; ".join(re.findall(r"- `([^`]+)`", help_text())) or "help"
 
 
 def tinker_command():
-    """How to start Tinker again: the script this one is."""
     return [sys.executable, str(Path(sys.argv[0]).resolve())]
 
 
 def tinker_process(arguments, folder=None, output=None, **env):
-    """A tinker of its own, started in the background (its own process group: a signal to it reaches what it runs),
-    printing to output (else where this one prints), with env added to this one's."""
     return subprocess.Popen(tinker_command() + arguments, cwd=folder, env=dict(os.environ, PYTHONUNBUFFERED="1", **env),
                             stdin=subprocess.DEVNULL, stdout=output, stderr=subprocess.STDOUT if output else None,
                             start_new_session=True)
@@ -2210,7 +1904,6 @@ def started_by_a_conversation():
 
 
 def json_in(text):
-    """The JSON object a reply holds ({} when none)."""
     found = re.search(r"\{.*\}", text or "", re.S)
     try:
         data = json.loads(found.group(0)) if found else {}
@@ -2224,7 +1917,6 @@ def text_of(output):
 
 
 def keep_typing(channel, chat, done):
-    """The chat's "typing…" sign, shown until done is set."""
     while not done.is_set():
         channel.typing(chat)
         done.wait(TYPING_SIGN_SECONDS)
@@ -2235,13 +1927,10 @@ def first_words(text, size=160):
 
 
 def site_of(url):
-    """The site a page is on, as a person names it: "https://www.python.org/downloads/" -> "python.org"."""
     return re.sub(r"^(?:[a-z]+://)?(?:www\.)?", "", url).split("/", 1)[0]
 
 
 def built_project(name=""):
-    """The project named (@ID or @folder, as Runs.find takes it), or without a name the one built last, from
-    the projects Tinker points to ({id, workdir, task, status ...}). None when there is none."""
     projects = [run for run in Runs.entries() if Path(str(run.get("workdir", ""))).is_dir()]
     if name:
         try:

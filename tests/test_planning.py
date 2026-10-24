@@ -1,5 +1,3 @@
-"""PLN: planning a cycle: recall, the spec, the contracts where files meet, and their review."""
-
 import json
 
 import pytest
@@ -445,7 +443,6 @@ def python_with_conditional_rules():
 
 
 def choose(situation):
-    """A spec reply that says the project has the listed situation of this name."""
     def reply(messages):
         listing = messages[-1]["content"].split("Code some learned rules are for", 1)[1]
         number = next(int(line.split(".")[0]) for line in listing.splitlines() if line.endswith(situation))

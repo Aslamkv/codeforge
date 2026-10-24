@@ -1,6 +1,3 @@
-"""JOB: every long command is a job, listed, stopped and resumed alike; a resumed job does not ask again what it
-asked before."""
-
 import contextlib
 import datetime
 import os
@@ -26,7 +23,6 @@ DEAD_PID = 999999999
 
 
 def stopped_job(home_store, argv, answers=()):
-    """Job #1 for argv, stopped as Ctrl-C stops it, its journal keeping the answers to the requests given."""
     with pytest.raises(KeyboardInterrupt), Jobs.running(argv):
         for request, answer in answers:
             journaled(request, lambda: answer)
@@ -302,7 +298,6 @@ def test_a_research_job_ends_with_its_answer():
 
 
 def other_running(home_store, number=1, command="learn", title="learn go"):
-    """A job another process runs (the test's parent process: alive, not this one)."""
     home_store.put("jobs", str(number), {"number": number, "command": command, "title": title, "state": "running",
                                          "pid": os.getppid(), "arguments": title.split(), "started": "x", "updated": "x"})
     home_store.put("job numbers", "last", number)

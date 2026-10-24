@@ -1,6 +1,3 @@
-"""BLD: building a cycle: the tests, the code, and fixing until every test passes (real test runs in a temporary
-project; the model's replies are scripted)."""
-
 import json
 
 import pytest
@@ -21,7 +18,6 @@ FILES = {"calc.py": {"kind": "code", "role": "the calculator", "contract": [], "
 
 @pytest.fixture
 def calc(make_project, make_session, project_dir):
-    """A calculator whose sub is wrong, with its two tests, as a planned project at the verify phase."""
     (project_dir / "calc.py").write_text(CALC_WITH_WRONG_SUB)
     (project_dir / "test_calc.py").write_text(TESTS)
     steps = [criterion("C1", "test_calc.py::test_add", "calc.add(2, 3) is 5"),
@@ -334,7 +330,6 @@ def test_what_a_build_fix_may_change(calc):
 
 @pytest.fixture
 def bug(calc, project_dir):
-    """The calculator with sub fixed, and a bug report against it."""
     session, project = calc
     (project_dir / "calc.py").write_text(FIXED)
     for step in project.criteria:

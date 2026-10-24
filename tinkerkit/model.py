@@ -1,6 +1,3 @@
-"""The local model: Ollama's API, one request with its budgets and retries (Model), and measuring a
-model once, quickly (Calibrator)."""
-
 lazy import json
 lazy import secrets
 lazy import subprocess
@@ -57,11 +54,6 @@ LoadedModel = namedtuple("LoadedModel", "name size_bytes")
 
 
 class Model:
-    """The one model, with the settings its calibration measured: its context, its think setting,
-    every prompt within its input budget, every reply up to the longest it writes (a fix: up to
-    fix_max). Every exchange, and every detail of a call, goes to its log (log.add(event)); the person
-    sees a live line while it writes (say.live) and a short one when it is asked again."""
-
     def __init__(self, name, settings, keep_alive, log, exclusive=True,
                  max_growth=DEFAULT_CONFIG["max_growth"]):
         self.name, self.settings = name, settings
@@ -84,8 +76,6 @@ class Model:
         self.recent_chars_per_token = []
 
     def ask(self, system, parts, label, **kw):
-        """One request (ask_once); a prompt too large as it is gets every part shortened (exact
-        ones too) rather than failing: PromptTooLarge only when even that does not fit."""
         try:
             return self.ask_once(system, parts, label, **kw)
         except PromptTooLarge:
@@ -95,15 +85,6 @@ class Model:
 
     def ask_once(self, system, parts, label, budget=None, done_when=None, max_reply=None, unthinking_retry=True,
                  think=None):
-        """One request. parts: a list of Part, or a function limit -> list (rebuilt on a retry).
-        The reply may be as long as the longest the model writes (budget: shorter), and at most
-        max_reply: a smaller budget saves nothing on a reply that ends on its own, and one that
-        is cut is asked again from the start.
-        A reply cut off while still thinking is asked again with twice the budget up to max_reply,
-        then (if unthinking_retry) without thinking; otherwise it counts as an empty reply (and
-        self.hit_thinking_cap says so). A cut reply is finished when done_when says so or its blocks have
-        all ended (done_when may wait for the model to run on). think: this call's think setting
-        instead of the phase's."""
         if self.exclusive:
             self.evict_others()
         self.hit_thinking_cap = False
@@ -117,7 +98,6 @@ class Model:
         return reply
 
     def one_try(self, tries, system, parts, label, done_when, max_reply, unthinking_retry):
-        """One try of a request: its reply, or None to try again (after what went wrong calls for)."""
         user = self.user_message(system, self.with_thought(parts, tries.unfinished_thought), label, tries.shrink)
         cap = min(self.reply_room(system, user), self.max_reply, max_reply)
         tries.budget = max(MIN_REPLY_TOKENS, min(tries.budget, cap))
@@ -135,14 +115,12 @@ class Model:
         return content
 
     def evict_others(self):
-        """Unload every other model, so two never share memory (other apps reload theirs)."""
         for loaded, _ in Ollama.loaded_models() or []:
             if loaded and loaded != self.name:
                 self.note(f"unloading {loaded} (exclusive mode: only one model in memory)")
                 Ollama.unload(loaded)
 
     def think_now(self):
-        """The think setting for the current phase: planning at the model's, building at build_think."""
         return self.build_think if self.is_building and self.build_think else self.think
 
     def user_message(self, system, parts, label, shrink):
@@ -155,8 +133,6 @@ class Model:
 
     @staticmethod
     def with_thought(parts, thought):
-        """The prompt's parts with the end of an unfinished thought after them, for the retry that
-        does not think (parts: a list, or a function limit -> list)."""
         if not thought.strip():
             return parts
         return Model.with_part(parts, Part("Your analysis so far (it ran out of room before an answer: conclude it "
@@ -165,7 +141,6 @@ class Model:
 
     @staticmethod
     def with_part(parts, part):
-        """The prompt's parts with one more after them (parts: a list, or a function limit -> list)."""
         return (lambda limit: parts(limit) + [part]) if callable(parts) else list(parts) + [part]
 
     def reply_room(self, system, user):
@@ -187,8 +162,6 @@ class Model:
         return options
 
     def after_error(self, exc, label, tries, prompt_tokens, shown, started):
-        """What a failed request leads to: None to try it again (after what the failure calls for),
-        or the reply to return (what arrived before a reply error, once tries run out)."""
         if exc.crashed:
             tries.crashes += 1
             if exc.streamed:
@@ -203,11 +176,6 @@ class Model:
         return None
 
     def after_crash(self, exc, label, prompt_tokens, crashes):
-        """The runner died reading the prompt (some runners do above some size, which varies a
-        little). The same prompt is tried again once the crashed runner has freed its memory; when
-        it crashes again, the budget drops a little (CRASHED_LIMIT_SHARE) for the rest of this run only:
-        the measured value stays in the model's settings, and the run ends with a note to measure
-        again if crashes keep happening."""
         self.stop_after(exc, crashes, f"the last time reading a prompt of ~{prompt_tokens} tokens")
         what = f"crashed reading a prompt of ~{prompt_tokens} tokens"
         if crashes > 1 and prompt_tokens >= self.max_tokens * CRASH_NEAR_LIMIT_SHARE:
@@ -217,11 +185,6 @@ class Model:
         self.crashed(exc, label, what, prompt_tokens=prompt_tokens)
 
     def after_reply_crash(self, exc, label, crashes):
-        """The runner died while writing the reply (out of GPU memory, which fills token by token,
-        or memory other apps took). The same call is made again once the runner has freed its
-        memory; when it crashes again near the longest reply, that limit drops a little
-        (CRASHED_LIMIT_SHARE) for the rest of this run only. A crash far below the limit is not about the
-        reply's length: the limit stays."""
         self.stop_after(exc, crashes, f"the last time after writing {exc.streamed} tokens")
         what = f"crashed after writing {exc.streamed} tokens"
         if crashes > 1 and exc.streamed >= self.max_reply * CRASH_NEAR_LIMIT_SHARE:
@@ -236,7 +199,6 @@ class Model:
                               f"happening, measure the model again: tinker calibrate {self.name}", crashed=True)
 
     def crashed(self, exc, label, what, **facts):
-        """Say what happened, log it, and give the crashed runner time to free its memory."""
         self.crashes += 1
         self.note(f"{label}: {self.name} {what} ({first_line(str(exc), 90)}); trying again in {CRASH_RECOVERY_SECONDS}s",
                   f"{self.name} crashed; trying again in {CRASH_RECOVERY_SECONDS}s")
@@ -246,9 +208,6 @@ class Model:
         time.sleep(CRASH_RECOVERY_SECONDS)
 
     def reply_error_is_final(self, exc, shown, started, tries):
-        """Ollama failed while streaming the reply (it could not parse what the model wrote). True when
-        that was the last try: what arrived before the error counts as the reply (often nothing usable,
-        which the caller treats as an attempt with no change; the run goes on)."""
         self.log.add({"label": shown, "model": self.name, "error": str(exc), "reply": exc.partial})
         if tries <= REPLY_ERROR_RETRIES:
             self.step(f"{shown}  ({first_line(str(exc), 120)}; asking again)", started)
@@ -258,7 +217,6 @@ class Model:
         return True
 
     def recover(self, exc, label, tries):
-        """What to change before trying a failed request again; re-raises when nothing helps."""
         think = tries.think
         if self.build_thinking_rejected(exc, think):
             self.think_as_planning(label, tries)
@@ -274,46 +232,38 @@ class Model:
             raise exc
 
     def think_as_planning(self, label, tries):
-        """The think setting for building refused: building thinks as planning does from now on."""
         self.note(f"{label}: {self.name} rejected think={tries.think!r} for building; using {self.think!r} as for "
                   f"planning")
         self.build_think = None
         tries.think = self.think
 
     def shorter_prompt(self, label, tries):
-        """Out of GPU memory: the request is tried again with a smaller prompt budget."""
         self.note(f"{label}: out of GPU memory; retrying this request with a prompt budget of "
                   f"{int(self.max_tokens * OOM_RETRY_PROMPT_SHARE ** (tries.shrink + 1))} tokens",
                   "Out of GPU memory; trying again with a shorter prompt")
         tries.shrink += 1
 
     def reload_model(self, exc, label, tries):
-        """The model stopped answering: it is unloaded, so the next try loads it afresh."""
         self.note(f"{label}: {exc}; reloading the model and retrying",
                   f"{self.name} stopped responding; reloading it and trying again")
         Ollama.unload(self.name)
         tries.stalls += 1
 
     def think_true(self, label, tries):
-        """A thinking level refused: the model thinks with true from now on."""
         self.note(f"{label}: {self.name} rejected think={tries.think!r}; using think=true")
         self.think = tries.think = True
 
     def without_thinking(self, label, tries):
-        """The think setting refused altogether: the model is asked without one from now on."""
         self.note(f"{label}: {self.name} rejected the think setting; retrying without it")
         self.think, self.think_rejected, tries.think = None, True, None
 
     def build_thinking_rejected(self, exc, think):
-        """Whether the model refused the think setting kept for building, which differs from planning's."""
         return self.is_building and think == self.build_think != self.think and exc.about_thinking
 
     def prompt_tokens(self, system, user):
-        """The most tokens system + user can be (the lowest chars per token seen)."""
         return int((len(system) + len(user)) / self.chars_per_token)
 
     def log_exchange(self, system, user, shown, budget, data, started):
-        """Learn from the real token count and log the exchange. Returns (content, cut)."""
         content = data.get("message", {}).get("content") or ""
         cut = data.get("done_reason") == "length"
         self.learn_chars_per_token(len(system) + len(user), data.get("prompt_eval_count", 0))
@@ -325,7 +275,6 @@ class Model:
         return content, cut
 
     def learn_chars_per_token(self, chars, tokens):
-        """Learn chars per token from real prompts: the lowest recent ratio, capped."""
         if tokens and chars and tokens > 50:
             self.recent_chars_per_token = (self.recent_chars_per_token + [chars / tokens])[-20:]
             self.chars_per_token = max(MIN_CHARS_PER_TOKEN, min(min(self.recent_chars_per_token), MAX_CHARS_PER_TOKEN))
@@ -336,9 +285,6 @@ class Model:
                                        and not Reply.files_ended(content))
 
     def think_again(self, tries, data, shown, started, cap, unthinking_retry):
-        """After a reply cut off while still thinking: True to ask again, with more room or without
-        thinking (then given the thought so far to conclude: what was thought is not lost), or False
-        to give up (an empty reply; self.hit_thinking_cap and self.last_unfinished_thought say so)."""
         action, said = self.after_cut(data, tries.budget, cap, unthinking_retry)
         self.step(f"{shown}  ({said})", started)
         thought = data["message"].get("thinking", "")
@@ -353,8 +299,6 @@ class Model:
 
     @staticmethod
     def after_cut(data, budget, cap, unthinking_retry):
-        """A reply cut off while still thinking: ("more" (twice the budget), "unthinking" (ask again
-        without thinking) or "give up" (it counts as an empty reply), what to say about it)."""
         tokens = data.get("eval_count", 0)
         if budget < cap:
             return "more", (f"cut at {tokens} tokens while thinking; asking again with up to "
@@ -376,17 +320,14 @@ class Model:
             self.note(f"reply cut at {tokens_out} tokens")
 
     def step(self, message, started):
-        """A call's step, kept in the log with how long it took."""
         self.log.add({"note": message, "model": self.name, "seconds": round(time.perf_counter() - started, 1)})
 
     def note(self, detail, retry=""):
-        """A detail of a call, kept in the log; when it is asked again, the person is told in plain words."""
         self.log.add({"note": detail, "model": self.name})
         if retry:
             say.retry(retry)
 
     def check_memory(self):
-        """With the model kept loaded, unload it once it grows past max_growth x its first size."""
         if self.keep_alive in (0, "0"):
             return
         size = self.loaded_size()
@@ -399,7 +340,6 @@ class Model:
             self.unload()
 
     def loaded_size(self):
-        """Its size in memory, in GB (None when it is not loaded, or Ollama cannot tell)."""
         return next((size / 1e9 for model_name, size in Ollama.loaded_models() or [] if model_name == self.name), None)
 
     def unload(self):
@@ -407,9 +347,6 @@ class Model:
             Ollama.unload(self.name)
 
     def ask_until_usable(self, system, parts, label, read, attempts=3, think=None, max_reply=None):
-        """Ask for JSON until read(reply) gives a result; read raises ValueError and the like when
-        a reply is not usable, and the reason goes into the next prompt. None when no reply was.
-        think: this request's think setting instead of the phase's; max_reply: its longest reply."""
         for attempt in range(1, attempts + 1):
             reply = Reply(self.ask(system, parts, f"{label} (attempt {attempt})", done_when=Reply.json_complete,
                                    think=think, max_reply=max_reply))
@@ -423,19 +360,13 @@ class Model:
         return None
 
     def limit_chars(self, system, tokens=None):
-        """Room for the user message, in chars, so system + user stay within the token budget."""
         return int((tokens or self.max_tokens) * PROMPT_BUDGET_SHARE * self.chars_per_token) - len(system) - 40
 
     def learned_chars_per_token(self):
-        """What this run's prompts showed (None until enough were seen): the next run starts there."""
         return round(min(self.recent_chars_per_token), 2) if len(self.recent_chars_per_token) >= 5 else None
 
 
 class Tries:
-    """What changes between the tries of one request: the think setting and the reply budget, the
-    prompt shrunk after running out of memory, a thought cut off to conclude, and the stalls,
-    crashes and reply errors so far."""
-
     def __init__(self, think, budget):
         self.think, self.budget = think, budget
         self.shrink = self.stalls = self.crashes = self.reply_errors = 0
@@ -443,13 +374,10 @@ class Tries:
 
 
 class Models:
-    """The models Ollama has, and what calibration measured for each (Tinker's "models"): the settings
-    a run uses, and what a run learned about its model."""
     MEASURED_LIMITS = ("max_prompt_tokens", "num_ctx", "max_reply_tokens", "fix_max_tokens")
 
     @staticmethod
     def installed(name):
-        """The name, when Ollama has a model of exactly that name (as tinker models lists it)."""
         models = Ollama.installed_models()
         if models is None:
             raise SystemExit(f"Ollama does not answer at {Config.ollama_url()} (tinker config ollama_url URL).")
@@ -462,7 +390,6 @@ class Models:
 
     @staticmethod
     def selected():
-        """(name, settings) of the model in use: the one tinker use-model selected, measured."""
         name = Config.get("model")
         if not name:
             raise SystemExit("No model in use. Measure one Ollama has with tinker calibrate NAME, then select it with "
@@ -483,7 +410,6 @@ class Models:
 
     @staticmethod
     def settings(name):
-        """A model's measured settings, or None when it was never calibrated."""
         settings = Home.store().get("models", name)
         return settings if isinstance(settings, dict) else None
 
@@ -493,9 +419,6 @@ class Models:
 
     @staticmethod
     def remember(model):
-        """What this run learned about its model, for the next run: the chars per token its prompts
-        showed (prompts are packed from there). Limits lowered after crashes are not kept: the
-        measured ones stay, and a note says to measure again if crashes keep happening."""
         if model.crashes:
             Models.say_crashes(model)
         learned, settings = model.learned_chars_per_token(), Models.settings(model.name)
@@ -513,37 +436,16 @@ class Models:
 
     @staticmethod
     def context_for(budget, max_reply, context_length):
-        """num_ctx for a prompt budget and a longest reply: room for both (a runner that keeps to it
-        then never cuts a reply short), within what the model supports."""
         needed = -(-(budget + max_reply + 512) // 1024) * 1024
         return min(needed, context_length) if context_length else needed
 
     @staticmethod
     def reply_limits(max_reply):
-        """The reply settings for a longest reply: it, and the budget of a fix under it."""
         return {"max_reply_tokens": max_reply,
                 "fix_max_tokens": min(FIX_MAX_TOKENS, max_reply)}
 
 
 class Calibrator:
-    """Measures a model once, quickly, so every run uses it at its limits without trial and error.
-    A run needs at most PROMPT_TARGET_TOKENS tokens of prompt and REPLY_TARGET_TOKENS of reply, so the question
-    is whether a context of that size fits in GPU memory. It is answered by reading, not writing:
-    a reply fills memory exactly as a prompt of the same length does, and a model reads several
-    times faster than it writes. In order:
-    1. fit, with no model call: the model's weights against the machine's GPU memory; a model
-       that cannot fit stops here, with what to do;
-    2. one short chat on a fresh load: the think setting it accepts, the chars per token of text
-       like a real prompt, how fast it writes;
-    3. one read of the whole context, freshly loaded as a run loads it (a GGUF runner reserves the
-       context when it loads, so it reads only a full prompt, and in pieces when one piece
-       crashes it);
-    4. only when that fails: the largest context that reads, found to within CAPACITY_SEARCH_PRECISION, and
-       shared between the prompt (up to PROMPT_TARGET_TOKENS) and the reply.
-    A probe is a prompt of an exact number of tokens: random digits sent as is (no chat template),
-    one token each in most tokenizers (one that counts them otherwise is measured by the read).
-    Kept in Tinker's "models" (tinker models and tinker config show it)."""
-
     FILLER = """def due_items(items, today):
     \"\"\"The items due by today, oldest first: each a dict with "id", "title" and "due" (an ISO date).\"\"\"
     found = [item for item in items if item.get("due") and item["due"] <= today.isoformat()]
@@ -580,9 +482,6 @@ class Calibrator:
         return settings
 
     def check_fit(self, facts):
-        """The weights against the GPU memory, with no model call: a model that cannot fit stops
-        here, with what to do (a guess of the context is not worth more: memory per token depends on
-        an architecture Ollama does not always describe, so the context is measured instead)."""
         memory, size = self.gpu_memory(), facts.get("size") or 0
         if not memory or not size:
             return
@@ -600,8 +499,6 @@ class Calibrator:
 
     @classmethod
     def gpu_memory(cls):
-        """The memory a model may use: on a Mac, the GPU's wired limit (iogpu.wired_limit_mb when it
-        is set, else macOS's default share of the memory); elsewhere the machine's memory."""
         total = cls.total_memory()
         if sys.platform != "darwin" or not total:
             return total
@@ -614,7 +511,6 @@ class Calibrator:
 
     @staticmethod
     def total_memory():
-        """The machine's memory in bytes (None when it cannot be told)."""
         try:
             if sys.platform == "darwin":
                 return int(subprocess.run(["sysctl", "-n", "hw.memsize"], capture_output=True, text=True).stdout)
@@ -624,9 +520,6 @@ class Calibrator:
             return None
 
     def first_chat(self, facts):
-        """One short chat on a fresh load: the think setting the model accepts ("high", else true;
-        none when it does not think), the chars per token of prompt-like text, and how fast it
-        writes. Returns the think setting."""
         thinks = not facts["capabilities"] or "thinking" in facts["capabilities"]
         content = self.FILLER * 4
         for think in ((DEFAULT_THINK, True) if thinks else (None,)):
@@ -645,7 +538,6 @@ class Calibrator:
         return None
 
     def measure_chat(self, content, data):
-        """From a chat's stats: how long the model took to load, its chars per token, how fast it writes."""
         self.load_seconds = round(data.get("load_duration", 0) / 1e9, 1)
         read, written = data.get("prompt_eval_count") or 0, data.get("eval_count") or 0
         self.measured_chars_per_token = len(content) / read if read > 50 else None
@@ -653,8 +545,6 @@ class Calibrator:
         self.write_tokens_per_second = round(written / seconds, 1) if written and seconds else None
 
     def capacity(self, target, facts):
-        """(the largest context that reads, the smallest that failed or None): the target first;
-        when it fails, halving the gap until it is within CAPACITY_SEARCH_PRECISION."""
         gguf = (facts.get("format") or "").lower() == "gguf"
         if self.reads(target, gguf):
             return Capacity(target, None)
@@ -668,10 +558,6 @@ class Calibrator:
         return Capacity(good, bad)
 
     def reads(self, context, gguf):
-        """Whether the model, freshly loaded with this context, reads it: all of it (memory then
-        holds as much as a full prompt and reply), or for a GGUF model a full prompt (its runner
-        reserved the whole context when it loaded); a GGUF runner that crashes on one piece is
-        tried once more in pieces (num_batch)."""
         tokens = min(context, PROMPT_TARGET_TOKENS) if gguf else context
         with say.section():
             say.step(f"Reading {tokens} tokens with a context of {context} (about "
@@ -688,9 +574,6 @@ class Calibrator:
         return False
 
     def probe(self, tokens, num_ctx):
-        """Have the model read a prompt of exactly `tokens` tokens on a fresh load, as a run loads
-        it: the count Ollama reports, or None when it fails (then after the crashed runner had time
-        to free its memory)."""
         digits = max(1, round(tokens / self.tokens_per_digit))
         prompt = "".join(secrets.choice("0123456789") for _ in range(digits))
         timeout = max(OLLAMA_SILENCE_TIMEOUT, int(tokens / max(self.read_speed() / 3, 1)))
@@ -702,7 +585,6 @@ class Calibrator:
         return self.probe_read(data, tokens, digits)
 
     def probe_failed(self, exc, tokens):
-        """Noted, after the crashed runner had time to free its memory; Ollama gone ends calibration."""
         if Ollama.installed_models() is None:
             raise SystemExit(f"Ollama stopped answering during calibration: {exc}")
         with say.section(), say.section():
@@ -712,7 +594,6 @@ class Calibrator:
         time.sleep(CRASH_RECOVERY_SECONDS)
 
     def probe_read(self, data, tokens, digits):
-        """The tokens read, noted with what they teach: tokens per digit, and the largest read so far."""
         read = data.get("prompt_eval_count") or tokens
         self.tokens_per_digit = read / digits
         self.probe_history.append([read, "read"])
@@ -723,15 +604,12 @@ class Calibrator:
         return read
 
     def read_speed(self):
-        """Tokens a second it reads (from the last read; at first a guess from how fast it writes)."""
         if self.largest_read_stats.get("prompt_eval_duration"):
             return self.largest_read_stats["prompt_eval_count"] / self.largest_read_stats["prompt_eval_duration"] * 1e9
         return (self.write_tokens_per_second or 25) * 4
 
     @staticmethod
     def shared(context):
-        """(prompt budget, longest reply) of a context: the prompt up to PROMPT_TARGET_TOKENS and no more
-        than a third of it, the reply the rest, up to REPLY_TARGET_TOKENS."""
         budget = min(PROMPT_TARGET_TOKENS, max(MIN_PROMPT_TOKENS, context // 3))
         return ContextSplit(budget, max(MIN_REPLY_TOKENS, min(REPLY_TARGET_TOKENS, context - budget)))
 
@@ -746,16 +624,12 @@ class Calibrator:
                 "tokens_per_digit": round(self.tokens_per_digit, 4)}
 
     def safe_ratio(self):
-        """The chars per token prompts are sized with: what was measured, 3% lower (prompts with
-        more markup have fewer chars per token; each run then learns the real ones)."""
         if not self.measured_chars_per_token:
             return STARTING_CHARS_PER_TOKEN
         return round(max(MIN_CHARS_PER_TOKEN, min(self.measured_chars_per_token * 0.97, MAX_CHARS_PER_TOKEN)), 2)
 
 
 class Ollama:
-    """Ollama's HTTP API (the setting ollama_url): chat calls streamed with live progress, raw
-    prompts for calibration, and what it says about its models."""
     RUNNER_CRASHES = ("runner failed", "runner process has terminated", "runner process no longer running",
                       "command buffer execution failed", "panic:", "signal: abort", "signal: killed",
                       "segmentation fault")
@@ -763,10 +637,6 @@ class Ollama:
     @staticmethod
     def chat(name, messages, keep_alive, options, think=None, label=None, done_when=None,
              timeout=OLLAMA_SILENCE_TIMEOUT):
-        """Stream one chat request (a live line in plain words when labelled, say.live). done_when(content)
-        says when the reply is complete: the stream is
-        closed there, which stops Ollama generating. Returns the final stats chunk with message.content
-        set to the reply. In a job, a request it made before is answered from its journal."""
         unloading = not messages
         if unloading:
             return Ollama.streamed(name, messages, keep_alive, options, think, label, done_when, timeout)
@@ -804,14 +674,12 @@ class Ollama:
 
     @staticmethod
     def request(path, payload=None):
-        """A request to one of Ollama's endpoints: a GET, or a POST of payload as JSON."""
         data = None if payload is None else json.dumps(payload).encode("utf-8")
         return urllib.request.Request(Config.ollama_url() + path, data=data, headers={"Content-Type": "application/json"},
                                       method="GET" if payload is None else "POST")
 
     @staticmethod
     def http_error(exc, streamed=0):
-        """The OllamaError for an HTTP error, with what Ollama said (out of memory? a crash?)."""
         body = exc.read().decode("utf-8", errors="replace").strip()
         return OllamaError(f"Ollama returned HTTP {exc.code}: {body or exc.reason}", oom=Ollama.is_oom(body),
                            crashed=Ollama.is_crash(body), streamed=streamed)
@@ -823,14 +691,11 @@ class Ollama:
 
     @staticmethod
     def is_crash(text):
-        """The model's runner died (not a refusal of the request): retrying after a pause can work."""
         lowered = (text or "").lower()
         return any(sign in lowered for sign in Ollama.RUNNER_CRASHES)
 
     @staticmethod
     def read_raw(name, prompt, options, timeout=OLLAMA_SILENCE_TIMEOUT):
-        """Have the model read a prompt sent as is (no chat template: calibration sends an exact
-        number of tokens), on a fresh load and without streaming. Ollama's stats."""
         payload = {"model": name, "prompt": prompt, "raw": True, "stream": False, "keep_alive": 0, "options": options}
         try:
             with urllib.request.urlopen(Ollama.request("/api/generate", payload), timeout=timeout) as response:
@@ -855,13 +720,11 @@ class Ollama:
 
     @staticmethod
     def installed_models():
-        """[{name, size, details}] of the models Ollama has (None when Ollama does not answer)."""
         data = Ollama.get_json("/api/tags")
         return None if data is None else sorted(data.get("models", []), key=lambda model: model.get("name", ""))
 
     @staticmethod
     def loaded_models():
-        """[(name, size_bytes)] of the models Ollama has loaded (None if unknown)."""
         data = Ollama.get_json("/api/ps")
         if data is None:
             return None
@@ -870,7 +733,6 @@ class Ollama:
 
     @staticmethod
     def model_facts(name):
-        """What Ollama says about a model: its longest context and what it can do (thinking...)."""
         data = Ollama.get_json("/api/show", {"model": name}, timeout=30) or {}
         info = data.get("model_info") or {}
         context = next((value for key, value in info.items() if key.endswith(".context_length")
@@ -882,8 +744,6 @@ class Ollama:
 
     @staticmethod
     def get_json(path, payload=None, timeout=10, errors=False):
-        """GET (or POST payload to) an Ollama endpoint; its JSON, or None when Ollama does not answer
-        (errors: an error's own JSON, {"error": ...}, instead of None)."""
         try:
             with urllib.request.urlopen(Ollama.request(path, payload), timeout=timeout) as response:
                 return json.loads(response.read().decode("utf-8"))
@@ -899,10 +759,6 @@ class Ollama:
 
 
 class Stream:
-    """Reads a streamed reply: collects its content, shows what the model is doing (say.live), and
-    stops early once done_when(content) says the reply is complete, or once the model loops (it writes
-    one line again and again): that reply is cut, as one that ran out of room is."""
-
     def __init__(self, label, done_when):
         self.label, self.done_when = label, done_when
         self.content, self.written, self.thinking, self.final = "", 0, 0, {}
@@ -917,9 +773,6 @@ class Stream:
                 return
 
     def take(self, chunk):
-        """One chunk; True when the reply is over. Once the reply is complete, Ollama's last chunk
-        (with the real prompt token count, which keeps the prompt budget right) is awaited a few
-        seconds more; anything the model writes meanwhile is not part of the reply."""
         if "error" in chunk:
             reply_was_complete = self.answer is not None
             if reply_was_complete:
@@ -944,7 +797,6 @@ class Stream:
                            partial=self.content, streamed=self.written + self.thinking)
 
     def add(self, message):
-        """A message's piece of the reply and of the thought, counted; the reply's piece."""
         piece = message.get("content") or ""
         self.content += piece
         self.written += bool(piece)
@@ -962,17 +814,14 @@ class Stream:
         return plainly(say.going_on(), now - self.started)
 
     def complete(self, piece):
-        """Checked when a piece may end a block or an object (or every 40 pieces)."""
         if not self.done_when or not self.may_end_here(piece):
             return False
         return self.done_when(self.content)
 
     def may_end_here(self, piece):
-        """Whether the piece may close a block or an object (or it is time for the every-40-pieces look)."""
         return ">" in piece or "}" in piece or self.written % 40 == 0
 
     def looping(self):
-        """Whether the last LOOPING_REPEATED_LINES finished lines of the reply are one line, written again and again."""
         lines = self.content.rsplit("\n", LOOPING_REPEATED_LINES + 1)[-LOOPING_REPEATED_LINES - 1:-1]
         return len(lines) == LOOPING_REPEATED_LINES and bool(lines[0].strip()) and len(set(lines)) == 1
 
@@ -994,17 +843,11 @@ class Stream:
 
 
 def plainly(doing, seconds):
-    """What goes on, as the command named it, and for how long: "Writing the spec… 1m 41s (101s)"."""
     seconds = round(seconds)
     return f"{doing}… {human_duration(seconds)}" + (f" ({seconds}s)" if seconds >= 60 else "")
 
 
 class OllamaError(Exception):
-    """A call to Ollama that failed. oom: out of memory; crashed: the model's runner died (some
-    runners do, reading a prompt above some size); stalled: no answer; in_reply: Ollama failed
-    while streaming the reply (it could not parse what the model wrote, e.g. text that looks like a
-    tool call): partial is what arrived before."""
-
     def __init__(self, message, oom=False, stalled=False, in_reply=False, partial="", crashed=False, streamed=0):
         super().__init__(message)
         self.oom, self.stalled, self.crashed = oom, stalled, crashed
@@ -1013,5 +856,4 @@ class OllamaError(Exception):
 
     @property
     def about_thinking(self):
-        """Whether Ollama refused the think setting (its message names it)."""
         return "think" in str(self).lower()

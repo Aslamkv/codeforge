@@ -1,5 +1,3 @@
-"""CNV: the conversation: Markup, channels, a task's progress, a chat, a command line, research and the Desk."""
-
 import contextlib
 import io
 import os
@@ -34,7 +32,6 @@ def wait_until(condition, timeout=15):
 
 
 class Recorder(Channel):
-    """A chat channel that keeps what it was asked to do: [(action, chat, id, text)]."""
     KIND = "recorder"
 
     def __init__(self, name="rec", chats=("1",), inbox=()):
@@ -240,7 +237,6 @@ def test_console_receives_lines_until_exit():
 
 
 def snapshot(**state):
-    """A run's tracker, as a run publishes it."""
     base = {"title": "calc: a calculator", "run": "abc123", "folder": "/tmp/projects/calc", "step": None,
             "doing": Tracker.STARTING, "began": None, "steps": [], "passing": None, "working": "", "tally": "",
             "found": "", "latest": "", "waiting": None, "ended": None, "before": 0.0, "seconds": 0.0}
@@ -473,7 +469,6 @@ store.put("running", str(os.getpid()), state)
 
 @pytest.fixture
 def desk(tmp_path, monkeypatch, home_store):
-    """A Desk on a recorder channel, whose tinker is a small script that publishes a tracker as a run does."""
     script = tmp_path / "fake_tinker.py"
     script.write_text(textwrap.dedent(FAKE_TINKER))
     monkeypatch.setenv("TINKER_SOURCE", str(Path(__file__).resolve().parent.parent))
@@ -658,7 +653,6 @@ def test_helpers(tmp_path):
 
 
 def built(tmp_path, name, run_id, run, status="done", updated="2026-10-01 10:00"):
-    """A built project Tinker points to, with its toolchain's run command."""
     from tinkerkit.project import project_store
     folder = tmp_path / name
     folder.mkdir(parents=True)
@@ -738,8 +732,6 @@ def test_run_with_nothing_to_run(desk, tmp_path):
 
 
 class Listening(Recorder):
-    """A chat whose messages come one at a time, as a person sends them."""
-
     def receive(self, timeout):
         time.sleep(0.05)
         return [self.inbox.pop(0)] if self.inbox else []
@@ -826,8 +818,6 @@ def test_one_shot_command_runs_nothing_without_a_yes(monkeypatch, measured_model
 
 
 class Pages:
-    """The Internet plugin, with a few pages."""
-
     def __init__(self, up=True):
         self.up = up
 

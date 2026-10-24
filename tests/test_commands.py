@@ -1,5 +1,3 @@
-"""CMD: Tinker's commands, defined once, and how a project is named in them."""
-
 import pytest
 
 from tinkerkit import cli

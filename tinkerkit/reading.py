@@ -1,10 +1,3 @@
-"""Reading what the person gives (tinker read SOURCE): a book, an article, a document. Its whole text is stored first,
-numbered on the reading list (#1, #2 ...), so it is never sent twice. Then every chapter is read, the core ones first
-(its contents, foreword and index tell which), each building on what was learned before, and saved as it is read:
-what it teaches is a topic of the library (kind: reading), so asking and teaching reach it, and a source about
-building software guides the builds that need it. The text stays: an ask or a teach finds what the source itself
-says, and read #N "WHAT" reads it again with a focus. EPUB, Markdown and plain text are read; a PDF is refused."""
-
 import collections
 import dataclasses
 lazy import html.parser
@@ -59,8 +52,6 @@ ParsedText = namedtuple("ParsedText", "text ids")
 
 @dataclass
 class Chapter:
-    """One chapter: its number, title and text; its kind (front: it says what the source is about, body, index, or
-    raw: front or back matter); its state (unread, read, or raw: kept as text, never read)."""
     number: int
     title: str
     text: str
@@ -73,7 +64,6 @@ class Chapter:
 
 @dataclass
 class Book:
-    """What is read: a book, an article or a document, as its chapters."""
     title: str
     author: str
     chapters: list
@@ -90,8 +80,6 @@ class Book:
 
 
 def stored(source):
-    """read SOURCE: the source's whole text stored on the reading list, before anything is read (no model); (its
-    number, whether it is new). The same text sent again is the one stored before."""
     say.step(f"Storing {first_line(source, 80)}…", "📥")
     book = opened(book_bytes(source), Path(urllib.parse.urlsplit(source).path).name or source)
     if not book.of_kind("body", "front"):
@@ -108,19 +96,10 @@ def stored(source):
 
 
 class Reader:
-    """read #N [WHAT]: reading #N learned from. SURVEY (one call, once): what it is about, whether it teaches how to
-    build software, its key terms, and the order to read its chapters in (core, supporting, other), from its
-    contents, what it says about itself and its index. CHAPTERS (a call per part of each chapter): every unread
-    chapter, in that order, each given what was learned before, and saved as soon as it is read, so a reading
-    stopped goes on where it was. With WHAT: the chapters most about it (and those it names) read again with it in
-    mind. CONDENSE: once every chapter is read, a source about building software has its facts made into rules."""
-
     def __init__(self, model, tracker=None):
         self.model, self.tracker = model, tracker
 
     def read(self, number, focus=""):
-        """Reading #number learned from (its unread chapters, or with a focus the chapters most about it); the
-        ending."""
         entry = Readings.get(number)
         book = Book.of(entry)
         survey = entry["survey"] or self.surveyed(entry, book)
@@ -138,9 +117,6 @@ class Reader:
             self.tracker.phase(phase)
 
     def surveyed(self, entry, book):
-        """SURVEY: {summary, software, terms, order: {chapter number: {read, look_for}}}, kept with the reading (as
-        JSON keeps it: each number as text); its
-        topic made, with nothing learned yet."""
         self.step("survey", "Reading its contents, foreword and index…", "🧭")
         with say.working_on(f"Getting to know {entry['title']} from its {len(book.chapters)} chapters"):
             survey = self.model.ask_until_usable(Prompts.READ_SURVEY_SYSTEM, survey_parts(book),
@@ -157,7 +133,6 @@ class Reader:
         return survey
 
     def chapters_read(self, entry, book, survey, chapters, focus):
-        """CHAPTERS: each chapter read and saved at once; the facts found."""
         self.step("chapters", f"Reading {len(chapters)} chapter(s)" + (f" for: {first_line(focus, 60)}" if focus
                                                                        else "") + "…", "📚")
         found = []
@@ -172,7 +147,6 @@ class Reader:
 
     @staticmethod
     def say_chapter(chapter, facts, done, found):
-        """What a chapter gave, the first of it, and how far the reading is (done: "3/12")."""
         say.info(f"Chapter {chapter.number}, {chapter.title}: {learned(len(facts))}", CHAPTER_STATE_ICONS["read"])
         if facts:
             say.found(first_line(facts[0]["text"], 200))
@@ -183,8 +157,6 @@ class Reader:
             self.tracker.outcome(text)
 
     def chapter_read(self, entry, book, survey, chapter, focus):
-        """What one chapter teaches: each part of it in turn (with a focus, its parts most about it), given the
-        source, what was learned before (the latest kept when the prompt is full) and what to look for."""
         room = int(self.model.limit_chars(Prompts.READ_CHAPTER_SYSTEM) * READ_CHAPTER_TEXT_SHARE)
         look_for = survey["order"].get(str(chapter.number), {}).get("look_for") or "what it teaches"
         texts = [excerpt(chapter.text, room, focus)] if focus else split_text(chapter.text, room)
@@ -200,8 +172,6 @@ class Reader:
         return found
 
     def condensed(self, entry, survey, found):
-        """CONDENSE: once every chapter is read, a source about building software has the facts that change how
-        software is built made into its rules (made again when something new was found); none for any other."""
         topic = Library.read(entry["topic"]) or {}
         building = [fact for fact in topic.get("facts", []) if fact["phase"] in FACT_PHASES]
         if not (survey["software"] and building) or Book.of(entry).in_state("unread"):
@@ -215,13 +185,8 @@ class Reader:
 
 
 class Readings:
-    """The reading list, in Tinker's "readings" by number: each source's title, author, where it came from, the
-    fingerprint of its text, when it was added, its chapters (text, kind and state), its survey once made, and its
-    topic: the slug of what was learned from it, in the library."""
-
     @staticmethod
     def add(book, source):
-        """(its number on the reading list, whether it is new): a text added before is that one."""
         key = fingerprint("\n\n".join(chapter.text for chapter in book.chapters))[:16]
         known = next((number for number, entry in Readings.all().items() if entry["fingerprint"] == key), None)
         if known is not None:
@@ -241,7 +206,6 @@ class Readings:
 
     @staticmethod
     def all():
-        """{number: entry} of the reading list, the newest first."""
         found = {int(key): entry for key, entry in Home.store().items("readings").items()}
         return dict(sorted(found.items(), reverse=True))
 
@@ -251,7 +215,6 @@ class Readings:
 
     @staticmethod
     def surveyed(entry, survey):
-        """The survey kept with the reading, and its topic made (nothing learned yet)."""
         Readings.save(dict(entry, survey=survey))
         Library.save(entry["topic"], {"topic": entry["title"], "name": entry["title"], "kind": "reading",
                                       "reading": entry["number"], "author": entry["author"],
@@ -261,8 +224,6 @@ class Readings:
 
     @staticmethod
     def learned(number, chapter, facts):
-        """What one chapter taught, saved at once: its new facts (one already kept is not kept again) joined to the
-        topic, and the chapter marked read; the new facts."""
         entry = Readings.get(number)
         known = set(Readings.facts(entry))
         new = [fact for fact in {fact["text"]: fact for fact in facts}.values() if fact["text"] not in known]
@@ -281,20 +242,16 @@ class Readings:
 
     @staticmethod
     def facts(entry):
-        """The texts of the facts learned from a reading so far."""
         return [fact["text"] for fact in (Library.read(entry["topic"]) or {}).get("facts", [])]
 
     @staticmethod
     def forget(number):
-        """A reading deleted: its text, and what was learned from it."""
         entry = Readings.get(number)
         Home.store().delete("readings", str(number))
         Home.store().delete("learned", entry["topic"])
 
     @staticmethod
     def about(text, items):
-        """The numbers of the readings a question or a teaching is about: those it names by title, then those whose
-        items it was shown."""
         readings = Readings.all()
         named = [number for number, entry in readings.items() if entry["title"] and mentions(text, entry["title"])]
         topics = {entry["topic"]: number for number, entry in readings.items()}
@@ -303,8 +260,6 @@ class Readings:
 
     @staticmethod
     def passages(numbers, query, count=BOOK_PASSAGES_SHOWN):
-        """[{source, text}] of the readings' passages most about the query (by its words), the best first, each with
-        its title and chapter."""
         found = []
         for number in numbers:
             entry = Readings.get(number) or {"chapters": []}
@@ -316,7 +271,6 @@ class Readings:
 
 
 def ending(entry, new, chapters):
-    """How a reading pass ended, for its tracker: what it read, what is kept, and what to do next."""
     book, topic = Book.of(entry), Library.read(entry["topic"]) or {}
     readable = [chapter for chapter in book.chapters if chapter.state != "raw"]
     details = [("Read now", f"{len(chapters)} chapter(s), {new} new fact(s)"),
@@ -334,7 +288,6 @@ def ending(entry, new, chapters):
 
 
 def show_list():
-    """read list: each reading, the newest first: how much of it is read, and what was learned."""
     readings = Readings.all()
     if not readings:
         say.info("Nothing on the reading list: tinker read FILE | URL adds one (in a chat: attach it).", "📭")
@@ -346,7 +299,6 @@ def show_list():
 
 
 def show(number):
-    """read show #N: one reading: where it came from, what it is about, each chapter with its state and facts."""
     entry = known_reading(number)
     topic = Library.read(entry["topic"]) or {}
     facts = collections.Counter(fact.get("chapter") for fact in topic.get("facts", []))
@@ -362,8 +314,6 @@ def show(number):
 
 
 def forgotten(numbers, yes=False):
-    """clear read [#N...]: those readings (every one, with none named) deleted, their text and what was learned from
-    them, once the person agrees."""
     numbers = [known_reading(number)["number"] for number in numbers] or list(Readings.all())
     if not numbers:
         say.info("Nothing to clear: the reading list is empty.")
@@ -393,26 +343,22 @@ def known_reading(number):
 
 
 def progress(entry):
-    """How much of a reading is read, and what was learned: "3 of 5 chapters read · 12 fact(s)"."""
     book = Book.of(entry)
     readable = [chapter for chapter in book.chapters if chapter.state != "raw"]
     return f"{len(book.in_state('read'))} of {len(readable)} chapters read · {len(Readings.facts(entry))} fact(s)"
 
 
 def learned(count):
-    """What a chapter taught, as the person reads it: "nothing new", "1 thing learned", "4 things learned"."""
     if not count:
         return "nothing new"
     return f"{count} thing{'s' if count > 1 else ''} learned"
 
 
 def think():
-    """The think setting of reading's calls: learning's."""
     return Config.get("learn_think")
 
 
 def chapter_parts(book, survey, chapter, text, look_for, known, focus):
-    """A chapter's prompt: the source, what was learned before, what the person asks to look for, the chapter."""
     return [Part("The source", f"{book.title}: {survey['summary']}\nIts key terms: "
                                f"{', '.join(survey['terms']) or 'none named'}", True),
             Part("What you learned from it before", "\n".join(f"- {text}" for text in known), keep="tail"),
@@ -422,8 +368,6 @@ def chapter_parts(book, survey, chapter, text, look_for, known, focus):
 
 
 def in_order(chapters, survey):
-    """Chapters in the survey's order: the core ones, then the supporting ones, then the others, each in the
-    source's order."""
     return sorted(chapters, key=lambda chapter: (CHAPTER_ROLE_ORDER.index(order_of(survey, chapter)), chapter.number))
 
 
@@ -432,8 +376,6 @@ def order_of(survey, chapter):
 
 
 def focused(book, focus):
-    """The chapters to read again for what the person asks: those it names ("chapter 7"), then those most about it
-    by its words, READ_FOCUS_CHAPTERS in all, in the source's order; never the raw ones."""
     readable = [chapter for chapter in book.chapters if chapter.state != "raw"]
     named = {int(number) for number in NAMED_CHAPTER_RE.findall(focus)}
     ranked = Retriever(None).by_words(focus, [chapter.text for chapter in readable])
@@ -443,7 +385,6 @@ def focused(book, focus):
 
 
 def book_bytes(source):
-    """The bytes of the book at a web address (downloaded) or in a file."""
     if is_web_address(source):
         data, why = Internet.download(source, READ_MAX_BYTES)
         if why:
@@ -458,8 +399,6 @@ def book_bytes(source):
 
 
 def opened(data, name):
-    """The book in a file's bytes, by what they hold (never by the file's name): an EPUB, else Markdown or plain text.
-    A PDF, a web page or any other file is refused, with what to do."""
     title = re.sub(r"[-_]+", " ", Path(name).stem).strip() or "Untitled book"
     if data.startswith(b"%PDF"):
         raise SystemExit(PDF_REFUSED)
@@ -474,7 +413,6 @@ def opened(data, name):
 
 
 def lone_title(text):
-    """The title of a text whose top heading is used once (# Title, then ## chapters); "" otherwise."""
     headings = [(len(match.group(1)), match.group(2)) for match in HEADING_RE.finditer(text)]
     top = [title for level, title in headings if level == min((heading_level for heading_level, _ in headings),
                                                               default=0)]
@@ -482,8 +420,6 @@ def lone_title(text):
 
 
 def headed_chapters(text):
-    """The chapters of a text marked with Markdown headings (#), down to the level that gives READ_MIN_CHAPTERS (a lone
-    top heading is its title, not a chapter); [] when it has no headings."""
     headings = [(len(match.group(1)), match.group(2), match.start()) for match in HEADING_RE.finditer(text)]
     if lone_title(text):
         headings = [heading for heading in headings if heading[0] != min(level for level, _, _ in headings)]
@@ -492,7 +428,6 @@ def headed_chapters(text):
 
 
 def plain_chapters(text):
-    """The chapters of a plain text: at its chapter lines ("Chapter 3", "Preface"), else parts of READ_WINDOW_CHARS."""
     marks = {match.start(): match.group(0).strip() for match in CHAPTER_LINE_RE.finditer(text)}
     if len(marks) >= 2:
         return sliced(text, marks)
@@ -500,8 +435,6 @@ def plain_chapters(text):
 
 
 def chapter_depth(depths):
-    """The depth of the contents (or of the headings) that chapters are split at: the shallowest that gives at least
-    READ_MIN_CHAPTERS of them, else the deepest (a book of three parts is split at their chapters)."""
     for depth in sorted(set(depths)):
         if sum(level <= depth for level in depths) >= READ_MIN_CHAPTERS:
             return depth
@@ -509,8 +442,6 @@ def chapter_depth(depths):
 
 
 def sliced(text, marks):
-    """The chapters that start at the marks ({offset: title}), each to where the next starts; what comes before the
-    first is a chapter of its own (the opening pages). [] with no marks."""
     if not marks:
         return []
     starts = sorted(marks)
@@ -520,21 +451,17 @@ def sliced(text, marks):
 
 
 def numbered(pieces):
-    """Chapters numbered from 1, of the (title, text) pieces that hold more than a heading, each with its kind."""
     pieces = [(" ".join(title.split()), tidy(text)) for title, text in pieces]
     pieces = [(title, text) for title, text in pieces if len(words(text)) > len(words(title)) + 3]
     return [Chapter(number, title, text, kind_of(title)) for number, (title, text) in enumerate(pieces, 1)]
 
 
 def tidy(text):
-    """Text with its lines' spaces collapsed and at most one blank line in a row."""
     lines = [" ".join(line.split()) for line in text.splitlines()]
     return re.sub(r"\n{3,}", "\n\n", "\n".join(lines)).strip()
 
 
 def kind_of(title):
-    """A chapter's kind, by its title: index, raw (front or back matter), front (it says what the source is about)
-    or body."""
     name = title.lower()
     if re.search(r"\bindex\b", name):
         return "index"
@@ -544,7 +471,6 @@ def kind_of(title):
 
 
 def index_terms(book, limit=READ_INDEX_TERMS):
-    """[(term, references)] of the book's index, the most referred to first: what the book itself says matters."""
     counts = collections.Counter()
     for chapter in book.of_kind("index"):
         for match in INDEX_LINE_RE.finditer(chapter.text):
@@ -553,8 +479,6 @@ def index_terms(book, limit=READ_INDEX_TERMS):
 
 
 def survey_parts(book):
-    """The survey's prompt: the book, its contents (each chapter's kind and length), what it says about itself and
-    the terms its index refers to most."""
     contents = "\n".join(f"{chapter.number}. {chapter.title} ({chapter.kind}, {chapter.size()} words)"
                          for chapter in book.chapters)
     about = "\n\n".join(f"## {chapter.title}\n{chapter.text}" for chapter in book.of_kind("front"))
@@ -566,8 +490,6 @@ def survey_parts(book):
 
 
 def read_survey(data, book):
-    """{summary, software, terms, order: {chapter number, as text: {read, look_for}}} (read: core, supporting or
-    other; a chapter the reply leaves out is other: read last, never skipped). ValueError without a summary."""
     summary = str(data.get("summary") or "").strip()
     if not summary:
         raise ValueError("no summary")
@@ -581,8 +503,6 @@ def read_survey(data, book):
 
 
 def excerpt(text, room, wanted):
-    """A chapter as its prompt shows it: whole when it fits room; else its opening and the parts most about what is
-    wanted, READ_FOCUS_CHUNKS in all, in the chapter's order."""
     if len(text) <= room:
         return text
     chunks = split_text(text, room // READ_FOCUS_CHUNKS)
@@ -592,8 +512,6 @@ def excerpt(text, room, wanted):
 
 
 def read_points(data, software):
-    """[{text, phase, section}] of a chapter's reply, at most READ_FACTS_PER_CHAPTER. A point that does not change how software
-    is built, and every point of a source not about building it, has the phase book: no build is shown it."""
     if not isinstance(data.get("points"), list):
         raise ValueError('no "points" list')
     points = []
@@ -607,9 +525,6 @@ def read_points(data, software):
 
 
 class Epub:
-    """An EPUB: a zip of XHTML documents read in its spine's order; its contents (EPUB 3's navigation document, else
-    EPUB 2's NCX) mark where each chapter starts."""
-
     def __init__(self, data):
         try:
             self.zip = zipfile.ZipFile(io.BytesIO(data))
@@ -620,8 +535,6 @@ class Epub:
         self.manifest = {item.get("id"): item for item in self.opf.iterfind(".//{*}manifest/{*}item")}
 
     def book(self, title):
-        """The book: its title and author, and its chapters where its contents mark them (else at its headings,
-        else in parts)."""
         text, starts = self.spine_text()
         chapters = contents_chapters(text, starts, self.contents()) or headed_chapters(text) or plain_chapters(text)
         return Book(self.metadata("title") or title, self.metadata("creator"), chapters)
@@ -637,7 +550,6 @@ class Epub:
         return " ".join((found.text or "").split()) if found is not None else ""
 
     def spine_text(self):
-        """(the text of the spine's documents in order, where each starts: {(path, ""): offset, (path, id): offset})."""
         parts, starts, size = [], {}, 0
         for ref in self.opf.iterfind(".//{*}spine/{*}itemref"):
             item = self.manifest.get(ref.get("idref"))
@@ -652,7 +564,6 @@ class Epub:
         return SpineText("".join(parts), starts)
 
     def contents(self):
-        """[(depth, title, (path, fragment))] of the table of contents: EPUB 3's navigation document, else the NCX."""
         nav = next((item for item in self.manifest.values() if "nav" in (item.get("properties") or "").split()), None)
         if nav is not None:
             document = located(nav.get("href"), self.opf_path)[0]
@@ -668,14 +579,11 @@ class Epub:
 
 
 def located(href, document):
-    """(the path in the zip, the fragment) of an address relative to a document of the EPUB."""
     path, _, fragment = urllib.parse.unquote(href or "").partition("#")
     return Located(posixpath.normpath(posixpath.join(posixpath.dirname(document), path)) if path else document, fragment)
 
 
 def contents_chapters(text, starts, contents):
-    """The chapters the contents mark in the text: each entry down to the depth that gives READ_MIN_CHAPTERS, from where
-    its target starts (its document's start when the fragment is not found) to where the next one does."""
     depth = chapter_depth([entry_depth for entry_depth, _, _ in contents])
     marks = {}
     for entry_depth, title, (path, fragment) in contents:
@@ -686,7 +594,6 @@ def contents_chapters(text, starts, contents):
 
 
 def ncx_entries(parent, depth=1):
-    """(depth, title, src) of each navPoint under parent, in order (EPUB 2's contents)."""
     if parent is None:
         return
     for point in parent.findall("{*}navPoint"):
@@ -697,8 +604,6 @@ def ncx_entries(parent, depth=1):
 
 
 class XhtmlText(html.parser.HTMLParser):
-    """A book's XHTML document as text: blocks apart, headings marked as Markdown's (#), list items as "- "; the head,
-    scripts and styles left out. ids: where each element with an id starts in the text."""
     BLOCKS = {"p", "div", "section", "article", "aside", "blockquote", "pre", "table", "tr", "ul", "ol", "dl", "dt",
               "dd", "figure", "figcaption", "hr", "header", "footer", "body"}
     HEADINGS = {f"h{level}": level for level in range(1, 7)}
@@ -710,7 +615,6 @@ class XhtmlText(html.parser.HTMLParser):
 
     @classmethod
     def of(cls, markup):
-        """(the text, {id: where it starts})."""
         parser = cls()
         parser.feed(markup)
         parser.close()
@@ -748,9 +652,6 @@ class XhtmlText(html.parser.HTMLParser):
 
 
 class NavEntries(html.parser.HTMLParser):
-    """The entries of an EPUB 3 navigation document's table of contents (its toc nav, else its first one), as
-    (depth, title, href): depth 1 at the top."""
-
     def __init__(self):
         super().__init__(convert_charrefs=True)
         self.navs, self.depth, self.link, self.words, self.inside = [], 0, None, [], False

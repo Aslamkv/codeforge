@@ -1,5 +1,3 @@
-"""What the model is told and what it answers: prompt parts (Part), replies (Reply) and every system prompt (Prompts)."""
-
 lazy import json
 import re
 from collections import namedtuple
@@ -19,7 +17,6 @@ LineEdit = namedtuple("LineEdit", "path first last lines")
 
 
 class Reply:
-    """What the model answered, and the structured parts in it."""
     THINK_RE = re.compile(r"<think>.*?</think>", re.S)
     HEADER_PATH = r"[ \t:]+(?:(?:path|file)[ \t]*[=:][ \t]*)?[\"'`]?([^\s<>\"'`]+?)[\"'`]?"
     FILE_BLOCK_RE = re.compile(r"<<<FILE" + HEADER_PATH + r"[ \t]*(?:>>>[ \t]*([^\s<>]*))?[ \t]*\n(.*?)\n?<<<END>>>",
@@ -41,25 +38,18 @@ class Reply:
         self.text = self.THINK_RE.sub("", raw or "").strip()
 
     def json(self):
-        """The JSON object in the reply. A model's usual slips are mended in turn, each only when
-        the reply does not parse without it: a comma before a closing bracket, strings joined with
-        + as in code, a single quote escaped as in code (\\' is not JSON), the last brackets left
-        open, a list left open before the next key."""
         start, end = self.text.find("{"), self.text.rfind("}")
         if start == -1 or end <= start:
             raise ValueError("no JSON object in reply")
         return self.first_parsed(self.json_candidates(self.text[start:end + 1], self.text[start:]))
 
     def json_candidates(self, whole, to_the_end):
-        """The object as written, then mended, then (from its start to the reply's end) with its
-        brackets closed or put right."""
         to_the_end = to_the_end.rstrip().rstrip("`").rstrip()
         return [whole, self.mended(whole), self.closed(self.mended(to_the_end)),
                 self.balanced(self.mended(to_the_end))]
 
     @staticmethod
     def first_parsed(candidates):
-        """The first candidate that parses; else the error of the first one (the reply as written)."""
         problem = None
         for candidate in filter(None, candidates):
             try:
@@ -70,14 +60,10 @@ class Reply:
 
     @classmethod
     def mended(cls, text):
-        """Code habits undone: strings joined with +, \' escapes, commas before a closing bracket."""
         return cls.strip_trailing_commas(cls.ESCAPED_SINGLE_QUOTE_RE.sub(r"\1'", cls.STRING_CONCATENATION_RE.sub("", text)))
 
     @staticmethod
     def closed(text):
-        """The JSON text with the brackets it left open closed at its end (a model that wrote the
-        whole answer and forgot the last brace or two), or None when it ends inside a string or
-        closes a bracket it never opened."""
         inside, ends_inside = Reply.string_states(text)
         stack = []
         for char, in_string in zip(text, inside):
@@ -93,9 +79,6 @@ class Reply:
 
     @staticmethod
     def balanced(text):
-        """The JSON text with its brackets put right: a list left open when the next key of its
-        object begins ("a":["x","b":1) is closed before that key, a closing bracket that closes
-        nothing open is dropped, and what is left open at the end is closed."""
         inside, ends_inside = Reply.string_states(text)
         out, stack = [], []
         for index, (char, in_string) in enumerate(zip(text, inside)):
@@ -124,22 +107,18 @@ class Reply:
 
     @staticmethod
     def close_until(char, out, stack):
-        """What is open inside the bracket char closes is closed first."""
         while stack[-1] != char:
             out.append(stack.pop())
         stack.pop()
 
     @staticmethod
     def strip_trailing_commas(text):
-        """Remove commas directly before ] or } outside JSON strings."""
         inside, _ = Reply.string_states(text)
         return "".join(char for index, (char, in_string) in enumerate(zip(text, inside))
                        if in_string or not (char == "," and text[index + 1:].lstrip()[:1] in ("]", "}")))
 
     @staticmethod
     def string_states(text):
-        """([whether each char is inside a JSON string: its closing quote is, its opening one is not],
-        whether the text ends inside one)."""
         states, in_string, escaped = [], False, False
         for char in text:
             states.append(in_string)
@@ -150,8 +129,6 @@ class Reply:
         return StringStates(states, in_string)
 
     def spec_json(self):
-        """The spec's JSON; when only its free-form "data" part (written last) is broken, that
-        part is kept as text instead of asking again."""
         try:
             return self.json()
         except ValueError as problem:
@@ -161,7 +138,6 @@ class Reply:
             return data
 
     def spec_with_data_as_text(self):
-        """The spec before its "data" key, with data as the text after it; None when that does not parse."""
         start, at = self.text.find("{"), self.text.rfind('"data"')
         if start < 0 or at <= start:
             return None
@@ -173,8 +149,6 @@ class Reply:
         return data
 
     def files(self):
-        """[(path, content)] of its FILE blocks. A block whose body is only the format's placeholder
-        ("content") is the model musing about the format, not a file."""
         found = []
         for path, after, body in self.FILE_BLOCK_RE.findall(self.text):
             path, body = self.real_path_and_body(path.strip(), after, body)
@@ -185,8 +159,6 @@ class Reply:
         return found
 
     def real_path_and_body(self, path, after, body):
-        """A header that copied the format's placeholder (<<<FILE path>>>) with the real path right after
-        it, or as the block's first line, is read as that path; text after the header began the file."""
         first, _, rest = body.partition("\n")
         if path.lower() in self.PLACEHOLDER_PATHS and self.RELATIVE_PATH_LINE_RE.fullmatch(after):
             return after, body
@@ -198,10 +170,6 @@ class Reply:
 
     @classmethod
     def without_debris(cls, body, fences=True):
-        """A block's body without what the model wrapped around it: lines of the block format's
-        own marks at its ends (a stray >>> before <<<END>>>), and a markdown fence around the whole
-        body. These are never content in any language, and kept they break the file (the stray
-        >>> was a syntax error a fix could not see, in a test it could not change)."""
         lines = cls.without_mark_lines(body.split("\n"))
         return "\n".join(cls.unfenced(lines) if fences else lines)
 
@@ -215,7 +183,6 @@ class Reply:
 
     @classmethod
     def unfenced(cls, lines):
-        """The lines inside one fence pair around them all (a fence inside is content: docs)."""
         filled = [index for index, line in enumerate(lines) if line.strip()]
         if cls.one_fence_around(lines, filled):
             return lines[filled[0] + 1:filled[-1]]
@@ -223,27 +190,22 @@ class Reply:
 
     @classmethod
     def one_fence_around(cls, lines, filled):
-        """Whether the filled lines open and close with a fence, with no fence between them."""
         fence_at = lambda index: cls.MARKDOWN_FENCE_RE.fullmatch(lines[index])
         return len(filled) >= 2 and fence_at(filled[0]) and fence_at(filled[-1]) \
             and not any(fence_at(index) for index in filled[1:-1])
 
     def as_file(self, path):
-        """The reply as a FILE block for path when it has none but one fenced code block (a model
-        that answered with the file and forgot the block format); else the reply as it is."""
         if self.files():
             return self
         blocks = re.findall(r"^(`{3,}|~{3,})[\w+#.-]*[ \t]*\n(.*?)^\1[ \t]*$", self.text, re.S | re.M)
         return Reply(f"<<<FILE {path}>>>\n{blocks[0][1].rstrip()}\n<<<END>>>") if len(blocks) == 1 else self
 
     def line_edits(self):
-        """[(path, first, last, new lines)] of its LINES blocks."""
         return [LineEdit(str(Path(path.strip())), int(first), int(last), self.unnumbered(self.without_debris(body).splitlines()))
                 for path, first, last, body in self.LINES_BLOCK_RE.findall(self.text)]
 
     @classmethod
     def unnumbered(cls, lines):
-        """The lines without the numbers they were shown with, when the model kept them."""
         if lines and all(cls.NUMBERED_RE.prefixmatch(line) or not line.strip() for line in lines):
             return [cls.NUMBERED_RE.sub("", line, count=1) for line in lines]
         return lines
@@ -255,20 +217,16 @@ class Reply:
         return first_line(self.marked("CAUSE"), 160)
 
     def test_wrong(self):
-        """Why the reply says the test itself is wrong ("" when it does not): a line TEST WRONG: why."""
         return first_line(self.marked("TEST WRONG"), 200)
 
     def criterion(self):
-        """The criterion as the reply says it should read ("" when it keeps it): a line CRITERION: text."""
         return self.marked("CRITERION").strip()
 
     def marked(self, mark):
-        """The text after the first line that starts with MARK: ("" when none does)."""
         match = re.search(rf"^\s*{mark}:\s*(.+)$", self.text, re.M)
         return match.group(1) if match else ""
 
     def corrected_criteria(self):
-        """{test name: the criterion as it should read} from lines CRITERION <test name>: text."""
         return {name: text.strip() for name, text in re.findall(r"^\s*CRITERION\s+([^\s:]+):\s*(.+)$", self.text, re.M)}
 
     def toolchain_line(self):
@@ -277,22 +235,16 @@ class Reply:
 
     @staticmethod
     def files_ended(content):
-        """A reply of FILE/LINES blocks has ended when its last block has, and nothing after it
-        begins another one."""
         end = content.rfind("<<<END>>>")
         rest = content[end + 9:] if end >= 0 else ""
         return end >= 0 and "<<<FILE" not in rest and "<<<LINES" not in rest
 
     @staticmethod
     def files_complete(content):
-        """A streamed reply of FILE/LINES blocks can stop once it has ended and the model runs on
-        (300+ chars of junk after its answer): it may still be between two blocks before that."""
         return Reply.files_ended(content) and len(content[content.rfind("<<<END>>>") + 9:].strip()) >= 300
 
     @staticmethod
     def wrote(paths):
-        """When a reply asked for these files is complete: once each has its block, as soon as the
-        last one ends (models run on with files nobody asked for), or as files_complete says."""
         wanted = {str(Path(path)) for path in paths}
 
         def done(content):
@@ -301,7 +253,6 @@ class Reply:
 
     @staticmethod
     def json_complete(content):
-        """A JSON reply is complete once the object that opened it closes and parses."""
         start = content.find("{")
         if start < 0 or not content.rstrip().endswith("}"):
             return False
@@ -313,12 +264,6 @@ class Reply:
 
 
 class Part:
-    """A section of a prompt. Optional parts are cut or dropped to fit; required ones are always
-    sent: prose ones (a request, a failure) are shortened at their less useful end, exact ones
-    (a whole file) are sent as they are. An atomic optional part is sent whole or not at all.
-    place: "first" for what calls of a run share (lessons, learned facts, the spec's data), "last"
-    for what changes from one try to the next (a failure, what was tried): a prompt is laid out
-    first, then as given, then last, so Ollama re-reads only what follows the part it has cached."""
     SHORTEST_KEPT_CHARS = 150
     PLACES = {"first": 0, None: 1, "last": 2}
 
@@ -330,13 +275,10 @@ class Part:
 
     @staticmethod
     def total_size(parts):
-        """The chars a list of parts takes in a prompt (empty optional parts are left out)."""
         return sum(part.size() for part in parts if part.text or part.required)
 
     @staticmethod
     def assemble(parts, limit, notes=None):
-        """The user message: required parts first fitted (shortening prose ones), then optional
-        parts while they fit. Raises PromptTooLarge when the required parts cannot fit."""
         parts = Part.shorten_required(sorted(parts, key=lambda part: Part.PLACES[part.place]), limit, notes)
         room = limit - Part.required_size(parts)
         blocks = []
@@ -349,7 +291,6 @@ class Part:
         return "\n\n".join(blocks)
 
     def fitted(self, room):
-        """This optional part as it fits in room: whole, shortened (the room is then used up), or None."""
         if self.size() <= room:
             return self
         blank_line_before = 2
@@ -376,7 +317,6 @@ class Part:
 
     @staticmethod
     def longest_prose(parts, limit):
-        """The index of the longest required prose part that can still be shortened."""
         prose = [index for index, part in enumerate(parts) if part.required and not part.exact
                  and len(part.text) > MIN_TRIMMED_PROSE_CHARS]
         if not prose:
@@ -393,7 +333,6 @@ class Part:
         return len(self.render()) + 2
 
     def floor_size(self):
-        """Its size once shortened as far as it may be."""
         return self.size() if self.exact else min(self.size(), MIN_TRIMMED_PROSE_CHARS + len(self.title) + 12)
 
     def shortened(self, room):
@@ -408,12 +347,10 @@ class Part:
 
 
 class PromptTooLarge(Exception):
-    """The required parts of a prompt do not fit the budget."""
+    pass
 
 
 class Prompts:
-    """Every prompt text: language- and app-neutral (the examples are a small command-line notes
-    tool). The *_SYSTEM ones are system prompts; the others are pieces of them and of user messages."""
     NO_TOOL_CALLS = "\nReply in plain text; never call a tool or function."
     FOLDER_NAME_SYSTEM = ("Name the folder of the project the person asks for: one to three short lowercase words "
                           "joined by hyphens, at most 20 characters, the shorter the better; shorten well-known "

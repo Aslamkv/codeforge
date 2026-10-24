@@ -1,5 +1,3 @@
-"""MOD: the local model: Ollama's API, one request with its budgets and retries, and calibration."""
-
 import io
 import json
 import urllib.error
@@ -250,8 +248,6 @@ def test_safe_ratio():
 
 
 class Probed(Calibrator):
-    """A calibrator whose reads succeed up to a size."""
-
     def __init__(self, limit):
         super().__init__("m")
         self.limit, self.tried = limit, []

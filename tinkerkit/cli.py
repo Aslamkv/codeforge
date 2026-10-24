@@ -1,20 +1,3 @@
-"""
-🔧 Tinker — your friendly project builder
-
-Tell Tinker what you want. Tinker plans it, builds it, tests it,
-and learns something new every time.
-
-  🧠 Plans first      Every detail is thought through before any work starts
-  🧱 Builds small     Simple pieces that work well together
-  ✅ Tests the goal   Checks the result the way a person would use it
-  📒 Remembers        Each run makes the next one faster
-  🔁 Any model        Switch the AI whenever you like
-
-Part of CodeForge 🛠️ — built by the community, for the community.
-Free to copy, change, and share. 🌻
-
-"""
-
 import re
 import sys
 
@@ -65,9 +48,6 @@ CallSettings = namedtuple("CallSettings", "options think")
 
 
 def main():
-    """Tinker's command line: tinker reset, a command that shows or changes its settings (then it
-    exits), or a run: a new project, or a resumed one, or a feature or a bug fix for one. What fails
-    for a reason that is not a bug (Ollama, a file, Ctrl-C) ends with what happened, not a traceback."""
     script_started, started_at = time.perf_counter(), datetime.datetime.now()
     try:
         argv = Jobs.arguments(sys.argv[1:])
@@ -86,7 +66,6 @@ def cannot_read_or_write(exc):
 
 
 def run(args, script_started, started_at):
-    """tinker reset, a command that shows or changes something (then it exits), or a run on a project."""
     if args.reset:
         return Home.reset(args.yes)
     Home.ensure()
@@ -98,11 +77,6 @@ def run(args, script_started, started_at):
 
 
 class Cli:
-    """The command line: `tinker COMMAND ...`, e.g. `tinker task ...` builds something. Every command
-    comes from the one table of commands (tinkerkit/commands.py): its arguments, its options and its
-    help. Each command takes only its own arguments and options, every value is checked before
-    anything starts, and what is wrong is an error that says what to change. A project is named only
-    as @ID or @folder. The result has one shape for the rest of Tinker."""
     EXAMPLES = ("tinker", "tinker doctor", "tinker task a calculator in Python", "tinker add keep a history of results",
                 "tinker research the newest Python release", "tinker help task")
     TALK_COMMANDS = tuple(command.name for command in COMMANDS if command.group == "Talk" and command.cli)
@@ -121,7 +95,6 @@ class Cli:
 
     @staticmethod
     def parse(argv=None):
-        """The command line read and checked (a mistake exits with what to change)."""
         argv = sys.argv[1:] if argv is None else argv
         Cli.run_at_once(argv)
         if argv[0] == "confirm":
@@ -143,9 +116,6 @@ class Cli:
 
     @staticmethod
     def run_at_once(argv):
-        """What runs as soon as it is read, and exits: the conversation (no command), help, one of the
-        conversation's own commands said once, the chat channels (a plugin of its own) and tinker clear
-        (no model, no project)."""
         if not argv:
             Home.ensure()
             conversation.session(Path.cwd())
@@ -169,8 +139,6 @@ class Cli:
 
     @staticmethod
     def cleared(parts, yes):
-        """tinker clear PART... (Home's parts), or, alone, tinker clear read [#N...] (readings deleted) or tinker
-        clear jobs [#N...] (jobs archived)."""
         if parts[0] not in ("read", "jobs"):
             return Home.clear(parts, yes)
         numbers = [job_number(word) for word in parts[1:]]
@@ -184,7 +152,6 @@ class Cli:
 
     @staticmethod
     def known_command(argv):
-        """The command, one of tinker's (the commands were options once: --task is said to be task)."""
         old = next((word for word in argv if word.startswith("--") and word[2:] in Cli.COMMANDS), None)
         if old:
             raise SystemExit(f"tinker: commands are written without --: tinker {old[2:]} (tinker help lists them)")
@@ -194,7 +161,6 @@ class Cli:
 
     @staticmethod
     def help(command=None):
-        """tinker help: every command; tinker help COMMAND: that command's arguments and options."""
         if command is None:
             say.text(Cli.overview_markup() if os.environ.get("TINKER_FORMAT") == "markup" else Cli.overview())
             raise SystemExit(0)
@@ -214,9 +180,6 @@ class Cli:
 
     @staticmethod
     def overview():
-        """tinker help: what it is, every command by what it is for, the options (with the commands
-        that take them) and a few examples; in colour in a terminal (unless NO_COLOR is set). Columns
-        are lined up before colouring."""
         paint = Cli.painter()
         out = [f"🛠  {paint('tinker', 'bold')} builds what you ask for with a local Ollama model: a small spec, a unit",
                "   test for each point, just enough code, and a README a person can follow.", "",
@@ -228,7 +191,6 @@ class Cli:
 
     @staticmethod
     def command_lines(paint):
-        """Every command by what it is for, its synopsis lined up (the channels only with their plugin)."""
         rows = [(group, row) for group in GROUPS for command in COMMANDS if command.group == group
                 for row in command.rows]
         width = max(len(synopsis) for _, (synopsis, _) in rows) + 2
@@ -246,7 +208,6 @@ class Cli:
 
     @staticmethod
     def option_lines(paint):
-        """Every option, with the commands that take it."""
         options = Cli.options()
         width = max(len(name) for name in options) + 2
         return ["", paint("⚙️  Options", "bold")] + [
@@ -255,7 +216,6 @@ class Cli:
 
     @staticmethod
     def options():
-        """{--option [VALUE]: (what it does, the commands that take it)}, from the command table."""
         found = {}
         for command in COMMANDS:
             if command.name not in Cli.COMMANDS:
@@ -267,7 +227,6 @@ class Cli:
 
     @staticmethod
     def painter():
-        """paint(text, style): ANSI colour in a terminal; plain text when piped or NO_COLOR is set."""
         codes = {"bold": "1", "dim": "2", "cyan": "36", "yellow": "33", "green": "32"}
         if not sys.stdout.isatty() or os.environ.get("NO_COLOR"):
             return lambda text, style: text
@@ -275,8 +234,6 @@ class Cli:
 
     @staticmethod
     def overview_markup():
-        """tinker help as a conversation shows it (Markup): what to send, by what it is for. A command is sent
-        there as its words alone (no tinker before it)."""
         out = ["🛠 **What you can send**"]
         for group in GROUPS:
             if group == "Channels" and channels is None:
@@ -289,7 +246,6 @@ class Cli:
 
     @staticmethod
     def parser(command):
-        """The parser of one command, with only what that command takes (from the command table)."""
         found = BY_NAME[command]
         parser = argparse.ArgumentParser(prog=f"tinker {command}", allow_abbrev=False, description=found.about)
         for argument in found.arguments:
@@ -305,7 +261,6 @@ class Cli:
 
     @staticmethod
     def read_command(command, given, args, parser):
-        """The command's arguments in the fields the rest of Tinker reads, checked."""
         value = Cli.command_value(command, given, parser)
         if value is not None:
             setattr(args, command.replace("-", "_"), value)
@@ -317,7 +272,6 @@ class Cli:
 
     @staticmethod
     def command_value(command, given, parser):
-        """What a command's words say, checked, for its own field (None: it has none, or they say nothing)."""
         match command:
             case "reset" | "restart" | "models" | "memory" | "runs" | "doctor":
                 return True
@@ -343,14 +297,12 @@ class Cli:
 
     @staticmethod
     def config_words(words, parser):
-        """config's words: none (the settings), or a KEY and its VALUE."""
         if len(words) not in (0, 2):
             parser.error("use tinker config (the settings) or tinker config KEY VALUE")
         return words
 
     @staticmethod
     def project_named(words, parser):
-        """The project the words name (@ID or @folder), or "" for this folder's; nothing else may follow."""
         name, rest = refs(words)
         if rest:
             parser.error(f"name a project as @ID or @folder (tinker runs lists them), not {' '.join(rest)!r}")
@@ -358,7 +310,6 @@ class Cli:
 
     @staticmethod
     def renamed(words, parser):
-        """(the project named, or "", the folder's new name)."""
         name, rest = refs(words)
         if len(rest) != 1 or not Cli.FOLDER_RE.fullmatch(rest[0]):
             parser.error("use tinker rename NAME or tinker rename @PROJECT NAME; a name is letters, digits, - _ "
@@ -367,7 +318,6 @@ class Cli:
 
     @staticmethod
     def job_words(command, words, parser):
-        """jobs [STATE] [PAGE]: (the state or None, the page); stop [#JOB]: the job's number or None."""
         if command == "stop":
             number = job_number(words[0]) if len(words) == 1 else None
             if words and number is None:
@@ -381,7 +331,6 @@ class Cli:
 
     @staticmethod
     def is_page(word):
-        """Whether a word is a page number (1 or more)."""
         return word.isdigit() and int(word) >= 1
 
     @staticmethod
@@ -393,7 +342,6 @@ class Cli:
 
     @staticmethod
     def reading(words, parser):
-        """read's words, checked: list; show #N; #N [WHAT] (its quotes left out); else a source (its words, joined)."""
         if words[0] in ("list", "show"):
             if words == ["list"] or (words[0] == "show" and len(words) == 2 and job_number(words[1])):
                 return words
@@ -410,9 +358,6 @@ class Cli:
 
     @staticmethod
     def check_run(args, parser):
-        """A new build, or one of new, resume, add, fix: read into one shape. A feature or a bug
-        becomes a resume of its run with a request (args.change_request; args.bug for a bug);
-        args.spec is the spec file of a new build."""
         kind = args.command
         args.bug, args.change_request = kind == "fix", None
         if kind == "task":
@@ -426,7 +371,6 @@ class Cli:
 
     @staticmethod
     def read_task(args, parser):
-        """The task's words, quoted or not (an older spec file given last as a word is still one)."""
         words = list(args.task)
         last = Path(words[-1])
         if len(words) > 1 and not args.spec and Cli.is_spec_file(last):
@@ -437,12 +381,10 @@ class Cli:
 
     @staticmethod
     def is_spec_file(path):
-        """Whether a word names a spec file here (Markdown or text)."""
         return path.suffix in (".md", ".txt") and path.is_file()
 
     @staticmethod
     def check_request(kind, args, parser):
-        """add [@PROJECT] FEATURE or fix [@PROJECT] BUG: a resume of its run, with the request (args.change_request)."""
         what = "bug" if kind == "fix" else "feature"
         name, words = refs(args.fix if kind == "fix" else args.add)
         text = " ".join(words).strip()
@@ -454,7 +396,6 @@ class Cli:
 
     @staticmethod
     def check_amend(args, parser):
-        """amend [@PROJECT] CHANGE: a resume of its run, with the change (args.amend)."""
         name, words = refs(args.amend)
         text = " ".join(words).strip()
         if not text:
@@ -469,21 +410,14 @@ class Cli:
 
     @staticmethod
     def works_for_hours(args):
-        """A run or learning: work the computer must not sleep through (the other commands are quick)."""
         return args.command in Cli.RUNS + Cli.LONG_MODEL_COMMANDS
 
 
 class Commands:
-    """The commands that show or change Tinker's settings, models, what it knows and the projects, then
-    exit: tinker config, tinker models, tinker use-model, tinker embed, tinker use-web, tinker calibrate,
-    tinker learn, tinker ask, tinker teach, tinker read, tinker memory, tinker runs, tinker status, tinker log,
-    tinker rename."""
-
     def __init__(self, args):
         self.args = args
 
     def run(self):
-        """Runs the command the command line gives; False when it gives none (a run then)."""
         run = self.handlers().get(self.args.command)
         if run is None:
             return False
@@ -491,7 +425,6 @@ class Commands:
         return True
 
     def handlers(self):
-        """What runs each command that shows or changes something (Tinker exits after it)."""
         args = self.args
         return {"config": lambda: self.config(args.config),
                 "models": self.list_models,
@@ -515,7 +448,6 @@ class Commands:
 
     @staticmethod
     def config(words):
-        """tinker config: the settings a run would use; tinker config KEY VALUE sets one (checked)."""
         if words:
             value = Config.set(words[0], words[1])
             say.done(f"{words[0]} is {value!r} now")
@@ -545,7 +477,6 @@ class Commands:
 
     @staticmethod
     def print_measured(settings):
-        """What calibration measured for the model in use, and how it thinks."""
         say.text(f"input budget:    {settings['max_prompt_tokens']} tokens"
                  + (f" (largest read {settings['largest_prompt_read']}, crashed at {settings['crashed_reading']})"
                     if settings.get("crashed_reading") else ""))
@@ -572,8 +503,6 @@ class Commands:
 
     @staticmethod
     def use_model(name):
-        """tinker use-model NAME: the model every run uses from now on, one already measured (nothing
-        is measured unasked)."""
         if Models.settings(name) is None:
             raise SystemExit(f"{name} has not been measured: measure it first with tinker calibrate {name} "
                              f"(tinker models lists the models Ollama has)")
@@ -582,8 +511,6 @@ class Commands:
 
     @staticmethod
     def embed(name):
-        """tinker embed NAME: the embedding model that indexes what is learned from now on: one Ollama
-        has that gives embeddings (tried once here)."""
         Models.installed(name)
         embeddings = Embeddings(name)
         if embeddings.vectors(["a test"], keep=False) is None:
@@ -593,23 +520,13 @@ class Commands:
 
     @staticmethod
     def use_web(name):
-        """tinker use-web NAME: the web search tinker learn and --web use from now on (one of
-        Internet.backends()); it says when that one is not usable yet (a missing key)."""
         Config.save(web=name)
         say.done(f"Web search: {name}; {Internet.state()}")
 
     def calibrate(self):
-        """tinker calibrate NAME: measure a model (again)."""
         Calibrator(Models.installed(self.args.calibrate)).run()
 
     def learn(self):
-        """tinker learn WHAT [DEFINITION]: a command of yours (a definition given, or an alias in your
-        shell) is kept at once, with no model; anything else is learned from the web with the model
-        in use (SlotLearner tells a language, a tool and a domain apart), kept and indexed (an
-        embedding model and the Internet plugin must be there; when one is not, nothing is loaded
-        and it says why). A learn the web cannot feed stops before any model call, saving nothing
-        (learning.LearnStopped), and ends non-zero. However it ends, it says how long it took. Its tracker
-        reports its steps and its end, as a run's does, so a chat that started it shows them."""
         args, option = self.args, "tinker learn"
         topic, definition = args.learn[0].strip(), (args.learn[1] if len(args.learn) > 1 else None)
         if definition is not None or TaughtCommands.alias(topic):
@@ -632,14 +549,11 @@ class Commands:
 
     @staticmethod
     def followed(title):
-        """The one report of a learn, an ask or a teach: what it says and what the model is doing, as a run's
-        tracker keeps them."""
         tracker = Tracker(title)
         say.follow(tracker.heard)
         return tracker
 
     def learned(self, topic, learner):
-        """The topic learned and shown; its ending, for the tracker."""
         entry = learner.learn(topic, deep=True)
         if entry is None:
             raise SystemExit(f"Nothing learned about {topic}; nothing saved.")
@@ -650,21 +564,17 @@ class Commands:
 
     @staticmethod
     def learn_stopped(topic, stopped):
-        """The ending of a learn that stopped: why, and what to do next when it says."""
         details = stopped.details if isinstance(stopped, LearnStopped) else [("Why", first_line(str(stopped), 200))]
         return {"status": "blocked", "headline": f"Nothing learned about {topic}", "details": details}
 
     @staticmethod
     def tracker_ended(tracker, ending, seconds):
-        """The end told to the tracker, which leaves the home unless the conversation that started it reads it last."""
         tracker.end(ending, seconds)
         if not conversation.started_by_a_conversation():
             tracker.close()
 
     @staticmethod
     def learning_tools(option):
-        """(the model in use, the embedding model, the Internet plugin), each checked first: when one is
-        not there, nothing is loaded and it says why."""
         name, settings = Commands.checked_model()
         embeddings = Embeddings.required(option)
         internet = Internet.required(option)
@@ -672,7 +582,6 @@ class Commands:
 
     @staticmethod
     def checked_model():
-        """(name, settings) of the model in use: selected, installed and measured (else it says what to do)."""
         name, settings = Models.selected()
         Models.installed(name)
         Config.check_model(run=False)
@@ -680,15 +589,12 @@ class Commands:
 
     @staticmethod
     def model_in_use(name, settings, log_name):
-        """The model, its calls kept in the home's log of that name (nothing is loaded until it is asked)."""
         log = Log(Home.store(), log_name)
         say.keep_log(log)
         return Model(name, settings, Config.keep_alive(Config.get("keep_alive")), log,
                      max_growth=float(Config.get("max_growth")))
 
     def ask(self):
-        """tinker ask QUESTION: answered from what Tinker keeps alone (no web), each claim citing the item it
-        rests on."""
         question = self.args.ask
         model = Commands.model_in_use(*Commands.checked_model(), "teach")
         memory = Memory(Embeddings.configured())
@@ -696,8 +602,6 @@ class Commands:
                           lambda tracker: Asker(model, memory, tracker).answer(question))
 
     def teach(self):
-        """tinker teach WHAT: what Tinker keeps corrected by the person, once checked on this machine and on the
-        web (the Internet plugin must be there: nothing is corrected unchecked)."""
         teaching = self.args.teach
         name, settings = Commands.checked_model()
         internet = Internet.required("tinker teach")
@@ -706,9 +610,6 @@ class Commands:
                           lambda tracker: Teacher(model, internet, memory, tracker).teach(teaching))
 
     def read(self):
-        """tinker read SOURCE: the source stored on the reading list (no model), then learned from as read #N, which
-        its job is from then on: stopped and resumed, it goes on with the chapters not read yet. tinker read #N
-        ["WHAT"]: go on, or look again for WHAT. tinker read list, tinker read show #N: show the reading list."""
         words = self.args.read
         if words == ["list"]:
             return reading.show_list()
@@ -726,9 +627,6 @@ class Commands:
                           lambda tracker: Reader(model, tracker).read(number, focus))
 
     def exercise(self):
-        """tinker exercise LANGUAGE: practice projects in that language, one after another, until it is stopped
-        (exercising.Exercise; a job: tinker stop #N stops it, everything kept, tinker resume #N goes on); tinker
-        exercise status shows how each is going. Its tracker reports to the chats too, as a run's does."""
         what = self.args.exercise
         if what.lower() == "status":
             return exercising.show()
@@ -743,8 +641,6 @@ class Commands:
 
     @staticmethod
     def reported(title, model, work, chats=False):
-        """work(tracker) done with the model, its tracker told how it ended (work gives the ending) and how long it
-        took, however it ends; the model unloaded after. chats: the tracker reports to the enabled chats too."""
         tracker = Commands.followed(title)
         listening = conversation.attach(title, tracker) if chats else None
         started, ending = time.monotonic(), {"status": "stopped", "headline": f"{title} did not finish"}
@@ -779,8 +675,6 @@ class Commands:
 
     @staticmethod
     def show_memory(graph=False):
-        """What Tinker knows, as lists; or (graph) as a graph in one page, opened in the browser when this
-        prints to a terminal (a chat sends the page as a file)."""
         if graph:
             Commands.show_graph()
             return
@@ -811,14 +705,11 @@ class Commands:
 
     @staticmethod
     def languages_known(languages, topics):
-        """{key: (what its builds taught, what was learned of it from the web)} of every language Tinker knows."""
         learned = {slug: entry for slug, entry in topics.items() if entry.get("kind") == "language"}
         return {key: (languages.get(key) or {}, learned.get(key)) for key in dict.fromkeys([*languages, *learned])}
 
     @staticmethod
     def print_language(key, doc, topic):
-        """A language: how many projects built it and what was read of it, then the toolchain that worked, its
-        proven facts, its fixes and its lessons (each only when there is one)."""
         name = doc.get("language") or (topic or {}).get("name") or key
         with say.part(" · ".join([name, Commands.projects_built(doc.get("projects", 0)), *Commands.read_of(topic)]),
                       "📘"):
@@ -834,14 +725,12 @@ class Commands:
 
     @staticmethod
     def read_of(topic):
-        """What was read of it from the web, as a part of its heading (nothing when it was not)."""
         if not topic:
             return []
         return [f"docs read {Commands.short_date(topic.get('learned'))} ({len(topic.get('facts', []))} facts)"]
 
     @staticmethod
     def short_date(text):
-        """"2026-10-22 00:22" as "22 Oct"; anything else as it is."""
         try:
             return datetime.datetime.strptime(str(text)[:10], "%Y-%m-%d").strftime("%-d %b")
         except ValueError:
@@ -849,7 +738,6 @@ class Commands:
 
     @staticmethod
     def print_toolchain(toolchain):
-        """The toolchain that worked, one command a row, under what it does."""
         if not toolchain:
             return
         rows = [("setup", command) for command in toolchain.setup] + [
@@ -872,7 +760,6 @@ class Commands:
 
     @staticmethod
     def print_lessons(lessons):
-        """Lessons, each marked proven (✅) or not yet (🌱)."""
         if lessons:
             with say.part("Lessons (✅ proven by a build, 🌱 not yet)", "📒"):
                 for lesson in lessons:
@@ -886,7 +773,6 @@ class Commands:
 
     @staticmethod
     def print_topics(topics):
-        """The tools and domains learned from the web (languages are shown with their own)."""
         if topics:
             with say.part("Topics learned", "🔬"):
                 for slug, entry in topics.items():
@@ -929,8 +815,6 @@ class Commands:
 
     @staticmethod
     def list_jobs(state, page):
-        """tinker jobs: the jobs in a state (none: the running, paused and stopped ones), newest first, a page
-        of them at a time."""
         jobs = Jobs.listed(state)
         if not jobs:
             say.text(f"No {state or 'running, paused or stopped'} jobs.")
@@ -947,8 +831,6 @@ class Commands:
 
     @staticmethod
     def stop(number):
-        """tinker stop #N: that job told to stop, as Ctrl-C stops it (it saves what it did); tinker stop: the job that
-        runs, whatever it is."""
         if number is not None:
             job = Jobs.get(number)
             if job is None or job["state"] not in ("running", "paused"):
@@ -964,14 +846,12 @@ class Commands:
 
     @staticmethod
     def short_folder(workdir):
-        """The folder in at most 32 chars: under ~, and cut at its start (its name is what identifies it)."""
         home = str(Path.home())
         shown = ("~" + workdir[len(home):]) if workdir.startswith(home) else workdir
         return ("..." + shown[-29:] if len(shown) > 32 else shown)[:32]
 
     @staticmethod
     def task_of(entry):
-        """The run's task on one line, with how many features were added to it."""
         task = entry.get("task", "").replace("\n", " ")
         features = entry.get("features")
         return f"[+{len(features)} feature{'s' if len(features) > 1 else ''}] " + task if features else task
@@ -995,7 +875,6 @@ class Commands:
 
     @staticmethod
     def print_criteria(steps):
-        """How many criteria pass; each one's status, and a parked one's last error."""
         say.text(f"{sum(1 for step in steps if step['status'] == 'green')}/{len(steps)} criteria pass")
         for step in steps:
             say.text(f"  {step['id']:5} {STATUS_TEXT.get(step['status'], step['status']):11} "
@@ -1005,7 +884,6 @@ class Commands:
 
     @staticmethod
     def show_log(name, workdir_arg, calls=False):
-        """tinker log: what the project's runs printed; --calls: its model calls."""
         workdir = Runs.workdir(name, workdir_arg)
         Runs.read_record(workdir)
         store = project_store(workdir)
@@ -1017,7 +895,6 @@ class Commands:
 
     @staticmethod
     def print_calls(store):
-        """Each model call and detail: when, what, an error, and the start of its reply."""
         for _, entry in store.entries("events"):
             say.text(f"[{entry['time']}] {entry.get('label') or entry.get('note', '')}"
                      + (f"  error: {entry['error']}" if entry.get("error") else ""))
@@ -1026,8 +903,6 @@ class Commands:
 
     @staticmethod
     def rename(name, new, workdir_arg):
-        """A project's folder renamed (in the folder it is in) while its plan waits for confirmation, with
-        the run's record and its pointer; nothing is built there yet."""
         workdir = Runs.workdir(name, workdir_arg or ".")
         project = Project.load(workdir)
         RunChecks.check_awaiting(project, "tinker rename renames the folder of")
@@ -1041,11 +916,6 @@ class Commands:
 
 
 class Doctor:
-    """tinker doctor: what Tinker needs, checked in order, each with what it found and, when
-    something is missing or wrong, the command that fixes it (like brew doctor). Required: Ollama
-    answering, a model selected and measured. For learning and --web: an embedding model and the
-    web. Nice to have: the tinker command on PATH."""
-
     def run(self):
         problems = 0
         for required, name, check in self.checks():
@@ -1063,7 +933,6 @@ class Doctor:
             raise SystemExit(1)
 
     def checks(self):
-        """(required, what, check): a check returns what it found or exits with what to do."""
         return [DoctorCheck(True, "Ollama", self.ollama), DoctorCheck(True, "model", self.model),
                 DoctorCheck(False, "embedding model (for tinker learn and --web)", self.embedding),
                 DoctorCheck(False, "web (for tinker learn and --web)", self.web),
@@ -1113,10 +982,6 @@ class Doctor:
 
 
 class ProjectRun:
-    """One run on a project: a new project, or a resumed one, or a feature (tinker add) or a bug fix
-    (tinker fix) for one. It opens the run and a session on it, works through the cycle that is open,
-    saves whatever happens, and ends with a summary. Its tracker reports it all, as data."""
-
     def __init__(self, args, script_started, started_at):
         self.args = args
         self.script_started, self.started_at = script_started, started_at
@@ -1127,8 +992,6 @@ class ProjectRun:
         self.tracker = Tracker(args.task or "a task")
 
     def execute(self):
-        """Check what the run needs, prepare its folder, open it, work, and finish (exiting with
-        its outcome)."""
         workdir = self.check_requirements()
         if self.args.restart:
             spec = self.args.spec
@@ -1147,8 +1010,6 @@ class ProjectRun:
         sys.exit(self.outcome.exit_code)
 
     def check_requirements(self):
-        """The run's folder, once everything the run needs is checked: before a folder is emptied
-        or the model loaded, so what is missing stops it with nothing changed."""
         Models.installed(Models.selected()[0])
         Config.check_model(run=True)
         TaughtCommands.stop_if_broken()
@@ -1165,7 +1026,6 @@ class ProjectRun:
         return RunChecks.before_start(self.args)
 
     def open(self):
-        """The model, the run, its project and the session; the tracker told the run and its folder."""
         args = self.args
         model_name, settings = Models.selected()
         self.record, workdir, self.spec_text, self.mode = Runs.open(args)
@@ -1202,8 +1062,6 @@ class ProjectRun:
                      f"tokens; fixes at most {model.fix_max}")
 
     def work_safely(self):
-        """work, saved whatever happens: Ollama failing, Ctrl-C, a stop, or a bug (reported, so
-        the run can be continued)."""
         try:
             self.work()
         except OllamaError as exc:
@@ -1223,7 +1081,6 @@ class ProjectRun:
             self.save()
 
     def work(self):
-        """The cycle to work on, run from its saved phase: a plan that waits is confirmed (or amended)."""
         session, run = self.session, self.record
         brief = Brief.load(session.model, session.project.store, self.mode, run["task"], self.spec_text)
         cycle = self.choose_cycle(brief)
@@ -1237,8 +1094,6 @@ class ProjectRun:
         self.outcome.set(CycleRunner(session).run(cycle, web=self.internet is not None))
 
     def choose_cycle(self, brief):
-        """The cycle to work on: a new feature or bug (tinker add, tinker fix), the unfinished one, or the
-        project itself. A new cycle's plan waits for confirmation only when the run was given --confirm."""
         project = self.session.project
         cycle = project.open_cycle()
         if self.mode == "change":
@@ -1250,7 +1105,6 @@ class ProjectRun:
         return cycle
 
     def new_change(self):
-        """A feature's or a bug's cycle (its spec file condensed with its request), kept in the run too."""
         session, run, args, project = self.session, self.record, self.args, self.session.project
         feature_id = secrets.token_hex(3)
         kind = "fix" if args.bug else "feature"
@@ -1265,7 +1119,6 @@ class ProjectRun:
         return cycle
 
     def confirm_or_amend(self, cycle):
-        """The plan that waits for the person: changed as they ask, or confirmed."""
         if self.args.amend:
             say.title("Plan: changing it as you asked", "✏️")
             self.tracker.phase("amend")
@@ -1276,8 +1129,6 @@ class ProjectRun:
             self.session.save()
 
     def amend(self, cycle, change):
-        """The plan that waits, changed as the person asks: a spec planned again (SpecWriter.amend), or a
-        bug shown again with the change (its test written again)."""
         if cycle.get("kind") != "fix":
             SpecWriter(self.session).amend(cycle, change)
             return
@@ -1286,8 +1137,6 @@ class ProjectRun:
         self.session.save()
 
     def save(self):
-        """Whatever happened: the model unloaded, what the run learned about it kept, the run and
-        the project saved."""
         model, project = self.session.model, self.session.project
         plan_waits = self.outcome.status == "awaiting"
         if not plan_waits:
@@ -1302,7 +1151,6 @@ class ProjectRun:
             pass
 
     def finish(self):
-        """The summary, the times, and the run's end told to its tracker."""
         self.print_summary()
         ended_at = datetime.datetime.now()
         wall = (ended_at - self.started_at).total_seconds()
@@ -1317,7 +1165,6 @@ class ProjectRun:
         self.tracker.end(self.ending, total)
 
     def print_summary(self):
-        """What happened, for the terminal; the same as data (self.ending) for the tracker."""
         status = self.outcome.status
         self.ending = {"status": status, "headline": "", "details": [], "next": []}
         if status == "done":
@@ -1363,8 +1210,6 @@ class ProjectRun:
                                ("🐞 fix a bug", f'tinker fix @{run_id} "..."')]
 
     def summary_awaiting(self):
-        """The plan as a person reads it, to confirm or change before anything is built; the tracker is
-        given it as data."""
         run_id = self.record["id"]
         plan = self.waiting_plan()
         self.print_plan(plan)
@@ -1375,7 +1220,6 @@ class ProjectRun:
         self.tracker.wait(plan)
 
     def waiting_plan(self):
-        """The plan that waits, as data: what it is, what changed, its criteria, what it leaves out."""
         project = self.session.project
         cycle = project.open_cycle()
         kind = "fix" if cycle.get("kind") == "fix" else "project" if cycle["id"] == "base" else "feature"
@@ -1401,8 +1245,6 @@ class ProjectRun:
                 say.info(f"Not included: {'; '.join(plan['non_goals'])}", "🚫")
 
     def summary_blocked(self):
-        """Why it stopped: a bug no test showed, a project that does not build, tools that do not
-        work, or criteria parked."""
         run_id = self.record["id"]
         lines = self.why_blocked(self.session, run_id)
         say.title(lines[0], Messages.ICONS["stop"])
@@ -1414,7 +1256,6 @@ class ProjectRun:
 
     @staticmethod
     def why_blocked(session, run_id):
-        """The lines that say why it stopped (the first is the headline) and how to go on."""
         if session.unreproduced_reason:
             return [f"Not fixed: {session.unreproduced_reason}"]
         if session.review_problem:
@@ -1436,9 +1277,6 @@ class ProjectRun:
 
 
 class ProjectFolder:
-    """A new task's own folder in the projects folder (tinker config projects): named after the task by one
-    quick call to the model (calc-py for a calculator in Python), checked, else from the task's own words;
-    a name that is taken gets -2, -3 ..."""
     NAME_RE = re.compile(r"[a-z][a-z0-9]*(?:-[a-z0-9]+){0,2}")
     NAME_MAX = 20
     COMMON = {"a", "an", "the", "build", "make", "create", "write", "simple", "small", "basic", "using", "use",
@@ -1459,7 +1297,6 @@ class ProjectFolder:
 
     @staticmethod
     def named(task):
-        """The model's name for the task's folder ("" when it gives none that fits NAME_RE)."""
         model, settings = Models.selected()
         options, think = ProjectFolder.quick_call(settings)
         try:
@@ -1473,8 +1310,6 @@ class ProjectFolder:
 
     @staticmethod
     def quick_call(settings):
-        """(options, think) of a call that names something: a run's num_ctx (the model stays loaded for the run),
-        a few tokens, no thinking."""
         options = {"num_ctx": settings["num_ctx"], "num_predict": 24}
         if settings.get("num_batch"):
             options["num_batch"] = settings["num_batch"]
@@ -1488,19 +1323,10 @@ class ProjectFolder:
 
 
 class CycleRunner:
-    """A cycle of the project itself, of a feature (tinker add) or of a bug fix (tinker fix): Tinker's idea in
-    order (PHASES, FIX_PHASES): plan the task as a spec, which waits for the person's confirm (CONFIRM_AFTER),
-    install the test tool, a test for every spec point, just enough code to pass them, tidied, one final
-    review, done. Resumable at each phase: a phase is saved as done once it ends. A phase that stops the
-    cycle disproves the knowledge the cycle used in it."""
-
     def __init__(self, session):
         self.session, self.project = session, session.project
 
     def run(self, cycle, web=False):
-        """Continue a cycle from its saved phase: "done", "blocked" (a phase stopped it) or "awaiting" (its
-        plan waits for the person to confirm it). With web, a cycle past its recall phase recalls first, so
-        the rest of it may learn what it needs."""
         phases = FIX_PHASES if cycle.get("kind") == "fix" else PHASES
         self.session.cycle = cycle
         if web and cycle["phase"] not in ("recall", "done") and not cycle.get("awaiting"):
@@ -1522,16 +1348,12 @@ class CycleRunner:
         return "done"
 
     def recall_first(self, cycle):
-        """A run with --web past its recall phase: what the rest of the cycle needs is learned first."""
         if self.session.tracker is not None:
             self.session.tracker.phase("recall")
         with say.part(f"{Recaller.TITLE} (with --web, before {cycle['phase']})", Tracker.icon("recall")):
             Recaller(self.session).run(cycle)
 
     def run_phase(self, phase, cycle):
-        """Runs one phase; only setup, verify, the final review and reproduce can stop
-        the cycle (they return False). The plan is made at the model's full think setting; building
-        from it at build_think."""
         worker = self.phase_class(phase)(self.session)
         self.session.model.is_building = worker.BUILDS
         if not worker.TITLE:
@@ -1547,7 +1369,6 @@ class CycleRunner:
         return went
 
     def outcome(self, phase, cycle):
-        """What came of a phase, as the person counts it: "9 point(s) to test", "4 file(s)", "6/9 spec points pass"."""
         criteria = self.project.cycle_criteria(cycle)
         green, _, total = self.project.counts()
         return {"spec": f"{len(criteria)} point(s) to test",
@@ -1559,7 +1380,6 @@ class CycleRunner:
 
     @staticmethod
     def phase_class(phase):
-        """The Phase that does a phase of a cycle (in the order of PHASES, then a bug fix's own)."""
         return {"recall": Recaller,
                 "spec": SpecWriter,
                 "design": Designer,
@@ -1575,8 +1395,6 @@ class CycleRunner:
                 "reproduce": BugReproducer}[phase]
 
     def done_with(self, phase, cycle, phases):
-        """The cycle on to its next phase, saved; past the phase its plan waits after, it waits for the person
-        to confirm it (tinker confirm) or change it (tinker amend), when its run was given --confirm."""
         cycle["phase"] = phases[phases.index(phase) + 1]
         if self.waits_for_confirm(phase, cycle):
             cycle["awaiting"] = True
@@ -1584,13 +1402,10 @@ class CycleRunner:
 
     @staticmethod
     def waits_for_confirm(phase, cycle):
-        """Whether the cycle's plan, once past this phase, waits for the person: its run was given --confirm,
-        and it is not confirmed yet."""
         return (phase == CONFIRM_AFTER[cycle.get("kind", "feature")] and cycle.get("confirm")
                 and not cycle.get("confirmed"))
 
     def disprove(self, cycle, phase):
-        """The knowledge used in a step that failed is discarded (it did not hold)."""
         gone = self.session.knowledge.disprove(cycle.get("used", {}), self.session.failed_phases(phase))
         if gone:
             say.info(f"{gone} lesson(s) and fact(s) used in this step are discarded: they did not hold", "🗑️")

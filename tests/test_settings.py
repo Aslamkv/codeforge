@@ -1,5 +1,3 @@
-"""SET: Tinker's settings, its home folder and the small helpers every part uses."""
-
 import io
 import multiprocessing
 import re

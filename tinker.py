@@ -1,10 +1,4 @@
 #!/usr/bin/env python3
-"""🔧 Tinker — your friendly project builder. Tinker itself is tinkerkit/cli.py; this file only makes sure the
-Python running it is new enough to read it.
-
-It keeps to syntax that Python 3.9 can read (no lazy import, no match): Python reads a whole file before it runs
-a line of it, so newer syntax here would fail before the check below could explain why."""
-
 import sys
 
 if sys.version_info < (3, 15):

@@ -1,6 +1,3 @@
-"""SPEC.md is the source of truth and the tests enforce it: every point it states has a test, and every test
-names a point it states."""
-
 import re
 from pathlib import Path
 
@@ -32,8 +29,6 @@ def test_every_test_names_a_spec_point():
 
 
 def test_every_xfail_is_strict_and_names_its_issue():
-    """A test the code does not pass yet is a known issue (tracked outside the spec): it fails as soon as the code
-    is fixed, so its marker is removed and the point is enforced from then on."""
     tests = "\n".join(path.read_text(encoding="utf-8") for path in (ROOT / "tests").glob("test_*.py"))
     marks = re.findall(r"mark\.xfail\(([^)]*)\)", tests)
     assert all(re.search(r'strict=True, reason="ISSUE-\d+: ', mark) for mark in marks), marks

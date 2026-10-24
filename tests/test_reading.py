@@ -1,6 +1,3 @@
-"""RDG: reading what the person gives: stored whole on the reading list first, then every chapter learned from, the
-core ones first, saved as it is read; read #N "WHAT" looks again."""
-
 import io
 import json
 import zipfile
@@ -49,8 +46,6 @@ DOCUMENTS = {"cover.xhtml": "<h1>The Craft</h1>",
                             + "</ul>"}
 
 def epub(nav=True):
-    """An EPUB of The Craft (cover, foreword, a part of two chapters in one document, an index): its contents in an
-    EPUB 3 navigation document, else in an EPUB 2 NCX."""
     manifest = "".join(f'<item id="d{number}" href="text/{name}" media-type="application/xhtml+xml"/>'
                        for number, name in enumerate(DOCUMENTS))
     manifest += ('<item id="nav" href="nav.xhtml" media-type="application/xhtml+xml" properties="nav"/>' if nav
@@ -146,7 +141,6 @@ def test_chapters_have_kinds_and_the_index_names_what_matters():
     assert index_terms(opened(MARKDOWN.encode(), "craft.md")) == [("naming", 3), ("testing", 3), ("coupling", 1)]
 
 def craft(tmp_path, name="craft.md", text=MARKDOWN):
-    """The Craft, as a Markdown file: 1 Foreword, 2 Naming, 3 Stories, 4 Testing, 5 Index."""
     path = tmp_path / name
     path.write_text(text)
     return str(path)
@@ -162,8 +156,6 @@ def points(*texts, phase="code"):
     return json.dumps({"points": [{"text": text, "phase": phase, "section": ""} for text in texts]})
 
 class Steps:
-    """A tracker that only remembers the steps it was moved through, and what came of each."""
-
     def __init__(self):
         self.steps, self.outcomes, self.state = [], {}, {"step": None}
 
@@ -209,7 +201,6 @@ def test_the_survey_orders_every_chapter_and_skips_none(tmp_path, home_store):
         read_survey({"chapters": []}, book)
 
 def read_craft(tmp_path, make_model, fake_ollama, software=True):
-    """The Craft stored and read whole: chapter 4 is core, 2 supporting, then 1 and 3."""
     stored(craft(tmp_path))
     fake_ollama.reply(survey_reply(software), when="reading plan")
     fake_ollama.reply(points("Write a test for each behaviour first", phase="tests"), when="chapter 4")
