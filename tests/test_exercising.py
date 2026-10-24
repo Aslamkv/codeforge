@@ -10,6 +10,7 @@ from tinkerkit import conversation, exercising
 from tinkerkit.cli import Cli
 from tinkerkit.conversation import Desk, persons_runs
 from tinkerkit.exercising import (
+    PRACTICE_STEPS,
     Exercise,
     Exercises,
     free_folder,
@@ -21,7 +22,7 @@ from tinkerkit.exercising import (
     slowest,
 )
 from tinkerkit.knowledge import Knowledge, Library
-from tinkerkit.project import Tracker, project_store
+from tinkerkit.project import Steps, Tracker, project_store
 from tinkerkit.settings import Config
 
 OTHER_LIVE_PID = os.getppid()
@@ -298,11 +299,11 @@ def test_the_exercise_has_no_rule_of_its_own_for_giving_way(make_model, home_sto
 
 
 @pytest.mark.spec("EXR-6")
-def test_the_exercise_shows_what_its_build_does(make_model, home_store, monkeypatch):
+def test_the_exercise_shows_what_its_build_does(make_model, home_store, monkeypatch, tmp_path):
     build = FakeBuild(polls=1)
     build.pid = OTHER_LIVE_PID
     exercise = Exercise(make_model(), Tracker("Exercising rust"), start_build=lambda arguments: build)
-    exercise.on_to("build")
+    Steps(PRACTICE_STEPS, exercise.tracker).enter("build")
     home_store.put(
         "running",
         str(OTHER_LIVE_PID),
@@ -315,7 +316,7 @@ def test_the_exercise_shows_what_its_build_does(make_model, home_store, monkeypa
         },
     )
     monkeypatch.setattr(time, "sleep", lambda seconds: None)
-    exercise.built(lambda: ["task", "t"])
+    exercise.practise_step("build", {"language": "rust"}, {"folder": str(tmp_path / "calc"), "task": "t"})
     state = exercise.tracker.state
     assert state["doing"] == "🔨 Building the practice project · 💻 Writing the code"
     assert (state["working"], state["latest"], state["passing"]) == ("Writing a.py", "✅ Wrote a.py", [2, 5])

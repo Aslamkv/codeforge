@@ -83,19 +83,19 @@ def test_no_backend_left_is_not_available(monkeypatch):
     assert not internet_with(monkeypatch, Scripted(1), web_name="").available()
 
 
-@pytest.mark.spec("WEB-3")
+@pytest.mark.spec("WEB-1")
 def test_the_web_backends_are_the_ones_the_settings_name():
     assert tuple(Internet.backends()) == WEB_BACKENDS
 
 
-@pytest.mark.spec("WEB-4")
+@pytest.mark.spec("WEB-3")
 def test_required_names_the_option_when_no_backend_works():
     Config.save(web="ollama")
     with pytest.raises(SystemExit, match="--web needs the Internet plugin: ollama: no Ollama API key"):
         Internet.required("--web")
 
 
-@pytest.mark.spec("WEB-4")
+@pytest.mark.spec("WEB-3")
 def test_required_and_state_with_a_backend_ready(capsys):
     Config.save(web="ollama", web_fallback="duckduckgo")
     internet = Internet.required("tinker learn")
@@ -104,7 +104,7 @@ def test_required_and_state_with_a_backend_ready(capsys):
     assert Internet.state().startswith("ready: duckduckgo; not usable: ollama")
 
 
-@pytest.mark.spec("WEB-4")
+@pytest.mark.spec("WEB-3")
 def test_state_when_not_usable():
     Config.save(web="ollama")
     assert Internet.state().startswith("ollama: no Ollama API key")
@@ -112,7 +112,7 @@ def test_state_when_not_usable():
     assert Internet.state().startswith("not usable: web must be one of")
 
 
-@pytest.mark.spec("WEB-5")
+@pytest.mark.spec("WEB-4")
 def test_search_keeps_web_addresses_as_strings(monkeypatch):
     found = [
         {"title": "T", "url": "https://x.org", "content": None},
@@ -127,7 +127,7 @@ def test_search_keeps_web_addresses_as_strings(monkeypatch):
     ]
 
 
-@pytest.mark.spec("WEB-5")
+@pytest.mark.spec("WEB-4")
 def test_fetch_needs_text_and_keeps_the_address_asked(monkeypatch):
     internet = internet_with(
         monkeypatch, Scripted(1, [{"title": "P", "url": "other", "content": "text"}, {"content": "   "}])
@@ -137,20 +137,20 @@ def test_fetch_needs_text_and_keeps_the_address_asked(monkeypatch):
     assert "its fetch gave no text" in internet.problem("https://b")
 
 
-@pytest.mark.spec("WEB-5")
+@pytest.mark.spec("WEB-4")
 def test_search_gives_none_with_why_when_nothing_answers(monkeypatch):
     internet = internet_with(monkeypatch, Scripted(1, [WebError("down")]))
     assert internet.search("q", 3) is None and internet.problem("q") == "a: down"
 
 
-@pytest.mark.spec("WEB-6")
+@pytest.mark.spec("WEB-5")
 def test_the_next_backend_is_asked_when_one_fails(monkeypatch):
     first, second = Scripted(1, [WebError("a broke")]), Scripted(1, [[{"url": "https://ok"}]])
     internet = internet_with(monkeypatch, first, second, web_name="a", fallback="b")
     assert internet.search("q", 1) == [{"title": "", "url": "https://ok", "content": ""}]
 
 
-@pytest.mark.spec("WEB-6")
+@pytest.mark.spec("WEB-5")
 def test_a_moments_trouble_is_asked_again_once(monkeypatch):
     first = Scripted(1, [WebError("rate", retry=True), [{"url": "https://ok"}]])
     assert internet_with(monkeypatch, first).search("q", 1) and first.calls == 2
@@ -158,14 +158,14 @@ def test_a_moments_trouble_is_asked_again_once(monkeypatch):
     assert internet_with(monkeypatch, second).search("q", 1) is None and second.calls == 2
 
 
-@pytest.mark.spec("WEB-6")
+@pytest.mark.spec("WEB-5")
 def test_a_backend_bug_is_a_failure_never_raised(monkeypatch):
     internet = internet_with(monkeypatch, Scripted(1, [KeyError("oops")]))
     assert internet.search("q", 1) is None
     assert "failed: KeyError" in internet.problem("q")
 
 
-@pytest.mark.spec("WEB-7")
+@pytest.mark.spec("WEB-6")
 def test_a_backend_lost_twice_in_a_row_is_left(monkeypatch, capsys):
     gone = WebError("unreachable", network=True)
     backend = Scripted(1, [gone, gone])
@@ -177,7 +177,7 @@ def test_a_backend_lost_twice_in_a_row_is_left(monkeypatch, capsys):
     assert "not asking a again" in capsys.readouterr().out
 
 
-@pytest.mark.spec("WEB-7")
+@pytest.mark.spec("WEB-6")
 def test_a_success_resets_the_count(monkeypatch):
     gone = WebError("unreachable", network=True)
     backend = Scripted(1, [gone, [{"url": "https://x"}], gone, gone])
@@ -206,14 +206,14 @@ def http_error(code):
     return urllib.error.HTTPError("https://x", code, "err", {}, io.BytesIO(b""))
 
 
-@pytest.mark.spec("WEB-9")
+@pytest.mark.spec("WEB-8")
 def test_ollama_web_needs_its_key(monkeypatch):
     assert "OLLAMA_API_KEY" in OllamaWeb(5).unready()
     monkeypatch.setenv("OLLAMA_API_KEY", " k ")
     assert OllamaWeb(5).unready() == ""
 
 
-@pytest.mark.spec("WEB-9")
+@pytest.mark.spec("WEB-8")
 def test_ollama_web_posts_json_with_its_key(monkeypatch):
     monkeypatch.setenv("OLLAMA_API_KEY", "secret")
     sent = []
@@ -230,7 +230,7 @@ def test_ollama_web_posts_json_with_its_key(monkeypatch):
     assert json.loads(request.data) == {"query": "python", "max_results": 2}
 
 
-@pytest.mark.spec("WEB-9")
+@pytest.mark.spec("WEB-8")
 @pytest.mark.parametrize(
     "code,path,network,retry",
     [
@@ -253,7 +253,7 @@ def test_ollama_web_http_errors(monkeypatch, code, path, network, retry):
     assert f"HTTP {code}" in str(error.value)
 
 
-@pytest.mark.spec("WEB-9")
+@pytest.mark.spec("WEB-8")
 def test_ollama_web_unusable_answers(monkeypatch):
     answers = iter([Response("not json"), Response("[1]"), Response("{}")])
     monkeypatch.setattr(urllib.request, "urlopen", lambda request, timeout: next(answers))
@@ -265,7 +265,7 @@ def test_ollama_web_unusable_answers(monkeypatch):
         OllamaWeb(5).search("q", 1)
 
 
-@pytest.mark.spec("WEB-9")
+@pytest.mark.spec("WEB-8")
 def test_ollama_web_unreachable_is_a_network_failure():
     with pytest.raises(WebError, match="cannot be reached") as error:
         OllamaWeb(5).post("/web_search", {})
@@ -280,7 +280,7 @@ RESULTS = """<html><body>
 </body></html>"""
 
 
-@pytest.mark.spec("WEB-10")
+@pytest.mark.spec("WEB-9")
 def test_duckduckgo_reads_its_results(monkeypatch):
     monkeypatch.setattr(
         DuckDuckGoWeb, "get", classmethod(lambda cls, url, timeout, form=None: (RESULTS, "text/html"))
@@ -294,7 +294,7 @@ def test_duckduckgo_reads_its_results(monkeypatch):
     assert len(backend.search("python", 1)) == 1
 
 
-@pytest.mark.spec("WEB-10")
+@pytest.mark.spec("WEB-9")
 def test_duckduckgo_bot_check_is_worth_asking_again(monkeypatch):
     monkeypatch.setattr(
         DuckDuckGoWeb, "get", classmethod(lambda cls, url, timeout, form=None: ("anomaly", "text/html"))
@@ -304,7 +304,7 @@ def test_duckduckgo_bot_check_is_worth_asking_again(monkeypatch):
     assert error.value.retry
 
 
-@pytest.mark.spec("WEB-11")
+@pytest.mark.spec("WEB-10")
 def test_read_page_by_content_type(monkeypatch):
     pages = {
         "https://h": ("<html><title>T</title><body><p>Hello there</p></body></html>", "text/html"),
@@ -324,7 +324,7 @@ def test_read_page_by_content_type(monkeypatch):
         DuckDuckGoWeb.read_page("https://i", 5)
 
 
-@pytest.mark.spec("WEB-11")
+@pytest.mark.spec("WEB-10")
 def test_duckduckgo_get_errors(monkeypatch):
     monkeypatch.setattr(
         urllib.request, "urlopen", lambda request, timeout: (_ for _ in ()).throw(http_error(503))
@@ -342,7 +342,7 @@ ARTICLE = (
 )
 
 
-@pytest.mark.spec("WEB-12")
+@pytest.mark.spec("WEB-11")
 def test_page_text_takes_the_main_part_without_the_noise():
     page = PageText.of(f"""<html><head><title>My Page</title><style>p{{}}</style><script>x()</script></head>
         <body><nav><a>Home</a></nav><header>Site header</header><div hidden>secret</div>
@@ -367,19 +367,19 @@ def test_page_text_takes_the_main_part_without_the_noise():
         assert noise not in text
 
 
-@pytest.mark.spec("WEB-12")
+@pytest.mark.spec("WEB-11")
 def test_page_text_uses_the_whole_body_when_main_is_short():
     page = PageText.of("<body><p>Intro outside</p><main><p>short</p></main><p>after</p></body>")
     assert page.content() == "Intro outside\n\nshort\n\nafter"
 
 
-@pytest.mark.spec("WEB-12")
+@pytest.mark.spec("WEB-11")
 def test_page_text_survives_broken_html():
     page = PageText.of("<body><p>kept text<p>more <b>bold</i></div></div></body>")
     assert "kept text" in page.content() and "more bold" in page.content()
 
 
-@pytest.mark.spec("WEB-8")
+@pytest.mark.spec("WEB-7")
 def test_a_rate_limit_is_told_apart_from_other_failures(monkeypatch):
     internet = internet_with(
         monkeypatch,
@@ -403,7 +403,7 @@ def test_a_rate_limit_is_told_apart_from_other_failures(monkeypatch):
     assert error.value.code == 429
 
 
-@pytest.mark.spec("WEB-8")
+@pytest.mark.spec("WEB-7")
 def test_the_page_fetcher_follows_the_fetch_settings():
     Config.save(fetch_workers=3, fetch_timeout=7, fetch_max_bytes=5000, fetch_domain_delay=0.25)
     fetcher = Internet.page_fetcher(log=print)

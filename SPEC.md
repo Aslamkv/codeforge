@@ -60,17 +60,17 @@ listed above it:
 | Module | Responsibility |
 |---|---|
 | `messages` | everything Tinker tells the person, in one voice (`say`, `Messages`, `Message`): each message's kind gives its icon, sections nest it, followers (a tracker) get it as data, and details go to the log only |
-| `settings` | every tunable number and fixed name; the Tinker home (`Home`), its database (`Store`) and `Config`; small helpers |
-| `commands` | the one table of Tinker's commands, and project references (`@ID`, `@folder`) |
-| `jobs` | every long command as a job, listed, stopped and resumed (`Jobs`), and its journal of requests and answers (`Journal`, `journaled`) |
+| `settings` | every tunable number and fixed name; the Tinker home (`Home`), its database (`Store`), the settings table (`SETTINGS`, `Config`), numbered lists (`Numbered`), the one way to delete (`confirm_deletion`); small helpers |
+| `commands` | the one table of Tinker's commands with each one's kind (`kind_of`, `deletes`), and project references (`@ID`, `@folder`) |
+| `jobs` | every long command as a job, listed, stopped and resumed (`Jobs`), its journal of requests and answers (`Journal`, `journaled`), and its log of model calls (`calls_log`) |
 | `ledger` | what is said in the chats, so a chat is only a view of it: each message with when it goes, each thing shown, numbered, for `history` (`Ledger`) |
 | `prompts` | prompt parts (`Part`), replies (`Reply`), every system prompt (`Prompts`) |
 | `workspace` | the project's files and the commands run in it (`Workspace`, `Toolchain`, `TestRef`, `Output`, `FileView`, `TaughtCommands`) |
 | `model` | the local model: Ollama's API, one request with its budgets and retries (`Model`), measuring a model (`Calibrator`) |
-| `project` | the plan and its record (`Project`, `SpecDocument`, `Runs`, `RunChecks`, `Brief`, `Outcome`), and the run's `Tracker` |
+| `project` | the plan and its record (`Project`, `SpecDocument`, `Runs`, `RunChecks`, `Brief`, `Outcome`), the run's `Tracker`, and the step pipeline (`Steps`) |
 | `fetcher` | the Internet plugin's page fetcher: pages read straight from their sites, in parallel, with the standard library only (`Fetcher`, `Fetched`) |
-| `passages` | fetched pages as passages: main content, under headings, repeats dropped (`Cleaner`, `MainBlocks`, `Links`, `Page`, `Passage`) |
-| `web` | the Internet plugin, the only part that goes on the web (`Internet`, `OllamaWeb`, `DuckDuckGoWeb`, `PageText`) |
+| `passages` | every page read as text: an HTML page's main content as blocks, and fetched pages as passages under headings, repeats dropped (`Cleaner`, `MainBlocks`, `Links`, `Page`, `Passage`) |
+| `web` | the Internet plugin, the only part that goes on the web (`Internet`, `OllamaWeb`, `DuckDuckGoWeb`), and a page as text (`PageText`, a view over `passages`) |
 | `conversation` | the terminal and the chats as one conversation (`Desk`, `Channel`, `Markup`, `Talk`, `Shell`, `Research`, `Progress`, `Reporter`) |
 | `channels` | the chat plugin: Telegram, and `tinker channel` |
 | `knowledge` | lessons and proven knowledge (`Knowledge`), and what learning shares (`Learner`, `Researcher`, `Library`, `Retriever`, `Embeddings`) |
@@ -125,7 +125,7 @@ the last column:
 | `learned` | what was learned from the web about each topic, with sources, and what each reading teaches | `learned` |
 | `embeddings` | the embedding of each learned text, per embedding model | `learned` |
 | `sources` | the cleaned documentation pages of each topic, per version (`slug@version`) | `docs` |
-| `readings`, `reading numbers` | the reading list: each source's whole text by chapter, each chapter's state, its survey; the last number given | `read` |
+| `readings`, `reading numbers` | the reading list: each source's whole text by chapter, each chapter's state, its survey; the last number given, kept by a clear | `read` |
 | `commands` | the person's own commands (aliases, programs) | `commands` |
 | `projects` | a pointer to each project: its run ID, folder and task | `runs` |
 | `runs` | one line about each run: its task, language, status and dates (the last `RUNS_KEPT`) | `runs` |
@@ -134,8 +134,8 @@ the last column:
 | `exercise` | per language: its exercise's practice projects, what each measured, and the focus of the next | `exercise` |
 | `activity` | the person's requests being answered (`answering`), and the ids of the exercise's one message (`exercise message`) | |
 | `chat views` | each message in a chat (Tinker's and the person's): when it goes, and the thing it shows | |
-| `chat history`, `chat history numbers` | each thing shown in a chat, as it was shown last, with what the person asked for it; the last number given | `history` |
-| `jobs`, `job numbers` | every job: its number, command, title, arguments, state, process and dates; the last number given | `jobs` |
+| `chat history`, `chat history numbers` | each thing shown in a chat, as it was shown last, with what the person asked for it; the last number given, kept by a clear | `history` |
+| `jobs`, `job numbers` | every job: its number, command, title, arguments, state, process and dates; the last number given, kept by a clear | `jobs` |
 | log `calls #N` | the model calls and details of job #N (a run's go to its project's `events`), until the job is archived (**JOB-12**) | `jobs` |
 | log `journal #N` | job #N's requests (model calls, web searches, page fetches) with their answers, until it finishes | `jobs` |
 
@@ -239,9 +239,10 @@ The home, its database, the settings, and small helpers every module shares.
 - **SET-11** Every deletion goes one way, `confirm_deletion(said, items, command, yes, verb)`: it says what it
   deletes (or archives), item by item, asks, and only then deletes. With `yes` (`--yes`, or `confirm` in a
   chat) it does not ask. With no terminal to ask in, it deletes nothing and exits, saying how to confirm
-  (`Nothing deleted: run COMMAND in a terminal to confirm, or add --yes.`); a no exits with `Nothing
-  deleted.` With nothing to delete, it says so and asks nothing. `Home.reset(yes)` deletes the home folder this
-  way. It refuses a folder not named `.tinker`, and does nothing when the folder is missing.
+  (`Nothing deleted: run COMMAND in a terminal to confirm, or add --yes.`); a no exits with `Nothing deleted.`
+  (an archive says `Nothing archived`). With nothing to delete, it asks nothing (`clear` and `reset` say so).
+  `Home.reset(yes)` deletes the home folder this way. It refuses a folder not named `.tinker`, and does
+  nothing when the folder is missing.
 - **SET-12** `tinker clear PART` names exactly these parts: languages, memory, learned, docs, models, runs,
   commands, history, exercise, jobs and read ([State](#state) shows what each holds). `jobs` and `read` take
   numbers (`#N`), and their own modules clear them (**JOB-11**, **RDG-13**). `Home.clear(names, yes)` deletes
@@ -293,17 +294,15 @@ pauses it too, so the person is always answered at once.
 - **JOB-1** `is_job(argv)` is true for a command of kind `job` (**CMD-1**): `task`, `restart`, `resume`,
   `confirm`, `amend`, `add`, `fix`, `calibrate`, `learn`, `ask`, `teach`, `read`, `research` and `exercise`.
   Help, and a build an exercise runs (`EXERCISE_ENV`), are never jobs. A job keeps the computer awake while it
-  runs (**SET-13**). `Jobs.running(argv)` runs
-  a job as the next number (`#1`, `#2` ...), kept in the home's `jobs` with its command, title, arguments, the
-  day it started, its state `running` and its process. Its process takes `JOB_STOP_SIGNAL` (SIGUSR2) as
-  Ctrl-C.
+  runs (**SET-13**). `Jobs.running(argv)` runs a job as the next number (`#1`, `#2` ...), kept in the home's
+  `jobs` with its command, title, arguments, the day it started, its state `running` and its process. Its
+  process takes `JOB_STOP_SIGNAL` (SIGUSR2) as Ctrl-C.
 - **JOB-2** A job ends `stopped` when it is interrupted (Ctrl-C, `JOB_STOP_SIGNAL`) or its tracker ends with
   the status `stopped` (`Tracker.end` tells `Jobs.ended`, which adds `("Go on", "tinker resume #N")` to the
   ending), and `paused` when another job or the person paused it ("Paused for job #N", "Paused for you": its
   ending says so, and its tracker's `doing`); otherwise it is `finished`, and its journal is deleted (its
-  `calls #N` log is kept). A
-  `running` or `paused` job whose process is gone (killed, the computer restarted) is read as `stopped`;
-  `Jobs.lost()` gives those jobs.
+  `calls #N` log is kept). A `running` or `paused` job whose process is gone (killed, the computer restarted)
+  is read as `stopped`; `Jobs.lost()` gives those jobs.
 - **JOB-3** `journaled(request, ask)` outside a job asks. In a job, a request made before, word for word, is
   answered from the job's journal (log `journal #N`) in the order the answers were kept, and nothing is asked;
   any other request is asked, and its answer kept unless it failed (`keep`). `Ollama.chat` (but an unload),
@@ -340,16 +339,16 @@ pauses it too, so the person is always answered at once.
   by "you"). The request is marked as being answered before anything is paused, so the paused job does not go
   on the moment it has saved itself. The person is answered as soon as it has, and the job goes on as soon as
   the answer is written (a command line run once confirmed pauses it again while the model reads its output).
-  A command that only shows something pauses nothing, and a job asked for pauses it as **JOB-8** says.
+  A glance (**CMD-1**) pauses nothing, and a job asked for pauses it as **JOB-8** says.
 - **JOB-11** `tinker clear jobs [#N...] [--yes]` archives those jobs (with no `#N`, every stopped and finished
   one), as a deletion (**SET-11**): each is kept with the state `archived` (and `archived_from`, the state it
   had), listed by `tinker jobs archived` and not without a state, and its journal and its `calls #N` log are
-  deleted. An archived job is not
-  resumed (**JOB-5**). An unknown job, a running or paused one, one archived already, and any word but `#N`
-  are refused with why.
+  deleted. An archived job is not resumed (**JOB-5**). An unknown job, a running or paused one, one archived
+  already, and any word but `#N` are refused with why.
 - **JOB-12** `calls_log()` is the one log of a job's model calls: `calls #N` for the job that runs, kept when
   it finishes and deleted when it is archived (**JOB-11**). Outside a job it keeps nothing. `learn`, `ask`,
-  `teach`, `read` and `exercise` give it to their model and to `say` (`detail`, **MSG-5**).
+  `teach`, `read` and `exercise` give it to their model and to `say` (`detail`, **MSG-5**); `research` and
+  `calibrate` call Ollama directly and keep none.
 
 ## ledger (LED)
 
@@ -606,11 +605,10 @@ What is said in the chats, kept so that a chat is only a view of it.
   taken and when it went on (`resumed`). Each change is published at once in the home's `running` under the
   run's process, and appended to the project's `progress` log.
 - **PRJ-15** The steps are named by phase (`DOING_AND_DONE`: what each phase is doing, and when done). A step
-  done says what came of it (`outcome`) after its words. The
-  passing count is taken from the project on every save, for every criterion (`C…` and `B…`). A plan that
-  waits is kept as data: its project, run, language, how to start it, its kind, what changed, its criteria,
-  its non-goals and its folder. The end is kept as data: its status, its headline, its details and the
-  commands to go on.
+  done says what came of it (`outcome`) after its words. The passing count is taken from the project on every
+  save, for every criterion (`C…` and `B…`). A plan that waits is kept as data: its project, run, language,
+  how to start it, its kind, what changed, its criteria, its non-goals and its folder. The end is kept as
+  data: its status, its headline, its details and the commands to go on.
 - **PRJ-16** A run keeps every model call and every detail in the project's `events` log, and every message it
   says in its `output` log (its tracker follows `say`).
 - **PRJ-17** `Steps(names, tracker, only_if)` is one step pipeline: its steps are data, in order, and the last
@@ -643,49 +641,47 @@ Fetched pages as passages: main content, under headings, repeats dropped.
 
 - **PAS-1** `Cleaner.page` takes an HTML page's main content as blocks (`<main>`/`<article>` when it holds
   `MIN_USABLE_PAGE_CHARS`, else the body). It leaves out scripts, styles, navigation, headers, footers,
-  asides, forms, `hidden`, `aria-hidden`, navigation roles, and every paragraph that is at least
+  asides, forms, `hidden`, `aria-hidden`, navigation roles, and every paragraph or list item that is at least
   `MENU_LINK_SHARE` links. A heading keeps its level, a list item is a block of its own (`item`), `<pre>` is a
   code block that keeps its layout, and the page's `<title>` is kept apart (`MainBlocks.parsed`). Broken HTML
   gives what was read before it broke. Plain text and Markdown are read by their lines (`#` headings, ```
-  code).
-  `Cleaner.pool(pages, known)` gathers blocks under their heading into passages of up to `MAX_PASSAGE_CHARS`
-  (a code block whole), drops text a site repeats on several of its pages and a passage that repeats another
-  or a known one (`NEAR_DUPLICATE_OVERLAP`), and numbers them on from the known ones (`P1`, `P2`, ...), each
-  with its address and fetch time.
+  code). `Cleaner.pool(pages, known)` gathers blocks under their heading into passages of up to
+  `MAX_PASSAGE_CHARS` (a code block whole), drops text a site repeats on several of its pages and a passage
+  that repeats another or a known one (`NEAR_DUPLICATE_OVERLAP`), and numbers them on from the known ones
+  (`P1`, `P2`, ...), each with its address and fetch time.
 
 ## web (WEB)
 
 The Internet plugin, the only part that goes on the web.
 
-- **WEB-1** `Internet.backends()` is `{"ollama": OllamaWeb, "duckduckgo": DuckDuckGoWeb}`.
+- **WEB-1** `Internet.backends()` is `{"ollama": OllamaWeb, "duckduckgo": DuckDuckGoWeb}`. Its names are
+  exactly `WEB_BACKENDS`, so the settings table checks `web` and `web_fallback` without the web (**SET-5**).
 - **WEB-2** `Internet()` uses config `web`, then `web_fallback`. It skips empty and repeated names. A backend
   that is not ready is left out, and its reason goes in `unusable_backends`. With no backend left,
   `available()` is False and `problem()` says why.
-- **WEB-3** The names of `Internet.backends()` are exactly `WEB_BACKENDS`, so the settings table checks `web`
-  and `web_fallback` without the web (**SET-5**).
-- **WEB-4** `Internet.required(option)` ends with `SystemExit` naming the option when no backend is usable.
+- **WEB-3** `Internet.required(option)` ends with `SystemExit` naming the option when no backend is usable.
   `Internet.state()` gives `ready: <backends>` (and any backends that are not usable), or why it is not
   usable.
-- **WEB-5** `search` keeps only the results with an `http(s)` address, each as `{title, url, content}`
+- **WEB-4** `search` keeps only the results with an `http(s)` address, each as `{title, url, content}`
   strings. `fetch` gives `{title, url, content}` for the address asked only when its content has text. When no
   backend answers, either one gives `None`, and `problem(key)` says why.
-- **WEB-6** When a backend fails, the next backend is asked. A `WebError(retry=True)` is asked once more after
+- **WEB-5** When a backend fails, the next backend is asked. A `WebError(retry=True)` is asked once more after
   `RETRY_PAUSE_SECONDS`. Any other exception from a backend counts as a failure; it is never raised.
-- **WEB-7** After `FAILURES_BEFORE_GONE` network failures in a row, a backend is not asked again. A success
+- **WEB-6** After `FAILURES_BEFORE_GONE` network failures in a row, a backend is not asked again. A success
   resets its count. Once no backend is left, the plugin is gone.
-- **WEB-8** A `WebError` carries the HTTP status it answered with (`code`), and `Internet.rate_limited(key)`
+- **WEB-7** A `WebError` carries the HTTP status it answered with (`code`), and `Internet.rate_limited(key)`
   says whether that key's last failure was HTTP 429. `Internet.page_fetcher(log)` is a `Fetcher` set up from
   the `fetch_*` settings.
-- **WEB-9** `OllamaWeb` is not ready without `OLLAMA_API_KEY`. It POSTs JSON with `Authorization: Bearer <key>`
+- **WEB-8** `OllamaWeb` is not ready without `OLLAMA_API_KEY`. It POSTs JSON with `Authorization: Bearer <key>`
   to `/web_search` and `/web_fetch`. HTTP 401, 403 and 429 are network failures. HTTP 429 and 5xx are worth
   asking again. A fetch's 5xx is not a network failure. An answer that is not JSON, or a search that has no
   result list, is a `WebError`.
-- **WEB-10** `DuckDuckGoWeb` is always ready. A search reads the result links, unwraps the `uddg` redirect,
+- **WEB-9** `DuckDuckGoWeb` is always ready. A search reads the result links, unwraps the `uddg` redirect,
   drops ads (`y.js`), takes the snippets, and gives at most `count` results. A bot-check page is a `WebError`
   worth asking again.
-- **WEB-11** `DuckDuckGoWeb.read_page` gives an HTML page as its main text (`PageText`). Plain text, JSON and
+- **WEB-10** `DuckDuckGoWeb.read_page` gives an HTML page as its main text (`PageText`). Plain text, JSON and
   XML stay as they are. Any other content type is a `WebError`.
-- **WEB-12** `PageText` is a view over `Cleaner`'s blocks (**PAS-1**): a page's title, and its main content's
+- **WEB-11** `PageText` is a view over `Cleaner`'s blocks (**PAS-1**): a page's title, and its main content's
   blocks as text, a blank line between them. A heading becomes a `#` line of its level, list items become `- `
   lines one under another, and a code block keeps its layout.
 
@@ -730,13 +726,12 @@ The terminal and the chats are one conversation: the same commands, the same ans
   it does, and `help`. It is never taken as a chat or a command.
 - **CNV-11** `Desk.answer` handles a command. `task WHAT` starts a task, and a bare `task` gets its usage. A
   run that starts a cycle is given `--confirm`, so its plan waits for the person. `status` alone gives what
-  runs (`status @PROJECT` is that project's status, **CLI-3**). `stop`, `stop #N` and `resume [#N]` act on jobs
-  (**JOB-7**), and `research TOPIC` runs as a job. A command that deletes shows what it deletes and waits for
-  `confirm` (**SET-11**), but `clear chat`, which deletes no record (the history keeps it), is done at once.
-  `exit` asks
-  first; the person's `exit` and `confirm` are taken out at once, and the question as Tinker ends (its status
-  says it no longer listens). A `channel` action that needs a terminal says so. Any other command runs as
-  `tinker`.
+  runs (`status @PROJECT` is that project's status, **CLI-3**). `stop`, `stop #N` and `resume [#N]` act on
+  jobs (**JOB-7**), and `research TOPIC` runs as a job. A command that deletes shows what it deletes and waits
+  for `confirm` (**SET-11**), but `clear chat`, which deletes no record (the history keeps it), is done at
+  once. `exit` asks first; the person's `exit` and `confirm` are taken out at once, and the question as Tinker
+  ends (its status says it no longer listens). A `channel` action that needs a terminal says so. Any other
+  command runs as `tinker`.
 - **CNV-12** `Desk.settle` runs what waits for a `confirm` (a deletion, a command line). Any other message
   cancels it and says so. `decide` builds or changes the plan that waits. For a new project, its first
   `confirm` asks for the folder's name.
@@ -798,8 +793,7 @@ The chat plugin: Telegram, and `tinker channel`.
 - **CHN-2** `ChannelCommand.run` lists by default and rejects an unknown action. `list` shows each channel and
   its chats. `add` (from options or questions) checks the name, refuses a name taken, checks the token, and
   saves the channel disabled. `remove` drops the settings and the secrets, as a deletion (**SET-11**).
-  `enable` and `disable` switch a
-  channel.
+  `enable` and `disable` switch a channel.
 - **CHN-3** `ask` gives the default when there is no terminal, or ends with `SystemExit` when there is none.
   `ChannelCommand.check` ends with `SystemExit` on a refusal, and tries a dropped network again up to
   `FIRST_CALL_TRIES` times.
@@ -1004,13 +998,13 @@ Domain research (`Researcher`), own-command learning and run lessons are apart.
 - **LRN-7** A topic researched before is researched again when deep, else kept. A plan that says the topic is
   a domain hands it to `Researcher` when deep; otherwise it is learned like a tool.
 - **LRN-8** Learning's steps (`LEARN_STEPS`, **PRJ-17**) are, in order: search, plan, machine, documentation,
-  digest, follow-up, condense and keep (a domain's: frame and investigate). A saved plan skips search; PREFLIGHT, GATE 1 and GATE 2
-  (**LRN-4**) are checks within them. A learn is not saved step by step: stopped, it goes on through its
-  job's journal (**JOB-3**), so nothing done is asked again. Given a tracker, learning moves it through its
-  steps (`Tracker.DOING_AND_DONE`), each once in a row; without one (a run's recall phase), the run's own steps
-  are left alone. The summary is kept as data too
-  (`recap`: answered, still open, documentation, pages, facts kept, web requests), and a `LearnStopped` carries
-  why it stopped and what to do next (`details`).
+  digest, follow-up, condense and keep (a domain's: frame and investigate). A saved plan skips search;
+  PREFLIGHT, GATE 1 and GATE 2 (**LRN-4**) are checks within them. A learn is not saved step by step: stopped,
+  it goes on through its job's journal (**JOB-3**), so nothing done is asked again. Given a tracker, learning
+  moves it through its steps (`Tracker.DOING_AND_DONE`), each once in a row; without one (a run's recall
+  phase), the run's own steps are left alone. The summary is kept as data too (`recap`: answered, still open,
+  documentation, pages, facts kept, web requests), and a `LearnStopped` carries why it stopped and what to do
+  next (`details`).
 
 ## graph (GRF)
 
