@@ -106,6 +106,7 @@ WordsAsked = namedtuple("WordsAsked", "question example")
 AppRequest = namedtuple("AppRequest", "project args stdin")
 ShellRun = namedtuple("ShellRun", "code output")
 Secret = namedtuple("Secret", "key question")
+Question = namedtuple("Question", "runs cancels held wanted naming", defaults=(None, None, None, None, False))
 
 
 def session(root):
@@ -153,7 +154,7 @@ def research_once(console, talk, topic):
 
 
 def command_once(console, talk, message):
-    chat, shell = ConsoleChannel.CHAT, Shell(talk, Path.cwd())
+    chat, shell = ConsoleChannel.CHAT, Shell(talk, Path.cwd(), Questions())
     console.show(chat, None, shell.propose(console, message, "", COMMAND_NAMING_MAX_TOKENS), done=True)
     proposed = shell.take(console, chat)
     if not proposed:
@@ -173,11 +174,10 @@ class Desk:
         self.last_task = self.reporter = self.task = None
         self.live_tasks = []
         self.lock, self.talk = threading.Lock(), Talk(commands_brief(), pausing_jobs=paused_for_you)
-        self.shell = Shell(self.talk, self.root)
+        self.questions = Questions()
+        self.shell = Shell(self.talk, self.root, self.questions)
         self.waiting_plan = None
         self.messages_by_run = {}
-        self.deletes_to_confirm = {}
-        self.commands_wanting_words = {}
         self.seconds_by_run = {}
         self.consoles = [channel for channel in channels if isinstance(channel, ConsoleChannel)]
         self.said_status = None
@@ -332,7 +332,7 @@ class Desk:
         if self.settle(channel, message, command):
             return
         if command in COMMANDS_ASKING_FOR_WORDS and len(message.text.split()) == 1:
-            self.commands_wanting_words[(channel.name, message.chat)] = command
+            self.questions.ask(channel, message.chat, Question(wanted=command))
             channel.ask_for(message.chat, *words_asked(command))
             return
         if not command:
@@ -347,9 +347,11 @@ class Desk:
                 channel.glance(message.chat, message.id, [sent])
 
     def with_words_wanted(self, channel, message):
-        wanted = self.commands_wanting_words.pop((channel.name, message.chat), None)
-        command = command_of(message.text)
-        if not wanted or self.command_of_its_own(message, command, wanted):
+        question = self.questions.waiting(channel, message.chat)
+        if not question or not question.wanted:
+            return message
+        wanted = self.questions.answered(channel, message.chat).wanted
+        if self.command_of_its_own(message, command_of(message.text), wanted):
             return message
         return Message(message.chat, f"{wanted} {message.text}", message.sender, message.id)
 
@@ -367,31 +369,19 @@ class Desk:
 
     def settle(self, channel, message, command):
         confirm = command == "confirm" and len(message.text.split()) == 1
-        asking = self.deletes_to_confirm.pop((channel.name, message.chat), None)
-        if asking and confirm:
-            threading.Thread(target=self.delete, args=(channel, message.chat, asking), daemon=True).start()
+        question = self.questions.waiting(channel, message.chat)
+        if question and question.naming:
+            if confirm:
+                channel.send(
+                    message.chat, "⏳ The command is still being worked out: `confirm` once it is shown."
+                )
+            return confirm
+        question = self.questions.answered(channel, message.chat)
+        if question and confirm:
+            threading.Thread(target=question.runs, daemon=True).start()
             return True
-        if asking:
-            channel.show(
-                message.chat,
-                asking["shown"],
-                f"🚫 _Not done:_ `{' '.join(asking['words'])}`",
-                done=True,
-                bottom=False,
-            )
-        proposed = self.shell.take(channel, message.chat)
-        if proposed == Shell.STILL_NAMING and confirm:
-            channel.send(
-                message.chat, "⏳ The command is still being worked out: `confirm` once it is shown."
-            )
-            return True
-        if proposed and confirm:
-            threading.Thread(
-                target=self.shell.run, args=(channel, message.chat, proposed), daemon=True
-            ).start()
-            return True
-        if proposed:
-            self.shell.drop(channel, message.chat, proposed)
+        if question:
+            question.cancels()
         return False
 
     def answer(self, message, channel):
@@ -736,7 +726,7 @@ class Desk:
             "👉 `confirm` to stop it · anything else keeps it",
             done=True,
         )
-        self.deletes_to_confirm[(channel.name, chat)] = {"words": [command], "shown": shown}
+        self.wait_for_confirm(channel, chat, {"words": [command], "shown": shown})
         return None
 
     def ask_first(self, channel, chat, words):
@@ -752,8 +742,24 @@ class Desk:
             ),
             done=True,
         )
-        self.deletes_to_confirm[(channel.name, chat)] = {"words": words, "shown": shown}
+        self.wait_for_confirm(channel, chat, {"words": words, "shown": shown})
         return None
+
+    def wait_for_confirm(self, channel, chat, asking):
+        self.questions.ask(
+            channel,
+            chat,
+            Question(
+                runs=lambda: self.delete(channel, chat, asking),
+                cancels=lambda: self.not_done(channel, chat, asking),
+            ),
+        )
+
+    @staticmethod
+    def not_done(channel, chat, asking):
+        channel.show(
+            chat, asking["shown"], f"🚫 _Not done:_ `{' '.join(asking['words'])}`", done=True, bottom=False
+        )
 
     def delete(self, channel, chat, asking):
         if asking["words"][0] in EXIT_WORDS:
@@ -1139,6 +1145,20 @@ class Talk:
                 say.warn(f"The model did not load for chat: {first_words(exc)}")
 
 
+class Questions:
+    def __init__(self):
+        self.by_chat = {}
+
+    def ask(self, channel, chat, question):
+        self.by_chat[(channel.name, chat)] = question
+
+    def waiting(self, channel, chat):
+        return self.by_chat.get((channel.name, chat))
+
+    def answered(self, channel, chat):
+        return self.by_chat.pop((channel.name, chat), None)
+
+
 class Shell:
     SYSTEM = (
         "The person describes a command they want run on their computer ({system}, shell {shell}, in the "
@@ -1152,7 +1172,6 @@ class Shell:
         r"\b(brew|pip3?|npm|cargo)\s+(install|uninstall|remove)\b|\s-delete\b|-exec\s+(rm|mv)\b|"
         r"\bxargs\s+(rm|mv)\b|\bsed\s+-i\b"
     )
-    STILL_NAMING = ""
     LOGIN_SHELL = os.environ.get("SHELL") or "/bin/sh"
     TELL_SYSTEM = (
         "Tell the person what this command's output says, for a chat read on a phone: the answer to "
@@ -1163,25 +1182,23 @@ class Shell:
         "output does not show; never the command again."
     )
 
-    def __init__(self, talk, folder):
-        self.talk, self.folder = talk, folder
-        self.commands_to_confirm = {}
+    def __init__(self, talk, folder, questions):
+        self.talk, self.folder, self.questions = talk, folder, questions
         self.shell = self.LOGIN_SHELL
 
     def name(self, channel, message, now):
-        key = (channel.name, message.chat)
-        self.commands_to_confirm[key] = self.STILL_NAMING
+        self.questions.ask(channel, message.chat, Question(naming=True))
 
         def shown(ids):
-            if isinstance(self.commands_to_confirm.get(key), dict):
-                self.commands_to_confirm[key]["shown"] = ids
+            question = self.questions.waiting(channel, message.chat)
+            if question and question.held:
+                question.held["shown"] = ids
 
         self.talk.answer(channel, message, now, write=self.propose, on_shown=shown)
 
     def propose(self, channel, message, context, tokens):
-        key = (channel.name, message.chat)
         if not Models.quick():
-            self.commands_to_confirm.pop(key, None)
+            self.questions.answered(channel, message.chat)
             return "⚠️ **No model is in use yet:** `tinker calibrate NAME`, then `tinker use-model NAME`."
         system = self.SYSTEM.format(
             system=os.uname().sysname, shell=Path(self.shell).name, folder=self.folder
@@ -1196,14 +1213,25 @@ class Shell:
                 )
             )
         except OllamaError as exc:
-            self.commands_to_confirm.pop(key, None)
+            self.questions.answered(channel, message.chat)
             return md(t"⚠️ **The model did not answer:** {first_words(exc)}")
         line, does = str(data.get("command") or "").strip(), str(data.get("does") or "").strip()
         if not line or "\n" in line:
-            self.commands_to_confirm.pop(key, None)
+            self.questions.answered(channel, message.chat)
             return md(t"🤷 **No command found:** {does or 'describe it another way'}")
-        self.commands_to_confirm[key] = {"line": line, "asked": message.text, "shown": None}
+        self.wait_for_confirm(channel, message.chat, {"line": line, "asked": message.text, "shown": None})
         return self.proposal(line, does)
+
+    def wait_for_confirm(self, channel, chat, proposed):
+        self.questions.ask(
+            channel,
+            chat,
+            Question(
+                runs=lambda: self.run(channel, chat, proposed),
+                cancels=lambda: self.drop(channel, chat, proposed),
+                held=proposed,
+            ),
+        )
 
     def proposal(self, line, does):
         warning = (
@@ -1217,11 +1245,10 @@ class Shell:
         )
 
     def take(self, channel, chat):
-        key = (channel.name, chat)
-        line = self.commands_to_confirm.get(key)
-        if line != self.STILL_NAMING:
-            self.commands_to_confirm.pop(key, None)
-        return line
+        question = self.questions.waiting(channel, chat)
+        if not question or not question.held:
+            return None
+        return self.questions.answered(channel, chat).held
 
     def drop(self, channel, chat, proposed):
         channel.show(chat, proposed["shown"], f"🚫 _Not run:_ `{proposed['line']}`", done=True)

@@ -19,6 +19,7 @@ from tinkerkit.conversation import (
     Markup,
     Message,
     Progress,
+    Questions,
     Reporter,
     Research,
     Shell,
@@ -464,7 +465,11 @@ def test_a_reporter_without_a_tracker_shows_its_lines(monkeypatch):
 
 @pytest.mark.spec("CNV-20")
 def test_an_unreadable_json_answer_is_taken_as_empty(measured_model, fake_ollama):
-    shell, research, channel = Shell(Talk("cmds"), Path.cwd()), Research(Talk("cmds")), Recorder()
+    shell, research, channel = (
+        Shell(Talk("cmds"), Path.cwd(), Questions()),
+        Research(Talk("cmds")),
+        Recorder(),
+    )
     for unreadable in ("{bad}", "[1]", "none"):
         fake_ollama.reply(unreadable)
         assert "describe it another way" in shell.propose(channel, Message("1", "x"), "", 300)
@@ -508,7 +513,7 @@ def test_talk_without_a_model_says_so():
 
 @pytest.mark.spec("CNV-22")
 def test_shell_proposes_one_command(measured_model, fake_ollama):
-    shell, channel = Shell(Talk("cmds"), Path.cwd()), Recorder()
+    shell, channel = Shell(Talk("cmds"), Path.cwd(), Questions()), Recorder()
     fake_ollama.reply('{"command": "rm -rf build", "does": "deletes the build folder"}')
     shown = shell.propose(channel, Message("1", "clean up"), "", 300)
     assert "```\nrm -rf build\n```" in shown and "It changes or deletes things" in shown
@@ -527,7 +532,7 @@ def test_shell_proposes_one_command(measured_model, fake_ollama):
 
 @pytest.mark.spec("CNV-22")
 def test_shell_runs_the_confirmed_command(tmp_path):
-    shell, channel = Shell(Talk("cmds"), tmp_path), Recorder()
+    shell, channel = Shell(Talk("cmds"), tmp_path, Questions()), Recorder()
     shell.shell = "/bin/sh"
     shell.run(channel, "1", {"line": "pwd; echo oops >&2; exit 3", "asked": "where", "shown": None})
     final = channel.texts()[-1]
@@ -763,6 +768,24 @@ def test_what_waits_for_confirm_is_cancelled_by_anything_else(desk, monkeypatch)
     assert desk.decide("amend", ["amend"]).startswith("✍️ Write `amend [@PROJECT] CHANGE`")
 
 
+@pytest.mark.spec("CNV-12")
+def test_a_chat_has_one_question_and_a_new_one_cancels_the_one_before(desk, monkeypatch):
+    desk, channel, _ = desk
+    monkeypatch.setattr(desk.talk, "answer", lambda *args, **kwargs: None)
+    desk.answer(Message("1", "clear memory"), channel)
+    say(desk, channel, "clear runs")
+    assert any(text.startswith("🚫 _Not done:_ `clear memory`") for text in channel.texts())
+    assert len(desk.questions.by_chat) == 1
+    say(desk, channel, "confirm")
+    wait_until(lambda: ["clear", "runs", "--yes"] in desk.ran)
+    assert ["clear", "memory", "--yes"] not in desk.ran and desk.questions.by_chat == {}
+    desk.shell.name(channel, Message("1", "list files"), desk.running_now)
+    say(desk, channel, "confirm")
+    assert channel.texts()[-1].startswith("⏳ The command is still being worked out")
+    say(desk, channel, "hello")
+    assert desk.questions.waiting(channel, "1").naming
+
+
 @pytest.mark.spec("CNV-13")
 def test_a_command_sent_alone_asks_for_its_words(desk, monkeypatch):
     desk, channel, _ = desk
@@ -782,7 +805,7 @@ def test_a_command_sent_alone_asks_for_its_words(desk, monkeypatch):
     say(desk, channel, a_command_of_its_own)
     say(desk, channel, "status")
     assert answered == ["fix typing 2/0 crashes", "ask help me", "read /tmp/book.epub", "/status", "status"]
-    assert desk.commands_wanting_words == {}
+    assert desk.questions.by_chat == {}
 
 
 @pytest.mark.spec("CNV-14")
@@ -1214,7 +1237,9 @@ def test_a_command_line_run_once_confirmed_pauses_the_job_while_its_output_is_re
     monkeypatch.setattr(Models, "quick", staticmethod(lambda: ("m", {}, None)))
     monkeypatch.setattr(Models, "quick_reply", staticmethod(lambda *asked: order.append("read") or "it says hi"))
     channel = Recorder()
-    Shell(talk, tmp_path).run(channel, "1", {"line": "echo hi", "asked": "say hi", "shown": None})
+    Shell(talk, tmp_path, Questions()).run(
+        channel, "1", {"line": "echo hi", "asked": "say hi", "shown": None}
+    )
     assert order == ["paused", "read", "goes on"] and "it says hi" in channel.texts()[-1]
 
 
