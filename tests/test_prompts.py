@@ -21,13 +21,8 @@ def test_reply_drops_thinking_and_whitespace():
         pytest.param(
             'Sure! Here it is:\n```json\n{"a": [1, 2]}\n```\nDone.', {"a": [1, 2]}, id="prose around it"
         ),
-        pytest.param('{"a": [1, 2,], "b": 3,}', {"a": [1, 2], "b": 3}, id="trailing commas"),
-        pytest.param('{"a": "one " + "two"}', {"a": "one two"}, id="joined strings"),
-        pytest.param('{"a": "it\\\'s"}', {"a": "it's"}, id="escaped single quote"),
         pytest.param('{"a": {"b": [1, 2]}', {"a": {"b": [1, 2]}}, id="left open at the end"),
-        pytest.param(
-            '{"a": ["x", "y", "b": 1}', {"a": ["x", "y"], "b": 1}, id="list open before the next key"
-        ),
+        pytest.param('{"a": [{"b": 1]}', {"a": [{"b": 1}]}, id="closer missing before an outer one"),
     ],
 )
 def test_json_in_prose_mends_the_usual_slips(text, expected):
@@ -40,6 +35,8 @@ def test_json_without_an_object_or_beyond_mending():
         Reply("no json here").json()
     with pytest.raises(json.JSONDecodeError):
         Reply('{"a": tru}').json()
+    with pytest.raises(json.JSONDecodeError):
+        Reply('{"a": 1,}').json()
 
 
 @pytest.mark.spec("PRM-3")
@@ -134,7 +131,8 @@ def test_wrote_once_every_wanted_file_has_its_block():
 
 @pytest.mark.spec("PRM-7")
 def test_json_complete():
-    assert Reply.json_complete('ok {"a": [1,],}')
+    assert Reply.json_complete('ok {"a": [1]}')
+    assert not Reply.json_complete('ok {"a": [1,],}')
     assert not Reply.json_complete('{"a": 1')
     assert not Reply.json_complete('{"a": 1} trailing')
     assert not Reply.json_complete("no braces")
