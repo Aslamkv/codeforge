@@ -15,13 +15,13 @@ lazy import time
 lazy import webbrowser
 lazy from pathlib import Path
 
-from .commands import COMMANDS, deletes, kind_of, refs
+from .commands import BY_NAME, COMMANDS, deletes, kind_of, refs
 from .jobs import JOB_STOP_SIGNAL, Jobs, alive, job_number, paused_for_you, today
 from .project import Runs, Tracker, saved
 lazy from .ledger import DONE_NOTE_KEPT_SECONDS, Ledger
 lazy from .messages import human_duration, say
 lazy from .model import Models, OllamaError
-lazy from .prompts import Reply
+lazy from .prompts import Prompts, Reply
 lazy from .settings import EXERCISE_FOLDER, Home, projects_folder
 lazy from .web import Internet
 lazy from .workspace import Toolchain
@@ -1003,7 +1003,7 @@ def offered():
 
 
 def words_asked(command):
-    found = next(candidate for candidate in COMMANDS if candidate.name == command)
+    found = BY_NAME[command]
     needed = found.synopsis.split(None, 1)[1]
     example = found.example.split(None, 1)[1] if " " in found.example else ""
     question = md(t"✍️ **{command}** · {found.what}\nSend {needed:code} now")
@@ -1030,15 +1030,6 @@ def welcome():
 
 
 class Talk:
-    SYSTEM = (
-        "You are Tinker, a friendly helper that builds small programs on this computer with a local model. "
-        "You are chatting over {kind}, read on a phone: answer briefly, in short lines. Format for "
-        "meaning, in Markdown: **bold** for what matters most, *italic* for an aside, `code` for "
-        'commands, names and paths, "- " for items; an emoji only where it says something with less '
-        "(✅ done or fine, ⚠️ a problem, 💡 a tip, 👉 what to do next); never a heading or a table. Talk "
-        "about anything. You cannot run anything yourself from the chat; these messages do:\n{commands}"
-    )
-
     def __init__(self, commands, pausing_jobs=contextlib.nullcontext):
         self.commands, self.said, self.lock, self.turn = commands, {}, threading.Lock(), threading.Lock()
         self.pausing_jobs = pausing_jobs
@@ -1108,7 +1099,7 @@ class Talk:
             )
         said = self.chat_of(channel, message.chat)
         asked = self.remembered(said, "user", message.text)
-        system = self.SYSTEM.format(kind=channel.KIND.title(), commands=self.commands)
+        system = Prompts.CHAT_SYSTEM.format(kind=channel.KIND.title(), commands=self.commands)
         system += f"\n\n{now}" if now else "\n\nNo task is running now."
         try:
             text = self.ask(channel, message.chat, [{"role": "system", "content": system}] + asked, tokens)
@@ -1162,12 +1153,6 @@ class Questions:
 
 
 class Shell:
-    SYSTEM = (
-        "The person describes a command they want run on their computer ({system}, shell {shell}, in the "
-        'folder {folder}). Reply with ONLY JSON: {{"command": "the one command line that does it", '
-        '"does": "what it does, in one short sentence"}}, or {{"command": "", "does": "why no '
-        'single command fits"}} when the description is unclear or asks for no command.'
-    )
     CHANGES_RE = re.compile(
         r"\b(rm|rmdir|mv|dd|mkfs\w*|chmod|chown|kill|killall|pkill|sudo|shutdown|reboot|"
         r"truncate)\b|(?<![\d&>])>(?!&)|\bgit\s+(push|reset|clean|checkout|rebase)\b|"
@@ -1175,14 +1160,6 @@ class Shell:
         r"\bxargs\s+(rm|mv)\b|\bsed\s+-i\b"
     )
     LOGIN_SHELL = os.environ.get("SHELL") or "/bin/sh"
-    TELL_SYSTEM = (
-        "Tell the person what this command's output says, for a chat read on a phone: the answer to "
-        "what they asked first, then only what matters, in a few short lines. Format for meaning, in "
-        'Markdown: **bold** for the key values, `code` for names and paths, "- " for items; an emoji '
-        "only where it says something with less (⚠️ a problem or something nearly full, ✅ all fine, "
-        "💾 disk, 📁 folders, 🌐 network, ⏱ time). Never a heading or a table; never anything the "
-        "output does not show; never the command again."
-    )
 
     def __init__(self, talk, folder, questions):
         self.talk, self.folder, self.questions = talk, folder, questions
@@ -1202,7 +1179,7 @@ class Shell:
         if not Models.quick():
             self.questions.answered(channel, message.chat)
             return "⚠️ **No model is in use yet:** `tinker calibrate NAME`, then `tinker use-model NAME`."
-        system = self.SYSTEM.format(
+        system = Prompts.COMMAND_SYSTEM.format(
             system=os.uname().sysname, shell=Path(self.shell).name, folder=self.folder
         )
         try:
@@ -1286,7 +1263,7 @@ class Shell:
                 channel,
                 chat,
                 [
-                    {"role": "system", "content": self.TELL_SYSTEM},
+                    {"role": "system", "content": Prompts.COMMAND_TELL_SYSTEM},
                     {
                         "role": "user",
                         "content": f"They asked: {asked}\nCommand: {line}\n"
