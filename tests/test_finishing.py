@@ -187,7 +187,7 @@ def test_findings_said_about_and_reported(built):
 @pytest.mark.spec("FIN-9")
 def test_final_review_passes_a_built_project(built):
     session, project = built
-    assert FinalReview(session).run(project.cycles[0]) is True and session.review_problem == ""
+    assert FinalReview(session).run(project.cycles[0]) is True
 
 
 @pytest.mark.spec("FIN-9")
@@ -211,8 +211,8 @@ def test_final_review_needs_tests_to_run_and_setup_to_work(built, fake_ollama, m
     project.spec["toolchain"]["setup"] = ["exit 3"]
     monkeypatch.setattr("tinkerkit.workspace.online", lambda: True)
     fake_ollama.reply("CAUSE: no idea", when="Fix the toolchain")
-    assert FinalReview(session).run(project.cycles[0]) is False
-    assert session.review_problem.startswith("setup fails from the project's own files")
+    stopped = FinalReview(session).run(project.cycles[0])
+    assert stopped.kind == "review" and stopped.reason.startswith("setup fails from the project's own files")
 
 
 @pytest.mark.spec("FIN-10")

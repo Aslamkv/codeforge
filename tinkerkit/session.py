@@ -1,3 +1,4 @@
+from collections import namedtuple
 lazy import json
 lazy import time
 
@@ -16,6 +17,8 @@ lazy from .knowledge import Item, Knowledge, Library
 lazy from .prompts import Part, Prompts, PromptTooLarge, Reply
 lazy from .workspace import TaughtCommands, Workspace
 
+Stopped = namedtuple("Stopped", "kind reason")
+
 
 class Session:
     def __init__(
@@ -27,10 +30,6 @@ class Session:
         self.tracker = tracker
         self.cycle = None
         self.workspace = Workspace(project.workdir)
-        self.tool_problem = ""
-        self.build_problem = ""
-        self.unreproduced_reason = ""
-        self.review_problem = ""
         self.waiting_for_network = []
         self.last_all_tests_run = None
         self.parked_at_start = {
@@ -136,10 +135,12 @@ class Session:
         for key in keys:
             used[key] = sorted(set(used.get(key, [])) | set(phases))
 
-    def failed_phases(self, phase):
-        if phase in ("setup", "final_review") or self.tool_problem:
+    @staticmethod
+    def failed_phases(phase, stopped=None):
+        kind = stopped.kind if stopped else None
+        if phase in ("setup", "final_review") or kind == "tools":
             return ("toolchain", "config")
-        if self.build_problem:
+        if kind == "build":
             return ("code", "config")
         if phase == "verify":
             return ("code", "tests", "design", "spec")
