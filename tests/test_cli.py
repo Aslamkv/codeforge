@@ -285,6 +285,8 @@ def test_project_folders(measured_model, fake_ollama, tmp_path):
     fake_ollama.reply(OllamaError("down"))
     assert ProjectFolder.named("x") == ""
     assert fake_ollama.calls[0]["think"] is False and fake_ollama.calls[0]["options"]["num_predict"] == 24
+    Config.save(**{"model": None})
+    assert ProjectFolder.named("x") == ""
 
 
 @pytest.mark.spec("CLI-6")

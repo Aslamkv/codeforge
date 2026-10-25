@@ -64,8 +64,7 @@ class Cleaner:
 
     @staticmethod
     def page(url, text, kind, fetched):
-        is_html = "html" in kind or text.lstrip()[:200].lower().startswith(("<!doctype html", "<html"))
-        return Page(url, fetched, MainBlocks.of(text) if is_html else text_blocks(text))
+        return Page(url, fetched, MainBlocks.of(text) if is_html(text, kind) else text_blocks(text))
 
     def pool(self, pages, known=()):
         kept, seen = [], [shingles(passage.text) for passage in known]
@@ -322,6 +321,10 @@ class Links(html.parser.HTMLParser):
 
 
 MARKDOWN_LINK = re.compile(r"\[[^\]]*\]\([^)]*\)")
+
+
+def is_html(text, kind):
+    return "html" in kind or text.lstrip()[:200].lower().startswith(("<!doctype html", "<html"))
 
 
 def text_blocks(text):

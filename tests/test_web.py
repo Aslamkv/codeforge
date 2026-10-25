@@ -6,9 +6,19 @@ from email.message import Message
 
 import pytest
 
-from tinkerkit.fetcher import Fetcher
+from tinkerkit.fetcher import Fetched, Fetcher
 from tinkerkit.settings import WEB_BACKENDS, Config
-from tinkerkit.web import DuckDuckGoWeb, Internet, OllamaWeb, PageText, WebBackend, WebError
+from tinkerkit import web
+from tinkerkit.web import (
+    DuckDuckGoWeb,
+    Internet,
+    OllamaWeb,
+    PageText,
+    RateLimited,
+    Throttle,
+    WebBackend,
+    WebError,
+)
 
 
 class Scripted(WebBackend):
@@ -46,9 +56,23 @@ def internet_with(monkeypatch, *backends, web_name="a", fallback=""):
     return Internet()
 
 
+class FakeClock:
+    def __init__(self):
+        self.at, self.slept = 0.0, []
+
+    def monotonic(self):
+        return self.at
+
+    def sleep(self, seconds):
+        self.slept.append(seconds)
+        self.at += seconds
+
 @pytest.fixture(autouse=True)
-def no_pause(monkeypatch):
+def clock(monkeypatch):
     monkeypatch.setattr(Internet, "RETRY_PAUSE_SECONDS", 0)
+    fake = FakeClock()
+    monkeypatch.setattr(web, "time", fake)
+    return fake
 
 
 @pytest.mark.spec("WEB-1")
@@ -304,28 +328,64 @@ def test_duckduckgo_bot_check_is_worth_asking_again(monkeypatch):
     assert error.value.retry
 
 
+HELLO = "<body><p>Hello there</p></body>"
+
+
+class Pages:
+    def __init__(self, pages):
+        self.pages, self.asked = pages, []
+
+    def fetch_all(self, urls, kind="fetch"):
+        self.asked += urls
+        return [self.pages[url] for url in urls]
+
+
 @pytest.mark.spec("WEB-10")
-def test_read_page_by_content_type(monkeypatch):
-    pages = {
-        "https://h": ("<html><title>T</title><body><p>Hello there</p></body></html>", "text/html"),
-        "https://t": ("plain words", "text/plain"),
-        "https://j": ('{"a": 1}', "application/json"),
-        "https://i": ("\x89PNG", "image/png"),
-    }
-    monkeypatch.setattr(DuckDuckGoWeb, "get", classmethod(lambda cls, url, timeout, form=None: pages[url]))
-    assert DuckDuckGoWeb.read_page("https://h", 5) == {
-        "title": "T",
-        "url": "https://h",
-        "content": "Hello there",
-    }
-    assert DuckDuckGoWeb.read_page("https://t", 5)["content"] == "plain words"
-    assert DuckDuckGoWeb.read_page("https://j", 5)["content"] == '{"a": 1}'
+def test_duckduckgo_reads_pages_through_the_fetcher_by_content_type(monkeypatch):
+    pages = Pages(
+        {
+            "https://h": Fetched(
+                "https://h", 200, "https://h", f"<html><title>T</title>{HELLO}</html>", "text/html"
+            ),
+            "https://t": Fetched("https://t", 200, "https://t", "plain words", "text/plain"),
+            "https://j": Fetched("https://j", 200, "https://j", '{"a": 1}', "application/json"),
+            "https://i": Fetched("https://i", 200, "https://i", "\x89PNG", "image/png"),
+        }
+    )
+    monkeypatch.setattr(Internet, "page_fetcher", staticmethod(lambda log=None: pages))
+    backend = DuckDuckGoWeb(5)
+    assert backend.fetch("https://h") == {"title": "T", "url": "https://h", "content": "Hello there"}
+    assert backend.fetch("https://t")["content"] == "plain words"
+    assert backend.fetch("https://j")["content"] == '{"a": 1}'
     with pytest.raises(WebError, match="not a text page"):
-        DuckDuckGoWeb.read_page("https://i", 5)
+        backend.fetch("https://i")
+    assert pages.asked == ["https://h", "https://t", "https://j", "https://i"]
 
 
 @pytest.mark.spec("WEB-10")
-def test_duckduckgo_get_errors(monkeypatch):
+def test_a_page_the_fetcher_could_not_get_is_a_web_error_with_its_status(monkeypatch):
+    pages = Pages(
+        {
+            "https://down": Fetched("https://down", 503, "https://down", error="HTTP 503"),
+            "https://gone": Fetched("https://gone", 404, "https://gone", error="HTTP 404"),
+            "https://no": Fetched("https://no", final_url="https://no", error=Fetched.ROBOTS),
+        }
+    )
+    monkeypatch.setattr(Internet, "page_fetcher", staticmethod(lambda log=None: pages))
+    errors = {}
+    for url in pages.pages:
+        with pytest.raises(WebError) as error:
+            DuckDuckGoWeb(5).fetch(url)
+        errors[url] = error.value
+    assert errors["https://down"].code == 503 and errors["https://down"].retry
+    assert errors["https://gone"].code == 404 and not errors["https://gone"].retry
+    assert errors["https://no"].code is None and not errors["https://no"].retry
+    assert "robots.txt" in str(errors["https://no"])
+    assert not any(error.network for error in errors.values())
+
+
+@pytest.mark.spec("WEB-9")
+def test_duckduckgo_search_errors(monkeypatch):
     monkeypatch.setattr(
         urllib.request, "urlopen", lambda request, timeout: (_ for _ in ()).throw(http_error(503))
     )
@@ -381,6 +441,7 @@ def test_page_text_survives_broken_html():
 
 @pytest.mark.spec("WEB-7")
 def test_a_rate_limit_is_told_apart_from_other_failures(monkeypatch):
+    Config.save(web_backoff=0)
     internet = internet_with(
         monkeypatch,
         Scripted(1, [WebError("busy", code=429), WebError("down", code=503), [{"url": "https://ok"}]]),
@@ -389,10 +450,6 @@ def test_a_rate_limit_is_told_apart_from_other_failures(monkeypatch):
     assert internet.search("r", 1) is None and not internet.rate_limited("r")
     answered_later = internet.search("q", 1)
     assert answered_later and not internet.rate_limited("q")
-    asked_again_and_answered = internet_with(
-        monkeypatch, Scripted(1, [WebError("busy", retry=True, code=429), [{"url": "https://ok"}]])
-    )
-    assert asked_again_and_answered.search("q", 1) and not asked_again_and_answered.rate_limited("q")
 
     def urlopen(request, timeout):
         raise http_error(429)
@@ -409,3 +466,73 @@ def test_the_page_fetcher_follows_the_fetch_settings():
     fetcher = Internet.page_fetcher(log=print)
     assert isinstance(fetcher, Fetcher) and fetcher.log is print
     assert (fetcher.workers, fetcher.timeout, fetcher.max_bytes, fetcher.domain_delay) == (3, 7.0, 5000, 0.25)
+
+
+@pytest.mark.spec("WEB-12")
+def test_the_throttle_lets_rate_requests_a_minute_through(clock):
+    throttle = Throttle(2, 20, clock=clock.monotonic, sleep=clock.sleep)
+    for _ in range(3):
+        throttle.call(lambda: "ok", lambda: False)
+    half_a_minute_for_the_third = [30.0]
+    assert clock.slept == half_a_minute_for_the_third
+    clock.slept.clear()
+    unlimited = Throttle(None, 20, clock=clock.monotonic, sleep=clock.sleep)
+    for _ in range(100):
+        unlimited.call(lambda: "ok", lambda: False)
+    assert clock.slept == []
+
+
+@pytest.mark.spec("WEB-12")
+def test_the_throttle_waits_out_429_within_its_backoff(clock):
+    with pytest.raises(RateLimited):
+        Throttle(60, 20, clock=clock.monotonic, sleep=clock.sleep).call(lambda: None, lambda: True)
+    assert clock.slept == [1.0, 2.0, 4.0, 8.0, 5.0] and sum(clock.slept) <= 20
+    answers = iter([True, False])
+    assert (
+        Throttle(60, 20, clock=clock.monotonic, sleep=clock.sleep).call(lambda: "ok", lambda: next(answers))
+        == "ok"
+    )
+    clock.slept.clear()
+    with pytest.raises(RateLimited):
+        Throttle(60, 0, clock=clock.monotonic, sleep=clock.sleep).call(lambda: None, lambda: True)
+    assert clock.slept == []
+
+
+@pytest.mark.spec("WEB-12")
+def test_each_backend_has_its_own_rate():
+    assert OllamaWeb.RATE == 8 and DuckDuckGoWeb.RATE is None
+
+
+@pytest.mark.spec("WEB-12", "WEB-5")
+def test_internet_waits_out_a_429_without_the_retry_pause(monkeypatch, clock):
+    monkeypatch.setattr(Internet, "RETRY_PAUSE_SECONDS", 3)
+    busy = WebError("busy", retry=True, network=True, code=429)
+    backend = Scripted(1, [busy, busy, [{"url": "https://ok"}]])
+    internet = internet_with(monkeypatch, backend)
+    assert internet.search("q", 1) and backend.calls == 3 and not internet.rate_limited("q")
+    assert clock.slept == [1.0, 2.0] and internet.failures["a"] == 0
+
+
+@pytest.mark.spec("WEB-12")
+def test_a_backend_still_rate_limited_fails_after_web_backoff(monkeypatch, clock):
+    Config.save(web_backoff=5)
+    busy = WebError("busy", network=True, code=429)
+    first, second = Scripted(1, [busy] * 10), Scripted(1, [[{"url": "https://ok"}]])
+    internet = internet_with(monkeypatch, first, web_name="a")
+    assert internet.search("q", 1) is None and internet.rate_limited("q")
+    assert internet.problem("q") == "a: still rate limited after 5 seconds" and sum(clock.slept) <= 5
+    assert internet.failures["a"] == 1
+    internet = internet_with(monkeypatch, Scripted(1, [busy] * 10), second, web_name="a", fallback="b")
+    assert internet.search("q", 1) and not internet.rate_limited("q")
+
+
+@pytest.mark.spec("WEB-12")
+def test_internet_asks_each_backend_at_its_rate(monkeypatch, clock):
+    class Rated(Scripted):
+        RATE = 2
+
+    backend = Rated(1, [[{"url": "https://ok"}]] * 3)
+    internet = internet_with(monkeypatch, backend)
+    for query in ("1", "2", "3"):
+        internet.search(query, 1)
+    assert clock.slept == [30.0]

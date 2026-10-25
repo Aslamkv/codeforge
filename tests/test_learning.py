@@ -8,10 +8,8 @@ from tinkerkit.fetcher import Fetched
 from tinkerkit.knowledge import Knowledge, Library
 from tinkerkit.learning import (
     LearnStopped,
-    RateLimited,
     RequestLog,
     SlotLearner,
-    Throttle,
     read_digest,
     read_plan,
 )
@@ -44,8 +42,9 @@ class FakeWeb:
 
     def fetch(self, url):
         self.fallback_asked.append(url)
-        self.limited = False
-        return {"title": "", "url": url, "content": self.fallback[url]} if url in self.fallback else None
+        answer = self.fallback.get(url)
+        self.limited = answer == "429"
+        return {"title": "", "url": url, "content": answer} if answer and not self.limited else None
 
     def page_fetcher(self, log=None):
         return FakeFetcher(self, log)
@@ -104,18 +103,6 @@ class CountingEmbeddings:
             ]
             for text in texts
         ]
-
-
-class FakeClock:
-    def __init__(self):
-        self.at, self.slept = 0.0, []
-
-    def now(self):
-        return self.at
-
-    def sleep(self, seconds):
-        self.slept.append(seconds)
-        self.at += seconds
 
 
 def result(url, title, snippet=""):
@@ -270,29 +257,17 @@ def test_profiles_are_data_and_a_slot_takes_the_plans_hint_and_follow_up():
 
 
 @pytest.mark.spec("LRN-1")
-def test_the_throttle_lets_rate_requests_a_minute_through():
-    clock = FakeClock()
-    throttle = Throttle(2, 20, clock=clock.now, sleep=clock.sleep)
-    for _ in range(3):
-        throttle.call(lambda: "ok", lambda: False)
-    half_a_minute_for_the_third = [30.0]
-    assert clock.slept == half_a_minute_for_the_third
+def test_a_search_still_rate_limited_stops_at_gate_1(tinker_home):
+    with pytest.raises(LearnStopped, match=r"stopped at the first web search: the search is rate limited"):
+        learner(FakeWeb(["429"])).learn("Widgetlib")
 
 
 @pytest.mark.spec("LRN-1")
-def test_the_throttle_waits_out_429_within_its_budget():
-    clock = FakeClock()
-    with pytest.raises(RateLimited):
-        Throttle(60, 20, clock=clock.now, sleep=clock.sleep).call(lambda: None, lambda: True)
-    assert clock.slept == [1.0, 2.0, 4.0, 8.0, 5.0] and sum(clock.slept) <= 20
-    answers = iter([True, False])
-    assert (
-        Throttle(60, 20, clock=clock.now, sleep=clock.sleep).call(lambda: "ok", lambda: next(answers)) == "ok"
-    )
-    clock.slept.clear()
-    with pytest.raises(RateLimited):
-        Throttle(60, 0, clock=clock.now, sleep=clock.sleep).call(lambda: None, lambda: True)
-    assert clock.slept == []
+def test_a_fallback_still_rate_limited_keeps_the_page_as_fetched(tinker_home):
+    web = FakeWeb([RESULTS], {**PAGES, **MINOR_VERSION_DOC_PAGES}, {APP: "429"})
+    entry = learner(web).learn("Widgetlib")
+    assert web.fallback_asked == [APP] and entry["requests"]["fallback"] == {"requests": 1, "429": 1}
+    assert all(fact["source"] != APP for fact in entry["facts"])
 
 
 @pytest.mark.spec("LRN-2")
@@ -485,9 +460,8 @@ WEB_AND_WARNING_BY_CAUSE = {
 @pytest.mark.parametrize("cause", WEB_AND_WARNING_BY_CAUSE)
 def test_a_learn_the_web_cannot_feed_stops_before_any_model_call(cause, tinker_home):
     web_settings, warning = WEB_AND_WARNING_BY_CAUSE[cause]
-    model, embeddings, clock = tool_model(), CountingEmbeddings(), FakeClock()
+    model, embeddings = tool_model(), CountingEmbeddings()
     slot_learner = SlotLearner(model, FakeWeb(**web_settings), embeddings)
-    slot_learner.throttle = Throttle(8, 20, clock=clock.now, sleep=clock.sleep)
     with pytest.raises(LearnStopped) as stopped:
         slot_learner.learn("Widgetlib")
     message = str(stopped.value)
@@ -497,7 +471,6 @@ def test_a_learn_the_web_cannot_feed_stops_before_any_model_call(cause, tinker_h
     assert "Web requests: " in message and "Tried: " in message
     assert model.calls == [] and embeddings.calls == 0
     assert all(Home.store().items(part) == {} for part in ("learned", "embeddings", "languages", "memory"))
-    assert sum(clock.slept) <= 20
 
 
 @pytest.mark.spec("LRN-4")

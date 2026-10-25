@@ -25,9 +25,8 @@ DEFAULT_CONFIG = frozendict(
         "web": "ollama",
         "web_fallback": "",
         "web_timeout": 30,
+        "web_backoff": 20,
         "learn_missing": 2,
-        "learn_rate": 8,
-        "learn_backoff": 20,
         "learn_cutoff": 0.0,
         "learn_pages": 8,
         "learn_min_pages": 2,
@@ -110,9 +109,8 @@ SETTINGS = frozendict(
         "web": Setting("backend", "use-web"),
         "web_fallback": Setting("backend"),
         "web_timeout": Setting("number", least=0, above=True),
+        "web_backoff": Setting("number", least=0),
         "learn_missing": Setting("number", least=1, whole=True),
-        "learn_rate": Setting("number", least=1),
-        "learn_backoff": Setting("number", least=0),
         "learn_cutoff": Setting("number", least=0),
         "learn_pages": Setting("number", least=1, whole=True),
         "learn_min_pages": Setting("number", least=1, whole=True),
@@ -191,6 +189,7 @@ CHECK_MAX_TOKENS = 12288
 UNFINISHED_THOUGHT_KEPT_CHARS = 4000
 
 OLLAMA_SILENCE_TIMEOUT = 600
+QUICK_REPLY_TIMEOUT = 600
 STALL_RETRIES = 2
 OOM_RETRIES = 2
 OOM_RETRY_PROMPT_SHARE = 0.75
