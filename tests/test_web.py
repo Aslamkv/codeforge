@@ -67,6 +67,7 @@ class FakeClock:
         self.slept.append(seconds)
         self.at += seconds
 
+
 @pytest.fixture(autouse=True)
 def clock(monkeypatch):
     monkeypatch.setattr(Internet, "RETRY_PAUSE_SECONDS", 0)

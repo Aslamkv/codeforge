@@ -623,6 +623,7 @@ class Brief:
 def ending(status, headline, details=(), next=()):
     return {"status": status, "headline": headline, "details": list(details), "next": list(next)}
 
+
 class Tracker:
     DOING_AND_DONE = {
         "recall": ("🧠 Recalling what Tinker has learned", "🧠 Recalled what Tinker has learned"),

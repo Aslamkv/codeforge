@@ -200,6 +200,7 @@ class Internet:
 class RateLimited(Exception):
     pass
 
+
 class Throttle:
     def __init__(self, rate, backoff, clock=None, sleep=None):
         self.rate, self.backoff = float(rate or 0), float(backoff)
@@ -233,6 +234,7 @@ class Throttle:
         now = self.clock()
         self.tokens = min(self.rate, self.tokens + (now - self.filled) * self.rate / 60)
         self.filled = now
+
 
 class WebBackend:
     name = ""
