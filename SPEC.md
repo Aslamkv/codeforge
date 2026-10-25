@@ -50,6 +50,9 @@ enforce it.
   terminal and the chats show that state. They never read meaning back out of printed text.
 - **The person comes first.** Every long command is a job, and one job runs at a time. Whatever the person
   asks for pauses the job that runs, and a paused job goes on by itself once Tinker is idle ([jobs](#jobs-job)).
+- **Tinker uses the web as a person does.** It searches one search at a time, and reads only the pages its
+  searches found, as curl would on the person's behalf. It never crawls: no site maps, no links followed. A
+  good search is how it finds what it needs, so no search provider has reason to turn it away.
 
 ## Architecture
 
@@ -68,15 +71,14 @@ listed above it:
 | `workspace` | the project's files and the commands run in it (`Workspace`, `Toolchain`, `TestRef`, `Output`, `FileView`, `TaughtCommands`) |
 | `model` | the local model: Ollama's API, one request with its budgets and retries (`Model`), measuring a model (`Calibrator`), measured models (`Models`) |
 | `project` | the plan and its record (`Project`, `SpecDocument`, `Runs`, `RunChecks`, `Brief`, `Outcome`), the run's `Tracker` and its `ending`, and the step pipeline (`Steps`) with what moves a tracker through it (`Tracked`) |
-| `fetcher` | the Internet plugin's page fetcher: pages read straight from their sites, in parallel, with the standard library only (`Fetcher`, `Fetched`) |
+| `fetcher` | the web plugin's page fetcher, used by `web` alone: pages read straight from their sites, in parallel, with the standard library only (`Fetcher`, `Fetched`) |
 | `passages` | every page read as text: an HTML page's main content as blocks, and fetched pages as passages under headings, repeats dropped (`Cleaner`, `MainBlocks`, `Links`, `Page`, `Passage`) |
-| `web` | the Internet plugin, the only part that goes on the web (`Internet`, `OllamaWeb`, `DuckDuckGoWeb`, `Throttle`), and a page as text (`PageText`, a view over `passages`) |
+| `web` | the web plugin, the only part that reaches web content: search and fetch, and every failure of either (`Internet`, `WebBackend`, `OllamaWeb`, `WebPage`, `RequestLog`), and a page as text (`PageText`, a view over `passages`) |
 | `conversation` | the terminal and the chats as one conversation (`Desk`, `Channel`, `Markup`, `Talk`, `Shell`, `Progress`, `Reporter`) |
 | `channels` | the chat plugin: Telegram, and `tinker channel` |
 | `knowledge` | lessons and proven knowledge (`Knowledge`), research (`Researcher`), and what learning shares (`Learner`, `Library`, `Retriever`, `Embeddings`) |
 | `slots` | what learning a language or a tool must find out, as data (`Slot`, `PROFILES`), and each slot's passages (`Selector`) |
-| `docsite` | a topic's documentation site for its version: its map, each slot's pages, kept per topic and version (`DocSite`, `DocCache`) |
-| `learning` | learning a language or a tool by its slots (`SlotLearner`, `RequestLog`, `LearnStopped`) |
+| `learning` | learning a language or a tool by its slots (`SlotLearner`, `DocCache`, `LearnStopped`) |
 | `graph` | what Tinker knows as one graph of items and links (`Graph`), and the page that shows it (`GraphPage`) |
 | `reading` | what the person gives to read: stored whole on the reading list (`Readings`), then learned from chapter by chapter (`Reader`, `Epub`, `Book`) |
 | `teaching` | asking what Tinker keeps (`Asker`), and teaching it, checked before anything changes (`Teacher`, `Memory`, `Verdict`) |
@@ -91,8 +93,9 @@ listed above it:
   is `conversation`, which imports the `channels` plugin lazily, inside a function.
 - **ARCH-2** The channels plugin is optional. Without `tinkerkit/channels.py`, the conversation has no chat
   channels, and everything else works.
-- **ARCH-3** Every model call goes through `Model` and `Ollama`. Every web call goes through `Internet` (pages
-  through its `page_fetcher`, the `fetcher` module). Every project command goes through `Workspace.run` or
+- **ARCH-3** Every model call goes through `Model` and `Ollama`. Every web search, page and download goes through
+  `Internet.search` or `Internet.fetch`; only `web` uses the `fetcher`. The model's server and the chat
+  channels are not web content and keep their own connections. Every project command goes through `Workspace.run` or
   `Workspace.start`.
 - **ARCH-4** Only `settings.Home` knows where the home is. No other module names a path inside it. Every phase
   works through the `Session` (**SES-1**).
@@ -109,7 +112,7 @@ The Tinker home is the `.tinker` folder next to the real `tinker.py` (symlinks r
 |---|---|
 | `tinker.db` | the home database (mode 600), below |
 | `channel-NAME.lock` | the lock of each chat channel a Tinker listens to |
-| `web-requests.log` | every web request `tinker learn` made, one JSON line each (**LRN-1**) |
+| `web-requests.log` | every web search and fetch Tinker made, one JSON line each (**WEB-6**) |
 | `memory.html` | the page `tinker memory --graph` writes |
 | `reading/` | the files sent in a chat to read |
 
@@ -124,7 +127,7 @@ the last column:
 | `memory` | lessons for any language | `memory` |
 | `learned` | what was learned from the web about each topic, with sources, and what each reading teaches | `learned` |
 | `embeddings` | the embedding of each learned text, per embedding model | `learned` |
-| `sources` | the cleaned documentation pages of each topic, per version (`slug@version`) | `docs` |
+| `sources` | the cleaned documentation pages a learn read for each topic, per version (`slug@version`) | `docs` |
 | `readings`, `reading numbers` | the reading list: each source's whole text by chapter, each chapter's state, its survey; the last number given, kept by a clear | `read` |
 | `commands` | the person's own commands (aliases, programs) | `commands` |
 | `projects` | a pointer to each project: its run ID, folder and task | `runs` |
@@ -204,23 +207,21 @@ The home, its database, the settings, and small helpers every module shares.
 - **SET-1** `Home.root` is `.tinker` next to the package's real location. `Home.store()` is the home
   database, `tinker.db`, in it.
 - **SET-2** `DEFAULT_CONFIG` is exactly: model `None`, ollama_url `http://localhost:11434`, keep_alive `0`,
-  max_growth `1.15`, build_think `"medium"`, test_timeout `60`, web `"ollama"`, web_fallback `""`, web_timeout
-  `30`, web_backoff `20`, learn_missing `2`, learn_cutoff `0.0`, learn_pages `8`,
-  learn_min_pages `2`, learn_searches `3`, learn_think `"low"`, docs_pages `30`, tool_docs_pages `5`,
-  docs_latest_days `30`, fetch_workers `6`, fetch_timeout `15`, fetch_max_bytes `2000000`, fetch_domain_delay
-  `0.1`, fetch_fallbacks `2`, embed_model `""`, projects `"~/Projects"`. web_backoff is the `Throttle`'s backoff
-  (**WEB-12**); fetch_workers, fetch_timeout, fetch_max_bytes and fetch_domain_delay are the `Fetcher`'s workers, timeout,
-  max_bytes and domain_delay; embed_model is the model `tinker embed NAME` selects.
+  max_growth `1.15`, build_think `"medium"`, test_timeout `60`, web_timeout `30`, learn_missing `2`,
+  learn_cutoff `0.0`, learn_pages `8`, learn_min_pages `2`, learn_searches `3`, learn_think `"low"`,
+  tool_docs_pages `5`, docs_latest_days `30`, fetch_workers `6`, fetch_timeout `15`, fetch_max_bytes `2000000`,
+  embed_model `""`, projects `"~/Projects"`. web_timeout is a search's timeout; fetch_workers, fetch_timeout and
+  fetch_max_bytes are the `Fetcher`'s workers, timeout and max_bytes; embed_model is the model
+  `tinker embed NAME` selects.
 - **SET-3** `PHASES`, `FIX_PHASES` and `PLANNING_PHASES` are the phase lists given in [The cycle](#the-cycle).
   `CONFIRM_AFTER` is `review` for the project and a feature, and `reproduce` for a bug fix.
 - **SET-4** `Config` is `DEFAULT_CONFIG` overridden by the home's `config`. It is read from the database each
   time, so a change another Tinker made is seen at once. `Config.save(**changes)` keeps the changes.
 - **SET-5** `SETTINGS` is the one table of the settings: for each key of `DEFAULT_CONFIG`, its type, its
-  range and its owner, the command that sets it (`use-model` for model, `use-web` for web, `embed` for
-  embed_model, `config` for the rest). `Config.check()` checks every setting by its row, and rejects with
+  range and its owner, the command that sets it (`use-model` for model, `embed` for embed_model, `config`
+  for the rest). `Config.check()` checks every setting by its row, and rejects with
   `SystemExit`: a keep_alive that is neither whole seconds nor a duration (`10m`, `1h30m`); a build_think or
-  learn_think other than `"high"`, `"medium"`, `"low"`, `true`, `false` or `null`; a web or web_fallback that
-  names no backend of `WEB_BACKENDS` (either may be empty: none); and a number outside its range, or not whole
+  learn_think other than `"high"`, `"medium"`, `"low"`, `true`, `false` or `null`; and a number outside its range, or not whole
   where its row says so (max_growth above 1, web_timeout above 0, test_timeout and learn_missing at least 1,
   and each `learn_*`, `docs_*` and `fetch_*` limit). A boolean is never a number. Every command that needs the
   model or the web checks them first.
@@ -310,7 +311,7 @@ pauses it too, so the person is always answered at once.
 - **JOB-3** `journaled(request, ask)` outside a job asks. In a job, a request made before, word for word, is
   answered from the job's journal (log `journal #N`) in the order the answers were kept, and nothing is asked;
   any other request is asked, and its answer kept unless it failed (`keep`). `Ollama.chat` (but an unload),
-  `Internet.search`, `Internet.fetch` and `Fetcher.fetch` go through it.
+  `Internet.search` and `Internet.fetch` go through it.
 - **JOB-4** `today()` is the day the job that runs started (today outside a job): the prompts that say the date
   (learning's plan, research's frame) say the same on the day a job is resumed.
 - **JOB-5** `Jobs.arguments`: `resume #N` runs job #N's arguments, as that job (its number, its journal);
@@ -639,18 +640,15 @@ What is said in the chats, kept so that a chat is only a view of it.
 
 ## fetcher (FET)
 
-The Internet plugin's page fetcher, with the standard library only.
+The web plugin's page fetcher, with the standard library only. Only `web` uses it.
 
-- **FET-1** `Fetcher.fetch_all(urls)` gives a `Fetched` per address, in order: status, final address, text,
-  content type and error. The pages of one site go one after another over one kept-alive connection
+- **FET-1** `Fetcher.fetch_all(urls)` gives a `Fetched` per address, in order: status, final address, bytes,
+  text, content type and error. The pages of one site go one after another over one kept-alive connection
   (`http.client`), the sites in parallel (`workers`); a connection the site closed is opened again once. One
-  page failing never stops the others. It sends its User-Agent, asks for gzip, reads at most `max_bytes`,
-  follows at most `MAX_REDIRECTS` redirects, waits `domain_delay` between two requests to one site, and decodes
-  by the header's charset, else the page's `<meta>` charset, else UTF-8. An address the environment sends
-  through a proxy is fetched with urllib, which honours it.
-- **FET-2** `Fetcher` honours each site's robots.txt (read once per site): a disallowed page is not fetched,
-  and its `Fetched` is `refused`. A missing robots.txt allows everything; one answered with 401 or 403 allows
-  nothing.
+  page failing never stops the others. It sends its User-Agent, asks for gzip, follows at most
+  `MAX_REDIRECTS` redirects, and decodes by the header's charset, else the page's `<meta>` charset, else UTF-8.
+  A page larger than `max_bytes` fails, saying so. An address the environment sends through a proxy is fetched
+  with urllib, which honours it.
 
 ## passages (PAS)
 
@@ -670,48 +668,37 @@ Fetched pages as passages: main content, under headings, repeats dropped.
 
 ## web (WEB)
 
-The Internet plugin, the only part that goes on the web.
+The web plugin, the only part that reaches web content. It has two calls, search and fetch, and it handles
+every failure of either: no caller sees a backend, an HTTP status or an exception from the web.
 
-- **WEB-1** `Internet.backends()` is `{"ollama": OllamaWeb, "duckduckgo": DuckDuckGoWeb}`. Its names are
-  exactly `WEB_BACKENDS`, so the settings table checks `web` and `web_fallback` without the web (**SET-5**).
-- **WEB-2** `Internet()` uses config `web`, then `web_fallback`. It skips empty and repeated names. A backend
-  that is not ready is left out, and its reason goes in `unusable_backends`. With no backend left,
-  `available()` is False and `problem()` says why.
-- **WEB-3** `Internet.required(option)` ends with `SystemExit` naming the option when no backend is usable.
-  `Internet.state()` gives `ready: <backends>` (and any backends that are not usable), or why it is not
-  usable.
-- **WEB-4** `search` keeps only the results with an `http(s)` address, each as `{title, url, content}`
-  strings. `fetch` gives `{title, url, content}` for the address asked only when its content has text. When no
-  backend answers, either one gives `None`, and `problem(key)` says why.
-- **WEB-5** When a backend fails, the next backend is asked. A `WebError(retry=True)` is asked once more after
-  `RETRY_PAUSE_SECONDS`, but HTTP 429 is waited out (**WEB-12**). Any other exception from a backend counts as a failure; it is never raised.
-- **WEB-6** After `FAILURES_BEFORE_GONE` network failures in a row, a backend is not asked again. A success
-  resets its count. Once no backend is left, the plugin is gone.
-- **WEB-7** A `WebError` carries the HTTP status it answered with (`code`), and `Internet.rate_limited(key)`
-  says whether that key's last failure was HTTP 429. `Internet.page_fetcher(log)` is a `Fetcher` set up from
-  the `fetch_*` settings.
-- **WEB-8** `OllamaWeb` is not ready without `OLLAMA_API_KEY`. It POSTs JSON with `Authorization: Bearer <key>`
-  to `/web_search` and `/web_fetch`. HTTP 401 and 403 are network failures; 429 is waited out (**WEB-12**). HTTP 5xx is worth asking
-  again. A fetch's 5xx is not a network failure. An answer that is not JSON, or a search that has no
-  result list, is a `WebError`.
-- **WEB-9** `DuckDuckGoWeb` is always ready. A search reads the result links, unwraps the `uddg` redirect,
-  drops ads (`y.js`), takes the snippets, and gives at most `count` results. A bot-check page is a `WebError`
-  worth asking again.
-- **WEB-10** `DuckDuckGoWeb.fetch` reads the page with `Internet.page_fetcher()` (**FET-1**, **FET-2**), the one
-  client that reads pages. It gives an HTML page (`is_html`, **PAS-1**) as its main text (`PageText`). Plain
-  text, JSON and XML stay as they are. Any other content type, and a page the `Fetcher` could not get, is a
-  `WebError` (with the page's HTTP status as its `code`).
-- **WEB-11** `PageText` is a view over `Cleaner`'s blocks (**PAS-1**): a page's title, and its main content's
+- **WEB-1** `Internet()` searches with `OllamaWeb` when `OLLAMA_API_KEY` is set, else with the standard
+  `WebBackend`; no setting chooses. `Internet.state()` says which: `ollama.com search, the standard search as
+  fallback`, or `the standard search (no OLLAMA_API_KEY)`.
+- **WEB-2** `WebBackend` uses the standard library only. Its `search(query, count)` reads DuckDuckGo's HTML
+  results page: the result links with the `uddg` redirect unwrapped, ads (`y.js`) dropped, the snippets, at
+  most `count`. A bot-check page is a failure. `OllamaWeb(WebBackend)` replaces `search` alone: it POSTs JSON
+  with `Authorization: Bearer <key>` to ollama.com's `/web_search`. An answer that is not JSON, or has no
+  result list, is a failure.
+- **WEB-3** `Internet.search(query, count)` asks one search at a time and adds no pause of its own. When
+  Ollama's search fails in any way (HTTP 401, 403, 429 or 5xx, a timeout, no connection, an unusable answer),
+  the same query goes to the standard search at once. A standard search that times out or answers HTTP 5xx is
+  asked once more, at once. It gives the results with an `http(s)` address, each as `{title, url, content}`
+  strings, and `[]` when no search answered.
+- **WEB-4** When the standard search cannot reach its site (no connection; a timeout is not that), the web is
+  offline: `Internet` says so once (`Web: not reachable (why)`), and every later search and fetch it is asked
+  gives nothing at once, making no request.
+- **WEB-5** `Internet.fetch(urls, max_bytes)` reads the addresses with the `Fetcher` (**FET-1**) in parallel,
+  at most `fetch_max_bytes` each unless `max_bytes` is given, and gives a `WebPage` per address, in order: its
+  address, content type, bytes, blocks (**PAS-1**), title and `why` (empty unless it failed). An HTML page
+  (`is_html`) and plain text, Markdown, JSON or XML give their blocks; `text` is them as text (`PageText`). Any
+  other content keeps its bytes with no blocks. A page that could not be read has no bytes and no blocks, and
+  its `why` says what happened; it is not asked again.
+- **WEB-6** `RequestLog` appends every search and every fetched address to `Home.web_log()` as one JSON line
+  `{at, kind, by, result, why, seconds, target}`: kind `search` or `fetch`, by `ollama` or `standard`, result
+  `ok` or `failed`. It counts them by kind, and `text()` gives the counts in one line.
+- **WEB-7** `PageText` is a view over `Cleaner`'s blocks (**PAS-1**): a page's title, and its main content's
   blocks as text, a blank line between them. A heading becomes a `#` line of its level, list items become `- `
   lines one under another, and a code block keeps its layout.
-- **WEB-12** `Throttle(rate, backoff)` lets at most `rate` requests a minute through (a token bucket, full at
-  the start; an empty one waits; a `rate` of `None` lets every request through). `call(request, limited)` asks
-  again while `limited()` says HTTP 429, after pauses of `FIRST_BACKOFF_SECONDS` seconds, doubled, and raises
-  `RateLimited` once `backoff` seconds have passed since the first 429: it never waits longer than that in all.
-  Each backend has its own `RATE`: `OllamaWeb` 8 a minute (ollama.com allows 10), `DuckDuckGoWeb` `None`.
-  `Internet` asks each backend through a `Throttle` of its `RATE` and `web_backoff`, for every search and fetch
-  and every caller. A backend still answering HTTP 429 after that fails, saying it was still rate limited after
-  `web_backoff` seconds, and `rate_limited(key)` is True.
 
 ## conversation (CNV)
 
@@ -950,8 +937,10 @@ Lessons and proven knowledge, and what every kind of learning shares.
 - **KNW-23** `Researcher.answer(entry)` gives a research as text: its findings by question, each with its confidence
   and the pages of the facts it cites as `[n]`, then those pages as numbered sources. A research with no finding
   says so.
-- **KNW-24** `Learner.web_pages(searches)` searches each and fetches the results in turn, each address once,
-  at most `TEACH_PAGES`; each page keeps its `relevant_chunks` for the searches (**KNW-14**), up to
+- **KNW-24** `Learner.web_pages(searches)` searches each, takes the results in turn, each address once, at
+  most `TEACH_PAGES`, and fetches them in one `Internet.fetch`; a research round fetches its pages the same
+  way, all at once. A page the web could not read stands on its search snippet. Each page keeps
+  its `relevant_chunks` for the searches (**KNW-14**), up to
   `TEACH_PAGE_CHARS`. A page with no text is left out.
 
 ## slots (SLT)
@@ -976,70 +965,47 @@ What learning a language or a tool must find out, as data, and each slot's passa
   Readiness, `missing(profile, facts, machine)`, gives installed when no version command ran and each web slot
   without a fact.
 
-## docsite (DOC)
-
-A topic's documentation site for the version installed: its map, each slot's pages, kept per topic and
-version.
-
-- **DOC-1** `DocSite.resolve(docs, version)` tries the version's documentation most exact first
-  (`version_keys`: 3.15.1, 3.15, 3), at the plan's `versioned` address, then the unversioned `root` as
-  "latest", and gives the first root page that answers with its version key.
-- **DOC-2** `DocSite.map(root, base)` lists the site's pages from its `llms.txt`, else its `sitemap.xml`, else
-  the root page's own links (`Links`), on its site and under the root (all of the site's when none is under
-  it), at most `MAX_MAP_LINKS`. `pick(links, wanted, key, cap, base)` gives each slot its pages by the words
-  their address (below the base) and title share with the slot's `docs` words, in turn (each slot's best, then
-  each one's second), a page that names the version first, each once, at most `cap`.
-- **DOC-3** `DocSite.read` fetches the root and the picked pages, then picks the same way from the links of
-  the pages it read, one level on (the version's what's new behind an index), at most `docs_pages` in all. A
-  page that names another version (`whatsnew/3.14.html` for 3.15) is never picked; the latest documentation is
-  matched to the version installed (major.minor). Pages left with no text are dropped.
-- **DOC-4** `DocCache` keeps the cleaned pages in the home's `sources` as `slug@version`. `DocSite.pages`
-  reads them from there before the web, so learning a version again fetches none of its documentation. A copy
-  of the "latest" documentation is read again after `docs_latest_days`; a version's own is kept until
-  `tinker clear docs`.
-
 ## learning (LRN)
 
 `tinker learn TOPIC` and the recall phase of a run with `--web` learn a language or a tool by its slots
-(`SlotLearner`), from its own documentation for the version installed, through the steps of **LRN-7**.
+(`SlotLearner`), from the pages about the version installed that its searches find, through the steps of
+**LRN-7**.
 A domain is researched (`Researcher`, **KNW-18**), as `tinker research` does. Own-command learning and run
 lessons are apart.
 
-- **LRN-1** `RequestLog` appends every web request of a learn to `Home.web_log()` as one JSON line
-  `{at, kind, result, seconds, target}` (kind search, fetch, robots, probe or fallback; result ok, 429,
-  missing or failed: a robots.txt, site map or version's documentation the site does not have is missing). It
-  counts them by kind, and `text()` gives them in one line with the HTTP 429 count.
+- **LRN-1** `DocCache` keeps the cleaned documentation pages a learn read in the home's `sources` as
+  `slug@version` (`slug@latest` when no version is known). A learn reads them from there before the web, so
+  learning a version again makes none of its documentation searches. A `latest` copy is searched again after
+  `docs_latest_days`; a version's own is kept until `tinker clear docs`.
 - **LRN-2** `read_plan` needs a kind (language, tool or domain) and a name. It keeps safe commands only
-  (`MAX_VERSION_COMMANDS`), its documentation site (`docs`: web addresses only, `versioned` only with
-  `{version}` in it), a language's tools (one per role of `TOOL_ROLES`, each with a safe version command and
-  its `docs`), and hints and follow-ups for its profile's slots only; a tool's language is `used_with`.
+  (`MAX_VERSION_COMMANDS`), a language's tools (one per role of `TOOL_ROLES`, each with a safe version
+  command), and hints and follow-ups for its profile's slots only; a tool's language is `used_with`.
   `read_digest` keeps a fact only when it cites a passage given and speaks of no unreleased version; each keeps
   its slot, the passages it cites, their pages (`source`, `also`), and a known phase (else the slot's
   section); at most `FACTS_PER_SLOT`.
 - **LRN-3** Fail fast. No model call (plan, digest, condense or embedding) runs until the web, or the
-  documentation kept from before, has delivered usable pages. PREFLIGHT stops when the Internet plugin is off
-  or there is no embedding model; GATE 1 when the search fails, is rate limited past `web_backoff`, finds
-  nothing, or finds nothing above `learn_cutoff`; GATE 2 when fewer than `learn_min_pages` pages give usable
+  documentation kept from before, has delivered usable pages. PREFLIGHT stops when there is no embedding model;
+  GATE 1 when the search finds nothing, or nothing above `learn_cutoff` (when the web could not search, it has
+  said why, **WEB-3**, **WEB-4**); GATE 2 when fewer than `learn_min_pages` pages give usable
   text (snippets never count). With a saved plan, GATE 2 counts the documentation's pages, and runs search 1
   when they are too few. Then it raises `LearnStopped` (a `SystemExit`: a non-zero exit) naming the cause, what
   was tried and the requests made, saying nothing was learned or saved and what was learned before is
   untouched, and the next step; nothing is written to Tinker's database.
 - **LRN-4** A first learn makes one search (`DOCS_SITE_SEARCH`, from the topic alone), picks the results whose
   title and snippet score above `learn_cutoff` (BM25), each address once, at most `learn_pages`, and fetches
-  them with the plugin's fetcher. A page that gives too little text is fetched by the plugin instead (logged
-  as a fallback), at most `fetch_fallbacks` per learn, never one robots.txt refused; a fallback still rate
-  limited keeps the page as it was fetched. Only then does the plan call run (at the model's own think
-  setting); it names the documentation site and, for a language, each tool's version command and
-  documentation. A saved plan is reused with no search and no call. The version commands (each run once) give
-  the version installed; the documentation of that version (**DOC-1** to **DOC-4**) and of a language's tools
-  (`TOOL_DOCS_QUERY`, at most `tool_docs_pages`) joins the pool. Each slot's passages are digested into facts
+  them in one `Internet.fetch`. Only then does the plan call run (at the model's own think setting); for a
+  language it names each tool's version command. A saved plan is reused with no search and no call. The version
+  commands (each run once) give the version installed. That version's documentation is found by one search
+  (`DOCS_VERSION_SEARCH`: the topic's name, its version and `documentation`), its results picked as above, and
+  each of a language's tools by one search of its own (`TOOL_DOCS_SEARCH`, its own version, at most
+  `tool_docs_pages` pages); their pages join the pool, and are kept (**LRN-1**). Each slot's passages are digested into facts
   (candidates, each with its slot) and condensed into rules, both at `learn_think`, and kept only after both
   succeed, under the language's key or the topic's slug, with its plan, machine, documentation versions,
   sources, cited passages, status (`complete` or `incomplete`), missing slots and request counts; then
   indexed. A summary prints the slots filled and missing, the documentation, the pages by source, the facts
   and the requests by kind.
-- **LRN-5** After the digest, each slot left without facts gets the plan's follow-up search, while fewer than
-  `learn_searches` searches were made; its pages join the pool, and that slot alone is selected and digested
+- **LRN-5** After the digest, each slot left without facts gets the plan's follow-up search, at most
+  `learn_searches` follow-ups in all; its pages join the pool, and that slot alone is selected and digested
   again. When a follow-up fails, the learn goes on, marked `incomplete`, with a warning and a note.
 - **LRN-6** A topic researched before is researched again when deep, else kept. A plan that says the topic is
   a domain hands it to `Researcher` when deep; otherwise it is learned like a tool.
@@ -1082,10 +1048,9 @@ first (no model), numbered on the reading list, so it is never sent twice; then 
 the core ones first, and saved as soon as it is read. What it teaches is a topic of the library (kind
 `reading`, slug `read-N`); its text stays for ask, teach and a focused read again (`read #N "WHAT"`).
 
-- **RDG-1** `book_bytes(source)` reads a file, or downloads a web address with `Internet.download` (the
-  plugin's fetcher; no web backend needed), at most `READ_MAX_BYTES`; a missing file, a failed download or a
-  larger one is an error that says so. `Fetcher.download` gives the bytes as they are, through the
-  environment's proxy, and refuses more than its limit.
+- **RDG-1** `book_bytes(source)` reads a file, or downloads a web address with `Internet.fetch` (its
+  bytes as they are, **WEB-5**), at most `READ_MAX_BYTES`; a missing file, a failed download or a larger one is
+  an error that says so (the page's `why`).
 - **RDG-2** `opened(data, name)` reads a source by what its bytes hold, never by its name: a zip is an EPUB,
   other text is Markdown or plain text (its title: a lone top heading, else the file's name). A PDF is
   refused, saying to convert it to EPUB first (Calibre); a web page is refused, saying a share link needs its
@@ -1182,8 +1147,7 @@ then is anything changed.
   evidence, and a plan needs no command or search for its facts. A change may keep a `fact` in place of an
   item shown (`about`): that item is retired, and the fact kept in its topic as proven
   (`Library.taught_fact`), with its phase, chapter and section, a `taught` event and its sources.
-- **TCH-9** `tinker teach` needs the Internet plugin, checked before any model call. Both commands report
-  through a tracker.
+- **TCH-9** Both commands report through a tracker.
 
 ## exercising (EXR)
 
@@ -1241,7 +1205,7 @@ It is a job like any other, so the person always comes first.
 What every phase works through.
 
 - **SES-1** `Session` is what every phase works through: the model, the project, its workspace and toolchain,
-  the knowledge, the Internet plugin, the run's options (`web`, `confirm`) and its tracker. `Worker` and
+  the knowledge, the web plugin, the run's options (`web`, `confirm`) and its tracker. `Worker` and
   `Phase` take it, and nothing else, from the run, and reach the model, the project and its files
   only through it.
 - **SES-2** `Session.setup` runs setup only when the setup commands or config files changed (or when forced),
@@ -1392,7 +1356,7 @@ The main system: the command line, one run, and the cycle of phases.
 - **CLI-2** `tinker help` lists every command by group, the options, and examples. With
   `TINKER_FORMAT=markup`, it lists what a chat can send. `tinker help COMMAND` shows that command's arguments,
   and an unknown command is an error.
-- **CLI-3** `Commands`. `use-model` accepts only a measured model. `use-web` keeps the backend. `runs` lists
+- **CLI-3** `Commands`. `use-model` accepts only a measured model. `runs` lists
   the runs, newest first. `status [@PROJECT]` shows the project's criteria and its open phase (in a chat,
   `status` alone shows what runs, **CNV-11**). `rename` renames the folder of a project whose plan waits, and
   its pointer. `config` shows the settings, and `config KEY VALUE` sets one.
@@ -1407,7 +1371,7 @@ The main system: the command line, one run, and the cycle of phases.
 - **CLI-6** `tinker log [@PROJECT]` shows what the project's last runs said. `--calls` shows its model calls
   and details instead.
 - **CLI-7** `tinker learn NAME = DEFINITION`, `tinker learn NAME "DEFINITION"` (or an alias in the person's shell) keeps the command, with no
-  model. `tinker learn WHAT` needs a measured model, an embedding model and the web, all checked before
+  model. `tinker learn WHAT` needs a measured model and an embedding model, both checked before
   anything is loaded. Learning nothing ends with an error. However it ends, it prints the time it took
   (`Time taken: 8m 34s`). It keeps a `Tracker` as a run does: its messages, what the model is doing (in plain
   words), its steps and its end (learned, with the summary, or why it stopped), so a chat that started it shows
