@@ -45,13 +45,20 @@ class Argument:
         self.dest, self.nargs, self.metavar, self.help, self.choices = dest, nargs, metavar, help, choices
 
 
-class Action(namedtuple("Action", "kind word words deletes", defaults=(None, None, False))):
+class Action(namedtuple("Action", "kind word when deletes", defaults=(None, None, False))):
     __slots__ = ()
 
     def fits(self, argv):
-        return (self.word is None or argv[1:2] == [self.word]) and (
-            self.words is None or len(argv) - 1 == self.words
-        )
+        return (self.word is None or argv[1:2] == [self.word]) and (self.when is None or self.when(argv[1:]))
+
+
+def taught_command(words):
+    name, equals, definition = " ".join(words).partition("=")
+    if equals and name.strip() and " " not in name.strip():
+        return name.strip(), definition.strip()
+    if len(words) == 2 and (" " in words[1].strip() or words[1].strip().lower() == "none"):
+        return words[0], words[1]
+    return None
 
 
 class Command:
@@ -237,16 +244,16 @@ COMMANDS = [
         "learn a language, a tool or a domain",
         "Learn something and keep it for the builds that need it. Tinker tells what it is: a language "
         '("Python 3.14"), a tool ("Flask"), a domain ("food bank inventory", researched with its sources '
-        'cross-checked), or NAME "DEFINITION" (or an alias in your shell): a command of yours.',
+        "cross-checked), or NAME = DEFINITION (or an alias in your shell): a command of yours. No quotes needed.",
         kind="job",
-        actions=[Action("glance", words=2)],
+        actions=[Action("glance", when=taught_command)],
         chat=True,
         words="any",
-        arguments=[Argument("words", "+", "WHAT [DEFINITION]")],
+        arguments=[Argument("words", "+", "WHAT | NAME = DEFINITION")],
         example="learn rust",
         rows=[
             ("learn WHAT", "learn a language, a tool or a domain"),
-            ('learn NAME "DEFINITION"', "a command of yours Tinker may use"),
+            ("learn NAME = DEFINITION", "a command of yours Tinker may use"),
         ],
     ),
     Command(

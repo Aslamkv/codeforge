@@ -249,13 +249,12 @@ kept of the chat. Your projects, runs and jobs stay.
 
 ## Learn 🧠
 
-Teach Tinker a language, a tool, or a whole domain (it reads the web, and keeps what it learns). Quote a name of
-more than one word, since two words teach a command of yours (below):
+Teach Tinker a language, a tool, or a whole domain (it reads the web, and keeps what it learns). No quotes needed:
 
 ```sh
 tinker learn rust
-tinker learn Flask
-tinker learn "food bank inventory"
+tinker learn Python 3.14
+tinker learn food bank inventory
 ```
 
 A language or a tool is learned mainly from its own documentation, for the version you have installed
@@ -271,10 +270,13 @@ Forget the kept documentation (it is fetched again on the next learn):
 tinker clear docs
 ```
 
-Teach it a command of yours, which builds may then use:
+Teach it a command of yours, which builds may then use (`=` says it is a command; a quoted definition works
+too), and forget it again:
 
 ```sh
+tinker learn serve = python3 -m http.server
 tinker learn serve "python3 -m http.server"
+tinker learn serve none
 ```
 
 See what it has learned:

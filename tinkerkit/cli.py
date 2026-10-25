@@ -12,7 +12,7 @@ lazy import webbrowser
 lazy from pathlib import Path
 
 from . import conversation, exercising, reading
-from .commands import BY_NAME, COMMANDS, GROUPS, refs
+from .commands import BY_NAME, COMMANDS, GROUPS, refs, taught_command
 from .jobs import STATES, Jobs, archived, calls_log, job_number
 from .messages import Messages, human_duration, say
 from .reading import Reader
@@ -422,12 +422,13 @@ class Cli:
 
     @staticmethod
     def learning(words, parser):
-        if len(words) > 2 or not words[0].strip():
-            parser.error(
-                'use tinker learn WHAT (e.g. tinker learn Flask) or tinker learn NAME "DEFINITION" '
-                "(quote the definition)"
-            )
-        return words
+        taught = taught_command(words)
+        if taught:
+            return list(taught)
+        topic = " ".join(words).strip()
+        if not topic:
+            parser.error("use tinker learn WHAT (e.g. tinker learn Flask) or tinker learn NAME = DEFINITION")
+        return [topic]
 
     @staticmethod
     def reading(words, parser):

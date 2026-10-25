@@ -46,6 +46,14 @@ def test_task(tmp_path, monkeypatch):
 
 
 @pytest.mark.spec("CLI-1")
+def test_a_learn_is_one_topic_or_a_command_of_yours():
+    assert parse("learn", "food", "bank", "inventory").learn == ["food bank inventory"]
+    assert parse("learn", "Python", "3.14").learn == ["Python 3.14"]
+    assert parse("learn", "gs", "=", "git", "status").learn == ["gs", "git status"]
+    assert parse("learn", "serve", "python3 -m http.server").learn == ["serve", "python3 -m http.server"]
+
+
+@pytest.mark.spec("CLI-1")
 @pytest.mark.parametrize(
     "argv,why",
     [
@@ -56,7 +64,7 @@ def test_task(tmp_path, monkeypatch):
         (["resume", "abc123"], None),
         (["status", "@abc", "--workdir", "x"], None),
         (["rename", "bad name!"], None),
-        (["learn", "a", "b", "c"], None),
+        (["learn", " "], None),
         (["use-web", "bing"], None),
         (["resume", "@abc", "--workdir", "x"], None),
         (["add"], None),
