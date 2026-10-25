@@ -66,7 +66,7 @@ listed above it:
 | `ledger` | what is said in the chats, so a chat is only a view of it: each message with when it goes, each thing shown, numbered, for `history` (`Ledger`) |
 | `prompts` | prompt parts (`Part`), replies (`Reply`), every system prompt (`Prompts`) |
 | `workspace` | the project's files and the commands run in it (`Workspace`, `Toolchain`, `TestRef`, `Output`, `FileView`, `TaughtCommands`) |
-| `model` | the local model: Ollama's API, one request with its budgets and retries (`Model`), measuring a model (`Calibrator`) |
+| `model` | the local model: Ollama's API, one request with its budgets and retries (`Model`), measuring a model (`Calibrator`), measured models (`Models`) |
 | `project` | the plan and its record (`Project`, `SpecDocument`, `Runs`, `RunChecks`, `Brief`, `Outcome`), the run's `Tracker` and its `ending`, and the step pipeline (`Steps`) with what moves a tracker through it (`Tracked`) |
 | `fetcher` | the Internet plugin's page fetcher: pages read straight from their sites, in parallel, with the standard library only (`Fetcher`, `Fetched`) |
 | `passages` | every page read as text: an HTML page's main content as blocks, and fetched pages as passages under headings, repeats dropped (`Cleaner`, `MainBlocks`, `Links`, `Page`, `Passage`) |
@@ -165,7 +165,7 @@ order, each saved as it ends, so a run resumes from the phase it reached:
 
 `recall → spec → design → review → setup → tests → code → verify → tidy → docs → final_review → lessons → done`
 
-A bug fix runs `recall → reproduce → verify → final_review → lessons → done`.
+Its planning phases are `recall → spec → design → review`. A bug fix runs `recall → reproduce → verify → final_review → lessons → done`.
 
 A cycle started from the conversation, or with `--confirm`, waits for the person once its plan is made: the
 project or a feature after `review`, a bug fix after `reproduce`. `confirm` builds it. `amend CHANGE` changes it
@@ -187,7 +187,8 @@ Everything Tinker tells the person goes through one voice, `say` (a `Messages`).
   with its icon. `took` says something done with how long it took.
 - **MSG-3** Every message is given, as data (`Message`: kind, text, depth, icon), to each follower. A follower
   that fails never breaks what is said. A run's and a learn's `Tracker` follow: a message becomes the latest
-  and goes to the project's `output` log; a live one becomes what goes on now.
+  and goes to the project's `output` log; a live one becomes what goes on now. `working_on`, `tally` and
+  `found` set what the run works on, its tally and what it found.
 - **MSG-4** `live` redraws one status line in place on a terminal only. Piped (a chat following the command),
   it writes nothing; its followers are still told. The next message clears it first.
 - **MSG-5** `detail` goes to the log given to `keep_log` (a run's `events`, a job's `calls #N`), and is never
@@ -514,7 +515,7 @@ What is said in the chats, kept so that a chat is only a view of it.
   thinking. An error chunk is an `OllamaError`: a reply error with what came before, unless it is out of
   memory or a crash. Once `done_when(content)` says the reply is complete, the stream ends within
   `LAST_CHUNK_WAIT_SECONDS` seconds, and the reply is the content as it was at that moment. While it goes, its
-  live line (`say.live`) says what the model is doing. A reply whose last `LOOPING_REPEATED_LINES` finished
+  live line says what Tinker works on (**MOD-24**). A reply whose last `LOOPING_REPEATED_LINES` finished
   lines are one non-blank line, again and again, is stopped there and is cut (`length`).
 - **MOD-10** `Calibrator.shared(context)` sets the prompt budget to `min(8192, max(512, context // 3))`, and
   the longest reply to `max(1024, min(16384, context - budget))`. `safe_ratio()` is
@@ -613,8 +614,8 @@ What is said in the chats, kept so that a chat is only a view of it.
 - **PRJ-13** `Outcome` starts as `stopped` with exit code 1. `done` and `awaiting` exit with 0, and `blocked`
   exits with 1.
 - **PRJ-14** `Tracker` is a run's one report. It keeps the title, job number, run ID, folder, phase, steps
-  done, passing spec points, what the model is doing now, the latest message said, a plan that waits, the end,
-  the seconds taken and when it went on (`resumed`). Each change is published at once in its job's `progress`
+  done, passing spec points, what goes on now, what it works on (`working`), its tally, what it found, the
+  latest message said, a plan that waits, the end, the seconds taken and when it went on (`resumed`). Each change is published at once in its job's `progress`
   (an exercise's build: in the exercise's job, as `build`), and appended to the project's `progress` log. A
   tracker outside a job publishes nothing.
 - **PRJ-15** The steps are named by phase (`DOING_AND_DONE`: what each phase is doing, and when done). A step
@@ -689,7 +690,7 @@ The Internet plugin, the only part that goes on the web.
   says whether that key's last failure was HTTP 429. `Internet.page_fetcher(log)` is a `Fetcher` set up from
   the `fetch_*` settings.
 - **WEB-8** `OllamaWeb` is not ready without `OLLAMA_API_KEY`. It POSTs JSON with `Authorization: Bearer <key>`
-  to `/web_search` and `/web_fetch`. HTTP 401, 403 and 429 are network failures. HTTP 5xx is worth asking
+  to `/web_search` and `/web_fetch`. HTTP 401 and 403 are network failures; 429 is waited out (**WEB-12**). HTTP 5xx is worth asking
   again. A fetch's 5xx is not a network failure. An answer that is not JSON, or a search that has no
   result list, is a `WebError`.
 - **WEB-9** `DuckDuckGoWeb` is always ready. A search reads the result links, unwraps the `uddg` redirect,
@@ -827,7 +828,7 @@ The chat plugin: Telegram, and `tinker channel`.
   its chats. `add` (from options or questions) checks the name, refuses a name taken, checks the token, and
   saves the channel disabled. `remove` drops the settings and the secrets, as a deletion (**SET-11**).
   `enable` and `disable` switch a channel.
-- **CHN-3** `ask` gives the default when there is no terminal, or ends with `SystemExit` when there is none.
+- **CHN-3** `ask` gives the default when there is no terminal, or ends with `SystemExit` when it has no default.
   `ChannelCommand.check` ends with `SystemExit` on a refusal, and tries a dropped network again up to
   `FIRST_CALL_TRIES` times.
 - **CHN-4** `pair` serves the chat whose sender says yes at the terminal. `start` needs an enabled channel (or
