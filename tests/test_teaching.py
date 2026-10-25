@@ -9,6 +9,7 @@ from tinkerkit.cli import Cli, Commands
 from tinkerkit.commands import kind_of
 from tinkerkit.knowledge import Knowledge, Library
 from tinkerkit.model import Ollama
+from tinkerkit.project import Tracker
 from tinkerkit.prompts import Prompts
 from tinkerkit.reading import Readings
 from tinkerkit.settings import MEMORY_ITEMS_SHOWN, TEACH_CLAIMS, Home
@@ -395,12 +396,10 @@ def test_ask_and_teach_report_through_a_tracker_and_run_as_jobs(
     monkeypatch.setattr(cli.Internet, "required", staticmethod(lambda option: FakeWeb()))
     ended = []
     monkeypatch.setattr(
-        Commands,
-        "tracker_ended",
-        staticmethod(
-            lambda tracker, ending, took: ended.append(
-                (tracker.state["title"], ending["status"], tracker.state["steps"])
-            )
+        Tracker,
+        "end",
+        lambda tracker, ending, took: ended.append(
+            (tracker.state["title"], ending["status"], tracker.state["steps"])
         ),
     )
     fake_ollama.reply("Black formats it [1].", when="ask")

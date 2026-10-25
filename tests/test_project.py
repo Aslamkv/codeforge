@@ -22,7 +22,7 @@ from tinkerkit.project import (
     project_store,
     saved,
 )
-from tinkerkit.settings import Home
+from tinkerkit.settings import EXERCISE_ENV, Home
 from tinkerkit.workspace import TaughtCommands, Workspace
 
 
@@ -400,34 +400,51 @@ def test_a_jobs_tracker_keeps_its_job_number(home_store):
 
 
 @pytest.mark.spec("PRJ-14")
-def test_the_tracker_publishes_each_change(home_store, project_dir):
-    tracker = Tracker("a calculator", before=12.0)
-    store = project_store(project_dir)
-    tracker.project(store, "abc123", project_dir, "calc: a calculator")
-    tracker.phase("recall")
-    tracker.phase("spec")
-    tracker.points(1, 3)
-    tracker.wait({"name": "calc", "kind": "project"})
-    state = home_store.get("running", str(os.getpid()))
-    assert (
-        state["title"] == "calc: a calculator"
-        and state["run"] == "abc123"
-        and state["folder"] == str(project_dir)
-    )
-    assert state["step"] == "spec" and state["doing"] == "📝 Writing the spec" and state["before"] == 12.0
-    assert state["steps"] == ["🧠 Recalled what Tinker has learned"] and state["passing"] == [1, 3]
-    assert state["waiting"] == {"name": "calc", "kind": "project"} and state["pid"] == os.getpid()
-    assert state["job"] is None
-    events = [event["event"] for _, event in store.entries("progress")]
-    assert events == ["project", "phase", "phase", "points", "waiting"]
-    the_same_points = (1, 3)
-    tracker.points(*the_same_points)
-    assert len(store.entries("progress")) == 5
-    tracker.end({"status": "done", "headline": "Done."}, 30.0)
-    state = home_store.get("running", str(os.getpid()))
+def test_the_tracker_publishes_each_change_in_its_job(home_store, project_dir):
+    with Jobs.running(["task", "a", "calculator"]):
+        tracker = Tracker("a calculator", before=12.0)
+        store = project_store(project_dir)
+        tracker.project(store, "abc123", project_dir, "calc: a calculator")
+        tracker.phase("recall")
+        tracker.phase("spec")
+        tracker.points(1, 3)
+        tracker.wait({"name": "calc", "kind": "project"})
+        state = Jobs.get(1)["progress"]
+        assert (
+            state["title"] == "calc: a calculator"
+            and state["run"] == "abc123"
+            and state["folder"] == str(project_dir)
+        )
+        assert state["step"] == "spec" and state["doing"] == "📝 Writing the spec" and state["before"] == 12.0
+        assert state["steps"] == ["🧠 Recalled what Tinker has learned"] and state["passing"] == [1, 3]
+        assert state["waiting"] == {"name": "calc", "kind": "project"} and state["pid"] == os.getpid()
+        assert state["job"] == 1
+        events = [event["event"] for _, event in store.entries("progress")]
+        assert events == ["project", "phase", "phase", "points", "waiting"]
+        the_same_points = (1, 3)
+        tracker.points(*the_same_points)
+        assert len(store.entries("progress")) == 5
+        tracker.end({"status": "done", "headline": "Done."}, 30.0)
+    state = Jobs.get(1)["progress"]
     assert state["ended"]["status"] == "done" and state["seconds"] == 30.0 and state["resumed"] is None
-    tracker.close()
-    assert home_store.get("running", str(os.getpid())) is None
+
+
+@pytest.mark.spec("PRJ-14")
+def test_a_tracker_outside_a_job_publishes_nothing(home_store, project_dir, monkeypatch):
+    monkeypatch.delenv(EXERCISE_ENV, raising=False)
+    tracker = Tracker("a calculator")
+    tracker.project(project_store(project_dir), "abc123", project_dir)
+    tracker.phase("spec")
+    assert home_store.items("jobs") == {} and tracker.state["step"] == "spec"
+
+
+@pytest.mark.spec("PRJ-14")
+def test_an_exercise_build_publishes_in_the_exercise_job_as_build(home_store, monkeypatch):
+    Jobs.save({"number": 1, "command": "exercise", "title": "exercise rust", "state": "running"})
+    monkeypatch.setenv(EXERCISE_ENV, "1")
+    Tracker("calc").phase("spec")
+    job = Jobs.get(1)
+    assert job["build"]["step"] == "spec" and job["build"]["exercise"] and "progress" not in job
 
 
 @pytest.mark.spec("PRJ-15")
@@ -448,28 +465,29 @@ def test_steps_live_progress_and_messages(home_store, project_dir, monkeypatch):
         "reproduce",
         "amend",
     }
-    tracker = Tracker("calc")
-    store = project_store(project_dir)
-    tracker.project(store, "abc123", project_dir)
-    tracker.heard(Message("working", "Writing calc.py", 1))
-    tracker.heard(Message("live", "Writing calc.py… 14s", 2, "⏳"))
-    tracker.heard(Message("tally", "1/2 files"))
-    tracker.heard(Message("done", "Wrote calc.py (12 lines)", 1, "✅"))
-    tracker.heard(Message("found", "2/0 gives a clear error", 1, "💡"))
-    state = tracker.state
-    assert state["working"] == "Writing calc.py" and state["tally"] == "1/2 files"
-    assert state["found"] == "2/0 gives a clear error" and state["latest"] == "💡 2/0 gives a clear error"
-    assert [(entry["line"], entry["kind"]) for _, entry in store.entries("output")] == [
-        ("   ✅ Wrote calc.py (12 lines)", "done"),
-        ("   💡 2/0 gives a clear error", "found"),
-    ]
-    monkeypatch.setattr(Tracker, "QUIET_PUBLISH_SECONDS", 1000)
-    a_quiet_change = Message("text", "next line")
-    tracker.heard(a_quiet_change)
-    assert home_store.get("running", str(os.getpid()))["latest"] != "next line"
-    tracker.phase("verify")
-    state = home_store.get("running", str(os.getpid()))
-    assert state["latest"] == state["found"] == state["working"] == "" and state["tally"] == "1/2 files"
+    with Jobs.running(["task", "calc"]):
+        tracker = Tracker("calc")
+        store = project_store(project_dir)
+        tracker.project(store, "abc123", project_dir)
+        tracker.heard(Message("working", "Writing calc.py", 1))
+        tracker.heard(Message("live", "Writing calc.py… 14s", 2, "⏳"))
+        tracker.heard(Message("tally", "1/2 files"))
+        tracker.heard(Message("done", "Wrote calc.py (12 lines)", 1, "✅"))
+        tracker.heard(Message("found", "2/0 gives a clear error", 1, "💡"))
+        state = tracker.state
+        assert state["working"] == "Writing calc.py" and state["tally"] == "1/2 files"
+        assert state["found"] == "2/0 gives a clear error" and state["latest"] == "💡 2/0 gives a clear error"
+        assert [(entry["line"], entry["kind"]) for _, entry in store.entries("output")] == [
+            ("   ✅ Wrote calc.py (12 lines)", "done"),
+            ("   💡 2/0 gives a clear error", "found"),
+        ]
+        monkeypatch.setattr(Tracker, "QUIET_PUBLISH_SECONDS", 1000)
+        a_quiet_change = Message("text", "next line")
+        tracker.heard(a_quiet_change)
+        assert Jobs.get(1)["progress"]["latest"] != "next line"
+        tracker.phase("verify")
+        state = Jobs.get(1)["progress"]
+        assert state["latest"] == state["found"] == state["working"] == "" and state["tally"] == "1/2 files"
 
 
 @pytest.mark.spec("PRJ-15")

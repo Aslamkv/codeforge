@@ -149,8 +149,6 @@ def research_once(console, talk, topic):
         ending = {"status": status, "headline": "", "text": text}
     finally:
         tracker.end(ending, time.monotonic() - started)
-        if not started_by_a_conversation():
-            tracker.close()
 
 
 def command_once(console, talk, message):
@@ -518,7 +516,6 @@ class Desk:
             keep_exercise_board(sent)
             if self.exercise_reporter is reporter:
                 self.exercise_reporter = None
-            Home.store().delete("running", str(pid))
             self.say_status()
 
         threading.Thread(target=follow, daemon=True).start()
@@ -917,8 +914,6 @@ class Desk:
                 final or {}
             ).get("seconds", 0.0)
         reporter.finish(final)
-        if final is not None:
-            Home.store().delete("running", str(process.pid))
         if task["run"] and reporter.progress.waiting():
             plan = reporter.progress.snapshot["waiting"]
             self.waiting_plan = {
@@ -1532,7 +1527,8 @@ class Reporter:
                 self.update()
 
     def tracked(self):
-        return Home.store().get("running", str(self.pid)) if self.pid else None
+        job = Jobs.of_process(self.pid) if self.pid else None
+        return (job or {}).get("progress")
 
     def update(self):
         self.last_edit = time.monotonic()
@@ -1740,7 +1736,6 @@ class Attached:
 
     def end(self):
         self.reporter.finish(self.tracker.state)
-        self.tracker.close()
 
 
 def attach(title, tracker):
@@ -1765,22 +1760,21 @@ def persons_runs(skip=()):
 
 
 def exercising_now():
-    pids = {job["pid"] for job in Jobs.listed("running") if job["command"] == "exercise"}
-    state = next((state for state in running() if state["pid"] in pids), None)
-    return described(state) if state else None
+    jobs = [job for job in Jobs.listed("running") if job["command"] == "exercise" and job.get("progress")]
+    return described(tracker_of(jobs[0])) if jobs else None
 
 
 def running(skip=()):
-    found = []
-    for key, state in Home.store().items("running").items():
-        pid = int(key) if key.isdigit() else 0
-        if pid <= 0 or pid == os.getpid() or pid in skip:
-            continue
-        if not alive(pid, state.get("pid_began") if isinstance(state, dict) else None):
-            Home.store().delete("running", key)
-        elif isinstance(state, dict):
-            found.append(dict(state, pid=pid))
-    return found
+    return [
+        tracker_of(job)
+        for state in ("running", "paused")
+        for job in Jobs.listed(state)
+        if job.get("progress") and job["pid"] != os.getpid() and job["pid"] not in skip
+    ]
+
+
+def tracker_of(job):
+    return dict(job["progress"], pid=job["pid"])
 
 
 def exercise_switch(text):

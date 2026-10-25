@@ -671,7 +671,7 @@ class Commands:
             Models.remember(model)
             took = time.monotonic() - started
             say.title(f"Time taken: {human_duration(took)}", "⏱️")
-            Commands.tracker_ended(tracker, ending, took)
+            tracker.end(ending, took)
 
     @staticmethod
     def followed(title):
@@ -697,12 +697,6 @@ class Commands:
             stopped.details if isinstance(stopped, LearnStopped) else [("Why", first_line(str(stopped), 200))]
         )
         return {"status": "blocked", "headline": f"Nothing learned about {topic}", "details": details}
-
-    @staticmethod
-    def tracker_ended(tracker, ending, seconds):
-        tracker.end(ending, seconds)
-        if not conversation.started_by_a_conversation():
-            tracker.close()
 
     @staticmethod
     def learning_tools(option):
@@ -798,11 +792,9 @@ class Commands:
             Models.remember(model)
             took = time.monotonic() - started
             say.title(f"Time taken: {human_duration(took)}", "⏱️")
+            tracker.end(ending, took)
             if listening:
-                tracker.end(ending, took)
                 listening.end()
-            else:
-                Commands.tracker_ended(tracker, ending, took)
 
     @staticmethod
     def print_learned(topic, entry):
@@ -1217,8 +1209,6 @@ class ProjectRun:
         finally:
             if listening:
                 listening.end()
-            elif not conversation.started_by_a_conversation():
-                self.tracker.close()
         sys.exit(self.outcome.exit_code)
 
     def check_requirements(self):

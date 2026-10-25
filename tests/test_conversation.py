@@ -443,7 +443,7 @@ def test_reporter_shows_the_tracker_and_ends_with_its_ending(home_store, monkeyp
     reporter.update()
     one_per_chat = len(chats)
     assert len(channel.texts("send")) == one_per_chat
-    home_store.put("running", "4242", snapshot(step="spec", doing=Tracker.DOING_AND_DONE["spec"][0]))
+    keep_job(home_store, 1, 4242, snapshot(step="spec", doing=Tracker.DOING_AND_DONE["spec"][0]))
     reporter.refresh()
     assert "📝 Writing the spec" in channel.texts()[-1] and channel.log[-1][0] == "edit"
     edits = len(channel.log)
@@ -570,20 +570,27 @@ def test_research_searches_fall_back_to_the_topic(measured_model, fake_ollama):
     assert research.searches(Recorder(), "1", "python news") == ["a", "b", "c"]
 
 
+def keep_job(home_store, number, pid, progress, **job):
+    kept = {"number": number, "command": "task", "title": "task", "state": "running", "pid": pid, **job}
+    home_store.put("jobs", str(number), dict(kept, progress=progress) if progress else kept)
+
+
 @pytest.mark.spec("CNV-16")
 def test_running(home_store):
     ended = subprocess.Popen([sys.executable, "-c", "pass"])
     ended.wait()
-    home_store.put("running", str(ended.pid), snapshot(title="gone"))
-    home_store.put("running", str(os.getpid()), snapshot(title="mine"))
-    home_store.put("running", str(os.getppid()), snapshot(title="calc"))
-    home_store.put("running", "notapid", {})
+    keep_job(home_store, 1, ended.pid, snapshot(title="gone"))
+    keep_job(home_store, 2, os.getpid(), snapshot(title="mine"))
+    keep_job(home_store, 3, os.getppid(), snapshot(title="calc"))
+    keep_job(home_store, 4, os.getppid(), None)
+    keep_job(home_store, 5, os.getppid(), snapshot(title="done"), state="finished")
     assert [run["title"] for run in running()] == ["calc"] and running()[0]["pid"] == os.getppid()
     assert running(skip={os.getppid()}) == []
-    assert home_store.get("running", str(ended.pid)) is None
-    home_store.put("running", str(os.getppid()), snapshot(title="calc", pid_began="Sat Oct 24 16:32:00 2026"))
-    assert running() == [] and home_store.get("running", str(os.getppid())) is None
-    home_store.put("running", str(os.getppid()), snapshot(title="calc", pid_began=began_at(os.getppid())))
+    keep_job(home_store, 3, os.getppid(), snapshot(title="calc"), pid_began="Sat Oct 24 16:32:00 2026")
+    assert running() == []
+    keep_job(home_store, 3, os.getppid(), snapshot(title="calc"), pid_began=began_at(os.getppid()))
+    keep_job(home_store, 6, os.getppid(), snapshot(title="paused"), state="paused")
+    assert [run["title"] for run in running()] == ["calc", "paused"]
     shown = described(running()[0])
     assert shown["title"] == "calc" and shown["brief"].startswith("**calc**") and shown["pid"] == os.getppid()
 
@@ -603,7 +610,8 @@ if args[:1] == ["help"]:
 state = {"title": "calc: a calculator", "run": "abc123", "folder": folder, "step": "spec", "doing": "📝 Writing the spec",
          "began": time.time(), "steps": [], "passing": None, "live": "", "latest": "", "waiting": None, "ended": None,
          "before": 0.0, "seconds": 1.0}
-store.put("running", str(os.getpid()), state)
+job = {"number": os.getpid(), "command": "task", "title": "task", "state": "running", "pid": os.getpid()}
+store.put("jobs", str(os.getpid()), dict(job, progress=state))
 print("Plan: the spec (project)", flush=True)
 if args[:1] == ["slow"]:
     signal.signal(signal.SIGINT, lambda *a: (print("Interrupted.", flush=True), sys.exit(1)))
@@ -613,7 +621,7 @@ if args[:1] == ["task"]:
                         "kind": "project", "criteria": [["C1", "calc.add(2, 3) is 5"]], "folder": folder}
 else:
     state["ended"] = {"status": "done", "headline": "Done. All 1 spec tests pass (SPEC.md).", "details": [], "next": []}
-store.put("running", str(os.getpid()), state)
+store.put("jobs", str(os.getpid()), dict(job, progress=state))
 """
 
 
@@ -725,7 +733,6 @@ def test_a_task_runs_as_its_own_tinker_and_its_plan_waits(desk, home_store):
     )
     assert desk.waiting_plan["plan"].startswith("📋 **Plan for calc** · run `abc123`")
     assert desk.status().startswith("🙋 **Tinker** · calc: a calculator waits for you")
-    assert home_store.items("running") == {}
 
 
 @pytest.mark.spec("CNV-12")
@@ -879,7 +886,7 @@ def test_follow_reads_the_tasks_tracker(tmp_path, home_store):
     desk.echo_to_terminal, desk.messages_by_run, desk.seconds_by_run, desk.waiting_plan = False, {}, {}, None
     desk.say_status = lambda *args, **kwargs: None
     reporter = Reporter([Recorder()], "a calculator", pid=4343)
-    home_store.put("running", "4343", snapshot(folder="/tmp/projects/calc", waiting=PLAN))
+    keep_job(home_store, 1, 4343, snapshot(folder="/tmp/projects/calc", waiting=PLAN))
     process = type(
         "P",
         (),
@@ -894,7 +901,7 @@ def test_follow_reads_the_tasks_tracker(tmp_path, home_store):
     assert task["run"] == "abc123" and task["folder"] == Path("/tmp/projects/calc")
     assert task["title"] == "calc: a calculator" == reporter.progress.title
     assert desk.waiting_plan["run"] == "abc123" and desk.messages_by_run["abc123"] is reporter.sent
-    assert home_store.get("running", "4343") is None
+    assert reporter.tracked()["waiting"] == PLAN
 
 
 @pytest.mark.spec("CNV-4")
@@ -1063,7 +1070,7 @@ def test_a_job_says_its_status_as_it_starts_and_ends(desk, monkeypatch):
 def test_a_run_in_a_terminal_shows_its_title_and_never_how_far_it_got(home_store, tmp_path):
     desk = Desk([Recorder()], tmp_path)
     state = snapshot(title="calc", doing="🔨 Building", passing=[1, 2], pid_began=began_at(os.getppid()))
-    home_store.put("running", str(os.getppid()), state)
+    keep_job(home_store, 1, os.getppid(), state)
     assert desk.status() == "🔄 **Tinker** · working in a terminal on calc"
 
 
@@ -1191,7 +1198,6 @@ def test_a_terminal_task_reports_and_stops_on_a_signal(attached, home_store):
         os.kill(os.getpid(), conversation.JOB_STOP_SIGNAL)
         time.sleep(1)
     task.end()
-    assert home_store.get("running", str(os.getpid())) is None
     assert "🧠 Recalling what Tinker has learned" in channel.texts()[-1]
 
 
