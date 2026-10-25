@@ -14,7 +14,7 @@ from .settings import (
     first_line,
 )
 lazy from .knowledge import Item, Knowledge, Library
-lazy from .prompts import Part, Prompts, PromptTooLarge, Reply
+lazy from .prompts import Part, Prompts, Reply
 lazy from .workspace import TaughtCommands, Workspace
 
 Stopped = namedtuple("Stopped", "kind reason")
@@ -61,19 +61,10 @@ class Session:
         return Reply(answer.value, answer.thought)
 
     def ask_until_usable(self, system, parts, label, read, attempts=3, think=None, max_reply=None):
-        try:
-            result = self.model.ask_until_usable(system, parts, label, read, attempts, think, max_reply)
-        except PromptTooLarge as exc:
-            raise SystemExit(
-                f"{label}: even shortened, the prompt does not fit {self.model.name}'s input budget "
-                f"of {self.model.max_tokens} tokens ({exc}). Measure the model again (tinker calibrate) "
-                f"or use one that reads longer prompts (tinker models)."
-            )
-        if result is None:
-            raise SystemExit(
-                f"Could not get a usable {label.lower()}. See the model calls: tinker log --calls"
-            )
-        return result
+        answer = self.model.ask_until_usable(system, parts, label, read, attempts, think, max_reply)
+        return answer.needed(
+            f"Could not get a usable {label.lower()}. See the model calls: tinker log --calls"
+        )
 
     def room(self, system):
         return int(self.model.limit_chars(system + Prompts.NO_TOOL_CALLS) * 0.95)

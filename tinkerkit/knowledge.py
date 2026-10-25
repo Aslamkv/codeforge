@@ -5,8 +5,6 @@ lazy import collections
 lazy import hashlib
 lazy import math
 lazy import tempfile
-lazy import urllib.error
-lazy import urllib.request
 lazy from pathlib import Path
 
 from .messages import say
@@ -50,9 +48,9 @@ from .settings import (
     words,
 )
 lazy from .jobs import today
-lazy from .model import Models, Ollama, OllamaError
+lazy from .model import Answer, Models, Ollama, OllamaError
 lazy from .project import Tracked
-lazy from .prompts import Part, Prompts, PromptTooLarge
+lazy from .prompts import Part, Prompts
 lazy from .workspace import Toolchain, Workspace
 
 SavedPlan = namedtuple("SavedPlan", "plan saved")
@@ -459,12 +457,13 @@ class Learner(Tracked):
                 return SavedPlan(plan, True)
             except ValueError as exc:
                 say.warn(f"The plan saved last time cannot be used ({exc}), so making a new one")
-        plan = self.model.ask_until_usable(system, parts, label, lambda reply: read(reply.json()), attempts=2)
-        if plan is None:
-            raise SystemExit(
-                f"{self.model.name} gave no usable plan for {what}; see the log of its replies "
-                f"(tinker memory; its calls are in tinker learn's log)"
-            )
+        answer = self.model.ask_until_usable(
+            system, parts, label, lambda reply: read(reply.json()), attempts=2
+        )
+        plan = answer.needed(
+            f"{self.model.name} gave no usable plan for {what}; see the log of its replies "
+            f"(tinker memory; its calls are in tinker learn's log)"
+        )
         return SavedPlan(plan, False)
 
     @staticmethod
@@ -613,25 +612,23 @@ class Learner(Tracked):
 
     def facts_in(self, parts, page, number, part):
         try:
-            return (
-                self.model.ask_until_usable(
-                    Prompts.FACTS_SYSTEM,
-                    parts,
-                    f"Facts, page {number} part {part}",
-                    self.read_facts,
-                    attempts=2,
-                )
-                or []
+            answer = self.model.ask_until_usable(
+                Prompts.FACTS_SYSTEM,
+                parts,
+                f"Facts, page {number} part {part}",
+                self.read_facts,
+                attempts=2,
             )
-        except PromptTooLarge as exc:
-            self.notes.append(f"page {page['url']}: {first_line(str(exc), 160)}")
         except OllamaError as exc:
             self.model_failure = first_line(str(exc), 200)
             self.notes.append(
                 f"the model stopped answering at page {number}; the pages after it were not read"
             )
             say.warn(f"{self.notes[-1]} ({self.model_failure})")
-        return None
+            return None
+        if answer.why:
+            self.notes.append(f"page {page['url']}: {first_line(answer.why, 160)}")
+        return answer.value or []
 
     @staticmethod
     def read_facts(reply):
@@ -676,7 +673,7 @@ class Learner(Tracked):
         sources = self.rule_sources(facts, lessons)
         self.step("condense", f"Turning {len(facts)} fact(s) into rules a code writer can follow…", "✍️")
         with say.working_on(f"Turning {len(facts)} fact(s) about {plan['name']} into rules"):
-            rules = self.model.ask_until_usable(
+            answer = self.model.ask_until_usable(
                 Prompts.PLAYBOOK_SYSTEM,
                 self.playbook_parts(plan, facts, lessons),
                 "Condense the facts",
@@ -684,12 +681,15 @@ class Learner(Tracked):
                 attempts=2,
                 think=think,
             )
-        self.say_rules(rules, facts)
-        return rules or []
+        rules = answer.value or []
+        self.say_rules(rules, facts, answer.why)
+        return rules
 
-    def say_rules(self, rules, facts):
+    def say_rules(self, rules, facts, why):
         if not rules:
-            self.notes.append("the facts were not condensed into rules (no usable reply)")
+            self.notes.append(
+                f"the facts were not condensed into rules ({first_line(why, 160) or 'no usable reply'})"
+            )
         with say.section():
             if rules:
                 say.done(f"{len(rules)} rule(s)")
@@ -972,17 +972,19 @@ class Researcher:
     def analyse(self, frame, facts, differ):
         parts = self.analysis_parts(frame, facts, differ)
         try:
-            return self.model.ask_until_usable(
+            answer = self.model.ask_until_usable(
                 Prompts.RESEARCH_ANALYSIS_SYSTEM,
                 parts,
                 "Analyse the findings",
                 lambda reply: self.read_analysis(reply.json(), len(facts), len(frame["questions"])),
                 attempts=2,
             )
-        except (PromptTooLarge, OllamaError) as exc:
-            self.learner.notes.append(f"the findings could not be analysed ({first_line(str(exc), 160)})")
+        except OllamaError as exc:
+            answer = Answer(None, why=str(exc))
+        if answer.why:
+            self.learner.notes.append(f"the findings could not be analysed ({first_line(answer.why, 160)})")
             say.warn(self.learner.notes[-1])
-            return None
+        return answer.value
 
     def analysis_parts(self, frame, facts, differ):
         questions = "\n".join(

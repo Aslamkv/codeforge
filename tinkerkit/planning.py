@@ -963,13 +963,15 @@ class InterfaceReviewer(Phase):
             Part("External services: adapters and sample data", cycle.get("data", ""), atomic=True),
             Part("Language", self.project.language),
         ]
-        try:
-            return self.session.ask_until_usable(
-                Prompts.INTERFACE_SYSTEM, parts, label, self.read, attempts=2, max_reply=CHECK_MAX_TOKENS
+        answer = self.session.model.ask_until_usable(
+            Prompts.INTERFACE_SYSTEM, parts, label, self.read, attempts=2, max_reply=CHECK_MAX_TOKENS
+        )
+        if answer.why:
+            say.warn(
+                f"Could not get a usable {label.lower()} ({answer.why}). Going on with this part of the plan as it is."
             )
-        except SystemExit as exc:
-            say.warn(f"{exc} Going on with this part of the plan as it is.")
             return [], []
+        return answer.value
 
     def design_entry(self, path):
         info = self.project.files[path]
@@ -1107,13 +1109,15 @@ class ContractWriter(Worker):
             calls += 1
             parts, criteria = self.prompt(cycle, path, info, criteria, so_far, problems)
             label = f"Contract of {path}" + (f" (part {calls})" if calls > 1 or criteria else "")
-            try:
-                so_far, uses = self.session.ask_until_usable(
-                    Prompts.CONTRACT_SYSTEM, parts, label, self.read, attempts=2
+            answer = self.session.model.ask_until_usable(
+                Prompts.CONTRACT_SYSTEM, parts, label, self.read, attempts=2
+            )
+            if answer.why:
+                say.warn(
+                    f"Could not get a usable {label.lower()} ({answer.why}). Its contract stays as it is."
                 )
-            except SystemExit as exc:
-                say.warn(f"{exc} Its contract stays as it is.")
                 return None
+            so_far, uses = answer.value
             info["uses"] = list(
                 dict.fromkeys(
                     info.get("uses", [])

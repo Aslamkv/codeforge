@@ -114,11 +114,8 @@ class Exercise:
                 parts,
                 "exercise: next project",
                 lambda reply: read_choice(reply.json(), name, earlier),
-            )
-        if choice is None:
-            raise SystemExit(
-                f"{self.model.name} could not choose a practice project; the exercise stopped, "
-                f"everything kept."
+            ).needed(
+                f"{self.model.name} could not choose a practice project; the exercise stopped, everything kept."
             )
         project = dict(
             choice, folder=str(free_folder(choice["folder"])), step=PRACTICE_STEPS[0], started=now_text()
@@ -151,16 +148,19 @@ class Exercise:
         folder = Path(project["folder"])
         knowledge = Knowledge(exercise["language"], (run_of(folder) or {}).get("id"))
         with say.working_on(f"Learning from what went wrong and what was slow in {folder.name}"):
-            reflection = self.model.ask_until_usable(
+            answer = self.model.ask_until_usable(
                 Prompts.EXERCISE_REFLECT_SYSTEM,
                 reflection_parts(exercise, project, knowledge.known_lessons()),
                 "exercise: lessons",
                 lambda reply: read_reflection(reply.json()),
                 attempts=2,
             )
-        if reflection is None:
-            say.warn("No lessons from this project: nothing usable came of looking back at it.")
+        if answer.why:
+            say.warn(
+                f"No lessons from this project: nothing usable came of looking back at it ({answer.why})."
+            )
             return
+        reflection = answer.value
         names = [folder.name] + [Path(path).name for path in Project.load(folder).files]
         project["lessons"] = knowledge.add_lessons(reflection["lessons"], reflection["confirmed"], names)
         exercise["focus"] = reflection["focus"] or exercise.get("focus", "")
@@ -214,9 +214,7 @@ def identified(model, asked):
         "exercise: which language",
         lambda reply: read_verdict(reply.json()),
         attempts=2,
-    )
-    if verdict is None:
-        raise SystemExit(f"Could not tell whether {asked!r} is a programming language; nothing done.")
+    ).needed(f"Could not tell whether {asked!r} is a programming language; nothing done.")
     if verdict["verdict"] == "ambiguous":
         choices = verdict["choices"] or ["one language"]
         raise SystemExit(

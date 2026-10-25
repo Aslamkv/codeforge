@@ -7,7 +7,7 @@ from .messages import say
 from .session import Phase, Stopped
 from .settings import ENV_EXAMPLE, ENV_FILE, FILES_SHOWN_PER_FIX, field, first_line, one_line
 lazy from .building import ToolchainRepair, Verifier
-lazy from .model import OllamaError
+lazy from .model import Answer, OllamaError
 lazy from .prompts import Part, Prompts, PromptTooLarge
 lazy from .workspace import FileView, Output, TaughtCommands, TestRef, Toolchain
 
@@ -186,13 +186,14 @@ class ReadmeWriter(Phase):
             ],
         ]
         try:
-            found = self.session.model.ask_until_usable(
+            answer = self.session.model.ask_until_usable(
                 Prompts.README_SYSTEM, parts, "README", self.read, attempts=2, think=False
             )
-        except (PromptTooLarge, OllamaError) as exc:
-            say.warn(f"README: {first_line(str(exc), 120)}; its features are the spec's criteria")
-            found = None
-        return found or {
+        except OllamaError as exc:
+            answer = Answer(None, why=str(exc))
+        if answer.why:
+            say.warn(f"README: {first_line(answer.why, 120)}; its features are the spec's criteria")
+        return answer.value or {
             "overview": "",
             "features": [criterion["behaviour"] for criterion in self.project.criteria],
             "usage": [],

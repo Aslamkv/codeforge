@@ -183,9 +183,7 @@ class Reader(Tracked):
                 "Read: the reading plan",
                 lambda reply: read_survey(reply.json(), book),
                 think=think(),
-            )
-        if survey is None:
-            raise SystemExit(f"{self.model.name} could not make a reading plan; its text stays stored.")
+            ).needed(f"{self.model.name} could not make a reading plan; its text stays stored.")
         Readings.surveyed(entry, survey)
         core = [str(chapter.number) for chapter in book.chapters if order_of(survey, chapter) == "core"]
         with say.section():
@@ -236,7 +234,7 @@ class Reader(Tracked):
                 lambda reply: read_points(reply.json(), survey["software"]),
                 attempts=2,
                 think=think(),
-            )
+            ).value
             found += [
                 dict(point, chapter=chapter.number, slot=f"chapter {chapter.number}")
                 for point in points or []

@@ -210,7 +210,11 @@ class Model:
             return None
         if exc.in_reply:
             tries.reply_errors += 1
-            return Answer(exc.partial) if self.reply_error_is_final(exc, shown, started, tries.reply_errors) else None
+            return (
+                Answer(exc.partial)
+                if self.reply_error_is_final(exc, shown, started, tries.reply_errors)
+                else None
+            )
         self.recover(exc, label, tries)
         return None
 
@@ -432,20 +436,23 @@ class Model:
             Ollama.unload(self.name)
 
     def ask_until_usable(self, system, parts, label, read, attempts=3, think=None, max_reply=None):
+        problem = None
         for attempt in range(1, attempts + 1):
-            reply = Reply(
-                self.ask(
+            try:
+                answer = self.ask(
                     system,
                     parts,
                     f"{label} (attempt {attempt})",
                     done_when=Reply.json_complete,
                     think=think,
                     max_reply=max_reply,
-                ).value
-            )
+                )
+            except PromptTooLarge as exc:
+                return Answer(None, why=self.too_large_why(exc))
             try:
-                return read(reply)
+                return Answer(read(Reply(answer.value)))
             except (ValueError, ToolError, AttributeError, TypeError, KeyError) as exc:
+                problem = exc
                 self.note(
                     f"{label.lower()} not usable: {exc}",
                     f"{say.going_on()}: no usable result yet, trying again" if attempt < attempts else "",
@@ -456,7 +463,14 @@ class Model:
                         "Note", f"Your previous reply was not usable ({exc}). Reply with ONLY the JSON.", True
                     ),
                 )
-        return None
+        return Answer(None, why=f"no usable reply after {attempts} attempt(s): {problem}")
+
+    def too_large_why(self, exc):
+        return (
+            f"even shortened, the prompt does not fit {self.name}'s input budget of {self.max_tokens} tokens "
+            f"({exc}). Measure the model again (tinker calibrate) or use one that reads longer prompts "
+            f"(tinker models)"
+        )
 
     def limit_chars(self, system, tokens=None):
         return (

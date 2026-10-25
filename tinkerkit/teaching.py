@@ -66,7 +66,6 @@ def moved_on(tracker, phase, said, icon):
         tracker.phase(phase)
 
 
-
 class Asker:
     def __init__(self, model, memory, tracker=None):
         self.model, self.memory, self.tracker = model, memory, tracker
@@ -138,9 +137,7 @@ class Teacher:
                 parts,
                 "teach: what to check",
                 lambda reply: read_plan(reply.json(), len(items), marked(teaching), bool(self.readings)),
-            )
-        if plan is None:
-            raise SystemExit(f"{self.model.name} could not work out what to check; nothing changed")
+            ).needed(f"{self.model.name} could not work out what to check; nothing changed")
         with say.part("What you taught", "📝"):
             for claim in plan["claims"]:
                 say.info(claim["text"], "👤" if claim["preference"] else "🔍")
@@ -211,15 +208,12 @@ class Teacher:
         moved_on(self.tracker, "judge", "Weighing the evidence…", "⚖️")
         facts = sum(not claim["preference"] for claim in plan["claims"])
         with say.working_on(f"Weighing {len(evidence)} piece(s) of evidence on {facts} fact(s) you taught"):
-            verdict = self.model.ask_until_usable(
+            return self.model.ask_until_usable(
                 Prompts.JUDGE_SYSTEM,
                 self.judge_parts(teaching, plan, items, evidence),
                 "teach: weigh the evidence",
                 lambda reply: Verdict.read(reply.json(), plan, len(evidence)),
-            )
-        if verdict is None:
-            raise SystemExit(f"{self.model.name} could not weigh the evidence; nothing changed")
-        return verdict
+            ).needed(f"{self.model.name} could not weigh the evidence; nothing changed")
 
     @staticmethod
     def judge_parts(teaching, plan, items, evidence):

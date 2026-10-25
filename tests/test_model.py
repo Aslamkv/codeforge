@@ -389,7 +389,9 @@ def test_model_settings(make_model):
 def test_ask_once(make_model, fake_ollama, model_log):
     fake_ollama.reply("the answer")
     model = make_model()
-    assert model.ask("You help.", [Part("Question", "what?", True), Part("Empty", "")], "Ask") == Answer("the answer")
+    assert model.ask("You help.", [Part("Question", "what?", True), Part("Empty", "")], "Ask") == Answer(
+        "the answer"
+    )
     messages = fake_ollama.calls[0]["messages"]
     assert messages[0] == {"role": "system", "content": "You help." + Prompts.NO_TOOL_CALLS}
     assert messages[1] == {"role": "user", "content": "## Question\nwhat?"}
@@ -402,7 +404,8 @@ def test_ask_once(make_model, fake_ollama, model_log):
 def test_a_model_logs_its_details_and_says_only_when_it_asks_again(model_log, fake_ollama, capsys):
     fake_ollama.reply("not json").reply('{"ok": 1}')
     model = Model(MODEL, MEASURED, 0, model_log)
-    assert model.ask_until_usable("s", [Part("Q", "q", True)], "Plan", lambda reply: reply.json()["ok"]) == 1
+    answer = model.ask_until_usable("s", [Part("Q", "q", True)], "Plan", lambda reply: reply.json()["ok"])
+    assert answer.value == 1
     assert capsys.readouterr().out == "🔁 Working on it: no usable result yet, trying again\n"
     notes = [entry["note"] for _, entry in model_log.store.entries("calls") if "note" in entry]
     assert any(note.startswith("Plan (attempt 1)") for note in notes) and any(
@@ -453,7 +456,9 @@ def test_without_unthinking_retry_it_gives_up(make_model, fake_ollama):
 def test_a_cut_reply_whose_blocks_have_ended_is_kept(make_model, fake_ollama):
     answer = "<<<FILE a.py>>>\nx = 1\n<<<END>>>\nI"
     fake_ollama.reply({"content": answer, "thinking": "t", "done_reason": "length", "eval_count": 4096})
-    assert make_model().ask("s", [Part("Q", "q", True)], "Ask", done_when=Reply.files_complete) == Answer(answer)
+    assert make_model().ask("s", [Part("Q", "q", True)], "Ask", done_when=Reply.files_complete) == Answer(
+        answer
+    )
     assert len(fake_ollama.calls) == 1
 
 
@@ -540,12 +545,12 @@ def test_a_prompt_too_large_is_relaxed_then_refused(make_model, fake_ollama, mod
 
 
 @pytest.mark.spec("MOD-21")
-def test_ask_until_usable(make_model, fake_ollama):
+def test_ask_until_usable(make_model, fake_ollama, monkeypatch):
     fake_ollama.reply("not json").reply('{"ok": true}')
-    result = make_model().ask_until_usable(
+    answer = make_model().ask_until_usable(
         "s", [Part("Q", "q", True)], "Plan", lambda reply: reply.json()["ok"]
     )
-    assert result is True
+    assert answer == Answer(True)
     assert (
         "Your previous reply was not usable (no JSON object in reply)"
         in fake_ollama.calls[1]["messages"][1]["content"]
@@ -555,12 +560,21 @@ def test_ask_until_usable(make_model, fake_ollama):
         "Plan (attempt 2)",
     ]
     fake_ollama.reply("no", times=2)
-    assert (
-        make_model().ask_until_usable(
-            "s", [Part("Q", "q", True)], "Plan", lambda reply: reply.json(), attempts=2
-        )
-        is None
+    answer = make_model().ask_until_usable(
+        "s", [Part("Q", "q", True)], "Plan", lambda reply: reply.json(), attempts=2
     )
+    assert (
+        answer.value is None and answer.why == "no usable reply after 2 attempt(s): no JSON object in reply"
+    )
+    model = make_model()
+
+    def too_large(*args, **kwargs):
+        raise PromptTooLarge("too big")
+
+    monkeypatch.setattr(model, "ask", too_large)
+    answer = model.ask_until_usable("s", [], "Plan", lambda reply: reply)
+    assert answer.value is None and "even shortened, the prompt does not fit" in answer.why
+    assert "(too big)" in answer.why and "tinker calibrate" in answer.why
 
 
 @pytest.mark.spec("MOD-22")
