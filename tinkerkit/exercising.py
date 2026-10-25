@@ -106,7 +106,7 @@ class Exercise:
         parts = [
             Part("Language", name, True),
             Part("Focus", exercise.get("focus") or "(none yet)", True),
-            Part("Earlier projects", "\n".join(f"- {task}" for task in earlier[-30:]) or "(none yet)", True),
+            Part("Earlier projects", Part.bullets(earlier[-30:]) or "(none yet)", True),
         ]
         focus = f", practising {exercise['focus']}" if exercise.get("focus") else ""
         with say.working_on(f"Choosing practice project {len(earlier) + 1} in {name}{focus}"):
@@ -390,11 +390,11 @@ def reflection_parts(exercise, project, known):
         ),
         Part(
             "Earlier projects' measures",
-            "\n".join(f"- {measures_line(practice['measures'])}" for practice in earlier) or "(none yet)",
+            Part.bullets(measures_line(practice["measures"]) for practice in earlier) or "(none yet)",
         ),
         Part(
             "Problems",
-            "\n".join(f"- {problem}" for problem in project["problems"]) or "(none)",
+            Part.bullets(project["problems"]) or "(none)",
             True,
             keep="tail",
         ),

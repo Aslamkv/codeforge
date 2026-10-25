@@ -81,20 +81,12 @@ class Command:
         example="",
         rows=(),
     ):
-        self.name, self.group, self.synopsis, self.what, self.about = (
-            name,
-            group,
-            synopsis,
-            what,
-            about or what,
-        )
+        self.name, self.group, self.synopsis, self.what = name, group, synopsis, what
+        self.about = about or what
         self.kind, self.chat, self.actions = kind, chat, tuple(actions)
         self.words, self.cli, self.run, self.deletes = words, cli, run, deletes
-        self.arguments, self.options, self.example = (
-            list(arguments),
-            [OPTIONS[option] for option in options],
-            example,
-        )
+        self.arguments, self.example = list(arguments), example
+        self.options = [OPTIONS[option] for option in options]
         self.rows = list(rows) or [(synopsis, what)]
 
 

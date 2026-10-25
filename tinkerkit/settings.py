@@ -538,10 +538,6 @@ def is_number(value):
     return isinstance(value, (int, float)) and not isinstance(value, bool)
 
 
-def number_from(value, least, whole=True):
-    return is_number(value) and (not whole or isinstance(value, int)) and not value < least
-
-
 class Store:
     SCHEMA = (
         "CREATE TABLE IF NOT EXISTS docs (collection TEXT NOT NULL, key TEXT NOT NULL, value TEXT NOT NULL, "
@@ -722,6 +718,10 @@ def projects_folder():
 def first_line(text, limit=140):
     line = (text or "").strip().splitlines()[0] if (text or "").strip() else ""
     return line if len(line) <= limit else line[: limit - 3] + "..."
+
+
+def one_line(value):
+    return " ".join(str(value or "").split())
 
 
 def now_text():

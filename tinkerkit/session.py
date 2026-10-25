@@ -82,25 +82,20 @@ class Session:
         lessons = self.knowledge.lessons(phases)
         proven = [fact for fact in self.knowledge.facts(phases) if fact["id"] not in self.inapplicable()]
         learned = self.learned_for(phases, {fact["id"] for fact in proven})
-        self.used(
-            [f"lesson:{lesson['id']}" for lesson in lessons]
-            + [f"known:{fact['id']}" for fact in proven]
-            + [f"fact:{item['topic']}:{item['id']}" for item in learned if item.get("id")],
-            phases,
-        )
-        facts = [f"- [{self.project.language or 'the language'}] {fact['text']}" for fact in proven] + [
-            f"- [{item['name']}] {item['text']}" for item in learned
+        self.used(self.ids_used(lessons, proven, learned), phases)
+        facts = [f"[{self.project.language or 'the language'}] {fact['text']}" for fact in proven] + [
+            f"[{item['name']}] {item['text']}" for item in learned
         ]
         parts = [
             Part(
                 "Lessons from earlier projects (follow them)",
-                "\n".join(f"- {lesson['text']}" for lesson in lessons),
+                Part.bullets(lesson["text"] for lesson in lessons),
                 atomic=True,
                 place="first",
             ),
             Part(
                 "Learned from the web (current; newer than what you were trained on)",
-                "\n".join(facts),
+                Part.bullets(facts),
                 place="first",
             ),
         ]
@@ -108,6 +103,14 @@ class Session:
             parts
             + ([TaughtCommands.prompt_part()] if "toolchain" in phases else [])
             + self.checks_part(phases)
+        )
+
+    @staticmethod
+    def ids_used(lessons, proven, learned):
+        return (
+            [f"lesson:{lesson['id']}" for lesson in lessons]
+            + [f"known:{fact['id']}" for fact in proven]
+            + [f"fact:{item['topic']}:{item['id']}" for item in learned if item.get("id")]
         )
 
     def checks_part(self, phases):

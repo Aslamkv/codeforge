@@ -211,50 +211,49 @@ class Teacher:
 
     def judged(self, teaching, plan, items, evidence):
         moved_on(self.tracker, "judge", "Weighing the evidence…", "⚖️")
-        claims = list(enumerate(plan["claims"], 1))
-        parts = [
-            Part("What the person teaches", teaching, True),
-            Part(
-                "Facts",
-                "\n".join(
-                    f"{number}. {claim['text']}" for number, claim in claims if not claim["preference"]
-                ),
-                True,
-            ),
-            Part(
-                "The person's preferences",
-                "\n".join(f"{number}. {claim['text']}" for number, claim in claims if claim["preference"]),
-            ),
-            Part(
-                "Changes",
-                "\n\n".join(
-                    f"Change {number} "
-                    f"(rests on claims {', '.join(map(str, change['claims']))}):\n"
-                    f"{change_text(change, plan['language'], items)}"
-                    for number, change in judged_changes(plan)
-                ),
-                True,
-            ),
-            Part(
-                "Evidence",
-                "\n\n".join(
-                    f"[{number}] {piece['source']}\n{piece['text']}"
-                    for number, piece in enumerate(evidence, 1)
-                ),
-                True,
-            ),
-        ]
         facts = sum(not claim["preference"] for claim in plan["claims"])
         with say.working_on(f"Weighing {len(evidence)} piece(s) of evidence on {facts} fact(s) you taught"):
             verdict = self.model.ask_until_usable(
                 Prompts.JUDGE_SYSTEM,
-                parts,
+                self.judge_parts(teaching, plan, items, evidence),
                 "teach: weigh the evidence",
                 lambda reply: Verdict.read(reply.json(), plan, len(evidence)),
             )
         if verdict is None:
             raise SystemExit(f"{self.model.name} could not weigh the evidence; nothing changed")
         return verdict
+
+    @staticmethod
+    def judge_parts(teaching, plan, items, evidence):
+        return [
+            Part("What the person teaches", teaching, True),
+            Part("Facts", Teacher.numbered_claims(plan, preference=False), True),
+            Part("The person's preferences", Teacher.numbered_claims(plan, preference=True)),
+            Part("Changes", Teacher.judged_changes_text(plan, items), True),
+            Part("Evidence", Teacher.numbered_evidence(evidence), True),
+        ]
+
+    @staticmethod
+    def numbered_claims(plan, preference):
+        return "\n".join(
+            f"{number}. {claim['text']}"
+            for number, claim in enumerate(plan["claims"], 1)
+            if bool(claim["preference"]) == preference
+        )
+
+    @staticmethod
+    def judged_changes_text(plan, items):
+        return "\n\n".join(
+            f"Change {number} (rests on claims {', '.join(map(str, change['claims']))}):\n"
+            f"{change_text(change, plan['language'], items)}"
+            for number, change in judged_changes(plan)
+        )
+
+    @staticmethod
+    def numbered_evidence(evidence):
+        return "\n\n".join(
+            f"[{number}] {piece['source']}\n{piece['text']}" for number, piece in enumerate(evidence, 1)
+        )
 
     def corrected(self, teaching, plan, items, evidence, verdict):
         moved_on(self.tracker, "correct", "Correcting what Tinker keeps…", "✏️")

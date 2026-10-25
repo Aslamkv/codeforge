@@ -4,7 +4,6 @@ import re
 from collections import namedtuple
 lazy import json
 lazy import os
-lazy import socket
 lazy import time
 lazy import urllib.error
 lazy import urllib.parse
@@ -404,7 +403,7 @@ class WebError(Exception):
 
 def unreached(exc):
     reason = first_line(str(getattr(exc, "reason", "") or exc) or type(exc).__name__, 160)
-    return Unreached(reason, isinstance(exc, (TimeoutError, socket.timeout)) or "timed out" in reason)
+    return Unreached(reason, isinstance(exc, TimeoutError) or "timed out" in reason)
 
 
 def is_web_address(url):

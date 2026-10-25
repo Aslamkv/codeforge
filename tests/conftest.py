@@ -177,7 +177,7 @@ def project_dir(tmp_path):
 
 
 PY = sys.executable
-PYTEST = f'"{PY}" -m pytest -q -p no:cacheprovider'
+PYTEST = f'"{PY}" -m pytest -q -p no:cacheprovider -p no:debugging -p no:doctest -p no:junitxml -p no:pastebin -p no:legacypath'
 TOOLCHAIN = {
     "setup": [],
     "activate": "",

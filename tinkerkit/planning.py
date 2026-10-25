@@ -1182,7 +1182,7 @@ class ContractWriter(Worker):
             ),
             Part(
                 "Problems the plan review found in it (fix them)",
-                "\n".join(f"- {problem}" for problem in problems),
+                Part.bullets(problems),
                 bool(problems),
                 exact=True,
             ),

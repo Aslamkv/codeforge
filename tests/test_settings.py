@@ -23,6 +23,7 @@ from tinkerkit.settings import (
     fingerprint,
     first_line,
     groups_fitting,
+    one_line,
     similarity,
     split_text,
     words,
@@ -354,6 +355,11 @@ def test_first_line():
     assert first_line("\n  hello world\nsecond") == "hello world"
     assert first_line(None) == "" and first_line("   ") == ""
     assert first_line("x" * 200, 10) == "xxxxxxx..."
+
+
+@pytest.mark.spec("SET-14")
+def test_one_line():
+    assert one_line("  a\n\tb   c ") == "a b c" and one_line(None) == "" and one_line(7) == "7"
 
 
 @pytest.mark.spec("SET-14")

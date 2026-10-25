@@ -1249,15 +1249,26 @@ class ProjectRun:
         Jobs.retarget(["resume", f"@{self.record['id']}"])
         self.log = Log(project.store, "events")
         say.keep_log(self.log)
-        model = Model(
+        model = self.configured_model(model_name, settings)
+        self.record["model"] = model.name
+        self.print_header(model, workdir)
+        self.log_start(model)
+        self.session = Session(
+            model, project, DEFAULT_MAX_STALL, self.internet, confirm=args.confirm, tracker=self.tracker
+        )
+        if project.language:
+            say.info(f"Learned so far: {self.session.knowledge.summary()}", "🧠")
+
+    def configured_model(self, model_name, settings):
+        return Model(
             model_name,
             settings,
             Config.keep_alive(Config.get("keep_alive")),
             self.log,
             max_growth=float(Config.get("max_growth")),
         )
-        self.record["model"] = model.name
-        self.print_header(model, workdir)
+
+    def log_start(self, model):
         self.log.add(
             {
                 "label": "session start",
@@ -1266,11 +1277,6 @@ class ProjectRun:
                 "started": clock(self.started_at),
             }
         )
-        self.session = Session(
-            model, project, DEFAULT_MAX_STALL, self.internet, confirm=args.confirm, tracker=self.tracker
-        )
-        if project.language:
-            say.info(f"Learned so far: {self.session.knowledge.summary()}", "🧠")
 
     def print_header(self, model, workdir):
         run, mode, args = self.record, self.mode, self.args
@@ -1537,17 +1543,19 @@ class ProjectRun:
                 "No code change can fix that. Check the commands in SPEC.md (setup, test_all) and the dependency",
                 f"file, then continue with: tinker resume @{run_id}",
             ]
-        green, parked, total = session.project.counts()
-        return (
-            [
-                f"Stopped: {green}/{total} tests pass; {parked} parked after fixing and a review against the plan:"
-            ]
-            + [
+        return ProjectRun.parked_report(session.project, run_id)
+
+    @staticmethod
+    def parked_report(project, run_id):
+        green, parked, total = project.counts()
+        return [
+            f"Stopped: {green}/{total} tests pass; {parked} parked after fixing and a review against the plan:",
+            *(
                 f"  {criterion['id']} {criterion['title']}: {first_line(criterion.get('last_error', ''), 160)}"
-                for criterion in session.project.parked()
-            ]
-            + [f"Change what it cannot (the request, the plan, a dependency), then: tinker resume @{run_id}"]
-        )
+                for criterion in project.parked()
+            ),
+            f"Change what it cannot (the request, the plan, a dependency), then: tinker resume @{run_id}",
+        ]
 
 
 class ProjectFolder:
