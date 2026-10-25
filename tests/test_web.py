@@ -6,9 +6,9 @@ from email.message import Message
 
 import pytest
 
+from tinkerkit import web
 from tinkerkit.fetcher import Fetched, Fetcher
 from tinkerkit.settings import WEB_BACKENDS, Config
-from tinkerkit import web
 from tinkerkit.web import (
     DuckDuckGoWeb,
     Internet,
