@@ -17,7 +17,6 @@ lazy from .fetcher import Fetcher
 lazy from .jobs import journaled
 lazy from .passages import Block, MainBlocks, is_html, text_blocks
 
-Unreached = namedtuple("Unreached", "why timed_out")
 TEXT_KINDS = (
     "text/plain",
     "text/markdown",
@@ -252,8 +251,9 @@ class WebBackend:
         except urllib.error.HTTPError as exc:
             raise WebError(f"{host(url)} answered HTTP {exc.code}", retry=exc.code >= 500)
         except Exception as exc:
-            reason, timed_out = unreached(exc)
-            raise WebError(f"{host(url)}: {reason}", retry=timed_out, unreachable=not timed_out)
+            raise WebError(
+                f"{host(url)}: {unreached(exc)}", retry=timed_out(exc), unreachable=not timed_out(exc)
+            )
 
     @staticmethod
     def target(href):
@@ -270,7 +270,6 @@ class WebBackend:
 class OllamaWeb(WebBackend):
     BASE = "https://ollama.com/api"
     KEY_ENV = "OLLAMA_API_KEY"
-    MAX_ANSWER_BYTES = 2_000_000
     HINTS = {401: ": check OLLAMA_API_KEY", 403: ": check OLLAMA_API_KEY", 429: ": its rate limit"}
 
     @classmethod
@@ -296,11 +295,11 @@ class OllamaWeb(WebBackend):
         )
         try:
             with urllib.request.urlopen(request, timeout=self.timeout) as response:
-                body = response.read(self.MAX_ANSWER_BYTES)
+                body = response.read(self.MAX_BYTES)
         except urllib.error.HTTPError as exc:
             raise WebError(f"ollama.com answered HTTP {exc.code}{self.HINTS.get(exc.code, '')}")
         except Exception as exc:
-            raise WebError(f"ollama.com: {unreached(exc).why}")
+            raise WebError(f"ollama.com: {unreached(exc)}")
         return self.json_object(body)
 
     @staticmethod
@@ -342,8 +341,11 @@ class WebError(Exception):
 
 
 def unreached(exc):
-    reason = first_line(str(getattr(exc, "reason", "") or exc) or type(exc).__name__, 160)
-    return Unreached(reason, isinstance(exc, TimeoutError) or "timed out" in reason)
+    return first_line(str(getattr(exc, "reason", "") or exc) or type(exc).__name__, 160)
+
+
+def timed_out(exc):
+    return isinstance(exc, TimeoutError) or "timed out" in unreached(exc)
 
 
 def host(url):

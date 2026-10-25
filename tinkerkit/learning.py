@@ -276,31 +276,25 @@ class SlotLearner(Tracked):
     def doc_pages(self, slug, name, version, search, cap):
         if cap <= 0:
             return []
-        key, kept = version or "latest", DocCache.get(slug, version or "latest")
-        if kept is None:
-            pages = self.searched_docs(name, " ".join(search.format(name=name, version=version).split()), cap)
-            if pages:
-                DocCache.put(slug, key, pages)
-        else:
-            pages = kept
+        key = version or "latest"
+        kept = DocCache.get(slug, key)
+        pages = kept or self.searched_docs(slug, key, name, search.format(name=name, version=version), cap)
         if pages:
             self.docs[slug] = key
-        self.pages.update(**{"docs" if kept is None else "kept docs": len(pages)})
-        say.info(
-            f"Read {len(pages)} page(s) of the {slug} {key} documentation"
-            + ("" if kept is None else " (the copy saved last time)")
-            if pages
-            else f"Found no {slug} {key} documentation",
-            "📖",
-        )
+        self.pages.update(**{"kept docs" if kept else "docs": len(pages)})
+        say_docs(slug, key, pages, kept)
         return pages
 
-    def searched_docs(self, name, query, cap):
+    def searched_docs(self, slug, key, name, search, cap):
+        query = " ".join(search.split())
         with say.working_on(f'Searching the web for "{query}"'):
             results = self.search(query)
             picked = self.picked(name, results, cap) if results else []
             fetched = self.internet.fetch([result["url"] for result in picked]) if picked else []
-        return [page for page in map(self.page_of, fetched) if page.usable()]
+        pages = [page for page in map(self.page_of, fetched) if page.usable()]
+        if pages:
+            DocCache.put(slug, key, pages)
+        return pages
 
     def enough_pages(self, pages):
         usable = [page for page in pages if page.usable()]
@@ -537,6 +531,14 @@ def version_of(machine, commands):
         ),
         "",
     )
+
+
+def say_docs(slug, key, pages, kept):
+    if not pages:
+        say.info(f"Found no {slug} {key} documentation", "📖")
+        return
+    saved = " (the copy saved last time)" if kept else ""
+    say.info(f"Read {len(pages)} page(s) of the {slug} {key} documentation{saved}", "📖")
 
 
 def read_plan(data):

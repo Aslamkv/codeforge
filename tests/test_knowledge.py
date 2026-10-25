@@ -1,6 +1,7 @@
 import json
 
 import pytest
+from conftest import web_page
 
 from tinkerkit.knowledge import (
     Embeddings,
@@ -26,7 +27,7 @@ from tinkerkit.settings import (
     Config,
     Home,
 )
-from tinkerkit.web import WebPage, readable
+from tinkerkit.web import WebPage
 from tinkerkit.workspace import Toolchain
 
 
@@ -443,8 +444,7 @@ class FakeInternet:
     def page(self, url):
         if url not in self.pages:
             return WebPage.failed(url, "HTTP 404")
-        title, blocks = readable(self.pages[url], "text/plain")
-        return WebPage(url, "text/plain", self.pages[url].encode(), blocks, title, "")
+        return web_page(url, self.pages[url])
 
 
 @pytest.mark.spec("KNW-24")

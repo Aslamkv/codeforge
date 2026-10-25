@@ -3,6 +3,7 @@ import json
 import re
 
 import pytest
+from conftest import web_page
 
 from tinkerkit.knowledge import Knowledge, Library
 from tinkerkit.learning import (
@@ -18,7 +19,7 @@ from tinkerkit.project import Tracker
 from tinkerkit.prompts import Reply
 from tinkerkit.settings import FACTS_PER_SLOT, SLOT_CANDIDATE_PASSAGES, Config, Home
 from tinkerkit.slots import PROFILES, Selector, missing, short_slots, web_slots
-from tinkerkit.web import RequestLog, WebPage, readable
+from tinkerkit.web import RequestLog, WebPage
 
 
 class FakeWeb:
@@ -40,8 +41,7 @@ class FakeWeb:
         self.requests("fetch", "standard", why, 0.01, url)
         if why:
             return WebPage.failed(url, why)
-        title, blocks = readable(self.pages[url], "text/html")
-        return WebPage(url, "text/html", self.pages[url].encode(), blocks, title, "")
+        return web_page(url, self.pages[url], "text/html")
 
 
 class CountingModel:

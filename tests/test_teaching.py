@@ -2,7 +2,7 @@ import json
 import sys
 
 import pytest
-from conftest import MODEL, TOOLCHAIN
+from conftest import MODEL, TOOLCHAIN, web_page
 
 from tinkerkit import cli
 from tinkerkit.cli import Cli, Commands
@@ -14,7 +14,6 @@ from tinkerkit.prompts import Prompts
 from tinkerkit.reading import Readings
 from tinkerkit.settings import MEMORY_ITEMS_SHOWN, TEACH_CLAIMS, Home
 from tinkerkit.teaching import Asker, Memory, Teacher, Verdict, marked, read_plan
-from tinkerkit.web import WebPage, readable
 from tinkerkit.workspace import Toolchain
 
 PY = sys.executable
@@ -39,8 +38,7 @@ class FakeWeb:
 
     def page(self, url):
         page = next(page for page in self.pages if page["url"] == url)
-        title, blocks = readable(page["content"], "text/plain")
-        return WebPage(url, "text/plain", page["content"].encode(), blocks, title, "")
+        return web_page(url, page["content"])
 
 
 @pytest.fixture
