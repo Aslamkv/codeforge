@@ -8,9 +8,10 @@ lazy from collections import Counter
 from .messages import Message, Messages, say
 lazy from .docsite import DocSite
 lazy from .jobs import today
-lazy from .knowledge import Learner, Library, Researcher, Retriever, language_key
+lazy from .knowledge import LEARN_STEPS, Learner, Library, Researcher, Retriever, language_key
 lazy from .model import OllamaError
 lazy from .passages import Cleaner, Page, text_blocks
+lazy from .project import Tracked
 lazy from .prompts import Part, Prompts, PromptTooLarge
 lazy from .settings import (
     DOCS_SITE_SEARCH,
@@ -84,8 +85,11 @@ class SearchFailed(Exception):
         self.cause, self.detail = cause, detail
 
 
-class SlotLearner:
+class SlotLearner(Tracked):
+    STEPS = LEARN_STEPS
+
     def __init__(self, model, internet, embeddings, tracker=None):
+        self.tracker = tracker
         self.learner = Learner(model, internet, embeddings)
         self.learner.tracker = tracker
         self.model, self.internet, self.embeddings = model, internet, embeddings
@@ -151,11 +155,11 @@ class SlotLearner:
         except ValueError as exc:
             say.warn(f"The plan saved last time cannot be used ({exc}), so making a new one")
             return None
-        self.learner.step("plan", "Using the plan saved last time: no web search needed to start", "📋")
+        self.step("plan", "Using the plan saved last time: no web search needed to start", "📋")
         return plan
 
     def first_search(self):
-        self.learner.step("search", f"Searching the web for pages about {self.topic}…", "🔎")
+        self.step("search", f"Searching the web for pages about {self.topic}…", "🔎")
         try:
             results = self.search(DOCS_SITE_SEARCH.format(topic=self.topic))
         except SearchFailed as failed:
@@ -225,9 +229,6 @@ class SlotLearner:
         self.outcome(f"{len(usable)} of {len(picked)} page(s) read")
         return UsablePages([page for page, _ in usable], [result for _, result in usable])
 
-    def outcome(self, text):
-        self.learner.outcome(text)
-
     @staticmethod
     def page_of(fetched):
         if not fetched.ok:
@@ -248,7 +249,7 @@ class SlotLearner:
         return Page(page.url, now_text(), text_blocks(got["content"])) if got else page
 
     def asked_plan(self, results):
-        self.learner.step(
+        self.step(
             "plan",
             f"Working out what {self.topic} is, how to check the version you have, and where "
             f"its documentation is…",
@@ -290,7 +291,7 @@ class SlotLearner:
         ]
 
     def documentation(self, plan, machine, version):
-        self.learner.step("documentation")
+        self.step("documentation")
         site = DocSite(self.fetcher)
         pages = self.doc_pages(
             site,
@@ -379,7 +380,7 @@ class SlotLearner:
         return selected
 
     def digested(self, plan, version, selected):
-        self.learner.step(
+        self.step(
             "digest", "Reading the passages for answers, one question at a time (the slow part)…", "🧠"
         )
         asked = [slot for slot in web_slots(plan["profile"]) if selected.get(slot.id)]
@@ -428,7 +429,7 @@ class SlotLearner:
             if self.searches >= int(Config.get("learn_searches")):
                 break
             query = slot.search(plan, version)
-            self.learner.step(
+            self.step(
                 "follow-up", f'Nothing found on {label(slot.id)} yet: searching the web for "{query}"…', "🔁"
             )
             pages = self.extra_pages(query, plan)
@@ -462,7 +463,7 @@ class SlotLearner:
     def kept(self, plan, machine, facts, rules, pool):
         slug, language = self.slug(plan), plan["kind"] == "language"
         entry = self.entry(plan, machine, facts, rules, pool)
-        self.learner.step("keep")
+        self.step("keep")
         Library.save(slug, entry)
         say.info(
             f"Saved {len(facts)} fact(s) about {plan['name']} from {len(entry['sources'])} page(s) as {slug}"
