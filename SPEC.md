@@ -274,7 +274,7 @@ The home, its database, the settings, and small helpers every module shares.
   `glance` (answered at once, pausing nothing, **CNV-14**), `pauses` (a request the model answers right away,
   **JOB-10**) or `own` (the conversation answers it its own way). An action whose kind differs from its
   command's is an `Action` of that command, with its own kind: `read list`, `read show`, `exercise status`,
-  `channel remove` and `learn NAME "DEFINITION"` (two words). `kind_of(argv)` gives the kind of what the words
+  `channel remove` and `learn` of a command of the person's (**CLI-1**). `kind_of(argv)` gives the kind of what the words
   ask for, and `deletes(argv)` whether it deletes. The command line builds its parser and its help from the
   table, and the conversation its commands. Nothing else lists commands by kind.
 - **CMD-2** The runs are `task`, `restart`, `confirm`, `amend`, `add`, `fix` and `resume`. Every run but
@@ -1336,8 +1336,10 @@ The main system: the command line, one run, and the cycle of phases.
 - **CLI-1** `Cli.parse`. Every command is a word (`tinker task …`). An unknown command is an error. `confirm`
   runs as `resume` (of the plan that waits, **JOB-5**). A project is named only as `@ID` or `@folder`, before
   the command's words. `--workdir` defaults to `.`, except for `task`. A task's words are joined, and a last
-  word that is an existing `.md`/`.txt` file is its spec. `rename` needs a valid folder name. `learn` takes one
-  or two words. An option a command does not take is an error.
+  word that is an existing `.md`/`.txt` file is its spec. `rename` needs a valid folder name. A learn's
+  words are joined into one topic, unless `taught_command(words)` reads them as a command of the person's: one
+  word, then `=` and the definition (`gs = git status`, no quotes needed), or two words whose second is quoted
+  (it has a space) or `none`. An option a command does not take is an error.
 - **CLI-2** `tinker help` lists every command by group, the options, and examples. With
   `TINKER_FORMAT=markup`, it lists what a chat can send. `tinker help COMMAND` shows that command's arguments,
   and an unknown command is an error.
@@ -1355,7 +1357,7 @@ The main system: the command line, one run, and the cycle of phases.
   measured, and marks the one in use.
 - **CLI-6** `tinker log [@PROJECT]` shows what the project's last runs said. `--calls` shows its model calls
   and details instead.
-- **CLI-7** `tinker learn NAME "DEFINITION"` (or an alias in the person's shell) keeps the command, with no
+- **CLI-7** `tinker learn NAME = DEFINITION`, `tinker learn NAME "DEFINITION"` (or an alias in the person's shell) keeps the command, with no
   model. `tinker learn WHAT` needs a measured model, an embedding model and the web, all checked before
   anything is loaded. Learning nothing ends with an error. However it ends, it prints the time it took
   (`Time taken: 8m 34s`). It keeps a `Tracker` as a run does: its messages, what the model is doing (in plain

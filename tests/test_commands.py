@@ -1,7 +1,7 @@
 import pytest
 
 from tinkerkit import cli, conversation
-from tinkerkit.commands import BY_NAME, COMMANDS, GROUPS, deletes, kind_of, ref, refs
+from tinkerkit.commands import BY_NAME, COMMANDS, GROUPS, deletes, kind_of, ref, refs, taught_command
 
 
 @pytest.mark.spec("CMD-1")
@@ -35,6 +35,10 @@ def test_the_kind_of_a_command_and_of_its_actions_comes_from_the_table():
     assert kind_of(["read", "craft.md"]) == "job" and kind_of(["read", "list", "2"]) == "glance"
     assert kind_of(["read", "show", "#1"]) == "glance" and kind_of(["exercise", "status"]) == "glance"
     assert kind_of(["learn", "rust"]) == "job" and kind_of(["learn", "ll", "ls -l"]) == "glance"
+    assert (
+        kind_of(["learn", "Python", "3.14"]) == "job"
+        and kind_of(["learn", "gs", "=", "git", "status"]) == "glance"
+    )
     assert (
         kind_of(["help"]) == "glance" and kind_of(["history", "2"]) == "glance" and kind_of(["stop"]) == "own"
     )
@@ -87,3 +91,14 @@ def test_project_references():
     a_project_after_the_first_word = ["add", "@calc"]
     assert refs(a_project_after_the_first_word) == ("", a_project_after_the_first_word)
     assert refs([]) == ("", [])
+
+
+@pytest.mark.spec("CLI-1")
+def test_a_learn_is_a_command_only_when_its_words_say_so():
+    assert taught_command(["gs", "=", "git", "status"]) == ("gs", "git status")
+    assert taught_command(["gs=git", "status"]) == ("gs", "git status")
+    assert taught_command(["serve", "python3 -m http.server"]) == ("serve", "python3 -m http.server")
+    assert taught_command(["ll", "none"]) == ("ll", "none")
+    assert taught_command(["Python", "3.14"]) is None
+    assert taught_command(["food", "bank", "inventory"]) is None
+    assert taught_command(["rust"]) is None
