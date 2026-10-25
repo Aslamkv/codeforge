@@ -272,9 +272,10 @@ The home, its database, the settings, and small helpers every module shares.
   it does, its kind, whether a chat offers it, whether it is a run, whether it deletes, the words it takes in
   a chat (`none`, `one`, `any`), its arguments and its options. The kind is `job` (a long command, **JOB-1**),
   `glance` (answered at once, pausing nothing, **CNV-14**), `pauses` (a request the model answers right away,
-  **JOB-10**) or `own` (the conversation answers it its own way). An action whose kind differs from its
-  command's is an `Action` of that command, with its own kind: `read list`, `read show`, `exercise status`,
-  `channel remove` and `learn` of a command of the person's (**CLI-1**). `kind_of(argv)` gives the kind of what the words
+  **JOB-10**), `own` (the conversation answers it its own way) or `terminal` (it asks in a terminal, so a chat
+  only says to run it there). An action whose kind differs from its command's is an `Action` of that command,
+  with its own kind: `read list`, `read show`, `exercise status`, `channel add`, `channel remove`,
+  `channel start` and `learn` of a command of the person's (**CLI-1**). `kind_of(argv)` gives the kind of what the words
   ask for, and `deletes(argv)` whether it deletes. The command line builds its parser and its help from the
   table, and the conversation its commands. Nothing else lists commands by kind.
 - **CMD-2** The runs are `task`, `restart`, `confirm`, `amend`, `add`, `fix` and `resume`. Every run but
@@ -744,16 +745,22 @@ The terminal and the chats are one conversation: the same commands, the same ans
   a short, tldr-style guide for beginners in plain words: what Tinker does, then what to send, grouped by what
   a person does (build something, their projects, ask anything, while it works), each with one line on what
   it does, and `help`. It is never taken as a chat or a command.
-- **CNV-11** `Desk.answer` handles a command. `task WHAT` starts a task, and a bare `task` gets its usage. A
+- **CNV-11** `Desk.answer` handles a command in one place: its own handler when the conversation has one
+  (`Desk.handlers`, by command name), and otherwise by its action in the table (**CMD-1**): one that deletes
+  asks first, a `job` starts a task, a `terminal` one says to run it in a terminal, and the rest run as
+  `tinker`. `task WHAT` starts a task, and a bare `task` gets its usage. A
   run that starts a cycle is given `--confirm`, so its plan waits for the person. `status` alone gives what
   runs (`status @PROJECT` is that project's status, **CLI-3**). `stop`, `stop #N` and `resume [#N]` act on
   jobs (**JOB-7**), and `research TOPIC` runs as a job. A command that deletes shows what it deletes and waits
   for `confirm` (**SET-11**), but `clear chat`, which deletes no record (the history keeps it), is done at
   once. `exit` asks first; the person's `exit` and `confirm` are taken out at once, and the question as Tinker
-  ends (its status says it no longer listens). A `channel` action that needs a terminal says so. Any other
-  command runs as `tinker`.
-- **CNV-12** `Desk.settle` runs what waits for a `confirm` (a deletion, a command line). Any other message
-  cancels it and says so. `decide` builds or changes the plan that waits. For a new project, its first
+  ends (its status says it no longer listens). The preview of a deletion is what `tinker` printed (its stdout),
+  and the plan that waits is kept without the lines on what to send next: the chat never filters `tinker`'s
+  text.
+- **CNV-12** Each chat has at most one question that waits for the person (a deletion, `exit`, a command
+  line, words a command needs), kept in one place by channel and chat: what its answer runs and what a
+  cancel says. `Desk.settle` runs what waits for a `confirm`. Any other message cancels it and says so. The
+  plan that waits is not such a question: every chat and the terminal share it. `decide` builds or changes the plan that waits. For a new project, its first
   `confirm` asks for the folder's name.
 - **CNV-13** A command that needs words, sent alone (as a chat app's menu sends it: `/fix`), asks for them
   (`ask_for`: what it does, what to send, an example) and takes the next message as them (`fix MESSAGE`), even
