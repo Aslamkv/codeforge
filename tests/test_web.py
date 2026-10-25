@@ -6,7 +6,7 @@ from email.message import Message
 
 import pytest
 
-from tinkerkit.fetcher import Fetcher
+from tinkerkit.fetcher import Fetched, Fetcher
 from tinkerkit.settings import WEB_BACKENDS, Config
 from tinkerkit import web
 from tinkerkit.web import (
@@ -328,28 +328,64 @@ def test_duckduckgo_bot_check_is_worth_asking_again(monkeypatch):
     assert error.value.retry
 
 
+HELLO = "<body><p>Hello there</p></body>"
+
+
+class Pages:
+    def __init__(self, pages):
+        self.pages, self.asked = pages, []
+
+    def fetch_all(self, urls, kind="fetch"):
+        self.asked += urls
+        return [self.pages[url] for url in urls]
+
+
 @pytest.mark.spec("WEB-10")
-def test_read_page_by_content_type(monkeypatch):
-    pages = {
-        "https://h": ("<html><title>T</title><body><p>Hello there</p></body></html>", "text/html"),
-        "https://t": ("plain words", "text/plain"),
-        "https://j": ('{"a": 1}', "application/json"),
-        "https://i": ("\x89PNG", "image/png"),
-    }
-    monkeypatch.setattr(DuckDuckGoWeb, "get", classmethod(lambda cls, url, timeout, form=None: pages[url]))
-    assert DuckDuckGoWeb.read_page("https://h", 5) == {
-        "title": "T",
-        "url": "https://h",
-        "content": "Hello there",
-    }
-    assert DuckDuckGoWeb.read_page("https://t", 5)["content"] == "plain words"
-    assert DuckDuckGoWeb.read_page("https://j", 5)["content"] == '{"a": 1}'
+def test_duckduckgo_reads_pages_through_the_fetcher_by_content_type(monkeypatch):
+    pages = Pages(
+        {
+            "https://h": Fetched(
+                "https://h", 200, "https://h", f"<html><title>T</title>{HELLO}</html>", "text/html"
+            ),
+            "https://t": Fetched("https://t", 200, "https://t", "plain words", "text/plain"),
+            "https://j": Fetched("https://j", 200, "https://j", '{"a": 1}', "application/json"),
+            "https://i": Fetched("https://i", 200, "https://i", "\x89PNG", "image/png"),
+        }
+    )
+    monkeypatch.setattr(Internet, "page_fetcher", staticmethod(lambda log=None: pages))
+    backend = DuckDuckGoWeb(5)
+    assert backend.fetch("https://h") == {"title": "T", "url": "https://h", "content": "Hello there"}
+    assert backend.fetch("https://t")["content"] == "plain words"
+    assert backend.fetch("https://j")["content"] == '{"a": 1}'
     with pytest.raises(WebError, match="not a text page"):
-        DuckDuckGoWeb.read_page("https://i", 5)
+        backend.fetch("https://i")
+    assert pages.asked == ["https://h", "https://t", "https://j", "https://i"]
 
 
 @pytest.mark.spec("WEB-10")
-def test_duckduckgo_get_errors(monkeypatch):
+def test_a_page_the_fetcher_could_not_get_is_a_web_error_with_its_status(monkeypatch):
+    pages = Pages(
+        {
+            "https://down": Fetched("https://down", 503, "https://down", error="HTTP 503"),
+            "https://gone": Fetched("https://gone", 404, "https://gone", error="HTTP 404"),
+            "https://no": Fetched("https://no", final_url="https://no", error=Fetched.ROBOTS),
+        }
+    )
+    monkeypatch.setattr(Internet, "page_fetcher", staticmethod(lambda log=None: pages))
+    errors = {}
+    for url in pages.pages:
+        with pytest.raises(WebError) as error:
+            DuckDuckGoWeb(5).fetch(url)
+        errors[url] = error.value
+    assert errors["https://down"].code == 503 and errors["https://down"].retry
+    assert errors["https://gone"].code == 404 and not errors["https://gone"].retry
+    assert errors["https://no"].code is None and not errors["https://no"].retry
+    assert "robots.txt" in str(errors["https://no"])
+    assert not any(error.network for error in errors.values())
+
+
+@pytest.mark.spec("WEB-9")
+def test_duckduckgo_search_errors(monkeypatch):
     monkeypatch.setattr(
         urllib.request, "urlopen", lambda request, timeout: (_ for _ in ()).throw(http_error(503))
     )

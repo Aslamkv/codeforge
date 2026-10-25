@@ -1,6 +1,6 @@
 import pytest
 
-from tinkerkit.passages import Block, Cleaner, MainBlocks, Page, Passage, text_blocks
+from tinkerkit.passages import Block, Cleaner, MainBlocks, Page, Passage, is_html, text_blocks
 from tinkerkit.settings import MAX_PASSAGE_CHARS
 
 INSTALL = (
@@ -24,6 +24,16 @@ PAGE = f"""<!doctype html><html><head><title>Tool docs</title><style>p {{ color:
 </main>
 <footer>Copyright</footer><script>alert(1)</script>
 </body></html>"""
+
+
+@pytest.mark.spec("PAS-1")
+def test_html_is_told_by_its_content_type_or_its_first_tag():
+    assert is_html("anything", "text/html")
+    assert is_html("anything", "application/xhtml+xml")
+    assert is_html("\n  <!DOCTYPE html><p>x</p>", "")
+    assert is_html("<html><body>x</body></html>", "text/plain")
+    assert not is_html("# Title\n<html> later", "text/markdown")
+    assert not is_html('{"a": 1}', "application/json")
 
 
 @pytest.mark.spec("PAS-1")

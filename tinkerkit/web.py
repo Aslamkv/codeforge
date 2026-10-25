@@ -13,7 +13,7 @@ from .messages import say
 from .settings import FIRST_BACKOFF_SECONDS, Config, first_line
 lazy from .fetcher import Fetcher
 lazy from .jobs import journaled
-lazy from .passages import MainBlocks
+lazy from .passages import MainBlocks, is_html
 
 Unreached = namedtuple("Unreached", "why timed_out")
 ReadyBackends = namedtuple("ReadyBackends", "ready reasons")
@@ -372,21 +372,23 @@ class DuckDuckGoWeb(WebBackend):
         return results
 
     def fetch(self, url):
-        return self.read_page(url, self.timeout)
+        fetched = Internet.page_fetcher().fetch_all([url])[0]
+        if not fetched.ok:
+            raise WebError(
+                f"{url} cannot be read ({fetched.error})",
+                retry=(fetched.status or 0) >= 500,
+                code=fetched.status,
+            )
+        return self.page(url, fetched.text, fetched.kind)
 
-    @classmethod
-    def read_page(cls, url, timeout):
-        body, kind = cls.get(url, timeout)
-        if cls.is_html(body, kind):
+    @staticmethod
+    def page(url, body, kind):
+        if is_html(body, kind):
             text = PageText.of(body)
             return {"title": text.title, "url": url, "content": text.content()}
         if kind.startswith("text/") or kind in ("", "application/json", "application/xml"):
             return {"title": "", "url": url, "content": body}
         raise WebError(f"{url} is not a text page ({kind})")
-
-    @staticmethod
-    def is_html(body, kind):
-        return "html" in kind or body.lstrip()[:200].lower().startswith(("<!doctype html", "<html"))
 
     @classmethod
     def get(cls, url, timeout, form=None):
