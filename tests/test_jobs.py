@@ -97,14 +97,14 @@ def test_a_job_is_numbered_and_kept_while_it_runs(home_store):
 @pytest.mark.spec("JOB-2")
 def test_an_interrupted_job_is_stopped_with_its_journal_kept(home_store):
     job = stopped_job(home_store, ["research", "python"], [({"search": "python"}, ["found"])])
-    assert job["state"] == "stopped" and home_store.logged("journal #1") == 1
+    assert job["state"] == "stopped" and len(home_store.entries("journal #1")) == 1
 
 
 @pytest.mark.spec("JOB-2")
 def test_a_finished_job_drops_its_journal(home_store):
     with Jobs.running(["research", "python"]):
         journaled({"search": "python"}, lambda: ["found"])
-    assert Jobs.get(1)["state"] == "finished" and home_store.logged("journal #1") == 0
+    assert Jobs.get(1)["state"] == "finished" and len(home_store.entries("journal #1")) == 0
 
 
 @pytest.mark.spec("JOB-2")
@@ -173,7 +173,7 @@ def test_outside_a_job_and_after_a_failure_it_asks(home_store):
     assert len(calls) == 2
     failed_search = ({"search": "x"}, None)
     stopped_job(home_store, ["research", "x"], [failed_search])
-    assert home_store.logged("journal #1") == 0
+    assert len(home_store.entries("journal #1")) == 0
 
 
 @pytest.mark.spec("JOB-3")
@@ -352,7 +352,7 @@ def test_clear_jobs_archives_them_listed_apart_and_never_resumed(home_store, cap
         Cli.cleared(["jobs", "#1"], yes=False)
     Cli.cleared(["jobs", "#1"], yes=True)
     assert Jobs.get(1)["state"] == "archived" and Jobs.get(1)["archived_from"] == "stopped"
-    assert home_store.logged("journal #1") == 0
+    assert len(home_store.entries("journal #1")) == 0
     assert [job["number"] for job in Jobs.listed()] == [3, 4] and [
         job["number"] for job in Jobs.listed("archived")
     ] == [1]

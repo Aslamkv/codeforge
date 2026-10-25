@@ -225,9 +225,9 @@ def test_store_logs_and_mode(tmp_path):
         "time" in entry for _, entry in entries
     )
     assert [entry["label"] for _, entry in store.entries("log", after=first)] == ["two"]
-    assert store.logged("log") == 2
+    assert len(store.entries("log")) == 2
     store.drop_log("log")
-    assert store.entries("log") == [] and store.logged("other") == 1
+    assert store.entries("log") == [] and len(store.entries("other")) == 1
     assert stat.S_IMODE((tmp_path / "x.db").stat().st_mode) == 0o600
 
 
