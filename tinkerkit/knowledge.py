@@ -50,7 +50,7 @@ from .settings import (
 )
 lazy from .jobs import today
 lazy from .model import Models, Ollama, OllamaError
-lazy from .project import Steps
+lazy from .project import Tracked
 lazy from .prompts import Part, Prompts, PromptTooLarge
 lazy from .workspace import Toolchain, Workspace
 
@@ -425,7 +425,8 @@ class Knowledge:
         Home.store().put("memory", "any", self.any_language_doc)
 
 
-class Learner:
+class Learner(Tracked):
+    STEPS = LEARN_STEPS
     VERSION_RE = re.compile(r"\d+(?:\.\d+)+")
     SHELL_OPERATORS = re.compile(r"[;&|<>`$\n\\]")
     UNRELEASED_RE = re.compile(
@@ -445,16 +446,6 @@ class Learner:
         self.model_failure = ""
         self.notes = []
         self.kept_earlier_topic = False
-        self.tracker = None
-
-    def step(self, phase, said="", icon=""):
-        if said:
-            say.step(said, icon)
-        Steps(LEARN_STEPS, self.tracker).enter(phase)
-
-    def outcome(self, text):
-        if self.tracker is not None:
-            self.tracker.outcome(text)
 
     def start(self):
         self.notes, self.model_failure, self.kept_earlier_topic = [], "", False

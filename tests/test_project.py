@@ -18,6 +18,7 @@ from tinkerkit.project import (
     Runs,
     SpecDocument,
     Steps,
+    Tracked,
     Tracker,
     project_store,
     saved,
@@ -600,3 +601,19 @@ def test_entering_a_step_moves_the_tracker_once_in_a_row():
     with pytest.raises(ValueError, match="no step 'fly'"):
         steps.enter("fly")
     Steps(("survey", "done")).enter("survey")
+
+
+@pytest.mark.spec("PRJ-17")
+def test_a_tracked_step_moves_its_tracker_and_says_the_step_when_told(monkeypatch):
+    heard = []
+    monkeypatch.setattr(say, "followers", [heard.append])
+    tracked = Tracked()
+    tracked.STEPS = ("survey", "chapters", "done")
+    tracked.outcome("ignored without a tracker")
+    tracked.step("survey")
+    assert heard == []
+    tracked.tracker = Tracker("reading")
+    tracked.step("survey", "Reading its contents…", "🧭")
+    tracked.outcome("2 core chapter(s)")
+    assert [(message.kind, message.text) for message in heard] == [("step", "Reading its contents…")]
+    assert tracked.tracker.state["step"] == "survey" and tracked.tracker.state["outcome"] == "2 core chapter(s)"

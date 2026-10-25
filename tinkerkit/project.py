@@ -802,6 +802,20 @@ class Steps:
             self.tracker.phase(step)
 
 
+class Tracked:
+    STEPS = ()
+    tracker = None
+
+    def step(self, phase, said="", icon=""):
+        if said:
+            say.step(said, icon)
+        Steps(self.STEPS, self.tracker).enter(phase)
+
+    def outcome(self, text):
+        if self.tracker is not None:
+            self.tracker.outcome(text)
+
+
 class Outcome:
     def __init__(self):
         self.status, self.exit_code = "stopped", 1

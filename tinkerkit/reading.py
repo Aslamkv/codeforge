@@ -13,7 +13,7 @@ lazy from pathlib import Path
 
 from .messages import say
 lazy from .knowledge import Learner, Library, Retriever, mentions, relevant_chunks
-lazy from .project import Steps
+lazy from .project import Tracked
 lazy from .prompts import Part, Prompts
 lazy from .settings import (
     BOOK_PASSAGES_SHOWN,
@@ -153,7 +153,9 @@ def stored(source):
     return number, True
 
 
-class Reader:
+class Reader(Tracked):
+    STEPS = READ_STEPS
+
     def __init__(self, model, tracker=None):
         self.model, self.tracker = model, tracker
 
@@ -170,10 +172,6 @@ class Reader:
         found = self.chapters_read(entry, book, survey, chapters, focus)
         self.condensed(Readings.get(number), survey, found)
         return ending(Readings.get(number), len(found), chapters)
-
-    def step(self, phase, said, icon):
-        say.step(said, icon)
-        Steps(READ_STEPS, self.tracker).enter(phase)
 
     def surveyed(self, entry, book):
         self.step("survey", "Reading its contents, foreword and index…", "🧭")
@@ -221,10 +219,6 @@ class Reader:
         if facts:
             say.found(first_line(facts[0]["text"], 200))
         say.tally(f"{done} chapters · {learned(len(found)) if found else 'nothing learned yet'}")
-
-    def outcome(self, text):
-        if self.tracker is not None:
-            self.tracker.outcome(text)
 
     def chapter_read(self, entry, book, survey, chapter, focus):
         room = int(self.model.limit_chars(Prompts.READ_CHAPTER_SYSTEM) * READ_CHAPTER_TEXT_SHARE)
