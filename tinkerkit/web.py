@@ -403,7 +403,7 @@ class DuckDuckGoWeb(WebBackend):
         except urllib.error.HTTPError as exc:
             raise WebError(
                 f"{urllib.parse.urlsplit(url).netloc} answered HTTP {exc.code}",
-                retry=exc.code == 429 or exc.code >= 500,
+                retry=exc.code >= 500,
                 code=exc.code,
             )
         except Exception as exc:
