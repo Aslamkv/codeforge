@@ -42,6 +42,12 @@ def test_the_kind_of_a_command_and_of_its_actions_comes_from_the_table():
     assert (
         kind_of(["help"]) == "glance" and kind_of(["history", "2"]) == "glance" and kind_of(["stop"]) == "own"
     )
+    assert [kind_of(["channel", action]) for action in ("add", "remove", "start", "list")] == [
+        "terminal",
+        "terminal",
+        "terminal",
+        "glance",
+    ]
     assert kind_of(["fly"]) is None and kind_of([]) is None
 
 

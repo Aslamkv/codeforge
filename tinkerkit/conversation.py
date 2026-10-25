@@ -15,7 +15,7 @@ lazy import time
 lazy import webbrowser
 lazy from pathlib import Path
 
-from .commands import COMMANDS, TERMINAL_ONLY_CHANNEL_ACTIONS, deletes, kind_of, refs
+from .commands import COMMANDS, deletes, kind_of, refs
 from .jobs import JOB_STOP_SIGNAL, Jobs, alive, job_number, paused_for_you, today
 from .project import Runs, Tracker, saved
 lazy from .ledger import DONE_NOTE_KEPT_SECONDS, Ledger
@@ -106,6 +106,7 @@ WordsAsked = namedtuple("WordsAsked", "question example")
 AppRequest = namedtuple("AppRequest", "project args stdin")
 ShellRun = namedtuple("ShellRun", "code output")
 Secret = namedtuple("Secret", "key question")
+Question = namedtuple("Question", "runs cancels held wanted naming", defaults=(None, None, None, None, False))
 
 
 def session(root):
@@ -153,7 +154,7 @@ def research_once(console, talk, topic):
 
 
 def command_once(console, talk, message):
-    chat, shell = ConsoleChannel.CHAT, Shell(talk, Path.cwd())
+    chat, shell = ConsoleChannel.CHAT, Shell(talk, Path.cwd(), Questions())
     console.show(chat, None, shell.propose(console, message, "", COMMAND_NAMING_MAX_TOKENS), done=True)
     proposed = shell.take(console, chat)
     if not proposed:
@@ -173,11 +174,10 @@ class Desk:
         self.last_task = self.reporter = self.task = None
         self.live_tasks = []
         self.lock, self.talk = threading.Lock(), Talk(commands_brief(), pausing_jobs=paused_for_you)
-        self.shell = Shell(self.talk, self.root)
+        self.questions = Questions()
+        self.shell = Shell(self.talk, self.root, self.questions)
         self.waiting_plan = None
         self.messages_by_run = {}
-        self.deletes_to_confirm = {}
-        self.commands_wanting_words = {}
         self.seconds_by_run = {}
         self.consoles = [channel for channel in channels if isinstance(channel, ConsoleChannel)]
         self.said_status = None
@@ -332,23 +332,13 @@ class Desk:
         if self.settle(channel, message, command):
             return
         if command in COMMANDS_ASKING_FOR_WORDS and len(message.text.split()) == 1:
-            self.commands_wanting_words[(channel.name, message.chat)] = command
+            self.questions.ask(channel, message.chat, Question(wanted=command))
             channel.ask_for(message.chat, *words_asked(command))
             return
         if not command:
             self.talk.answer(
-                channel, message, self.running_now, lambda: (self.waiting_plan or {}).get("spec", "")
+                channel, message, self.running_now, lambda: self.plan_shown(self.waiting_plan)
             )
-            return
-        if command == "run":
-            threading.Thread(
-                target=self.run_app,
-                args=(channel, message.chat, message.text.split(None, 1)[1:]),
-                daemon=True,
-            ).start()
-            return
-        if command == "command":
-            self.asked_with_words(channel, message, command)
             return
         reply = self.answer(message, channel)
         if reply:
@@ -357,9 +347,11 @@ class Desk:
                 channel.glance(message.chat, message.id, [sent])
 
     def with_words_wanted(self, channel, message):
-        wanted = self.commands_wanting_words.pop((channel.name, message.chat), None)
-        command = command_of(message.text)
-        if not wanted or self.command_of_its_own(message, command, wanted):
+        question = self.questions.waiting(channel, message.chat)
+        if not question or not question.wanted:
+            return message
+        wanted = self.questions.answered(channel, message.chat).wanted
+        if self.command_of_its_own(message, command_of(message.text), wanted):
             return message
         return Message(message.chat, f"{wanted} {message.text}", message.sender, message.id)
 
@@ -377,55 +369,34 @@ class Desk:
 
     def settle(self, channel, message, command):
         confirm = command == "confirm" and len(message.text.split()) == 1
-        asking = self.deletes_to_confirm.pop((channel.name, message.chat), None)
-        if asking and confirm:
-            threading.Thread(target=self.delete, args=(channel, message.chat, asking), daemon=True).start()
+        question = self.questions.waiting(channel, message.chat)
+        if question and question.naming:
+            if confirm:
+                channel.send(
+                    message.chat, "⏳ The command is still being worked out: `confirm` once it is shown."
+                )
+            return confirm
+        question = self.questions.answered(channel, message.chat)
+        if question and confirm:
+            threading.Thread(target=question.runs, daemon=True).start()
             return True
-        if asking:
-            channel.show(
-                message.chat,
-                asking["shown"],
-                f"🚫 _Not done:_ `{' '.join(asking['words'])}`",
-                done=True,
-                bottom=False,
-            )
-        proposed = self.shell.take(channel, message.chat)
-        if proposed == Shell.STILL_NAMING and confirm:
-            channel.send(
-                message.chat, "⏳ The command is still being worked out: `confirm` once it is shown."
-            )
-            return True
-        if proposed and confirm:
-            threading.Thread(
-                target=self.shell.run, args=(channel, message.chat, proposed), daemon=True
-            ).start()
-            return True
-        if proposed:
-            self.shell.drop(channel, message.chat, proposed)
+        if question:
+            question.cancels()
         return False
 
     def answer(self, message, channel):
         words = command_words(message.text)
-        command = words[0]
-        handler = self.handlers(channel, message, words).get(command)
-        if handler is not None:
-            return handler()
-        if command == "clear" and words[1:] == ["chat"]:
-            return self.clear_chat(
-                channel, message.chat, "Chat cleared", " · `history` shows any of them again"
-            )
-        if command in EXIT_WORDS:
-            return self.ask_to_exit(channel, message.chat, command)
-        if command == "channel" and words[1:2] and words[1] in TERMINAL_ONLY_CHANNEL_ACTIONS:
-            return f"🖥 `channel {words[1]}` asks in a terminal: `tinker channel {words[1]}` there"
-        if command == "read" and words[1:2] in (["list"], ["show"]):
-            return md(t"📚 **{' '.join(words)}**\n{self.tinker(words):block}")
+        handler = self.handlers(channel, message, words).get(words[0])
+        return handler() if handler is not None else self.by_table(channel, message.chat, words)
+
+    def by_table(self, channel, chat, words):
+        kind = kind_of(words)
+        if kind == "terminal":
+            return f"🖥 `{' '.join(words[:2])}` asks in a terminal: `tinker {' '.join(words[:2])}` there"
         if deletes(words) and "--yes" not in words:
-            return self.ask_first(channel, message.chat, words)
-        if kind_of(words) == "job":
+            return self.ask_first(channel, chat, words)
+        if kind == "job":
             return self.start_task(words, self.root, " ".join(words))
-        if command == "memory" and "--graph" in words:
-            return self.memory_graph(channel, message.chat, words)
         shown = self.tinker(words)
         return md(t"⚙️ **{' '.join(words)}**\n{shown:block}")
 
@@ -444,7 +415,33 @@ class Desk:
             "status": lambda: self.report(command, words),
             "help": lambda: help_text(words[1:2]),
             "history": lambda: history_text(words[1:2]),
+            "run": lambda: self.run_app_apart(channel, message),
+            "command": lambda: self.asked_with_words(channel, message, command),
+            "clear": lambda: self.clear(channel, message.chat, words),
+            "read": lambda: self.read(channel, message.chat, words),
+            "memory": lambda: self.memory(channel, message.chat, words),
+            **{word: lambda: self.ask_to_exit(channel, message.chat, command) for word in EXIT_WORDS},
         }
+
+    def run_app_apart(self, channel, message):
+        threading.Thread(
+            target=self.run_app, args=(channel, message.chat, message.text.split(None, 1)[1:]), daemon=True
+        ).start()
+
+    def clear(self, channel, chat, words):
+        if words[1:] == ["chat"]:
+            return self.clear_chat(channel, chat, "Chat cleared", " · `history` shows any of them again")
+        return self.by_table(channel, chat, words)
+
+    def read(self, channel, chat, words):
+        if words[1:2] in (["list"], ["show"]):
+            return md(t"📚 **{' '.join(words)}**\n{self.tinker(words):block}")
+        return self.by_table(channel, chat, words)
+
+    def memory(self, channel, chat, words):
+        if "--graph" in words:
+            return self.memory_graph(channel, chat, words)
+        return self.by_table(channel, chat, words)
 
     def research(self, words):
         return self.start_task(words, self.root, " ".join(words)) if len(words) > 1 else USAGE["research"]
@@ -582,7 +579,7 @@ class Desk:
                     folder,
                     title,
                     "✅ **Confirmed:** building it",
-                    keep=self.kept(waiting) if mine else "",
+                    keep=waiting["plan"] if mine else "",
                 ),
             )
         change = " ".join(rest)
@@ -611,17 +608,15 @@ class Desk:
     @staticmethod
     def asked(waiting):
         if waiting.get("stage") != "name":
-            return waiting["spec"]
+            return Desk.plan_shown(waiting)
         return (
-            f"{waiting['spec']}\n\n📁 **Its folder:** `{Path(waiting['folder']).name}`\n👉 `confirm` to build it "
+            f"{Desk.plan_shown(waiting)}\n\n📁 **Its folder:** `{Path(waiting['folder']).name}`\n👉 `confirm` to build it "
             f"there · `rename NAME` to name it otherwise (it builds then)"
         )
 
     @staticmethod
-    def kept(waiting):
-        return "\n".join(
-            line for line in waiting["spec"].splitlines() if not line.startswith(("👉", "⏱"))
-        ).strip()
+    def plan_shown(waiting):
+        return Progress.waits(waiting["plan"], waiting["so_far"]) if waiting else ""
 
     def on_board(self, waiting, text):
         board = self.messages_by_run.setdefault(waiting["run"], {})
@@ -644,7 +639,7 @@ class Desk:
             return self.on_task(waiting, md(t"⚠️ **Not renamed:** {why}"))
         self.renamed(waiting, words[1])
         if waiting.get("stage") != "name":
-            self.on_board(waiting, f"{waiting['spec']}\n\n📁 **Renamed:** its folder is `{words[1]}`")
+            self.on_board(waiting, f"{self.plan_shown(waiting)}\n\n📁 **Renamed:** its folder is `{words[1]}`")
             return None
         return self.on_task(
             waiting,
@@ -653,7 +648,7 @@ class Desk:
                 waiting["folder"],
                 waiting["title"],
                 f"✅ **Renamed** to `{words[1]}`: building it",
-                keep=self.kept(waiting),
+                keep=waiting["plan"],
             ),
         )
 
@@ -675,7 +670,7 @@ class Desk:
     def renamed(waiting, name):
         old, waiting["folder"] = waiting["folder"], Path(waiting["folder"]).parent / name
         waiting["title"] = f"{name}: {waiting['title'].split(': ', 1)[-1]}"
-        waiting["spec"] = waiting["spec"].replace(f"📁 `{Path(old).name}`", f"📁 `{name}`")
+        waiting["plan"] = waiting["plan"].replace(f"📁 `{Path(old).name}`", f"📁 `{name}`")
 
     def resume(self, words):
         name, rest = refs(words[1:])
@@ -729,13 +724,11 @@ class Desk:
             "👉 `confirm` to stop it · anything else keeps it",
             done=True,
         )
-        self.deletes_to_confirm[(channel.name, chat)] = {"words": [command], "shown": shown}
+        self.wait_for_confirm(channel, chat, {"words": [command], "shown": shown})
         return None
 
     def ask_first(self, channel, chat, words):
-        preview = "\n".join(
-            line for line in self.tinker(words).splitlines() if "in a terminal to confirm" not in line
-        )
+        preview = self.printed(words)
         shown = channel.show(
             chat,
             None,
@@ -745,8 +738,24 @@ class Desk:
             ),
             done=True,
         )
-        self.deletes_to_confirm[(channel.name, chat)] = {"words": words, "shown": shown}
+        self.wait_for_confirm(channel, chat, {"words": words, "shown": shown})
         return None
+
+    def wait_for_confirm(self, channel, chat, asking):
+        self.questions.ask(
+            channel,
+            chat,
+            Question(
+                runs=lambda: self.delete(channel, chat, asking),
+                cancels=lambda: self.not_done(channel, chat, asking),
+            ),
+        )
+
+    @staticmethod
+    def not_done(channel, chat, asking):
+        channel.show(
+            chat, asking["shown"], f"🚫 _Not done:_ `{' '.join(asking['words'])}`", done=True, bottom=False
+        )
 
     def delete(self, channel, chat, asking):
         if asking["words"][0] in EXIT_WORDS:
@@ -916,7 +925,8 @@ class Desk:
                 "run": task["run"],
                 "folder": task["folder"],
                 "title": task["title"],
-                "spec": reporter.progress.ending(),
+                "plan": reporter.progress.planned(plan),
+                "so_far": reporter.progress.time_taken(),
                 "stage": "spec",
                 "new": plan.get("kind") == "project",
             }
@@ -944,7 +954,14 @@ class Desk:
         return {process.pid for process in self.live_tasks}
 
     def tinker(self, arguments, timeout=120):
-        done = subprocess.run(
+        done = self.run_tinker(arguments, timeout)
+        return shown_output(done.stdout + done.stderr)
+
+    def printed(self, arguments):
+        return shown_output(self.run_tinker(arguments, 120).stdout)
+
+    def run_tinker(self, arguments, timeout):
+        return subprocess.run(
             tinker_command() + arguments,
             cwd=self.root,
             text=True,
@@ -953,7 +970,10 @@ class Desk:
             env=dict(os.environ, NO_COLOR="1"),
             timeout=timeout,
         )
-        return first_lines(Markup.columns((done.stdout + done.stderr).strip()) or "(nothing)", 40)
+
+
+def shown_output(output):
+    return first_lines(Markup.columns(output.strip()) or "(nothing)", 40)
 
 
 def command_of(text, commands=None):
@@ -1132,6 +1152,20 @@ class Talk:
                 say.warn(f"The model did not load for chat: {first_words(exc)}")
 
 
+class Questions:
+    def __init__(self):
+        self.by_chat = {}
+
+    def ask(self, channel, chat, question):
+        self.by_chat[(channel.name, chat)] = question
+
+    def waiting(self, channel, chat):
+        return self.by_chat.get((channel.name, chat))
+
+    def answered(self, channel, chat):
+        return self.by_chat.pop((channel.name, chat), None)
+
+
 class Shell:
     SYSTEM = (
         "The person describes a command they want run on their computer ({system}, shell {shell}, in the "
@@ -1145,7 +1179,6 @@ class Shell:
         r"\b(brew|pip3?|npm|cargo)\s+(install|uninstall|remove)\b|\s-delete\b|-exec\s+(rm|mv)\b|"
         r"\bxargs\s+(rm|mv)\b|\bsed\s+-i\b"
     )
-    STILL_NAMING = ""
     LOGIN_SHELL = os.environ.get("SHELL") or "/bin/sh"
     TELL_SYSTEM = (
         "Tell the person what this command's output says, for a chat read on a phone: the answer to "
@@ -1156,25 +1189,23 @@ class Shell:
         "output does not show; never the command again."
     )
 
-    def __init__(self, talk, folder):
-        self.talk, self.folder = talk, folder
-        self.commands_to_confirm = {}
+    def __init__(self, talk, folder, questions):
+        self.talk, self.folder, self.questions = talk, folder, questions
         self.shell = self.LOGIN_SHELL
 
     def name(self, channel, message, now):
-        key = (channel.name, message.chat)
-        self.commands_to_confirm[key] = self.STILL_NAMING
+        self.questions.ask(channel, message.chat, Question(naming=True))
 
         def shown(ids):
-            if isinstance(self.commands_to_confirm.get(key), dict):
-                self.commands_to_confirm[key]["shown"] = ids
+            question = self.questions.waiting(channel, message.chat)
+            if question and question.held:
+                question.held["shown"] = ids
 
         self.talk.answer(channel, message, now, write=self.propose, on_shown=shown)
 
     def propose(self, channel, message, context, tokens):
-        key = (channel.name, message.chat)
         if not Models.quick():
-            self.commands_to_confirm.pop(key, None)
+            self.questions.answered(channel, message.chat)
             return "⚠️ **No model is in use yet:** `tinker calibrate NAME`, then `tinker use-model NAME`."
         system = self.SYSTEM.format(
             system=os.uname().sysname, shell=Path(self.shell).name, folder=self.folder
@@ -1189,14 +1220,25 @@ class Shell:
                 )
             )
         except OllamaError as exc:
-            self.commands_to_confirm.pop(key, None)
+            self.questions.answered(channel, message.chat)
             return md(t"⚠️ **The model did not answer:** {first_words(exc)}")
         line, does = str(data.get("command") or "").strip(), str(data.get("does") or "").strip()
         if not line or "\n" in line:
-            self.commands_to_confirm.pop(key, None)
+            self.questions.answered(channel, message.chat)
             return md(t"🤷 **No command found:** {does or 'describe it another way'}")
-        self.commands_to_confirm[key] = {"line": line, "asked": message.text, "shown": None}
+        self.wait_for_confirm(channel, message.chat, {"line": line, "asked": message.text, "shown": None})
         return self.proposal(line, does)
+
+    def wait_for_confirm(self, channel, chat, proposed):
+        self.questions.ask(
+            channel,
+            chat,
+            Question(
+                runs=lambda: self.run(channel, chat, proposed),
+                cancels=lambda: self.drop(channel, chat, proposed),
+                held=proposed,
+            ),
+        )
 
     def proposal(self, line, does):
         warning = (
@@ -1210,11 +1252,10 @@ class Shell:
         )
 
     def take(self, channel, chat):
-        key = (channel.name, chat)
-        line = self.commands_to_confirm.get(key)
-        if line != self.STILL_NAMING:
-            self.commands_to_confirm.pop(key, None)
-        return line
+        question = self.questions.waiting(channel, chat)
+        if not question or not question.held:
+            return None
+        return self.questions.answered(channel, chat).held
 
     def drop(self, channel, chat, proposed):
         channel.show(chat, proposed["shown"], f"🚫 _Not run:_ `{proposed['line']}`", done=True)
@@ -1612,7 +1653,7 @@ class Progress:
 
     def ending(self):
         if self.waiting():
-            return self.plan(self.snapshot["waiting"]) + f"\n⏱ _so far: {self.time_taken()}_"
+            return self.waits(self.planned(self.snapshot["waiting"]), self.time_taken())
         ended = self.snapshot.get("ended")
         if not ended:
             return md(t"🏁 **{self.title}**")
@@ -1645,7 +1686,19 @@ class Progress:
         return f"{human_duration(seconds)} ({round(seconds)} seconds)"
 
     @staticmethod
+    def waits(planned, so_far):
+        return f"{Progress.with_next_step(planned)}\n⏱ _so far: {so_far}_"
+
+    @staticmethod
     def plan(plan):
+        return Progress.with_next_step(Progress.planned(plan))
+
+    @staticmethod
+    def with_next_step(planned):
+        return f"{planned}\n\n👉 `confirm` to build it · `amend WHAT` to change it"
+
+    @staticmethod
+    def planned(plan):
         heading = "🐞 **Bug shown for" if plan.get("kind") == "fix" else "📋 **Plan for"
         start = f" · ▶️ `{plan['start']}`" if plan.get("start") else ""
         lines = [
@@ -1660,7 +1713,7 @@ class Progress:
             lines += ["", md(t"🚫 _Not included:_ {'; '.join(plan['non_goals'])}")]
         if plan.get("folder"):
             lines += [f"📁 `{Path(plan['folder']).name}`"]
-        return "\n".join(lines + ["", "👉 `confirm` to build it · `amend WHAT` to change it"])
+        return "\n".join(lines)
 
     @staticmethod
     def change_line(change):
