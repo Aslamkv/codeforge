@@ -781,43 +781,47 @@ class Desk:
 
     def run_app(self, channel, chat, said):
         name, args, stdin = app_request(said[0] if said else "")
+        workdir, toolchain, refusal = self.runnable(name)
+        if refusal:
+            channel.show(chat, None, refusal, done=True)
+            return
+        title = workdir.name
+        line = " ".join([toolchain.run] + [shlex.quote(arg) for arg in args])
+        shown = channel.show(chat, None, md(t"▶️ **{title}** {line:code} …"))
+        code, output = in_shell(Shell.LOGIN_SHELL, toolchain.shell(line), workdir, stdin)
+        channel.show(chat, shown, self.app_ran(title, line, code, output, stdin), done=True)
+
+    @staticmethod
+    def runnable(name):
         project = built_project(name)
         if project is None:
-            channel.show(
-                chat,
+            return (
+                None,
                 None,
                 md(t"🤷 **No project @{name}:** `runs` lists them")
                 if name
                 else "🤷 **No project is built yet:** `task WHAT TO BUILD` builds one",
-                done=True,
             )
-            return
-        workdir, title = Path(project["workdir"]), Path(project["workdir"]).name
+        workdir = Path(project["workdir"])
         toolchain = Toolchain((saved(workdir, "spec", "plan", {}) or {}).get("toolchain"))
         if not toolchain.run:
-            channel.show(
-                chat,
-                None,
-                md(t"🤷 **{title} has no run command:** it is not a program a person runs"),
-                done=True,
+            return (
+                workdir,
+                toolchain,
+                md(t"🤷 **{workdir.name} has no run command:** it is not a program a person runs"),
             )
-            return
-        line = " ".join([toolchain.run] + [shlex.quote(arg) for arg in args])
-        shown = channel.show(chat, None, md(t"▶️ **{title}** {line:code} …"))
-        code, output = in_shell(Shell.LOGIN_SHELL, toolchain.shell(line), workdir, stdin)
+        return workdir, toolchain, ""
+
+    @staticmethod
+    def app_ran(title, line, code, output, stdin):
         fed = md(t"\n_input:_ `{stdin.strip()}`") if stdin else ""
         printed = (
             f"```\n{Markup.fenced(output[-CHAT_COMMAND_OUTPUT_SHOWN_CHARS:])}\n```"
             if output
             else "_(it printed nothing)_"
         )
-        channel.show(
-            chat,
-            shown,
-            md(
-                t"{'✅' if code == 0 else '❌'} **{title}** {line:code} · _exit {code}_{fed:md}\n{printed:md}"
-            ),
-            done=True,
+        return md(
+            t"{'✅' if code == 0 else '❌'} **{title}** {line:code} · _exit {code}_{fed:md}\n{printed:md}"
         )
 
     def start_task(self, arguments, folder, title, phase=Tracker.STARTING, sent=None, keep=""):

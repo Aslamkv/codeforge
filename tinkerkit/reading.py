@@ -497,7 +497,7 @@ def chapter_parts(book, survey, chapter, text, look_for, known, focus):
             f"{book.title}: {survey['summary']}\nIts key terms: {', '.join(survey['terms']) or 'none named'}",
             True,
         ),
-        Part("What you learned from it before", "\n".join(f"- {text}" for text in known), keep="tail"),
+        Part("What you learned from it before", Part.bullets(known), keep="tail"),
         Part("What the person asks you to look for", focus, bool(focus)),
         Part(f"Chapter {chapter.number}: {chapter.title}", f"Look for: {look_for}", True),
         Part("Its text", text, True),

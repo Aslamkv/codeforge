@@ -251,7 +251,7 @@ The home, its database, the settings, and small helpers every module shares.
 - **SET-13** `Home.keep_awake()` keeps the computer awake with `caffeinate` (macOS) or `systemd-inhibit`
   (Linux), tied to Tinker's process. It does nothing when neither tool is there, and it never raises.
 - **SET-14** Helpers. `first_line` gives the first line of the text with its ends stripped, cut to the limit
-  with `...`. `words` gives the lowercase alphanumeric words. `fingerprint` is the SHA-1 of the text.
+  with `...`. `one_line` gives the text on one line, each run of whitespace one space. `words` gives the lowercase alphanumeric words. `fingerprint` is the SHA-1 of the text.
   `similarity` is a case-insensitive ratio from 0 to 1.
 - **SET-15** `split_text(text, size)` gives chunks of at most `max(size, 200)` chars. It splits between
   paragraphs, cuts a longer paragraph, and loses no text.

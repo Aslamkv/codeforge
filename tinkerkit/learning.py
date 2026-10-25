@@ -25,6 +25,7 @@ lazy from .settings import (
     Home,
     first_line,
     now_text,
+    one_line,
 )
 lazy from .slots import PROFILES, TOOL_DOCS_QUERY, Selector, fill, missing, short_slots, web_slots
 lazy from .web import is_web_address
@@ -676,7 +677,7 @@ def read_digest(data, slot, passages):
 
 
 def clean(value, limit):
-    return " ".join(str(value or "").split())[:limit]
+    return one_line(value)[:limit]
 
 
 def address_key(url):

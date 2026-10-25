@@ -41,6 +41,7 @@ from .settings import (
     fingerprint,
     first_line,
     now_text,
+    one_line,
     similarity,
     split_text,
     words,
@@ -711,36 +712,43 @@ class Learner:
     @staticmethod
     def read_rules(data, sources):
         rules = {}
-        given = (data.get("rules") or []) if isinstance(data, dict) else []
-        declare = data.get("declare") if isinstance(data, dict) else None
-        if isinstance(declare, dict):
-            given = [dict(declare, phase="config", when="")] + list(given)
-        for item in given:
-            if not isinstance(item, dict):
-                continue
-            text, phase = (
-                " ".join(str(item.get("text") or "").split())[:MAX_RULE_CHARS],
-                str(item.get("phase") or "").lower(),
-            )
-            cites = list(
-                dict.fromkeys(
-                    sources[number - 1]["id"]
-                    for number in item.get("cites") or []
-                    if isinstance(number, int) and 1 <= number <= len(sources)
-                )
-            )
-            when = " ".join(str(item.get("when") or "").split())[:MAX_RULE_WHEN_CHARS]
-            if text and phase in FACT_PHASES and cites and text not in rules:
-                rules[text] = {
-                    "id": fingerprint(text)[:12],
-                    "phase": phase,
-                    "text": text,
-                    "when": when,
-                    "cites": cites,
-                }
+        for item in Learner.rules_given(data):
+            rule = Learner.rule_of(item, sources)
+            if rule and rule["text"] not in rules:
+                rules[rule["text"]] = rule
         if not rules:
             raise ValueError("it needs at least one rule that cites the facts")
         return list(rules.values())[:PLAYBOOK_RULES]
+
+    @staticmethod
+    def rules_given(data):
+        if not isinstance(data, dict):
+            return []
+        given = data.get("rules") or []
+        declare = data.get("declare")
+        if isinstance(declare, dict):
+            given = [dict(declare, phase="config", when="")] + list(given)
+        return [item for item in given if isinstance(item, dict)]
+
+    @staticmethod
+    def rule_of(item, sources):
+        text = one_line(item.get("text"))[:MAX_RULE_CHARS]
+        phase = str(item.get("phase") or "").lower()
+        cites = Learner.cited_ids(item, sources)
+        if not (text and phase in FACT_PHASES and cites):
+            return None
+        when = one_line(item.get("when"))[:MAX_RULE_WHEN_CHARS]
+        return {"id": fingerprint(text)[:12], "phase": phase, "text": text, "when": when, "cites": cites}
+
+    @staticmethod
+    def cited_ids(item, sources):
+        return list(
+            dict.fromkeys(
+                sources[number - 1]["id"]
+                for number in item.get("cites") or []
+                if isinstance(number, int) and 1 <= number <= len(sources)
+            )
+        )
 
     def index(self, slug, entry):
         if self.embeddings is None:
@@ -1267,59 +1275,64 @@ class Library:
     @staticmethod
     def topic_items(slug, entry):
         name = str(entry.get("name") or entry["topic"])
-        plain = lambda phase, text: {
+        item = lambda phase, text, claim=None, said=None, **more: {
             "topic": slug,
             "name": name,
             "phase": phase,
             "text": text,
-            "id": None,
-            "status": None,
+            **more,
+            **Library.claim_state(claim, said),
         }
-        items = [plain("summary", str(entry.get("summary") or name))]
+        return (
+            [item(phase, text) for phase, text in Library.overview(entry, name)]
+            + [
+                item("findings", Library.finding_text(entry, finding), finding, finding["answer"])
+                for finding in entry.get("findings", [])
+            ]
+            + [
+                item(
+                    str(rule["phase"]),
+                    str(rule["text"]),
+                    rule,
+                    rule["text"],
+                    kind="rule",
+                    when=str(rule.get("when") or ""),
+                )
+                for rule in entry.get("rules", [])
+            ]
+            + [
+                item(str(fact["phase"]), Library.fact_text(fact), fact, fact["text"])
+                for fact in Library.facts_shown(entry)
+            ]
+        )
+
+    @staticmethod
+    def overview(entry, name):
+        yield "summary", str(entry.get("summary") or name)
         if entry.get("tools"):
-            items.append(plain("tools", f"its tools: {Library.tools_text(entry['tools'])}"))
-        installed = [
-            (tool["output"] if tool["found"] else f"`{tool['command']}` fails (not installed)")
-            for tool in entry.get("machine", [])
-        ]
+            yield "tools", f"its tools: {Library.tools_text(entry['tools'])}"
+        installed = [Library.installed_text(tool) for tool in entry.get("machine", [])]
         if installed:
-            items.append(plain("machine", f"on this machine: {'; '.join(installed)}"))
-        items += [
-            {
-                "topic": slug,
-                "name": name,
-                "phase": "findings",
-                "text": f"{entry['questions'][finding['question'] - 1]['question']} {finding['answer']} "
-                f"({finding['confidence']} confidence)",
-                "id": Library.claim_id(finding, finding["answer"]),
-                "status": finding.get("status", "candidate"),
-            }
-            for finding in entry.get("findings", [])
-        ]
-        items += [
-            {
-                "topic": slug,
-                "name": name,
-                "phase": str(rule["phase"]),
-                "text": str(rule["text"]),
-                "kind": "rule",
-                "when": str(rule.get("when") or ""),
-                "id": Library.claim_id(rule, rule["text"]),
-                "status": rule.get("status", "candidate"),
-            }
-            for rule in entry.get("rules", [])
-        ]
-        return items + [
-            {
-                "topic": slug,
-                "name": name,
-                "phase": str(fact["phase"]),
-                "text": str(fact["text"]) + (f" ({fact['confidence']})" if fact.get("confidence") else ""),
-                "id": Library.claim_id(fact, fact["text"]),
-                "status": fact.get("status", "candidate"),
-            }
-            for fact in Library.facts_shown(entry)
-        ]
+            yield "machine", f"on this machine: {'; '.join(installed)}"
+
+    @staticmethod
+    def installed_text(tool):
+        return tool["output"] if tool["found"] else f"`{tool['command']}` fails (not installed)"
+
+    @staticmethod
+    def finding_text(entry, finding):
+        question = entry["questions"][finding["question"] - 1]["question"]
+        return f"{question} {finding['answer']} ({finding['confidence']} confidence)"
+
+    @staticmethod
+    def fact_text(fact):
+        return str(fact["text"]) + (f" ({fact['confidence']})" if fact.get("confidence") else "")
+
+    @staticmethod
+    def claim_state(claim, said):
+        if claim is None:
+            return {"id": None, "status": None}
+        return {"id": Library.claim_id(claim, said), "status": claim.get("status", "candidate")}
 
     @staticmethod
     def facts_shown(entry):

@@ -324,6 +324,10 @@ class Part:
         self.place = place
 
     @staticmethod
+    def bullets(lines):
+        return "\n".join(f"- {line}" for line in lines)
+
+    @staticmethod
     def total_size(parts):
         return sum(part.size() for part in parts if part.text or part.required)
 

@@ -5,7 +5,7 @@ lazy from pathlib import Path
 
 from .messages import say
 from .session import Phase
-from .settings import ENV_EXAMPLE, ENV_FILE, FILES_SHOWN_PER_FIX, first_line
+from .settings import ENV_EXAMPLE, ENV_FILE, FILES_SHOWN_PER_FIX, first_line, one_line
 lazy from .building import ToolchainRepair, Verifier
 lazy from .model import OllamaError
 lazy from .prompts import Part, Prompts, PromptTooLarge
@@ -166,7 +166,7 @@ class ReadmeWriter(Phase):
             Part("Request", self.project.run["task"], True, keep="head"),
             Part(
                 "What it does (its tested criteria)",
-                "\n".join(f"- {criterion['behaviour']}" for criterion in self.project.criteria),
+                Part.bullets(criterion["behaviour"] for criterion in self.project.criteria),
                 True,
             ),
             Part(
@@ -201,17 +201,16 @@ class ReadmeWriter(Phase):
 
     def read(self, reply):
         data = reply.json()
-        clean = lambda value: " ".join(str(value or "").split())
-        features = [clean(feature) for feature in data.get("features") or [] if clean(feature)]
+        features = [one_line(feature) for feature in data.get("features") or [] if one_line(feature)]
         entries = [use for use in data.get("usage") or [] if isinstance(use, dict)]
         usage = [
             {
-                "what": clean(use.get("what")),
-                "command": clean(use.get("command")),
+                "what": one_line(use.get("what")),
+                "command": one_line(use.get("command")),
                 "output": str(use.get("output") or "").strip("\n"),
             }
             for use in entries
-            if clean(use.get("what")) and clean(use.get("command"))
+            if one_line(use.get("what")) and one_line(use.get("command"))
         ]
         if not features or not usage:
             raise ValueError("it needs the features and at least one usage example")
@@ -223,7 +222,7 @@ class ReadmeWriter(Phase):
             "features": features,
             "usage": usage[: self.MAX_USAGE_EXAMPLES],
             "serves": serves,
-            "requires": clean(data.get("requires")),
+            "requires": one_line(data.get("requires")),
         }
 
     def text(self, guide):
@@ -231,7 +230,7 @@ class ReadmeWriter(Phase):
             f"# {self.project.workdir.name}",
             guide["overview"] or self.project.run["task"].strip(),
             "## Features",
-            "\n".join(f"- {feature}" for feature in guide["features"]),
+            Part.bullets(guide["features"]),
         ]
         started = self.getting_started(guide)
         sections += ["## Getting started", *[step for step in started if step]] if any(started) else []

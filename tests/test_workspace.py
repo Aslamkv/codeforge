@@ -43,9 +43,9 @@ def test_run_removes_the_project_path_and_has_no_input(workspace, project_dir):
 
 @pytest.mark.spec("WS-1")
 def test_run_times_out_and_kills_the_process_group(workspace, project_dir):
-    code, output = workspace.run("(sleep 0.3; touch late) & sleep 30", timeout=0.1, quiet=True)
+    code, output = workspace.run("(sleep 0.2; touch late) & sleep 30", timeout=0.05, quiet=True)
     assert code is None
-    time.sleep(0.4)
+    time.sleep(0.3)
     assert not (project_dir / "late").exists()
 
 
@@ -274,13 +274,13 @@ def test_placeholders_and_real_values():
 
 @pytest.mark.spec("WS-9")
 def test_start_and_stop_a_background_command(workspace, project_dir):
-    process, output = workspace.start("echo serving; (sleep 0.3; touch late) & sleep 30")
+    process, output = workspace.start("echo serving; (sleep 0.2; touch late) & sleep 30")
     assert output == project_dir / ".tinker" / "app-output.txt"
     while "serving" not in output.read_text():
         time.sleep(0.01)
     workspace.stop(process)
     assert process.poll() is not None
-    time.sleep(0.4)
+    time.sleep(0.3)
     assert not (project_dir / "late").exists()
     assert workspace.start("sudo serve") is None
 

@@ -98,7 +98,7 @@ class TestWriter(Phase, NotAPytestClass):
         parts = [
             Part(
                 f"Tests to write in {where} (name: criterion)",
-                "\n".join(f"- {TestRef(step['test']).name}: {step['behaviour']}" for step in todo),
+                Part.bullets(f"{TestRef(step['test']).name}: {step['behaviour']}" for step in todo),
                 True,
             ),
             Part("Test command", self.session.toolchain.test_one, True, place="first"),
@@ -277,9 +277,7 @@ class CodeWriter(Phase):
                     f"{self.project.language}\n{json.dumps(self.session.toolchain.to_dict())}",
                     True,
                 ),
-                Part(
-                    "Constraints", "\n".join(f"- {constraint}" for constraint in cycle.get("constraints", []))
-                ),
+                Part("Constraints", Part.bullets(cycle.get("constraints", []))),
                 Part("Project files", self.project.outline()),
                 *self.session.knowledge_parts("config", "toolchain"),
             ],
@@ -377,7 +375,7 @@ class CodeWriter(Phase):
             ),
             Part(
                 "Criteria it serves",
-                "\n".join(f"- {criterion['behaviour']}" for criterion in criteria)
+                Part.bullets(criterion["behaviour"] for criterion in criteria)
                 or "none directly: its contract says what it does",
                 True,
             ),
@@ -421,7 +419,7 @@ class CodeWriter(Phase):
             Part("Other files", self.project.outline(), place="first"),
             Part(
                 "Not wanted (non-goals)",
-                "\n".join(f"- {non_goal}" for non_goal in cycle.get("non_goals", [])),
+                Part.bullets(cycle.get("non_goals", [])),
                 place="first",
             ),
             *self.session.knowledge_parts("config" if info.get("kind") == "config" else "code"),
@@ -1115,7 +1113,7 @@ class BuildFix(Worker):
             else []
         )
         tail = [
-            Part("Already tried (it still failed)", "\n".join(f"- {attempt}" for attempt in self.tried)),
+            Part("Already tried (it still failed)", Part.bullets(self.tried)),
             Part("Language", self.project.language),
             *self.session.knowledge_parts("code", "config"),
         ]
