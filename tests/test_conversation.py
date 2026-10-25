@@ -628,9 +628,9 @@ def desk(tmp_path, monkeypatch, home_store):
     channel = Recorder(chats=("1",))
     desk = Desk([channel], tmp_path)
     desk.ran = []
-    monkeypatch.setattr(
-        desk, "tinker", lambda words: desk.ran.append(words) or f"output of {' '.join(words)}"
-    )
+    ran = lambda words: desk.ran.append(words) or f"output of {' '.join(words)}"
+    monkeypatch.setattr(desk, "tinker", ran)
+    monkeypatch.setattr(desk, "printed", ran)
     yield desk, channel, script
     desk.stop_task()
     if desk.last_task:
@@ -697,6 +697,22 @@ def test_a_command_that_deletes_and_exit_ask_first(desk):
 
 
 @pytest.mark.spec("CNV-11")
+def test_a_deletion_preview_is_what_tinker_printed_without_its_errors(tmp_path, monkeypatch, home_store):
+    script = tmp_path / "deletes.py"
+    script.write_text(
+        "import sys\nprint('Delete these runs:')\nprint('  • abc123')\n"
+        "sys.exit('Nothing deleted: run tinker clear runs in a terminal to confirm, or add --yes.')\n"
+    )
+    monkeypatch.setattr(conversation, "tinker_command", lambda: [sys.executable, str(script)])
+    channel = Recorder(chats=("1",))
+    desk = Desk([channel], tmp_path)
+    desk.answer(Message("1", "clear runs"), channel)
+    shown = channel.texts()[-1]
+    assert "Delete these runs:" in shown and "abc123" in shown
+    assert "Nothing deleted" not in shown and "👉 `confirm` to delete it" in shown
+
+
+@pytest.mark.spec("CNV-11")
 def test_a_task_runs_as_its_own_tinker_and_its_plan_waits(desk, home_store):
     desk, channel, script = desk
     say(desk, channel, "task a calculator")
@@ -707,7 +723,7 @@ def test_a_task_runs_as_its_own_tinker_and_its_plan_waits(desk, home_store):
         and desk.waiting_plan["stage"] == "spec"
         and desk.waiting_plan["new"]
     )
-    assert desk.waiting_plan["spec"].startswith("📋 **Plan for calc** · run `abc123`")
+    assert desk.waiting_plan["plan"].startswith("📋 **Plan for calc** · run `abc123`")
     assert desk.status().startswith("🙋 **Tinker** · calc: a calculator waits for you")
     assert home_store.items("running") == {}
 
@@ -727,6 +743,19 @@ def test_confirm_asks_a_new_projects_folder_once_then_builds(desk):
     assert desk.waiting_plan is None
 
 
+@pytest.mark.spec("CNV-11")
+def test_a_confirmed_plan_is_kept_without_its_next_step_lines(desk):
+    desk, channel, script = desk
+    say(desk, channel, "task a calculator")
+    wait_until(lambda: desk.waiting_plan is not None)
+    say(desk, channel, "confirm")
+    say(desk, channel, "rename sums")
+    wait_until(lambda: "resume @abc123" in calls_of(script))
+    kept = desk.reporter.plan_on_top.splitlines()
+    assert kept[0].startswith("📋 **Plan for calc** · run `abc123`") and kept[-1] == "📁 `sums`"
+    assert not [line for line in kept if line.startswith(("👉", "⏱"))]
+
+
 @pytest.mark.spec("CNV-12")
 def test_confirm_of_a_feature_builds_at_once_and_amend_changes_it(desk):
     desk, channel, script = desk
@@ -734,7 +763,8 @@ def test_confirm_of_a_feature_builds_at_once_and_amend_changes_it(desk):
         "run": "abc123",
         "folder": desk.root / "calc",
         "title": "calc: history",
-        "spec": "📋 plan",
+        "plan": "📋 plan",
+        "so_far": "1 second (1 seconds)",
         "stage": "spec",
         "new": False,
     }
@@ -745,7 +775,8 @@ def test_confirm_of_a_feature_builds_at_once_and_amend_changes_it(desk):
         "run": "abc123",
         "folder": desk.root / "calc",
         "title": "calc: history",
-        "spec": "📋 plan",
+        "plan": "📋 plan",
+        "so_far": "1 second (1 seconds)",
         "stage": "spec",
         "new": False,
     }

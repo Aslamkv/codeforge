@@ -337,7 +337,7 @@ class Desk:
             return
         if not command:
             self.talk.answer(
-                channel, message, self.running_now, lambda: (self.waiting_plan or {}).get("spec", "")
+                channel, message, self.running_now, lambda: self.plan_shown(self.waiting_plan)
             )
             return
         reply = self.answer(message, channel)
@@ -579,7 +579,7 @@ class Desk:
                     folder,
                     title,
                     "✅ **Confirmed:** building it",
-                    keep=self.kept(waiting) if mine else "",
+                    keep=waiting["plan"] if mine else "",
                 ),
             )
         change = " ".join(rest)
@@ -608,17 +608,15 @@ class Desk:
     @staticmethod
     def asked(waiting):
         if waiting.get("stage") != "name":
-            return waiting["spec"]
+            return Desk.plan_shown(waiting)
         return (
-            f"{waiting['spec']}\n\n📁 **Its folder:** `{Path(waiting['folder']).name}`\n👉 `confirm` to build it "
+            f"{Desk.plan_shown(waiting)}\n\n📁 **Its folder:** `{Path(waiting['folder']).name}`\n👉 `confirm` to build it "
             f"there · `rename NAME` to name it otherwise (it builds then)"
         )
 
     @staticmethod
-    def kept(waiting):
-        return "\n".join(
-            line for line in waiting["spec"].splitlines() if not line.startswith(("👉", "⏱"))
-        ).strip()
+    def plan_shown(waiting):
+        return Progress.waits(waiting["plan"], waiting["so_far"]) if waiting else ""
 
     def on_board(self, waiting, text):
         board = self.messages_by_run.setdefault(waiting["run"], {})
@@ -641,7 +639,7 @@ class Desk:
             return self.on_task(waiting, md(t"⚠️ **Not renamed:** {why}"))
         self.renamed(waiting, words[1])
         if waiting.get("stage") != "name":
-            self.on_board(waiting, f"{waiting['spec']}\n\n📁 **Renamed:** its folder is `{words[1]}`")
+            self.on_board(waiting, f"{self.plan_shown(waiting)}\n\n📁 **Renamed:** its folder is `{words[1]}`")
             return None
         return self.on_task(
             waiting,
@@ -650,7 +648,7 @@ class Desk:
                 waiting["folder"],
                 waiting["title"],
                 f"✅ **Renamed** to `{words[1]}`: building it",
-                keep=self.kept(waiting),
+                keep=waiting["plan"],
             ),
         )
 
@@ -672,7 +670,7 @@ class Desk:
     def renamed(waiting, name):
         old, waiting["folder"] = waiting["folder"], Path(waiting["folder"]).parent / name
         waiting["title"] = f"{name}: {waiting['title'].split(': ', 1)[-1]}"
-        waiting["spec"] = waiting["spec"].replace(f"📁 `{Path(old).name}`", f"📁 `{name}`")
+        waiting["plan"] = waiting["plan"].replace(f"📁 `{Path(old).name}`", f"📁 `{name}`")
 
     def resume(self, words):
         name, rest = refs(words[1:])
@@ -730,9 +728,7 @@ class Desk:
         return None
 
     def ask_first(self, channel, chat, words):
-        preview = "\n".join(
-            line for line in self.tinker(words).splitlines() if "in a terminal to confirm" not in line
-        )
+        preview = self.printed(words)
         shown = channel.show(
             chat,
             None,
@@ -929,7 +925,8 @@ class Desk:
                 "run": task["run"],
                 "folder": task["folder"],
                 "title": task["title"],
-                "spec": reporter.progress.ending(),
+                "plan": reporter.progress.planned(plan),
+                "so_far": reporter.progress.time_taken(),
                 "stage": "spec",
                 "new": plan.get("kind") == "project",
             }
@@ -957,7 +954,14 @@ class Desk:
         return {process.pid for process in self.live_tasks}
 
     def tinker(self, arguments, timeout=120):
-        done = subprocess.run(
+        done = self.run_tinker(arguments, timeout)
+        return shown_output(done.stdout + done.stderr)
+
+    def printed(self, arguments):
+        return shown_output(self.run_tinker(arguments, 120).stdout)
+
+    def run_tinker(self, arguments, timeout):
+        return subprocess.run(
             tinker_command() + arguments,
             cwd=self.root,
             text=True,
@@ -966,7 +970,10 @@ class Desk:
             env=dict(os.environ, NO_COLOR="1"),
             timeout=timeout,
         )
-        return first_lines(Markup.columns((done.stdout + done.stderr).strip()) or "(nothing)", 40)
+
+
+def shown_output(output):
+    return first_lines(Markup.columns(output.strip()) or "(nothing)", 40)
 
 
 def command_of(text, commands=None):
@@ -1646,7 +1653,7 @@ class Progress:
 
     def ending(self):
         if self.waiting():
-            return self.plan(self.snapshot["waiting"]) + f"\n⏱ _so far: {self.time_taken()}_"
+            return self.waits(self.planned(self.snapshot["waiting"]), self.time_taken())
         ended = self.snapshot.get("ended")
         if not ended:
             return md(t"🏁 **{self.title}**")
@@ -1679,7 +1686,19 @@ class Progress:
         return f"{human_duration(seconds)} ({round(seconds)} seconds)"
 
     @staticmethod
+    def waits(planned, so_far):
+        return f"{Progress.with_next_step(planned)}\n⏱ _so far: {so_far}_"
+
+    @staticmethod
     def plan(plan):
+        return Progress.with_next_step(Progress.planned(plan))
+
+    @staticmethod
+    def with_next_step(planned):
+        return f"{planned}\n\n👉 `confirm` to build it · `amend WHAT` to change it"
+
+    @staticmethod
+    def planned(plan):
         heading = "🐞 **Bug shown for" if plan.get("kind") == "fix" else "📋 **Plan for"
         start = f" · ▶️ `{plan['start']}`" if plan.get("start") else ""
         lines = [
@@ -1694,7 +1713,7 @@ class Progress:
             lines += ["", md(t"🚫 _Not included:_ {'; '.join(plan['non_goals'])}")]
         if plan.get("folder"):
             lines += [f"📁 `{Path(plan['folder']).name}`"]
-        return "\n".join(lines + ["", "👉 `confirm` to build it · `amend WHAT` to change it"])
+        return "\n".join(lines)
 
     @staticmethod
     def change_line(change):
