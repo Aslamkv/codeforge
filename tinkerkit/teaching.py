@@ -2,7 +2,6 @@ import re
 from collections import namedtuple
 
 from .messages import say
-lazy from .conversation import Research
 lazy from .graph import Graph
 lazy from .knowledge import Item, Knowledge, Learner, Library, Retriever, retire
 lazy from .prompts import Part, Prompts
@@ -188,7 +187,7 @@ class Teacher:
             return []
         moved_on(self.tracker, "search", "Searching the web for sources…", "🔎")
         with say.working_on(f"Reading the web: {len(searches)} search(es)"):
-            pages = Research(None).read(self.internet, searches)
+            pages = self.learner.web_pages(searches)
         if not pages:
             say.warn(f"No web page found: {self.internet.problem()}")
         for page in pages:

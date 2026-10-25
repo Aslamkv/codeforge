@@ -34,6 +34,8 @@ from .settings import (
     SAME_FACT_SIMILARITY,
     SAME_LESSON_SIMILARITY,
     SEARCHES_PER_RESEARCH_QUESTION,
+    TEACH_PAGE_CHARS,
+    TEACH_PAGES,
     TOOLCHAIN_HINT_SIMILARITY,
     VERSION_TIMEOUT,
     Config,
@@ -531,6 +533,25 @@ class Learner:
     def read_web(self, name, searches, max_pages):
         results = [self.results(search) for search in searches]
         return self.read_pages(name, self.in_turn(searches, results, max_pages))
+
+    def web_pages(self, searches):
+        asked = [
+            {"query": search, "pages": RESULTS_PER_RESEARCH_SEARCH, "section": "", "focus": search}
+            for search in searches
+        ]
+        found = self.in_turn(asked, [self.results(search) for search in asked], TEACH_PAGES)
+        pages = [self.web_page(result, " ".join(searches)) for result in found]
+        return [page for page in pages if page["content"]]
+
+    def web_page(self, result, wanted):
+        got = self.internet.fetch(result["url"]) or {}
+        text = got.get("content") or result.get("content") or ""
+        chunks = self.relevant_chunks(text, TEACH_PAGE_CHARS // CHUNKS_PER_PAGE, wanted) if text.strip() else []
+        return {
+            "title": got.get("title") or result.get("title", ""),
+            "url": result["url"],
+            "content": "\n\n".join(chunks)[:TEACH_PAGE_CHARS],
+        }
 
     def results(self, search):
         found = self.internet.search(search["query"], RESULTS_PER_RESEARCH_SEARCH)
