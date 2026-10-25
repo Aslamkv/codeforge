@@ -957,8 +957,8 @@ def test_every_status_is_sent_anew_the_one_before_taken_out(desk):
     channel = Recorder("bot")
     listening = Desk([channel], Path.cwd())
     listening.chats_started.add(channel)
-    listening.say_status("🔄 **Tinker** · working on calc\n▸ planning")
-    listening.say_status("🔄 **Tinker** · working on calc\n▸ building")
+    listening.say_status("🔄 **Tinker** · working on calc")
+    listening.say_status("🔄 **Tinker** · working on learn go")
     listening.say_status("🟢 **Tinker** · idle: send a task")
     log = [(kind, sent) for kind, _, sent, _ in channel.log]
     assert log[0] == ("send", 101) and "edit" not in {kind for kind, _ in log}
@@ -998,6 +998,14 @@ def test_a_job_says_its_status_as_it_starts_and_ends(desk, monkeypatch):
     job.code = 0
     listening.ended(job, listening.reporter, listening.task)
     assert listening.said_status.startswith("🟢 **Tinker** · idle")
+
+
+@pytest.mark.spec("CNV-9")
+def test_a_run_in_a_terminal_shows_its_title_and_never_how_far_it_got(home_store, tmp_path):
+    desk = Desk([Recorder()], tmp_path)
+    state = snapshot(title="calc", doing="🔨 Building", passing=[1, 2], pid_began=began_at(os.getppid()))
+    home_store.put("running", str(os.getppid()), state)
+    assert desk.status() == "🔄 **Tinker** · working in a terminal on calc"
 
 
 @pytest.mark.spec("CNV-9")
