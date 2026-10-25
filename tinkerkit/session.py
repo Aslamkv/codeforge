@@ -57,7 +57,8 @@ class Session:
 
     def ask(self, system, parts, label, **kw):
         kw.setdefault("done_when", Reply.files_complete)
-        return Reply(self.model.ask(system, parts, label, **kw))
+        answer = self.model.ask(system, parts, label, **kw)
+        return Reply(answer.value, answer.thought)
 
     def ask_until_usable(self, system, parts, label, read, attempts=3, think=None, max_reply=None):
         try:

@@ -611,7 +611,7 @@ class Brief:
                     Prompts.BRIEF_SYSTEM.format(words=words_each),
                     [Part("Task", task, True), Part("Spec excerpt", chunk, True)],
                     f"Brief {number}/{len(chunks)}",
-                )
+                ).value
             ).text
             for number, chunk in enumerate(chunks, 1)
         ]

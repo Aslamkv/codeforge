@@ -58,8 +58,9 @@ class Reply:
     MARKDOWN_FENCE_RE = re.compile(r"\s*(`{3,}|~{3,})[\w+#.-]*\s*")
     ESCAPED_SINGLE_QUOTE_RE = re.compile(r"(?<!\\)((?:\\\\)*)\\'")
 
-    def __init__(self, raw):
+    def __init__(self, raw, thought=""):
         self.text = self.THINK_RE.sub("", raw or "").strip()
+        self.thought = thought
 
     def json(self):
         start, end = self.text.find("{"), self.text.rfind("}")

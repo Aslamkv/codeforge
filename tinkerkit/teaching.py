@@ -96,7 +96,7 @@ class Asker:
             Part("From what you read", quoted(passages)),
             Part("The question", question, True),
         ]
-        return self.model.ask(Prompts.ASK_SYSTEM, parts, "ask").strip()
+        return self.model.ask(Prompts.ASK_SYSTEM, parts, "ask").value.strip()
 
     @staticmethod
     def said(answer):
