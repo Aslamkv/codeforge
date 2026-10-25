@@ -458,7 +458,10 @@ def test_a_rate_limit_is_told_apart_from_other_failures(monkeypatch):
     monkeypatch.setattr(urllib.request, "urlopen", urlopen)
     with pytest.raises(WebError) as error:
         OllamaWeb(5).post("/web_search", {})
-    assert error.value.code == 429
+    assert error.value.code == 429 and not error.value.retry
+    with pytest.raises(WebError) as error:
+        DuckDuckGoWeb.get("https://site.org/x", 5)
+    assert error.value.code == 429 and not error.value.retry
 
 
 @pytest.mark.spec("WEB-7")
@@ -505,9 +508,8 @@ def test_each_backend_has_its_own_rate():
 
 
 @pytest.mark.spec("WEB-12", "WEB-5")
-def test_internet_waits_out_a_429_without_the_retry_pause(monkeypatch, clock):
-    monkeypatch.setattr(Internet, "RETRY_PAUSE_SECONDS", 3)
-    busy = WebError("busy", retry=True, network=True, code=429)
+def test_internet_waits_out_a_429(monkeypatch, clock):
+    busy = WebError("busy", network=True, code=429)
     backend = Scripted(1, [busy, busy, [{"url": "https://ok"}]])
     internet = internet_with(monkeypatch, backend)
     assert internet.search("q", 1) and backend.calls == 3 and not internet.rate_limited("q")
