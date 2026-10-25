@@ -67,7 +67,7 @@ listed above it:
 | `prompts` | prompt parts (`Part`), replies (`Reply`), every system prompt (`Prompts`) |
 | `workspace` | the project's files and the commands run in it (`Workspace`, `Toolchain`, `TestRef`, `Output`, `FileView`, `TaughtCommands`) |
 | `model` | the local model: Ollama's API, one request with its budgets and retries (`Model`), measuring a model (`Calibrator`) |
-| `project` | the plan and its record (`Project`, `SpecDocument`, `Runs`, `RunChecks`, `Brief`, `Outcome`), the run's `Tracker`, and the step pipeline (`Steps`) |
+| `project` | the plan and its record (`Project`, `SpecDocument`, `Runs`, `RunChecks`, `Brief`, `Outcome`), the run's `Tracker` and its `ending`, and the step pipeline (`Steps`) with what moves a tracker through it (`Tracked`) |
 | `fetcher` | the Internet plugin's page fetcher: pages read straight from their sites, in parallel, with the standard library only (`Fetcher`, `Fetched`) |
 | `passages` | every page read as text: an HTML page's main content as blocks, and fetched pages as passages under headings, repeats dropped (`Cleaner`, `MainBlocks`, `Links`, `Page`, `Passage`) |
 | `web` | the Internet plugin, the only part that goes on the web (`Internet`, `OllamaWeb`, `DuckDuckGoWeb`, `Throttle`), and a page as text (`PageText`, a view over `passages`) |
@@ -631,7 +631,9 @@ What is said in the chats, kept so that a chat is only a view of it.
   is passed over, neither entered nor run. A step that gives False stops there, unsaved (`blocked`), and
   `waits()` stops it before the next step (`waiting`). The cycle's phases (**CLI-11**) and a practice project's
   steps (**EXR-4**) run this way. Learning (**LRN-8**) and reading (**RDG-12**) only enter their steps: a
-  learn goes on through its journal, and a reading by its chapters' states.
+  learn goes on through its journal, and a reading by its chapters' states. Both share `Tracked`: its
+  `step(phase, said)` says the words and enters the step, and its `outcome(text)` gives the tracker what came of
+  it; neither touches a tracker when there is none.
 
 ## fetcher (FET)
 
