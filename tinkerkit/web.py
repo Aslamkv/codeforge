@@ -309,8 +309,8 @@ class OllamaWeb(WebBackend):
         }
         return WebError(
             f"ollama.com answered HTTP {code}{hint.get(code, '')}",
-            network=code in (401, 403, 429) or (code >= 500 and path != "/web_fetch"),
-            retry=code == 429 or code >= 500,
+            network=code in (401, 403) or (code >= 500 and path != "/web_fetch"),
+            retry=code >= 500,
             code=code,
         )
 

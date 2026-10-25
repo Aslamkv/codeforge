@@ -122,7 +122,7 @@ def test_projects_are_named_with_an_at(tmp_path):
     ]
 
 
-@pytest.mark.spec("CLI-1")
+@pytest.mark.spec("SET-12")
 def test_clear_runs_on_its_own(home_store):
     home_store.put("memory", "any", {})
     with pytest.raises(SystemExit) as done:

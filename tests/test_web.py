@@ -260,7 +260,7 @@ def test_ollama_web_posts_json_with_its_key(monkeypatch):
     [
         (401, "/web_search", True, False),
         (403, "/web_fetch", True, False),
-        (429, "/web_search", True, True),
+        (429, "/web_search", False, False),
         (500, "/web_search", True, True),
         (503, "/web_fetch", False, True),
         (404, "/web_fetch", False, False),

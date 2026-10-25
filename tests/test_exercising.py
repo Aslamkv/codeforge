@@ -436,7 +436,7 @@ def test_an_exercise_that_ends_before_it_keeps_a_tracker_shows_what_it_printed(h
 def test_the_conversation_leaves_exercise_runs_alone(home_store, tmp_path):
     desk = Desk([Recorder()], tmp_path)
     home_store.put("jobs", "1", exercise_job("running", progress=BUILDING))
-    assert persons_runs() == []
+    assert persons_runs() == [] and desk.running_now() == []
     assert desk.status() == "🏋️ **Tinker** · Exercising Rust"
 
 
@@ -493,13 +493,6 @@ def test_tinker_exercise_takes_a_language_or_status():
     assert Cli.parse(["exercise", "status"]).exercise == "status"
     with pytest.raises(SystemExit):
         Cli.parse(["exercise"])
-
-
-@pytest.mark.spec("EXR-6")
-def test_a_chat_never_waits_for_an_exercise(home_store, tmp_path):
-    desk = Desk([Recorder()], tmp_path)
-    home_store.put("jobs", "1", exercise_job("running", progress=BUILDING))
-    assert desk.running_now() == []
 
 
 @pytest.mark.spec("EXR-7")
