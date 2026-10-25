@@ -54,6 +54,23 @@ def test_selected_needs_a_measured_model(tinker_home):
     assert Models.selected() == ("m", MEASURED)
 
 
+@pytest.mark.spec("MOD-25")
+def test_quick_calls_use_the_measured_model(measured_model, fake_ollama, tinker_home):
+    assert Models.quick() == (MODEL, {"num_ctx": 32768}, False)
+    Models.keep(MODEL, dict(MEASURED, think=None, num_batch=512))
+    assert Models.quick() == (MODEL, {"num_ctx": 32768, "num_batch": 512}, None)
+    fake_ollama.reply("  hi there \n")
+    assert Models.quick_reply([{"role": "user", "content": "hi"}], 7) == "hi there"
+    call = fake_ollama.calls[-1]
+    assert call["options"] == {"num_ctx": 32768, "num_batch": 512, "num_predict": 7}
+    assert call["timeout"] == model_module.QUICK_REPLY_TIMEOUT and call["keep_alive"] is not None
+    fake_ollama.reply(OllamaError("down"))
+    with pytest.raises(OllamaError, match="down"):
+        Models.quick_reply([{"role": "user", "content": "hi"}], 7)
+    Config.save(**{"model": None})
+    assert Models.quick() is None
+
+
 @pytest.mark.spec("MOD-3")
 def test_installed(monkeypatch):
     monkeypatch.setattr(Ollama, "installed_models", staticmethod(lambda: None))

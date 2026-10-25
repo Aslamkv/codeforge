@@ -20,8 +20,9 @@ from .jobs import JOB_STOP_SIGNAL, Jobs, alive, job_number, paused_for_you, toda
 from .project import Runs, Tracker, saved
 lazy from .ledger import DONE_NOTE_KEPT_SECONDS, Ledger
 lazy from .messages import human_duration, say
-lazy from .model import Models, Ollama, OllamaError
-lazy from .settings import EXERCISE_FOLDER, Config, Home, projects_folder
+lazy from .model import Models, OllamaError
+lazy from .prompts import Reply
+lazy from .settings import EXERCISE_FOLDER, Home, projects_folder
 lazy from .web import Internet
 lazy from .workspace import Toolchain
 
@@ -35,7 +36,6 @@ ENDED_LOOK_SECONDS = 0.5
 
 CHAT_CONTEXT_MESSAGES = 12
 CHAT_MAX_REPLY_TOKENS = 1024
-CHAT_REPLY_TIMEOUT = 600
 TYPING_SIGN_SECONDS = 4
 MODEL_BUSY_NOTE_AFTER_SECONDS = 5
 MODEL_BUSY_NOTE_EDIT_SECONDS = 30
@@ -105,7 +105,6 @@ MenuEntry = namedtuple("MenuEntry", "name what")
 WordsAsked = namedtuple("WordsAsked", "question example")
 AppRequest = namedtuple("AppRequest", "project args stdin")
 ShellRun = namedtuple("ShellRun", "code output")
-ChatModel = namedtuple("ChatModel", "name options think")
 Secret = namedtuple("Secret", "key question")
 
 
@@ -1087,8 +1086,7 @@ class Talk:
         return "\n".join(lines)
 
     def reply(self, channel, message, now="", tokens=CHAT_MAX_REPLY_TOKENS):
-        found = self.model()
-        if not found:
+        if not Models.quick():
             return (
                 "⚠️ **No model is in use yet**, so I cannot chat: `tinker calibrate NAME`, then "
                 f"`tinker use-model NAME`. These still work:\n{self.commands}"
@@ -1116,49 +1114,20 @@ class Talk:
             return list(said)
 
     def ask(self, channel, chat, messages, tokens):
-        name, options, think = self.model()
         done = threading.Event()
         threading.Thread(target=keep_typing, args=(channel, chat, done), daemon=True).start()
         try:
-            data = Ollama.chat(
-                name,
-                messages,
-                Config.keep_alive(Config.get("keep_alive")),
-                dict(options, num_predict=tokens),
-                think=think,
-                timeout=CHAT_REPLY_TIMEOUT,
-            )
+            return Models.quick_reply(messages, tokens)
         finally:
             done.set()
-        return data["message"]["content"].strip()
-
-    @staticmethod
-    def model():
-        name = Config.get("model")
-        settings = (Models.settings(name) or {}) if name else {}
-        if not settings.get("num_ctx"):
-            return None
-        options = {"num_ctx": settings["num_ctx"], "num_predict": CHAT_MAX_REPLY_TOKENS}
-        if settings.get("num_batch"):
-            options["num_batch"] = settings["num_batch"]
-        return ChatModel(name, options, False if settings.get("think") not in (None, False) else None)
 
     def warm(self):
         threading.Thread(target=self.load, daemon=True).start()
 
     def load(self):
-        found = self.model()
-        if found:
-            name, options, think = found
+        if Models.quick():
             try:
-                Ollama.chat(
-                    name,
-                    [{"role": "user", "content": "hi"}],
-                    Config.keep_alive(Config.get("keep_alive")),
-                    dict(options, num_predict=1),
-                    think=think,
-                    timeout=CHAT_REPLY_TIMEOUT,
-                )
+                Models.quick_reply([{"role": "user", "content": "hi"}], 1)
             except OllamaError as exc:
                 say.warn(f"The model did not load for chat: {first_words(exc)}")
 
@@ -1204,14 +1173,14 @@ class Shell:
 
     def propose(self, channel, message, context, tokens):
         key = (channel.name, message.chat)
-        if not self.talk.model():
+        if not Models.quick():
             self.commands_to_confirm.pop(key, None)
             return "⚠️ **No model is in use yet:** `tinker calibrate NAME`, then `tinker use-model NAME`."
         system = self.SYSTEM.format(
             system=os.uname().sysname, shell=Path(self.shell).name, folder=self.folder
         )
         try:
-            data = json_in(
+            data = json_answer(
                 self.talk.ask(
                     channel,
                     message.chat,
@@ -1256,7 +1225,7 @@ class Shell:
         code, output = in_shell(self.shell, line, self.folder)
         head = md(t"{'✅' if code == 0 else '❌'} {line:code} · _exit {code}_")
         folded = self.folded(output)
-        tells = bool(output) and bool(self.talk.model())
+        tells = bool(output) and bool(Models.quick())
         sent = channel.show(chat, sent, f"{head}\n{folded}", done=not tells)
         if not tells:
             return
@@ -1394,12 +1363,12 @@ class Research:
     def unusable(self, internet):
         if not internet.available():
             return md(t"⚠️ **The web is not usable:** {internet.problem()}")
-        if not self.talk.model():
+        if not Models.quick():
             return "⚠️ **No model is in use yet:** `tinker use-model NAME`"
         return ""
 
     def searches(self, channel, chat, topic):
-        data = json_in(
+        data = json_answer(
             self.talk.ask(
                 channel,
                 chat,
@@ -2271,12 +2240,11 @@ def started_by_a_conversation():
     return os.environ.get(CHANNEL_REPORTS_ENV) == "off"
 
 
-def json_in(text):
-    found = re.search(r"\{.*\}", text or "", re.S)
+def json_answer(text):
     try:
-        data = json.loads(found.group(0)) if found else {}
+        data = Reply(text).json()
     except ValueError:
-        data = {}
+        return {}
     return data if isinstance(data, dict) else {}
 
 

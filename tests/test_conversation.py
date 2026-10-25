@@ -9,7 +9,6 @@ import time
 from pathlib import Path
 
 import pytest
-from conftest import MODEL
 
 import tinkerkit.conversation as conversation
 from tinkerkit.conversation import (
@@ -30,7 +29,6 @@ from tinkerkit.conversation import (
     described,
     first_lines,
     first_words,
-    json_in,
     pieces,
     running,
     text_of,
@@ -38,6 +36,7 @@ from tinkerkit.conversation import (
 )
 from tinkerkit.jobs import began_at
 from tinkerkit.ledger import DONE_NOTE_KEPT_SECONDS, Ledger
+from tinkerkit.model import Models
 from tinkerkit.project import Runs, Tracker
 from tinkerkit.settings import Home
 
@@ -464,12 +463,15 @@ def test_a_reporter_without_a_tracker_shows_its_lines(monkeypatch):
 
 
 @pytest.mark.spec("CNV-20")
-def test_talk_model_needs_a_measured_model(measured_model, tinker_home):
-    from tinkerkit.settings import Config
-
-    assert Talk.model() == (MODEL, {"num_ctx": 32768, "num_predict": 1024}, False)
-    Config.save(**{"model": None})
-    assert Talk.model() is None
+def test_an_unreadable_json_answer_is_taken_as_empty(measured_model, fake_ollama):
+    shell, research, channel = Shell(Talk("cmds"), Path.cwd()), Research(Talk("cmds")), Recorder()
+    for unreadable in ("{bad}", "[1]", "none"):
+        fake_ollama.reply(unreadable)
+        assert "describe it another way" in shell.propose(channel, Message("1", "x"), "", 300)
+        fake_ollama.reply(unreadable)
+        assert research.searches(channel, "1", "python news") == ["python news"]
+    fake_ollama.reply('Sure: {"command": "ls", "does": "lists",} ok')
+    assert "```\nls\n```" in shell.propose(channel, Message("1", "x"), "", 300)
 
 
 @pytest.mark.spec("CNV-20")
@@ -838,8 +840,6 @@ def test_follow_reads_the_tasks_tracker(tmp_path, home_store):
 
 @pytest.mark.spec("CNV-4")
 def test_helpers(tmp_path):
-    assert json_in('Sure: {"a": 1} ok') == {"a": 1} and json_in("none") == {} and json_in("{bad}") == {}
-    assert json_in("[1]") == {}
     assert first_lines("a\nb\nc", 2) == "a\nb\n… 1 more lines" and first_lines("a", 2) == "a"
     assert first_words("  a \n b  c ", 3) == "a b"
     assert text_of(b"caf\xc3\xa9") == "café" and text_of(None) == "" and text_of("x") == "x"
@@ -1206,8 +1206,8 @@ def test_a_command_line_run_once_confirmed_pauses_the_job_while_its_output_is_re
         order.append("goes on")
 
     talk = Talk("cmds", pausing_jobs=pausing)
-    monkeypatch.setattr(talk, "model", lambda: ("m", {}, None))
-    monkeypatch.setattr(talk, "ask", lambda *asked: order.append("read") or "it says hi")
+    monkeypatch.setattr(Models, "quick", staticmethod(lambda: ("m", {}, None)))
+    monkeypatch.setattr(Models, "quick_reply", staticmethod(lambda *asked: order.append("read") or "it says hi"))
     channel = Recorder()
     Shell(talk, tmp_path).run(channel, "1", {"line": "echo hi", "asked": "say hi", "shown": None})
     assert order == ["paused", "read", "goes on"] and "it says hi" in channel.texts()[-1]

@@ -58,7 +58,6 @@ except ImportError:
 Renamed = namedtuple("Renamed", "project folder")
 LearningTools = namedtuple("LearningTools", "model embeddings internet")
 DoctorCheck = namedtuple("DoctorCheck", "required what check")
-CallSettings = namedtuple("CallSettings", "options think")
 
 
 def main():
@@ -1561,6 +1560,7 @@ class ProjectRun:
 class ProjectFolder:
     NAME_RE = re.compile(r"[a-z][a-z0-9]*(?:-[a-z0-9]+){0,2}")
     NAME_MAX = 20
+    NAME_TOKENS = 24
     COMMON = {
         "a",
         "an",
@@ -1604,31 +1604,20 @@ class ProjectFolder:
 
     @staticmethod
     def named(task):
-        model, settings = Models.selected()
-        options, think = ProjectFolder.quick_call(settings)
+        if not Models.quick():
+            return ""
         try:
-            data = Ollama.chat(
-                model,
+            reply = Models.quick_reply(
                 [
                     {"role": "system", "content": Prompts.FOLDER_NAME_SYSTEM},
                     {"role": "user", "content": task},
                 ],
-                Config.keep_alive(Config.get("keep_alive")),
-                options,
-                think=think,
-                timeout=180,
+                ProjectFolder.NAME_TOKENS,
             )
         except OllamaError:
             return ""
-        name = data["message"]["content"].strip().strip("`'\".").lower()
+        name = reply.strip("`'\".").lower()
         return name if ProjectFolder.NAME_RE.fullmatch(name) and len(name) <= ProjectFolder.NAME_MAX else ""
-
-    @staticmethod
-    def quick_call(settings):
-        options = {"num_ctx": settings["num_ctx"], "num_predict": 24}
-        if settings.get("num_batch"):
-            options["num_batch"] = settings["num_batch"]
-        return CallSettings(options, False if settings.get("think") not in (None, False) else None)
 
     @staticmethod
     def from_words(task):

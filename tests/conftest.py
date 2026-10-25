@@ -101,6 +101,7 @@ class FakeOllama:
                 "think": think,
                 "label": label or "",
                 "keep_alive": keep_alive,
+                "timeout": timeout,
             }
         )
         index = next(

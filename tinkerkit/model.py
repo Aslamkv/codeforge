@@ -31,6 +31,7 @@ from .settings import (
     PROGRESS_UPDATE_SECONDS,
     PROMPT_BUDGET_SHARE,
     PROMPT_TARGET_TOKENS,
+    QUICK_REPLY_TIMEOUT,
     REPLY_ERROR_RETRIES,
     REPLY_TARGET_TOKENS,
     RUNNER_OVERHEAD_BYTES,
@@ -47,6 +48,7 @@ lazy from .prompts import Part, Prompts, PromptTooLarge, Reply
 lazy from .workspace import ToolError
 
 SelectedModel = namedtuple("SelectedModel", "name settings")
+QuickModel = namedtuple("QuickModel", "name options think")
 Capacity = namedtuple("Capacity", "largest_that_reads smallest_that_failed")
 ContextSplit = namedtuple("ContextSplit", "prompt_budget longest_reply")
 LoadedModel = namedtuple("LoadedModel", "name size_bytes")
@@ -506,6 +508,30 @@ class Models:
                 f"again with tinker calibrate {name}"
             )
         return SelectedModel(name, settings)
+
+    @staticmethod
+    def quick():
+        name = Config.get("model")
+        settings = (Models.settings(name) or {}) if name else {}
+        if not settings.get("num_ctx"):
+            return None
+        options = {"num_ctx": settings["num_ctx"]}
+        if settings.get("num_batch"):
+            options["num_batch"] = settings["num_batch"]
+        return QuickModel(name, options, False if settings.get("think") not in (None, False) else None)
+
+    @staticmethod
+    def quick_reply(messages, tokens):
+        name, options, think = Models.quick()
+        data = Ollama.chat(
+            name,
+            messages,
+            Config.keep_alive(Config.get("keep_alive")),
+            dict(options, num_predict=tokens),
+            think=think,
+            timeout=QUICK_REPLY_TIMEOUT,
+        )
+        return data["message"]["content"].strip()
 
     @staticmethod
     def unusable_measurements(settings):
