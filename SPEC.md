@@ -367,10 +367,10 @@ What is said in the chats, kept so that a chat is only a view of it.
 ## prompts (PRM)
 
 - **PRM-1** `Reply(raw).text` is the raw reply without `<think>…</think>`, stripped.
-- **PRM-2** `Reply.json()` gives the JSON object in the reply, with prose around it allowed. It mends, only
-  when needed: commas before a closing bracket, strings joined with `+`, an escaped single quote (`\'`),
-  brackets left open at the end, and a list left open before the next key. No object is a `ValueError`. What
-  cannot be mended raises the reply's own `JSONDecodeError`.
+- **PRM-2** `Reply.json()` gives the JSON object in the reply, with prose around it allowed. Only when it
+  does not parse, it closes brackets the reply left open: before a closing bracket further out, and at the
+  end. No object is a `ValueError`. What cannot be mended raises the reply's own `JSONDecodeError`, so the
+  caller asks again.
 - **PRM-3** `Reply.files()` gives `(path, body)` for each `<<<FILE path>>> … <<<END>>>` block. The header may
   be `path=x`, `file: x`, `"x"`, or have no `>>>`. A placeholder path (`path`, `file` …) followed by the real
   path, on the header line or on the first line, takes that real path. A body that is only the format's
@@ -384,7 +384,7 @@ What is said in the chats, kept so that a chat is only a view of it.
   block. `Reply.files_complete(content)`, which stops a stream early, also needs at least 300 chars after it
   (the model is running on). `Reply.wrote(paths)` is also true once every wanted path has its block.
 - **PRM-7** `Reply.json_complete(content)` is true once the content ends with `}` and the object from its
-  first `{` parses (trailing commas allowed).
+  first `{` parses.
 - **PRM-8** `cause()`, `test_wrong()`, `criterion()`, `corrected_criteria()` and `toolchain_line()` read their
   marker lines (`CAUSE:`, `TEST WRONG:`, `CRITERION:`, `CRITERION <test>:`, `TOOLCHAIN: {json}`).
   `named_paths()` gives each path named by a block, once, in order.

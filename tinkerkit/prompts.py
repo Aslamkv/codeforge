@@ -52,11 +52,8 @@ class Reply:
         re.I,
     )
     RELATIVE_PATH_LINE_RE = re.compile(r"[\w.-]+(?:/[\w.-]+)*\.[\w]+|[\w.-]+(?:/[\w.-]+)+")
-    OBJECT_KEY_RE = re.compile(r'"(?:[^"\\]|\\.)*"\s*:')
-    STRING_CONCATENATION_RE = re.compile(r'(?<!\\)"\s*\+\s*"')
     BLOCK_MARKS_ONLY_RE = re.compile(r"\s*(<{2,}|>{2,}|<<<\w*>>>)\s*")
     MARKDOWN_FENCE_RE = re.compile(r"\s*(`{3,}|~{3,})[\w+#.-]*\s*")
-    ESCAPED_SINGLE_QUOTE_RE = re.compile(r"(?<!\\)((?:\\\\)*)\\'")
 
     def __init__(self, raw, thought=""):
         self.text = self.THINK_RE.sub("", raw or "").strip()
@@ -69,13 +66,7 @@ class Reply:
         return self.first_parsed(self.json_candidates(self.text[start : end + 1], self.text[start:]))
 
     def json_candidates(self, whole, to_the_end):
-        to_the_end = to_the_end.rstrip().rstrip("`").rstrip()
-        return [
-            whole,
-            self.mended(whole),
-            self.closed(self.mended(to_the_end)),
-            self.balanced(self.mended(to_the_end)),
-        ]
+        return [whole, self.balanced(to_the_end.rstrip().rstrip("`").rstrip())]
 
     @staticmethod
     def first_parsed(candidates):
@@ -87,36 +78,13 @@ class Reply:
                 problem = problem or exc
         raise problem
 
-    @classmethod
-    def mended(cls, text):
-        return cls.strip_trailing_commas(
-            cls.ESCAPED_SINGLE_QUOTE_RE.sub(r"\1'", cls.STRING_CONCATENATION_RE.sub("", text))
-        )
-
-    @staticmethod
-    def closed(text):
-        inside, ends_inside = Reply.string_states(text)
-        stack = []
-        for char, in_string in zip(text, inside):
-            if in_string or char not in "{[]}":
-                continue
-            if char in "{[":
-                stack.append(Reply.closer(char))
-            elif not stack or stack.pop() != char:
-                return None
-        if ends_inside or not stack:
-            return None
-        return text.rstrip().rstrip(",") + "".join(reversed(stack))
-
     @staticmethod
     def balanced(text):
         inside, ends_inside = Reply.string_states(text)
         out, stack = [], []
-        for index, (char, in_string) in enumerate(zip(text, inside)):
+        for char, in_string in zip(text, inside):
             if in_string:
                 pass
-            elif char == '"' and stack and stack[-1] == "]" and Reply.OBJECT_KEY_RE.prefixmatch(text, index):
-                Reply.close_list_before_last_comma(out, stack)
             elif char in "{[":
                 stack.append(Reply.closer(char))
             elif char in "}]":
@@ -129,12 +97,6 @@ class Reply:
     @staticmethod
     def closer(opener):
         return "}" if opener == "{" else "]"
-
-    @staticmethod
-    def close_list_before_last_comma(out, stack):
-        comma = "".join(out).rstrip().rfind(",")
-        if comma >= 0:
-            out.insert(comma, stack.pop())
 
     @staticmethod
     def close_until(char, out, stack):
@@ -308,7 +270,7 @@ class Reply:
         if start < 0 or not content.rstrip().endswith("}"):
             return False
         try:
-            json.loads(Reply.strip_trailing_commas(content[start:].strip()))
+            json.loads(content[start:].strip())
             return True
         except ValueError:
             return False
