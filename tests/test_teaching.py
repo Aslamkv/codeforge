@@ -14,6 +14,7 @@ from tinkerkit.prompts import Prompts
 from tinkerkit.reading import Readings
 from tinkerkit.settings import MEMORY_ITEMS_SHOWN, TEACH_CLAIMS, Home
 from tinkerkit.teaching import Asker, Memory, Teacher, Verdict, marked, read_plan
+from tinkerkit.web import WebPage, readable
 from tinkerkit.workspace import Toolchain
 
 PY = sys.executable
@@ -29,18 +30,17 @@ class FakeWeb:
     def __init__(self, pages=(PAGE,)):
         self.pages, self.queries = list(pages), []
 
-    def available(self):
-        return True
-
-    def problem(self, key=None):
-        return "nothing found"
-
     def search(self, query, count):
         self.queries.append(query)
         return self.pages[:count]
 
-    def fetch(self, url):
-        return next((page for page in self.pages if page["url"] == url), None)
+    def fetch(self, urls, max_bytes=None):
+        return [self.page(url) for url in urls]
+
+    def page(self, url):
+        page = next(page for page in self.pages if page["url"] == url)
+        title, blocks = readable(page["content"], "text/plain")
+        return WebPage(url, "text/plain", page["content"].encode(), blocks, title, "")
 
 
 @pytest.fixture

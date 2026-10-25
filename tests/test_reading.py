@@ -7,7 +7,6 @@ from conftest import MODEL
 
 from tinkerkit import cli, commands, reading, settings
 from tinkerkit.cli import Cli, Commands
-from tinkerkit.fetcher import Fetcher
 from tinkerkit.jobs import is_job
 from tinkerkit.knowledge import Library
 from tinkerkit.model import Ollama
@@ -27,7 +26,8 @@ from tinkerkit.reading import (
     show_list,
     stored,
 )
-from tinkerkit.settings import MAX_FACT_CHARS, READ_FACTS_PER_CHAPTER, READ_KEY_TERMS
+from tinkerkit.settings import MAX_FACT_CHARS, READ_FACTS_PER_CHAPTER, READ_KEY_TERMS, READ_MAX_BYTES
+from tinkerkit.web import WebPage
 
 CONTAINER = (
     '<?xml version="1.0"?><container xmlns="urn:oasis:names:tc:opendocument:xmlns:container" version="1.0">'
@@ -483,32 +483,28 @@ def test_a_source_comes_from_a_file_or_a_web_address(tmp_path, monkeypatch):
     with pytest.raises(SystemExit, match="No file at"):
         book_bytes(str(tmp_path / "missing.epub"))
     asked = []
-    monkeypatch.setattr(
-        reading.Internet,
-        "download",
-        staticmethod(
-            lambda url, limit: (
-                asked.append(url) or ((b"book", "") if url.endswith("ok") else (b"", "HTTP 404"))
-            )
-        ),
-    )
+
+    def fetch(internet, urls, max_bytes=None):
+        asked.append((urls, max_bytes))
+        ok = urls[0].endswith("ok")
+        return [
+            WebPage(urls[0], "application/epub+zip", b"book", [], "", "")
+            if ok
+            else WebPage.failed(urls[0], "HTTP 404")
+        ]
+
+    monkeypatch.setattr(reading.Internet, "__init__", lambda internet: None)
+    monkeypatch.setattr(reading.Internet, "fetch", fetch)
     assert book_bytes("https://example.org/ok") == b"book"
     with pytest.raises(SystemExit, match="Could not download https://example.org/gone: HTTP 404"):
         book_bytes("https://example.org/gone")
-    assert asked == ["https://example.org/ok", "https://example.org/gone"]
+    assert asked == [
+        (["https://example.org/ok"], READ_MAX_BYTES),
+        (["https://example.org/gone"], READ_MAX_BYTES),
+    ]
     monkeypatch.setattr(reading, "READ_MAX_BYTES", 2)
     with pytest.raises(SystemExit, match="larger than"):
         book_bytes(str(path))
-
-
-@pytest.mark.spec("RDG-1")
-def test_the_fetcher_downloads_bytes_as_they_are_within_its_limit(tmp_path):
-    path = tmp_path / "book.epub"
-    path.write_bytes(b"PK\x03\x04\x00\xff binary")
-    fetcher = Fetcher(1, 5, 1000, 0)
-    assert fetcher.download(path.as_uri(), 100) == (b"PK\x03\x04\x00\xff binary", "")
-    assert fetcher.download(path.as_uri(), 5) == (b"", "it is larger than 0 MB")
-    assert fetcher.download((tmp_path / "missing").as_uri(), 100)[1]
 
 
 @pytest.mark.spec("RDG-11")

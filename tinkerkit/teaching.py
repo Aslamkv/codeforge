@@ -185,7 +185,7 @@ class Teacher:
         with say.working_on(f"Reading the web: {len(searches)} search(es)"):
             pages = self.learner.web_pages(searches)
         if not pages:
-            say.warn(f"No web page found: {self.internet.problem()}")
+            say.warn("No web page found")
         for page in pages:
             say.info(f"Read {page['title'] or page['url']}", "📖")
         self.learner.outcome(f"{len(pages)} page(s) read")
