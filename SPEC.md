@@ -95,7 +95,7 @@ listed above it:
   through its `page_fetcher`, the `fetcher` module). Every project command goes through `Workspace.run` or
   `Workspace.start`.
 - **ARCH-4** Only `settings.Home` knows where the home is. No other module names a path inside it. Every phase
-  reaches the model, the project and its files through the `Session` only.
+  works through the `Session` (**SES-1**).
 - **ARCH-5** No module and no test has a comment or a docstring: names, types, tests and this spec say what the
   code does. The `#!` line of `tinker.py` and `# noqa` pragmas are the only comments.
 - **ARCH-6** `tinker.py` refuses every Python below 3.15, on any platform, before it imports `tinkerkit`:
@@ -567,7 +567,8 @@ What is said in the chats, kept so that a chat is only a view of it.
   use; otherwise it gives the model's name, its options (`num_ctx`, and `num_batch` when measured) and its think
   setting (`false` for a thinking model, else none). `Models.quick_reply(messages, tokens)` sends one chat with
   them, `keep_alive`, `num_predict` `tokens` and `QUICK_REPLY_TIMEOUT`, and gives the reply's content, stripped.
-  An Ollama failure is its `OllamaError`. Nothing else outside `Model` and calibration calls `Ollama.chat`.
+  An Ollama failure is its `OllamaError`. Nothing else outside `Model`, the quick call, an unload and
+  calibration calls `Ollama.chat`.
 
 ## project (PRJ)
 
@@ -910,8 +911,8 @@ Lessons and proven knowledge, and what every kind of learning shares.
   and an unsafe command.
 - **KNW-14** `Learner.read_facts` keeps facts of a known phase, cut to `MAX_FACT_CHARS`, at most
   `FACTS_PER_CHUNK`. `add_facts` keeps a repeated fact once and adds the other page to its `also`.
-  `relevant_chunks` gives the page's first chunk and then the best-matching ones, in page order. Facts about
-  unreleased versions are dropped.
+  `relevant_chunks` gives the page's first chunk and then the ones best matching what is wanted (**KNW-12**),
+  in page order. Facts about unreleased versions are dropped.
 - **KNW-15** `look_at_machine(commands)` runs each command in an empty temporary folder and keeps its first
   line and version. A failing command means the tool is not installed.
 - **KNW-16** `Researcher.read_frame` and `read_analysis` keep only well-formed questions, findings that cite
@@ -950,8 +951,8 @@ Lessons and proven knowledge, and what every kind of learning shares.
   and the pages of the facts it cites as `[n]`, then those pages as numbered sources. A research with no finding
   says so.
 - **KNW-24** `Learner.web_pages(searches)` searches each and fetches the results in turn, each address once,
-  at most `TEACH_PAGES`; each page keeps its first chunk and then the ones best about the searches
-  (**KNW-12**), up to `TEACH_PAGE_CHARS`. A page with no text is left out.
+  at most `TEACH_PAGES`; each page keeps its `relevant_chunks` for the searches (**KNW-14**), up to
+  `TEACH_PAGE_CHARS`. A page with no text is left out.
 
 ## slots (SLT)
 
@@ -1117,8 +1118,8 @@ the core ones first, and saved as soon as it is read. What it teaches is a topic
   already kept is not kept again) join the topic, each with its chapter, and it is marked read; so a reading
   stopped goes on with the chapters not read yet. With every chapter read, it says so and asks nothing.
 - **RDG-9** `read #N "WHAT"` reads again the chapters WHAT names ("chapter 7"), then those most about it by its
-  words, `READ_FOCUS_CHAPTERS` in all, never a raw one: each shows its opening and its parts most about WHAT
-  (`excerpt`, `READ_FOCUS_CHUNKS` parts), and the prompt says what the person asks to look for. What it finds
+  words, `READ_FOCUS_CHAPTERS` in all, never a raw one: each shows its `excerpt`, its `relevant_chunks` for WHAT
+  (**KNW-14**, `READ_FOCUS_CHUNKS` parts), and the prompt says what the person asks to look for. What it finds
   that is new joins the topic.
 - **RDG-10** `read_points` keeps at most `READ_FACTS_PER_CHAPTER` points, each cut to `MAX_FACT_CHARS`. A point
   of a source about building software keeps its phase when it is one of `FACT_PHASES`; every other point has
@@ -1241,7 +1242,8 @@ What every phase works through.
 
 - **SES-1** `Session` is what every phase works through: the model, the project, its workspace and toolchain,
   the knowledge, the Internet plugin, the run's options (`web`, `confirm`) and its tracker. `Worker` and
-  `Phase` take it, and nothing else, from the run.
+  `Phase` take it, and nothing else, from the run, and reach the model, the project and its files
+  only through it.
 - **SES-2** `Session.setup` runs setup only when the setup commands or config files changed (or when forced),
   and it prepares `.env`. `run_all_tests` runs the suite once per state of the project's files. `note` keeps
   the last 30 problems. `ask_until_usable` gives the value, and ends with `SystemExit` when no reply was usable. `format_code` drops

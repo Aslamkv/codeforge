@@ -127,7 +127,7 @@ def test_only_home_knows_where_the_home_is():
         assert not re.search(r"\b[A-Z_]+_(FILE|DIR)\s*=\s*HOME\b", text), path.name
 
 
-@pytest.mark.spec("ARCH-4")
+@pytest.mark.spec("SES-1")
 def test_every_phase_works_through_the_session():
     from tinkerkit import session
     from tinkerkit.building import Verifier
