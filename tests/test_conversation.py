@@ -468,7 +468,7 @@ def test_an_unreadable_json_answer_is_taken_as_empty(measured_model, fake_ollama
     for unreadable in ("{bad}", "[1]", "none"):
         fake_ollama.reply(unreadable)
         assert "describe it another way" in shell.propose(channel, Message("1", "x"), "", 300)
-    fake_ollama.reply('Sure: {"command": "ls", "does": "lists",} ok')
+    fake_ollama.reply('Sure: {"command": "ls", "does": "lists", "flags": [}')
     assert "```\nls\n```" in shell.propose(channel, Message("1", "x"), "", 300)
 
 
