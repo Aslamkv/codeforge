@@ -12,7 +12,7 @@ from tinkerkit import conversation, jobs
 from tinkerkit.cli import Cli, Commands
 from tinkerkit.conversation import ConsoleChannel, Desk, Message, Progress, Research, research_once
 from tinkerkit.fetcher import Fetched, Fetcher
-from tinkerkit.jobs import JOB_STOP_SIGNAL, Jobs, archived, calls_log, is_job, journaled, today
+from tinkerkit.jobs import JOB_STOP_SIGNAL, Jobs, archived, began_at, calls_log, is_job, journaled, today
 from tinkerkit.learning import SlotLearner
 from tinkerkit.model import Ollama
 from tinkerkit.project import Tracker
@@ -135,6 +135,15 @@ def test_a_running_job_whose_process_is_gone_is_stopped(home_store):
     assert [job["number"] for job in Jobs.lost()] == [3]
     stopped_job(home_store, ["learn", "rust"])
     assert [job["number"] for job in Jobs.lost()] == [3]
+
+
+@pytest.mark.spec("JOB-2")
+def test_a_job_whose_process_id_went_to_another_process_is_stopped(home_store):
+    mine = {"number": 4, "command": "learn", "title": "learn go", "state": "running", "pid": os.getpid()}
+    home_store.put("jobs", "4", dict(mine, pid_began=began_at(os.getpid())))
+    assert Jobs.get(4)["state"] == "running"
+    home_store.put("jobs", "4", dict(mine, pid_began="Sat Oct 24 16:32:00 2026"))
+    assert Jobs.get(4)["state"] == "stopped" and [job["number"] for job in Jobs.lost()] == [4]
 
 
 @pytest.mark.spec("JOB-3")

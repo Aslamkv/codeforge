@@ -36,6 +36,7 @@ from tinkerkit.conversation import (
     text_of,
     welcome,
 )
+from tinkerkit.jobs import began_at
 from tinkerkit.ledger import DONE_NOTE_KEPT_SECONDS, Ledger
 from tinkerkit.project import Runs, Tracker
 from tinkerkit.settings import Home
@@ -572,6 +573,9 @@ def test_running(home_store):
     assert [run["title"] for run in running()] == ["calc"] and running()[0]["pid"] == os.getppid()
     assert running(skip={os.getppid()}) == []
     assert home_store.get("running", str(ended.pid)) is None
+    home_store.put("running", str(os.getppid()), snapshot(title="calc", pid_began="Sat Oct 24 16:32:00 2026"))
+    assert running() == [] and home_store.get("running", str(os.getppid())) is None
+    home_store.put("running", str(os.getppid()), snapshot(title="calc", pid_began=began_at(os.getppid())))
     shown = described(running()[0])
     assert shown["title"] == "calc" and shown["brief"].startswith("**calc**") and shown["pid"] == os.getppid()
 

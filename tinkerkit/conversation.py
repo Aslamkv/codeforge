@@ -16,7 +16,7 @@ lazy import webbrowser
 lazy from pathlib import Path
 
 from .commands import COMMANDS, TERMINAL_ONLY_CHANNEL_ACTIONS, deletes, kind_of, refs
-from .jobs import JOB_STOP_SIGNAL, Jobs, job_number, paused_for_you, today
+from .jobs import JOB_STOP_SIGNAL, Jobs, alive, job_number, paused_for_you, today
 from .project import Runs, Tracker, saved
 lazy from .ledger import DONE_NOTE_KEPT_SECONDS, Ledger
 lazy from .messages import human_duration, say
@@ -1745,21 +1745,11 @@ def running(skip=()):
         pid = int(key) if key.isdigit() else 0
         if pid <= 0 or pid == os.getpid() or pid in skip:
             continue
-        if not alive(pid):
+        if not alive(pid, state.get("pid_began") if isinstance(state, dict) else None):
             Home.store().delete("running", key)
         elif isinstance(state, dict):
             found.append(dict(state, pid=pid))
     return found
-
-
-def alive(pid):
-    try:
-        os.kill(pid, 0)
-    except ProcessLookupError:
-        return False
-    except PermissionError:
-        pass
-    return True
 
 
 def exercise_switch(text):

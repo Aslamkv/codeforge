@@ -302,7 +302,8 @@ pauses it too, so the person is always answered at once.
   ending), and `paused` when another job or the person paused it ("Paused for job #N", "Paused for you": its
   ending says so, and its tracker's `doing`); otherwise it is `finished`, and its journal is deleted (its
   `calls #N` log is kept). A `running` or `paused` job whose process is gone (killed, the computer restarted)
-  is read as `stopped`; `Jobs.lost()` gives those jobs.
+  is read as `stopped`; `Jobs.lost()` gives those jobs. A process is known by its ID and the time it started
+  (`alive(pid, began)`), so a later process given the same ID is not taken for it.
 - **JOB-3** `journaled(request, ask)` outside a job asks. In a job, a request made before, word for word, is
   answered from the job's journal (log `journal #N`) in the order the answers were kept, and nothing is asked;
   any other request is asked, and its answer kept unless it failed (`keep`). `Ollama.chat` (but an unload),
@@ -750,7 +751,7 @@ The terminal and the chats are one conversation: the same commands, the same ans
 - **CNV-15** `Desk.follow` follows a task by its tracker: its run ID, its folder (the title is named after it),
   and a plan that waits. Once the task ends, it reads the task's last state and removes its tracker.
 - **CNV-16** `running(skip)` lists the runs whose trackers are in the home's `running`, but for its own process
-  and those it skips. It removes the trackers of processes that have ended.
+  and those it skips. It removes the trackers of processes that have ended, known as a job is (**JOB-2**).
 - **CNV-17** `Progress(snapshot)` shows a run's tracker: its title, its steps done, the step it is on with its
   clock, what the model writes now, the passing spec points and the latest line (`text`); a one-line `brief`;
   how long it took (`took`); and its `ending`: the end's headline, details and next commands, or the plan that
