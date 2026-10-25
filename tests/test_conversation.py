@@ -21,7 +21,6 @@ from tinkerkit.conversation import (
     Progress,
     Questions,
     Reporter,
-    Research,
     Shell,
     Talk,
     after_word,
@@ -465,16 +464,10 @@ def test_a_reporter_without_a_tracker_shows_its_lines(monkeypatch):
 
 @pytest.mark.spec("CNV-20")
 def test_an_unreadable_json_answer_is_taken_as_empty(measured_model, fake_ollama):
-    shell, research, channel = (
-        Shell(Talk("cmds"), Path.cwd(), Questions()),
-        Research(Talk("cmds")),
-        Recorder(),
-    )
+    shell, channel = Shell(Talk("cmds"), Path.cwd(), Questions()), Recorder()
     for unreadable in ("{bad}", "[1]", "none"):
         fake_ollama.reply(unreadable)
         assert "describe it another way" in shell.propose(channel, Message("1", "x"), "", 300)
-        fake_ollama.reply(unreadable)
-        assert research.searches(channel, "1", "python news") == ["python news"]
     fake_ollama.reply('Sure: {"command": "ls", "does": "lists",} ok')
     assert "```\nls\n```" in shell.propose(channel, Message("1", "x"), "", 300)
 
@@ -546,30 +539,6 @@ def test_shell_runs_the_confirmed_command(tmp_path):
     assert "🚫 _Not run:_ `ls`" in channel.texts()[-1]
 
 
-@pytest.mark.spec("CNV-23")
-def test_research_reads_what_is_most_about_the_searches(monkeypatch):
-    paragraphs = [
-        "Python 3.14 released with free threading support and more " * 2,
-        "Cookies and privacy notice " * 4,
-        "The release notes for python list every change in detail " * 2,
-    ]
-    text = "\n\n".join(paragraphs)
-    wanted = {"python", "release", "notes", "free", "threading"}
-    assert Research.most_about(text, wanted) == "\n\n".join(paragraph.strip() for paragraph in paragraphs)
-    monkeypatch.setattr(conversation, "CHAT_RESEARCH_CHARS_PER_PAGE", len(paragraphs[0]) + len(paragraphs[2]))
-    assert Research.most_about(text, wanted) == paragraphs[0].strip() + "\n\n" + paragraphs[2].strip()
-    assert Research.most_about("tiny", wanted) == "tiny"
-
-
-@pytest.mark.spec("CNV-23")
-def test_research_searches_fall_back_to_the_topic(measured_model, fake_ollama):
-    research = Research(Talk("cmds"))
-    fake_ollama.reply("I would search the web.")
-    assert research.searches(Recorder(), "1", "python news") == ["python news"]
-    fake_ollama.reply('{"searches": ["a", "a", "b", "c", "d"]}')
-    assert research.searches(Recorder(), "1", "python news") == ["a", "b", "c"]
-
-
 def keep_job(home_store, number, pid, progress, **job):
     kept = {"number": number, "command": "task", "title": "task", "state": "running", "pid": pid, **job}
     home_store.put("jobs", str(number), dict(kept, progress=progress) if progress else kept)
@@ -619,6 +588,9 @@ if args[:1] == ["slow"]:
 if args[:1] == ["task"]:
     state["waiting"] = {"name": "calc", "run": "abc123", "language": "Python", "start": "python3 calc.py",
                         "kind": "project", "criteria": [["C1", "calc.add(2, 3) is 5"]], "folder": folder}
+elif args[:1] == ["research"]:
+    state["ended"] = {"status": "done", "headline": "Researched it.", "details": [], "next": [],
+                      "text": "**Python 3.14** came out in October [1]."}
 else:
     state["ended"] = {"status": "done", "headline": "Done. All 1 spec tests pass (SPEC.md).", "details": [], "next": []}
 store.put("jobs", str(os.getpid()), dict(job, progress=state))
@@ -733,6 +705,17 @@ def test_a_task_runs_as_its_own_tinker_and_its_plan_waits(desk, home_store):
     )
     assert desk.waiting_plan["plan"].startswith("📋 **Plan for calc** · run `abc123`")
     assert desk.status().startswith("🙋 **Tinker** · calc: a calculator waits for you")
+
+
+@pytest.mark.spec("CNV-23")
+def test_research_in_a_chat_is_the_research_job_ending_with_its_answer(desk):
+    desk, channel, script = desk
+    say(desk, channel, "research the newest Python")
+    wait_until(lambda: not desk.busy())
+    assert calls_of(script) == ["help", "research the newest Python"]
+    wait_until(lambda: "came out in October" in channel.texts()[-1])
+    shown = channel.texts()[-1].split("\n\n🕒")[0]
+    assert "✅ **Researched it.**" in shown and shown.endswith("**Python 3.14** came out in October [1].")
 
 
 @pytest.mark.spec("CNV-12")
@@ -957,7 +940,7 @@ def test_a_chat_pauses_the_job_that_runs_before_it_is_answered(desk, monkeypatch
 ECHO_APP = "import sys\nprint('args:', sys.argv[1:])\nprint('input:', sys.stdin.read().strip())\n"
 
 
-@pytest.mark.spec("CNV-25")
+@pytest.mark.spec("CNV-24")
 def test_run_a_built_project(desk, tmp_path):
     desk, channel, _ = desk
     folder = built(tmp_path, "calc", "aaa111", f'"{sys.executable}" app.py')
@@ -975,7 +958,7 @@ def test_run_a_built_project(desk, tmp_path):
     assert "args: ['5', '+', '3']" in channel.texts()[-1]
 
 
-@pytest.mark.spec("CNV-25")
+@pytest.mark.spec("CNV-24")
 def test_run_with_nothing_to_run(desk, tmp_path):
     desk, channel, _ = desk
     desk.run_app(channel, "1", ["x"])
@@ -1086,22 +1069,19 @@ def test_desk_refuses_a_chat_another_tinker_listens_to(desk):
         holder.claimed.close()
 
 
-@pytest.mark.spec("CNV-26")
+@pytest.mark.spec("CNV-25")
 def test_one_shot_commands(monkeypatch, capsys):
     monkeypatch.setattr(conversation, "commands_brief", lambda: "cmds")
     monkeypatch.setattr(sys, "stdin", io.StringIO(""))
     assert conversation.one_shot("chat", "") == "tinker chat needs words after it, e.g. tinker chat hello"
-    assert (
-        conversation.one_shot("research", "")
-        == "tinker research needs words after it, e.g. tinker research ..."
-    )
+    assert conversation.one_shot("command", "") == "tinker command needs words after it, e.g. tinker command ..."
     assert conversation.one_shot("history", "") is None
     assert "nothing shown in the chats yet" in capsys.readouterr().out
     conversation.one_shot("chat", "hello")
     assert "No model is in use yet" in capsys.readouterr().out
 
 
-@pytest.mark.spec("CNV-26")
+@pytest.mark.spec("CNV-25")
 def test_one_shot_command_runs_nothing_without_a_yes(
     monkeypatch, measured_model, fake_ollama, capsys, tmp_path
 ):
@@ -1112,58 +1092,6 @@ def test_one_shot_command_runs_nothing_without_a_yes(
     conversation.one_shot("command", "make a file")
     out = capsys.readouterr().out
     assert "touch made.txt" in out and "Not run:" in out and not (tmp_path / "made.txt").exists()
-
-
-class Pages:
-    def __init__(self, up=True):
-        self.up = up
-
-    def available(self):
-        return self.up
-
-    def problem(self, key=None):
-        return "no key" if not self.up else "no answer"
-
-    def search(self, query, count):
-        return [
-            {
-                "title": f"Page {number}",
-                "url": f"https://site{number}.org/{query.replace(' ', '-')}",
-                "content": "excerpt",
-            }
-            for number in (1, 2)
-        ]
-
-    def fetch(self, url):
-        return {
-            "title": "",
-            "url": url,
-            "content": "Python 3.14 was released in October with free threading.",
-        }
-
-
-@pytest.mark.spec("CNV-24")
-def test_research_in_a_chat(measured_model, fake_ollama, monkeypatch):
-    channel = Recorder()
-    monkeypatch.setattr(conversation, "Internet", lambda: Pages(up=False))
-    Research(Talk("cmds")).researching(channel, "1", "the newest Python", lambda: [])
-    assert "⚠️ **The web is not usable:** no key" in channel.texts()[-1]
-    monkeypatch.setattr(conversation, "Internet", lambda: Pages())
-    fake_ollama.reply('{"searches": ["python release"]}').reply("**Python 3.14** came out in October [1].")
-    Research(Talk("cmds")).researching(channel, "1", "the newest Python", lambda: [])
-    final = channel.texts()[-1]
-    assert (
-        "📖 _read 2 pages:_ site1.org · site2.org\n⏳ _answering from what they say_" in channel.texts()[-2]
-    )
-    assert final.startswith("🔎 **the newest Python**\n**Python 3.14** came out in October [1].")
-    assert (
-        "📚 **Sources**\n[1] [Page 1](https://site1.org/python-release)\n[2] [Page 2](https://site2.org/python-release)"
-        in final
-    )
-    assert (
-        "[1] Page 1 (https://site1.org/python-release)\nPython 3.14 was released"
-        in fake_ollama.calls[-1]["messages"][1]["content"]
-    )
 
 
 @pytest.fixture
@@ -1221,7 +1149,7 @@ def test_start_is_answered_with_a_welcome(desk):
     assert channel.texts()[-1] == welcome()
 
 
-@pytest.mark.spec("CNV-27")
+@pytest.mark.spec("CNV-26")
 def test_memory_graph_is_sent_as_a_file(desk, monkeypatch):
     desk, channel, _ = desk
     sent = []
@@ -1246,7 +1174,7 @@ def test_memory_graph_is_sent_as_a_file(desk, monkeypatch):
     )
 
 
-@pytest.mark.spec("CNV-27")
+@pytest.mark.spec("CNV-26")
 def test_the_terminal_opens_the_file_and_other_channels_send_where_it_is(monkeypatch, tmp_path):
     opened, printed = [], []
     monkeypatch.setattr(conversation.webbrowser, "open", opened.append)

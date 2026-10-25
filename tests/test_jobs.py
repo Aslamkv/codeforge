@@ -8,11 +8,12 @@ import time
 import pytest
 from test_conversation import Recorder
 
-from tinkerkit import conversation, exercising, jobs
+from tinkerkit import cli, conversation, exercising, jobs
 from tinkerkit.cli import Cli, Commands
-from tinkerkit.conversation import ConsoleChannel, Desk, Message, Progress, Research, research_once
+from tinkerkit.conversation import Desk, Message
 from tinkerkit.fetcher import Fetched, Fetcher
 from tinkerkit.jobs import JOB_STOP_SIGNAL, Jobs, archived, began_at, calls_log, is_job, journaled, today
+from tinkerkit.knowledge import Learner, Researcher
 from tinkerkit.learning import SlotLearner
 from tinkerkit.model import Ollama
 from tinkerkit.project import Tracker
@@ -97,14 +98,14 @@ def test_a_job_is_numbered_and_kept_while_it_runs(home_store):
 @pytest.mark.spec("JOB-2")
 def test_an_interrupted_job_is_stopped_with_its_journal_kept(home_store):
     job = stopped_job(home_store, ["research", "python"], [({"search": "python"}, ["found"])])
-    assert job["state"] == "stopped" and home_store.logged("journal #1") == 1
+    assert job["state"] == "stopped" and len(home_store.entries("journal #1")) == 1
 
 
 @pytest.mark.spec("JOB-2")
 def test_a_finished_job_drops_its_journal(home_store):
     with Jobs.running(["research", "python"]):
         journaled({"search": "python"}, lambda: ["found"])
-    assert Jobs.get(1)["state"] == "finished" and home_store.logged("journal #1") == 0
+    assert Jobs.get(1)["state"] == "finished" and len(home_store.entries("journal #1")) == 0
 
 
 @pytest.mark.spec("JOB-2")
@@ -173,7 +174,7 @@ def test_outside_a_job_and_after_a_failure_it_asks(home_store):
     assert len(calls) == 2
     failed_search = ({"search": "x"}, None)
     stopped_job(home_store, ["research", "x"], [failed_search])
-    assert home_store.logged("journal #1") == 0
+    assert len(home_store.entries("journal #1")) == 0
 
 
 @pytest.mark.spec("JOB-3")
@@ -352,7 +353,7 @@ def test_clear_jobs_archives_them_listed_apart_and_never_resumed(home_store, cap
         Cli.cleared(["jobs", "#1"], yes=False)
     Cli.cleared(["jobs", "#1"], yes=True)
     assert Jobs.get(1)["state"] == "archived" and Jobs.get(1)["archived_from"] == "stopped"
-    assert home_store.logged("journal #1") == 0
+    assert len(home_store.entries("journal #1")) == 0
     assert [job["number"] for job in Jobs.listed()] == [3, 4] and [
         job["number"] for job in Jobs.listed("archived")
     ] == [1]
@@ -407,11 +408,30 @@ def test_the_conversation_stops_and_resumes_jobs(home_store, tmp_path, monkeypat
     ]
 
 
-@pytest.mark.spec("CNV-24")
-def test_a_research_job_ends_with_its_answer():
-    progress = Progress("Researching python")
-    progress.take({"ended": {"status": "done", "headline": "", "text": "🔎 **python**\nThe answer [1]"}})
-    assert progress.ending().endswith("The answer [1]") and "****" not in progress.ending()
+@pytest.mark.spec("JOB-4")
+def test_a_research_job_frames_its_topic_on_the_day_the_job_started(home_store, monkeypatch):
+    home_store.put(
+        "jobs",
+        "1",
+        {
+            "number": 1,
+            "command": "research",
+            "title": "research go",
+            "state": "stopped",
+            "pid": DEAD_PID,
+            "arguments": ["research", "go"],
+            "today": "2026-01-02",
+            "updated": "x",
+        },
+    )
+    framed = {"name": "Go", "summary": "", "questions": [{"question": "Which release?", "queries": ["go"]}]}
+    given = []
+    monkeypatch.setattr(
+        Learner, "saved_or_asked", lambda self, known, read, system, parts, *rest: given.extend(parts) or (framed, True)
+    )
+    with Jobs.running(Jobs.arguments(["resume", "#1"])):
+        Researcher(Learner(None, None, None)).frame("go", None)
+    assert next(part for part in given if part.title == "Today").text == "2026-01-02"
 
 
 def other_running(home_store, number=1, command="learn", title="learn go"):
@@ -598,7 +618,7 @@ def test_web_searches_and_fetches_go_through_the_journal(home_store, monkeypatch
 
 
 @pytest.mark.spec("JOB-4")
-def test_the_prompts_that_say_the_date_say_the_jobs(home_store):
+def test_a_learning_plan_says_the_day_the_job_started(home_store):
     home_store.put(
         "jobs",
         "1",
@@ -613,19 +633,10 @@ def test_the_prompts_that_say_the_date_say_the_jobs(home_store):
             "updated": "x",
         },
     )
-    asked = []
-
-    class Talk:
-        def ask(self, channel, chat, messages, tokens):
-            asked.append(messages[0]["content"])
-            return '{"searches": ["go"]}'
-
     learner = SlotLearner.__new__(SlotLearner)
     learner.topic = "go"
     with Jobs.running(Jobs.arguments(["resume", "#1"])):
-        Research(Talk()).searches(None, "1", "go")
         parts = learner.plan_parts([])
-    assert "02 January 2026" in asked[0] and "2026" in asked[0]
     assert next(part for part in parts if part.title == "Today").text == "2026-01-02"
 
 
@@ -662,7 +673,6 @@ def test_tinker_chat_and_command_pause_the_job_that_runs(monkeypatch, capsys):
     monkeypatch.setattr(conversation, "paused_for_you", lambda: contextlib.nullcontext(paused.append(True)))
     monkeypatch.setattr(conversation, "commands_brief", lambda: "cmds")
     conversation.one_shot("chat", "hello")
-    conversation.one_shot("research", "")
     assert paused == [True]
 
 
@@ -678,24 +688,32 @@ def test_a_job_that_does_not_pause_is_waited_for_at_most_pause_wait(home_store, 
         assert Jobs.get(1)["state"] == "running" and no_sleep == looked_at_50s_and_100s
 
 
-@pytest.mark.spec("CNV-24")
+@pytest.mark.spec("CLI-7")
 def test_a_research_job_says_its_steps_and_ends_with_its_answer(home_store, monkeypatch):
-    monkeypatch.setenv(conversation.CHANNEL_REPORTS_ENV, "off")
-    monkeypatch.setattr(
-        Research,
-        "researching",
-        lambda self, channel, chat, topic, now: (
-            self.enter("searches"),
-            self.enter("read"),
-            self.enter("write"),
-            ("done", "🔎 **go**\nGo 1.25 [1]"),
-        )[-1],
-    )
+    entry = {
+        "name": "Go",
+        "summary": "A language.",
+        "questions": [{"question": "Which release?"}],
+        "findings": [{"question": 1, "answer": "Go 1.25.", "confidence": "high", "facts": [1]}],
+        "facts": [{"text": "Go 1.25 is out", "source": "https://go.dev"}],
+    }
+    class Model:
+        def unload(self):
+            pass
+
+    def research(self, topic):
+        for step in ("frame", "investigate", "keep"):
+            self.learner.step(step)
+        return entry
+
+    monkeypatch.setattr(Commands, "learning_tools", staticmethod(lambda option: (Model(), None, None)))
+    monkeypatch.setattr(cli.Models, "remember", staticmethod(lambda model: None))
+    monkeypatch.setattr(Researcher, "research", research)
     with Jobs.running(["research", "go"]):
-        research_once(ConsoleChannel(commands_without_tinker=False), None, "go")
+        Commands(Cli.parse(["research", "go"])).run()
     state = Jobs.get(1)["progress"]
-    assert state["steps"] == ["🤔 Searches chosen", "🌐 Pages read"] and state["doing"].startswith("✍️")
-    assert state["ended"] == {"status": "done", "headline": "", "text": "🔎 **go**\nGo 1.25 [1]"}
+    assert state["title"] == "Researching go" and len(state["steps"]) == 2 and state["step"] == "keep"
+    assert state["ended"]["status"] == "done" and state["ended"]["text"] == Researcher.answer(entry)
 
 
 @pytest.mark.spec("EXR-7")

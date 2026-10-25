@@ -157,8 +157,8 @@ def test_help_markup_and_one_command(capsys, monkeypatch):
         parse("help", "task")
     assert capsys.readouterr().out.startswith("usage: tinker task")
     with pytest.raises(SystemExit):
-        parse("help", "research")
-    assert capsys.readouterr().out.startswith("usage: tinker research TOPIC")
+        parse("help", "chat")
+    assert capsys.readouterr().out.startswith("usage: tinker chat MESSAGE")
     with pytest.raises(SystemExit, match="no command 'fly'"):
         parse("help", "fly")
     assert "resume" in Cli.options()["--workdir DIR"][1] and "fix" in Cli.options()["--confirm"][1]
@@ -794,6 +794,26 @@ def test_learning_checks_everything_before_loading(measured_model, fake_ollama, 
     Config.save(model=None)
     with pytest.raises(SystemExit, match="No model in use"):
         Commands(parse("learn", "Flask")).run()
+
+
+@pytest.mark.spec("CLI-7")
+def test_research_checks_everything_before_loading_and_finding_nothing_is_an_error(
+    measured_model, fake_ollama, monkeypatch, capsys
+):
+    monkeypatch.setattr(
+        Ollama, "installed_models", staticmethod(lambda: [{"name": MODEL}, {"name": "embedder"}])
+    )
+    with pytest.raises(SystemExit, match="tinker research needs an embedding model"):
+        Commands(parse("research", "food", "banks")).run()
+    Config.save(embed_model="embedder")
+    with pytest.raises(SystemExit, match="tinker research needs the Internet plugin"):
+        Commands(parse("research", "food", "banks")).run()
+    Config.save(web="duckduckgo")
+    monkeypatch.setattr(cli.Researcher, "research", lambda self, topic: None)
+    with pytest.raises(SystemExit, match="Nothing found about food banks; nothing saved."):
+        Commands(parse("research", "food", "banks")).run()
+    assert fake_ollama.calls == []
+    assert "Time taken: 0s" in capsys.readouterr().out
 
 
 @pytest.mark.spec("CLI-5")

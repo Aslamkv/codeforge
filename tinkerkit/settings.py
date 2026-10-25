@@ -223,6 +223,8 @@ MEMORY_ITEMS_SHOWN = 25
 TEACH_CLAIMS = 4
 TEACH_CHECK_COMMANDS = 3
 TEACH_CHECK_SEARCHES = 3
+TEACH_PAGES = 4
+TEACH_PAGE_CHARS = 3500
 
 READ_MAX_BYTES = 50_000_000
 READ_MIN_CHAPTERS = 5
@@ -343,31 +345,26 @@ class Home:
         return {
             "languages": (
                 ["languages"],
-                [],
                 "per language: the toolchain that worked, its fixes, its lessons",
             ),
-            "memory": (["memory"], [], "lessons that hold for any language"),
-            "learned": (["learned", "embeddings"], [], "what tinker learn learned, and its index"),
+            "memory": (["memory"], "lessons that hold for any language"),
+            "learned": (["learned", "embeddings"], "what tinker learn learned, and its index"),
             "docs": (
                 ["sources"],
-                [],
                 "the documentation pages tinker learn fetched, cleaned, per topic and version",
             ),
-            "models": (["models"], [], "what calibration measured for each model"),
+            "models": (["models"], "what calibration measured for each model"),
             "runs": (
                 ["projects", "runs"],
-                [],
                 "the list of projects and a line about each run (projects keep their own .tinker)",
             ),
-            "commands": (["commands"], [], "your commands Tinker may use"),
+            "commands": (["commands"], "your commands Tinker may use"),
             "history": (
                 ["chat history"],
-                [],
                 "what the chats showed, and what you asked (their messages go from the chats in a day)",
             ),
             "exercise": (
                 ["exercise"],
-                [],
                 "the exercises: each language's practice projects, what they "
                 "measured, and where each stopped",
             ),
@@ -388,7 +385,7 @@ class Home:
             return
         confirm_deletion(
             "This deletes:",
-            [f"{name}: {cls.parts()[name][2]} ({entries} entries)" for name, entries in held.items()],
+            [f"{name}: {cls.parts()[name][1]} ({entries} entries)" for name, entries in held.items()],
             f"tinker clear {' '.join(names)}",
             yes,
         )
@@ -408,19 +405,15 @@ class Home:
 
     @classmethod
     def entries_in(cls, name):
-        collections, logs, _ = cls.parts()[name]
+        collections, _ = cls.parts()[name]
         store = cls.store()
-        return sum(store.count(collection) for collection in collections) + sum(
-            store.logged(log) for log in logs
-        )
+        return sum(store.count(collection) for collection in collections)
 
     @classmethod
     def delete_part(cls, name):
-        collections, logs, _ = cls.parts()[name]
+        collections, _ = cls.parts()[name]
         for collection in collections:
             cls.store().delete(collection)
-        for log in logs:
-            cls.store().drop_log(log)
 
     @classmethod
     def keep_awake(cls):
@@ -598,10 +591,6 @@ class Store:
     def drop_log(self, log):
         with self.transaction(write=True) as db:
             db.execute("DELETE FROM logs WHERE name = ?", (log,))
-
-    def logged(self, log):
-        with self.transaction() as db:
-            return db.execute("SELECT COUNT(*) FROM logs WHERE name = ?", (log,)).fetchone()[0]
 
     @contextlib.contextmanager
     def transaction(self, write=False):

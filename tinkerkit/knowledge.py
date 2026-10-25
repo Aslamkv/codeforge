@@ -34,6 +34,8 @@ from .settings import (
     SAME_FACT_SIMILARITY,
     SAME_LESSON_SIMILARITY,
     SEARCHES_PER_RESEARCH_QUESTION,
+    TEACH_PAGE_CHARS,
+    TEACH_PAGES,
     TOOLCHAIN_HINT_SIMILARITY,
     VERSION_TIMEOUT,
     Config,
@@ -531,6 +533,25 @@ class Learner:
     def read_web(self, name, searches, max_pages):
         results = [self.results(search) for search in searches]
         return self.read_pages(name, self.in_turn(searches, results, max_pages))
+
+    def web_pages(self, searches):
+        asked = [
+            {"query": search, "pages": RESULTS_PER_RESEARCH_SEARCH, "section": "", "focus": search}
+            for search in searches
+        ]
+        found = self.in_turn(asked, [self.results(search) for search in asked], TEACH_PAGES)
+        pages = [self.web_page(result, " ".join(searches)) for result in found]
+        return [page for page in pages if page["content"]]
+
+    def web_page(self, result, wanted):
+        got = self.internet.fetch(result["url"]) or {}
+        text = got.get("content") or result.get("content") or ""
+        chunks = self.relevant_chunks(text, TEACH_PAGE_CHARS // CHUNKS_PER_PAGE, wanted) if text.strip() else []
+        return {
+            "title": got.get("title") or result.get("title", ""),
+            "url": result["url"],
+            "content": "\n\n".join(chunks)[:TEACH_PAGE_CHARS],
+        }
 
     def results(self, search):
         found = self.internet.search(search["query"], RESULTS_PER_RESEARCH_SEARCH)
@@ -1152,6 +1173,35 @@ class Researcher:
             else "low"
         )
         return min(stated, ceiling, key=cls.CONFIDENCE_LEVELS.index)
+
+    @staticmethod
+    def answer(entry):
+        heading = f"{entry['name']}: {entry['summary']}" if entry.get("summary") else entry["name"]
+        findings = entry.get("findings", [])
+        if not findings:
+            return f"{heading}\n\nThe research has no finding: the pages read did not answer its questions."
+        sources, lines = [], [heading]
+        for number, question in enumerate(entry["questions"], 1):
+            answered = [finding for finding in findings if finding["question"] == number]
+            if answered:
+                lines += ["", f"Q{number}. {question['question']}"]
+            for finding in answered:
+                cited = Researcher.cited_pages(entry["facts"], finding["facts"], sources)
+                lines.append(f"{finding['answer']} ({finding['confidence']} confidence) {cited}".rstrip())
+        if sources:
+            lines += ["", "Sources:"] + [f"[{number}] {url}" for number, url in enumerate(sources, 1)]
+        return "\n".join(lines)
+
+    @staticmethod
+    def cited_pages(facts, numbers, sources):
+        pages = []
+        for number in numbers:
+            for url in Learner.pages_of(facts[number - 1]):
+                if url not in sources:
+                    sources.append(url)
+                if url not in pages:
+                    pages.append(url)
+        return " ".join(f"[{sources.index(url) + 1}]" for url in pages)
 
 
 class Library:

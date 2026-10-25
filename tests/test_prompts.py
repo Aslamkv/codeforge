@@ -264,6 +264,8 @@ def test_the_prompts_example_json_parses_and_its_toolchain_works():
 @pytest.mark.spec("PRM-14")
 def test_the_templates_format():
     assert "60 words" in Prompts.BRIEF_SYSTEM.format(words=60)
+    assert "over Telegram" in Prompts.CHAT_SYSTEM.format(kind="Telegram", commands="status")
+    assert '{"command": ' in Prompts.COMMAND_SYSTEM.format(system="Darwin", shell="zsh", folder="/tmp")
     systems = [value for key, value in vars(Prompts).items() if key.endswith("_SYSTEM")]
     assert len(systems) >= 25 and all(isinstance(system, str) and system.strip() for system in systems)
 

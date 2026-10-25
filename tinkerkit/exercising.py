@@ -9,7 +9,6 @@ from .messages import say
 lazy from .conversation import (
     BUILD_STOP_GRACE_SECONDS,
     CHANNEL_REPORTS_ENV,
-    JOB_STOP_SIGNAL,
     tinker_process,
 )
 lazy from .jobs import Jobs
@@ -44,7 +43,6 @@ class Exercise:
         self.own_step = ""
 
     def run(self, asked):
-        signal.signal(JOB_STOP_SIGNAL, interrupted)
         self.tracker.change("exercise", exercise=True)
         self.on_to("identify")
         exercise = Exercises.of(identified(self.model, asked))
@@ -305,10 +303,6 @@ def start_tinker(arguments):
     return tinker_process(
         arguments, **{EXERCISE_ENV: str(Jobs.current["number"]), CHANNEL_REPORTS_ENV: "off"}
     )
-
-
-def interrupted(signum, frame):
-    raise KeyboardInterrupt
 
 
 def stopped(exercise):

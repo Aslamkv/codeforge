@@ -15,7 +15,15 @@ from tinkerkit.knowledge import (
     retire,
 )
 from tinkerkit.model import Ollama
-from tinkerkit.settings import MAX_LESSONS_PER_FILE, MAX_RULE_CHARS, PLAYBOOK_RULES, Config, Home
+from tinkerkit.settings import (
+    MAX_LESSONS_PER_FILE,
+    MAX_RULE_CHARS,
+    PLAYBOOK_RULES,
+    TEACH_PAGE_CHARS,
+    TEACH_PAGES,
+    Config,
+    Home,
+)
 from tinkerkit.workspace import Toolchain
 
 
@@ -435,6 +443,43 @@ class FakeInternet:
         return {"title": url, "url": url, "content": self.pages[url]} if self.up else None
 
 
+class SearchedInternet(FakeInternet):
+    def __init__(self, pages, results):
+        super().__init__(pages)
+        self.results = results
+
+    def search(self, query, count):
+        return [{"title": url, "url": url, "content": ""} for url in self.results[query]][:count]
+
+
+@pytest.mark.spec("KNW-24")
+def test_web_pages_reads_each_address_once_up_to_the_cap(make_model):
+    pages = {url: f"what {url} says" for url in ("https://shared", "https://r1", "https://r2", "https://b1")}
+    results = {
+        "ruff": ["https://shared", "https://r1", "https://r2"],
+        "black": ["https://shared", "https://empty", "https://b1"],
+    }
+    internet = SearchedInternet(dict(pages, **{"https://empty": ""}), results)
+    read = Learner(make_model(), internet, None).web_pages(["ruff", "black"])
+    assert len(read) <= TEACH_PAGES
+    assert [page["url"] for page in read] == ["https://shared", "https://r1", "https://r2"]
+    assert read[0] == {"title": "https://shared", "url": "https://shared", "content": "what https://shared says"}
+
+
+@pytest.mark.spec("KNW-24")
+def test_web_pages_keep_the_first_chunk_and_the_best_about_the_searches(make_model):
+    paragraphs = (
+        ["intro to the page " * 60]
+        + [f"filler {number} " * 120 for number in range(6)]
+        + ["black and ruff formatter " * 40]
+    )
+    internet = SearchedInternet({"https://long": "\n\n".join(paragraphs)}, {"ruff formatter": ["https://long"]})
+    [page] = Learner(make_model(), internet, None).web_pages(["ruff formatter"])
+    assert len(page["content"]) <= TEACH_PAGE_CHARS
+    assert page["content"].startswith("intro to the page") and "black and ruff formatter" in page["content"]
+    assert "filler" not in page["content"]
+
+
 @pytest.mark.spec("KNW-15")
 def test_look_at_machine(make_model):
     found = Learner(make_model(), FakeInternet(), None).look_at_machine(
@@ -559,6 +604,40 @@ def test_fold_repeats_keeps_the_more_detailed_text():
     assert Researcher.agree({"text": "5 kg"}, {"text": "5 kg at 9am"}) and not Researcher.agree(
         {"text": "5"}, {"text": "6"}
     )
+
+
+@pytest.mark.spec("KNW-23")
+def test_a_research_answers_with_its_findings_and_their_numbered_sources():
+    entry = {
+        "name": "Food banks",
+        "summary": "How a food bank runs.",
+        "questions": [{"question": "How is food stored?"}, {"question": "Who helps?"}],
+        "findings": [
+            {"question": 1, "answer": "In 10 kg crates.", "confidence": "high", "facts": [1, 2]},
+            {"question": 2, "answer": "Volunteers.", "confidence": "low", "facts": [3]},
+        ],
+        "facts": [
+            {"text": "10 kg crates", "source": "https://a.org/1", "also": ["https://b.org/x"]},
+            {"text": "Crates of 10 kg", "source": "https://b.org/x"},
+            {"text": "Volunteers sign in", "source": "https://a.org/2"},
+        ],
+    }
+    answer = Researcher.answer(entry)
+    assert answer.splitlines() == [
+        "Food banks: How a food bank runs.",
+        "",
+        "Q1. How is food stored?",
+        "In 10 kg crates. (high confidence) [1] [2]",
+        "",
+        "Q2. Who helps?",
+        "Volunteers. (low confidence) [3]",
+        "",
+        "Sources:",
+        "[1] https://a.org/1",
+        "[2] https://b.org/x",
+        "[3] https://a.org/2",
+    ]
+    assert "no finding" in Researcher.answer(dict(entry, findings=[]))
     assert Researcher.site("https://www.Example.org/x") == "example.org"
 
 

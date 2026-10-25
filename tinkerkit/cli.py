@@ -19,7 +19,7 @@ from .reading import Reader
 lazy from .building import BugReproducer, CodeWriter, TestToolSetup, TestWriter, Verifier
 lazy from .finishing import FinalReview, LessonWriter, ReadmeWriter, Tidy
 lazy from .graph import write_page
-lazy from .knowledge import Embeddings, Library
+lazy from .knowledge import Embeddings, Learner, Library, Researcher
 lazy from .learning import LearnStopped, SlotLearner
 lazy from .model import Calibrator, Model, Models, Ollama, OllamaError, SelectedModel
 lazy from .planning import Designer, InterfaceReviewer, Recaller, SpecWriter
@@ -122,6 +122,7 @@ class Cli:
         "use_web": None,
         "calibrate": None,
         "learn": None,
+        "research": None,
         "ask": None,
         "teach": None,
         "read": None,
@@ -369,7 +370,7 @@ class Cli:
                 return Cli.job_words(command, given.words, parser)
             case "read":
                 return Cli.reading(given.words, parser)
-            case "ask" | "teach" | "exercise":
+            case "ask" | "teach" | "research" | "exercise":
                 return Cli.non_empty(" ".join(given.words), command, parser)
             case "config":
                 return Cli.config_words(given.words, parser)
@@ -529,6 +530,7 @@ class Commands:
             "use-web": lambda: self.use_web(args.use_web),
             "calibrate": self.calibrate,
             "learn": self.learn,
+            "research": self.research,
             "ask": self.ask,
             "teach": self.teach,
             "read": self.read,
@@ -656,22 +658,12 @@ class Commands:
             TaughtCommands.teach(topic, definition)
             return
         model, embeddings, internet = self.learning_tools(option)
-        tracker = Commands.followed(f"Learning {topic}")
-        started, ending = (
-            time.monotonic(),
-            {"status": "stopped", "headline": f"Learning {topic} did not finish"},
+        Commands.reported(
+            f"Learning {topic}",
+            model,
+            lambda tracker: self.learned(topic, SlotLearner(model, internet, embeddings, tracker)),
+            blocked=lambda stopped: Commands.blocked(f"Nothing learned about {topic}", stopped),
         )
-        try:
-            ending = self.learned(topic, SlotLearner(model, internet, embeddings, tracker))
-        except SystemExit as stopped:
-            ending = Commands.learn_stopped(topic, stopped)
-            raise
-        finally:
-            model.unload()
-            Models.remember(model)
-            took = time.monotonic() - started
-            say.title(f"Time taken: {human_duration(took)}", "⏱️")
-            tracker.end(ending, took)
 
     @staticmethod
     def followed(title):
@@ -692,11 +684,45 @@ class Commands:
         }
 
     @staticmethod
-    def learn_stopped(topic, stopped):
+    def blocked(headline, stopped):
         details = (
             stopped.details if isinstance(stopped, LearnStopped) else [("Why", first_line(str(stopped), 200))]
         )
-        return {"status": "blocked", "headline": f"Nothing learned about {topic}", "details": details}
+        return {"status": "blocked", "headline": headline, "details": details}
+
+    def research(self):
+        topic = self.args.research
+        model, embeddings, internet = self.learning_tools("tinker research")
+        Commands.reported(
+            f"Researching {topic}",
+            model,
+            lambda tracker: Commands.researched(
+                topic, Commands.researcher(model, internet, embeddings, tracker).research(topic)
+            ),
+            blocked=lambda stopped: Commands.blocked(f"Nothing found about {topic}", stopped),
+        )
+
+    @staticmethod
+    def researcher(model, internet, embeddings, tracker):
+        learner = Learner(model, internet, embeddings)
+        learner.tracker = tracker
+        return Researcher(learner)
+
+    @staticmethod
+    def researched(topic, entry):
+        if entry is None:
+            raise SystemExit(f"Nothing found about {topic}; nothing saved.")
+        return {
+            "status": "done",
+            "headline": f"Researched {entry['name']}",
+            "details": [
+                ("Findings", str(len(entry.get("findings", [])))),
+                ("Facts", str(len(entry.get("facts", [])))),
+                ("Pages", str(len(entry.get("sources", [])))),
+            ],
+            "next": [("See it", "tinker memory")],
+            "text": Researcher.answer(entry),
+        }
 
     @staticmethod
     def learning_tools(option):
@@ -778,14 +804,16 @@ class Commands:
         )
 
     @staticmethod
-    def reported(title, model, work, chats=False):
+    def reported(title, model, work, chats=False, blocked=None):
         tracker = Commands.followed(title)
         listening = conversation.attach(title, tracker) if chats else None
         started, ending = time.monotonic(), {"status": "stopped", "headline": f"{title} did not finish"}
         try:
             ending = work(tracker)
         except SystemExit as stopped:
-            ending = {"status": "blocked", "headline": first_line(str(stopped), 200)}
+            ending = (
+                blocked(stopped) if blocked else {"status": "blocked", "headline": first_line(str(stopped), 200)}
+            )
             raise
         finally:
             model.unload()

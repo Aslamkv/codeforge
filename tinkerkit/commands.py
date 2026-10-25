@@ -249,6 +249,20 @@ COMMANDS = [
         ],
     ),
     Command(
+        "research",
+        "Learn",
+        "research TOPIC",
+        "the web researched in depth, its facts checked across sites, and kept: slow",
+        "Research a topic on the web in depth: Tinker frames it as questions, reads pages for each, checks the "
+        "facts across sites, keeps what it found (tinker memory) and answers with its sources. It is slow. "
+        "No quotes needed.",
+        kind="job",
+        chat=True,
+        words="any",
+        arguments=[Argument("words", "+", "TOPIC", "the topic (no quotes needed)")],
+        example="research the newest Python release",
+    ),
+    Command(
         "ask",
         "Learn",
         "ask QUESTION",
@@ -577,16 +591,6 @@ COMMANDS = [
         chat=True,
         words="any",
         example="command show the free disk space",
-    ),
-    Command(
-        "research",
-        "Talk",
-        "research TOPIC",
-        "the web searched, answered with its sources",
-        kind="job",
-        chat=True,
-        words="any",
-        example="research the newest Python release",
     ),
     Command(
         "run",
