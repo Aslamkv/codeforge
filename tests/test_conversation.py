@@ -987,7 +987,13 @@ def test_a_job_says_its_status_as_it_starts_and_ends(desk, monkeypatch):
     listening.start_task(["learn", "go"], Path.cwd(), "learn go")
     sent = [text for kind, _, _, text in channel.log if kind == "send"]
     assert sent[0].startswith("🟢 **Tinker** · idle")
-    assert sent[1].startswith("🔄 **Tinker** · working on learn go") and "learn go" in sent[2]
+    assert sent[1].startswith("🔄 **Tinker** · working on learn go\n\n🕒") and "learn go" in sent[2]
+    listening.reporter.progress.snapshot["doing"] = "building"
+    listening.reporter.update()
+    assert listening.status() == "🔄 **Tinker** · working on learn go"
+    listening.say_status("🔄 **Tinker** · working on learn go; calc in a terminal")
+    sent = [text for kind, _, _, text in channel.log if kind == "send"]
+    assert "calc in a terminal" in sent[-2] and "building" in sent[-1]
     job.code = 0
     listening.ended(job, listening.reporter, listening.task)
     assert listening.said_status.startswith("🟢 **Tinker** · idle")

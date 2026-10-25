@@ -242,7 +242,9 @@ def test_resume_runs_the_jobs_own_command_line(home_store):
     stopped_job(home_store, ["learn", "rust"])
     assert Jobs.arguments(["resume"]) == ["learn", "rust"] and Jobs.current["number"] == 1
     Jobs.current = None
-    home_store.put("jobs", "1", dict(Jobs.get(1), state="running", pid=os.getppid()))
+    home_store.put(
+        "jobs", "1", dict(Jobs.get(1), state="running", pid=os.getppid(), pid_began=began_at(os.getppid()))
+    )
     with pytest.raises(SystemExit, match="Job #1 is running"):
         Jobs.arguments(["resume", "#1"])
     home_store.put("jobs", "1", dict(Jobs.get(1), state="finished"))

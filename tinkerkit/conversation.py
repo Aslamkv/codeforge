@@ -237,15 +237,18 @@ class Desk:
                         self.post_status(channel, text)
             elif anew or text.startswith("💤"):
                 channel.show(ConsoleChannel.CHAT, None, text, done=True)
+        self.keep_job_at_bottom()
+
+    def keep_job_at_bottom(self):
+        reporter = self.reporter
+        if self.busy() and reporter.sent and not reporter.ended:
+            with reporter.lock:
+                reporter.send_at_bottom = True
+                reporter.update()
 
     def status(self):
         if self.busy():
-            progress = self.reporter.progress
-            passing = f" · {progress.passing}" if progress.passing else ""
-            return md(
-                t"🔄 **Tinker** · working on {progress.title}\n▸ {Markup.plain(progress.snapshot['doing']):md}"
-                t"{passing}"
-            )
+            return md(t"🔄 **Tinker** · working on {self.reporter.progress.title}")
         if self.waiting_plan:
             then = (
                 "`confirm` · `rename NAME`"
@@ -255,10 +258,12 @@ class Desk:
             return md(t"🙋 **Tinker** · {self.waiting_plan['title']} waits for you: {then:md}")
         elsewhere = [described(state) for state in persons_runs(self.children())]
         if elsewhere:
-            return "🔄 **Tinker** · working in a terminal: " + "; ".join(run["brief"] for run in elsewhere)
+            return md(
+                t"🔄 **Tinker** · working in a terminal on {'; '.join(run['title'] for run in elsewhere)}"
+            )
         exercise = exercising_now()
         if exercise:
-            return f"🏋️ **Tinker** · {exercise['brief']}\n_It pauses whenever you ask for something._"
+            return md(t"🏋️ **Tinker** · {exercise['title']}")
         return "🟢 **Tinker** · idle: send a task"
 
     @staticmethod
@@ -827,7 +832,6 @@ class Desk:
                 phase=phase,
                 plan_on_top=keep,
                 before=self.seconds_by_run.get(run, 0.0),
-                on_step=self.say_status,
             )
             try:
                 self.last_task = self.spawn(arguments)

@@ -717,11 +717,12 @@ The terminal and the chats are one conversation: the same commands, the same ans
   and only the new lines when it grew. `exit` or end of input closes it.
 - **CNV-9** `Desk.run` claims each chat channel. When another Tinker holds one, it stops if there is no
   terminal, and otherwise leaves that chat out. The terminal never waits on a chat: each chat starts in its own
-  thread. Each chat has one status message. Every time the status changes (Tinker starts listening, a task
-  moves on, waits for the person, ends, Tinker ends: `not listening`), the one before is taken out and the new
-  one is sent at the bottom. A task or other job says its status at once as it starts, before its own
-  message, and the status before it comes back at once as it ends. While it listens it collects the messages whose time is up, every
-  `EXPIRED_MESSAGES_SWEEP_SECONDS` seconds.
+  thread. Each chat has one status message: what Tinker works on (a job's title), never how far it got. Every
+  time the status changes (Tinker starts listening, a job starts, waits for the person, ends, Tinker ends:
+  `not listening`), the one before is taken out and the new one is sent at the bottom, with the message of the
+  job that runs moved below it. A job says its status at once as it starts, before its own message, and the
+  status before it comes back at once as it ends. While it listens it collects the messages whose time is up,
+  every `EXPIRED_MESSAGES_SWEEP_SECONDS` seconds.
 - **CNV-10** `/start` (what a chat app sends when a person first opens the bot) is answered with a welcome and
   a short, tldr-style guide for beginners in plain words: what Tinker does, then what to send, grouped by what
   a person does (build something, their projects, ask anything, while it works), each with one line on what
