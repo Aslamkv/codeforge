@@ -6,7 +6,7 @@ lazy import shutil
 lazy import time
 lazy from pathlib import Path
 
-lazy from .jobs import Jobs
+lazy from .jobs import Jobs, began_at
 lazy from .messages import say
 lazy from .prompts import Part, Prompts, Reply
 lazy from .settings import (
@@ -670,6 +670,7 @@ class Tracker:
         self.pid, self.store, self.published = os.getpid(), None, 0.0
         self.state = {
             "title": title,
+            "job": Jobs.current["number"] if Jobs.current else None,
             "run": None,
             "folder": None,
             "step": None,
@@ -687,6 +688,7 @@ class Tracker:
             "before": before,
             "seconds": 0.0,
             "pid": self.pid,
+            "pid_began": began_at(self.pid),
             "resumed": time.time() if Jobs.resumed_here else None,
             "exercise": os.environ.get(EXERCISE_ENV) == "1",
         }

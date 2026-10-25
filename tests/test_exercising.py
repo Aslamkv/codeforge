@@ -441,7 +441,7 @@ def test_the_conversation_leaves_exercise_runs_alone(home_store, tmp_path):
     )
     assert persons_runs() == []
     home_store.put("jobs", "1", exercise_job("running"))
-    assert desk.status().startswith("🏋️ **Tinker** · **Exercising Rust**")
+    assert desk.status() == "🏋️ **Tinker** · Exercising Rust"
 
 
 @pytest.mark.spec("EXR-7")

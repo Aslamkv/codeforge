@@ -8,6 +8,7 @@ from pathlib import Path
 import pytest
 from conftest import criterion, plan_of, record_of
 
+from tinkerkit.jobs import Jobs
 from tinkerkit.messages import Message, say
 from tinkerkit.project import (
     Brief,
@@ -393,6 +394,12 @@ def test_outcome():
 
 
 @pytest.mark.spec("PRJ-14")
+def test_a_jobs_tracker_keeps_its_job_number(home_store):
+    with Jobs.running(["learn", "go"]):
+        assert Tracker("learn go").state["job"] == Jobs.current["number"] == 1
+
+
+@pytest.mark.spec("PRJ-14")
 def test_the_tracker_publishes_each_change(home_store, project_dir):
     tracker = Tracker("a calculator", before=12.0)
     store = project_store(project_dir)
@@ -410,6 +417,7 @@ def test_the_tracker_publishes_each_change(home_store, project_dir):
     assert state["step"] == "spec" and state["doing"] == "📝 Writing the spec" and state["before"] == 12.0
     assert state["steps"] == ["🧠 Recalled what Tinker has learned"] and state["passing"] == [1, 3]
     assert state["waiting"] == {"name": "calc", "kind": "project"} and state["pid"] == os.getpid()
+    assert state["job"] is None
     events = [event["event"] for _, event in store.entries("progress")]
     assert events == ["project", "phase", "phase", "points", "waiting"]
     the_same_points = (1, 3)

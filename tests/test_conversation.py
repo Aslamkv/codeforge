@@ -36,6 +36,7 @@ from tinkerkit.conversation import (
     text_of,
     welcome,
 )
+from tinkerkit.jobs import began_at
 from tinkerkit.ledger import DONE_NOTE_KEPT_SECONDS, Ledger
 from tinkerkit.project import Runs, Tracker
 from tinkerkit.settings import Home
@@ -306,6 +307,7 @@ def test_progress_shows_the_tracker():
     assert progress.take(before_any_step) and "▸ ✅ **Confirmed:** building it" in progress.text()
     progress.take(
         snapshot(
+            job=7,
             step="verify",
             doing=Tracker.DOING_AND_DONE["verify"][0],
             began=time.time() - 65,
@@ -315,7 +317,7 @@ def test_progress_shows_the_tracker():
         )
     )
     assert progress.text().splitlines() == [
-        "🔨 **calc: a calculator**",
+        "🔨 **calc: a calculator** (Job #7)",
         "✅ 🧠 Recalled what Tinker has learned",
         "✅ 📝 Spec written",
         "▸ **🔁 Fixing until every test passes** · ⏱ 1m 5s ⏳",
@@ -572,6 +574,9 @@ def test_running(home_store):
     assert [run["title"] for run in running()] == ["calc"] and running()[0]["pid"] == os.getppid()
     assert running(skip={os.getppid()}) == []
     assert home_store.get("running", str(ended.pid)) is None
+    home_store.put("running", str(os.getppid()), snapshot(title="calc", pid_began="Sat Oct 24 16:32:00 2026"))
+    assert running() == [] and home_store.get("running", str(os.getppid())) is None
+    home_store.put("running", str(os.getppid()), snapshot(title="calc", pid_began=began_at(os.getppid())))
     shown = described(running()[0])
     assert shown["title"] == "calc" and shown["brief"].startswith("**calc**") and shown["pid"] == os.getppid()
 
@@ -952,13 +957,55 @@ def test_every_status_is_sent_anew_the_one_before_taken_out(desk):
     channel = Recorder("bot")
     listening = Desk([channel], Path.cwd())
     listening.chats_started.add(channel)
-    listening.say_status("🔄 **Tinker** · working on calc\n▸ planning")
-    listening.say_status("🔄 **Tinker** · working on calc\n▸ building")
+    listening.say_status("🔄 **Tinker** · working on calc")
+    listening.say_status("🔄 **Tinker** · working on learn go")
     listening.say_status("🟢 **Tinker** · idle: send a task")
     log = [(kind, sent) for kind, _, sent, _ in channel.log]
     assert log[0] == ("send", 101) and "edit" not in {kind for kind, _ in log}
     assert sorted(log[1:3]) == [("delete", 101), ("send", 102)]
     assert sorted(log[3:]) == [("delete", 102), ("send", 103)]
+
+
+@pytest.mark.spec("CNV-9")
+def test_a_job_says_its_status_as_it_starts_and_ends(desk, monkeypatch):
+    channel = Recorder("bot")
+    listening = Desk([channel], Path.cwd())
+    listening.chats_started.add(channel)
+    listening.say_status()
+
+    class Running:
+        pid, stdout, code = os.getpid(), [], None
+
+        def poll(self):
+            return self.code
+
+        def wait(self, timeout=None):
+            return 0
+
+    job = Running()
+    monkeypatch.setattr(listening, "spawn", lambda arguments: job)
+    monkeypatch.setattr(listening, "follow", lambda process, reporter, task: None)
+    listening.start_task(["learn", "go"], Path.cwd(), "learn go")
+    sent = [text for kind, _, _, text in channel.log if kind == "send"]
+    assert sent[0].startswith("🟢 **Tinker** · idle")
+    assert sent[1].startswith("🔄 **Tinker** · working on learn go\n\n🕒") and "learn go" in sent[2]
+    listening.reporter.progress.snapshot["doing"] = "building"
+    listening.reporter.update()
+    assert listening.status() == "🔄 **Tinker** · working on learn go"
+    listening.say_status("🔄 **Tinker** · working on learn go; calc in a terminal")
+    sent = [text for kind, _, _, text in channel.log if kind == "send"]
+    assert "calc in a terminal" in sent[-2] and "building" in sent[-1]
+    job.code = 0
+    listening.ended(job, listening.reporter, listening.task)
+    assert listening.said_status.startswith("🟢 **Tinker** · idle")
+
+
+@pytest.mark.spec("CNV-9")
+def test_a_run_in_a_terminal_shows_its_title_and_never_how_far_it_got(home_store, tmp_path):
+    desk = Desk([Recorder()], tmp_path)
+    state = snapshot(title="calc", doing="🔨 Building", passing=[1, 2], pid_began=began_at(os.getppid()))
+    home_store.put("running", str(os.getppid()), state)
+    assert desk.status() == "🔄 **Tinker** · working in a terminal on calc"
 
 
 @pytest.mark.spec("CNV-9")

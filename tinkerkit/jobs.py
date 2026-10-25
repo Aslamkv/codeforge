@@ -3,6 +3,7 @@ import os
 import signal
 lazy import datetime
 lazy import json
+lazy import subprocess
 lazy import sys
 lazy import threading
 lazy import time
@@ -82,7 +83,16 @@ class Jobs:
     @classmethod
     def begin(cls, argv):
         job = cls.current or cls.new(argv)
-        cls.current = cls.save(dict(job, state="running", pid=os.getpid(), paused_by=None, go_now=False))
+        cls.current = cls.save(
+            dict(
+                job,
+                state="running",
+                pid=os.getpid(),
+                pid_began=began_at(os.getpid()),
+                paused_by=None,
+                go_now=False,
+            )
+        )
         cls.journal, cls.ended_status = Journal(job["number"]), None
         cls.pause_running(job["number"])
 
@@ -173,7 +183,7 @@ class Jobs:
         return [
             job
             for job in JOBS.newest()
-            if job.get("state") in ("running", "paused") and not alive(job.get("pid"))
+            if job.get("state") in ("running", "paused") and not alive(job.get("pid"), job.get("pid_began"))
         ]
 
     @staticmethod
@@ -330,12 +340,12 @@ def job_number(word):
 
 
 def settled(job):
-    if job.get("state") in ("running", "paused") and not alive(job.get("pid")):
+    if job.get("state") in ("running", "paused") and not alive(job.get("pid"), job.get("pid_began")):
         return dict(job, state="stopped")
     return job
 
 
-def alive(pid):
+def alive(pid, began=None):
     if not pid:
         return False
     try:
@@ -344,7 +354,12 @@ def alive(pid):
         return False
     except PermissionError:
         pass
-    return True
+    return began is None or began == began_at(pid)
+
+
+def began_at(pid):
+    done = subprocess.run(["ps", "-o", "lstart=", "-p", str(pid)], capture_output=True, text=True)
+    return done.stdout.strip()
 
 
 def interrupted(signum, frame):

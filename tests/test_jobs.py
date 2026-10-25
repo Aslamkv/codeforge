@@ -12,7 +12,7 @@ from tinkerkit import conversation, jobs
 from tinkerkit.cli import Cli, Commands
 from tinkerkit.conversation import ConsoleChannel, Desk, Message, Progress, Research, research_once
 from tinkerkit.fetcher import Fetched, Fetcher
-from tinkerkit.jobs import JOB_STOP_SIGNAL, Jobs, archived, calls_log, is_job, journaled, today
+from tinkerkit.jobs import JOB_STOP_SIGNAL, Jobs, archived, began_at, calls_log, is_job, journaled, today
 from tinkerkit.learning import SlotLearner
 from tinkerkit.model import Ollama
 from tinkerkit.project import Tracker
@@ -137,6 +137,15 @@ def test_a_running_job_whose_process_is_gone_is_stopped(home_store):
     assert [job["number"] for job in Jobs.lost()] == [3]
 
 
+@pytest.mark.spec("JOB-2")
+def test_a_job_whose_process_id_went_to_another_process_is_stopped(home_store):
+    mine = {"number": 4, "command": "learn", "title": "learn go", "state": "running", "pid": os.getpid()}
+    home_store.put("jobs", "4", dict(mine, pid_began=began_at(os.getpid())))
+    assert Jobs.get(4)["state"] == "running"
+    home_store.put("jobs", "4", dict(mine, pid_began="Sat Oct 24 16:32:00 2026"))
+    assert Jobs.get(4)["state"] == "stopped" and [job["number"] for job in Jobs.lost()] == [4]
+
+
 @pytest.mark.spec("JOB-3")
 def test_a_resumed_job_is_answered_from_its_journal_and_asks_only_what_is_new(home_store):
     kept_twice, never_kept = {"search": "rust"}, {"search": "rust docs"}
@@ -233,7 +242,9 @@ def test_resume_runs_the_jobs_own_command_line(home_store):
     stopped_job(home_store, ["learn", "rust"])
     assert Jobs.arguments(["resume"]) == ["learn", "rust"] and Jobs.current["number"] == 1
     Jobs.current = None
-    home_store.put("jobs", "1", dict(Jobs.get(1), state="running", pid=os.getppid()))
+    home_store.put(
+        "jobs", "1", dict(Jobs.get(1), state="running", pid=os.getppid(), pid_began=began_at(os.getppid()))
+    )
     with pytest.raises(SystemExit, match="Job #1 is running"):
         Jobs.arguments(["resume", "#1"])
     home_store.put("jobs", "1", dict(Jobs.get(1), state="finished"))

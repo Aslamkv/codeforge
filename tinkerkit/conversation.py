@@ -16,7 +16,7 @@ lazy import webbrowser
 lazy from pathlib import Path
 
 from .commands import COMMANDS, TERMINAL_ONLY_CHANNEL_ACTIONS, deletes, kind_of, refs
-from .jobs import JOB_STOP_SIGNAL, Jobs, job_number, paused_for_you, today
+from .jobs import JOB_STOP_SIGNAL, Jobs, alive, job_number, paused_for_you, today
 from .project import Runs, Tracker, saved
 lazy from .ledger import DONE_NOTE_KEPT_SECONDS, Ledger
 lazy from .messages import human_duration, say
@@ -237,15 +237,18 @@ class Desk:
                         self.post_status(channel, text)
             elif anew or text.startswith("💤"):
                 channel.show(ConsoleChannel.CHAT, None, text, done=True)
+        self.keep_job_at_bottom()
+
+    def keep_job_at_bottom(self):
+        reporter = self.reporter
+        if self.busy() and reporter.sent and not reporter.ended:
+            with reporter.lock:
+                reporter.send_at_bottom = True
+                reporter.update()
 
     def status(self):
         if self.busy():
-            progress = self.reporter.progress
-            passing = f" · {progress.passing}" if progress.passing else ""
-            return md(
-                t"🔄 **Tinker** · working on {progress.title}\n▸ {Markup.plain(progress.snapshot['doing']):md}"
-                t"{passing}"
-            )
+            return md(t"🔄 **Tinker** · working on {self.reporter.progress.title}")
         if self.waiting_plan:
             then = (
                 "`confirm` · `rename NAME`"
@@ -255,10 +258,12 @@ class Desk:
             return md(t"🙋 **Tinker** · {self.waiting_plan['title']} waits for you: {then:md}")
         elsewhere = [described(state) for state in persons_runs(self.children())]
         if elsewhere:
-            return "🔄 **Tinker** · working in a terminal: " + "; ".join(run["brief"] for run in elsewhere)
+            return md(
+                t"🔄 **Tinker** · working in a terminal on {'; '.join(run['title'] for run in elsewhere)}"
+            )
         exercise = exercising_now()
         if exercise:
-            return f"🏋️ **Tinker** · {exercise['brief']}\n_It pauses whenever you ask for something._"
+            return md(t"🏋️ **Tinker** · {exercise['title']}")
         return "🟢 **Tinker** · idle: send a task"
 
     @staticmethod
@@ -827,10 +832,7 @@ class Desk:
                 phase=phase,
                 plan_on_top=keep,
                 before=self.seconds_by_run.get(run, 0.0),
-                on_step=self.say_status,
             )
-            with self.reporter.lock:
-                self.reporter.update()
             try:
                 self.last_task = self.spawn(arguments)
             except OSError as exc:
@@ -840,6 +842,9 @@ class Desk:
             self.live_tasks = [process for process in self.live_tasks if process.poll() is None] + [
                 self.last_task
             ]
+            self.say_status()
+            with self.reporter.lock:
+                self.reporter.update()
         its_plan_moves_on = self.waiting_plan and self.waiting_plan["folder"] == folder
         if its_plan_moves_on:
             self.waiting_plan = None
@@ -1595,7 +1600,8 @@ class Progress:
             if self.working_on.startswith(self.OWN_PHASE_ICONS)
             else md(t"**{self.working_on}**")
         )
-        lines = [md(t"🔨 **{state['title']}**")] + [f"✅ {step}" for step in state.get("steps", [])]
+        job = f" (Job #{state['job']})" if state.get("job") else ""
+        lines = [md(t"🔨 **{state['title']}**{job}")] + [f"✅ {step}" for step in state.get("steps", [])]
         lines += [f"▸ {doing}{clock} {self.HOURGLASS[self.turns % 2]}"]
         lines += [md(t"📊 {self.how_far}")] if self.how_far else []
         if state.get("found"):
@@ -1744,21 +1750,11 @@ def running(skip=()):
         pid = int(key) if key.isdigit() else 0
         if pid <= 0 or pid == os.getpid() or pid in skip:
             continue
-        if not alive(pid):
+        if not alive(pid, state.get("pid_began") if isinstance(state, dict) else None):
             Home.store().delete("running", key)
         elif isinstance(state, dict):
             found.append(dict(state, pid=pid))
     return found
-
-
-def alive(pid):
-    try:
-        os.kill(pid, 0)
-    except ProcessLookupError:
-        return False
-    except PermissionError:
-        pass
-    return True
 
 
 def exercise_switch(text):

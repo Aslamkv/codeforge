@@ -302,7 +302,8 @@ pauses it too, so the person is always answered at once.
   ending), and `paused` when another job or the person paused it ("Paused for job #N", "Paused for you": its
   ending says so, and its tracker's `doing`); otherwise it is `finished`, and its journal is deleted (its
   `calls #N` log is kept). A `running` or `paused` job whose process is gone (killed, the computer restarted)
-  is read as `stopped`; `Jobs.lost()` gives those jobs.
+  is read as `stopped`; `Jobs.lost()` gives those jobs. A process is known by its ID and the time it started
+  (`alive(pid, began)`), so a later process given the same ID is not taken for it.
 - **JOB-3** `journaled(request, ask)` outside a job asks. In a job, a request made before, word for word, is
   answered from the job's journal (log `journal #N`) in the order the answers were kept, and nothing is asked;
   any other request is asked, and its answer kept unless it failed (`keep`). `Ollama.chat` (but an unload),
@@ -600,10 +601,10 @@ What is said in the chats, kept so that a chat is only a view of it.
   that fits the spec prompt is used whole. A longer spec is condensed chunk by chunk with the model.
 - **PRJ-13** `Outcome` starts as `stopped` with exit code 1. `done` and `awaiting` exit with 0, and `blocked`
   exits with 1.
-- **PRJ-14** `Tracker` is a run's one report. It keeps the title, run ID, folder, phase, steps done, passing
-  spec points, what the model is doing now, the latest message said, a plan that waits, the end, the seconds
-  taken and when it went on (`resumed`). Each change is published at once in the home's `running` under the
-  run's process, and appended to the project's `progress` log.
+- **PRJ-14** `Tracker` is a run's one report. It keeps the title, job number, run ID, folder, phase, steps
+  done, passing spec points, what the model is doing now, the latest message said, a plan that waits, the end,
+  the seconds taken and when it went on (`resumed`). Each change is published at once in the home's `running`
+  under the run's process, and appended to the project's `progress` log.
 - **PRJ-15** The steps are named by phase (`DOING_AND_DONE`: what each phase is doing, and when done). A step
   done says what came of it (`outcome`) after its words. The passing count is taken from the project on every
   save, for every criterion (`C…` and `B…`). A plan that waits is kept as data: its project, run, language,
@@ -716,10 +717,12 @@ The terminal and the chats are one conversation: the same commands, the same ans
   and only the new lines when it grew. `exit` or end of input closes it.
 - **CNV-9** `Desk.run` claims each chat channel. When another Tinker holds one, it stops if there is no
   terminal, and otherwise leaves that chat out. The terminal never waits on a chat: each chat starts in its own
-  thread. Each chat has one status message. Every time the status changes (Tinker starts listening, a task
-  moves on, waits for the person, ends, Tinker ends: `not listening`), the one before is taken out and the new
-  one is sent at the bottom. While it listens it collects the messages whose time is up, every
-  `EXPIRED_MESSAGES_SWEEP_SECONDS` seconds.
+  thread. Each chat has one status message: what Tinker works on (a job's title), never how far it got. Every
+  time the status changes (Tinker starts listening, a job starts, waits for the person, ends, Tinker ends:
+  `not listening`), the one before is taken out and the new one is sent at the bottom, with the message of the
+  job that runs moved below it. A job says its status at once as it starts, before its own message, and the
+  status before it comes back at once as it ends. While it listens it collects the messages whose time is up,
+  every `EXPIRED_MESSAGES_SWEEP_SECONDS` seconds.
 - **CNV-10** `/start` (what a chat app sends when a person first opens the bot) is answered with a welcome and
   a short, tldr-style guide for beginners in plain words: what Tinker does, then what to send, grouped by what
   a person does (build something, their projects, ask anything, while it works), each with one line on what
@@ -749,11 +752,11 @@ The terminal and the chats are one conversation: the same commands, the same ans
 - **CNV-15** `Desk.follow` follows a task by its tracker: its run ID, its folder (the title is named after it),
   and a plan that waits. Once the task ends, it reads the task's last state and removes its tracker.
 - **CNV-16** `running(skip)` lists the runs whose trackers are in the home's `running`, but for its own process
-  and those it skips. It removes the trackers of processes that have ended.
-- **CNV-17** `Progress(snapshot)` shows a run's tracker: its title, its steps done, the step it is on with its
-  clock, what the model writes now, the passing spec points and the latest line (`text`); a one-line `brief`;
-  how long it took (`took`); and its `ending`: the end's headline, details and next commands, or the plan that
-  waits with its criteria and what to send next.
+  and those it skips. It removes the trackers of processes that have ended, known as a job is (**JOB-2**).
+- **CNV-17** `Progress(snapshot)` shows a run's tracker: its title with its job (`(Job #N)`, so the person can
+  stop it at once), its steps done, the step it is on with its clock, what the model writes now, the passing
+  spec points and the latest line (`text`); a one-line `brief`; how long it took (`took`); and its `ending`: the
+  end's headline, details and next commands, or the plan that waits with its criteria and what to send next.
 - **CNV-18** `Reporter` shows one run's tracker in one message per chat. It reads the tracker every
   `PROGRESS_EDIT_SECONDS` seconds and edits the message when it changed. It ends with the run's ending (with
   its `text`: a research's answer). A command that keeps no tracker shows its latest printed line.
