@@ -40,7 +40,7 @@ class Recaller(Phase):
 
     def run(self, cycle):
         known, internet = Library.topics(), self.session.internet
-        can_learn = Config.get("learn_missing") if internet and internet.available() else 0
+        can_learn = Config.get("learn_missing") if internet else 0
         if not known and not can_learn:
             say.info(
                 "Nothing learned yet" + ("" if internet else " (with --web, a run learns what it needs)"),
@@ -164,9 +164,6 @@ class Recaller(Phase):
         return list(dict.fromkeys(named + close))
 
     def learn(self, topic, internet, retriever):
-        if not internet.available():
-            say.skip(f"Not learning {topic}: {internet.problem()}")
-            return None
         try:
             entry = SlotLearner(self.session.model, internet, retriever.embeddings).learn(topic)
         except (SystemExit, PromptTooLarge, OllamaError) as exc:

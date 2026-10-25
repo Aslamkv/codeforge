@@ -216,7 +216,8 @@ The home, its database, the settings, and small helpers every module shares.
 - **SET-3** `PHASES`, `FIX_PHASES` and `PLANNING_PHASES` are the phase lists given in [The cycle](#the-cycle).
   `CONFIRM_AFTER` is `review` for the project and a feature, and `reproduce` for a bug fix.
 - **SET-4** `Config` is `DEFAULT_CONFIG` overridden by the home's `config`. It is read from the database each
-  time, so a change another Tinker made is seen at once. `Config.save(**changes)` keeps the changes.
+  time, so a change another Tinker made is seen at once; a stored key no setting has is ignored.
+  `Config.save(**changes)` keeps the changes.
 - **SET-5** `SETTINGS` is the one table of the settings: for each key of `DEFAULT_CONFIG`, its type, its
   range and its owner, the command that sets it (`use-model` for model, `embed` for embed_model, `config`
   for the rest). `Config.check()` checks every setting by its row, and rejects with
@@ -224,7 +225,7 @@ The home, its database, the settings, and small helpers every module shares.
   learn_think other than `"high"`, `"medium"`, `"low"`, `true`, `false` or `null`; and a number outside its range, or not whole
   where its row says so (max_growth above 1, web_timeout above 0, test_timeout and learn_missing at least 1,
   and each `learn_*`, `docs_*` and `fetch_*` limit). A boolean is never a number. Every command that needs the
-  model or the web checks them first.
+  model checks them first.
 - **SET-6** `Config.set(key, text)` is `tinker config KEY VALUE`. It sets only the keys whose owner is
   `config`, reading the value by the row's type. A value that fails its row's check is not kept, and the
   command ends with why. `tinker help config` lists those keys with their type and range, from the table.

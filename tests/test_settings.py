@@ -47,24 +47,18 @@ def test_default_config():
         "max_growth": 1.15,
         "build_think": "medium",
         "test_timeout": 60,
-        "web": "ollama",
-        "web_fallback": "",
         "web_timeout": 30,
-        "web_backoff": 20,
         "learn_missing": 2,
         "learn_cutoff": 0.0,
         "learn_pages": 8,
         "learn_min_pages": 2,
         "learn_searches": 3,
         "learn_think": "low",
-        "docs_pages": 30,
         "tool_docs_pages": 5,
         "docs_latest_days": 30,
         "fetch_workers": 6,
         "fetch_timeout": 15,
         "fetch_max_bytes": 2000000,
-        "fetch_domain_delay": 0.1,
-        "fetch_fallbacks": 2,
         "embed_model": "",
         "projects": "~/Projects",
     }
@@ -95,12 +89,19 @@ def test_phase_lists():
 @pytest.mark.spec("SET-4")
 def test_config_is_defaults_overridden_by_the_home(home_store):
     home_store.put("config", "model", "m1")
-    assert Config.get("model") == "m1" and Config.get("web") == "ollama"
+    assert Config.get("model") == "m1" and Config.get("web_timeout") == 30
     changed_by_another_tinker = "changed"
     home_store.put("config", "model", changed_by_another_tinker)
     assert Config.get("model") == changed_by_another_tinker
-    Config.save(web="duckduckgo", test_timeout=5)
-    assert Config.load() == dict(settings.DEFAULT_CONFIG, model="changed", web="duckduckgo", test_timeout=5)
+    Config.save(web_timeout=5, test_timeout=5)
+    assert Config.load() == dict(settings.DEFAULT_CONFIG, model="changed", web_timeout=5, test_timeout=5)
+
+
+@pytest.mark.spec("SET-4")
+def test_a_stored_key_no_setting_has_is_ignored(home_store):
+    home_store.put("config", "web_fallback", "duckduckgo")
+    assert Config.load() == settings.DEFAULT_CONFIG
+    Config.check()
 
 
 @pytest.mark.spec("SET-5")
@@ -119,8 +120,6 @@ def test_config_is_defaults_overridden_by_the_home(home_store):
         ("test_timeout", 0),
         ("test_timeout", 1.5),
         ("test_timeout", "60"),
-        ("web", "bing"),
-        ("web_fallback", "x"),
         ("web_timeout", 0),
         ("web_timeout", True),
         ("learn_missing", 0),
@@ -128,7 +127,7 @@ def test_config_is_defaults_overridden_by_the_home(home_store):
         ("learn_missing", True),
         ("learn_pages", 2.5),
         ("learn_min_pages", 0),
-        ("web_backoff", -1),
+        ("learn_cutoff", -1),
         ("fetch_workers", True),
         ("fetch_max_bytes", "big"),
     ],
@@ -150,9 +149,9 @@ def test_check_accepts_keep_alive_seconds_or_durations(value):
 def test_every_setting_has_one_row_with_its_owner():
     assert list(SETTINGS) == list(settings.DEFAULT_CONFIG)
     owned = {key: row.owner for key, row in SETTINGS.items() if row.owner != "config"}
-    assert owned == {"model": "use-model", "web": "use-web", "embed_model": "embed"}
+    assert owned == {"model": "use-model", "embed_model": "embed"}
     Config.check()
-    Config.save(web="duckduckgo", web_fallback="", web_timeout=2.5, learn_missing=3)
+    Config.save(web_timeout=2.5, learn_missing=3)
     Config.check()
 
 
@@ -445,14 +444,14 @@ def test_config_set_reads_and_checks_the_value():
     assert config_set("test_timeout", "90") == 90 and Config.get("test_timeout") == 90
     assert config_set("keep_alive", "10m") == "10m" and config_set("keep_alive", "300") == 300
     assert config_set("build_think", "false") is False and config_set("max_growth", "1.5") == 1.5
-    assert config_set("learn_think", "false") is False and config_set("docs_pages", "12") == 12
-    assert config_set("web_fallback", "duckduckgo") == "duckduckgo"
+    assert config_set("learn_think", "false") is False and config_set("tool_docs_pages", "12") == 12
+    assert config_set("projects", "~/Code") == "~/Code"
     with pytest.raises(SystemExit, match="test_timeout must be a whole number"):
         config_set("test_timeout", "soon")
     assert Config.get("test_timeout") == 90
-    with pytest.raises(SystemExit, match="web_fallback must be one of"):
-        config_set("web_fallback", "bing")
-    assert Config.get("web_fallback") == "duckduckgo"
+    with pytest.raises(SystemExit, match="web_timeout must be a number above 0"):
+        config_set("web_timeout", "0")
+    assert Config.get("web_timeout") == settings.DEFAULT_CONFIG["web_timeout"]
     with pytest.raises(SystemExit, match="learn_missing"):
         config_set("learn_missing", "0")
     assert Config.get("learn_missing") == settings.DEFAULT_CONFIG["learn_missing"]
@@ -474,7 +473,7 @@ def test_config_set_only_the_settings_with_no_command_of_their_own():
 def test_help_config_lists_the_settings_from_the_table():
     about = BY_NAME["config"].about
     assert "test_timeout (a whole number, 1 or more)" in about and "max_growth (a number above 1)" in about
-    assert "web_fallback (" in about and "embed_model" not in about and "model (" not in about
+    assert "web_timeout (" in about and "embed_model" not in about and "model (" not in about
 
 
 @pytest.mark.spec("SET-18")

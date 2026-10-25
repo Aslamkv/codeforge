@@ -11,13 +11,13 @@ from test_conversation import Recorder
 from tinkerkit import cli, conversation, exercising, jobs
 from tinkerkit.cli import Cli, Commands
 from tinkerkit.conversation import Desk, Message
-from tinkerkit.fetcher import Fetched, Fetcher
 from tinkerkit.jobs import JOB_STOP_SIGNAL, Jobs, archived, began_at, calls_log, is_job, journaled, today
 from tinkerkit.knowledge import Learner, Researcher
 from tinkerkit.learning import SlotLearner
 from tinkerkit.model import Ollama
+from tinkerkit.passages import Block
 from tinkerkit.project import Tracker
-from tinkerkit.web import Internet
+from tinkerkit.web import Internet, WebPage
 
 DEAD_PID = 999999999
 
@@ -178,7 +178,7 @@ def test_outside_a_job_and_after_a_failure_it_asks(home_store):
 
 
 @pytest.mark.spec("JOB-3")
-def test_model_calls_and_page_fetches_go_through_the_journal(home_store, monkeypatch):
+def test_model_calls_go_through_the_journal(home_store, monkeypatch):
     calls = []
 
     def streamed(name, messages, *rest):
@@ -186,31 +186,16 @@ def test_model_calls_and_page_fetches_go_through_the_journal(home_store, monkeyp
         return {"message": {"content": "hi"}}
 
     monkeypatch.setattr(Ollama, "streamed", staticmethod(streamed))
-    fetcher = Fetcher(1, 1.0, 1000, 0.0)
-    monkeypatch.setattr(
-        fetcher,
-        "fetched",
-        lambda url, connections, kind: (
-            calls.append(url)
-            or (Fetched(url, 200, url, "text") if "good" in url else Fetched(url, error="refused"))
-        ),
-    )
     say_hi = [{"role": "user", "content": "hi"}]
     with pytest.raises(KeyboardInterrupt), Jobs.running(["ask", "hi"]):
         Ollama.chat("m", say_hi, 0, {})
-        fetcher.fetch("https://good.example", None, "fetch")
-        fetcher.fetch("https://bad.example", None, "fetch")
         raise KeyboardInterrupt
     calls.clear()
     a_different_keep_alive, an_unload = 300, []
     with Jobs.running(Jobs.arguments(["resume", "#1"])):
         assert Ollama.chat("m", say_hi, a_different_keep_alive, {})["message"]["content"] == "hi"
-        assert fetcher.fetch("https://good.example", None, "fetch") == Fetched(
-            "https://good.example", 200, "https://good.example", "text"
-        )
-        assert not fetcher.fetch("https://bad.example", None, "fetch").ok
         Ollama.chat("m", an_unload, 0, None)
-    assert calls == ["https://bad.example", an_unload]
+    assert calls == [an_unload]
 
 
 @pytest.mark.spec("JOB-4")
@@ -603,17 +588,18 @@ def test_paused_jobs_are_listed_between_running_and_stopped(home_store):
 @pytest.mark.spec("JOB-3")
 def test_web_searches_and_fetches_go_through_the_journal(home_store, monkeypatch):
     calls = []
-    internet = Internet.__new__(Internet)
+    page = WebPage("https://a.example", "text/plain", b"text", [Block("text", "text")], "", "")
+    internet = Internet()
     monkeypatch.setattr(
         internet, "searched", lambda query, count: calls.append(query) or [{"url": "https://a.example"}]
     )
-    monkeypatch.setattr(internet, "fetched", lambda url: calls.append(url) or {"url": url, "content": "text"})
+    monkeypatch.setattr(internet, "fetched", lambda urls, max_bytes: calls.extend(urls) or [page])
     with pytest.raises(KeyboardInterrupt), Jobs.running(["research", "go"]):
-        internet.search("go", 5), internet.fetch("https://a.example")
+        internet.search("go", 5), internet.fetch(["https://a.example"])
         raise KeyboardInterrupt
     with Jobs.running(Jobs.arguments(["resume", "#1"])):
         assert internet.search("go", 5) == [{"url": "https://a.example"}]
-        assert internet.fetch("https://a.example") == {"url": "https://a.example", "content": "text"}
+        assert internet.fetch(["https://a.example"]) == [page]
         a_new_request = ("go", 10)
         internet.search(*a_new_request)
     assert calls == ["go", "https://a.example", "go"]
