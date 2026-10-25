@@ -643,7 +643,7 @@ What is said in the chats, kept so that a chat is only a view of it.
 The web plugin's page fetcher, with the standard library only. Only `web` uses it.
 
 - **FET-1** `Fetcher.fetch_all(urls)` gives a `Fetched` per address, in order: status, final address, bytes,
-  text, content type and error. The pages of one site go one after another over one kept-alive connection
+  text, content type, error and the seconds it took. The pages of one site go one after another over one kept-alive connection
   (`http.client`), the sites in parallel (`workers`); a connection the site closed is opened again once. One
   page failing never stops the others. It sends its User-Agent, asks for gzip, follows at most
   `MAX_REDIRECTS` redirects, and decodes by the header's charset, else the page's `<meta>` charset, else UTF-8.

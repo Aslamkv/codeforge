@@ -1,335 +1,208 @@
+import base64
 import html
-import html.parser
 import re
 from collections import namedtuple
 lazy import json
 lazy import os
+lazy import threading
 lazy import time
 lazy import urllib.error
 lazy import urllib.parse
 lazy import urllib.request
+lazy from collections import Counter
 
 from .messages import say
-from .settings import FIRST_BACKOFF_SECONDS, Config, field, first_line
+from .settings import Config, Home, first_line
 lazy from .fetcher import Fetcher
 lazy from .jobs import journaled
-lazy from .passages import MainBlocks, is_html
+lazy from .passages import Block, MainBlocks, is_html, text_blocks
 
 Unreached = namedtuple("Unreached", "why timed_out")
-ReadyBackends = namedtuple("ReadyBackends", "ready reasons")
-BackendAnswer = namedtuple("BackendAnswer", "result why")
-Got = namedtuple("Got", "text content_type")
+TEXT_KINDS = (
+    "text/plain",
+    "text/markdown",
+    "text/x-markdown",
+    "application/json",
+    "application/xml",
+    "text/xml",
+)
 
 
 class Internet:
-    RETRY_PAUSE_SECONDS = 3
-    FAILURES_BEFORE_GONE = 2
-
     def __init__(self):
-        self.errors, self.failures, self.last_failure_status = {}, {}, {}
-        self.backends_used, reasons = self.ready_backends()
-        self.gone = (
-            "" if self.backends_used else ("; ".join(reasons) or "no web backend (tinker use-web NAME)")
-        )
-        self.unusable_backends = reasons
-        self.throttles = {
-            backend.name: Throttle(backend.RATE, Config.get("web_backoff")) for backend in self.backends_used
-        }
-
-    def ready_backends(self):
-        ready, reasons = [], []
         timeout = float(Config.get("web_timeout"))
-        for name in dict.fromkeys(name for name in (Config.get("web"), Config.get("web_fallback")) if name):
-            backend = self.backends()[name](timeout)
-            why = backend.unready()
-            if why:
-                reasons.append(f"{name}: {why}")
-            else:
-                backend.name = name
-                ready.append(backend)
-        return ReadyBackends(ready, reasons)
-
-    @staticmethod
-    def required(option):
-        Config.check()
-        internet = Internet()
-        if not internet.available():
-            raise SystemExit(f"{option} needs the Internet plugin: {internet.problem()}")
-        for reason in internet.unusable_backends:
-            say.warn(f"Web: {reason}; using {internet.describe()}")
-        return internet
+        self.ollama = OllamaWeb(timeout) if OllamaWeb.key() else None
+        self.standard = WebBackend(timeout)
+        self.requests = RequestLog()
+        self.offline = ""
 
     @staticmethod
     def state():
+        if OllamaWeb.key():
+            return "ollama.com search, the standard search as fallback"
+        return f"the standard search (no {OllamaWeb.KEY_ENV})"
+
+    def search(self, query, count):
+        return journaled({"search": query, "count": count}, lambda: self.searched(query, count)) or []
+
+    def searched(self, query, count):
+        if self.offline:
+            return None
+        found = self.ollama_searched(query, count) if self.ollama else None
+        if found is None:
+            found = self.standard_searched(query, count)
+        return None if found is None else results(found, count)
+
+    def ollama_searched(self, query, count):
         try:
-            Config.check()
-        except SystemExit as exc:
-            return f"not usable: {exc}"
-        internet = Internet()
-        if not internet.available():
-            return internet.problem()
-        skipped = (
-            f"; not usable: {'; '.join(internet.unusable_backends)}" if internet.unusable_backends else ""
+            return self.asked("ollama", query, lambda: self.ollama.search(query, count))
+        except WebError as exc:
+            say.warn(f"Web: ollama.com search failed ({exc}); asking the standard search")
+            return None
+
+    def standard_searched(self, query, count, again=True):
+        try:
+            return self.asked("standard", query, lambda: self.standard.search(query, count))
+        except WebError as exc:
+            if exc.unreachable:
+                self.go_offline(str(exc))
+            elif exc.retry and again:
+                return self.standard_searched(query, count, again=False)
+            return None
+
+    def asked(self, by, query, search):
+        started = time.monotonic()
+        try:
+            found = search()
+        except Exception as exc:
+            failure = exc if isinstance(exc, WebError) else WebError(f"failed: {type(exc).__name__}: {exc}")
+            self.requests("search", by, str(failure), time.monotonic() - started, query)
+            raise failure
+        self.requests("search", by, "", time.monotonic() - started, query)
+        return found
+
+    def go_offline(self, why):
+        self.offline = why
+        say.warn(f"Web: not reachable ({why})")
+
+    def fetch(self, urls, max_bytes=None):
+        urls = list(urls)
+        return journaled(
+            {"fetch": urls, "max_bytes": max_bytes},
+            lambda: self.fetched(urls, max_bytes),
+            keep=lambda pages: not self.offline,
+            dump=lambda pages: [page.kept() for page in pages],
+            load=lambda kept: [WebPage.from_kept(page) for page in kept],
         )
-        return f"ready: {internet.describe()}{skipped}"
 
-    @staticmethod
-    def backends():
-        return {"ollama": OllamaWeb, "duckduckgo": DuckDuckGoWeb}
+    def fetched(self, urls, max_bytes):
+        if self.offline:
+            return [WebPage.failed(url, f"the web is not reachable ({self.offline})") for url in urls]
+        pages = []
+        for fetched in self.fetcher(max_bytes).fetch_all(urls):
+            pages.append(WebPage.of(fetched))
+            self.requests("fetch", "standard", fetched.error, fetched.seconds, fetched.url)
+        return pages
 
-    def available(self):
-        return not self.gone
-
-    def problem(self, key=None):
-        return self.gone or self.errors.get(key) or "no answer"
-
-    def rate_limited(self, key):
-        return self.last_failure_status.get(key) == 429
-
-    def describe(self):
-        return " then ".join(backend.name for backend in self.backends_used)
-
-    @property
-    def backend(self):
-        return self.backends_used[0] if self.backends_used else None
-
-    @staticmethod
-    def page_fetcher(log=None):
+    def fetcher(self, max_bytes):
         return Fetcher(
             int(Config.get("fetch_workers")),
             float(Config.get("fetch_timeout")),
-            int(Config.get("fetch_max_bytes")),
-            float(Config.get("fetch_domain_delay")),
-            log=log,
+            int(max_bytes or Config.get("fetch_max_bytes")),
         )
 
-    @staticmethod
-    def download(url, max_bytes):
-        return Internet.page_fetcher().download(url, max_bytes)
 
-    def search(self, query, count):
-        return journaled({"search": query, "count": count}, lambda: self.searched(query, count))
+def results(found, count):
+    return [
+        {
+            "title": str(result.get("title") or ""),
+            "url": str(result["url"]),
+            "content": str(result.get("content") or ""),
+        }
+        for result in found
+        if isinstance(result, dict) and is_web_address(result.get("url", ""))
+    ][:count]
 
-    def searched(self, query, count):
-        found = self.call(
-            query,
-            lambda backend: backend.search(query, count),
-            lambda result: isinstance(result, list) or "its search gave no list",
-        )
-        if found is None:
-            return None
-        return [
-            self.as_result(result)
-            for result in found
-            if isinstance(result, dict) and is_web_address(result.get("url", ""))
-        ]
 
-    @staticmethod
-    def as_result(found):
+class WebPage(namedtuple("WebPage", "url kind data blocks title why")):
+    @classmethod
+    def of(cls, fetched):
+        if not fetched.ok:
+            return cls.failed(fetched.url, fetched.error)
+        title, blocks = readable(fetched.text, fetched.kind)
+        return cls(fetched.url, fetched.kind, fetched.data, blocks, title, "")
+
+    @classmethod
+    def failed(cls, url, why):
+        return cls(url, "", b"", [], "", why)
+
+    @property
+    def text(self):
+        return PageText(self.title, self.blocks).content()
+
+    def kept(self):
         return {
-            "title": str(found.get("title") or ""),
-            "url": str(found["url"]),
-            "content": str(found.get("content") or ""),
+            **self._asdict(),
+            "data": base64.b64encode(self.data).decode("ascii"),
+            "blocks": [[block.kind, block.text, block.level] for block in self.blocks],
         }
 
-    def fetch(self, url):
-        return journaled({"fetch": url}, lambda: self.fetched(url))
-
-    def fetched(self, url):
-        usable = lambda page: (
-            isinstance(page, dict) and bool(field(page, "content")) or "its fetch gave no text"
+    @classmethod
+    def from_kept(cls, kept):
+        return cls(
+            **{
+                **kept,
+                "data": base64.b64decode(kept["data"]),
+                "blocks": [Block(*block) for block in kept["blocks"]],
+            }
         )
-        page = self.call(url, lambda backend: backend.fetch(url), usable)
-        if page is None:
-            return None
-        return {"title": str(page.get("title") or ""), "url": url, "content": str(page.get("content") or "")}
-
-    def call(self, key, action, usable):
-        reasons = []
-        self.last_failure_status.pop(key, None)
-        for backend in list(self.backends_used):
-            result, why = self.ask_backend(backend, action, usable, key)
-            if not why:
-                self.last_failure_status.pop(key, None)
-                return result
-            reasons.append(f"{backend.name}: {why}")
-        self.errors[key] = "; ".join(reasons) or self.gone or "no answer"
-        return None
-
-    def ask_backend(self, backend, action, usable, key):
-        try:
-            return self.throttles[backend.name].call(
-                lambda: self.answer(backend, action, usable, key), lambda: self.rate_limited(key)
-            )
-        except RateLimited:
-            why = f"still rate limited after {self.throttles[backend.name].backoff:g} seconds"
-            self.lost(backend, why)
-            return BackendAnswer(None, why)
-
-    def answer(self, backend, action, usable, key):
-        for attempt in (1, 2):
-            self.last_failure_status.pop(key, None)
-            try:
-                result = action(backend)
-            except WebError as exc:
-                self.last_failure_status[key] = exc.code
-                if exc.code == 429:
-                    return BackendAnswer(None, str(exc))
-                if exc.retry and attempt == 1:
-                    time.sleep(self.RETRY_PAUSE_SECONDS)
-                    continue
-                if exc.network:
-                    self.lost(backend, str(exc))
-                return BackendAnswer(None, str(exc))
-            except Exception as exc:
-                return BackendAnswer(None, f"failed: {type(exc).__name__}: {exc}")
-            self.failures[backend.name] = 0
-            verdict = usable(result)
-            return BackendAnswer(result, "") if verdict is True else BackendAnswer(None, verdict)
-        return BackendAnswer(None, "no answer")
-
-    def lost(self, backend, why):
-        self.failures[backend.name] = self.failures.get(backend.name, 0) + 1
-        if self.failures[backend.name] >= self.FAILURES_BEFORE_GONE and backend in self.backends_used:
-            self.backends_used.remove(backend)
-            say.warn(f"Web: not asking {backend.name} again ({first_line(why, 120)})")
-            if not self.backends_used:
-                self.gone = why
 
 
-class RateLimited(Exception):
-    pass
+def readable(text, kind):
+    if is_html(text, kind):
+        parsed = MainBlocks.parsed(text)
+        return parsed.title, parsed.content()
+    if kind in TEXT_KINDS:
+        return "", text_blocks(text)
+    return "", []
 
 
-class Throttle:
-    def __init__(self, rate, backoff, clock=None, sleep=None):
-        self.rate, self.backoff = float(rate or 0), float(backoff)
-        self.clock, self.sleep = clock or time.monotonic, sleep or time.sleep
-        self.tokens, self.filled = self.rate, self.clock()
+class RequestLog:
+    def __init__(self):
+        self.path, self.tally, self.lock = Home.web_log(), {}, threading.Lock()
 
-    def call(self, request, limited):
-        deadline, pause = None, FIRST_BACKOFF_SECONDS
-        while True:
-            self.take()
-            result = request()
-            if not limited():
-                return result
-            now = self.clock()
-            deadline = now + self.backoff if deadline is None else deadline
-            if now >= deadline:
-                raise RateLimited()
-            self.sleep(min(pause, deadline - now))
-            pause *= 2
+    def __call__(self, kind, by, why, seconds, target):
+        result = "failed" if why else "ok"
+        line = json.dumps(
+            {
+                "at": time.strftime("%Y-%m-%dT%H:%M:%S"),
+                "kind": kind,
+                "by": by,
+                "result": result,
+                "why": why,
+                "seconds": round(seconds, 3),
+                "target": target,
+            }
+        )
+        with self.lock:
+            self.tally.setdefault(kind, Counter()).update(requests=1, **{result: 1})
+            with self.path.open("a") as log:
+                log.write(line + "\n")
 
-    def take(self):
-        if not self.rate:
-            return
-        self.refill()
-        if self.tokens < 1:
-            self.sleep((1 - self.tokens) * 60 / self.rate)
-            self.refill()
-        self.tokens -= 1
+    def counts(self):
+        return {kind: dict(counts) for kind, counts in self.tally.items()}
 
-    def refill(self):
-        now = self.clock()
-        self.tokens = min(self.rate, self.tokens + (now - self.filled) * self.rate / 60)
-        self.filled = now
+    def text(self):
+        if not self.tally:
+            return "none"
+        return ", ".join(
+            f"{kind} {counts['requests']}" + (f" ({counts['failed']} failed)" if counts["failed"] else "")
+            for kind, counts in self.tally.items()
+        )
 
 
 class WebBackend:
-    name = ""
-    RATE = None
-
-    def __init__(self, timeout):
-        self.timeout = timeout
-
-    def unready(self):
-        raise NotImplementedError
-
-    def search(self, query, count):
-        raise NotImplementedError
-
-    def fetch(self, url):
-        raise NotImplementedError
-
-
-class OllamaWeb(WebBackend):
-    BASE = "https://ollama.com/api"
-    KEY_ENV = "OLLAMA_API_KEY"
-    RATE = 8
-    MAX_ANSWER_BYTES = 2_000_000
-
-    def __init__(self, timeout):
-        super().__init__(timeout)
-        self.key = os.environ.get(self.KEY_ENV, "").strip()
-
-    def unready(self):
-        return (
-            ""
-            if self.key
-            else (
-                f"no Ollama API key: set {self.KEY_ENV} (a free key from "
-                f"ollama.com/settings/keys), or tinker use-web duckduckgo (no key)"
-            )
-        )
-
-    def search(self, query, count):
-        data = self.post("/web_search", {"query": query, "max_results": count})
-        if not isinstance(data.get("results"), list):
-            raise WebError("ollama.com's web search answered without results")
-        return data["results"]
-
-    def fetch(self, url):
-        return self.post("/web_fetch", {"url": url})
-
-    def post(self, path, payload):
-        request = urllib.request.Request(
-            self.BASE + path,
-            data=json.dumps(payload).encode("utf-8"),
-            method="POST",
-            headers={
-                "Authorization": f"Bearer {self.key}",
-                "Content-Type": "application/json",
-                "User-Agent": "Tinker",
-            },
-        )
-        try:
-            with urllib.request.urlopen(request, timeout=self.timeout) as response:
-                body = response.read(self.MAX_ANSWER_BYTES)
-        except urllib.error.HTTPError as exc:
-            raise self.refused(exc.code, path)
-        except Exception as exc:
-            reason, timed_out = unreached(exc)
-            raise WebError(f"ollama.com cannot be reached ({reason})", network=True, retry=timed_out)
-        return self.json_object(body)
-
-    def refused(self, code, path):
-        hint = {
-            401: f": check {self.KEY_ENV}",
-            403: f": check {self.KEY_ENV}",
-            429: ": its rate limit, try later",
-        }
-        return WebError(
-            f"ollama.com answered HTTP {code}{hint.get(code, '')}",
-            network=code in (401, 403) or (code >= 500 and path != "/web_fetch"),
-            retry=code >= 500,
-            code=code,
-        )
-
-    @staticmethod
-    def json_object(body):
-        try:
-            data = json.loads(body.decode("utf-8", errors="replace"))
-        except ValueError:
-            raise WebError("ollama.com did not answer with JSON")
-        if not isinstance(data, dict):
-            raise WebError("ollama.com answered with something else than a JSON object")
-        return data
-
-
-class DuckDuckGoWeb(WebBackend):
     SEARCH = "https://html.duckduckgo.com/html/"
-    RATE = None
     USER_AGENT = "Mozilla/5.0 (compatible; Tinker)"
     MAX_BYTES = 2_000_000
     RESULT_RE = re.compile(
@@ -338,18 +211,14 @@ class DuckDuckGoWeb(WebBackend):
     SNIPPET_RE = re.compile(r'class="result__snippet"[^>]*>(.*?)</a>', re.S)
     TAG_RE = re.compile(r"<[^>]+>")
 
-    def unready(self):
-        return ""
+    def __init__(self, timeout):
+        self.timeout = timeout
 
     def search(self, query, count):
-        body = self.get(self.SEARCH, self.timeout, form={"q": query})[0]
+        body = self.get(self.SEARCH, self.timeout, form={"q": query})
         results = self.results(body)
         if not results and self.bot_check(body):
-            raise WebError(
-                "DuckDuckGo answered with its bot check instead of results (too many searches; it "
-                "passes after a while)",
-                retry=True,
-            )
+            raise WebError("DuckDuckGo answered with its bot check instead of results")
         return results[:count]
 
     @staticmethod
@@ -371,25 +240,6 @@ class DuckDuckGoWeb(WebBackend):
                 )
         return results
 
-    def fetch(self, url):
-        fetched = Internet.page_fetcher().fetch_all([url])[0]
-        if not fetched.ok:
-            raise WebError(
-                f"{url} cannot be read ({fetched.error})",
-                retry=(fetched.status or 0) >= 500,
-                code=fetched.status,
-            )
-        return self.page(url, fetched.text, fetched.kind)
-
-    @staticmethod
-    def page(url, body, kind):
-        if is_html(body, kind):
-            text = PageText.of(body)
-            return {"title": text.title, "url": url, "content": text.content()}
-        if kind.startswith("text/") or kind in ("", "application/json", "application/xml"):
-            return {"title": "", "url": url, "content": body}
-        raise WebError(f"{url} is not a text page ({kind})")
-
     @classmethod
     def get(cls, url, timeout, form=None):
         data = urllib.parse.urlencode(form).encode("utf-8") if form else None
@@ -397,23 +247,13 @@ class DuckDuckGoWeb(WebBackend):
         request = urllib.request.Request(url, data=data, headers=headers)
         try:
             with urllib.request.urlopen(request, timeout=timeout) as response:
-                kind = (response.headers.get_content_type() or "").lower()
                 charset = response.headers.get_content_charset() or "utf-8"
-                return Got(response.read(cls.MAX_BYTES).decode(charset, errors="replace"), kind)
+                return response.read(cls.MAX_BYTES).decode(charset, errors="replace")
         except urllib.error.HTTPError as exc:
-            raise WebError(
-                f"{urllib.parse.urlsplit(url).netloc} answered HTTP {exc.code}",
-                retry=exc.code >= 500,
-                code=exc.code,
-            )
+            raise WebError(f"{host(url)} answered HTTP {exc.code}", retry=exc.code >= 500)
         except Exception as exc:
             reason, timed_out = unreached(exc)
-            host = urllib.parse.urlsplit(url).netloc
-            raise WebError(
-                f"{host} cannot be reached ({reason})",
-                network=host in cls.SEARCH and not timed_out,
-                retry=timed_out,
-            )
+            raise WebError(f"{host(url)}: {reason}", retry=timed_out, unreachable=not timed_out)
 
     @staticmethod
     def target(href):
@@ -427,17 +267,59 @@ class DuckDuckGoWeb(WebBackend):
         return " ".join(html.unescape(cls.TAG_RE.sub("", fragment)).split())
 
 
+class OllamaWeb(WebBackend):
+    BASE = "https://ollama.com/api"
+    KEY_ENV = "OLLAMA_API_KEY"
+    MAX_ANSWER_BYTES = 2_000_000
+    HINTS = {401: ": check OLLAMA_API_KEY", 403: ": check OLLAMA_API_KEY", 429: ": its rate limit"}
+
+    @classmethod
+    def key(cls):
+        return os.environ.get(cls.KEY_ENV, "").strip()
+
+    def search(self, query, count):
+        data = self.post("/web_search", {"query": query, "max_results": count})
+        if not isinstance(data.get("results"), list):
+            raise WebError("ollama.com's web search answered without results")
+        return data["results"]
+
+    def post(self, path, payload):
+        request = urllib.request.Request(
+            self.BASE + path,
+            data=json.dumps(payload).encode("utf-8"),
+            method="POST",
+            headers={
+                "Authorization": f"Bearer {self.key()}",
+                "Content-Type": "application/json",
+                "User-Agent": "Tinker",
+            },
+        )
+        try:
+            with urllib.request.urlopen(request, timeout=self.timeout) as response:
+                body = response.read(self.MAX_ANSWER_BYTES)
+        except urllib.error.HTTPError as exc:
+            raise WebError(f"ollama.com answered HTTP {exc.code}{self.HINTS.get(exc.code, '')}")
+        except Exception as exc:
+            raise WebError(f"ollama.com: {unreached(exc).why}")
+        return self.json_object(body)
+
+    @staticmethod
+    def json_object(body):
+        try:
+            data = json.loads(body.decode("utf-8", errors="replace"))
+        except ValueError:
+            raise WebError("ollama.com did not answer with JSON")
+        if not isinstance(data, dict):
+            raise WebError("ollama.com answered with something else than a JSON object")
+        return data
+
+
 class PageText:
     SEPARATORS_ONLY_RE = re.compile(r"[-*#|»›>·•\s]*")
 
     def __init__(self, title, blocks):
         self.title = title
         self.blocks = [block for block in blocks if not self.SEPARATORS_ONLY_RE.fullmatch(block.text)]
-
-    @classmethod
-    def of(cls, markup):
-        parsed = MainBlocks.parsed(markup)
-        return cls(parsed.title, parsed.content())
 
     def content(self):
         text = ""
@@ -454,14 +336,18 @@ class PageText:
 
 
 class WebError(Exception):
-    def __init__(self, message, network=False, retry=False, code=None):
+    def __init__(self, message, retry=False, unreachable=False):
         super().__init__(message)
-        self.network, self.retry, self.code = network, retry, code
+        self.retry, self.unreachable = retry, unreachable
 
 
 def unreached(exc):
     reason = first_line(str(getattr(exc, "reason", "") or exc) or type(exc).__name__, 160)
     return Unreached(reason, isinstance(exc, TimeoutError) or "timed out" in reason)
+
+
+def host(url):
+    return urllib.parse.urlsplit(url).netloc
 
 
 def is_web_address(url):

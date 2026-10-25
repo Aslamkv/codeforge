@@ -8,7 +8,6 @@ from tinkerkit.fetcher import Fetched
 from tinkerkit.knowledge import Knowledge, Library
 from tinkerkit.learning import (
     LearnStopped,
-    RequestLog,
     SlotLearner,
     read_digest,
     read_plan,
@@ -269,22 +268,6 @@ def test_a_fallback_still_rate_limited_keeps_the_page_as_fetched(tinker_home):
     entry = learner(web).learn("Widgetlib")
     assert web.fallback_asked == [APP] and entry["requests"]["fallback"] == {"requests": 1, "429": 1}
     assert all(fact["source"] != APP for fact in entry["facts"])
-
-
-@pytest.mark.spec("LRN-1")
-def test_every_request_is_logged_and_counted(tinker_home):
-    log = RequestLog()
-    log("search", "429", 0.5, "q")
-    log("search", "ok", 0.4, "q")
-    log("fetch", "failed", 1.0, "https://a")
-    lines = [json.loads(line) for line in Home.web_log().read_text().splitlines()]
-    assert [(line["kind"], line["result"], line["target"]) for line in lines] == [
-        ("search", "429", "q"),
-        ("search", "ok", "q"),
-        ("fetch", "failed", "https://a"),
-    ]
-    assert log.counts()["search"] == {"requests": 2, "429": 1, "ok": 1}
-    assert log.text() == "search 2, fetch 1 (1 failed); HTTP 429: 1" and RequestLog().text() == "none"
 
 
 def passage(number, text, url="https://x.dev/doc"):

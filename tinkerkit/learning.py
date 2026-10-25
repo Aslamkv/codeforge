@@ -1,6 +1,4 @@
 from collections import namedtuple
-lazy import json
-lazy import threading
 lazy import time
 lazy import urllib.parse
 lazy from collections import Counter
@@ -22,13 +20,12 @@ lazy from .settings import (
     RESULTS_PER_LEARN_SEARCH,
     TOOL_ROLES,
     Config,
-    Home,
     first_line,
     now_text,
     one_line,
 )
 lazy from .slots import PROFILES, TOOL_DOCS_QUERY, Selector, fill, missing, short_slots, web_slots
-lazy from .web import is_web_address
+lazy from .web import RequestLog, is_web_address
 
 LEARN_STOP_CAUSES = frozendict(
     {
@@ -663,36 +660,3 @@ def address_key(url):
     return urllib.parse.urlunsplit(
         (parts.scheme, parts.netloc.lower(), parts.path.rstrip("/"), parts.query, "")
     )
-
-
-class RequestLog:
-    def __init__(self):
-        self.path, self.tally, self.lock = Home.web_log(), {}, threading.Lock()
-
-    def __call__(self, kind, result, seconds, target):
-        line = json.dumps(
-            {
-                "at": time.strftime("%Y-%m-%dT%H:%M:%S"),
-                "kind": kind,
-                "result": result,
-                "seconds": round(seconds, 3),
-                "target": target,
-            }
-        )
-        with self.lock:
-            counts = self.tally.setdefault(kind, Counter())
-            counts.update(requests=1, **{result: 1})
-            with self.path.open("a") as log:
-                log.write(line + "\n")
-
-    def counts(self):
-        return {kind: dict(counts) for kind, counts in self.tally.items()}
-
-    def text(self):
-        if not self.tally:
-            return "none"
-        shown = [
-            f"{kind} {counts['requests']}" + (f" ({counts['failed']} failed)" if counts["failed"] else "")
-            for kind, counts in self.tally.items()
-        ]
-        return ", ".join(shown) + f"; HTTP 429: {sum(counts['429'] for counts in self.tally.values())}"
