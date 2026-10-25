@@ -203,11 +203,11 @@ The home, its database, the settings, and small helpers every module shares.
   database, `tinker.db`, in it.
 - **SET-2** `DEFAULT_CONFIG` is exactly: model `None`, ollama_url `http://localhost:11434`, keep_alive `0`,
   max_growth `1.15`, build_think `"medium"`, test_timeout `60`, web `"ollama"`, web_fallback `""`, web_timeout
-  `30`, learn_missing `2`, learn_rate `8`, learn_backoff `20`, learn_cutoff `0.0`, learn_pages `8`,
+  `30`, web_backoff `20`, learn_missing `2`, learn_cutoff `0.0`, learn_pages `8`,
   learn_min_pages `2`, learn_searches `3`, learn_think `"low"`, docs_pages `30`, tool_docs_pages `5`,
   docs_latest_days `30`, fetch_workers `6`, fetch_timeout `15`, fetch_max_bytes `2000000`, fetch_domain_delay
-  `0.1`, fetch_fallbacks `2`, embed_model `""`, projects `"~/Projects"`. learn_rate is the `Throttle`'s rate;
-  fetch_workers, fetch_timeout, fetch_max_bytes and fetch_domain_delay are the `Fetcher`'s workers, timeout,
+  `0.1`, fetch_fallbacks `2`, embed_model `""`, projects `"~/Projects"`. web_backoff is the `Throttle`'s backoff
+  (**WEB-12**); fetch_workers, fetch_timeout, fetch_max_bytes and fetch_domain_delay are the `Fetcher`'s workers, timeout,
   max_bytes and domain_delay; embed_model is the model `tinker embed NAME` selects.
 - **SET-3** `PHASES`, `FIX_PHASES` and `PLANNING_PHASES` are the phase lists given in [The cycle](#the-cycle).
   `CONFIRM_AFTER` is `review` for the project and a feature, and `reproduce` for a bug fix.
@@ -555,6 +555,12 @@ What is said in the chats, kept so that a chat is only a view of it.
 - **MOD-24** `Model` keeps each call's step and details in its log and never prints them. The person sees
   only a short line when it asks again, and its live line says in plain words what Tinker is working on (the
   step it is on, else "Working on it") and for how long ("Working on it… 1m 41s (101s)").
+- **MOD-25** A quick call is one model chat outside a run: the chat's replies, its warm-up, the commands and
+  searches it proposes, and a project's folder name. `Models.quick()` is `None` until a measured model is in
+  use; otherwise it gives the model's name, its options (`num_ctx`, and `num_batch` when measured) and its think
+  setting (`false` for a thinking model, else none). `Models.quick_reply(messages, tokens)` sends one chat with
+  them, `keep_alive`, `num_predict` `tokens` and `QUICK_REPLY_TIMEOUT`, and gives the reply's content, stripped.
+  An Ollama failure is its `OllamaError`. Nothing else outside `Model` and calibration calls `Ollama.chat`.
 
 ## project (PRJ)
 
@@ -640,7 +646,8 @@ The Internet plugin's page fetcher, with the standard library only.
 
 Fetched pages as passages: main content, under headings, repeats dropped.
 
-- **PAS-1** `Cleaner.page` takes an HTML page's main content as blocks (`<main>`/`<article>` when it holds
+- **PAS-1** `is_html(text, kind)` is the one check for HTML: a content type that says html, or text that begins
+  with `<!doctype html` or `<html`. `Cleaner.page` takes an HTML page's main content as blocks (`<main>`/`<article>` when it holds
   `MIN_USABLE_PAGE_CHARS`, else the body). It leaves out scripts, styles, navigation, headers, footers,
   asides, forms, `hidden`, `aria-hidden`, navigation roles, and every paragraph or list item that is at least
   `MENU_LINK_SHARE` links. A heading keeps its level, a list item is a block of its own (`item`), `<pre>` is a
@@ -667,24 +674,34 @@ The Internet plugin, the only part that goes on the web.
   strings. `fetch` gives `{title, url, content}` for the address asked only when its content has text. When no
   backend answers, either one gives `None`, and `problem(key)` says why.
 - **WEB-5** When a backend fails, the next backend is asked. A `WebError(retry=True)` is asked once more after
-  `RETRY_PAUSE_SECONDS`. Any other exception from a backend counts as a failure; it is never raised.
+  `RETRY_PAUSE_SECONDS`, but HTTP 429 is waited out (**WEB-12**). Any other exception from a backend counts as a failure; it is never raised.
 - **WEB-6** After `FAILURES_BEFORE_GONE` network failures in a row, a backend is not asked again. A success
   resets its count. Once no backend is left, the plugin is gone.
 - **WEB-7** A `WebError` carries the HTTP status it answered with (`code`), and `Internet.rate_limited(key)`
   says whether that key's last failure was HTTP 429. `Internet.page_fetcher(log)` is a `Fetcher` set up from
   the `fetch_*` settings.
 - **WEB-8** `OllamaWeb` is not ready without `OLLAMA_API_KEY`. It POSTs JSON with `Authorization: Bearer <key>`
-  to `/web_search` and `/web_fetch`. HTTP 401, 403 and 429 are network failures. HTTP 429 and 5xx are worth
-  asking again. A fetch's 5xx is not a network failure. An answer that is not JSON, or a search that has no
+  to `/web_search` and `/web_fetch`. HTTP 401, 403 and 429 are network failures. HTTP 5xx is worth asking
+  again. A fetch's 5xx is not a network failure. An answer that is not JSON, or a search that has no
   result list, is a `WebError`.
 - **WEB-9** `DuckDuckGoWeb` is always ready. A search reads the result links, unwraps the `uddg` redirect,
   drops ads (`y.js`), takes the snippets, and gives at most `count` results. A bot-check page is a `WebError`
   worth asking again.
-- **WEB-10** `DuckDuckGoWeb.read_page` gives an HTML page as its main text (`PageText`). Plain text, JSON and
-  XML stay as they are. Any other content type is a `WebError`.
+- **WEB-10** `DuckDuckGoWeb.fetch` reads the page with `Internet.page_fetcher()` (**FET-1**, **FET-2**), the one
+  client that reads pages. It gives an HTML page (`is_html`, **PAS-1**) as its main text (`PageText`). Plain
+  text, JSON and XML stay as they are. Any other content type, and a page the `Fetcher` could not get, is a
+  `WebError` (with the page's HTTP status as its `code`).
 - **WEB-11** `PageText` is a view over `Cleaner`'s blocks (**PAS-1**): a page's title, and its main content's
   blocks as text, a blank line between them. A heading becomes a `#` line of its level, list items become `- `
   lines one under another, and a code block keeps its layout.
+- **WEB-12** `Throttle(rate, backoff)` lets at most `rate` requests a minute through (a token bucket, full at
+  the start; an empty one waits; a `rate` of `None` lets every request through). `call(request, limited)` asks
+  again while `limited()` says HTTP 429, after pauses of `FIRST_BACKOFF_SECONDS` seconds, doubled, and raises
+  `RateLimited` once `backoff` seconds have passed since the first 429: it never waits longer than that in all.
+  Each backend has its own `RATE`: `OllamaWeb` 8 a minute (ollama.com allows 10), `DuckDuckGoWeb` `None`.
+  `Internet` asks each backend through a `Throttle` of its `RATE` and `web_backoff`, for every search and fetch
+  and every caller. A backend still answering HTTP 429 after that fails, saying it was still rate limited after
+  `web_backoff` seconds, and `rate_limited(key)` is True.
 
 ## conversation (CNV)
 
@@ -700,7 +717,7 @@ The terminal and the chats are one conversation: the same commands, the same ans
   in columns as it is.
 - **CNV-3** `pieces(text, size)` splits a message between lines into parts of at most `size` chars, and loses
   no text.
-- **CNV-4** Helpers. `json_in` gives the JSON object in a text, or `{}`. `first_lines` cuts lines and counts
+- **CNV-4** Helpers. `first_lines` cuts lines and counts
   the rest. `first_words` collapses whitespace and cuts. `text_of` decodes bytes. `after_word` drops the
   command word. `built_project(name)` gives the project named (`Runs.find`), or without a name the one built
   last.
@@ -762,9 +779,10 @@ The terminal and the chats are one conversation: the same commands, the same ans
   its `text`: a research's answer). A command that keeps no tracker shows its latest printed line.
 - **CNV-19** A task run from a terminal reports to the enabled chats (`Attached`). `JOB_STOP_SIGNAL` (SIGUSR2)
   stops it as Ctrl-C does (a job is paused with it too), and its last state is shown once it ends.
-- **CNV-20** `Talk.model()` is `None` until a measured model is in use. Otherwise it gives the chat options
-  (no thinking for a thinking model). `reply` keeps the last `CHAT_CONTEXT_MESSAGES` messages per chat, and it
-  says plainly when no model is in use or the model failed.
+- **CNV-20** The chat asks the model only through the quick call (**MOD-25**); `Talk`, `Shell` and `Research`
+  read a JSON answer with `Reply.json()` (**PRM-2**), and take one that cannot be read as `{}`. `reply` keeps
+  the last `CHAT_CONTEXT_MESSAGES` messages per chat, and it says plainly when no model is in use or the model
+  failed.
 - **CNV-21** While a chat or a command line pauses the job that runs (**JOB-10**, `Talk.pausing_jobs`), its
   note says what is paused for it, and that it goes on once they have their answer.
 - **CNV-22** `Shell.propose` gives one command line to confirm, with a warning when it changes or deletes
@@ -959,10 +977,9 @@ version.
 (`SlotLearner`), from its own documentation for the version installed, through the steps of **LRN-8**.
 Domain research (`Researcher`), own-command learning and run lessons are apart.
 
-- **LRN-1** `Throttle(rate, backoff)` lets at most `rate` requests a minute through (a token bucket, full at
-  the start; an empty one waits). `call(request, limited)` asks again while `limited()` says HTTP 429, after
-  pauses of `FIRST_BACKOFF_SECONDS` seconds, doubled, and raises `RateLimited` once `backoff` seconds have
-  passed since the first 429: it never waits longer than that in all.
+- **LRN-1** `SlotLearner` goes on the web only through `Internet`, which waits out rate limits (**WEB-12**). A
+  search still rate limited stops at GATE 1 as `rate-limit`; a fallback fetch still rate limited keeps the page
+  as it was fetched.
 - **LRN-2** `RequestLog` appends every web request of a learn to `Home.web_log()` as one JSON line
   `{at, kind, result, seconds, target}` (kind search, fetch, robots, probe or fallback; result ok, 429,
   missing or failed: a robots.txt, site map or version's documentation the site does not have is missing). It
@@ -976,7 +993,7 @@ Domain research (`Researcher`), own-command learning and run lessons are apart.
   section); at most `FACTS_PER_SLOT`.
 - **LRN-4** Fail fast. No model call (plan, digest, condense or embedding) runs until the web, or the
   documentation kept from before, has delivered usable pages. PREFLIGHT stops when the Internet plugin is off
-  or there is no embedding model; GATE 1 when the search fails, is rate limited past `learn_backoff`, finds
+  or there is no embedding model; GATE 1 when the search fails, is rate limited past `web_backoff`, finds
   nothing, or finds nothing above `learn_cutoff`; GATE 2 when fewer than `learn_min_pages` pages give usable
   text (snippets never count). With a saved plan, GATE 2 counts the documentation's pages, and runs search 1
   when they are too few. Then it raises `LearnStopped` (a `SystemExit`: a non-zero exit) naming the cause, what
