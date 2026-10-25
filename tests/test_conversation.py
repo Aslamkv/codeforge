@@ -658,6 +658,8 @@ def test_desk_answers_commands(desk):
             "resume #9",
             "resume abc123",
             "channel add",
+            "channel remove bot",
+            "channel start",
             "models",
             "/Runs",
         )
@@ -671,7 +673,10 @@ def test_desk_answers_commands(desk):
     assert replies["resume"] == "🤷 No job is stopped (jobs lists them)."
     assert replies["resume #9"] == "🤷 No job #9 (jobs lists them)."
     assert replies["resume abc123"].startswith("✍️ Write `resume [#JOB | @PROJECT]`")
-    assert "asks in a terminal" in replies["channel add"]
+    assert [replies[text] for text in ("channel add", "channel remove bot", "channel start")] == [
+        f"🖥 `channel {action}` asks in a terminal: `tinker channel {action}` there"
+        for action in ("add", "remove", "start")
+    ]
     assert replies["models"] == "⚙️ **models**\n```\noutput of models\n```"
     assert replies["/Runs"] == "📚 **Runs**\n```\noutput of runs\n```"
 

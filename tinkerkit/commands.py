@@ -628,7 +628,11 @@ COMMANDS = [
         "channel ACTION",
         "the chat channels",
         kind="glance",
-        actions=[Action("glance", "remove", deletes=True)],
+        actions=[
+            Action("terminal", "add"),
+            Action("terminal", "remove", deletes=True),
+            Action("terminal", "start"),
+        ],
         chat=True,
         words="any",
         rows=[
@@ -643,7 +647,6 @@ COMMANDS = [
 ]
 BY_NAME = frozendict({command.name: command for command in COMMANDS if command.name})
 GROUPS = ("Build", "Learn", "Jobs", "Set up", "Talk", "Channels")
-TERMINAL_ONLY_CHANNEL_ACTIONS = ("add", "remove", "start")
 
 
 def kind_of(argv):

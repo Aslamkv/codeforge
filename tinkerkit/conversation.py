@@ -15,7 +15,7 @@ lazy import time
 lazy import webbrowser
 lazy from pathlib import Path
 
-from .commands import COMMANDS, TERMINAL_ONLY_CHANNEL_ACTIONS, deletes, kind_of, refs
+from .commands import COMMANDS, deletes, kind_of, refs
 from .jobs import JOB_STOP_SIGNAL, Jobs, alive, job_number, paused_for_you, today
 from .project import Runs, Tracker, saved
 lazy from .ledger import DONE_NOTE_KEPT_SECONDS, Ledger
@@ -340,16 +340,6 @@ class Desk:
                 channel, message, self.running_now, lambda: (self.waiting_plan or {}).get("spec", "")
             )
             return
-        if command == "run":
-            threading.Thread(
-                target=self.run_app,
-                args=(channel, message.chat, message.text.split(None, 1)[1:]),
-                daemon=True,
-            ).start()
-            return
-        if command == "command":
-            self.asked_with_words(channel, message, command)
-            return
         reply = self.answer(message, channel)
         if reply:
             sent = channel.send(message.chat, reply)
@@ -406,26 +396,17 @@ class Desk:
 
     def answer(self, message, channel):
         words = command_words(message.text)
-        command = words[0]
-        handler = self.handlers(channel, message, words).get(command)
-        if handler is not None:
-            return handler()
-        if command == "clear" and words[1:] == ["chat"]:
-            return self.clear_chat(
-                channel, message.chat, "Chat cleared", " · `history` shows any of them again"
-            )
-        if command in EXIT_WORDS:
-            return self.ask_to_exit(channel, message.chat, command)
-        if command == "channel" and words[1:2] and words[1] in TERMINAL_ONLY_CHANNEL_ACTIONS:
-            return f"🖥 `channel {words[1]}` asks in a terminal: `tinker channel {words[1]}` there"
-        if command == "read" and words[1:2] in (["list"], ["show"]):
-            return md(t"📚 **{' '.join(words)}**\n{self.tinker(words):block}")
+        handler = self.handlers(channel, message, words).get(words[0])
+        return handler() if handler is not None else self.by_table(channel, message.chat, words)
+
+    def by_table(self, channel, chat, words):
+        kind = kind_of(words)
+        if kind == "terminal":
+            return f"🖥 `{' '.join(words[:2])}` asks in a terminal: `tinker {' '.join(words[:2])}` there"
         if deletes(words) and "--yes" not in words:
-            return self.ask_first(channel, message.chat, words)
-        if kind_of(words) == "job":
+            return self.ask_first(channel, chat, words)
+        if kind == "job":
             return self.start_task(words, self.root, " ".join(words))
-        if command == "memory" and "--graph" in words:
-            return self.memory_graph(channel, message.chat, words)
         shown = self.tinker(words)
         return md(t"⚙️ **{' '.join(words)}**\n{shown:block}")
 
@@ -444,7 +425,33 @@ class Desk:
             "status": lambda: self.report(command, words),
             "help": lambda: help_text(words[1:2]),
             "history": lambda: history_text(words[1:2]),
+            "run": lambda: self.run_app_apart(channel, message),
+            "command": lambda: self.asked_with_words(channel, message, command),
+            "clear": lambda: self.clear(channel, message.chat, words),
+            "read": lambda: self.read(channel, message.chat, words),
+            "memory": lambda: self.memory(channel, message.chat, words),
+            **{word: lambda: self.ask_to_exit(channel, message.chat, command) for word in EXIT_WORDS},
         }
+
+    def run_app_apart(self, channel, message):
+        threading.Thread(
+            target=self.run_app, args=(channel, message.chat, message.text.split(None, 1)[1:]), daemon=True
+        ).start()
+
+    def clear(self, channel, chat, words):
+        if words[1:] == ["chat"]:
+            return self.clear_chat(channel, chat, "Chat cleared", " · `history` shows any of them again")
+        return self.by_table(channel, chat, words)
+
+    def read(self, channel, chat, words):
+        if words[1:2] in (["list"], ["show"]):
+            return md(t"📚 **{' '.join(words)}**\n{self.tinker(words):block}")
+        return self.by_table(channel, chat, words)
+
+    def memory(self, channel, chat, words):
+        if "--graph" in words:
+            return self.memory_graph(channel, chat, words)
+        return self.by_table(channel, chat, words)
 
     def research(self, words):
         return self.start_task(words, self.root, " ".join(words)) if len(words) > 1 else USAGE["research"]
