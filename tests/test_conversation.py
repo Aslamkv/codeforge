@@ -962,6 +962,34 @@ def test_every_status_is_sent_anew_the_one_before_taken_out(desk):
 
 
 @pytest.mark.spec("CNV-9")
+def test_a_job_says_its_status_as_it_starts_and_ends(desk, monkeypatch):
+    channel = Recorder("bot")
+    listening = Desk([channel], Path.cwd())
+    listening.chats_started.add(channel)
+    listening.say_status()
+
+    class Running:
+        pid, stdout, code = os.getpid(), [], None
+
+        def poll(self):
+            return self.code
+
+        def wait(self, timeout=None):
+            return 0
+
+    job = Running()
+    monkeypatch.setattr(listening, "spawn", lambda arguments: job)
+    monkeypatch.setattr(listening, "follow", lambda process, reporter, task: None)
+    listening.start_task(["learn", "go"], Path.cwd(), "learn go")
+    sent = [text for kind, _, _, text in channel.log if kind == "send"]
+    assert sent[0].startswith("🟢 **Tinker** · idle")
+    assert sent[1].startswith("🔄 **Tinker** · working on learn go") and "learn go" in sent[2]
+    job.code = 0
+    listening.ended(job, listening.reporter, listening.task)
+    assert listening.said_status.startswith("🟢 **Tinker** · idle")
+
+
+@pytest.mark.spec("CNV-9")
 def test_desk_refuses_a_chat_another_tinker_listens_to(desk):
     _, _, script = desk
     holder = Recorder("bot")

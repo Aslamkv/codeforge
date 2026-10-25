@@ -718,7 +718,8 @@ The terminal and the chats are one conversation: the same commands, the same ans
   terminal, and otherwise leaves that chat out. The terminal never waits on a chat: each chat starts in its own
   thread. Each chat has one status message. Every time the status changes (Tinker starts listening, a task
   moves on, waits for the person, ends, Tinker ends: `not listening`), the one before is taken out and the new
-  one is sent at the bottom. While it listens it collects the messages whose time is up, every
+  one is sent at the bottom. A task or other job says its status at once as it starts, before its own
+  message, and the status before it comes back at once as it ends. While it listens it collects the messages whose time is up, every
   `EXPIRED_MESSAGES_SWEEP_SECONDS` seconds.
 - **CNV-10** `/start` (what a chat app sends when a person first opens the bot) is answered with a welcome and
   a short, tldr-style guide for beginners in plain words: what Tinker does, then what to send, grouped by what

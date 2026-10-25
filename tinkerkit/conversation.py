@@ -829,8 +829,6 @@ class Desk:
                 before=self.seconds_by_run.get(run, 0.0),
                 on_step=self.say_status,
             )
-            with self.reporter.lock:
-                self.reporter.update()
             try:
                 self.last_task = self.spawn(arguments)
             except OSError as exc:
@@ -840,6 +838,9 @@ class Desk:
             self.live_tasks = [process for process in self.live_tasks if process.poll() is None] + [
                 self.last_task
             ]
+            self.say_status()
+            with self.reporter.lock:
+                self.reporter.update()
         its_plan_moves_on = self.waiting_plan and self.waiting_plan["folder"] == folder
         if its_plan_moves_on:
             self.waiting_plan = None
