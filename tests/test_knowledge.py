@@ -465,7 +465,11 @@ def test_web_pages_reads_each_address_once_up_to_the_cap(make_model):
     read = Learner(make_model(), internet, None).web_pages(["ruff", "black"])
     assert len(read) <= TEACH_PAGES
     assert [page["url"] for page in read] == ["https://shared", "https://r1", "https://r2"]
-    assert read[0] == {"title": "https://shared", "url": "https://shared", "content": "what https://shared says"}
+    assert read[0] == {
+        "title": "https://shared",
+        "url": "https://shared",
+        "content": "what https://shared says",
+    }
 
 
 @pytest.mark.spec("KNW-24")
@@ -475,7 +479,9 @@ def test_web_pages_keep_the_first_chunk_and_the_best_about_the_searches(make_mod
         + [f"filler {number} " * 120 for number in range(6)]
         + ["black and ruff formatter " * 40]
     )
-    internet = SearchedInternet({"https://long": "\n\n".join(paragraphs)}, {"ruff formatter": ["https://long"]})
+    internet = SearchedInternet(
+        {"https://long": "\n\n".join(paragraphs)}, {"ruff formatter": ["https://long"]}
+    )
     [page] = Learner(make_model(), internet, None).web_pages(["ruff formatter"])
     assert len(page["content"]) <= TEACH_PAGE_CHARS
     assert page["content"].startswith("intro to the page") and "black and ruff formatter" in page["content"]

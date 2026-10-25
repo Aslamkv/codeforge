@@ -1074,7 +1074,9 @@ def test_one_shot_commands(monkeypatch, capsys):
     monkeypatch.setattr(conversation, "commands_brief", lambda: "cmds")
     monkeypatch.setattr(sys, "stdin", io.StringIO(""))
     assert conversation.one_shot("chat", "") == "tinker chat needs words after it, e.g. tinker chat hello"
-    assert conversation.one_shot("command", "") == "tinker command needs words after it, e.g. tinker command ..."
+    assert (
+        conversation.one_shot("command", "") == "tinker command needs words after it, e.g. tinker command ..."
+    )
     assert conversation.one_shot("history", "") is None
     assert "nothing shown in the chats yet" in capsys.readouterr().out
     conversation.one_shot("chat", "hello")
@@ -1200,7 +1202,9 @@ def test_a_command_line_run_once_confirmed_pauses_the_job_while_its_output_is_re
 
     talk = Talk("cmds", pausing_jobs=pausing)
     monkeypatch.setattr(Models, "quick", staticmethod(lambda: ("m", {}, None)))
-    monkeypatch.setattr(Models, "quick_reply", staticmethod(lambda *asked: order.append("read") or "it says hi"))
+    monkeypatch.setattr(
+        Models, "quick_reply", staticmethod(lambda *asked: order.append("read") or "it says hi")
+    )
     channel = Recorder()
     Shell(talk, tmp_path, Questions()).run(
         channel, "1", {"line": "echo hi", "asked": "say hi", "shown": None}

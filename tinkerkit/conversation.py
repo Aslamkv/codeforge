@@ -316,9 +316,7 @@ class Desk:
             channel.ask_for(message.chat, *words_asked(command))
             return
         if not command:
-            self.talk.answer(
-                channel, message, self.running_now, lambda: self.plan_shown(self.waiting_plan)
-            )
+            self.talk.answer(channel, message, self.running_now, lambda: self.plan_shown(self.waiting_plan))
             return
         reply = self.answer(message, channel)
         if reply:
@@ -618,7 +616,9 @@ class Desk:
             return self.on_task(waiting, md(t"⚠️ **Not renamed:** {why}"))
         self.renamed(waiting, words[1])
         if waiting.get("stage") != "name":
-            self.on_board(waiting, f"{self.plan_shown(waiting)}\n\n📁 **Renamed:** its folder is `{words[1]}`")
+            self.on_board(
+                waiting, f"{self.plan_shown(waiting)}\n\n📁 **Renamed:** its folder is `{words[1]}`"
+            )
             return None
         return self.on_task(
             waiting,

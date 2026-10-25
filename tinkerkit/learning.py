@@ -380,9 +380,7 @@ class SlotLearner(Tracked):
         return selected
 
     def digested(self, plan, version, selected):
-        self.step(
-            "digest", "Reading the passages for answers, one question at a time (the slow part)…", "🧠"
-        )
+        self.step("digest", "Reading the passages for answers, one question at a time (the slow part)…", "🧠")
         asked = [slot for slot in web_slots(plan["profile"]) if selected.get(slot.id)]
         facts, answered = [], 0
         for done, slot in enumerate(asked, 1):

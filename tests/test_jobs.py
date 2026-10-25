@@ -427,7 +427,9 @@ def test_a_research_job_frames_its_topic_on_the_day_the_job_started(home_store, 
     framed = {"name": "Go", "summary": "", "questions": [{"question": "Which release?", "queries": ["go"]}]}
     given = []
     monkeypatch.setattr(
-        Learner, "saved_or_asked", lambda self, known, read, system, parts, *rest: given.extend(parts) or (framed, True)
+        Learner,
+        "saved_or_asked",
+        lambda self, known, read, system, parts, *rest: given.extend(parts) or (framed, True),
     )
     with Jobs.running(Jobs.arguments(["resume", "#1"])):
         Researcher(Learner(None, None, None)).frame("go", None)
@@ -697,6 +699,7 @@ def test_a_research_job_says_its_steps_and_ends_with_its_answer(home_store, monk
         "findings": [{"question": 1, "answer": "Go 1.25.", "confidence": "high", "facts": [1]}],
         "facts": [{"text": "Go 1.25 is out", "source": "https://go.dev"}],
     }
+
     class Model:
         def unload(self):
             pass

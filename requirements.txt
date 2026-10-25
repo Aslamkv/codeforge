@@ -1,3 +1,4 @@
 # Tinker needs nothing beyond Python. This is for running its tests and linting its code.
 pytest>=9.1
+pytest-xdist>=3
 ruff>=0.17

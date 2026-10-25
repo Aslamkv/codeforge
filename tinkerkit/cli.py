@@ -23,7 +23,18 @@ lazy from .knowledge import Embeddings, Learner, Library, Researcher
 lazy from .learning import LearnStopped, SlotLearner
 lazy from .model import Calibrator, Model, Models, Ollama, OllamaError, SelectedModel
 lazy from .planning import Designer, InterfaceReviewer, Recaller, SpecWriter
-lazy from .project import Brief, Outcome, Project, RunChecks, Runs, Steps, Tracker, ending, project_store, saved
+lazy from .project import (
+    Brief,
+    Outcome,
+    Project,
+    RunChecks,
+    Runs,
+    Steps,
+    Tracker,
+    ending,
+    project_store,
+    saved,
+)
 lazy from .prompts import Prompts
 lazy from .session import Session, Stopped
 lazy from .settings import (

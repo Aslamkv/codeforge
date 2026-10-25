@@ -455,6 +455,7 @@ def test_ending_keeps_status_headline_details_and_next_as_lists():
     made = ending("blocked", "Stopped", (("Why", "x"),), (("Go on", "tinker resume"),))
     assert made["details"] == [("Why", "x")] and made["next"] == [("Go on", "tinker resume")]
 
+
 @pytest.mark.spec("PRJ-15")
 def test_steps_live_progress_and_messages(home_store, project_dir, monkeypatch):
     assert set(Tracker.DOING_AND_DONE) >= {
@@ -623,4 +624,6 @@ def test_a_tracked_step_moves_its_tracker_and_says_the_step_when_told(monkeypatc
     tracked.step("survey", "Reading its contents…", "🧭")
     tracked.outcome("2 core chapter(s)")
     assert [(message.kind, message.text) for message in heard] == [("step", "Reading its contents…")]
-    assert tracked.tracker.state["step"] == "survey" and tracked.tracker.state["outcome"] == "2 core chapter(s)"
+    assert (
+        tracked.tracker.state["step"] == "survey" and tracked.tracker.state["outcome"] == "2 core chapter(s)"
+    )

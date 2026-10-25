@@ -6,6 +6,7 @@ import time
 import pytest
 
 import tinkerkit.cli  # noqa: F401
+from tinkerkit import conversation
 from tinkerkit.messages import say
 from tinkerkit.model import Model, Ollama
 from tinkerkit.project import Project
@@ -70,6 +71,11 @@ def offline(monkeypatch):
 
 def no_stale_bytecode(monkeypatch):
     monkeypatch.setenv("PYTHONDONTWRITEBYTECODE", "1")
+
+
+@pytest.fixture(autouse=True)
+def tinker_runs_nothing(monkeypatch):
+    monkeypatch.setattr(conversation, "tinker_command", lambda: [sys.executable, "-c", ""])
 
 
 @pytest.fixture

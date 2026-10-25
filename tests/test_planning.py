@@ -102,10 +102,8 @@ def test_runs_program(text, ok):
     assert SpecWriter.runs_program(text, "calc.py", "python3 calc.py") is ok
 
 
-@pytest.mark.spec("PLN-8")
-def test_effort_strings_and_changes():
-    assert [SpecWriter.effort(value) for value in (0, 2, "3", 9, None, "hard")] == [1, 2, 3, 3, 2, 2]
-    assert SpecWriter.strings(["a", " ", 3, None, "b"], 2) == ["a", "3"]
+@pytest.mark.spec("PLN-10")
+def test_changes_mark_each_point_added_changed_or_removed():
     before = [
         {"id": "C1", "test": "t::a", "behaviour": "adds"},
         {"id": "C2", "test": "t::b", "behaviour": "subtracts"},

@@ -66,7 +66,7 @@ listed above it:
 | `ledger` | what is said in the chats, so a chat is only a view of it: each message with when it goes, each thing shown, numbered, for `history` (`Ledger`) |
 | `prompts` | prompt parts (`Part`), replies (`Reply`), every system prompt (`Prompts`) |
 | `workspace` | the project's files and the commands run in it (`Workspace`, `Toolchain`, `TestRef`, `Output`, `FileView`, `TaughtCommands`) |
-| `model` | the local model: Ollama's API, one request with its budgets and retries (`Model`), measuring a model (`Calibrator`) |
+| `model` | the local model: Ollama's API, one request with its budgets and retries (`Model`), measuring a model (`Calibrator`), measured models (`Models`) |
 | `project` | the plan and its record (`Project`, `SpecDocument`, `Runs`, `RunChecks`, `Brief`, `Outcome`), the run's `Tracker` and its `ending`, and the step pipeline (`Steps`) with what moves a tracker through it (`Tracked`) |
 | `fetcher` | the Internet plugin's page fetcher: pages read straight from their sites, in parallel, with the standard library only (`Fetcher`, `Fetched`) |
 | `passages` | every page read as text: an HTML page's main content as blocks, and fetched pages as passages under headings, repeats dropped (`Cleaner`, `MainBlocks`, `Links`, `Page`, `Passage`) |
@@ -109,7 +109,7 @@ The Tinker home is the `.tinker` folder next to the real `tinker.py` (symlinks r
 |---|---|
 | `tinker.db` | the home database (mode 600), below |
 | `channel-NAME.lock` | the lock of each chat channel a Tinker listens to |
-| `web-requests.log` | every web request `tinker learn` made, one JSON line each (**LRN-2**) |
+| `web-requests.log` | every web request `tinker learn` made, one JSON line each (**LRN-1**) |
 | `memory.html` | the page `tinker memory --graph` writes |
 | `reading/` | the files sent in a chat to read |
 
@@ -165,6 +165,7 @@ order, each saved as it ends, so a run resumes from the phase it reached:
 
 `recall → spec → design → review → setup → tests → code → verify → tidy → docs → final_review → lessons → done`
 
+Its planning phases are `recall → spec → design → review`.
 A bug fix runs `recall → reproduce → verify → final_review → lessons → done`.
 
 A cycle started from the conversation, or with `--confirm`, waits for the person once its plan is made: the
@@ -176,7 +177,7 @@ straight through. `--web` lets any run, at any phase, learn from the web what th
 
 ## messages (MSG)
 
-Everything Tinker tells the person goes through one voice, `say` (a `Messages`). No other module prints.
+Everything Tinker tells the person goes through one voice, `say` (a `Messages`).
 
 - **MSG-1** Each message has a kind, and its kind gives its icon: done ✅, warn ⚠️, fail ❌, retry 🔁, skip ➖,
   stop 🛑, tip 💡, item •. A title, a step and an info take their own icon; plain text has none. A line is its
@@ -187,7 +188,8 @@ Everything Tinker tells the person goes through one voice, `say` (a `Messages`).
   with its icon. `took` says something done with how long it took.
 - **MSG-3** Every message is given, as data (`Message`: kind, text, depth, icon), to each follower. A follower
   that fails never breaks what is said. A run's and a learn's `Tracker` follow: a message becomes the latest
-  and goes to the project's `output` log; a live one becomes what goes on now.
+  and goes to the project's `output` log; a live one becomes what goes on now. `working_on`, `tally` and
+  `found` set what the run works on, its tally and what it found.
 - **MSG-4** `live` redraws one status line in place on a terminal only. Piped (a chat following the command),
   it writes nothing; its followers are still told. The next message clears it first.
 - **MSG-5** `detail` goes to the log given to `keep_log` (a run's `events`, a job's `calls #N`), and is never
@@ -514,7 +516,7 @@ What is said in the chats, kept so that a chat is only a view of it.
   thinking. An error chunk is an `OllamaError`: a reply error with what came before, unless it is out of
   memory or a crash. Once `done_when(content)` says the reply is complete, the stream ends within
   `LAST_CHUNK_WAIT_SECONDS` seconds, and the reply is the content as it was at that moment. While it goes, its
-  live line (`say.live`) says what the model is doing. A reply whose last `LOOPING_REPEATED_LINES` finished
+  live line says what Tinker works on (**MOD-24**). A reply whose last `LOOPING_REPEATED_LINES` finished
   lines are one non-blank line, again and again, is stopped there and is cut (`length`).
 - **MOD-10** `Calibrator.shared(context)` sets the prompt budget to `min(8192, max(512, context // 3))`, and
   the longest reply to `max(1024, min(16384, context - budget))`. `safe_ratio()` is
@@ -586,7 +588,6 @@ What is said in the chats, kept so that a chat is only a view of it.
   to it, as a deletion (**SET-11**).
 - **PRJ-6** `Runs.remember(run, language)` keeps one line about the run in the home's `runs`: `{id, task,
   language, status, created, updated}`, at most `RUNS_KEPT`, the least recently updated dropped first.
-  `tinker clear runs` deletes these lines with the pointers.
 - **PRJ-7** `RunChecks.before_start`. A new run needs an existing folder that holds no run, and an existing
   spec file when one is given. A saved run needs a valid phase in every cycle. `add`/`fix` need a project spec
   and no unfinished cycle. `amend` needs a cycle that waits for confirmation. `restart` reads the task and spec
@@ -613,8 +614,8 @@ What is said in the chats, kept so that a chat is only a view of it.
 - **PRJ-13** `Outcome` starts as `stopped` with exit code 1. `done` and `awaiting` exit with 0, and `blocked`
   exits with 1.
 - **PRJ-14** `Tracker` is a run's one report. It keeps the title, job number, run ID, folder, phase, steps
-  done, passing spec points, what the model is doing now, the latest message said, a plan that waits, the end,
-  the seconds taken and when it went on (`resumed`). Each change is published at once in its job's `progress`
+  done, passing spec points, what goes on now, what it works on (`working`), its tally, what it found, the
+  latest message said, a plan that waits, the end, the seconds taken and when it went on (`resumed`). Each change is published at once in its job's `progress`
   (an exercise's build: in the exercise's job, as `build`), and appended to the project's `progress` log. A
   tracker outside a job publishes nothing.
 - **PRJ-15** The steps are named by phase (`DOING_AND_DONE`: what each phase is doing, and when done). A step
@@ -630,7 +631,7 @@ What is said in the chats, kept so that a chat is only a view of it.
   (`step(name)`), and saves the next one (`save(next)`), until the end (`done`). A step whose `only_if` says no
   is passed over, neither entered nor run. A step that gives False stops there, unsaved (`blocked`), and
   `waits()` stops it before the next step (`waiting`). The cycle's phases (**CLI-11**) and a practice project's
-  steps (**EXR-4**) run this way. Learning (**LRN-8**) and reading (**RDG-12**) only enter their steps: a
+  steps (**EXR-4**) run this way. Learning (**LRN-7**) and reading (**RDG-12**) only enter their steps: a
   learn goes on through its journal, and a reading by its chapters' states. Both share `Tracked`: its
   `step(phase, said)` says the words and enters the step, and its `outcome(text)` gives the tracker what came of
   it; neither touches a tracker when there is none.
@@ -689,7 +690,7 @@ The Internet plugin, the only part that goes on the web.
   says whether that key's last failure was HTTP 429. `Internet.page_fetcher(log)` is a `Fetcher` set up from
   the `fetch_*` settings.
 - **WEB-8** `OllamaWeb` is not ready without `OLLAMA_API_KEY`. It POSTs JSON with `Authorization: Bearer <key>`
-  to `/web_search` and `/web_fetch`. HTTP 401, 403 and 429 are network failures. HTTP 5xx is worth asking
+  to `/web_search` and `/web_fetch`. HTTP 401 and 403 are network failures; 429 is waited out (**WEB-12**). HTTP 5xx is worth asking
   again. A fetch's 5xx is not a network failure. An answer that is not JSON, or a search that has no
   result list, is a `WebError`.
 - **WEB-9** `DuckDuckGoWeb` is always ready. A search reads the result links, unwraps the `uddg` redirect,
@@ -758,7 +759,7 @@ The terminal and the chats are one conversation: the same commands, the same ans
   `tinker`. `task WHAT` starts a task, and a bare `task` gets its usage. A
   run that starts a cycle is given `--confirm`, so its plan waits for the person. `status` alone gives what
   runs (`status @PROJECT` is that project's status, **CLI-3**). `stop`, `stop #N` and `resume [#N]` act on
-  jobs (**JOB-7**), and `research TOPIC` runs as a job. A command that deletes shows what it deletes and waits
+  jobs (**JOB-7**). A command that deletes shows what it deletes and waits
   for `confirm` (**SET-11**), but `clear chat`, which deletes no record (the history keeps it), is done at
   once. `exit` asks first; the person's `exit` and `confirm` are taken out at once, and the question as Tinker
   ends (its status says it no longer listens). The preview of a deletion is what `tinker` printed (its stdout),
@@ -827,7 +828,7 @@ The chat plugin: Telegram, and `tinker channel`.
   its chats. `add` (from options or questions) checks the name, refuses a name taken, checks the token, and
   saves the channel disabled. `remove` drops the settings and the secrets, as a deletion (**SET-11**).
   `enable` and `disable` switch a channel.
-- **CHN-3** `ask` gives the default when there is no terminal, or ends with `SystemExit` when there is none.
+- **CHN-3** `ask` gives the default when there is no terminal, or ends with `SystemExit` when it has no default.
   `ChannelCommand.check` ends with `SystemExit` on a refusal, and tries a dropped network again up to
   `FIRST_CALL_TRIES` times.
 - **CHN-4** `pair` serves the chat whose sender says yes at the terminal. `start` needs an enabled channel (or
@@ -935,7 +936,7 @@ Lessons and proven knowledge, and what every kind of learning shares.
   the language's facts, or retired. Each rule says when it applies (`when`, at most `MAX_RULE_WHEN_CHARS`): ""
   for every program, else the kind of code it is for, which a proven copy keeps. What the reply says a new
   project declares to get the newest version (`declare`) is the first rule, for every program.
-- **KNW-21** Learning a language again (**LRN-5**) replaces what its earlier learning proved: `supersede`
+- **KNW-21** Learning a language again (**LRN-4**) replaces what its earlier learning proved: `supersede`
   retires the language's proven facts from its own topic that the new learning does not show (its rules, when
   it has them), with the reason that they were replaced. Proven facts from other topics stay.
 - **KNW-22** `Item(kind, id, topic)` names one knowledge item: a lesson (`lesson`) or a language's proven fact
@@ -999,25 +1000,22 @@ version.
 ## learning (LRN)
 
 `tinker learn TOPIC` and the recall phase of a run with `--web` learn a language or a tool by its slots
-(`SlotLearner`), from its own documentation for the version installed, through the steps of **LRN-8**.
+(`SlotLearner`), from its own documentation for the version installed, through the steps of **LRN-7**.
 A domain is researched (`Researcher`, **KNW-18**), as `tinker research` does. Own-command learning and run
 lessons are apart.
 
-- **LRN-1** `SlotLearner` goes on the web only through `Internet`, which waits out rate limits (**WEB-12**). A
-  search still rate limited stops at GATE 1 as `rate-limit`; a fallback fetch still rate limited keeps the page
-  as it was fetched.
-- **LRN-2** `RequestLog` appends every web request of a learn to `Home.web_log()` as one JSON line
+- **LRN-1** `RequestLog` appends every web request of a learn to `Home.web_log()` as one JSON line
   `{at, kind, result, seconds, target}` (kind search, fetch, robots, probe or fallback; result ok, 429,
   missing or failed: a robots.txt, site map or version's documentation the site does not have is missing). It
   counts them by kind, and `text()` gives them in one line with the HTTP 429 count.
-- **LRN-3** `read_plan` needs a kind (language, tool or domain) and a name. It keeps safe commands only
+- **LRN-2** `read_plan` needs a kind (language, tool or domain) and a name. It keeps safe commands only
   (`MAX_VERSION_COMMANDS`), its documentation site (`docs`: web addresses only, `versioned` only with
   `{version}` in it), a language's tools (one per role of `TOOL_ROLES`, each with a safe version command and
   its `docs`), and hints and follow-ups for its profile's slots only; a tool's language is `used_with`.
   `read_digest` keeps a fact only when it cites a passage given and speaks of no unreleased version; each keeps
   its slot, the passages it cites, their pages (`source`, `also`), and a known phase (else the slot's
   section); at most `FACTS_PER_SLOT`.
-- **LRN-4** Fail fast. No model call (plan, digest, condense or embedding) runs until the web, or the
+- **LRN-3** Fail fast. No model call (plan, digest, condense or embedding) runs until the web, or the
   documentation kept from before, has delivered usable pages. PREFLIGHT stops when the Internet plugin is off
   or there is no embedding model; GATE 1 when the search fails, is rate limited past `web_backoff`, finds
   nothing, or finds nothing above `learn_cutoff`; GATE 2 when fewer than `learn_min_pages` pages give usable
@@ -1025,27 +1023,28 @@ lessons are apart.
   when they are too few. Then it raises `LearnStopped` (a `SystemExit`: a non-zero exit) naming the cause, what
   was tried and the requests made, saying nothing was learned or saved and what was learned before is
   untouched, and the next step; nothing is written to Tinker's database.
-- **LRN-5** A first learn makes one search (`DOCS_SITE_SEARCH`, from the topic alone), picks the results
-  whose title and snippet score above `learn_cutoff` (BM25), each address once, at most `learn_pages`, and
-  fetches them with the plugin's fetcher. A page that gives too little text is fetched by the plugin instead
-  (logged as a fallback), at most `fetch_fallbacks` per learn, never one robots.txt refused. Only then does the
-  plan call run (at the model's own think setting); it names the documentation site and, for a language, each
-  tool's version command and documentation. A saved plan is reused with no search and no call. The version
-  commands (each run once) give the version installed; the documentation of that version (**DOC-1** to
-  **DOC-4**) and of a language's tools (`TOOL_DOCS_QUERY`, at most `tool_docs_pages`) joins the pool. Each
-  slot's passages are digested into facts (candidates, each with its slot) and condensed into rules, both at
-  `learn_think`, and kept only after both succeed, under the language's key or the topic's slug, with its plan,
-  machine, documentation versions, sources, cited passages, status (`complete` or `incomplete`), missing slots
-  and request counts; then indexed. A summary prints the slots filled and missing, the documentation, the
-  pages by source, the facts and the requests by kind.
-- **LRN-6** After the digest, each slot left without facts gets the plan's follow-up search, while fewer than
+- **LRN-4** A first learn makes one search (`DOCS_SITE_SEARCH`, from the topic alone), picks the results whose
+  title and snippet score above `learn_cutoff` (BM25), each address once, at most `learn_pages`, and fetches
+  them with the plugin's fetcher. A page that gives too little text is fetched by the plugin instead (logged
+  as a fallback), at most `fetch_fallbacks` per learn, never one robots.txt refused; a fallback still rate
+  limited keeps the page as it was fetched. Only then does the plan call run (at the model's own think
+  setting); it names the documentation site and, for a language, each tool's version command and
+  documentation. A saved plan is reused with no search and no call. The version commands (each run once) give
+  the version installed; the documentation of that version (**DOC-1** to **DOC-4**) and of a language's tools
+  (`TOOL_DOCS_QUERY`, at most `tool_docs_pages`) joins the pool. Each slot's passages are digested into facts
+  (candidates, each with its slot) and condensed into rules, both at `learn_think`, and kept only after both
+  succeed, under the language's key or the topic's slug, with its plan, machine, documentation versions,
+  sources, cited passages, status (`complete` or `incomplete`), missing slots and request counts; then
+  indexed. A summary prints the slots filled and missing, the documentation, the pages by source, the facts
+  and the requests by kind.
+- **LRN-5** After the digest, each slot left without facts gets the plan's follow-up search, while fewer than
   `learn_searches` searches were made; its pages join the pool, and that slot alone is selected and digested
   again. When a follow-up fails, the learn goes on, marked `incomplete`, with a warning and a note.
-- **LRN-7** A topic researched before is researched again when deep, else kept. A plan that says the topic is
+- **LRN-6** A topic researched before is researched again when deep, else kept. A plan that says the topic is
   a domain hands it to `Researcher` when deep; otherwise it is learned like a tool.
-- **LRN-8** Learning's steps (`LEARN_STEPS`, **PRJ-17**) are, in order: search, plan, machine, documentation,
+- **LRN-7** Learning's steps (`LEARN_STEPS`, **PRJ-17**) are, in order: search, plan, machine, documentation,
   digest, follow-up, condense and keep (a domain's: frame and investigate). A saved plan skips search;
-  PREFLIGHT, GATE 1 and GATE 2 (**LRN-4**) are checks within them. A learn is not saved step by step: stopped,
+  PREFLIGHT, GATE 1 and GATE 2 (**LRN-3**) are checks within them. A learn is not saved step by step: stopped,
   it goes on through its job's journal (**JOB-3**), so nothing done is asked again. Given a tracker, learning
   moves it through its steps (`Tracker.DOING_AND_DONE`), each once in a row; without one (a run's recall
   phase), the run's own steps are left alone. The summary is kept as data too (`recap`: answered, still open,
@@ -1183,7 +1182,7 @@ then is anything changed.
   item shown (`about`): that item is retired, and the fact kept in its topic as proven
   (`Library.taught_fact`), with its phase, chapter and section, a `taught` event and its sources.
 - **TCH-9** `tinker teach` needs the Internet plugin, checked before any model call. Both commands report
-  through a tracker, and in the conversation they run as jobs.
+  through a tracker.
 
 ## exercising (EXR)
 
@@ -1207,8 +1206,8 @@ It is a job like any other, so the person always comes first.
   saving each as it ends, from the step it reached (a new project is chosen only when none is open). `build`
   runs `tinker task TASK --workdir FOLDER`, and `tinker resume --workdir FOLDER` once the folder keeps a run.
   `feature` runs `tinker add FEATURE`, and resume once its cycle exists, only for a project that built
-  (`done`). `reflect` makes one call, keeps its lessons through `add_lessons` (as candidates; none that names
-  the project), and keeps its `focus` for the next choice.
+  (`done`). `reflect` makes one call, keeps its lessons through `add_lessons` (**KNW-4**), and keeps its
+  `focus` for the next choice.
 - **EXR-5** `measured(folder)` reads the project's own database: its status, its minutes (every session's wall
   time), its model calls, the retried ones (attempt 2 and later), reply tokens, spec points passing, parked and
   in all, README examples that failed, and the `slowest` steps (a step is its call's first word, so no file is
@@ -1216,15 +1215,15 @@ It is a job like any other, so the person always comes first.
   failed, unusable and cut replies, and the warnings the runs said.
 - **EXR-6** The exercise gives way as every job does (**JOB-8** to **JOB-10**): paused, it stops its build as
   Ctrl-C stops it (it saves itself), and goes on from where it was. A run an exercise started (its build) is
-  not a job: its tracker goes in the exercise's job as `build` (**PRJ-14**), which only the exercise reads, so
-  it is never among what runs, and the conversation's status shows the exercise when nothing else runs (looked at
-  every `STATUS_LOOK_SECONDS` seconds, so it moves on by itself). The exercise's tracker shows its build's: its
-  step after the exercise's, what the model writes now, the spec points passing and the latest line, and a
-  practice project's steps only. As a conversation starts (`adopt_exercise`), it keeps up the message of an
-  exercise whose job runs and whose tracker does not say it `reports` by itself (`Attached` says so), and an
-  exercise whose job ended without being stopped (`Jobs.lost`: killed, the computer restarted) goes on as
-  `resume #N`; either way its message is taken out and sent anew at the bottom. While it listens, it adopts
-  again an exercise that went on by itself.
+  not a job (**JOB-1**): its tracker goes in the exercise's job as `build` (**PRJ-14**), which only the
+  exercise reads, so it is never among what runs, and the conversation's status shows the exercise when
+  nothing else runs (looked at every `STATUS_LOOK_SECONDS` seconds, so it moves on by itself). The exercise's
+  tracker shows its build's: its step after the exercise's, what the model writes now, the spec points passing
+  and the latest line, and a practice project's steps only. As a conversation starts (`adopt_exercise`), it
+  keeps up the message of an exercise whose job runs and whose tracker does not say it `reports` by itself
+  (`Attached` says so), and an exercise whose job ended without being stopped (`Jobs.lost`: killed, the
+  computer restarted) goes on as `resume #N`; either way its message is taken out and sent anew at the bottom.
+  While it listens, it adopts again an exercise that went on by itself.
 - **EXR-7** Ctrl-C or `stop #N` stops an exercise's build, keeps everything, and ends `stopped` with how to go
   on (`resume #N`, or `tinker exercise LANGUAGE`, goes on from there). A second exercise pauses the one that
   runs (**JOB-8**). `tinker exercise` takes a language or `status`. `exercise status` shows each exercise: its
@@ -1373,8 +1372,9 @@ Tidy, the README, the final review and the lessons.
 - **FIN-9** `FinalReview` passes only when: setup runs afresh, the whole suite passes twice, the suite ran
   tests, and every criterion's test is there and passes. Otherwise it says what is wrong.
 - **FIN-10** `LessonWriter` proves the knowledge the cycle used, and counts a finished project and keeps its
-  toolchain once. With no problems noted, it makes no call. Otherwise it keeps at most 3 new lessons, never
-  one that names the project's files, and clears the noted problems.
+  toolchain once. With no problems noted, it makes no call. Otherwise it keeps at most 3 new lessons
+  (**KNW-4**), giving the project's files and folder as the names a lesson must not have, and clears the noted
+  problems.
 
 ## cli (CLI)
 
@@ -1417,16 +1417,17 @@ The main system: the command line, one run, and the cycle of phases.
   run's `features`. Otherwise it is the unfinished cycle, or else the project's own (`base`). A new cycle waits
   for confirmation only when the run was given `--confirm`, and keeps that for the runs that go on with it.
 - **CLI-10** `tinker task` builds straight through ([The cycle](#the-cycle)). Given `--confirm`, it prints the
-  plan to confirm and exits 0 as `awaiting`. A run that stops (`blocked`) says why and how to go on.
+  plan to confirm and ends `awaiting` (**CLI-9**, **PRJ-13**). A run that stops (`blocked`) says why and how
+  to go on.
 - **CLI-11** `CycleRunner.run` runs the phases from the saved one, in order, saving after each, and formats
   after verify. A run with `--web` that is past recall recalls first. It gives `blocked` when a phase stops,
   and then disproves the knowledge used in that step. A phase that stops for a reason gives it as its result,
   `Stopped(kind, reason)`: the tools do not work (`tools`), the project does not build (`build`), the bug was
   not reproduced (`unreproduced`) or the final review failed (`review`). The runner keeps it, and the run's
-  end says why from it. A phase that stops with parked criteria gives False. `Session` carries no such flag. It gives `awaiting` after the phase its kind confirms
-  after (`CONFIRM_AFTER`), unless the cycle builds without confirmation, and `done` otherwise. Every phase has
-  a phase class, and each phase done says what came of it (`outcome`: the points to test, the files, the tests
-  and files written, the spec points passing).
+  end says why from it. A phase that stops with parked criteria gives False. It gives `awaiting` after the
+  phase its kind confirms after (`CONFIRM_AFTER`) when the cycle waits for confirmation (**CLI-9**), and
+  `done` otherwise. Every phase has a phase class, and each phase done says what came of it (`outcome`: the
+  points to test, the files, the tests and files written, the spec points passing).
 - **CLI-12** `main()` ends a run cleanly: Ctrl-C ends with `Interrupted.`, and Ollama and file errors end with
   their message, never a traceback.
 - **CLI-13** Built end to end: `tinker task` with a model that answers like a real one builds a project in its
