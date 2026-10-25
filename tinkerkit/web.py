@@ -10,7 +10,7 @@ lazy import urllib.parse
 lazy import urllib.request
 
 from .messages import say
-from .settings import Config, first_line
+from .settings import FIRST_BACKOFF_SECONDS, Config, first_line
 lazy from .fetcher import Fetcher
 lazy from .jobs import journaled
 lazy from .passages import MainBlocks
@@ -32,6 +32,9 @@ class Internet:
             "" if self.backends_used else ("; ".join(reasons) or "no web backend (tinker use-web NAME)")
         )
         self.unusable_backends = reasons
+        self.throttles = {
+            backend.name: Throttle(backend.RATE, Config.get("web_backoff")) for backend in self.backends_used
+        }
 
     def ready_backends(self):
         ready, reasons = [], []
@@ -156,11 +159,24 @@ class Internet:
         return None
 
     def ask_backend(self, backend, action, usable, key):
+        try:
+            return self.throttles[backend.name].call(
+                lambda: self.answer(backend, action, usable, key), lambda: self.rate_limited(key)
+            )
+        except RateLimited:
+            why = f"still rate limited after {self.throttles[backend.name].backoff:g} seconds"
+            self.lost(backend, why)
+            return BackendAnswer(None, why)
+
+    def answer(self, backend, action, usable, key):
         for attempt in (1, 2):
+            self.last_failure_status.pop(key, None)
             try:
                 result = action(backend)
             except WebError as exc:
                 self.last_failure_status[key] = exc.code
+                if exc.code == 429:
+                    return BackendAnswer(None, str(exc))
                 if exc.retry and attempt == 1:
                     time.sleep(self.RETRY_PAUSE_SECONDS)
                     continue
@@ -183,8 +199,46 @@ class Internet:
                 self.gone = why
 
 
+class RateLimited(Exception):
+    pass
+
+class Throttle:
+    def __init__(self, rate, backoff, clock=None, sleep=None):
+        self.rate, self.backoff = float(rate or 0), float(backoff)
+        self.clock, self.sleep = clock or time.monotonic, sleep or time.sleep
+        self.tokens, self.filled = self.rate, self.clock()
+
+    def call(self, request, limited):
+        deadline, pause = None, FIRST_BACKOFF_SECONDS
+        while True:
+            self.take()
+            result = request()
+            if not limited():
+                return result
+            now = self.clock()
+            deadline = now + self.backoff if deadline is None else deadline
+            if now >= deadline:
+                raise RateLimited()
+            self.sleep(min(pause, deadline - now))
+            pause *= 2
+
+    def take(self):
+        if not self.rate:
+            return
+        self.refill()
+        if self.tokens < 1:
+            self.sleep((1 - self.tokens) * 60 / self.rate)
+            self.refill()
+        self.tokens -= 1
+
+    def refill(self):
+        now = self.clock()
+        self.tokens = min(self.rate, self.tokens + (now - self.filled) * self.rate / 60)
+        self.filled = now
+
 class WebBackend:
     name = ""
+    RATE = None
 
     def __init__(self, timeout):
         self.timeout = timeout
@@ -202,6 +256,7 @@ class WebBackend:
 class OllamaWeb(WebBackend):
     BASE = "https://ollama.com/api"
     KEY_ENV = "OLLAMA_API_KEY"
+    RATE = 8
     MAX_ANSWER_BYTES = 2_000_000
 
     def __init__(self, timeout):
@@ -274,6 +329,7 @@ class OllamaWeb(WebBackend):
 
 class DuckDuckGoWeb(WebBackend):
     SEARCH = "https://html.duckduckgo.com/html/"
+    RATE = None
     USER_AGENT = "Mozilla/5.0 (compatible; Tinker)"
     MAX_BYTES = 2_000_000
     RESULT_RE = re.compile(

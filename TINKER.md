@@ -444,8 +444,7 @@ A value that does not fit is refused, with what the setting takes, and the old v
 Tune how `tinker learn` uses the web:
 
 ```sh
-tinker config learn_rate 4          # web requests per minute
-tinker config learn_backoff 10      # most seconds to wait out a rate limit
+tinker config web_backoff 10        # most seconds to wait out a rate limit
 tinker config learn_searches 1      # never a second search
 tinker config fetch_fallbacks 0     # never ask the web plugin to fetch a page
 tinker config docs_pages 50         # pages taken from a documentation site

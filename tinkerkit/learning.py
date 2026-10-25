@@ -16,7 +16,6 @@ lazy from .settings import (
     DOCS_SITE_SEARCH,
     FACT_PHASES,
     FACTS_PER_SLOT,
-    FIRST_BACKOFF_SECONDS,
     MAX_FACT_CHARS,
     MAX_VERSION_COMMANDS,
     RESULTS_PER_LEARN_SEARCH,
@@ -85,21 +84,16 @@ class SearchFailed(Exception):
         self.cause, self.detail = cause, detail
 
 
-class RateLimited(Exception):
-    pass
-
-
 class SlotLearner:
     def __init__(self, model, internet, embeddings, tracker=None):
         self.learner = Learner(model, internet, embeddings)
         self.learner.tracker = tracker
         self.model, self.internet, self.embeddings = model, internet, embeddings
         self.log = RequestLog()
-        self.throttle = Throttle(Config.get("learn_rate"), Config.get("learn_backoff"))
         self.cleaner = Cleaner()
         self.fetcher = None
         self.topic, self.known, self.tried, self.seen, self.docs = "", None, [], set(), {}
-        self.searches, self.fallbacks, self.saw_429, self.incomplete = 0, 0, False, False
+        self.searches, self.fallbacks, self.incomplete = 0, 0, False
         self.pages = Counter()
         self.recap = []
 
@@ -174,27 +168,22 @@ class SlotLearner:
     def search(self, query):
         self.searches += 1
         self.tried.append(f'search "{query}"')
-        try:
-            found = self.throttle.call(
-                lambda: self.timed(
-                    "search", query, lambda: self.internet.search(query, RESULTS_PER_LEARN_SEARCH)
-                ),
-                lambda: self.internet.rate_limited(query),
-            )
-        except RateLimited:
-            raise SearchFailed("rate-limit", f"still after {Config.get('learn_backoff')}s of backoff")
+        found = self.timed("search", query, lambda: self.internet.search(query, RESULTS_PER_LEARN_SEARCH))
         if found is None:
-            cause = "rate-limit" if self.saw_429 else "error" if self.internet.available() else "plugin"
-            raise SearchFailed(cause, first_line(self.internet.problem(query), 160))
+            raise SearchFailed(self.failure_cause(query), first_line(self.internet.problem(query), 160))
         if not found:
             raise SearchFailed("no-results")
         return found
+
+    def failure_cause(self, query):
+        if self.internet.rate_limited(query):
+            return "rate-limit"
+        return "error" if self.internet.available() else "plugin"
 
     def timed(self, kind, target, request):
         started = time.monotonic()
         result = request()
         limited = self.internet.rate_limited(target)
-        self.saw_429 |= limited
         self.log(
             kind,
             "ok" if result is not None else "429" if limited else "failed",
@@ -255,13 +244,7 @@ class SlotLearner:
             f"{page.url} showed too little text; asking the web plugin to read it "
             f"({self.fallbacks} of {Config.get('fetch_fallbacks')})"
         )
-        try:
-            got = self.throttle.call(
-                lambda: self.timed("fallback", page.url, lambda: self.internet.fetch(page.url)),
-                lambda: self.internet.rate_limited(page.url),
-            )
-        except RateLimited:
-            got = None
+        got = self.timed("fallback", page.url, lambda: self.internet.fetch(page.url))
         return Page(page.url, now_text(), text_blocks(got["content"])) if got else page
 
     def asked_plan(self, results):
@@ -685,39 +668,6 @@ def address_key(url):
     return urllib.parse.urlunsplit(
         (parts.scheme, parts.netloc.lower(), parts.path.rstrip("/"), parts.query, "")
     )
-
-
-class Throttle:
-    def __init__(self, rate, backoff, clock=None, sleep=None):
-        self.rate, self.backoff = float(rate), float(backoff)
-        self.clock, self.sleep = clock or time.monotonic, sleep or time.sleep
-        self.tokens, self.filled = self.rate, self.clock()
-
-    def call(self, request, limited):
-        deadline, pause = None, FIRST_BACKOFF_SECONDS
-        while True:
-            self.take()
-            result = request()
-            if not limited():
-                return result
-            now = self.clock()
-            deadline = now + self.backoff if deadline is None else deadline
-            if now >= deadline:
-                raise RateLimited()
-            self.sleep(min(pause, deadline - now))
-            pause *= 2
-
-    def take(self):
-        self.refill()
-        if self.tokens < 1:
-            self.sleep((1 - self.tokens) * 60 / self.rate)
-            self.refill()
-        self.tokens -= 1
-
-    def refill(self):
-        now = self.clock()
-        self.tokens = min(self.rate, self.tokens + (now - self.filled) * self.rate / 60)
-        self.filled = now
 
 
 class RequestLog:
