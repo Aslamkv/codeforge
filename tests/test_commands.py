@@ -23,13 +23,13 @@ def test_the_kind_of_a_command_and_of_its_actions_comes_from_the_table():
         "add",
         "fix",
         "learn",
+        "research",
         "ask",
         "teach",
         "read",
         "exercise",
         "resume",
         "calibrate",
-        "research",
     ]
     assert [command.name for command in COMMANDS if command.kind == "pauses"] == ["chat", "command"]
     assert kind_of(["read", "craft.md"]) == "job" and kind_of(["read", "list", "2"]) == "glance"

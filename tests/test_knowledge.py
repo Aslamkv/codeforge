@@ -604,6 +604,40 @@ def test_fold_repeats_keeps_the_more_detailed_text():
     assert Researcher.agree({"text": "5 kg"}, {"text": "5 kg at 9am"}) and not Researcher.agree(
         {"text": "5"}, {"text": "6"}
     )
+
+
+@pytest.mark.spec("KNW-23")
+def test_a_research_answers_with_its_findings_and_their_numbered_sources():
+    entry = {
+        "name": "Food banks",
+        "summary": "How a food bank runs.",
+        "questions": [{"question": "How is food stored?"}, {"question": "Who helps?"}],
+        "findings": [
+            {"question": 1, "answer": "In 10 kg crates.", "confidence": "high", "facts": [1, 2]},
+            {"question": 2, "answer": "Volunteers.", "confidence": "low", "facts": [3]},
+        ],
+        "facts": [
+            {"text": "10 kg crates", "source": "https://a.org/1", "also": ["https://b.org/x"]},
+            {"text": "Crates of 10 kg", "source": "https://b.org/x"},
+            {"text": "Volunteers sign in", "source": "https://a.org/2"},
+        ],
+    }
+    answer = Researcher.answer(entry)
+    assert answer.splitlines() == [
+        "Food banks: How a food bank runs.",
+        "",
+        "Q1. How is food stored?",
+        "In 10 kg crates. (high confidence) [1] [2]",
+        "",
+        "Q2. Who helps?",
+        "Volunteers. (low confidence) [3]",
+        "",
+        "Sources:",
+        "[1] https://a.org/1",
+        "[2] https://b.org/x",
+        "[3] https://a.org/2",
+    ]
+    assert "no finding" in Researcher.answer(dict(entry, findings=[]))
     assert Researcher.site("https://www.Example.org/x") == "example.org"
 
 

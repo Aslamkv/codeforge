@@ -939,8 +939,8 @@ Lessons and proven knowledge, and what every kind of learning shares.
   teaching name items only this way. `retire(item, language, reason, run)` retires it from its own store: a
   lesson from the language's lessons or else any language's, a proven fact or fix from the language's, a
   topic's item from its topic; it says whether it was there.
-- **KNW-23** `Researcher.answer(entry)` gives a research as text: its findings, each with its confidence and
-  the facts it cites as `[n]`, then the pages of those facts as numbered sources. A research with no finding
+- **KNW-23** `Researcher.answer(entry)` gives a research as text: its findings by question, each with its confidence
+  and the pages of the facts it cites as `[n]`, then those pages as numbered sources. A research with no finding
   says so.
 - **KNW-24** `Learner.web_pages(searches)` searches each and fetches the results in turn, each address once,
   at most `TEACH_PAGES`; each page keeps its first chunk and then the ones best about the searches

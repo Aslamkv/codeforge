@@ -1174,6 +1174,35 @@ class Researcher:
         )
         return min(stated, ceiling, key=cls.CONFIDENCE_LEVELS.index)
 
+    @staticmethod
+    def answer(entry):
+        heading = f"{entry['name']}: {entry['summary']}" if entry.get("summary") else entry["name"]
+        findings = entry.get("findings", [])
+        if not findings:
+            return f"{heading}\n\nThe research has no finding: the pages read did not answer its questions."
+        sources, lines = [], [heading]
+        for number, question in enumerate(entry["questions"], 1):
+            answered = [finding for finding in findings if finding["question"] == number]
+            if answered:
+                lines += ["", f"Q{number}. {question['question']}"]
+            for finding in answered:
+                cited = Researcher.cited_pages(entry["facts"], finding["facts"], sources)
+                lines.append(f"{finding['answer']} ({finding['confidence']} confidence) {cited}".rstrip())
+        if sources:
+            lines += ["", "Sources:"] + [f"[{number}] {url}" for number, url in enumerate(sources, 1)]
+        return "\n".join(lines)
+
+    @staticmethod
+    def cited_pages(facts, numbers, sources):
+        pages = []
+        for number in numbers:
+            for url in Learner.pages_of(facts[number - 1]):
+                if url not in sources:
+                    sources.append(url)
+                if url not in pages:
+                    pages.append(url)
+        return " ".join(f"[{sources.index(url) + 1}]" for url in pages)
+
 
 class Library:
     CLAIM_KINDS = ("facts", "findings", "rules")

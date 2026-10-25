@@ -69,7 +69,7 @@ COMMANDS_ASKING_FOR_WORDS = tuple(
     command.name
     for command in COMMANDS
     if command.chat and any(argument.nargs in ("+", None) for argument in command.arguments)
-) + ("command", "research")
+) + ("command",)
 EXIT_WORDS = ("exit",)
 CHAT_APP_START = "/start"
 START_WELCOME = """👋 **Hi, I'm Tinker!**
@@ -129,26 +129,12 @@ def one_shot(command, text):
     if command == "chat":
         with paused_for_you():
             console.show(chat, None, talk.reply(console, message, "", CHAT_MAX_REPLY_TOKENS), done=True)
-    elif command == "research":
-        research_once(console, talk, text)
     elif command == "run":
         Desk([console], Path.cwd()).run_app(console, chat, [text])
     else:
         with paused_for_you():
             command_once(console, talk, message)
     return None
-
-
-def research_once(console, talk, topic):
-    tracker, started = Tracker(f"Researching {topic}"), time.monotonic()
-    ending = {"status": "stopped", "headline": f"Research of {topic} stopped"}
-    try:
-        status, text = Research(talk, tracker).researching(
-            console, ConsoleChannel.CHAT, topic, lambda: [described(state) for state in running()]
-        )
-        ending = {"status": status, "headline": "", "text": text}
-    finally:
-        tracker.end(ending, time.monotonic() - started)
 
 
 def command_once(console, talk, message):
