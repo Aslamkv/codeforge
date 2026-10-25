@@ -33,6 +33,7 @@ lazy from .settings import (
     Home,
     Numbered,
     confirm_deletion,
+    field,
     fingerprint,
     first_line,
     now_text,
@@ -636,7 +637,7 @@ def survey_parts(book):
 
 
 def read_survey(data, book):
-    summary = str(data.get("summary") or "").strip()
+    summary = field(data, "summary")
     if not summary:
         raise ValueError("no summary")
     numbers, order = {chapter.number for chapter in book.chapters}, {}
@@ -663,9 +664,9 @@ def read_points(data, software):
         raise ValueError('no "points" list')
     points = []
     for point in data["points"]:
-        text = str(point.get("text") or "").strip() if isinstance(point, dict) else ""
+        text = field(point, "text") if isinstance(point, dict) else ""
         if text:
-            phase = str(point.get("phase") or "").strip().lower()
+            phase = field(point, "phase").lower()
             points.append(
                 {
                     "text": text[:MAX_FACT_CHARS],

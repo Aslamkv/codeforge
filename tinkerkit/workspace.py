@@ -21,6 +21,7 @@ from .settings import (
     Config,
     Home,
     NotAPytestClass,
+    field,
     first_line,
     now_text,
 )
@@ -74,9 +75,9 @@ class Toolchain:
             command for command in setup if self.MACHINE_TOOLCHAIN_CHANGE_RE.search(command)
         ]
         self.use = self.command_list(data.get("use"))
-        self.activate = str(data.get("activate") or "").strip()
+        self.activate = field(data, "activate")
         for key in self.COMMANDS:
-            setattr(self, key, str(data.get(key) or "").strip())
+            setattr(self, key, field(data, key))
         self.lint_declared = bool(self.lint)
         self.lint = "" if self.lint.lower() == "none" else self.lint
 

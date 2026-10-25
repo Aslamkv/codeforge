@@ -8,6 +8,7 @@ lazy from .settings import (
     MENU_LINK_SHARE,
     MIN_USABLE_PAGE_CHARS,
     NEAR_DUPLICATE_OVERLAP,
+    host,
     split_text,
     words,
 )
@@ -84,7 +85,7 @@ class Cleaner:
         counts = {}
         for page in pages:
             for key in {
-                (site(page.url), normal(block.text)) for block in page.blocks if block.kind != "code"
+                (host(page.url), normal(block.text)) for block in page.blocks if block.kind != "code"
             }:
                 counts[key] = counts.get(key, 0) + 1
         return [
@@ -94,7 +95,7 @@ class Cleaner:
                 [
                     block
                     for block in page.blocks
-                    if block.kind == "code" or counts[(site(page.url), normal(block.text))] < 2
+                    if block.kind == "code" or counts[(host(page.url), normal(block.text))] < 2
                 ],
             )
             for page in pages
@@ -365,10 +366,6 @@ def shingles(text):
 
 def repeats(a, b):
     return len(a & b) >= NEAR_DUPLICATE_OVERLAP * len(a | b) if a | b else True
-
-
-def site(url):
-    return urllib.parse.urlsplit(url).netloc.lower()
 
 
 def normal(text):

@@ -57,7 +57,7 @@ class Fetcher:
     def fetch_all(self, urls, kind="fetch"):
         sites = {}
         for index, url in enumerate(urls):
-            sites.setdefault(site_of(url), []).append(index)
+            sites.setdefault(origin(url), []).append(index)
         results = [None] * len(urls)
         with concurrent.futures.ThreadPoolExecutor(
             max_workers=max(1, min(self.workers, len(sites) or 1))
@@ -92,7 +92,7 @@ class Fetcher:
             return Fetched(url, final_url=url, error=f"{type(exc).__name__}: {first_line(str(exc), 160)}")
 
     def allowed(self, url, connections):
-        site = site_of(url)
+        site = origin(url)
         if site not in self.robots_by_site:
             self.robots_by_site[site] = self.read_robots(site, connections)
         return self.robots_by_site[site].can_fetch(self.user_agent, url)
@@ -263,7 +263,7 @@ def unzipped(body, encoding, max_bytes):
     return body
 
 
-def site_of(url):
+def origin(url):
     parts = urllib.parse.urlsplit(url)
     return f"{parts.scheme}://{parts.netloc}"
 

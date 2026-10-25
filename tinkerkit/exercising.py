@@ -22,6 +22,7 @@ lazy from .settings import (
     EXERCISE_FOLDER,
     REFLECTION_PROBLEMS,
     Home,
+    field,
     first_line,
     now_text,
     projects_folder,
@@ -167,7 +168,7 @@ class Exercise:
             f"{project['lessons']} new lesson(s), {len(reflection['confirmed'])} confirmed; next focus: "
             f"{exercise['focus'] or '(none)'}"
         )
-        lessons = [str(item.get("text", "")).strip() for item in reflection["lessons"]]
+        lessons = [field(item, "text") for item in reflection["lessons"]]
         if any(lessons):
             say.found(first_line(next(text for text in lessons if text), 200))
 
@@ -231,10 +232,10 @@ def identified(model, asked):
 
 
 def read_verdict(data):
-    verdict = str(data.get("verdict", "")).strip().lower()
+    verdict = field(data, "verdict").lower()
     if verdict not in VERDICTS:
         raise ValueError(f'"verdict" must be one of {", ".join(VERDICTS)}')
-    name = str(data.get("name") or "").strip()[:40]
+    name = field(data, "name", 40)
     if verdict == "language" and not name:
         raise ValueError('a language needs its "name"')
     choices = [str(choice).strip()[:40] for choice in data.get("choices") or [] if str(choice).strip()][:6]
@@ -252,7 +253,7 @@ def installed(entry):
 
 
 def read_choice(data, language, earlier):
-    task, feature = str(data.get("task") or "").strip(), str(data.get("feature") or "").strip()
+    task, feature = field(data, "task"), field(data, "feature")
     if not task or not feature:
         raise ValueError('a practice project needs a "task" and a "feature"')
     repeated = next(
@@ -262,7 +263,7 @@ def read_choice(data, language, earlier):
         raise ValueError(f"it repeats an earlier project ({first_line(repeated, 80)}): choose another")
     if language.lower() not in task.lower():
         task = f"{task.rstrip('.')} in {language}"
-    folder = str(data.get("folder") or "").strip().lower()
+    folder = field(data, "folder").lower()
     if not FOLDER_RE.fullmatch(folder) or len(folder) > 30:
         folder = "-".join(re.findall(r"[a-z][a-z0-9]*", task.lower())[:3]) or "practice"
     practises = [

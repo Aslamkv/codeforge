@@ -20,6 +20,7 @@ lazy from .settings import (
     Home,
     Store,
     confirm_deletion,
+    field,
     first_line,
     now_text,
     split_text,
@@ -53,7 +54,7 @@ class RunChecks:
 
     @staticmethod
     def has_task(run):
-        return isinstance(run, dict) and str(run.get("task") or "").strip()
+        return isinstance(run, dict) and field(run, "task")
 
     @staticmethod
     def new_run(args):

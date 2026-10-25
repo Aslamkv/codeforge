@@ -5,7 +5,7 @@ lazy from pathlib import Path
 
 from .messages import say
 from .session import Phase, Stopped
-from .settings import ENV_EXAMPLE, ENV_FILE, FILES_SHOWN_PER_FIX, first_line, one_line
+from .settings import ENV_EXAMPLE, ENV_FILE, FILES_SHOWN_PER_FIX, field, first_line, one_line
 lazy from .building import ToolchainRepair, Verifier
 lazy from .model import OllamaError
 lazy from .prompts import Part, Prompts, PromptTooLarge
@@ -218,7 +218,7 @@ class ReadmeWriter(Phase):
             self.SERVER_ADDRESS_RE.search(use["command"]) for use in usage
         )
         return {
-            "overview": str(data.get("overview") or "").strip(),
+            "overview": field(data, "overview"),
             "features": features,
             "usage": usage[: self.MAX_USAGE_EXAMPLES],
             "serves": serves,

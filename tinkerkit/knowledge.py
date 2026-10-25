@@ -6,7 +6,6 @@ lazy import hashlib
 lazy import math
 lazy import tempfile
 lazy import urllib.error
-lazy import urllib.parse
 lazy import urllib.request
 lazy from pathlib import Path
 
@@ -40,8 +39,10 @@ from .settings import (
     VERSION_TIMEOUT,
     Config,
     Home,
+    field,
     fingerprint,
     first_line,
+    host,
     now_text,
     one_line,
     similarity,
@@ -176,7 +177,7 @@ class Knowledge:
         return added
 
     def new_lesson(self, item, known, names):
-        text, phase = str(item.get("text", "")).strip()[:240], str(item.get("phase", "")).strip().lower()
+        text, phase = field(item, "text", 240), field(item, "phase").lower()
         if not text or phase not in LESSON_PHASES or self.names_project(text, names):
             return None
         same = next(
@@ -392,7 +393,7 @@ class Knowledge:
 
     def taught_lesson(self, item, sources):
         known = self.known_lessons()
-        text = str(item.get("text", "")).strip()
+        text = field(item, "text")
         lesson = next(
             (lesson for lesson in known if similarity(lesson["text"], text) >= SAME_LESSON_SIMILARITY), None
         )
@@ -639,8 +640,8 @@ class Learner(Tracked):
             if not isinstance(item, dict):
                 continue
             text, phase = (
-                str(item.get("text", "")).strip()[:MAX_FACT_CHARS],
-                str(item.get("phase", "")).strip().lower(),
+                field(item, "text", MAX_FACT_CHARS),
+                field(item, "phase").lower(),
             )
             if text and phase in FACT_PHASES:
                 facts.append({"phase": phase, "text": text})
@@ -839,7 +840,7 @@ class Researcher:
         if not isinstance(data, dict):
             raise ValueError("not a JSON object")
         name, summary = (
-            str(data.get("name") or "").strip()[:80],
+            field(data, "name", 80),
             " ".join(str(data.get("summary") or "").split())[:200],
         )
         questions = []
@@ -909,7 +910,7 @@ class Researcher:
             vectors = [None] * len(facts)
         else:
             self.fold_repeats(facts, vectors)
-        sites = [{self.site(url) for url in Learner.pages_of(fact)} for fact in facts]
+        sites = [{host(url) for url in Learner.pages_of(fact)} for fact in facts]
         support, differ = self.compared(facts, vectors, sites)
         for fact, found_on in zip(facts, support):
             fact["sites"] = sorted(found_on)
@@ -967,10 +968,6 @@ class Researcher:
     @classmethod
     def numbers(cls, fact):
         return set(cls.NUMBER_RE.findall(fact["text"]))
-
-    @staticmethod
-    def site(url):
-        return urllib.parse.urlparse(url).netloc.lower().removeprefix("www.")
 
     def analyse(self, frame, facts, differ):
         parts = self.analysis_parts(frame, facts, differ)
@@ -1047,7 +1044,7 @@ class Researcher:
                 "facts": cited(finding.get("facts")),
             }
             for finding in given
-            if asked(finding) and str(finding.get("answer") or "").strip()
+            if asked(finding) and field(finding, "answer")
         ]
 
     @staticmethod
@@ -1075,7 +1072,7 @@ class Researcher:
                 "search": " ".join(str(gap.get("search") or "").split())[:160],
             }
             for gap in given
-            if asked(gap) and str(gap.get("search") or "").strip()
+            if asked(gap) and field(gap, "search")
         ]
 
     @staticmethod
@@ -1086,7 +1083,7 @@ class Researcher:
             if isinstance(check, dict)
             and isinstance(check.get("fact"), int)
             and 1 <= check["fact"] <= fact_count
-            and str(check.get("search") or "").strip()
+            and field(check, "search")
         ]
 
     @staticmethod

@@ -22,7 +22,7 @@ lazy from .ledger import DONE_NOTE_KEPT_SECONDS, Ledger
 lazy from .messages import human_duration, say
 lazy from .model import Models, OllamaError
 lazy from .prompts import Prompts, Reply
-lazy from .settings import EXERCISE_FOLDER, Home, projects_folder
+lazy from .settings import EXERCISE_FOLDER, Home, field, projects_folder
 lazy from .workspace import Toolchain
 
 CHANNEL_REPORTS_ENV = "TINKER_CHANNELS"
@@ -1176,7 +1176,7 @@ class Shell:
         except OllamaError as exc:
             self.questions.answered(channel, message.chat)
             return md(t"⚠️ **The model did not answer:** {first_words(exc)}")
-        line, does = str(data.get("command") or "").strip(), str(data.get("does") or "").strip()
+        line, does = field(data, "command"), field(data, "does")
         if not line or "\n" in line:
             self.questions.answered(channel, message.chat)
             return md(t"🤷 **No command found:** {does or 'describe it another way'}")

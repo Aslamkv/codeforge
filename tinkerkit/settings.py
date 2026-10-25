@@ -11,6 +11,7 @@ lazy import sqlite3
 lazy import subprocess
 lazy import sys
 lazy import time
+lazy import urllib.parse
 
 lazy from .messages import say
 
@@ -710,6 +711,14 @@ def first_line(text, limit=140):
 
 def one_line(value):
     return " ".join(str(value or "").split())
+
+
+def field(item, key, limit=None):
+    return str(item.get(key) or "").strip()[:limit]
+
+
+def host(url):
+    return urllib.parse.urlsplit(url).netloc.lower().removeprefix("www.")
 
 
 def now_text():

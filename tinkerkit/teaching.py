@@ -12,6 +12,7 @@ lazy from .settings import (
     TEACH_CHECK_COMMANDS,
     TEACH_CHECK_SEARCHES,
     TEACH_CLAIMS,
+    field,
     first_line,
     words,
 )
@@ -348,7 +349,7 @@ def read_plan(data, count, preferences=True, readings=False):
         "claims": claims,
         "commands": texts("commands", TEACH_CHECK_COMMANDS),
         "searches": texts("searches", TEACH_CHECK_SEARCHES),
-        "language": str(data.get("language") or "").strip(),
+        "language": field(data, "language"),
         "changes": read_changes(data.get("changes"), len(claims), count),
     }
     if not claims:
@@ -368,7 +369,7 @@ def read_claims(given):
     claims = []
     for claim in given if isinstance(given, list) else []:
         claim = claim if isinstance(claim, dict) else {"text": claim}
-        text = str(claim.get("text") or "").strip()
+        text = field(claim, "text")
         if text:
             claims.append({"text": text, "preference": claim.get("preference") is True})
     return claims[:TEACH_CLAIMS]
@@ -438,13 +439,13 @@ def command_list(key, value):
 
 def read_lesson(given):
     given = given if isinstance(given, dict) else {}
-    text, phase = str(given.get("text") or "").strip(), str(given.get("phase") or "").strip().lower()
+    text, phase = field(given, "text"), field(given, "phase").lower()
     return {"phase": phase, "text": text} if text and phase in LESSON_PHASES else None
 
 
 def read_fact(given, count):
     given = given if isinstance(given, dict) else {}
-    text, about = str(given.get("text") or "").strip(), given.get("about")
+    text, about = field(given, "text"), given.get("about")
     return {"about": about, "text": text} if text and type(about) is int and 1 <= about <= count else None
 
 
@@ -517,15 +518,13 @@ class Verdict:
             claim.update(
                 verdict="unsure" if holds_bare else item["verdict"],
                 evidence=cites,
-                why="no evidence cited" if holds_bare else str(item.get("why") or "").strip(),
+                why="no evidence cited" if holds_bare else field(item, "why"),
             )
         said = {item.get("change"): item for item in data.get("changes") or [] if isinstance(item, dict)}
         for number, _ in judged_changes(plan):
             if number not in said or not isinstance(said[number].get("follows"), bool):
                 raise ValueError(f'change {number} has no "follows" (true or false)')
-            verdict.follows_by_change[number] = Follows(
-                said[number]["follows"], str(said[number].get("why") or "").strip()
-            )
+            verdict.follows_by_change[number] = Follows(said[number]["follows"], field(said[number], "why"))
         return verdict
 
     def why_not(self, number, change):
