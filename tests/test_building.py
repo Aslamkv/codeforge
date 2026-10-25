@@ -329,7 +329,7 @@ def test_a_missing_linter_is_a_tooling_problem_the_model_may_fix(calc, fake_olla
     fake_ollama.reply(
         'CAUSE: that linter is not installed\nTOOLCHAIN: {"lint": "none"}', when="Fix the toolchain"
     )
-    assert TestTool(session).works() is True
+    assert TestTool(session).works() is None
     assert project.toolchain.lint == "" and project.toolchain.lint_declared
     assert session.knowledge.language_doc["fixes"][0]["cause"] == "that linter is not installed"
 
@@ -342,7 +342,7 @@ def test_a_one_test_command_that_ignores_the_name_is_a_tooling_problem(calc, fak
     fake_ollama.reply(
         f"CAUSE: the name is dropped\nTOOLCHAIN: {json.dumps({'test_one': named})}", when="Fix the toolchain"
     )
-    assert TestTool(session).works() is True and project.toolchain.test_one == named
+    assert TestTool(session).works() is None and project.toolchain.test_one == named
     assert "answers a made-up test name the same way" in fake_ollama.calls[0]["messages"][-1]["content"]
 
 
@@ -351,8 +351,8 @@ def test_tools_that_stay_broken_stop_the_cycle(calc, fake_ollama):
     session, project = calc
     project.spec["toolchain"]["lint"] = "no-such-linter-xyz ."
     fake_ollama.reply("CAUSE: no idea", when="Fix the toolchain", times=2)
-    assert TestTool(session).works() is False
-    assert session.tool_problem.startswith("the project's tools do not work:")
+    stopped = TestTool(session).works()
+    assert stopped.kind == "tools" and stopped.reason.startswith("the project's tools do not work:")
 
 
 @pytest.mark.spec("BLD-3")
@@ -403,7 +403,7 @@ def test_a_project_that_does_not_build_is_fixed(calc, fake_ollama, project_dir):
     session, project = calc
     (project_dir / "calc.py").write_text("def add(a, b)\n    return a + b\n")
     fake_ollama.reply("CAUSE: a colon was missing\n" + file_block("calc.py", FIXED), when="Make it build")
-    assert Verifier(session).make_it_build() is True
+    assert Verifier(session).make_it_build() is None
     assert (project_dir / "calc.py").read_text() == FIXED and fake_ollama.calls[0]["think"] is False
 
 
@@ -453,12 +453,10 @@ def test_a_bug_no_test_shows_is_dropped(bug, fake_ollama, project_dir):
     cycle["amendments"] = ["it happens only with two negative numbers"]
     passing = "import calc\n\n\ndef test_negative():\n    assert calc.add(-1, -1) == -2\n"
     fake_ollama.reply("TEST: test_bug.py::test_negative\n" + file_block("test_bug.py", passing), times=2)
-    assert BugReproducer(session).run(cycle) is False
+    stopped = BugReproducer(session).run(cycle)
+    assert stopped.kind == "unreproduced" and "could not be reproduced" in stopped.reason
     assert project.cycle_criteria(cycle) == [] and not (project_dir / "test_bug.py").exists()
-    assert (cycle["phase"], cycle["outcome"]) == (
-        "done",
-        "not reproduced",
-    ) and "could not be reproduced" in session.unreproduced_reason
+    assert (cycle["phase"], cycle["outcome"]) == ("done", "not reproduced")
     assert (
         "Changed by the person: it happens only with two negative numbers"
         in fake_ollama.calls[0]["messages"][1]["content"]

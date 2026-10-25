@@ -12,7 +12,7 @@ from tinkerkit.knowledge import Knowledge, Library
 from tinkerkit.model import Models, Ollama, OllamaError
 from tinkerkit.project import Runs, Tracker, project_store
 from tinkerkit.prompts import Part, Prompts, PromptTooLarge
-from tinkerkit.session import Phase
+from tinkerkit.session import Phase, Session, Stopped
 from tinkerkit.settings import FIX_PHASES, PHASES, Config
 
 
@@ -461,12 +461,13 @@ def test_before_the_spec_names_the_language_knowledge_is_for_the_one_the_request
 
 
 @pytest.mark.spec("SES-3")
-def test_the_phases_a_failure_disproves(session):
-    assert session.failed_phases("setup") == ("toolchain", "config")
-    assert session.failed_phases("verify") == ("code", "tests", "design", "spec")
-    assert session.failed_phases("reproduce") == ()
-    session.build_problem = "no colon"
-    assert session.failed_phases("verify") == ("code", "config")
+def test_the_phases_a_failure_disproves():
+    assert Session.failed_phases("setup") == ("toolchain", "config")
+    assert Session.failed_phases("verify") == ("code", "tests", "design", "spec")
+    assert Session.failed_phases("reproduce") == ()
+    assert Session.failed_phases("verify", Stopped("build", "no colon")) == ("code", "config")
+    assert Session.failed_phases("reproduce", Stopped("tools", "no pytest")) == ("toolchain", "config")
+    assert Session.failed_phases("reproduce", Stopped("unreproduced", "no test")) == ()
 
 
 @pytest.mark.spec("SES-4")
@@ -945,28 +946,26 @@ def test_amend_plans_again_and_waits_again(run_ready, fake_ollama):
 
 @pytest.mark.spec("CLI-10")
 @pytest.mark.parametrize(
-    "problem,said",
+    "stopped,said",
     [
         (
-            {"unreproduced_reason": 'the bug could not be reproduced ... then: tinker fix @abc123 "..."'},
+            Stopped("unreproduced", 'the bug could not be reproduced ... then: tinker fix @abc123 "..."'),
             "Not fixed: the bug could not be reproduced",
         ),
-        ({"review_problem": "`pytest` fails"}, "Not done: the final review found `pytest` fails"),
-        ({"build_problem": "it does not build"}, "Stopped before working on criteria: it does not build"),
-        ({"tool_problem": "the tools do not work"}, "No code change can fix that."),
-        ({}, "Stopped: 1/2 tests pass; 1 parked after fixing and a review against the plan:"),
+        (Stopped("review", "`pytest` fails"), "Not done: the final review found `pytest` fails"),
+        (Stopped("build", "it does not build"), "Stopped before working on criteria: it does not build"),
+        (Stopped("tools", "the tools do not work"), "No code change can fix that."),
+        (None, "Stopped: 1/2 tests pass; 1 parked after fixing and a review against the plan:"),
     ],
 )
-def test_a_blocked_run_says_why_and_how_to_go_on(make_project, make_session, capsys, problem, said):
+def test_a_blocked_run_says_why_and_how_to_go_on(make_project, make_session, capsys, stopped, said):
     steps = [
         criterion("C1", "t.py::a", "adds", status="green"),
         criterion("C2", "t.py::b", "subtracts", status="blocked", last_error="AssertionError"),
     ]
     session = make_session(make_project(steps))
-    for key, value in problem.items():
-        setattr(session, key, value)
     run = ProjectRun.__new__(ProjectRun)
-    run.session, run.record, run.tracker = session, {"id": "abc123"}, Tracker("calc")
+    run.session, run.record, run.tracker, run.stopped = session, {"id": "abc123"}, Tracker("calc"), stopped
     run.outcome = cli.Outcome()
     run.outcome.set("blocked")
     run.print_summary()

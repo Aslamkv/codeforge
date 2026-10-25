@@ -25,7 +25,7 @@ lazy from .model import Calibrator, Model, Models, Ollama, OllamaError, Selected
 lazy from .planning import Designer, InterfaceReviewer, Recaller, SpecWriter
 lazy from .project import Brief, Outcome, Project, RunChecks, Runs, Steps, Tracker, project_store, saved
 lazy from .prompts import Prompts
-lazy from .session import Session
+lazy from .session import Session, Stopped
 lazy from .settings import (
     CONFIRM_AFTER,
     DEFAULT_MAX_STALL,
@@ -1221,6 +1221,7 @@ class ProjectRun:
         self.internet = None
         self.spec_text = ""
         self.outcome = Outcome()
+        self.stopped = None
         self.tracker = Tracker(args.task or "a task")
 
     def execute(self):
@@ -1352,7 +1353,9 @@ class ProjectRun:
             )
             self.outcome.set("done")
             return
-        self.outcome.set(CycleRunner(session).run(cycle, web=self.internet is not None))
+        runner = CycleRunner(session)
+        self.outcome.set(runner.run(cycle, web=self.internet is not None))
+        self.stopped = runner.stopped
 
     def choose_cycle(self, brief):
         project = self.session.project
@@ -1528,7 +1531,7 @@ class ProjectRun:
 
     def summary_blocked(self):
         run_id = self.record["id"]
-        lines = self.why_blocked(self.session, run_id)
+        lines = self.why_blocked(self.stopped, self.session.project, run_id)
         say.title(lines[0], Messages.ICONS["stop"])
         with say.section():
             for line in lines[1:]:
@@ -1540,27 +1543,28 @@ class ProjectRun:
         )
 
     @staticmethod
-    def why_blocked(session, run_id):
-        if session.unreproduced_reason:
-            return [f"Not fixed: {session.unreproduced_reason}"]
-        if session.review_problem:
+    def why_blocked(stopped, project, run_id):
+        kind, reason = stopped or (None, "")
+        if kind == "unreproduced":
+            return [f"Not fixed: {reason}"]
+        if kind == "review":
             return [
-                f"Not done: the final review found {session.review_problem}",
+                f"Not done: the final review found {reason}",
                 f"Correct it (or the request), then: tinker resume @{run_id}",
             ]
-        if session.build_problem:
+        if kind == "build":
             return [
-                f"Stopped before working on criteria: {session.build_problem}",
+                f"Stopped before working on criteria: {reason}",
                 f"See what each fix did (tinker log @{run_id}); correct it by hand or continue with: "
                 f"tinker resume @{run_id}",
             ]
-        if session.tool_problem:
+        if kind == "tools":
             return [
-                f"Stopped before working on criteria: {session.tool_problem}",
+                f"Stopped before working on criteria: {reason}",
                 "No code change can fix that. Check the commands in SPEC.md (setup, test_all) and the dependency",
                 f"file, then continue with: tinker resume @{run_id}",
             ]
-        return ProjectRun.parked_report(session.project, run_id)
+        return ProjectRun.parked_report(project, run_id)
 
     @staticmethod
     def parked_report(project, run_id):
@@ -1647,6 +1651,7 @@ class ProjectFolder:
 class CycleRunner:
     def __init__(self, session):
         self.session, self.project = session, session.project
+        self.stopped = None
 
     def run(self, cycle, web=False):
         steps = Steps(FIX_PHASES if cycle.get("kind") == "fix" else PHASES, self.session.tracker)
@@ -1686,7 +1691,7 @@ class CycleRunner:
         worker = self.phase_class(phase)(self.session)
         self.session.model.is_building = worker.BUILDS
         if not worker.TITLE:
-            return worker.run(cycle)
+            return self.result(worker.run(cycle))
         started = time.perf_counter()
         with say.part(
             worker.TITLE
@@ -1697,11 +1702,17 @@ class CycleRunner:
             ),
             Tracker.icon(phase),
         ):
-            went = worker.run(cycle)
+            went = self.result(worker.run(cycle))
             if went is not False:
                 say.took(Tracker.done_words(phase), time.perf_counter() - started)
         if self.session.tracker is not None:
             self.session.tracker.outcome(self.outcome(phase, cycle))
+        return went
+
+    def result(self, went):
+        if isinstance(went, Stopped):
+            self.stopped = went
+            return False
         return went
 
     def outcome(self, phase, cycle):
@@ -1743,7 +1754,9 @@ class CycleRunner:
         )
 
     def disprove(self, cycle, phase):
-        gone = self.session.knowledge.disprove(cycle.get("used", {}), self.session.failed_phases(phase))
+        gone = self.session.knowledge.disprove(
+            cycle.get("used", {}), self.session.failed_phases(phase, self.stopped)
+        )
         if gone:
             say.info(f"{gone} lesson(s) and fact(s) used in this step are discarded: they did not hold", "🗑️")
         self.session.save()

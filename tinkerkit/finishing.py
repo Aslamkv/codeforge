@@ -4,7 +4,7 @@ lazy import time
 lazy from pathlib import Path
 
 from .messages import say
-from .session import Phase
+from .session import Phase, Stopped
 from .settings import ENV_EXAMPLE, ENV_FILE, FILES_SHOWN_PER_FIX, first_line, one_line
 lazy from .building import ToolchainRepair, Verifier
 lazy from .model import OllamaError
@@ -451,9 +451,8 @@ class FinalReview(Phase):
         if problem and not self.by_chance(problem) and ToolchainRepair(self.session).run(output, set()):
             problem, output = self.problem()
         if problem:
-            self.session.review_problem = problem
             say.fail(f"Not done: {problem}")
-            return False
+            return Stopped("review", problem)
         green, _, total = self.project.counts()
         say.done(
             f"Set up afresh; `{self.session.toolchain.test_all}` passes; "

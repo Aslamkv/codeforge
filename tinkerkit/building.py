@@ -6,7 +6,7 @@ lazy import time
 lazy from pathlib import Path
 
 from .messages import human_duration, say
-from .session import Phase, Worker
+from .session import Phase, Stopped, Worker
 lazy from .planning import Designer, SpecWriter, asked
 lazy from .prompts import Part, Prompts, PromptTooLarge, Reply
 lazy from .settings import (
@@ -44,7 +44,7 @@ class TestToolSetup(Phase, NotAPytestClass):
                 "📡",
             )
             return True
-        return TestTool(self.session).works()
+        return TestTool(self.session).works() or True
 
 
 class TestWriter(Phase, NotAPytestClass):
@@ -535,8 +535,9 @@ class Verifier(Phase):
     def run(self, cycle):
         self.recover_interrupted()
         Designer(self.session).ensure_toolchain()
-        if not TestTool(self.session).works() or not self.make_it_build():
-            return False
+        stopped = self.builds()
+        if stopped:
+            return stopped
         self.mark_passing()
         green_at_start = self.project.counts()[0]
         self.work_through(
@@ -563,6 +564,9 @@ class Verifier(Phase):
             )
         self.project.store.delete("restore", self.RESTORE_POINT)
 
+    def builds(self):
+        return TestTool(self.session).works() or self.make_it_build()
+
     def make_it_build(self):
         tried, thought = [], ""
         for attempt in itertools.count():
@@ -571,7 +575,7 @@ class Verifier(Phase):
                 ok, output = self.session.toolchain.run_check(self.workspace)
             if ok:
                 say.done("The project builds now" if attempt else "The project builds")
-                return True
+                return None
             say.fail(f"The project does not build: {Output.key_line(output)}")
             if attempt >= BROKEN_BUILD_FIXES and not thought:
                 break
@@ -579,10 +583,9 @@ class Verifier(Phase):
             tried.append(fix.run())
             thought = fix.unfinished_thought
             self.session.last_all_tests_run = None
-        self.session.build_problem = (
-            f"the project does not build after {len(tried)} fixes: {Output.key_line(output)}"
+        return Stopped(
+            "build", f"the project does not build after {len(tried)} fixes: {Output.key_line(output)}"
         )
-        return False
 
     def mark_passing(self):
         green = self.passing()
@@ -1151,8 +1154,9 @@ class BugReproducer(Phase):
 
     def run(self, cycle):
         Designer(self.session).ensure_toolchain()
-        if not TestTool(self.session).works() or not Verifier(self.session).make_it_build():
-            return False
+        stopped = Verifier(self.session).builds()
+        if stopped:
+            return stopped
         note = ""
         for _ in range(2):
             step, state, output = self.write_test(cycle, note)
@@ -1165,12 +1169,12 @@ class BugReproducer(Phase):
             note = self.why_not(step, state, output)
             say.fail(f"Not reproduced: {note}")
         self.drop(cycle)
-        self.session.unreproduced_reason = (
+        return Stopped(
+            "unreproduced",
             f"the bug could not be reproduced with a test, so nothing was changed. "
             f"Describe what you do, what happens and what should happen instead, then: "
-            f'tinker fix {self.project.run["id"]} "..."'
+            f'tinker fix {self.project.run["id"]} "..."',
         )
-        return False
 
     @staticmethod
     def reproduced(step, state, output):
@@ -1308,7 +1312,7 @@ class TestTool(Worker, NotAPytestClass):
             stage, output = self.check(attempt)
             if stage == "ok":
                 self.remember_what_worked(repair)
-                return True
+                return None
             if repair and repair[0] == "known":
                 self.session.knowledge.fix_result(repair[1], worked=False)
             problem = Output.key_line(output)
@@ -1316,8 +1320,7 @@ class TestTool(Worker, NotAPytestClass):
             repair = ToolchainRepair(self.session).run(output, tried) if attempt < 2 else None
             if repair is None:
                 break
-        self.session.tool_problem = f"the project's tools do not work: {problem}"
-        return False
+        return Stopped("tools", f"the project's tools do not work: {problem}")
 
     def check(self, attempt):
         ok, output = self.session.setup(force=attempt > 0)
