@@ -37,7 +37,7 @@ To update later, just `git pull`. The link always points at the latest code.
 
 We don't reinvent wheels. When something good already exists, we use it.
 
-So Tinker uses Ollama's own **web search** and **web fetch** by default. It needs a free key:
+So Tinker searches with Ollama's own **web search** when you give it a free key:
 
 1. Make a free account at [ollama.com](https://ollama.com).
 2. Create a key at [ollama.com/settings/keys](https://ollama.com/settings/keys).
@@ -47,16 +47,14 @@ So Tinker uses Ollama's own **web search** and **web fetch** by default. It need
 export OLLAMA_API_KEY="your-key-here"
 ```
 
-Tinker only goes on the web when you ask: `tinker learn`, `tinker research`, `tinker teach`, a run with `--web`,
-or `tinker read` of a link (that one needs no key: it only downloads the file).
+No key, or Ollama down or rate limited? Tinker falls back to a plain search on its own (DuckDuckGo's HTML
+page, read with Python alone), so the web always works. Pages are read straight from their sites, in
+parallel, like `curl` would.
 
-No key? Switch to DuckDuckGo, which needs none:
-
-```sh
-tinker use-web duckduckgo
-```
-
-Switch back any time with `tinker use-web ollama`.
+Tinker uses the web as you would: one search at a time, and only the pages its searches found. It never
+crawls a site. It only goes on the web when you ask: `tinker learn`, `tinker research`, `tinker teach`, a run
+with `--web`, or `tinker read` of a link. Offline, it says so once and goes on with what it has.
+`tinker doctor` shows which search it uses.
 
 ## First Steps 🚀
 
@@ -258,11 +256,12 @@ tinker learn food bank inventory
 ```
 
 A language or a tool is learned mainly from its own documentation, for the version you have installed
-(a language's tools too: its test runner, formatter, linter). The first time takes one web search to find
-it; a search follows only for what the documentation leaves unanswered. The cleaned pages are kept per
-version, so learning it again fetches nothing. When the web cannot help (offline, rate limited, nothing
-found), it stops at once and says why, before the model does any work, and keeps what it knew before.
-Every web request is logged in `.tinker/web-requests.log`.
+(a language's tools too: its test runner, formatter, linter). The first time takes a search to find what it
+is, one for your version's documentation, one for each tool, and a few more only for what the
+documentation leaves unanswered. The cleaned pages are kept per version, so learning it again searches for
+none of them. When the web finds nothing (offline, nothing about the topic), it stops at once and says why,
+before the model does any work, and keeps what it knew before. Every web search and fetch Tinker makes is
+logged in `.tinker/web-requests.log`.
 
 Forget the kept documentation (it is fetched again on the next learn):
 
@@ -304,8 +303,7 @@ Correct it when you know better, as many things at once as you like. Mark your o
 **prefer** ("I prefer no mypy"): Tinker honors them as they are. Everything else is a fact, checked first: Tinker runs commands on your machine that
 only show what is installed, and reads web pages about them. Each change is made once the facts it rests
 on hold: what you showed wrong is retired (kept, with why), the toolchain is corrected, and your lesson is
-kept, with its sources. A change whose facts do not hold is not made, and Tinker says why. It needs the
-web (`tinker use-web`):
+kept, with its sources. A change whose facts do not hold is not made, and Tinker says why:
 
 ```sh
 tinker teach use ruff and not black for python, ruff already does what black does
@@ -444,10 +442,9 @@ A value that does not fit is refused, with what the setting takes, and the old v
 Tune how `tinker learn` uses the web:
 
 ```sh
-tinker config web_backoff 10        # most seconds to wait out a rate limit
-tinker config learn_searches 1      # never a second search
-tinker config fetch_fallbacks 0     # never ask the web plugin to fetch a page
-tinker config docs_pages 50         # pages taken from a documentation site
+tinker config learn_searches 1      # at most one follow-up search
+tinker config learn_pages 4         # pages read from each search
+tinker config tool_docs_pages 2     # pages read about each of a language's tools
 tinker config learn_think high      # think harder (and slower) while reading pages
 ```
 
