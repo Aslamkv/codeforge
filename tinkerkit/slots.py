@@ -14,7 +14,6 @@ class Slot:
     minimum: int
     section: str
     source: str = "web"
-    docs: str = ""
 
     def asked(self, plan, version):
         hint = plan.get("hints", {}).get(self.id, "")
@@ -49,7 +48,6 @@ PROFILES = frozendict(
                 6,
                 2,
                 "toolchain",
-                docs="installing install packaging venv development tools testing",
             ),
             Slot(
                 "fundamentals",
@@ -58,7 +56,6 @@ PROFILES = frozendict(
                 5,
                 2,
                 "code",
-                docs="tutorial introduction reference lexical keywords syntax datatypes types controlflow",
             ),
             Slot(
                 "this-version",
@@ -67,7 +64,6 @@ PROFILES = frozendict(
                 5,
                 2,
                 "code",
-                docs="whatsnew changelog changes release notes migration porting deprecated removed",
             ),
             Slot(
                 "limitations",
@@ -76,7 +72,6 @@ PROFILES = frozendict(
                 4,
                 1,
                 "design",
-                docs="faq design limitations performance threading memory",
             ),
             Slot(
                 "best-use-cases",
@@ -85,7 +80,6 @@ PROFILES = frozendict(
                 3,
                 1,
                 "spec",
-                docs="faq general about appetite overview",
             ),
             READINESS,
         ),
@@ -98,7 +92,6 @@ PROFILES = frozendict(
                 3,
                 1,
                 "spec",
-                docs="overview introduction about index why",
             ),
             Slot(
                 "core-usage",
@@ -107,7 +100,6 @@ PROFILES = frozendict(
                 6,
                 2,
                 "code",
-                docs="quickstart tutorial getting started usage guide api reference",
             ),
             Slot(
                 "this-version",
@@ -116,7 +108,6 @@ PROFILES = frozendict(
                 4,
                 1,
                 "code",
-                docs="changelog changes release history whatsnew migration deprecations upgrading",
             ),
             Slot(
                 "pitfalls-and-limits",
@@ -125,7 +116,6 @@ PROFILES = frozendict(
                 4,
                 1,
                 "code",
-                docs="faq troubleshooting limitations caveats gotchas known issues",
             ),
             Slot(
                 "conventions",
@@ -134,7 +124,6 @@ PROFILES = frozendict(
                 4,
                 1,
                 "design",
-                docs="configuration structure layout best practices patterns settings",
             ),
             Slot(
                 "fit",
@@ -143,7 +132,6 @@ PROFILES = frozendict(
                 3,
                 1,
                 "toolchain",
-                docs="install installation integration testing plugins",
             ),
             READINESS,
         ),
@@ -151,7 +139,7 @@ PROFILES = frozendict(
 )
 
 
-TOOL_DOCS_QUERY = "install installation getting started usage configuration command line options"
+TOOL_DOCS_SEARCH = "{name} {version} documentation usage configuration"
 
 
 def web_slots(profile):

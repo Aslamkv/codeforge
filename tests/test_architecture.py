@@ -27,7 +27,6 @@ LAYERS = (
     "channels",
     "knowledge",
     "slots",
-    "docsite",
     "learning",
     "graph",
     "reading",

@@ -257,8 +257,7 @@ MAX_RULE_CHARS = 200
 MAX_RULE_WHEN_CHARS = 80
 
 DOCS_SITE_SEARCH = "{topic} official documentation"
-SITE_MAP_FILES = ("llms.txt", "sitemap.xml")
-MAX_MAP_LINKS = 5000
+DOCS_VERSION_SEARCH = "{name} {version} documentation"
 RESULTS_PER_LEARN_SEARCH = 10
 MIN_USABLE_PAGE_CHARS = 400
 MAX_REDIRECTS = 5
