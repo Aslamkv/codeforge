@@ -307,6 +307,7 @@ def test_progress_shows_the_tracker():
     assert progress.take(before_any_step) and "▸ ✅ **Confirmed:** building it" in progress.text()
     progress.take(
         snapshot(
+            job=7,
             step="verify",
             doing=Tracker.DOING_AND_DONE["verify"][0],
             began=time.time() - 65,
@@ -316,7 +317,7 @@ def test_progress_shows_the_tracker():
         )
     )
     assert progress.text().splitlines() == [
-        "🔨 **calc: a calculator**",
+        "🔨 **calc: a calculator** (Job #7)",
         "✅ 🧠 Recalled what Tinker has learned",
         "✅ 📝 Spec written",
         "▸ **🔁 Fixing until every test passes** · ⏱ 1m 5s ⏳",

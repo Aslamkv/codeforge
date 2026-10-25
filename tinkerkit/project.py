@@ -670,6 +670,7 @@ class Tracker:
         self.pid, self.store, self.published = os.getpid(), None, 0.0
         self.state = {
             "title": title,
+            "job": Jobs.current["number"] if Jobs.current else None,
             "run": None,
             "folder": None,
             "step": None,

@@ -601,10 +601,10 @@ What is said in the chats, kept so that a chat is only a view of it.
   that fits the spec prompt is used whole. A longer spec is condensed chunk by chunk with the model.
 - **PRJ-13** `Outcome` starts as `stopped` with exit code 1. `done` and `awaiting` exit with 0, and `blocked`
   exits with 1.
-- **PRJ-14** `Tracker` is a run's one report. It keeps the title, run ID, folder, phase, steps done, passing
-  spec points, what the model is doing now, the latest message said, a plan that waits, the end, the seconds
-  taken and when it went on (`resumed`). Each change is published at once in the home's `running` under the
-  run's process, and appended to the project's `progress` log.
+- **PRJ-14** `Tracker` is a run's one report. It keeps the title, job number, run ID, folder, phase, steps
+  done, passing spec points, what the model is doing now, the latest message said, a plan that waits, the end,
+  the seconds taken and when it went on (`resumed`). Each change is published at once in the home's `running`
+  under the run's process, and appended to the project's `progress` log.
 - **PRJ-15** The steps are named by phase (`DOING_AND_DONE`: what each phase is doing, and when done). A step
   done says what came of it (`outcome`) after its words. The passing count is taken from the project on every
   save, for every criterion (`C…` and `B…`). A plan that waits is kept as data: its project, run, language,
@@ -753,10 +753,10 @@ The terminal and the chats are one conversation: the same commands, the same ans
   and a plan that waits. Once the task ends, it reads the task's last state and removes its tracker.
 - **CNV-16** `running(skip)` lists the runs whose trackers are in the home's `running`, but for its own process
   and those it skips. It removes the trackers of processes that have ended, known as a job is (**JOB-2**).
-- **CNV-17** `Progress(snapshot)` shows a run's tracker: its title, its steps done, the step it is on with its
-  clock, what the model writes now, the passing spec points and the latest line (`text`); a one-line `brief`;
-  how long it took (`took`); and its `ending`: the end's headline, details and next commands, or the plan that
-  waits with its criteria and what to send next.
+- **CNV-17** `Progress(snapshot)` shows a run's tracker: its title with its job (`(Job #N)`, so the person can
+  stop it at once), its steps done, the step it is on with its clock, what the model writes now, the passing
+  spec points and the latest line (`text`); a one-line `brief`; how long it took (`took`); and its `ending`: the
+  end's headline, details and next commands, or the plan that waits with its criteria and what to send next.
 - **CNV-18** `Reporter` shows one run's tracker in one message per chat. It reads the tracker every
   `PROGRESS_EDIT_SECONDS` seconds and edits the message when it changed. It ends with the run's ending (with
   its `text`: a research's answer). A command that keeps no tracker shows its latest printed line.

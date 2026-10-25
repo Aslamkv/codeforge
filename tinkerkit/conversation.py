@@ -1600,7 +1600,8 @@ class Progress:
             if self.working_on.startswith(self.OWN_PHASE_ICONS)
             else md(t"**{self.working_on}**")
         )
-        lines = [md(t"🔨 **{state['title']}**")] + [f"✅ {step}" for step in state.get("steps", [])]
+        job = f" (Job #{state['job']})" if state.get("job") else ""
+        lines = [md(t"🔨 **{state['title']}**{job}")] + [f"✅ {step}" for step in state.get("steps", [])]
         lines += [f"▸ {doing}{clock} {self.HOURGLASS[self.turns % 2]}"]
         lines += [md(t"📊 {self.how_far}")] if self.how_far else []
         if state.get("found"):
