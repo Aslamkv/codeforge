@@ -13,7 +13,7 @@ lazy from pathlib import Path
 
 from .messages import say
 lazy from .knowledge import Learner, Library, Retriever, mentions, relevant_chunks
-lazy from .project import Tracked
+lazy from .project import Tracked, ending
 lazy from .prompts import Part, Prompts
 lazy from .settings import (
     BOOK_PASSAGES_SHOWN,
@@ -33,6 +33,7 @@ lazy from .settings import (
     Home,
     Numbered,
     confirm_deletion,
+    field,
     fingerprint,
     first_line,
     now_text,
@@ -168,10 +169,10 @@ class Reader(Tracked):
             say.info(
                 f'Every chapter of #{number} is read: read #{number} "WHAT" reads it again with a focus', "📚"
             )
-            return ending(Readings.get(number), 0, [])
+            return read_ending(Readings.get(number), 0, [])
         found = self.chapters_read(entry, book, survey, chapters, focus)
         self.condensed(Readings.get(number), survey, found)
-        return ending(Readings.get(number), len(found), chapters)
+        return read_ending(Readings.get(number), len(found), chapters)
 
     def surveyed(self, entry, book):
         self.step("survey", "Reading its contents, foreword and index…", "🧭")
@@ -182,9 +183,7 @@ class Reader(Tracked):
                 "Read: the reading plan",
                 lambda reply: read_survey(reply.json(), book),
                 think=think(),
-            )
-        if survey is None:
-            raise SystemExit(f"{self.model.name} could not make a reading plan; its text stays stored.")
+            ).needed(f"{self.model.name} could not make a reading plan; its text stays stored.")
         Readings.surveyed(entry, survey)
         core = [str(chapter.number) for chapter in book.chapters if order_of(survey, chapter) == "core"]
         with say.section():
@@ -235,7 +234,7 @@ class Reader(Tracked):
                 lambda reply: read_points(reply.json(), survey["software"]),
                 attempts=2,
                 think=think(),
-            )
+            ).value
             found += [
                 dict(point, chapter=chapter.number, slot=f"chapter {chapter.number}")
                 for point in points or []
@@ -378,7 +377,7 @@ class Readings:
         return [found[index] for index in order[:count]]
 
 
-def ending(entry, new, chapters):
+def read_ending(entry, new, chapters):
     book, topic = Book.of(entry), Library.read(entry["topic"]) or {}
     readable = [chapter for chapter in book.chapters if chapter.state != "raw"]
     details = [
@@ -395,16 +394,16 @@ def ending(entry, new, chapters):
     for label, value in details:
         say.done(f"{label}: {value}")
     number = entry["number"]
-    return {
-        "status": "done",
-        "headline": f"Read #{number} {entry['title']}",
-        "details": details,
-        "next": [
+    return ending(
+        "done",
+        f"Read #{number} {entry['title']}",
+        details,
+        [
             ("Ask about it", f"tinker ask what does {entry['title']} say about …"),
             ("Look again", f'tinker read #{number} "what to look for"'),
             ("See it", f"tinker read show #{number}"),
         ],
-    }
+    )
 
 
 def show_list(page=1):
@@ -636,7 +635,7 @@ def survey_parts(book):
 
 
 def read_survey(data, book):
-    summary = str(data.get("summary") or "").strip()
+    summary = field(data, "summary")
     if not summary:
         raise ValueError("no summary")
     numbers, order = {chapter.number for chapter in book.chapters}, {}
@@ -663,9 +662,9 @@ def read_points(data, software):
         raise ValueError('no "points" list')
     points = []
     for point in data["points"]:
-        text = str(point.get("text") or "").strip() if isinstance(point, dict) else ""
+        text = field(point, "text") if isinstance(point, dict) else ""
         if text:
-            phase = str(point.get("phase") or "").strip().lower()
+            phase = field(point, "phase").lower()
             points.append(
                 {
                     "text": text[:MAX_FACT_CHARS],

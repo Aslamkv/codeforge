@@ -948,9 +948,9 @@ class FixAttempt(Worker):
             unthinking_retry=False,
             think=think,
         )
-        self.hit_thinking_cap = self.session.model.hit_thinking_cap
+        self.hit_thinking_cap = bool(reply.thought)
         if self.hit_thinking_cap:
-            self.step[key], self.step["unfinished_thought"] = True, self.session.model.last_unfinished_thought
+            self.step[key], self.step["unfinished_thought"] = True, reply.thought
         return reply
 
     def system(self):
@@ -1088,8 +1088,8 @@ class BuildFix(Worker):
         except PromptTooLarge as exc:
             say.skip(f"Make it build: the prompt does not fit ({exc})")
             return "the prompt did not fit"
-        if self.session.model.hit_thinking_cap:
-            self.unfinished_thought = self.session.model.last_unfinished_thought
+        if reply.thought:
+            self.unfinished_thought = reply.thought
         change = self.workspace.apply(reply, self.may_change(view), view.windows)
         return self.said(change, reply.cause() or "?")
 

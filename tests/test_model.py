@@ -8,7 +8,7 @@ from conftest import MEASURED, MODEL
 
 import tinkerkit.model as model_module
 from tinkerkit.messages import say
-from tinkerkit.model import Calibrator, Model, Models, Ollama, OllamaError, Stream
+from tinkerkit.model import Answer, Calibrator, Model, Models, Ollama, OllamaError, Stream
 from tinkerkit.prompts import Part, Prompts, PromptTooLarge, Reply
 from tinkerkit.settings import PROMPT_BUDGET_SHARE, STARTING_CHARS_PER_TOKEN, Config, Home
 
@@ -389,7 +389,9 @@ def test_model_settings(make_model):
 def test_ask_once(make_model, fake_ollama, model_log):
     fake_ollama.reply("the answer")
     model = make_model()
-    assert model.ask("You help.", [Part("Question", "what?", True), Part("Empty", "")], "Ask") == "the answer"
+    assert model.ask("You help.", [Part("Question", "what?", True), Part("Empty", "")], "Ask") == Answer(
+        "the answer"
+    )
     messages = fake_ollama.calls[0]["messages"]
     assert messages[0] == {"role": "system", "content": "You help." + Prompts.NO_TOOL_CALLS}
     assert messages[1] == {"role": "user", "content": "## Question\nwhat?"}
@@ -402,7 +404,8 @@ def test_ask_once(make_model, fake_ollama, model_log):
 def test_a_model_logs_its_details_and_says_only_when_it_asks_again(model_log, fake_ollama, capsys):
     fake_ollama.reply("not json").reply('{"ok": 1}')
     model = Model(MODEL, MEASURED, 0, model_log)
-    assert model.ask_until_usable("s", [Part("Q", "q", True)], "Plan", lambda reply: reply.json()["ok"]) == 1
+    answer = model.ask_until_usable("s", [Part("Q", "q", True)], "Plan", lambda reply: reply.json()["ok"])
+    assert answer.value == 1
     assert capsys.readouterr().out == "🔁 Working on it: no usable result yet, trying again\n"
     notes = [entry["note"] for _, entry in model_log.store.entries("calls") if "note" in entry]
     assert any(note.startswith("Plan (attempt 1)") for note in notes) and any(
@@ -414,6 +417,13 @@ def test_a_model_logs_its_details_and_says_only_when_it_asks_again(model_log, fa
     assert stream.status(stream.started + 101) == "Working on it… 1m 41s (101s)"
 
 
+@pytest.mark.spec("MOD-17")
+def test_an_answer_gives_its_value_when_it_is_usable_and_ends_when_it_is_not():
+    assert Answer("ok").needed("No plan") == "ok"
+    with pytest.raises(SystemExit, match=r"^No plan \(it ran out\)$"):
+        Answer("", why="it ran out").needed("No plan")
+
+
 def cut(thinking="I was thinking about it"):
     return {"content": "", "thinking": thinking, "done_reason": "length", "eval_count": 4096}
 
@@ -421,14 +431,14 @@ def cut(thinking="I was thinking about it"):
 @pytest.mark.spec("MOD-18")
 def test_a_reply_cut_while_thinking_gets_more_room(make_model, fake_ollama):
     fake_ollama.reply(cut()).reply("done")
-    assert make_model().ask("s", [Part("Q", "q", True)], "Ask", budget=2048) == "done"
+    assert make_model().ask("s", [Part("Q", "q", True)], "Ask", budget=2048) == Answer("done")
     assert [call["options"]["num_predict"] for call in fake_ollama.calls] == [2048, 4096]
 
 
 @pytest.mark.spec("MOD-18")
 def test_then_it_is_asked_without_thinking_to_conclude(make_model, fake_ollama):
     fake_ollama.reply(cut("the plan is to add")).reply("concluded")
-    assert make_model().ask("s", [Part("Q", "q", True)], "Ask") == "concluded"
+    assert make_model().ask("s", [Part("Q", "q", True)], "Ask") == Answer("concluded")
     second = fake_ollama.calls[1]
     assert second["think"] is False and "the plan is to add" in second["messages"][1]["content"]
 
@@ -437,22 +447,25 @@ def test_then_it_is_asked_without_thinking_to_conclude(make_model, fake_ollama):
 def test_without_unthinking_retry_it_gives_up(make_model, fake_ollama):
     fake_ollama.reply(cut("half a thought"))
     model = make_model()
-    assert model.ask("s", [Part("Q", "q", True)], "Ask", unthinking_retry=False) == ""
-    assert model.hit_thinking_cap and model.last_unfinished_thought == "half a thought"
+    assert model.ask("s", [Part("Q", "q", True)], "Ask", unthinking_retry=False) == Answer(
+        "", why="the reply ran out of room while still thinking", thought="half a thought"
+    )
 
 
 @pytest.mark.spec("MOD-18")
 def test_a_cut_reply_whose_blocks_have_ended_is_kept(make_model, fake_ollama):
     answer = "<<<FILE a.py>>>\nx = 1\n<<<END>>>\nI"
     fake_ollama.reply({"content": answer, "thinking": "t", "done_reason": "length", "eval_count": 4096})
-    assert make_model().ask("s", [Part("Q", "q", True)], "Ask", done_when=Reply.files_complete) == answer
+    assert make_model().ask("s", [Part("Q", "q", True)], "Ask", done_when=Reply.files_complete) == Answer(
+        answer
+    )
     assert len(fake_ollama.calls) == 1
 
 
 @pytest.mark.spec("MOD-19")
 def test_out_of_memory_shrinks_the_prompt_then_gives_up(make_model, fake_ollama, capsys):
     fake_ollama.reply(OllamaError("oom", oom=True)).reply("ok")
-    assert make_model().ask("s", [Part("Q", "q", True)], "Ask") == "ok"
+    assert make_model().ask("s", [Part("Q", "q", True)], "Ask") == Answer("ok")
     assert "Out of GPU memory; trying again with a shorter prompt" in capsys.readouterr().out
     fake_ollama.reply(OllamaError("oom", oom=True), times=3)
     with pytest.raises(OllamaError, match="oom"):
@@ -462,7 +475,7 @@ def test_out_of_memory_shrinks_the_prompt_then_gives_up(make_model, fake_ollama,
 @pytest.mark.spec("MOD-19")
 def test_a_stall_reloads_the_model(make_model, fake_ollama):
     fake_ollama.reply(OllamaError("stuck", stalled=True), times=2).reply("ok")
-    assert make_model().ask("s", [Part("Q", "q", True)], "Ask") == "ok"
+    assert make_model().ask("s", [Part("Q", "q", True)], "Ask") == Answer("ok")
     assert fake_ollama.unloaded == [MODEL, MODEL]
     fake_ollama.reply(OllamaError("stuck", stalled=True), times=3)
     with pytest.raises(OllamaError):
@@ -476,7 +489,7 @@ def test_a_rejected_think_level_falls_back(make_model, fake_ollama):
     )
     fake_ollama.reply("ok")
     model = make_model()
-    assert model.ask("s", [Part("Q", "q", True)], "Ask") == "ok"
+    assert model.ask("s", [Part("Q", "q", True)], "Ask") == Answer("ok")
     assert [call["think"] for call in fake_ollama.calls] == ["high", True, None]
     assert model.think is None and model.think_rejected
 
@@ -485,7 +498,7 @@ def test_a_rejected_think_level_falls_back(make_model, fake_ollama):
 def test_a_reply_error_is_asked_once_more_then_the_partial_is_used(make_model, fake_ollama, capsys):
     error = OllamaError("parse error", in_reply=True, partial="<<<FILE a.py>>>\nx")
     fake_ollama.reply(error, times=2)
-    assert make_model().ask("s", [Part("Q", "q", True)], "Ask") == "<<<FILE a.py>>>\nx"
+    assert make_model().ask("s", [Part("Q", "q", True)], "Ask") == Answer("<<<FILE a.py>>>\nx")
     assert len(fake_ollama.calls) == 2
 
 
@@ -493,7 +506,7 @@ def test_a_reply_error_is_asked_once_more_then_the_partial_is_used(make_model, f
 def test_crashes_lower_a_limit_for_the_run_then_stop(make_model, fake_ollama, no_sleep, capsys):
     model = make_model(max_prompt_tokens=700)
     fake_ollama.reply(OllamaError("runner process has terminated", crashed=True), times=2).reply("ok")
-    assert model.ask("s", [Part("Q", "q" * 1000, True)], "Ask") == "ok"
+    assert model.ask("s", [Part("Q", "q" * 1000, True)], "Ask") == Answer("ok")
     assert model.max_tokens == 630 and model.crashes == 2 and model.calibrated[0] == 700
     assert no_sleep.count(model_module.CRASH_RECOVERY_SECONDS) == 2
     fake_ollama.reply(OllamaError("runner failed", crashed=True), times=4)
@@ -506,7 +519,7 @@ def test_a_crash_while_writing_lowers_the_longest_reply(make_model, fake_ollama,
     model = make_model()
     crash = OllamaError("runner failed", crashed=True, streamed=12000)
     fake_ollama.reply(crash, times=2).reply("ok")
-    assert model.ask("s", [Part("Q", "q", True)], "Ask") == "ok"
+    assert model.ask("s", [Part("Q", "q", True)], "Ask") == Answer("ok")
     assert model.max_reply == int(16384 * 0.9) and model.max_tokens == 8192
 
 
@@ -522,7 +535,7 @@ def test_a_prompt_too_large_is_relaxed_then_refused(make_model, fake_ollama, mod
     fake_ollama.reply("ok")
     model = make_model(max_prompt_tokens=512)
     exact = Part("File", "c" * 3000, True, exact=True)
-    assert model.ask("s", [exact], "Ask") == "ok"
+    assert model.ask("s", [exact], "Ask") == Answer("ok")
     assert any(
         "shortening every part" in entry.get("note", "") for _, entry in model_log.store.entries("calls")
     )
@@ -532,12 +545,12 @@ def test_a_prompt_too_large_is_relaxed_then_refused(make_model, fake_ollama, mod
 
 
 @pytest.mark.spec("MOD-21")
-def test_ask_until_usable(make_model, fake_ollama):
+def test_ask_until_usable(make_model, fake_ollama, monkeypatch):
     fake_ollama.reply("not json").reply('{"ok": true}')
-    result = make_model().ask_until_usable(
+    answer = make_model().ask_until_usable(
         "s", [Part("Q", "q", True)], "Plan", lambda reply: reply.json()["ok"]
     )
-    assert result is True
+    assert answer == Answer(True)
     assert (
         "Your previous reply was not usable (no JSON object in reply)"
         in fake_ollama.calls[1]["messages"][1]["content"]
@@ -547,12 +560,21 @@ def test_ask_until_usable(make_model, fake_ollama):
         "Plan (attempt 2)",
     ]
     fake_ollama.reply("no", times=2)
-    assert (
-        make_model().ask_until_usable(
-            "s", [Part("Q", "q", True)], "Plan", lambda reply: reply.json(), attempts=2
-        )
-        is None
+    answer = make_model().ask_until_usable(
+        "s", [Part("Q", "q", True)], "Plan", lambda reply: reply.json(), attempts=2
     )
+    assert (
+        answer.value is None and answer.why == "no usable reply after 2 attempt(s): no JSON object in reply"
+    )
+    model = make_model()
+
+    def too_large(*args, **kwargs):
+        raise PromptTooLarge("too big")
+
+    monkeypatch.setattr(model, "ask", too_large)
+    answer = model.ask_until_usable("s", [], "Plan", lambda reply: reply)
+    assert answer.value is None and "even shortened, the prompt does not fit" in answer.why
+    assert "(too big)" in answer.why and "tinker calibrate" in answer.why
 
 
 @pytest.mark.spec("MOD-22")

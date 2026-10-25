@@ -54,6 +54,13 @@ ContextSplit = namedtuple("ContextSplit", "prompt_budget longest_reply")
 LoadedModel = namedtuple("LoadedModel", "name size_bytes")
 
 
+class Answer(namedtuple("Answer", "value why thought", defaults=("", ""))):
+    def needed(self, message):
+        if self.why:
+            raise SystemExit(f"{message} ({self.why})")
+        return self.value
+
+
 class Model:
     def __init__(
         self, name, settings, keep_alive, log, exclusive=True, max_growth=DEFAULT_CONFIG["max_growth"]
@@ -68,8 +75,6 @@ class Model:
         self.options = {"num_batch": int(settings["num_batch"])} if settings.get("num_batch") else {}
         self.log, self.exclusive, self.max_growth = log, exclusive, max_growth
         self.think_rejected = False
-        self.hit_thinking_cap = False
-        self.last_unfinished_thought = ""
         self.crashes = 0
         self.calibrated = (self.max_tokens, self.max_reply)
         self.base_gb = None
@@ -100,7 +105,6 @@ class Model:
     ):
         if self.exclusive:
             self.evict_others()
-        self.hit_thinking_cap = False
         chosen = self.think_now() if think is None else think
         tries = Tries(None if self.think_rejected else chosen, budget or self.max_reply)
         request = (
@@ -111,10 +115,10 @@ class Model:
             max_reply or self.max_reply,
             unthinking_retry,
         )
-        reply = None
-        while reply is None:
-            reply = self.one_try(tries, *request)
-        return reply
+        answer = None
+        while answer is None:
+            answer = self.one_try(tries, *request)
+        return answer
 
     def one_try(self, tries, system, parts, label, done_when, max_reply, unthinking_retry):
         user = self.user_message(
@@ -130,10 +134,10 @@ class Model:
             return self.after_error(exc, label, tries, self.prompt_tokens(system, user), shown, started)
         content, cut = self.log_exchange(system, user, shown, tries.budget, data, started)
         if cut and self.unfinished(content, done_when) and tries.think is not False:
-            return None if self.think_again(tries, data, shown, started, cap, unthinking_retry) else ""
+            return self.think_again(tries, data, shown, started, cap, unthinking_retry)
         self.report(shown, data, started, cut)
         self.check_memory()
-        return content
+        return Answer(content)
 
     def evict_others(self):
         for loaded, _ in Ollama.loaded_models() or []:
@@ -206,7 +210,11 @@ class Model:
             return None
         if exc.in_reply:
             tries.reply_errors += 1
-            return exc.partial if self.reply_error_is_final(exc, shown, started, tries.reply_errors) else None
+            return (
+                Answer(exc.partial)
+                if self.reply_error_is_final(exc, shown, started, tries.reply_errors)
+                else None
+            )
         self.recover(exc, label, tries)
         return None
 
@@ -359,13 +367,12 @@ class Model:
         self.step(f"{shown}  ({said})", started)
         thought = data["message"].get("thinking", "")
         if action == "give up":
-            self.hit_thinking_cap, self.last_unfinished_thought = True, thought
-            return False
+            return Answer("", why="the reply ran out of room while still thinking", thought=thought)
         if action == "more":
             tries.budget = min(tries.budget * 2, cap)
         else:
             tries.think, tries.unfinished_thought = False, thought
-        return True
+        return None
 
     @staticmethod
     def after_cut(data, budget, cap, unthinking_retry):
@@ -429,9 +436,10 @@ class Model:
             Ollama.unload(self.name)
 
     def ask_until_usable(self, system, parts, label, read, attempts=3, think=None, max_reply=None):
+        problem = None
         for attempt in range(1, attempts + 1):
-            reply = Reply(
-                self.ask(
+            try:
+                answer = self.ask(
                     system,
                     parts,
                     f"{label} (attempt {attempt})",
@@ -439,10 +447,12 @@ class Model:
                     think=think,
                     max_reply=max_reply,
                 )
-            )
+            except PromptTooLarge as exc:
+                return Answer(None, why=self.too_large_why(exc))
             try:
-                return read(reply)
+                return Answer(read(Reply(answer.value)))
             except (ValueError, ToolError, AttributeError, TypeError, KeyError) as exc:
+                problem = exc
                 self.note(
                     f"{label.lower()} not usable: {exc}",
                     f"{say.going_on()}: no usable result yet, trying again" if attempt < attempts else "",
@@ -453,7 +463,14 @@ class Model:
                         "Note", f"Your previous reply was not usable ({exc}). Reply with ONLY the JSON.", True
                     ),
                 )
-        return None
+        return Answer(None, why=f"no usable reply after {attempts} attempt(s): {problem}")
+
+    def too_large_why(self, exc):
+        return (
+            f"even shortened, the prompt does not fit {self.name}'s input budget of {self.max_tokens} tokens "
+            f"({exc}). Measure the model again (tinker calibrate) or use one that reads longer prompts "
+            f"(tinker models)"
+        )
 
     def limit_chars(self, system, tokens=None):
         return (

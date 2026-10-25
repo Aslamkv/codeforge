@@ -4,6 +4,7 @@ from collections import namedtuple
 from .messages import say
 lazy from .graph import Graph
 lazy from .knowledge import Item, Knowledge, Learner, Library, Retriever, retire
+lazy from .project import ending
 lazy from .prompts import Part, Prompts
 lazy from .reading import Readings
 lazy from .settings import (
@@ -12,6 +13,7 @@ lazy from .settings import (
     TEACH_CHECK_COMMANDS,
     TEACH_CHECK_SEARCHES,
     TEACH_CLAIMS,
+    field,
     first_line,
     words,
 )
@@ -64,10 +66,6 @@ def moved_on(tracker, phase, said, icon):
         tracker.phase(phase)
 
 
-def ending(status, headline, details=()):
-    return {"status": status, "headline": headline, "details": list(details)}
-
-
 class Asker:
     def __init__(self, model, memory, tracker=None):
         self.model, self.memory, self.tracker = model, memory, tracker
@@ -97,7 +95,7 @@ class Asker:
             Part("From what you read", quoted(passages)),
             Part("The question", question, True),
         ]
-        return self.model.ask(Prompts.ASK_SYSTEM, parts, "ask").strip()
+        return self.model.ask(Prompts.ASK_SYSTEM, parts, "ask").value.strip()
 
     @staticmethod
     def said(answer):
@@ -139,9 +137,7 @@ class Teacher:
                 parts,
                 "teach: what to check",
                 lambda reply: read_plan(reply.json(), len(items), marked(teaching), bool(self.readings)),
-            )
-        if plan is None:
-            raise SystemExit(f"{self.model.name} could not work out what to check; nothing changed")
+            ).needed(f"{self.model.name} could not work out what to check; nothing changed")
         with say.part("What you taught", "📝"):
             for claim in plan["claims"]:
                 say.info(claim["text"], "👤" if claim["preference"] else "🔍")
@@ -212,15 +208,12 @@ class Teacher:
         moved_on(self.tracker, "judge", "Weighing the evidence…", "⚖️")
         facts = sum(not claim["preference"] for claim in plan["claims"])
         with say.working_on(f"Weighing {len(evidence)} piece(s) of evidence on {facts} fact(s) you taught"):
-            verdict = self.model.ask_until_usable(
+            return self.model.ask_until_usable(
                 Prompts.JUDGE_SYSTEM,
                 self.judge_parts(teaching, plan, items, evidence),
                 "teach: weigh the evidence",
                 lambda reply: Verdict.read(reply.json(), plan, len(evidence)),
-            )
-        if verdict is None:
-            raise SystemExit(f"{self.model.name} could not weigh the evidence; nothing changed")
-        return verdict
+            ).needed(f"{self.model.name} could not weigh the evidence; nothing changed")
 
     @staticmethod
     def judge_parts(teaching, plan, items, evidence):
@@ -348,7 +341,7 @@ def read_plan(data, count, preferences=True, readings=False):
         "claims": claims,
         "commands": texts("commands", TEACH_CHECK_COMMANDS),
         "searches": texts("searches", TEACH_CHECK_SEARCHES),
-        "language": str(data.get("language") or "").strip(),
+        "language": field(data, "language"),
         "changes": read_changes(data.get("changes"), len(claims), count),
     }
     if not claims:
@@ -368,7 +361,7 @@ def read_claims(given):
     claims = []
     for claim in given if isinstance(given, list) else []:
         claim = claim if isinstance(claim, dict) else {"text": claim}
-        text = str(claim.get("text") or "").strip()
+        text = field(claim, "text")
         if text:
             claims.append({"text": text, "preference": claim.get("preference") is True})
     return claims[:TEACH_CLAIMS]
@@ -438,13 +431,13 @@ def command_list(key, value):
 
 def read_lesson(given):
     given = given if isinstance(given, dict) else {}
-    text, phase = str(given.get("text") or "").strip(), str(given.get("phase") or "").strip().lower()
+    text, phase = field(given, "text"), field(given, "phase").lower()
     return {"phase": phase, "text": text} if text and phase in LESSON_PHASES else None
 
 
 def read_fact(given, count):
     given = given if isinstance(given, dict) else {}
-    text, about = str(given.get("text") or "").strip(), given.get("about")
+    text, about = field(given, "text"), given.get("about")
     return {"about": about, "text": text} if text and type(about) is int and 1 <= about <= count else None
 
 
@@ -517,15 +510,13 @@ class Verdict:
             claim.update(
                 verdict="unsure" if holds_bare else item["verdict"],
                 evidence=cites,
-                why="no evidence cited" if holds_bare else str(item.get("why") or "").strip(),
+                why="no evidence cited" if holds_bare else field(item, "why"),
             )
         said = {item.get("change"): item for item in data.get("changes") or [] if isinstance(item, dict)}
         for number, _ in judged_changes(plan):
             if number not in said or not isinstance(said[number].get("follows"), bool):
                 raise ValueError(f'change {number} has no "follows" (true or false)')
-            verdict.follows_by_change[number] = Follows(
-                said[number]["follows"], str(said[number].get("why") or "").strip()
-            )
+            verdict.follows_by_change[number] = Follows(said[number]["follows"], field(said[number], "why"))
         return verdict
 
     def why_not(self, number, change):

@@ -372,7 +372,7 @@ def test_note_ask_until_usable_and_room(session, fake_ollama, monkeypatch):
     def too_large(*args, **kwargs):
         raise PromptTooLarge("too big")
 
-    monkeypatch.setattr(session.model, "ask_until_usable", too_large)
+    monkeypatch.setattr(session.model, "ask", too_large)
     with pytest.raises(SystemExit, match="even shortened, the prompt does not fit"):
         session.ask_until_usable("s", [], "Plan", lambda reply: reply)
     assert session.room("system") == int(session.model.limit_chars("system" + Prompts.NO_TOOL_CALLS) * 0.95)

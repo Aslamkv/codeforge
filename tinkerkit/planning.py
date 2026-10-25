@@ -22,6 +22,7 @@ lazy from .settings import (
     TOPIC_RELEVANT_SIMILARITY,
     Config,
     after_what_they_use,
+    field,
     first_line,
     groups_fitting,
     words,
@@ -330,7 +331,7 @@ class SpecWriter(Phase):
             if not isinstance(given, dict):
                 raise ValueError("it needs the toolchain")
             toolchain = Designer.read_toolchain_data(given)
-        language = str(data.get("language") or "").strip() or "Python"
+        language = field(data, "language") or "Python"
         return {
             "language": language,
             "criteria": criteria,
@@ -358,7 +359,7 @@ class SpecWriter(Phase):
             )
             if not text:
                 continue
-            source = str(item.get("source", "")).strip()
+            source = field(item, "source")
             if not self.traced(source, request):
                 say.skip(
                     f"Dropped a criterion the request does not ask for: {first_line(text, 90)} "
@@ -424,12 +425,12 @@ class SpecWriter(Phase):
 
     def place_tests(self, criteria, listed):
         listed_tests = [
-            str(Path(str(item.get("path", "")).strip()))
+            str(Path(field(item, "path")))
             for item in listed
-            if isinstance(item, dict) and str(item.get("kind") or "").strip().lower() == "test"
+            if isinstance(item, dict) and field(item, "kind").lower() == "test"
         ]
         listed_code = {
-            str(Path(str(item.get("path", "")).strip()))
+            str(Path(field(item, "path")))
             for item in listed
             if isinstance(item, dict) and str(item.get("kind") or "code").strip().lower() == "code"
         }
@@ -864,9 +865,9 @@ class Designer(Phase):
 
     @staticmethod
     def layout_file(item, test_files, workspace):
-        path = str(Path(str(item.get("path", "")).strip()))
+        path = str(Path(field(item, "path")))
         workspace.resolve(path, for_write=True)
-        kind = "test" if path in test_files else (str(item.get("kind") or "").strip().lower() or "code")
+        kind = "test" if path in test_files else (field(item, "kind").lower() or "code")
         uses = item.get("uses", [])
         return {
             "path": path,
@@ -962,13 +963,15 @@ class InterfaceReviewer(Phase):
             Part("External services: adapters and sample data", cycle.get("data", ""), atomic=True),
             Part("Language", self.project.language),
         ]
-        try:
-            return self.session.ask_until_usable(
-                Prompts.INTERFACE_SYSTEM, parts, label, self.read, attempts=2, max_reply=CHECK_MAX_TOKENS
+        answer = self.session.model.ask_until_usable(
+            Prompts.INTERFACE_SYSTEM, parts, label, self.read, attempts=2, max_reply=CHECK_MAX_TOKENS
+        )
+        if answer.why:
+            say.warn(
+                f"Could not get a usable {label.lower()} ({answer.why}). Going on with this part of the plan as it is."
             )
-        except SystemExit as exc:
-            say.warn(f"{exc} Going on with this part of the plan as it is.")
             return [], []
+        return answer.value
 
     def design_entry(self, path):
         info = self.project.files[path]
@@ -990,14 +993,14 @@ class InterfaceReviewer(Phase):
     def problem(item):
         match item:
             case {"problem": problem} if str(problem).strip():
-                file = str(item.get("file") or "").strip()
+                file = field(item, "file")
                 return {"file": str(Path(file)) if file else "", "problem": str(problem).strip()}
             case str() if item.strip():
                 return {"file": "", "problem": item.strip()}
         return None
 
     def corrected_file(self, item):
-        path = str(Path(str(item.get("path", "")).strip()))
+        path = str(Path(field(item, "path")))
         self.workspace.resolve(path, for_write=True)
         known = self.project.files.get(path, {})
         contract = item.get("contract")
@@ -1106,13 +1109,15 @@ class ContractWriter(Worker):
             calls += 1
             parts, criteria = self.prompt(cycle, path, info, criteria, so_far, problems)
             label = f"Contract of {path}" + (f" (part {calls})" if calls > 1 or criteria else "")
-            try:
-                so_far, uses = self.session.ask_until_usable(
-                    Prompts.CONTRACT_SYSTEM, parts, label, self.read, attempts=2
+            answer = self.session.model.ask_until_usable(
+                Prompts.CONTRACT_SYSTEM, parts, label, self.read, attempts=2
+            )
+            if answer.why:
+                say.warn(
+                    f"Could not get a usable {label.lower()} ({answer.why}). Its contract stays as it is."
                 )
-            except SystemExit as exc:
-                say.warn(f"{exc} Its contract stays as it is.")
                 return None
+            so_far, uses = answer.value
             info["uses"] = list(
                 dict.fromkeys(
                     info.get("uses", [])

@@ -13,7 +13,7 @@ lazy from .conversation import (
 )
 lazy from .jobs import Jobs
 lazy from .knowledge import Knowledge, Library, language_key
-lazy from .project import Project, Steps, saved
+lazy from .project import Project, Steps, ending, saved
 lazy from .prompts import Part, Prompts
 lazy from .settings import (
     EARLIER_MEASURES_SHOWN,
@@ -22,6 +22,7 @@ lazy from .settings import (
     EXERCISE_FOLDER,
     REFLECTION_PROBLEMS,
     Home,
+    field,
     first_line,
     now_text,
     projects_folder,
@@ -113,11 +114,8 @@ class Exercise:
                 parts,
                 "exercise: next project",
                 lambda reply: read_choice(reply.json(), name, earlier),
-            )
-        if choice is None:
-            raise SystemExit(
-                f"{self.model.name} could not choose a practice project; the exercise stopped, "
-                f"everything kept."
+            ).needed(
+                f"{self.model.name} could not choose a practice project; the exercise stopped, everything kept."
             )
         project = dict(
             choice, folder=str(free_folder(choice["folder"])), step=PRACTICE_STEPS[0], started=now_text()
@@ -150,16 +148,19 @@ class Exercise:
         folder = Path(project["folder"])
         knowledge = Knowledge(exercise["language"], (run_of(folder) or {}).get("id"))
         with say.working_on(f"Learning from what went wrong and what was slow in {folder.name}"):
-            reflection = self.model.ask_until_usable(
+            answer = self.model.ask_until_usable(
                 Prompts.EXERCISE_REFLECT_SYSTEM,
                 reflection_parts(exercise, project, knowledge.known_lessons()),
                 "exercise: lessons",
                 lambda reply: read_reflection(reply.json()),
                 attempts=2,
             )
-        if reflection is None:
-            say.warn("No lessons from this project: nothing usable came of looking back at it.")
+        if answer.why:
+            say.warn(
+                f"No lessons from this project: nothing usable came of looking back at it ({answer.why})."
+            )
             return
+        reflection = answer.value
         names = [folder.name] + [Path(path).name for path in Project.load(folder).files]
         project["lessons"] = knowledge.add_lessons(reflection["lessons"], reflection["confirmed"], names)
         exercise["focus"] = reflection["focus"] or exercise.get("focus", "")
@@ -167,7 +168,7 @@ class Exercise:
             f"{project['lessons']} new lesson(s), {len(reflection['confirmed'])} confirmed; next focus: "
             f"{exercise['focus'] or '(none)'}"
         )
-        lessons = [str(item.get("text", "")).strip() for item in reflection["lessons"]]
+        lessons = [field(item, "text") for item in reflection["lessons"]]
         if any(lessons):
             say.found(first_line(next(text for text in lessons if text), 200))
 
@@ -213,9 +214,7 @@ def identified(model, asked):
         "exercise: which language",
         lambda reply: read_verdict(reply.json()),
         attempts=2,
-    )
-    if verdict is None:
-        raise SystemExit(f"Could not tell whether {asked!r} is a programming language; nothing done.")
+    ).needed(f"Could not tell whether {asked!r} is a programming language; nothing done.")
     if verdict["verdict"] == "ambiguous":
         choices = verdict["choices"] or ["one language"]
         raise SystemExit(
@@ -231,10 +230,10 @@ def identified(model, asked):
 
 
 def read_verdict(data):
-    verdict = str(data.get("verdict", "")).strip().lower()
+    verdict = field(data, "verdict").lower()
     if verdict not in VERDICTS:
         raise ValueError(f'"verdict" must be one of {", ".join(VERDICTS)}')
-    name = str(data.get("name") or "").strip()[:40]
+    name = field(data, "name", 40)
     if verdict == "language" and not name:
         raise ValueError('a language needs its "name"')
     choices = [str(choice).strip()[:40] for choice in data.get("choices") or [] if str(choice).strip()][:6]
@@ -252,7 +251,7 @@ def installed(entry):
 
 
 def read_choice(data, language, earlier):
-    task, feature = str(data.get("task") or "").strip(), str(data.get("feature") or "").strip()
+    task, feature = field(data, "task"), field(data, "feature")
     if not task or not feature:
         raise ValueError('a practice project needs a "task" and a "feature"')
     repeated = next(
@@ -262,7 +261,7 @@ def read_choice(data, language, earlier):
         raise ValueError(f"it repeats an earlier project ({first_line(repeated, 80)}): choose another")
     if language.lower() not in task.lower():
         task = f"{task.rstrip('.')} in {language}"
-    folder = str(data.get("folder") or "").strip().lower()
+    folder = field(data, "folder").lower()
     if not FOLDER_RE.fullmatch(folder) or len(folder) > 30:
         folder = "-".join(re.findall(r"[a-z][a-z0-9]*", task.lower())[:3]) or "practice"
     practises = [
@@ -308,11 +307,11 @@ def start_tinker(arguments):
 def stopped(exercise):
     done = len(Exercises.finished(exercise))
     say.title(f"Exercise of {exercise['language']} stopped: everything is kept.", "🛑")
-    return {
-        "status": "stopped",
-        "headline": f"Exercise of {exercise['language']} stopped, everything kept",
-        "details": [("Practice projects done", str(done))],
-    }
+    return ending(
+        "stopped",
+        f"Exercise of {exercise['language']} stopped, everything kept",
+        [("Practice projects done", str(done))],
+    )
 
 
 def measured(folder):

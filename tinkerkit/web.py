@@ -10,7 +10,7 @@ lazy import urllib.parse
 lazy import urllib.request
 
 from .messages import say
-from .settings import FIRST_BACKOFF_SECONDS, Config, first_line
+from .settings import FIRST_BACKOFF_SECONDS, Config, field, first_line
 lazy from .fetcher import Fetcher
 lazy from .jobs import journaled
 lazy from .passages import MainBlocks, is_html
@@ -137,9 +137,7 @@ class Internet:
 
     def fetched(self, url):
         usable = lambda page: (
-            isinstance(page, dict)
-            and bool(str(page.get("content") or "").strip())
-            or "its fetch gave no text"
+            isinstance(page, dict) and bool(field(page, "content")) or "its fetch gave no text"
         )
         page = self.call(url, lambda backend: backend.fetch(url), usable)
         if page is None:

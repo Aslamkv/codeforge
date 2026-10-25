@@ -261,11 +261,7 @@ class SlotLearner:
                 "Plan learning",
                 lambda reply: read_plan(reply.json()),
                 attempts=2,
-            )
-        if plan is None:
-            raise SystemExit(
-                f"{self.model.name} gave no usable plan for learning {self.topic}. Nothing was saved."
-            )
+            ).needed(f"{self.model.name} gave no usable plan for learning {self.topic}. Nothing was saved.")
         self.say_plan(plan)
         return plan
 
@@ -410,7 +406,7 @@ class SlotLearner:
                 lambda reply: read_digest(reply.json(), slot, passages),
                 attempts=2,
                 think=self.think(),
-            )
+            ).value
             or []
         )
         with say.section():

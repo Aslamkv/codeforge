@@ -13,6 +13,7 @@ from tinkerkit.learning import (
     read_digest,
     read_plan,
 )
+from tinkerkit.model import Answer
 from tinkerkit.passages import Passage
 from tinkerkit.project import Tracker
 from tinkerkit.prompts import Reply
@@ -83,9 +84,9 @@ class CountingModel:
         self.thinking.append((label, think))
         answer = next(reply for start, reply in self.replies.items() if label.startswith(start))
         try:
-            return read(Reply(json.dumps(answer(parts) if callable(answer) else answer)))
-        except ValueError:
-            return None
+            return Answer(read(Reply(json.dumps(answer(parts) if callable(answer) else answer))))
+        except ValueError as exc:
+            return Answer(None, why=f"no usable reply after 1 attempt(s): {exc}")
 
 
 class CountingEmbeddings:

@@ -20,6 +20,7 @@ lazy from .settings import (
     Home,
     Store,
     confirm_deletion,
+    field,
     first_line,
     now_text,
     split_text,
@@ -53,7 +54,7 @@ class RunChecks:
 
     @staticmethod
     def has_task(run):
-        return isinstance(run, dict) and str(run.get("task") or "").strip()
+        return isinstance(run, dict) and field(run, "task")
 
     @staticmethod
     def new_run(args):
@@ -610,7 +611,7 @@ class Brief:
                     Prompts.BRIEF_SYSTEM.format(words=words_each),
                     [Part("Task", task, True), Part("Spec excerpt", chunk, True)],
                     f"Brief {number}/{len(chunks)}",
-                )
+                ).value
             ).text
             for number, chunk in enumerate(chunks, 1)
         ]
@@ -618,6 +619,9 @@ class Brief:
         cut = text.rfind("\n", 0, limit)
         return text if len(text) <= limit else text[: cut if cut > 0 else limit]
 
+
+def ending(status, headline, details=(), next=()):
+    return {"status": status, "headline": headline, "details": list(details), "next": list(next)}
 
 class Tracker:
     DOING_AND_DONE = {

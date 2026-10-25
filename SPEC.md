@@ -535,10 +535,13 @@ What is said in the chats, kept so that a chat is only a view of it.
   model thinks. Its chars per token stay within [2, 4]. `limit_chars(system)` is
   `tokens × PROMPT_BUDGET_SHARE × chars_per_token − len(system) − 40`.
 - **MOD-17** `Model.ask_once` adds `NO_TOOL_CALLS` to the system prompt. It fits the user message to the
-  prompt budget, gives the reply's content, and logs the exchange to its log.
+  prompt budget, gives an `Answer` with the reply's content as its value, and logs the exchange to its log.
+  An `Answer` is one result of a model call: its `value`, `why` it is not usable (empty when it is) and the
+  `thought` left unfinished. `needed(message)` gives the value, or ends with `SystemExit` naming the message
+  and why.
 - **MOD-18** A reply cut off while it is still thinking is asked again: first with twice the budget, up to the
-  cap; then, if `unthinking_retry`, without thinking, with the thought so far to conclude. Otherwise the result
-  is `""`, with `hit_thinking_cap` set and `last_unfinished_thought` kept. A cut reply is finished, and kept,
+  cap; then, if `unthinking_retry`, without thinking, with the thought so far to conclude. Otherwise the answer
+  is empty, says why, and keeps the unfinished thought. A cut reply is finished, and kept,
   when its `done_when` says so or its blocks have all ended.
 - **MOD-19** A failed request is tried again after what the failure calls for. Out of memory: a smaller prompt
   budget, up to `OOM_RETRIES` times. A stall: the model is reloaded, up to `STALL_RETRIES` times. A rejected
@@ -548,7 +551,8 @@ What is said in the chats, kept so that a chat is only a view of it.
 - **MOD-20** `Model.ask` tries a prompt that is too large again with every part relaxed. It raises
   `PromptTooLarge` only when even that does not fit.
 - **MOD-21** `Model.ask_until_usable(…, read)` asks again when `read` rejects a reply, adding a note with the
-  reason. It gives `None` once the attempts run out.
+  reason. Once the attempts run out, or when the prompt is too large even relaxed, its answer has no value
+  and says why.
 - **MOD-22** `learn_chars_per_token` keeps the lowest ratio of the last 20 prompts over 50 tokens, within
   [2, 4]. `learned_chars_per_token()` is `None` until 5 prompts have been seen.
 - **MOD-23** In exclusive mode, every other loaded model is unloaded before a call. With the model kept
@@ -617,7 +621,7 @@ What is said in the chats, kept so that a chat is only a view of it.
   done says what came of it (`outcome`) after its words. The passing count is taken from the project on every
   save, for every criterion (`C…` and `B…`). A plan that waits is kept as data: its project, run, language,
   how to start it, its kind, what changed, its criteria, its non-goals and its folder. The end is kept as
-  data: its status, its headline, its details and the commands to go on.
+  data, made by `ending`: its status, its headline, its details and the commands to go on.
 - **PRJ-16** A run keeps every model call and every detail in the project's `events` log, and every message it
   says in its `output` log (its tracker follows `say`).
 - **PRJ-17** `Steps(names, tracker, only_if)` is one step pipeline: its steps are data, in order, and the last
@@ -1239,7 +1243,7 @@ What every phase works through.
   `Phase` take it, and nothing else, from the run.
 - **SES-2** `Session.setup` runs setup only when the setup commands or config files changed (or when forced),
   and it prepares `.env`. `run_all_tests` runs the suite once per state of the project's files. `note` keeps
-  the last 30 problems. `ask_until_usable` ends with `SystemExit` when no reply was usable. `format_code` drops
+  the last 30 problems. `ask_until_usable` gives the value, and ends with `SystemExit` when no reply was usable. `format_code` drops
   a formatter that fails.
 - **SES-3** `knowledge_parts(*phases)` gives lessons and learned facts as optional parts, plus the person's
   commands for the toolchain. It records each item it shows in the cycle's `used`, with the prompt phases it

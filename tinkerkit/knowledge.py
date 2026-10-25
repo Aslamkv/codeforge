@@ -5,9 +5,6 @@ lazy import collections
 lazy import hashlib
 lazy import math
 lazy import tempfile
-lazy import urllib.error
-lazy import urllib.parse
-lazy import urllib.request
 lazy from pathlib import Path
 
 from .messages import say
@@ -40,8 +37,10 @@ from .settings import (
     VERSION_TIMEOUT,
     Config,
     Home,
+    field,
     fingerprint,
     first_line,
+    host,
     now_text,
     one_line,
     similarity,
@@ -49,9 +48,9 @@ from .settings import (
     words,
 )
 lazy from .jobs import today
-lazy from .model import Models, Ollama, OllamaError
+lazy from .model import Answer, Models, Ollama, OllamaError
 lazy from .project import Tracked
-lazy from .prompts import Part, Prompts, PromptTooLarge
+lazy from .prompts import Part, Prompts
 lazy from .workspace import Toolchain, Workspace
 
 SavedPlan = namedtuple("SavedPlan", "plan saved")
@@ -176,7 +175,7 @@ class Knowledge:
         return added
 
     def new_lesson(self, item, known, names):
-        text, phase = str(item.get("text", "")).strip()[:240], str(item.get("phase", "")).strip().lower()
+        text, phase = field(item, "text", 240), field(item, "phase").lower()
         if not text or phase not in LESSON_PHASES or self.names_project(text, names):
             return None
         same = next(
@@ -392,7 +391,7 @@ class Knowledge:
 
     def taught_lesson(self, item, sources):
         known = self.known_lessons()
-        text = str(item.get("text", "")).strip()
+        text = field(item, "text")
         lesson = next(
             (lesson for lesson in known if similarity(lesson["text"], text) >= SAME_LESSON_SIMILARITY), None
         )
@@ -458,12 +457,13 @@ class Learner(Tracked):
                 return SavedPlan(plan, True)
             except ValueError as exc:
                 say.warn(f"The plan saved last time cannot be used ({exc}), so making a new one")
-        plan = self.model.ask_until_usable(system, parts, label, lambda reply: read(reply.json()), attempts=2)
-        if plan is None:
-            raise SystemExit(
-                f"{self.model.name} gave no usable plan for {what}; see the log of its replies "
-                f"(tinker memory; its calls are in tinker learn's log)"
-            )
+        answer = self.model.ask_until_usable(
+            system, parts, label, lambda reply: read(reply.json()), attempts=2
+        )
+        plan = answer.needed(
+            f"{self.model.name} gave no usable plan for {what}; see the log of its replies "
+            f"(tinker memory; its calls are in tinker learn's log)"
+        )
         return SavedPlan(plan, False)
 
     @staticmethod
@@ -612,25 +612,23 @@ class Learner(Tracked):
 
     def facts_in(self, parts, page, number, part):
         try:
-            return (
-                self.model.ask_until_usable(
-                    Prompts.FACTS_SYSTEM,
-                    parts,
-                    f"Facts, page {number} part {part}",
-                    self.read_facts,
-                    attempts=2,
-                )
-                or []
+            answer = self.model.ask_until_usable(
+                Prompts.FACTS_SYSTEM,
+                parts,
+                f"Facts, page {number} part {part}",
+                self.read_facts,
+                attempts=2,
             )
-        except PromptTooLarge as exc:
-            self.notes.append(f"page {page['url']}: {first_line(str(exc), 160)}")
         except OllamaError as exc:
             self.model_failure = first_line(str(exc), 200)
             self.notes.append(
                 f"the model stopped answering at page {number}; the pages after it were not read"
             )
             say.warn(f"{self.notes[-1]} ({self.model_failure})")
-        return None
+            return None
+        if answer.why:
+            self.notes.append(f"page {page['url']}: {first_line(answer.why, 160)}")
+        return answer.value or []
 
     @staticmethod
     def read_facts(reply):
@@ -639,8 +637,8 @@ class Learner(Tracked):
             if not isinstance(item, dict):
                 continue
             text, phase = (
-                str(item.get("text", "")).strip()[:MAX_FACT_CHARS],
-                str(item.get("phase", "")).strip().lower(),
+                field(item, "text", MAX_FACT_CHARS),
+                field(item, "phase").lower(),
             )
             if text and phase in FACT_PHASES:
                 facts.append({"phase": phase, "text": text})
@@ -675,7 +673,7 @@ class Learner(Tracked):
         sources = self.rule_sources(facts, lessons)
         self.step("condense", f"Turning {len(facts)} fact(s) into rules a code writer can follow…", "✍️")
         with say.working_on(f"Turning {len(facts)} fact(s) about {plan['name']} into rules"):
-            rules = self.model.ask_until_usable(
+            answer = self.model.ask_until_usable(
                 Prompts.PLAYBOOK_SYSTEM,
                 self.playbook_parts(plan, facts, lessons),
                 "Condense the facts",
@@ -683,12 +681,15 @@ class Learner(Tracked):
                 attempts=2,
                 think=think,
             )
-        self.say_rules(rules, facts)
-        return rules or []
+        rules = answer.value or []
+        self.say_rules(rules, facts, answer.why)
+        return rules
 
-    def say_rules(self, rules, facts):
+    def say_rules(self, rules, facts, why):
         if not rules:
-            self.notes.append("the facts were not condensed into rules (no usable reply)")
+            self.notes.append(
+                f"the facts were not condensed into rules ({first_line(why, 160) or 'no usable reply'})"
+            )
         with say.section():
             if rules:
                 say.done(f"{len(rules)} rule(s)")
@@ -839,7 +840,7 @@ class Researcher:
         if not isinstance(data, dict):
             raise ValueError("not a JSON object")
         name, summary = (
-            str(data.get("name") or "").strip()[:80],
+            field(data, "name", 80),
             " ".join(str(data.get("summary") or "").split())[:200],
         )
         questions = []
@@ -909,7 +910,7 @@ class Researcher:
             vectors = [None] * len(facts)
         else:
             self.fold_repeats(facts, vectors)
-        sites = [{self.site(url) for url in Learner.pages_of(fact)} for fact in facts]
+        sites = [{host(url) for url in Learner.pages_of(fact)} for fact in facts]
         support, differ = self.compared(facts, vectors, sites)
         for fact, found_on in zip(facts, support):
             fact["sites"] = sorted(found_on)
@@ -968,24 +969,22 @@ class Researcher:
     def numbers(cls, fact):
         return set(cls.NUMBER_RE.findall(fact["text"]))
 
-    @staticmethod
-    def site(url):
-        return urllib.parse.urlparse(url).netloc.lower().removeprefix("www.")
-
     def analyse(self, frame, facts, differ):
         parts = self.analysis_parts(frame, facts, differ)
         try:
-            return self.model.ask_until_usable(
+            answer = self.model.ask_until_usable(
                 Prompts.RESEARCH_ANALYSIS_SYSTEM,
                 parts,
                 "Analyse the findings",
                 lambda reply: self.read_analysis(reply.json(), len(facts), len(frame["questions"])),
                 attempts=2,
             )
-        except (PromptTooLarge, OllamaError) as exc:
-            self.learner.notes.append(f"the findings could not be analysed ({first_line(str(exc), 160)})")
+        except OllamaError as exc:
+            answer = Answer(None, why=str(exc))
+        if answer.why:
+            self.learner.notes.append(f"the findings could not be analysed ({first_line(answer.why, 160)})")
             say.warn(self.learner.notes[-1])
-            return None
+        return answer.value
 
     def analysis_parts(self, frame, facts, differ):
         questions = "\n".join(
@@ -1047,7 +1046,7 @@ class Researcher:
                 "facts": cited(finding.get("facts")),
             }
             for finding in given
-            if asked(finding) and str(finding.get("answer") or "").strip()
+            if asked(finding) and field(finding, "answer")
         ]
 
     @staticmethod
@@ -1075,7 +1074,7 @@ class Researcher:
                 "search": " ".join(str(gap.get("search") or "").split())[:160],
             }
             for gap in given
-            if asked(gap) and str(gap.get("search") or "").strip()
+            if asked(gap) and field(gap, "search")
         ]
 
     @staticmethod
@@ -1086,7 +1085,7 @@ class Researcher:
             if isinstance(check, dict)
             and isinstance(check.get("fact"), int)
             and 1 <= check["fact"] <= fact_count
-            and str(check.get("search") or "").strip()
+            and field(check, "search")
         ]
 
     @staticmethod

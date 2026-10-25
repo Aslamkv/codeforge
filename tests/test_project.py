@@ -20,6 +20,7 @@ from tinkerkit.project import (
     Steps,
     Tracked,
     Tracker,
+    ending,
     project_store,
     saved,
 )
@@ -447,6 +448,12 @@ def test_an_exercise_build_publishes_in_the_exercise_job_as_build(home_store, mo
     job = Jobs.get(1)
     assert job["build"]["step"] == "spec" and job["build"]["exercise"] and "progress" not in job
 
+
+@pytest.mark.spec("PRJ-15")
+def test_ending_keeps_status_headline_details_and_next_as_lists():
+    assert ending("done", "Done.") == {"status": "done", "headline": "Done.", "details": [], "next": []}
+    made = ending("blocked", "Stopped", (("Why", "x"),), (("Go on", "tinker resume"),))
+    assert made["details"] == [("Why", "x")] and made["next"] == [("Go on", "tinker resume")]
 
 @pytest.mark.spec("PRJ-15")
 def test_steps_live_progress_and_messages(home_store, project_dir, monkeypatch):

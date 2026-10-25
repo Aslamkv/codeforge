@@ -640,7 +640,6 @@ def test_a_research_answers_with_its_findings_and_their_numbered_sources():
         "[3] https://a.org/2",
     ]
     assert "no finding" in Researcher.answer(dict(entry, findings=[]))
-    assert Researcher.site("https://www.Example.org/x") == "example.org"
 
 
 @pytest.mark.spec("KNW-17")
