@@ -130,12 +130,12 @@ the last column:
 | `projects` | a pointer to each project: its run ID, folder and task | `runs` |
 | `runs` | one line about each run: its task, language, status and dates (the last `RUNS_KEPT`) | `runs` |
 | `channels`, `channel_secrets` | the chat channels and their tokens | |
-| `listening`, `running` | the conversation's live state: its status messages, and each run's tracker | |
+| `listening` | the conversation's live state: its status messages | |
 | `exercise` | per language: its exercise's practice projects, what each measured, and the focus of the next | `exercise` |
 | `activity` | the person's requests being answered (`answering`), and the ids of the exercise's one message (`exercise message`) | |
 | `chat views` | each message in a chat (Tinker's and the person's): when it goes, and the thing it shows | |
 | `chat history`, `chat history numbers` | each thing shown in a chat, as it was shown last, with what the person asked for it; the last number given, kept by a clear | `history` |
-| `jobs`, `job numbers` | every job: its number, command, title, arguments, state, process and dates; the last number given, kept by a clear | `jobs` |
+| `jobs`, `job numbers` | every job: its number, command, title, arguments, state, process, dates and tracker; the last number given, kept by a clear | `jobs` |
 | log `calls #N` | the model calls and details of job #N (a run's go to its project's `events`), until the job is archived (**JOB-12**) | `jobs` |
 | log `journal #N` | job #N's requests (model calls, web searches, page fetches) with their answers, until it finishes | `jobs` |
 
@@ -294,10 +294,10 @@ pauses it too, so the person is always answered at once.
 
 - **JOB-1** `is_job(argv)` is true for a command of kind `job` (**CMD-1**): `task`, `restart`, `resume`,
   `confirm`, `amend`, `add`, `fix`, `calibrate`, `learn`, `ask`, `teach`, `read`, `research` and `exercise`.
-  Help, and a build an exercise runs (`EXERCISE_ENV`), are never jobs. A job keeps the computer awake while it
+  Help, and a build an exercise runs (`EXERCISE_ENV`, which holds the exercise's job number), are never jobs. A job keeps the computer awake while it
   runs (**SET-13**). `Jobs.running(argv)` runs a job as the next number (`#1`, `#2` ...), kept in the home's
-  `jobs` with its command, title, arguments, the day it started, its state `running` and its process. Its
-  process takes `JOB_STOP_SIGNAL` (SIGUSR2) as Ctrl-C.
+  `jobs` with its command, title, arguments, the day it started, its state `running`, its process and its
+  tracker (`progress`, **PRJ-14**): the one list of what runs. Its process takes `JOB_STOP_SIGNAL` (SIGUSR2) as Ctrl-C.
 - **JOB-2** A job ends `stopped` when it is interrupted (Ctrl-C, `JOB_STOP_SIGNAL`) or its tracker ends with
   the status `stopped` (`Tracker.end` tells `Jobs.ended`, which adds `("Go on", "tinker resume #N")` to the
   ending), and `paused` when another job or the person paused it ("Paused for job #N", "Paused for you": its
@@ -610,8 +610,9 @@ What is said in the chats, kept so that a chat is only a view of it.
   exits with 1.
 - **PRJ-14** `Tracker` is a run's one report. It keeps the title, job number, run ID, folder, phase, steps
   done, passing spec points, what the model is doing now, the latest message said, a plan that waits, the end,
-  the seconds taken and when it went on (`resumed`). Each change is published at once in the home's `running`
-  under the run's process, and appended to the project's `progress` log.
+  the seconds taken and when it went on (`resumed`). Each change is published at once in its job's `progress`
+  (an exercise's build: in the exercise's job, as `build`), and appended to the project's `progress` log. A
+  tracker outside a job publishes nothing.
 - **PRJ-15** The steps are named by phase (`DOING_AND_DONE`: what each phase is doing, and when done). A step
   done says what came of it (`outcome`) after its words. The passing count is taken from the project on every
   save, for every criterion (`C…` and `B…`). A plan that waits is kept as data: its project, run, language,
@@ -774,9 +775,9 @@ The terminal and the chats are one conversation: the same commands, the same ans
   `tinker clear history` (**SET-12**): once confirmed, it forgets the history, clears the chat as `clear chat`
   does, and leaves nothing in the history, not even what it said.
 - **CNV-15** `Desk.follow` follows a task by its tracker: its run ID, its folder (the title is named after it),
-  and a plan that waits. Once the task ends, it reads the task's last state and removes its tracker.
-- **CNV-16** `running(skip)` lists the runs whose trackers are in the home's `running`, but for its own process
-  and those it skips. It removes the trackers of processes that have ended, known as a job is (**JOB-2**).
+  and a plan that waits. Once the task ends, it reads the task's last state from its job.
+- **CNV-16** `running(skip)` lists the trackers of the jobs that run or are paused, but for its own process and
+  those it skips. A job whose process is gone is not among them (**JOB-2**).
 - **CNV-17** `Progress(snapshot)` shows a run's tracker: its title with its job (`(Job #N)`, so the person can
   stop it at once), its steps done, the step it is on with its clock, what the model writes now, the passing
   spec points and the latest line (`text`); a one-line `brief`; how long it took (`took`); and its `ending`: the
@@ -933,6 +934,13 @@ Lessons and proven knowledge, and what every kind of learning shares.
 - **KNW-21** Learning a language again (**LRN-5**) replaces what its earlier learning proved: `supersede`
   retires the language's proven facts from its own topic that the new learning does not show (its rules, when
   it has them), with the reason that they were replaced. Proven facts from other topics stay.
+- **KNW-22** `Item(kind, id, topic)` names one knowledge item: a lesson (`lesson`) or a language's proven fact
+  (`known`), with no topic; a toolchain fix (`fix`: its topic the language, its ID the failure); and a topic's
+  `fact`, `finding` or `rule` (its topic the slug). `key` gives it as text, `kind:id` or `kind:topic:id`, and
+  `Item.of(key)` reads that back (a failure may hold `:`). A run's used items, the graph's node IDs and
+  teaching name items only this way. `retire(item, language, reason, run)` retires it from its own store: a
+  lesson from the language's lessons or else any language's, a proven fact or fix from the language's, a
+  topic's item from its topic; it says whether it was there.
 
 ## slots (SLT)
 
@@ -1197,8 +1205,8 @@ It is a job like any other, so the person always comes first.
   failed, unusable and cut replies, and the warnings the runs said.
 - **EXR-6** The exercise gives way as every job does (**JOB-8** to **JOB-10**): paused, it stops its build as
   Ctrl-C stops it (it saves itself), and goes on from where it was. A run an exercise started (its build) is
-  marked `exercise` in its tracker and is not a job: the conversation leaves it out of what runs
-  (`persons_runs`, `Desk.running_now`), and its status shows the exercise when nothing else runs (looked at
+  not a job: its tracker goes in the exercise's job as `build` (**PRJ-14**), which only the exercise reads, so
+  it is never among what runs, and the conversation's status shows the exercise when nothing else runs (looked at
   every `STATUS_LOOK_SECONDS` seconds, so it moves on by itself). The exercise's tracker shows its build's: its
   step after the exercise's, what the model writes now, the spec points passing and the latest line, and a
   practice project's steps only. As a conversation starts (`adopt_exercise`), it keeps up the message of an
@@ -1389,7 +1397,7 @@ The main system: the command line, one run, and the cycle of phases.
   anything is loaded. Learning nothing ends with an error. However it ends, it prints the time it took
   (`Time taken: 8m 34s`). It keeps a `Tracker` as a run does: its messages, what the model is doing (in plain
   words), its steps and its end (learned, with the summary, or why it stopped), so a chat that started it shows
-  them; the tracker leaves the home at the end unless that conversation reads it last.
+  them; its last state stays in its job.
 - **CLI-8** `ProjectFolder.make(task)` makes a new folder in the projects folder. Its name comes from the model
   (when it is valid) or from the task's words, and it gets `-2`, `-3` … when the name is taken.
 - **CLI-9** A run works on one cycle. For `add` or `fix`, that is a new feature or fix cycle, recorded in the

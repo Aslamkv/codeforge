@@ -4,6 +4,7 @@ import pytest
 
 from tinkerkit.knowledge import (
     Embeddings,
+    Item,
     Knowledge,
     Learner,
     Library,
@@ -11,6 +12,7 @@ from tinkerkit.knowledge import (
     Retriever,
     language_key,
     record,
+    retire,
 )
 from tinkerkit.model import Ollama
 from tinkerkit.settings import MAX_LESSONS_PER_FILE, MAX_RULE_CHARS, PLAYBOOK_RULES, Config, Home
@@ -1017,6 +1019,47 @@ def test_what_is_retired_is_kept_apart_with_why_and_never_shown(tinker_home, mon
     monkeypatch.setattr("tinkerkit.knowledge.RETIRED_KEPT_PER_LIST", 1)
     Knowledge("Python").disprove({f"fact:flask:{route}": ["code"]}, ("code",))
     assert [retired["id"] for retired in Library.read("flask")["retired"]] == [route]
+
+
+@pytest.mark.spec("KNW-22")
+@pytest.mark.parametrize(
+    "item,key",
+    [
+        (Item("lesson", "a1"), "lesson:a1"),
+        (Item("known", "b2"), "known:b2"),
+        (Item("fix", "error: no module named calc", "python"), "fix:python:error: no module named calc"),
+        (Item("fact", "c3", "flask"), "fact:flask:c3"),
+        (Item("finding", "d4", "flask"), "finding:flask:d4"),
+        (Item("rule", "e5", "python"), "rule:python:e5"),
+    ],
+)
+def test_an_item_reads_back_from_its_key(item, key):
+    assert item.key == key and Item.of(key) == item
+
+
+@pytest.mark.spec("KNW-22")
+def test_retire_takes_an_item_from_its_own_store(tinker_home):
+    route, client = topic_with_facts()
+    known = Knowledge("Python", "r1")
+    known.add_lessons([lesson("Seed random generators inside tests", "tests")], [])
+    known.add_lessons([lesson("Use tmp_path for files a test makes", "tests", "language")], [])
+    known.remember_fix({"failure": "error: no module named calc", "cause": "pythonpath", "replay": None})
+    known.prove({f"fact:flask:{route}": ["code"]})
+    lessons = {item["text"]: item["id"] for item in Knowledge("Python").known_lessons()}
+    for item in (
+        Item("lesson", lessons["Seed random generators inside tests"]),
+        Item("lesson", lessons["Use tmp_path for files a test makes"]),
+        Item("known", route),
+        Item("fix", "error: no module named calc", "python"),
+        Item("fact", client, "flask"),
+    ):
+        assert retire(item, "Python", "taught wrong", "r2")
+        assert not retire(item, "Python", "taught wrong", "r2")
+    after = Knowledge("Python")
+    assert after.known_lessons() == [] and after.language_doc["facts"] == after.language_doc["fixes"] == []
+    assert [fact["id"] for fact in Library.read("flask")["facts"]] == [route]
+    assert {item["reason"] for item in after.language_doc["retired"]} == {"taught wrong"}
+    assert not retire(Item("toolchain", "python"), "Python", "taught wrong", "r2")
 
 
 @pytest.mark.spec("KNW-19")

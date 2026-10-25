@@ -8,7 +8,7 @@ import time
 import pytest
 from test_conversation import Recorder
 
-from tinkerkit import conversation, jobs
+from tinkerkit import conversation, exercising, jobs
 from tinkerkit.cli import Cli, Commands
 from tinkerkit.conversation import ConsoleChannel, Desk, Message, Progress, Research, research_once
 from tinkerkit.fetcher import Fetched, Fetcher
@@ -71,8 +71,12 @@ def test_long_commands_are_jobs_and_the_rest_are_not():
 
 @pytest.mark.spec("JOB-1")
 def test_an_exercises_build_is_not_a_job_of_its_own(monkeypatch):
-    monkeypatch.setenv("TINKER_EXERCISE", "1")
-    assert not is_job(["task", "a", "calculator"])
+    started = []
+    monkeypatch.setattr(exercising, "tinker_process", lambda arguments, **env: started.append(env))
+    monkeypatch.setattr(Jobs, "current", {"number": 7})
+    exercising.start_tinker(["task", "a", "calculator"])
+    monkeypatch.setenv("TINKER_EXERCISE", started[0]["TINKER_EXERCISE"])
+    assert started[0]["TINKER_EXERCISE"] == "7" and not is_job(["task", "a", "calculator"])
 
 
 @pytest.mark.spec("JOB-1")
@@ -687,8 +691,9 @@ def test_a_research_job_says_its_steps_and_ends_with_its_answer(home_store, monk
             ("done", "🔎 **go**\nGo 1.25 [1]"),
         )[-1],
     )
-    research_once(ConsoleChannel(commands_without_tinker=False), None, "go")
-    state = home_store.get("running", str(os.getpid()))
+    with Jobs.running(["research", "go"]):
+        research_once(ConsoleChannel(commands_without_tinker=False), None, "go")
+    state = Jobs.get(1)["progress"]
     assert state["steps"] == ["🤔 Searches chosen", "🌐 Pages read"] and state["doing"].startswith("✍️")
     assert state["ended"] == {"status": "done", "headline": "", "text": "🔎 **go**\nGo 1.25 [1]"}
 
@@ -696,7 +701,17 @@ def test_a_research_job_says_its_steps_and_ends_with_its_answer(home_store, monk
 @pytest.mark.spec("EXR-7")
 def test_an_exercise_paused_for_another_hands_it_its_message(home_store, tmp_path):
     desk = Desk([Recorder()], tmp_path)
-    home_store.put("running", str(os.getpid()), {"title": "Exercising Rust", "exercise": True, "doing": "🔨"})
+    home_store.put(
+        "jobs",
+        "1",
+        {
+            "number": 1,
+            "command": "exercise",
+            "state": "running",
+            "pid": os.getpid(),
+            "progress": {"title": "Exercising Rust", "exercise": True, "doing": "🔨"},
+        },
+    )
     paused_one_ends = threading.Event()
     desk.follow_exercise(os.getpid(), "exercise rust", paused_one_ends.wait)
     first = desk.exercise_reporter
@@ -712,6 +727,8 @@ def test_an_exercise_paused_for_another_hands_it_its_message(home_store, tmp_pat
 def test_a_new_jobs_message_is_kept_up_and_one_that_goes_on_comes_to_the_bottom(home_store, monkeypatch):
     monkeypatch.setattr(conversation, "PROGRESS_EDIT_SECONDS", 1000)
     channel = Recorder()
+    job = {"number": 1, "command": "learn", "title": "learn html5", "state": "running", "pid": os.getpid()}
+    monkeypatch.setattr(Jobs, "current", Jobs.save(job))
     a_new_job = Tracker("learn html5")
     a_new_job.publish()
     reporter = conversation.Reporter([channel], "learn html5", pid=os.getpid())

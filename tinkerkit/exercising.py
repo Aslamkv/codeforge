@@ -174,9 +174,11 @@ class Exercise:
             say.found(first_line(next(text for text in lessons if text), 200))
 
     def built(self, arguments):
+        number = self.tracker.state["job"]
+        Jobs.update(number, build=None)
         self.running_build = self.start_build(arguments())
         while self.running_build.poll() is None:
-            self.show_build(Home.store().get("running", str(self.running_build.pid)))
+            self.show_build(Jobs.get(number).get("build"))
             time.sleep(EXERCISE_BUILD_LOOK_SECONDS)
         return self.running_build.returncode
 
@@ -300,7 +302,9 @@ def going_on(folder):
 
 
 def start_tinker(arguments):
-    return tinker_process(arguments, **{EXERCISE_ENV: "1", CHANNEL_REPORTS_ENV: "off"})
+    return tinker_process(
+        arguments, **{EXERCISE_ENV: str(Jobs.current["number"]), CHANNEL_REPORTS_ENV: "off"}
+    )
 
 
 def interrupted(signum, frame):

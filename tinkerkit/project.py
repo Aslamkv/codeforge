@@ -668,6 +668,7 @@ class Tracker:
 
     def __init__(self, title, before=0.0):
         self.pid, self.store, self.published = os.getpid(), None, 0.0
+        self.published_in = published_in()
         self.state = {
             "title": title,
             "job": Jobs.current["number"] if Jobs.current else None,
@@ -690,7 +691,7 @@ class Tracker:
             "pid": self.pid,
             "pid_began": began_at(self.pid),
             "resumed": time.time() if Jobs.resumed_here else None,
-            "exercise": os.environ.get(EXERCISE_ENV) == "1",
+            "exercise": bool(os.environ.get(EXERCISE_ENV)),
         }
 
     @classmethod
@@ -763,10 +764,16 @@ class Tracker:
 
     def publish(self):
         self.published = time.monotonic()
-        Home.store().put("running", str(self.pid), self.state)
+        number, key = self.published_in
+        if number is not None:
+            Jobs.update(number, **{key: self.state})
 
-    def close(self):
-        Home.store().delete("running", str(self.pid))
+
+def published_in():
+    build_of = os.environ.get(EXERCISE_ENV)
+    if build_of:
+        return int(build_of), "build"
+    return (Jobs.current["number"] if Jobs.current else None), "progress"
 
 
 class Steps:

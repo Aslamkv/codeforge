@@ -11,6 +11,7 @@ from tinkerkit.fetcher import Fetcher
 from tinkerkit.jobs import is_job
 from tinkerkit.knowledge import Library
 from tinkerkit.model import Ollama
+from tinkerkit.project import Tracker
 from tinkerkit.reading import (
     Reader,
     Readings,
@@ -527,13 +528,9 @@ def test_tinker_read_stores_then_reads_as_its_own_job(
     retargeted, ended = [], []
     monkeypatch.setattr(cli.Jobs, "retarget", staticmethod(lambda arguments: retargeted.append(arguments)))
     monkeypatch.setattr(
-        Commands,
-        "tracker_ended",
-        staticmethod(
-            lambda tracker, ending, took: ended.append(
-                (tracker.state["title"], ending, tracker.state["steps"])
-            )
-        ),
+        Tracker,
+        "end",
+        lambda tracker, ending, took: ended.append((tracker.state["title"], ending, tracker.state["steps"])),
     )
     monkeypatch.chdir(tmp_path)
     craft(tmp_path)

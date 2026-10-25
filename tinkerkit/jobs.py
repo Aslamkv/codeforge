@@ -175,6 +175,10 @@ class Jobs:
         return settled(job) if job else None
 
     @staticmethod
+    def of_process(pid):
+        return next((job for job in JOBS.newest() if job.get("pid") == pid), None)
+
+    @staticmethod
     def every():
         return [settled(job) for job in JOBS.newest()]
 
@@ -329,7 +333,7 @@ def signal_job(job):
 
 
 def is_job(argv):
-    if {"-h", "--help"} & set(argv) or os.environ.get(EXERCISE_ENV) == "1":
+    if {"-h", "--help"} & set(argv) or os.environ.get(EXERCISE_ENV):
         return False
     return kind_of(argv) == "job"
 

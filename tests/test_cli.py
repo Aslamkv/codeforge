@@ -1,7 +1,6 @@
 import argparse
 import datetime
 import json
-import os
 import sys
 
 import pytest
@@ -14,7 +13,7 @@ from tinkerkit.model import Models, Ollama, OllamaError
 from tinkerkit.project import Runs, Tracker, project_store
 from tinkerkit.prompts import Part, Prompts, PromptTooLarge
 from tinkerkit.session import Phase
-from tinkerkit.settings import FIX_PHASES, PHASES, Config, Home
+from tinkerkit.settings import FIX_PHASES, PHASES, Config
 
 
 def parse(*argv):
@@ -763,7 +762,6 @@ def test_a_task_is_built_end_to_end(run_ready, fake_ollama, home_store):
         "calc.py",
         "test_calc.py",
     ]
-    assert home_store.items("running") == {}
     progress = [event["event"] for _, event in project_store(folder).entries("progress")]
     assert progress[0] == "project" and "points" in progress and progress[-1] == "ended"
 
@@ -793,7 +791,6 @@ def test_learning_checks_everything_before_loading(measured_model, fake_ollama, 
         Commands(parse("learn", "Flask")).run()
     assert fake_ollama.calls == []
     assert "Time taken: 0s" in capsys.readouterr().out
-    assert Home.store().get("running", str(os.getpid())) is None
     Config.save(model=None)
     with pytest.raises(SystemExit, match="No model in use"):
         Commands(parse("learn", "Flask")).run()
