@@ -4,6 +4,7 @@ from collections import namedtuple
 from .messages import say
 lazy from .graph import Graph
 lazy from .knowledge import Item, Knowledge, Learner, Library, Retriever, retire
+lazy from .project import ending
 lazy from .prompts import Part, Prompts
 lazy from .reading import Readings
 lazy from .settings import (
@@ -64,9 +65,6 @@ def moved_on(tracker, phase, said, icon):
     if tracker is not None:
         tracker.phase(phase)
 
-
-def ending(status, headline, details=()):
-    return {"status": status, "headline": headline, "details": list(details)}
 
 
 class Asker:

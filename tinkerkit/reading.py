@@ -13,7 +13,7 @@ lazy from pathlib import Path
 
 from .messages import say
 lazy from .knowledge import Learner, Library, Retriever, mentions, relevant_chunks
-lazy from .project import Tracked
+lazy from .project import Tracked, ending
 lazy from .prompts import Part, Prompts
 lazy from .settings import (
     BOOK_PASSAGES_SHOWN,
@@ -169,10 +169,10 @@ class Reader(Tracked):
             say.info(
                 f'Every chapter of #{number} is read: read #{number} "WHAT" reads it again with a focus', "📚"
             )
-            return ending(Readings.get(number), 0, [])
+            return read_ending(Readings.get(number), 0, [])
         found = self.chapters_read(entry, book, survey, chapters, focus)
         self.condensed(Readings.get(number), survey, found)
-        return ending(Readings.get(number), len(found), chapters)
+        return read_ending(Readings.get(number), len(found), chapters)
 
     def surveyed(self, entry, book):
         self.step("survey", "Reading its contents, foreword and index…", "🧭")
@@ -379,7 +379,7 @@ class Readings:
         return [found[index] for index in order[:count]]
 
 
-def ending(entry, new, chapters):
+def read_ending(entry, new, chapters):
     book, topic = Book.of(entry), Library.read(entry["topic"]) or {}
     readable = [chapter for chapter in book.chapters if chapter.state != "raw"]
     details = [
@@ -396,16 +396,16 @@ def ending(entry, new, chapters):
     for label, value in details:
         say.done(f"{label}: {value}")
     number = entry["number"]
-    return {
-        "status": "done",
-        "headline": f"Read #{number} {entry['title']}",
-        "details": details,
-        "next": [
+    return ending(
+        "done",
+        f"Read #{number} {entry['title']}",
+        details,
+        [
             ("Ask about it", f"tinker ask what does {entry['title']} say about …"),
             ("Look again", f'tinker read #{number} "what to look for"'),
             ("See it", f"tinker read show #{number}"),
         ],
-    }
+    )
 
 
 def show_list(page=1):

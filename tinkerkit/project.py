@@ -620,6 +620,9 @@ class Brief:
         return text if len(text) <= limit else text[: cut if cut > 0 else limit]
 
 
+def ending(status, headline, details=(), next=()):
+    return {"status": status, "headline": headline, "details": list(details), "next": list(next)}
+
 class Tracker:
     DOING_AND_DONE = {
         "recall": ("🧠 Recalling what Tinker has learned", "🧠 Recalled what Tinker has learned"),

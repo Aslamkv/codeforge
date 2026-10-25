@@ -13,7 +13,7 @@ lazy from .conversation import (
 )
 lazy from .jobs import Jobs
 lazy from .knowledge import Knowledge, Library, language_key
-lazy from .project import Project, Steps, saved
+lazy from .project import Project, Steps, ending, saved
 lazy from .prompts import Part, Prompts
 lazy from .settings import (
     EARLIER_MEASURES_SHOWN,
@@ -309,11 +309,11 @@ def start_tinker(arguments):
 def stopped(exercise):
     done = len(Exercises.finished(exercise))
     say.title(f"Exercise of {exercise['language']} stopped: everything is kept.", "🛑")
-    return {
-        "status": "stopped",
-        "headline": f"Exercise of {exercise['language']} stopped, everything kept",
-        "details": [("Practice projects done", str(done))],
-    }
+    return ending(
+        "stopped",
+        f"Exercise of {exercise['language']} stopped, everything kept",
+        [("Practice projects done", str(done))],
+    )
 
 
 def measured(folder):

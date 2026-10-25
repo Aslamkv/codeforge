@@ -23,7 +23,7 @@ lazy from .knowledge import Embeddings, Learner, Library, Researcher
 lazy from .learning import LearnStopped, SlotLearner
 lazy from .model import Calibrator, Model, Models, Ollama, OllamaError, SelectedModel
 lazy from .planning import Designer, InterfaceReviewer, Recaller, SpecWriter
-lazy from .project import Brief, Outcome, Project, RunChecks, Runs, Steps, Tracker, project_store, saved
+lazy from .project import Brief, Outcome, Project, RunChecks, Runs, Steps, Tracker, ending, project_store, saved
 lazy from .prompts import Prompts
 lazy from .session import Session, Stopped
 lazy from .settings import (
@@ -676,19 +676,19 @@ class Commands:
         if entry is None:
             raise SystemExit(f"Nothing learned about {topic}; nothing saved.")
         self.print_learned(topic, entry)
-        return {
-            "status": "done",
-            "headline": f"Learned {entry['name']}",
-            "details": learner.recap or [("Findings", str(len(entry.get("findings", []))))],
-            "next": [("See it", "tinker memory")],
-        }
+        return ending(
+            "done",
+            f"Learned {entry['name']}",
+            learner.recap or [("Findings", str(len(entry.get("findings", []))))],
+            [("See it", "tinker memory")],
+        )
 
     @staticmethod
     def blocked(headline, stopped):
         details = (
             stopped.details if isinstance(stopped, LearnStopped) else [("Why", first_line(str(stopped), 200))]
         )
-        return {"status": "blocked", "headline": headline, "details": details}
+        return ending("blocked", headline, details)
 
     def research(self):
         topic = self.args.research
@@ -712,17 +712,13 @@ class Commands:
     def researched(topic, entry):
         if entry is None:
             raise SystemExit(f"Nothing found about {topic}; nothing saved.")
-        return {
-            "status": "done",
-            "headline": f"Researched {entry['name']}",
-            "details": [
-                ("Findings", str(len(entry.get("findings", [])))),
-                ("Facts", str(len(entry.get("facts", [])))),
-                ("Pages", str(len(entry.get("sources", [])))),
-            ],
-            "next": [("See it", "tinker memory")],
-            "text": Researcher.answer(entry),
-        }
+        details = [
+            ("Findings", str(len(entry.get("findings", [])))),
+            ("Facts", str(len(entry.get("facts", [])))),
+            ("Pages", str(len(entry.get("sources", [])))),
+        ]
+        researched = ending("done", f"Researched {entry['name']}", details, [("See it", "tinker memory")])
+        return {**researched, "text": Researcher.answer(entry)}
 
     @staticmethod
     def learning_tools(option):
@@ -807,20 +803,18 @@ class Commands:
     def reported(title, model, work, chats=False, blocked=None):
         tracker = Commands.followed(title)
         listening = conversation.attach(title, tracker) if chats else None
-        started, ending = time.monotonic(), {"status": "stopped", "headline": f"{title} did not finish"}
+        started, ended = time.monotonic(), ending("stopped", f"{title} did not finish")
         try:
-            ending = work(tracker)
+            ended = work(tracker)
         except SystemExit as stopped:
-            ending = (
-                blocked(stopped) if blocked else {"status": "blocked", "headline": first_line(str(stopped), 200)}
-            )
+            ended = blocked(stopped) if blocked else ending("blocked", first_line(str(stopped), 200))
             raise
         finally:
             model.unload()
             Models.remember(model)
             took = time.monotonic() - started
             say.title(f"Time taken: {human_duration(took)}", "⏱️")
-            tracker.end(ending, took)
+            tracker.end(ended, took)
             if listening:
                 listening.end()
 
@@ -1436,7 +1430,7 @@ class ProjectRun:
 
     def print_summary(self):
         status = self.outcome.status
-        self.ending = {"status": status, "headline": "", "details": [], "next": []}
+        self.ending = ending(status, "")
         if status == "done":
             self.summary_done()
         elif status == "awaiting":

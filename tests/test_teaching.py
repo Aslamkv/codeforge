@@ -146,7 +146,7 @@ def test_ask_says_the_answer_alone(kept, make_model, fake_ollama, capsys):
         and "[1] toolchain (python, proven)" in asked[1]["content"]
     )
     assert capsys.readouterr().out == answer + "\n"
-    assert ending == {"status": "done", "headline": "Answered", "details": [("Answer", answer)]}
+    assert ending == {"status": "done", "headline": "Answered", "details": [("Answer", answer)], "next": []}
     unchanged = "black ."
     assert Home.store().get("languages", "python")["toolchain"]["format"] == unchanged
 
