@@ -16,6 +16,7 @@ from tinkerkit.reading import (
     Reader,
     Readings,
     book_bytes,
+    excerpt,
     in_order,
     index_terms,
     kind_of,
@@ -430,6 +431,19 @@ def test_read_again_with_a_focus_looks_where_it_is_asked(
     )
     assert ("Read now", "2 chapter(s), 2 new fact(s)") in ending["details"]
     assert Library.read("read-1")["facts"][-1]["text"] == "Run every test after each change"
+
+
+@pytest.mark.spec("RDG-9")
+def test_a_focus_excerpt_keeps_the_start_and_the_chunks_that_match():
+    paragraphs = (
+        ["intro about the book " * 10]
+        + [f"filler {number} " * 25 for number in range(6)]
+        + ["install with pip " * 10, "run tests with pytest " * 10]
+    )
+    text = "\n\n".join(paragraphs)
+    pieces = excerpt(text, 750, "pip pytest").split("\n\n[…]\n\n")
+    assert [piece.split()[0] for piece in pieces] == ["intro", "install", "run"]
+    assert excerpt("short chapter", 750, "x") == "short chapter"
 
 
 @pytest.mark.spec("RDG-10")

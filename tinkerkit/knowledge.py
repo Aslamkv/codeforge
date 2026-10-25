@@ -546,7 +546,11 @@ class Learner:
     def web_page(self, result, wanted):
         got = self.internet.fetch(result["url"]) or {}
         text = got.get("content") or result.get("content") or ""
-        chunks = self.relevant_chunks(text, TEACH_PAGE_CHARS // CHUNKS_PER_PAGE, wanted) if text.strip() else []
+        chunks = (
+            relevant_chunks(text, TEACH_PAGE_CHARS // CHUNKS_PER_PAGE, wanted, CHUNKS_PER_PAGE)
+            if text.strip()
+            else []
+        )
         return {
             "title": got.get("title") or result.get("title", ""),
             "url": result["url"],
@@ -591,7 +595,9 @@ class Learner:
         focus = Part("Look for", page["focus"], True)
         room = self.room_for_excerpts(topic, source, focus)
         found = []
-        for chunk_number, chunk in enumerate(self.relevant_chunks(text, room, f"{topic} {page['focus']}"), 1):
+        for chunk_number, chunk in enumerate(
+            relevant_chunks(text, room, f"{topic} {page['focus']}", CHUNKS_PER_PAGE), 1
+        ):
             parts = [Part("Topic", topic, True), focus, source, Part("Excerpt", chunk, True)]
             facts = self.facts_in(parts, page, number, chunk_number)
             if facts is None:
@@ -612,17 +618,6 @@ class Learner:
 
     def room_for_excerpts(self, topic, source, focus):
         return self.model.limit_chars(Prompts.FACTS_SYSTEM) - source.size() - focus.size() - len(topic) - 200
-
-    @staticmethod
-    def relevant_chunks(text, room, wanted):
-        chunks = split_text(text, room)
-        if len(chunks) <= CHUNKS_PER_PAGE:
-            return chunks
-        matched = [index for index in Retriever(None).by_words(wanted, chunks) if index]
-        chosen = [0] + (matched + [index for index in range(1, len(chunks)) if index not in matched])[
-            : CHUNKS_PER_PAGE - 1
-        ]
-        return [chunks[index] for index in sorted(chosen)]
 
     def facts_in(self, parts, page, number, part):
         try:
@@ -1421,6 +1416,15 @@ class Library:
             "findings": {"spec", "design"},
         }.get(item["phase"])
         return item["phase"] in phases or bool(shown and shown & set(phases))
+
+
+def relevant_chunks(text, size, wanted, count):
+    chunks = split_text(text, size)
+    if len(chunks) <= count:
+        return chunks
+    matched = [index for index in Retriever(None).by_words(wanted, chunks) if index]
+    chosen = [0] + (matched + [index for index in range(1, len(chunks)) if index not in matched])[: count - 1]
+    return [chunks[index] for index in sorted(chosen)]
 
 
 class Retriever:

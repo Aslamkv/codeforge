@@ -12,10 +12,12 @@ from tinkerkit.knowledge import (
     Retriever,
     language_key,
     record,
+    relevant_chunks,
     retire,
 )
 from tinkerkit.model import Ollama
 from tinkerkit.settings import (
+    CHUNKS_PER_PAGE,
     MAX_LESSONS_PER_FILE,
     MAX_RULE_CHARS,
     PLAYBOOK_RULES,
@@ -416,9 +418,9 @@ def test_relevant_chunks():
         + [f"filler {number} " * 25 for number in range(6)]
         + ["install with pip " * 10]
     )
-    chunks = Learner.relevant_chunks("\n\n".join(paragraphs), 250, "pip install")
+    chunks = relevant_chunks("\n\n".join(paragraphs), 250, "pip install", CHUNKS_PER_PAGE)
     assert len(chunks) == 2 and chunks[0].startswith("intro") and chunks[1].startswith("install with pip")
-    assert Learner.relevant_chunks("short page", 250, "x") == ["short page"]
+    assert relevant_chunks("short page", 250, "x", CHUNKS_PER_PAGE) == ["short page"]
     assert Learner.UNRELEASED_RE.search("Flask 4.0 is in development") and not Learner.UNRELEASED_RE.search(
         "Flask 3.1 adds"
     )
