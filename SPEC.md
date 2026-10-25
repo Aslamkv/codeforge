@@ -1244,9 +1244,10 @@ What every phase works through.
 - **SES-3** `knowledge_parts(*phases)` gives lessons and learned facts as optional parts, plus the person's
   commands for the toolchain. It records each item it shows in the cycle's `used`, with the prompt phases it
   was shown in. A prompt that writes code or tests is also told the checks they must pass: the toolchain's
-  lint command, when it has one. `failed_phases(phase)` names the prompt phases whose knowledge a failure in
-  that phase disproves: toolchain and config for setup, the final review or a tooling problem; code and config
-  when the project did not build; code, tests, design and spec for verify; none otherwise.
+  lint command, when it has one. `failed_phases(phase, stopped)` names the prompt phases whose knowledge a
+  failure in that phase disproves: toolchain and config for setup, the final review or a tooling problem
+  (`stopped` of kind `tools`); code and config when the project did not build (kind `build`); code, tests,
+  design and spec for verify; none otherwise.
 - **SES-4** `Session.save` keeps the project and gives the tracker the passing count.
 - **SES-5** `Session.knowledge` is for the project's language. Before the spec names it, it is for the
   language the request names (`Knowledge.named_in`: the first it names of the languages Tinker knows), and
@@ -1413,7 +1414,10 @@ The main system: the command line, one run, and the cycle of phases.
   plan to confirm and exits 0 as `awaiting`. A run that stops (`blocked`) says why and how to go on.
 - **CLI-11** `CycleRunner.run` runs the phases from the saved one, in order, saving after each, and formats
   after verify. A run with `--web` that is past recall recalls first. It gives `blocked` when a phase stops,
-  and then disproves the knowledge used in that step. It gives `awaiting` after the phase its kind confirms
+  and then disproves the knowledge used in that step. A phase that stops for a reason gives it as its result,
+  `Stopped(kind, reason)`: the tools do not work (`tools`), the project does not build (`build`), the bug was
+  not reproduced (`unreproduced`) or the final review failed (`review`). The runner keeps it, and the run's
+  end says why from it. A phase that stops with parked criteria gives False. `Session` carries no such flag. It gives `awaiting` after the phase its kind confirms
   after (`CONFIRM_AFTER`), unless the cycle builds without confirmation, and `done` otherwise. Every phase has
   a phase class, and each phase done says what came of it (`outcome`: the points to test, the files, the tests
   and files written, the spec points passing).
