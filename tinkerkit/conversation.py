@@ -16,14 +16,13 @@ lazy import webbrowser
 lazy from pathlib import Path
 
 from .commands import BY_NAME, COMMANDS, deletes, kind_of, refs
-from .jobs import JOB_STOP_SIGNAL, Jobs, alive, job_number, paused_for_you, today
+from .jobs import JOB_STOP_SIGNAL, Jobs, alive, job_number, paused_for_you
 from .project import Runs, Tracker, saved
 lazy from .ledger import DONE_NOTE_KEPT_SECONDS, Ledger
 lazy from .messages import human_duration, say
 lazy from .model import Models, OllamaError
 lazy from .prompts import Prompts, Reply
 lazy from .settings import EXERCISE_FOLDER, Home, projects_folder
-lazy from .web import Internet
 lazy from .workspace import Toolchain
 
 CHANNEL_REPORTS_ENV = "TINKER_CHANNELS"
@@ -44,9 +43,6 @@ COMMAND_NAMING_MAX_TOKENS = 300
 CHAT_COMMAND_TIMEOUT = 120
 CHAT_COMMAND_OUTPUT_SHOWN_CHARS = 3000
 CHAT_COMMAND_OUTPUT_READ_CHARS = 6000
-CHAT_RESEARCH_SEARCHES = 3
-CHAT_RESEARCH_PAGES = 4
-CHAT_RESEARCH_CHARS_PER_PAGE = 3500
 
 PLAN_CONFIRMING_COMMANDS = tuple(
     command.name for command in COMMANDS if "--confirm" in (option.flag for option in command.options)
@@ -89,7 +85,7 @@ I build small programs for you, on this computer, with an AI model that runs rig
 
 💬 **Ask me anything**
 - Just write to me: what is not a command is a normal chat
-- `research the newest Python release`: I search the web, and name my sources
+- `research the newest Python release`: I study it on the web, thoroughly, and keep what I find (it takes a while)
 - `command how full is my disk`: I find the command line, and run it once you `confirm`
 - `learn rust`: I study it, and use it in my builds
 
@@ -1282,177 +1278,6 @@ def in_shell(shell, line, folder, given=None):
         return ShellRun("not started", str(exc))
 
 
-class Research:
-    SEARCHES_SYSTEM = (
-        "The person wants to know about a topic. Give the web searches that together answer it "
-        "best: two or three, each looking for something different, in the topic's language. Today "
-        "is {today}, and you were trained well before it: never assume what the latest version, "
-        "release or event is, or name one; for something recent, search for it as the latest, "
-        'with the year {year}. Reply with ONLY JSON: {{"searches": ["...", "..."]}}'
-    )
-    ANSWER_SYSTEM = (
-        "Answer what the person asks from these web pages alone, for a chat read on a phone: the "
-        "answer itself first, in a line or two, then only what matters, in short lines. Today is "
-        "{today}: what you were trained on may be out of date, so trust the pages, the newest first, "
-        "and say so when they may be older than what is asked. Each claim "
-        "cites its page as [n]. Where the pages disagree, say so; where they say nothing, say that "
-        "too; never anything they do not say. Format for meaning, in Markdown: **bold** for the key "
-        'facts and numbers, *italic* for an aside, `code` for exact names, "- " for items; an emoji '
-        "only where it says something with less (✅ settled, ⚠️ a caveat or a disagreement, 📅 a "
-        "date, 💡 a tip). Never a heading or a table, and no list of sources (it is added)."
-    )
-
-    def __init__(self, talk, tracker=None):
-        self.talk, self.tracker = talk, tracker
-
-    def researching(self, channel, chat, topic, now):
-        head = md(t"🔎 **{topic}**")
-        self.enter("searches")
-        sent = channel.show(chat, None, f"{head}\n⏳ _working out what to search_")
-        internet = Internet()
-        unusable = self.unusable(internet)
-        if unusable:
-            return self.ended(channel, chat, sent, "blocked", f"{head}\n{unusable}")
-        busy = "; ".join(run["brief"] for run in now())
-        waits = f"\n⏸ _first finishing a step of_ {busy}_; your answer comes right after_" if busy else ""
-        try:
-            searches = self.searches(channel, chat, topic)
-            searching = " · ".join(f"`{search}`" for search in searches)
-            self.enter("read")
-            sent = channel.show(chat, sent, f"{head}\n🌐 _searching:_ {searching}{waits}")
-            pages = self.read(internet, searches)
-            if not pages:
-                return self.ended(
-                    channel,
-                    chat,
-                    sent,
-                    "blocked",
-                    md(t"{head:md}\n🤷 **Nothing found on the web** for it: {internet.problem()}"),
-                )
-            self.enter("write")
-            sites = " · ".join(dict.fromkeys(site_of(page["url"]) for page in pages))
-            sent = channel.show(
-                chat,
-                sent,
-                md(t"{head:md}\n📖 _read {len(pages)} pages:_ {sites}\n⏳ _answering from what they say_")
-                + waits,
-            )
-            told = self.answer_from(channel, chat, topic, pages)
-        except OllamaError as exc:
-            return self.ended(
-                channel,
-                chat,
-                sent,
-                "blocked",
-                md(t"{head:md}\n⚠️ **The model did not answer:** {first_words(exc)}"),
-            )
-        return self.ended(
-            channel, chat, sent, "done", f"{head}\n{told}\n\n📚 **Sources**\n{self.sources(pages)}"
-        )
-
-    def enter(self, phase):
-        if self.tracker is not None:
-            self.tracker.phase(phase)
-
-    @staticmethod
-    def ended(channel, chat, sent, status, text):
-        channel.show(chat, sent, text, done=True)
-        return status, text
-
-    def unusable(self, internet):
-        if not internet.available():
-            return md(t"⚠️ **The web is not usable:** {internet.problem()}")
-        if not Models.quick():
-            return "⚠️ **No model is in use yet:** `tinker use-model NAME`"
-        return ""
-
-    def searches(self, channel, chat, topic):
-        data = json_answer(
-            self.talk.ask(
-                channel,
-                chat,
-                [
-                    {
-                        "role": "system",
-                        "content": self.SEARCHES_SYSTEM.format(
-                            today=today().strftime("%d %B %Y"), year=today().strftime("%Y")
-                        ),
-                    },
-                    {"role": "user", "content": topic},
-                ],
-                COMMAND_NAMING_MAX_TOKENS,
-            )
-        )
-        found = [str(search).strip() for search in data.get("searches") or [] if str(search).strip()]
-        return list(dict.fromkeys(found))[:CHAT_RESEARCH_SEARCHES] or [topic]
-
-    def read(self, internet, searches):
-        found = [internet.search(query, CHAT_RESEARCH_PAGES) or [] for query in searches]
-        pages, wanted = [], set(re.findall(r"[a-z0-9]{3,}", " ".join(searches).lower()))
-        for result in self.in_turn(found)[:CHAT_RESEARCH_PAGES]:
-            page = internet.fetch(result["url"]) or result
-            content = self.most_about(page.get("content") or result.get("content", ""), wanted)
-            if content.strip():
-                pages.append(
-                    {"title": page.get("title") or result["title"], "url": result["url"], "content": content}
-                )
-        return pages
-
-    @staticmethod
-    def in_turn(found):
-        order, seen = [], set()
-        for rank in range(CHAT_RESEARCH_PAGES):
-            for results in found:
-                if rank < len(results) and results[rank]["url"] not in seen:
-                    seen.add(results[rank]["url"])
-                    order.append(results[rank])
-        return order
-
-    @staticmethod
-    def most_about(text, wanted):
-        paragraphs = [
-            paragraph.strip()
-            for paragraph in re.split(r"\n\s*\n|\n(?=[#*-] )", text)
-            if len(paragraph.strip()) > 40
-        ]
-        score = lambda paragraph: len(wanted & set(re.findall(r"[a-z0-9]{3,}", paragraph.lower())))
-        best, size = set(), 0
-        for index in sorted(range(len(paragraphs)), key=lambda position: -score(paragraphs[position])):
-            if size + len(paragraphs[index]) > CHAT_RESEARCH_CHARS_PER_PAGE:
-                continue
-            best.add(index)
-            size += len(paragraphs[index])
-        return (
-            "\n\n".join(paragraphs[position] for position in sorted(best))
-            or text[:CHAT_RESEARCH_CHARS_PER_PAGE]
-        )
-
-    def answer_from(self, channel, chat, topic, pages):
-        return self.talk.ask(
-            channel,
-            chat,
-            [
-                {"role": "system", "content": self.ANSWER_SYSTEM.format(today=today().strftime("%d %B %Y"))},
-                {
-                    "role": "user",
-                    "content": f"The person asks: {topic}\n\n"
-                    + "\n\n".join(
-                        f"[{number}] {page['title']} ({page['url']})\n{page['content']}"
-                        for number, page in enumerate(pages, 1)
-                    ),
-                },
-            ],
-            CHAT_MAX_REPLY_TOKENS,
-        )
-
-    @staticmethod
-    def sources(pages):
-        return "\n".join(
-            f"[{number}] [{page['title'][:70] or page['url']}]({page['url']})"
-            for number, page in enumerate(pages, 1)
-        )
-
-
 class Reporter:
     def __init__(
         self,
@@ -2270,10 +2095,6 @@ def keep_typing(channel, chat, done):
 
 def first_words(text, size=160):
     return " ".join(str(text).split())[:size]
-
-
-def site_of(url):
-    return re.sub(r"^(?:[a-z]+://)?(?:www\.)?", "", url).split("/", 1)[0]
 
 
 def built_project(name=""):

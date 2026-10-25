@@ -10,7 +10,7 @@ from test_conversation import Recorder
 
 from tinkerkit import cli, conversation, exercising, jobs
 from tinkerkit.cli import Cli, Commands
-from tinkerkit.conversation import ConsoleChannel, Desk, Message, Research
+from tinkerkit.conversation import Desk, Message
 from tinkerkit.fetcher import Fetched, Fetcher
 from tinkerkit.jobs import JOB_STOP_SIGNAL, Jobs, archived, began_at, calls_log, is_job, journaled, today
 from tinkerkit.knowledge import Learner, Researcher
@@ -618,7 +618,7 @@ def test_web_searches_and_fetches_go_through_the_journal(home_store, monkeypatch
 
 
 @pytest.mark.spec("JOB-4")
-def test_the_prompts_that_say_the_date_say_the_jobs(home_store):
+def test_a_learning_plan_says_the_day_the_job_started(home_store):
     home_store.put(
         "jobs",
         "1",
@@ -633,19 +633,10 @@ def test_the_prompts_that_say_the_date_say_the_jobs(home_store):
             "updated": "x",
         },
     )
-    asked = []
-
-    class Talk:
-        def ask(self, channel, chat, messages, tokens):
-            asked.append(messages[0]["content"])
-            return '{"searches": ["go"]}'
-
     learner = SlotLearner.__new__(SlotLearner)
     learner.topic = "go"
     with Jobs.running(Jobs.arguments(["resume", "#1"])):
-        Research(Talk()).searches(None, "1", "go")
         parts = learner.plan_parts([])
-    assert "02 January 2026" in asked[0] and "2026" in asked[0]
     assert next(part for part in parts if part.title == "Today").text == "2026-01-02"
 
 
@@ -682,7 +673,6 @@ def test_tinker_chat_and_command_pause_the_job_that_runs(monkeypatch, capsys):
     monkeypatch.setattr(conversation, "paused_for_you", lambda: contextlib.nullcontext(paused.append(True)))
     monkeypatch.setattr(conversation, "commands_brief", lambda: "cmds")
     conversation.one_shot("chat", "hello")
-    conversation.one_shot("research", "")
     assert paused == [True]
 
 
