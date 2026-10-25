@@ -70,13 +70,13 @@ listed above it:
 | `project` | the plan and its record (`Project`, `SpecDocument`, `Runs`, `RunChecks`, `Brief`, `Outcome`), the run's `Tracker`, and the step pipeline (`Steps`) |
 | `fetcher` | the Internet plugin's page fetcher: pages read straight from their sites, in parallel, with the standard library only (`Fetcher`, `Fetched`) |
 | `passages` | every page read as text: an HTML page's main content as blocks, and fetched pages as passages under headings, repeats dropped (`Cleaner`, `MainBlocks`, `Links`, `Page`, `Passage`) |
-| `web` | the Internet plugin, the only part that goes on the web (`Internet`, `OllamaWeb`, `DuckDuckGoWeb`), and a page as text (`PageText`, a view over `passages`) |
-| `conversation` | the terminal and the chats as one conversation (`Desk`, `Channel`, `Markup`, `Talk`, `Shell`, `Research`, `Progress`, `Reporter`) |
+| `web` | the Internet plugin, the only part that goes on the web (`Internet`, `OllamaWeb`, `DuckDuckGoWeb`, `Throttle`), and a page as text (`PageText`, a view over `passages`) |
+| `conversation` | the terminal and the chats as one conversation (`Desk`, `Channel`, `Markup`, `Talk`, `Shell`, `Progress`, `Reporter`) |
 | `channels` | the chat plugin: Telegram, and `tinker channel` |
-| `knowledge` | lessons and proven knowledge (`Knowledge`), and what learning shares (`Learner`, `Researcher`, `Library`, `Retriever`, `Embeddings`) |
+| `knowledge` | lessons and proven knowledge (`Knowledge`), research (`Researcher`), and what learning shares (`Learner`, `Library`, `Retriever`, `Embeddings`) |
 | `slots` | what learning a language or a tool must find out, as data (`Slot`, `PROFILES`), and each slot's passages (`Selector`) |
 | `docsite` | a topic's documentation site for its version: its map, each slot's pages, kept per topic and version (`DocSite`, `DocCache`) |
-| `learning` | learning a language or a tool by its slots (`SlotLearner`, `Throttle`, `RequestLog`, `LearnStopped`) |
+| `learning` | learning a language or a tool by its slots (`SlotLearner`, `RequestLog`, `LearnStopped`) |
 | `graph` | what Tinker knows as one graph of items and links (`Graph`), and the page that shows it (`GraphPage`) |
 | `reading` | what the person gives to read: stored whole on the reading list (`Readings`), then learned from chapter by chapter (`Reader`, `Epub`, `Book`) |
 | `teaching` | asking what Tinker keeps (`Asker`), and teaching it, checked before anything changes (`Teacher`, `Memory`, `Verdict`) |
@@ -310,7 +310,7 @@ pauses it too, so the person is always answered at once.
   any other request is asked, and its answer kept unless it failed (`keep`). `Ollama.chat` (but an unload),
   `Internet.search`, `Internet.fetch` and `Fetcher.fetch` go through it.
 - **JOB-4** `today()` is the day the job that runs started (today outside a job): the prompts that say the date
-  (learning's plan, research's frame, `research TOPIC`) say the same on the day a job is resumed.
+  (learning's plan, research's frame) say the same on the day a job is resumed.
 - **JOB-5** `Jobs.arguments`: `resume #N` runs job #N's arguments, as that job (its number, its journal);
   `resume` alone runs the job stopped last, or, with no job stopped, the folder's run; `resume @PROJECT` runs
   that project. `confirm` is never a job's resume: it always builds the plan that waits in its folder. An
@@ -349,8 +349,8 @@ pauses it too, so the person is always answered at once.
   already, and any word but `#N` are refused with why.
 - **JOB-12** `calls_log()` is the one log of a job's model calls: `calls #N` for the job that runs, kept when
   it finishes and deleted when it is archived (**JOB-11**). Outside a job it keeps nothing. `learn`, `ask`,
-  `teach`, `read` and `exercise` give it to their model and to `say` (`detail`, **MSG-5**); `research` and
-  `calibrate` call Ollama directly and keep none.
+  `teach`, `read`, `research` and `exercise` give it to their model and to `say` (`detail`, **MSG-5**);
+  `calibrate` calls Ollama directly and keeps none.
 
 ## ledger (LED)
 
@@ -787,7 +787,7 @@ The terminal and the chats are one conversation: the same commands, the same ans
   its `text`: a research's answer). A command that keeps no tracker shows its latest printed line.
 - **CNV-19** A task run from a terminal reports to the enabled chats (`Attached`). `JOB_STOP_SIGNAL` (SIGUSR2)
   stops it as Ctrl-C does (a job is paused with it too), and its last state is shown once it ends.
-- **CNV-20** The chat asks the model only through the quick call (**MOD-25**); `Talk`, `Shell` and `Research`
+- **CNV-20** The chat asks the model only through the quick call (**MOD-25**); `Talk` and `Shell`
   read a JSON answer with `Reply.json()` (**PRM-2**), and take one that cannot be read as `{}`. `reply` keeps
   the last `CHAT_CONTEXT_MESSAGES` messages per chat, and it says plainly when no model is in use or the model
   failed.
@@ -796,18 +796,16 @@ The terminal and the chats are one conversation: the same commands, the same ans
 - **CNV-22** `Shell.propose` gives one command line to confirm, with a warning when it changes or deletes
   things. It gives no command for an empty, multi-line or failed reply. `take` hands the proposal over once.
   `run` runs it in the person's shell and shows the exit code and output.
-- **CNV-23** `Research.most_about` keeps the paragraphs that share the most words with the searches, in page
-  order, up to `CHAT_RESEARCH_CHARS_PER_PAGE`. `searches` falls back to the topic itself.
-- **CNV-24** `research TOPIC` says when the web or the model is not usable. Otherwise it answers from the pages
-  it read and lists them as numbered sources. It is a job: its tracker shows its steps (`searches`, `read`,
-  `write`) and ends with its answer (the ending's `text`, which a chat's message shows).
-- **CNV-25** `run [@PROJECT] ARGS [<<< INPUT]` runs a built project the way a person runs it: its run command,
+- **CNV-23** `research TOPIC` is `tinker research TOPIC` (**CLI-7**) run as a job, so research is the same
+  in a chat and in a terminal: its message shows the job's tracker (**CNV-18**) and ends with its answer
+  (**KNW-23**, the ending's `text`).
+- **CNV-24** `run [@PROJECT] ARGS [<<< INPUT]` runs a built project the way a person runs it: its run command,
   in its folder and environment, with the arguments quoted and the input given after `<<<`. The project is the
   one named, else the one built last. With no project built, or one with no run command, it says so.
-- **CNV-26** `one_shot` says one of the conversation's commands once, in the terminal (`tinker chat`,
-  `command`, `research`, `run`, `history`). Each needs words after it, except `run` and `history`. `chat` and
+- **CNV-25** `one_shot` says one of the conversation's commands once, in the terminal (`tinker chat`,
+  `command`, `run`, `history`). Each needs words after it, except `run` and `history`. `chat` and
   `command` pause the job that runs (**JOB-10**). `command` runs nothing without a yes at the terminal.
-- **CNV-27** `memory --graph` in a conversation makes the page (`tinker memory --graph`) and sends it with
+- **CNV-26** `memory --graph` in a conversation makes the page (`tinker memory --graph`) and sends it with
   `send_file`, what tinker printed as its caption. The terminal opens the file in the browser and says where it
   is; a channel that cannot send files sends the caption with the file's path.
 
@@ -941,6 +939,12 @@ Lessons and proven knowledge, and what every kind of learning shares.
   teaching name items only this way. `retire(item, language, reason, run)` retires it from its own store: a
   lesson from the language's lessons or else any language's, a proven fact or fix from the language's, a
   topic's item from its topic; it says whether it was there.
+- **KNW-23** `Researcher.answer(entry)` gives a research as text: its findings, each with its confidence and
+  the facts it cites as `[n]`, then the pages of those facts as numbered sources. A research with no finding
+  says so.
+- **KNW-24** `Learner.web_pages(searches)` searches each and fetches the results in turn, each address once,
+  at most `TEACH_PAGES`; each page keeps its first chunk and then the ones best about the searches
+  (**KNW-12**), up to `TEACH_PAGE_CHARS`. A page with no text is left out.
 
 ## slots (SLT)
 
@@ -990,7 +994,8 @@ version.
 
 `tinker learn TOPIC` and the recall phase of a run with `--web` learn a language or a tool by its slots
 (`SlotLearner`), from its own documentation for the version installed, through the steps of **LRN-8**.
-Domain research (`Researcher`), own-command learning and run lessons are apart.
+A domain is researched (`Researcher`, **KNW-18**), as `tinker research` does. Own-command learning and run
+lessons are apart.
 
 - **LRN-1** `SlotLearner` goes on the web only through `Internet`, which waits out rate limits (**WEB-12**). A
   search still rate limited stops at GATE 1 as `rate-limit`; a fallback fetch still rate limited keeps the page
@@ -1156,7 +1161,7 @@ then is anything changed.
   toolchain key or value it cannot use is a `ValueError` (the model is asked again with why).
 - **TCH-5** `Teacher.teach` checks the facts first. It runs only the commands that show what is installed
   (each other one is skipped, and said; a tool not found here may be in a project's own environment), and
-  reads the pages the searches find. A preference is honored, never checked: with only preferences, nothing is
+  reads the pages the searches find (**KNW-24**). A preference is honored, never checked: with only preferences, nothing is
   run or searched and the judge is not asked. Facts with no evidence are unsure, and the judge is not asked.
 - **TCH-6** `Verdict.read` needs a verdict for every fact (`holds`, `wrong` or `unsure`; one that holds with
   no evidence it can cite is unsure), and whether each change a fact is for follows. Each change is made on
@@ -1397,7 +1402,8 @@ The main system: the command line, one run, and the cycle of phases.
   anything is loaded. Learning nothing ends with an error. However it ends, it prints the time it took
   (`Time taken: 8m 34s`). It keeps a `Tracker` as a run does: its messages, what the model is doing (in plain
   words), its steps and its end (learned, with the summary, or why it stopped), so a chat that started it shows
-  them; its last state stays in its job.
+  them; its last state stays in its job. `tinker research TOPIC` is the same, with its own steps: it
+  researches the topic (**KNW-18**) and ends with its answer (**KNW-23**) as the ending's `text`.
 - **CLI-8** `ProjectFolder.make(task)` makes a new folder in the projects folder. Its name comes from the model
   (when it is valid) or from the task's words, and it gets `-2`, `-3` … when the name is taken.
 - **CLI-9** A run works on one cycle. For `add` or `fix`, that is a new feature or fix cycle, recorded in the
