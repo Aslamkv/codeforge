@@ -57,6 +57,27 @@ SafeCommands = namedtuple("SafeCommands", "kept dropped")
 Findings = namedtuple("Findings", "facts sources")
 Investigation = namedtuple("Investigation", "facts sources analysis")
 CrossCheck = namedtuple("CrossCheck", "support differ")
+
+
+class Item(namedtuple("Item", "kind id topic", defaults=("",))):
+    TOPIC_KINDS = ("fix", "fact", "finding", "rule")
+    CLAIM_KINDS = ("fact", "finding", "rule")
+
+    @property
+    def key(self):
+        named = (self.kind, self.topic, self.id) if self.kind in Item.TOPIC_KINDS else (self.kind, self.id)
+        return ":".join(named)
+
+    @classmethod
+    def of(cls, key):
+        kind, _, rest = key.partition(":")
+        if kind not in Item.TOPIC_KINDS:
+            return cls(kind, rest)
+        topic, _, item_id = rest.partition(":")
+        return cls(kind, item_id, topic)
+
+
+STORED_AS = frozendict({"lesson": ("lessons", "id"), "known": ("facts", "id"), "fix": ("fixes", "failure")})
 LEARN_STEPS = (
     "search",
     "plan",
@@ -193,9 +214,10 @@ class Knowledge:
         return sorted(fresh + older[: max(0, MAX_LESSONS_PER_FILE - len(fresh))], key=rank, reverse=True)
 
     def prove(self, used):
+        used = items_of(used)
         proven = self.prove_lessons(used) + self.prove_web_facts(used)
         for fact in self.language_doc.get("facts", []):
-            if f"known:{fact['id']}" in used:
+            if Item("known", fact["id"]) in used:
                 record(fact, "helped", self.run)
         self.save()
         return proven
@@ -203,7 +225,7 @@ class Knowledge:
     def prove_lessons(self, used):
         proven = 0
         for lesson in self.known_lessons():
-            if f"lesson:{lesson.get('id')}" in used:
+            if Item("lesson", lesson.get("id")) in used:
                 proven += lesson.get("status") != "proven"
                 record(lesson, "helped", self.run)["status"] = "proven"
         return proven
@@ -232,36 +254,36 @@ class Knowledge:
         return proven
 
     def disprove(self, used, phases):
-        shown = {key for key, where in used.items() if set(where) & set(phases)}
+        shown = items_of(key for key, where in used.items() if set(where) & set(phases))
         reason = f"shown in the {', '.join(phases)} prompts of a step that failed"
         gone = self.retire_lessons(shown, reason)
-        dropped = {key.split(":", 1)[1] for key in shown if key.startswith("known:")}
+        dropped = {item.id for item in shown if item.kind == "known"}
         for slug, ids in self.used_facts(shown).items():
             gone += Library.retire(slug, ids, reason, self.run)
             dropped |= ids
-        gone += retire(self.language_doc, "facts", lambda fact: fact["id"] in dropped, reason, self.run)
+        gone += retire_from(self.language_doc, "facts", lambda fact: fact["id"] in dropped, reason, self.run)
         self.save()
         return gone
 
     def retire_lessons(self, shown, reason):
         return sum(
-            retire(doc, "lessons", lambda lesson: f"lesson:{lesson.get('id')}" in shown, reason, self.run)
+            retire_from(
+                doc, "lessons", lambda lesson: Item("lesson", lesson.get("id")) in shown, reason, self.run
+            )
             for doc in (self.language_doc, self.any_language_doc)
         )
 
     @staticmethod
     def used_facts(used):
         found = collections.defaultdict(set)
-        for key in used:
-            kind, _, rest = key.partition(":")
-            if kind == "fact" and ":" in rest:
-                slug, _, claim_id = rest.rpartition(":")
-                found[slug].add(claim_id)
+        for item in used:
+            if item.kind == "fact":
+                found[item.topic].add(item.id)
         return dict(found)
 
     def supersede(self, slug, shown):
         reason = "replaced when the language was learned again"
-        gone = retire(
+        gone = retire_from(
             self.language_doc,
             "facts",
             lambda fact: fact.get("topic") == slug and fact["id"] not in shown,
@@ -344,7 +366,7 @@ class Knowledge:
             fix["used"] = fix.get("used", 0) + 1
             record(fix, "helped", self.run)
         else:
-            retire(
+            retire_from(
                 self.language_doc,
                 "fixes",
                 lambda known: known["failure"] == fix["failure"],
@@ -356,24 +378,6 @@ class Knowledge:
     def finished_project(self):
         self.language_doc["projects"] = self.language_doc.get("projects", 0) + 1
         self.save()
-
-    def retire_item(self, key, reason):
-        kind, _, rest = key.partition(":")
-        picks = {
-            "lesson": ("lessons", lambda item: item.get("id") == rest),
-            "known": ("facts", lambda item: item.get("id") == rest),
-            "fix": ("fixes", lambda item: item.get("failure") == rest),
-        }
-        if kind not in picks:
-            return False
-        name, gone = picks[kind]
-        if retire(self.language_doc, name, gone, reason, self.run):
-            self.save_language()
-            return True
-        if kind == "lesson" and retire(self.any_language_doc, name, gone, reason, self.run):
-            self.save_any_language()
-            return True
-        return False
 
     def correct_toolchain(self, changes):
         known = self.toolchain()
@@ -1213,7 +1217,7 @@ class Library:
             if entry:
                 gone.append(
                     sum(
-                        retire(entry, key, lambda claim: claim.get("id") in ids, reason, run)
+                        retire_from(entry, key, lambda claim: claim.get("id") in ids, reason, run)
                         for key in Library.CLAIM_KINDS
                     )
                 )
@@ -1538,7 +1542,29 @@ def record(item, event, run):
     return item
 
 
-def retire(doc, key, gone, reason, run):
+def retire(item, language, reason, run):
+    if item.kind in Item.CLAIM_KINDS:
+        return Library.retire(item.topic, {item.id}, reason, run) > 0
+    return item.kind in STORED_AS and retire_known(Knowledge(language, run), item, reason)
+
+
+def retire_known(knowledge, item, reason):
+    name, field = STORED_AS[item.kind]
+    gone = lambda kept: kept.get(field) == item.id
+    if retire_from(knowledge.language_doc, name, gone, reason, knowledge.run):
+        knowledge.save_language()
+        return True
+    if item.kind == "lesson" and retire_from(knowledge.any_language_doc, name, gone, reason, knowledge.run):
+        knowledge.save_any_language()
+        return True
+    return False
+
+
+def items_of(keys):
+    return {Item.of(key) for key in keys}
+
+
+def retire_from(doc, key, gone, reason, run):
     items = doc.get(key, [])
     leaving = [item for item in items if gone(item)]
     doc[key] = [item for item in items if not gone(item)]

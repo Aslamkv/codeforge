@@ -12,7 +12,7 @@ from .settings import (
     fingerprint,
     first_line,
 )
-lazy from .knowledge import Knowledge, Library
+lazy from .knowledge import Item, Knowledge, Library
 lazy from .prompts import Part, Prompts, PromptTooLarge, Reply
 lazy from .workspace import TaughtCommands, Workspace
 
@@ -108,9 +108,9 @@ class Session:
     @staticmethod
     def ids_used(lessons, proven, learned):
         return (
-            [f"lesson:{lesson['id']}" for lesson in lessons]
-            + [f"known:{fact['id']}" for fact in proven]
-            + [f"fact:{item['topic']}:{item['id']}" for item in learned if item.get("id")]
+            [Item("lesson", lesson["id"]).key for lesson in lessons]
+            + [Item("known", fact["id"]).key for fact in proven]
+            + [Item("fact", item["id"], item["topic"]).key for item in learned if item.get("id")]
         )
 
     def checks_part(self, phases):

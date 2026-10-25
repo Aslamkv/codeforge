@@ -4,7 +4,7 @@ from collections import namedtuple
 from .messages import say
 lazy from .conversation import Research
 lazy from .graph import Graph
-lazy from .knowledge import Knowledge, Learner, Library, Retriever
+lazy from .knowledge import Item, Knowledge, Learner, Library, Retriever, retire
 lazy from .prompts import Part, Prompts
 lazy from .reading import Readings
 lazy from .settings import (
@@ -291,7 +291,7 @@ class Teacher:
         return [
             f"Retired {item['kind']}: {first_line(item['text'], 100)}"
             for item in items
-            if retire_item(item, reason)
+            if retire(Item.of(item["id"]), item["group"], reason, None)
         ]
 
     @staticmethod
@@ -317,17 +317,16 @@ class Teacher:
     def fact_kept(fact, items, sources):
         if not fact:
             return ""
-        kind, _, rest = items[fact["about"] - 1]["id"].partition(":")
-        slug, _, claim_id = rest.rpartition(":")
+        about = Item.of(items[fact["about"] - 1]["id"])
         kept = (
-            Library.taught_fact(slug, claim_id, fact["text"], sources)
-            if kind in ("fact", "rule", "finding")
+            Library.taught_fact(about.topic, about.id, fact["text"], sources)
+            if about.kind in Item.CLAIM_KINDS
             else None
         )
         if kept is None:
             say.skip(f"No book or topic to keep it in: {first_line(fact['text'], 80)}")
             return ""
-        return f"Fact kept for {(Library.read(slug) or {}).get('name', slug)}: {kept['text']}"
+        return f"Fact kept for {(Library.read(about.topic) or {}).get('name', about.topic)}: {kept['text']}"
 
 
 def quoted(passages):
@@ -483,17 +482,6 @@ def change_summary(change):
 
 def shown(command):
     return " && ".join(command) if isinstance(command, list) else command
-
-
-def retire_item(item, reason):
-    kind, _, rest = item["id"].partition(":")
-    if kind in ("fact", "finding", "rule"):
-        slug, _, claim_id = rest.rpartition(":")
-        return Library.retire(slug, {claim_id}, reason, None) > 0
-    if kind in ("lesson", "known", "fix"):
-        key = item["id"] if kind != "fix" else f"fix:{rest.partition(':')[2]}"
-        return Knowledge(item["group"]).retire_item(key, reason)
-    return False
 
 
 class Verdict:

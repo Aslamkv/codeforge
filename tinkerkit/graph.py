@@ -2,7 +2,7 @@ lazy import html
 lazy import itertools
 lazy import json
 
-lazy from .knowledge import Embeddings, Library
+lazy from .knowledge import Embeddings, Item, Library
 lazy from .settings import SIMILAR_LESSON_MEANING, SIMILAR_LESSON_WORDS, Home, first_line, similarity
 lazy from .workspace import TaughtCommands, Toolchain
 
@@ -47,7 +47,7 @@ class Graph:
             for fix in doc.get("fixes", []):
                 self.add_fix(key, fix, hub)
             for fact in doc.get("facts", []):
-                self.add_claim(f"known:{fact['id']}", "fact", fact, hub)
+                self.add_claim(Item("known", fact["id"]).key, "fact", fact, hub)
             for lesson in doc.get("lessons", []):
                 self.add_lesson(lesson, hub)
             self.add_retired(doc, hub, key)
@@ -83,25 +83,23 @@ class Graph:
 
     def add_topic_facts(self, slug, entry, hub):
         for fact in entry.get("facts", []):
-            self.add_claim(f"fact:{slug}:{fact['id']}", "fact", fact, hub)
-            if f"known:{fact['id']}" in self.nodes:
-                self.link(f"fact:{slug}:{fact['id']}", f"known:{fact['id']}", "became")
+            node, known = Item("fact", fact["id"], slug).key, Item("known", fact["id"]).key
+            self.add_claim(node, "fact", fact, hub)
+            if known in self.nodes:
+                self.link(node, known, "became")
 
     def add_findings(self, slug, entry, hub):
         for finding in entry.get("findings", []):
-            node = self.add_claim(f"finding:{slug}:{finding['id']}", "finding", finding, hub)
+            node = self.add_claim(Item("finding", finding["id"], slug).key, "finding", finding, hub)
             for fact_id in finding.get("cites", []):
-                self.link(node, f"fact:{slug}:{fact_id}", "cites")
+                self.link(node, Item("fact", fact_id, slug).key, "cites")
 
     def add_rules(self, slug, entry, hub):
         for rule in entry.get("rules", []):
-            node = self.add_claim(f"rule:{slug}:{rule['id']}", "rule", rule, hub)
+            node = self.add_claim(Item("rule", rule["id"], slug).key, "rule", rule, hub)
             for cited in rule.get("cites", []):
-                self.link(
-                    node,
-                    f"fact:{slug}:{cited}" if f"fact:{slug}:{cited}" in self.nodes else f"lesson:{cited}",
-                    "cites",
-                )
+                fact = Item("fact", cited, slug).key
+                self.link(node, fact if fact in self.nodes else Item("lesson", cited).key, "cites")
 
     def add_commands(self):
         taught = TaughtCommands.all()
@@ -179,7 +177,7 @@ class Graph:
             ("last seen", lesson.get("last_seen")),
         ]
         return self.item(
-            f"lesson:{lesson['id']}",
+            Item("lesson", lesson["id"]).key,
             "lesson",
             lesson["text"],
             hub,
@@ -219,7 +217,7 @@ class Graph:
             ("replayed without the model", "yes" if fix.get("replay") else "no"),
         ]
         return self.item(
-            f"fix:{key}:{fix['failure']}",
+            Item("fix", fix["failure"], key).key,
             "fix",
             f"{fix['failure']} → {fix.get('cause', '')}",
             hub,
