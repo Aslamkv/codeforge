@@ -256,9 +256,8 @@ def live_line(text, began, frame, width, stream=None, indent="", **facts):
 
 
 def glowing(word, frame):
-    start = frame % (len(word) + GLOW_WIDTH) - GLOW_WIDTH
-    end = max(start + GLOW_WIDTH, 0)
-    start = max(start, 0)
+    end = frame % (len(word) + GLOW_WIDTH)
+    start = max(end - GLOW_WIDTH, 0)
     return [(word[:start], "accent"), (word[start:end], "glow"), (word[end:], "accent")]
 
 

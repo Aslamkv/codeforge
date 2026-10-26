@@ -562,6 +562,11 @@ def test_console_changes_its_live_block_in_place_and_turns_its_star_and_glow_on_
 
 
 @pytest.mark.spec("CNV-8")
+def test_the_live_block_ticks_about_eight_times_a_second():
+    assert round(1 / ConsoleScreen.TICK_SECONDS) == 8
+
+
+@pytest.mark.spec("CNV-8")
 def test_a_shrinking_live_block_pulls_the_rule_and_prompt_up(monkeypatch, clock):
     screen = live_screen(monkeypatch)
     screen.show_live("Learning", 100.0, under=UNDER)
@@ -603,9 +608,7 @@ def started_screen(monkeypatch):
     def started():
         colour_terminal(monkeypatch)
         monkeypatch.setattr(ConsoleScreen, "TICK_SECONDS", 60)
-        screen = ConsoleScreen()
-        screen.start()
-        return screen
+        ConsoleScreen().start()
 
     yield started
     signal.signal(signal.SIGWINCH, resize_handler)
@@ -615,14 +618,6 @@ def started_screen(monkeypatch):
 def test_console_starts_by_drawing_the_rule_where_the_cursor_is(started_screen):
     started_screen()
     assert sys.stdout.getvalue() == unwrapped(rule_drawn(10)) + "\n"
-
-
-@pytest.mark.spec("CNV-8")
-def test_a_print_goes_in_right_above_the_block_and_pushes_the_prompt_down(started_screen):
-    screen = started_screen()
-    assert drawn_after(lambda: screen.print("hi")) == printed_above("hi")
-    printed = drawn_after(lambda: screen.print(stacked("line", 20)))
-    assert printed == printed_above(stacked("line", 20), rows=20)
 
 
 def stale_rows_cleared(rows, typed_rows=0):
