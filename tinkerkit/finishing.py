@@ -161,9 +161,20 @@ class ReadmeWriter(Phase):
         return None
 
     def guide(self):
+        try:
+            answer = self.session.model.ask_until_usable(
+                Prompts.README_SYSTEM, self.readme_parts(), "README", self.read, attempts=2, think=False
+            )
+        except OllamaError as exc:
+            answer = Answer(None, why=str(exc))
+        if answer.why:
+            say.warn(f"README: {first_line(answer.why, 120)}; its features are the spec's criteria")
+        return answer.value or self.criteria_readme()
+
+    def readme_parts(self):
         code = [path for path in self.session.files_on_disk("code", "template") if path != ENV_FILE]
         entry = self.project.entry_files(code)
-        parts = [
+        return [
             Part("Request", self.project.run["task"], True, keep="head"),
             Part(
                 "What it does (its tested criteria)",
@@ -186,15 +197,9 @@ class ReadmeWriter(Phase):
                 for path in dict.fromkeys(entry + code)
             ],
         ]
-        try:
-            answer = self.session.model.ask_until_usable(
-                Prompts.README_SYSTEM, parts, "README", self.read, attempts=2, think=False
-            )
-        except OllamaError as exc:
-            answer = Answer(None, why=str(exc))
-        if answer.why:
-            say.warn(f"README: {first_line(answer.why, 120)}; its features are the spec's criteria")
-        return answer.value or {
+
+    def criteria_readme(self):
+        return {
             "overview": "",
             "features": [criterion["behaviour"] for criterion in self.project.criteria],
             "usage": [],
