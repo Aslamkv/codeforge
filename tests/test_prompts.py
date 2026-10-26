@@ -162,11 +162,6 @@ def test_spec_json_keeps_the_spec_when_only_data_is_broken():
 
 
 @pytest.mark.spec("PRM-10")
-def test_strip_trailing_commas_outside_strings_only():
-    assert Reply.strip_trailing_commas('{"a": [1, 2, ], "s": "x, ]",}') == '{"a": [1, 2 ], "s": "x, ]"}'
-
-
-@pytest.mark.spec("PRM-11")
 def test_assemble_orders_by_place_and_leaves_out_empty_optional_parts():
     parts = [
         Part("Middle", "m", True),
@@ -184,7 +179,7 @@ def test_assemble_orders_by_place_and_leaves_out_empty_optional_parts():
     ]
 
 
-@pytest.mark.spec("PRM-11")
+@pytest.mark.spec("PRM-10")
 def test_assemble_fits_optional_parts_while_they_fit():
     parts = [Part("R", "r" * 100, True), Part("Atomic", "a" * 500, atomic=True), Part("Prose", "p" * 1000)]
     text = Part.assemble(parts, 600)
@@ -193,13 +188,13 @@ def test_assemble_fits_optional_parts_while_they_fit():
     assert "## Prose\n" + "p" * 100 in text and "[...]" in text
 
 
-@pytest.mark.spec("PRM-11")
+@pytest.mark.spec("PRM-10")
 def test_assemble_leaves_out_a_part_too_small_to_shorten():
     text = Part.assemble([Part("R", "r" * 100, True), Part("Prose", "p" * 1000)], 200)
     assert "## Prose" not in text
 
 
-@pytest.mark.spec("PRM-12")
+@pytest.mark.spec("PRM-11")
 def test_required_prose_is_shortened_head_or_tail():
     notes = []
     head, tail = Part("Head", "H" + "x" * 2000, True), Part("Tail", "y" * 2000 + "T", True, keep="tail")
@@ -209,7 +204,7 @@ def test_required_prose_is_shortened_head_or_tail():
     assert text.count("[...]") == 2
 
 
-@pytest.mark.spec("PRM-12")
+@pytest.mark.spec("PRM-11")
 def test_exact_parts_are_never_shortened():
     exact = Part("File app.py", "c" * 3000, True, exact=True)
     with pytest.raises(PromptTooLarge, match="File app.py"):
@@ -218,7 +213,7 @@ def test_exact_parts_are_never_shortened():
     assert "c" * 3000 in text
 
 
-@pytest.mark.spec("PRM-12")
+@pytest.mark.spec("PRM-11")
 def test_prose_is_never_cut_below_the_floor():
     with pytest.raises(PromptTooLarge):
         Part.assemble([Part("Prose", "p" * 3000, True)], 100)
@@ -226,7 +221,7 @@ def test_prose_is_never_cut_below_the_floor():
     assert len(shortened.text) <= MIN_TRIMMED_PROSE_CHARS and shortened.text.endswith("[...]")
 
 
-@pytest.mark.spec("PRM-13")
+@pytest.mark.spec("PRM-12")
 def test_part_flags_render_and_size():
     assert not Part("t", "x", exact=True).exact and Part("t", "x", True, exact=True).exact
     assert Part("t", "x", atomic=True).atomic and not Part("t", "x", True, atomic=True).atomic
@@ -245,7 +240,7 @@ def example(text):
     return json.loads(text)
 
 
-@pytest.mark.spec("PRM-14")
+@pytest.mark.spec("PRM-13")
 def test_the_prompts_example_json_parses_and_its_toolchain_works():
     spec = example(Prompts.SPEC_JSON + ",\n " + Prompts.TOOLCHAIN_JSON + "}")
     assert spec["criteria"] and spec["files"] and spec["entry"] == "tip.py"
@@ -259,7 +254,7 @@ def test_the_prompts_example_json_parses_and_its_toolchain_works():
     )
 
 
-@pytest.mark.spec("PRM-14")
+@pytest.mark.spec("PRM-13")
 def test_the_templates_format():
     assert "60 words" in Prompts.BRIEF_SYSTEM.format(words=60)
     assert "over Telegram" in Prompts.CHAT_SYSTEM.format(kind="Telegram", commands="status")
@@ -268,14 +263,14 @@ def test_the_templates_format():
     assert len(systems) >= 25 and all(isinstance(system, str) and system.strip() for system in systems)
 
 
-@pytest.mark.spec("PRM-15")
+@pytest.mark.spec("PRM-14")
 def test_the_example_toolchain_commands_are_real_commands():
     toolchain = example("{" + Prompts.TOOLCHAIN_JSON + "}")["toolchain"]
     commands = toolchain["setup"] + [value for key, value in toolchain.items() if isinstance(value, str)]
     assert not [command for command in commands if re.search(r"\btinker\b", command)]
 
 
-@pytest.mark.spec("PRM-16")
+@pytest.mark.spec("PRM-15")
 def test_the_lessons_prompt_asks_for_general_lessons():
     assert "never name this project, its files, its names, its features or its data" in " ".join(
         Prompts.LESSONS_SYSTEM.split()

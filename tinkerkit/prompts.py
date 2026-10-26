@@ -105,15 +105,6 @@ class Reply:
         stack.pop()
 
     @staticmethod
-    def strip_trailing_commas(text):
-        inside, _ = Reply.string_states(text)
-        return "".join(
-            char
-            for index, (char, in_string) in enumerate(zip(text, inside))
-            if in_string or not (char == "," and text[index + 1 :].lstrip()[:1] in ("]", "}"))
-        )
-
-    @staticmethod
     def string_states(text):
         states, in_string, escaped = [], False, False
         for char in text:
@@ -138,7 +129,7 @@ class Reply:
         if start < 0 or at <= start:
             return None
         try:
-            data = json.loads(self.strip_trailing_commas(self.text[start:at].rstrip().rstrip(",") + "}"))
+            data = json.loads(self.text[start:at].rstrip().rstrip(",") + "}")
         except ValueError:
             return None
         data["data"] = self.text[at:].split(":", 1)[-1].strip().rstrip("}").strip()
