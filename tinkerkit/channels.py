@@ -59,6 +59,7 @@ class ChannelCommand:
             "enable": ChannelCommand.enable,
             "disable": ChannelCommand.disable,
             "start": ChannelCommand.start,
+            "goodbye": ChannelCommand.goodbye,
         }
         if action in ("help", "-h", "--help"):
             say.text(ChannelCommand.USAGE)
@@ -181,6 +182,17 @@ class ChannelCommand:
         for channel in channels:
             ChannelCommand.check(channel)
         Desk(channels, Path.cwd()).run()
+
+    @staticmethod
+    def goodbye(rest):
+        goodbye = json.loads(rest[0])
+        for name in goodbye["channels"]:
+            Desk.post_status(Channels.make(name), goodbye["status"])
+        question = goodbye["question"]
+        if question:
+            channel = Channels.make(question["channel"])
+            for message in question["messages"]:
+                channel.delete(question["chat"], message)
 
     @staticmethod
     def check(channel):

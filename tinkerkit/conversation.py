@@ -50,7 +50,7 @@ CLOCK_ONLY_EDIT_SECONDS = 15
 BUILD_STOP_GRACE_SECONDS = 120
 STATUS_LOOK_SECONDS = 10
 EXPIRED_MESSAGES_SWEEP_SECONDS = 2
-ENDED_LOOK_SECONDS = 0.5
+ENDED_LOOK_SECONDS = 0.1
 BANNER_MAX_COLUMNS = 64
 
 CHAT_CONTEXT_MESSAGES = 12
@@ -191,7 +191,6 @@ class Desk:
         self.open_banner()
         self.talk.warm()
         self.say_status(anew=True)
-        self.adopt_exercise()
         if not self.consoles:
             names = ", ".join(channel.name for channel in self.channels)
             say.info(f"Listening on {names}; projects go in {self.root}. Ctrl-C stops.", "👂")
@@ -227,16 +226,20 @@ class Desk:
         return str("~" / self.root.relative_to(home)) if self.root.is_relative_to(home) else str(self.root)
 
     def say_goodbye(self):
-        leaving = threading.Thread(target=self.take_out_question, daemon=True)
-        leaving.start()
-        self.say_status("💤 **Tinker** · not listening")
-        leaving.join()
+        status = "💤 **Tinker** · not listening"
+        for console in self.consoles:
+            console.show(ConsoleChannel.CHAT, None, status, done=True)
+        goodbye = self.goodbye(status)
+        if goodbye["channels"] or goodbye["question"]:
+            tinker_process(["channel", "goodbye", json.dumps(goodbye)], output=subprocess.DEVNULL)
 
-    def take_out_question(self):
+    def goodbye(self, status):
+        started = [channel.name for channel in self.channels if channel in self.chats_started]
+        question = None
         if self.stop_question:
             channel, chat, shown = self.stop_question
-            for message in shown:
-                channel.delete(chat, message)
+            question = {"channel": channel.name, "chat": chat, "messages": list(shown)}
+        return {"status": status, "channels": started, "question": question}
 
     def say_status(self, text=None, anew=False):
         text = text or self.status()
@@ -301,10 +304,18 @@ class Desk:
         ]
         for thread in threads:
             thread.start()
+        threading.Thread(target=self.keep_up, daemon=True).start()
+        while any(thread.is_alive() for thread in threads) and not self.a_channel_closed():
+            time.sleep(ENDED_LOOK_SECONDS)
+        raise KeyboardInterrupt
+
+    def a_channel_closed(self):
+        return any(channel.closed for channel in self.channels)
+
+    def keep_up(self):
+        self.adopt_exercise()
         looked = collected = 0.0
-        while any(thread.is_alive() for thread in threads) and not any(
-            channel.closed for channel in self.channels
-        ):
+        while not self.a_channel_closed():
             time.sleep(ENDED_LOOK_SECONDS)
             if time.monotonic() - collected >= EXPIRED_MESSAGES_SWEEP_SECONDS:
                 collected = time.monotonic()
@@ -315,7 +326,6 @@ class Desk:
                 self.say_status()
                 if self.exercise_reporter is None:
                     self.adopt_exercise()
-        raise KeyboardInterrupt
 
     def listen(self, channel):
         if channel not in self.consoles:

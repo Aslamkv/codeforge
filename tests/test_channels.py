@@ -127,6 +127,38 @@ def test_channel_command_list_enable_disable_remove(capsys):
     assert "tinker channel start" in capsys.readouterr().out
 
 
+class Goodbyes:
+    def __init__(self, name):
+        self.name, self.allowed, self.log = name, ["1"], []
+
+    def show(self, chat, sent, text, **how):
+        self.log.append(("show", chat, text))
+        return [77]
+
+    def lasting(self, chat, shown):
+        pass
+
+    def delete(self, chat, sent):
+        self.log.append(("delete", chat, sent))
+
+
+@pytest.mark.spec("CNV-9", "CNV-11")
+def test_the_goodbye_sender_posts_the_status_and_takes_the_question_out(monkeypatch, home_store, capsys):
+    made = {name: Goodbyes(name) for name in ("bot", "other")}
+    monkeypatch.setattr(Channels, "make", lambda name: made[name])
+    home_store.put("listening", "bot", {"1": 55})
+    goodbye = {
+        "status": "💤 **Tinker** · not listening",
+        "channels": ["bot", "other"],
+        "question": {"channel": "bot", "chat": "1", "messages": [102, 103]},
+    }
+    ChannelCommand.run(["goodbye", json.dumps(goodbye)])
+    said = ("show", "1", "💤 **Tinker** · not listening")
+    assert set(made["bot"].log) == {("delete", "1", 55), said, ("delete", "1", 102), ("delete", "1", 103)}
+    assert made["other"].log == [said] and home_store.get("listening", "bot") == {"1": 77}
+    assert capsys.readouterr().out == "" and "goodbye" not in ChannelCommand.USAGE
+
+
 @pytest.mark.spec("CHN-2")
 def test_removing_a_channel_asks_first():
     keep_a_disabled_bot()
