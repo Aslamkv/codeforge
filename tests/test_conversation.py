@@ -16,6 +16,7 @@ from tinkerkit.conversation import (
     Channel,
     ChannelError,
     ConsoleChannel,
+    ConsoleScreen,
     Desk,
     Markup,
     Message,
@@ -252,11 +253,15 @@ CALC_VERIFYING = "🔨 **calc**\n✅ step one\n✅ step two\n▸ **Verifying** �
 CALC_DONE = "🏁 **calc**\n✅ **Done**"
 
 
-@pytest.mark.spec("CNV-8")
-def test_console_without_a_live_line_prints_settled_lines_once_and_each_new_doing_line(monkeypatch):
+def piped_console(monkeypatch):
     out = io.StringIO()
     monkeypatch.setattr(sys, "stdout", out)
-    console = ConsoleChannel()
+    return ConsoleChannel(), out
+
+
+@pytest.mark.spec("CNV-8")
+def test_console_without_a_live_line_prints_settled_lines_once_and_each_new_doing_line(monkeypatch):
+    console, out = piped_console(monkeypatch)
     shown = console.show("console", None, CALC_WRITING)
     console.show("console", shown, CALC_WRITING_LATER)
     console.show("console", shown, CALC_VERIFYING)
@@ -274,9 +279,7 @@ def test_console_without_a_live_line_prints_settled_lines_once_and_each_new_doin
 
 @pytest.mark.spec("CNV-8")
 def test_console_prints_only_what_a_done_message_grew_by(monkeypatch):
-    out = io.StringIO()
-    monkeypatch.setattr(sys, "stdout", out)
-    console = ConsoleChannel()
+    console, out = piped_console(monkeypatch)
     shown = console.show("console", None, "Done\n\nline one", done=True)
     console.show("console", shown, "Done\n\nline one\nline two", done=True)
     console.show("console", shown, "Done\n\nline one\nline two", done=True)
@@ -304,6 +307,22 @@ def typing(monkeypatch, *lines):
 
     monkeypatch.setattr("builtins.input", typed_line)
     return prompts
+
+
+def drawn_after(terminal, step):
+    terminal.seek(0)
+    terminal.truncate()
+    step()
+    return terminal.getvalue()
+
+
+def rule_and_prompt(columns):
+    return f"{DIM}{'─' * columns}{RESET}\n{ACCENT}› {RESET}"
+
+
+ERASED_ABOVE_THE_PROMPT = "\r\033[K\033[F\033[K"
+ERASED_WITH_THE_LIVE_LINE = "\r\033[K\033[F\033[K\033[F\033[K"
+LIVE_LINE_TAKEN_OUT = "\0337\033[2F\033[M\0338\033[A"
 
 
 @pytest.mark.spec("CNV-8")
@@ -340,7 +359,7 @@ def test_console_leaves_piped_input_unruled_and_unrepeated(monkeypatch):
     monkeypatch.setattr(sys.stdin, "isatty", lambda: False)
     prompts = typing(monkeypatch, "hello there")
     ConsoleChannel().read()
-    assert prompts == [ConsoleChannel.PROMPT] * 2
+    assert prompts == [ConsoleScreen.PROMPT] * 2
     assert terminal.getvalue() == ""
 
 
@@ -348,166 +367,162 @@ def test_console_leaves_piped_input_unruled_and_unrepeated(monkeypatch):
 def test_console_redraws_the_rule_and_prompt_under_what_it_prints(monkeypatch):
     terminal = colour_terminal(monkeypatch)
     console = ConsoleChannel()
-    console.reader = object()
+    console.screen.reading = True
     console.send("console", "hi")
-    assert (
-        terminal.getvalue()
-        == f"\r\033[K\033[F\033[K{ACCENT}● {RESET}hi\n{DIM}{'─' * 10}{RESET}\n{ACCENT}› {RESET}"
-    )
+    assert terminal.getvalue() == f"{ERASED_ABOVE_THE_PROMPT}{ACCENT}● {RESET}hi\n{rule_and_prompt(10)}"
 
 
 @pytest.mark.spec("CNV-8")
 def test_what_tinker_says_while_you_type_prints_above_the_prompt(monkeypatch):
     terminal = colour_terminal(monkeypatch)
     typing(monkeypatch)
-    console = ConsoleChannel()
-    console.receive(1)
-    terminal.seek(0)
-    terminal.truncate()
-    conversation.say.text("[12:00:00] tinker_bot: hello")
-    assert (
-        terminal.getvalue()
-        == f"\r\033[K\033[F\033[K[12:00:00] tinker_bot: hello\n{DIM}{'─' * 10}{RESET}\n{ACCENT}› {RESET}"
-    )
+    ConsoleChannel().receive(1)
+    said = drawn_after(terminal, lambda: conversation.say.text("[12:00:00] tinker_bot: hello"))
+    assert said == f"{ERASED_ABOVE_THE_PROMPT}[12:00:00] tinker_bot: hello\n{rule_and_prompt(10)}"
 
 
 LIVE_COLUMNS = 40
-UNDER_THE_LIVE_LINE = f"{DIM}{'─' * LIVE_COLUMNS}{RESET}\n{ACCENT}› {RESET}"
+UNDER_THE_LIVE_LINE = rule_and_prompt(LIVE_COLUMNS)
 
 
-def live_drawn(star, text, elapsed="0s"):
+def live_drawn(text, elapsed="0s", star="✻"):
     return f"{ACCENT}{star}{RESET} Tinkering… ({elapsed}){DIM} · {text}{RESET}"
 
 
+def live_shown(text):
+    return f"{ERASED_ABOVE_THE_PROMPT}{live_drawn(text)}\n{UNDER_THE_LIVE_LINE}"
+
+
+def live_changed(text, elapsed="0s", star="✻"):
+    return f"\0337\033[2F{live_drawn(text, elapsed, star)}\033[K\0338"
+
+
 def live_console(monkeypatch):
-    terminal = colour_terminal(monkeypatch, LIVE_COLUMNS)
-    clock = [100.0]
-    monkeypatch.setattr(time, "monotonic", lambda: clock[0])
+    colour_terminal(monkeypatch, LIVE_COLUMNS)
     console = ConsoleChannel()
-    console.reader = object()
-    return console, terminal, clock
+    console.screen.reading = True
+    return console
 
 
-def drawn_after(terminal, step):
-    terminal.seek(0)
-    terminal.truncate()
-    step()
-    return terminal.getvalue()
+def live_screen(monkeypatch):
+    return live_console(monkeypatch).screen
 
 
 @pytest.mark.spec("CNV-8")
-def test_console_shows_its_live_line_above_the_rule_and_prompt(monkeypatch):
-    console, terminal, clock = live_console(monkeypatch)
-    console.show_live("Writing tests", 100.0)
-    assert terminal.getvalue() == (
-        f"\r\033[K\033[F\033[K{live_drawn('✻', 'Writing tests')}\n{UNDER_THE_LIVE_LINE}"
+def test_console_shows_its_live_line_above_the_rule_and_prompt(monkeypatch, clock):
+    screen = live_screen(monkeypatch)
+    assert drawn_after(sys.stdout, lambda: screen.show_live("Writing tests", 100.0)) == live_shown(
+        "Writing tests"
     )
 
 
 @pytest.mark.spec("CNV-8")
-def test_console_changes_its_live_line_in_place_without_touching_what_you_type(monkeypatch):
-    console, terminal, clock = live_console(monkeypatch)
-    console.show_live("Writing tests", 100.0)
+def test_console_changes_its_live_line_in_place_without_touching_what_you_type(monkeypatch, clock):
+    screen = live_screen(monkeypatch)
+    screen.show_live("Writing tests", 100.0)
     clock[0] += 64
-    changed = drawn_after(terminal, lambda: console.show_live("Running tests", 100.0))
-    assert changed == f"\0337\033[2F{live_drawn('✻', 'Running tests', '1m 4s')}\033[K\0338"
+    changed = drawn_after(sys.stdout, lambda: screen.show_live("Running tests", 100.0))
+    assert changed == live_changed("Running tests", "1m 4s")
 
 
 @pytest.mark.spec("CNV-8")
-def test_console_live_star_turns_on_each_tick(monkeypatch):
-    console, terminal, clock = live_console(monkeypatch)
-    console.show_live("Writing tests", 100.0)
+def test_console_live_star_turns_on_each_tick(monkeypatch, clock):
+    screen = live_screen(monkeypatch)
+    screen.show_live("Writing tests", 100.0)
     clock[0] += 1
-    ticked = drawn_after(terminal, console.tick)
-    assert ticked == f"\0337\033[2F{live_drawn('✶', 'Writing tests', '1s')}\033[K\0338"
+    assert drawn_after(sys.stdout, screen.tick) == live_changed("Writing tests", "1s", star="✶")
 
 
 @pytest.mark.spec("CNV-8")
-def test_console_prints_above_its_live_line(monkeypatch):
-    console, terminal, clock = live_console(monkeypatch)
-    console.show_live("Writing tests", 100.0)
-    printed = drawn_after(terminal, lambda: console.print("hello"))
-    assert printed == (
-        f"\r\033[K\033[F\033[K\033[F\033[Khello\n{live_drawn('✻', 'Writing tests')}\n{UNDER_THE_LIVE_LINE}"
+def test_console_prints_above_its_live_line(monkeypatch, clock):
+    screen = live_screen(monkeypatch)
+    screen.show_live("Writing tests", 100.0)
+    printed = drawn_after(sys.stdout, lambda: screen.print("hello"))
+    assert (
+        printed == f"{ERASED_WITH_THE_LIVE_LINE}hello\n{live_drawn('Writing tests')}\n{UNDER_THE_LIVE_LINE}"
     )
 
 
 @pytest.mark.spec("CNV-8")
-def test_console_takes_its_live_line_out_and_stops_turning_it(monkeypatch):
-    console, terminal, clock = live_console(monkeypatch)
-    console.show_live("Writing tests", 100.0)
-    ended = drawn_after(terminal, console.end_live)
-    assert ended == "\0337\033[2F\033[M\0338\033[A"
-    assert drawn_after(terminal, console.tick) == "" and drawn_after(terminal, console.end_live) == ""
+def test_console_takes_its_live_line_out_and_stops_turning_it(monkeypatch, clock):
+    screen = live_screen(monkeypatch)
+    screen.show_live("Writing tests", 100.0)
+    assert drawn_after(sys.stdout, screen.end_live) == LIVE_LINE_TAKEN_OUT
+    assert drawn_after(sys.stdout, screen.tick) == "" and drawn_after(sys.stdout, screen.end_live) == ""
 
 
 @pytest.mark.spec("CNV-8")
-def test_console_without_colour_shows_no_live_line(monkeypatch):
-    console, terminal, clock = live_console(monkeypatch)
+def test_console_without_colour_shows_no_live_line(monkeypatch, clock):
+    screen = live_screen(monkeypatch)
     monkeypatch.setenv("NO_COLOR", "1")
-    console.show_live("Writing tests", 100.0)
-    console.tick()
-    console.end_live()
-    assert terminal.getvalue() == ""
+    screen.show_live("Writing tests", 100.0)
+    screen.tick()
+    screen.end_live()
+    assert sys.stdout.getvalue() == ""
 
 
 @pytest.mark.spec("CNV-8")
-def test_once_the_console_reads_live_draws_in_its_live_line(monkeypatch):
-    console, terminal, clock = live_console(monkeypatch)
-    monkeypatch.setattr(ConsoleChannel, "TICK_SECONDS", 60)
-    console.reader = None
+def test_once_the_console_reads_live_draws_in_its_live_line(monkeypatch, clock):
+    colour_terminal(monkeypatch, LIVE_COLUMNS)
+    monkeypatch.setattr(ConsoleScreen, "TICK_SECONDS", 60)
     typing(monkeypatch)
-    console.receive(1)
-    lived = drawn_after(terminal, lambda: conversation.say.live("Writing tests"))
-    assert lived == f"\r\033[K\033[F\033[K{live_drawn('✻', 'Writing tests')}\n{UNDER_THE_LIVE_LINE}"
-    said = drawn_after(terminal, lambda: conversation.say.text("Answered"))
-    assert said == f"\0337\033[2F\033[M\0338\033[A\r\033[K\033[F\033[KAnswered\n{UNDER_THE_LIVE_LINE}"
-
-
-ERASED_ABOVE_THE_PROMPT = "\r\033[K\033[F\033[K"
-ERASED_WITH_THE_LIVE_LINE = "\r\033[K\033[F\033[K\033[F\033[K"
-LIVE_LINE_TAKEN_OUT = "\0337\033[2F\033[M\0338\033[A"
-
-
-def live_changed(text, elapsed="0s"):
-    return f"\0337\033[2F{live_drawn('✻', text, elapsed)}\033[K\0338"
+    ConsoleChannel().receive(1)
+    assert drawn_after(sys.stdout, lambda: conversation.say.live("Writing tests")) == live_shown(
+        "Writing tests"
+    )
+    said = drawn_after(sys.stdout, lambda: conversation.say.text("Answered"))
+    assert said == f"{LIVE_LINE_TAKEN_OUT}{ERASED_ABOVE_THE_PROMPT}Answered\n{UNDER_THE_LIVE_LINE}"
 
 
 @pytest.mark.spec("CNV-8")
-def test_console_prints_a_jobs_settled_lines_once_and_shows_what_goes_on_in_its_live_line(monkeypatch):
-    console, terminal, clock = live_console(monkeypatch)
+def test_console_prints_a_jobs_settled_lines_once_and_shows_what_goes_on_in_its_live_line(monkeypatch, clock):
+    console = live_console(monkeypatch)
     shown = console.show("console", None, "🔨 calc\n✅ step one\n▸ **Writing the code** · ⏱ 3s ⏳\n… detail")
-    assert terminal.getvalue() == (
+    assert sys.stdout.getvalue() == (
         f"{ERASED_ABOVE_THE_PROMPT}{ACCENT}● {RESET}🔨 calc\n  ✅ step one\n{UNDER_THE_LIVE_LINE}"
-        f"{ERASED_ABOVE_THE_PROMPT}{live_drawn('✻', 'Writing the code')}\n{UNDER_THE_LIVE_LINE}"
+        f"{live_shown('Writing the code')}"
     )
     clock[0] += 5
     grew = drawn_after(
-        terminal, lambda: console.show("console", shown, "🔨 calc\n✅ step one\n✅ step two\n▸ Verifying ⌛\n📊 1/2")
+        sys.stdout,
+        lambda: console.show("console", shown, "🔨 calc\n✅ step one\n✅ step two\n▸ Verifying ⌛\n📊 1/2"),
     )
     assert grew == (
-        f"{ERASED_WITH_THE_LIVE_LINE}  ✅ step two\n{live_drawn('✻', 'Writing the code', '5s')}\n"
+        f"{ERASED_WITH_THE_LIVE_LINE}  ✅ step two\n{live_drawn('Writing the code', '5s')}\n"
         f"{UNDER_THE_LIVE_LINE}{live_changed('Verifying', '5s')}"
     )
-    done = drawn_after(terminal, lambda: console.show("console", shown, "🏁 calc\n✅ Done", done=True))
-    assert done == f"{LIVE_LINE_TAKEN_OUT}{ERASED_ABOVE_THE_PROMPT}  🏁 calc\n  ✅ Done\n{UNDER_THE_LIVE_LINE}"
+    done = drawn_after(sys.stdout, lambda: console.show("console", shown, "🏁 calc\n✅ Done", done=True))
+    assert (
+        done == f"{LIVE_LINE_TAKEN_OUT}{ERASED_ABOVE_THE_PROMPT}  🏁 calc\n  ✅ Done\n{UNDER_THE_LIVE_LINE}"
+    )
 
 
 @pytest.mark.spec("CNV-8")
-def test_console_shows_a_message_without_a_doing_line_in_its_live_line_until_done(monkeypatch):
-    console, terminal, clock = live_console(monkeypatch)
+def test_console_shows_a_message_without_a_doing_line_in_its_live_line_until_done(monkeypatch, clock):
+    console = live_console(monkeypatch)
     shown = console.show("console", None, "⏳ **Getting ready**\nI answer soon.")
-    assert terminal.getvalue() == f"{ERASED_ABOVE_THE_PROMPT}{live_drawn('✻', '⏳ Getting ready')}\n{UNDER_THE_LIVE_LINE}"
-    done = drawn_after(terminal, lambda: console.show("console", shown, "Answer", done=True))
-    assert done == f"{LIVE_LINE_TAKEN_OUT}{ERASED_ABOVE_THE_PROMPT}{ACCENT}● {RESET}Answer\n{UNDER_THE_LIVE_LINE}"
+    assert sys.stdout.getvalue() == live_shown("⏳ Getting ready")
+    done = drawn_after(sys.stdout, lambda: console.show("console", shown, "Answer", done=True))
+    assert (
+        done
+        == f"{LIVE_LINE_TAKEN_OUT}{ERASED_ABOVE_THE_PROMPT}{ACCENT}● {RESET}Answer\n{UNDER_THE_LIVE_LINE}"
+    )
 
 
 @pytest.mark.spec("CNV-8")
-def test_a_done_message_leaves_a_live_line_it_does_not_own(monkeypatch):
-    console, terminal, clock = live_console(monkeypatch)
+def test_a_done_message_leaves_a_live_line_it_does_not_own(monkeypatch, clock):
+    console = live_console(monkeypatch)
     console.show("console", None, "🔨 calc\n▸ Writing")
-    done = drawn_after(terminal, lambda: console.show("console", None, "Answer", done=True))
-    assert done.startswith(ERASED_WITH_THE_LIVE_LINE) and console.live == ("Writing", 100.0)
+    done = drawn_after(sys.stdout, lambda: console.show("console", None, "Answer", done=True))
+    assert done.startswith(ERASED_WITH_THE_LIVE_LINE) and console.screen.live == ("Writing", 100.0)
+
+
+@pytest.mark.spec("CNV-8")
+def test_a_done_message_forgets_how_it_went(monkeypatch, clock):
+    console = live_console(monkeypatch)
+    shown = console.show("console", None, "🔨 calc\n▸ Writing")
+    console.show("console", shown, "🏁 calc", done=True)
+    assert console.began == {} and console.doings == {} and console.live_owner is None
 
 
 @pytest.mark.spec("CNV-8")
@@ -518,7 +533,7 @@ def test_console_prints_plain_without_colour(monkeypatch):
     console = ConsoleChannel()
     console.read()
     console.send("console", "Done\nline one")
-    assert prompts == [ConsoleChannel.PROMPT] * 2
+    assert prompts == [ConsoleScreen.PROMPT] * 2
     assert terminal.getvalue() == "\r\033[KDone\nline one\n"
 
 
@@ -593,15 +608,14 @@ def test_the_conversation_opens_with_the_banner_before_the_status(monkeypatch):
 @pytest.mark.spec("CNV-8")
 def test_console_receives_lines_until_exit():
     console = ConsoleChannel()
-    no_input_thread = object()
-    console.reader = no_input_thread
+    console.screen.reading = True
     for line in ("hello", "  ", "exit"):
         console.lines.put(line)
     assert [message.text for message in console.receive(0)] == ["hello"]
     assert console.receive(0) == [] and not console.closed
     assert console.receive(0) == [] and console.closed
     eof = ConsoleChannel()
-    eof.reader = object()
+    eof.screen.reading = True
     eof.lines.put(None)
     assert eof.receive(0) == [] and eof.closed
 
@@ -1529,7 +1543,7 @@ def test_the_terminal_opens_the_file_and_other_channels_send_where_it_is(monkeyp
     opened, printed = [], []
     monkeypatch.setattr(conversation.webbrowser, "open", opened.append)
     console = ConsoleChannel()
-    monkeypatch.setattr(console, "print", printed.append)
+    monkeypatch.setattr(console.screen, "print", printed.append)
     page = tmp_path / "memory.html"
     console.send_file("console", page, "🧠 **Tinker's memory**")
     assert opened == [page.as_uri()] and f"Opened in your browser: {page}" in Markup.plain(printed[0])

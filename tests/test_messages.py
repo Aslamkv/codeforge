@@ -3,7 +3,6 @@ import io
 import os
 import shutil
 import sys
-import time
 from pathlib import Path
 
 import pytest
@@ -119,13 +118,6 @@ def terminal(monkeypatch):
     monkeypatch.setattr(sys, "__stdout__", terminal)
     monkeypatch.setenv("NO_COLOR", "1")
     return terminal
-
-
-@pytest.fixture
-def clock(monkeypatch):
-    clock = [100.0]
-    monkeypatch.setattr(time, "monotonic", lambda: clock[0])
-    return clock
 
 
 @pytest.mark.spec("MSG-4")

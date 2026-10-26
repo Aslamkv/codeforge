@@ -20,6 +20,9 @@ STYLES = frozendict(
     }
 )
 RESET = "\033[0m"
+CLEAR_TO_LINE_END = "\033[K"
+LINE_START = "\r"
+CLEAR_LINE = LINE_START + CLEAR_TO_LINE_END
 
 
 @dataclass(frozen=True)
@@ -148,8 +151,8 @@ class Messages:
     def draw_live(self, text):
         width = max(shutil.get_terminal_size((80, 24)).columns - 1, 10)
         indent = "   " * (self.depth + 1)
-        sys.__stdout__.write("\r" + live_line(text, self.began, self.frame, width, indent=indent) + "\033[K")
-        sys.__stdout__.flush()
+        drawn = live_line(text, self.began, self.frame, width, indent=indent)
+        terminal_write(LINE_START + drawn + CLEAR_TO_LINE_END)
         self.frame += 1
         self.drawn = True
 
@@ -179,8 +182,7 @@ class Messages:
         if self.screen:
             self.screen.end_live()
         else:
-            sys.__stdout__.write("\r\033[K")
-            sys.__stdout__.flush()
+            terminal_write(CLEAR_LINE)
         self.drawn = False
 
     def detail(self, text, **facts):
@@ -205,6 +207,11 @@ class Messages:
 
     def reset(self):
         self.__init__()
+
+
+def terminal_write(text):
+    sys.__stdout__.write(text)
+    sys.__stdout__.flush()
 
 
 def live_line(text, began, frame, width, stream=None, indent=""):

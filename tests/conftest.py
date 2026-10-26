@@ -44,6 +44,13 @@ class Terminal(io.StringIO):
         return True
 
 
+@pytest.fixture
+def clock(monkeypatch):
+    clock = [100.0]
+    monkeypatch.setattr(time, "monotonic", lambda: clock[0])
+    return clock
+
+
 @pytest.fixture(autouse=True)
 def tinker_home(tmp_path, monkeypatch):
     home = tmp_path / "tinker-home" / ".tinker"
