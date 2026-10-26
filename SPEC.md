@@ -394,23 +394,22 @@ What is said in the chats, kept so that a chat is only a view of it.
   `named_paths()` gives each path named by a block, once, in order.
 - **PRM-9** `Reply.spec_json()` keeps the rest of a spec, with `data` as text, when only its last part
   (`"data"`) is broken.
-- **PRM-10** `Reply.strip_trailing_commas` removes a comma before `]` or `}` only outside strings.
-- **PRM-11** `Part.assemble(parts, limit)` lays parts out by `place`: `"first"`, then unplaced, then `"last"`,
+- **PRM-10** `Part.assemble(parts, limit)` lays parts out by `place`: `"first"`, then unplaced, then `"last"`,
   each group in its given order. Required parts are always included. An empty optional part is left out.
   Optional parts are added while they fit. A non-atomic optional part is shortened to the room left (if at
   least `SHORTEST_KEPT_CHARS` chars). An atomic one is whole or left out. When the required parts fit, the
   result fits the limit.
-- **PRM-12** When the required parts do not fit, the longest prose part is shortened first, never below
+- **PRM-11** When the required parts do not fit, the longest prose part is shortened first, never below
   `MIN_TRIMMED_PROSE_CHARS`. A `head` part keeps its start, a `tail` part its end, with a `[...]` mark. Exact
   parts are never shortened. When nothing more can be shortened, `PromptTooLarge` names the exact parts. The
   shortened titles are added to `notes`.
-- **PRM-13** A part is `exact` only when it is required, and `atomic` only when it is optional. `relaxed()` is
+- **PRM-12** A part is `exact` only when it is required, and `atomic` only when it is optional. `relaxed()` is
   the same part, but not exact. A part renders as `## title\ntext`, and its size is the rendered length + 2.
-- **PRM-14** The example JSON in `SPEC_SYSTEM`, `FEATURE_SPEC_SYSTEM`, `TOOLCHAIN_SYSTEM` and `README_SYSTEM`
+- **PRM-13** The example JSON in `SPEC_SYSTEM`, `FEATURE_SPEC_SYSTEM`, `TOOLCHAIN_SYSTEM` and `README_SYSTEM`
   parses. Its toolchain is a usable `Toolchain`. Every `{placeholder}` template (`BRIEF_SYSTEM`) formats.
-- **PRM-15** Each command in the example toolchain is a real command line of its own tools. Tinker's own words
+- **PRM-14** Each command in the example toolchain is a real command line of its own tools. Tinker's own words
   never appear in it.
-- **PRM-16** `LESSONS_SYSTEM` asks for general lessons only: never a project's names, files or data.
+- **PRM-15** `LESSONS_SYSTEM` asks for general lessons only: never a project's names, files or data.
 
 ## workspace (WS)
 
