@@ -550,23 +550,19 @@ class Desk:
         folder, title = (waiting["folder"], waiting["title"]) if mine else (self.root, f"@{target}")
         target = waiting["run"] if mine else target
         if command == "confirm":
-            return self.on_task(
-                waiting if mine else {},
-                self.start_task(
-                    ["resume", f"@{target}"],
-                    folder,
-                    title,
-                    "✅ **Confirmed:** building it",
-                    keep=waiting["plan"] if mine else "",
-                ),
+            started = self.start_task(
+                ["resume", f"@{target}"],
+                folder,
+                title,
+                "✅ **Confirmed:** building it",
+                keep=waiting["plan"] if mine else "",
             )
-        change = " ".join(rest)
-        return self.on_task(
-            waiting if mine else {},
-            self.start_task(
+        else:
+            change = " ".join(rest)
+            started = self.start_task(
                 ["amend", f"@{target}", change], folder, title, md(t"✏️ **Changing the plan:** {change}")
-            ),
-        )
+            )
+        return self.on_task(waiting if mine else {}, started)
 
     @staticmethod
     def confirms_a_new_project(command, name, waiting):
