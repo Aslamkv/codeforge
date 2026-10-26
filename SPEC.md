@@ -55,7 +55,7 @@ enforce it.
 - **Tinker uses the web as a person does.** It asks a few open search engines, in parallel within a fixed
   limit, and reads only the pages its searches found, as curl would on the person's behalf. It never crawls:
   no site maps, no links followed. A good search is how it finds what it needs, so no search engine has reason
-  to turn it away.
+  to turn it away: the model picks the engines, queries and result counts that suit each need.
 
 ## Architecture
 
@@ -133,6 +133,7 @@ the last column:
 | `learned` | what was learned from the web about each topic, with sources, and what each reading teaches | `learned` |
 | `embeddings` | the embedding of each learned text, per embedding model | `learned` |
 | `sources` | the cleaned documentation pages a learn read for each topic, per version (`slug@version`) | `docs` |
+| `search plans` | the searches planned for each need (**KNW-26**) | `searches` |
 | `readings`, `reading numbers` | the reading list: each source's whole text by chapter, each chapter's state, its survey; the last number given, kept by a clear | `read` |
 | `commands` | the person's own commands (aliases, programs) | `commands` |
 | `projects` | a pointer to each project: its run ID, folder and task | `runs` |
@@ -274,8 +275,8 @@ The home and its database, the settings, numbered lists, and the one way to dele
   (an archive says `Nothing archived`). With nothing to delete, it asks nothing (`clear` and `reset` say so).
   `Home.reset(yes)` deletes the home folder this way. It refuses a folder not named `.tinker`, and does
   nothing when the folder is missing.
-- **SET-10** `tinker clear PART` names exactly these parts: languages, memory, learned, docs, models, runs,
-  commands, history, exercise, jobs and read ([State](#state) shows what each holds). `jobs` and `read` take
+- **SET-10** `tinker clear PART` names exactly these parts: languages, memory, learned, docs, searches, models,
+  runs, commands, history, exercise, jobs and read ([State](#state) shows what each holds). `jobs` and `read` take
   numbers (`#N`), and their own modules clear them (**JOB-11**, **RDG-13**). `Home.clear(names, yes)` deletes
   only the named parts from the home database, as a deletion (**SET-9**). It rejects an unknown part by
   listing the parts.
@@ -582,7 +583,7 @@ What is said in the chats, kept so that a chat is only a view of it.
   only a short line when it asks again, and its live line says in plain words what Tinker is working on (the
   step it is on, else "Working on it") and for how long ("Working on it… 1m 41s (101s)").
 - **MOD-25** A quick call is one model chat outside a run: the chat's replies, its warm-up, the commands and
-  searches it proposes, and a project's folder name. `Models.quick()` is `None` until a measured model is in
+  searches it proposes, the searches planned for a need (**KNW-25**), and a project's folder name. `Models.quick()` is `None` until a measured model is in
   use; otherwise it gives the model's name, its options (`num_ctx`, and `num_batch` when measured) and its think
   setting (`false` for a thinking model, else none). `Models.quick_reply(messages, tokens)` sends one chat with
   them, `keep_alive`, `num_predict` `tokens` and `QUICK_REPLY_TIMEOUT`, and gives the reply's content, stripped.
@@ -703,8 +704,12 @@ every failure of either: no caller sees a backend, an HTTP status or an exceptio
   that times out or answers HTTP 5xx is asked once more, at once; one engine failing never stops the others.
   It interleaves the engines' results by rank (each one's first, then each one's second ...), keeps those with
   an `http(s)` address, each address once, at most `count`, and gives `[]` when no engine answered.
-  `Internet.search_all(queries, count)` runs several searches at once and gives each query's results, in the
-  order asked. At most `SEARCHES_PER_ENGINE` requests go to one engine at a time.
+  `Internet.search(query, count, engines)` asks only the engines named (every engine when none is).
+  `Internet.search_all(searches, count)` runs several searches at once and gives each one's results, in the
+  order asked. A search is a query (every engine, `count` results) or `{query, engines, count}`, as a model
+  writes it: unknown engines are dropped (none left is every engine), its count is at most `count` (`count`
+  when missing or not a positive number), an entry with no query is dropped, and at most
+  `MAX_PLANNED_SEARCHES` run. At most `SEARCHES_PER_ENGINE` requests go to one engine at a time.
 - **WEB-4** When no engine can be reached (no connection; a timeout is not that), the web is offline:
   `Internet` says so once (`Web: not reachable (why)`), and every later search and fetch it is asked gives
   nothing at once, making no request.
@@ -980,6 +985,17 @@ Lessons and proven knowledge, and what every kind of learning shares.
   way, all at once. A page the web could not read stands on its search snippet. Each page keeps
   its `relevant_chunks` for the searches (**KNW-14**), up to
   `TEACH_PAGE_CHARS`. A page with no text is left out.
+- **KNW-25** Every prompt that writes searches (a research's frame, gaps and checks, a learn plan's
+  follow-ups, a teaching's checks, the chat's proposed searches) writes each as `{query, engines, count}`
+  (**WEB-3**), and says what each engine is good for: `mwmbl` the whole web, plain keywords only; `wikipedia`
+  overviews; `wikibooks` tutorials and manuals. Where code alone has a need (a learn's documentation
+  searches), `SearchPlanner.plan(need, count, values)` turns it into searches with one quick call (**MOD-25**,
+  no thinking) under that prompt, then fills the need's placeholders (`{topic}`, `{name}`, `{version}`) from
+  `values`. With no quick model, a failed call or a reply with no search, the plan is the filled need as one
+  search to every engine.
+- **KNW-26** `SearchPlanner` keeps each plan in the home's `search plans`, keyed by its need before filling,
+  lowercased with spaces collapsed, and plans a need found there with no call, so one plan serves every topic.
+  A fallback plan is not kept. Plans stay until `tinker clear searches`.
 
 ## slots (SLT)
 
@@ -1019,7 +1035,7 @@ learning and run lessons are apart.
   `read_digest` keeps a fact only when it cites a passage given and speaks of no unreleased version; each keeps
   its slot, the passages it cites, their pages (`source`, `also`), and a known phase (else the slot's
   section); at most `FACTS_PER_SLOT`.
-- **LRN-3** Fail fast. No model call (plan, digest, condense or embedding) runs until the web, or the
+- **LRN-3** Fail fast. No model call (plan, digest, condense or embedding; a search plan, **KNW-25**, may) runs until the web, or the
   documentation kept from before, has delivered usable pages. PREFLIGHT stops when there is no embedding model;
   GATE 1 when the search finds nothing, or nothing above `learn_cutoff` (when the web could not search, it has
   said why, **WEB-3**, **WEB-4**); GATE 2 when fewer than `learn_min_pages` pages give usable
@@ -1027,13 +1043,14 @@ learning and run lessons are apart.
   when they are too few. Then it raises `LearnStopped` (a `SystemExit`: a non-zero exit) naming the cause, what
   was tried and the requests made, saying nothing was learned or saved and what was learned before is
   untouched, and the next step; nothing is written to Tinker's database.
-- **LRN-4** A first learn makes one search (`DOCS_SITE_SEARCH`, from the topic alone), picks the results whose
+- **LRN-4** A learn's documentation searches are needs planned by `SearchPlanner` (**KNW-25**). A first learn
+  searches by `DOCS_SITE_SEARCH` (from the topic alone), picks the results whose
   title and snippet score above `learn_cutoff` (BM25), each address once, at most `learn_pages`, and fetches
   them in one `Internet.fetch`. Only then does the plan call run (at the model's own think setting); for a
   language it names each tool's version command. A saved plan is reused with no search and no call. The version
-  commands (each run once) give the version installed. That version's documentation is found by one search
-  (`DOCS_VERSION_SEARCH`: the topic's name, its version and `documentation`), its results picked as above, and
-  each of a language's tools by one search of its own (`TOOL_DOCS_SEARCH`, its own version, at most
+  commands (each run once) give the version installed. That version's documentation is found by
+  `DOCS_VERSION_SEARCH` (the topic's name, its version and `documentation`), its results picked as above, and
+  each of a language's tools by its own `TOOL_DOCS_SEARCH` (its own version, at most
   `tool_docs_pages` pages), the tools' searches all at once; their pages join the pool, and are kept (**LRN-1**). Each slot's passages are digested into facts
   (candidates, each with its slot) and condensed into rules, both at `learn_think`, and kept only after both
   succeed, under the language's key or the topic's slug, with its plan, machine, documentation versions,
