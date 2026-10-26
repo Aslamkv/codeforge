@@ -1843,7 +1843,7 @@ class ConsoleChannel(Channel):
     def banner(self, lines):
         if not typed_here():
             return
-        width = min(shutil.get_terminal_size().columns, BANNER_MAX_COLUMNS)
+        width = min(terminal_columns(), BANNER_MAX_COLUMNS)
         edge = "─" * (width - 2)
         rows = [self.banner_row(line, "dim" if row else "bold", width - 4) for row, line in enumerate(lines)]
         framed = [styled(f"╭{edge}╮", "accent"), *rows, styled(f"╰{edge}╯", "accent")]
@@ -1870,7 +1870,7 @@ class ConsoleChannel(Channel):
     def show(self, chat, shown, text, done=False, bottom=None, status=False, began=None, doing=None, **facts):
         sent, text = (shown or [None])[0] or self.new_id(), self.said(text)
         if began is not None:
-            self.began[sent] = time.monotonic() - (time.time() - began)
+            self.began[sent] = monotonic_at(began)
         if done:
             self.show_done(sent, text)
         else:
@@ -1943,11 +1943,11 @@ class ConsoleScreen:
             signal.signal(signal.SIGWINCH, lambda *_: self.size_changed.set())
 
     def pin_to_the_bottom(self):
-        row, rule_row = cursor_row(), shutil.get_terminal_size().lines - 1
+        row, rule_at = cursor_row(), rule_row()
         if row is None:
-            self.draw(moved_to_row(rule_row))
-        elif row < rule_row:
-            self.blank_top = rule_row - row
+            self.draw(moved_to_row(rule_at))
+        elif row < rule_at:
+            self.blank_top = rule_at - row
             self.draw(scrolled_down(self.blank_top) + rows_down(self.blank_top))
 
     def print(self, text):
@@ -1956,7 +1956,7 @@ class ConsoleScreen:
             write_out(self.printed_in_pieces(text) if self.ruled() else self.printed_over_prompt(text))
 
     def printed_in_pieces(self, text):
-        room = shutil.get_terminal_size().lines - self.live_rows() - 2
+        room = terminal_lines() - self.live_rows() - 2
         return "".join(
             self.printed_above("\n".join(lines), rows) for lines, rows in screen_pieces(text, room)
         )
@@ -1982,7 +1982,7 @@ class ConsoleScreen:
 
     @staticmethod
     def shown_again(typed):
-        return styled(typed.ljust(shutil.get_terminal_size().columns), "grey background")
+        return styled(typed.ljust(terminal_columns()), "grey background")
 
     def draw(self, text):
         with self.printing:
@@ -2103,7 +2103,7 @@ class ConsoleScreen:
 
     def live_drawn(self):
         text, began, facts = self.live
-        width = shutil.get_terminal_size().columns - 1
+        width = terminal_columns() - 1
         tinkering = live_line(text, began, self.frame, width, sys.stdout, **facts)
         under = (f"  {styled(cut_to_width(line, width - 2), 'dim')}" for line in self.under)
         self.drawn = [tinkering, *under]
@@ -2114,7 +2114,7 @@ class ConsoleScreen:
 
     @staticmethod
     def rule():
-        return styled("─" * shutil.get_terminal_size().columns, "dim")
+        return styled("─" * terminal_columns(), "dim")
 
     def ruled(self):
         return self.reading and typed_here()
@@ -2179,7 +2179,7 @@ def fitting_lines(text, room):
 
 
 def screen_wide_rows(line):
-    columns = shutil.get_terminal_size().columns
+    columns = terminal_columns()
     row, width = "", 0
     for char in line:
         char_columns = char_width(char)
@@ -2192,7 +2192,7 @@ def screen_wide_rows(line):
 
 
 def rows_shown(text):
-    return rows_shown_at(text, shutil.get_terminal_size().columns)
+    return rows_shown_at(text, terminal_columns())
 
 
 def rows_shown_at(text, columns):
@@ -2204,7 +2204,23 @@ def rows_at(width, columns):
 
 
 def row_above(kept):
-    return shutil.get_terminal_size().lines - 1 - kept
+    return rule_row() - kept
+
+
+def rule_row():
+    return terminal_lines() - 1
+
+
+def terminal_columns():
+    return shutil.get_terminal_size().columns
+
+
+def terminal_lines():
+    return shutil.get_terminal_size().lines
+
+
+def monotonic_at(wall_time):
+    return time.monotonic() - (time.time() - wall_time)
 
 
 def lines_up(rows):
