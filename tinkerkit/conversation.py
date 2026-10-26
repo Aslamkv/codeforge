@@ -1440,7 +1440,7 @@ class Progress:
         )
         job = f" (Job #{state['job']})" if state.get("job") else ""
         lines = [md(t"🔨 **{state['title']}**{job}")] + [f"✅ {step}" for step in state.get("steps", [])]
-        lines += [f"{star_at(self.turns)} {self.tinkering(doing, counted)}"]
+        lines += [f"{star_at(self.turns)} {self.tinkering_line(doing, counted)}"]
         lines += [md(t"📊 {self.how_far}")] if self.how_far else []
         if state.get("found"):
             lines += [md(t"💡 {state['found']}")]
@@ -1448,7 +1448,7 @@ class Progress:
             lines += [md(t"… {state['latest']}")]
         return "\n".join(lines)
 
-    def tinkering(self, doing, counted):
+    def tinkering_line(self, doing, counted):
         if not counted:
             return tinkering(None, doing, **dict(self.facts, tokens=0))
         began = self.work_began
@@ -1884,7 +1884,7 @@ class ConsoleChannel(Channel):
 
     def count_live(self, chat, shown, **facts):
         if shown and shown[0] == self.live_owner:
-            self.screen.count_live(facts)
+            self.screen.count_live(**facts)
 
     def show_done(self, sent, text):
         if self.live_owner == sent:
@@ -1898,13 +1898,10 @@ class ConsoleChannel(Channel):
         self.doings.pop(sent, None)
 
     def show_going(self, sent, text, doing, facts):
-        lines = text.split("\n")
-        at = next((row for row, line in enumerate(lines) if is_tinkering(line)), None)
-        settled, going_on, under = (
-            (lines[:at], lines[at], lines[at + 1 :]) if at is not None else ([], lines[0], [])
-        )
+        settled, going_on, under = split_at_tinkering(text.split("\n"))
         self.print_settled(sent, settled)
-        self.show_doing(sent, doing or Markup.plain(going_on).strip(), facts, under)
+        shown_under = [Markup.plain(line).strip() for line in under if line.strip()]
+        self.show_doing(sent, doing or Markup.plain(going_on).strip(), facts, shown_under)
 
     def print_settled(self, sent, lines):
         printed = self.printed.setdefault(sent, set())
@@ -1915,11 +1912,10 @@ class ConsoleChannel(Channel):
             self.screen.print(indented(Markup.ansi("\n".join(new))))
         printed.update(new)
 
-    def show_doing(self, sent, doing, facts, under=()):
+    def show_doing(self, sent, doing, facts, under):
         if self.screen.ruled():
             self.live_owner = sent
-            shown_under = [Markup.plain(line).strip() for line in under if line.strip()]
-            self.screen.show_live(doing, self.began.setdefault(sent, time.monotonic()), shown_under, **facts)
+            self.screen.show_live(doing, self.began.setdefault(sent, time.monotonic()), under, **facts)
         elif self.doings.get(sent) != doing:
             self.doings[sent] = doing
             self.screen.print(doing)
@@ -1962,12 +1958,12 @@ class ConsoleScreen:
         with self.printing:
             rows_before, erased = self.live_rows(), self.erased_bottom()
             self.live, self.under = (text, began, facts), list(under)
-            if rows_before and self.live_rows() <= rows_before:
+            if self.live_rows() <= rows_before:
                 write_out(self.shrunk(rows_before, rows_before - self.live_rows()) + self.redrawn_live())
             else:
                 write_out(erased + self.bottom())
 
-    def count_live(self, facts):
+    def count_live(self, **facts):
         with self.printing:
             if self.live is not None:
                 text, began, _ = self.live
@@ -2058,6 +2054,11 @@ def marked(text):
 
 def indented(text, first="  "):
     return first + text.replace("\n", "\n  ") if colourful(sys.stdout) else text
+
+
+def split_at_tinkering(lines):
+    at = next((row for row, line in enumerate(lines) if is_tinkering(line)), None)
+    return (lines[:at], lines[at], lines[at + 1 :]) if at is not None else ([], lines[0], [])
 
 
 def is_tinkering(line):

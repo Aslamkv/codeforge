@@ -739,19 +739,26 @@ class Tracker:
         self.change("outcome", outcome=text)
 
     def heard(self, message):
-        if message.kind in ("working", "tally"):
-            self.change(message.kind, quiet=message.kind == "tally", **{message.kind: message.text})
-            if message.kind == "working" and message.text:
-                self.change("thought", quiet=True, thought_seconds=None)
-            return
-        if message.kind == "tokens":
-            self.change("tokens", quiet=True, tokens=self.state["tokens"] + int(message.text))
-            return
-        if message.kind == "thinking":
-            self.thought(bool(message.text))
-            return
-        if message.kind == "live":
-            return
+        match message.kind:
+            case "working":
+                self.working(message.text)
+            case "tally":
+                self.change("tally", quiet=True, tally=message.text)
+            case "tokens":
+                self.change("tokens", quiet=True, tokens=self.state["tokens"] + int(message.text))
+            case "thinking":
+                self.thought(bool(message.text))
+            case "live":
+                pass
+            case _:
+                self.said(message)
+
+    def working(self, text):
+        self.change("working", working=text)
+        if text:
+            self.change("thought", quiet=True, thought_seconds=None)
+
+    def said(self, message):
         if self.store is not None:
             self.store.append("output", {"line": message.line, "kind": message.kind})
         found = {"found": message.text[:300]} if message.kind == "found" else {}

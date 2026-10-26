@@ -464,12 +464,19 @@ def block_drawn(text, under, elapsed="0s", star="✻"):
     return [live_drawn(text, elapsed, star), *map(under_drawn, under)]
 
 
+LEARNING_BLOCK = "".join(f"{row}\n" for row in block_drawn("Learning", UNDER))
+
+
 def block_changed(rows):
     return f"\0337\033[{len(rows) + 1}F" + "\033[E".join(f"{row}\033[K" for row in rows) + "\0338"
 
 
+def block_shrunk(rows, by):
+    return f"\0337\033[{rows + 1}F" + "\033[M" * by + "\0338" + "\033[A" * by
+
+
 def block_taken_out(rows):
-    return f"\0337\033[{rows + 1}F" + "\033[M" * rows + "\0338" + "\033[A" * rows
+    return block_shrunk(rows, rows)
 
 
 def erased_with_the_block(rows):
@@ -480,8 +487,7 @@ def erased_with_the_block(rows):
 def test_console_shows_the_lines_under_its_live_line_dim_and_indented(monkeypatch, clock):
     screen = live_screen(monkeypatch)
     shown = drawn_after(sys.stdout, lambda: screen.show_live("Learning", 100.0, under=UNDER))
-    rows = "".join(f"{row}\n" for row in block_drawn("Learning", UNDER))
-    assert shown == f"{ERASED_ABOVE_THE_PROMPT}{rows}{UNDER_THE_LIVE_LINE}"
+    assert shown == f"{ERASED_ABOVE_THE_PROMPT}{LEARNING_BLOCK}{UNDER_THE_LIVE_LINE}"
 
 
 @pytest.mark.spec("CNV-8")
@@ -503,7 +509,7 @@ def test_a_shrinking_live_block_clears_its_leftover_lines(monkeypatch, clock):
     screen = live_screen(monkeypatch)
     screen.show_live("Learning", 100.0, under=UNDER)
     shrunk = drawn_after(sys.stdout, lambda: screen.show_live("Writing", 100.0))
-    assert shrunk == "\0337\033[4F\033[M\033[M\0338\033[A\033[A" + live_changed("Writing")
+    assert shrunk == block_shrunk(3, 2) + live_changed("Writing")
 
 
 @pytest.mark.spec("CNV-8")
@@ -511,8 +517,7 @@ def test_a_growing_live_block_is_drawn_again_above_the_prompt(monkeypatch, clock
     screen = live_screen(monkeypatch)
     screen.show_live("Learning", 100.0)
     grown = drawn_after(sys.stdout, lambda: screen.show_live("Learning", 100.0, under=UNDER))
-    rows = "".join(f"{row}\n" for row in block_drawn("Learning", UNDER))
-    assert grown == f"{ERASED_WITH_THE_LIVE_LINE}{rows}{UNDER_THE_LIVE_LINE}"
+    assert grown == f"{ERASED_WITH_THE_LIVE_LINE}{LEARNING_BLOCK}{UNDER_THE_LIVE_LINE}"
 
 
 @pytest.mark.spec("CNV-8")
@@ -520,8 +525,7 @@ def test_console_prints_above_its_live_block_and_takes_it_out(monkeypatch, clock
     screen = live_screen(monkeypatch)
     screen.show_live("Learning", 100.0, under=UNDER)
     printed = drawn_after(sys.stdout, lambda: screen.print("hello"))
-    rows = "".join(f"{row}\n" for row in block_drawn("Learning", UNDER))
-    assert printed == f"{erased_with_the_block(3)}hello\n{rows}{UNDER_THE_LIVE_LINE}"
+    assert printed == f"{erased_with_the_block(3)}hello\n{LEARNING_BLOCK}{UNDER_THE_LIVE_LINE}"
     assert drawn_after(sys.stdout, screen.end_live) == block_taken_out(3)
     assert screen.under == []
 
