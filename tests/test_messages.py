@@ -9,7 +9,7 @@ import pytest
 from conftest import ACCENT, DIM, RESET, Terminal
 
 from tinkerkit import project as project_module
-from tinkerkit.messages import Message, Messages, human_duration, say, short_count, tinkering
+from tinkerkit.messages import Message, Messages, human_duration, live_line, say, short_count, tinkering
 from tinkerkit.project import Tracker, project_store
 from tinkerkit.store import Log
 
@@ -180,6 +180,8 @@ def test_the_live_line_counts_from_when_the_work_began(terminal, clock):
 
 
 STEEL_BLUE = "\033[38;2;70;130;180m"
+LIGHT_STEEL_BLUE = "\033[38;2;176;196;222m"
+GLOW = "\033[38;5;153m"
 
 
 @pytest.mark.spec("MSG-4")
@@ -191,7 +193,46 @@ def test_the_live_star_is_steel_blue_and_what_goes_on_is_dim(
     say.live("Writing tests")
     assert (
         colored_terminal.getvalue()
-        == f"\r   {accent}✻{RESET} Tinkering… (0s){DIM} · Writing tests{RESET}\033[K"
+        == f"\r   {accent}✻{RESET} {accent}Tinkering…{RESET} (0s){DIM} · Writing tests{RESET}\033[K"
+    )
+
+
+@pytest.mark.spec("MSG-4")
+@pytest.mark.parametrize(
+    "frame,before,glowing,after",
+    [
+        (0, "", "", "Tinkering…"),
+        (1, "", "T", "inkering…"),
+        (4, "T", "ink", "ering…"),
+        (12, "Tinkering", "…", ""),
+        (13, "", "", "Tinkering…"),
+    ],
+)
+def test_a_glow_moves_through_tinkering_one_letter_each_frame(
+    clock, monkeypatch, frame, before, glowing, after
+):
+    monkeypatch.delenv("COLORTERM", raising=False)
+    shown = live_line("Writing tests", 100.0, frame, 80, Terminal())
+    word = "".join(
+        f"{style}{text}{RESET}"
+        for text, style in ((before, ACCENT), (glowing, GLOW), (after, ACCENT))
+        if text
+    )
+    assert shown.split(" ", 1)[1].startswith(f"{word} (0s)")
+
+
+@pytest.mark.spec("MSG-4")
+def test_the_glow_is_light_steel_blue_on_a_truecolor_terminal(clock, monkeypatch):
+    monkeypatch.setenv("COLORTERM", "truecolor")
+    shown = live_line("Writing tests", 100.0, 1, 80, Terminal())
+    assert f"{LIGHT_STEEL_BLUE}T{RESET}{STEEL_BLUE}inkering…{RESET}" in shown
+
+
+@pytest.mark.spec("MSG-4")
+def test_without_colour_the_live_line_has_no_glow(clock):
+    assert (
+        live_line("Writing tests", 100.0, 4, 80, io.StringIO())
+        == f"{Messages.STAR[4]} Tinkering… (0s) · Writing tests"
     )
 
 
@@ -199,7 +240,10 @@ def test_the_live_star_is_steel_blue_and_what_goes_on_is_dim(
 def test_the_live_line_is_cut_to_the_terminal_width_by_what_shows(colored_terminal, clock, monkeypatch):
     monkeypatch.setattr(shutil, "get_terminal_size", lambda fallback: os.terminal_size((23, 10)))
     say.live("Writing tests")
-    assert colored_terminal.getvalue() == f"\r   {ACCENT}✻{RESET} Tinkering… (0s){DIM} ·{RESET}\033[K"
+    assert (
+        colored_terminal.getvalue()
+        == f"\r   {ACCENT}✻{RESET} {ACCENT}Tinkering…{RESET} (0s){DIM} ·{RESET}\033[K"
+    )
 
 
 @pytest.mark.spec("MSG-4")

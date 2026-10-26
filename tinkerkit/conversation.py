@@ -9,13 +9,10 @@ lazy import fcntl
 lazy import html
 lazy import json
 lazy import queue
-lazy import select
 lazy import shlex
 lazy import subprocess
-lazy import termios
 lazy import threading
 lazy import time
-lazy import tty
 lazy import webbrowser
 lazy from pathlib import Path
 
@@ -1933,17 +1930,16 @@ class ConsoleChannel(Channel):
 
 class ConsoleScreen:
     PROMPT = "› " if sys.stdin.isatty() else ""
-    TICK_SECONDS = 0.25
+    TICK_SECONDS = 0.12
 
     def __init__(self):
         self.reading, self.live, self.under, self.frame, self.printing = False, None, [], 0, threading.Lock()
-        self.size, self.drawn, self.blank_top = shutil.get_terminal_size(), [], 0
+        self.size, self.drawn = shutil.get_terminal_size(), []
         self.size_changed = threading.Event()
 
     def start(self):
         self.reading, self.size = True, shutil.get_terminal_size()
         if typed_here():
-            self.pin_to_the_bottom()
             self.draw(unwrapped(self.rule()) + "\n")
             self.wake_on_resize()
             threading.Thread(target=self.keep_ticking, daemon=True).start()
@@ -1951,14 +1947,6 @@ class ConsoleScreen:
     def wake_on_resize(self):
         if hasattr(signal, "SIGWINCH") and threading.current_thread() is threading.main_thread():
             signal.signal(signal.SIGWINCH, lambda *_: self.size_changed.set())
-
-    def pin_to_the_bottom(self):
-        row, rule_at = cursor_row(), rule_row()
-        if row is None:
-            self.draw(moved_to_row(rule_at))
-        elif row < rule_at:
-            self.blank_top = rule_at - row
-            self.draw(scrolled_down(self.blank_top) + rows_down(self.blank_top))
 
     def print(self, text):
         with self.printing:
@@ -1982,9 +1970,8 @@ class ConsoleScreen:
     def sent(self, typed, shown):
         with self.printing:
             rows = rows_shown(typed)
-            self.pushed_off_the_top(rows)
             self.repair(typed_rows=rows)
-            write_out(self.shown_above_the_block(typed, rows) if shown else self.moved_down(rows, kept=0))
+            write_out(self.shown_above_the_block(typed, rows) if shown else self.pulled_up(rows, kept=0))
 
     def shown_above_the_block(self, typed, rows):
         shown = NEXT_LINE.join([self.shown_again(typed), self.block_and_rule()])
@@ -2039,25 +2026,20 @@ class ConsoleScreen:
     def repair(self, typed_rows=0):
         size = shutil.get_terminal_size()
         if size != self.size and self.ruled():
-            self.pushed_off_the_top(self.size.lines - size.lines)
             write_out(self.redrawn_at(size, typed_rows))
         self.size = size
 
     def redrawn_at(self, size, typed_rows):
         stale, kept = self.stale_rows(size.columns), self.live_rows() + 1 + typed_rows
         rewrapped = stale + typed_rows - kept
-        self.pushed_off_the_top(rewrapped)
         return (
             self.stale_rows_cleared(stale, typed_rows)
-            + self.moved_down(rewrapped, kept)
+            + self.pulled_up(rewrapped, kept)
             + self.above_the_prompt(kept, self.block_and_rule())
         )
 
     def stale_rows_cleared(self, stale, typed_rows):
         return self.above_the_prompt(stale + typed_rows, NEXT_LINE.join([CLEAR_TO_LINE_END] * stale))
-
-    def pushed_off_the_top(self, rows):
-        self.blank_top = max(0, self.blank_top - max(0, rows))
 
     def stale_rows(self, columns):
         rule_rows = rows_at(self.size.columns, columns)
@@ -2075,27 +2057,18 @@ class ConsoleScreen:
             return self.room_made(rows_after - rows_before, above=0) + RESTORE_CURSOR
         return self.shrunk(rows_before - rows_after)
 
-    def room_made(self, rows, above):
-        blanks = min(rows, self.blank_top)
-        self.blank_top -= blanks
-        scrolled = rows - blanks
-        return (
-            f"{self.blank_rows_dropped(blanks, above)}{ROW_DOWN_OR_SCROLL * scrolled}"
-            f"{SAVE_CURSOR}{rows_up(rows + above + 1)}{inserted_rows(scrolled)}"
-        )
-
     @staticmethod
-    def blank_rows_dropped(rows, above):
-        return scrolled_up_above(row_above(above + 1), rows) if rows else ""
+    def room_made(rows, above):
+        return f"{ROW_DOWN_OR_SCROLL * rows}{SAVE_CURSOR}{rows_up(rows + above + 1)}{inserted_rows(rows)}"
 
     def shrunk(self, by):
-        return self.moved_down(by, kept=self.live_rows() + 1)
+        return self.pulled_up(by, kept=self.live_rows() + 1)
 
-    def moved_down(self, rows, kept):
+    @staticmethod
+    def pulled_up(rows, kept):
         if not rows:
             return ""
-        self.blank_top += rows
-        return scrolled_down_above(row_above(kept), rows)
+        return f"{SAVE_CURSOR}{lines_up(kept + rows)}{deleted_rows(rows)}{RESTORE_CURSOR}{rows_up(rows)}"
 
     def redrawn_live(self):
         return self.above_the_rule(self.live_rows(), unwrapped(NEXT_LINE.join(self.live_block())))
@@ -2133,39 +2106,11 @@ class ConsoleScreen:
 SAVE_CURSOR, RESTORE_CURSOR, NEXT_LINE = "\0337", "\0338", "\033[E"
 AUTOWRAP_OFF, AUTOWRAP_ON = "\033[?7l", "\033[?7h"
 COLOUR_CODE_RE = re.compile(r"\033\[[0-9;]*m")
-WHOLE_SCREEN, ROW_DOWN_OR_SCROLL = "\033[r", "\033D"
-CURSOR_REPORT, CURSOR_REPORT_RE, CURSOR_REPORT_SECONDS = "\033[6n", re.compile(r"\033\[(\d+);\d+R"), 0.2
+ROW_DOWN_OR_SCROLL = "\033D"
 
 
 def unwrapped(rows):
     return f"{AUTOWRAP_OFF}{rows}{AUTOWRAP_ON}"
-
-
-def cursor_row():
-    try:
-        stdin = sys.stdin.fileno()
-        return reported_row(stdin) if os.isatty(stdin) and sys.stdout.isatty() else None
-    except OSError, ValueError:
-        return None
-
-
-def reported_row(stdin):
-    settings = termios.tcgetattr(stdin)
-    try:
-        tty.setcbreak(stdin)
-        write_out(CURSOR_REPORT)
-        answer = cursor_report_read(stdin)
-    finally:
-        termios.tcsetattr(stdin, termios.TCSADRAIN, settings)
-    found = CURSOR_REPORT_RE.search(answer)
-    return int(found.group(1)) if found else None
-
-
-def cursor_report_read(stdin):
-    answer = ""
-    while not answer.endswith("R") and select.select([stdin], [], [], CURSOR_REPORT_SECONDS)[0]:
-        answer += os.read(stdin, 32).decode(errors="ignore")
-    return answer
 
 
 def screen_pieces(text, room):
@@ -2213,14 +2158,6 @@ def rows_at(width, columns):
     return max(1, -(-width // columns))
 
 
-def row_above(kept):
-    return rule_row() - kept
-
-
-def rule_row():
-    return terminal_lines() - 1
-
-
 def terminal_columns():
     return shutil.get_terminal_size().columns
 
@@ -2241,40 +2178,12 @@ def rows_up(rows):
     return f"\033[{rows}A"
 
 
-def rows_down(rows):
-    return f"\033[{rows}B"
-
-
-def moved_to_row(row):
-    return f"\033[{row};1H"
-
-
 def inserted_rows(rows):
     return f"\033[{rows}L" if rows else ""
 
 
-def scrolled_down(rows):
-    return f"\033[{rows}T"
-
-
-def scrolled_up(rows):
-    return f"\033[{rows}S"
-
-
-def scrolled_down_above(bottom, rows):
-    return scrolled_within(bottom, scrolled_down(rows))
-
-
-def scrolled_up_above(bottom, rows):
-    return scrolled_within(bottom, scrolled_up(rows))
-
-
-def scrolled_within(bottom, scroll):
-    return f"{SAVE_CURSOR}{scroll_region(1, bottom)}{scroll}{WHOLE_SCREEN}{RESTORE_CURSOR}"
-
-
-def scroll_region(top, bottom):
-    return f"\033[{top};{bottom}r"
+def deleted_rows(rows):
+    return f"\033[{rows}M"
 
 
 def write_out(text):

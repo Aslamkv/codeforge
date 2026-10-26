@@ -9,6 +9,10 @@ lazy import unicodedata
 VARIATION_SELECTOR = "\ufe0f"
 TRUECOLOR_ACCENT = "\033[38;2;70;130;180m"
 PALETTE_ACCENT = "\033[38;5;67m"
+TRUECOLOR_GLOW = "\033[38;2;176;196;222m"
+PALETTE_GLOW = "\033[38;5;153m"
+GLOW_WIDTH = 3
+TINKERING = "Tinkering…"
 STYLES = frozendict(
     {
         "dim": "\033[2m",
@@ -239,8 +243,22 @@ def terminal_write(text):
 
 def live_line(text, began, frame, width, stream=None, indent="", **facts):
     (head, _), doing = tinkering_pieces(time.monotonic() - began, text, **facts)
-    pieces = [(indent, None), (star_at(frame), "accent"), (f" {head}", None), doing]
+    word, rest = head[: len(TINKERING)], head[len(TINKERING) :]
+    pieces = [
+        (indent, None),
+        (star_at(frame), "accent"),
+        (" ", None),
+        *glowing(word, frame),
+        (rest, None),
+        doing,
+    ]
     return fitted(pieces, width, stream)
+
+
+def glowing(word, frame):
+    end = frame % (len(word) + GLOW_WIDTH)
+    start = max(end - GLOW_WIDTH, 0)
+    return [(word[:start], "accent"), (word[start:end], "glow"), (word[end:], "accent")]
 
 
 def star_at(frame):
@@ -258,7 +276,7 @@ def tinkering_pieces(elapsed, doing, tokens=0, thinking=False, thought_seconds=N
         thought(thinking, thought_seconds),
     )
     shown = " · ".join(fact for fact in facts if fact)
-    return [(f"Tinkering… ({shown})" if shown else "Tinkering…", None), (f" · {doing}", "dim")]
+    return [(f"{TINKERING} ({shown})" if shown else TINKERING, None), (f" · {doing}", "dim")]
 
 
 def thought(thinking, thought_seconds):
@@ -295,8 +313,11 @@ def colourful(stream):
 
 
 def style_code(style):
+    truecolor = os.environ.get("COLORTERM") in ("truecolor", "24bit")
     if style == "accent":
-        return TRUECOLOR_ACCENT if os.environ.get("COLORTERM") in ("truecolor", "24bit") else PALETTE_ACCENT
+        return TRUECOLOR_ACCENT if truecolor else PALETTE_ACCENT
+    if style == "glow":
+        return TRUECOLOR_GLOW if truecolor else PALETTE_GLOW
     return STYLES[style]
 
 

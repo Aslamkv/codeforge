@@ -206,6 +206,8 @@ Everything Tinker tells the person goes through one voice, `say` (a `Messages`).
   star, `Tinkering…`, then in brackets the time since the work began, the tokens (`↓ 1.2k tokens`, left out
   at 0) and `thinking` or `thought for 12s` (left out when the model does not think), then what goes on now:
   `✻ Tinkering… (1m 4s · ↓ 1.2k tokens · thought for 12s) · 🧠 Learning about purpose (1 of 6)`.
+  With colour, `Tinkering…` is steel blue with a glow, as in Claude Code: a few letters in a light steel blue
+  that move one letter on with each frame, left to right, and start again from the left once past the end.
 - **MSG-5** `detail` goes to the log given to `keep_log` (a run's `events`, with every model call it makes; a
   job's `calls #N`), and is never printed. With no log, it is dropped.
 - **MSG-6** `human_duration`: 42.5 gives `42s`, 1762.08 gives `29m 22s`, 4000 gives `1h 6m 40s`.
@@ -760,13 +762,15 @@ The terminal and the chats are one conversation: the same commands, the same ans
   changes. When the thing is done, the live block clears and only the lines not yet printed follow. `exit` or
   end of input closes it.
   Once it reads, all that Tinker says (`say`, a chat's message too) prints through it, above the prompt, and
-  `live` draws in that same live block, its star turning on its own about four times a second. While a job
+  `live` draws in that same live block, its star turning and its glow moving on their own about eight times a second. While a job
   shows its progress there, the status that says what Tinker works on is left out of the terminal. A job's
   live line counts from when the job began (its tracker's `started`, less the time of earlier runs), so a
   Tinker opened later shows the same time.
-  On a terminal with colour, the prompt sits on the screen's last row, the rule above it and the live block
-  above that. What Tinker prints sits right above the block: each new line pushes the ones above it up, any
-  blank space stays at the top of the window, and older lines go to the scrollback. A message of any height
+  On a terminal with colour, the live block, the rule and the prompt follow what Tinker printed, as in Claude
+  Code, and are never pinned to the screen's last row: they start right under the banner, and each line Tinker
+  prints goes in right above the block and pushes the block, the rule and the prompt down a row. Once the
+  prompt is on the last row, the lines above scroll up instead and older lines go to the scrollback. When the
+  block grows or shrinks, the rule and the prompt move down or up with it. A message of any height
   prints above the block in pieces that fit, and the line you send shows again there; the prompt line and
   what you type on it are never redrawn. When the window is resized, the block and the rule are drawn again
   at the new size right away, still right above the prompt and with what Tinker printed right above them, and
