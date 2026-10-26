@@ -744,7 +744,10 @@ The terminal and the chats are one conversation: the same commands, the same ans
 - **CNV-8** `ConsoleChannel` prints a thing's message as it grows: its title and each settled line once, as
   they come. The Tinkering line (what goes on now) and the lines under it stay out of the print: on a
   terminal with colour, it shows (**MSG-4**) above the prompt, with the
-  lines under it dim and indented below it, all redrawn in place as one live block; otherwise what goes on now
+  lines under it dim and indented below it, all redrawn in place as one live block. The block grows into
+  the room under the prompt, or scrolls what is above it up into the scrollback when there is none, and what
+  you type stays on the prompt line;
+  otherwise what goes on now
   prints as a line of its own each time it changes. When the thing is done, the live block clears and only
   the lines not yet printed follow. `exit` or end of input closes it. Once it reads, all that Tinker says
   (`say`, a chat's message too) prints through it, above the prompt, and `live` draws in that same live
