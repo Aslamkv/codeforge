@@ -1,19 +1,14 @@
-import contextlib
 import re
 from collections import namedtuple
 from pathlib import Path
-lazy import difflib
-lazy import hashlib
-lazy import json
 lazy import os
 lazy import shutil
 lazy import sqlite3
 lazy import subprocess
 lazy import sys
-lazy import time
-lazy import urllib.parse
 
 lazy from .messages import say
+lazy from .store import Store
 
 DEFAULT_CONFIG = frozendict(
     {
@@ -267,7 +262,6 @@ NUMBERED_PARTS = ("jobs", "read")
 
 
 Paged = namedtuple("Paged", "items pages")
-LogEntry = namedtuple("LogEntry", "id entry")
 
 
 class Home:
@@ -513,129 +507,6 @@ def is_number(value):
     return isinstance(value, (int, float)) and not isinstance(value, bool)
 
 
-class Store:
-    SCHEMA = (
-        "CREATE TABLE IF NOT EXISTS docs (collection TEXT NOT NULL, key TEXT NOT NULL, value TEXT NOT NULL, "
-        "PRIMARY KEY (collection, key))",
-        "CREATE TABLE IF NOT EXISTS logs (id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT NOT NULL, "
-        "time TEXT NOT NULL, entry TEXT NOT NULL)",
-    )
-    LOCK_WAIT_SECONDS = 30
-
-    def __init__(self, path):
-        self.path, self.made = Path(path), False
-
-    def get(self, collection, key, default=None):
-        with self.transaction() as db:
-            return self.read(db, collection, key, default)
-
-    def put(self, collection, key, value):
-        with self.transaction(write=True) as db:
-            self.write(db, collection, key, value)
-
-    def update(self, collection, key, change, default=None):
-        with self.transaction(write=True) as db:
-            value = change(self.read(db, collection, key, default))
-            self.write(db, collection, key, value)
-        return value
-
-    def delete(self, collection, key=None):
-        with self.transaction(write=True) as db:
-            if key is None:
-                db.execute("DELETE FROM docs WHERE collection = ?", (collection,))
-            else:
-                db.execute("DELETE FROM docs WHERE collection = ? AND key = ?", (collection, key))
-
-    def items(self, collection):
-        with self.transaction() as db:
-            rows = db.execute(
-                "SELECT key, value FROM docs WHERE collection = ? ORDER BY rowid", (collection,)
-            ).fetchall()
-        return {key: json.loads(value) for key, value in rows}
-
-    def count(self, collection):
-        with self.transaction() as db:
-            return db.execute("SELECT COUNT(*) FROM docs WHERE collection = ?", (collection,)).fetchone()[0]
-
-    def append(self, log, entry):
-        with self.transaction(write=True) as db:
-            return db.execute(
-                "INSERT INTO logs (name, time, entry) VALUES (?, ?, ?)",
-                (log, time.strftime("%Y-%m-%d %H:%M:%S"), json.dumps(entry, ensure_ascii=False)),
-            ).lastrowid
-
-    def entries(self, log, after=0):
-        with self.transaction() as db:
-            rows = db.execute(
-                "SELECT id, time, entry FROM logs WHERE name = ? AND id > ? ORDER BY id", (log, after)
-            ).fetchall()
-        return [LogEntry(row_id, {"time": stamp, **json.loads(entry)}) for row_id, stamp, entry in rows]
-
-    def drop_log(self, log):
-        with self.transaction(write=True) as db:
-            db.execute("DELETE FROM logs WHERE name = ?", (log,))
-
-    @contextlib.contextmanager
-    def transaction(self, write=False):
-        db = self.opened()
-        try:
-            db.execute("BEGIN IMMEDIATE" if write else "BEGIN")
-            yield db
-            db.execute("COMMIT")
-        except sqlite3.DatabaseError as exc:
-            raise self.unreadable(exc) from None
-        except BaseException:
-            if db.in_transaction:
-                db.execute("ROLLBACK")
-            raise
-        finally:
-            db.close()
-
-    def opened(self):
-        try:
-            return self.connect()
-        except sqlite3.Error as exc:
-            raise self.unreadable(exc) from None
-
-    def unreadable(self, exc):
-        return SystemExit(f"{self.path} cannot be read ({exc})")
-
-    def connect(self):
-        if not self.path.exists():
-            self.create_private_file()
-        elif not self.made:
-            self.path.chmod(0o600)
-        db = sqlite3.connect(self.path, timeout=self.LOCK_WAIT_SECONDS, isolation_level=None)
-        if not self.made:
-            self.create_tables(db)
-        return db
-
-    def create_private_file(self):
-        self.path.parent.mkdir(parents=True, exist_ok=True)
-        os.close(os.open(self.path, os.O_CREAT | os.O_WRONLY, 0o600))
-        self.made = False
-
-    def create_tables(self, db):
-        for statement in self.SCHEMA:
-            db.execute(statement)
-        self.made = True
-
-    @staticmethod
-    def read(db, collection, key, default):
-        row = db.execute(
-            "SELECT value FROM docs WHERE collection = ? AND key = ?", (collection, key)
-        ).fetchone()
-        return json.loads(row[0]) if row else default
-
-    @staticmethod
-    def write(db, collection, key, value):
-        db.execute(
-            "INSERT INTO docs (collection, key, value) VALUES (?, ?, ?) ON CONFLICT (collection, key) "
-            "DO UPDATE SET value = excluded.value",
-            (collection, key, json.dumps(value, ensure_ascii=False)),
-        )
-
-
 class Numbered:
     def __init__(self, collection, counter):
         self.collection, self.counter = collection, counter
@@ -669,99 +540,9 @@ class Numbered:
         return Paged(entries[(number - 1) * PER_PAGE : number * PER_PAGE], pages)
 
 
-class Log:
-    def __init__(self, store, name):
-        self.store, self.name = store, name
-
-    def add(self, event):
-        if self.name:
-            self.store.append(self.name, event)
-
-
 class NotAPytestClass:
     __test__ = False
 
 
 def projects_folder():
     return Path(str(Config.get("projects") or "~/Projects")).expanduser().resolve()
-
-
-def first_line(text, limit=140):
-    line = (text or "").strip().splitlines()[0] if (text or "").strip() else ""
-    return line if len(line) <= limit else line[: limit - 3] + "..."
-
-
-def one_line(value):
-    return " ".join(str(value or "").split())
-
-
-def field(item, key, limit=None):
-    return str(item.get(key) or "").strip()[:limit]
-
-
-def host(url):
-    return urllib.parse.urlsplit(url).netloc.lower().removeprefix("www.")
-
-
-def now_text():
-    return time.strftime("%Y-%m-%d %H:%M")
-
-
-def clock(moment):
-    return moment.strftime("%Y-%m-%d %H:%M:%S")
-
-
-def words(text):
-    return re.findall(r"[a-z0-9]+", (text or "").lower())
-
-
-def split_text(text, size):
-    size, chunks, current = max(size, 200), [], ""
-    for para in re.split(r"\n\s*\n", text):
-        para = para.strip()
-        while len(para) > size:
-            chunks += [current] if current else []
-            chunks.append(para[:size])
-            current, para = "", para[size:]
-        if para and current and len(current) + 2 + len(para) > size:
-            chunks.append(current)
-            current = para
-        elif para:
-            current = f"{current}\n\n{para}" if current else para
-    return chunks + ([current] if current else [])
-
-
-def fingerprint(text):
-    return hashlib.sha1(text.encode("utf-8")).hexdigest()
-
-
-def after_what_they_use(starts, uses, known):
-    order, seen = [], set()
-
-    def visit(path, trail=()):
-        if path in seen or path in trail or not known(path):
-            return
-        for used in uses(path):
-            visit(used, trail + (path,))
-        seen.add(path)
-        order.append(path)
-
-    for path in starts:
-        visit(path)
-    return order
-
-
-def similarity(a, b):
-    return difflib.SequenceMatcher(None, a.lower(), b.lower()).ratio()
-
-
-def groups_fitting(items, room, size=len):
-    groups, used = [], room + 1
-    for item in items:
-        need = size(item) + 1
-        if used + need > room:
-            groups.append([])
-            used = 0
-        groups[-1].append(item)
-        used += need
-    return groups

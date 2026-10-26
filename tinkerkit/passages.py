@@ -3,15 +3,8 @@ import re
 from dataclasses import dataclass
 lazy import urllib.parse
 
-lazy from .settings import (
-    MAX_PASSAGE_CHARS,
-    MENU_LINK_SHARE,
-    MIN_USABLE_PAGE_CHARS,
-    NEAR_DUPLICATE_OVERLAP,
-    host,
-    split_text,
-    words,
-)
+lazy from .settings import MAX_PASSAGE_CHARS, MENU_LINK_SHARE, MIN_USABLE_PAGE_CHARS, NEAR_DUPLICATE_OVERLAP
+lazy from .text import host, split_text, words
 
 
 @dataclass

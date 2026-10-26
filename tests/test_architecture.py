@@ -12,6 +12,8 @@ import pytest
 ROOT = Path(__file__).resolve().parent.parent
 LAYERS = (
     "messages",
+    "text",
+    "store",
     "settings",
     "commands",
     "jobs",

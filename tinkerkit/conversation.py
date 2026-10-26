@@ -22,7 +22,8 @@ lazy from .ledger import DONE_NOTE_KEPT_SECONDS, Ledger
 lazy from .messages import human_duration, say
 lazy from .model import Models, OllamaError
 lazy from .prompts import Prompts, Reply
-lazy from .settings import EXERCISE_FOLDER, Home, field, projects_folder
+lazy from .settings import EXERCISE_FOLDER, Home, projects_folder
+lazy from .text import field
 lazy from .workspace import Toolchain
 
 CHANNEL_REPORTS_ENV = "TINKER_CHANNELS"

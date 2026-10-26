@@ -63,7 +63,9 @@ listed above it:
 | Module | Responsibility |
 |---|---|
 | `messages` | everything Tinker tells the person, in one voice (`say`, `Messages`, `Message`): each message's kind gives its icon, sections nest it, followers (a tracker) get it as data, and details go to the log only |
-| `settings` | every tunable number and fixed name; the Tinker home (`Home`), its database (`Store`), the settings table (`SETTINGS`, `Config`), numbered lists (`Numbered`), the one way to delete (`confirm_deletion`); small helpers |
+| `text` | plain text helpers every module shares (`first_line`, `one_line`, `words`, `split_text`, `similarity`) |
+| `store` | one SQLite database of documents and logs (`Store`, `Log`) |
+| `settings` | every tunable number and fixed name; the Tinker home (`Home`) and its database, the settings table (`SETTINGS`, `Config`), numbered lists (`Numbered`), the one way to delete (`confirm_deletion`) |
 | `commands` | the one table of Tinker's commands with each one's kind (`kind_of`, `deletes`), and project references (`@ID`, `@folder`) |
 | `jobs` | every long command as a job, listed, stopped and resumed (`Jobs`), its journal of requests and answers (`Journal`, `journaled`), and its log of model calls (`calls_log`) |
 | `ledger` | what is said in the chats, so a chat is only a view of it: each message with when it goes, each thing shown, numbered, for `history` (`Ledger`) |
@@ -116,7 +118,7 @@ The Tinker home is the `.tinker` folder next to the real `tinker.py` (symlinks r
 | `memory.html` | the page `tinker memory --graph` writes |
 | `reading/` | the files sent in a chat to read |
 
-The home database holds these collections and logs. `tinker clear PART` deletes a part (**SET-12**), named in
+The home database holds these collections and logs. `tinker clear PART` deletes a part (**SET-10**), named in
 the last column:
 
 | Collection or log | What | Part |
@@ -142,9 +144,9 @@ the last column:
 | log `calls #N` | the model calls and details of job #N (a run's go to its project's `events`), until the job is archived (**JOB-12**) | `jobs` |
 | log `journal #N` | job #N's requests (model calls, web searches, page fetches) with their answers, until it finishes | `jobs` |
 
-Jobs, readings and the chat history are numbered lists (`Numbered`, **SET-18**). `#N` names an entry. A list
+Jobs, readings and the chat history are numbered lists (`Numbered`, **SET-12**). `#N` names an entry. A list
 shows them newest first, a page at a time, and a page that has more after it names the command for the next.
-Clearing archives jobs (**JOB-11**), and deletes readings (**RDG-13**) and the history (**SET-12**).
+Clearing archives jobs (**JOB-11**), and deletes readings (**RDG-13**) and the history (**SET-10**).
 
 Each project keeps its own state in `<project>/.tinker/project.db`:
 
@@ -200,9 +202,32 @@ Everything Tinker tells the person goes through one voice, `say` (a `Messages`).
 - **MSG-6** `human_duration`: 42.5 gives `42s`, 1762.08 gives `29m 22s`, 4000 gives `1h 6m 40s`.
 - **MSG-7** No module of Tinker but `messages` calls `print`.
 
+## text (TXT)
+
+Plain text helpers every module shares.
+
+- **TXT-1** `first_line` gives the first line of the text with its ends stripped, cut to the limit with
+  `...`. `one_line` gives the text on one line, each run of whitespace one space. `words` gives the lowercase
+  alphanumeric words. `fingerprint` is the SHA-1 of the text. `similarity` is a case-insensitive ratio from 0
+  to 1.
+- **TXT-2** `split_text(text, size)` gives chunks of at most `max(size, 200)` chars. It splits between
+  paragraphs, cuts a longer paragraph, and loses no text.
+
+## store (STO)
+
+One SQLite database of documents and logs.
+
+- **STO-1** `Store(path)` is one SQLite database of documents (JSON values) by collection and key. `get` gives
+  the default for a missing document. `put`, `delete` (one document, or a whole collection) and `items` work as
+  named. `update(collection, key, change, default)` reads, changes and writes a document in one transaction,
+  so two processes never lose each other's change. A write is all or nothing: a crash leaves the old value or
+  the new one.
+- **STO-2** `Store.append(log, entry)` adds an entry with its time to a log. `Store.entries(log, after)` gives
+  the entries after an ID, in order, with their IDs. A database file is made with mode 600.
+
 ## settings (SET)
 
-The home, its database, the settings, and small helpers every module shares.
+The home and its database, the settings, numbered lists, and the one way to delete.
 
 - **SET-1** `Home.root` is `.tinker` next to the package's real location. `Home.store()` is the home
   database, `tinker.db`, in it.
@@ -231,40 +256,23 @@ The home, its database, the settings, and small helpers every module shares.
   command ends with why. `tinker help config` lists those keys with their type and range, from the table.
 - **SET-7** `Config.keep_alive(value)` gives whole seconds as an `int` and a duration as it is.
   `Config.ollama_url()` has no trailing slash.
-- **SET-8** `Store(path)` is one SQLite database of documents (JSON values) by collection and key. `get` gives
-  the default for a missing document. `put`, `delete` (one document, or a whole collection) and `items` work as
-  named. `update(collection, key, change, default)` reads, changes and writes a document in one transaction,
-  so two processes never lose each other's change. A write is all or nothing: a crash leaves the old value or
-  the new one.
-- **SET-9** `Store.append(log, entry)` adds an entry with its time to a log. `Store.entries(log, after)` gives
-  the entries after an ID, in order, with their IDs. A database file is made with mode 600.
-- **SET-10** `Home.ensure()` makes the home folder and its database on first use. A home that cannot be written
+- **SET-8** `Home.ensure()` makes the home folder and its database on first use. A home that cannot be written
   ends with `SystemExit`.
-- **SET-11** Every deletion goes one way, `confirm_deletion(said, items, command, yes, verb)`: it says what it
+- **SET-9** Every deletion goes one way, `confirm_deletion(said, items, command, yes, verb)`: it says what it
   deletes (or archives), item by item, asks, and only then deletes. With `yes` (`--yes`, or `confirm` in a
   chat) it does not ask. With no terminal to ask in, it deletes nothing and exits, saying how to confirm
   (`Nothing deleted: run COMMAND in a terminal to confirm, or add --yes.`); a no exits with `Nothing deleted.`
   (an archive says `Nothing archived`). With nothing to delete, it asks nothing (`clear` and `reset` say so).
   `Home.reset(yes)` deletes the home folder this way. It refuses a folder not named `.tinker`, and does
   nothing when the folder is missing.
-- **SET-12** `tinker clear PART` names exactly these parts: languages, memory, learned, docs, models, runs,
+- **SET-10** `tinker clear PART` names exactly these parts: languages, memory, learned, docs, models, runs,
   commands, history, exercise, jobs and read ([State](#state) shows what each holds). `jobs` and `read` take
   numbers (`#N`), and their own modules clear them (**JOB-11**, **RDG-13**). `Home.clear(names, yes)` deletes
-  only the named parts from the home database, as a deletion (**SET-11**). It rejects an unknown part by
+  only the named parts from the home database, as a deletion (**SET-9**). It rejects an unknown part by
   listing the parts.
-- **SET-13** `Home.keep_awake()` keeps the computer awake with `caffeinate` (macOS) or `systemd-inhibit`
+- **SET-11** `Home.keep_awake()` keeps the computer awake with `caffeinate` (macOS) or `systemd-inhibit`
   (Linux), tied to Tinker's process. It does nothing when neither tool is there, and it never raises.
-- **SET-14** Helpers. `first_line` gives the first line of the text with its ends stripped, cut to the limit
-  with `...`. `one_line` gives the text on one line, each run of whitespace one space. `words` gives the lowercase alphanumeric words. `fingerprint` is the SHA-1 of the text.
-  `similarity` is a case-insensitive ratio from 0 to 1.
-- **SET-15** `split_text(text, size)` gives chunks of at most `max(size, 200)` chars. It splits between
-  paragraphs, cuts a longer paragraph, and loses no text.
-- **SET-16** `after_what_they_use(starts, uses, known)` orders the paths so that each comes after the paths it
-  uses. It goes depth first from the starts, in their order. A cycle is broken where it closes. A path that is
-  not known is left out.
-- **SET-17** `groups_fitting(items, room, size)` keeps the items in order, in groups that each fit `room` (each
-  item takes `size + 1`). An item larger than the room is a group of its own.
-- **SET-18** `Numbered(collection, counter)` is one numbered list in the home database. `add(entry)` keeps the
+- **SET-12** `Numbered(collection, counter)` is one numbered list in the home database. `add(entry)` keeps the
   entry under the next number (its `number`), and a number is never given again, even once its entry is
   deleted or its list cleared. `get(N)`, `put(entry)`, `update(N, change)` and `delete(N)` work as named, and
   `newest()` gives the entries newest first. `page(entries, N)` gives page N of the entries, `PER_PAGE` (10) to
@@ -299,7 +307,7 @@ pauses it too, so the person is always answered at once.
 - **JOB-1** `is_job(argv)` is true for a command of kind `job` (**CMD-1**): `task`, `restart`, `resume`,
   `confirm`, `amend`, `add`, `fix`, `calibrate`, `learn`, `ask`, `teach`, `read`, `research` and `exercise`.
   Help, and a build an exercise runs (`EXERCISE_ENV`, which holds the exercise's job number), are never jobs. A job keeps the computer awake while it
-  runs (**SET-13**). `Jobs.running(argv)` runs a job as the next number (`#1`, `#2` ...), kept in the home's
+  runs (**SET-11**). `Jobs.running(argv)` runs a job as the next number (`#1`, `#2` ...), kept in the home's
   `jobs` with its command, title, arguments, the day it started, its state `running`, its process and its
   tracker (`progress`, **PRJ-14**): the one list of what runs. Its process takes `JOB_STOP_SIGNAL` (SIGUSR2) as Ctrl-C.
 - **JOB-2** A job ends `stopped` when it is interrupted (Ctrl-C, `JOB_STOP_SIGNAL`) or its tracker ends with
@@ -347,7 +355,7 @@ pauses it too, so the person is always answered at once.
   the answer is written (a command line run once confirmed pauses it again while the model reads its output).
   A glance (**CMD-1**) pauses nothing, and a job asked for pauses it as **JOB-8** says.
 - **JOB-11** `tinker clear jobs [#N...] [--yes]` archives those jobs (with no `#N`, every stopped and finished
-  one), as a deletion (**SET-11**): each is kept with the state `archived` (and `archived_from`, the state it
+  one), as a deletion (**SET-9**): each is kept with the state `archived` (and `archived_from`, the state it
   had), listed by `tinker jobs archived` and not without a state, and its journal and its `calls #N` log are
   deleted. An archived job is not resumed (**JOB-5**). An unknown job, a running or paused one, one archived
   already, and any word but `#N` are refused with why.
@@ -587,7 +595,7 @@ What is said in the chats, kept so that a chat is only a view of it.
   gives the mode `"resume"` with the saved spec text, or `"change"` with the feature's spec file.
 - **PRJ-5** `Runs.clear_folder` refuses the home folder, the filesystem root, and any folder that holds
   Tinker's home. It keeps the entry that holds the spec file. It empties the folder and forgets the pointers
-  to it, as a deletion (**SET-11**).
+  to it, as a deletion (**SET-9**).
 - **PRJ-6** `Runs.remember(run, language)` keeps one line about the run in the home's `runs`: `{id, task,
   language, status, created, updated}`, at most `RUNS_KEPT`, the least recently updated dropped first.
 - **PRJ-7** `RunChecks.before_start`. A new run needs an existing folder that holds no run, and an existing
@@ -748,7 +756,7 @@ The terminal and the chats are one conversation: the same commands, the same ans
   run that starts a cycle is given `--confirm`, so its plan waits for the person. `status` alone gives what
   runs (`status @PROJECT` is that project's status, **CLI-3**). `stop`, `stop #N` and `resume [#N]` act on
   jobs (**JOB-7**). A command that deletes shows what it deletes and waits
-  for `confirm` (**SET-11**), but `clear chat`, which deletes no record (the history keeps it), is done at
+  for `confirm` (**SET-9**), but `clear chat`, which deletes no record (the history keeps it), is done at
   once. `exit` asks first; the person's `exit` and `confirm` are taken out at once, and the question as Tinker
   ends (its status says it no longer listens). The preview of a deletion is what `tinker` printed (its stdout),
   and the plan that waits is kept without the lines on what to send next: the chat never filters `tinker`'s
@@ -767,7 +775,7 @@ The terminal and the chats are one conversation: the same commands, the same ans
   goes at once, the answer in `GLANCE_KEPT_SECONDS`. `history [PAGE | #N]` lists the things shown by page
   ([State](#state)), with what was asked for each, or shows thing N again. `clear chat` takes every message out
   of the chats but the status, said in a note that goes in `DONE_NOTE_KEPT_SECONDS`. `clear history` is
-  `tinker clear history` (**SET-12**): once confirmed, it forgets the history, clears the chat as `clear chat`
+  `tinker clear history` (**SET-10**): once confirmed, it forgets the history, clears the chat as `clear chat`
   does, and leaves nothing in the history, not even what it said.
 - **CNV-15** `Desk.follow` follows a task by its tracker: its run ID, its folder (the title is named after it),
   and a plan that waits. Once the task ends, it reads the task's last state from its job.
@@ -814,7 +822,7 @@ The chat plugin: Telegram, and `tinker channel`.
   `SystemExit`. `enabled()` gives nothing when `TINKER_CHANNELS=off`.
 - **CHN-2** `ChannelCommand.run` lists by default and rejects an unknown action. `list` shows each channel and
   its chats. `add` (from options or questions) checks the name, refuses a name taken, checks the token, and
-  saves the channel disabled. `remove` drops the settings and the secrets, as a deletion (**SET-11**).
+  saves the channel disabled. `remove` drops the settings and the secrets, as a deletion (**SET-9**).
   `enable` and `disable` switch a channel.
 - **CHN-3** `ask` gives the default when there is no terminal, or ends with `SystemExit` when it has no default.
   `ChannelCommand.check` ends with `SystemExit` on a refusal, and tries a dropped network again up to
@@ -1100,7 +1108,7 @@ the core ones first, and saved as soon as it is read. What it teaches is a topic
 - **RDG-13** `read list [PAGE]` shows the readings by page ([State](#state)), each with how many chapters are
   read and the facts kept; `read show #N` its source, summary and each chapter with its state and facts. Both
   are glances (**CMD-1**). `clear read [#N...]` deletes those readings (every one with no number): their text
-  and their topic, as a deletion (**SET-11**).
+  and their topic, as a deletion (**SET-9**).
 
 ## teaching (TCH)
 
@@ -1270,6 +1278,11 @@ Recall, the spec, the design and the contracts where files meet, and their revie
   that is not the entry, is a marker. `write` sets the contract and adds the files it says it uses.
 - **PLN-13** `InterfaceReviewer` checks only the files that use two or more contracted code files. It applies
   the corrections, checks the changed files again, and keeps its findings in the cycle's `review`.
+- **PLN-14** `after_what_they_use(starts, uses, known)` orders the paths so that each comes after the paths it
+  uses. It goes depth first from the starts, in their order. A cycle is broken where it closes. A path that is
+  not known is left out.
+- **PLN-15** `groups_fitting(items, room, size)` keeps the items in order, in groups that each fit `room` (each
+  item takes `size + 1`). An item larger than the room is a group of its own.
 
 ## building (BLD)
 

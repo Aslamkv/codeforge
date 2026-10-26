@@ -1,7 +1,4 @@
 import io
-import multiprocessing
-import re
-import stat
 import sys
 from pathlib import Path
 
@@ -17,18 +14,7 @@ from tinkerkit.settings import (
     Home,
     Numbered,
     Paged,
-    Store,
-    after_what_they_use,
     confirm_deletion,
-    field,
-    fingerprint,
-    first_line,
-    groups_fitting,
-    host,
-    one_line,
-    similarity,
-    split_text,
-    words,
 )
 
 
@@ -164,85 +150,6 @@ def test_keep_alive_and_ollama_url_as_ollama_takes_them():
 
 
 @pytest.mark.spec("SET-8")
-def test_store_documents(tmp_path):
-    store = Store(tmp_path / "a" / "x.db")
-    assert store.get("c", "k") is None and store.get("c", "k", {"d": 1}) == {"d": 1}
-    store.put("c", "b", {"name": "café", "n": [1]})
-    store.put("c", "a", 2)
-    store.put("c", "b", {"name": "again"})
-    store.put("other", "z", 3)
-    assert store.items("c") == {"b": {"name": "again"}, "a": 2} and store.count("c") == 2
-    store.delete("c", "b")
-    assert store.items("c") == {"a": 2}
-    store.delete("c")
-    assert store.items("c") == {} and store.get("other", "z") == 3
-
-
-def add_many(path, times):
-    store = Store(path)
-    for _ in range(times):
-        store.update("c", "n", lambda count: count + 1, 0)
-
-
-@pytest.mark.spec("SET-8")
-def test_store_updates_from_two_processes_lose_nothing(tmp_path):
-    path = tmp_path / "x.db"
-    Store(path).put("c", "n", 0)
-    context = multiprocessing.get_context("spawn")
-    workers = [context.Process(target=add_many, args=(path, 50)) for _ in range(2)]
-    for worker in workers:
-        worker.start()
-    add_many(path, 50)
-    for worker in workers:
-        worker.join(30)
-    assert Store(path).get("c", "n") == 150
-
-
-@pytest.mark.spec("SET-8")
-def test_a_failed_write_leaves_the_old_value(tmp_path):
-    store = Store(tmp_path / "x.db")
-    store.put("c", "k", "old")
-
-    def broken(value):
-        raise RuntimeError("crash in the middle")
-
-    with pytest.raises(RuntimeError):
-        store.update("c", "k", broken)
-    assert store.get("c", "k") == "old"
-    with pytest.raises(TypeError):
-        not_json = object()
-        store.put("c", "k", not_json)
-    assert store.get("c", "k") == "old"
-
-
-@pytest.mark.spec("SET-9")
-def test_store_logs_and_mode(tmp_path):
-    store = Store(tmp_path / "x.db")
-    first = store.append("log", {"label": "one"})
-    store.append("log", {"label": "two", "x": "é"})
-    store.append("other", {"label": "no"})
-    entries = store.entries("log")
-    assert [entry["label"] for _, entry in entries] == ["one", "two"] and all(
-        "time" in entry for _, entry in entries
-    )
-    assert [entry["label"] for _, entry in store.entries("log", after=first)] == ["two"]
-    assert len(store.entries("log")) == 2
-    store.drop_log("log")
-    assert store.entries("log") == [] and len(store.entries("other")) == 1
-    assert stat.S_IMODE((tmp_path / "x.db").stat().st_mode) == 0o600
-
-
-@pytest.mark.spec("SET-9")
-def test_a_deleted_database_is_made_again(tmp_path):
-    store = Store(tmp_path / "x.db")
-    store.put("c", "k", 1)
-    (tmp_path / "x.db").unlink()
-    assert store.get("c", "k") is None
-    store.put("c", "k", 2)
-    assert store.get("c", "k") == 2
-
-
-@pytest.mark.spec("SET-10")
 def test_ensure_makes_home_and_its_database(tinker_home, capsys):
     assert not tinker_home.exists()
     Home.ensure()
@@ -251,7 +158,7 @@ def test_ensure_makes_home_and_its_database(tinker_home, capsys):
     assert capsys.readouterr().out == ""
 
 
-@pytest.mark.spec("SET-10")
+@pytest.mark.spec("SET-8")
 def test_ensure_stops_when_home_cannot_be_written(tinker_home, monkeypatch):
     def refuse(*args, **kwargs):
         raise PermissionError("read-only")
@@ -261,7 +168,7 @@ def test_ensure_stops_when_home_cannot_be_written(tinker_home, monkeypatch):
         Home.ensure()
 
 
-@pytest.mark.spec("SET-11")
+@pytest.mark.spec("SET-9")
 def test_reset_with_yes_deletes_home(tinker_home):
     Home.ensure()
     Home.reset(yes=True)
@@ -270,13 +177,13 @@ def test_reset_with_yes_deletes_home(tinker_home):
     assert Config.get("model") == "m"
 
 
-@pytest.mark.spec("SET-11")
+@pytest.mark.spec("SET-9")
 def test_reset_without_home_does_nothing(tinker_home, capsys):
     Home.reset(yes=True)
     assert "Nothing to reset" in capsys.readouterr().out
 
 
-@pytest.mark.spec("SET-11")
+@pytest.mark.spec("SET-9")
 def test_reset_refuses_a_folder_not_named_dot_tinker(tmp_path, monkeypatch):
     other = tmp_path / "precious"
     other.mkdir()
@@ -286,7 +193,7 @@ def test_reset_refuses_a_folder_not_named_dot_tinker(tmp_path, monkeypatch):
     assert other.exists()
 
 
-@pytest.mark.spec("SET-11")
+@pytest.mark.spec("SET-9")
 def test_reset_outside_a_terminal_without_yes_deletes_nothing(tinker_home, monkeypatch):
     Home.ensure()
     monkeypatch.setattr(sys, "stdin", io.StringIO(""))
@@ -295,7 +202,7 @@ def test_reset_outside_a_terminal_without_yes_deletes_nothing(tinker_home, monke
     assert tinker_home.exists()
 
 
-@pytest.mark.spec("SET-11")
+@pytest.mark.spec("SET-9")
 def test_a_deletion_says_what_goes_then_asks(monkeypatch, capsys):
     confirm_deletion("This deletes:", ["the notes", "the logs"], "tinker clear notes", yes=True)
     said = capsys.readouterr().out
@@ -315,7 +222,7 @@ def test_a_deletion_says_what_goes_then_asks(monkeypatch, capsys):
     assert asked == ["Delete it? [y/N] ", "Delete them? [y/N] "]
 
 
-@pytest.mark.spec("SET-12")
+@pytest.mark.spec("SET-10")
 def test_clear_deletes_only_the_named_parts(home_store, capsys):
     home_store.put("languages", "python", {})
     home_store.put("memory", "any", {})
@@ -328,19 +235,19 @@ def test_clear_deletes_only_the_named_parts(home_store, capsys):
     assert "Cleared languages, memory, learned." in capsys.readouterr().out
 
 
-@pytest.mark.spec("SET-12")
+@pytest.mark.spec("SET-10")
 def test_clear_rejects_an_unknown_part():
     with pytest.raises(SystemExit, match="the parts are: languages, .*, exercise, jobs, read$"):
         Home.clear(["everything"], yes=True)
 
 
-@pytest.mark.spec("SET-12")
+@pytest.mark.spec("SET-10")
 def test_clear_with_nothing_there(capsys):
     Home.clear(["runs"], yes=True)
     assert "Nothing to clear: runs is empty" in capsys.readouterr().out
 
 
-@pytest.mark.spec("SET-12")
+@pytest.mark.spec("SET-10")
 def test_clear_outside_a_terminal_without_yes_deletes_nothing(home_store, monkeypatch):
     home_store.put("memory", "any", {})
     monkeypatch.setattr(sys, "stdin", io.StringIO(""))
@@ -349,72 +256,7 @@ def test_clear_outside_a_terminal_without_yes_deletes_nothing(home_store, monkey
     assert home_store.items("memory") == {"any": {}}
 
 
-@pytest.mark.spec("SET-14")
-def test_first_line():
-    assert first_line("\n  hello world\nsecond") == "hello world"
-    assert first_line(None) == "" and first_line("   ") == ""
-    assert first_line("x" * 200, 10) == "xxxxxxx..."
-
-
-@pytest.mark.spec("SET-14")
-def test_one_line():
-    assert one_line("  a\n\tb   c ") == "a b c" and one_line(None) == "" and one_line(7) == "7"
-
-
-def test_field_is_the_stripped_text_of_a_key_cut_to_its_limit():
-    item = {"name": "  tinker  ", "none": None, "number": 7}
-    assert field(item, "name") == "tinker" and field(item, "name", 3) == "tin"
-    assert field(item, "none") == "" and field(item, "missing") == "" and field(item, "number") == "7"
-
-
-def test_host_is_the_lowercase_site_without_www():
-    assert host("https://www.Example.org/x") == "example.org"
-    assert host("http://docs.python.org:8080/3/") == "docs.python.org:8080"
-
-
-@pytest.mark.spec("SET-14")
-def test_words_fingerprint_and_similarity():
-    assert words("Hello, World 42!") == ["hello", "world", "42"]
-    assert words(None) == []
-    assert fingerprint("a") == fingerprint("a") != fingerprint("b")
-    assert re.fullmatch(r"[0-9a-f]{40}", fingerprint("a"))
-    assert similarity("ABC", "abc") == 1.0 and similarity("abc", "xyz") == 0.0
-
-
-@pytest.mark.spec("SET-15")
-def test_split_text_keeps_paragraphs_together_within_the_size():
-    text = "\n\n".join(f"paragraph {number} " + "word " * 30 for number in range(10))
-    chunks = split_text(text, 400)
-    assert all(len(chunk) <= 400 for chunk in chunks)
-    assert len(chunks) > 1
-    nothing_lost = "".join(text.split()) == "".join("".join(chunks).split())
-    split_between_paragraphs = all(chunk.startswith("paragraph") for chunk in chunks)
-    assert nothing_lost and split_between_paragraphs
-
-
-@pytest.mark.spec("SET-15")
-def test_split_text_cuts_a_long_paragraph_and_never_below_200():
-    chunks = split_text("x" * 1000, 50)
-    assert [len(chunk) for chunk in chunks] == [200] * 5
-
-
-@pytest.mark.spec("SET-16")
-def test_after_what_they_use_orders_dependencies_first_breaks_cycles_and_skips_unknown():
-    uses = {"app": ["db", "util"], "db": ["util"], "util": [], "x": ["app"], "a": ["b", "ghost"], "b": ["a"]}
-    known = lambda name: name in uses
-    assert after_what_they_use(["app", "x"], lambda name: uses[name], known) == ["util", "db", "app", "x"]
-    assert after_what_they_use(["a"], lambda name: uses[name], known) == ["b", "a"]
-
-
-@pytest.mark.spec("SET-17")
-def test_groups_fitting():
-    assert groups_fitting(["aa", "bb", "cc"], 6) == [["aa", "bb"], ["cc"]]
-    assert groups_fitting(["a" * 10, "b"], 5) == [["a" * 10], ["b"]]
-    assert groups_fitting([], 5) == []
-    assert groups_fitting([3, 3, 3], 8, size=lambda value: value) == [[3, 3], [3]]
-
-
-@pytest.mark.spec("SET-13")
+@pytest.mark.spec("SET-11")
 @pytest.mark.parametrize(
     "tool,program", [("caffeinate", "caffeinate"), ("systemd-inhibit", "systemd-inhibit")]
 )
@@ -426,7 +268,7 @@ def test_keep_awake_uses_the_tool_there_is(monkeypatch, tool, program):
     assert started and started[0][0] == program and str(settings.os.getpid()) in " ".join(started[0])
 
 
-@pytest.mark.spec("SET-13")
+@pytest.mark.spec("SET-11")
 def test_keep_awake_without_a_tool_or_failing_does_nothing(monkeypatch):
     monkeypatch.setattr(settings.shutil, "which", lambda name: None)
     Home.keep_awake()
@@ -476,7 +318,7 @@ def test_help_config_lists_the_settings_from_the_table():
     assert "web_timeout (" in about and "embed_model" not in about and "model (" not in about
 
 
-@pytest.mark.spec("SET-18")
+@pytest.mark.spec("SET-12")
 def test_a_numbered_list_never_gives_a_number_again(home_store):
     listed = Numbered("things", "thing numbers")
     first, second = listed.add({"text": "a"}), listed.add({"text": "b"})
@@ -489,7 +331,7 @@ def test_a_numbered_list_never_gives_a_number_again(home_store):
     assert [entry["text"] for entry in listed.newest()] == ["d", "e"]
 
 
-@pytest.mark.spec("SET-18")
+@pytest.mark.spec("SET-12")
 def test_a_list_comes_a_page_at_a_time():
     entries = list(range(PER_PAGE * 2 + 1))
     assert PER_PAGE == 10 and Numbered.page(entries, 1) == Paged(entries[:PER_PAGE], 3)

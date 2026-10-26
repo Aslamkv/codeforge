@@ -49,14 +49,12 @@ lazy from .settings import (
     STATUS_TEXT,
     Config,
     Home,
-    Log,
     Numbered,
-    clock,
-    first_line,
-    now_text,
     projects_folder,
 )
+lazy from .store import Log
 lazy from .teaching import Asker, Memory, Teacher
+lazy from .text import clock, first_line, now_text
 lazy from .web import Internet
 lazy from .workspace import TaughtCommands, TestRef, Toolchain
 

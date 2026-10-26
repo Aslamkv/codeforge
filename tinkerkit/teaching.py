@@ -13,10 +13,8 @@ lazy from .settings import (
     TEACH_CHECK_COMMANDS,
     TEACH_CHECK_SEARCHES,
     TEACH_CLAIMS,
-    field,
-    first_line,
-    words,
 )
+lazy from .text import field, first_line, words
 
 ITEM_KINDS = ("toolchain", "fix", "lesson", "fact", "finding", "rule", "command")
 TEACHABLE_TOOLCHAIN_KEYS = ("setup", "check", "test_all", "test_one", "format", "lint")

@@ -10,7 +10,8 @@ from tinkerkit import conversation
 from tinkerkit.messages import say
 from tinkerkit.model import Model, Ollama
 from tinkerkit.project import Project
-from tinkerkit.settings import Home, Log, Store
+from tinkerkit.settings import Home
+from tinkerkit.store import Log, Store
 from tinkerkit.web import WebPage, readable
 
 REAL_HOME = Home.root

@@ -7,7 +7,7 @@ import pytest
 
 from tinkerkit.messages import Message, Messages, human_duration, say
 from tinkerkit.project import Tracker, project_store
-from tinkerkit.settings import Log
+from tinkerkit.store import Log
 
 ROOT = Path(__file__).resolve().parent.parent
 

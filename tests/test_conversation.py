@@ -567,7 +567,7 @@ def test_running(home_store):
 FAKE_TINKER = """
 import json, os, signal, sys, time
 sys.path.insert(0, os.environ["TINKER_SOURCE"])
-from tinkerkit.settings import Store
+from tinkerkit.store import Store
 store = Store(os.environ["FAKE_TINKER_DB"])
 args = sys.argv[1:]
 folder = sys.argv[0].rsplit("/", 1)[0] + "/calc"

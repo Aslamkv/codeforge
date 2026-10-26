@@ -11,7 +11,8 @@ lazy import ssl
 lazy import time
 lazy import zlib
 
-from .settings import FETCH_USER_AGENT, MAX_REDIRECTS, first_line
+from .settings import FETCH_USER_AGENT, MAX_REDIRECTS
+from .text import first_line
 
 RawResponse = namedtuple("RawResponse", "status headers body")
 

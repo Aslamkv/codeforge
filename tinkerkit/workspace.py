@@ -21,10 +21,8 @@ from .settings import (
     Config,
     Home,
     NotAPytestClass,
-    field,
-    first_line,
-    now_text,
 )
+from .text import field, first_line, now_text
 lazy from .messages import human_duration, say
 lazy from .prompts import Part, Prompts, Reply
 

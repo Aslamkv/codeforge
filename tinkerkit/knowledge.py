@@ -37,16 +37,8 @@ from .settings import (
     VERSION_TIMEOUT,
     Config,
     Home,
-    field,
-    fingerprint,
-    first_line,
-    host,
-    now_text,
-    one_line,
-    similarity,
-    split_text,
-    words,
 )
+from .text import field, fingerprint, first_line, host, now_text, one_line, similarity, split_text, words
 lazy from .jobs import today
 lazy from .model import Answer, Models, Ollama, OllamaError
 lazy from .project import Tracked

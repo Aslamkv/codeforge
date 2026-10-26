@@ -13,7 +13,7 @@ import tinkerkit.ledger as ledger
 from tinkerkit.channels import ChannelCommand, Channels, TelegramChannel, ask
 from tinkerkit.conversation import ChannelError
 from tinkerkit.ledger import Ledger
-from tinkerkit.settings import Store
+from tinkerkit.store import Store
 
 
 class BotAPI:

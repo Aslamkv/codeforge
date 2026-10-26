@@ -49,7 +49,7 @@ def test_things_are_kept_as_shown_last_and_listed_newest_first():
     assert [thing["number"] for thing in Ledger.page(2)[0]] == [2, 1]
 
 
-@pytest.mark.spec("SET-18")
+@pytest.mark.spec("SET-12")
 def test_the_history_never_numbers_a_thing_again_once_cleared():
     Ledger.shown("bot", "42", None, [1], "first")
     Home.clear(["history"], yes=True)

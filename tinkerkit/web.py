@@ -12,7 +12,8 @@ lazy import urllib.request
 lazy from collections import Counter
 
 from .messages import say
-from .settings import Config, Home, first_line
+from .settings import Config, Home
+from .text import first_line
 lazy from .fetcher import Fetcher
 lazy from .jobs import journaled
 lazy from .passages import Block, MainBlocks, is_html, text_blocks
