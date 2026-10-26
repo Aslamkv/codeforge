@@ -764,7 +764,7 @@ class Verifier(Phase):
                 if state == "passes":
                     return True
                 stall = 0 if climb.progressed(state, output) else stall + 1
-                conclusion_due = attempt.hit_thinking_cap
+                conclusion_due = bool(step.get("unfinished_thought"))
                 step["last_error"] = Output.key_line(output)
                 why = self.to_review(attempt, approach)
                 if why:
@@ -843,7 +843,6 @@ class FixAttempt(Worker):
         self.label = f"{self.APPROACH_TEXT[approach].capitalize()} {step['id']}"
         self.only_wanted_test_change = False
         self.tests_may_disagree = False
-        self.hit_thinking_cap = False
         self.broken_test, self.broken_output = "", ""
 
     def run(self):
@@ -948,8 +947,7 @@ class FixAttempt(Worker):
             unthinking_retry=False,
             think=think,
         )
-        self.hit_thinking_cap = bool(reply.thought)
-        if self.hit_thinking_cap:
+        if reply.thought:
             self.step[key], self.step["unfinished_thought"] = True, reply.thought
         return reply
 
