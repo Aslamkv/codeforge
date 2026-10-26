@@ -927,6 +927,27 @@ def test_reporter_shows_the_tracker_and_ends_with_its_ending(home_store, monkeyp
 
 
 @pytest.mark.spec("CNV-18")
+def test_reporter_edits_for_new_tokens_only_with_the_clock_but_the_console_counts_them_live(
+    home_store, monkeypatch, clock
+):
+    monkeypatch.setattr(conversation, "PROGRESS_EDIT_SECONDS", 1000)
+    chat, console = Recorder(), live_console(monkeypatch)
+    reporter = Reporter([chat, console], "a calculator", pid=4242)
+    keep_job(home_store, 1, 4242, snapshot(step="spec", doing=Tracker.DOING_AND_DONE["spec"][0], tokens=10))
+    reporter.refresh()
+    edits = len(chat.log)
+    keep_job(home_store, 1, 4242, snapshot(step="spec", doing=Tracker.DOING_AND_DONE["spec"][0], tokens=900))
+    reporter.refresh()
+    assert len(chat.log) == edits
+    assert console.screen.live[2]["tokens"] == 900
+
+
+@pytest.mark.spec("CNV-18")
+def test_progress_edits_come_within_about_two_seconds():
+    assert conversation.PROGRESS_EDIT_SECONDS <= 2 < conversation.CLOCK_ONLY_EDIT_SECONDS
+
+
+@pytest.mark.spec("CNV-18")
 def test_a_reporter_without_a_tracker_shows_its_lines(monkeypatch):
     monkeypatch.setattr(conversation, "PROGRESS_EDIT_SECONDS", 1000)
     channel = Recorder()

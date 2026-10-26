@@ -41,7 +41,7 @@ lazy from .text import field
 lazy from .workspace import Toolchain
 
 CHANNEL_REPORTS_ENV = "TINKER_CHANNELS"
-PROGRESS_EDIT_SECONDS = 5
+PROGRESS_EDIT_SECONDS = 2
 CLOCK_ONLY_EDIT_SECONDS = 15
 BUILD_STOP_GRACE_SECONDS = 120
 STATUS_LOOK_SECONDS = 10
@@ -1340,6 +1340,8 @@ class Reporter:
             changed = self.progress.take(state)
             if changed or went_on or time.monotonic() - self.last_edit >= CLOCK_ONLY_EDIT_SECONDS:
                 self.update()
+            else:
+                self.count_live()
 
     def tracked(self):
         job = Jobs.of_process(self.pid) if self.pid else None
@@ -1351,6 +1353,11 @@ class Reporter:
         self.say(self.progress.text())
         if self.on_step:
             self.on_step()
+
+    def count_live(self):
+        for channel in self.channels:
+            for chat in channel.allowed:
+                channel.count_live(chat, self.sent.get((channel.name, chat)), **self.progress.facts)
 
     def say(self, text, done=False):
         text = f"{self.plan_on_top}\n\n{text}" if self.plan_on_top else text
@@ -1729,6 +1736,9 @@ class Channel:
             self.delete(chat, extra)
         return now
 
+    def count_live(self, chat, shown, **facts):
+        pass
+
     def said(self, text):
         return BARE_RE.sub("", text) if self.commands_without_tinker else text
 
@@ -1872,6 +1882,10 @@ class ConsoleChannel(Channel):
             self.show_going(sent, text, doing, facts)
         return [sent]
 
+    def count_live(self, chat, shown, **facts):
+        if shown and shown[0] == self.live_owner:
+            self.screen.count_live(facts)
+
     def show_done(self, sent, text):
         if self.live_owner == sent:
             self.live_owner = None
@@ -1952,6 +1966,13 @@ class ConsoleScreen:
                 write_out(self.shrunk(rows_before, rows_before - self.live_rows()) + self.redrawn_live())
             else:
                 write_out(erased + self.bottom())
+
+    def count_live(self, facts):
+        with self.printing:
+            if self.live is not None:
+                text, began, _ = self.live
+                self.live = (text, began, facts)
+                write_out(self.redrawn_live())
 
     def end_live(self):
         with self.printing:
