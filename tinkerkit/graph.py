@@ -6,7 +6,14 @@ lazy from collections import namedtuple
 
 lazy from .knowledge import Embeddings, Item, Library
 lazy from .messages import say
-lazy from .settings import MEMORY_ID_CHARS, SIMILAR_LESSON_MEANING, SIMILAR_LESSON_WORDS, Home, Numbered
+lazy from .settings import (
+    MEMORY_FOUND_SHOWN,
+    MEMORY_ID_CHARS,
+    SIMILAR_LESSON_MEANING,
+    SIMILAR_LESSON_WORDS,
+    Home,
+    Numbered,
+)
 lazy from .text import first_line, similarity
 lazy from .workspace import TaughtCommands, Toolchain
 
@@ -437,6 +444,16 @@ class MemoryBrowser:
         ("Correct it", "tinker teach WHAT"),
         ("Forget a part", "tinker clear PART"),
     )
+    LINKED = (
+        ("cites", "source", "Cites"),
+        ("cites", "target", "Cited by"),
+        ("became", "source", "Became"),
+        ("became", "target", "Came from"),
+        ("similar", "either", "Similar lessons"),
+    )
+    RUN_LINKS = frozendict(
+        {"taught_by": "taught", "confirmed_in": "confirmed", "helped_in": "helped", "failed_in": "failed"}
+    )
 
     def __init__(self, graph):
         self.graph = graph
@@ -457,7 +474,7 @@ class MemoryBrowser:
         if first == "find" and rest:
             return MemoryRequest("find", " ".join(rest), "", 1, rest)
         if first == "recent" and len(rest) <= 1:
-            return MemoryRequest("recent", "", "", cls.page_of(rest[0]) if rest else 1, [])
+            return MemoryRequest("recent", "", "", cls.page_of(rest[0]) if rest else 1, ["recent"])
         if first in ("show", "find", "recent"):
             raise ValueError(cls.USAGE)
         named, page = (words[:-1], cls.page_of(words[-1])) if words and words[-1].isdigit() else (words, 1)
@@ -478,6 +495,12 @@ class MemoryBrowser:
             self.show_parts(request.page)
         elif request.view == "part":
             self.show_part(request)
+        elif request.view == "show":
+            self.show_item(request.words[0])
+        elif request.view == "find":
+            self.show_found(request)
+        elif request.view == "recent":
+            self.show_recent(request.page)
 
     def show_parts(self, page):
         if not self.items and len(self.hubs) == 1:
@@ -525,7 +548,7 @@ class MemoryBrowser:
             [item for item in members if self.keeps(item, request.kind)], request.page
         )
         for item in shown:
-            say.text(self.item_line(item) + ("" if hub else f"  ({self.part_of[item['id']]['group']})"))
+            say.text(self.item_line(item) if hub else self.across_line(item))
         if not shown:
             say.text("Nothing here.")
         left_out = sum(item["status"] == "retired" for item in members) if request.kind != "retired" else 0
@@ -533,6 +556,94 @@ class MemoryBrowser:
             where = f"{hub['group']} " if hub else ""
             say.text(f"\n{left_out} retired, not shown: tinker memory {where}retired")
         self.say_page(request.page, pages, request.words)
+
+    def show_item(self, word):
+        item = self.item_named(word)
+        hub = self.part_of.get(item["id"])
+        say.title(f"{item['kind']} {self.status_of(item)} [{self.ids[item['id']]}]", "🧠")
+        lines = [
+            f"part: {hub['label']} (tinker memory {hub['group']})" if hub else None,
+            f"day: {item['day']}" if item["day"] else None,
+            item["text"],
+            *(f"{key}: {value}" for key, value in item["details"]),
+            *(f"source: {source}" for source in item["sources"]),
+        ]
+        for line in lines:
+            if line:
+                say.text(line)
+        for kind, end, title in self.LINKED:
+            self.say_section(title, [self.item_line(node) for node in self.linked(item, kind, end)])
+        self.say_section("Runs", self.runs_of(item))
+        say.text("\nCorrect it: tinker teach WHAT")
+
+    def item_named(self, word):
+        wanted = word.strip("[]").lower()
+        if len(wanted) < MEMORY_ID_CHARS:
+            raise SystemExit(
+                f"A short ID has at least {MEMORY_ID_CHARS} digits, not {word!r}: tinker memory NAME lists them."
+            )
+        found = [item for item in self.items if self.ids[item["id"]].startswith(wanted)]
+        if not found:
+            raise SystemExit(f"No item has the short ID {word!r}: tinker memory find WORDS finds one.")
+        if len(found) > 1:
+            shared = "\n".join(self.item_line(item) for item in found)
+            raise SystemExit(f"{len(found)} items start with {word!r}; give more digits:\n{shared}")
+        return found[0]
+
+    def linked(self, item, kind, end):
+        ends = ("source", "target") if end == "either" else (end,)
+        other = {"source": "target", "target": "source"}
+        return [
+            self.graph.nodes[link[other[at]]]
+            for link in self.graph.links
+            for at in ends
+            if link["kind"] == kind and link[at] == item["id"] and link[other[at]] in self.ids
+        ]
+
+    def runs_of(self, item):
+        return [
+            f"{run['label']} {first_line(run['text'], 80)} — {self.RUN_LINKS[link['kind']]}"
+            for link in self.graph.links
+            if link["source"] == item["id"] and link["kind"] in self.RUN_LINKS
+            for run in [self.graph.nodes[link["target"]]]
+        ]
+
+    @staticmethod
+    def say_section(title, lines):
+        if lines:
+            with say.part(title, "🔗"):
+                for line in lines:
+                    say.text(line)
+
+    def show_found(self, request):
+        words = [word.lower() for word in request.words]
+        found = [
+            item
+            for item in self.items
+            if all(word in f"{item['text']} {item['label']}".lower() for word in words)
+        ]
+        if not found:
+            say.info(f"Nothing in memory holds {request.name!r}", "🔍")
+            return
+        say.title(f"Found in memory: {request.name}", "🔍")
+        for item in found[:MEMORY_FOUND_SHOWN]:
+            say.text(self.across_line(item))
+        if len(found) > MEMORY_FOUND_SHOWN:
+            say.text(f"\n{len(found) - MEMORY_FOUND_SHOWN} more: add words to narrow it")
+
+    def show_recent(self, page):
+        dated = sorted(
+            (item for item in self.items if item["day"] and item["status"] != "retired"),
+            key=lambda item: item["day"],
+            reverse=True,
+        )
+        say.title("Newest in memory", "🧠")
+        shown, pages = Numbered.page(dated, page)
+        for item in shown:
+            say.text(f"{item['day']} {self.across_line(item)}")
+        if not shown:
+            say.text("Nothing here.")
+        self.say_page(page, pages, ["recent"])
 
     def say_details(self, hub):
         say.title(hub["label"], self.icon_of(hub))
@@ -559,8 +670,14 @@ class MemoryBrowser:
         return item["status"] != "retired" and kind in ("", item["kind"])
 
     def item_line(self, item):
-        status = {"proven": "✅", "retired": "♻️"}.get(item["status"], "🌱")
-        return f"[{self.ids[item['id']]}] {status} {item['kind']:9} {first_line(item['text'], 100)}"
+        return f"[{self.ids[item['id']]}] {self.status_of(item)} {item['kind']:9} {first_line(item['text'], 100)}"
+
+    def across_line(self, item):
+        return f"{self.item_line(item)}  ({self.part_of[item['id']]['group']})"
+
+    @staticmethod
+    def status_of(item):
+        return {"proven": "✅", "retired": "♻️"}.get(item["status"], "🌱")
 
     def say_page(self, page, pages, words):
         shown = "".join(f"{word} " for word in words)

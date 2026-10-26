@@ -316,6 +316,78 @@ def test_memory_words_are_a_name_a_kind_and_a_page(home_store):
     assert Cli.parse(["memory", "python", "lessons", "2"]).memory == request(["python", "lessons", "2"])
     with pytest.raises(SystemExit):
         Cli.parse(["memory", "lessons", "facts"])
+    with pytest.raises(SystemExit):
+        Cli.parse(["memory", "--graph", "python"])
+
+
+@pytest.mark.spec("GRF-10")
+def test_memory_show_shows_one_item_whole_with_its_links_and_runs(memory, capsys):
+    seed = f"lesson:{memory['seed']}"
+    browse("show", f"[{short_id(seed).upper()}]")
+    out = capsys.readouterr().out
+    assert "lesson ✅" in out and "Seed random generators inside tests" in out
+    assert "part: Python (tinker memory python)" in out and "day: 20" in out
+    assert "@r1 a calculator — taught" in out and "@r2 " in out and "— helped" in out
+    assert "Correct it: tinker teach WHAT" in out and "Cites" not in out and "Similar" not in out
+    route = f"fact:flask:{memory['route']}"
+    browse("show", short_id(route))
+    out = capsys.readouterr().out
+    assert "Cited by" in out and "Routes and a test client" in out
+    assert "Became" in out and f"[{short_id('known:' + memory['route'])}]" in out
+    assert "source: https://a.org/x" in out
+    browse("show", short_id(f"known:{memory['route']}"))
+    assert "Came from" in capsys.readouterr().out
+    browse("show", short_id(f"retired:lesson:{memory['name']}"))
+    out = capsys.readouterr().out
+    assert "♻️" in out and "why: shown in the tests prompts of a step that failed" in out and "— failed" in out
+
+
+@pytest.mark.spec("GRF-7", "GRF-10")
+def test_memory_show_refuses_a_short_unknown_or_shared_id(memory, monkeypatch):
+    with pytest.raises(SystemExit, match="at least 6"):
+        browse("show", short_id("toolchain:python")[:5])
+    with pytest.raises(SystemExit, match="No item"):
+        browse("show", "zzzzzz")
+    graph = Graph.build()
+    browser = MemoryBrowser(graph)
+    first, second = browser.items[:2]
+    browser.ids[first["id"]], browser.ids[second["id"]] = "abcdef1", "abcdef2"
+    with pytest.raises(SystemExit, match=r"2 items[\s\S]*\[abcdef1\][\s\S]*\[abcdef2\]"):
+        browser.show(MemoryBrowser.request(["show", "abcdef"]))
+
+
+@pytest.mark.spec("GRF-11")
+def test_memory_find_lists_items_holding_every_word_retired_too(memory, monkeypatch, capsys):
+    browse("find", "TESTS")
+    out = capsys.readouterr().out
+    assert "Seed random generators inside tests  (python)" in out
+    assert "♻️ lesson    Name each test after" not in out
+    browse("find", "test", "name")
+    assert "♻️ lesson    Name each test after the behaviour it checks  (any)" in capsys.readouterr().out
+    browse("find", "cobol")
+    assert "Nothing in memory holds 'cobol'" in capsys.readouterr().out
+    monkeypatch.setattr("tinkerkit.graph.MEMORY_FOUND_SHOWN", 1)
+    browse("find", "e")
+    out = capsys.readouterr().out
+    assert out.count("] ") == 1 and "more: add words to narrow it" in out
+
+
+@pytest.mark.spec("GRF-12")
+def test_memory_recent_lists_kept_items_newest_first_with_day_and_part(memory, monkeypatch, capsys):
+    graph = Graph.build()
+    browser = MemoryBrowser(graph)
+    for item in browser.items:
+        item["day"] = ""
+    seed, route = f"lesson:{memory['seed']}", f"fact:flask:{memory['route']}"
+    graph.nodes[seed]["day"], graph.nodes[route]["day"] = "2026-01-02", "2026-03-04"
+    graph.nodes[f"retired:lesson:{memory['name']}"]["day"] = "2026-05-06"
+    browser.show(MemoryBrowser.request(["recent"]))
+    out = capsys.readouterr().out
+    assert out.index("2026-03-04 [") < out.index("2026-01-02 [") and out.count("] ") == 2
+    assert "Flask routes use @app.route  (flask)" in out and "Name each test" not in out
+    monkeypatch.setattr(settings, "PER_PAGE", 1)
+    browser.show(MemoryBrowser.request(["recent"]))
+    assert "Page 1 of 2: tinker memory recent 2 for more." in capsys.readouterr().out
 
 
 @pytest.mark.spec("GRF-1")

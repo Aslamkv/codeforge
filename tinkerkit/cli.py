@@ -375,7 +375,7 @@ class Cli:
             case "read":
                 return Cli.reading(given.words, parser)
             case "memory":
-                return Cli.memory_words(given.words, parser)
+                return Cli.memory_words(given, parser)
             case "ask" | "teach" | "research" | "exercise":
                 return Cli.non_empty(" ".join(given.words), command, parser)
             case "config":
@@ -447,9 +447,11 @@ class Cli:
         return [Cli.non_empty(" ".join(words), "read", parser)]
 
     @staticmethod
-    def memory_words(words, parser):
+    def memory_words(given, parser):
+        if given.graph and given.words:
+            parser.error(MemoryBrowser.USAGE)
         try:
-            return MemoryBrowser.request(words)
+            return MemoryBrowser.request(given.words)
         except ValueError as refused:
             parser.error(str(refused))
 
