@@ -25,7 +25,11 @@ from tinkerkit.web import RequestLog, WebPage
 class FakeWeb:
     def __init__(self, found=None, pages=None):
         self.found, self.pages = found or {}, pages or {}
-        self.queries, self.fetched, self.requests = [], [], RequestLog()
+        self.queries, self.fetched, self.requests, self.batches = [], [], RequestLog(), []
+
+    def search_all(self, queries, count):
+        self.batches.append(list(queries))
+        return [self.search(query, count) for query in queries]
 
     def search(self, query, count):
         self.queries.append(query)
@@ -683,6 +687,8 @@ def test_a_language_is_learned_under_its_key_and_replaces_what_its_earlier_learn
     each_command_once = 2
     assert len(entry["machine"]) == each_command_once
     assert TOOL_DOCS_SEARCH in web.queries and all(url in web.fetched for url in TOOL_PAGES)
+    language_and_tool_docs_at_once = [batch for batch in web.batches if TOOL_DOCS_SEARCH in batch]
+    assert len(language_and_tool_docs_at_once) == 1 and len(language_and_tool_docs_at_once[0]) == 2
     assert entry["docs"] == {"langtest": "1.2.0"} and Home.store().get("sources", "langtest@1.2.0")["pages"]
     assert (
         Knowledge("Lang").language_doc["retired"][0]["reason"]

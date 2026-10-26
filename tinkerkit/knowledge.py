@@ -514,7 +514,7 @@ class Learner(Tracked):
         return shown
 
     def read_web(self, name, searches, max_pages):
-        found = self.in_turn(searches, [self.results(search) for search in searches], max_pages)
+        found = self.in_turn(searches, self.results(searches), max_pages)
         return self.read_pages(name, self.fetched(found))
 
     def web_pages(self, searches):
@@ -522,7 +522,7 @@ class Learner(Tracked):
             {"query": search, "pages": RESULTS_PER_RESEARCH_SEARCH, "section": "", "focus": search}
             for search in searches
         ]
-        found = self.in_turn(asked, [self.results(search) for search in asked], TEACH_PAGES)
+        found = self.in_turn(asked, self.results(asked), TEACH_PAGES)
         pages = [self.web_page(page, " ".join(searches)) for page in self.fetched(found)]
         return [page for page in pages if page["content"]]
 
@@ -535,8 +535,11 @@ class Learner(Tracked):
         )
         return {"title": page["title"], "url": page["url"], "content": "\n\n".join(chunks)[:TEACH_PAGE_CHARS]}
 
-    def results(self, search):
-        return self.internet.search(search["query"], RESULTS_PER_RESEARCH_SEARCH)[: search["pages"]]
+    def results(self, searches):
+        found = self.internet.search_all(
+            [search["query"] for search in searches], RESULTS_PER_RESEARCH_SEARCH
+        )
+        return [results[: search["pages"]] for search, results in zip(searches, found)]
 
     def fetched(self, found):
         pages = self.internet.fetch([result["url"] for result in found]) if found else []

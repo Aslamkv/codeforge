@@ -431,7 +431,11 @@ def test_relevant_chunks():
 class FakeInternet:
     def __init__(self, pages=None, results=None, snippets=None):
         self.pages, self.results, self.snippets = pages or {}, results, snippets or {}
-        self.fetches = []
+        self.fetches, self.searches = [], []
+
+    def search_all(self, queries, count):
+        self.searches.append(list(queries))
+        return [self.search(query, count) for query in queries]
 
     def search(self, query, count):
         found = self.pages if self.results is None else self.results[query]
@@ -458,6 +462,7 @@ def test_web_pages_reads_each_address_once_up_to_the_cap(make_model):
     read = Learner(make_model(), internet, None).web_pages(["ruff", "black"])
     assert len(read) <= TEACH_PAGES
     assert [page["url"] for page in read] == ["https://shared", "https://r1", "https://r2"]
+    assert internet.searches == [["ruff", "black"]]
     assert internet.fetches == [["https://shared", "https://r1", "https://empty", "https://r2"]]
     assert read[0] == {
         "title": "https://shared",
@@ -488,6 +493,7 @@ def test_a_research_round_reads_its_pages_from_one_fetch(make_model, fake_ollama
         {"query": query, "pages": 2, "section": "1", "focus": "weighing"} for query in ("weigh", "count")
     ]
     facts, sources = learner.read_web("food", searches, 3)
+    assert internet.searches == [["weigh", "count"]]
     assert internet.fetches == [["https://a.org", "https://gone", "https://bare"]]
     assert sources == ["https://a.org"] and facts[0]["text"] == "Food is weighed"
     assert learner.notes == ["page https://gone: HTTP 404", "page https://bare: HTTP 404"]

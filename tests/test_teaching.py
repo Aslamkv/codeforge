@@ -29,6 +29,9 @@ class FakeWeb:
     def __init__(self, pages=(PAGE,)):
         self.pages, self.queries = list(pages), []
 
+    def search_all(self, queries, count):
+        return [self.search(query, count) for query in queries]
+
     def search(self, query, count):
         self.queries.append(query)
         return self.pages[:count]

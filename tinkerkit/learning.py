@@ -60,6 +60,7 @@ RECAP_LINE_ICONS = ("✅", "❓", "📖", "📄", "🧩", "🌐")
 Tools = namedtuple("Tools", "tools dropped")
 PlanAndPages = namedtuple("PlanAndPages", "plan pages")
 UsablePages = namedtuple("UsablePages", "pages results")
+WantedDocs = namedtuple("WantedDocs", "slug key name query cap")
 
 
 class LearnStopped(SystemExit):
@@ -257,41 +258,59 @@ class SlotLearner(Tracked):
 
     def documentation(self, plan, machine, version):
         self.step("documentation")
-        pages = self.doc_pages(
-            self.slug(plan), plan["name"], version, DOCS_VERSION_SEARCH, int(Config.get("learn_pages"))
-        )
-        for tool in {tool["name"]: tool for tool in plan["tools"]}.values():
-            pages += self.doc_pages(
-                Library.slug(tool["name"]),
-                tool["name"],
-                version_of(machine, [tool["command"]]),
-                TOOL_DOCS_SEARCH,
-                int(Config.get("tool_docs_pages")),
-            )
+        tools = {tool["name"]: tool for tool in plan["tools"]}.values()
+        wanted = [self.language_docs(plan, version)] + [self.tool_docs(machine, tool) for tool in tools]
+        pages = [page for docs_pages in self.doc_pages(wanted) for page in docs_pages]
         self.outcome(f"{len(pages)} page(s)" + (f" of {plan['name']} {version}" if version else ""))
         return pages
 
-    def doc_pages(self, slug, name, version, search, cap):
-        if cap <= 0:
+    def language_docs(self, plan, version):
+        return wanted_docs(
+            self.slug(plan), plan["name"], version, DOCS_VERSION_SEARCH, int(Config.get("learn_pages"))
+        )
+
+    @staticmethod
+    def tool_docs(machine, tool):
+        return wanted_docs(
+            Library.slug(tool["name"]),
+            tool["name"],
+            version_of(machine, [tool["command"]]),
+            TOOL_DOCS_SEARCH,
+            int(Config.get("tool_docs_pages")),
+        )
+
+    def doc_pages(self, wanted):
+        wanted = [docs for docs in wanted if docs.cap > 0]
+        kept = [DocCache.get(docs.slug, docs.key) for docs in wanted]
+        missing = [docs.query for docs, pages in zip(wanted, kept) if not pages]
+        found = iter(self.searched_all(missing))
+        return [
+            self.docs_of(docs, pages, None if pages else next(found)) for docs, pages in zip(wanted, kept)
+        ]
+
+    def searched_all(self, queries):
+        if not queries:
             return []
-        key = version or "latest"
-        kept = DocCache.get(slug, key)
-        pages = kept or self.searched_docs(slug, key, name, search.format(name=name, version=version), cap)
+        self.tried += [f'search "{query}"' for query in queries]
+        quoted = ", ".join(f'"{query}"' for query in queries)
+        with say.working_on(f"Searching the web for {quoted}"):
+            return self.internet.search_all(queries, RESULTS_PER_LEARN_SEARCH)
+
+    def docs_of(self, docs, kept, results):
+        pages = kept or self.searched_docs(docs, results)
         if pages:
-            self.docs[slug] = key
+            self.docs[docs.slug] = docs.key
         self.pages.update(**{"kept docs" if kept else "docs": len(pages)})
-        say_docs(slug, key, pages, kept)
+        say_docs(docs.slug, docs.key, pages, kept)
         return pages
 
-    def searched_docs(self, slug, key, name, search, cap):
-        query = " ".join(search.split())
-        with say.working_on(f'Searching the web for "{query}"'):
-            results = self.search(query)
-            picked = self.picked(name, results, cap) if results else []
+    def searched_docs(self, docs, results):
+        picked = self.picked(docs.name, results, docs.cap) if results else []
+        with say.working_on(f'Reading the pages found for "{docs.query}"'):
             fetched = self.internet.fetch([result["url"] for result in picked]) if picked else []
         pages = [page for page in map(self.page_of, fetched) if page.usable()]
         if pages:
-            DocCache.put(slug, key, pages)
+            DocCache.put(docs.slug, docs.key, pages)
         return pages
 
     def enough_pages(self, pages):
@@ -523,6 +542,11 @@ def version_of(machine, commands):
         ),
         "",
     )
+
+
+def wanted_docs(slug, name, version, search, cap):
+    query = " ".join(search.format(name=name, version=version).split())
+    return WantedDocs(slug, version or "latest", name, query, cap)
 
 
 def say_docs(slug, key, pages, kept):
