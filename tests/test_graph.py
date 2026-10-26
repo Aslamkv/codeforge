@@ -67,17 +67,18 @@ def test_one_node_per_thing_tinker_knows(memory):
     kinds = {node_id: node["kind"] for node_id, node in nodes.items()}
     assert kinds["lang:python"] == kinds["any"] == "language" and kinds["topic:flask"] == "topic"
     assert kinds["commands"] == "commands" and kinds["command:act"] == "command"
+    assert re.fullmatch(r"\d{4}-\d{2}-\d{2}", nodes["command:act"]["day"])
     assert kinds["toolchain:python"] == "toolchain" and kinds["fix:python:no module named calc"] == "fix"
     assert kinds[f"lesson:{memory['seed']}"] == "lesson" and kinds[f"known:{memory['route']}"] == "fact"
     assert kinds[f"fact:flask:{memory['route']}"] == "fact"
     assert [node["kind"] for node in nodes.values() if node["id"].startswith("finding:flask:")] == ["finding"]
-    retired = nodes["retired:any:0"]
+    retired = nodes[f"retired:lesson:{memory['name']}"]
     assert (
         retired["status"] == "retired" and retired["text"] == "Name each test after the behaviour it checks"
     )
     assert ["why", "shown in the tests prompts of a step that failed"] in retired["details"]
     seed = nodes[f"lesson:{memory['seed']}"]
-    assert set(seed) == {"id", "kind", "label", "text", "status", "group", "details", "sources"}
+    assert set(seed) == {"id", "kind", "label", "text", "status", "group", "details", "sources", "day"}
     assert seed["group"] == "python" and seed["status"] == "proven" and ["helped", "1"] in seed["details"]
     assert nodes[f"fact:flask:{memory['route']}"]["sources"] == ["https://a.org/x"]
 
@@ -99,7 +100,7 @@ def test_links_join_items_to_what_they_belong_to_and_to_their_runs(memory):
         (f"fact:flask:{route}", f"known:{route}", "became"),
         (seed, "run:r1", "taught_by"),
         (seed, "run:r2", "helped_in"),
-        ("retired:any:0", "run:r2", "failed_in"),
+        (f"retired:lesson:{memory['name']}", "run:r2", "failed_in"),
     } <= links
     assert (
         graph.nodes["run:r1"]["text"] == "a calculator"
@@ -231,3 +232,53 @@ def test_a_facts_slot_and_a_topics_missing_slots_are_in_their_details(home_store
     assert ["slot", "core-usage"] in fact["details"] and fact["sources"] == ["https://widgetlib.dev/start"]
     assert ["missing", "this-version, fit"] in nodes["topic:widgetlib"]["details"]
     assert "Create a Widget" in GraphPage.html(Graph.build())
+
+
+def retired_item(was, reason, **fields):
+    return dict(fields, status="retired", was=was, reason=reason, retired="2026-03-01 09:00")
+
+
+@pytest.mark.spec("GRF-1")
+def test_an_items_day_is_when_it_was_first_kept_and_a_retired_id_is_its_old_key(home_store):
+    born = [{"event": "born", "run": "r1", "at": "2026-01-04 10:00"}, {"event": "helped", "at": "2026-02-09"}]
+    Home.store().put(
+        "languages",
+        "python",
+        {
+            "language": "Python",
+            "toolchain": TOOLCHAIN,
+            "toolchain_saved": "2026-01-02 08:00",
+            "lessons": [
+                {"id": "a", "text": "Seed random", "added": "2026-01-03 10:00", "history": born},
+                {"id": "b", "text": "Name tests", "added": "2026-01-05 10:00"},
+            ],
+            "facts": [{"id": "k", "text": "Use pytest"}],
+            "fixes": [{"failure": "boom", "cause": "pythonpath", "added": "2026-01-06 10:00"}],
+            "retired": [
+                retired_item("lessons", "first", id="c", text="Old", added="2026-01-07 10:00"),
+                retired_item("facts", "why", id="k2", text="Old fact"),
+                retired_item("fixes", "why", failure="bang", cause="path"),
+                retired_item("lessons", "second", id="c", text="Old again"),
+            ],
+        },
+    )
+    Library.save(
+        "flask",
+        {
+            "name": "Flask",
+            "learned": "2026-02-01 12:00",
+            "facts": [{"phase": "code", "text": "Flask routes use @app.route"}],
+            "retired": [retired_item("rules", "why", id="r", text="Old rule")],
+        },
+    )
+    nodes = Graph.build().nodes
+    route = Library.read("flask")["facts"][0]["id"]
+    days = {node_id: node["day"] for node_id, node in nodes.items()}
+    assert days["lesson:a"] == "2026-01-04" and days["lesson:b"] == "2026-01-05"
+    assert days["toolchain:python"] == "2026-01-02" and days["fix:python:boom"] == "2026-01-06"
+    assert days["known:k"] == "" and days[f"fact:flask:{route}"] == "2026-02-01"
+    assert days["retired:lesson:c"] == "2026-01-07" and days["retired:rule:flask:r"] == "2026-02-01"
+    assert {"retired:known:k2", "retired:fix:python:bang"} <= set(nodes)
+    assert ["why", "first"] in nodes["retired:lesson:c"]["details"]
+    assert ["why", "second"] in nodes["retired:lesson:c:2"]["details"]
+    assert days["lang:python"] == days["topic:flask"] == ""
