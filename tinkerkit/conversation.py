@@ -1956,12 +1956,9 @@ class ConsoleScreen:
         if not self.ruled():
             return
         with self.printing:
-            rows_before, erased = self.live_rows(), self.erased_bottom()
+            rows_before = self.live_rows()
             self.live, self.under = (text, began, facts), list(under)
-            if self.live_rows() <= rows_before:
-                write_out(self.shrunk(rows_before, rows_before - self.live_rows()) + self.redrawn_live())
-            else:
-                write_out(erased + self.bottom())
+            write_out(self.resized(rows_before, self.live_rows()) + self.redrawn_live())
 
     def count_live(self, **facts):
         with self.printing:
@@ -1990,6 +1987,15 @@ class ConsoleScreen:
 
     def live_rows(self):
         return 0 if self.live is None else 1 + len(self.under)
+
+    def resized(self, rows_before, rows_after):
+        if rows_after > rows_before:
+            return self.grown(rows_after - rows_before)
+        return self.shrunk(rows_before, rows_before - rows_after)
+
+    @staticmethod
+    def grown(by):
+        return f"{ROW_DOWN_OR_SCROLL * by}{SAVE_CURSOR}{rows_up(by + 1)}{inserted_rows(by)}{RESTORE_CURSOR}"
 
     def shrunk(self, rows, by):
         return self.at_the_live_block(rows, DELETE_LINE * by) + CURSOR_UP * by if by else ""
@@ -2027,12 +2033,20 @@ class ConsoleScreen:
 
 
 SAVE_CURSOR, RESTORE_CURSOR, CURSOR_UP, NEXT_LINE = "\0337", "\0338", "\033[A", "\033[E"
-DELETE_LINE, CLEAR_DOWN = "\033[M", "\033[J"
+DELETE_LINE, CLEAR_DOWN, ROW_DOWN_OR_SCROLL = "\033[M", "\033[J", "\033D"
 CLEARED_LINE_ABOVE = "\033[F" + CLEAR_TO_LINE_END
 
 
 def lines_up(rows):
     return f"\033[{rows}F"
+
+
+def rows_up(rows):
+    return f"\033[{rows}A"
+
+
+def inserted_rows(rows):
+    return f"\033[{rows}L"
 
 
 def write_out(text):

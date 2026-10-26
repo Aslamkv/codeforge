@@ -391,8 +391,12 @@ def live_drawn(text, elapsed="0s", star="✻"):
     return f"{ACCENT}{star}{RESET} Tinkering… ({elapsed}){DIM} · {text}{RESET}"
 
 
+def block_grown(by):
+    return f"{'\033D' * by}\0337\033[{by + 1}A\033[{by}L\0338"
+
+
 def live_shown(text):
-    return f"{ERASED_ABOVE_THE_PROMPT}{live_drawn(text)}\n{UNDER_THE_LIVE_LINE}"
+    return block_grown(1) + live_changed(text)
 
 
 def live_changed(text, elapsed="0s", star="✻"):
@@ -487,7 +491,7 @@ def erased_with_the_block(rows):
 def test_console_shows_the_lines_under_its_live_line_dim_and_indented(monkeypatch, clock):
     screen = live_screen(monkeypatch)
     shown = drawn_after(sys.stdout, lambda: screen.show_live("Learning", 100.0, under=UNDER))
-    assert shown == f"{ERASED_ABOVE_THE_PROMPT}{LEARNING_BLOCK}{UNDER_THE_LIVE_LINE}"
+    assert shown == block_grown(3) + block_changed(block_drawn("Learning", UNDER))
 
 
 @pytest.mark.spec("CNV-8")
@@ -513,11 +517,11 @@ def test_a_shrinking_live_block_clears_its_leftover_lines(monkeypatch, clock):
 
 
 @pytest.mark.spec("CNV-8")
-def test_a_growing_live_block_is_drawn_again_above_the_prompt(monkeypatch, clock):
+def test_a_growing_live_block_scrolls_up_without_touching_what_you_type(monkeypatch, clock):
     screen = live_screen(monkeypatch)
     screen.show_live("Learning", 100.0)
     grown = drawn_after(sys.stdout, lambda: screen.show_live("Learning", 100.0, under=UNDER))
-    assert grown == f"{ERASED_WITH_THE_LIVE_LINE}{LEARNING_BLOCK}{UNDER_THE_LIVE_LINE}"
+    assert grown == block_grown(2) + block_changed(block_drawn("Learning", UNDER))
 
 
 @pytest.mark.spec("CNV-8")
@@ -534,7 +538,7 @@ def test_console_prints_above_its_live_block_and_takes_it_out(monkeypatch, clock
 def test_the_lines_under_the_live_line_are_cut_to_the_terminal_width(monkeypatch, clock):
     screen = live_screen(monkeypatch)
     screen.show_live("Learning", 100.0, under=["x" * 60])
-    assert under_drawn("x" * (LIVE_COLUMNS - 3)) + "\n" in sys.stdout.getvalue()
+    assert under_drawn("x" * (LIVE_COLUMNS - 3)) + "\033[K" in sys.stdout.getvalue()
 
 
 @pytest.mark.spec("CNV-8")
@@ -567,8 +571,7 @@ def test_console_prints_a_jobs_settled_lines_once_and_shows_what_goes_on_in_its_
     shown = console.show("console", None, writing, doing="Writing the code")
     assert sys.stdout.getvalue() == (
         f"{ERASED_ABOVE_THE_PROMPT}{ACCENT}● {RESET}🔨 calc\n  ✅ step one\n{UNDER_THE_LIVE_LINE}"
-        f"{ERASED_ABOVE_THE_PROMPT}{live_drawn('Writing the code')}\n{under_drawn('… detail')}\n"
-        f"{UNDER_THE_LIVE_LINE}"
+        f"{block_grown(2)}{block_changed(block_drawn('Writing the code', ['… detail']))}"
     )
     clock[0] += 5
     grew = drawn_after(
