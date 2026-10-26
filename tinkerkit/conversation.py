@@ -13,6 +13,7 @@ lazy import shlex
 lazy import subprocess
 lazy import threading
 lazy import time
+lazy import unicodedata
 lazy import webbrowser
 lazy from pathlib import Path
 
@@ -23,7 +24,7 @@ lazy from .ledger import DONE_NOTE_KEPT_SECONDS, Ledger
 lazy from .messages import colourful, human_duration, paint, say
 lazy from .model import Models, OllamaError
 lazy from .prompts import Prompts, Reply
-lazy from .settings import EXERCISE_FOLDER, JOB_STOP_SIGNAL, Home, projects_folder
+lazy from .settings import EXERCISE_FOLDER, JOB_STOP_SIGNAL, Config, Home, projects_folder
 lazy from .text import field
 lazy from .workspace import Toolchain
 
@@ -34,6 +35,7 @@ BUILD_STOP_GRACE_SECONDS = 120
 STATUS_LOOK_SECONDS = 10
 EXPIRED_MESSAGES_SWEEP_SECONDS = 2
 ENDED_LOOK_SECONDS = 0.5
+BANNER_MAX_COLUMNS = 64
 
 CHAT_CONTEXT_MESSAGES = 12
 CHAT_MAX_REPLY_TOKENS = 1024
@@ -170,6 +172,7 @@ class Desk:
 
     def run(self):
         self.claim_chats()
+        self.open_banner()
         self.talk.warm()
         self.say_status(anew=True)
         self.adopt_exercise()
@@ -192,6 +195,20 @@ class Desk:
                     raise SystemExit(f"tinker: {held}: stop it first")
                 say.warn(f"{held}: this one talks here only")
                 self.channels.remove(channel)
+
+    def open_banner(self):
+        for console in self.consoles:
+            console.banner(self.banner_lines())
+
+    def banner_lines(self):
+        chats = [channel.name for channel in self.channels if channel not in self.consoles]
+        details = [f"model {Config.get('model') or 'no model yet'}", f"projects {self.shown_root()}"]
+        details += [f"chats {', '.join(chats)}"] if chats else []
+        return ["🔧 Tinker", " · ".join(details), "help lists commands · exit quits"]
+
+    def shown_root(self):
+        home = Path.home()
+        return str("~" / self.root.relative_to(home)) if self.root.is_relative_to(home) else str(self.root)
 
     def say_goodbye(self):
         leaving = threading.Thread(target=self.take_out_question, daemon=True)
@@ -1787,6 +1804,28 @@ class ConsoleChannel(Channel):
     def rule():
         return paint("─" * shutil.get_terminal_size().columns, "dim", sys.stdout)
 
+    def banner(self, lines):
+        if not self.typed_here():
+            return
+        width = min(shutil.get_terminal_size().columns, BANNER_MAX_COLUMNS)
+        edge = "─" * (width - 2)
+        rows = [self.banner_row(line, "dim" if row else "bold", width - 4) for row, line in enumerate(lines)]
+        framed = [paint(f"╭{edge}╮", "accent", sys.stdout), *rows, paint(f"╰{edge}╯", "accent", sys.stdout)]
+        with self.printing:
+            sys.stdout.write("\n".join(framed) + "\n")
+            sys.stdout.flush()
+
+    @staticmethod
+    def banner_row(text, style, room):
+        shown = cut_to_width(text, room)
+        padding = " " * (room - visible_width(shown))
+        return (
+            paint("│ ", "accent", sys.stdout)
+            + paint(shown, style, sys.stdout)
+            + padding
+            + paint(" │", "accent", sys.stdout)
+        )
+
     def send(self, chat, text):
         self.print(self.marked(Markup.ansi(self.said(text))))
         return self.new_id()
@@ -1857,6 +1896,26 @@ class ConsoleChannel(Channel):
         with self.printing:
             self.next_id += 1
             return self.next_id
+
+
+def cut_to_width(text, room):
+    kept, used = "", 0
+    for char in text:
+        used += char_width(char)
+        if used > room:
+            break
+        kept += char
+    return kept.rstrip()
+
+
+def visible_width(text):
+    return sum(char_width(char) for char in text)
+
+
+def char_width(char):
+    if unicodedata.category(char) in ("Mn", "Me", "Cf"):
+        return 0
+    return 2 if unicodedata.east_asian_width(char) in ("W", "F") else 1
 
 
 class Message:

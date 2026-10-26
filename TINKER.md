@@ -172,6 +172,10 @@ Talk with Tinker. Every command works here, and anything else is a normal chat (
 tinker
 ```
 
+On a colour terminal it opens with a banner showing the model, the projects folder and the chats it listens on.
+A rule sits over the prompt, your lines show again highlighted, Tinker's messages are marked with a steel blue
+`●`, and a `✻ Tinkering…` line shows the time while it works. `NO_COLOR=1 tinker` turns all of that off.
+
 Or say one thing at a time:
 
 ```sh

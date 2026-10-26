@@ -263,14 +263,14 @@ def test_console_shows_headlines_then_the_whole_message(monkeypatch):
 ACCENT, DIM, GREY, RESET = "\033[38;5;67m", "\033[2m", "\033[48;5;236m", "\033[0m"
 
 
-def colour_terminal(monkeypatch):
+def colour_terminal(monkeypatch, columns=10):
     terminal = io.StringIO()
     terminal.isatty = lambda: True
     monkeypatch.setattr(sys, "stdout", terminal)
     monkeypatch.setattr(sys.stdin, "isatty", lambda: True)
     monkeypatch.delenv("NO_COLOR", raising=False)
     monkeypatch.delenv("COLORTERM", raising=False)
-    monkeypatch.setattr(conversation.shutil, "get_terminal_size", lambda: os.terminal_size((10, 24)))
+    monkeypatch.setattr(conversation.shutil, "get_terminal_size", lambda: os.terminal_size((columns, 24)))
     return terminal
 
 
@@ -347,6 +347,77 @@ def test_console_prints_plain_without_colour(monkeypatch):
     console.send("console", "Done\nline one")
     assert prompts == [ConsoleChannel.PROMPT] * 2
     assert terminal.getvalue() == "\r\033[KDone\nline one\n"
+
+
+BOLD = "\033[1m"
+
+
+def framed(width, *rows):
+    inner = width - 4
+    side = lambda text, style, shown: (
+        f"{ACCENT}│ {RESET}{style}{text}{RESET}{' ' * (inner - shown)}{ACCENT} │{RESET}\n"
+    )
+    return (
+        f"{ACCENT}╭{'─' * (width - 2)}╮{RESET}\n"
+        + "".join(side(*row) for row in rows)
+        + f"{ACCENT}╰{'─' * (width - 2)}╯{RESET}\n"
+    )
+
+
+@pytest.mark.spec("CNV-8")
+def test_console_frames_the_banner_as_wide_as_the_terminal_up_to_64_columns(monkeypatch):
+    terminal = colour_terminal(monkeypatch, 80)
+    ConsoleChannel().banner(["🔧 Tinker", "model qwen3", "help lists commands"])
+    assert terminal.getvalue() == framed(
+        64, ("🔧 Tinker", BOLD, 9), ("model qwen3", DIM, 11), ("help lists commands", DIM, 19)
+    )
+
+
+@pytest.mark.spec("CNV-8")
+def test_console_cuts_banner_text_that_is_too_long(monkeypatch):
+    terminal = colour_terminal(monkeypatch, 14)
+    ConsoleChannel().banner(["🔧 Tinker tool", "help lists commands"])
+    assert terminal.getvalue() == framed(14, ("🔧 Tinker", BOLD, 9), ("help lists", DIM, 10))
+
+
+@pytest.mark.spec("CNV-8")
+def test_console_draws_no_banner_without_colour_or_a_terminal(monkeypatch):
+    terminal = colour_terminal(monkeypatch)
+    monkeypatch.setattr(sys.stdin, "isatty", lambda: False)
+    ConsoleChannel().banner(["🔧 Tinker"])
+    monkeypatch.setattr(sys.stdin, "isatty", lambda: True)
+    monkeypatch.setenv("NO_COLOR", "1")
+    ConsoleChannel().banner(["🔧 Tinker"])
+    assert terminal.getvalue() == ""
+
+
+@pytest.mark.spec("CNV-8")
+def test_the_banner_names_tinker_the_model_the_projects_folder_and_the_chats(monkeypatch):
+    settings = {"model": "qwen3"}
+    monkeypatch.setattr(conversation.Config, "get", lambda key: settings.get(key))
+    root = Path.home() / "Projects"
+    with_chats = Desk([ConsoleChannel(), Recorder("telegram")], root)
+    assert with_chats.banner_lines() == [
+        "🔧 Tinker",
+        "model qwen3 · projects ~/Projects · chats telegram",
+        "help lists commands · exit quits",
+    ]
+    settings.clear()
+    alone = Desk([ConsoleChannel()], "/tmp")
+    assert alone.banner_lines()[1] == f"model no model yet · projects {Path('/tmp').resolve()}"
+
+
+@pytest.mark.spec("CNV-8")
+def test_the_conversation_opens_with_the_banner_before_the_status(monkeypatch):
+    terminal = colour_terminal(monkeypatch, 80)
+    typing(monkeypatch)
+    desk = Desk([ConsoleChannel()], Path.cwd())
+    monkeypatch.setattr(desk.talk, "warm", lambda: None)
+    desk.run()
+    shown = terminal.getvalue()
+    assert shown.startswith(f"{ACCENT}╭") and shown.index("🔧 Tinker") < shown.index("╰") < shown.index(
+        "idle"
+    )
 
 
 @pytest.mark.spec("CNV-8")
