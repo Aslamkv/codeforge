@@ -951,11 +951,9 @@ What learning a language or a tool must find out, as data, and each slot's passa
 - **SLT-1** Profiles are data. `PROFILES["language"]` is the slots installed, toolchain, fundamentals,
   this-version, limitations, best-use-cases and readiness; `PROFILES["tool"]` is installed, purpose,
   core-usage, this-version, pitfalls-and-limits, conventions, fit and readiness. Each `Slot` has an id, a
-  question, a query hint, a passage count, a minimum, the section (fact phase) it fills, its source (`web`,
-  `machine` for installed, `check` for readiness), and its `docs` words: what a documentation site's
-  addresses and titles call its pages (`whatsnew`, `changelog`). `TOOL_DOCS_QUERY` are those of a language's
-  tools' pages. `asked(plan, version)` is its question with the plan's hint; `search(plan, version)` is the
-  plan's follow-up search for it, else its own query.
+  question, a query hint, a passage count, a minimum, the section (fact phase) it fills and its source
+  (`web`, `machine` for installed, `check` for readiness). `asked(plan, version)` is its question with the
+  plan's hint; `search(plan, version)` is the plan's follow-up search for it, else its own query.
 - **SLT-2** `Selector.select(slots, pool, plan, version)` gives each slot its passages from the one pool: its
   best `SLOT_CANDIDATE_PASSAGES` by the words of its question, the topic and the version are shortlisted, and
   only those are embedded; of them, only those that hold a keyword of its own search (`Slot.keywords`, without
