@@ -246,19 +246,41 @@ def test_only_one_process_claims_a_channel():
     assert Recorder("other").holder() == {}
 
 
+CALC_WRITING = "🔨 **calc**\n✅ step one\n▸ **Writing the code** · ⏱ 3s ⏳\n… detail"
+CALC_WRITING_LATER = "🔨 **calc**\n✅ step one\n▸ **Writing the code** · ⏱ 9s ⌛\n… other detail"
+CALC_VERIFYING = "🔨 **calc**\n✅ step one\n✅ step two\n▸ **Verifying** ⏳\n📊 1/2 spec points pass"
+CALC_DONE = "🏁 **calc**\n✅ **Done**"
+
+
 @pytest.mark.spec("CNV-8")
-def test_console_shows_headlines_then_the_whole_message(monkeypatch):
+def test_console_without_a_live_line_prints_settled_lines_once_and_each_new_doing_line(monkeypatch):
     out = io.StringIO()
     monkeypatch.setattr(sys, "stdout", out)
     console = ConsoleChannel()
-    shown = console.show("console", None, "🔨 **calc**\n✅ step one\n▸ **Writing the code** · ⏱ 3s\n… detail")
-    console.show("console", shown, "🔨 **calc**\n✅ step one\n▸ **Writing the code** · ⏱ 9s\n… other detail")
-    console.show("console", shown, "🔨 **calc**\n▸ **Verifying** · ⏱ 1s")
-    assert out.getvalue().splitlines() == ["⋯ 🔨 calc · ▸ Writing the code", "⋯ 🔨 calc · ▸ Verifying"]
-    console.show("console", shown, "Done\nline one", done=True)
-    console.show("console", shown, "Done\nline one\nline two", done=True)
-    assert out.getvalue().splitlines()[2:4] == ["Done", "line one"]
-    assert out.getvalue().splitlines()[4].startswith("line two")
+    shown = console.show("console", None, CALC_WRITING)
+    console.show("console", shown, CALC_WRITING_LATER)
+    console.show("console", shown, CALC_VERIFYING)
+    console.show("console", shown, CALC_DONE, done=True)
+    assert out.getvalue().splitlines() == [
+        "🔨 calc",
+        "✅ step one",
+        "Writing the code",
+        "✅ step two",
+        "Verifying",
+        "🏁 calc",
+        "✅ Done",
+    ]
+
+
+@pytest.mark.spec("CNV-8")
+def test_console_prints_only_what_a_done_message_grew_by(monkeypatch):
+    out = io.StringIO()
+    monkeypatch.setattr(sys, "stdout", out)
+    console = ConsoleChannel()
+    shown = console.show("console", None, "Done\n\nline one", done=True)
+    console.show("console", shown, "Done\n\nline one\nline two", done=True)
+    console.show("console", shown, "Done\n\nline one\nline two", done=True)
+    assert out.getvalue().splitlines() == ["Done", "", "line one", "line two"]
 
 
 def colour_terminal(monkeypatch, columns=10):
@@ -440,6 +462,52 @@ def test_once_the_console_reads_live_draws_in_its_live_line(monkeypatch):
     assert lived == f"\r\033[K\033[F\033[K{live_drawn('✻', 'Writing tests')}\n{UNDER_THE_LIVE_LINE}"
     said = drawn_after(terminal, lambda: conversation.say.text("Answered"))
     assert said == f"\0337\033[2F\033[M\0338\033[A\r\033[K\033[F\033[KAnswered\n{UNDER_THE_LIVE_LINE}"
+
+
+ERASED_ABOVE_THE_PROMPT = "\r\033[K\033[F\033[K"
+ERASED_WITH_THE_LIVE_LINE = "\r\033[K\033[F\033[K\033[F\033[K"
+LIVE_LINE_TAKEN_OUT = "\0337\033[2F\033[M\0338\033[A"
+
+
+def live_changed(text, elapsed="0s"):
+    return f"\0337\033[2F{live_drawn('✻', text, elapsed)}\033[K\0338"
+
+
+@pytest.mark.spec("CNV-8")
+def test_console_prints_a_jobs_settled_lines_once_and_shows_what_goes_on_in_its_live_line(monkeypatch):
+    console, terminal, clock = live_console(monkeypatch)
+    shown = console.show("console", None, "🔨 calc\n✅ step one\n▸ **Writing the code** · ⏱ 3s ⏳\n… detail")
+    assert terminal.getvalue() == (
+        f"{ERASED_ABOVE_THE_PROMPT}{ACCENT}● {RESET}🔨 calc\n  ✅ step one\n{UNDER_THE_LIVE_LINE}"
+        f"{ERASED_ABOVE_THE_PROMPT}{live_drawn('✻', 'Writing the code')}\n{UNDER_THE_LIVE_LINE}"
+    )
+    clock[0] += 5
+    grew = drawn_after(
+        terminal, lambda: console.show("console", shown, "🔨 calc\n✅ step one\n✅ step two\n▸ Verifying ⌛\n📊 1/2")
+    )
+    assert grew == (
+        f"{ERASED_WITH_THE_LIVE_LINE}  ✅ step two\n{live_drawn('✻', 'Writing the code', '5s')}\n"
+        f"{UNDER_THE_LIVE_LINE}{live_changed('Verifying', '5s')}"
+    )
+    done = drawn_after(terminal, lambda: console.show("console", shown, "🏁 calc\n✅ Done", done=True))
+    assert done == f"{LIVE_LINE_TAKEN_OUT}{ERASED_ABOVE_THE_PROMPT}  🏁 calc\n  ✅ Done\n{UNDER_THE_LIVE_LINE}"
+
+
+@pytest.mark.spec("CNV-8")
+def test_console_shows_a_message_without_a_doing_line_in_its_live_line_until_done(monkeypatch):
+    console, terminal, clock = live_console(monkeypatch)
+    shown = console.show("console", None, "⏳ **Getting ready**\nI answer soon.")
+    assert terminal.getvalue() == f"{ERASED_ABOVE_THE_PROMPT}{live_drawn('✻', '⏳ Getting ready')}\n{UNDER_THE_LIVE_LINE}"
+    done = drawn_after(terminal, lambda: console.show("console", shown, "Answer", done=True))
+    assert done == f"{LIVE_LINE_TAKEN_OUT}{ERASED_ABOVE_THE_PROMPT}{ACCENT}● {RESET}Answer\n{UNDER_THE_LIVE_LINE}"
+
+
+@pytest.mark.spec("CNV-8")
+def test_a_done_message_leaves_a_live_line_it_does_not_own(monkeypatch):
+    console, terminal, clock = live_console(monkeypatch)
+    console.show("console", None, "🔨 calc\n▸ Writing")
+    done = drawn_after(terminal, lambda: console.show("console", None, "Answer", done=True))
+    assert done.startswith(ERASED_WITH_THE_LIVE_LINE) and console.live == ("Writing", 100.0)
 
 
 @pytest.mark.spec("CNV-8")
@@ -1279,6 +1347,22 @@ def test_every_status_is_sent_anew_the_one_before_taken_out(desk):
     assert log[0] == ("send", 101) and "edit" not in {kind for kind, _ in log}
     assert sorted(log[1:3]) == [("delete", 101), ("send", 102)]
     assert sorted(log[3:]) == [("delete", 102), ("send", 103)]
+
+
+@pytest.mark.spec("CNV-8")
+def test_the_terminal_leaves_out_what_tinker_works_on_while_a_job_shows_its_progress(desk, monkeypatch):
+    chat, console, shown = Recorder("bot"), ConsoleChannel(), []
+    monkeypatch.setattr(console, "show", lambda chat, sent, text, done=False: shown.append(text) or [1])
+    listening = desk_with_a_started_chat(chat)
+    listening.channels.append(console)
+    listening.consoles.append(console)
+    monkeypatch.setattr(listening, "keep_job_at_bottom", lambda: None)
+    monkeypatch.setattr(listening, "busy", lambda: True)
+    listening.say_status("🔄 **Tinker** · working on calc")
+    monkeypatch.setattr(listening, "busy", lambda: False)
+    listening.say_status("🟢 **Tinker** · idle: send a task")
+    assert shown == ["🟢 **Tinker** · idle: send a task"]
+    assert any("working on calc" in text for text in chat.texts("send"))
 
 
 @pytest.mark.spec("CNV-9")

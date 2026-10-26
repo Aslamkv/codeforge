@@ -232,7 +232,7 @@ class Desk:
                 with self.post_lock:
                     if channel in self.chats_started:
                         self.post_status(channel, text)
-            elif anew or text.startswith("💤"):
+            elif (anew and not self.busy()) or text.startswith("💤"):
                 channel.show(ConsoleChannel.CHAT, None, text, done=True)
         self.keep_job_at_bottom()
 
@@ -1750,9 +1750,10 @@ class ConsoleChannel(Channel):
     def __init__(self, commands_without_tinker=True):
         super().__init__("console", {"allowed": [self.CHAT]}, {})
         self.commands_without_tinker = commands_without_tinker
-        self.lines, self.next_id, self.headlines, self.whole = queue.Queue(), 0, {}, {}
+        self.lines, self.next_id = queue.Queue(), 0
+        self.printed, self.began, self.doings = {}, {}, {}
         self.reader, self.printing = None, threading.Lock()
-        self.live, self.frame = None, 0
+        self.live, self.live_owner, self.frame = None, None, 0
 
     def handle(self):
         return "this terminal"
@@ -1835,25 +1836,49 @@ class ConsoleChannel(Channel):
     def show(self, chat, shown, text, done=False, bottom=None, status=False):
         sent, text = (shown or [None])[0] or self.new_id(), self.said(text)
         if done:
-            self.show_whole(sent, text)
+            self.show_done(sent, text)
         else:
-            self.show_headline(sent, text)
+            self.show_going(sent, text)
         return [sent]
 
-    def show_whole(self, sent, text):
-        self.headlines.pop(sent, None)
-        before, self.whole[sent] = self.whole.get(sent), text
-        grew = before is not None and text.startswith(before + "\n")
-        if grew:
-            self.print(self.indented(Markup.ansi(text[len(before) + 1 :].lstrip("\n"))))
-        else:
-            self.print(self.marked(Markup.ansi(text)))
+    def show_done(self, sent, text):
+        if self.live_owner == sent:
+            self.live_owner = None
+            self.end_live()
+        self.print_settled(sent, text.split("\n"))
 
-    def show_headline(self, sent, text):
-        headline = self.headline(text)
-        if self.headlines.get(sent) != headline:
-            self.headlines[sent] = headline
-            self.print(self.styled(f"⋯ {headline}", "dim"))
+    def show_going(self, sent, text):
+        lines = text.split("\n")
+        at = next((row for row, line in enumerate(lines) if self.is_doing(line)), None)
+        settled, doing = (lines[:at], lines[at]) if at is not None else ([], lines[0])
+        self.print_settled(sent, settled)
+        self.show_doing(sent, self.cleaned_doing(doing))
+
+    @staticmethod
+    def is_doing(line):
+        return Markup.plain(line).lstrip().startswith("▸")
+
+    @staticmethod
+    def cleaned_doing(line):
+        doing = Markup.plain(line).strip().removeprefix("▸").split(" · ⏱")[0].strip()
+        return doing.rstrip("".join(Progress.HOURGLASS)).strip()
+
+    def print_settled(self, sent, lines):
+        printed = self.printed.setdefault(sent, set())
+        new = [line for line in lines if line.strip() and line not in printed]
+        if new and not printed:
+            self.print(self.marked(Markup.ansi("\n".join(lines))))
+        elif new:
+            self.print(self.indented(Markup.ansi("\n".join(new))))
+        printed.update(new)
+
+    def show_doing(self, sent, doing):
+        if self.ruled():
+            self.live_owner = sent
+            self.show_live(doing, self.began.setdefault(sent, time.monotonic()))
+        elif self.doings.get(sent) != doing:
+            self.doings[sent] = doing
+            self.print(doing)
 
     def marked(self, text):
         return self.indented(text, self.styled("● ", "accent"))
@@ -1861,12 +1886,6 @@ class ConsoleChannel(Channel):
     @staticmethod
     def indented(text, first="  "):
         return first + text.replace("\n", "\n  ") if colourful(sys.stdout) else text
-
-    @staticmethod
-    def headline(text):
-        lines = [line.strip() for line in Markup.plain(text).splitlines() if line.strip()]
-        doing = next((line for line in lines if line.startswith("▸")), lines[1] if len(lines) > 1 else "")
-        return " · ".join(line for line in (lines[:1] + [doing.split(" · ⏱")[0]]) if line)
 
     def show_live(self, text, began):
         if not self.ruled():
