@@ -1846,7 +1846,20 @@ class ConsoleChannel(Channel):
                 return
             self.show_again(line)
             self.remember(line)
-            self.lines.put(line)
+            self.lines.put(self.picked(line))
+
+    def picked(self, line):
+        if line.strip() != "use-model" or not typed_here():
+            return line
+        try:
+            choices = Models.choices()
+        except SystemExit:
+            return line
+        if not choices:
+            return line
+        with self.screen.printing:
+            name = Models.picked(choices)
+        return "" if name is None else f"use-model {name}"
 
     def remember(self, line):
         if self.history and line.strip() and line.strip().lower() not in EXIT_WORDS:

@@ -410,6 +410,15 @@ def test_the_list_is_cleared_when_pick_ends(terminal):
 
 
 @pytest.mark.spec("MSG-8")
+def test_pick_leaves_a_screens_live_block_above_the_prompt(terminal, clock):
+    screen = Screen()
+    say.write_through(screen.print, screen)
+    say.live("Learning")
+    picking("enter")
+    assert screen.shown == [("live", "Learning", 100.0, NO_FACTS)]
+
+
+@pytest.mark.spec("MSG-8")
 def test_pick_gives_the_terminal_back_however_it_ends(terminal):
     closed = []
 

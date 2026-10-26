@@ -489,6 +489,13 @@ class Models:
         return [(name, Models.settings(name) is not None) for name in names]
 
     @staticmethod
+    def picked(choices):
+        names = [name for name, _ in choices]
+        start = names.index(Config.get("model")) if Config.get("model") in names else 0
+        index = say.pick([(name, not measured) for name, measured in choices], start)
+        return None if index is None else names[index]
+
+    @staticmethod
     def installed(name):
         names = [model.get("name", "") for model in Models.answering()]
         if name not in names:

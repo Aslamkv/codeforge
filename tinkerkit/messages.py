@@ -231,7 +231,8 @@ class Messages:
         self.drawn = False
 
     def pick(self, choices, start=0):
-        self.end_live()
+        if not self.screen:
+            self.end_live()
         current = start
         keys = self.keys()
         terminal_write(choice_rows(choices, current))

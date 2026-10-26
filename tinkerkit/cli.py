@@ -648,10 +648,7 @@ class Commands:
         if not choices:
             Commands.list_models()
             return None
-        names = [name for name, _ in choices]
-        start = names.index(Config.get("model")) if Config.get("model") in names else 0
-        index = say.pick([(name, not measured) for name, measured in choices], start)
-        return None if index is None else names[index]
+        return Models.picked(choices)
 
     @staticmethod
     def embed(name):
