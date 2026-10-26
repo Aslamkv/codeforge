@@ -9,7 +9,7 @@ import pytest
 import tinkerkit.cli  # noqa: F401
 from tinkerkit import conversation
 from tinkerkit.messages import say
-from tinkerkit.model import Model, Ollama
+from tinkerkit.model import Model, Models, Ollama
 from tinkerkit.project import Project
 from tinkerkit.settings import MAX_PLANNED_SEARCHES, Home
 from tinkerkit.store import Log, Store
@@ -289,7 +289,11 @@ def web_page(url, text, kind="text/plain"):
 
 class FakeSearch:
     def __init__(self):
-        self.batches, self.entries = [], []
+        self.entries = []
+
+    @property
+    def batches(self):
+        return [[entry["query"] for entry in entries] for entries in self.entries]
 
     def search(self, query, count):
         raise NotImplementedError
@@ -297,9 +301,20 @@ class FakeSearch:
     def search_all(self, searches, count):
         entries = [search if isinstance(search, dict) else {"query": search} for search in searches]
         entries = [entry for entry in entries if entry["query"]][:MAX_PLANNED_SEARCHES]
-        self.batches.append([entry["query"] for entry in entries])
         self.entries.append(entries)
         return [self.search(entry["query"], count) for entry in entries]
+
+
+def quick_model_replying(monkeypatch, reply):
+    asked = []
+
+    def replied(messages, tokens):
+        asked.append(messages)
+        return reply(messages)
+
+    monkeypatch.setattr(Models, "quick", staticmethod(lambda: ("m", {}, None)))
+    monkeypatch.setattr(Models, "quick_reply", staticmethod(replied))
+    return asked
 
 
 def plan_of(folder):

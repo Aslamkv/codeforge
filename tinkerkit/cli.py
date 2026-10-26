@@ -826,7 +826,8 @@ class Commands:
                     "⚖️",
                 )
             for gap in entry.get("open", []):
-                say.info(f"Still open (Q{gap['question']}): {gap['missing'] or search_entry(gap['search'])['query']}", "❓")
+                missing = gap["missing"] or search_entry(gap["search"])["query"]
+                say.info(f"Still open (Q{gap['question']}): {missing}", "❓")
             for note in entry["notes"]:
                 say.warn(f"Not learned: {note}")
         say.tip(

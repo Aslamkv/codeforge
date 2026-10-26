@@ -1,6 +1,6 @@
 import re
 from collections import namedtuple
-from itertools import combinations
+from itertools import batched, combinations
 lazy import collections
 lazy import hashlib
 lazy import math
@@ -797,17 +797,7 @@ class SearchPlanner:
             searches = Reply(reply).json().get("searches")
         except OllamaError, ValueError, AttributeError:
             return []
-        return self.with_a_query(searches)[:MAX_PLANNED_SEARCHES]
-
-    @staticmethod
-    def with_a_query(searches):
-        if not isinstance(searches, list):
-            return []
-        return [
-            search
-            for search in searches
-            if isinstance(search, dict) and isinstance(search.get("query"), str) and search["query"].strip()
-        ]
+        return search_entries(searches)[:MAX_PLANNED_SEARCHES]
 
     @staticmethod
     def filled(query, values):
@@ -827,21 +817,15 @@ def search_entry(raw, limit=160):
     return {"query": query, **given} if query else None
 
 
-def search_entries(given, limit=160):
-    entries = (search_entry(raw, limit) for raw in given) if isinstance(given, list) else ()
+def search_entries(given):
+    entries = map(search_entry, given) if isinstance(given, list) else ()
     return [entry for entry in entries if entry]
 
 
 def searched_in_batches(internet, searches, count):
     asked = [search for search in searches if search["query"]]
-    starts = range(0, len(asked), MAX_PLANNED_SEARCHES)
-    found = iter(
-        [
-            results
-            for start in starts
-            for results in internet.search_all(asked[start : start + MAX_PLANNED_SEARCHES], count)
-        ]
-    )
+    batches = batched(asked, MAX_PLANNED_SEARCHES)
+    found = iter([results for batch in batches for results in internet.search_all(batch, count)])
     return [next(found, []) if search["query"] else [] for search in searches]
 
 

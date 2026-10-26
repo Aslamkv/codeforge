@@ -1,7 +1,7 @@
 import json
 
 import pytest
-from conftest import FakeSearch, web_page
+from conftest import FakeSearch, quick_model_replying, web_page
 
 from tinkerkit.knowledge import (
     Embeddings,
@@ -1294,19 +1294,13 @@ def test_the_checks_a_reused_toolchain_lacks_and_the_tools_it_cannot_count_on(ti
     assert "add the learned types mypy, format black it lacks" in known.toolchain_title("reuse it")
 
 
-def planner_replying(monkeypatch, *replies):
-    asked = []
-
-    def reply(messages, tokens):
-        asked.append(messages)
-        answer = replies[len(asked) - 1]
+def planner_replying(monkeypatch, answer):
+    def reply(messages):
         if isinstance(answer, Exception):
             raise answer
         return answer
 
-    monkeypatch.setattr(Models, "quick", staticmethod(lambda: ("m", {}, None)))
-    monkeypatch.setattr(Models, "quick_reply", staticmethod(reply))
-    return asked
+    return quick_model_replying(monkeypatch, reply)
 
 
 def searches_reply(*searches):

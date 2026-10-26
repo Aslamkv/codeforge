@@ -3,7 +3,7 @@ import json
 import re
 
 import pytest
-from conftest import FakeSearch, web_page
+from conftest import FakeSearch, quick_model_replying, web_page
 
 from tinkerkit.knowledge import Knowledge, Library
 from tinkerkit.learning import (
@@ -14,7 +14,7 @@ from tinkerkit.learning import (
     read_plan,
     wanted_docs,
 )
-from tinkerkit.model import Answer, Models
+from tinkerkit.model import Answer
 from tinkerkit.passages import Block, Page, Passage
 from tinkerkit.project import Tracker
 from tinkerkit.prompts import Reply
@@ -494,28 +494,12 @@ def test_a_tool_is_learned_from_one_search_and_its_versions_documentation(tinker
     assert "Pages: 2 searched, 1 failed, 4 docs" in out and f"Facts kept: {len(entry['facts'])}" in out
 
 
-class PlannedWeb(FakeWeb):
-    def __init__(self, found=None, pages=None):
-        super().__init__(found, pages)
-        self.searches = []
-
-    def search_all(self, searches, count):
-        self.searches.append(list(searches))
-        kept = [search for search in searches if search["query"]][:MAX_PLANNED_SEARCHES]
-        return super().search_all(kept, count)
-
-
 def quick_model_planning(monkeypatch, plans):
-    calls = []
-
-    def reply(messages, tokens):
+    def reply(messages):
         need = next(need for need in plans if need in messages[1]["content"])
-        calls.append(need)
         return json.dumps({"searches": plans[need]})
 
-    monkeypatch.setattr(Models, "quick", staticmethod(lambda: ("m", {}, None)))
-    monkeypatch.setattr(Models, "quick_reply", staticmethod(reply))
-    return calls
+    return quick_model_replying(monkeypatch, reply)
 
 
 @pytest.mark.spec("WEB-3", "LRN-4")
@@ -527,22 +511,22 @@ def test_more_planned_searches_than_one_ask_keeps_each_needs_results_its_own():
         for plan in plans
         for search in plan
     }
-    web = PlannedWeb(found)
+    web = FakeWeb(found)
     results = learner(web).searched_needs(plans)
-    assert [len(batch) for batch in web.searches] == [MAX_PLANNED_SEARCHES, 4]
+    assert [len(batch) for batch in web.entries] == [MAX_PLANNED_SEARCHES, 4]
     assert results == [[found[f"need {need} search {number}"][0] for number in range(4)] for need in range(3)]
 
 
 @pytest.mark.spec("LRN-1", "KNW-25")
 def test_kept_documentation_is_not_planned_or_searched(tinker_home, monkeypatch):
-    calls = quick_model_planning(monkeypatch, {DOCS_VERSION_SEARCH: [{"query": "{name} {version} docs"}]})
+    asked = quick_model_planning(monkeypatch, {DOCS_VERSION_SEARCH: [{"query": "{name} {version} docs"}]})
     page = Page("https://widgetlib.dev/docs/", "t", [Block("text", "Overview")])
     DocCache.put("widgetlib", "2.1.0", [page])
-    web = PlannedWeb()
+    web = FakeWeb()
     kept = wanted_docs("widgetlib", "Widgetlib", "2.1.0", DOCS_VERSION_SEARCH, 4)
     [pages] = learner(web).doc_pages([kept])
     assert [kept_page.blocks for kept_page in pages] == [page.blocks]
-    assert calls == [] and web.searches == []
+    assert asked == [] and web.entries == []
 
 
 @pytest.mark.spec("LRN-4", "KNW-25")
@@ -566,9 +550,9 @@ def test_a_learns_documentation_needs_are_planned_and_each_pools_its_searches(ti
         "Widgetlib 2.1.0 docs": DOC_RESULTS[:2],
         "Widgetlib 2.1.0 changelog": DOC_RESULTS[2:],
     }
-    web = PlannedWeb(found, ALL_PAGES)
+    web = FakeWeb(found, ALL_PAGES)
     learner(web).learn("Widgetlib")
-    assert web.searches[:2] == [
+    assert web.entries[:2] == [
         [
             {"query": "Widgetlib guide", "engines": ["wikibooks"], "count": 3},
             {"query": FIRST_SEARCH, "engines": ["mwmbl"]},
