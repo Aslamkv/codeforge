@@ -22,11 +22,9 @@ lazy from .settings import (
     TOPIC_RELEVANT_SIMILARITY,
     Config,
     after_what_they_use,
-    field,
-    first_line,
     groups_fitting,
-    words,
 )
+lazy from .text import field, first_line, words
 lazy from .workspace import TestRef, Toolchain
 
 RecallChoice = namedtuple("RecallChoice", "use learn")

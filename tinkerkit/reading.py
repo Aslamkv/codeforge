@@ -33,13 +33,8 @@ lazy from .settings import (
     Home,
     Numbered,
     confirm_deletion,
-    field,
-    fingerprint,
-    first_line,
-    now_text,
-    split_text,
-    words,
 )
+lazy from .text import field, fingerprint, first_line, now_text, split_text, words
 lazy from .web import Internet, is_web_address
 
 CHAPTER_ROLE_ORDER = ("core", "supporting", "other")

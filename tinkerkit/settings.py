@@ -1,15 +1,11 @@
 import re
 from collections import namedtuple
 from pathlib import Path
-lazy import difflib
-lazy import hashlib
 lazy import os
 lazy import shutil
 lazy import sqlite3
 lazy import subprocess
 lazy import sys
-lazy import time
-lazy import urllib.parse
 
 lazy from .messages import say
 lazy from .store import Store
@@ -552,55 +548,6 @@ def projects_folder():
     return Path(str(Config.get("projects") or "~/Projects")).expanduser().resolve()
 
 
-def first_line(text, limit=140):
-    line = (text or "").strip().splitlines()[0] if (text or "").strip() else ""
-    return line if len(line) <= limit else line[: limit - 3] + "..."
-
-
-def one_line(value):
-    return " ".join(str(value or "").split())
-
-
-def field(item, key, limit=None):
-    return str(item.get(key) or "").strip()[:limit]
-
-
-def host(url):
-    return urllib.parse.urlsplit(url).netloc.lower().removeprefix("www.")
-
-
-def now_text():
-    return time.strftime("%Y-%m-%d %H:%M")
-
-
-def clock(moment):
-    return moment.strftime("%Y-%m-%d %H:%M:%S")
-
-
-def words(text):
-    return re.findall(r"[a-z0-9]+", (text or "").lower())
-
-
-def split_text(text, size):
-    size, chunks, current = max(size, 200), [], ""
-    for para in re.split(r"\n\s*\n", text):
-        para = para.strip()
-        while len(para) > size:
-            chunks += [current] if current else []
-            chunks.append(para[:size])
-            current, para = "", para[size:]
-        if para and current and len(current) + 2 + len(para) > size:
-            chunks.append(current)
-            current = para
-        elif para:
-            current = f"{current}\n\n{para}" if current else para
-    return chunks + ([current] if current else [])
-
-
-def fingerprint(text):
-    return hashlib.sha1(text.encode("utf-8")).hexdigest()
-
-
 def after_what_they_use(starts, uses, known):
     order, seen = [], set()
 
@@ -615,10 +562,6 @@ def after_what_they_use(starts, uses, known):
     for path in starts:
         visit(path)
     return order
-
-
-def similarity(a, b):
-    return difflib.SequenceMatcher(None, a.lower(), b.lower()).ratio()
 
 
 def groups_fitting(items, room, size=len):

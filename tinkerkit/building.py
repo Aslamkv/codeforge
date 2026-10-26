@@ -22,8 +22,8 @@ lazy from .settings import (
     TESTS_LOCKED_REASON,
     TESTS_PER_CALL,
     NotAPytestClass,
-    first_line,
 )
+lazy from .text import first_line
 lazy from .workspace import FileView, Output, TestOutcome, TestRef, Toolchain, ToolError
 
 WrittenTest = namedtuple("WrittenTest", "step state output")

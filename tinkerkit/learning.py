@@ -21,11 +21,9 @@ lazy from .settings import (
     TOOL_ROLES,
     Config,
     Home,
-    first_line,
-    now_text,
-    one_line,
 )
 lazy from .slots import PROFILES, TOOL_DOCS_SEARCH, Selector, fill, missing, short_slots, web_slots
+lazy from .text import first_line, now_text, one_line
 
 LEARN_STOP_CAUSES = frozendict(
     {

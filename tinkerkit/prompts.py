@@ -25,8 +25,8 @@ from .settings import (
     TEACH_CHECK_SEARCHES,
     TEACH_CLAIMS,
     TOOL_ROLES,
-    first_line,
 )
+from .text import first_line
 
 StringStates = namedtuple("StringStates", "states in_string")
 FileBlock = namedtuple("FileBlock", "path content")

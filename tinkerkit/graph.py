@@ -3,7 +3,8 @@ lazy import itertools
 lazy import json
 
 lazy from .knowledge import Embeddings, Item, Library
-lazy from .settings import SIMILAR_LESSON_MEANING, SIMILAR_LESSON_WORDS, Home, first_line, similarity
+lazy from .settings import SIMILAR_LESSON_MEANING, SIMILAR_LESSON_WORDS, Home
+lazy from .text import first_line, similarity
 lazy from .workspace import TaughtCommands, Toolchain
 
 HISTORY_LINKS = frozendict(

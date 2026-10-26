@@ -10,9 +10,8 @@ from .settings import (
     NETWORK_RETRY_SECONDS,
     NETWORK_WAIT_NOTE_SECONDS,
     SETUP_TIMEOUT,
-    fingerprint,
-    first_line,
 )
+from .text import fingerprint, first_line
 lazy from .knowledge import Item, Knowledge, Library
 lazy from .prompts import Part, Prompts, Reply
 lazy from .workspace import TaughtCommands, Workspace

@@ -22,12 +22,9 @@ lazy from .settings import (
     EXERCISE_FOLDER,
     REFLECTION_PROBLEMS,
     Home,
-    field,
-    first_line,
-    now_text,
     projects_folder,
-    similarity,
 )
+lazy from .text import field, first_line, now_text, similarity
 
 VERDICTS = ("language", "ambiguous", "other")
 PRACTICE_STEPS = ("build", "feature", "measure", "reflect", "done")

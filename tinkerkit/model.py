@@ -40,9 +40,8 @@ from .settings import (
     UNFINISHED_THOUGHT_KEPT_CHARS,
     Config,
     Home,
-    first_line,
-    now_text,
 )
+from .text import first_line, now_text
 lazy from .jobs import journaled
 lazy from .prompts import Part, Prompts, PromptTooLarge, Reply
 lazy from .workspace import ToolError
