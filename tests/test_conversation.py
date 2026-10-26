@@ -334,12 +334,15 @@ def above_the_rule(up, change):
     return f"\0337\033[{up}F{change}\0338"
 
 
-def room_made(rows, above):
-    return f"{'\033D' * rows}\0337\033[{rows + above + 1}A\033[{rows}L"
+def room_made(rows, above, blanks=0, lines=24):
+    dropped = f"\0337\033[1;{lines - 2 - above}r\033[{blanks}S\033[r\0338" if blanks else ""
+    scrolled = rows - blanks
+    inserted = f"\033[{scrolled}L" if scrolled else ""
+    return f"{dropped}{'\033D' * scrolled}\0337\033[{rows + above + 1}A{inserted}"
 
 
-def printed_above(text, rows=1, block_rows=0):
-    return f"{room_made(rows, block_rows)}\r{text}\0338"
+def printed_above(text, rows=1, block_rows=0, blanks=0, lines=24):
+    return f"{room_made(rows, block_rows, blanks, lines)}\r{text}\0338"
 
 
 def moved_down(rows, kept):
@@ -471,8 +474,8 @@ def live_drawn(text, elapsed="0s", star="✻"):
     return f"{ACCENT}{star}{RESET} Tinkering… ({elapsed}){DIM} · {text}{RESET}"
 
 
-def block_grown(by):
-    return room_made(by, above=0) + "\0338"
+def block_grown(by, blanks=0):
+    return room_made(by, above=0, blanks=blanks) + "\0338"
 
 
 def live_shown(text):
@@ -620,10 +623,65 @@ def test_console_pins_the_rule_and_prompt_to_the_last_rows_with_what_it_printed_
 
 
 @pytest.mark.spec("CNV-8")
-@pytest.mark.parametrize("cursor_row", [None, 23])
-def test_console_starts_where_the_cursor_is_without_an_answer_or_on_the_last_rows(monkeypatch, cursor_row):
-    terminal, _ = started_screen(monkeypatch, cursor_row)
+def test_console_starts_where_the_cursor_is_on_the_last_rows(monkeypatch):
+    terminal, _ = started_screen(monkeypatch, cursor_row=23)
     assert terminal.getvalue() == STARTING_RULE
+
+
+@pytest.mark.spec("CNV-8")
+def test_console_without_a_cursor_answer_moves_to_the_rule_row_and_counts_no_blank_rows(monkeypatch):
+    terminal, screen = started_screen(monkeypatch, cursor_row=None)
+    assert terminal.getvalue() == "\033[23;1H" + STARTING_RULE
+    assert drawn_after(terminal, lambda: screen.print("hi")) == printed_above("hi")
+
+
+@pytest.mark.spec("CNV-8")
+def test_a_print_after_pinning_uses_up_the_blank_rows_at_the_top_before_the_scrollback(monkeypatch):
+    terminal, screen = started_screen(monkeypatch, cursor_row=5)
+    printed = drawn_after(terminal, lambda: screen.print(stacked("line", 20)))
+    assert printed == printed_above(stacked("line", 20), rows=20, blanks=18)
+    assert drawn_after(terminal, lambda: screen.print("hi")) == printed_above("hi")
+
+
+@pytest.mark.spec("CNV-8")
+def test_a_print_uses_up_the_blank_row_a_quiet_line_left_at_the_top(monkeypatch):
+    console = ruled_console(monkeypatch)
+    console.show_again("")
+    printed = drawn_after(sys.stdout, lambda: console.screen.print("hi"))
+    assert printed == printed_above("hi", blanks=1)
+
+
+@pytest.mark.spec("CNV-8")
+def test_a_line_shown_again_uses_up_a_blank_row_at_the_top(monkeypatch):
+    terminal, screen = started_screen(monkeypatch, cursor_row=21)
+    screen.sent("› hi", shown=True)
+    assert drawn_after(terminal, lambda: screen.print("hello")) == printed_above("hello", blanks=1)
+
+
+@pytest.mark.spec("CNV-8")
+def test_a_growing_live_block_uses_up_the_blank_rows_at_the_top(monkeypatch, clock):
+    terminal, screen = started_screen(monkeypatch, cursor_row=21)
+    grown = drawn_after(terminal, lambda: screen.show_live("Learning", 100.0, under=UNDER))
+    assert grown.startswith(block_grown(3, blanks=2))
+
+
+@pytest.mark.spec("CNV-8")
+@pytest.mark.parametrize(("lines", "blanks"), [(10, 4), (30, 18)])
+def test_a_shorter_window_drops_blank_rows_off_the_top_and_a_taller_one_keeps_them(
+    monkeypatch, lines, blanks
+):
+    terminal, screen = started_screen(monkeypatch, cursor_row=5)
+    resized_to(monkeypatch, 10, lines)
+    printed = drawn_after(terminal, lambda: screen.print(stacked("line", 8)))
+    assert printed.endswith(printed_above(stacked("line", 8), rows=8, blanks=min(8, blanks), lines=lines))
+
+
+@pytest.mark.spec("CNV-8")
+def test_a_narrower_window_pushes_blank_rows_off_the_top_as_its_rule_wraps(monkeypatch):
+    terminal, screen = started_screen(monkeypatch, cursor_row=22)
+    resized_to(monkeypatch, 5)
+    printed = drawn_after(terminal, lambda: screen.print(stacked("hi", 2)))
+    assert printed.endswith(printed_above(stacked("hi", 2), rows=2, blanks=1))
 
 
 def test_there_is_no_cursor_row_without_a_terminal():
@@ -698,7 +756,10 @@ def test_a_print_right_after_a_resize_draws_the_rule_again_first(monkeypatch):
     resized_to(monkeypatch, 5)
     printed = drawn_after(sys.stdout, lambda: screen.print("hello"))
     assert printed == (
-        stale_rows_cleared(2) + moved_down(1, kept=1) + redrawn_with_rule([], 5) + printed_above("hello")
+        stale_rows_cleared(2)
+        + moved_down(1, kept=1)
+        + redrawn_with_rule([], 5)
+        + printed_above("hello", blanks=1)
     )
 
 
@@ -743,7 +804,7 @@ def test_once_the_console_reads_live_draws_in_its_live_line(monkeypatch, clock):
         "Writing tests"
     )
     said = drawn_after(sys.stdout, lambda: conversation.say.text("Answered"))
-    assert said == block_taken_out(1) + printed_above("Answered")
+    assert said == block_taken_out(1) + printed_above("Answered", blanks=1)
 
 
 @pytest.mark.spec("CNV-8")
@@ -770,7 +831,7 @@ def test_console_prints_a_jobs_settled_lines_once_and_shows_what_goes_on_in_its_
         f"{block_changed(block_drawn('Verifying', ['📊 1/2'], '5s'))}"
     )
     done = drawn_after(sys.stdout, lambda: console.show("console", shown, "🏁 calc\n✅ Done", done=True))
-    assert done == f"{block_taken_out(2)}{printed_above('  🏁 calc\n  ✅ Done', rows=2)}"
+    assert done == f"{block_taken_out(2)}{printed_above('  🏁 calc\n  ✅ Done', rows=2, blanks=2)}"
 
 
 @pytest.mark.spec("CNV-8")
@@ -779,7 +840,7 @@ def test_console_shows_a_message_without_a_doing_line_in_its_live_line_until_don
     shown = console.show("console", None, "⏳ **Getting ready**\nI answer soon.")
     assert sys.stdout.getvalue() == live_shown("⏳ Getting ready")
     done = drawn_after(sys.stdout, lambda: console.show("console", shown, "Answer", done=True))
-    assert done == block_taken_out(1) + printed_above(f"{ACCENT}● {RESET}Answer")
+    assert done == block_taken_out(1) + printed_above(f"{ACCENT}● {RESET}Answer", blanks=1)
 
 
 @pytest.mark.spec("CNV-8")

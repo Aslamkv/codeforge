@@ -1927,7 +1927,7 @@ class ConsoleScreen:
 
     def __init__(self):
         self.reading, self.live, self.under, self.frame, self.printing = False, None, [], 0, threading.Lock()
-        self.size, self.drawn = shutil.get_terminal_size(), []
+        self.size, self.drawn, self.blank_top = shutil.get_terminal_size(), [], 0
 
     def start(self):
         self.reading, self.size = True, shutil.get_terminal_size()
@@ -1938,8 +1938,11 @@ class ConsoleScreen:
 
     def pin_to_the_bottom(self):
         row, rule_row = cursor_row(), shutil.get_terminal_size().lines - 1
-        if row is not None and row < rule_row:
-            self.draw(scrolled_down(rule_row - row) + rows_down(rule_row - row))
+        if row is None:
+            self.draw(moved_to_row(rule_row))
+        elif row < rule_row:
+            self.blank_top = rule_row - row
+            self.draw(scrolled_down(self.blank_top) + rows_down(self.blank_top))
 
     def print(self, text):
         with self.printing:
@@ -1963,6 +1966,7 @@ class ConsoleScreen:
     def sent(self, typed, shown):
         with self.printing:
             rows = rows_shown(typed)
+            self.pushed_off_the_top(rows)
             self.repair(typed_rows=rows)
             write_out(self.shown_above_the_block(typed, rows) if shown else self.moved_down(rows, kept=0))
 
@@ -2018,14 +2022,19 @@ class ConsoleScreen:
     def repair(self, typed_rows=0):
         size = shutil.get_terminal_size()
         if size != self.size and self.ruled():
+            self.pushed_off_the_top(self.size.lines - size.lines)
             write_out(self.redrawn_at(size, typed_rows))
         self.size = size
 
     def redrawn_at(self, size, typed_rows):
         stale, kept = self.stale_rows(size.columns), self.live_rows() + 1 + typed_rows
         cleared = self.above_the_prompt(stale + typed_rows, NEXT_LINE.join([CLEAR_TO_LINE_END] * stale))
-        moved = self.moved_down(stale + typed_rows - kept, kept)
-        return cleared + moved + self.above_the_prompt(kept, self.block_and_rule())
+        rewrapped = stale + typed_rows - kept
+        self.pushed_off_the_top(rewrapped)
+        return cleared + self.moved_down(rewrapped, kept) + self.above_the_prompt(kept, self.block_and_rule())
+
+    def pushed_off_the_top(self, rows):
+        self.blank_top = max(0, self.blank_top - max(0, rows))
 
     def stale_rows(self, columns):
         drawn = [visible_width(COLOUR_CODE_RE.sub("", row)) for row in self.drawn]
@@ -2043,16 +2052,27 @@ class ConsoleScreen:
             return self.room_made(rows_after - rows_before, above=0) + RESTORE_CURSOR
         return self.shrunk(rows_before - rows_after)
 
+    def room_made(self, rows, above):
+        blanks = min(rows, self.blank_top)
+        self.blank_top -= blanks
+        scrolled = rows - blanks
+        return (
+            f"{self.blank_rows_dropped(blanks, above)}{ROW_DOWN_OR_SCROLL * scrolled}"
+            f"{SAVE_CURSOR}{rows_up(rows + above + 1)}{inserted_rows(scrolled)}"
+        )
+
     @staticmethod
-    def room_made(rows, above):
-        return f"{ROW_DOWN_OR_SCROLL * rows}{SAVE_CURSOR}{rows_up(rows + above + 1)}{inserted_rows(rows)}"
+    def blank_rows_dropped(rows, above):
+        return scrolled_up_above(shutil.get_terminal_size().lines - 2 - above, rows) if rows else ""
 
     def shrunk(self, by):
         return self.moved_down(by, kept=self.live_rows() + 1)
 
-    @staticmethod
-    def moved_down(rows, kept):
-        return scrolled_down_above(shutil.get_terminal_size().lines - 1 - kept, rows) if rows else ""
+    def moved_down(self, rows, kept):
+        if not rows:
+            return ""
+        self.blank_top += rows
+        return scrolled_down_above(shutil.get_terminal_size().lines - 1 - kept, rows)
 
     def redrawn_live(self):
         changed = NEXT_LINE.join(row + CLEAR_TO_LINE_END for row in self.live_drawn())
@@ -2172,16 +2192,32 @@ def rows_down(rows):
     return f"\033[{rows}B"
 
 
+def moved_to_row(row):
+    return f"\033[{row};1H"
+
+
 def inserted_rows(rows):
-    return f"\033[{rows}L"
+    return f"\033[{rows}L" if rows else ""
 
 
 def scrolled_down(rows):
     return f"\033[{rows}T"
 
 
+def scrolled_up(rows):
+    return f"\033[{rows}S"
+
+
 def scrolled_down_above(bottom, rows):
-    return f"{SAVE_CURSOR}{scroll_region(1, bottom)}{scrolled_down(rows)}{WHOLE_SCREEN}{RESTORE_CURSOR}"
+    return scrolled_within(bottom, scrolled_down(rows))
+
+
+def scrolled_up_above(bottom, rows):
+    return scrolled_within(bottom, scrolled_up(rows))
+
+
+def scrolled_within(bottom, scroll):
+    return f"{SAVE_CURSOR}{scroll_region(1, bottom)}{scroll}{WHOLE_SCREEN}{RESTORE_CURSOR}"
 
 
 def scroll_region(top, bottom):
