@@ -2,6 +2,7 @@ from collections import namedtuple
 lazy import datetime
 lazy import urllib.parse
 lazy from collections import Counter
+lazy from itertools import islice
 
 from .messages import Message, Messages, say
 lazy from .jobs import today
@@ -191,8 +192,8 @@ class SlotLearner(Tracked):
     def searched_needs(self, plans):
         searches = [search for plan in plans for search in plan]
         self.tried += [f'search "{search["query"]}"' for search in searches if search["query"]]
-        results = iter(searched_in_batches(self.internet, searches, RESULTS_PER_LEARN_SEARCH))
-        return [[result for _ in plan for result in next(results)] for plan in plans]
+        results = searched_in_batches(self.internet, searches, RESULTS_PER_LEARN_SEARCH)
+        return pooled_by_plan(results, plans)
 
     def picked(self, topic, results, most=None):
         scores = Retriever(None).word_scores(
@@ -568,6 +569,11 @@ def planned_searches(need, values):
 
 def collapsed(query):
     return " ".join(query.split())
+
+
+def pooled_by_plan(results, plans):
+    results = iter(results)
+    return [[result for found in islice(results, len(plan)) for result in found] for plan in plans]
 
 
 def say_docs(slug, key, pages, kept):

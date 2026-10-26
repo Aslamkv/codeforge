@@ -243,7 +243,7 @@ def test_clear_rejects_an_unknown_part():
         Home.clear(["everything"], yes=True)
 
 
-@pytest.mark.spec("SET-10")
+@pytest.mark.spec("SET-10", "KNW-26")
 def test_clear_searches_forgets_the_search_plans(home_store):
     home_store.put("search plans", "{topic} docs", [{"query": "{topic} docs"}])
     home_store.put("sources", "flask@latest", {})

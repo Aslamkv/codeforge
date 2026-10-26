@@ -824,9 +824,13 @@ def search_entries(given):
 
 def searched_in_batches(internet, searches, count):
     asked = [search for search in searches if search["query"]]
-    batches = batched(asked, MAX_PLANNED_SEARCHES)
-    found = iter([results for batch in batches for results in internet.search_all(batch, count)])
+    found = iter(results_in_batches(internet, asked, count))
     return [next(found, []) if search["query"] else [] for search in searches]
+
+
+def results_in_batches(internet, searches, count):
+    batches = batched(searches, MAX_PLANNED_SEARCHES)
+    return [results for batch in batches for results in internet.search_all(batch, count)]
 
 
 class Researcher:

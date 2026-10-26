@@ -1335,7 +1335,7 @@ def test_the_search_plan_prompt_names_each_engine_the_placeholders_and_the_cap()
     assert "placeholder" in prompt and str(MAX_PLANNED_SEARCHES) in prompt and '"searches"' in prompt
 
 
-@pytest.mark.spec("KNW-25")
+@pytest.mark.spec("KNW-25", "KNW-26")
 @pytest.mark.parametrize(
     "reply",
     [
