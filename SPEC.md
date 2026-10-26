@@ -997,8 +997,8 @@ Lessons and proven knowledge, and what every kind of learning shares.
 - **KNW-25** Every prompt that writes searches (a research's frame, gaps and checks, a learn plan's
   follow-ups, and a teaching's checks) writes each as `{query, engines, count}`
   (**WEB-3**), and says what each engine is good for: `mwmbl` the whole web, plain keywords only; `wikipedia`
-  overviews; `wikibooks` tutorials and manuals. Where code alone has a need (a learn's documentation
-  searches), `SearchPlanner.plan(need, count, values)` turns it into searches with one quick call (**MOD-25**,
+  overviews; `wikibooks` tutorials and manuals. Where code alone has a need (a learn's version and tool
+  documentation searches), `SearchPlanner.plan(need, count, values)` turns it into searches with one quick call (**MOD-25**,
   no thinking) under that prompt, then fills the need's placeholders (`{topic}`, `{name}`, `{version}`) from
   `values`. With no quick model, a failed call or a reply with no search, the plan is the filled need as one
   search to every engine.
@@ -1051,9 +1051,12 @@ learning and run lessons are apart.
   text (snippets never count). With a saved plan, GATE 2 counts the documentation's pages, and runs search 1
   when they are too few. Then it raises `LearnStopped` (a `SystemExit`: a non-zero exit) naming the cause, what
   was tried and the requests made, saying nothing was learned or saved and what was learned before is
-  untouched, and the next step; nothing is written to Tinker's database.
-- **LRN-4** A learn's documentation searches are needs planned by `SearchPlanner` (**KNW-25**). A first learn
-  searches by `DOCS_SITE_SEARCH` (from the topic alone), picks the results whose
+  untouched, and the next step (after nothing above `learn_cutoff`: learn again later, or name the topic
+  differently if it is ambiguous, never only more fully); nothing is written to Tinker's database.
+- **LRN-4** A learn's version and tool documentation searches are needs planned by `SearchPlanner`
+  (**KNW-25**). A first learn searches by `DOCS_SITE_SEARCH` (from the topic alone) on every engine, with no
+  plan: a plan kept for every topic cannot suit each one, so no one engine's blind spot (a one-letter name, say)
+  can leave the search with nothing about the topic. It picks the results whose
   title and snippet score above `learn_cutoff` (BM25), each address once, at most `learn_pages`, and fetches
   them in one `Internet.fetch`. Only then does the plan call run (at the model's own think setting); for a
   language it names each tool's version command. A saved plan is reused with no search and no call. The version
