@@ -776,7 +776,12 @@ The terminal and the chats are one conversation: the same commands, the same ans
   rule and shows no line again; with `NO_COLOR` or no terminal, none of that is drawn.
 - **CNV-9** `Desk.run` claims each chat channel. When another Tinker holds one, it stops if there is no
   terminal, and otherwise leaves that chat out. The terminal never waits on a chat: each chat starts in its own
-  thread. Each chat has one status message: what Tinker works on (a job's title), never how far it got. Every
+  thread, and what Tinker does every few seconds while it listens (collecting the messages whose time is up,
+  saying the status, taking up an exercise that runs) runs in a thread of its own, from the start, so the
+  terminal reads at once and `exit` or Ctrl-C ends Tinker at once. Tinker tells and never waits as it ends: it
+  hands its last status (`not listening`) and the question to stop, to be taken out, to a sender that runs on
+  its own (`tinker channel goodbye`, left out of the usage), and exits; the sender posts the status and takes
+  the question out, and what happens to them is the chat's matter, not Tinker's. Each chat has one status message: what Tinker works on (a job's title), never how far it got. Every
   time the status changes (Tinker starts listening, a job starts, waits for the person, ends, Tinker ends:
   `not listening`), the one before is taken out and the new one is sent at the bottom, with the message of the
   job that runs moved below it. A job says its status at once as it starts, before its own message, and the
