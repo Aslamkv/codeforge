@@ -521,7 +521,7 @@ def test_the_passing_count_follows_every_save(make_project, make_session):
     assert tracker.state["passing"] == [2, 2]
 
 
-@pytest.mark.spec("PRJ-16")
+@pytest.mark.spec("MSG-3", "MSG-5")
 def test_a_run_keeps_its_calls_and_output_in_its_project(project_dir, make_model, fake_ollama):
     from tinkerkit.prompts import Part
     from tinkerkit.store import Log
@@ -572,7 +572,7 @@ def test_remember_keeps_a_line_about_each_run(home_store, monkeypatch):
     assert home_store.items("runs") == {} and home_store.items("projects") == {}
 
 
-@pytest.mark.spec("PRJ-17")
+@pytest.mark.spec("PRJ-16")
 def test_steps_go_on_from_the_one_reached_and_save_each_next_one():
     tracker, ran, saved = Tracker("practice"), [], []
     steps = Steps(("build", "feature", "measure", "done"), tracker)
@@ -582,7 +582,7 @@ def test_steps_go_on_from_the_one_reached_and_save_each_next_one():
     assert steps.run("done", ran.append, saved.append) == "done" and ran == ["feature", "measure"]
 
 
-@pytest.mark.spec("PRJ-17")
+@pytest.mark.spec("PRJ-16")
 def test_a_step_passed_over_a_blocked_one_and_a_wait_stop_the_steps_as_they_say():
     tracker, ran, saved = Tracker("practice"), [], []
     steps = Steps(("build", "feature", "measure", "done"), tracker, only_if={"feature": lambda: False})
@@ -592,7 +592,7 @@ def test_a_step_passed_over_a_blocked_one_and_a_wait_stop_the_steps_as_they_say(
     assert steps.run("build", ran.append, saved.append, waits=lambda: True) == "waiting"
 
 
-@pytest.mark.spec("PRJ-17")
+@pytest.mark.spec("PRJ-16")
 def test_entering_a_step_moves_the_tracker_once_in_a_row():
     tracker = Tracker("reading")
     steps = Steps(("survey", "chapters", "done"), tracker)
@@ -605,7 +605,7 @@ def test_entering_a_step_moves_the_tracker_once_in_a_row():
     Steps(("survey", "done")).enter("survey")
 
 
-@pytest.mark.spec("PRJ-17")
+@pytest.mark.spec("PRJ-16")
 def test_a_tracked_step_moves_its_tracker_and_says_the_step_when_told(monkeypatch):
     heard = []
     monkeypatch.setattr(say, "followers", [heard.append])

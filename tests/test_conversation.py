@@ -707,7 +707,7 @@ def test_a_task_runs_as_its_own_tinker_and_its_plan_waits(desk, home_store):
     assert desk.status().startswith("🙋 **Tinker** · calc: a calculator waits for you")
 
 
-@pytest.mark.spec("CNV-23")
+@pytest.mark.spec("CNV-18")
 def test_research_in_a_chat_is_the_research_job_ending_with_its_answer(desk):
     desk, channel, script = desk
     say(desk, channel, "research the newest Python")
@@ -940,7 +940,7 @@ def test_a_chat_pauses_the_job_that_runs_before_it_is_answered(desk, monkeypatch
 ECHO_APP = "import sys\nprint('args:', sys.argv[1:])\nprint('input:', sys.stdin.read().strip())\n"
 
 
-@pytest.mark.spec("CNV-24")
+@pytest.mark.spec("CNV-23")
 def test_run_a_built_project(desk, tmp_path):
     desk, channel, _ = desk
     folder = built(tmp_path, "calc", "aaa111", f'"{sys.executable}" app.py')
@@ -958,7 +958,7 @@ def test_run_a_built_project(desk, tmp_path):
     assert "args: ['5', '+', '3']" in channel.texts()[-1]
 
 
-@pytest.mark.spec("CNV-24")
+@pytest.mark.spec("CNV-23")
 def test_run_with_nothing_to_run(desk, tmp_path):
     desk, channel, _ = desk
     desk.run_app(channel, "1", ["x"])
@@ -1069,7 +1069,7 @@ def test_desk_refuses_a_chat_another_tinker_listens_to(desk):
         holder.claimed.close()
 
 
-@pytest.mark.spec("CNV-25")
+@pytest.mark.spec("CNV-24")
 def test_one_shot_commands(monkeypatch, capsys):
     monkeypatch.setattr(conversation, "commands_brief", lambda: "cmds")
     monkeypatch.setattr(sys, "stdin", io.StringIO(""))
@@ -1083,7 +1083,7 @@ def test_one_shot_commands(monkeypatch, capsys):
     assert "No model is in use yet" in capsys.readouterr().out
 
 
-@pytest.mark.spec("CNV-25")
+@pytest.mark.spec("CNV-24")
 def test_one_shot_command_runs_nothing_without_a_yes(
     monkeypatch, measured_model, fake_ollama, capsys, tmp_path
 ):
@@ -1151,7 +1151,7 @@ def test_start_is_answered_with_a_welcome(desk):
     assert channel.texts()[-1] == welcome()
 
 
-@pytest.mark.spec("CNV-26")
+@pytest.mark.spec("CNV-25")
 def test_memory_graph_is_sent_as_a_file(desk, monkeypatch):
     desk, channel, _ = desk
     sent = []
@@ -1176,7 +1176,7 @@ def test_memory_graph_is_sent_as_a_file(desk, monkeypatch):
     )
 
 
-@pytest.mark.spec("CNV-26")
+@pytest.mark.spec("CNV-25")
 def test_the_terminal_opens_the_file_and_other_channels_send_where_it_is(monkeypatch, tmp_path):
     opened, printed = [], []
     monkeypatch.setattr(conversation.webbrowser, "open", opened.append)
