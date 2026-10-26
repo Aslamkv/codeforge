@@ -678,6 +678,86 @@ def test_the_lines_under_the_live_line_are_cut_to_the_terminal_width(monkeypatch
     assert under_drawn("x" * (LIVE_COLUMNS - 3)) + "\033[K" in sys.stdout.getvalue()
 
 
+def resized_to(monkeypatch, columns, lines=24):
+    monkeypatch.setattr(conversation.shutil, "get_terminal_size", lambda: os.terminal_size((columns, lines)))
+
+
+def stale_rows_cleared(rows, typed_rows=0):
+    return above_the_rule(rows + typed_rows, "\033[E".join(["\033[K"] * rows))
+
+
+def redrawn_with_rule(block, columns, typed_rows=0):
+    rows = [f"{row}\033[K" for row in block] + [f"{DIM}{'─' * columns}{RESET}"]
+    return above_the_rule(len(rows) + typed_rows, "\033[E".join(rows))
+
+
+def resized_block_screen(monkeypatch, gap=0):
+    screen = live_screen(monkeypatch)
+    screen.show_live("Go", 100.0, under=["x" * 30])
+    screen.gap = gap
+    return screen
+
+
+@pytest.mark.spec("CNV-8")
+def test_a_narrower_window_clears_the_wrapped_block_and_rule_and_draws_them_again(monkeypatch, clock):
+    screen = resized_block_screen(monkeypatch, gap=1)
+    resized_to(monkeypatch, 30)
+    repaired = drawn_after(sys.stdout, screen.tick)
+    assert repaired.startswith(stale_rows_cleared(5) + redrawn_with_rule(block_drawn("Go", ["x" * 27]), 30))
+    assert screen.gap == 3
+
+
+@pytest.mark.spec("CNV-8")
+def test_a_wider_window_draws_the_block_and_rule_again_at_its_width(monkeypatch, clock):
+    screen = resized_block_screen(monkeypatch, gap=1)
+    resized_to(monkeypatch, 60)
+    repaired = drawn_after(sys.stdout, screen.tick)
+    assert repaired.startswith(stale_rows_cleared(3) + redrawn_with_rule(block_drawn("Go", ["x" * 30]), 60))
+    assert screen.gap == 1
+
+
+@pytest.mark.spec("CNV-8")
+def test_a_shorter_window_keeps_only_the_blank_rows_that_still_fit(monkeypatch, clock):
+    screen = resized_block_screen(monkeypatch, gap=20)
+    resized_to(monkeypatch, LIVE_COLUMNS, lines=10)
+    screen.tick()
+    assert screen.gap == 6
+
+
+@pytest.mark.spec("CNV-8")
+def test_a_resized_window_without_a_block_draws_only_the_rule_again(monkeypatch):
+    screen = ruled_screen(monkeypatch)
+    resized_to(monkeypatch, 5)
+    assert drawn_after(sys.stdout, screen.tick) == stale_rows_cleared(2) + redrawn_with_rule([], 5)
+    assert screen.gap == 1 and drawn_after(sys.stdout, screen.tick) == ""
+
+
+@pytest.mark.spec("CNV-8")
+def test_a_print_right_after_a_resize_draws_the_rule_again_first(monkeypatch):
+    screen = ruled_screen(monkeypatch)
+    resized_to(monkeypatch, 5)
+    printed = drawn_after(sys.stdout, lambda: screen.print("hello"))
+    assert printed == stale_rows_cleared(2) + redrawn_with_rule([], 5) + printed_in_gap("hello", up=2)
+
+
+@pytest.mark.spec("CNV-8")
+def test_a_line_sent_right_after_a_resize_draws_the_rule_again_above_it(monkeypatch):
+    console = ruled_console(monkeypatch)
+    resized_to(monkeypatch, 5)
+    sent = drawn_after(sys.stdout, lambda: console.show_again(""))
+    assert sent == (
+        stale_rows_cleared(2, typed_rows=1) + redrawn_with_rule([], 5, typed_rows=1) + typed_rows_cleared(1)
+    )
+
+
+@pytest.mark.spec("CNV-8")
+def test_an_unruled_screen_does_nothing_when_resized(monkeypatch):
+    screen = ruled_screen(monkeypatch)
+    monkeypatch.setattr(sys.stdin, "isatty", lambda: False)
+    resized_to(monkeypatch, 5)
+    assert drawn_after(sys.stdout, screen.tick) == "" and screen.gap == 0
+
+
 @pytest.mark.spec("CNV-8")
 def test_console_without_colour_shows_no_live_line(monkeypatch, clock):
     screen = live_screen(monkeypatch)

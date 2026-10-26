@@ -1927,10 +1927,10 @@ class ConsoleScreen:
 
     def __init__(self):
         self.reading, self.live, self.under, self.frame, self.printing = False, None, [], 0, threading.Lock()
-        self.gap = 0
+        self.gap, self.size, self.drawn = 0, shutil.get_terminal_size(), []
 
     def start(self):
-        self.reading = True
+        self.reading, self.size = True, shutil.get_terminal_size()
         if typed_here():
             self.pin_to_the_bottom()
             self.draw(self.rule() + "\n")
@@ -1944,6 +1944,7 @@ class ConsoleScreen:
 
     def print(self, text):
         with self.printing:
+            self.repair()
             write_out(self.printed_in_pieces(text) if self.ruled() else self.printed_over_prompt(text))
 
     def printed_in_pieces(self, text):
@@ -1973,7 +1974,9 @@ class ConsoleScreen:
 
     def sent(self, typed, shown):
         with self.printing:
-            cleared = self.typed_rows_cleared(rows_shown(typed))
+            rows = rows_shown(typed)
+            self.repair(typed_rows=rows)
+            cleared = self.typed_rows_cleared(rows)
             write_out(cleared + (self.printed_in_pieces(self.shown_again(typed)) if shown else ""))
 
     def typed_rows_cleared(self, rows):
@@ -1993,12 +1996,14 @@ class ConsoleScreen:
         if not self.ruled():
             return
         with self.printing:
+            self.repair()
             rows_before = self.live_rows()
             self.live, self.under = (text, began, facts), list(under)
             write_out(self.resized(rows_before, self.live_rows()) + self.redrawn_live())
 
     def count_live(self, **facts):
         with self.printing:
+            self.repair()
             if self.live is not None:
                 text, began, _ = self.live
                 self.live = (text, began, facts)
@@ -2006,9 +2011,10 @@ class ConsoleScreen:
 
     def end_live(self):
         with self.printing:
+            self.repair()
             if self.live is not None:
                 taken_out = self.shrunk(self.live_rows(), self.live_rows())
-                self.live, self.under = None, []
+                self.live, self.under, self.drawn = None, [], []
                 write_out(taken_out)
 
     def keep_ticking(self):
@@ -2018,9 +2024,31 @@ class ConsoleScreen:
 
     def tick(self):
         with self.printing:
+            self.repair()
             if self.live is not None:
                 self.frame += 1
                 write_out(self.redrawn_live())
+
+    def repair(self, typed_rows=0):
+        size = shutil.get_terminal_size()
+        if size != self.size and self.ruled():
+            write_out(self.redrawn_at(size, typed_rows))
+        self.size = size
+
+    def redrawn_at(self, size, typed_rows):
+        stale = self.stale_rows(size.columns)
+        blank = self.gap + stale - self.live_rows() - 1
+        self.gap = max(0, min(blank, size.lines - self.live_rows() - 2))
+        cleared = self.above_the_prompt(stale + typed_rows, NEXT_LINE.join([CLEAR_TO_LINE_END] * stale))
+        return cleared + self.above_the_prompt(self.live_rows() + 1 + typed_rows, self.block_and_rule())
+
+    def stale_rows(self, columns):
+        drawn = [visible_width(COLOUR_CODE_RE.sub("", row)) for row in self.drawn]
+        return sum(rows_at(width, columns) for width in [self.size.columns, *drawn])
+
+    def block_and_rule(self):
+        block = [row + CLEAR_TO_LINE_END for row in self.live_drawn()] if self.live is not None else []
+        return NEXT_LINE.join([*block, self.rule()])
 
     def live_rows(self):
         return 0 if self.live is None else 1 + len(self.under)
@@ -2047,15 +2075,21 @@ class ConsoleScreen:
         changed = NEXT_LINE.join(row + CLEAR_TO_LINE_END for row in self.live_drawn())
         return self.above_the_rule(self.live_rows(), changed)
 
+    @classmethod
+    def above_the_rule(cls, rows, change):
+        return cls.above_the_prompt(rows + 1, change)
+
     @staticmethod
-    def above_the_rule(rows, change):
-        return f"{SAVE_CURSOR}{lines_up(rows + 1)}{change}{RESTORE_CURSOR}"
+    def above_the_prompt(rows, change):
+        return f"{SAVE_CURSOR}{lines_up(rows)}{change}{RESTORE_CURSOR}"
 
     def live_drawn(self):
         text, began, facts = self.live
         width = shutil.get_terminal_size().columns - 1
         tinkering = live_line(text, began, self.frame, width, sys.stdout, **facts)
-        return [tinkering, *(f"  {styled(cut_to_width(line, width - 2), 'dim')}" for line in self.under)]
+        under = (f"  {styled(cut_to_width(line, width - 2), 'dim')}" for line in self.under)
+        self.drawn = [tinkering, *under]
+        return self.drawn
 
     def prompt(self):
         return styled("› ", "accent") if typed_here() else self.PROMPT
@@ -2136,9 +2170,11 @@ def screen_wide_rows(line):
 
 def rows_shown(text):
     columns = shutil.get_terminal_size().columns
-    return sum(
-        max(1, -(-visible_width(COLOUR_CODE_RE.sub("", line)) // columns)) for line in text.split("\n")
-    )
+    return sum(rows_at(visible_width(COLOUR_CODE_RE.sub("", line)), columns) for line in text.split("\n"))
+
+
+def rows_at(width, columns):
+    return max(1, -(-width // columns))
 
 
 def lines_up(rows):
