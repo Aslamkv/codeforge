@@ -23,6 +23,7 @@ LAYERS = (
     "model",
     "project",
     "fetcher",
+    "search",
     "passages",
     "web",
     "conversation",
@@ -109,19 +110,23 @@ def test_only_the_model_web_and_channel_modules_open_connections():
         text = path.read_text(encoding="utf-8")
         if any(f"import {name}" in text or f"{name}(" in text for name in network):
             users.add(path.stem)
-    assert users <= {"model", "web", "fetcher", "channels", "knowledge"}, users
+    assert users <= {"model", "web", "fetcher", "search", "channels", "knowledge"}, users
     knowledge = (ROOT / "tinkerkit" / "knowledge.py").read_text(encoding="utf-8")
     assert "urlopen(" not in knowledge, "knowledge goes online only through Internet and Ollama"
-    fetcher_users = {
-        path.stem
-        for path in (ROOT / "tinkerkit").glob("*.py")
-        if ".fetcher import" in path.read_text(encoding="utf-8")
-    }
-    assert fetcher_users == {"web"}, fetcher_users
+    for plugin in ("fetcher", "search"):
+        assert importers_of(plugin) == {"web"}, plugin
     runners = {
         path.stem for path in program_files() if "subprocess.Popen(" in path.read_text(encoding="utf-8")
     }
     assert runners <= {"workspace", "settings", "conversation"}, runners
+
+
+def importers_of(module):
+    return {
+        path.stem
+        for path in (ROOT / "tinkerkit").glob("*.py")
+        if f".{module} import" in path.read_text(encoding="utf-8")
+    }
 
 
 @pytest.mark.spec("ARCH-4")

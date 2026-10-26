@@ -3,7 +3,7 @@ import json
 import re
 
 import pytest
-from conftest import web_page
+from conftest import FakeSearch, web_page
 
 from tinkerkit.knowledge import Knowledge, Library
 from tinkerkit.learning import (
@@ -22,14 +22,15 @@ from tinkerkit.slots import PROFILES, Selector, missing, short_slots, web_slots
 from tinkerkit.web import RequestLog, WebPage
 
 
-class FakeWeb:
+class FakeWeb(FakeSearch):
     def __init__(self, found=None, pages=None):
+        super().__init__()
         self.found, self.pages = found or {}, pages or {}
         self.queries, self.fetched, self.requests = [], [], RequestLog()
 
     def search(self, query, count):
         self.queries.append(query)
-        self.requests("search", "standard", "", 0.01, query)
+        self.requests("search", "mwmbl", "", 0.01, query)
         return list(self.found.get(query, []))[:count]
 
     def fetch(self, urls, max_bytes=None):
@@ -38,7 +39,7 @@ class FakeWeb:
 
     def page(self, url):
         why = "" if url in self.pages else "HTTP 404"
-        self.requests("fetch", "standard", why, 0.01, url)
+        self.requests("fetch", "fetcher", why, 0.01, url)
         if why:
             return WebPage.failed(url, why)
         return web_page(url, self.pages[url], "text/html")
@@ -683,6 +684,8 @@ def test_a_language_is_learned_under_its_key_and_replaces_what_its_earlier_learn
     each_command_once = 2
     assert len(entry["machine"]) == each_command_once
     assert TOOL_DOCS_SEARCH in web.queries and all(url in web.fetched for url in TOOL_PAGES)
+    language_and_tool_docs_at_once = [batch for batch in web.batches if TOOL_DOCS_SEARCH in batch]
+    assert len(language_and_tool_docs_at_once) == 1 and len(language_and_tool_docs_at_once[0]) == 2
     assert entry["docs"] == {"langtest": "1.2.0"} and Home.store().get("sources", "langtest@1.2.0")["pages"]
     assert (
         Knowledge("Lang").language_doc["retired"][0]["reason"]

@@ -52,9 +52,10 @@ enforce it.
   terminal and the chats show that state. They never read meaning back out of printed text.
 - **The person comes first.** Every long command is a job. Whatever the person asks for pauses the job that
   runs, and a paused job goes on by itself once Tinker is idle ([jobs](#jobs-job)).
-- **Tinker uses the web as a person does.** It searches one search at a time, and reads only the pages its
-  searches found, as curl would on the person's behalf. It never crawls: no site maps, no links followed. A
-  good search is how it finds what it needs, so no search provider has reason to turn it away.
+- **Tinker uses the web as a person does.** It asks a few open search engines, in parallel within a fixed
+  limit, and reads only the pages its searches found, as curl would on the person's behalf. It never crawls:
+  no site maps, no links followed. A good search is how it finds what it needs, so no search engine has reason
+  to turn it away.
 
 ## Architecture
 
@@ -76,8 +77,9 @@ listed above it:
 | `model` | the local model: Ollama's API, one request with its budgets and retries (`Model`), measuring a model (`Calibrator`), measured models (`Models`) |
 | `project` | the plan and its record (`Project`, `SpecDocument`, `Runs`, `RunChecks`, `Brief`, `Outcome`), the run's `Tracker` and its `ending`, and the step pipeline (`Steps`) with what moves a tracker through it (`Tracked`) |
 | `fetcher` | the web plugin's page fetcher, used by `web` alone: pages read straight from their sites, in parallel, with the standard library only (`Fetcher`, `Fetched`) |
+| `search` | the search engines the web plugin asks, used by `web` alone: open engines with no key, with the standard library only (`SearchEngine`, `Mwmbl`, `MediaWiki`, `Wikipedia`, `Wikibooks`) |
 | `passages` | every page read as text: an HTML page's main content as blocks, and fetched pages as passages under headings, repeats dropped (`Cleaner`, `MainBlocks`, `Page`, `Passage`) |
-| `web` | the web plugin, the only part that reaches web content: search and fetch, and every failure of either (`Internet`, `WebBackend`, `OllamaWeb`, `WebPage`, `RequestLog`), and a page as text (`PageText`, a view over `passages`) |
+| `web` | the web plugin, the only part that reaches web content: search and fetch, and every failure of either (`Internet`, `WebPage`, `RequestLog`), and a page as text (`PageText`, a view over `passages`) |
 | `conversation` | the terminal and the chats as one conversation (`Desk`, `Channel`, `Markup`, `Talk`, `Shell`, `Progress`, `Reporter`) |
 | `channels` | the chat plugin: Telegram, and `tinker channel` |
 | `knowledge` | lessons and proven knowledge (`Knowledge`), research (`Researcher`), and what learning shares (`Learner`, `Library`, `Retriever`, `Embeddings`) |
@@ -98,7 +100,7 @@ listed above it:
 - **ARCH-2** The channels plugin is optional. Without `tinkerkit/channels.py`, the conversation has no chat
   channels, and everything else works.
 - **ARCH-3** Every model call goes through `Ollama`, and who may call `Ollama.chat` is **MOD-25**. Every web
-  search, page and download goes through `Internet.search` or `Internet.fetch`; only `web` uses the `fetcher`.
+  search, page and download goes through `Internet.search` or `Internet.fetch`; only `web` uses the `fetcher` and `search`.
   The model's server and the chat channels are not web content and keep their own connections. Every project
   command goes through `Workspace.run` or `Workspace.start`.
 - **ARCH-4** Only `settings.Home` knows where the home is. No other module names a path inside it.
@@ -685,22 +687,27 @@ Fetched pages as passages: main content, under headings, repeats dropped.
 The web plugin, the only part that reaches web content. It has two calls, search and fetch, and it handles
 every failure of either: no caller sees a backend, an HTTP status or an exception from the web.
 
-- **WEB-1** `Internet()` searches with `OllamaWeb` when `OLLAMA_API_KEY` is set, else with the standard
-  `WebBackend`; no setting chooses. `Internet.state()` says which: `ollama.com search, the standard search as
-  fallback`, or `the standard search (no OLLAMA_API_KEY)`.
-- **WEB-2** `WebBackend` uses the standard library only. Its `search(query, count)` reads DuckDuckGo's HTML
-  results page: the result links with the `uddg` redirect unwrapped, ads (`y.js`) dropped, the snippets, at
-  most `count`. A bot-check page is a failure. `OllamaWeb(WebBackend)` replaces `search` alone: it POSTs JSON
-  with `Authorization: Bearer <key>` to ollama.com's `/web_search`. An answer that is not JSON, or has no
-  result list, is a failure.
-- **WEB-3** `Internet.search(query, count)` asks one search at a time and adds no pause of its own. When
-  Ollama's search fails in any way (HTTP 401, 403, 429 or 5xx, a timeout, no connection, an unusable answer),
-  the same query goes to the standard search at once. A standard search that times out or answers HTTP 5xx is
-  asked once more, at once. It gives the results with an `http(s)` address, each as `{title, url, content}`
-  strings, and `[]` when no search answered.
-- **WEB-4** When the standard search cannot reach its site (no connection; a timeout is not that), the web is
-  offline: `Internet` says so once (`Web: not reachable (why)`), and every later search and fetch it is asked
-  gives nothing at once, making no request.
+- **WEB-1** `Internet()` searches with every engine of `search` (**WEB-2**): Mwmbl, Wikipedia and Wikibooks;
+  no setting and no key choose. `Internet.state()` names them: `searches mwmbl, wikipedia, wikibooks`.
+- **WEB-2** A `SearchEngine` has a `name` and `search(query, count)`, which gives at most `count` results, each
+  `{title, url, content}` strings, and raises on any failure: the web's own error for an HTTP error, a timeout or no connection,
+  and `SearchFailed` for an answer that is not JSON or has no result list. It uses the standard library only and sends a User-Agent naming
+  Tinker and its repository (`https://github.com/Aslamkv/codeforge`), as Wikimedia asks. `Mwmbl` (name
+  `mwmbl`) asks `https://api.mwmbl.org/api/v1/search/?s=<query>` with the query as plain keywords (it knows no
+  operators); a title or extract given as a list of `{value}` segments is joined into one string. `MediaWiki`
+  asks a wiki's `/w/api.php` search (`list=search`, `srlimit=count`, `maxlag=5`); an answer with an `error` is a
+  failure, a snippet's HTML tags are dropped, and a page's address is `https://<host>/wiki/<title>` with spaces
+  as `_`. `Wikipedia` (`wikipedia`, `en.wikipedia.org`) and `Wikibooks` (`wikibooks`, `en.wikibooks.org`) are
+  MediaWikis.
+- **WEB-3** `Internet.search(query, count)` asks every engine at once and adds no pause of its own. An engine
+  that times out or answers HTTP 5xx is asked once more, at once; one engine failing never stops the others.
+  It interleaves the engines' results by rank (each one's first, then each one's second ...), keeps those with
+  an `http(s)` address, each address once, at most `count`, and gives `[]` when no engine answered.
+  `Internet.search_all(queries, count)` runs several searches at once and gives each query's results, in the
+  order asked. At most `SEARCHES_PER_ENGINE` requests go to one engine at a time.
+- **WEB-4** When no engine can be reached (no connection; a timeout is not that), the web is offline:
+  `Internet` says so once (`Web: not reachable (why)`), and every later search and fetch it is asked gives
+  nothing at once, making no request.
 - **WEB-5** `Internet.fetch(urls, max_bytes)` reads the addresses with the `Fetcher` (**FET-1**) in parallel,
   at most `fetch_max_bytes` each unless `max_bytes` is given, and gives a `WebPage` per address, in order: its
   address (the final one, after redirects; a page that could not be read keeps the one asked), content type, bytes, blocks (**PAS-1**), title and `why` (empty unless it failed). An HTML page
@@ -708,7 +715,7 @@ every failure of either: no caller sees a backend, an HTTP status or an exceptio
   other content keeps its bytes with no blocks. A page that could not be read has no bytes and no blocks, and
   its `why` says what happened; it is not asked again.
 - **WEB-6** `RequestLog` appends every search and every fetched address to `Home.web_log()` as one JSON line
-  `{at, kind, by, result, why, seconds, target}`: kind `search` or `fetch`, by `ollama` or `standard`, result
+  `{at, kind, by, result, why, seconds, target}`: kind `search` or `fetch`, by the engine's name (`mwmbl`, `wikipedia`, `wikibooks`) or `fetcher`, result
   `ok` or `failed`. It counts them by kind, and `text()` gives the counts in one line.
 - **WEB-7** `PageText` is a view over `Cleaner`'s blocks (**PAS-1**): a page's title, and its main content's
   blocks as text, a blank line between them. A heading becomes a `#` line of its level, list items become `- `
@@ -968,8 +975,8 @@ Lessons and proven knowledge, and what every kind of learning shares.
 - **KNW-23** `Researcher.answer(entry)` gives a research as text: its findings by question, each with its confidence
   and the pages of the facts it cites as `[n]`, then those pages as numbered sources. A research with no finding
   says so.
-- **KNW-24** `Learner.web_pages(searches)` searches each, takes the results in turn, each address once, at
-  most `TEACH_PAGES`, and fetches them in one `Internet.fetch`; a research round fetches its pages the same
+- **KNW-24** `Learner.web_pages(searches)` runs the searches at once (`Internet.search_all`), takes the results in turn, each address once, at
+  most `TEACH_PAGES`, and fetches them in one `Internet.fetch`; a research round searches and fetches its pages the same
   way, all at once. A page the web could not read stands on its search snippet. Each page keeps
   its `relevant_chunks` for the searches (**KNW-14**), up to
   `TEACH_PAGE_CHARS`. A page with no text is left out.
@@ -1027,7 +1034,7 @@ learning and run lessons are apart.
   commands (each run once) give the version installed. That version's documentation is found by one search
   (`DOCS_VERSION_SEARCH`: the topic's name, its version and `documentation`), its results picked as above, and
   each of a language's tools by one search of its own (`TOOL_DOCS_SEARCH`, its own version, at most
-  `tool_docs_pages` pages); their pages join the pool, and are kept (**LRN-1**). Each slot's passages are digested into facts
+  `tool_docs_pages` pages), the tools' searches all at once; their pages join the pool, and are kept (**LRN-1**). Each slot's passages are digested into facts
   (candidates, each with its slot) and condensed into rules, both at `learn_think`, and kept only after both
   succeed, under the language's key or the topic's slug, with its plan, machine, documentation versions,
   sources, cited passages, status (`complete` or `incomplete`), missing slots and request counts; then

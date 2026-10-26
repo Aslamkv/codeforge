@@ -90,7 +90,7 @@ def offline(monkeypatch):
         raise OSError(f"network is off in tests ({address})")
 
     monkeypatch.setattr(socket.socket, "connect", refuse)
-    for name in ("OLLAMA_API_KEY", "TINKER_CHANNELS", "NO_COLOR", "TINKER_FORMAT"):
+    for name in ("TINKER_CHANNELS", "NO_COLOR", "TINKER_FORMAT"):
         monkeypatch.delenv(name, raising=False)
     no_stale_bytecode(monkeypatch)
 
@@ -285,6 +285,18 @@ def file_block(path, body):
 def web_page(url, text, kind="text/plain"):
     title, blocks = readable(text, kind)
     return WebPage(url, kind, text.encode(), blocks, title, "")
+
+
+class FakeSearch:
+    def __init__(self):
+        self.batches = []
+
+    def search(self, query, count):
+        raise NotImplementedError
+
+    def search_all(self, queries, count):
+        self.batches.append(list(queries))
+        return [self.search(query, count) for query in queries]
 
 
 def plan_of(folder):

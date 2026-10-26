@@ -235,7 +235,7 @@ def test_config(measured_model, capsys):
         "think:           high for planning, medium for building",
         "keep_alive:      0",
         "test_timeout:    60",
-        "web:             the standard search (no OLLAMA_API_KEY)",
+        "web:             searches mwmbl, wikipedia, wikibooks",
     ):
         assert line in out, line
     Commands(parse("config", "test_timeout", "90")).run()
@@ -251,9 +251,7 @@ def test_doctor(monkeypatch, capsys):
         "web search",
         "tinker command",
     ]
-    assert Doctor.web() == "the standard search (no OLLAMA_API_KEY)"
-    monkeypatch.setenv("OLLAMA_API_KEY", "key")
-    assert Doctor.web() == "ollama.com search, the standard search as fallback"
+    assert Doctor.web() == "searches mwmbl, wikipedia, wikibooks"
     with pytest.raises(SystemExit, match="does not answer"):
         Doctor.ollama()
     ok = lambda: "fine"

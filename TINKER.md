@@ -35,27 +35,17 @@ To update later, just `git pull`. The link always points at the latest code.
 
 ## Web Search 🌐
 
-We don't reinvent wheels. When something good already exists, we use it.
-
-So Tinker searches with Ollama's own **web search** when you give it a free key:
-
-1. Make a free account at [ollama.com](https://ollama.com).
-2. Create a key at [ollama.com/settings/keys](https://ollama.com/settings/keys).
-3. Put it in your shell profile (`~/.zshrc` or `~/.bashrc`):
-
-```sh
-export OLLAMA_API_KEY="your-key-here"
-```
-
-No key, or Ollama down or rate limited? Tinker falls back to a plain search on its own (DuckDuckGo's HTML
-page, read with Python alone), so the web always works. Pages are read straight from their sites, in
+Tinker searches open search engines that need no account and no key:
+[Mwmbl](https://mwmbl.org) for the web at large, and [Wikipedia](https://en.wikipedia.org) and
+[Wikibooks](https://en.wikibooks.org) for overviews and tutorials. It asks them all at once and mixes their
+results by rank. If one is down, the others still answer. Pages are read straight from their sites, in
 parallel, like `curl` would.
 
-Tinker uses the web as you would: one search at a time, and only the pages its searches found. It never
-crawls a site. It only goes on the web when you ask: `tinker learn`, `tinker research`, `tinker teach`, a run
-with `--web`, `tinker read` of a link, or `tinker exercise` of a language it has not learned yet. Offline, it
-says so once and goes on with what it has.
-`tinker doctor` shows which search it uses.
+Tinker uses the web as you would: a few searches at a time, within a small limit for each engine, and only
+the pages its searches found. It never crawls a site. It only goes on the web when you ask: `tinker learn`,
+`tinker research`, `tinker teach`, a run with `--web`, `tinker read` of a link, or `tinker exercise` of a
+language it has not learned yet. Offline, it says so once and goes on with what it has.
+`tinker doctor` shows the engines it searches.
 
 ## First Steps 🚀
 
@@ -475,6 +465,7 @@ tinker config learn_searches 1      # at most one follow-up search
 tinker config learn_pages 4         # pages read from each search
 tinker config tool_docs_pages 2     # pages read about each of a language's tools
 tinker config learn_think high      # think harder (and slower) while reading pages
+tinker config web_timeout 60        # wait up to 60 seconds for each search engine
 ```
 
 Delete parts of what Tinker keeps, or all of it (your projects stay). Each shows what it deletes and asks

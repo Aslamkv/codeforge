@@ -1,206 +1,145 @@
 import io
 import json
+import threading
 import time
 import urllib.error
-import urllib.request
-from email.message import Message
 
 import pytest
 
 from tinkerkit.fetcher import Fetched, Fetcher
 from tinkerkit.jobs import Jobs
-from tinkerkit.settings import Config, Home
-from tinkerkit.web import Internet, OllamaWeb, RequestLog, WebBackend, WebError, WebPage
+from tinkerkit.search import Mwmbl, SearchFailed, Wikibooks, Wikipedia
+from tinkerkit.settings import SEARCHES_PER_ENGINE, Config, Home
+from tinkerkit.web import Internet, RequestLog, WebPage
 
 
-@pytest.fixture
-def ollama_key(monkeypatch):
-    monkeypatch.setenv("OLLAMA_API_KEY", "secret")
-
-
-def scripted(monkeypatch, backend, *answers):
-    asked, left = [], list(answers)
+class Engine:
+    def __init__(self, name, *answers):
+        self.name, self.answers, self.asked = name, list(answers), []
 
     def search(self, query, count):
-        asked.append(query)
-        answer = left.pop(0)
+        self.asked.append(query)
+        answer = self.answer(query)
         if isinstance(answer, BaseException):
             raise answer
         return answer
 
-    monkeypatch.setattr(backend, "search", search)
-    return asked
+    def answer(self, query):
+        return self.answers.pop(0)
 
 
-class Response(io.BytesIO):
-    def __init__(self, body, content_type="application/json"):
-        super().__init__(body if isinstance(body, bytes) else body.encode())
-        self.headers = Message()
-        self.headers["Content-Type"] = content_type
+class Echo(Engine):
+    def __init__(self, name, pause=0.0):
+        super().__init__(name)
+        self.pause, self.running, self.most, self.lock = pause, 0, 0, threading.Lock()
 
-    def __enter__(self):
-        return self
+    def answer(self, query):
+        with self.lock:
+            self.running += 1
+            self.most = max(self.most, self.running)
+        time.sleep(self.pause)
+        with self.lock:
+            self.running -= 1
+        return [found(f"{self.name}/{query}")]
 
-    def __exit__(self, *exc):
-        return False
+
+def found(path, title="T"):
+    return {"title": title, "url": f"https://{path}", "content": "c"}
 
 
 def http_error(code):
     return urllib.error.HTTPError("https://x", code, "err", {}, io.BytesIO(b""))
 
 
-def raising(error):
-    def urlopen(request, timeout):
-        raise error
-
-    return urlopen
-
-
-FOUND = [{"title": "T", "url": "https://x.org", "content": "c"}]
+NO_ROUTE = urllib.error.URLError(OSError("no route"))
+FOUND = [found("x.org")]
 
 
 @pytest.mark.spec("WEB-1")
-def test_the_standard_search_without_an_ollama_key():
-    internet = Internet()
-    assert internet.ollama is None and type(internet.standard) is WebBackend
-    assert Internet.state() == "the standard search (no OLLAMA_API_KEY)"
-
-
-@pytest.mark.spec("WEB-1")
-def test_ollama_search_first_with_its_key(ollama_key):
-    internet = Internet()
-    assert type(internet.ollama) is OllamaWeb and type(internet.standard) is WebBackend
-    assert Internet.state() == "ollama.com search, the standard search as fallback"
-
-
-RESULTS = """<html><body>
-<a class="result__a" href="//duckduckgo.com/l/?uddg=https%3A%2F%2Fpython.org%2Fdocs&amp;rut=1">Python <b>Docs</b></a>
-<a class="result__snippet" href="x">The <b>official</b> docs</a>
-<a class="result__a" href="https://duckduckgo.com/y.js?ad=1">An ad</a>
-<a class="result__a" href="https://example.com/page">Example</a>
-</body></html>"""
-
-
-def answering(monkeypatch, body):
-    monkeypatch.setattr(WebBackend, "get", classmethod(lambda cls, url, timeout, form=None: body))
-
-
-@pytest.mark.spec("WEB-2")
-def test_the_standard_search_reads_duckduckgos_results(monkeypatch):
-    answering(monkeypatch, RESULTS)
-    backend = WebBackend(5)
-    assert backend.search("python", 5) == [
-        {"url": "https://python.org/docs", "title": "Python Docs", "content": "The official docs"},
-        {"url": "https://example.com/page", "title": "Example", "content": ""},
-    ]
-    assert len(backend.search("python", 1)) == 1
-
-
-@pytest.mark.spec("WEB-2")
-def test_a_bot_check_page_is_a_failure(monkeypatch):
-    answering(monkeypatch, "<html>anomaly</html>")
-    with pytest.raises(WebError, match="bot check") as error:
-        WebBackend(5).search("q", 3)
-    assert not error.value.retry and not error.value.unreachable
-
-
-@pytest.mark.spec("WEB-2")
-@pytest.mark.parametrize(
-    "error,retry,unreachable",
-    [
-        (http_error(503), True, False),
-        (http_error(429), False, False),
-        (http_error(404), False, False),
-        (TimeoutError("timed out"), True, False),
-        (urllib.error.URLError(OSError("no route")), False, True),
-    ],
-)
-def test_the_standard_searchs_failures(monkeypatch, error, retry, unreachable):
-    monkeypatch.setattr(urllib.request, "urlopen", raising(error))
-    with pytest.raises(WebError) as raised:
-        WebBackend.get("https://html.duckduckgo.com/html/", 5)
-    assert (raised.value.retry, raised.value.unreachable) == (retry, unreachable)
-
-
-@pytest.mark.spec("WEB-2")
-def test_ollama_web_posts_json_with_its_key(monkeypatch, ollama_key):
-    sent = []
-
-    def urlopen(request, timeout):
-        sent.append(request)
-        return Response(json.dumps({"results": [{"url": "https://r"}]}))
-
-    monkeypatch.setattr(urllib.request, "urlopen", urlopen)
-    assert OllamaWeb(5).search("python", 2) == [{"url": "https://r"}]
-    request = sent[0]
-    assert request.full_url == "https://ollama.com/api/web_search" and request.get_method() == "POST"
-    assert request.get_header("Authorization") == "Bearer secret"
-    assert json.loads(request.data) == {"query": "python", "max_results": 2}
-
-
-@pytest.mark.spec("WEB-2")
-def test_ollama_answers_without_json_or_a_result_list_are_failures(monkeypatch, ollama_key):
-    answers = iter([Response("not json"), Response("[1]"), Response("{}")])
-    monkeypatch.setattr(urllib.request, "urlopen", lambda request, timeout: next(answers))
-    for _ in range(3):
-        with pytest.raises(WebError):
-            OllamaWeb(5).search("q", 1)
+def test_internet_searches_with_mwmbl_wikipedia_and_wikibooks():
+    Config.save(web_timeout=7)
+    engines = Internet().engines
+    assert [type(engine) for engine in engines] == [Mwmbl, Wikipedia, Wikibooks]
+    assert all(engine.timeout == 7.0 for engine in engines)
+    assert Internet.state() == "searches mwmbl, wikipedia, wikibooks"
 
 
 @pytest.mark.spec("WEB-3")
-@pytest.mark.parametrize(
-    "error",
-    [
-        http_error(401),
-        http_error(403),
-        http_error(429),
-        http_error(503),
-        TimeoutError("timed out"),
-        urllib.error.URLError(OSError("no route")),
-    ],
-)
-def test_any_ollama_failure_asks_the_standard_search_at_once(monkeypatch, ollama_key, capsys, error):
-    monkeypatch.setattr(urllib.request, "urlopen", raising(error))
-    standard = scripted(monkeypatch, WebBackend, FOUND, FOUND)
-    slept = []
-    monkeypatch.setattr(time, "sleep", slept.append)
-    internet = Internet()
-    assert internet.search("q", 3) == FOUND and standard == ["q"] and slept == []
-    assert "Web: ollama.com search failed" in capsys.readouterr().out
-    ollama = scripted(monkeypatch, OllamaWeb, FOUND)
-    assert internet.search("r", 3) == FOUND and ollama == ["r"] and standard == ["q"]
+def test_search_interleaves_the_engines_results_by_rank():
+    first = Engine("a", [found("a1"), found("same"), found("a3")])
+    second = Engine("b", [found("same", "B"), found("b2")])
+    results = Internet([first, second]).search("q", 4)
+    assert [result["url"] for result in results] == ["https://a1", "https://same", "https://b2", "https://a3"]
+    assert results[1]["title"] == "B" and first.asked == second.asked == ["q"]
 
 
 @pytest.mark.spec("WEB-3")
-def test_a_standard_search_that_times_out_or_fails_on_the_server_is_asked_once_more(monkeypatch):
-    for trouble in (WebError("timed out", retry=True), WebError("HTTP 503", retry=True)):
-        asked = scripted(monkeypatch, WebBackend, trouble, FOUND)
-        assert Internet().search("q", 3) == FOUND and asked == ["q", "q"]
-        asked = scripted(monkeypatch, WebBackend, trouble, trouble)
-        assert Internet().search("q", 3) == [] and asked == ["q", "q"]
-    asked = scripted(monkeypatch, WebBackend, WebError("bot check"))
-    assert Internet().search("q", 3) == [] and asked == ["q"]
-
-
-@pytest.mark.spec("WEB-3")
-def test_search_keeps_web_addresses_as_strings(monkeypatch):
-    found = [
+def test_search_keeps_web_addresses_as_strings():
+    answer = [
         {"title": "T", "url": "https://x.org", "content": None},
         {"url": "ftp://x"},
         "junk",
         {"title": 5, "url": "http://y.org"},
+        {"url": "https://z.org"},
     ]
-    scripted(monkeypatch, WebBackend, found)
-    assert Internet().search("q", 3) == [
+    assert Internet([Engine("a", answer)]).search("q", 2) == [
         {"title": "T", "url": "https://x.org", "content": ""},
         {"title": "5", "url": "http://y.org", "content": ""},
     ]
 
 
 @pytest.mark.spec("WEB-3")
-def test_a_search_bug_is_a_failure_never_raised(monkeypatch):
-    scripted(monkeypatch, WebBackend, KeyError("oops"))
-    assert Internet().search("q", 3) == []
+def test_search_asks_every_engine_at_once_with_no_pause(monkeypatch):
+    together = threading.Barrier(3, timeout=5)
+
+    class Waiting(Engine):
+        def answer(self, query):
+            together.wait()
+            return [found(self.name)]
+
+    slept = []
+    monkeypatch.setattr(time, "sleep", slept.append)
+    engines = [Waiting(name) for name in ("a", "b", "c")]
+    assert len(Internet(engines).search("q", 5)) == 3 and slept == []
+
+
+@pytest.mark.spec("WEB-3")
+@pytest.mark.parametrize(
+    "trouble", [TimeoutError("timed out"), urllib.error.URLError(TimeoutError("timed out")), http_error(503)]
+)
+def test_an_engine_that_times_out_or_fails_on_the_server_is_asked_once_more(trouble):
+    engine = Engine("a", trouble, FOUND)
+    assert Internet([engine]).search("q", 3) == FOUND and engine.asked == ["q", "q"]
+    engine = Engine("a", trouble, trouble)
+    assert Internet([engine]).search("q", 3) == [] and engine.asked == ["q", "q"]
+
+
+@pytest.mark.spec("WEB-3")
+@pytest.mark.parametrize(
+    "trouble", [http_error(404), http_error(429), SearchFailed("no JSON"), KeyError("oops")]
+)
+def test_any_other_failure_gives_nothing_from_that_engine(trouble):
+    failing, answering = Engine("a", trouble), Engine("b", FOUND)
+    assert Internet([failing, answering]).search("q", 3) == FOUND
+    assert failing.asked == ["q"] and Internet([Engine("a", trouble)]).search("q", 3) == []
+
+
+@pytest.mark.spec("WEB-3")
+def test_search_all_gives_each_querys_results_in_order():
+    engines = [Echo("a"), Echo("b")]
+    assert Internet(engines).search_all(["q", "r"], 3) == [
+        [found("a/q"), found("b/q")],
+        [found("a/r"), found("b/r")],
+    ]
+
+
+@pytest.mark.spec("WEB-3")
+def test_at_most_searches_per_engine_go_to_one_engine_at_a_time():
+    engine = Echo("a", pause=0.05)
+    queries = [f"q{number}" for number in range(SEARCHES_PER_ENGINE * 3)]
+    results = Internet([engine]).search_all(queries, 3)
+    assert results == [[found(f"a/{query}")] for query in queries]
+    assert engine.most == SEARCHES_PER_ENGINE
 
 
 class Pages:
@@ -225,22 +164,28 @@ def got(url, body, kind="text/html", final_url=None):
 
 @pytest.mark.spec("WEB-4")
 def test_an_unreachable_web_is_offline_after_saying_so_once(monkeypatch, capsys):
-    asked = scripted(monkeypatch, WebBackend, WebError("html.duckduckgo.com: no route", unreachable=True))
+    engines = [Engine("a", NO_ROUTE, NO_ROUTE), Engine("b", NO_ROUTE, NO_ROUTE)]
     fetcher, _ = reading(monkeypatch, {})
-    internet = Internet()
-    assert internet.search("q", 3) == [] and internet.search("r", 3) == []
+    internet = Internet(engines)
+    assert internet.search_all(["q", "r"], 3) == [[], []]
+    asked = [list(engine.asked) for engine in engines]
+    assert internet.search("s", 3) == [] and [engine.asked for engine in engines] == asked
     [page] = internet.fetch(["https://a.org"])
-    assert asked == ["q"] and fetcher.asked == []
+    assert all("q" in engine_asked for engine_asked in asked) and fetcher.asked == []
     assert page.url == "https://a.org" and page.data == b"" and page.blocks == [] and page.why
-    assert capsys.readouterr().out.count("Web: not reachable (html.duckduckgo.com: no route)") == 1
+    assert capsys.readouterr().out.count("Web: not reachable (") == 1
 
 
 @pytest.mark.spec("WEB-4")
-def test_a_timeout_is_not_offline(monkeypatch):
-    timed_out = WebError("timed out", retry=True)
-    asked = scripted(monkeypatch, WebBackend, timed_out, timed_out, FOUND)
-    internet = Internet()
-    assert internet.search("q", 3) == [] and internet.search("r", 3) == FOUND and asked == ["q", "q", "r"]
+def test_a_timeout_or_one_unreachable_engine_is_not_offline():
+    timed_out = TimeoutError("timed out")
+    engine = Engine("a", timed_out, timed_out, FOUND)
+    internet = Internet([engine])
+    assert (
+        internet.search("q", 3) == [] and internet.search("r", 3) == FOUND and engine.asked == ["q", "q", "r"]
+    )
+    internet = Internet([Engine("a", NO_ROUTE, FOUND), Engine("b", FOUND, FOUND)])
+    assert internet.search("q", 3) == FOUND and internet.search("r", 3) == FOUND and not internet.offline
 
 
 ARTICLE = (
@@ -317,14 +262,14 @@ def logged():
 @pytest.mark.spec("WEB-6")
 def test_every_request_is_logged_and_counted():
     log = RequestLog()
-    log("search", "ollama", "HTTP 429", 0.5, "q")
-    log("search", "standard", "", 0.4, "q")
-    log("fetch", "standard", "HTTP 404", 1.0, "https://a")
+    log("search", "mwmbl", "HTTP 429", 0.5, "q")
+    log("search", "wikipedia", "", 0.4, "q")
+    log("fetch", "fetcher", "HTTP 404", 1.0, "https://a")
     lines = logged()
     assert [{key: line[key] for key in ("kind", "by", "result", "why", "target")} for line in lines] == [
-        {"kind": "search", "by": "ollama", "result": "failed", "why": "HTTP 429", "target": "q"},
-        {"kind": "search", "by": "standard", "result": "ok", "why": "", "target": "q"},
-        {"kind": "fetch", "by": "standard", "result": "failed", "why": "HTTP 404", "target": "https://a"},
+        {"kind": "search", "by": "mwmbl", "result": "failed", "why": "HTTP 429", "target": "q"},
+        {"kind": "search", "by": "wikipedia", "result": "ok", "why": "", "target": "q"},
+        {"kind": "fetch", "by": "fetcher", "result": "failed", "why": "HTTP 404", "target": "https://a"},
     ]
     assert all(set(line) == {"at", "kind", "by", "result", "why", "seconds", "target"} for line in lines)
     assert log.counts()["search"] == {"requests": 2, "failed": 1, "ok": 1}
@@ -332,20 +277,19 @@ def test_every_request_is_logged_and_counted():
 
 
 @pytest.mark.spec("WEB-6")
-def test_internet_logs_its_searches_and_fetches(monkeypatch, ollama_key):
-    scripted(monkeypatch, OllamaWeb, WebError("HTTP 429"))
-    scripted(monkeypatch, WebBackend, FOUND)
+def test_internet_logs_every_engine_request_and_fetch(monkeypatch):
     reading(monkeypatch, {"https://a": got("https://a", "words", "text/plain")})
-    internet = Internet()
+    internet = Internet([Engine("mwmbl", http_error(503), FOUND), Engine("wikipedia", http_error(404))])
     internet.search("q", 3)
     internet.fetch(["https://a"])
-    lines = logged()
-    assert [(line["kind"], line["by"], line["result"], line["target"]) for line in lines] == [
-        ("search", "ollama", "failed", "q"),
-        ("search", "standard", "ok", "q"),
-        ("fetch", "standard", "ok", "https://a"),
+    lines = sorted((line["kind"], line["by"], line["result"], line["target"]) for line in logged())
+    assert lines == [
+        ("fetch", "fetcher", "ok", "https://a"),
+        ("search", "mwmbl", "failed", "q"),
+        ("search", "mwmbl", "ok", "q"),
+        ("search", "wikipedia", "failed", "q"),
     ]
-    assert internet.requests.text() == "search 2 (1 failed), fetch 1"
+    assert internet.requests.text() == "search 3 (2 failed), fetch 1"
 
 
 def page_text(markup):
@@ -395,16 +339,16 @@ def test_page_text_survives_broken_html():
 
 @pytest.mark.spec("JOB-3")
 def test_searches_and_fetches_go_through_the_journal(home_store, monkeypatch):
-    asked = scripted(monkeypatch, WebBackend, FOUND, FOUND)
+    engine = Engine("a", FOUND, FOUND)
     fetcher, _ = reading(
         monkeypatch,
         {"https://a": got("https://a", b"\x89PNG", "image/png"), "https://b": got("https://b", "<p>hi</p>")},
     )
     with pytest.raises(KeyboardInterrupt), Jobs.running(["ask", "hi"]):
-        first = Internet().fetch(["https://a", "https://b"])
-        Internet().search("q", 3)
+        first = Internet([engine]).fetch(["https://a", "https://b"])
+        Internet([engine]).search("q", 3)
         raise KeyboardInterrupt
     with Jobs.running(Jobs.arguments(["resume", "#1"])):
-        assert Internet().fetch(["https://a", "https://b"]) == first
-        assert Internet().search("q", 3) == FOUND
-    assert asked == ["q"] and len(fetcher.asked) == 1
+        assert Internet([engine]).fetch(["https://a", "https://b"]) == first
+        assert Internet([engine]).search("q", 3) == FOUND
+    assert engine.asked == ["q"] and len(fetcher.asked) == 1
