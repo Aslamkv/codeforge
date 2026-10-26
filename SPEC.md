@@ -209,7 +209,8 @@ Plain text helpers every module shares.
 - **TXT-1** `first_line` gives the first line of the text with its ends stripped, cut to the limit with
   `...`. `one_line` gives the text on one line, each run of whitespace one space. `words` gives the lowercase
   alphanumeric words. `fingerprint` is the SHA-1 of the text. `similarity` is a case-insensitive ratio from 0
-  to 1.
+  to 1. `field(item, key, limit)` gives a key's value as stripped text, cut to the limit, empty when it is
+  missing or none. `host` gives a URL's site in lowercase, without `www.`.
 - **TXT-2** `split_text(text, size)` gives chunks of at most `max(size, 200)` chars. It splits between
   paragraphs, cuts a longer paragraph, and loses no text.
 
