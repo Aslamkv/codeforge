@@ -319,15 +319,15 @@ def drawn_after(terminal, step):
     return terminal.getvalue()
 
 
-def ruled_console(monkeypatch, columns=10, gap=0):
+def ruled_console(monkeypatch, columns=10):
     colour_terminal(monkeypatch, columns)
     console = ConsoleChannel()
-    console.screen.reading, console.screen.gap = True, gap
+    console.screen.reading = True
     return console
 
 
-def ruled_screen(monkeypatch, columns=10, gap=0):
-    return ruled_console(monkeypatch, columns, gap).screen
+def ruled_screen(monkeypatch, columns=10):
+    return ruled_console(monkeypatch, columns).screen
 
 
 def above_the_rule(up, change):
@@ -338,21 +338,25 @@ def room_made(rows, above):
     return f"{'\033D' * rows}\0337\033[{rows + above + 1}A\033[{rows}L"
 
 
-def printed_above(text, rows=1, block_rows=0, gap=0):
-    to_gap_top = f"\033[{gap}A" if gap else ""
-    return f"{room_made(rows - gap, block_rows)}{to_gap_top}\r{text}\0338"
+def printed_above(text, rows=1, block_rows=0):
+    return f"{room_made(rows, block_rows)}\r{text}\0338"
 
 
-def printed_in_gap(text, up):
-    return above_the_rule(up, text)
-
-
-def typed_rows_cleared(rows, block_rows=0):
-    return above_the_rule(block_rows + 1 + rows, f"\033[{rows}L") + "\033[J"
+def moved_down(rows, kept):
+    return f"\0337\033[1;{23 - kept}r\033[{rows}T\033[r\0338"
 
 
 def shown_again(line, columns=10):
     return f"{GREY}{f'› {line}'.ljust(columns)}{RESET}"
+
+
+def rule_drawn(columns):
+    return f"{DIM}{'─' * columns}{RESET}"
+
+
+def sent_back_shown(line, rows=1, block=(), columns=10):
+    drawn = [shown_again(line, columns), *(f"{row}\033[K" for row in block), rule_drawn(columns)]
+    return above_the_rule(rows + len(block) + 1, "\033[E".join(drawn))
 
 
 def stacked(line, count):
@@ -380,46 +384,39 @@ def test_console_shows_your_line_again_highlighted_without_ruling_each_prompt(mo
     console.read()
     assert prompts == [f"{ACCENT}› {RESET}"] * 4
     assert sys.stdout.getvalue() == (
-        typed_rows_cleared(2)
-        + printed_in_gap(shown_again("hello there"), up=3)
-        + typed_rows_cleared(1)
-        + typed_rows_cleared(1)
+        sent_back_shown("hello there", rows=2) + moved_down(1, kept=0) + moved_down(1, kept=0)
     )
-    assert console.screen.gap == 2
     assert [console.lines.get() for _ in range(4)] == ["hello there", "", "exit", None]
 
 
 @pytest.mark.spec("CNV-8")
-def test_console_sends_a_line_back_under_the_rule_and_shows_it_in_the_gap(monkeypatch):
-    console = ruled_console(monkeypatch, columns=20, gap=3)
+def test_console_shows_a_line_sent_under_the_rule_again_right_above_it(monkeypatch):
+    console = ruled_console(monkeypatch, columns=20)
     shown = drawn_after(sys.stdout, lambda: console.show_again("hi"))
-    assert shown == typed_rows_cleared(1) + printed_in_gap(shown_again("hi", columns=20), up=5)
-    assert console.screen.gap == 3
+    assert shown == sent_back_shown("hi", columns=20)
 
 
 @pytest.mark.spec("CNV-8")
 def test_console_sends_a_wrapped_line_back_by_all_its_rows(monkeypatch):
-    console = ruled_console(monkeypatch, columns=10, gap=1)
+    console = ruled_console(monkeypatch, columns=10)
     line = "x" * 25
     shown = drawn_after(sys.stdout, lambda: console.show_again(line))
-    assert shown == typed_rows_cleared(3) + printed_in_gap(shown_again(line), up=5)
-    assert console.screen.gap == 1
+    assert shown == sent_back_shown(line, rows=3)
 
 
 @pytest.mark.spec("CNV-8")
 @pytest.mark.parametrize("line", ["", "  ", "exit"])
-def test_console_sends_a_quiet_line_back_into_the_gap_without_showing_it(monkeypatch, line):
-    console = ruled_console(monkeypatch, columns=10, gap=2)
-    assert drawn_after(sys.stdout, lambda: console.show_again(line)) == typed_rows_cleared(1)
-    assert console.screen.gap == 3
+def test_console_drops_a_quiet_line_by_moving_what_is_above_it_down(monkeypatch, line):
+    console = ruled_console(monkeypatch, columns=10)
+    assert drawn_after(sys.stdout, lambda: console.show_again(line)) == moved_down(1, kept=0)
 
 
 @pytest.mark.spec("CNV-8")
 def test_console_sends_a_line_back_above_the_live_block(monkeypatch, clock):
-    console = ruled_console(monkeypatch, columns=20, gap=4)
+    console = ruled_console(monkeypatch, columns=20)
     console.screen.show_live("Learning", 100.0, under=["one"])
     shown = drawn_after(sys.stdout, lambda: console.show_again("hi"))
-    assert shown == typed_rows_cleared(1, block_rows=2) + printed_in_gap(shown_again("hi", columns=20), up=6)
+    assert shown == sent_back_shown("hi", block=console.screen.drawn, columns=20)
 
 
 @pytest.mark.spec("CNV-8")
@@ -550,12 +547,12 @@ def block_changed(rows):
     return above_the_rule(len(rows) + 1, "\033[E".join(f"{row}\033[K" for row in rows))
 
 
-def block_shrunk(rows, by):
-    return above_the_rule(rows + 1, "\033[E".join(["\033[K"] * by))
+def block_shrunk(by, rows_left):
+    return moved_down(by, kept=rows_left + 1)
 
 
 def block_taken_out(rows):
-    return block_shrunk(rows, rows)
+    return block_shrunk(rows, rows_left=0)
 
 
 @pytest.mark.spec("CNV-8")
@@ -584,8 +581,7 @@ def test_a_shrinking_live_block_clears_its_leftover_lines(monkeypatch, clock):
     screen = live_screen(monkeypatch)
     screen.show_live("Learning", 100.0, under=UNDER)
     shrunk = drawn_after(sys.stdout, lambda: screen.show_live("Writing", 100.0))
-    assert shrunk == block_shrunk(3, 2) + live_changed("Writing")
-    assert screen.gap == 2
+    assert shrunk == block_shrunk(2, rows_left=1) + live_changed("Writing")
 
 
 @pytest.mark.spec("CNV-8")
@@ -603,43 +599,7 @@ def test_console_prints_above_its_live_block_and_takes_it_out(monkeypatch, clock
     printed = drawn_after(sys.stdout, lambda: screen.print("hello"))
     assert printed == printed_above("hello", block_rows=3)
     assert drawn_after(sys.stdout, screen.end_live) == block_taken_out(3)
-    assert screen.under == [] and screen.gap == 3
-
-
-@pytest.mark.spec("CNV-8")
-def test_console_prints_into_the_blank_rows_above_its_live_block(monkeypatch, clock):
-    screen = live_screen(monkeypatch)
-    screen.show_live("Learning", 100.0, under=UNDER)
-    screen.gap = 5
-    printed = drawn_after(sys.stdout, lambda: screen.print("hello\nthere"))
-    assert printed == printed_in_gap("hello\nthere", up=9)
-    assert screen.gap == 3
-
-
-@pytest.mark.spec("CNV-8")
-def test_console_scrolls_only_the_rows_the_blank_rows_cannot_hold(monkeypatch):
-    screen = ruled_screen(monkeypatch, gap=2)
-    screen.print(stacked("line", 5))
-    assert sys.stdout.getvalue() == printed_above(stacked("line", 5), rows=5, gap=2)
-    assert screen.gap == 0
-
-
-@pytest.mark.spec("CNV-8")
-def test_a_growing_live_block_takes_the_blank_rows_above_it_first(monkeypatch, clock):
-    screen = live_screen(monkeypatch)
-    screen.gap = 5
-    grown = drawn_after(sys.stdout, lambda: screen.show_live("Learning", 100.0, under=UNDER))
-    assert grown == block_changed(block_drawn("Learning", UNDER))
-    assert screen.gap == 2
-
-
-@pytest.mark.spec("CNV-8")
-def test_a_live_block_grows_past_the_blank_rows_by_scrolling_the_rest(monkeypatch, clock):
-    screen = live_screen(monkeypatch)
-    screen.gap = 1
-    grown = drawn_after(sys.stdout, lambda: screen.show_live("Learning", 100.0, under=UNDER))
-    assert grown == block_grown(2) + block_changed(block_drawn("Learning", UNDER))
-    assert screen.gap == 0
+    assert screen.under == []
 
 
 def started_screen(monkeypatch, cursor_row):
@@ -654,17 +614,16 @@ STARTING_RULE = f"{DIM}{'─' * 10}{RESET}\n"
 
 
 @pytest.mark.spec("CNV-8")
-def test_console_pins_the_rule_and_prompt_to_the_last_rows_when_it_starts(monkeypatch):
-    terminal, screen = started_screen(monkeypatch, cursor_row=5)
-    assert terminal.getvalue() == "\n" * 18 + STARTING_RULE
-    assert screen.gap == 18
+def test_console_pins_the_rule_and_prompt_to_the_last_rows_with_what_it_printed_above(monkeypatch):
+    terminal, _ = started_screen(monkeypatch, cursor_row=5)
+    assert terminal.getvalue() == "\033[18T\033[18B" + STARTING_RULE
 
 
 @pytest.mark.spec("CNV-8")
 @pytest.mark.parametrize("cursor_row", [None, 23])
 def test_console_starts_where_the_cursor_is_without_an_answer_or_on_the_last_rows(monkeypatch, cursor_row):
-    terminal, screen = started_screen(monkeypatch, cursor_row)
-    assert terminal.getvalue() == STARTING_RULE and screen.gap == 0
+    terminal, _ = started_screen(monkeypatch, cursor_row)
+    assert terminal.getvalue() == STARTING_RULE
 
 
 def test_there_is_no_cursor_row_without_a_terminal():
@@ -687,49 +646,50 @@ def stale_rows_cleared(rows, typed_rows=0):
 
 
 def redrawn_with_rule(block, columns, typed_rows=0):
-    rows = [f"{row}\033[K" for row in block] + [f"{DIM}{'─' * columns}{RESET}"]
+    rows = [f"{row}\033[K" for row in block] + [rule_drawn(columns)]
     return above_the_rule(len(rows) + typed_rows, "\033[E".join(rows))
 
 
-def resized_block_screen(monkeypatch, gap=0):
+def resized_block_screen(monkeypatch):
     screen = live_screen(monkeypatch)
     screen.show_live("Go", 100.0, under=["x" * 30])
-    screen.gap = gap
     return screen
 
 
 @pytest.mark.spec("CNV-8")
 def test_a_narrower_window_clears_the_wrapped_block_and_rule_and_draws_them_again(monkeypatch, clock):
-    screen = resized_block_screen(monkeypatch, gap=1)
+    screen = resized_block_screen(monkeypatch)
     resized_to(monkeypatch, 30)
     repaired = drawn_after(sys.stdout, screen.tick)
-    assert repaired.startswith(stale_rows_cleared(5) + redrawn_with_rule(block_drawn("Go", ["x" * 27]), 30))
-    assert screen.gap == 3
+    assert repaired.startswith(
+        stale_rows_cleared(5) + moved_down(2, kept=3) + redrawn_with_rule(block_drawn("Go", ["x" * 27]), 30)
+    )
 
 
 @pytest.mark.spec("CNV-8")
 def test_a_wider_window_draws_the_block_and_rule_again_at_its_width(monkeypatch, clock):
-    screen = resized_block_screen(monkeypatch, gap=1)
+    screen = resized_block_screen(monkeypatch)
     resized_to(monkeypatch, 60)
     repaired = drawn_after(sys.stdout, screen.tick)
     assert repaired.startswith(stale_rows_cleared(3) + redrawn_with_rule(block_drawn("Go", ["x" * 30]), 60))
-    assert screen.gap == 1
 
 
 @pytest.mark.spec("CNV-8")
-def test_a_shorter_window_keeps_only_the_blank_rows_that_still_fit(monkeypatch, clock):
-    screen = resized_block_screen(monkeypatch, gap=20)
+def test_a_shorter_window_draws_the_block_and_rule_again_without_moving_what_is_above(monkeypatch, clock):
+    screen = resized_block_screen(monkeypatch)
     resized_to(monkeypatch, LIVE_COLUMNS, lines=10)
-    screen.tick()
-    assert screen.gap == 6
+    repaired = drawn_after(sys.stdout, screen.tick)
+    assert repaired.startswith(stale_rows_cleared(3) + redrawn_with_rule(block_drawn("Go", ["x" * 30]), 40))
 
 
 @pytest.mark.spec("CNV-8")
 def test_a_resized_window_without_a_block_draws_only_the_rule_again(monkeypatch):
     screen = ruled_screen(monkeypatch)
     resized_to(monkeypatch, 5)
-    assert drawn_after(sys.stdout, screen.tick) == stale_rows_cleared(2) + redrawn_with_rule([], 5)
-    assert screen.gap == 1 and drawn_after(sys.stdout, screen.tick) == ""
+    assert drawn_after(sys.stdout, screen.tick) == (
+        stale_rows_cleared(2) + moved_down(1, kept=1) + redrawn_with_rule([], 5)
+    )
+    assert drawn_after(sys.stdout, screen.tick) == ""
 
 
 @pytest.mark.spec("CNV-8")
@@ -737,7 +697,9 @@ def test_a_print_right_after_a_resize_draws_the_rule_again_first(monkeypatch):
     screen = ruled_screen(monkeypatch)
     resized_to(monkeypatch, 5)
     printed = drawn_after(sys.stdout, lambda: screen.print("hello"))
-    assert printed == stale_rows_cleared(2) + redrawn_with_rule([], 5) + printed_in_gap("hello", up=2)
+    assert printed == (
+        stale_rows_cleared(2) + moved_down(1, kept=1) + redrawn_with_rule([], 5) + printed_above("hello")
+    )
 
 
 @pytest.mark.spec("CNV-8")
@@ -746,7 +708,10 @@ def test_a_line_sent_right_after_a_resize_draws_the_rule_again_above_it(monkeypa
     resized_to(monkeypatch, 5)
     sent = drawn_after(sys.stdout, lambda: console.show_again(""))
     assert sent == (
-        stale_rows_cleared(2, typed_rows=1) + redrawn_with_rule([], 5, typed_rows=1) + typed_rows_cleared(1)
+        stale_rows_cleared(2, typed_rows=1)
+        + moved_down(1, kept=2)
+        + redrawn_with_rule([], 5, typed_rows=1)
+        + moved_down(1, kept=0)
     )
 
 
@@ -755,7 +720,7 @@ def test_an_unruled_screen_does_nothing_when_resized(monkeypatch):
     screen = ruled_screen(monkeypatch)
     monkeypatch.setattr(sys.stdin, "isatty", lambda: False)
     resized_to(monkeypatch, 5)
-    assert drawn_after(sys.stdout, screen.tick) == "" and screen.gap == 0
+    assert drawn_after(sys.stdout, screen.tick) == ""
 
 
 @pytest.mark.spec("CNV-8")
@@ -778,7 +743,7 @@ def test_once_the_console_reads_live_draws_in_its_live_line(monkeypatch, clock):
         "Writing tests"
     )
     said = drawn_after(sys.stdout, lambda: conversation.say.text("Answered"))
-    assert said == block_taken_out(1) + printed_in_gap("Answered", up=2)
+    assert said == block_taken_out(1) + printed_above("Answered")
 
 
 @pytest.mark.spec("CNV-8")
@@ -805,7 +770,7 @@ def test_console_prints_a_jobs_settled_lines_once_and_shows_what_goes_on_in_its_
         f"{block_changed(block_drawn('Verifying', ['📊 1/2'], '5s'))}"
     )
     done = drawn_after(sys.stdout, lambda: console.show("console", shown, "🏁 calc\n✅ Done", done=True))
-    assert done == f"{block_taken_out(2)}{printed_in_gap('  🏁 calc\n  ✅ Done', up=3)}"
+    assert done == f"{block_taken_out(2)}{printed_above('  🏁 calc\n  ✅ Done', rows=2)}"
 
 
 @pytest.mark.spec("CNV-8")
@@ -814,7 +779,7 @@ def test_console_shows_a_message_without_a_doing_line_in_its_live_line_until_don
     shown = console.show("console", None, "⏳ **Getting ready**\nI answer soon.")
     assert sys.stdout.getvalue() == live_shown("⏳ Getting ready")
     done = drawn_after(sys.stdout, lambda: console.show("console", shown, "Answer", done=True))
-    assert done == block_taken_out(1) + printed_in_gap(f"{ACCENT}● {RESET}Answer", up=2)
+    assert done == block_taken_out(1) + printed_above(f"{ACCENT}● {RESET}Answer")
 
 
 @pytest.mark.spec("CNV-8")

@@ -1927,7 +1927,7 @@ class ConsoleScreen:
 
     def __init__(self):
         self.reading, self.live, self.under, self.frame, self.printing = False, None, [], 0, threading.Lock()
-        self.gap, self.size, self.drawn = 0, shutil.get_terminal_size(), []
+        self.size, self.drawn = shutil.get_terminal_size(), []
 
     def start(self):
         self.reading, self.size = True, shutil.get_terminal_size()
@@ -1939,8 +1939,7 @@ class ConsoleScreen:
     def pin_to_the_bottom(self):
         row, rule_row = cursor_row(), shutil.get_terminal_size().lines - 1
         if row is not None and row < rule_row:
-            self.gap = rule_row - row
-            self.draw("\n" * self.gap)
+            self.draw(scrolled_down(rule_row - row) + rows_down(rule_row - row))
 
     def print(self, text):
         with self.printing:
@@ -1954,18 +1953,7 @@ class ConsoleScreen:
         )
 
     def printed_above(self, text, rows):
-        return self.printed_in_gap(text, rows) if rows <= self.gap else self.printed_past_gap(text, rows)
-
-    def printed_in_gap(self, text, rows):
-        printed = self.above_the_rule(self.live_rows() + self.gap, text)
-        self.gap -= rows
-        return printed
-
-    def printed_past_gap(self, text, rows):
-        room = self.room_made(rows - self.gap, above=self.live_rows())
-        to_gap_top = rows_up(self.gap) if self.gap else ""
-        self.gap = 0
-        return f"{room}{to_gap_top}\r{text}{RESTORE_CURSOR}"
+        return f"{self.room_made(rows, above=self.live_rows())}\r{text}{RESTORE_CURSOR}"
 
     def printed_over_prompt(self, text):
         if not sys.stdout.isatty():
@@ -1976,13 +1964,11 @@ class ConsoleScreen:
         with self.printing:
             rows = rows_shown(typed)
             self.repair(typed_rows=rows)
-            cleared = self.typed_rows_cleared(rows)
-            write_out(cleared + (self.printed_in_pieces(self.shown_again(typed)) if shown else ""))
+            write_out(self.shown_above_the_block(typed, rows) if shown else self.moved_down(rows, kept=0))
 
-    def typed_rows_cleared(self, rows):
-        cleared = self.above_the_rule(self.live_rows() + rows, inserted_rows(rows)) + CLEAR_DOWN
-        self.gap += rows
-        return cleared
+    def shown_above_the_block(self, typed, rows):
+        shown = NEXT_LINE.join([self.shown_again(typed), self.block_and_rule()])
+        return self.above_the_rule(rows + self.live_rows(), shown)
 
     @staticmethod
     def shown_again(typed):
@@ -2013,9 +1999,9 @@ class ConsoleScreen:
         with self.printing:
             self.repair()
             if self.live is not None:
-                taken_out = self.shrunk(self.live_rows(), self.live_rows())
+                rows = self.live_rows()
                 self.live, self.under, self.drawn = None, [], []
-                write_out(taken_out)
+                write_out(self.shrunk(rows))
 
     def keep_ticking(self):
         while True:
@@ -2036,11 +2022,10 @@ class ConsoleScreen:
         self.size = size
 
     def redrawn_at(self, size, typed_rows):
-        stale = self.stale_rows(size.columns)
-        blank = self.gap + stale - self.live_rows() - 1
-        self.gap = max(0, min(blank, size.lines - self.live_rows() - 2))
+        stale, kept = self.stale_rows(size.columns), self.live_rows() + 1 + typed_rows
         cleared = self.above_the_prompt(stale + typed_rows, NEXT_LINE.join([CLEAR_TO_LINE_END] * stale))
-        return cleared + self.above_the_prompt(self.live_rows() + 1 + typed_rows, self.block_and_rule())
+        moved = self.moved_down(stale + typed_rows - kept, kept)
+        return cleared + moved + self.above_the_prompt(kept, self.block_and_rule())
 
     def stale_rows(self, columns):
         drawn = [visible_width(COLOUR_CODE_RE.sub("", row)) for row in self.drawn]
@@ -2055,21 +2040,19 @@ class ConsoleScreen:
 
     def resized(self, rows_before, rows_after):
         if rows_after > rows_before:
-            return self.grown(rows_after - rows_before)
-        return self.shrunk(rows_before, rows_before - rows_after)
-
-    def grown(self, by):
-        taken = min(by, self.gap)
-        self.gap -= taken
-        return self.room_made(by - taken, above=0) + RESTORE_CURSOR if by > taken else ""
+            return self.room_made(rows_after - rows_before, above=0) + RESTORE_CURSOR
+        return self.shrunk(rows_before - rows_after)
 
     @staticmethod
     def room_made(rows, above):
         return f"{ROW_DOWN_OR_SCROLL * rows}{SAVE_CURSOR}{rows_up(rows + above + 1)}{inserted_rows(rows)}"
 
-    def shrunk(self, rows, by):
-        self.gap += by
-        return self.above_the_rule(rows, NEXT_LINE.join([CLEAR_TO_LINE_END] * by)) if by else ""
+    def shrunk(self, by):
+        return self.moved_down(by, kept=self.live_rows() + 1)
+
+    @staticmethod
+    def moved_down(rows, kept):
+        return scrolled_down_above(shutil.get_terminal_size().lines - 1 - kept, rows) if rows else ""
 
     def redrawn_live(self):
         changed = NEXT_LINE.join(row + CLEAR_TO_LINE_END for row in self.live_drawn())
@@ -2104,7 +2087,7 @@ class ConsoleScreen:
 
 SAVE_CURSOR, RESTORE_CURSOR, NEXT_LINE = "\0337", "\0338", "\033[E"
 COLOUR_CODE_RE = re.compile(r"\033\[[0-9;]*m")
-CLEAR_DOWN, ROW_DOWN_OR_SCROLL = "\033[J", "\033D"
+WHOLE_SCREEN, ROW_DOWN_OR_SCROLL = "\033[r", "\033D"
 CURSOR_REPORT, CURSOR_REPORT_RE, CURSOR_REPORT_SECONDS = "\033[6n", re.compile(r"\033\[(\d+);\d+R"), 0.2
 
 
@@ -2185,8 +2168,24 @@ def rows_up(rows):
     return f"\033[{rows}A"
 
 
+def rows_down(rows):
+    return f"\033[{rows}B"
+
+
 def inserted_rows(rows):
     return f"\033[{rows}L"
+
+
+def scrolled_down(rows):
+    return f"\033[{rows}T"
+
+
+def scrolled_down_above(bottom, rows):
+    return f"{SAVE_CURSOR}{scroll_region(1, bottom)}{scrolled_down(rows)}{WHOLE_SCREEN}{RESTORE_CURSOR}"
+
+
+def scroll_region(top, bottom):
+    return f"\033[{top};{bottom}r"
 
 
 def write_out(text):
