@@ -335,6 +335,21 @@ def test_console_redraws_the_rule_and_prompt_under_what_it_prints(monkeypatch):
 
 
 @pytest.mark.spec("CNV-8")
+def test_what_tinker_says_while_you_type_prints_above_the_prompt(monkeypatch):
+    terminal = colour_terminal(monkeypatch)
+    typing(monkeypatch)
+    console = ConsoleChannel()
+    console.receive(1)
+    terminal.seek(0)
+    terminal.truncate()
+    conversation.say.text("[12:00:00] tinker_bot: hello")
+    assert (
+        terminal.getvalue()
+        == f"\r\033[K\033[F\033[K[12:00:00] tinker_bot: hello\n{DIM}{'─' * 10}{RESET}\n{ACCENT}› {RESET}"
+    )
+
+
+@pytest.mark.spec("CNV-8")
 def test_console_prints_plain_without_colour(monkeypatch):
     terminal = colour_terminal(monkeypatch)
     monkeypatch.setenv("NO_COLOR", "1")

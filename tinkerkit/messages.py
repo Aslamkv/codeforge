@@ -60,10 +60,11 @@ class Messages:
     def __init__(self):
         self.depth, self.followers, self.log, self.drawn, self.frame = 0, [], None, False, 0
         self.doing, self.last_step, self.began = "", "", None
+        self.write = print
 
     def title(self, text, icon=""):
         if self.depth == 0:
-            print()
+            self.write("")
         self.say("title", text, icon)
 
     @contextlib.contextmanager
@@ -131,7 +132,7 @@ class Messages:
     def say(self, kind, text, icon=""):
         message = Message(kind, text, self.depth, icon or self.ICONS.get(kind, ""))
         self.end_live()
-        print(message.line)
+        self.write(message.line)
         self.tell(message)
 
     def live(self, text):
@@ -187,6 +188,9 @@ class Messages:
     def detail(self, text, **facts):
         if self.log is not None:
             self.log.add({"note": text, **facts})
+
+    def write_through(self, write):
+        self.write = write
 
     def follow(self, follower):
         self.followers.append(follower)

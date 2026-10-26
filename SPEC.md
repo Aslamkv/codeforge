@@ -737,7 +737,8 @@ The terminal and the chats are one conversation: the same commands, the same ans
 - **CNV-7** `Channel.listened` gives only messages from allowed chats. It says a refusal once and gives
   nothing. `claim` lets only one process hold a channel's lock.
 - **CNV-8** `ConsoleChannel` prints a dim headline while a thing changes, the whole message when it is done,
-  and only the new lines when it grew. `exit` or end of input closes it. On a terminal with colour, the
+  and only the new lines when it grew. `exit` or end of input closes it. Once it reads, all that Tinker says
+  (`say`, a chat's message too) prints through it, above the prompt. On a terminal with colour, the
   conversation opens in a framed banner, draws a rule over the prompt, shows each line you send again
   highlighted, and marks each message it sends with a steel blue `●`. The banner names Tinker, the model in
   use, the projects folder and the chats it listens on. Piped input draws no rule and shows no line again;

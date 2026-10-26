@@ -1757,8 +1757,7 @@ class ConsoleChannel(Channel):
 
     def receive(self, timeout):
         if self.reader is None:
-            self.reader = threading.Thread(target=self.read, daemon=True)
-            self.reader.start()
+            self.start_reading()
         try:
             line = self.lines.get(timeout=timeout)
         except queue.Empty:
@@ -1767,6 +1766,11 @@ class ConsoleChannel(Channel):
             self.closed = True
             return []
         return [Message(self.CHAT, line, "you")] if line.strip() else []
+
+    def start_reading(self):
+        say.write_through(self.print)
+        self.reader = threading.Thread(target=self.read, daemon=True)
+        self.reader.start()
 
     def read(self):
         while True:
