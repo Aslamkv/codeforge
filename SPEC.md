@@ -690,8 +690,8 @@ every failure of either: no caller sees a backend, an HTTP status or an exceptio
 - **WEB-1** `Internet()` searches with every engine of `search` (**WEB-2**): Mwmbl, Wikipedia and Wikibooks;
   no setting and no key choose. `Internet.state()` names them: `searches mwmbl, wikipedia, wikibooks`.
 - **WEB-2** A `SearchEngine` has a `name` and `search(query, count)`, which gives at most `count` results, each
-  `{title, url, content}` strings, and raises on any failure (an HTTP error, a timeout, no connection, an answer
-  that is not JSON or has no result list). It uses the standard library only and sends a User-Agent naming
+  `{title, url, content}` strings, and raises on any failure: the web's own error for an HTTP error, a timeout or no connection,
+  and `SearchFailed` for an answer that is not JSON or has no result list. It uses the standard library only and sends a User-Agent naming
   Tinker and its repository (`https://github.com/Aslamkv/codeforge`), as Wikimedia asks. `Mwmbl` (name
   `mwmbl`) asks `https://api.mwmbl.org/api/v1/search/?s=<query>` with the query as plain keywords (it knows no
   operators); a title or extract given as a list of `{value}` segments is joined into one string. `MediaWiki`
