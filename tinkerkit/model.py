@@ -275,27 +275,24 @@ class Model:
         return True
 
     def recover(self, exc, label, tries):
-        think = tries.think
-        if self.build_thinking_rejected(exc, think):
-            self.think_as_planning(label, tries)
+        if exc.about_thinking and tries.think is not None:
+            self.lower_think(label, tries)
         elif exc.oom and tries.shrink < OOM_RETRIES:
             self.shorter_prompt(label, tries)
         elif exc.stalled and tries.stalls < STALL_RETRIES:
             self.reload_model(exc, label, tries)
-        elif think not in (None, True, False) and exc.about_thinking:
-            self.think_true(label, tries)
-        elif think is not None and exc.about_thinking:
-            self.without_thinking(label, tries)
         else:
             raise exc
 
-    def think_as_planning(self, label, tries):
-        self.note(
-            f"{label}: {self.name} rejected think={tries.think!r} for building; using {self.think!r} as for "
-            f"planning"
-        )
-        self.build_think = None
-        tries.think = self.think
+    def lower_think(self, label, tries):
+        rejected = tries.think
+        if self.is_building and rejected == self.build_think != self.think:
+            self.build_think, tries.think = None, self.think
+        elif rejected in (True, False):
+            self.think, self.think_rejected, tries.think = None, True, None
+        else:
+            self.think = tries.think = True
+        self.note(f"{label}: {self.name} rejected think={rejected!r}; using think={tries.think!r}")
 
     def shorter_prompt(self, label, tries):
         self.note(
@@ -312,17 +309,6 @@ class Model:
         )
         Ollama.unload(self.name)
         tries.stalls += 1
-
-    def think_true(self, label, tries):
-        self.note(f"{label}: {self.name} rejected think={tries.think!r}; using think=true")
-        self.think = tries.think = True
-
-    def without_thinking(self, label, tries):
-        self.note(f"{label}: {self.name} rejected the think setting; retrying without it")
-        self.think, self.think_rejected, tries.think = None, True, None
-
-    def build_thinking_rejected(self, exc, think):
-        return self.is_building and think == self.build_think != self.think and exc.about_thinking
 
     def prompt_tokens(self, system, user):
         return int((len(system) + len(user)) / self.chars_per_token)
