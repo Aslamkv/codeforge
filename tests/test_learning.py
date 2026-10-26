@@ -29,7 +29,7 @@ class FakeWeb:
 
     def search(self, query, count):
         self.queries.append(query)
-        self.requests("search", "standard", "", 0.01, query)
+        self.requests("search", "mwmbl", "", 0.01, query)
         return list(self.found.get(query, []))[:count]
 
     def fetch(self, urls, max_bytes=None):
@@ -38,7 +38,7 @@ class FakeWeb:
 
     def page(self, url):
         why = "" if url in self.pages else "HTTP 404"
-        self.requests("fetch", "standard", why, 0.01, url)
+        self.requests("fetch", "fetcher", why, 0.01, url)
         if why:
             return WebPage.failed(url, why)
         return web_page(url, self.pages[url], "text/html")

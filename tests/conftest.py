@@ -90,7 +90,7 @@ def offline(monkeypatch):
         raise OSError(f"network is off in tests ({address})")
 
     monkeypatch.setattr(socket.socket, "connect", refuse)
-    for name in ("OLLAMA_API_KEY", "TINKER_CHANNELS", "NO_COLOR", "TINKER_FORMAT"):
+    for name in ("TINKER_CHANNELS", "NO_COLOR", "TINKER_FORMAT"):
         monkeypatch.delenv(name, raising=False)
     no_stale_bytecode(monkeypatch)
 
