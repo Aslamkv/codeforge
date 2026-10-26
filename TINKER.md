@@ -465,6 +465,7 @@ tinker config learn_searches 1      # at most one follow-up search
 tinker config learn_pages 4         # pages read from each search
 tinker config tool_docs_pages 2     # pages read about each of a language's tools
 tinker config learn_think high      # think harder (and slower) while reading pages
+tinker config web_timeout 60        # wait up to 60 seconds for each search engine
 ```
 
 Delete parts of what Tinker keeps, or all of it (your projects stay). Each shows what it deletes and asks
