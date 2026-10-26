@@ -74,7 +74,7 @@ listed above it:
 | `model` | the local model: Ollama's API, one request with its budgets and retries (`Model`), measuring a model (`Calibrator`), measured models (`Models`) |
 | `project` | the plan and its record (`Project`, `SpecDocument`, `Runs`, `RunChecks`, `Brief`, `Outcome`), the run's `Tracker` and its `ending`, and the step pipeline (`Steps`) with what moves a tracker through it (`Tracked`) |
 | `fetcher` | the web plugin's page fetcher, used by `web` alone: pages read straight from their sites, in parallel, with the standard library only (`Fetcher`, `Fetched`) |
-| `passages` | every page read as text: an HTML page's main content as blocks, and fetched pages as passages under headings, repeats dropped (`Cleaner`, `MainBlocks`, `Links`, `Page`, `Passage`) |
+| `passages` | every page read as text: an HTML page's main content as blocks, and fetched pages as passages under headings, repeats dropped (`Cleaner`, `MainBlocks`, `Page`, `Passage`) |
 | `web` | the web plugin, the only part that reaches web content: search and fetch, and every failure of either (`Internet`, `WebBackend`, `OllamaWeb`, `WebPage`, `RequestLog`), and a page as text (`PageText`, a view over `passages`) |
 | `conversation` | the terminal and the chats as one conversation (`Desk`, `Channel`, `Markup`, `Talk`, `Shell`, `Progress`, `Reporter`) |
 | `channels` | the chat plugin: Telegram, and `tinker channel` |
