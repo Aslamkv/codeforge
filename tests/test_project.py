@@ -395,7 +395,6 @@ def test_outcome():
         assert (outcome.status, outcome.exit_code) == (status, code)
 
 
-
 @pytest.mark.spec("PRJ-14")
 def test_the_tracker_publishes_each_change_in_its_job(home_store, project_dir):
     with Jobs.running(["task", "a", "calculator"]):
