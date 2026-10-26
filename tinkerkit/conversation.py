@@ -461,7 +461,7 @@ class Desk:
     def memory(self, channel, chat, words):
         if "--graph" in words:
             return self.memory_graph(channel, chat, words)
-        return self.by_table(channel, chat, words)
+        return md(t"🧠 **{' '.join(words)}**\n{self.tinker(words):block}")
 
     def research(self, words):
         return self.start_task(words, self.root, " ".join(words)) if len(words) > 1 else USAGE["research"]

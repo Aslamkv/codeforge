@@ -13,6 +13,7 @@ from tinkerkit.model import Models, Ollama, OllamaError
 from tinkerkit.project import Runs, Tracker, project_store
 from tinkerkit.session import Phase, Stopped
 from tinkerkit.settings import FIX_PHASES, PHASES, Config
+from tinkerkit.workspace import Toolchain
 
 
 def parse(*argv):
@@ -633,73 +634,44 @@ def test_learning_checks_everything_before_loading_and_finding_nothing_is_an_err
         Commands(parse(*words)).run()
 
 
-@pytest.mark.spec("CLI-5")
-def test_memory(home_store, capsys):
+@pytest.mark.spec("CLI-5", "GRF-8", "GRF-9")
+def test_memory_browses_what_tinker_learned(home_store, capsys):
     known = Knowledge("Python")
-    known.remember_toolchain(cli.Toolchain(TOOLCHAIN))
-    known.remember_fix(
-        {"failure": "no module named calc", "cause": "pythonpath", "replay": {"toolchain": {}}}
-    )
-    known.add_lessons(
-        [
-            {"text": "Use tmp_path in tests", "phase": "tests", "scope": "language"},
-            {"text": "Exit with 1 after an error", "phase": "code", "scope": "any"},
-        ],
-        [],
-    )
-    Library.save(
-        "flask",
-        {
-            "name": "Flask",
-            "summary": "A web framework.",
-            "learned": "2026-10-01",
-            "facts": [{"phase": "code", "text": "x"}],
-        },
-    )
-    Commands(parse("learn", "act", "echo hi")).run()
-    capsys.readouterr()
-    Commands.show_memory()
-    out = capsys.readouterr().out
-    for line in (
-        "📘 Python · nothing built yet",
-        "   🧰 Toolchain\n",
-        f"      test      {TOOLCHAIN['test_all']}",
-        "   🔧 Fixes\n      • no module named calc → pythonpath (helped 1×)",
-        "   📒 Lessons (✅ proven by a build, 🌱 not yet)\n      🌱 Use tmp_path in tests",
-        "🌍 Any language\n   📒 Lessons",
-        "      🌱 Exit with 1 after an error",
-        "🔬 Topics learned\n   • Flask: A web framework. (read 1 Oct, 1 facts)",
-        "⌨️  Your commands\n   • act: stands for `echo hi` (given)",
-        "   Ask about it   tinker ask",
-    ):
-        assert line in out, line
-    toolchain_rows = out.split("🧰 Toolchain")[1].split("🔧")[0]
-    assert "setup" not in toolchain_rows
-
-
-@pytest.mark.spec("CLI-5")
-def test_memory_of_a_language_read_from_the_web_only(home_store, capsys):
+    known.remember_toolchain(Toolchain(TOOLCHAIN))
+    known.add_lessons([{"text": "Use tmp_path in tests", "phase": "tests", "scope": "language"}], [])
     Library.save(
         "go",
         {
             "name": "Go",
             "kind": "language",
             "language": "Go",
-            "summary": "s",
+            "summary": "A compiled language.",
             "learned": "2026-10-22 08:53",
-            "facts": [{"phase": "code", "text": "x"}],
+            "facts": [{"phase": "code", "text": "Run go test ./..."}],
         },
     )
-    Commands.show_memory()
+    Commands(parse("memory")).run()
     out = capsys.readouterr().out
-    assert "📘 Go · nothing built yet · docs read 22 Oct (1 facts)" in out and "Topics learned" not in out
+    assert "📘 Python (memory python): 1 toolchain, 1 lesson; 1 proven · nothing built yet" in out
+    assert "📘 Go (memory go): 1 fact; 0 proven · nothing built yet" in out
+    Commands(parse("memory", "go", "facts")).run()
+    out = capsys.readouterr().out
+    assert "A compiled language.\nlearned: 2026-10-22 08:53\nnothing built yet" in out
+    assert "] 🌱 fact      Run go test ./..." in out
 
 
-@pytest.mark.spec("CLI-5")
+@pytest.mark.spec("CLI-5", "GRF-8")
 def test_memory_with_nothing_learned_says_how_to_start(home_store, capsys):
-    Commands.show_memory()
-    out = capsys.readouterr().out
-    assert "🌱 Nothing yet: it learns from every build" in out and "Any language" not in out
+    Commands(parse("memory")).run()
+    assert "🌱 Nothing yet: it learns from every build" in capsys.readouterr().out
+
+
+@pytest.mark.spec("CLI-5", "GRF-9")
+def test_memory_refuses_words_it_cannot_read(home_store, capsys):
+    for wrong in (["show"], ["lessons", "facts"], ["python", "0"]):
+        with pytest.raises(SystemExit):
+            parse("memory", *wrong)
+        assert "tinker memory NAME [KIND] [PAGE]" in capsys.readouterr().err
 
 
 @pytest.mark.spec("CLI-5")

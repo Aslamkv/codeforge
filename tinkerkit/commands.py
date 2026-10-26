@@ -407,16 +407,38 @@ COMMANDS = [
     Command(
         "memory",
         "Learn",
-        "memory [--graph]",
-        "what Tinker has learned (--graph: as a graph to explore)",
-        "Show what Tinker has learned: toolchains, fixes, lessons, topics, your commands. --graph draws it as a "
+        "memory [NAME] [KIND] [PAGE] | show ID | find WORDS | recent [PAGE] [--graph]",
+        "browse what Tinker has learned (--graph: as a graph to explore)",
+        "Browse what Tinker has learned, a page at a time: memory lists the parts (each language, any language, "
+        "each topic, your commands) with what each holds; memory NAME shows one part, each item with its short "
+        "ID, ✅ proven or 🌱 not yet, its kind and its first line; a KIND (toolchain, facts, findings, rules, "
+        "fixes, lessons, commands or retired) keeps that kind, and alone lists it across memory. The browser "
+        "changes nothing: correct an item with teach, forget a part with clear PART. --graph draws it as a "
         "graph in one page (opened in the browser; in a chat, sent as a file): each lesson, fact and fix linked "
         "to its language or topic and to the runs that taught it, proved it or found it wrong.",
         kind="glance",
         chat=True,
-        words="one",
+        words="any",
+        arguments=[
+            Argument(
+                "words",
+                "*",
+                "[NAME] [KIND] [PAGE]",
+                "a part (as memory lists it), a kind of item, the page, from 1; or show ID, find WORDS, "
+                "recent [PAGE]",
+            )
+        ],
         options=("graph",),
-        example="memory --graph",
+        example="memory python lessons 2",
+        rows=[
+            ("memory [PAGE]", "the parts of memory: what each holds, how much is proven, what is retired"),
+            ("memory NAME [KIND] [PAGE]", "one part: its details, then its items with their short IDs"),
+            ("memory KIND [PAGE]", "one kind of item across memory (retired: the retired ones)"),
+            ("memory show ID", "one item whole: its text, details, sources, links and runs"),
+            ("memory find WORDS", "the items that hold every word, retired ones too"),
+            ("memory recent [PAGE]", "the items newest first, each with its day"),
+            ("memory --graph", "memory as a graph in one page, to explore"),
+        ],
     ),
     Command(
         "doctor",
