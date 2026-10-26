@@ -74,7 +74,7 @@ listed above it:
 | `model` | the local model: Ollama's API, one request with its budgets and retries (`Model`), measuring a model (`Calibrator`), measured models (`Models`) |
 | `project` | the plan and its record (`Project`, `SpecDocument`, `Runs`, `RunChecks`, `Brief`, `Outcome`), the run's `Tracker` and its `ending`, and the step pipeline (`Steps`) with what moves a tracker through it (`Tracked`) |
 | `fetcher` | the web plugin's page fetcher, used by `web` alone: pages read straight from their sites, in parallel, with the standard library only (`Fetcher`, `Fetched`) |
-| `passages` | every page read as text: an HTML page's main content as blocks, and fetched pages as passages under headings, repeats dropped (`Cleaner`, `MainBlocks`, `Links`, `Page`, `Passage`) |
+| `passages` | every page read as text: an HTML page's main content as blocks, and fetched pages as passages under headings, repeats dropped (`Cleaner`, `MainBlocks`, `Page`, `Passage`) |
 | `web` | the web plugin, the only part that reaches web content: search and fetch, and every failure of either (`Internet`, `WebBackend`, `OllamaWeb`, `WebPage`, `RequestLog`), and a page as text (`PageText`, a view over `passages`) |
 | `conversation` | the terminal and the chats as one conversation (`Desk`, `Channel`, `Markup`, `Talk`, `Shell`, `Progress`, `Reporter`) |
 | `channels` | the chat plugin: Telegram, and `tinker channel` |
@@ -209,7 +209,8 @@ Plain text helpers every module shares.
 - **TXT-1** `first_line` gives the first line of the text with its ends stripped, cut to the limit with
   `...`. `one_line` gives the text on one line, each run of whitespace one space. `words` gives the lowercase
   alphanumeric words. `fingerprint` is the SHA-1 of the text. `similarity` is a case-insensitive ratio from 0
-  to 1.
+  to 1. `field(item, key, limit)` gives a key's value as stripped text, cut to the limit, empty when it is
+  missing or none. `host` gives a URL's site in lowercase, without `www.`.
 - **TXT-2** `split_text(text, size)` gives chunks of at most `max(size, 200)` chars. It splits between
   paragraphs, cuts a longer paragraph, and loses no text.
 

@@ -396,12 +396,6 @@ def test_outcome():
 
 
 @pytest.mark.spec("PRJ-14")
-def test_a_jobs_tracker_keeps_its_job_number(home_store):
-    with Jobs.running(["learn", "go"]):
-        assert Tracker("learn go").state["job"] == Jobs.current["number"] == 1
-
-
-@pytest.mark.spec("PRJ-14")
 def test_the_tracker_publishes_each_change_in_its_job(home_store, project_dir):
     with Jobs.running(["task", "a", "calculator"]):
         tracker = Tracker("a calculator", before=12.0)

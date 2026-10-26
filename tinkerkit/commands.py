@@ -354,8 +354,8 @@ COMMANDS = [
         "Jobs",
         "jobs [running|paused|stopped|finished|archived] [PAGE]",
         "the long commands: running, paused, stopped",
-        "List the jobs: every long command (a task, add, fix, learn, ask, teach, read, research, exercise) is one, "
-        "numbered #1, #2 ... One runs at a time: a job you start pauses the one that runs, which goes on by itself once Tinker "
+        "List the jobs: every long command (a task, add, fix, learn, ask, teach, read, research, exercise, "
+        "calibrate) is one, numbered #1, #2 ... One runs at a time: a job you start pauses the one that runs, which goes on by itself once Tinker "
         "is idle (resume #N: at once). Without a state, the running ones, the paused ones and the stopped ones; "
         "running, paused, stopped, finished or archived (by clear jobs) lists those alone. Newest first, 10 to a "
         "page (jobs stopped 2: the second page).",

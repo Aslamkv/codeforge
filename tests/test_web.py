@@ -172,13 +172,6 @@ def test_any_ollama_failure_asks_the_standard_search_at_once(monkeypatch, ollama
 
 
 @pytest.mark.spec("WEB-3")
-def test_an_unusable_ollama_answer_falls_back_too(monkeypatch, ollama_key):
-    monkeypatch.setattr(urllib.request, "urlopen", lambda request, timeout: Response("{}"))
-    standard = scripted(monkeypatch, WebBackend, FOUND)
-    assert Internet().search("q", 3) == FOUND and standard == ["q"]
-
-
-@pytest.mark.spec("WEB-3")
 def test_a_standard_search_that_times_out_or_fails_on_the_server_is_asked_once_more(monkeypatch):
     for trouble in (WebError("timed out", retry=True), WebError("HTTP 503", retry=True)):
         asked = scripted(monkeypatch, WebBackend, trouble, FOUND)

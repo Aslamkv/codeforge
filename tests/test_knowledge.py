@@ -699,7 +699,7 @@ def test_supported_and_entry():
     assert "section" not in entry["facts"][0]
 
 
-@pytest.mark.spec("KNW-17")
+@pytest.mark.spec("KNW-18")
 def test_next_searches_and_fact_listing():
     frame = {"questions": [{"question": "q1"}, {"question": "q2"}]}
     facts = [fact("a", "u", "2"), fact("b", "u", "1")]

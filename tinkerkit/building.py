@@ -88,19 +88,8 @@ class TestWriter(Phase, NotAPytestClass):
             note = self.take(reply, path, todo, current)
 
     def prompt(self, cycle, path, todo, current, note):
-        where = (
-            f"a NEW test file next to {path} (do not change {path}; name it by the language's test "
-            f"conventions)"
-            if current.strip()
-            else path
-        )
-        uses = self.project.files.get(path, {}).get("uses") or self.project.paths("code", "template")
-        parts = [
-            Part(
-                f"Tests to write in {where} (name: criterion)",
-                Part.bullets(f"{TestRef(step['test']).name}: {step['behaviour']}" for step in todo),
-                True,
-            ),
+        return [
+            self.tests_to_write(path, todo, current),
             Part("Test command", self.session.toolchain.test_one, True, place="first"),
             Part("Note", note, place="last"),
             Part(
@@ -108,18 +97,38 @@ class TestWriter(Phase, NotAPytestClass):
                 cycle.get("data", ""),
                 place="first",
             ),
+            self.config_files_part(),
+            *self.context_parts(path, current),
         ]
+
+    def tests_to_write(self, path, todo, current):
+        where = (
+            f"a NEW test file next to {path} (do not change {path}; name it by the language's test "
+            f"conventions)"
+            if current.strip()
+            else path
+        )
+        return Part(
+            f"Tests to write in {where} (name: criterion)",
+            Part.bullets(f"{TestRef(step['test']).name}: {step['behaviour']}" for step in todo),
+            True,
+        )
+
+    def config_files_part(self):
         configs = [
             config for config in self.session.files_on_disk("config") if config not in (ENV_FILE, ENV_EXAMPLE)
         ]
-        return parts + [
-            Part(
-                "The project's config files (the tests use the names they give: the package, the library, "
-                "the program)",
-                "\n\n".join(f"{config}:\n{self.workspace.read(config)}" for config in configs),
-                atomic=True,
-                place="first",
-            ),
+        return Part(
+            "The project's config files (the tests use the names they give: the package, the library, "
+            "the program)",
+            "\n\n".join(f"{config}:\n{self.workspace.read(config)}" for config in configs),
+            atomic=True,
+            place="first",
+        )
+
+    def context_parts(self, path, current):
+        uses = self.project.files.get(path, {}).get("uses") or self.project.paths("code", "template")
+        return [
             Part("Contracts of the files these tests use", self.project.contracts(uses)),
             Part(
                 f"Start of {path} (its imports and shared setup; it stays as it is; a fake of the app's own "
