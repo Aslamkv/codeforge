@@ -319,19 +319,44 @@ def drawn_after(terminal, step):
     return terminal.getvalue()
 
 
-LIVE_LINE_TAKEN_OUT = "\0337\033[2F\033[K\0338"
+def ruled_console(monkeypatch, columns=10, gap=0):
+    colour_terminal(monkeypatch, columns)
+    console = ConsoleChannel()
+    console.screen.reading, console.screen.gap = True, gap
+    return console
+
+
+def ruled_screen(monkeypatch, columns=10, gap=0):
+    return ruled_console(monkeypatch, columns, gap).screen
+
+
+def above_the_rule(up, change):
+    return f"\0337\033[{up}F{change}\0338"
+
+
+def room_made(rows, above):
+    return f"{'\033D' * rows}\0337\033[{rows + above + 1}A\033[{rows}L"
 
 
 def printed_above(text, rows=1, block_rows=0, gap=0):
-    scrolled = rows - gap
     to_gap_top = f"\033[{gap}A" if gap else ""
-    return (
-        f"{'\033D' * scrolled}\0337\033[{scrolled + block_rows + 1}A\033[{scrolled}L{to_gap_top}\r{text}\0338"
-    )
+    return f"{room_made(rows - gap, block_rows)}{to_gap_top}\r{text}\0338"
 
 
 def printed_in_gap(text, up):
-    return f"\0337\033[{up}F{text}\0338"
+    return above_the_rule(up, text)
+
+
+def typed_rows_cleared(rows, block_rows=0):
+    return above_the_rule(block_rows + 1 + rows, f"\033[{rows}L") + "\033[J"
+
+
+def shown_again(line, columns=10):
+    return f"{GREY}{f'› {line}'.ljust(columns)}{RESET}"
+
+
+def stacked(line, count):
+    return "\n".join([line] * count)
 
 
 @pytest.mark.spec("CNV-8")
@@ -350,15 +375,13 @@ def test_console_marks_each_message_and_indents_its_lines_on_a_colour_terminal(m
 
 @pytest.mark.spec("CNV-8")
 def test_console_shows_your_line_again_highlighted_without_ruling_each_prompt(monkeypatch):
-    terminal = colour_terminal(monkeypatch)
+    console = ruled_console(monkeypatch)
     prompts = typing(monkeypatch, "hello there", "", "exit")
-    console = ConsoleChannel()
-    console.screen.reading = True
     console.read()
     assert prompts == [f"{ACCENT}› {RESET}"] * 4
-    assert terminal.getvalue() == (
+    assert sys.stdout.getvalue() == (
         typed_rows_cleared(2)
-        + printed_in_gap(f"{GREY}› hello there{RESET}", up=3)
+        + printed_in_gap(shown_again("hello there"), up=3)
         + typed_rows_cleared(1)
         + typed_rows_cleared(1)
     )
@@ -366,22 +389,11 @@ def test_console_shows_your_line_again_highlighted_without_ruling_each_prompt(mo
     assert [console.lines.get() for _ in range(4)] == ["hello there", "", "exit", None]
 
 
-def typed_rows_cleared(rows, block_rows=0):
-    return f"\0337\033[{block_rows + 1 + rows}F\033[{rows}L\0338\033[J"
-
-
-def ruled_console(monkeypatch, columns, gap):
-    colour_terminal(monkeypatch, columns)
-    console = ConsoleChannel()
-    console.screen.reading, console.screen.gap = True, gap
-    return console
-
-
 @pytest.mark.spec("CNV-8")
 def test_console_sends_a_line_back_under_the_rule_and_shows_it_in_the_gap(monkeypatch):
     console = ruled_console(monkeypatch, columns=20, gap=3)
     shown = drawn_after(sys.stdout, lambda: console.show_again("hi"))
-    assert shown == typed_rows_cleared(1) + printed_in_gap(f"{GREY}› hi{' ' * 16}{RESET}", up=5)
+    assert shown == typed_rows_cleared(1) + printed_in_gap(shown_again("hi", columns=20), up=5)
     assert console.screen.gap == 3
 
 
@@ -390,7 +402,7 @@ def test_console_sends_a_wrapped_line_back_by_all_its_rows(monkeypatch):
     console = ruled_console(monkeypatch, columns=10, gap=1)
     line = "x" * 25
     shown = drawn_after(sys.stdout, lambda: console.show_again(line))
-    assert shown == typed_rows_cleared(3) + printed_in_gap(f"{GREY}› {line}{RESET}", up=5)
+    assert shown == typed_rows_cleared(3) + printed_in_gap(shown_again(line), up=5)
     assert console.screen.gap == 1
 
 
@@ -407,7 +419,7 @@ def test_console_sends_a_line_back_above_the_live_block(monkeypatch, clock):
     console = ruled_console(monkeypatch, columns=20, gap=4)
     console.screen.show_live("Learning", 100.0, under=["one"])
     shown = drawn_after(sys.stdout, lambda: console.show_again("hi"))
-    assert shown == typed_rows_cleared(1, block_rows=2) + printed_in_gap(f"{GREY}› hi{' ' * 16}{RESET}", up=6)
+    assert shown == typed_rows_cleared(1, block_rows=2) + printed_in_gap(shown_again("hi", columns=20), up=6)
 
 
 @pytest.mark.spec("CNV-8")
@@ -422,11 +434,8 @@ def test_console_leaves_piped_input_unruled_and_unrepeated(monkeypatch):
 
 @pytest.mark.spec("CNV-8")
 def test_console_prints_above_the_rule_without_touching_the_prompt(monkeypatch):
-    terminal = colour_terminal(monkeypatch)
-    console = ConsoleChannel()
-    console.screen.reading = True
-    console.send("console", "hi")
-    assert terminal.getvalue() == printed_above(f"{ACCENT}● {RESET}hi")
+    ruled_console(monkeypatch).send("console", "hi")
+    assert sys.stdout.getvalue() == printed_above(f"{ACCENT}● {RESET}hi")
 
 
 @pytest.mark.spec("CNV-8")
@@ -440,31 +449,22 @@ def test_what_tinker_says_while_you_type_prints_above_the_prompt(monkeypatch):
 
 @pytest.mark.spec("CNV-8")
 def test_console_makes_room_for_a_message_by_what_shows_of_it(monkeypatch):
-    terminal = colour_terminal(monkeypatch)
-    screen = ConsoleChannel().screen
-    screen.reading = True
-    screen.print(f"{ACCENT}● {RESET}hi there, friend\n  🔨 calc")
-    assert terminal.getvalue() == printed_above(f"{ACCENT}● {RESET}hi there, friend\n  🔨 calc", rows=3)
+    ruled_screen(monkeypatch).print(f"{ACCENT}● {RESET}hi there, friend\n  🔨 calc")
+    assert sys.stdout.getvalue() == printed_above(f"{ACCENT}● {RESET}hi there, friend\n  🔨 calc", rows=3)
 
 
 @pytest.mark.spec("CNV-8")
 def test_console_prints_a_message_taller_than_the_screen_above_the_prompt_in_pieces(monkeypatch):
-    terminal = colour_terminal(monkeypatch)
-    screen = ConsoleChannel().screen
-    screen.reading = True
-    screen.print("\n".join(["line"] * 30))
-    assert terminal.getvalue() == (
-        printed_above("\n".join(["line"] * 22), rows=22) + printed_above("\n".join(["line"] * 8), rows=8)
+    ruled_screen(monkeypatch).print(stacked("line", 30))
+    assert sys.stdout.getvalue() == (
+        printed_above(stacked("line", 22), rows=22) + printed_above(stacked("line", 8), rows=8)
     )
 
 
 @pytest.mark.spec("CNV-8")
 def test_console_cuts_a_line_taller_than_the_room_into_screen_wide_rows(monkeypatch):
-    terminal = colour_terminal(monkeypatch)
-    screen = ConsoleChannel().screen
-    screen.reading = True
-    screen.print(f"{ACCENT}{'x' * 225}{RESET}")
-    assert terminal.getvalue() == printed_above("\n".join(["x" * 10] * 22), rows=22) + printed_above("xxxxx")
+    ruled_screen(monkeypatch).print(f"{ACCENT}{'x' * 225}{RESET}")
+    assert sys.stdout.getvalue() == printed_above(stacked("x" * 10, 22), rows=22) + printed_above("x" * 5)
 
 
 LIVE_COLUMNS = 40
@@ -475,7 +475,7 @@ def live_drawn(text, elapsed="0s", star="✻"):
 
 
 def block_grown(by):
-    return f"{'\033D' * by}\0337\033[{by + 1}A\033[{by}L\0338"
+    return room_made(by, above=0) + "\0338"
 
 
 def live_shown(text):
@@ -483,14 +483,11 @@ def live_shown(text):
 
 
 def live_changed(text, elapsed="0s", star="✻"):
-    return f"\0337\033[2F{live_drawn(text, elapsed, star)}\033[K\0338"
+    return above_the_rule(2, f"{live_drawn(text, elapsed, star)}\033[K")
 
 
 def live_console(monkeypatch):
-    colour_terminal(monkeypatch, LIVE_COLUMNS)
-    console = ConsoleChannel()
-    console.screen.reading = True
-    return console
+    return ruled_console(monkeypatch, LIVE_COLUMNS)
 
 
 def live_screen(monkeypatch):
@@ -534,7 +531,7 @@ def test_console_prints_above_its_live_line(monkeypatch, clock):
 def test_console_takes_its_live_line_out_and_stops_turning_it(monkeypatch, clock):
     screen = live_screen(monkeypatch)
     screen.show_live("Writing tests", 100.0)
-    assert drawn_after(sys.stdout, screen.end_live) == LIVE_LINE_TAKEN_OUT
+    assert drawn_after(sys.stdout, screen.end_live) == block_taken_out(1)
     assert drawn_after(sys.stdout, screen.tick) == "" and drawn_after(sys.stdout, screen.end_live) == ""
 
 
@@ -550,11 +547,11 @@ def block_drawn(text, under, elapsed="0s", star="✻"):
 
 
 def block_changed(rows):
-    return f"\0337\033[{len(rows) + 1}F" + "\033[E".join(f"{row}\033[K" for row in rows) + "\0338"
+    return above_the_rule(len(rows) + 1, "\033[E".join(f"{row}\033[K" for row in rows))
 
 
 def block_shrunk(rows, by):
-    return f"\0337\033[{rows + 1}F" + "\033[E".join(["\033[K"] * by) + "\0338"
+    return above_the_rule(rows + 1, "\033[E".join(["\033[K"] * by))
 
 
 def block_taken_out(rows):
@@ -621,11 +618,9 @@ def test_console_prints_into_the_blank_rows_above_its_live_block(monkeypatch, cl
 
 @pytest.mark.spec("CNV-8")
 def test_console_scrolls_only_the_rows_the_blank_rows_cannot_hold(monkeypatch):
-    terminal = colour_terminal(monkeypatch)
-    screen = ConsoleChannel().screen
-    screen.reading, screen.gap = True, 2
-    screen.print("\n".join(["line"] * 5))
-    assert terminal.getvalue() == printed_above("\n".join(["line"] * 5), rows=5, gap=2)
+    screen = ruled_screen(monkeypatch, gap=2)
+    screen.print(stacked("line", 5))
+    assert sys.stdout.getvalue() == printed_above(stacked("line", 5), rows=5, gap=2)
     assert screen.gap == 0
 
 
@@ -666,14 +661,9 @@ def test_console_pins_the_rule_and_prompt_to_the_last_rows_when_it_starts(monkey
 
 
 @pytest.mark.spec("CNV-8")
-def test_console_starts_where_the_cursor_is_without_a_cursor_answer(monkeypatch):
-    terminal, screen = started_screen(monkeypatch, cursor_row=None)
-    assert terminal.getvalue() == STARTING_RULE and screen.gap == 0
-
-
-@pytest.mark.spec("CNV-8")
-def test_console_starts_where_the_cursor_is_on_the_last_rows(monkeypatch):
-    terminal, screen = started_screen(monkeypatch, cursor_row=23)
+@pytest.mark.parametrize("cursor_row", [None, 23])
+def test_console_starts_where_the_cursor_is_without_an_answer_or_on_the_last_rows(monkeypatch, cursor_row):
+    terminal, screen = started_screen(monkeypatch, cursor_row)
     assert terminal.getvalue() == STARTING_RULE and screen.gap == 0
 
 
@@ -708,7 +698,7 @@ def test_once_the_console_reads_live_draws_in_its_live_line(monkeypatch, clock):
         "Writing tests"
     )
     said = drawn_after(sys.stdout, lambda: conversation.say.text("Answered"))
-    assert said == LIVE_LINE_TAKEN_OUT + printed_in_gap("Answered", up=2)
+    assert said == block_taken_out(1) + printed_in_gap("Answered", up=2)
 
 
 @pytest.mark.spec("CNV-8")
@@ -744,7 +734,7 @@ def test_console_shows_a_message_without_a_doing_line_in_its_live_line_until_don
     shown = console.show("console", None, "⏳ **Getting ready**\nI answer soon.")
     assert sys.stdout.getvalue() == live_shown("⏳ Getting ready")
     done = drawn_after(sys.stdout, lambda: console.show("console", shown, "Answer", done=True))
-    assert done == LIVE_LINE_TAKEN_OUT + printed_in_gap(f"{ACCENT}● {RESET}Answer", up=2)
+    assert done == block_taken_out(1) + printed_in_gap(f"{ACCENT}● {RESET}Answer", up=2)
 
 
 @pytest.mark.spec("CNV-8")
