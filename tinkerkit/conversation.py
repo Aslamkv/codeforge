@@ -2035,20 +2035,26 @@ class ConsoleScreen:
 
     def redrawn_at(self, size, typed_rows):
         stale, kept = self.stale_rows(size.columns), self.live_rows() + 1 + typed_rows
-        cleared = self.above_the_prompt(stale + typed_rows, NEXT_LINE.join([CLEAR_TO_LINE_END] * stale))
         rewrapped = stale + typed_rows - kept
         self.pushed_off_the_top(rewrapped)
-        return cleared + self.moved_down(rewrapped, kept) + self.above_the_prompt(kept, self.block_and_rule())
+        return (
+            self.stale_rows_cleared(stale, typed_rows)
+            + self.moved_down(rewrapped, kept)
+            + self.above_the_prompt(kept, self.block_and_rule())
+        )
+
+    def stale_rows_cleared(self, stale, typed_rows):
+        return self.above_the_prompt(stale + typed_rows, NEXT_LINE.join([CLEAR_TO_LINE_END] * stale))
 
     def pushed_off_the_top(self, rows):
         self.blank_top = max(0, self.blank_top - max(0, rows))
 
     def stale_rows(self, columns):
-        drawn = [visible_width(COLOUR_CODE_RE.sub("", row)) for row in self.drawn]
-        return sum(rows_at(width, columns) for width in [self.size.columns, *drawn])
+        rule_rows = rows_at(self.size.columns, columns)
+        return rule_rows + sum(rows_shown_at(row, columns) for row in self.drawn)
 
     def block_and_rule(self):
-        block = [row + CLEAR_TO_LINE_END for row in self.live_drawn()] if self.live is not None else []
+        block = self.live_block() if self.live is not None else []
         return unwrapped(NEXT_LINE.join([*block, self.rule()]))
 
     def live_rows(self):
@@ -2070,7 +2076,7 @@ class ConsoleScreen:
 
     @staticmethod
     def blank_rows_dropped(rows, above):
-        return scrolled_up_above(shutil.get_terminal_size().lines - 2 - above, rows) if rows else ""
+        return scrolled_up_above(row_above(above + 1), rows) if rows else ""
 
     def shrunk(self, by):
         return self.moved_down(by, kept=self.live_rows() + 1)
@@ -2079,11 +2085,13 @@ class ConsoleScreen:
         if not rows:
             return ""
         self.blank_top += rows
-        return scrolled_down_above(shutil.get_terminal_size().lines - 1 - kept, rows)
+        return scrolled_down_above(row_above(kept), rows)
 
     def redrawn_live(self):
-        changed = unwrapped(NEXT_LINE.join(row + CLEAR_TO_LINE_END for row in self.live_drawn()))
-        return self.above_the_rule(self.live_rows(), changed)
+        return self.above_the_rule(self.live_rows(), unwrapped(NEXT_LINE.join(self.live_block())))
+
+    def live_block(self):
+        return [row + CLEAR_TO_LINE_END for row in self.live_drawn()]
 
     @classmethod
     def above_the_rule(cls, rows, change):
@@ -2184,12 +2192,19 @@ def screen_wide_rows(line):
 
 
 def rows_shown(text):
-    columns = shutil.get_terminal_size().columns
+    return rows_shown_at(text, shutil.get_terminal_size().columns)
+
+
+def rows_shown_at(text, columns):
     return sum(rows_at(visible_width(COLOUR_CODE_RE.sub("", line)), columns) for line in text.split("\n"))
 
 
 def rows_at(width, columns):
     return max(1, -(-width // columns))
+
+
+def row_above(kept):
+    return shutil.get_terminal_size().lines - 1 - kept
 
 
 def lines_up(rows):

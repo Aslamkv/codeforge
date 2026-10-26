@@ -339,8 +339,12 @@ def unwrapped(rows):
     return f"\033[?7l{rows}\033[?7h"
 
 
+def scrolled_above(bottom, scroll):
+    return f"\0337\033[1;{bottom}r{scroll}\033[r\0338"
+
+
 def room_made(rows, above, blanks=0, lines=24):
-    dropped = f"\0337\033[1;{lines - 2 - above}r\033[{blanks}S\033[r\0338" if blanks else ""
+    dropped = scrolled_above(lines - 2 - above, f"\033[{blanks}S") if blanks else ""
     scrolled = rows - blanks
     inserted = f"\033[{scrolled}L" if scrolled else ""
     return f"{dropped}{'\033D' * scrolled}\0337\033[{rows + above + 1}A{inserted}"
@@ -351,7 +355,7 @@ def printed_above(text, rows=1, block_rows=0, blanks=0, lines=24):
 
 
 def moved_down(rows, kept):
-    return f"\0337\033[1;{23 - kept}r\033[{rows}T\033[r\0338"
+    return scrolled_above(23 - kept, f"\033[{rows}T")
 
 
 def shown_again(line, columns=10):
@@ -362,9 +366,17 @@ def rule_drawn(columns):
     return f"{DIM}{'─' * columns}{RESET}"
 
 
+def cleared_to_end(rows):
+    return [f"{row}\033[K" for row in rows]
+
+
+def block_and_rule(block, columns):
+    return unwrapped("\033[E".join([*cleared_to_end(block), rule_drawn(columns)]))
+
+
 def sent_back_shown(line, rows=1, block=(), columns=10):
-    drawn = unwrapped("\033[E".join([*(f"{row}\033[K" for row in block), rule_drawn(columns)]))
-    return above_the_rule(rows + len(block) + 1, f"{shown_again(line, columns)}\033[E{drawn}")
+    shown = f"{shown_again(line, columns)}\033[E{block_and_rule(block, columns)}"
+    return above_the_rule(rows + len(block) + 1, shown)
 
 
 def stacked(line, count):
@@ -488,7 +500,7 @@ def live_shown(text):
 
 
 def live_changed(text, elapsed="0s", star="✻"):
-    return above_the_rule(2, unwrapped(f"{live_drawn(text, elapsed, star)}\033[K"))
+    return block_changed([live_drawn(text, elapsed, star)])
 
 
 def live_console(monkeypatch):
@@ -552,7 +564,7 @@ def block_drawn(text, under, elapsed="0s", star="✻"):
 
 
 def block_changed(rows):
-    return above_the_rule(len(rows) + 1, unwrapped("\033[E".join(f"{row}\033[K" for row in rows)))
+    return above_the_rule(len(rows) + 1, unwrapped("\033[E".join(cleared_to_end(rows))))
 
 
 def block_shrunk(by, rows_left):
@@ -610,39 +622,46 @@ def test_console_prints_above_its_live_block_and_takes_it_out(monkeypatch, clock
     assert screen.under == []
 
 
-def started_screen(monkeypatch, cursor_row):
-    terminal = colour_terminal(monkeypatch, cursor_row=cursor_row)
-    monkeypatch.setattr(ConsoleScreen, "TICK_SECONDS", 60)
-    screen = ConsoleScreen()
-    screen.start()
-    return terminal, screen
+@pytest.fixture
+def started_screen(monkeypatch):
+    resize_handler = signal.getsignal(signal.SIGWINCH)
+
+    def started(cursor_row):
+        terminal = colour_terminal(monkeypatch, cursor_row=cursor_row)
+        monkeypatch.setattr(ConsoleScreen, "TICK_SECONDS", 60)
+        screen = ConsoleScreen()
+        screen.start()
+        return terminal, screen
+
+    yield started
+    signal.signal(signal.SIGWINCH, resize_handler)
 
 
-STARTING_RULE = unwrapped(f"{DIM}{'─' * 10}{RESET}") + "\n"
+STARTING_RULE = unwrapped(rule_drawn(10)) + "\n"
 
 
 @pytest.mark.spec("CNV-8")
-def test_console_pins_the_rule_and_prompt_to_the_last_rows_with_what_it_printed_above(monkeypatch):
-    terminal, _ = started_screen(monkeypatch, cursor_row=5)
+def test_console_pins_the_rule_and_prompt_to_the_last_rows_with_what_it_printed_above(started_screen):
+    terminal, _ = started_screen(cursor_row=5)
     assert terminal.getvalue() == "\033[18T\033[18B" + STARTING_RULE
 
 
 @pytest.mark.spec("CNV-8")
-def test_console_starts_where_the_cursor_is_on_the_last_rows(monkeypatch):
-    terminal, _ = started_screen(monkeypatch, cursor_row=23)
+def test_console_starts_where_the_cursor_is_on_the_last_rows(started_screen):
+    terminal, _ = started_screen(cursor_row=23)
     assert terminal.getvalue() == STARTING_RULE
 
 
 @pytest.mark.spec("CNV-8")
-def test_console_without_a_cursor_answer_moves_to_the_rule_row_and_counts_no_blank_rows(monkeypatch):
-    terminal, screen = started_screen(monkeypatch, cursor_row=None)
+def test_console_without_a_cursor_answer_moves_to_the_rule_row_and_counts_no_blank_rows(started_screen):
+    terminal, screen = started_screen(cursor_row=None)
     assert terminal.getvalue() == "\033[23;1H" + STARTING_RULE
     assert drawn_after(terminal, lambda: screen.print("hi")) == printed_above("hi")
 
 
 @pytest.mark.spec("CNV-8")
-def test_a_print_after_pinning_uses_up_the_blank_rows_at_the_top_before_the_scrollback(monkeypatch):
-    terminal, screen = started_screen(monkeypatch, cursor_row=5)
+def test_a_print_after_pinning_uses_up_the_blank_rows_at_the_top_before_the_scrollback(started_screen):
+    terminal, screen = started_screen(cursor_row=5)
     printed = drawn_after(terminal, lambda: screen.print(stacked("line", 20)))
     assert printed == printed_above(stacked("line", 20), rows=20, blanks=18)
     assert drawn_after(terminal, lambda: screen.print("hi")) == printed_above("hi")
@@ -657,15 +676,15 @@ def test_a_print_uses_up_the_blank_row_a_quiet_line_left_at_the_top(monkeypatch)
 
 
 @pytest.mark.spec("CNV-8")
-def test_a_line_shown_again_uses_up_a_blank_row_at_the_top(monkeypatch):
-    terminal, screen = started_screen(monkeypatch, cursor_row=21)
+def test_a_line_shown_again_uses_up_a_blank_row_at_the_top(started_screen):
+    terminal, screen = started_screen(cursor_row=21)
     screen.sent("› hi", shown=True)
     assert drawn_after(terminal, lambda: screen.print("hello")) == printed_above("hello", blanks=1)
 
 
 @pytest.mark.spec("CNV-8")
-def test_a_growing_live_block_uses_up_the_blank_rows_at_the_top(monkeypatch, clock):
-    terminal, screen = started_screen(monkeypatch, cursor_row=21)
+def test_a_growing_live_block_uses_up_the_blank_rows_at_the_top(started_screen, clock):
+    terminal, screen = started_screen(cursor_row=21)
     grown = drawn_after(terminal, lambda: screen.show_live("Learning", 100.0, under=UNDER))
     assert grown.startswith(block_grown(3, blanks=2))
 
@@ -673,17 +692,17 @@ def test_a_growing_live_block_uses_up_the_blank_rows_at_the_top(monkeypatch, clo
 @pytest.mark.spec("CNV-8")
 @pytest.mark.parametrize(("lines", "blanks"), [(10, 4), (30, 18)])
 def test_a_shorter_window_drops_blank_rows_off_the_top_and_a_taller_one_keeps_them(
-    monkeypatch, lines, blanks
+    monkeypatch, started_screen, lines, blanks
 ):
-    terminal, screen = started_screen(monkeypatch, cursor_row=5)
+    terminal, screen = started_screen(cursor_row=5)
     resized_to(monkeypatch, 10, lines)
     printed = drawn_after(terminal, lambda: screen.print(stacked("line", 8)))
     assert printed.endswith(printed_above(stacked("line", 8), rows=8, blanks=min(8, blanks), lines=lines))
 
 
 @pytest.mark.spec("CNV-8")
-def test_a_narrower_window_pushes_blank_rows_off_the_top_as_its_rule_wraps(monkeypatch):
-    terminal, screen = started_screen(monkeypatch, cursor_row=22)
+def test_a_narrower_window_pushes_blank_rows_off_the_top_as_its_rule_wraps(monkeypatch, started_screen):
+    terminal, screen = started_screen(cursor_row=22)
     resized_to(monkeypatch, 5)
     printed = drawn_after(terminal, lambda: screen.print(stacked("hi", 2)))
     assert printed.endswith(printed_above(stacked("hi", 2), rows=2, blanks=1))
@@ -709,8 +728,7 @@ def stale_rows_cleared(rows, typed_rows=0):
 
 
 def redrawn_with_rule(block, columns, typed_rows=0):
-    rows = [f"{row}\033[K" for row in block] + [rule_drawn(columns)]
-    return above_the_rule(len(rows) + typed_rows, unwrapped("\033[E".join(rows)))
+    return above_the_rule(len(block) + 1 + typed_rows, block_and_rule(block, columns))
 
 
 def resized_block_screen(monkeypatch):
@@ -763,8 +781,8 @@ def drawn_soon(terminal, expected, seconds=2.0):
 
 
 @pytest.mark.spec("CNV-8")
-def test_a_resize_signal_draws_the_rule_again_without_waiting_for_the_tick(monkeypatch):
-    terminal, _ = started_screen(monkeypatch, cursor_row=23)
+def test_a_resize_signal_draws_the_rule_again_without_waiting_for_the_tick(monkeypatch, started_screen):
+    terminal, _ = started_screen(cursor_row=23)
     resized_to(monkeypatch, 5)
     signal.raise_signal(signal.SIGWINCH)
     assert redrawn_with_rule([], 5) in drawn_soon(terminal, redrawn_with_rule([], 5))
