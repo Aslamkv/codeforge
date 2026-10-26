@@ -60,7 +60,7 @@ class Messages:
     def __init__(self):
         self.depth, self.followers, self.log, self.drawn, self.frame = 0, [], None, False, 0
         self.doing, self.last_step, self.began = "", "", None
-        self.write = print
+        self.write, self.screen = print, None
 
     def title(self, text, icon=""):
         if self.depth == 0:
@@ -138,26 +138,20 @@ class Messages:
     def live(self, text):
         if self.began is None:
             self.began = time.monotonic()
-        if sys.__stdout__.isatty():
+        if self.screen:
+            self.screen.show_live(text, self.began)
+            self.drawn = True
+        elif sys.__stdout__.isatty():
             self.draw_live(text)
         self.tell(Message("live", text, self.depth + 1, "⏳"))
 
     def draw_live(self, text):
         width = max(shutil.get_terminal_size((80, 24)).columns - 1, 10)
-        sys.__stdout__.write("\r" + fitted(self.live_pieces(text), width) + "\033[K")
+        indent = "   " * (self.depth + 1)
+        sys.__stdout__.write("\r" + live_line(text, self.began, self.frame, width, indent=indent) + "\033[K")
         sys.__stdout__.flush()
-        self.drawn = True
-
-    def live_pieces(self, text):
-        star = self.STAR[self.frame % len(self.STAR)]
         self.frame += 1
-        elapsed = human_duration(time.monotonic() - self.began)
-        return [
-            ("   " * (self.depth + 1), None),
-            (star, "accent"),
-            (f" Tinkering… ({elapsed})", None),
-            (f" · {text}", "dim"),
-        ]
+        self.drawn = True
 
     @contextlib.contextmanager
     def working_on(self, doing):
@@ -180,17 +174,21 @@ class Messages:
         return self.doing or self.last_step or "Working on it"
 
     def end_live(self):
-        if self.drawn:
+        if not self.drawn:
+            return
+        if self.screen:
+            self.screen.end_live()
+        else:
             sys.__stdout__.write("\r\033[K")
             sys.__stdout__.flush()
-            self.drawn = False
+        self.drawn = False
 
     def detail(self, text, **facts):
         if self.log is not None:
             self.log.add({"note": text, **facts})
 
-    def write_through(self, write):
-        self.write = write
+    def write_through(self, write, screen=None):
+        self.write, self.screen = write, screen
 
     def follow(self, follower):
         self.followers.append(follower)
@@ -209,12 +207,19 @@ class Messages:
         self.__init__()
 
 
-def fitted(pieces, width):
+def live_line(text, began, frame, width, stream=None, indent=""):
+    star = Messages.STAR[frame % len(Messages.STAR)]
+    elapsed = human_duration(time.monotonic() - began)
+    pieces = [(indent, None), (star, "accent"), (f" Tinkering… ({elapsed})", None), (f" · {text}", "dim")]
+    return fitted(pieces, width, stream)
+
+
+def fitted(pieces, width, stream=None):
     shown = []
     for text, style in pieces:
         text = text[:width]
         width -= len(text)
-        shown.append(paint(text, style) if style else text)
+        shown.append(paint(text, style, stream) if style else text)
     return "".join(shown)
 
 

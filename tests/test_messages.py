@@ -176,6 +176,37 @@ def test_the_live_line_is_cut_to_the_terminal_width_by_what_shows(terminal, cloc
     assert terminal.getvalue() == f"\r   {ACCENT}✻{RESET} Tinkering… (0s){DIM} ·{RESET}\033[K"
 
 
+class Screen:
+    def __init__(self):
+        self.shown = []
+
+    def print(self, text):
+        self.shown.append(("print", text))
+
+    def show_live(self, text, began):
+        self.shown.append(("live", text, began))
+
+    def end_live(self):
+        self.shown.append(("end",))
+
+
+@pytest.mark.spec("MSG-4")
+def test_the_live_line_goes_to_the_screen_said_things_write_through(terminal, clock):
+    screen = Screen()
+    say.write_through(screen.print, screen)
+    say.live("Writing tests")
+    clock[0] += 5
+    say.live("Running tests")
+    say.done("Answered")
+    assert screen.shown == [
+        ("live", "Writing tests", 100.0),
+        ("live", "Running tests", 100.0),
+        ("end",),
+        ("print", "✅ Answered"),
+    ]
+    assert terminal.getvalue() == ""
+
+
 @pytest.mark.spec("MSG-5")
 def test_a_detail_goes_to_the_log_only(home_store, capsys):
     say.detail("dropped: no log is kept yet")

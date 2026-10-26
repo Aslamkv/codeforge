@@ -20,7 +20,7 @@ from .commands import BY_NAME, COMMANDS, deletes, kind_of, refs
 from .jobs import Jobs, alive, job_number, paused_for_you
 from .project import Runs, Tracker, saved
 lazy from .ledger import DONE_NOTE_KEPT_SECONDS, Ledger
-lazy from .messages import colourful, cut_to_width, human_duration, paint, say, visible_width
+lazy from .messages import colourful, cut_to_width, human_duration, live_line, paint, say, visible_width
 lazy from .model import Models, OllamaError
 lazy from .prompts import Prompts, Reply
 lazy from .settings import EXERCISE_FOLDER, JOB_STOP_SIGNAL, Config, Home, projects_folder
@@ -1745,12 +1745,14 @@ class ConsoleChannel(Channel):
     KIND = "console"
     CHAT = "console"
     PROMPT = "› " if sys.stdin.isatty() else ""
+    TICK_SECONDS = 0.25
 
     def __init__(self, commands_without_tinker=True):
         super().__init__("console", {"allowed": [self.CHAT]}, {})
         self.commands_without_tinker = commands_without_tinker
         self.lines, self.next_id, self.headlines, self.whole = queue.Queue(), 0, {}, {}
         self.reader, self.printing = None, threading.Lock()
+        self.live, self.frame = None, 0
 
     def handle(self):
         return "this terminal"
@@ -1768,9 +1770,11 @@ class ConsoleChannel(Channel):
         return [Message(self.CHAT, line, "you")] if line.strip() else []
 
     def start_reading(self):
-        say.write_through(self.print)
+        say.write_through(self.print, self if self.typed_here() else None)
         self.reader = threading.Thread(target=self.read, daemon=True)
         self.reader.start()
+        if self.typed_here():
+            threading.Thread(target=self.keep_ticking, daemon=True).start()
 
     def read(self):
         while True:
@@ -1864,20 +1868,67 @@ class ConsoleChannel(Channel):
         doing = next((line for line in lines if line.startswith("▸")), lines[1] if len(lines) > 1 else "")
         return " · ".join(line for line in (lines[:1] + [doing.split(" · ⏱")[0]]) if line)
 
+    def show_live(self, text, began):
+        if not self.ruled():
+            return
+        with self.printing:
+            shown, erased = self.live is not None, self.erased_bottom()
+            self.live = (text, began)
+            if shown:
+                self.redraw_live()
+            else:
+                self.write_out(erased + self.bottom())
+
+    def end_live(self):
+        with self.printing:
+            if self.live is not None:
+                self.live = None
+                self.write_out("\0337\033[2F\033[M\0338\033[A")
+
+    def keep_ticking(self):
+        while True:
+            time.sleep(self.TICK_SECONDS)
+            self.tick()
+
+    def tick(self):
+        with self.printing:
+            if self.live is not None:
+                self.frame += 1
+                self.redraw_live()
+
+    def redraw_live(self):
+        self.write_out(f"\0337\033[2F{self.live_drawn()}\033[K\0338")
+
+    def live_drawn(self):
+        text, began = self.live
+        return live_line(text, began, self.frame, shutil.get_terminal_size().columns - 1, sys.stdout)
+
     def print(self, text):
         out = sys.stdout
         with self.printing:
             if out.isatty():
-                out.write("\r\033[K\033[F\033[K" if self.ruled() else "\r\033[K")
+                out.write(self.erased_bottom())
             out.write(text + "\n")
             if out.isatty() and self.reader is not None:
-                out.write(f"{self.rule()}\n{self.prompt()}" if self.ruled() else self.PROMPT)
+                out.write(self.bottom() if self.ruled() else self.PROMPT)
             out.flush()
+
+    def erased_bottom(self):
+        rows_above_the_prompt = self.ruled() + (self.live is not None)
+        return "\r\033[K" + "\033[F\033[K" * rows_above_the_prompt
+
+    def bottom(self):
+        live = f"{self.live_drawn()}\n" if self.live is not None else ""
+        return f"{live}{self.rule()}\n{self.prompt()}"
+
+    @staticmethod
+    def write_out(text):
+        sys.stdout.write(text)
+        sys.stdout.flush()
 
     def draw(self, text):
         with self.printing:
-            sys.stdout.write(text)
-            sys.stdout.flush()
+            self.write_out(text)
 
     @staticmethod
     def styled(text, style):
