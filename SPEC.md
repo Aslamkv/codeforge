@@ -582,8 +582,8 @@ What is said in the chats, kept so that a chat is only a view of it.
 - **MOD-24** `Model` keeps each call's step and details in its log and never prints them. The person sees
   only a short line when it asks again, and its live line says in plain words what Tinker is working on (the
   step it is on, else "Working on it") and for how long ("Working on it… 1m 41s (101s)").
-- **MOD-25** A quick call is one model chat outside a run: the chat's replies, its warm-up, the commands and
-  searches it proposes, the searches planned for a need (**KNW-25**), and a project's folder name. `Models.quick()` is `None` until a measured model is in
+- **MOD-25** A quick call is one model chat outside a run: the chat's replies, its warm-up, the commands it
+  proposes, the searches planned for a need (**KNW-25**), and a project's folder name. `Models.quick()` is `None` until a measured model is in
   use; otherwise it gives the model's name, its options (`num_ctx`, and `num_batch` when measured) and its think
   setting (`false` for a thinking model, else none). `Models.quick_reply(messages, tokens)` sends one chat with
   them, `keep_alive`, `num_predict` `tokens` and `QUICK_REPLY_TIMEOUT`, and gives the reply's content, stripped.
