@@ -87,14 +87,16 @@ def test_compare():
 
 
 @pytest.mark.spec("FIN-5")
-def test_an_expected_line_matches_only_a_whole_line():
-    assert ReadmeWriter.missing(["80.33"], "80.33000000000004") == ["80.33"]
-    assert ReadmeWriter.missing(["7"], "17") == ["7"]
-
-
-@pytest.mark.spec("FIN-5")
-def test_a_whole_line_matches():
-    assert ReadmeWriter.missing(["80.33"], "result:\n80.33\n") == []
+@pytest.mark.parametrize(
+    "expected,output,missing",
+    [
+        ("80.33", "80.33000000000004", ["80.33"]),
+        ("7", "17", ["7"]),
+        ("80.33", "result:\n80.33\n", []),
+    ],
+)
+def test_an_expected_line_matches_only_a_whole_line(expected, output, missing):
+    assert ReadmeWriter.missing([expected], output) == missing
 
 
 @pytest.mark.spec("FIN-6")
