@@ -295,6 +295,11 @@ class Home:
         return cls.root / "memory.html"
 
     @classmethod
+    def prompt_history(cls):
+        cls.root.mkdir(parents=True, exist_ok=True)
+        return cls.root / "prompt_history"
+
+    @classmethod
     def reading_file(cls, name):
         folder = cls.root / "reading"
         folder.mkdir(parents=True, exist_ok=True)

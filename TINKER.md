@@ -168,7 +168,8 @@ tinker
 On a colour terminal it opens with a banner showing the model, the projects folder and the chats it listens
 on. As in Claude Code, the prompt, with a rule over it, follows the output: it starts under the banner and
 moves down as Tinker prints, until it reaches the bottom row; then older lines scroll into the scrollback.
-What you type is never redrawn. Resizing the window redraws the rule at the new size. Your lines show again
+What you type is never redrawn. Up and down bring back the lines you typed before, even from an earlier
+session. Resizing the window redraws the rule at the new size. Your lines show again
 highlighted, Tinker's messages are marked with a steel blue `●`, and a `✻ Tinkering…` line above the prompt,
 with a steel blue glow moving across the word, shows the time, the tokens, how long the model thought and
 the current step while it works:
