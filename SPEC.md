@@ -690,7 +690,7 @@ every failure of either: no caller sees a backend, an HTTP status or an exceptio
   gives nothing at once, making no request.
 - **WEB-5** `Internet.fetch(urls, max_bytes)` reads the addresses with the `Fetcher` (**FET-1**) in parallel,
   at most `fetch_max_bytes` each unless `max_bytes` is given, and gives a `WebPage` per address, in order: its
-  address, content type, bytes, blocks (**PAS-1**), title and `why` (empty unless it failed). An HTML page
+  address (the final one, after redirects; a page that could not be read keeps the one asked), content type, bytes, blocks (**PAS-1**), title and `why` (empty unless it failed). An HTML page
   (`is_html`) and plain text, Markdown, JSON or XML give their blocks; `text` is them as text (`PageText`). Any
   other content keeps its bytes with no blocks. A page that could not be read has no bytes and no blocks, and
   its `why` says what happened; it is not asked again.

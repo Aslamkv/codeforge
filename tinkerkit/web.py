@@ -129,7 +129,7 @@ class WebPage(namedtuple("WebPage", "url kind data blocks title why")):
         if not fetched.ok:
             return cls.failed(fetched.url, fetched.error)
         title, blocks = readable(fetched.text, fetched.kind)
-        return cls(fetched.url, fetched.kind, fetched.data, blocks, title, "")
+        return cls(fetched.final_url or fetched.url, fetched.kind, fetched.data, blocks, title, "")
 
     @classmethod
     def failed(cls, url, why):

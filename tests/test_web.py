@@ -225,9 +225,9 @@ def reading(monkeypatch, pages):
     return fetcher, sizes
 
 
-def got(url, body, kind="text/html"):
+def got(url, body, kind="text/html", final_url=None):
     data = body if isinstance(body, bytes) else body.encode()
-    return Fetched(url, 200, url, data.decode("utf-8", "replace"), kind, data=data, seconds=0.1)
+    return Fetched(url, 200, final_url or url, data.decode("utf-8", "replace"), kind, data=data, seconds=0.1)
 
 
 @pytest.mark.spec("WEB-4")
@@ -285,6 +285,19 @@ def test_fetch_gives_a_page_per_address_in_order(monkeypatch):
     assert plain.text == "plain words" and markdown.blocks[0].kind == "heading" and '"a": 1' in json_page.text
     assert xml.blocks and image.data == b"\x89PNG" and image.blocks == [] and image.why == ""
     assert gone.data == b"" and gone.blocks == [] and gone.why == "HTTP 404"
+
+
+@pytest.mark.spec("WEB-5")
+def test_a_page_has_the_address_it_was_redirected_to(monkeypatch):
+    reading(
+        monkeypatch,
+        {
+            "https://old": got("https://old", "plain words", "text/plain", "https://new"),
+            "https://gone": Fetched("https://gone", 404, "https://elsewhere", error="HTTP 404"),
+        },
+    )
+    moved, gone = Internet().fetch(["https://old", "https://gone"])
+    assert moved.url == "https://new" and gone.url == "https://gone"
 
 
 @pytest.mark.spec("WEB-5")
