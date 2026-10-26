@@ -62,7 +62,7 @@ class Answer(namedtuple("Answer", "value why thought", defaults=("", ""))):
 
 class Model:
     def __init__(
-        self, name, settings, keep_alive, log, exclusive=True, max_growth=DEFAULT_CONFIG["max_growth"]
+        self, name, settings, keep_alive, log, max_growth=DEFAULT_CONFIG["max_growth"]
     ):
         self.name, self.settings = name, settings
         self.max_tokens, self.num_ctx = int(settings["max_prompt_tokens"]), int(settings["num_ctx"])
@@ -72,7 +72,7 @@ class Model:
         self.max_reply, self.fix_max = int(settings["max_reply_tokens"]), int(settings["fix_max_tokens"])
         self.keep_alive = keep_alive
         self.options = {"num_batch": int(settings["num_batch"])} if settings.get("num_batch") else {}
-        self.log, self.exclusive, self.max_growth = log, exclusive, max_growth
+        self.log, self.max_growth = log, max_growth
         self.think_rejected = False
         self.crashes = 0
         self.calibrated = (self.max_tokens, self.max_reply)
@@ -102,8 +102,7 @@ class Model:
         unthinking_retry=True,
         think=None,
     ):
-        if self.exclusive:
-            self.evict_others()
+        self.evict_others()
         chosen = self.think_now() if think is None else think
         tries = Tries(None if self.think_rejected else chosen, budget or self.max_reply)
         request = (
@@ -141,7 +140,7 @@ class Model:
     def evict_others(self):
         for loaded, _ in Ollama.loaded_models() or []:
             if loaded and loaded != self.name:
-                self.note(f"unloading {loaded} (exclusive mode: only one model in memory)")
+                self.note(f"unloading {loaded} (only one model in memory)")
                 Ollama.unload(loaded)
 
     def think_now(self):

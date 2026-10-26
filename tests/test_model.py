@@ -611,7 +611,7 @@ def test_other_models_are_unloaded_and_a_grown_model_too(make_model, fake_ollama
     assert fake_ollama.unloaded == ["other"]
     sizes = iter([10e9, 11e9, 12e9])
     monkeypatch.setattr(Ollama, "loaded_models", staticmethod(lambda: [(MODEL, next(sizes))]))
-    model = Model(MODEL, MEASURED, 300, make_model().log, exclusive=False, max_growth=1.15)
+    model = Model(MODEL, MEASURED, 300, make_model().log, max_growth=1.15)
     for _ in range(3):
         model.check_memory()
     assert fake_ollama.unloaded == ["other", MODEL]

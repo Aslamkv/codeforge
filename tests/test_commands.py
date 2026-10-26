@@ -79,7 +79,7 @@ def test_runs_and_what_deletes():
         "fix",
         "resume",
     ]
-    for command in [command for command in COMMANDS if command.run and command.name != "restart"]:
+    for command in [command for command in COMMANDS if command.run]:
         assert "--web" in {option.flag for option in command.options}, command.name
     assert [
         command.name for command in COMMANDS if "--confirm" in {option.flag for option in command.options}
