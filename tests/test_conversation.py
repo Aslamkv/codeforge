@@ -1710,9 +1710,7 @@ def goodbyes_handed(monkeypatch):
 
 
 @pytest.mark.spec("CNV-9", "CNV-11")
-def test_the_status_is_sent_anew_as_tinker_starts_and_the_goodbye_is_handed_on(
-    desk, home_store, monkeypatch
-):
+def test_the_status_is_sent_anew_as_tinker_starts_and_the_goodbye_is_handed_on(desk, home_store, monkeypatch):
     monkeypatch.setattr(conversation, "ENDED_LOOK_SECONDS", 0.05)
     handed = goodbyes_handed(monkeypatch)
     status_before = 55
