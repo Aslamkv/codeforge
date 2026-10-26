@@ -129,7 +129,6 @@ PHASES = (
     "done",
 )
 FIX_PHASES = ("recall", "reproduce", "verify", "final_review", "lessons", "done")
-PLANNING_PHASES = ("recall", "spec", "design", "review")
 CONFIRM_AFTER = frozendict({"feature": "review", "fix": "reproduce"})
 FORMATTER_RUNS_AFTER = ("verify",)
 STATUS_TEXT = frozendict({"green": "passes", "todo": "to do", "active": "in progress", "blocked": "parked"})
@@ -356,13 +355,7 @@ class Home:
         names = cls.known_parts(names)
         held = {name: cls.entries_in(name) for name in names}
         if not any(held.values()):
-            say.info(
-                "Nothing to clear: "
-                + ", ".join(names)
-                + " "
-                + ("is" if len(names) == 1 else "are")
-                + " empty."
-            )
+            say.info(f"Nothing to clear: {', '.join(names)} {'is' if len(names) == 1 else 'are'} empty.")
             return
         confirm_deletion(
             "This deletes:",
@@ -468,12 +461,12 @@ class Config:
 
     @classmethod
     def refuse_unsettable(cls, key):
-        if key in SETTINGS and SETTINGS[key].owner != "config":
-            raise SystemExit(f"tinker config: {key} is set with tinker {SETTINGS[key].owner} NAME")
         if key not in SETTINGS:
             raise SystemExit(
                 f"tinker config: no setting {key!r}; the settings are: {', '.join(cls.settable())}"
             )
+        if SETTINGS[key].owner != "config":
+            raise SystemExit(f"tinker config: {key} is set with tinker {SETTINGS[key].owner} NAME")
 
     @classmethod
     def check(cls):

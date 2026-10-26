@@ -68,7 +68,6 @@ def test_phase_lists():
         "done",
     )
     assert settings.FIX_PHASES == ("recall", "reproduce", "verify", "final_review", "lessons", "done")
-    assert settings.PLANNING_PHASES == ("recall", "spec", "design", "review")
     assert settings.CONFIRM_AFTER == {"feature": "review", "fix": "reproduce"}
 
 
@@ -283,24 +282,20 @@ def test_keep_awake_without_a_tool_or_failing_does_nothing(monkeypatch):
 
 @pytest.mark.spec("SET-6")
 def test_config_set_reads_and_checks_the_value():
-    assert config_set("test_timeout", "90") == 90 and Config.get("test_timeout") == 90
-    assert config_set("keep_alive", "10m") == "10m" and config_set("keep_alive", "300") == 300
-    assert config_set("build_think", "false") is False and config_set("max_growth", "1.5") == 1.5
-    assert config_set("learn_think", "false") is False and config_set("tool_docs_pages", "12") == 12
-    assert config_set("projects", "~/Code") == "~/Code"
+    assert Config.set("test_timeout", "90") == 90 and Config.get("test_timeout") == 90
+    assert Config.set("keep_alive", "10m") == "10m" and Config.set("keep_alive", "300") == 300
+    assert Config.set("build_think", "false") is False and Config.set("max_growth", "1.5") == 1.5
+    assert Config.set("learn_think", "false") is False and Config.set("tool_docs_pages", "12") == 12
+    assert Config.set("projects", "~/Code") == "~/Code"
     with pytest.raises(SystemExit, match="test_timeout must be a whole number"):
-        config_set("test_timeout", "soon")
+        Config.set("test_timeout", "soon")
     assert Config.get("test_timeout") == 90
     with pytest.raises(SystemExit, match="web_timeout must be a number above 0"):
-        config_set("web_timeout", "0")
+        Config.set("web_timeout", "0")
     assert Config.get("web_timeout") == settings.DEFAULT_CONFIG["web_timeout"]
     with pytest.raises(SystemExit, match="learn_missing"):
-        config_set("learn_missing", "0")
+        Config.set("learn_missing", "0")
     assert Config.get("learn_missing") == settings.DEFAULT_CONFIG["learn_missing"]
-
-
-def config_set(key, text):
-    return Config.set(key, text)
 
 
 @pytest.mark.spec("SET-6")

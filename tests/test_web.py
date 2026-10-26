@@ -310,13 +310,17 @@ def test_the_fetcher_follows_the_fetch_settings():
     assert Internet().fetcher(100).max_bytes == 100
 
 
+def logged():
+    return [json.loads(line) for line in Home.web_log().read_text().splitlines()]
+
+
 @pytest.mark.spec("WEB-6")
 def test_every_request_is_logged_and_counted():
     log = RequestLog()
     log("search", "ollama", "HTTP 429", 0.5, "q")
     log("search", "standard", "", 0.4, "q")
     log("fetch", "standard", "HTTP 404", 1.0, "https://a")
-    lines = [json.loads(line) for line in Home.web_log().read_text().splitlines()]
+    lines = logged()
     assert [{key: line[key] for key in ("kind", "by", "result", "why", "target")} for line in lines] == [
         {"kind": "search", "by": "ollama", "result": "failed", "why": "HTTP 429", "target": "q"},
         {"kind": "search", "by": "standard", "result": "ok", "why": "", "target": "q"},
@@ -335,7 +339,7 @@ def test_internet_logs_its_searches_and_fetches(monkeypatch, ollama_key):
     internet = Internet()
     internet.search("q", 3)
     internet.fetch(["https://a"])
-    lines = [json.loads(line) for line in Home.web_log().read_text().splitlines()]
+    lines = logged()
     assert [(line["kind"], line["by"], line["result"], line["target"]) for line in lines] == [
         ("search", "ollama", "failed", "q"),
         ("search", "standard", "ok", "q"),

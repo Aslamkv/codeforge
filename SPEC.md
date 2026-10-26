@@ -240,7 +240,7 @@ The home and its database, the settings, numbered lists, and the one way to dele
   embed_model `""`, projects `"~/Projects"`. web_timeout is a search's timeout; fetch_workers, fetch_timeout and
   fetch_max_bytes are the `Fetcher`'s workers, timeout and max_bytes; embed_model is the model
   `tinker embed NAME` selects.
-- **SET-3** `PHASES`, `FIX_PHASES` and `PLANNING_PHASES` are the phase lists given in [The cycle](#the-cycle).
+- **SET-3** `PHASES` and `FIX_PHASES` are the phase lists given in [The cycle](#the-cycle).
   `CONFIRM_AFTER` is `review` for the project and a feature, and `reproduce` for a bug fix.
 - **SET-4** `Config` is `DEFAULT_CONFIG` overridden by the home's `config`. It is read from the database each
   time, so a change another Tinker made is seen at once; a stored key no setting has is ignored.
@@ -371,7 +371,7 @@ What is said in the chats, kept so that a chat is only a view of it.
 
 - **LED-1** `Ledger` keeps each message by channel, chat and id: `kept` goes in `MESSAGE_KEPT_SECONDS`,
   `touched` moves that on (but a glance's, or the status'), `glance` in `GLANCE_KEPT_SECONDS` (or the seconds
-  given), `lasting` never (`is_lasting` tells it). `due` gives the messages whose time is up, `passing` all but
+  given), `lasting` never. `due` gives the messages whose time is up, `passing` all but
   the status, `glances` a chat's glances; `gone` forgets one.
 - **LED-2** `shown(channel, chat, thing, ids, text, asked)` keeps a thing as it was shown last; with no thing,
   a new one is numbered, keeping what was asked. `thing_of(ids)` gives the thing messages show. `page(N)` lists

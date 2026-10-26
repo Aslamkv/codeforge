@@ -60,6 +60,14 @@ def telegram(api, chats=("42",)):
     return channel
 
 
+def every_telegram_talks_to(monkeypatch, api):
+    monkeypatch.setattr(TelegramChannel, "connection", lambda self, wait: api.connection(wait))
+
+
+def keep_a_disabled_bot():
+    Channels.keep("bot", {"kind": "telegram", "enabled": False, "allowed": ["42"]}, {"token": "t"})
+
+
 @pytest.mark.spec("CHN-1")
 def test_channels_settings_and_secrets(tinker_home, home_store):
     assert Channels.settings() == {}
@@ -100,7 +108,7 @@ def test_a_run_told_not_to_report_has_no_channels(monkeypatch):
 def test_channel_command_list_enable_disable_remove(capsys):
     ChannelCommand.run([])
     assert "No channels yet" in capsys.readouterr().out
-    Channels.keep("bot", {"kind": "telegram", "enabled": False, "allowed": ["42"]}, {"token": "t"})
+    keep_a_disabled_bot()
     ChannelCommand.run(["enable", "bot"])
     assert Channels.settings()["bot"]["enabled"] is True
     capsys.readouterr()
@@ -121,7 +129,7 @@ def test_channel_command_list_enable_disable_remove(capsys):
 
 @pytest.mark.spec("CHN-2")
 def test_removing_a_channel_asks_first():
-    Channels.keep("bot", {"kind": "telegram", "enabled": False, "allowed": ["42"]}, {"token": "t"})
+    keep_a_disabled_bot()
     with pytest.raises(SystemExit, match="Nothing deleted: run tinker channel remove bot in a terminal"):
         ChannelCommand.run(["remove", "bot"])
     assert "bot" in Channels.settings()
@@ -132,7 +140,7 @@ def test_removing_a_channel_asks_first():
 @pytest.mark.spec("CHN-2")
 def test_channel_add_from_options(monkeypatch, capsys):
     api = BotAPI(getMe={"username": "my_bot"})
-    monkeypatch.setattr(TelegramChannel, "connection", lambda self, wait: api.connection(wait))
+    every_telegram_talks_to(monkeypatch, api)
     ChannelCommand.run(["add", "--kind", "telegram", "--name", "home", "--token", "abc", "--chat", "42, 43"])
     assert Channels.settings()["home"] == {
         "kind": "telegram",
@@ -142,24 +150,21 @@ def test_channel_add_from_options(monkeypatch, capsys):
     }
     assert Channels.secrets("home") == {"token": "abc"}
     assert api.calls[0][0] == "/botabc/getMe" and "It starts disabled" in capsys.readouterr().out
+    a_telegram_add = ["add", "--kind", "telegram", "--token", "abc", "--chat", "1"]
     for argv, why in (
-        (["--name", "home"], "exists"),
-        (["--name", "-bad"], "letters, digits"),
-        (["--kind", "pigeon"], "no channel kind"),
-        (["oops"], "unexpected 'oops'"),
+        (a_telegram_add + ["--name", "home"], "exists"),
+        (a_telegram_add + ["--name", "-bad"], "letters, digits"),
+        (["add", "--kind", "pigeon"], "no channel kind"),
+        (["add", "oops"], "unexpected 'oops'"),
     ):
         with pytest.raises(SystemExit, match=why):
-            ChannelCommand.run(
-                ["add", "--kind", "telegram", "--token", "abc", "--chat", "1"] + argv
-                if argv[0] != "--kind" and argv[0] != "oops"
-                else ["add"] + argv
-            )
+            ChannelCommand.run(argv)
 
 
 @pytest.mark.spec("CHN-2")
 def test_channel_add_with_a_token_that_does_not_work(monkeypatch):
     api = BotAPI(getMe=(401, '{"ok": false, "description": "Unauthorized"}'))
-    monkeypatch.setattr(TelegramChannel, "connection", lambda self, wait: api.connection(wait))
+    every_telegram_talks_to(monkeypatch, api)
     with pytest.raises(SystemExit, match="does not work with that: Telegram refused getMe: 401"):
         ChannelCommand.run(["add", "--kind", "telegram", "--name", "home", "--token", "bad", "--chat", "1"])
     assert Channels.settings() == {}
@@ -347,9 +352,9 @@ def test_pair_serves_the_chat_its_sender_confirms(monkeypatch, capsys):
 def test_start_needs_a_channel_and_checks_it(monkeypatch):
     with pytest.raises(SystemExit, match="no channel is enabled"):
         ChannelCommand.run(["start"])
-    Channels.keep("bot", {"kind": "telegram", "enabled": False, "allowed": ["42"]}, {"token": "t"})
+    keep_a_disabled_bot()
     api = BotAPI(getMe=(401, "Unauthorized"))
-    monkeypatch.setattr(TelegramChannel, "connection", lambda self, wait: api.connection(wait))
+    every_telegram_talks_to(monkeypatch, api)
     with pytest.raises(SystemExit, match="channel bot does not work"):
         ChannelCommand.run(["start", "bot"])
 

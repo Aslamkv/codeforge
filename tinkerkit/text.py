@@ -6,7 +6,8 @@ lazy import urllib.parse
 
 
 def first_line(text, limit=140):
-    line = (text or "").strip().splitlines()[0] if (text or "").strip() else ""
+    lines = (text or "").strip().splitlines()
+    line = lines[0] if lines else ""
     return line if len(line) <= limit else line[: limit - 3] + "..."
 
 

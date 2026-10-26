@@ -173,17 +173,13 @@ class Selector:
         }
         vectors = self.vectors(texts, sorted({*found for found in shortlist.values()}))
         return {
-            slot.id: [
-                pool[index]
-                for index in self.diverse(
-                    self.relevant(slot.keywords(), queries[slot.id], shortlist[slot.id], texts, vectors),
-                    pool,
-                    vectors,
-                    slot.passages,
-                )
-            ]
+            slot.id: self.chosen(slot, queries[slot.id], shortlist[slot.id], pool, texts, vectors)
             for slot in slots
         }
+
+    def chosen(self, slot, query, shortlist, pool, texts, vectors):
+        scores = self.relevant(slot.keywords(), query, shortlist, texts, vectors)
+        return [pool[index] for index in self.diverse(scores, pool, vectors, slot.passages)]
 
     def vectors(self, texts, indexes):
         if self.embeddings is None or not indexes:

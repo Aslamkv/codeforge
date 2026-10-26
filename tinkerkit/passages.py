@@ -1,5 +1,6 @@
 import html.parser
 import re
+from collections import Counter
 from dataclasses import dataclass
 
 lazy from .settings import MAX_PASSAGE_CHARS, MENU_LINK_SHARE, MIN_USABLE_PAGE_CHARS, NEAR_DUPLICATE_OVERLAP
@@ -74,12 +75,11 @@ class Cleaner:
 
     @staticmethod
     def without_site_repeats(pages):
-        counts = {}
-        for page in pages:
-            for key in {
-                (host(page.url), normal(block.text)) for block in page.blocks if block.kind != "code"
-            }:
-                counts[key] = counts.get(key, 0) + 1
+        counts = Counter(
+            line
+            for page in pages
+            for line in {site_line(page, block) for block in page.blocks if block.kind != "code"}
+        )
         return [
             Page(
                 page.url,
@@ -87,7 +87,7 @@ class Cleaner:
                 [
                     block
                     for block in page.blocks
-                    if block.kind == "code" or counts[(host(page.url), normal(block.text))] < 2
+                    if block.kind == "code" or counts[site_line(page, block)] < 2
                 ],
             )
             for page in pages
@@ -335,3 +335,7 @@ def repeats(a, b):
 
 def normal(text):
     return " ".join(words(text))
+
+
+def site_line(page, block):
+    return host(page.url), normal(block.text)

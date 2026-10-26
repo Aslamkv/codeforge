@@ -107,7 +107,6 @@ class Jobs:
         ends = time.monotonic() + JOB_PAUSE_GRACE_SECONDS
         while Jobs.still_running(others) and time.monotonic() < ends:
             time.sleep(0.5)
-        return others
 
     @staticmethod
     def still_running(jobs):
@@ -185,11 +184,7 @@ class Jobs:
 
     @staticmethod
     def lost():
-        return [
-            job
-            for job in JOBS.newest()
-            if job.get("state") in ("running", "paused") and not alive(job.get("pid"), job.get("pid_began"))
-        ]
+        return [job for job in JOBS.newest() if is_lost(job)]
 
     @staticmethod
     def listed(state=None):
@@ -345,9 +340,11 @@ def job_number(word):
 
 
 def settled(job):
-    if job.get("state") in ("running", "paused") and not alive(job.get("pid"), job.get("pid_began")):
-        return dict(job, state="stopped")
-    return job
+    return dict(job, state="stopped") if is_lost(job) else job
+
+
+def is_lost(job):
+    return job.get("state") in ("running", "paused") and not alive(job.get("pid"), job.get("pid_began"))
 
 
 def alive(pid, began=None):

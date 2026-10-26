@@ -34,11 +34,6 @@ class Ledger:
         cls.change(channel, chat, message, until=None)
 
     @classmethod
-    def is_lasting(cls, channel, chat, message):
-        view = Home.store().get(cls.VIEWS, key(channel, chat, message))
-        return view is not None and view.get("until") is None
-
-    @classmethod
     def change(cls, channel, chat, message, **changes):
         Home.store().update(cls.VIEWS, key(channel, chat, message), lambda view: dict(view or {}, **changes))
 

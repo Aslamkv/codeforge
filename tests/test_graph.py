@@ -82,10 +82,14 @@ def test_one_node_per_thing_tinker_knows(memory):
     assert nodes[f"fact:flask:{memory['route']}"]["sources"] == ["https://a.org/x"]
 
 
+def linked(graph):
+    return {(link["source"], link["target"], link["kind"]) for link in graph.links}
+
+
 @pytest.mark.spec("GRF-2")
 def test_links_join_items_to_what_they_belong_to_and_to_their_runs(memory):
     graph = Graph.build()
-    links = {(link["source"], link["target"], link["kind"]) for link in graph.links}
+    links = linked(graph)
     seed, route = f"lesson:{memory['seed']}", memory["route"]
     finding = next(node for node in graph.nodes if node.startswith("finding:"))
     assert {
@@ -113,7 +117,7 @@ def test_a_rule_links_to_the_facts_and_lessons_it_rests_on(memory):
     Library.save("flask", entry)
     graph = Graph.build()
     rule = next(node for node in graph.nodes if node.startswith("rule:"))
-    links = {(link["source"], link["target"], link["kind"]) for link in graph.links}
+    links = linked(graph)
     assert {
         (rule, f"fact:flask:{memory['route']}", "cites"),
         (rule, f"lesson:{memory['seed']}", "cites"),
