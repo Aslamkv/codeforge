@@ -2,7 +2,7 @@ import json
 import sys
 
 import pytest
-from conftest import MODEL, TOOLCHAIN, web_page
+from conftest import MODEL, TOOLCHAIN, FakeSearch, web_page
 
 from tinkerkit import cli
 from tinkerkit.cli import Cli, Commands
@@ -25,12 +25,10 @@ PAGE = {
 }
 
 
-class FakeWeb:
+class FakeWeb(FakeSearch):
     def __init__(self, pages=(PAGE,)):
+        super().__init__()
         self.pages, self.queries = list(pages), []
-
-    def search_all(self, queries, count):
-        return [self.search(query, count) for query in queries]
 
     def search(self, query, count):
         self.queries.append(query)

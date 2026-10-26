@@ -36,7 +36,7 @@ class SearchEngine:
         try:
             return json.loads(body)
         except ValueError as error:
-            raise SearchFailed(f"{self.name} answered without JSON") from error
+            raise self.failed("answered without JSON") from error
 
     def failed(self, why):
         return SearchFailed(f"{self.name} {why}")

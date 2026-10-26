@@ -3,7 +3,7 @@ import json
 import re
 
 import pytest
-from conftest import web_page
+from conftest import FakeSearch, web_page
 
 from tinkerkit.knowledge import Knowledge, Library
 from tinkerkit.learning import (
@@ -22,14 +22,11 @@ from tinkerkit.slots import PROFILES, Selector, missing, short_slots, web_slots
 from tinkerkit.web import RequestLog, WebPage
 
 
-class FakeWeb:
+class FakeWeb(FakeSearch):
     def __init__(self, found=None, pages=None):
+        super().__init__()
         self.found, self.pages = found or {}, pages or {}
-        self.queries, self.fetched, self.requests, self.batches = [], [], RequestLog(), []
-
-    def search_all(self, queries, count):
-        self.batches.append(list(queries))
-        return [self.search(query, count) for query in queries]
+        self.queries, self.fetched, self.requests = [], [], RequestLog()
 
     def search(self, query, count):
         self.queries.append(query)

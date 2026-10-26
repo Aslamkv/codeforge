@@ -287,6 +287,18 @@ def web_page(url, text, kind="text/plain"):
     return WebPage(url, kind, text.encode(), blocks, title, "")
 
 
+class FakeSearch:
+    def __init__(self):
+        self.batches = []
+
+    def search(self, query, count):
+        raise NotImplementedError
+
+    def search_all(self, queries, count):
+        self.batches.append(list(queries))
+        return [self.search(query, count) for query in queries]
+
+
 def plan_of(folder):
     from tinkerkit.project import saved
 
