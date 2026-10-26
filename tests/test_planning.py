@@ -17,7 +17,7 @@ from tinkerkit.planning import (
 )
 from tinkerkit.prompts import Reply
 from tinkerkit.web import Internet
-from tinkerkit.workspace import Toolchain
+from tinkerkit.workspace import Toolchain, Workspace
 
 
 @pytest.mark.spec("PLN-4")
@@ -174,6 +174,11 @@ def planner(make_project, make_session):
     return session, project, project.cycles[0]
 
 
+def write_spec(session, cycle, fake_ollama):
+    fake_ollama.reply(spec_reply(), when="Spec")
+    SpecWriter(session).run(cycle)
+
+
 @pytest.mark.spec("PLN-8")
 def test_read_spec_traces_criteria_and_checks_the_plan(planner):
     session, project, cycle = planner
@@ -267,8 +272,7 @@ def test_read_spec_needs_the_program_run_as_a_person_runs_it(planner):
 @pytest.mark.spec("PLN-9")
 def test_spec_phase_makes_the_plan_the_cycles_spec(planner, fake_ollama):
     session, project, cycle = planner
-    fake_ollama.reply(spec_reply(), when="Spec")
-    SpecWriter(session).run(cycle)
+    write_spec(session, cycle, fake_ollama)
     assert [criterion["id"] for criterion in project.criteria] == ["C1", "C2"]
     assert all(
         criterion["status"] == "todo" and criterion["cycle"] == "base" for criterion in project.criteria
@@ -297,8 +301,7 @@ def test_a_program_without_a_run_command_gets_its_toolchain_again(planner, fake_
 @pytest.mark.spec("PLN-10")
 def test_amend_replaces_the_cycles_criteria(planner, fake_ollama):
     session, project, cycle = planner
-    fake_ollama.reply(spec_reply(), when="Spec")
-    SpecWriter(session).run(cycle)
+    write_spec(session, cycle, fake_ollama)
     amended = spec_reply(
         criteria=[
             {
@@ -333,8 +336,7 @@ def test_amend_replaces_the_cycles_criteria(planner, fake_ollama):
 @pytest.mark.spec("PLN-10")
 def test_an_amendment_that_fails_leaves_the_spec(planner, fake_ollama):
     session, project, cycle = planner
-    fake_ollama.reply(spec_reply(), when="Spec")
-    SpecWriter(session).run(cycle)
+    write_spec(session, cycle, fake_ollama)
     before = json.dumps(project.criteria)
     fake_ollama.reply("I cannot", when="Amend", times=3)
     with pytest.raises(SystemExit, match="usable amend the spec"):
@@ -387,8 +389,6 @@ def test_templates_get_a_renderer_and_files_their_layout(project_dir):
     ]
     Designer.give_templates_a_renderer(files, "app.py")
     assert files[2]["uses"] == ["templates/list.html"] and files[3]["uses"] == ["templates/other.html"]
-    from tinkerkit.workspace import Workspace
-
     entry = Designer.layout_file(
         {"path": "./src/x.py", "kind": "Weird", "purpose": "does x", "uses": ["./a.py", 3]},
         set(),
@@ -538,6 +538,17 @@ def topic(slug, **entry):
     )
 
 
+def python_topic(**entry):
+    topic("python", name="Python 3.14", kind="language", language="Python", **entry)
+
+
+def with_python_rules(*rules):
+    entry = Library.read("python")
+    entry["rules"] = [dict(rule, cites=[entry["facts"][0]["id"]]) for rule in rules]
+    Library.save("python", entry)
+    return {rule["text"]: rule["id"] for rule in Library.read("python")["rules"]}
+
+
 @pytest.mark.spec("PLN-1")
 def test_recall_with_nothing_learned_makes_no_call(make_project, make_session, fake_ollama):
     project = make_project()
@@ -552,13 +563,8 @@ def test_recall_without_the_web_uses_the_topics_named_and_the_language(
 ):
     topic("flask", name="Flask", facts=[{"phase": "code", "text": "Flask routes use decorators"}])
     topic("django", name="Django", facts=[{"phase": "code", "text": "Django has an ORM"}])
-    topic(
-        "python",
-        name="Python 3.14",
-        kind="language",
-        language="Python",
-        tools=[{"role": "tests", "name": "pytest"}],
-        facts=[{"phase": "code", "text": "match is soft"}],
+    python_topic(
+        tools=[{"role": "tests", "name": "pytest"}], facts=[{"phase": "code", "text": "match is soft"}]
     )
     project = make_project(cycles=[{"id": "base", "request": "a Flask app for notes", "phase": "recall"}])
     cycle = project.cycles[0]
@@ -571,17 +577,11 @@ def test_recall_without_the_web_uses_the_topics_named_and_the_language(
 
 @pytest.mark.spec("PLN-1")
 def test_recall_keeps_a_languages_rules_before_its_other_facts(make_project, make_session, fake_ollama):
-    topic(
-        "python",
-        name="Python 3.14",
-        kind="language",
-        language="Python",
+    python_topic(
         tools=[{"role": "tests", "name": "pytest"}],
         facts=[{"phase": "code", "text": "Python has match"}, {"phase": "code", "text": "t-strings are new"}],
     )
-    entry = Library.read("python")
-    entry["rules"] = [{"phase": "code", "text": "Use match for dispatch", "cites": [entry["facts"][0]["id"]]}]
-    Library.save("python", entry)
+    with_python_rules({"phase": "code", "text": "Use match for dispatch"})
     project = make_project(cycles=[{"id": "base", "request": "a calculator in Python", "phase": "recall"}])
     Recaller(make_session(project)).run(project.cycles[0])
     the_rules_stand_in_for_the_facts = ["its tools: tests pytest", "Use match for dispatch"]
@@ -629,36 +629,22 @@ def test_recall_goes_on_when_its_call_fails(make_project, make_session, fake_oll
 def test_a_plan_to_confirm_is_a_quick_draft(planner, fake_ollama):
     session, project, cycle = planner
     cycle["confirm"] = True
-    fake_ollama.reply(spec_reply(), when="Spec")
-    SpecWriter(session).run(cycle)
+    write_spec(session, cycle, fake_ollama)
     assert fake_ollama.calls[0]["think"] == "low"
 
 
 def python_with_conditional_rules():
-    topic(
-        "python",
-        name="Python 3.14",
-        kind="language",
-        language="Python",
+    python_topic(
         tools=[{"role": "environment", "name": "uv"}, {"role": "tests", "name": "pytest"}],
         machine=[{"command": "uv --version", "found": False, "output": ""}],
         facts=[{"phase": "code", "text": "a fact"}],
     )
-    entry = Library.read("python")
-    cite = [entry["facts"][0]["id"]]
-    entry["rules"] = [
-        {"phase": "code", "text": "Never use a mutable default argument", "when": "", "cites": cite},
-        {"phase": "code", "text": "Use inspect.iscoroutinefunction", "when": "async code", "cites": cite},
-        {
-            "phase": "code",
-            "text": "Open text files with an encoding",
-            "when": "code that reads files",
-            "cites": cite,
-        },
-        {"phase": "config", "text": "Set build-backend uv_build", "when": "", "cites": cite},
-    ]
-    Library.save("python", entry)
-    return {rule["text"]: rule["id"] for rule in Library.read("python")["rules"]}
+    return with_python_rules(
+        {"phase": "code", "text": "Never use a mutable default argument", "when": ""},
+        {"phase": "code", "text": "Use inspect.iscoroutinefunction", "when": "async code"},
+        {"phase": "code", "text": "Open text files with an encoding", "when": "code that reads files"},
+        {"phase": "config", "text": "Set build-backend uv_build", "when": ""},
+    )
 
 
 def choose(situation):
@@ -716,26 +702,10 @@ def test_a_proven_rule_for_other_code_stays_out_too(make_project, make_session):
 @pytest.mark.spec("PLN-8")
 def test_the_spec_sees_the_config_rules_since_it_plans_the_config_files(planner, fake_ollama):
     session, project, cycle = planner
-    topic(
-        "python",
-        name="Python 3.14",
-        kind="language",
-        language="Python",
-        facts=[{"phase": "code", "text": "f"}],
-    )
-    entry = Library.read("python")
-    entry["rules"] = [
-        {
-            "phase": "config",
-            "text": "Set pythonpath in pyproject.toml",
-            "when": "",
-            "cites": [entry["facts"][0]["id"]],
-        }
-    ]
-    Library.save("python", entry)
+    python_topic(facts=[{"phase": "code", "text": "f"}])
+    with_python_rules({"phase": "config", "text": "Set pythonpath in pyproject.toml", "when": ""})
     project.spec["learned"] = Library.items({"python": Library.read("python")})[1:]
-    fake_ollama.reply(spec_reply(), when="Spec")
-    SpecWriter(session).run(cycle)
+    write_spec(session, cycle, fake_ollama)
     assert "Set pythonpath in pyproject.toml" in fake_ollama.calls[0]["messages"][-1]["content"]
 
 

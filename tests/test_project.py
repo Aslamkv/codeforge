@@ -2,6 +2,7 @@ import argparse
 import io
 import os
 import re
+import shutil
 import sys
 from pathlib import Path
 
@@ -24,7 +25,9 @@ from tinkerkit.project import (
     project_store,
     saved,
 )
+from tinkerkit.prompts import Part
 from tinkerkit.settings import EXERCISE_ENV, Home
+from tinkerkit.store import Log
 from tinkerkit.workspace import TaughtCommands, Workspace
 
 
@@ -98,8 +101,6 @@ def test_two_folders_of_one_name_need_the_id(tmp_path):
 @pytest.mark.spec("PRJ-2")
 def test_entries_have_each_projects_own_record(tmp_path):
     saved_run(tmp_path / "calc", "abc123")
-    import shutil
-
     saved_run(tmp_path / "gone", "fff000")
     shutil.rmtree(tmp_path / "gone")
     entries = {entry["id"]: entry for entry in Runs.entries()}
@@ -115,8 +116,6 @@ def test_workdir(tmp_path, monkeypatch):
     assert Runs.workdir("", "p") == (tmp_path / "p").resolve()
     with pytest.raises(SystemExit, match="does not exist"):
         Runs.workdir("", "nowhere")
-    import shutil
-
     shutil.rmtree(tmp_path / "p")
     with pytest.raises(SystemExit, match="no longer exists"):
         Runs.workdir("abc123", None)
@@ -193,22 +192,26 @@ def test_before_start_for_a_new_run(tmp_path, monkeypatch):
 @pytest.mark.spec("PRJ-7")
 def test_before_start_for_a_saved_run(tmp_path):
     folder = tmp_path / "p"
+
+    def resuming(**given):
+        return RunChecks.before_start(run_args(resume="", workdir=str(folder), **given))
+
     saved_run(folder, cycles=[{"id": "base", "request": "x", "phase": "nonsense"}])
     with pytest.raises(SystemExit, match="saved phase 'nonsense'"):
-        RunChecks.before_start(run_args(resume="", workdir=str(folder)))
+        resuming()
     saved_run(folder, cycles=[{"id": "base", "request": "a calculator", "phase": "verify"}])
-    assert RunChecks.before_start(run_args(resume="", workdir=str(folder))) == folder
+    assert resuming() == folder
     with pytest.raises(SystemExit, match="unfinished project"):
-        RunChecks.before_start(run_args(resume="", workdir=str(folder), add=["more"]))
+        resuming(add=["more"])
     with pytest.raises(SystemExit, match="a plan that waits for confirmation"):
-        RunChecks.before_start(run_args(resume="", workdir=str(folder), amend="change"))
+        resuming(amend="change")
     saved_run(folder, cycles=[])
     with pytest.raises(SystemExit, match="no project spec yet"):
-        RunChecks.before_start(run_args(resume="", workdir=str(folder), add=["more"]))
+        resuming(add=["more"])
     saved_run(folder, cycles=[{"id": "base", "request": "x", "phase": "done"}])
-    assert RunChecks.before_start(run_args(resume="", workdir=str(folder), add=["more"])) == folder
+    assert resuming(add=["more"]) == folder
     saved_run(folder, cycles=[{"id": "base", "request": "x", "phase": "setup", "awaiting": True}])
-    assert RunChecks.before_start(run_args(resume="", workdir=str(folder), amend="change")) == folder
+    assert resuming(amend="change") == folder
 
 
 @pytest.mark.spec("PRJ-7")
@@ -523,9 +526,6 @@ def test_the_passing_count_follows_every_save(make_project, make_session):
 
 @pytest.mark.spec("MSG-3", "MSG-5")
 def test_a_run_keeps_its_calls_and_output_in_its_project(project_dir, make_model, fake_ollama):
-    from tinkerkit.prompts import Part
-    from tinkerkit.store import Log
-
     store = project_store(project_dir)
     model = make_model()
     model.log = Log(store, "events")
