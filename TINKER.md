@@ -39,7 +39,8 @@ Tinker searches open search engines that need no account and no key:
 [Mwmbl](https://mwmbl.org) for the web at large, and [Wikipedia](https://en.wikipedia.org) and
 [Wikibooks](https://en.wikibooks.org) for overviews and tutorials. For each thing it needs to find, the model
 plans the searches: their words, the engines that suit each one and how many results to take. Each plan is
-kept, so the same need is not planned twice. It asks the engines at once and mixes their results by rank. If
+kept, so the same need is not planned twice. A learn's first search, from the topic alone, is not planned: it
+asks every engine. It asks the engines at once and mixes their results by rank. If
 one is down, the others still answer. Pages are read straight from their sites, in parallel, like `curl`
 would.
 

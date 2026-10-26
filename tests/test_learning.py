@@ -23,6 +23,7 @@ from tinkerkit.settings import (
     DOCS_VERSION_SEARCH,
     FACTS_PER_SLOT,
     MAX_PLANNED_SEARCHES,
+    RESULTS_PER_LEARN_SEARCH,
     SLOT_CANDIDATE_PASSAGES,
     Config,
     Home,
@@ -412,7 +413,11 @@ def test_read_digest_keeps_only_facts_that_cite_the_passages_given():
 
 WEB_AND_WARNING_BY_CAUSE = {
     "no search answered": (dict(), "the search found nothing"),
-    "no relevant results": (dict(found={FIRST_SEARCH: [OFF_TOPIC]}), "no search result is about the topic"),
+    "no relevant results": (
+        dict(found={FIRST_SEARCH: [OFF_TOPIC]}),
+        "no search result is about the topic",
+        "Next: learn again later, or name the topic differently if it is ambiguous",
+    ),
     "too few pages": (
         dict(found={FIRST_SEARCH: RESULTS}, pages={START: PAGES[START]}),
         "too few pages could be fetched",
@@ -423,7 +428,7 @@ WEB_AND_WARNING_BY_CAUSE = {
 @pytest.mark.spec("LRN-3")
 @pytest.mark.parametrize("cause", WEB_AND_WARNING_BY_CAUSE)
 def test_a_learn_the_web_cannot_feed_stops_before_any_model_call(cause, tinker_home):
-    web_settings, warning = WEB_AND_WARNING_BY_CAUSE[cause]
+    web_settings, *warnings = WEB_AND_WARNING_BY_CAUSE[cause]
     model, embeddings = tool_model(), CountingEmbeddings()
     slot_learner = SlotLearner(model, FakeWeb(**web_settings), embeddings)
     with pytest.raises(LearnStopped) as stopped:
@@ -431,7 +436,8 @@ def test_a_learn_the_web_cannot_feed_stops_before_any_model_call(cause, tinker_h
     message = str(stopped.value)
     exit_code = stopped.value.code
     assert isinstance(stopped.value, SystemExit) and exit_code
-    assert warning in message and "Nothing was learned or saved" in message and "Next: " in message
+    assert all(warning in message for warning in warnings)
+    assert "Nothing was learned or saved" in message and "Next: " in message
     assert "Web requests: search 1" in message and "Tried: " in message
     assert model.calls == [] and embeddings.calls == 0
     assert all(Home.store().items(part) == {} for part in ("learned", "embeddings", "languages", "memory"))
@@ -531,13 +537,10 @@ def test_kept_documentation_is_not_planned_or_searched(tinker_home, monkeypatch)
 
 @pytest.mark.spec("LRN-4", "KNW-25")
 def test_a_learns_documentation_needs_are_planned_and_each_pools_its_searches(tinker_home, monkeypatch):
-    quick_model_planning(
+    asked = quick_model_planning(
         monkeypatch,
         {
-            DOCS_SITE_SEARCH: [
-                {"query": "{topic} guide", "engines": ["wikibooks"], "count": 3},
-                {"query": "{topic} official documentation", "engines": ["mwmbl"]},
-            ],
+            DOCS_SITE_SEARCH: [{"query": "{topic} guide", "engines": ["wikibooks"], "count": 3}],
             DOCS_VERSION_SEARCH: [
                 {"query": "{name}  {version} docs", "engines": ["mwmbl"], "count": 4},
                 {"query": "{name} {version} changelog"},
@@ -545,7 +548,6 @@ def test_a_learns_documentation_needs_are_planned_and_each_pools_its_searches(ti
         },
     )
     found = {
-        "Widgetlib guide": RESULTS[:1],
         FIRST_SEARCH: RESULTS,
         "Widgetlib 2.1.0 docs": DOC_RESULTS[:2],
         "Widgetlib 2.1.0 changelog": DOC_RESULTS[2:],
@@ -553,15 +555,13 @@ def test_a_learns_documentation_needs_are_planned_and_each_pools_its_searches(ti
     web = FakeWeb(found, ALL_PAGES)
     learner(web).learn("Widgetlib")
     assert web.entries[:2] == [
-        [
-            {"query": "Widgetlib guide", "engines": ["wikibooks"], "count": 3},
-            {"query": FIRST_SEARCH, "engines": ["mwmbl"]},
-        ],
+        [{"query": FIRST_SEARCH, "engines": [], "count": RESULTS_PER_LEARN_SEARCH}],
         [
             {"query": "Widgetlib 2.1.0 docs", "engines": ["mwmbl"], "count": 4},
             {"query": "Widgetlib 2.1.0 changelog"},
         ],
     ]
+    assert not any(DOCS_SITE_SEARCH in messages[1]["content"] for messages in asked)
     assert web.fetched[:3] == [START, CHANGES, APP]
     assert all(url in web.fetched for url in DOC_PAGES if url != ELSEWHERE)
 
