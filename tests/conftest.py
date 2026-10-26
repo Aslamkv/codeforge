@@ -294,8 +294,9 @@ class FakeSearch:
     def search(self, query, count):
         raise NotImplementedError
 
-    def search_all(self, queries, count):
-        self.batches.append(list(queries))
+    def search_all(self, searches, count):
+        queries = [search["query"] if isinstance(search, dict) else search for search in searches]
+        self.batches.append(queries)
         return [self.search(query, count) for query in queries]
 
 

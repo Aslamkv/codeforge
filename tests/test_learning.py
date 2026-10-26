@@ -12,12 +12,21 @@ from tinkerkit.learning import (
     SlotLearner,
     read_digest,
     read_plan,
+    wanted_docs,
 )
-from tinkerkit.model import Answer
+from tinkerkit.model import Answer, Models
 from tinkerkit.passages import Block, Page, Passage
 from tinkerkit.project import Tracker
 from tinkerkit.prompts import Reply
-from tinkerkit.settings import FACTS_PER_SLOT, SLOT_CANDIDATE_PASSAGES, Config, Home
+from tinkerkit.settings import (
+    DOCS_SITE_SEARCH,
+    DOCS_VERSION_SEARCH,
+    FACTS_PER_SLOT,
+    MAX_PLANNED_SEARCHES,
+    SLOT_CANDIDATE_PASSAGES,
+    Config,
+    Home,
+)
 from tinkerkit.slots import PROFILES, Selector, missing, short_slots, web_slots
 from tinkerkit.web import RequestLog, WebPage
 
@@ -479,6 +488,94 @@ def test_a_tool_is_learned_from_one_search_and_its_versions_documentation(tinker
     out = capsys.readouterr().out
     assert "Documentation: widgetlib 2.1.0" in out and f"Web requests: search {len(web.queries)}" in out
     assert "Pages: 2 searched, 1 failed, 4 docs" in out and f"Facts kept: {len(entry['facts'])}" in out
+
+
+class PlannedWeb(FakeWeb):
+    def __init__(self, found=None, pages=None):
+        super().__init__(found, pages)
+        self.searches = []
+
+    def search_all(self, searches, count):
+        self.searches.append(list(searches))
+        kept = [search for search in searches if search["query"]][:MAX_PLANNED_SEARCHES]
+        return super().search_all(kept, count)
+
+
+def quick_model_planning(monkeypatch, plans):
+    calls = []
+
+    def reply(messages, tokens):
+        need = next(need for need in plans if need in messages[1]["content"])
+        calls.append(need)
+        return json.dumps({"searches": plans[need]})
+
+    monkeypatch.setattr(Models, "quick", staticmethod(lambda: ("m", {}, None)))
+    monkeypatch.setattr(Models, "quick_reply", staticmethod(reply))
+    return calls
+
+
+@pytest.mark.spec("WEB-3", "LRN-4")
+def test_more_planned_searches_than_one_ask_keeps_each_needs_results_its_own():
+    plans = [[{"query": f"need {need} search {number}"} for number in range(4)] for need in range(3)]
+    plans[0].insert(1, {"query": ""})
+    found = {
+        search["query"]: [result(f"https://x.dev/{search['query']}", "t")]
+        for plan in plans
+        for search in plan
+    }
+    web = PlannedWeb(found)
+    results = learner(web).searched_needs(plans)
+    assert [len(batch) for batch in web.searches] == [MAX_PLANNED_SEARCHES, 4]
+    assert results == [[found[f"need {need} search {number}"][0] for number in range(4)] for need in range(3)]
+
+
+@pytest.mark.spec("LRN-1", "KNW-25")
+def test_kept_documentation_is_not_planned_or_searched(tinker_home, monkeypatch):
+    calls = quick_model_planning(monkeypatch, {DOCS_VERSION_SEARCH: [{"query": "{name} {version} docs"}]})
+    page = Page("https://widgetlib.dev/docs/", "t", [Block("text", "Overview")])
+    DocCache.put("widgetlib", "2.1.0", [page])
+    web = PlannedWeb()
+    kept = wanted_docs("widgetlib", "Widgetlib", "2.1.0", DOCS_VERSION_SEARCH, 4)
+    [pages] = learner(web).doc_pages([kept])
+    assert [kept_page.blocks for kept_page in pages] == [page.blocks]
+    assert calls == [] and web.searches == []
+
+
+@pytest.mark.spec("LRN-4", "KNW-25")
+def test_a_learns_documentation_needs_are_planned_and_each_pools_its_searches(tinker_home, monkeypatch):
+    quick_model_planning(
+        monkeypatch,
+        {
+            DOCS_SITE_SEARCH: [
+                {"query": "{topic} guide", "engines": ["wikibooks"], "count": 3},
+                {"query": "{topic} official documentation", "engines": ["mwmbl"]},
+            ],
+            DOCS_VERSION_SEARCH: [
+                {"query": "{name}  {version} docs", "engines": ["mwmbl"], "count": 4},
+                {"query": "{name} {version} changelog"},
+            ],
+        },
+    )
+    found = {
+        "Widgetlib guide": RESULTS[:1],
+        FIRST_SEARCH: RESULTS,
+        "Widgetlib 2.1.0 docs": DOC_RESULTS[:2],
+        "Widgetlib 2.1.0 changelog": DOC_RESULTS[2:],
+    }
+    web = PlannedWeb(found, ALL_PAGES)
+    learner(web).learn("Widgetlib")
+    assert web.searches[:2] == [
+        [
+            {"query": "Widgetlib guide", "engines": ["wikibooks"], "count": 3},
+            {"query": FIRST_SEARCH, "engines": ["mwmbl"]},
+        ],
+        [
+            {"query": "Widgetlib 2.1.0 docs", "engines": ["mwmbl"], "count": 4},
+            {"query": "Widgetlib 2.1.0 changelog"},
+        ],
+    ]
+    assert web.fetched[:3] == [START, CHANGES, APP]
+    assert all(url in web.fetched for url in DOC_PAGES if url != ELSEWHERE)
 
 
 @pytest.mark.spec("LRN-7")

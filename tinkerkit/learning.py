@@ -5,7 +5,7 @@ lazy from collections import Counter
 
 from .messages import Message, Messages, say
 lazy from .jobs import today
-lazy from .knowledge import LEARN_STEPS, Learner, Library, Researcher, Retriever, language_key
+lazy from .knowledge import LEARN_STEPS, Learner, Library, Researcher, Retriever, SearchPlanner, language_key
 lazy from .model import OllamaError
 lazy from .passages import Cleaner, Page
 lazy from .project import Tracked
@@ -16,6 +16,7 @@ lazy from .settings import (
     FACT_PHASES,
     FACTS_PER_SLOT,
     MAX_FACT_CHARS,
+    MAX_PLANNED_SEARCHES,
     MAX_VERSION_COMMANDS,
     RESULTS_PER_LEARN_SEARCH,
     TOOL_ROLES,
@@ -60,7 +61,7 @@ RECAP_LINE_ICONS = ("✅", "❓", "📖", "📄", "🧩", "🌐")
 Tools = namedtuple("Tools", "tools dropped")
 PlanAndPages = namedtuple("PlanAndPages", "plan pages")
 UsablePages = namedtuple("UsablePages", "pages results")
-WantedDocs = namedtuple("WantedDocs", "slug key name query cap")
+WantedDocs = namedtuple("WantedDocs", "slug key name query need values cap")
 
 
 class LearnStopped(SystemExit):
@@ -170,7 +171,7 @@ class SlotLearner(Tracked):
     def first_search(self):
         self.step("search", f"Searching the web for pages about {self.topic}…", "🔎")
         self.searched_first = True
-        results = self.search(DOCS_SITE_SEARCH.format(topic=self.topic))
+        [results] = self.searched_needs([planned_searches(DOCS_SITE_SEARCH, {"topic": self.topic})])
         if not results:
             self.stop("gate 1", "no-results")
         picked = self.picked(self.topic, results)
@@ -181,6 +182,22 @@ class SlotLearner(Tracked):
     def search(self, query):
         self.tried.append(f'search "{query}"')
         return self.internet.search(query, RESULTS_PER_LEARN_SEARCH)
+
+    def searched_needs(self, plans):
+        plans = [[search for search in plan if search["query"]] for plan in plans]
+        searches = [search for plan in plans for search in plan]
+        self.tried += [f'search "{search["query"]}"' for search in searches]
+        results = iter(self.searched_in_batches(searches))
+        return [[result for _ in plan for result in next(results, [])] for plan in plans]
+
+    def searched_in_batches(self, searches):
+        starts = range(0, len(searches), MAX_PLANNED_SEARCHES)
+        batches = [searches[start : start + MAX_PLANNED_SEARCHES] for start in starts]
+        return [
+            results
+            for batch in batches
+            for results in self.internet.search_all(batch, RESULTS_PER_LEARN_SEARCH)
+        ]
 
     def picked(self, topic, results, most=None):
         scores = Retriever(None).word_scores(
@@ -282,17 +299,16 @@ class SlotLearner(Tracked):
     def doc_pages(self, wanted):
         wanted = [docs for docs in wanted if docs.cap > 0]
         kept = [DocCache.get(docs.slug, docs.key) for docs in wanted]
-        missing = [docs.query for docs, pages in zip(wanted, kept) if not pages]
-        found = dict(zip(missing, self.searched_all(missing)))
+        missing = [docs for docs, pages in zip(wanted, kept) if not pages]
+        found = dict(zip([docs.query for docs in missing], self.searched_all(missing)))
         return [self.docs_of(docs, pages, found.get(docs.query)) for docs, pages in zip(wanted, kept)]
 
-    def searched_all(self, queries):
-        if not queries:
+    def searched_all(self, wanted):
+        if not wanted:
             return []
-        self.tried += [f'search "{query}"' for query in queries]
-        quoted = ", ".join(f'"{query}"' for query in queries)
+        quoted = ", ".join(f'"{docs.query}"' for docs in wanted)
         with say.working_on(f"Searching the web for {quoted}"):
-            return self.internet.search_all(queries, RESULTS_PER_LEARN_SEARCH)
+            return self.searched_needs([planned_searches(docs.need, docs.values) for docs in wanted])
 
     def docs_of(self, docs, kept, results):
         pages = kept or self.searched_docs(docs, results)
@@ -542,9 +558,19 @@ def version_of(machine, commands):
     )
 
 
-def wanted_docs(slug, name, version, search, cap):
-    query = " ".join(search.format(name=name, version=version).split())
-    return WantedDocs(slug, version or "latest", name, query, cap)
+def wanted_docs(slug, name, version, need, cap):
+    values = {"name": name, "version": version}
+    query = collapsed(SearchPlanner.filled(need, values))
+    return WantedDocs(slug, version or "latest", name, query, need, values, cap)
+
+
+def planned_searches(need, values):
+    planned = SearchPlanner().plan(need, RESULTS_PER_LEARN_SEARCH, values)
+    return [{**search, "query": collapsed(search["query"])} for search in planned]
+
+
+def collapsed(query):
+    return " ".join(query.split())
 
 
 def say_docs(slug, key, pages, kept):
