@@ -21,8 +21,6 @@ lazy from .settings import (
     MAX_RECALL_TOPICS,
     TOPIC_RELEVANT_SIMILARITY,
     Config,
-    after_what_they_use,
-    groups_fitting,
 )
 lazy from .text import field, first_line, words
 lazy from .workspace import TestRef, Toolchain
@@ -1201,3 +1199,31 @@ def asked(cycle):
     return cycle["request"] + "".join(
         f"\nChanged by the person: {change}" for change in cycle.get("amendments", [])
     )
+
+
+def after_what_they_use(starts, uses, known):
+    order, seen = [], set()
+
+    def visit(path, trail=()):
+        if path in seen or path in trail or not known(path):
+            return
+        for used in uses(path):
+            visit(used, trail + (path,))
+        seen.add(path)
+        order.append(path)
+
+    for path in starts:
+        visit(path)
+    return order
+
+
+def groups_fitting(items, room, size=len):
+    groups, used = [], room + 1
+    for item in items:
+        need = size(item) + 1
+        if used + need > room:
+            groups.append([])
+            used = 0
+        groups[-1].append(item)
+        used += need
+    return groups

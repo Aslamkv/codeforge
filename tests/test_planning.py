@@ -11,7 +11,9 @@ from tinkerkit.planning import (
     Recaller,
     SpecWriter,
     Working,
+    after_what_they_use,
     asked,
+    groups_fitting,
 )
 from tinkerkit.prompts import Reply
 from tinkerkit.web import Internet
@@ -512,6 +514,22 @@ def test_interface_review_with_nothing_to_check(make_project, make_session, fake
     cycle = dict(project.cycles[0], files=["a.py"])
     InterfaceReviewer(make_session(project)).run(cycle)
     assert fake_ollama.calls == [] and "review" not in cycle
+
+
+@pytest.mark.spec("PLN-14")
+def test_after_what_they_use_orders_dependencies_first_breaks_cycles_and_skips_unknown():
+    uses = {"app": ["db", "util"], "db": ["util"], "util": [], "x": ["app"], "a": ["b", "ghost"], "b": ["a"]}
+    known = lambda name: name in uses
+    assert after_what_they_use(["app", "x"], lambda name: uses[name], known) == ["util", "db", "app", "x"]
+    assert after_what_they_use(["a"], lambda name: uses[name], known) == ["b", "a"]
+
+
+@pytest.mark.spec("PLN-15")
+def test_groups_fitting():
+    assert groups_fitting(["aa", "bb", "cc"], 6) == [["aa", "bb"], ["cc"]]
+    assert groups_fitting(["a" * 10, "b"], 5) == [["a" * 10], ["b"]]
+    assert groups_fitting([], 5) == []
+    assert groups_fitting([3, 3, 3], 8, size=lambda value: value) == [[3, 3], [3]]
 
 
 def topic(slug, **entry):

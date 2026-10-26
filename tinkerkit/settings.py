@@ -546,31 +546,3 @@ class NotAPytestClass:
 
 def projects_folder():
     return Path(str(Config.get("projects") or "~/Projects")).expanduser().resolve()
-
-
-def after_what_they_use(starts, uses, known):
-    order, seen = [], set()
-
-    def visit(path, trail=()):
-        if path in seen or path in trail or not known(path):
-            return
-        for used in uses(path):
-            visit(used, trail + (path,))
-        seen.add(path)
-        order.append(path)
-
-    for path in starts:
-        visit(path)
-    return order
-
-
-def groups_fitting(items, room, size=len):
-    groups, used = [], room + 1
-    for item in items:
-        need = size(item) + 1
-        if used + need > room:
-            groups.append([])
-            used = 0
-        groups[-1].append(item)
-        used += need
-    return groups
