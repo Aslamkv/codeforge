@@ -1827,7 +1827,6 @@ class ConsoleChannel(Channel):
 
     def read(self):
         while True:
-            self.draw_rule()
             try:
                 line = input(self.screen.prompt())
             except EOFError, KeyboardInterrupt:
@@ -1836,18 +1835,10 @@ class ConsoleChannel(Channel):
             self.show_again(line)
             self.lines.put(line)
 
-    def draw_rule(self):
-        if typed_here():
-            self.screen.draw(self.screen.rule() + "\n")
-
     def show_again(self, line):
-        if not typed_here():
-            return
-        typed, width = f"› {line}", shutil.get_terminal_size().columns
-        rows = max(1, -(-len(typed) // width))
-        quiet = not line.strip() or line.strip().lower() in EXIT_WORDS
-        shown = "" if quiet else styled(typed.ljust(width), "grey background") + "\n"
-        self.screen.draw(f"{lines_up(rows + 1)}{CLEAR_DOWN}{shown}")
+        if self.screen.ruled():
+            quiet = not line.strip() or line.strip().lower() in EXIT_WORDS
+            self.screen.sent(f"› {line}", shown=not quiet)
 
     def banner(self, lines):
         if not typed_here():
@@ -1942,6 +1933,7 @@ class ConsoleScreen:
         self.reading = True
         if typed_here():
             self.pin_to_the_bottom()
+            self.draw(self.rule() + "\n")
             threading.Thread(target=self.keep_ticking, daemon=True).start()
 
     def pin_to_the_bottom(self):
@@ -1973,6 +1965,20 @@ class ConsoleScreen:
         to_gap_top = rows_up(self.gap) if self.gap else ""
         self.gap = 0
         return f"{room}{to_gap_top}\r{text}{RESTORE_CURSOR}"
+
+    def sent(self, typed, shown):
+        with self.printing:
+            cleared = self.typed_rows_cleared(rows_shown(typed))
+            write_out(cleared + (self.printed_in_pieces(self.shown_again(typed)) if shown else ""))
+
+    def typed_rows_cleared(self, rows):
+        block_top = self.live_rows() + 1 + rows
+        self.gap += rows
+        return f"{SAVE_CURSOR}{lines_up(block_top)}{inserted_rows(rows)}{RESTORE_CURSOR}{CLEAR_DOWN}"
+
+    @staticmethod
+    def shown_again(typed):
+        return styled(typed.ljust(shutil.get_terminal_size().columns), "grey background")
 
     def printed_over_prompt(self, text):
         if not sys.stdout.isatty():

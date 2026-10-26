@@ -349,17 +349,65 @@ def test_console_marks_each_message_and_indents_its_lines_on_a_colour_terminal(m
 
 
 @pytest.mark.spec("CNV-8")
-def test_console_rules_the_prompt_and_shows_your_line_again_highlighted(monkeypatch):
+def test_console_shows_your_line_again_highlighted_without_ruling_each_prompt(monkeypatch):
     terminal = colour_terminal(monkeypatch)
     prompts = typing(monkeypatch, "hello there", "", "exit")
     console = ConsoleChannel()
+    console.screen.reading = True
     console.read()
-    rule = f"{DIM}{'─' * 10}{RESET}\n"
     assert prompts == [f"{ACCENT}› {RESET}"] * 4
     assert terminal.getvalue() == (
-        f"{rule}\033[3F\033[J{GREY}› hello there{RESET}\n{rule}\033[2F\033[J{rule}\033[2F\033[J{rule}"
+        typed_rows_cleared(2)
+        + printed_in_gap(f"{GREY}› hello there{RESET}", up=3)
+        + typed_rows_cleared(1)
+        + typed_rows_cleared(1)
     )
+    assert console.screen.gap == 2
     assert [console.lines.get() for _ in range(4)] == ["hello there", "", "exit", None]
+
+
+def typed_rows_cleared(rows, block_rows=0):
+    return f"\0337\033[{block_rows + 1 + rows}F\033[{rows}L\0338\033[J"
+
+
+def ruled_console(monkeypatch, columns, gap):
+    colour_terminal(monkeypatch, columns)
+    console = ConsoleChannel()
+    console.screen.reading, console.screen.gap = True, gap
+    return console
+
+
+@pytest.mark.spec("CNV-8")
+def test_console_sends_a_line_back_under_the_rule_and_shows_it_in_the_gap(monkeypatch):
+    console = ruled_console(monkeypatch, columns=20, gap=3)
+    shown = drawn_after(sys.stdout, lambda: console.show_again("hi"))
+    assert shown == typed_rows_cleared(1) + printed_in_gap(f"{GREY}› hi{' ' * 16}{RESET}", up=5)
+    assert console.screen.gap == 3
+
+
+@pytest.mark.spec("CNV-8")
+def test_console_sends_a_wrapped_line_back_by_all_its_rows(monkeypatch):
+    console = ruled_console(monkeypatch, columns=10, gap=1)
+    line = "x" * 25
+    shown = drawn_after(sys.stdout, lambda: console.show_again(line))
+    assert shown == typed_rows_cleared(3) + printed_in_gap(f"{GREY}› {line}{RESET}", up=5)
+    assert console.screen.gap == 1
+
+
+@pytest.mark.spec("CNV-8")
+@pytest.mark.parametrize("line", ["", "  ", "exit"])
+def test_console_sends_a_quiet_line_back_into_the_gap_without_showing_it(monkeypatch, line):
+    console = ruled_console(monkeypatch, columns=10, gap=2)
+    assert drawn_after(sys.stdout, lambda: console.show_again(line)) == typed_rows_cleared(1)
+    assert console.screen.gap == 3
+
+
+@pytest.mark.spec("CNV-8")
+def test_console_sends_a_line_back_above_the_live_block(monkeypatch, clock):
+    console = ruled_console(monkeypatch, columns=20, gap=4)
+    console.screen.show_live("Learning", 100.0, under=["one"])
+    shown = drawn_after(sys.stdout, lambda: console.show_again("hi"))
+    assert shown == typed_rows_cleared(1, block_rows=2) + printed_in_gap(f"{GREY}› hi{' ' * 16}{RESET}", up=6)
 
 
 @pytest.mark.spec("CNV-8")
@@ -607,23 +655,26 @@ def started_screen(monkeypatch, cursor_row):
     return terminal, screen
 
 
+STARTING_RULE = f"{DIM}{'─' * 10}{RESET}\n"
+
+
 @pytest.mark.spec("CNV-8")
 def test_console_pins_the_rule_and_prompt_to_the_last_rows_when_it_starts(monkeypatch):
     terminal, screen = started_screen(monkeypatch, cursor_row=5)
-    assert terminal.getvalue() == "\n" * 18
+    assert terminal.getvalue() == "\n" * 18 + STARTING_RULE
     assert screen.gap == 18
 
 
 @pytest.mark.spec("CNV-8")
 def test_console_starts_where_the_cursor_is_without_a_cursor_answer(monkeypatch):
     terminal, screen = started_screen(monkeypatch, cursor_row=None)
-    assert terminal.getvalue() == "" and screen.gap == 0
+    assert terminal.getvalue() == STARTING_RULE and screen.gap == 0
 
 
 @pytest.mark.spec("CNV-8")
 def test_console_starts_where_the_cursor_is_on_the_last_rows(monkeypatch):
     terminal, screen = started_screen(monkeypatch, cursor_row=23)
-    assert terminal.getvalue() == "" and screen.gap == 0
+    assert terminal.getvalue() == STARTING_RULE and screen.gap == 0
 
 
 def test_there_is_no_cursor_row_without_a_terminal():
