@@ -253,18 +253,11 @@ class Readings:
     @staticmethod
     def add(book, source):
         key = fingerprint("\n\n".join(chapter.text for chapter in book.chapters))[:16]
-        known = next(
-            (number for number, entry in Readings.all().items() if entry["fingerprint"] == key), None
-        )
+        known = Readings.with_fingerprint(key)
         if known is not None:
             return Added(known, False)
         number = READINGS.next_number()
-        chapters = [
-            dataclasses.asdict(
-                dataclasses.replace(chapter, state="raw" if chapter.kind in ("index", "raw") else "unread")
-            )
-            for chapter in book.chapters
-        ]
+        chapters = [dataclasses.asdict(Readings.unread(chapter)) for chapter in book.chapters]
         Readings.save(
             {
                 "number": number,
@@ -279,6 +272,14 @@ class Readings:
             }
         )
         return Added(number, True)
+
+    @staticmethod
+    def with_fingerprint(key):
+        return next((number for number, entry in Readings.all().items() if entry["fingerprint"] == key), None)
+
+    @staticmethod
+    def unread(chapter):
+        return dataclasses.replace(chapter, state="raw" if chapter.kind in ("index", "raw") else "unread")
 
     @staticmethod
     def get(number):
@@ -318,14 +319,8 @@ class Readings:
         entry = Readings.get(number)
         known = set(Readings.facts(entry))
         new = [fact for fact in {fact["text"]: fact for fact in facts}.values() if fact["text"] not in known]
-        Library.save(
-            entry["topic"],
-            dict(
-                Library.read(entry["topic"]),
-                learned=now_text(),
-                facts=Library.read(entry["topic"])["facts"] + new,
-            ),
-        )
+        topic = Library.read(entry["topic"])
+        Library.save(entry["topic"], dict(topic, learned=now_text(), facts=topic["facts"] + new))
         for kept in entry["chapters"]:
             if kept["number"] == chapter:
                 kept["state"] = "read"

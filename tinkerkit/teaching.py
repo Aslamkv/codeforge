@@ -368,18 +368,8 @@ def read_claims(given):
 def read_changes(given, claims, count):
     changes, keys = [], set()
     for change in given if isinstance(given, list) else []:
-        if not isinstance(change, dict):
-            continue
-        read = {
-            "claims": numbers(change.get("claims"), claims),
-            "retire": numbers(change.get("retire"), count),
-            "toolchain": read_toolchain(change.get("toolchain")),
-            "lesson": read_lesson(change.get("lesson")),
-            "fact": read_fact(change.get("fact"), count),
-        }
-        if read["fact"]:
-            read["retire"] = sorted(set(read["retire"]) | {read["fact"]["about"]})
-        if not changes_something(read):
+        read = read_change(change, claims, count) if isinstance(change, dict) else None
+        if not read or not changes_something(read):
             continue
         twice = keys & set(read["toolchain"])
         if twice:
@@ -390,6 +380,19 @@ def read_changes(given, claims, count):
         keys |= set(read["toolchain"])
         changes.append(read)
     return changes
+
+
+def read_change(change, claims, count):
+    read = {
+        "claims": numbers(change.get("claims"), claims),
+        "retire": numbers(change.get("retire"), count),
+        "toolchain": read_toolchain(change.get("toolchain")),
+        "lesson": read_lesson(change.get("lesson")),
+        "fact": read_fact(change.get("fact"), count),
+    }
+    if read["fact"]:
+        read["retire"] = sorted(set(read["retire"]) | {read["fact"]["about"]})
+    return read
 
 
 def changes_something(change):

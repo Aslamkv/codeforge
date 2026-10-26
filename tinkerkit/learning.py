@@ -489,31 +489,25 @@ class SlotLearner(Tracked):
 
     def stop(self, gate, cause, detail=""):
         what, next_step = LEARN_STOP_CAUSES[cause]
+        raise LearnStopped(
+            "\n".join(message.line for message in self.stop_messages(gate, what, detail, next_step)),
+            [("Why", f"stopped {LEARN_STOP_PLACES[gate]}: {what}"), ("Next", next_step)],
+        )
+
+    def stop_messages(self, gate, what, detail, next_step):
         before = (
             f"what was learned about it before ({self.known.get('learned', '?')}) is untouched"
             if self.known
             else "there was no library for it before"
         )
-        raise LearnStopped(
-            "\n".join(
-                message.line
-                for message in [
-                    Message(
-                        "stop",
-                        f"Learning {self.topic} stopped {LEARN_STOP_PLACES[gate]}: {what}"
-                        + (f" ({detail})" if detail else "")
-                        + ".",
-                        0,
-                        Messages.ICONS["stop"],
-                    ),
-                    Message("info", f"Tried: {'; '.join(self.tried) or 'nothing yet'}", 1, "🔎"),
-                    Message("info", f"Web requests: {self.internet.requests.text()}", 1, "🌐"),
-                    Message("info", f"Nothing was learned or saved; {before}.", 1, "💾"),
-                    Message("tip", f"Next: {next_step}", 1, "👉"),
-                ]
-            ),
-            [("Why", f"stopped {LEARN_STOP_PLACES[gate]}: {what}"), ("Next", next_step)],
-        )
+        stopped = f"Learning {self.topic} stopped {LEARN_STOP_PLACES[gate]}: {what}"
+        return [
+            Message("stop", stopped + (f" ({detail})" if detail else "") + ".", 0, Messages.ICONS["stop"]),
+            Message("info", f"Tried: {'; '.join(self.tried) or 'nothing yet'}", 1, "🔎"),
+            Message("info", f"Web requests: {self.internet.requests.text()}", 1, "🌐"),
+            Message("info", f"Nothing was learned or saved; {before}.", 1, "💾"),
+            Message("tip", f"Next: {next_step}", 1, "👉"),
+        ]
 
 
 def label(slot_id):
