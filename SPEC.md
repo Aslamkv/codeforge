@@ -986,7 +986,7 @@ Lessons and proven knowledge, and what every kind of learning shares.
   its `relevant_chunks` for the searches (**KNW-14**), up to
   `TEACH_PAGE_CHARS`. A page with no text is left out.
 - **KNW-25** Every prompt that writes searches (a research's frame, gaps and checks, a learn plan's
-  follow-ups, a teaching's checks, the chat's proposed searches) writes each as `{query, engines, count}`
+  follow-ups, and a teaching's checks) writes each as `{query, engines, count}`
   (**WEB-3**), and says what each engine is good for: `mwmbl` the whole web, plain keywords only; `wikipedia`
   overviews; `wikibooks` tutorials and manuals. Where code alone has a need (a learn's documentation
   searches), `SearchPlanner.plan(need, count, values)` turns it into searches with one quick call (**MOD-25**,
