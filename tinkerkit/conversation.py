@@ -9,10 +9,13 @@ lazy import fcntl
 lazy import html
 lazy import json
 lazy import queue
+lazy import select
 lazy import shlex
 lazy import subprocess
+lazy import termios
 lazy import threading
 lazy import time
+lazy import tty
 lazy import webbrowser
 lazy from pathlib import Path
 
@@ -1933,11 +1936,19 @@ class ConsoleScreen:
 
     def __init__(self):
         self.reading, self.live, self.under, self.frame, self.printing = False, None, [], 0, threading.Lock()
+        self.gap = 0
 
     def start(self):
         self.reading = True
         if typed_here():
+            self.pin_to_the_bottom()
             threading.Thread(target=self.keep_ticking, daemon=True).start()
+
+    def pin_to_the_bottom(self):
+        row, rule_row = cursor_row(), shutil.get_terminal_size().lines - 1
+        if row is not None and row < rule_row:
+            self.gap = rule_row - row
+            self.draw("\n" * self.gap)
 
     def print(self, text):
         with self.printing:
@@ -1950,7 +1961,18 @@ class ConsoleScreen:
         )
 
     def printed_above(self, text, rows):
-        return f"{self.room_made(rows, above=self.live_rows())}\r{text}{RESTORE_CURSOR}"
+        return self.printed_in_gap(text, rows) if rows <= self.gap else self.printed_past_gap(text, rows)
+
+    def printed_in_gap(self, text, rows):
+        gap_top = self.live_rows() + 1 + self.gap
+        self.gap -= rows
+        return f"{SAVE_CURSOR}{lines_up(gap_top)}{text}{RESTORE_CURSOR}"
+
+    def printed_past_gap(self, text, rows):
+        room = self.room_made(rows - self.gap, above=self.live_rows())
+        to_gap_top = rows_up(self.gap) if self.gap else ""
+        self.gap = 0
+        return f"{room}{to_gap_top}\r{text}{RESTORE_CURSOR}"
 
     def printed_over_prompt(self, text):
         if not sys.stdout.isatty():
@@ -2003,14 +2025,17 @@ class ConsoleScreen:
         return self.shrunk(rows_before, rows_before - rows_after)
 
     def grown(self, by):
-        return self.room_made(by, above=0) + RESTORE_CURSOR
+        taken = min(by, self.gap)
+        self.gap -= taken
+        return self.room_made(by - taken, above=0) + RESTORE_CURSOR if by > taken else ""
 
     @staticmethod
     def room_made(rows, above):
         return f"{ROW_DOWN_OR_SCROLL * rows}{SAVE_CURSOR}{rows_up(rows + above + 1)}{inserted_rows(rows)}"
 
     def shrunk(self, rows, by):
-        return self.at_the_live_block(rows, DELETE_LINE * by) + CURSOR_UP * by if by else ""
+        self.gap += by
+        return self.at_the_live_block(rows, NEXT_LINE.join([CLEAR_TO_LINE_END] * by)) if by else ""
 
     def redrawn_live(self):
         changed = NEXT_LINE.join(row + CLEAR_TO_LINE_END for row in self.live_drawn())
@@ -2037,13 +2062,41 @@ class ConsoleScreen:
         return self.reading and typed_here()
 
 
-SAVE_CURSOR, RESTORE_CURSOR, CURSOR_UP, NEXT_LINE = "\0337", "\0338", "\033[A", "\033[E"
+SAVE_CURSOR, RESTORE_CURSOR, NEXT_LINE = "\0337", "\0338", "\033[E"
 COLOUR_CODE_RE = re.compile(r"\033\[[0-9;]*m")
-DELETE_LINE, CLEAR_DOWN, ROW_DOWN_OR_SCROLL = "\033[M", "\033[J", "\033D"
+CLEAR_DOWN, ROW_DOWN_OR_SCROLL = "\033[J", "\033D"
+CURSOR_REPORT, CURSOR_REPORT_RE, CURSOR_REPORT_SECONDS = "\033[6n", re.compile(r"\033\[(\d+);\d+R"), 0.2
 
 
 def lines_up(rows):
     return f"\033[{rows}F"
+
+
+def cursor_row():
+    try:
+        stdin = sys.stdin.fileno()
+        return reported_row(stdin) if os.isatty(stdin) and sys.stdout.isatty() else None
+    except OSError, ValueError:
+        return None
+
+
+def reported_row(stdin):
+    settings = termios.tcgetattr(stdin)
+    try:
+        tty.setcbreak(stdin)
+        write_out(CURSOR_REPORT)
+        answer = cursor_report_read(stdin)
+    finally:
+        termios.tcsetattr(stdin, termios.TCSADRAIN, settings)
+    found = CURSOR_REPORT_RE.search(answer)
+    return int(found.group(1)) if found else None
+
+
+def cursor_report_read(stdin):
+    answer = ""
+    while not answer.endswith("R") and select.select([stdin], [], [], CURSOR_REPORT_SECONDS)[0]:
+        answer += os.read(stdin, 32).decode(errors="ignore")
+    return answer
 
 
 def screen_pieces(text, room):
