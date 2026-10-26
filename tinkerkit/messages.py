@@ -1,9 +1,28 @@
 import contextlib
 from dataclasses import dataclass
+lazy import os
 lazy import shutil
 lazy import sys
+lazy import time
+lazy import unicodedata
 
 VARIATION_SELECTOR = "\ufe0f"
+TRUECOLOR_ACCENT = "\033[38;2;70;130;180m"
+PALETTE_ACCENT = "\033[38;5;67m"
+STYLES = frozendict(
+    {
+        "dim": "\033[2m",
+        "bold": "\033[1m",
+        "grey background": "\033[48;5;236m",
+        "cyan": "\033[36m",
+        "yellow": "\033[33m",
+        "green": "\033[32m",
+    }
+)
+RESET = "\033[0m"
+CLEAR_TO_LINE_END = "\033[K"
+LINE_START = "\r"
+CLEAR_LINE = LINE_START + CLEAR_TO_LINE_END
 
 
 @dataclass(frozen=True)
@@ -39,15 +58,17 @@ class Messages:
             "found": "💡",
         }
     )
-    SPINNER = "⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏"
+    STAR = "✻✶✳✢✳✶"
 
     def __init__(self):
         self.depth, self.followers, self.log, self.drawn, self.frame = 0, [], None, False, 0
-        self.doing, self.last_step = "", ""
+        self.doing, self.last_step, self.began = "", "", None
+        self.heard_tokens, self.thinking_since, self.thought_seconds = 0, None, None
+        self.write, self.screen = print, None
 
     def title(self, text, icon=""):
         if self.depth == 0:
-            print()
+            self.write("")
         self.say("title", text, icon)
 
     @contextlib.contextmanager
@@ -96,6 +117,18 @@ class Messages:
     def tally(self, text):
         self.tell(Message("tally", text, self.depth))
 
+    def tokens(self, count):
+        self.heard_tokens += count
+        self.tell(Message("tokens", str(count), self.depth))
+
+    def thinking(self, now):
+        if now:
+            self.thinking_since = time.monotonic()
+        elif self.thinking_since is not None:
+            self.thought_seconds = time.monotonic() - self.thinking_since
+            self.thinking_since = None
+        self.tell(Message("thinking", "on" if now else "", self.depth))
+
     def took(self, text, seconds):
         self.done(f"{text} ({human_duration(seconds)})")
 
@@ -115,22 +148,34 @@ class Messages:
     def say(self, kind, text, icon=""):
         message = Message(kind, text, self.depth, icon or self.ICONS.get(kind, ""))
         self.end_live()
-        print(message.line)
+        self.write(message.line)
         self.tell(message)
 
     def live(self, text):
-        if sys.__stdout__.isatty():
+        if self.began is None:
+            self.began = time.monotonic()
+        if self.screen:
+            self.screen.show_live(text, self.began, **self.live_facts)
+            self.drawn = True
+        elif sys.__stdout__.isatty():
             self.draw_live(text)
         self.tell(Message("live", text, self.depth + 1, "⏳"))
 
     def draw_live(self, text):
-        width = shutil.get_terminal_size((80, 24)).columns
-        spinner = self.SPINNER[self.frame % len(self.SPINNER)]
-        drawn = Message("live", text, self.depth + 1, spinner)
+        width = max(shutil.get_terminal_size((80, 24)).columns - 1, 10)
+        indent = "   " * (self.depth + 1)
+        drawn = live_line(text, self.began, self.frame, width, indent=indent, **self.live_facts)
+        terminal_write(LINE_START + drawn + CLEAR_TO_LINE_END)
         self.frame += 1
-        sys.__stdout__.write("\r" + drawn.line[: max(width - 1, 10)] + "\033[K")
-        sys.__stdout__.flush()
         self.drawn = True
+
+    @property
+    def live_facts(self):
+        return {
+            "tokens": self.heard_tokens,
+            "thinking": self.thinking_since is not None,
+            "thought_seconds": self.thought_seconds,
+        }
 
     @contextlib.contextmanager
     def working_on(self, doing):
@@ -142,6 +187,10 @@ class Messages:
             self.now_on(before)
 
     def now_on(self, doing):
+        if not (doing and self.doing):
+            self.began, self.heard_tokens = None, 0
+        if doing:
+            self.thought_seconds = None
         self.doing = doing
         self.tell(Message("working", doing, self.depth))
         if doing:
@@ -151,14 +200,20 @@ class Messages:
         return self.doing or self.last_step or "Working on it"
 
     def end_live(self):
-        if self.drawn:
-            sys.__stdout__.write("\r\033[K")
-            sys.__stdout__.flush()
-            self.drawn = False
+        if not self.drawn:
+            return
+        if self.screen:
+            self.screen.end_live()
+        else:
+            terminal_write(CLEAR_LINE)
+        self.drawn = False
 
     def detail(self, text, **facts):
         if self.log is not None:
             self.log.add({"note": text, **facts})
+
+    def write_through(self, write, screen=None):
+        self.write, self.screen = write, screen
 
     def follow(self, follower):
         self.followers.append(follower)
@@ -175,6 +230,94 @@ class Messages:
 
     def reset(self):
         self.__init__()
+
+
+def terminal_write(text):
+    sys.__stdout__.write(text)
+    sys.__stdout__.flush()
+
+
+def live_line(text, began, frame, width, stream=None, indent="", **facts):
+    (head, _), doing = tinkering_pieces(time.monotonic() - began, text, **facts)
+    pieces = [(indent, None), (star_at(frame), "accent"), (f" {head}", None), doing]
+    return fitted(pieces, width, stream)
+
+
+def star_at(frame):
+    return Messages.STAR[frame % len(Messages.STAR)]
+
+
+def tinkering(elapsed, doing, **facts):
+    return "".join(text for text, _ in tinkering_pieces(elapsed, doing, **facts))
+
+
+def tinkering_pieces(elapsed, doing, tokens=0, thinking=False, thought_seconds=None):
+    facts = (
+        human_duration(elapsed) if elapsed is not None else "",
+        f"↓ {short_count(tokens)} tokens" if tokens else "",
+        thought(thinking, thought_seconds),
+    )
+    shown = " · ".join(fact for fact in facts if fact)
+    return [(f"Tinkering… ({shown})" if shown else "Tinkering…", None), (f" · {doing}", "dim")]
+
+
+def thought(thinking, thought_seconds):
+    if thinking:
+        return "thinking"
+    return f"thought for {human_duration(thought_seconds)}" if thought_seconds is not None else ""
+
+
+def short_count(count):
+    for size, unit in ((1_000_000, "M"), (1_000, "k")):
+        if count >= size:
+            scaled = count / size
+            return (f"{scaled:.1f}".removesuffix(".0") if scaled < 10 else f"{scaled:.0f}") + unit
+    return str(count)
+
+
+def fitted(pieces, width, stream=None):
+    shown = []
+    for text, style in pieces:
+        text = text[:width]
+        width -= len(text)
+        shown.append(paint(text, style, stream) if style else text)
+    return "".join(shown)
+
+
+def paint(text, style, stream=None):
+    if not text or not colourful(stream or sys.__stdout__):
+        return text
+    return f"{style_code(style)}{text}{RESET}"
+
+
+def colourful(stream):
+    return stream.isatty() and not os.environ.get("NO_COLOR")
+
+
+def style_code(style):
+    if style == "accent":
+        return TRUECOLOR_ACCENT if os.environ.get("COLORTERM") in ("truecolor", "24bit") else PALETTE_ACCENT
+    return STYLES[style]
+
+
+def cut_to_width(text, room):
+    kept, used = "", 0
+    for char in text:
+        used += char_width(char)
+        if used > room:
+            break
+        kept += char
+    return kept.rstrip()
+
+
+def visible_width(text):
+    return sum(char_width(char) for char in text)
+
+
+def char_width(char):
+    if unicodedata.category(char) in ("Mn", "Me", "Cf"):
+        return 0
+    return 2 if unicodedata.east_asian_width(char) in ("W", "F") else 1
 
 
 def human_duration(seconds):

@@ -3,6 +3,7 @@ import sys
 from collections import namedtuple
 lazy import argparse
 lazy import datetime
+lazy import functools
 lazy import os
 lazy import secrets
 lazy import shutil
@@ -14,7 +15,7 @@ lazy from pathlib import Path
 from . import conversation, exercising, reading
 from .commands import BY_NAME, COMMANDS, GROUPS, refs, taught_command
 from .jobs import STATES, Jobs, archived, calls_log, job_number
-from .messages import Messages, human_duration, say
+from .messages import Messages, human_duration, paint, say
 from .reading import Reader
 lazy from .building import BugReproducer, CodeWriter, TestToolSetup, TestWriter, Verifier
 lazy from .finishing import FinalReview, LessonWriter, ReadmeWriter, Tidy
@@ -307,10 +308,7 @@ class Cli:
 
     @staticmethod
     def painter():
-        codes = {"bold": "1", "dim": "2", "cyan": "36", "yellow": "33", "green": "32"}
-        if not sys.stdout.isatty() or os.environ.get("NO_COLOR"):
-            return lambda text, style: text
-        return lambda text, style: f"\033[{codes[style]}m{text}\033[0m"
+        return functools.partial(paint, stream=sys.stdout)
 
     @staticmethod
     def overview_markup():

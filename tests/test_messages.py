@@ -1,11 +1,15 @@
 import ast
 import io
+import os
+import shutil
 import sys
 from pathlib import Path
 
 import pytest
+from conftest import ACCENT, DIM, RESET, Terminal
 
-from tinkerkit.messages import Message, Messages, human_duration, say
+from tinkerkit import project as project_module
+from tinkerkit.messages import Message, Messages, human_duration, say, short_count, tinkering
 from tinkerkit.project import Tracker, project_store
 from tinkerkit.store import Log
 
@@ -99,6 +103,26 @@ def test_what_a_command_works_on_its_tally_and_what_it_found_reach_the_tracker(h
     assert capsys.readouterr().out == "💡 Small habits compound like interest\n"
 
 
+@pytest.mark.spec("MSG-3")
+def test_tokens_and_thinking_reach_the_tracker(home_store, monkeypatch, capsys):
+    now = [100.0]
+    monkeypatch.setattr(project_module.time, "time", lambda: now[0])
+    tracker = Tracker("reading")
+    say.follow(tracker.heard)
+    with say.working_on("Reading chapter 1, Habits (1 of 2)"):
+        say.thinking(True)
+        say.tokens(30)
+        assert tracker.state["thinking"] and tracker.state["tokens"] == 30
+        now[0] = 112.0
+        say.thinking(False)
+        say.tokens(12)
+    state = tracker.state
+    assert not state["thinking"] and state["thought_seconds"] == 12.0 and state["tokens"] == 42
+    with say.working_on("Reading chapter 2, Tools (2 of 2)"):
+        assert tracker.state["thought_seconds"] is None and tracker.state["tokens"] == 42
+    assert capsys.readouterr().out == ""
+
+
 @pytest.mark.spec("MSG-4")
 def test_the_live_line_is_drawn_on_a_terminal_only(monkeypatch):
     piped, heard = io.StringIO(), []
@@ -109,19 +133,139 @@ def test_the_live_line_is_drawn_on_a_terminal_only(monkeypatch):
     assert piped.getvalue() == "" and heard[0].kind == "live" and heard[0].text == "thinking… 12s"
 
 
-@pytest.mark.spec("MSG-4")
-def test_on_a_terminal_the_next_message_clears_the_live_line(monkeypatch, capsys):
-    class Terminal(io.StringIO):
-        def isatty(self):
-            return True
-
+@pytest.fixture
+def terminal(monkeypatch):
     terminal = Terminal()
     monkeypatch.setattr(sys, "__stdout__", terminal)
-    say.live("Writing the spec… 12s")
-    say.live("Writing the spec… 14s")
+    monkeypatch.setenv("NO_COLOR", "1")
+    return terminal
+
+
+@pytest.fixture
+def colored_terminal(terminal, monkeypatch):
+    monkeypatch.delenv("NO_COLOR")
+    monkeypatch.setenv("COLORTERM", "")
+    return terminal
+
+
+def drawn_lines(terminal):
+    return terminal.getvalue().split("\033[K")
+
+
+@pytest.mark.spec("MSG-4")
+def test_on_a_terminal_the_next_message_clears_the_live_line(terminal, clock, capsys):
+    say.live("Writing the spec")
+    clock[0] += 64
+    say.live("Writing the spec")
     say.done("Answered")
-    assert terminal.getvalue().startswith("\r   ⠋ Writing the spec… 12s\033[K\r   ⠙ Writing the spec… 14s")
+    assert terminal.getvalue().startswith(
+        "\r   ✻ Tinkering… (0s) · Writing the spec\033[K\r   ✶ Tinkering… (1m 4s) · Writing the spec\033[K"
+    )
     assert terminal.getvalue().endswith("\r\033[K") and capsys.readouterr().out == "✅ Answered\n"
+
+
+@pytest.mark.spec("MSG-4")
+def test_the_live_line_counts_from_when_the_work_began(terminal, clock):
+    say.now_on("Writing tests")
+    clock[0] += 12
+    with say.working_on("Writing calc.py"):
+        clock[0] += 3
+        say.live("Writing calc.py")
+    say.now_on("")
+    clock[0] += 30
+    say.now_on("Running tests")
+    drawn = drawn_lines(terminal)
+    assert drawn[2] == "\r   ✳ Tinkering… (15s) · Writing calc.py"
+    assert drawn[-2] == "\r   ✳ Tinkering… (0s) · Running tests"
+
+
+STEEL_BLUE = "\033[38;2;70;130;180m"
+
+
+@pytest.mark.spec("MSG-4")
+@pytest.mark.parametrize("colorterm,accent", [("truecolor", STEEL_BLUE), ("24bit", STEEL_BLUE), ("", ACCENT)])
+def test_the_live_star_is_steel_blue_and_what_goes_on_is_dim(
+    colored_terminal, clock, monkeypatch, colorterm, accent
+):
+    monkeypatch.setenv("COLORTERM", colorterm)
+    say.live("Writing tests")
+    assert (
+        colored_terminal.getvalue()
+        == f"\r   {accent}✻{RESET} Tinkering… (0s){DIM} · Writing tests{RESET}\033[K"
+    )
+
+
+@pytest.mark.spec("MSG-4")
+def test_the_live_line_is_cut_to_the_terminal_width_by_what_shows(colored_terminal, clock, monkeypatch):
+    monkeypatch.setattr(shutil, "get_terminal_size", lambda fallback: os.terminal_size((23, 10)))
+    say.live("Writing tests")
+    assert colored_terminal.getvalue() == f"\r   {ACCENT}✻{RESET} Tinkering… (0s){DIM} ·{RESET}\033[K"
+
+
+@pytest.mark.spec("MSG-4")
+def test_the_live_line_shows_the_tokens_and_thinking_heard_since_the_work_began(terminal, clock):
+    say.now_on("Writing tests")
+    say.tokens(1000)
+    say.tokens(200)
+    say.thinking(True)
+    say.live("Writing tests")
+    clock[0] += 12
+    say.thinking(False)
+    say.live("Writing tests")
+    say.now_on("")
+    say.now_on("Running tests")
+    drawn = drawn_lines(terminal)
+    assert drawn[1] == "\r   ✶ Tinkering… (0s · ↓ 1.2k tokens · thinking) · Writing tests"
+    assert drawn[2] == "\r   ✳ Tinkering… (12s · ↓ 1.2k tokens · thought for 12s) · Writing tests"
+    assert drawn[-2] == "\r   ✢ Tinkering… (0s) · Running tests"
+
+
+@pytest.mark.spec("MSG-4")
+@pytest.mark.parametrize(
+    "count,short", [(0, "0"), (950, "950"), (1234, "1.2k"), (12_345, "12k"), (1_234_567, "1.2M")]
+)
+def test_the_live_line_counts_tokens_in_short(count, short):
+    assert short_count(count) == short
+
+
+@pytest.mark.spec("MSG-4")
+def test_the_tinkering_line_leaves_out_empty_facts():
+    assert tinkering(None, "Writing") == "Tinkering… · Writing"
+    assert tinkering(64, "Writing", thought_seconds=12) == "Tinkering… (1m 4s · thought for 12s) · Writing"
+
+
+NO_FACTS = {"tokens": 0, "thinking": False, "thought_seconds": None}
+
+
+class Screen:
+    def __init__(self):
+        self.shown = []
+
+    def print(self, text):
+        self.shown.append(("print", text))
+
+    def show_live(self, text, began, **facts):
+        self.shown.append(("live", text, began, facts))
+
+    def end_live(self):
+        self.shown.append(("end",))
+
+
+@pytest.mark.spec("MSG-4")
+def test_the_live_line_goes_to_the_screen_said_things_write_through(terminal, clock):
+    screen = Screen()
+    say.write_through(screen.print, screen)
+    say.live("Writing tests")
+    clock[0] += 5
+    say.live("Running tests")
+    say.done("Answered")
+    assert screen.shown == [
+        ("live", "Writing tests", 100.0, NO_FACTS),
+        ("live", "Running tests", 100.0, NO_FACTS),
+        ("end",),
+        ("print", "✅ Answered"),
+    ]
+    assert terminal.getvalue() == ""
 
 
 @pytest.mark.spec("MSG-5")

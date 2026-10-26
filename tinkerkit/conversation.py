@@ -1,6 +1,7 @@
 import contextlib
 import os
 import re
+import shutil
 import signal
 import sys
 from collections import namedtuple
@@ -8,10 +9,13 @@ lazy import fcntl
 lazy import html
 lazy import json
 lazy import queue
+lazy import select
 lazy import shlex
 lazy import subprocess
+lazy import termios
 lazy import threading
 lazy import time
+lazy import tty
 lazy import webbrowser
 lazy from pathlib import Path
 
@@ -19,20 +23,35 @@ from .commands import BY_NAME, COMMANDS, deletes, kind_of, refs
 from .jobs import Jobs, alive, job_number, paused_for_you
 from .project import Runs, Tracker, saved
 lazy from .ledger import DONE_NOTE_KEPT_SECONDS, Ledger
-lazy from .messages import human_duration, say
+lazy from .messages import (
+    CLEAR_LINE,
+    CLEAR_TO_LINE_END,
+    Messages,
+    char_width,
+    colourful,
+    cut_to_width,
+    human_duration,
+    live_line,
+    paint,
+    say,
+    star_at,
+    tinkering,
+    visible_width,
+)
 lazy from .model import Models, OllamaError
 lazy from .prompts import Prompts, Reply
-lazy from .settings import EXERCISE_FOLDER, JOB_STOP_SIGNAL, Home, projects_folder
+lazy from .settings import EXERCISE_FOLDER, JOB_STOP_SIGNAL, Config, Home, projects_folder
 lazy from .text import field
 lazy from .workspace import Toolchain
 
 CHANNEL_REPORTS_ENV = "TINKER_CHANNELS"
-PROGRESS_EDIT_SECONDS = 5
+PROGRESS_EDIT_SECONDS = 2
 CLOCK_ONLY_EDIT_SECONDS = 15
 BUILD_STOP_GRACE_SECONDS = 120
 STATUS_LOOK_SECONDS = 10
 EXPIRED_MESSAGES_SWEEP_SECONDS = 2
 ENDED_LOOK_SECONDS = 0.5
+BANNER_MAX_COLUMNS = 64
 
 CHAT_CONTEXT_MESSAGES = 12
 CHAT_MAX_REPLY_TOKENS = 1024
@@ -169,6 +188,7 @@ class Desk:
 
     def run(self):
         self.claim_chats()
+        self.open_banner()
         self.talk.warm()
         self.say_status(anew=True)
         self.adopt_exercise()
@@ -191,6 +211,20 @@ class Desk:
                     raise SystemExit(f"tinker: {held}: stop it first")
                 say.warn(f"{held}: this one talks here only")
                 self.channels.remove(channel)
+
+    def open_banner(self):
+        for console in self.consoles:
+            console.banner(self.banner_lines())
+
+    def banner_lines(self):
+        chats = [channel.name for channel in self.channels if channel not in self.consoles]
+        details = [f"model {Config.get('model') or 'no model yet'}", f"projects {self.shown_root()}"]
+        details += [f"chats {', '.join(chats)}"] if chats else []
+        return ["🔧 Tinker", " · ".join(details), "help lists commands · exit quits"]
+
+    def shown_root(self):
+        home = Path.home()
+        return str("~" / self.root.relative_to(home)) if self.root.is_relative_to(home) else str(self.root)
 
     def say_goodbye(self):
         leaving = threading.Thread(target=self.take_out_question, daemon=True)
@@ -215,7 +249,7 @@ class Desk:
                 with self.post_lock:
                     if channel in self.chats_started:
                         self.post_status(channel, text)
-            elif anew or text.startswith("💤"):
+            elif (anew and not self.busy()) or text.startswith("💤"):
                 channel.show(ConsoleChannel.CHAT, None, text, done=True)
         self.keep_job_at_bottom()
 
@@ -1310,6 +1344,8 @@ class Reporter:
             changed = self.progress.take(state)
             if changed or went_on or time.monotonic() - self.last_edit >= CLOCK_ONLY_EDIT_SECONDS:
                 self.update()
+            else:
+                self.count_live()
 
     def tracked(self):
         job = Jobs.of_process(self.pid) if self.pid else None
@@ -1322,13 +1358,27 @@ class Reporter:
         if self.on_step:
             self.on_step()
 
+    def count_live(self):
+        for channel in self.channels:
+            for chat in channel.allowed:
+                channel.count_live(chat, self.sent.get((channel.name, chat)), **self.progress.facts)
+
     def say(self, text, done=False):
         text = f"{self.plan_on_top}\n\n{text}" if self.plan_on_top else text
         bottom, self.send_at_bottom = done or self.send_at_bottom, False
         for channel in self.channels:
             for chat in channel.allowed:
                 key = (channel.name, chat)
-                self.sent[key] = channel.show(chat, self.sent.get(key), text, done, bottom)
+                self.sent[key] = channel.show(
+                    chat,
+                    self.sent.get(key),
+                    text,
+                    done,
+                    bottom,
+                    began=self.progress.work_began,
+                    doing=self.progress.working_on,
+                    **self.progress.facts,
+                )
 
     def printed(self, line):
         if self.tracked() is None and self.says_something(line):
@@ -1352,7 +1402,6 @@ class Reporter:
 class Progress:
     OWN_PHASE_ICONS = ("✅", "✏️", "📁")
     CHANGE_SIGNS = {"+": "➕", "~": "🔄"}
-    HOURGLASS = ("⏳", "⌛")
 
     def __init__(self, title, phase=Tracker.STARTING, before=0.0):
         self.snapshot = {
@@ -1377,19 +1426,17 @@ class Progress:
         self.turns += 1
 
     def take(self, snapshot):
-        before = self.text()
+        before = self.text(counted=False)
         said = self.snapshot["doing"] if self.snapshot.get("step") is None else None
         self.snapshot = dict(
             self.snapshot, **{key: value for key, value in (snapshot or {}).items() if key != "before"}
         )
         if said and self.snapshot.get("step") is None:
             self.snapshot["doing"] = said
-        return self.text() != before
+        return self.text(counted=False) != before
 
-    def text(self):
+    def text(self, counted=True):
         state = self.snapshot
-        began = state.get("began")
-        clock = f" · ⏱ {human_duration(time.time() - began)}" if began else ""
         doing = (
             self.working_on
             if self.working_on.startswith(self.OWN_PHASE_ICONS)
@@ -1397,7 +1444,7 @@ class Progress:
         )
         job = f" (Job #{state['job']})" if state.get("job") else ""
         lines = [md(t"🔨 **{state['title']}**{job}")] + [f"✅ {step}" for step in state.get("steps", [])]
-        lines += [f"▸ {doing}{clock} {self.HOURGLASS[self.turns % 2]}"]
+        lines += [f"{star_at(self.turns)} {self.tinkering_line(doing, counted)}"]
         lines += [md(t"📊 {self.how_far}")] if self.how_far else []
         if state.get("found"):
             lines += [md(t"💡 {state['found']}")]
@@ -1405,9 +1452,29 @@ class Progress:
             lines += [md(t"… {state['latest']}")]
         return "\n".join(lines)
 
+    def tinkering_line(self, doing, counted):
+        if not counted:
+            return tinkering(None, doing, **dict(self.facts, tokens=0))
+        began = self.work_began
+        return tinkering(time.time() - began if began else None, doing, **self.facts)
+
+    @property
+    def facts(self):
+        state = self.snapshot
+        return {
+            "tokens": state.get("tokens", 0),
+            "thinking": state.get("thinking", False),
+            "thought_seconds": state.get("thought_seconds"),
+        }
+
     @property
     def title(self):
         return self.snapshot["title"]
+
+    @property
+    def work_began(self):
+        started = self.snapshot.get("started")
+        return started - self.snapshot.get("before", 0.0) if started else None
 
     @property
     def working_on(self):
@@ -1658,7 +1725,7 @@ class Channel:
     def latest(self, chat, sent):
         return True
 
-    def show(self, chat, shown, text, done=False, bottom=None, status=False):
+    def show(self, chat, shown, text, done=False, bottom=None, status=False, began=None, **going):
         shown = list(shown or [])
         if (done if bottom is None else bottom) and shown and not self.latest(chat, shown[-1]):
             for old in shown:
@@ -1672,6 +1739,9 @@ class Channel:
         for extra in shown[len(parts) :]:
             self.delete(chat, extra)
         return now
+
+    def count_live(self, chat, shown, **facts):
+        pass
 
     def said(self, text):
         return BARE_RE.sub("", text) if self.commands_without_tinker else text
@@ -1727,21 +1797,20 @@ class ChannelError(Exception):
 class ConsoleChannel(Channel):
     KIND = "console"
     CHAT = "console"
-    PROMPT = "› " if sys.stdin.isatty() else ""
 
     def __init__(self, commands_without_tinker=True):
         super().__init__("console", {"allowed": [self.CHAT]}, {})
         self.commands_without_tinker = commands_without_tinker
-        self.lines, self.next_id, self.headlines, self.whole = queue.Queue(), 0, {}, {}
-        self.reader, self.printing = None, threading.Lock()
+        self.screen, self.lines = ConsoleScreen(), queue.Queue()
+        self.last_id, self.numbering = 0, threading.Lock()
+        self.printed, self.began, self.doings, self.live_owner = {}, {}, {}, None
 
     def handle(self):
         return "this terminal"
 
     def receive(self, timeout):
-        if self.reader is None:
-            self.reader = threading.Thread(target=self.read, daemon=True)
-            self.reader.start()
+        if not self.screen.reading:
+            self.start_reading()
         try:
             line = self.lines.get(timeout=timeout)
         except queue.Empty:
@@ -1751,70 +1820,482 @@ class ConsoleChannel(Channel):
             return []
         return [Message(self.CHAT, line, "you")] if line.strip() else []
 
+    def start_reading(self):
+        say.write_through(self.screen.print, self.screen if typed_here() else None)
+        self.screen.start()
+        threading.Thread(target=self.read, daemon=True).start()
+
     def read(self):
         while True:
             try:
-                self.lines.put(input(self.PROMPT))
+                line = input(self.screen.prompt())
             except EOFError, KeyboardInterrupt:
                 self.lines.put(None)
                 return
+            self.show_again(line)
+            self.lines.put(line)
+
+    def show_again(self, line):
+        if self.screen.ruled():
+            quiet = not line.strip() or line.strip().lower() in EXIT_WORDS
+            self.screen.sent(f"› {line}", shown=not quiet)
+
+    def banner(self, lines):
+        if not typed_here():
+            return
+        width = min(terminal_columns(), BANNER_MAX_COLUMNS)
+        edge = "─" * (width - 2)
+        rows = [self.banner_row(line, "dim" if row else "bold", width - 4) for row, line in enumerate(lines)]
+        framed = [styled(f"╭{edge}╮", "accent"), *rows, styled(f"╰{edge}╯", "accent")]
+        self.screen.draw("\n".join(framed) + "\n")
+
+    @staticmethod
+    def banner_row(text, style, room):
+        shown = cut_to_width(text, room)
+        padding = " " * (room - visible_width(shown))
+        return styled("│ ", "accent") + styled(shown, style) + padding + styled(" │", "accent")
 
     def send(self, chat, text):
-        self.print(Markup.ansi(self.said(text)))
+        self.screen.print(marked(Markup.ansi(self.said(text))))
         return self.new_id()
 
     def edit(self, chat, sent, text):
-        self.print(Markup.ansi(self.said(text)))
+        self.screen.print(marked(Markup.ansi(self.said(text))))
         return sent
 
     def send_file(self, chat, path, caption):
         webbrowser.open(Path(path).as_uri())
         return self.send(chat, f"{caption}\n📄 Opened in your browser: `{path}`")
 
-    def show(self, chat, shown, text, done=False, bottom=None, status=False):
+    def show(self, chat, shown, text, done=False, bottom=None, status=False, began=None, doing=None, **facts):
         sent, text = (shown or [None])[0] or self.new_id(), self.said(text)
+        if began is not None:
+            self.began[sent] = monotonic_at(began)
         if done:
-            self.show_whole(sent, text)
+            self.show_done(sent, text)
         else:
-            self.show_headline(sent, text)
+            self.show_going(sent, text, doing, facts)
         return [sent]
 
-    def show_whole(self, sent, text):
-        self.headlines.pop(sent, None)
-        before, self.whole[sent] = self.whole.get(sent), text
-        grew = before is not None and text.startswith(before + "\n")
-        self.print(Markup.ansi(text[len(before) + 1 :].lstrip("\n") if grew else text))
+    def count_live(self, chat, shown, **facts):
+        if shown and shown[0] == self.live_owner:
+            self.screen.count_live(**facts)
 
-    def show_headline(self, sent, text):
-        headline = self.headline(text)
-        if self.headlines.get(sent) != headline:
-            self.headlines[sent] = headline
-            self.print(
-                f"\033[2m⋯ {headline}\033[22m"
-                if sys.stdout.isatty() and not os.environ.get("NO_COLOR")
-                else f"⋯ {headline}"
-            )
+    def show_done(self, sent, text):
+        if self.live_owner == sent:
+            self.live_owner = None
+            self.screen.end_live()
+        self.print_settled(sent, text.split("\n"))
+        self.forget_going(sent)
 
-    @staticmethod
-    def headline(text):
-        lines = [line.strip() for line in Markup.plain(text).splitlines() if line.strip()]
-        doing = next((line for line in lines if line.startswith("▸")), lines[1] if len(lines) > 1 else "")
-        return " · ".join(line for line in (lines[:1] + [doing.split(" · ⏱")[0]]) if line)
+    def forget_going(self, sent):
+        self.began.pop(sent, None)
+        self.doings.pop(sent, None)
 
-    def print(self, text):
-        out = sys.stdout
-        with self.printing:
-            if out.isatty():
-                out.write("\r\033[K")
-            out.write(text + "\n")
-            if out.isatty() and self.reader is not None:
-                out.write(self.PROMPT)
-            out.flush()
+    def show_going(self, sent, text, doing, facts):
+        settled, going_on, under = split_at_tinkering(text.split("\n"))
+        self.print_settled(sent, settled)
+        shown_under = [Markup.plain(line).strip() for line in under if line.strip()]
+        self.show_doing(sent, doing or Markup.plain(going_on).strip(), facts, shown_under)
+
+    def print_settled(self, sent, lines):
+        printed = self.printed.setdefault(sent, set())
+        new = [line for line in lines if line.strip() and line not in printed]
+        if new and not printed:
+            self.screen.print(marked(Markup.ansi("\n".join(lines))))
+        elif new:
+            self.screen.print(indented(Markup.ansi("\n".join(new))))
+        printed.update(new)
+
+    def show_doing(self, sent, doing, facts, under):
+        if self.screen.ruled():
+            self.live_owner = sent
+            self.screen.show_live(doing, self.began.setdefault(sent, time.monotonic()), under, **facts)
+        elif self.doings.get(sent) != doing:
+            self.doings[sent] = doing
+            self.screen.print(doing)
 
     def new_id(self):
+        with self.numbering:
+            self.last_id += 1
+            return self.last_id
+
+
+class ConsoleScreen:
+    PROMPT = "› " if sys.stdin.isatty() else ""
+    TICK_SECONDS = 0.25
+
+    def __init__(self):
+        self.reading, self.live, self.under, self.frame, self.printing = False, None, [], 0, threading.Lock()
+        self.size, self.drawn, self.blank_top = shutil.get_terminal_size(), [], 0
+        self.size_changed = threading.Event()
+
+    def start(self):
+        self.reading, self.size = True, shutil.get_terminal_size()
+        if typed_here():
+            self.pin_to_the_bottom()
+            self.draw(unwrapped(self.rule()) + "\n")
+            self.wake_on_resize()
+            threading.Thread(target=self.keep_ticking, daemon=True).start()
+
+    def wake_on_resize(self):
+        if hasattr(signal, "SIGWINCH") and threading.current_thread() is threading.main_thread():
+            signal.signal(signal.SIGWINCH, lambda *_: self.size_changed.set())
+
+    def pin_to_the_bottom(self):
+        row, rule_at = cursor_row(), rule_row()
+        if row is None:
+            self.draw(moved_to_row(rule_at))
+        elif row < rule_at:
+            self.blank_top = rule_at - row
+            self.draw(scrolled_down(self.blank_top) + rows_down(self.blank_top))
+
+    def print(self, text):
         with self.printing:
-            self.next_id += 1
-            return self.next_id
+            self.repair()
+            write_out(self.printed_in_pieces(text) if self.ruled() else self.printed_over_prompt(text))
+
+    def printed_in_pieces(self, text):
+        room = terminal_lines() - self.live_rows() - 2
+        return "".join(
+            self.printed_above("\n".join(lines), rows) for lines, rows in screen_pieces(text, room)
+        )
+
+    def printed_above(self, text, rows):
+        return f"{self.room_made(rows, above=self.live_rows())}\r{text}{RESTORE_CURSOR}"
+
+    def printed_over_prompt(self, text):
+        if not sys.stdout.isatty():
+            return text + "\n"
+        return f"{CLEAR_LINE}{text}\n{self.PROMPT if self.reading else ''}"
+
+    def sent(self, typed, shown):
+        with self.printing:
+            rows = rows_shown(typed)
+            self.pushed_off_the_top(rows)
+            self.repair(typed_rows=rows)
+            write_out(self.shown_above_the_block(typed, rows) if shown else self.moved_down(rows, kept=0))
+
+    def shown_above_the_block(self, typed, rows):
+        shown = NEXT_LINE.join([self.shown_again(typed), self.block_and_rule()])
+        return self.above_the_rule(rows + self.live_rows(), shown)
+
+    @staticmethod
+    def shown_again(typed):
+        return styled(typed.ljust(terminal_columns()), "grey background")
+
+    def draw(self, text):
+        with self.printing:
+            write_out(text)
+
+    def show_live(self, text, began, under=(), **facts):
+        if not self.ruled():
+            return
+        with self.printing:
+            self.repair()
+            rows_before = self.live_rows()
+            self.live, self.under = (text, began, facts), list(under)
+            write_out(self.resized(rows_before, self.live_rows()) + self.redrawn_live())
+
+    def count_live(self, **facts):
+        with self.printing:
+            self.repair()
+            if self.live is not None:
+                text, began, _ = self.live
+                self.live = (text, began, facts)
+                write_out(self.redrawn_live())
+
+    def end_live(self):
+        with self.printing:
+            self.repair()
+            if self.live is not None:
+                rows = self.live_rows()
+                self.live, self.under, self.drawn = None, [], []
+                write_out(self.shrunk(rows))
+
+    def keep_ticking(self):
+        while True:
+            self.size_changed.wait(self.TICK_SECONDS)
+            self.size_changed.clear()
+            self.tick()
+
+    def tick(self):
+        with self.printing:
+            self.repair()
+            if self.live is not None:
+                self.frame += 1
+                write_out(self.redrawn_live())
+
+    def repair(self, typed_rows=0):
+        size = shutil.get_terminal_size()
+        if size != self.size and self.ruled():
+            self.pushed_off_the_top(self.size.lines - size.lines)
+            write_out(self.redrawn_at(size, typed_rows))
+        self.size = size
+
+    def redrawn_at(self, size, typed_rows):
+        stale, kept = self.stale_rows(size.columns), self.live_rows() + 1 + typed_rows
+        rewrapped = stale + typed_rows - kept
+        self.pushed_off_the_top(rewrapped)
+        return (
+            self.stale_rows_cleared(stale, typed_rows)
+            + self.moved_down(rewrapped, kept)
+            + self.above_the_prompt(kept, self.block_and_rule())
+        )
+
+    def stale_rows_cleared(self, stale, typed_rows):
+        return self.above_the_prompt(stale + typed_rows, NEXT_LINE.join([CLEAR_TO_LINE_END] * stale))
+
+    def pushed_off_the_top(self, rows):
+        self.blank_top = max(0, self.blank_top - max(0, rows))
+
+    def stale_rows(self, columns):
+        rule_rows = rows_at(self.size.columns, columns)
+        return rule_rows + sum(rows_shown_at(row, columns) for row in self.drawn)
+
+    def block_and_rule(self):
+        block = self.live_block() if self.live is not None else []
+        return unwrapped(NEXT_LINE.join([*block, self.rule()]))
+
+    def live_rows(self):
+        return 0 if self.live is None else 1 + len(self.under)
+
+    def resized(self, rows_before, rows_after):
+        if rows_after > rows_before:
+            return self.room_made(rows_after - rows_before, above=0) + RESTORE_CURSOR
+        return self.shrunk(rows_before - rows_after)
+
+    def room_made(self, rows, above):
+        blanks = min(rows, self.blank_top)
+        self.blank_top -= blanks
+        scrolled = rows - blanks
+        return (
+            f"{self.blank_rows_dropped(blanks, above)}{ROW_DOWN_OR_SCROLL * scrolled}"
+            f"{SAVE_CURSOR}{rows_up(rows + above + 1)}{inserted_rows(scrolled)}"
+        )
+
+    @staticmethod
+    def blank_rows_dropped(rows, above):
+        return scrolled_up_above(row_above(above + 1), rows) if rows else ""
+
+    def shrunk(self, by):
+        return self.moved_down(by, kept=self.live_rows() + 1)
+
+    def moved_down(self, rows, kept):
+        if not rows:
+            return ""
+        self.blank_top += rows
+        return scrolled_down_above(row_above(kept), rows)
+
+    def redrawn_live(self):
+        return self.above_the_rule(self.live_rows(), unwrapped(NEXT_LINE.join(self.live_block())))
+
+    def live_block(self):
+        return [row + CLEAR_TO_LINE_END for row in self.live_drawn()]
+
+    @classmethod
+    def above_the_rule(cls, rows, change):
+        return cls.above_the_prompt(rows + 1, change)
+
+    @staticmethod
+    def above_the_prompt(rows, change):
+        return f"{SAVE_CURSOR}{lines_up(rows)}{change}{RESTORE_CURSOR}"
+
+    def live_drawn(self):
+        text, began, facts = self.live
+        width = terminal_columns() - 1
+        tinkering = live_line(text, began, self.frame, width, sys.stdout, **facts)
+        under = (f"  {styled(cut_to_width(line, width - 2), 'dim')}" for line in self.under)
+        self.drawn = [tinkering, *under]
+        return self.drawn
+
+    def prompt(self):
+        return styled("› ", "accent") if typed_here() else self.PROMPT
+
+    @staticmethod
+    def rule():
+        return styled("─" * terminal_columns(), "dim")
+
+    def ruled(self):
+        return self.reading and typed_here()
+
+
+SAVE_CURSOR, RESTORE_CURSOR, NEXT_LINE = "\0337", "\0338", "\033[E"
+AUTOWRAP_OFF, AUTOWRAP_ON = "\033[?7l", "\033[?7h"
+COLOUR_CODE_RE = re.compile(r"\033\[[0-9;]*m")
+WHOLE_SCREEN, ROW_DOWN_OR_SCROLL = "\033[r", "\033D"
+CURSOR_REPORT, CURSOR_REPORT_RE, CURSOR_REPORT_SECONDS = "\033[6n", re.compile(r"\033\[(\d+);\d+R"), 0.2
+
+
+def unwrapped(rows):
+    return f"{AUTOWRAP_OFF}{rows}{AUTOWRAP_ON}"
+
+
+def cursor_row():
+    try:
+        stdin = sys.stdin.fileno()
+        return reported_row(stdin) if os.isatty(stdin) and sys.stdout.isatty() else None
+    except OSError, ValueError:
+        return None
+
+
+def reported_row(stdin):
+    settings = termios.tcgetattr(stdin)
+    try:
+        tty.setcbreak(stdin)
+        write_out(CURSOR_REPORT)
+        answer = cursor_report_read(stdin)
+    finally:
+        termios.tcsetattr(stdin, termios.TCSADRAIN, settings)
+    found = CURSOR_REPORT_RE.search(answer)
+    return int(found.group(1)) if found else None
+
+
+def cursor_report_read(stdin):
+    answer = ""
+    while not answer.endswith("R") and select.select([stdin], [], [], CURSOR_REPORT_SECONDS)[0]:
+        answer += os.read(stdin, 32).decode(errors="ignore")
+    return answer
+
+
+def screen_pieces(text, room):
+    lines, rows = [], 0
+    for line in fitting_lines(text, room):
+        line_rows = rows_shown(line)
+        if lines and rows + line_rows > room:
+            yield lines, rows
+            lines, rows = [], 0
+        lines.append(line)
+        rows += line_rows
+    yield lines, rows
+
+
+def fitting_lines(text, room):
+    for line in text.split("\n"):
+        if rows_shown(line) > room:
+            yield from screen_wide_rows(COLOUR_CODE_RE.sub("", line))
+        else:
+            yield line
+
+
+def screen_wide_rows(line):
+    columns = terminal_columns()
+    row, width = "", 0
+    for char in line:
+        char_columns = char_width(char)
+        if width + char_columns > columns:
+            yield row
+            row, width = "", 0
+        row += char
+        width += char_columns
+    yield row
+
+
+def rows_shown(text):
+    return rows_shown_at(text, terminal_columns())
+
+
+def rows_shown_at(text, columns):
+    return sum(rows_at(visible_width(COLOUR_CODE_RE.sub("", line)), columns) for line in text.split("\n"))
+
+
+def rows_at(width, columns):
+    return max(1, -(-width // columns))
+
+
+def row_above(kept):
+    return rule_row() - kept
+
+
+def rule_row():
+    return terminal_lines() - 1
+
+
+def terminal_columns():
+    return shutil.get_terminal_size().columns
+
+
+def terminal_lines():
+    return shutil.get_terminal_size().lines
+
+
+def monotonic_at(wall_time):
+    return time.monotonic() - (time.time() - wall_time)
+
+
+def lines_up(rows):
+    return f"\033[{rows}F"
+
+
+def rows_up(rows):
+    return f"\033[{rows}A"
+
+
+def rows_down(rows):
+    return f"\033[{rows}B"
+
+
+def moved_to_row(row):
+    return f"\033[{row};1H"
+
+
+def inserted_rows(rows):
+    return f"\033[{rows}L" if rows else ""
+
+
+def scrolled_down(rows):
+    return f"\033[{rows}T"
+
+
+def scrolled_up(rows):
+    return f"\033[{rows}S"
+
+
+def scrolled_down_above(bottom, rows):
+    return scrolled_within(bottom, scrolled_down(rows))
+
+
+def scrolled_up_above(bottom, rows):
+    return scrolled_within(bottom, scrolled_up(rows))
+
+
+def scrolled_within(bottom, scroll):
+    return f"{SAVE_CURSOR}{scroll_region(1, bottom)}{scroll}{WHOLE_SCREEN}{RESTORE_CURSOR}"
+
+
+def scroll_region(top, bottom):
+    return f"\033[{top};{bottom}r"
+
+
+def write_out(text):
+    sys.stdout.write(text)
+    sys.stdout.flush()
+
+
+def typed_here():
+    return sys.stdin.isatty() and colourful(sys.stdout)
+
+
+def styled(text, style):
+    return paint(text, style, sys.stdout)
+
+
+def marked(text):
+    return indented(text, styled("● ", "accent"))
+
+
+def indented(text, first="  "):
+    return first + text.replace("\n", "\n  ") if colourful(sys.stdout) else text
+
+
+def split_at_tinkering(lines):
+    at = next((row for row, line in enumerate(lines) if is_tinkering(line)), None)
+    return (lines[:at], lines[at], lines[at + 1 :]) if at is not None else ([], lines[0], [])
+
+
+def is_tinkering(line):
+    star, _, rest = Markup.plain(line).lstrip().partition(" ")
+    return star in Messages.STAR and rest.startswith("Tinkering…")
 
 
 class Message:

@@ -195,9 +195,14 @@ Everything Tinker tells the person goes through one voice, `say` (a `Messages`).
 - **MSG-3** Every message is given, as data (`Message`: kind, text, depth, icon), to each follower. A follower
   that fails never breaks what is said. A run's and a learn's `Tracker` follow: a message becomes the latest
   and goes to the project's `output` log (every message a run says); a live one becomes what goes on now.
-  `working_on`, `tally` and `found` set what the run works on, its tally and what it found.
+  `working_on`, `tally` and `found` set what the run works on, its tally and what it found. `tokens` adds to
+  the job's token count (reply and thinking chunks, earlier runs too); `thinking` tells whether the model
+  thinks now, and when its thinking ends the tracker keeps how long it thought until the next step starts.
 - **MSG-4** `live` redraws one status line in place on a terminal only. Piped (a chat following the command),
-  it writes nothing; its followers are still told. The next message clears it first.
+  it writes nothing; its followers are still told. The next message clears it first. The line is a turning
+  star, `Tinkering…`, then in brackets the time since the work began, the tokens (`↓ 1.2k tokens`, left out
+  at 0) and `thinking` or `thought for 12s` (left out when the model does not think), then what goes on now:
+  `✻ Tinkering… (1m 4s · ↓ 1.2k tokens · thought for 12s) · 🧠 Learning about purpose (1 of 6)`.
 - **MSG-5** `detail` goes to the log given to `keep_log` (a run's `events`, with every model call it makes; a
   job's `calls #N`), and is never printed. With no log, it is dropped.
 - **MSG-6** `human_duration`: 42.5 gives `42s`, 1762.08 gives `29m 22s`, 4000 gives `1h 6m 40s`.
@@ -526,7 +531,8 @@ What is said in the chats, kept so that a chat is only a view of it.
   thinking. An error chunk is an `OllamaError`: a reply error with what came before, unless it is out of
   memory or a crash. Once `done_when(content)` says the reply is complete, the stream ends within
   `LAST_CHUNK_WAIT_SECONDS` seconds, and the reply is the content as it was at that moment. While it goes, its
-  live line says what Tinker works on (**MOD-24**). A reply whose last `LOOPING_REPEATED_LINES` finished
+  live line says what Tinker works on (**MOD-24**), and it tells `say` its new chunks (`tokens`) and whether
+  it is in its thinking phase (`thinking`). A reply whose last `LOOPING_REPEATED_LINES` finished
   lines are one non-blank line, again and again, is stopped there and is cut (`length`).
 - **MOD-10** `Calibrator.shared(context)` sets the prompt budget to `min(8192, max(512, context // 3))`, and
   the longest reply to `max(1024, min(16384, context - budget))`. `safe_ratio()` is
@@ -735,8 +741,27 @@ The terminal and the chats are one conversation: the same commands, the same ans
   the message again at the bottom when it is no longer the newest.
 - **CNV-7** `Channel.listened` gives only messages from allowed chats. It says a refusal once and gives
   nothing. `claim` lets only one process hold a channel's lock.
-- **CNV-8** `ConsoleChannel` prints a dim headline while a thing changes, the whole message when it is done,
-  and only the new lines when it grew. `exit` or end of input closes it.
+- **CNV-8** `ConsoleChannel` prints a thing's message as it grows: its title and each settled line once, as
+  they come. The Tinkering line (what goes on now, **MSG-4**) and the lines under it stay out of the print.
+  On a terminal with colour, they show above the prompt as one live block, the lines under the Tinkering line
+  dim and indented, all redrawn in place; otherwise what goes on now prints as a line of its own each time it
+  changes. When the thing is done, the live block clears and only the lines not yet printed follow. `exit` or
+  end of input closes it.
+  Once it reads, all that Tinker says (`say`, a chat's message too) prints through it, above the prompt, and
+  `live` draws in that same live block, its star turning on its own about four times a second. While a job
+  shows its progress there, the status that says what Tinker works on is left out of the terminal. A job's
+  live line counts from when the job began (its tracker's `started`, less the time of earlier runs), so a
+  Tinker opened later shows the same time.
+  On a terminal with colour, the prompt sits on the screen's last row, the rule above it and the live block
+  above that. What Tinker prints sits right above the block: each new line pushes the ones above it up, any
+  blank space stays at the top of the window, and older lines go to the scrollback. A message of any height
+  prints above the block in pieces that fit, and the line you send shows again there; the prompt line and
+  what you type on it are never redrawn. When the window is resized, the block and the rule are drawn again
+  at the new size right away, still right above the prompt and with what Tinker printed right above them, and
+  they never spill onto the prompt row. The conversation opens in a framed banner that names Tinker, the model
+  in use, the projects folder and the chats it listens on; it draws a rule over the prompt, shows each line
+  you send again highlighted, and marks each message it sends with a steel blue `●`. Piped input draws no
+  rule and shows no line again; with `NO_COLOR` or no terminal, none of that is drawn.
 - **CNV-9** `Desk.run` claims each chat channel. When another Tinker holds one, it stops if there is no
   terminal, and otherwise leaves that chat out. The terminal never waits on a chat: each chat starts in its own
   thread. Each chat has one status message: what Tinker works on (a job's title), never how far it got. Every
@@ -782,11 +807,13 @@ The terminal and the chats are one conversation: the same commands, the same ans
 - **CNV-16** `running(skip)` lists the trackers of the jobs that run or are paused, but for its own process and
   those it skips. A job whose process is gone is not among them (**JOB-2**).
 - **CNV-17** `Progress(snapshot)` shows a run's tracker: its title with its job (`(Job #N)`, so the person can
-  stop it at once), its steps done, the step it is on with its clock, what the model writes now, the passing
+  stop it at once), its steps done, the step it is on as the Tinkering line (**MSG-4**, its star one frame
+  further each edit), what the model writes now, the passing
   spec points and the latest line (`text`); a one-line `brief`; how long it took (`took`); and its `ending`: the
   end's headline, details and next commands, or the plan that waits with its criteria and what to send next.
 - **CNV-18** `Reporter` shows one run's tracker in one message per chat. It reads the tracker every
-  `PROGRESS_EDIT_SECONDS` seconds and edits the message when it changed. It ends with the run's ending (with
+  `PROGRESS_EDIT_SECONDS` seconds (about 1–2) and edits the message when a line changed; when only the time
+  or the tokens changed, it edits at most every `CLOCK_ONLY_EDIT_SECONDS` seconds. It ends with the run's ending (with
   its `text`: a research's answer). A command that keeps no tracker shows its latest printed line.
 - **CNV-19** A task run from a terminal reports to the enabled chats (`Attached`). Stopped or paused
   (**JOB-1**), its last state is shown once it ends.

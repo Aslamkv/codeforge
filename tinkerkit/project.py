@@ -668,6 +668,7 @@ class Tracker:
 
     def __init__(self, title, before=0.0):
         self.pid, self.store, self.published = os.getpid(), None, 0.0
+        self.thought_began = None
         self.published_in = published_in()
         self.state = {
             "title": title,
@@ -682,11 +683,15 @@ class Tracker:
             "working": "",
             "tally": "",
             "found": "",
+            "tokens": tokens_before(),
+            "thinking": False,
+            "thought_seconds": None,
             "outcome": "",
             "latest": "",
             "waiting": None,
             "ended": None,
             "before": before,
+            "started": time.time(),
             "seconds": 0.0,
             "pid": self.pid,
             "pid_began": began_at(self.pid),
@@ -723,6 +728,7 @@ class Tracker:
             found="",
             outcome="",
             latest="",
+            thought_seconds=None,
         )
 
     def points(self, passing, total):
@@ -733,15 +739,38 @@ class Tracker:
         self.change("outcome", outcome=text)
 
     def heard(self, message):
-        if message.kind in ("working", "tally"):
-            self.change(message.kind, quiet=message.kind == "tally", **{message.kind: message.text})
-            return
-        if message.kind == "live":
-            return
+        match message.kind:
+            case "working":
+                self.working(message.text)
+            case "tally":
+                self.change("tally", quiet=True, tally=message.text)
+            case "tokens":
+                self.change("tokens", quiet=True, tokens=self.state["tokens"] + int(message.text))
+            case "thinking":
+                self.thought(bool(message.text))
+            case "live":
+                pass
+            case _:
+                self.said(message)
+
+    def working(self, text):
+        self.change("working", working=text)
+        if text:
+            self.change("thought", quiet=True, thought_seconds=None)
+
+    def said(self, message):
         if self.store is not None:
             self.store.append("output", {"line": message.line, "kind": message.kind})
         found = {"found": message.text[:300]} if message.kind == "found" else {}
         self.change("said", quiet=True, latest=message.line.strip()[:300], **found)
+
+    def thought(self, thinking):
+        if thinking:
+            self.thought_began = time.time()
+            self.change("thinking", quiet=True, thinking=True)
+        elif self.thought_began is not None:
+            seconds, self.thought_began = time.time() - self.thought_began, None
+            self.change("thinking", quiet=True, thinking=False, thought_seconds=seconds)
 
     def wait(self, plan):
         self.change("waiting", waiting=plan, working="")
@@ -767,6 +796,12 @@ class Tracker:
         number, key = self.published_in
         if number is not None:
             Jobs.update(number, **{key: self.state})
+
+
+def tokens_before():
+    number, key = published_in()
+    earlier = (Jobs.current or {}).get(key) if Jobs.resumed_here and number is not None else None
+    return (earlier or {}).get("tokens", 0)
 
 
 def published_in():

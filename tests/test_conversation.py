@@ -1,6 +1,7 @@
 import contextlib
 import io
 import os
+import signal
 import subprocess
 import sys
 import textwrap
@@ -9,12 +10,14 @@ import time
 from pathlib import Path
 
 import pytest
+from conftest import ACCENT, BOLD, DIM, GREY, RESET, Terminal
 
 import tinkerkit.conversation as conversation
 from tinkerkit.conversation import (
     Channel,
     ChannelError,
     ConsoleChannel,
+    ConsoleScreen,
     Desk,
     Markup,
     Message,
@@ -245,33 +248,715 @@ def test_only_one_process_claims_a_channel():
     assert Recorder("other").holder() == {}
 
 
-@pytest.mark.spec("CNV-8")
-def test_console_shows_headlines_then_the_whole_message(monkeypatch):
+CALC_WRITING = "🔨 **calc**\n✅ step one\n✻ Tinkering… (3s) · **Writing the code**\n… detail"
+CALC_WRITING_LATER = "🔨 **calc**\n✅ step one\n✶ Tinkering… (9s) · **Writing the code**\n… other detail"
+CALC_VERIFYING = (
+    "🔨 **calc**\n✅ step one\n✅ step two\n✳ Tinkering… · **Verifying**\n📊 1/2 spec points pass"
+)
+CALC_DONE = "🏁 **calc**\n✅ **Done**"
+CALC_WRITING_NOW = "🔨 calc\n✻ Tinkering… · **Writing**"
+MARK = f"{ACCENT}● {RESET}"
+
+
+def piped_console(monkeypatch):
     out = io.StringIO()
     monkeypatch.setattr(sys, "stdout", out)
+    return ConsoleChannel(), out
+
+
+@pytest.mark.spec("CNV-8")
+def test_console_without_a_live_line_prints_settled_lines_once_and_each_new_doing_line(monkeypatch):
+    console, out = piped_console(monkeypatch)
+    shown = console.show("console", None, CALC_WRITING, doing="Writing the code")
+    console.show("console", shown, CALC_WRITING_LATER, doing="Writing the code", tokens=50)
+    console.show("console", shown, CALC_VERIFYING, doing="Verifying")
+    console.show("console", shown, CALC_DONE, done=True)
+    assert out.getvalue().splitlines() == [
+        "🔨 calc",
+        "✅ step one",
+        "Writing the code",
+        "✅ step two",
+        "Verifying",
+        "🏁 calc",
+        "✅ Done",
+    ]
+
+
+@pytest.mark.spec("CNV-8")
+def test_console_prints_only_what_a_done_message_grew_by(monkeypatch):
+    console, out = piped_console(monkeypatch)
+    shown = console.show("console", None, "Done\n\nline one", done=True)
+    console.show("console", shown, "Done\n\nline one\nline two", done=True)
+    console.show("console", shown, "Done\n\nline one\nline two", done=True)
+    assert out.getvalue().splitlines() == ["Done", "", "line one", "line two"]
+
+
+def colour_terminal(monkeypatch, columns=10, cursor_row=None):
+    terminal = Terminal()
+    monkeypatch.setattr(conversation, "cursor_row", lambda: cursor_row)
+    monkeypatch.setattr(sys, "stdout", terminal)
+    monkeypatch.setattr(sys.stdin, "isatty", lambda: True)
+    monkeypatch.delenv("NO_COLOR", raising=False)
+    monkeypatch.delenv("COLORTERM", raising=False)
+    resized_to(monkeypatch, columns)
+    return terminal
+
+
+def resized_to(monkeypatch, columns, lines=24):
+    monkeypatch.setattr(conversation.shutil, "get_terminal_size", lambda: os.terminal_size((columns, lines)))
+
+
+def typing(monkeypatch, *lines):
+    prompts, typed = [], list(lines)
+
+    def typed_line(prompt):
+        prompts.append(prompt)
+        if not typed:
+            raise EOFError
+        return typed.pop(0)
+
+    monkeypatch.setattr("builtins.input", typed_line)
+    return prompts
+
+
+def drawn_after(step):
+    sys.stdout.seek(0)
+    sys.stdout.truncate()
+    step()
+    return sys.stdout.getvalue()
+
+
+def ruled_console(monkeypatch, columns=10):
+    colour_terminal(monkeypatch, columns)
     console = ConsoleChannel()
-    shown = console.show("console", None, "🔨 **calc**\n✅ step one\n▸ **Writing the code** · ⏱ 3s\n… detail")
-    console.show("console", shown, "🔨 **calc**\n✅ step one\n▸ **Writing the code** · ⏱ 9s\n… other detail")
-    console.show("console", shown, "🔨 **calc**\n▸ **Verifying** · ⏱ 1s")
-    assert out.getvalue().splitlines() == ["⋯ 🔨 calc · ▸ Writing the code", "⋯ 🔨 calc · ▸ Verifying"]
-    console.show("console", shown, "Done\nline one", done=True)
-    console.show("console", shown, "Done\nline one\nline two", done=True)
-    assert out.getvalue().splitlines()[2:4] == ["Done", "line one"]
-    assert out.getvalue().splitlines()[4].startswith("line two")
+    console.screen.reading = True
+    return console
+
+
+def ruled_screen(monkeypatch, columns=10):
+    return ruled_console(monkeypatch, columns).screen
+
+
+def reading_console(monkeypatch, columns=10):
+    colour_terminal(monkeypatch, columns)
+    monkeypatch.setattr(ConsoleScreen, "TICK_SECONDS", 60)
+    typing(monkeypatch)
+    ConsoleChannel().receive(1)
+
+
+def above_the_rule(up, change):
+    return f"\0337\033[{up}F{change}\0338"
+
+
+def unwrapped(rows):
+    return f"\033[?7l{rows}\033[?7h"
+
+
+def scrolled_above(bottom, scroll):
+    return f"\0337\033[1;{bottom}r{scroll}\033[r\0338"
+
+
+def room_made(rows, above, blanks=0, lines=24):
+    dropped = scrolled_above(lines - 2 - above, f"\033[{blanks}S") if blanks else ""
+    scrolled = rows - blanks
+    inserted = f"\033[{scrolled}L" if scrolled else ""
+    return f"{dropped}{'\033D' * scrolled}\0337\033[{rows + above + 1}A{inserted}"
+
+
+def printed_above(text, rows=1, block_rows=0, blanks=0, lines=24):
+    return f"{room_made(rows, block_rows, blanks, lines)}\r{text}\0338"
+
+
+def moved_down(rows, kept):
+    return scrolled_above(23 - kept, f"\033[{rows}T")
+
+
+def shown_again(line, columns=10):
+    return f"{GREY}{f'› {line}'.ljust(columns)}{RESET}"
+
+
+def rule_drawn(columns):
+    return f"{DIM}{'─' * columns}{RESET}"
+
+
+def cleared_to_end(rows):
+    return [f"{row}\033[K" for row in rows]
+
+
+def block_and_rule(block, columns):
+    return unwrapped("\033[E".join([*cleared_to_end(block), rule_drawn(columns)]))
+
+
+def sent_back_shown(line, rows=1, block=(), columns=10):
+    shown = f"{shown_again(line, columns)}\033[E{block_and_rule(block, columns)}"
+    return above_the_rule(rows + len(block) + 1, shown)
+
+
+def stacked(line, count):
+    return "\n".join([line] * count)
+
+
+@pytest.mark.spec("CNV-8")
+def test_console_marks_each_message_and_indents_its_lines_on_a_colour_terminal(monkeypatch):
+    terminal = colour_terminal(monkeypatch)
+    console = ConsoleChannel()
+    console.send("console", "Done\nline one")
+    shown = console.show("console", None, "Report\nline one", done=True)
+    console.show("console", shown, "Report\nline one\nline two", done=True)
+    assert terminal.getvalue() == (
+        f"\r\033[K{MARK}Done\n  line one\n\r\033[K{MARK}Report\n  line one\n\r\033[K  line two\n"
+    )
+
+
+@pytest.mark.spec("CNV-8")
+def test_console_shows_your_line_again_highlighted_without_ruling_each_prompt(monkeypatch):
+    console = ruled_console(monkeypatch)
+    prompts = typing(monkeypatch, "hello there", "", "exit")
+    console.read()
+    assert prompts == [f"{ACCENT}› {RESET}"] * 4
+    assert sys.stdout.getvalue() == (
+        sent_back_shown("hello there", rows=2) + moved_down(1, kept=0) + moved_down(1, kept=0)
+    )
+    assert [console.lines.get() for _ in range(4)] == ["hello there", "", "exit", None]
+
+
+@pytest.mark.spec("CNV-8")
+@pytest.mark.parametrize(("line", "columns", "rows"), [("hi", 20, 1), ("x" * 25, 10, 3)])
+def test_console_shows_a_line_sent_again_right_above_the_rule_by_all_its_rows(
+    monkeypatch, line, columns, rows
+):
+    console = ruled_console(monkeypatch, columns)
+    assert drawn_after(lambda: console.show_again(line)) == sent_back_shown(line, rows, columns=columns)
+
+
+@pytest.mark.spec("CNV-8")
+@pytest.mark.parametrize("line", ["", "  ", "exit"])
+def test_console_drops_a_quiet_line_by_moving_what_is_above_it_down(monkeypatch, line):
+    console = ruled_console(monkeypatch)
+    assert drawn_after(lambda: console.show_again(line)) == moved_down(1, kept=0)
+
+
+@pytest.mark.spec("CNV-8")
+def test_console_sends_a_line_back_above_the_live_block(monkeypatch, clock):
+    console = ruled_console(monkeypatch, columns=20)
+    console.screen.show_live("Learning", 100.0, under=["one"])
+    shown = drawn_after(lambda: console.show_again("hi"))
+    assert shown == sent_back_shown("hi", block=console.screen.drawn, columns=20)
+
+
+@pytest.mark.spec("CNV-8")
+def test_console_leaves_piped_input_unruled_and_unrepeated(monkeypatch):
+    terminal = colour_terminal(monkeypatch)
+    monkeypatch.setattr(sys.stdin, "isatty", lambda: False)
+    prompts = typing(monkeypatch, "hello there")
+    ConsoleChannel().read()
+    assert prompts == [ConsoleScreen.PROMPT] * 2
+    assert terminal.getvalue() == ""
+
+
+@pytest.mark.spec("CNV-8")
+def test_console_prints_above_the_rule_without_touching_the_prompt(monkeypatch):
+    ruled_console(monkeypatch).send("console", "hi")
+    assert sys.stdout.getvalue() == printed_above(f"{MARK}hi")
+
+
+@pytest.mark.spec("CNV-8")
+def test_what_tinker_says_while_you_type_prints_above_the_prompt(monkeypatch):
+    reading_console(monkeypatch)
+    said = drawn_after(lambda: conversation.say.text("[12:00:00] tinker_bot: hello"))
+    assert said == printed_above("[12:00:00] tinker_bot: hello", rows=3)
+
+
+@pytest.mark.spec("CNV-8")
+@pytest.mark.parametrize(
+    ("text", "printed"),
+    [
+        (f"{MARK}hi there, friend\n  🔨 calc", printed_above(f"{MARK}hi there, friend\n  🔨 calc", rows=3)),
+        (
+            stacked("line", 30),
+            printed_above(stacked("line", 22), rows=22) + printed_above(stacked("line", 8), rows=8),
+        ),
+        (
+            f"{ACCENT}{'x' * 225}{RESET}",
+            printed_above(stacked("x" * 10, 22), rows=22) + printed_above("x" * 5),
+        ),
+    ],
+    ids=["wrapped", "taller-than-the-screen", "one-line-taller-than-the-room"],
+)
+def test_console_prints_a_message_above_the_prompt_in_pieces_by_what_shows_of_it(monkeypatch, text, printed):
+    ruled_screen(monkeypatch).print(text)
+    assert sys.stdout.getvalue() == printed
+
+
+LIVE_COLUMNS = 40
+UNDER = ["📊 3 page(s) read", "… Read 2 of 6 page(s) found"]
+
+
+def live_drawn(text, elapsed="0s", star="✻"):
+    return f"{ACCENT}{star}{RESET} Tinkering… ({elapsed}){DIM} · {text}{RESET}"
+
+
+def under_drawn(line):
+    return f"  {DIM}{line}{RESET}"
+
+
+def block_drawn(text, under, elapsed="0s", star="✻"):
+    return [live_drawn(text, elapsed, star), *map(under_drawn, under)]
+
+
+def block_grown(by, blanks=0):
+    return room_made(by, above=0, blanks=blanks) + "\0338"
+
+
+def block_changed(rows):
+    return above_the_rule(len(rows) + 1, unwrapped("\033[E".join(cleared_to_end(rows))))
+
+
+def block_shrunk(by, rows_left):
+    return moved_down(by, kept=rows_left + 1)
+
+
+def block_taken_out(rows):
+    return block_shrunk(rows, rows_left=0)
+
+
+def live_changed(text, elapsed="0s", star="✻"):
+    return block_changed([live_drawn(text, elapsed, star)])
+
+
+def live_shown(text):
+    return block_grown(1) + live_changed(text)
+
+
+def live_console(monkeypatch):
+    return ruled_console(monkeypatch, LIVE_COLUMNS)
+
+
+def live_screen(monkeypatch):
+    return live_console(monkeypatch).screen
+
+
+@pytest.mark.spec("CNV-8")
+@pytest.mark.parametrize("under", [[], UNDER], ids=["live-line", "with-lines-under"])
+def test_console_shows_its_live_block_dim_and_indented_above_the_rule_and_prompt(monkeypatch, clock, under):
+    screen = live_screen(monkeypatch)
+    shown = drawn_after(lambda: screen.show_live("Learning", 100.0, under=under))
+    assert shown == block_grown(1 + len(under)) + block_changed(block_drawn("Learning", under))
+
+
+@pytest.mark.spec("CNV-8")
+def test_console_changes_its_live_line_in_place_without_touching_what_you_type(monkeypatch, clock):
+    screen = live_screen(monkeypatch)
+    screen.show_live("Writing tests", 100.0)
+    clock[0] += 64
+    changed = drawn_after(lambda: screen.show_live("Running tests", 100.0))
+    assert changed == live_changed("Running tests", "1m 4s")
+
+
+@pytest.mark.spec("CNV-8")
+def test_console_changes_its_live_block_in_place_and_turns_its_star_on_each_tick(monkeypatch, clock):
+    screen = live_screen(monkeypatch)
+    screen.show_live("Learning", 100.0, under=UNDER)
+    clock[0] += 1
+    changed = drawn_after(lambda: screen.show_live("Learning", 100.0, under=["📊 4 page(s) read", "…"]))
+    assert changed == block_changed(block_drawn("Learning", ["📊 4 page(s) read", "…"], "1s"))
+    assert drawn_after(screen.tick) == block_changed(
+        block_drawn("Learning", ["📊 4 page(s) read", "…"], "1s", star="✶")
+    )
+
+
+@pytest.mark.spec("CNV-8")
+def test_a_shrinking_live_block_clears_its_leftover_lines(monkeypatch, clock):
+    screen = live_screen(monkeypatch)
+    screen.show_live("Learning", 100.0, under=UNDER)
+    shrunk = drawn_after(lambda: screen.show_live("Writing", 100.0))
+    assert shrunk == block_shrunk(2, rows_left=1) + live_changed("Writing")
+
+
+@pytest.mark.spec("CNV-8")
+def test_a_growing_live_block_scrolls_up_without_touching_what_you_type(monkeypatch, clock):
+    screen = live_screen(monkeypatch)
+    screen.show_live("Learning", 100.0)
+    grown = drawn_after(lambda: screen.show_live("Learning", 100.0, under=UNDER))
+    assert grown == block_grown(2) + block_changed(block_drawn("Learning", UNDER))
+
+
+@pytest.mark.spec("CNV-8")
+@pytest.mark.parametrize("under", [[], UNDER], ids=["live-line", "with-lines-under"])
+def test_console_prints_above_its_live_block_and_takes_it_out_for_good(monkeypatch, clock, under):
+    screen = live_screen(monkeypatch)
+    screen.show_live("Learning", 100.0, under=under)
+    rows = 1 + len(under)
+    assert drawn_after(lambda: screen.print("hello")) == printed_above("hello", block_rows=rows)
+    assert drawn_after(screen.end_live) == block_taken_out(rows)
+    assert screen.under == []
+    assert drawn_after(screen.tick) == "" and drawn_after(screen.end_live) == ""
+
+
+@pytest.mark.spec("CNV-8")
+def test_the_lines_under_the_live_line_are_cut_to_the_terminal_width(monkeypatch, clock):
+    screen = live_screen(monkeypatch)
+    screen.show_live("Learning", 100.0, under=["x" * 60])
+    assert under_drawn("x" * (LIVE_COLUMNS - 3)) + "\033[K" in sys.stdout.getvalue()
+
+
+@pytest.fixture
+def started_screen(monkeypatch):
+    resize_handler = signal.getsignal(signal.SIGWINCH)
+
+    def started(cursor_row):
+        colour_terminal(monkeypatch, cursor_row=cursor_row)
+        monkeypatch.setattr(ConsoleScreen, "TICK_SECONDS", 60)
+        screen = ConsoleScreen()
+        screen.start()
+        return screen
+
+    yield started
+    signal.signal(signal.SIGWINCH, resize_handler)
+
+
+STARTING_RULE = unwrapped(rule_drawn(10)) + "\n"
+
+
+@pytest.mark.spec("CNV-8")
+@pytest.mark.parametrize(
+    ("cursor_row", "moved", "blanks"),
+    [(5, "\033[18T\033[18B", 1), (23, "", 0), (None, "\033[23;1H", 0)],
+    ids=["cursor-high-up", "cursor-on-the-last-rows", "no-cursor-answer"],
+)
+def test_console_pins_the_rule_and_prompt_to_the_last_rows_counting_the_blank_rows_above(
+    started_screen, cursor_row, moved, blanks
+):
+    screen = started_screen(cursor_row)
+    assert sys.stdout.getvalue() == moved + STARTING_RULE
+    assert drawn_after(lambda: screen.print("hi")) == printed_above("hi", blanks=blanks)
+
+
+@pytest.mark.spec("CNV-8")
+def test_a_print_after_pinning_uses_up_the_blank_rows_at_the_top_before_the_scrollback(started_screen):
+    screen = started_screen(cursor_row=5)
+    printed = drawn_after(lambda: screen.print(stacked("line", 20)))
+    assert printed == printed_above(stacked("line", 20), rows=20, blanks=18)
+    assert drawn_after(lambda: screen.print("hi")) == printed_above("hi")
+
+
+@pytest.mark.spec("CNV-8")
+def test_a_print_uses_up_the_blank_row_a_quiet_line_left_at_the_top(monkeypatch):
+    console = ruled_console(monkeypatch)
+    console.show_again("")
+    assert drawn_after(lambda: console.screen.print("hi")) == printed_above("hi", blanks=1)
+
+
+@pytest.mark.spec("CNV-8")
+def test_a_line_shown_again_uses_up_a_blank_row_at_the_top(started_screen):
+    screen = started_screen(cursor_row=21)
+    screen.sent("› hi", shown=True)
+    assert drawn_after(lambda: screen.print("hello")) == printed_above("hello", blanks=1)
+
+
+@pytest.mark.spec("CNV-8")
+def test_a_growing_live_block_uses_up_the_blank_rows_at_the_top(started_screen, clock):
+    screen = started_screen(cursor_row=21)
+    grown = drawn_after(lambda: screen.show_live("Learning", 100.0, under=UNDER))
+    assert grown.startswith(block_grown(3, blanks=2))
+
+
+@pytest.mark.spec("CNV-8")
+@pytest.mark.parametrize(("lines", "blanks"), [(10, 4), (30, 18)])
+def test_a_shorter_window_drops_blank_rows_off_the_top_and_a_taller_one_keeps_them(
+    monkeypatch, started_screen, lines, blanks
+):
+    screen = started_screen(cursor_row=5)
+    resized_to(monkeypatch, 10, lines)
+    printed = drawn_after(lambda: screen.print(stacked("line", 8)))
+    assert printed.endswith(printed_above(stacked("line", 8), rows=8, blanks=min(8, blanks), lines=lines))
+
+
+@pytest.mark.spec("CNV-8")
+def test_a_narrower_window_pushes_blank_rows_off_the_top_as_its_rule_wraps(monkeypatch, started_screen):
+    screen = started_screen(cursor_row=22)
+    resized_to(monkeypatch, 5)
+    printed = drawn_after(lambda: screen.print(stacked("hi", 2)))
+    assert printed.endswith(printed_above(stacked("hi", 2), rows=2, blanks=1))
+
+
+def test_there_is_no_cursor_row_without_a_terminal():
+    assert conversation.cursor_row() is None
+
+
+def stale_rows_cleared(rows, typed_rows=0):
+    return above_the_rule(rows + typed_rows, "\033[E".join(["\033[K"] * rows))
+
+
+def redrawn_with_rule(block, columns, typed_rows=0):
+    return above_the_rule(len(block) + 1 + typed_rows, block_and_rule(block, columns))
+
+
+RULE_REDRAWN_NARROWER = stale_rows_cleared(2) + moved_down(1, kept=1) + redrawn_with_rule([], 5)
+
+
+@pytest.mark.spec("CNV-8")
+@pytest.mark.parametrize(
+    ("columns", "lines", "repaired"),
+    [
+        (
+            30,
+            24,
+            stale_rows_cleared(5)
+            + moved_down(2, kept=3)
+            + redrawn_with_rule(block_drawn("Go", ["x" * 27]), 30),
+        ),
+        (60, 24, stale_rows_cleared(3) + redrawn_with_rule(block_drawn("Go", ["x" * 30]), 60)),
+        (
+            LIVE_COLUMNS,
+            10,
+            stale_rows_cleared(3) + redrawn_with_rule(block_drawn("Go", ["x" * 30]), LIVE_COLUMNS),
+        ),
+    ],
+    ids=["narrower", "wider", "shorter"],
+)
+def test_a_resized_window_draws_the_block_and_rule_again_at_its_size_right_above_the_prompt(
+    monkeypatch, clock, columns, lines, repaired
+):
+    screen = live_screen(monkeypatch)
+    screen.show_live("Go", 100.0, under=["x" * 30])
+    resized_to(monkeypatch, columns, lines)
+    assert drawn_after(screen.tick).startswith(repaired)
+
+
+@pytest.mark.spec("CNV-8")
+def test_a_resized_window_without_a_block_draws_only_the_rule_again(monkeypatch):
+    screen = ruled_screen(monkeypatch)
+    resized_to(monkeypatch, 5)
+    assert drawn_after(screen.tick) == RULE_REDRAWN_NARROWER
+    assert drawn_after(screen.tick) == ""
+
+
+def drawn_soon(expected, seconds=2.0):
+    deadline = time.monotonic() + seconds
+    while expected not in sys.stdout.getvalue() and time.monotonic() < deadline:
+        time.sleep(0.01)
+    return sys.stdout.getvalue()
+
+
+@pytest.mark.spec("CNV-8")
+def test_a_resize_signal_draws_the_rule_again_without_waiting_for_the_tick(monkeypatch, started_screen):
+    started_screen(cursor_row=23)
+    resized_to(monkeypatch, 5)
+    signal.raise_signal(signal.SIGWINCH)
+    assert redrawn_with_rule([], 5) in drawn_soon(redrawn_with_rule([], 5))
+
+
+@pytest.mark.spec("CNV-8")
+def test_a_print_right_after_a_resize_draws_the_rule_again_first(monkeypatch):
+    screen = ruled_screen(monkeypatch)
+    resized_to(monkeypatch, 5)
+    printed = drawn_after(lambda: screen.print("hello"))
+    assert printed == RULE_REDRAWN_NARROWER + printed_above("hello", blanks=1)
+
+
+@pytest.mark.spec("CNV-8")
+def test_a_line_sent_right_after_a_resize_draws_the_rule_again_above_it(monkeypatch):
+    console = ruled_console(monkeypatch)
+    resized_to(monkeypatch, 5)
+    sent = drawn_after(lambda: console.show_again(""))
+    assert sent == (
+        stale_rows_cleared(2, typed_rows=1)
+        + moved_down(1, kept=2)
+        + redrawn_with_rule([], 5, typed_rows=1)
+        + moved_down(1, kept=0)
+    )
+
+
+@pytest.mark.spec("CNV-8")
+def test_an_unruled_screen_does_nothing_when_resized(monkeypatch):
+    screen = ruled_screen(monkeypatch)
+    monkeypatch.setattr(sys.stdin, "isatty", lambda: False)
+    resized_to(monkeypatch, 5)
+    assert drawn_after(screen.tick) == ""
+
+
+@pytest.mark.spec("CNV-8")
+def test_console_without_colour_shows_no_live_line(monkeypatch, clock):
+    screen = live_screen(monkeypatch)
+    monkeypatch.setenv("NO_COLOR", "1")
+    screen.show_live("Writing tests", 100.0)
+    screen.tick()
+    screen.end_live()
+    assert sys.stdout.getvalue() == ""
+
+
+@pytest.mark.spec("CNV-8")
+def test_once_the_console_reads_live_draws_in_its_live_line(monkeypatch, clock):
+    reading_console(monkeypatch, LIVE_COLUMNS)
+    assert drawn_after(lambda: conversation.say.live("Writing tests")) == live_shown("Writing tests")
+    said = drawn_after(lambda: conversation.say.text("Answered"))
+    assert said == block_taken_out(1) + printed_above("Answered", blanks=1)
+
+
+@pytest.mark.spec("CNV-8")
+def test_console_prints_a_jobs_settled_lines_once_and_shows_what_goes_on_in_its_live_line(monkeypatch, clock):
+    console = live_console(monkeypatch)
+    writing = "🔨 calc\n✅ step one\n✻ Tinkering… (3s) · **Writing the code**\n… detail"
+    shown = console.show("console", None, writing, doing="Writing the code")
+    assert sys.stdout.getvalue() == (
+        f"{printed_above(f'{MARK}🔨 calc\n  ✅ step one', rows=2)}"
+        f"{block_grown(2)}{block_changed(block_drawn('Writing the code', ['… detail']))}"
+    )
+    clock[0] += 5
+    verifying = "🔨 calc\n✅ step one\n✅ step two\n✶ Tinkering… · Verifying\n📊 1/2"
+    grew = drawn_after(lambda: console.show("console", shown, verifying, doing="Verifying"))
+    assert grew == (
+        f"{printed_above('  ✅ step two', block_rows=2)}"
+        f"{block_changed(block_drawn('Verifying', ['📊 1/2'], '5s'))}"
+    )
+    done = drawn_after(lambda: console.show("console", shown, "🏁 calc\n✅ Done", done=True))
+    assert done == f"{block_taken_out(2)}{printed_above('  🏁 calc\n  ✅ Done', rows=2, blanks=2)}"
+
+
+@pytest.mark.spec("CNV-8")
+def test_console_shows_a_message_without_a_doing_line_in_its_live_line_until_done(monkeypatch, clock):
+    console = live_console(monkeypatch)
+    shown = console.show("console", None, "⏳ **Getting ready**\nI answer soon.")
+    assert sys.stdout.getvalue() == live_shown("⏳ Getting ready")
+    done = drawn_after(lambda: console.show("console", shown, "Answer", done=True))
+    assert done == block_taken_out(1) + printed_above(f"{MARK}Answer", blanks=1)
+
+
+@pytest.mark.spec("CNV-8")
+def test_a_done_message_leaves_a_live_line_it_does_not_own(monkeypatch, clock):
+    console = live_console(monkeypatch)
+    console.show("console", None, CALC_WRITING_NOW, doing="Writing")
+    done = drawn_after(lambda: console.show("console", None, "Answer", done=True))
+    assert done == printed_above(f"{MARK}Answer", block_rows=1)
+    assert console.screen.live == ("Writing", 100.0, {})
+
+
+@pytest.mark.spec("CNV-8")
+def test_a_done_message_forgets_how_it_went(monkeypatch, clock):
+    console = live_console(monkeypatch)
+    shown = console.show("console", None, CALC_WRITING_NOW, doing="Writing")
+    console.show("console", shown, "🏁 calc", done=True)
+    assert console.began == {} and console.doings == {} and console.live_owner is None
+
+
+@pytest.mark.spec("CNV-8")
+def test_a_jobs_live_line_counts_from_when_the_job_began(monkeypatch, clock):
+    monkeypatch.setattr(time, "time", lambda: 5000.0)
+    console = live_console(monkeypatch)
+    console.show("console", None, CALC_WRITING_NOW, began=4936.0, doing="Writing")
+    assert console.screen.live == ("Writing", 36.0, {})
+
+
+@pytest.mark.spec("CNV-8")
+def test_a_jobs_live_line_shows_its_tokens_and_thinking(monkeypatch, clock):
+    console = live_console(monkeypatch)
+    line = "🔨 calc\n✻ Tinkering… (↓ 1.2k tokens · thinking) · **Writing**"
+    console.show("console", None, line, doing="Writing", tokens=1200, thinking=True, thought_seconds=None)
+    facts = {"tokens": 1200, "thinking": True, "thought_seconds": None}
+    assert console.screen.live == ("Writing", 100.0, facts)
+    assert "Tinkering… (0s · ↓ 1.2k tokens" in sys.stdout.getvalue()
+
+
+@pytest.mark.spec("CNV-8")
+def test_progress_says_when_the_work_began_counting_earlier_runs():
+    progress = Progress("calc", before=60.0)
+    assert progress.work_began is None
+    progress.take({"started": 1000.0})
+    assert progress.work_began == 940.0
+
+
+@pytest.mark.spec("CNV-8")
+def test_console_prints_plain_without_colour(monkeypatch):
+    terminal = colour_terminal(monkeypatch)
+    monkeypatch.setenv("NO_COLOR", "1")
+    prompts = typing(monkeypatch, "hello")
+    console = ConsoleChannel()
+    console.read()
+    console.send("console", "Done\nline one")
+    assert prompts == [ConsoleScreen.PROMPT] * 2
+    assert terminal.getvalue() == "\r\033[KDone\nline one\n"
+
+
+def framed(width, *rows):
+    inner = width - 4
+    side = lambda text, style, shown: (
+        f"{ACCENT}│ {RESET}{style}{text}{RESET}{' ' * (inner - shown)}{ACCENT} │{RESET}\n"
+    )
+    return (
+        f"{ACCENT}╭{'─' * (width - 2)}╮{RESET}\n"
+        + "".join(side(*row) for row in rows)
+        + f"{ACCENT}╰{'─' * (width - 2)}╯{RESET}\n"
+    )
+
+
+@pytest.mark.spec("CNV-8")
+def test_console_frames_the_banner_as_wide_as_the_terminal_up_to_64_columns(monkeypatch):
+    terminal = colour_terminal(monkeypatch, 80)
+    ConsoleChannel().banner(["🔧 Tinker", "model qwen3", "help lists commands"])
+    assert terminal.getvalue() == framed(
+        64, ("🔧 Tinker", BOLD, 9), ("model qwen3", DIM, 11), ("help lists commands", DIM, 19)
+    )
+
+
+@pytest.mark.spec("CNV-8")
+def test_console_cuts_banner_text_that_is_too_long(monkeypatch):
+    terminal = colour_terminal(monkeypatch, 14)
+    ConsoleChannel().banner(["🔧 Tinker tool", "help lists commands"])
+    assert terminal.getvalue() == framed(14, ("🔧 Tinker", BOLD, 9), ("help lists", DIM, 10))
+
+
+@pytest.mark.spec("CNV-8")
+def test_console_draws_no_banner_without_colour_or_a_terminal(monkeypatch):
+    terminal = colour_terminal(monkeypatch)
+    monkeypatch.setattr(sys.stdin, "isatty", lambda: False)
+    ConsoleChannel().banner(["🔧 Tinker"])
+    monkeypatch.setattr(sys.stdin, "isatty", lambda: True)
+    monkeypatch.setenv("NO_COLOR", "1")
+    ConsoleChannel().banner(["🔧 Tinker"])
+    assert terminal.getvalue() == ""
+
+
+@pytest.mark.spec("CNV-8")
+def test_the_banner_names_tinker_the_model_the_projects_folder_and_the_chats(monkeypatch):
+    settings = {"model": "qwen3"}
+    monkeypatch.setattr(conversation.Config, "get", lambda key: settings.get(key))
+    root = Path.home() / "Projects"
+    with_chats = Desk([ConsoleChannel(), Recorder("telegram")], root)
+    assert with_chats.banner_lines() == [
+        "🔧 Tinker",
+        "model qwen3 · projects ~/Projects · chats telegram",
+        "help lists commands · exit quits",
+    ]
+    settings.clear()
+    alone = Desk([ConsoleChannel()], "/tmp")
+    assert alone.banner_lines()[1] == f"model no model yet · projects {Path('/tmp').resolve()}"
+
+
+@pytest.mark.spec("CNV-8")
+def test_the_conversation_opens_with_the_banner_before_the_status(monkeypatch):
+    terminal = colour_terminal(monkeypatch, 80)
+    typing(monkeypatch)
+    desk = Desk([ConsoleChannel()], Path.cwd())
+    monkeypatch.setattr(desk.talk, "warm", lambda: None)
+    desk.run()
+    shown = terminal.getvalue()
+    assert shown.startswith(f"{ACCENT}╭") and shown.index("🔧 Tinker") < shown.index("╰") < shown.index(
+        "idle"
+    )
 
 
 @pytest.mark.spec("CNV-8")
 def test_console_receives_lines_until_exit():
     console = ConsoleChannel()
-    no_input_thread = object()
-    console.reader = no_input_thread
+    console.screen.reading = True
     for line in ("hello", "  ", "exit"):
         console.lines.put(line)
     assert [message.text for message in console.receive(0)] == ["hello"]
     assert console.receive(0) == [] and not console.closed
     assert console.receive(0) == [] and console.closed
     eof = ConsoleChannel()
-    eof.reader = object()
+    eof.screen.reading = True
     eof.lines.put(None)
     assert eof.receive(0) == [] and eof.closed
 
@@ -301,15 +986,18 @@ def snapshot(**state):
 @pytest.mark.spec("CNV-17")
 def test_progress_shows_the_tracker():
     progress = Progress("a calculator", phase="✅ **Confirmed:** building it")
-    assert progress.text().splitlines() == ["🔨 **a calculator**", "▸ ✅ **Confirmed:** building it ⏳"]
+    assert progress.text().splitlines() == [
+        "🔨 **a calculator**",
+        "✻ Tinkering… · ✅ **Confirmed:** building it",
+    ]
     before_any_step = snapshot()
-    assert progress.take(before_any_step) and "▸ ✅ **Confirmed:** building it" in progress.text()
+    assert progress.take(before_any_step) and "Tinkering… · ✅ **Confirmed:** building it" in progress.text()
     progress.take(
         snapshot(
             job=7,
             step="verify",
             doing=Tracker.DOING_AND_DONE["verify"][0],
-            began=time.time() - 65,
+            started=time.time() - 65,
             steps=["🧠 Recalled what Tinker has learned", "📝 Spec written"],
             passing=[2, 3],
             latest="wrote calc.py",
@@ -319,7 +1007,7 @@ def test_progress_shows_the_tracker():
         "🔨 **calc: a calculator** (Job #7)",
         "✅ 🧠 Recalled what Tinker has learned",
         "✅ 📝 Spec written",
-        "▸ **🔁 Fixing until every test passes** · ⏱ 1m 5s ⏳",
+        "✻ Tinkering… (1m 5s) · **🔁 Fixing until every test passes**",
         "📊 2/3 spec points pass",
         "… wrote calc.py",
     ]
@@ -337,7 +1025,9 @@ def test_progress_says_what_the_run_works_on_how_far_it_got_and_what_it_found():
             title="Reading Atomic Habits",
             step="chapters",
             doing=Tracker.DOING_AND_DONE["chapters"][0],
-            began=time.time() - 12,
+            started=time.time() - 12,
+            tokens=1234,
+            thought_seconds=4.0,
             steps=["🧭 Chose the chapters to read: 3 core chapter(s) of 20"],
             working="Reading chapter 3, The 1% Rule (2 of 7)",
             tally="1/7 chapters · 4 things learned",
@@ -348,7 +1038,7 @@ def test_progress_says_what_the_run_works_on_how_far_it_got_and_what_it_found():
     assert progress.text().splitlines() == [
         "🔨 **Reading Atomic Habits**",
         "✅ 🧭 Chose the chapters to read: 3 core chapter(s) of 20",
-        "▸ **📚 Reading chapter 3, The 1% Rule (2 of 7)** · ⏱ 12s ⏳",
+        "✻ Tinkering… (12s · ↓ 1.2k tokens · thought for 4s) · **📚 Reading chapter 3, The 1% Rule (2 of 7)**",
         "📊 1/7 chapters · 4 things learned",
         "💡 Small habits compound like interest",
     ]
@@ -357,7 +1047,16 @@ def test_progress_says_what_the_run_works_on_how_far_it_got_and_what_it_found():
         "1/7 chapters · 4 things learned)"
     )
     progress.turn()
-    assert progress.text().splitlines()[2].endswith(" ⌛") and not progress.take(progress.snapshot)
+    assert progress.text().splitlines()[2].startswith("✶ Tinkering…") and not progress.take(progress.snapshot)
+
+
+@pytest.mark.spec("CNV-17")
+def test_progress_says_while_the_model_thinks_and_edits_for_a_new_token_count_only_with_the_clock():
+    progress = Progress("calc")
+    progress.take(snapshot(tokens=950, thinking=True, thought_seconds=4.0))
+    assert "✻ Tinkering… (↓ 950 tokens · thinking) · " in progress.text()
+    assert not progress.take(dict(progress.snapshot, tokens=2000))
+    assert progress.take(dict(progress.snapshot, thinking=False))
 
 
 @pytest.mark.spec("CNV-17")
@@ -451,6 +1150,27 @@ def test_reporter_shows_the_tracker_and_ends_with_its_ending(home_store, monkeyp
     reporter.finish(snapshot(ended={"status": "done", "headline": "Done.", "details": [], "next": []}))
     assert reporter.ended and "✅ **Done.**" in channel.texts()[-1]
     assert set(reporter.sent) == {("rec", "1"), ("rec", "2")}
+
+
+@pytest.mark.spec("CNV-18")
+def test_reporter_edits_for_new_tokens_only_with_the_clock_but_the_console_counts_them_live(
+    home_store, monkeypatch, clock
+):
+    monkeypatch.setattr(conversation, "PROGRESS_EDIT_SECONDS", 1000)
+    chat, console = Recorder(), live_console(monkeypatch)
+    reporter = Reporter([chat, console], "a calculator", pid=4242)
+    keep_job(home_store, 1, 4242, snapshot(step="spec", doing=Tracker.DOING_AND_DONE["spec"][0], tokens=10))
+    reporter.refresh()
+    edits = len(chat.log)
+    keep_job(home_store, 1, 4242, snapshot(step="spec", doing=Tracker.DOING_AND_DONE["spec"][0], tokens=900))
+    reporter.refresh()
+    assert len(chat.log) == edits
+    assert console.screen.live[2]["tokens"] == 900
+
+
+@pytest.mark.spec("CNV-18")
+def test_progress_edits_come_within_about_two_seconds():
+    assert conversation.PROGRESS_EDIT_SECONDS <= 2 < conversation.CLOCK_ONLY_EDIT_SECONDS
 
 
 @pytest.mark.spec("CNV-18")
@@ -1019,6 +1739,22 @@ def test_every_status_is_sent_anew_the_one_before_taken_out(desk):
     assert sorted(log[3:]) == [("delete", 102), ("send", 103)]
 
 
+@pytest.mark.spec("CNV-8")
+def test_the_terminal_leaves_out_what_tinker_works_on_while_a_job_shows_its_progress(desk, monkeypatch):
+    chat, console, shown = Recorder("bot"), ConsoleChannel(), []
+    monkeypatch.setattr(console, "show", lambda chat, sent, text, done=False: shown.append(text) or [1])
+    listening = desk_with_a_started_chat(chat)
+    listening.channels.append(console)
+    listening.consoles.append(console)
+    monkeypatch.setattr(listening, "keep_job_at_bottom", lambda: None)
+    monkeypatch.setattr(listening, "busy", lambda: True)
+    listening.say_status("🔄 **Tinker** · working on calc")
+    monkeypatch.setattr(listening, "busy", lambda: False)
+    listening.say_status("🟢 **Tinker** · idle: send a task")
+    assert shown == ["🟢 **Tinker** · idle: send a task"]
+    assert any("working on calc" in text for text in chat.texts("send"))
+
+
 @pytest.mark.spec("CNV-9")
 def test_a_job_says_its_status_as_it_starts_and_ends(desk, monkeypatch):
     channel = Recorder("bot")
@@ -1183,7 +1919,7 @@ def test_the_terminal_opens_the_file_and_other_channels_send_where_it_is(monkeyp
     opened, printed = [], []
     monkeypatch.setattr(conversation.webbrowser, "open", opened.append)
     console = ConsoleChannel()
-    monkeypatch.setattr(console, "print", printed.append)
+    monkeypatch.setattr(console.screen, "print", printed.append)
     page = tmp_path / "memory.html"
     console.send_file("console", page, "🧠 **Tinker's memory**")
     assert opened == [page.as_uri()] and f"Opened in your browser: {page}" in Markup.plain(printed[0])
