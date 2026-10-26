@@ -1,5 +1,6 @@
 import contextlib
 import io
+import json
 import os
 import signal
 import subprocess
@@ -1698,9 +1699,22 @@ class Listening(Recorder):
         return [self.inbox.pop(0)] if self.inbox else []
 
 
-@pytest.mark.spec("CNV-9")
-def test_the_status_is_sent_anew_as_tinker_starts_and_ends(desk, home_store, monkeypatch):
+def goodbyes_handed(monkeypatch):
+    handed = []
+    monkeypatch.setattr(
+        conversation,
+        "tinker_process",
+        lambda arguments, output=None: handed.append((arguments[:2], json.loads(arguments[2]), output)),
+    )
+    return handed
+
+
+@pytest.mark.spec("CNV-9", "CNV-11")
+def test_the_status_is_sent_anew_as_tinker_starts_and_the_goodbye_is_handed_on(
+    desk, home_store, monkeypatch
+):
     monkeypatch.setattr(conversation, "ENDED_LOOK_SECONDS", 0.05)
+    handed = goodbyes_handed(monkeypatch)
     status_before = 55
     home_store.put("listening", "bot", {"1": status_before})
     exit_said, confirm_said = Message("1", "exit", id=1), Message("1", "confirm", id=2)
@@ -1708,16 +1722,29 @@ def test_the_status_is_sent_anew_as_tinker_starts_and_ends(desk, home_store, mon
     collected = []
     channel.collect = lambda: collected.append(True)
     Desk([channel], Path.cwd()).run()
-    first_status, the_question_to_stop, last_status = 101, 102, 103
+    first_status, the_question_to_stop = 101, 102
     status = [(kind, sent, text) for kind, _, sent, text in channel.log if "**Tinker** ·" in text]
-    assert [(kind, sent) for kind, sent, _ in status] == [("send", first_status), ("send", last_status)]
-    assert status[0][2].startswith("🟢 **Tinker** · idle: send a task")
-    assert status[1][2].startswith("💤 **Tinker** · not listening") and channel.closed
+    assert [(kind, sent) for kind, sent, _ in status] == [("send", first_status)]
+    assert status[0][2].startswith("🟢 **Tinker** · idle: send a task") and channel.closed
     deleted = {sent for kind, _, sent, _ in channel.log if kind == "delete"}
-    assert deleted == {status_before, first_status, exit_said.id, confirm_said.id, the_question_to_stop}
+    assert deleted == {status_before, exit_said.id, confirm_said.id}
     assert not any("Stopping" in text for text in channel.texts())
-    assert home_store.get("listening", "bot") == {"1": last_status} and collected
+    assert home_store.get("listening", "bot") == {"1": first_status} and collected
+    goodbye = {
+        "status": "💤 **Tinker** · not listening",
+        "channels": ["bot"],
+        "question": {"channel": "bot", "chat": "1", "messages": [the_question_to_stop]},
+    }
+    assert handed == [(["channel", "goodbye"], goodbye, subprocess.DEVNULL)]
     channel.claimed.close()
+
+
+@pytest.mark.spec("CNV-9")
+def test_a_terminal_alone_hands_no_goodbye_on(monkeypatch):
+    handed = goodbyes_handed(monkeypatch)
+    console, out = piped_console(monkeypatch)
+    Desk([console], Path.cwd()).say_goodbye()
+    assert handed == [] and "not listening" in out.getvalue()
 
 
 @pytest.mark.spec("CNV-9")
