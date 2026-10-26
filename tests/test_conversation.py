@@ -318,11 +318,6 @@ def drawn_after(terminal, step):
     return terminal.getvalue()
 
 
-def rule_and_prompt(columns):
-    return f"{DIM}{'─' * columns}{RESET}\n{ACCENT}› {RESET}"
-
-
-ERASED_ABOVE_THE_PROMPT = "\r\033[K\033[F\033[K"
 LIVE_LINE_TAKEN_OUT = "\0337\033[2F\033[M\0338\033[A"
 
 
@@ -396,13 +391,23 @@ def test_console_makes_room_for_a_message_by_what_shows_of_it(monkeypatch):
 
 
 @pytest.mark.spec("CNV-8")
-def test_console_redraws_the_prompt_under_a_message_taller_than_the_screen(monkeypatch):
+def test_console_prints_a_message_taller_than_the_screen_above_the_prompt_in_pieces(monkeypatch):
     terminal = colour_terminal(monkeypatch)
     screen = ConsoleChannel().screen
     screen.reading = True
-    tall = "\n".join(["line"] * 30)
-    screen.print(tall)
-    assert terminal.getvalue() == f"{ERASED_ABOVE_THE_PROMPT}{tall}\n{rule_and_prompt(10)}"
+    screen.print("\n".join(["line"] * 30))
+    assert terminal.getvalue() == (
+        printed_above("\n".join(["line"] * 22), rows=22) + printed_above("\n".join(["line"] * 8), rows=8)
+    )
+
+
+@pytest.mark.spec("CNV-8")
+def test_console_cuts_a_line_taller_than_the_room_into_screen_wide_rows(monkeypatch):
+    terminal = colour_terminal(monkeypatch)
+    screen = ConsoleChannel().screen
+    screen.reading = True
+    screen.print(f"{ACCENT}{'x' * 225}{RESET}")
+    assert terminal.getvalue() == printed_above("\n".join(["x" * 10] * 22), rows=22) + printed_above("xxxxx")
 
 
 LIVE_COLUMNS = 40

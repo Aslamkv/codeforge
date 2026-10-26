@@ -24,6 +24,7 @@ lazy from .messages import (
     CLEAR_LINE,
     CLEAR_TO_LINE_END,
     Messages,
+    char_width,
     colourful,
     cut_to_width,
     human_duration,
@@ -1940,23 +1941,21 @@ class ConsoleScreen:
 
     def print(self, text):
         with self.printing:
-            rows = rows_shown(text)
-            write_out(
-                self.printed_above(text, rows) if self.has_room_for(rows) else self.printed_over_prompt(text)
-            )
+            write_out(self.printed_in_pieces(text) if self.ruled() else self.printed_over_prompt(text))
+
+    def printed_in_pieces(self, text):
+        room = shutil.get_terminal_size().lines - self.live_rows() - 2
+        return "".join(
+            self.printed_above("\n".join(lines), rows) for lines, rows in screen_pieces(text, room)
+        )
 
     def printed_above(self, text, rows):
         return f"{self.room_made(rows, above=self.live_rows())}\r{text}{RESTORE_CURSOR}"
 
-    def has_room_for(self, rows):
-        return self.ruled() and rows + self.live_rows() + 2 <= shutil.get_terminal_size().lines
-
     def printed_over_prompt(self, text):
-        out = sys.stdout
-        if not out.isatty():
+        if not sys.stdout.isatty():
             return text + "\n"
-        after = (self.bottom() if self.ruled() else self.PROMPT) if self.reading else ""
-        return f"{self.erased_bottom()}{text}\n{after}"
+        return f"{CLEAR_LINE}{text}\n{self.PROMPT if self.reading else ''}"
 
     def draw(self, text):
         with self.printing:
@@ -2027,13 +2026,6 @@ class ConsoleScreen:
         tinkering = live_line(text, began, self.frame, width, sys.stdout, **facts)
         return [tinkering, *(f"  {styled(cut_to_width(line, width - 2), 'dim')}" for line in self.under)]
 
-    def erased_bottom(self):
-        return CLEAR_LINE + CLEARED_LINE_ABOVE * (self.ruled() + self.live_rows())
-
-    def bottom(self):
-        live = "".join(f"{row}\n" for row in self.live_drawn()) if self.live is not None else ""
-        return f"{live}{self.rule()}\n{self.prompt()}"
-
     def prompt(self):
         return styled("› ", "accent") if typed_here() else self.PROMPT
 
@@ -2048,11 +2040,42 @@ class ConsoleScreen:
 SAVE_CURSOR, RESTORE_CURSOR, CURSOR_UP, NEXT_LINE = "\0337", "\0338", "\033[A", "\033[E"
 COLOUR_CODE_RE = re.compile(r"\033\[[0-9;]*m")
 DELETE_LINE, CLEAR_DOWN, ROW_DOWN_OR_SCROLL = "\033[M", "\033[J", "\033D"
-CLEARED_LINE_ABOVE = "\033[F" + CLEAR_TO_LINE_END
 
 
 def lines_up(rows):
     return f"\033[{rows}F"
+
+
+def screen_pieces(text, room):
+    lines, rows = [], 0
+    for line in fitting_lines(text, room):
+        line_rows = rows_shown(line)
+        if lines and rows + line_rows > room:
+            yield lines, rows
+            lines, rows = [], 0
+        lines.append(line)
+        rows += line_rows
+    yield lines, rows
+
+
+def fitting_lines(text, room):
+    for line in text.split("\n"):
+        if rows_shown(line) > room:
+            yield from screen_wide_rows(COLOUR_CODE_RE.sub("", line))
+        else:
+            yield line
+
+
+def screen_wide_rows(line):
+    columns = shutil.get_terminal_size().columns
+    row, width = "", 0
+    for char in line:
+        if width + char_width(char) > columns:
+            yield row
+            row, width = "", 0
+        row += char
+        width += char_width(char)
+    yield row
 
 
 def rows_shown(text):
