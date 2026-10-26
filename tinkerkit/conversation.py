@@ -50,7 +50,7 @@ CLOCK_ONLY_EDIT_SECONDS = 15
 BUILD_STOP_GRACE_SECONDS = 120
 STATUS_LOOK_SECONDS = 10
 EXPIRED_MESSAGES_SWEEP_SECONDS = 2
-ENDED_LOOK_SECONDS = 0.5
+ENDED_LOOK_SECONDS = 0.1
 BANNER_MAX_COLUMNS = 64
 
 CHAT_CONTEXT_MESSAGES = 12
@@ -191,7 +191,6 @@ class Desk:
         self.open_banner()
         self.talk.warm()
         self.say_status(anew=True)
-        self.adopt_exercise()
         if not self.consoles:
             names = ", ".join(channel.name for channel in self.channels)
             say.info(f"Listening on {names}; projects go in {self.root}. Ctrl-C stops.", "👂")
@@ -301,10 +300,18 @@ class Desk:
         ]
         for thread in threads:
             thread.start()
+        threading.Thread(target=self.keep_up, daemon=True).start()
+        while any(thread.is_alive() for thread in threads) and not self.a_channel_closed():
+            time.sleep(ENDED_LOOK_SECONDS)
+        raise KeyboardInterrupt
+
+    def a_channel_closed(self):
+        return any(channel.closed for channel in self.channels)
+
+    def keep_up(self):
+        self.adopt_exercise()
         looked = collected = 0.0
-        while any(thread.is_alive() for thread in threads) and not any(
-            channel.closed for channel in self.channels
-        ):
+        while not self.a_channel_closed():
             time.sleep(ENDED_LOOK_SECONDS)
             if time.monotonic() - collected >= EXPIRED_MESSAGES_SWEEP_SECONDS:
                 collected = time.monotonic()
@@ -315,7 +322,6 @@ class Desk:
                 self.say_status()
                 if self.exercise_reporter is None:
                     self.adopt_exercise()
-        raise KeyboardInterrupt
 
     def listen(self, channel):
         if channel not in self.consoles:

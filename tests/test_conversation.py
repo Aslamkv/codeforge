@@ -1720,6 +1720,52 @@ def test_the_status_is_sent_anew_as_tinker_starts_and_ends(desk, home_store, mon
     channel.claimed.close()
 
 
+@pytest.mark.spec("CNV-9")
+@pytest.mark.parametrize("slow", ["collect", "status", "adopt_exercise"])
+def test_the_terminal_reads_and_exits_at_once_while_periodic_work_waits(monkeypatch, slow):
+    monkeypatch.setattr(conversation, "STATUS_LOOK_SECONDS", 0)
+    monkeypatch.setattr(conversation, "EXPIRED_MESSAGES_SWEEP_SECONDS", 0)
+    colour_terminal(monkeypatch, 80)
+    console = ConsoleChannel()
+    desk = Desk([console], Path.cwd())
+    monkeypatch.setattr(desk.talk, "warm", lambda: None)
+    status = desk.status
+    waits, released = threading.Event(), threading.Event()
+
+    def waiting(then=lambda: None, passing=0):
+        calls = []
+
+        def wait():
+            calls.append(True)
+            if len(calls) > passing:
+                waits.set()
+                released.wait()
+            return then()
+
+        return wait
+
+    typed = ["exit"]
+
+    def exit_once_it_waits(prompt):
+        assert waits.wait(timeout=5)
+        if not typed:
+            raise EOFError
+        return typed.pop()
+
+    monkeypatch.setattr("builtins.input", exit_once_it_waits)
+    patched = {"collect": (console, waiting()), "status": (desk, waiting(status, passing=1))}
+    owner, stand_in = patched.get(slow, (desk, waiting()))
+    monkeypatch.setattr(owner, slow, stand_in)
+    running = threading.Thread(target=desk.run, daemon=True)
+    running.start()
+    assert waits.wait(timeout=5)
+    started = time.monotonic()
+    running.join(timeout=5)
+    ended_in = time.monotonic() - started
+    released.set()
+    assert not running.is_alive() and ended_in < 1 and console.closed
+
+
 def desk_with_a_started_chat(channel):
     listening = Desk([channel], Path.cwd())
     listening.chats_started.add(channel)
