@@ -1,3 +1,4 @@
+import hashlib
 import json
 import re
 import sys
@@ -5,9 +6,9 @@ import sys
 import pytest
 from conftest import TOOLCHAIN
 
-from tinkerkit import cli
+from tinkerkit import cli, settings
 from tinkerkit.cli import Cli, Commands
-from tinkerkit.graph import Graph, GraphPage
+from tinkerkit.graph import Graph, GraphPage, MemoryBrowser, short_ids
 from tinkerkit.knowledge import Knowledge, Library
 from tinkerkit.project import Runs
 from tinkerkit.settings import Home
@@ -196,12 +197,125 @@ def test_memory_graph_writes_the_page_and_opens_it_only_in_a_terminal(memory, mo
     assert opened == [Home.graph_page().as_uri()]
 
 
-@pytest.mark.spec("CLI-5")
-def test_memory_counts_what_is_retired(memory, capsys):
-    Commands.show_memory()
+def browse(*words):
+    MemoryBrowser(Graph.build()).show(MemoryBrowser.request(list(words)))
+
+
+def short_id(node_id):
+    return hashlib.sha1(node_id.encode()).hexdigest()[:6]
+
+
+@pytest.mark.spec("GRF-7")
+def test_a_short_id_is_six_hex_digits_made_longer_only_where_two_items_share_them():
+    assert short_ids(["lesson:1", "fact:x"]) == {
+        "lesson:1": short_id("lesson:1"),
+        "fact:x": short_id("fact:x"),
+    }
+    sharing_six_digits = short_ids(["lesson:438", "lesson:524", "lesson:1"])
+    assert sharing_six_digits == {
+        "lesson:438": "2d35d66",
+        "lesson:524": "2d35d6b",
+        "lesson:1": short_id("lesson:1"),
+    }
+
+
+@pytest.mark.spec("GRF-6", "GRF-8")
+def test_memory_lists_the_parts_with_what_each_holds(memory, capsys):
+    browse()
     out = capsys.readouterr().out
-    assert "♻️  1 item did not hold and was retired: never shown to the model again" in out
-    assert "Explore it     tinker memory --graph" in out
+    assert "Python (memory python): 1 toolchain, 1 fix, 1 fact, 1 lesson; 4 proven · nothing built yet" in out
+    assert "Any language (memory any): 1 lesson; 0 proven" in out
+    assert "Flask (memory flask): 2 facts, 1 finding; 1 proven" in out
+    assert "Your commands (memory commands): 1 command; 1 proven" in out
+    assert "1 item did not hold and was retired" in out
+    for tip in (
+        "tinker memory NAME",
+        "tinker memory show ID",
+        "tinker memory find WORDS",
+        "tinker memory recent",
+    ):
+        assert tip in out
+    assert "tinker memory --graph" in out and "tinker teach" in out and "tinker clear PART" in out
+
+
+@pytest.mark.spec("GRF-8")
+def test_memory_with_nothing_learned_says_how_to_start(home_store, capsys):
+    browse()
+    out = capsys.readouterr().out
+    assert "Nothing yet: it learns from every build" in out and "memory any" not in out
+
+
+@pytest.mark.spec("GRF-9")
+def test_memory_name_shows_one_part_its_items_with_short_ids_and_counts_the_retired(memory, capsys):
+    browse("PYTHON")
+    out = capsys.readouterr().out
+    seed = f"lesson:{memory['seed']}"
+    assert f"[{short_id(seed)}] ✅ lesson    Seed random generators inside tests" in out
+    assert f"[{short_id('toolchain:python')}] ✅ toolchain" in out and "nothing built yet" in out
+    assert "Exit with code 1" not in out and "retired" not in out
+    browse("Any", "language")
+    out = capsys.readouterr().out
+    assert "🌱 lesson    Exit with code 1 after an error <b>" in out and "Name each test after" not in out
+    assert "1 retired, not shown: tinker memory any retired" in out
+    browse("any", "retired")
+    out = capsys.readouterr().out
+    assert f"[{short_id('retired:lesson:' + memory['name'])}] ♻️ lesson    Name each test after" in out
+    assert "Exit with code 1" not in out
+    browse("flask", "fact")
+    out = capsys.readouterr().out
+    assert "A web framework." in out and "Flask routes use @app.route" in out and "finding" not in out
+
+
+@pytest.mark.spec("GRF-9")
+def test_memory_kind_alone_lists_that_kind_across_memory_with_each_part(memory, capsys):
+    browse("lessons")
+    out = capsys.readouterr().out
+    assert "Seed random generators inside tests  (python)" in out and "after an error <b>  (any)" in out
+    assert "toolchain" not in out and "Flask" not in out
+
+
+@pytest.mark.spec("GRF-9")
+def test_an_unknown_part_is_refused_saying_memory_lists_the_parts(memory):
+    with pytest.raises(SystemExit, match="tinker memory lists the parts"):
+        browse("cobol")
+
+
+@pytest.mark.spec("GRF-6", "GRF-9")
+def test_every_memory_list_comes_a_page_at_a_time(memory, monkeypatch, capsys):
+    monkeypatch.setattr(settings, "PER_PAGE", 1)
+    browse("python", "2")
+    out = capsys.readouterr().out
+    assert "Page 2 of 4: tinker memory python 3 for more." in out and out.count("] ") == 1
+    browse("python", "lessons", "1")
+    assert "Page 1 of 1" not in capsys.readouterr().out
+    browse("2")
+    assert "Page 2 of 4: tinker memory 3 for more." in capsys.readouterr().out
+
+
+@pytest.mark.spec("GRF-9", "CLI-5")
+def test_memory_words_are_a_name_a_kind_and_a_page(home_store):
+    request = MemoryBrowser.request
+    assert request([]) == ("parts", "", "", 1, [])
+    assert request(["python", "Lessons", "2"]) == ("part", "python", "lesson", 2, ["python", "Lessons"])
+    assert request(["any", "language"])[:4] == ("part", "any language", "", 1)
+    assert request(["fixes"])[:4] == ("part", "", "fix", 1)
+    assert request(["show", "2d35d6"])[:1] == ("show",) and request(["find", "seed", "tests"])[:1] == (
+        "find",
+    )
+    assert request(["recent", "2"])[:4] == ("recent", "", "", 2)
+    for wrong in (
+        ["show"],
+        ["show", "a", "b"],
+        ["find"],
+        ["recent", "x"],
+        ["lessons", "facts"],
+        ["python", "0"],
+    ):
+        with pytest.raises(ValueError, match="tinker memory NAME"):
+            request(wrong)
+    assert Cli.parse(["memory", "python", "lessons", "2"]).memory == request(["python", "lessons", "2"])
+    with pytest.raises(SystemExit):
+        Cli.parse(["memory", "lessons", "facts"])
 
 
 @pytest.mark.spec("GRF-1")

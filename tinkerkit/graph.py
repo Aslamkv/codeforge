@@ -1,9 +1,12 @@
+lazy import hashlib
 lazy import html
 lazy import itertools
 lazy import json
+lazy from collections import namedtuple
 
 lazy from .knowledge import Embeddings, Item, Library
-lazy from .settings import SIMILAR_LESSON_MEANING, SIMILAR_LESSON_WORDS, Home
+lazy from .messages import say
+lazy from .settings import MEMORY_ID_CHARS, SIMILAR_LESSON_MEANING, SIMILAR_LESSON_WORDS, Home, Numbered
 lazy from .text import first_line, similarity
 lazy from .workspace import TaughtCommands, Toolchain
 
@@ -391,6 +394,208 @@ class GraphPage:
             f"<li><span class=tags>{html.escape(' · '.join(tags))}</span> {html.escape(node['text'])}"
             f"{sources}</li>"
         )
+
+
+MemoryRequest = namedtuple("MemoryRequest", "view name kind page words")
+
+
+class MemoryBrowser:
+    HUBS = ("language", "topic", "commands")
+    KINDS = frozendict(
+        {
+            "toolchain": "toolchain",
+            "toolchains": "toolchain",
+            "fact": "fact",
+            "facts": "fact",
+            "finding": "finding",
+            "findings": "finding",
+            "rule": "rule",
+            "rules": "rule",
+            "fix": "fix",
+            "fixes": "fix",
+            "lesson": "lesson",
+            "lessons": "lesson",
+            "command": "command",
+            "commands": "command",
+            "retired": "retired",
+        }
+    )
+    MANY = frozendict({"fix": "fixes", "toolchain": "toolchains", "retired": "retired items"})
+    ICONS = frozendict({"language": "📘", "topic": "🔬", "commands": "⌨️"})
+    USAGE = (
+        "use tinker memory [PAGE], tinker memory NAME [KIND] [PAGE] (KIND: toolchain, facts, findings, rules, "
+        "fixes, lessons, commands or retired; alone, across memory), tinker memory show ID, "
+        "tinker memory find WORDS or tinker memory recent [PAGE]"
+    )
+    TIPS = (
+        ("See a part", "tinker memory NAME [KIND]"),
+        ("See an item", "tinker memory show ID"),
+        ("Find items", "tinker memory find WORDS"),
+        ("Newest first", "tinker memory recent"),
+        ("Explore it", "tinker memory --graph"),
+        ("Ask about it", "tinker ask WHAT"),
+        ("Correct it", "tinker teach WHAT"),
+        ("Forget a part", "tinker clear PART"),
+    )
+
+    def __init__(self, graph):
+        self.graph = graph
+        self.hubs = [node for node in graph.nodes.values() if node["kind"] in self.HUBS]
+        self.items = [node for node in graph.nodes.values() if node["kind"] not in (*self.HUBS, "run")]
+        self.ids = short_ids([item["id"] for item in self.items])
+        self.part_of = {
+            link["source"]: graph.nodes[link["target"]]
+            for link in graph.links
+            if link["kind"] == "belongs_to"
+        }
+
+    @classmethod
+    def request(cls, words):
+        first, rest = (words[0].lower(), words[1:]) if words else ("", [])
+        if first == "show" and len(rest) == 1:
+            return MemoryRequest("show", "", "", 1, rest)
+        if first == "find" and rest:
+            return MemoryRequest("find", " ".join(rest), "", 1, rest)
+        if first == "recent" and len(rest) <= 1:
+            return MemoryRequest("recent", "", "", cls.page_of(rest[0]) if rest else 1, [])
+        if first in ("show", "find", "recent"):
+            raise ValueError(cls.USAGE)
+        named, page = (words[:-1], cls.page_of(words[-1])) if words and words[-1].isdigit() else (words, 1)
+        kinds = [cls.KINDS[word.lower()] for word in named if word.lower() in cls.KINDS]
+        if len(kinds) > 1:
+            raise ValueError(cls.USAGE)
+        name = " ".join(word for word in named if word.lower() not in cls.KINDS)
+        return MemoryRequest("part" if name or kinds else "parts", name, "".join(kinds), page, named)
+
+    @classmethod
+    def page_of(cls, word):
+        if not word.isdigit() or int(word) < 1:
+            raise ValueError(cls.USAGE)
+        return int(word)
+
+    def show(self, request):
+        if request.view == "parts":
+            self.show_parts(request.page)
+        elif request.view == "part":
+            self.show_part(request)
+
+    def show_parts(self, page):
+        if not self.items and len(self.hubs) == 1:
+            say.info(
+                "Nothing yet: it learns from every build (tinker task), tinker learn WHAT and tinker read FILE",
+                "🌱",
+            )
+            return
+        say.title("What Tinker has learned", "🧠")
+        shown, pages = Numbered.page(self.hubs, page)
+        for hub in shown:
+            say.info(self.part_line(hub), self.icon_of(hub))
+        retired = sum(item["status"] == "retired" for item in self.items)
+        if retired:
+            say.info(
+                f"{retired} item{'s' if retired > 1 else ''} did not hold and {'were' if retired > 1 else 'was'} "
+                f"retired: never shown to the model again (tinker memory retired)",
+                "♻️",
+            )
+        self.say_page(page, pages, [])
+        with say.part("What next", "💡"):
+            for what, command in self.TIPS:
+                say.text(f"{what:14} {command}")
+
+    def part_line(self, hub):
+        kept = [item for item in self.members(hub) if item["status"] != "retired"]
+        kinds = list(dict.fromkeys(item["kind"] for item in kept))
+        held = ", ".join(self.many(sum(item["kind"] == kind for item in kept), kind) for kind in kinds)
+        proven = sum(item["status"] == "proven" for item in kept)
+        line = f"{hub['label']} (memory {hub['group']}): " + (
+            f"{held}; {proven} proven" if kept else "nothing yet"
+        )
+        return line + (f" · {self.built(hub)}" if hub["id"].startswith("lang:") else "")
+
+    def show_part(self, request):
+        hub = self.named(request.name) if request.name else None
+        if request.name and hub is None:
+            raise SystemExit(f"No part of memory is called {request.name!r}: tinker memory lists the parts.")
+        members = self.members(hub) if hub else self.items
+        if hub:
+            self.say_details(hub)
+        else:
+            say.title(f"{self.plural(request.kind).capitalize()} across memory", "🧠")
+        shown, pages = Numbered.page(
+            [item for item in members if self.keeps(item, request.kind)], request.page
+        )
+        for item in shown:
+            say.text(self.item_line(item) + ("" if hub else f"  ({self.part_of[item['id']]['group']})"))
+        if not shown:
+            say.text("Nothing here.")
+        left_out = sum(item["status"] == "retired" for item in members) if request.kind != "retired" else 0
+        if left_out:
+            where = f"{hub['group']} " if hub else ""
+            say.text(f"\n{left_out} retired, not shown: tinker memory {where}retired")
+        self.say_page(request.page, pages, request.words)
+
+    def say_details(self, hub):
+        say.title(hub["label"], self.icon_of(hub))
+        details = dict(hub["details"])
+        shown = [details.get("summary")] + [
+            f"{key}: {details[key]}" for key in ("learned", "missing") if details.get(key)
+        ]
+        for line in [*shown, self.built(hub) if hub["id"].startswith("lang:") else None]:
+            if line:
+                say.text(line)
+
+    def named(self, name):
+        wanted = name.lower()
+        by_group = [hub for hub in self.hubs if hub["group"].lower() == wanted]
+        return next(iter(by_group or [hub for hub in self.hubs if hub["label"].lower() == wanted]), None)
+
+    def members(self, hub):
+        return [item for item in self.items if self.part_of.get(item["id"]) is hub]
+
+    @staticmethod
+    def keeps(item, kind):
+        if kind == "retired":
+            return item["status"] == "retired"
+        return item["status"] != "retired" and kind in ("", item["kind"])
+
+    def item_line(self, item):
+        status = {"proven": "✅", "retired": "♻️"}.get(item["status"], "🌱")
+        return f"[{self.ids[item['id']]}] {status} {item['kind']:9} {first_line(item['text'], 100)}"
+
+    def say_page(self, page, pages, words):
+        shown = "".join(f"{word} " for word in words)
+        if page < pages:
+            say.text(f"\nPage {page} of {pages}: tinker memory {shown}{page + 1} for more.")
+        elif pages > 1 or page > 1:
+            say.text(f"\nPage {page} of {pages}.")
+
+    def icon_of(self, hub):
+        return "🌍" if hub["id"] == "any" else self.ICONS[hub["kind"]]
+
+    def many(self, count, kind):
+        return f"{count} {kind}" if count == 1 else f"{count} {self.plural(kind)}"
+
+    def plural(self, kind):
+        return self.MANY.get(kind, kind + "s")
+
+    @staticmethod
+    def built(hub):
+        count = int(dict(hub["details"]).get("projects finished", 0))
+        return "nothing built yet" if not count else f"{count} project{'s' if count > 1 else ''} built"
+
+
+def short_ids(node_ids):
+    digests = sorted((hashlib.sha1(node_id.encode()).hexdigest(), node_id) for node_id in node_ids)
+    ids = {}
+    for index, (digest, node_id) in enumerate(digests):
+        neighbours = [digests[other][0] for other in (index - 1, index + 1) if 0 <= other < len(digests)]
+        shared = max((shared_digits(digest, other) for other in neighbours), default=0)
+        ids[node_id] = digest[: max(MEMORY_ID_CHARS, shared + 1)]
+    return ids
+
+
+def shared_digits(first, second):
+    return sum(1 for _ in itertools.takewhile(lambda pair: pair[0] == pair[1], zip(first, second)))
 
 
 def write_page(embeddings=None):

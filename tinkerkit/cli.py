@@ -19,7 +19,7 @@ from .messages import Messages, human_duration, paint, say
 from .reading import Reader
 lazy from .building import BugReproducer, CodeWriter, TestToolSetup, TestWriter, Verifier
 lazy from .finishing import FinalReview, LessonWriter, ReadmeWriter, Tidy
-lazy from .graph import write_page
+lazy from .graph import Graph, MemoryBrowser, write_page
 lazy from .knowledge import Embeddings, Learner, Library, Researcher, search_entry
 lazy from .learning import LearnStopped, SlotLearner
 lazy from .model import Calibrator, Model, Models, Ollama, OllamaError, SelectedModel
@@ -57,7 +57,7 @@ lazy from .store import Log
 lazy from .teaching import Asker, Memory, Teacher
 lazy from .text import clock, first_line, now_text
 lazy from .web import Internet
-lazy from .workspace import TaughtCommands, TestRef, Toolchain
+lazy from .workspace import TaughtCommands, TestRef
 
 try:
     from . import channels
@@ -136,7 +136,7 @@ class Cli:
         "teach": None,
         "read": None,
         "exercise": None,
-        "memory": False,
+        "memory": None,
         "runs": False,
         "status": None,
         "log": None,
@@ -358,7 +358,7 @@ class Cli:
     @staticmethod
     def command_value(command, given, parser):
         match command:
-            case "reset" | "restart" | "models" | "memory" | "runs" | "doctor":
+            case "reset" | "restart" | "models" | "runs" | "doctor":
                 return True
             case "use-model" | "calibrate" | "embed":
                 return Cli.non_empty(given.name, command, parser)
@@ -374,6 +374,8 @@ class Cli:
                 return Cli.job_words(command, given.words, parser)
             case "read":
                 return Cli.reading(given.words, parser)
+            case "memory":
+                return Cli.memory_words(given.words, parser)
             case "ask" | "teach" | "research" | "exercise":
                 return Cli.non_empty(" ".join(given.words), command, parser)
             case "config":
@@ -443,6 +445,13 @@ class Cli:
         if job_number(words[0]):
             return words[:1] + ([" ".join(words[1:]).strip(" \"'“”")] if words[1:] else [])
         return [Cli.non_empty(" ".join(words), "read", parser)]
+
+    @staticmethod
+    def memory_words(words, parser):
+        try:
+            return MemoryBrowser.request(words)
+        except ValueError as refused:
+            parser.error(str(refused))
 
     @staticmethod
     def lists_readings(words):
@@ -536,7 +545,7 @@ class Commands:
             "teach": self.teach,
             "read": self.read,
             "exercise": self.exercise,
-            "memory": lambda: self.show_memory(args.graph),
+            "memory": lambda: self.show_memory(args.graph, args.memory),
             "runs": self.list_runs,
             "jobs": lambda: self.list_jobs(*args.jobs),
             "stop": lambda: self.stop(args.stop),
@@ -835,30 +844,11 @@ class Commands:
         )
 
     @staticmethod
-    def show_memory(graph=False):
+    def show_memory(graph=False, request=None):
         if graph:
             Commands.show_graph()
             return
-        languages, any_language, topics = (
-            Home.store().items("languages"),
-            Home.store().get("memory", "any") or {},
-            Library.topics(),
-        )
-        taught = TaughtCommands.all()
-        say.title("What Tinker has learned", "🧠")
-        if not (languages or any_language.get("lessons") or topics or taught):
-            say.info("Nothing yet: it learns from every build (tinker task) and from tinker learn WHAT", "🌱")
-        for key, (doc, topic) in Commands.languages_known(languages, topics).items():
-            Commands.print_language(key, doc, topic)
-        Commands.print_any_language(any_language.get("lessons", []))
-        Commands.print_topics(
-            {slug: entry for slug, entry in topics.items() if entry.get("kind") != "language"}
-        )
-        Commands.print_taught(taught)
-        Commands.print_retired(
-            sum(len(doc.get("retired", [])) for doc in [*languages.values(), any_language, *topics.values()])
-        )
-        Commands.print_memory_tips()
+        MemoryBrowser(Graph.build()).show(request or MemoryBrowser.request([]))
 
     @staticmethod
     def show_graph():
@@ -869,135 +859,6 @@ class Commands:
         if sys.stdout.isatty():
             webbrowser.open(Home.graph_page().as_uri())
             say.done("Opened in your browser.")
-
-    @staticmethod
-    def languages_known(languages, topics):
-        learned = {slug: entry for slug, entry in topics.items() if entry.get("kind") == "language"}
-        return {
-            key: (languages.get(key) or {}, learned.get(key)) for key in dict.fromkeys([*languages, *learned])
-        }
-
-    @staticmethod
-    def print_language(key, doc, topic):
-        name = doc.get("language") or (topic or {}).get("name") or key
-        with say.part(
-            " · ".join([name, Commands.projects_built(doc.get("projects", 0)), *Commands.read_of(topic)]),
-            "📘",
-        ):
-            Commands.print_toolchain(Toolchain(doc.get("toolchain")))
-            Commands.print_items(
-                "Proven facts", "✅", [fact.get("text", "") for fact in doc.get("facts", [])]
-            )
-            Commands.print_items(
-                "Fixes",
-                "🔧",
-                [
-                    f"{first_line(fix['failure'], 60)} → {first_line(fix['cause'], 60)}"
-                    f" (helped {fix.get('used', 0)}×)"
-                    for fix in doc.get("fixes", [])
-                ],
-            )
-            Commands.print_lessons(doc.get("lessons", []))
-
-    @staticmethod
-    def projects_built(count):
-        return "nothing built yet" if not count else f"{count} project{'s' if count > 1 else ''} built"
-
-    @staticmethod
-    def read_of(topic):
-        if not topic:
-            return []
-        return [
-            f"docs read {Commands.short_date(topic.get('learned'))} ({len(topic.get('facts', []))} facts)"
-        ]
-
-    @staticmethod
-    def short_date(text):
-        try:
-            return datetime.datetime.strptime(str(text)[:10], "%Y-%m-%d").strftime("%-d %b")
-        except ValueError:
-            return str(text or "?")
-
-    @staticmethod
-    def print_toolchain(toolchain):
-        if not toolchain:
-            return
-        rows = [("setup", command) for command in toolchain.setup] + [
-            (label, getattr(toolchain, key))
-            for label, key in (
-                ("activate", "activate"),
-                ("test", "test_all"),
-                ("check", "check"),
-                ("format", "format"),
-                ("lint", "lint"),
-            )
-        ]
-        with say.part("Toolchain", "🧰"):
-            shown = ""
-            for label, command in rows:
-                if command:
-                    say.text(f"{'' if label == shown else label:9} {command}")
-                    shown = label
-
-    @staticmethod
-    def print_items(title, icon, texts):
-        if texts:
-            with say.part(title, icon):
-                for text in texts:
-                    say.item(first_line(text, 110))
-
-    @staticmethod
-    def print_lessons(lessons):
-        if lessons:
-            with say.part("Lessons (✅ proven by a build, 🌱 not yet)", "📒"):
-                for lesson in lessons:
-                    say.info(
-                        first_line(lesson.get("text", ""), 110),
-                        "✅" if lesson.get("status") == "proven" else "🌱",
-                    )
-
-    @staticmethod
-    def print_any_language(lessons):
-        if lessons:
-            with say.part("Any language", "🌍"):
-                Commands.print_lessons(lessons)
-
-    @staticmethod
-    def print_topics(topics):
-        if topics:
-            with say.part("Topics learned", "🔬"):
-                for slug, entry in topics.items():
-                    say.item(
-                        f"{entry.get('name', slug)}: {first_line(str(entry.get('summary', '')), 80)} "
-                        f"(read {Commands.short_date(entry.get('learned'))}, {len(entry.get('facts', []))} facts)"
-                    )
-
-    @staticmethod
-    def print_taught(taught):
-        if taught:
-            with say.part("Your commands", "⌨️"):
-                for name, entry in taught.items():
-                    say.item(f"{name}: {TaughtCommands.describe(entry)}")
-
-    @staticmethod
-    def print_retired(count):
-        if count:
-            say.title(
-                f"{count} item{'s' if count > 1 else ''} did not hold and {'were' if count > 1 else 'was'} "
-                f"retired: never shown to the model again",
-                "♻️",
-            )
-
-    @staticmethod
-    def print_memory_tips():
-        with say.part("What next", "💡"):
-            for what, command in (
-                ("Ask about it", "tinker ask what is your toolchain for python"),
-                ("Correct it", "tinker teach WHAT"),
-                ("Explore it", "tinker memory --graph"),
-                ("Forget a part", "tinker clear PART"),
-            ):
-                say.text(f"{what:14} {command}")
 
     @staticmethod
     def list_runs():

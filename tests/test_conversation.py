@@ -1920,6 +1920,16 @@ def test_memory_graph_is_sent_as_a_file(desk, monkeypatch):
     )
 
 
+@pytest.mark.spec("GRF-6", "CMD-1")
+def test_memory_with_words_is_browsed_in_a_chat(desk, monkeypatch):
+    desk, channel, _ = desk
+    monkeypatch.setattr(desk, "tinker", lambda words: desk.ran.append(words) or "[2d35d6] ✅ lesson    Seed")
+    assert command_of("memory python lessons 2") == "memory"
+    answer = desk.answer(Message("1", "memory python lessons 2"), channel)
+    assert desk.ran == [["memory", "python", "lessons", "2"]]
+    assert answer == "🧠 **memory python lessons 2**\n```\n[2d35d6] ✅ lesson    Seed\n```"
+
+
 @pytest.mark.spec("CNV-25")
 def test_the_terminal_opens_the_file_and_other_channels_send_where_it_is(monkeypatch, tmp_path):
     opened, printed = [], []

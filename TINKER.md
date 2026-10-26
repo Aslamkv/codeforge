@@ -294,10 +294,17 @@ tinker learn serve "python3 -m http.server"
 tinker learn serve none
 ```
 
-See what it has learned:
+See what it has learned, a part at a time: `memory` lists the parts (each language, any language, each
+topic, your commands) with what each holds, and every list comes 10 to a page. Each item has a short ID
+that stays the same while it is kept, and ✅ when a build proved it, 🌱 when not yet:
 
 ```sh
-tinker memory
+tinker memory                      # the parts, and how many items are retired
+tinker memory python               # one part: its details, then its items
+tinker memory python lessons 2     # its lessons, the second page
+tinker memory flask facts          # a topic's facts
+tinker memory lessons              # every lesson, across memory
+tinker memory any retired          # what did not hold, and was retired
 ```
 
 See it as a graph you can explore in the browser: each lesson, fact and fix linked to its language, and to
