@@ -1,35 +1,25 @@
 import json
 
 import pytest
-from conftest import TOOLCHAIN, criterion, file_block
+from conftest import CALC, CALC_FILES, CALC_TESTS, TOOLCHAIN, criterion, file_block
 
 from tinkerkit.finishing import FinalReview, LessonWriter, ReadmeWriter, Tidy
 from tinkerkit.prompts import Reply
 from tinkerkit.settings import Home
 from tinkerkit.workspace import TaughtCommands
 
-FIXED = "def add(a, b):\n    return a + b\n\n\ndef sub(a, b):\n    return a - b\n"
-TESTS = (
-    "import calc\n\n\ndef test_add():\n    assert calc.add(2, 3) == 5\n\n\n"
-    "def test_sub():\n    assert calc.sub(5, 3) == 2\n"
-)
-FILES = {
-    "calc.py": {"kind": "code", "role": "the calculator", "contract": [], "uses": []},
-    "test_calc.py": {"kind": "test", "role": "tests", "contract": [], "uses": ["calc.py"]},
-}
-
 
 @pytest.fixture
 def built(make_project, make_session, project_dir):
-    (project_dir / "calc.py").write_text(FIXED)
-    (project_dir / "test_calc.py").write_text(TESTS)
+    (project_dir / "calc.py").write_text(CALC)
+    (project_dir / "test_calc.py").write_text(CALC_TESTS)
     steps = [
         criterion("C1", "test_calc.py::test_add", "calc.add(2, 3) is 5", status="green"),
         criterion("C2", "test_calc.py::test_sub", "calc.sub(5, 3) is 2", status="green"),
     ]
     project = make_project(
         steps,
-        files=json.loads(json.dumps(FILES)),
+        files=json.loads(json.dumps(CALC_FILES)),
         cycles=[{"id": "base", "request": "a calculator", "phase": "docs"}],
     )
     return make_session(project), project
@@ -200,7 +190,7 @@ def test_final_review_finds_what_is_wrong(built, project_dir):
     project.criteria[1]["status"] = "green"
     project.criteria[1]["test"] = "test_calc.py::test_mul"
     assert FinalReview(session).problem()[0] == "spec points without a passing test: C2"
-    (project_dir / "calc.py").write_text(FIXED.replace("a - b", "a * b"))
+    (project_dir / "calc.py").write_text(CALC.replace("a - b", "a * b"))
     problem, output = FinalReview(session).problem()
     assert problem.startswith("`") and "fails when the whole suite runs" in problem and output
 
@@ -278,7 +268,7 @@ def test_readme_examples_that_stay_wrong_are_kept(built, fake_ollama, project_di
     cycle = project.cycles[0]
     ReadmeWriter(session).check(cycle, "README.md")
     assert cycle["readme_failures"] == ["`cat used.txt && echo 1`: ready"]
-    as_before_the_breaking_fix = FIXED
+    as_before_the_breaking_fix = CALC
     assert (project_dir / "calc.py").read_text() == as_before_the_breaking_fix
     assert "broke a passing test" in fake_ollama.calls[1]["messages"][1]["content"]
 
@@ -286,13 +276,13 @@ def test_readme_examples_that_stay_wrong_are_kept(built, fake_ollama, project_di
 @pytest.mark.spec("FIN-2")
 def test_tidy_fixes_what_the_linter_reports(built, fake_ollama, project_dir):
     session, project = built
-    (project_dir / "calc.py").write_text(FIXED + "# TODO tidy me\n")
+    (project_dir / "calc.py").write_text(CALC + "# TODO tidy me\n")
     project.spec["toolchain"]["lint"] = "! grep -Hn TODO calc.py test_calc.py"
     fake_ollama.reply(
         "CAUSE: a leftover note\n<<<LINES calc.py 7-7>>>\n# done\n<<<END>>>", when="Tidy calc.py"
     )
     Tidy(session).run(project.cycles[0])
-    assert (project_dir / "calc.py").read_text() == FIXED + "# done\n"
+    assert (project_dir / "calc.py").read_text() == CALC + "# done\n"
     numbered = fake_ollama.calls[0]["messages"][1]["content"]
     assert "   7| # TODO tidy me" in numbered and fake_ollama.calls[0]["think"] is False
 
@@ -300,16 +290,16 @@ def test_tidy_fixes_what_the_linter_reports(built, fake_ollama, project_dir):
 @pytest.mark.spec("FIN-2")
 def test_tidy_reverts_a_change_that_breaks_a_test_or_finds_more(built, fake_ollama, project_dir):
     session, project = built
-    (project_dir / "calc.py").write_text(FIXED + "# TODO tidy me\n")
+    (project_dir / "calc.py").write_text(CALC + "# TODO tidy me\n")
     project.spec["toolchain"]["lint"] = "! grep -Hn TODO calc.py"
     fake_ollama.reply("<<<LINES calc.py 6-7>>>\n    return a * b\n<<<END>>>", when="Tidy calc.py")
     Tidy(session).run(project.cycles[0])
-    assert (project_dir / "calc.py").read_text() == FIXED + "# TODO tidy me\n"
+    assert (project_dir / "calc.py").read_text() == CALC + "# TODO tidy me\n"
     fake_ollama.reply(
         "<<<LINES calc.py 1-1>>>\n# TODO one\n# TODO two\ndef add(a, b):\n<<<END>>>", when="Tidy calc.py"
     )
     Tidy(session).run(project.cycles[0])
-    assert (project_dir / "calc.py").read_text() == FIXED + "# TODO tidy me\n"
+    assert (project_dir / "calc.py").read_text() == CALC + "# TODO tidy me\n"
 
 
 @pytest.mark.spec("FIN-10")

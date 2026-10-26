@@ -26,6 +26,15 @@ MEASURED = {
     "think": "high",
     "chars_per_token": 3.0,
 }
+CALC = "def add(a, b):\n    return a + b\n\n\ndef sub(a, b):\n    return a - b\n"
+CALC_TESTS = (
+    "import calc\n\n\ndef test_add():\n    assert calc.add(2, 3) == 5\n\n\n"
+    "def test_sub():\n    assert calc.sub(5, 3) == 2\n"
+)
+CALC_FILES = {
+    "calc.py": {"kind": "code", "role": "the calculator", "contract": [], "uses": []},
+    "test_calc.py": {"kind": "test", "role": "tests", "contract": [], "uses": ["calc.py"]},
+}
 
 
 @pytest.fixture(autouse=True)

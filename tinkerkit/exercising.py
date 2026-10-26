@@ -313,7 +313,7 @@ def stopped(exercise):
 
 def measured(folder):
     project = Project.load(folder)
-    events = [entry for _, entry in project.store.entries("events")]
+    events = events_of(project)
     calls = [entry for entry in events if "reply_tokens" in entry]
     passing, parked, points = project.counts()
     return {
@@ -331,6 +331,10 @@ def measured(folder):
         "readme_failures": len(readme_failures(project)),
         "slowest": slowest(calls),
     }
+
+
+def events_of(project):
+    return [entry for _, entry in project.store.entries("events")]
 
 
 def readme_failures(project):
@@ -352,7 +356,7 @@ def slowest(calls, count=3):
 
 def problems(folder):
     project = Project.load(folder)
-    events = [entry for _, entry in project.store.entries("events")]
+    events = events_of(project)
     found = [f"nothing made this pass: {step['behaviour']}" for step in project.parked()]
     found += [f"README example failed: {failure}" for failure in readme_failures(project)]
     found += [

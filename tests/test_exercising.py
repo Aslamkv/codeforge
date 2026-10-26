@@ -4,6 +4,7 @@ import time
 from pathlib import Path
 
 import pytest
+from conftest import criterion
 from test_conversation import Recorder
 
 from tinkerkit import conversation, exercising
@@ -236,8 +237,6 @@ def test_an_exercise_goes_on_from_the_step_it_reached(make_model, fake_ollama, h
 
 @pytest.mark.spec("EXR-5")
 def test_measured_and_problems_come_from_the_projects_own_database(make_project, project_dir):
-    from conftest import criterion
-
     project = make_project(
         [criterion("C1", "t::a", status="green"), criterion("C2", "t::b", "sorts", status="blocked")],
         cycles=[{"id": "base", "request": "r", "phase": "done", "readme_failures": ["`x`: boom"]}],
@@ -294,16 +293,12 @@ def test_the_exercise_has_no_rule_of_its_own_for_giving_way(make_model, home_sto
     monkeypatch.setattr(os, "killpg", lambda pid, signum: signals.append(signum))
     the_person_is_answered = {"a chat": os.getpid()}
     home_store.put("activity", "answering", the_person_is_answered)
-    code = Exercise(
-        make_model(),
-        exercise_tracker("Exercising rust"),
-        start_build=lambda arguments: FakeBuild(polls=3, code=0),
-    ).built(lambda: ["task", "t"])
+    code = exercise_of(make_model, lambda arguments: FakeBuild(polls=3, code=0)).built(lambda: ["task", "t"])
     assert code == 0 and signals == []
 
 
 @pytest.mark.spec("EXR-6")
-def test_the_exercise_shows_what_its_build_does(make_model, home_store, monkeypatch, tmp_path):
+def test_the_exercise_shows_what_its_build_does(make_model, home_store, no_sleep, tmp_path):
     what_the_build_does = {
         "doing": "💻 Writing the code",
         "working": "Writing a.py",
@@ -316,9 +311,8 @@ def test_the_exercise_shows_what_its_build_does(make_model, home_store, monkeypa
         Jobs.update(1, build=what_the_build_does)
         return FakeBuild(polls=1)
 
-    exercise = Exercise(make_model(), exercise_tracker("Exercising rust"), start_build=start_build)
+    exercise = exercise_of(make_model, start_build)
     Steps(PRACTICE_STEPS, exercise.tracker).enter("build")
-    monkeypatch.setattr(time, "sleep", lambda seconds: None)
     exercise.practise_step("build", {"language": "rust"}, {"folder": str(tmp_path / "calc"), "task": "t"})
     state = exercise.tracker.state
     assert state["doing"] == "🔨 Building the practice project · 💻 Writing the code"
@@ -385,15 +379,7 @@ def test_an_exercise_that_ended_unstopped_goes_on_as_the_conversation_starts(
     started = []
     monkeypatch.setattr(desk, "start_exercise", lambda words, title=None: started.append((words, title)))
     desk.adopt_exercise()
-    its_job_killed_too = {
-        "number": 4,
-        "command": "exercise",
-        "title": "exercise rust",
-        "state": "running",
-        "pid": 999999999,
-        "arguments": ["exercise", "rust"],
-        "updated": "2026-10-23 09:00",
-    }
+    its_job_killed_too = exercise_job("running", number=4, pid=999999999, updated="2026-10-23 09:00")
     home_store.put("jobs", "4", its_job_killed_too)
     desk.adopt_exercise()
     assert started == [(["resume", "#4"], "exercise rust")]
@@ -502,20 +488,21 @@ def test_every_exercise_keeps_one_message_started_stopped_or_resumed(home_store,
         OTHER_LIVE_PID, "Exercising Rust", lambda: first_ended.append(True) or time.sleep(0.2)
     )
     assert desk.stop_exercise() is None and told == [(OTHER_LIVE_PID, conversation.JOB_STOP_SIGNAL)]
-    for _ in range(100):
-        if desk.exercise_reporter is None:
-            break
-        time.sleep(0.05)
+    wait_for_the_reporter_to_end(desk)
     the_next_exercise = "resume #4"
     desk.follow_exercise(OTHER_LIVE_PID, the_next_exercise, lambda: None)
-    for _ in range(100):
-        if desk.exercise_reporter is None:
-            break
-        time.sleep(0.05)
+    wait_for_the_reporter_to_end(desk)
     sent = {entry[2] for entry in channel.log if entry[0] == "send" and "🔨 **" in entry[3]}
     deleted = {entry[2] for entry in channel.log if entry[0] == "delete"}
     assert first_ended and len(sent - deleted) == 1
     assert list(conversation.exercise_board().values()) == [[next(iter(sent - deleted))]]
+
+
+def wait_for_the_reporter_to_end(desk):
+    for _ in range(100):
+        if desk.exercise_reporter is None:
+            return
+        time.sleep(0.05)
 
 
 @pytest.mark.spec("EXR-7")

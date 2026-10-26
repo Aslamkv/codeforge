@@ -183,11 +183,7 @@ class TestWriter(Phase, NotAPytestClass):
         for step in todo:
             text = corrected.get(TestRef(step["test"]).name)
             if text and text != step["behaviour"]:
-                say.info(
-                    f"{step['id']} now reads: {first_line(text, 120)} (was: {first_line(step['behaviour'], 80)})",
-                    "✏️",
-                )
-                step["behaviour"], step["title"] = text, text[:80]
+                reword(step, text)
 
     def follow_new_files(self, path, todo, change):
         for step in todo:
@@ -207,8 +203,7 @@ class TestWriter(Phase, NotAPytestClass):
         )
 
     def report_and_note(self, path, todo, change):
-        for note in change.notes:
-            say.skip(f"Skipped {note}")
+        say_skipped(change)
         missing = [
             TestRef(step["test"]).name for step in todo if not TestRef(step["test"]).present(self.workspace)
         ]
@@ -346,8 +341,7 @@ class CodeWriter(Phase):
         change = self.workspace.apply(
             self.addressed_to(reply.as_file(path), path, exists), self.may_write(path), view.windows
         )
-        for text in change.notes:
-            say.skip(f"Skipped {text}")
+        say_skipped(change)
         return change
 
     def write_marker(self, path):
@@ -760,7 +754,7 @@ class Verifier(Phase):
 
     def climb(self, step, state, output, retry):
         before = {criterion["id"] for criterion in self.project.criteria if criterion["status"] == "green"}
-        climb, total = Climb(state, output), 0
+        progress, total = Climb(state, output), 0
         for approach, patience in self.ladder(step, output, retry):
             stall, conclusion_due = 0, False
             while (stall < patience or conclusion_due) and total < MAX_CALLS_PER_CRITERION_PASS:
@@ -772,7 +766,7 @@ class Verifier(Phase):
                 state, output = attempt.run()
                 if state == "passes":
                     return True
-                stall = 0 if climb.progressed(state, output) else stall + 1
+                stall = 0 if progress.progressed(state, output) else stall + 1
                 conclusion_due = bool(step.get("unfinished_thought"))
                 step["last_error"] = Output.key_line(output)
                 why = self.to_review(attempt, approach)
@@ -873,30 +867,13 @@ class FixAttempt(Worker):
         excerpt = self.ref.excerpt(self.workspace, self.project.test_names(self.ref.file))
         fixed = [
             Part("Criterion", self.step["behaviour"], True),
-            Part(
-                "Project files (all exist; only those shown below may change)",
-                ", ".join(path for path in self.project.files if self.workspace.exists(path)),
-                True,
-            ),
+            existing_files_part(self.project, self.workspace),
             Part("Failure output", Output.failure_text(self.output), True, keep="tail", place="last"),
             Part(f"Test {self.ref}", excerpt, True),
         ] + self.kept_tests()
         if self.approach == "review":
             fixed += self.plan_parts()
-        thought = self.step.pop("unfinished_thought", "")
-        fixed += (
-            [
-                Part(
-                    "Your analysis so far (it ran out of room before an answer: conclude it and answer now)",
-                    thought,
-                    True,
-                    keep="tail",
-                    place="last",
-                )
-            ]
-            if thought
-            else []
-        )
+        fixed += analysis_parts(self.step.pop("unfinished_thought", ""))
         candidates = self.candidates()
         tail = [
             Part("Contracts", self.project.contracts(candidates[:4])),
@@ -926,15 +903,12 @@ class FixAttempt(Worker):
         ]
 
     def candidates(self):
-        code = [path for path in self.session.files_on_disk("code", "template", "config") if path != ENV_FILE]
-        named = [path for path in self.mentioned(code) if path in code]
+        code = fixable_files(self.session)
+        named = [path for path in Output.mentioned_in(self.output, code) if path in code]
         wanted = [path for path in self.step.get("want", []) if self.workspace.exists(path)]
         own_test = [self.ref.file] if self.approach == "review" else []
         uses = [path for path in self.project.uses(self.ref.file) if path in code]
         return list(dict.fromkeys(wanted + own_test + named[:2] + uses + named + code))[:FILES_SHOWN_PER_FIX]
-
-    def mentioned(self, paths):
-        return Output.mentioned_in(self.output, paths)
 
     def ask(self, view):
         key, tried = f"overthought_{self.approach}", f"tried_{self.approach}"
@@ -1022,17 +996,10 @@ class FixAttempt(Worker):
 
     def passed(self, reply, cause):
         if self.approach == "review" and reply.criterion():
-            self.correct_criterion(reply.criterion())
+            reword(self.step, reply.criterion())
+            self.session.save()
         if cause != "?":
             self.session.note(self.approach, f"{self.step['behaviour'][:120]} | solved: {cause}")
-
-    def correct_criterion(self, text):
-        say.info(
-            f"{self.step['id']} now reads: {first_line(text, 120)} (was: {first_line(self.step['behaviour'], 80)})",
-            "✏️",
-        )
-        self.step["behaviour"], self.step["title"] = text, text[:80]
-        self.session.save()
 
     def broke_others(self, change, cause):
         if not self.before:
@@ -1103,25 +1070,9 @@ class BuildFix(Worker):
     def prompt(self):
         fixed = [
             Part("What failed", Output.failure_text(self.output), True, keep="tail"),
-            Part(
-                "Project files (all exist; only those shown below may change)",
-                ", ".join(path for path in self.project.files if self.workspace.exists(path)),
-                True,
-            ),
+            existing_files_part(self.project, self.workspace),
         ]
-        fixed += (
-            [
-                Part(
-                    "Your analysis so far (it ran out of room before an answer: conclude it and answer now)",
-                    self.concluding,
-                    True,
-                    keep="tail",
-                    place="last",
-                )
-            ]
-            if self.concluding
-            else []
-        )
+        fixed += analysis_parts(self.concluding)
         tail = [
             Part("Already tried (it still failed)", Part.bullets(self.tried)),
             Part("Language", self.project.language),
@@ -1130,9 +1081,7 @@ class BuildFix(Worker):
         return FileView(self.workspace, fixed, self.candidates(), tail, output=self.output, hints=self.output)
 
     def candidates(self):
-        files = [
-            path for path in self.session.files_on_disk("code", "template", "config") if path != ENV_FILE
-        ]
+        files = fixable_files(self.session)
         configs = [path for path in files if self.project.files[path].get("kind") == "config"]
         return list(dict.fromkeys(Output.mentioned_in(self.output, files) + configs + files))[
             :FILES_SHOWN_PER_FIX
@@ -1147,8 +1096,7 @@ class BuildFix(Worker):
         return check
 
     def said(self, change, cause):
-        for note in change.notes:
-            say.skip(f"Skipped {note}")
+        say_skipped(change)
         did = f"changed {', '.join(change.files)}" if change else "no usable change"
         say.info(f"Make it build: {did}" + (f"  ({cause})" if cause != "?" else ""), "🔧")
         if change and cause != "?":
@@ -1202,8 +1150,7 @@ class BugReproducer(Phase):
         change = self.workspace.apply(
             reply, lambda path, exists: None if path == ref.file else "only the bug's test file"
         )
-        for line in change.notes:
-            say.skip(f"Skipped {line}")
+        say_skipped(change)
         expected = re.search(r"^\s*EXPECTED:\s*(.+)$", reply.text, re.M)
         if expected:
             step["behaviour"] = first_line(expected.group(1), 300)
@@ -1503,8 +1450,7 @@ class ToolchainRepair(Worker):
             lambda path, exists: None if path in configs or not exists else "only config files change now",
         )
         self.project.register(change.created, "config", "added by the toolchain fix")
-        for note in change.notes:
-            say.skip(f"Skipped {note}")
+        say_skipped(change)
         return change
 
     def learned(self, failure, reply, commands, change):
@@ -1519,3 +1465,41 @@ class ToolchainRepair(Worker):
             "cause": reply.cause() or "?",
             "replay": {"toolchain": commands, "files": files} if replayable else None,
         }
+
+
+def say_skipped(change):
+    for note in change.notes:
+        say.skip(f"Skipped {note}")
+
+
+def reword(step, text):
+    say.info(
+        f"{step['id']} now reads: {first_line(text, 120)} (was: {first_line(step['behaviour'], 80)})", "✏️"
+    )
+    step["behaviour"], step["title"] = text, text[:80]
+
+
+def existing_files_part(project, workspace):
+    return Part(
+        "Project files (all exist; only those shown below may change)",
+        ", ".join(path for path in project.files if workspace.exists(path)),
+        True,
+    )
+
+
+def analysis_parts(thought):
+    if not thought:
+        return []
+    return [
+        Part(
+            "Your analysis so far (it ran out of room before an answer: conclude it and answer now)",
+            thought,
+            True,
+            keep="tail",
+            place="last",
+        )
+    ]
+
+
+def fixable_files(session):
+    return [path for path in session.files_on_disk("code", "template", "config") if path != ENV_FILE]

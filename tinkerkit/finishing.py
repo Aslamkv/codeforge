@@ -172,7 +172,7 @@ class ReadmeWriter(Phase):
         return answer.value or self.criteria_readme()
 
     def readme_parts(self):
-        code = [path for path in self.session.files_on_disk("code", "template") if path != ENV_FILE]
+        code = self.code_files()
         entry = self.project.entry_files(code)
         return [
             Part("Request", self.project.run["task"], True, keep="head"),
@@ -197,6 +197,9 @@ class ReadmeWriter(Phase):
                 for path in dict.fromkeys(entry + code)
             ],
         ]
+
+    def code_files(self):
+        return [path for path in self.session.files_on_disk("code", "template") if path != ENV_FILE]
 
     def criteria_readme(self):
         return {
@@ -389,7 +392,7 @@ class ReadmeWriter(Phase):
         parts = [re.escape(part) for part in cls.VARYING_VALUE_RE.split(compact)]
         return re.compile(parts[0] + "".join(r"(\S+?)" + part for part in parts[1:]))
 
-    def fix(self, readme, failures, note=""):
+    def fix(self, readme, failures, note):
         view = self.fix_prompt(readme, failures, note)
         passing = Verifier(self.session).passing()
         try:
@@ -420,7 +423,7 @@ class ReadmeWriter(Phase):
             + f"\nIt printed:\n{Output.failure_text(output, 1200)}"
             for command, expected, output in failures
         )
-        code = [path for path in self.session.files_on_disk("code", "template") if path != ENV_FILE]
+        code = self.code_files()
         fixed = [
             Part("Request", self.project.run["task"], True, keep="head"),
             Part("Examples that do not do what the README says", shown, True, keep="head"),
