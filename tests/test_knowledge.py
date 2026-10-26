@@ -16,6 +16,7 @@ from tinkerkit.knowledge import (
     record,
     relevant_chunks,
     retire,
+    search_entry,
 )
 from tinkerkit.model import Models, Ollama, OllamaError
 from tinkerkit.prompts import Prompts
@@ -459,10 +460,12 @@ def test_web_pages_reads_each_address_once_up_to_the_cap(make_model):
         "black": ["https://shared", "https://empty", "https://b1"],
     }
     internet = FakeInternet(dict(pages, **{"https://empty": ""}), results)
-    read = Learner(make_model(), internet, None).web_pages(["ruff", "black"])
+    black = {"query": "black", "engines": ["wikipedia"], "count": 2}
+    read = Learner(make_model(), internet, None).web_pages([{"query": "ruff"}, black])
     assert len(read) <= TEACH_PAGES
     assert [page["url"] for page in read] == ["https://shared", "https://r1", "https://r2"]
     assert internet.batches == [["ruff", "black"]]
+    assert {key: internet.entries[0][1][key] for key in black} == black
     assert internet.fetches == [["https://shared", "https://r1", "https://empty", "https://r2"]]
     assert read[0] == {
         "title": "https://shared",
@@ -476,7 +479,7 @@ def test_a_page_the_web_could_not_read_stands_on_its_search_snippet(make_model):
     internet = FakeInternet(
         {}, {"ruff": ["https://gone", "https://bare"]}, {"https://gone": "Ruff replaces black"}
     )
-    read = Learner(make_model(), internet, None).web_pages(["ruff"])
+    read = Learner(make_model(), internet, None).web_pages([{"query": "ruff"}])
     assert read == [{"title": "https://gone", "url": "https://gone", "content": "Ruff replaces black"}]
 
 
@@ -507,10 +510,35 @@ def test_web_pages_keep_the_first_chunk_and_the_best_about_the_searches(make_mod
         + ["black and ruff formatter " * 40]
     )
     internet = FakeInternet({"https://long": "\n\n".join(paragraphs)}, {"ruff formatter": ["https://long"]})
-    [page] = Learner(make_model(), internet, None).web_pages(["ruff formatter"])
+    [page] = Learner(make_model(), internet, None).web_pages([{"query": "ruff formatter"}])
     assert len(page["content"]) <= TEACH_PAGE_CHARS
     assert page["content"].startswith("intro to the page") and "black and ruff formatter" in page["content"]
     assert "filler" not in page["content"]
+
+
+@pytest.mark.spec("KNW-24", "WEB-3")
+def test_more_searches_than_one_ask_keeps_each_searchs_results_its_own(make_model):
+    queries = [f"search {number}" for number in range(MAX_PLANNED_SEARCHES + 2)]
+    internet = FakeInternet({}, {query: [f"https://x.dev/{number}"] for number, query in enumerate(queries)})
+    asked = [{"query": query, "pages": 1, "section": "", "focus": ""} for query in queries]
+    asked.insert(1, {"query": "", "pages": 1, "section": "", "focus": ""})
+    found = Learner(make_model(), internet, None).results(asked)
+    assert [len(batch) for batch in internet.batches] == [MAX_PLANNED_SEARCHES, 2]
+    assert found[1] == [] and [results[0]["url"] for results in found[:1] + found[2:]] == [
+        f"https://x.dev/{number}" for number in range(len(queries))
+    ]
+
+
+@pytest.mark.spec("KNW-25")
+def test_a_search_a_model_writes_is_a_query_or_an_entry_with_engines_and_count():
+    assert search_entry("  food   bank ") == {"query": "food bank"}
+    assert search_entry({"query": " x ", "engines": ["mwmbl"], "count": 3, "why": "y"}) == {
+        "query": "x",
+        "engines": ["mwmbl"],
+        "count": 3,
+    }
+    assert search_entry("long " * 50, 12) == {"query": "long long lo"}
+    assert [search_entry(raw) for raw in ("  ", {"engines": ["mwmbl"]}, {"query": 3}, 7, None)] == [None] * 5
 
 
 @pytest.mark.spec("KNW-15")
@@ -535,7 +563,11 @@ def test_read_frame():
             "name": "Food banks",
             "summary": "s",
             "questions": [
-                {"question": "How is food recorded?", "queries": ["a", "b", "c"]},
+                {
+                    "question": "How is food recorded?",
+                    "queries": [" a  plain ", {"query": "b", "engines": ["wikipedia"], "count": 3}, "c"],
+                },
+                {"question": "Only broken searches?", "queries": [{"engines": ["mwmbl"]}, 7, " "]},
                 {"question": "", "queries": ["x"]},
                 {"question": "No searches?", "queries": []},
                 "junk",
@@ -543,7 +575,10 @@ def test_read_frame():
             + [{"question": f"Q{number}", "queries": ["q"]} for number in range(9)],
         }
     )
-    assert frame["questions"][0] == {"question": "How is food recorded?", "queries": ["a", "b"]}
+    assert frame["questions"][0] == {
+        "question": "How is food recorded?",
+        "queries": [{"query": "a plain"}, {"query": "b", "engines": ["wikipedia"], "count": 3}],
+    }
     assert len(frame["questions"]) == 4
     with pytest.raises(ValueError):
         Researcher.read_frame({"name": "X", "questions": []})
@@ -570,12 +605,12 @@ def test_read_analysis():
             ],
             "gaps": [
                 {"question": 1, "missing": "m", "search": "s1"},
-                {"question": 1, "search": "s2"},
+                {"question": 1, "search": {"query": "s2", "engines": ["wikibooks"]}},
                 {"question": 1, "search": "s3"},
                 {"question": 2, "search": ""},
             ],
             "checks": [
-                {"fact": 1, "search": "c"},
+                {"fact": 1, "search": {"query": " c ", "count": 2}},
                 {"fact": 99, "search": "c"},
                 {"fact": 2, "search": "d"},
                 {"fact": 3, "search": "e"},
@@ -591,9 +626,14 @@ def test_read_analysis():
         {"facts": [1, 2], "doubtful": [2], "note": "n"},
         {"facts": [1, 3], "doubtful": [1, 3], "note": ""},
     ]
-    assert [gap["search"] for gap in analysis["gaps"]] == ["s1", "s2"] and [
-        check["fact"] for check in analysis["checks"]
-    ] == [1, 2]
+    assert [gap["search"] for gap in analysis["gaps"]] == [
+        {"query": "s1"},
+        {"query": "s2", "engines": ["wikibooks"]},
+    ]
+    assert analysis["checks"] == [
+        {"fact": 1, "search": {"query": "c", "count": 2}},
+        {"fact": 2, "search": {"query": "d"}},
+    ]
     with pytest.raises(ValueError, match="finding"):
         Researcher.read_analysis({"findings": []}, 3, 2)
 
@@ -709,10 +749,20 @@ def test_supported_and_entry():
 def test_next_searches_and_fact_listing():
     frame = {"questions": [{"question": "q1"}, {"question": "q2"}]}
     facts = [fact("a", "u", "2"), fact("b", "u", "1")]
-    analysis = {"gaps": [{"question": 2, "search": "find gap"}], "checks": [{"fact": 1, "search": "check a"}]}
+    analysis = {
+        "gaps": [{"question": 2, "search": {"query": "find gap", "engines": ["wikipedia"], "count": 3}}],
+        "checks": [{"fact": 1, "search": {"query": "check a"}}],
+    }
     searches = Researcher.next_searches(frame, facts, analysis)
     assert searches == [
-        {"query": "find gap", "section": "2", "pages": 1, "focus": "q2"},
+        {
+            "query": "find gap",
+            "engines": ["wikipedia"],
+            "count": 3,
+            "section": "2",
+            "pages": 1,
+            "focus": "q2",
+        },
         {
             "query": "check a",
             "section": "2",
@@ -731,7 +781,12 @@ def test_next_searches_and_fact_listing():
 FRAME = {
     "name": "Food bank inventory",
     "summary": "How food banks track donations.",
-    "questions": [{"question": "How is donated food recorded?", "queries": ["food bank intake records"]}],
+    "questions": [
+        {
+            "question": "How is donated food recorded?",
+            "queries": [{"query": "food bank intake records", "engines": ["mwmbl"], "count": 5}],
+        }
+    ],
 }
 
 

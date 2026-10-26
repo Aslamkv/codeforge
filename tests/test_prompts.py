@@ -250,6 +250,23 @@ def test_the_prompts_example_json_parses_and_its_toolchain_works():
     )
 
 
+@pytest.mark.spec("KNW-25")
+def test_every_prompt_that_writes_searches_writes_them_with_engines_and_count():
+    searches_in = {
+        Prompts.RESEARCH_PLAN_SYSTEM: lambda reply: reply["questions"][0]["queries"],
+        Prompts.RESEARCH_ANALYSIS_SYSTEM: lambda reply: [
+            reply["gaps"][0]["search"],
+            reply["checks"][0]["search"],
+        ],
+        Prompts.SLOT_PLAN_SYSTEM: lambda reply: list(reply["followups"].values()),
+        Prompts.TEACH_SYSTEM: lambda reply: reply["searches"],
+    }
+    for prompt, searches in searches_in.items():
+        example = json.loads(prompt[prompt.index("{", prompt.index("ONLY JSON")) :], strict=False)
+        assert Prompts.SEARCH_ENGINES in prompt
+        assert all(set(search) == {"query", "engines", "count"} for search in searches(example))
+
+
 @pytest.mark.spec("PRM-13")
 def test_the_templates_format():
     assert "60 words" in Prompts.BRIEF_SYSTEM.format(words=60)

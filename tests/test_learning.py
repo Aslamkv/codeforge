@@ -132,6 +132,7 @@ PAGES = {
     APP: DRAWN_BY_ITS_SCRIPTS,
 }
 FIRST_SEARCH = "Widgetlib official documentation"
+PITFALLS_SEARCH = {"query": " widgetlib  common mistakes", "engines": ["wikibooks"], "count": 4}
 VERSION_DOCS_SEARCH = "Widgetlib 2.1.0 documentation"
 PLAN = {
     "kind": "tool",
@@ -141,7 +142,7 @@ PLAN = {
     "language": "Python",
     "commands": ["echo widgetlib 2.1.0", "pip install widgetlib"],
     "hints": {"core-usage": "the Widget class"},
-    "followups": {"pitfalls-and-limits": "widgetlib common mistakes", "unknown-slot": "x"},
+    "followups": {"pitfalls-and-limits": PITFALLS_SEARCH, "unknown-slot": "x"},
 }
 DOC_ROOT = "https://widgetlib.dev/docs/2.1/"
 ELSEWHERE = "https://elsewhere.org/x"
@@ -233,11 +234,11 @@ def test_profiles_are_data_and_a_slot_takes_the_plans_hint_and_follow_up():
         plan, "2.1"
     )
     its_own_search = "Widgetlib 2.1 changelog deprecations"
-    assert this_version.search(plan, "2.1") == its_own_search
+    assert this_version.search(plan, "2.1") == {"query": its_own_search}
     pitfalls = next(slot for slot in web_slots("tool") if slot.id == "pitfalls-and-limits")
-    assert pitfalls.search(plan, "2.1") == "widgetlib common mistakes"
+    assert pitfalls.search(plan, "2.1") == dict(PITFALLS_SEARCH, query="widgetlib common mistakes")
     assert (
-        core.search(plan, "2.1") == "Widgetlib getting started tutorial API"
+        core.search(plan, "2.1") == {"query": "Widgetlib getting started tutorial API"}
         and core.keywords() == "getting started tutorial API"
     )
 
@@ -345,7 +346,10 @@ def test_read_plan_checks_the_plan():
         "Python",
     )
     assert plan["commands"] == ["echo widgetlib 2.1.0"] and plan["dropped"] == ["pip install widgetlib"]
-    assert plan["followups"] == {"pitfalls-and-limits": "widgetlib common mistakes"} and plan["tools"] == []
+    assert plan["followups"] == {
+        "pitfalls-and-limits": dict(PITFALLS_SEARCH, query="widgetlib common mistakes")
+    }
+    assert plan["tools"] == []
     assert "docs" not in plan
     language = read_plan(
         {
@@ -677,6 +681,9 @@ def test_a_slot_left_without_facts_gets_the_plans_follow_up_search(tinker_home):
     )
     entry = learner(web).learn("Widgetlib")
     assert "widgetlib common mistakes" in follow_ups(web)
+    assert dict(PITFALLS_SEARCH, query="widgetlib common mistakes") in [
+        entry for entries in web.entries for entry in entries
+    ]
     assert any(
         fact["source"] == PITFALLS and fact["slot"] == "pitfalls-and-limits" for fact in entry["facts"]
     )

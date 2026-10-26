@@ -163,7 +163,7 @@ def test_read_plan_keeps_what_is_usable_within_limits():
             "claims": [f"claim {number}" for number in range(9)]
             + [{"text": "I prefer X", "preference": True}, ""],
             "commands": ["ruff --version"],
-            "searches": ["a", "b", "c", "d"],
+            "searches": [" a  plain ", {"query": "b", "engines": ["wikibooks"], "count": 2}, "", "c", "d"],
             "language": "Python",
             "changes": [
                 {
@@ -178,7 +178,11 @@ def test_read_plan_keeps_what_is_usable_within_limits():
         },
         count=3,
     )
-    assert len(plan["claims"]) == TEACH_CLAIMS and len(plan["searches"]) == 3
+    assert len(plan["claims"]) == TEACH_CLAIMS and plan["searches"] == [
+        {"query": "a plain"},
+        {"query": "b", "engines": ["wikibooks"], "count": 2},
+        {"query": "c"},
+    ]
     assert plan["claims"][0] == {"text": "claim 0", "preference": False}
     assert plan["changes"] == [
         {

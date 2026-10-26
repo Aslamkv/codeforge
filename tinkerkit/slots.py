@@ -20,7 +20,7 @@ class Slot:
         return fill(self.question, plan, version) + (f" (look for: {hint})" if hint else "")
 
     def search(self, plan, version):
-        return plan.get("followups", {}).get(self.id) or fill(self.query, plan, version)
+        return plan.get("followups", {}).get(self.id) or {"query": fill(self.query, plan, version)}
 
     def keywords(self):
         return " ".join(self.query.format(topic="", version="", language="").split())

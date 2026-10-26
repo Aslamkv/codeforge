@@ -5,7 +5,17 @@ lazy from collections import Counter
 
 from .messages import Message, Messages, say
 lazy from .jobs import today
-lazy from .knowledge import LEARN_STEPS, Learner, Library, Researcher, Retriever, SearchPlanner, language_key
+lazy from .knowledge import (
+    LEARN_STEPS,
+    Learner,
+    Library,
+    Researcher,
+    Retriever,
+    SearchPlanner,
+    language_key,
+    search_entry,
+    searched_in_batches,
+)
 lazy from .model import OllamaError
 lazy from .passages import Cleaner, Page
 lazy from .project import Tracked
@@ -16,7 +26,6 @@ lazy from .settings import (
     FACT_PHASES,
     FACTS_PER_SLOT,
     MAX_FACT_CHARS,
-    MAX_PLANNED_SEARCHES,
     MAX_VERSION_COMMANDS,
     RESULTS_PER_LEARN_SEARCH,
     TOOL_ROLES,
@@ -179,25 +188,12 @@ class SlotLearner(Tracked):
             self.stop("gate 1", "irrelevant", f"{len(results)} result(s), none above learn_cutoff")
         return picked
 
-    def search(self, query):
-        self.tried.append(f'search "{query}"')
-        return self.internet.search(query, RESULTS_PER_LEARN_SEARCH)
-
     def searched_needs(self, plans):
         plans = [[search for search in plan if search["query"]] for plan in plans]
         searches = [search for plan in plans for search in plan]
         self.tried += [f'search "{search["query"]}"' for search in searches]
-        results = iter(self.searched_in_batches(searches))
+        results = iter(searched_in_batches(self.internet, searches, RESULTS_PER_LEARN_SEARCH))
         return [[result for _ in plan for result in next(results, [])] for plan in plans]
-
-    def searched_in_batches(self, searches):
-        starts = range(0, len(searches), MAX_PLANNED_SEARCHES)
-        batches = [searches[start : start + MAX_PLANNED_SEARCHES] for start in starts]
-        return [
-            results
-            for batch in batches
-            for results in self.internet.search_all(batch, RESULTS_PER_LEARN_SEARCH)
-        ]
 
     def picked(self, topic, results, most=None):
         scores = Retriever(None).word_scores(
@@ -425,11 +421,13 @@ class SlotLearner(Tracked):
             if self.follow_ups >= int(Config.get("learn_searches")):
                 break
             self.follow_ups += 1
-            query = slot.search(plan, version)
+            search = slot.search(plan, version)
             self.step(
-                "follow-up", f'Nothing found on {label(slot.id)} yet: searching the web for "{query}"…', "🔁"
+                "follow-up",
+                f'Nothing found on {label(slot.id)} yet: searching the web for "{search["query"]}"…',
+                "🔁",
             )
-            pages = self.extra_pages(query, plan)
+            pages = self.extra_pages(search, plan)
             if pages:
                 pool += self.cleaner.pool(pages, known=pool)
                 passages = self.selected(selector, plan, version, pool, [slot])[slot.id]
@@ -437,13 +435,13 @@ class SlotLearner(Tracked):
                     found += self.slot_facts(slot, plan, version, passages) if passages else []
         return found
 
-    def extra_pages(self, query, plan):
-        results = self.search(query)
+    def extra_pages(self, search, plan):
+        [results] = self.searched_needs([[search]])
         if not results:
-            return self.extra_failed(query, LEARN_STOP_CAUSES["no-results"][0])
+            return self.extra_failed(search["query"], LEARN_STOP_CAUSES["no-results"][0])
         picked = self.picked(plan["name"], results)
         pages = self.fetched(picked)[0] if picked else []
-        return pages or self.extra_failed(query, "no result about the topic gave usable text")
+        return pages or self.extra_failed(search["query"], "no result about the topic gave usable text")
 
     def extra_failed(self, query, why):
         self.incomplete = True
@@ -606,7 +604,7 @@ def read_plan(data):
         "dropped": dropped + tool_dropped,
         "tools": tools,
         "hints": by_slot(data.get("hints"), ids),
-        "followups": by_slot(data.get("followups"), ids),
+        "followups": searches_by_slot(data.get("followups"), ids),
     }
 
 
@@ -627,6 +625,14 @@ def by_slot(given, ids):
         key: clean(text, 160)
         for key, text in (given.items() if isinstance(given, dict) else [])
         if key in ids and clean(text, 160)
+    }
+
+
+def searches_by_slot(given, ids):
+    return {
+        key: search_entry(search)
+        for key, search in (given.items() if isinstance(given, dict) else [])
+        if key in ids and search_entry(search)
     }
 
 

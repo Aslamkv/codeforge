@@ -715,12 +715,14 @@ operators, nothing installed or changed);
 "tools": for a language only, one per role it has, of {", ".join(TOOL_ROLES)}: the one the topic names, else
 the one most used today, each with the command that shows its version;
 "hints": for some slots of its kind, a few words on what to look for about this topic;
-"followups": for each slot of its kind its documentation may not answer, one web search that answers it.
+"followups": for each slot of its kind its documentation may not answer, one web search that answers it, naming the
+engines that suit it and how many results to take. {SEARCH_ENGINES}
 Reply with ONLY JSON (this example is for Go):
 {{"kind":"language","name":"Go","version":"1.25","summary":"A compiled, statically typed language with built-in
 concurrency.","language":"Go","commands":["go version"],
  "tools":[{{"role":"lint","name":"golangci-lint","command":"golangci-lint --version"}}],
- "hints":{{"toolchain":"go test, gofmt, go vet, go mod"}},"followups":{{"limitations":"Go garbage collector limits"}}}}"""
+ "hints":{{"toolchain":"go test, gofmt, go vet, go mod"}},
+ "followups":{{"limitations":{{"query":"Go garbage collector limits","engines":["mwmbl","wikibooks"],"count":5}}}}}}"""
 
     DIGEST_SYSTEM = f"""Answer one question about a topic for a code generator that knows only what it was trained on,
 from the numbered passages of web pages below. List the facts the passages state that answer it: each one
@@ -798,11 +800,13 @@ software for it. Split the topic into at most {RESEARCH_QUESTIONS} research ques
 what it is and its key terms; how it is done in practice (the steps, roles, records and rules); the
 numbers, limits and standards that matter; what is changing or disputed. Each question has
 {SEARCHES_PER_RESEARCH_QUESTION} web searches that would answer it from different, independent sources (name the year
-when it helps). Give the topic's name and one sentence on what it is.
+when it helps), each naming the engines that suit it and how many results to take. {SEARCH_ENGINES}
+Give the topic's name and one sentence on what it is.
 Reply with ONLY JSON (this example is for "food bank inventory"):
 {{"name":"Food bank inventory","summary":"How food banks track donated food from intake to distribution.",
  "questions":[{{"question":"How do food banks record donations at intake?",
-   "queries":["food bank donation intake weighing records","food bank receiving donated food procedure"]}}]}}"""
+   "queries":[{{"query":"food bank donation intake weighing records","engines":["mwmbl"],"count":5}},
+    {{"query":"food bank receiving donated food","engines":["wikipedia","wikibooks"],"count":3}}]}}]}}"""
 
     RESEARCH_ANALYSIS_SYSTEM = f"""You are a careful researcher. Below are research questions about a topic and numbered
 facts found on web pages: each with the question it was searched for and how many independent sites
@@ -820,11 +824,12 @@ state it. Work only from these facts, never from your own knowledge.
 - checks: the key facts the answers rest on that only one site states (above all figures, limits and
   rules), each with one web search that would find another, independent source for it; at most
   {RESEARCH_FACTS_CHECKED}, those the answers depend on most first.
+Each search names the engines that suit it and how many results to take. {SEARCH_ENGINES}
 Reply with ONLY JSON:
 {{"findings":[{{"question":1,"answer":"...","confidence":"high","facts":[1,4]}}],
  "contradictions":[{{"facts":[3,9,12],"doubtful":[9],"note":"..."}}],
- "gaps":[{{"question":2,"missing":"...","search":"..."}}],
- "checks":[{{"fact":7,"search":"..."}}]}}"""
+ "gaps":[{{"question":2,"missing":"...","search":{{"query":"...","engines":["mwmbl"],"count":5}}}}],
+ "checks":[{{"fact":7,"search":{{"query":"...","engines":["mwmbl","wikipedia"],"count":5}}}}]}}"""
 
     README_SYSTEM = """Write the heart of a README for a beginner who has never seen this project: from the request,
 its tested criteria and its code, say what it is and how to use it. Only what the code really does and
@@ -899,7 +904,7 @@ and never checked. Every other claim is a fact, checked first, however sure the 
 "commands": commands that show on this machine whether a fact holds (a tool's --version or --help), one command
 each, no shell operators, nothing installed or changed, at most {TEACH_CHECK_COMMANDS};
 "searches": web searches that find independent sources for the facts, at most {TEACH_CHECK_SEARCHES} ([] when every
-claim is a preference). A fact about what something you read says is checked against its own text (its passages are
+claim is a preference), each naming the engines that suit it and how many results to take. {SEARCH_ENGINES} A fact about what something you read says is checked against its own text (its passages are
 found for you): it needs no command and no search.
 "language": the language it is about, or "" when it holds for every language.
 "changes": each change, with "claims": the numbers of the claims it rests on, and one or more of:
@@ -913,7 +918,7 @@ several claims affect rests on all of them);
 "text": one plain sentence}}.
 Reply with ONLY JSON: {{"claims":[{{"text":"Tool A formats code as tool B does","preference":false}},
 {{"text":"I prefer no type checker in my projects","preference":true}}],"commands":["tool-a format --help"],
-"searches":["tool A replaces tool B formatter"],"language":"Python","changes":[{{"claims":[1],"retire":[2],
+"searches":[{{"query":"tool A replaces tool B formatter","engines":["mwmbl"],"count":5}}],"language":"Python","changes":[{{"claims":[1],"retire":[2],
 "toolchain":{{"format":"tool-a format ."}},"lesson":{{"phase":"toolchain","text":"Format with tool A alone; tool B
 is not needed beside it"}}}},{{"claims":[2],"toolchain":{{"lint":"tool-a check ."}},"lesson":{{"phase":"toolchain",
 "text":"Run no type checker: the tests check what the spec asks"}}}}]}}"""

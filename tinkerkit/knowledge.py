@@ -520,11 +520,12 @@ class Learner(Tracked):
 
     def web_pages(self, searches):
         asked = [
-            {"query": search, "pages": RESULTS_PER_RESEARCH_SEARCH, "section": "", "focus": search}
+            dict(search, pages=RESULTS_PER_RESEARCH_SEARCH, section="", focus=search["query"])
             for search in searches
         ]
         found = self.in_turn(asked, self.results(asked), TEACH_PAGES)
-        pages = [self.web_page(page, " ".join(searches)) for page in self.fetched(found)]
+        wanted = " ".join(search["query"] for search in searches)
+        pages = [self.web_page(page, wanted) for page in self.fetched(found)]
         return [page for page in pages if page["content"]]
 
     def web_page(self, page, wanted):
@@ -537,9 +538,7 @@ class Learner(Tracked):
         return {"title": page["title"], "url": page["url"], "content": "\n\n".join(chunks)[:TEACH_PAGE_CHARS]}
 
     def results(self, searches):
-        found = self.internet.search_all(
-            [search["query"] for search in searches], RESULTS_PER_RESEARCH_SEARCH
-        )
+        found = searched_in_batches(self.internet, searches, RESULTS_PER_RESEARCH_SEARCH)
         return [results[: search["pages"]] for search, results in zip(searches, found)]
 
     def fetched(self, found):
@@ -817,6 +816,35 @@ class SearchPlanner:
         return query
 
 
+def search_entry(raw, limit=160):
+    if isinstance(raw, str):
+        query, given = raw, {}
+    elif isinstance(raw, dict) and isinstance(raw.get("query"), str):
+        query, given = raw["query"], {key: raw[key] for key in ("engines", "count") if key in raw}
+    else:
+        return None
+    query = " ".join(query.split())[:limit]
+    return {"query": query, **given} if query else None
+
+
+def search_entries(given, limit=160):
+    entries = (search_entry(raw, limit) for raw in given) if isinstance(given, list) else ()
+    return [entry for entry in entries if entry]
+
+
+def searched_in_batches(internet, searches, count):
+    asked = [search for search in searches if search["query"]]
+    starts = range(0, len(asked), MAX_PLANNED_SEARCHES)
+    found = iter(
+        [
+            results
+            for start in starts
+            for results in internet.search_all(asked[start : start + MAX_PLANNED_SEARCHES], count)
+        ]
+    )
+    return [next(found, []) if search["query"] else [] for search in searches]
+
+
 class Researcher:
     NUMBER_RE = re.compile(r"\d+(?:[.,]\d+)*")
     EMPTY_ANALYSIS = {"findings": [], "contradictions": [], "gaps": [], "checks": []}
@@ -893,9 +921,7 @@ class Researcher:
             if not isinstance(item, dict):
                 continue
             question = " ".join(str(item.get("question") or "").split())[:200]
-            queries = [
-                " ".join(str(query).split()) for query in item.get("queries") or [] if str(query).strip()
-            ][:SEARCHES_PER_RESEARCH_QUESTION]
+            queries = search_entries(item.get("queries"))[:SEARCHES_PER_RESEARCH_QUESTION]
             if question and queries:
                 questions.append({"question": question, "queries": queries})
         if not name or not questions:
@@ -928,14 +954,9 @@ class Researcher:
     @staticmethod
     def first_searches(frame):
         return [
-            {
-                "query": query,
-                "section": str(number),
-                "pages": RESULTS_PER_RESEARCH_SEARCH,
-                "focus": question["question"],
-            }
+            dict(search, section=str(number), pages=RESULTS_PER_RESEARCH_SEARCH, focus=question["question"])
             for number, question in enumerate(frame["questions"], 1)
-            for query in question["queries"]
+            for search in question["queries"]
         ]
 
     def say_round(self, facts, sources, found):
@@ -1116,41 +1137,41 @@ class Researcher:
             {
                 "question": gap["question"],
                 "missing": " ".join(str(gap.get("missing") or "").split())[:200],
-                "search": " ".join(str(gap.get("search") or "").split())[:160],
+                "search": search_entry(gap.get("search")),
             }
             for gap in given
-            if asked(gap) and field(gap, "search")
+            if asked(gap) and search_entry(gap.get("search"))
         ]
 
     @staticmethod
     def read_checks(given, fact_count):
         return [
-            {"fact": check["fact"], "search": " ".join(str(check.get("search") or "").split())[:160]}
+            {"fact": check["fact"], "search": search_entry(check.get("search"))}
             for check in given
             if isinstance(check, dict)
             and isinstance(check.get("fact"), int)
             and 1 <= check["fact"] <= fact_count
-            and field(check, "search")
+            and search_entry(check.get("search"))
         ]
 
     @staticmethod
     def next_searches(frame, facts, analysis):
         gaps = [
-            {
-                "query": gap["search"],
-                "section": str(gap["question"]),
-                "pages": 1,
-                "focus": frame["questions"][gap["question"] - 1]["question"],
-            }
+            dict(
+                gap["search"],
+                section=str(gap["question"]),
+                pages=1,
+                focus=frame["questions"][gap["question"] - 1]["question"],
+            )
             for gap in analysis["gaps"]
         ]
         checks = [
-            {
-                "query": check["search"],
-                "section": facts[check["fact"] - 1]["section"],
-                "pages": 2,
-                "focus": f"whether this is so, and the exact figures: {facts[check['fact'] - 1]['text']}",
-            }
+            dict(
+                check["search"],
+                section=facts[check["fact"] - 1]["section"],
+                pages=2,
+                focus=f"whether this is so, and the exact figures: {facts[check['fact'] - 1]['text']}",
+            )
             for check in analysis["checks"]
         ]
         return gaps + checks
