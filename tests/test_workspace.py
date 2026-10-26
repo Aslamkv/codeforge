@@ -422,56 +422,52 @@ def test_problems():
     assert any("must contain {name}" in problem for problem in problems)
 
 
+def run_setup(workspace, *commands, activate=""):
+    return Toolchain(dict(TOOLS, activate=activate, setup=list(commands))).run_setup(workspace)
+
+
 @pytest.mark.spec("WS-14")
 def test_run_setup_runs_in_order(workspace, project_dir):
-    ok, output, waiting = Toolchain(dict(TOOLS, activate="", setup=["echo one > a", "cat a > b"])).run_setup(
-        workspace
-    )
+    ok, output, waiting = run_setup(workspace, "echo one > a", "cat a > b")
     assert (ok, waiting) == (True, []) and workspace.read("b") == "one\n"
 
 
 @pytest.mark.spec("WS-14")
 def test_run_setup_stops_at_a_failure(workspace, monkeypatch):
     monkeypatch.setattr(workspace_module, "online", lambda: True)
-    ok, output, waiting = Toolchain(
-        dict(TOOLS, activate="", setup=["echo boom; exit 4", "touch never"])
-    ).run_setup(workspace)
+    ok, output, waiting = run_setup(workspace, "echo boom; exit 4", "touch never")
     assert (
         not ok
         and output == "$ echo boom; exit 4  failed (exit code 4)\nboom"
         and not workspace.exists("never")
     )
-    ok, output, _ = Toolchain(dict(TOOLS, activate="", setup=["true; exit 2"])).run_setup(workspace)
+    ok, output, _ = run_setup(workspace, "true; exit 2")
     assert output.endswith("(it printed nothing)")
 
 
 @pytest.mark.spec("WS-14")
 def test_run_setup_sets_network_failures_aside(workspace, monkeypatch):
     monkeypatch.setattr(workspace_module, "online", lambda: True)
-    toolchain = Toolchain(
-        dict(TOOLS, activate="", setup=["echo 'Could not resolve host: pypi.org'; exit 1", "touch after"])
-    )
-    ok, output, waiting = toolchain.run_setup(workspace)
-    assert ok and waiting == [toolchain.setup[0]] and workspace.exists("after")
+    unreachable = "echo 'Could not resolve host: pypi.org'; exit 1"
+    ok, output, waiting = run_setup(workspace, unreachable, "touch after")
+    assert ok and waiting == [unreachable] and workspace.exists("after")
     monkeypatch.setattr(workspace_module, "online", lambda: False)
-    ok, _, waiting = Toolchain(dict(TOOLS, activate="", setup=["exit 1"])).run_setup(workspace)
+    ok, _, waiting = run_setup(workspace, "exit 1")
     assert ok and waiting == ["exit 1"]
 
 
 @pytest.mark.spec("WS-14")
 def test_run_setup_refuses_a_command_that_starts_a_new_project(workspace, project_dir):
     (project_dir / "Cargo.toml").write_text("[package]\n")
-    toolchain = Toolchain(dict(TOOLS, activate="", setup=["mkdir app && touch app/Cargo.toml"]))
-    ok, output, _ = toolchain.run_setup(workspace)
+    ok, output, _ = run_setup(workspace, "mkdir app && touch app/Cargo.toml")
     assert not ok and "made a new project in app/" in output
 
 
 @pytest.mark.spec("WS-14")
 def test_run_setup_uses_the_environment_once_activate_works(workspace):
-    toolchain = Toolchain(
-        dict(TOOLS, activate=". ./env.sh", setup=["echo 'export MARK=on' > env.sh", "echo $MARK > seen"])
+    ok, _, _ = run_setup(
+        workspace, "echo 'export MARK=on' > env.sh", "echo $MARK > seen", activate=". ./env.sh"
     )
-    ok, _, _ = toolchain.run_setup(workspace)
     assert ok and workspace.read("seen") == "on\n"
 
 

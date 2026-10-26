@@ -439,13 +439,14 @@ class Model:
                     f"{label.lower()} not usable: {exc}",
                     f"{say.going_on()}: no usable result yet, trying again" if attempt < attempts else "",
                 )
-                parts = self.with_part(
-                    parts,
-                    Part(
-                        "Note", f"Your previous reply was not usable ({exc}). Reply with ONLY the JSON.", True
-                    ),
-                )
+                parts = self.with_part(parts, self.not_usable_note(exc))
         return Answer(None, why=f"no usable reply after {attempts} attempt(s): {problem}")
+
+    @staticmethod
+    def not_usable_note(problem):
+        return Part(
+            "Note", f"Your previous reply was not usable ({problem}). Reply with ONLY the JSON.", True
+        )
 
     def too_large_why(self, exc):
         return (
@@ -696,14 +697,17 @@ class Calibrator:
                     continue
                 raise SystemExit(f"{self.name} does not run: {exc}")
             self.measure_chat(content, data)
-            with say.section():
-                say.info(
-                    f"Thinks with {think!r}; {self.safe_ratio()} chars per token; writes {self.write_tokens_per_second} "
-                    f"tokens a second",
-                    "🧠",
-                )
+            self.show_first_chat(think)
             return think
         return None
+
+    def show_first_chat(self, think):
+        with say.section():
+            say.info(
+                f"Thinks with {think!r}; {self.safe_ratio()} chars per token; writes {self.write_tokens_per_second} "
+                f"tokens a second",
+                "🧠",
+            )
 
     def measure_chat(self, content, data):
         self.load_seconds = round(data.get("load_duration", 0) / 1e9, 1)

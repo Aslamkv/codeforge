@@ -236,19 +236,15 @@ def test_part_flags_render_and_size():
     )
 
 
-def example(text):
-    return json.loads(text)
-
-
 @pytest.mark.spec("PRM-13")
 def test_the_prompts_example_json_parses_and_its_toolchain_works():
-    spec = example(Prompts.SPEC_JSON + ",\n " + Prompts.TOOLCHAIN_JSON + "}")
+    spec = json.loads(Prompts.SPEC_JSON + ",\n " + Prompts.TOOLCHAIN_JSON + "}")
     assert spec["criteria"] and spec["files"] and spec["entry"] == "tip.py"
     assert not Toolchain(spec["toolchain"]).problems()
-    assert example(Prompts.SPEC_JSON + "}")["language"] == "Python"
-    assert example("{" + Prompts.TOOLCHAIN_JSON + "}")["toolchain"]["test_all"] == "pytest -q"
+    assert json.loads(Prompts.SPEC_JSON + "}")["language"] == "Python"
+    assert json.loads("{" + Prompts.TOOLCHAIN_JSON + "}")["toolchain"]["test_all"] == "pytest -q"
     readme = re.search(r"Reply with ONLY JSON: (\{.*\})", Prompts.README_SYSTEM, re.S).group(1)
-    assert example(readme)["usage"][0]["command"] == "python3 calculator.py add 5 2"
+    assert json.loads(readme)["usage"][0]["command"] == "python3 calculator.py add 5 2"
     assert (
         Prompts.SPEC_JSON[:-1] in Prompts.SPEC_SYSTEM and Prompts.TOOLCHAIN_JSON in Prompts.TOOLCHAIN_SYSTEM
     )
@@ -265,7 +261,7 @@ def test_the_templates_format():
 
 @pytest.mark.spec("PRM-14")
 def test_the_example_toolchain_commands_are_real_commands():
-    toolchain = example("{" + Prompts.TOOLCHAIN_JSON + "}")["toolchain"]
+    toolchain = json.loads("{" + Prompts.TOOLCHAIN_JSON + "}")["toolchain"]
     commands = toolchain["setup"] + [value for key, value in toolchain.items() if isinstance(value, str)]
     assert not [command for command in commands if re.search(r"\btinker\b", command)]
 
