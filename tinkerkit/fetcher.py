@@ -3,20 +3,16 @@ import re
 import urllib.error
 import urllib.parse
 import urllib.request
-import urllib.robotparser
 from collections import namedtuple
-from dataclasses import asdict, dataclass
+from dataclasses import dataclass
 lazy import codecs
 lazy import concurrent.futures
 lazy import ssl
-lazy import threading
 lazy import time
 lazy import zlib
 
 from .settings import FETCH_USER_AGENT, MAX_REDIRECTS, first_line
-lazy from .jobs import journaled
 
-Download = namedtuple("Download", "data why_failed")
 RawResponse = namedtuple("RawResponse", "status headers body")
 
 
@@ -28,33 +24,22 @@ class Fetched:
     text: str = ""
     kind: str = ""
     error: str = ""
-    ROBOTS = "its robots.txt does not allow it"
+    data: bytes = b""
+    seconds: float = 0.0
 
     @property
     def ok(self):
         return not self.error
-
-    @property
-    def refused(self):
-        return self.error == self.ROBOTS
 
 
 class Fetcher:
     META_CHARSET = re.compile(rb"""<meta[^>]+charset=["']?([\w-]+)""", re.I)
     REDIRECTS = (301, 302, 303, 307, 308)
 
-    def __init__(self, workers, timeout, max_bytes, domain_delay, log=None, user_agent=FETCH_USER_AGENT):
-        self.workers, self.timeout, self.max_bytes, self.domain_delay = (
-            workers,
-            timeout,
-            max_bytes,
-            domain_delay,
-        )
-        self.log, self.user_agent = log, user_agent
-        self.robots_by_site = {}
-        self.next_turn, self.turn_lock = {}, threading.Lock()
+    def __init__(self, workers, timeout, max_bytes, user_agent=FETCH_USER_AGENT):
+        self.workers, self.timeout, self.max_bytes, self.user_agent = workers, timeout, max_bytes, user_agent
 
-    def fetch_all(self, urls, kind="fetch"):
+    def fetch_all(self, urls):
         sites = {}
         for index, url in enumerate(urls):
             sites.setdefault(origin(url), []).append(index)
@@ -63,80 +48,33 @@ class Fetcher:
             max_workers=max(1, min(self.workers, len(sites) or 1))
         ) as pool:
             fetched_sites = pool.map(
-                lambda found: self.fetch_site([urls[at] for at in found], kind), sites.values()
+                lambda found: self.fetch_site([urls[at] for at in found]), sites.values()
             )
             for indexes, got in zip(sites.values(), fetched_sites):
                 for index, fetched in zip(indexes, got):
                     results[index] = fetched
         return results
 
-    def fetch_site(self, urls, kind):
+    def fetch_site(self, urls):
         with Connections(self.timeout) as connections:
-            return [self.fetch(url, connections, kind) for url in urls]
+            return [self.timed(url, connections) for url in urls]
 
-    def fetch(self, url, connections, kind):
-        return journaled(
-            {"page": url, "kind": kind},
-            lambda: self.fetched(url, connections, kind),
-            keep=lambda fetched: fetched.ok,
-            dump=asdict,
-            load=lambda kept: Fetched(**kept),
-        )
-
-    def fetched(self, url, connections, kind):
-        try:
-            if not self.allowed(url, connections):
-                return Fetched(url, final_url=url, error=Fetched.ROBOTS)
-            return self.get(url, connections, kind)
-        except Exception as exc:
-            return Fetched(url, final_url=url, error=f"{type(exc).__name__}: {first_line(str(exc), 160)}")
-
-    def allowed(self, url, connections):
-        site = origin(url)
-        if site not in self.robots_by_site:
-            self.robots_by_site[site] = self.read_robots(site, connections)
-        return self.robots_by_site[site].can_fetch(self.user_agent, url)
-
-    def read_robots(self, site, connections):
-        rules = urllib.robotparser.RobotFileParser(site + "/robots.txt")
-        got = self.get(site + "/robots.txt", connections, kind="robots")
-        if got.status in (401, 403):
-            rules.disallow_all = True
-        elif got.ok:
-            rules.parse(got.text.splitlines())
-        else:
-            rules.allow_all = True
-        return rules
-
-    def get(self, url, connections, kind="fetch"):
-        self.wait_turn(url)
+    def timed(self, url, connections):
         started = time.monotonic()
-        fetched = self.through_proxy(url) if behind_proxy(url) else self.request(url, connections)
-        if self.log:
-            self.log(kind, self.result_of(fetched, kind), time.monotonic() - started, url)
+        fetched = self.fetched(url, connections)
+        fetched.seconds = time.monotonic() - started
         return fetched
 
-    @staticmethod
-    def result_of(fetched, kind):
-        if fetched.ok:
-            return "ok"
-        if fetched.status == 429:
-            return "429"
-        return "missing" if kind in ("robots", "probe") and fetched.status == 404 else "failed"
-
-    def wait_turn(self, url):
-        host = urllib.parse.urlsplit(url).netloc
-        with self.turn_lock:
-            now = time.monotonic()
-            turn = max(now, self.next_turn.get(host, 0.0))
-            self.next_turn[host] = turn + self.domain_delay
-        if turn > now:
-            time.sleep(turn - now)
+    def fetched(self, url, connections):
+        try:
+            return self.through_proxy(url) if behind_proxy(url) else self.request(url, connections)
+        except Exception as exc:
+            return Fetched(url, final_url=url, error=f"{type(exc).__name__}: {first_line(str(exc), 160)}")
 
     def request(self, url, connections):
         target = url
         for _ in range(MAX_REDIRECTS + 1):
-            status, headers, body = connections.exchange(target, self.asked(), self.max_bytes)
+            status, headers, body = connections.exchange(target, self.asked(), self.max_bytes + 1)
             if status not in self.REDIRECTS or not headers.get("Location"):
                 return self.answered(url, target, status, headers, body)
             target = urllib.parse.urljoin(target, headers["Location"])
@@ -148,10 +86,8 @@ class Fetcher:
     def answered(self, url, final_url, status, headers, body):
         if status >= 400:
             return Fetched(url, status, final_url, error=f"HTTP {status}")
-        text = self.decoded(
-            unzipped(body, headers.get("Content-Encoding", ""), self.max_bytes), headers.get_content_charset()
-        )
-        return Fetched(url, status, final_url, text, (headers.get_content_type() or "").lower())
+        data = unzipped(body, headers.get("Content-Encoding", ""), self.max_bytes + 1)
+        return self.read(url, status, final_url, data, headers)
 
     def through_proxy(self, url):
         request = urllib.request.Request(
@@ -161,31 +97,16 @@ class Fetcher:
             with urllib.request.build_opener(LimitedRedirects).open(
                 request, timeout=self.timeout
             ) as response:
-                body = response.read(self.max_bytes)
-                return Fetched(
-                    url,
-                    response.status,
-                    response.geturl(),
-                    self.decoded(body, response.headers.get_content_charset()),
-                    (response.headers.get_content_type() or "").lower(),
-                )
+                data = response.read(self.max_bytes + 1)
+                return self.read(url, response.status, response.geturl(), data, response.headers)
         except urllib.error.HTTPError as exc:
             return Fetched(url, exc.code, exc.geturl() or url, error=f"HTTP {exc.code}")
 
-    def download(self, url, max_bytes):
-        request = urllib.request.Request(url, headers={"User-Agent": self.user_agent})
-        try:
-            with urllib.request.build_opener(LimitedRedirects).open(
-                request, timeout=self.timeout
-            ) as response:
-                body = response.read(max_bytes + 1)
-        except urllib.error.HTTPError as exc:
-            return Download(b"", f"HTTP {exc.code}")
-        except (urllib.error.URLError, OSError, ValueError) as exc:
-            return Download(b"", first_line(str(getattr(exc, "reason", exc)), 160))
-        if len(body) > max_bytes:
-            return Download(b"", f"it is larger than {max_bytes // 1_000_000} MB")
-        return Download(body, "")
+    def read(self, url, status, final_url, data, headers):
+        if len(data) > self.max_bytes:
+            return Fetched(url, status, final_url, error=f"larger than {self.max_bytes} bytes")
+        text = self.decoded(data, headers.get_content_charset())
+        return Fetched(url, status, final_url, text, (headers.get_content_type() or "").lower(), data=data)
 
     @classmethod
     def decoded(cls, body, charset):

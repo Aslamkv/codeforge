@@ -1,20 +1,18 @@
 from collections import namedtuple
-lazy import json
-lazy import threading
-lazy import time
+lazy import datetime
 lazy import urllib.parse
 lazy from collections import Counter
 
 from .messages import Message, Messages, say
-lazy from .docsite import DocSite
 lazy from .jobs import today
 lazy from .knowledge import LEARN_STEPS, Learner, Library, Researcher, Retriever, language_key
 lazy from .model import OllamaError
-lazy from .passages import Cleaner, Page, text_blocks
+lazy from .passages import Cleaner, Page
 lazy from .project import Tracked
 lazy from .prompts import Part, Prompts, PromptTooLarge
 lazy from .settings import (
     DOCS_SITE_SEARCH,
+    DOCS_VERSION_SEARCH,
     FACT_PHASES,
     FACTS_PER_SLOT,
     MAX_FACT_CHARS,
@@ -27,33 +25,26 @@ lazy from .settings import (
     now_text,
     one_line,
 )
-lazy from .slots import PROFILES, TOOL_DOCS_QUERY, Selector, fill, missing, short_slots, web_slots
-lazy from .web import is_web_address
+lazy from .slots import PROFILES, TOOL_DOCS_SEARCH, Selector, fill, missing, short_slots, web_slots
 
 LEARN_STOP_CAUSES = frozendict(
     {
-        "plugin": (
-            "the Internet plugin is off or cannot be reached",
-            "check the network and tinker use-web (tinker config shows the web's state), then learn again",
-        ),
         "embeddings": (
             "no embedding model is selected",
             "select one with tinker embed NAME, then learn again",
         ),
-        "error": (
-            "the search failed",
-            "learn again; if it keeps failing, try another backend with tinker use-web NAME",
+        "no-results": (
+            "the search found nothing",
+            "check the topic's spelling, or name it more fully; if the web said it could not search, "
+            "learn again later",
         ),
-        "rate-limit": ("the search is rate limited (HTTP 429)", "wait a minute, then learn again"),
-        "no-results": ("the search found nothing", "check the topic's spelling, or name it more fully"),
         "irrelevant": (
             "no search result is about the topic",
             "name the topic more fully (with its language, say)",
         ),
         "pages": (
             "too few pages could be fetched",
-            "learn again later: a site may refuse fetches or draw its pages with "
-            "scripts (fetch_fallbacks lets the web plugin fetch more of those)",
+            "learn again later: a site may refuse fetches or draw its pages with scripts",
         ),
     }
 )
@@ -79,10 +70,34 @@ class LearnStopped(SystemExit):
         self.details = list(details)
 
 
-class SearchFailed(Exception):
-    def __init__(self, cause, detail=""):
-        super().__init__(cause)
-        self.cause, self.detail = cause, detail
+class DocCache:
+    @staticmethod
+    def get(slug, key):
+        kept = Home.store().get("sources", f"{slug}@{key}")
+        if not isinstance(kept, dict) or not kept.get("pages"):
+            return None
+        if key == "latest" and DocCache.stale(kept):
+            return None
+        return [Page.of_dict(page) for page in kept["pages"]]
+
+    @staticmethod
+    def stale(kept):
+        return DocCache.age_days(kept.get("kept", "")) > float(Config.get("docs_latest_days"))
+
+    @staticmethod
+    def put(slug, key, pages):
+        Home.store().put(
+            "sources",
+            f"{slug}@{key}",
+            {"version": key, "kept": now_text(), "pages": [page.as_dict() for page in pages]},
+        )
+
+    @staticmethod
+    def age_days(kept):
+        try:
+            return (datetime.datetime.now() - datetime.datetime.strptime(kept, "%Y-%m-%d %H:%M")).days
+        except ValueError:
+            return float("inf")
 
 
 class SlotLearner(Tracked):
@@ -93,11 +108,9 @@ class SlotLearner(Tracked):
         self.learner = Learner(model, internet, embeddings)
         self.learner.tracker = tracker
         self.model, self.internet, self.embeddings = model, internet, embeddings
-        self.log = RequestLog()
         self.cleaner = Cleaner()
-        self.fetcher = None
         self.topic, self.known, self.tried, self.seen, self.docs = "", None, [], set(), {}
-        self.searches, self.fallbacks, self.incomplete = 0, 0, False
+        self.searched_first, self.follow_ups, self.incomplete = False, 0, False
         self.pages = Counter()
         self.recap = []
 
@@ -133,11 +146,8 @@ class SlotLearner(Tracked):
         return self.learned(plan, version, machine, pages)
 
     def preflight(self):
-        if self.internet is None or not self.internet.available():
-            self.stop("preflight", "plugin", self.internet.problem() if self.internet else "")
         if self.embeddings is None:
             self.stop("preflight", "embeddings")
-        self.fetcher = self.internet.page_fetcher(self.log)
 
     def plan_and_pages(self):
         saved = self.saved_plan()
@@ -160,47 +170,24 @@ class SlotLearner(Tracked):
 
     def first_search(self):
         self.step("search", f"Searching the web for pages about {self.topic}…", "🔎")
-        try:
-            results = self.search(DOCS_SITE_SEARCH.format(topic=self.topic))
-        except SearchFailed as failed:
-            self.stop("gate 1", failed.cause, failed.detail)
+        self.searched_first = True
+        results = self.search(DOCS_SITE_SEARCH.format(topic=self.topic))
+        if not results:
+            self.stop("gate 1", "no-results")
         picked = self.picked(self.topic, results)
         if not picked:
             self.stop("gate 1", "irrelevant", f"{len(results)} result(s), none above learn_cutoff")
         return picked
 
     def search(self, query):
-        self.searches += 1
         self.tried.append(f'search "{query}"')
-        found = self.timed("search", query, lambda: self.internet.search(query, RESULTS_PER_LEARN_SEARCH))
-        if found is None:
-            raise SearchFailed(self.failure_cause(query), first_line(self.internet.problem(query), 160))
-        if not found:
-            raise SearchFailed("no-results")
-        return found
+        return self.internet.search(query, RESULTS_PER_LEARN_SEARCH)
 
-    def failure_cause(self, query):
-        if self.internet.rate_limited(query):
-            return "rate-limit"
-        return "error" if self.internet.available() else "plugin"
-
-    def timed(self, kind, target, request):
-        started = time.monotonic()
-        result = request()
-        limited = self.internet.rate_limited(target)
-        self.log(
-            kind,
-            "ok" if result is not None else "429" if limited else "failed",
-            time.monotonic() - started,
-            target,
-        )
-        return result
-
-    def picked(self, topic, results):
+    def picked(self, topic, results, most=None):
         scores = Retriever(None).word_scores(
             topic, [f"{result['title']} {result['content']}" for result in results]
         )
-        picked, cutoff, most = [], float(Config.get("learn_cutoff")), int(Config.get("learn_pages"))
+        picked, cutoff, most = [], float(Config.get("learn_cutoff")), most or int(Config.get("learn_pages"))
         for result, score in zip(results, scores):
             key = address_key(result["url"])
             if score > cutoff and key not in self.seen and len(picked) < most:
@@ -216,12 +203,9 @@ class SlotLearner(Tracked):
         return pages, results
 
     def fetched(self, picked):
-        got = self.fetcher.fetch_all([result["url"] for result in picked])
+        got = self.internet.fetch([result["url"] for result in picked])
         with say.section():
-            pages = [
-                self.fallen_back(page) if not page.usable() and self.may_fall_back(fetched) else page
-                for page, fetched in ((self.page_of(fetched), fetched) for fetched in got)
-            ]
+            pages = [self.page_of(web_page) for web_page in got]
             usable = [(page, result) for page, result in zip(pages, picked) if page.usable()]
             self.pages.update(searched=len(usable), failed=len(pages) - len(usable))
             self.tried.append(f"fetched {len(picked)} page(s), {len(usable)} with usable text")
@@ -230,29 +214,15 @@ class SlotLearner(Tracked):
         return UsablePages([page for page, _ in usable], [result for _, result in usable])
 
     @staticmethod
-    def page_of(fetched):
-        if not fetched.ok:
-            say.fail(f"Could not open {fetched.url} ({fetched.error})")
-            return Page(fetched.url, now_text(), [])
-        return Cleaner.page(fetched.final_url or fetched.url, fetched.text, fetched.kind, now_text())
-
-    def may_fall_back(self, fetched):
-        return not fetched.refused and self.fallbacks < int(Config.get("fetch_fallbacks"))
-
-    def fallen_back(self, page):
-        self.fallbacks += 1
-        say.retry(
-            f"{page.url} showed too little text; asking the web plugin to read it "
-            f"({self.fallbacks} of {Config.get('fetch_fallbacks')})"
-        )
-        got = self.timed("fallback", page.url, lambda: self.internet.fetch(page.url))
-        return Page(page.url, now_text(), text_blocks(got["content"])) if got else page
+    def page_of(web_page):
+        if web_page.why:
+            say.fail(f"Could not open {web_page.url} ({web_page.why})")
+        return Page(web_page.url, now_text(), web_page.blocks)
 
     def asked_plan(self, results):
         self.step(
             "plan",
-            f"Working out what {self.topic} is, how to check the version you have, and where "
-            f"its documentation is…",
+            f"Working out what {self.topic} is and how to check the version you have…",
             "🤔",
         )
         with say.working_on(f"Working out what {self.topic} is, from {len(results)} page(s) found"):
@@ -269,9 +239,6 @@ class SlotLearner(Tracked):
     def say_plan(self, plan):
         say.found(f"{plan['name']} is a {plan['kind']}: {plan['summary']}")
         self.outcome(f"{plan['name']}, a {plan['kind']}")
-        if plan["docs"]["root"]:
-            with say.section():
-                say.info(f"Documentation: {plan['docs']['root']}", "📍")
         self.learner.show_dropped(plan)
 
     def plan_parts(self, results):
@@ -292,46 +259,46 @@ class SlotLearner(Tracked):
 
     def documentation(self, plan, machine, version):
         self.step("documentation")
-        site = DocSite(self.fetcher)
         pages = self.doc_pages(
-            site,
-            self.slug(plan),
-            plan["docs"],
-            version,
-            [slot.docs for slot in web_slots(plan["profile"])],
-            int(Config.get("docs_pages")),
+            self.slug(plan), plan["name"], version, DOCS_VERSION_SEARCH, int(Config.get("learn_pages"))
         )
-        for tool in {tool["docs"].get("root") or tool["name"]: tool for tool in plan["tools"]}.values():
+        for tool in {tool["name"]: tool for tool in plan["tools"]}.values():
             pages += self.doc_pages(
-                site,
                 Library.slug(tool["name"]),
-                tool["docs"],
+                tool["name"],
                 version_of(machine, [tool["command"]]),
-                [TOOL_DOCS_QUERY],
+                TOOL_DOCS_SEARCH,
                 int(Config.get("tool_docs_pages")),
             )
         self.outcome(f"{len(pages)} page(s)" + (f" of {plan['name']} {version}" if version else ""))
         return pages
 
-    def doc_pages(self, site, slug, docs, version, wanted, cap):
-        if not (docs.get("root") or docs.get("versioned")) or cap <= 0:
+    def doc_pages(self, slug, name, version, search, cap):
+        if cap <= 0:
             return []
-        with say.working_on(f"Reading the {slug} documentation" + (f" for {version}" if version else "")):
-            pages, key, kept = site.pages(slug, docs, version, wanted, cap)
-        self.docs[slug] = key or "not reachable"
+        key = version or "latest"
+        kept = DocCache.get(slug, key)
+        pages = kept or self.searched_docs(slug, key, name, search.format(name=name, version=version), cap)
+        if pages:
+            self.docs[slug] = key
         self.pages.update(**{"kept docs" if kept else "docs": len(pages)})
-        where = "the copy saved last time" if kept else docs.get("versioned") or docs.get("root")
-        say.info(
-            f"Read {len(pages)} page(s) of the {slug} {key} documentation ({where})"
-            if key
-            else f"Could not reach the {slug} documentation ({where})",
-            "📖",
-        )
+        say_docs(slug, key, pages, kept)
+        return pages
+
+    def searched_docs(self, slug, key, name, search, cap):
+        query = " ".join(search.split())
+        with say.working_on(f'Searching the web for "{query}"'):
+            results = self.search(query)
+            picked = self.picked(name, results, cap) if results else []
+            fetched = self.internet.fetch([result["url"] for result in picked]) if picked else []
+        pages = [page for page in map(self.page_of, fetched) if page.usable()]
+        if pages:
+            DocCache.put(slug, key, pages)
         return pages
 
     def enough_pages(self, pages):
         usable = [page for page in pages if page.usable()]
-        if self.searches or len(usable) >= int(Config.get("learn_min_pages")):
+        if self.searched_first or len(usable) >= int(Config.get("learn_min_pages")):
             return usable
         say.info("The documentation gave too little to learn from", "📖")
         return usable + self.usable_pages(self.first_search(), have=len(usable))[0]
@@ -424,8 +391,9 @@ class SlotLearner(Tracked):
         found = []
         answered = {fact["slot"] for fact in facts}
         for slot in [slot for slot in web_slots(plan["profile"]) if slot.id not in answered]:
-            if self.searches >= int(Config.get("learn_searches")):
+            if self.follow_ups >= int(Config.get("learn_searches")):
                 break
+            self.follow_ups += 1
             query = slot.search(plan, version)
             self.step(
                 "follow-up", f'Nothing found on {label(slot.id)} yet: searching the web for "{query}"…', "🔁"
@@ -439,10 +407,10 @@ class SlotLearner(Tracked):
         return found
 
     def extra_pages(self, query, plan):
-        try:
-            picked = self.picked(plan["name"], self.search(query))
-        except SearchFailed as failed:
-            return self.extra_failed(query, LEARN_STOP_CAUSES[failed.cause][0])
+        results = self.search(query)
+        if not results:
+            return self.extra_failed(query, LEARN_STOP_CAUSES["no-results"][0])
+        picked = self.picked(plan["name"], results)
         pages = self.fetched(picked)[0] if picked else []
         return pages or self.extra_failed(query, "no result about the topic gave usable text")
 
@@ -502,7 +470,7 @@ class SlotLearner(Tracked):
             ],
             "status": "incomplete" if gaps or self.incomplete else "complete",
             "missing": gaps,
-            "requests": self.log.counts(),
+            "requests": self.internet.requests.counts(),
             "notes": self.learner.notes,
         }
 
@@ -518,7 +486,7 @@ class SlotLearner(Tracked):
             ("Documentation", ", ".join(f"{slug} {key}" for slug, key in self.docs.items()) or "none"),
             ("Pages", ", ".join(f"{count} {kind}" for kind, count in self.pages.items() if count) or "none"),
             ("Facts kept", str(len(entry["facts"]))),
-            ("Web requests", self.log.text()),
+            ("Web requests", self.internet.requests.text()),
         ]
 
     def stop(self, gate, cause, detail=""):
@@ -541,7 +509,7 @@ class SlotLearner(Tracked):
                         Messages.ICONS["stop"],
                     ),
                     Message("info", f"Tried: {'; '.join(self.tried) or 'nothing yet'}", 1, "🔎"),
-                    Message("info", f"Web requests: {self.log.text()}", 1, "🌐"),
+                    Message("info", f"Web requests: {self.internet.requests.text()}", 1, "🌐"),
                     Message("info", f"Nothing was learned or saved; {before}.", 1, "💾"),
                     Message("tip", f"Next: {next_step}", 1, "👉"),
                 ]
@@ -565,6 +533,14 @@ def version_of(machine, commands):
     )
 
 
+def say_docs(slug, key, pages, kept):
+    if not pages:
+        say.info(f"Found no {slug} {key} documentation", "📖")
+        return
+    saved = " (the copy saved last time)" if kept else ""
+    say.info(f"Read {len(pages)} page(s) of the {slug} {key} documentation{saved}", "📖")
+
+
 def read_plan(data):
     if not isinstance(data, dict):
         raise ValueError("not a JSON object")
@@ -586,7 +562,6 @@ def read_plan(data):
         "summary": clean(data.get("summary"), 200) or name,
         "language": (language or name) if kind == "language" else "",
         "used_with": "" if kind == "language" else language or clean(data.get("used_with"), 40),
-        "docs": read_docs(data.get("docs")),
         "commands": commands[:MAX_VERSION_COMMANDS],
         "dropped": dropped + tool_dropped,
         "tools": tools,
@@ -603,22 +578,8 @@ def read_tools(given):
             if role in TOOL_ROLES and name and role not in tools:
                 kept, unsafe = Learner.safe_commands([tool.get("command") or ""])
                 dropped += unsafe
-                tools[role] = {
-                    "role": role,
-                    "name": name,
-                    "command": (kept or [""])[0],
-                    "docs": read_docs(tool.get("docs")),
-                }
+                tools[role] = {"role": role, "name": name, "command": (kept or [""])[0]}
     return Tools(list(tools.values()), dropped)
-
-
-def read_docs(given):
-    given = given if isinstance(given, dict) else {}
-    root, versioned = clean(given.get("root"), 300), clean(given.get("versioned"), 300)
-    return {
-        "root": root if is_web_address(root) else "",
-        "versioned": versioned if is_web_address(versioned) and "{version}" in versioned else "",
-    }
 
 
 def by_slot(given, ids):
@@ -663,36 +624,3 @@ def address_key(url):
     return urllib.parse.urlunsplit(
         (parts.scheme, parts.netloc.lower(), parts.path.rstrip("/"), parts.query, "")
     )
-
-
-class RequestLog:
-    def __init__(self):
-        self.path, self.tally, self.lock = Home.web_log(), {}, threading.Lock()
-
-    def __call__(self, kind, result, seconds, target):
-        line = json.dumps(
-            {
-                "at": time.strftime("%Y-%m-%dT%H:%M:%S"),
-                "kind": kind,
-                "result": result,
-                "seconds": round(seconds, 3),
-                "target": target,
-            }
-        )
-        with self.lock:
-            counts = self.tally.setdefault(kind, Counter())
-            counts.update(requests=1, **{result: 1})
-            with self.path.open("a") as log:
-                log.write(line + "\n")
-
-    def counts(self):
-        return {kind: dict(counts) for kind, counts in self.tally.items()}
-
-    def text(self):
-        if not self.tally:
-            return "none"
-        shown = [
-            f"{kind} {counts['requests']}" + (f" ({counts['failed']} failed)" if counts["failed"] else "")
-            for kind, counts in self.tally.items()
-        ]
-        return ", ".join(shown) + f"; HTTP 429: {sum(counts['429'] for counts in self.tally.values())}"

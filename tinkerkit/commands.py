@@ -41,8 +41,8 @@ OPTIONS = frozendict(
 
 
 class Argument:
-    def __init__(self, dest, nargs=None, metavar=None, help="", choices=None):
-        self.dest, self.nargs, self.metavar, self.help, self.choices = dest, nargs, metavar, help, choices
+    def __init__(self, dest, nargs=None, metavar=None, help=""):
+        self.dest, self.nargs, self.metavar, self.help = dest, nargs, metavar, help
 
 
 class Action(namedtuple("Action", "kind word when deletes", defaults=(None, None, False))):
@@ -284,8 +284,7 @@ COMMANDS = [
         'the word prefer ("I prefer no mypy"): they are honored as they are. Everything else is a fact, checked '
         "first on this machine (commands that only show what is installed) and on the web, and each change is "
         "made once the facts it rests on hold: what you showed wrong is retired, the toolchain corrected and a "
-        "lesson kept, with its sources. A change whose facts do not hold is not made, and it says why. Needs the "
-        "web (tinker use-web).",
+        "lesson kept, with its sources. A change whose facts do not hold is not made, and it says why.",
         kind="job",
         chat=True,
         words="any",
@@ -470,18 +469,6 @@ COMMANDS = [
         chat=True,
         words="one",
         arguments=[Argument("name", None, None, "the model's name, as `tinker models` lists it")],
-    ),
-    Command(
-        "use-web",
-        "Set up",
-        "use-web NAME",
-        "the web search tinker learn and --web use: ollama or duckduckgo",
-        "Use this web search for tinker learn and --web from now on: ollama (Ollama's web search and fetch, with a "
-        "free key in OLLAMA_API_KEY) or duckduckgo (no key).",
-        kind="glance",
-        chat=True,
-        words="one",
-        arguments=[Argument("name", None, None, "the web search to use", choices="backends")],
     ),
     Command(
         "config",

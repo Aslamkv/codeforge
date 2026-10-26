@@ -522,8 +522,8 @@ class Learner(Tracked):
         return shown
 
     def read_web(self, name, searches, max_pages):
-        results = [self.results(search) for search in searches]
-        return self.read_pages(name, self.in_turn(searches, results, max_pages))
+        found = self.in_turn(searches, [self.results(search) for search in searches], max_pages)
+        return self.read_pages(name, self.fetched(found))
 
     def web_pages(self, searches):
         asked = [
@@ -531,30 +531,32 @@ class Learner(Tracked):
             for search in searches
         ]
         found = self.in_turn(asked, [self.results(search) for search in asked], TEACH_PAGES)
-        pages = [self.web_page(result, " ".join(searches)) for result in found]
+        pages = [self.web_page(page, " ".join(searches)) for page in self.fetched(found)]
         return [page for page in pages if page["content"]]
 
-    def web_page(self, result, wanted):
-        got = self.internet.fetch(result["url"]) or {}
-        text = got.get("content") or result.get("content") or ""
+    def web_page(self, page, wanted):
+        text = page["content"]
         chunks = (
             relevant_chunks(text, TEACH_PAGE_CHARS // CHUNKS_PER_PAGE, wanted, CHUNKS_PER_PAGE)
             if text.strip()
             else []
         )
-        return {
-            "title": got.get("title") or result.get("title", ""),
-            "url": result["url"],
-            "content": "\n\n".join(chunks)[:TEACH_PAGE_CHARS],
-        }
+        return {"title": page["title"], "url": page["url"], "content": "\n\n".join(chunks)[:TEACH_PAGE_CHARS]}
 
     def results(self, search):
-        found = self.internet.search(search["query"], RESULTS_PER_RESEARCH_SEARCH)
-        if found is None:
-            self.notes.append(f"search '{search['query']}': {self.internet.problem(search['query'])}")
-            with say.section():
-                say.warn(self.notes[-1])
-        return (found or [])[: search["pages"]]
+        return self.internet.search(search["query"], RESULTS_PER_RESEARCH_SEARCH)[: search["pages"]]
+
+    def fetched(self, found):
+        pages = self.internet.fetch([result["url"] for result in found]) if found else []
+        return [
+            dict(
+                result,
+                title=page.title or result.get("title", ""),
+                content=page.text or result.get("content", ""),
+                why=page.why,
+            )
+            for result, page in zip(found, pages)
+        ]
 
     @staticmethod
     def in_turn(searches, results, max_pages):
@@ -578,11 +580,10 @@ class Learner(Tracked):
         return Findings(facts, sources)
 
     def read_page(self, topic, page, number):
-        got = self.internet.fetch(page["url"])
-        text = (got or {}).get("content") or page.get("content") or ""
+        text = page["content"]
         if not text.strip():
             return self.unreadable(page, number)
-        source = Part("Page", f"{(got or {}).get('title') or page.get('title', '')}\n{page['url']}", True)
+        source = Part("Page", f"{page['title']}\n{page['url']}", True)
         focus = Part("Look for", page["focus"], True)
         room = self.room_for_excerpts(topic, source, focus)
         found = []
@@ -601,7 +602,7 @@ class Learner(Tracked):
         return found
 
     def unreadable(self, page, number):
-        why = f"{page['url']}: {self.internet.problem(page['url'])}"
+        why = f"{page['url']}: {page['why'] or 'no text'}"
         self.notes.append(f"page {why}")
         with say.section():
             say.fail(f"Could not read page {number}: {why}")
@@ -662,8 +663,6 @@ class Learner(Tracked):
         return [fact["source"], *fact.get("also", [])]
 
     def cut_short(self):
-        if not self.internet.available():
-            return f"the web was lost ({self.internet.problem()})"
         if self.model_failure:
             return f"the model stopped answering ({self.model_failure})"
         return ""

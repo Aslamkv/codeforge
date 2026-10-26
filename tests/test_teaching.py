@@ -2,7 +2,7 @@ import json
 import sys
 
 import pytest
-from conftest import MODEL, TOOLCHAIN
+from conftest import MODEL, TOOLCHAIN, web_page
 
 from tinkerkit import cli
 from tinkerkit.cli import Cli, Commands
@@ -29,18 +29,16 @@ class FakeWeb:
     def __init__(self, pages=(PAGE,)):
         self.pages, self.queries = list(pages), []
 
-    def available(self):
-        return True
-
-    def problem(self, key=None):
-        return "nothing found"
-
     def search(self, query, count):
         self.queries.append(query)
         return self.pages[:count]
 
-    def fetch(self, url):
-        return next((page for page in self.pages if page["url"] == url), None)
+    def fetch(self, urls, max_bytes=None):
+        return [self.page(url) for url in urls]
+
+    def page(self, url):
+        page = next(page for page in self.pages if page["url"] == url)
+        return web_page(url, page["content"])
 
 
 @pytest.fixture
@@ -380,20 +378,12 @@ def test_a_teaching_that_holds_corrects_what_tinker_keeps(kept, make_model, fake
 
 
 @pytest.mark.spec("TCH-9")
-def test_teach_needs_the_web_before_any_model_call(measured_model, fake_ollama, monkeypatch):
-    monkeypatch.setattr(Ollama, "installed_models", staticmethod(lambda: [{"name": MODEL}]))
-    with pytest.raises(SystemExit, match="tinker teach needs the Internet plugin"):
-        Commands(Cli.parse(["teach", "ruff", "alone", "is", "enough"])).run()
-    assert fake_ollama.calls == []
-
-
-@pytest.mark.spec("TCH-9")
 def test_ask_and_teach_report_through_a_tracker_and_run_as_jobs(
     kept, measured_model, fake_ollama, monkeypatch, capsys
 ):
 
     monkeypatch.setattr(Ollama, "installed_models", staticmethod(lambda: [{"name": MODEL}]))
-    monkeypatch.setattr(cli.Internet, "required", staticmethod(lambda option: FakeWeb()))
+    monkeypatch.setattr(cli, "Internet", FakeWeb)
     ended = []
     monkeypatch.setattr(
         Tracker,

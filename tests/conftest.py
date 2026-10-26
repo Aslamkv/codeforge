@@ -11,6 +11,7 @@ from tinkerkit.messages import say
 from tinkerkit.model import Model, Ollama
 from tinkerkit.project import Project
 from tinkerkit.settings import Home, Log, Store
+from tinkerkit.web import WebPage, readable
 
 REAL_HOME = Home.root
 MODEL = "fake-model"
@@ -245,6 +246,11 @@ def criterion(id, test, behaviour="does it", status="todo", cycle="base", **more
 
 def file_block(path, body):
     return f"<<<FILE {path}>>>\n{body}\n<<<END>>>"
+
+
+def web_page(url, text, kind="text/plain"):
+    title, blocks = readable(text, kind)
+    return WebPage(url, kind, text.encode(), blocks, title, "")
 
 
 def plan_of(folder):

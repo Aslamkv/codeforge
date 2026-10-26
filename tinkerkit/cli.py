@@ -130,7 +130,6 @@ class Cli:
         "models": False,
         "use_model": None,
         "embed": None,
-        "use_web": None,
         "calibrate": None,
         "learn": None,
         "research": None,
@@ -336,13 +335,11 @@ class Cli:
             prog=f"tinker {command}", allow_abbrev=False, description=found.about
         )
         for argument in found.arguments:
-            choices = list(Internet.backends()) if argument.choices == "backends" else argument.choices
             parser.add_argument(
                 argument.dest,
                 nargs=argument.nargs,
                 metavar=argument.metavar,
                 help=argument.help,
-                choices=choices,
             )
         for option in found.options:
             if option.metavar:
@@ -367,7 +364,7 @@ class Cli:
         match command:
             case "reset" | "restart" | "models" | "memory" | "runs" | "doctor":
                 return True
-            case "use-model" | "calibrate" | "embed" | "use-web":
+            case "use-model" | "calibrate" | "embed":
                 return Cli.non_empty(given.name, command, parser)
             case "resume" | "status" | "log":
                 return Cli.project_named(given.words, parser)
@@ -538,7 +535,6 @@ class Commands:
             "models": self.list_models,
             "use-model": lambda: self.use_model(args.use_model),
             "embed": lambda: self.embed(args.embed),
-            "use-web": lambda: self.use_web(args.use_web),
             "calibrate": self.calibrate,
             "learn": self.learn,
             "research": self.research,
@@ -572,16 +568,14 @@ class Commands:
         for key in Config.settable():
             if key not in ("ollama_url",):
                 say.text(f"{key + ':':16} {Config.get(key)!r}")
-        say.text(
-            f"web:             {Config.get('web') or 'none'} ({Internet.state()}; used by tinker learn and --web only)"
-        )
+        say.text(f"web:             {Internet.state()}")
         embed = (
             Config.get("embed_model")
             or "none: select one with tinker embed NAME (tinker learn and --web need one)"
         )
         say.text(f"embed_model:     {embed}")
         say.text(
-            "Set one with tinker config KEY VALUE (the model, the embedding model and the web have their own commands)."
+            "Set one with tinker config KEY VALUE (the model and the embedding model have their own commands)."
         )
 
     @staticmethod
@@ -653,11 +647,6 @@ class Commands:
         say.done(
             f"Embedding model: {name}; what was learned is indexed with it from the next tinker learn or run on"
         )
-
-    @staticmethod
-    def use_web(name):
-        Config.save(web=name)
-        say.done(f"Web search: {name}; {Internet.state()}")
 
     def calibrate(self):
         Calibrator(Models.installed(self.args.calibrate)).run()
@@ -735,8 +724,7 @@ class Commands:
     def learning_tools(option):
         name, settings = Commands.checked_model()
         embeddings = Embeddings.required(option)
-        internet = Internet.required(option)
-        return LearningTools(Commands.model_in_use(name, settings), embeddings, internet)
+        return LearningTools(Commands.model_in_use(name, settings), embeddings, Internet())
 
     @staticmethod
     def checked_model():
@@ -770,7 +758,7 @@ class Commands:
     def teach(self):
         teaching = self.args.teach
         name, settings = Commands.checked_model()
-        internet = Internet.required("tinker teach")
+        internet = Internet()
         model, memory = Commands.model_in_use(name, settings), Memory(Embeddings.configured())
         Commands.reported(
             f"Teaching: {first_line(teaching, 60)}",
@@ -1163,7 +1151,7 @@ class Doctor:
             DoctorCheck(True, "Ollama", self.ollama),
             DoctorCheck(True, "model", self.model),
             DoctorCheck(False, "embedding model (for tinker learn and --web)", self.embedding),
-            DoctorCheck(False, "web (for tinker learn and --web)", self.web),
+            DoctorCheck(False, "web search", self.web),
             DoctorCheck(False, "tinker command", self.command),
         ]
 
@@ -1201,10 +1189,7 @@ class Doctor:
 
     @staticmethod
     def web():
-        state = Internet.state()
-        if not state.startswith("ready"):
-            raise SystemExit(state)
-        return state
+        return Internet.state()
 
     @staticmethod
     def command():
@@ -1251,7 +1236,7 @@ class ProjectRun:
         TaughtCommands.stop_if_broken()
         if self.args.web:
             Embeddings.required("--web")
-            self.internet = Internet.required("--web")
+            self.internet = Internet()
         else:
             Embeddings.check()
         makes_its_own_folder = self.args.workdir is None

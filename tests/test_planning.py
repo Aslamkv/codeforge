@@ -14,6 +14,7 @@ from tinkerkit.planning import (
     asked,
 )
 from tinkerkit.prompts import Reply
+from tinkerkit.web import Internet
 from tinkerkit.workspace import Toolchain
 
 
@@ -576,14 +577,6 @@ def test_topic_listing_fits_the_room():
     assert Recaller.topic_listing(known, ["b", "a"], 16) == "- b: B, second"
 
 
-class Web:
-    def available(self):
-        return True
-
-    def problem(self, key=None):
-        return ""
-
-
 @pytest.mark.spec("PLN-2")
 def test_recall_with_the_web_learns_what_it_needs(make_project, make_session, fake_ollama, monkeypatch):
     topic("flask", name="Flask", facts=[{"phase": "code", "text": "Flask routes use decorators"}])
@@ -598,7 +591,7 @@ def test_recall_with_the_web_learns_what_it_needs(make_project, make_session, fa
         json.dumps({"use": ["flask", "unknown"], "learn": ["Celery", "celery", "Redis", "RQ"]}), when="Recall"
     )
     cycle = project.cycles[0]
-    Recaller(make_session(project, internet=Web())).run(cycle)
+    Recaller(make_session(project, internet=Internet())).run(cycle)
     assert learned == ["Celery", "Redis"] and cycle["topics"] == ["celery", "redis", "flask"]
     prompt = fake_ollama.calls[0]["messages"][1]["content"]
     assert "possible: name up to 2 topics to learn" in prompt and "- flask: Flask" in prompt
@@ -610,7 +603,7 @@ def test_recall_goes_on_when_its_call_fails(make_project, make_session, fake_oll
     project = make_project(cycles=[{"id": "base", "request": "a Flask app", "phase": "recall"}])
     fake_ollama.reply("no json", when="Recall", times=2)
     cycle = project.cycles[0]
-    Recaller(make_session(project, internet=Web())).run(cycle)
+    Recaller(make_session(project, internet=Internet())).run(cycle)
     assert cycle["topics"] == [] and "Going on without what was learned" in capsys.readouterr().out
 
 

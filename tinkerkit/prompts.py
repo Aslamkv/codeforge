@@ -704,20 +704,16 @@ programming language; "tool" for a library, framework or tool used in code; "dom
 standard or subject a program must get right (food bank inventory, accessibility rules), which is researched.
 Give its name, its newest stable version the pages name (else ""), and one sentence on what it is;
 "language": the language's name when it is one, else the language a tool is used with ("" when none);
-"docs": its official documentation site: "root", the address of its newest documentation, and "versioned",
-the address of one version's documentation with {{version}} where the version goes ("" when the site has no
-such addresses);
 "commands": up to {MAX_VERSION_COMMANDS} commands that show its installed version and exit (one command each: no shell
 operators, nothing installed or changed);
 "tools": for a language only, one per role it has, of {", ".join(TOOL_ROLES)}: the one the topic names, else
-the one most used today, each with the command that shows its version and its "docs" as above;
+the one most used today, each with the command that shows its version;
 "hints": for some slots of its kind, a few words on what to look for about this topic;
 "followups": for each slot of its kind its documentation may not answer, one web search that answers it.
 Reply with ONLY JSON (this example is for Go):
 {{"kind":"language","name":"Go","version":"1.25","summary":"A compiled, statically typed language with built-in
-concurrency.","language":"Go","docs":{{"root":"https://go.dev/doc/","versioned":""}},"commands":["go version"],
- "tools":[{{"role":"lint","name":"golangci-lint","command":"golangci-lint --version",
-   "docs":{{"root":"https://golangci-lint.run/","versioned":""}}}}],
+concurrency.","language":"Go","commands":["go version"],
+ "tools":[{{"role":"lint","name":"golangci-lint","command":"golangci-lint --version"}}],
  "hints":{{"toolchain":"go test, gofmt, go vet, go mod"}},"followups":{{"limitations":"Go garbage collector limits"}}}}"""
 
     DIGEST_SYSTEM = f"""Answer one question about a topic for a code generator that knows only what it was trained on,

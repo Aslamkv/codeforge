@@ -1,6 +1,7 @@
 import json
 
 import pytest
+from conftest import web_page
 
 from tinkerkit.knowledge import (
     Embeddings,
@@ -26,6 +27,7 @@ from tinkerkit.settings import (
     Config,
     Home,
 )
+from tinkerkit.web import WebPage
 from tinkerkit.workspace import Toolchain
 
 
@@ -427,31 +429,22 @@ def test_relevant_chunks():
 
 
 class FakeInternet:
-    def __init__(self, pages=None, up=True):
-        self.pages, self.up = pages or {}, up
-
-    def available(self):
-        return self.up
-
-    def problem(self, key=None):
-        return "offline" if not self.up else "no answer"
+    def __init__(self, pages=None, results=None, snippets=None):
+        self.pages, self.results, self.snippets = pages or {}, results, snippets or {}
+        self.fetches = []
 
     def search(self, query, count):
-        if not self.up:
-            return None
-        return [{"title": url, "url": url, "content": ""} for url in self.pages][:count]
+        found = self.pages if self.results is None else self.results[query]
+        return [{"title": url, "url": url, "content": self.snippets.get(url, "")} for url in found][:count]
 
-    def fetch(self, url):
-        return {"title": url, "url": url, "content": self.pages[url]} if self.up else None
+    def fetch(self, urls, max_bytes=None):
+        self.fetches.append(list(urls))
+        return [self.page(url) for url in urls]
 
-
-class SearchedInternet(FakeInternet):
-    def __init__(self, pages, results):
-        super().__init__(pages)
-        self.results = results
-
-    def search(self, query, count):
-        return [{"title": url, "url": url, "content": ""} for url in self.results[query]][:count]
+    def page(self, url):
+        if url not in self.pages:
+            return WebPage.failed(url, "HTTP 404")
+        return web_page(url, self.pages[url])
 
 
 @pytest.mark.spec("KNW-24")
@@ -461,15 +454,43 @@ def test_web_pages_reads_each_address_once_up_to_the_cap(make_model):
         "ruff": ["https://shared", "https://r1", "https://r2"],
         "black": ["https://shared", "https://empty", "https://b1"],
     }
-    internet = SearchedInternet(dict(pages, **{"https://empty": ""}), results)
+    internet = FakeInternet(dict(pages, **{"https://empty": ""}), results)
     read = Learner(make_model(), internet, None).web_pages(["ruff", "black"])
     assert len(read) <= TEACH_PAGES
     assert [page["url"] for page in read] == ["https://shared", "https://r1", "https://r2"]
+    assert internet.fetches == [["https://shared", "https://r1", "https://empty", "https://r2"]]
     assert read[0] == {
         "title": "https://shared",
         "url": "https://shared",
         "content": "what https://shared says",
     }
+
+
+@pytest.mark.spec("KNW-24")
+def test_a_page_the_web_could_not_read_stands_on_its_search_snippet(make_model):
+    internet = FakeInternet(
+        {}, {"ruff": ["https://gone", "https://bare"]}, {"https://gone": "Ruff replaces black"}
+    )
+    read = Learner(make_model(), internet, None).web_pages(["ruff"])
+    assert read == [{"title": "https://gone", "url": "https://gone", "content": "Ruff replaces black"}]
+
+
+@pytest.mark.spec("KNW-24")
+def test_a_research_round_reads_its_pages_from_one_fetch(make_model, fake_ollama):
+    fake_ollama.reply(json.dumps({"facts": [{"phase": "spec", "text": "Food is weighed"}]}), when="Facts")
+    internet = FakeInternet(
+        {"https://a.org": "Food is weighed."},
+        {"weigh": ["https://a.org", "https://gone"], "count": ["https://gone", "https://bare"]},
+        {"https://bare": ""},
+    )
+    learner = Learner(make_model(), internet, None)
+    searches = [
+        {"query": query, "pages": 2, "section": "1", "focus": "weighing"} for query in ("weigh", "count")
+    ]
+    facts, sources = learner.read_web("food", searches, 3)
+    assert internet.fetches == [["https://a.org", "https://gone", "https://bare"]]
+    assert sources == ["https://a.org"] and facts[0]["text"] == "Food is weighed"
+    assert learner.notes == ["page https://gone: HTTP 404", "page https://bare: HTTP 404"]
 
 
 @pytest.mark.spec("KNW-24")
@@ -479,9 +500,7 @@ def test_web_pages_keep_the_first_chunk_and_the_best_about_the_searches(make_mod
         + [f"filler {number} " * 120 for number in range(6)]
         + ["black and ruff formatter " * 40]
     )
-    internet = SearchedInternet(
-        {"https://long": "\n\n".join(paragraphs)}, {"ruff formatter": ["https://long"]}
-    )
+    internet = FakeInternet({"https://long": "\n\n".join(paragraphs)}, {"ruff formatter": ["https://long"]})
     [page] = Learner(make_model(), internet, None).web_pages(["ruff formatter"])
     assert len(page["content"]) <= TEACH_PAGE_CHARS
     assert page["content"].startswith("intro to the page") and "black and ruff formatter" in page["content"]
@@ -740,7 +759,8 @@ def test_research_a_domain(make_model, fake_ollama, tinker_home):
         when="Analyse the findings",
     )
     fake_ollama.reply(analysis(), when="Analyse the findings")
-    entry = Researcher(Learner(make_model(), FakeInternet(pages), None)).research("food bank inventory")
+    internet = FakeInternet(pages)
+    entry = Researcher(Learner(make_model(), internet, None)).research("food bank inventory")
     assert entry["kind"] == "research" and entry["name"] == "Food bank inventory"
     assert entry["questions"] == FRAME["questions"] and entry["open"] == []
     assert entry["facts"][0]["confidence"] == "corroborated" and entry["facts"][0]["sites"] == [
@@ -752,6 +772,17 @@ def test_research_a_domain(make_model, fake_ollama, tinker_home):
         "Analyse the findings"
     ) == 2
     assert Library.read("food-bank-inventory")["kind"] == "research"
+    assert len(internet.fetches) == 2 and internet.fetches[0] == list(pages)
+
+
+@pytest.mark.spec("KNW-18")
+def test_a_research_that_finds_nothing_keeps_the_earlier_one(make_model, tinker_home, capsys):
+    earlier = dict(FRAME, kind="research", learned="2026-01-01", facts=[], findings=[])
+    Library.save("food-bank-inventory", earlier)
+    learner = Learner(make_model(), FakeInternet(), None)
+    kept = Researcher(learner).research("food bank inventory")
+    assert kept["learned"] == "2026-01-01" and learner.kept_earlier_topic
+    assert "No page gave facts; kept what was found before (2026-01-01)" in capsys.readouterr().out
 
 
 SOURCES = [{"id": "fact1", "text": "a"}, {"id": "fact2", "text": "b"}, {"id": "lesson1", "text": "c"}]

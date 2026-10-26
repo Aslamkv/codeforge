@@ -64,7 +64,7 @@ def test_a_learn_is_one_topic_or_a_command_of_yours():
         (["status", "@abc", "--workdir", "x"], None),
         (["rename", "bad name!"], None),
         (["learn", " "], None),
-        (["use-web", "bing"], None),
+        (["use-web", "duckduckgo"], "no command 'use-web'"),
         (["resume", "@abc", "--workdir", "x"], None),
         (["add"], None),
         (["config", "only-a-key"], None),
@@ -115,7 +115,6 @@ def test_projects_are_named_with_an_at(tmp_path):
         and parse("runs").runs is True
     )
     assert parse("log", "@calc", "--calls").log == "calc" and parse("log").calls is False
-    assert parse("use-web", "duckduckgo").use_web == "duckduckgo"
     assert parse("config").config == [] and parse("config", "test_timeout", "90").config == [
         "test_timeout",
         "90",
@@ -165,14 +164,12 @@ def test_help_markup_and_one_command(capsys, monkeypatch):
 
 
 @pytest.mark.spec("CLI-3")
-def test_use_model_and_use_web(home_store, capsys):
+def test_use_model(home_store, capsys):
     with pytest.raises(SystemExit, match="has not been measured"):
         Commands.use_model("ghost")
     Models.keep("m", MEASURED)
     Commands.use_model("m")
-    Commands.use_web("duckduckgo")
-    assert Config.get("model") == "m" and Config.get("web") == "duckduckgo"
-    assert "Web search: duckduckgo" in capsys.readouterr().out
+    assert Config.get("model") == "m" and "Model in use: m" in capsys.readouterr().out
 
 
 @pytest.mark.spec("CLI-3")
@@ -238,7 +235,7 @@ def test_config(measured_model, capsys):
         "think:           high for planning, medium for building",
         "keep_alive:      0",
         "test_timeout:    60",
-        "web:             ollama",
+        "web:             the standard search (no OLLAMA_API_KEY)",
     ):
         assert line in out, line
     Commands(parse("config", "test_timeout", "90")).run()
@@ -251,9 +248,12 @@ def test_doctor(monkeypatch, capsys):
         "Ollama",
         "model",
         "embedding model (for tinker learn and --web)",
-        "web (for tinker learn and --web)",
+        "web search",
         "tinker command",
     ]
+    assert Doctor.web() == "the standard search (no OLLAMA_API_KEY)"
+    monkeypatch.setenv("OLLAMA_API_KEY", "key")
+    assert Doctor.web() == "ollama.com search, the standard search as fallback"
     with pytest.raises(SystemExit, match="does not answer"):
         Doctor.ollama()
     ok = lambda: "fine"
@@ -784,9 +784,6 @@ def test_learning_checks_everything_before_loading(measured_model, fake_ollama, 
     with pytest.raises(SystemExit, match="tinker learn needs an embedding model"):
         Commands(parse("learn", "Flask")).run()
     Config.save(embed_model="embedder")
-    with pytest.raises(SystemExit, match="tinker learn needs the Internet plugin"):
-        Commands(parse("learn", "Flask")).run()
-    Config.save(web="duckduckgo")
     monkeypatch.setattr(cli.SlotLearner, "learn", lambda self, topic, deep=False: None)
     with pytest.raises(SystemExit, match="Nothing learned about Flask; nothing saved."):
         Commands(parse("learn", "Flask")).run()
@@ -807,9 +804,6 @@ def test_research_checks_everything_before_loading_and_finding_nothing_is_an_err
     with pytest.raises(SystemExit, match="tinker research needs an embedding model"):
         Commands(parse("research", "food", "banks")).run()
     Config.save(embed_model="embedder")
-    with pytest.raises(SystemExit, match="tinker research needs the Internet plugin"):
-        Commands(parse("research", "food", "banks")).run()
-    Config.save(web="duckduckgo")
     monkeypatch.setattr(cli.Researcher, "research", lambda self, topic: None)
     with pytest.raises(SystemExit, match="Nothing found about food banks; nothing saved."):
         Commands(parse("research", "food", "banks")).run()

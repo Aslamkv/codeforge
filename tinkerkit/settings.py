@@ -23,29 +23,22 @@ DEFAULT_CONFIG = frozendict(
         "max_growth": 1.15,
         "build_think": "medium",
         "test_timeout": 60,
-        "web": "ollama",
-        "web_fallback": "",
         "web_timeout": 30,
-        "web_backoff": 20,
         "learn_missing": 2,
         "learn_cutoff": 0.0,
         "learn_pages": 8,
         "learn_min_pages": 2,
         "learn_searches": 3,
         "learn_think": "low",
-        "docs_pages": 30,
         "tool_docs_pages": 5,
         "docs_latest_days": 30,
         "fetch_workers": 6,
         "fetch_timeout": 15,
         "fetch_max_bytes": 2000000,
-        "fetch_domain_delay": 0.1,
-        "fetch_fallbacks": 2,
         "embed_model": "",
         "projects": "~/Projects",
     }
 )
-WEB_BACKENDS = ("ollama", "duckduckgo")
 
 
 class Setting(namedtuple("Setting", "kind owner least whole above", defaults=("config", None, False, False))):
@@ -76,8 +69,6 @@ class Setting(namedtuple("Setting", "kind owner least whole above", defaults=("c
                 return value in ("high", "medium", "low", True, False, None) and not (
                     value in (0, 1) and not isinstance(value, bool)
                 )
-            case "backend":
-                return value in ("", *WEB_BACKENDS)
         return value is None or isinstance(value, str)
 
     def in_range(self, value):
@@ -94,8 +85,6 @@ class Setting(namedtuple("Setting", "kind owner least whole above", defaults=("c
                 return "seconds (0, 300; -1 keeps the model loaded) or a duration (10m, 1h)"
             case "think":
                 return '"high", "medium", "low", true, false or null'
-            case "backend":
-                return "one of " + ", ".join(map(repr, WEB_BACKENDS)) + ' or "" (none)'
         return "text"
 
 
@@ -107,24 +96,18 @@ SETTINGS = frozendict(
         "max_growth": Setting("number", least=1, above=True),
         "build_think": Setting("think"),
         "test_timeout": Setting("number", least=1, whole=True),
-        "web": Setting("backend", "use-web"),
-        "web_fallback": Setting("backend"),
         "web_timeout": Setting("number", least=0, above=True),
-        "web_backoff": Setting("number", least=0),
         "learn_missing": Setting("number", least=1, whole=True),
         "learn_cutoff": Setting("number", least=0),
         "learn_pages": Setting("number", least=1, whole=True),
         "learn_min_pages": Setting("number", least=1, whole=True),
         "learn_searches": Setting("number", least=1, whole=True),
         "learn_think": Setting("think"),
-        "docs_pages": Setting("number", least=1, whole=True),
         "tool_docs_pages": Setting("number", least=0, whole=True),
         "docs_latest_days": Setting("number", least=0),
         "fetch_workers": Setting("number", least=1, whole=True),
         "fetch_timeout": Setting("number", least=1),
         "fetch_max_bytes": Setting("number", least=1000, whole=True),
-        "fetch_domain_delay": Setting("number", least=0),
-        "fetch_fallbacks": Setting("number", least=0, whole=True),
         "embed_model": Setting("text", "embed"),
         "projects": Setting("text"),
     }
@@ -257,8 +240,7 @@ MAX_RULE_CHARS = 200
 MAX_RULE_WHEN_CHARS = 80
 
 DOCS_SITE_SEARCH = "{topic} official documentation"
-SITE_MAP_FILES = ("llms.txt", "sitemap.xml")
-MAX_MAP_LINKS = 5000
+DOCS_VERSION_SEARCH = "{name} {version} documentation"
 RESULTS_PER_LEARN_SEARCH = 10
 MIN_USABLE_PAGE_CHARS = 400
 MAX_REDIRECTS = 5
@@ -270,7 +252,6 @@ SLOT_RELEVANT_SIMILARITY = 0.6
 SLOT_CANDIDATE_PASSAGES = 60
 MMR_BALANCE = 0.7
 FACTS_PER_SLOT = 6
-FIRST_BACKOFF_SECONDS = 1.0
 
 RESEARCH_QUESTIONS = 4
 SEARCHES_PER_RESEARCH_QUESTION = 2
@@ -462,7 +443,8 @@ class Home:
 class Config:
     @staticmethod
     def load():
-        return {**DEFAULT_CONFIG, **Home.store().items("config")}
+        stored = Home.store().items("config")
+        return {key: stored.get(key, default) for key, default in DEFAULT_CONFIG.items()}
 
     @staticmethod
     def save(**changes):

@@ -522,10 +522,10 @@ def focused(book, focus):
 
 def book_bytes(source):
     if is_web_address(source):
-        data, why = Internet.download(source, READ_MAX_BYTES)
-        if why:
-            raise SystemExit(f"Could not download {source}: {why}")
-        return data
+        [page] = Internet().fetch([source], READ_MAX_BYTES)
+        if page.why:
+            raise SystemExit(f"Could not download {source}: {page.why}")
+        return page.data
     path = Path(source).expanduser()
     if not path.is_file():
         raise SystemExit(f"No file at {source}: give a book's file or its web address.")
