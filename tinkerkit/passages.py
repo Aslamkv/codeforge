@@ -1,7 +1,6 @@
 import html.parser
 import re
 from dataclasses import dataclass
-lazy import urllib.parse
 
 lazy from .settings import MAX_PASSAGE_CHARS, MENU_LINK_SHARE, MIN_USABLE_PAGE_CHARS, NEAR_DUPLICATE_OVERLAP
 lazy from .text import host, split_text, words
@@ -285,33 +284,6 @@ def read_what_it_can(parser, markup):
         parser.close()
     except Exception:
         pass
-
-
-class Links(html.parser.HTMLParser):
-    def __init__(self, base):
-        super().__init__(convert_charrefs=True)
-        self.base, self.found, self.href, self.text = base, {}, None, []
-
-    @classmethod
-    def of(cls, markup, base):
-        parser = cls(base)
-        read_what_it_can(parser, markup)
-        return list(parser.found.items())
-
-    def handle_starttag(self, tag, attrs):
-        if tag == "a" and dict(attrs).get("href"):
-            self.href, self.text = dict(attrs)["href"], []
-
-    def handle_data(self, data):
-        if self.href is not None:
-            self.text.append(data)
-
-    def handle_endtag(self, tag):
-        if tag == "a" and self.href is not None:
-            url = urllib.parse.urldefrag(urllib.parse.urljoin(self.base, self.href))[0]
-            if url.startswith(("http://", "https://")):
-                self.found.setdefault(url, " ".join("".join(self.text).split()))
-            self.href = None
 
 
 MARKDOWN_LINK = re.compile(r"\[[^\]]*\]\([^)]*\)")
