@@ -707,7 +707,7 @@ def test_a_task_runs_as_its_own_tinker_and_its_plan_waits(desk, home_store):
     assert desk.status().startswith("🙋 **Tinker** · calc: a calculator waits for you")
 
 
-@pytest.mark.spec("CNV-23")
+@pytest.mark.spec("CNV-18")
 def test_research_in_a_chat_is_the_research_job_ending_with_its_answer(desk):
     desk, channel, script = desk
     say(desk, channel, "research the newest Python")
@@ -746,30 +746,26 @@ def test_a_confirmed_plan_is_kept_without_its_next_step_lines(desk):
     assert not [line for line in kept if line.startswith(("👉", "⏱"))]
 
 
+def a_features_plan(root):
+    return {
+        "run": "abc123",
+        "folder": root / "calc",
+        "title": "calc: history",
+        "plan": "📋 plan",
+        "so_far": "1 second (1 seconds)",
+        "stage": "spec",
+        "new": False,
+    }
+
+
 @pytest.mark.spec("CNV-12")
 def test_confirm_of_a_feature_builds_at_once_and_amend_changes_it(desk):
     desk, channel, script = desk
-    desk.waiting_plan = {
-        "run": "abc123",
-        "folder": desk.root / "calc",
-        "title": "calc: history",
-        "plan": "📋 plan",
-        "so_far": "1 second (1 seconds)",
-        "stage": "spec",
-        "new": False,
-    }
+    desk.waiting_plan = a_features_plan(desk.root)
     say(desk, channel, "amend also keep the date")
     wait_until(lambda: "amend @abc123 also keep the date" in calls_of(script))
     wait_until(lambda: not desk.busy())
-    desk.waiting_plan = {
-        "run": "abc123",
-        "folder": desk.root / "calc",
-        "title": "calc: history",
-        "plan": "📋 plan",
-        "so_far": "1 second (1 seconds)",
-        "stage": "spec",
-        "new": False,
-    }
+    desk.waiting_plan = a_features_plan(desk.root)
     say(desk, channel, "confirm @calc")
     wait_until(lambda: "resume @abc123" in calls_of(script))
 
@@ -918,18 +914,21 @@ def test_built_project(tmp_path):
     assert built_project("ccc") is None and built_project("nothing") is None
 
 
-@pytest.mark.spec("CNV-21", "JOB-10")
-def test_a_chat_pauses_the_job_that_runs_before_it_is_answered(desk, monkeypatch):
-    desk, channel, _ = desk
-    order = []
-
+def pausing_into(order):
     @contextlib.contextmanager
     def pausing():
         order.append("paused")
         yield
         order.append("goes on")
 
-    monkeypatch.setattr(desk.talk, "pausing_jobs", pausing)
+    return pausing
+
+
+@pytest.mark.spec("CNV-21", "JOB-10")
+def test_a_chat_pauses_the_job_that_runs_before_it_is_answered(desk, monkeypatch):
+    desk, channel, _ = desk
+    order = []
+    monkeypatch.setattr(desk.talk, "pausing_jobs", pausing_into(order))
     monkeypatch.setattr(desk.talk, "reply", lambda *asked: order.append("answered") or "the answer")
     say(desk, channel, "hello there")
     wait_until(lambda: any("the answer" in text for text in channel.texts()))
@@ -940,7 +939,7 @@ def test_a_chat_pauses_the_job_that_runs_before_it_is_answered(desk, monkeypatch
 ECHO_APP = "import sys\nprint('args:', sys.argv[1:])\nprint('input:', sys.stdin.read().strip())\n"
 
 
-@pytest.mark.spec("CNV-24")
+@pytest.mark.spec("CNV-23")
 def test_run_a_built_project(desk, tmp_path):
     desk, channel, _ = desk
     folder = built(tmp_path, "calc", "aaa111", f'"{sys.executable}" app.py')
@@ -958,7 +957,7 @@ def test_run_a_built_project(desk, tmp_path):
     assert "args: ['5', '+', '3']" in channel.texts()[-1]
 
 
-@pytest.mark.spec("CNV-24")
+@pytest.mark.spec("CNV-23")
 def test_run_with_nothing_to_run(desk, tmp_path):
     desk, channel, _ = desk
     desk.run_app(channel, "1", ["x"])
@@ -1001,11 +1000,16 @@ def test_the_status_is_sent_anew_as_tinker_starts_and_ends(desk, home_store, mon
     channel.claimed.close()
 
 
+def desk_with_a_started_chat(channel):
+    listening = Desk([channel], Path.cwd())
+    listening.chats_started.add(channel)
+    return listening
+
+
 @pytest.mark.spec("CNV-9")
 def test_every_status_is_sent_anew_the_one_before_taken_out(desk):
     channel = Recorder("bot")
-    listening = Desk([channel], Path.cwd())
-    listening.chats_started.add(channel)
+    listening = desk_with_a_started_chat(channel)
     listening.say_status("🔄 **Tinker** · working on calc")
     listening.say_status("🔄 **Tinker** · working on learn go")
     listening.say_status("🟢 **Tinker** · idle: send a task")
@@ -1018,8 +1022,7 @@ def test_every_status_is_sent_anew_the_one_before_taken_out(desk):
 @pytest.mark.spec("CNV-9")
 def test_a_job_says_its_status_as_it_starts_and_ends(desk, monkeypatch):
     channel = Recorder("bot")
-    listening = Desk([channel], Path.cwd())
-    listening.chats_started.add(channel)
+    listening = desk_with_a_started_chat(channel)
     listening.say_status()
 
     class Running:
@@ -1035,14 +1038,14 @@ def test_a_job_says_its_status_as_it_starts_and_ends(desk, monkeypatch):
     monkeypatch.setattr(listening, "spawn", lambda arguments: job)
     monkeypatch.setattr(listening, "follow", lambda process, reporter, task: None)
     listening.start_task(["learn", "go"], Path.cwd(), "learn go")
-    sent = [text for kind, _, _, text in channel.log if kind == "send"]
+    sent = channel.texts("send")
     assert sent[0].startswith("🟢 **Tinker** · idle")
     assert sent[1].startswith("🔄 **Tinker** · working on learn go\n\n🕒") and "learn go" in sent[2]
     listening.reporter.progress.snapshot["doing"] = "building"
     listening.reporter.update()
     assert listening.status() == "🔄 **Tinker** · working on learn go"
     listening.say_status("🔄 **Tinker** · working on learn go; calc in a terminal")
-    sent = [text for kind, _, _, text in channel.log if kind == "send"]
+    sent = channel.texts("send")
     assert "calc in a terminal" in sent[-2] and "building" in sent[-1]
     job.code = 0
     listening.ended(job, listening.reporter, listening.task)
@@ -1069,7 +1072,7 @@ def test_desk_refuses_a_chat_another_tinker_listens_to(desk):
         holder.claimed.close()
 
 
-@pytest.mark.spec("CNV-25")
+@pytest.mark.spec("CNV-24")
 def test_one_shot_commands(monkeypatch, capsys):
     monkeypatch.setattr(conversation, "commands_brief", lambda: "cmds")
     monkeypatch.setattr(sys, "stdin", io.StringIO(""))
@@ -1083,7 +1086,7 @@ def test_one_shot_commands(monkeypatch, capsys):
     assert "No model is in use yet" in capsys.readouterr().out
 
 
-@pytest.mark.spec("CNV-25")
+@pytest.mark.spec("CNV-24")
 def test_one_shot_command_runs_nothing_without_a_yes(
     monkeypatch, measured_model, fake_ollama, capsys, tmp_path
 ):
@@ -1100,7 +1103,7 @@ def test_one_shot_command_runs_nothing_without_a_yes(
 def attached(monkeypatch, home_store):
     import signal
 
-    handlers = {sig: signal.getsignal(sig) for sig in (conversation.JOB_STOP_SIGNAL,)}
+    handler = signal.getsignal(conversation.JOB_STOP_SIGNAL)
     monkeypatch.setattr(conversation, "PROGRESS_EDIT_SECONDS", 1000)
     started = []
     channel = Recorder()
@@ -1114,8 +1117,7 @@ def attached(monkeypatch, home_store):
     yield start, channel
     for task in started:
         task.reporter.ended = True
-    for sig, handler in handlers.items():
-        signal.signal(sig, handler)
+    signal.signal(conversation.JOB_STOP_SIGNAL, handler)
 
 
 @pytest.mark.spec("CNV-19")
@@ -1151,7 +1153,7 @@ def test_start_is_answered_with_a_welcome(desk):
     assert channel.texts()[-1] == welcome()
 
 
-@pytest.mark.spec("CNV-26")
+@pytest.mark.spec("CNV-25")
 def test_memory_graph_is_sent_as_a_file(desk, monkeypatch):
     desk, channel, _ = desk
     sent = []
@@ -1176,7 +1178,7 @@ def test_memory_graph_is_sent_as_a_file(desk, monkeypatch):
     )
 
 
-@pytest.mark.spec("CNV-26")
+@pytest.mark.spec("CNV-25")
 def test_the_terminal_opens_the_file_and_other_channels_send_where_it_is(monkeypatch, tmp_path):
     opened, printed = [], []
     monkeypatch.setattr(conversation.webbrowser, "open", opened.append)
@@ -1193,14 +1195,7 @@ def test_the_terminal_opens_the_file_and_other_channels_send_where_it_is(monkeyp
 @pytest.mark.spec("JOB-10")
 def test_a_command_line_run_once_confirmed_pauses_the_job_while_its_output_is_read(tmp_path, monkeypatch):
     order = []
-
-    @contextlib.contextmanager
-    def pausing():
-        order.append("paused")
-        yield
-        order.append("goes on")
-
-    talk = Talk("cmds", pausing_jobs=pausing)
+    talk = Talk("cmds", pausing_jobs=pausing_into(order))
     monkeypatch.setattr(Models, "quick", staticmethod(lambda: ("m", {}, None)))
     monkeypatch.setattr(
         Models, "quick_reply", staticmethod(lambda *asked: order.append("read") or "it says hi")

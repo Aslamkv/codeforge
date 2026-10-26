@@ -401,11 +401,8 @@ class Workspace:
         for path, edits in self.edits_inside_windows(reply, windows, change.notes).items():
             old = self.read(path)
             change.backups[path] = old
-            self.write(
-                path,
-                "\n".join(self.edited(old.splitlines(), self.without_overlaps(path, edits, change.notes)))
-                + "\n",
-            )
+            kept = self.without_overlaps(path, edits, change.notes)
+            self.write(path, "\n".join(self.edited(old.splitlines(), kept)) + "\n")
 
     @staticmethod
     def edits_inside_windows(reply, windows, notes):
@@ -594,11 +591,9 @@ class TaughtCommands:
         except OSError, subprocess.TimeoutExpired:
             return None
         definition = TaughtCommands.alias_definition(name, proc.stdout)
-        return (
-            None
-            if definition is None
-            else {"kind": "alias", "definition": definition, "from": f"your {Path(shell).name} alias"}
-        )
+        if definition is None:
+            return None
+        return {"kind": "alias", "definition": definition, "from": f"your {Path(shell).name} alias"}
 
     @staticmethod
     def alias_definition(name, printed):
@@ -980,11 +975,15 @@ class FileView:
 
     @staticmethod
     def first_line_using(lines, hints):
-        for word in sorted(set(re.findall(r"[A-Za-z_][A-Za-z0-9_]{3,}", hints)), key=len, reverse=True)[:40]:
+        for word in FileView.longest_names(hints):
             for index, line in enumerate(lines, 1):
                 if re.search(rf"(?<![\w]){re.escape(word)}(?![\w])", line):
                     return index
         return None
+
+    @staticmethod
+    def longest_names(text, count=40):
+        return sorted(set(re.findall(r"[A-Za-z_][A-Za-z0-9_]{3,}", text)), key=len, reverse=True)[:count]
 
     @staticmethod
     def window_view(lines, center, room):

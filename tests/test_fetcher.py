@@ -69,9 +69,8 @@ def site(monkeypatch):
 HTML = {"Content-Type": "text/html; charset=utf-8"}
 
 
-def fetcher(**given):
-    settings = {"workers": 4, "timeout": 5, "max_bytes": 100_000, **given}
-    return Fetcher(settings.pop("workers"), settings.pop("timeout"), settings.pop("max_bytes"), **settings)
+def fetcher(max_bytes=100_000):
+    return Fetcher(workers=4, timeout=5, max_bytes=max_bytes)
 
 
 @pytest.mark.spec("FET-1")

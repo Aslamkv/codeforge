@@ -448,9 +448,7 @@ class Cli:
 
     @staticmethod
     def lists_readings(words):
-        return words[0] == "list" and (
-            len(words) == 1 or (len(words) == 2 and words[1].isdigit() and int(words[1]) > 0)
-        )
+        return words[0] == "list" and (len(words) == 1 or (len(words) == 2 and Cli.is_page(words[1])))
 
     @staticmethod
     def non_empty(value, command, parser):
@@ -650,12 +648,12 @@ class Commands:
         Calibrator(Models.installed(self.args.calibrate)).run()
 
     def learn(self):
-        args, option = self.args, "tinker learn"
-        topic, definition = args.learn[0].strip(), (args.learn[1] if len(args.learn) > 1 else None)
+        learn = self.args.learn
+        topic, definition = learn[0].strip(), (learn[1] if len(learn) > 1 else None)
         if definition is not None or TaughtCommands.alias(topic):
             TaughtCommands.teach(topic, definition)
             return
-        model, embeddings, internet = self.learning_tools(option)
+        model, embeddings, internet = self.learning_tools("tinker learn")
         Commands.reported(
             f"Learning {topic}",
             model,
@@ -735,6 +733,10 @@ class Commands:
     def model_in_use(name, settings):
         log = calls_log()
         say.keep_log(log)
+        return Commands.configured_model(name, settings, log)
+
+    @staticmethod
+    def configured_model(name, settings, log):
         return Model(
             name,
             settings,
@@ -1137,12 +1139,11 @@ class Doctor:
             except SystemExit as exc:
                 problems += required
                 (say.fail if required else say.warn)(f"{name}: {exc}")
-        if problems:
-            say.title(f"{problems} thing(s) to fix before a build can run.", Messages.ICONS["stop"])
-        else:
+        if not problems:
             say.title("Everything Tinker needs is there.", "🎉")
-        if problems:
-            raise SystemExit(1)
+            return
+        say.title(f"{problems} thing(s) to fix before a build can run.", Messages.ICONS["stop"])
+        raise SystemExit(1)
 
     def checks(self):
         return [
@@ -1255,7 +1256,7 @@ class ProjectRun:
         Jobs.retarget(["resume", f"@{self.record['id']}"])
         self.log = Log(project.store, "events")
         say.keep_log(self.log)
-        model = self.configured_model(model_name, settings)
+        model = Commands.configured_model(model_name, settings, self.log)
         self.record["model"] = model.name
         self.print_header(model, workdir)
         self.log_start(model)
@@ -1264,15 +1265,6 @@ class ProjectRun:
         )
         if project.language:
             say.info(f"Learned so far: {self.session.knowledge.summary()}", "🧠")
-
-    def configured_model(self, model_name, settings):
-        return Model(
-            model_name,
-            settings,
-            Config.keep_alive(Config.get("keep_alive")),
-            self.log,
-            max_growth=float(Config.get("max_growth")),
-        )
 
     def log_start(self, model):
         self.log.add(
@@ -1285,27 +1277,30 @@ class ProjectRun:
         )
 
     def print_header(self, model, workdir):
-        run, mode, args = self.record, self.mode, self.args
-        change = "fixing a bug" if args.bug else "adding a feature"
-        doing = {"new": "restarting" if self.args.restart else "new", "resume": "resuming", "change": change}[
-            mode
-        ]
-        with say.part(f"Run {run['id']} ({doing}): {run['task']}", "🚀"):
-            if mode == "change":
+        run, args = self.record, self.args
+        with say.part(f"Run {run['id']} ({self.doing()}): {run['task']}", "🚀"):
+            if self.mode == "change":
                 say.info(f"Request: {first_line(args.change_request, 200)}", "✏️")
             say.info(f"Project: {workdir}", "📁")
             say.info(f"Model: {model.name}; started {clock(self.started_at)}", "🤖")
         say.detail(
             f"model {model.name} (calibrated {model.settings.get('calibrated', '?')})   context {model.num_ctx}   "
-            f"input budget {model.max_tokens} tok   think {model.think}"
-            + (
-                f" (building: {model.build_think})"
-                if model.build_think and model.build_think != model.think
-                else ""
-            )
-            + f"   keep_alive {model.keep_alive}   reply limit per call (thinking included): {model.max_reply} "
-            f"tokens; fixes at most {model.fix_max}"
+            f"input budget {model.max_tokens} tok   think {self.thinking(model)}   keep_alive {model.keep_alive}   "
+            f"reply limit per call (thinking included): {model.max_reply} tokens; fixes at most {model.fix_max}"
         )
+
+    def doing(self):
+        if self.mode == "change":
+            return "fixing a bug" if self.args.bug else "adding a feature"
+        if self.mode == "resume":
+            return "resuming"
+        return "restarting" if self.args.restart else "new"
+
+    @staticmethod
+    def thinking(model):
+        if model.build_think and model.build_think != model.think:
+            return f"{model.think} (building: {model.build_think})"
+        return model.think
 
     def work_safely(self):
         try:
@@ -1334,14 +1329,14 @@ class ProjectRun:
         cycle = self.choose_cycle(brief)
         if cycle is not None and cycle.get("awaiting"):
             self.confirm_or_amend(cycle)
+        runner = CycleRunner(session)
         if cycle is None:
-            CycleRunner(session).show_plan()
+            runner.show_plan()
             say.done(
                 "Every cycle of this run is done; add a feature with tinker add, or fix a bug with tinker fix"
             )
             self.outcome.set("done")
             return
-        runner = CycleRunner(session)
         self.outcome.set(runner.run(cycle, web=self.internet is not None))
         self.stopped = runner.stopped
 
@@ -1681,21 +1676,19 @@ class CycleRunner:
         if not worker.TITLE:
             return self.result(worker.run(cycle))
         started = time.perf_counter()
-        with say.part(
-            worker.TITLE
-            + (
-                f" ({'project' if cycle['id'] == 'base' else 'feature ' + cycle['id']})"
-                if phase == "spec"
-                else ""
-            ),
-            Tracker.icon(phase),
-        ):
+        with say.part(self.phase_title(worker, phase, cycle), Tracker.icon(phase)):
             went = self.result(worker.run(cycle))
             if went is not False:
                 say.took(Tracker.done_words(phase), time.perf_counter() - started)
         if self.session.tracker is not None:
             self.session.tracker.outcome(self.outcome(phase, cycle))
         return went
+
+    @staticmethod
+    def phase_title(worker, phase, cycle):
+        if phase != "spec":
+            return worker.TITLE
+        return f"{worker.TITLE} ({'project' if cycle['id'] == 'base' else 'feature ' + cycle['id']})"
 
     def result(self, went):
         if isinstance(went, Stopped):

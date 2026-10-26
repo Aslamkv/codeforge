@@ -11,15 +11,40 @@ from test_conversation import Recorder
 from tinkerkit import cli, conversation, exercising, jobs
 from tinkerkit.cli import Cli, Commands
 from tinkerkit.conversation import Desk, Message
-from tinkerkit.jobs import JOB_STOP_SIGNAL, Jobs, archived, began_at, calls_log, is_job, journaled, today
+from tinkerkit.jobs import Jobs, archived, began_at, calls_log, is_job, journaled, today
 from tinkerkit.knowledge import Learner, Researcher
 from tinkerkit.learning import SlotLearner
 from tinkerkit.model import Ollama
-from tinkerkit.passages import Block
 from tinkerkit.project import Tracker
-from tinkerkit.web import Internet, WebPage
+from tinkerkit.settings import JOB_STOP_SIGNAL
 
 DEAD_PID = 999999999
+
+
+def put_job(home_store, number, **fields):
+    job = {
+        "number": number,
+        "command": "learn",
+        "title": "learn go",
+        "state": "stopped",
+        "pid": DEAD_PID,
+        "arguments": ["learn", "go"],
+        "started": "x",
+        "updated": "x",
+        **fields,
+    }
+    home_store.put("jobs", str(number), job)
+
+
+def research_job_started_on_jan_2(home_store):
+    put_job(
+        home_store,
+        1,
+        command="research",
+        title="research go",
+        arguments=["research", "go"],
+        today="2026-01-02",
+    )
 
 
 def stopped_job(home_store, argv, answers=()):
@@ -122,20 +147,7 @@ def test_a_tracker_that_ends_stopped_stops_the_job_and_says_how_to_go_on(home_st
 
 @pytest.mark.spec("JOB-2")
 def test_a_running_job_whose_process_is_gone_is_stopped(home_store):
-    home_store.put(
-        "jobs",
-        "3",
-        {
-            "number": 3,
-            "command": "learn",
-            "title": "learn go",
-            "state": "running",
-            "pid": DEAD_PID,
-            "arguments": ["learn", "go"],
-            "started": "x",
-            "updated": "x",
-        },
-    )
+    put_job(home_store, 3, state="running")
     assert Jobs.get(3)["state"] == "stopped" and Jobs.listed("stopped")[0]["number"] == 3
     assert [job["number"] for job in Jobs.lost()] == [3]
     stopped_job(home_store, ["learn", "rust"])
@@ -201,20 +213,7 @@ def test_model_calls_go_through_the_journal(home_store, monkeypatch):
 @pytest.mark.spec("JOB-4")
 def test_a_job_says_the_day_it_started(home_store):
     assert today() == datetime.date.today()
-    home_store.put(
-        "jobs",
-        "1",
-        {
-            "number": 1,
-            "command": "learn",
-            "title": "learn rust",
-            "state": "stopped",
-            "pid": DEAD_PID,
-            "arguments": ["learn", "rust"],
-            "today": "2026-01-02",
-            "updated": "x",
-        },
-    )
+    put_job(home_store, 1, title="learn rust", arguments=["learn", "rust"], today="2026-01-02")
     with Jobs.running(Jobs.arguments(["resume", "#1"])):
         assert today() == datetime.date(2026, 1, 2)
 
@@ -223,10 +222,8 @@ def test_a_job_says_the_day_it_started(home_store):
 def test_resume_runs_the_jobs_own_command_line(home_store):
     this_folders_run = ["resume"]
     assert Jobs.arguments(this_folders_run) == this_folders_run
-    assert Jobs.arguments(["resume", "@calc"]) == ["resume", "@calc"] and Jobs.arguments(["task", "x"]) == [
-        "task",
-        "x",
-    ]
+    assert Jobs.arguments(["resume", "@calc"]) == ["resume", "@calc"]
+    assert Jobs.arguments(["task", "x"]) == ["task", "x"]
     with pytest.raises(SystemExit, match="No job #4"):
         Jobs.arguments(["resume", "#4"])
     stopped_job(home_store, ["learn", "rust"])
@@ -260,19 +257,15 @@ def test_a_tasks_job_is_resumed_as_its_run(home_store):
 
 def keep_jobs(home_store, states):
     for number, state in enumerate(states, 1):
-        home_store.put(
-            "jobs",
-            str(number),
-            {
-                "number": number,
-                "command": "learn",
-                "title": f"learn topic {number}",
-                "state": state,
-                "pid": os.getpid() if state == "running" else DEAD_PID,
-                "arguments": ["learn", f"topic {number}"],
-                "started": "2026-10-23 09:00",
-                "updated": "2026-10-23 09:00",
-            },
+        put_job(
+            home_store,
+            number,
+            title=f"learn topic {number}",
+            state=state,
+            pid=os.getpid() if state == "running" else DEAD_PID,
+            arguments=["learn", f"topic {number}"],
+            started="2026-10-23 09:00",
+            updated="2026-10-23 09:00",
         )
 
 
@@ -395,20 +388,7 @@ def test_the_conversation_stops_and_resumes_jobs(home_store, tmp_path, monkeypat
 
 @pytest.mark.spec("JOB-4")
 def test_a_research_job_frames_its_topic_on_the_day_the_job_started(home_store, monkeypatch):
-    home_store.put(
-        "jobs",
-        "1",
-        {
-            "number": 1,
-            "command": "research",
-            "title": "research go",
-            "state": "stopped",
-            "pid": DEAD_PID,
-            "arguments": ["research", "go"],
-            "today": "2026-01-02",
-            "updated": "x",
-        },
-    )
+    research_job_started_on_jan_2(home_store)
     framed = {"name": "Go", "summary": "", "questions": [{"question": "Which release?", "queries": ["go"]}]}
     given = []
     monkeypatch.setattr(
@@ -422,19 +402,14 @@ def test_a_research_job_frames_its_topic_on_the_day_the_job_started(home_store, 
 
 
 def other_running(home_store, number=1, command="learn", title="learn go"):
-    home_store.put(
-        "jobs",
-        str(number),
-        {
-            "number": number,
-            "command": command,
-            "title": title,
-            "state": "running",
-            "pid": os.getppid(),
-            "arguments": title.split(),
-            "started": "x",
-            "updated": "x",
-        },
+    put_job(
+        home_store,
+        number,
+        command=command,
+        title=title,
+        state="running",
+        pid=os.getppid(),
+        arguments=title.split(),
     )
     home_store.put("job numbers", "last", number)
 
@@ -502,23 +477,15 @@ class Execd(Exception):
 
 
 def paused_job(home_store, number, pid=None, **more):
-    home_store.put(
-        "jobs",
-        str(number),
-        dict(
-            {
-                "number": number,
-                "command": "learn",
-                "title": f"learn {number}",
-                "state": "paused",
-                "pid": pid or os.getpid(),
-                "paused_by": 9,
-                "arguments": ["learn", str(number)],
-                "started": "x",
-                "updated": "x",
-            },
-            **more,
-        ),
+    put_job(
+        home_store,
+        number,
+        title=f"learn {number}",
+        state="paused",
+        pid=pid or os.getpid(),
+        paused_by=9,
+        arguments=["learn", str(number)],
+        **more,
     )
 
 
@@ -585,42 +552,9 @@ def test_paused_jobs_are_listed_between_running_and_stopped(home_store):
     )
 
 
-@pytest.mark.spec("JOB-3")
-def test_web_searches_and_fetches_go_through_the_journal(home_store, monkeypatch):
-    calls = []
-    page = WebPage("https://a.example", "text/plain", b"text", [Block("text", "text")], "", "")
-    internet = Internet()
-    monkeypatch.setattr(
-        internet, "searched", lambda query, count: calls.append(query) or [{"url": "https://a.example"}]
-    )
-    monkeypatch.setattr(internet, "fetched", lambda urls, max_bytes: calls.extend(urls) or [page])
-    with pytest.raises(KeyboardInterrupt), Jobs.running(["research", "go"]):
-        internet.search("go", 5), internet.fetch(["https://a.example"])
-        raise KeyboardInterrupt
-    with Jobs.running(Jobs.arguments(["resume", "#1"])):
-        assert internet.search("go", 5) == [{"url": "https://a.example"}]
-        assert internet.fetch(["https://a.example"]) == [page]
-        a_new_request = ("go", 10)
-        internet.search(*a_new_request)
-    assert calls == ["go", "https://a.example", "go"]
-
-
 @pytest.mark.spec("JOB-4")
 def test_a_learning_plan_says_the_day_the_job_started(home_store):
-    home_store.put(
-        "jobs",
-        "1",
-        {
-            "number": 1,
-            "command": "research",
-            "title": "research go",
-            "state": "stopped",
-            "pid": DEAD_PID,
-            "arguments": ["research", "go"],
-            "today": "2026-01-02",
-            "updated": "x",
-        },
-    )
+    research_job_started_on_jan_2(home_store)
     learner = SlotLearner.__new__(SlotLearner)
     learner.topic = "go"
     with Jobs.running(Jobs.arguments(["resume", "#1"])):

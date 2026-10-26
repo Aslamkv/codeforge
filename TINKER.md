@@ -53,7 +53,8 @@ parallel, like `curl` would.
 
 Tinker uses the web as you would: one search at a time, and only the pages its searches found. It never
 crawls a site. It only goes on the web when you ask: `tinker learn`, `tinker research`, `tinker teach`, a run
-with `--web`, or `tinker read` of a link. Offline, it says so once and goes on with what it has.
+with `--web`, `tinker read` of a link, or `tinker exercise` of a language it has not learned yet. Offline, it
+says so once and goes on with what it has.
 `tinker doctor` shows which search it uses.
 
 ## First Steps 🚀
@@ -129,7 +130,7 @@ Build from a spec you wrote:
 tinker task a calculator in Python --spec plan.md
 ```
 
-Look up the web while building:
+Look up the web while building (every run takes `--web`: `add`, `fix`, `amend`, `restart` and `resume` too):
 
 ```sh
 tinker task a weather app --web
@@ -254,6 +255,9 @@ tinker learn rust
 tinker learn Python 3.14
 tinker learn food bank inventory
 ```
+
+A domain is learned like a tool. To research one, its facts checked across sites, use `tinker research` (it is
+slower).
 
 A language or a tool is learned mainly from its own documentation, for the version you have installed
 (a language's tools too: its test runner, formatter, linter). The first time takes a search to find what it
@@ -380,8 +384,8 @@ again, and an exercise that was killed (or the computer restarted) goes on by it
 
 ## Jobs ⏯
 
-Everything that takes a while is a job: a task, `add`, `fix`, `calibrate`, `learn`, `ask`, `teach`, `read`,
-`research` and `exercise`. Each gets a number (`#1`, `#2` ...).
+Everything that takes a while is a job: a task (and `restart`, `confirm`, `amend`, `resume`), `add`, `fix`,
+`calibrate`, `learn`, `ask`, `teach`, `read`, `research` and `exercise`. Each gets a number (`#1`, `#2` ...).
 
 One job runs at a time. Start another, of any kind, or chat with Tinker, and the one that runs is paused: it
 saves itself and waits, and you are answered at once. As soon as Tinker is idle (no job runs, and nothing you
@@ -438,6 +442,14 @@ tinker help config                  # every setting you can change, with what it
 ```
 
 A value that does not fit is refused, with what the setting takes, and the old value stays.
+
+Choose where new projects go, and how long the model stays loaded after a call (before each call, other
+loaded models are unloaded):
+
+```sh
+tinker config projects ~/Code       # new projects (and the exercises) go here
+tinker config keep_alive 10m        # keep the model loaded 10 minutes (0, the default, unloads it at once)
+```
 
 Tune how `tinker learn` uses the web:
 

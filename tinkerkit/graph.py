@@ -11,6 +11,8 @@ HISTORY_LINKS = frozendict(
     {"born": "taught_by", "confirmed": "confirmed_in", "helped": "helped_in", "failed": "failed_in"}
 )
 
+RETIRED_KINDS = frozendict({"lessons": "lesson", "fixes": "fix", "findings": "finding", "rules": "rule"})
+
 
 class Graph:
     def __init__(self):
@@ -128,46 +130,41 @@ class Graph:
     def add_run(self, run_id, line):
         if f"run:{run_id}" in self.nodes:
             return
+        line = line or {}
         text = (
             line.get("task", "") if line else "no line about this run is kept (tinker clear runs, or older)"
         )
-        details = (
-            [
-                ("status", line.get("status", "")),
-                ("language", line.get("language", "")),
-                ("started", line.get("created", "")),
-                ("updated", line.get("updated", "")),
-            ]
-            if line
-            else []
-        )
-        self.node(
-            f"run:{run_id}", "run", f"@{run_id}", text, line.get("status") if line else None, "runs", details
-        )
+        details = [
+            ("status", line.get("status", "")),
+            ("language", line.get("language", "")),
+            ("started", line.get("created", "")),
+            ("updated", line.get("updated", "")),
+        ]
+        self.node(f"run:{run_id}", "run", f"@{run_id}", text, line.get("status"), "runs", details)
 
     def add_similar(self, embeddings):
         lessons = [
             node for node in self.nodes.values() if node["kind"] == "lesson" and node["status"] != "retired"
         ]
-        vectors = (
-            embeddings.vectors([lesson["text"] for lesson in lessons], keep=False)
-            if embeddings and lessons
-            else None
+        texts = [lesson["text"] for lesson in lessons]
+        vectors = embeddings.vectors(texts, keep=False) if embeddings and lessons else None
+        alike = (
+            self.alike_in_meaning(embeddings, vectors) if vectors else self.alike_in_words(embeddings, texts)
         )
-        if vectors:
-            self.similar_by = f"meaning ({embeddings.name})"
-            alike = lambda first, second: (
-                Embeddings.cosine(vectors[first], vectors[second]) >= SIMILAR_LESSON_MEANING
-            )
-        else:
-            why = embeddings.failed if embeddings else "no embedding model selected (tinker embed NAME)"
-            self.similar_by = f"words ({why})" if lessons else "words"
-            alike = lambda first, second: (
-                similarity(lessons[first]["text"], lessons[second]["text"]) >= SIMILAR_LESSON_WORDS
-            )
         for first, second in itertools.combinations(range(len(lessons)), 2):
             if alike(first, second):
                 self.link(lessons[first]["id"], lessons[second]["id"], "similar")
+
+    def alike_in_meaning(self, embeddings, vectors):
+        self.similar_by = f"meaning ({embeddings.name})"
+        return lambda first, second: (
+            Embeddings.cosine(vectors[first], vectors[second]) >= SIMILAR_LESSON_MEANING
+        )
+
+    def alike_in_words(self, embeddings, texts):
+        why = embeddings.failed if embeddings else "no embedding model selected (tinker embed NAME)"
+        self.similar_by = f"words ({why})" if texts else "words"
+        return lambda first, second: similarity(texts[first], texts[second]) >= SIMILAR_LESSON_WORDS
 
     def add_lesson(self, lesson, hub):
         details = [
@@ -229,9 +226,7 @@ class Graph:
 
     def add_retired(self, doc, hub, key):
         for number, item in enumerate(doc.get("retired", [])):
-            kind = {"lessons": "lesson", "fixes": "fix", "findings": "finding", "rules": "rule"}.get(
-                item.get("was"), "fact"
-            )
+            kind = RETIRED_KINDS.get(item.get("was"), "fact")
             text = (
                 item.get("text")
                 or item.get("answer")

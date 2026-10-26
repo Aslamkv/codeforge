@@ -83,11 +83,9 @@ class Reply:
         inside, ends_inside = Reply.string_states(text)
         out, stack = [], []
         for char, in_string in zip(text, inside):
-            if in_string:
-                pass
-            elif char in "{[":
+            if not in_string and char in "{[":
                 stack.append(Reply.closer(char))
-            elif char in "}]":
+            elif not in_string and char in "}]":
                 if char not in stack:
                     continue
                 Reply.close_until(char, out, stack)
@@ -238,13 +236,18 @@ class Reply:
 
     @staticmethod
     def files_ended(content):
-        end = content.rfind("<<<END>>>")
-        rest = content[end + 9 :] if end >= 0 else ""
-        return end >= 0 and "<<<FILE" not in rest and "<<<LINES" not in rest
+        rest = Reply.after_last_end(content)
+        return rest is not None and "<<<FILE" not in rest and "<<<LINES" not in rest
 
     @staticmethod
     def files_complete(content):
-        return Reply.files_ended(content) and len(content[content.rfind("<<<END>>>") + 9 :].strip()) >= 300
+        return Reply.files_ended(content) and len(Reply.after_last_end(content).strip()) >= 300
+
+    @staticmethod
+    def after_last_end(content):
+        end_mark = "<<<END>>>"
+        end = content.rfind(end_mark)
+        return None if end < 0 else content[end + len(end_mark) :]
 
     @staticmethod
     def wrote(paths):
@@ -269,6 +272,7 @@ class Reply:
 
 class Part:
     SHORTEST_KEPT_CHARS = 150
+    CUT_MARK = "[...]"
     PLACES = {"first": 0, None: 1, "last": 2}
 
     def __init__(self, title, text, required=False, keep="head", exact=False, atomic=False, place=None):
@@ -350,16 +354,14 @@ class Part:
         return self.size() if self.exact else min(self.size(), MIN_TRIMMED_PROSE_CHARS + len(self.title) + 12)
 
     def shortened(self, room):
-        marker = "[...]"
-        room -= len(marker) + 1
-        text = (
-            ""
-            if room <= 0
-            else (
-                self.text[:room] + "\n" + marker if self.keep == "head" else marker + "\n" + self.text[-room:]
-            )
-        )
+        room -= len(self.CUT_MARK) + 1
+        text = self.kept_text(room) if room > 0 else ""
         return Part(self.title, text, self.required, self.keep, self.exact, self.atomic, self.place)
+
+    def kept_text(self, room):
+        if self.keep == "head":
+            return self.text[:room] + "\n" + self.CUT_MARK
+        return self.CUT_MARK + "\n" + self.text[-room:]
 
     def relaxed(self):
         return Part(

@@ -43,8 +43,7 @@ class Messages:
 
     def __init__(self):
         self.depth, self.followers, self.log, self.drawn, self.frame = 0, [], None, False, 0
-        self.doing = ""
-        self.last_step = ""
+        self.doing, self.last_step = "", ""
 
     def title(self, text, icon=""):
         if self.depth == 0:
@@ -120,15 +119,18 @@ class Messages:
         self.tell(message)
 
     def live(self, text):
-        message = Message("live", text, self.depth + 1, "⏳")
         if sys.__stdout__.isatty():
-            width = shutil.get_terminal_size((80, 24)).columns
-            drawn = Message("live", text, self.depth + 1, self.SPINNER[self.frame % len(self.SPINNER)])
-            self.frame += 1
-            sys.__stdout__.write("\r" + drawn.line[: max(width - 1, 10)] + "\033[K")
-            sys.__stdout__.flush()
-            self.drawn = True
-        self.tell(message)
+            self.draw_live(text)
+        self.tell(Message("live", text, self.depth + 1, "⏳"))
+
+    def draw_live(self, text):
+        width = shutil.get_terminal_size((80, 24)).columns
+        spinner = self.SPINNER[self.frame % len(self.SPINNER)]
+        drawn = Message("live", text, self.depth + 1, spinner)
+        self.frame += 1
+        sys.__stdout__.write("\r" + drawn.line[: max(width - 1, 10)] + "\033[K")
+        sys.__stdout__.flush()
+        self.drawn = True
 
     @contextlib.contextmanager
     def working_on(self, doing):
@@ -178,7 +180,9 @@ class Messages:
 def human_duration(seconds):
     hours, rest = divmod(int(round(seconds)), 3600)
     minutes, secs = divmod(rest, 60)
-    return f"{hours}h {minutes}m {secs}s" if hours else (f"{minutes}m {secs}s" if minutes else f"{secs}s")
+    if hours:
+        return f"{hours}h {minutes}m {secs}s"
+    return f"{minutes}m {secs}s" if minutes else f"{secs}s"
 
 
 say = Messages()

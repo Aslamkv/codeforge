@@ -26,6 +26,15 @@ MEASURED = {
     "think": "high",
     "chars_per_token": 3.0,
 }
+CALC = "def add(a, b):\n    return a + b\n\n\ndef sub(a, b):\n    return a - b\n"
+CALC_TESTS = (
+    "import calc\n\n\ndef test_add():\n    assert calc.add(2, 3) == 5\n\n\n"
+    "def test_sub():\n    assert calc.sub(5, 3) == 2\n"
+)
+CALC_FILES = {
+    "calc.py": {"kind": "code", "role": "the calculator", "contract": [], "uses": []},
+    "test_calc.py": {"kind": "test", "role": "tests", "contract": [], "uses": ["calc.py"]},
+}
 
 
 @pytest.fixture(autouse=True)
@@ -44,7 +53,8 @@ def quiet_voice():
 
 @pytest.fixture(autouse=True)
 def no_job():
-    from tinkerkit.jobs import JOB_STOP_SIGNAL, Jobs
+    from tinkerkit.jobs import Jobs
+    from tinkerkit.settings import JOB_STOP_SIGNAL
 
     handler = signal.getsignal(JOB_STOP_SIGNAL)
     Jobs.current = Jobs.journal = Jobs.ended_status = None
@@ -228,6 +238,15 @@ def make_session(make_model):
         return Session(model or make_model(), project, internet=internet, confirm=confirm, tracker=tracker)
 
     return make
+
+
+@pytest.fixture
+def session(make_project, make_session, project_dir):
+    return make_session(
+        make_project(
+            toolchain=dict(TOOLCHAIN, setup=["echo ran >> setups.txt"], test_all="echo run >> runs.txt")
+        )
+    )
 
 
 def criterion(id, test, behaviour="does it", status="todo", cycle="base", **more):

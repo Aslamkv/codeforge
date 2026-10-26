@@ -16,13 +16,13 @@ lazy import webbrowser
 lazy from pathlib import Path
 
 from .commands import BY_NAME, COMMANDS, deletes, kind_of, refs
-from .jobs import JOB_STOP_SIGNAL, Jobs, alive, job_number, paused_for_you
+from .jobs import Jobs, alive, job_number, paused_for_you
 from .project import Runs, Tracker, saved
 lazy from .ledger import DONE_NOTE_KEPT_SECONDS, Ledger
 lazy from .messages import human_duration, say
 lazy from .model import Models, OllamaError
 lazy from .prompts import Prompts, Reply
-lazy from .settings import EXERCISE_FOLDER, Home, projects_folder
+lazy from .settings import EXERCISE_FOLDER, JOB_STOP_SIGNAL, Home, projects_folder
 lazy from .text import field
 lazy from .workspace import Toolchain
 
@@ -550,23 +550,19 @@ class Desk:
         folder, title = (waiting["folder"], waiting["title"]) if mine else (self.root, f"@{target}")
         target = waiting["run"] if mine else target
         if command == "confirm":
-            return self.on_task(
-                waiting if mine else {},
-                self.start_task(
-                    ["resume", f"@{target}"],
-                    folder,
-                    title,
-                    "✅ **Confirmed:** building it",
-                    keep=waiting["plan"] if mine else "",
-                ),
+            started = self.start_task(
+                ["resume", f"@{target}"],
+                folder,
+                title,
+                "✅ **Confirmed:** building it",
+                keep=waiting["plan"] if mine else "",
             )
-        change = " ".join(rest)
-        return self.on_task(
-            waiting if mine else {},
-            self.start_task(
+        else:
+            change = " ".join(rest)
+            started = self.start_task(
                 ["amend", f"@{target}", change], folder, title, md(t"✏️ **Changing the plan:** {change}")
-            ),
-        )
+            )
+        return self.on_task(waiting if mine else {}, started)
 
     @staticmethod
     def confirms_a_new_project(command, name, waiting):

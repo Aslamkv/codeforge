@@ -193,7 +193,7 @@ class Session:
         command = self.toolchain.format
         if not command:
             return
-        ok, failed = self.setup()
+        ok, _ = self.setup()
         if not ok:
             return
         code, output = self.workspace.run(self.toolchain.shell(command), timeout=SETUP_TIMEOUT, quiet=True)

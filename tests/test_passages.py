@@ -27,13 +27,19 @@ PAGE = f"""<!doctype html><html><head><title>Tool docs</title><style>p {{ color:
 
 
 @pytest.mark.spec("PAS-1")
-def test_html_is_told_by_its_content_type_or_its_first_tag():
-    assert is_html("anything", "text/html")
-    assert is_html("anything", "application/xhtml+xml")
-    assert is_html("\n  <!DOCTYPE html><p>x</p>", "")
-    assert is_html("<html><body>x</body></html>", "text/plain")
-    assert not is_html("# Title\n<html> later", "text/markdown")
-    assert not is_html('{"a": 1}', "application/json")
+@pytest.mark.parametrize(
+    "text,kind,html",
+    [
+        ("anything", "text/html", True),
+        ("anything", "application/xhtml+xml", True),
+        ("\n  <!DOCTYPE html><p>x</p>", "", True),
+        ("<html><body>x</body></html>", "text/plain", True),
+        ("# Title\n<html> later", "text/markdown", False),
+        ('{"a": 1}', "application/json", False),
+    ],
+)
+def test_html_is_told_by_its_content_type_or_its_first_tag(text, kind, html):
+    assert is_html(text, kind) == html
 
 
 @pytest.mark.spec("PAS-1")

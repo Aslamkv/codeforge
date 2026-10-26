@@ -32,23 +32,33 @@ def test_the_kind_of_a_command_and_of_its_actions_comes_from_the_table():
         "calibrate",
     ]
     assert [command.name for command in COMMANDS if command.kind == "pauses"] == ["chat", "command"]
-    assert kind_of(["read", "craft.md"]) == "job" and kind_of(["read", "list", "2"]) == "glance"
-    assert kind_of(["read", "show", "#1"]) == "glance" and kind_of(["exercise", "status"]) == "glance"
-    assert kind_of(["learn", "rust"]) == "job" and kind_of(["learn", "ll", "ls -l"]) == "glance"
-    assert (
-        kind_of(["learn", "Python", "3.14"]) == "job"
-        and kind_of(["learn", "gs", "=", "git", "status"]) == "glance"
-    )
-    assert (
-        kind_of(["help"]) == "glance" and kind_of(["history", "2"]) == "glance" and kind_of(["stop"]) == "own"
-    )
-    assert [kind_of(["channel", action]) for action in ("add", "remove", "start", "list")] == [
-        "terminal",
-        "terminal",
-        "terminal",
-        "glance",
-    ]
-    assert kind_of(["fly"]) is None and kind_of([]) is None
+
+
+@pytest.mark.spec("CMD-1")
+@pytest.mark.parametrize(
+    "argv,kind",
+    [
+        (["read", "craft.md"], "job"),
+        (["read", "list", "2"], "glance"),
+        (["read", "show", "#1"], "glance"),
+        (["exercise", "status"], "glance"),
+        (["learn", "rust"], "job"),
+        (["learn", "ll", "ls -l"], "glance"),
+        (["learn", "Python", "3.14"], "job"),
+        (["learn", "gs", "=", "git", "status"], "glance"),
+        (["help"], "glance"),
+        (["history", "2"], "glance"),
+        (["stop"], "own"),
+        (["channel", "add"], "terminal"),
+        (["channel", "remove"], "terminal"),
+        (["channel", "start"], "terminal"),
+        (["channel", "list"], "glance"),
+        (["fly"], None),
+        ([], None),
+    ],
+)
+def test_the_kind_of_an_action_comes_from_its_command(argv, kind):
+    assert kind_of(argv) == kind
 
 
 @pytest.mark.spec("CMD-1")
@@ -79,7 +89,7 @@ def test_runs_and_what_deletes():
         "fix",
         "resume",
     ]
-    for command in [command for command in COMMANDS if command.run and command.name != "restart"]:
+    for command in [command for command in COMMANDS if command.run]:
         assert "--web" in {option.flag for option in command.options}, command.name
     assert [
         command.name for command in COMMANDS if "--confirm" in {option.flag for option in command.options}
@@ -100,11 +110,17 @@ def test_project_references():
 
 
 @pytest.mark.spec("CLI-1")
-def test_a_learn_is_a_command_only_when_its_words_say_so():
-    assert taught_command(["gs", "=", "git", "status"]) == ("gs", "git status")
-    assert taught_command(["gs=git", "status"]) == ("gs", "git status")
-    assert taught_command(["serve", "python3 -m http.server"]) == ("serve", "python3 -m http.server")
-    assert taught_command(["ll", "none"]) == ("ll", "none")
-    assert taught_command(["Python", "3.14"]) is None
-    assert taught_command(["food", "bank", "inventory"]) is None
-    assert taught_command(["rust"]) is None
+@pytest.mark.parametrize(
+    "words,taught",
+    [
+        (["gs", "=", "git", "status"], ("gs", "git status")),
+        (["gs=git", "status"], ("gs", "git status")),
+        (["serve", "python3 -m http.server"], ("serve", "python3 -m http.server")),
+        (["ll", "none"], ("ll", "none")),
+        (["Python", "3.14"], None),
+        (["food", "bank", "inventory"], None),
+        (["rust"], None),
+    ],
+)
+def test_a_learn_is_a_command_only_when_its_words_say_so(words, taught):
+    assert taught_command(words) == taught

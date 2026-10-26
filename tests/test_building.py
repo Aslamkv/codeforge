@@ -1,7 +1,7 @@
 import json
 
 import pytest
-from conftest import PYTEST, criterion, file_block
+from conftest import CALC, CALC_FILES, CALC_TESTS, PYTEST, criterion, file_block
 
 from tinkerkit.building import (
     BugReproducer,
@@ -18,29 +18,20 @@ from tinkerkit.settings import TESTS_LOCKED_REASON
 from tinkerkit.workspace import Output, TestRef
 
 CALC_WITH_WRONG_SUB = "def add(a, b):\n    return a + b\n\n\ndef sub(a, b):\n    return a + b\n"
-FIXED = "def add(a, b):\n    return a + b\n\n\ndef sub(a, b):\n    return a - b\n"
-TESTS = (
-    "import calc\n\n\ndef test_add():\n    assert calc.add(2, 3) == 5\n\n\n"
-    "def test_sub():\n    assert calc.sub(5, 3) == 2\n"
-)
-FILES = {
-    "calc.py": {"kind": "code", "role": "the calculator", "contract": [], "uses": []},
-    "test_calc.py": {"kind": "test", "role": "tests", "contract": [], "uses": ["calc.py"]},
-}
 
 
 @pytest.fixture
 def calc(make_project, make_session, project_dir):
     (project_dir / "calc.py").write_text(CALC_WITH_WRONG_SUB)
-    (project_dir / "test_calc.py").write_text(TESTS)
+    (project_dir / "test_calc.py").write_text(CALC_TESTS)
     steps = [
         criterion("C1", "test_calc.py::test_add", "calc.add(2, 3) is 5"),
         criterion("C2", "test_calc.py::test_sub", "calc.sub(5, 3) is 2"),
     ]
     project = make_project(
         steps,
-        files=json.loads(json.dumps(FILES)),
-        cycles=[{"id": "base", "request": "a calculator", "phase": "verify", "files": list(FILES)}],
+        files=json.loads(json.dumps(CALC_FILES)),
+        cycles=[{"id": "base", "request": "a calculator", "phase": "verify", "files": list(CALC_FILES)}],
     )
     return make_session(project), project
 
@@ -55,7 +46,7 @@ def test_tests_are_written_for_the_criteria(make_project, make_session, fake_oll
         criterion("C1", "tests/test_calc.py::test_add", "calc.add(2, 3) is 5"),
         criterion("C2", "tests/test_calc.py::test_sub", "calc.sub(5, 3) is 3"),
     ]
-    project = make_project(steps, files={"calc.py": FILES["calc.py"]})
+    project = make_project(steps, files={"calc.py": CALC_FILES["calc.py"]})
     body = "import calc\n\ndef test_add():\n    assert calc.add(2, 3) == 5\n\ndef test_sub():\n    assert calc.sub(5, 3) == 2\n"
     fake_ollama.reply(
         "CRITERION test_sub: calc.sub(5, 3) is 2\n" + file_block("tests/test_calc.py", body), when="Tests"
@@ -142,21 +133,21 @@ def test_code_files_one_call_each_with_markers_written_empty(
     }
     project = make_project(files=files)
     cycle = dict(project.cycles[0], files=list(files))
-    named_without_its_folder = file_block("calc.py", FIXED)
+    named_without_its_folder = file_block("calc.py", CALC)
     fake_ollama.reply(named_without_its_folder, when="Write pkg/calc.py")
     CodeWriter(make_session(project)).write_all(cycle)
     assert (project_dir / "pkg" / "__init__.py").read_text() == ""
-    assert (project_dir / "pkg" / "calc.py").read_text() == FIXED and not (project_dir / "calc.py").exists()
+    assert (project_dir / "pkg" / "calc.py").read_text() == CALC and not (project_dir / "calc.py").exists()
     assert len(fake_ollama.calls) == 1 and cycle["code_done"] == ["pkg/__init__.py", "pkg/calc.py"]
 
 
 @pytest.mark.spec("BLD-4")
 def test_a_file_far_too_long_is_asked_for_again(make_project, make_session, fake_ollama, project_dir):
-    project = make_project(files={"calc.py": FILES["calc.py"]})
+    project = make_project(files={"calc.py": CALC_FILES["calc.py"]})
     fake_ollama.reply(file_block("calc.py", "x = 1\n" * 130), when="Write calc.py")
-    fake_ollama.reply(file_block("calc.py", FIXED), when="Write calc.py")
+    fake_ollama.reply(file_block("calc.py", CALC), when="Write calc.py")
     CodeWriter(make_session(project)).write_file(project.cycles[0], "calc.py")
-    assert (project_dir / "calc.py").read_text() == FIXED
+    assert (project_dir / "calc.py").read_text() == CALC
     assert "had 130 lines; keep it under 60" in fake_ollama.calls[1]["messages"][1]["content"]
 
 
@@ -189,10 +180,10 @@ def test_wiring(make_project, make_session, fake_ollama, project_dir):
 @pytest.mark.spec("BLD-6")
 def test_verify_fixes_a_failing_criterion(calc, fake_ollama, project_dir):
     session, project = calc
-    fake_ollama.reply("CAUSE: sub added\n" + file_block("calc.py", FIXED), when="Fix the code C2")
+    fake_ollama.reply("CAUSE: sub added\n" + file_block("calc.py", CALC), when="Fix the code C2")
     assert Verifier(session).run(project.cycles[0]) is True
     assert {criterion["status"] for criterion in project.criteria} == {"green"}
-    assert (project_dir / "calc.py").read_text() == FIXED
+    assert (project_dir / "calc.py").read_text() == CALC
     assert steps_of(project)["C2"]["history"] == ["fix: sub added -> passes"]
     assert project.spec["events"] == [{"kind": "fix", "text": "calc.sub(5, 3) is 2 | solved: sub added"}]
 
@@ -229,7 +220,10 @@ def test_a_stopped_run_is_put_back_from_its_restore_point(calc, project_dir, cap
     project.store.put(
         "restore",
         Verifier.RESTORE_POINT,
-        {"criterion": "C2", "files": {"calc.py": CALC_WITH_WRONG_SUB, "test_calc.py": TESTS, "new.py": None}},
+        {
+            "criterion": "C2",
+            "files": {"calc.py": CALC_WITH_WRONG_SUB, "test_calc.py": CALC_TESTS, "new.py": None},
+        },
     )
     (project_dir / "calc.py").write_text("half-done change\n")
     Verifier(session).recover_interrupted()
@@ -295,7 +289,7 @@ def test_what_a_fix_and_a_review_may_change(calc):
 @pytest.mark.spec("BLD-8")
 def test_a_fix_that_blames_the_test_changes_nothing(calc, fake_ollama, project_dir):
     session, project = calc
-    fake_ollama.reply("TEST WRONG: 5 - 3 is 2, the test is fine actually\n" + file_block("calc.py", FIXED))
+    fake_ollama.reply("TEST WRONG: 5 - 3 is 2, the test is fine actually\n" + file_block("calc.py", CALC))
     fix = attempt(session, project)
     assert fix.run() == ("fails", "it fails") and fix.only_wanted_test_change
     assert (project_dir / "calc.py").read_text() == CALC_WITH_WRONG_SUB
@@ -402,9 +396,9 @@ def test_a_model_fix_changes_only_config_files_and_commands(calc, fake_ollama, p
 def test_a_project_that_does_not_build_is_fixed(calc, fake_ollama, project_dir):
     session, project = calc
     (project_dir / "calc.py").write_text("def add(a, b)\n    return a + b\n")
-    fake_ollama.reply("CAUSE: a colon was missing\n" + file_block("calc.py", FIXED), when="Make it build")
+    fake_ollama.reply("CAUSE: a colon was missing\n" + file_block("calc.py", CALC), when="Make it build")
     assert Verifier(session).make_it_build() is None
-    assert (project_dir / "calc.py").read_text() == FIXED and fake_ollama.calls[0]["think"] is False
+    assert (project_dir / "calc.py").read_text() == CALC and fake_ollama.calls[0]["think"] is False
 
 
 @pytest.mark.spec("BLD-5")
@@ -419,7 +413,7 @@ def test_what_a_build_fix_may_change(calc):
 @pytest.fixture
 def bug(calc, project_dir):
     session, project = calc
-    (project_dir / "calc.py").write_text(FIXED)
+    (project_dir / "calc.py").write_text(CALC)
     for step in project.criteria:
         step["status"] = "green"
     project.cycles[0]["phase"] = "done"
@@ -431,7 +425,7 @@ def bug(calc, project_dir):
 def test_a_bug_is_reproduced_with_a_new_failing_test(bug, fake_ollama, project_dir):
     session, project, cycle = bug
     (project_dir / "calc.py").write_text(
-        FIXED.replace("return a + b", "return abs(a) + abs(b) if a < 0 else a + b")
+        CALC.replace("return a + b", "return abs(a) + abs(b) if a < 0 else a + b")
     )
     test = "import calc\n\n\ndef test_negative():\n    assert calc.add(-1, -1) == -2\n"
     fake_ollama.reply(

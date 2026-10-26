@@ -347,9 +347,7 @@ class SpecWriter(Phase):
         request = asked(cycle) + "\n" + cycle.get("brief", "")
         out = []
         for item in items if isinstance(items, list) else []:
-            text = (
-                str(item.get("text") or item.get("behaviour") or "").strip() if isinstance(item, dict) else ""
-            )
+            text = self.criterion_text(item)
             if not text:
                 continue
             source = field(item, "source")
@@ -372,6 +370,10 @@ class SpecWriter(Phase):
                 )
             )
         return out
+
+    @staticmethod
+    def criterion_text(item):
+        return str(item.get("text") or item.get("behaviour") or "").strip() if isinstance(item, dict) else ""
 
     @staticmethod
     def traced(source, request):
@@ -582,16 +584,19 @@ class SpecWriter(Phase):
             file["uses"] = [used for used in file["uses"] if used in paths and used != file["path"]]
         Designer.give_templates_a_renderer(files, entry)
         for file in files:
-            known = self.project.files.get(file["path"], {})
-            self.project.files[file["path"]] = {
-                "kind": file["kind"],
-                "role": file["role"] or known.get("role", ""),
-                "contract": known.get("contract", []),
-                "uses": list(dict.fromkeys(known.get("uses", []) + file["uses"])),
-            }
+            self.merge_designed(file)
         if entry or cycle["id"] == "base":
             self.project.spec["entry"] = entry
         cycle["files"] = Designer.order([file for file in files if file["path"] != ENV_FILE])
+
+    def merge_designed(self, file):
+        known = self.project.files.get(file["path"], {})
+        self.project.files[file["path"]] = {
+            "kind": file["kind"],
+            "role": file["role"] or known.get("role", ""),
+            "contract": known.get("contract", []),
+            "uses": list(dict.fromkeys(known.get("uses", []) + file["uses"])),
+        }
 
     @staticmethod
     def has_docs(files):

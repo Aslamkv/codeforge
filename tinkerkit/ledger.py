@@ -1,10 +1,8 @@
 from collections import namedtuple
 lazy import time
 
-lazy from .settings import Home, Numbered
+lazy from .settings import GLANCE_KEPT_SECONDS, MESSAGE_KEPT_SECONDS, Home, Numbered
 
-MESSAGE_KEPT_SECONDS = 24 * 3600
-GLANCE_KEPT_SECONDS = 120
 DONE_NOTE_KEPT_SECONDS = 5
 ANSWER_WINDOW_SECONDS = 60
 
@@ -34,11 +32,6 @@ class Ledger:
     @classmethod
     def lasting(cls, channel, chat, message):
         cls.change(channel, chat, message, until=None)
-
-    @classmethod
-    def is_lasting(cls, channel, chat, message):
-        view = Home.store().get(cls.VIEWS, key(channel, chat, message))
-        return view is not None and view.get("until") is None
 
     @classmethod
     def change(cls, channel, chat, message, **changes):

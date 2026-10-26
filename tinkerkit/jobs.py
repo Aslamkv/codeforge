@@ -11,7 +11,7 @@ lazy from pathlib import Path
 
 lazy from .commands import kind_of
 lazy from .messages import say
-lazy from .settings import EXERCISE_ENV, Home, Numbered, confirm_deletion
+lazy from .settings import EXERCISE_ENV, JOB_STOP_SIGNAL, Home, Numbered, confirm_deletion
 lazy from .store import Log
 lazy from .text import fingerprint, now_text
 
@@ -19,7 +19,6 @@ JOBS = Numbered("jobs", "job numbers")
 STATES = ("running", "paused", "stopped", "finished", "archived")
 JOB_PAUSE_GRACE_SECONDS = 150
 PAUSED_JOB_IDLE_LOOK_SECONDS = 1.0
-JOB_STOP_SIGNAL = signal.SIGUSR2
 
 
 class Journal:
@@ -108,7 +107,6 @@ class Jobs:
         ends = time.monotonic() + JOB_PAUSE_GRACE_SECONDS
         while Jobs.still_running(others) and time.monotonic() < ends:
             time.sleep(0.5)
-        return others
 
     @staticmethod
     def still_running(jobs):
@@ -186,11 +184,7 @@ class Jobs:
 
     @staticmethod
     def lost():
-        return [
-            job
-            for job in JOBS.newest()
-            if job.get("state") in ("running", "paused") and not alive(job.get("pid"), job.get("pid_began"))
-        ]
+        return [job for job in JOBS.newest() if is_lost(job)]
 
     @staticmethod
     def listed(state=None):
@@ -346,9 +340,11 @@ def job_number(word):
 
 
 def settled(job):
-    if job.get("state") in ("running", "paused") and not alive(job.get("pid"), job.get("pid_began")):
-        return dict(job, state="stopped")
-    return job
+    return dict(job, state="stopped") if is_lost(job) else job
+
+
+def is_lost(job):
+    return job.get("state") in ("running", "paused") and not alive(job.get("pid"), job.get("pid_began"))
 
 
 def alive(pid, began=None):

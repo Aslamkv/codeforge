@@ -175,9 +175,8 @@ class Runs:
         line = {key: run.get(key, "") for key in ("id", "task", "status", "created", "updated")}
         Home.store().put("runs", run["id"], dict(line, language=language or ""))
         lines = Home.store().items("runs")
-        for run_id in sorted(lines, key=lambda key: lines[key].get("updated", ""))[
-            : max(0, len(lines) - RUNS_KEPT)
-        ]:
+        oldest_first = sorted(lines, key=lambda key: lines[key].get("updated", ""))
+        for run_id in oldest_first[: max(0, len(lines) - RUNS_KEPT)]:
             Home.store().delete("runs", run_id)
 
     @staticmethod
@@ -372,8 +371,7 @@ class Project:
 
     def counts(self):
         green = sum(1 for criterion in self.criteria if criterion["status"] == "green")
-        parked = sum(1 for criterion in self.criteria if criterion["status"] == "blocked")
-        return green, parked, len(self.criteria)
+        return green, len(self.parked()), len(self.criteria)
 
     def parked(self):
         return [criterion for criterion in self.criteria if criterion["status"] == "blocked"]

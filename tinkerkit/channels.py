@@ -1,4 +1,5 @@
 from collections import namedtuple
+lazy import getpass
 lazy import http.client
 lazy import json
 lazy import queue
@@ -559,13 +560,7 @@ def ask(question, default="", choices=None, secret=False):
         raise SystemExit(
             f"tinker channel: {question} is needed (run it in a terminal, or give it as an option)"
         )
-    if secret:
-        import getpass
-
-        answer = getpass.getpass(f"{shown}: ")
-    else:
-        answer = input(f"{shown}: ")
-    answer = answer.strip() or default
+    answer = (getpass.getpass if secret else input)(f"{shown}: ").strip() or default
     if not answer:
         raise SystemExit(f"tinker channel: {question} is needed")
     return answer

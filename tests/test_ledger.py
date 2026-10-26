@@ -3,8 +3,8 @@ import time
 import pytest
 
 import tinkerkit.ledger as ledger
-from tinkerkit.ledger import GLANCE_KEPT_SECONDS, MESSAGE_KEPT_SECONDS, Ledger
-from tinkerkit.settings import PER_PAGE, Home
+from tinkerkit.ledger import Ledger
+from tinkerkit.settings import GLANCE_KEPT_SECONDS, MESSAGE_KEPT_SECONDS, PER_PAGE, Home
 
 
 @pytest.fixture
@@ -19,9 +19,7 @@ def test_each_message_goes_when_its_time_is_up(clock):
     Ledger.kept("bot", "42", 1)
     Ledger.glance("bot", "42", [2])
     Ledger.lasting("bot", "42", 3)
-    assert (
-        Ledger.due("bot") == [] and Ledger.glances("bot", "42") == [2] and Ledger.is_lasting("bot", "42", 3)
-    )
+    assert Ledger.due("bot") == [] and Ledger.glances("bot", "42") == [2]
     assert sorted(message for _, message in Ledger.passing("bot")) == [1, 2]
     clock[0] += GLANCE_KEPT_SECONDS
     assert Ledger.due("bot") == [("42", 2)]
@@ -30,7 +28,7 @@ def test_each_message_goes_when_its_time_is_up(clock):
     Ledger.touched("bot", "42", edited)
     Ledger.touched("bot", "42", the_status)
     clock[0] += 20
-    assert Ledger.due("bot") == [("42", 2)] and Ledger.is_lasting("bot", "42", 3)
+    assert Ledger.due("bot") == [("42", 2)]
     Ledger.gone("bot", "42", 2)
     assert Ledger.due("bot") == [] and Ledger.due("other") == []
 

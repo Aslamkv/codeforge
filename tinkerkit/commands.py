@@ -122,7 +122,7 @@ COMMANDS = [
         chat=True,
         run=True,
         deletes=True,
-        options=("yes", "confirm", "workdir"),
+        options=("yes", "web", "confirm", "workdir"),
     ),
     Command(
         "confirm",
