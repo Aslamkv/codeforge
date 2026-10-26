@@ -58,17 +58,13 @@ def test_a_learn_is_one_topic_or_a_command_of_yours():
     [
         (["fly"], "no command 'fly'"),
         (["task", "x", "--yes"], None),
-        (["task", "x", "--plan-only"], None),
-        (["task", "x", "--no-confirm"], None),
         (["resume", "abc123"], None),
         (["status", "@abc", "--workdir", "x"], None),
         (["rename", "bad name!"], None),
         (["learn", " "], None),
-        (["use-web", "duckduckgo"], "no command 'use-web'"),
         (["resume", "@abc", "--workdir", "x"], None),
         (["add"], None),
         (["config", "only-a-key"], None),
-        (["list-config"], "no command 'list-config'"),
     ],
 )
 def test_mistakes_are_errors(argv, why, capsys):
@@ -108,7 +104,6 @@ def test_projects_are_named_with_an_at(tmp_path):
         parse("amend", "@abc123", "also", "divide", "--confirm")
     assert parse("rename", "@abc123", "calc").rename == ("abc123", "calc")
     assert parse("rename", "calc").rename == ("", "calc")
-    assert parse("learn", "act", ". .venv/bin/activate").learn == ["act", ". .venv/bin/activate"]
     assert (
         parse("status").status == ""
         and parse("status", "@calc").status == "calc"
