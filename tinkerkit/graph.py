@@ -2,7 +2,7 @@ lazy import hashlib
 lazy import html
 lazy import itertools
 lazy import json
-lazy from collections import namedtuple
+lazy from collections import Counter, namedtuple
 
 lazy from .knowledge import Embeddings, Item, Library
 lazy from .messages import say
@@ -459,7 +459,8 @@ class MemoryBrowser:
         self.graph = graph
         self.hubs = [node for node in graph.nodes.values() if node["kind"] in self.HUBS]
         self.items = [node for node in graph.nodes.values() if node["kind"] not in (*self.HUBS, "run")]
-        self.ids = short_ids([item["id"] for item in self.items])
+        self.digests = {item["id"]: digest_of(item["id"]) for item in self.items}
+        self.ids = short_ids(self.digests)
         self.part_of = {
             link["source"]: graph.nodes[link["target"]]
             for link in graph.links
@@ -582,7 +583,7 @@ class MemoryBrowser:
             raise SystemExit(
                 f"A short ID has at least {MEMORY_ID_CHARS} digits, not {word!r}: tinker memory NAME lists them."
             )
-        found = [item for item in self.items if self.ids[item["id"]].startswith(wanted)]
+        found = [item for item in self.items if self.digests[item["id"]].startswith(wanted)]
         if not found:
             raise SystemExit(f"No item has the short ID {word!r}: tinker memory find WORDS finds one.")
         if len(found) > 1:
@@ -601,12 +602,17 @@ class MemoryBrowser:
         ]
 
     def runs_of(self, item):
-        return [
-            f"{run['label']} {first_line(run['text'], 80)} — {self.RUN_LINKS[link['kind']]}"
+        uses = Counter(
+            (link["target"], self.RUN_LINKS[link["kind"]])
             for link in self.graph.links
             if link["source"] == item["id"] and link["kind"] in self.RUN_LINKS
-            for run in [self.graph.nodes[link["target"]]]
-        ]
+        )
+        return [self.run_line(self.graph.nodes[run], verb, count) for (run, verb), count in uses.items()]
+
+    @staticmethod
+    def run_line(run, verb, count):
+        times = f" ×{count}" if count > 1 else ""
+        return f"{run['label']} {first_line(run['text'], 80)} — {verb}{times}"
 
     @staticmethod
     def say_section(title, lines):
@@ -701,8 +707,12 @@ class MemoryBrowser:
         return "nothing built yet" if not count else f"{count} project{'s' if count > 1 else ''} built"
 
 
+def digest_of(node_id):
+    return hashlib.sha1(node_id.encode()).hexdigest()
+
+
 def short_ids(node_ids):
-    digests = sorted((hashlib.sha1(node_id.encode()).hexdigest(), node_id) for node_id in node_ids)
+    digests = sorted((digest_of(node_id), node_id) for node_id in node_ids)
     ids = {}
     for index, (digest, node_id) in enumerate(digests):
         neighbours = [digests[other][0] for other in (index - 1, index + 1) if 0 <= other < len(digests)]

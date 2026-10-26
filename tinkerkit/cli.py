@@ -449,7 +449,7 @@ class Cli:
     @staticmethod
     def memory_words(given, parser):
         if given.graph and given.words:
-            parser.error(MemoryBrowser.USAGE)
+            parser.error(f"--graph takes no other words; {MemoryBrowser.USAGE}")
         try:
             return MemoryBrowser.request(given.words)
         except ValueError as refused:

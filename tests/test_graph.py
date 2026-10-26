@@ -202,7 +202,11 @@ def browse(*words):
 
 
 def short_id(node_id):
-    return hashlib.sha1(node_id.encode()).hexdigest()[:6]
+    return digest(node_id)[:6]
+
+
+def digest(node_id):
+    return hashlib.sha1(node_id.encode()).hexdigest()
 
 
 @pytest.mark.spec("GRF-7")
@@ -293,7 +297,7 @@ def test_every_memory_list_comes_a_page_at_a_time(memory, monkeypatch, capsys):
 
 
 @pytest.mark.spec("GRF-9", "CLI-5")
-def test_memory_words_are_a_name_a_kind_and_a_page(home_store):
+def test_memory_words_are_a_name_a_kind_and_a_page(home_store, capsys):
     request = MemoryBrowser.request
     assert request([]) == ("parts", "", "", 1, [])
     assert request(["python", "Lessons", "2"]) == ("part", "python", "lesson", 2, ["python", "Lessons"])
@@ -318,16 +322,21 @@ def test_memory_words_are_a_name_a_kind_and_a_page(home_store):
         Cli.parse(["memory", "lessons", "facts"])
     with pytest.raises(SystemExit):
         Cli.parse(["memory", "--graph", "python"])
+    assert "--graph takes no other words; use tinker memory [PAGE]" in capsys.readouterr().err
 
 
 @pytest.mark.spec("GRF-10")
 def test_memory_show_shows_one_item_whole_with_its_links_and_runs(memory, capsys):
     seed = f"lesson:{memory['seed']}"
+    Knowledge("Python", "r2").prove({seed: ["tests"]})
     browse("show", f"[{short_id(seed).upper()}]")
     out = capsys.readouterr().out
     assert "lesson ✅" in out and "Seed random generators inside tests" in out
     assert "part: Python (tinker memory python)" in out and "day: 20" in out
-    assert "@r1 a calculator — taught" in out and "@r2 " in out and "— helped" in out
+    assert "@r1 a calculator — taught" in out and out.count("@r2 ") == 1 and "— helped ×2" in out
+    for prefix in (digest(seed)[:7], digest(seed)):
+        browse("show", prefix)
+        assert "Seed random generators inside tests" in capsys.readouterr().out
     assert "Correct it: tinker teach WHAT" in out and "Cites" not in out and "Similar" not in out
     route = f"fact:flask:{memory['route']}"
     browse("show", short_id(route))
@@ -352,6 +361,7 @@ def test_memory_show_refuses_a_short_unknown_or_shared_id(memory, monkeypatch):
     browser = MemoryBrowser(graph)
     first, second = browser.items[:2]
     browser.ids[first["id"]], browser.ids[second["id"]] = "abcdef1", "abcdef2"
+    browser.digests[first["id"]], browser.digests[second["id"]] = "abcdef1", "abcdef2"
     with pytest.raises(SystemExit, match=r"2 items[\s\S]*\[abcdef1\][\s\S]*\[abcdef2\]"):
         browser.show(MemoryBrowser.request(["show", "abcdef"]))
 
