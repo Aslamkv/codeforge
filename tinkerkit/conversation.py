@@ -9,6 +9,7 @@ lazy import fcntl
 lazy import html
 lazy import json
 lazy import queue
+lazy import readline
 lazy import shlex
 lazy import subprocess
 lazy import threading
@@ -84,6 +85,7 @@ COMMANDS_ASKING_FOR_WORDS = tuple(
     if command.chat and any(argument.nargs in ("+", None) for argument in command.arguments)
 ) + ("command",)
 EXIT_WORDS = ("exit",)
+PROMPT_HISTORY_LINES = 1000
 CHAT_APP_START = "/start"
 START_WELCOME = """👋 **Hi, I'm Tinker!**
 I build small programs for you, on this computer, with an AI model that runs right here.
@@ -1811,6 +1813,7 @@ class ConsoleChannel(Channel):
         self.screen, self.lines = ConsoleScreen(), queue.Queue()
         self.last_id, self.numbering = 0, threading.Lock()
         self.printed, self.began, self.doings, self.live_owner = {}, {}, {}, None
+        self.history = None
 
     def handle(self):
         return "this terminal"
@@ -1829,6 +1832,8 @@ class ConsoleChannel(Channel):
 
     def start_reading(self):
         say.write_through(self.screen.print, self.screen if typed_here() else None)
+        if typed_here():
+            self.history = remembered_prompts()
         self.screen.start()
         threading.Thread(target=self.read, daemon=True).start()
 
@@ -1840,7 +1845,13 @@ class ConsoleChannel(Channel):
                 self.lines.put(None)
                 return
             self.show_again(line)
+            self.remember(line)
             self.lines.put(line)
+
+    def remember(self, line):
+        if self.history and line.strip() and line.strip().lower() not in EXIT_WORDS:
+            readline.add_history(line)
+            readline.write_history_file(self.history)
 
     def show_again(self, line):
         if self.screen.ruled():
@@ -2093,7 +2104,7 @@ class ConsoleScreen:
         return self.drawn
 
     def prompt(self):
-        return styled("› ", "accent") if typed_here() else self.PROMPT
+        return "› " if typed_here() else self.PROMPT
 
     @staticmethod
     def rule():
@@ -2189,6 +2200,16 @@ def deleted_rows(rows):
 def write_out(text):
     sys.stdout.write(text)
     sys.stdout.flush()
+
+
+def remembered_prompts():
+    path = Home.prompt_history()
+    readline.set_auto_history(False)
+    readline.set_history_length(PROMPT_HISTORY_LINES)
+    readline.clear_history()
+    with contextlib.suppress(OSError):
+        readline.read_history_file(path)
+    return path
 
 
 def typed_here():

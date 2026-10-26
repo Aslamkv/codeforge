@@ -2,6 +2,7 @@ import contextlib
 import io
 import json
 import os
+import readline
 import signal
 import subprocess
 import sys
@@ -406,11 +407,30 @@ def test_console_shows_your_line_again_highlighted_without_ruling_each_prompt(mo
     console = ruled_console(monkeypatch)
     prompts = typing(monkeypatch, "hello there", "", "exit")
     console.read()
-    assert prompts == [f"{ACCENT}› {RESET}"] * 4
+    assert prompts == ["› "] * 4
     assert sys.stdout.getvalue() == (
         sent_back_shown("hello there", rows=2) + pulled_up(1, kept=0) + pulled_up(1, kept=0)
     )
     assert [console.lines.get() for _ in range(4)] == ["hello there", "", "exit", None]
+
+
+@pytest.mark.spec("CNV-8")
+def test_console_keeps_the_lines_typed_for_up_and_down_across_restarts(monkeypatch, tinker_home):
+    colour_terminal(monkeypatch)
+    monkeypatch.setattr(ConsoleScreen, "TICK_SECONDS", 60)
+    typing(monkeypatch, "first", "", "second", "exit")
+    console = ConsoleChannel()
+    console.receive(1)
+    while console.lines.get(timeout=1) is not None:
+        pass
+    readline.clear_history()
+    reading_console(monkeypatch)
+    assert typed_before() == ["first", "second"]
+    assert (tinker_home / "prompt_history").exists()
+
+
+def typed_before():
+    return [readline.get_history_item(i) for i in range(1, readline.get_current_history_length() + 1)]
 
 
 @pytest.mark.spec("CNV-8")

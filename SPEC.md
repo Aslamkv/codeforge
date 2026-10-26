@@ -760,7 +760,8 @@ The terminal and the chats are one conversation: the same commands, the same ans
   On a terminal with colour, they show above the prompt as one live block, the lines under the Tinkering line
   dim and indented, all redrawn in place; otherwise what goes on now prints as a line of its own each time it
   changes. When the thing is done, the live block clears and only the lines not yet printed follow. `exit` or
-  end of input closes it.
+  end of input closes it. On a terminal, up and down on the prompt go through the lines typed before, the
+  last 1000 kept in the home's `prompt_history`, so they outlive a restart.
   Once it reads, all that Tinker says (`say`, a chat's message too) prints through it, above the prompt, and
   `live` draws in that same live block, its star turning and its glow moving on their own about eight times a second. While a job
   shows its progress there, the status that says what Tinker works on is left out of the terminal. A job's
