@@ -212,6 +212,11 @@ Everything Tinker tells the person goes through one voice, `say` (a `Messages`).
   job's `calls #N`), and is never printed. With no log, it is dropped.
 - **MSG-6** `human_duration`: 42.5 gives `42s`, 1762.08 gives `29m 22s`, 4000 gives `1h 6m 40s`.
 - **MSG-7** No module of Tinker but `messages` calls `print`.
+- **MSG-8** `say.pick(choices, start)` is a select box on the terminal, drawn as a short list under the
+  prompt, not full screen. Each choice is a label and whether it shows dim; `›` marks the current one, first
+  `start`. Up and down move it, stopping at the ends; Enter gives its index; Esc, Ctrl-C or end of input give
+  `None`. It reads the keys one at a time with the terminal raw, gives the terminal back as it was, and clears
+  the list when it ends.
 
 ## text (TXT)
 
@@ -591,6 +596,8 @@ What is said in the chats, kept so that a chat is only a view of it.
   them, `keep_alive`, `num_predict` `tokens` and `QUICK_REPLY_TIMEOUT`, and gives the reply's content, stripped.
   An Ollama failure is its `OllamaError`. Nothing else outside `Model`, the quick call, an unload and
   calibration calls `Ollama.chat`.
+- **MOD-26** `Models.choices()` gives the name of each model Ollama has, in Ollama's order, with whether it was
+  measured. It ends with `SystemExit` when Ollama does not answer, as `tinker models` does.
 
 ## project (PRJ)
 
@@ -761,7 +768,9 @@ The terminal and the chats are one conversation: the same commands, the same ans
   dim and indented, all redrawn in place; otherwise what goes on now prints as a line of its own each time it
   changes. When the thing is done, the live block clears and only the lines not yet printed follow. `exit` or
   end of input closes it. On a terminal, up and down on the prompt go through the lines typed before, the
-  last 1000 kept in the home's `prompt_history`, so they outlive a restart.
+  last 1000 kept in the home's `prompt_history`, so they outlive a restart. `use-model` typed alone there opens
+  its select box on the prompt (**CLI-3**) and sends `use-model NAME` for the one chosen; a cancel sends
+  nothing.
   Once it reads, all that Tinker says (`say`, a chat's message too) prints through it, above the prompt, and
   `live` draws in that same live block, its star turning and its glow moving on their own about eight times a second. While a job
   shows its progress there, the status that says what Tinker works on is left out of the terminal. A job's
@@ -1463,7 +1472,11 @@ The main system: the command line, one run, and the cycle of phases.
 - **CLI-2** `tinker help` lists every command by group, the options, and examples. With
   `TINKER_FORMAT=markup`, it lists what a chat can send. `tinker help COMMAND` shows that command's arguments,
   and an unknown command is an error.
-- **CLI-3** `Commands`. `use-model` accepts only a measured model. `runs` lists
+- **CLI-3** `Commands`. `use-model` accepts only a measured model. `use-model` with no NAME, on a terminal,
+  opens a select box (**MSG-8**) on Ollama's models (**MOD-26**), the measured ones plain and the rest dim,
+  starting at the one in use; the one chosen is used as `use-model NAME` uses it (one never measured says to
+  calibrate it first), and a cancel changes nothing. Not on a terminal (a chat too), it lists the models as
+  `tinker models` does. `runs` lists
   the runs, newest first. `status [@PROJECT]` shows the project's criteria and its open phase (in a chat,
   `status` alone shows what runs, **CNV-11**). `rename` renames the folder of a project whose plan waits, and
   its pointer. `config` shows the settings, and `config KEY VALUE` sets one.
