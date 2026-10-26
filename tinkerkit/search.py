@@ -78,19 +78,22 @@ class MediaWiki(SearchEngine):
         return f"https://{self.host}/w/api.php?" + urllib.parse.urlencode(args)
 
     def results(self, answer):
-        if isinstance(answer, dict) and "error" in answer:
-            raise self.failed(f"answered with an error: {answer['error']}")
-        found = answer.get("query", {}).get("search") if isinstance(answer, dict) else None
-        if not isinstance(found, list):
-            raise self.failed("answered without a result list")
         return [
             {
                 "title": str(item["title"]),
                 "url": self.page(str(item["title"])),
                 "content": plain(item.get("snippet", "")),
             }
-            for item in found
+            for item in self.found(answer)
         ]
+
+    def found(self, answer):
+        if isinstance(answer, dict) and "error" in answer:
+            raise self.failed(f"answered with an error: {answer['error']}")
+        found = answer.get("query", {}).get("search") if isinstance(answer, dict) else None
+        if not isinstance(found, list):
+            raise self.failed("answered without a result list")
+        return found
 
     def page(self, title):
         return f"https://{self.host}/wiki/" + urllib.parse.quote(title.replace(" ", "_"), safe="/():,")
