@@ -260,6 +260,95 @@ def test_console_shows_headlines_then_the_whole_message(monkeypatch):
     assert out.getvalue().splitlines()[4].startswith("line two")
 
 
+ACCENT, DIM, GREY, RESET = "\033[38;5;67m", "\033[2m", "\033[48;5;236m", "\033[0m"
+
+
+def colour_terminal(monkeypatch):
+    terminal = io.StringIO()
+    terminal.isatty = lambda: True
+    monkeypatch.setattr(sys, "stdout", terminal)
+    monkeypatch.setattr(sys.stdin, "isatty", lambda: True)
+    monkeypatch.delenv("NO_COLOR", raising=False)
+    monkeypatch.delenv("COLORTERM", raising=False)
+    monkeypatch.setattr(conversation.shutil, "get_terminal_size", lambda: os.terminal_size((10, 24)))
+    return terminal
+
+
+def typing(monkeypatch, *lines):
+    prompts, typed = [], list(lines)
+
+    def typed_line(prompt):
+        prompts.append(prompt)
+        if not typed:
+            raise EOFError
+        return typed.pop(0)
+
+    monkeypatch.setattr("builtins.input", typed_line)
+    return prompts
+
+
+@pytest.mark.spec("CNV-8")
+def test_console_marks_each_message_and_indents_its_lines_on_a_colour_terminal(monkeypatch):
+    terminal = colour_terminal(monkeypatch)
+    console = ConsoleChannel()
+    console.send("console", "Done\nline one")
+    shown = console.show("console", None, "Report\nline one", done=True)
+    console.show("console", shown, "Report\nline one\nline two", done=True)
+    assert terminal.getvalue() == (
+        f"\r\033[K{ACCENT}● {RESET}Done\n  line one\n"
+        f"\r\033[K{ACCENT}● {RESET}Report\n  line one\n"
+        "\r\033[K  line two\n"
+    )
+
+
+@pytest.mark.spec("CNV-8")
+def test_console_rules_the_prompt_and_shows_your_line_again_highlighted(monkeypatch):
+    terminal = colour_terminal(monkeypatch)
+    prompts = typing(monkeypatch, "hello there", "", "exit")
+    console = ConsoleChannel()
+    console.read()
+    rule = f"{DIM}{'─' * 10}{RESET}\n"
+    assert prompts == [f"{ACCENT}› {RESET}"] * 4
+    assert terminal.getvalue() == (
+        f"{rule}\033[3F\033[J{GREY}› hello there{RESET}\n{rule}\033[2F\033[J{rule}\033[2F\033[J{rule}"
+    )
+    assert [console.lines.get() for _ in range(4)] == ["hello there", "", "exit", None]
+
+
+@pytest.mark.spec("CNV-8")
+def test_console_leaves_piped_input_unruled_and_unrepeated(monkeypatch):
+    terminal = colour_terminal(monkeypatch)
+    monkeypatch.setattr(sys.stdin, "isatty", lambda: False)
+    prompts = typing(monkeypatch, "hello there")
+    ConsoleChannel().read()
+    assert prompts == [ConsoleChannel.PROMPT] * 2
+    assert terminal.getvalue() == ""
+
+
+@pytest.mark.spec("CNV-8")
+def test_console_redraws_the_rule_and_prompt_under_what_it_prints(monkeypatch):
+    terminal = colour_terminal(monkeypatch)
+    console = ConsoleChannel()
+    console.reader = object()
+    console.send("console", "hi")
+    assert (
+        terminal.getvalue()
+        == f"\r\033[K\033[F\033[K{ACCENT}● {RESET}hi\n{DIM}{'─' * 10}{RESET}\n{ACCENT}› {RESET}"
+    )
+
+
+@pytest.mark.spec("CNV-8")
+def test_console_prints_plain_without_colour(monkeypatch):
+    terminal = colour_terminal(monkeypatch)
+    monkeypatch.setenv("NO_COLOR", "1")
+    prompts = typing(monkeypatch, "hello")
+    console = ConsoleChannel()
+    console.read()
+    console.send("console", "Done\nline one")
+    assert prompts == [ConsoleChannel.PROMPT] * 2
+    assert terminal.getvalue() == "\r\033[KDone\nline one\n"
+
+
 @pytest.mark.spec("CNV-8")
 def test_console_receives_lines_until_exit():
     console = ConsoleChannel()

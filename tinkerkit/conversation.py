@@ -1,6 +1,7 @@
 import contextlib
 import os
 import re
+import shutil
 import signal
 import sys
 from collections import namedtuple
@@ -19,7 +20,7 @@ from .commands import BY_NAME, COMMANDS, deletes, kind_of, refs
 from .jobs import Jobs, alive, job_number, paused_for_you
 from .project import Runs, Tracker, saved
 lazy from .ledger import DONE_NOTE_KEPT_SECONDS, Ledger
-lazy from .messages import human_duration, say
+lazy from .messages import colourful, human_duration, paint, say
 lazy from .model import Models, OllamaError
 lazy from .prompts import Prompts, Reply
 lazy from .settings import EXERCISE_FOLDER, JOB_STOP_SIGNAL, Home, projects_folder
@@ -1753,18 +1754,45 @@ class ConsoleChannel(Channel):
 
     def read(self):
         while True:
+            self.draw_rule()
             try:
-                self.lines.put(input(self.PROMPT))
+                line = input(self.prompt())
             except EOFError, KeyboardInterrupt:
                 self.lines.put(None)
                 return
+            self.show_again(line)
+            self.lines.put(line)
+
+    def draw_rule(self):
+        if self.typed_here():
+            with self.printing:
+                sys.stdout.write(self.rule() + "\n")
+                sys.stdout.flush()
+
+    def show_again(self, line):
+        if not self.typed_here():
+            return
+        typed, width = f"› {line}", shutil.get_terminal_size().columns
+        rows = max(1, -(-len(typed) // width))
+        quiet = not line.strip() or line.strip().lower() in EXIT_WORDS
+        shown = "" if quiet else paint(typed.ljust(width), "grey background", sys.stdout) + "\n"
+        with self.printing:
+            sys.stdout.write(f"\033[{rows + 1}F\033[J{shown}")
+            sys.stdout.flush()
+
+    def prompt(self):
+        return paint("› ", "accent", sys.stdout) if self.typed_here() else self.PROMPT
+
+    @staticmethod
+    def rule():
+        return paint("─" * shutil.get_terminal_size().columns, "dim", sys.stdout)
 
     def send(self, chat, text):
-        self.print(Markup.ansi(self.said(text)))
+        self.print(self.marked(Markup.ansi(self.said(text))))
         return self.new_id()
 
     def edit(self, chat, sent, text):
-        self.print(Markup.ansi(self.said(text)))
+        self.print(self.marked(Markup.ansi(self.said(text))))
         return sent
 
     def send_file(self, chat, path, caption):
@@ -1783,17 +1811,24 @@ class ConsoleChannel(Channel):
         self.headlines.pop(sent, None)
         before, self.whole[sent] = self.whole.get(sent), text
         grew = before is not None and text.startswith(before + "\n")
-        self.print(Markup.ansi(text[len(before) + 1 :].lstrip("\n") if grew else text))
+        if grew:
+            self.print(self.indented(Markup.ansi(text[len(before) + 1 :].lstrip("\n"))))
+        else:
+            self.print(self.marked(Markup.ansi(text)))
 
     def show_headline(self, sent, text):
         headline = self.headline(text)
         if self.headlines.get(sent) != headline:
             self.headlines[sent] = headline
-            self.print(
-                f"\033[2m⋯ {headline}\033[22m"
-                if sys.stdout.isatty() and not os.environ.get("NO_COLOR")
-                else f"⋯ {headline}"
-            )
+            self.print(paint(f"⋯ {headline}", "dim", sys.stdout))
+
+    @staticmethod
+    def marked(text):
+        return ConsoleChannel.indented(text, paint("● ", "accent", sys.stdout))
+
+    @staticmethod
+    def indented(text, first="  "):
+        return first + text.replace("\n", "\n  ") if colourful(sys.stdout) else text
 
     @staticmethod
     def headline(text):
@@ -1805,11 +1840,18 @@ class ConsoleChannel(Channel):
         out = sys.stdout
         with self.printing:
             if out.isatty():
-                out.write("\r\033[K")
+                out.write("\r\033[K\033[F\033[K" if self.ruled() else "\r\033[K")
             out.write(text + "\n")
             if out.isatty() and self.reader is not None:
-                out.write(self.PROMPT)
+                out.write(f"{self.rule()}\n{self.prompt()}" if self.ruled() else self.PROMPT)
             out.flush()
+
+    def ruled(self):
+        return self.reader is not None and self.typed_here()
+
+    @staticmethod
+    def typed_here():
+        return sys.stdin.isatty() and colourful(sys.stdout)
 
     def new_id(self):
         with self.printing:
