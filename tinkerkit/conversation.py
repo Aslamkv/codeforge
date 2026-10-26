@@ -1886,9 +1886,11 @@ class ConsoleChannel(Channel):
     def show_going(self, sent, text, doing, facts):
         lines = text.split("\n")
         at = next((row for row, line in enumerate(lines) if is_tinkering(line)), None)
-        settled, going_on = (lines[:at], lines[at]) if at is not None else ([], lines[0])
+        settled, going_on, under = (
+            (lines[:at], lines[at], lines[at + 1 :]) if at is not None else ([], lines[0], [])
+        )
         self.print_settled(sent, settled)
-        self.show_doing(sent, doing or Markup.plain(going_on).strip(), facts)
+        self.show_doing(sent, doing or Markup.plain(going_on).strip(), facts, under)
 
     def print_settled(self, sent, lines):
         printed = self.printed.setdefault(sent, set())
@@ -1899,10 +1901,11 @@ class ConsoleChannel(Channel):
             self.screen.print(indented(Markup.ansi("\n".join(new))))
         printed.update(new)
 
-    def show_doing(self, sent, doing, facts):
+    def show_doing(self, sent, doing, facts, under=()):
         if self.screen.ruled():
             self.live_owner = sent
-            self.screen.show_live(doing, self.began.setdefault(sent, time.monotonic()), **facts)
+            shown_under = [Markup.plain(line).strip() for line in under if line.strip()]
+            self.screen.show_live(doing, self.began.setdefault(sent, time.monotonic()), shown_under, **facts)
         elif self.doings.get(sent) != doing:
             self.doings[sent] = doing
             self.screen.print(doing)
@@ -1916,10 +1919,9 @@ class ConsoleChannel(Channel):
 class ConsoleScreen:
     PROMPT = "› " if sys.stdin.isatty() else ""
     TICK_SECONDS = 0.25
-    LIVE_ROWS_ABOVE_THE_PROMPT = 2
 
     def __init__(self):
-        self.reading, self.live, self.frame, self.printing = False, None, 0, threading.Lock()
+        self.reading, self.live, self.under, self.frame, self.printing = False, None, [], 0, threading.Lock()
 
     def start(self):
         self.reading = True
@@ -1940,22 +1942,23 @@ class ConsoleScreen:
         with self.printing:
             write_out(text)
 
-    def show_live(self, text, began, **facts):
+    def show_live(self, text, began, under=(), **facts):
         if not self.ruled():
             return
         with self.printing:
-            shown, erased = self.live is not None, self.erased_bottom()
-            self.live = (text, began, facts)
-            if shown:
-                self.redraw_live()
+            rows_before, erased = self.live_rows(), self.erased_bottom()
+            self.live, self.under = (text, began, facts), list(under)
+            if rows_before and self.live_rows() <= rows_before:
+                write_out(self.shrunk(rows_before, rows_before - self.live_rows()) + self.redrawn_live())
             else:
                 write_out(erased + self.bottom())
 
     def end_live(self):
         with self.printing:
             if self.live is not None:
-                self.live = None
-                write_out(self.at_the_live_line(DELETE_LINE) + CURSOR_UP)
+                taken_out = self.shrunk(self.live_rows(), self.live_rows())
+                self.live, self.under = None, []
+                write_out(taken_out)
 
     def keep_ticking(self):
         while True:
@@ -1966,24 +1969,33 @@ class ConsoleScreen:
         with self.printing:
             if self.live is not None:
                 self.frame += 1
-                self.redraw_live()
+                write_out(self.redrawn_live())
 
-    def redraw_live(self):
-        write_out(self.at_the_live_line(self.live_drawn() + CLEAR_TO_LINE_END))
+    def live_rows(self):
+        return 0 if self.live is None else 1 + len(self.under)
 
-    def at_the_live_line(self, change):
-        return f"{SAVE_CURSOR}{lines_up(self.LIVE_ROWS_ABOVE_THE_PROMPT)}{change}{RESTORE_CURSOR}"
+    def shrunk(self, rows, by):
+        return self.at_the_live_block(rows, DELETE_LINE * by) + CURSOR_UP * by if by else ""
+
+    def redrawn_live(self):
+        changed = NEXT_LINE.join(row + CLEAR_TO_LINE_END for row in self.live_drawn())
+        return self.at_the_live_block(self.live_rows(), changed)
+
+    @staticmethod
+    def at_the_live_block(rows, change):
+        return f"{SAVE_CURSOR}{lines_up(rows + 1)}{change}{RESTORE_CURSOR}"
 
     def live_drawn(self):
         text, began, facts = self.live
-        return live_line(text, began, self.frame, shutil.get_terminal_size().columns - 1, sys.stdout, **facts)
+        width = shutil.get_terminal_size().columns - 1
+        tinkering = live_line(text, began, self.frame, width, sys.stdout, **facts)
+        return [tinkering, *(f"  {styled(cut_to_width(line, width - 2), 'dim')}" for line in self.under)]
 
     def erased_bottom(self):
-        rows_above_the_prompt = self.ruled() + (self.live is not None)
-        return CLEAR_LINE + CLEARED_LINE_ABOVE * rows_above_the_prompt
+        return CLEAR_LINE + CLEARED_LINE_ABOVE * (self.ruled() + self.live_rows())
 
     def bottom(self):
-        live = f"{self.live_drawn()}\n" if self.live is not None else ""
+        live = "".join(f"{row}\n" for row in self.live_drawn()) if self.live is not None else ""
         return f"{live}{self.rule()}\n{self.prompt()}"
 
     def prompt(self):
@@ -1997,7 +2009,7 @@ class ConsoleScreen:
         return self.reading and typed_here()
 
 
-SAVE_CURSOR, RESTORE_CURSOR, CURSOR_UP = "\0337", "\0338", "\033[A"
+SAVE_CURSOR, RESTORE_CURSOR, CURSOR_UP, NEXT_LINE = "\0337", "\0338", "\033[A", "\033[E"
 DELETE_LINE, CLEAR_DOWN = "\033[M", "\033[J"
 CLEARED_LINE_ABOVE = "\033[F" + CLEAR_TO_LINE_END
 
