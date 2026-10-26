@@ -8,7 +8,7 @@ lazy import urllib.error
 lazy import urllib.parse
 lazy import urllib.request
 
-from .messages import human_duration, say
+from .messages import say
 from .settings import (
     CAPACITY_SEARCH_PRECISION,
     CRASH_NEAR_LIMIT_SHARE,
@@ -1075,10 +1075,10 @@ class Stream:
         now = time.perf_counter()
         if self.label and now - self.last_print >= PROGRESS_UPDATE_SECONDS:
             self.last_print, self.progressed = now, True
-            say.live(self.status(now))
+            say.live(self.status())
 
-    def status(self, now):
-        return plainly(say.going_on(), now - self.started)
+    def status(self):
+        return say.going_on()
 
     def complete(self, piece):
         if not self.done_when or not self.may_end_here(piece):
@@ -1111,11 +1111,6 @@ class Stream:
     def close(self):
         if self.progressed:
             say.end_live()
-
-
-def plainly(doing, seconds):
-    seconds = round(seconds)
-    return f"{doing}… {human_duration(seconds)}" + (f" ({seconds}s)" if seconds >= 60 else "")
 
 
 class OllamaError(Exception):

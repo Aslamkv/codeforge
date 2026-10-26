@@ -214,7 +214,7 @@ def test_stream_says_live_the_step_never_what_the_model_is_doing(monkeypatch):
     stream = Stream("Write calc.py", None)
     stream.take({"message": {"thinking": "hm"}})
     stream.take({"message": {"content": "x"}})
-    assert seen == ["Writing the spec… 3s", "Writing the spec… 6s"]
+    assert seen == ["Writing the spec", "Writing the spec"]
 
 
 @pytest.mark.spec("MOD-9")
@@ -234,8 +234,8 @@ def test_what_the_command_works_on_is_said_live_and_heard(monkeypatch):
     assert seen == [
         ("working", "Reading chapter 2, Habits (1 of 3)"),
         ("live", "Reading chapter 2, Habits (1 of 3)"),
-        ("live", "Reading chapter 2, Habits (1 of 3)… 3s"),
-        ("live", "Reading chapter 2, Habits (1 of 3)… 6s"),
+        ("live", "Reading chapter 2, Habits (1 of 3)"),
+        ("live", "Reading chapter 2, Habits (1 of 3)"),
         ("working", ""),
     ]
     assert say.doing == ""
@@ -413,8 +413,7 @@ def test_a_model_logs_its_details_and_says_only_when_it_asks_again(model_log, fa
     )
     stream = Stream("Plan", None)
     stream.thinking = 3
-    assert stream.status(stream.started + 12) == "Working on it… 12s"
-    assert stream.status(stream.started + 101) == "Working on it… 1m 41s (101s)"
+    assert stream.status() == "Working on it"
 
 
 @pytest.mark.spec("MOD-17")
