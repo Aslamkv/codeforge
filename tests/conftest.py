@@ -240,6 +240,15 @@ def make_session(make_model):
     return make
 
 
+@pytest.fixture
+def session(make_project, make_session, project_dir):
+    return make_session(
+        make_project(
+            toolchain=dict(TOOLCHAIN, setup=["echo ran >> setups.txt"], test_all="echo run >> runs.txt")
+        )
+    )
+
+
 def criterion(id, test, behaviour="does it", status="todo", cycle="base", **more):
     return {
         "id": id,
