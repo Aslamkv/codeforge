@@ -84,6 +84,18 @@ def test_installed(monkeypatch):
         Models.installed("qwen3")
 
 
+@pytest.mark.spec("MOD-26")
+def test_choices(home_store, monkeypatch):
+    monkeypatch.setattr(Ollama, "installed_models", staticmethod(lambda: None))
+    with pytest.raises(SystemExit, match="Ollama does not answer"):
+        Models.choices()
+    monkeypatch.setattr(
+        Ollama, "installed_models", staticmethod(lambda: [{"name": "qwen3:8b"}, {"name": "llama3"}])
+    )
+    Models.keep("llama3", MEASURED)
+    assert Models.choices() == [("qwen3:8b", False), ("llama3", True)]
+
+
 @pytest.mark.spec("MOD-4")
 def test_context_for_and_reply_limits():
     assert Models.context_for(8192, 16384, None) == 25600

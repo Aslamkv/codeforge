@@ -360,6 +360,8 @@ class Cli:
         match command:
             case "reset" | "restart" | "models" | "runs" | "doctor":
                 return True
+            case "use-model" if given.name is None:
+                return None
             case "use-model" | "calibrate" | "embed":
                 return Cli.non_empty(given.name, command, parser)
             case "resume" | "status" | "log":
@@ -612,11 +614,7 @@ class Commands:
 
     @staticmethod
     def list_models():
-        models = Ollama.installed_models()
-        if models is None:
-            raise SystemExit(
-                f"Ollama does not answer at {Config.ollama_url()} (tinker config ollama_url URL)."
-            )
+        models = Models.answering()
         say.text(f"  {'MODEL':36} {'SIZE':>7}  {'PROMPT':>6} {'READ/S':>7} {'WRITE/S':>7}  CALIBRATED")
         for model in models:
             name, s = model.get("name", ""), Models.settings(model.get("name", "")) or {}
@@ -632,6 +630,10 @@ class Commands:
 
     @staticmethod
     def use_model(name):
+        if name is None:
+            name = Commands.picked_model()
+            if name is None:
+                return
         if Models.settings(name) is None:
             raise SystemExit(
                 f"{name} has not been measured: measure it first with tinker calibrate {name} "
@@ -639,6 +641,17 @@ class Commands:
             )
         Config.save(model=name)
         say.done(f"Model in use: {name}")
+
+    @staticmethod
+    def picked_model():
+        choices = Models.choices() if sys.stdin.isatty() else []
+        if not choices:
+            Commands.list_models()
+            return None
+        names = [name for name, _ in choices]
+        start = names.index(Config.get("model")) if Config.get("model") in names else 0
+        index = say.pick([(name, not measured) for name, measured in choices], start)
+        return None if index is None else names[index]
 
     @staticmethod
     def embed(name):
