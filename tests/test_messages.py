@@ -438,6 +438,8 @@ def test_pick_gives_the_terminal_back_however_it_ends(terminal):
     "pressed,key",
     [
         (b"\x1b[A", "up"),
+        (b"\x1bOA", "up"),
+        (b"\x1b[B", "down"),
         (b"\x1bOB", "down"),
         (b"\r", "enter"),
         (b"\n", "enter"),

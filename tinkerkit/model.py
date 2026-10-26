@@ -490,8 +490,8 @@ class Models:
 
     @staticmethod
     def picked(choices):
-        names = [name for name, _ in choices]
-        start = names.index(Config.get("model")) if Config.get("model") in names else 0
+        names, in_use = [name for name, _ in choices], Config.get("model")
+        start = names.index(in_use) if in_use in names else 0
         index = say.pick([(name, not measured) for name, measured in choices], start)
         return None if index is None else names[index]
 
