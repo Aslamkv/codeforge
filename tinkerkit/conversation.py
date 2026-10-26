@@ -13,7 +13,6 @@ lazy import shlex
 lazy import subprocess
 lazy import threading
 lazy import time
-lazy import unicodedata
 lazy import webbrowser
 lazy from pathlib import Path
 
@@ -21,7 +20,7 @@ from .commands import BY_NAME, COMMANDS, deletes, kind_of, refs
 from .jobs import Jobs, alive, job_number, paused_for_you
 from .project import Runs, Tracker, saved
 lazy from .ledger import DONE_NOTE_KEPT_SECONDS, Ledger
-lazy from .messages import colourful, human_duration, paint, say
+lazy from .messages import colourful, cut_to_width, human_duration, paint, say, visible_width
 lazy from .model import Models, OllamaError
 lazy from .prompts import Prompts, Reply
 lazy from .settings import EXERCISE_FOLDER, JOB_STOP_SIGNAL, Config, Home, projects_folder
@@ -1782,9 +1781,7 @@ class ConsoleChannel(Channel):
 
     def draw_rule(self):
         if self.typed_here():
-            with self.printing:
-                sys.stdout.write(self.rule() + "\n")
-                sys.stdout.flush()
+            self.draw(self.rule() + "\n")
 
     def show_again(self, line):
         if not self.typed_here():
@@ -1792,17 +1789,14 @@ class ConsoleChannel(Channel):
         typed, width = f"› {line}", shutil.get_terminal_size().columns
         rows = max(1, -(-len(typed) // width))
         quiet = not line.strip() or line.strip().lower() in EXIT_WORDS
-        shown = "" if quiet else paint(typed.ljust(width), "grey background", sys.stdout) + "\n"
-        with self.printing:
-            sys.stdout.write(f"\033[{rows + 1}F\033[J{shown}")
-            sys.stdout.flush()
+        shown = "" if quiet else self.styled(typed.ljust(width), "grey background") + "\n"
+        self.draw(f"\033[{rows + 1}F\033[J{shown}")
 
     def prompt(self):
-        return paint("› ", "accent", sys.stdout) if self.typed_here() else self.PROMPT
+        return self.styled("› ", "accent") if self.typed_here() else self.PROMPT
 
-    @staticmethod
-    def rule():
-        return paint("─" * shutil.get_terminal_size().columns, "dim", sys.stdout)
+    def rule(self):
+        return self.styled("─" * shutil.get_terminal_size().columns, "dim")
 
     def banner(self, lines):
         if not self.typed_here():
@@ -1810,21 +1804,13 @@ class ConsoleChannel(Channel):
         width = min(shutil.get_terminal_size().columns, BANNER_MAX_COLUMNS)
         edge = "─" * (width - 2)
         rows = [self.banner_row(line, "dim" if row else "bold", width - 4) for row, line in enumerate(lines)]
-        framed = [paint(f"╭{edge}╮", "accent", sys.stdout), *rows, paint(f"╰{edge}╯", "accent", sys.stdout)]
-        with self.printing:
-            sys.stdout.write("\n".join(framed) + "\n")
-            sys.stdout.flush()
+        framed = [self.styled(f"╭{edge}╮", "accent"), *rows, self.styled(f"╰{edge}╯", "accent")]
+        self.draw("\n".join(framed) + "\n")
 
-    @staticmethod
-    def banner_row(text, style, room):
+    def banner_row(self, text, style, room):
         shown = cut_to_width(text, room)
         padding = " " * (room - visible_width(shown))
-        return (
-            paint("│ ", "accent", sys.stdout)
-            + paint(shown, style, sys.stdout)
-            + padding
-            + paint(" │", "accent", sys.stdout)
-        )
+        return self.styled("│ ", "accent") + self.styled(shown, style) + padding + self.styled(" │", "accent")
 
     def send(self, chat, text):
         self.print(self.marked(Markup.ansi(self.said(text))))
@@ -1859,11 +1845,10 @@ class ConsoleChannel(Channel):
         headline = self.headline(text)
         if self.headlines.get(sent) != headline:
             self.headlines[sent] = headline
-            self.print(paint(f"⋯ {headline}", "dim", sys.stdout))
+            self.print(self.styled(f"⋯ {headline}", "dim"))
 
-    @staticmethod
-    def marked(text):
-        return ConsoleChannel.indented(text, paint("● ", "accent", sys.stdout))
+    def marked(self, text):
+        return self.indented(text, self.styled("● ", "accent"))
 
     @staticmethod
     def indented(text, first="  "):
@@ -1885,6 +1870,15 @@ class ConsoleChannel(Channel):
                 out.write(f"{self.rule()}\n{self.prompt()}" if self.ruled() else self.PROMPT)
             out.flush()
 
+    def draw(self, text):
+        with self.printing:
+            sys.stdout.write(text)
+            sys.stdout.flush()
+
+    @staticmethod
+    def styled(text, style):
+        return paint(text, style, sys.stdout)
+
     def ruled(self):
         return self.reader is not None and self.typed_here()
 
@@ -1896,26 +1890,6 @@ class ConsoleChannel(Channel):
         with self.printing:
             self.next_id += 1
             return self.next_id
-
-
-def cut_to_width(text, room):
-    kept, used = "", 0
-    for char in text:
-        used += char_width(char)
-        if used > room:
-            break
-        kept += char
-    return kept.rstrip()
-
-
-def visible_width(text):
-    return sum(char_width(char) for char in text)
-
-
-def char_width(char):
-    if unicodedata.category(char) in ("Mn", "Me", "Cf"):
-        return 0
-    return 2 if unicodedata.east_asian_width(char) in ("W", "F") else 1
 
 
 class Message:

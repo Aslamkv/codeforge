@@ -1,3 +1,4 @@
+import io
 import signal
 import socket
 import sys
@@ -15,6 +16,7 @@ from tinkerkit.store import Log, Store
 from tinkerkit.web import WebPage, readable
 
 REAL_HOME = Home.root
+ACCENT, DIM, BOLD, GREY, RESET = "\033[38;5;67m", "\033[2m", "\033[1m", "\033[48;5;236m", "\033[0m"
 MODEL = "fake-model"
 MEASURED = {
     "model": MODEL,
@@ -35,6 +37,11 @@ CALC_FILES = {
     "calc.py": {"kind": "code", "role": "the calculator", "contract": [], "uses": []},
     "test_calc.py": {"kind": "test", "role": "tests", "contract": [], "uses": ["calc.py"]},
 }
+
+
+class Terminal(io.StringIO):
+    def isatty(self):
+        return True
 
 
 @pytest.fixture(autouse=True)

@@ -7,6 +7,7 @@ import time
 from pathlib import Path
 
 import pytest
+from conftest import ACCENT, DIM, RESET, Terminal
 
 from tinkerkit.messages import Message, Messages, human_duration, say
 from tinkerkit.project import Tracker, project_store
@@ -112,11 +113,6 @@ def test_the_live_line_is_drawn_on_a_terminal_only(monkeypatch):
     assert piped.getvalue() == "" and heard[0].kind == "live" and heard[0].text == "thinking… 12s"
 
 
-class Terminal(io.StringIO):
-    def isatty(self):
-        return True
-
-
 @pytest.fixture
 def terminal(monkeypatch):
     terminal = Terminal()
@@ -162,13 +158,13 @@ def test_the_live_line_counts_from_when_the_work_began(terminal, clock):
 @pytest.mark.spec("MSG-4")
 @pytest.mark.parametrize(
     "colorterm,accent",
-    [("truecolor", "\033[38;2;70;130;180m"), ("24bit", "\033[38;2;70;130;180m"), ("", "\033[38;5;67m")],
+    [("truecolor", "\033[38;2;70;130;180m"), ("24bit", "\033[38;2;70;130;180m"), ("", ACCENT)],
 )
 def test_the_live_star_is_steel_blue_and_what_goes_on_is_dim(terminal, clock, monkeypatch, colorterm, accent):
     monkeypatch.delenv("NO_COLOR")
     monkeypatch.setenv("COLORTERM", colorterm)
     say.live("Writing tests")
-    assert terminal.getvalue() == f"\r   {accent}✻\033[0m Tinkering… (0s)\033[2m · Writing tests\033[0m\033[K"
+    assert terminal.getvalue() == f"\r   {accent}✻{RESET} Tinkering… (0s){DIM} · Writing tests{RESET}\033[K"
 
 
 @pytest.mark.spec("MSG-4")
@@ -177,7 +173,7 @@ def test_the_live_line_is_cut_to_the_terminal_width_by_what_shows(terminal, cloc
     monkeypatch.setenv("COLORTERM", "")
     monkeypatch.setattr(shutil, "get_terminal_size", lambda fallback: os.terminal_size((23, 10)))
     say.live("Writing tests")
-    assert terminal.getvalue() == "\r   \033[38;5;67m✻\033[0m Tinkering… (0s)\033[2m ·\033[0m\033[K"
+    assert terminal.getvalue() == f"\r   {ACCENT}✻{RESET} Tinkering… (0s){DIM} ·{RESET}\033[K"
 
 
 @pytest.mark.spec("MSG-5")

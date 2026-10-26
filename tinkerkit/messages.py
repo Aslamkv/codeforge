@@ -4,11 +4,21 @@ lazy import os
 lazy import shutil
 lazy import sys
 lazy import time
+lazy import unicodedata
 
 VARIATION_SELECTOR = "\ufe0f"
 TRUECOLOR_ACCENT = "\033[38;2;70;130;180m"
 PALETTE_ACCENT = "\033[38;5;67m"
-STYLES = frozendict({"dim": "\033[2m", "bold": "\033[1m", "grey background": "\033[48;5;236m"})
+STYLES = frozendict(
+    {
+        "dim": "\033[2m",
+        "bold": "\033[1m",
+        "grey background": "\033[48;5;236m",
+        "cyan": "\033[36m",
+        "yellow": "\033[33m",
+        "green": "\033[32m",
+    }
+)
 RESET = "\033[0m"
 
 
@@ -218,6 +228,26 @@ def style_code(style):
     if style == "accent":
         return TRUECOLOR_ACCENT if os.environ.get("COLORTERM") in ("truecolor", "24bit") else PALETTE_ACCENT
     return STYLES[style]
+
+
+def cut_to_width(text, room):
+    kept, used = "", 0
+    for char in text:
+        used += char_width(char)
+        if used > room:
+            break
+        kept += char
+    return kept.rstrip()
+
+
+def visible_width(text):
+    return sum(char_width(char) for char in text)
+
+
+def char_width(char):
+    if unicodedata.category(char) in ("Mn", "Me", "Cf"):
+        return 0
+    return 2 if unicodedata.east_asian_width(char) in ("W", "F") else 1
 
 
 def human_duration(seconds):

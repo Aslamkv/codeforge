@@ -9,6 +9,7 @@ import time
 from pathlib import Path
 
 import pytest
+from conftest import ACCENT, BOLD, DIM, GREY, RESET, Terminal
 
 import tinkerkit.conversation as conversation
 from tinkerkit.conversation import (
@@ -260,12 +261,8 @@ def test_console_shows_headlines_then_the_whole_message(monkeypatch):
     assert out.getvalue().splitlines()[4].startswith("line two")
 
 
-ACCENT, DIM, GREY, RESET = "\033[38;5;67m", "\033[2m", "\033[48;5;236m", "\033[0m"
-
-
 def colour_terminal(monkeypatch, columns=10):
-    terminal = io.StringIO()
-    terminal.isatty = lambda: True
+    terminal = Terminal()
     monkeypatch.setattr(sys, "stdout", terminal)
     monkeypatch.setattr(sys.stdin, "isatty", lambda: True)
     monkeypatch.delenv("NO_COLOR", raising=False)
@@ -347,9 +344,6 @@ def test_console_prints_plain_without_colour(monkeypatch):
     console.send("console", "Done\nline one")
     assert prompts == [ConsoleChannel.PROMPT] * 2
     assert terminal.getvalue() == "\r\033[KDone\nline one\n"
-
-
-BOLD = "\033[1m"
 
 
 def framed(width, *rows):
