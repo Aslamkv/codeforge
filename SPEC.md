@@ -739,8 +739,9 @@ The terminal and the chats are one conversation: the same commands, the same ans
 - **CNV-8** `ConsoleChannel` prints a dim headline while a thing changes, the whole message when it is done,
   and only the new lines when it grew. `exit` or end of input closes it. On a terminal with colour, the
   conversation opens in a framed banner, draws a rule over the prompt, shows each line you send again
-  highlighted, and marks each message it sends with a steel blue `●`; with `NO_COLOR` or no terminal, all
-  of that is plain text.
+  highlighted, and marks each message it sends with a steel blue `●`. The banner names Tinker, the model in
+  use, the projects folder and the chats it listens on. Piped input draws no rule and shows no line again;
+  with `NO_COLOR` or no terminal, none of that is drawn.
 - **CNV-9** `Desk.run` claims each chat channel. When another Tinker holds one, it stops if there is no
   terminal, and otherwise leaves that chat out. The terminal never waits on a chat: each chat starts in its own
   thread. Each chat has one status message: what Tinker works on (a job's title), never how far it got. Every
