@@ -238,6 +238,7 @@ DOCS_SITE_SEARCH = "{topic} official documentation"
 DOCS_VERSION_SEARCH = "{name} {version} documentation"
 RESULTS_PER_LEARN_SEARCH = 10
 SEARCHES_PER_ENGINE = 2
+MAX_PLANNED_SEARCHES = 8
 MIN_USABLE_PAGE_CHARS = 400
 MAX_REDIRECTS = 5
 FETCH_USER_AGENT = "Tinker/1.0 (a local coding agent learning from documentation)"
@@ -334,6 +335,7 @@ class Home:
                 ["sources"],
                 "the documentation pages tinker learn fetched, cleaned, per topic and version",
             ),
+            "searches": (["search plans"], "the web searches the model planned for each need"),
             "models": (["models"], "what calibration measured for each model"),
             "runs": (
                 ["projects", "runs"],

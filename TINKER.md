@@ -37,9 +37,11 @@ To update later, just `git pull`. The link always points at the latest code.
 
 Tinker searches open search engines that need no account and no key:
 [Mwmbl](https://mwmbl.org) for the web at large, and [Wikipedia](https://en.wikipedia.org) and
-[Wikibooks](https://en.wikibooks.org) for overviews and tutorials. It asks them all at once and mixes their
-results by rank. If one is down, the others still answer. Pages are read straight from their sites, in
-parallel, like `curl` would.
+[Wikibooks](https://en.wikibooks.org) for overviews and tutorials. For each thing it needs to find, the model
+plans the searches: their words, the engines that suit each one and how many results to take. Each plan is
+kept, so the same need is not planned twice. It asks the engines at once and mixes their results by rank. If
+one is down, the others still answer. Pages are read straight from their sites, in parallel, like `curl`
+would.
 
 Tinker uses the web as you would: a few searches at a time, within a small limit for each engine, and only
 the pages its searches found. It never crawls a site. It only goes on the web when you ask: `tinker learn`,
@@ -274,10 +276,11 @@ none of them. When the web finds nothing (offline, nothing about the topic), it 
 before the model does any work, and keeps what it knew before. Every web search and fetch Tinker makes is
 logged in `.tinker/web-requests.log`.
 
-Forget the kept documentation (it is fetched again on the next learn):
+Forget what learning keeps:
 
 ```sh
-tinker clear docs
+tinker clear docs        # the kept documentation: it is fetched again on the next learn
+tinker clear searches    # the kept search plans: the model plans them again on the next search
 ```
 
 Teach it a command of yours, which builds may then use (`=` says it is a command; a quoted definition works

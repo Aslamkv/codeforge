@@ -20,7 +20,7 @@ from .reading import Reader
 lazy from .building import BugReproducer, CodeWriter, TestToolSetup, TestWriter, Verifier
 lazy from .finishing import FinalReview, LessonWriter, ReadmeWriter, Tidy
 lazy from .graph import write_page
-lazy from .knowledge import Embeddings, Learner, Library, Researcher
+lazy from .knowledge import Embeddings, Learner, Library, Researcher, search_entry
 lazy from .learning import LearnStopped, SlotLearner
 lazy from .model import Calibrator, Model, Models, Ollama, OllamaError, SelectedModel
 lazy from .planning import Designer, InterfaceReviewer, Recaller, SpecWriter
@@ -826,7 +826,8 @@ class Commands:
                     "⚖️",
                 )
             for gap in entry.get("open", []):
-                say.info(f"Still open (Q{gap['question']}): {gap['missing'] or gap['search']}", "❓")
+                missing = gap["missing"] or search_entry(gap["search"])["query"]
+                say.info(f"Still open (Q{gap['question']}): {missing}", "❓")
             for note in entry["notes"]:
                 say.warn(f"Not learned: {note}")
         say.tip(

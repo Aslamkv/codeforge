@@ -9,7 +9,7 @@ import pytest
 from tinkerkit.fetcher import Fetched, Fetcher
 from tinkerkit.jobs import Jobs
 from tinkerkit.search import Mwmbl, SearchFailed, Wikibooks, Wikipedia
-from tinkerkit.settings import SEARCHES_PER_ENGINE, Config, Home
+from tinkerkit.settings import MAX_PLANNED_SEARCHES, SEARCHES_PER_ENGINE, Config, Home
 from tinkerkit.web import Internet, RequestLog, WebPage
 
 
@@ -131,6 +131,49 @@ def test_search_all_gives_each_querys_results_in_order():
         [found("a/q"), found("b/q")],
         [found("a/r"), found("b/r")],
     ]
+
+
+@pytest.mark.spec("WEB-3")
+def test_search_asks_only_the_engines_named():
+    first, second = Echo("a"), Echo("b")
+    assert Internet([first, second]).search("q", 3, ["b"]) == [found("b/q")]
+    assert first.asked == [] and second.asked == ["q"]
+
+
+@pytest.mark.spec("WEB-3")
+def test_a_planned_search_drops_unknown_engines_and_none_left_is_every_engine():
+    engines = [Echo("a"), Echo("b")]
+    searches = [{"query": "q", "engines": [" B ", "nope"]}, {"query": "r", "engines": ["nope"]}]
+    assert Internet(engines).search_all(searches, 3) == [
+        [found("b/q")],
+        [found("a/r"), found("b/r")],
+    ]
+
+
+class Many(Engine):
+    def answer(self, query):
+        return [found(f"{self.name}/{query}/{rank}") for rank in range(10)]
+
+
+@pytest.mark.spec("WEB-3")
+@pytest.mark.parametrize("asked, kept", [(2, 2), (9, 4), (None, 4), (0, 4), (-1, 4), ("x", 4), (True, 4)])
+def test_a_planned_search_count_is_at_most_count(asked, kept):
+    search = {"query": "q", "count": asked}
+    assert len(Internet([Many("a")]).search_all([search], 4)[0]) == kept
+
+
+@pytest.mark.spec("WEB-3")
+def test_a_planned_search_with_no_query_is_dropped():
+    searches = [{"engines": ["a"]}, {"query": "  "}, "", {"query": "q"}, "r"]
+    assert Internet([Echo("a")]).search_all(searches, 3) == [[found("a/q")], [found("a/r")]]
+
+
+@pytest.mark.spec("WEB-3")
+def test_at_most_max_planned_searches_run():
+    engine = Echo("a")
+    queries = [f"q{number}" for number in range(MAX_PLANNED_SEARCHES + 2)]
+    assert len(Internet([engine]).search_all(queries, 3)) == MAX_PLANNED_SEARCHES
+    assert len(engine.asked) == MAX_PLANNED_SEARCHES
 
 
 @pytest.mark.spec("WEB-3")

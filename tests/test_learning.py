@@ -3,7 +3,7 @@ import json
 import re
 
 import pytest
-from conftest import FakeSearch, web_page
+from conftest import FakeSearch, quick_model_replying, web_page
 
 from tinkerkit.knowledge import Knowledge, Library
 from tinkerkit.learning import (
@@ -12,12 +12,21 @@ from tinkerkit.learning import (
     SlotLearner,
     read_digest,
     read_plan,
+    wanted_docs,
 )
 from tinkerkit.model import Answer
 from tinkerkit.passages import Block, Page, Passage
 from tinkerkit.project import Tracker
 from tinkerkit.prompts import Reply
-from tinkerkit.settings import FACTS_PER_SLOT, SLOT_CANDIDATE_PASSAGES, Config, Home
+from tinkerkit.settings import (
+    DOCS_SITE_SEARCH,
+    DOCS_VERSION_SEARCH,
+    FACTS_PER_SLOT,
+    MAX_PLANNED_SEARCHES,
+    SLOT_CANDIDATE_PASSAGES,
+    Config,
+    Home,
+)
 from tinkerkit.slots import PROFILES, Selector, missing, short_slots, web_slots
 from tinkerkit.web import RequestLog, WebPage
 
@@ -123,6 +132,7 @@ PAGES = {
     APP: DRAWN_BY_ITS_SCRIPTS,
 }
 FIRST_SEARCH = "Widgetlib official documentation"
+PITFALLS_SEARCH = {"query": " widgetlib  common mistakes", "engines": ["wikibooks"], "count": 4}
 VERSION_DOCS_SEARCH = "Widgetlib 2.1.0 documentation"
 PLAN = {
     "kind": "tool",
@@ -132,7 +142,7 @@ PLAN = {
     "language": "Python",
     "commands": ["echo widgetlib 2.1.0", "pip install widgetlib"],
     "hints": {"core-usage": "the Widget class"},
-    "followups": {"pitfalls-and-limits": "widgetlib common mistakes", "unknown-slot": "x"},
+    "followups": {"pitfalls-and-limits": PITFALLS_SEARCH, "unknown-slot": "x"},
 }
 DOC_ROOT = "https://widgetlib.dev/docs/2.1/"
 ELSEWHERE = "https://elsewhere.org/x"
@@ -224,11 +234,11 @@ def test_profiles_are_data_and_a_slot_takes_the_plans_hint_and_follow_up():
         plan, "2.1"
     )
     its_own_search = "Widgetlib 2.1 changelog deprecations"
-    assert this_version.search(plan, "2.1") == its_own_search
+    assert this_version.search(plan, "2.1") == {"query": its_own_search}
     pitfalls = next(slot for slot in web_slots("tool") if slot.id == "pitfalls-and-limits")
-    assert pitfalls.search(plan, "2.1") == "widgetlib common mistakes"
+    assert pitfalls.search(plan, "2.1") == dict(PITFALLS_SEARCH, query="widgetlib common mistakes")
     assert (
-        core.search(plan, "2.1") == "Widgetlib getting started tutorial API"
+        core.search(plan, "2.1") == {"query": "Widgetlib getting started tutorial API"}
         and core.keywords() == "getting started tutorial API"
     )
 
@@ -336,7 +346,10 @@ def test_read_plan_checks_the_plan():
         "Python",
     )
     assert plan["commands"] == ["echo widgetlib 2.1.0"] and plan["dropped"] == ["pip install widgetlib"]
-    assert plan["followups"] == {"pitfalls-and-limits": "widgetlib common mistakes"} and plan["tools"] == []
+    assert plan["followups"] == {
+        "pitfalls-and-limits": dict(PITFALLS_SEARCH, query="widgetlib common mistakes")
+    }
+    assert plan["tools"] == []
     assert "docs" not in plan
     language = read_plan(
         {
@@ -481,6 +494,78 @@ def test_a_tool_is_learned_from_one_search_and_its_versions_documentation(tinker
     assert "Pages: 2 searched, 1 failed, 4 docs" in out and f"Facts kept: {len(entry['facts'])}" in out
 
 
+def quick_model_planning(monkeypatch, plans):
+    def reply(messages):
+        need = next(need for need in plans if need in messages[1]["content"])
+        return json.dumps({"searches": plans[need]})
+
+    return quick_model_replying(monkeypatch, reply)
+
+
+@pytest.mark.spec("WEB-3", "LRN-4")
+def test_more_planned_searches_than_one_ask_keeps_each_needs_results_its_own():
+    plans = [[{"query": f"need {need} search {number}"} for number in range(4)] for need in range(3)]
+    plans[0].insert(1, {"query": ""})
+    found = {
+        search["query"]: [result(f"https://x.dev/{search['query']}", "t")]
+        for plan in plans
+        for search in plan
+    }
+    web = FakeWeb(found)
+    results = learner(web).searched_needs(plans)
+    assert [len(batch) for batch in web.entries] == [MAX_PLANNED_SEARCHES, 4]
+    assert results == [[found[f"need {need} search {number}"][0] for number in range(4)] for need in range(3)]
+
+
+@pytest.mark.spec("LRN-1", "KNW-25")
+def test_kept_documentation_is_not_planned_or_searched(tinker_home, monkeypatch):
+    asked = quick_model_planning(monkeypatch, {DOCS_VERSION_SEARCH: [{"query": "{name} {version} docs"}]})
+    page = Page("https://widgetlib.dev/docs/", "t", [Block("text", "Overview")])
+    DocCache.put("widgetlib", "2.1.0", [page])
+    web = FakeWeb()
+    kept = wanted_docs("widgetlib", "Widgetlib", "2.1.0", DOCS_VERSION_SEARCH, 4)
+    [pages] = learner(web).doc_pages([kept])
+    assert [kept_page.blocks for kept_page in pages] == [page.blocks]
+    assert asked == [] and web.entries == []
+
+
+@pytest.mark.spec("LRN-4", "KNW-25")
+def test_a_learns_documentation_needs_are_planned_and_each_pools_its_searches(tinker_home, monkeypatch):
+    quick_model_planning(
+        monkeypatch,
+        {
+            DOCS_SITE_SEARCH: [
+                {"query": "{topic} guide", "engines": ["wikibooks"], "count": 3},
+                {"query": "{topic} official documentation", "engines": ["mwmbl"]},
+            ],
+            DOCS_VERSION_SEARCH: [
+                {"query": "{name}  {version} docs", "engines": ["mwmbl"], "count": 4},
+                {"query": "{name} {version} changelog"},
+            ],
+        },
+    )
+    found = {
+        "Widgetlib guide": RESULTS[:1],
+        FIRST_SEARCH: RESULTS,
+        "Widgetlib 2.1.0 docs": DOC_RESULTS[:2],
+        "Widgetlib 2.1.0 changelog": DOC_RESULTS[2:],
+    }
+    web = FakeWeb(found, ALL_PAGES)
+    learner(web).learn("Widgetlib")
+    assert web.entries[:2] == [
+        [
+            {"query": "Widgetlib guide", "engines": ["wikibooks"], "count": 3},
+            {"query": FIRST_SEARCH, "engines": ["mwmbl"]},
+        ],
+        [
+            {"query": "Widgetlib 2.1.0 docs", "engines": ["mwmbl"], "count": 4},
+            {"query": "Widgetlib 2.1.0 changelog"},
+        ],
+    ]
+    assert web.fetched[:3] == [START, CHANGES, APP]
+    assert all(url in web.fetched for url in DOC_PAGES if url != ELSEWHERE)
+
+
 @pytest.mark.spec("LRN-7")
 def test_learning_moves_its_tracker_through_its_steps_and_keeps_its_summary(tinker_home):
     tracker = Tracker("Learning Widgetlib")
@@ -580,6 +665,9 @@ def test_a_slot_left_without_facts_gets_the_plans_follow_up_search(tinker_home):
     )
     entry = learner(web).learn("Widgetlib")
     assert "widgetlib common mistakes" in follow_ups(web)
+    assert dict(PITFALLS_SEARCH, query="widgetlib common mistakes") in [
+        entry for entries in web.entries for entry in entries
+    ]
     assert any(
         fact["source"] == PITFALLS and fact["slot"] == "pitfalls-and-limits" for fact in entry["facts"]
     )

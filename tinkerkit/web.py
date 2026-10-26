@@ -10,7 +10,7 @@ lazy from concurrent.futures import ThreadPoolExecutor
 lazy from itertools import zip_longest
 
 from .messages import say
-from .settings import SEARCHES_PER_ENGINE, Config, Home
+from .settings import MAX_PLANNED_SEARCHES, SEARCHES_PER_ENGINE, Config, Home
 from .text import first_line
 lazy from .fetcher import Fetcher
 lazy from .jobs import journaled
@@ -40,27 +40,57 @@ class Internet:
     def state():
         return "searches " + ", ".join(engine.name for engine in search_engines())
 
-    def search(self, query, count):
-        return self.search_all([query], count)[0]
+    def search(self, query, count, engines=None):
+        return self.search_all([{"query": query, "engines": engines or []}], count)[0]
 
-    def search_all(self, queries, count):
-        queries = list(queries)
+    def search_all(self, searches, count):
+        searches = self.planned(searches, count)
         answers = journaled(
-            {"search": queries, "count": count},
-            lambda: self.searched_all(queries, count),
+            {"search": searches, "count": count},
+            lambda: self.searched_all(searches),
             keep=lambda answers: None not in answers,
         )
         return [answer or [] for answer in answers]
 
-    def searched_all(self, queries, count):
+    def planned(self, searches, count):
+        planned = [self.normalized(search, count) for search in searches]
+        return [search for search in planned if search["query"]][:MAX_PLANNED_SEARCHES]
+
+    def normalized(self, search, count):
+        if not isinstance(search, dict):
+            search = {"query": search}
+        query = search.get("query")
+        return {
+            "query": query.strip() if isinstance(query, str) else "",
+            "engines": self.known_engines(search.get("engines")),
+            "count": planned_count(search.get("count"), count),
+        }
+
+    def known_engines(self, asked):
+        names = [engine.name for engine in self.engines]
+        if isinstance(asked, str):
+            asked = [asked]
+        if not isinstance(asked, list):
+            asked = []
+        wanted = {name.strip().lower() for name in asked if isinstance(name, str)}
+        return [name for name in names if name in wanted] or names
+
+    def searched_all(self, searches):
         if self.offline:
-            return [None for _ in queries]
-        with ThreadPoolExecutor(max_workers=max(1, len(queries) * len(self.engines))) as pool:
+            return [None for _ in searches]
+        with ThreadPoolExecutor(max_workers=max(1, len(searches) * len(self.engines))) as pool:
             asked = [
-                [pool.submit(self.answered, engine, query, count) for engine in self.engines]
-                for query in queries
+                [
+                    pool.submit(self.answered, engine, search["query"], search["count"])
+                    for engine in self.engines
+                    if engine.name in search["engines"]
+                ]
+                for search in searches
             ]
-            return [self.merged([future.result() for future in futures], count) for futures in asked]
+            return [
+                self.merged([future.result() for future in futures], search["count"])
+                for search, futures in zip(searches, asked)
+            ]
 
     def merged(self, answers, count):
         found = [answer for answer in answers if not isinstance(answer, Unanswered)]
@@ -126,6 +156,16 @@ class Internet:
 
 def search_engines():
     return (Mwmbl, Wikipedia, Wikibooks)
+
+
+def planned_count(asked, count):
+    if isinstance(asked, bool):
+        return count
+    try:
+        asked = int(asked)
+    except TypeError, ValueError:
+        return count
+    return min(asked, count) if asked > 0 else count
 
 
 def interleaved(answers, count):

@@ -3,7 +3,7 @@ from collections import namedtuple
 
 from .messages import say
 lazy from .graph import Graph
-lazy from .knowledge import Item, Knowledge, Learner, Library, Retriever, retire
+lazy from .knowledge import Item, Knowledge, Learner, Library, Retriever, retire, search_entries
 lazy from .project import ending
 lazy from .prompts import Part, Prompts
 lazy from .reading import Readings
@@ -338,7 +338,7 @@ def read_plan(data, count, preferences=True, readings=False):
     plan = {
         "claims": claims,
         "commands": texts("commands", TEACH_CHECK_COMMANDS),
-        "searches": texts("searches", TEACH_CHECK_SEARCHES),
+        "searches": search_entries(data.get("searches"))[:TEACH_CHECK_SEARCHES],
         "language": field(data, "language"),
         "changes": read_changes(data.get("changes"), len(claims), count),
     }
