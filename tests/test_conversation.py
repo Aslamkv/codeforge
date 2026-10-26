@@ -493,16 +493,19 @@ LIVE_COLUMNS = 40
 UNDER = ["📊 3 page(s) read", "… Read 2 of 6 page(s) found"]
 
 
-def live_drawn(text, elapsed="0s", star="✻"):
-    return f"{ACCENT}{star}{RESET} Tinkering… ({elapsed}){DIM} · {text}{RESET}"
+GLOWING_T = f"\033[38;5;153mT{RESET}{ACCENT}inkering…{RESET}"
+
+
+def live_drawn(text, elapsed="0s", star="✻", word=f"{ACCENT}Tinkering…{RESET}"):
+    return f"{ACCENT}{star}{RESET} {word} ({elapsed}){DIM} · {text}{RESET}"
 
 
 def under_drawn(line):
     return f"  {DIM}{line}{RESET}"
 
 
-def block_drawn(text, under, elapsed="0s", star="✻"):
-    return [live_drawn(text, elapsed, star), *map(under_drawn, under)]
+def block_drawn(text, under, elapsed="0s", star="✻", word=f"{ACCENT}Tinkering…{RESET}"):
+    return [live_drawn(text, elapsed, star, word), *map(under_drawn, under)]
 
 
 def block_grown(by, blanks=0):
@@ -555,14 +558,14 @@ def test_console_changes_its_live_line_in_place_without_touching_what_you_type(m
 
 
 @pytest.mark.spec("CNV-8")
-def test_console_changes_its_live_block_in_place_and_turns_its_star_on_each_tick(monkeypatch, clock):
+def test_console_changes_its_live_block_in_place_and_turns_its_star_and_glow_on_each_tick(monkeypatch, clock):
     screen = live_screen(monkeypatch)
     screen.show_live("Learning", 100.0, under=UNDER)
     clock[0] += 1
     changed = drawn_after(lambda: screen.show_live("Learning", 100.0, under=["📊 4 page(s) read", "…"]))
     assert changed == block_changed(block_drawn("Learning", ["📊 4 page(s) read", "…"], "1s"))
     assert drawn_after(screen.tick) == block_changed(
-        block_drawn("Learning", ["📊 4 page(s) read", "…"], "1s", star="✶")
+        block_drawn("Learning", ["📊 4 page(s) read", "…"], "1s", star="✶", word=GLOWING_T)
     )
 
 
@@ -856,7 +859,7 @@ def test_a_jobs_live_line_shows_its_tokens_and_thinking(monkeypatch, clock):
     console.show("console", None, line, doing="Writing", tokens=1200, thinking=True, thought_seconds=None)
     facts = {"tokens": 1200, "thinking": True, "thought_seconds": None}
     assert console.screen.live == ("Writing", 100.0, facts)
-    assert "Tinkering… (0s · ↓ 1.2k tokens" in sys.stdout.getvalue()
+    assert f"Tinkering…{RESET} (0s · ↓ 1.2k tokens" in sys.stdout.getvalue()
 
 
 @pytest.mark.spec("CNV-8")

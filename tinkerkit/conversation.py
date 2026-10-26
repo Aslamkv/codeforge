@@ -1933,7 +1933,7 @@ class ConsoleChannel(Channel):
 
 class ConsoleScreen:
     PROMPT = "› " if sys.stdin.isatty() else ""
-    TICK_SECONDS = 0.25
+    TICK_SECONDS = 0.12
 
     def __init__(self):
         self.reading, self.live, self.under, self.frame, self.printing = False, None, [], 0, threading.Lock()
