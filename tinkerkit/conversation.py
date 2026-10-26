@@ -1928,13 +1928,19 @@ class ConsoleScreen:
     def __init__(self):
         self.reading, self.live, self.under, self.frame, self.printing = False, None, [], 0, threading.Lock()
         self.size, self.drawn, self.blank_top = shutil.get_terminal_size(), [], 0
+        self.size_changed = threading.Event()
 
     def start(self):
         self.reading, self.size = True, shutil.get_terminal_size()
         if typed_here():
             self.pin_to_the_bottom()
-            self.draw(self.rule() + "\n")
+            self.draw(unwrapped(self.rule()) + "\n")
+            self.wake_on_resize()
             threading.Thread(target=self.keep_ticking, daemon=True).start()
+
+    def wake_on_resize(self):
+        if hasattr(signal, "SIGWINCH") and threading.current_thread() is threading.main_thread():
+            signal.signal(signal.SIGWINCH, lambda *_: self.size_changed.set())
 
     def pin_to_the_bottom(self):
         row, rule_row = cursor_row(), shutil.get_terminal_size().lines - 1
@@ -2009,7 +2015,8 @@ class ConsoleScreen:
 
     def keep_ticking(self):
         while True:
-            time.sleep(self.TICK_SECONDS)
+            self.size_changed.wait(self.TICK_SECONDS)
+            self.size_changed.clear()
             self.tick()
 
     def tick(self):
@@ -2042,7 +2049,7 @@ class ConsoleScreen:
 
     def block_and_rule(self):
         block = [row + CLEAR_TO_LINE_END for row in self.live_drawn()] if self.live is not None else []
-        return NEXT_LINE.join([*block, self.rule()])
+        return unwrapped(NEXT_LINE.join([*block, self.rule()]))
 
     def live_rows(self):
         return 0 if self.live is None else 1 + len(self.under)
@@ -2075,7 +2082,7 @@ class ConsoleScreen:
         return scrolled_down_above(shutil.get_terminal_size().lines - 1 - kept, rows)
 
     def redrawn_live(self):
-        changed = NEXT_LINE.join(row + CLEAR_TO_LINE_END for row in self.live_drawn())
+        changed = unwrapped(NEXT_LINE.join(row + CLEAR_TO_LINE_END for row in self.live_drawn()))
         return self.above_the_rule(self.live_rows(), changed)
 
     @classmethod
@@ -2106,9 +2113,14 @@ class ConsoleScreen:
 
 
 SAVE_CURSOR, RESTORE_CURSOR, NEXT_LINE = "\0337", "\0338", "\033[E"
+AUTOWRAP_OFF, AUTOWRAP_ON = "\033[?7l", "\033[?7h"
 COLOUR_CODE_RE = re.compile(r"\033\[[0-9;]*m")
 WHOLE_SCREEN, ROW_DOWN_OR_SCROLL = "\033[r", "\033D"
 CURSOR_REPORT, CURSOR_REPORT_RE, CURSOR_REPORT_SECONDS = "\033[6n", re.compile(r"\033\[(\d+);\d+R"), 0.2
+
+
+def unwrapped(rows):
+    return f"{AUTOWRAP_OFF}{rows}{AUTOWRAP_ON}"
 
 
 def cursor_row():

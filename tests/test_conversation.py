@@ -1,6 +1,7 @@
 import contextlib
 import io
 import os
+import signal
 import subprocess
 import sys
 import textwrap
@@ -334,6 +335,10 @@ def above_the_rule(up, change):
     return f"\0337\033[{up}F{change}\0338"
 
 
+def unwrapped(rows):
+    return f"\033[?7l{rows}\033[?7h"
+
+
 def room_made(rows, above, blanks=0, lines=24):
     dropped = f"\0337\033[1;{lines - 2 - above}r\033[{blanks}S\033[r\0338" if blanks else ""
     scrolled = rows - blanks
@@ -358,8 +363,8 @@ def rule_drawn(columns):
 
 
 def sent_back_shown(line, rows=1, block=(), columns=10):
-    drawn = [shown_again(line, columns), *(f"{row}\033[K" for row in block), rule_drawn(columns)]
-    return above_the_rule(rows + len(block) + 1, "\033[E".join(drawn))
+    drawn = unwrapped("\033[E".join([*(f"{row}\033[K" for row in block), rule_drawn(columns)]))
+    return above_the_rule(rows + len(block) + 1, f"{shown_again(line, columns)}\033[E{drawn}")
 
 
 def stacked(line, count):
@@ -483,7 +488,7 @@ def live_shown(text):
 
 
 def live_changed(text, elapsed="0s", star="✻"):
-    return above_the_rule(2, f"{live_drawn(text, elapsed, star)}\033[K")
+    return above_the_rule(2, unwrapped(f"{live_drawn(text, elapsed, star)}\033[K"))
 
 
 def live_console(monkeypatch):
@@ -547,7 +552,7 @@ def block_drawn(text, under, elapsed="0s", star="✻"):
 
 
 def block_changed(rows):
-    return above_the_rule(len(rows) + 1, "\033[E".join(f"{row}\033[K" for row in rows))
+    return above_the_rule(len(rows) + 1, unwrapped("\033[E".join(f"{row}\033[K" for row in rows)))
 
 
 def block_shrunk(by, rows_left):
@@ -613,7 +618,7 @@ def started_screen(monkeypatch, cursor_row):
     return terminal, screen
 
 
-STARTING_RULE = f"{DIM}{'─' * 10}{RESET}\n"
+STARTING_RULE = unwrapped(f"{DIM}{'─' * 10}{RESET}") + "\n"
 
 
 @pytest.mark.spec("CNV-8")
@@ -705,7 +710,7 @@ def stale_rows_cleared(rows, typed_rows=0):
 
 def redrawn_with_rule(block, columns, typed_rows=0):
     rows = [f"{row}\033[K" for row in block] + [rule_drawn(columns)]
-    return above_the_rule(len(rows) + typed_rows, "\033[E".join(rows))
+    return above_the_rule(len(rows) + typed_rows, unwrapped("\033[E".join(rows)))
 
 
 def resized_block_screen(monkeypatch):
@@ -748,6 +753,21 @@ def test_a_resized_window_without_a_block_draws_only_the_rule_again(monkeypatch)
         stale_rows_cleared(2) + moved_down(1, kept=1) + redrawn_with_rule([], 5)
     )
     assert drawn_after(sys.stdout, screen.tick) == ""
+
+
+def drawn_soon(terminal, expected, seconds=2.0):
+    deadline = time.monotonic() + seconds
+    while expected not in terminal.getvalue() and time.monotonic() < deadline:
+        time.sleep(0.01)
+    return terminal.getvalue()
+
+
+@pytest.mark.spec("CNV-8")
+def test_a_resize_signal_draws_the_rule_again_without_waiting_for_the_tick(monkeypatch):
+    terminal, _ = started_screen(monkeypatch, cursor_row=23)
+    resized_to(monkeypatch, 5)
+    signal.raise_signal(signal.SIGWINCH)
+    assert redrawn_with_rule([], 5) in drawn_soon(terminal, redrawn_with_rule([], 5))
 
 
 @pytest.mark.spec("CNV-8")
