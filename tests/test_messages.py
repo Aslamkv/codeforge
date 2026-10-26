@@ -141,6 +141,17 @@ def terminal(monkeypatch):
     return terminal
 
 
+@pytest.fixture
+def colored_terminal(terminal, monkeypatch):
+    monkeypatch.delenv("NO_COLOR")
+    monkeypatch.setenv("COLORTERM", "")
+    return terminal
+
+
+def drawn_lines(terminal):
+    return terminal.getvalue().split("\033[K")
+
+
 @pytest.mark.spec("MSG-4")
 def test_on_a_terminal_the_next_message_clears_the_live_line(terminal, clock, capsys):
     say.live("Writing the spec")
@@ -163,33 +174,32 @@ def test_the_live_line_counts_from_when_the_work_began(terminal, clock):
     say.now_on("")
     clock[0] += 30
     say.now_on("Running tests")
-    drawn = terminal.getvalue().split("\033[K")
+    drawn = drawn_lines(terminal)
     assert drawn[2] == "\r   ✳ Tinkering… (15s) · Writing calc.py"
     assert drawn[-2] == "\r   ✳ Tinkering… (0s) · Running tests"
 
 
+STEEL_BLUE = "\033[38;2;70;130;180m"
+
+
 @pytest.mark.spec("MSG-4")
-@pytest.mark.parametrize(
-    "colorterm,accent",
-    [("truecolor", "\033[38;2;70;130;180m"), ("24bit", "\033[38;2;70;130;180m"), ("", ACCENT)],
-)
-def test_the_live_star_is_steel_blue_and_what_goes_on_is_dim(terminal, clock, monkeypatch, colorterm, accent):
-    monkeypatch.delenv("NO_COLOR")
+@pytest.mark.parametrize("colorterm,accent", [("truecolor", STEEL_BLUE), ("24bit", STEEL_BLUE), ("", ACCENT)])
+def test_the_live_star_is_steel_blue_and_what_goes_on_is_dim(
+    colored_terminal, clock, monkeypatch, colorterm, accent
+):
     monkeypatch.setenv("COLORTERM", colorterm)
     say.live("Writing tests")
-    assert terminal.getvalue() == f"\r   {accent}✻{RESET} Tinkering… (0s){DIM} · Writing tests{RESET}\033[K"
+    assert (
+        colored_terminal.getvalue()
+        == f"\r   {accent}✻{RESET} Tinkering… (0s){DIM} · Writing tests{RESET}\033[K"
+    )
 
 
 @pytest.mark.spec("MSG-4")
-def test_the_live_line_is_cut_to_the_terminal_width_by_what_shows(terminal, clock, monkeypatch):
-    monkeypatch.delenv("NO_COLOR")
-    monkeypatch.setenv("COLORTERM", "")
+def test_the_live_line_is_cut_to_the_terminal_width_by_what_shows(colored_terminal, clock, monkeypatch):
     monkeypatch.setattr(shutil, "get_terminal_size", lambda fallback: os.terminal_size((23, 10)))
     say.live("Writing tests")
-    assert terminal.getvalue() == f"\r   {ACCENT}✻{RESET} Tinkering… (0s){DIM} ·{RESET}\033[K"
-
-
-NO_FACTS = {"tokens": 0, "thinking": False, "thought_seconds": None}
+    assert colored_terminal.getvalue() == f"\r   {ACCENT}✻{RESET} Tinkering… (0s){DIM} ·{RESET}\033[K"
 
 
 @pytest.mark.spec("MSG-4")
@@ -204,7 +214,7 @@ def test_the_live_line_shows_the_tokens_and_thinking_heard_since_the_work_began(
     say.live("Writing tests")
     say.now_on("")
     say.now_on("Running tests")
-    drawn = terminal.getvalue().split("\033[K")
+    drawn = drawn_lines(terminal)
     assert drawn[1] == "\r   ✶ Tinkering… (0s · ↓ 1.2k tokens · thinking) · Writing tests"
     assert drawn[2] == "\r   ✳ Tinkering… (12s · ↓ 1.2k tokens · thought for 12s) · Writing tests"
     assert drawn[-2] == "\r   ✢ Tinkering… (0s) · Running tests"
@@ -222,6 +232,9 @@ def test_the_live_line_counts_tokens_in_short(count, short):
 def test_the_tinkering_line_leaves_out_empty_facts():
     assert tinkering(None, "Writing") == "Tinkering… · Writing"
     assert tinkering(64, "Writing", thought_seconds=12) == "Tinkering… (1m 4s · thought for 12s) · Writing"
+
+
+NO_FACTS = {"tokens": 0, "thinking": False, "thought_seconds": None}
 
 
 class Screen:

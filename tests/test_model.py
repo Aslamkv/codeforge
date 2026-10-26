@@ -204,29 +204,32 @@ def test_stream_keeps_the_end_of_the_thought(monkeypatch):
     assert stream.thought_tail == "aa" + "b" * 8 and stream.thinking == 2
 
 
+def stream_clock(monkeypatch, *ticks):
+    clock = iter(ticks)
+    monkeypatch.setattr(model_module.time, "perf_counter", lambda: next(clock))
+
+
+def heard_of(*kinds):
+    heard = []
+    say.follow(lambda message: heard.append((message.kind, message.text)) if message.kind in kinds else None)
+    return heard
+
+
 @pytest.mark.spec("MOD-9")
 def test_stream_says_live_the_step_never_what_the_model_is_doing(monkeypatch):
-    clock = iter([0, 3, 6])
-    monkeypatch.setattr(model_module.time, "perf_counter", lambda: next(clock))
-    seen = []
-    say.follow(lambda message: seen.append(message.text) if message.kind == "live" else None)
+    stream_clock(monkeypatch, 0, 3, 6)
+    seen = heard_of("live")
     say.step("Writing the spec…", "📝")
     stream = Stream("Write calc.py", None)
     stream.take({"message": {"thinking": "hm"}})
     stream.take({"message": {"content": "x"}})
-    assert seen == ["Writing the spec", "Writing the spec"]
+    assert seen == [("live", "Writing the spec")] * 2
 
 
 @pytest.mark.spec("MOD-9")
 def test_what_the_command_works_on_is_said_live_and_heard(monkeypatch):
-    clock = iter([0, 3, 6])
-    monkeypatch.setattr(model_module.time, "perf_counter", lambda: next(clock))
-    seen = []
-    say.follow(
-        lambda message: (
-            seen.append((message.kind, message.text)) if message.kind in ("live", "working") else None
-        )
-    )
+    stream_clock(monkeypatch, 0, 3, 6)
+    seen = heard_of("live", "working")
     stream = Stream("Read: chapter 2", None)
     with say.working_on("Reading chapter 2, Habits (1 of 3)"):
         stream.take({"message": {"thinking": "hm"}})
@@ -243,14 +246,8 @@ def test_what_the_command_works_on_is_said_live_and_heard(monkeypatch):
 
 @pytest.mark.spec("MOD-9")
 def test_a_stream_tells_its_tokens_on_each_update_and_its_thinking_when_it_turns(monkeypatch):
-    clock = iter([0, 1, 3, 4])
-    monkeypatch.setattr(model_module.time, "perf_counter", lambda: next(clock))
-    told = []
-    say.follow(
-        lambda message: (
-            told.append((message.kind, message.text)) if message.kind in ("tokens", "thinking") else None
-        )
-    )
+    stream_clock(monkeypatch, 0, 1, 3, 4)
+    told = heard_of("tokens", "thinking")
     stream = Stream("Write calc.py", None)
     stream.take({"message": {"thinking": "hm"}})
     stream.take({"message": {"content": "x"}})
