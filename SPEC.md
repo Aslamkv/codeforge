@@ -742,28 +742,26 @@ The terminal and the chats are one conversation: the same commands, the same ans
 - **CNV-7** `Channel.listened` gives only messages from allowed chats. It says a refusal once and gives
   nothing. `claim` lets only one process hold a channel's lock.
 - **CNV-8** `ConsoleChannel` prints a thing's message as it grows: its title and each settled line once, as
-  they come. The Tinkering line (what goes on now) and the lines under it stay out of the print: on a
-  terminal with colour, it shows (**MSG-4**) above the prompt, with the
-  lines under it dim and indented below it, all redrawn in place as one live block. On a terminal with
-  colour, the prompt sits on the screen's last row, the rule above it and the live block above that. What
-  Tinker prints sits right above the block: each new line pushes the ones above it up, any blank space stays
-  at the top of the window, and older lines go to the scrollback. A message of any height prints above the
-  block in pieces that fit, and the line you send shows again there; the prompt line and what you type on it
-  are never redrawn. When the window is resized, the block and the rule are drawn again at the new size right
-  away, still right above the prompt and with what Tinker printed right above them, and they never spill onto
-  the prompt row;
-  otherwise what goes on now
-  prints as a line of its own each time it changes. When the thing is done, the live block clears and only
-  the lines not yet printed follow. `exit` or end of input closes it. Once it reads, all that Tinker says
-  (`say`, a chat's message too) prints through it, above the prompt, and `live` draws in that same live
-  block, its star turning on its own about four times a second. While a job shows its progress there, the
-  status that says what Tinker works on is left out of the terminal. A job's live line counts from when the
-  job began (its tracker's `started`, less the time of earlier runs), so a Tinker opened later shows the same
-  time. On a terminal with colour, the
-  conversation opens in a framed banner, draws a rule over the prompt, shows each line you send again
-  highlighted, and marks each message it sends with a steel blue `●`. The banner names Tinker, the model in
-  use, the projects folder and the chats it listens on. Piped input draws no rule and shows no line again;
-  with `NO_COLOR` or no terminal, none of that is drawn.
+  they come. The Tinkering line (what goes on now, **MSG-4**) and the lines under it stay out of the print.
+  On a terminal with colour, they show above the prompt as one live block, the lines under the Tinkering line
+  dim and indented, all redrawn in place; otherwise what goes on now prints as a line of its own each time it
+  changes. When the thing is done, the live block clears and only the lines not yet printed follow. `exit` or
+  end of input closes it.
+  Once it reads, all that Tinker says (`say`, a chat's message too) prints through it, above the prompt, and
+  `live` draws in that same live block, its star turning on its own about four times a second. While a job
+  shows its progress there, the status that says what Tinker works on is left out of the terminal. A job's
+  live line counts from when the job began (its tracker's `started`, less the time of earlier runs), so a
+  Tinker opened later shows the same time.
+  On a terminal with colour, the prompt sits on the screen's last row, the rule above it and the live block
+  above that. What Tinker prints sits right above the block: each new line pushes the ones above it up, any
+  blank space stays at the top of the window, and older lines go to the scrollback. A message of any height
+  prints above the block in pieces that fit, and the line you send shows again there; the prompt line and
+  what you type on it are never redrawn. When the window is resized, the block and the rule are drawn again
+  at the new size right away, still right above the prompt and with what Tinker printed right above them, and
+  they never spill onto the prompt row. The conversation opens in a framed banner that names Tinker, the model
+  in use, the projects folder and the chats it listens on; it draws a rule over the prompt, shows each line
+  you send again highlighted, and marks each message it sends with a steel blue `●`. Piped input draws no
+  rule and shows no line again; with `NO_COLOR` or no terminal, none of that is drawn.
 - **CNV-9** `Desk.run` claims each chat channel. When another Tinker holds one, it stops if there is no
   terminal, and otherwise leaves that chat out. The terminal never waits on a chat: each chat starts in its own
   thread. Each chat has one status message: what Tinker works on (a job's title), never how far it got. Every

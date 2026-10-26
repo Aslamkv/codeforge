@@ -172,11 +172,12 @@ Talk with Tinker. Every command works here, and anything else is a normal chat (
 tinker
 ```
 
-On a colour terminal it opens with a banner showing the model, the projects folder and the chats it listens on.
-The prompt stays on the bottom row with a rule over it. Output sits right above it and older lines scroll
-into the scrollback, so what you type is never redrawn. Resizing the window redraws the rule at the new size. Your lines show again highlighted, Tinker's messages
-are marked with a steel blue `●`, and a `✻ Tinkering…` line above the prompt shows the time, the tokens, how long the model thought and
-the current step while it works:
+On a colour terminal it opens with a banner showing the model, the projects folder and the chats it listens
+on. The prompt stays on the bottom row with a rule over it. Output sits right above it and older lines
+scroll into the scrollback, so what you type is never redrawn. Resizing the window redraws the rule at the
+new size. Your lines show again highlighted, Tinker's messages are marked with a steel blue `●`, and a
+`✻ Tinkering…` line above the prompt shows the time, the tokens, how long the model thought and the current
+step while it works:
 
 ```
 ✻ Tinkering… (1m 4s · ↓ 1.2k tokens · thought for 12s) · 🧠 Learning about purpose (1 of 6)
