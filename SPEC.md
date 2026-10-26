@@ -746,10 +746,12 @@ The terminal and the chats are one conversation: the same commands, the same ans
   terminal with colour, it shows (**MSG-4**) above the prompt, with the
   lines under it dim and indented below it, all redrawn in place as one live block. On a terminal with
   colour, the prompt sits on the screen's last row, the rule above it and the live block above that. What
-  Tinker prints fills the rows above the block, and once they are full the screen scrolls, older lines going
-  to the scrollback. A message of any height prints above the block in pieces that fit, and the line you send
-  shows again there; the prompt line and what you type on it are never redrawn. When the window is resized,
-  the block and the rule are drawn again at the new size, still right above the prompt;
+  Tinker prints sits right above the block: each new line pushes the ones above it up, any blank space stays
+  at the top of the window, and older lines go to the scrollback. A message of any height prints above the
+  block in pieces that fit, and the line you send shows again there; the prompt line and what you type on it
+  are never redrawn. When the window is resized, the block and the rule are drawn again at the new size right
+  away, still right above the prompt and with what Tinker printed right above them, and they never spill onto
+  the prompt row;
   otherwise what goes on now
   prints as a line of its own each time it changes. When the thing is done, the live block clears and only
   the lines not yet printed follow. `exit` or end of input closes it. Once it reads, all that Tinker says
