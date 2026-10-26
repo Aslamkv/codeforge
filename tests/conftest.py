@@ -44,7 +44,8 @@ def quiet_voice():
 
 @pytest.fixture(autouse=True)
 def no_job():
-    from tinkerkit.jobs import JOB_STOP_SIGNAL, Jobs
+    from tinkerkit.jobs import Jobs
+    from tinkerkit.settings import JOB_STOP_SIGNAL
 
     handler = signal.getsignal(JOB_STOP_SIGNAL)
     Jobs.current = Jobs.journal = Jobs.ended_status = None

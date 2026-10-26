@@ -61,9 +61,7 @@ class Answer(namedtuple("Answer", "value why thought", defaults=("", ""))):
 
 
 class Model:
-    def __init__(
-        self, name, settings, keep_alive, log, max_growth=DEFAULT_CONFIG["max_growth"]
-    ):
+    def __init__(self, name, settings, keep_alive, log, max_growth=DEFAULT_CONFIG["max_growth"]):
         self.name, self.settings = name, settings
         self.max_tokens, self.num_ctx = int(settings["max_prompt_tokens"]), int(settings["num_ctx"])
         self.think = settings.get("think")

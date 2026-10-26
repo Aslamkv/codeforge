@@ -1,4 +1,5 @@
 import re
+import signal
 from collections import namedtuple
 from pathlib import Path
 lazy import os
@@ -259,6 +260,10 @@ MAX_RECALL_TOPICS = 6
 TOPIC_RELEVANT_SIMILARITY = 0.6
 PER_PAGE = 10
 NUMBERED_PARTS = ("jobs", "read")
+
+JOB_STOP_SIGNAL = signal.SIGUSR2
+MESSAGE_KEPT_SECONDS = 24 * 3600
+GLANCE_KEPT_SECONDS = 120
 
 
 Paged = namedtuple("Paged", "items pages")

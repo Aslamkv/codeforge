@@ -11,7 +11,7 @@ lazy from pathlib import Path
 
 lazy from .commands import kind_of
 lazy from .messages import say
-lazy from .settings import EXERCISE_ENV, Home, Numbered, confirm_deletion
+lazy from .settings import EXERCISE_ENV, JOB_STOP_SIGNAL, Home, Numbered, confirm_deletion
 lazy from .store import Log
 lazy from .text import fingerprint, now_text
 
@@ -19,7 +19,6 @@ JOBS = Numbered("jobs", "job numbers")
 STATES = ("running", "paused", "stopped", "finished", "archived")
 JOB_PAUSE_GRACE_SECONDS = 150
 PAUSED_JOB_IDLE_LOOK_SECONDS = 1.0
-JOB_STOP_SIGNAL = signal.SIGUSR2
 
 
 class Journal:

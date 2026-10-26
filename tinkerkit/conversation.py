@@ -16,13 +16,13 @@ lazy import webbrowser
 lazy from pathlib import Path
 
 from .commands import BY_NAME, COMMANDS, deletes, kind_of, refs
-from .jobs import JOB_STOP_SIGNAL, Jobs, alive, job_number, paused_for_you
+from .jobs import Jobs, alive, job_number, paused_for_you
 from .project import Runs, Tracker, saved
 lazy from .ledger import DONE_NOTE_KEPT_SECONDS, Ledger
 lazy from .messages import human_duration, say
 lazy from .model import Models, OllamaError
 lazy from .prompts import Prompts, Reply
-lazy from .settings import EXERCISE_FOLDER, Home, projects_folder
+lazy from .settings import EXERCISE_FOLDER, JOB_STOP_SIGNAL, Home, projects_folder
 lazy from .text import field
 lazy from .workspace import Toolchain
 

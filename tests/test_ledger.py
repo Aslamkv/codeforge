@@ -3,8 +3,8 @@ import time
 import pytest
 
 import tinkerkit.ledger as ledger
-from tinkerkit.ledger import GLANCE_KEPT_SECONDS, MESSAGE_KEPT_SECONDS, Ledger
-from tinkerkit.settings import PER_PAGE, Home
+from tinkerkit.ledger import Ledger
+from tinkerkit.settings import GLANCE_KEPT_SECONDS, MESSAGE_KEPT_SECONDS, PER_PAGE, Home
 
 
 @pytest.fixture

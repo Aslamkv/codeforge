@@ -11,12 +11,13 @@ from test_conversation import Recorder
 from tinkerkit import cli, conversation, exercising, jobs
 from tinkerkit.cli import Cli, Commands
 from tinkerkit.conversation import Desk, Message
-from tinkerkit.jobs import JOB_STOP_SIGNAL, Jobs, archived, began_at, calls_log, is_job, journaled, today
+from tinkerkit.jobs import Jobs, archived, began_at, calls_log, is_job, journaled, today
 from tinkerkit.knowledge import Learner, Researcher
 from tinkerkit.learning import SlotLearner
 from tinkerkit.model import Ollama
 from tinkerkit.passages import Block
 from tinkerkit.project import Tracker
+from tinkerkit.settings import JOB_STOP_SIGNAL
 from tinkerkit.web import Internet, WebPage
 
 DEAD_PID = 999999999
