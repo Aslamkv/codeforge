@@ -25,6 +25,12 @@ def registered(folder, run_id="abc123", **record):
     Runs.save(dict(Runs.new_record("a calculator", folder, None), id=run_id, **record), folder)
 
 
+def bare_run(**attributes):
+    run = ProjectRun.__new__(ProjectRun)
+    vars(run).update(attributes)
+    return run
+
+
 @pytest.mark.spec("CLI-1")
 def test_task(tmp_path, monkeypatch):
     monkeypatch.chdir(tmp_path)
@@ -769,41 +775,36 @@ def test_learn_a_command_of_yours_needs_no_model(home_store):
 
 
 @pytest.mark.spec("CLI-7")
-def test_learning_checks_everything_before_loading(measured_model, fake_ollama, monkeypatch, capsys):
-    from tinkerkit.workspace import TaughtCommands
-
-    monkeypatch.setattr(TaughtCommands, "alias", staticmethod(lambda name: None))
+@pytest.mark.parametrize(
+    "words,finder,nothing",
+    [
+        (["learn", "Flask"], ("SlotLearner", "learn"), "Nothing learned about Flask; nothing saved."),
+        (
+            ["research", "food", "banks"],
+            ("Researcher", "research"),
+            "Nothing found about food banks; nothing saved.",
+        ),
+    ],
+)
+def test_learning_checks_everything_before_loading_and_finding_nothing_is_an_error(
+    measured_model, fake_ollama, monkeypatch, capsys, words, finder, nothing
+):
+    monkeypatch.setattr(cli.TaughtCommands, "alias", staticmethod(lambda name: None))
     monkeypatch.setattr(
         Ollama, "installed_models", staticmethod(lambda: [{"name": MODEL}, {"name": "embedder"}])
     )
-    with pytest.raises(SystemExit, match="tinker learn needs an embedding model"):
-        Commands(parse("learn", "Flask")).run()
+    with pytest.raises(SystemExit, match=f"tinker {words[0]} needs an embedding model"):
+        Commands(parse(*words)).run()
     Config.save(embed_model="embedder")
-    monkeypatch.setattr(cli.SlotLearner, "learn", lambda self, topic, deep=False: None)
-    with pytest.raises(SystemExit, match="Nothing learned about Flask; nothing saved."):
-        Commands(parse("learn", "Flask")).run()
+    finder_class, method = finder
+    monkeypatch.setattr(getattr(cli, finder_class), method, lambda self, *args, **kwargs: None)
+    with pytest.raises(SystemExit, match=nothing):
+        Commands(parse(*words)).run()
     assert fake_ollama.calls == []
     assert "Time taken: 0s" in capsys.readouterr().out
     Config.save(model=None)
     with pytest.raises(SystemExit, match="No model in use"):
-        Commands(parse("learn", "Flask")).run()
-
-
-@pytest.mark.spec("CLI-7")
-def test_research_checks_everything_before_loading_and_finding_nothing_is_an_error(
-    measured_model, fake_ollama, monkeypatch, capsys
-):
-    monkeypatch.setattr(
-        Ollama, "installed_models", staticmethod(lambda: [{"name": MODEL}, {"name": "embedder"}])
-    )
-    with pytest.raises(SystemExit, match="tinker research needs an embedding model"):
-        Commands(parse("research", "food", "banks")).run()
-    Config.save(embed_model="embedder")
-    monkeypatch.setattr(cli.Researcher, "research", lambda self, topic: None)
-    with pytest.raises(SystemExit, match="Nothing found about food banks; nothing saved."):
-        Commands(parse("research", "food", "banks")).run()
-    assert fake_ollama.calls == []
-    assert "Time taken: 0s" in capsys.readouterr().out
+        Commands(parse(*words)).run()
 
 
 @pytest.mark.spec("CLI-5")
@@ -952,10 +953,13 @@ def test_a_blocked_run_says_why_and_how_to_go_on(make_project, make_session, cap
         criterion("C1", "t.py::a", "adds", status="green"),
         criterion("C2", "t.py::b", "subtracts", status="blocked", last_error="AssertionError"),
     ]
-    session = make_session(make_project(steps))
-    run = ProjectRun.__new__(ProjectRun)
-    run.session, run.record, run.tracker, run.stopped = session, {"id": "abc123"}, Tracker("calc"), stopped
-    run.outcome = cli.Outcome()
+    run = bare_run(
+        session=make_session(make_project(steps)),
+        record={"id": "abc123"},
+        tracker=Tracker("calc"),
+        stopped=stopped,
+        outcome=cli.Outcome(),
+    )
     run.outcome.set("blocked")
     run.print_summary()
     out = capsys.readouterr().out
@@ -966,14 +970,13 @@ def test_a_blocked_run_says_why_and_how_to_go_on(make_project, make_session, cap
 @pytest.mark.spec("CLI-9")
 def test_the_cycle_a_run_works_on(make_project, make_session):
     def run_on(project, mode, confirm=True, **given):
-        run = ProjectRun.__new__(ProjectRun)
         defaults = {"bug": False, "change_request": "keep a history"}
-        run.args = argparse.Namespace(**dict(defaults, **given))
-        run.session, run.record, run.mode, run.spec_text = (
-            make_session(project, confirm=confirm),
-            project.run,
-            mode,
-            "",
+        run = bare_run(
+            args=argparse.Namespace(**dict(defaults, **given)),
+            session=make_session(project, confirm=confirm),
+            record=project.run,
+            mode=mode,
+            spec_text="",
         )
         return run.choose_cycle("")
 

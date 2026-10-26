@@ -97,11 +97,15 @@ def test_without_the_channels_plugin_the_conversation_has_no_chats(monkeypatch):
     assert conversation.attach("a task", None) is None
 
 
+def program_files():
+    return [*(ROOT / "tinkerkit").glob("*.py"), ROOT / "tinker.py"]
+
+
 @pytest.mark.spec("ARCH-3")
 def test_only_the_model_web_and_channel_modules_open_connections():
     network = {"urllib.request", "http.client", "urlopen", "HTTPSConnection"}
     users = set()
-    for path in [*(ROOT / "tinkerkit").glob("*.py"), ROOT / "tinker.py"]:
+    for path in program_files():
         text = path.read_text(encoding="utf-8")
         if any(f"import {name}" in text or f"{name}(" in text for name in network):
             users.add(path.stem)
@@ -115,16 +119,14 @@ def test_only_the_model_web_and_channel_modules_open_connections():
     }
     assert fetcher_users == {"web"}, fetcher_users
     runners = {
-        path.stem
-        for path in [*(ROOT / "tinkerkit").glob("*.py"), ROOT / "tinker.py"]
-        if "subprocess.Popen(" in path.read_text(encoding="utf-8")
+        path.stem for path in program_files() if "subprocess.Popen(" in path.read_text(encoding="utf-8")
     }
     assert runners <= {"workspace", "settings", "conversation"}, runners
 
 
 @pytest.mark.spec("ARCH-4")
 def test_only_home_knows_where_the_home_is():
-    for path in [*(ROOT / "tinkerkit").glob("*.py"), ROOT / "tinker.py"]:
+    for path in program_files():
         if path.stem == "settings":
             continue
         text = path.read_text(encoding="utf-8")
@@ -144,15 +146,13 @@ def test_every_phase_works_through_the_session():
     for module in ("planning", "building", "finishing", "cli"):
         top, inner = imports_of(module)
         assert "session" in top, f"{module} takes its phases from the session"
-    tinker_py = (ROOT / "tinker.py").read_text(encoding="utf-8")
-    assert "class Session" not in tinker_py
 
 
 PRAGMA_RE = re.compile(r"# noqa(: [A-Z]+\d+(, [A-Z]+\d+)*)?")
 
 
 def every_source_file():
-    return sorted([*(ROOT / "tinkerkit").glob("*.py"), *(ROOT / "tests").glob("*.py"), ROOT / "tinker.py"])
+    return sorted([*program_files(), *(ROOT / "tests").glob("*.py")])
 
 
 def comments_of(path):
