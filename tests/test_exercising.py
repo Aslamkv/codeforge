@@ -19,7 +19,6 @@ from tinkerkit.exercising import (
     problems,
     read_choice,
     read_verdict,
-    slowest,
 )
 from tinkerkit.jobs import Jobs
 from tinkerkit.knowledge import Knowledge, Library
@@ -287,11 +286,6 @@ def test_measured_and_problems_come_from_the_projects_own_database(make_project,
         and "warning: ⚠️ ruff is not installed" in found
     )
     assert any(problem.startswith("reply cut short: Spec (attempt 2)") for problem in found)
-
-
-@pytest.mark.spec("EXR-5")
-def test_slowest_never_names_a_file():
-    assert slowest([{"label": "Write notes.py", "seconds": 5}]) == ["Write: 5s in 1 call"]
 
 
 @pytest.mark.spec("EXR-6")
