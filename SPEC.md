@@ -556,7 +556,8 @@ What is said in the chats, kept so that a chat is only a view of it.
   when its `done_when` says so or its blocks have all ended.
 - **MOD-19** A failed request is tried again after what the failure calls for. Out of memory: a smaller prompt
   budget, up to `OOM_RETRIES` times. A stall: the model is reloaded, up to `STALL_RETRIES` times. A rejected
-  think level: `true`, then no think setting. A reply error: one more try, then what came before it. A crash:
+  think level: `true`, then no think setting; a rejected `build_think` falls back to the planning one, for the
+  run. A reply error: one more try, then what came before it. A crash:
   the same call again; after a second crash near a limit, that limit is lowered for the run; after
   `CRASH_RETRIES` crashes it raises. Anything else is raised.
 - **MOD-20** `Model.ask` tries a prompt that is too large again with every part relaxed. It raises

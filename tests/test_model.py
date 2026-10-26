@@ -495,6 +495,16 @@ def test_a_rejected_think_level_falls_back(make_model, fake_ollama):
 
 
 @pytest.mark.spec("MOD-19")
+def test_a_rejected_build_think_falls_back_to_the_planning_one(make_model, fake_ollama):
+    fake_ollama.reply(OllamaError('invalid think value "medium"')).reply("ok")
+    model = make_model()
+    model.is_building = True
+    assert model.ask("s", [Part("Q", "q", True)], "Ask") == Answer("ok")
+    assert [call["think"] for call in fake_ollama.calls] == ["medium", "high"]
+    assert model.build_think is None and model.think == "high"
+
+
+@pytest.mark.spec("MOD-19")
 def test_a_reply_error_is_asked_once_more_then_the_partial_is_used(make_model, fake_ollama, capsys):
     error = OllamaError("parse error", in_reply=True, partial="<<<FILE a.py>>>\nx")
     fake_ollama.reply(error, times=2)
