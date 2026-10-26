@@ -85,7 +85,7 @@ listed above it:
 | `knowledge` | lessons and proven knowledge (`Knowledge`), research (`Researcher`), and what learning shares (`Learner`, `Library`, `Retriever`, `Embeddings`) |
 | `slots` | what learning a language or a tool must find out, as data (`Slot`, `PROFILES`), and each slot's passages (`Selector`) |
 | `learning` | learning a language or a tool by its slots (`SlotLearner`, `DocCache`, `LearnStopped`) |
-| `graph` | what Tinker knows as one graph of items and links (`Graph`), and the page that shows it (`GraphPage`) |
+| `graph` | what Tinker knows as one graph of items and links (`Graph`), the page that shows it (`GraphPage`), and browsing it in pages (`MemoryBrowser`) |
 | `reading` | what the person gives to read: stored whole on the reading list (`Readings`), then learned from chapter by chapter (`Reader`, `Epub`, `Book`) |
 | `teaching` | asking what Tinker keeps (`Asker`), and teaching it, checked before anything changes (`Teacher`, `Memory`, `Verdict`) |
 | `exercising` | practising a language on its own, giving way to the person (`Exercise`, `Exercises`) |
@@ -1091,8 +1091,12 @@ What Tinker knows as one graph, and the page that shows it.
 - **GRF-1** `Graph.build()` makes one node per thing Tinker knows: each language (one for its knowledge and
   what was learned of it), any language, each topic learned, the person's commands, and each lesson, fact,
   finding, rule, toolchain, fix, command and retired item. A node is
-  `{id, kind, label, text, status, group, details, sources}`; `group` is the language or topic it belongs to.
-  A fact's details name its slot, and a topic's details name the slots it is missing.
+  `{id, kind, label, text, status, group, details, sources, day}`; `group` is the language or topic it belongs
+  to. A fact's details name its slot, and a topic's details name the slots it is missing. An item's `day`
+  (`YYYY-MM-DD`, or empty) is when it was first kept: its first history event, else its `added` or saved day,
+  else the day its topic was learned. A node's `id` comes from what it is, never from where it is in a list: a
+  retired item's is `retired:` and the key it had before it was retired, so it stays the same while the item
+  is kept.
 - **GRF-2** Links: `belongs_to` from an item to its language, topic, any language or the person's commands;
   `cites` from a finding to its facts and from a language's rule to its facts and lessons; `became` from a web
   fact to the language's proven fact it was copied into; and `taught_by`, `confirmed_in`, `helped_in` and
@@ -1106,6 +1110,36 @@ What Tinker knows as one graph, and the page that shows it.
   scripts), escapes every text, and draws the graph when scripts run.
 - **GRF-5** `tinker memory --graph` writes the page to `Home.graph_page()`, prints what it holds (the counts,
   and how lessons were found similar), and opens it in the browser only when printing to a terminal.
+- **GRF-6** `MemoryBrowser` shows memory from one `Graph.build()` (without embeddings), never from the stores
+  themselves, so the browser and the page always show the same things. It deletes nothing and changes nothing;
+  `tinker teach` corrects an item and `tinker clear PART` forgets a part (**SET-10**). Every list comes a page
+  at a time ([State](#state)), and every view is a glance (**CMD-1**).
+- **GRF-7** An item's short ID is the first `MEMORY_ID_CHARS` (6) hex digits of the SHA-1 of its node `id`, made
+  longer only when two items share it, so it names the same item for as long as it is kept, whatever is learned
+  or retired around it. `memory show ID` takes any prefix of at least `MEMORY_ID_CHARS` digits: one that matches
+  no item, or more than one (listed), is refused with why. Hubs and runs have no short ID.
+- **GRF-8** `tinker memory [PAGE]` lists the parts of memory: each language, any language, each topic and the
+  person's commands, one line each with the name to see it by (its group), how many of each kind of item it
+  holds and how many of them are proven, and for a language how many projects built it. Then how many items are
+  retired, and what to do next: `memory NAME`, `memory show ID`, `memory find WORDS`, `memory recent`,
+  `memory --graph`, `tinker ask`, `tinker teach` and `tinker clear PART`. With nothing learned, it says how to
+  start.
+- **GRF-9** `tinker memory NAME [KIND] [PAGE]` shows one part, named by its group or its label (case does not
+  matter): its details (summary, when learned, the slots missing, projects built), then its items, each with its
+  short ID, its status (✅ proven, 🌱 not yet), its kind and its first line, in the graph's order. Retired items
+  are left out but counted, and the `retired` kind lists them alone. `KIND` (`toolchain`, `facts`, `findings`,
+  `rules`, `fixes`, `lessons`, `commands` or `retired`, singular or plural) keeps that kind; without `NAME` it
+  lists that kind across memory. A last word that is a number is the page, a kind word is always the kind, and
+  the other words are the name. An unknown name is refused, saying `tinker memory` lists the parts.
+- **GRF-10** `tinker memory show ID` shows one item whole: its kind, status, part (and `memory NAME` to see it),
+  day, text, details and sources; what it cites and what cites it, what it became or came from, the lessons
+  similar to it (each with its short ID and first line); and the runs that taught, confirmed, helped or failed
+  it (`@ID` and the run's task). It ends with how to correct it (`tinker teach`).
+- **GRF-11** `tinker memory find WORDS` lists the items whose text or label holds every word (case does not
+  matter), retired ones too (marked ♻️), each as **GRF-9** shows it with its part. It shows at most
+  `MEMORY_FOUND_SHOWN` (20) and says how many more there are; with none found, it says so.
+- **GRF-12** `tinker memory recent [PAGE]` lists the items that are not retired by `day`, newest first, each
+  with its day and its part; an item with no day is left out.
 
 ## reading (RDG)
 
@@ -1433,12 +1467,8 @@ The main system: the command line, one run, and the cycle of phases.
   its pointer. `config` shows the settings, and `config KEY VALUE` sets one.
 - **CLI-4** `Doctor` checks Ollama, the model, the embedding model, the web and the command. It exits 1 only
   when a required check fails.
-- **CLI-5** `tinker memory` shows one part per language (built, or read from the web): how many projects built
-  it and when its docs were read, then the toolchain that worked (one command a row), its proven facts, fixes
-  and lessons (each marked proven or not yet). Then the lessons for any language, the other topics learned,
-  the person's commands, how many items are retired, and what to do next. A part with nothing in it is left
-  out; with nothing learned at all, it says how to start. `tinker models` lists Ollama's models with what was
-  measured, and marks the one in use.
+- **CLI-5** `tinker memory` browses what Tinker has learned (**GRF-6** to **GRF-12**); `--graph` draws it
+  (**GRF-5**). `tinker models` lists Ollama's models with what was measured, and marks the one in use.
 - **CLI-6** `tinker log [@PROJECT]` shows what the project's last runs said. `--calls` shows its model calls
   and details instead.
 - **CLI-7** `tinker learn NAME = DEFINITION`, `tinker learn NAME "DEFINITION"` (or an alias in the person's
