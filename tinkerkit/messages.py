@@ -1,9 +1,12 @@
 import contextlib
 from dataclasses import dataclass
 lazy import os
+lazy import select
 lazy import shutil
 lazy import sys
+lazy import termios
 lazy import time
+lazy import tty
 lazy import unicodedata
 
 VARIATION_SELECTOR = "\ufe0f"
@@ -27,6 +30,21 @@ RESET = "\033[0m"
 CLEAR_TO_LINE_END = "\033[K"
 LINE_START = "\r"
 CLEAR_LINE = LINE_START + CLEAR_TO_LINE_END
+CLEAR_TO_SCREEN_END = "\033[J"
+KEYS = frozendict(
+    {
+        b"\x1b[A": "up",
+        b"\x1bOA": "up",
+        b"\x1b[B": "down",
+        b"\x1bOB": "down",
+        b"\r": "enter",
+        b"\n": "enter",
+        b"\x1b": "esc",
+        b"\x03": "ctrl-c",
+        b"\x04": "end",
+        b"": "end",
+    }
+)
 
 
 @dataclass(frozen=True)
@@ -68,7 +86,7 @@ class Messages:
         self.depth, self.followers, self.log, self.drawn, self.frame = 0, [], None, False, 0
         self.doing, self.last_step, self.began = "", "", None
         self.heard_tokens, self.thinking_since, self.thought_seconds = 0, None, None
-        self.write, self.screen = print, None
+        self.write, self.screen, self.keys = print, None, raw_keys
 
     def title(self, text, icon=""):
         if self.depth == 0:
@@ -212,6 +230,24 @@ class Messages:
             terminal_write(CLEAR_LINE)
         self.drawn = False
 
+    def pick(self, choices, start=0):
+        self.end_live()
+        current = start
+        keys = self.keys()
+        terminal_write(choice_rows(choices, current))
+        try:
+            for key in keys:
+                if key == "enter":
+                    return current
+                if key in ("esc", "ctrl-c", "end"):
+                    return None
+                current = moved(current, key, len(choices))
+                terminal_write(rows_up(choices) + choice_rows(choices, current))
+            return None
+        finally:
+            keys.close()
+            terminal_write(rows_up(choices) + LINE_START + CLEAR_TO_SCREEN_END)
+
     def detail(self, text, **facts):
         if self.log is not None:
             self.log.add({"note": text, **facts})
@@ -239,6 +275,48 @@ class Messages:
 def terminal_write(text):
     sys.__stdout__.write(text)
     sys.__stdout__.flush()
+
+
+def moved(current, key, count):
+    step = {"up": -1, "down": 1}.get(key, 0)
+    return min(max(current + step, 0), count - 1)
+
+
+def choice_rows(choices, current):
+    return "\r\n".join(
+        LINE_START + choice_row(label, dim, index == current) + CLEAR_TO_LINE_END
+        for index, (label, dim) in enumerate(choices)
+    )
+
+
+def choice_row(label, dim, marked):
+    return ("› " if marked else "  ") + (paint(label, "dim") if dim else label)
+
+
+def rows_up(choices):
+    return f"\033[{len(choices) - 1}A" if len(choices) > 1 else ""
+
+
+def raw_keys():
+    stdin = sys.stdin.fileno()
+    saved = termios.tcgetattr(stdin)
+    tty.setraw(stdin)
+    try:
+        while True:
+            yield key_named(pressed(stdin))
+    finally:
+        termios.tcsetattr(stdin, termios.TCSADRAIN, saved)
+
+
+def pressed(stdin):
+    first = os.read(stdin, 1)
+    if first != b"\x1b" or not select.select([stdin], [], [], 0.05)[0]:
+        return first
+    return first + os.read(stdin, 2)
+
+
+def key_named(pressed):
+    return KEYS.get(pressed, "other")
 
 
 def live_line(text, began, frame, width, stream=None, indent="", **facts):
