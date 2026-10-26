@@ -436,7 +436,8 @@ def test_a_learn_the_web_cannot_feed_stops_before_any_model_call(cause, tinker_h
     message = str(stopped.value)
     exit_code = stopped.value.code
     assert isinstance(stopped.value, SystemExit) and exit_code
-    assert all(warning in message for warning in warnings) and "Nothing was learned or saved" in message and "Next: " in message
+    assert all(warning in message for warning in warnings)
+    assert "Nothing was learned or saved" in message and "Next: " in message
     assert "Web requests: search 1" in message and "Tried: " in message
     assert model.calls == [] and embeddings.calls == 0
     assert all(Home.store().items(part) == {} for part in ("learned", "embeddings", "languages", "memory"))
@@ -553,9 +554,8 @@ def test_a_learns_documentation_needs_are_planned_and_each_pools_its_searches(ti
     }
     web = FakeWeb(found, ALL_PAGES)
     learner(web).learn("Widgetlib")
-    every_engine = []
     assert web.entries[:2] == [
-        [{"query": FIRST_SEARCH, "engines": every_engine, "count": RESULTS_PER_LEARN_SEARCH}],
+        [{"query": FIRST_SEARCH, "engines": [], "count": RESULTS_PER_LEARN_SEARCH}],
         [
             {"query": "Widgetlib 2.1.0 docs", "engines": ["mwmbl"], "count": 4},
             {"query": "Widgetlib 2.1.0 changelog"},

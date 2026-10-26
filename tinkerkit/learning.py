@@ -558,8 +558,7 @@ def version_of(machine, commands):
 
 def wanted_docs(slug, name, version, need, cap):
     values = {"name": name, "version": version}
-    query = collapsed(SearchPlanner.filled(need, values))
-    return WantedDocs(slug, version or "latest", name, query, need, values, cap)
+    return WantedDocs(slug, version or "latest", name, filled_query(need, values), need, values, cap)
 
 
 def planned_searches(need, values):
@@ -568,8 +567,11 @@ def planned_searches(need, values):
 
 
 def every_engine_search(need, values):
-    query = collapsed(SearchPlanner.filled(need, values))
-    return {"query": query, "engines": [], "count": RESULTS_PER_LEARN_SEARCH}
+    return {"query": filled_query(need, values), "engines": [], "count": RESULTS_PER_LEARN_SEARCH}
+
+
+def filled_query(need, values):
+    return collapsed(SearchPlanner.filled(need, values))
 
 
 def collapsed(query):
