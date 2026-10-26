@@ -115,6 +115,10 @@ def test_only_the_model_web_and_channel_modules_open_connections():
     assert "urlopen(" not in knowledge, "knowledge goes online only through Internet and Ollama"
     for plugin in ("fetcher", "search"):
         assert importers_of(plugin) == {"web"}, plugin
+    runners = {
+        path.stem for path in program_files() if "subprocess.Popen(" in path.read_text(encoding="utf-8")
+    }
+    assert runners <= {"workspace", "settings", "conversation"}, runners
 
 
 def importers_of(module):
@@ -123,10 +127,6 @@ def importers_of(module):
         for path in (ROOT / "tinkerkit").glob("*.py")
         if f".{module} import" in path.read_text(encoding="utf-8")
     }
-    runners = {
-        path.stem for path in program_files() if "subprocess.Popen(" in path.read_text(encoding="utf-8")
-    }
-    assert runners <= {"workspace", "settings", "conversation"}, runners
 
 
 @pytest.mark.spec("ARCH-4")

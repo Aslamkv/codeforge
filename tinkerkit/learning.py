@@ -283,10 +283,8 @@ class SlotLearner(Tracked):
         wanted = [docs for docs in wanted if docs.cap > 0]
         kept = [DocCache.get(docs.slug, docs.key) for docs in wanted]
         missing = [docs.query for docs, pages in zip(wanted, kept) if not pages]
-        found = iter(self.searched_all(missing))
-        return [
-            self.docs_of(docs, pages, None if pages else next(found)) for docs, pages in zip(wanted, kept)
-        ]
+        found = dict(zip(missing, self.searched_all(missing)))
+        return [self.docs_of(docs, pages, found.get(docs.query)) for docs, pages in zip(wanted, kept)]
 
     def searched_all(self, queries):
         if not queries:
