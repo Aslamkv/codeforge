@@ -49,7 +49,7 @@ LEARN_STOP_CAUSES = frozendict(
         ),
         "irrelevant": (
             "no search result is about the topic",
-            "name the topic more fully (with its language, say)",
+            "learn again later, or name the topic differently if it is ambiguous",
         ),
         "pages": (
             "too few pages could be fetched",
@@ -181,7 +181,7 @@ class SlotLearner(Tracked):
     def first_search(self):
         self.step("search", f"Searching the web for pages about {self.topic}…", "🔎")
         self.searched_first = True
-        [results] = self.searched_needs([planned_searches(DOCS_SITE_SEARCH, {"topic": self.topic})])
+        [results] = self.searched_needs([[every_engine_search(DOCS_SITE_SEARCH, {"topic": self.topic})]])
         if not results:
             self.stop("gate 1", "no-results")
         picked = self.picked(self.topic, results)
@@ -565,6 +565,11 @@ def wanted_docs(slug, name, version, need, cap):
 def planned_searches(need, values):
     planned = SearchPlanner().plan(need, RESULTS_PER_LEARN_SEARCH, values)
     return [{**search, "query": collapsed(search["query"])} for search in planned]
+
+
+def every_engine_search(need, values):
+    query = collapsed(SearchPlanner.filled(need, values))
+    return {"query": query, "engines": [], "count": RESULTS_PER_LEARN_SEARCH}
 
 
 def collapsed(query):
