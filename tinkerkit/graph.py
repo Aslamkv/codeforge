@@ -492,18 +492,16 @@ class MemoryBrowser:
         return int(word)
 
     def show(self, request):
-        if request.view == "parts":
-            self.show_parts(request.page)
-        elif request.view == "part":
-            self.show_part(request)
-        elif request.view == "show":
-            self.show_item(request.words[0])
-        elif request.view == "find":
-            self.show_found(request)
-        elif request.view == "recent":
-            self.show_recent(request.page)
+        views = {
+            "parts": self.show_parts,
+            "part": self.show_part,
+            "show": self.show_item,
+            "find": self.show_found,
+            "recent": self.show_recent,
+        }
+        views[request.view](request)
 
-    def show_parts(self, page):
+    def show_parts(self, request):
         if not self.items and len(self.hubs) == 1:
             say.info(
                 "Nothing yet: it learns from every build (tinker task), tinker learn WHAT and tinker read FILE",
@@ -511,17 +509,17 @@ class MemoryBrowser:
             )
             return
         say.title("What Tinker has learned", "🧠")
-        shown, pages = Numbered.page(self.hubs, page)
+        shown, pages = Numbered.page(self.hubs, request.page)
         for hub in shown:
             say.info(self.part_line(hub), self.icon_of(hub))
-        retired = sum(item["status"] == "retired" for item in self.items)
+        retired = self.retired_in(self.items)
         if retired:
             say.info(
                 f"{retired} item{'s' if retired > 1 else ''} did not hold and {'were' if retired > 1 else 'was'} "
                 f"retired: never shown to the model again (tinker memory retired)",
                 "♻️",
             )
-        self.say_page(page, pages, [])
+        self.say_page(request.page, pages, [])
         with say.part("What next", "💡"):
             for what, command in self.TIPS:
                 say.text(f"{what:14} {command}")
@@ -534,7 +532,8 @@ class MemoryBrowser:
         line = f"{hub['label']} (memory {hub['group']}): " + (
             f"{held}; {proven} proven" if kept else "nothing yet"
         )
-        return line + (f" · {self.built(hub)}" if hub["id"].startswith("lang:") else "")
+        built = self.built(hub)
+        return line + (f" · {built}" if built else "")
 
     def show_part(self, request):
         hub = self.named(request.name) if request.name else None
@@ -545,21 +544,16 @@ class MemoryBrowser:
             self.say_details(hub)
         else:
             say.title(f"{self.plural(request.kind).capitalize()} across memory", "🧠")
-        shown, pages = Numbered.page(
-            [item for item in members if self.keeps(item, request.kind)], request.page
-        )
-        for item in shown:
-            say.text(self.item_line(item) if hub else self.across_line(item))
-        if not shown:
-            say.text("Nothing here.")
-        left_out = sum(item["status"] == "retired" for item in members) if request.kind != "retired" else 0
+        kept = [item for item in members if self.keeps(item, request.kind)]
+        pages = self.say_listed(kept, request.page, self.item_line if hub else self.across_line)
+        left_out = self.retired_in(members) if request.kind != "retired" else 0
         if left_out:
             where = f"{hub['group']} " if hub else ""
             say.text(f"\n{left_out} retired, not shown: tinker memory {where}retired")
         self.say_page(request.page, pages, request.words)
 
-    def show_item(self, word):
-        item = self.item_named(word)
+    def show_item(self, request):
+        item = self.item_named(request.words[0])
         hub = self.part_of.get(item["id"])
         say.title(f"{item['kind']} {self.status_of(item)} [{self.ids[item['id']]}]", "🧠")
         lines = [
@@ -637,19 +631,24 @@ class MemoryBrowser:
         if len(found) > MEMORY_FOUND_SHOWN:
             say.text(f"\n{len(found) - MEMORY_FOUND_SHOWN} more: add words to narrow it")
 
-    def show_recent(self, page):
+    def show_recent(self, request):
         dated = sorted(
             (item for item in self.items if item["day"] and item["status"] != "retired"),
             key=lambda item: item["day"],
             reverse=True,
         )
         say.title("Newest in memory", "🧠")
-        shown, pages = Numbered.page(dated, page)
+        pages = self.say_listed(dated, request.page, lambda item: f"{item['day']} {self.across_line(item)}")
+        self.say_page(request.page, pages, ["recent"])
+
+    @staticmethod
+    def say_listed(items, page, line_of):
+        shown, pages = Numbered.page(items, page)
         for item in shown:
-            say.text(f"{item['day']} {self.across_line(item)}")
+            say.text(line_of(item))
         if not shown:
             say.text("Nothing here.")
-        self.say_page(page, pages, ["recent"])
+        return pages
 
     def say_details(self, hub):
         say.title(hub["label"], self.icon_of(hub))
@@ -657,7 +656,7 @@ class MemoryBrowser:
         shown = [details.get("summary")] + [
             f"{key}: {details[key]}" for key in ("learned", "missing") if details.get(key)
         ]
-        for line in [*shown, self.built(hub) if hub["id"].startswith("lang:") else None]:
+        for line in [*shown, self.built(hub)]:
             if line:
                 say.text(line)
 
@@ -668,6 +667,10 @@ class MemoryBrowser:
 
     def members(self, hub):
         return [item for item in self.items if self.part_of.get(item["id"]) is hub]
+
+    @staticmethod
+    def retired_in(items):
+        return sum(item["status"] == "retired" for item in items)
 
     @staticmethod
     def keeps(item, kind):
@@ -703,6 +706,8 @@ class MemoryBrowser:
 
     @staticmethod
     def built(hub):
+        if not hub["id"].startswith("lang:"):
+            return ""
         count = int(dict(hub["details"]).get("projects finished", 0))
         return "nothing built yet" if not count else f"{count} project{'s' if count > 1 else ''} built"
 

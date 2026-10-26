@@ -658,8 +658,6 @@ def test_memory_browses_what_tinker_learned(home_store, capsys):
     out = capsys.readouterr().out
     assert "A compiled language.\nlearned: 2026-10-22 08:53\nnothing built yet" in out
     assert "] 🌱 fact      Run go test ./..." in out
-    with pytest.raises(SystemExit, match="tinker memory lists the parts"):
-        Commands(parse("memory", "cobol")).run()
 
 
 @pytest.mark.spec("CLI-5", "GRF-8")

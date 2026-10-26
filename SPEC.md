@@ -1134,7 +1134,8 @@ What Tinker knows as one graph, and the page that shows it.
 - **GRF-10** `tinker memory show ID` shows one item whole: its kind, status, part (and `memory NAME` to see it),
   day, text, details and sources; what it cites and what cites it, what it became or came from, the lessons
   similar to it (each with its short ID and first line); and the runs that taught, confirmed, helped or failed
-  it (`@ID` and the run's task, once per run and verb, with how many times when more than once). It ends with how to correct it (`tinker teach`).
+  it (`@ID` and the run's task, once per run and verb, with how many times when more than once). It ends with
+  how to correct it (`tinker teach`).
 - **GRF-11** `tinker memory find WORDS` lists the items whose text or label holds every word (case does not
   matter), retired ones too (marked ♻️), each as **GRF-9** shows it with its part. It shows at most
   `MEMORY_FOUND_SHOWN` (20) and says how many more there are; with none found, it says so.

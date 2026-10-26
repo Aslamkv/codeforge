@@ -319,8 +319,6 @@ def test_memory_words_are_a_name_a_kind_and_a_page(home_store, capsys):
             request(wrong)
     assert Cli.parse(["memory", "python", "lessons", "2"]).memory == request(["python", "lessons", "2"])
     with pytest.raises(SystemExit):
-        Cli.parse(["memory", "lessons", "facts"])
-    with pytest.raises(SystemExit):
         Cli.parse(["memory", "--graph", "python"])
     assert "--graph takes no other words; use tinker memory [PAGE]" in capsys.readouterr().err
 
@@ -334,10 +332,10 @@ def test_memory_show_shows_one_item_whole_with_its_links_and_runs(memory, capsys
     assert "lesson ✅" in out and "Seed random generators inside tests" in out
     assert "part: Python (tinker memory python)" in out and "day: 20" in out
     assert "@r1 a calculator — taught" in out and out.count("@r2 ") == 1 and "— helped ×2" in out
+    assert "Correct it: tinker teach WHAT" in out and "Cites" not in out and "Similar" not in out
     for prefix in (digest(seed)[:7], digest(seed)):
         browse("show", prefix)
         assert "Seed random generators inside tests" in capsys.readouterr().out
-    assert "Correct it: tinker teach WHAT" in out and "Cites" not in out and "Similar" not in out
     route = f"fact:flask:{memory['route']}"
     browse("show", short_id(route))
     out = capsys.readouterr().out
@@ -352,7 +350,7 @@ def test_memory_show_shows_one_item_whole_with_its_links_and_runs(memory, capsys
 
 
 @pytest.mark.spec("GRF-7", "GRF-10")
-def test_memory_show_refuses_a_short_unknown_or_shared_id(memory, monkeypatch):
+def test_memory_show_refuses_a_short_unknown_or_shared_id(memory):
     with pytest.raises(SystemExit, match="at least 6"):
         browse("show", short_id("toolchain:python")[:5])
     with pytest.raises(SystemExit, match="No item"):

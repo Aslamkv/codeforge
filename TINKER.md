@@ -305,7 +305,12 @@ tinker memory python lessons 2     # its lessons, the second page
 tinker memory flask facts          # a topic's facts
 tinker memory lessons              # every lesson, across memory
 tinker memory any retired          # what did not hold, and was retired
+tinker memory show 5b94dc          # one item whole: details, sources, links, the runs that used it
+tinker memory find pytest toml     # every item that holds all the words, retired ones too
+tinker memory recent               # what was learned, newest first
 ```
+
+Browsing changes nothing: `tinker teach` corrects an item, and `tinker clear PART` forgets a part.
 
 See it as a graph you can explore in the browser: each lesson, fact and fix linked to its language, and to
 the runs that taught it, proved it or found it wrong (what did not hold is kept, greyed, with why). In a
