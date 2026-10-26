@@ -23,12 +23,15 @@ lazy from .ledger import DONE_NOTE_KEPT_SECONDS, Ledger
 lazy from .messages import (
     CLEAR_LINE,
     CLEAR_TO_LINE_END,
+    Messages,
     colourful,
     cut_to_width,
     human_duration,
     live_line,
     paint,
     say,
+    star_at,
+    tinkering,
     visible_width,
 )
 lazy from .model import Models, OllamaError
@@ -1356,7 +1359,14 @@ class Reporter:
             for chat in channel.allowed:
                 key = (channel.name, chat)
                 self.sent[key] = channel.show(
-                    chat, self.sent.get(key), text, done, bottom, began=self.progress.work_began
+                    chat,
+                    self.sent.get(key),
+                    text,
+                    done,
+                    bottom,
+                    began=self.progress.work_began,
+                    doing=self.progress.working_on,
+                    **self.progress.facts,
                 )
 
     def printed(self, line):
@@ -1381,7 +1391,6 @@ class Reporter:
 class Progress:
     OWN_PHASE_ICONS = ("✅", "✏️", "📁")
     CHANGE_SIGNS = {"+": "➕", "~": "🔄"}
-    HOURGLASS = ("⏳", "⌛")
 
     def __init__(self, title, phase=Tracker.STARTING, before=0.0):
         self.snapshot = {
@@ -1406,19 +1415,17 @@ class Progress:
         self.turns += 1
 
     def take(self, snapshot):
-        before = self.text()
+        before = self.text(counted=False)
         said = self.snapshot["doing"] if self.snapshot.get("step") is None else None
         self.snapshot = dict(
             self.snapshot, **{key: value for key, value in (snapshot or {}).items() if key != "before"}
         )
         if said and self.snapshot.get("step") is None:
             self.snapshot["doing"] = said
-        return self.text() != before
+        return self.text(counted=False) != before
 
-    def text(self):
+    def text(self, counted=True):
         state = self.snapshot
-        began = state.get("began")
-        clock = f" · ⏱ {human_duration(time.time() - began)}" if began else ""
         doing = (
             self.working_on
             if self.working_on.startswith(self.OWN_PHASE_ICONS)
@@ -1426,13 +1433,28 @@ class Progress:
         )
         job = f" (Job #{state['job']})" if state.get("job") else ""
         lines = [md(t"🔨 **{state['title']}**{job}")] + [f"✅ {step}" for step in state.get("steps", [])]
-        lines += [f"▸ {doing}{clock} {self.HOURGLASS[self.turns % 2]}"]
+        lines += [f"{star_at(self.turns)} {self.tinkering(doing, counted)}"]
         lines += [md(t"📊 {self.how_far}")] if self.how_far else []
         if state.get("found"):
             lines += [md(t"💡 {state['found']}")]
         elif state.get("latest"):
             lines += [md(t"… {state['latest']}")]
         return "\n".join(lines)
+
+    def tinkering(self, doing, counted):
+        if not counted:
+            return tinkering(None, doing, **dict(self.facts, tokens=0))
+        began = self.work_began
+        return tinkering(time.time() - began if began else None, doing, **self.facts)
+
+    @property
+    def facts(self):
+        state = self.snapshot
+        return {
+            "tokens": state.get("tokens", 0),
+            "thinking": state.get("thinking", False),
+            "thought_seconds": state.get("thought_seconds"),
+        }
 
     @property
     def title(self):
@@ -1692,7 +1714,7 @@ class Channel:
     def latest(self, chat, sent):
         return True
 
-    def show(self, chat, shown, text, done=False, bottom=None, status=False, began=None):
+    def show(self, chat, shown, text, done=False, bottom=None, status=False, began=None, **going):
         shown = list(shown or [])
         if (done if bottom is None else bottom) and shown and not self.latest(chat, shown[-1]):
             for old in shown:
@@ -1840,14 +1862,14 @@ class ConsoleChannel(Channel):
         webbrowser.open(Path(path).as_uri())
         return self.send(chat, f"{caption}\n📄 Opened in your browser: `{path}`")
 
-    def show(self, chat, shown, text, done=False, bottom=None, status=False, began=None):
+    def show(self, chat, shown, text, done=False, bottom=None, status=False, began=None, doing=None, **facts):
         sent, text = (shown or [None])[0] or self.new_id(), self.said(text)
         if began is not None:
             self.began[sent] = time.monotonic() - (time.time() - began)
         if done:
             self.show_done(sent, text)
         else:
-            self.show_going(sent, text)
+            self.show_going(sent, text, doing, facts)
         return [sent]
 
     def show_done(self, sent, text):
@@ -1861,12 +1883,12 @@ class ConsoleChannel(Channel):
         self.began.pop(sent, None)
         self.doings.pop(sent, None)
 
-    def show_going(self, sent, text):
+    def show_going(self, sent, text, doing, facts):
         lines = text.split("\n")
-        at = next((row for row, line in enumerate(lines) if is_doing(line)), None)
-        settled, doing = (lines[:at], lines[at]) if at is not None else ([], lines[0])
+        at = next((row for row, line in enumerate(lines) if is_tinkering(line)), None)
+        settled, going_on = (lines[:at], lines[at]) if at is not None else ([], lines[0])
         self.print_settled(sent, settled)
-        self.show_doing(sent, cleaned_doing(doing))
+        self.show_doing(sent, doing or Markup.plain(going_on).strip(), facts)
 
     def print_settled(self, sent, lines):
         printed = self.printed.setdefault(sent, set())
@@ -1877,10 +1899,10 @@ class ConsoleChannel(Channel):
             self.screen.print(indented(Markup.ansi("\n".join(new))))
         printed.update(new)
 
-    def show_doing(self, sent, doing):
+    def show_doing(self, sent, doing, facts):
         if self.screen.ruled():
             self.live_owner = sent
-            self.screen.show_live(doing, self.began.setdefault(sent, time.monotonic()))
+            self.screen.show_live(doing, self.began.setdefault(sent, time.monotonic()), **facts)
         elif self.doings.get(sent) != doing:
             self.doings[sent] = doing
             self.screen.print(doing)
@@ -1918,12 +1940,12 @@ class ConsoleScreen:
         with self.printing:
             write_out(text)
 
-    def show_live(self, text, began):
+    def show_live(self, text, began, **facts):
         if not self.ruled():
             return
         with self.printing:
             shown, erased = self.live is not None, self.erased_bottom()
-            self.live = (text, began)
+            self.live = (text, began, facts)
             if shown:
                 self.redraw_live()
             else:
@@ -1953,8 +1975,8 @@ class ConsoleScreen:
         return f"{SAVE_CURSOR}{lines_up(self.LIVE_ROWS_ABOVE_THE_PROMPT)}{change}{RESTORE_CURSOR}"
 
     def live_drawn(self):
-        text, began = self.live
-        return live_line(text, began, self.frame, shutil.get_terminal_size().columns - 1, sys.stdout)
+        text, began, facts = self.live
+        return live_line(text, began, self.frame, shutil.get_terminal_size().columns - 1, sys.stdout, **facts)
 
     def erased_bottom(self):
         rows_above_the_prompt = self.ruled() + (self.live is not None)
@@ -2005,13 +2027,9 @@ def indented(text, first="  "):
     return first + text.replace("\n", "\n  ") if colourful(sys.stdout) else text
 
 
-def is_doing(line):
-    return Markup.plain(line).lstrip().startswith("▸")
-
-
-def cleaned_doing(line):
-    doing = Markup.plain(line).strip().removeprefix("▸").split(" · ⏱")[0].strip()
-    return doing.rstrip("".join(Progress.HOURGLASS)).strip()
+def is_tinkering(line):
+    star, _, rest = Markup.plain(line).lstrip().partition(" ")
+    return star in Messages.STAR and rest.startswith("Tinkering…")
 
 
 class Message:

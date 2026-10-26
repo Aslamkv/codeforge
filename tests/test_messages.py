@@ -9,7 +9,7 @@ import pytest
 from conftest import ACCENT, DIM, RESET, Terminal
 
 from tinkerkit import project as project_module
-from tinkerkit.messages import Message, Messages, human_duration, say
+from tinkerkit.messages import Message, Messages, human_duration, say, short_count, tinkering
 from tinkerkit.project import Tracker, project_store
 from tinkerkit.store import Log
 
@@ -189,6 +189,41 @@ def test_the_live_line_is_cut_to_the_terminal_width_by_what_shows(terminal, cloc
     assert terminal.getvalue() == f"\r   {ACCENT}✻{RESET} Tinkering… (0s){DIM} ·{RESET}\033[K"
 
 
+NO_FACTS = {"tokens": 0, "thinking": False, "thought_seconds": None}
+
+
+@pytest.mark.spec("MSG-4")
+def test_the_live_line_shows_the_tokens_and_thinking_heard_since_the_work_began(terminal, clock):
+    say.now_on("Writing tests")
+    say.tokens(1000)
+    say.tokens(200)
+    say.thinking(True)
+    say.live("Writing tests")
+    clock[0] += 12
+    say.thinking(False)
+    say.live("Writing tests")
+    say.now_on("")
+    say.now_on("Running tests")
+    drawn = terminal.getvalue().split("\033[K")
+    assert drawn[1] == "\r   ✶ Tinkering… (0s · ↓ 1.2k tokens · thinking) · Writing tests"
+    assert drawn[2] == "\r   ✳ Tinkering… (12s · ↓ 1.2k tokens · thought for 12s) · Writing tests"
+    assert drawn[-2] == "\r   ✢ Tinkering… (0s) · Running tests"
+
+
+@pytest.mark.spec("MSG-4")
+@pytest.mark.parametrize(
+    "count,short", [(0, "0"), (950, "950"), (1234, "1.2k"), (12_345, "12k"), (1_234_567, "1.2M")]
+)
+def test_the_live_line_counts_tokens_in_short(count, short):
+    assert short_count(count) == short
+
+
+@pytest.mark.spec("MSG-4")
+def test_the_tinkering_line_leaves_out_empty_facts():
+    assert tinkering(None, "Writing") == "Tinkering… · Writing"
+    assert tinkering(64, "Writing", thought_seconds=12) == "Tinkering… (1m 4s · thought for 12s) · Writing"
+
+
 class Screen:
     def __init__(self):
         self.shown = []
@@ -196,8 +231,8 @@ class Screen:
     def print(self, text):
         self.shown.append(("print", text))
 
-    def show_live(self, text, began):
-        self.shown.append(("live", text, began))
+    def show_live(self, text, began, **facts):
+        self.shown.append(("live", text, began, facts))
 
     def end_live(self):
         self.shown.append(("end",))
@@ -212,8 +247,8 @@ def test_the_live_line_goes_to_the_screen_said_things_write_through(terminal, cl
     say.live("Running tests")
     say.done("Answered")
     assert screen.shown == [
-        ("live", "Writing tests", 100.0),
-        ("live", "Running tests", 100.0),
+        ("live", "Writing tests", 100.0, NO_FACTS),
+        ("live", "Running tests", 100.0, NO_FACTS),
         ("end",),
         ("print", "✅ Answered"),
     ]

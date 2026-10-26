@@ -247,9 +247,11 @@ def test_only_one_process_claims_a_channel():
     assert Recorder("other").holder() == {}
 
 
-CALC_WRITING = "🔨 **calc**\n✅ step one\n▸ **Writing the code** · ⏱ 3s ⏳\n… detail"
-CALC_WRITING_LATER = "🔨 **calc**\n✅ step one\n▸ **Writing the code** · ⏱ 9s ⌛\n… other detail"
-CALC_VERIFYING = "🔨 **calc**\n✅ step one\n✅ step two\n▸ **Verifying** ⏳\n📊 1/2 spec points pass"
+CALC_WRITING = "🔨 **calc**\n✅ step one\n✻ Tinkering… (3s) · **Writing the code**\n… detail"
+CALC_WRITING_LATER = "🔨 **calc**\n✅ step one\n✶ Tinkering… (9s) · **Writing the code**\n… other detail"
+CALC_VERIFYING = (
+    "🔨 **calc**\n✅ step one\n✅ step two\n✳ Tinkering… · **Verifying**\n📊 1/2 spec points pass"
+)
 CALC_DONE = "🏁 **calc**\n✅ **Done**"
 
 
@@ -262,9 +264,9 @@ def piped_console(monkeypatch):
 @pytest.mark.spec("CNV-8")
 def test_console_without_a_live_line_prints_settled_lines_once_and_each_new_doing_line(monkeypatch):
     console, out = piped_console(monkeypatch)
-    shown = console.show("console", None, CALC_WRITING)
-    console.show("console", shown, CALC_WRITING_LATER)
-    console.show("console", shown, CALC_VERIFYING)
+    shown = console.show("console", None, CALC_WRITING, doing="Writing the code")
+    console.show("console", shown, CALC_WRITING_LATER, doing="Writing the code", tokens=50)
+    console.show("console", shown, CALC_VERIFYING, doing="Verifying")
     console.show("console", shown, CALC_DONE, done=True)
     assert out.getvalue().splitlines() == [
         "🔨 calc",
@@ -477,7 +479,8 @@ def test_once_the_console_reads_live_draws_in_its_live_line(monkeypatch, clock):
 @pytest.mark.spec("CNV-8")
 def test_console_prints_a_jobs_settled_lines_once_and_shows_what_goes_on_in_its_live_line(monkeypatch, clock):
     console = live_console(monkeypatch)
-    shown = console.show("console", None, "🔨 calc\n✅ step one\n▸ **Writing the code** · ⏱ 3s ⏳\n… detail")
+    writing = "🔨 calc\n✅ step one\n✻ Tinkering… (3s) · **Writing the code**\n… detail"
+    shown = console.show("console", None, writing, doing="Writing the code")
     assert sys.stdout.getvalue() == (
         f"{ERASED_ABOVE_THE_PROMPT}{ACCENT}● {RESET}🔨 calc\n  ✅ step one\n{UNDER_THE_LIVE_LINE}"
         f"{live_shown('Writing the code')}"
@@ -485,7 +488,12 @@ def test_console_prints_a_jobs_settled_lines_once_and_shows_what_goes_on_in_its_
     clock[0] += 5
     grew = drawn_after(
         sys.stdout,
-        lambda: console.show("console", shown, "🔨 calc\n✅ step one\n✅ step two\n▸ Verifying ⌛\n📊 1/2"),
+        lambda: console.show(
+            "console",
+            shown,
+            "🔨 calc\n✅ step one\n✅ step two\n✶ Tinkering… · Verifying\n📊 1/2",
+            doing="Verifying",
+        ),
     )
     assert grew == (
         f"{ERASED_WITH_THE_LIVE_LINE}  ✅ step two\n{live_drawn('Writing the code', '5s')}\n"
@@ -512,17 +520,27 @@ def test_console_shows_a_message_without_a_doing_line_in_its_live_line_until_don
 @pytest.mark.spec("CNV-8")
 def test_a_done_message_leaves_a_live_line_it_does_not_own(monkeypatch, clock):
     console = live_console(monkeypatch)
-    console.show("console", None, "🔨 calc\n▸ Writing")
+    console.show("console", None, "🔨 calc\n✻ Tinkering… · **Writing**", doing="Writing")
     done = drawn_after(sys.stdout, lambda: console.show("console", None, "Answer", done=True))
-    assert done.startswith(ERASED_WITH_THE_LIVE_LINE) and console.screen.live == ("Writing", 100.0)
+    assert done.startswith(ERASED_WITH_THE_LIVE_LINE) and console.screen.live == ("Writing", 100.0, {})
 
 
 @pytest.mark.spec("CNV-8")
 def test_a_jobs_live_line_counts_from_when_the_job_began(monkeypatch, clock):
     monkeypatch.setattr(time, "time", lambda: 5000.0)
     console = live_console(monkeypatch)
-    console.show("console", None, "🔨 calc\n▸ Writing", began=4936.0)
-    assert console.screen.live == ("Writing", 36.0)
+    console.show("console", None, "🔨 calc\n✻ Tinkering… · **Writing**", began=4936.0, doing="Writing")
+    assert console.screen.live == ("Writing", 36.0, {})
+
+
+@pytest.mark.spec("CNV-8")
+def test_a_jobs_live_line_shows_its_tokens_and_thinking(monkeypatch, clock):
+    console = live_console(monkeypatch)
+    line = "🔨 calc\n✻ Tinkering… (↓ 1.2k tokens · thinking) · **Writing**"
+    console.show("console", None, line, doing="Writing", tokens=1200, thinking=True, thought_seconds=None)
+    facts = {"tokens": 1200, "thinking": True, "thought_seconds": None}
+    assert console.screen.live == ("Writing", 100.0, facts)
+    assert "Tinkering… (0s · ↓ 1.2k tokens" in sys.stdout.getvalue()
 
 
 @pytest.mark.spec("CNV-8")
@@ -536,7 +554,7 @@ def test_progress_says_when_the_work_began_counting_earlier_runs():
 @pytest.mark.spec("CNV-8")
 def test_a_done_message_forgets_how_it_went(monkeypatch, clock):
     console = live_console(monkeypatch)
-    shown = console.show("console", None, "🔨 calc\n▸ Writing")
+    shown = console.show("console", None, "🔨 calc\n✻ Tinkering… · **Writing**", doing="Writing")
     console.show("console", shown, "🏁 calc", done=True)
     assert console.began == {} and console.doings == {} and console.live_owner is None
 
@@ -661,15 +679,18 @@ def snapshot(**state):
 @pytest.mark.spec("CNV-17")
 def test_progress_shows_the_tracker():
     progress = Progress("a calculator", phase="✅ **Confirmed:** building it")
-    assert progress.text().splitlines() == ["🔨 **a calculator**", "▸ ✅ **Confirmed:** building it ⏳"]
+    assert progress.text().splitlines() == [
+        "🔨 **a calculator**",
+        "✻ Tinkering… · ✅ **Confirmed:** building it",
+    ]
     before_any_step = snapshot()
-    assert progress.take(before_any_step) and "▸ ✅ **Confirmed:** building it" in progress.text()
+    assert progress.take(before_any_step) and "Tinkering… · ✅ **Confirmed:** building it" in progress.text()
     progress.take(
         snapshot(
             job=7,
             step="verify",
             doing=Tracker.DOING_AND_DONE["verify"][0],
-            began=time.time() - 65,
+            started=time.time() - 65,
             steps=["🧠 Recalled what Tinker has learned", "📝 Spec written"],
             passing=[2, 3],
             latest="wrote calc.py",
@@ -679,7 +700,7 @@ def test_progress_shows_the_tracker():
         "🔨 **calc: a calculator** (Job #7)",
         "✅ 🧠 Recalled what Tinker has learned",
         "✅ 📝 Spec written",
-        "▸ **🔁 Fixing until every test passes** · ⏱ 1m 5s ⏳",
+        "✻ Tinkering… (1m 5s) · **🔁 Fixing until every test passes**",
         "📊 2/3 spec points pass",
         "… wrote calc.py",
     ]
@@ -697,7 +718,9 @@ def test_progress_says_what_the_run_works_on_how_far_it_got_and_what_it_found():
             title="Reading Atomic Habits",
             step="chapters",
             doing=Tracker.DOING_AND_DONE["chapters"][0],
-            began=time.time() - 12,
+            started=time.time() - 12,
+            tokens=1234,
+            thought_seconds=4.0,
             steps=["🧭 Chose the chapters to read: 3 core chapter(s) of 20"],
             working="Reading chapter 3, The 1% Rule (2 of 7)",
             tally="1/7 chapters · 4 things learned",
@@ -708,7 +731,7 @@ def test_progress_says_what_the_run_works_on_how_far_it_got_and_what_it_found():
     assert progress.text().splitlines() == [
         "🔨 **Reading Atomic Habits**",
         "✅ 🧭 Chose the chapters to read: 3 core chapter(s) of 20",
-        "▸ **📚 Reading chapter 3, The 1% Rule (2 of 7)** · ⏱ 12s ⏳",
+        "✻ Tinkering… (12s · ↓ 1.2k tokens · thought for 4s) · **📚 Reading chapter 3, The 1% Rule (2 of 7)**",
         "📊 1/7 chapters · 4 things learned",
         "💡 Small habits compound like interest",
     ]
@@ -717,7 +740,16 @@ def test_progress_says_what_the_run_works_on_how_far_it_got_and_what_it_found():
         "1/7 chapters · 4 things learned)"
     )
     progress.turn()
-    assert progress.text().splitlines()[2].endswith(" ⌛") and not progress.take(progress.snapshot)
+    assert progress.text().splitlines()[2].startswith("✶ Tinkering…") and not progress.take(progress.snapshot)
+
+
+@pytest.mark.spec("CNV-17")
+def test_progress_says_while_the_model_thinks_and_edits_for_a_new_token_count_only_with_the_clock():
+    progress = Progress("calc")
+    progress.take(snapshot(tokens=950, thinking=True, thought_seconds=4.0))
+    assert "✻ Tinkering… (↓ 950 tokens · thinking) · " in progress.text()
+    assert not progress.take(dict(progress.snapshot, tokens=2000))
+    assert progress.take(dict(progress.snapshot, thinking=False))
 
 
 @pytest.mark.spec("CNV-17")

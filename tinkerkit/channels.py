@@ -378,7 +378,7 @@ class TelegramChannel(Channel):
     def refused_as_unchanged(exc):
         return "not modified" in str(exc)
 
-    def show(self, chat, shown, text, done=False, bottom=None, status=False, began=None):
+    def show(self, chat, shown, text, done=False, bottom=None, status=False, began=None, **going):
         thing = None if status else Ledger.thing_of(self.name, str(chat), shown)
         now = super().show(chat, shown, text, done, bottom, status)
         if not status:

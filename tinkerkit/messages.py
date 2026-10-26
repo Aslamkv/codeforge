@@ -63,6 +63,7 @@ class Messages:
     def __init__(self):
         self.depth, self.followers, self.log, self.drawn, self.frame = 0, [], None, False, 0
         self.doing, self.last_step, self.began = "", "", None
+        self.heard_tokens, self.thinking_since, self.thought_seconds = 0, None, None
         self.write, self.screen = print, None
 
     def title(self, text, icon=""):
@@ -117,9 +118,15 @@ class Messages:
         self.tell(Message("tally", text, self.depth))
 
     def tokens(self, count):
+        self.heard_tokens += count
         self.tell(Message("tokens", str(count), self.depth))
 
     def thinking(self, now):
+        if now:
+            self.thinking_since = time.monotonic()
+        elif self.thinking_since is not None:
+            self.thought_seconds = time.monotonic() - self.thinking_since
+            self.thinking_since = None
         self.tell(Message("thinking", "on" if now else "", self.depth))
 
     def took(self, text, seconds):
@@ -148,7 +155,7 @@ class Messages:
         if self.began is None:
             self.began = time.monotonic()
         if self.screen:
-            self.screen.show_live(text, self.began)
+            self.screen.show_live(text, self.began, **self.live_facts)
             self.drawn = True
         elif sys.__stdout__.isatty():
             self.draw_live(text)
@@ -157,10 +164,18 @@ class Messages:
     def draw_live(self, text):
         width = max(shutil.get_terminal_size((80, 24)).columns - 1, 10)
         indent = "   " * (self.depth + 1)
-        drawn = live_line(text, self.began, self.frame, width, indent=indent)
+        drawn = live_line(text, self.began, self.frame, width, indent=indent, **self.live_facts)
         terminal_write(LINE_START + drawn + CLEAR_TO_LINE_END)
         self.frame += 1
         self.drawn = True
+
+    @property
+    def live_facts(self):
+        return {
+            "tokens": self.heard_tokens,
+            "thinking": self.thinking_since is not None,
+            "thought_seconds": self.thought_seconds,
+        }
 
     @contextlib.contextmanager
     def working_on(self, doing):
@@ -173,7 +188,9 @@ class Messages:
 
     def now_on(self, doing):
         if not (doing and self.doing):
-            self.began = None
+            self.began, self.heard_tokens = None, 0
+        if doing:
+            self.thought_seconds = None
         self.doing = doing
         self.tell(Message("working", doing, self.depth))
         if doing:
@@ -220,11 +237,42 @@ def terminal_write(text):
     sys.__stdout__.flush()
 
 
-def live_line(text, began, frame, width, stream=None, indent=""):
-    star = Messages.STAR[frame % len(Messages.STAR)]
-    elapsed = human_duration(time.monotonic() - began)
-    pieces = [(indent, None), (star, "accent"), (f" Tinkering… ({elapsed})", None), (f" · {text}", "dim")]
+def live_line(text, began, frame, width, stream=None, indent="", **facts):
+    (head, _), doing = tinkering_pieces(time.monotonic() - began, text, **facts)
+    pieces = [(indent, None), (star_at(frame), "accent"), (f" {head}", None), doing]
     return fitted(pieces, width, stream)
+
+
+def star_at(frame):
+    return Messages.STAR[frame % len(Messages.STAR)]
+
+
+def tinkering(elapsed, doing, **facts):
+    return "".join(text for text, _ in tinkering_pieces(elapsed, doing, **facts))
+
+
+def tinkering_pieces(elapsed, doing, tokens=0, thinking=False, thought_seconds=None):
+    facts = (
+        human_duration(elapsed) if elapsed is not None else "",
+        f"↓ {short_count(tokens)} tokens" if tokens else "",
+        thought(thinking, thought_seconds),
+    )
+    shown = " · ".join(fact for fact in facts if fact)
+    return [(f"Tinkering… ({shown})" if shown else "Tinkering…", None), (f" · {doing}", "dim")]
+
+
+def thought(thinking, thought_seconds):
+    if thinking:
+        return "thinking"
+    return f"thought for {human_duration(thought_seconds)}" if thought_seconds is not None else ""
+
+
+def short_count(count):
+    for size, unit in ((1_000_000, "M"), (1_000, "k")):
+        if count >= size:
+            scaled = count / size
+            return (f"{scaled:.1f}".removesuffix(".0") if scaled < 10 else f"{scaled:.0f}") + unit
+    return str(count)
 
 
 def fitted(pieces, width, stream=None):
