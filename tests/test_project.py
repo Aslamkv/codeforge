@@ -491,9 +491,25 @@ def test_steps_live_progress_and_messages(home_store, project_dir, monkeypatch):
         a_quiet_change = Message("text", "next line")
         tracker.heard(a_quiet_change)
         assert Jobs.get(1)["progress"]["latest"] != "next line"
+        tracker.heard(Message("thinking", "on"))
+        tracker.heard(Message("thinking", ""))
+        assert tracker.state["thought_seconds"] is not None
         tracker.phase("verify")
         state = Jobs.get(1)["progress"]
         assert state["latest"] == state["found"] == state["working"] == "" and state["tally"] == "1/2 files"
+        assert state["thought_seconds"] is None
+
+
+@pytest.mark.spec("MSG-3")
+def test_a_resumed_job_counts_on_from_the_tokens_of_its_earlier_runs(home_store, monkeypatch):
+    assert Tracker("new").state["tokens"] == 0
+    with Jobs.running(["task", "calc"]):
+        Jobs.update(1, progress={"tokens": 500})
+        monkeypatch.setattr(Jobs, "current", Jobs.get(1))
+        monkeypatch.setattr(Jobs, "resumed_here", True)
+        tracker = Tracker("calc")
+        tracker.heard(Message("tokens", "20"))
+        assert tracker.state["tokens"] == 520
 
 
 @pytest.mark.spec("PRJ-15")

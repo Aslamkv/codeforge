@@ -8,6 +8,7 @@ from pathlib import Path
 import pytest
 from conftest import ACCENT, DIM, RESET, Terminal
 
+from tinkerkit import project as project_module
 from tinkerkit.messages import Message, Messages, human_duration, say
 from tinkerkit.project import Tracker, project_store
 from tinkerkit.store import Log
@@ -100,6 +101,26 @@ def test_what_a_command_works_on_its_tally_and_what_it_found_reach_the_tracker(h
     assert state["working"] == "" and state["tally"] == "1/2 chapters · 4 things learned"
     assert state["found"] == "Small habits compound like interest"
     assert capsys.readouterr().out == "💡 Small habits compound like interest\n"
+
+
+@pytest.mark.spec("MSG-3")
+def test_tokens_and_thinking_reach_the_tracker(home_store, monkeypatch, capsys):
+    now = [100.0]
+    monkeypatch.setattr(project_module.time, "time", lambda: now[0])
+    tracker = Tracker("reading")
+    say.follow(tracker.heard)
+    with say.working_on("Reading chapter 1, Habits (1 of 2)"):
+        say.thinking(True)
+        say.tokens(30)
+        assert tracker.state["thinking"] and tracker.state["tokens"] == 30
+        now[0] = 112.0
+        say.thinking(False)
+        say.tokens(12)
+    state = tracker.state
+    assert not state["thinking"] and state["thought_seconds"] == 12.0 and state["tokens"] == 42
+    with say.working_on("Reading chapter 2, Tools (2 of 2)"):
+        assert tracker.state["thought_seconds"] is None and tracker.state["tokens"] == 42
+    assert capsys.readouterr().out == ""
 
 
 @pytest.mark.spec("MSG-4")

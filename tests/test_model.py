@@ -242,6 +242,24 @@ def test_what_the_command_works_on_is_said_live_and_heard(monkeypatch):
 
 
 @pytest.mark.spec("MOD-9")
+def test_a_stream_tells_its_tokens_on_each_update_and_its_thinking_when_it_turns(monkeypatch):
+    clock = iter([0, 1, 3, 4])
+    monkeypatch.setattr(model_module.time, "perf_counter", lambda: next(clock))
+    told = []
+    say.follow(
+        lambda message: (
+            told.append((message.kind, message.text)) if message.kind in ("tokens", "thinking") else None
+        )
+    )
+    stream = Stream("Write calc.py", None)
+    stream.take({"message": {"thinking": "hm"}})
+    stream.take({"message": {"content": "x"}})
+    stream.take({"message": {"content": "y"}})
+    stream.close()
+    assert told == [("thinking", "on"), ("thinking", ""), ("tokens", "2"), ("tokens", "1")]
+
+
+@pytest.mark.spec("MOD-9")
 def test_a_stream_that_writes_one_line_again_and_again_is_cut(monkeypatch):
     monkeypatch.setattr(model_module, "LOOPING_REPEATED_LINES", 4)
     stream = Stream(None, None)

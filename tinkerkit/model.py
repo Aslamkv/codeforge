@@ -1021,7 +1021,7 @@ class Stream:
     def __init__(self, label, done_when):
         self.label, self.done_when = label, done_when
         self.content, self.written, self.thinking, self.final = "", 0, 0, {}
-        self.thought_tail = ""
+        self.thought_tail, self.in_thought, self.tokens_told = "", False, 0
         self.started = self.last_print = time.perf_counter()
         self.progressed = False
         self.answer, self.complete_at = None, None
@@ -1069,13 +1069,26 @@ class Stream:
         self.thought_tail = (self.thought_tail + (message.get("thinking") or ""))[
             -UNFINISHED_THOUGHT_KEPT_CHARS:
         ]
+        self.turn_thinking(bool(message.get("thinking")) or (self.in_thought and not piece))
         return piece
+
+    def turn_thinking(self, now):
+        if now != self.in_thought:
+            self.in_thought = now
+            say.thinking(now)
 
     def show(self):
         now = time.perf_counter()
         if self.label and now - self.last_print >= PROGRESS_UPDATE_SECONDS:
             self.last_print, self.progressed = now, True
+            self.tell_tokens()
             say.live(self.status())
+
+    def tell_tokens(self):
+        streamed = self.written + self.thinking
+        if streamed > self.tokens_told:
+            say.tokens(streamed - self.tokens_told)
+            self.tokens_told = streamed
 
     def status(self):
         return say.going_on()
@@ -1109,6 +1122,8 @@ class Stream:
         return self.content if self.answer is None else self.answer
 
     def close(self):
+        self.tell_tokens()
+        self.turn_thinking(False)
         if self.progressed:
             say.end_live()
 

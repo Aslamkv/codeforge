@@ -116,6 +116,12 @@ class Messages:
     def tally(self, text):
         self.tell(Message("tally", text, self.depth))
 
+    def tokens(self, count):
+        self.tell(Message("tokens", str(count), self.depth))
+
+    def thinking(self, now):
+        self.tell(Message("thinking", "on" if now else "", self.depth))
+
     def took(self, text, seconds):
         self.done(f"{text} ({human_duration(seconds)})")
 
