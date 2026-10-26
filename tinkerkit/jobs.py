@@ -11,7 +11,8 @@ lazy from pathlib import Path
 
 lazy from .commands import kind_of
 lazy from .messages import say
-lazy from .settings import EXERCISE_ENV, Home, Log, Numbered, confirm_deletion, fingerprint, now_text
+lazy from .settings import EXERCISE_ENV, Home, Numbered, confirm_deletion, fingerprint, now_text
+lazy from .store import Log
 
 JOBS = Numbered("jobs", "job numbers")
 STATES = ("running", "paused", "stopped", "finished", "archived")

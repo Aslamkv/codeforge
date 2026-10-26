@@ -18,13 +18,13 @@ lazy from .settings import (
     STATE_DIR,
     STATUS_TEXT,
     Home,
-    Store,
     confirm_deletion,
     field,
     first_line,
     now_text,
     split_text,
 )
+lazy from .store import Store
 lazy from .workspace import TaughtCommands, TestRef, Toolchain
 
 SpecSource = namedtuple("SpecSource", "text name")

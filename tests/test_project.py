@@ -530,7 +530,7 @@ def test_the_passing_count_follows_every_save(make_project, make_session):
 @pytest.mark.spec("PRJ-16")
 def test_a_run_keeps_its_calls_and_output_in_its_project(project_dir, make_model, fake_ollama):
     from tinkerkit.prompts import Part
-    from tinkerkit.settings import Log
+    from tinkerkit.store import Log
 
     store = project_store(project_dir)
     model = make_model()
