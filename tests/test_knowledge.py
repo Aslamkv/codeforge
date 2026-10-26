@@ -11,15 +11,18 @@ from tinkerkit.knowledge import (
     Library,
     Researcher,
     Retriever,
+    SearchPlanner,
     language_key,
     record,
     relevant_chunks,
     retire,
 )
-from tinkerkit.model import Ollama
+from tinkerkit.model import Models, Ollama, OllamaError
+from tinkerkit.prompts import Prompts
 from tinkerkit.settings import (
     CHUNKS_PER_PAGE,
     MAX_LESSONS_PER_FILE,
+    MAX_PLANNED_SEARCHES,
     MAX_RULE_CHARS,
     PLAYBOOK_RULES,
     TEACH_PAGE_CHARS,
@@ -1234,3 +1237,104 @@ def test_the_checks_a_reused_toolchain_lacks_and_the_tools_it_cannot_count_on(ti
     neither_installed_nor_to_be_added = ["uv"]
     assert known.unavailable_tools() == neither_installed_nor_to_be_added
     assert "add the learned types mypy, format black it lacks" in known.toolchain_title("reuse it")
+
+
+def planner_replying(monkeypatch, *replies):
+    asked = []
+
+    def reply(messages, tokens):
+        asked.append(messages)
+        answer = replies[len(asked) - 1]
+        if isinstance(answer, Exception):
+            raise answer
+        return answer
+
+    monkeypatch.setattr(Models, "quick", staticmethod(lambda: ("m", {}, None)))
+    monkeypatch.setattr(Models, "quick_reply", staticmethod(reply))
+    return asked
+
+
+def searches_reply(*searches):
+    return json.dumps({"searches": list(searches)})
+
+
+@pytest.mark.spec("KNW-25")
+def test_a_search_plan_asks_the_quick_model_and_fills_the_placeholders(monkeypatch):
+    asked = planner_replying(
+        monkeypatch,
+        searches_reply(
+            {"query": "{topic} tutorial", "engines": ["wikibooks"], "count": 3},
+            {"query": "{name} {version} docs", "engines": ["mwmbl"], "count": 5},
+        ),
+    )
+    plan = SearchPlanner().plan(
+        "{topic} documentation", 10, {"topic": "Flask", "name": "flask", "version": "3"}
+    )
+    assert plan == [
+        {"query": "Flask tutorial", "engines": ["wikibooks"], "count": 3},
+        {"query": "flask 3 docs", "engines": ["mwmbl"], "count": 5},
+    ]
+    system, user = asked[0]
+    assert system["content"] == Prompts.SEARCH_PLAN_SYSTEM
+    assert "{topic} documentation" in user["content"] and "10" in user["content"]
+
+
+@pytest.mark.spec("KNW-25")
+def test_the_search_plan_prompt_names_each_engine_the_placeholders_and_the_cap():
+    prompt = Prompts.SEARCH_PLAN_SYSTEM
+    assert all(engine in prompt for engine in ("mwmbl", "wikipedia", "wikibooks"))
+    assert "placeholder" in prompt and str(MAX_PLANNED_SEARCHES) in prompt and '"searches"' in prompt
+
+
+@pytest.mark.spec("KNW-25")
+@pytest.mark.parametrize(
+    "reply",
+    [
+        OllamaError("down"),
+        "not json at all",
+        searches_reply(),
+        searches_reply({"query": ""}, {"query": 7}, {"engines": ["mwmbl"]}),
+    ],
+)
+def test_a_failed_or_empty_search_plan_is_the_filled_need_to_every_engine(monkeypatch, reply, home_store):
+    planner_replying(monkeypatch, reply)
+    plan = SearchPlanner().plan("{topic} docs", 4, {"topic": "Flask"})
+    assert plan == [{"query": "Flask docs", "engines": [], "count": 4}]
+    assert home_store.items("search plans") == {}
+
+
+@pytest.mark.spec("KNW-25")
+def test_with_no_quick_model_the_plan_is_the_need_with_no_call(monkeypatch):
+    monkeypatch.setattr(Models, "quick", staticmethod(lambda: None))
+    monkeypatch.setattr(Models, "quick_reply", staticmethod(lambda *asked: pytest.fail("no call")))
+    assert SearchPlanner().plan("python docs", 2) == [{"query": "python docs", "engines": [], "count": 2}]
+
+
+@pytest.mark.spec("KNW-25")
+def test_a_plan_keeps_searches_with_a_query_up_to_the_cap(monkeypatch):
+    many = [{"query": f"q{n}"} for n in range(MAX_PLANNED_SEARCHES + 2)]
+    planner_replying(monkeypatch, searches_reply({"query": "  "}, *many))
+    assert [search["query"] for search in SearchPlanner().plan("need", 3)] == [
+        f"q{n}" for n in range(MAX_PLANNED_SEARCHES)
+    ]
+
+
+@pytest.mark.spec("KNW-25")
+def test_stray_braces_in_a_planned_query_are_left_as_written(monkeypatch):
+    planner_replying(monkeypatch, searches_reply({"query": "{topic} {unknown} {"}))
+    assert SearchPlanner().plan("need", 3, {"topic": "Go"})[0]["query"] == "Go {unknown} {"
+
+
+@pytest.mark.spec("KNW-26")
+def test_a_plan_is_kept_unfilled_by_its_need_and_serves_every_topic_with_no_call(monkeypatch, home_store):
+    asked = planner_replying(
+        monkeypatch, searches_reply({"query": "{topic} guide", "engines": ["wikibooks"]})
+    )
+    SearchPlanner().plan("{topic}  Official\nDocs", 3, {"topic": "Flask"})
+    assert home_store.get("search plans", "{topic} official docs") == [
+        {"query": "{topic} guide", "engines": ["wikibooks"]}
+    ]
+    assert SearchPlanner().plan("{topic} Official docs", 3, {"topic": "Rust"}) == [
+        {"query": "Rust guide", "engines": ["wikibooks"]}
+    ]
+    assert len(asked) == 1

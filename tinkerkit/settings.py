@@ -335,6 +335,7 @@ class Home:
                 ["sources"],
                 "the documentation pages tinker learn fetched, cleaned, per topic and version",
             ),
+            "searches": (["search plans"], "the web searches the model planned for each need"),
             "models": (["models"], "what calibration measured for each model"),
             "runs": (
                 ["projects", "runs"],

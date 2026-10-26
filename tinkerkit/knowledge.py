@@ -17,6 +17,7 @@ from .settings import (
     LESSONS_PER_PROMPT,
     MAX_FACT_CHARS,
     MAX_LESSONS_PER_FILE,
+    MAX_PLANNED_SEARCHES,
     MAX_RULE_CHARS,
     MAX_RULE_WHEN_CHARS,
     PLAYBOOK_RULES,
@@ -42,7 +43,7 @@ from .text import field, fingerprint, first_line, host, now_text, one_line, simi
 lazy from .jobs import today
 lazy from .model import Answer, Models, Ollama, OllamaError
 lazy from .project import Tracked
-lazy from .prompts import Part, Prompts
+lazy from .prompts import Part, Prompts, Reply
 lazy from .workspace import Toolchain, Workspace
 
 SavedPlan = namedtuple("SavedPlan", "plan saved")
@@ -764,6 +765,56 @@ class Learner(Tracked):
             say.warn(f"Not indexed now ({self.embeddings.failed}); a run indexes it when it searches")
         else:
             say.info(f"Indexed with {self.embeddings.name}, so a run can find it by meaning", "🔍")
+
+
+class SearchPlanner:
+    PLAN_TOKENS = 400
+
+    def plan(self, need, count, values=None):
+        planned = self.kept_or_asked(need, count) or [{"query": need, "engines": [], "count": count}]
+        return [{**search, "query": self.filled(search["query"], values or {})} for search in planned]
+
+    def kept_or_asked(self, need, count):
+        key = " ".join(need.lower().split())
+        kept = Home.store().get("search plans", key)
+        if kept:
+            return kept
+        asked = self.asked(need, count)
+        if asked:
+            Home.store().put("search plans", key, asked)
+        return asked
+
+    def asked(self, need, count):
+        if not Models.quick():
+            return []
+        try:
+            reply = Models.quick_reply(
+                [
+                    {"role": "system", "content": Prompts.SEARCH_PLAN_SYSTEM},
+                    {"role": "user", "content": f"Need: {need}\nCount: {count}"},
+                ],
+                self.PLAN_TOKENS,
+            )
+            searches = Reply(reply).json().get("searches")
+        except OllamaError, ValueError, AttributeError:
+            return []
+        return self.with_a_query(searches)[:MAX_PLANNED_SEARCHES]
+
+    @staticmethod
+    def with_a_query(searches):
+        if not isinstance(searches, list):
+            return []
+        return [
+            search
+            for search in searches
+            if isinstance(search, dict) and isinstance(search.get("query"), str) and search["query"].strip()
+        ]
+
+    @staticmethod
+    def filled(query, values):
+        for name, value in values.items():
+            query = query.replace("{" + name + "}", str(value))
+        return query
 
 
 class Researcher:

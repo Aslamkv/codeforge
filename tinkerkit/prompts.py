@@ -11,6 +11,7 @@ from .settings import (
     FACTS_PER_SLOT,
     LESSON_PHASES,
     MAX_FILE_LINES,
+    MAX_PLANNED_SEARCHES,
     MAX_RULE_CHARS,
     MAX_VERSION_COMMANDS,
     MIN_TRIMMED_PROSE_CHARS,
@@ -380,6 +381,18 @@ class Prompts:
         "joined by hyphens, at most 20 characters, the shorter the better; shorten well-known "
         "words (calc-py for a calculator in Python, todo for a todo app). Reply with the name "
         "only."
+    )
+    SEARCH_ENGINES = (
+        "The search engines: mwmbl searches the whole web and takes plain keywords only, no operators "
+        "or quotes; wikipedia finds overviews; wikibooks finds tutorials and manuals."
+    )
+    SEARCH_PLAN_SYSTEM = (
+        "Plan the web searches that best meet the need the person names. "
+        f"{SEARCH_ENGINES} "
+        "Keep each {placeholder} in a query exactly as written in the need. Reply with JSON only: "
+        '{"searches": [{"query": "...", "engines": ["mwmbl", "wikipedia", "wikibooks"], "count": N}]}, '
+        f"at most {MAX_PLANNED_SEARCHES} searches, each naming the engines that suit it and a count of "
+        "results no more than the count the person gives."
     )
     SAME_CASES = (
         "Several similar cases (every line, every unit, each row of a table) are built from the values "

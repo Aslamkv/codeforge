@@ -236,8 +236,19 @@ def test_clear_deletes_only_the_named_parts(home_store, capsys):
 
 @pytest.mark.spec("SET-10")
 def test_clear_rejects_an_unknown_part():
-    with pytest.raises(SystemExit, match="the parts are: languages, .*, exercise, jobs, read$"):
+    parts = (
+        "languages, memory, learned, docs, searches, models, runs, commands, history, exercise, jobs, read"
+    )
+    with pytest.raises(SystemExit, match=f"the parts are: {parts}$"):
         Home.clear(["everything"], yes=True)
+
+
+@pytest.mark.spec("SET-10")
+def test_clear_searches_forgets_the_search_plans(home_store):
+    home_store.put("search plans", "{topic} docs", [{"query": "{topic} docs"}])
+    home_store.put("sources", "flask@latest", {})
+    Home.clear(["searches"], yes=True)
+    assert home_store.items("search plans") == {} and home_store.items("sources") == {"flask@latest": {}}
 
 
 @pytest.mark.spec("SET-10")
