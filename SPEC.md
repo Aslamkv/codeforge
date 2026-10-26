@@ -197,7 +197,8 @@ Everything Tinker tells the person goes through one voice, `say` (a `Messages`).
   and goes to the project's `output` log (every message a run says); a live one becomes what goes on now.
   `working_on`, `tally` and `found` set what the run works on, its tally and what it found.
 - **MSG-4** `live` redraws one status line in place on a terminal only. Piped (a chat following the command),
-  it writes nothing; its followers are still told. The next message clears it first.
+  it writes nothing; its followers are still told. The next message clears it first. The line is a turning
+  star, `Tinkering…`, the time since the work began, and what goes on now.
 - **MSG-5** `detail` goes to the log given to `keep_log` (a run's `events`, with every model call it makes; a
   job's `calls #N`), and is never printed. With no log, it is dropped.
 - **MSG-6** `human_duration`: 42.5 gives `42s`, 1762.08 gives `29m 22s`, 4000 gives `1h 6m 40s`.
@@ -736,7 +737,10 @@ The terminal and the chats are one conversation: the same commands, the same ans
 - **CNV-7** `Channel.listened` gives only messages from allowed chats. It says a refusal once and gives
   nothing. `claim` lets only one process hold a channel's lock.
 - **CNV-8** `ConsoleChannel` prints a dim headline while a thing changes, the whole message when it is done,
-  and only the new lines when it grew. `exit` or end of input closes it.
+  and only the new lines when it grew. `exit` or end of input closes it. On a terminal with colour, the
+  conversation opens in a framed banner, draws a rule over the prompt, shows each line you send again
+  highlighted, and marks each message it sends with a steel blue `●`; with `NO_COLOR` or no terminal, all
+  of that is plain text.
 - **CNV-9** `Desk.run` claims each chat channel. When another Tinker holds one, it stops if there is no
   terminal, and otherwise leaves that chat out. The terminal never waits on a chat: each chat starts in its own
   thread. Each chat has one status message: what Tinker works on (a job's title), never how far it got. Every
