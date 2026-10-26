@@ -323,8 +323,11 @@ def rule_and_prompt(columns):
 
 
 ERASED_ABOVE_THE_PROMPT = "\r\033[K\033[F\033[K"
-ERASED_WITH_THE_LIVE_LINE = "\r\033[K\033[F\033[K\033[F\033[K"
 LIVE_LINE_TAKEN_OUT = "\0337\033[2F\033[M\0338\033[A"
+
+
+def printed_above(text, rows=1, block_rows=0):
+    return f"{'\033D' * rows}\0337\033[{rows + block_rows + 1}A\033[{rows}L\r{text}\0338"
 
 
 @pytest.mark.spec("CNV-8")
@@ -366,12 +369,12 @@ def test_console_leaves_piped_input_unruled_and_unrepeated(monkeypatch):
 
 
 @pytest.mark.spec("CNV-8")
-def test_console_redraws_the_rule_and_prompt_under_what_it_prints(monkeypatch):
+def test_console_prints_above_the_rule_without_touching_the_prompt(monkeypatch):
     terminal = colour_terminal(monkeypatch)
     console = ConsoleChannel()
     console.screen.reading = True
     console.send("console", "hi")
-    assert terminal.getvalue() == f"{ERASED_ABOVE_THE_PROMPT}{ACCENT}● {RESET}hi\n{rule_and_prompt(10)}"
+    assert terminal.getvalue() == printed_above(f"{ACCENT}● {RESET}hi")
 
 
 @pytest.mark.spec("CNV-8")
@@ -380,11 +383,29 @@ def test_what_tinker_says_while_you_type_prints_above_the_prompt(monkeypatch):
     typing(monkeypatch)
     ConsoleChannel().receive(1)
     said = drawn_after(terminal, lambda: conversation.say.text("[12:00:00] tinker_bot: hello"))
-    assert said == f"{ERASED_ABOVE_THE_PROMPT}[12:00:00] tinker_bot: hello\n{rule_and_prompt(10)}"
+    assert said == printed_above("[12:00:00] tinker_bot: hello", rows=3)
+
+
+@pytest.mark.spec("CNV-8")
+def test_console_makes_room_for_a_message_by_what_shows_of_it(monkeypatch):
+    terminal = colour_terminal(monkeypatch)
+    screen = ConsoleChannel().screen
+    screen.reading = True
+    screen.print(f"{ACCENT}● {RESET}hi there, friend\n  🔨 calc")
+    assert terminal.getvalue() == printed_above(f"{ACCENT}● {RESET}hi there, friend\n  🔨 calc", rows=3)
+
+
+@pytest.mark.spec("CNV-8")
+def test_console_redraws_the_prompt_under_a_message_taller_than_the_screen(monkeypatch):
+    terminal = colour_terminal(monkeypatch)
+    screen = ConsoleChannel().screen
+    screen.reading = True
+    tall = "\n".join(["line"] * 30)
+    screen.print(tall)
+    assert terminal.getvalue() == f"{ERASED_ABOVE_THE_PROMPT}{tall}\n{rule_and_prompt(10)}"
 
 
 LIVE_COLUMNS = 40
-UNDER_THE_LIVE_LINE = rule_and_prompt(LIVE_COLUMNS)
 
 
 def live_drawn(text, elapsed="0s", star="✻"):
@@ -444,9 +465,7 @@ def test_console_prints_above_its_live_line(monkeypatch, clock):
     screen = live_screen(monkeypatch)
     screen.show_live("Writing tests", 100.0)
     printed = drawn_after(sys.stdout, lambda: screen.print("hello"))
-    assert (
-        printed == f"{ERASED_WITH_THE_LIVE_LINE}hello\n{live_drawn('Writing tests')}\n{UNDER_THE_LIVE_LINE}"
-    )
+    assert printed == printed_above("hello", block_rows=1)
 
 
 @pytest.mark.spec("CNV-8")
@@ -468,9 +487,6 @@ def block_drawn(text, under, elapsed="0s", star="✻"):
     return [live_drawn(text, elapsed, star), *map(under_drawn, under)]
 
 
-LEARNING_BLOCK = "".join(f"{row}\n" for row in block_drawn("Learning", UNDER))
-
-
 def block_changed(rows):
     return f"\0337\033[{len(rows) + 1}F" + "\033[E".join(f"{row}\033[K" for row in rows) + "\0338"
 
@@ -481,10 +497,6 @@ def block_shrunk(rows, by):
 
 def block_taken_out(rows):
     return block_shrunk(rows, rows)
-
-
-def erased_with_the_block(rows):
-    return "\r\033[K" + "\033[F\033[K" * (rows + 1)
 
 
 @pytest.mark.spec("CNV-8")
@@ -529,7 +541,7 @@ def test_console_prints_above_its_live_block_and_takes_it_out(monkeypatch, clock
     screen = live_screen(monkeypatch)
     screen.show_live("Learning", 100.0, under=UNDER)
     printed = drawn_after(sys.stdout, lambda: screen.print("hello"))
-    assert printed == f"{erased_with_the_block(3)}hello\n{LEARNING_BLOCK}{UNDER_THE_LIVE_LINE}"
+    assert printed == printed_above("hello", block_rows=3)
     assert drawn_after(sys.stdout, screen.end_live) == block_taken_out(3)
     assert screen.under == []
 
@@ -561,7 +573,7 @@ def test_once_the_console_reads_live_draws_in_its_live_line(monkeypatch, clock):
         "Writing tests"
     )
     said = drawn_after(sys.stdout, lambda: conversation.say.text("Answered"))
-    assert said == f"{LIVE_LINE_TAKEN_OUT}{ERASED_ABOVE_THE_PROMPT}Answered\n{UNDER_THE_LIVE_LINE}"
+    assert said == LIVE_LINE_TAKEN_OUT + printed_above("Answered")
 
 
 @pytest.mark.spec("CNV-8")
@@ -570,7 +582,7 @@ def test_console_prints_a_jobs_settled_lines_once_and_shows_what_goes_on_in_its_
     writing = "🔨 calc\n✅ step one\n✻ Tinkering… (3s) · **Writing the code**\n… detail"
     shown = console.show("console", None, writing, doing="Writing the code")
     assert sys.stdout.getvalue() == (
-        f"{ERASED_ABOVE_THE_PROMPT}{ACCENT}● {RESET}🔨 calc\n  ✅ step one\n{UNDER_THE_LIVE_LINE}"
+        f"{printed_above(f'{ACCENT}● {RESET}🔨 calc\n  ✅ step one', rows=2)}"
         f"{block_grown(2)}{block_changed(block_drawn('Writing the code', ['… detail']))}"
     )
     clock[0] += 5
@@ -584,13 +596,11 @@ def test_console_prints_a_jobs_settled_lines_once_and_shows_what_goes_on_in_its_
         ),
     )
     assert grew == (
-        f"{erased_with_the_block(2)}  ✅ step two\n{live_drawn('Writing the code', '5s')}\n"
-        f"{under_drawn('… detail')}\n{UNDER_THE_LIVE_LINE}{block_changed(block_drawn('Verifying', ['📊 1/2'], '5s'))}"
+        f"{printed_above('  ✅ step two', block_rows=2)}"
+        f"{block_changed(block_drawn('Verifying', ['📊 1/2'], '5s'))}"
     )
     done = drawn_after(sys.stdout, lambda: console.show("console", shown, "🏁 calc\n✅ Done", done=True))
-    assert done == (
-        f"{block_taken_out(2)}{ERASED_ABOVE_THE_PROMPT}  🏁 calc\n  ✅ Done\n{UNDER_THE_LIVE_LINE}"
-    )
+    assert done == (f"{block_taken_out(2)}{printed_above('  🏁 calc\n  ✅ Done', rows=2)}")
 
 
 @pytest.mark.spec("CNV-8")
@@ -599,10 +609,7 @@ def test_console_shows_a_message_without_a_doing_line_in_its_live_line_until_don
     shown = console.show("console", None, "⏳ **Getting ready**\nI answer soon.")
     assert sys.stdout.getvalue() == live_shown("⏳ Getting ready")
     done = drawn_after(sys.stdout, lambda: console.show("console", shown, "Answer", done=True))
-    assert (
-        done
-        == f"{LIVE_LINE_TAKEN_OUT}{ERASED_ABOVE_THE_PROMPT}{ACCENT}● {RESET}Answer\n{UNDER_THE_LIVE_LINE}"
-    )
+    assert done == LIVE_LINE_TAKEN_OUT + printed_above(f"{ACCENT}● {RESET}Answer")
 
 
 @pytest.mark.spec("CNV-8")
@@ -610,7 +617,8 @@ def test_a_done_message_leaves_a_live_line_it_does_not_own(monkeypatch, clock):
     console = live_console(monkeypatch)
     console.show("console", None, "🔨 calc\n✻ Tinkering… · **Writing**", doing="Writing")
     done = drawn_after(sys.stdout, lambda: console.show("console", None, "Answer", done=True))
-    assert done.startswith(ERASED_WITH_THE_LIVE_LINE) and console.screen.live == ("Writing", 100.0, {})
+    assert done == printed_above(f"{ACCENT}● {RESET}Answer", block_rows=1)
+    assert console.screen.live == ("Writing", 100.0, {})
 
 
 @pytest.mark.spec("CNV-8")

@@ -1939,14 +1939,24 @@ class ConsoleScreen:
             threading.Thread(target=self.keep_ticking, daemon=True).start()
 
     def print(self, text):
-        out = sys.stdout
         with self.printing:
-            if out.isatty():
-                out.write(self.erased_bottom())
-            out.write(text + "\n")
-            if out.isatty() and self.reading:
-                out.write(self.bottom() if self.ruled() else self.PROMPT)
-            out.flush()
+            rows = rows_shown(text)
+            write_out(
+                self.printed_above(text, rows) if self.has_room_for(rows) else self.printed_over_prompt(text)
+            )
+
+    def printed_above(self, text, rows):
+        return f"{self.room_made(rows, above=self.live_rows())}\r{text}{RESTORE_CURSOR}"
+
+    def has_room_for(self, rows):
+        return self.ruled() and rows + self.live_rows() + 2 <= shutil.get_terminal_size().lines
+
+    def printed_over_prompt(self, text):
+        out = sys.stdout
+        if not out.isatty():
+            return text + "\n"
+        after = (self.bottom() if self.ruled() else self.PROMPT) if self.reading else ""
+        return f"{self.erased_bottom()}{text}\n{after}"
 
     def draw(self, text):
         with self.printing:
@@ -1993,9 +2003,12 @@ class ConsoleScreen:
             return self.grown(rows_after - rows_before)
         return self.shrunk(rows_before, rows_before - rows_after)
 
+    def grown(self, by):
+        return self.room_made(by, above=0) + RESTORE_CURSOR
+
     @staticmethod
-    def grown(by):
-        return f"{ROW_DOWN_OR_SCROLL * by}{SAVE_CURSOR}{rows_up(by + 1)}{inserted_rows(by)}{RESTORE_CURSOR}"
+    def room_made(rows, above):
+        return f"{ROW_DOWN_OR_SCROLL * rows}{SAVE_CURSOR}{rows_up(rows + above + 1)}{inserted_rows(rows)}"
 
     def shrunk(self, rows, by):
         return self.at_the_live_block(rows, DELETE_LINE * by) + CURSOR_UP * by if by else ""
@@ -2033,12 +2046,20 @@ class ConsoleScreen:
 
 
 SAVE_CURSOR, RESTORE_CURSOR, CURSOR_UP, NEXT_LINE = "\0337", "\0338", "\033[A", "\033[E"
+COLOUR_CODE_RE = re.compile(r"\033\[[0-9;]*m")
 DELETE_LINE, CLEAR_DOWN, ROW_DOWN_OR_SCROLL = "\033[M", "\033[J", "\033D"
 CLEARED_LINE_ABOVE = "\033[F" + CLEAR_TO_LINE_END
 
 
 def lines_up(rows):
     return f"\033[{rows}F"
+
+
+def rows_shown(text):
+    columns = shutil.get_terminal_size().columns
+    return sum(
+        max(1, -(-visible_width(COLOUR_CODE_RE.sub("", line)) // columns)) for line in text.split("\n")
+    )
 
 
 def rows_up(rows):
