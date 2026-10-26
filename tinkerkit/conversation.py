@@ -1355,7 +1355,9 @@ class Reporter:
         for channel in self.channels:
             for chat in channel.allowed:
                 key = (channel.name, chat)
-                self.sent[key] = channel.show(chat, self.sent.get(key), text, done, bottom)
+                self.sent[key] = channel.show(
+                    chat, self.sent.get(key), text, done, bottom, began=self.progress.work_began
+                )
 
     def printed(self, line):
         if self.tracked() is None and self.says_something(line):
@@ -1435,6 +1437,11 @@ class Progress:
     @property
     def title(self):
         return self.snapshot["title"]
+
+    @property
+    def work_began(self):
+        started = self.snapshot.get("started")
+        return started - self.snapshot.get("before", 0.0) if started else None
 
     @property
     def working_on(self):
@@ -1685,7 +1692,7 @@ class Channel:
     def latest(self, chat, sent):
         return True
 
-    def show(self, chat, shown, text, done=False, bottom=None, status=False):
+    def show(self, chat, shown, text, done=False, bottom=None, status=False, began=None):
         shown = list(shown or [])
         if (done if bottom is None else bottom) and shown and not self.latest(chat, shown[-1]):
             for old in shown:
@@ -1833,8 +1840,10 @@ class ConsoleChannel(Channel):
         webbrowser.open(Path(path).as_uri())
         return self.send(chat, f"{caption}\n📄 Opened in your browser: `{path}`")
 
-    def show(self, chat, shown, text, done=False, bottom=None, status=False):
+    def show(self, chat, shown, text, done=False, bottom=None, status=False, began=None):
         sent, text = (shown or [None])[0] or self.new_id(), self.said(text)
+        if began is not None:
+            self.began[sent] = time.monotonic() - (time.time() - began)
         if done:
             self.show_done(sent, text)
         else:

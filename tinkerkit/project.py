@@ -687,6 +687,7 @@ class Tracker:
             "waiting": None,
             "ended": None,
             "before": before,
+            "started": time.time(),
             "seconds": 0.0,
             "pid": self.pid,
             "pid_began": began_at(self.pid),

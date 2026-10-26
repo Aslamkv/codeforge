@@ -518,6 +518,22 @@ def test_a_done_message_leaves_a_live_line_it_does_not_own(monkeypatch, clock):
 
 
 @pytest.mark.spec("CNV-8")
+def test_a_jobs_live_line_counts_from_when_the_job_began(monkeypatch, clock):
+    monkeypatch.setattr(time, "time", lambda: 5000.0)
+    console = live_console(monkeypatch)
+    console.show("console", None, "🔨 calc\n▸ Writing", began=4936.0)
+    assert console.screen.live == ("Writing", 36.0)
+
+
+@pytest.mark.spec("CNV-8")
+def test_progress_says_when_the_work_began_counting_earlier_runs():
+    progress = Progress("calc", before=60.0)
+    assert progress.work_began is None
+    progress.take({"started": 1000.0})
+    assert progress.work_began == 940.0
+
+
+@pytest.mark.spec("CNV-8")
 def test_a_done_message_forgets_how_it_went(monkeypatch, clock):
     console = live_console(monkeypatch)
     shown = console.show("console", None, "🔨 calc\n▸ Writing")

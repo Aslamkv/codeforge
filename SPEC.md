@@ -743,7 +743,9 @@ The terminal and the chats are one conversation: the same commands, the same ans
   the lines not yet printed follow. `exit` or end of input closes it. Once it reads, all that Tinker says
   (`say`, a chat's message too) prints through it, above the prompt, and `live` draws in that same live
   line, its star turning on its own about four times a second. While a job shows its progress there, the
-  status that says what Tinker works on is left out of the terminal. On a terminal with colour, the
+  status that says what Tinker works on is left out of the terminal. A job's live line counts from when the
+  job began (its tracker's `started`, less the time of earlier runs), so a Tinker opened later shows the same
+  time. On a terminal with colour, the
   conversation opens in a framed banner, draws a rule over the prompt, shows each line you send again
   highlighted, and marks each message it sends with a steel blue `●`. The banner names Tinker, the model in
   use, the projects folder and the chats it listens on. Piped input draws no rule and shows no line again;
