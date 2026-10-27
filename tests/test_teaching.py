@@ -329,7 +329,9 @@ def test_a_confirmed_answer_like_a_kept_fact_adds_to_it(kept, make_model, fake_o
     entry = Library.read("flask")
     entry["facts"][-1]["status"] = "proven"
     Library.save("flask", entry)
-    checked_ask(kept, make_model, fake_ollama, checked_reply(fact="SQLite adds integers exactly: 40 + 2 is 42"))
+    checked_ask(
+        kept, make_model, fake_ollama, checked_reply(fact="SQLite adds integers exactly: 40 + 2 is 42")
+    )
     [_, fact] = facts_of("flask")
     assert fact["status"] == "proven" and fact["text"].endswith("gives 42")
     assert [event["event"] for event in fact["history"]] == ["checked", "checked"]

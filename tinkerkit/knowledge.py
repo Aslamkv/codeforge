@@ -644,10 +644,7 @@ class Learner(Tracked):
     @staticmethod
     def add_facts(facts, found):
         for fact in found:
-            same = next(
-                (known for known in facts if similarity(fact["text"], known["text"]) >= SAME_FACT_SIMILARITY),
-                None,
-            )
+            same = Library.like_fact(facts, fact)
             if same is None:
                 facts.append(fact)
             elif fact["source"] not in Learner.pages_of(same):
@@ -1354,6 +1351,7 @@ class Library:
             "sources": list(dict.fromkeys(sources)),
             "id": fingerprint(text)[:12],
         }
+
         def checked_in(entry):
             facts = entry.get("facts", [])
             same = Library.like_fact(facts, fact)
@@ -1368,7 +1366,11 @@ class Library:
     @staticmethod
     def like_fact(facts, fact):
         return next(
-            (known for known in facts if similarity(known.get("text", ""), fact["text"]) >= SAME_FACT_SIMILARITY),
+            (
+                known
+                for known in facts
+                if similarity(known.get("text", ""), fact["text"]) >= SAME_FACT_SIMILARITY
+            ),
             None,
         )
 
