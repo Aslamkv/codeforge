@@ -1,3 +1,4 @@
+import re
 import shlex
 import sqlite3
 import time
@@ -109,8 +110,8 @@ def authorized(action, *_):
 
 def statements(code):
     pending = ""
-    for line in code.splitlines(keepends=True):
-        pending += line
+    for piece in re.split(r"(?<=;)", code):
+        pending += piece
         if sqlite3.complete_statement(pending):
             yield pending
             pending = ""

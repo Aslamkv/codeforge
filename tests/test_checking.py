@@ -61,6 +61,18 @@ def test_sql_runs_a_script_statement_by_statement():
     assert result.output.splitlines() == ["1|x", "2|y"]
 
 
+def test_sql_runs_statements_that_share_a_line():
+    result = sql("create table t(a); insert into t values (null); select count(*), count(a) from t;")
+    assert result.code == 0
+    assert result.output.splitlines() == ["1|0"]
+
+
+def test_sql_keeps_a_semicolon_inside_a_string():
+    result = sql("select 'a;b'; select 2;")
+    assert result.code == 0
+    assert result.output.splitlines() == ["a;b", "2"]
+
+
 def test_sql_stops_at_an_error_keeping_what_printed():
     result = sql("select 1;\nselect * from missing;\nselect 2;")
     assert result.ran and result.code == 1
