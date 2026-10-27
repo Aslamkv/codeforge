@@ -324,6 +324,19 @@ def test_an_answer_the_check_confirmed_is_kept_as_a_candidate_fact(kept, make_mo
 
 
 @pytest.mark.spec("TCH-11")
+def test_a_confirmed_answer_like_a_kept_fact_adds_to_it(kept, make_model, fake_ollama):
+    checked_ask(kept, make_model, fake_ollama, checked_reply())
+    entry = Library.read("flask")
+    entry["facts"][-1]["status"] = "proven"
+    Library.save("flask", entry)
+    checked_ask(kept, make_model, fake_ollama, checked_reply(fact="SQLite adds integers exactly: 40 + 2 is 42"))
+    [_, fact] = facts_of("flask")
+    assert fact["status"] == "proven" and fact["text"].endswith("gives 42")
+    assert [event["event"] for event in fact["history"]] == ["checked", "checked"]
+    assert len(fact["sources"]) == 2
+
+
+@pytest.mark.spec("TCH-11")
 def test_an_answer_the_check_did_not_confirm_keeps_nothing(kept, make_model, fake_ollama):
     ending = checked_ask(kept, make_model, fake_ollama, checked_reply(confirms=False))
     assert len(facts_of("flask")) == 1 and ending["details"] == [("Answer", CHECKED_ANSWER)]

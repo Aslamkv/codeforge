@@ -1283,7 +1283,8 @@ then is anything changed.
   `python3 -m pip` and the like) or an install word right after its program (`cargo install`, `go get`,
   `poetry add`) is refused. A refused or failed check is said, and the answer goes on without it.
 - **TCH-11** An answer a check ran and confirmed is kept in its topic as a candidate fact, with a `checked`
-  event and its sources (the check and what it printed). `tinker teach` confirms or corrects it (**TCH-7**).
+  event and its sources (the check and what it printed). One like a fact the topic keeps (`SAME_FACT_SIMILARITY`)
+  adds its sources and a `checked` event to that fact instead, whose status stays. `tinker teach` confirms or corrects it (**TCH-7**).
 
 ## sandbox (SBX)
 

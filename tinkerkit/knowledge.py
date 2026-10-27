@@ -1354,9 +1354,23 @@ class Library:
             "sources": list(dict.fromkeys(sources)),
             "id": fingerprint(text)[:12],
         }
-        record(fact, "checked", None)
-        Home.store().update("learned", slug, lambda kept: dict(kept, facts=kept.get("facts", []) + [fact]))
-        return fact
+        def checked_in(entry):
+            facts = entry.get("facts", [])
+            same = Library.like_fact(facts, fact)
+            if same is None:
+                return dict(entry, facts=facts + [record(fact, "checked", None)])
+            same["sources"] = list(dict.fromkeys(same.get("sources", []) + fact["sources"]))
+            record(same, "checked", None)
+            return entry
+
+        return Library.like_fact(Home.store().update("learned", slug, checked_in)["facts"], fact)
+
+    @staticmethod
+    def like_fact(facts, fact):
+        return next(
+            (known for known in facts if similarity(known.get("text", ""), fact["text"]) >= SAME_FACT_SIMILARITY),
+            None,
+        )
 
     @staticmethod
     def slug(topic):
