@@ -244,6 +244,8 @@ MAX_RULE_WHEN_CHARS = 80
 
 DOCS_SITE_SEARCH = "{topic} official documentation"
 DOCS_VERSION_SEARCH = "{name} {version} documentation"
+DOCS_NAME_SEARCH = "{name} documentation"
+NOT_REFERENCE_WORDS = ("news", "release", "releases", "changelog", "changes", "download", "downloads")
 RESULTS_PER_LEARN_SEARCH = 10
 SEARCHES_PER_ENGINE = 2
 MAX_PLANNED_SEARCHES = 8

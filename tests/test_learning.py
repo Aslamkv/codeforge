@@ -475,8 +475,8 @@ def test_a_tool_is_learned_from_one_search_and_its_versions_documentation(tinker
     web, model, embeddings = FakeWeb(FOUND, ALL_PAGES), tool_model(), CountingEmbeddings()
     entry = SlotLearner(model, web, embeddings).learn("Widgetlib")
     assert web.queries[:2] == [FIRST_SEARCH, VERSION_DOCS_SEARCH]
-    without_off_topic_and_repeat = [START, CHANGES, APP]
-    assert web.fetched[:3] == without_off_topic_and_repeat
+    reference_first_without_off_topic_and_repeat = [START, APP, CHANGES]
+    assert web.fetched[:3] == reference_first_without_off_topic_and_repeat
     assert all(url in web.fetched for url in DOC_PAGES if url != ELSEWHERE) and ELSEWHERE not in web.fetched
     assert entry["docs"] == {"widgetlib": "2.1.0"} and Home.store().get("sources", "widgetlib@2.1.0")["pages"]
     assert model.calls[0] == "Plan learning" and model.calls[-1] == "Condense the facts" and embeddings.calls
@@ -562,7 +562,7 @@ def test_a_learns_documentation_needs_are_planned_and_each_pools_its_searches(ti
         ],
     ]
     assert not any(DOCS_SITE_SEARCH in messages[1]["content"] for messages in asked)
-    assert web.fetched[:3] == [START, CHANGES, APP]
+    assert web.fetched[:3] == [START, APP, CHANGES]
     assert all(url in web.fetched for url in DOC_PAGES if url != ELSEWHERE)
 
 
@@ -799,6 +799,34 @@ def test_a_language_is_learned_under_its_key_and_replaces_what_its_earlier_learn
         Knowledge("Lang").language_doc["retired"][0]["reason"]
         == "replaced when the language was learned again"
     )
+
+
+SQL_PLAN = {**LANGUAGE_PLAN, "name": "SQL", "language": "SQL", "commands": ["sqlite3 --version"], "tools": []}
+SQLITE = {
+    "command": "sqlite3 --version",
+    "found": True,
+    "version": "3.54.0",
+    "output": "3.54.0 2026-09-01 a1b2",
+}
+SQL_RESULTS = [
+    result("https://news.example.com/sqlite-3.54", "SQL news: SQLite 3.54 is out"),
+    result("https://sqlite.example.org/changes.html", "SQL release history"),
+    result("https://tools.example.com/sqlpackage", "Download the SQL package"),
+    result("https://sql.example.org/reference/select.html", "SQL SELECT reference"),
+]
+
+
+@pytest.mark.spec("LRN-4")
+def test_a_version_of_one_implementation_searches_the_topics_own_docs_by_its_name_alone(tinker_home):
+    web = FakeWeb({"SQL documentation": SQL_RESULTS})
+    SlotLearner(language_model(), web, CountingEmbeddings()).documentation(SQL_PLAN, [SQLITE], "3.54.0")
+    assert web.queries == ["SQL documentation"]
+
+
+@pytest.mark.spec("LRN-4")
+def test_reference_pages_are_picked_before_news_release_notes_changelogs_and_downloads(tinker_home):
+    picked = SlotLearner(language_model(), FakeWeb(), CountingEmbeddings()).picked("SQL", SQL_RESULTS)
+    assert [found["url"] for found in picked] == [SQL_RESULTS[3]["url"], *[r["url"] for r in SQL_RESULTS[:3]]]
 
 
 @pytest.mark.spec("LRN-6")
