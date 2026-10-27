@@ -1229,6 +1229,19 @@ def test_a_reporter_without_a_tracker_shows_its_lines(monkeypatch):
     assert learning.progress.snapshot["latest"] == "reading 4 pages"
 
 
+@pytest.mark.spec("CNV-18")
+def test_a_reporter_without_a_tracker_ends_with_its_title_and_last_line(monkeypatch):
+    monkeypatch.setattr(conversation, "PROGRESS_EDIT_SECONDS", 1000)
+    channel = Recorder()
+    calibrating = Reporter([channel], "calibrate qwen", pid=999999)
+    calibrating.update()
+    calibrating.printed("✅ Calibrated qwen")
+    calibrating.finish()
+    ending = channel.texts()[-1]
+    assert "🏁 **calibrate qwen**" in ending and "✅ Calibrated qwen" in ending
+    assert "Tinkering" not in ending
+
+
 @pytest.mark.spec("CNV-20")
 def test_an_unreadable_json_answer_is_taken_as_empty(measured_model, fake_ollama):
     shell, channel = Shell(Talk("cmds"), Path.cwd(), Questions()), Recorder()
@@ -2015,6 +2028,7 @@ def test_a_terminal_task_reports_and_stops_on_a_signal(attached, home_store):
         time.sleep(1)
     task.end()
     assert "🧠 Recalling what Tinker has learned" in channel.texts()[-1]
+    assert "Tinkering" not in channel.texts()[-1]
 
 
 @pytest.mark.spec("CNV-10")

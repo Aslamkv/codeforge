@@ -860,7 +860,8 @@ The terminal and the chats are one conversation: the same commands, the same ans
 - **CNV-18** `Reporter` shows one run's tracker in one message per chat. It reads the tracker every
   `PROGRESS_EDIT_SECONDS` seconds (about 1–2) and edits the message when a line changed; when only the time
   or the tokens changed, it edits at most every `CLOCK_ONLY_EDIT_SECONDS` seconds. It ends with the run's ending (with
-  its `text`: a research's answer). A command that keeps no tracker shows its latest printed line.
+  its `text`: a research's answer). A command that keeps no tracker shows its latest printed line, and ends
+  with its title and that line, without the Tinkering line or its clock.
 - **CNV-19** A task run from a terminal reports to the enabled chats (`Attached`). Stopped or paused
   (**JOB-1**), its last state is shown once it ends.
 - **CNV-20** The chat asks the model only through the quick call (**MOD-25**); `Talk` and `Shell`

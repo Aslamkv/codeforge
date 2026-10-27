@@ -1425,10 +1425,7 @@ class Reporter:
         with self.lock:
             self.ended = True
             self.progress.take(snapshot or self.tracked())
-            if self.progress.waiting() or self.progress.snapshot.get("ended"):
-                self.say(self.progress.ending(), done=True)
-            else:
-                self.update()
+            self.say(self.progress.ending(), done=True)
 
 
 class Progress:
@@ -1535,9 +1532,14 @@ class Progress:
         if self.waiting():
             return self.waits(self.planned(self.snapshot["waiting"]), self.time_taken())
         ended = self.snapshot.get("ended")
-        if not ended:
-            return md(t"🏁 **{self.title}**")
-        return "\n".join([md(t"🏁 **{self.title}**")] + self.ended_lines(ended))
+        lines = self.ended_lines(ended) if ended else self.last_state_lines()
+        return "\n".join([md(t"🏁 **{self.title}**")] + lines)
+
+    def last_state_lines(self):
+        state = self.snapshot
+        lines = [f"✅ {step}" for step in state.get("steps", [])]
+        lines += [md(t"⏸ {self.working_on}")] if state.get("step") else []
+        return lines + ([md(t"{state['latest']}")] if state.get("latest") else [])
 
     def ended_lines(self, ended):
         mark = {"done": "✅", "blocked": "⚠️"}.get(ended.get("status"), "⏸")
