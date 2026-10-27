@@ -1297,7 +1297,8 @@ then is anything changed.
   databases and loading extensions refused. A `command` check runs its code from a new empty folder with a tool learned and found on
   this machine; a tool with a package manager or installer anywhere in it (pip, npm, brew, apt, gem,
   `python3 -m pip` and the like) or an install word right after its program (`cargo install`, `go get`,
-  `poetry add`) is refused. A refused or failed check is told to the model with why, once, on the same
+  `poetry add`) is refused. A check fails when it does not run, runs out of time, or one of its `sql` statements
+  errors; a `command` check's exit code is part of what it printed. A refused or failed check is told to the model with why, once, on the same
   conversation, and the check it gives back runs instead. When that one is refused or fails too, or none is
   given, it is said, and the first answer stands.
 - **TCH-11** An answer a check ran and confirmed is kept in its topic as a candidate fact, with a `checked`
