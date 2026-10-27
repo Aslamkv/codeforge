@@ -194,14 +194,17 @@ class Asker:
     def checked(self, conversation, given, items, proposal):
         tools = found_programs(list(machines_here(items).values()))
         check = Check.of(proposal, tools, self.sandbox_here)
-        refusal = check.refusal()
-        if refusal:
-            say.warn(f"Check refused: {refusal}")
-            return None
-        ran = check.run()
-        if not ran.ran or ran.timed_out:
-            say.warn(f"Check failed: {ran.why or 'it ran out of time'}")
-            return None
+        ran, why = Asker.tried(check)
+        if why:
+            check = self.fixed_check(conversation, why, tools)
+            if check is None:
+                say.warn("No fixed check came back: the first answer stands")
+                return None
+            ran, why = Asker.tried(check)
+            if why:
+                say.warn("The fixed check did not run either: the first answer stands")
+                return None
+        proposal = check.proposal
         say.step(f"Ran a {proposal.get('kind')} check: {check.shows or first_line(check.code, 60)}")
         ran_parts = [
             Part("The check Tinker ran", check_text(check, ran), True),
@@ -213,6 +216,27 @@ class Asker:
                 given,
             )
         return answer, Asker.fact_kept(confirmed, items, check, ran)
+
+    @staticmethod
+    def tried(check):
+        refusal = check.refusal()
+        if refusal:
+            say.warn(f"Check refused: {refusal}")
+            return None, f"Tinker refused it: {refusal}"
+        ran = check.run()
+        if not ran.ran or ran.timed_out:
+            why = ran.why or "it ran out of time"
+            say.warn(f"Check failed: {why}")
+            return None, f"It failed: {why}"
+        return ran, ""
+
+    def fixed_check(self, conversation, why, tools):
+        parts = [Part("Why your check did not run", why, True), Part("Now", Prompts.ASK_CHECK_AGAIN, True)]
+        with say.working_on("Asking for a fixed check"):
+            proposal = proposal_of(
+                self.model.ask(Prompts.ASK_SYSTEM, parts, "ask: fixed check", conversation=conversation)
+            )
+        return Check.of(proposal, tools, self.sandbox_here) if proposal else None
 
     @staticmethod
     def fact_kept(confirmed, items, check, ran):
@@ -494,6 +518,15 @@ def first_answer(answer, given):
     text, data = marked_answer(answer, given)
     check = (data or {}).get("check")
     return text, check if isinstance(check, dict) else None
+
+
+def proposal_of(answer):
+    try:
+        data = Reply(answer.value).json()
+    except ValueError:
+        return None
+    check = data.get("check") if isinstance(data, dict) else None
+    return check if isinstance(check, dict) else None
 
 
 def marked_answer(answer, given):

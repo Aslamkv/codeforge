@@ -875,6 +875,11 @@ Reply with ONLY JSON: {"overview":"...","features":["..."],"requires":"Python 3.
         'Reply with ONLY JSON: {"answer": "...", "uses": [1], "check": null or {"kind": "sql|command", '
         '"code": "...", "shows": "what it shows", "tool": "...", "file": "..."}}'
     )
+    ASK_CHECK_AGAIN = (
+        "Tinker could not run your check, for the reason above. Give back one fixed check that shows the same "
+        'claim and avoids that reason, or null when no check can. Reply with ONLY JSON: {"check": null or '
+        '{"kind": "sql|command", "code": "...", "shows": "what it shows", "tool": "...", "file": "..."}}'
+    )
     ASK_CHECKED = (
         "Tinker ran your check above. Answer the question again with what it printed: say "
         '"I ran …, it printed …" and let that settle the claim it checks. "uses" lists the numbers of the items '

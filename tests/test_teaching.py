@@ -310,27 +310,51 @@ def test_an_ask_runs_a_command_check_with_a_tool_found_here(kept, make_model, fa
 
 
 @pytest.mark.spec("TCH-10")
-def test_a_refused_check_is_said_and_the_first_answer_goes_on(kept, make_model, fake_ollama, capsys):
+def test_a_refused_check_is_told_once_and_the_fixed_check_runs_instead(kept, make_model, fake_ollama, capsys):
+    flask_found_here()
+    refused = {"kind": "command", "code": "flask", "shows": "it installs", "tool": "pip"}
+    fixed = {"kind": "command", "code": "import flask", "shows": "flask imports", "tool": "python3"}
+    answered = "I ran import flask, it printed Flask 3.0.2."
+    fake_ollama.reply(first_reply("It imports.", refused, [1]), when="ask")
+    fake_ollama.reply(json.dumps({"check": fixed}), when="ask")
+    fake_ollama.reply(json.dumps({"answer": answered, "uses": [1]}), when="ask")
+    sandbox = FakeSandbox()
+    ending = Asker(make_model(), Memory(), sandbox=sandbox).answer("how do flask routes work")
+    first, retry, checked = (call["messages"] for call in fake_ollama.calls)
+    assert retry[:2] == first and len(retry) == 4 and Prompts.ASK_CHECK_AGAIN in retry[3]["content"]
+    assert "refused" in retry[3]["content"] and "The question" not in retry[3]["content"]
+    assert checked[:4] == retry and len(checked) == 6 and "Flask 3.0.2" in checked[5]["content"]
+    assert len(sandbox.runs) == 1 and "Check refused" in capsys.readouterr().out
+    assert ending["details"] == [("Answer", answered)]
+
+
+@pytest.mark.spec("TCH-10")
+def test_a_check_refused_again_is_said_and_the_first_answer_goes_on(kept, make_model, fake_ollama, capsys):
     flask_found_here()
     check = {"kind": "command", "code": "flask", "shows": "it installs", "tool": "pip"}
     fake_ollama.reply(first_reply("Install it with pip.", check, [1]), when="ask")
+    fake_ollama.reply(json.dumps({"check": check}), when="ask")
     sandbox = FakeSandbox()
     ending = Asker(make_model(), Memory(), sandbox=sandbox).answer("how do flask routes work")
     out = capsys.readouterr().out
-    assert len(fake_ollama.calls) == 1 and sandbox.runs == []
-    assert "Check refused" in out and "Install it with pip." in out
+    assert len(fake_ollama.calls) == 2 and sandbox.runs == []
+    assert out.count("Check refused") == 2 and "Install it with pip." in out
     assert ending["details"] == [("Answer", "Install it with pip.")]
 
 
 @pytest.mark.spec("TCH-10")
-def test_a_failed_check_is_said_and_the_first_answer_goes_on(kept, make_model, fake_ollama, capsys):
+def test_a_failed_check_with_no_fixed_one_is_said_and_the_first_answer_goes_on(
+    kept, make_model, fake_ollama, capsys
+):
     flask_found_here()
     check = {"kind": "command", "code": "import flask", "shows": "flask imports", "tool": "python3"}
     fake_ollama.reply(first_reply("It imports.", check), when="ask")
+    fake_ollama.reply(json.dumps({"check": None}), when="ask")
     sandbox = FakeSandbox(Ran(False, why="no sandbox here"))
     Asker(make_model(), Memory(), sandbox=sandbox).answer("how do flask routes work")
     out = capsys.readouterr().out
-    assert len(fake_ollama.calls) == 1 and "Check failed: no sandbox here" in out and "It imports." in out
+    assert len(fake_ollama.calls) == 2 and "no sandbox here" in fake_ollama.calls[1]["messages"][3]["content"]
+    assert "Check failed: no sandbox here" in out and "No fixed check" in out and "It imports." in out
 
 
 SQL_CHECK = {"kind": "sql", "code": "select 40 + 2", "shows": "what 40 + 2 gives"}
