@@ -82,6 +82,7 @@ def no_job():
 @pytest.fixture(autouse=True)
 def nothing_kept(monkeypatch):
     monkeypatch.setattr(Ollama, "kept", set())
+    monkeypatch.setattr(Ollama, "embedders", set())
     handlers = {signum: signal.getsignal(signum) for signum in (signal.SIGTERM, signal.SIGHUP)}
     yield
     for signum, handler in handlers.items():

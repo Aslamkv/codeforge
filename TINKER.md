@@ -290,7 +290,7 @@ is, one for your version's documentation, one for each tool, and a few more only
 documentation leaves unanswered. The cleaned pages are kept per version, so learning it again searches for
 none of them. When the web finds nothing (offline, nothing about the topic), it stops at once and says why,
 before the model does any work, and keeps what it knew before. Every web search and fetch Tinker makes is
-logged in `.tinker/web-requests.log`.
+logged in `.tinker/web-requests.log`. The summary at the end shows the versions installed here.
 
 Forget what learning keeps:
 
@@ -334,12 +334,23 @@ chat, `memory --graph` sends the page as a file to open on your phone:
 tinker memory --graph
 ```
 
-Ask what it has learned. It answers just what you ask, from what it keeps, and changes nothing:
+Ask what it has learned. It answers just what you ask, from what it keeps first: its items, the passages of the
+documentation and readings it kept that are most about your question, and the versions installed here. What it
+adds from the model's own knowledge is marked "Not from what I learned", and an answer that depends on your
+version names it:
 
 ```sh
 tinker ask what is your current toolchain for python
 tinker ask which lessons do you have about tests
+tinker ask does sqlite support RETURNING
+tinker ask how do I list a cargo project's dependencies
 ```
+
+To be sure, it may run one check first and answer with what it printed ("I ran …, it printed …"): SQL in an
+in-memory SQLite, or a command with a tool it learned and found on your machine, run in a [sandbox](#safety-)
+from a new empty folder. Installers (pip, npm, brew, cargo install and the like) are refused, and without a
+sandbox nothing runs; a refused or failed check is said, and it answers without it. An answer a check confirmed
+is kept in its topic (a tool or domain it learned; a language keeps none) as a 🌱 fact, for `tinker teach` to confirm or correct. Asking changes nothing else.
 
 Correct it when you know better, as many things at once as you like. Mark your own choices with the word
 **prefer** ("I prefer no mypy"): Tinker honors them as they are. Everything else is a fact, checked first: Tinker runs commands on your machine that
@@ -521,7 +532,9 @@ tinker help task
 Tinker runs the code it writes: setup commands, tests and the app itself, as you, on your computer.
 It never writes outside the project folder, but the code it writes can do anything you can.
 
-- 🧪 Want it walled off? Run Tinker as a separate user, or in a VM or container.
+- 📦 The checks an `ask` runs are walled off: no network, writes only in a new empty folder, limited time,
+  file size and processes (`sandbox-exec` on macOS; namespaces and Landlock on Linux). Elsewhere they do not run.
+- 🧪 Want builds walled off too? Run Tinker as a separate user, or in a VM or container.
 - 🌐 With `--web`, pages can steer the model. Read the plan before you `confirm`.
 - 💬 A paired chat can run commands on your computer. Pair only your own private chat, never a group.
   Keep the bot token secret.

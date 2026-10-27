@@ -137,7 +137,7 @@ class Model:
 
     def evict_others(self):
         for loaded, _ in Ollama.loaded_models() or []:
-            if loaded and loaded != self.name:
+            if loaded and loaded != self.name and loaded not in Ollama.embedders:
                 self.note(f"unloading {loaded} (only one model in memory)")
                 Ollama.unload(loaded)
 
@@ -878,6 +878,7 @@ class Ollama:
         "segmentation fault",
     )
     kept = set()
+    embedders = set()
 
     @staticmethod
     def chat(

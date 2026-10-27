@@ -2,12 +2,18 @@ import re
 from collections import namedtuple
 
 from .messages import say
+lazy from .checking import Check, found_programs
 lazy from .graph import Graph
 lazy from .knowledge import Item, Knowledge, Learner, Library, Retriever, retire, search_entries
+lazy from .learning import DocCache
+lazy from .passages import Cleaner
 lazy from .project import ending
-lazy from .prompts import Part, Prompts
+lazy from .prompts import Part, Prompts, Reply
 lazy from .reading import Readings
+lazy from .sandbox import Sandbox
 lazy from .settings import (
+    BOOK_PASSAGES_SHOWN,
+    CHECK_SOURCE_CHARS,
     LESSON_PHASES,
     MEMORY_ITEMS_SHOWN,
     TEACH_CHECK_COMMANDS,
@@ -30,18 +36,39 @@ Follows = namedtuple("Follows", "follows why")
 
 class Memory:
     def __init__(self, embeddings=None):
+        graph = Graph.build()
         self.items = [
             node
-            for node in Graph.build().nodes.values()
+            for node in graph.nodes.values()
             if node["kind"] in ITEM_KINDS and node["status"] != "retired"
         ]
+        self.cited = self.cited_by_rules(graph)
         self.retriever = Retriever(embeddings)
+
+    def cited_by_rules(self, graph):
+        kept = {item["id"]: item for item in self.items}
+        cited = {}
+        for link in graph.links:
+            if (
+                link["kind"] == "cites"
+                and graph.nodes[link["source"]]["kind"] == "rule"
+                and link["target"] in kept
+            ):
+                cited.setdefault(link["source"], []).append(kept[link["target"]])
+        return cited
 
     def about(self, text, limit=MEMORY_ITEMS_SHOWN):
         ranking = self.retriever.rank(text, [item["text"] for item in self.items])
         named = set(words(text))
         ranking.sort(key=lambda index: -self.named_in(self.items[index], named))
-        return [self.items[index] for index in ranking[:limit]]
+        return self.with_cited([self.items[index] for index in ranking])[:limit]
+
+    def with_cited(self, ranked):
+        given = {}
+        for item in ranked:
+            for each in [item, *self.cited.get(item["id"], [])]:
+                given.setdefault(each["id"], each)
+        return list(given.values())
 
     @staticmethod
     def named_in(item, named):
@@ -64,42 +91,124 @@ def moved_on(tracker, phase, said, icon):
         tracker.phase(phase)
 
 
+class PassageSource:
+    SHORTLIST_TIMES = 4
+
+    def __init__(self, retriever):
+        self.retriever = retriever
+
+    @staticmethod
+    def found(question, items) -> list:
+        return []
+
+    def passages(self, question, items, count=BOOK_PASSAGES_SHOWN):
+        found = self.found(question, items)
+        by_words = Retriever(None).by_words(question, [passage["text"] for passage in found])
+        shortlist = [found[index] for index in by_words[: self.SHORTLIST_TIMES * count]]
+        by_meaning = self.retriever.rank(question, [passage["text"] for passage in shortlist])
+        return [shortlist[index] for index in by_meaning[:count]]
+
+
+class ReadingPassages(PassageSource):
+    @staticmethod
+    def found(question, items):
+        return Readings.chapter_passages(Readings.about(question, items))
+
+
+class DocumentationPassages(PassageSource):
+    @staticmethod
+    def found(question, items):
+        groups = dict.fromkeys(item["group"] for item in items)
+        docs = dict.fromkeys(
+            (slug, key)
+            for group in groups
+            for slug, key in ((Library.read(group) or {}).get("docs") or {}).items()
+        )
+        return [
+            {"source": DocumentationPassages.source(slug, key, passage), "text": passage.text}
+            for slug, key in docs
+            for page in DocCache.pages(slug, key)
+            for passage in Cleaner.under_headings(page)
+        ]
+
+    @staticmethod
+    def source(slug, key, passage):
+        return f"{slug}@{key}, {passage.url}" + (f" > {passage.heading}" if passage.heading else "")
+
+
 class Asker:
-    def __init__(self, model, memory, tracker=None):
-        self.model, self.memory, self.tracker = model, memory, tracker
+    def __init__(self, model, memory, tracker=None, sandbox=None):
+        self.model, self.memory, self.tracker, self.sandbox = model, memory, tracker, sandbox
 
     def answer(self, question):
         self.on_to("recall")
         with say.working_on(f"Looking through what Tinker keeps for: {first_line(question, 60)}"):
-            items = self.memory.about(question)
-            passages = Readings.passages(Readings.about(question, items), question)
-        if not items and not passages:
-            return self.said(
-                "I have not learned anything yet: I learn from builds (tinker task), tinker learn and "
-                "tinker read."
-            )
+            items, passages = self.recalled(question)
         self.on_to("answer")
-        read = f" and {len(passages)} passage(s) of what you gave it to read" if passages else ""
+        read = f" and {len(passages)} passage(s) of what it read" if passages else ""
+        parts = ask_parts(question, items, passages)
         with say.working_on(f"Answering from {len(items)} thing(s) Tinker keeps{read}"):
-            return self.said(self.asked(question, items, passages))
+            answer, proposal = first_answer(self.model.ask(Prompts.ASK_SYSTEM, parts, "ask"))
+        if proposal is None:
+            return self.said(answer)
+        return self.said(*(self.checked(parts, items, proposal) or (answer,)))
+
+    def recalled(self, question):
+        items = self.memory.about(question)
+        passages = [
+            passage
+            for source in (ReadingPassages, DocumentationPassages)
+            for passage in source(self.memory.retriever).passages(question, items)
+        ]
+        return items, passages
 
     def on_to(self, phase):
         if self.tracker is not None:
             self.tracker.phase(phase)
 
-    def asked(self, question, items, passages):
-        parts = [
-            Part("What Tinker keeps", numbered(items) or "(nothing)", True),
-            Part("From what you read", quoted(passages)),
-            Part("The question", question, True),
-        ]
-        return self.model.ask(Prompts.ASK_SYSTEM, parts, "ask").value.strip()
+    def sandbox_here(self):
+        return self.sandbox or Sandbox.here()
+
+    def checked(self, parts, items, proposal):
+        tools = found_programs(list(machines_here(items).values()))
+        check = Check.of(proposal, tools, self.sandbox_here)
+        refusal = check.refusal()
+        if refusal:
+            say.warn(f"Check refused: {refusal}")
+            return None
+        ran = check.run()
+        if not ran.ran or ran.timed_out:
+            say.warn(f"Check failed: {ran.why or 'it ran out of time'}")
+            return None
+        say.step(f"Ran a {proposal.get('kind')} check: {check.shows or first_line(check.code, 60)}")
+        ran_part = Part("The check Tinker ran", check_text(check, ran), True)
+        with say.working_on("Answering with what the check printed"):
+            answer, confirmed = checked_answer(
+                self.model.ask(Prompts.ASK_CHECKED_SYSTEM, [*parts, ran_part], "ask: checked")
+            )
+        return answer, Asker.fact_kept(confirmed, items, check, ran)
 
     @staticmethod
-    def said(answer):
+    def fact_kept(confirmed, items, check, ran):
+        fact = str((confirmed or {}).get("fact") or "").strip()
+        if not fact:
+            return ""
+        topic = confirmed.get("topic")
+        sources = [cut(f"{check.proposal.get('kind')} check: {check.code}"), cut(f"It printed: {ran.output}")]
+        shown = isinstance(topic, str) and topic in {item["group"] for item in items}
+        kept = Library.checked_fact(topic, fact, sources) if shown else None
+        if kept is None:
+            say.skip(f"No book or topic to keep it in: {first_line(fact, 80)}")
+            return ""
+        return f"Fact kept for {(Library.read(topic) or {}).get('name', topic)}: {kept['text']}"
+
+    @staticmethod
+    def said(answer, kept=""):
         for line in answer.splitlines():
             say.text(line)
-        return ending("done", "Answered", [("Answer", answer)])
+        if kept:
+            say.step(kept)
+        return ending("done", "Answered", [("Answer", answer)] + ([("Kept", kept)] if kept else []))
 
 
 class Teacher:
@@ -319,8 +428,70 @@ class Teacher:
         return f"Fact kept for {(Library.read(about.topic) or {}).get('name', about.topic)}: {kept['text']}"
 
 
+def ask_parts(question, items, passages):
+    return [
+        Part("What Tinker keeps", numbered(items) or "(nothing)", True),
+        Part("From what you read", quoted(passages)),
+        Part("Installed here", installed_here(items)),
+        Part("The question", question, True),
+    ]
+
+
 def quoted(passages):
     return "\n\n".join(f"[{passage['source']}]\n{passage['text']}" for passage in passages)
+
+
+def installed_here(items):
+    return "\n".join(
+        f"{group}: {Library.machine_text(machine)}" for group, machine in machines_here(items).items()
+    )
+
+
+def machines_here(items):
+    machines = {
+        group: (Library.read(group) or {}).get("machine")
+        for group in dict.fromkeys(item["group"] for item in items)
+    }
+    return {group: machine for group, machine in machines.items() if machine}
+
+
+def first_answer(answer):
+    data = answer_data(answer)
+    if data is None:
+        return answer.value.strip(), None
+    check = data.get("check")
+    return data["answer"].strip(), check if isinstance(check, dict) else None
+
+
+def checked_answer(answer):
+    data = answer_data(answer)
+    if data is None:
+        return answer.value.strip(), None
+    return data["answer"].strip(), data if data.get("confirms") is True else None
+
+
+def answer_data(answer):
+    try:
+        data = Reply(answer.value).json()
+    except ValueError:
+        return None
+    return data if isinstance(data, dict) and isinstance(data.get("answer"), str) else None
+
+
+def cut(text):
+    return first_line(" ".join(str(text).split()), CHECK_SOURCE_CHARS)
+
+
+def check_text(check, ran):
+    lines = [
+        f"Kind: {check.proposal.get('kind')}",
+        f"Tool: {check.proposal.get('tool')}" if check.proposal.get("tool") else "",
+        f"Code:\n{check.code}",
+        f"What it shows: {check.shows}",
+        f"Exit code: {ran.code}",
+        f"It printed:\n{ran.output or '(nothing)'}",
+    ]
+    return "\n".join(line for line in lines if line)
 
 
 def marked(teaching):

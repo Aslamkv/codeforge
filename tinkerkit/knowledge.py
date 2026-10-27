@@ -10,6 +10,7 @@ lazy from pathlib import Path
 from .messages import say
 from .settings import (
     CHUNKS_PER_PAGE,
+    EMBED_KEEP_ALIVE,
     EVENTS_KEPT_PER_ITEM,
     FACT_PHASES,
     FACTS_PER_CHUNK,
@@ -643,10 +644,7 @@ class Learner(Tracked):
     @staticmethod
     def add_facts(facts, found):
         for fact in found:
-            same = next(
-                (known for known in facts if similarity(fact["text"], known["text"]) >= SAME_FACT_SIMILARITY),
-                None,
-            )
+            same = Library.like_fact(facts, fact)
             if same is None:
                 facts.append(fact)
             elif fact["source"] not in Learner.pages_of(same):
@@ -1343,6 +1341,40 @@ class Library:
         return fact
 
     @staticmethod
+    def checked_fact(slug, text, sources):
+        if not Library.read(slug):
+            return None
+        fact = {
+            "text": text[:MAX_FACT_CHARS],
+            "phase": "code",
+            "status": "candidate",
+            "sources": list(dict.fromkeys(sources)),
+            "id": fingerprint(text)[:12],
+        }
+
+        def checked_in(entry):
+            facts = entry.get("facts", [])
+            same = Library.like_fact(facts, fact)
+            if same is None:
+                return dict(entry, facts=facts + [record(fact, "checked", None)])
+            same["sources"] = list(dict.fromkeys(same.get("sources", []) + fact["sources"]))
+            record(same, "checked", None)
+            return entry
+
+        return Library.like_fact(Home.store().update("learned", slug, checked_in)["facts"], fact)
+
+    @staticmethod
+    def like_fact(facts, fact):
+        return next(
+            (
+                known
+                for known in facts
+                if similarity(known.get("text", ""), fact["text"]) >= SAME_FACT_SIMILARITY
+            ),
+            None,
+        )
+
+    @staticmethod
     def slug(topic):
         text = topic.lower().replace("+", "p").replace("#", "sharp")
         return re.sub(r"[^a-z0-9]+", "-", text).strip("-")[:60]
@@ -1411,6 +1443,13 @@ class Library:
     @staticmethod
     def installed_text(tool):
         return tool["output"] if tool["found"] else f"`{tool['command']}` fails (not installed)"
+
+    @staticmethod
+    def machine_text(machine):
+        return "; ".join(
+            f"`{tool['command']}`: {tool['output']}" if tool["found"] else Library.installed_text(tool)
+            for tool in machine
+        )
 
     @staticmethod
     def finding_text(entry, finding):
@@ -1588,8 +1627,13 @@ class Embeddings:
         }
 
     def embedded(self, batch):
+        Ollama.kept.add(self.name)
+        Ollama.embedders.add(self.name)
         data = Ollama.get_json(
-            "/api/embed", {"model": self.name, "input": batch, "keep_alive": 0}, timeout=300, errors=True
+            "/api/embed",
+            {"model": self.name, "input": batch, "keep_alive": EMBED_KEEP_ALIVE},
+            timeout=300,
+            errors=True,
         )
         found = data.get("embeddings") if isinstance(data, dict) else None
         if self.one_vector_each(found, batch):
