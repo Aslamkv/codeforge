@@ -655,18 +655,11 @@ class Commands:
 
     @staticmethod
     def picked_model(command="use-model"):
-        choices = Commands.model_choices(command) if sys.stdin.isatty() else []
+        choices = Models.command_choices(command) if sys.stdin.isatty() else []
         if not choices:
             Commands.list_models()
             return None
-        return Models.picked(choices, Config.get("embed_model" if command == "embed" else "model"))
-
-    @staticmethod
-    def model_choices(command):
-        if command == "embed":
-            return Models.embedding_choices()
-        choices = Models.choices()
-        return [(name, True) for name, _ in choices] if command == "calibrate" else choices
+        return Models.picked_for(command, choices)
 
     @staticmethod
     def embed(name):

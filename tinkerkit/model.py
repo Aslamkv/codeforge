@@ -494,6 +494,17 @@ class Models:
         return [(name, Models.embeds(Ollama.capabilities(name))) for name in names]
 
     @staticmethod
+    def command_choices(command):
+        if command == "embed":
+            return Models.embedding_choices()
+        choices = Models.choices()
+        return [(name, True) for name, _ in choices] if command == "calibrate" else choices
+
+    @staticmethod
+    def picked_for(command, choices):
+        return Models.picked(choices, Config.get("embed_model" if command == "embed" else "model"))
+
+    @staticmethod
     def embeds(capabilities):
         return not capabilities or "embedding" in capabilities
 

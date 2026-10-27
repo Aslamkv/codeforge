@@ -43,6 +43,7 @@ lazy from .text import field
 lazy from .workspace import Toolchain
 
 CHANNEL_REPORTS_ENV = "TINKER_CHANNELS"
+MODEL_PICKS = ("use-model", "calibrate", "embed")
 PROGRESS_EDIT_SECONDS = 2
 CLOCK_ONLY_EDIT_SECONDS = 15
 BUILD_STOP_GRACE_SECONDS = 120
@@ -1849,17 +1850,18 @@ class ConsoleChannel(Channel):
             self.lines.put(self.picked(line))
 
     def picked(self, line):
-        if line.strip() != "use-model" or not typed_here():
+        command = line.strip()
+        if command not in MODEL_PICKS or not typed_here():
             return line
         try:
-            choices = Models.choices()
+            choices = Models.command_choices(command)
         except SystemExit:
             return line
         if not choices:
             return line
         with self.screen.printing:
-            name = Models.picked(choices, Config.get("model"))
-        return "" if name is None else f"use-model {name}"
+            name = Models.picked_for(command, choices)
+        return "" if name is None else f"{command} {name}"
 
     def remember(self, line):
         if self.history and line.strip() and line.strip().lower() not in EXIT_WORDS:

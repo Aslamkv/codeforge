@@ -43,7 +43,7 @@ from tinkerkit.jobs import began_at
 from tinkerkit.ledger import DONE_NOTE_KEPT_SECONDS, Ledger
 from tinkerkit.model import Models, Ollama
 from tinkerkit.project import Runs, Tracker
-from tinkerkit.settings import Home
+from tinkerkit.settings import Config, Home
 
 
 def wait_until(condition, timeout=15):
@@ -483,33 +483,64 @@ def test_console_picks_the_model_for_use_model_typed_alone(monkeypatch, home_sto
 
 
 @pytest.mark.spec("CNV-8")
-def test_console_sends_nothing_when_the_pick_is_cancelled(monkeypatch, home_store):
+def test_console_picks_the_model_for_calibrate_typed_alone(monkeypatch, home_store):
     console = ruled_console(monkeypatch)
+    Config.save(model="n")
+    shown = model_picker(monkeypatch, console, 0)
+    typing(monkeypatch, "calibrate", "calibrate n")
+    console.read()
+    assert shown == [([("m", False), ("n", False)], 1, True)]
+    assert [console.lines.get() for _ in range(3)] == ["calibrate m", "calibrate n", None]
+
+
+@pytest.mark.spec("CNV-8")
+def test_console_picks_the_model_for_embed_typed_alone(monkeypatch, home_store):
+    console = ruled_console(monkeypatch)
+    Config.save(model="m", embed_model="n")
+    monkeypatch.setattr(
+        Ollama, "capabilities", staticmethod(lambda name: ["completion"] if name == "m" else ["embedding"])
+    )
+    shown = model_picker(monkeypatch, console, 0)
+    typing(monkeypatch, "embed")
+    console.read()
+    assert shown == [([("m", True), ("n", False)], 1, True)]
+    assert console.lines.get() == "embed m"
+
+
+@pytest.mark.spec("CNV-8")
+@pytest.mark.parametrize("command", ["use-model", "calibrate", "embed"])
+def test_console_sends_nothing_when_the_pick_is_cancelled(monkeypatch, home_store, command):
+    console = ruled_console(monkeypatch)
+    monkeypatch.setattr(Ollama, "capabilities", staticmethod(lambda name: ["embedding"]))
     model_picker(monkeypatch, console, None)
-    typing(monkeypatch, "use-model")
+    typing(monkeypatch, command)
     console.read()
     assert console.lines.get() == "" and console.receive(0) == []
 
 
 @pytest.mark.spec("CNV-8")
+@pytest.mark.parametrize("command", ["use-model", "calibrate", "embed"])
 @pytest.mark.parametrize("models", [(), None])
-def test_console_passes_use_model_on_when_there_is_nothing_to_pick(monkeypatch, home_store, models):
+def test_console_passes_a_pick_command_on_when_there_is_nothing_to_pick(
+    monkeypatch, home_store, models, command
+):
     console = ruled_console(monkeypatch)
     shown = model_picker(monkeypatch, console, 0, models)
-    typing(monkeypatch, "use-model")
+    typing(monkeypatch, command)
     console.read()
-    assert shown == [] and console.lines.get() == "use-model"
+    assert shown == [] and console.lines.get() == command
 
 
 @pytest.mark.spec("CNV-8")
-def test_console_passes_piped_use_model_on(monkeypatch, home_store):
+@pytest.mark.parametrize("command", ["use-model", "calibrate", "embed"])
+def test_console_passes_a_piped_pick_command_on(monkeypatch, home_store, command):
     colour_terminal(monkeypatch)
     monkeypatch.setattr(sys.stdin, "isatty", lambda: False)
     console = ConsoleChannel()
     shown = model_picker(monkeypatch, console, 0)
-    typing(monkeypatch, "use-model")
+    typing(monkeypatch, command)
     console.read()
-    assert shown == [] and console.lines.get() == "use-model"
+    assert shown == [] and console.lines.get() == command
 
 
 @pytest.mark.spec("CNV-8")
