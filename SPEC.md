@@ -87,7 +87,8 @@ listed above it:
 | `learning` | learning a language or a tool by its slots (`SlotLearner`, `DocCache`, `LearnStopped`) |
 | `graph` | what Tinker knows as one graph of items and links (`Graph`), the page that shows it (`GraphPage`), and browsing it in pages (`MemoryBrowser`) |
 | `reading` | what the person gives to read: stored whole on the reading list (`Readings`), then learned from chapter by chapter (`Reader`, `Epub`, `Book`) |
-| `teaching` | asking what Tinker keeps (`Asker`), and teaching it, checked before anything changes (`Teacher`, `Memory`, `Verdict`) |
+| `sandbox` | running a check with no network and writes only in its own folder, one backend per platform (`Sandbox`, `MacSandbox`, `LinuxSandbox`, `NoSandbox`) |
+| `teaching` | asking what Tinker keeps (`Asker`), checked by running when it can, and teaching it, checked before anything changes (`Teacher`, `Memory`, `Verdict`) |
 | `exercising` | practising a language on its own, giving way to the person (`Exercise`, `Exercises`) |
 | `session` | what every phase works through (`Session`), and the phase contract (`Worker`, `Phase`) |
 | `planning` | recall, the spec, the contracts where files meet, and their review |
@@ -1085,8 +1086,8 @@ learning and run lessons are apart.
   (candidates, each with its slot) and condensed into rules, both at `learn_think`, and kept only after both
   succeed, under the language's key or the topic's slug, with its plan, machine, documentation versions,
   sources, cited passages, status (`complete` or `incomplete`), missing slots and request counts; then
-  indexed. A summary prints the slots filled and missing, the documentation, the pages by source, the facts
-  and the requests by kind.
+  indexed. A summary prints the slots filled and missing, what is installed (each machine command and the
+  version it found), the documentation, the pages by source, the facts and the requests by kind.
 - **LRN-5** After the digest, each slot left without facts gets the plan's follow-up search, at most
   `learn_searches` follow-ups in all; its pages join the pool, and that slot alone is selected and digested
   again. When a follow-up fails, the learn goes on, marked `incomplete`, with a warning and a note.
@@ -1233,13 +1234,19 @@ then is anything changed.
 - **TCH-1** `Memory(embeddings).items` are the memory graph's toolchains, fixes, lessons, facts, findings,
   rules and commands, without the retired. `about(text)` gives at most `MEMORY_ITEMS_SHOWN` of them, the most
   related first: first the items whose kind and language (or topic) the text names. A language's toolchain
-  counts as named with its language, however the text calls it ("toolset").
-- **TCH-2** `Asker.answer(question)` makes one model call with the items numbered, and says the answer alone:
-  no steps and no sources, then the time taken (a terminal shows one status line while it thinks). With
-  nothing kept it makes no call and says so. It changes nothing.
-- **TCH-3** An ask about a reading (named by its title, or whose items are shown) also sees its passages most
-  about the question (`Readings`), so it answers from the source's own words. With nothing kept and no
-  passage, no model is asked.
+  counts as named with its language, however the text calls it ("toolset"). A rule given brings the facts it
+  cites (`cites`) right after it, still within `MEMORY_ITEMS_SHOWN`. A second `about` embeds only its text: the
+  items' embeddings are kept.
+- **TCH-2** `Asker.answer(question)` gives the model the items numbered, and the version installed here of each
+  topic shown (its machine's version). The answer comes from them first; anything from the model's own
+  knowledge is marked as not from what Tinker learned, and an answer that depends on the version names it. With
+  nothing kept and no passage, the model is still asked, and its whole answer is marked. It says the answer
+  alone: no steps and no sources, then the time taken (a terminal shows one status line while it thinks). It
+  changes nothing but **TCH-11**.
+- **TCH-3** An ask also sees the passages most about the question from each passage source: the readings
+  (`Readings`; a reading named by its title or whose items are shown) and the documentation kept for the topics
+  shown (**LRN-1**, any version), so it answers from the source's own words. Each source shortlists its
+  passages by words first (**KNW-12**) and ranks only the shortlist by meaning; no source embeds all its pages.
 - **TCH-4** `read_plan` keeps at most `TEACH_CLAIMS` claims, each a fact or a preference (the person's own
   choice). A preference is only what the person marks with the word prefer: a teaching without it (`marked`)
   has facts alone, whatever the model says. It keeps at most `TEACH_CHECK_COMMANDS` commands and
@@ -1267,6 +1274,27 @@ then is anything changed.
   item shown (`about`): that item is retired, and the fact kept in its topic as proven
   (`Library.taught_fact`), with its phase, chapter and section, a `taught` event and its sources.
 - **TCH-9** Both commands report through a tracker.
+- **TCH-10** The first ask call may propose one check (its kind, code and what it shows). Tinker runs it
+  (**SBX**) and a second call answers with what it printed ("I ran …, it printed …"); with no check there is one
+  call. A `sql` check runs in the standard library's SQLite in memory, with attaching databases and loading
+  extensions refused. A `command` check runs its code from a new empty folder with a tool learned and found on
+  this machine; a package manager or installer (pip, npm, brew, apt, cargo install, gem, go install and the like)
+  is refused. A refused or failed check is said, and the answer goes on without it.
+- **TCH-11** An answer a check ran and confirmed is kept in its topic as a candidate fact, with a `checked`
+  event and its sources (the check and what it printed). `tinker teach` confirms or corrects it (**TCH-7**).
+
+## sandbox (SBX)
+
+A check from an ask runs only in a sandbox. Nothing is ever installed.
+
+- **SBX-1** `Sandbox.here()` picks the backend once, by platform: `MacSandbox` on macOS, `LinuxSandbox` on Linux,
+  `NoSandbox` anywhere else, or when the backend's probe fails. No other part asks which platform it runs on.
+- **SBX-2** `Sandbox.run(command, folder, timeout)` runs from a new empty temporary folder with a timeout and
+  limits on CPU time, file size and processes. It reaches no network and writes only inside that folder.
+- **SBX-3** `MacSandbox` runs the command under `sandbox-exec` with a profile that denies the network and every
+  write outside the folder. `LinuxSandbox` cuts the network with a new user and network namespace and allows
+  writes only in the folder with Landlock (and no new privileges).
+- **SBX-4** `NoSandbox` fails closed: it runs nothing and says why.
 
 ## exercising (EXR)
 
