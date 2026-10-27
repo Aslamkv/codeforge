@@ -587,7 +587,7 @@ def test_learning_moves_its_tracker_through_its_steps_and_keeps_its_summary(tink
     assert tracker.state["steps"][:5] == each_with_what_came_of_it
     each_step_once = len(tracker.state["steps"]) == len(set(tracker.state["steps"]))
     assert each_step_once
-    recap = dict(slot_learner.recap)
+    recap = {name: text for _, name, text in slot_learner.recap}
     assert list(recap) == [
         "Answered",
         "Still open",
@@ -599,6 +599,17 @@ def test_learning_moves_its_tracker_through_its_steps_and_keeps_its_summary(tink
     ]
     assert recap["Installed"] == "`echo widgetlib 2.1.0`: widgetlib 2.1.0"
     assert recap["Facts kept"] == str(len(entry["facts"])) and recap["Documentation"] == "widgetlib 2.1.0"
+
+
+@pytest.mark.spec("LRN-7")
+def test_every_recap_row_shows_its_own_icon(tinker_home, capsys):
+    slot_learner = SlotLearner(tool_model(), FakeWeb(FOUND, ALL_PAGES), CountingEmbeddings())
+    slot_learner.learn("Widgetlib")
+    out = capsys.readouterr().out
+    icons = [icon for icon, _, _ in slot_learner.recap]
+    assert len(set(icons)) == len(icons)
+    for icon, name, text in slot_learner.recap:
+        assert f"{icon} {name}: {text}" in " ".join(out.split())
 
 
 @pytest.mark.spec("LRN-7")

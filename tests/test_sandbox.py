@@ -113,6 +113,11 @@ class FakeLibc:
         self.abi = abi
         self.failing = failing
         self.calls = []
+        self.unshared = []
+
+    def unshare(self, flags):
+        self.unshared.append(flags)
+        return 0
 
     def syscall(self, number, *arguments):
         self.calls.append((number, *map(plain, arguments)))
@@ -137,13 +142,11 @@ def plain(argument):
 def confined(monkeypatch):
     def confine(abi, failing=None):
         libc = FakeLibc(abi, failing)
-        unshared = []
         monkeypatch.setattr(sandbox, "libc", lambda: libc)
-        monkeypatch.setattr(sandbox.os, "unshare", lambda flags: unshared.append(flags), raising=False)
         monkeypatch.setattr(sandbox.os, "open", lambda path, flags: 11 if path == "/folder" else 12)
         monkeypatch.setattr(sandbox.os, "close", lambda fd: None)
         LinuxSandbox().confine("/folder")
-        return unshared, libc.calls
+        return libc.unshared, libc.calls
 
     return confine
 

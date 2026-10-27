@@ -17,27 +17,31 @@ class FakeSandbox:
         return Ran(True, code=0, output="ran")
 
 
+def no_sandbox():
+    raise AssertionError("only a command check asks for a sandbox")
+
+
 def sql(code):
-    return Check.of({"kind": "sql", "code": code, "shows": "it works"}, set(), FakeSandbox()).run()
+    return Check.of({"kind": "sql", "code": code, "shows": "it works"}, set(), no_sandbox).run()
 
 
 def command(tool, code="print(1)", tools=("python3", "cargo", "go", "pip", "npm"), sandbox=None, **more):
     proposal = {"kind": "command", "code": code, "shows": "it works", "tool": tool, **more}
     sandbox = sandbox or FakeSandbox()
-    return Check.of(proposal, set(tools), sandbox).run(), sandbox
+    return Check.of(proposal, set(tools), lambda: sandbox).run(), sandbox
 
 
 def test_a_check_is_chosen_by_its_kind_and_keeps_its_proposal():
-    check = Check.of({"kind": "sql", "code": "select 1", "shows": "one"}, set(), FakeSandbox())
+    check = Check.of({"kind": "sql", "code": "select 1", "shows": "one"}, set(), no_sandbox)
     assert isinstance(check, SqlCheck)
     assert (check.code, check.shows) == ("select 1", "one")
     proposal = {"kind": "command", "code": "x", "shows": "y", "tool": "python3"}
-    assert isinstance(Check.of(proposal, {"python3"}, FakeSandbox()), CommandCheck)
+    assert isinstance(Check.of(proposal, {"python3"}, no_sandbox), CommandCheck)
 
 
 def test_an_unknown_kind_or_missing_code_is_refused():
     for proposal in ({"kind": "shell", "code": "ls"}, {"kind": "sql"}, {"kind": "sql", "code": " "}, {}):
-        check = Check.of(proposal, set(), FakeSandbox())
+        check = Check.of(proposal, set(), no_sandbox)
         assert isinstance(check, RefusedCheck)
         result = check.run()
         assert not result.ran and result.why

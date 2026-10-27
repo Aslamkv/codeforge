@@ -65,7 +65,6 @@ LEARN_STOP_PLACES = frozendict(
         "gate 2": "while reading pages",
     }
 )
-RECAP_LINE_ICONS = ("✅", "❓", "💻", "📖", "📄", "🧩", "🌐")
 
 
 Tools = namedtuple("Tools", "tools dropped")
@@ -141,9 +140,7 @@ class SlotLearner(Tracked):
         with say.part(f"Learning {topic}", "📚"):
             entry = self.learned_by_slots(deep)
         if self.recap:
-            say.summary(
-                f"Learned {entry['name']}", [(icon, *row) for icon, row in zip(RECAP_LINE_ICONS, self.recap)]
-            )
+            say.summary(f"Learned {entry['name']}", self.recap)
         return entry
 
     def learned_by_slots(self, deep):
@@ -518,13 +515,17 @@ class SlotLearner(Tracked):
             if slot.source != "check" and slot.id not in entry["missing"]
         ]
         return [
-            ("Answered", ", ".join(filled) or "nothing"),
-            ("Still open", ", ".join(map(label, entry["missing"])) or "nothing"),
-            ("Installed", Library.machine_text(entry["machine"]) or "nothing"),
-            ("Documentation", ", ".join(f"{slug} {key}" for slug, key in self.docs.items()) or "none"),
-            ("Pages", ", ".join(f"{count} {kind}" for kind, count in self.pages.items() if count) or "none"),
-            ("Facts kept", str(len(entry["facts"]))),
-            ("Web requests", self.internet.requests.text()),
+            ("✅", "Answered", ", ".join(filled) or "nothing"),
+            ("❓", "Still open", ", ".join(map(label, entry["missing"])) or "nothing"),
+            ("💻", "Installed", Library.machine_text(entry["machine"]) or "nothing"),
+            ("📖", "Documentation", ", ".join(f"{slug} {key}" for slug, key in self.docs.items()) or "none"),
+            (
+                "📄",
+                "Pages",
+                ", ".join(f"{count} {kind}" for kind, count in self.pages.items() if count) or "none",
+            ),
+            ("🧩", "Facts kept", str(len(entry["facts"]))),
+            ("🌐", "Web requests", self.internet.requests.text()),
         ]
 
     def stop(self, gate, cause, detail=""):

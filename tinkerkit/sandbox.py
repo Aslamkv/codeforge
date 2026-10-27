@@ -73,7 +73,7 @@ class Sandbox:
         return NoSandbox(why) if why else backend()
 
     @classmethod
-    def probe(cls):
+    def probe(cls) -> str:
         return ""
 
     @staticmethod
@@ -159,8 +159,8 @@ class LinuxSandbox(Sandbox):
         return f"a confined command fails: {done.returncode}" if done.returncode else ""
 
     def confine(self, folder):
-        os.unshare(CLONE_NEWUSER | CLONE_NEWNET)
         landlock = libc()
+        checked(landlock.unshare(CLONE_NEWUSER | CLONE_NEWNET))
         rights = handled_rights(landlock_version(landlock))
         ruleset = new_ruleset(landlock, rights)
         allow_writes_beneath(landlock, ruleset, str(folder), rights)

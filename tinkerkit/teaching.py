@@ -97,6 +97,10 @@ class PassageSource:
     def __init__(self, retriever):
         self.retriever = retriever
 
+    @staticmethod
+    def found(question, items) -> list:
+        return []
+
     def passages(self, question, items, count=BOOK_PASSAGES_SHOWN):
         found = self.found(question, items)
         by_words = Retriever(None).by_words(question, [passage["text"] for passage in found])
@@ -139,33 +143,35 @@ class Asker:
     def answer(self, question):
         self.on_to("recall")
         with say.working_on(f"Looking through what Tinker keeps for: {first_line(question, 60)}"):
-            items = self.memory.about(question)
-            passages = [
-                passage
-                for source in (ReadingPassages, DocumentationPassages)
-                for passage in source(self.memory.retriever).passages(question, items)
-            ]
+            items, passages = self.recalled(question)
         self.on_to("answer")
         read = f" and {len(passages)} passage(s) of what it read" if passages else ""
-        parts = [
-            Part("What Tinker keeps", numbered(items) or "(nothing)", True),
-            Part("From what you read", quoted(passages)),
-            Part("Installed here", installed_here(items)),
-            Part("The question", question, True),
-        ]
+        parts = ask_parts(question, items, passages)
         with say.working_on(f"Answering from {len(items)} thing(s) Tinker keeps{read}"):
             answer, proposal = first_answer(self.model.ask(Prompts.ASK_SYSTEM, parts, "ask"))
         if proposal is None:
             return self.said(answer)
         return self.said(*(self.checked(parts, items, proposal) or (answer,)))
 
+    def recalled(self, question):
+        items = self.memory.about(question)
+        passages = [
+            passage
+            for source in (ReadingPassages, DocumentationPassages)
+            for passage in source(self.memory.retriever).passages(question, items)
+        ]
+        return items, passages
+
     def on_to(self, phase):
         if self.tracker is not None:
             self.tracker.phase(phase)
 
+    def sandbox_here(self):
+        return self.sandbox or Sandbox.here()
+
     def checked(self, parts, items, proposal):
         tools = found_programs(list(machines_here(items).values()))
-        check = Check.of(proposal, tools, self.sandbox or Sandbox.here())
+        check = Check.of(proposal, tools, self.sandbox_here)
         refusal = check.refusal()
         if refusal:
             say.warn(f"Check refused: {refusal}")
@@ -420,6 +426,15 @@ class Teacher:
             say.skip(f"No book or topic to keep it in: {first_line(fact['text'], 80)}")
             return ""
         return f"Fact kept for {(Library.read(about.topic) or {}).get('name', about.topic)}: {kept['text']}"
+
+
+def ask_parts(question, items, passages):
+    return [
+        Part("What Tinker keeps", numbered(items) or "(nothing)", True),
+        Part("From what you read", quoted(passages)),
+        Part("Installed here", installed_here(items)),
+        Part("The question", question, True),
+    ]
 
 
 def quoted(passages):

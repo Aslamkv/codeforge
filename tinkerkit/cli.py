@@ -719,7 +719,8 @@ class Commands:
         return ending(
             "done",
             f"Learned {entry['name']}",
-            learner.recap or [("Findings", str(len(entry.get("findings", []))))],
+            [(name, text) for _, name, text in learner.recap]
+            or [("Findings", str(len(entry.get("findings", []))))],
             [("See it", "tinker memory")],
         )
 

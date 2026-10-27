@@ -39,23 +39,23 @@ def first_word(command):
 
 
 class Check:
-    def __init__(self, proposal, tools, sandbox):
+    def __init__(self, proposal, tools, sandbox_here):
         self.code = proposal.get("code", "")
         self.shows = proposal.get("shows", "")
         self.proposal = proposal
         self.tools = tools
-        self.sandbox = sandbox
+        self.sandbox_here = sandbox_here
 
     @classmethod
-    def of(cls, proposal, tools, sandbox):
+    def of(cls, proposal, tools, sandbox_here):
         kind = {"sql": SqlCheck, "command": CommandCheck}.get(proposal.get("kind"))
         if kind is None:
             return RefusedCheck(proposal, f"a check of kind {proposal.get('kind')!r} cannot run")
         if not str(proposal.get("code", "")).strip():
             return RefusedCheck(proposal, "a check without code cannot run")
-        return kind(proposal, tools, sandbox)
+        return kind(proposal, tools, sandbox_here)
 
-    def refusal(self):
+    def refusal(self) -> str:
         return ""
 
 
@@ -126,7 +126,7 @@ class CommandCheck(Check):
         name = Path(self.proposal.get("file") or DEFAULT_FILE).name or DEFAULT_FILE
         with Sandbox.folder() as folder:
             (folder / name).write_text(self.code)
-            return self.sandbox.run([*shlex.split(self.tool), name], folder, TIMEOUT_SECONDS)
+            return self.sandbox_here().run([*shlex.split(self.tool), name], folder, TIMEOUT_SECONDS)
 
     @property
     def tool(self):

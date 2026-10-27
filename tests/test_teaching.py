@@ -14,7 +14,7 @@ from tinkerkit.passages import Block, Page
 from tinkerkit.project import Tracker
 from tinkerkit.prompts import Prompts
 from tinkerkit.reading import Readings
-from tinkerkit.sandbox import Ran
+from tinkerkit.sandbox import Ran, Sandbox
 from tinkerkit.settings import BOOK_PASSAGES_SHOWN, MEMORY_ITEMS_SHOWN, TEACH_CLAIMS, Home
 from tinkerkit.teaching import Asker, Memory, PassageSource, Teacher, Verdict, marked, read_plan
 from tinkerkit.workspace import Toolchain
@@ -239,7 +239,10 @@ def test_an_ask_without_a_check_makes_one_call(kept, make_model, fake_ollama, ca
 
 
 @pytest.mark.spec("TCH-10")
-def test_an_ask_runs_its_sql_check_and_answers_with_what_it_printed(kept, make_model, fake_ollama, capsys):
+def test_an_ask_runs_its_sql_check_and_answers_with_what_it_printed(
+    kept, make_model, fake_ollama, capsys, monkeypatch
+):
+    monkeypatch.setattr(Sandbox, "here", classmethod(lambda cls: pytest.fail("a sql check needs no sandbox")))
     check = {"kind": "sql", "code": "select 40 + 2", "shows": "what 40 + 2 gives"}
     answered = "I ran select 40 + 2, it printed 42."
     fake_ollama.reply(first_reply("It gives 42.", check), when="ask")
