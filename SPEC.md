@@ -598,6 +598,8 @@ What is said in the chats, kept so that a chat is only a view of it.
   calibration calls `Ollama.chat`.
 - **MOD-26** `Models.choices()` gives the name of each model Ollama has, in Ollama's order, with whether it was
   measured. It ends with `SystemExit` when Ollama does not answer, as `tinker models` does.
+  `Models.embedding_choices()` gives the same names with whether each embeds: its `capabilities` from Ollama's
+  `/api/show` hold `embedding`, or Ollama gives none for it.
 
 ## project (PRJ)
 
@@ -768,9 +770,9 @@ The terminal and the chats are one conversation: the same commands, the same ans
   dim and indented, all redrawn in place; otherwise what goes on now prints as a line of its own each time it
   changes. When the thing is done, the live block clears and only the lines not yet printed follow. `exit` or
   end of input closes it. On a terminal, up and down on the prompt go through the lines typed before, the
-  last 1000 kept in the home's `prompt_history`, so they outlive a restart. `use-model` typed alone there opens
-  its select box on the prompt (**CLI-3**) and sends `use-model NAME` for the one chosen; a cancel sends
-  nothing.
+  last 1000 kept in the home's `prompt_history`, so they outlive a restart. `use-model`, `calibrate` or `embed`
+  typed alone there opens its select box on the prompt (**CLI-3**) and sends the command with the NAME chosen; a
+  cancel sends nothing.
   Once it reads, all that Tinker says (`say`, a chat's message too) prints through it, above the prompt, and
   `live` draws in that same live block, its star turning and its glow moving on their own about eight times a second. While a job
   shows its progress there, the status that says what Tinker works on is left out of the terminal. A job's
@@ -1472,11 +1474,13 @@ The main system: the command line, one run, and the cycle of phases.
 - **CLI-2** `tinker help` lists every command by group, the options, and examples. With
   `TINKER_FORMAT=markup`, it lists what a chat can send. `tinker help COMMAND` shows that command's arguments,
   and an unknown command is an error.
-- **CLI-3** `Commands`. `use-model` accepts only a measured model. `use-model` with no NAME, on a terminal,
-  opens a select box (**MSG-8**) on Ollama's models (**MOD-26**), the measured ones plain and the rest dim,
-  starting at the one in use; the one chosen is used as `use-model NAME` uses it (one never measured says to
-  calibrate it first), and a cancel changes nothing. Not on a terminal (a chat too), it lists the models as
-  `tinker models` does. `runs` lists
+- **CLI-3** `Commands`. `use-model` accepts only a measured model. `use-model`, `calibrate` and `embed` with no
+  NAME, on a terminal, open a select box (**MSG-8**) on Ollama's models (**MOD-26**), and the one chosen is
+  taken as the NAME (one never measured says to calibrate it first; one that does not embed is refused as
+  before); a cancel changes nothing. `use-model` shows the measured ones plain and the rest dim, starting at
+  the one in use; `calibrate` shows them all plain, starting at the one in use, and picks before its job
+  starts; `embed` shows the ones that embed plain and the rest dim, starting at the embedding model. Not on a
+  terminal (a chat too), they list the models as `tinker models` does. `runs` lists
   the runs, newest first. `status [@PROJECT]` shows the project's criteria and its open phase (in a chat,
   `status` alone shows what runs, **CNV-11**). `rename` renames the folder of a project whose plan waits, and
   its pointer. `config` shows the settings, and `config KEY VALUE` sets one.
