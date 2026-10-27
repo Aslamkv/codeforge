@@ -403,9 +403,9 @@ class Probed(Calibrator):
         super().__init__("m")
         self.limit, self.tried = limit, []
 
-    def probe(self, tokens, context):
-        self.tried.append((tokens, context))
-        return context <= self.limit
+    def probe(self, tokens, num_ctx):
+        self.tried.append((tokens, num_ctx))
+        return num_ctx <= self.limit
 
 
 GGUF = {"format": "gguf"}
@@ -443,9 +443,16 @@ def test_a_growing_model_that_may_not_fit_reads_the_whole_target(monkeypatch):
 
 
 @pytest.mark.spec("MOD-11")
-def test_a_growing_model_of_unknown_size_reads_the_whole_target(monkeypatch):
-    probed = growing(monkeypatch, [None], 20e9)
-    assert probed.capacity(24576, {}) == (24576, None) and probed.tried == [(24576, 24576)]
+@pytest.mark.parametrize(
+    ("sizes", "memory", "tried"),
+    [
+        ([None], 20e9, [(24576, 24576)]),
+        ([[("m", 5e9)], [("m", 5.1e9)]], None, [(2048, 24576), (24576, 24576)]),
+    ],
+)
+def test_a_growing_model_of_unknown_size_reads_the_whole_target(monkeypatch, sizes, memory, tried):
+    probed = growing(monkeypatch, sizes, memory)
+    assert probed.capacity(24576, {}) == (24576, None) and probed.tried == tried
 
 
 @pytest.mark.spec("MOD-12")
@@ -823,6 +830,7 @@ def test_the_first_chat_finds_the_think_setting(fake_ollama):
         Calibrator("m").first_chat({"capabilities": []}, 4096)
 
 
+@pytest.mark.spec("MOD-15")
 def test_the_first_chat_keeps_the_model_loaded_at_the_target_context(fake_ollama):
     fake_ollama.reply("OK")
     Calibrator("m").first_chat({"capabilities": ["completion"]}, 24576)
@@ -830,6 +838,7 @@ def test_the_first_chat_keeps_the_model_loaded_at_the_target_context(fake_ollama
     assert call["options"]["num_ctx"] == 24576 and call["keep_alive"] not in (0, "0")
 
 
+@pytest.mark.spec("MOD-15")
 def test_the_first_chat_asks_again_at_4096_when_the_target_does_not_run(fake_ollama, no_sleep):
     fake_ollama.reply(OllamaError("runner process has terminated", crashed=True)).reply("OK")
     assert Calibrator("m").first_chat({"capabilities": ["completion"]}, 24576) is None

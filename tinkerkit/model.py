@@ -655,7 +655,7 @@ class Calibrator:
         self.write_tokens_per_second = None
 
     def run(self):
-        say.title(f"Calibrating {self.name} (once per model; a few minutes)", "📏")
+        say.title(f"Calibrating {self.name} (once per model; under a minute for most models)", "📏")
         started = time.perf_counter()
         facts = Ollama.model_facts(self.name)
         self.check_fit(facts)
@@ -746,8 +746,7 @@ class Calibrator:
         except OllamaError as exc:
             if (think is not None and exc.about_thinking) or target <= FIRST_CHAT_CONTEXT:
                 raise
-        Ollama.unload(self.name)
-        time.sleep(CRASH_RECOVERY_SECONDS)
+        self.unload_and_wait()
         return self.say_ok(content, think, FIRST_CHAT_CONTEXT)
 
     def say_ok(self, content, think, context):
@@ -824,6 +823,9 @@ class Calibrator:
         with say.section(), say.section():
             say.fail(f"Could not read it ({first_line(str(exc), 100)})")
         self.probe_history.append([tokens, "crashed"])
+        self.unload_and_wait()
+
+    def unload_and_wait(self):
         Ollama.unload(self.name)
         time.sleep(CRASH_RECOVERY_SECONDS)
 
@@ -879,15 +881,21 @@ class Calibrator:
         )
 
 
-class GgufReading:
+class Reading:
     def __init__(self, calibrator):
         self.calibrator = calibrator
 
+    @staticmethod
+    def sample(context):
+        return min(context, PROBE_SAMPLE_TOKENS)
+
+
+class GgufReading(Reading):
     def target_reads(self, context):
         return self.reads(context)
 
     def reads(self, context):
-        calibrator, tokens = self.calibrator, min(context, PROBE_SAMPLE_TOKENS)
+        calibrator, tokens = self.calibrator, self.sample(context)
         if calibrator.read(tokens, context):
             return True
         if not calibrator.options:
@@ -900,10 +908,7 @@ class GgufReading:
         return False
 
 
-class GrowingReading:
-    def __init__(self, calibrator):
-        self.calibrator = calibrator
-
+class GrowingReading(Reading):
     def target_reads(self, context):
         return self.sample_shows_fit(context) or self.reads(context)
 
@@ -911,7 +916,7 @@ class GrowingReading:
         return bool(self.calibrator.read(context, context))
 
     def sample_shows_fit(self, context):
-        tokens, before = min(context, PROBE_SAMPLE_TOKENS), self.loaded_size()
+        tokens, before = self.sample(context), self.loaded_size()
         if before is None or tokens >= context or not self.calibrator.read(tokens, context):
             return False
         after, memory = self.loaded_size(), self.calibrator.gpu_memory()
@@ -959,9 +964,13 @@ class Ollama:
         )
 
     @staticmethod
-    def streamed(name, messages, keep_alive, options, think, label, done_when, timeout):
+    def keep(name, keep_alive):
         if keep_alive not in (0, "0"):
             Ollama.kept.add(name)
+
+    @staticmethod
+    def streamed(name, messages, keep_alive, options, think, label, done_when, timeout):
+        Ollama.keep(name, keep_alive)
         payload = Ollama.chat_payload(name, messages, keep_alive, options, think)
         stream = Stream(label, done_when)
         try:
@@ -1028,8 +1037,7 @@ class Ollama:
 
     @staticmethod
     def read_raw(name, prompt, options, keep_alive=0, timeout=OLLAMA_SILENCE_TIMEOUT):
-        if keep_alive not in (0, "0"):
-            Ollama.kept.add(name)
+        Ollama.keep(name, keep_alive)
         payload = {
             "model": name,
             "prompt": prompt,
