@@ -13,6 +13,7 @@ lazy from .reading import Readings
 lazy from .sandbox import Sandbox
 lazy from .settings import (
     BOOK_PASSAGES_SHOWN,
+    CHECK_SOURCE_CHARS,
     LESSON_PHASES,
     MEMORY_ITEMS_SHOWN,
     TEACH_CHECK_COMMANDS,
@@ -156,7 +157,7 @@ class Asker:
             answer, proposal = first_answer(self.model.ask(Prompts.ASK_SYSTEM, parts, "ask"))
         if proposal is None:
             return self.said(answer)
-        return self.said(self.checked(parts, items, proposal) or answer)
+        return self.said(*(self.checked(parts, items, proposal) or (answer,)))
 
     def on_to(self, phase):
         if self.tracker is not None:
@@ -176,15 +177,32 @@ class Asker:
         say.step(f"Ran a {proposal.get('kind')} check: {check.shows or first_line(check.code, 60)}")
         ran_part = Part("The check Tinker ran", check_text(check, ran), True)
         with say.working_on("Answering with what the check printed"):
-            return self.model.ask(
-                Prompts.ASK_CHECKED_SYSTEM, [*parts, ran_part], "ask: checked"
-            ).value.strip()
+            answer, confirmed = checked_answer(
+                self.model.ask(Prompts.ASK_CHECKED_SYSTEM, [*parts, ran_part], "ask: checked")
+            )
+        return answer, Asker.fact_kept(confirmed, items, check, ran)
 
     @staticmethod
-    def said(answer):
+    def fact_kept(confirmed, items, check, ran):
+        fact = str((confirmed or {}).get("fact") or "").strip()
+        if not fact:
+            return ""
+        topic = confirmed.get("topic")
+        sources = [cut(f"{check.proposal.get('kind')} check: {check.code}"), cut(f"It printed: {ran.output}")]
+        shown = isinstance(topic, str) and topic in {item["group"] for item in items}
+        kept = Library.checked_fact(topic, fact, sources) if shown else None
+        if kept is None:
+            say.skip(f"No book or topic to keep it in: {first_line(fact, 80)}")
+            return ""
+        return f"Fact kept for {(Library.read(topic) or {}).get('name', topic)}: {kept['text']}"
+
+    @staticmethod
+    def said(answer, kept=""):
         for line in answer.splitlines():
             say.text(line)
-        return ending("done", "Answered", [("Answer", answer)])
+        if kept:
+            say.step(kept)
+        return ending("done", "Answered", [("Answer", answer)] + ([("Kept", kept)] if kept else []))
 
 
 class Teacher:
@@ -423,14 +441,30 @@ def machines_here(items):
 
 
 def first_answer(answer):
-    try:
-        data = Reply(answer.value).json()
-    except ValueError:
-        data = None
-    if not isinstance(data, dict) or not isinstance(data.get("answer"), str):
+    data = answer_data(answer)
+    if data is None:
         return answer.value.strip(), None
     check = data.get("check")
     return data["answer"].strip(), check if isinstance(check, dict) else None
+
+
+def checked_answer(answer):
+    data = answer_data(answer)
+    if data is None:
+        return answer.value.strip(), None
+    return data["answer"].strip(), data if data.get("confirms") is True else None
+
+
+def answer_data(answer):
+    try:
+        data = Reply(answer.value).json()
+    except ValueError:
+        return None
+    return data if isinstance(data, dict) and isinstance(data.get("answer"), str) else None
+
+
+def cut(text):
+    return first_line(" ".join(str(text).split()), CHECK_SOURCE_CHARS)
 
 
 def check_text(check, ran):

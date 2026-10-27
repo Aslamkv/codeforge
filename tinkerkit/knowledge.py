@@ -1344,6 +1344,21 @@ class Library:
         return fact
 
     @staticmethod
+    def checked_fact(slug, text, sources):
+        if not Library.read(slug):
+            return None
+        fact = {
+            "text": text[:MAX_FACT_CHARS],
+            "phase": "code",
+            "status": "candidate",
+            "sources": list(dict.fromkeys(sources)),
+            "id": fingerprint(text)[:12],
+        }
+        record(fact, "checked", None)
+        Home.store().update("learned", slug, lambda kept: dict(kept, facts=kept.get("facts", []) + [fact]))
+        return fact
+
+    @staticmethod
     def slug(topic):
         text = topic.lower().replace("+", "p").replace("#", "sharp")
         return re.sub(r"[^a-z0-9]+", "-", text).strip("-")[:60]

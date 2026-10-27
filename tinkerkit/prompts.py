@@ -877,7 +877,10 @@ Reply with ONLY JSON: {"overview":"...","features":["..."],"requires":"Python 3.
     )
     ASK_CHECKED_SYSTEM = ASK_RULES + (
         " Tinker ran the check below for this question. Answer with what it printed: say "
-        '"I ran …, it printed …" and let that settle the claim it checks. Reply with the answer only.'
+        '"I ran …, it printed …" and let that settle the claim it checks. "confirms" is true only when what '
+        'it printed shows the answer holds. "fact" is the one fact it showed, in one general sentence that '
+        'does not repeat the question; "topic" is the one topic shown above it belongs to. Reply with ONLY '
+        'JSON: {"answer": "...", "confirms": true or false, "fact": "...", "topic": "..."}'
     )
 
     EXERCISE_LANGUAGE_SYSTEM = """The person asks Tinker, a code generator, to practise a programming language, named by the

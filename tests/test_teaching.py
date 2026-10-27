@@ -289,6 +289,56 @@ def test_a_failed_check_is_said_and_the_first_answer_goes_on(kept, make_model, f
     assert len(fake_ollama.calls) == 1 and "Check failed: no sandbox here" in out and "It imports." in out
 
 
+SQL_CHECK = {"kind": "sql", "code": "select 40 + 2", "shows": "what 40 + 2 gives"}
+CHECKED_ANSWER = "I ran select 40 + 2, it printed 42."
+
+
+def checked_reply(confirms=True, topic="flask", fact="SQLite adds integers exactly: 40 + 2 gives 42"):
+    return json.dumps({"answer": CHECKED_ANSWER, "confirms": confirms, "fact": fact, "topic": topic})
+
+
+def checked_ask(kept, make_model, fake_ollama, reply):
+    fake_ollama.reply(first_reply("It gives 42.", SQL_CHECK), when="ask")
+    fake_ollama.reply(reply, when="ask")
+    return Asker(make_model(), kept).answer("how do flask routes work")
+
+
+def facts_of(slug):
+    return Library.read(slug)["facts"]
+
+
+@pytest.mark.spec("TCH-11")
+def test_an_answer_the_check_confirmed_is_kept_as_a_candidate_fact(kept, make_model, fake_ollama, capsys):
+    ending = checked_ask(kept, make_model, fake_ollama, checked_reply())
+    fact = facts_of("flask")[-1]
+    assert fact["text"] == "SQLite adds integers exactly: 40 + 2 gives 42" and fact["status"] == "candidate"
+    assert [event["event"] for event in fact["history"]] == ["checked"]
+    assert "select 40 + 2" in fact["sources"][0] and "42" in fact["sources"][1]
+    kept_line = f"Fact kept for Flask: {fact['text']}"
+    assert kept_line in capsys.readouterr().out
+    assert ending["details"] == [("Answer", CHECKED_ANSWER), ("Kept", kept_line)]
+    assert "confirms" in fake_ollama.calls[1]["messages"][0]["content"]
+
+
+@pytest.mark.spec("TCH-11")
+def test_an_answer_the_check_did_not_confirm_keeps_nothing(kept, make_model, fake_ollama):
+    ending = checked_ask(kept, make_model, fake_ollama, checked_reply(confirms=False))
+    assert len(facts_of("flask")) == 1 and ending["details"] == [("Answer", CHECKED_ANSWER)]
+
+
+@pytest.mark.spec("TCH-11")
+def test_a_plain_checked_reply_is_the_answer_and_keeps_nothing(kept, make_model, fake_ollama):
+    ending = checked_ask(kept, make_model, fake_ollama, CHECKED_ANSWER)
+    assert len(facts_of("flask")) == 1 and ending["details"] == [("Answer", CHECKED_ANSWER)]
+
+
+@pytest.mark.spec("TCH-11")
+def test_a_confirmed_fact_with_no_topic_shown_is_said_and_not_kept(kept, make_model, fake_ollama, capsys):
+    ending = checked_ask(kept, make_model, fake_ollama, checked_reply(topic="django"))
+    assert "No book or topic to keep it in" in capsys.readouterr().out
+    assert len(facts_of("flask")) == 1 and ending["details"] == [("Answer", CHECKED_ANSWER)]
+
+
 @pytest.mark.spec("TCH-4")
 def test_read_plan_keeps_what_is_usable_within_limits():
     plan = read_plan(
