@@ -15,8 +15,25 @@ from tinkerkit.project import Tracker
 from tinkerkit.prompts import Prompts
 from tinkerkit.reading import Readings
 from tinkerkit.sandbox import Ran, Sandbox
-from tinkerkit.settings import BOOK_PASSAGES_SHOWN, MEMORY_ITEMS_SHOWN, TEACH_CLAIMS, Home
-from tinkerkit.teaching import Asker, Memory, PassageSource, Teacher, Verdict, marked, read_plan
+from tinkerkit.settings import (
+    ASK_ITEMS_SHOWN,
+    ASK_PASSAGES_SHOWN,
+    BOOK_PASSAGES_SHOWN,
+    MEMORY_ITEMS_SHOWN,
+    TEACH_CLAIMS,
+    Home,
+)
+from tinkerkit.teaching import (
+    Asker,
+    DocumentationPassages,
+    Memory,
+    PassageSource,
+    ReadingPassages,
+    Teacher,
+    Verdict,
+    marked,
+    read_plan,
+)
 from tinkerkit.workspace import Toolchain
 
 PY = sys.executable
@@ -236,9 +253,31 @@ def test_ask_shows_the_version_installed_here_of_each_topic_shown(kept, make_mod
     Asker(make_model(), Memory()).answer("how do flask routes work")
     prompt = fake_ollama.calls[0]["messages"][1]["content"]
     assert "Installed here" in prompt
-    assert "flask: `flask --version`: Flask 3.0.2; `gunicorn --version` fails (not installed)" in prompt
-    assert "django" not in prompt
+    assert "flask: `flask --version`: Flask 3.0.2\n" in prompt
+    assert "gunicorn" not in prompt and "django" not in prompt
     assert "version" in Prompts.ASK_SYSTEM and "installed here" in Prompts.ASK_SYSTEM
+
+
+@pytest.mark.spec("TCH-2")
+def test_ask_says_a_topic_with_no_command_found_here_is_not_installed(kept, make_model, fake_ollama):
+    entry = Library.read("flask")
+    entry["machine"] = [{"command": "flask --version", "found": False, "output": ""}]
+    Library.save("flask", entry)
+    fake_ollama.reply("With @app.route.", when="ask")
+    Asker(make_model(), Memory()).answer("how do flask routes work")
+    prompt = fake_ollama.calls[0]["messages"][1]["content"]
+    assert "## Installed here\nflask: not installed\n" in prompt and "flask --version" not in prompt
+
+
+@pytest.mark.spec("TCH-2")
+def test_ask_shows_at_most_the_ask_items(home_store, make_model, fake_ollama):
+    facts = [{"phase": "code", "text": f"Flask fact {number}"} for number in range(ASK_ITEMS_SHOWN + 5)]
+    Library.save("flask", {"topic": "flask", "facts": facts})
+    fake_ollama.reply("With @app.route.", when="ask")
+    Asker(make_model(), Memory()).answer("flask fact")
+    prompt = fake_ollama.calls[0]["messages"][1]["content"]
+    assert f"[{ASK_ITEMS_SHOWN}] fact" in prompt and f"[{ASK_ITEMS_SHOWN + 1}]" not in prompt
+    assert ASK_ITEMS_SHOWN < MEMORY_ITEMS_SHOWN
 
 
 class FakeSandbox:
@@ -813,6 +852,17 @@ def test_an_ask_embeds_only_the_passages_its_words_shortlist(
     Asker(make_model(), Memory(Embeddings("e"))).answer("how does a flask route bind a view?")
     passages_embedded = [text for text in embedded if "Passage " in text]
     assert len(passages_embedded) == PassageSource.SHORTLIST_TIMES * BOOK_PASSAGES_SHOWN
+
+
+@pytest.mark.spec("TCH-3")
+def test_an_ask_takes_its_passages_in_turn_from_each_sources_best(home_store, monkeypatch):
+    given = lambda name, texts: [{"source": name, "text": text} for text in texts]
+    readings = given("book", ["same", "book 2", "book 3", "book 4"])
+    docs = given("docs", ["same", "docs 2", "docs 3", "docs 4"])
+    monkeypatch.setattr(ReadingPassages, "passages", lambda self, question, items: readings)
+    monkeypatch.setattr(DocumentationPassages, "passages", lambda self, question, items: docs)
+    items, passages = Asker(None, Memory()).recalled("anything")
+    assert passages == [readings[0], readings[1], docs[1]] and len(passages) == ASK_PASSAGES_SHOWN
 
 
 @pytest.mark.spec("TCH-8")

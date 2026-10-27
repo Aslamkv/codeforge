@@ -1,5 +1,6 @@
 import re
 from collections import namedtuple
+from itertools import zip_longest
 
 from .messages import say
 lazy from .checking import Check, found_programs
@@ -12,6 +13,8 @@ lazy from .prompts import Part, Prompts, Reply
 lazy from .reading import Readings
 lazy from .sandbox import Sandbox
 lazy from .settings import (
+    ASK_ITEMS_SHOWN,
+    ASK_PASSAGES_SHOWN,
     BOOK_PASSAGES_SHOWN,
     CHECK_SOURCE_CHARS,
     LESSON_PHASES,
@@ -176,13 +179,13 @@ class Asker:
         return self.said(*(self.checked(conversation, given, items, proposal) or (answer,)))
 
     def recalled(self, question):
-        items = self.memory.about(question)
-        passages = distinct(
-            passage
+        items = self.memory.about(question, limit=ASK_ITEMS_SHOWN)
+        best = [
+            source(self.memory.retriever).passages(question, items)
             for source in (ReadingPassages, DocumentationPassages)
-            for passage in source(self.memory.retriever).passages(question, items)
-        )
-        return items, passages
+        ]
+        in_turn = (passage for turn in zip_longest(*best) for passage in turn if passage)
+        return items, distinct(in_turn)[:ASK_PASSAGES_SHOWN]
 
     def on_to(self, phase):
         if self.tracker is not None:
@@ -501,9 +504,12 @@ def quoted(passages, first):
 
 
 def installed_here(items):
-    return "\n".join(
-        f"{group}: {Library.machine_text(machine)}" for group, machine in machines_here(items).items()
-    )
+    return "\n".join(f"{group}: {found_text(machine)}" for group, machine in machines_here(items).items())
+
+
+def found_text(machine):
+    found = [tool for tool in machine if tool["found"]]
+    return Library.machine_text(found) if found else "not installed"
 
 
 def machines_here(items):
