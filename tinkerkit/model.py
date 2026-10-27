@@ -10,6 +10,7 @@ lazy import urllib.request
 
 from .messages import say
 from .settings import (
+    CALIBRATION_KEEP_ALIVE,
     CAPACITY_SEARCH_PRECISION,
     CRASH_NEAR_LIMIT_SHARE,
     CRASH_RECOVERY_SECONDS,
@@ -17,6 +18,7 @@ from .settings import (
     CRASHED_LIMIT_SHARE,
     DEFAULT_CONFIG,
     DEFAULT_THINK,
+    FIRST_CHAT_CONTEXT,
     FIX_MAX_TOKENS,
     LAST_CHUNK_WAIT_SECONDS,
     LOOPING_REPEATED_LINES,
@@ -657,11 +659,11 @@ class Calibrator:
         started = time.perf_counter()
         facts = Ollama.model_facts(self.name)
         self.check_fit(facts)
-        think = self.first_chat(facts)
         target = min(
             PROMPT_TARGET_TOKENS + REPLY_TARGET_TOKENS,
             facts["context_length"] or PROMPT_TARGET_TOKENS + REPLY_TARGET_TOKENS,
         )
+        think = self.first_chat(facts, target)
         context, crash = self.capacity(target, facts)
         budget, max_reply = self.shared(context)
         settings = self.settings(facts, think, budget, context, crash, max_reply)
@@ -723,18 +725,12 @@ class Calibrator:
         except OSError, ValueError, StopIteration:
             return None
 
-    def first_chat(self, facts):
+    def first_chat(self, facts, target):
         thinks = not facts["capabilities"] or "thinking" in facts["capabilities"]
         content = self.FILLER * 4
         for think in (DEFAULT_THINK, True) if thinks else (None,):
             try:
-                data = Ollama.chat(
-                    self.name,
-                    [{"role": "user", "content": content + "\nSay OK."}],
-                    0,
-                    {"num_ctx": 4096, "num_predict": 64},
-                    think,
-                )
+                data = self.chat_at(content, think, target)
             except OllamaError as exc:
                 if think is not None and exc.about_thinking:
                     continue
@@ -743,6 +739,25 @@ class Calibrator:
             self.show_first_chat(think)
             return think
         return None
+
+    def chat_at(self, content, think, target):
+        try:
+            return self.say_ok(content, think, target)
+        except OllamaError as exc:
+            if (think is not None and exc.about_thinking) or target <= FIRST_CHAT_CONTEXT:
+                raise
+        Ollama.unload(self.name)
+        time.sleep(CRASH_RECOVERY_SECONDS)
+        return self.say_ok(content, think, FIRST_CHAT_CONTEXT)
+
+    def say_ok(self, content, think, context):
+        return Ollama.chat(
+            self.name,
+            [{"role": "user", "content": content + "\nSay OK."}],
+            CALIBRATION_KEEP_ALIVE,
+            {"num_ctx": context, "num_predict": 64},
+            think,
+        )
 
     def show_first_chat(self, think):
         with say.section():

@@ -785,11 +785,28 @@ def test_the_first_chat_finds_the_think_setting(fake_ollama):
     fake_ollama.reply(OllamaError('invalid think value "high"')).reply(
         {"content": "OK", "prompt_eval_count": 300}
     )
-    assert Calibrator("m").first_chat({"capabilities": ["thinking"]}) is True
+    assert Calibrator("m").first_chat({"capabilities": ["thinking"]}, 4096) is True
     assert [call["think"] for call in fake_ollama.calls] == ["high", True]
     fake_ollama.reply("OK")
-    assert Calibrator("m").first_chat({"capabilities": ["completion"]}) is None
+    assert Calibrator("m").first_chat({"capabilities": ["completion"]}, 4096) is None
     assert fake_ollama.calls[-1]["think"] is None
     fake_ollama.reply(OllamaError("model requires more system memory"))
     with pytest.raises(SystemExit, match="m does not run"):
-        Calibrator("m").first_chat({"capabilities": []})
+        Calibrator("m").first_chat({"capabilities": []}, 4096)
+
+
+def test_the_first_chat_keeps_the_model_loaded_at_the_target_context(fake_ollama):
+    fake_ollama.reply("OK")
+    Calibrator("m").first_chat({"capabilities": ["completion"]}, 24576)
+    call = fake_ollama.calls[-1]
+    assert call["options"]["num_ctx"] == 24576 and call["keep_alive"] not in (0, "0")
+
+
+def test_the_first_chat_asks_again_at_4096_when_the_target_does_not_run(fake_ollama, no_sleep):
+    fake_ollama.reply(OllamaError("runner process has terminated", crashed=True)).reply("OK")
+    assert Calibrator("m").first_chat({"capabilities": ["completion"]}, 24576) is None
+    assert [call["options"]["num_ctx"] for call in fake_ollama.calls] == [24576, 4096]
+    assert fake_ollama.unloaded == ["m"]
+    fake_ollama.reply(OllamaError("crashed", crashed=True), times=2)
+    with pytest.raises(SystemExit, match="m does not run"):
+        Calibrator("m").first_chat({"capabilities": []}, 24576)
