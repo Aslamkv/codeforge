@@ -828,7 +828,10 @@ The terminal and the chats are one conversation: the same commands, the same ans
   (`ask_for`: what it does, what to send, an example) and takes the next message as them (`fix MESSAGE`), even
   one that starts with a command word. A command of its own instead (sent with its `/`, alone, or the same
   command, as a file sent to read is) drops the question. A command whose words are optional (`status`) runs
-  at once.
+  at once. `use-model`, `calibrate` and `embed` sent alone on a channel with buttons (Telegram) ask with
+  `choose(chat, question, names)` instead: a button for each model its select box (**CLI-3**) shows plain, the
+  question naming the one in use; the next message (a tap sends the name) is the NAME, as above. With none to
+  show, or on a channel without buttons, they run at once and list the models.
 - **CNV-14** A glance (a command of kind `glance`, **CMD-1**) is answered with `glance`: the person's message
   goes at once, the answer in `GLANCE_KEPT_SECONDS`. `history [PAGE | #N]` lists the things shown by page
   ([State](#state)), with what was asked for each, or shows thing N again. `clear chat` takes every message out
@@ -897,7 +900,8 @@ The chat plugin: Telegram, and `tinker channel`.
 - **CHN-7** `send` and `edit` post Telegram HTML, and fall back to plain text when the HTML is refused. An edit
   of unchanged text is harmless. A refused edit takes the message out and sends a new one in its place.
   `latest` tracks the newest message still in the chat. `ask_for(chat, question, hint)` sends the question with
-  the reply box open (`force_reply`), the hint in it cut to 64 characters.
+  the reply box open (`force_reply`), the hint in it cut to 64 characters. `choose(chat, question, names)` sends
+  the question with a keyboard of one button per name, one to a row, hidden after a tap (`one_time_keyboard`).
 - **CHN-8** `send_file(chat, path, caption)` posts `sendDocument` as `multipart/form-data`: the chat, the file
   under its name, and the caption as Telegram HTML (at most 1024 chars). A failure sends the caption alone.
 - **CHN-9** Every message of a chat served (Tinker's, and the person's) is kept in the ledger (**LED-1**); an
@@ -1480,7 +1484,7 @@ The main system: the command line, one run, and the cycle of phases.
   `calibrate` show only the models that do not embed: `use-model` the measured ones plain and the rest dim,
   starting at the one in use; `calibrate` all plain, starting at the one in use, and picks before its job
   starts. `embed` shows only the ones that embed, all plain, starting at the embedding model. Not on a
-  terminal (a chat too), they list the models as `tinker models` does. `runs` lists
+  terminal, they list the models as `tinker models` does; a chat with buttons asks with them (**CNV-13**). `runs` lists
   the runs, newest first. `status [@PROJECT]` shows the project's criteria and its open phase (in a chat,
   `status` alone shows what runs, **CNV-11**). `rename` renames the folder of a project whose plan waits, and
   its pointer. `config` shows the settings, and `config KEY VALUE` sets one.
