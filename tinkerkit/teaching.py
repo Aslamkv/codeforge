@@ -165,7 +165,9 @@ class Asker:
         read = f" and {len(passages)} passage(s) of what it read" if passages else ""
         parts = ask_parts(question, items, passages)
         with say.working_on(f"Answering from {len(items)} thing(s) Tinker keeps{read}"):
-            answer, proposal = first_answer(self.model.ask(Prompts.ASK_SYSTEM, parts, "ask"))
+            answer, proposal = first_answer(
+                self.model.ask(Prompts.ASK_SYSTEM, parts, "ask"), len(items) + len(passages)
+            )
         if proposal is None:
             return self.said(answer)
         return self.said(*(self.checked(parts, items, proposal) or (answer,)))
@@ -448,7 +450,7 @@ class Teacher:
 def ask_parts(question, items, passages):
     return [
         Part("What Tinker keeps", numbered(items) or "(nothing)", True),
-        Part("From what you read", quoted(passages)),
+        Part("From what you read", quoted(passages, len(items) + 1)),
         Part("Installed here", installed_here(items)),
         Part("The question", question, True),
     ]
@@ -461,8 +463,10 @@ def distinct(passages):
     return list(kept.values())
 
 
-def quoted(passages):
-    return "\n\n".join(f"[{passage['source']}]\n{passage['text']}" for passage in passages)
+def quoted(passages, first):
+    return "\n\n".join(
+        f"[{number}] {passage['source']}\n{passage['text']}" for number, passage in enumerate(passages, first)
+    )
 
 
 def installed_here(items):
@@ -479,12 +483,22 @@ def machines_here(items):
     return {group: machine for group, machine in machines.items() if machine}
 
 
-def first_answer(answer):
+def first_answer(answer, given):
     data = answer_data(answer)
     if data is None:
-        return answer.value.strip(), None
+        return not_learned(answer.value.strip()), None
     check = data.get("check")
-    return data["answer"].strip(), check if isinstance(check, dict) else None
+    text = data["answer"].strip()
+    marked = text if rests_on_given(data.get("uses"), given) else not_learned(text)
+    return marked, check if isinstance(check, dict) else None
+
+
+def rests_on_given(uses, given):
+    return isinstance(uses, list) and any(isinstance(number, int) and 1 <= number <= given for number in uses)
+
+
+def not_learned(answer):
+    return f"Not from what I learned: {answer}"
 
 
 def checked_answer(answer):

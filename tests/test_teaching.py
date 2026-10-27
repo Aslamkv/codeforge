@@ -183,13 +183,14 @@ def test_a_second_about_embeds_only_its_text(kept, monkeypatch):
 @pytest.mark.spec("TCH-2")
 def test_ask_says_the_answer_alone(kept, make_model, fake_ollama, capsys):
     answer = "Tests run with pytest.\nCode is formatted with black and linted with ruff."
-    fake_ollama.reply(first_reply(answer), when="ask")
+    fake_ollama.reply(first_reply(answer, uses=[1]), when="ask")
     ending = Asker(make_model(), kept).answer("what is your current toolchain for python")
     asked = fake_ollama.calls[0]["messages"]
     assert (
         asked[0]["content"].startswith(Prompts.ASK_SYSTEM)
         and "[1] toolchain (python, proven)" in asked[1]["content"]
     )
+    assert '"uses"' in Prompts.ASK_SYSTEM and "Not from what I learned" not in Prompts.ASK_SYSTEM
     assert capsys.readouterr().out == answer + "\n"
     assert ending == {"status": "done", "headline": "Answered", "details": [("Answer", answer)], "next": []}
     unchanged = "black ."
@@ -200,13 +201,19 @@ def test_ask_says_the_answer_alone(kept, make_model, fake_ollama, capsys):
 def test_ask_with_nothing_kept_still_asks_and_marks_own_knowledge(
     home_store, make_model, fake_ollama, capsys
 ):
-    answer = "Not from what I learned: Python is a programming language."
-    fake_ollama.reply(answer, when="ask")
+    fake_ollama.reply(first_reply("Python is a programming language."), when="ask")
     Asker(make_model(), Memory()).answer("what is python")
     asked = fake_ollama.calls[0]["messages"]
     assert "What Tinker keeps" in asked[1]["content"] and "(nothing)" in asked[1]["content"]
-    assert "Not from what I learned:" in asked[0]["content"] and "first" in Prompts.ASK_SYSTEM
-    assert capsys.readouterr().out == answer + "\n"
+    assert "first" in Prompts.ASK_SYSTEM
+    assert capsys.readouterr().out == "Not from what I learned: Python is a programming language.\n"
+
+
+@pytest.mark.spec("TCH-2")
+def test_ask_marks_an_answer_that_uses_no_number_it_was_given(kept, make_model, fake_ollama, capsys):
+    fake_ollama.reply(first_reply("Use pytest.", uses=[99, "1"]), when="ask")
+    Asker(make_model(), kept).answer("what is your current toolchain for python")
+    assert capsys.readouterr().out == "Not from what I learned: Use pytest.\n"
 
 
 @pytest.mark.spec("TCH-2")
@@ -243,8 +250,8 @@ class FakeSandbox:
         return self.ran
 
 
-def first_reply(answer, check=None):
-    return json.dumps({"answer": answer, "check": check})
+def first_reply(answer, check=None, uses=()):
+    return json.dumps({"answer": answer, "uses": list(uses), "check": check})
 
 
 def flask_found_here():
@@ -255,7 +262,7 @@ def flask_found_here():
 
 @pytest.mark.spec("TCH-10")
 def test_an_ask_without_a_check_makes_one_call(kept, make_model, fake_ollama, capsys):
-    fake_ollama.reply(first_reply("Tests run with pytest."), when="ask")
+    fake_ollama.reply(first_reply("Tests run with pytest.", uses=[1]), when="ask")
     ending = Asker(make_model(), kept).answer("what is your current toolchain for python")
     assert len(fake_ollama.calls) == 1 and "check" in Prompts.ASK_SYSTEM
     assert capsys.readouterr().out == "Tests run with pytest.\n"
@@ -296,7 +303,7 @@ def test_an_ask_runs_a_command_check_with_a_tool_found_here(kept, make_model, fa
 def test_a_refused_check_is_said_and_the_first_answer_goes_on(kept, make_model, fake_ollama, capsys):
     flask_found_here()
     check = {"kind": "command", "code": "flask", "shows": "it installs", "tool": "pip"}
-    fake_ollama.reply(first_reply("Install it with pip.", check), when="ask")
+    fake_ollama.reply(first_reply("Install it with pip.", check, [1]), when="ask")
     sandbox = FakeSandbox()
     ending = Asker(make_model(), Memory(), sandbox=sandbox).answer("how do flask routes work")
     out = capsys.readouterr().out
@@ -622,14 +629,14 @@ def test_ask_and_teach_report_through_a_tracker_and_run_as_jobs(
             (tracker.state["title"], ending["status"], tracker.state["steps"])
         ),
     )
-    fake_ollama.reply("Black formats it [1].", when="ask")
+    fake_ollama.reply(first_reply("Black formats it.", uses=[1]), when="ask")
     Commands(Cli.parse(["ask", "what", "formats", "python"])).run()
     fake_ollama.reply(plan_reply(), when="what to check")
     fake_ollama.reply(verdict_reply(), when="weigh the evidence")
     Commands(Cli.parse(["teach", "ruff", "alone", "is", "enough,", "I", "prefer", "no", "mypy"])).run()
     assert ended[0][:2] == ("Asking: what formats python", "done")
     out = capsys.readouterr().out
-    assert out.startswith("Black formats it [1].") and out.count("Time taken") == 2
+    assert out.startswith("Black formats it.") and out.count("Time taken") == 2
     assert ended[1][:2] == ("Teaching: ruff alone is enough, I prefer no mypy", "done")
     steps = [step.split(":")[0] for step in ended[1][2]]
     assert "🤔 Worked out what to check" in steps and "⚖️ Evidence weighed" in steps
@@ -682,11 +689,11 @@ def shelved():
 @pytest.mark.spec("TCH-3")
 def test_an_ask_about_a_book_sees_what_the_book_says(home_store, make_model, fake_ollama, capsys):
     shelved()
-    fake_ollama.reply("Chapter 1 says each test comes before the code.", when="ask")
+    fake_ollama.reply(first_reply("Chapter 1 says each test comes before the code.", uses=[2]), when="ask")
     Asker(make_model(), Memory()).answer("when does The Craft write each test?")
     prompt = fake_ollama.calls[0]["messages"][1]["content"]
-    assert "## From what you read\n[The Craft, chapter 1: Testing]\nWrite one test" in prompt
-    assert WRONG in prompt and capsys.readouterr().out.startswith("Chapter 1 says")
+    assert "## From what you read\n[2] The Craft, chapter 1: Testing\nWrite one test" in prompt
+    assert WRONG in prompt and capsys.readouterr().out == "Chapter 1 says each test comes before the code.\n"
 
 
 def learned_flask(texts):
@@ -711,7 +718,7 @@ def test_an_ask_about_a_learned_topic_sees_its_kept_documentation(home_store, ma
     fake_ollama.reply("With the route decorator.", when="ask")
     Asker(make_model(), Memory()).answer("how do flask routes bind a view function?")
     prompt = fake_ollama.calls[0]["messages"][1]["content"]
-    assert "[flask@latest, https://flask.example/routing > Routing]\nThe route decorator binds" in prompt
+    assert "[2] flask@latest, https://flask.example/routing > Routing\nThe route decorator binds" in prompt
 
 
 @pytest.mark.spec("TCH-3")
@@ -731,7 +738,7 @@ def test_an_ask_gives_a_passage_kept_at_two_addresses_once(home_store, make_mode
     Asker(make_model(), Memory()).answer("how do flask routes bind a view function?")
     prompt = fake_ollama.calls[0]["messages"][1]["content"]
     assert prompt.count("The route decorator binds") == 1
-    assert "[flask@latest, https://flask.example/routing > Routing]" in prompt
+    assert "[2] flask@latest, https://flask.example/routing > Routing" in prompt
 
 
 @pytest.mark.spec("TCH-3")
