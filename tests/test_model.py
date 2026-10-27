@@ -90,8 +90,18 @@ def test_choices(home_store, monkeypatch):
     with pytest.raises(SystemExit, match="Ollama does not answer"):
         Models.choices()
     monkeypatch.setattr(
-        Ollama, "installed_models", staticmethod(lambda: [{"name": "qwen3:8b"}, {"name": "llama3"}])
+        Ollama,
+        "installed_models",
+        staticmethod(
+            lambda: [{"name": "qwen3:8b"}, {"name": "nomic-embed"}, {"name": "llama3"}, {"name": "old"}]
+        ),
     )
+    capabilities = {
+        "qwen3:8b": ["completion"],
+        "nomic-embed": ["embedding"],
+        "llama3": ["completion", "tools"],
+    }
+    monkeypatch.setattr(Ollama, "capabilities", staticmethod(capabilities.get))
     Models.keep("llama3", MEASURED)
     assert Models.choices() == [("qwen3:8b", False), ("llama3", True)]
 
@@ -108,7 +118,7 @@ def test_embedding_choices(monkeypatch):
     )
     capabilities = {"qwen3:8b": ["completion"], "nomic-embed": ["embedding"], "old": None}
     monkeypatch.setattr(Ollama, "capabilities", staticmethod(capabilities.get))
-    assert Models.embedding_choices() == [("qwen3:8b", False), ("nomic-embed", True), ("old", True)]
+    assert Models.embedding_choices() == [("nomic-embed", True), ("old", True)]
 
 
 @pytest.mark.spec("MOD-26")

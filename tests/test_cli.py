@@ -174,10 +174,15 @@ def test_use_model(home_store, capsys):
     assert Config.get("model") == "m" and "Model in use: m" in capsys.readouterr().out
 
 
-def picker(monkeypatch, chosen, terminal=True):
+def picker(monkeypatch, chosen, terminal=True, embedding=()):
     shown = []
     monkeypatch.setattr(sys.stdin, "isatty", lambda: terminal)
     monkeypatch.setattr(cli.say, "pick", lambda choices, start: shown.append((choices, start)) or chosen)
+    monkeypatch.setattr(
+        Ollama,
+        "capabilities",
+        staticmethod(lambda name: ["embedding" if name in embedding else "completion"]),
+    )
     monkeypatch.setattr(
         Ollama, "installed_models", staticmethod(lambda: [{"name": "other"}, {"name": "m"}, {"name": "n"}])
     )
@@ -190,9 +195,9 @@ def test_use_model_without_a_name_picks_one_on_a_terminal(home_store, monkeypatc
     Models.keep("m", MEASURED)
     Models.keep("n", MEASURED)
     Config.save(model="n")
-    shown = picker(monkeypatch, 1)
+    shown = picker(monkeypatch, 0, embedding=("other",))
     Commands.use_model(None)
-    assert shown == [([("other", True), ("m", False), ("n", False)], 2)]
+    assert shown == [([("m", False), ("n", False)], 1)]
     assert Config.get("model") == "m" and "Model in use: m" in capsys.readouterr().out
     picker(monkeypatch, None)
     Commands.use_model(None)
@@ -238,18 +243,15 @@ def test_calibrate_without_a_name_picks_one_before_its_job_starts(home_store, mo
 def test_embed_without_a_name_picks_one_that_embeds(home_store, monkeypatch, capsys):
     assert parse("embed").embed is None
     Config.save(embed_model="n")
-    monkeypatch.setattr(
-        Ollama, "capabilities", staticmethod(lambda name: [] if name == "n" else ["completion"])
-    )
     monkeypatch.setattr(cli.Embeddings, "vectors", lambda self, texts, keep=True: [[1.0]])
-    shown = picker(monkeypatch, 2)
+    shown = picker(monkeypatch, 0, embedding=("m", "n"))
     Commands.embed(None)
-    assert shown == [([("other", True), ("m", True), ("n", False)], 2)]
-    assert Config.get("embed_model") == "n" and "Embedding model: n" in capsys.readouterr().out
-    picker(monkeypatch, None)
+    assert shown == [([("m", False), ("n", False)], 1)]
+    assert Config.get("embed_model") == "m" and "Embedding model: m" in capsys.readouterr().out
+    picker(monkeypatch, None, embedding=("m", "n"))
     Commands.embed(None)
-    assert Config.get("embed_model") == "n" and capsys.readouterr().out == ""
-    shown = picker(monkeypatch, 2, terminal=False)
+    assert Config.get("embed_model") == "m" and capsys.readouterr().out == ""
+    shown = picker(monkeypatch, 0, terminal=False, embedding=("m", "n"))
     Commands.embed(None)
     assert shown == [] and "MODEL" in capsys.readouterr().out
 

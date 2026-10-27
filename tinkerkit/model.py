@@ -485,13 +485,16 @@ class Models:
 
     @staticmethod
     def choices():
-        names = [model.get("name", "") for model in Models.answering()]
-        return [(name, Models.settings(name) is not None) for name in names]
+        return [(name, Models.settings(name) is not None) for name in Models.named(embedding=False)]
 
     @staticmethod
     def embedding_choices():
+        return [(name, True) for name in Models.named(embedding=True)]
+
+    @staticmethod
+    def named(embedding):
         names = [model.get("name", "") for model in Models.answering()]
-        return [(name, Models.embeds(Ollama.capabilities(name))) for name in names]
+        return [name for name in names if Models.embeds(Ollama.capabilities(name)) == embedding]
 
     @staticmethod
     def command_choices(command):

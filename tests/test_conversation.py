@@ -457,7 +457,7 @@ def test_console_sends_a_line_back_above_the_live_block(monkeypatch, clock):
     assert shown == sent_back_shown("hi", block=console.screen.drawn, columns=20)
 
 
-def model_picker(monkeypatch, console, chosen, models=({"name": "m"}, {"name": "n"})):
+def model_picker(monkeypatch, console, chosen, models=({"name": "m"}, {"name": "n"}), embedding=()):
     shown = []
 
     def pick(choices, start):
@@ -465,6 +465,11 @@ def model_picker(monkeypatch, console, chosen, models=({"name": "m"}, {"name": "
         return chosen
 
     monkeypatch.setattr(conversation.say, "pick", pick)
+    monkeypatch.setattr(
+        Ollama,
+        "capabilities",
+        staticmethod(lambda name: ["embedding" if name in embedding else "completion"]),
+    )
     monkeypatch.setattr(
         Ollama, "installed_models", staticmethod(lambda: None if models is None else list(models))
     )
@@ -497,22 +502,18 @@ def test_console_picks_the_model_for_calibrate_typed_alone(monkeypatch, home_sto
 def test_console_picks_the_model_for_embed_typed_alone(monkeypatch, home_store):
     console = ruled_console(monkeypatch)
     Config.save(model="m", embed_model="n")
-    monkeypatch.setattr(
-        Ollama, "capabilities", staticmethod(lambda name: ["completion"] if name == "m" else ["embedding"])
-    )
-    shown = model_picker(monkeypatch, console, 0)
+    shown = model_picker(monkeypatch, console, 0, embedding=("n",))
     typing(monkeypatch, "embed")
     console.read()
-    assert shown == [([("m", True), ("n", False)], 1, True)]
-    assert console.lines.get() == "embed m"
+    assert shown == [([("n", False)], 0, True)]
+    assert console.lines.get() == "embed n"
 
 
 @pytest.mark.spec("CNV-8")
 @pytest.mark.parametrize("command", ["use-model", "calibrate", "embed"])
 def test_console_sends_nothing_when_the_pick_is_cancelled(monkeypatch, home_store, command):
     console = ruled_console(monkeypatch)
-    monkeypatch.setattr(Ollama, "capabilities", staticmethod(lambda name: ["embedding"]))
-    model_picker(monkeypatch, console, None)
+    model_picker(monkeypatch, console, None, embedding=("n",))
     typing(monkeypatch, command)
     console.read()
     assert console.lines.get() == "" and console.receive(0) == []

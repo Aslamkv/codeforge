@@ -596,10 +596,10 @@ What is said in the chats, kept so that a chat is only a view of it.
   them, `keep_alive`, `num_predict` `tokens` and `QUICK_REPLY_TIMEOUT`, and gives the reply's content, stripped.
   An Ollama failure is its `OllamaError`. Nothing else outside `Model`, the quick call, an unload and
   calibration calls `Ollama.chat`.
-- **MOD-26** `Models.choices()` gives the name of each model Ollama has, in Ollama's order, with whether it was
-  measured. It ends with `SystemExit` when Ollama does not answer, as `tinker models` does.
-  `Models.embedding_choices()` gives the same names with whether each embeds: its `capabilities` from Ollama's
-  `/api/show` hold `embedding`, or Ollama gives none for it.
+- **MOD-26** `Models.choices()` gives the name of each model Ollama has that does not embed, in Ollama's order,
+  with whether it was measured. It ends with `SystemExit` when Ollama does not answer, as `tinker models` does.
+  `Models.embedding_choices()` gives the names of the ones that embed: their `capabilities` from Ollama's
+  `/api/show` hold `embedding`, or Ollama gives none for them.
 
 ## project (PRJ)
 
@@ -1476,10 +1476,10 @@ The main system: the command line, one run, and the cycle of phases.
   and an unknown command is an error.
 - **CLI-3** `Commands`. `use-model` accepts only a measured model. `use-model`, `calibrate` and `embed` with no
   NAME, on a terminal, open a select box (**MSG-8**) on Ollama's models (**MOD-26**), and the one chosen is
-  taken as the NAME (one never measured says to calibrate it first; one that does not embed is refused as
-  before); a cancel changes nothing. `use-model` shows the measured ones plain and the rest dim, starting at
-  the one in use; `calibrate` shows them all plain, starting at the one in use, and picks before its job
-  starts; `embed` shows the ones that embed plain and the rest dim, starting at the embedding model. Not on a
+  taken as the NAME (one never measured says to calibrate it first); a cancel changes nothing. `use-model` and
+  `calibrate` show only the models that do not embed: `use-model` the measured ones plain and the rest dim,
+  starting at the one in use; `calibrate` all plain, starting at the one in use, and picks before its job
+  starts. `embed` shows only the ones that embed, all plain, starting at the embedding model. Not on a
   terminal (a chat too), they list the models as `tinker models` does. `runs` lists
   the runs, newest first. `status [@PROJECT]` shows the project's criteria and its open phase (in a chat,
   `status` alone shows what runs, **CNV-11**). `rename` renames the folder of a project whose plan waits, and

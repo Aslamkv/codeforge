@@ -67,7 +67,8 @@ tinker use-model qwen3
 ```
 
 Or leave out the name and choose from Ollama's models in a select box (up, down, Enter, Esc), on the command
-line or typed alone in the chat. `use-model` dims the unmeasured ones and `embed` the ones that do not embed:
+line or typed alone in the chat. `embed` lists the embedding models, the others the rest, and `use-model` dims
+the unmeasured ones:
 
 ```sh
 tinker calibrate
