@@ -918,7 +918,10 @@ class Desk:
 
     def spawn(self, arguments):
         arguments = arguments + ["--confirm"] if arguments[0] in PLAN_CONFIRMING_COMMANDS else arguments
-        env = dict(os.environ, **{CHANNEL_REPORTS_ENV: "off", KEEP_LOADED_ENV: "1", "PYTHONUNBUFFERED": "1", "NO_COLOR": "1"})
+        env = dict(
+            os.environ,
+            **{CHANNEL_REPORTS_ENV: "off", KEEP_LOADED_ENV: "1", "PYTHONUNBUFFERED": "1", "NO_COLOR": "1"},
+        )
         return subprocess.Popen(
             tinker_command() + arguments,
             cwd=self.root,
