@@ -175,7 +175,7 @@ Talk with Tinker. Every command works here, and anything else is a normal chat (
 tinker
 ```
 
-On a colour terminal it opens with a banner showing the model, the projects folder and the chats it listens
+On a colour terminal it opens with a banner showing the model, the embedding model, the projects folder and the chats it listens
 on. As in Claude Code, the prompt, with a rule over it, follows the output: it starts under the banner and
 moves down as Tinker prints, until it reaches the bottom row; then older lines scroll into the scrollback.
 What you type is never redrawn. Up and down bring back the lines you typed before, even from an earlier

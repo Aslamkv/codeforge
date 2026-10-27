@@ -217,7 +217,10 @@ class Desk:
 
     def banner_lines(self):
         chats = [channel.name for channel in self.channels if channel not in self.consoles]
-        details = [f"model {Config.get('model') or 'no model yet'}", f"projects {self.shown_root()}"]
+        embedding = Config.get("embed_model")
+        details = [f"model {Config.get('model') or 'no model yet'}"]
+        details += [f"embedding {embedding}"] if embedding else []
+        details += [f"projects {self.shown_root()}"]
         details += [f"chats {', '.join(chats)}"] if chats else []
         return ["🔧 Tinker", " · ".join(details), "help lists commands · exit quits"]
 

@@ -962,13 +962,13 @@ def test_console_draws_no_banner_without_colour_or_a_terminal(monkeypatch):
 
 @pytest.mark.spec("CNV-8")
 def test_the_banner_names_tinker_the_model_the_projects_folder_and_the_chats(monkeypatch):
-    settings = {"model": "qwen3"}
+    settings = {"model": "qwen3", "embed_model": "nomic-embed"}
     monkeypatch.setattr(conversation.Config, "get", lambda key: settings.get(key))
     root = Path.home() / "Projects"
     with_chats = Desk([ConsoleChannel(), Recorder("telegram")], root)
     assert with_chats.banner_lines() == [
         "🔧 Tinker",
-        "model qwen3 · projects ~/Projects · chats telegram",
+        "model qwen3 · embedding nomic-embed · projects ~/Projects · chats telegram",
         "help lists commands · exit quits",
     ]
     settings.clear()
