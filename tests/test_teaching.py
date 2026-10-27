@@ -861,7 +861,7 @@ def test_an_ask_takes_its_passages_in_turn_from_each_sources_best(home_store, mo
     docs = given("docs", ["same", "docs 2", "docs 3", "docs 4"])
     monkeypatch.setattr(ReadingPassages, "passages", lambda self, question, items: readings)
     monkeypatch.setattr(DocumentationPassages, "passages", lambda self, question, items: docs)
-    items, passages = Asker(None, Memory()).recalled("anything")
+    _, passages = Asker(None, Memory()).recalled("anything")
     assert passages == [readings[0], readings[1], docs[1]] and len(passages) == ASK_PASSAGES_SHOWN
 
 

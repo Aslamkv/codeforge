@@ -335,9 +335,9 @@ tinker memory --graph
 ```
 
 Ask what it has learned. It answers just what you ask, from what it keeps first: its items, the passages of the
-documentation and readings it kept that are most about your question, and the versions installed here. What it
-adds from the model's own knowledge is marked "Not from what I learned", and an answer that depends on your
-version names it:
+documentation and readings it kept that are most about your question, and the versions of those topics installed
+here. What it adds from the model's own knowledge is marked "Not from what I learned", and an answer that depends
+on your version names it:
 
 ```sh
 tinker ask what is your current toolchain for python
@@ -349,7 +349,8 @@ tinker ask how do I list a cargo project's dependencies
 To be sure, it may run one check first and answer with what it printed ("I ran …, it printed …"): SQL in an
 in-memory SQLite, or a command with a tool it learned and found on your machine, run in a [sandbox](#safety-)
 from a new empty folder. Installers (pip, npm, brew, cargo install and the like) are refused, and without a
-sandbox nothing runs; a refused or failed check is said, and it answers without it. An answer a check confirmed
+sandbox nothing runs. A refused or failed check is told to it once, and its fixed check runs; if that fails
+too, its first answer stands. An answer a check confirmed
 is kept in its topic (a tool or domain it learned; a language keeps none) as a 🌱 fact, for `tinker teach` to confirm or correct. Asking changes nothing else.
 
 Correct it when you know better, as many things at once as you like. Mark your own choices with the word

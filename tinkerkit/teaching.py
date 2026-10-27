@@ -73,9 +73,7 @@ class Memory:
         if not topics:
             return ranked
         others = [item for item in ranked if item["group"] not in topics]
-        similarity_of = self.retriever.similarities(text, [item["text"] for item in others]) or [0.0] * len(
-            others
-        )
+        similarity_of = self.retriever.similarities(text, [item["text"] for item in others]) or []
         alike = [
             item
             for item, similarity in zip(others, similarity_of)
@@ -196,19 +194,11 @@ class Asker:
 
     def checked(self, conversation, given, items, proposal):
         tools = found_programs(list(machines_here(items).values()))
-        check = Check.of(proposal, tools, self.sandbox_here)
-        ran, why = Asker.tried(check)
-        if why:
-            check = self.fixed_check(conversation, why, tools)
-            if check is None:
-                say.warn("No fixed check came back: the first answer stands")
-                return None
-            ran, why = Asker.tried(check)
-            if why:
-                say.warn("The fixed check did not run either: the first answer stands")
-                return None
-        proposal = check.proposal
-        say.step(f"Ran a {proposal.get('kind')} check: {check.shows or first_line(check.code, 60)}")
+        tried = self.ran_check(conversation, Check.of(proposal, tools, self.sandbox_here), tools)
+        if tried is None:
+            return None
+        check, ran = tried
+        say.step(f"Ran a {check.proposal.get('kind')} check: {check.shows or first_line(check.code, 60)}")
         ran_parts = [
             Part("The check Tinker ran", check_text(check, ran), True),
             Part("Now", Prompts.ASK_CHECKED, True),
@@ -219,6 +209,20 @@ class Asker:
                 given,
             )
         return answer, Asker.fact_kept(confirmed, items, check, ran)
+
+    def ran_check(self, conversation, check, tools):
+        ran, why = Asker.tried(check)
+        if not why:
+            return check, ran
+        check = self.fixed_check(conversation, why, tools)
+        if check is None:
+            say.warn("No fixed check came back: the first answer stands")
+            return None
+        ran, why = Asker.tried(check)
+        if why:
+            say.warn("The fixed check did not run either: the first answer stands")
+            return None
+        return check, ran
 
     @staticmethod
     def tried(check):
@@ -522,16 +526,15 @@ def machines_here(items):
 
 def first_answer(answer, given):
     text, data = marked_answer(answer, given)
-    check = (data or {}).get("check")
-    return text, check if isinstance(check, dict) else None
+    return text, check_in(data)
 
 
 def proposal_of(answer):
-    try:
-        data = Reply(answer.value).json()
-    except ValueError:
-        return None
-    check = data.get("check") if isinstance(data, dict) else None
+    return check_in(reply_data(answer))
+
+
+def check_in(data):
+    check = (data or {}).get("check")
     return check if isinstance(check, dict) else None
 
 
@@ -557,11 +560,16 @@ def checked_answer(answer, given):
 
 
 def answer_data(answer):
+    data = reply_data(answer)
+    return data if data and isinstance(data.get("answer"), str) else None
+
+
+def reply_data(answer):
     try:
         data = Reply(answer.value).json()
     except ValueError:
         return None
-    return data if isinstance(data, dict) and isinstance(data.get("answer"), str) else None
+    return data if isinstance(data, dict) else None
 
 
 def cut(text):

@@ -578,19 +578,19 @@ def version_shown(machine, commands):
 
 def implemented_by_other(name, machine, commands):
     shown = version_shown(machine, commands)
-    return bool(shown) and only_letters(name) not in words(f"{shown['command']} {shown['output']}")
+    return bool(shown) and only_letters(name) not in letter_words(f"{shown['command']} {shown['output']}")
 
 
 def not_reference(result):
-    return any(word in NOT_REFERENCE_WORDS for word in words(f"{result['title']} {result['url']}"))
+    return any(word in NOT_REFERENCE_WORDS for word in letter_words(f"{result['title']} {result['url']}"))
 
 
-def words(text):
+def letter_words(text):
     return re.findall(r"[a-z]+", text.lower())
 
 
 def only_letters(text):
-    return "".join(words(text))
+    return "".join(letter_words(text))
 
 
 def wanted_docs(slug, name, version, need, cap):

@@ -71,6 +71,10 @@ def user_turn(text):
     return {"role": "user", "content": text}
 
 
+def assistant_turn(text):
+    return {"role": "assistant", "content": text}
+
+
 class Model:
     def __init__(self, name, settings, keep_alive, log, max_growth=DEFAULT_CONFIG["max_growth"]):
         self.name, self.settings = name, settings
@@ -128,7 +132,7 @@ class Model:
         while answer is None:
             answer = self.one_try(tries, *request)
         if conversation is not None:
-            conversation += [user_turn(tries.user), {"role": "assistant", "content": answer.value or ""}]
+            conversation += [user_turn(tries.user), assistant_turn(answer.value or "")]
         return answer
 
     def one_try(self, tries, system, parts, label, done_when, max_reply, unthinking_retry, earlier):
