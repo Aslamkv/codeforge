@@ -36,9 +36,9 @@ lazy from .messages import (
     tinkering,
     visible_width,
 )
-lazy from .model import Models, OllamaError
+lazy from .model import Models, Ollama, OllamaError
 lazy from .prompts import Prompts, Reply
-lazy from .settings import EXERCISE_FOLDER, JOB_STOP_SIGNAL, Config, Home, projects_folder
+lazy from .settings import EXERCISE_FOLDER, JOB_STOP_SIGNAL, KEEP_LOADED_ENV, Config, Home, projects_folder
 lazy from .text import field
 lazy from .workspace import Toolchain
 
@@ -201,6 +201,13 @@ class Desk:
             self.say_goodbye()
             if not self.consoles:
                 say.title("Stopped listening.", "🛑")
+        finally:
+            Desk.unload_models()
+
+    @staticmethod
+    def unload_models():
+        for name in {Config.get("model"), Config.get("embed_model")} - {None, ""}:
+            Ollama.unload(name)
 
     def claim_chats(self):
         for channel in [channel for channel in self.channels if channel not in self.consoles]:
@@ -911,7 +918,7 @@ class Desk:
 
     def spawn(self, arguments):
         arguments = arguments + ["--confirm"] if arguments[0] in PLAN_CONFIRMING_COMMANDS else arguments
-        env = dict(os.environ, **{CHANNEL_REPORTS_ENV: "off", "PYTHONUNBUFFERED": "1", "NO_COLOR": "1"})
+        env = dict(os.environ, **{CHANNEL_REPORTS_ENV: "off", KEEP_LOADED_ENV: "1", "PYTHONUNBUFFERED": "1", "NO_COLOR": "1"})
         return subprocess.Popen(
             tinker_command() + arguments,
             cwd=self.root,

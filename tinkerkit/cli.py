@@ -46,6 +46,7 @@ lazy from .settings import (
     ENV_FILE,
     FIX_PHASES,
     FORMATTER_RUNS_AFTER,
+    KEEP_LOADED_ENV,
     NUMBERED_PARTS,
     PHASES,
     STATUS_TEXT,
@@ -86,7 +87,8 @@ def main():
     except OSError as exc:
         raise SystemExit(cannot_read_or_write(exc))
     finally:
-        Ollama.unload_kept()
+        if not os.environ.get(KEEP_LOADED_ENV):
+            Ollama.unload_kept()
 
 
 def ended_like_ctrl_c(*_):
@@ -854,7 +856,6 @@ class Commands:
             ended = blocked(stopped) if blocked else ending("blocked", first_line(str(stopped), 200))
             raise
         finally:
-            model.unload()
             Models.remember(model)
             took = time.monotonic() - started
             say.title(f"Time taken: {human_duration(took)}", "⏱️")
@@ -1287,9 +1288,6 @@ class ProjectRun:
 
     def save(self):
         model, project = self.session.model, self.session.project
-        plan_waits = self.outcome.status == "awaiting"
-        if not plan_waits:
-            model.unload()
         Models.remember(model)
         self.record["status"] = self.outcome.status
         Runs.save(self.record, project.workdir)

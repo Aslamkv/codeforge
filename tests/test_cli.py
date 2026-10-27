@@ -14,7 +14,7 @@ from tinkerkit.knowledge import Knowledge, Library
 from tinkerkit.model import Models, Ollama, OllamaError
 from tinkerkit.project import Runs, Tracker, project_store
 from tinkerkit.session import Phase, Stopped
-from tinkerkit.settings import FIX_PHASES, PHASES, Config
+from tinkerkit.settings import FIX_PHASES, KEEP_LOADED_ENV, PHASES, Config
 from tinkerkit.workspace import Toolchain
 
 
@@ -537,6 +537,38 @@ def test_main_unloads_nothing_it_did_not_keep(monkeypatch, fake_ollama):
     monkeypatch.setattr(Cli, "parse", staticmethod(lambda argv=None: argparse.Namespace()))
     monkeypatch.setattr(cli, "run", lambda *args: None)
     cli.main()
+    assert fake_ollama.unloaded == []
+
+
+@pytest.mark.spec("CLI-12")
+def test_a_job_a_chat_started_leaves_its_models_loaded(monkeypatch, fake_ollama):
+    def end(argv=None):
+        Ollama.kept.update({"a", "b"})
+        raise KeyboardInterrupt
+
+    monkeypatch.setenv(KEEP_LOADED_ENV, "1")
+    monkeypatch.setattr(Cli, "parse", staticmethod(end))
+    with pytest.raises(SystemExit):
+        cli.main()
+    assert fake_ollama.unloaded == []
+    Ollama.kept.clear()
+
+
+@pytest.mark.spec("CLI-12")
+def test_a_job_never_unloads_its_model_when_it_ends(monkeypatch, fake_ollama):
+    class Ended:
+        def end(self, ended, took):
+            pass
+
+    class Kept:
+        name = "m"
+
+        def unload(self):
+            raise AssertionError("the job unloaded its model")
+
+    monkeypatch.setattr(Commands, "followed", staticmethod(lambda title: Ended()))
+    monkeypatch.setattr(Models, "remember", staticmethod(lambda model: None))
+    Commands.reported("Asking", Kept(), lambda tracker: cli.ending("done", "asked"))
     assert fake_ollama.unloaded == []
 
 

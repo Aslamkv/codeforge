@@ -43,7 +43,7 @@ from tinkerkit.jobs import began_at
 from tinkerkit.ledger import DONE_NOTE_KEPT_SECONDS, Ledger
 from tinkerkit.model import Models, Ollama
 from tinkerkit.project import Runs, Tracker
-from tinkerkit.settings import Config, Home
+from tinkerkit.settings import KEEP_LOADED_ENV, Config, Home
 
 
 def wait_until(condition, timeout=15):
@@ -1833,6 +1833,29 @@ def test_a_terminal_alone_hands_no_goodbye_on(monkeypatch):
     console, out = piped_console(monkeypatch)
     Desk([console], Path.cwd()).say_goodbye()
     assert handed == [] and "not listening" in out.getvalue()
+
+
+@pytest.mark.spec("CLI-12")
+def test_a_chat_unloads_the_model_in_use_and_the_embedding_model_when_it_ends(
+    desk, home_store, monkeypatch, fake_ollama
+):
+    monkeypatch.setattr(conversation, "ENDED_LOOK_SECONDS", 0.05)
+    goodbyes_handed(monkeypatch)
+    Config.save(model="m", embed_model="e")
+    channel = Listening("bot", inbox=[Message("1", "exit", id=1), Message("1", "confirm", id=2)])
+    chat = Desk([channel], Path.cwd())
+    monkeypatch.setattr(chat.talk, "warm", lambda: None)
+    chat.run()
+    assert sorted(fake_ollama.unloaded) == ["e", "m"]
+    channel.claimed.close()
+
+
+@pytest.mark.spec("CLI-12")
+def test_a_job_a_chat_starts_is_told_to_leave_its_models_loaded(monkeypatch):
+    started, chat = [], Desk([Recorder()], Path.cwd())
+    monkeypatch.setattr(subprocess, "Popen", lambda command, **options: started.append(options["env"]))
+    chat.spawn(["ask", "why"])
+    assert started[0][KEEP_LOADED_ENV] == "1"
 
 
 @pytest.mark.spec("CNV-9")
