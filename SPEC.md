@@ -249,7 +249,7 @@ The home and its database, the settings, numbered lists, and the one way to dele
 
 - **SET-1** `Home.root` is the `.tinker` folder next to the `tinkerkit` package and `tinker.py`, where they
   really are (symlinks resolved). `Home.store()` is the home database, `tinker.db`, in it.
-- **SET-2** `DEFAULT_CONFIG` is exactly: model `None`, ollama_url `http://localhost:11434`, keep_alive `0`,
+- **SET-2** `DEFAULT_CONFIG` is exactly: model `None`, ollama_url `http://localhost:11434`, keep_alive `"30m"`,
   max_growth `1.15`, build_think `"medium"`, test_timeout `60`, web_timeout `30`, learn_missing `2`,
   learn_cutoff `0.0`, learn_pages `8`, learn_min_pages `2`, learn_searches `3`, learn_think `"low"`,
   tool_docs_pages `5`, docs_latest_days `30`, fetch_workers `6`, fetch_timeout `15`, fetch_max_bytes `2000000`,
@@ -537,8 +537,7 @@ What is said in the chats, kept so that a chat is only a view of it.
 - **MOD-8** `Ollama.chat` streams a request with `model`, `messages`, `stream: true` and `keep_alive`. It
   sends `think` only when it is set, and `options` only when there are some. It gives the final chunk, with
   `message.content` and `message.thinking`. An HTTP error is an `OllamaError` flagged out of memory or crashed
-  when it is either. An unreachable Ollama is an `OllamaError`. `Ollama.kept` holds each model a chat asked to
-  stay loaded (`keep_alive` not 0) until it is unloaded.
+  when it is either. An unreachable Ollama is an `OllamaError`.
 - **MOD-9** `Stream` collects the reply and keeps the last `UNFINISHED_THOUGHT_KEPT_CHARS` chars of the
   thinking. An error chunk is an `OllamaError`: a reply error with what came before, unless it is out of
   memory or a crash. Once `done_when(content)` says the reply is complete, the stream ends within
@@ -969,7 +968,7 @@ Lessons and proven knowledge, and what every kind of learning shares.
   `RETIRED_KEPT_PER_LIST`. Nothing retired is shown in a prompt.
 - **KNW-11** `Embeddings` keeps each text's vector by its key, per embedding model, in the home database. Only
   missing texts are asked for, in batches of `TEXTS_PER_REQUEST`, keeping the model loaded for `EMBED_KEEP_ALIVE` and in
-  `Ollama.kept` (**MOD-8**). A wrong reply gives `None`, and `failed` says why. `prune` keeps only the texts asked for. `cosine` is the cosine similarity, and 0 for a zero vector.
+  `Ollama.embedders`. A wrong reply gives `None`, and `failed` says why. `prune` keeps only the texts asked for. `cosine` is the cosine similarity, and 0 for a zero vector.
 - **KNW-12** `Retriever.by_words` ranks the texts that hold the query's words with BM25, best first. `rank`
   fuses the word and meaning rankings and gives every index: the ones neither finds come last. When embeddings
   fail, the meaning search is turned off for the rest of the run.
@@ -1089,6 +1088,9 @@ learning and run lessons are apart.
   language it names each tool's version command. A saved plan is reused with no search and no call. The version
   commands (each run once) give the version installed. That version's documentation is found by
   `DOCS_VERSION_SEARCH` (the topic's name, its version and `documentation`), its results picked as above, and
+  a version that is one implementation's (a tool named otherwise than the topic, `sqlite3` for SQL) searches
+  the topic's own documentation, by its name alone. Among the results picked, reference pages come before
+  news, release notes, changelogs and downloads; those serve only the slot of what this version changes. And
   each of a language's tools by its own `TOOL_DOCS_SEARCH` (its own version, at most
   `tool_docs_pages` pages), the tools' searches all at once; their pages join the pool, and are kept (**LRN-1**). Each slot's passages are digested into facts
   (candidates, each with its slot) and condensed into rules, both at `learn_think`, and kept only after both
@@ -1242,19 +1244,25 @@ then is anything changed.
 - **TCH-1** `Memory(embeddings).items` are the memory graph's toolchains, fixes, lessons, facts, findings,
   rules and commands, without the retired. `about(text)` gives at most `MEMORY_ITEMS_SHOWN` of them, the most
   related first: first the items whose kind and language (or topic) the text names. A language's toolchain
-  counts as named with its language, however the text calls it ("toolset"). A rule given brings the facts it
+  counts as named with its language, however the text calls it ("toolset"). When the text names a topic, an
+  item of a topic it does not name comes after them, and only when its meaning is at least
+  `RECALL_OTHER_TOPIC_SIMILARITY` like the text's: a shared word alone ("NULL") never brings it. A rule given brings the facts it
   cites (`cites`) right after it, still within `MEMORY_ITEMS_SHOWN`. A second `about` embeds only its text: the
   items' embeddings are kept.
-- **TCH-2** `Asker.answer(question)` gives the model the items numbered, and the version installed here of each
-  topic shown (its machine's version). The answer comes from them first; anything from the model's own
-  knowledge is marked as not from what Tinker learned, and an answer that depends on the version names it. With
-  nothing kept and no passage, the model is still asked, and its whole answer is marked. It says the answer
-  alone: no steps and no sources, then the time taken (a terminal shows one status line while it thinks). It
-  changes nothing but **TCH-11**.
+- **TCH-2** `Asker.answer(question)` gives the model at most `ASK_ITEMS_SHOWN` items (the first of `about`) and the
+  passages numbered, and the version installed here of each topic shown (its machine's version), of no other
+  topic: only the commands that found one, and a topic with none says it is not installed. The model replies JSON: `answer`, and
+  `uses`, the numbers it rests on. The answer comes from them first, says things as they are (never what Tinker
+  keeps or notes) and names the version when it depends on it. Tinker marks it, never the model: an answer with
+  no number it was given in `uses` is marked as not from what Tinker learned. With nothing kept and no passage,
+  the model is still asked, and its answer is marked. It says the answer alone: no steps and no sources, then
+  the time taken (a terminal shows one status line while it thinks). It changes nothing but **TCH-11**.
 - **TCH-3** An ask also sees the passages most about the question from each passage source: the readings
   (`Readings`; a reading named by its title or whose items are shown) and the documentation kept for the topics
   shown (**LRN-1**, any version), so it answers from the source's own words. Each source shortlists its
   passages by words first (**KNW-12**) and ranks only the shortlist by meaning; no source embeds all its pages.
+  A passage whose text is one already given (the same page at another address) is given once. The ask gets at most
+  `ASK_PASSAGES_SHOWN` passages in all, taken in turn from each source's best.
 - **TCH-4** `read_plan` keeps at most `TEACH_CLAIMS` claims, each a fact or a preference (the person's own
   choice). A preference is only what the person marks with the word prefer: a teaching without it (`marked`)
   has facts alone, whatever the model says. It keeps at most `TEACH_CHECK_COMMANDS` commands and
@@ -1284,11 +1292,16 @@ then is anything changed.
 - **TCH-9** Both commands report through a tracker.
 - **TCH-10** The first ask call may propose one check (its kind, code and what it shows). Tinker runs it
   (**SBX**) and a second call answers with what it printed ("I ran …, it printed …"); with no check there is one
-  call. A `sql` check runs in the standard library's SQLite in memory, with attaching databases and loading
-  extensions refused. A `command` check runs its code from a new empty folder with a tool learned and found on
+  call. The second call goes on the first one's conversation: the same system prompt and messages, the first
+  reply, then what the check printed, so the model reuses what it already read. A `sql` check runs in the
+  standard library's SQLite in memory, statement by statement however they sit on lines, with attaching
+  databases and loading extensions refused. A `command` check runs its code from a new empty folder with a tool learned and found on
   this machine; a tool with a package manager or installer anywhere in it (pip, npm, brew, apt, gem,
   `python3 -m pip` and the like) or an install word right after its program (`cargo install`, `go get`,
-  `poetry add`) is refused. A refused or failed check is said, and the answer goes on without it.
+  `poetry add`) is refused. A check fails when it does not run, runs out of time, or one of its `sql` statements
+  errors; a `command` check's exit code is part of what it printed. A refused or failed check is told to the model with why, once, on the same
+  conversation, and the check it gives back runs instead. When that one is refused or fails too, or none is
+  given, it is said, and the first answer stands.
 - **TCH-11** An answer a check ran and confirmed is kept in its topic as a candidate fact, with a `checked`
   event and its sources (the check and what it printed). One like a fact the topic keeps (`SAME_FACT_SIMILARITY`)
   adds its sources and a `checked` event to that fact instead, whose status stays. `tinker teach` confirms or corrects it (**TCH-7**).
@@ -1561,7 +1574,9 @@ The main system: the command line, one run, and the cycle of phases.
   points to test, the files, the tests and files written, the spec points passing).
 - **CLI-12** `main()` ends a run cleanly: Ctrl-C ends with `Interrupted.`, and Ollama and file errors end with
   their message, never a traceback. A closed terminal and `SIGTERM` end it as Ctrl-C does. However it ends, it
-  unloads every model in `Ollama.kept` (**MOD-8**), so no model it loaded stays in memory after it.
+  unloads no model: a model stays loaded until its `keep_alive` idle time is up, so the next run does not load it
+  again. A chat, however it ends, unloads the model in use and the embedding model, so none of its jobs' models
+  stays in memory after it.
 - **CLI-13** Built end to end: `tinker task` with a model that answers like a real one builds a project in its
   folder. Each spec point gets a test, the code passes them (a wrong first version is fixed by the verify
   loop), the README's examples run, the final review passes, lessons are kept, SPEC.md is written, the run is

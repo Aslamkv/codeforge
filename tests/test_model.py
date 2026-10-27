@@ -245,18 +245,6 @@ def test_chat_streams_and_gives_the_final_chunk(monkeypatch):
 
 
 @pytest.mark.spec("MOD-8")
-def test_a_chat_asked_to_stay_loaded_is_kept_until_it_is_unloaded(monkeypatch):
-    monkeypatch.setattr(urllib.request, "urlopen", lambda request, timeout: stream_of({"done": True}))
-    hi = [{"role": "user", "content": "hi"}]
-    Ollama.chat("gone", hi, 0, None)
-    Ollama.chat("gone too", hi, "0", None)
-    Ollama.chat("stays", hi, "5m", None)
-    assert Ollama.kept == {"stays"}
-    Ollama.unload("stays")
-    assert Ollama.kept == set()
-
-
-@pytest.mark.spec("MOD-8")
 def test_chat_errors(monkeypatch):
     def oom(request, timeout):
         raise http_error(500, b'{"error":"model requires more system memory: out of memory"}')
@@ -531,6 +519,18 @@ def test_ask_once(make_model, fake_ollama, model_log):
     assert log[0]["reply"] == "the answer" and log[0]["label"].startswith("Ask [think high")
 
 
+@pytest.mark.spec("TCH-10")
+def test_an_ask_goes_on_a_conversation_and_adds_its_turns(make_model, fake_ollama):
+    fake_ollama.reply("first").reply("second")
+    model, conversation = make_model(), []
+    model.ask("You help.", [Part("Question", "what?", True)], "Ask", conversation=conversation)
+    model.ask("You help.", [Part("Check", "it printed 42", True)], "Ask", conversation=conversation)
+    first, second = (call["messages"] for call in fake_ollama.calls)
+    assert second[:2] == first and second[2] == {"role": "assistant", "content": "first"}
+    assert second[3] == {"role": "user", "content": "## Check\nit printed 42"}
+    assert conversation == [*second[1:], {"role": "assistant", "content": "second"}]
+
+
 @pytest.mark.spec("MOD-24")
 def test_a_model_logs_its_details_and_says_only_when_it_asks_again(model_log, fake_ollama, capsys):
     fake_ollama.reply("not json").reply('{"ok": 1}')
@@ -794,8 +794,7 @@ def test_a_raw_read_sends_its_keep_alive(monkeypatch):
     monkeypatch.setattr(urllib.request, "urlopen", urlopen)
     Ollama.read_raw("gone", "12", {})
     Ollama.read_raw("stays", "12", {}, "5m")
-    assert [payload["keep_alive"] for payload in sent] == [0, "5m"] and Ollama.kept == {"stays"}
-    Ollama.unload("stays")
+    assert [payload["keep_alive"] for payload in sent] == [0, "5m"]
 
 
 @pytest.mark.spec("MOD-14")

@@ -318,7 +318,7 @@ def test_config(measured_model, capsys):
         "input budget:    8192 tokens",
         "context:         32768 tokens",
         "think:           high for planning, medium for building",
-        "keep_alive:      0",
+        "keep_alive:      '30m'",
         "test_timeout:    60",
         "web:             searches mwmbl, wikipedia, wikibooks",
     ):
@@ -518,9 +518,8 @@ def test_main_ends_cleanly(monkeypatch, error, message):
 
 @pytest.mark.spec("CLI-12")
 @pytest.mark.parametrize("ending", [KeyboardInterrupt, signal.SIGTERM, signal.SIGHUP])
-def test_main_unloads_every_kept_model_however_it_ends(monkeypatch, fake_ollama, ending):
+def test_main_unloads_no_model_however_it_ends(monkeypatch, fake_ollama, ending):
     def end(argv=None):
-        Ollama.kept.update({"a", "b"})
         if ending is KeyboardInterrupt:
             raise ending
         signal.raise_signal(ending)
@@ -529,14 +528,24 @@ def test_main_unloads_every_kept_model_however_it_ends(monkeypatch, fake_ollama,
     with pytest.raises(SystemExit) as ended:
         cli.main()
     assert ended.value.code == "\nInterrupted."
-    assert sorted(fake_ollama.unloaded) == ["a", "b"]
+    assert fake_ollama.unloaded == []
 
 
 @pytest.mark.spec("CLI-12")
-def test_main_unloads_nothing_it_did_not_keep(monkeypatch, fake_ollama):
-    monkeypatch.setattr(Cli, "parse", staticmethod(lambda argv=None: argparse.Namespace()))
-    monkeypatch.setattr(cli, "run", lambda *args: None)
-    cli.main()
+def test_a_job_never_unloads_its_model_when_it_ends(monkeypatch, fake_ollama):
+    class Ended:
+        def end(self, ended, took):
+            pass
+
+    class Kept:
+        name = "m"
+
+        def unload(self):
+            raise AssertionError("the job unloaded its model")
+
+    monkeypatch.setattr(Commands, "followed", staticmethod(lambda title: Ended()))
+    monkeypatch.setattr(Models, "remember", staticmethod(lambda model: None))
+    Commands.reported("Asking", Kept(), lambda tracker: cli.ending("done", "asked"))
     assert fake_ollama.unloaded == []
 
 

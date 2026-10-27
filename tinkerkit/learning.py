@@ -1,5 +1,6 @@
 from collections import namedtuple
 lazy import datetime
+lazy import re
 lazy import urllib.parse
 lazy from collections import Counter
 lazy from itertools import islice
@@ -22,12 +23,14 @@ lazy from .passages import Cleaner, Page
 lazy from .project import Tracked
 lazy from .prompts import Part, Prompts, PromptTooLarge
 lazy from .settings import (
+    DOCS_NAME_SEARCH,
     DOCS_SITE_SEARCH,
     DOCS_VERSION_SEARCH,
     FACT_PHASES,
     FACTS_PER_SLOT,
     MAX_FACT_CHARS,
     MAX_VERSION_COMMANDS,
+    NOT_REFERENCE_WORDS,
     RESULTS_PER_LEARN_SEARCH,
     TOOL_ROLES,
     Config,
@@ -205,7 +208,7 @@ class SlotLearner(Tracked):
             topic, [f"{result['title']} {result['content']}" for result in results]
         )
         picked, cutoff, most = [], float(Config.get("learn_cutoff")), most or int(Config.get("learn_pages"))
-        for result, score in zip(results, scores):
+        for result, score in sorted(zip(results, scores), key=lambda scored: not_reference(scored[0])):
             key = address_key(result["url"])
             if score > cutoff and key not in self.seen and len(picked) < most:
                 self.seen.add(key)
@@ -277,14 +280,21 @@ class SlotLearner(Tracked):
     def documentation(self, plan, machine, version):
         self.step("documentation")
         tools = {tool["name"]: tool for tool in plan["tools"]}.values()
-        wanted = [self.language_docs(plan, version)] + [self.tool_docs(machine, tool) for tool in tools]
+        wanted = [self.language_docs(plan, machine, version)] + [
+            self.tool_docs(machine, tool) for tool in tools
+        ]
         pages = [page for docs_pages in self.doc_pages(wanted) for page in docs_pages]
         self.outcome(f"{len(pages)} page(s)" + (f" of {plan['name']} {version}" if version else ""))
         return pages
 
-    def language_docs(self, plan, version):
+    def language_docs(self, plan, machine, version):
+        own = not implemented_by_other(plan["name"], machine, plan["commands"])
         return wanted_docs(
-            self.slug(plan), plan["name"], version, DOCS_VERSION_SEARCH, int(Config.get("learn_pages"))
+            self.slug(plan),
+            plan["name"],
+            version if own else "",
+            DOCS_VERSION_SEARCH if own else DOCS_NAME_SEARCH,
+            int(Config.get("learn_pages")),
         )
 
     @staticmethod
@@ -556,14 +566,31 @@ def label(slot_id):
 
 
 def version_of(machine, commands):
+    shown = version_shown(machine, commands)
+    return shown["version"] if shown else ""
+
+
+def version_shown(machine, commands):
     return next(
-        (
-            tool["version"]
-            for tool in machine
-            if tool["command"] in commands and tool["found"] and tool["version"]
-        ),
-        "",
+        (tool for tool in machine if tool["command"] in commands and tool["found"] and tool["version"]), None
     )
+
+
+def implemented_by_other(name, machine, commands):
+    shown = version_shown(machine, commands)
+    return bool(shown) and only_letters(name) not in letter_words(f"{shown['command']} {shown['output']}")
+
+
+def not_reference(result):
+    return any(word in NOT_REFERENCE_WORDS for word in letter_words(f"{result['title']} {result['url']}"))
+
+
+def letter_words(text):
+    return re.findall(r"[a-z]+", text.lower())
+
+
+def only_letters(text):
+    return "".join(letter_words(text))
 
 
 def wanted_docs(slug, name, version, need, cap):

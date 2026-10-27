@@ -29,7 +29,7 @@ def test_default_config():
     assert settings.DEFAULT_CONFIG == {
         "model": None,
         "ollama_url": "http://localhost:11434",
-        "keep_alive": 0,
+        "keep_alive": "30m",
         "max_growth": 1.15,
         "build_think": "medium",
         "test_timeout": 60,

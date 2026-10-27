@@ -15,7 +15,7 @@ DEFAULT_CONFIG = frozendict(
     {
         "model": None,
         "ollama_url": "http://localhost:11434",
-        "keep_alive": 0,
+        "keep_alive": "30m",
         "max_growth": 1.15,
         "build_think": "medium",
         "test_timeout": 60,
@@ -203,6 +203,8 @@ SIMILAR_LESSON_MEANING = 0.75
 SIMILAR_LESSON_WORDS = 0.5
 
 MEMORY_ITEMS_SHOWN = 25
+ASK_ITEMS_SHOWN = 10
+ASK_PASSAGES_SHOWN = 3
 MEMORY_ID_CHARS = 6
 MEMORY_FOUND_SHOWN = 20
 TEACH_CLAIMS = 4
@@ -243,6 +245,8 @@ MAX_RULE_WHEN_CHARS = 80
 
 DOCS_SITE_SEARCH = "{topic} official documentation"
 DOCS_VERSION_SEARCH = "{name} {version} documentation"
+DOCS_NAME_SEARCH = "{name} documentation"
+NOT_REFERENCE_WORDS = ("news", "release", "releases", "changelog", "changes", "download", "downloads")
 RESULTS_PER_LEARN_SEARCH = 10
 SEARCHES_PER_ENGINE = 2
 MAX_PLANNED_SEARCHES = 8
@@ -265,6 +269,7 @@ RESEARCH_FACTS_CHECKED = 2
 SAME_CLAIM_SIMILARITY = 0.8
 REPEAT_CLAIM_SIMILARITY = 0.9
 MAX_RECALL_TOPICS = 6
+RECALL_OTHER_TOPIC_SIMILARITY = 0.6
 TOPIC_RELEVANT_SIMILARITY = 0.6
 PER_PAGE = 10
 NUMBERED_PARTS = ("jobs", "read")

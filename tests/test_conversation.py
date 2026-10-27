@@ -1835,6 +1835,21 @@ def test_a_terminal_alone_hands_no_goodbye_on(monkeypatch):
     assert handed == [] and "not listening" in out.getvalue()
 
 
+@pytest.mark.spec("CLI-12")
+def test_a_chat_unloads_the_model_in_use_and_the_embedding_model_when_it_ends(
+    desk, home_store, monkeypatch, fake_ollama
+):
+    monkeypatch.setattr(conversation, "ENDED_LOOK_SECONDS", 0.05)
+    goodbyes_handed(monkeypatch)
+    Config.save(model="m", embed_model="e")
+    channel = Listening("bot", inbox=[Message("1", "exit", id=1), Message("1", "confirm", id=2)])
+    chat = Desk([channel], Path.cwd())
+    monkeypatch.setattr(chat.talk, "warm", lambda: None)
+    chat.run()
+    assert sorted(fake_ollama.unloaded) == ["e", "m"]
+    channel.claimed.close()
+
+
 @pytest.mark.spec("CNV-9")
 @pytest.mark.parametrize("slow", ["collect", "status", "adopt_exercise"])
 def test_the_terminal_reads_and_exits_at_once_while_periodic_work_waits(monkeypatch, slow):

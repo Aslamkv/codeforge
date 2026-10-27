@@ -1557,7 +1557,15 @@ class Retriever:
         return score
 
     def by_meaning(self, query, texts, prune):
+        similarity_of = self.similarities(query, texts, prune)
+        if similarity_of is None:
+            return []
+        return sorted(range(len(texts)), key=lambda index: (-similarity_of[index], index))
+
+    def similarities(self, query, texts, prune=False):
         if self.embeddings is None:
+            return None
+        if not texts:
             return []
         vectors = self.embeddings.vectors(texts, prune=prune)
         if vectors and query not in self.query_embeddings:
@@ -1566,10 +1574,9 @@ class Retriever:
         if not vectors or not self.query_embeddings.get(query):
             say.warn(f"Meaning search not used: {self.embeddings.failed}; the word search stands alone")
             self.embeddings = None
-            return []
+            return None
         self.used = f"words and meaning ({self.embeddings.name})"
-        similarity_of = [Embeddings.cosine(self.query_embeddings[query], vector) for vector in vectors]
-        return sorted(range(len(texts)), key=lambda index: (-similarity_of[index], index))
+        return [Embeddings.cosine(self.query_embeddings[query], vector) for vector in vectors]
 
 
 class Embeddings:
@@ -1627,7 +1634,6 @@ class Embeddings:
         }
 
     def embedded(self, batch):
-        Ollama.kept.add(self.name)
         Ollama.embedders.add(self.name)
         data = Ollama.get_json(
             "/api/embed",

@@ -36,7 +36,7 @@ lazy from .messages import (
     tinkering,
     visible_width,
 )
-lazy from .model import Models, OllamaError
+lazy from .model import Models, Ollama, OllamaError
 lazy from .prompts import Prompts, Reply
 lazy from .settings import EXERCISE_FOLDER, JOB_STOP_SIGNAL, Config, Home, projects_folder
 lazy from .text import field
@@ -201,6 +201,13 @@ class Desk:
             self.say_goodbye()
             if not self.consoles:
                 say.title("Stopped listening.", "🛑")
+        finally:
+            Desk.unload_models()
+
+    @staticmethod
+    def unload_models():
+        for name in {Config.get("model"), Config.get("embed_model")} - {None, ""}:
+            Ollama.unload(name)
 
     def claim_chats(self):
         for channel in [channel for channel in self.channels if channel not in self.consoles]:

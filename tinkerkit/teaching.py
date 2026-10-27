@@ -1,5 +1,6 @@
 import re
 from collections import namedtuple
+from itertools import zip_longest
 
 from .messages import say
 lazy from .checking import Check, found_programs
@@ -12,10 +13,13 @@ lazy from .prompts import Part, Prompts, Reply
 lazy from .reading import Readings
 lazy from .sandbox import Sandbox
 lazy from .settings import (
+    ASK_ITEMS_SHOWN,
+    ASK_PASSAGES_SHOWN,
     BOOK_PASSAGES_SHOWN,
     CHECK_SOURCE_CHARS,
     LESSON_PHASES,
     MEMORY_ITEMS_SHOWN,
+    RECALL_OTHER_TOPIC_SIMILARITY,
     TEACH_CHECK_COMMANDS,
     TEACH_CHECK_SEARCHES,
     TEACH_CLAIMS,
@@ -61,7 +65,21 @@ class Memory:
         ranking = self.retriever.rank(text, [item["text"] for item in self.items])
         named = set(words(text))
         ranking.sort(key=lambda index: -self.named_in(self.items[index], named))
-        return self.with_cited([self.items[index] for index in ranking])[:limit]
+        ranked = [self.items[index] for index in ranking]
+        return self.with_cited(self.on_named_topics(text, ranked, named))[:limit]
+
+    def on_named_topics(self, text, ranked, named):
+        topics = {item["group"] for item in ranked} & named
+        if not topics:
+            return ranked
+        others = [item for item in ranked if item["group"] not in topics]
+        similarity_of = self.retriever.similarities(text, [item["text"] for item in others]) or []
+        alike = [
+            item
+            for item, similarity in zip(others, similarity_of)
+            if similarity >= RECALL_OTHER_TOPIC_SIMILARITY
+        ]
+        return [item for item in ranked if item["group"] in topics] + alike
 
     def with_cited(self, ranked):
         given = {}
@@ -102,7 +120,7 @@ class PassageSource:
         return []
 
     def passages(self, question, items, count=BOOK_PASSAGES_SHOWN):
-        found = self.found(question, items)
+        found = distinct(self.found(question, items))
         by_words = Retriever(None).by_words(question, [passage["text"] for passage in found])
         shortlist = [found[index] for index in by_words[: self.SHORTLIST_TIMES * count]]
         by_meaning = self.retriever.rank(question, [passage["text"] for passage in shortlist])
@@ -146,21 +164,26 @@ class Asker:
             items, passages = self.recalled(question)
         self.on_to("answer")
         read = f" and {len(passages)} passage(s) of what it read" if passages else ""
-        parts = ask_parts(question, items, passages)
+        conversation, given = [], len(items) + len(passages)
         with say.working_on(f"Answering from {len(items)} thing(s) Tinker keeps{read}"):
-            answer, proposal = first_answer(self.model.ask(Prompts.ASK_SYSTEM, parts, "ask"))
+            answer, proposal = first_answer(
+                self.model.ask(
+                    Prompts.ASK_SYSTEM, ask_parts(question, items, passages), "ask", conversation=conversation
+                ),
+                given,
+            )
         if proposal is None:
             return self.said(answer)
-        return self.said(*(self.checked(parts, items, proposal) or (answer,)))
+        return self.said(*(self.checked(conversation, given, items, proposal) or (answer,)))
 
     def recalled(self, question):
-        items = self.memory.about(question)
-        passages = [
-            passage
+        items = self.memory.about(question, limit=ASK_ITEMS_SHOWN)
+        best = [
+            source(self.memory.retriever).passages(question, items)
             for source in (ReadingPassages, DocumentationPassages)
-            for passage in source(self.memory.retriever).passages(question, items)
         ]
-        return items, passages
+        in_turn = (passage for turn in zip_longest(*best) for passage in turn if passage)
+        return items, distinct(in_turn)[:ASK_PASSAGES_SHOWN]
 
     def on_to(self, phase):
         if self.tracker is not None:
@@ -169,24 +192,58 @@ class Asker:
     def sandbox_here(self):
         return self.sandbox or Sandbox.here()
 
-    def checked(self, parts, items, proposal):
+    def checked(self, conversation, given, items, proposal):
         tools = found_programs(list(machines_here(items).values()))
-        check = Check.of(proposal, tools, self.sandbox_here)
+        tried = self.ran_check(conversation, Check.of(proposal, tools, self.sandbox_here), tools)
+        if tried is None:
+            return None
+        check, ran = tried
+        say.step(f"Ran a {check.proposal.get('kind')} check: {check.shows or first_line(check.code, 60)}")
+        ran_parts = [
+            Part("The check Tinker ran", check_text(check, ran), True),
+            Part("Now", Prompts.ASK_CHECKED, True),
+        ]
+        with say.working_on("Answering with what the check printed"):
+            answer, confirmed = checked_answer(
+                self.model.ask(Prompts.ASK_SYSTEM, ran_parts, "ask: checked", conversation=conversation),
+                given,
+            )
+        return answer, Asker.fact_kept(confirmed, items, check, ran)
+
+    def ran_check(self, conversation, check, tools):
+        ran, why = Asker.tried(check)
+        if not why:
+            return check, ran
+        check = self.fixed_check(conversation, why, tools)
+        if check is None:
+            say.warn("No fixed check came back: the first answer stands")
+            return None
+        ran, why = Asker.tried(check)
+        if why:
+            say.warn("The fixed check did not run either: the first answer stands")
+            return None
+        return check, ran
+
+    @staticmethod
+    def tried(check):
         refusal = check.refusal()
         if refusal:
             say.warn(f"Check refused: {refusal}")
-            return None
+            return None, f"Tinker refused it: {refusal}"
         ran = check.run()
-        if not ran.ran or ran.timed_out:
-            say.warn(f"Check failed: {ran.why or 'it ran out of time'}")
-            return None
-        say.step(f"Ran a {proposal.get('kind')} check: {check.shows or first_line(check.code, 60)}")
-        ran_part = Part("The check Tinker ran", check_text(check, ran), True)
-        with say.working_on("Answering with what the check printed"):
-            answer, confirmed = checked_answer(
-                self.model.ask(Prompts.ASK_CHECKED_SYSTEM, [*parts, ran_part], "ask: checked")
+        if ran.why or not ran.ran or ran.timed_out:
+            why = ran.why or "it ran out of time"
+            say.warn(f"Check failed: {why}")
+            return None, f"It failed: {why}"
+        return ran, ""
+
+    def fixed_check(self, conversation, why, tools):
+        parts = [Part("Why your check did not run", why, True), Part("Now", Prompts.ASK_CHECK_AGAIN, True)]
+        with say.working_on("Asking for a fixed check"):
+            proposal = proposal_of(
+                self.model.ask(Prompts.ASK_SYSTEM, parts, "ask: fixed check", conversation=conversation)
             )
-        return answer, Asker.fact_kept(confirmed, items, check, ran)
+        return Check.of(proposal, tools, self.sandbox_here) if proposal else None
 
     @staticmethod
     def fact_kept(confirmed, items, check, ran):
@@ -431,20 +488,32 @@ class Teacher:
 def ask_parts(question, items, passages):
     return [
         Part("What Tinker keeps", numbered(items) or "(nothing)", True),
-        Part("From what you read", quoted(passages)),
+        Part("From what you read", quoted(passages, len(items) + 1)),
         Part("Installed here", installed_here(items)),
         Part("The question", question, True),
     ]
 
 
-def quoted(passages):
-    return "\n\n".join(f"[{passage['source']}]\n{passage['text']}" for passage in passages)
+def distinct(passages):
+    kept = {}
+    for passage in passages:
+        kept.setdefault(passage["text"].strip(), passage)
+    return list(kept.values())
+
+
+def quoted(passages, first):
+    return "\n\n".join(
+        f"[{number}] {passage['source']}\n{passage['text']}" for number, passage in enumerate(passages, first)
+    )
 
 
 def installed_here(items):
-    return "\n".join(
-        f"{group}: {Library.machine_text(machine)}" for group, machine in machines_here(items).items()
-    )
+    return "\n".join(f"{group}: {found_text(machine)}" for group, machine in machines_here(items).items())
+
+
+def found_text(machine):
+    found = [tool for tool in machine if tool["found"]]
+    return Library.machine_text(found) if found else "not installed"
 
 
 def machines_here(items):
@@ -455,27 +524,52 @@ def machines_here(items):
     return {group: machine for group, machine in machines.items() if machine}
 
 
-def first_answer(answer):
-    data = answer_data(answer)
-    if data is None:
-        return answer.value.strip(), None
-    check = data.get("check")
-    return data["answer"].strip(), check if isinstance(check, dict) else None
+def first_answer(answer, given):
+    text, data = marked_answer(answer, given)
+    return text, check_in(data)
 
 
-def checked_answer(answer):
+def proposal_of(answer):
+    return check_in(reply_data(answer))
+
+
+def check_in(data):
+    check = (data or {}).get("check")
+    return check if isinstance(check, dict) else None
+
+
+def marked_answer(answer, given):
     data = answer_data(answer)
     if data is None:
-        return answer.value.strip(), None
-    return data["answer"].strip(), data if data.get("confirms") is True else None
+        return not_learned(answer.value.strip()), None
+    text = data["answer"].strip()
+    return (text if rests_on_given(data.get("uses"), given) else not_learned(text)), data
+
+
+def rests_on_given(uses, given):
+    return isinstance(uses, list) and any(isinstance(number, int) and 1 <= number <= given for number in uses)
+
+
+def not_learned(answer):
+    return f"Not from what I learned: {answer}"
+
+
+def checked_answer(answer, given):
+    text, data = marked_answer(answer, given)
+    return text, data if data is not None and data.get("confirms") is True else None
 
 
 def answer_data(answer):
+    data = reply_data(answer)
+    return data if data and isinstance(data.get("answer"), str) else None
+
+
+def reply_data(answer):
     try:
         data = Reply(answer.value).json()
     except ValueError:
         return None
-    return data if isinstance(data, dict) and isinstance(data.get("answer"), str) else None
+    return data if isinstance(data, dict) else None
 
 
 def cut(text):
