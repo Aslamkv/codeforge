@@ -16,6 +16,7 @@ lazy from .settings import (
     CHECK_SOURCE_CHARS,
     LESSON_PHASES,
     MEMORY_ITEMS_SHOWN,
+    RECALL_OTHER_TOPIC_SIMILARITY,
     TEACH_CHECK_COMMANDS,
     TEACH_CHECK_SEARCHES,
     TEACH_CLAIMS,
@@ -61,7 +62,23 @@ class Memory:
         ranking = self.retriever.rank(text, [item["text"] for item in self.items])
         named = set(words(text))
         ranking.sort(key=lambda index: -self.named_in(self.items[index], named))
-        return self.with_cited([self.items[index] for index in ranking])[:limit]
+        ranked = [self.items[index] for index in ranking]
+        return self.with_cited(self.on_named_topics(text, ranked, named))[:limit]
+
+    def on_named_topics(self, text, ranked, named):
+        topics = {item["group"] for item in ranked} & named
+        if not topics:
+            return ranked
+        others = [item for item in ranked if item["group"] not in topics]
+        similarity_of = self.retriever.similarities(text, [item["text"] for item in others]) or [0.0] * len(
+            others
+        )
+        alike = [
+            item
+            for item, similarity in zip(others, similarity_of)
+            if similarity >= RECALL_OTHER_TOPIC_SIMILARITY
+        ]
+        return [item for item in ranked if item["group"] in topics] + alike
 
     def with_cited(self, ranked):
         given = {}

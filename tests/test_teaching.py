@@ -150,6 +150,21 @@ def test_a_rule_given_brings_the_facts_it_cites_right_after_it_within_the_limit(
 
 
 @pytest.mark.spec("TCH-1")
+def test_an_item_of_a_topic_the_text_does_not_name_comes_after_only_by_meaning(kept, monkeypatch):
+    asked = "how do flask routes work with black"
+    assert {item["group"] for item in kept.about(asked)} == {"flask"}
+
+    def embed(path, payload=None, timeout=10, errors=False):
+        return {"embeddings": [[1.0, 0.0] if "black" in text else [0.0, 1.0] for text in payload["input"]]}
+
+    monkeypatch.setattr(Ollama, "get_json", staticmethod(embed))
+    recalled = Memory(Embeddings("e")).about(asked)
+    assert recalled[0]["group"] == "flask"
+    assert recalled[1:] and all("black" in item["text"] for item in recalled[1:])
+    assert {item["group"] for item in kept.about("which lessons do you have")} >= {"python"}
+
+
+@pytest.mark.spec("TCH-1")
 def test_a_second_about_embeds_only_its_text(kept, monkeypatch):
     embedded = []
 
@@ -202,11 +217,20 @@ def test_ask_shows_the_version_installed_here_of_each_topic_shown(kept, make_mod
         {"command": "gunicorn --version", "found": False, "output": ""},
     ]
     Library.save("flask", entry)
+    Library.save(
+        "django",
+        {
+            "topic": "django",
+            "facts": [{"phase": "code", "text": "Django routes live in urls.py"}],
+            "machine": [{"command": "django-admin --version", "found": True, "output": "5.0"}],
+        },
+    )
     fake_ollama.reply("With @app.route in Flask 3.0.2.", when="ask")
     Asker(make_model(), Memory()).answer("how do flask routes work")
     prompt = fake_ollama.calls[0]["messages"][1]["content"]
     assert "Installed here" in prompt
     assert "flask: `flask --version`: Flask 3.0.2; `gunicorn --version` fails (not installed)" in prompt
+    assert "django" not in prompt
     assert "version" in Prompts.ASK_SYSTEM and "installed here" in Prompts.ASK_SYSTEM
 
 
