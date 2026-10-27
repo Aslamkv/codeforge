@@ -7,7 +7,7 @@ from conftest import MODEL, TOOLCHAIN, FakeSearch, web_page
 from tinkerkit import cli
 from tinkerkit.cli import Cli, Commands
 from tinkerkit.commands import kind_of
-from tinkerkit.knowledge import Knowledge, Library
+from tinkerkit.knowledge import Embeddings, Knowledge, Library
 from tinkerkit.model import Ollama
 from tinkerkit.project import Tracker
 from tinkerkit.prompts import Prompts
@@ -144,6 +144,22 @@ def test_a_rule_given_brings_the_facts_it_cites_right_after_it_within_the_limit(
     assert given[:2] == ["rule", "fact"] and given.count("fact") == 1
     assert [item["kind"] for item in memory.about("which rules do you have", limit=2)] == ["rule", "fact"]
     assert len(memory.about("which rules do you have", limit=1)) == 1
+
+
+@pytest.mark.spec("TCH-1")
+def test_a_second_about_embeds_only_its_text(kept, monkeypatch):
+    embedded = []
+
+    def embed(path, payload=None, timeout=10, errors=False):
+        embedded.extend(payload["input"])
+        return {"embeddings": [[float(len(text)), 1.0] for text in payload["input"]]}
+
+    monkeypatch.setattr(Ollama, "get_json", staticmethod(embed))
+    Memory(Embeddings("e")).about("what is your current toolchain for python")
+    assert len(embedded) == len(kept.items) + 1
+    embedded.clear()
+    Memory(Embeddings("e")).about("which lessons do you have")
+    assert embedded == ["which lessons do you have"]
 
 
 @pytest.mark.spec("TCH-2")
