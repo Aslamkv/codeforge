@@ -4,7 +4,7 @@ import sys
 import pytest
 
 import tinkerkit.sandbox as sandbox
-from tinkerkit.sandbox import MacSandbox, NoSandbox, Sandbox
+from tinkerkit.sandbox import LinuxSandbox, MacSandbox, NoSandbox, Sandbox
 
 
 @pytest.fixture
@@ -31,6 +31,16 @@ def test_here_picks_the_backend_by_platform_and_none_when_its_probe_fails(monkey
     monkeypatch.setattr(MacSandbox, "probe", classmethod(lambda cls: "sandbox-exec is missing"))
     assert type(Sandbox.here()) is NoSandbox
     assert Sandbox.here().why == "sandbox-exec is missing"
+
+
+@pytest.mark.spec("SBX-1")
+def test_here_picks_linux_sandbox_on_linux_and_none_when_its_probe_fails(monkeypatch):
+    monkeypatch.setattr(sys, "platform", "linux")
+    monkeypatch.setattr(LinuxSandbox, "probe", classmethod(lambda cls: ""))
+    assert type(Sandbox.here()) is LinuxSandbox
+    monkeypatch.setattr(LinuxSandbox, "probe", classmethod(lambda cls: "user namespaces are off"))
+    assert type(Sandbox.here()) is NoSandbox
+    assert Sandbox.here().why == "user namespaces are off"
 
 
 @pytest.mark.spec("SBX-4")
@@ -91,10 +101,81 @@ def test_mac_runs_under_sandbox_exec_denying_the_network_and_writes_outside(runs
     assert f'(subpath "{folder}")' in profile
 
 
-@pytest.mark.spec("SBX-3")
-def test_mac_allows_the_processes_already_running_and_a_few_more(monkeypatch):
+@pytest.mark.spec("SBX-2")
+def test_a_run_allows_the_processes_already_running_and_a_few_more(monkeypatch):
     monkeypatch.setattr(sandbox, "processes_of_this_user", lambda: 40)
     assert MacSandbox().process_limit() == 40 + sandbox.PROCESS_MARGIN
+    assert LinuxSandbox().process_limit() == 40 + sandbox.PROCESS_MARGIN
+
+
+class FakeLibc:
+    def __init__(self, abi, failing=None):
+        self.abi = abi
+        self.failing = failing
+        self.calls = []
+
+    def syscall(self, number, *arguments):
+        self.calls.append((number, *map(plain, arguments)))
+        if number == self.failing:
+            return -1
+        if number == sandbox.LANDLOCK_CREATE_RULESET:
+            return self.abi if arguments[0] is None else 7
+        return 0
+
+    def prctl(self, *arguments):
+        self.calls.append(("prctl", *map(plain, arguments)))
+        return 0
+
+
+def plain(argument):
+    if hasattr(argument, "_obj"):
+        return {name: getattr(argument._obj, name) for name, _ in argument._obj._fields_}
+    return getattr(argument, "value", argument)
+
+
+@pytest.fixture
+def confined(monkeypatch):
+    def confine(abi, failing=None):
+        libc = FakeLibc(abi, failing)
+        unshared = []
+        monkeypatch.setattr(sandbox, "libc", lambda: libc)
+        monkeypatch.setattr(sandbox.os, "unshare", lambda flags: unshared.append(flags), raising=False)
+        monkeypatch.setattr(sandbox.os, "open", lambda path, flags: 11 if path == "/folder" else 12)
+        monkeypatch.setattr(sandbox.os, "close", lambda fd: None)
+        LinuxSandbox().confine("/folder")
+        return unshared, libc.calls
+
+    return confine
+
+
+@pytest.mark.spec("SBX-3")
+def test_linux_cuts_the_network_then_allows_writes_only_in_the_folder(confined):
+    unshared, calls = confined(abi=3)
+    assert unshared == [sandbox.CLONE_NEWUSER | sandbox.CLONE_NEWNET]
+    rights = calls[1][1]["handled_access_fs"]
+    assert calls == [
+        (444, None, 0, 1),
+        (444, {"handled_access_fs": rights}, 8, 0),
+        (445, 7, 1, {"allowed_access": rights, "parent_fd": 11}, 0),
+        (445, 7, 1, {"allowed_access": sandbox.WRITE_FILE, "parent_fd": 12}, 0),
+        ("prctl", 38, 1, 0, 0, 0),
+        (446, 7, 0),
+    ]
+
+
+@pytest.mark.spec("SBX-3")
+def test_linux_handles_every_write_right_its_landlock_version_knows(confined):
+    newest = confined(abi=3)[1][1][1]["handled_access_fs"]
+    oldest = confined(abi=1)[1][1][1]["handled_access_fs"]
+    assert newest == oldest | sandbox.REFER | sandbox.TRUNCATE
+    assert not oldest & (sandbox.REFER | sandbox.TRUNCATE) and oldest & sandbox.WRITE_FILE
+
+
+@pytest.mark.spec("SBX-3")
+@pytest.mark.parametrize("failing", [444, 445, 446])
+def test_linux_refuses_to_run_when_a_landlock_step_fails(confined, failing):
+    with pytest.raises(OSError):
+        confined(abi=3, failing=failing)
 
 
 @pytest.mark.spec("SBX-2")
@@ -122,3 +203,13 @@ def test_a_real_run_writes_only_in_its_folder_and_reaches_no_network(tmp_path):
     assert result.code == 0, result.output
     assert "outside refused" in result.output and "network refused" in result.output
     assert not outside.exists()
+
+
+@pytest.mark.spec("SBX-3")
+def test_a_real_linux_run_still_writes_to_dev_null():
+    here = Sandbox.here()
+    if not isinstance(here, LinuxSandbox):
+        pytest.skip("not a Linux sandbox here")
+    with Sandbox.folder() as folder:
+        result = here.run(["sh", "-c", "echo hidden > /dev/null && echo shown"], folder)
+    assert result.code == 0 and result.output == "shown\n", result.output
