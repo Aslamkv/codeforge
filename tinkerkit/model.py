@@ -493,8 +493,11 @@ class Models:
 
     @staticmethod
     def named(embedding):
-        names = [model.get("name", "") for model in Models.answering()]
-        return [name for name in names if Models.embeds(Ollama.capabilities(name)) == embedding]
+        return [name for name in Models.names() if Models.embeds(Ollama.capabilities(name)) == embedding]
+
+    @staticmethod
+    def names():
+        return [model.get("name", "") for model in Models.answering()]
 
     @staticmethod
     def command_choices(command):
@@ -520,7 +523,7 @@ class Models:
 
     @staticmethod
     def installed(name):
-        names = [model.get("name", "") for model in Models.answering()]
+        names = Models.names()
         if name not in names:
             close = [candidate for candidate in names if name.lower() in candidate.lower()]
             hint = f" Did you mean {' or '.join(close)}?" if close else ""

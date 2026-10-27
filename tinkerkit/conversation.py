@@ -363,11 +363,7 @@ class Desk:
             self.questions.ask(channel, message.chat, Question(wanted=command))
             channel.ask_for(message.chat, *words_asked(command))
             return
-        if (
-            command in MODEL_PICKS
-            and len(message.text.split()) == 1
-            and self.chose(channel, message, command)
-        ):
+        if self.chose(channel, message, command):
             return
         if not command:
             self.talk.answer(channel, message, self.running_now, lambda: self.plan_shown(self.waiting_plan))
@@ -379,6 +375,8 @@ class Desk:
                 channel.glance(message.chat, message.id, [sent])
 
     def chose(self, channel, message, command):
+        if command not in MODEL_PICKS or len(message.text.split()) != 1:
+            return False
         try:
             names = [name for name, plain in Models.command_choices(command) if plain]
         except SystemExit:
