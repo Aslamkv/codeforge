@@ -877,6 +877,7 @@ class Ollama:
         "signal: killed",
         "segmentation fault",
     )
+    kept = set()
 
     @staticmethod
     def chat(
@@ -899,6 +900,8 @@ class Ollama:
 
     @staticmethod
     def streamed(name, messages, keep_alive, options, think, label, done_when, timeout):
+        if keep_alive not in (0, "0"):
+            Ollama.kept.add(name)
         payload = Ollama.chat_payload(name, messages, keep_alive, options, think)
         stream = Stream(label, done_when)
         try:
@@ -994,10 +997,16 @@ class Ollama:
 
     @staticmethod
     def unload(name):
+        Ollama.kept.discard(name)
         try:
             Ollama.chat(name, [], 0, None)
         except OllamaError:
             pass
+
+    @staticmethod
+    def unload_kept():
+        for name in sorted(Ollama.kept):
+            Ollama.unload(name)
 
     @staticmethod
     def installed_models():

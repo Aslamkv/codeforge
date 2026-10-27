@@ -79,6 +79,15 @@ def no_job():
     signal.signal(JOB_STOP_SIGNAL, handler)
 
 
+@pytest.fixture(autouse=True)
+def nothing_kept(monkeypatch):
+    monkeypatch.setattr(Ollama, "kept", set())
+    handlers = {signum: signal.getsignal(signum) for signum in (signal.SIGTERM, signal.SIGHUP)}
+    yield
+    for signum, handler in handlers.items():
+        signal.signal(signum, handler)
+
+
 @pytest.fixture
 def home_store(tinker_home):
     return Home.store()

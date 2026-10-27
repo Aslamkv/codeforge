@@ -7,6 +7,7 @@ lazy import functools
 lazy import os
 lazy import secrets
 lazy import shutil
+lazy import signal
 lazy import time
 lazy import traceback
 lazy import webbrowser
@@ -72,6 +73,8 @@ DoctorCheck = namedtuple("DoctorCheck", "required what check")
 
 def main():
     script_started, started_at = time.perf_counter(), datetime.datetime.now()
+    for ending in (signal.SIGTERM, signal.SIGHUP):
+        signal.signal(ending, ended_like_ctrl_c)
     try:
         argv = Cli.named(Jobs.arguments(sys.argv[1:]))
         with Jobs.running(argv):
@@ -82,6 +85,12 @@ def main():
         raise SystemExit(f"\n{exc}")
     except OSError as exc:
         raise SystemExit(cannot_read_or_write(exc))
+    finally:
+        Ollama.unload_kept()
+
+
+def ended_like_ctrl_c(*_):
+    raise KeyboardInterrupt
 
 
 def cannot_read_or_write(exc):

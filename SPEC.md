@@ -536,7 +536,8 @@ What is said in the chats, kept so that a chat is only a view of it.
 - **MOD-8** `Ollama.chat` streams a request with `model`, `messages`, `stream: true` and `keep_alive`. It
   sends `think` only when it is set, and `options` only when there are some. It gives the final chunk, with
   `message.content` and `message.thinking`. An HTTP error is an `OllamaError` flagged out of memory or crashed
-  when it is either. An unreachable Ollama is an `OllamaError`.
+  when it is either. An unreachable Ollama is an `OllamaError`. `Ollama.kept` holds each model a chat asked to
+  stay loaded (`keep_alive` not 0) until it is unloaded.
 - **MOD-9** `Stream` collects the reply and keeps the last `UNFINISHED_THOUGHT_KEPT_CHARS` chars of the
   thinking. An error chunk is an `OllamaError`: a reply error with what came before, unless it is out of
   memory or a crash. Once `done_when(content)` says the reply is complete, the stream ends within
@@ -1521,7 +1522,8 @@ The main system: the command line, one run, and the cycle of phases.
   `done` otherwise. Every phase has a phase class, and each phase done says what came of it (`outcome`: the
   points to test, the files, the tests and files written, the spec points passing).
 - **CLI-12** `main()` ends a run cleanly: Ctrl-C ends with `Interrupted.`, and Ollama and file errors end with
-  their message, never a traceback.
+  their message, never a traceback. A closed terminal and `SIGTERM` end it as Ctrl-C does. However it ends, it
+  unloads every model in `Ollama.kept` (**MOD-8**), so no model it loaded stays in memory after it.
 - **CLI-13** Built end to end: `tinker task` with a model that answers like a real one builds a project in its
   folder. Each spec point gets a test, the code passes them (a wrong first version is fixed by the verify
   loop), the README's examples run, the final review passes, lessons are kept, SPEC.md is written, the run is
