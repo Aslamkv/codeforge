@@ -8,6 +8,7 @@ from conftest import MEASURED, MODEL, PY, TOOLCHAIN, criterion, file_block, plan
 
 from tinkerkit import cli
 from tinkerkit.cli import Cli, Commands, CycleRunner, Doctor, ProjectFolder, ProjectRun
+from tinkerkit.commands import kind_of
 from tinkerkit.knowledge import Knowledge, Library
 from tinkerkit.model import Models, Ollama, OllamaError
 from tinkerkit.project import Runs, Tracker, project_store
@@ -173,10 +174,15 @@ def test_use_model(home_store, capsys):
     assert Config.get("model") == "m" and "Model in use: m" in capsys.readouterr().out
 
 
-def picker(monkeypatch, chosen, terminal=True):
+def picker(monkeypatch, chosen, terminal=True, embedding=()):
     shown = []
     monkeypatch.setattr(sys.stdin, "isatty", lambda: terminal)
     monkeypatch.setattr(cli.say, "pick", lambda choices, start: shown.append((choices, start)) or chosen)
+    monkeypatch.setattr(
+        Ollama,
+        "capabilities",
+        staticmethod(lambda name: ["embedding" if name in embedding else "completion"]),
+    )
     monkeypatch.setattr(
         Ollama, "installed_models", staticmethod(lambda: [{"name": "other"}, {"name": "m"}, {"name": "n"}])
     )
@@ -189,9 +195,9 @@ def test_use_model_without_a_name_picks_one_on_a_terminal(home_store, monkeypatc
     Models.keep("m", MEASURED)
     Models.keep("n", MEASURED)
     Config.save(model="n")
-    shown = picker(monkeypatch, 1)
+    shown = picker(monkeypatch, 0, embedding=("other",))
     Commands.use_model(None)
-    assert shown == [([("other", True), ("m", False), ("n", False)], 2)]
+    assert shown == [([("m", False), ("n", False)], 1)]
     assert Config.get("model") == "m" and "Model in use: m" in capsys.readouterr().out
     picker(monkeypatch, None)
     Commands.use_model(None)
@@ -209,6 +215,44 @@ def test_use_model_without_a_name_lists_the_models_off_a_terminal(home_store, mo
     shown = picker(monkeypatch, 1)
     monkeypatch.setattr(Ollama, "installed_models", staticmethod(lambda: []))
     Commands.use_model(None)
+    assert shown == [] and "MODEL" in capsys.readouterr().out
+
+
+@pytest.mark.spec("CLI-3")
+def test_calibrate_without_a_name_picks_one_before_its_job_starts(home_store, monkeypatch, capsys):
+    assert Cli.named(["calibrate", "m"]) == ["calibrate", "m"] and Cli.named(["runs"]) == ["runs"]
+    assert kind_of(["calibrate"]) == "glance" and kind_of(["calibrate", "m"]) == "job"
+    Models.keep("m", MEASURED)
+    Config.save(model="m")
+    shown = picker(monkeypatch, 0)
+    assert Cli.named(["calibrate"]) == ["calibrate", "other"]
+    assert shown == [([("other", False), ("m", False), ("n", False)], 1)]
+    picker(monkeypatch, None)
+    with pytest.raises(SystemExit) as cancelled:
+        Cli.named(["calibrate"])
+    assert not cancelled.value.code and capsys.readouterr().out == ""
+    shown = picker(monkeypatch, 0, terminal=False)
+    with pytest.raises(SystemExit) as listed:
+        Cli.named(["calibrate"])
+    assert not listed.value.code and shown == [] and "MODEL" in capsys.readouterr().out
+    Commands(parse("calibrate")).run()
+    assert "MODEL" in capsys.readouterr().out
+
+
+@pytest.mark.spec("CLI-3")
+def test_embed_without_a_name_picks_one_that_embeds(home_store, monkeypatch, capsys):
+    assert parse("embed").embed is None
+    Config.save(embed_model="n")
+    monkeypatch.setattr(cli.Embeddings, "vectors", lambda self, texts, keep=True: [[1.0]])
+    shown = picker(monkeypatch, 0, embedding=("m", "n"))
+    Commands.embed(None)
+    assert shown == [([("m", False), ("n", False)], 1)]
+    assert Config.get("embed_model") == "m" and "Embedding model: m" in capsys.readouterr().out
+    picker(monkeypatch, None, embedding=("m", "n"))
+    Commands.embed(None)
+    assert Config.get("embed_model") == "m" and capsys.readouterr().out == ""
+    shown = picker(monkeypatch, 0, terminal=False, embedding=("m", "n"))
+    Commands.embed(None)
     assert shown == [] and "MODEL" in capsys.readouterr().out
 
 

@@ -43,6 +43,7 @@ lazy from .text import field
 lazy from .workspace import Toolchain
 
 CHANNEL_REPORTS_ENV = "TINKER_CHANNELS"
+MODEL_PICKS = ("use-model", "calibrate", "embed")
 PROGRESS_EDIT_SECONDS = 2
 CLOCK_ONLY_EDIT_SECONDS = 15
 BUILD_STOP_GRACE_SECONDS = 120
@@ -216,9 +217,12 @@ class Desk:
 
     def banner_lines(self):
         chats = [channel.name for channel in self.channels if channel not in self.consoles]
-        details = [f"model {Config.get('model') or 'no model yet'}", f"projects {self.shown_root()}"]
+        embedding = Config.get("embed_model")
+        details = [f"model {Config.get('model') or 'no model yet'}"]
+        details += [f"embedding {embedding}"] if embedding else []
+        details += [f"projects {self.shown_root()}"]
         details += [f"chats {', '.join(chats)}"] if chats else []
-        return ["🔧 Tinker", " · ".join(details), "help lists commands · exit quits"]
+        return ["🔧 Tinker", *details, "help lists commands · exit quits"]
 
     def shown_root(self):
         home = Path.home()
@@ -359,6 +363,8 @@ class Desk:
             self.questions.ask(channel, message.chat, Question(wanted=command))
             channel.ask_for(message.chat, *words_asked(command))
             return
+        if self.chose(channel, message, command):
+            return
         if not command:
             self.talk.answer(channel, message, self.running_now, lambda: self.plan_shown(self.waiting_plan))
             return
@@ -367,6 +373,18 @@ class Desk:
             sent = channel.send(message.chat, reply)
             if kind_of(command_words(message.text)) == "glance":
                 channel.glance(message.chat, message.id, [sent])
+
+    def chose(self, channel, message, command):
+        if command not in MODEL_PICKS or len(message.text.split()) != 1:
+            return False
+        try:
+            names = [name for name, plain in Models.command_choices(command) if plain]
+        except SystemExit:
+            return False
+        if not names or channel.choose(message.chat, model_asked(command), names) is None:
+            return False
+        self.questions.ask(channel, message.chat, Question(wanted=command))
+        return True
 
     def with_words_wanted(self, channel, message):
         question = self.questions.waiting(channel, message.chat)
@@ -1030,6 +1048,11 @@ def words_asked(command):
     example = found.example.split(None, 1)[1] if " " in found.example else ""
     question = md(t"✍️ **{command}** · {found.what}\nSend {needed:code} now")
     return WordsAsked(question + (md(t", e.g. {example:code}") if example else ""), example or needed)
+
+
+def model_asked(command):
+    current = Models.in_use(command)
+    return md(t"🧠 **{command}** · choose a model") + (md(t" (in use: {current})") if current else "")
 
 
 def after_word(message):
@@ -1764,6 +1787,9 @@ class Channel:
     def ask_for(self, chat, question, hint):
         return self.send(chat, question)
 
+    def choose(self, chat, question, names):
+        return None
+
     def listened(self, timeout):
         try:
             messages = self.receive(timeout)
@@ -1849,17 +1875,18 @@ class ConsoleChannel(Channel):
             self.lines.put(self.picked(line))
 
     def picked(self, line):
-        if line.strip() != "use-model" or not typed_here():
+        command = line.strip()
+        if command not in MODEL_PICKS or not typed_here():
             return line
         try:
-            choices = Models.choices()
+            choices = Models.command_choices(command)
         except SystemExit:
             return line
         if not choices:
             return line
         with self.screen.printing:
-            name = Models.picked(choices)
-        return "" if name is None else f"use-model {name}"
+            name = Models.picked(command, choices)
+        return "" if name is None else f"{command} {name}"
 
     def remember(self, line):
         if self.history and line.strip() and line.strip().lower() not in EXIT_WORDS:

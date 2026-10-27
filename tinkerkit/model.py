@@ -485,19 +485,45 @@ class Models:
 
     @staticmethod
     def choices():
-        names = [model.get("name", "") for model in Models.answering()]
-        return [(name, Models.settings(name) is not None) for name in names]
+        return [(name, Models.settings(name) is not None) for name in Models.named(embedding=False)]
 
     @staticmethod
-    def picked(choices):
-        names, in_use = [name for name, _ in choices], Config.get("model")
-        start = names.index(in_use) if in_use in names else 0
-        index = say.pick([(name, not measured) for name, measured in choices], start)
+    def embedding_choices():
+        return [(name, True) for name in Models.named(embedding=True)]
+
+    @staticmethod
+    def named(embedding):
+        return [name for name in Models.names() if Models.embeds(Ollama.capabilities(name)) == embedding]
+
+    @staticmethod
+    def names():
+        return [model.get("name", "") for model in Models.answering()]
+
+    @staticmethod
+    def command_choices(command):
+        if command == "embed":
+            return Models.embedding_choices()
+        choices = Models.choices()
+        return [(name, True) for name, _ in choices] if command == "calibrate" else choices
+
+    @staticmethod
+    def embeds(capabilities):
+        return not capabilities or "embedding" in capabilities
+
+    @staticmethod
+    def picked(command, choices):
+        names, current = [name for name, _ in choices], Models.in_use(command)
+        start = names.index(current) if current in names else 0
+        index = say.pick([(name, not plain) for name, plain in choices], start)
         return None if index is None else names[index]
 
     @staticmethod
+    def in_use(command):
+        return Config.get("embed_model" if command == "embed" else "model")
+
+    @staticmethod
     def installed(name):
-        names = [model.get("name", "") for model in Models.answering()]
+        names = Models.names()
         if name not in names:
             close = [candidate for candidate in names if name.lower() in candidate.lower()]
             hint = f" Did you mean {' or '.join(close)}?" if close else ""
@@ -989,6 +1015,10 @@ class Ollama:
             LoadedModel(model.get("name") or model.get("model") or "", model.get("size", 0))
             for model in data.get("models", [])
         ]
+
+    @staticmethod
+    def capabilities(name):
+        return (Ollama.get_json("/api/show", {"model": name}, timeout=30) or {}).get("capabilities")
 
     @staticmethod
     def model_facts(name):

@@ -73,7 +73,7 @@ DoctorCheck = namedtuple("DoctorCheck", "required what check")
 def main():
     script_started, started_at = time.perf_counter(), datetime.datetime.now()
     try:
-        argv = Jobs.arguments(sys.argv[1:])
+        argv = Cli.named(Jobs.arguments(sys.argv[1:]))
         with Jobs.running(argv):
             run(Cli.parse(argv), script_started, started_at)
     except KeyboardInterrupt:
@@ -360,7 +360,7 @@ class Cli:
         match command:
             case "reset" | "restart" | "models" | "runs" | "doctor":
                 return True
-            case "use-model" if given.name is None:
+            case "use-model" | "calibrate" | "embed" if given.name is None:
                 return None
             case "use-model" | "calibrate" | "embed":
                 return Cli.non_empty(given.name, command, parser)
@@ -523,6 +523,15 @@ class Cli:
     def works_for_hours(args):
         return BY_NAME[args.command].kind == "job"
 
+    @staticmethod
+    def named(argv):
+        if argv != ["calibrate"]:
+            return argv
+        name = Commands.picked_model("calibrate")
+        if name is None:
+            raise SystemExit(0)
+        return [*argv, name]
+
 
 class Commands:
     def __init__(self, args):
@@ -643,15 +652,19 @@ class Commands:
         say.done(f"Model in use: {name}")
 
     @staticmethod
-    def picked_model():
-        choices = Models.choices() if sys.stdin.isatty() else []
+    def picked_model(command="use-model"):
+        choices = Models.command_choices(command) if sys.stdin.isatty() else []
         if not choices:
             Commands.list_models()
             return None
-        return Models.picked(choices)
+        return Models.picked(command, choices)
 
     @staticmethod
     def embed(name):
+        if name is None:
+            name = Commands.picked_model("embed")
+            if name is None:
+                return
         Models.installed(name)
         embeddings = Embeddings(name)
         if embeddings.vectors(["a test"], keep=False) is None:
@@ -664,6 +677,9 @@ class Commands:
         )
 
     def calibrate(self):
+        if self.args.calibrate is None:
+            Commands.list_models()
+            return
         Calibrator(Models.installed(self.args.calibrate)).run()
 
     def learn(self):

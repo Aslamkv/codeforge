@@ -43,7 +43,7 @@ from tinkerkit.jobs import began_at
 from tinkerkit.ledger import DONE_NOTE_KEPT_SECONDS, Ledger
 from tinkerkit.model import Models, Ollama
 from tinkerkit.project import Runs, Tracker
-from tinkerkit.settings import Home
+from tinkerkit.settings import Config, Home
 
 
 def wait_until(condition, timeout=15):
@@ -457,7 +457,7 @@ def test_console_sends_a_line_back_above_the_live_block(monkeypatch, clock):
     assert shown == sent_back_shown("hi", block=console.screen.drawn, columns=20)
 
 
-def model_picker(monkeypatch, console, chosen, models=({"name": "m"}, {"name": "n"})):
+def model_picker(monkeypatch, console, chosen, models=({"name": "m"}, {"name": "n"}), embedding=()):
     shown = []
 
     def pick(choices, start):
@@ -465,6 +465,11 @@ def model_picker(monkeypatch, console, chosen, models=({"name": "m"}, {"name": "
         return chosen
 
     monkeypatch.setattr(conversation.say, "pick", pick)
+    monkeypatch.setattr(
+        Ollama,
+        "capabilities",
+        staticmethod(lambda name: ["embedding" if name in embedding else "completion"]),
+    )
     monkeypatch.setattr(
         Ollama, "installed_models", staticmethod(lambda: None if models is None else list(models))
     )
@@ -483,33 +488,60 @@ def test_console_picks_the_model_for_use_model_typed_alone(monkeypatch, home_sto
 
 
 @pytest.mark.spec("CNV-8")
-def test_console_sends_nothing_when_the_pick_is_cancelled(monkeypatch, home_store):
+def test_console_picks_the_model_for_calibrate_typed_alone(monkeypatch, home_store):
     console = ruled_console(monkeypatch)
-    model_picker(monkeypatch, console, None)
-    typing(monkeypatch, "use-model")
+    Config.save(model="n")
+    shown = model_picker(monkeypatch, console, 0)
+    typing(monkeypatch, "calibrate", "calibrate n")
+    console.read()
+    assert shown == [([("m", False), ("n", False)], 1, True)]
+    assert [console.lines.get() for _ in range(3)] == ["calibrate m", "calibrate n", None]
+
+
+@pytest.mark.spec("CNV-8")
+def test_console_picks_the_model_for_embed_typed_alone(monkeypatch, home_store):
+    console = ruled_console(monkeypatch)
+    Config.save(model="m", embed_model="n")
+    shown = model_picker(monkeypatch, console, 0, embedding=("n",))
+    typing(monkeypatch, "embed")
+    console.read()
+    assert shown == [([("n", False)], 0, True)]
+    assert console.lines.get() == "embed n"
+
+
+@pytest.mark.spec("CNV-8")
+@pytest.mark.parametrize("command", ["use-model", "calibrate", "embed"])
+def test_console_sends_nothing_when_the_pick_is_cancelled(monkeypatch, home_store, command):
+    console = ruled_console(monkeypatch)
+    model_picker(monkeypatch, console, None, embedding=("n",))
+    typing(monkeypatch, command)
     console.read()
     assert console.lines.get() == "" and console.receive(0) == []
 
 
 @pytest.mark.spec("CNV-8")
+@pytest.mark.parametrize("command", ["use-model", "calibrate", "embed"])
 @pytest.mark.parametrize("models", [(), None])
-def test_console_passes_use_model_on_when_there_is_nothing_to_pick(monkeypatch, home_store, models):
+def test_console_passes_a_pick_command_on_when_there_is_nothing_to_pick(
+    monkeypatch, home_store, models, command
+):
     console = ruled_console(monkeypatch)
     shown = model_picker(monkeypatch, console, 0, models)
-    typing(monkeypatch, "use-model")
+    typing(monkeypatch, command)
     console.read()
-    assert shown == [] and console.lines.get() == "use-model"
+    assert shown == [] and console.lines.get() == command
 
 
 @pytest.mark.spec("CNV-8")
-def test_console_passes_piped_use_model_on(monkeypatch, home_store):
+@pytest.mark.parametrize("command", ["use-model", "calibrate", "embed"])
+def test_console_passes_a_piped_pick_command_on(monkeypatch, home_store, command):
     colour_terminal(monkeypatch)
     monkeypatch.setattr(sys.stdin, "isatty", lambda: False)
     console = ConsoleChannel()
     shown = model_picker(monkeypatch, console, 0)
-    typing(monkeypatch, "use-model")
+    typing(monkeypatch, command)
     console.read()
-    assert shown == [] and console.lines.get() == "use-model"
+    assert shown == [] and console.lines.get() == command
 
 
 @pytest.mark.spec("CNV-8")
@@ -930,18 +962,22 @@ def test_console_draws_no_banner_without_colour_or_a_terminal(monkeypatch):
 
 @pytest.mark.spec("CNV-8")
 def test_the_banner_names_tinker_the_model_the_projects_folder_and_the_chats(monkeypatch):
-    settings = {"model": "qwen3"}
+    settings = {"model": "qwen3", "embed_model": "nomic-embed"}
     monkeypatch.setattr(conversation.Config, "get", lambda key: settings.get(key))
     root = Path.home() / "Projects"
     with_chats = Desk([ConsoleChannel(), Recorder("telegram")], root)
     assert with_chats.banner_lines() == [
         "🔧 Tinker",
-        "model qwen3 · projects ~/Projects · chats telegram",
+        "model qwen3",
+        "embedding nomic-embed",
+        "projects ~/Projects",
+        "chats telegram",
         "help lists commands · exit quits",
     ]
     settings.clear()
     alone = Desk([ConsoleChannel()], "/tmp")
-    assert alone.banner_lines()[1] == f"model no model yet · projects {Path('/tmp').resolve()}"
+    assert alone.banner_lines()[1:3] == ["model no model yet", f"projects {Path('/tmp').resolve()}"]
+    assert len(alone.banner_lines()) == 4
 
 
 @pytest.mark.spec("CNV-8")
@@ -1554,6 +1590,37 @@ def test_a_command_sent_alone_asks_for_its_words(desk, monkeypatch):
     say(desk, channel, "status")
     assert answered == ["fix typing 2/0 crashes", "ask help me", "read /tmp/book.epub", "/status", "status"]
     assert desk.questions.by_chat == {}
+
+
+@pytest.mark.spec("CNV-13")
+def test_a_model_pick_sent_alone_asks_with_buttons(desk, monkeypatch):
+    desk, channel, _ = desk
+    answered, chosen = [], []
+    monkeypatch.setattr(desk, "answer", lambda message, channel: answered.append(message.text))
+    monkeypatch.setattr(Models, "command_choices", lambda command: [("qwen3", True), ("big", False)])
+    monkeypatch.setattr(Models, "in_use", lambda command: "qwen3")
+    say(desk, channel, "calibrate")
+    assert answered == ["calibrate"]
+    monkeypatch.setattr(
+        channel, "choose", lambda chat, question, names: chosen.append((question, names)) or 7
+    )
+    say(desk, channel, "/use_model")
+    assert answered == ["calibrate"] and chosen == [
+        ("🧠 **use-model** · choose a model (in use: qwen3)", ["qwen3"])
+    ]
+    say(desk, channel, "qwen3")
+    assert answered[-1] == "use-model qwen3"
+    monkeypatch.setattr(Models, "in_use", lambda command: None)
+    say(desk, channel, "calibrate")
+    assert chosen[-1][0] == "🧠 **calibrate** · choose a model"
+    say(desk, channel, "qwen3")
+    monkeypatch.setattr(Models, "command_choices", lambda command: [("big", False)])
+    say(desk, channel, "embed")
+    monkeypatch.setattr(
+        Models, "command_choices", lambda command: (_ for _ in ()).throw(SystemExit("no Ollama"))
+    )
+    say(desk, channel, "embed")
+    assert answered[-2:] == ["embed", "embed"] and len(chosen) == 2
 
 
 @pytest.mark.spec("CNV-14")

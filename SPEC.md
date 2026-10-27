@@ -321,7 +321,7 @@ again what it did. The job asked for last is the one that runs (**JOB-8**), and 
 person asks for pauses it too (**JOB-10**), so the person is always answered at once.
 
 - **JOB-1** `is_job(argv)` is true for a command of kind `job` (**CMD-1**): `task`, `restart`, `resume`,
-  `confirm`, `amend`, `add`, `fix`, `calibrate`, `learn`, `ask`, `teach`, `read`, `research` and `exercise`.
+  `confirm`, `amend`, `add`, `fix`, `calibrate NAME`, `learn`, `ask`, `teach`, `read`, `research` and `exercise`.
   Help, and a build an exercise runs (`EXERCISE_ENV`, which holds the exercise's job number), are never jobs. A job keeps the computer awake while it
   runs (**SET-11**). `Jobs.running(argv)` runs a job as the next number (`#1`, `#2` ...), kept in the home's
   `jobs` with its command, title, arguments, the day it started, its state `running`, its process and its
@@ -596,8 +596,10 @@ What is said in the chats, kept so that a chat is only a view of it.
   them, `keep_alive`, `num_predict` `tokens` and `QUICK_REPLY_TIMEOUT`, and gives the reply's content, stripped.
   An Ollama failure is its `OllamaError`. Nothing else outside `Model`, the quick call, an unload and
   calibration calls `Ollama.chat`.
-- **MOD-26** `Models.choices()` gives the name of each model Ollama has, in Ollama's order, with whether it was
-  measured. It ends with `SystemExit` when Ollama does not answer, as `tinker models` does.
+- **MOD-26** `Models.choices()` gives the name of each model Ollama has that does not embed, in Ollama's order,
+  with whether it was measured. It ends with `SystemExit` when Ollama does not answer, as `tinker models` does.
+  `Models.embedding_choices()` gives the names of the ones that embed: their `capabilities` from Ollama's
+  `/api/show` hold `embedding`, or Ollama gives none for them.
 
 ## project (PRJ)
 
@@ -768,9 +770,9 @@ The terminal and the chats are one conversation: the same commands, the same ans
   dim and indented, all redrawn in place; otherwise what goes on now prints as a line of its own each time it
   changes. When the thing is done, the live block clears and only the lines not yet printed follow. `exit` or
   end of input closes it. On a terminal, up and down on the prompt go through the lines typed before, the
-  last 1000 kept in the home's `prompt_history`, so they outlive a restart. `use-model` typed alone there opens
-  its select box on the prompt (**CLI-3**) and sends `use-model NAME` for the one chosen; a cancel sends
-  nothing.
+  last 1000 kept in the home's `prompt_history`, so they outlive a restart. `use-model`, `calibrate` or `embed`
+  typed alone there opens its select box on the prompt (**CLI-3**) and sends the command with the NAME chosen; a
+  cancel sends nothing.
   Once it reads, all that Tinker says (`say`, a chat's message too) prints through it, above the prompt, and
   `live` draws in that same live block, its star turning and its glow moving on their own about eight times a second. While a job
   shows its progress there, the status that says what Tinker works on is left out of the terminal. A job's
@@ -785,7 +787,8 @@ The terminal and the chats are one conversation: the same commands, the same ans
   what you type on it are never redrawn. When the window is resized, the block and the rule are drawn again
   at the new size right away, still right above the prompt and with what Tinker printed right above them, and
   they never spill onto the prompt row. The conversation opens in a framed banner that names Tinker, the model
-  in use, the projects folder and the chats it listens on; it draws a rule over the prompt, shows each line
+  in use, the embedding model when one is set, the projects folder and the chats it listens on, each on a
+  line of its own; it draws a rule over the prompt, shows each line
   you send again highlighted, and marks each message it sends with a steel blue `●`. Piped input draws no
   rule and shows no line again; with `NO_COLOR` or no terminal, none of that is drawn.
 - **CNV-9** `Desk.run` claims each chat channel. When another Tinker holds one, it stops if there is no
@@ -826,7 +829,10 @@ The terminal and the chats are one conversation: the same commands, the same ans
   (`ask_for`: what it does, what to send, an example) and takes the next message as them (`fix MESSAGE`), even
   one that starts with a command word. A command of its own instead (sent with its `/`, alone, or the same
   command, as a file sent to read is) drops the question. A command whose words are optional (`status`) runs
-  at once.
+  at once. `use-model`, `calibrate` and `embed` sent alone on a channel with buttons (Telegram) ask with
+  `choose(chat, question, names)` instead: a button for each model its select box (**CLI-3**) shows plain, the
+  question naming the one in use; the next message (a tap sends the name) is the NAME, as above. With none to
+  show, or on a channel without buttons, they run at once and list the models.
 - **CNV-14** A glance (a command of kind `glance`, **CMD-1**) is answered with `glance`: the person's message
   goes at once, the answer in `GLANCE_KEPT_SECONDS`. `history [PAGE | #N]` lists the things shown by page
   ([State](#state)), with what was asked for each, or shows thing N again. `clear chat` takes every message out
@@ -895,7 +901,8 @@ The chat plugin: Telegram, and `tinker channel`.
 - **CHN-7** `send` and `edit` post Telegram HTML, and fall back to plain text when the HTML is refused. An edit
   of unchanged text is harmless. A refused edit takes the message out and sends a new one in its place.
   `latest` tracks the newest message still in the chat. `ask_for(chat, question, hint)` sends the question with
-  the reply box open (`force_reply`), the hint in it cut to 64 characters.
+  the reply box open (`force_reply`), the hint in it cut to 64 characters. `choose(chat, question, names)` sends
+  the question with a keyboard of one button per name, one to a row, hidden after a tap (`one_time_keyboard`).
 - **CHN-8** `send_file(chat, path, caption)` posts `sendDocument` as `multipart/form-data`: the chat, the file
   under its name, and the caption as Telegram HTML (at most 1024 chars). A failure sends the caption alone.
 - **CHN-9** Every message of a chat served (Tinker's, and the person's) is kept in the ledger (**LED-1**); an
@@ -1472,11 +1479,13 @@ The main system: the command line, one run, and the cycle of phases.
 - **CLI-2** `tinker help` lists every command by group, the options, and examples. With
   `TINKER_FORMAT=markup`, it lists what a chat can send. `tinker help COMMAND` shows that command's arguments,
   and an unknown command is an error.
-- **CLI-3** `Commands`. `use-model` accepts only a measured model. `use-model` with no NAME, on a terminal,
-  opens a select box (**MSG-8**) on Ollama's models (**MOD-26**), the measured ones plain and the rest dim,
-  starting at the one in use; the one chosen is used as `use-model NAME` uses it (one never measured says to
-  calibrate it first), and a cancel changes nothing. Not on a terminal (a chat too), it lists the models as
-  `tinker models` does. `runs` lists
+- **CLI-3** `Commands`. `use-model` accepts only a measured model. `use-model`, `calibrate` and `embed` with no
+  NAME, on a terminal, open a select box (**MSG-8**) on Ollama's models (**MOD-26**), and the one chosen is
+  taken as the NAME (one never measured says to calibrate it first); a cancel changes nothing. `use-model` and
+  `calibrate` show only the models that do not embed: `use-model` the measured ones plain and the rest dim,
+  starting at the one in use; `calibrate` all plain, starting at the one in use, and picks before its job
+  starts. `embed` shows only the ones that embed, all plain, starting at the embedding model. Not on a
+  terminal, they list the models as `tinker models` does; a chat with buttons asks with them (**CNV-13**). `runs` lists
   the runs, newest first. `status [@PROJECT]` shows the project's criteria and its open phase (in a chat,
   `status` alone shows what runs, **CNV-11**). `rename` renames the folder of a project whose plan waits, and
   its pointer. `config` shows the settings, and `config KEY VALUE` sets one.

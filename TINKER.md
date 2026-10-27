@@ -66,10 +66,14 @@ tinker calibrate qwen3
 tinker use-model qwen3
 ```
 
-Or choose from Ollama's models in a select box (the unmeasured ones dim; up, down, Enter, Esc):
+Or leave out the name and choose from Ollama's models in a select box (up, down, Enter, Esc), on the command
+line or typed alone in the chat. `embed` lists the embedding models, the others the rest, and `use-model` dims
+the unmeasured ones:
 
 ```sh
+tinker calibrate
 tinker use-model
+tinker embed
 ```
 
 To learn (`tinker learn`, `--web`), Tinker also needs a small embedding model:
@@ -171,7 +175,7 @@ Talk with Tinker. Every command works here, and anything else is a normal chat (
 tinker
 ```
 
-On a colour terminal it opens with a banner showing the model, the projects folder and the chats it listens
+On a colour terminal it opens with a banner showing the model, the embedding model, the projects folder and the chats it listens
 on. As in Claude Code, the prompt, with a rule over it, follows the output: it starts under the banner and
 moves down as Tinker prints, until it reaches the bottom row; then older lines scroll into the scrollback.
 What you type is never redrawn. Up and down bring back the lines you typed before, even from an earlier
@@ -245,6 +249,9 @@ Type `/` in the chat to pick any command from the bot's menu. With or without th
 runs
 /use_model qwen3:8b
 ```
+
+Send `/use_model`, `/calibrate` or `/embed` alone and Tinker answers with a button for each model it can take;
+tap one to choose it.
 
 Attach a book, an article or a document to the chat, and Tinker reads it: see [Read](#read-).
 

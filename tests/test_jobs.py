@@ -76,13 +76,14 @@ def test_long_commands_are_jobs_and_the_rest_are_not():
         ["exercise", "rust"],
         ["confirm"],
         ["amend", "x"],
-        ["calibrate"],
+        ["calibrate", "qwen3"],
         ["ask", "status", "of", "python"],
     ):
         assert is_job(argv), argv
     for argv in (
         [],
         ["help"],
+        ["calibrate"],
         ["runs"],
         ["jobs"],
         ["stop"],

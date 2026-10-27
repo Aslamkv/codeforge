@@ -306,6 +306,18 @@ def test_ask_for_opens_the_reply_box_with_a_hint():
     assert reply == {"force_reply": True, "input_field_placeholder": "x" * 64}
 
 
+@pytest.mark.spec("CHN-7")
+def test_choose_sends_a_button_for_each_name():
+    api = BotAPI(sendMessage={"message_id": 5})
+    assert telegram(api).choose("42", "🧠 **use-model**", ["qwen3", "llama3"]) == 5
+    reply = json.loads(api.calls[0][1]["reply_markup"])
+    assert reply == {
+        "keyboard": [[{"text": "qwen3"}], [{"text": "llama3"}]],
+        "one_time_keyboard": True,
+        "resize_keyboard": True,
+    }
+
+
 @pytest.mark.spec("CHN-9")
 def test_the_ledger_keeps_every_message_and_collects_them(monkeypatch):
     update = {"update_id": 1, "message": {"message_id": 4, "text": "task calc", "chat": {"id": 42}}}
