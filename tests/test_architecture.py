@@ -18,6 +18,7 @@ LAYERS = (
     "commands",
     "jobs",
     "sandbox",
+    "checking",
     "ledger",
     "prompts",
     "workspace",
