@@ -1279,8 +1279,9 @@ then is anything changed.
   (**SBX**) and a second call answers with what it printed ("I ran …, it printed …"); with no check there is one
   call. A `sql` check runs in the standard library's SQLite in memory, with attaching databases and loading
   extensions refused. A `command` check runs its code from a new empty folder with a tool learned and found on
-  this machine; a package manager or installer (pip, npm, brew, apt, cargo install, gem, go install and the like)
-  is refused. A refused or failed check is said, and the answer goes on without it.
+  this machine; a tool with a package manager or installer anywhere in it (pip, npm, brew, apt, gem,
+  `python3 -m pip` and the like) or an install word right after its program (`cargo install`, `go get`,
+  `poetry add`) is refused. A refused or failed check is said, and the answer goes on without it.
 - **TCH-11** An answer a check ran and confirmed is kept in its topic as a candidate fact, with a `checked`
   event and its sources (the check and what it printed). `tinker teach` confirms or corrects it (**TCH-7**).
 

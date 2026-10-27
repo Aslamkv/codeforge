@@ -29,6 +29,10 @@ INSTALLERS = {
 INSTALL_WORDS = {"install", "add", "get"}
 
 
+def installs(words):
+    return bool(INSTALLERS & set(words)) or bool(INSTALL_WORDS & set(words[1:2]))
+
+
 def found_programs(machines):
     return {first_word(tool["command"]) for machine in machines for tool in machine if tool.get("found")}
 
@@ -138,7 +142,7 @@ class CommandCheck(Check):
         except ValueError:
             return f"the tool {self.tool!r} cannot be read"
         program = words[0] if words else ""
-        if program in INSTALLERS or INSTALL_WORDS & set(words):
+        if installs(words):
             return f"{self.tool!r} installs software, which a check may not do"
         if program not in self.tools:
             return f"{program or 'no tool'} is not found on this machine"

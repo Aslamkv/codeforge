@@ -102,12 +102,20 @@ def test_a_command_file_defaults_to_check():
 
 
 @pytest.mark.parametrize(
-    "tool", ["ruby", "pip install x", "npm", "cargo install ripgrep", "go get x", "brew"]
+    "tool",
+    ["ruby", "pip install x", "npm", "cargo install ripgrep", "go get x", "brew", "python3 -m pip install x"],
 )
 def test_an_unfound_tool_or_an_installer_is_refused_without_running(tool):
     result, sandbox = command(tool, tools=("python3", "cargo", "go", "pip", "npm", "brew"))
     assert not result.ran and result.why
     assert sandbox.runs == []
+
+
+@pytest.mark.parametrize("tool", ["sqlite3 -cmd get", "python3 -c add"])
+def test_an_install_word_after_the_first_argument_is_not_installing(tool):
+    result, sandbox = command(tool, tools=("python3", "sqlite3"))
+    assert "installs" not in result.why
+    assert len(sandbox.runs) == 1
 
 
 def test_without_a_sandbox_a_command_does_not_run():
