@@ -462,13 +462,13 @@ COMMANDS = [
     Command(
         "calibrate",
         "Set up",
-        "calibrate NAME",
+        "calibrate [NAME]",
         "measure a model once (a minute or a few)",
         "Measure a model once: the largest prompt it reads and the longest reply it writes.",
         kind="job",
         chat=True,
         words="one",
-        arguments=[Argument("name", None, None, "the model's name, as `tinker models` lists it")],
+        arguments=[Argument("name", "?", None, "the model's name, as `tinker models` lists it")],
     ),
     Command(
         "use-model",
@@ -484,13 +484,13 @@ COMMANDS = [
     Command(
         "embed",
         "Set up",
-        "embed NAME",
+        "embed [NAME]",
         "the embedding model that indexes what is learned",
         "Use this embedding model to index what is learned, so builds find it by meaning.",
         kind="glance",
         chat=True,
         words="one",
-        arguments=[Argument("name", None, None, "the model's name, as `tinker models` lists it")],
+        arguments=[Argument("name", "?", None, "the model's name, as `tinker models` lists it")],
     ),
     Command(
         "config",

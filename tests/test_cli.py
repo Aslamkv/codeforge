@@ -213,6 +213,42 @@ def test_use_model_without_a_name_lists_the_models_off_a_terminal(home_store, mo
 
 
 @pytest.mark.spec("CLI-3")
+def test_calibrate_without_a_name_picks_one_before_its_job_starts(home_store, monkeypatch, capsys):
+    assert Cli.named(["calibrate", "m"]) == ["calibrate", "m"] and Cli.named(["runs"]) == ["runs"]
+    Models.keep("m", MEASURED)
+    Config.save(model="m")
+    shown = picker(monkeypatch, 0)
+    assert Cli.named(["calibrate"]) == ["calibrate", "other"]
+    assert shown == [([("other", False), ("m", False), ("n", False)], 1)]
+    picker(monkeypatch, None)
+    with pytest.raises(SystemExit) as cancelled:
+        Cli.named(["calibrate"])
+    assert not cancelled.value.code and capsys.readouterr().out == ""
+    shown = picker(monkeypatch, 0, terminal=False)
+    with pytest.raises(SystemExit) as listed:
+        Cli.named(["calibrate"])
+    assert not listed.value.code and shown == [] and "MODEL" in capsys.readouterr().out
+
+
+@pytest.mark.spec("CLI-3")
+def test_embed_without_a_name_picks_one_that_embeds(home_store, monkeypatch, capsys):
+    assert parse("embed").embed is None
+    Config.save(embed_model="n")
+    monkeypatch.setattr(Ollama, "capabilities", staticmethod(lambda name: [] if name == "n" else ["completion"]))
+    monkeypatch.setattr(cli.Embeddings, "vectors", lambda self, texts, keep=True: [[1.0]])
+    shown = picker(monkeypatch, 2)
+    Commands.embed(None)
+    assert shown == [([("other", True), ("m", True), ("n", False)], 2)]
+    assert Config.get("embed_model") == "n" and "Embedding model: n" in capsys.readouterr().out
+    picker(monkeypatch, None)
+    Commands.embed(None)
+    assert Config.get("embed_model") == "n" and capsys.readouterr().out == ""
+    shown = picker(monkeypatch, 2, terminal=False)
+    Commands.embed(None)
+    assert shown == [] and "MODEL" in capsys.readouterr().out
+
+
+@pytest.mark.spec("CLI-3")
 def test_runs_and_status(tmp_path, capsys):
     registered(tmp_path / "older", "aaa111")
     registered(tmp_path / "newer", "bbb222")
