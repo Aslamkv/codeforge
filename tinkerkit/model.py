@@ -509,13 +509,14 @@ class Models:
 
     @staticmethod
     def picked(command, choices):
-        names, current = (
-            [name for name, _ in choices],
-            Config.get("embed_model" if command == "embed" else "model"),
-        )
+        names, current = [name for name, _ in choices], Models.in_use(command)
         start = names.index(current) if current in names else 0
         index = say.pick([(name, not plain) for name, plain in choices], start)
         return None if index is None else names[index]
+
+    @staticmethod
+    def in_use(command):
+        return Config.get("embed_model" if command == "embed" else "model")
 
     @staticmethod
     def installed(name):

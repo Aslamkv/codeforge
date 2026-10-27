@@ -250,6 +250,9 @@ runs
 /use_model qwen3:8b
 ```
 
+Send `/use_model`, `/calibrate` or `/embed` alone and Tinker answers with a button for each model it can take;
+tap one to choose it.
+
 Attach a book, an article or a document to the chat, and Tinker reads it: see [Read](#read-).
 
 The chat stays tidy. Tinker's status is one message: each new status replaces the one before, at the

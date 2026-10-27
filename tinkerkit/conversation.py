@@ -360,6 +360,12 @@ class Desk:
             self.questions.ask(channel, message.chat, Question(wanted=command))
             channel.ask_for(message.chat, *words_asked(command))
             return
+        if (
+            command in MODEL_PICKS
+            and len(message.text.split()) == 1
+            and self.chose(channel, message, command)
+        ):
+            return
         if not command:
             self.talk.answer(channel, message, self.running_now, lambda: self.plan_shown(self.waiting_plan))
             return
@@ -368,6 +374,16 @@ class Desk:
             sent = channel.send(message.chat, reply)
             if kind_of(command_words(message.text)) == "glance":
                 channel.glance(message.chat, message.id, [sent])
+
+    def chose(self, channel, message, command):
+        try:
+            names = [name for name, plain in Models.command_choices(command) if plain]
+        except SystemExit:
+            return False
+        if not names or channel.choose(message.chat, model_asked(command), names) is None:
+            return False
+        self.questions.ask(channel, message.chat, Question(wanted=command))
+        return True
 
     def with_words_wanted(self, channel, message):
         question = self.questions.waiting(channel, message.chat)
@@ -1031,6 +1047,11 @@ def words_asked(command):
     example = found.example.split(None, 1)[1] if " " in found.example else ""
     question = md(t"✍️ **{command}** · {found.what}\nSend {needed:code} now")
     return WordsAsked(question + (md(t", e.g. {example:code}") if example else ""), example or needed)
+
+
+def model_asked(command):
+    current = Models.in_use(command)
+    return md(t"🧠 **{command}** · choose a model") + (md(t" (in use: {current})") if current else "")
 
 
 def after_word(message):
@@ -1764,6 +1785,9 @@ class Channel:
 
     def ask_for(self, chat, question, hint):
         return self.send(chat, question)
+
+    def choose(self, chat, question, names):
+        return None
 
     def listened(self, timeout):
         try:

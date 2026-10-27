@@ -364,6 +364,11 @@ class TelegramChannel(Channel):
         reply = {"force_reply": True, "input_field_placeholder": hint[:TELEGRAM_MAX_PLACEHOLDER_CHARS]}
         return self.send(chat, question, reply_markup=json.dumps(reply))
 
+    def choose(self, chat, question, names):
+        buttons = [[{"text": name}] for name in names]
+        reply = {"keyboard": buttons, "one_time_keyboard": True, "resize_keyboard": True}
+        return self.send(chat, question, reply_markup=json.dumps(reply))
+
     def send(self, chat, text, **fields):
         try:
             sent = self.post("sendMessage", chat, text, **fields)["message_id"]

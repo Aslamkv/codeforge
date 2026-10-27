@@ -1588,6 +1588,37 @@ def test_a_command_sent_alone_asks_for_its_words(desk, monkeypatch):
     assert desk.questions.by_chat == {}
 
 
+@pytest.mark.spec("CNV-13")
+def test_a_model_pick_sent_alone_asks_with_buttons(desk, monkeypatch):
+    desk, channel, _ = desk
+    answered, chosen = [], []
+    monkeypatch.setattr(desk, "answer", lambda message, channel: answered.append(message.text))
+    monkeypatch.setattr(Models, "command_choices", lambda command: [("qwen3", True), ("big", False)])
+    monkeypatch.setattr(Models, "in_use", lambda command: "qwen3")
+    say(desk, channel, "calibrate")
+    assert answered == ["calibrate"]
+    monkeypatch.setattr(
+        channel, "choose", lambda chat, question, names: chosen.append((question, names)) or 7
+    )
+    say(desk, channel, "/use_model")
+    assert answered == ["calibrate"] and chosen == [
+        ("🧠 **use-model** · choose a model (in use: qwen3)", ["qwen3"])
+    ]
+    say(desk, channel, "qwen3")
+    assert answered[-1] == "use-model qwen3"
+    monkeypatch.setattr(Models, "in_use", lambda command: None)
+    say(desk, channel, "calibrate")
+    assert chosen[-1][0] == "🧠 **calibrate** · choose a model"
+    say(desk, channel, "qwen3")
+    monkeypatch.setattr(Models, "command_choices", lambda command: [("big", False)])
+    say(desk, channel, "embed")
+    monkeypatch.setattr(
+        Models, "command_choices", lambda command: (_ for _ in ()).throw(SystemExit("no Ollama"))
+    )
+    say(desk, channel, "embed")
+    assert answered[-2:] == ["embed", "embed"] and len(chosen) == 2
+
+
 @pytest.mark.spec("CNV-14")
 def test_a_glance_goes_soon_and_history_shows_things_again(desk, monkeypatch):
     desk, channel, _ = desk
