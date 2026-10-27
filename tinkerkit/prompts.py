@@ -875,12 +875,13 @@ Reply with ONLY JSON: {"overview":"...","features":["..."],"requires":"Python 3.
         'Reply with ONLY JSON: {"answer": "...", "uses": [1], "check": null or {"kind": "sql|command", '
         '"code": "...", "shows": "what it shows", "tool": "...", "file": "..."}}'
     )
-    ASK_CHECKED_SYSTEM = ASK_RULES + (
-        " Tinker ran the check below for this question. Answer with what it printed: say "
-        '"I ran …, it printed …" and let that settle the claim it checks. "confirms" is true only when what '
-        'it printed shows the answer holds. "fact" is the one fact it showed, in one general sentence that '
-        'does not repeat the question; "topic" is the one topic shown above it belongs to. Reply with ONLY '
-        'JSON: {"answer": "...", "confirms": true or false, "fact": "...", "topic": "..."}'
+    ASK_CHECKED = (
+        "Tinker ran your check above. Answer the question again with what it printed: say "
+        '"I ran …, it printed …" and let that settle the claim it checks. "uses" lists the numbers of the items '
+        'and passages the answer rests on, empty when none. "confirms" is true only when what it printed shows '
+        'the answer holds. "fact" is the one fact it showed, in one general sentence that does not repeat the '
+        'question; "topic" is the one topic shown earlier it belongs to. Reply with ONLY JSON: {"answer": "...", '
+        '"uses": [1], "confirms": true or false, "fact": "...", "topic": "..."}'
     )
 
     EXERCISE_LANGUAGE_SYSTEM = """The person asks Tinker, a code generator, to practise a programming language, named by the

@@ -63,6 +63,14 @@ class Answer(namedtuple("Answer", "value why thought", defaults=("", ""))):
         return self.value
 
 
+def system_turn(text):
+    return {"role": "system", "content": text}
+
+
+def user_turn(text):
+    return {"role": "user", "content": text}
+
+
 class Model:
     def __init__(self, name, settings, keep_alive, log, max_growth=DEFAULT_CONFIG["max_growth"]):
         self.name, self.settings = name, settings
@@ -102,6 +110,7 @@ class Model:
         max_reply=None,
         unthinking_retry=True,
         think=None,
+        conversation=None,
     ):
         self.evict_others()
         chosen = self.think_now() if think is None else think
@@ -113,24 +122,29 @@ class Model:
             done_when,
             max_reply or self.max_reply,
             unthinking_retry,
+            list(conversation or []),
         )
         answer = None
         while answer is None:
             answer = self.one_try(tries, *request)
+        if conversation is not None:
+            conversation += [user_turn(tries.user), {"role": "assistant", "content": answer.value or ""}]
         return answer
 
-    def one_try(self, tries, system, parts, label, done_when, max_reply, unthinking_retry):
+    def one_try(self, tries, system, parts, label, done_when, max_reply, unthinking_retry, earlier):
+        read = system + "".join(turn["content"] for turn in earlier)
         user = self.user_message(
-            system, self.with_thought(parts, tries.unfinished_thought), label, tries.shrink
+            read, self.with_thought(parts, tries.unfinished_thought), label, tries.shrink
         )
-        cap = min(self.reply_room(system, user), self.max_reply, max_reply)
+        tries.user = user
+        cap = min(self.reply_room(read, user), self.max_reply, max_reply)
         tries.budget = max(MIN_REPLY_TOKENS, min(tries.budget, cap))
         shown = self.call_label(label, tries.think, tries.budget)
         started = time.perf_counter()
         try:
-            data = self.send(system, user, tries, shown, done_when)
+            data = self.send([system_turn(system), *earlier, user_turn(user)], tries, shown, done_when)
         except OllamaError as exc:
-            return self.after_error(exc, label, tries, self.prompt_tokens(system, user), shown, started)
+            return self.after_error(exc, label, tries, self.prompt_tokens(read, user), shown, started)
         content, cut = self.log_exchange(system, user, shown, tries.budget, data, started)
         if cut and self.unfinished(content, done_when) and tries.think is not False:
             return self.think_again(tries, data, shown, started, cap, unthinking_retry)
@@ -182,10 +196,10 @@ class Model:
         mode = "no thinking" if think is False else f"think {think if think is not None else 'default'}"
         return f"{label} [{mode}, reply up to {budget // 1024}K tok]"
 
-    def send(self, system, user, tries, shown, done_when):
+    def send(self, messages, tries, shown, done_when):
         return Ollama.chat(
             self.name,
-            [{"role": "system", "content": system}, {"role": "user", "content": user}],
+            messages,
             self.keep_alive,
             self.request_options(tries.budget),
             tries.think,
@@ -471,7 +485,7 @@ class Tries:
     def __init__(self, think, budget):
         self.think, self.budget = think, budget
         self.shrink = self.stalls = self.crashes = self.reply_errors = 0
-        self.unfinished_thought = ""
+        self.unfinished_thought = self.user = ""
 
 
 class Models:

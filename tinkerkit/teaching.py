@@ -163,14 +163,17 @@ class Asker:
             items, passages = self.recalled(question)
         self.on_to("answer")
         read = f" and {len(passages)} passage(s) of what it read" if passages else ""
-        parts = ask_parts(question, items, passages)
+        conversation, given = [], len(items) + len(passages)
         with say.working_on(f"Answering from {len(items)} thing(s) Tinker keeps{read}"):
             answer, proposal = first_answer(
-                self.model.ask(Prompts.ASK_SYSTEM, parts, "ask"), len(items) + len(passages)
+                self.model.ask(
+                    Prompts.ASK_SYSTEM, ask_parts(question, items, passages), "ask", conversation=conversation
+                ),
+                given,
             )
         if proposal is None:
             return self.said(answer)
-        return self.said(*(self.checked(parts, items, proposal) or (answer,)))
+        return self.said(*(self.checked(conversation, given, items, proposal) or (answer,)))
 
     def recalled(self, question):
         items = self.memory.about(question)
@@ -188,7 +191,7 @@ class Asker:
     def sandbox_here(self):
         return self.sandbox or Sandbox.here()
 
-    def checked(self, parts, items, proposal):
+    def checked(self, conversation, given, items, proposal):
         tools = found_programs(list(machines_here(items).values()))
         check = Check.of(proposal, tools, self.sandbox_here)
         refusal = check.refusal()
@@ -200,10 +203,14 @@ class Asker:
             say.warn(f"Check failed: {ran.why or 'it ran out of time'}")
             return None
         say.step(f"Ran a {proposal.get('kind')} check: {check.shows or first_line(check.code, 60)}")
-        ran_part = Part("The check Tinker ran", check_text(check, ran), True)
+        ran_parts = [
+            Part("The check Tinker ran", check_text(check, ran), True),
+            Part("Now", Prompts.ASK_CHECKED, True),
+        ]
         with say.working_on("Answering with what the check printed"):
             answer, confirmed = checked_answer(
-                self.model.ask(Prompts.ASK_CHECKED_SYSTEM, [*parts, ran_part], "ask: checked")
+                self.model.ask(Prompts.ASK_SYSTEM, ran_parts, "ask: checked", conversation=conversation),
+                given,
             )
         return answer, Asker.fact_kept(confirmed, items, check, ran)
 
@@ -484,13 +491,17 @@ def machines_here(items):
 
 
 def first_answer(answer, given):
+    text, data = marked_answer(answer, given)
+    check = (data or {}).get("check")
+    return text, check if isinstance(check, dict) else None
+
+
+def marked_answer(answer, given):
     data = answer_data(answer)
     if data is None:
         return not_learned(answer.value.strip()), None
-    check = data.get("check")
     text = data["answer"].strip()
-    marked = text if rests_on_given(data.get("uses"), given) else not_learned(text)
-    return marked, check if isinstance(check, dict) else None
+    return (text if rests_on_given(data.get("uses"), given) else not_learned(text)), data
 
 
 def rests_on_given(uses, given):
@@ -501,11 +512,9 @@ def not_learned(answer):
     return f"Not from what I learned: {answer}"
 
 
-def checked_answer(answer):
-    data = answer_data(answer)
-    if data is None:
-        return answer.value.strip(), None
-    return data["answer"].strip(), data if data.get("confirms") is True else None
+def checked_answer(answer, given):
+    text, data = marked_answer(answer, given)
+    return text, data if data is not None and data.get("confirms") is True else None
 
 
 def answer_data(answer):

@@ -531,6 +531,18 @@ def test_ask_once(make_model, fake_ollama, model_log):
     assert log[0]["reply"] == "the answer" and log[0]["label"].startswith("Ask [think high")
 
 
+@pytest.mark.spec("TCH-10")
+def test_an_ask_goes_on_a_conversation_and_adds_its_turns(make_model, fake_ollama):
+    fake_ollama.reply("first").reply("second")
+    model, conversation = make_model(), []
+    model.ask("You help.", [Part("Question", "what?", True)], "Ask", conversation=conversation)
+    model.ask("You help.", [Part("Check", "it printed 42", True)], "Ask", conversation=conversation)
+    first, second = (call["messages"] for call in fake_ollama.calls)
+    assert second[:2] == first and second[2] == {"role": "assistant", "content": "first"}
+    assert second[3] == {"role": "user", "content": "## Check\nit printed 42"}
+    assert conversation == [*second[1:], {"role": "assistant", "content": "second"}]
+
+
 @pytest.mark.spec("MOD-24")
 def test_a_model_logs_its_details_and_says_only_when_it_asks_again(model_log, fake_ollama, capsys):
     fake_ollama.reply("not json").reply('{"ok": 1}')

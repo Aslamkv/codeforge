@@ -276,16 +276,24 @@ def test_an_ask_runs_its_sql_check_and_answers_with_what_it_printed(
     monkeypatch.setattr(Sandbox, "here", classmethod(lambda cls: pytest.fail("a sql check needs no sandbox")))
     check = {"kind": "sql", "code": "select 40 + 2", "shows": "what 40 + 2 gives"}
     answered = "I ran select 40 + 2, it printed 42."
-    fake_ollama.reply(first_reply("It gives 42.", check), when="ask")
-    fake_ollama.reply(answered, when="ask")
+    reply = first_reply("It gives 42.", check)
+    fake_ollama.reply(reply, when="ask")
+    fake_ollama.reply(json.dumps({"answer": answered, "uses": [1]}), when="ask")
     ending = Asker(make_model(), kept).answer("what does sqlite give for 40 + 2")
-    second = fake_ollama.calls[1]["messages"]
-    assert second[0]["content"].startswith(Prompts.ASK_CHECKED_SYSTEM)
-    assert "The check Tinker ran" in second[1]["content"] and "42" in second[1]["content"]
-    assert "select 40 + 2" in second[1]["content"] and "The question" in second[1]["content"]
+    first, second = (call["messages"] for call in fake_ollama.calls)
+    assert second[:2] == first and first[0]["content"].startswith(Prompts.ASK_SYSTEM)
+    assert second[2] == {"role": "assistant", "content": reply} and len(second) == 4
+    assert "The check Tinker ran" in second[3]["content"] and "42" in second[3]["content"]
+    assert "select 40 + 2" in second[3]["content"] and "The question" not in second[3]["content"]
     out = capsys.readouterr().out
     assert "Ran a sql check" in out and answered in out
     assert ending["details"] == [("Answer", answered)]
+
+
+@pytest.mark.spec("TCH-2")
+def test_a_checked_answer_that_uses_no_number_given_is_marked(kept, make_model, fake_ollama):
+    ending = checked_ask(kept, make_model, fake_ollama, checked_reply(confirms=False, uses=[]))
+    assert ending["details"] == [("Answer", f"Not from what I learned: {CHECKED_ANSWER}")]
 
 
 @pytest.mark.spec("TCH-10")
@@ -293,10 +301,12 @@ def test_an_ask_runs_a_command_check_with_a_tool_found_here(kept, make_model, fa
     flask_found_here()
     check = {"kind": "command", "code": "import flask", "shows": "flask imports", "tool": "python3"}
     fake_ollama.reply(first_reply("It imports.", check), when="ask")
-    fake_ollama.reply("I ran import flask, it printed Flask 3.0.2.", when="ask")
+    fake_ollama.reply(
+        json.dumps({"answer": "I ran import flask, it printed Flask 3.0.2.", "uses": []}), when="ask"
+    )
     sandbox = FakeSandbox()
     Asker(make_model(), Memory(), sandbox=sandbox).answer("how do flask routes work")
-    assert len(sandbox.runs) == 1 and "Flask 3.0.2" in fake_ollama.calls[1]["messages"][1]["content"]
+    assert len(sandbox.runs) == 1 and "Flask 3.0.2" in fake_ollama.calls[1]["messages"][3]["content"]
 
 
 @pytest.mark.spec("TCH-10")
@@ -327,8 +337,12 @@ SQL_CHECK = {"kind": "sql", "code": "select 40 + 2", "shows": "what 40 + 2 gives
 CHECKED_ANSWER = "I ran select 40 + 2, it printed 42."
 
 
-def checked_reply(confirms=True, topic="flask", fact="SQLite adds integers exactly: 40 + 2 gives 42"):
-    return json.dumps({"answer": CHECKED_ANSWER, "confirms": confirms, "fact": fact, "topic": topic})
+def checked_reply(
+    confirms=True, topic="flask", fact="SQLite adds integers exactly: 40 + 2 gives 42", uses=(1,)
+):
+    return json.dumps(
+        {"answer": CHECKED_ANSWER, "uses": list(uses), "confirms": confirms, "fact": fact, "topic": topic}
+    )
 
 
 def checked_ask(kept, make_model, fake_ollama, reply):
@@ -351,7 +365,7 @@ def test_an_answer_the_check_confirmed_is_kept_as_a_candidate_fact(kept, make_mo
     kept_line = f"Fact kept for Flask: {fact['text']}"
     assert kept_line in capsys.readouterr().out
     assert ending["details"] == [("Answer", CHECKED_ANSWER), ("Kept", kept_line)]
-    assert "confirms" in fake_ollama.calls[1]["messages"][0]["content"]
+    assert "confirms" in fake_ollama.calls[1]["messages"][-1]["content"]
 
 
 @pytest.mark.spec("TCH-11")
@@ -376,9 +390,10 @@ def test_an_answer_the_check_did_not_confirm_keeps_nothing(kept, make_model, fak
 
 
 @pytest.mark.spec("TCH-11")
-def test_a_plain_checked_reply_is_the_answer_and_keeps_nothing(kept, make_model, fake_ollama):
+def test_a_plain_checked_reply_is_the_answer_marked_and_keeps_nothing(kept, make_model, fake_ollama):
     ending = checked_ask(kept, make_model, fake_ollama, CHECKED_ANSWER)
-    assert len(facts_of("flask")) == 1 and ending["details"] == [("Answer", CHECKED_ANSWER)]
+    assert len(facts_of("flask")) == 1
+    assert ending["details"] == [("Answer", f"Not from what I learned: {CHECKED_ANSWER}")]
 
 
 @pytest.mark.spec("TCH-11")
