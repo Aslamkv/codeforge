@@ -354,6 +354,12 @@ class Readings:
 
     @staticmethod
     def passages(numbers, query, count=BOOK_PASSAGES_SHOWN):
+        found = Readings.chapter_passages(numbers)
+        order = Retriever(None).by_words(query, [passage["text"] for passage in found])
+        return [found[index] for index in order[:count]]
+
+    @staticmethod
+    def chapter_passages(numbers):
         found = []
         for number in numbers:
             entry = Readings.get(number) or {"chapters": []}
@@ -363,8 +369,7 @@ class Readings:
                     {"source": source, "text": piece}
                     for piece in split_text(chapter["text"], MAX_PASSAGE_CHARS)
                 ]
-        order = Retriever(None).by_words(query, [passage["text"] for passage in found])
-        return [found[index] for index in order[:count]]
+        return found
 
 
 def read_ending(entry, new, chapters):

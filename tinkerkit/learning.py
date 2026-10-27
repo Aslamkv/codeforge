@@ -83,12 +83,20 @@ class LearnStopped(SystemExit):
 class DocCache:
     @staticmethod
     def get(slug, key):
-        kept = Home.store().get("sources", f"{slug}@{key}")
-        if not isinstance(kept, dict) or not kept.get("pages"):
-            return None
-        if key == "latest" and DocCache.stale(kept):
+        kept = DocCache.stored(slug, key)
+        if kept is None or key == "latest" and DocCache.stale(kept):
             return None
         return [Page.of_dict(page) for page in kept["pages"]]
+
+    @staticmethod
+    def pages(slug, key):
+        kept = DocCache.stored(slug, key)
+        return [Page.of_dict(page) for page in kept["pages"]] if kept else []
+
+    @staticmethod
+    def stored(slug, key):
+        kept = Home.store().get("sources", f"{slug}@{key}")
+        return kept if isinstance(kept, dict) and kept.get("pages") else None
 
     @staticmethod
     def stale(kept):

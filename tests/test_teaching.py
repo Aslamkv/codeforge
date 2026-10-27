@@ -8,12 +8,14 @@ from tinkerkit import cli
 from tinkerkit.cli import Cli, Commands
 from tinkerkit.commands import kind_of
 from tinkerkit.knowledge import Embeddings, Knowledge, Library
+from tinkerkit.learning import DocCache
 from tinkerkit.model import Ollama
+from tinkerkit.passages import Block, Page
 from tinkerkit.project import Tracker
 from tinkerkit.prompts import Prompts
 from tinkerkit.reading import Readings
-from tinkerkit.settings import MEMORY_ITEMS_SHOWN, TEACH_CLAIMS, Home
-from tinkerkit.teaching import Asker, Memory, Teacher, Verdict, marked, read_plan
+from tinkerkit.settings import BOOK_PASSAGES_SHOWN, MEMORY_ITEMS_SHOWN, TEACH_CLAIMS, Home
+from tinkerkit.teaching import Asker, Memory, PassageSource, Teacher, Verdict, marked, read_plan
 from tinkerkit.workspace import Toolchain
 
 PY = sys.executable
@@ -497,6 +499,49 @@ def test_an_ask_about_a_book_sees_what_the_book_says(home_store, make_model, fak
     prompt = fake_ollama.calls[0]["messages"][1]["content"]
     assert "## From what you read\n[The Craft, chapter 1: Testing]\nWrite one test" in prompt
     assert WRONG in prompt and capsys.readouterr().out.startswith("Chapter 1 says")
+
+
+def learned_flask(texts):
+    Library.save(
+        "flask",
+        {
+            "topic": "flask",
+            "name": "Flask",
+            "summary": "A web framework.",
+            "facts": [{"phase": "code", "text": "Flask routes use @app.route"}],
+            "docs": {"flask": "latest"},
+        },
+    )
+    blocks = [Block("heading", "Routing")] + [Block("text", text) for text in texts]
+    DocCache.put("flask", "latest", [Page("https://flask.example/routing", "2020-01-01", blocks)])
+    Home.store().update("sources", "flask@latest", lambda kept: dict(kept, kept="2020-01-01 10:00"))
+
+
+@pytest.mark.spec("TCH-3")
+def test_an_ask_about_a_learned_topic_sees_its_kept_documentation(home_store, make_model, fake_ollama):
+    learned_flask(["The route decorator binds a view function to a URL rule."])
+    fake_ollama.reply("With the route decorator.", when="ask")
+    Asker(make_model(), Memory()).answer("how do flask routes bind a view function?")
+    prompt = fake_ollama.calls[0]["messages"][1]["content"]
+    assert "[flask@latest, https://flask.example/routing > Routing]\nThe route decorator binds" in prompt
+
+
+@pytest.mark.spec("TCH-3")
+def test_an_ask_embeds_only_the_passages_its_words_shortlist(
+    home_store, make_model, fake_ollama, monkeypatch
+):
+    learned_flask([f"Passage {number}: a flask route binds a view. " + "x" * 1100 for number in range(40)])
+    embedded = []
+
+    def embed(path, payload=None, timeout=10, errors=False):
+        embedded.extend(payload["input"])
+        return {"embeddings": [[float(len(text)), 1.0] for text in payload["input"]]}
+
+    monkeypatch.setattr(Ollama, "get_json", staticmethod(embed))
+    fake_ollama.reply("With the route decorator.", when="ask")
+    Asker(make_model(), Memory(Embeddings("e"))).answer("how does a flask route bind a view?")
+    passages_embedded = [text for text in embedded if "Passage " in text]
+    assert len(passages_embedded) == PassageSource.SHORTLIST_TIMES * BOOK_PASSAGES_SHOWN
 
 
 @pytest.mark.spec("TCH-8")

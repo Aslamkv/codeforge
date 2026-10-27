@@ -4,10 +4,13 @@ from collections import namedtuple
 from .messages import say
 lazy from .graph import Graph
 lazy from .knowledge import Item, Knowledge, Learner, Library, Retriever, retire, search_entries
+lazy from .learning import DocCache
+lazy from .passages import Cleaner
 lazy from .project import ending
 lazy from .prompts import Part, Prompts
 lazy from .reading import Readings
 lazy from .settings import (
+    BOOK_PASSAGES_SHOWN,
     LESSON_PHASES,
     MEMORY_ITEMS_SHOWN,
     TEACH_CHECK_COMMANDS,
@@ -85,6 +88,47 @@ def moved_on(tracker, phase, said, icon):
         tracker.phase(phase)
 
 
+class PassageSource:
+    SHORTLIST_TIMES = 4
+
+    def __init__(self, retriever):
+        self.retriever = retriever
+
+    def passages(self, question, items, count=BOOK_PASSAGES_SHOWN):
+        found = self.found(question, items)
+        by_words = Retriever(None).by_words(question, [passage["text"] for passage in found])
+        shortlist = [found[index] for index in by_words[: self.SHORTLIST_TIMES * count]]
+        by_meaning = self.retriever.rank(question, [passage["text"] for passage in shortlist])
+        return [shortlist[index] for index in by_meaning[:count]]
+
+
+class ReadingPassages(PassageSource):
+    @staticmethod
+    def found(question, items):
+        return Readings.chapter_passages(Readings.about(question, items))
+
+
+class DocumentationPassages(PassageSource):
+    @staticmethod
+    def found(question, items):
+        groups = dict.fromkeys(item["group"] for item in items)
+        docs = dict.fromkeys(
+            (slug, key)
+            for group in groups
+            for slug, key in ((Library.read(group) or {}).get("docs") or {}).items()
+        )
+        return [
+            {"source": DocumentationPassages.source(slug, key, passage), "text": passage.text}
+            for slug, key in docs
+            for page in DocCache.pages(slug, key)
+            for passage in Cleaner.under_headings(page)
+        ]
+
+    @staticmethod
+    def source(slug, key, passage):
+        return f"{slug}@{key}, {passage.url}" + (f" > {passage.heading}" if passage.heading else "")
+
+
 class Asker:
     def __init__(self, model, memory, tracker=None):
         self.model, self.memory, self.tracker = model, memory, tracker
@@ -93,9 +137,13 @@ class Asker:
         self.on_to("recall")
         with say.working_on(f"Looking through what Tinker keeps for: {first_line(question, 60)}"):
             items = self.memory.about(question)
-            passages = Readings.passages(Readings.about(question, items), question)
+            passages = [
+                passage
+                for source in (ReadingPassages, DocumentationPassages)
+                for passage in source(self.memory.retriever).passages(question, items)
+            ]
         self.on_to("answer")
-        read = f" and {len(passages)} passage(s) of what you gave it to read" if passages else ""
+        read = f" and {len(passages)} passage(s) of what it read" if passages else ""
         with say.working_on(f"Answering from {len(items)} thing(s) Tinker keeps{read}"):
             return self.said(self.asked(question, items, passages))
 
