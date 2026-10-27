@@ -1249,8 +1249,9 @@ then is anything changed.
   `RECALL_OTHER_TOPIC_SIMILARITY` like the text's: a shared word alone ("NULL") never brings it. A rule given brings the facts it
   cites (`cites`) right after it, still within `MEMORY_ITEMS_SHOWN`. A second `about` embeds only its text: the
   items' embeddings are kept.
-- **TCH-2** `Asker.answer(question)` gives the model the items and passages numbered, and the version installed
-  here of each topic shown (its machine's version), of no other topic. The model replies JSON: `answer`, and
+- **TCH-2** `Asker.answer(question)` gives the model at most `ASK_ITEMS_SHOWN` items (the first of `about`) and the
+  passages numbered, and the version installed here of each topic shown (its machine's version), of no other
+  topic: only the commands that found one, and a topic with none says it is not installed. The model replies JSON: `answer`, and
   `uses`, the numbers it rests on. The answer comes from them first, says things as they are (never what Tinker
   keeps or notes) and names the version when it depends on it. Tinker marks it, never the model: an answer with
   no number it was given in `uses` is marked as not from what Tinker learned. With nothing kept and no passage,
@@ -1260,7 +1261,8 @@ then is anything changed.
   (`Readings`; a reading named by its title or whose items are shown) and the documentation kept for the topics
   shown (**LRN-1**, any version), so it answers from the source's own words. Each source shortlists its
   passages by words first (**KNW-12**) and ranks only the shortlist by meaning; no source embeds all its pages.
-  A passage whose text is one already given (the same page at another address) is given once.
+  A passage whose text is one already given (the same page at another address) is given once. The ask gets at most
+  `ASK_PASSAGES_SHOWN` passages in all, taken in turn from each source's best.
 - **TCH-4** `read_plan` keeps at most `TEACH_CLAIMS` claims, each a fact or a preference (the person's own
   choice). A preference is only what the person marks with the word prefer: a teaching without it (`marked`)
   has facts alone, whatever the model says. It keeps at most `TEACH_CHECK_COMMANDS` commands and
