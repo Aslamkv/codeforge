@@ -73,11 +73,6 @@ class Asker:
         with say.working_on(f"Looking through what Tinker keeps for: {first_line(question, 60)}"):
             items = self.memory.about(question)
             passages = Readings.passages(Readings.about(question, items), question)
-        if not items and not passages:
-            return self.said(
-                "I have not learned anything yet: I learn from builds (tinker task), tinker learn and "
-                "tinker read."
-            )
         self.on_to("answer")
         read = f" and {len(passages)} passage(s) of what you gave it to read" if passages else ""
         with say.working_on(f"Answering from {len(items)} thing(s) Tinker keeps{read}"):

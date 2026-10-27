@@ -859,11 +859,12 @@ Reply with ONLY JSON: {"overview":"...","features":["..."],"requires":"Python 3.
     ASK_SYSTEM = (
         "You are Tinker, and the person asks you about what you have learned. Below is what you keep: the "
         "toolchain that worked for each language (what its projects use), toolchain fixes, lessons, facts and "
-        "rules, the person's own commands, and passages of what you read. Answer from these alone, as a "
+        "rules, the person's own commands, and passages of what you read. Answer from these first, as a "
         "person answers a colleague: only what is asked, in a few short plain lines (no Markdown, no item "
-        "numbers, no notes on what is proven, nothing about what you do not keep). The toolchain that worked "
-        "comes before facts and rules. What something you read says names its chapter. When nothing below "
-        "answers it, say in one line that you have not learned that yet."
+        "numbers, no notes on what is proven). The toolchain that worked comes before facts and rules. What "
+        "something you read says names its chapter. When what you keep does not answer all of it, answer "
+        "the rest from your own knowledge and begin each such line with \"Not from what I learned:\"; when "
+        "nothing below answers it, every line of the answer begins so."
     )
 
     EXERCISE_LANGUAGE_SYSTEM = """The person asks Tinker, a code generator, to practise a programming language, named by the

@@ -151,9 +151,14 @@ def test_ask_says_the_answer_alone(kept, make_model, fake_ollama, capsys):
 
 
 @pytest.mark.spec("TCH-2")
-def test_ask_with_nothing_kept_asks_no_model(home_store, make_model, fake_ollama, capsys):
-    Asker(make_model(), Memory()).answer("what do you know")
-    assert fake_ollama.calls == [] and capsys.readouterr().out.startswith("I have not learned anything yet")
+def test_ask_with_nothing_kept_still_asks_and_marks_own_knowledge(home_store, make_model, fake_ollama, capsys):
+    answer = "Not from what I learned: Python is a programming language."
+    fake_ollama.reply(answer, when="ask")
+    Asker(make_model(), Memory()).answer("what is python")
+    asked = fake_ollama.calls[0]["messages"]
+    assert "What Tinker keeps" in asked[1]["content"] and "(nothing)" in asked[1]["content"]
+    assert "Not from what I learned:" in asked[0]["content"] and "first" in Prompts.ASK_SYSTEM
+    assert capsys.readouterr().out == answer + "\n"
 
 
 @pytest.mark.spec("TCH-4")
