@@ -699,7 +699,10 @@ def test_learn_chars_per_token(make_model):
 
 @pytest.mark.spec("MOD-23")
 def test_other_models_are_unloaded_and_a_grown_model_too(make_model, fake_ollama, monkeypatch):
-    monkeypatch.setattr(Ollama, "loaded_models", staticmethod(lambda: [("other", 1), (MODEL, 1)]))
+    monkeypatch.setattr(
+        Ollama, "loaded_models", staticmethod(lambda: [("other", 1), ("embed", 1), (MODEL, 1)])
+    )
+    Ollama.embedders.add("embed")
     fake_ollama.reply("ok")
     ask_a_question(make_model())
     assert fake_ollama.unloaded == ["other"]

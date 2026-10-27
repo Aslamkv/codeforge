@@ -22,6 +22,7 @@ from tinkerkit.model import Models, Ollama, OllamaError
 from tinkerkit.prompts import Prompts
 from tinkerkit.settings import (
     CHUNKS_PER_PAGE,
+    EMBED_KEEP_ALIVE,
     MAX_LESSONS_PER_FILE,
     MAX_PLANNED_SEARCHES,
     MAX_RULE_CHARS,
@@ -267,10 +268,11 @@ def test_remember_toolchain_without_its_project_commands(tinker_home):
 
 class EmbedServer:
     def __init__(self, broken=False):
-        self.requests, self.broken = [], broken
+        self.requests, self.keep_alives, self.broken = [], set(), broken
 
     def __call__(self, path, payload=None, timeout=10, errors=False):
         self.requests.append(payload["input"])
+        self.keep_alives.add(payload["keep_alive"])
         if self.broken:
             return {"error": "not an embedding model"}
         return {"embeddings": [[float(len(text)), float(text.count("a")) + 0.5] for text in payload["input"]]}
@@ -292,6 +294,8 @@ def test_embeddings_are_cached_per_model(tinker_home, monkeypatch):
     assert list(Home.store().get("embeddings", "embed-b")) == [Embeddings.key("b")]
     each_model_keeps_its_own = 4
     assert len(Home.store().get("embeddings", "embed-a")) == each_model_keeps_its_own
+    assert server.keep_alives == {EMBED_KEEP_ALIVE}
+    assert Ollama.kept == Ollama.embedders == {"embed-a", "embed-b"}
 
 
 @pytest.mark.spec("KNW-11")

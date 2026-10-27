@@ -586,8 +586,9 @@ What is said in the chats, kept so that a chat is only a view of it.
   and says why.
 - **MOD-22** `learn_chars_per_token` keeps the lowest ratio of the last 20 prompts over 50 tokens, within
   [2, 4]. `learned_chars_per_token()` is `None` until 5 prompts have been seen.
-- **MOD-23** Before each call, every other loaded model is unloaded. With the model kept loaded, it is
-  unloaded once it grows past `max_growth` times its first size.
+- **MOD-23** Before each call, every other loaded model is unloaded, except an embedding model `Embeddings` used
+  (`Ollama.embedders`). With the model kept loaded, it is unloaded once it grows past `max_growth` times its
+  first size.
 - **MOD-24** `Model` keeps each call's step and details in its log and never prints them. The person sees
   only a short line when it asks again, and its live line says in plain words what Tinker is working on (the
   step it is on, else "Working on it") and for how long ("Working on it… 1m 41s (101s)").
@@ -960,8 +961,8 @@ Lessons and proven knowledge, and what every kind of learning shares.
   beside them, with status `retired`, its `reason` and the run. That list keeps the last
   `RETIRED_KEPT_PER_LIST`. Nothing retired is shown in a prompt.
 - **KNW-11** `Embeddings` keeps each text's vector by its key, per embedding model, in the home database. Only
-  missing texts are asked for, in batches of `TEXTS_PER_REQUEST`. A wrong reply gives `None`, and `failed` says
-  why. `prune` keeps only the texts asked for. `cosine` is the cosine similarity, and 0 for a zero vector.
+  missing texts are asked for, in batches of `TEXTS_PER_REQUEST`, keeping the model loaded for `EMBED_KEEP_ALIVE` and in
+  `Ollama.kept` (**MOD-8**). A wrong reply gives `None`, and `failed` says why. `prune` keeps only the texts asked for. `cosine` is the cosine similarity, and 0 for a zero vector.
 - **KNW-12** `Retriever.by_words` ranks the texts that hold the query's words with BM25, best first. `rank`
   fuses the word and meaning rankings and gives every index: the ones neither finds come last. When embeddings
   fail, the meaning search is turned off for the rest of the run.

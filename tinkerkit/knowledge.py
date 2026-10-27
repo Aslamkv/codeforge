@@ -10,6 +10,7 @@ lazy from pathlib import Path
 from .messages import say
 from .settings import (
     CHUNKS_PER_PAGE,
+    EMBED_KEEP_ALIVE,
     EVENTS_KEPT_PER_ITEM,
     FACT_PHASES,
     FACTS_PER_CHUNK,
@@ -1588,8 +1589,13 @@ class Embeddings:
         }
 
     def embedded(self, batch):
+        Ollama.kept.add(self.name)
+        Ollama.embedders.add(self.name)
         data = Ollama.get_json(
-            "/api/embed", {"model": self.name, "input": batch, "keep_alive": 0}, timeout=300, errors=True
+            "/api/embed",
+            {"model": self.name, "input": batch, "keep_alive": EMBED_KEEP_ALIVE},
+            timeout=300,
+            errors=True,
         )
         found = data.get("embeddings") if isinstance(data, dict) else None
         if self.one_vector_each(found, batch):
