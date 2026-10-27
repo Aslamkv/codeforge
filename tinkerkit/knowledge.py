@@ -1414,6 +1414,13 @@ class Library:
         return tool["output"] if tool["found"] else f"`{tool['command']}` fails (not installed)"
 
     @staticmethod
+    def machine_text(machine):
+        return "; ".join(
+            f"`{tool['command']}`: {tool['output']}" if tool["found"] else Library.installed_text(tool)
+            for tool in machine
+        )
+
+    @staticmethod
     def finding_text(entry, finding):
         question = entry["questions"][finding["question"] - 1]["question"]
         return f"{question} {finding['answer']} ({finding['confidence']} confidence)"

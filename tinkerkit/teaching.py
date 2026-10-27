@@ -155,6 +155,7 @@ class Asker:
         parts = [
             Part("What Tinker keeps", numbered(items) or "(nothing)", True),
             Part("From what you read", quoted(passages)),
+            Part("Installed here", installed_here(items)),
             Part("The question", question, True),
         ]
         return self.model.ask(Prompts.ASK_SYSTEM, parts, "ask").value.strip()
@@ -385,6 +386,16 @@ class Teacher:
 
 def quoted(passages):
     return "\n\n".join(f"[{passage['source']}]\n{passage['text']}" for passage in passages)
+
+
+def installed_here(items):
+    machines = {
+        group: (Library.read(group) or {}).get("machine")
+        for group in dict.fromkeys(item["group"] for item in items)
+    }
+    return "\n".join(
+        f"{group}: {Library.machine_text(machine)}" for group, machine in machines.items() if machine
+    )
 
 
 def marked(teaching):

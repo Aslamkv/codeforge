@@ -193,6 +193,22 @@ def test_ask_with_nothing_kept_still_asks_and_marks_own_knowledge(
     assert capsys.readouterr().out == answer + "\n"
 
 
+@pytest.mark.spec("TCH-2")
+def test_ask_shows_the_version_installed_here_of_each_topic_shown(kept, make_model, fake_ollama):
+    entry = Library.read("flask")
+    entry["machine"] = [
+        {"command": "flask --version", "found": True, "output": "Flask 3.0.2"},
+        {"command": "gunicorn --version", "found": False, "output": ""},
+    ]
+    Library.save("flask", entry)
+    fake_ollama.reply("With @app.route in Flask 3.0.2.", when="ask")
+    Asker(make_model(), Memory()).answer("how do flask routes work")
+    prompt = fake_ollama.calls[0]["messages"][1]["content"]
+    assert "Installed here" in prompt
+    assert "flask: `flask --version`: Flask 3.0.2; `gunicorn --version` fails (not installed)" in prompt
+    assert "version" in Prompts.ASK_SYSTEM and "installed here" in Prompts.ASK_SYSTEM
+
+
 @pytest.mark.spec("TCH-4")
 def test_read_plan_keeps_what_is_usable_within_limits():
     plan = read_plan(

@@ -588,7 +588,16 @@ def test_learning_moves_its_tracker_through_its_steps_and_keeps_its_summary(tink
     each_step_once = len(tracker.state["steps"]) == len(set(tracker.state["steps"]))
     assert each_step_once
     recap = dict(slot_learner.recap)
-    assert list(recap) == ["Answered", "Still open", "Documentation", "Pages", "Facts kept", "Web requests"]
+    assert list(recap) == [
+        "Answered",
+        "Still open",
+        "Installed",
+        "Documentation",
+        "Pages",
+        "Facts kept",
+        "Web requests",
+    ]
+    assert recap["Installed"] == "`echo widgetlib 2.1.0`: widgetlib 2.1.0"
     assert recap["Facts kept"] == str(len(entry["facts"])) and recap["Documentation"] == "widgetlib 2.1.0"
 
 

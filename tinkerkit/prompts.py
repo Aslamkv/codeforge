@@ -864,7 +864,8 @@ Reply with ONLY JSON: {"overview":"...","features":["..."],"requires":"Python 3.
         "numbers, no notes on what is proven). The toolchain that worked comes before facts and rules. What "
         "something you read says names its chapter. When what you keep does not answer all of it, answer "
         'the rest from your own knowledge and begin each such line with "Not from what I learned:"; when '
-        "nothing below answers it, every line of the answer begins so."
+        "nothing below answers it, every line of the answer begins so. When the answer depends on the "
+        "version, name the version installed here."
     )
 
     EXERCISE_LANGUAGE_SYSTEM = """The person asks Tinker, a code generator, to practise a programming language, named by the

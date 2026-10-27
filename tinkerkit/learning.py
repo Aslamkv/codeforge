@@ -65,7 +65,7 @@ LEARN_STOP_PLACES = frozendict(
         "gate 2": "while reading pages",
     }
 )
-RECAP_LINE_ICONS = ("✅", "❓", "📖", "📄", "🧩", "🌐")
+RECAP_LINE_ICONS = ("✅", "❓", "💻", "📖", "📄", "🧩", "🌐")
 
 
 Tools = namedtuple("Tools", "tools dropped")
@@ -520,6 +520,7 @@ class SlotLearner(Tracked):
         return [
             ("Answered", ", ".join(filled) or "nothing"),
             ("Still open", ", ".join(map(label, entry["missing"])) or "nothing"),
+            ("Installed", Library.machine_text(entry["machine"]) or "nothing"),
             ("Documentation", ", ".join(f"{slug} {key}" for slug, key in self.docs.items()) or "none"),
             ("Pages", ", ".join(f"{count} {kind}" for kind, count in self.pages.items() if count) or "none"),
             ("Facts kept", str(len(entry["facts"]))),
