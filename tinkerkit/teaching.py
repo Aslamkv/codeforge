@@ -30,18 +30,39 @@ Follows = namedtuple("Follows", "follows why")
 
 class Memory:
     def __init__(self, embeddings=None):
+        graph = Graph.build()
         self.items = [
             node
-            for node in Graph.build().nodes.values()
+            for node in graph.nodes.values()
             if node["kind"] in ITEM_KINDS and node["status"] != "retired"
         ]
+        self.cited = self.cited_by_rules(graph)
         self.retriever = Retriever(embeddings)
+
+    def cited_by_rules(self, graph):
+        kept = {item["id"]: item for item in self.items}
+        cited = {}
+        for link in graph.links:
+            if (
+                link["kind"] == "cites"
+                and graph.nodes[link["source"]]["kind"] == "rule"
+                and link["target"] in kept
+            ):
+                cited.setdefault(link["source"], []).append(kept[link["target"]])
+        return cited
 
     def about(self, text, limit=MEMORY_ITEMS_SHOWN):
         ranking = self.retriever.rank(text, [item["text"] for item in self.items])
         named = set(words(text))
         ranking.sort(key=lambda index: -self.named_in(self.items[index], named))
-        return [self.items[index] for index in ranking[:limit]]
+        return self.with_cited([self.items[index] for index in ranking])[:limit]
+
+    def with_cited(self, ranked):
+        given = {}
+        for item in ranked:
+            for each in [item, *self.cited.get(item["id"], [])]:
+                given.setdefault(each["id"], each)
+        return list(given.values())
 
     @staticmethod
     def named_in(item, named):

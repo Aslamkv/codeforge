@@ -134,6 +134,18 @@ def test_memory_is_what_tinker_keeps_but_the_retired_most_related_first(kept):
     assert len(kept.about("anything", limit=2)) == 2 and MEMORY_ITEMS_SHOWN >= 20
 
 
+@pytest.mark.spec("TCH-1")
+def test_a_rule_given_brings_the_facts_it_cites_right_after_it_within_the_limit(kept):
+    entry = Library.read("flask")
+    entry["rules"] = [{"phase": "code", "text": "Route each page", "cites": [entry["facts"][0]["id"]]}]
+    Library.save("flask", entry)
+    memory = Memory()
+    given = [item["kind"] for item in memory.about("which rules do you have")]
+    assert given[:2] == ["rule", "fact"] and given.count("fact") == 1
+    assert [item["kind"] for item in memory.about("which rules do you have", limit=2)] == ["rule", "fact"]
+    assert len(memory.about("which rules do you have", limit=1)) == 1
+
+
 @pytest.mark.spec("TCH-2")
 def test_ask_says_the_answer_alone(kept, make_model, fake_ollama, capsys):
     answer = "Tests run with pytest.\nCode is formatted with black and linted with ruff."
@@ -151,7 +163,9 @@ def test_ask_says_the_answer_alone(kept, make_model, fake_ollama, capsys):
 
 
 @pytest.mark.spec("TCH-2")
-def test_ask_with_nothing_kept_still_asks_and_marks_own_knowledge(home_store, make_model, fake_ollama, capsys):
+def test_ask_with_nothing_kept_still_asks_and_marks_own_knowledge(
+    home_store, make_model, fake_ollama, capsys
+):
     answer = "Not from what I learned: Python is a programming language."
     fake_ollama.reply(answer, when="ask")
     Asker(make_model(), Memory()).answer("what is python")
