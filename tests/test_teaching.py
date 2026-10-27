@@ -14,6 +14,7 @@ from tinkerkit.passages import Block, Page
 from tinkerkit.project import Tracker
 from tinkerkit.prompts import Prompts
 from tinkerkit.reading import Readings
+from tinkerkit.sandbox import Ran
 from tinkerkit.settings import BOOK_PASSAGES_SHOWN, MEMORY_ITEMS_SHOWN, TEACH_CLAIMS, Home
 from tinkerkit.teaching import Asker, Memory, PassageSource, Teacher, Verdict, marked, read_plan
 from tinkerkit.workspace import Toolchain
@@ -167,7 +168,7 @@ def test_a_second_about_embeds_only_its_text(kept, monkeypatch):
 @pytest.mark.spec("TCH-2")
 def test_ask_says_the_answer_alone(kept, make_model, fake_ollama, capsys):
     answer = "Tests run with pytest.\nCode is formatted with black and linted with ruff."
-    fake_ollama.reply(answer, when="ask")
+    fake_ollama.reply(first_reply(answer), when="ask")
     ending = Asker(make_model(), kept).answer("what is your current toolchain for python")
     asked = fake_ollama.calls[0]["messages"]
     assert (
@@ -207,6 +208,85 @@ def test_ask_shows_the_version_installed_here_of_each_topic_shown(kept, make_mod
     assert "Installed here" in prompt
     assert "flask: `flask --version`: Flask 3.0.2; `gunicorn --version` fails (not installed)" in prompt
     assert "version" in Prompts.ASK_SYSTEM and "installed here" in Prompts.ASK_SYSTEM
+
+
+class FakeSandbox:
+    def __init__(self, ran=None):
+        self.runs, self.ran = [], ran or Ran(True, code=0, output="Flask 3.0.2")
+
+    def run(self, command, folder, timeout=None):
+        self.runs.append(command)
+        return self.ran
+
+
+def first_reply(answer, check=None):
+    return json.dumps({"answer": answer, "check": check})
+
+
+def flask_found_here():
+    entry = Library.read("flask")
+    entry["machine"] = [{"command": "python3 --version", "found": True, "output": "Python 3.12.1"}]
+    Library.save("flask", entry)
+
+
+@pytest.mark.spec("TCH-10")
+def test_an_ask_without_a_check_makes_one_call(kept, make_model, fake_ollama, capsys):
+    fake_ollama.reply(first_reply("Tests run with pytest."), when="ask")
+    ending = Asker(make_model(), kept).answer("what is your current toolchain for python")
+    assert len(fake_ollama.calls) == 1 and "check" in Prompts.ASK_SYSTEM
+    assert capsys.readouterr().out == "Tests run with pytest.\n"
+    assert ending["details"] == [("Answer", "Tests run with pytest.")]
+
+
+@pytest.mark.spec("TCH-10")
+def test_an_ask_runs_its_sql_check_and_answers_with_what_it_printed(kept, make_model, fake_ollama, capsys):
+    check = {"kind": "sql", "code": "select 40 + 2", "shows": "what 40 + 2 gives"}
+    answered = "I ran select 40 + 2, it printed 42."
+    fake_ollama.reply(first_reply("It gives 42.", check), when="ask")
+    fake_ollama.reply(answered, when="ask")
+    ending = Asker(make_model(), kept).answer("what does sqlite give for 40 + 2")
+    second = fake_ollama.calls[1]["messages"]
+    assert second[0]["content"].startswith(Prompts.ASK_CHECKED_SYSTEM)
+    assert "The check Tinker ran" in second[1]["content"] and "42" in second[1]["content"]
+    assert "select 40 + 2" in second[1]["content"] and "The question" in second[1]["content"]
+    out = capsys.readouterr().out
+    assert "Ran a sql check" in out and answered in out
+    assert ending["details"] == [("Answer", answered)]
+
+
+@pytest.mark.spec("TCH-10")
+def test_an_ask_runs_a_command_check_with_a_tool_found_here(kept, make_model, fake_ollama):
+    flask_found_here()
+    check = {"kind": "command", "code": "import flask", "shows": "flask imports", "tool": "python3"}
+    fake_ollama.reply(first_reply("It imports.", check), when="ask")
+    fake_ollama.reply("I ran import flask, it printed Flask 3.0.2.", when="ask")
+    sandbox = FakeSandbox()
+    Asker(make_model(), Memory(), sandbox=sandbox).answer("how do flask routes work")
+    assert len(sandbox.runs) == 1 and "Flask 3.0.2" in fake_ollama.calls[1]["messages"][1]["content"]
+
+
+@pytest.mark.spec("TCH-10")
+def test_a_refused_check_is_said_and_the_first_answer_goes_on(kept, make_model, fake_ollama, capsys):
+    flask_found_here()
+    check = {"kind": "command", "code": "flask", "shows": "it installs", "tool": "pip"}
+    fake_ollama.reply(first_reply("Install it with pip.", check), when="ask")
+    sandbox = FakeSandbox()
+    ending = Asker(make_model(), Memory(), sandbox=sandbox).answer("how do flask routes work")
+    out = capsys.readouterr().out
+    assert len(fake_ollama.calls) == 1 and sandbox.runs == []
+    assert "Check refused" in out and "Install it with pip." in out
+    assert ending["details"] == [("Answer", "Install it with pip.")]
+
+
+@pytest.mark.spec("TCH-10")
+def test_a_failed_check_is_said_and_the_first_answer_goes_on(kept, make_model, fake_ollama, capsys):
+    flask_found_here()
+    check = {"kind": "command", "code": "import flask", "shows": "flask imports", "tool": "python3"}
+    fake_ollama.reply(first_reply("It imports.", check), when="ask")
+    sandbox = FakeSandbox(Ran(False, why="no sandbox here"))
+    Asker(make_model(), Memory(), sandbox=sandbox).answer("how do flask routes work")
+    out = capsys.readouterr().out
+    assert len(fake_ollama.calls) == 1 and "Check failed: no sandbox here" in out and "It imports." in out
 
 
 @pytest.mark.spec("TCH-4")

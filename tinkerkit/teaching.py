@@ -2,13 +2,15 @@ import re
 from collections import namedtuple
 
 from .messages import say
+lazy from .checking import Check, found_programs
 lazy from .graph import Graph
 lazy from .knowledge import Item, Knowledge, Learner, Library, Retriever, retire, search_entries
 lazy from .learning import DocCache
 lazy from .passages import Cleaner
 lazy from .project import ending
-lazy from .prompts import Part, Prompts
+lazy from .prompts import Part, Prompts, Reply
 lazy from .reading import Readings
+lazy from .sandbox import Sandbox
 lazy from .settings import (
     BOOK_PASSAGES_SHOWN,
     LESSON_PHASES,
@@ -130,8 +132,8 @@ class DocumentationPassages(PassageSource):
 
 
 class Asker:
-    def __init__(self, model, memory, tracker=None):
-        self.model, self.memory, self.tracker = model, memory, tracker
+    def __init__(self, model, memory, tracker=None, sandbox=None):
+        self.model, self.memory, self.tracker, self.sandbox = model, memory, tracker, sandbox
 
     def answer(self, question):
         self.on_to("recall")
@@ -144,21 +146,39 @@ class Asker:
             ]
         self.on_to("answer")
         read = f" and {len(passages)} passage(s) of what it read" if passages else ""
-        with say.working_on(f"Answering from {len(items)} thing(s) Tinker keeps{read}"):
-            return self.said(self.asked(question, items, passages))
-
-    def on_to(self, phase):
-        if self.tracker is not None:
-            self.tracker.phase(phase)
-
-    def asked(self, question, items, passages):
         parts = [
             Part("What Tinker keeps", numbered(items) or "(nothing)", True),
             Part("From what you read", quoted(passages)),
             Part("Installed here", installed_here(items)),
             Part("The question", question, True),
         ]
-        return self.model.ask(Prompts.ASK_SYSTEM, parts, "ask").value.strip()
+        with say.working_on(f"Answering from {len(items)} thing(s) Tinker keeps{read}"):
+            answer, proposal = first_answer(self.model.ask(Prompts.ASK_SYSTEM, parts, "ask"))
+        if proposal is None:
+            return self.said(answer)
+        return self.said(self.checked(parts, items, proposal) or answer)
+
+    def on_to(self, phase):
+        if self.tracker is not None:
+            self.tracker.phase(phase)
+
+    def checked(self, parts, items, proposal):
+        tools = found_programs(list(machines_here(items).values()))
+        check = Check.of(proposal, tools, self.sandbox or Sandbox.here())
+        refusal = check.refusal()
+        if refusal:
+            say.warn(f"Check refused: {refusal}")
+            return None
+        ran = check.run()
+        if not ran.ran or ran.timed_out:
+            say.warn(f"Check failed: {ran.why or 'it ran out of time'}")
+            return None
+        say.step(f"Ran a {proposal.get('kind')} check: {check.shows or first_line(check.code, 60)}")
+        ran_part = Part("The check Tinker ran", check_text(check, ran), True)
+        with say.working_on("Answering with what the check printed"):
+            return self.model.ask(
+                Prompts.ASK_CHECKED_SYSTEM, [*parts, ran_part], "ask: checked"
+            ).value.strip()
 
     @staticmethod
     def said(answer):
@@ -389,13 +409,40 @@ def quoted(passages):
 
 
 def installed_here(items):
+    return "\n".join(
+        f"{group}: {Library.machine_text(machine)}" for group, machine in machines_here(items).items()
+    )
+
+
+def machines_here(items):
     machines = {
         group: (Library.read(group) or {}).get("machine")
         for group in dict.fromkeys(item["group"] for item in items)
     }
-    return "\n".join(
-        f"{group}: {Library.machine_text(machine)}" for group, machine in machines.items() if machine
-    )
+    return {group: machine for group, machine in machines.items() if machine}
+
+
+def first_answer(answer):
+    try:
+        data = Reply(answer.value).json()
+    except ValueError:
+        data = None
+    if not isinstance(data, dict) or not isinstance(data.get("answer"), str):
+        return answer.value.strip(), None
+    check = data.get("check")
+    return data["answer"].strip(), check if isinstance(check, dict) else None
+
+
+def check_text(check, ran):
+    lines = [
+        f"Kind: {check.proposal.get('kind')}",
+        f"Tool: {check.proposal.get('tool')}" if check.proposal.get("tool") else "",
+        f"Code:\n{check.code}",
+        f"What it shows: {check.shows}",
+        f"Exit code: {ran.code}",
+        f"It printed:\n{ran.output or '(nothing)'}",
+    ]
+    return "\n".join(line for line in lines if line)
 
 
 def marked(teaching):

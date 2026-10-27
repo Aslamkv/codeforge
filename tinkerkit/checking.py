@@ -55,6 +55,9 @@ class Check:
             return RefusedCheck(proposal, "a check without code cannot run")
         return kind(proposal, tools, sandbox)
 
+    def refusal(self):
+        return ""
+
 
 class RefusedCheck(Check):
     def __init__(self, proposal, why):
@@ -63,6 +66,9 @@ class RefusedCheck(Check):
 
     def run(self):
         return Ran(False, why=self.why)
+
+    def refusal(self):
+        return self.why
 
 
 class SqlCheck(Check):
