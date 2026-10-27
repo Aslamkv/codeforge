@@ -80,6 +80,13 @@ def test_sql_stops_at_an_error_keeping_what_printed():
     assert "missing" in result.output and "2" not in result.output.splitlines()
 
 
+def test_a_sql_error_fails_the_check_with_the_error_and_the_short_output_before_it():
+    result = sql("select 'before';\nselect * from missing;")
+    assert "no such table: missing" in result.why and "before" in result.why
+    long = sql(f"select '{'x' * 2000}';\nselect * from missing;")
+    assert "no such table: missing" in long.why and "x" * 2000 not in long.why
+
+
 def test_sql_refuses_attaching_a_database():
     result = sql("attach database 'other.db' as other;")
     assert result.code == 1
@@ -95,7 +102,7 @@ def test_sql_stops_an_endless_query_at_the_deadline(monkeypatch):
     monkeypatch.setattr(checking, "TIMEOUT_SECONDS", 0.2)
     result = sql("with recursive n(i) as (select 1 union all select i + 1 from n) select count(*) from n;")
     assert result.code == 1
-    assert result.timed_out
+    assert result.timed_out and "ran out of time" in result.why
 
 
 def test_a_command_runs_its_file_with_the_tool_in_an_empty_folder():

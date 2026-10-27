@@ -224,7 +224,7 @@ class Asker:
             say.warn(f"Check refused: {refusal}")
             return None, f"Tinker refused it: {refusal}"
         ran = check.run()
-        if not ran.ran or ran.timed_out:
+        if ran.why or not ran.ran or ran.timed_out:
             why = ran.why or "it ran out of time"
             say.warn(f"Check failed: {why}")
             return None, f"It failed: {why}"

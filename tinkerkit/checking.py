@@ -8,6 +8,7 @@ from .sandbox import TIMEOUT_SECONDS, Ran, Sandbox, cut
 
 DEFAULT_FILE = "check"
 PROGRESS_STEPS = 1000
+SHORT_OUTPUT_CHARS = 500
 REFUSED_ACTIONS = {sqlite3.SQLITE_ATTACH, sqlite3.SQLITE_DETACH}
 INSTALLERS = {
     "pip",
@@ -92,9 +93,17 @@ class SqlCheck(Check):
             try:
                 lines.extend(rows_of(connection.execute(statement)))
             except sqlite3.Error as error:
+                timed_out = time.monotonic() >= deadline
+                why = "it ran out of time" if timed_out else statement_failure(error, lines)
                 lines.append(f"Error: {error}")
-                return Ran(True, code=1, output=cut("\n".join(lines)), timed_out=time.monotonic() >= deadline)
+                return Ran(True, code=1, output=cut("\n".join(lines)), timed_out=timed_out, why=why)
         return Ran(True, code=0, output=cut("\n".join(lines)))
+
+
+def statement_failure(error, lines):
+    printed = "\n".join(lines)
+    before = f"\nIt printed before that:\n{printed}" if printed and len(printed) <= SHORT_OUTPUT_CHARS else ""
+    return f"a statement errored: {error}{before}"
 
 
 def confine(connection, deadline):

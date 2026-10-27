@@ -357,6 +357,23 @@ def test_a_failed_check_with_no_fixed_one_is_said_and_the_first_answer_goes_on(
     assert "Check failed: no sandbox here" in out and "No fixed check" in out and "It imports." in out
 
 
+@pytest.mark.spec("TCH-10")
+def test_a_sql_check_whose_statement_errors_is_told_the_error_and_fixed(
+    kept, make_model, fake_ollama, capsys
+):
+    flask_found_here()
+    broken = {"kind": "sql", "code": "select * from missing", "shows": "the table"}
+    fixed = {"kind": "sql", "code": "select 40 + 2", "shows": "what 40 + 2 gives"}
+    fake_ollama.reply(first_reply("It gives 42.", broken), when="ask")
+    fake_ollama.reply(json.dumps({"check": fixed}), when="ask")
+    fake_ollama.reply(json.dumps({"answer": "It printed 42.", "uses": []}), when="ask")
+    Asker(make_model(), Memory()).answer("how do flask routes work")
+    retry = fake_ollama.calls[1]["messages"]
+    assert "no such table: missing" in retry[3]["content"] and Prompts.ASK_CHECK_AGAIN in retry[3]["content"]
+    assert "42" in fake_ollama.calls[2]["messages"][5]["content"]
+    assert "Check failed" in capsys.readouterr().out
+
+
 SQL_CHECK = {"kind": "sql", "code": "select 40 + 2", "shows": "what 40 + 2 gives"}
 CHECKED_ANSWER = "I ran select 40 + 2, it printed 42."
 
