@@ -480,7 +480,7 @@ def test_calibrate_writes_the_measured_settings(fake_ollama, monkeypatch, no_sle
         Ollama,
         "read_raw",
         staticmethod(
-            lambda name, prompt, options, timeout=0: {
+            lambda name, prompt, options, keep_alive=0, timeout=0: {
                 "prompt_eval_count": len(prompt),
                 "prompt_eval_duration": 2e9,
             }
@@ -493,6 +493,7 @@ def test_calibrate_writes_the_measured_settings(fake_ollama, monkeypatch, no_sle
     assert saved["max_prompt_tokens"] == 8192 and saved["max_reply_tokens"] == 16384
     assert saved["fix_max_tokens"] == 4096 and saved["num_ctx"] == 25600 and saved["think"] == "high"
     assert saved["probes"] == [[2048, "read"]] and 2.0 <= saved["chars_per_token"] <= 4.0
+    assert fake_ollama.unloaded[-1] == "m"
 
 
 @pytest.mark.spec("MOD-16")
@@ -746,7 +747,7 @@ def test_other_models_are_unloaded_and_a_grown_model_too(make_model, fake_ollama
 
 @pytest.mark.spec("MOD-14")
 def test_a_failed_probe_is_recorded_and_waited_out(monkeypatch, fake_ollama, no_sleep, capsys):
-    def crash(name, prompt, options, timeout=0):
+    def crash(name, prompt, options, keep_alive=0, timeout=0):
         raise OllamaError("llama runner process has terminated", crashed=True)
 
     monkeypatch.setattr(Ollama, "read_raw", staticmethod(crash))
@@ -763,11 +764,38 @@ def test_a_failed_probe_is_recorded_and_waited_out(monkeypatch, fake_ollama, no_
         calibrator.probe(4096, 8192)
 
 
+@pytest.mark.spec("MOD-11")
+def test_a_probe_keeps_the_model_loaded(monkeypatch):
+    kept = []
+
+    def read(name, prompt, options, keep_alive=0, timeout=0):
+        kept.append(keep_alive)
+        return {"prompt_eval_count": len(prompt), "prompt_eval_duration": 1e9}
+
+    monkeypatch.setattr(Ollama, "read_raw", staticmethod(read))
+    Calibrator("m").probe(2048, 4096)
+    assert kept == [model_module.CALIBRATION_KEEP_ALIVE]
+
+
+def test_a_raw_read_sends_its_keep_alive(monkeypatch):
+    sent = []
+
+    def urlopen(request, timeout):
+        sent.append(json.loads(request.data))
+        return Body(b'{"response": "1"}')
+
+    monkeypatch.setattr(urllib.request, "urlopen", urlopen)
+    Ollama.read_raw("gone", "12", {})
+    Ollama.read_raw("stays", "12", {}, "5m")
+    assert [payload["keep_alive"] for payload in sent] == [0, "5m"] and Ollama.kept == {"stays"}
+    Ollama.unload("stays")
+
+
 @pytest.mark.spec("MOD-14")
 def test_a_gguf_model_that_crashes_is_read_in_pieces(monkeypatch, no_sleep, fake_ollama):
     reads = []
 
-    def read(name, prompt, options, timeout=0):
+    def read(name, prompt, options, keep_alive=0, timeout=0):
         reads.append(dict(options))
         if "num_batch" not in options:
             raise OllamaError("runner failed", crashed=True)

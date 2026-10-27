@@ -807,7 +807,11 @@ class Calibrator:
         timeout = max(OLLAMA_SILENCE_TIMEOUT, int(tokens / max(self.read_speed() / 3, 1)))
         try:
             data = Ollama.read_raw(
-                self.name, prompt, {"num_ctx": num_ctx, "num_predict": 1, **self.options}, timeout
+                self.name,
+                prompt,
+                {"num_ctx": num_ctx, "num_predict": 1, **self.options},
+                CALIBRATION_KEEP_ALIVE,
+                timeout,
             )
         except OllamaError as exc:
             self.probe_failed(exc, tokens)
@@ -1023,13 +1027,15 @@ class Ollama:
         return any(sign in lowered for sign in Ollama.RUNNER_CRASHES)
 
     @staticmethod
-    def read_raw(name, prompt, options, timeout=OLLAMA_SILENCE_TIMEOUT):
+    def read_raw(name, prompt, options, keep_alive=0, timeout=OLLAMA_SILENCE_TIMEOUT):
+        if keep_alive not in (0, "0"):
+            Ollama.kept.add(name)
         payload = {
             "model": name,
             "prompt": prompt,
             "raw": True,
             "stream": False,
-            "keep_alive": 0,
+            "keep_alive": keep_alive,
             "options": options,
         }
         try:
