@@ -516,7 +516,6 @@ def test_main_ends_cleanly(monkeypatch, error, message):
     assert ended.value.code == message
 
 
-
 @pytest.mark.spec("CLI-12")
 @pytest.mark.parametrize("ending", [KeyboardInterrupt, signal.SIGTERM, signal.SIGHUP])
 def test_main_unloads_every_kept_model_however_it_ends(monkeypatch, fake_ollama, ending):
@@ -539,6 +538,7 @@ def test_main_unloads_nothing_it_did_not_keep(monkeypatch, fake_ollama):
     monkeypatch.setattr(cli, "run", lambda *args: None)
     cli.main()
     assert fake_ollama.unloaded == []
+
 
 SPEC_REPLY = {
     "language": "Python",

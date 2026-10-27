@@ -244,7 +244,6 @@ def test_chat_streams_and_gives_the_final_chunk(monkeypatch):
     assert "think" not in sent[1] and "options" not in sent[1] and sent[1]["keep_alive"] == "5m"
 
 
-
 @pytest.mark.spec("MOD-8")
 def test_a_chat_asked_to_stay_loaded_is_kept_until_it_is_unloaded(monkeypatch):
     monkeypatch.setattr(urllib.request, "urlopen", lambda request, timeout: stream_of({"done": True}))
@@ -255,6 +254,7 @@ def test_a_chat_asked_to_stay_loaded_is_kept_until_it_is_unloaded(monkeypatch):
     assert Ollama.kept == {"stays"}
     Ollama.unload("stays")
     assert Ollama.kept == set()
+
 
 @pytest.mark.spec("MOD-8")
 def test_chat_errors(monkeypatch):

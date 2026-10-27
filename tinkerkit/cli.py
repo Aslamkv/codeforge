@@ -73,8 +73,8 @@ DoctorCheck = namedtuple("DoctorCheck", "required what check")
 
 def main():
     script_started, started_at = time.perf_counter(), datetime.datetime.now()
-    for ending in (signal.SIGTERM, signal.SIGHUP):
-        signal.signal(ending, ended_like_ctrl_c)
+    for signum in (signal.SIGTERM, signal.SIGHUP):
+        signal.signal(signum, ended_like_ctrl_c)
     try:
         argv = Cli.named(Jobs.arguments(sys.argv[1:]))
         with Jobs.running(argv):
