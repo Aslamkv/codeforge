@@ -475,13 +475,29 @@ class Models:
     MEASURED_LIMITS = ("max_prompt_tokens", "num_ctx", "max_reply_tokens", "fix_max_tokens")
 
     @staticmethod
-    def installed(name):
+    def answering():
         models = Ollama.installed_models()
         if models is None:
             raise SystemExit(
                 f"Ollama does not answer at {Config.ollama_url()} (tinker config ollama_url URL)."
             )
-        names = [model.get("name", "") for model in models]
+        return models
+
+    @staticmethod
+    def choices():
+        names = [model.get("name", "") for model in Models.answering()]
+        return [(name, Models.settings(name) is not None) for name in names]
+
+    @staticmethod
+    def picked(choices):
+        names, in_use = [name for name, _ in choices], Config.get("model")
+        start = names.index(in_use) if in_use in names else 0
+        index = say.pick([(name, not measured) for name, measured in choices], start)
+        return None if index is None else names[index]
+
+    @staticmethod
+    def installed(name):
+        names = [model.get("name", "") for model in Models.answering()]
         if name not in names:
             close = [candidate for candidate in names if name.lower() in candidate.lower()]
             hint = f" Did you mean {' or '.join(close)}?" if close else ""

@@ -173,6 +173,45 @@ def test_use_model(home_store, capsys):
     assert Config.get("model") == "m" and "Model in use: m" in capsys.readouterr().out
 
 
+def picker(monkeypatch, chosen, terminal=True):
+    shown = []
+    monkeypatch.setattr(sys.stdin, "isatty", lambda: terminal)
+    monkeypatch.setattr(cli.say, "pick", lambda choices, start: shown.append((choices, start)) or chosen)
+    monkeypatch.setattr(
+        Ollama, "installed_models", staticmethod(lambda: [{"name": "other"}, {"name": "m"}, {"name": "n"}])
+    )
+    return shown
+
+
+@pytest.mark.spec("CLI-3")
+def test_use_model_without_a_name_picks_one_on_a_terminal(home_store, monkeypatch, capsys):
+    assert parse("use-model").use_model is None
+    Models.keep("m", MEASURED)
+    Models.keep("n", MEASURED)
+    Config.save(model="n")
+    shown = picker(monkeypatch, 1)
+    Commands.use_model(None)
+    assert shown == [([("other", True), ("m", False), ("n", False)], 2)]
+    assert Config.get("model") == "m" and "Model in use: m" in capsys.readouterr().out
+    picker(monkeypatch, None)
+    Commands.use_model(None)
+    assert Config.get("model") == "m" and capsys.readouterr().out == ""
+    picker(monkeypatch, 0)
+    with pytest.raises(SystemExit, match="other has not been measured"):
+        Commands.use_model(None)
+
+
+@pytest.mark.spec("CLI-3")
+def test_use_model_without_a_name_lists_the_models_off_a_terminal(home_store, monkeypatch, capsys):
+    shown = picker(monkeypatch, 1, terminal=False)
+    Commands.use_model(None)
+    assert shown == [] and capsys.readouterr().out.splitlines()[1].startswith("  other")
+    shown = picker(monkeypatch, 1)
+    monkeypatch.setattr(Ollama, "installed_models", staticmethod(lambda: []))
+    Commands.use_model(None)
+    assert shown == [] and "MODEL" in capsys.readouterr().out
+
+
 @pytest.mark.spec("CLI-3")
 def test_runs_and_status(tmp_path, capsys):
     registered(tmp_path / "older", "aaa111")

@@ -66,6 +66,12 @@ tinker calibrate qwen3
 tinker use-model qwen3
 ```
 
+Or choose from Ollama's models in a select box (the unmeasured ones dim; up, down, Enter, Esc):
+
+```sh
+tinker use-model
+```
+
 To learn (`tinker learn`, `--web`), Tinker also needs a small embedding model:
 
 ```sh

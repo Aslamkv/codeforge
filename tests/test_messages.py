@@ -9,7 +9,16 @@ import pytest
 from conftest import ACCENT, DIM, RESET, Terminal
 
 from tinkerkit import project as project_module
-from tinkerkit.messages import Message, Messages, human_duration, live_line, say, short_count, tinkering
+from tinkerkit.messages import (
+    Message,
+    Messages,
+    human_duration,
+    key_named,
+    live_line,
+    say,
+    short_count,
+    tinkering,
+)
 from tinkerkit.project import Tracker, project_store
 from tinkerkit.store import Log
 
@@ -346,3 +355,100 @@ def test_only_messages_prints():
     found = {path.name: printing(path) for path in paths if path.stem != "messages" and printing(path)}
     assert found == {}
     assert isinstance(say, Messages)
+
+
+def scripted(*keys):
+    return lambda: (key for key in keys)
+
+
+def picking(*keys, choices=(("one", False), ("two", False), ("three", False)), start=0):
+    say.keys = scripted(*keys)
+    return say.pick(list(choices), start)
+
+
+def frames(terminal, count=3):
+    drawn = terminal.getvalue().split(f"\033[{count - 1}A")
+    return [
+        [row.removeprefix("\r").removesuffix("\033[K") for row in frame.split("\r\n")] for frame in drawn[:-1]
+    ]
+
+
+@pytest.mark.spec("MSG-8")
+def test_pick_marks_the_start_choice_and_enter_gives_it(terminal):
+    assert picking("enter", start=1) == 1
+    assert frames(terminal)[0] == ["  one", "› two", "  three"]
+
+
+@pytest.mark.spec("MSG-8")
+def test_up_and_down_move_the_mark_and_stop_at_the_ends(terminal):
+    assert picking("up", "down", "down", "down", "down", "up", "enter") == 1
+    marked = [frame.index(next(row for row in frame if row.startswith("›"))) for frame in frames(terminal)]
+    assert marked == [0, 0, 1, 2, 2, 2, 1]
+
+
+@pytest.mark.spec("MSG-8")
+@pytest.mark.parametrize("keys", [("down", "esc"), ("ctrl-c",), ("down",), ()])
+def test_esc_ctrl_c_or_end_of_input_give_none(terminal, keys):
+    assert picking(*keys) is None
+
+
+@pytest.mark.spec("MSG-8")
+def test_other_keys_change_nothing(terminal):
+    assert picking("other", "down", "other", "enter") == 1
+
+
+@pytest.mark.spec("MSG-8")
+def test_dim_choices_are_drawn_dim(colored_terminal):
+    picking("enter", choices=(("ready", False), ("not pulled", True)))
+    assert frames(colored_terminal, 2)[0] == ["› ready", f"  {DIM}not pulled{RESET}"]
+
+
+@pytest.mark.spec("MSG-8")
+def test_the_list_is_cleared_when_pick_ends(terminal):
+    picking("down", "enter")
+    assert terminal.getvalue().endswith("\033[2A\r\033[J")
+
+
+@pytest.mark.spec("MSG-8")
+def test_pick_leaves_a_screens_live_block_above_the_prompt(terminal, clock):
+    screen = Screen()
+    say.write_through(screen.print, screen)
+    say.live("Learning")
+    picking("enter")
+    assert screen.shown == [("live", "Learning", 100.0, NO_FACTS)]
+
+
+@pytest.mark.spec("MSG-8")
+def test_pick_gives_the_terminal_back_however_it_ends(terminal):
+    closed = []
+
+    def keys():
+        try:
+            yield "enter"
+        finally:
+            closed.append(True)
+
+    say.keys = keys
+    say.pick([("one", False)], 0)
+    assert closed == [True]
+
+
+@pytest.mark.spec("MSG-8")
+@pytest.mark.parametrize(
+    "pressed,key",
+    [
+        (b"\x1b[A", "up"),
+        (b"\x1bOA", "up"),
+        (b"\x1b[B", "down"),
+        (b"\x1bOB", "down"),
+        (b"\r", "enter"),
+        (b"\n", "enter"),
+        (b"\x1b", "esc"),
+        (b"\x03", "ctrl-c"),
+        (b"\x04", "end"),
+        (b"", "end"),
+        (b"x", "other"),
+    ],
+)
+def test_pressed_bytes_are_named_keys(pressed, key):
+    assert key_named(pressed) == key

@@ -12,7 +12,7 @@ import time
 from pathlib import Path
 
 import pytest
-from conftest import ACCENT, BOLD, DIM, GREY, RESET, Terminal
+from conftest import ACCENT, BOLD, DIM, GREY, MEASURED, RESET, Terminal
 
 import tinkerkit.conversation as conversation
 from tinkerkit.conversation import (
@@ -41,7 +41,7 @@ from tinkerkit.conversation import (
 )
 from tinkerkit.jobs import began_at
 from tinkerkit.ledger import DONE_NOTE_KEPT_SECONDS, Ledger
-from tinkerkit.model import Models
+from tinkerkit.model import Models, Ollama
 from tinkerkit.project import Runs, Tracker
 from tinkerkit.settings import Home
 
@@ -455,6 +455,61 @@ def test_console_sends_a_line_back_above_the_live_block(monkeypatch, clock):
     console.screen.show_live("Learning", 100.0, under=["one"])
     shown = drawn_after(lambda: console.show_again("hi"))
     assert shown == sent_back_shown("hi", block=console.screen.drawn, columns=20)
+
+
+def model_picker(monkeypatch, console, chosen, models=({"name": "m"}, {"name": "n"})):
+    shown = []
+
+    def pick(choices, start):
+        shown.append((choices, start, console.screen.printing.locked()))
+        return chosen
+
+    monkeypatch.setattr(conversation.say, "pick", pick)
+    monkeypatch.setattr(
+        Ollama, "installed_models", staticmethod(lambda: None if models is None else list(models))
+    )
+    return shown
+
+
+@pytest.mark.spec("CNV-8")
+def test_console_picks_the_model_for_use_model_typed_alone(monkeypatch, home_store):
+    console = ruled_console(monkeypatch)
+    Models.keep("n", MEASURED)
+    shown = model_picker(monkeypatch, console, 1)
+    typing(monkeypatch, " use-model ", "use-model n", "use-models")
+    console.read()
+    assert shown == [([("m", True), ("n", False)], 0, True)]
+    assert [console.lines.get() for _ in range(4)] == ["use-model n", "use-model n", "use-models", None]
+
+
+@pytest.mark.spec("CNV-8")
+def test_console_sends_nothing_when_the_pick_is_cancelled(monkeypatch, home_store):
+    console = ruled_console(monkeypatch)
+    model_picker(monkeypatch, console, None)
+    typing(monkeypatch, "use-model")
+    console.read()
+    assert console.lines.get() == "" and console.receive(0) == []
+
+
+@pytest.mark.spec("CNV-8")
+@pytest.mark.parametrize("models", [(), None])
+def test_console_passes_use_model_on_when_there_is_nothing_to_pick(monkeypatch, home_store, models):
+    console = ruled_console(monkeypatch)
+    shown = model_picker(monkeypatch, console, 0, models)
+    typing(monkeypatch, "use-model")
+    console.read()
+    assert shown == [] and console.lines.get() == "use-model"
+
+
+@pytest.mark.spec("CNV-8")
+def test_console_passes_piped_use_model_on(monkeypatch, home_store):
+    colour_terminal(monkeypatch)
+    monkeypatch.setattr(sys.stdin, "isatty", lambda: False)
+    console = ConsoleChannel()
+    shown = model_picker(monkeypatch, console, 0)
+    typing(monkeypatch, "use-model")
+    console.read()
+    assert shown == [] and console.lines.get() == "use-model"
 
 
 @pytest.mark.spec("CNV-8")

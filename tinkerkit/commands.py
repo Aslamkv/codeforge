@@ -473,13 +473,13 @@ COMMANDS = [
     Command(
         "use-model",
         "Set up",
-        "use-model NAME",
+        "use-model [NAME]",
         "the measured model every build uses",
         "Use this measured model for every build from now on.",
         kind="glance",
         chat=True,
         words="one",
-        arguments=[Argument("name", None, None, "the model's name, as `tinker models` lists it")],
+        arguments=[Argument("name", "?", None, "the model's name, as `tinker models` lists it")],
     ),
     Command(
         "embed",
