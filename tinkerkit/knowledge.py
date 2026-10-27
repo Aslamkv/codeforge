@@ -1634,7 +1634,6 @@ class Embeddings:
         }
 
     def embedded(self, batch):
-        Ollama.kept.add(self.name)
         Ollama.embedders.add(self.name)
         data = Ollama.get_json(
             "/api/embed",

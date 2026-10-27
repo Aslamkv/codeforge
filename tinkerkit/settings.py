@@ -15,7 +15,7 @@ DEFAULT_CONFIG = frozendict(
     {
         "model": None,
         "ollama_url": "http://localhost:11434",
-        "keep_alive": 0,
+        "keep_alive": "30m",
         "max_growth": 1.15,
         "build_think": "medium",
         "test_timeout": 60,
@@ -225,7 +225,6 @@ BOOK_PASSAGES_SHOWN = 4
 
 EXERCISE_FOLDER = "tinker-exercise"
 EXERCISE_ENV = "TINKER_EXERCISE"
-KEEP_LOADED_ENV = "TINKER_KEEP_LOADED"
 EXERCISE_BUILD_LOOK_SECONDS = 2
 EARLIER_MEASURES_SHOWN = 8
 REFLECTION_PROBLEMS = 12

@@ -245,18 +245,6 @@ def test_chat_streams_and_gives_the_final_chunk(monkeypatch):
 
 
 @pytest.mark.spec("MOD-8")
-def test_a_chat_asked_to_stay_loaded_is_kept_until_it_is_unloaded(monkeypatch):
-    monkeypatch.setattr(urllib.request, "urlopen", lambda request, timeout: stream_of({"done": True}))
-    hi = [{"role": "user", "content": "hi"}]
-    Ollama.chat("gone", hi, 0, None)
-    Ollama.chat("gone too", hi, "0", None)
-    Ollama.chat("stays", hi, "5m", None)
-    assert Ollama.kept == {"stays"}
-    Ollama.unload("stays")
-    assert Ollama.kept == set()
-
-
-@pytest.mark.spec("MOD-8")
 def test_chat_errors(monkeypatch):
     def oom(request, timeout):
         raise http_error(500, b'{"error":"model requires more system memory: out of memory"}')
@@ -806,8 +794,7 @@ def test_a_raw_read_sends_its_keep_alive(monkeypatch):
     monkeypatch.setattr(urllib.request, "urlopen", urlopen)
     Ollama.read_raw("gone", "12", {})
     Ollama.read_raw("stays", "12", {}, "5m")
-    assert [payload["keep_alive"] for payload in sent] == [0, "5m"] and Ollama.kept == {"stays"}
-    Ollama.unload("stays")
+    assert [payload["keep_alive"] for payload in sent] == [0, "5m"]
 
 
 @pytest.mark.spec("MOD-14")

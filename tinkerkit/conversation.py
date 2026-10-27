@@ -38,7 +38,7 @@ lazy from .messages import (
 )
 lazy from .model import Models, Ollama, OllamaError
 lazy from .prompts import Prompts, Reply
-lazy from .settings import EXERCISE_FOLDER, JOB_STOP_SIGNAL, KEEP_LOADED_ENV, Config, Home, projects_folder
+lazy from .settings import EXERCISE_FOLDER, JOB_STOP_SIGNAL, Config, Home, projects_folder
 lazy from .text import field
 lazy from .workspace import Toolchain
 
@@ -920,7 +920,7 @@ class Desk:
         arguments = arguments + ["--confirm"] if arguments[0] in PLAN_CONFIRMING_COMMANDS else arguments
         env = dict(
             os.environ,
-            **{CHANNEL_REPORTS_ENV: "off", KEEP_LOADED_ENV: "1", "PYTHONUNBUFFERED": "1", "NO_COLOR": "1"},
+            **{CHANNEL_REPORTS_ENV: "off", "PYTHONUNBUFFERED": "1", "NO_COLOR": "1"},
         )
         return subprocess.Popen(
             tinker_command() + arguments,

@@ -14,7 +14,7 @@ from tinkerkit.knowledge import Knowledge, Library
 from tinkerkit.model import Models, Ollama, OllamaError
 from tinkerkit.project import Runs, Tracker, project_store
 from tinkerkit.session import Phase, Stopped
-from tinkerkit.settings import FIX_PHASES, KEEP_LOADED_ENV, PHASES, Config
+from tinkerkit.settings import FIX_PHASES, PHASES, Config
 from tinkerkit.workspace import Toolchain
 
 
@@ -318,7 +318,7 @@ def test_config(measured_model, capsys):
         "input budget:    8192 tokens",
         "context:         32768 tokens",
         "think:           high for planning, medium for building",
-        "keep_alive:      0",
+        "keep_alive:      '30m'",
         "test_timeout:    60",
         "web:             searches mwmbl, wikipedia, wikibooks",
     ):
@@ -518,9 +518,8 @@ def test_main_ends_cleanly(monkeypatch, error, message):
 
 @pytest.mark.spec("CLI-12")
 @pytest.mark.parametrize("ending", [KeyboardInterrupt, signal.SIGTERM, signal.SIGHUP])
-def test_main_unloads_every_kept_model_however_it_ends(monkeypatch, fake_ollama, ending):
+def test_main_unloads_no_model_however_it_ends(monkeypatch, fake_ollama, ending):
     def end(argv=None):
-        Ollama.kept.update({"a", "b"})
         if ending is KeyboardInterrupt:
             raise ending
         signal.raise_signal(ending)
@@ -529,29 +528,7 @@ def test_main_unloads_every_kept_model_however_it_ends(monkeypatch, fake_ollama,
     with pytest.raises(SystemExit) as ended:
         cli.main()
     assert ended.value.code == "\nInterrupted."
-    assert sorted(fake_ollama.unloaded) == ["a", "b"]
-
-
-@pytest.mark.spec("CLI-12")
-def test_main_unloads_nothing_it_did_not_keep(monkeypatch, fake_ollama):
-    monkeypatch.setattr(Cli, "parse", staticmethod(lambda argv=None: argparse.Namespace()))
-    monkeypatch.setattr(cli, "run", lambda *args: None)
-    cli.main()
     assert fake_ollama.unloaded == []
-
-
-@pytest.mark.spec("CLI-12")
-def test_a_job_a_chat_started_leaves_its_models_loaded(monkeypatch, fake_ollama):
-    def end(argv=None):
-        Ollama.kept.update({"a", "b"})
-        raise KeyboardInterrupt
-
-    monkeypatch.setenv(KEEP_LOADED_ENV, "1")
-    monkeypatch.setattr(Cli, "parse", staticmethod(end))
-    with pytest.raises(SystemExit):
-        cli.main()
-    assert fake_ollama.unloaded == []
-    Ollama.kept.clear()
 
 
 @pytest.mark.spec("CLI-12")

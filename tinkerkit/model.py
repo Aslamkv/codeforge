@@ -955,7 +955,6 @@ class Ollama:
         "signal: killed",
         "segmentation fault",
     )
-    kept = set()
     embedders = set()
 
     @staticmethod
@@ -978,13 +977,7 @@ class Ollama:
         )
 
     @staticmethod
-    def keep(name, keep_alive):
-        if keep_alive not in (0, "0"):
-            Ollama.kept.add(name)
-
-    @staticmethod
     def streamed(name, messages, keep_alive, options, think, label, done_when, timeout):
-        Ollama.keep(name, keep_alive)
         payload = Ollama.chat_payload(name, messages, keep_alive, options, think)
         stream = Stream(label, done_when)
         try:
@@ -1051,7 +1044,6 @@ class Ollama:
 
     @staticmethod
     def read_raw(name, prompt, options, keep_alive=0, timeout=OLLAMA_SILENCE_TIMEOUT):
-        Ollama.keep(name, keep_alive)
         payload = {
             "model": name,
             "prompt": prompt,
@@ -1081,16 +1073,10 @@ class Ollama:
 
     @staticmethod
     def unload(name):
-        Ollama.kept.discard(name)
         try:
             Ollama.chat(name, [], 0, None)
         except OllamaError:
             pass
-
-    @staticmethod
-    def unload_kept():
-        for name in sorted(Ollama.kept):
-            Ollama.unload(name)
 
     @staticmethod
     def installed_models():

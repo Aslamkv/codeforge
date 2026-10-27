@@ -295,7 +295,7 @@ def test_embeddings_are_cached_per_model(tinker_home, monkeypatch):
     each_model_keeps_its_own = 4
     assert len(Home.store().get("embeddings", "embed-a")) == each_model_keeps_its_own
     assert server.keep_alives == {EMBED_KEEP_ALIVE}
-    assert Ollama.kept == Ollama.embedders == {"embed-a", "embed-b"}
+    assert Ollama.embedders == {"embed-a", "embed-b"}
 
 
 @pytest.mark.spec("KNW-11")

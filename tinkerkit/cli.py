@@ -46,7 +46,6 @@ lazy from .settings import (
     ENV_FILE,
     FIX_PHASES,
     FORMATTER_RUNS_AFTER,
-    KEEP_LOADED_ENV,
     NUMBERED_PARTS,
     PHASES,
     STATUS_TEXT,
@@ -86,9 +85,6 @@ def main():
         raise SystemExit(f"\n{exc}")
     except OSError as exc:
         raise SystemExit(cannot_read_or_write(exc))
-    finally:
-        if not os.environ.get(KEEP_LOADED_ENV):
-            Ollama.unload_kept()
 
 
 def ended_like_ctrl_c(*_):

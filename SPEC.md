@@ -249,7 +249,7 @@ The home and its database, the settings, numbered lists, and the one way to dele
 
 - **SET-1** `Home.root` is the `.tinker` folder next to the `tinkerkit` package and `tinker.py`, where they
   really are (symlinks resolved). `Home.store()` is the home database, `tinker.db`, in it.
-- **SET-2** `DEFAULT_CONFIG` is exactly: model `None`, ollama_url `http://localhost:11434`, keep_alive `0`,
+- **SET-2** `DEFAULT_CONFIG` is exactly: model `None`, ollama_url `http://localhost:11434`, keep_alive `"30m"`,
   max_growth `1.15`, build_think `"medium"`, test_timeout `60`, web_timeout `30`, learn_missing `2`,
   learn_cutoff `0.0`, learn_pages `8`, learn_min_pages `2`, learn_searches `3`, learn_think `"low"`,
   tool_docs_pages `5`, docs_latest_days `30`, fetch_workers `6`, fetch_timeout `15`, fetch_max_bytes `2000000`,
@@ -537,8 +537,7 @@ What is said in the chats, kept so that a chat is only a view of it.
 - **MOD-8** `Ollama.chat` streams a request with `model`, `messages`, `stream: true` and `keep_alive`. It
   sends `think` only when it is set, and `options` only when there are some. It gives the final chunk, with
   `message.content` and `message.thinking`. An HTTP error is an `OllamaError` flagged out of memory or crashed
-  when it is either. An unreachable Ollama is an `OllamaError`. `Ollama.kept` holds each model a chat asked to
-  stay loaded (`keep_alive` not 0) until it is unloaded.
+  when it is either. An unreachable Ollama is an `OllamaError`.
 - **MOD-9** `Stream` collects the reply and keeps the last `UNFINISHED_THOUGHT_KEPT_CHARS` chars of the
   thinking. An error chunk is an `OllamaError`: a reply error with what came before, unless it is out of
   memory or a crash. Once `done_when(content)` says the reply is complete, the stream ends within
@@ -969,7 +968,7 @@ Lessons and proven knowledge, and what every kind of learning shares.
   `RETIRED_KEPT_PER_LIST`. Nothing retired is shown in a prompt.
 - **KNW-11** `Embeddings` keeps each text's vector by its key, per embedding model, in the home database. Only
   missing texts are asked for, in batches of `TEXTS_PER_REQUEST`, keeping the model loaded for `EMBED_KEEP_ALIVE` and in
-  `Ollama.kept` (**MOD-8**). A wrong reply gives `None`, and `failed` says why. `prune` keeps only the texts asked for. `cosine` is the cosine similarity, and 0 for a zero vector.
+  `Ollama.embedders`. A wrong reply gives `None`, and `failed` says why. `prune` keeps only the texts asked for. `cosine` is the cosine similarity, and 0 for a zero vector.
 - **KNW-12** `Retriever.by_words` ranks the texts that hold the query's words with BM25, best first. `rank`
   fuses the word and meaning rankings and gives every index: the ones neither finds come last. When embeddings
   fail, the meaning search is turned off for the rest of the run.
@@ -1573,10 +1572,9 @@ The main system: the command line, one run, and the cycle of phases.
   points to test, the files, the tests and files written, the spec points passing).
 - **CLI-12** `main()` ends a run cleanly: Ctrl-C ends with `Interrupted.`, and Ollama and file errors end with
   their message, never a traceback. A closed terminal and `SIGTERM` end it as Ctrl-C does. However it ends, it
-  unloads every model in `Ollama.kept` (**MOD-8**), so no model it loaded stays in memory after it; but a job
-  a chat started (`KEEP_LOADED_ENV`) leaves its models loaded, so the chat's next job does not load them again.
-  A job never unloads its model when it ends. A chat, however it ends, unloads the model in use and the
-  embedding model, so none of its jobs' models stays in memory after it.
+  unloads no model: a model stays loaded until its `keep_alive` idle time is up, so the next run does not load it
+  again. A chat, however it ends, unloads the model in use and the embedding model, so none of its jobs' models
+  stays in memory after it.
 - **CLI-13** Built end to end: `tinker task` with a model that answers like a real one builds a project in its
   folder. Each spec point gets a test, the code passes them (a wrong first version is fixed by the verify
   loop), the README's examples run, the final review passes, lessons are kept, SPEC.md is written, the run is

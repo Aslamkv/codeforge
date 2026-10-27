@@ -43,7 +43,7 @@ from tinkerkit.jobs import began_at
 from tinkerkit.ledger import DONE_NOTE_KEPT_SECONDS, Ledger
 from tinkerkit.model import Models, Ollama
 from tinkerkit.project import Runs, Tracker
-from tinkerkit.settings import KEEP_LOADED_ENV, Config, Home
+from tinkerkit.settings import Config, Home
 
 
 def wait_until(condition, timeout=15):
@@ -1848,14 +1848,6 @@ def test_a_chat_unloads_the_model_in_use_and_the_embedding_model_when_it_ends(
     chat.run()
     assert sorted(fake_ollama.unloaded) == ["e", "m"]
     channel.claimed.close()
-
-
-@pytest.mark.spec("CLI-12")
-def test_a_job_a_chat_starts_is_told_to_leave_its_models_loaded(monkeypatch):
-    started, chat = [], Desk([Recorder()], Path.cwd())
-    monkeypatch.setattr(subprocess, "Popen", lambda command, **options: started.append(options["env"]))
-    chat.spawn(["ask", "why"])
-    assert started[0][KEEP_LOADED_ENV] == "1"
 
 
 @pytest.mark.spec("CNV-9")
