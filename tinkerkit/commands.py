@@ -463,7 +463,7 @@ COMMANDS = [
         "calibrate",
         "Set up",
         "calibrate [NAME]",
-        "measure a model once (a minute or a few)",
+        "measure a model once (under a minute for most)",
         "Measure a model once: the largest prompt it reads and the longest reply it writes.",
         kind="job",
         actions=[Action("glance", when=lambda words: not words)],

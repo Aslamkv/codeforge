@@ -549,7 +549,11 @@ What is said in the chats, kept so that a chat is only a view of it.
 - **MOD-10** `Calibrator.shared(context)` sets the prompt budget to `min(8192, max(512, context // 3))`, and
   the longest reply to `max(1024, min(16384, context - budget))`. `safe_ratio()` is
   `STARTING_CHARS_PER_TOKEN` until measured, and then 97% of the measure, within [2, 4], to 2 decimals.
-- **MOD-11** `Calibrator.capacity(target)` gives `(target, None)` when the target reads. Otherwise it halves
+- **MOD-11** `Calibrator.capacity(target)` gives `(target, None)` when the target reads. A GGUF model holds
+  its whole context from the load, so reading `PROBE_SAMPLE_TOKENS` at a context shows that context reads. Any
+  other model grows its memory as it reads: it reads `PROBE_SAMPLE_TOKENS` first, and the target reads when
+  the loaded size, grown at the rate that read showed up to the target, and `RUNNER_OVERHEAD_BYTES` are within
+  the GPU memory. When that does not show it, or a size is unknown, it reads the whole target. Otherwise it halves
   the gap until it is within `CAPACITY_SEARCH_PRECISION`, and gives `(largest that read, smallest that
   failed)`. Below the smallest usable context it ends with `SystemExit`.
 - **MOD-12** `Calibrator.check_fit` ends with `SystemExit` when the weights and `RUNNER_OVERHEAD_BYTES` are
@@ -560,7 +564,9 @@ What is said in the chats, kept so that a chat is only a view of it.
   memory before the next one. A GGUF model whose probe crashes is read again in pieces (`num_batch` 256), and
   keeps that option. When Ollama itself stops answering, calibration ends with `SystemExit`.
 - **MOD-15** Calibration's first chat finds the think setting the model takes: `"high"`, else `true`, and none
-  for a model that does not think. A model that does not run ends calibration with `SystemExit`.
+  for a model that does not think. It asks for the context calibration aims for, so the first probe finds the
+  model loaded, and asks again at 4096 when the model does not run there. A model that does not run ends
+  calibration with `SystemExit`.
 - **MOD-16** `Model` takes its limits from the measured settings. It builds at `build_think` only when the
   model thinks. Its chars per token stay within [2, 4]. `limit_chars(system)` is
   `tokens × PROMPT_BUDGET_SHARE × chars_per_token − len(system) − 40`.

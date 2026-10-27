@@ -8,7 +8,7 @@ from conftest import MEASURED, MODEL
 
 import tinkerkit.model as model_module
 from tinkerkit.messages import say
-from tinkerkit.model import Answer, Calibrator, Model, Models, Ollama, OllamaError, Stream
+from tinkerkit.model import Answer, Calibrator, GgufReading, Model, Models, Ollama, OllamaError, Stream
 from tinkerkit.prompts import Part, Prompts, PromptTooLarge, Reply
 from tinkerkit.settings import PROMPT_BUDGET_SHARE, STARTING_CHARS_PER_TOKEN, Config, Home
 
@@ -403,19 +403,56 @@ class Probed(Calibrator):
         super().__init__("m")
         self.limit, self.tried = limit, []
 
-    def reads(self, context, gguf):
-        self.tried.append(context)
-        return context <= self.limit
+    def probe(self, tokens, num_ctx):
+        self.tried.append((tokens, num_ctx))
+        return num_ctx <= self.limit
+
+
+GGUF = {"format": "gguf"}
 
 
 @pytest.mark.spec("MOD-11")
 def test_capacity():
-    assert Probed(30000).capacity(24576, {}) == (24576, None)
+    probed = Probed(30000)
+    assert probed.capacity(24576, GGUF) == (24576, None) and probed.tried == [(2048, 24576)]
     probed = Probed(10000)
-    good, bad = probed.capacity(24576, {})
+    good, bad = probed.capacity(24576, GGUF)
     assert good <= 10000 < bad and bad - good <= 0.1 * bad
     with pytest.raises(SystemExit, match="cannot hold even 1536"):
-        Probed(1000).capacity(24576, {})
+        Probed(1000).capacity(24576, GGUF)
+
+
+def growing(monkeypatch, sizes, memory):
+    sizes = iter(sizes)
+    monkeypatch.setattr(Ollama, "loaded_models", staticmethod(lambda: next(sizes)))
+    monkeypatch.setattr(Calibrator, "gpu_memory", classmethod(lambda cls: memory))
+    return Probed(30000)
+
+
+@pytest.mark.spec("MOD-11")
+def test_a_growing_model_that_fits_is_read_once_in_a_sample(monkeypatch):
+    probed = growing(monkeypatch, [[("other", 1e9), ("m", 5e9)], [("m", 5.1e9)]], 20e9)
+    assert probed.capacity(24576, {}) == (24576, None) and probed.tried == [(2048, 24576)]
+
+
+@pytest.mark.spec("MOD-11")
+def test_a_growing_model_that_may_not_fit_reads_the_whole_target(monkeypatch):
+    probed = growing(monkeypatch, [[("m", 5e9)], [("m", 5.1e9)]], 7e9)
+    assert probed.capacity(24576, {}) == (24576, None)
+    assert probed.tried == [(2048, 24576), (24576, 24576)]
+
+
+@pytest.mark.spec("MOD-11")
+@pytest.mark.parametrize(
+    ("sizes", "memory", "tried"),
+    [
+        ([None], 20e9, [(24576, 24576)]),
+        ([[("m", 5e9)], [("m", 5.1e9)]], None, [(2048, 24576), (24576, 24576)]),
+    ],
+)
+def test_a_growing_model_of_unknown_size_reads_the_whole_target(monkeypatch, sizes, memory, tried):
+    probed = growing(monkeypatch, sizes, memory)
+    assert probed.capacity(24576, {}) == (24576, None) and probed.tried == tried
 
 
 @pytest.mark.spec("MOD-12")
@@ -450,7 +487,7 @@ def test_calibrate_writes_the_measured_settings(fake_ollama, monkeypatch, no_sle
         Ollama,
         "read_raw",
         staticmethod(
-            lambda name, prompt, options, timeout=0: {
+            lambda name, prompt, options, keep_alive=0, timeout=0: {
                 "prompt_eval_count": len(prompt),
                 "prompt_eval_duration": 2e9,
             }
@@ -462,7 +499,8 @@ def test_calibrate_writes_the_measured_settings(fake_ollama, monkeypatch, no_sle
     assert saved == settings and Home.store().get("models", "m") == settings
     assert saved["max_prompt_tokens"] == 8192 and saved["max_reply_tokens"] == 16384
     assert saved["fix_max_tokens"] == 4096 and saved["num_ctx"] == 25600 and saved["think"] == "high"
-    assert saved["probes"] == [[8192, "read"]] and 2.0 <= saved["chars_per_token"] <= 4.0
+    assert saved["probes"] == [[2048, "read"]] and 2.0 <= saved["chars_per_token"] <= 4.0
+    assert fake_ollama.unloaded[-1] == "m"
 
 
 @pytest.mark.spec("MOD-16")
@@ -716,7 +754,7 @@ def test_other_models_are_unloaded_and_a_grown_model_too(make_model, fake_ollama
 
 @pytest.mark.spec("MOD-14")
 def test_a_failed_probe_is_recorded_and_waited_out(monkeypatch, fake_ollama, no_sleep, capsys):
-    def crash(name, prompt, options, timeout=0):
+    def crash(name, prompt, options, keep_alive=0, timeout=0):
         raise OllamaError("llama runner process has terminated", crashed=True)
 
     monkeypatch.setattr(Ollama, "read_raw", staticmethod(crash))
@@ -733,11 +771,38 @@ def test_a_failed_probe_is_recorded_and_waited_out(monkeypatch, fake_ollama, no_
         calibrator.probe(4096, 8192)
 
 
+@pytest.mark.spec("MOD-11")
+def test_a_probe_keeps_the_model_loaded(monkeypatch):
+    kept = []
+
+    def read(name, prompt, options, keep_alive=0, timeout=0):
+        kept.append(keep_alive)
+        return {"prompt_eval_count": len(prompt), "prompt_eval_duration": 1e9}
+
+    monkeypatch.setattr(Ollama, "read_raw", staticmethod(read))
+    Calibrator("m").probe(2048, 4096)
+    assert kept == [model_module.CALIBRATION_KEEP_ALIVE]
+
+
+def test_a_raw_read_sends_its_keep_alive(monkeypatch):
+    sent = []
+
+    def urlopen(request, timeout):
+        sent.append(json.loads(request.data))
+        return Body(b'{"response": "1"}')
+
+    monkeypatch.setattr(urllib.request, "urlopen", urlopen)
+    Ollama.read_raw("gone", "12", {})
+    Ollama.read_raw("stays", "12", {}, "5m")
+    assert [payload["keep_alive"] for payload in sent] == [0, "5m"] and Ollama.kept == {"stays"}
+    Ollama.unload("stays")
+
+
 @pytest.mark.spec("MOD-14")
 def test_a_gguf_model_that_crashes_is_read_in_pieces(monkeypatch, no_sleep, fake_ollama):
     reads = []
 
-    def read(name, prompt, options, timeout=0):
+    def read(name, prompt, options, keep_alive=0, timeout=0):
         reads.append(dict(options))
         if "num_batch" not in options:
             raise OllamaError("runner failed", crashed=True)
@@ -746,7 +811,7 @@ def test_a_gguf_model_that_crashes_is_read_in_pieces(monkeypatch, no_sleep, fake
     monkeypatch.setattr(Ollama, "read_raw", staticmethod(read))
     monkeypatch.setattr(Ollama, "installed_models", staticmethod(lambda: [{"name": "m"}]))
     calibrator = Calibrator("m")
-    assert calibrator.reads(16384, gguf=True) is True and calibrator.options == {"num_batch": 256}
+    assert GgufReading(calibrator).reads(16384) is True and calibrator.options == {"num_batch": 256}
     assert reads[0]["num_ctx"] == 16384 and reads[1]["num_batch"] == 256
 
 
@@ -755,11 +820,30 @@ def test_the_first_chat_finds_the_think_setting(fake_ollama):
     fake_ollama.reply(OllamaError('invalid think value "high"')).reply(
         {"content": "OK", "prompt_eval_count": 300}
     )
-    assert Calibrator("m").first_chat({"capabilities": ["thinking"]}) is True
+    assert Calibrator("m").first_chat({"capabilities": ["thinking"]}, 4096) is True
     assert [call["think"] for call in fake_ollama.calls] == ["high", True]
     fake_ollama.reply("OK")
-    assert Calibrator("m").first_chat({"capabilities": ["completion"]}) is None
+    assert Calibrator("m").first_chat({"capabilities": ["completion"]}, 4096) is None
     assert fake_ollama.calls[-1]["think"] is None
     fake_ollama.reply(OllamaError("model requires more system memory"))
     with pytest.raises(SystemExit, match="m does not run"):
-        Calibrator("m").first_chat({"capabilities": []})
+        Calibrator("m").first_chat({"capabilities": []}, 4096)
+
+
+@pytest.mark.spec("MOD-15")
+def test_the_first_chat_keeps_the_model_loaded_at_the_target_context(fake_ollama):
+    fake_ollama.reply("OK")
+    Calibrator("m").first_chat({"capabilities": ["completion"]}, 24576)
+    call = fake_ollama.calls[-1]
+    assert call["options"]["num_ctx"] == 24576 and call["keep_alive"] not in (0, "0")
+
+
+@pytest.mark.spec("MOD-15")
+def test_the_first_chat_asks_again_at_4096_when_the_target_does_not_run(fake_ollama, no_sleep):
+    fake_ollama.reply(OllamaError("runner process has terminated", crashed=True)).reply("OK")
+    assert Calibrator("m").first_chat({"capabilities": ["completion"]}, 24576) is None
+    assert [call["options"]["num_ctx"] for call in fake_ollama.calls] == [24576, 4096]
+    assert fake_ollama.unloaded == ["m"]
+    fake_ollama.reply(OllamaError("crashed", crashed=True), times=2)
+    with pytest.raises(SystemExit, match="m does not run"):
+        Calibrator("m").first_chat({"capabilities": []}, 24576)

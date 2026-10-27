@@ -10,6 +10,7 @@ lazy import urllib.request
 
 from .messages import say
 from .settings import (
+    CALIBRATION_KEEP_ALIVE,
     CAPACITY_SEARCH_PRECISION,
     CRASH_NEAR_LIMIT_SHARE,
     CRASH_RECOVERY_SECONDS,
@@ -17,6 +18,7 @@ from .settings import (
     CRASHED_LIMIT_SHARE,
     DEFAULT_CONFIG,
     DEFAULT_THINK,
+    FIRST_CHAT_CONTEXT,
     FIX_MAX_TOKENS,
     LAST_CHUNK_WAIT_SECONDS,
     LOOPING_REPEATED_LINES,
@@ -28,6 +30,7 @@ from .settings import (
     OOM_RETRIES,
     OOM_RETRY_PROMPT_SHARE,
     PROBE_NUM_BATCH,
+    PROBE_SAMPLE_TOKENS,
     PROGRESS_UPDATE_SECONDS,
     PROMPT_BUDGET_SHARE,
     PROMPT_TARGET_TOKENS,
@@ -652,15 +655,15 @@ class Calibrator:
         self.write_tokens_per_second = None
 
     def run(self):
-        say.title(f"Calibrating {self.name} (once per model; a few minutes)", "📏")
+        say.title(f"Calibrating {self.name} (once per model; under a minute for most models)", "📏")
         started = time.perf_counter()
         facts = Ollama.model_facts(self.name)
         self.check_fit(facts)
-        think = self.first_chat(facts)
         target = min(
             PROMPT_TARGET_TOKENS + REPLY_TARGET_TOKENS,
             facts["context_length"] or PROMPT_TARGET_TOKENS + REPLY_TARGET_TOKENS,
         )
+        think = self.first_chat(facts, target)
         context, crash = self.capacity(target, facts)
         budget, max_reply = self.shared(context)
         settings = self.settings(facts, think, budget, context, crash, max_reply)
@@ -722,18 +725,12 @@ class Calibrator:
         except OSError, ValueError, StopIteration:
             return None
 
-    def first_chat(self, facts):
+    def first_chat(self, facts, target):
         thinks = not facts["capabilities"] or "thinking" in facts["capabilities"]
         content = self.FILLER * 4
         for think in (DEFAULT_THINK, True) if thinks else (None,):
             try:
-                data = Ollama.chat(
-                    self.name,
-                    [{"role": "user", "content": content + "\nSay OK."}],
-                    0,
-                    {"num_ctx": 4096, "num_predict": 64},
-                    think,
-                )
+                data = self.chat_at(content, think, target)
             except OllamaError as exc:
                 if think is not None and exc.about_thinking:
                     continue
@@ -742,6 +739,24 @@ class Calibrator:
             self.show_first_chat(think)
             return think
         return None
+
+    def chat_at(self, content, think, target):
+        try:
+            return self.say_ok(content, think, target)
+        except OllamaError as exc:
+            if (think is not None and exc.about_thinking) or target <= FIRST_CHAT_CONTEXT:
+                raise
+        self.unload_and_wait()
+        return self.say_ok(content, think, FIRST_CHAT_CONTEXT)
+
+    def say_ok(self, content, think, context):
+        return Ollama.chat(
+            self.name,
+            [{"role": "user", "content": content + "\nSay OK."}],
+            CALIBRATION_KEEP_ALIVE,
+            {"num_ctx": context, "num_predict": 64},
+            think,
+        )
 
     def show_first_chat(self, think):
         with say.section():
@@ -759,13 +774,13 @@ class Calibrator:
         self.write_tokens_per_second = round(written / seconds, 1) if written and seconds else None
 
     def capacity(self, target, facts):
-        gguf = (facts.get("format") or "").lower() == "gguf"
-        if self.reads(target, gguf):
+        reading = self.reading(facts)
+        if reading.target_reads(target):
             return Capacity(target, None)
         good, bad = 0, target
         while bad - good > CAPACITY_SEARCH_PRECISION * bad and bad > MIN_PROMPT_TOKENS + MIN_REPLY_TOKENS:
             middle = (good + bad) // 2
-            good, bad = (middle, bad) if self.reads(middle, gguf) else (good, middle)
+            good, bad = (middle, bad) if reading.reads(middle) else (good, middle)
         if good < MIN_PROMPT_TOKENS + MIN_REPLY_TOKENS:
             raise SystemExit(
                 f"{self.name} cannot hold even {MIN_PROMPT_TOKENS + MIN_REPLY_TOKENS} tokens of "
@@ -773,24 +788,17 @@ class Calibrator:
             )
         return Capacity(good, bad)
 
-    def reads(self, context, gguf):
-        tokens = min(context, PROMPT_TARGET_TOKENS) if gguf else context
+    def reading(self, facts):
+        return (GgufReading if (facts.get("format") or "").lower() == "gguf" else GrowingReading)(self)
+
+    def read(self, tokens, context):
         with say.section():
             say.step(
                 f"Reading {tokens} tokens with a context of {context} (about "
                 f"{round(tokens / max(self.read_speed(), 1))}s)…",
                 "📏",
             )
-        if self.probe(tokens, context):
-            return True
-        if gguf and not self.options:
-            self.options = {"num_batch": PROBE_NUM_BATCH}
-            if self.probe(tokens, context):
-                with say.section(), say.section():
-                    say.done(f"Read in pieces of {PROBE_NUM_BATCH} tokens (num_batch)")
-                return True
-            self.options = {}
-        return False
+        return self.probe(tokens, context)
 
     def probe(self, tokens, num_ctx):
         digits = max(1, round(tokens / self.tokens_per_digit))
@@ -798,7 +806,11 @@ class Calibrator:
         timeout = max(OLLAMA_SILENCE_TIMEOUT, int(tokens / max(self.read_speed() / 3, 1)))
         try:
             data = Ollama.read_raw(
-                self.name, prompt, {"num_ctx": num_ctx, "num_predict": 1, **self.options}, timeout
+                self.name,
+                prompt,
+                {"num_ctx": num_ctx, "num_predict": 1, **self.options},
+                CALIBRATION_KEEP_ALIVE,
+                timeout,
             )
         except OllamaError as exc:
             self.probe_failed(exc, tokens)
@@ -811,6 +823,9 @@ class Calibrator:
         with say.section(), say.section():
             say.fail(f"Could not read it ({first_line(str(exc), 100)})")
         self.probe_history.append([tokens, "crashed"])
+        self.unload_and_wait()
+
+    def unload_and_wait(self):
         Ollama.unload(self.name)
         time.sleep(CRASH_RECOVERY_SECONDS)
 
@@ -866,6 +881,55 @@ class Calibrator:
         )
 
 
+class Reading:
+    def __init__(self, calibrator):
+        self.calibrator = calibrator
+
+    @staticmethod
+    def sample(context):
+        return min(context, PROBE_SAMPLE_TOKENS)
+
+
+class GgufReading(Reading):
+    def target_reads(self, context):
+        return self.reads(context)
+
+    def reads(self, context):
+        calibrator, tokens = self.calibrator, self.sample(context)
+        if calibrator.read(tokens, context):
+            return True
+        if not calibrator.options:
+            calibrator.options = {"num_batch": PROBE_NUM_BATCH}
+            if calibrator.probe(tokens, context):
+                with say.section(), say.section():
+                    say.done(f"Read in pieces of {PROBE_NUM_BATCH} tokens (num_batch)")
+                return True
+            calibrator.options = {}
+        return False
+
+
+class GrowingReading(Reading):
+    def target_reads(self, context):
+        return self.sample_shows_fit(context) or self.reads(context)
+
+    def reads(self, context):
+        return bool(self.calibrator.read(context, context))
+
+    def sample_shows_fit(self, context):
+        tokens, before = self.sample(context), self.loaded_size()
+        if before is None or tokens >= context or not self.calibrator.read(tokens, context):
+            return False
+        after, memory = self.loaded_size(), self.calibrator.gpu_memory()
+        if after is None or not memory:
+            return False
+        grown = (after - before) / tokens * (context - tokens)
+        return after + grown + RUNNER_OVERHEAD_BYTES <= memory
+
+    def loaded_size(self):
+        name = self.calibrator.name
+        return next((size for loaded, size in Ollama.loaded_models() or [] if loaded == name), None)
+
+
 class Ollama:
     RUNNER_CRASHES = (
         "runner failed",
@@ -900,9 +964,13 @@ class Ollama:
         )
 
     @staticmethod
-    def streamed(name, messages, keep_alive, options, think, label, done_when, timeout):
+    def keep(name, keep_alive):
         if keep_alive not in (0, "0"):
             Ollama.kept.add(name)
+
+    @staticmethod
+    def streamed(name, messages, keep_alive, options, think, label, done_when, timeout):
+        Ollama.keep(name, keep_alive)
         payload = Ollama.chat_payload(name, messages, keep_alive, options, think)
         stream = Stream(label, done_when)
         try:
@@ -968,13 +1036,14 @@ class Ollama:
         return any(sign in lowered for sign in Ollama.RUNNER_CRASHES)
 
     @staticmethod
-    def read_raw(name, prompt, options, timeout=OLLAMA_SILENCE_TIMEOUT):
+    def read_raw(name, prompt, options, keep_alive=0, timeout=OLLAMA_SILENCE_TIMEOUT):
+        Ollama.keep(name, keep_alive)
         payload = {
             "model": name,
             "prompt": prompt,
             "raw": True,
             "stream": False,
-            "keep_alive": 0,
+            "keep_alive": keep_alive,
             "options": options,
         }
         try:
