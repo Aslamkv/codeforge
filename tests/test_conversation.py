@@ -968,12 +968,16 @@ def test_the_banner_names_tinker_the_model_the_projects_folder_and_the_chats(mon
     with_chats = Desk([ConsoleChannel(), Recorder("telegram")], root)
     assert with_chats.banner_lines() == [
         "🔧 Tinker",
-        "model qwen3 · embedding nomic-embed · projects ~/Projects · chats telegram",
+        "model qwen3",
+        "embedding nomic-embed",
+        "projects ~/Projects",
+        "chats telegram",
         "help lists commands · exit quits",
     ]
     settings.clear()
     alone = Desk([ConsoleChannel()], "/tmp")
-    assert alone.banner_lines()[1] == f"model no model yet · projects {Path('/tmp').resolve()}"
+    assert alone.banner_lines()[1:3] == ["model no model yet", f"projects {Path('/tmp').resolve()}"]
+    assert len(alone.banner_lines()) == 4
 
 
 @pytest.mark.spec("CNV-8")

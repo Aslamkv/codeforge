@@ -222,7 +222,7 @@ class Desk:
         details += [f"embedding {embedding}"] if embedding else []
         details += [f"projects {self.shown_root()}"]
         details += [f"chats {', '.join(chats)}"] if chats else []
-        return ["🔧 Tinker", " · ".join(details), "help lists commands · exit quits"]
+        return ["🔧 Tinker", *details, "help lists commands · exit quits"]
 
     def shown_root(self):
         home = Path.home()

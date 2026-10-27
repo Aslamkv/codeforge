@@ -787,7 +787,8 @@ The terminal and the chats are one conversation: the same commands, the same ans
   what you type on it are never redrawn. When the window is resized, the block and the rule are drawn again
   at the new size right away, still right above the prompt and with what Tinker printed right above them, and
   they never spill onto the prompt row. The conversation opens in a framed banner that names Tinker, the model
-  in use, the embedding model when one is set, the projects folder and the chats it listens on; it draws a rule over the prompt, shows each line
+  in use, the embedding model when one is set, the projects folder and the chats it listens on, each on a
+  line of its own; it draws a rule over the prompt, shows each line
   you send again highlighted, and marks each message it sends with a steel blue `●`. Piped input draws no
   rule and shows no line again; with `NO_COLOR` or no terminal, none of that is drawn.
 - **CNV-9** `Desk.run` claims each chat channel. When another Tinker holds one, it stops if there is no
