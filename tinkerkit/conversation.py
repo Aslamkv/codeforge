@@ -1858,7 +1858,7 @@ class ConsoleChannel(Channel):
         if not choices:
             return line
         with self.screen.printing:
-            name = Models.picked(choices)
+            name = Models.picked(choices, Config.get("model"))
         return "" if name is None else f"use-model {name}"
 
     def remember(self, line):

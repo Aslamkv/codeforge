@@ -489,9 +489,18 @@ class Models:
         return [(name, Models.settings(name) is not None) for name in names]
 
     @staticmethod
-    def picked(choices):
-        names, in_use = [name for name, _ in choices], Config.get("model")
-        start = names.index(in_use) if in_use in names else 0
+    def embedding_choices():
+        names = [model.get("name", "") for model in Models.answering()]
+        return [(name, Models.embeds(Ollama.capabilities(name))) for name in names]
+
+    @staticmethod
+    def embeds(capabilities):
+        return not capabilities or "embedding" in capabilities
+
+    @staticmethod
+    def picked(choices, current):
+        names = [name for name, _ in choices]
+        start = names.index(current) if current in names else 0
         index = say.pick([(name, not measured) for name, measured in choices], start)
         return None if index is None else names[index]
 
@@ -989,6 +998,10 @@ class Ollama:
             LoadedModel(model.get("name") or model.get("model") or "", model.get("size", 0))
             for model in data.get("models", [])
         ]
+
+    @staticmethod
+    def capabilities(name):
+        return (Ollama.get_json("/api/show", {"model": name}, timeout=30) or {}).get("capabilities")
 
     @staticmethod
     def model_facts(name):

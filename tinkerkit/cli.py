@@ -648,7 +648,7 @@ class Commands:
         if not choices:
             Commands.list_models()
             return None
-        return Models.picked(choices)
+        return Models.picked(choices, Config.get("model"))
 
     @staticmethod
     def embed(name):

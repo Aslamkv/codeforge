@@ -96,6 +96,49 @@ def test_choices(home_store, monkeypatch):
     assert Models.choices() == [("qwen3:8b", False), ("llama3", True)]
 
 
+@pytest.mark.spec("MOD-26")
+def test_embedding_choices(monkeypatch):
+    monkeypatch.setattr(Ollama, "installed_models", staticmethod(lambda: None))
+    with pytest.raises(SystemExit, match="Ollama does not answer"):
+        Models.embedding_choices()
+    monkeypatch.setattr(
+        Ollama,
+        "installed_models",
+        staticmethod(lambda: [{"name": "qwen3:8b"}, {"name": "nomic-embed"}, {"name": "old"}]),
+    )
+    capabilities = {"qwen3:8b": ["completion"], "nomic-embed": ["embedding"], "old": None}
+    monkeypatch.setattr(Ollama, "capabilities", staticmethod(capabilities.get))
+    assert Models.embedding_choices() == [("qwen3:8b", False), ("nomic-embed", True), ("old", True)]
+
+
+@pytest.mark.spec("MOD-26")
+def test_capabilities_asks_show_once(monkeypatch):
+    asked = []
+    answers = {"qwen3": {"capabilities": ["completion", "tools"]}, "old": {}}
+    monkeypatch.setattr(
+        Ollama,
+        "get_json",
+        staticmethod(lambda path, payload=None, **_: asked.append(path) or answers.get(payload["model"])),
+    )
+    assert Ollama.capabilities("qwen3") == ["completion", "tools"]
+    assert Ollama.capabilities("old") is None
+    assert Ollama.capabilities("gone") is None
+    assert asked == ["/api/show"] * 3
+
+
+@pytest.mark.spec("MOD-26")
+def test_picked_starts_at_the_given_name(monkeypatch):
+    shown = []
+    monkeypatch.setattr(say, "pick", lambda choices, start: shown.append((choices, start)) or 1)
+    choices = [("qwen3:8b", False), ("llama3", True)]
+    assert Models.picked(choices, "llama3") == "llama3"
+    assert Models.picked(choices, "gone") == "llama3"
+    assert shown == [
+        ([("qwen3:8b", True), ("llama3", False)], 1),
+        ([("qwen3:8b", True), ("llama3", False)], 0),
+    ]
+
+
 @pytest.mark.spec("MOD-4")
 def test_context_for_and_reply_limits():
     assert Models.context_for(8192, 16384, None) == 25600
