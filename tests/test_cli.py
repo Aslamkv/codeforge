@@ -1,6 +1,7 @@
 import argparse
 import datetime
 import json
+import signal
 import sys
 
 import pytest
@@ -513,6 +514,30 @@ def test_main_ends_cleanly(monkeypatch, error, message):
     with pytest.raises(SystemExit) as ended:
         cli.main()
     assert ended.value.code == message
+
+
+@pytest.mark.spec("CLI-12")
+@pytest.mark.parametrize("ending", [KeyboardInterrupt, signal.SIGTERM, signal.SIGHUP])
+def test_main_unloads_every_kept_model_however_it_ends(monkeypatch, fake_ollama, ending):
+    def end(argv=None):
+        Ollama.kept.update({"a", "b"})
+        if ending is KeyboardInterrupt:
+            raise ending
+        signal.raise_signal(ending)
+
+    monkeypatch.setattr(Cli, "parse", staticmethod(end))
+    with pytest.raises(SystemExit) as ended:
+        cli.main()
+    assert ended.value.code == "\nInterrupted."
+    assert sorted(fake_ollama.unloaded) == ["a", "b"]
+
+
+@pytest.mark.spec("CLI-12")
+def test_main_unloads_nothing_it_did_not_keep(monkeypatch, fake_ollama):
+    monkeypatch.setattr(Cli, "parse", staticmethod(lambda argv=None: argparse.Namespace()))
+    monkeypatch.setattr(cli, "run", lambda *args: None)
+    cli.main()
+    assert fake_ollama.unloaded == []
 
 
 SPEC_REPLY = {

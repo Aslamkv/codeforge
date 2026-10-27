@@ -486,7 +486,7 @@ loaded models are unloaded):
 
 ```sh
 tinker config projects ~/Code       # new projects (and the exercises) go here
-tinker config keep_alive 10m        # keep the model loaded 10 minutes (0, the default, unloads it at once)
+tinker config keep_alive 10m        # keep the model loaded 10 minutes, or until Tinker exits (0, the default, unloads it at once)
 ```
 
 Tune how `tinker learn` uses the web:
