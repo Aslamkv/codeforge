@@ -8,7 +8,7 @@ from conftest import MEASURED, MODEL
 
 import tinkerkit.model as model_module
 from tinkerkit.messages import say
-from tinkerkit.model import Answer, Calibrator, Model, Models, Ollama, OllamaError, Stream
+from tinkerkit.model import Answer, Calibrator, GgufReading, Model, Models, Ollama, OllamaError, Stream
 from tinkerkit.prompts import Part, Prompts, PromptTooLarge, Reply
 from tinkerkit.settings import PROMPT_BUDGET_SHARE, STARTING_CHARS_PER_TOKEN, Config, Home
 
@@ -403,19 +403,49 @@ class Probed(Calibrator):
         super().__init__("m")
         self.limit, self.tried = limit, []
 
-    def reads(self, context, gguf):
-        self.tried.append(context)
+    def probe(self, tokens, context):
+        self.tried.append((tokens, context))
         return context <= self.limit
+
+
+GGUF = {"format": "gguf"}
 
 
 @pytest.mark.spec("MOD-11")
 def test_capacity():
-    assert Probed(30000).capacity(24576, {}) == (24576, None)
+    probed = Probed(30000)
+    assert probed.capacity(24576, GGUF) == (24576, None) and probed.tried == [(2048, 24576)]
     probed = Probed(10000)
-    good, bad = probed.capacity(24576, {})
+    good, bad = probed.capacity(24576, GGUF)
     assert good <= 10000 < bad and bad - good <= 0.1 * bad
     with pytest.raises(SystemExit, match="cannot hold even 1536"):
-        Probed(1000).capacity(24576, {})
+        Probed(1000).capacity(24576, GGUF)
+
+
+def growing(monkeypatch, sizes, memory):
+    sizes = iter(sizes)
+    monkeypatch.setattr(Ollama, "loaded_models", staticmethod(lambda: next(sizes)))
+    monkeypatch.setattr(Calibrator, "gpu_memory", classmethod(lambda cls: memory))
+    return Probed(30000)
+
+
+@pytest.mark.spec("MOD-11")
+def test_a_growing_model_that_fits_is_read_once_in_a_sample(monkeypatch):
+    probed = growing(monkeypatch, [[("other", 1e9), ("m", 5e9)], [("m", 5.1e9)]], 20e9)
+    assert probed.capacity(24576, {}) == (24576, None) and probed.tried == [(2048, 24576)]
+
+
+@pytest.mark.spec("MOD-11")
+def test_a_growing_model_that_may_not_fit_reads_the_whole_target(monkeypatch):
+    probed = growing(monkeypatch, [[("m", 5e9)], [("m", 5.1e9)]], 7e9)
+    assert probed.capacity(24576, {}) == (24576, None)
+    assert probed.tried == [(2048, 24576), (24576, 24576)]
+
+
+@pytest.mark.spec("MOD-11")
+def test_a_growing_model_of_unknown_size_reads_the_whole_target(monkeypatch):
+    probed = growing(monkeypatch, [None], 20e9)
+    assert probed.capacity(24576, {}) == (24576, None) and probed.tried == [(24576, 24576)]
 
 
 @pytest.mark.spec("MOD-12")
@@ -462,7 +492,7 @@ def test_calibrate_writes_the_measured_settings(fake_ollama, monkeypatch, no_sle
     assert saved == settings and Home.store().get("models", "m") == settings
     assert saved["max_prompt_tokens"] == 8192 and saved["max_reply_tokens"] == 16384
     assert saved["fix_max_tokens"] == 4096 and saved["num_ctx"] == 25600 and saved["think"] == "high"
-    assert saved["probes"] == [[8192, "read"]] and 2.0 <= saved["chars_per_token"] <= 4.0
+    assert saved["probes"] == [[2048, "read"]] and 2.0 <= saved["chars_per_token"] <= 4.0
 
 
 @pytest.mark.spec("MOD-16")
@@ -746,7 +776,7 @@ def test_a_gguf_model_that_crashes_is_read_in_pieces(monkeypatch, no_sleep, fake
     monkeypatch.setattr(Ollama, "read_raw", staticmethod(read))
     monkeypatch.setattr(Ollama, "installed_models", staticmethod(lambda: [{"name": "m"}]))
     calibrator = Calibrator("m")
-    assert calibrator.reads(16384, gguf=True) is True and calibrator.options == {"num_batch": 256}
+    assert GgufReading(calibrator).reads(16384) is True and calibrator.options == {"num_batch": 256}
     assert reads[0]["num_ctx"] == 16384 and reads[1]["num_batch"] == 256
 
 

@@ -28,6 +28,7 @@ from .settings import (
     OOM_RETRIES,
     OOM_RETRY_PROMPT_SHARE,
     PROBE_NUM_BATCH,
+    PROBE_SAMPLE_TOKENS,
     PROGRESS_UPDATE_SECONDS,
     PROMPT_BUDGET_SHARE,
     PROMPT_TARGET_TOKENS,
@@ -759,13 +760,13 @@ class Calibrator:
         self.write_tokens_per_second = round(written / seconds, 1) if written and seconds else None
 
     def capacity(self, target, facts):
-        gguf = (facts.get("format") or "").lower() == "gguf"
-        if self.reads(target, gguf):
+        reading = self.reading(facts)
+        if reading.target_reads(target):
             return Capacity(target, None)
         good, bad = 0, target
         while bad - good > CAPACITY_SEARCH_PRECISION * bad and bad > MIN_PROMPT_TOKENS + MIN_REPLY_TOKENS:
             middle = (good + bad) // 2
-            good, bad = (middle, bad) if self.reads(middle, gguf) else (good, middle)
+            good, bad = (middle, bad) if reading.reads(middle) else (good, middle)
         if good < MIN_PROMPT_TOKENS + MIN_REPLY_TOKENS:
             raise SystemExit(
                 f"{self.name} cannot hold even {MIN_PROMPT_TOKENS + MIN_REPLY_TOKENS} tokens of "
@@ -773,24 +774,17 @@ class Calibrator:
             )
         return Capacity(good, bad)
 
-    def reads(self, context, gguf):
-        tokens = min(context, PROMPT_TARGET_TOKENS) if gguf else context
+    def reading(self, facts):
+        return (GgufReading if (facts.get("format") or "").lower() == "gguf" else GrowingReading)(self)
+
+    def read(self, tokens, context):
         with say.section():
             say.step(
                 f"Reading {tokens} tokens with a context of {context} (about "
                 f"{round(tokens / max(self.read_speed(), 1))}s)…",
                 "📏",
             )
-        if self.probe(tokens, context):
-            return True
-        if gguf and not self.options:
-            self.options = {"num_batch": PROBE_NUM_BATCH}
-            if self.probe(tokens, context):
-                with say.section(), say.section():
-                    say.done(f"Read in pieces of {PROBE_NUM_BATCH} tokens (num_batch)")
-                return True
-            self.options = {}
-        return False
+        return self.probe(tokens, context)
 
     def probe(self, tokens, num_ctx):
         digits = max(1, round(tokens / self.tokens_per_digit))
@@ -864,6 +858,52 @@ class Calibrator:
         return round(
             max(MIN_CHARS_PER_TOKEN, min(self.measured_chars_per_token * 0.97, MAX_CHARS_PER_TOKEN)), 2
         )
+
+
+class GgufReading:
+    def __init__(self, calibrator):
+        self.calibrator = calibrator
+
+    def target_reads(self, context):
+        return self.reads(context)
+
+    def reads(self, context):
+        calibrator, tokens = self.calibrator, min(context, PROBE_SAMPLE_TOKENS)
+        if calibrator.read(tokens, context):
+            return True
+        if not calibrator.options:
+            calibrator.options = {"num_batch": PROBE_NUM_BATCH}
+            if calibrator.probe(tokens, context):
+                with say.section(), say.section():
+                    say.done(f"Read in pieces of {PROBE_NUM_BATCH} tokens (num_batch)")
+                return True
+            calibrator.options = {}
+        return False
+
+
+class GrowingReading:
+    def __init__(self, calibrator):
+        self.calibrator = calibrator
+
+    def target_reads(self, context):
+        return self.sample_shows_fit(context) or self.reads(context)
+
+    def reads(self, context):
+        return bool(self.calibrator.read(context, context))
+
+    def sample_shows_fit(self, context):
+        tokens, before = min(context, PROBE_SAMPLE_TOKENS), self.loaded_size()
+        if before is None or tokens >= context or not self.calibrator.read(tokens, context):
+            return False
+        after, memory = self.loaded_size(), self.calibrator.gpu_memory()
+        if after is None or not memory:
+            return False
+        grown = (after - before) / tokens * (context - tokens)
+        return after + grown + RUNNER_OVERHEAD_BYTES <= memory
+
+    def loaded_size(self):
+        name = self.calibrator.name
+        return next((size for loaded, size in Ollama.loaded_models() or [] if loaded == name), None)
 
 
 class Ollama:
