@@ -119,7 +119,7 @@ class PassageSource:
         return []
 
     def passages(self, question, items, count=BOOK_PASSAGES_SHOWN):
-        found = self.found(question, items)
+        found = distinct(self.found(question, items))
         by_words = Retriever(None).by_words(question, [passage["text"] for passage in found])
         shortlist = [found[index] for index in by_words[: self.SHORTLIST_TIMES * count]]
         by_meaning = self.retriever.rank(question, [passage["text"] for passage in shortlist])
@@ -172,11 +172,11 @@ class Asker:
 
     def recalled(self, question):
         items = self.memory.about(question)
-        passages = [
+        passages = distinct(
             passage
             for source in (ReadingPassages, DocumentationPassages)
             for passage in source(self.memory.retriever).passages(question, items)
-        ]
+        )
         return items, passages
 
     def on_to(self, phase):
@@ -452,6 +452,13 @@ def ask_parts(question, items, passages):
         Part("Installed here", installed_here(items)),
         Part("The question", question, True),
     ]
+
+
+def distinct(passages):
+    kept = {}
+    for passage in passages:
+        kept.setdefault(passage["text"].strip(), passage)
+    return list(kept.values())
 
 
 def quoted(passages):

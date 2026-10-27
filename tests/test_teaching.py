@@ -715,6 +715,26 @@ def test_an_ask_about_a_learned_topic_sees_its_kept_documentation(home_store, ma
 
 
 @pytest.mark.spec("TCH-3")
+def test_an_ask_gives_a_passage_kept_at_two_addresses_once(home_store, make_model, fake_ollama):
+    learned_flask(["The route decorator binds a view function to a URL rule."])
+    blocks = [
+        Block("heading", "Routing"),
+        Block("text", "The route decorator binds a view function to a URL rule. "),
+    ]
+    DocCache.put(
+        "flask",
+        "latest",
+        DocCache.pages("flask", "latest")
+        + [Page("https://mirror.flask.example/routing", "2020-01-01", blocks)],
+    )
+    fake_ollama.reply("With the route decorator.", when="ask")
+    Asker(make_model(), Memory()).answer("how do flask routes bind a view function?")
+    prompt = fake_ollama.calls[0]["messages"][1]["content"]
+    assert prompt.count("The route decorator binds") == 1
+    assert "[flask@latest, https://flask.example/routing > Routing]" in prompt
+
+
+@pytest.mark.spec("TCH-3")
 def test_an_ask_embeds_only_the_passages_its_words_shortlist(
     home_store, make_model, fake_ollama, monkeypatch
 ):
