@@ -8,6 +8,7 @@ from conftest import MEASURED, MODEL, PY, TOOLCHAIN, criterion, file_block, plan
 
 from tinkerkit import cli
 from tinkerkit.cli import Cli, Commands, CycleRunner, Doctor, ProjectFolder, ProjectRun
+from tinkerkit.commands import kind_of
 from tinkerkit.knowledge import Knowledge, Library
 from tinkerkit.model import Models, Ollama, OllamaError
 from tinkerkit.project import Runs, Tracker, project_store
@@ -215,6 +216,7 @@ def test_use_model_without_a_name_lists_the_models_off_a_terminal(home_store, mo
 @pytest.mark.spec("CLI-3")
 def test_calibrate_without_a_name_picks_one_before_its_job_starts(home_store, monkeypatch, capsys):
     assert Cli.named(["calibrate", "m"]) == ["calibrate", "m"] and Cli.named(["runs"]) == ["runs"]
+    assert kind_of(["calibrate"]) == "glance" and kind_of(["calibrate", "m"]) == "job"
     Models.keep("m", MEASURED)
     Config.save(model="m")
     shown = picker(monkeypatch, 0)
@@ -228,13 +230,17 @@ def test_calibrate_without_a_name_picks_one_before_its_job_starts(home_store, mo
     with pytest.raises(SystemExit) as listed:
         Cli.named(["calibrate"])
     assert not listed.value.code and shown == [] and "MODEL" in capsys.readouterr().out
+    Commands(parse("calibrate")).run()
+    assert "MODEL" in capsys.readouterr().out
 
 
 @pytest.mark.spec("CLI-3")
 def test_embed_without_a_name_picks_one_that_embeds(home_store, monkeypatch, capsys):
     assert parse("embed").embed is None
     Config.save(embed_model="n")
-    monkeypatch.setattr(Ollama, "capabilities", staticmethod(lambda name: [] if name == "n" else ["completion"]))
+    monkeypatch.setattr(
+        Ollama, "capabilities", staticmethod(lambda name: [] if name == "n" else ["completion"])
+    )
     monkeypatch.setattr(cli.Embeddings, "vectors", lambda self, texts, keep=True: [[1.0]])
     shown = picker(monkeypatch, 2)
     Commands.embed(None)

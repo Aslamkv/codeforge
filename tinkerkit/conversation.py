@@ -1860,7 +1860,7 @@ class ConsoleChannel(Channel):
         if not choices:
             return line
         with self.screen.printing:
-            name = Models.picked_for(command, choices)
+            name = Models.picked(command, choices)
         return "" if name is None else f"{command} {name}"
 
     def remember(self, line):

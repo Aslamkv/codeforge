@@ -127,12 +127,13 @@ def test_capabilities_asks_show_once(monkeypatch):
 
 
 @pytest.mark.spec("MOD-26")
-def test_picked_starts_at_the_given_name(monkeypatch):
+def test_picked_starts_at_the_model_the_command_sets(home_store, monkeypatch):
     shown = []
     monkeypatch.setattr(say, "pick", lambda choices, start: shown.append((choices, start)) or 1)
     choices = [("qwen3:8b", False), ("llama3", True)]
-    assert Models.picked(choices, "llama3") == "llama3"
-    assert Models.picked(choices, "gone") == "llama3"
+    Config.save(model="llama3", embed_model="gone")
+    assert Models.picked("use-model", choices) == "llama3"
+    assert Models.picked("embed", choices) == "llama3"
     assert shown == [
         ([("qwen3:8b", True), ("llama3", False)], 1),
         ([("qwen3:8b", True), ("llama3", False)], 0),

@@ -466,6 +466,7 @@ COMMANDS = [
         "measure a model once (a minute or a few)",
         "Measure a model once: the largest prompt it reads and the longest reply it writes.",
         kind="job",
+        actions=[Action("glance", when=lambda words: not words)],
         chat=True,
         words="one",
         arguments=[Argument("name", "?", None, "the model's name, as `tinker models` lists it")],

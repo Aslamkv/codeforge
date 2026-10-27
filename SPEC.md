@@ -321,7 +321,7 @@ again what it did. The job asked for last is the one that runs (**JOB-8**), and 
 person asks for pauses it too (**JOB-10**), so the person is always answered at once.
 
 - **JOB-1** `is_job(argv)` is true for a command of kind `job` (**CMD-1**): `task`, `restart`, `resume`,
-  `confirm`, `amend`, `add`, `fix`, `calibrate`, `learn`, `ask`, `teach`, `read`, `research` and `exercise`.
+  `confirm`, `amend`, `add`, `fix`, `calibrate NAME`, `learn`, `ask`, `teach`, `read`, `research` and `exercise`.
   Help, and a build an exercise runs (`EXERCISE_ENV`, which holds the exercise's job number), are never jobs. A job keeps the computer awake while it
   runs (**SET-11**). `Jobs.running(argv)` runs a job as the next number (`#1`, `#2` ...), kept in the home's
   `jobs` with its command, title, arguments, the day it started, its state `running`, its process and its

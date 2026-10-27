@@ -501,18 +501,17 @@ class Models:
         return [(name, True) for name, _ in choices] if command == "calibrate" else choices
 
     @staticmethod
-    def picked_for(command, choices):
-        return Models.picked(choices, Config.get("embed_model" if command == "embed" else "model"))
-
-    @staticmethod
     def embeds(capabilities):
         return not capabilities or "embedding" in capabilities
 
     @staticmethod
-    def picked(choices, current):
-        names = [name for name, _ in choices]
+    def picked(command, choices):
+        names, current = (
+            [name for name, _ in choices],
+            Config.get("embed_model" if command == "embed" else "model"),
+        )
         start = names.index(current) if current in names else 0
-        index = say.pick([(name, not measured) for name, measured in choices], start)
+        index = say.pick([(name, not plain) for name, plain in choices], start)
         return None if index is None else names[index]
 
     @staticmethod

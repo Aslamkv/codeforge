@@ -360,10 +360,8 @@ class Cli:
         match command:
             case "reset" | "restart" | "models" | "runs" | "doctor":
                 return True
-            case "use-model" | "embed" if given.name is None:
+            case "use-model" | "calibrate" | "embed" if given.name is None:
                 return None
-            case "calibrate" if given.name is None:
-                parser.error("tinker calibrate: give the model's NAME (tinker models lists them)")
             case "use-model" | "calibrate" | "embed":
                 return Cli.non_empty(given.name, command, parser)
             case "resume" | "status" | "log":
@@ -659,7 +657,7 @@ class Commands:
         if not choices:
             Commands.list_models()
             return None
-        return Models.picked_for(command, choices)
+        return Models.picked(command, choices)
 
     @staticmethod
     def embed(name):
@@ -679,6 +677,9 @@ class Commands:
         )
 
     def calibrate(self):
+        if self.args.calibrate is None:
+            Commands.list_models()
+            return
         Calibrator(Models.installed(self.args.calibrate)).run()
 
     def learn(self):
