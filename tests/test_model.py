@@ -424,10 +424,16 @@ def test_a_growing_model_that_fits_is_read_once_in_a_sample(monkeypatch):
 
 
 @pytest.mark.spec("MOD-11")
-def test_a_growing_model_that_may_not_fit_reads_the_whole_target(monkeypatch):
-    probed = growing(monkeypatch, [[("m", 5e9)], [("m", 5.1e9)]], 7e9)
-    assert probed.capacity(24576, {}) == (24576, None)
-    assert probed.tried == [(2048, 24576), (24576, 24576)]
+def test_a_growing_model_that_does_not_fit_gets_the_capacity_from_its_rate(monkeypatch):
+    probed = growing(monkeypatch, [[("m", 5e9)], [("m", 5.1e9)]], 7.03e9)
+    assert probed.capacity(24576, {}) == (10240, 24576) and probed.tried == [(2048, 24576)]
+
+
+@pytest.mark.spec("MOD-11")
+def test_a_growing_model_whose_rate_fits_too_little_stops(monkeypatch):
+    probed = growing(monkeypatch, [[("m", 5e9)], [("m", 5.1e9)]], 6.5e9)
+    with pytest.raises(SystemExit, match="cannot hold even 1536"):
+        probed.capacity(24576, {})
 
 
 @pytest.mark.spec("MOD-11")

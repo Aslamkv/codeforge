@@ -790,19 +790,13 @@ class Calibrator:
         self.write_tokens_per_second = round(written / seconds, 1) if written and seconds else None
 
     def capacity(self, target, facts):
-        reading = self.reading(facts)
-        if reading.target_reads(target):
-            return Capacity(target, None)
-        good, bad = 0, target
-        while bad - good > CAPACITY_SEARCH_PRECISION * bad and bad > MIN_PROMPT_TOKENS + MIN_REPLY_TOKENS:
-            middle = (good + bad) // 2
-            good, bad = (middle, bad) if reading.reads(middle) else (good, middle)
-        if good < MIN_PROMPT_TOKENS + MIN_REPLY_TOKENS:
+        capacity = self.reading(facts).capacity(target)
+        if capacity.largest_that_reads < MIN_PROMPT_TOKENS + MIN_REPLY_TOKENS:
             raise SystemExit(
                 f"{self.name} cannot hold even {MIN_PROMPT_TOKENS + MIN_REPLY_TOKENS} tokens of "
                 f"context on this machine: choose a smaller model or quantization."
             )
-        return Capacity(good, bad)
+        return capacity
 
     def reading(self, facts):
         return (GgufReading if (facts.get("format") or "").lower() == "gguf" else GrowingReading)(self)
@@ -909,11 +903,18 @@ class Reading:
     def sample(context):
         return min(context, PROBE_SAMPLE_TOKENS)
 
+    def capacity(self, target):
+        return Capacity(target, None) if self.reads(target) else self.search(target)
+
+    def search(self, target):
+        good, bad = 0, target
+        while bad - good > CAPACITY_SEARCH_PRECISION * bad and bad > MIN_PROMPT_TOKENS + MIN_REPLY_TOKENS:
+            middle = (good + bad) // 2
+            good, bad = (middle, bad) if self.reads(middle) else (good, middle)
+        return Capacity(good, bad)
+
 
 class GgufReading(Reading):
-    def target_reads(self, context):
-        return self.reads(context)
-
     def reads(self, context):
         calibrator, tokens = self.calibrator, self.sample(context)
         if calibrator.read(tokens, context):
@@ -929,21 +930,29 @@ class GgufReading(Reading):
 
 
 class GrowingReading(Reading):
-    def target_reads(self, context):
-        return self.sample_shows_fit(context) or self.reads(context)
+    def capacity(self, target):
+        fitting = self.sample_fit(target)
+        if fitting is None:
+            return super().capacity(target)
+        if fitting >= target:
+            return Capacity(target, None)
+        return Capacity(int(fitting) // 1024 * 1024, target)
 
     def reads(self, context):
         return bool(self.calibrator.read(context, context))
 
-    def sample_shows_fit(self, context):
+    def sample_fit(self, context):
         tokens, before = self.sample(context), self.loaded_size()
         if before is None or tokens >= context or not self.calibrator.read(tokens, context):
-            return False
+            return None
         after, memory = self.loaded_size(), self.calibrator.gpu_memory()
         if after is None or not memory:
-            return False
-        grown = (after - before) / tokens * (context - tokens)
-        return after + grown + RUNNER_OVERHEAD_BYTES <= memory
+            return None
+        growth = (after - before) / tokens
+        room = memory - RUNNER_OVERHEAD_BYTES - after
+        if growth * (context - tokens) <= room:
+            return context
+        return tokens + room / growth if growth > 0 else None
 
     def loaded_size(self):
         name = self.calibrator.name
