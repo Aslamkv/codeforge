@@ -339,7 +339,8 @@ again what it did. The job asked for last is the one that runs (**JOB-8**), and 
 person asks for pauses it too (**JOB-10**), so the person is always answered at once.
 
 - **JOB-1** `is_job(argv)` is true for a command of kind `job` (**CMD-1**): `task`, `restart`, `resume`,
-  `confirm`, `amend`, `add`, `fix`, `model calibrate NAME`, `model NAME` of a model never measured, `learn`, `ask`, `teach`, `read`, `research` and `exercise`.
+  `confirm`, `amend`, `add`, `fix`, `model calibrate NAME`, `model NAME` of a model the home has no record of and that is not the embedding model (an embedding model not
+  yet `embed_model` is one too: the home cannot tell it apart, **ARCH-1**), `learn`, `ask`, `teach`, `read`, `research` and `exercise`.
   Help, and a build an exercise runs (`EXERCISE_ENV`, which holds the exercise's job number), are never jobs. A job keeps the computer awake while it
   runs (**SET-11**). `Jobs.running(argv)` runs a job as the next number (`#1`, `#2` ...), kept in the home's
   `jobs` with its command, title, arguments, the day it started, its state `running`, its process and its
@@ -660,15 +661,16 @@ What is said in the chats, kept so that a chat is only a view of it.
   of `Models.choices()`, then `— embeddings —` with one for each of `Models.embedding_choices()`, a group with
   no model left out. A row is the name, then facts in plain words, with no adjectives: a measured model
   `in use · writes ~19 words/s · reads ~225 words/s · solved 2 of 3` (`in use ·` only for the model in use,
-  words as **MOD-28** counts them, an unmeasured speed `?`), one never measured
+  words as **MOD-28** counts them, an unmeasured speed `?`; one with no `solved` count never ran the test tasks,
+  and says `test tasks not run · tinker model calibrate NAME runs them` in place of `solved ? of ?`), one never measured
   `not measured yet · choosing it measures it (about a minute)`, an embedding model `in use · 0.3 GB` (its
   size; `in use ·` for the embedding model).
 - **MOD-30** `Models.recipe()` gives the lines above the list, so the person sees what to pick: of the measured
-  models that do not embed, `🏆 Best quality: NAME (solved 3 of 3)`, the one that solved most (a tie: the
+  models that do not embed, `🏆 Best quality: NAME (solved 3 of 3)`, the one with a `solved` count that solved most (a tie: the
   faster writer, then Ollama's order), and `⚡ Fastest: NAME (writes ~40 words/s)`, the fastest writer (a tie:
   the one that solved most, then Ollama's order). When one model is both, the one line is
-  `🏆 NAME is the best and the fastest (solved 3 of 3, writes ~40 words/s)`. With fewer than two measured, there is
-  no recipe.
+  `🏆 NAME is the best and the fastest (solved 3 of 3, writes ~40 words/s)`. With no model that has a `solved`
+  count, the fastest line alone. With fewer than two measured, there is no recipe.
 
 ## project (PRJ)
 

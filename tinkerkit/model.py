@@ -550,7 +550,7 @@ class Models:
         facts = [
             f"writes {Models.speed_words(settings, 'write_tokens_per_s')} words/s",
             f"reads {Models.speed_words(settings, 'read_tokens_per_s')} words/s",
-            Models.solved_text(settings),
+            Models.tasks_text(name, settings),
         ]
         return f"{name:<{width}}" + " · ".join(Models.in_use_facts(name, "model", facts))
 
@@ -570,23 +570,30 @@ class Models:
         return "?" if speed is None else f"~{Calibrator.words(speed, settings['chars_per_token'])}"
 
     @staticmethod
+    def tasks_text(name, settings):
+        if "solved" in settings:
+            return Models.solved_text(settings)
+        return f"test tasks not run · tinker model calibrate {name} runs them"
+
+    @staticmethod
     def solved_text(settings):
-        return f"solved {settings.get('solved', '?')} of {len(settings.get('quality_tasks') or []) or '?'}"
+        return f"solved {settings['solved']} of {len(settings['quality_tasks'])}"
 
     @staticmethod
     def recipe():
         measured = [(name, kept) for name in Models.named(embedding=False) if (kept := Models.settings(name))]
         if len(measured) < 2:
             return []
-        best = max(measured, key=lambda pair: (Models.solved(pair[1]), Models.words_per_second(pair[1])))
         fastest = max(measured, key=lambda pair: (Models.words_per_second(pair[1]), Models.solved(pair[1])))
         writes = f"writes {Models.speed_words(fastest[1], 'write_tokens_per_s')} words/s"
+        fastest_line = f"⚡ Fastest: {fastest[0]} ({writes})"
+        tested = [pair for pair in measured if "solved" in pair[1]]
+        if not tested:
+            return [fastest_line]
+        best = max(tested, key=lambda pair: (Models.solved(pair[1]), Models.words_per_second(pair[1])))
         if best is fastest:
             return [f"🏆 {best[0]} is the best and the fastest ({Models.solved_text(best[1])}, {writes})"]
-        return [
-            f"🏆 Best quality: {best[0]} ({Models.solved_text(best[1])})",
-            f"⚡ Fastest: {fastest[0]} ({writes})",
-        ]
+        return [f"🏆 Best quality: {best[0]} ({Models.solved_text(best[1])})", fastest_line]
 
     @staticmethod
     def say_recipe():

@@ -308,6 +308,18 @@ def test_model_calibrate_without_a_name_picks_a_general_model_before_its_job_sta
 
 
 @pytest.mark.spec("CLI-3")
+def test_model_calibrate_without_a_name_prints_the_recipe_first_off_a_terminal(
+    home_store, monkeypatch, capsys
+):
+    measured_two()
+    picker(monkeypatch, 1, terminal=False)
+    with pytest.raises(SystemExit):
+        Cli.named(["model", "calibrate"])
+    out = capsys.readouterr().out.splitlines()
+    assert Models.recipe() and out[:2] == Models.recipe() and out[2] == "— general —"
+
+
+@pytest.mark.spec("CLI-3")
 def test_model_calibrate_measures_and_changes_no_model_in_use(home_store, monkeypatch):
     picker(monkeypatch, None)
     Config.save(model="m")

@@ -140,7 +140,7 @@ def test_rows(home_store, monkeypatch):
         ("— general —", HEADING),
         ("qwen3:8b  not measured yet · choosing it measures it (about a minute)", DIMMED),
         "llama3    in use · writes ~19 words/s · reads ~150 words/s · solved 2 of 3",
-        "phi       writes ? words/s · reads ? words/s · solved ? of ?",
+        "phi       writes ? words/s · reads ? words/s · test tasks not run · tinker model calibrate phi runs them",
         ("— embeddings —", HEADING),
         "nomic     in use · 0.3 GB",
     ]
@@ -153,6 +153,10 @@ def test_rows_leave_out_a_group_with_no_model(home_store, monkeypatch):
         ("— general —", HEADING),
         ("qwen3:8b  not measured yet · choosing it measures it (about a minute)", DIMMED),
     ]
+
+
+def unsolved(write):
+    return dict(MEASURED, write_tokens_per_s=write)
 
 
 def recipe_for(monkeypatch, settings):
@@ -197,6 +201,17 @@ def test_recipe_names_the_best_and_the_fastest(home_store, monkeypatch):
 )
 def test_recipe_says_one_line_for_a_model_both_best_and_fastest(home_store, monkeypatch, settings, line):
     assert recipe_for(monkeypatch, settings) == [f"🏆 {line} words/s)"]
+
+
+@pytest.mark.spec("MOD-30")
+def test_a_model_that_never_ran_the_test_tasks_can_only_be_fastest(home_store, monkeypatch):
+    assert recipe_for(monkeypatch, {"a": measured(1, 20.0), "b": unsolved(80.0)}) == [
+        "🏆 Best quality: a (solved 1 of 3)",
+        "⚡ Fastest: b (writes ~40 words/s)",
+    ]
+    assert recipe_for(monkeypatch, {"c": unsolved(20.0), "d": unsolved(80.0)}) == [
+        "⚡ Fastest: d (writes ~40 words/s)"
+    ]
 
 
 @pytest.mark.spec("MOD-30")

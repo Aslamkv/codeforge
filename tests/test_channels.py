@@ -260,10 +260,10 @@ def test_skip_waiting_moves_past_old_messages():
 @pytest.mark.spec("CHN-6")
 def test_offer_lists_the_commands_in_the_bots_menu():
     api = BotAPI(setMyCommands=True)
-    telegram(api).offer([("use-model", "the model every build uses"), ("help", "x" * 300)])
+    telegram(api).offer([("model", "the model every build uses"), ("help", "x" * 300)])
     path, fields = api.calls[-1]
     menu = json.loads(fields["commands"])
-    assert path.endswith("/setMyCommands") and [item["command"] for item in menu] == ["use_model", "help"]
+    assert path.endswith("/setMyCommands") and [item["command"] for item in menu] == ["model", "help"]
     assert len(menu[1]["description"]) == 256
     telegram(BotAPI(setMyCommands=OSError("down"))).offer([("help", "this list")])
 
@@ -309,7 +309,7 @@ def test_ask_for_opens_the_reply_box_with_a_hint():
 @pytest.mark.spec("CHN-7")
 def test_choose_sends_a_button_for_each_name():
     api = BotAPI(sendMessage={"message_id": 5})
-    assert telegram(api).choose("42", "🧠 **use-model**", ["qwen3", "llama3"]) == 5
+    assert telegram(api).choose("42", "🧠 **model**", ["qwen3", "llama3"]) == 5
     reply = json.loads(api.calls[0][1]["reply_markup"])
     assert reply == {
         "keyboard": [[{"text": "qwen3"}], [{"text": "llama3"}]],

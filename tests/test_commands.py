@@ -87,6 +87,12 @@ def test_model_of_a_never_measured_model_is_a_job(home_store):
     assert kind_of(["model", "fresh"]) == "job"
 
 
+@pytest.mark.spec("JOB-1")
+def test_model_of_an_embedding_model_not_yet_in_use_is_a_job(home_store):
+    Config.save(embed_model="nomic")
+    assert kind_of(["model", "mxbai-embed"]) == "job"
+
+
 @pytest.mark.spec("CMD-1")
 def test_the_command_line_and_the_conversation_read_the_table():
     on_the_command_line = set(cli.Cli.COMMANDS) | set(cli.Cli.TALK_COMMANDS) | {"help", "channel", "confirm"}
