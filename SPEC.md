@@ -1388,7 +1388,7 @@ A check from an ask runs only in a sandbox. Nothing is ever installed.
   limits on CPU time, file size and processes. It reaches no network and writes only inside that folder.
 - **SBX-3** `MacSandbox` runs the command under `sandbox-exec` with a profile that denies the network and every
   write outside the folder. `LinuxSandbox` cuts the network with a new user and network namespace and allows
-  writes only in the folder with Landlock (and no new privileges).
+  writes only in the folder with Landlock (and no new privileges). Both let the command write to `/dev/null`.
 - **SBX-4** `NoSandbox` fails closed: it runs nothing and says why.
 
 ## exercising (EXR)

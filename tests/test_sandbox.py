@@ -209,10 +209,7 @@ def test_a_real_run_writes_only_in_its_folder_and_reaches_no_network(tmp_path):
 
 
 @pytest.mark.spec("SBX-3")
-def test_a_real_linux_run_still_writes_to_dev_null():
-    here = Sandbox.here()
-    if not isinstance(here, LinuxSandbox):
-        pytest.skip("not a Linux sandbox here")
+def test_a_real_run_still_writes_to_dev_null():
     with Sandbox.folder() as folder:
-        result = here.run(["sh", "-c", "echo hidden > /dev/null && echo shown"], folder)
+        result = Sandbox.here().run(["sh", "-c", "echo hidden > /dev/null && echo shown"], folder)
     assert result.code == 0 and result.output == "shown\n", result.output
