@@ -579,7 +579,9 @@ What is said in the chats, kept so that a chat is only a view of it.
   more than the GPU memory. With either size unknown, it checks nothing.
 - **MOD-13** `Calibrator.run()` measures the model and keeps, in the home's `models`, a prompt budget, a
   context, a longest reply, a longest fix, a think setting, chars per token, and its read and write speeds in
-  tokens a second. Its last line names both speeds (`?` when unmeasured) and both limits.
+  tokens a second, and what its quality probe solved (**MOD-27**). Each calibration also appends those settings,
+  with the model and when it ran, to the home's `calibrations` log (`Store.append`); `models` keeps only the
+  latest. Its messages follow **MOD-28**.
 - **MOD-14** A calibration probe that fails is recorded as crashed, and the runner gets time to free its
   memory before the next one. A GGUF model whose probe crashes is read again in pieces (`num_batch` 256), and
   keeps that option. When Ollama itself stops answering, calibration ends with `SystemExit`.
@@ -629,6 +631,30 @@ What is said in the chats, kept so that a chat is only a view of it.
   with whether it was measured. It ends with `SystemExit` when Ollama does not answer, as `tinker models` does.
   `Models.embedding_choices()` gives the names of the ones that embed: their `capabilities` from Ollama's
   `/api/show` hold `embedding`, or Ollama gives none for them.
+- **MOD-27** Calibration's quality probe asks the model `QUALITY_TASK_COUNT` (3) tasks drawn at random from
+  `tinkerkit/quality_tasks.json`: 100 short tasks (a code's output, a bug's line, small arithmetic and logic
+  word problems, an exact-format reply), each with one fixed answer. Each is asked with the think setting
+  calibration found and `num_predict` `QUALITY_REPLY_TOKENS` (2048); a reply cut off before an answer fails.
+  A reply solves its task when it equals the answer after both are stripped, lowercased and freed of trailing
+  punctuation, quotes and backticks; no code is run. The settings keep `solved` (a count) and `quality_tasks`
+  (the ids drawn).
+- **MOD-28** Calibration speaks in plain words, with an emoji per line and exact figures in brackets; no line
+  is long. Words are `tokens × chars_per_token / 6`, rounded. It says the title "Testing NAME on this machine
+  (once per model, about a minute)", whether the weights fit ("NAME needs 18 GB (weights); this machine's GPU
+  can use 24 GB"), each read probe ("Checking it can read about 6,000 words at once (8,192 tokens, about
+  12s)…", then "Read it in 10s", "Too much for this machine (ERROR)" or "Read it in smaller pieces (num_batch
+  256)"), "Solving 3 small test tasks…" with ✅ or ❌ per task and "Solved 2 of 3", and ends with one
+  multi-line message, so a channel shows all of it (**CNV-18**):
+  ```
+  ✅ NAME is ready
+     📖 Reads about 225 words a second (300 tok/s)
+     ✍️ Writes about 19 words a second (25.1 tok/s)
+     📥 Takes requests up to about 8,000 words (10,922 tokens)
+     📤 Replies up to about 16,000 words (21,846 tokens)
+     🧠 Solved 2 of 3 test tasks
+     💭 Thinks before it answers (think: high)
+  ```
+  An unmeasured speed is `?`. `tinker models` keeps exact numbers and adds a SOLVED column.
 
 ## project (PRJ)
 
