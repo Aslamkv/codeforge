@@ -15,6 +15,7 @@ import pytest
 from conftest import ACCENT, BOLD, DIM, GREY, MEASURED, RESET, Terminal
 
 import tinkerkit.conversation as conversation
+from tinkerkit.commands import MenuRow
 from tinkerkit.conversation import (
     Channel,
     ChannelError,
@@ -24,6 +25,7 @@ from tinkerkit.conversation import (
     Markup,
     Message,
     Progress,
+    PromptDrawer,
     Questions,
     Reporter,
     Shell,
@@ -706,6 +708,54 @@ def test_the_lines_under_the_live_line_are_cut_to_the_terminal_width(monkeypatch
     screen = live_screen(monkeypatch)
     screen.show_live("Learning", 100.0, under=["x" * 60])
     assert under_drawn("x" * (LIVE_COLUMNS - 3)) + "\033[K" in sys.stdout.getvalue()
+
+
+def menu_rows():
+    return [MenuRow(True, "/ask", "QUESTION", "answers a question"), MenuRow(False, "/clear", "", "clears")]
+
+
+@pytest.mark.spec("CNV-8")
+def test_prompt_drawer_draws_the_line_and_puts_the_cursor_at_the_column():
+    drawer = PromptDrawer("› ")
+    assert drawer.draw("hello", 2, [], 80) == "\r\033[J› hello\r\033[4C"
+    assert drawer.cursor_row == 0
+
+
+@pytest.mark.spec("MSG-10")
+def test_prompt_drawer_draws_the_menu_rows_under_the_line_and_goes_back_up():
+    drawer = PromptDrawer("› ")
+    drawn = drawer.draw("/", 1, menu_rows(), 80)
+    rows = "\r\n› /ask QUESTION  answers a question\r\n  /clear  clears"
+    assert drawn == "\r\033[J› /" + rows + "\033[2A\r\033[3C"
+
+
+@pytest.mark.spec("MSG-10")
+def test_prompt_drawer_cuts_menu_rows_to_one_less_than_the_width():
+    drawn = PromptDrawer("› ").draw("/", 1, menu_rows(), 12)
+    assert "\r\n› /ask QUES\r\n" in drawn and "\r\n  /clear  c\033" in drawn
+
+
+@pytest.mark.spec("MSG-10")
+def test_prompt_drawer_dims_the_words_on_a_colour_terminal(monkeypatch):
+    colour_terminal(monkeypatch)
+    drawn = PromptDrawer("› ").draw("/", 1, menu_rows()[:1], 80)
+    assert f"› /ask{DIM} QUESTION{RESET}  answers a question" in drawn
+
+
+@pytest.mark.spec("CNV-8")
+def test_prompt_drawer_follows_a_wrapped_line_and_starts_the_next_draw_from_its_top():
+    drawer = PromptDrawer("› ")
+    assert drawer.draw("x" * 12, 12, [], 10) == "\r\033[J› " + "x" * 12 + "\r\033[4C"
+    assert drawer.cursor_row == 1
+    assert drawer.draw("x", 1, [], 10).startswith("\033[1A\r\033[J› x")
+
+
+@pytest.mark.spec("CNV-8")
+def test_prompt_drawer_done_drops_the_menu_and_moves_below_the_line():
+    drawer = PromptDrawer("› ")
+    drawer.draw("x" * 12, 12, menu_rows(), 10)
+    assert drawer.done("x" * 12, 10) == "\033[1A\r\033[J› " + "x" * 12 + "\r\n"
+    assert drawer.cursor_row == 0
 
 
 @pytest.fixture

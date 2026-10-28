@@ -24,6 +24,7 @@ lazy from .ledger import DONE_NOTE_KEPT_SECONDS, Ledger
 lazy from .messages import (
     CLEAR_LINE,
     CLEAR_TO_LINE_END,
+    CLEAR_TO_SCREEN_END,
     Messages,
     char_width,
     colourful,
@@ -1986,6 +1987,43 @@ class ConsoleChannel(Channel):
         with self.numbering:
             self.last_id += 1
             return self.last_id
+
+
+class PromptDrawer:
+    def __init__(self, prompt):
+        self.prompt, self.cursor_row = prompt, 0
+
+    def draw(self, text, column, rows, columns):
+        line = self.prompt + text
+        menu = "".join("\r\n" + menu_row(row, columns - 1) for row in rows)
+        drawn_row = (max(visible_width(line), 1) - 1) // columns + len(rows)
+        return self.cleared() + line + menu + self.cursor_placed(text[:column], drawn_row, columns)
+
+    def done(self, text, columns):
+        cleared, self.cursor_row = self.cleared(), 0
+        return cleared + self.prompt + text + "\r\n"
+
+    def cleared(self):
+        return rows_moved(-self.cursor_row) + "\r" + CLEAR_TO_SCREEN_END
+
+    def cursor_placed(self, before, drawn_row, columns):
+        row, column = divmod(visible_width(self.prompt + before), columns)
+        self.cursor_row = row
+        return rows_moved(row - drawn_row) + "\r" + (f"\033[{column}C" if column else "")
+
+
+def rows_moved(rows):
+    if not rows:
+        return ""
+    return f"\033[{abs(rows)}{'B' if rows > 0 else 'A'}"
+
+
+def menu_row(row, room):
+    named = ("› " if row.marked else "  ") + row.name
+    words = f" {row.words}" if row.words else ""
+    shown = cut_to_width(named + words + "  " + row.what, room)
+    end = len(named) + len(words)
+    return shown[: len(named)] + styled(shown[len(named) : end], "dim") + shown[end:]
 
 
 class ConsoleScreen:
