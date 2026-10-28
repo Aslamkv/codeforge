@@ -418,11 +418,16 @@ def raw_keys():
     stdin = sys.stdin.fileno()
     saved = termios.tcgetattr(stdin)
     tty.setraw(stdin)
+    termios.tcsetattr(stdin, termios.TCSANOW, output_kept(termios.tcgetattr(stdin)))
     try:
         while True:
             yield from keys_in(pressed(stdin))
     finally:
         termios.tcsetattr(stdin, termios.TCSADRAIN, saved)
+
+
+def output_kept(mode):
+    return [mode[0], mode[1] | termios.OPOST, *mode[2:]]
 
 
 def pressed(stdin):

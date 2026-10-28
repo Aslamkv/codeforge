@@ -835,6 +835,70 @@ def test_prompt_drawer_done_drops_the_menu_and_moves_below_the_line():
     assert drawer.cursor_row == 0
 
 
+@pytest.mark.spec("CNV-8")
+def test_prompt_drawer_taken_away_clears_from_the_line_top_and_draws_next_from_there():
+    drawer = PromptDrawer("› ")
+    drawer.draw("x" * 12, 12, menu_rows(), 10)
+    assert drawer.taken_away() == "\033[1A\r\033[J"
+    assert drawer.cursor_row == 0
+    assert drawer.draw("x", 1, [], 10).startswith("\r\033[J› x")
+
+
+def typing_on(screen, text="hi", rows=()):
+    drawer = PromptDrawer("› ")
+    drawer.draw(text, len(text), list(rows), 10)
+    screen.typing = (drawer, lambda: drawer.draw(text, len(text), list(rows), 10))
+
+
+def prompt_again(text="hi", rows=()):
+    return PromptDrawer("› ").draw(text, len(text), list(rows), 10)
+
+
+@pytest.mark.spec("CNV-8")
+@pytest.mark.parametrize("rows", [[], menu_rows()], ids=["line", "with-menu"])
+def test_a_print_while_typing_takes_the_prompt_away_and_draws_it_again(monkeypatch, rows):
+    screen = ruled_screen(monkeypatch)
+    typing_on(screen, rows=rows)
+    printed = drawn_after(lambda: screen.print("hello"))
+    assert printed == "\r\033[J" + printed_above("hello") + prompt_again(rows=rows)
+
+
+@pytest.mark.spec("CNV-8")
+def test_a_resize_while_typing_takes_the_prompt_away_before_drawing_the_rule_again(monkeypatch):
+    screen = ruled_screen(monkeypatch)
+    typing_on(screen)
+    resized_to(monkeypatch, 5)
+    printed = drawn_after(lambda: screen.print("hello"))
+    assert printed.startswith("\r\033[J" + RULE_REDRAWN_NARROWER)
+
+
+@pytest.mark.spec("CNV-8")
+def test_the_live_block_while_typing_draws_the_prompt_again_and_a_quiet_tick_draws_nothing(
+    monkeypatch, clock
+):
+    screen = ruled_screen(monkeypatch)
+    typing_on(screen)
+    assert drawn_after(screen.tick) == ""
+    shown = drawn_after(lambda: screen.show_live("Learning", 100.0))
+    assert shown.startswith("\r\033[J") and shown.endswith(prompt_again())
+
+
+@pytest.mark.spec("CNV-8")
+def test_a_print_from_elsewhere_while_typing_keeps_the_typed_text_and_ends_typing(monkeypatch):
+    console = ruled_console(monkeypatch)
+
+    def keys_left():
+        yield Text("hi")
+        printed.append(drawn_after(lambda: console.screen.print("hello")))
+        yield "enter"
+
+    printed = []
+    monkeypatch.setattr(conversation.say, "keys", keys_left)
+    assert console.typed_line() == "hi"
+    assert printed == ["\r\033[J" + printed_above("hello") + prompt_again()]
+    assert console.screen.typing is None
+
+
 @pytest.fixture
 def started_screen(monkeypatch):
     resize_handler = signal.getsignal(signal.SIGWINCH)

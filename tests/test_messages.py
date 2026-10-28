@@ -19,6 +19,7 @@ from tinkerkit.messages import (
     keys_in,
     lacking,
     live_line,
+    output_kept,
     say,
     short_count,
     tinkering,
@@ -507,6 +508,14 @@ def test_keys_waiting_together_are_split_from_the_text():
 def test_a_utf8_character_cut_short_lacks_its_last_bytes():
     smile = "🙂".encode()
     assert [lacking(b"a" + smile[:cut]) for cut in range(5)] == [0, 3, 2, 1, 0]
+
+
+@pytest.mark.spec("MSG-9")
+def test_raw_keys_keep_output_processing_so_a_newline_returns_to_the_first_column():
+    termios = pytest.importorskip("termios")
+    mode = [0, termios.ONLCR, 0, 0, 0, 0, []]
+    assert output_kept(mode)[1] == termios.ONLCR | termios.OPOST
+    assert output_kept(mode)[0::2] == mode[0::2]
 
 
 def edited(*keys, history=()):

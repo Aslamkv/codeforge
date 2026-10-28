@@ -1890,18 +1890,23 @@ class ConsoleChannel(Channel):
     def typed_line(self):
         editor, menu, drawer = LineEditor(typed_before()), CommandMenu(), PromptDrawer(self.screen.prompt())
         columns = shutil.get_terminal_size().columns
-        self.screen.draw(drawer.draw("", 0, [], columns))
+        self.screen.typing_with(
+            (
+                drawer,
+                lambda: drawer.draw(editor.text, editor.column, menu.rows() if menu.open else [], columns),
+            )
+        )
+        self.screen.draw_prompt()
         keys = say.keys()
         try:
             for key in keys:
                 if self.pressed(editor, menu, key):
                     break
                 menu.follow(editor.text)
-                self.screen.draw(
-                    drawer.draw(editor.text, editor.column, menu.rows() if menu.open else [], columns)
-                )
+                self.screen.draw_prompt()
         finally:
             keys.close()
+            self.screen.typing_with(None)
         self.screen.draw(drawer.done(editor.text, columns))
         return editor.answer
 
@@ -2033,6 +2038,10 @@ class PromptDrawer:
         cleared, self.cursor_row = self.cleared(), 0
         return cleared + self.prompt + text + "\r\n"
 
+    def taken_away(self):
+        cleared, self.cursor_row = self.cleared(), 0
+        return cleared
+
     def cleared(self):
         return rows_moved(-self.cursor_row) + "\r" + CLEAR_TO_SCREEN_END
 
@@ -2067,7 +2076,7 @@ class ConsoleScreen:
     def __init__(self):
         self.reading, self.live, self.under, self.frame, self.printing = False, None, [], 0, threading.Lock()
         self.size, self.drawn = shutil.get_terminal_size(), []
-        self.size_changed = threading.Event()
+        self.size_changed, self.typing = threading.Event(), None
 
     def start(self):
         self.reading, self.size = True, shutil.get_terminal_size()
@@ -2082,8 +2091,7 @@ class ConsoleScreen:
 
     def print(self, text):
         with self.printing:
-            self.repair()
-            write_out(self.printed_in_pieces(text) if self.ruled() else self.printed_over_prompt(text))
+            self.out(lambda: self.printed_in_pieces(text) if self.ruled() else self.printed_over_prompt(text))
 
     def printed_in_pieces(self, text):
         room = terminal_lines() - self.live_rows() - 2
@@ -2102,8 +2110,10 @@ class ConsoleScreen:
     def sent(self, typed, shown):
         with self.printing:
             rows = rows_shown(typed)
-            self.repair(typed_rows=rows)
-            write_out(self.shown_above_the_block(typed, rows) if shown else self.pulled_up(rows, kept=0))
+            self.out(
+                lambda: self.shown_above_the_block(typed, rows) if shown else self.pulled_up(rows, kept=0),
+                typed_rows=rows,
+            )
 
     def shown_above_the_block(self, typed, rows):
         shown = NEXT_LINE.join([self.shown_again(typed), self.block_and_rule()])
@@ -2117,30 +2127,62 @@ class ConsoleScreen:
         with self.printing:
             write_out(text)
 
+    def typing_with(self, typing):
+        self.typing = typing
+
+    def draw_prompt(self):
+        with self.printing:
+            typing = self.typing
+            if typing is not None:
+                write_out(typing[1]())
+
+    def out(self, made, typed_rows=0):
+        typing, repaired = self.typing, self.repaired(typed_rows)
+        text = made()
+        if typing is None or not repaired + text:
+            write_out(repaired + text)
+            return
+        drawer, drawn = typing
+        write_out(drawer.taken_away() + repaired + text + drawn())
+
     def show_live(self, text, began, under=(), **facts):
         if not self.ruled():
             return
         with self.printing:
-            self.repair()
-            rows_before = self.live_rows()
-            self.live, self.under = (text, began, facts), list(under)
-            write_out(self.resized(rows_before, self.live_rows()) + self.redrawn_live())
+            self.out(lambda: self.live_replaced(text, began, under, facts))
 
     def count_live(self, **facts):
         with self.printing:
-            self.repair()
-            if self.live is not None:
-                text, began, _ = self.live
-                self.live = (text, began, facts)
-                write_out(self.redrawn_live())
+            self.out(lambda: self.live_counted(facts))
 
     def end_live(self):
         with self.printing:
-            self.repair()
-            if self.live is not None:
-                rows = self.live_rows()
-                self.live, self.under, self.drawn = None, [], []
-                write_out(self.shrunk(rows))
+            self.out(self.live_ended)
+
+    def live_replaced(self, text, began, under, facts):
+        rows_before = self.live_rows()
+        self.live, self.under = (text, began, facts), list(under)
+        return self.resized(rows_before, self.live_rows()) + self.redrawn_live()
+
+    def live_counted(self, facts):
+        if self.live is None:
+            return ""
+        text, began, _ = self.live
+        self.live = (text, began, facts)
+        return self.redrawn_live()
+
+    def live_ended(self):
+        if self.live is None:
+            return ""
+        rows = self.live_rows()
+        self.live, self.under, self.drawn = None, [], []
+        return self.shrunk(rows)
+
+    def live_ticked(self):
+        if self.live is None:
+            return ""
+        self.frame += 1
+        return self.redrawn_live()
 
     def keep_ticking(self):
         while True:
@@ -2150,16 +2192,13 @@ class ConsoleScreen:
 
     def tick(self):
         with self.printing:
-            self.repair()
-            if self.live is not None:
-                self.frame += 1
-                write_out(self.redrawn_live())
+            self.out(self.live_ticked)
 
-    def repair(self, typed_rows=0):
+    def repaired(self, typed_rows=0):
         size = shutil.get_terminal_size()
-        if size != self.size and self.ruled():
-            write_out(self.redrawn_at(size, typed_rows))
+        redrawn = self.redrawn_at(size, typed_rows) if size != self.size and self.ruled() else ""
         self.size = size
+        return redrawn
 
     def redrawn_at(self, size, typed_rows):
         stale, kept = self.stale_rows(size.columns), self.live_rows() + 1 + typed_rows
