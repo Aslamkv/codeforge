@@ -218,6 +218,21 @@ Everything Tinker tells the person goes through one voice, `say` (a `Messages`).
   `start`. Up and down move it, stopping at the ends; Enter gives its index; Esc, Ctrl-C or end of input give
   `None`. It reads the keys one at a time with the terminal raw, gives the terminal back as it was, and clears
   the list when it ends.
+- **MSG-9** The raw keys name, beside those of **MSG-8**: left, right, Home, End, Backspace, Delete, Tab and
+  Ctrl-A/E/U/K/W; any other bytes are text, a UTF-8 character whole and a paste as one piece. `LineEditor`
+  edits one line from them: the text and the cursor, text inserted at the cursor, left and right one
+  character, Home/Ctrl-A and End/Ctrl-E to the ends, Backspace and Delete one character, Ctrl-U to the start,
+  Ctrl-K to the end, Ctrl-W the word before. Up and down go through the lines typed before (newest first, the
+  line being typed kept for when down passes the newest). Enter gives the line; Ctrl-C or end of input on an
+  empty line give `None`, Ctrl-C on a line empties it. The cursor counts a wide character as two columns.
+- **MSG-10** `slash_matches(typed)` gives, for a line that starts with `/` and holds no space, the commands a
+  chat offers (**CMD-1**) whose name starts with what follows the `/`, then those whose name holds it, each
+  group in table order. `CommandMenu` shows them under the prompt, at most 8 rows, each `/name` with its
+  synopsis' words after the name dim and what it does; `›` marks the current one, first the first. Up and down
+  move it, scrolling the 8 rows, stopping at the ends. Tab fills the line with `/name ` and closes the menu.
+  Enter on a command that takes no words (`words` is `none`) sends `/name`; on one that takes words it fills
+  the line with `/name ` and waits. Esc closes the menu and keeps the line; typing on narrows it again, and no
+  match or a space closes it.
 
 ## text (TXT)
 
@@ -777,8 +792,10 @@ The terminal and the chats are one conversation: the same commands, the same ans
   On a terminal with colour, they show above the prompt as one live block, the lines under the Tinkering line
   dim and indented, all redrawn in place; otherwise what goes on now prints as a line of its own each time it
   changes. When the thing is done, the live block clears and only the lines not yet printed follow. `exit` or
-  end of input closes it. On a terminal, up and down on the prompt go through the lines typed before, the
-  last 1000 kept in the home's `prompt_history`, so they outlive a restart. `use-model`, `calibrate` or `embed`
+  end of input closes it. On a terminal, the prompt reads through `LineEditor` (**MSG-9**), and up and down
+  on it go through the lines typed before, the last 1000 kept in the home's `prompt_history`, so they outlive
+  a restart. Typing `/` there opens `CommandMenu` (**MSG-10**) under the prompt, narrowed as you type; up and
+  down move in the menu while it is open. Piped input reads lines as before. `use-model`, `calibrate` or `embed`
   typed alone there opens its select box on the prompt (**CLI-3**) and sends the command with the NAME chosen; a
   cancel sends nothing.
   Once it reads, all that Tinker says (`say`, a chat's message too) prints through it, above the prompt, and
@@ -791,8 +808,8 @@ The terminal and the chats are one conversation: the same commands, the same ans
   prints goes in right above the block and pushes the block, the rule and the prompt down a row. Once the
   prompt is on the last row, the lines above scroll up instead and older lines go to the scrollback. When the
   block grows or shrinks, the rule and the prompt move down or up with it. A message of any height
-  prints above the block in pieces that fit, and the line you send shows again there; the prompt line and
-  what you type on it are never redrawn. When the window is resized, the block and the rule are drawn again
+  prints above the block in pieces that fit, and the line you send shows again there; the prompt line, what
+  you type on it and the menu under it are drawn again after each print, with the cursor where it was. When the window is resized, the block and the rule are drawn again
   at the new size right away, still right above the prompt and with what Tinker printed right above them, and
   they never spill onto the prompt row. The conversation opens in a framed banner that names Tinker, the model
   in use, the embedding model when one is set, the projects folder and the chats it listens on, each on a
