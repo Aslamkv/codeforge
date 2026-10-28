@@ -214,8 +214,8 @@ Everything Tinker tells the person goes through one voice, `say` (a `Messages`).
 - **MSG-6** `human_duration`: 42.5 gives `42s`, 1762.08 gives `29m 22s`, 4000 gives `1h 6m 40s`.
 - **MSG-7** No module of Tinker but `messages` calls `print`.
 - **MSG-8** `say.pick(choices, start)` is a select box on the terminal, drawn as a short list under the
-  prompt, not full screen. Each choice is a label and whether it shows dim; `›` marks the current one, first
-  `start`. Up and down move it, stopping at the ends; Enter gives its index; Esc, Ctrl-C or end of input give
+  prompt, not full screen. Each choice is a label and how it shows: plain, dim, or a heading (never current:
+  up and down step over it); `›` marks the current one, first `start`. Up and down move it, stopping at the ends; Enter gives its index; Esc, Ctrl-C or end of input give
   `None`. It reads the keys one at a time with the terminal raw, gives the terminal back as it was, and clears
   the list when it ends.
 - **MSG-9** The raw keys name, beside those of **MSG-8**: left, right, Home, End, Backspace, Delete, Tab and
@@ -270,16 +270,16 @@ The home and its database, the settings, numbered lists, and the one way to dele
   learn_cutoff `0.0`, learn_pages `8`, learn_min_pages `2`, learn_searches `3`, learn_think `"low"`,
   tool_docs_pages `5`, docs_latest_days `30`, fetch_workers `6`, fetch_timeout `15`, fetch_max_bytes `2000000`,
   embed_model `""`, projects `"~/Projects"`. web_timeout is a search's timeout; fetch_workers, fetch_timeout and
-  fetch_max_bytes are the `Fetcher`'s workers, timeout and max_bytes; embed_model is the model
-  `tinker embed NAME` selects.
+  fetch_max_bytes are the `Fetcher`'s workers, timeout and max_bytes; embed_model is the embedding model
+  `tinker model NAME` selects.
 - **SET-3** `PHASES` and `FIX_PHASES` are the phase lists given in [The cycle](#the-cycle).
   `CONFIRM_AFTER` is `review` for the project and a feature, and `reproduce` for a bug fix.
 - **SET-4** `Config` is `DEFAULT_CONFIG` overridden by the home's `config`. It is read from the database each
   time, so a change another Tinker made is seen at once; a stored key no setting has is ignored.
   `Config.save(**changes)` keeps the changes.
 - **SET-5** `SETTINGS` is the one table of the settings: for each key of `DEFAULT_CONFIG`, its type, its
-  range and its owner, the command that sets it (`use-model` for model, `embed` for embed_model, `config`
-  for the rest). `Config.check()` checks every setting by its row, and rejects with
+  range and its owner, the command that sets it (`model` for model and embed_model, `config` for the
+  rest). `Config.check()` checks every setting by its row, and rejects with
   `SystemExit`: a keep_alive that is neither whole seconds nor a duration (`10m`, `1h30m`); a build_think or
   learn_think other than `"high"`, `"medium"`, `"low"`, `true`, `false` or `null`; and a number outside its range, or not whole
   where its row says so (max_growth above 1, web_timeout above 0, test_timeout and learn_missing at least 1,
@@ -321,7 +321,8 @@ The home and its database, the settings, numbered lists, and the one way to dele
   **JOB-10**), `own` (the conversation answers it its own way) or `terminal` (it asks in a terminal, so a chat
   only says to run it there). An action whose kind differs from its command's is an `Action` of that command,
   with its own kind: `read list`, `read show`, `exercise status`, `channel add`, `channel remove`,
-  `channel start` and `learn` of a command of the person's (**CLI-1**). `kind_of(argv)` gives the kind of what the words
+  `channel start`, `model calibrate NAME`, `model NAME` of a model that does not embed and was never measured
+  (**CLI-3**) and `learn` of a command of the person's (**CLI-1**). `kind_of(argv)` gives the kind of what the words
   ask for, and `deletes(argv)` whether it deletes. The command line builds its parser and its help from the
   table, and the conversation its commands. Nothing else lists commands by kind.
 - **CMD-2** The runs are `task`, `restart`, `confirm`, `amend`, `add`, `fix` and `resume`. Every run takes
@@ -338,7 +339,7 @@ again what it did. The job asked for last is the one that runs (**JOB-8**), and 
 person asks for pauses it too (**JOB-10**), so the person is always answered at once.
 
 - **JOB-1** `is_job(argv)` is true for a command of kind `job` (**CMD-1**): `task`, `restart`, `resume`,
-  `confirm`, `amend`, `add`, `fix`, `calibrate NAME`, `learn`, `ask`, `teach`, `read`, `research` and `exercise`.
+  `confirm`, `amend`, `add`, `fix`, `model calibrate NAME`, `model NAME` of a model never measured, `learn`, `ask`, `teach`, `read`, `research` and `exercise`.
   Help, and a build an exercise runs (`EXERCISE_ENV`, which holds the exercise's job number), are never jobs. A job keeps the computer awake while it
   runs (**SET-11**). `Jobs.running(argv)` runs a job as the next number (`#1`, `#2` ...), kept in the home's
   `jobs` with its command, title, arguments, the day it started, its state `running`, its process and its
@@ -395,7 +396,7 @@ person asks for pauses it too (**JOB-10**), so the person is always answered at 
 - **JOB-12** `calls_log()` is the one log of a job's model calls: `calls #N` for the job that runs, kept when
   it finishes and deleted when it is archived (**JOB-11**). Outside a job it keeps nothing. `learn`, `ask`,
   `teach`, `read`, `research` and `exercise` give it to their model and to `say` (`detail`, **MSG-5**);
-  `calibrate` calls Ollama directly and keeps none.
+  calibration (`model`) calls Ollama directly and keeps none.
 
 ## ledger (LED)
 
@@ -628,7 +629,7 @@ What is said in the chats, kept so that a chat is only a view of it.
   An Ollama failure is its `OllamaError`. Nothing else outside `Model`, the quick call, an unload and
   calibration calls `Ollama.chat`.
 - **MOD-26** `Models.choices()` gives the name of each model Ollama has that does not embed, in Ollama's order,
-  with whether it was measured. It ends with `SystemExit` when Ollama does not answer, as `tinker models` does.
+  with whether it was measured. It ends with `SystemExit` when Ollama does not answer, as `tinker model` does.
   `Models.embedding_choices()` gives the names of the ones that embed: their `capabilities` from Ollama's
   `/api/show` hold `embedding`, or Ollama gives none for them.
 - **MOD-27** Calibration's quality probe asks the model `QUALITY_TASK_COUNT` (3) tasks drawn at random from
@@ -654,7 +655,20 @@ What is said in the chats, kept so that a chat is only a view of it.
      🧠 Solved 2 of 3 test tasks
      💭 Thinks before it answers (think: high)
   ```
-  An unmeasured speed is `?`. `tinker models` keeps exact numbers and adds a SOLVED column.
+  An unmeasured speed is `?`.
+- **MOD-29** `Models.rows()` gives `tinker model`'s list: a heading `— general —` with a row for each model
+  of `Models.choices()`, then `— embeddings —` with one for each of `Models.embedding_choices()`, a group with
+  no model left out. A row is the name, then facts in plain words, with no adjectives: a measured model
+  `in use · writes ~19 words/s · reads ~225 words/s · solved 2 of 3` (`in use ·` only for the model in use,
+  words as **MOD-28** counts them, an unmeasured speed `?`), one never measured
+  `not measured yet · choosing it measures it (about a minute)`, an embedding model `in use · 0.3 GB` (its
+  size; `in use ·` for the embedding model).
+- **MOD-30** `Models.recipe()` gives the lines above the list, so the person sees what to pick: of the measured
+  models that do not embed, `🏆 Best quality: NAME (solved 3 of 3)`, the one that solved most (a tie: the
+  faster writer, then Ollama's order), and `⚡ Fastest: NAME (writes ~40 words/s)`, the fastest writer (a tie:
+  the one that solved most, then Ollama's order). When one model is both, the one line is
+  `🏆 NAME is the best and the fastest (solved 3 of 3, writes ~40 words/s)`. With fewer than two measured, there is
+  no recipe.
 
 ## project (PRJ)
 
@@ -813,8 +827,8 @@ The terminal and the chats are one conversation: the same commands, the same ans
 - **CNV-5** In a conversation (the terminal and every chat) a command is sent with its `/`: `command_of(text)`
   gives the command a message starts with, by the command table, only when its first word is `/` and a
   command's name, whatever words follow (a command refuses words it does not take). A message without the `/`
-  is a chat (`""`), even one that starts with a command's name. A menu's form is taken too: `/use_model` is
-  `use-model`, and `@bot` after the name (in a group) is dropped. A `/` word that names no command is answered
+  is a chat (`""`), even one that starts with a command's name. A menu's form is taken too: `@bot` after the
+  name (in a group) is dropped. A `/` word that names no command is answered
   `❓ No command /WORD: /help lists them`, and nothing else is done. The command line (`tinker help`) is not a
   conversation: its commands take no `/`.
 - **CNV-6** `Channel.said` writes `tinker COMMAND` as `/COMMAND` in a conversation, in the terminal as in every
@@ -833,9 +847,9 @@ The terminal and the chats are one conversation: the same commands, the same ans
   again there. A plain `exit` is a chat. On a terminal, the prompt reads through `LineEditor` (**MSG-9**), and up and down
   on it go through the lines typed before, the last 1000 kept in the home's `prompt_history`, so they outlive
   a restart. Typing `/` there opens `CommandMenu` (**MSG-10**) under the prompt, narrowed as you type; up and
-  down move in the menu while it is open. Piped input reads lines as before. `/use-model`, `/calibrate` or `/embed`
-  typed alone there opens its select box on the prompt (**CLI-3**) and sends the command with the NAME chosen; a
-  cancel sends nothing.
+  down move in the menu while it is open. Piped input reads lines as before. `/model` or `/model calibrate` typed
+  alone there prints the recipe (**MOD-30**), opens its select box on the prompt (**CLI-3**) and sends the
+  command with the NAME chosen; a cancel sends nothing.
   Once it reads, all that Tinker says (`say`, a chat's message too) prints through it, above the prompt, and
   `live` draws in that same live block, its star turning and its glow moving on their own about eight times a second. While a job
   shows its progress there, the status that says what Tinker works on is left out of the terminal. A job's
@@ -892,9 +906,9 @@ The terminal and the chats are one conversation: the same commands, the same ans
 - **CNV-13** A command that needs words, sent alone (as a chat app's menu sends it: `/fix`), asks for them
   (`ask_for`: what it does, what to send, an example) and takes the next message without a `/` as them
   (`fix MESSAGE`), even one that starts with a command's name. A command instead (sent with its `/`, as a file
-  sent to read is) drops the question. A command whose words are optional (`status`) runs at once. `/use-model`, `/calibrate` and `/embed` sent alone on a channel with buttons (Telegram) ask with
-  `choose(chat, question, names)` instead: a button for each model its select box (**CLI-3**) shows plain, the
-  question naming the one in use; the next message (a tap sends the name) is the NAME, as above. With none to
+  sent to read is) drops the question. A command whose words are optional (`status`) runs at once. `/model` and `/model calibrate` sent alone on a channel with buttons (Telegram) ask with
+  `choose(chat, question, names)` instead: a button with the name of each model its select box (**CLI-3**)
+  offers, the question holding the recipe and the rows (**MOD-29**, **MOD-30**); the next message (a tap sends the name) is the NAME, as above. With none to
   show, or on a channel without buttons, they run at once and list the models.
 - **CNV-14** A glance (a command of kind `glance`, **CMD-1**) is answered with `glance`: the person's message
   goes at once, the answer in `GLANCE_KEPT_SECONDS`. `history [PAGE | #N]` lists the things shown by page
@@ -1587,20 +1601,24 @@ The main system: the command line, one run, and the cycle of phases.
 - **CLI-2** `tinker help` lists every command by group, the options, and examples. With
   `TINKER_FORMAT=markup`, it lists what a chat can send, each command with its `/`. `tinker help COMMAND` shows that command's arguments,
   and an unknown command is an error.
-- **CLI-3** `Commands`. `use-model` accepts only a measured model. `use-model`, `calibrate` and `embed` with no
-  NAME, on a terminal, open a select box (**MSG-8**) on Ollama's models (**MOD-26**), and the one chosen is
-  taken as the NAME (one never measured says to calibrate it first); a cancel changes nothing. `use-model` and
-  `calibrate` show only the models that do not embed: `use-model` the measured ones plain and the rest dim,
-  starting at the one in use; `calibrate` all plain, starting at the one in use, and picks before its job
-  starts. `embed` shows only the ones that embed, all plain, starting at the embedding model. Not on a
-  terminal, they list the models as `tinker models` does; a chat with buttons asks with them (**CNV-13**). `runs` lists
+- **CLI-3** `Commands`. `model NAME` of a measured model uses it for every build; of one that does not embed
+  and was never measured, it is a job that measures it (`Calibrator`) and then uses it, so a failed
+  measurement keeps the model in use; of an embedding model, it checks the model gives a vector and makes it
+  the embedding model. `model calibrate NAME` measures a model that does not embed again, and changes no model
+  in use. A NAME Ollama does not have is refused, with `tinker model` to list them. `model` and
+  `model calibrate` with no NAME, on a terminal, print the recipe (**MOD-30**) and open a select box
+  (**MSG-8**) on the rows (**MOD-29**), and the one chosen is taken as the NAME; a cancel changes nothing.
+  `model` offers every model, the measured ones plain, the rest dim, starting at the one in use;
+  `model calibrate` only the general ones, all plain, starting at the one in use, and picks before its job
+  starts. Not on a terminal, they print the recipe and the rows; a chat with buttons asks with them
+  (**CNV-13**). `runs` lists
   the runs, newest first. `status [@PROJECT]` shows the project's criteria and its open phase (in a chat,
   `status` alone shows what runs, **CNV-11**). `rename` renames the folder of a project whose plan waits, and
   its pointer. `config` shows the settings, and `config KEY VALUE` sets one.
 - **CLI-4** `Doctor` checks Ollama, the model, the embedding model, the web and the command. It exits 1 only
   when a required check fails.
 - **CLI-5** `tinker memory` browses what Tinker has learned (**GRF-6** to **GRF-12**); `--graph` draws it
-  (**GRF-5**). `tinker models` lists Ollama's models with what was measured, and marks the one in use.
+  (**GRF-5**).
 - **CLI-6** `tinker log [@PROJECT]` shows what the project's last runs said. `--calls` shows its model calls
   and details instead.
 - **CLI-7** `tinker learn NAME = DEFINITION`, `tinker learn NAME "DEFINITION"` (or an alias in the person's
