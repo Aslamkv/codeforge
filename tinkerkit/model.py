@@ -9,7 +9,7 @@ lazy import urllib.error
 lazy import urllib.parse
 lazy import urllib.request
 
-from .messages import say
+from .messages import DIMMED, HEADING, say
 from .settings import (
     CALIBRATION_KEEP_ALIVE,
     CAPACITY_SEARCH_PRECISION,
@@ -522,6 +522,73 @@ class Models:
     @staticmethod
     def names():
         return [model.get("name", "") for model in Models.answering()]
+
+    @staticmethod
+    def rows():
+        general, embeddings = Models.choices(), Models.embedding_choices()
+        sizes = {model.get("name", ""): model.get("size") or 0 for model in Models.answering()}
+        width = max(len(name) for name, _ in general + embeddings) + 2 if general + embeddings else 0
+        return Models.section("— general —", [Models.general_row(name, width) for name, _ in general]) + (
+            Models.section(
+                "— embeddings —", [Models.embedding_row(name, sizes[name], width) for name, _ in embeddings]
+            )
+        )
+
+    @staticmethod
+    def section(heading, rows):
+        return [(heading, HEADING), *rows] if rows else []
+
+    @staticmethod
+    def general_row(name, width):
+        settings = Models.settings(name)
+        if settings is None:
+            return (f"{name:<{width}}not measured yet · choosing it measures it (about a minute)", DIMMED)
+        facts = [
+            f"writes {Models.speed_words(settings, 'write_tokens_per_s')} words/s",
+            f"reads {Models.speed_words(settings, 'read_tokens_per_s')} words/s",
+            Models.solved_text(settings),
+        ]
+        return f"{name:<{width}}" + " · ".join(Models.in_use_facts(name, "model", facts))
+
+    @staticmethod
+    def embedding_row(name, size, width):
+        return f"{name:<{width}}" + " · ".join(Models.in_use_facts(name, "embed", [f"{size / 1e9:.1f} GB"]))
+
+    @staticmethod
+    def in_use_facts(name, command, facts):
+        return ["in use", *facts] if Models.in_use(command) == name else facts
+
+    @staticmethod
+    def speed_words(settings, key):
+        speed = settings.get(key)
+        return "?" if speed is None else f"~{Calibrator.words(speed, settings['chars_per_token'])}"
+
+    @staticmethod
+    def solved_text(settings):
+        return f"solved {settings.get('solved', '?')} of {len(settings.get('quality_tasks') or []) or '?'}"
+
+    @staticmethod
+    def recipe():
+        measured = [(name, Models.settings(name)) for name, known in Models.choices() if known]
+        if len(measured) < 2:
+            return []
+        best = max(measured, key=lambda pair: (Models.solved(pair[1]), Models.words_per_second(pair[1])))
+        fastest = max(measured, key=lambda pair: (Models.words_per_second(pair[1]), Models.solved(pair[1])))
+        writes = f"writes {Models.speed_words(fastest[1], 'write_tokens_per_s')} words/s"
+        if best is fastest:
+            return [f"🏆 {best[0]} is the best and the fastest ({Models.solved_text(best[1])}, {writes})"]
+        return [
+            f"🏆 Best quality: {best[0]} ({Models.solved_text(best[1])})",
+            f"⚡ Fastest: {fastest[0]} ({writes})",
+        ]
+
+    @staticmethod
+    def solved(settings):
+        return settings.get("solved") or 0
+
+    @staticmethod
+    def words_per_second(settings):
+        return (settings.get("write_tokens_per_s") or 0) * settings["chars_per_token"]
 
     @staticmethod
     def command_choices(command):

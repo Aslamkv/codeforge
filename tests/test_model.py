@@ -9,7 +9,7 @@ from conftest import MEASURED, MODEL
 
 import tinkerkit.model as model_module
 from tinkerkit import quality
-from tinkerkit.messages import say
+from tinkerkit.messages import DIMMED, HEADING, say
 from tinkerkit.model import Answer, Calibrator, GgufReading, Model, Models, Ollama, OllamaError, Stream
 from tinkerkit.prompts import Part, Prompts, PromptTooLarge, Reply
 from tinkerkit.settings import (
@@ -128,6 +128,93 @@ def test_embedding_choices(monkeypatch):
     capabilities = {"qwen3:8b": ["completion"], "nomic-embed": ["embedding"], "old": None}
     monkeypatch.setattr(Ollama, "capabilities", staticmethod(capabilities.get))
     assert Models.embedding_choices() == [("nomic-embed", True), ("old", True)]
+
+
+def installed(monkeypatch, models, capabilities):
+    monkeypatch.setattr(Ollama, "installed_models", staticmethod(lambda: models))
+    monkeypatch.setattr(Ollama, "capabilities", staticmethod(capabilities.get))
+
+
+def measured(solved, write, read=300.0):
+    return dict(
+        MEASURED, solved=solved, quality_tasks=[1, 2, 3], write_tokens_per_s=write, read_tokens_per_s=read
+    )
+
+
+@pytest.mark.spec("MOD-29")
+def test_rows(home_store, monkeypatch):
+    installed(
+        monkeypatch,
+        [{"name": "qwen3:8b"}, {"name": "nomic", "size": 274_000_000}, {"name": "llama3"}, {"name": "phi"}],
+        {"qwen3:8b": ["completion"], "nomic": ["embedding"], "llama3": ["completion"], "phi": ["completion"]},
+    )
+    Models.keep("llama3", measured(2, 38.0))
+    Models.keep("phi", dict(MEASURED))
+    Config.save(model="llama3", embed_model="nomic")
+    assert Models.rows() == [
+        ("— general —", HEADING),
+        ("qwen3:8b  not measured yet · choosing it measures it (about a minute)", DIMMED),
+        "llama3    in use · writes ~19 words/s · reads ~150 words/s · solved 2 of 3",
+        "phi       writes ? words/s · reads ? words/s · solved ? of ?",
+        ("— embeddings —", HEADING),
+        "nomic     in use · 0.3 GB",
+    ]
+
+
+@pytest.mark.spec("MOD-29")
+def test_rows_leave_out_a_group_with_no_model(home_store, monkeypatch):
+    installed(monkeypatch, [{"name": "qwen3:8b"}], {"qwen3:8b": ["completion"]})
+    assert Models.rows() == [
+        ("— general —", HEADING),
+        ("qwen3:8b  not measured yet · choosing it measures it (about a minute)", DIMMED),
+    ]
+
+
+def recipe_for(monkeypatch, settings):
+    names = list(settings) + ["unmeasured", "nomic"]
+    capabilities = {name: ["completion"] for name in names} | {"nomic": ["embedding"]}
+    installed(monkeypatch, [{"name": name} for name in names], capabilities)
+    for name, kept in settings.items():
+        Models.keep(name, kept)
+    return Models.recipe()
+
+
+@pytest.mark.spec("MOD-30")
+def test_recipe_names_the_best_and_the_fastest(home_store, monkeypatch):
+    assert recipe_for(monkeypatch, {"a": measured(3, 20.0), "b": measured(1, 80.0)}) == [
+        "🏆 Best quality: a (solved 3 of 3)",
+        "⚡ Fastest: b (writes ~40 words/s)",
+    ]
+
+
+@pytest.mark.spec("MOD-30")
+def test_recipe_says_one_line_for_a_model_both_best_and_fastest(home_store, monkeypatch):
+    assert recipe_for(monkeypatch, {"a": measured(1, 20.0), "b": measured(3, 80.0)}) == [
+        "🏆 b is the best and the fastest (solved 3 of 3, writes ~40 words/s)"
+    ]
+
+
+@pytest.mark.spec("MOD-30")
+def test_recipe_breaks_ties_by_the_other_figure_then_ollamas_order(home_store, monkeypatch):
+    assert recipe_for(
+        monkeypatch, {"a": measured(2, 20.0), "b": measured(2, 80.0), "c": measured(3, 80.0)}
+    ) == ["🏆 c is the best and the fastest (solved 3 of 3, writes ~40 words/s)"]
+    assert recipe_for(
+        monkeypatch, {"d": measured(3, 20.0), "e": measured(3, 80.0), "f": measured(1, 80.0)}
+    ) == ["🏆 e is the best and the fastest (solved 3 of 3, writes ~40 words/s)"]
+
+
+@pytest.mark.spec("MOD-30")
+def test_recipe_takes_ollamas_order_when_both_figures_tie(home_store, monkeypatch):
+    assert recipe_for(monkeypatch, {"a": measured(2, 20.0), "b": measured(2, 20.0)}) == [
+        "🏆 a is the best and the fastest (solved 2 of 3, writes ~10 words/s)"
+    ]
+
+
+@pytest.mark.spec("MOD-30")
+def test_no_recipe_with_fewer_than_two_measured(home_store, monkeypatch):
+    assert recipe_for(monkeypatch, {}) == []
+    assert recipe_for(monkeypatch, {"a": measured(3, 20.0)}) == []
 
 
 @pytest.mark.spec("MOD-26")
