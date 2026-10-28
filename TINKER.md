@@ -169,7 +169,7 @@ tinker restart --workdir ~/Projects/calc-py
 
 ## Talk 💬
 
-Talk with Tinker. Every command works here, and anything else is a normal chat (`exit` ends it):
+Talk with Tinker. Every command works here, and anything else is a normal chat. A command starts with `/`, as in `/status`; `/exit` (or Ctrl-D) ends it:
 
 ```sh
 tinker
@@ -227,7 +227,7 @@ tinker run add 5 2
 tinker run @calc-py add 5 2
 ```
 
-In the conversation or a chat, give it input after `<<<`: `run @calc-py <<< 2+2`.
+In the conversation or a chat, give it input after `<<<`: `/run @calc-py <<< 2+2`.
 
 While a job runs, just ask: a chat or a command line pauses it (it saves itself), you are answered at once, and
 the job goes on as soon as you have your answer (see [Jobs](#jobs-)).
@@ -258,11 +258,12 @@ tinker channel disable telegram
 tinker channel remove telegram
 ```
 
-Type `/` in the chat to pick any command from the bot's menu. With or without the `/`, it works the same:
+Type `/` in the chat to pick any command from the bot's menu. A command starts with `/`; anything else is a
+chat, and a `/` with a name Tinker doesn't know is answered with a pointer to `/help`:
 
 ```text
 /status
-runs
+/runs
 /use_model qwen3:8b
 ```
 
@@ -273,18 +274,18 @@ Attach a book, an article or a document to the chat, and Tinker reads it: see [R
 
 The chat stays tidy. Tinker's status is one message: each new status replaces the one before, at the
 bottom of the chat, even after a restart. Each task has
-one message. Quick looks like `jobs` or `help` go after two minutes, and your question goes as soon as
+one message. Quick looks like `/jobs` or `/help` go after two minutes, and your question goes as soon as
 Tinker answers. Everything else goes after a day. Nothing is lost: Tinker keeps a history of what it showed.
 
-```sh
-history          # what the chat showed, newest first, with what you asked
-history 2        # the next page
-history #12      # show #12 again
-clear chat       # empty the chat now (the history stays)
-clear history    # forget the history too (asks first)
+```text
+/history         # what the chat showed, newest first, with what you asked
+/history 2       # the next page
+/history #12     # show #12 again
+/clear chat      # empty the chat now (the history stays)
+/clear history   # forget the history too (asks first)
 ```
 
-`tinker history` shows the same list in a terminal. For privacy, `clear history` deletes everything Tinker
+`tinker history` shows the same list in a terminal. For privacy, `/clear history` deletes everything Tinker
 kept of the chat. Your projects, runs and jobs stay.
 
 ## Learn 🧠
@@ -443,7 +444,7 @@ An exercise is a [job](#jobs-) like any other, and each language keeps its own p
 exercise too, or a chat or a command line, pauses it (its build stops and saves itself), and the exercise goes
 on as soon as nothing else runs and you have your answer.
 
-It runs until you stop it. In a chat, `exercise rust` starts it in the background, so it keeps going after the
+It runs until you stop it. In a chat, `/exercise rust` starts it in the background, so it keeps going after the
 conversation ends. It keeps one message, whether it is started, stopped or resumed, and that message shows what
 its build is doing right now, as a task's does. A conversation started later picks up the exercise's message
 again, and an exercise that was killed (or the computer restarted) goes on by itself.
@@ -484,8 +485,8 @@ tinker resume            # the job stopped last (with none stopped, this folder'
 `tinker confirm` is not a job's resume: it always builds the plan that waits in its folder.
 
 A job that was killed (or the computer restarted) shows as stopped, and resumes the same way. Once a job
-finishes, its journal is deleted. While a job runs, the computer stays awake. In a chat, the same words work:
-`jobs`, `stop #3`, `resume #3`.
+finishes, its journal is deleted. While a job runs, the computer stays awake. In a chat, the same commands work with a `/`:
+`/jobs`, `/stop #3`, `/resume #3`.
 
 Clear the jobs you are done with (it asks first). They are archived, not deleted: `tinker jobs` no longer shows
 them, but `tinker jobs archived` does. An archived job cannot be resumed, and its journal and its log of model

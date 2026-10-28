@@ -153,7 +153,8 @@ def test_help_markup_and_one_command(capsys, monkeypatch):
     with pytest.raises(SystemExit):
         parse("help")
     out = capsys.readouterr().out
-    assert out.startswith("🛠 **What you can send**") and "- `task WHAT TO BUILD`" in out
+    assert out.startswith("🛠 **What you can send**") and "- `/task WHAT TO BUILD`" in out
+    assert "❓ `/help COMMAND`" in out
     assert "💬 anything else: a normal chat" in out
     with pytest.raises(SystemExit):
         parse("help", "task")

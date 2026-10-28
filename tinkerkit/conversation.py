@@ -68,16 +68,14 @@ CHAT_COMMAND_OUTPUT_READ_CHARS = 6000
 PLAN_CONFIRMING_COMMANDS = tuple(
     command.name for command in COMMANDS if "--confirm" in (option.flag for option in command.options)
 )
-ONE_WORD_COMMANDS = tuple(command.name for command in COMMANDS if command.chat and command.words == "one")
-ANY_WORDS_COMMANDS = tuple(command.name for command in COMMANDS if command.chat and command.words == "any")
 COMMAND_NAMES = tuple(command.name for command in COMMANDS if command.name)
 BARE_RE = re.compile(
     r"(?<![/\w.-])tinker (?=(?:" + "|".join(sorted(COMMAND_NAMES, key=len, reverse=True)) + r")\b)"
 )
 USAGE = frozendict(
     {
-        command.name: f"✍️ Write `{command.synopsis}`"
-        + (f", e.g. `{command.example}`" if command.example else "")
+        command.name: f"✍️ Write `/{command.synopsis}`"
+        + (f", e.g. `/{command.example}`" if command.example else "")
         for command in COMMANDS
         if command.name
     }
@@ -94,29 +92,29 @@ START_WELCOME = """👋 **Hi, I'm Tinker!**
 I build small programs for you, on this computer, with an AI model that runs right here.
 
 🔨 **Build something**
-- Tell me what you want: `task a calculator in Python`
+- Tell me what you want: `/task a calculator in Python`
 - I reply with a plan: what I will build, and how I will test it
-- Like it? Send `confirm`. Want a change? `amend also handle negative numbers`
+- Like it? Send `/confirm`. Want a change? `/amend also handle negative numbers`
 - I build it, and you see my progress here, in one message
 
 📂 **Your projects**
-- `runs` lists them all, newest first
-- `run 5 + 3` uses the one built last
-- `add @calc-py a history of results` adds a feature
-- `fix @calc-py 2/0 crashes` fixes a bug
+- `/runs` lists them all, newest first
+- `/run 5 + 3` uses the one built last
+- `/add @calc-py a history of results` adds a feature
+- `/fix @calc-py 2/0 crashes` fixes a bug
 
 💬 **Ask me anything**
 - Just write to me: what is not a command is a normal chat
-- `research the newest Python release`: I study it on the web, thoroughly, and keep what I find (it takes a while)
-- `command how full is my disk`: I find the command line, and run it once you `confirm`
-- `learn rust`: I study it, and use it in my builds
+- `/research the newest Python release`: I study it on the web, thoroughly, and keep what I find (it takes a while)
+- `/command how full is my disk`: I find the command line, and run it once you `/confirm`
+- `/learn rust`: I study it, and use it in my builds
 
 ⏳ **While I work**
-- `status` tells what I am doing
-- `stop` stops it (it is saved): `jobs` lists what runs and what stopped, `resume #3` goes on
+- `/status` tells what I am doing
+- `/stop` stops it (it is saved): `/jobs` lists what runs and what stopped, `/resume #3` goes on
 - Just write to me: I pause what runs, answer you, and go on with it
 
-❓ `help` lists everything I can do, and `help task` explains one command."""
+❓ `/help` lists everything I can do, and `/help task` explains one command."""
 
 
 MenuEntry = namedtuple("MenuEntry", "name what")
@@ -137,7 +135,7 @@ def session(root):
 
 
 def one_shot(command, text):
-    console, talk = ConsoleChannel(commands_without_tinker=False), Talk(commands_brief())
+    console, talk = ConsoleChannel(), Talk(commands_brief())
     message, chat = Message(ConsoleChannel.CHAT, text, "you"), ConsoleChannel.CHAT
     if command == "history":
         console.send(chat, history_text(text.split()[:1]))
@@ -280,9 +278,9 @@ class Desk:
             return md(t"🔄 **Tinker** · working on {self.reporter.progress.title}")
         if self.waiting_plan:
             then = (
-                "`confirm` · `rename NAME`"
+                "`/confirm` · `/rename NAME`"
                 if self.waiting_plan.get("stage") == "name"
-                else "`confirm` · `amend WHAT`"
+                else "`/confirm` · `/amend WHAT`"
             )
             return md(t"🙋 **Tinker** · {self.waiting_plan['title']} waits for you: {then:md}")
         elsewhere = [described(state) for state in persons_runs(self.children())]
@@ -361,6 +359,10 @@ class Desk:
             return
         message = self.with_words_wanted(channel, message)
         command = command_of(message.text)
+        unknown = not command and unknown_command(message.text)
+        if unknown:
+            channel.send(message.chat, unknown)
+            return
         already_answered_in_a_message = message.id and (
             command in ("confirm",) + EXIT_WORDS or exercise_switch(message.text)
         )
@@ -400,15 +402,9 @@ class Desk:
         if not question or not question.wanted:
             return message
         wanted = self.questions.answered(channel, message.chat).wanted
-        if self.command_of_its_own(message, command_of(message.text), wanted):
+        if message.text.startswith("/"):
             return message
-        return Message(message.chat, f"{wanted} {message.text}", message.sender, message.id)
-
-    @staticmethod
-    def command_of_its_own(message, command, wanted):
-        return command and (
-            message.text.startswith("/") or len(message.text.split()) == 1 or command == wanted
-        )
+        return Message(message.chat, f"/{wanted} {message.text}", message.sender, message.id)
 
     def asked_with_words(self, channel, message, command):
         if len(message.text.split()) == 1:
@@ -422,7 +418,7 @@ class Desk:
         if question and question.naming:
             if confirm:
                 channel.send(
-                    message.chat, "⏳ The command is still being worked out: `confirm` once it is shown."
+                    message.chat, "⏳ The command is still being worked out: `/confirm` once it is shown."
                 )
             return confirm
         question = self.questions.answered(channel, message.chat)
@@ -479,7 +475,7 @@ class Desk:
 
     def clear(self, channel, chat, words):
         if words[1:] == ["chat"]:
-            return self.clear_chat(channel, chat, "Chat cleared", " · `history` shows any of them again")
+            return self.clear_chat(channel, chat, "Chat cleared", " · `/history` shows any of them again")
         return self.by_table(channel, chat, words)
 
     def read(self, channel, chat, words):
@@ -511,7 +507,7 @@ class Desk:
     def stop_exercise(self):
         running_one = exercising_now()
         if not running_one:
-            return "🤷 No exercise runs: `resume #N` goes on with one (`jobs stopped` lists them)"
+            return "🤷 No exercise runs: `/resume #N` goes on with one (`/jobs stopped` lists them)"
         signal_task(running_one["pid"], JOB_STOP_SIGNAL)
         self.exercise_says("🛑 Stopping: its build saves itself first")
         return None
@@ -615,7 +611,7 @@ class Desk:
             return self.ask_folder_name(waiting)
         target = name or waiting.get("run")
         if not target:
-            return "🤷 No plan waits for confirmation: start one with `task WHAT TO BUILD`"
+            return "🤷 No plan waits for confirmation: start one with `/task WHAT TO BUILD`"
         mine = bool(waiting) and target in (waiting.get("run"), Path(str(waiting.get("folder", ""))).name)
         folder, title = (waiting["folder"], waiting["title"]) if mine else (self.root, f"@{target}")
         target = waiting["run"] if mine else target
@@ -654,8 +650,8 @@ class Desk:
         if waiting.get("stage") != "name":
             return Desk.plan_shown(waiting)
         return (
-            f"{Desk.plan_shown(waiting)}\n\n📁 **Its folder:** `{Path(waiting['folder']).name}`\n👉 `confirm` to build it "
-            f"there · `rename NAME` to name it otherwise (it builds then)"
+            f"{Desk.plan_shown(waiting)}\n\n📁 **Its folder:** `{Path(waiting['folder']).name}`\n👉 `/confirm` to build it "
+            f"there · `/rename NAME` to name it otherwise (it builds then)"
         )
 
     @staticmethod
@@ -677,7 +673,7 @@ class Desk:
         if not waiting:
             return "🤷 No plan waits for confirmation, so no folder can be renamed (once built, it stays)."
         if self.busy():
-            return self.on_task(waiting, "⏳ A task is running: wait for it, or `stop` it first.")
+            return self.on_task(waiting, "⏳ A task is running: wait for it, or `/stop` it first.")
         why = self.rename_folder(waiting, words[1])
         if why is not None:
             return self.on_task(waiting, md(t"⚠️ **Not renamed:** {why}"))
@@ -745,7 +741,7 @@ class Desk:
     def stop_job(self, number):
         job = Jobs.get(number)
         if job is None or job["state"] not in ("running", "paused"):
-            return f"🤷 Job #{number} is not running or paused: `jobs` lists them."
+            return f"🤷 Job #{number} is not running or paused: `/jobs` lists them."
         if job["state"] == "paused":
             Jobs.stop(job)
         elif self.busy() and job["pid"] == self.last_task.pid:
@@ -754,7 +750,7 @@ class Desk:
             return self.stop_exercise()
         else:
             Jobs.stop(job)
-        return md(t"⏹ **Stopping #{number}** {job['title']}: it is saved; `resume #{number}` goes on later.")
+        return md(t"⏹ **Stopping #{number}** {job['title']}: it is saved; `/resume #{number}` goes on later.")
 
     def report(self, command, words):
         if command == "status" and len(words) == 1:
@@ -767,7 +763,7 @@ class Desk:
             chat,
             None,
             "🛑 **Stop Tinker?** It cannot be started again from here.\n"
-            "👉 `confirm` to stop it · anything else keeps it",
+            "👉 `/confirm` to stop it · anything else keeps it",
             done=True,
         )
         self.wait_for_confirm(channel, chat, {"words": [command], "shown": shown})
@@ -780,7 +776,7 @@ class Desk:
             None,
             md(
                 t"🗑 **{' '.join(words)}**\n{preview:block}\n"
-                t"👉 `confirm` to delete it · anything else cancels it"
+                t"👉 `/confirm` to delete it · anything else cancels it"
             ),
             done=True,
         )
@@ -852,9 +848,9 @@ class Desk:
             return (
                 None,
                 None,
-                md(t"🤷 **No project @{name}:** `runs` lists them")
+                md(t"🤷 **No project @{name}:** `/runs` lists them")
                 if name
-                else "🤷 **No project is built yet:** `task WHAT TO BUILD` builds one",
+                else "🤷 **No project is built yet:** `/task WHAT TO BUILD` builds one",
             )
         workdir = Path(project["workdir"])
         toolchain = Toolchain((saved(workdir, "spec", "plan", {}) or {}).get("toolchain"))
@@ -1021,17 +1017,22 @@ def shown_output(output):
 
 
 def command_of(text, commands=None):
+    first = slash_word(text)
+    return first if first in (commands or Desk.COMMANDS) else ""
+
+
+def slash_word(text):
     words = text.split()
-    first = command_word(words[0]) if words else ""
-    if first not in (commands or Desk.COMMANDS):
-        return ""
-    if takes_these_words(first, words):
-        return first
-    return ""
+    return command_word(words[0]) if words and words[0].startswith("/") else ""
 
 
-def takes_these_words(first, words):
-    return len(words) == 1 or first in ANY_WORDS_COMMANDS or (first in ONE_WORD_COMMANDS and len(words) == 2)
+def typed_exit(line):
+    return line.strip().lower() in [f"/{word}" for word in EXIT_WORDS]
+
+
+def unknown_command(text):
+    word = text.split()[0].partition("@")[0] if text.startswith("/") else ""
+    return f"❓ No command {word}: /help lists them" if len(word) > 1 else ""
 
 
 def command_words(text):
@@ -1055,7 +1056,7 @@ def words_asked(command):
     found = BY_NAME[command]
     needed = found.synopsis.split(None, 1)[1]
     example = found.example.split(None, 1)[1] if " " in found.example else ""
-    question = md(t"✍️ **{command}** · {found.what}\nSend {needed:code} now")
+    question = md(t"✍️ **/{command}** · {found.what}\nSend {needed:code} now")
     return WordsAsked(question + (md(t", e.g. {example:code}") if example else ""), example or needed)
 
 
@@ -1274,7 +1275,7 @@ class Shell:
         )
         return md(
             t"🖥 **Run this?**\n{line:block}\n{does}{warning:md}\n"
-            t"👉 `confirm` to run it · anything else cancels it"
+            t"👉 `/confirm` to run it · anything else cancels it"
         )
 
     def take(self, channel, chat):
@@ -1586,7 +1587,7 @@ class Progress:
 
     @staticmethod
     def with_next_step(planned):
-        return f"{planned}\n\n👉 `confirm` to build it · `amend WHAT` to change it"
+        return f"{planned}\n\n👉 `/confirm` to build it · `/amend WHAT` to change it"
 
     @staticmethod
     def planned(plan):
@@ -1674,7 +1675,7 @@ def tracker_of(job):
 
 def exercise_switch(text):
     words = text.split()
-    return len(words) > 1 and words[0].lstrip("/").lower() == "exercise" and words[1].lower() != "status"
+    return command_of(text) == "exercise" and len(words) > 1 and words[1].lower() != "status"
 
 
 def headline(status):
@@ -1730,7 +1731,6 @@ class Channel:
         self.name, self.settings, self.secrets = name, settings, secrets
         self.allowed = {str(chat) for chat in settings.get("allowed", [])}
         self.closed = False
-        self.commands_without_tinker = True
 
     def handle(self):
         raise NotImplementedError
@@ -1787,7 +1787,7 @@ class Channel:
         pass
 
     def said(self, text):
-        return BARE_RE.sub("", text) if self.commands_without_tinker else text
+        return BARE_RE.sub("/", text)
 
     def skip_waiting(self):
         pass
@@ -1844,9 +1844,8 @@ class ConsoleChannel(Channel):
     KIND = "console"
     CHAT = "console"
 
-    def __init__(self, commands_without_tinker=True):
+    def __init__(self):
         super().__init__("console", {"allowed": [self.CHAT]}, {})
-        self.commands_without_tinker = commands_without_tinker
         self.screen, self.lines = ConsoleScreen(), queue.Queue()
         self.last_id, self.numbering = 0, threading.Lock()
         self.printed, self.began, self.doings, self.live_owner = {}, {}, {}, None
@@ -1862,7 +1861,7 @@ class ConsoleChannel(Channel):
             line = self.lines.get(timeout=timeout)
         except queue.Empty:
             return []
-        if line is None or line.strip().lower() in EXIT_WORDS:
+        if line is None or typed_exit(line):
             self.closed = True
             return []
         return [Message(self.CHAT, line, "you")] if line.strip() else []
@@ -1920,8 +1919,8 @@ class ConsoleChannel(Channel):
         return answer.send and editor.press("enter")
 
     def picked(self, line):
-        command = line.strip()
-        if command not in MODEL_PICKS or not typed_here():
+        command = command_of(line, MODEL_PICKS)
+        if not command or len(line.split()) != 1 or not typed_here():
             return line
         try:
             choices = Models.command_choices(command)
@@ -1931,16 +1930,16 @@ class ConsoleChannel(Channel):
             return line
         with self.screen.printing:
             name = Models.picked(command, choices)
-        return "" if name is None else f"{command} {name}"
+        return "" if name is None else f"/{command} {name}"
 
     def remember(self, line):
-        if self.history and line.strip() and line.strip().lower() not in EXIT_WORDS:
+        if self.history and line.strip() and not typed_exit(line):
             readline.add_history(line)
             readline.write_history_file(self.history)
 
     def show_again(self, line):
         if self.screen.ruled():
-            quiet = not line.strip() or line.strip().lower() in EXIT_WORDS
+            quiet = not line.strip() or typed_exit(line)
             self.screen.sent(f"› {line}", shown=not quiet)
 
     def banner(self, lines):
@@ -2591,7 +2590,7 @@ def help_text(words=()):
             env=dict(os.environ, NO_COLOR="1", TINKER_FORMAT="markup"),
         )
     except OSError, subprocess.SubprocessError:
-        return "❓ `help` lists what you can send"
+        return "❓ `/help` lists what you can send"
     shown = (done.stdout + done.stderr).strip()
     return shown if not words else md(t"❓ **help {' '.join(words)}**\n{shown:block}")
 
@@ -2610,14 +2609,14 @@ def history_text(words=()):
         lines.append(
             md(t"`#{thing['number']}` {thing['time'][5:]} · {entry_headline(thing['text'])}") + asked
         )
-    older = f" · `history {page + 1}` older" if page < pages else ""
-    return "\n".join(lines + [f"👉 `history #N` shows one again{older}"])
+    older = f" · `/history {page + 1}` older" if page < pages else ""
+    return "\n".join(lines + [f"👉 `/history #N` shows one again{older}"])
 
 
 def history_thing(word):
     thing = Ledger.thing(word[1:]) if word[1:].isdigit() else None
     if thing is None:
-        return md(t"🤷 **No {word} in the history:** `history` lists what it keeps")
+        return md(t"🤷 **No {word} in the history:** `/history` lists what it keeps")
     asked = md(t"💬 _you:_ {thing['asked']}\n") if thing.get("asked") else ""
     return md(t"📜 **#{thing['number']}** · {thing['time']}\n") + asked + "\n" + thing["text"]
 

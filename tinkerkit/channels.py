@@ -324,7 +324,7 @@ class TelegramChannel(Channel):
         except (OSError, ChannelError, KeyError, TypeError) as exc:
             self.send(chat, f"Could not take {name}: {exc}")
             return dict(message, text="")
-        return dict(message, text=f"read {path}")
+        return dict(message, text=f"/read {path}")
 
     def downloaded(self, file_id, name):
         found = self.call("getFile", file_id=file_id)["file_path"]

@@ -277,8 +277,8 @@ def test_send_and_edit_post_html_with_a_plain_fallback():
     channel = telegram(api)
     assert channel.send("42", "**hi** tinker resume abc") == 8
     html_call, plain_call = api.calls[0][1], api.calls[1][1]
-    assert html_call["text"] == "<b>hi</b> resume abc" and html_call["parse_mode"] == "HTML"
-    assert plain_call["text"] == "hi resume abc" and "parse_mode" not in plain_call
+    assert html_call["text"] == "<b>hi</b> /resume abc" and html_call["parse_mode"] == "HTML"
+    assert plain_call["text"] == "hi /resume abc" and "parse_mode" not in plain_call
     api.answers["sendMessage"] = [{"message_id": 9}]
     unchanged_keeps_its_message, gone_is_sent_anew = 8, 9
     assert channel.edit("42", 8, "same") == unchanged_keeps_its_message
@@ -458,7 +458,7 @@ def test_a_book_sent_in_a_chat_is_kept_and_read(tinker_home, home_store):
     )
     messages = telegram(api).receive(1)
     path = tinker_home / "reading" / "My-Book.epub"
-    assert [message.text for message in messages] == [f"read {path}"] and path.read_bytes() == b"EPUB BYTES"
+    assert [message.text for message in messages] == [f"/read {path}"] and path.read_bytes() == b"EPUB BYTES"
     assert api.calls[-1][0] == "/file/botT0K/documents/file_1.epub" and "T0K" not in messages[0].text
 
 

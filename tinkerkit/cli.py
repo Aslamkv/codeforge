@@ -327,9 +327,9 @@ class Cli:
             for command in [command for command in COMMANDS if command.group == group]:
                 for synopsis, what in command.rows:
                     out.append(
-                        "💬 anything else: a normal chat" if not command.name else f"- `{synopsis}` {what}"
+                        "💬 anything else: a normal chat" if not command.name else f"- `/{synopsis}` {what}"
                     )
-        return "\n".join(out + ["", "❓ `help COMMAND` shows one command in full"])
+        return "\n".join(out + ["", "❓ `/help COMMAND` shows one command in full"])
 
     @staticmethod
     def parser(command):
@@ -1365,8 +1365,8 @@ class ProjectRun:
         plan = self.waiting_plan()
         self.print_plan(plan)
         say.info(f"Its folder: {plan['folder']}   (rename it: tinker rename @{run_id} NAME)", "📁")
-        say.tip(f"Build it: tinker confirm @{run_id}   (in the chat: confirm)")
-        say.tip(f"Change it: tinker amend @{run_id} CHANGE   (in the chat: amend WHAT)")
+        say.tip(f"Build it: tinker confirm @{run_id}   (in the chat: /confirm)")
+        say.tip(f"Change it: tinker amend @{run_id} CHANGE   (in the chat: /amend WHAT)")
         self.ending.update(headline=f"Its plan waits for your confirm: tinker confirm @{run_id}")
         self.tracker.wait(plan)
 
