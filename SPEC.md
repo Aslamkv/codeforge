@@ -571,15 +571,15 @@ What is said in the chats, kept so that a chat is only a view of it.
   other model grows its memory as it reads: it reads `PROBE_SAMPLE_TOKENS` first, and the target reads when
   the loaded size, grown at the rate that read showed up to the target, and `RUNNER_OVERHEAD_BYTES` are within
   the GPU memory. When they are not, the capacity is the largest context, in whole 1024s, that the rate fits
-  in the GPU memory, without reading it: `(that context, target)`. When a size is unknown, it reads the whole
-  target. Otherwise it halves
+  in the GPU memory, without reading it: `(that context, target)`. When a size is unknown, or the sample shows
+  no growth, it reads the whole target. Otherwise it halves
   the gap until it is within `CAPACITY_SEARCH_PRECISION`, and gives `(largest that read, smallest that
   failed)`. Below the smallest usable context it ends with `SystemExit`.
 - **MOD-12** `Calibrator.check_fit` ends with `SystemExit` when the weights and `RUNNER_OVERHEAD_BYTES` are
   more than the GPU memory. With either size unknown, it checks nothing.
 - **MOD-13** `Calibrator.run()` measures the model and keeps, in the home's `models`, a prompt budget, a
   context, a longest reply, a longest fix, a think setting, chars per token, and its read and write speeds in
-  tokens a second. Its last line names both speeds and both limits.
+  tokens a second. Its last line names both speeds (`?` when unmeasured) and both limits.
 - **MOD-14** A calibration probe that fails is recorded as crashed, and the runner gets time to free its
   memory before the next one. A GGUF model whose probe crashes is read again in pieces (`num_batch` 256), and
   keeps that option. When Ollama itself stops answering, calibration ends with `SystemExit`.

@@ -442,6 +442,7 @@ def test_a_growing_model_whose_rate_fits_too_little_stops(monkeypatch):
     [
         ([None], 20e9, [(24576, 24576)]),
         ([[("m", 5e9)], [("m", 5.1e9)]], None, [(2048, 24576), (24576, 24576)]),
+        ([[("m", 5e9)], [("m", 5e9)]], 4e9, [(2048, 24576), (24576, 24576)]),
     ],
 )
 def test_a_growing_model_of_unknown_size_reads_the_whole_target(monkeypatch, sizes, memory, tried):
@@ -496,9 +497,15 @@ def test_calibrate_writes_the_measured_settings(fake_ollama, monkeypatch, no_sle
     assert saved["probes"] == [[2048, "read"]] and 2.0 <= saved["chars_per_token"] <= 4.0
     assert fake_ollama.unloaded[-1] == "m"
     assert (
-        f"Calibrated m: reads {saved['read_tokens_per_s']} tokens a second, "
+        f"Calibrated m: reads {saved['read_tokens_per_s']:g} tokens a second, "
         f"writes {saved['write_tokens_per_s']:g}; prompts up to 13653 tokens, replies up to 27307, think high"
     ) in capsys.readouterr().out
+
+
+@pytest.mark.spec("MOD-13")
+@pytest.mark.parametrize("tokens_per_s,text", [(None, "?"), (12.0, "12"), (12.5, "12.5")])
+def test_speed_text(tokens_per_s, text):
+    assert Calibrator.speed_text(tokens_per_s) == text
 
 
 @pytest.mark.spec("MOD-16")
