@@ -33,14 +33,13 @@ from .settings import (
     PROBE_SAMPLE_TOKENS,
     PROGRESS_UPDATE_SECONDS,
     PROMPT_BUDGET_SHARE,
-    PROMPT_TARGET_TOKENS,
     QUICK_REPLY_TIMEOUT,
     REPLY_ERROR_RETRIES,
-    REPLY_TARGET_TOKENS,
     RUNNER_OVERHEAD_BYTES,
     STALL_RETRIES,
     STARTING_CHARS_PER_TOKEN,
     UNFINISHED_THOUGHT_KEPT_CHARS,
+    UNKNOWN_CONTEXT_TOKENS,
     Config,
     Home,
 )
@@ -677,10 +676,7 @@ class Calibrator:
         started = time.perf_counter()
         facts = Ollama.model_facts(self.name)
         self.check_fit(facts)
-        target = min(
-            PROMPT_TARGET_TOKENS + REPLY_TARGET_TOKENS,
-            facts["context_length"] or PROMPT_TARGET_TOKENS + REPLY_TARGET_TOKENS,
-        )
+        target = facts["context_length"] or UNKNOWN_CONTEXT_TOKENS
         think = self.first_chat(facts, target)
         context, crash = self.capacity(target, facts)
         budget, max_reply = self.shared(context)
@@ -688,7 +684,9 @@ class Calibrator:
         Ollama.unload(self.name)
         Models.keep(self.name, settings)
         say.took(
-            f"Calibrated {self.name}: prompts up to {budget} tokens, replies up to {max_reply}, think {think}",
+            f"Calibrated {self.name}: reads {self.speed_text(settings['read_tokens_per_s'])} tokens a second, "
+            f"writes {self.speed_text(settings['write_tokens_per_s'])}; "
+            f"prompts up to {budget} tokens, replies up to {max_reply}, think {think}",
             time.perf_counter() - started,
         )
         return settings
@@ -868,8 +866,12 @@ class Calibrator:
 
     @staticmethod
     def shared(context):
-        budget = min(PROMPT_TARGET_TOKENS, max(MIN_PROMPT_TOKENS, context // 3))
-        return ContextSplit(budget, max(MIN_REPLY_TOKENS, min(REPLY_TARGET_TOKENS, context - budget)))
+        budget = max(MIN_PROMPT_TOKENS, context // 3)
+        return ContextSplit(budget, max(MIN_REPLY_TOKENS, context - budget))
+
+    @staticmethod
+    def speed_text(tokens_per_s):
+        return "?" if tokens_per_s is None else f"{tokens_per_s:g}"
 
     def settings(self, facts, think, budget, context, crash, max_reply):
         return {

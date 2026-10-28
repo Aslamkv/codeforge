@@ -368,7 +368,7 @@ def test_stream_stops_soon_after_the_reply_is_complete(monkeypatch):
 @pytest.mark.spec("MOD-10")
 @pytest.mark.parametrize(
     "context,shared",
-    [(24576, (8192, 16384)), (4096, (1365, 2731)), (1200, (512, 1024)), (100000, (8192, 16384))],
+    [(24576, (8192, 16384)), (4096, (1365, 2731)), (1200, (512, 1024)), (100000, (33333, 66667))],
 )
 def test_shared(context, shared):
     assert Calibrator.shared(context) == shared
@@ -457,7 +457,7 @@ def test_check_fit(monkeypatch):
 
 
 @pytest.mark.spec("MOD-13")
-def test_calibrate_writes_the_measured_settings(fake_ollama, monkeypatch, no_sleep, tinker_home):
+def test_calibrate_writes_the_measured_settings(fake_ollama, monkeypatch, no_sleep, tinker_home, capsys):
     monkeypatch.setattr(
         Ollama,
         "model_facts",
@@ -485,10 +485,14 @@ def test_calibrate_writes_the_measured_settings(fake_ollama, monkeypatch, no_sle
     settings = Calibrator("m").run()
     saved = Models.settings("m")
     assert saved == settings and Home.store().get("models", "m") == settings
-    assert saved["max_prompt_tokens"] == 8192 and saved["max_reply_tokens"] == 16384
-    assert saved["fix_max_tokens"] == 4096 and saved["num_ctx"] == 25600 and saved["think"] == "high"
+    assert saved["max_prompt_tokens"] == 13653 and saved["max_reply_tokens"] == 27307
+    assert saved["fix_max_tokens"] == 4096 and saved["num_ctx"] == 40960 and saved["think"] == "high"
     assert saved["probes"] == [[2048, "read"]] and 2.0 <= saved["chars_per_token"] <= 4.0
     assert fake_ollama.unloaded[-1] == "m"
+    assert (
+        f"Calibrated m: reads {saved['read_tokens_per_s']} tokens a second, "
+        f"writes {saved['write_tokens_per_s']:g}; prompts up to 13653 tokens, replies up to 27307, think high"
+    ) in capsys.readouterr().out
 
 
 @pytest.mark.spec("MOD-16")
