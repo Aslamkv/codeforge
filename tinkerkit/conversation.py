@@ -38,6 +38,9 @@ lazy from .messages import (
     tinkering,
     visible_width,
 )
+lazy from .messages import (
+    styled as styled_choice,
+)
 lazy from .model import Models, Ollama, OllamaError
 lazy from .prompts import Prompts, Reply
 lazy from .settings import EXERCISE_FOLDER, JOB_STOP_SIGNAL, Config, Home, projects_folder
@@ -45,7 +48,7 @@ lazy from .text import field
 lazy from .workspace import Toolchain
 
 CHANNEL_REPORTS_ENV = "TINKER_CHANNELS"
-MODEL_PICKS = ("use-model", "calibrate", "embed")
+MODEL_PICKS = (["model"], ["model", "calibrate"])
 PROGRESS_EDIT_SECONDS = 2
 CLOCK_ONLY_EDIT_SECONDS = 15
 BUILD_STOP_GRACE_SECONDS = 120
@@ -386,15 +389,17 @@ class Desk:
                 channel.glance(message.chat, message.id, [sent])
 
     def chose(self, channel, message, command):
-        if command not in MODEL_PICKS or len(message.text.split()) != 1:
+        pick = model_pick(message.text)
+        if not pick:
             return False
         try:
-            names = [name for name, plain in Models.command_choices(command) if plain]
+            rows = Models.command_choices(pick.split()[-1])
         except SystemExit:
             return False
-        if not names or channel.choose(message.chat, model_asked(command), names) is None:
+        names = [styled_choice(row)[0].split()[0] for row in rows if styled_choice(row)[1].selectable]
+        if not names or channel.choose(message.chat, model_asked(pick, rows), names) is None:
             return False
-        self.questions.ask(channel, message.chat, Question(wanted=command))
+        self.questions.ask(channel, message.chat, Question(wanted=pick))
         return True
 
     def with_words_wanted(self, channel, message):
@@ -1021,6 +1026,11 @@ def command_of(text, commands=None):
     return first if first in (commands or Desk.COMMANDS) else ""
 
 
+def model_pick(text):
+    asked = [command_of(text), *text.split()[1:]]
+    return " ".join(asked) if asked in MODEL_PICKS else ""
+
+
 def slash_word(text):
     words = text.split()
     return command_word(words[0]) if words and words[0].startswith("/") else ""
@@ -1045,7 +1055,7 @@ def command_words(text):
 
 
 def command_word(word):
-    return word.lower().lstrip("/").partition("@")[0].replace("_", "-")
+    return word.lower().lstrip("/").partition("@")[0]
 
 
 def offered():
@@ -1060,9 +1070,11 @@ def words_asked(command):
     return WordsAsked(question + (md(t", e.g. {example:code}") if example else ""), example or needed)
 
 
-def model_asked(command):
-    current = Models.in_use(command)
-    return md(t"🧠 **{command}** · choose a model") + (md(t" (in use: {current})") if current else "")
+def model_asked(pick, rows):
+    current = Models.in_use(pick.split()[-1])
+    asked = md(t"🧠 **/{pick}** · choose a model") + (md(t" (in use: {current})") if current else "")
+    listed = Markup.fenced("\n".join(styled_choice(row)[0] for row in rows))
+    return "\n".join([asked, *(md(t"{line}") for line in Models.recipe()), f"```\n{listed}\n```"])
 
 
 def after_word(message):
@@ -1925,18 +1937,21 @@ class ConsoleChannel(Channel):
         return answer.send and editor.press("enter")
 
     def picked(self, line):
-        command = command_of(line, MODEL_PICKS)
-        if not command or len(line.split()) != 1 or not typed_here():
+        pick = model_pick(line)
+        if not pick or not typed_here():
             return line
+        command = pick.split()[-1]
         try:
             choices = Models.command_choices(command)
         except SystemExit:
             return line
         if not choices:
             return line
+        for recipe_line in Models.recipe():
+            say.text(recipe_line)
         with self.screen.printing:
             name = Models.picked(command, choices)
-        return "" if name is None else f"/{command} {name}"
+        return "" if name is None else f"/{pick} {name}"
 
     def remember(self, line):
         if self.history and line.strip() and not typed_exit(line):
