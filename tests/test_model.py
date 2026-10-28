@@ -173,27 +173,30 @@ def test_recipe_names_the_best_and_the_fastest(home_store, monkeypatch):
 
 
 @pytest.mark.spec("MOD-30")
-def test_recipe_says_one_line_for_a_model_both_best_and_fastest(home_store, monkeypatch):
-    assert recipe_for(monkeypatch, {"a": measured(1, 20.0), "b": measured(3, 80.0)}) == [
-        "🏆 b is the best and the fastest (solved 3 of 3, writes ~40 words/s)"
-    ]
-
-
-@pytest.mark.spec("MOD-30")
-def test_recipe_breaks_ties_by_the_other_figure_then_ollamas_order(home_store, monkeypatch):
-    assert recipe_for(
-        monkeypatch, {"a": measured(2, 20.0), "b": measured(2, 80.0), "c": measured(3, 80.0)}
-    ) == ["🏆 c is the best and the fastest (solved 3 of 3, writes ~40 words/s)"]
-    assert recipe_for(
-        monkeypatch, {"d": measured(3, 20.0), "e": measured(3, 80.0), "f": measured(1, 80.0)}
-    ) == ["🏆 e is the best and the fastest (solved 3 of 3, writes ~40 words/s)"]
-
-
-@pytest.mark.spec("MOD-30")
-def test_recipe_takes_ollamas_order_when_both_figures_tie(home_store, monkeypatch):
-    assert recipe_for(monkeypatch, {"a": measured(2, 20.0), "b": measured(2, 20.0)}) == [
-        "🏆 a is the best and the fastest (solved 2 of 3, writes ~10 words/s)"
-    ]
+@pytest.mark.parametrize(
+    "settings, line",
+    [
+        (
+            {"a": measured(1, 20.0), "b": measured(3, 80.0)},
+            "b is the best and the fastest (solved 3 of 3, writes ~40",
+        ),
+        (
+            {"a": measured(2, 80.0), "c": measured(3, 80.0)},
+            "c is the best and the fastest (solved 3 of 3, writes ~40",
+        ),
+        (
+            {"d": measured(3, 20.0), "e": measured(3, 80.0)},
+            "e is the best and the fastest (solved 3 of 3, writes ~40",
+        ),
+        (
+            {"a": measured(2, 20.0), "b": measured(2, 20.0)},
+            "a is the best and the fastest (solved 2 of 3, writes ~10",
+        ),
+    ],
+    ids=["one-model", "speed-tie-by-quality", "quality-tie-by-speed", "full-tie-by-ollama-order"],
+)
+def test_recipe_says_one_line_for_a_model_both_best_and_fastest(home_store, monkeypatch, settings, line):
+    assert recipe_for(monkeypatch, settings) == [f"🏆 {line} words/s)"]
 
 
 @pytest.mark.spec("MOD-30")

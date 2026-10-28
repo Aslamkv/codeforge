@@ -309,12 +309,9 @@ def test_model_calibrate_without_a_name_picks_a_general_model_before_its_job_sta
 
 @pytest.mark.spec("CLI-3")
 def test_model_calibrate_measures_and_changes_no_model_in_use(home_store, monkeypatch):
-    measured = []
-    monkeypatch.setattr(
-        cli, "Calibrator", lambda name: type("C", (), {"run": lambda self: measured.append(name)})()
-    )
     picker(monkeypatch, None)
     Config.save(model="m")
+    measured = calibrating(monkeypatch, measures=True)
     Commands(parse("model", "calibrate", "n")).run()
     assert measured == ["n"] and Config.get("model") == "m"
     with pytest.raises(SystemExit, match="no model named 'ghost'"):
