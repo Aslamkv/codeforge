@@ -3,6 +3,9 @@ from collections import namedtuple
 from .settings import SETTINGS
 
 Refs = namedtuple("Refs", "project words")
+MenuAnswer = namedtuple("MenuAnswer", "line send")
+MenuRow = namedtuple("MenuRow", "marked name words what")
+MENU_ROWS = 8
 
 
 class Option:
@@ -690,3 +693,83 @@ def refs(words):
     words = [word for word in words if str(word).strip()]
     name = ref(words[0]) if words else None
     return Refs(name, words[1:]) if name else Refs("", words)
+
+
+def slash_matches(typed):
+    if not typed.startswith("/") or " " in typed:
+        return []
+    word = typed[1:]
+    offered = [command for command in COMMANDS if command.chat]
+    starts = [command for command in offered if command.name.startswith(word)]
+    return starts + [command for command in offered if word in command.name and command not in starts]
+
+
+class CommandMenu:
+    def __init__(self):
+        self.typed = None
+        self.close()
+
+    @property
+    def open(self):
+        return bool(self.matches)
+
+    @property
+    def chosen(self):
+        return self.matches[self.current]
+
+    def follow(self, text):
+        if text != self.typed:
+            self.typed = text
+            self.matches, self.current, self.top = slash_matches(text), 0, 0
+
+    def close(self):
+        self.matches, self.current, self.top = [], 0, 0
+
+    def rows(self):
+        shown = self.matches[self.top : self.top + MENU_ROWS]
+        return [
+            MenuRow(
+                self.top + index == self.current, "/" + command.name, synopsis_words(command), command.what
+            )
+            for index, command in enumerate(shown)
+        ]
+
+    def press(self, key):
+        if not self.open or not isinstance(key, str):
+            return None
+        handler = getattr(self, "on_" + key, None)
+        return handler() if handler else None
+
+    def on_up(self):
+        return self.move(self.current - 1)
+
+    def on_down(self):
+        return self.move(self.current + 1)
+
+    def move(self, current):
+        self.current = min(max(current, 0), len(self.matches) - 1)
+        self.top = min(max(self.top, self.current - MENU_ROWS + 1), self.current)
+        return MenuAnswer(None, False)
+
+    def on_tab(self):
+        return self.fill()
+
+    def on_enter(self):
+        if self.chosen.words == "none":
+            line = "/" + self.chosen.name
+            self.close()
+            return MenuAnswer(line, True)
+        return self.fill()
+
+    def fill(self):
+        line = f"/{self.chosen.name} "
+        self.close()
+        return MenuAnswer(line, False)
+
+    def on_esc(self):
+        self.close()
+        return MenuAnswer(None, False)
+
+
+def synopsis_words(command):
+    return command.synopsis.removeprefix(command.name).strip()
