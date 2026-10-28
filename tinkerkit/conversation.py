@@ -17,7 +17,7 @@ lazy import time
 lazy import webbrowser
 lazy from pathlib import Path
 
-from .commands import BY_NAME, COMMANDS, deletes, kind_of, refs
+from .commands import BY_NAME, COMMANDS, CommandMenu, deletes, kind_of, refs
 from .jobs import Jobs, alive, job_number, paused_for_you
 from .project import Runs, Tracker, saved
 lazy from .ledger import DONE_NOTE_KEPT_SECONDS, Ledger
@@ -25,6 +25,7 @@ lazy from .messages import (
     CLEAR_LINE,
     CLEAR_TO_LINE_END,
     CLEAR_TO_SCREEN_END,
+    LineEditor,
     Messages,
     char_width,
     colourful,
@@ -1876,13 +1877,42 @@ class ConsoleChannel(Channel):
     def read(self):
         while True:
             try:
-                line = input(self.screen.prompt())
+                line = self.typed_line() if typed_here() else input(self.screen.prompt())
             except EOFError, KeyboardInterrupt:
+                line = None
+            if line is None:
                 self.lines.put(None)
                 return
             self.show_again(line)
             self.remember(line)
             self.lines.put(self.picked(line))
+
+    def typed_line(self):
+        editor, menu, drawer = LineEditor(typed_before()), CommandMenu(), PromptDrawer(self.screen.prompt())
+        columns = shutil.get_terminal_size().columns
+        self.screen.draw(drawer.draw("", 0, [], columns))
+        keys = say.keys()
+        try:
+            for key in keys:
+                if self.pressed(editor, menu, key):
+                    break
+                menu.follow(editor.text)
+                self.screen.draw(
+                    drawer.draw(editor.text, editor.column, menu.rows() if menu.open else [], columns)
+                )
+        finally:
+            keys.close()
+        self.screen.draw(drawer.done(editor.text, columns))
+        return editor.answer
+
+    @staticmethod
+    def pressed(editor, menu, key):
+        answer = menu.press(key) if menu.open else None
+        if answer is None:
+            return editor.press(key)
+        if answer.line is not None:
+            editor.replace(answer.line)
+        return answer.send and editor.press("enter")
 
     def picked(self, line):
         command = line.strip()
@@ -2010,6 +2040,10 @@ class PromptDrawer:
         row, column = divmod(visible_width(self.prompt + before), columns)
         self.cursor_row = row
         return rows_moved(row - drawn_row) + "\r" + (f"\033[{column}C" if column else "")
+
+
+def typed_before():
+    return [readline.get_history_item(item) for item in range(1, readline.get_current_history_length() + 1)]
 
 
 def rows_moved(rows):

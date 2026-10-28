@@ -15,7 +15,7 @@ import pytest
 from conftest import ACCENT, BOLD, DIM, GREY, MEASURED, RESET, Terminal
 
 import tinkerkit.conversation as conversation
-from tinkerkit.commands import MenuRow
+from tinkerkit.commands import MenuRow, slash_matches, synopsis_words
 from tinkerkit.conversation import (
     Channel,
     ChannelError,
@@ -43,6 +43,7 @@ from tinkerkit.conversation import (
 )
 from tinkerkit.jobs import began_at
 from tinkerkit.ledger import DONE_NOTE_KEPT_SECONDS, Ledger
+from tinkerkit.messages import Text
 from tinkerkit.model import Models, Ollama
 from tinkerkit.project import Runs, Tracker
 from tinkerkit.settings import Config, Home
@@ -319,7 +320,17 @@ def typing(monkeypatch, *lines):
         return typed.pop(0)
 
     monkeypatch.setattr("builtins.input", typed_line)
+    pressing(monkeypatch, *[key for line in lines for key in (Text(line), "enter")], "eof")
     return prompts
+
+
+def pressing(monkeypatch, *keys):
+    pressed = iter(keys)
+
+    def keys_left():
+        yield from pressed
+
+    monkeypatch.setattr(conversation.say, "keys", keys_left)
 
 
 def drawn_after(step):
@@ -388,6 +399,13 @@ def sent_back_shown(line, rows=1, block=(), columns=10):
     return above_the_rule(rows + len(block) + 1, shown)
 
 
+def prompt_typed(line, columns=10):
+    drawer = PromptDrawer("› ")
+    first = drawer.draw("", 0, [], columns)
+    typed = drawer.draw(line, len(line), [], columns) if line is not None else ""
+    return first + typed + drawer.done(line or "", columns)
+
+
 def stacked(line, count):
     return "\n".join([line] * count)
 
@@ -407,13 +425,72 @@ def test_console_marks_each_message_and_indents_its_lines_on_a_colour_terminal(m
 @pytest.mark.spec("CNV-8")
 def test_console_shows_your_line_again_highlighted_without_ruling_each_prompt(monkeypatch):
     console = ruled_console(monkeypatch)
-    prompts = typing(monkeypatch, "hello there", "", "exit")
+    typing(monkeypatch, "hello there", "", "exit")
     console.read()
-    assert prompts == ["› "] * 4
     assert sys.stdout.getvalue() == (
-        sent_back_shown("hello there", rows=2) + pulled_up(1, kept=0) + pulled_up(1, kept=0)
+        prompt_typed("hello there")
+        + sent_back_shown("hello there", rows=2)
+        + prompt_typed("")
+        + pulled_up(1, kept=0)
+        + prompt_typed("exit")
+        + pulled_up(1, kept=0)
+        + prompt_typed(None)
     )
     assert [console.lines.get() for _ in range(4)] == ["hello there", "", "exit", None]
+
+
+def lines_keyed(monkeypatch, *keys, columns=80):
+    console = ruled_console(monkeypatch, columns)
+    pressing(monkeypatch, *keys)
+    console.read()
+    return [console.lines.get() for _ in range(console.lines.qsize())]
+
+
+@pytest.mark.spec("MSG-9")
+def test_console_edits_the_prompt_line_with_cursor_keys(monkeypatch):
+    keys = [Text("helo"), "left", Text("l"), "end", Text(" world"), "home", "delete", Text("H"), "enter"]
+    assert lines_keyed(monkeypatch, *keys) == ["Hello world", None]
+
+
+@pytest.mark.spec("MSG-9")
+def test_console_brings_back_earlier_lines_with_up_and_down(monkeypatch):
+    readline.clear_history()
+    readline.add_history("earlier")
+    readline.add_history("latest")
+    try:
+        assert lines_keyed(monkeypatch, "up", "up", "down", "enter") == ["latest", None]
+    finally:
+        readline.clear_history()
+
+
+@pytest.mark.spec("MSG-9")
+def test_console_ctrl_c_clears_a_typed_line_and_quits_on_an_empty_one(monkeypatch):
+    assert lines_keyed(monkeypatch, Text("abc"), "ctrl-c", Text("d"), "enter") == ["d", None]
+    assert lines_keyed(monkeypatch, "ctrl-c", Text("never")) == [None]
+
+
+@pytest.mark.spec("MSG-10")
+def test_console_fills_the_command_picked_from_the_menu_and_reads_on(monkeypatch):
+    picked = slash_matches("/")[1].name
+    assert lines_keyed(monkeypatch, Text("/"), "down", "tab", Text("x"), "enter") == [f"/{picked} x", None]
+
+
+@pytest.mark.spec("MSG-10")
+def test_console_sends_a_command_without_words_on_enter_and_fills_the_rest(monkeypatch):
+    assert lines_keyed(monkeypatch, Text("/runs"), "enter") == ["/runs", None]
+    assert lines_keyed(monkeypatch, Text("/task"), "enter", Text("x"), "enter") == ["/task x", None]
+
+
+@pytest.mark.spec("MSG-10")
+def test_console_esc_closes_the_menu_and_keeps_the_typed_slash(monkeypatch):
+    assert lines_keyed(monkeypatch, Text("/"), "esc", "enter") == ["/", None]
+
+
+@pytest.mark.spec("MSG-10", "CNV-8")
+def test_console_draws_the_command_menu_under_the_prompt_line(monkeypatch):
+    first = slash_matches("/")[0]
+    lines_keyed(monkeypatch, Text("/"))
+    assert f"› /{first.name}{DIM} {synopsis_words(first)}" in sys.stdout.getvalue()
 
 
 @pytest.mark.spec("CNV-8")
@@ -1924,15 +2001,13 @@ def test_the_terminal_reads_and_exits_at_once_while_periodic_work_waits(monkeypa
 
         return wait
 
-    typed = ["exit"]
+    typed = iter([Text("exit"), "enter", "eof"])
 
-    def exit_once_it_waits(prompt):
+    def exit_once_it_waits():
         assert waits.wait(timeout=5)
-        if not typed:
-            raise EOFError
-        return typed.pop()
+        yield from typed
 
-    monkeypatch.setattr("builtins.input", exit_once_it_waits)
+    monkeypatch.setattr(conversation.say, "keys", exit_once_it_waits)
     patched = {"collect": (console, waiting()), "status": (desk, waiting(status, passing=1))}
     owner, stand_in = patched.get(slow, (desk, waiting()))
     monkeypatch.setattr(owner, slow, stand_in)
