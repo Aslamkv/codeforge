@@ -16,7 +16,7 @@ lazy from pathlib import Path
 from . import conversation, exercising, reading
 from .commands import BY_NAME, COMMANDS, GROUPS, kind_of, refs, taught_command
 from .jobs import STATES, Jobs, archived, calls_log, job_number
-from .messages import Messages, human_duration, paint, say
+from .messages import Messages, human_duration, paint, say, styled
 from .reading import Reader
 lazy from .building import BugReproducer, CodeWriter, TestToolSetup, TestWriter, Verifier
 lazy from .finishing import FinalReview, LessonWriter, ReadmeWriter, Tidy
@@ -556,10 +556,7 @@ class Commands:
         args = self.args
         return {
             "config": lambda: self.config(args.config),
-            "models": self.list_models,
-            "use-model": lambda: self.use_model(args.use_model),
-            "embed": lambda: self.embed(args.embed),
-            "calibrate": self.calibrate,
+            "model": lambda: self.model(args.model),
             "learn": self.learn,
             "research": self.research,
             "ask": self.ask,
@@ -630,73 +627,47 @@ class Commands:
         say.text(f"chars per token: {settings.get('chars_per_token')}")
 
     @staticmethod
-    def list_models():
-        models = Models.answering()
-        say.text(
-            f"  {'MODEL':36} {'SIZE':>7}  {'PROMPT':>6} {'READ/S':>7} {'WRITE/S':>7} {'SOLVED':>6}  CALIBRATED"
-        )
-        for model in models:
-            name, s = model.get("name", ""), Models.settings(model.get("name", "")) or {}
-            mark = "*" if name == Config.get("model") else " "
-            say.text(
-                f"{mark} {name[:36]:36} {model.get('size', 0) / 1e9:6.1f}G  {s.get('max_prompt_tokens') or '-':>6} "
-                f"{s.get('read_tokens_per_s') or '-':>7} {s.get('write_tokens_per_s') or '-':>7} {Commands.solved(s):>6}  "
-                f"{s.get('calibrated', 'not measured: tinker calibrate NAME')}"
-            )
-        say.text(
-            "\n* the model in use. Measure one with tinker calibrate NAME, select it with tinker use-model NAME."
-        )
-
-    @staticmethod
-    def solved(settings):
-        if settings.get("solved") is None or not settings.get("quality_tasks"):
-            return "-"
-        return f"{settings['solved']}/{len(settings['quality_tasks'])}"
-
-    @staticmethod
-    def use_model(name):
+    def model(words):
+        command = "calibrate" if words[:1] == ["calibrate"] else "model"
+        names = words[1:] if command == "calibrate" else words
+        name = names[0] if names else Commands.picked_model(command)
         if name is None:
-            name = Commands.picked_model()
-            if name is None:
-                return
+            return
+        if command == "calibrate":
+            Calibrator(Models.installed(name)).run()
+            return
+        Commands.use(Models.installed(name))
+
+    @staticmethod
+    def use(name):
+        if name in Models.named(embedding=True):
+            Commands.embed(name)
+            return
         if Models.settings(name) is None:
-            raise SystemExit(
-                f"{name} has not been measured: measure it first with tinker calibrate {name} "
-                f"(tinker models lists the models Ollama has)"
-            )
+            raise SystemExit(f"{name} has not been measured: measure it first with tinker model calibrate {name}")
         Config.save(model=name)
         say.done(f"Model in use: {name}")
 
     @staticmethod
-    def picked_model(command="use-model"):
-        choices = Models.command_choices(command) if sys.stdin.isatty() else []
-        if not choices:
-            Commands.list_models()
+    def picked_model(command):
+        rows = Models.command_choices(command)
+        for line in Models.recipe():
+            say.text(line)
+        if not rows or not sys.stdin.isatty():
+            for row in rows:
+                say.text(styled(row)[0])
             return None
-        return Models.picked(command, choices)
+        return Models.picked(command, rows)
 
     @staticmethod
     def embed(name):
-        if name is None:
-            name = Commands.picked_model("embed")
-            if name is None:
-                return
-        Models.installed(name)
         embeddings = Embeddings(name)
         if embeddings.vectors(["a test"], keep=False) is None:
-            raise SystemExit(
-                f"{embeddings.failed}: choose an embedding model (tinker models lists the models Ollama has)"
-            )
+            raise SystemExit(f"{embeddings.failed}: choose an embedding model (tinker model lists them)")
         Config.save(embed_model=name)
         say.done(
             f"Embedding model: {name}; what was learned is indexed with it from the next tinker learn or run on"
         )
-
-    def calibrate(self):
-        if self.args.calibrate is None:
-            Commands.list_models()
-            return
-        Calibrator(Models.installed(self.args.calibrate)).run()
 
     def learn(self):
         learn = self.args.learn

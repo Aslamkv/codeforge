@@ -213,7 +213,7 @@ def test_model_takes_one_name(wrong, capsys):
 
 
 def measured_two():
-    Models.keep("m", MEASURED)
+    Models.keep("m", dict(MEASURED, write_tokens_per_s=40))
     Models.keep("n", dict(MEASURED, solved=3, quality_tasks=[1, 2, 3]))
     Config.save(model="n")
 
@@ -225,7 +225,7 @@ def test_model_without_a_name_prints_the_recipe_then_picks_from_every_row(home_s
     shown = picker(monkeypatch, 1, embedding=("other",))
     rows = Models.rows()
     Commands.model([])
-    assert shown == [(rows, 2)] and rows[4][0].startswith("other")
+    assert shown == [(rows, 2)] and rows[4].startswith("other")
     out = capsys.readouterr().out.splitlines()
     assert out[: len(Models.recipe())] == Models.recipe() and Models.recipe()
     assert Config.get("model") == "m" and "Model in use: m" in out[-1]
