@@ -48,8 +48,8 @@ from .settings import (
 )
 from .text import first_line, now_text
 lazy from .jobs import journaled
-lazy from .quality import pick, solves
 lazy from .prompts import Part, Prompts, PromptTooLarge, Reply
+lazy from .quality import pick, solves
 lazy from .workspace import ToolError
 
 SelectedModel = namedtuple("SelectedModel", "name settings")
@@ -678,8 +678,7 @@ class Calibrator:
         self.write_tokens_per_second = None
 
     def run(self):
-        say.title(f"Calibrating {self.name} (once per model; under a minute for most models)", "📏")
-        started = time.perf_counter()
+        say.title(f"Testing {self.name} on this machine (once per model, about a minute)", "📏")
         facts = Ollama.model_facts(self.name)
         self.check_fit(facts)
         target = facts["context_length"] or UNKNOWN_CONTEXT_TOKENS
@@ -690,20 +689,46 @@ class Calibrator:
         settings.update(self.quality(think, settings["num_ctx"]))
         Ollama.unload(self.name)
         Models.keep(self.name, settings)
-        say.took(
-            f"Calibrated {self.name}: reads {self.speed_text(settings['read_tokens_per_s'])} tokens a second, "
-            f"writes {self.speed_text(settings['write_tokens_per_s'])}; "
-            f"prompts up to {budget} tokens, replies up to {max_reply}, think {think}",
-            time.perf_counter() - started,
-        )
+        say.done(self.summary(settings))
         return settings
+
+    def summary(self, settings):
+        ratio, think = settings["chars_per_token"], settings["think"]
+        read, write = settings["read_tokens_per_s"], settings["write_tokens_per_s"]
+        prompt, reply = settings["max_prompt_tokens"], settings["max_reply_tokens"]
+        return "\n   ".join(
+            [
+                f"{self.name} is ready",
+                f"📖 Reads {self.about_words(read, ratio)} words a second ({self.speed_text(read)} tok/s)",
+                f"✍️ Writes {self.about_words(write, ratio)} words a second ({self.speed_text(write)} tok/s)",
+                f"📥 Takes requests up to about {self.words(prompt, ratio)} words ({prompt:,} tokens)",
+                f"📤 Replies up to about {self.words(reply, ratio)} words ({reply:,} tokens)",
+                f"🧠 Solved {settings['solved']} of {len(settings['quality_tasks'])} test tasks",
+                f"💭 Thinks before it answers (think: {str(think).lower()})"
+                if think
+                else "💭 Answers without thinking (think: false)",
+            ]
+        )
+
+    @classmethod
+    def about_words(cls, tokens, chars_per_token):
+        return "?" if tokens is None else f"about {cls.words(tokens, chars_per_token)}"
+
+    @staticmethod
+    def words(tokens, chars_per_token):
+        count = round(tokens * chars_per_token / 6)
+        return f"{round(count, -3) if count > 1000 else count:,}"
 
     def check_fit(self, facts):
         memory, size = self.gpu_memory(), facts.get("size") or 0
         if not memory or not size:
             return
         with say.section():
-            say.info(f"{size / 1e9:.1f} GB of weights; {memory / 1e9:.1f} GB of GPU memory", "🧮")
+            say.info(
+                f"{self.name} needs {round(size / 1e9, 1):g} GB (weights); "
+                f"this machine's GPU can use {round(memory / 1e9, 1):g} GB",
+                "🧮",
+            )
         if size + RUNNER_OVERHEAD_BYTES > memory:
             raise SystemExit(self.does_not_fit(size, memory))
 
@@ -759,7 +784,6 @@ class Calibrator:
                     continue
                 raise SystemExit(f"{self.name} does not run: {exc}")
             self.measure_chat(content, data)
-            self.show_first_chat(think)
             return think
         return None
 
@@ -783,7 +807,11 @@ class Calibrator:
 
     def quality(self, think, context):
         tasks = pick(QUALITY_TASK_COUNT, self.rng)
-        solved = sum(self.solves_task(task, think, context) for task in tasks)
+        with say.section():
+            say.step(f"Solving {len(tasks)} small test tasks…", "🧠")
+            solved = sum(self.solves_task(task, think, context) for task in tasks)
+            with say.section():
+                say.info(f"Solved {solved} of {len(tasks)}", "🧠")
         return {"solved": solved, "quality_tasks": [task["id"] for task in tasks]}
 
     def solves_task(self, task, think, context):
@@ -795,16 +823,9 @@ class Calibrator:
             think,
         )
         solved = reply.get("done_reason") != "length" and solves(reply["message"]["content"], task["answer"])
-        say.info(f"Task {task['id']}: {'solved' if solved else 'missed'}", "🧩")
-        return solved
-
-    def show_first_chat(self, think):
         with say.section():
-            say.info(
-                f"Thinks with {think!r}; {self.safe_ratio()} chars per token; writes {self.write_tokens_per_second} "
-                f"tokens a second",
-                "🧠",
-            )
+            (say.done if solved else say.fail)(f"Task {task['id']}")
+        return solved
 
     def measure_chat(self, content, data):
         self.load_seconds = round(data.get("load_duration", 0) / 1e9, 1)
@@ -828,9 +849,9 @@ class Calibrator:
     def read(self, tokens, context):
         with say.section():
             say.step(
-                f"Reading {tokens} tokens with a context of {context} (about "
-                f"{round(tokens / max(self.read_speed(), 1))}s)…",
-                "📏",
+                f"Checking it can read {self.about_words(tokens, self.safe_ratio())} words at once "
+                f"({tokens:,} tokens, about {round(tokens / max(self.read_speed(), 1))}s)…",
+                "📥",
             )
         return self.probe(tokens, context)
 
@@ -855,7 +876,7 @@ class Calibrator:
         if Ollama.installed_models() is None:
             raise SystemExit(f"Ollama stopped answering during calibration: {exc}")
         with say.section(), say.section():
-            say.fail(f"Could not read it ({first_line(str(exc), 100)})")
+            say.fail(f"Too much for this machine ({first_line(str(exc), 100)})")
         self.probe_history.append([tokens, "crashed"])
         self.unload_and_wait()
 
@@ -870,7 +891,7 @@ class Calibrator:
         if read >= self.largest_read_stats.get("prompt_eval_count", 0):
             self.largest_read_stats = data
         with say.section(), say.section():
-            say.done(f"Read {read} tokens in {data.get('prompt_eval_duration', 0) / 1e9:.0f}s")
+            say.done(f"Read it in {data.get('prompt_eval_duration', 0) / 1e9:.0f}s")
         return read
 
     def read_speed(self):
@@ -947,7 +968,7 @@ class GgufReading(Reading):
             calibrator.options = {"num_batch": PROBE_NUM_BATCH}
             if calibrator.probe(tokens, context):
                 with say.section(), say.section():
-                    say.done(f"Read in pieces of {PROBE_NUM_BATCH} tokens (num_batch)")
+                    say.done(f"Read it in smaller pieces (num_batch {PROBE_NUM_BATCH})")
                 return True
             calibrator.options = {}
         return False

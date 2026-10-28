@@ -516,10 +516,52 @@ def test_calibrate_writes_the_measured_settings(fake_ollama, monkeypatch, no_sle
         dict(settings, time=None)
     ]
     assert fake_ollama.unloaded[-1] == "m"
+    out = capsys.readouterr().out
+    ratio, read, write = saved["chars_per_token"], saved["read_tokens_per_s"], saved["write_tokens_per_s"]
+    for line in (
+        "Testing m on this machine (once per model, about a minute)",
+        "m needs 5 GB (weights); this machine's GPU can use 20 GB",
+        f"Checking it can read about {Calibrator.words(2048, ratio)} words at once (2,048 tokens, about",
+        "Read it in 2s",
+        "Solving 3 small test tasks…",
+        "Solved 2 of 3",
+    ):
+        assert line in out
     assert (
-        f"Calibrated m: reads {saved['read_tokens_per_s']:g} tokens a second, "
-        f"writes {saved['write_tokens_per_s']:g}; prompts up to 13653 tokens, replies up to 27307, think high"
-    ) in capsys.readouterr().out
+        "✅ m is ready\n"
+        f"   📖 Reads about {Calibrator.words(read, ratio)} words a second ({read:g} tok/s)\n"
+        f"   ✍️ Writes about {Calibrator.words(write, ratio)} words a second ({write:g} tok/s)\n"
+        f"   📥 Takes requests up to about {Calibrator.words(13653, ratio)} words (13,653 tokens)\n"
+        f"   📤 Replies up to about {Calibrator.words(27307, ratio)} words (27,307 tokens)\n"
+        "   🧠 Solved 2 of 3 test tasks\n"
+        "   💭 Thinks before it answers (think: high)\n"
+    ) in out
+    assert all(len(line) <= 80 for line in out.splitlines() if "Testing" not in line)
+
+
+@pytest.mark.spec("MOD-28")
+@pytest.mark.parametrize(
+    "tokens,ratio,text", [(10922, 4.4, "8,000"), (8192, 4.4, "6,000"), (300, 4.5, "225"), (25.1, 4.5, "19")]
+)
+def test_words_are_rounded_from_tokens(tokens, ratio, text):
+    assert Calibrator.words(tokens, ratio) == text
+
+
+@pytest.mark.spec("MOD-28")
+def test_a_model_that_does_not_think_says_so_and_an_unmeasured_speed_is_a_question_mark():
+    settings = {
+        "think": None,
+        "chars_per_token": 4.0,
+        "read_tokens_per_s": None,
+        "write_tokens_per_s": 12.5,
+        "max_prompt_tokens": 2048,
+        "max_reply_tokens": 4096,
+        "solved": 0,
+        "quality_tasks": [1, 2, 3],
+    }
+    summary = Calibrator("m").summary(settings)
+    assert "📖 Reads ? words a second (? tok/s)" in summary and "(12.5 tok/s)" in summary
+    assert summary.endswith("💭 Answers without thinking (think: false)") and "Solved 0 of 3" in summary
 
 
 @pytest.mark.spec("MOD-13")
@@ -810,7 +852,7 @@ def test_a_failed_probe_is_recorded_and_waited_out(monkeypatch, fake_ollama, no_
     assert calibrator.probe_history == [[4096, "crashed"]] and model_module.CRASH_RECOVERY_SECONDS in no_sleep
     assert (
         fake_ollama.unloaded == ["m"]
-        and "Could not read it (llama runner process has terminated)" in capsys.readouterr().out
+        and "Too much for this machine (llama runner process has terminated)" in capsys.readouterr().out
     )
     monkeypatch.setattr(Ollama, "installed_models", staticmethod(lambda: None))
     with pytest.raises(SystemExit, match="Ollama stopped answering during calibration"):
@@ -844,7 +886,7 @@ def test_a_raw_read_sends_its_keep_alive(monkeypatch):
 
 
 @pytest.mark.spec("MOD-14")
-def test_a_gguf_model_that_crashes_is_read_in_pieces(monkeypatch, no_sleep, fake_ollama):
+def test_a_gguf_model_that_crashes_is_read_in_pieces(monkeypatch, no_sleep, fake_ollama, capsys):
     reads = []
 
     def read(name, prompt, options, keep_alive=0, timeout=0):
@@ -858,6 +900,7 @@ def test_a_gguf_model_that_crashes_is_read_in_pieces(monkeypatch, no_sleep, fake
     calibrator = Calibrator("m")
     assert GgufReading(calibrator).reads(16384) is True and calibrator.options == {"num_batch": 256}
     assert reads[0]["num_ctx"] == 16384 and reads[1]["num_batch"] == 256
+    assert "Read it in smaller pieces (num_batch 256)" in capsys.readouterr().out
 
 
 @pytest.mark.spec("MOD-15")
