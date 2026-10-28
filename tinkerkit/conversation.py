@@ -2137,13 +2137,11 @@ class ConsoleScreen:
                 write_out(typing[1]())
 
     def out(self, made, typed_rows=0):
-        typing, repaired = self.typing, self.repaired(typed_rows)
-        text = made()
-        if typing is None or not repaired + text:
-            write_out(repaired + text)
-            return
-        drawer, drawn = typing
-        write_out(drawer.taken_away() + repaired + text + drawn())
+        text = self.repaired(typed_rows) + made()
+        if text and self.typing is not None:
+            drawer, drawn = self.typing
+            text = drawer.taken_away() + text + drawn()
+        write_out(text)
 
     def show_live(self, text, began, under=(), **facts):
         if not self.ruled():

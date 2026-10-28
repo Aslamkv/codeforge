@@ -39,6 +39,7 @@ from tinkerkit.conversation import (
     pieces,
     running,
     text_of,
+    typed_before,
     welcome,
 )
 from tinkerkit.jobs import began_at
@@ -506,10 +507,6 @@ def test_console_keeps_the_lines_typed_for_up_and_down_across_restarts(monkeypat
     reading_console(monkeypatch)
     assert typed_before() == ["first", "second"]
     assert (tinker_home / "prompt_history").exists()
-
-
-def typed_before():
-    return [readline.get_history_item(i) for i in range(1, readline.get_current_history_length() + 1)]
 
 
 @pytest.mark.spec("CNV-8")
