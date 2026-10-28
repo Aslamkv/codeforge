@@ -1,6 +1,7 @@
 import contextlib
 from dataclasses import dataclass
 lazy import os
+lazy import re
 lazy import select
 lazy import shutil
 lazy import sys
@@ -40,11 +41,37 @@ KEYS = frozendict(
         b"\r": "enter",
         b"\n": "enter",
         b"\x1b": "esc",
+        b"\x1b[D": "left",
+        b"\x1bOD": "left",
+        b"\x1b[C": "right",
+        b"\x1bOC": "right",
+        b"\x1b[H": "home",
+        b"\x1bOH": "home",
+        b"\x1b[1~": "home",
+        b"\x1b[F": "end",
+        b"\x1bOF": "end",
+        b"\x1b[4~": "end",
+        b"\x1b[3~": "delete",
+        b"\x7f": "backspace",
+        b"\x08": "backspace",
+        b"\t": "tab",
+        b"\x01": "ctrl-a",
+        b"\x05": "ctrl-e",
+        b"\x15": "ctrl-u",
+        b"\x0b": "ctrl-k",
+        b"\x17": "ctrl-w",
         b"\x03": "ctrl-c",
-        b"\x04": "end",
-        b"": "end",
+        b"\x04": "eof",
+        b"": "eof",
     }
 )
+ESCAPE_SEQUENCE = re.compile(rb"\x1b(\[[0-9;]*[@-~]|O[@-~])")
+TEXT_RUN = re.compile(rb"[^\x00-\x1f\x7f]+")
+
+
+@dataclass(frozen=True)
+class Text:
+    text: str
 
 
 @dataclass(frozen=True)
@@ -240,7 +267,7 @@ class Messages:
             for key in keys:
                 if key == "enter":
                     return current
-                if key in ("esc", "ctrl-c", "end"):
+                if key in ("esc", "ctrl-c", "eof"):
                     return None
                 current = moved(current, key, len(choices))
                 terminal_write(rows_up(choices) + choice_rows(choices, current))
@@ -304,20 +331,55 @@ def raw_keys():
     tty.setraw(stdin)
     try:
         while True:
-            yield key_named(pressed(stdin))
+            yield from keys_in(pressed(stdin))
     finally:
         termios.tcsetattr(stdin, termios.TCSADRAIN, saved)
 
 
 def pressed(stdin):
     first = os.read(stdin, 1)
-    if first != b"\x1b" or not select.select([stdin], [], [], 0.05)[0]:
-        return first
-    return first + os.read(stdin, 2)
+    wait = 0.05 if first == b"\x1b" else 0
+    burst = first + os.read(stdin, 4096) if first and select.select([stdin], [], [], wait)[0] else first
+    return burst + os.read(stdin, lacking(burst))
 
 
-def key_named(pressed):
-    return KEYS.get(pressed, "other")
+def lacking(data):
+    for back, byte in enumerate(reversed(data[-4:]), 1):
+        if not is_continuation(byte):
+            return max(utf8_length(byte) - back, 0)
+    return 0
+
+
+def is_continuation(byte):
+    return byte & 0xC0 == 0x80
+
+
+def utf8_length(lead):
+    return next((length for length, least in ((4, 0xF0), (3, 0xE0), (2, 0xC0)) if lead >= least), 1)
+
+
+def keys_in(data):
+    if not data:
+        return [key_named(data)]
+    keys = []
+    while data:
+        piece = first_piece(data)
+        keys.append(key_named(piece))
+        data = data[len(piece) :]
+    return keys
+
+
+def first_piece(data):
+    run = TEXT_RUN.match(data) or ESCAPE_SEQUENCE.match(data)
+    return run.group() if run else data[:1]
+
+
+def key_named(piece):
+    if piece in KEYS:
+        return KEYS[piece]
+    if TEXT_RUN.fullmatch(piece):
+        return Text(piece.decode(errors="replace"))
+    return "other"
 
 
 def live_line(text, began, frame, width, stream=None, indent="", **facts):

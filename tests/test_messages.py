@@ -12,8 +12,11 @@ from tinkerkit import project as project_module
 from tinkerkit.messages import (
     Message,
     Messages,
+    Text,
     human_duration,
     key_named,
+    keys_in,
+    lacking,
     live_line,
     say,
     short_count,
@@ -445,10 +448,61 @@ def test_pick_gives_the_terminal_back_however_it_ends(terminal):
         (b"\n", "enter"),
         (b"\x1b", "esc"),
         (b"\x03", "ctrl-c"),
-        (b"\x04", "end"),
-        (b"", "end"),
-        (b"x", "other"),
+        (b"\x04", "eof"),
+        (b"", "eof"),
+        (b"\x1b[5~", "other"),
     ],
 )
 def test_pressed_bytes_are_named_keys(pressed, key):
     assert key_named(pressed) == key
+
+
+@pytest.mark.spec("MSG-9")
+@pytest.mark.parametrize(
+    "pressed,key",
+    [
+        (b"\x1b[D", "left"),
+        (b"\x1bOD", "left"),
+        (b"\x1b[C", "right"),
+        (b"\x1bOC", "right"),
+        (b"\x1b[H", "home"),
+        (b"\x1bOH", "home"),
+        (b"\x1b[1~", "home"),
+        (b"\x1b[F", "end"),
+        (b"\x1bOF", "end"),
+        (b"\x1b[4~", "end"),
+        (b"\x1b[3~", "delete"),
+        (b"\x7f", "backspace"),
+        (b"\x08", "backspace"),
+        (b"\t", "tab"),
+        (b"\x01", "ctrl-a"),
+        (b"\x05", "ctrl-e"),
+        (b"\x15", "ctrl-u"),
+        (b"\x0b", "ctrl-k"),
+        (b"\x17", "ctrl-w"),
+    ],
+)
+def test_editing_keys_are_named(pressed, key):
+    assert keys_in(pressed) == [key]
+
+
+@pytest.mark.spec("MSG-9")
+def test_other_bytes_are_text_a_utf8_character_whole():
+    assert keys_in("é".encode()) == [Text("é")]
+    assert keys_in("🙂".encode()) == [Text("🙂")]
+
+
+@pytest.mark.spec("MSG-9")
+def test_a_paste_is_one_text_piece():
+    assert keys_in("hello wörld".encode()) == [Text("hello wörld")]
+
+
+@pytest.mark.spec("MSG-9")
+def test_keys_waiting_together_are_split_from_the_text():
+    assert keys_in(b"ab\x1b[D\x1b[Dc\r") == [Text("ab"), "left", "left", Text("c"), "enter"]
+
+
+@pytest.mark.spec("MSG-9")
+def test_a_utf8_character_cut_short_lacks_its_last_bytes():
+    smile = "🙂".encode()
+    assert [lacking(b"a" + smile[:cut]) for cut in range(5)] == [0, 3, 2, 1, 0]
