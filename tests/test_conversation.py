@@ -1428,11 +1428,18 @@ def test_a_reporter_without_a_tracker_ends_with_its_title_and_last_line(monkeypa
     channel = Recorder()
     calibrating = Reporter([channel], "calibrate qwen", pid=999999)
     calibrating.update()
-    calibrating.printed("✅ Calibrated qwen")
+    for line in (
+        "📏 Testing qwen",
+        "   📥 Checking it can read",
+        "✅ qwen is ready\n",
+        "   📖 Reads\n",
+        "   🧠 Solved\n",
+    ):
+        calibrating.printed(line)
     calibrating.finish()
     ending = channel.texts()[-1]
-    assert "🏁 **calibrate qwen**" in ending and "✅ Calibrated qwen" in ending
-    assert "Tinkering" not in ending
+    assert "🏁 **calibrate qwen**" in ending and "✅ qwen is ready\n   📖 Reads\n   🧠 Solved" in ending
+    assert "Tinkering" not in ending and "Testing" not in ending and "Checking" not in ending
 
 
 @pytest.mark.spec("CNV-20")

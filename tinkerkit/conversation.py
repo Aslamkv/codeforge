@@ -1425,7 +1425,13 @@ class Reporter:
     def printed(self, line):
         if self.tracked() is None and self.says_something(line):
             with self.lock:
-                self.progress.snapshot["latest"] = line.strip()[:300]
+                self.progress.snapshot["latest"] = self.joined(self.progress.snapshot.get("latest"), line)
+
+    @staticmethod
+    def joined(latest, line):
+        if latest and line[:1].isspace():
+            return f"{latest}\n{line.rstrip()[:300]}"
+        return line.strip()[:300]
 
     @staticmethod
     def says_something(line):

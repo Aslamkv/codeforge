@@ -793,14 +793,16 @@ def test_memory_refuses_words_it_cannot_read(home_store, capsys):
 
 
 @pytest.mark.spec("CLI-5")
-def test_models(measured_model, monkeypatch, capsys):
+def test_models(measured_model, home_store, monkeypatch, capsys):
     monkeypatch.setattr(
         Ollama,
         "installed_models",
         staticmethod(lambda: [{"name": MODEL, "size": 5.2e9}, {"name": "other", "size": 1e9}]),
     )
+    home_store.put("models", MODEL, dict(MEASURED, solved=2, quality_tasks=[1, 2, 3]))
     Commands.list_models()
     lines = capsys.readouterr().out.splitlines()
+    assert "SOLVED" in lines[0] and " 2/3 " in lines[1]
     assert lines[1].startswith(f"* {MODEL}") and "5.2G" in lines[1] and "8192" in lines[1]
     assert lines[2].startswith("  other") and lines[2].endswith("not measured: tinker calibrate NAME")
     monkeypatch.setattr(Ollama, "installed_models", staticmethod(lambda: None))

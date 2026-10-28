@@ -1,5 +1,6 @@
 import io
 import json
+import random
 import urllib.error
 import urllib.request
 
@@ -7,10 +8,18 @@ import pytest
 from conftest import MEASURED, MODEL
 
 import tinkerkit.model as model_module
+from tinkerkit import quality
 from tinkerkit.messages import say
 from tinkerkit.model import Answer, Calibrator, GgufReading, Model, Models, Ollama, OllamaError, Stream
 from tinkerkit.prompts import Part, Prompts, PromptTooLarge, Reply
-from tinkerkit.settings import PROMPT_BUDGET_SHARE, STARTING_CHARS_PER_TOKEN, Config, Home
+from tinkerkit.settings import (
+    PROMPT_BUDGET_SHARE,
+    QUALITY_REPLY_TOKENS,
+    QUALITY_TASK_COUNT,
+    STARTING_CHARS_PER_TOKEN,
+    Config,
+    Home,
+)
 
 
 class Body(io.BytesIO):
@@ -368,7 +377,7 @@ def test_stream_stops_soon_after_the_reply_is_complete(monkeypatch):
 @pytest.mark.spec("MOD-10")
 @pytest.mark.parametrize(
     "context,shared",
-    [(24576, (8192, 16384)), (4096, (1365, 2731)), (1200, (512, 1024)), (100000, (8192, 16384))],
+    [(24576, (8192, 16384)), (4096, (1365, 2731)), (1200, (512, 1024)), (100000, (33333, 66667))],
 )
 def test_shared(context, shared):
     assert Calibrator.shared(context) == shared
@@ -424,10 +433,16 @@ def test_a_growing_model_that_fits_is_read_once_in_a_sample(monkeypatch):
 
 
 @pytest.mark.spec("MOD-11")
-def test_a_growing_model_that_may_not_fit_reads_the_whole_target(monkeypatch):
-    probed = growing(monkeypatch, [[("m", 5e9)], [("m", 5.1e9)]], 7e9)
-    assert probed.capacity(24576, {}) == (24576, None)
-    assert probed.tried == [(2048, 24576), (24576, 24576)]
+def test_a_growing_model_that_does_not_fit_gets_the_capacity_from_its_rate(monkeypatch):
+    probed = growing(monkeypatch, [[("m", 5e9)], [("m", 5.1e9)]], 7.03e9)
+    assert probed.capacity(24576, {}) == (10240, 24576) and probed.tried == [(2048, 24576)]
+
+
+@pytest.mark.spec("MOD-11")
+def test_a_growing_model_whose_rate_fits_too_little_stops(monkeypatch):
+    probed = growing(monkeypatch, [[("m", 5e9)], [("m", 5.1e9)]], 6.5e9)
+    with pytest.raises(SystemExit, match="cannot hold even 1536"):
+        probed.capacity(24576, {})
 
 
 @pytest.mark.spec("MOD-11")
@@ -436,6 +451,7 @@ def test_a_growing_model_that_may_not_fit_reads_the_whole_target(monkeypatch):
     [
         ([None], 20e9, [(24576, 24576)]),
         ([[("m", 5e9)], [("m", 5.1e9)]], None, [(2048, 24576), (24576, 24576)]),
+        ([[("m", 5e9)], [("m", 5e9)]], 4e9, [(2048, 24576), (24576, 24576)]),
     ],
 )
 def test_a_growing_model_of_unknown_size_reads_the_whole_target(monkeypatch, sizes, memory, tried):
@@ -457,7 +473,7 @@ def test_check_fit(monkeypatch):
 
 
 @pytest.mark.spec("MOD-13")
-def test_calibrate_writes_the_measured_settings(fake_ollama, monkeypatch, no_sleep, tinker_home):
+def test_calibrate_writes_the_measured_settings(fake_ollama, monkeypatch, no_sleep, tinker_home, capsys):
     monkeypatch.setattr(
         Ollama,
         "model_facts",
@@ -482,13 +498,87 @@ def test_calibrate_writes_the_measured_settings(fake_ollama, monkeypatch, no_sle
         ),
     )
     fake_ollama.reply({"content": "OK", "prompt_eval_count": 400, "eval_count": 2, "eval_duration": 1e8})
-    settings = Calibrator("m").run()
+    answers = {task["prompt"]: task["answer"] for task in quality.tasks()}
+    fake_ollama.reply(lambda messages: answers[messages[0]["content"]], times=2)
+    fake_ollama.reply("not the answer")
+    drawn = [task["id"] for task in quality.pick(QUALITY_TASK_COUNT, random.Random(5))]
+    settings = Calibrator("m", random.Random(5)).run()
     saved = Models.settings("m")
     assert saved == settings and Home.store().get("models", "m") == settings
-    assert saved["max_prompt_tokens"] == 8192 and saved["max_reply_tokens"] == 16384
-    assert saved["fix_max_tokens"] == 4096 and saved["num_ctx"] == 25600 and saved["think"] == "high"
+    assert saved["max_prompt_tokens"] == 13653 and saved["max_reply_tokens"] == 27307
+    assert saved["fix_max_tokens"] == 4096 and saved["num_ctx"] == 40960 and saved["think"] == "high"
     assert saved["probes"] == [[2048, "read"]] and 2.0 <= saved["chars_per_token"] <= 4.0
+    assert saved["solved"] == 2 and saved["quality_tasks"] == drawn
+    asked = fake_ollama.calls[-QUALITY_TASK_COUNT:]
+    assert all(call["think"] == "high" for call in asked)
+    assert all(call["options"] == {"num_ctx": 40960, "num_predict": QUALITY_REPLY_TOKENS} for call in asked)
+    assert [dict(entry.entry, time=None) for entry in Home.store().entries("calibrations")] == [
+        dict(settings, time=None)
+    ]
     assert fake_ollama.unloaded[-1] == "m"
+    out = capsys.readouterr().out
+    ratio, read, write = saved["chars_per_token"], saved["read_tokens_per_s"], saved["write_tokens_per_s"]
+    for line in (
+        "Testing m on this machine (once per model, about a minute)",
+        "m needs 5 GB (weights); this machine's GPU can use 20 GB",
+        f"Checking it can read about {Calibrator.words(2048, ratio)} words at once (2,048 tokens, about",
+        "Read it in 2s",
+        "Solving 3 small test tasks…",
+        f"✅ Task {drawn[0]}",
+        f"❌ Task {drawn[2]}",
+        "Solved 2 of 3",
+    ):
+        assert line in out
+    assert (
+        "✅ m is ready\n"
+        f"   📖 Reads about {Calibrator.words(read, ratio)} words a second ({read:g} tok/s)\n"
+        f"   ✍️ Writes about {Calibrator.words(write, ratio)} words a second ({write:g} tok/s)\n"
+        f"   📥 Takes requests up to about {Calibrator.words(13653, ratio)} words (13,653 tokens)\n"
+        f"   📤 Replies up to about {Calibrator.words(27307, ratio)} words (27,307 tokens)\n"
+        "   🧠 Solved 2 of 3 test tasks\n"
+        "   💭 Thinks before it answers (think: high)\n"
+    ) in out
+    assert all(len(line) <= 80 for line in out.splitlines() if "Testing" not in line)
+
+
+@pytest.mark.spec("MOD-28")
+@pytest.mark.parametrize(
+    "tokens,ratio,text", [(10922, 4.4, "8,000"), (8192, 4.4, "6,000"), (300, 4.5, "225"), (25.1, 4.5, "19")]
+)
+def test_words_are_rounded_from_tokens(tokens, ratio, text):
+    assert Calibrator.words(tokens, ratio) == text
+
+
+@pytest.mark.spec("MOD-28")
+def test_a_model_that_does_not_think_says_so_and_an_unmeasured_speed_is_a_question_mark():
+    settings = {
+        "think": None,
+        "chars_per_token": 4.0,
+        "read_tokens_per_s": None,
+        "write_tokens_per_s": 12.5,
+        "max_prompt_tokens": 2048,
+        "max_reply_tokens": 4096,
+        "solved": 0,
+        "quality_tasks": [1, 2, 3],
+    }
+    summary = Calibrator("m").summary(settings)
+    assert "📖 Reads ? words a second (? tok/s)" in summary and "(12.5 tok/s)" in summary
+    assert summary.endswith("💭 Answers without thinking (think: false)") and "Solved 0 of 3" in summary
+
+
+@pytest.mark.spec("MOD-13")
+@pytest.mark.parametrize("tokens_per_s,text", [(None, "?"), (12.0, "12"), (12.5, "12.5")])
+def test_speed_text(tokens_per_s, text):
+    assert Calibrator.speed_text(tokens_per_s) == text
+
+
+@pytest.mark.spec("MOD-27")
+def test_a_reply_cut_off_before_an_answer_fails_its_task(fake_ollama):
+    answers = {task["prompt"]: task["answer"] for task in quality.tasks()}
+    fake_ollama.reply({"content": "", "thinking": "Let me", "done_reason": "length"})
+    fake_ollama.reply(lambda messages: answers[messages[0]["content"]], times=2)
+    probe = Calibrator("m", random.Random(3)).quality(True, 8192)
+    assert probe["solved"] == 2 and len(probe["quality_tasks"]) == QUALITY_TASK_COUNT
 
 
 @pytest.mark.spec("MOD-16")
@@ -764,7 +854,7 @@ def test_a_failed_probe_is_recorded_and_waited_out(monkeypatch, fake_ollama, no_
     assert calibrator.probe_history == [[4096, "crashed"]] and model_module.CRASH_RECOVERY_SECONDS in no_sleep
     assert (
         fake_ollama.unloaded == ["m"]
-        and "Could not read it (llama runner process has terminated)" in capsys.readouterr().out
+        and "Too much for this machine (llama runner process has terminated)" in capsys.readouterr().out
     )
     monkeypatch.setattr(Ollama, "installed_models", staticmethod(lambda: None))
     with pytest.raises(SystemExit, match="Ollama stopped answering during calibration"):
@@ -798,7 +888,7 @@ def test_a_raw_read_sends_its_keep_alive(monkeypatch):
 
 
 @pytest.mark.spec("MOD-14")
-def test_a_gguf_model_that_crashes_is_read_in_pieces(monkeypatch, no_sleep, fake_ollama):
+def test_a_gguf_model_that_crashes_is_read_in_pieces(monkeypatch, no_sleep, fake_ollama, capsys):
     reads = []
 
     def read(name, prompt, options, keep_alive=0, timeout=0):
@@ -812,6 +902,7 @@ def test_a_gguf_model_that_crashes_is_read_in_pieces(monkeypatch, no_sleep, fake
     calibrator = Calibrator("m")
     assert GgufReading(calibrator).reads(16384) is True and calibrator.options == {"num_batch": 256}
     assert reads[0]["num_ctx"] == 16384 and reads[1]["num_batch"] == 256
+    assert "Read it in smaller pieces (num_batch 256)" in capsys.readouterr().out
 
 
 @pytest.mark.spec("MOD-15")

@@ -631,18 +631,26 @@ class Commands:
     @staticmethod
     def list_models():
         models = Models.answering()
-        say.text(f"  {'MODEL':36} {'SIZE':>7}  {'PROMPT':>6} {'READ/S':>7} {'WRITE/S':>7}  CALIBRATED")
+        say.text(
+            f"  {'MODEL':36} {'SIZE':>7}  {'PROMPT':>6} {'READ/S':>7} {'WRITE/S':>7} {'SOLVED':>6}  CALIBRATED"
+        )
         for model in models:
             name, s = model.get("name", ""), Models.settings(model.get("name", "")) or {}
             mark = "*" if name == Config.get("model") else " "
             say.text(
                 f"{mark} {name[:36]:36} {model.get('size', 0) / 1e9:6.1f}G  {s.get('max_prompt_tokens') or '-':>6} "
-                f"{s.get('read_tokens_per_s') or '-':>7} {s.get('write_tokens_per_s') or '-':>7}  "
+                f"{s.get('read_tokens_per_s') or '-':>7} {s.get('write_tokens_per_s') or '-':>7} {Commands.solved(s):>6}  "
                 f"{s.get('calibrated', 'not measured: tinker calibrate NAME')}"
             )
         say.text(
             "\n* the model in use. Measure one with tinker calibrate NAME, select it with tinker use-model NAME."
         )
+
+    @staticmethod
+    def solved(settings):
+        if settings.get("solved") is None or not settings.get("quality_tasks"):
+            return "-"
+        return f"{settings['solved']}/{len(settings['quality_tasks'])}"
 
     @staticmethod
     def use_model(name):
