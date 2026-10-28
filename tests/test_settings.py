@@ -134,7 +134,7 @@ def test_check_accepts_keep_alive_seconds_or_durations(value):
 def test_every_setting_has_one_row_with_its_owner():
     assert list(SETTINGS) == list(settings.DEFAULT_CONFIG)
     owned = {key: row.owner for key, row in SETTINGS.items() if row.owner != "config"}
-    assert owned == {"model": "use-model", "embed_model": "embed"}
+    assert owned == {"model": "model", "embed_model": "model"}
     Config.check()
     Config.save(web_timeout=2.5, learn_missing=3)
     Config.check()
@@ -311,7 +311,7 @@ def test_config_set_reads_and_checks_the_value():
 
 @pytest.mark.spec("SET-6")
 def test_config_set_only_the_settings_with_no_command_of_their_own():
-    with pytest.raises(SystemExit, match="model is set with tinker use-model NAME"):
+    with pytest.raises(SystemExit, match="model is set with tinker model NAME"):
         Config.set("model", "x")
     with pytest.raises(SystemExit, match="no setting 'colour'"):
         Config.set("colour", "red")

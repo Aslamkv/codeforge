@@ -235,15 +235,13 @@ def test_capabilities_asks_show_once(monkeypatch):
 @pytest.mark.spec("MOD-26")
 def test_picked_starts_at_the_model_the_command_sets(home_store, monkeypatch):
     shown = []
-    monkeypatch.setattr(say, "pick", lambda choices, start: shown.append((choices, start)) or 1)
-    choices = [("qwen3:8b", False), ("llama3", True)]
-    Config.save(model="llama3", embed_model="gone")
-    assert Models.picked("use-model", choices) == "llama3"
-    assert Models.picked("embed", choices) == "llama3"
-    assert shown == [
-        ([("qwen3:8b", True), ("llama3", False)], 1),
-        ([("qwen3:8b", True), ("llama3", False)], 0),
-    ]
+    monkeypatch.setattr(say, "pick", lambda choices, start: shown.append((choices, start)) or 2)
+    rows = [("— general —", HEADING), ("qwen3:8b  not measured yet", DIMMED), "llama3    solved 2 of 3", "phi"]
+    Config.save(model="phi")
+    assert Models.picked("model", rows) == "llama3"
+    Config.save(model="gone")
+    assert Models.picked("calibrate", rows) == "llama3"
+    assert shown == [(rows, 3), (rows, 1)]
 
 
 @pytest.mark.spec("MOD-4")

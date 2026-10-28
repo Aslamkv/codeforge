@@ -9,7 +9,7 @@ lazy import urllib.error
 lazy import urllib.parse
 lazy import urllib.request
 
-from .messages import DIMMED, HEADING, say
+from .messages import DIMMED, HEADING, say, styled
 from .settings import (
     CALIBRATION_KEEP_ALIVE,
     CAPACITY_SEARCH_PRECISION,
@@ -527,12 +527,24 @@ class Models:
     def rows():
         general, embeddings = Models.choices(), Models.embedding_choices()
         sizes = {model.get("name", ""): model.get("size") or 0 for model in Models.answering()}
-        width = max(len(name) for name, _ in general + embeddings) + 2 if general + embeddings else 0
+        width = Models.width([name for name, _ in general + embeddings])
         return Models.section("— general —", [Models.general_row(name, width) for name, _ in general]) + (
             Models.section(
                 "— embeddings —", [Models.embedding_row(name, sizes[name], width) for name, _ in embeddings]
             )
         )
+
+    @staticmethod
+    def calibrate_rows():
+        general = Models.named(embedding=False)
+        width = Models.width(general)
+        return Models.section(
+            "— general —", [(styled(Models.general_row(name, width))[0], False) for name in general]
+        )
+
+    @staticmethod
+    def width(names):
+        return max(len(name) for name in names) + 2 if names else 0
 
     @staticmethod
     def section(heading, rows):
@@ -592,20 +604,16 @@ class Models:
 
     @staticmethod
     def command_choices(command):
-        if command == "embed":
-            return Models.embedding_choices()
-        choices = Models.choices()
-        return [(name, True) for name, _ in choices] if command == "calibrate" else choices
+        return Models.calibrate_rows() if command == "calibrate" else Models.rows()
 
     @staticmethod
     def embeds(capabilities):
         return not capabilities or "embedding" in capabilities
 
     @staticmethod
-    def picked(command, choices):
-        names, current = [name for name, _ in choices], Models.in_use(command)
-        start = names.index(current) if current in names else 0
-        index = say.pick([(name, not plain) for name, plain in choices], start)
+    def picked(command, rows):
+        names, current = [styled(row)[0].split()[0] for row in rows], Models.in_use(command)
+        index = say.pick(rows, names.index(current) if current in names else 1)
         return None if index is None else names[index]
 
     @staticmethod
@@ -619,7 +627,8 @@ class Models:
             close = [candidate for candidate in names if name.lower() in candidate.lower()]
             hint = f" Did you mean {' or '.join(close)}?" if close else ""
             raise SystemExit(
-                f"Ollama has no model named '{name}'.{hint} Installed: {', '.join(names) or 'none'}"
+                f"Ollama has no model named '{name}'.{hint} Installed: {', '.join(names) or 'none'} "
+                "(tinker model lists them)"
             )
         return name
 

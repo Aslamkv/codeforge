@@ -42,7 +42,6 @@ def test_the_kind_of_a_command_and_of_its_actions_comes_from_the_table():
         "read",
         "exercise",
         "resume",
-        "calibrate",
     ]
     assert [command.name for command in COMMANDS if command.kind == "pauses"] == ["chat", "command"]
 
@@ -66,6 +65,10 @@ def test_the_kind_of_a_command_and_of_its_actions_comes_from_the_table():
         (["channel", "remove"], "terminal"),
         (["channel", "start"], "terminal"),
         (["channel", "list"], "glance"),
+        (["model"], "glance"),
+        (["model", "qwen3"], "glance"),
+        (["model", "calibrate"], "glance"),
+        (["model", "calibrate", "qwen3"], "job"),
         (["fly"], None),
         ([], None),
     ],
@@ -151,7 +154,7 @@ def test_slash_matches_name_starts_first_then_name_holds_in_table_order():
     chat = [command.name for command in COMMANDS if command.chat]
     assert names(slash_matches("/")) == chat
     assert names(slash_matches("/st")) == ["status", "stop", "restart", "history"]
-    assert names(slash_matches("/mod")) == ["models", "use-model"]
+    assert names(slash_matches("/mod")) == ["model"]
     assert names(slash_matches("/xyz")) == []
 
 

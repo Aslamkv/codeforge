@@ -167,15 +167,6 @@ def test_help_markup_and_one_command(capsys, monkeypatch):
     assert "resume" in Cli.options()["--workdir DIR"][1] and "fix" in Cli.options()["--confirm"][1]
 
 
-@pytest.mark.spec("CLI-3")
-def test_use_model(home_store, capsys):
-    with pytest.raises(SystemExit, match="has not been measured"):
-        Commands.use_model("ghost")
-    Models.keep("m", MEASURED)
-    Commands.use_model("m")
-    assert Config.get("model") == "m" and "Model in use: m" in capsys.readouterr().out
-
-
 def picker(monkeypatch, chosen, terminal=True, embedding=()):
     shown = []
     monkeypatch.setattr(sys.stdin, "isatty", lambda: terminal)
@@ -192,70 +183,102 @@ def picker(monkeypatch, chosen, terminal=True, embedding=()):
 
 
 @pytest.mark.spec("CLI-3")
-def test_use_model_without_a_name_picks_one_on_a_terminal(home_store, monkeypatch, capsys):
-    assert parse("use-model").use_model is None
-    Models.keep("m", MEASURED)
-    Models.keep("n", MEASURED)
-    Config.save(model="n")
-    shown = picker(monkeypatch, 0, embedding=("other",))
-    Commands.use_model(None)
-    assert shown == [([("m", False), ("n", False)], 1)]
-    assert Config.get("model") == "m" and "Model in use: m" in capsys.readouterr().out
+def test_model_uses_a_measured_model_and_refuses_one_ollama_does_not_have(home_store, monkeypatch, capsys):
+    assert parse("model", "m").model == ["m"]
     picker(monkeypatch, None)
-    Commands.use_model(None)
-    assert Config.get("model") == "m" and capsys.readouterr().out == ""
-    picker(monkeypatch, 0)
-    with pytest.raises(SystemExit, match="other has not been measured"):
-        Commands.use_model(None)
+    with pytest.raises(SystemExit, match="no model named 'ghost'.*tinker model"):
+        Commands.model(["ghost"])
+    with pytest.raises(SystemExit, match="n has not been measured.*tinker model calibrate n"):
+        Commands.model(["n"])
+    Models.keep("m", MEASURED)
+    Commands.model(["m"])
+    assert Config.get("model") == "m" and "Model in use: m" in capsys.readouterr().out
 
 
 @pytest.mark.spec("CLI-3")
-def test_use_model_without_a_name_lists_the_models_off_a_terminal(home_store, monkeypatch, capsys):
-    shown = picker(monkeypatch, 1, terminal=False)
-    Commands.use_model(None)
-    assert shown == [] and capsys.readouterr().out.splitlines()[1].startswith("  other")
-    shown = picker(monkeypatch, 1)
-    monkeypatch.setattr(Ollama, "installed_models", staticmethod(lambda: []))
-    Commands.use_model(None)
-    assert shown == [] and "MODEL" in capsys.readouterr().out
+def test_model_of_an_embedding_model_makes_it_the_embedding_model(home_store, monkeypatch, capsys):
+    picker(monkeypatch, None, embedding=("n",))
+    monkeypatch.setattr(cli.Embeddings, "vectors", lambda self, texts, keep=True: [[1.0]])
+    Commands.model(["n"])
+    assert Config.get("embed_model") == "n" and "Embedding model: n" in capsys.readouterr().out
+    assert Config.get("model") != "n"
 
 
 @pytest.mark.spec("CLI-3")
-def test_calibrate_without_a_name_picks_one_before_its_job_starts(home_store, monkeypatch, capsys):
-    assert Cli.named(["calibrate", "m"]) == ["calibrate", "m"] and Cli.named(["runs"]) == ["runs"]
-    assert kind_of(["calibrate"]) == "glance" and kind_of(["calibrate", "m"]) == "job"
+@pytest.mark.parametrize("wrong", [["m", "n"], ["calibrate", "m", "n"]])
+def test_model_takes_one_name(wrong, capsys):
+    with pytest.raises(SystemExit):
+        parse("model", *wrong)
+    assert "tinker model [calibrate] [NAME]" in capsys.readouterr().err
+
+
+def measured_two():
+    Models.keep("m", MEASURED)
+    Models.keep("n", dict(MEASURED, solved=3, quality_tasks=[1, 2, 3]))
+    Config.save(model="n")
+
+
+@pytest.mark.spec("CLI-3")
+def test_model_without_a_name_prints_the_recipe_then_picks_from_every_row(home_store, monkeypatch, capsys):
+    assert parse("model").model == []
+    measured_two()
+    shown = picker(monkeypatch, 1, embedding=("other",))
+    rows = Models.rows()
+    Commands.model([])
+    assert shown == [(rows, 2)] and rows[4][0].startswith("other")
+    out = capsys.readouterr().out.splitlines()
+    assert out[: len(Models.recipe())] == Models.recipe() and Models.recipe()
+    assert Config.get("model") == "m" and "Model in use: m" in out[-1]
+    picker(monkeypatch, None)
+    Commands.model([])
+    assert Config.get("model") == "m" and capsys.readouterr().out.splitlines() == Models.recipe()
+
+
+@pytest.mark.spec("CLI-3")
+def test_model_without_a_name_prints_the_recipe_and_the_rows_off_a_terminal(home_store, monkeypatch, capsys):
+    measured_two()
+    shown = picker(monkeypatch, 1, terminal=False, embedding=("other",))
+    Commands.model([])
+    out = capsys.readouterr().out.splitlines()
+    assert shown == [] and out[:2] == Models.recipe() and out[2] == "— general —"
+    assert out[3].startswith("m ") and out[5] == "— embeddings —" and out[6].startswith("other")
+    assert Config.get("model") == "n"
+
+
+@pytest.mark.spec("CLI-3")
+def test_model_calibrate_without_a_name_picks_a_general_model_before_its_job_starts(
+    home_store, monkeypatch, capsys
+):
+    assert Cli.named(["model", "calibrate", "m"]) == ["model", "calibrate", "m"]
+    assert Cli.named(["model"]) == ["model"] and Cli.named(["runs"]) == ["runs"]
     Models.keep("m", MEASURED)
     Config.save(model="m")
-    shown = picker(monkeypatch, 0)
-    assert Cli.named(["calibrate"]) == ["calibrate", "other"]
-    assert shown == [([("other", False), ("m", False), ("n", False)], 1)]
+    shown = picker(monkeypatch, 1, embedding=("n",))
+    assert Cli.named(["model", "calibrate"]) == ["model", "calibrate", "other"]
+    [(rows, start)] = shown
+    assert start == 2 and [row[0].split()[0] for row in rows] == ["—", "other", "m"]
+    assert rows[1][1] is False and rows[2][1] is False
     picker(monkeypatch, None)
     with pytest.raises(SystemExit) as cancelled:
-        Cli.named(["calibrate"])
+        Cli.named(["model", "calibrate"])
     assert not cancelled.value.code and capsys.readouterr().out == ""
-    shown = picker(monkeypatch, 0, terminal=False)
+    shown = picker(monkeypatch, 1, terminal=False, embedding=("n",))
     with pytest.raises(SystemExit) as listed:
-        Cli.named(["calibrate"])
-    assert not listed.value.code and shown == [] and "MODEL" in capsys.readouterr().out
-    Commands(parse("calibrate")).run()
-    assert "MODEL" in capsys.readouterr().out
+        Cli.named(["model", "calibrate"])
+    out = capsys.readouterr().out
+    assert not listed.value.code and shown == [] and "— general —" in out and "embeddings" not in out
 
 
 @pytest.mark.spec("CLI-3")
-def test_embed_without_a_name_picks_one_that_embeds(home_store, monkeypatch, capsys):
-    assert parse("embed").embed is None
-    Config.save(embed_model="n")
-    monkeypatch.setattr(cli.Embeddings, "vectors", lambda self, texts, keep=True: [[1.0]])
-    shown = picker(monkeypatch, 0, embedding=("m", "n"))
-    Commands.embed(None)
-    assert shown == [([("m", False), ("n", False)], 1)]
-    assert Config.get("embed_model") == "m" and "Embedding model: m" in capsys.readouterr().out
-    picker(monkeypatch, None, embedding=("m", "n"))
-    Commands.embed(None)
-    assert Config.get("embed_model") == "m" and capsys.readouterr().out == ""
-    shown = picker(monkeypatch, 0, terminal=False, embedding=("m", "n"))
-    Commands.embed(None)
-    assert shown == [] and "MODEL" in capsys.readouterr().out
+def test_model_calibrate_measures_and_changes_no_model_in_use(home_store, monkeypatch):
+    measured = []
+    monkeypatch.setattr(cli, "Calibrator", lambda name: type("C", (), {"run": lambda self: measured.append(name)})())
+    picker(monkeypatch, None)
+    Config.save(model="m")
+    Commands(parse("model", "calibrate", "n")).run()
+    assert measured == ["n"] and Config.get("model") == "m"
+    with pytest.raises(SystemExit, match="no model named 'ghost'"):
+        Commands.model(["calibrate", "ghost"])
 
 
 @pytest.mark.spec("CLI-3")
@@ -792,24 +815,6 @@ def test_memory_refuses_words_it_cannot_read(home_store, capsys):
         assert "tinker memory NAME [KIND] [PAGE]" in capsys.readouterr().err
 
 
-@pytest.mark.spec("CLI-5")
-def test_models(measured_model, home_store, monkeypatch, capsys):
-    monkeypatch.setattr(
-        Ollama,
-        "installed_models",
-        staticmethod(lambda: [{"name": MODEL, "size": 5.2e9}, {"name": "other", "size": 1e9}]),
-    )
-    home_store.put("models", MODEL, dict(MEASURED, solved=2, quality_tasks=[1, 2, 3]))
-    Commands.list_models()
-    lines = capsys.readouterr().out.splitlines()
-    assert "SOLVED" in lines[0] and " 2/3 " in lines[1]
-    assert lines[1].startswith(f"* {MODEL}") and "5.2G" in lines[1] and "8192" in lines[1]
-    assert lines[2].startswith("  other") and lines[2].endswith("not measured: tinker calibrate NAME")
-    monkeypatch.setattr(Ollama, "installed_models", staticmethod(lambda: None))
-    with pytest.raises(SystemExit, match="Ollama does not answer"):
-        Commands.list_models()
-
-
 @pytest.mark.spec("CLI-10")
 def test_a_task_waits_for_its_plan_then_confirm_builds_it(run_ready, fake_ollama, home_store):
     folder = run_ready
@@ -923,5 +928,6 @@ def test_the_cycle_a_run_works_on(make_project, make_session):
 @pytest.mark.spec("JOB-1")
 def test_a_job_keeps_the_computer_awake_and_a_glance_does_not():
     assert Cli.works_for_hours(Cli.parse(["ask", "what", "formats", "python"]))
-    assert Cli.works_for_hours(Cli.parse(["calibrate", "qwen3"]))
+    assert Cli.works_for_hours(Cli.parse(["model", "calibrate", "qwen3"]))
+    assert not Cli.works_for_hours(Cli.parse(["model", "qwen3"]))
     assert not Cli.works_for_hours(Cli.parse(["runs"]))

@@ -358,7 +358,7 @@ COMMANDS = [
         "jobs [running|paused|stopped|finished|archived] [PAGE]",
         "the long commands: running, paused, stopped",
         "List the jobs: every long command (a task, add, fix, learn, ask, teach, read, research, exercise, "
-        "calibrate) is one, numbered #1, #2 ... One runs at a time: a job you start pauses the one that runs, which goes on by itself once Tinker "
+        "model calibrate) is one, numbered #1, #2 ... One runs at a time: a job you start pauses the one that runs, which goes on by itself once Tinker "
         "is idle (resume #N: at once). Without a state, the running ones, the paused ones and the stopped ones; "
         "running, paused, stopped, finished or archived (by clear jobs) lists those alone. Newest first, 10 to a "
         "page (jobs stopped 2: the second page).",
@@ -454,47 +454,17 @@ COMMANDS = [
         chat=True,
     ),
     Command(
-        "models",
+        "model",
         "Set up",
-        "models",
-        "the models Ollama has, and which are measured",
-        "List the models Ollama has, and which are measured.",
+        "model [calibrate] [NAME]",
+        "the models Ollama has, and the one every build uses",
+        "List the models Ollama has and pick one: a measured model is used for every build, one never measured "
+        "is measured first, an embedding model indexes what is learned. calibrate NAME measures a model again.",
         kind="glance",
-        chat=True,
-    ),
-    Command(
-        "calibrate",
-        "Set up",
-        "calibrate [NAME]",
-        "measure a model once (under a minute for most)",
-        "Measure a model once: the largest prompt it reads and the longest reply it writes.",
-        kind="job",
-        actions=[Action("glance", when=lambda words: not words)],
+        actions=[Action("job", "calibrate", when=lambda words: len(words) > 1)],
         chat=True,
         words=True,
-        arguments=[Argument("name", "?", None, "the model's name, as `tinker models` lists it")],
-    ),
-    Command(
-        "use-model",
-        "Set up",
-        "use-model [NAME]",
-        "the measured model every build uses",
-        "Use this measured model for every build from now on.",
-        kind="glance",
-        chat=True,
-        words=True,
-        arguments=[Argument("name", "?", None, "the model's name, as `tinker models` lists it")],
-    ),
-    Command(
-        "embed",
-        "Set up",
-        "embed [NAME]",
-        "the embedding model that indexes what is learned",
-        "Use this embedding model to index what is learned, so builds find it by meaning.",
-        kind="glance",
-        chat=True,
-        words=True,
-        arguments=[Argument("name", "?", None, "the model's name, as `tinker models` lists it")],
+        arguments=[Argument("words", "*", "[calibrate] [NAME]", "calibrate, then the model's name")],
     ),
     Command(
         "config",

@@ -14,7 +14,7 @@ lazy import webbrowser
 lazy from pathlib import Path
 
 from . import conversation, exercising, reading
-from .commands import BY_NAME, COMMANDS, GROUPS, refs, taught_command
+from .commands import BY_NAME, COMMANDS, GROUPS, kind_of, refs, taught_command
 from .jobs import STATES, Jobs, archived, calls_log, job_number
 from .messages import Messages, human_duration, paint, say
 from .reading import Reader
@@ -133,10 +133,7 @@ class Cli:
     FIELDS = {
         "reset": False,
         "config": None,
-        "models": False,
-        "use_model": None,
-        "embed": None,
-        "calibrate": None,
+        "model": None,
         "learn": None,
         "research": None,
         "ask": None,
@@ -365,12 +362,10 @@ class Cli:
     @staticmethod
     def command_value(command, given, parser):
         match command:
-            case "reset" | "restart" | "models" | "runs" | "doctor":
+            case "reset" | "restart" | "runs" | "doctor":
                 return True
-            case "use-model" | "calibrate" | "embed" if given.name is None:
-                return None
-            case "use-model" | "calibrate" | "embed":
-                return Cli.non_empty(given.name, command, parser)
+            case "model":
+                return Cli.model_words(given.words, parser)
             case "resume" | "status" | "log":
                 return Cli.project_named(given.words, parser)
             case "add" | "fix" | "amend":
@@ -469,6 +464,12 @@ class Cli:
         return words[0] == "list" and (len(words) == 1 or (len(words) == 2 and Cli.is_page(words[1])))
 
     @staticmethod
+    def model_words(words, parser):
+        if len(words) > (2 if words[:1] == ["calibrate"] else 1):
+            parser.error("tinker model [calibrate] [NAME] takes one model name")
+        return words
+
+    @staticmethod
     def non_empty(value, command, parser):
         if not value.strip():
             parser.error(f"tinker {command}: the value is empty")
@@ -528,11 +529,11 @@ class Cli:
 
     @staticmethod
     def works_for_hours(args):
-        return BY_NAME[args.command].kind == "job"
+        return kind_of([args.command, *(args.model or [])]) == "job"
 
     @staticmethod
     def named(argv):
-        if argv != ["calibrate"]:
+        if argv != ["model", "calibrate"]:
             return argv
         name = Commands.picked_model("calibrate")
         if name is None:

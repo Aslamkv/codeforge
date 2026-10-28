@@ -86,7 +86,7 @@ class Setting(namedtuple("Setting", "kind owner least whole above", defaults=("c
 
 SETTINGS = frozendict(
     {
-        "model": Setting("text", "use-model"),
+        "model": Setting("text", "model"),
         "ollama_url": Setting("text"),
         "keep_alive": Setting("duration"),
         "max_growth": Setting("number", least=1, above=True),
@@ -104,7 +104,7 @@ SETTINGS = frozendict(
         "fetch_workers": Setting("number", least=1, whole=True),
         "fetch_timeout": Setting("number", least=1),
         "fetch_max_bytes": Setting("number", least=1000, whole=True),
-        "embed_model": Setting("text", "embed"),
+        "embed_model": Setting("text", "model"),
         "projects": Setting("text"),
     }
 )
