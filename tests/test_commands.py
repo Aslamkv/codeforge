@@ -1,4 +1,5 @@
 import pytest
+from conftest import MEASURED
 
 from tinkerkit import cli, conversation
 from tinkerkit.commands import (
@@ -15,6 +16,7 @@ from tinkerkit.commands import (
     taught_command,
 )
 from tinkerkit.messages import Text
+from tinkerkit.settings import Config
 
 
 @pytest.mark.spec("CMD-1")
@@ -66,7 +68,6 @@ def test_the_kind_of_a_command_and_of_its_actions_comes_from_the_table():
         (["channel", "start"], "terminal"),
         (["channel", "list"], "glance"),
         (["model"], "glance"),
-        (["model", "qwen3"], "glance"),
         (["model", "calibrate"], "glance"),
         (["model", "calibrate", "qwen3"], "job"),
         (["fly"], None),
@@ -75,6 +76,15 @@ def test_the_kind_of_a_command_and_of_its_actions_comes_from_the_table():
 )
 def test_the_kind_of_an_action_comes_from_its_command(argv, kind):
     assert kind_of(argv) == kind
+
+
+@pytest.mark.spec("CMD-1")
+def test_model_of_a_never_measured_model_is_a_job(home_store):
+    home_store.put("models", "measured", MEASURED)
+    Config.save(embed_model="nomic")
+    assert kind_of(["model", "measured"]) == "glance"
+    assert kind_of(["model", "nomic"]) == "glance"
+    assert kind_of(["model", "fresh"]) == "job"
 
 
 @pytest.mark.spec("CMD-1")

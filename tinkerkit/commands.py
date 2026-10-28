@@ -1,6 +1,6 @@
 from collections import namedtuple
 
-from .settings import SETTINGS
+from .settings import SETTINGS, Config, Home
 
 Refs = namedtuple("Refs", "project words")
 MenuAnswer = namedtuple("MenuAnswer", "line send")
@@ -62,6 +62,15 @@ def taught_command(words):
     if len(words) == 2 and (" " in words[1].strip() or words[1].strip().lower() == "none"):
         return words[0], words[1]
     return None
+
+
+def never_measured(words):
+    return (
+        len(words) == 1
+        and words[0] != "calibrate"
+        and words[0] != Config.get("embed_model")
+        and not isinstance(Home.store().get("models", words[0]), dict)
+    )
 
 
 class Command:
@@ -461,7 +470,7 @@ COMMANDS = [
         "List the models Ollama has and pick one: a measured model is used for every build, one never measured "
         "is measured first, an embedding model indexes what is learned. calibrate NAME measures a model again.",
         kind="glance",
-        actions=[Action("job", "calibrate", when=lambda words: len(words) > 1)],
+        actions=[Action("job", "calibrate", when=lambda words: len(words) > 1), Action("job", when=never_measured)],
         chat=True,
         words=True,
         arguments=[Argument("words", "*", "[calibrate] [NAME]", "calibrate, then the model's name")],

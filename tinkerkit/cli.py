@@ -634,9 +634,15 @@ class Commands:
         if name is None:
             return
         if command == "calibrate":
-            Calibrator(Models.installed(name)).run()
+            Commands.calibrate(Models.installed(name))
             return
         Commands.use(Models.installed(name))
+
+    @staticmethod
+    def calibrate(name):
+        if name in Models.named(embedding=True):
+            raise SystemExit(f"{name} is an embedding model: only a general model is measured")
+        Calibrator(name).run()
 
     @staticmethod
     def use(name):
@@ -644,7 +650,7 @@ class Commands:
             Commands.embed(name)
             return
         if Models.settings(name) is None:
-            raise SystemExit(f"{name} has not been measured: measure it first with tinker model calibrate {name}")
+            Calibrator(name).run()
         Config.save(model=name)
         say.done(f"Model in use: {name}")
 

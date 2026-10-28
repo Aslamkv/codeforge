@@ -188,11 +188,50 @@ def test_model_uses_a_measured_model_and_refuses_one_ollama_does_not_have(home_s
     picker(monkeypatch, None)
     with pytest.raises(SystemExit, match="no model named 'ghost'.*tinker model"):
         Commands.model(["ghost"])
-    with pytest.raises(SystemExit, match="n has not been measured.*tinker model calibrate n"):
-        Commands.model(["n"])
     Models.keep("m", MEASURED)
     Commands.model(["m"])
     assert Config.get("model") == "m" and "Model in use: m" in capsys.readouterr().out
+
+
+def calibrating(monkeypatch, measures):
+    measured = []
+
+    def run(self):
+        measured.append(self.name)
+        if not measures:
+            raise SystemExit("could not measure")
+        Models.keep(self.name, MEASURED)
+
+    monkeypatch.setattr(cli, "Calibrator", lambda name: type("C", (), {"name": name, "run": run})())
+    return measured
+
+
+@pytest.mark.spec("CLI-3")
+def test_model_of_a_never_measured_model_measures_it_then_uses_it(home_store, monkeypatch, capsys):
+    picker(monkeypatch, None)
+    Config.save(model="m")
+    measured = calibrating(monkeypatch, measures=True)
+    Commands.model(["n"])
+    assert measured == ["n"] and Config.get("model") == "n" and "Model in use: n" in capsys.readouterr().out
+
+
+@pytest.mark.spec("CLI-3")
+def test_a_failed_measure_keeps_the_model_in_use(home_store, monkeypatch):
+    picker(monkeypatch, None)
+    Config.save(model="m")
+    measured = calibrating(monkeypatch, measures=False)
+    with pytest.raises(SystemExit, match="could not measure"):
+        Commands.model(["n"])
+    assert measured == ["n"] and Config.get("model") == "m"
+
+
+@pytest.mark.spec("CLI-3")
+def test_model_calibrate_refuses_an_embedding_model(home_store, monkeypatch):
+    picker(monkeypatch, None, embedding=("n",))
+    measured = calibrating(monkeypatch, measures=True)
+    with pytest.raises(SystemExit, match="n is an embedding model"):
+        Commands.model(["calibrate", "n"])
+    assert measured == []
 
 
 @pytest.mark.spec("CLI-3")
@@ -926,7 +965,8 @@ def test_the_cycle_a_run_works_on(make_project, make_session):
 
 
 @pytest.mark.spec("JOB-1")
-def test_a_job_keeps_the_computer_awake_and_a_glance_does_not():
+def test_a_job_keeps_the_computer_awake_and_a_glance_does_not(home_store):
+    Models.keep("qwen3", MEASURED)
     assert Cli.works_for_hours(Cli.parse(["ask", "what", "formats", "python"]))
     assert Cli.works_for_hours(Cli.parse(["model", "calibrate", "qwen3"]))
     assert not Cli.works_for_hours(Cli.parse(["model", "qwen3"]))
