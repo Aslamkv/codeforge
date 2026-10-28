@@ -977,8 +977,7 @@ The chat plugin: Telegram, and `tinker channel`.
   3 times, and then it is a `ChannelError`.
 - **CHN-6** `receive` gives the text messages (and a file sent, as **CHN-10** says) and moves the offset past
   every update. A network failure gives no messages. `offer` lists every chat command in the bot's menu
-  (`setMyCommands`, so typing `/` autofills them), `-` as `_`, each description cut to 256 characters; a
-  failure is ignored.
+  (`setMyCommands`, so typing `/` autofills them), each description cut to 256 characters; a failure is ignored.
 - **CHN-7** `send` and `edit` post Telegram HTML, and fall back to plain text when the HTML is refused. An edit
   of unchanged text is harmless. A refused edit takes the message out and sends a new one in its place.
   `latest` tracks the newest message still in the chat. `ask_for(chat, question, hint)` sends the question with
