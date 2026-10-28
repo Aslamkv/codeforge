@@ -1633,7 +1633,7 @@ def test_desk_answers_commands(desk):
             "channel add",
             "channel remove bot",
             "channel start",
-            "models",
+            "model",
             "/Runs",
         )
     }
@@ -1650,7 +1650,7 @@ def test_desk_answers_commands(desk):
         f"🖥 `channel {action}` asks in a terminal: `tinker channel {action}` there"
         for action in ("add", "remove", "start")
     ]
-    assert replies["models"] == "⚙️ **models**\n```\noutput of models\n```"
+    assert replies["model"] == "⚙️ **model**\n```\noutput of model\n```"
     assert replies["/Runs"] == "📚 **Runs**\n```\noutput of runs\n```"
 
 

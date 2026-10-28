@@ -592,7 +592,7 @@ class Commands:
         say.text(f"web:             {Internet.state()}")
         embed = (
             Config.get("embed_model")
-            or "none: select one with tinker embed NAME (tinker learn and --web need one)"
+            or "none: select one with tinker model NAME (tinker learn and --web need one)"
         )
         say.text(f"embed_model:     {embed}")
         say.text(
@@ -602,10 +602,10 @@ class Commands:
     @staticmethod
     def model_state(name, settings):
         if not name:
-            return "none (measure one with tinker calibrate NAME, then select it with tinker use-model NAME)"
+            return "none (use one with tinker model NAME: it measures a model never measured)"
         if settings:
             return f"{name} (calibrated {settings.get('calibrated', '?')})"
-        return f"{name} (not measured: tinker calibrate {name})"
+        return f"{name} (not measured: tinker model calibrate {name})"
 
     @staticmethod
     def print_measured(settings):
@@ -1059,12 +1059,12 @@ class Doctor:
         name = Config.get("embed_model")
         if not name:
             raise SystemExit(
-                "none selected: pick one Ollama has with tinker embed NAME (tinker models lists them)"
+                "none selected: pick one Ollama has with tinker model NAME (tinker model lists them)"
             )
         Embeddings.check()
         embeddings = Embeddings(name)
         if embeddings.vectors(["a test"], keep=False) is None:
-            raise SystemExit(f"{embeddings.failed}: pick another with tinker embed NAME")
+            raise SystemExit(f"{embeddings.failed}: pick another with tinker model NAME")
         return f"{name}, working"
 
     @staticmethod

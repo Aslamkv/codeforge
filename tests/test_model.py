@@ -891,7 +891,7 @@ def test_ask_until_usable(make_model, fake_ollama, monkeypatch):
     monkeypatch.setattr(model, "ask", too_large)
     answer = model.ask_until_usable("s", [], "Plan", lambda reply: reply)
     assert answer.value is None and "even shortened, the prompt does not fit" in answer.why
-    assert "(too big)" in answer.why and "tinker calibrate" in answer.why
+    assert "(too big)" in answer.why and "tinker model calibrate" in answer.why
 
 
 @pytest.mark.spec("MOD-22")

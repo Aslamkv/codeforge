@@ -1161,8 +1161,8 @@ class Talk:
     def reply(self, channel, message, now="", tokens=CHAT_MAX_REPLY_TOKENS):
         if not Models.quick():
             return (
-                "⚠️ **No model is in use yet**, so I cannot chat: `tinker calibrate NAME`, then "
-                f"`tinker use-model NAME`. These still work:\n{self.commands}"
+                "⚠️ **No model is in use yet**, so I cannot chat: `tinker model NAME` picks "
+                f"one. These still work:\n{self.commands}"
             )
         said = self.chat_of(channel, message.chat)
         asked = self.remembered(said, "user", message.text)
@@ -1245,7 +1245,7 @@ class Shell:
     def propose(self, channel, message, context, tokens):
         if not Models.quick():
             self.questions.answered(channel, message.chat)
-            return "⚠️ **No model is in use yet:** `tinker calibrate NAME`, then `tinker use-model NAME`."
+            return "⚠️ **No model is in use yet:** `tinker model NAME` picks one."
         system = Prompts.COMMAND_SYSTEM.format(
             system=os.uname().sysname, shell=Path(self.shell).name, folder=self.folder
         )

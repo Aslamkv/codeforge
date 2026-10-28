@@ -1591,7 +1591,7 @@ class Embeddings:
         if not Config.get("embed_model"):
             raise SystemExit(
                 f"{option} needs an embedding model, which indexes what it learns: select one Ollama "
-                f"has with tinker embed NAME (tinker models lists them)"
+                f"has with tinker model NAME (tinker model lists them)"
             )
         Embeddings.check()
         return Embeddings(Config.get("embed_model"))
@@ -1600,12 +1600,12 @@ class Embeddings:
     def check():
         name = Config.get("embed_model")
         if not isinstance(name, str):
-            raise SystemExit(f"embed_model is not a model name ({name!r}): select one with tinker embed NAME")
+            raise SystemExit(f"embed_model is not a model name ({name!r}): select one with tinker model NAME")
         if name:
             try:
                 Models.installed(name)
             except SystemExit as exc:
-                raise SystemExit(f"The embedding model (tinker embed): {exc}")
+                raise SystemExit(f"The embedding model (tinker model): {exc}")
 
     @staticmethod
     def configured():

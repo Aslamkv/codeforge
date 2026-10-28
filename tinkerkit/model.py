@@ -260,7 +260,7 @@ class Model:
         if crashes > CRASH_RETRIES:
             raise OllamaError(
                 f"{exc}\n{self.name} crashed {crashes} times on this call, {last}. If this keeps "
-                f"happening, measure the model again: tinker calibrate {self.name}",
+                f"happening, measure the model again: tinker model calibrate {self.name}",
                 crashed=True,
             )
 
@@ -475,8 +475,8 @@ class Model:
     def too_large_why(self, exc):
         return (
             f"even shortened, the prompt does not fit {self.name}'s input budget of {self.max_tokens} tokens "
-            f"({exc}). Measure the model again (tinker calibrate) or use one that reads longer prompts "
-            f"(tinker models)"
+            f"({exc}). Measure the model again (tinker model calibrate) or use one that reads longer prompts "
+            f"(tinker model)"
         )
 
     def limit_chars(self, system, tokens=None):
@@ -637,17 +637,19 @@ class Models:
         name = Config.get("model")
         if not name:
             raise SystemExit(
-                "No model in use. Measure one Ollama has with tinker calibrate NAME, then select it with "
-                "tinker use-model NAME (tinker models lists them)."
+                "No model in use. Use one Ollama has with tinker model NAME, which measures it first if it was "
+                "never measured (tinker model lists them)."
             )
         settings = Models.settings(name)
         if settings is None:
-            raise SystemExit(f"{name}, the model in use, has not been measured: tinker calibrate {name}")
+            raise SystemExit(
+                f"{name}, the model in use, has not been measured: tinker model calibrate {name}"
+            )
         broken = Models.unusable_measurements(settings)
         if broken:
             raise SystemExit(
                 f"What was measured for {name} has no usable {', '.join(broken)}: measure the model "
-                f"again with tinker calibrate {name}"
+                f"again with tinker model calibrate {name}"
             )
         return SelectedModel(name, settings)
 
@@ -719,7 +721,7 @@ class Models:
             f"{model.name} crashed {model.crashes} time(s) this run"
             + (f"; lowered for this run only: {', '.join(lowered)}" if lowered else "")
             + f". If crashes keep happening, measure it again: "
-            f"tinker calibrate {model.name}"
+            f"tinker model calibrate {model.name}"
         )
 
     @staticmethod
