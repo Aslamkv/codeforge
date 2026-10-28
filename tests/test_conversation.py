@@ -200,15 +200,13 @@ def test_command_of(text, command):
 
 
 @pytest.mark.spec("CNV-6")
-def test_said_removes_tinker_before_a_command():
-    channel = Recorder()
-    assert (
-        channel.said("Build it: tinker resume abc (or tinker   amend)")
-        == "Build it: resume abc (or tinker   amend)"
-    )
-    assert channel.said("the tinker tool and /x/tinker task") == "the tinker tool and /x/tinker task"
-    channel.commands_without_tinker = False
-    assert channel.said("tinker resume abc") == "tinker resume abc"
+def test_said_writes_tinker_before_a_command_as_slash():
+    for channel in (Recorder(), ConsoleChannel()):
+        assert (
+            channel.said("Build it: tinker resume abc (or tinker   amend)")
+            == "Build it: /resume abc (or tinker   amend)"
+        )
+        assert channel.said("the tinker tool and /x/tinker task") == "the tinker tool and /x/tinker task"
 
 
 @pytest.mark.spec("CNV-6")
@@ -1364,7 +1362,7 @@ def test_progress_ending_of_a_plan_that_waits():
         "**C1** calc.add(2, 3) is 5",
         "🚫 _Not included:_ a GUI",
         "📁 `calc`",
-        "👉 `confirm` to build it · `amend WHAT` to change it",
+        "👉 `/confirm` to build it · `/amend WHAT` to change it",
     ):
         assert line in lines, line
     assert lines[-1].startswith("⏱ _so far:")
@@ -1622,15 +1620,15 @@ def test_desk_answers_commands(desk):
             "/Runs",
         )
     }
-    assert replies["task"].startswith("✍️ Write `task WHAT TO BUILD`")
+    assert replies["task"].startswith("✍️ Write `/task WHAT TO BUILD`")
     assert (
         replies["status"] == "🟢 **Tinker** · idle: send a task"
         and replies["stop"] == "💤 No job is running."
     )
-    assert replies["stop #9"] == "🤷 Job #9 is not running or paused: `jobs` lists them."
+    assert replies["stop #9"] == "🤷 Job #9 is not running or paused: `/jobs` lists them."
     assert replies["resume"] == "🤷 No job is stopped (jobs lists them)."
     assert replies["resume #9"] == "🤷 No job #9 (jobs lists them)."
-    assert replies["resume abc123"].startswith("✍️ Write `resume [#JOB | @PROJECT]`")
+    assert replies["resume abc123"].startswith("✍️ Write `/resume [#JOB | @PROJECT]`")
     assert [replies[text] for text in ("channel add", "channel remove bot", "channel start")] == [
         f"🖥 `channel {action}` asks in a terminal: `tinker channel {action}` there"
         for action in ("add", "remove", "start")
@@ -1643,7 +1641,7 @@ def test_desk_answers_commands(desk):
 def test_a_command_that_deletes_and_exit_ask_first(desk):
     desk, channel, _ = desk
     assert desk.answer(Message("1", "/clear memory"), channel) is None
-    assert desk.ran == [["clear", "memory"]] and "👉 `confirm` to delete it" in channel.texts()[-1]
+    assert desk.ran == [["clear", "memory"]] and "👉 `/confirm` to delete it" in channel.texts()[-1]
     assert desk.answer(Message("1", "/exit"), channel) is None and "**Stop Tinker?**" in channel.texts()[-1]
     say(desk, channel, "/confirm")
     wait_until(lambda: channel.closed)
@@ -1662,7 +1660,7 @@ def test_a_deletion_preview_is_what_tinker_printed_without_its_errors(tmp_path, 
     desk.answer(Message("1", "/clear runs"), channel)
     shown = channel.texts()[-1]
     assert "Delete these runs:" in shown and "abc123" in shown
-    assert "Nothing deleted" not in shown and "👉 `confirm` to delete it" in shown
+    assert "Nothing deleted" not in shown and "👉 `/confirm` to delete it" in shown
 
 
 @pytest.mark.spec("CNV-11")
@@ -1755,7 +1753,7 @@ def test_what_waits_for_confirm_is_cancelled_by_anything_else(desk, monkeypatch)
     wait_until(lambda: ["clear", "memory", "--yes"] in desk.ran)
     assert desk.decide("confirm", ["confirm"]).startswith("🤷 No plan waits")
     assert desk.rename({}, ["rename", "x"]).startswith("🤷 No plan waits")
-    assert desk.decide("amend", ["amend"]).startswith("✍️ Write `amend [@PROJECT] CHANGE`")
+    assert desk.decide("amend", ["amend"]).startswith("✍️ Write `/amend [@PROJECT] CHANGE`")
 
 
 @pytest.mark.spec("CNV-12")
@@ -1782,7 +1780,7 @@ def test_a_command_sent_alone_asks_for_its_words(desk, monkeypatch):
     answered = []
     monkeypatch.setattr(desk, "answer", lambda message, channel: answered.append(message.text))
     say(desk, channel, "/fix")
-    assert answered == [] and channel.texts()[-1].startswith("✍️ **fix** · fix a bug")
+    assert answered == [] and channel.texts()[-1].startswith("✍️ **/fix** · fix a bug")
     say(desk, channel, "typing 2/0 crashes")
     say(desk, channel, "/ask")
     starts_with_a_command_word = "help me"
@@ -2270,7 +2268,8 @@ def test_start_is_answered_with_a_welcome(desk):
         "⏳ **While I work**",
     ):
         assert section in text
-    assert "`task a calculator in Python`" in text and "normal chat" in text and "`help`" in text
+    assert "`/task a calculator in Python`" in text and "normal chat" in text and "`/help`" in text
+    assert "`confirm`" not in text and "`/confirm`" in text
     assert calls_of(script) == ["help"] and desk.last_task is None
     a_start_link_with_a_payload = "/start abcdef"
     say(desk, channel, a_start_link_with_a_payload)
