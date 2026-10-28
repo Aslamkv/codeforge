@@ -366,9 +366,9 @@ person asks for pauses it too (**JOB-10**), so the person is always answered at 
   ([State](#state)): with no state, the running ones, then the paused ones, then the stopped ones. Any other
   words are an error.
 - **JOB-7** `tinker stop #N` sends job #N `JOB_STOP_SIGNAL`, as Ctrl-C (one that neither runs nor is paused is
-  an error); `tinker stop` stops the job that runs, whatever it is. In the conversation, `stop #N` stops that
-  job (the task started here, the exercise in its own message, or one elsewhere) and `stop` the job that runs,
-  and `resume [#N]` starts `tinker resume #N` as a job (an exercise as the exercise). A paused job that is
+  an error); `tinker stop` stops the job that runs, whatever it is. In the conversation, `/stop #N` stops that
+  job (the task started here, the exercise in its own message, or one elsewhere) and `/stop` the job that runs,
+  and `/resume [#N]` starts `tinker resume #N` as a job (an exercise as the exercise). A paused job that is
   stopped no longer goes on by itself.
 - **JOB-8** One job runs at a time, whatever kind it is. A job that starts (`Jobs.begin`) pauses every job that
   runs: each is marked `paused_by` it and told to stop (`JOB_STOP_SIGNAL`), and it waits, at most
@@ -779,11 +779,16 @@ The terminal and the chats are one conversation: the same commands, the same ans
   the rest. `first_words` collapses whitespace and cuts. `text_of` decodes bytes. `after_word` drops the
   command word. `built_project(name)` gives the project named (`Runs.find`), or without a name the one built
   last.
-- **CNV-5** `command_of(text)` gives the command a message starts with (`/` allowed), by the command table. It
-  is a command when the word is alone, when the command takes any words, or when it takes one word and exactly
-  one follows. Otherwise the message is a chat (`""`). A menu's form is taken too: `/use_model` is
-  `use-model`, and `@bot` after the name (in a group) is dropped.
-- **CNV-6** `Channel.said` removes `tinker ` before a command in a conversation. `Channel.show` edits the
+- **CNV-5** In a conversation (the terminal and every chat) a command is sent with its `/`: `command_of(text)`
+  gives the command a message starts with, by the command table, only when its first word is `/` and a
+  command's name, whatever words follow (a command refuses words it does not take). A message without the `/`
+  is a chat (`""`), even one that starts with a command's name. A menu's form is taken too: `/use_model` is
+  `use-model`, and `@bot` after the name (in a group) is dropped. A `/` word that names no command is answered
+  `❓ No command /WORD: /help lists them`, and nothing else is done. The command line (`tinker help`) is not a
+  conversation: its commands take no `/`.
+- **CNV-6** `Channel.said` writes `tinker COMMAND` as `/COMMAND` in a conversation, in the terminal as in every
+  chat, so what Tinker says to send can be sent as it is. Every command Tinker names in a conversation (a hint,
+  the welcome, a usage, a question) has its `/`. `Channel.show` edits the
   thing's messages, sends parts that no longer fit, deletes the extra ones, adds the update time, and sends
   the message again at the bottom when it is no longer the newest.
 - **CNV-7** `Channel.listened` gives only messages from allowed chats. It says a refusal once and gives
@@ -792,8 +797,9 @@ The terminal and the chats are one conversation: the same commands, the same ans
   they come. The Tinkering line (what goes on now, **MSG-4**) and the lines under it stay out of the print.
   On a terminal with colour, they show above the prompt as one live block, the lines under the Tinkering line
   dim and indented, all redrawn in place; otherwise what goes on now prints as a line of its own each time it
-  changes. When the thing is done, the live block clears and only the lines not yet printed follow. `exit` or
-  end of input closes it. On a terminal, the prompt reads through `LineEditor` (**MSG-9**), and up and down
+  changes. When the thing is done, the live block clears and only the lines not yet printed follow. `/exit` or
+  end of input closes it at once, asking nothing: the terminal reads it itself, and Tinker can be started
+  again there. A plain `exit` is a chat. On a terminal, the prompt reads through `LineEditor` (**MSG-9**), and up and down
   on it go through the lines typed before, the last 1000 kept in the home's `prompt_history`, so they outlive
   a restart. Typing `/` there opens `CommandMenu` (**MSG-10**) under the prompt, narrowed as you type; up and
   down move in the menu while it is open. Piped input reads lines as before. `use-model`, `calibrate` or `embed`
@@ -821,7 +827,7 @@ The terminal and the chats are one conversation: the same commands, the same ans
   terminal, and otherwise leaves that chat out. The terminal never waits on a chat: each chat starts in its own
   thread, and what Tinker does every few seconds while it listens (collecting the messages whose time is up,
   saying the status, taking up an exercise that runs) runs in a thread of its own, from the start, so the
-  terminal reads at once and `exit` or Ctrl-C ends Tinker at once. Tinker tells and never waits as it ends: it
+  terminal reads at once and `/exit` or Ctrl-C ends Tinker at once. Tinker tells and never waits as it ends: it
   hands its last status (`not listening`) and the question to stop, to be taken out, to a sender that runs on
   its own (`tinker channel goodbye`, left out of the usage), and exits; the sender posts the status and takes
   the question out, and what happens to them is the chat's matter, not Tinker's. Each chat has one status message: what Tinker works on (a job's title), never how far it got. Every
@@ -833,7 +839,7 @@ The terminal and the chats are one conversation: the same commands, the same ans
 - **CNV-10** `/start` (what a chat app sends when a person first opens the bot) is answered with a welcome and
   a short, tldr-style guide for beginners in plain words: what Tinker does, then what to send, grouped by what
   a person does (build something, their projects, ask anything, while it works), each with one line on what
-  it does, and `help`. It is never taken as a chat or a command.
+  it does, and `/help`. It is never taken as a chat or a command.
 - **CNV-11** `Desk.answer` handles a command in one place: its own handler when the conversation has one
   (`Desk.handlers`, by command name), and otherwise by its action in the table (**CMD-1**): one that deletes
   asks first, a `job` starts a task, a `terminal` one says to run it in a terminal, and the rest run as
@@ -841,21 +847,21 @@ The terminal and the chats are one conversation: the same commands, the same ans
   run that starts a cycle is given `--confirm`, so its plan waits for the person. `status` alone gives what
   runs (`status @PROJECT` is that project's status, **CLI-3**). `stop`, `stop #N` and `resume [#N]` act on
   jobs (**JOB-7**). A command that deletes shows what it deletes and waits
-  for `confirm` (**SET-9**), but `clear chat`, which deletes no record (the history keeps it), is done at
-  once. `exit` asks first; the person's `exit` and `confirm` are taken out at once, and the question as Tinker
+  for `/confirm` (**SET-9**), but `clear chat`, which deletes no record (the history keeps it), is done at
+  once. `/exit` in a chat asks first, as Tinker cannot be started again from there (the terminal's closes at
+  once, **CNV-8**); the person's `/exit` and `/confirm` are taken out at once, and the question as Tinker
   ends (its status says it no longer listens). The preview of a deletion is what `tinker` printed (its stdout),
   and the plan that waits is kept without the lines on what to send next: the chat never filters `tinker`'s
   text.
-- **CNV-12** Each chat has at most one question that waits for the person (a deletion, `exit`, a command
-  line, words a command needs), kept in one place by channel and chat: what its answer runs and what a
-  cancel says. `Desk.settle` runs what waits for a `confirm`. Any other message cancels it and says so. The
+- **CNV-12** Each chat has at most one question that waits for the person (a deletion, a chat's `/exit`, a
+  command line, words a command needs), kept in one place by channel and chat: what its answer runs and what a
+  cancel says. `Desk.settle` runs what waits for a `/confirm`. Any other message cancels it and says so. The
   plan that waits is not such a question: every chat and the terminal share it. `decide` builds or changes the plan that waits. For a new project, its first
   `confirm` asks for the folder's name.
 - **CNV-13** A command that needs words, sent alone (as a chat app's menu sends it: `/fix`), asks for them
-  (`ask_for`: what it does, what to send, an example) and takes the next message as them (`fix MESSAGE`), even
-  one that starts with a command word. A command of its own instead (sent with its `/`, alone, or the same
-  command, as a file sent to read is) drops the question. A command whose words are optional (`status`) runs
-  at once. `use-model`, `calibrate` and `embed` sent alone on a channel with buttons (Telegram) ask with
+  (`ask_for`: what it does, what to send, an example) and takes the next message without a `/` as them
+  (`fix MESSAGE`), even one that starts with a command's name. A command instead (sent with its `/`, as a file
+  sent to read is) drops the question. A command whose words are optional (`status`) runs at once. `use-model`, `calibrate` and `embed` sent alone on a channel with buttons (Telegram) ask with
   `choose(chat, question, names)` instead: a button for each model its select box (**CLI-3**) shows plain, the
   question naming the one in use; the next message (a tap sends the name) is the NAME, as above. With none to
   show, or on a channel without buttons, they run at once and list the models.
@@ -1547,7 +1553,7 @@ The main system: the command line, one run, and the cycle of phases.
   word, then `=` and the definition (`gs = git status`, no quotes needed), or two words whose second is quoted
   (it has a space) or `none`. An option a command does not take is an error.
 - **CLI-2** `tinker help` lists every command by group, the options, and examples. With
-  `TINKER_FORMAT=markup`, it lists what a chat can send. `tinker help COMMAND` shows that command's arguments,
+  `TINKER_FORMAT=markup`, it lists what a chat can send, each command with its `/`. `tinker help COMMAND` shows that command's arguments,
   and an unknown command is an error.
 - **CLI-3** `Commands`. `use-model` accepts only a measured model. `use-model`, `calibrate` and `embed` with no
   NAME, on a terminal, open a select box (**MSG-8**) on Ollama's models (**MOD-26**), and the one chosen is
