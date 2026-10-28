@@ -470,7 +470,10 @@ COMMANDS = [
         "List the models Ollama has and pick one: a measured model is used for every build, one never measured "
         "is measured first, an embedding model indexes what is learned. calibrate NAME measures a model again.",
         kind="glance",
-        actions=[Action("job", "calibrate", when=lambda words: len(words) > 1), Action("job", when=never_measured)],
+        actions=[
+            Action("job", "calibrate", when=lambda words: len(words) > 1),
+            Action("job", when=never_measured),
+        ],
         chat=True,
         words=True,
         arguments=[Argument("words", "*", "[calibrate] [NAME]", "calibrate, then the model's name")],

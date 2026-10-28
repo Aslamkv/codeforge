@@ -508,14 +508,6 @@ class Models:
         return models
 
     @staticmethod
-    def choices():
-        return [(name, Models.settings(name) is not None) for name in Models.named(embedding=False)]
-
-    @staticmethod
-    def embedding_choices():
-        return [(name, True) for name in Models.named(embedding=True)]
-
-    @staticmethod
     def named(embedding):
         return [name for name in Models.names() if Models.embeds(Ollama.capabilities(name)) == embedding]
 
@@ -525,12 +517,12 @@ class Models:
 
     @staticmethod
     def rows():
-        general, embeddings = Models.choices(), Models.embedding_choices()
+        general, embeddings = Models.named(embedding=False), Models.named(embedding=True)
         sizes = {model.get("name", ""): model.get("size") or 0 for model in Models.answering()}
-        width = Models.width([name for name, _ in general + embeddings])
-        return Models.section("— general —", [Models.general_row(name, width) for name, _ in general]) + (
+        width = Models.width(general + embeddings)
+        return Models.section("— general —", [Models.general_row(name, width) for name in general]) + (
             Models.section(
-                "— embeddings —", [Models.embedding_row(name, sizes[name], width) for name, _ in embeddings]
+                "— embeddings —", [Models.embedding_row(name, sizes[name], width) for name in embeddings]
             )
         )
 
@@ -539,7 +531,7 @@ class Models:
         general = Models.named(embedding=False)
         width = Models.width(general)
         return Models.section(
-            "— general —", [(styled(Models.general_row(name, width))[0], False) for name in general]
+            "— general —", [Models.label(Models.general_row(name, width)) for name in general]
         )
 
     @staticmethod
@@ -564,11 +556,13 @@ class Models:
 
     @staticmethod
     def embedding_row(name, size, width):
-        return f"{name:<{width}}" + " · ".join(Models.in_use_facts(name, "embed", [f"{size / 1e9:.1f} GB"]))
+        return f"{name:<{width}}" + " · ".join(
+            Models.in_use_facts(name, "embed_model", [f"{size / 1e9:.1f} GB"])
+        )
 
     @staticmethod
-    def in_use_facts(name, command, facts):
-        return ["in use", *facts] if Models.in_use(command) == name else facts
+    def in_use_facts(name, setting, facts):
+        return ["in use", *facts] if Config.get(setting) == name else facts
 
     @staticmethod
     def speed_words(settings, key):
@@ -581,7 +575,7 @@ class Models:
 
     @staticmethod
     def recipe():
-        measured = [(name, Models.settings(name)) for name, known in Models.choices() if known]
+        measured = [(name, kept) for name in Models.named(embedding=False) if (kept := Models.settings(name))]
         if len(measured) < 2:
             return []
         best = max(measured, key=lambda pair: (Models.solved(pair[1]), Models.words_per_second(pair[1])))
@@ -593,6 +587,11 @@ class Models:
             f"🏆 Best quality: {best[0]} ({Models.solved_text(best[1])})",
             f"⚡ Fastest: {fastest[0]} ({writes})",
         ]
+
+    @staticmethod
+    def say_recipe():
+        for line in Models.recipe():
+            say.text(line)
 
     @staticmethod
     def solved(settings):
@@ -611,14 +610,18 @@ class Models:
         return not capabilities or "embedding" in capabilities
 
     @staticmethod
-    def picked(command, rows):
-        names, current = [styled(row)[0].split()[0] for row in rows], Models.in_use(command)
+    def picked(rows):
+        names, current = [Models.row_name(row) for row in rows], Config.get("model")
         index = say.pick(rows, names.index(current) if current in names else 1)
         return None if index is None else names[index]
 
     @staticmethod
-    def in_use(command):
-        return Config.get("embed_model" if command == "embed" else "model")
+    def row_name(row):
+        return Models.label(row).split()[0]
+
+    @staticmethod
+    def label(row):
+        return styled(row)[0]
 
     @staticmethod
     def installed(name):

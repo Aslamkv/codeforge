@@ -423,13 +423,11 @@ class Heading(Plain):
         return paint(label, "bold")
 
 
-DIMMED, HEADING = Dimmed(), Heading()
-CHOICE_STYLES = frozendict({False: Plain(), True: DIMMED})
+PLAIN, DIMMED, HEADING = Plain(), Dimmed(), Heading()
 
 
 def styled(choice):
-    label, style = (choice, False) if isinstance(choice, str) else choice
-    return label, CHOICE_STYLES.get(style, style)
+    return (choice, PLAIN) if isinstance(choice, str) else choice
 
 
 def choice_rows(choices, current):

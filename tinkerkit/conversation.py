@@ -38,9 +38,7 @@ lazy from .messages import (
     tinkering,
     visible_width,
 )
-lazy from .messages import (
-    styled as styled_choice,
-)
+lazy from .messages import styled as styled_choice
 lazy from .model import Models, Ollama, OllamaError
 lazy from .prompts import Prompts, Reply
 lazy from .settings import EXERCISE_FOLDER, JOB_STOP_SIGNAL, Config, Home, projects_folder
@@ -396,7 +394,7 @@ class Desk:
             rows = Models.command_choices(pick.split()[-1])
         except SystemExit:
             return False
-        names = [styled_choice(row)[0].split()[0] for row in rows if styled_choice(row)[1].selectable]
+        names = [Models.row_name(row) for row in rows if styled_choice(row)[1].selectable]
         if not names or channel.choose(message.chat, model_asked(pick, rows), names) is None:
             return False
         self.questions.ask(channel, message.chat, Question(wanted=pick))
@@ -1071,9 +1069,9 @@ def words_asked(command):
 
 
 def model_asked(pick, rows):
-    current = Models.in_use(pick.split()[-1])
+    current = Config.get("model")
     asked = md(t"🧠 **/{pick}** · choose a model") + (md(t" (in use: {current})") if current else "")
-    listed = Markup.fenced("\n".join(styled_choice(row)[0] for row in rows))
+    listed = Markup.fenced("\n".join(Models.label(row) for row in rows))
     return "\n".join([asked, *(md(t"{line}") for line in Models.recipe()), f"```\n{listed}\n```"])
 
 
@@ -1940,17 +1938,15 @@ class ConsoleChannel(Channel):
         pick = model_pick(line)
         if not pick or not typed_here():
             return line
-        command = pick.split()[-1]
         try:
-            choices = Models.command_choices(command)
+            choices = Models.command_choices(pick.split()[-1])
         except SystemExit:
             return line
         if not choices:
             return line
-        for recipe_line in Models.recipe():
-            say.text(recipe_line)
+        Models.say_recipe()
         with self.screen.printing:
-            name = Models.picked(command, choices)
+            name = Models.picked(choices)
         return "" if name is None else f"/{pick} {name}"
 
     def remember(self, line):

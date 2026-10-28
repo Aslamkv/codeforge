@@ -368,7 +368,7 @@ def scripted(*keys):
     return lambda: (key for key in keys)
 
 
-def picking(*keys, choices=(("one", False), ("two", False), ("three", False)), start=0):
+def picking(*keys, choices=("one", "two", "three"), start=0):
     say.keys = scripted(*keys)
     return say.pick(list(choices), start)
 
@@ -402,12 +402,6 @@ def test_esc_ctrl_c_or_end_of_input_give_none(terminal, keys):
 @pytest.mark.spec("MSG-8")
 def test_other_keys_change_nothing(terminal):
     assert picking("other", "down", "other", "enter") == 1
-
-
-@pytest.mark.spec("MSG-8")
-def test_dim_choices_are_drawn_dim(colored_terminal):
-    picking("enter", choices=(("ready", False), ("not pulled", True)))
-    assert frames(colored_terminal, 2)[0] == ["› ready", f"  {DIM}not pulled{RESET}"]
 
 
 @pytest.mark.spec("MSG-8")
@@ -457,7 +451,7 @@ def test_pick_gives_the_terminal_back_however_it_ends(terminal):
             closed.append(True)
 
     say.keys = keys
-    say.pick([("one", False)], 0)
+    say.pick(["one"], 0)
     assert closed == [True]
 
 

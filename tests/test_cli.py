@@ -9,7 +9,6 @@ from conftest import MEASURED, MODEL, PY, TOOLCHAIN, criterion, file_block, plan
 
 from tinkerkit import cli
 from tinkerkit.cli import Cli, Commands, CycleRunner, Doctor, ProjectFolder, ProjectRun
-from tinkerkit.commands import kind_of
 from tinkerkit.knowledge import Knowledge, Library
 from tinkerkit.model import Models, Ollama, OllamaError
 from tinkerkit.project import Runs, Tracker, project_store
@@ -295,8 +294,8 @@ def test_model_calibrate_without_a_name_picks_a_general_model_before_its_job_sta
     shown = picker(monkeypatch, 1, embedding=("n",))
     assert Cli.named(["model", "calibrate"]) == ["model", "calibrate", "other"]
     [(rows, start)] = shown
-    assert start == 2 and [row[0].split()[0] for row in rows] == ["—", "other", "m"]
-    assert rows[1][1] is False and rows[2][1] is False
+    assert start == 2 and [Models.row_name(row) for row in rows] == ["—", "other", "m"]
+    assert all(isinstance(row, str) for row in rows[1:])
     picker(monkeypatch, None)
     with pytest.raises(SystemExit) as cancelled:
         Cli.named(["model", "calibrate"])
@@ -311,7 +310,9 @@ def test_model_calibrate_without_a_name_picks_a_general_model_before_its_job_sta
 @pytest.mark.spec("CLI-3")
 def test_model_calibrate_measures_and_changes_no_model_in_use(home_store, monkeypatch):
     measured = []
-    monkeypatch.setattr(cli, "Calibrator", lambda name: type("C", (), {"run": lambda self: measured.append(name)})())
+    monkeypatch.setattr(
+        cli, "Calibrator", lambda name: type("C", (), {"run": lambda self: measured.append(name)})()
+    )
     picker(monkeypatch, None)
     Config.save(model="m")
     Commands(parse("model", "calibrate", "n")).run()

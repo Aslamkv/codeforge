@@ -16,7 +16,7 @@ lazy from pathlib import Path
 from . import conversation, exercising, reading
 from .commands import BY_NAME, COMMANDS, GROUPS, kind_of, refs, taught_command
 from .jobs import STATES, Jobs, archived, calls_log, job_number
-from .messages import Messages, human_duration, paint, say, styled
+from .messages import Messages, human_duration, paint, say
 from .reading import Reader
 lazy from .building import BugReproducer, CodeWriter, TestToolSetup, TestWriter, Verifier
 lazy from .finishing import FinalReview, LessonWriter, ReadmeWriter, Tidy
@@ -628,15 +628,10 @@ class Commands:
 
     @staticmethod
     def model(words):
-        command = "calibrate" if words[:1] == ["calibrate"] else "model"
-        names = words[1:] if command == "calibrate" else words
+        command, names = ("calibrate", words[1:]) if words[:1] == ["calibrate"] else ("model", words)
         name = names[0] if names else Commands.picked_model(command)
-        if name is None:
-            return
-        if command == "calibrate":
-            Commands.calibrate(Models.installed(name))
-            return
-        Commands.use(Models.installed(name))
+        if name is not None:
+            (Commands.calibrate if command == "calibrate" else Commands.use)(Models.installed(name))
 
     @staticmethod
     def calibrate(name):
@@ -657,13 +652,12 @@ class Commands:
     @staticmethod
     def picked_model(command):
         rows = Models.command_choices(command)
-        for line in Models.recipe():
-            say.text(line)
+        Models.say_recipe()
         if not rows or not sys.stdin.isatty():
             for row in rows:
-                say.text(styled(row)[0])
+                say.text(Models.label(row))
             return None
-        return Models.picked(command, rows)
+        return Models.picked(rows)
 
     @staticmethod
     def embed(name):

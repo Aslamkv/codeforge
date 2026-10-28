@@ -1837,11 +1837,11 @@ def test_a_slash_word_that_names_no_command_is_only_answered(desk, monkeypatch):
 def test_a_model_pick_sent_alone_asks_with_buttons(desk, monkeypatch):
     desk, channel, _ = desk
     answered, chosen = [], []
-    rows = [("— general —", HEADING), "qwen3  in use · solved 2 of 3", ("big  not measured yet", True)]
+    rows = [("— general —", HEADING), "qwen3  in use · solved 2 of 3", ("big  not measured yet", DIMMED)]
     monkeypatch.setattr(desk, "answer", lambda message, channel: answered.append(message.text))
     monkeypatch.setattr(Models, "command_choices", lambda command: rows)
     monkeypatch.setattr(Models, "recipe", lambda: ["🏆 qwen3 is the best and the fastest"])
-    monkeypatch.setattr(Models, "in_use", lambda command: "qwen3")
+    Config.save(model="qwen3")
     say(desk, channel, "/model calibrate")
     assert answered == ["/model calibrate"]
     monkeypatch.setattr(
@@ -1857,9 +1857,8 @@ def test_a_model_pick_sent_alone_asks_with_buttons(desk, monkeypatch):
     ]
     say(desk, channel, "big")
     assert answered[-1] == "/model big"
-    monkeypatch.setattr(Models, "in_use", lambda command: None)
     say(desk, channel, "/model calibrate")
-    assert chosen[-1][0].startswith("🧠 **/model calibrate** · choose a model\n")
+    assert chosen[-1][0].startswith("🧠 **/model calibrate** · choose a model (in use: qwen3)\n")
     say(desk, channel, "qwen3")
     assert answered[-1] == "/model calibrate qwen3"
     monkeypatch.setattr(Models, "command_choices", lambda command: [("— general —", HEADING)])
