@@ -224,7 +224,8 @@ Everything Tinker tells the person goes through one voice, `say` (a `Messages`).
   character, Home/Ctrl-A and End/Ctrl-E to the ends, Backspace and Delete one character, Ctrl-U to the start,
   Ctrl-K to the end, Ctrl-W the word before. Up and down go through the lines typed before (newest first, the
   line being typed kept for when down passes the newest). Enter gives the line; Ctrl-C or end of input on an
-  empty line give `None`, Ctrl-C on a line empties it. The cursor counts a wide character as two columns.
+  empty line give `None`, Ctrl-C on a line empties it, and end of input on a line does nothing. Tab is the
+  command menu's key (**MSG-10**); the editor ignores it. The cursor counts a wide character as two columns.
 - **MSG-10** `slash_matches(typed)` gives, for a line that starts with `/` and holds no space, the commands a
   chat offers (**CMD-1**) whose name starts with what follows the `/`, then those whose name holds it, each
   group in table order. `CommandMenu` shows them under the prompt, at most 8 rows, each `/name` with its
