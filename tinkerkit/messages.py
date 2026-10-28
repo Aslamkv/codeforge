@@ -1,6 +1,7 @@
 import contextlib
 from dataclasses import dataclass
 lazy import os
+lazy import re
 lazy import select
 lazy import shutil
 lazy import sys
@@ -40,11 +41,37 @@ KEYS = frozendict(
         b"\r": "enter",
         b"\n": "enter",
         b"\x1b": "esc",
+        b"\x1b[D": "left",
+        b"\x1bOD": "left",
+        b"\x1b[C": "right",
+        b"\x1bOC": "right",
+        b"\x1b[H": "home",
+        b"\x1bOH": "home",
+        b"\x1b[1~": "home",
+        b"\x1b[F": "end",
+        b"\x1bOF": "end",
+        b"\x1b[4~": "end",
+        b"\x1b[3~": "delete",
+        b"\x7f": "backspace",
+        b"\x08": "backspace",
+        b"\t": "tab",
+        b"\x01": "ctrl-a",
+        b"\x05": "ctrl-e",
+        b"\x15": "ctrl-u",
+        b"\x0b": "ctrl-k",
+        b"\x17": "ctrl-w",
         b"\x03": "ctrl-c",
-        b"\x04": "end",
-        b"": "end",
+        b"\x04": "eof",
+        b"": "eof",
     }
 )
+ESCAPE_SEQUENCE = re.compile(rb"\x1b(\[[0-9;]*[@-~]|O[@-~])")
+TEXT_RUN = re.compile(rb"[^\x00-\x1f\x7f]+")
+
+
+@dataclass(frozen=True)
+class Text:
+    text: str
 
 
 @dataclass(frozen=True)
@@ -240,7 +267,7 @@ class Messages:
             for key in keys:
                 if key == "enter":
                     return current
-                if key in ("esc", "ctrl-c", "end"):
+                if key in ("esc", "ctrl-c", "eof"):
                     return None
                 current = moved(current, key, len(choices))
                 terminal_write(rows_up(choices) + choice_rows(choices, current))
@@ -283,6 +310,95 @@ def moved(current, key, count):
     return min(max(current + step, 0), count - 1)
 
 
+class LineEditor:
+    def __init__(self, history=()):
+        self.history = list(history)
+        self.place = len(self.history)
+        self.draft = ""
+        self.text = ""
+        self.cursor = 0
+        self.answer = None
+
+    @property
+    def column(self):
+        return visible_width(self.text[: self.cursor])
+
+    def press(self, key):
+        if isinstance(key, Text):
+            self.insert(key.text)
+            return False
+        return bool(getattr(self, "on_" + key.replace("-", "_"), self.ignore)())
+
+    def replace(self, text):
+        self.text, self.cursor = text, len(text)
+
+    def insert(self, text):
+        self.text = self.text[: self.cursor] + text + self.text[self.cursor :]
+        self.cursor += len(text)
+
+    def cut(self, start, end):
+        self.text = self.text[:start] + self.text[end:]
+        self.cursor = start
+
+    def ignore(self):
+        return False
+
+    def on_left(self):
+        self.cursor = max(self.cursor - 1, 0)
+
+    def on_right(self):
+        self.cursor = min(self.cursor + 1, len(self.text))
+
+    def on_home(self):
+        self.cursor = 0
+
+    def on_end(self):
+        self.cursor = len(self.text)
+
+    on_ctrl_a = on_home
+    on_ctrl_e = on_end
+
+    def on_backspace(self):
+        self.cut(max(self.cursor - 1, 0), self.cursor)
+
+    def on_delete(self):
+        self.cut(self.cursor, self.cursor + 1)
+
+    def on_ctrl_u(self):
+        self.cut(0, self.cursor)
+
+    def on_ctrl_k(self):
+        self.cut(self.cursor, len(self.text))
+
+    def on_ctrl_w(self):
+        self.cut(len(re.sub(r"\S*\s*$", "", self.text[: self.cursor])), self.cursor)
+
+    def on_up(self):
+        if self.place > 0:
+            if self.place == len(self.history):
+                self.draft = self.text
+            self.place -= 1
+            self.replace(self.history[self.place])
+
+    def on_down(self):
+        if self.place < len(self.history):
+            self.place += 1
+            self.replace(self.history[self.place] if self.place < len(self.history) else self.draft)
+
+    def on_enter(self):
+        self.answer = self.text
+        return True
+
+    def on_ctrl_c(self):
+        if self.text:
+            self.replace("")
+            return False
+        return True
+
+    def on_eof(self):
+        return not self.text
+
+
 def choice_rows(choices, current):
     return "\r\n".join(
         LINE_START + choice_row(label, dim, index == current) + CLEAR_TO_LINE_END
@@ -302,22 +418,62 @@ def raw_keys():
     stdin = sys.stdin.fileno()
     saved = termios.tcgetattr(stdin)
     tty.setraw(stdin)
+    termios.tcsetattr(stdin, termios.TCSANOW, output_kept(termios.tcgetattr(stdin)))
     try:
         while True:
-            yield key_named(pressed(stdin))
+            yield from keys_in(pressed(stdin))
     finally:
         termios.tcsetattr(stdin, termios.TCSADRAIN, saved)
 
 
+def output_kept(mode):
+    return [mode[0], mode[1] | termios.OPOST, *mode[2:]]
+
+
 def pressed(stdin):
     first = os.read(stdin, 1)
-    if first != b"\x1b" or not select.select([stdin], [], [], 0.05)[0]:
-        return first
-    return first + os.read(stdin, 2)
+    wait = 0.05 if first == b"\x1b" else 0
+    burst = first + os.read(stdin, 4096) if first and select.select([stdin], [], [], wait)[0] else first
+    return burst + os.read(stdin, lacking(burst))
 
 
-def key_named(pressed):
-    return KEYS.get(pressed, "other")
+def lacking(data):
+    for back, byte in enumerate(reversed(data[-4:]), 1):
+        if not is_continuation(byte):
+            return max(utf8_length(byte) - back, 0)
+    return 0
+
+
+def is_continuation(byte):
+    return byte & 0xC0 == 0x80
+
+
+def utf8_length(lead):
+    return next((length for length, least in ((4, 0xF0), (3, 0xE0), (2, 0xC0)) if lead >= least), 1)
+
+
+def keys_in(data):
+    if not data:
+        return [key_named(data)]
+    keys = []
+    while data:
+        piece = first_piece(data)
+        keys.append(key_named(piece))
+        data = data[len(piece) :]
+    return keys
+
+
+def first_piece(data):
+    run = TEXT_RUN.match(data) or ESCAPE_SEQUENCE.match(data)
+    return run.group() if run else data[:1]
+
+
+def key_named(piece):
+    if piece in KEYS:
+        return KEYS[piece]
+    if TEXT_RUN.fullmatch(piece):
+        return Text(piece.decode(errors="replace"))
+    return "other"
 
 
 def live_line(text, began, frame, width, stream=None, indent="", **facts):

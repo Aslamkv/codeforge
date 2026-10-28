@@ -178,8 +178,24 @@ tinker
 On a colour terminal it opens with a banner showing the model, the embedding model, the projects folder and the chats it listens
 on. As in Claude Code, the prompt, with a rule over it, follows the output: it starts under the banner and
 moves down as Tinker prints, until it reaches the bottom row; then older lines scroll into the scrollback.
-What you type is never redrawn. Up and down bring back the lines you typed before, even from an earlier
-session. Resizing the window redraws the rule at the new size. Your lines show again
+The prompt edits like a shell: left and right, Home and End (or Ctrl-A and Ctrl-E), Backspace and Delete,
+Ctrl-U and Ctrl-K to clear to the start or the end, and Ctrl-W to delete the word before. Up and down bring
+back the lines you typed before, even from an earlier session. Ctrl-C clears the line, or quits on an empty
+one. When Tinker prints while you type, your line and the menu are drawn again under it.
+
+As in Claude Code, typing `/` lists the commands under the prompt, narrowed as you type (names that start
+with what you typed first, then names that hold it):
+
+```
+› /re
+› /restart [--yes]  build this folder's task again from scratch (asks first)
+  /rename [@PROJECT] NAME  rename the folder of a project whose plan waits
+  /research TOPIC  the web researched in depth, its facts checked across sites, and kept: slow
+  /read FILE | URL  store a book, an article or a document, then learn from every chapter
+```
+
+Up and down pick one, Tab fills it in, Enter sends a command that takes no words (or fills one that does),
+and Esc closes the list. Resizing the window redraws the rule at the new size. Your lines show again
 highlighted, Tinker's messages are marked with a steel blue `●`, and a `✻ Tinkering…` line above the prompt,
 with a steel blue glow moving across the word, shows the time, the tokens, how long the model thought and
 the current step while it works:

@@ -15,6 +15,7 @@ import pytest
 from conftest import ACCENT, BOLD, DIM, GREY, MEASURED, RESET, Terminal
 
 import tinkerkit.conversation as conversation
+from tinkerkit.commands import MenuRow, slash_matches, synopsis_words
 from tinkerkit.conversation import (
     Channel,
     ChannelError,
@@ -24,6 +25,7 @@ from tinkerkit.conversation import (
     Markup,
     Message,
     Progress,
+    PromptDrawer,
     Questions,
     Reporter,
     Shell,
@@ -37,10 +39,12 @@ from tinkerkit.conversation import (
     pieces,
     running,
     text_of,
+    typed_before,
     welcome,
 )
 from tinkerkit.jobs import began_at
 from tinkerkit.ledger import DONE_NOTE_KEPT_SECONDS, Ledger
+from tinkerkit.messages import Text
 from tinkerkit.model import Models, Ollama
 from tinkerkit.project import Runs, Tracker
 from tinkerkit.settings import Config, Home
@@ -317,7 +321,17 @@ def typing(monkeypatch, *lines):
         return typed.pop(0)
 
     monkeypatch.setattr("builtins.input", typed_line)
+    pressing(monkeypatch, *[key for line in lines for key in (Text(line), "enter")], "eof")
     return prompts
+
+
+def pressing(monkeypatch, *keys):
+    pressed = iter(keys)
+
+    def keys_left():
+        yield from pressed
+
+    monkeypatch.setattr(conversation.say, "keys", keys_left)
 
 
 def drawn_after(step):
@@ -386,6 +400,13 @@ def sent_back_shown(line, rows=1, block=(), columns=10):
     return above_the_rule(rows + len(block) + 1, shown)
 
 
+def prompt_typed(line, columns=10):
+    drawer = PromptDrawer("› ")
+    first = drawer.draw("", 0, [], columns)
+    typed = drawer.draw(line, len(line), [], columns) if line is not None else ""
+    return first + typed + drawer.done(line or "", columns)
+
+
 def stacked(line, count):
     return "\n".join([line] * count)
 
@@ -405,13 +426,72 @@ def test_console_marks_each_message_and_indents_its_lines_on_a_colour_terminal(m
 @pytest.mark.spec("CNV-8")
 def test_console_shows_your_line_again_highlighted_without_ruling_each_prompt(monkeypatch):
     console = ruled_console(monkeypatch)
-    prompts = typing(monkeypatch, "hello there", "", "exit")
+    typing(monkeypatch, "hello there", "", "exit")
     console.read()
-    assert prompts == ["› "] * 4
     assert sys.stdout.getvalue() == (
-        sent_back_shown("hello there", rows=2) + pulled_up(1, kept=0) + pulled_up(1, kept=0)
+        prompt_typed("hello there")
+        + sent_back_shown("hello there", rows=2)
+        + prompt_typed("")
+        + pulled_up(1, kept=0)
+        + prompt_typed("exit")
+        + pulled_up(1, kept=0)
+        + prompt_typed(None)
     )
     assert [console.lines.get() for _ in range(4)] == ["hello there", "", "exit", None]
+
+
+def lines_keyed(monkeypatch, *keys, columns=80):
+    console = ruled_console(monkeypatch, columns)
+    pressing(monkeypatch, *keys)
+    console.read()
+    return [console.lines.get() for _ in range(console.lines.qsize())]
+
+
+@pytest.mark.spec("MSG-9")
+def test_console_edits_the_prompt_line_with_cursor_keys(monkeypatch):
+    keys = [Text("helo"), "left", Text("l"), "end", Text(" world"), "home", "delete", Text("H"), "enter"]
+    assert lines_keyed(monkeypatch, *keys) == ["Hello world", None]
+
+
+@pytest.mark.spec("MSG-9")
+def test_console_brings_back_earlier_lines_with_up_and_down(monkeypatch):
+    readline.clear_history()
+    readline.add_history("earlier")
+    readline.add_history("latest")
+    try:
+        assert lines_keyed(monkeypatch, "up", "up", "down", "enter") == ["latest", None]
+    finally:
+        readline.clear_history()
+
+
+@pytest.mark.spec("MSG-9")
+def test_console_ctrl_c_clears_a_typed_line_and_quits_on_an_empty_one(monkeypatch):
+    assert lines_keyed(monkeypatch, Text("abc"), "ctrl-c", Text("d"), "enter") == ["d", None]
+    assert lines_keyed(monkeypatch, "ctrl-c", Text("never")) == [None]
+
+
+@pytest.mark.spec("MSG-10")
+def test_console_fills_the_command_picked_from_the_menu_and_reads_on(monkeypatch):
+    picked = slash_matches("/")[1].name
+    assert lines_keyed(monkeypatch, Text("/"), "down", "tab", Text("x"), "enter") == [f"/{picked} x", None]
+
+
+@pytest.mark.spec("MSG-10")
+def test_console_sends_a_command_without_words_on_enter_and_fills_the_rest(monkeypatch):
+    assert lines_keyed(monkeypatch, Text("/runs"), "enter") == ["/runs", None]
+    assert lines_keyed(monkeypatch, Text("/task"), "enter", Text("x"), "enter") == ["/task x", None]
+
+
+@pytest.mark.spec("MSG-10")
+def test_console_esc_closes_the_menu_and_keeps_the_typed_slash(monkeypatch):
+    assert lines_keyed(monkeypatch, Text("/"), "esc", "enter") == ["/", None]
+
+
+@pytest.mark.spec("MSG-10", "CNV-8")
+def test_console_draws_the_command_menu_under_the_prompt_line(monkeypatch):
+    first = slash_matches("/")[0]
+    lines_keyed(monkeypatch, Text("/"))
+    assert f"› /{first.name}{DIM} {synopsis_words(first)}" in sys.stdout.getvalue()
 
 
 @pytest.mark.spec("CNV-8")
@@ -427,10 +507,6 @@ def test_console_keeps_the_lines_typed_for_up_and_down_across_restarts(monkeypat
     reading_console(monkeypatch)
     assert typed_before() == ["first", "second"]
     assert (tinker_home / "prompt_history").exists()
-
-
-def typed_before():
-    return [readline.get_history_item(i) for i in range(1, readline.get_current_history_length() + 1)]
 
 
 @pytest.mark.spec("CNV-8")
@@ -706,6 +782,118 @@ def test_the_lines_under_the_live_line_are_cut_to_the_terminal_width(monkeypatch
     screen = live_screen(monkeypatch)
     screen.show_live("Learning", 100.0, under=["x" * 60])
     assert under_drawn("x" * (LIVE_COLUMNS - 3)) + "\033[K" in sys.stdout.getvalue()
+
+
+def menu_rows():
+    return [MenuRow(True, "/ask", "QUESTION", "answers a question"), MenuRow(False, "/clear", "", "clears")]
+
+
+@pytest.mark.spec("CNV-8")
+def test_prompt_drawer_draws_the_line_and_puts_the_cursor_at_the_column():
+    drawer = PromptDrawer("› ")
+    assert drawer.draw("hello", 2, [], 80) == "\r\033[J› hello\r\033[4C"
+    assert drawer.cursor_row == 0
+
+
+@pytest.mark.spec("MSG-10")
+def test_prompt_drawer_draws_the_menu_rows_under_the_line_and_goes_back_up():
+    drawer = PromptDrawer("› ")
+    drawn = drawer.draw("/", 1, menu_rows(), 80)
+    rows = "\r\n› /ask QUESTION  answers a question\r\n  /clear  clears"
+    assert drawn == "\r\033[J› /" + rows + "\033[2A\r\033[3C"
+
+
+@pytest.mark.spec("MSG-10")
+def test_prompt_drawer_cuts_menu_rows_to_one_less_than_the_width():
+    drawn = PromptDrawer("› ").draw("/", 1, menu_rows(), 12)
+    assert "\r\n› /ask QUES\r\n" in drawn and "\r\n  /clear  c\033" in drawn
+
+
+@pytest.mark.spec("MSG-10")
+def test_prompt_drawer_dims_the_words_on_a_colour_terminal(monkeypatch):
+    colour_terminal(monkeypatch)
+    drawn = PromptDrawer("› ").draw("/", 1, menu_rows()[:1], 80)
+    assert f"› /ask{DIM} QUESTION{RESET}  answers a question" in drawn
+
+
+@pytest.mark.spec("CNV-8")
+def test_prompt_drawer_follows_a_wrapped_line_and_starts_the_next_draw_from_its_top():
+    drawer = PromptDrawer("› ")
+    assert drawer.draw("x" * 12, 12, [], 10) == "\r\033[J› " + "x" * 12 + "\r\033[4C"
+    assert drawer.cursor_row == 1
+    assert drawer.draw("x", 1, [], 10).startswith("\033[1A\r\033[J› x")
+
+
+@pytest.mark.spec("CNV-8")
+def test_prompt_drawer_done_drops_the_menu_and_moves_below_the_line():
+    drawer = PromptDrawer("› ")
+    drawer.draw("x" * 12, 12, menu_rows(), 10)
+    assert drawer.done("x" * 12, 10) == "\033[1A\r\033[J› " + "x" * 12 + "\r\n"
+    assert drawer.cursor_row == 0
+
+
+@pytest.mark.spec("CNV-8")
+def test_prompt_drawer_taken_away_clears_from_the_line_top_and_draws_next_from_there():
+    drawer = PromptDrawer("› ")
+    drawer.draw("x" * 12, 12, menu_rows(), 10)
+    assert drawer.taken_away() == "\033[1A\r\033[J"
+    assert drawer.cursor_row == 0
+    assert drawer.draw("x", 1, [], 10).startswith("\r\033[J› x")
+
+
+def typing_on(screen, text="hi", rows=()):
+    drawer = PromptDrawer("› ")
+    drawer.draw(text, len(text), list(rows), 10)
+    screen.typing = (drawer, lambda: drawer.draw(text, len(text), list(rows), 10))
+
+
+def prompt_again(text="hi", rows=()):
+    return PromptDrawer("› ").draw(text, len(text), list(rows), 10)
+
+
+@pytest.mark.spec("CNV-8")
+@pytest.mark.parametrize("rows", [[], menu_rows()], ids=["line", "with-menu"])
+def test_a_print_while_typing_takes_the_prompt_away_and_draws_it_again(monkeypatch, rows):
+    screen = ruled_screen(monkeypatch)
+    typing_on(screen, rows=rows)
+    printed = drawn_after(lambda: screen.print("hello"))
+    assert printed == "\r\033[J" + printed_above("hello") + prompt_again(rows=rows)
+
+
+@pytest.mark.spec("CNV-8")
+def test_a_resize_while_typing_takes_the_prompt_away_before_drawing_the_rule_again(monkeypatch):
+    screen = ruled_screen(monkeypatch)
+    typing_on(screen)
+    resized_to(monkeypatch, 5)
+    printed = drawn_after(lambda: screen.print("hello"))
+    assert printed.startswith("\r\033[J" + RULE_REDRAWN_NARROWER)
+
+
+@pytest.mark.spec("CNV-8")
+def test_the_live_block_while_typing_draws_the_prompt_again_and_a_quiet_tick_draws_nothing(
+    monkeypatch, clock
+):
+    screen = ruled_screen(monkeypatch)
+    typing_on(screen)
+    assert drawn_after(screen.tick) == ""
+    shown = drawn_after(lambda: screen.show_live("Learning", 100.0))
+    assert shown.startswith("\r\033[J") and shown.endswith(prompt_again())
+
+
+@pytest.mark.spec("CNV-8")
+def test_a_print_from_elsewhere_while_typing_keeps_the_typed_text_and_ends_typing(monkeypatch):
+    console = ruled_console(monkeypatch)
+
+    def keys_left():
+        yield Text("hi")
+        printed.append(drawn_after(lambda: console.screen.print("hello")))
+        yield "enter"
+
+    printed = []
+    monkeypatch.setattr(conversation.say, "keys", keys_left)
+    assert console.typed_line() == "hi"
+    assert printed == ["\r\033[J" + printed_above("hello") + prompt_again()]
+    assert console.screen.typing is None
 
 
 @pytest.fixture
@@ -1874,15 +2062,13 @@ def test_the_terminal_reads_and_exits_at_once_while_periodic_work_waits(monkeypa
 
         return wait
 
-    typed = ["exit"]
+    typed = iter([Text("exit"), "enter", "eof"])
 
-    def exit_once_it_waits(prompt):
+    def exit_once_it_waits():
         assert waits.wait(timeout=5)
-        if not typed:
-            raise EOFError
-        return typed.pop()
+        yield from typed
 
-    monkeypatch.setattr("builtins.input", exit_once_it_waits)
+    monkeypatch.setattr(conversation.say, "keys", exit_once_it_waits)
     patched = {"collect": (console, waiting()), "status": (desk, waiting(status, passing=1))}
     owner, stand_in = patched.get(slow, (desk, waiting()))
     monkeypatch.setattr(owner, slow, stand_in)

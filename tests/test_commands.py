@@ -1,7 +1,20 @@
 import pytest
 
 from tinkerkit import cli, conversation
-from tinkerkit.commands import BY_NAME, COMMANDS, GROUPS, deletes, kind_of, ref, refs, taught_command
+from tinkerkit.commands import (
+    BY_NAME,
+    COMMANDS,
+    GROUPS,
+    CommandMenu,
+    MenuAnswer,
+    deletes,
+    kind_of,
+    ref,
+    refs,
+    slash_matches,
+    taught_command,
+)
+from tinkerkit.messages import Text
 
 
 @pytest.mark.spec("CMD-1")
@@ -124,3 +137,94 @@ def test_project_references():
 )
 def test_a_learn_is_a_command_only_when_its_words_say_so(words, taught):
     assert taught_command(words) == taught
+
+
+def names(commands):
+    return [command.name for command in commands]
+
+
+def menu_on(text):
+    menu = CommandMenu()
+    menu.follow(text)
+    return menu
+
+
+@pytest.mark.spec("MSG-10")
+def test_slash_matches_name_starts_first_then_name_holds_in_table_order():
+    chat = [command.name for command in COMMANDS if command.chat]
+    assert names(slash_matches("/")) == chat
+    assert names(slash_matches("/st")) == ["status", "stop", "restart", "history"]
+    assert names(slash_matches("/mod")) == ["models", "use-model"]
+    assert names(slash_matches("/xyz")) == []
+
+
+@pytest.mark.spec("MSG-10")
+def test_slash_matches_only_chat_commands_and_only_a_slash_word():
+    not_chat = [command.name for command in COMMANDS if not command.chat and command.name]
+    assert not set(names(slash_matches("/"))) & set(not_chat)
+    assert slash_matches("task") == [] and slash_matches("") == [] and slash_matches("/task a") == []
+
+
+@pytest.mark.spec("MSG-10")
+def test_the_menu_rows_show_the_name_its_synopsis_words_and_what_it_does():
+    rows = menu_on("/tas").rows()
+    task = BY_NAME["task"]
+    assert rows == [(True, "/task", "WHAT TO BUILD", task.what)]
+    assert menu_on("/runs").rows()[0][2] == ""
+
+
+@pytest.mark.spec("MSG-10")
+def test_up_and_down_move_the_current_row_scroll_eight_and_stop_at_the_ends():
+    menu = menu_on("/")
+    count = len(menu.matches)
+    assert count > 9
+    assert [row[1] for row in menu.rows()] == ["/" + name for name in names(menu.matches[:8])]
+    assert menu.press("up") == MenuAnswer(None, False) and menu.current == 0
+    for _ in range(8):
+        menu.press("down")
+    rows = menu.rows()
+    assert len(rows) == 8 and rows[-1] == (True, "/" + menu.matches[8].name, *rows[-1][2:])
+    assert rows[0][1] == "/" + menu.matches[1].name
+    for _ in range(count + 3):
+        menu.press("down")
+    assert menu.current == count - 1 and menu.rows()[-1][0]
+    for _ in range(count + 3):
+        menu.press("up")
+    assert menu.current == 0 and menu.rows()[0] == (True, "/" + menu.matches[0].name, *menu.rows()[0][2:])
+
+
+@pytest.mark.spec("MSG-10")
+def test_tab_fills_the_line_and_closes_the_menu():
+    menu = menu_on("/ru")
+    assert menu.press("tab") == MenuAnswer("/runs ", False) and not menu.open
+    menu = menu_on("/ta")
+    assert menu.press("tab") == MenuAnswer("/task ", False) and not menu.open
+
+
+@pytest.mark.spec("MSG-10")
+def test_enter_sends_a_command_without_words_and_fills_one_that_takes_words():
+    menu = menu_on("/ru")
+    assert menu.press("enter") == MenuAnswer("/runs", True) and not menu.open
+    menu = menu_on("/ta")
+    assert menu.press("enter") == MenuAnswer("/task ", False) and not menu.open
+    menu.follow("/task ")
+    assert not menu.open
+
+
+@pytest.mark.spec("MSG-10")
+def test_esc_closes_the_menu_until_typing_narrows_it_again():
+    menu = menu_on("/r")
+    assert menu.press("esc") == MenuAnswer(None, False) and not menu.open
+    menu.follow("/r")
+    assert not menu.open
+    menu.follow("/ru")
+    assert menu.open and names(menu.matches) == ["runs", "run"]
+
+
+@pytest.mark.spec("MSG-10")
+def test_the_menu_is_closed_without_a_match_and_leaves_other_keys():
+    menu = menu_on("/xyz")
+    assert not menu.open and menu.press("down") is None and menu.press("enter") is None
+    menu = menu_on("/r")
+    assert menu.open and menu.press("left") is None and menu.press(Text("u")) is None
+    assert menu.press("backspace") is None
