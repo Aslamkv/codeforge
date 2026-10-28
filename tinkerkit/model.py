@@ -693,7 +693,7 @@ class Calibrator:
         return settings
 
     def summary(self, settings):
-        ratio, think = settings["chars_per_token"], settings["think"]
+        ratio = settings["chars_per_token"]
         read, write = settings["read_tokens_per_s"], settings["write_tokens_per_s"]
         prompt, reply = settings["max_prompt_tokens"], settings["max_reply_tokens"]
         return "\n   ".join(
@@ -704,11 +704,15 @@ class Calibrator:
                 f"📥 Takes requests up to about {self.words(prompt, ratio)} words ({prompt:,} tokens)",
                 f"📤 Replies up to about {self.words(reply, ratio)} words ({reply:,} tokens)",
                 f"🧠 Solved {settings['solved']} of {len(settings['quality_tasks'])} test tasks",
-                f"💭 Thinks before it answers (think: {str(think).lower()})"
-                if think
-                else "💭 Answers without thinking (think: false)",
+                self.thinking(settings["think"]),
             ]
         )
+
+    @staticmethod
+    def thinking(think):
+        if think:
+            return f"💭 Thinks before it answers (think: {str(think).lower()})"
+        return "💭 Answers without thinking (think: false)"
 
     @classmethod
     def about_words(cls, tokens, chars_per_token):

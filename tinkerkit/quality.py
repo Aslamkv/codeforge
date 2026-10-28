@@ -1,5 +1,4 @@
 import json
-import random
 from pathlib import Path
 
 TASKS = Path(__file__).parent / "quality_tasks.json"
@@ -11,7 +10,7 @@ def tasks():
     return json.loads(TASKS.read_text())
 
 
-def pick(count, rng=random):
+def pick(count, rng):
     return rng.sample(tasks(), count)
 
 

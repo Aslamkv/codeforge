@@ -22,6 +22,7 @@ LAYERS = (
     "ledger",
     "prompts",
     "workspace",
+    "quality",
     "model",
     "project",
     "fetcher",

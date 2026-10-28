@@ -58,7 +58,9 @@ Check that everything is ready (it tells you how to fix what is missing):
 tinker doctor
 ```
 
-Pull a model, then measure it once and use it:
+Pull a model, then measure it once and use it. Calibration takes about a minute: it checks how fast the model
+reads and writes, how much it can take in and reply, and has it solve 3 small test tasks. It ends with a
+summary in plain words, exact figures in brackets, and keeps every run in its history:
 
 ```sh
 ollama pull qwen3
@@ -83,7 +85,7 @@ ollama pull qwen3-embedding:0.6b
 tinker embed qwen3-embedding:0.6b
 ```
 
-See the models Ollama has, and which are measured:
+See the models Ollama has, which are measured, and how many test tasks each solved (`SOLVED`, e.g. `2/3`):
 
 ```sh
 tinker models

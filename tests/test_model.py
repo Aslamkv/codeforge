@@ -524,6 +524,8 @@ def test_calibrate_writes_the_measured_settings(fake_ollama, monkeypatch, no_sle
         f"Checking it can read about {Calibrator.words(2048, ratio)} words at once (2,048 tokens, about",
         "Read it in 2s",
         "Solving 3 small test tasks…",
+        f"✅ Task {drawn[0]}",
+        f"❌ Task {drawn[2]}",
         "Solved 2 of 3",
     ):
         assert line in out
