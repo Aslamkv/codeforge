@@ -310,6 +310,95 @@ def moved(current, key, count):
     return min(max(current + step, 0), count - 1)
 
 
+class LineEditor:
+    def __init__(self, history=()):
+        self.history = list(history)
+        self.place = len(self.history)
+        self.draft = ""
+        self.text = ""
+        self.cursor = 0
+        self.answer = None
+
+    @property
+    def column(self):
+        return visible_width(self.text[: self.cursor])
+
+    def press(self, key):
+        if isinstance(key, Text):
+            self.insert(key.text)
+            return False
+        return bool(getattr(self, "on_" + key.replace("-", "_"), self.ignore)())
+
+    def replace(self, text):
+        self.text, self.cursor = text, len(text)
+
+    def insert(self, text):
+        self.text = self.text[: self.cursor] + text + self.text[self.cursor :]
+        self.cursor += len(text)
+
+    def cut(self, start, end):
+        self.text = self.text[:start] + self.text[end:]
+        self.cursor = start
+
+    def ignore(self):
+        return False
+
+    def on_left(self):
+        self.cursor = max(self.cursor - 1, 0)
+
+    def on_right(self):
+        self.cursor = min(self.cursor + 1, len(self.text))
+
+    def on_home(self):
+        self.cursor = 0
+
+    def on_end(self):
+        self.cursor = len(self.text)
+
+    on_ctrl_a = on_home
+    on_ctrl_e = on_end
+
+    def on_backspace(self):
+        self.cut(max(self.cursor - 1, 0), self.cursor)
+
+    def on_delete(self):
+        self.cut(self.cursor, self.cursor + 1)
+
+    def on_ctrl_u(self):
+        self.cut(0, self.cursor)
+
+    def on_ctrl_k(self):
+        self.cut(self.cursor, len(self.text))
+
+    def on_ctrl_w(self):
+        self.cut(len(re.sub(r"\S*\s*$", "", self.text[: self.cursor])), self.cursor)
+
+    def on_up(self):
+        if self.place > 0:
+            if self.place == len(self.history):
+                self.draft = self.text
+            self.place -= 1
+            self.replace(self.history[self.place])
+
+    def on_down(self):
+        if self.place < len(self.history):
+            self.place += 1
+            self.replace(self.history[self.place] if self.place < len(self.history) else self.draft)
+
+    def on_enter(self):
+        self.answer = self.text
+        return True
+
+    def on_ctrl_c(self):
+        if self.text:
+            self.replace("")
+            return False
+        return True
+
+    def on_eof(self):
+        return not self.text
+
+
 def choice_rows(choices, current):
     return "\r\n".join(
         LINE_START + choice_row(label, dim, index == current) + CLEAR_TO_LINE_END

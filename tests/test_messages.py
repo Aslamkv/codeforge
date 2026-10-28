@@ -10,6 +10,7 @@ from conftest import ACCENT, DIM, RESET, Terminal
 
 from tinkerkit import project as project_module
 from tinkerkit.messages import (
+    LineEditor,
     Message,
     Messages,
     Text,
@@ -506,3 +507,107 @@ def test_keys_waiting_together_are_split_from_the_text():
 def test_a_utf8_character_cut_short_lacks_its_last_bytes():
     smile = "🙂".encode()
     assert [lacking(b"a" + smile[:cut]) for cut in range(5)] == [0, 3, 2, 1, 0]
+
+
+def edited(*keys, history=()):
+    editor = LineEditor(history)
+    for key in keys:
+        editor.press(key)
+    return editor
+
+
+@pytest.mark.spec("MSG-9")
+def test_text_goes_in_at_the_cursor():
+    editor = edited(Text("ac"), "left", Text("b"))
+    assert (editor.text, editor.cursor) == ("abc", 2)
+
+
+@pytest.mark.spec("MSG-9")
+def test_left_and_right_stop_at_the_ends():
+    assert edited(Text("ab"), "left", "left", "left").cursor == 0
+    assert edited(Text("ab"), "right").cursor == 2
+
+
+@pytest.mark.spec("MSG-9")
+@pytest.mark.parametrize("key,cursor", [("home", 0), ("ctrl-a", 0), ("end", 3), ("ctrl-e", 3)])
+def test_home_and_end_go_to_the_ends(key, cursor):
+    assert edited(Text("abc"), "left", key).cursor == cursor
+
+
+@pytest.mark.spec("MSG-9")
+def test_backspace_and_delete_take_one_character():
+    editor = edited(Text("abcd"), "left", "left", "backspace", "delete")
+    assert (editor.text, editor.cursor) == ("ad", 1)
+    assert edited(Text("a"), "home", "backspace").text == "a"
+    assert edited(Text("a"), "delete").text == "a"
+
+
+@pytest.mark.spec("MSG-9")
+def test_ctrl_u_and_ctrl_k_cut_to_the_ends():
+    editor = edited(Text("abcd"), "left", "left", "ctrl-u")
+    assert (editor.text, editor.cursor) == ("cd", 0)
+    editor = edited(Text("abcd"), "left", "left", "ctrl-k")
+    assert (editor.text, editor.cursor) == ("ab", 2)
+
+
+@pytest.mark.spec("MSG-9")
+def test_ctrl_w_takes_the_word_before():
+    editor = edited(Text("run the  tests"), "left", "left", "ctrl-w")
+    assert (editor.text, editor.cursor) == ("run the  ts", 9)
+    editor = edited(Text("run the  "), "ctrl-w")
+    assert (editor.text, editor.cursor) == ("run ", 4)
+
+
+@pytest.mark.spec("MSG-9")
+def test_up_and_down_go_through_the_lines_typed_before():
+    history = ["first", "second"]
+    assert edited("up", history=history).text == "second"
+    assert edited("up", "up", "up", history=history).text == "first"
+    editor = edited(Text("draft"), "up", "up", "down", history=history)
+    assert (editor.text, editor.cursor) == ("second", 6)
+    assert edited(Text("draft"), "up", "down", "down", history=history).text == "draft"
+    assert edited(Text("draft"), "up", history=()).text == "draft"
+
+
+@pytest.mark.spec("MSG-9")
+def test_enter_gives_the_line():
+    editor = LineEditor()
+    assert editor.press(Text("hi")) is False
+    assert editor.press("enter") is True
+    assert editor.answer == "hi"
+
+
+@pytest.mark.spec("MSG-9")
+@pytest.mark.parametrize("key", ["ctrl-c", "eof"])
+def test_ctrl_c_or_end_of_input_on_an_empty_line_give_none(key):
+    editor = LineEditor()
+    assert editor.press(key) is True
+    assert editor.answer is None
+
+
+@pytest.mark.spec("MSG-9")
+def test_ctrl_c_on_a_line_empties_it():
+    editor = LineEditor()
+    editor.press(Text("hi"))
+    assert editor.press("ctrl-c") is False
+    assert (editor.text, editor.cursor) == ("", 0)
+
+
+@pytest.mark.spec("MSG-9")
+def test_end_of_input_on_a_line_keeps_it():
+    editor = LineEditor()
+    editor.press(Text("hi"))
+    assert editor.press("eof") is False
+    assert editor.text == "hi"
+
+
+@pytest.mark.spec("MSG-9")
+def test_the_cursor_counts_a_wide_character_as_two_columns():
+    assert edited(Text("a界b"), "left").column == 3
+
+
+@pytest.mark.spec("MSG-9")
+def test_the_line_can_be_replaced():
+    editor = edited(Text("/he"))
+    editor.replace("/help ")
+    assert (editor.text, editor.cursor) == ("/help ", 6)
