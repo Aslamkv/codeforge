@@ -1,5 +1,6 @@
 from collections import namedtuple
 lazy import json
+lazy import random
 lazy import secrets
 lazy import subprocess
 lazy import sys
@@ -33,6 +34,8 @@ from .settings import (
     PROBE_SAMPLE_TOKENS,
     PROGRESS_UPDATE_SECONDS,
     PROMPT_BUDGET_SHARE,
+    QUALITY_REPLY_TOKENS,
+    QUALITY_TASK_COUNT,
     QUICK_REPLY_TIMEOUT,
     REPLY_ERROR_RETRIES,
     RUNNER_OVERHEAD_BYTES,
@@ -45,6 +48,7 @@ from .settings import (
 )
 from .text import first_line, now_text
 lazy from .jobs import journaled
+lazy from .quality import pick, solves
 lazy from .prompts import Part, Prompts, PromptTooLarge, Reply
 lazy from .workspace import ToolError
 
@@ -613,6 +617,7 @@ class Models:
     @staticmethod
     def keep(name, settings):
         Home.store().put("models", name, settings)
+        Home.store().append("calibrations", settings)
 
     @staticmethod
     def remember(model):
@@ -661,8 +666,9 @@ class Calibrator:
 # A request asks for the due list; the reply is JSON: {"items": [...], "count": 3}.
 """
 
-    def __init__(self, name):
+    def __init__(self, name, rng=None):
         self.name = name
+        self.rng = rng or random
         self.tokens_per_digit = 1.0
         self.largest_read_stats = {}
         self.load_seconds = None
@@ -681,6 +687,7 @@ class Calibrator:
         context, crash = self.capacity(target, facts)
         budget, max_reply = self.shared(context)
         settings = self.settings(facts, think, budget, context, crash, max_reply)
+        settings.update(self.quality(think, settings["num_ctx"]))
         Ollama.unload(self.name)
         Models.keep(self.name, settings)
         say.took(
@@ -773,6 +780,23 @@ class Calibrator:
             {"num_ctx": context, "num_predict": 64},
             think,
         )
+
+    def quality(self, think, context):
+        tasks = pick(QUALITY_TASK_COUNT, self.rng)
+        solved = sum(self.solves_task(task, think, context) for task in tasks)
+        return {"solved": solved, "quality_tasks": [task["id"] for task in tasks]}
+
+    def solves_task(self, task, think, context):
+        reply = Ollama.chat(
+            self.name,
+            [{"role": "user", "content": task["prompt"]}],
+            CALIBRATION_KEEP_ALIVE,
+            {"num_ctx": context, "num_predict": QUALITY_REPLY_TOKENS},
+            think,
+        )
+        solved = reply.get("done_reason") != "length" and solves(reply["message"]["content"], task["answer"])
+        say.info(f"Task {task['id']}: {'solved' if solved else 'missed'}", "🧩")
+        return solved
 
     def show_first_chat(self, think):
         with say.section():

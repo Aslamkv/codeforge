@@ -1,5 +1,6 @@
 import io
 import json
+import random
 import urllib.error
 import urllib.request
 
@@ -7,10 +8,18 @@ import pytest
 from conftest import MEASURED, MODEL
 
 import tinkerkit.model as model_module
+from tinkerkit import quality
 from tinkerkit.messages import say
 from tinkerkit.model import Answer, Calibrator, GgufReading, Model, Models, Ollama, OllamaError, Stream
 from tinkerkit.prompts import Part, Prompts, PromptTooLarge, Reply
-from tinkerkit.settings import PROMPT_BUDGET_SHARE, STARTING_CHARS_PER_TOKEN, Config, Home
+from tinkerkit.settings import (
+    PROMPT_BUDGET_SHARE,
+    QUALITY_REPLY_TOKENS,
+    QUALITY_TASK_COUNT,
+    STARTING_CHARS_PER_TOKEN,
+    Config,
+    Home,
+)
 
 
 class Body(io.BytesIO):
@@ -489,12 +498,23 @@ def test_calibrate_writes_the_measured_settings(fake_ollama, monkeypatch, no_sle
         ),
     )
     fake_ollama.reply({"content": "OK", "prompt_eval_count": 400, "eval_count": 2, "eval_duration": 1e8})
-    settings = Calibrator("m").run()
+    answers = {task["prompt"]: task["answer"] for task in quality.tasks()}
+    fake_ollama.reply(lambda messages: answers[messages[0]["content"]], times=2)
+    fake_ollama.reply("not the answer")
+    drawn = [task["id"] for task in quality.pick(QUALITY_TASK_COUNT, random.Random(5))]
+    settings = Calibrator("m", random.Random(5)).run()
     saved = Models.settings("m")
     assert saved == settings and Home.store().get("models", "m") == settings
     assert saved["max_prompt_tokens"] == 13653 and saved["max_reply_tokens"] == 27307
     assert saved["fix_max_tokens"] == 4096 and saved["num_ctx"] == 40960 and saved["think"] == "high"
     assert saved["probes"] == [[2048, "read"]] and 2.0 <= saved["chars_per_token"] <= 4.0
+    assert saved["solved"] == 2 and saved["quality_tasks"] == drawn
+    asked = fake_ollama.calls[-QUALITY_TASK_COUNT:]
+    assert all(call["think"] == "high" for call in asked)
+    assert all(call["options"] == {"num_ctx": 40960, "num_predict": QUALITY_REPLY_TOKENS} for call in asked)
+    assert [dict(entry.entry, time=None) for entry in Home.store().entries("calibrations")] == [
+        dict(settings, time=None)
+    ]
     assert fake_ollama.unloaded[-1] == "m"
     assert (
         f"Calibrated m: reads {saved['read_tokens_per_s']:g} tokens a second, "
@@ -506,6 +526,15 @@ def test_calibrate_writes_the_measured_settings(fake_ollama, monkeypatch, no_sle
 @pytest.mark.parametrize("tokens_per_s,text", [(None, "?"), (12.0, "12"), (12.5, "12.5")])
 def test_speed_text(tokens_per_s, text):
     assert Calibrator.speed_text(tokens_per_s) == text
+
+
+@pytest.mark.spec("MOD-27")
+def test_a_reply_cut_off_before_an_answer_fails_its_task(fake_ollama):
+    answers = {task["prompt"]: task["answer"] for task in quality.tasks()}
+    fake_ollama.reply({"content": "", "thinking": "Let me", "done_reason": "length"})
+    fake_ollama.reply(lambda messages: answers[messages[0]["content"]], times=2)
+    probe = Calibrator("m", random.Random(3)).quality(True, 8192)
+    assert probe["solved"] == 2 and len(probe["quality_tasks"]) == QUALITY_TASK_COUNT
 
 
 @pytest.mark.spec("MOD-16")
