@@ -68,8 +68,6 @@ CHAT_COMMAND_OUTPUT_READ_CHARS = 6000
 PLAN_CONFIRMING_COMMANDS = tuple(
     command.name for command in COMMANDS if "--confirm" in (option.flag for option in command.options)
 )
-ONE_WORD_COMMANDS = tuple(command.name for command in COMMANDS if command.chat and command.words == "one")
-ANY_WORDS_COMMANDS = tuple(command.name for command in COMMANDS if command.chat and command.words == "any")
 COMMAND_NAMES = tuple(command.name for command in COMMANDS if command.name)
 BARE_RE = re.compile(
     r"(?<![/\w.-])tinker (?=(?:" + "|".join(sorted(COMMAND_NAMES, key=len, reverse=True)) + r")\b)"
@@ -361,6 +359,9 @@ class Desk:
             return
         message = self.with_words_wanted(channel, message)
         command = command_of(message.text)
+        if not command and unknown_command(message.text):
+            channel.send(message.chat, unknown_command(message.text))
+            return
         already_answered_in_a_message = message.id and (
             command in ("confirm",) + EXIT_WORDS or exercise_switch(message.text)
         )
@@ -400,15 +401,9 @@ class Desk:
         if not question or not question.wanted:
             return message
         wanted = self.questions.answered(channel, message.chat).wanted
-        if self.command_of_its_own(message, command_of(message.text), wanted):
+        if message.text.startswith("/"):
             return message
-        return Message(message.chat, f"{wanted} {message.text}", message.sender, message.id)
-
-    @staticmethod
-    def command_of_its_own(message, command, wanted):
-        return command and (
-            message.text.startswith("/") or len(message.text.split()) == 1 or command == wanted
-        )
+        return Message(message.chat, f"/{wanted} {message.text}", message.sender, message.id)
 
     def asked_with_words(self, channel, message, command):
         if len(message.text.split()) == 1:
@@ -1021,17 +1016,18 @@ def shown_output(output):
 
 
 def command_of(text, commands=None):
+    first = slash_word(text)
+    return first if first in (commands or Desk.COMMANDS) else ""
+
+
+def slash_word(text):
     words = text.split()
-    first = command_word(words[0]) if words else ""
-    if first not in (commands or Desk.COMMANDS):
-        return ""
-    if takes_these_words(first, words):
-        return first
-    return ""
+    return command_word(words[0]) if words and words[0].startswith("/") else ""
 
 
-def takes_these_words(first, words):
-    return len(words) == 1 or first in ANY_WORDS_COMMANDS or (first in ONE_WORD_COMMANDS and len(words) == 2)
+def unknown_command(text):
+    word = text.split()[0].partition("@")[0] if text.startswith("/") else ""
+    return f"❓ No command {word}: /help lists them" if len(word) > 1 else ""
 
 
 def command_words(text):
@@ -1674,7 +1670,7 @@ def tracker_of(job):
 
 def exercise_switch(text):
     words = text.split()
-    return len(words) > 1 and words[0].lstrip("/").lower() == "exercise" and words[1].lower() != "status"
+    return command_of(text) == "exercise" and len(words) > 1 and words[1].lower() != "status"
 
 
 def headline(status):

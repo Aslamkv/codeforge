@@ -174,18 +174,23 @@ def test_pieces_split_between_lines_and_lose_no_text():
 @pytest.mark.parametrize(
     "text,command",
     [
-        ("status", "status"),
+        ("/status", "status"),
         ("/Status", "status"),
-        ("status abc123", "status"),
-        ("status of my build please", ""),
-        ("task a calculator", "task"),
+        ("/status abc123", "status"),
+        ("/status of my build please", "status"),
+        ("status", ""),
+        ("status abc123", ""),
+        ("/task a calculator", "task"),
+        ("task a calculator", ""),
         ("models are getting better", ""),
-        ("models", "models"),
+        ("/models", "models"),
         ("hello", ""),
+        ("/hello", ""),
         ("", ""),
-        ("confirm", "confirm"),
-        ("confirm abc123", "confirm"),
-        ("research the new python", "research"),
+        ("/", ""),
+        ("/confirm", "confirm"),
+        ("/confirm abc123", "confirm"),
+        ("/research the new python", "research"),
         ("/use_model", "use-model"),
         ("/status@tinker_bot", "status"),
     ],
@@ -1779,18 +1784,38 @@ def test_a_command_sent_alone_asks_for_its_words(desk, monkeypatch):
     say(desk, channel, "/fix")
     assert answered == [] and channel.texts()[-1].startswith("✍️ **fix** · fix a bug")
     say(desk, channel, "typing 2/0 crashes")
-    say(desk, channel, "ask")
+    say(desk, channel, "/ask")
     starts_with_a_command_word = "help me"
     say(desk, channel, starts_with_a_command_word)
     say(desk, channel, "/read")
-    a_file_to_read = "read /tmp/book.epub"
+    a_file_to_read = "/read /tmp/book.epub"
     say(desk, channel, a_file_to_read)
     say(desk, channel, "/teach")
     a_command_of_its_own = "/status"
     say(desk, channel, a_command_of_its_own)
-    say(desk, channel, "status")
-    assert answered == ["fix typing 2/0 crashes", "ask help me", "read /tmp/book.epub", "/status", "status"]
+    say(desk, channel, "/teach")
+    say(desk, channel, "status codes in HTTP")
+    assert answered == [
+        "/fix typing 2/0 crashes",
+        "/ask help me",
+        "/read /tmp/book.epub",
+        "/status",
+        "/teach status codes in HTTP",
+    ]
     assert desk.questions.by_chat == {}
+
+
+@pytest.mark.spec("CNV-5")
+def test_a_slash_word_that_names_no_command_is_only_answered(desk, monkeypatch):
+    desk, channel, _ = desk
+    heard = []
+    monkeypatch.setattr(desk, "answer", lambda message, channel: heard.append(message.text))
+    monkeypatch.setattr(desk.talk, "answer", lambda channel, message, *rest: heard.append(message.text))
+    say(desk, channel, "/frobnicate the build")
+    assert heard == [] and channel.texts()[-1] == "❓ No command /frobnicate: /help lists them"
+    say(desk, channel, "status of my build")
+    say(desk, channel, "/status")
+    assert heard == ["status of my build", "/status"]
 
 
 @pytest.mark.spec("CNV-13")
@@ -1800,28 +1825,28 @@ def test_a_model_pick_sent_alone_asks_with_buttons(desk, monkeypatch):
     monkeypatch.setattr(desk, "answer", lambda message, channel: answered.append(message.text))
     monkeypatch.setattr(Models, "command_choices", lambda command: [("qwen3", True), ("big", False)])
     monkeypatch.setattr(Models, "in_use", lambda command: "qwen3")
-    say(desk, channel, "calibrate")
-    assert answered == ["calibrate"]
+    say(desk, channel, "/calibrate")
+    assert answered == ["/calibrate"]
     monkeypatch.setattr(
         channel, "choose", lambda chat, question, names: chosen.append((question, names)) or 7
     )
     say(desk, channel, "/use_model")
-    assert answered == ["calibrate"] and chosen == [
+    assert answered == ["/calibrate"] and chosen == [
         ("🧠 **use-model** · choose a model (in use: qwen3)", ["qwen3"])
     ]
     say(desk, channel, "qwen3")
-    assert answered[-1] == "use-model qwen3"
+    assert answered[-1] == "/use-model qwen3"
     monkeypatch.setattr(Models, "in_use", lambda command: None)
-    say(desk, channel, "calibrate")
+    say(desk, channel, "/calibrate")
     assert chosen[-1][0] == "🧠 **calibrate** · choose a model"
     say(desk, channel, "qwen3")
     monkeypatch.setattr(Models, "command_choices", lambda command: [("big", False)])
-    say(desk, channel, "embed")
+    say(desk, channel, "/embed")
     monkeypatch.setattr(
         Models, "command_choices", lambda command: (_ for _ in ()).throw(SystemExit("no Ollama"))
     )
-    say(desk, channel, "embed")
-    assert answered[-2:] == ["embed", "embed"] and len(chosen) == 2
+    say(desk, channel, "/embed")
+    assert answered[-2:] == ["/embed", "/embed"] and len(chosen) == 2
 
 
 @pytest.mark.spec("CNV-14")
@@ -2265,7 +2290,7 @@ def test_memory_graph_is_sent_as_a_file(desk, monkeypatch):
         return "Tinker's memory: 2 lessons; 3 links"
 
     monkeypatch.setattr(desk, "tinker", make_page)
-    assert command_of("memory --graph") == "memory"
+    assert command_of("/memory --graph") == "memory"
     assert desk.answer(Message("1", "memory --graph"), channel) is None
     assert desk.ran == [["memory", "--graph"]]
     assert sent == [("1", page, "🧠 **Tinker's memory**\nTinker's memory: 2 lessons; 3 links")]
@@ -2281,7 +2306,7 @@ def test_memory_graph_is_sent_as_a_file(desk, monkeypatch):
 def test_memory_with_words_is_browsed_in_a_chat(desk, monkeypatch):
     desk, channel, _ = desk
     monkeypatch.setattr(desk, "tinker", lambda words: desk.ran.append(words) or "[2d35d6] ✅ lesson    Seed")
-    assert command_of("memory python lessons 2") == "memory"
+    assert command_of("/memory python lessons 2") == "memory"
     answer = desk.answer(Message("1", "memory python lessons 2"), channel)
     assert desk.ran == [["memory", "python", "lessons", "2"]]
     assert answer == "🧠 **memory python lessons 2**\n```\n[2d35d6] ✅ lesson    Seed\n```"

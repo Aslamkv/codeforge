@@ -507,9 +507,10 @@ def wait_for_the_reporter_to_end(desk):
 
 @pytest.mark.spec("EXR-7")
 def test_exercise_commands_that_switch_it_show_in_its_message_alone():
-    assert conversation.exercise_switch("exercise rust") and conversation.exercise_switch(
+    assert conversation.exercise_switch("/exercise rust") and conversation.exercise_switch(
         "/exercise python 3"
     )
-    assert not conversation.exercise_switch("exercise status") and not conversation.exercise_switch(
-        "exercise"
+    assert not conversation.exercise_switch("/exercise status") and not conversation.exercise_switch(
+        "/exercise"
     )
+    assert not conversation.exercise_switch("exercise rust")

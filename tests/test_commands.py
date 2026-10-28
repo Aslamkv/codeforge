@@ -79,9 +79,6 @@ def test_the_command_line_and_the_conversation_read_the_table():
     on_the_command_line = set(cli.Cli.COMMANDS) | set(cli.Cli.TALK_COMMANDS) | {"help", "channel", "confirm"}
     assert on_the_command_line == {command.name for command in COMMANDS if command.cli}
     assert set(conversation.Desk.COMMANDS) == {command.name for command in COMMANDS if command.chat}
-    assert set(conversation.ONE_WORD_COMMANDS) == {
-        command.name for command in COMMANDS if command.chat and command.words == "one"
-    }
     assert conversation.USAGE["task"] == "✍️ Write `task WHAT TO BUILD`, e.g. `task a calculator in Python`"
     for command in cli.Cli.COMMANDS:
         parser = cli.Cli.parser(command)
