@@ -9,7 +9,7 @@ lazy import urllib.error
 lazy import urllib.parse
 lazy import urllib.request
 
-from .messages import say
+from .messages import DIMMED, HEADING, say, styled
 from .settings import (
     CALIBRATION_KEEP_ALIVE,
     CAPACITY_SEARCH_PRECISION,
@@ -260,7 +260,7 @@ class Model:
         if crashes > CRASH_RETRIES:
             raise OllamaError(
                 f"{exc}\n{self.name} crashed {crashes} times on this call, {last}. If this keeps "
-                f"happening, measure the model again: tinker calibrate {self.name}",
+                f"happening, measure the model again: tinker model calibrate {self.name}",
                 crashed=True,
             )
 
@@ -475,8 +475,8 @@ class Model:
     def too_large_why(self, exc):
         return (
             f"even shortened, the prompt does not fit {self.name}'s input budget of {self.max_tokens} tokens "
-            f"({exc}). Measure the model again (tinker calibrate) or use one that reads longer prompts "
-            f"(tinker models)"
+            f"({exc}). Measure the model again (tinker model calibrate) or use one that reads longer prompts "
+            f"(tinker model)"
         )
 
     def limit_chars(self, system, tokens=None):
@@ -508,14 +508,6 @@ class Models:
         return models
 
     @staticmethod
-    def choices():
-        return [(name, Models.settings(name) is not None) for name in Models.named(embedding=False)]
-
-    @staticmethod
-    def embedding_choices():
-        return [(name, True) for name in Models.named(embedding=True)]
-
-    @staticmethod
     def named(embedding):
         return [name for name in Models.names() if Models.embeds(Ollama.capabilities(name)) == embedding]
 
@@ -524,26 +516,119 @@ class Models:
         return [model.get("name", "") for model in Models.answering()]
 
     @staticmethod
+    def rows():
+        general, embeddings = Models.named(embedding=False), Models.named(embedding=True)
+        sizes = {model.get("name", ""): model.get("size") or 0 for model in Models.answering()}
+        width = Models.width(general + embeddings)
+        return Models.section("— general —", [Models.general_row(name, width) for name in general]) + (
+            Models.section(
+                "— embeddings —", [Models.embedding_row(name, sizes[name], width) for name in embeddings]
+            )
+        )
+
+    @staticmethod
+    def calibrate_rows():
+        general = Models.named(embedding=False)
+        width = Models.width(general)
+        return Models.section(
+            "— general —", [Models.label(Models.general_row(name, width)) for name in general]
+        )
+
+    @staticmethod
+    def width(names):
+        return max(len(name) for name in names) + 2 if names else 0
+
+    @staticmethod
+    def section(heading, rows):
+        return [(heading, HEADING), *rows] if rows else []
+
+    @staticmethod
+    def general_row(name, width):
+        settings = Models.settings(name)
+        if settings is None:
+            return (f"{name:<{width}}not measured yet · choosing it measures it (about a minute)", DIMMED)
+        facts = [
+            f"writes {Models.speed_words(settings, 'write_tokens_per_s')} words/s",
+            f"reads {Models.speed_words(settings, 'read_tokens_per_s')} words/s",
+            Models.tasks_text(name, settings),
+        ]
+        return f"{name:<{width}}" + " · ".join(Models.in_use_facts(name, "model", facts))
+
+    @staticmethod
+    def embedding_row(name, size, width):
+        return f"{name:<{width}}" + " · ".join(
+            Models.in_use_facts(name, "embed_model", [f"{size / 1e9:.1f} GB"])
+        )
+
+    @staticmethod
+    def in_use_facts(name, setting, facts):
+        return ["in use", *facts] if Config.get(setting) == name else facts
+
+    @staticmethod
+    def speed_words(settings, key):
+        speed = settings.get(key)
+        return "?" if speed is None else f"~{Calibrator.words(speed, settings['chars_per_token'])}"
+
+    @staticmethod
+    def tasks_text(name, settings):
+        if "solved" in settings:
+            return Models.solved_text(settings)
+        return f"test tasks not run · tinker model calibrate {name} runs them"
+
+    @staticmethod
+    def solved_text(settings):
+        return f"solved {settings['solved']} of {len(settings['quality_tasks'])}"
+
+    @staticmethod
+    def recipe():
+        measured = [(name, kept) for name in Models.named(embedding=False) if (kept := Models.settings(name))]
+        if len(measured) < 2:
+            return []
+        fastest = max(measured, key=lambda pair: (Models.words_per_second(pair[1]), Models.solved(pair[1])))
+        writes = f"writes {Models.speed_words(fastest[1], 'write_tokens_per_s')} words/s"
+        fastest_line = f"⚡ Fastest: {fastest[0]} ({writes})"
+        tested = [pair for pair in measured if "solved" in pair[1]]
+        if not tested:
+            return [fastest_line]
+        best = max(tested, key=lambda pair: (Models.solved(pair[1]), Models.words_per_second(pair[1])))
+        if best is fastest:
+            return [f"🏆 {best[0]} is the best and the fastest ({Models.solved_text(best[1])}, {writes})"]
+        return [f"🏆 Best quality: {best[0]} ({Models.solved_text(best[1])})", fastest_line]
+
+    @staticmethod
+    def say_recipe():
+        for line in Models.recipe():
+            say.text(line)
+
+    @staticmethod
+    def solved(settings):
+        return settings.get("solved") or 0
+
+    @staticmethod
+    def words_per_second(settings):
+        return (settings.get("write_tokens_per_s") or 0) * settings["chars_per_token"]
+
+    @staticmethod
     def command_choices(command):
-        if command == "embed":
-            return Models.embedding_choices()
-        choices = Models.choices()
-        return [(name, True) for name, _ in choices] if command == "calibrate" else choices
+        return Models.calibrate_rows() if command == "calibrate" else Models.rows()
 
     @staticmethod
     def embeds(capabilities):
         return not capabilities or "embedding" in capabilities
 
     @staticmethod
-    def picked(command, choices):
-        names, current = [name for name, _ in choices], Models.in_use(command)
-        start = names.index(current) if current in names else 0
-        index = say.pick([(name, not plain) for name, plain in choices], start)
+    def picked(rows):
+        names, current = [Models.row_name(row) for row in rows], Config.get("model")
+        index = say.pick(rows, names.index(current) if current in names else 1)
         return None if index is None else names[index]
 
     @staticmethod
-    def in_use(command):
-        return Config.get("embed_model" if command == "embed" else "model")
+    def row_name(row):
+        return Models.label(row).split()[0]
+
+    @staticmethod
+    def label(row):
+        return styled(row)[0]
 
     @staticmethod
     def installed(name):
@@ -552,7 +637,8 @@ class Models:
             close = [candidate for candidate in names if name.lower() in candidate.lower()]
             hint = f" Did you mean {' or '.join(close)}?" if close else ""
             raise SystemExit(
-                f"Ollama has no model named '{name}'.{hint} Installed: {', '.join(names) or 'none'}"
+                f"Ollama has no model named '{name}'.{hint} Installed: {', '.join(names) or 'none'} "
+                "(tinker model lists them)"
             )
         return name
 
@@ -561,17 +647,19 @@ class Models:
         name = Config.get("model")
         if not name:
             raise SystemExit(
-                "No model in use. Measure one Ollama has with tinker calibrate NAME, then select it with "
-                "tinker use-model NAME (tinker models lists them)."
+                "No model in use. Use one Ollama has with tinker model NAME, which measures it first if it was "
+                "never measured (tinker model lists them)."
             )
         settings = Models.settings(name)
         if settings is None:
-            raise SystemExit(f"{name}, the model in use, has not been measured: tinker calibrate {name}")
+            raise SystemExit(
+                f"{name}, the model in use, has not been measured: tinker model calibrate {name}"
+            )
         broken = Models.unusable_measurements(settings)
         if broken:
             raise SystemExit(
                 f"What was measured for {name} has no usable {', '.join(broken)}: measure the model "
-                f"again with tinker calibrate {name}"
+                f"again with tinker model calibrate {name}"
             )
         return SelectedModel(name, settings)
 
@@ -643,7 +731,7 @@ class Models:
             f"{model.name} crashed {model.crashes} time(s) this run"
             + (f"; lowered for this run only: {', '.join(lowered)}" if lowered else "")
             + f". If crashes keep happening, measure it again: "
-            f"tinker calibrate {model.name}"
+            f"tinker model calibrate {model.name}"
         )
 
     @staticmethod

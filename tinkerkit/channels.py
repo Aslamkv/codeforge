@@ -352,7 +352,7 @@ class TelegramChannel(Channel):
 
     def offer(self, commands):
         menu = [
-            {"command": name.replace("-", "_"), "description": what[:TELEGRAM_MAX_MENU_DESCRIPTION_CHARS]}
+            {"command": name, "description": what[:TELEGRAM_MAX_MENU_DESCRIPTION_CHARS]}
             for name, what in commands
         ]
         try:

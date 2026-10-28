@@ -9,7 +9,7 @@ from conftest import MEASURED, MODEL
 
 import tinkerkit.model as model_module
 from tinkerkit import quality
-from tinkerkit.messages import say
+from tinkerkit.messages import DIMMED, HEADING, say
 from tinkerkit.model import Answer, Calibrator, GgufReading, Model, Models, Ollama, OllamaError, Stream
 from tinkerkit.prompts import Part, Prompts, PromptTooLarge, Reply
 from tinkerkit.settings import (
@@ -94,10 +94,10 @@ def test_installed(monkeypatch):
 
 
 @pytest.mark.spec("MOD-26")
-def test_choices(home_store, monkeypatch):
+def test_named_splits_general_and_embedding_models(monkeypatch):
     monkeypatch.setattr(Ollama, "installed_models", staticmethod(lambda: None))
     with pytest.raises(SystemExit, match="Ollama does not answer"):
-        Models.choices()
+        Models.named(embedding=False)
     monkeypatch.setattr(
         Ollama,
         "installed_models",
@@ -111,23 +111,113 @@ def test_choices(home_store, monkeypatch):
         "llama3": ["completion", "tools"],
     }
     monkeypatch.setattr(Ollama, "capabilities", staticmethod(capabilities.get))
-    Models.keep("llama3", MEASURED)
-    assert Models.choices() == [("qwen3:8b", False), ("llama3", True)]
+    assert Models.named(embedding=False) == ["qwen3:8b", "llama3"]
+    assert Models.named(embedding=True) == ["nomic-embed", "old"]
 
 
-@pytest.mark.spec("MOD-26")
-def test_embedding_choices(monkeypatch):
-    monkeypatch.setattr(Ollama, "installed_models", staticmethod(lambda: None))
-    with pytest.raises(SystemExit, match="Ollama does not answer"):
-        Models.embedding_choices()
-    monkeypatch.setattr(
-        Ollama,
-        "installed_models",
-        staticmethod(lambda: [{"name": "qwen3:8b"}, {"name": "nomic-embed"}, {"name": "old"}]),
-    )
-    capabilities = {"qwen3:8b": ["completion"], "nomic-embed": ["embedding"], "old": None}
+def installed(monkeypatch, models, capabilities):
+    monkeypatch.setattr(Ollama, "installed_models", staticmethod(lambda: models))
     monkeypatch.setattr(Ollama, "capabilities", staticmethod(capabilities.get))
-    assert Models.embedding_choices() == [("nomic-embed", True), ("old", True)]
+
+
+def measured(solved, write, read=300.0):
+    return dict(
+        MEASURED, solved=solved, quality_tasks=[1, 2, 3], write_tokens_per_s=write, read_tokens_per_s=read
+    )
+
+
+@pytest.mark.spec("MOD-29")
+def test_rows(home_store, monkeypatch):
+    installed(
+        monkeypatch,
+        [{"name": "qwen3:8b"}, {"name": "nomic", "size": 274_000_000}, {"name": "llama3"}, {"name": "phi"}],
+        {"qwen3:8b": ["completion"], "nomic": ["embedding"], "llama3": ["completion"], "phi": ["completion"]},
+    )
+    Models.keep("llama3", measured(2, 38.0))
+    Models.keep("phi", dict(MEASURED))
+    Config.save(model="llama3", embed_model="nomic")
+    assert Models.rows() == [
+        ("— general —", HEADING),
+        ("qwen3:8b  not measured yet · choosing it measures it (about a minute)", DIMMED),
+        "llama3    in use · writes ~19 words/s · reads ~150 words/s · solved 2 of 3",
+        "phi       writes ? words/s · reads ? words/s · test tasks not run · tinker model calibrate phi runs them",
+        ("— embeddings —", HEADING),
+        "nomic     in use · 0.3 GB",
+    ]
+
+
+@pytest.mark.spec("MOD-29")
+def test_rows_leave_out_a_group_with_no_model(home_store, monkeypatch):
+    installed(monkeypatch, [{"name": "qwen3:8b"}], {"qwen3:8b": ["completion"]})
+    assert Models.rows() == [
+        ("— general —", HEADING),
+        ("qwen3:8b  not measured yet · choosing it measures it (about a minute)", DIMMED),
+    ]
+
+
+def unsolved(write):
+    return dict(MEASURED, write_tokens_per_s=write)
+
+
+def recipe_for(monkeypatch, settings):
+    names = list(settings) + ["unmeasured", "nomic"]
+    capabilities = {name: ["completion"] for name in names} | {"nomic": ["embedding"]}
+    installed(monkeypatch, [{"name": name} for name in names], capabilities)
+    for name, kept in settings.items():
+        Models.keep(name, kept)
+    return Models.recipe()
+
+
+@pytest.mark.spec("MOD-30")
+def test_recipe_names_the_best_and_the_fastest(home_store, monkeypatch):
+    assert recipe_for(monkeypatch, {"a": measured(3, 20.0), "b": measured(1, 80.0)}) == [
+        "🏆 Best quality: a (solved 3 of 3)",
+        "⚡ Fastest: b (writes ~40 words/s)",
+    ]
+
+
+@pytest.mark.spec("MOD-30")
+@pytest.mark.parametrize(
+    "settings, line",
+    [
+        (
+            {"a": measured(1, 20.0), "b": measured(3, 80.0)},
+            "b is the best and the fastest (solved 3 of 3, writes ~40",
+        ),
+        (
+            {"a": measured(2, 80.0), "c": measured(3, 80.0)},
+            "c is the best and the fastest (solved 3 of 3, writes ~40",
+        ),
+        (
+            {"d": measured(3, 20.0), "e": measured(3, 80.0)},
+            "e is the best and the fastest (solved 3 of 3, writes ~40",
+        ),
+        (
+            {"a": measured(2, 20.0), "b": measured(2, 20.0)},
+            "a is the best and the fastest (solved 2 of 3, writes ~10",
+        ),
+    ],
+    ids=["one-model", "speed-tie-by-quality", "quality-tie-by-speed", "full-tie-by-ollama-order"],
+)
+def test_recipe_says_one_line_for_a_model_both_best_and_fastest(home_store, monkeypatch, settings, line):
+    assert recipe_for(monkeypatch, settings) == [f"🏆 {line} words/s)"]
+
+
+@pytest.mark.spec("MOD-30")
+def test_a_model_that_never_ran_the_test_tasks_can_only_be_fastest(home_store, monkeypatch):
+    assert recipe_for(monkeypatch, {"a": measured(1, 20.0), "b": unsolved(80.0)}) == [
+        "🏆 Best quality: a (solved 1 of 3)",
+        "⚡ Fastest: b (writes ~40 words/s)",
+    ]
+    assert recipe_for(monkeypatch, {"c": unsolved(20.0), "d": unsolved(80.0)}) == [
+        "⚡ Fastest: d (writes ~40 words/s)"
+    ]
+
+
+@pytest.mark.spec("MOD-30")
+def test_no_recipe_with_fewer_than_two_measured(home_store, monkeypatch):
+    assert recipe_for(monkeypatch, {}) == []
+    assert recipe_for(monkeypatch, {"a": measured(3, 20.0)}) == []
 
 
 @pytest.mark.spec("MOD-26")
@@ -146,17 +236,20 @@ def test_capabilities_asks_show_once(monkeypatch):
 
 
 @pytest.mark.spec("MOD-26")
-def test_picked_starts_at_the_model_the_command_sets(home_store, monkeypatch):
+def test_picked_starts_at_the_model_in_use(home_store, monkeypatch):
     shown = []
-    monkeypatch.setattr(say, "pick", lambda choices, start: shown.append((choices, start)) or 1)
-    choices = [("qwen3:8b", False), ("llama3", True)]
-    Config.save(model="llama3", embed_model="gone")
-    assert Models.picked("use-model", choices) == "llama3"
-    assert Models.picked("embed", choices) == "llama3"
-    assert shown == [
-        ([("qwen3:8b", True), ("llama3", False)], 1),
-        ([("qwen3:8b", True), ("llama3", False)], 0),
+    monkeypatch.setattr(say, "pick", lambda choices, start: shown.append((choices, start)) or 2)
+    rows = [
+        ("— general —", HEADING),
+        ("qwen3:8b  not measured yet", DIMMED),
+        "llama3    solved 2 of 3",
+        "phi",
     ]
+    Config.save(model="phi")
+    assert Models.picked(rows) == "llama3"
+    Config.save(model="gone")
+    assert Models.picked(rows) == "llama3"
+    assert shown == [(rows, 3), (rows, 1)]
 
 
 @pytest.mark.spec("MOD-4")
@@ -806,7 +899,7 @@ def test_ask_until_usable(make_model, fake_ollama, monkeypatch):
     monkeypatch.setattr(model, "ask", too_large)
     answer = model.ask_until_usable("s", [], "Plan", lambda reply: reply)
     assert answer.value is None and "even shortened, the prompt does not fit" in answer.why
-    assert "(too big)" in answer.why and "tinker calibrate" in answer.why
+    assert "(too big)" in answer.why and "tinker model calibrate" in answer.why
 
 
 @pytest.mark.spec("MOD-22")

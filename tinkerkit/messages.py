@@ -260,6 +260,7 @@ class Messages:
     def pick(self, choices, start=0):
         if not self.screen:
             self.end_live()
+        choices = [styled(choice) for choice in choices]
         current = start
         keys = self.keys()
         terminal_write(choice_rows(choices, current))
@@ -269,7 +270,7 @@ class Messages:
                     return current
                 if key in ("esc", "ctrl-c", "eof"):
                     return None
-                current = moved(current, key, len(choices))
+                current = moved(current, key, choices)
                 terminal_write(rows_up(choices) + choice_rows(choices, current))
             return None
         finally:
@@ -305,9 +306,10 @@ def terminal_write(text):
     sys.__stdout__.flush()
 
 
-def moved(current, key, count):
+def moved(current, key, choices):
     step = {"up": -1, "down": 1}.get(key, 0)
-    return min(max(current + step, 0), count - 1)
+    ahead = range(current + step, len(choices) if step > 0 else -1, step or 1)
+    return next((index for index in ahead if choices[index][1].selectable), current)
 
 
 class LineEditor:
@@ -399,15 +401,40 @@ class LineEditor:
         return not self.text
 
 
+class Plain:
+    selectable = True
+
+    def row(self, label, marked):
+        return ("› " if marked else "  ") + self.shown(label)
+
+    def shown(self, label):
+        return label
+
+
+class Dimmed(Plain):
+    def shown(self, label):
+        return paint(label, "dim")
+
+
+class Heading(Plain):
+    selectable = False
+
+    def row(self, label, marked):
+        return paint(label, "bold")
+
+
+PLAIN, DIMMED, HEADING = Plain(), Dimmed(), Heading()
+
+
+def styled(choice):
+    return (choice, PLAIN) if isinstance(choice, str) else choice
+
+
 def choice_rows(choices, current):
     return "\r\n".join(
-        LINE_START + choice_row(label, dim, index == current) + CLEAR_TO_LINE_END
-        for index, (label, dim) in enumerate(choices)
+        LINE_START + style.row(label, index == current) + CLEAR_TO_LINE_END
+        for index, (label, style) in enumerate(choices)
     )
-
-
-def choice_row(label, dim, marked):
-    return ("› " if marked else "  ") + (paint(label, "dim") if dim else label)
 
 
 def rows_up(choices):

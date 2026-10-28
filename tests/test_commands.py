@@ -1,4 +1,5 @@
 import pytest
+from conftest import MEASURED
 
 from tinkerkit import cli, conversation
 from tinkerkit.commands import (
@@ -15,6 +16,7 @@ from tinkerkit.commands import (
     taught_command,
 )
 from tinkerkit.messages import Text
+from tinkerkit.settings import Config
 
 
 @pytest.mark.spec("CMD-1")
@@ -42,7 +44,6 @@ def test_the_kind_of_a_command_and_of_its_actions_comes_from_the_table():
         "read",
         "exercise",
         "resume",
-        "calibrate",
     ]
     assert [command.name for command in COMMANDS if command.kind == "pauses"] == ["chat", "command"]
 
@@ -66,12 +67,30 @@ def test_the_kind_of_a_command_and_of_its_actions_comes_from_the_table():
         (["channel", "remove"], "terminal"),
         (["channel", "start"], "terminal"),
         (["channel", "list"], "glance"),
+        (["model"], "glance"),
+        (["model", "calibrate"], "glance"),
+        (["model", "calibrate", "qwen3"], "job"),
         (["fly"], None),
         ([], None),
     ],
 )
 def test_the_kind_of_an_action_comes_from_its_command(argv, kind):
     assert kind_of(argv) == kind
+
+
+@pytest.mark.spec("CMD-1")
+def test_model_of_a_never_measured_model_is_a_job(home_store):
+    home_store.put("models", "measured", MEASURED)
+    Config.save(embed_model="nomic")
+    assert kind_of(["model", "measured"]) == "glance"
+    assert kind_of(["model", "nomic"]) == "glance"
+    assert kind_of(["model", "fresh"]) == "job"
+
+
+@pytest.mark.spec("JOB-1")
+def test_model_of_an_embedding_model_not_yet_in_use_is_a_job(home_store):
+    Config.save(embed_model="nomic")
+    assert kind_of(["model", "mxbai-embed"]) == "job"
 
 
 @pytest.mark.spec("CMD-1")
@@ -151,7 +170,7 @@ def test_slash_matches_name_starts_first_then_name_holds_in_table_order():
     chat = [command.name for command in COMMANDS if command.chat]
     assert names(slash_matches("/")) == chat
     assert names(slash_matches("/st")) == ["status", "stop", "restart", "history"]
-    assert names(slash_matches("/mod")) == ["models", "use-model"]
+    assert names(slash_matches("/mod")) == ["model"]
     assert names(slash_matches("/xyz")) == []
 
 

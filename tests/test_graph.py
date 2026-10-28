@@ -161,7 +161,7 @@ def test_similar_lessons_by_meaning_else_by_words(home_store):
     by_words = Graph.build(FakeEmbeddings(None))
     assert by_words.similar_by == "words (embed-model gave no embeddings)"
     assert similar(by_words) == {frozenset((ids[texts[0]], ids[texts[1]]))}
-    assert Graph.build().similar_by == "words (no embedding model selected (tinker embed NAME))"
+    assert Graph.build().similar_by == "words (no embedding model selected (tinker model NAME))"
 
 
 @pytest.mark.spec("GRF-4")

@@ -6,10 +6,12 @@ import sys
 from pathlib import Path
 
 import pytest
-from conftest import ACCENT, DIM, RESET, Terminal
+from conftest import ACCENT, BOLD, DIM, RESET, Terminal
 
 from tinkerkit import project as project_module
 from tinkerkit.messages import (
+    DIMMED,
+    HEADING,
     LineEditor,
     Message,
     Messages,
@@ -366,7 +368,7 @@ def scripted(*keys):
     return lambda: (key for key in keys)
 
 
-def picking(*keys, choices=(("one", False), ("two", False), ("three", False)), start=0):
+def picking(*keys, choices=("one", "two", "three"), start=0):
     say.keys = scripted(*keys)
     return say.pick(list(choices), start)
 
@@ -403,12 +405,6 @@ def test_other_keys_change_nothing(terminal):
 
 
 @pytest.mark.spec("MSG-8")
-def test_dim_choices_are_drawn_dim(colored_terminal):
-    picking("enter", choices=(("ready", False), ("not pulled", True)))
-    assert frames(colored_terminal, 2)[0] == ["› ready", f"  {DIM}not pulled{RESET}"]
-
-
-@pytest.mark.spec("MSG-8")
 def test_the_list_is_cleared_when_pick_ends(terminal):
     picking("down", "enter")
     assert terminal.getvalue().endswith("\033[2A\r\033[J")
@@ -424,6 +420,27 @@ def test_pick_leaves_a_screens_live_block_above_the_prompt(terminal, clock):
 
 
 @pytest.mark.spec("MSG-8")
+def test_choices_show_plain_dim_or_as_a_heading(colored_terminal):
+    picking("enter", choices=("ready", ("not pulled", DIMMED), ("Embeddings", HEADING)))
+    assert frames(colored_terminal)[0] == ["› ready", f"  {DIM}not pulled{RESET}", f"{BOLD}Embeddings{RESET}"]
+
+
+HEADED = (("Chat", HEADING), "one", "two", ("Embeddings", HEADING), "three")
+
+
+@pytest.mark.spec("MSG-8")
+def test_up_and_down_step_over_headings(terminal):
+    assert picking("down", "down", "down", "up", "enter", choices=HEADED, start=1) == 2
+    marked = [frame.index(next(row for row in frame if row.startswith("›"))) for frame in frames(terminal, 5)]
+    assert marked == [1, 2, 4, 4, 2]
+
+
+@pytest.mark.spec("MSG-8")
+def test_up_stops_below_a_heading_at_the_top(terminal):
+    assert picking("up", "enter", choices=HEADED, start=1) == 1
+
+
+@pytest.mark.spec("MSG-8")
 def test_pick_gives_the_terminal_back_however_it_ends(terminal):
     closed = []
 
@@ -434,7 +451,7 @@ def test_pick_gives_the_terminal_back_however_it_ends(terminal):
             closed.append(True)
 
     say.keys = keys
-    say.pick([("one", False)], 0)
+    say.pick(["one"], 0)
     assert closed == [True]
 
 

@@ -176,7 +176,7 @@ class Graph:
         )
 
     def alike_in_words(self, embeddings, texts):
-        why = embeddings.failed if embeddings else "no embedding model selected (tinker embed NAME)"
+        why = embeddings.failed if embeddings else "no embedding model selected (tinker model NAME)"
         self.similar_by = f"words ({why})" if texts else "words"
         return lambda first, second: similarity(texts[first], texts[second]) >= SIMILAR_LESSON_WORDS
 

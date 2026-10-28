@@ -43,7 +43,7 @@ LEARN_STOP_CAUSES = frozendict(
     {
         "embeddings": (
             "no embedding model is selected",
-            "select one with tinker embed NAME, then learn again",
+            "select one with tinker model NAME, then learn again",
         ),
         "no-results": (
             "the search found nothing",
