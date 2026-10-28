@@ -1642,10 +1642,10 @@ def test_desk_answers_commands(desk):
 @pytest.mark.spec("CNV-11")
 def test_a_command_that_deletes_and_exit_ask_first(desk):
     desk, channel, _ = desk
-    assert desk.answer(Message("1", "clear memory"), channel) is None
+    assert desk.answer(Message("1", "/clear memory"), channel) is None
     assert desk.ran == [["clear", "memory"]] and "👉 `confirm` to delete it" in channel.texts()[-1]
-    assert desk.answer(Message("1", "exit"), channel) is None and "**Stop Tinker?**" in channel.texts()[-1]
-    say(desk, channel, "confirm")
+    assert desk.answer(Message("1", "/exit"), channel) is None and "**Stop Tinker?**" in channel.texts()[-1]
+    say(desk, channel, "/confirm")
     wait_until(lambda: channel.closed)
 
 
@@ -1659,7 +1659,7 @@ def test_a_deletion_preview_is_what_tinker_printed_without_its_errors(tmp_path, 
     monkeypatch.setattr(conversation, "tinker_command", lambda: [sys.executable, str(script)])
     channel = Recorder(chats=("1",))
     desk = Desk([channel], tmp_path)
-    desk.answer(Message("1", "clear runs"), channel)
+    desk.answer(Message("1", "/clear runs"), channel)
     shown = channel.texts()[-1]
     assert "Delete these runs:" in shown and "abc123" in shown
     assert "Nothing deleted" not in shown and "👉 `confirm` to delete it" in shown
@@ -1668,7 +1668,7 @@ def test_a_deletion_preview_is_what_tinker_printed_without_its_errors(tmp_path, 
 @pytest.mark.spec("CNV-11")
 def test_a_task_runs_as_its_own_tinker_and_its_plan_waits(desk, home_store):
     desk, channel, script = desk
-    say(desk, channel, "task a calculator")
+    say(desk, channel, "/task a calculator")
     wait_until(lambda: desk.waiting_plan is not None)
     assert calls_of(script) == ["help", "task a calculator --confirm"]
     assert (
@@ -1683,7 +1683,7 @@ def test_a_task_runs_as_its_own_tinker_and_its_plan_waits(desk, home_store):
 @pytest.mark.spec("CNV-18")
 def test_research_in_a_chat_is_the_research_job_ending_with_its_answer(desk):
     desk, channel, script = desk
-    say(desk, channel, "research the newest Python")
+    say(desk, channel, "/research the newest Python")
     wait_until(lambda: not desk.busy())
     assert calls_of(script) == ["help", "research the newest Python"]
     wait_until(lambda: "came out in October" in channel.texts()[-1])
@@ -1694,13 +1694,13 @@ def test_research_in_a_chat_is_the_research_job_ending_with_its_answer(desk):
 @pytest.mark.spec("CNV-12")
 def test_confirm_asks_a_new_projects_folder_once_then_builds(desk):
     desk, channel, script = desk
-    say(desk, channel, "task a calculator")
+    say(desk, channel, "/task a calculator")
     wait_until(lambda: desk.waiting_plan is not None)
-    say(desk, channel, "confirm")
+    say(desk, channel, "/confirm")
     assert desk.waiting_plan["stage"] == "name" and any(
         "📁 **Its folder:** `calc`" in text for text in channel.texts()[-3:]
     )
-    say(desk, channel, "confirm")
+    say(desk, channel, "/confirm")
     wait_until(lambda: "resume @abc123" in calls_of(script))
     wait_until(lambda: not desk.busy())
     assert desk.waiting_plan is None
@@ -1709,10 +1709,10 @@ def test_confirm_asks_a_new_projects_folder_once_then_builds(desk):
 @pytest.mark.spec("CNV-11")
 def test_a_confirmed_plan_is_kept_without_its_next_step_lines(desk):
     desk, channel, script = desk
-    say(desk, channel, "task a calculator")
+    say(desk, channel, "/task a calculator")
     wait_until(lambda: desk.waiting_plan is not None)
-    say(desk, channel, "confirm")
-    say(desk, channel, "rename sums")
+    say(desk, channel, "/confirm")
+    say(desk, channel, "/rename sums")
     wait_until(lambda: "resume @abc123" in calls_of(script))
     kept = desk.reporter.plan_on_top.splitlines()
     assert kept[0].startswith("📋 **Plan for calc** · run `abc123`") and kept[-1] == "📁 `sums`"
@@ -1735,11 +1735,11 @@ def a_features_plan(root):
 def test_confirm_of_a_feature_builds_at_once_and_amend_changes_it(desk):
     desk, channel, script = desk
     desk.waiting_plan = a_features_plan(desk.root)
-    say(desk, channel, "amend also keep the date")
+    say(desk, channel, "/amend also keep the date")
     wait_until(lambda: "amend @abc123 also keep the date" in calls_of(script))
     wait_until(lambda: not desk.busy())
     desk.waiting_plan = a_features_plan(desk.root)
-    say(desk, channel, "confirm @calc")
+    say(desk, channel, "/confirm @calc")
     wait_until(lambda: "resume @abc123" in calls_of(script))
 
 
@@ -1747,11 +1747,11 @@ def test_confirm_of_a_feature_builds_at_once_and_amend_changes_it(desk):
 def test_what_waits_for_confirm_is_cancelled_by_anything_else(desk, monkeypatch):
     desk, channel, _ = desk
     monkeypatch.setattr(desk.talk, "answer", lambda *args, **kwargs: None)
-    desk.answer(Message("1", "clear memory"), channel)
+    desk.answer(Message("1", "/clear memory"), channel)
     say(desk, channel, "no thanks")
     assert "🚫 _Not done:_ `clear memory`" in channel.texts()[-1] and desk.ran == [["clear", "memory"]]
-    desk.answer(Message("1", "clear memory"), channel)
-    say(desk, channel, "confirm")
+    desk.answer(Message("1", "/clear memory"), channel)
+    say(desk, channel, "/confirm")
     wait_until(lambda: ["clear", "memory", "--yes"] in desk.ran)
     assert desk.decide("confirm", ["confirm"]).startswith("🤷 No plan waits")
     assert desk.rename({}, ["rename", "x"]).startswith("🤷 No plan waits")
@@ -1762,15 +1762,15 @@ def test_what_waits_for_confirm_is_cancelled_by_anything_else(desk, monkeypatch)
 def test_a_chat_has_one_question_and_a_new_one_cancels_the_one_before(desk, monkeypatch):
     desk, channel, _ = desk
     monkeypatch.setattr(desk.talk, "answer", lambda *args, **kwargs: None)
-    desk.answer(Message("1", "clear memory"), channel)
-    say(desk, channel, "clear runs")
+    desk.answer(Message("1", "/clear memory"), channel)
+    say(desk, channel, "/clear runs")
     assert any(text.startswith("🚫 _Not done:_ `clear memory`") for text in channel.texts())
     assert len(desk.questions.by_chat) == 1
-    say(desk, channel, "confirm")
+    say(desk, channel, "/confirm")
     wait_until(lambda: ["clear", "runs", "--yes"] in desk.ran)
     assert ["clear", "memory", "--yes"] not in desk.ran and desk.questions.by_chat == {}
     desk.shell.name(channel, Message("1", "list files"), desk.running_now)
-    say(desk, channel, "confirm")
+    say(desk, channel, "/confirm")
     assert channel.texts()[-1].startswith("⏳ The command is still being worked out")
     say(desk, channel, "hello")
     assert desk.questions.waiting(channel, "1").naming
@@ -1857,26 +1857,26 @@ def test_a_glance_goes_soon_and_history_shows_things_again(desk, monkeypatch):
         channel, "glance", lambda chat, asked, sent, keep=None: glances.append((chat, asked, sent, keep))
     )
     monkeypatch.setattr(channel, "clear", lambda: 3)
-    desk.hear(channel, Message("1", "jobs", "you", id=7))
+    desk.hear(channel, Message("1", "/jobs", "you", id=7))
     assert glances == [("1", 7, [101], None)]
-    assert desk.answer(Message("1", "history"), channel) == "📜 **History:** nothing shown in the chats yet"
+    assert desk.answer(Message("1", "/history"), channel) == "📜 **History:** nothing shown in the chats yet"
     Ledger.shown("rec", "1", None, [5], "🔨 **calc**\n▸ build", "task a calculator")
-    listed = desk.answer(Message("1", "history"), channel)
+    listed = desk.answer(Message("1", "/history"), channel)
     assert "`#1`" in listed and "🔨 calc" in listed and "_you: task a calculator_" in listed
-    again = desk.answer(Message("1", "history #1"), channel)
+    again = desk.answer(Message("1", "/history #1"), channel)
     assert again.startswith("📜 **#1**") and "💬 _you:_ task a calculator" in again
     assert again.endswith("🔨 **calc**\n▸ build") and "No #9" in desk.answer(
-        Message("1", "history #9"), channel
+        Message("1", "/history #9"), channel
     )
-    assert desk.answer(Message("1", "clear chat"), channel) is None
+    assert desk.answer(Message("1", "/clear chat"), channel) is None
     assert (
         channel.texts()[-1].startswith("🧹 **Chat cleared:** 3 messages taken out")
         and glances[-1][3] == DONE_NOTE_KEPT_SECONDS
     )
     monkeypatch.setattr(desk, "tinker", lambda words: Home.clear(["history"], yes=True) or "Cleared history.")
-    desk.answer(Message("1", "clear history"), channel)
+    desk.answer(Message("1", "/clear history"), channel)
     shown = len(channel.texts())
-    say(desk, channel, "confirm")
+    say(desk, channel, "/confirm")
     wait_until(lambda: len(channel.texts()) > shown)
     assert channel.texts()[-1].startswith("🧹 **clear history: done, and the chat:** 3 messages taken out")
     nothing_left = ([], 1)
@@ -2018,7 +2018,7 @@ def test_the_status_is_sent_anew_as_tinker_starts_and_the_goodbye_is_handed_on(d
     handed = goodbyes_handed(monkeypatch)
     status_before = 55
     home_store.put("listening", "bot", {"1": status_before})
-    exit_said, confirm_said = Message("1", "exit", id=1), Message("1", "confirm", id=2)
+    exit_said, confirm_said = Message("1", "/exit", id=1), Message("1", "/confirm", id=2)
     channel = Listening("bot", inbox=[exit_said, confirm_said])
     collected = []
     channel.collect = lambda: collected.append(True)
@@ -2055,7 +2055,7 @@ def test_a_chat_unloads_the_model_in_use_and_the_embedding_model_when_it_ends(
     monkeypatch.setattr(conversation, "ENDED_LOOK_SECONDS", 0.05)
     goodbyes_handed(monkeypatch)
     Config.save(model="m", embed_model="e")
-    channel = Listening("bot", inbox=[Message("1", "exit", id=1), Message("1", "confirm", id=2)])
+    channel = Listening("bot", inbox=[Message("1", "/exit", id=1), Message("1", "/confirm", id=2)])
     chat = Desk([channel], Path.cwd())
     monkeypatch.setattr(chat.talk, "warm", lambda: None)
     chat.run()

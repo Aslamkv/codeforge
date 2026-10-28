@@ -458,7 +458,7 @@ def test_a_book_sent_in_a_chat_is_kept_and_read(tinker_home, home_store):
     )
     messages = telegram(api).receive(1)
     path = tinker_home / "reading" / "My-Book.epub"
-    assert [message.text for message in messages] == [f"read {path}"] and path.read_bytes() == b"EPUB BYTES"
+    assert [message.text for message in messages] == [f"/read {path}"] and path.read_bytes() == b"EPUB BYTES"
     assert api.calls[-1][0] == "/file/botT0K/documents/file_1.epub" and "T0K" not in messages[0].text
 
 
