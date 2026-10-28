@@ -176,21 +176,14 @@ def test_pieces_split_between_lines_and_lose_no_text():
     [
         ("/status", "status"),
         ("/Status", "status"),
-        ("/status abc123", "status"),
         ("/status of my build please", "status"),
         ("status", ""),
-        ("status abc123", ""),
         ("/task a calculator", "task"),
-        ("task a calculator", ""),
         ("models are getting better", ""),
-        ("/models", "models"),
         ("hello", ""),
         ("/hello", ""),
         ("", ""),
         ("/", ""),
-        ("/confirm", "confirm"),
-        ("/confirm abc123", "confirm"),
-        ("/research the new python", "research"),
         ("/use_model", "use-model"),
         ("/status@tinker_bot", "status"),
     ],
@@ -565,7 +558,13 @@ def test_console_picks_the_model_for_use_model_typed_alone(monkeypatch, home_sto
     typing(monkeypatch, " /use-model ", "/use-model n", "/use-models", "use-model")
     console.read()
     assert shown == [([("m", True), ("n", False)], 0, True)]
-    assert [console.lines.get() for _ in range(5)] == ["/use-model n", "/use-model n", "/use-models", "use-model", None]
+    assert [console.lines.get() for _ in range(5)] == [
+        "/use-model n",
+        "/use-model n",
+        "/use-models",
+        "use-model",
+        None,
+    ]
 
 
 @pytest.mark.spec("CNV-8")

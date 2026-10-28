@@ -359,8 +359,9 @@ class Desk:
             return
         message = self.with_words_wanted(channel, message)
         command = command_of(message.text)
-        if not command and unknown_command(message.text):
-            channel.send(message.chat, unknown_command(message.text))
+        unknown = not command and unknown_command(message.text)
+        if unknown:
+            channel.send(message.chat, unknown)
             return
         already_answered_in_a_message = message.id and (
             command in ("confirm",) + EXIT_WORDS or exercise_switch(message.text)
@@ -1020,13 +1021,13 @@ def command_of(text, commands=None):
     return first if first in (commands or Desk.COMMANDS) else ""
 
 
-def typed_exit(line):
-    return line.strip().lower() in [f"/{word}" for word in EXIT_WORDS]
-
-
 def slash_word(text):
     words = text.split()
     return command_word(words[0]) if words and words[0].startswith("/") else ""
+
+
+def typed_exit(line):
+    return line.strip().lower() in [f"/{word}" for word in EXIT_WORDS]
 
 
 def unknown_command(text):

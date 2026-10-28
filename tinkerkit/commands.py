@@ -75,7 +75,7 @@ class Command:
         kind="own",
         chat=False,
         actions=(),
-        words="none",
+        words=False,
         cli=True,
         run=False,
         deletes=False,
@@ -108,7 +108,7 @@ COMMANDS = [
         "name after the task (calc-py); --workdir DIR builds in DIR instead (--workdir . here).",
         kind="job",
         chat=True,
-        words="any",
+        words=True,
         run=True,
         arguments=[Argument("task", "+", "WHAT", "what to build (no quotes needed)")],
         options=("spec", "web", "confirm", "new_workdir"),
@@ -135,7 +135,7 @@ COMMANDS = [
         "Build the plan that waits for confirmation (as resume).",
         kind="job",
         chat=True,
-        words="one",
+        words=True,
         run=True,
         arguments=[PROJECT],
         options=RUN_OPTIONS,
@@ -149,7 +149,7 @@ COMMANDS = [
         "change and planned again, and it waits again (build it with tinker confirm).",
         kind="job",
         chat=True,
-        words="any",
+        words=True,
         run=True,
         arguments=[Argument("words", "+", "[@PROJECT] CHANGE", "the change")],
         options=RUN_OPTIONS,
@@ -164,7 +164,7 @@ COMMANDS = [
         "built there may name its folder).",
         kind="own",
         chat=True,
-        words="one",
+        words=True,
         arguments=[Argument("words", "+", "[@PROJECT] NAME", "the folder's new name")],
         options=("workdir",),
         example="rename calculator",
@@ -178,7 +178,7 @@ COMMANDS = [
         "first with --confirm (as in the conversation).",
         kind="job",
         chat=True,
-        words="any",
+        words=True,
         run=True,
         arguments=[Argument("words", "+", "[@PROJECT] FEATURE", "the feature")],
         options=("feature_spec", "confirm") + RUN_OPTIONS,
@@ -193,7 +193,7 @@ COMMANDS = [
         "waits for your confirm); then the code is fixed so it passes and every other test still passes.",
         kind="job",
         chat=True,
-        words="any",
+        words=True,
         run=True,
         arguments=[Argument("words", "+", "[@PROJECT] BUG", "the bug")],
         options=("confirm",) + RUN_OPTIONS,
@@ -207,7 +207,7 @@ COMMANDS = [
         "Show a project's spec points and whether their tests pass.",
         kind="glance",
         chat=True,
-        words="one",
+        words=True,
         arguments=[PROJECT],
         options=("workdir",),
     ),
@@ -228,7 +228,7 @@ COMMANDS = [
         "Show what this folder's project (or the one named) printed in its runs; --calls shows its model calls.",
         kind="glance",
         chat=True,
-        words="one",
+        words=True,
         arguments=[PROJECT],
         options=("calls", "workdir"),
     ),
@@ -243,7 +243,7 @@ COMMANDS = [
         kind="job",
         actions=[Action("glance", when=taught_command)],
         chat=True,
-        words="any",
+        words=True,
         arguments=[Argument("words", "+", "WHAT | NAME = DEFINITION")],
         example="learn rust",
         rows=[
@@ -261,7 +261,7 @@ COMMANDS = [
         "No quotes needed.",
         kind="job",
         chat=True,
-        words="any",
+        words=True,
         arguments=[Argument("words", "+", "TOPIC", "the topic (no quotes needed)")],
         example="research the newest Python release",
     ),
@@ -274,7 +274,7 @@ COMMANDS = [
         "lessons, facts, your commands). Nothing is changed.",
         kind="job",
         chat=True,
-        words="any",
+        words=True,
         arguments=[Argument("words", "+", "QUESTION", "the question (no quotes needed)")],
         example="ask what is your current toolchain for python",
     ),
@@ -290,7 +290,7 @@ COMMANDS = [
         "lesson kept, with its sources. A change whose facts do not hold is not made, and it says why.",
         kind="job",
         chat=True,
-        words="any",
+        words=True,
         arguments=[Argument("words", "+", "WHAT", "what to correct, and why (no quotes needed)")],
         example="teach ruff formats Python as black does, so ruff alone is enough",
     ),
@@ -310,7 +310,7 @@ COMMANDS = [
         kind="job",
         actions=[Action("glance", "list"), Action("glance", "show")],
         chat=True,
-        words="any",
+        words=True,
         arguments=[
             Argument(
                 "words",
@@ -348,7 +348,7 @@ COMMANDS = [
         kind="job",
         actions=[Action("glance", "status")],
         chat=True,
-        words="any",
+        words=True,
         arguments=[Argument("words", "+", "LANGUAGE | status")],
         example="exercise rust",
     ),
@@ -364,7 +364,7 @@ COMMANDS = [
         "page (jobs stopped 2: the second page).",
         kind="glance",
         chat=True,
-        words="any",
+        words=True,
         arguments=[
             Argument(
                 "words",
@@ -384,7 +384,7 @@ COMMANDS = [
         "job that runs, whatever it is. A paused job that is stopped no longer goes on by itself.",
         kind="own",
         chat=True,
-        words="one",
+        words=True,
         arguments=[Argument("words", "*", "[#JOB]", "the job, as jobs numbers it")],
         example="stop #3",
     ),
@@ -399,7 +399,7 @@ COMMANDS = [
         "confirmation is confirmed: building starts.",
         kind="job",
         chat=True,
-        words="one",
+        words=True,
         run=True,
         arguments=[
             Argument("words", "*", "[#JOB | @PROJECT]", "the job (#N) or the project (@ID or @folder)")
@@ -421,7 +421,7 @@ COMMANDS = [
         "to its language or topic and to the runs that taught it, proved it or found it wrong.",
         kind="glance",
         chat=True,
-        words="any",
+        words=True,
         arguments=[
             Argument(
                 "words",
@@ -471,7 +471,7 @@ COMMANDS = [
         kind="job",
         actions=[Action("glance", when=lambda words: not words)],
         chat=True,
-        words="one",
+        words=True,
         arguments=[Argument("name", "?", None, "the model's name, as `tinker models` lists it")],
     ),
     Command(
@@ -482,7 +482,7 @@ COMMANDS = [
         "Use this measured model for every build from now on.",
         kind="glance",
         chat=True,
-        words="one",
+        words=True,
         arguments=[Argument("name", "?", None, "the model's name, as `tinker models` lists it")],
     ),
     Command(
@@ -493,7 +493,7 @@ COMMANDS = [
         "Use this embedding model to index what is learned, so builds find it by meaning.",
         kind="glance",
         chat=True,
-        words="one",
+        words=True,
         arguments=[Argument("name", "?", None, "the model's name, as `tinker models` lists it")],
     ),
     Command(
@@ -507,7 +507,7 @@ COMMANDS = [
         + ".",
         kind="glance",
         chat=True,
-        words="any",
+        words=True,
         arguments=[Argument("words", "*", "KEY VALUE", "the setting and its value")],
     ),
     Command(
@@ -525,7 +525,7 @@ COMMANDS = [
         "message out of the chats but Tinker's status, at once: history keeps what they showed.",
         kind="glance",
         chat=True,
-        words="any",
+        words=True,
         deletes=True,
         arguments=[
             Argument(
@@ -576,7 +576,7 @@ COMMANDS = [
         "this list, or one command's arguments and options",
         kind="glance",
         chat=True,
-        words="one",
+        words=True,
         arguments=[Argument("command", "?", "COMMAND")],
     ),
     Command(
@@ -592,7 +592,7 @@ COMMANDS = [
         "chat MESSAGE",
         "a normal chat with the model (the job that runs is paused for it)",
         kind="pauses",
-        words="any",
+        words=True,
         example="chat hello",
     ),
     Command(
@@ -602,7 +602,7 @@ COMMANDS = [
         "the command line that does it, run once you confirm",
         kind="pauses",
         chat=True,
-        words="any",
+        words=True,
         example="command show the free disk space",
     ),
     Command(
@@ -612,7 +612,7 @@ COMMANDS = [
         "run a built project (the last one built, by default) with these arguments; <<< TEXT gives it input",
         kind="own",
         chat=True,
-        words="any",
+        words=True,
         example="run 5 + 3",
     ),
     Command(
@@ -626,7 +626,7 @@ COMMANDS = [
         "history.",
         kind="glance",
         chat=True,
-        words="one",
+        words=True,
         arguments=[Argument("words", "*", "[PAGE | #N]", "the page, from 1, or #N: the one to show again")],
         example="history #3",
     ),
@@ -651,7 +651,7 @@ COMMANDS = [
             Action("terminal", "start"),
         ],
         chat=True,
-        words="any",
+        words=True,
         rows=[
             ("channel list", "the chat channels (Telegram), and which are enabled"),
             ("channel add", "add one: its kind, a name, its token; pairs your chat"),
@@ -755,7 +755,7 @@ class CommandMenu:
         return self.fill()
 
     def on_enter(self):
-        if self.chosen.words == "none":
+        if not self.chosen.words:
             line = "/" + self.chosen.name
             self.close()
             return MenuAnswer(line, True)

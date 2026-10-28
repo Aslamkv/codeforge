@@ -23,7 +23,7 @@ def test_every_command_is_defined_once_with_all_it_needs():
     assert len(names) == len(set(names))
     for command in COMMANDS:
         assert command.group in GROUPS and command.synopsis and command.what and command.rows
-        assert command.words in ("none", "one", "any") and command.kind in ("job", "glance", "pauses", "own")
+        assert command.words in (True, False) and command.kind in ("job", "glance", "pauses", "own")
 
 
 @pytest.mark.spec("CMD-1")
@@ -79,7 +79,7 @@ def test_the_command_line_and_the_conversation_read_the_table():
     on_the_command_line = set(cli.Cli.COMMANDS) | set(cli.Cli.TALK_COMMANDS) | {"help", "channel", "confirm"}
     assert on_the_command_line == {command.name for command in COMMANDS if command.cli}
     assert set(conversation.Desk.COMMANDS) == {command.name for command in COMMANDS if command.chat}
-    assert conversation.USAGE["task"] == "✍️ Write `task WHAT TO BUILD`, e.g. `task a calculator in Python`"
+    assert conversation.USAGE["task"] == "✍️ Write `/task WHAT TO BUILD`, e.g. `/task a calculator in Python`"
     for command in cli.Cli.COMMANDS:
         parser = cli.Cli.parser(command)
         assert parser.description == BY_NAME[command].about
