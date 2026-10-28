@@ -802,7 +802,7 @@ The terminal and the chats are one conversation: the same commands, the same ans
   again there. A plain `exit` is a chat. On a terminal, the prompt reads through `LineEditor` (**MSG-9**), and up and down
   on it go through the lines typed before, the last 1000 kept in the home's `prompt_history`, so they outlive
   a restart. Typing `/` there opens `CommandMenu` (**MSG-10**) under the prompt, narrowed as you type; up and
-  down move in the menu while it is open. Piped input reads lines as before. `use-model`, `calibrate` or `embed`
+  down move in the menu while it is open. Piped input reads lines as before. `/use-model`, `/calibrate` or `/embed`
   typed alone there opens its select box on the prompt (**CLI-3**) and sends the command with the NAME chosen; a
   cancel sends nothing.
   Once it reads, all that Tinker says (`say`, a chat's message too) prints through it, above the prompt, and
@@ -861,7 +861,7 @@ The terminal and the chats are one conversation: the same commands, the same ans
 - **CNV-13** A command that needs words, sent alone (as a chat app's menu sends it: `/fix`), asks for them
   (`ask_for`: what it does, what to send, an example) and takes the next message without a `/` as them
   (`fix MESSAGE`), even one that starts with a command's name. A command instead (sent with its `/`, as a file
-  sent to read is) drops the question. A command whose words are optional (`status`) runs at once. `use-model`, `calibrate` and `embed` sent alone on a channel with buttons (Telegram) ask with
+  sent to read is) drops the question. A command whose words are optional (`status`) runs at once. `/use-model`, `/calibrate` and `/embed` sent alone on a channel with buttons (Telegram) ask with
   `choose(chat, question, names)` instead: a button for each model its select box (**CLI-3**) shows plain, the
   question naming the one in use; the next message (a tap sends the name) is the NAME, as above. With none to
   show, or on a channel without buttons, they run at once and list the models.

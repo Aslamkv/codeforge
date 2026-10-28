@@ -324,8 +324,12 @@ def typing(monkeypatch, *lines):
         return typed.pop(0)
 
     monkeypatch.setattr("builtins.input", typed_line)
-    pressing(monkeypatch, *[key for line in lines for key in (Text(line), "enter")], "eof")
+    pressing(monkeypatch, *[key for line in lines for key in typed_keys(line)], "eof")
     return prompts
+
+
+def typed_keys(line):
+    return (Text(line), "esc", "enter") if line.lstrip().startswith("/") else (Text(line), "enter")
 
 
 def pressing(monkeypatch, *keys):
@@ -429,18 +433,16 @@ def test_console_marks_each_message_and_indents_its_lines_on_a_colour_terminal(m
 @pytest.mark.spec("CNV-8")
 def test_console_shows_your_line_again_highlighted_without_ruling_each_prompt(monkeypatch):
     console = ruled_console(monkeypatch)
-    typing(monkeypatch, "hello there", "", "exit")
+    typing(monkeypatch, "hello there", "")
     console.read()
     assert sys.stdout.getvalue() == (
         prompt_typed("hello there")
         + sent_back_shown("hello there", rows=2)
         + prompt_typed("")
         + pulled_up(1, kept=0)
-        + prompt_typed("exit")
-        + pulled_up(1, kept=0)
         + prompt_typed(None)
     )
-    assert [console.lines.get() for _ in range(4)] == ["hello there", "", "exit", None]
+    assert [console.lines.get() for _ in range(3)] == ["hello there", "", None]
 
 
 def lines_keyed(monkeypatch, *keys, columns=80):
@@ -501,7 +503,7 @@ def test_console_draws_the_command_menu_under_the_prompt_line(monkeypatch):
 def test_console_keeps_the_lines_typed_for_up_and_down_across_restarts(monkeypatch, tinker_home):
     colour_terminal(monkeypatch)
     monkeypatch.setattr(ConsoleScreen, "TICK_SECONDS", 60)
-    typing(monkeypatch, "first", "", "second", "exit")
+    typing(monkeypatch, "first", "", "second", "/exit")
     console = ConsoleChannel()
     console.receive(1)
     while console.lines.get(timeout=1) is not None:
@@ -522,7 +524,7 @@ def test_console_shows_a_line_sent_again_right_above_the_rule_by_all_its_rows(
 
 
 @pytest.mark.spec("CNV-8")
-@pytest.mark.parametrize("line", ["", "  ", "exit"])
+@pytest.mark.parametrize("line", ["", "  ", "/exit", " /EXIT "])
 def test_console_drops_a_quiet_line_by_pulling_the_prompt_up(monkeypatch, line):
     console = ruled_console(monkeypatch)
     assert drawn_after(lambda: console.show_again(line)) == pulled_up(1, kept=0)
@@ -560,10 +562,10 @@ def test_console_picks_the_model_for_use_model_typed_alone(monkeypatch, home_sto
     console = ruled_console(monkeypatch)
     Models.keep("n", MEASURED)
     shown = model_picker(monkeypatch, console, 1)
-    typing(monkeypatch, " use-model ", "use-model n", "use-models")
+    typing(monkeypatch, " /use-model ", "/use-model n", "/use-models", "use-model")
     console.read()
     assert shown == [([("m", True), ("n", False)], 0, True)]
-    assert [console.lines.get() for _ in range(4)] == ["use-model n", "use-model n", "use-models", None]
+    assert [console.lines.get() for _ in range(5)] == ["/use-model n", "/use-model n", "/use-models", "use-model", None]
 
 
 @pytest.mark.spec("CNV-8")
@@ -571,10 +573,10 @@ def test_console_picks_the_model_for_calibrate_typed_alone(monkeypatch, home_sto
     console = ruled_console(monkeypatch)
     Config.save(model="n")
     shown = model_picker(monkeypatch, console, 0)
-    typing(monkeypatch, "calibrate", "calibrate n")
+    typing(monkeypatch, "/calibrate", "/calibrate n")
     console.read()
     assert shown == [([("m", False), ("n", False)], 1, True)]
-    assert [console.lines.get() for _ in range(3)] == ["calibrate m", "calibrate n", None]
+    assert [console.lines.get() for _ in range(3)] == ["/calibrate m", "/calibrate n", None]
 
 
 @pytest.mark.spec("CNV-8")
@@ -582,10 +584,10 @@ def test_console_picks_the_model_for_embed_typed_alone(monkeypatch, home_store):
     console = ruled_console(monkeypatch)
     Config.save(model="m", embed_model="n")
     shown = model_picker(monkeypatch, console, 0, embedding=("n",))
-    typing(monkeypatch, "embed")
+    typing(monkeypatch, "/embed")
     console.read()
     assert shown == [([("n", False)], 0, True)]
-    assert console.lines.get() == "embed n"
+    assert console.lines.get() == "/embed n"
 
 
 @pytest.mark.spec("CNV-8")
@@ -593,7 +595,7 @@ def test_console_picks_the_model_for_embed_typed_alone(monkeypatch, home_store):
 def test_console_sends_nothing_when_the_pick_is_cancelled(monkeypatch, home_store, command):
     console = ruled_console(monkeypatch)
     model_picker(monkeypatch, console, None, embedding=("n",))
-    typing(monkeypatch, command)
+    typing(monkeypatch, f"/{command}")
     console.read()
     assert console.lines.get() == "" and console.receive(0) == []
 
@@ -606,9 +608,9 @@ def test_console_passes_a_pick_command_on_when_there_is_nothing_to_pick(
 ):
     console = ruled_console(monkeypatch)
     shown = model_picker(monkeypatch, console, 0, models)
-    typing(monkeypatch, command)
+    typing(monkeypatch, f"/{command}")
     console.read()
-    assert shown == [] and console.lines.get() == command
+    assert shown == [] and console.lines.get() == f"/{command}"
 
 
 @pytest.mark.spec("CNV-8")
@@ -618,9 +620,9 @@ def test_console_passes_a_piped_pick_command_on(monkeypatch, home_store, command
     monkeypatch.setattr(sys.stdin, "isatty", lambda: False)
     console = ConsoleChannel()
     shown = model_picker(monkeypatch, console, 0)
-    typing(monkeypatch, command)
+    typing(monkeypatch, f"/{command}")
     console.read()
-    assert shown == [] and console.lines.get() == command
+    assert shown == [] and console.lines.get() == f"/{command}"
 
 
 @pytest.mark.spec("CNV-8")
@@ -1188,10 +1190,11 @@ def test_the_conversation_opens_with_the_banner_before_the_status(monkeypatch):
 def test_console_receives_lines_until_exit():
     console = ConsoleChannel()
     console.screen.reading = True
-    for line in ("hello", "  ", "exit"):
+    for line in ("hello", "  ", "exit", " /Exit "):
         console.lines.put(line)
     assert [message.text for message in console.receive(0)] == ["hello"]
     assert console.receive(0) == [] and not console.closed
+    assert [message.text for message in console.receive(0)] == ["exit"] and not console.closed
     assert console.receive(0) == [] and console.closed
     eof = ConsoleChannel()
     eof.screen.reading = True
@@ -2085,7 +2088,7 @@ def test_the_terminal_reads_and_exits_at_once_while_periodic_work_waits(monkeypa
 
         return wait
 
-    typed = iter([Text("exit"), "enter", "eof"])
+    typed = iter([Text("/exit"), "enter", "eof"])
 
     def exit_once_it_waits():
         assert waits.wait(timeout=5)

@@ -1020,6 +1020,10 @@ def command_of(text, commands=None):
     return first if first in (commands or Desk.COMMANDS) else ""
 
 
+def typed_exit(line):
+    return line.strip().lower() in [f"/{word}" for word in EXIT_WORDS]
+
+
 def slash_word(text):
     words = text.split()
     return command_word(words[0]) if words and words[0].startswith("/") else ""
@@ -1856,7 +1860,7 @@ class ConsoleChannel(Channel):
             line = self.lines.get(timeout=timeout)
         except queue.Empty:
             return []
-        if line is None or line.strip().lower() in EXIT_WORDS:
+        if line is None or typed_exit(line):
             self.closed = True
             return []
         return [Message(self.CHAT, line, "you")] if line.strip() else []
@@ -1914,8 +1918,8 @@ class ConsoleChannel(Channel):
         return answer.send and editor.press("enter")
 
     def picked(self, line):
-        command = line.strip()
-        if command not in MODEL_PICKS or not typed_here():
+        command = command_of(line, MODEL_PICKS)
+        if not command or len(line.split()) != 1 or not typed_here():
             return line
         try:
             choices = Models.command_choices(command)
@@ -1925,16 +1929,16 @@ class ConsoleChannel(Channel):
             return line
         with self.screen.printing:
             name = Models.picked(command, choices)
-        return "" if name is None else f"{command} {name}"
+        return "" if name is None else f"/{command} {name}"
 
     def remember(self, line):
-        if self.history and line.strip() and line.strip().lower() not in EXIT_WORDS:
+        if self.history and line.strip() and not typed_exit(line):
             readline.add_history(line)
             readline.write_history_file(self.history)
 
     def show_again(self, line):
         if self.screen.ruled():
-            quiet = not line.strip() or line.strip().lower() in EXIT_WORDS
+            quiet = not line.strip() or typed_exit(line)
             self.screen.sent(f"› {line}", shown=not quiet)
 
     def banner(self, lines):
