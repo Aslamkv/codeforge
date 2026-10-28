@@ -1,0 +1,502 @@
+[
+ {
+  "id": "output-01",
+  "prompt": "What does this Python code print?\n\nx = [1, 2, 3]\ny = x\ny.append(4)\nprint(len(x))\n\nReply with only the printed output.",
+  "answer": "4"
+ },
+ {
+  "id": "output-02",
+  "prompt": "What does this Python code print?\n\nprint(sum(range(5)))\n\nReply with only the printed output.",
+  "answer": "10"
+ },
+ {
+  "id": "output-03",
+  "prompt": "What does this Python code print?\n\ns = 'tinker'\nprint(s[::-1])\n\nReply with only the printed output.",
+  "answer": "reknit"
+ },
+ {
+  "id": "output-04",
+  "prompt": "What does this Python code print?\n\nprint(7 // 2, 7 % 2)\n\nReply with only the printed output.",
+  "answer": "3 1"
+ },
+ {
+  "id": "output-05",
+  "prompt": "What does this Python code print?\n\nd = {'a': 1, 'b': 2}\nd['a'] += 5\nprint(d['a'] * d['b'])\n\nReply with only the printed output.",
+  "answer": "12"
+ },
+ {
+  "id": "output-06",
+  "prompt": "What does this Python code print?\n\nprint([n * n for n in range(4)])\n\nReply with only the printed output.",
+  "answer": "[0, 1, 4, 9]"
+ },
+ {
+  "id": "output-07",
+  "prompt": "What does this Python code print?\n\ndef f(a, b=2):\n    return a ** b\nprint(f(3) + f(2, 3))\n\nReply with only the printed output.",
+  "answer": "17"
+ },
+ {
+  "id": "output-08",
+  "prompt": "What does this Python code print?\n\nprint(len('hello world'.split()))\n\nReply with only the printed output.",
+  "answer": "2"
+ },
+ {
+  "id": "output-09",
+  "prompt": "What does this Python code print?\n\nx = 10\nfor i in range(3):\n    x -= i\nprint(x)\n\nReply with only the printed output.",
+  "answer": "7"
+ },
+ {
+  "id": "output-10",
+  "prompt": "What does this Python code print?\n\nprint(sorted([3, 1, 2], reverse=True))\n\nReply with only the printed output.",
+  "answer": "[3, 2, 1]"
+ },
+ {
+  "id": "output-11",
+  "prompt": "What does this Python code print?\n\nprint('-'.join(['a', 'b', 'c']))\n\nReply with only the printed output.",
+  "answer": "a-b-c"
+ },
+ {
+  "id": "output-12",
+  "prompt": "What does this Python code print?\n\nprint(bool([]), bool([0]))\n\nReply with only the printed output.",
+  "answer": "False True"
+ },
+ {
+  "id": "output-13",
+  "prompt": "What does this Python code print?\n\na, b = 1, 2\na, b = b, a + b\nprint(a, b)\n\nReply with only the printed output.",
+  "answer": "2 3"
+ },
+ {
+  "id": "output-14",
+  "prompt": "What does this Python code print?\n\nprint(max('apple', 'banana', 'cherry', key=len))\n\nReply with only the printed output.",
+  "answer": "banana"
+ },
+ {
+  "id": "output-15",
+  "prompt": "What does this Python code print?\n\nn = 0\nwhile n < 20:\n    n = n * 2 + 1\nprint(n)\n\nReply with only the printed output.",
+  "answer": "31"
+ },
+ {
+  "id": "output-16",
+  "prompt": "What does this Python code print?\n\nprint(list(zip('ab', [1, 2, 3])))\n\nReply with only the printed output.",
+  "answer": "[('a', 1), ('b', 2)]"
+ },
+ {
+  "id": "output-17",
+  "prompt": "What does this Python code print?\n\ns = {1, 2, 2, 3, 3, 3}\nprint(len(s))\n\nReply with only the printed output.",
+  "answer": "3"
+ },
+ {
+  "id": "output-18",
+  "prompt": "What does this Python code print?\n\nprint(abs(-7) + pow(2, 3))\n\nReply with only the printed output.",
+  "answer": "15"
+ },
+ {
+  "id": "output-19",
+  "prompt": "What does this Python code print?\n\nwords = ['kiwi', 'fig', 'banana']\nprint(min(words, key=len).upper())\n\nReply with only the printed output.",
+  "answer": "FIG"
+ },
+ {
+  "id": "output-20",
+  "prompt": "What does this Python code print?\n\ndef g(n):\n    return 1 if n <= 1 else n * g(n - 1)\nprint(g(5))\n\nReply with only the printed output.",
+  "answer": "120"
+ },
+ {
+  "id": "output-21",
+  "prompt": "What does this Python code print?\n\nprint('abcabc'.count('bc'))\n\nReply with only the printed output.",
+  "answer": "2"
+ },
+ {
+  "id": "output-22",
+  "prompt": "What does this Python code print?\n\nnums = [4, 8, 15, 16, 23, 42]\nprint(nums[1:4][-1])\n\nReply with only the printed output.",
+  "answer": "16"
+ },
+ {
+  "id": "output-23",
+  "prompt": "What does this Python code print?\n\nprint(int('101', 2) + int('ff', 16))\n\nReply with only the printed output.",
+  "answer": "260"
+ },
+ {
+  "id": "output-24",
+  "prompt": "What does this Python code print?\n\nx = [[0] * 2] * 2\nx[0][0] = 1\nprint(x[1][0])\n\nReply with only the printed output.",
+  "answer": "1"
+ },
+ {
+  "id": "output-25",
+  "prompt": "What does this Python code print?\n\nprint(any(n > 5 for n in [1, 3, 5]))\n\nReply with only the printed output.",
+  "answer": "False"
+ },
+ {
+  "id": "output-26",
+  "prompt": "What does this Python code print?\n\ntotal = 0\nfor i in range(1, 11):\n    if i % 3 == 0:\n        continue\n    total += i\nprint(total)\n\nReply with only the printed output.",
+  "answer": "37"
+ },
+ {
+  "id": "output-27",
+  "prompt": "What does this Python code print?\n\nprint('Python'.find('th'))\n\nReply with only the printed output.",
+  "answer": "2"
+ },
+ {
+  "id": "output-28",
+  "prompt": "What does this Python code print?\n\nprint(divmod(17, 5))\n\nReply with only the printed output.",
+  "answer": "(3, 2)"
+ },
+ {
+  "id": "output-29",
+  "prompt": "What does this Python code print?\n\nt = (1, 2, 3)\nprint(t * 2)\n\nReply with only the printed output.",
+  "answer": "(1, 2, 3, 1, 2, 3)"
+ },
+ {
+  "id": "output-30",
+  "prompt": "What does this Python code print?\n\nprint(len(str(2 ** 20)))\n\nReply with only the printed output.",
+  "answer": "7"
+ },
+ {
+  "id": "bug-01",
+  "prompt": "This Python function should return the largest number in a non-empty list. Exactly one line is wrong.\n\n1: def largest(nums):\n2:     best = nums[0]\n3:     for n in nums:\n4:         if n < best:\n5:             best = n\n6:     return best\n\nReply with only the number of the wrong line.",
+  "answer": "4"
+ },
+ {
+  "id": "bug-02",
+  "prompt": "This Python function should return the average of a non-empty list. Exactly one line is wrong.\n\n1: def average(nums):\n2:     total = 0\n3:     for n in nums:\n4:         total += n\n5:     return total / len(nums) + 1\n\nReply with only the number of the wrong line.",
+  "answer": "5"
+ },
+ {
+  "id": "bug-03",
+  "prompt": "This Python function should return True when n is even. Exactly one line is wrong.\n\n1: def is_even(n):\n2:     return n % 2 == 1\n\nReply with only the number of the wrong line.",
+  "answer": "2"
+ },
+ {
+  "id": "bug-04",
+  "prompt": "This Python function should counts the vowels in a word. Exactly one line is wrong.\n\n1: def vowels(word):\n2:     count = 0\n3:     for ch in word:\n4:         if ch in 'aeiou':\n5:             count = 1\n6:     return count\n\nReply with only the number of the wrong line.",
+  "answer": "5"
+ },
+ {
+  "id": "bug-05",
+  "prompt": "This Python function should return the sum of 1 to n inclusive. Exactly one line is wrong.\n\n1: def total(n):\n2:     s = 0\n3:     for i in range(1, n):\n4:         s += i\n5:     return s\n\nReply with only the number of the wrong line.",
+  "answer": "3"
+ },
+ {
+  "id": "bug-06",
+  "prompt": "This Python function should return the string reversed. Exactly one line is wrong.\n\n1: def reverse(text):\n2:     out = ''\n3:     for ch in text:\n4:         out = out + ch\n5:     return out\n\nReply with only the number of the wrong line.",
+  "answer": "4"
+ },
+ {
+  "id": "bug-07",
+  "prompt": "This Python function should return the factorial of n. Exactly one line is wrong.\n\n1: def factorial(n):\n2:     result = 0\n3:     for i in range(2, n + 1):\n4:         result *= i\n5:     return result\n\nReply with only the number of the wrong line.",
+  "answer": "2"
+ },
+ {
+  "id": "bug-08",
+  "prompt": "This Python function should return the last item of a non-empty list. Exactly one line is wrong.\n\n1: def last(items):\n2:     size = len(items)\n3:     return items[size]\n\nReply with only the number of the wrong line.",
+  "answer": "3"
+ },
+ {
+  "id": "bug-09",
+  "prompt": "This Python function should return only the positive numbers. Exactly one line is wrong.\n\n1: def positives(nums):\n2:     out = []\n3:     for n in nums:\n4:         if n >= 0:\n5:             out.append(n)\n6:     return out\n\nReply with only the number of the wrong line.",
+  "answer": "4"
+ },
+ {
+  "id": "bug-10",
+  "prompt": "This Python function should return the number of words in a sentence. Exactly one line is wrong.\n\n1: def word_count(sentence):\n2:     words = sentence.split(',')\n3:     return len(words)\n\nReply with only the number of the wrong line.",
+  "answer": "2"
+ },
+ {
+  "id": "bug-11",
+  "prompt": "This Python function should return the smaller of two numbers. Exactly one line is wrong.\n\n1: def smaller(a, b):\n2:     if a < b:\n3:         return b\n4:     return a\n\nReply with only the number of the wrong line.",
+  "answer": "3"
+ },
+ {
+  "id": "bug-12",
+  "prompt": "This Python function should return the list doubled item by item. Exactly one line is wrong.\n\n1: def doubled(nums):\n2:     out = []\n3:     for n in nums:\n4:         out.append(n + 2)\n5:     return out\n\nReply with only the number of the wrong line.",
+  "answer": "4"
+ },
+ {
+  "id": "bug-13",
+  "prompt": "This Python function should return True when every item is truthy. Exactly one line is wrong.\n\n1: def all_true(items):\n2:     for item in items:\n3:         if not item:\n4:             return True\n5:     return True\n\nReply with only the number of the wrong line.",
+  "answer": "4"
+ },
+ {
+  "id": "bug-14",
+  "prompt": "This Python function should return the index of target in items, or -1. Exactly one line is wrong.\n\n1: def find(items, target):\n2:     for i, item in enumerate(items):\n3:         if item == target:\n4:             return item\n5:     return -1\n\nReply with only the number of the wrong line.",
+  "answer": "4"
+ },
+ {
+  "id": "bug-15",
+  "prompt": "This Python function should return the text in upper case. Exactly one line is wrong.\n\n1: def shout(text):\n2:     loud = text.upper()\n3:     return text\n\nReply with only the number of the wrong line.",
+  "answer": "3"
+ },
+ {
+  "id": "bug-16",
+  "prompt": "This Python function should return how many items are greater than limit. Exactly one line is wrong.\n\n1: def above(items, limit):\n2:     count = 0\n3:     for item in items:\n4:         if item > limit:\n5:             count += 1\n6:         return count\n\nReply with only the number of the wrong line.",
+  "answer": "6"
+ },
+ {
+  "id": "bug-17",
+  "prompt": "This Python function should return the first n squares, starting from 1. Exactly one line is wrong.\n\n1: def squares(n):\n2:     out = []\n3:     for i in range(n):\n4:         out.append(i * i)\n5:     return out\n\nReply with only the number of the wrong line.",
+  "answer": "3"
+ },
+ {
+  "id": "bug-18",
+  "prompt": "This Python function should return the dictionary's keys sorted. Exactly one line is wrong.\n\n1: def sorted_keys(d):\n2:     keys = list(d.values())\n3:     return sorted(keys)\n\nReply with only the number of the wrong line.",
+  "answer": "2"
+ },
+ {
+  "id": "bug-19",
+  "prompt": "This Python function should return True when the word reads the same backwards. Exactly one line is wrong.\n\n1: def palindrome(word):\n2:     return word == word[1:]\n\nReply with only the number of the wrong line.",
+  "answer": "2"
+ },
+ {
+  "id": "bug-20",
+  "prompt": "This Python function should return the product of all numbers in a list. Exactly one line is wrong.\n\n1: def product(nums):\n2:     result = 1\n3:     for n in nums:\n4:         result += n\n5:     return result\n\nReply with only the number of the wrong line.",
+  "answer": "4"
+ },
+ {
+  "id": "reason-01",
+  "prompt": "A shop sells pens at 3 dollars each. How many dollars do 14 pens cost? Reply with only the answer.",
+  "answer": "42"
+ },
+ {
+  "id": "reason-02",
+  "prompt": "A train travels 60 km per hour for 2.5 hours. How many km does it travel? Reply with only the answer.",
+  "answer": "150"
+ },
+ {
+  "id": "reason-03",
+  "prompt": "What is 17 multiplied by 23? Reply with only the answer.",
+  "answer": "391"
+ },
+ {
+  "id": "reason-04",
+  "prompt": "What is 1000 minus 387? Reply with only the answer.",
+  "answer": "613"
+ },
+ {
+  "id": "reason-05",
+  "prompt": "Anna is 4 years older than Ben. Ben is 9. How old will Anna be in 5 years? Reply with only the answer.",
+  "answer": "18"
+ },
+ {
+  "id": "reason-06",
+  "prompt": "A box holds 12 eggs. How many boxes are needed for 100 eggs? Reply with only the answer.",
+  "answer": "9"
+ },
+ {
+  "id": "reason-07",
+  "prompt": "What is 15 percent of 240? Reply with only the answer.",
+  "answer": "36"
+ },
+ {
+  "id": "reason-08",
+  "prompt": "A rectangle is 7 cm wide and 9 cm long. What is its perimeter in cm? Reply with only the answer.",
+  "answer": "32"
+ },
+ {
+  "id": "reason-09",
+  "prompt": "How many minutes are in 3.5 hours? Reply with only the answer.",
+  "answer": "210"
+ },
+ {
+  "id": "reason-10",
+  "prompt": "If 5 workers build a wall in 12 days, how many days do 10 workers take at the same rate? Reply with only the answer.",
+  "answer": "6"
+ },
+ {
+  "id": "reason-11",
+  "prompt": "What is the sum of the first 10 positive odd numbers? Reply with only the answer.",
+  "answer": "100"
+ },
+ {
+  "id": "reason-12",
+  "prompt": "A number doubled and then increased by 7 gives 31. What is the number? Reply with only the answer.",
+  "answer": "12"
+ },
+ {
+  "id": "reason-13",
+  "prompt": "How many days are there in a leap year? Reply with only the answer.",
+  "answer": "366"
+ },
+ {
+  "id": "reason-14",
+  "prompt": "What is the next number in the sequence 2, 6, 18, 54? Reply with only the answer.",
+  "answer": "162"
+ },
+ {
+  "id": "reason-15",
+  "prompt": "Tom has 3 times as many apples as Sue. Together they have 48. How many does Tom have? Reply with only the answer.",
+  "answer": "36"
+ },
+ {
+  "id": "reason-16",
+  "prompt": "What is the greatest common divisor of 84 and 36? Reply with only the answer.",
+  "answer": "12"
+ },
+ {
+  "id": "reason-17",
+  "prompt": "What is the least common multiple of 6 and 8? Reply with only the answer.",
+  "answer": "24"
+ },
+ {
+  "id": "reason-18",
+  "prompt": "A shirt costs 80 dollars and is discounted by 25 percent. What is the new price in dollars? Reply with only the answer.",
+  "answer": "60"
+ },
+ {
+  "id": "reason-19",
+  "prompt": "How many edges does a cube have? Reply with only the answer.",
+  "answer": "12"
+ },
+ {
+  "id": "reason-20",
+  "prompt": "What is 2 to the power of 10? Reply with only the answer.",
+  "answer": "1024"
+ },
+ {
+  "id": "reason-21",
+  "prompt": "A clock shows 9 o'clock. What hour will it show 30 hours later (1 to 12)? Reply with only the answer.",
+  "answer": "3"
+ },
+ {
+  "id": "reason-22",
+  "prompt": "What is the next number in the sequence 1, 1, 2, 3, 5, 8? Reply with only the answer.",
+  "answer": "13"
+ },
+ {
+  "id": "reason-23",
+  "prompt": "How many prime numbers are less than 20? Reply with only the answer.",
+  "answer": "8"
+ },
+ {
+  "id": "reason-24",
+  "prompt": "Five friends each shake hands once with every other friend. How many handshakes happen? Reply with only the answer.",
+  "answer": "10"
+ },
+ {
+  "id": "reason-25",
+  "prompt": "A tank holds 250 litres and drains 15 litres a minute. How many litres are left after 12 minutes? Reply with only the answer.",
+  "answer": "70"
+ },
+ {
+  "id": "reason-26",
+  "prompt": "What is the square root of 169? Reply with only the answer.",
+  "answer": "13"
+ },
+ {
+  "id": "reason-27",
+  "prompt": "If today is Monday, what day is it 10 days from now? Reply with only the answer.",
+  "answer": "Thursday"
+ },
+ {
+  "id": "reason-28",
+  "prompt": "Mary is taller than Joe. Joe is taller than Kim. Who is shortest? Reply with only the answer.",
+  "answer": "Kim"
+ },
+ {
+  "id": "reason-29",
+  "prompt": "All bloops are razzies and all razzies are lazzies. Are all bloops lazzies? Answer yes or no. Reply with only the answer.",
+  "answer": "yes"
+ },
+ {
+  "id": "reason-30",
+  "prompt": "A farmer has 17 sheep and all but 9 run away. How many sheep are left? Reply with only the answer.",
+  "answer": "9"
+ },
+ {
+  "id": "format-01",
+  "prompt": "Reverse the word 'stream'. Reply with only the answer.",
+  "answer": "maerts"
+ },
+ {
+  "id": "format-02",
+  "prompt": "Sort the letters d, a, c, b alphabetically and join them with no spaces. Reply with only the answer.",
+  "answer": "abcd"
+ },
+ {
+  "id": "format-03",
+  "prompt": "Write 255 in hexadecimal, lowercase, without a 0x prefix. Reply with only the answer.",
+  "answer": "ff"
+ },
+ {
+  "id": "format-04",
+  "prompt": "How many vowels (a, e, i, o, u) are in the word 'calibration'? Reply with only the answer.",
+  "answer": "5"
+ },
+ {
+  "id": "format-05",
+  "prompt": "Write the number 13 in binary, without a prefix. Reply with only the answer.",
+  "answer": "1101"
+ },
+ {
+  "id": "format-06",
+  "prompt": "Write the year 1994 in Roman numerals. Reply with only the answer.",
+  "answer": "MCMXCIV"
+ },
+ {
+  "id": "format-07",
+  "prompt": "Write the date 7 March 2025 in ISO format (YYYY-MM-DD). Reply with only the answer.",
+  "answer": "2025-03-07"
+ },
+ {
+  "id": "format-08",
+  "prompt": "Join the words red, green, blue with commas and no spaces. Reply with only the answer.",
+  "answer": "red,green,blue"
+ },
+ {
+  "id": "format-09",
+  "prompt": "Write the word 'model' in upper case. Reply with only the answer.",
+  "answer": "MODEL"
+ },
+ {
+  "id": "format-10",
+  "prompt": "Convert 'hello world' to snake_case. Reply with only the answer.",
+  "answer": "hello_world"
+ },
+ {
+  "id": "format-11",
+  "prompt": "Convert 'parse json file' to camelCase. Reply with only the answer.",
+  "answer": "parseJsonFile"
+ },
+ {
+  "id": "format-12",
+  "prompt": "What is the first letter of the English alphabet that is not in the word 'abacus'? Reply with only the answer.",
+  "answer": "d"
+ },
+ {
+  "id": "format-13",
+  "prompt": "Write 3 hours and 5 minutes as HH:MM. Reply with only the answer.",
+  "answer": "03:05"
+ },
+ {
+  "id": "format-14",
+  "prompt": "What is the 4th letter of the word 'quality'? Reply with only the answer.",
+  "answer": "l"
+ },
+ {
+  "id": "format-15",
+  "prompt": "Write the numbers 5, 3, 9, 1 sorted ascending and separated by single spaces. Reply with only the answer.",
+  "answer": "1 3 5 9"
+ },
+ {
+  "id": "format-16",
+  "prompt": "Spell the number 47 in English words, lowercase, with a hyphen. Reply with only the answer.",
+  "answer": "forty-seven"
+ },
+ {
+  "id": "format-17",
+  "prompt": "Remove every vowel (a, e, i, o, u) from 'calibrate'. Reply with only the answer.",
+  "answer": "clbrt"
+ },
+ {
+  "id": "format-18",
+  "prompt": "Write the chemical symbol for gold. Reply with only the answer.",
+  "answer": "Au"
+ },
+ {
+  "id": "format-19",
+  "prompt": "How many characters long is the word 'benchmark'? Reply with only the answer.",
+  "answer": "9"
+ },
+ {
+  "id": "format-20",
+  "prompt": "Write 0.75 as a percentage with a percent sign. Reply with only the answer.",
+  "answer": "75%"
+ }
+]
