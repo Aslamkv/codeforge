@@ -6,10 +6,12 @@ import sys
 from pathlib import Path
 
 import pytest
-from conftest import ACCENT, DIM, RESET, Terminal
+from conftest import ACCENT, BOLD, DIM, RESET, Terminal
 
 from tinkerkit import project as project_module
 from tinkerkit.messages import (
+    DIMMED,
+    HEADING,
     LineEditor,
     Message,
     Messages,
@@ -421,6 +423,27 @@ def test_pick_leaves_a_screens_live_block_above_the_prompt(terminal, clock):
     say.live("Learning")
     picking("enter")
     assert screen.shown == [("live", "Learning", 100.0, NO_FACTS)]
+
+
+@pytest.mark.spec("MSG-8")
+def test_choices_show_plain_dim_or_as_a_heading(colored_terminal):
+    picking("enter", choices=("ready", ("not pulled", DIMMED), ("Embeddings", HEADING)))
+    assert frames(colored_terminal)[0] == ["› ready", f"  {DIM}not pulled{RESET}", f"{BOLD}Embeddings{RESET}"]
+
+
+HEADED = (("Chat", HEADING), "one", "two", ("Embeddings", HEADING), "three")
+
+
+@pytest.mark.spec("MSG-8")
+def test_up_and_down_step_over_headings(terminal):
+    assert picking("down", "down", "down", "up", "enter", choices=HEADED, start=1) == 2
+    marked = [frame.index(next(row for row in frame if row.startswith("›"))) for frame in frames(terminal, 5)]
+    assert marked == [1, 2, 4, 4, 2]
+
+
+@pytest.mark.spec("MSG-8")
+def test_up_stops_below_a_heading_at_the_top(terminal):
+    assert picking("up", "enter", choices=HEADED, start=1) == 1
 
 
 @pytest.mark.spec("MSG-8")
