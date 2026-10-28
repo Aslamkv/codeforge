@@ -58,37 +58,38 @@ Check that everything is ready (it tells you how to fix what is missing):
 tinker doctor
 ```
 
-Pull a model, then measure it once and use it. Calibration takes about a minute: it checks how fast the model
-reads and writes, how much it can take in and reply, and has it solve 3 small test tasks. It ends with a
-summary in plain words, exact figures in brackets, and keeps every run in its history:
+Pull a model and use it. A model never measured is measured first, in about a minute: how fast it reads
+and writes, how much it can take in and reply, and 3 small test tasks to solve. It ends with a summary in
+plain words, exact figures in brackets, and keeps every run in its history. If the measurement fails, the
+model in use stays:
 
 ```sh
 ollama pull qwen3
-tinker calibrate qwen3
-tinker use-model qwen3
+tinker model qwen3
 ```
 
-Or leave out the name and choose from Ollama's models in a select box (up, down, Enter, Esc), on the command
-line or typed alone in the chat. `embed` lists the embedding models, the others the rest, and `use-model` dims
-the unmeasured ones:
+Measure a model again, without changing the one in use:
 
 ```sh
-tinker calibrate
-tinker use-model
-tinker embed
+tinker model calibrate qwen3
 ```
 
-To learn (`tinker learn`, `--web`), Tinker also needs a small embedding model:
+To learn (`tinker learn`, `--web`), Tinker also needs a small embedding model. `model` checks that it gives a
+vector, then uses it for embeddings:
 
 ```sh
 ollama pull qwen3-embedding:0.6b
-tinker embed qwen3-embedding:0.6b
+tinker model qwen3-embedding:0.6b
 ```
 
-See the models Ollama has, which are measured, and how many test tasks each solved (`SOLVED`, e.g. `2/3`):
+Leave out the name to see Ollama's models, general ones first and then embeddings, each with what was
+measured (`in use · writes ~19 words/s · reads ~225 words/s · solved 2 of 3`). Above the list it names the
+best and the fastest. On a terminal or typed alone in the chat, it is a select box (up, down, Enter, Esc) that
+starts at the model in use, with the unmeasured models dimmed:
 
 ```sh
-tinker models
+tinker model
+tinker model calibrate
 ```
 
 ## Build 🔨
@@ -266,10 +267,10 @@ chat, and a `/` with a name Tinker doesn't know is answered with a pointer to `/
 ```text
 /status
 /runs
-/use_model qwen3:8b
+/model qwen3:8b
 ```
 
-Send `/use_model`, `/calibrate` or `/embed` alone and Tinker answers with a button for each model it can take;
+Send `/model` or `/model calibrate` alone and Tinker answers with the models' rows and a button for each;
 tap one to choose it.
 
 Attach a book, an article or a document to the chat, and Tinker reads it: see [Read](#read-).
@@ -454,7 +455,7 @@ again, and an exercise that was killed (or the computer restarted) goes on by it
 ## Jobs ⏯
 
 Everything that takes a while is a job: a task (and `restart`, `confirm`, `amend`, `resume`), `add`, `fix`,
-`calibrate`, `learn`, `ask`, `teach`, `read`, `research` and `exercise`. Each gets a number (`#1`, `#2` ...).
+`model NAME` of a model never measured, `model calibrate`, `learn`, `ask`, `teach`, `read`, `research` and `exercise`. Each gets a number (`#1`, `#2` ...).
 
 One job runs at a time. Start another, of any kind, or chat with Tinker, and the one that runs is paused: it
 saves itself and waits, and you are answered at once. As soon as Tinker is idle (no job runs, and nothing you
