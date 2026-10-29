@@ -214,10 +214,22 @@ def test_a_smartest_tie_goes_to_the_higher_quality(home_store, monkeypatch):
 @pytest.mark.parametrize(
     "settings, line",
     [
-        ({"a": measured(1, 20.0), "b": measured(3, 80.0)}, "b is the smartest and the fastest (solved 3 of 3 · writes ~40"),
-        ({"a": measured(2, 80.0), "c": measured(3, 80.0)}, "c is the smartest and the fastest (solved 3 of 3 · writes ~40"),
-        ({"d": measured(3, 20.0), "e": measured(3, 80.0)}, "e is the smartest and the fastest (solved 3 of 3 · writes ~40"),
-        ({"a": measured(2, 20.0), "b": measured(2, 20.0)}, "a is the smartest and the fastest (solved 2 of 3 · writes ~10"),
+        (
+            {"a": measured(1, 20.0), "b": measured(3, 80.0)},
+            "b is the smartest and the fastest (solved 3 of 3 · writes ~40",
+        ),
+        (
+            {"a": measured(2, 80.0), "c": measured(3, 80.0)},
+            "c is the smartest and the fastest (solved 3 of 3 · writes ~40",
+        ),
+        (
+            {"d": measured(3, 20.0), "e": measured(3, 80.0)},
+            "e is the smartest and the fastest (solved 3 of 3 · writes ~40",
+        ),
+        (
+            {"a": measured(2, 20.0), "b": measured(2, 20.0)},
+            "a is the smartest and the fastest (solved 2 of 3 · writes ~10",
+        ),
     ],
     ids=["one-model", "speed-tie-by-quality", "quality-tie-by-speed", "full-tie-by-ollama-order"],
 )
@@ -241,9 +253,22 @@ def test_with_no_model_solving_a_task_the_fastest_writer_alone(home_store, monke
 
 
 @pytest.mark.spec("MOD-30")
-def test_no_recipe_with_fewer_than_two_measured(home_store, monkeypatch):
+def test_the_recipe_needs_one_measured_model(home_store, monkeypatch):
     assert recipe_for(monkeypatch, {}) == []
-    assert recipe_for(monkeypatch, {"a": measured(3, 20.0)}) == []
+    assert recipe_for(monkeypatch, {"a": measured(3, 20.0)})[0].startswith("🧠⚡ a is the smartest")
+
+
+def test_the_shown_recipe_needs_two_measured_models(home_store, monkeypatch):
+    recipe_for(monkeypatch, {"a": measured(3, 20.0)})
+    assert Models.shown_recipe() == []
+    recipe_for(monkeypatch, {"a": measured(3, 20.0), "b": measured(1, 40.0)})
+    assert Models.shown_recipe() == Models.recipe() != []
+
+
+def test_unmeasured_names_general_models_never_measured_or_without_solved(home_store, monkeypatch):
+    without_solved = {key: value for key, value in measured(3, 20.0).items() if key != "solved"}
+    recipe_for(monkeypatch, {"a": measured(3, 20.0), "b": without_solved})
+    assert Models.unmeasured() == ["b", "unmeasured"]
 
 
 @pytest.mark.spec("MOD-26")

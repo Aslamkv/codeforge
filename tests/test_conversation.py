@@ -590,7 +590,9 @@ def test_console_prints_the_recipe_before_the_pick(monkeypatch, home_store):
     console = ruled_console(monkeypatch)
     printed = []
     model_picker(monkeypatch, console, 1)
-    monkeypatch.setattr(Models, "recipe", staticmethod(lambda: ["🧠⚡ m is the smartest and the fastest"]))
+    monkeypatch.setattr(
+        Models, "shown_recipe", staticmethod(lambda: ["🧠⚡ m is the smartest and the fastest"])
+    )
     monkeypatch.setattr(conversation.say, "text", printed.append)
     typing(monkeypatch, "/model")
     console.read()
@@ -1840,7 +1842,7 @@ def test_a_model_pick_sent_alone_asks_with_buttons(desk, monkeypatch):
     rows = [("— general —", HEADING), "qwen3  in use · solved 2 of 3", ("big  not measured yet", DIMMED)]
     monkeypatch.setattr(desk, "answer", lambda message, channel: answered.append(message.text))
     monkeypatch.setattr(Models, "command_choices", lambda command: rows)
-    monkeypatch.setattr(Models, "recipe", lambda: ["🧠⚡ qwen3 is the smartest and the fastest"])
+    monkeypatch.setattr(Models, "shown_recipe", lambda: ["🧠⚡ qwen3 is the smartest and the fastest"])
     Config.save(model="qwen3")
     say(desk, channel, "/model calibrate")
     assert answered == ["/model calibrate"]

@@ -628,6 +628,9 @@ class Commands:
 
     @staticmethod
     def model(words):
+        if words[:1] == ["recipe"]:
+            (Commands.recipe_all if words[1:] == ["all"] else Commands.recipe)()
+            return
         command, names = ("calibrate", words[1:]) if words[:1] == ["calibrate"] else ("model", words)
         name = names[0] if names else Commands.picked_model(command)
         if name is not None:
@@ -638,6 +641,26 @@ class Commands:
         if name in Models.named(embedding=True):
             raise SystemExit(f"{name} is an embedding model: only a general model is measured")
         Calibrator(name).run()
+
+    @staticmethod
+    def recipe():
+        measured, unmeasured = len(Models.measured()), len(Models.unmeasured())
+        if not measured:
+            say.text("🍳 No model is measured yet: tinker model recipe all measures them")
+            return
+        lacking = f" ({unmeasured} not measured: tinker model recipe all measures them)" if unmeasured else ""
+        say.text(f"🍳 Model recipe, picked from {measured} measured models{lacking}")
+        for line in Models.recipe():
+            say.text(line)
+
+    @staticmethod
+    def recipe_all():
+        for name in Models.unmeasured():
+            try:
+                Calibrator(name).run()
+            except SystemExit as exc:
+                say.warn(f"{name} was not measured: {exc}")
+        Commands.recipe()
 
     @staticmethod
     def use(name):

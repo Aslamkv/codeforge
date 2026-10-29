@@ -1072,7 +1072,7 @@ def model_asked(pick, rows):
     current = Config.get("model")
     asked = md(t"🧠 **/{pick}** · choose a model") + (md(t" (in use: {current})") if current else "")
     listed = Markup.fenced("\n".join(Models.label(row) for row in rows))
-    return "\n".join([asked, *(md(t"{line}") for line in Models.recipe()), f"```\n{listed}\n```"])
+    return "\n".join([asked, *(md(t"{line}") for line in Models.shown_recipe()), f"```\n{listed}\n```"])
 
 
 def after_word(message):

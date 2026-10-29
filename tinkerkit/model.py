@@ -580,9 +580,23 @@ class Models:
         return f"solved {settings['solved']} of {len(settings['quality_tasks'])}"
 
     @staticmethod
+    def measured():
+        return [(name, kept) for name in Models.named(embedding=False) if (kept := Models.settings(name))]
+
+    @staticmethod
+    def unmeasured():
+        return [
+            name for name in Models.named(embedding=False) if "solved" not in (Models.settings(name) or {})
+        ]
+
+    @staticmethod
+    def shown_recipe():
+        return Models.recipe() if len(Models.measured()) > 1 else []
+
+    @staticmethod
     def recipe():
-        measured = [(name, kept) for name in Models.named(embedding=False) if (kept := Models.settings(name))]
-        if len(measured) < 2:
+        measured = Models.measured()
+        if not measured:
             return []
         solving = [pair for pair in measured if Models.solved(pair[1])]
         if not solving:
@@ -610,7 +624,7 @@ class Models:
 
     @staticmethod
     def say_recipe():
-        for line in Models.recipe():
+        for line in Models.shown_recipe():
             say.text(line)
 
     @staticmethod

@@ -472,6 +472,8 @@ COMMANDS = [
         kind="glance",
         actions=[
             Action("job", "calibrate", when=lambda words: len(words) > 1),
+            Action("glance", "recipe", when=lambda words: len(words) == 1),
+            Action("job", "recipe", when=lambda words: words[1:] == ["all"]),
             Action("job", when=never_measured),
         ],
         chat=True,
