@@ -321,7 +321,7 @@ The home and its database, the settings, numbered lists, and the one way to dele
   **JOB-10**), `own` (the conversation answers it its own way) or `terminal` (it asks in a terminal, so a chat
   only says to run it there). An action whose kind differs from its command's is an `Action` of that command,
   with its own kind: `read list`, `read show`, `exercise status`, `channel add`, `channel remove`,
-  `channel start`, `model calibrate NAME`, `model NAME` of a model that does not embed and was never measured
+  `channel start`, `model calibrate NAME`, `model recipe` (`glance`), `model recipe all`, `model NAME` of a model that does not embed and was never measured
   (**CLI-3**) and `learn` of a command of the person's (**CLI-1**). `kind_of(argv)` gives the kind of what the words
   ask for, and `deletes(argv)` whether it deletes. The command line builds its parser and its help from the
   table, and the conversation its commands. Nothing else lists commands by kind.
@@ -339,7 +339,7 @@ again what it did. The job asked for last is the one that runs (**JOB-8**), and 
 person asks for pauses it too (**JOB-10**), so the person is always answered at once.
 
 - **JOB-1** `is_job(argv)` is true for a command of kind `job` (**CMD-1**): `task`, `restart`, `resume`,
-  `confirm`, `amend`, `add`, `fix`, `model calibrate NAME`, `model NAME` of a model the home has no record of and that is not the embedding model (an embedding model not
+  `confirm`, `amend`, `add`, `fix`, `model calibrate NAME`, `model recipe all`, `model NAME` of a model the home has no record of and that is not the embedding model (an embedding model not
   yet `embed_model` is one too: the home cannot tell it apart, **ARCH-1**), `learn`, `ask`, `teach`, `read`, `research` and `exercise`.
   Help, and a build an exercise runs (`EXERCISE_ENV`, which holds the exercise's job number), are never jobs. A job keeps the computer awake while it
   runs (**SET-11**). `Jobs.running(argv)` runs a job as the next number (`#1`, `#2` ...), kept in the home's
@@ -633,7 +633,7 @@ What is said in the chats, kept so that a chat is only a view of it.
   with whether it was measured. It ends with `SystemExit` when Ollama does not answer, as `tinker model` does.
   `Models.embedding_choices()` gives the names of the ones that embed: their `capabilities` from Ollama's
   `/api/show` hold `embedding`, or Ollama gives none for them.
-- **MOD-27** Calibration's quality probe asks the model `QUALITY_TASK_COUNT` (3) tasks drawn at random from
+- **MOD-27** Calibration's quality probe asks the model `QUALITY_TASK_COUNT` (5) tasks drawn at random from
   `tinkerkit/quality_tasks.json`: 100 short tasks (a code's output, a bug's line, small arithmetic and logic
   word problems, an exact-format reply), each with one fixed answer. Each is asked with the think setting
   calibration found and `num_predict` `QUALITY_REPLY_TOKENS` (2048); a reply cut off before an answer fails.
@@ -645,7 +645,7 @@ What is said in the chats, kept so that a chat is only a view of it.
   (once per model, about a minute)", whether the weights fit ("NAME needs 18 GB (weights); this machine's GPU
   can use 24 GB"), each read probe ("Checking it can read about 6,000 words at once (8,192 tokens, about
   12s)…", then "Read it in 10s", "Too much for this machine (ERROR)" or "Read it in smaller pieces (num_batch
-  256)"), "Solving 3 small test tasks…" with ✅ or ❌ per task and "Solved 2 of 3", and ends with one
+  256)"), "Solving 5 small test tasks…" with ✅ or ❌ per task and "Solved 4 of 5", and ends with one
   multi-line message, so a channel shows all of it (**CNV-18**):
   ```
   ✅ NAME is ready
@@ -653,7 +653,7 @@ What is said in the chats, kept so that a chat is only a view of it.
      ✍️ Writes about 19 words a second (25.1 tok/s)
      📥 Takes requests up to about 8,000 words (10,922 tokens)
      📤 Replies up to about 16,000 words (21,846 tokens)
-     🧠 Solved 2 of 3 test tasks
+     🧠 Solved 4 of 5 test tasks
      💭 Thinks before it answers (think: high)
   ```
   An unmeasured speed is `?`.
@@ -665,12 +665,24 @@ What is said in the chats, kept so that a chat is only a view of it.
   and says `test tasks not run · tinker model calibrate NAME runs them` in place of `solved ? of ?`), one never measured
   `not measured yet · choosing it measures it (about a minute)`, an embedding model `in use · 0.3 GB` (its
   size; `in use ·` for the embedding model).
-- **MOD-30** `Models.recipe()` gives the lines above the list, so the person sees what to pick: of the measured
-  models that do not embed, `🏆 Best quality: NAME (solved 3 of 3)`, the one with a `solved` count that solved most (a tie: the
-  faster writer, then Ollama's order), and `⚡ Fastest: NAME (writes ~40 words/s)`, the fastest writer (a tie:
-  the one that solved most, then Ollama's order). When one model is both, the one line is
-  `🏆 NAME is the best and the fastest (solved 3 of 3, writes ~40 words/s)`. With no model that has a `solved`
-  count, the fastest line alone. With fewer than two measured, there is no recipe.
+- **MOD-30** `Models.recipe()` gives the recipe lines, so the person sees what to pick, from the measured models
+  that do not embed. A model's quality is its `solved` count over the tasks it was asked (its `quality_tasks`,
+  so a model measured with 3 tasks compares with one measured with 5; `solved N of M` says the same M), and its
+  speed is its write speed over the fastest writer's. The picks come from the models that solved at least one
+  task: the smartest has the highest quality² × speed, so quality counts most but a much slower model loses to
+  a nearly as good, much faster one (a tie: the higher quality, then Ollama's order); the fastest is the fastest
+  writer (a tie: the higher quality, then Ollama's order). The lines are
+  `🧠 Smartest: NAME (solved 3 of 5 · writes ~19 words/s)` and `⚡ Fastest: NAME (writes ~40 words/s · solved 2 of 5)`;
+  when one model is both, the one line `🧠⚡ NAME is the smartest and the fastest (solved 3 of 5 · writes ~40 words/s)`.
+  With no model that solved a task, the fastest writer of them all alone, as `⚡ Fastest: NAME (writes ~40 words/s)`.
+  `tinker model`'s list shows the recipe above its rows when two or more models are measured.
+- **MOD-31** `tinker model recipe` prints the recipe (**MOD-30**) under the heading
+  `🍳 Model recipe, picked from 4 measured models`, with ` (2 not measured: tinker model recipe all measures them)`
+  when models that do not embed were never measured or have no `solved` count; one measured model is enough.
+  With none measured, it prints `🍳 No model is measured yet: tinker model recipe all measures them`.
+  `tinker model recipe all` first measures each of those models, one after another, as `model calibrate NAME`
+  does (**MOD-28**), changing no model in use; a failed measurement says so and the next one goes on. Then it
+  prints the recipe.
 
 ## project (PRJ)
 
@@ -1606,7 +1618,8 @@ The main system: the command line, one run, and the cycle of phases.
   and was never measured, it is a job that measures it (`Calibrator`) and then uses it, so a failed
   measurement keeps the model in use; of an embedding model, it checks the model gives a vector and makes it
   the embedding model. `model calibrate NAME` measures a model that does not embed again, and changes no model
-  in use. A NAME Ollama does not have is refused, with `tinker model` to list them. `model` and
+  in use. `model recipe` prints the recipe, and `model recipe all` measures the models it lacks first
+  (**MOD-31**). A NAME Ollama does not have is refused, with `tinker model` to list them. `model` and
   `model calibrate` with no NAME, on a terminal, print the recipe (**MOD-30**) and open a select box
   (**MSG-8**) on the rows (**MOD-29**), and the one chosen is taken as the NAME; a cancel changes nothing.
   `model` offers every model, the measured ones plain, the rest dim, starting at the one in use;
