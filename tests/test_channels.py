@@ -215,12 +215,18 @@ class Goodbyes:
     def delete(self, chat, sent):
         self.log.append(("delete", chat, sent))
 
+    clear = TelegramChannel.clear
+
 
 @pytest.mark.spec("CNV-9", "CNV-11")
-def test_the_goodbye_sender_posts_the_status_and_takes_the_question_out(monkeypatch, home_store, capsys):
+def test_the_goodbye_sender_clears_each_chat_posts_the_status_and_takes_the_question_out(
+    monkeypatch, home_store, capsys
+):
     made = {name: Goodbyes(name) for name in ("bot", "other")}
     monkeypatch.setattr(Channels, "make", lambda name: made[name])
     home_store.put("listening", "bot", {"1": 55})
+    Ledger.kept("other", "1", 90)
+    Ledger.lasting("other", "1", 91)
     goodbye = {
         "status": "💤 **Tinker** · not listening",
         "channels": ["bot", "other"],
@@ -229,7 +235,7 @@ def test_the_goodbye_sender_posts_the_status_and_takes_the_question_out(monkeypa
     ChannelCommand.run(["goodbye", json.dumps(goodbye)])
     said = ("show", "1", "💤 **Tinker** · not listening")
     assert set(made["bot"].log) == {("delete", "1", 55), said, ("delete", "1", 102), ("delete", "1", 103)}
-    assert made["other"].log == [said] and home_store.get("listening", "bot") == {"1": 77}
+    assert made["other"].log == [("delete", "1", 90), said] and home_store.get("listening", "bot") == {"1": 77}
     assert capsys.readouterr().out == "" and "goodbye" not in ChannelCommand.USAGE
 
 

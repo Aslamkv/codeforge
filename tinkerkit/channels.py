@@ -190,7 +190,9 @@ class ChannelCommand:
     def goodbye(rest):
         goodbye = json.loads(rest[0])
         for name in goodbye["channels"]:
-            Desk.post_status(Channels.make(name), goodbye["status"])
+            channel = Channels.make(name)
+            channel.clear()
+            Desk.post_status(channel, goodbye["status"])
         question = goodbye["question"]
         if question:
             channel = Channels.make(question["channel"])
