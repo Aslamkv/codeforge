@@ -617,8 +617,8 @@ class Models:
 
     @staticmethod
     def smartness(pair):
-        quality = Models.quality(pair[1])
-        return (quality**2 * Models.words_per_second(pair[1]), quality)
+        settings = pair[1]
+        return (Models.solved(settings), Models.quality(settings), Models.words_per_second(settings))
 
     @staticmethod
     def facts(settings):
