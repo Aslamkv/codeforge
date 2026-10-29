@@ -273,6 +273,13 @@ def test_unmeasured_names_general_models_never_measured_or_without_solved(home_s
     assert Models.unmeasured() == ["b", "unmeasured"]
 
 
+@pytest.mark.spec("MOD-31")
+def test_measured_names_only_models_with_a_solved_count(home_store, monkeypatch):
+    without_solved = {key: value for key, value in measured(3, 20.0).items() if key != "solved"}
+    recipe_for(monkeypatch, {"a": measured(3, 20.0), "b": without_solved})
+    assert [name for name, _ in Models.measured()] == ["a"]
+
+
 @pytest.mark.spec("MOD-26")
 def test_capabilities_asks_show_once(monkeypatch):
     asked = []

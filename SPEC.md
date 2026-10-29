@@ -678,7 +678,8 @@ What is said in the chats, kept so that a chat is only a view of it.
   `tinker model`'s list shows the recipe above its rows when two or more models are measured.
 - **MOD-31** `tinker model recipe` prints the recipe (**MOD-30**) under the heading
   `🍳 Model recipe, picked from 4 measured models`, with ` (2 not measured: tinker model recipe all measures them)`
-  when models that do not embed were never measured or have no `solved` count; one measured model is enough.
+  when models that do not embed were never measured or have no `solved` count. A measured model is one with a
+  `solved` count, so each model counts once; one measured model is enough.
   With none measured, it prints `🍳 No model is measured yet: tinker model recipe all measures them`.
   `tinker model recipe all` first measures each of those models, one after another, as `model calibrate NAME`
   does (**MOD-28**), changing no model in use; a failed measurement says so and the next one goes on. Then it

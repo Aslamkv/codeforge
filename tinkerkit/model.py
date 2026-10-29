@@ -581,7 +581,11 @@ class Models:
 
     @staticmethod
     def measured():
-        return [(name, kept) for name in Models.named(embedding=False) if (kept := Models.settings(name))]
+        return [
+            (name, kept)
+            for name in Models.named(embedding=False)
+            if (kept := Models.settings(name)) and "solved" in kept
+        ]
 
     @staticmethod
     def unmeasured():

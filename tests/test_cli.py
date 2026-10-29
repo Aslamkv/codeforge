@@ -339,7 +339,7 @@ def test_model_recipe_prints_the_recipe_under_its_heading(home_store, monkeypatc
     out = capsys.readouterr().out.splitlines()
     assert (
         out[0]
-        == "🍳 Model recipe, picked from 1 measured models (1 not measured: tinker model recipe all measures them)"
+        == "🍳 Model recipe, picked from 1 measured model (1 not measured: tinker model recipe all measures them)"
     )
     assert out[1:] == Models.recipe()
     Models.keep("m", dict(MEASURED, solved=1, quality_tasks=[1, 2, 3]))
@@ -360,7 +360,7 @@ def test_model_recipe_all_measures_the_models_it_lacks_and_goes_on_past_a_failur
     out = capsys.readouterr().out
     assert measured == ["other", "m"] and "m was not measured: could not measure" in out
     assert "other was not measured: could not measure" in out
-    assert "🍳 Model recipe, picked from 2 measured models (2 not measured" in out
+    assert "🍳 Model recipe, picked from 1 measured model (2 not measured" in out
     assert Config.get("model") == "n"
 
 

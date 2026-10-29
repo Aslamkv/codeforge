@@ -652,7 +652,9 @@ class Commands:
             say.text("🍳 No model is measured yet: tinker model recipe all measures them")
             return
         lacking = f" ({unmeasured} not measured: tinker model recipe all measures them)" if unmeasured else ""
-        say.text(f"🍳 Model recipe, picked from {measured} measured models{lacking}")
+        say.text(
+            f"🍳 Model recipe, picked from {measured} measured model{'s' if measured > 1 else ''}{lacking}"
+        )
         for line in Models.recipe():
             say.text(line)
 
