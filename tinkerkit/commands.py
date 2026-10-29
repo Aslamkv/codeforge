@@ -465,10 +465,11 @@ COMMANDS = [
     Command(
         "model",
         "Set up",
-        "model [calibrate] [NAME]",
+        "model [calibrate|recipe [all]] [NAME]",
         "the models Ollama has, and the one every build uses",
         "List the models Ollama has and pick one: a measured model is used for every build, one never measured "
-        "is measured first, an embedding model indexes what is learned. calibrate NAME measures a model again.",
+        "is measured first, an embedding model indexes what is learned. calibrate NAME measures a model again. "
+        "recipe prints the smartest and the fastest measured model; recipe all measures the rest first.",
         kind="glance",
         actions=[
             Action("job", "calibrate", when=lambda words: len(words) > 1),
@@ -478,7 +479,11 @@ COMMANDS = [
         ],
         chat=True,
         words=True,
-        arguments=[Argument("words", "*", "[calibrate] [NAME]", "calibrate, then the model's name")],
+        arguments=[
+            Argument(
+                "words", "*", "[calibrate|recipe [all]] [NAME]", "calibrate or recipe, then the model's name"
+            )
+        ],
     ),
     Command(
         "config",

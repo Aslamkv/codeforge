@@ -465,7 +465,10 @@ class Cli:
 
     @staticmethod
     def model_words(words, parser):
-        if len(words) > (2 if words[:1] == ["calibrate"] else 1):
+        if words[:1] == ["recipe"]:
+            if words[1:] not in ([], ["all"]):
+                parser.error("tinker model recipe [all] takes no model name")
+        elif len(words) > (2 if words[:1] == ["calibrate"] else 1):
             parser.error("tinker model [calibrate] [NAME] takes one model name")
         return words
 

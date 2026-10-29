@@ -605,11 +605,9 @@ class Models:
         smartest = max(solving, key=Models.smartness)
         fastest = max(solving, key=lambda pair: (Models.words_per_second(pair[1]), Models.quality(pair[1])))
         if smartest is fastest:
-            name, settings = smartest
-            facts = f"{Models.solved_text(settings)} · {Models.writes_text(settings)}"
-            return [f"🧠⚡ {name} is the smartest and the fastest ({facts})"]
+            return [f"🧠⚡ {smartest[0]} is the smartest and the fastest ({Models.facts(smartest[1])})"]
         return [
-            f"🧠 Smartest: {smartest[0]} ({Models.solved_text(smartest[1])} · {Models.writes_text(smartest[1])})",
+            f"🧠 Smartest: {smartest[0]} ({Models.facts(smartest[1])})",
             f"⚡ Fastest: {fastest[0]} ({Models.writes_text(fastest[1])} · {Models.solved_text(fastest[1])})",
         ]
 
@@ -617,6 +615,10 @@ class Models:
     def smartness(pair):
         quality = Models.quality(pair[1])
         return (quality**2 * Models.words_per_second(pair[1]), quality)
+
+    @staticmethod
+    def facts(settings):
+        return f"{Models.solved_text(settings)} · {Models.writes_text(settings)}"
 
     @staticmethod
     def writes_text(settings):

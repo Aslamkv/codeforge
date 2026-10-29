@@ -59,7 +59,7 @@ tinker doctor
 ```
 
 Pull a model and use it. A model never measured is measured first, in about a minute: how fast it reads
-and writes, how much it can take in and reply, and 3 small test tasks to solve. It ends with a summary in
+and writes, how much it can take in and reply, and 5 small test tasks to solve. It ends with a summary in
 plain words, exact figures in brackets, and keeps every run in its history. If the measurement fails, the
 model in use stays:
 
@@ -83,13 +83,27 @@ tinker model qwen3-embedding:0.6b
 ```
 
 Leave out the name to see Ollama's models, general ones first and then embeddings, each with what was
-measured (`in use · writes ~19 words/s · reads ~225 words/s · solved 2 of 3`). Above the list it names the
-best and the fastest. On a terminal or typed alone in the chat, it is a select box (up, down, Enter, Esc) that
-starts at the model in use, with the unmeasured models dimmed:
+measured (`in use · writes ~19 words/s · reads ~225 words/s · solved 3 of 5`). Above the list, with two or
+more measured, it names the smartest and the fastest. On a terminal or typed alone in the chat, it is a select
+box (up, down, Enter, Esc) that starts at the model in use, with the unmeasured models dimmed:
 
 ```sh
 tinker model
 tinker model calibrate
+```
+
+See the recipe alone: the smartest model (quality counts most, then speed) and the fastest writer, from
+the models that solved at least one test task (`🧠 Smartest: qwen3 (solved 3 of 5 · writes ~19 words/s)`):
+
+```sh
+tinker model recipe
+```
+
+Measure every model never measured first, one after another, then print the recipe. It changes no model in
+use, and a failed measurement goes on to the next:
+
+```sh
+tinker model recipe all
 ```
 
 ## Build 🔨

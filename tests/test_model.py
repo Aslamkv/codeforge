@@ -258,6 +258,7 @@ def test_the_recipe_needs_one_measured_model(home_store, monkeypatch):
     assert recipe_for(monkeypatch, {"a": measured(3, 20.0)})[0].startswith("🧠⚡ a is the smartest")
 
 
+@pytest.mark.spec("MOD-30")
 def test_the_shown_recipe_needs_two_measured_models(home_store, monkeypatch):
     recipe_for(monkeypatch, {"a": measured(3, 20.0)})
     assert Models.shown_recipe() == []
@@ -265,6 +266,7 @@ def test_the_shown_recipe_needs_two_measured_models(home_store, monkeypatch):
     assert Models.shown_recipe() == Models.recipe() != []
 
 
+@pytest.mark.spec("MOD-31")
 def test_unmeasured_names_general_models_never_measured_or_without_solved(home_store, monkeypatch):
     without_solved = {key: value for key, value in measured(3, 20.0).items() if key != "solved"}
     recipe_for(monkeypatch, {"a": measured(3, 20.0), "b": without_solved})
