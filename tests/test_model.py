@@ -155,6 +155,16 @@ def test_rows_leave_out_a_group_with_no_model(home_store, monkeypatch):
     ]
 
 
+@pytest.mark.spec("MOD-30")
+@pytest.mark.parametrize(
+    "solved,tasks,text,fraction",
+    [(2, [1, 2, 3], "solved 2 of 3", 2 / 3), (3, [1, 2, 3, 4, 5], "solved 3 of 5", 0.6)],
+)
+def test_quality_is_solved_over_the_tasks_the_model_was_asked(solved, tasks, text, fraction):
+    settings = dict(MEASURED, solved=solved, quality_tasks=tasks)
+    assert Models.solved_text(settings) == text and Models.quality(settings) == pytest.approx(fraction)
+
+
 def unsolved(write):
     return dict(MEASURED, write_tokens_per_s=write)
 
@@ -593,7 +603,7 @@ def test_calibrate_writes_the_measured_settings(fake_ollama, monkeypatch, no_sle
     fake_ollama.reply({"content": "OK", "prompt_eval_count": 400, "eval_count": 2, "eval_duration": 1e8})
     answers = {task["prompt"]: task["answer"] for task in quality.tasks()}
     fake_ollama.reply(lambda messages: answers[messages[0]["content"]], times=2)
-    fake_ollama.reply("not the answer")
+    fake_ollama.reply("not the answer", times=3)
     drawn = [task["id"] for task in quality.pick(QUALITY_TASK_COUNT, random.Random(5))]
     settings = Calibrator("m", random.Random(5)).run()
     saved = Models.settings("m")
@@ -616,10 +626,10 @@ def test_calibrate_writes_the_measured_settings(fake_ollama, monkeypatch, no_sle
         "m needs 5 GB (weights); this machine's GPU can use 20 GB",
         f"Checking it can read about {Calibrator.words(2048, ratio)} words at once (2,048 tokens, about",
         "Read it in 2s",
-        "Solving 3 small test tasks…",
+        "Solving 5 small test tasks…",
         f"✅ Task {drawn[0]}",
         f"❌ Task {drawn[2]}",
-        "Solved 2 of 3",
+        "Solved 2 of 5",
     ):
         assert line in out
     assert (
@@ -628,7 +638,7 @@ def test_calibrate_writes_the_measured_settings(fake_ollama, monkeypatch, no_sle
         f"   ✍️ Writes about {Calibrator.words(write, ratio)} words a second ({write:g} tok/s)\n"
         f"   📥 Takes requests up to about {Calibrator.words(13653, ratio)} words (13,653 tokens)\n"
         f"   📤 Replies up to about {Calibrator.words(27307, ratio)} words (27,307 tokens)\n"
-        "   🧠 Solved 2 of 3 test tasks\n"
+        "   🧠 Solved 2 of 5 test tasks\n"
         "   💭 Thinks before it answers (think: high)\n"
     ) in out
     assert all(len(line) <= 80 for line in out.splitlines() if "Testing" not in line)
@@ -670,6 +680,7 @@ def test_a_reply_cut_off_before_an_answer_fails_its_task(fake_ollama):
     answers = {task["prompt"]: task["answer"] for task in quality.tasks()}
     fake_ollama.reply({"content": "", "thinking": "Let me", "done_reason": "length"})
     fake_ollama.reply(lambda messages: answers[messages[0]["content"]], times=2)
+    fake_ollama.reply("not the answer", times=2)
     probe = Calibrator("m", random.Random(3)).quality(True, 8192)
     assert probe["solved"] == 2 and len(probe["quality_tasks"]) == QUALITY_TASK_COUNT
 

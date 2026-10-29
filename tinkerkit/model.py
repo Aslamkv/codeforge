@@ -605,6 +605,10 @@ class Models:
         return settings.get("solved") or 0
 
     @staticmethod
+    def quality(settings):
+        return settings["solved"] / len(settings["quality_tasks"])
+
+    @staticmethod
     def words_per_second(settings):
         return (settings.get("write_tokens_per_s") or 0) * settings["chars_per_token"]
 
