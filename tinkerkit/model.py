@@ -520,9 +520,9 @@ class Models:
         general, embeddings = Models.named(embedding=False), Models.named(embedding=True)
         sizes = {model.get("name", ""): model.get("size") or 0 for model in Models.answering()}
         width = Models.width(general + embeddings)
-        return Models.section("— general —", [Models.general_row(name, width) for name in general]) + (
+        return Models.section("General models", [Models.general_row(name, width) for name in general]) + (
             Models.section(
-                "— embeddings —", [Models.embedding_row(name, sizes[name], width) for name in embeddings]
+                "Embedding models", [Models.embedding_row(name, sizes[name], width) for name in embeddings]
             )
         )
 
@@ -531,7 +531,7 @@ class Models:
         general = Models.named(embedding=False)
         width = Models.width(general)
         return Models.section(
-            "— general —", [Models.label(Models.general_row(name, width)) for name in general]
+            "General models", [Models.label(Models.general_row(name, width)) for name in general]
         )
 
     @staticmethod

@@ -566,7 +566,7 @@ def test_console_picks_the_model_for_model_typed_alone(monkeypatch, home_store):
     shown = model_picker(monkeypatch, console, 1)
     typing(monkeypatch, " /model ", "/model n", "/models", "model")
     console.read()
-    assert picked_names(shown) == [(["—", "m", "n"], 2, True)]
+    assert picked_names(shown) == [(["General", "m", "n"], 2, True)]
     assert styled(shown[0][0][1])[1] is DIMMED
     assert [console.lines.get() for _ in range(5)] == ["/model m", "/model n", "/models", "model", None]
 
@@ -580,7 +580,7 @@ def test_console_picks_the_model_for_model_calibrate_typed_alone(monkeypatch, ho
     )
     typing(monkeypatch, "/model calibrate", "/model calibrate n")
     console.read()
-    assert picked_names(shown) == [(["—", "m", "n"], 2, True)]
+    assert picked_names(shown) == [(["General", "m", "n"], 2, True)]
     assert not any(styled(choice)[1] is DIMMED for choice in shown[0][0])
     assert [console.lines.get() for _ in range(3)] == ["/model calibrate m", "/model calibrate n", None]
 
@@ -1839,7 +1839,7 @@ def test_a_slash_word_that_names_no_command_is_only_answered(desk, monkeypatch):
 def test_a_model_pick_sent_alone_asks_with_buttons(desk, monkeypatch):
     desk, channel, _ = desk
     answered, chosen = [], []
-    rows = [("— general —", HEADING), "qwen3  in use · solved 2 of 3", ("big  not measured yet", DIMMED)]
+    rows = [("General models", HEADING), "qwen3  in use · solved 2 of 3", ("big  not measured yet", DIMMED)]
     monkeypatch.setattr(desk, "answer", lambda message, channel: answered.append(message.text))
     monkeypatch.setattr(Models, "command_choices", lambda command: rows)
     monkeypatch.setattr(Models, "shown_recipe", lambda: ["🧠⚡ qwen3 is the smartest and the fastest"])
@@ -1853,7 +1853,7 @@ def test_a_model_pick_sent_alone_asks_with_buttons(desk, monkeypatch):
     assert answered == ["/model calibrate"] and chosen == [
         (
             "🧠 **/model** · choose a model (in use: qwen3)\n🧠⚡ qwen3 is the smartest and the fastest\n"
-            "```\n— general —\nqwen3  in use · solved 2 of 3\nbig  not measured yet\n```",
+            "```\nGeneral models\nqwen3  in use · solved 2 of 3\nbig  not measured yet\n```",
             ["qwen3", "big"],
         )
     ]
@@ -1863,7 +1863,7 @@ def test_a_model_pick_sent_alone_asks_with_buttons(desk, monkeypatch):
     assert chosen[-1][0].startswith("🧠 **/model calibrate** · choose a model (in use: qwen3)\n")
     say(desk, channel, "qwen3")
     assert answered[-1] == "/model calibrate qwen3"
-    monkeypatch.setattr(Models, "command_choices", lambda command: [("— general —", HEADING)])
+    monkeypatch.setattr(Models, "command_choices", lambda command: [("General models", HEADING)])
     say(desk, channel, "/model")
     monkeypatch.setattr(
         Models, "command_choices", lambda command: (_ for _ in ()).throw(SystemExit("no Ollama"))

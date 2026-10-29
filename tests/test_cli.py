@@ -286,8 +286,8 @@ def test_model_without_a_name_prints_the_recipe_and_the_rows_off_a_terminal(home
     shown = picker(monkeypatch, 1, terminal=False, embedding=("other",))
     Commands.model([])
     out = capsys.readouterr().out.splitlines()
-    assert shown == [] and out[:2] == Models.recipe() and out[2] == "— general —"
-    assert out[3].startswith("m ") and out[5] == "— embeddings —" and out[6].startswith("other")
+    assert shown == [] and out[:2] == Models.recipe() and out[2] == "General models"
+    assert out[3].startswith("m ") and out[5] == "Embedding models" and out[6].startswith("other")
     assert Config.get("model") == "n"
 
 
@@ -302,7 +302,7 @@ def test_model_calibrate_without_a_name_picks_a_general_model_before_its_job_sta
     shown = picker(monkeypatch, 1, embedding=("n",))
     assert Cli.named(["model", "calibrate"]) == ["model", "calibrate", "other"]
     [(rows, start)] = shown
-    assert start == 2 and [Models.row_name(row) for row in rows] == ["—", "other", "m"]
+    assert start == 2 and [Models.row_name(row) for row in rows] == ["General", "other", "m"]
     assert all(isinstance(row, str) for row in rows[1:])
     picker(monkeypatch, None)
     with pytest.raises(SystemExit) as cancelled:
@@ -312,7 +312,7 @@ def test_model_calibrate_without_a_name_picks_a_general_model_before_its_job_sta
     with pytest.raises(SystemExit) as listed:
         Cli.named(["model", "calibrate"])
     out = capsys.readouterr().out
-    assert not listed.value.code and shown == [] and "— general —" in out and "embeddings" not in out
+    assert not listed.value.code and shown == [] and "General models" in out and "Embedding models" not in out
 
 
 @pytest.mark.spec("CLI-3")
@@ -324,7 +324,7 @@ def test_model_calibrate_without_a_name_prints_the_recipe_first_off_a_terminal(
     with pytest.raises(SystemExit):
         Cli.named(["model", "calibrate"])
     out = capsys.readouterr().out.splitlines()
-    assert Models.recipe() and out[:2] == Models.recipe() and out[2] == "— general —"
+    assert Models.recipe() and out[:2] == Models.recipe() and out[2] == "General models"
 
 
 @pytest.mark.spec("MOD-31")

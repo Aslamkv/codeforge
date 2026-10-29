@@ -425,6 +425,13 @@ def test_choices_show_plain_dim_or_as_a_heading(colored_terminal):
     assert frames(colored_terminal)[0] == ["› ready", f"  {DIM}not pulled{RESET}", f"{BOLD}Embeddings{RESET}"]
 
 
+@pytest.mark.spec("MSG-8")
+def test_a_row_wider_than_the_terminal_is_cut_to_fit(terminal, monkeypatch):
+    monkeypatch.setattr(shutil, "get_terminal_size", lambda fallback: os.terminal_size((12, 10)))
+    picking("enter", choices=("a long row that wraps", ("a long heading", HEADING), "short"))
+    assert frames(terminal)[0] == ["› a long ro", "a long head", "  short"]
+
+
 HEADED = (("Chat", HEADING), "one", "two", ("Embeddings", HEADING), "three")
 
 
