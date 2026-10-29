@@ -68,6 +68,14 @@ def keep_a_disabled_bot():
     Channels.keep("bot", {"kind": "telegram", "enabled": False, "allowed": ["42"]}, {"token": "t"})
 
 
+@pytest.mark.spec("CNV-8")
+def test_telegram_sends_the_banner_first_line_bold_last_line_italic():
+    api = BotAPI(sendMessage={"message_id": 7})
+    sent = telegram(api).send_banner("42", ["🔧 Tinker", "model qwen*3", "help lists commands"])
+    assert sent == 7
+    assert api.calls[-1][1]["text"] == "<b>🔧 Tinker</b>\nmodel qwen*3\n<i>help lists commands</i>"
+
+
 @pytest.mark.spec("CHN-1")
 def test_channels_settings_and_secrets(tinker_home, home_store):
     assert Channels.settings() == {}

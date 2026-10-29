@@ -2046,7 +2046,7 @@ def test_the_status_is_sent_anew_as_tinker_starts_and_the_goodbye_is_handed_on(d
     collected = []
     channel.collect = lambda: collected.append(True)
     Desk([channel], Path.cwd()).run()
-    first_status, the_question_to_stop = 101, 102
+    banner, first_status, the_question_to_stop = 101, 102, 103
     status = [(kind, sent, text) for kind, _, sent, text in channel.log if "**Tinker** ·" in text]
     assert [(kind, sent) for kind, sent, _ in status] == [("send", first_status)]
     assert status[0][2].startswith("🟢 **Tinker** · idle: send a task") and channel.closed
@@ -2054,6 +2054,7 @@ def test_the_status_is_sent_anew_as_tinker_starts_and_the_goodbye_is_handed_on(d
     assert deleted == {status_before, exit_said.id, confirm_said.id}
     assert not any("Stopping" in text for text in channel.texts())
     assert home_store.get("listening", "bot") == {"1": first_status} and collected
+    assert home_store.get("banner", "bot") == {"1": banner}
     goodbye = {
         "status": "💤 **Tinker** · not listening",
         "channels": ["bot"],
@@ -2147,6 +2148,26 @@ def test_every_status_is_sent_anew_the_one_before_taken_out(desk):
     assert log[0] == ("send", 101) and "edit" not in {kind for kind, _ in log}
     assert sorted(log[1:3]) == [("delete", 101), ("send", 102)]
     assert sorted(log[3:]) == [("delete", 102), ("send", 103)]
+
+
+@pytest.mark.spec("CNV-9")
+def test_each_chat_starts_cleared_with_the_banner_before_the_status(desk, monkeypatch):
+    channel, cleared, lasting = Recorder("bot"), [], []
+    monkeypatch.setattr(channel, "clear", lambda: cleared.append(channel.name) or 0)
+    monkeypatch.setattr(channel, "lasting", lambda chat, sent: lasting.append(list(sent)))
+    listening = Desk([channel], Path.cwd())
+    listening.said_status = "🟢 **Tinker** · idle"
+    monkeypatch.setattr(
+        listening, "banner_lines", lambda: ["🔧 Tinker", "model qwen3", "help lists commands"]
+    )
+    listening.start_chat(channel)
+    listening.start_chat(channel)
+    log = [(kind, sent, text) for kind, _, sent, text in channel.log]
+    banner = "**🔧 Tinker**\nmodel qwen3\n_help lists commands_"
+    assert cleared == ["bot", "bot"] and log[0] == ("send", 101, banner) and log[1][:2] == ("send", 102)
+    assert {entry[1] for entry in log[2:] if entry[0] == "delete"} == {101, 102}
+    assert [entry for entry in log[2:] if entry[0] == "send"][0] == ("send", 103, banner)
+    assert [101] in lasting and [103] in lasting
 
 
 @pytest.mark.spec("CNV-8")

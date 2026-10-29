@@ -352,7 +352,20 @@ class Desk:
         channel.offer(offered())
         with self.post_lock:
             self.chats_started.add(channel)
+            channel.clear()
+            self.post_banner(channel, self.banner_lines())
             self.post_status(channel, self.said_status)
+
+    @staticmethod
+    def post_banner(channel, lines):
+        mine = Home.store().get("banner", channel.name) or {}
+        for chat in channel.allowed:
+            if mine.get(chat):
+                channel.delete(chat, mine[chat])
+            sent = channel.send_banner(chat, lines)
+            channel.lasting(chat, [sent])
+            mine[chat] = sent
+        Home.store().put("banner", channel.name, mine)
 
     def hear(self, channel, message):
         if message.text.split()[:1] == [CHAT_APP_START]:
@@ -1765,6 +1778,12 @@ class Channel:
 
     def typing(self, chat):
         pass
+
+    def send_banner(self, chat, lines):
+        first, *middle, last = lines
+        return self.send(
+            chat, "\n".join([md(t"**{first}**"), *(md(t"{line}") for line in middle), md(t"_{last}_")])
+        )
 
     def lasting(self, chat, sent):
         pass
