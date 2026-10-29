@@ -2121,8 +2121,7 @@ def test_ctrl_c_closes_the_chats_and_posts_no_status_after_the_first(desk, home_
 def test_no_status_is_posted_to_a_chat_once_a_channel_is_closed(monkeypatch):
     chat = Recorder()
     console, out = piped_console(monkeypatch)
-    desk = Desk([chat, console], Path.cwd())
-    desk.chats_started.add(chat)
+    desk = desk_with_a_started_chat(chat, console)
     chat.closed = True
     desk.say_status("💤 **Tinker** · not listening")
     assert chat.log == [] and "not listening" in out.getvalue()
@@ -2195,8 +2194,8 @@ def test_the_terminal_reads_and_exits_at_once_while_periodic_work_waits(monkeypa
     assert not running.is_alive() and ended_in < 1 and console.closed
 
 
-def desk_with_a_started_chat(channel):
-    listening = Desk([channel], Path.cwd())
+def desk_with_a_started_chat(channel, *others):
+    listening = Desk([channel, *others], Path.cwd())
     listening.chats_started.add(channel)
     return listening
 

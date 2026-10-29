@@ -235,7 +235,8 @@ def test_the_goodbye_sender_clears_each_chat_posts_the_status_and_takes_the_ques
     ChannelCommand.run(["goodbye", json.dumps(goodbye)])
     said = ("show", "1", "💤 **Tinker** · not listening")
     assert set(made["bot"].log) == {("delete", "1", 55), said, ("delete", "1", 102), ("delete", "1", 103)}
-    assert made["other"].log == [("delete", "1", 90), said] and home_store.get("listening", "bot") == {"1": 77}
+    assert made["other"].log == [("delete", "1", 90), said]
+    assert home_store.get("listening", "bot") == {"1": 77}
     assert capsys.readouterr().out == "" and "goodbye" not in ChannelCommand.USAGE
 
 

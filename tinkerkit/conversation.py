@@ -852,8 +852,7 @@ class Desk:
     def delete(self, channel, chat, asking):
         if asking["words"][0] in EXIT_WORDS:
             self.stop_question = (channel, chat, asking["shown"])
-            for each in self.channels:
-                each.closed = True
+            self.close_channels()
             return
         words = asking["words"] + ["--yes"]
         if kind_of(words) == "job":
