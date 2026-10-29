@@ -1012,6 +1012,12 @@ The chat plugin: Telegram, and `tinker channel`.
   `read PATH`: the link Telegram gives a bot holds its token, so it is never passed on. A file over
   `TELEGRAM_MAX_DOWNLOAD_BYTES`, or one that cannot be downloaded, is said to the person, and nothing is read.
   A file from any other chat is ignored.
+- **CHN-11** As Tinker starts (`Desk.run`), each chat channel finds its route to its host once, in a thread of
+  its own so nothing waits on it. `Route.find(host)` connects to the host's IPv6 addresses `ROUTE_TRIES` times,
+  each try given `ROUTE_SECONDS`; when a try does not connect, the home's `routes` keeps the host to IPv4,
+  otherwise (or when the host has no IPv6 address) any address is used. Every connection to the host
+  (`TelegramChannel.connection`), in this Tinker and in the goodbye it hands on, connects over IPv4 only while
+  the host is kept to it; until the route is found, the one found last is used.
 
 ## knowledge (KNW)
 
