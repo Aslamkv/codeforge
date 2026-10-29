@@ -894,8 +894,10 @@ The terminal and the chats are one conversation: the same commands, the same ans
   saying the status, taking up an exercise that runs) runs in a thread of its own, from the start, so the
   terminal reads at once and `/exit` or Ctrl-C ends Tinker at once. Tinker tells and never waits as it ends: it
   hands its last status (`not listening`) and the question to stop, to be taken out, to a sender that runs on
-  its own (`tinker channel goodbye`, left out of the usage), and exits; the sender posts the status and takes
-  the question out, and what happens to them is the chat's matter, not Tinker's. Each chat has one status message: what Tinker works on (a job's title), never how far it got. Every
+  its own (`tinker channel goodbye`, left out of the usage), and exits; the sender clears each chat as `clear
+  chat` does (the history keeps every message), posts the status and takes the question out, and what happens
+  to them is the chat's matter, not Tinker's. Once Tinker ends (`/exit` or Ctrl-C), it posts no status of its
+  own: the goodbye's is the last, waiting for a status being posted to be done before it is handed on. Each chat has one status message: what Tinker works on (a job's title), never how far it got. Every
   time the status changes (Tinker starts listening, a job starts, waits for the person, ends, Tinker ends:
   `not listening`), the one before is taken out and the new one is sent at the bottom, with the message of the
   job that runs moved below it. A job says its status at once as it starts, before its own message, and the
