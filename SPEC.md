@@ -880,11 +880,16 @@ The terminal and the chats are one conversation: the same commands, the same ans
   at the new size right away, still right above the prompt and with what Tinker printed right above them, and
   they never spill onto the prompt row. The conversation opens in a framed banner that names Tinker, the model
   in use, the embedding model when one is set, the projects folder and the chats it listens on, each on a
-  line of its own; it draws a rule over the prompt, shows each line
+  line of its own; each chat opens with the same lines as a message of its own (the first in bold, the last in
+  italics), kept by `clear chat` as the status is. When a message changes what the banner says (`model NAME`
+  picks another model), the chats are cleared as `clear chat` does, the terminal's screen and scrollback are
+  wiped, and the banner is drawn and sent anew, with the status below it. It draws a rule over the prompt, shows each line
   you send again highlighted, and marks each message it sends with a steel blue `●`. Piped input draws no
   rule and shows no line again; with `NO_COLOR` or no terminal, none of that is drawn.
 - **CNV-9** `Desk.run` claims each chat channel. When another Tinker holds one, it stops if there is no
-  terminal, and otherwise leaves that chat out. The terminal never waits on a chat: each chat starts in its own
+  terminal, and otherwise leaves that chat out. As each chat starts, what the last Tinker left in it is cleared
+  as `clear chat` does, its banner from before is taken out, and the banner (**CNV-8**) is sent before the
+  status. The terminal never waits on a chat: each chat starts in its own
   thread, and what Tinker does every few seconds while it listens (collecting the messages whose time is up,
   saying the status, taking up an exercise that runs) runs in a thread of its own, from the start, so the
   terminal reads at once and `/exit` or Ctrl-C ends Tinker at once. Tinker tells and never waits as it ends: it
