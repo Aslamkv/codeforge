@@ -193,7 +193,8 @@ tinker
 ```
 
 On a colour terminal it opens with a banner showing the model, the embedding model, the projects folder and the chats it listens
-on. As in Claude Code, the prompt, with a rule over it, follows the output: it starts under the banner and
+on. Each chat opens cleared, with the same lines as a message above the status. When `/model NAME` picks
+another model, the chats are cleared, the terminal is wiped and the banner shows anew. As in Claude Code, the prompt, with a rule over it, follows the output: it starts under the banner and
 moves down as Tinker prints, until it reaches the bottom row; then older lines scroll into the scrollback.
 The prompt edits like a shell: left and right, Home and End (or Ctrl-A and Ctrl-E), Backspace and Delete,
 Ctrl-U and Ctrl-K to clear to the start or the end, and Ctrl-W to delete the word before. Up and down bring

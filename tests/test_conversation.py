@@ -2183,6 +2183,7 @@ def renewing_desk(monkeypatch, lines):
     return listening, channel, done
 
 
+@pytest.mark.spec("CNV-8")
 def test_a_message_that_changes_the_banner_clears_the_chats_and_shows_the_banner_anew(desk, monkeypatch):
     lines = ["🔧 Tinker", "model qwen3", "help lists commands"]
     listening, channel, done = renewing_desk(monkeypatch, lines)
@@ -2195,6 +2196,7 @@ def test_a_message_that_changes_the_banner_clears_the_chats_and_shows_the_banner
     assert banner in sent and sent.index(banner) == len(sent) - 2
 
 
+@pytest.mark.spec("CNV-8")
 def test_a_message_that_leaves_the_banner_alone_clears_nothing(desk, monkeypatch):
     lines = ["🔧 Tinker", "model qwen3", "help lists commands"]
     listening, channel, done = renewing_desk(monkeypatch, lines)
@@ -2202,6 +2204,7 @@ def test_a_message_that_leaves_the_banner_alone_clears_nothing(desk, monkeypatch
     assert done == [lines] and not any("🔧 Tinker" in text for text in channel.texts())
 
 
+@pytest.mark.spec("CNV-8")
 def test_console_wipes_the_screen_and_scrollback_only_in_a_colour_terminal(monkeypatch):
     terminal = colour_terminal(monkeypatch)
     ConsoleChannel().wipe()
