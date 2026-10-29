@@ -54,6 +54,7 @@ STATUS_LOOK_SECONDS = 10
 EXPIRED_MESSAGES_SWEEP_SECONDS = 2
 ENDED_LOOK_SECONDS = 0.1
 BANNER_MAX_COLUMNS = 64
+WIPE_SCREEN_AND_SCROLLBACK = "\033[H\033[2J\033[3J"
 
 CHAT_CONTEXT_MESSAGES = 12
 CHAT_MAX_REPLY_TOKENS = 1024
@@ -182,6 +183,7 @@ class Desk:
         self.seconds_by_run = {}
         self.consoles = [channel for channel in channels if isinstance(channel, ConsoleChannel)]
         self.said_status = None
+        self.shown_banner = self.banner_lines()
         self.chats_started, self.post_lock = set(), threading.Lock()
         self.stop_question = None
         self.exercise_reporter = None
@@ -220,8 +222,24 @@ class Desk:
                 self.channels.remove(channel)
 
     def open_banner(self):
+        self.shown_banner = self.banner_lines()
         for console in self.consoles:
-            console.banner(self.banner_lines())
+            console.banner(self.shown_banner)
+
+    def renew_banner_when_changed(self):
+        if self.banner_lines() != self.shown_banner:
+            self.renew_banner()
+
+    def renew_banner(self):
+        self.shown_banner = self.banner_lines()
+        self.clear_all_chats()
+        for console in self.consoles:
+            console.wipe()
+            console.banner(self.shown_banner)
+        with self.post_lock:
+            for channel in self.chats_started:
+                self.post_banner(channel, self.shown_banner)
+        self.say_status(anew=True)
 
     def banner_lines(self):
         chats = [channel.name for channel in self.channels if channel not in self.consoles]
@@ -368,6 +386,10 @@ class Desk:
         Home.store().put("banner", channel.name, mine)
 
     def hear(self, channel, message):
+        self.handle(channel, message)
+        self.renew_banner_when_changed()
+
+    def handle(self, channel, message):
         if message.text.split()[:1] == [CHAT_APP_START]:
             channel.send(message.chat, welcome())
             return
@@ -839,8 +861,11 @@ class Desk:
             done=True,
         )
 
+    def clear_all_chats(self):
+        return sum(each.clear() for each in self.channels)
+
     def clear_chat(self, channel, chat, cleared, after=""):
-        taken = sum(each.clear() for each in self.channels)
+        taken = self.clear_all_chats()
         sent = channel.send(chat, f"🧹 **{cleared}:** {taken} messages taken out{after}")
         channel.glance(chat, None, [sent], DONE_NOTE_KEPT_SECONDS)
         return None
@@ -1986,6 +2011,10 @@ class ConsoleChannel(Channel):
         rows = [self.banner_row(line, "dim" if row else "bold", width - 4) for row, line in enumerate(lines)]
         framed = [styled(f"╭{edge}╮", "accent"), *rows, styled(f"╰{edge}╯", "accent")]
         self.screen.draw("\n".join(framed) + "\n")
+
+    def wipe(self):
+        if typed_here():
+            self.screen.draw(WIPE_SCREEN_AND_SCROLLBACK)
 
     @staticmethod
     def banner_row(text, style, room):

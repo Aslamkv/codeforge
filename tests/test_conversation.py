@@ -2170,6 +2170,47 @@ def test_each_chat_starts_cleared_with_the_banner_before_the_status(desk, monkey
     assert [101] in lasting and [103] in lasting
 
 
+def renewing_desk(monkeypatch, lines):
+    channel, console, done = Recorder("bot"), ConsoleChannel(), []
+    monkeypatch.setattr(channel, "clear", lambda: done.append("clear bot") or 0)
+    monkeypatch.setattr(console, "clear", lambda: done.append("clear console") or 0)
+    monkeypatch.setattr(console, "wipe", lambda: done.append("wipe"))
+    monkeypatch.setattr(console, "banner", lambda shown: done.append(list(shown)))
+    listening = Desk([console, channel], Path.cwd())
+    monkeypatch.setattr(listening, "banner_lines", lambda: list(lines))
+    listening.open_banner()
+    listening.chats_started.add(channel)
+    return listening, channel, done
+
+
+def test_a_message_that_changes_the_banner_clears_the_chats_and_shows_the_banner_anew(desk, monkeypatch):
+    lines = ["🔧 Tinker", "model qwen3", "help lists commands"]
+    listening, channel, done = renewing_desk(monkeypatch, lines)
+    lines[1] = "model gemma3"
+    listening.hear(channel, Message("1", "/jobs", "you", id=7))
+    banner = "**🔧 Tinker**\nmodel gemma3\n_help lists commands_"
+    sent = channel.texts("send")
+    assert done[0] == ["🔧 Tinker", "model qwen3", "help lists commands"]
+    assert set(done[1:3]) == {"clear bot", "clear console"} and done[3:] == ["wipe", list(lines)]
+    assert banner in sent and sent.index(banner) == len(sent) - 2
+
+
+def test_a_message_that_leaves_the_banner_alone_clears_nothing(desk, monkeypatch):
+    lines = ["🔧 Tinker", "model qwen3", "help lists commands"]
+    listening, channel, done = renewing_desk(monkeypatch, lines)
+    listening.hear(channel, Message("1", "/jobs", "you", id=7))
+    assert done == [lines] and not any("🔧 Tinker" in text for text in channel.texts())
+
+
+def test_console_wipes_the_screen_and_scrollback_only_in_a_colour_terminal(monkeypatch):
+    terminal = colour_terminal(monkeypatch)
+    ConsoleChannel().wipe()
+    assert terminal.getvalue() == "\033[H\033[2J\033[3J"
+    monkeypatch.setattr(sys.stdin, "isatty", lambda: False)
+    ConsoleChannel().wipe()
+    assert terminal.getvalue() == "\033[H\033[2J\033[3J"
+
+
 @pytest.mark.spec("CNV-8")
 def test_the_terminal_leaves_out_what_tinker_works_on_while_a_job_shows_its_progress(desk, monkeypatch):
     chat, console, shown = Recorder("bot"), ConsoleChannel(), []
