@@ -250,9 +250,17 @@ def test_model_takes_one_name(wrong, capsys):
     assert "tinker model [calibrate] [NAME]" in capsys.readouterr().err
 
 
+@pytest.mark.spec("MOD-31")
+def test_model_recipe_takes_all_and_no_model_name(capsys):
+    assert parse("model", "recipe", "all").model == ["recipe", "all"]
+    with pytest.raises(SystemExit):
+        parse("model", "recipe", "m")
+    assert "tinker model recipe [all] takes no model name" in capsys.readouterr().err
+
+
 def measured_two():
-    Models.keep("m", dict(MEASURED, write_tokens_per_s=40))
-    Models.keep("n", dict(MEASURED, solved=3, quality_tasks=[1, 2, 3]))
+    Models.keep("m", dict(MEASURED, write_tokens_per_s=40, solved=1, quality_tasks=[1, 2, 3]))
+    Models.keep("n", dict(MEASURED, write_tokens_per_s=20, solved=3, quality_tasks=[1, 2, 3]))
     Config.save(model="n")
 
 
@@ -317,6 +325,43 @@ def test_model_calibrate_without_a_name_prints_the_recipe_first_off_a_terminal(
         Cli.named(["model", "calibrate"])
     out = capsys.readouterr().out.splitlines()
     assert Models.recipe() and out[:2] == Models.recipe() and out[2] == "— general —"
+
+
+@pytest.mark.spec("MOD-31")
+def test_model_recipe_prints_the_recipe_under_its_heading(home_store, monkeypatch, capsys):
+    picker(monkeypatch, None, embedding=("other",))
+    Commands.model(["recipe"])
+    assert capsys.readouterr().out.splitlines() == [
+        "🍳 No model is measured yet: tinker model recipe all measures them"
+    ]
+    Models.keep("n", dict(MEASURED, solved=3, quality_tasks=[1, 2, 3]))
+    Commands.model(["recipe"])
+    out = capsys.readouterr().out.splitlines()
+    assert (
+        out[0]
+        == "🍳 Model recipe, picked from 1 measured model (1 not measured: tinker model recipe all measures them)"
+    )
+    assert out[1:] == Models.recipe()
+    Models.keep("m", dict(MEASURED, solved=1, quality_tasks=[1, 2, 3]))
+    Commands.model(["recipe"])
+    assert capsys.readouterr().out.splitlines()[0] == "🍳 Model recipe, picked from 2 measured models"
+
+
+@pytest.mark.spec("MOD-31")
+def test_model_recipe_all_measures_the_models_it_lacks_and_goes_on_past_a_failure(
+    home_store, monkeypatch, capsys
+):
+    picker(monkeypatch, None)
+    Config.save(model="n")
+    Models.keep("n", dict(MEASURED, solved=3, quality_tasks=[1, 2, 3]))
+    Models.keep("m", MEASURED)
+    measured = calibrating(monkeypatch, measures=False)
+    Commands.model(["recipe", "all"])
+    out = capsys.readouterr().out
+    assert measured == ["other", "m"] and "m was not measured: could not measure" in out
+    assert "other was not measured: could not measure" in out
+    assert "🍳 Model recipe, picked from 1 measured model (2 not measured" in out
+    assert Config.get("model") == "n"
 
 
 @pytest.mark.spec("CLI-3")

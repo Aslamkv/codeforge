@@ -87,6 +87,12 @@ def test_model_of_a_never_measured_model_is_a_job(home_store):
     assert kind_of(["model", "fresh"]) == "job"
 
 
+@pytest.mark.spec("CMD-1")
+def test_model_recipe_is_a_glance_and_model_recipe_all_a_job(home_store):
+    assert kind_of(["model", "recipe"]) == "glance"
+    assert kind_of(["model", "recipe", "all"]) == "job"
+
+
 @pytest.mark.spec("JOB-1")
 def test_model_of_an_embedding_model_not_yet_in_use_is_a_job(home_store):
     Config.save(embed_model="nomic")

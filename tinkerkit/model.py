@@ -580,29 +580,66 @@ class Models:
         return f"solved {settings['solved']} of {len(settings['quality_tasks'])}"
 
     @staticmethod
+    def measured():
+        return [
+            (name, kept)
+            for name in Models.named(embedding=False)
+            if (kept := Models.settings(name)) and "solved" in kept
+        ]
+
+    @staticmethod
+    def unmeasured():
+        return [
+            name for name in Models.named(embedding=False) if "solved" not in (Models.settings(name) or {})
+        ]
+
+    @staticmethod
+    def shown_recipe():
+        return Models.recipe() if len(Models.measured()) > 1 else []
+
+    @staticmethod
     def recipe():
-        measured = [(name, kept) for name in Models.named(embedding=False) if (kept := Models.settings(name))]
-        if len(measured) < 2:
+        measured = Models.measured()
+        if not measured:
             return []
-        fastest = max(measured, key=lambda pair: (Models.words_per_second(pair[1]), Models.solved(pair[1])))
-        writes = f"writes {Models.speed_words(fastest[1], 'write_tokens_per_s')} words/s"
-        fastest_line = f"⚡ Fastest: {fastest[0]} ({writes})"
-        tested = [pair for pair in measured if "solved" in pair[1]]
-        if not tested:
-            return [fastest_line]
-        best = max(tested, key=lambda pair: (Models.solved(pair[1]), Models.words_per_second(pair[1])))
-        if best is fastest:
-            return [f"🏆 {best[0]} is the best and the fastest ({Models.solved_text(best[1])}, {writes})"]
-        return [f"🏆 Best quality: {best[0]} ({Models.solved_text(best[1])})", fastest_line]
+        solving = [pair for pair in measured if Models.solved(pair[1])]
+        if not solving:
+            name, settings = max(measured, key=lambda pair: Models.words_per_second(pair[1]))
+            return [f"⚡ Fastest: {name} ({Models.writes_text(settings)})"]
+        smartest = max(solving, key=Models.smartness)
+        fastest = max(solving, key=lambda pair: (Models.words_per_second(pair[1]), Models.quality(pair[1])))
+        if smartest is fastest:
+            return [f"🧠⚡ {smartest[0]} is the smartest and the fastest ({Models.facts(smartest[1])})"]
+        return [
+            f"🧠 Smartest: {smartest[0]} ({Models.facts(smartest[1])})",
+            f"⚡ Fastest: {fastest[0]} ({Models.writes_text(fastest[1])} · {Models.solved_text(fastest[1])})",
+        ]
+
+    @staticmethod
+    def smartness(pair):
+        quality = Models.quality(pair[1])
+        return (quality**2 * Models.words_per_second(pair[1]), quality)
+
+    @staticmethod
+    def facts(settings):
+        return f"{Models.solved_text(settings)} · {Models.writes_text(settings)}"
+
+    @staticmethod
+    def writes_text(settings):
+        return f"writes {Models.speed_words(settings, 'write_tokens_per_s')} words/s"
 
     @staticmethod
     def say_recipe():
-        for line in Models.recipe():
+        for line in Models.shown_recipe():
             say.text(line)
 
     @staticmethod
     def solved(settings):
         return settings.get("solved") or 0
+
+    @staticmethod
+    def quality(settings):
+        return settings["solved"] / len(settings["quality_tasks"])
 
     @staticmethod
     def words_per_second(settings):
