@@ -404,8 +404,8 @@ class LineEditor:
 class Plain:
     selectable = True
 
-    def row(self, label, marked):
-        return ("› " if marked else "  ") + self.shown(label)
+    def row(self, label, marked, room):
+        return ("› " if marked else "  ") + self.shown(cut_to_width(label, room - 2))
 
     def shown(self, label):
         return label
@@ -419,8 +419,8 @@ class Dimmed(Plain):
 class Heading(Plain):
     selectable = False
 
-    def row(self, label, marked):
-        return paint(label, "bold")
+    def row(self, label, marked, room):
+        return paint(cut_to_width(label, room), "bold")
 
 
 PLAIN, DIMMED, HEADING = Plain(), Dimmed(), Heading()
@@ -431,8 +431,9 @@ def styled(choice):
 
 
 def choice_rows(choices, current):
+    room = max(shutil.get_terminal_size((80, 24)).columns - 1, 10)
     return "\r\n".join(
-        LINE_START + style.row(label, index == current) + CLEAR_TO_LINE_END
+        LINE_START + style.row(label, index == current, room) + CLEAR_TO_LINE_END
         for index, (label, style) in enumerate(choices)
     )
 

@@ -137,11 +137,11 @@ def test_rows(home_store, monkeypatch):
     Models.keep("phi", dict(MEASURED))
     Config.save(model="llama3", embed_model="nomic")
     assert Models.rows() == [
-        ("— general —", HEADING),
+        ("General models", HEADING),
         ("qwen3:8b  not measured yet · choosing it measures it (about a minute)", DIMMED),
         "llama3    in use · writes ~19 words/s · reads ~150 words/s · solved 2 of 3",
         "phi       writes ? words/s · reads ? words/s · test tasks not run · tinker model calibrate phi runs them",
-        ("— embeddings —", HEADING),
+        ("Embedding models", HEADING),
         "nomic     in use · 0.3 GB",
     ]
 
@@ -150,7 +150,7 @@ def test_rows(home_store, monkeypatch):
 def test_rows_leave_out_a_group_with_no_model(home_store, monkeypatch):
     installed(monkeypatch, [{"name": "qwen3:8b"}], {"qwen3:8b": ["completion"]})
     assert Models.rows() == [
-        ("— general —", HEADING),
+        ("General models", HEADING),
         ("qwen3:8b  not measured yet · choosing it measures it (about a minute)", DIMMED),
     ]
 
@@ -300,7 +300,7 @@ def test_picked_starts_at_the_model_in_use(home_store, monkeypatch):
     shown = []
     monkeypatch.setattr(say, "pick", lambda choices, start: shown.append((choices, start)) or 2)
     rows = [
-        ("— general —", HEADING),
+        ("General models", HEADING),
         ("qwen3:8b  not measured yet", DIMMED),
         "llama3    solved 2 of 3",
         "phi",

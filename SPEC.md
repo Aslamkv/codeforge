@@ -217,7 +217,7 @@ Everything Tinker tells the person goes through one voice, `say` (a `Messages`).
   prompt, not full screen. Each choice is a label and how it shows: plain, dim, or a heading (never current:
   up and down step over it); `›` marks the current one, first `start`. Up and down move it, stopping at the ends; Enter gives its index; Esc, Ctrl-C or end of input give
   `None`. It reads the keys one at a time with the terminal raw, gives the terminal back as it was, and clears
-  the list when it ends.
+  the list when it ends. A row wider than the terminal is cut to fit, so each row takes one line.
 - **MSG-9** The raw keys name, beside those of **MSG-8**: left, right, Home, End, Backspace, Delete, Tab and
   Ctrl-A/E/U/K/W; any other bytes are text, a UTF-8 character whole and a paste as one piece. `LineEditor`
   edits one line from them: the text and the cursor, text inserted at the cursor, left and right one
@@ -657,8 +657,8 @@ What is said in the chats, kept so that a chat is only a view of it.
      💭 Thinks before it answers (think: high)
   ```
   An unmeasured speed is `?`.
-- **MOD-29** `Models.rows()` gives `tinker model`'s list: a heading `— general —` with a row for each model
-  of `Models.choices()`, then `— embeddings —` with one for each of `Models.embedding_choices()`, a group with
+- **MOD-29** `Models.rows()` gives `tinker model`'s list: a heading `General models` with a row for each model
+  of `Models.choices()`, then `Embedding models` with one for each of `Models.embedding_choices()`, a group with
   no model left out. A row is the name, then facts in plain words, with no adjectives: a measured model
   `in use · writes ~19 words/s · reads ~225 words/s · solved 2 of 3` (`in use ·` only for the model in use,
   words as **MOD-28** counts them, an unmeasured speed `?`; one with no `solved` count never ran the test tasks,
