@@ -280,8 +280,6 @@ class Route:
             addresses = socket.getaddrinfo(host, 443, socket.AF_INET6, socket.SOCK_STREAM)
         except socket.gaierror:
             return False
-        if not addresses:
-            return False
         address = (str(addresses[0][4][0]), 443)
         return not all(Route.connects(address) for _ in range(ROUTE_TRIES))
 

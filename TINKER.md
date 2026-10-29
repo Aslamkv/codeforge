@@ -268,7 +268,9 @@ tinker channel enable telegram
 tinker channel start
 ```
 
-Only your paired chat is listened to. Manage your channels (removing one asks first; `--yes` skips that):
+Only your paired chat is listened to. As Tinker starts, it checks in the background whether the bot's host
+answers over IPv6; when it doesn't, Tinker talks to it over IPv4 only, so a broken IPv6 route never slows the
+chat. Manage your channels (removing one asks first; `--yes` skips that):
 
 ```sh
 tinker channel list
