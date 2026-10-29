@@ -1,6 +1,7 @@
 import io
 import json
 import re
+import socket
 import stat
 import sys
 import time
@@ -66,6 +67,71 @@ def every_telegram_talks_to(monkeypatch, api):
 
 def keep_a_disabled_bot():
     Channels.keep("bot", {"kind": "telegram", "enabled": False, "allowed": ["42"]}, {"token": "t"})
+
+
+class Sockets:
+    def __init__(self, monkeypatch, ipv6=(("2001:db8::1", 443, 0, 0),), connects=()):
+        self.ipv6, self.connects, self.tries, self.closed = list(ipv6), list(connects), [], 0
+        monkeypatch.setattr(socket, "getaddrinfo", self.getaddrinfo)
+        monkeypatch.setattr(socket, "create_connection", self.create_connection)
+
+    def getaddrinfo(self, host, port, family=0, kind=0):
+        if family == socket.AF_INET:
+            return [(socket.AF_INET, socket.SOCK_STREAM, 6, "", ("192.0.2.1", port))]
+        if not self.ipv6:
+            raise socket.gaierror("no IPv6 address")
+        return [(socket.AF_INET6, socket.SOCK_STREAM, 6, "", address) for address in self.ipv6]
+
+    def create_connection(self, address, timeout=None, source_address=None):
+        self.tries.append((address, timeout))
+        if self.connects and not self.connects.pop(0):
+            raise TimeoutError("timed out")
+        return self
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *exception):
+        self.close()
+
+    def close(self):
+        self.closed += 1
+
+
+@pytest.mark.spec("CHN-11")
+def test_a_host_whose_ipv6_connects_every_try_is_reached_over_any_address(monkeypatch, home_store):
+    sockets = Sockets(monkeypatch)
+    channels.Route.find("api.telegram.org")
+    assert home_store.get("routes", "api.telegram.org") == "any"
+    assert sockets.tries == [(("2001:db8::1", 443), channels.ROUTE_SECONDS)] * channels.ROUTE_TRIES
+    assert sockets.closed == channels.ROUTE_TRIES
+
+
+@pytest.mark.spec("CHN-11")
+def test_a_host_whose_ipv6_fails_a_try_is_kept_to_ipv4(monkeypatch, home_store):
+    Sockets(monkeypatch, connects=[True, False])
+    TelegramChannel("bot", {"allowed": ["42"]}, {"token": "T0K"}).find_route()
+    assert home_store.get("routes", TelegramChannel.HOST) == "ipv4"
+
+
+@pytest.mark.spec("CHN-11")
+def test_a_host_without_ipv6_is_reached_over_any_address(monkeypatch, home_store):
+    sockets = Sockets(monkeypatch, ipv6=())
+    channels.Route.find("api.telegram.org")
+    assert home_store.get("routes", "api.telegram.org") == "any" and sockets.tries == []
+
+
+@pytest.mark.spec("CHN-11")
+def test_a_telegram_connection_goes_over_ipv4_only_while_its_host_is_kept_to_it(monkeypatch, home_store):
+    sockets = Sockets(monkeypatch)
+    channel = TelegramChannel("bot", {"allowed": ["42"]}, {"token": "T0K"})
+    assert channel.connection(5)._create_connection is not channels.Route.ipv4_connection
+    home_store.put("routes", TelegramChannel.HOST, "ipv4")
+    connection = channel.connection(5)
+    assert connection._create_connection((TelegramChannel.HOST, 443), 5, None) is sockets
+    assert sockets.tries == [(("192.0.2.1", 443), 5)]
+    home_store.put("routes", TelegramChannel.HOST, "any")
+    assert channel.connection(5)._create_connection is not channels.Route.ipv4_connection
 
 
 @pytest.mark.spec("CNV-8")

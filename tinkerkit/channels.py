@@ -5,6 +5,7 @@ lazy import json
 lazy import queue
 lazy import re
 lazy import secrets
+lazy import socket
 lazy import sys
 lazy import time
 lazy import urllib.parse
@@ -33,6 +34,8 @@ TELEGRAM_MAX_PLACEHOLDER_CHARS = 64
 TELEGRAM_MAX_DOWNLOAD_BYTES = 20_000_000
 SENT_FILE_DOWNLOAD_TIMEOUT = 120
 FORM = "application/x-www-form-urlencoded"
+ROUTE_TRIES = 3
+ROUTE_SECONDS = 3
 
 
 Upload = namedtuple("Upload", "body content_type")
@@ -262,6 +265,41 @@ class Channels:
         Home.store().delete("channel_secrets", name)
 
 
+class Route:
+    @staticmethod
+    def find(host):
+        Home.store().put("routes", host, "ipv4" if Route.ipv6_fails(host) else "any")
+
+    @staticmethod
+    def kept_to_ipv4(host):
+        return Home.store().get("routes", host) == "ipv4"
+
+    @staticmethod
+    def ipv6_fails(host):
+        try:
+            addresses = socket.getaddrinfo(host, 443, socket.AF_INET6, socket.SOCK_STREAM)
+        except socket.gaierror:
+            return False
+        if not addresses:
+            return False
+        address = (str(addresses[0][4][0]), 443)
+        return not all(Route.connects(address) for _ in range(ROUTE_TRIES))
+
+    @staticmethod
+    def connects(address):
+        try:
+            with socket.create_connection(address, timeout=ROUTE_SECONDS):
+                return True
+        except OSError:
+            return False
+
+    @staticmethod
+    def ipv4_connection(address, timeout, source_address=None):
+        host, port = address
+        ipv4_address = socket.getaddrinfo(host, port, socket.AF_INET, socket.SOCK_STREAM)[0][4]
+        return socket.create_connection(ipv4_address, timeout, source_address)
+
+
 class TelegramChannel(Channel):
     KIND = "telegram"
     SECRETS = (Secret("token", "Bot token (from @BotFather)"),)
@@ -273,6 +311,9 @@ class TelegramChannel(Channel):
         self.open_connections = queue.Queue()
         self.live_message_ids = {}
         self.last_words_by_chat = {}
+
+    def find_route(self):
+        Route.find(self.HOST)
 
     def handle(self):
         return "@" + self.call("getMe")["username"]
@@ -558,6 +599,8 @@ class TelegramChannel(Channel):
             connection = self.open_connections.get_nowait()
         except queue.Empty:
             connection = http.client.HTTPSConnection(self.HOST, timeout=wait)
+            if Route.kept_to_ipv4(self.HOST):
+                connection._create_connection = Route.ipv4_connection
         connection.timeout = wait
         if connection.sock is not None:
             connection.sock.settimeout(wait)
