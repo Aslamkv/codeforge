@@ -669,9 +669,9 @@ What is said in the chats, kept so that a chat is only a view of it.
   that do not embed. A model's quality is its `solved` count over the tasks it was asked (its `quality_tasks`,
   so a model measured with 3 tasks compares with one measured with 5; `solved N of M` says the same M), and its
   speed is its write speed over the fastest writer's. The picks come from the models that solved at least one
-  task: the smartest has the highest quality² × speed, so quality counts most but a much slower model loses to
-  a nearly as good, much faster one (a tie: the higher quality, then Ollama's order); the fastest is the fastest
-  writer (a tie: the higher quality, then Ollama's order). The lines are
+  task: the smartest solved the most tasks, so 5 of 5 beats 3 of 3 and a faster 2 of 3 (a tie: the higher
+  quality, then the faster writer, then Ollama's order); the fastest is the fastest writer (a tie: the higher
+  quality, then Ollama's order). The lines are
   `🧠 Smartest: NAME (solved 3 of 5 · writes ~19 words/s)` and `⚡ Fastest: NAME (writes ~40 words/s · solved 2 of 5)`;
   when one model is both, the one line `🧠⚡ NAME is the smartest and the fastest (solved 3 of 5 · writes ~40 words/s)`.
   With no model that solved a task, the fastest writer of them all alone, as `⚡ Fastest: NAME (writes ~40 words/s)`.

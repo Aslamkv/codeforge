@@ -92,7 +92,7 @@ tinker model
 tinker model calibrate
 ```
 
-See the recipe alone: the smartest model (quality counts most, then speed) and the fastest writer, from
+See the recipe alone: the smartest model (the most tasks solved, then speed) and the fastest writer, from
 the models that solved at least one test task (`🧠 Smartest: qwen3 (solved 3 of 5 · writes ~19 words/s)`):
 
 ```sh

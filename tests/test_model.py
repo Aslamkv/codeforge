@@ -187,26 +187,36 @@ def test_recipe_names_the_smartest_and_the_fastest(home_store, monkeypatch):
 
 
 @pytest.mark.spec("MOD-30")
-def test_a_much_slower_model_loses_smartest_to_a_nearly_as_good_much_faster_one(home_store, monkeypatch):
-    assert recipe_for(monkeypatch, {"a": measured(3, 20.0), "b": measured(2, 80.0)}) == [
-        "🧠⚡ b is the smartest and the fastest (solved 2 of 3 · writes ~40 words/s)"
+def test_the_most_solved_wins_smartest_over_a_much_faster_one(home_store, monkeypatch):
+    five = dict(measured(5, 20.0), quality_tasks=[1, 2, 3, 4, 5])
+    assert recipe_for(monkeypatch, {"b": measured(2, 80.0), "a": five}) == [
+        "🧠 Smartest: a (solved 5 of 5 · writes ~10 words/s)",
+        "⚡ Fastest: b (writes ~40 words/s · solved 2 of 3)",
     ]
 
 
 @pytest.mark.spec("MOD-30")
-def test_quality_compares_models_asked_a_different_number_of_tasks(home_store, monkeypatch):
+def test_more_solved_of_more_tasks_wins_smartest_over_all_of_fewer(home_store, monkeypatch):
     five = dict(measured(4, 40.0), quality_tasks=[1, 2, 3, 4, 5])
     assert recipe_for(monkeypatch, {"a": five, "b": measured(3, 40.0)}) == [
-        "🧠⚡ b is the smartest and the fastest (solved 3 of 3 · writes ~20 words/s)"
+        "🧠 Smartest: a (solved 4 of 5 · writes ~20 words/s)",
+        "⚡ Fastest: b (writes ~20 words/s · solved 3 of 3)",
     ]
 
 
 @pytest.mark.spec("MOD-30")
 def test_a_smartest_tie_goes_to_the_higher_quality(home_store, monkeypatch):
-    half = dict(measured(2, 80.0), quality_tasks=[1, 2, 3, 4])
-    assert recipe_for(monkeypatch, {"b": half, "a": measured(3, 20.0)}) == [
+    five = dict(measured(3, 80.0), quality_tasks=[1, 2, 3, 4, 5])
+    assert recipe_for(monkeypatch, {"b": five, "a": measured(3, 20.0)}) == [
         "🧠 Smartest: a (solved 3 of 3 · writes ~10 words/s)",
-        "⚡ Fastest: b (writes ~40 words/s · solved 2 of 4)",
+        "⚡ Fastest: b (writes ~40 words/s · solved 3 of 5)",
+    ]
+
+
+@pytest.mark.spec("MOD-30")
+def test_a_smartest_tie_in_quality_goes_to_the_faster(home_store, monkeypatch):
+    assert recipe_for(monkeypatch, {"a": measured(3, 20.0), "b": measured(3, 40.0)}) == [
+        "🧠⚡ b is the smartest and the fastest (solved 3 of 3 · writes ~20 words/s)"
     ]
 
 
