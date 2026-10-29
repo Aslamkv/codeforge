@@ -193,7 +193,7 @@ tinker
 ```
 
 On a colour terminal it opens with a banner showing the model, the embedding model, the projects folder and the chats it listens
-on. Each chat opens cleared, with the same lines as a message above the status. When `/model NAME` picks
+on. Each chat opens cleared, with the same lines as a message above the status, and is cleared again when Tinker ends, leaving only the `not listening` status. When `/model NAME` picks
 another model, the chats are cleared, the terminal is wiped and the banner shows anew. As in Claude Code, the prompt, with a rule over it, follows the output: it starts under the banner and
 moves down as Tinker prints, until it reaches the bottom row; then older lines scroll into the scrollback.
 The prompt edits like a shell: left and right, Home and End (or Ctrl-A and Ctrl-E), Backspace and Delete,

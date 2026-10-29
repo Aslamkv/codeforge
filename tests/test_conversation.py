@@ -2101,6 +2101,33 @@ def test_routes_are_found_for_chat_channels_only_and_a_failing_one_does_not_stop
 
 
 @pytest.mark.spec("CNV-9")
+def test_ctrl_c_closes_the_chats_and_posts_no_status_after_the_first(desk, home_store, monkeypatch):
+    handed = goodbyes_handed(monkeypatch)
+    channel = Listening("bot")
+
+    def interrupted(self):
+        self.start_chat(channel)
+        raise KeyboardInterrupt
+
+    monkeypatch.setattr(Desk, "listen_until_ended", interrupted)
+    Desk([channel], Path.cwd()).run()
+    status = [sent for kind, _, sent, text in channel.log if "**Tinker** ·" in text and kind != "delete"]
+    assert channel.closed and len(status) == 1
+    assert handed[0][1]["status"] == "💤 **Tinker** · not listening"
+    channel.claimed.close()
+
+
+@pytest.mark.spec("CNV-9")
+def test_no_status_is_posted_to_a_chat_once_a_channel_is_closed(monkeypatch):
+    chat = Recorder()
+    console, out = piped_console(monkeypatch)
+    desk = desk_with_a_started_chat(chat, console)
+    chat.closed = True
+    desk.say_status("💤 **Tinker** · not listening")
+    assert chat.log == [] and "not listening" in out.getvalue()
+
+
+@pytest.mark.spec("CNV-9")
 def test_a_terminal_alone_hands_no_goodbye_on(monkeypatch):
     handed = goodbyes_handed(monkeypatch)
     console, out = piped_console(monkeypatch)
@@ -2167,8 +2194,8 @@ def test_the_terminal_reads_and_exits_at_once_while_periodic_work_waits(monkeypa
     assert not running.is_alive() and ended_in < 1 and console.closed
 
 
-def desk_with_a_started_chat(channel):
-    listening = Desk([channel], Path.cwd())
+def desk_with_a_started_chat(channel, *others):
+    listening = Desk([channel, *others], Path.cwd())
     listening.chats_started.add(channel)
     return listening
 
