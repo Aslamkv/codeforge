@@ -201,6 +201,7 @@ class Desk:
         try:
             self.listen_until_ended()
         except KeyboardInterrupt:
+            self.close_channels()
             self.stop_task()
             self.say_goodbye()
             if not self.consoles:
@@ -266,7 +267,8 @@ class Desk:
             console.show(ConsoleChannel.CHAT, None, status, done=True)
         goodbye = self.goodbye(status)
         if goodbye["channels"] or goodbye["question"]:
-            tinker_process(["channel", "goodbye", json.dumps(goodbye)], output=subprocess.DEVNULL)
+            with self.post_lock:
+                tinker_process(["channel", "goodbye", json.dumps(goodbye)], output=subprocess.DEVNULL)
 
     def goodbye(self, status):
         started = [channel.name for channel in self.channels if channel in self.chats_started]
@@ -285,7 +287,7 @@ class Desk:
         for channel in self.channels:
             if channel not in self.consoles:
                 with self.post_lock:
-                    if channel in self.chats_started:
+                    if channel in self.chats_started and not self.a_channel_closed():
                         self.post_status(channel, text)
             elif (anew and not self.busy()) or text.startswith("💤"):
                 channel.show(ConsoleChannel.CHAT, None, text, done=True)
@@ -343,6 +345,10 @@ class Desk:
         while any(thread.is_alive() for thread in threads) and not self.a_channel_closed():
             time.sleep(ENDED_LOOK_SECONDS)
         raise KeyboardInterrupt
+
+    def close_channels(self):
+        for channel in self.channels:
+            channel.closed = True
 
     def a_channel_closed(self):
         return any(channel.closed for channel in self.channels)
