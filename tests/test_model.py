@@ -179,10 +179,34 @@ def recipe_for(monkeypatch, settings):
 
 
 @pytest.mark.spec("MOD-30")
-def test_recipe_names_the_best_and_the_fastest(home_store, monkeypatch):
-    assert recipe_for(monkeypatch, {"a": measured(3, 20.0), "b": measured(1, 80.0)}) == [
-        "🏆 Best quality: a (solved 3 of 3)",
-        "⚡ Fastest: b (writes ~40 words/s)",
+def test_recipe_names_the_smartest_and_the_fastest(home_store, monkeypatch):
+    assert recipe_for(monkeypatch, {"a": measured(3, 40.0), "b": measured(2, 80.0)}) == [
+        "🧠 Smartest: a (solved 3 of 3 · writes ~20 words/s)",
+        "⚡ Fastest: b (writes ~40 words/s · solved 2 of 3)",
+    ]
+
+
+@pytest.mark.spec("MOD-30")
+def test_a_much_slower_model_loses_smartest_to_a_nearly_as_good_much_faster_one(home_store, monkeypatch):
+    assert recipe_for(monkeypatch, {"a": measured(3, 20.0), "b": measured(2, 80.0)}) == [
+        "🧠⚡ b is the smartest and the fastest (solved 2 of 3 · writes ~40 words/s)"
+    ]
+
+
+@pytest.mark.spec("MOD-30")
+def test_quality_compares_models_asked_a_different_number_of_tasks(home_store, monkeypatch):
+    five = dict(measured(4, 40.0), quality_tasks=[1, 2, 3, 4, 5])
+    assert recipe_for(monkeypatch, {"a": five, "b": measured(3, 40.0)}) == [
+        "🧠⚡ b is the smartest and the fastest (solved 3 of 3 · writes ~20 words/s)"
+    ]
+
+
+@pytest.mark.spec("MOD-30")
+def test_a_smartest_tie_goes_to_the_higher_quality(home_store, monkeypatch):
+    half = dict(measured(2, 80.0), quality_tasks=[1, 2, 3, 4])
+    assert recipe_for(monkeypatch, {"b": half, "a": measured(3, 20.0)}) == [
+        "🧠 Smartest: a (solved 3 of 3 · writes ~10 words/s)",
+        "⚡ Fastest: b (writes ~40 words/s · solved 2 of 4)",
     ]
 
 
@@ -190,36 +214,28 @@ def test_recipe_names_the_best_and_the_fastest(home_store, monkeypatch):
 @pytest.mark.parametrize(
     "settings, line",
     [
-        (
-            {"a": measured(1, 20.0), "b": measured(3, 80.0)},
-            "b is the best and the fastest (solved 3 of 3, writes ~40",
-        ),
-        (
-            {"a": measured(2, 80.0), "c": measured(3, 80.0)},
-            "c is the best and the fastest (solved 3 of 3, writes ~40",
-        ),
-        (
-            {"d": measured(3, 20.0), "e": measured(3, 80.0)},
-            "e is the best and the fastest (solved 3 of 3, writes ~40",
-        ),
-        (
-            {"a": measured(2, 20.0), "b": measured(2, 20.0)},
-            "a is the best and the fastest (solved 2 of 3, writes ~10",
-        ),
+        ({"a": measured(1, 20.0), "b": measured(3, 80.0)}, "b is the smartest and the fastest (solved 3 of 3 · writes ~40"),
+        ({"a": measured(2, 80.0), "c": measured(3, 80.0)}, "c is the smartest and the fastest (solved 3 of 3 · writes ~40"),
+        ({"d": measured(3, 20.0), "e": measured(3, 80.0)}, "e is the smartest and the fastest (solved 3 of 3 · writes ~40"),
+        ({"a": measured(2, 20.0), "b": measured(2, 20.0)}, "a is the smartest and the fastest (solved 2 of 3 · writes ~10"),
     ],
     ids=["one-model", "speed-tie-by-quality", "quality-tie-by-speed", "full-tie-by-ollama-order"],
 )
-def test_recipe_says_one_line_for_a_model_both_best_and_fastest(home_store, monkeypatch, settings, line):
-    assert recipe_for(monkeypatch, settings) == [f"🏆 {line} words/s)"]
+def test_recipe_says_one_line_for_a_model_both_smartest_and_fastest(home_store, monkeypatch, settings, line):
+    assert recipe_for(monkeypatch, settings) == [f"🧠⚡ {line} words/s)"]
 
 
 @pytest.mark.spec("MOD-30")
-def test_a_model_that_never_ran_the_test_tasks_can_only_be_fastest(home_store, monkeypatch):
-    assert recipe_for(monkeypatch, {"a": measured(1, 20.0), "b": unsolved(80.0)}) == [
-        "🏆 Best quality: a (solved 1 of 3)",
-        "⚡ Fastest: b (writes ~40 words/s)",
+@pytest.mark.parametrize("other", [unsolved(80.0), measured(0, 80.0)], ids=["never-ran", "solved-none"])
+def test_only_a_model_that_solved_a_task_is_picked(home_store, monkeypatch, other):
+    assert recipe_for(monkeypatch, {"a": measured(1, 20.0), "b": other}) == [
+        "🧠⚡ a is the smartest and the fastest (solved 1 of 3 · writes ~10 words/s)"
     ]
-    assert recipe_for(monkeypatch, {"c": unsolved(20.0), "d": unsolved(80.0)}) == [
+
+
+@pytest.mark.spec("MOD-30")
+def test_with_no_model_solving_a_task_the_fastest_writer_alone(home_store, monkeypatch):
+    assert recipe_for(monkeypatch, {"c": unsolved(20.0), "d": measured(0, 80.0)}) == [
         "⚡ Fastest: d (writes ~40 words/s)"
     ]
 
