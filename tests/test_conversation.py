@@ -1542,6 +1542,30 @@ def test_talk_without_a_model_says_so():
     assert "Getting ready to answer" in Talk.busy_note([])
 
 
+@pytest.mark.spec("CNV-20")
+def test_a_chat_reply_that_is_a_command_line_is_handled_or_offered(desk, monkeypatch):
+    desk, channel, _ = desk
+    replies = []
+    monkeypatch.setattr(Models, "quick", staticmethod(lambda: ("m", {}, None)))
+    monkeypatch.setattr(Models, "quick_reply", staticmethod(lambda *asked: replies.pop(0)))
+
+    def chat(reply, shown):
+        replies.append(reply)
+        say(desk, channel, "do it for me")
+        wait_until(lambda: shown("".join(channel.texts()[-1:])))
+
+    chat("/clear chat", lambda last: last.startswith("🧹 **Chat cleared:**"))
+    chat("`/status`", lambda last: last.startswith("🟢 **Tinker**"))
+    chat("/fix the login bug", lambda last: "👉 `/fix the login bug` — `/confirm` runs it" in last)
+    handled = []
+    monkeypatch.setattr(desk, "answer", lambda message, channel: handled.append(message.text))
+    say(desk, channel, "/confirm")
+    wait_until(lambda: handled == ["/fix the login bug"])
+    chat("/status\n/jobs", lambda last: "/status\n/jobs" in last)
+    chat("status is fine", lambda last: "status is fine" in last)
+    assert all("/clear chat" not in text and "`/status`" not in text for text in channel.texts())
+
+
 @pytest.mark.spec("CNV-22")
 def test_shell_proposes_one_command(measured_model, fake_ollama):
     shell, channel = Shell(Talk("cmds"), Path.cwd(), Questions()), Recorder()
@@ -1892,7 +1916,7 @@ def test_a_slash_word_that_names_no_command_is_only_answered(desk, monkeypatch):
     desk, channel, _ = desk
     heard = []
     monkeypatch.setattr(desk, "answer", lambda message, channel: heard.append(message.text))
-    monkeypatch.setattr(desk.talk, "answer", lambda channel, message, *rest: heard.append(message.text))
+    monkeypatch.setattr(desk.talk, "answer", lambda channel, message, *rest, **kwargs: heard.append(message.text))
     say(desk, channel, "/frobnicate the build")
     assert heard == [] and channel.texts()[-1] == "❓ No command /frobnicate: /help lists them"
     say(desk, channel, "status of my build")

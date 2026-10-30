@@ -276,6 +276,12 @@ def test_the_templates_format():
     assert len(systems) >= 25 and all(isinstance(system, str) and system.strip() for system in systems)
 
 
+@pytest.mark.spec("CNV-20")
+def test_the_chat_prompt_asks_for_only_the_command_line_when_asked_to_do_what_one_does():
+    chat = Prompts.CHAT_SYSTEM.format(kind="Telegram", commands="/clear chat")
+    assert "only that command line" in chat and "`/clear chat`" in chat and "answer in words" in chat
+
+
 @pytest.mark.spec("PRM-14")
 def test_the_example_toolchain_commands_are_real_commands():
     toolchain = json.loads("{" + Prompts.TOOLCHAIN_JSON + "}")["toolchain"]
