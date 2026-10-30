@@ -124,7 +124,9 @@ WordsAsked = namedtuple("WordsAsked", "question example")
 AppRequest = namedtuple("AppRequest", "project args stdin")
 ShellRun = namedtuple("ShellRun", "code output")
 Secret = namedtuple("Secret", "key question")
-Question = namedtuple("Question", "runs cancels held wanted naming", defaults=(None, None, None, None, False))
+Question = namedtuple(
+    "Question", "runs cancels held wanted naming", defaults=(None, lambda: None, None, None, False)
+)
 
 
 def session(root):
@@ -426,7 +428,7 @@ class Desk:
         if message.text.split()[:1] == [CHAT_APP_START]:
             channel.send(message.chat, welcome())
             return
-        message = self.with_words_wanted(channel, message)
+        message = self.as_said(channel, self.with_words_wanted(channel, message))
         command = command_of(message.text)
         unknown = not command and unknown_command(message.text)
         if unknown:
@@ -446,7 +448,13 @@ class Desk:
         if self.chose(channel, message, command):
             return
         if not command:
-            self.talk.answer(channel, message, self.running_now, lambda: self.plan_shown(self.waiting_plan))
+            self.talk.answer(
+                channel,
+                message,
+                self.running_now,
+                lambda: self.plan_shown(self.waiting_plan),
+                on_command=lambda line: self.replied(channel, message, line),
+            )
             return
         reply = self.answer(message, channel)
         if reply:
@@ -468,6 +476,13 @@ class Desk:
         self.questions.ask(channel, message.chat, Question(wanted=pick))
         return True
 
+    def as_said(self, channel, message):
+        said = said_command(message.text)
+        answers_a_question = said != "/confirm" and self.questions.waiting(channel, message.chat)
+        if not said or answers_a_question:
+            return message
+        return Message(message.chat, said, message.sender, message.id)
+
     def with_words_wanted(self, channel, message):
         question = self.questions.waiting(channel, message.chat)
         if not question or not question.wanted:
@@ -482,6 +497,14 @@ class Desk:
             channel.send(message.chat, USAGE[command])
         else:
             self.shell.name(channel, after_word(message), self.running_now)
+
+    def replied(self, channel, message, line):
+        sent = Message(message.chat, line, message.sender)
+        if said_command(line[1:]) == line:
+            self.handle(channel, sent)
+            return
+        self.questions.ask(channel, message.chat, Question(runs=lambda: self.handle(channel, sent)))
+        channel.send(message.chat, md(t"👉 {line:code} — `/confirm` runs it"))
 
     def settle(self, channel, message, command):
         confirm = command == "confirm" and len(message.text.split()) == 1
@@ -1094,6 +1117,63 @@ def command_of(text, commands=None):
     return first if first in (commands or Desk.COMMANDS) else ""
 
 
+def replied_command(reply):
+    line = reply.strip().strip("`").strip()
+    return line if "\n" not in line and line.startswith("/") and command_of(line) else ""
+
+
+SAID_FILLER = tuple("the my please can could would you tinker a an me now just".split())
+
+
+def said_command(text):
+    if text.startswith("/"):
+        return ""
+    words = tuple(word for word in re.sub(r"[^\w\s]", " ", text.lower()).split() if word not in SAID_FILLER)
+    return "/" + " ".join(words) if words in said_phrases() else ""
+
+
+def said_phrases():
+    return {
+        (command.name, *words)
+        for command in COMMANDS
+        if command.chat
+        for synopsis, _ in command.rows
+        for words in synopsis_phrases(synopsis.split()[1:])
+    }
+
+
+def synopsis_phrases(words):
+    tokens = re.findall(r"\[|\]|\||[^\s\[\]|]+", " ".join(words))
+    phrases, _ = alternatives_phrases(tokens, 0)
+    return phrases
+
+
+def alternatives_phrases(tokens, at):
+    phrases, at = sequence_phrases(tokens, at)
+    while at < len(tokens) and tokens[at] == "|":
+        more, at = sequence_phrases(tokens, at + 1)
+        phrases |= more
+    return phrases, at
+
+
+def sequence_phrases(tokens, at):
+    phrases = {()}
+    while at < len(tokens) and tokens[at] not in ("|", "]"):
+        item, at = item_phrases(tokens, at)
+        phrases = {phrase + more for phrase in phrases for more in item}
+    return phrases, at
+
+
+def item_phrases(tokens, at):
+    token = tokens[at]
+    if token == "[":
+        inside, at = alternatives_phrases(tokens, at + 1)
+        return {()} | inside, at + 1
+    if token.startswith("--"):
+        return {()}, at + 1
+    return ({(token,)} if re.fullmatch(r"[a-z]+", token) else set()), at + 1
+
+
 def model_pick(text):
     asked = [command_of(text), *text.split()[1:]]
     return " ".join(asked) if asked in MODEL_PICKS else ""
@@ -1169,18 +1249,24 @@ class Talk:
         self.commands, self.said, self.lock, self.turn = commands, {}, threading.Lock(), threading.Lock()
         self.pausing_jobs = pausing_jobs
 
-    def answer(self, channel, message, now, waiting=lambda: "", write=None, on_shown=None):
+    def answer(self, channel, message, now, waiting=lambda: "", write=None, on_shown=None, on_command=None):
         threading.Thread(
             target=self.answering,
-            args=(channel, message, now, waiting, write or self.reply, on_shown),
+            args=(channel, message, now, waiting, write or self.reply, on_shown, on_command),
             daemon=True,
         ).start()
 
-    def answering(self, channel, message, now, waiting, write_reply, on_shown):
+    def answering(self, channel, message, now, waiting, write_reply, on_shown, on_command):
         running, written, reply = now(), threading.Event(), []
         asked = (channel, message, self.context(running, waiting), CHAT_MAX_REPLY_TOKENS)
         threading.Thread(target=self.write, args=(write_reply, asked, reply, written), daemon=True).start()
         note = self.busy_until(written, running, now, channel, message.chat)
+        line = replied_command(reply[0]) if on_command and reply else ""
+        if line:
+            for shown in note or []:
+                channel.delete(message.chat, shown)
+            on_command(line)
+            return
         note = channel.show(
             message.chat, note, reply[0] if reply else "⚠️ **The model did not answer.**", done=True
         )

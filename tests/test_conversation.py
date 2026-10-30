@@ -26,6 +26,7 @@ from tinkerkit.conversation import (
     Message,
     Progress,
     PromptDrawer,
+    Question,
     Questions,
     Reporter,
     Shell,
@@ -191,6 +192,22 @@ def test_pieces_split_between_lines_and_lose_no_text():
 )
 def test_command_of(text, command):
     assert command_of(text, Desk.COMMANDS) == command
+
+
+@pytest.mark.spec("CNV-5")
+def test_said_command_gives_a_fixed_phrase_of_a_chat_command_as_slash():
+    for said in ("clear chat", "status", "jobs running", "model recipe all", "exercise status"):
+        assert conversation.said_command(said) == f"/{said}"
+    for said in ("task", "fix", "ask"):
+        assert conversation.said_command(said) == ""
+    assert conversation.said_command("Clear the chat, please!") == "/clear chat"
+    assert conversation.said_command("clear the chat and the history") == ""
+    assert conversation.said_command("status of my build") == ""
+
+
+def test_said_filler_holds_no_word_of_a_phrase():
+    words = {word for phrase in conversation.said_phrases() for word in phrase}
+    assert not words & set(conversation.SAID_FILLER)
 
 
 @pytest.mark.spec("CNV-6")
@@ -1527,6 +1544,30 @@ def test_talk_without_a_model_says_so():
     assert "Getting ready to answer" in Talk.busy_note([])
 
 
+@pytest.mark.spec("CNV-20")
+def test_a_chat_reply_that_is_a_command_line_is_handled_or_offered(desk, monkeypatch):
+    desk, channel, _ = desk
+    replies = []
+    monkeypatch.setattr(Models, "quick", staticmethod(lambda: ("m", {}, None)))
+    monkeypatch.setattr(Models, "quick_reply", staticmethod(lambda *asked: replies.pop(0)))
+
+    def chat(reply, shown):
+        replies.append(reply)
+        say(desk, channel, "do it for me")
+        wait_until(lambda: shown("".join(channel.texts()[-1:])))
+
+    chat("/clear chat", lambda last: last.startswith("🧹 **Chat cleared:**"))
+    chat("`/status`", lambda last: last.startswith("🟢 **Tinker**"))
+    chat("/fix the login bug", lambda last: "👉 `/fix the login bug` — `/confirm` runs it" in last)
+    handled = []
+    monkeypatch.setattr(desk, "answer", lambda message, channel: handled.append(message.text))
+    say(desk, channel, "/confirm")
+    wait_until(lambda: handled == ["/fix the login bug"])
+    chat("/status\n/jobs", lambda last: "/status\n/jobs" in last)
+    chat("status is fine", lambda last: "status is fine" in last)
+    assert all("/clear chat" not in text and "`/status`" not in text for text in channel.texts())
+
+
 @pytest.mark.spec("CNV-22")
 def test_shell_proposes_one_command(measured_model, fake_ollama):
     shell, channel = Shell(Talk("cmds"), Path.cwd(), Questions()), Recorder()
@@ -1805,6 +1846,14 @@ def test_what_waits_for_confirm_is_cancelled_by_anything_else(desk, monkeypatch)
     wait_until(lambda: ["clear", "memory", "--yes"] in desk.ran)
     assert desk.decide("confirm", ["confirm"]).startswith("🤷 No plan waits")
     assert desk.rename({}, ["rename", "x"]).startswith("🤷 No plan waits")
+
+
+@pytest.mark.spec("CNV-12")
+def test_a_question_with_nothing_to_say_on_a_cancel_is_dropped_quietly(desk):
+    desk, channel, _ = desk
+    desk.questions.ask(channel, "1", Question(wanted="model pick"))
+    assert not desk.settle(channel, Message("1", "/status"), "status")
+    assert not desk.questions.waiting(channel, "1") and channel.texts() == []
     assert desk.decide("amend", ["amend"]).startswith("✍️ Write `/amend [@PROJECT] CHANGE`")
 
 
@@ -1856,11 +1905,30 @@ def test_a_command_sent_alone_asks_for_its_words(desk, monkeypatch):
 
 
 @pytest.mark.spec("CNV-5")
+def test_a_said_phrase_runs_its_command_and_a_deleting_one_asks_first(desk, monkeypatch):
+    desk, channel, _ = desk
+    monkeypatch.setattr(desk.talk, "answer", lambda *args, **kwargs: None)
+    say(desk, channel, "Clear the memory, please!")
+    assert desk.ran == [["clear", "memory"]] and "👉 `/confirm` to delete it" in channel.texts()[-1]
+    say(desk, channel, "confirm")
+    wait_until(lambda: ["clear", "memory", "--yes"] in desk.ran)
+
+
+def test_a_said_phrase_answering_a_waiting_question_is_not_a_command(desk, monkeypatch):
+    desk, channel, _ = desk
+    monkeypatch.setattr(desk.talk, "answer", lambda *args, **kwargs: None)
+    desk.answer(Message("1", "/clear memory"), channel)
+    say(desk, channel, "status")
+    assert "🚫 _Not done:_ `clear memory`" in channel.texts()[-1] and desk.ran == [["clear", "memory"]]
+
+
 def test_a_slash_word_that_names_no_command_is_only_answered(desk, monkeypatch):
     desk, channel, _ = desk
     heard = []
     monkeypatch.setattr(desk, "answer", lambda message, channel: heard.append(message.text))
-    monkeypatch.setattr(desk.talk, "answer", lambda channel, message, *rest: heard.append(message.text))
+    monkeypatch.setattr(
+        desk.talk, "answer", lambda channel, message, *rest, **kwargs: heard.append(message.text)
+    )
     say(desk, channel, "/frobnicate the build")
     assert heard == [] and channel.texts()[-1] == "❓ No command /frobnicate: /help lists them"
     say(desk, channel, "status of my build")

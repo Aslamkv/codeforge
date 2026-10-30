@@ -189,7 +189,7 @@ tinker restart --workdir ~/Projects/calc-py
 
 ## Talk 💬
 
-Talk with Tinker. Every command works here, and anything else is a normal chat. A command starts with `/`, as in `/status`; `/exit` (or Ctrl-D) ends it:
+Talk with Tinker. Every command works here, and anything else is a normal chat. A command starts with `/`, as in `/status`; plain words that say one, like `clear the chat, please`, run it too, and asking the model to do what a command does runs it or offers it for `/confirm`. `/exit` (or Ctrl-D) ends it:
 
 ```sh
 tinker

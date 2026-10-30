@@ -856,11 +856,20 @@ The terminal and the chats are one conversation: the same commands, the same ans
   last.
 - **CNV-5** In a conversation (the terminal and every chat) a command is sent with its `/`: `command_of(text)`
   gives the command a message starts with, by the command table, only when its first word is `/` and a
-  command's name, whatever words follow (a command refuses words it does not take). A message without the `/`
-  is a chat (`""`), even one that starts with a command's name. A menu's form is taken too: `@bot` after the
-  name (in a group) is dropped. A `/` word that names no command is answered
-  `❓ No command /WORD: /help lists them`, and nothing else is done. The command line (`tinker help`) is not a
-  conversation: its commands take no `/`.
+  command's name, whatever words follow (a command refuses words it does not take). A menu's form is taken
+  too: `@bot` after the name (in a group) is dropped. A `/` word that names no command is answered
+  `❓ No command /WORD: /help lists them`, and nothing else is done. A message without the `/` is a command
+  too when it says one of the table's fixed phrases, with no model: `said_command(text)` gives it as
+  `/PHRASE`, else `""`. A chat command's fixed phrases come from its rows' synopses: the name, then for each
+  `|` alternative its words, where an optional `[...]` part is left out or, when it holds only lowercase
+  words, gives one of them; an alternative with a required placeholder (an uppercase word, `@`, `#`, `"`)
+  gives none, and options (`--yes`) are left out. So `clear chat`, `status`, `jobs running`,
+  `model recipe all`, `exercise status` are phrases, and `task`, `fix`, `ask` none. The text matches when its
+  words, lowercased, without punctuation and without the filler words `SAID_FILLER` (`the`, `my`, `please`,
+  `can`, `you`, `tinker`, …), are a phrase exactly: `Clear the chat, please!` is `/clear chat`, while
+  `clear the chat and the history` stays a chat. Such a message is handled as the `/PHRASE` sent, so a
+  command that deletes asks first just the same. A message that answers a waiting question is not matched.
+  The command line (`tinker help`) is not a conversation: its commands take no `/`.
 - **CNV-6** `Channel.said` writes `tinker COMMAND` as `/COMMAND` in a conversation, in the terminal as in every
   chat, so what Tinker says to send can be sent as it is. Every command Tinker names in a conversation (a hint,
   the welcome, a usage, a question) has its `/`. `Channel.show` edits the
@@ -937,7 +946,8 @@ The terminal and the chats are one conversation: the same commands, the same ans
   text.
 - **CNV-12** Each chat has at most one question that waits for the person (a deletion, a chat's `/exit`, a
   command line, words a command needs), kept in one place by channel and chat: what its answer runs and what a
-  cancel says. `Desk.settle` runs what waits for a `/confirm`. Any other message cancels it and says so. The
+  cancel says. `Desk.settle` runs what waits for a `/confirm`. Any other message cancels it and says so; a question
+  with nothing to say on a cancel (words a command needs) is dropped quietly. The
   plan that waits is not such a question: every chat and the terminal share it. `decide` builds or changes the plan that waits. For a new project, its first
   `confirm` asks for the folder's name.
 - **CNV-13** A command that needs words, sent alone (as a chat app's menu sends it: `/fix`), asks for them
@@ -973,7 +983,12 @@ The terminal and the chats are one conversation: the same commands, the same ans
 - **CNV-20** The chat asks the model only through the quick call (**MOD-25**); `Talk` and `Shell`
   read a JSON answer with `Reply.json()` (**PRM-2**), and take one that cannot be read as `{}`. `reply` keeps
   the last `CHAT_CONTEXT_MESSAGES` messages per chat, and it says plainly when no model is in use or the model
-  failed.
+  failed. The chat's prompt (`CHAT_SYSTEM`) asks the model, when the person asks Tinker to do what one of the
+  commands does, to reply with only that command line (`/clear chat` for `wipe the chat`); asked how to do
+  it, it answers in words. A reply that is one line, with or without backticks, and that `command_of` gives
+  a command for is not shown: its words a fixed phrase (**CNV-5**), it is handled as that command sent;
+  otherwise (more words: `/fix the login bug`) it is offered, `👉 /fix the login bug — /confirm runs it`,
+  and `/confirm` handles it as sent. This takes no extra model call.
 - **CNV-21** While a chat or a command line pauses the job that runs (**JOB-10**, `Talk.pausing_jobs`), its
   note says what is paused for it, and that it goes on once they have their answer.
 - **CNV-22** `Shell.propose` gives one command line to confirm, with a warning when it changes or deletes
