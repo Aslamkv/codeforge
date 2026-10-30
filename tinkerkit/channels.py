@@ -276,6 +276,7 @@ class TelegramChannel(Channel):
         super().__init__(name, settings, secrets)
         self.offset = None
         self.open_connections = queue.Queue()
+        self.family = None
         self.live_message_ids = {}
         self.last_words_by_chat = {}
         self.state = "connecting…"
@@ -553,6 +554,7 @@ class TelegramChannel(Channel):
             connection.close()
             raise
         self.open_connections.put(connection)
+        self.family = family
         self.state = f"connected ({family_name(family)})"
         return answer
 
@@ -570,7 +572,7 @@ class TelegramChannel(Channel):
         try:
             connection = self.open_connections.get_nowait()
         except queue.Empty:
-            connection = TelegramConnection(self.HOST, timeout=wait)
+            connection = TelegramConnection(self.HOST, timeout=wait, family=self.family)
         connection.timeout = wait
         if connection.sock is not None:
             connection.sock.settimeout(wait)
@@ -578,22 +580,23 @@ class TelegramChannel(Channel):
 
 
 class TelegramConnection(http.client.HTTPSConnection):
-    def __init__(self, host, timeout):
+    def __init__(self, host, timeout, family=None):
         self.context = ssl.create_default_context()
+        self.family = family
         super().__init__(host, timeout=timeout, context=self.context)
 
     def connect(self):
-        self.sock = connect_by_address((self.host, self.port), self.context, self.timeout)
+        self.sock = connect_by_address((self.host, self.port), self.context, self.timeout, self.family)
 
 
 def family_name(family):
     return "IPv6" if family == socket.AF_INET6 else "IPv4"
 
 
-def connect_by_address(address, context, wait):
+def connect_by_address(address, context, wait, family=None):
     host, port = address
     failure = OSError(f"{host} has no address")
-    for *_, socket_address in socket.getaddrinfo(host, port, 0, socket.SOCK_STREAM):
+    for *_, socket_address in addresses_by_family(host, port, family):
         try:
             sock = shake_hands(context, host, (str(socket_address[0]), port))
         except OSError as error:
@@ -602,6 +605,11 @@ def connect_by_address(address, context, wait):
         sock.settimeout(wait)
         return sock
     raise failure
+
+
+def addresses_by_family(host, port, family):
+    addresses = socket.getaddrinfo(host, port, 0, socket.SOCK_STREAM)
+    return sorted(addresses, key=lambda address: address[0] != family)
 
 
 def shake_hands(context, host, address):

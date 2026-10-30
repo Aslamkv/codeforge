@@ -109,8 +109,9 @@ class Handshakes:
         return sock
 
 
-def connected(monkeypatch, wait, sockets, shakes=()):
-    connection = TelegramChannel("bot", {"allowed": ["42"]}, {"token": "T0K"}).connection(wait)
+def connected(monkeypatch, wait, sockets, shakes=(), channel=None):
+    channel = channel or TelegramChannel("bot", {"allowed": ["42"]}, {"token": "T0K"})
+    connection = channel.connection(wait)
     handshakes = Handshakes(sockets, shakes)
     monkeypatch.setattr(connection, "context", handshakes)
     connection.connect()
@@ -145,6 +146,17 @@ def test_a_telegram_connection_answers_within_the_calls_own_wait(monkeypatch):
     sockets = Sockets(monkeypatch)
     connection, _ = connected(monkeypatch, 30, sockets)
     assert sockets.timeouts == [30] and connection.timeout == 30
+
+
+@pytest.mark.spec("CHN-11")
+def test_a_telegram_chat_answered_over_ipv4_connects_to_ipv4_first(monkeypatch):
+    channel = telegram(BotAPI(getMe={"username": "b"}))
+    channel.call("getMe")
+    del channel.connection
+    channel.open_connections.get_nowait()
+    sockets = Sockets(monkeypatch)
+    connected(monkeypatch, 5, sockets, channel=channel)
+    assert [address for address, _ in sockets.tries] == [("192.0.2.1", 443)]
 
 
 @pytest.mark.spec("CHN-11")

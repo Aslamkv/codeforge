@@ -1073,6 +1073,8 @@ The chat plugin: Telegram, and `tinker channel`.
   hands on, gives each of the host's addresses `CONNECT_SECONDS` to connect and `CONNECT_SECONDS` for the TLS
   handshake after it, in the order the system lists them, so an IPv6 route whose connect or handshake hangs
   falls to IPv4 within that time; once the handshake is done, the call's own wait applies to its answer.
+  Once a call Telegram answers, the chat's later connections try addresses of that call's family first, so
+  its connections keep to one family and its state (**CHN-12**) does not flip between IPv4 and IPv6.
 - **CHN-12** A chat channel's `state` is `connecting…` until its first call to Telegram ends, then
   `connected (IPv4)` or `connected (IPv6)` (the family of the address it connected to) after a call Telegram
   answers, and `unreachable: REASON` after a call the network fails. The terminal's banner (**CNV-8**) and
