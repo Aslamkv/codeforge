@@ -1122,14 +1122,18 @@ def replied_command(reply):
     return line if "\n" not in line and line.startswith("/") and command_of(line) else ""
 
 
-SAID_FILLER = tuple("the my please can could would you tinker a an me now just".split())
+SAID_FILLER = tuple("the my please can could would you tinker a an me now just show see view display".split())
 
 
 def said_command(text):
     if text.startswith("/"):
         return ""
     words = tuple(word for word in re.sub(r"[^\w\s]", " ", text.lower()).split() if word not in SAID_FILLER)
-    return "/" + " ".join(words) if words in said_phrases() else ""
+    phrases = said_phrases()
+    if words in phrases:
+        return "/" + " ".join(words)
+    named = [phrase for phrase in phrases if words and phrase[1:] == words and not deletes(list(phrase))]
+    return "/" + " ".join(named[0]) if len(named) == 1 else ""
 
 
 def said_phrases():

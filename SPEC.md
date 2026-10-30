@@ -870,8 +870,10 @@ The terminal and the chats are one conversation: the same commands, the same ans
   gives none, and options (`--yes`) are left out. So `clear chat`, `status`, `jobs running`,
   `model recipe all`, `exercise status` are phrases, and `task`, `fix`, `ask` none. The text matches when its
   words, lowercased, without punctuation and without the filler words `SAID_FILLER` (`the`, `my`, `please`,
-  `can`, `you`, `tinker`, …), are a phrase exactly: `Clear the chat, please!` is `/clear chat`, while
-  `clear the chat and the history` stays a chat. Such a message is handled as the `/PHRASE` sent, so a
+  `can`, `you`, `tinker`, `show`, `see`, …), are a phrase exactly: `Clear the chat, please!` is `/clear chat`,
+  `show model recipe` is `/model recipe`, while `clear the chat and the history` stays a chat. The command's
+  name may be left out when the words are the rest of just one phrase, of a command that does not delete:
+  `show recipe` is `/model recipe`, while `chat` (`/clear chat` deletes) stays a chat. Such a message is handled as the `/PHRASE` sent, so a
   command that deletes asks first just the same. A message that answers a waiting question is not matched.
   The command line (`tinker help`) is not a conversation: its commands take no `/`.
 - **CNV-6** `Channel.said` writes `tinker COMMAND` as `/COMMAND` in a conversation, in the terminal as in every

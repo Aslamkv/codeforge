@@ -205,6 +205,15 @@ def test_said_command_gives_a_fixed_phrase_of_a_chat_command_as_slash():
     assert conversation.said_command("status of my build") == ""
 
 
+@pytest.mark.spec("CNV-5")
+def test_said_command_takes_show_words_and_a_left_out_command_name():
+    assert conversation.said_command("show model recipe") == "/model recipe"
+    assert conversation.said_command("show recipe") == "/model recipe"
+    assert conversation.said_command("see the recipe all") == "/model recipe all"
+    assert conversation.said_command("chat") == ""
+    assert conversation.said_command("show me the chat") == ""
+
+
 def test_said_filler_holds_no_word_of_a_phrase():
     words = {word for phrase in conversation.said_phrases() for word in phrase}
     assert not words & set(conversation.SAID_FILLER)
