@@ -34,7 +34,10 @@ from .settings import (
     PROBE_SAMPLE_TOKENS,
     PROGRESS_UPDATE_SECONDS,
     PROMPT_BUDGET_SHARE,
+    QUALITY_ATTEMPTS,
     QUALITY_REPLY_TOKENS,
+    QUALITY_TASK_SECONDS,
+    QUALITY_VERSION,
     QUICK_REPLY_TIMEOUT,
     REPLY_ERROR_RETRIES,
     RUNNER_OVERHEAD_BYTES,
@@ -49,7 +52,7 @@ from .text import first_line, now_text
 lazy from .jobs import journaled
 lazy from .prompts import Part, Prompts, PromptTooLarge, Reply
 lazy from .quality import solves
-lazy from .quality import tasks as quality_tasks
+lazy from .quality import tiers as quality_tiers
 lazy from .workspace import ToolError
 
 SelectedModel = namedtuple("SelectedModel", "name settings")
@@ -790,6 +793,7 @@ class Calibrator:
 
 # A request asks for the due list; the reply is JSON: {"items": [...], "count": 3}.
 """
+    RETRY = "That answer is wrong. Check your work and answer again."
 
     def __init__(self, name, rng=None):
         self.name = name
@@ -811,7 +815,7 @@ class Calibrator:
         context, crash = self.capacity(target, facts)
         budget, max_reply = self.shared(context)
         settings = self.settings(facts, think, budget, context, crash, max_reply)
-        settings.update(self.quality(think, settings["num_ctx"]))
+        settings.update(self.quality(think, settings["num_ctx"], settings["write_tokens_per_s"]))
         Ollama.unload(self.name)
         Models.keep(self.name, settings)
         say.done(self.summary(settings))
@@ -828,7 +832,8 @@ class Calibrator:
                 f"✍️ Writes {self.about_words(write, ratio)} words a second ({self.speed_text(write)} tok/s)",
                 f"📥 Takes requests up to about {self.words(prompt, ratio)} words ({prompt:,} tokens)",
                 f"📤 Replies up to about {self.words(reply, ratio)} words ({reply:,} tokens)",
-                f"🧠 Solved {settings['solved']} of {len(settings['quality_tasks'])} test tasks",
+                f"🧠 Solved {settings['solved']} of {len(settings['quality_tasks'])} test tasks"
+                + quality_facts(settings.get("quality_results", [])),
                 self.thinking(settings["think"]),
             ]
         )
@@ -934,27 +939,64 @@ class Calibrator:
             think,
         )
 
-    def quality(self, think, context):
-        tasks = quality_tasks()
+    def quality(self, think, context, write_tokens_per_s):
+        tiers = quality_tiers()
+        tasks = [task for tier in tiers for task in tier]
         with say.section():
-            say.step(f"Solving {len(tasks)} small test tasks…", "🧠")
-            solved = sum(self.solves_task(task, think, context) for task in tasks)
+            say.step(
+                f"Solving {len(tasks)} test tasks, easy to hard, up to {QUALITY_TASK_SECONDS // 60} minutes each…",
+                "🧠",
+            )
+            results = self.solve_tiers(tiers, think, context, write_tokens_per_s)
+            solved = sum(result["solved"] for result in results)
             with say.section():
                 say.info(f"Solved {solved} of {len(tasks)}", "🧠")
-        return {"solved": solved, "quality_tasks": [task["id"] for task in tasks]}
+        return {
+            "quality_version": QUALITY_VERSION,
+            "quality_tasks": [task["id"] for task in tasks],
+            "solved": solved,
+            "quality_results": results,
+        }
 
-    def solves_task(self, task, think, context):
-        reply = Ollama.chat(
-            self.name,
-            [{"role": "user", "content": task["prompt"]}],
-            CALIBRATION_KEEP_ALIVE,
-            {"num_ctx": context, "num_predict": QUALITY_REPLY_TOKENS},
-            think,
-        )
-        solved = reply.get("done_reason") != "length" and solves(reply["message"]["content"], task["answer"])
+    def solve_tiers(self, tiers, think, context, write_tokens_per_s):
+        results = []
+        for tier in tiers:
+            tier_results = [self.solve_task(task, think, context, write_tokens_per_s) for task in tier]
+            results += tier_results
+            if not any(result["solved"] for result in tier_results):
+                if len(results) < sum(map(len, tiers)):
+                    with say.section():
+                        say.info(f"Stopped after tier {tier[0]['tier']}: neither task solved", "🛑")
+                break
+        return results
+
+    def solve_task(self, task, think, context, write_tokens_per_s):
+        messages = [{"role": "user", "content": task["prompt"]}]
+        attempts, seconds, solved = 0, 0.0, False
+        while not solved and attempts < QUALITY_ATTEMPTS and QUALITY_TASK_SECONDS - seconds >= 1:
+            options = {"num_ctx": context, "num_predict": self.reply_tokens(seconds, write_tokens_per_s)}
+            reply = Ollama.chat(self.name, list(messages), CALIBRATION_KEEP_ALIVE, options, think)
+            attempts += 1
+            seconds += (reply.get("total_duration") or 0) / 1e9
+            content = reply["message"]["content"]
+            solved = reply.get("done_reason") != "length" and solves(content, task["answer"])
+            messages += [{"role": "assistant", "content": content}, {"role": "user", "content": self.RETRY}]
+        result = {"id": task["id"], "solved": solved, "attempts": attempts, "seconds": round(seconds, 1)}
         with say.section():
-            (say.done if solved else say.fail)(f"Task {task['id']}")
-        return solved
+            (say.done if solved else say.fail)(
+                f"Task {task['id']} ({self.attempts_text(attempts)}, {round(seconds)}s)"
+            )
+        return result
+
+    @staticmethod
+    def reply_tokens(seconds, write_tokens_per_s):
+        if not write_tokens_per_s:
+            return QUALITY_REPLY_TOKENS
+        return int((QUALITY_TASK_SECONDS - seconds) * write_tokens_per_s)
+
+    @staticmethod
+    def attempts_text(attempts):
+        return "1 attempt" if attempts == 1 else f"{attempts} attempts"
 
     def measure_chat(self, content, data):
         self.load_seconds = round(data.get("load_duration", 0) / 1e9, 1)
@@ -1454,3 +1496,18 @@ class OllamaError(Exception):
     @property
     def about_thinking(self):
         return "think" in str(self).lower()
+
+
+def quality_facts(results):
+    facts = [f"{count} after a retry" for count in [retries(results)] if count]
+    facts += [f"~{round(seconds)}s an answer" for seconds in [answer_seconds(results)] if seconds is not None]
+    return f" ({', '.join(facts)})" if facts else ""
+
+
+def retries(results):
+    return sum(1 for result in results if result["solved"] and result["attempts"] > 1)
+
+
+def answer_seconds(results):
+    seconds = [result["seconds"] for result in results if result["solved"]]
+    return sum(seconds) / len(seconds) if seconds else None

@@ -15,7 +15,8 @@ from tinkerkit.prompts import Part, Prompts, PromptTooLarge, Reply
 from tinkerkit.settings import (
     PROMPT_BUDGET_SHARE,
     QUALITY_REPLY_TOKENS,
-    QUALITY_TASK_COUNT,
+    QUALITY_TASK_SECONDS,
+    QUALITY_VERSION,
     STARTING_CHARS_PER_TOKEN,
     Config,
     Home,
@@ -662,19 +663,30 @@ def test_calibrate_writes_the_measured_settings(fake_ollama, monkeypatch, no_sle
     )
     fake_ollama.reply({"content": "OK", "prompt_eval_count": 400, "eval_count": 2, "eval_duration": 1e8})
     answers = {task["prompt"]: task["answer"] for task in quality.tasks()}
-    fake_ollama.reply(lambda messages: answers[messages[0]["content"]], times=2)
-    fake_ollama.reply("not the answer", times=3)
-    drawn = [task["id"] for task in quality.pick(QUALITY_TASK_COUNT, random.Random(5))]
+    fake_ollama.reply(
+        lambda messages: {"content": answers[messages[0]["content"]], "total_duration": 3e9}, times=2
+    )
+    fake_ollama.reply("not the answer", times=6)
+    ids = [task["id"] for tier in quality.tiers() for task in tier]
     settings = Calibrator("m", random.Random(5)).run()
     saved = Models.settings("m")
     assert saved == settings and Home.store().get("models", "m") == settings
     assert saved["max_prompt_tokens"] == 13653 and saved["max_reply_tokens"] == 27307
     assert saved["fix_max_tokens"] == 4096 and saved["num_ctx"] == 40960 and saved["think"] == "high"
     assert saved["probes"] == [[2048, "read"]] and 2.0 <= saved["chars_per_token"] <= 4.0
-    assert saved["solved"] == 2 and saved["quality_tasks"] == drawn
-    asked = fake_ollama.calls[-QUALITY_TASK_COUNT:]
+    assert (
+        saved["solved"] == 2 and saved["quality_tasks"] == ids and saved["quality_version"] == QUALITY_VERSION
+    )
+    assert saved["quality_results"] == [
+        {"id": ids[0], "solved": True, "attempts": 1, "seconds": 3.0},
+        {"id": ids[1], "solved": True, "attempts": 1, "seconds": 3.0},
+        {"id": ids[2], "solved": False, "attempts": 3, "seconds": 0.0},
+        {"id": ids[3], "solved": False, "attempts": 3, "seconds": 0.0},
+    ]
+    asked = fake_ollama.calls[-8:]
     assert all(call["think"] == "high" for call in asked)
-    assert all(call["options"] == {"num_ctx": 40960, "num_predict": QUALITY_REPLY_TOKENS} for call in asked)
+    first_try = {"num_ctx": 40960, "num_predict": int(QUALITY_TASK_SECONDS * saved["write_tokens_per_s"])}
+    assert all(call["options"] == first_try for call in asked)
     assert [dict(entry.entry, time=None) for entry in Home.store().entries("calibrations")] == [
         dict(settings, time=None)
     ]
@@ -686,10 +698,11 @@ def test_calibrate_writes_the_measured_settings(fake_ollama, monkeypatch, no_sle
         "m needs 5 GB (weights); this machine's GPU can use 20 GB",
         f"Checking it can read about {Calibrator.words(2048, ratio)} words at once (2,048 tokens, about",
         "Read it in 2s",
-        "Solving 5 small test tasks…",
-        f"✅ Task {drawn[0]}",
-        f"❌ Task {drawn[2]}",
-        "Solved 2 of 5",
+        "Solving 8 test tasks, easy to hard, up to 2 minutes each…",
+        f"✅ Task {ids[0]} (1 attempt, 3s)",
+        f"❌ Task {ids[2]} (3 attempts, 0s)",
+        "Stopped after tier 2: neither task solved",
+        "Solved 2 of 8",
     ):
         assert line in out
     assert (
@@ -698,7 +711,7 @@ def test_calibrate_writes_the_measured_settings(fake_ollama, monkeypatch, no_sle
         f"   ✍️ Writes about {Calibrator.words(write, ratio)} words a second ({write:g} tok/s)\n"
         f"   📥 Takes requests up to about {Calibrator.words(13653, ratio)} words (13,653 tokens)\n"
         f"   📤 Replies up to about {Calibrator.words(27307, ratio)} words (27,307 tokens)\n"
-        "   🧠 Solved 2 of 5 test tasks\n"
+        "   🧠 Solved 2 of 8 test tasks (~3s an answer)\n"
         "   💭 Thinks before it answers (think: high)\n"
     ) in out
     assert all(len(line) <= 80 for line in out.splitlines() if "Testing" not in line)
@@ -737,12 +750,85 @@ def test_speed_text(tokens_per_s, text):
 
 @pytest.mark.spec("MOD-27")
 def test_a_reply_cut_off_before_an_answer_fails_its_task(fake_ollama):
-    answers = {task["prompt"]: task["answer"] for task in quality.tasks()}
-    fake_ollama.reply({"content": "", "thinking": "Let me", "done_reason": "length"})
-    fake_ollama.reply(lambda messages: answers[messages[0]["content"]], times=2)
+    task = quality.tiers()[0][0]
+    fake_ollama.reply({"content": task["answer"], "done_reason": "length"})
     fake_ollama.reply("not the answer", times=2)
-    probe = Calibrator("m", random.Random(3)).quality(True, 8192)
-    assert probe["solved"] == 2 and len(probe["quality_tasks"]) == QUALITY_TASK_COUNT
+    result = Calibrator("m").solve_task(task, True, 8192, None)
+    assert result == {"id": task["id"], "solved": False, "attempts": 3, "seconds": 0.0}
+    assert all(call["options"]["num_predict"] == QUALITY_REPLY_TOKENS for call in fake_ollama.calls)
+
+
+@pytest.mark.spec("MOD-27")
+def test_a_wrong_answer_is_asked_again_in_the_same_chat(fake_ollama):
+    task = quality.tiers()[1][0]
+    fake_ollama.reply({"content": "not the answer", "total_duration": 10e9})
+    fake_ollama.reply({"content": task["answer"], "total_duration": 5e9})
+    result = Calibrator("m").solve_task(task, "high", 8192, 10.0)
+    assert result == {"id": task["id"], "solved": True, "attempts": 2, "seconds": 15.0}
+    assert fake_ollama.calls[1]["messages"] == [
+        {"role": "user", "content": task["prompt"]},
+        {"role": "assistant", "content": "not the answer"},
+        {"role": "user", "content": "That answer is wrong. Check your work and answer again."},
+    ]
+    assert [call["options"]["num_predict"] for call in fake_ollama.calls] == [1200, 1100]
+
+
+@pytest.mark.spec("MOD-27")
+def test_a_task_stops_when_its_seconds_run_out(fake_ollama):
+    task = quality.tiers()[0][0]
+    fake_ollama.reply({"content": "not the answer", "total_duration": 100e9})
+    fake_ollama.reply({"content": "not the answer", "total_duration": 19.5e9})
+    result = Calibrator("m").solve_task(task, None, 8192, 10.0)
+    assert result == {"id": task["id"], "solved": False, "attempts": 2, "seconds": 119.5}
+    assert [call["options"]["num_predict"] for call in fake_ollama.calls] == [1200, 200]
+
+
+@pytest.mark.spec("MOD-27")
+@pytest.mark.spec("MOD-28")
+def test_the_probe_stops_after_a_tier_with_neither_task_solved(fake_ollama, capsys):
+    fake_ollama.reply("not the answer", times=6)
+    probe = Calibrator("m").quality(None, 8192, None)
+    assert probe["solved"] == 0 and len(probe["quality_tasks"]) == 8 and len(probe["quality_results"]) == 2
+    assert len(fake_ollama.calls) == 6
+    assert "Stopped after tier 1: neither task solved" in capsys.readouterr().out
+
+
+@pytest.mark.spec("MOD-28")
+@pytest.mark.spec("MOD-30")
+@pytest.mark.parametrize(
+    "results,line",
+    [
+        ([{"solved": False, "attempts": 3, "seconds": 9.0}], "🧠 Solved 0 of 8 test tasks\n"),
+        (
+            [
+                {"solved": True, "attempts": 1, "seconds": 30.0},
+                {"solved": True, "attempts": 1, "seconds": 49.0},
+            ],
+            "🧠 Solved 2 of 8 test tasks (~40s an answer)\n",
+        ),
+        (
+            [
+                {"solved": True, "attempts": 2, "seconds": 30.0},
+                {"solved": False, "attempts": 3, "seconds": 99.0},
+            ],
+            "🧠 Solved 1 of 8 test tasks (1 after a retry, ~30s an answer)\n",
+        ),
+    ],
+    ids=["none-solved", "no-retries", "with-a-retry"],
+)
+def test_the_summary_tells_retries_and_answer_time(results, line):
+    settings = {
+        "think": None,
+        "chars_per_token": 4.0,
+        "read_tokens_per_s": 10.0,
+        "write_tokens_per_s": 12.5,
+        "max_prompt_tokens": 2048,
+        "max_reply_tokens": 4096,
+        "solved": sum(result["solved"] for result in results),
+        "quality_tasks": list(range(8)),
+        "quality_results": results,
+    }
+    assert line in Calibrator("m").summary(settings)
 
 
 @pytest.mark.spec("MOD-16")
