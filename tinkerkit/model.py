@@ -553,7 +553,7 @@ class Models:
         facts = [
             f"writes {Models.speed_words(settings, 'write_tokens_per_s')} words/s",
             f"reads {Models.speed_words(settings, 'read_tokens_per_s')} words/s",
-            Models.tasks_text(name, settings),
+            Models.tasks_text(settings),
         ]
         return f"{name:<{width}}" + " · ".join(Models.in_use_facts(name, "model", facts))
 
@@ -573,27 +573,53 @@ class Models:
         return "?" if speed is None else f"~{Calibrator.words(speed, settings['chars_per_token'])}"
 
     @staticmethod
-    def tasks_text(name, settings):
-        if "solved" in settings:
+    def tasks_text(settings):
+        if Models.ran_current_tasks(settings):
             return Models.solved_text(settings)
-        return f"test tasks not run · tinker model calibrate {name} runs them"
+        return "test tasks not run · tinker model recipe all runs them"
+
+    @staticmethod
+    def ran_current_tasks(settings):
+        return settings.get("quality_version") == QUALITY_VERSION
 
     @staticmethod
     def solved_text(settings):
-        return f"solved {settings['solved']} of {len(settings['quality_tasks'])}"
+        return " · ".join(
+            [
+                Models.solved_count_text(settings),
+                *Models.retries_text(settings),
+                *Models.answer_text(settings),
+            ]
+        )
+
+    @staticmethod
+    def solved_count_text(settings):
+        return f"solved {Models.solved(settings)} of {len(settings['quality_tasks'])}"
+
+    @staticmethod
+    def retries_text(settings):
+        count = retries(settings["quality_results"])
+        return [f"{count} after a retry"] if count else []
+
+    @staticmethod
+    def answer_text(settings):
+        seconds = answer_seconds(settings["quality_results"])
+        return [] if seconds is None else [f"~{round(seconds)}s an answer"]
 
     @staticmethod
     def measured():
         return [
             (name, kept)
             for name in Models.named(embedding=False)
-            if (kept := Models.settings(name)) and "solved" in kept
+            if (kept := Models.settings(name)) and Models.ran_current_tasks(kept)
         ]
 
     @staticmethod
     def unmeasured():
         return [
-            name for name in Models.named(embedding=False) if "solved" not in (Models.settings(name) or {})
+            name
+            for name in Models.named(embedding=False)
+            if not Models.ran_current_tasks(Models.settings(name) or {})
         ]
 
     @staticmethod
@@ -609,23 +635,27 @@ class Models:
         if not solving:
             name, settings = max(measured, key=lambda pair: Models.words_per_second(pair[1]))
             return [f"⚡ Fastest: {name} ({Models.writes_text(settings)})"]
-        smartest = max(solving, key=Models.smartness)
-        fastest = max(solving, key=lambda pair: (Models.words_per_second(pair[1]), Models.quality(pair[1])))
+        smartest = min(solving, key=Models.smartness)
+        fastest = min(solving, key=Models.quickness)
         if smartest is fastest:
-            return [f"🧠⚡ {smartest[0]} is the smartest and the fastest ({Models.facts(smartest[1])})"]
+            return [f"🧠⚡ {smartest[0]} is the smartest and the fastest ({Models.solved_text(smartest[1])})"]
         return [
-            f"🧠 Smartest: {smartest[0]} ({Models.facts(smartest[1])})",
-            f"⚡ Fastest: {fastest[0]} ({Models.writes_text(fastest[1])} · {Models.solved_text(fastest[1])})",
+            f"🧠 Smartest: {smartest[0]} ({Models.solved_text(smartest[1])})",
+            f"⚡ Fastest: {fastest[0]} ({Models.fastest_text(fastest[1])})",
         ]
 
     @staticmethod
     def smartness(pair):
-        settings = pair[1]
-        return (Models.solved(settings), Models.quality(settings), Models.words_per_second(settings))
+        results = pair[1]["quality_results"]
+        return (-Models.solved(pair[1]), retries(results), answer_seconds(results))
 
     @staticmethod
-    def facts(settings):
-        return f"{Models.solved_text(settings)} · {Models.writes_text(settings)}"
+    def quickness(pair):
+        return (answer_seconds(pair[1]["quality_results"]), -Models.solved(pair[1]))
+
+    @staticmethod
+    def fastest_text(settings):
+        return " · ".join([*Models.answer_text(settings), Models.solved_count_text(settings)])
 
     @staticmethod
     def writes_text(settings):
@@ -639,10 +669,6 @@ class Models:
     @staticmethod
     def solved(settings):
         return settings.get("solved") or 0
-
-    @staticmethod
-    def quality(settings):
-        return settings["solved"] / len(settings["quality_tasks"])
 
     @staticmethod
     def words_per_second(settings):

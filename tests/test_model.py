@@ -121,27 +121,57 @@ def installed(monkeypatch, models, capabilities):
     monkeypatch.setattr(Ollama, "capabilities", staticmethod(capabilities.get))
 
 
-def measured(solved, write, read=300.0):
+def measured(solved, seconds=40.0, retried=0, write=40.0, read=300.0):
+    results = [
+        {"id": task, "solved": task < solved, "attempts": 2 if task < retried else 1, "seconds": seconds}
+        if task < solved
+        else {"id": task, "solved": False, "attempts": 3, "seconds": 300.0}
+        for task in range(8)
+    ]
     return dict(
-        MEASURED, solved=solved, quality_tasks=[1, 2, 3], write_tokens_per_s=write, read_tokens_per_s=read
+        MEASURED,
+        quality_version=QUALITY_VERSION,
+        quality_tasks=list(range(8)),
+        solved=solved,
+        quality_results=results,
+        write_tokens_per_s=write,
+        read_tokens_per_s=read,
     )
+
+
+def older(solved, write=40.0):
+    return dict(measured(solved, write=write), quality_version=QUALITY_VERSION - 1)
 
 
 @pytest.mark.spec("MOD-29")
 def test_rows(home_store, monkeypatch):
     installed(
         monkeypatch,
-        [{"name": "qwen3:8b"}, {"name": "nomic", "size": 274_000_000}, {"name": "llama3"}, {"name": "phi"}],
-        {"qwen3:8b": ["completion"], "nomic": ["embedding"], "llama3": ["completion"], "phi": ["completion"]},
+        [
+            {"name": "qwen3:8b"},
+            {"name": "nomic", "size": 274_000_000},
+            {"name": "llama3"},
+            {"name": "phi"},
+            {"name": "old"},
+        ],
+        {
+            "qwen3:8b": ["completion"],
+            "nomic": ["embedding"],
+            "llama3": ["completion"],
+            "phi": ["completion"],
+            "old": ["completion"],
+        },
     )
-    Models.keep("llama3", measured(2, 38.0))
+    Models.keep("llama3", measured(5, retried=1, write=38.0))
     Models.keep("phi", dict(MEASURED))
+    Models.keep("old", older(3))
     Config.save(model="llama3", embed_model="nomic")
     assert Models.rows() == [
         ("General models", HEADING),
         ("qwen3:8b  not measured yet · choosing it measures it (about a minute)", DIMMED),
-        "llama3    in use · writes ~19 words/s · reads ~150 words/s · solved 2 of 3",
-        "phi       writes ? words/s · reads ? words/s · test tasks not run · tinker model calibrate phi runs them",
+        "llama3    in use · writes ~19 words/s · reads ~150 words/s · solved 5 of 8 · 1 after a retry · ~40s an answer",
+        "phi       writes ? words/s · reads ? words/s · test tasks not run · tinker model recipe all runs them",
+        "old       writes ~20 words/s · reads ~150 words/s · test tasks not run · tinker model recipe all runs them",
         ("Embedding models", HEADING),
         "nomic     in use · 0.3 GB",
     ]
@@ -158,16 +188,16 @@ def test_rows_leave_out_a_group_with_no_model(home_store, monkeypatch):
 
 @pytest.mark.spec("MOD-30")
 @pytest.mark.parametrize(
-    "solved,tasks,text,fraction",
-    [(2, [1, 2, 3], "solved 2 of 3", 2 / 3), (3, [1, 2, 3, 4, 5], "solved 3 of 5", 0.6)],
+    "settings,text",
+    [
+        (measured(5, 40.0, retried=1), "solved 5 of 8 · 1 after a retry · ~40s an answer"),
+        (measured(3, 20.4), "solved 3 of 8 · ~20s an answer"),
+        (measured(0), "solved 0 of 8"),
+    ],
+    ids=["retried", "no-retry", "none-solved"],
 )
-def test_quality_is_solved_over_the_tasks_the_model_was_asked(solved, tasks, text, fraction):
-    settings = dict(MEASURED, solved=solved, quality_tasks=tasks)
-    assert Models.solved_text(settings) == text and Models.quality(settings) == pytest.approx(fraction)
-
-
-def unsolved(write):
-    return dict(MEASURED, write_tokens_per_s=write)
+def test_solved_text_says_the_solved_count_retries_and_answer_time(settings, text):
+    assert Models.solved_text(settings) == text
 
 
 def recipe_for(monkeypatch, settings):
@@ -180,44 +210,18 @@ def recipe_for(monkeypatch, settings):
 
 
 @pytest.mark.spec("MOD-30")
-def test_recipe_names_the_smartest_and_the_fastest(home_store, monkeypatch):
-    assert recipe_for(monkeypatch, {"a": measured(3, 40.0), "b": measured(2, 80.0)}) == [
-        "🧠 Smartest: a (solved 3 of 3 · writes ~20 words/s)",
-        "⚡ Fastest: b (writes ~40 words/s · solved 2 of 3)",
+def test_a_slow_model_that_solves_more_is_smartest_and_a_quick_one_fastest(home_store, monkeypatch):
+    assert recipe_for(monkeypatch, {"a": measured(7, 80.0), "b": measured(5, 20.0)}) == [
+        "🧠 Smartest: a (solved 7 of 8 · ~80s an answer)",
+        "⚡ Fastest: b (~20s an answer · solved 5 of 8)",
     ]
 
 
 @pytest.mark.spec("MOD-30")
-def test_the_most_solved_wins_smartest_over_a_much_faster_one(home_store, monkeypatch):
-    five = dict(measured(5, 20.0), quality_tasks=[1, 2, 3, 4, 5])
-    assert recipe_for(monkeypatch, {"b": measured(2, 80.0), "a": five}) == [
-        "🧠 Smartest: a (solved 5 of 5 · writes ~10 words/s)",
-        "⚡ Fastest: b (writes ~40 words/s · solved 2 of 3)",
-    ]
-
-
-@pytest.mark.spec("MOD-30")
-def test_more_solved_of_more_tasks_wins_smartest_over_all_of_fewer(home_store, monkeypatch):
-    five = dict(measured(4, 40.0), quality_tasks=[1, 2, 3, 4, 5])
-    assert recipe_for(monkeypatch, {"a": five, "b": measured(3, 40.0)}) == [
-        "🧠 Smartest: a (solved 4 of 5 · writes ~20 words/s)",
-        "⚡ Fastest: b (writes ~20 words/s · solved 3 of 3)",
-    ]
-
-
-@pytest.mark.spec("MOD-30")
-def test_a_smartest_tie_goes_to_the_higher_quality(home_store, monkeypatch):
-    five = dict(measured(3, 80.0), quality_tasks=[1, 2, 3, 4, 5])
-    assert recipe_for(monkeypatch, {"b": five, "a": measured(3, 20.0)}) == [
-        "🧠 Smartest: a (solved 3 of 3 · writes ~10 words/s)",
-        "⚡ Fastest: b (writes ~40 words/s · solved 3 of 5)",
-    ]
-
-
-@pytest.mark.spec("MOD-30")
-def test_a_smartest_tie_in_quality_goes_to_the_faster(home_store, monkeypatch):
-    assert recipe_for(monkeypatch, {"a": measured(3, 20.0), "b": measured(3, 40.0)}) == [
-        "🧠⚡ b is the smartest and the fastest (solved 3 of 3 · writes ~20 words/s)"
+def test_a_smartest_tie_goes_to_fewer_retries(home_store, monkeypatch):
+    assert recipe_for(monkeypatch, {"a": measured(5, 20.0, retried=2), "b": measured(5, 40.0)}) == [
+        "🧠 Smartest: b (solved 5 of 8 · ~40s an answer)",
+        "⚡ Fastest: a (~20s an answer · solved 5 of 8)",
     ]
 
 
@@ -226,68 +230,67 @@ def test_a_smartest_tie_in_quality_goes_to_the_faster(home_store, monkeypatch):
     "settings, line",
     [
         (
-            {"a": measured(1, 20.0), "b": measured(3, 80.0)},
-            "b is the smartest and the fastest (solved 3 of 3 · writes ~40",
+            {"a": measured(5, 40.0), "b": measured(5, 20.0)},
+            "b is the smartest and the fastest (solved 5 of 8 · ~20s",
         ),
         (
-            {"a": measured(2, 80.0), "c": measured(3, 80.0)},
-            "c is the smartest and the fastest (solved 3 of 3 · writes ~40",
+            {"a": measured(3, 20.0), "b": measured(5, 20.0)},
+            "b is the smartest and the fastest (solved 5 of 8 · ~20s",
         ),
         (
-            {"d": measured(3, 20.0), "e": measured(3, 80.0)},
-            "e is the smartest and the fastest (solved 3 of 3 · writes ~40",
+            {"a": measured(5, 20.0), "b": measured(5, 20.0)},
+            "a is the smartest and the fastest (solved 5 of 8 · ~20s",
         ),
-        (
-            {"a": measured(2, 20.0), "b": measured(2, 20.0)},
-            "a is the smartest and the fastest (solved 2 of 3 · writes ~10",
-        ),
+        ({"a": measured(2, 30.0)}, "a is the smartest and the fastest (solved 2 of 8 · ~30s"),
     ],
-    ids=["one-model", "speed-tie-by-quality", "quality-tie-by-speed", "full-tie-by-ollama-order"],
+    ids=["smartest-tie-by-answer-time", "fastest-tie-by-solved", "full-tie-by-ollama-order", "one-model"],
 )
 def test_recipe_says_one_line_for_a_model_both_smartest_and_fastest(home_store, monkeypatch, settings, line):
-    assert recipe_for(monkeypatch, settings) == [f"🧠⚡ {line} words/s)"]
+    assert recipe_for(monkeypatch, settings) == [f"🧠⚡ {line} an answer)"]
 
 
 @pytest.mark.spec("MOD-30")
-@pytest.mark.parametrize("other", [unsolved(80.0), measured(0, 80.0)], ids=["never-ran", "solved-none"])
+@pytest.mark.parametrize(
+    "other",
+    [dict(MEASURED, write_tokens_per_s=80.0), older(8, 80.0), measured(0, write=80.0)],
+    ids=["never-ran", "older-test", "solved-none"],
+)
 def test_only_a_model_that_solved_a_task_is_picked(home_store, monkeypatch, other):
     assert recipe_for(monkeypatch, {"a": measured(1, 20.0), "b": other}) == [
-        "🧠⚡ a is the smartest and the fastest (solved 1 of 3 · writes ~10 words/s)"
+        "🧠⚡ a is the smartest and the fastest (solved 1 of 8 · ~20s an answer)"
     ]
 
 
 @pytest.mark.spec("MOD-30")
 def test_with_no_model_solving_a_task_the_fastest_writer_alone(home_store, monkeypatch):
-    assert recipe_for(monkeypatch, {"c": unsolved(20.0), "d": measured(0, 80.0)}) == [
-        "⚡ Fastest: d (writes ~40 words/s)"
-    ]
+    settings = {"c": measured(0, write=20.0), "d": measured(0, write=80.0), "e": older(3, 200.0)}
+    assert recipe_for(monkeypatch, settings) == ["⚡ Fastest: d (writes ~40 words/s)"]
 
 
 @pytest.mark.spec("MOD-30")
 def test_the_recipe_needs_one_measured_model(home_store, monkeypatch):
     assert recipe_for(monkeypatch, {}) == []
+    assert recipe_for(monkeypatch, {"a": older(3)}) == []
     assert recipe_for(monkeypatch, {"a": measured(3, 20.0)})[0].startswith("🧠⚡ a is the smartest")
 
 
 @pytest.mark.spec("MOD-30")
 def test_the_shown_recipe_needs_two_measured_models(home_store, monkeypatch):
-    recipe_for(monkeypatch, {"a": measured(3, 20.0)})
+    recipe_for(monkeypatch, {"a": measured(3, 20.0), "b": older(5)})
     assert Models.shown_recipe() == []
     recipe_for(monkeypatch, {"a": measured(3, 20.0), "b": measured(1, 40.0)})
     assert Models.shown_recipe() == Models.recipe() != []
 
 
 @pytest.mark.spec("MOD-31")
-def test_unmeasured_names_general_models_never_measured_or_without_solved(home_store, monkeypatch):
-    without_solved = {key: value for key, value in measured(3, 20.0).items() if key != "solved"}
-    recipe_for(monkeypatch, {"a": measured(3, 20.0), "b": without_solved})
-    assert Models.unmeasured() == ["b", "unmeasured"]
+def test_unmeasured_names_general_models_never_measured_or_with_an_older_test(home_store, monkeypatch):
+    recipe_for(monkeypatch, {"a": measured(3, 20.0), "b": older(3), "c": dict(MEASURED)})
+    assert Models.unmeasured() == ["b", "c", "unmeasured"]
 
 
 @pytest.mark.spec("MOD-31")
-def test_measured_names_only_models_with_a_solved_count(home_store, monkeypatch):
-    without_solved = {key: value for key, value in measured(3, 20.0).items() if key != "solved"}
-    recipe_for(monkeypatch, {"a": measured(3, 20.0), "b": without_solved})
+def test_measured_names_only_models_that_ran_the_current_test(home_store, monkeypatch):
+    recipe_for(monkeypatch, {"a": measured(3, 20.0), "b": older(3), "c": dict(MEASURED)})
     assert [name for name, _ in Models.measured()] == ["a"]
 
 
