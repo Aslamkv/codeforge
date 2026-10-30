@@ -18,6 +18,7 @@ from .commands import BY_NAME, COMMANDS, GROUPS, kind_of, refs, taught_command
 from .jobs import STATES, Jobs, archived, calls_log, job_number
 from .messages import Messages, human_duration, paint, say
 from .reading import Reader
+from .system import SYSTEM_CHECKS, SYSTEM_WORDS
 lazy from .building import BugReproducer, CodeWriter, TestToolSetup, TestWriter, Verifier
 lazy from .finishing import FinalReview, LessonWriter, ReadmeWriter, Tidy
 lazy from .graph import Graph, MemoryBrowser, write_page
@@ -115,7 +116,11 @@ class Cli:
         "tinker research the newest Python release",
         "tinker help task",
     )
-    TALK_COMMANDS = tuple(command.name for command in COMMANDS if command.group == "Talk" and command.cli)
+    TALK_COMMANDS = tuple(
+        command.name
+        for command in COMMANDS
+        if command.group == "Talk" and command.cli and command.name != "system"
+    )
     TITLES = {
         "Build": "🔨 Build",
         "Learn": "🧠 Learn",
@@ -128,7 +133,9 @@ class Cli:
     COMMANDS = tuple(
         command.name
         for command in COMMANDS
-        if command.cli and command.group != "Talk" and command.name not in ("help", "channel", "confirm")
+        if command.cli
+        and (command.group != "Talk" or command.name == "system")
+        and command.name not in ("help", "channel", "confirm")
     )
     FIELDS = {
         "reset": False,
@@ -147,6 +154,7 @@ class Cli:
         "jobs": None,
         "stop": None,
         "doctor": False,
+        "system": None,
         "task": None,
         "spec": None,
         "spec_file": None,
@@ -384,7 +392,15 @@ class Cli:
                 return Cli.non_empty(" ".join(given.words), command, parser)
             case "config":
                 return Cli.config_words(given.words, parser)
+            case "system":
+                return Cli.system_word(given.system, parser)
         return None
+
+    @staticmethod
+    def system_word(word, parser):
+        if word is not None and word not in SYSTEM_WORDS:
+            parser.error(f"no system check {word!r}; use one of {', '.join(SYSTEM_WORDS)}")
+        return word
 
     @staticmethod
     def config_words(words, parser):
@@ -574,6 +590,7 @@ class Commands:
             "log": lambda: self.show_log(args.log, args.workdir, args.calls),
             "rename": lambda: self.rename(*args.rename, args.workdir),
             "doctor": lambda: Doctor().run(),
+            "system": lambda: self.system(args.system),
         }
 
     @staticmethod
@@ -970,6 +987,13 @@ class Commands:
         task = entry.get("task", "").replace("\n", " ")
         features = entry.get("features")
         return f"[+{len(features)} feature{'s' if len(features) > 1 else ''}] " + task if features else task
+
+    @staticmethod
+    def system(word):
+        for check in SYSTEM_CHECKS:
+            if word in (None, check.word):
+                say.text(paint(check.word, "bold", sys.stdout))
+                say.text(check.answer())
 
     @staticmethod
     def show_status(name, workdir_arg):

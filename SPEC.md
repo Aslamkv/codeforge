@@ -69,6 +69,7 @@ listed above it:
 | `text` | plain text helpers every module shares |
 | `store` | one SQLite database of documents and logs (`Store`, `Log`) |
 | `settings` | the numbers and fixed names more than one part shares (a module's own stay with it); the Tinker home (`Home`) and its database, the settings table (`SETTINGS`, `Config`), numbered lists (`Numbered`), the one way to delete (`confirm_deletion`) |
+| `system` | what this computer tells at once by fixed read-only commands, with no model (`SystemCheck`, `SYSTEM_CHECKS`) |
 | `commands` | the one table of Tinker's commands with each one's kind (`kind_of`, `deletes`), and project references (`@ID`, `@folder`) |
 | `jobs` | every long command as a job, listed, stopped and resumed (`Jobs`), its journal of requests and answers (`Journal`, `journaled`), and its log of model calls (`calls_log`) |
 | `ledger` | what is said in the chats, so a chat is only a view of it: each message with when it goes, each thing shown, numbered, for `history` (`Ledger`) |
@@ -315,6 +316,22 @@ The home and its database, the settings, numbered lists, and the one way to dele
   deleted or its list cleared. `get(N)`, `put(entry)`, `update(N, change)` and `delete(N)` work as named, and
   `newest()` gives the entries newest first. `page(entries, N)` gives page N of the entries, `PER_PAGE` (10) to
   a page, with how many pages there are (at least one).
+
+## system (SYS)
+
+- **SYS-1** `SYSTEM_CHECKS` is the one list of what Tinker tells about this computer at once: `time`, `date`,
+  `disk`, `ram` (memory, a word the `memory` command has), `battery`, `uptime` and `network`. Each is a `SystemCheck`: its word and
+  its fixed command on macOS and on Linux (a program and its arguments, never a line a model wrote), none of
+  which changes anything. A new check is one more entry, and the `system` command takes its word.
+- **SYS-2** `SystemCheck.answer()` runs the check's command for the system Tinker runs on, without a shell,
+  and gives its output, trimmed. A system it has no command for, a program not found, a failure, an empty
+  output or no answer within `SYSTEM_CHECK_SECONDS` (5) gives `⚠️ No WORD on this computer` instead; it never
+  raises.
+- **SYS-3** `system [time|date|…]` is a `glance` command a chat offers, whose synopsis takes its words from
+  `SYSTEM_CHECKS`. `tinker system WORD` prints that check's answer, and `tinker system` every check's, each
+  under its word in bold. In a conversation it is a fixed phrase (**CNV-5**), so `time`, `system disk` and
+  `what is the time now?` run it with no model, and the chat model asks for it for other questions about
+  this computer (**CNV-20**).
 
 ## commands (CMD)
 
@@ -870,8 +887,9 @@ The terminal and the chats are one conversation: the same commands, the same ans
   gives none, and options (`--yes`) are left out. So `clear chat`, `status`, `jobs running`,
   `model recipe all`, `exercise status` are phrases, and `task`, `fix`, `ask` none. The text matches when its
   words, lowercased, without punctuation and without the filler words `SAID_FILLER` (`the`, `my`, `please`,
-  `can`, `you`, `tinker`, `show`, `see`, …), are a phrase exactly: `Clear the chat, please!` is `/clear chat`,
-  `show model recipe` is `/model recipe`, while `clear the chat and the history` stays a chat. The command's
+  `can`, `you`, `tinker`, `show`, `see`, `what`, `is`, `now`, …), are a phrase exactly:
+  `Clear the chat, please!` is `/clear chat`, `show model recipe` is `/model recipe`, `What's the time now?`
+  is `/system time` (**SYS-3**), while `clear the chat and the history` stays a chat. The command's
   name may be left out when the words are the rest of just one phrase, of a command that does not delete:
   `show recipe` is `/model recipe`, while `chat` (`/clear chat` deletes) stays a chat. Such a message is handled as the `/PHRASE` sent, so a
   command that deletes asks first just the same. A message that answers a waiting question is not matched.
@@ -990,8 +1008,9 @@ The terminal and the chats are one conversation: the same commands, the same ans
   read a JSON answer with `Reply.json()` (**PRM-2**), and take one that cannot be read as `{}`. `reply` keeps
   the last `CHAT_CONTEXT_MESSAGES` messages per chat, and it says plainly when no model is in use or the model
   failed. The chat's prompt (`CHAT_SYSTEM`) asks the model, when the person asks Tinker to do what one of the
-  commands does, to reply with only that command line (`/clear chat` for `wipe the chat`); asked how to do
-  it, it answers in words. A reply that is one line, with or without backticks, and that `command_of` gives
+  commands does, to reply with only that command line (`/clear chat` for `wipe the chat`), and when they ask
+  what a `system` check tells (**SYS-1**), to reply with only that check's line (`/system battery` for
+  `am I charged?`); asked how to do it, it answers in words. A reply that is one line, with or without backticks, and that `command_of` gives
   a command for is not shown: its words a fixed phrase (**CNV-5**), it is handled as that command sent;
   otherwise (more words: `/fix the login bug`) it is offered, `👉 /fix the login bug — /confirm runs it`,
   and `/confirm` handles it as sent. This takes no extra model call.

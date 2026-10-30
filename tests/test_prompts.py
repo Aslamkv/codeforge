@@ -282,6 +282,12 @@ def test_the_chat_prompt_asks_for_only_the_command_line_when_asked_to_do_what_on
     assert "only that command line" in chat and "`/clear chat`" in chat and "answer in words" in chat
 
 
+@pytest.mark.spec("CNV-20", "SYS-1")
+def test_the_chat_prompt_asks_for_only_the_check_line_when_asked_what_a_system_check_tells():
+    chat = Prompts.CHAT_SYSTEM.format(kind="Telegram", commands="/system battery")
+    assert "only that check's line" in chat and "`/system battery`" in chat and "am I charged?" in chat
+
+
 @pytest.mark.spec("PRM-14")
 def test_the_example_toolchain_commands_are_real_commands():
     toolchain = json.loads("{" + Prompts.TOOLCHAIN_JSON + "}")["toolchain"]

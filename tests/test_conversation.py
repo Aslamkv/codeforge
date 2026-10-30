@@ -214,6 +214,12 @@ def test_said_command_takes_show_words_and_a_left_out_command_name():
     assert conversation.said_command("show me the chat") == ""
 
 
+@pytest.mark.spec("CNV-5", "SYS-3")
+def test_said_command_drops_question_words():
+    assert conversation.said_command("What's the time now?") == "/system time"
+    assert conversation.said_command("what is my battery") == "/system battery"
+
+
 def test_said_filler_holds_no_word_of_a_phrase():
     words = {word for phrase in conversation.said_phrases() for word in phrase}
     assert not words & set(conversation.SAID_FILLER)
