@@ -194,6 +194,21 @@ def test_command_of(text, command):
 
 
 @pytest.mark.spec("CNV-6")
+def test_said_command_gives_a_fixed_phrase_of_a_chat_command_as_slash():
+    for said in ("clear chat", "status", "jobs running", "model recipe all", "exercise status"):
+        assert conversation.said_command(said) == f"/{said}"
+    for said in ("task", "fix", "ask"):
+        assert conversation.said_command(said) == ""
+    assert conversation.said_command("Clear the chat, please!") == "/clear chat"
+    assert conversation.said_command("clear the chat and the history") == ""
+    assert conversation.said_command("status of my build") == ""
+
+
+def test_said_filler_holds_no_word_of_a_phrase():
+    words = {word for phrase in conversation.said_phrases() for word in phrase}
+    assert not words & set(conversation.SAID_FILLER)
+
+
 def test_said_writes_tinker_before_a_command_as_slash():
     for channel in (Recorder(), ConsoleChannel()):
         assert (
@@ -1856,6 +1871,23 @@ def test_a_command_sent_alone_asks_for_its_words(desk, monkeypatch):
 
 
 @pytest.mark.spec("CNV-5")
+def test_a_said_phrase_runs_its_command_and_a_deleting_one_asks_first(desk, monkeypatch):
+    desk, channel, _ = desk
+    monkeypatch.setattr(desk.talk, "answer", lambda *args, **kwargs: None)
+    say(desk, channel, "Clear the memory, please!")
+    assert desk.ran == [["clear", "memory"]] and "👉 `/confirm` to delete it" in channel.texts()[-1]
+    say(desk, channel, "confirm")
+    wait_until(lambda: ["clear", "memory", "--yes"] in desk.ran)
+
+
+def test_a_said_phrase_answering_a_waiting_question_is_not_a_command(desk, monkeypatch):
+    desk, channel, _ = desk
+    monkeypatch.setattr(desk.talk, "answer", lambda *args, **kwargs: None)
+    desk.answer(Message("1", "/clear memory"), channel)
+    say(desk, channel, "status")
+    assert "🚫 _Not done:_ `clear memory`" in channel.texts()[-1] and desk.ran == [["clear", "memory"]]
+
+
 def test_a_slash_word_that_names_no_command_is_only_answered(desk, monkeypatch):
     desk, channel, _ = desk
     heard = []

@@ -426,7 +426,7 @@ class Desk:
         if message.text.split()[:1] == [CHAT_APP_START]:
             channel.send(message.chat, welcome())
             return
-        message = self.with_words_wanted(channel, message)
+        message = self.as_said(channel, self.with_words_wanted(channel, message))
         command = command_of(message.text)
         unknown = not command and unknown_command(message.text)
         if unknown:
@@ -467,6 +467,13 @@ class Desk:
             return False
         self.questions.ask(channel, message.chat, Question(wanted=pick))
         return True
+
+    def as_said(self, channel, message):
+        said = said_command(message.text)
+        answers_a_question = said != "/confirm" and self.questions.waiting(channel, message.chat)
+        if not said or answers_a_question:
+            return message
+        return Message(message.chat, said, message.sender, message.id)
 
     def with_words_wanted(self, channel, message):
         question = self.questions.waiting(channel, message.chat)
@@ -1092,6 +1099,58 @@ def shown_output(output):
 def command_of(text, commands=None):
     first = slash_word(text)
     return first if first in (commands or Desk.COMMANDS) else ""
+
+
+SAID_FILLER = ("the", "my", "please", "can", "could", "would", "you", "tinker", "a", "an", "me", "now", "just")
+
+
+def said_command(text):
+    if text.startswith("/"):
+        return ""
+    words = tuple(word for word in re.sub(r"[^\w\s]", " ", text.lower()).split() if word not in SAID_FILLER)
+    return "/" + " ".join(words) if words in said_phrases() else ""
+
+
+def said_phrases():
+    return {
+        (command.name, *words)
+        for command in COMMANDS
+        if command.chat
+        for synopsis, _ in command.rows
+        for words in synopsis_phrases(synopsis.split()[1:])
+    }
+
+
+def synopsis_phrases(words):
+    tokens = re.findall(r"\[|\]|\||[^\s\[\]|]+", " ".join(words))
+    phrases, _ = alternatives_phrases(tokens, 0)
+    return phrases
+
+
+def alternatives_phrases(tokens, at):
+    phrases, at = sequence_phrases(tokens, at)
+    while at < len(tokens) and tokens[at] == "|":
+        more, at = sequence_phrases(tokens, at + 1)
+        phrases |= more
+    return phrases, at
+
+
+def sequence_phrases(tokens, at):
+    phrases = {()}
+    while at < len(tokens) and tokens[at] not in ("|", "]"):
+        item, at = item_phrases(tokens, at)
+        phrases = {phrase + more for phrase in phrases for more in item}
+    return phrases, at
+
+
+def item_phrases(tokens, at):
+    token = tokens[at]
+    if token == "[":
+        inside, at = alternatives_phrases(tokens, at + 1)
+        return {()} | inside, at + 1
+    if token.startswith("--"):
+        return {()}, at + 1
+    return ({(token,)} if re.fullmatch(r"[a-z]+", token) else set()), at + 1
 
 
 def model_pick(text):
