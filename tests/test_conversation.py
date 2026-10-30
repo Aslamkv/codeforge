@@ -1182,6 +1182,7 @@ def test_the_banner_names_tinker_the_model_the_projects_folder_and_the_chats(mon
     assert len(alone.banner_lines()) == 4
 
 
+@pytest.mark.spec("CNV-8", "CHN-12")
 def test_the_terminal_banner_shows_each_chat_with_its_state_and_a_chat_banner_names_it_only(
     desk, monkeypatch
 ):
@@ -1198,6 +1199,7 @@ def test_the_terminal_banner_shows_each_chat_with_its_state_and_a_chat_banner_na
     assert any("chats Telegram, rec" in text and "connecting" not in text for text in telegram.texts("send"))
 
 
+@pytest.mark.spec("CNV-8", "CHN-12")
 def test_a_chat_state_that_changes_after_the_banner_prints_a_dimmed_line_and_draws_no_banner(
     desk, monkeypatch
 ):

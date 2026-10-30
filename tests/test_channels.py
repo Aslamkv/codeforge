@@ -121,10 +121,12 @@ def test_a_telegram_connection_fails_when_no_address_connects(monkeypatch):
         channels.connect_by_address((TelegramChannel.HOST, 443), 5)
 
 
+@pytest.mark.spec("CHN-12")
 def test_a_telegram_chat_is_connecting_until_its_first_call_ends():
     assert TelegramChannel("bot", {"allowed": ["42"]}, {"token": "T0K"}).state == "connecting…"
 
 
+@pytest.mark.spec("CHN-12")
 def test_a_telegram_chat_answered_is_connected_by_the_family_of_its_address():
     api = BotAPI(getMe={"username": "b"})
     channel = telegram(api)
@@ -135,6 +137,7 @@ def test_a_telegram_chat_answered_is_connected_by_the_family_of_its_address():
     assert channel.state == "connected (IPv6)"
 
 
+@pytest.mark.spec("CHN-12")
 def test_a_telegram_chat_refused_is_still_connected():
     channel = telegram(BotAPI(getMe=(401, '{"ok": false, "description": "Unauthorized"}')))
     with pytest.raises(ChannelError):
@@ -142,6 +145,7 @@ def test_a_telegram_chat_refused_is_still_connected():
     assert channel.state == "connected (IPv4)"
 
 
+@pytest.mark.spec("CHN-12")
 def test_a_telegram_chat_the_network_fails_is_unreachable_with_the_reason():
     channel = telegram(BotAPI(getMe=[{"username": "b"}, OSError("reset"), OSError("no route")]))
     channel.call("getMe")
