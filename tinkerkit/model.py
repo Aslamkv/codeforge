@@ -35,7 +35,6 @@ from .settings import (
     PROGRESS_UPDATE_SECONDS,
     PROMPT_BUDGET_SHARE,
     QUALITY_REPLY_TOKENS,
-    QUALITY_TASK_COUNT,
     QUICK_REPLY_TIMEOUT,
     REPLY_ERROR_RETRIES,
     RUNNER_OVERHEAD_BYTES,
@@ -49,7 +48,8 @@ from .settings import (
 from .text import first_line, now_text
 lazy from .jobs import journaled
 lazy from .prompts import Part, Prompts, PromptTooLarge, Reply
-lazy from .quality import pick, solves
+lazy from .quality import solves
+lazy from .quality import tasks as quality_tasks
 lazy from .workspace import ToolError
 
 SelectedModel = namedtuple("SelectedModel", "name settings")
@@ -935,7 +935,7 @@ class Calibrator:
         )
 
     def quality(self, think, context):
-        tasks = pick(QUALITY_TASK_COUNT, self.rng)
+        tasks = quality_tasks()
         with say.section():
             say.step(f"Solving {len(tasks)} small test tasks…", "🧠")
             solved = sum(self.solves_task(task, think, context) for task in tasks)

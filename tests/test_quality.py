@@ -1,5 +1,3 @@
-import random
-
 import pytest
 
 from tinkerkit import quality
@@ -7,18 +5,17 @@ from tinkerkit import quality
 pytestmark = pytest.mark.spec("MOD-27")
 
 
-def test_a_hundred_tasks_with_unique_ids_a_prompt_and_an_answer_that_solves_it():
+def test_eight_tasks_with_unique_ids_a_prompt_and_an_answer_that_solves_it():
     tasks = quality.tasks()
-    assert len({task["id"] for task in tasks}) == len(tasks) == 100
+    assert len({task["id"] for task in tasks}) == len(tasks) == 8
     for task in tasks:
         assert task["prompt"].strip() and quality.solves(task["answer"], task["answer"])
 
 
-def test_a_seeded_pick_repeats_and_draws_distinct_tasks():
-    first = quality.pick(3, random.Random(7))
-    second = quality.pick(3, random.Random(7))
-    assert first == second
-    assert len({task["id"] for task in first}) == 3
+def test_four_tiers_of_two_tasks_from_easy_to_hard():
+    tiers = quality.tiers()
+    assert [[task["tier"] for task in tier] for tier in tiers] == [[1, 1], [2, 2], [3, 3], [4, 4]]
+    assert [task for tier in tiers for task in tier] == sorted(quality.tasks(), key=lambda task: task["tier"])
 
 
 @pytest.mark.parametrize(
