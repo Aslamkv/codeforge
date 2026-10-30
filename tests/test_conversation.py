@@ -1183,9 +1183,7 @@ def test_the_banner_names_tinker_the_model_the_projects_folder_and_the_chats(mon
 
 
 @pytest.mark.spec("CNV-8", "CHN-12")
-def test_the_terminal_banner_shows_each_chat_with_its_state_and_a_chat_banner_names_it_only(
-    desk, monkeypatch
-):
+def test_the_terminal_banner_and_a_chat_banner_name_the_chats_only(desk, monkeypatch):
     monkeypatch.setattr(conversation.Config, "get", lambda key: None)
     console, telegram, stateless, drawn = ConsoleChannel(), Recorder("Telegram"), Recorder("rec"), []
     telegram.state = "connecting…"
@@ -1193,8 +1191,7 @@ def test_the_terminal_banner_shows_each_chat_with_its_state_and_a_chat_banner_na
     listening = Desk([console, telegram, stateless], Path.cwd())
     listening.said_status = "🟢 **Tinker** · idle"
     listening.open_banner()
-    assert "chats Telegram · connecting…, rec" in drawn[0]
-    assert "chats Telegram, rec" in listening.banner_lines()
+    assert "chats Telegram, rec" in drawn[0] and not any("connecting" in line for line in drawn[0])
     listening.start_chat(telegram)
     assert any("chats Telegram, rec" in text and "connecting" not in text for text in telegram.texts("send"))
 

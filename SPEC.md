@@ -1020,10 +1020,10 @@ The chat plugin: Telegram, and `tinker channel`.
   falls to IPv4 within that time; once the handshake is done, the call's own wait applies to its answer.
 - **CHN-12** A chat channel's `state` is `connecting…` until its first call to Telegram ends, then
   `connected (IPv4)` or `connected (IPv6)` (the family of the address it connected to) after a call Telegram
-  answers, and `unreachable: REASON` after a call the network fails. The terminal's banner (**CNV-8**) shows
-  each chat with its state (`chats Telegram · connecting…`); the banner each chat opens with names the chats
-  only. When a chat's state changes after that, the terminal prints `Telegram · STATE` as a line of its own,
-  dimmed; the banner is not drawn again for it.
+  answers, and `unreachable: REASON` after a call the network fails. The terminal's banner (**CNV-8**) and
+  the banner each chat opens with name the chats only (`chats Telegram`). When a chat's state changes after
+  the banner, the terminal prints `Telegram · STATE` as a line of its own, dimmed; the banner is not drawn
+  again for it.
 
 ## knowledge (KNW)
 
