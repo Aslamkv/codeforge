@@ -1,3 +1,4 @@
+import re
 from collections import namedtuple
 
 from .settings import SETTINGS, Config, Home
@@ -691,6 +692,37 @@ def slash_matches(typed):
     offered = [command for command in COMMANDS if command.chat]
     starts = [command for command in offered if command.name.startswith(word)]
     return starts + [command for command in offered if word in command.name and command not in starts]
+
+
+def word_matches(typed):
+    name, _, word = typed.removeprefix("/").partition(" ")
+    command = BY_NAME.get(name)
+    if not typed.startswith("/") or not word or " " in word or not command or not command.chat:
+        return []
+    words = command_words(command)
+    starts = [known for known in words if known.startswith(word)]
+    return [
+        (command, known)
+        for known in starts + [known for known in words if word in known and known not in starts]
+    ]
+
+
+def command_words(command):
+    actions = [action.word for action in command.actions if action.word]
+    return list(dict.fromkeys(actions + alternative_words(synopsis_words(command))))
+
+
+def alternative_words(synopsis):
+    words, depth, opens = [], 0, True
+    for token in re.findall(r"\[|\]|\||[^\s\[\]|]+", synopsis):
+        if token in "[]|":
+            depth += {"[": 1, "]": -1}.get(token, 0)
+            opens = token != "]"
+            continue
+        if opens and depth <= 1 and re.fullmatch(r"[a-z]+", token):
+            words.append(token)
+        opens = False
+    return words
 
 
 class CommandMenu:

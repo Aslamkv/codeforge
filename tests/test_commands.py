@@ -8,12 +8,14 @@ from tinkerkit.commands import (
     GROUPS,
     CommandMenu,
     MenuAnswer,
+    command_words,
     deletes,
     kind_of,
     ref,
     refs,
     slash_matches,
     taught_command,
+    word_matches,
 )
 from tinkerkit.messages import Text
 from tinkerkit.settings import Config
@@ -185,6 +187,36 @@ def test_slash_matches_only_chat_commands_and_only_a_slash_word():
     not_chat = [command.name for command in COMMANDS if not command.chat and command.name]
     assert not set(names(slash_matches("/"))) & set(not_chat)
     assert slash_matches("task") == [] and slash_matches("") == [] and slash_matches("/task a") == []
+
+
+@pytest.mark.spec("MSG-10")
+def test_command_words_are_action_words_then_synopsis_alternatives_once():
+    assert command_words(BY_NAME["model"]) == ["calibrate", "recipe"]
+    assert command_words(BY_NAME["jobs"]) == ["running", "paused", "stopped", "finished", "archived"]
+    assert command_words(BY_NAME["memory"]) == ["show", "find", "recent"]
+    assert command_words(BY_NAME["exercise"]) == ["status"]
+    assert command_words(BY_NAME["read"]) == ["list", "show"]
+    assert command_words(BY_NAME["channel"]) == ["add", "remove", "start"]
+    assert command_words(BY_NAME["task"]) == [] and command_words(BY_NAME["restart"]) == []
+
+
+@pytest.mark.spec("MSG-10")
+def test_word_matches_word_starts_first_then_word_holds():
+    assert word_matches("/jobs p") == [(BY_NAME["jobs"], "paused"), (BY_NAME["jobs"], "stopped")]
+    assert word_matches("/model re") == [(BY_NAME["model"], "recipe")]
+    assert word_matches("/memory xyz") == []
+
+
+@pytest.mark.spec("MSG-10")
+def test_word_matches_only_a_second_word_of_a_chat_command():
+    assert (
+        word_matches("/jobs") == [] and word_matches("/jobs ") == [] and word_matches("/jobs running p") == []
+    )
+    assert (
+        word_matches("jobs r") == [] and word_matches("/nosuch r") == [] and word_matches("/model all") == []
+    )
+    not_chat = [command.name for command in COMMANDS if not command.chat and command.name]
+    assert all(word_matches(f"/{name} a") == [] for name in not_chat)
 
 
 @pytest.mark.spec("MSG-10")
