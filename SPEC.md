@@ -320,7 +320,7 @@ The home and its database, the settings, numbered lists, and the one way to dele
 ## system (SYS)
 
 - **SYS-1** `SYSTEM_CHECKS` is the one list of what Tinker tells about this computer at once: `time`, `date`,
-  `disk`, `ram` (memory, a word the `memory` command has), `battery`, `uptime` and `network`. Each is a `SystemCheck`: its word, what it tells, and
+  `disk`, `ram` (memory, a word the `memory` command has), `battery`, `uptime` and `network`. Each is a `SystemCheck`: its word and
   its fixed command on macOS and on Linux (a program and its arguments, never a line a model wrote), none of
   which changes anything. A new check is one more entry, and the `system` command takes its word.
 - **SYS-2** `SystemCheck.answer()` runs the check's command for the system Tinker runs on, without a shell,
@@ -887,7 +887,7 @@ The terminal and the chats are one conversation: the same commands, the same ans
   gives none, and options (`--yes`) are left out. So `clear chat`, `status`, `jobs running`,
   `model recipe all`, `exercise status` are phrases, and `task`, `fix`, `ask` none. The text matches when its
   words, lowercased, without punctuation and without the filler words `SAID_FILLER` (`the`, `my`, `please`,
-  `can`, `you`, `tinker`, `show`, `see`, `what`, `is`, `what's`, `now`, …), are a phrase exactly:
+  `can`, `you`, `tinker`, `show`, `see`, `what`, `is`, `now`, …), are a phrase exactly:
   `Clear the chat, please!` is `/clear chat`, `show model recipe` is `/model recipe`, `What's the time now?`
   is `/system time` (**SYS-3**), while `clear the chat and the history` stays a chat. The command's
   name may be left out when the words are the rest of just one phrase, of a command that does not delete:
