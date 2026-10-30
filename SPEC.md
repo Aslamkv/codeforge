@@ -233,7 +233,11 @@ Everything Tinker tells the person goes through one voice, `say` (a `Messages`).
   move it, scrolling the 8 rows, stopping at the ends. Tab fills the line with `/name ` and closes the menu.
   Enter on a command that takes no words (`words` is `none`) sends `/name`; on one that takes words it fills
   the line with `/name ` and waits. Esc closes the menu and keeps the line; typing on narrows it again, and no
-  match or a space closes it.
+  match or a space closes it. `word_matches(typed)` gives, for a line `/name w` of a chat command with one
+  partly typed word after the name, that command's words (its actions' words, then the lowercase words opening
+  an alternative in its synopsis, at most one bracket deep, each once) that start with it, then those that hold
+  it. `CommandMenu` shows them as it shows commands, each row `/name word`; Tab fills the line with
+  `/name word ` and Enter sends `/name word`.
 
 ## text (TXT)
 
