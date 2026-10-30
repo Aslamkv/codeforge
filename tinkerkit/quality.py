@@ -1,4 +1,5 @@
 import json
+from itertools import groupby
 from pathlib import Path
 
 TASKS = Path(__file__).parent / "quality_tasks.json"
@@ -10,8 +11,13 @@ def tasks():
     return json.loads(TASKS.read_text())
 
 
-def pick(count, rng):
-    return rng.sample(tasks(), count)
+def tiers():
+    ordered = sorted(tasks(), key=tier)
+    return [list(group) for _, group in groupby(ordered, key=tier)]
+
+
+def tier(task):
+    return task["tier"]
 
 
 def solves(reply, answer):

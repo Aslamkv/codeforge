@@ -13,7 +13,7 @@ from tinkerkit.knowledge import Knowledge, Library
 from tinkerkit.model import Models, Ollama, OllamaError
 from tinkerkit.project import Runs, Tracker, project_store
 from tinkerkit.session import Phase, Stopped
-from tinkerkit.settings import FIX_PHASES, PHASES, Config
+from tinkerkit.settings import FIX_PHASES, PHASES, QUALITY_VERSION, Config
 from tinkerkit.workspace import Toolchain
 
 
@@ -201,7 +201,15 @@ def calibrating(monkeypatch, measures):
             raise SystemExit("could not measure")
         Models.keep(self.name, MEASURED)
 
-    monkeypatch.setattr(cli, "Calibrator", lambda name: type("C", (), {"name": name, "run": run})())
+    def retest(self):
+        measured.append(f"{self.name} again")
+        if not measures:
+            raise SystemExit("could not measure")
+        Models.keep(self.name, quality_settings(1))
+
+    monkeypatch.setattr(
+        cli, "Calibrator", lambda name: type("C", (), {"name": name, "run": run, "retest": retest})()
+    )
     return measured
 
 
@@ -258,9 +266,20 @@ def test_model_recipe_takes_all_and_no_model_name(capsys):
     assert "tinker model recipe [all] takes no model name" in capsys.readouterr().err
 
 
+def quality_settings(solved, seconds=40.0):
+    results = [{"id": task, "solved": task < solved, "attempts": 1, "seconds": seconds} for task in range(3)]
+    return dict(
+        MEASURED,
+        quality_version=QUALITY_VERSION,
+        quality_tasks=[0, 1, 2],
+        solved=solved,
+        quality_results=results,
+    )
+
+
 def measured_two():
-    Models.keep("m", dict(MEASURED, write_tokens_per_s=40, solved=1, quality_tasks=[1, 2, 3]))
-    Models.keep("n", dict(MEASURED, write_tokens_per_s=20, solved=3, quality_tasks=[1, 2, 3]))
+    Models.keep("m", dict(quality_settings(1, 20.0), write_tokens_per_s=40))
+    Models.keep("n", dict(quality_settings(3, 60.0), write_tokens_per_s=20))
     Config.save(model="n")
 
 
@@ -334,7 +353,7 @@ def test_model_recipe_prints_the_recipe_under_its_heading(home_store, monkeypatc
     assert capsys.readouterr().out.splitlines() == [
         "🍳 No model is measured yet: tinker model recipe all measures them"
     ]
-    Models.keep("n", dict(MEASURED, solved=3, quality_tasks=[1, 2, 3]))
+    Models.keep("n", quality_settings(3))
     Commands.model(["recipe"])
     out = capsys.readouterr().out.splitlines()
     assert (
@@ -342,7 +361,7 @@ def test_model_recipe_prints_the_recipe_under_its_heading(home_store, monkeypatc
         == "🍳 Model recipe, picked from 1 measured model (1 not measured: tinker model recipe all measures them)"
     )
     assert out[1:] == Models.recipe()
-    Models.keep("m", dict(MEASURED, solved=1, quality_tasks=[1, 2, 3]))
+    Models.keep("m", quality_settings(1))
     Commands.model(["recipe"])
     assert capsys.readouterr().out.splitlines()[0] == "🍳 Model recipe, picked from 2 measured models"
 
@@ -353,15 +372,28 @@ def test_model_recipe_all_measures_the_models_it_lacks_and_goes_on_past_a_failur
 ):
     picker(monkeypatch, None)
     Config.save(model="n")
-    Models.keep("n", dict(MEASURED, solved=3, quality_tasks=[1, 2, 3]))
+    Models.keep("n", quality_settings(3))
     Models.keep("m", MEASURED)
     measured = calibrating(monkeypatch, measures=False)
     Commands.model(["recipe", "all"])
     out = capsys.readouterr().out
-    assert measured == ["other", "m"] and "m was not measured: could not measure" in out
+    assert measured == ["other", "m again"] and "m was not measured: could not measure" in out
     assert "other was not measured: could not measure" in out
     assert "🍳 Model recipe, picked from 1 measured model (2 not measured" in out
     assert Config.get("model") == "n"
+
+
+@pytest.mark.spec("MOD-31")
+def test_model_recipe_all_retests_a_model_measured_with_older_tasks(home_store, monkeypatch, capsys):
+    picker(monkeypatch, None)
+    Config.save(model="n")
+    Models.keep("n", quality_settings(3))
+    Models.keep("m", MEASURED)
+    measured = calibrating(monkeypatch, measures=True)
+    Commands.model(["recipe", "all"])
+    out = capsys.readouterr().out
+    assert measured == ["other", "m again"] and Models.settings("m") == quality_settings(1)
+    assert "picked from 2 measured models (1 not measured" in out and Config.get("model") == "n"
 
 
 @pytest.mark.spec("CLI-3")

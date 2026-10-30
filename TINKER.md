@@ -58,10 +58,11 @@ Check that everything is ready (it tells you how to fix what is missing):
 tinker doctor
 ```
 
-Pull a model and use it. A model never measured is measured first, in about a minute: how fast it reads
-and writes, how much it can take in and reply, and 5 small test tasks to solve. It ends with a summary in
-plain words, exact figures in brackets, and keeps every run in its history. If the measurement fails, the
-model in use stays:
+Pull a model and use it. A model never measured is measured first, in a few minutes: how fast it reads
+and writes, how much it can take in and reply, and 8 test tasks to solve, easy to hard, the same for every
+model. Each task gets up to 3 tries in 2 minutes, and the test stops at a level where it solves neither
+task. It ends with a summary in plain words, exact figures in brackets, and keeps every run in its history.
+If the measurement fails, the model in use stays:
 
 ```sh
 ollama pull qwen3
@@ -83,7 +84,7 @@ tinker model qwen3-embedding:0.6b
 ```
 
 Leave out the name to see Ollama's models, general ones first and then embeddings, each with what was
-measured (`in use · writes ~19 words/s · reads ~225 words/s · solved 3 of 5`). Above the list, with two or
+measured (`in use · writes ~19 words/s · reads ~225 words/s · solved 5 of 8 · 1 after a retry · ~40s an answer`). Above the list, with two or
 more measured, it names the smartest and the fastest. On a terminal or typed alone in the chat, it is a select
 box (up, down, Enter, Esc) that starts at the model in use, with the unmeasured models dimmed:
 
@@ -92,15 +93,17 @@ tinker model
 tinker model calibrate
 ```
 
-See the recipe alone: the smartest model (the most tasks solved, then speed) and the fastest writer, from
-the models that solved at least one test task (`🧠 Smartest: qwen3 (solved 3 of 5 · writes ~19 words/s)`):
+See the recipe alone, from the models that solved at least one test task: the smartest model (the most tasks
+solved, then fewer retries, then the quicker answers) and the fastest (the shortest time to a correct answer),
+as `🧠 Smartest: qwen3 (solved 7 of 8 · ~80s an answer)` and `⚡ Fastest: gemma3 (~20s an answer · solved 5 of 8)`:
 
 ```sh
 tinker model recipe
 ```
 
-Measure every model never measured first, one after another, then print the recipe. It changes no model in
-use, and a failed measurement goes on to the next:
+Measure every model never measured first, one after another, then print the recipe. A model measured on
+older test tasks reruns only the test tasks and keeps its other figures. It changes no model in use, and a
+failed measurement goes on to the next:
 
 ```sh
 tinker model recipe all

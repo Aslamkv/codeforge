@@ -1,6 +1,5 @@
 import io
 import json
-import random
 import urllib.error
 import urllib.request
 
@@ -15,7 +14,8 @@ from tinkerkit.prompts import Part, Prompts, PromptTooLarge, Reply
 from tinkerkit.settings import (
     PROMPT_BUDGET_SHARE,
     QUALITY_REPLY_TOKENS,
-    QUALITY_TASK_COUNT,
+    QUALITY_TASK_SECONDS,
+    QUALITY_VERSION,
     STARTING_CHARS_PER_TOKEN,
     Config,
     Home,
@@ -120,27 +120,57 @@ def installed(monkeypatch, models, capabilities):
     monkeypatch.setattr(Ollama, "capabilities", staticmethod(capabilities.get))
 
 
-def measured(solved, write, read=300.0):
+def measured(solved, seconds=40.0, retried=0, write=40.0, read=300.0):
+    results = [
+        {"id": task, "solved": task < solved, "attempts": 2 if task < retried else 1, "seconds": seconds}
+        if task < solved
+        else {"id": task, "solved": False, "attempts": 3, "seconds": 300.0}
+        for task in range(8)
+    ]
     return dict(
-        MEASURED, solved=solved, quality_tasks=[1, 2, 3], write_tokens_per_s=write, read_tokens_per_s=read
+        MEASURED,
+        quality_version=QUALITY_VERSION,
+        quality_tasks=list(range(8)),
+        solved=solved,
+        quality_results=results,
+        write_tokens_per_s=write,
+        read_tokens_per_s=read,
     )
+
+
+def older(solved, write=40.0):
+    return dict(measured(solved, write=write), quality_version=QUALITY_VERSION - 1)
 
 
 @pytest.mark.spec("MOD-29")
 def test_rows(home_store, monkeypatch):
     installed(
         monkeypatch,
-        [{"name": "qwen3:8b"}, {"name": "nomic", "size": 274_000_000}, {"name": "llama3"}, {"name": "phi"}],
-        {"qwen3:8b": ["completion"], "nomic": ["embedding"], "llama3": ["completion"], "phi": ["completion"]},
+        [
+            {"name": "qwen3:8b"},
+            {"name": "nomic", "size": 274_000_000},
+            {"name": "llama3"},
+            {"name": "phi"},
+            {"name": "old"},
+        ],
+        {
+            "qwen3:8b": ["completion"],
+            "nomic": ["embedding"],
+            "llama3": ["completion"],
+            "phi": ["completion"],
+            "old": ["completion"],
+        },
     )
-    Models.keep("llama3", measured(2, 38.0))
+    Models.keep("llama3", measured(5, retried=1, write=38.0))
     Models.keep("phi", dict(MEASURED))
+    Models.keep("old", older(3))
     Config.save(model="llama3", embed_model="nomic")
     assert Models.rows() == [
         ("General models", HEADING),
         ("qwen3:8b  not measured yet · choosing it measures it (about a minute)", DIMMED),
-        "llama3    in use · writes ~19 words/s · reads ~150 words/s · solved 2 of 3",
-        "phi       writes ? words/s · reads ? words/s · test tasks not run · tinker model calibrate phi runs them",
+        "llama3    in use · writes ~19 words/s · reads ~150 words/s · solved 5 of 8 · 1 after a retry · ~40s an answer",
+        "phi       writes ? words/s · reads ? words/s · test tasks not run · tinker model recipe all runs them",
+        "old       writes ~20 words/s · reads ~150 words/s · test tasks not run · tinker model recipe all runs them",
         ("Embedding models", HEADING),
         "nomic     in use · 0.3 GB",
     ]
@@ -157,16 +187,16 @@ def test_rows_leave_out_a_group_with_no_model(home_store, monkeypatch):
 
 @pytest.mark.spec("MOD-30")
 @pytest.mark.parametrize(
-    "solved,tasks,text,fraction",
-    [(2, [1, 2, 3], "solved 2 of 3", 2 / 3), (3, [1, 2, 3, 4, 5], "solved 3 of 5", 0.6)],
+    "settings,text",
+    [
+        (measured(5, 40.0, retried=1), "solved 5 of 8 · 1 after a retry · ~40s an answer"),
+        (measured(3, 20.4), "solved 3 of 8 · ~20s an answer"),
+        (measured(0), "solved 0 of 8"),
+    ],
+    ids=["retried", "no-retry", "none-solved"],
 )
-def test_quality_is_solved_over_the_tasks_the_model_was_asked(solved, tasks, text, fraction):
-    settings = dict(MEASURED, solved=solved, quality_tasks=tasks)
-    assert Models.solved_text(settings) == text and Models.quality(settings) == pytest.approx(fraction)
-
-
-def unsolved(write):
-    return dict(MEASURED, write_tokens_per_s=write)
+def test_solved_text_says_the_solved_count_retries_and_answer_time(settings, text):
+    assert Models.solved_text(settings) == text
 
 
 def recipe_for(monkeypatch, settings):
@@ -179,44 +209,18 @@ def recipe_for(monkeypatch, settings):
 
 
 @pytest.mark.spec("MOD-30")
-def test_recipe_names_the_smartest_and_the_fastest(home_store, monkeypatch):
-    assert recipe_for(monkeypatch, {"a": measured(3, 40.0), "b": measured(2, 80.0)}) == [
-        "🧠 Smartest: a (solved 3 of 3 · writes ~20 words/s)",
-        "⚡ Fastest: b (writes ~40 words/s · solved 2 of 3)",
+def test_a_slow_model_that_solves_more_is_smartest_and_a_quick_one_fastest(home_store, monkeypatch):
+    assert recipe_for(monkeypatch, {"a": measured(7, 80.0), "b": measured(5, 20.0)}) == [
+        "🧠 Smartest: a (solved 7 of 8 · ~80s an answer)",
+        "⚡ Fastest: b (~20s an answer · solved 5 of 8)",
     ]
 
 
 @pytest.mark.spec("MOD-30")
-def test_the_most_solved_wins_smartest_over_a_much_faster_one(home_store, monkeypatch):
-    five = dict(measured(5, 20.0), quality_tasks=[1, 2, 3, 4, 5])
-    assert recipe_for(monkeypatch, {"b": measured(2, 80.0), "a": five}) == [
-        "🧠 Smartest: a (solved 5 of 5 · writes ~10 words/s)",
-        "⚡ Fastest: b (writes ~40 words/s · solved 2 of 3)",
-    ]
-
-
-@pytest.mark.spec("MOD-30")
-def test_more_solved_of_more_tasks_wins_smartest_over_all_of_fewer(home_store, monkeypatch):
-    five = dict(measured(4, 40.0), quality_tasks=[1, 2, 3, 4, 5])
-    assert recipe_for(monkeypatch, {"a": five, "b": measured(3, 40.0)}) == [
-        "🧠 Smartest: a (solved 4 of 5 · writes ~20 words/s)",
-        "⚡ Fastest: b (writes ~20 words/s · solved 3 of 3)",
-    ]
-
-
-@pytest.mark.spec("MOD-30")
-def test_a_smartest_tie_goes_to_the_higher_quality(home_store, monkeypatch):
-    five = dict(measured(3, 80.0), quality_tasks=[1, 2, 3, 4, 5])
-    assert recipe_for(monkeypatch, {"b": five, "a": measured(3, 20.0)}) == [
-        "🧠 Smartest: a (solved 3 of 3 · writes ~10 words/s)",
-        "⚡ Fastest: b (writes ~40 words/s · solved 3 of 5)",
-    ]
-
-
-@pytest.mark.spec("MOD-30")
-def test_a_smartest_tie_in_quality_goes_to_the_faster(home_store, monkeypatch):
-    assert recipe_for(monkeypatch, {"a": measured(3, 20.0), "b": measured(3, 40.0)}) == [
-        "🧠⚡ b is the smartest and the fastest (solved 3 of 3 · writes ~20 words/s)"
+def test_a_smartest_tie_goes_to_fewer_retries(home_store, monkeypatch):
+    assert recipe_for(monkeypatch, {"a": measured(5, 20.0, retried=2), "b": measured(5, 40.0)}) == [
+        "🧠 Smartest: b (solved 5 of 8 · ~40s an answer)",
+        "⚡ Fastest: a (~20s an answer · solved 5 of 8)",
     ]
 
 
@@ -225,68 +229,67 @@ def test_a_smartest_tie_in_quality_goes_to_the_faster(home_store, monkeypatch):
     "settings, line",
     [
         (
-            {"a": measured(1, 20.0), "b": measured(3, 80.0)},
-            "b is the smartest and the fastest (solved 3 of 3 · writes ~40",
+            {"a": measured(5, 40.0), "b": measured(5, 20.0)},
+            "b is the smartest and the fastest (solved 5 of 8 · ~20s",
         ),
         (
-            {"a": measured(2, 80.0), "c": measured(3, 80.0)},
-            "c is the smartest and the fastest (solved 3 of 3 · writes ~40",
+            {"a": measured(3, 20.0), "b": measured(5, 20.0)},
+            "b is the smartest and the fastest (solved 5 of 8 · ~20s",
         ),
         (
-            {"d": measured(3, 20.0), "e": measured(3, 80.0)},
-            "e is the smartest and the fastest (solved 3 of 3 · writes ~40",
+            {"a": measured(5, 20.0), "b": measured(5, 20.0)},
+            "a is the smartest and the fastest (solved 5 of 8 · ~20s",
         ),
-        (
-            {"a": measured(2, 20.0), "b": measured(2, 20.0)},
-            "a is the smartest and the fastest (solved 2 of 3 · writes ~10",
-        ),
+        ({"a": measured(2, 30.0)}, "a is the smartest and the fastest (solved 2 of 8 · ~30s"),
     ],
-    ids=["one-model", "speed-tie-by-quality", "quality-tie-by-speed", "full-tie-by-ollama-order"],
+    ids=["smartest-tie-by-answer-time", "fastest-tie-by-solved", "full-tie-by-ollama-order", "one-model"],
 )
 def test_recipe_says_one_line_for_a_model_both_smartest_and_fastest(home_store, monkeypatch, settings, line):
-    assert recipe_for(monkeypatch, settings) == [f"🧠⚡ {line} words/s)"]
+    assert recipe_for(monkeypatch, settings) == [f"🧠⚡ {line} an answer)"]
 
 
 @pytest.mark.spec("MOD-30")
-@pytest.mark.parametrize("other", [unsolved(80.0), measured(0, 80.0)], ids=["never-ran", "solved-none"])
+@pytest.mark.parametrize(
+    "other",
+    [dict(MEASURED, write_tokens_per_s=80.0), older(8, 80.0), measured(0, write=80.0)],
+    ids=["never-ran", "older-test", "solved-none"],
+)
 def test_only_a_model_that_solved_a_task_is_picked(home_store, monkeypatch, other):
     assert recipe_for(monkeypatch, {"a": measured(1, 20.0), "b": other}) == [
-        "🧠⚡ a is the smartest and the fastest (solved 1 of 3 · writes ~10 words/s)"
+        "🧠⚡ a is the smartest and the fastest (solved 1 of 8 · ~20s an answer)"
     ]
 
 
 @pytest.mark.spec("MOD-30")
 def test_with_no_model_solving_a_task_the_fastest_writer_alone(home_store, monkeypatch):
-    assert recipe_for(monkeypatch, {"c": unsolved(20.0), "d": measured(0, 80.0)}) == [
-        "⚡ Fastest: d (writes ~40 words/s)"
-    ]
+    settings = {"c": measured(0, write=20.0), "d": measured(0, write=80.0), "e": older(3, 200.0)}
+    assert recipe_for(monkeypatch, settings) == ["⚡ Fastest: d (writes ~40 words/s)"]
 
 
 @pytest.mark.spec("MOD-30")
 def test_the_recipe_needs_one_measured_model(home_store, monkeypatch):
     assert recipe_for(monkeypatch, {}) == []
+    assert recipe_for(monkeypatch, {"a": older(3)}) == []
     assert recipe_for(monkeypatch, {"a": measured(3, 20.0)})[0].startswith("🧠⚡ a is the smartest")
 
 
 @pytest.mark.spec("MOD-30")
 def test_the_shown_recipe_needs_two_measured_models(home_store, monkeypatch):
-    recipe_for(monkeypatch, {"a": measured(3, 20.0)})
+    recipe_for(monkeypatch, {"a": measured(3, 20.0), "b": older(5)})
     assert Models.shown_recipe() == []
     recipe_for(monkeypatch, {"a": measured(3, 20.0), "b": measured(1, 40.0)})
     assert Models.shown_recipe() == Models.recipe() != []
 
 
 @pytest.mark.spec("MOD-31")
-def test_unmeasured_names_general_models_never_measured_or_without_solved(home_store, monkeypatch):
-    without_solved = {key: value for key, value in measured(3, 20.0).items() if key != "solved"}
-    recipe_for(monkeypatch, {"a": measured(3, 20.0), "b": without_solved})
-    assert Models.unmeasured() == ["b", "unmeasured"]
+def test_unmeasured_names_general_models_never_measured_or_with_an_older_test(home_store, monkeypatch):
+    recipe_for(monkeypatch, {"a": measured(3, 20.0), "b": older(3), "c": dict(MEASURED)})
+    assert Models.unmeasured() == ["b", "c", "unmeasured"]
 
 
 @pytest.mark.spec("MOD-31")
-def test_measured_names_only_models_with_a_solved_count(home_store, monkeypatch):
-    without_solved = {key: value for key, value in measured(3, 20.0).items() if key != "solved"}
-    recipe_for(monkeypatch, {"a": measured(3, 20.0), "b": without_solved})
+def test_measured_names_only_models_that_ran_the_current_test(home_store, monkeypatch):
+    recipe_for(monkeypatch, {"a": measured(3, 20.0), "b": older(3), "c": dict(MEASURED)})
     assert [name for name, _ in Models.measured()] == ["a"]
 
 
@@ -662,19 +665,30 @@ def test_calibrate_writes_the_measured_settings(fake_ollama, monkeypatch, no_sle
     )
     fake_ollama.reply({"content": "OK", "prompt_eval_count": 400, "eval_count": 2, "eval_duration": 1e8})
     answers = {task["prompt"]: task["answer"] for task in quality.tasks()}
-    fake_ollama.reply(lambda messages: answers[messages[0]["content"]], times=2)
-    fake_ollama.reply("not the answer", times=3)
-    drawn = [task["id"] for task in quality.pick(QUALITY_TASK_COUNT, random.Random(5))]
-    settings = Calibrator("m", random.Random(5)).run()
+    fake_ollama.reply(
+        lambda messages: {"content": answers[messages[0]["content"]], "total_duration": 3e9}, times=2
+    )
+    fake_ollama.reply("not the answer", times=6)
+    ids = [task["id"] for tier in quality.tiers() for task in tier]
+    settings = Calibrator("m").run()
     saved = Models.settings("m")
     assert saved == settings and Home.store().get("models", "m") == settings
     assert saved["max_prompt_tokens"] == 13653 and saved["max_reply_tokens"] == 27307
     assert saved["fix_max_tokens"] == 4096 and saved["num_ctx"] == 40960 and saved["think"] == "high"
     assert saved["probes"] == [[2048, "read"]] and 2.0 <= saved["chars_per_token"] <= 4.0
-    assert saved["solved"] == 2 and saved["quality_tasks"] == drawn
-    asked = fake_ollama.calls[-QUALITY_TASK_COUNT:]
+    assert (
+        saved["solved"] == 2 and saved["quality_tasks"] == ids and saved["quality_version"] == QUALITY_VERSION
+    )
+    assert saved["quality_results"] == [
+        {"id": ids[0], "solved": True, "attempts": 1, "seconds": 3.0},
+        {"id": ids[1], "solved": True, "attempts": 1, "seconds": 3.0},
+        {"id": ids[2], "solved": False, "attempts": 3, "seconds": 0.0},
+        {"id": ids[3], "solved": False, "attempts": 3, "seconds": 0.0},
+    ]
+    asked = fake_ollama.calls[-8:]
     assert all(call["think"] == "high" for call in asked)
-    assert all(call["options"] == {"num_ctx": 40960, "num_predict": QUALITY_REPLY_TOKENS} for call in asked)
+    first_try = {"num_ctx": 40960, "num_predict": int(QUALITY_TASK_SECONDS * saved["write_tokens_per_s"])}
+    assert all(call["options"] == first_try for call in asked)
     assert [dict(entry.entry, time=None) for entry in Home.store().entries("calibrations")] == [
         dict(settings, time=None)
     ]
@@ -686,10 +700,11 @@ def test_calibrate_writes_the_measured_settings(fake_ollama, monkeypatch, no_sle
         "m needs 5 GB (weights); this machine's GPU can use 20 GB",
         f"Checking it can read about {Calibrator.words(2048, ratio)} words at once (2,048 tokens, about",
         "Read it in 2s",
-        "Solving 5 small test tasks…",
-        f"✅ Task {drawn[0]}",
-        f"❌ Task {drawn[2]}",
-        "Solved 2 of 5",
+        "Solving 8 test tasks, easy to hard, up to 2 minutes each…",
+        f"✅ Task {ids[0]} (1 attempt, 3s)",
+        f"❌ Task {ids[2]} (3 attempts, 0s)",
+        "Stopped after tier 2: neither task solved",
+        "Solved 2 of 8",
     ):
         assert line in out
     assert (
@@ -698,7 +713,7 @@ def test_calibrate_writes_the_measured_settings(fake_ollama, monkeypatch, no_sle
         f"   ✍️ Writes about {Calibrator.words(write, ratio)} words a second ({write:g} tok/s)\n"
         f"   📥 Takes requests up to about {Calibrator.words(13653, ratio)} words (13,653 tokens)\n"
         f"   📤 Replies up to about {Calibrator.words(27307, ratio)} words (27,307 tokens)\n"
-        "   🧠 Solved 2 of 5 test tasks\n"
+        "   🧠 Solved 2 of 8 test tasks (~3s an answer)\n"
         "   💭 Thinks before it answers (think: high)\n"
     ) in out
     assert all(len(line) <= 80 for line in out.splitlines() if "Testing" not in line)
@@ -723,6 +738,7 @@ def test_a_model_that_does_not_think_says_so_and_an_unmeasured_speed_is_a_questi
         "max_reply_tokens": 4096,
         "solved": 0,
         "quality_tasks": [1, 2, 3],
+        "quality_results": [],
     }
     summary = Calibrator("m").summary(settings)
     assert "📖 Reads ? words a second (? tok/s)" in summary and "(12.5 tok/s)" in summary
@@ -737,12 +753,103 @@ def test_speed_text(tokens_per_s, text):
 
 @pytest.mark.spec("MOD-27")
 def test_a_reply_cut_off_before_an_answer_fails_its_task(fake_ollama):
-    answers = {task["prompt"]: task["answer"] for task in quality.tasks()}
-    fake_ollama.reply({"content": "", "thinking": "Let me", "done_reason": "length"})
-    fake_ollama.reply(lambda messages: answers[messages[0]["content"]], times=2)
+    task = quality.tiers()[0][0]
+    fake_ollama.reply({"content": task["answer"], "done_reason": "length"})
     fake_ollama.reply("not the answer", times=2)
-    probe = Calibrator("m", random.Random(3)).quality(True, 8192)
-    assert probe["solved"] == 2 and len(probe["quality_tasks"]) == QUALITY_TASK_COUNT
+    result = Calibrator("m").solve_task(task, True, 8192, None)
+    assert result == {"id": task["id"], "solved": False, "attempts": 3, "seconds": 0.0}
+    assert all(call["options"]["num_predict"] == QUALITY_REPLY_TOKENS for call in fake_ollama.calls)
+
+
+@pytest.mark.spec("MOD-27")
+def test_a_wrong_answer_is_asked_again_in_the_same_chat(fake_ollama):
+    task = quality.tiers()[1][0]
+    fake_ollama.reply({"content": "not the answer", "total_duration": 10e9})
+    fake_ollama.reply({"content": task["answer"], "total_duration": 5e9})
+    result = Calibrator("m").solve_task(task, "high", 8192, 10.0)
+    assert result == {"id": task["id"], "solved": True, "attempts": 2, "seconds": 15.0}
+    assert fake_ollama.calls[1]["messages"] == [
+        {"role": "user", "content": task["prompt"]},
+        {"role": "assistant", "content": "not the answer"},
+        {"role": "user", "content": "That answer is wrong. Check your work and answer again."},
+    ]
+    assert [call["options"]["num_predict"] for call in fake_ollama.calls] == [1200, 1100]
+
+
+@pytest.mark.spec("MOD-27")
+def test_a_task_stops_when_its_seconds_run_out(fake_ollama):
+    task = quality.tiers()[0][0]
+    fake_ollama.reply({"content": "not the answer", "total_duration": 100e9})
+    fake_ollama.reply({"content": "not the answer", "total_duration": 19.5e9})
+    result = Calibrator("m").solve_task(task, None, 8192, 10.0)
+    assert result == {"id": task["id"], "solved": False, "attempts": 2, "seconds": 119.5}
+    assert [call["options"]["num_predict"] for call in fake_ollama.calls] == [1200, 200]
+
+
+@pytest.mark.spec("MOD-27")
+@pytest.mark.spec("MOD-28")
+def test_the_probe_stops_after_a_tier_with_neither_task_solved(fake_ollama, capsys):
+    fake_ollama.reply("not the answer", times=6)
+    probe = Calibrator("m").quality(None, 8192, None)
+    assert probe["solved"] == 0 and len(probe["quality_tasks"]) == 8 and len(probe["quality_results"]) == 2
+    assert len(fake_ollama.calls) == 6
+    assert "Stopped after tier 1: neither task solved" in capsys.readouterr().out
+
+
+@pytest.mark.spec("MOD-31")
+def test_retest_reruns_only_the_quality_probe_and_keeps_the_other_settings(fake_ollama, tinker_home, capsys):
+    Models.keep("m", dict(MEASURED, write_tokens_per_s=10, quality_version=0, solved=5))
+    fake_ollama.reply("not the answer", times=6)
+    settings = Calibrator("m").retest()
+    saved = Models.settings("m")
+    assert saved == settings and saved == dict(saved, **MEASURED, write_tokens_per_s=10)
+    assert saved["quality_version"] == QUALITY_VERSION and saved["solved"] == 0
+    assert len(saved["quality_tasks"]) == 8 and len(saved["quality_results"]) == 2
+    assert all(call["think"] == "high" for call in fake_ollama.calls)
+    assert all(call["options"]["num_ctx"] == MEASURED["num_ctx"] for call in fake_ollama.calls)
+    assert fake_ollama.calls[0]["options"]["num_predict"] == int(QUALITY_TASK_SECONDS * 10)
+    assert fake_ollama.unloaded[-1] == "m"
+    out = capsys.readouterr().out
+    assert "Testing m again on the current test tasks" in out
+    assert "✅ m is ready\n   🧠 Solved 0 of 8 test tasks" in out and "📖" not in out
+
+
+@pytest.mark.spec("MOD-28")
+@pytest.mark.spec("MOD-30")
+@pytest.mark.parametrize(
+    "results,line",
+    [
+        ([{"solved": False, "attempts": 3, "seconds": 9.0}], "🧠 Solved 0 of 8 test tasks\n"),
+        (
+            [
+                {"solved": True, "attempts": 1, "seconds": 30.0},
+                {"solved": True, "attempts": 1, "seconds": 49.0},
+            ],
+            "🧠 Solved 2 of 8 test tasks (~40s an answer)\n",
+        ),
+        (
+            [
+                {"solved": True, "attempts": 2, "seconds": 30.0},
+                {"solved": False, "attempts": 3, "seconds": 99.0},
+            ],
+            "🧠 Solved 1 of 8 test tasks (1 after a retry, ~30s an answer)\n",
+        ),
+    ],
+    ids=["none-solved", "no-retries", "with-a-retry"],
+)
+def test_the_summary_tells_retries_and_answer_time(results, line):
+    settings = {
+        "think": None,
+        "chars_per_token": 4.0,
+        "read_tokens_per_s": 10.0,
+        "write_tokens_per_s": 12.5,
+        "max_prompt_tokens": 2048,
+        "max_reply_tokens": 4096,
+        "solved": sum(result["solved"] for result in results),
+        "quality_tasks": list(range(8)),
+        "quality_results": results,
+    }
+    assert line in Calibrator("m").summary(settings)
 
 
 @pytest.mark.spec("MOD-16")

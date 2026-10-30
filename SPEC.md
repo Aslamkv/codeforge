@@ -633,19 +633,28 @@ What is said in the chats, kept so that a chat is only a view of it.
   with whether it was measured. It ends with `SystemExit` when Ollama does not answer, as `tinker model` does.
   `Models.embedding_choices()` gives the names of the ones that embed: their `capabilities` from Ollama's
   `/api/show` hold `embedding`, or Ollama gives none for them.
-- **MOD-27** Calibration's quality probe asks the model `QUALITY_TASK_COUNT` (5) tasks drawn at random from
-  `tinkerkit/quality_tasks.json`: 100 short tasks (a code's output, a bug's line, small arithmetic and logic
-  word problems, an exact-format reply), each with one fixed answer. Each is asked with the think setting
-  calibration found and `num_predict` `QUALITY_REPLY_TOKENS` (2048); a reply cut off before an answer fails.
-  A reply solves its task when it equals the answer after both are stripped, lowercased and freed of trailing
-  punctuation, quotes and backticks; no code is run. The settings keep `solved` (a count) and `quality_tasks`
-  (the ids drawn).
+- **MOD-27** Calibration's quality probe asks every model the same tasks of `tinkerkit/quality_tasks.json`:
+  8 short tasks in 4 tiers of 2, easy to hard (tier 1 a one-step code output or word problem; tier 4 a
+  many-step trace, a subtle bug in a longer function or a many-step logic puzzle), each with an `id`, a `tier`,
+  a `prompt` and one fixed `answer`. Tiers go in order; once a model solves neither task of a tier, the probe
+  stops and the later tasks count as not solved. A task allows `QUALITY_ATTEMPTS` (3) attempts in one chat:
+  after a wrong reply it adds `That answer is wrong. Check your work and answer again.` and asks again. A task
+  has `QUALITY_TASK_SECONDS` (120) in all: each attempt is asked with the think setting calibration found and
+  `num_predict` the seconds left times the measured write speed in tokens a second (`QUALITY_REPLY_TOKENS`,
+  2048, when that speed is unknown); a task's seconds are the sum of its replies' `total_duration`, and no
+  attempt starts with no second left. A reply cut off before an answer is a wrong attempt. A reply solves its
+  task when it equals the answer after both are stripped, lowercased and freed of trailing punctuation, quotes
+  and backticks; no code is run. The settings keep `quality_version` (`QUALITY_VERSION`, 2: a changed task
+  set or scoring raises it), `quality_tasks` (every task's id), `solved` (a count) and `quality_results`, one
+  `{id, solved, attempts, seconds}` per task asked.
 - **MOD-28** Calibration speaks in plain words, with an emoji per line and exact figures in brackets; no line
   is long. Words are `tokens × chars_per_token / 6`, rounded. It says the title "Testing NAME on this machine
   (once per model, about a minute)", whether the weights fit ("NAME needs 18 GB (weights); this machine's GPU
   can use 24 GB"), each read probe ("Checking it can read about 6,000 words at once (8,192 tokens, about
   12s)…", then "Read it in 10s", "Too much for this machine (ERROR)" or "Read it in smaller pieces (num_batch
-  256)"), "Solving 5 small test tasks…" with ✅ or ❌ per task and "Solved 4 of 5", and ends with one
+  256)"), "Solving 8 test tasks, easy to hard, up to 2 minutes each…" with ✅ or ❌ per task as `Task
+  reason-15 (2 attempts, 34s)` (`1 attempt` in the singular), "Stopped after tier 3: neither task solved" when
+  the probe stops, and "Solved 5 of 8", and ends with one
   multi-line message, so a channel shows all of it (**CNV-18**):
   ```
   ✅ NAME is ready
@@ -653,37 +662,43 @@ What is said in the chats, kept so that a chat is only a view of it.
      ✍️ Writes about 19 words a second (25.1 tok/s)
      📥 Takes requests up to about 8,000 words (10,922 tokens)
      📤 Replies up to about 16,000 words (21,846 tokens)
-     🧠 Solved 4 of 5 test tasks
+     🧠 Solved 5 of 8 test tasks (1 after a retry, ~40s an answer)
      💭 Thinks before it answers (think: high)
   ```
-  An unmeasured speed is `?`.
+  An unmeasured speed is `?`. The brackets after the solved count are **MOD-30**'s retry and answer-time
+  facts, left out when there are none.
 - **MOD-29** `Models.rows()` gives `tinker model`'s list: a heading `General models` with a row for each model
   of `Models.choices()`, then `Embedding models` with one for each of `Models.embedding_choices()`, a group with
   no model left out. A row is the name, then facts in plain words, with no adjectives: a measured model
-  `in use · writes ~19 words/s · reads ~225 words/s · solved 2 of 3` (`in use ·` only for the model in use,
-  words as **MOD-28** counts them, an unmeasured speed `?`; one with no `solved` count never ran the test tasks,
-  and says `test tasks not run · tinker model calibrate NAME runs them` in place of `solved ? of ?`), one never measured
+  `in use · writes ~19 words/s · reads ~225 words/s · solved 5 of 8 · 1 after a retry · ~40s an answer`
+  (`in use ·` only for the model in use, words as **MOD-28** counts them, an unmeasured speed `?`, the solved
+  facts as **MOD-30** says them; one whose `quality_version` is not `QUALITY_VERSION` never ran the current
+  test tasks, and says `test tasks not run · tinker model recipe all runs them` in their place), one never measured
   `not measured yet · choosing it measures it (about a minute)`, an embedding model `in use · 0.3 GB` (its
   size; `in use ·` for the embedding model).
 - **MOD-30** `Models.recipe()` gives the recipe lines, so the person sees what to pick, from the measured models
-  that do not embed. A model's quality is its `solved` count over the tasks it was asked (its `quality_tasks`,
-  so a model measured with 3 tasks compares with one measured with 5; `solved N of M` says the same M), and its
-  speed is its write speed over the fastest writer's. The picks come from the models that solved at least one
-  task: the smartest solved the most tasks, so 5 of 5 beats 3 of 3 and a faster 2 of 3 (a tie: the higher
-  quality, then the faster writer, then Ollama's order); the fastest is the fastest writer (a tie: the higher
-  quality, then Ollama's order). The lines are
-  `🧠 Smartest: NAME (solved 3 of 5 · writes ~19 words/s)` and `⚡ Fastest: NAME (writes ~40 words/s · solved 2 of 5)`;
-  when one model is both, the one line `🧠⚡ NAME is the smartest and the fastest (solved 3 of 5 · writes ~40 words/s)`.
+  that do not embed. Every measured model was asked the same tasks (**MOD-27**), so its facts compare as they
+  are: its solved count, its retries (the solved tasks that took more than one attempt) and its answer time
+  (the mean seconds of its solved tasks). They read `solved 5 of 8 · 1 after a retry · ~40s an answer`, the
+  retries left out when none, the answer time when nothing was solved. The picks come from the models that
+  solved at least one task: the smartest solved the most tasks (a tie: fewer retries, then the shorter answer
+  time, then Ollama's order), so a slow model that solves 7 beats a quick one that solves 5; the fastest has
+  the shortest answer time (a tie: more solved, then Ollama's order), so a correct answer counts, not a fast
+  wrong one. The lines are
+  `🧠 Smartest: NAME (solved 7 of 8 · ~80s an answer)` and `⚡ Fastest: NAME (~20s an answer · solved 5 of 8)`;
+  when one model is both, the one line `🧠⚡ NAME is the smartest and the fastest (solved 7 of 8 · ~20s an answer)`.
   With no model that solved a task, the fastest writer of them all alone, as `⚡ Fastest: NAME (writes ~40 words/s)`.
   `tinker model`'s list shows the recipe above its rows when two or more models are measured.
 - **MOD-31** `tinker model recipe` prints the recipe (**MOD-30**) under the heading
   `🍳 Model recipe, picked from 4 measured models`, with ` (2 not measured: tinker model recipe all measures them)`
-  when models that do not embed were never measured or have no `solved` count. A measured model is one with a
-  `solved` count, so each model counts once; one measured model is enough.
+  when models that do not embed were never measured or ran an older test. A measured model is one whose
+  `quality_version` is `QUALITY_VERSION`, so each model counts once; one measured model is enough.
   With none measured, it prints `🍳 No model is measured yet: tinker model recipe all measures them`.
-  `tinker model recipe all` first measures each of those models, one after another, as `model calibrate NAME`
-  does (**MOD-28**), changing no model in use; a failed measurement says so and the next one goes on. Then it
-  prints the recipe.
+  `tinker model recipe all` first measures each of those models, one after another, changing no model in use; a
+  failed measurement says so and the next one goes on. A model never calibrated is measured as `model calibrate
+  NAME` does (**MOD-28**); one calibrated with an older test reruns only the quality probe (**MOD-27**) with its
+  kept think setting, `num_ctx` and write speed, under the title "Testing NAME again on the current test
+  tasks", keeps its other settings and ends with `✅ NAME is ready` and its 🧠 line. Then it prints the recipe.
 
 ## project (PRJ)
 
