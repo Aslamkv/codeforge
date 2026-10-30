@@ -1122,7 +1122,7 @@ def replied_command(reply):
     return line if "\n" not in line and line.startswith("/") and command_of(line) else ""
 
 
-SAID_FILLER = ("the", "my", "please", "can", "could", "would", "you", "tinker", "a", "an", "me", "now", "just")
+SAID_FILLER = tuple("the my please can could would you tinker a an me now just".split())
 
 
 def said_command(text):
@@ -1256,7 +1256,7 @@ class Talk:
             daemon=True,
         ).start()
 
-    def answering(self, channel, message, now, waiting, write_reply, on_shown, on_command=None):
+    def answering(self, channel, message, now, waiting, write_reply, on_shown, on_command):
         running, written, reply = now(), threading.Event(), []
         asked = (channel, message, self.context(running, waiting), CHAT_MAX_REPLY_TOKENS)
         threading.Thread(target=self.write, args=(write_reply, asked, reply, written), daemon=True).start()

@@ -193,7 +193,7 @@ def test_command_of(text, command):
     assert command_of(text, Desk.COMMANDS) == command
 
 
-@pytest.mark.spec("CNV-6")
+@pytest.mark.spec("CNV-5")
 def test_said_command_gives_a_fixed_phrase_of_a_chat_command_as_slash():
     for said in ("clear chat", "status", "jobs running", "model recipe all", "exercise status"):
         assert conversation.said_command(said) == f"/{said}"
@@ -209,6 +209,7 @@ def test_said_filler_holds_no_word_of_a_phrase():
     assert not words & set(conversation.SAID_FILLER)
 
 
+@pytest.mark.spec("CNV-6")
 def test_said_writes_tinker_before_a_command_as_slash():
     for channel in (Recorder(), ConsoleChannel()):
         assert (
@@ -1916,7 +1917,9 @@ def test_a_slash_word_that_names_no_command_is_only_answered(desk, monkeypatch):
     desk, channel, _ = desk
     heard = []
     monkeypatch.setattr(desk, "answer", lambda message, channel: heard.append(message.text))
-    monkeypatch.setattr(desk.talk, "answer", lambda channel, message, *rest, **kwargs: heard.append(message.text))
+    monkeypatch.setattr(
+        desk.talk, "answer", lambda channel, message, *rest, **kwargs: heard.append(message.text)
+    )
     say(desk, channel, "/frobnicate the build")
     assert heard == [] and channel.texts()[-1] == "❓ No command /frobnicate: /help lists them"
     say(desk, channel, "status of my build")
