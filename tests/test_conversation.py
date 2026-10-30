@@ -1182,6 +1182,42 @@ def test_the_banner_names_tinker_the_model_the_projects_folder_and_the_chats(mon
     assert len(alone.banner_lines()) == 4
 
 
+@pytest.mark.spec("CNV-8", "CHN-12")
+def test_the_terminal_banner_shows_each_chat_with_its_state_and_a_chat_banner_names_it_only(
+    desk, monkeypatch
+):
+    monkeypatch.setattr(conversation.Config, "get", lambda key: None)
+    console, telegram, stateless, drawn = ConsoleChannel(), Recorder("Telegram"), Recorder("rec"), []
+    telegram.state = "connecting…"
+    monkeypatch.setattr(console, "banner", lambda lines: drawn.append(list(lines)))
+    listening = Desk([console, telegram, stateless], Path.cwd())
+    listening.said_status = "🟢 **Tinker** · idle"
+    listening.open_banner()
+    assert "chats Telegram · connecting…, rec" in drawn[0]
+    assert "chats Telegram, rec" in listening.banner_lines()
+    listening.start_chat(telegram)
+    assert any("chats Telegram, rec" in text and "connecting" not in text for text in telegram.texts("send"))
+
+
+@pytest.mark.spec("CNV-8", "CHN-12")
+def test_a_chat_state_that_changes_after_the_banner_prints_a_dimmed_line_and_draws_no_banner(
+    desk, monkeypatch
+):
+    terminal = colour_terminal(monkeypatch, 80)
+    console, telegram, drawn = ConsoleChannel(), Recorder("Telegram"), []
+    telegram.state = "connecting…"
+    monkeypatch.setattr(console, "banner", lambda lines: drawn.append(list(lines)))
+    listening = Desk([console, telegram], Path.cwd())
+    listening.open_banner()
+    listening.say_state_changes()
+    telegram.state = "connected (IPv4)"
+    listening.say_state_changes()
+    listening.say_state_changes()
+    shown = terminal.getvalue()
+    assert "connecting…" not in shown and shown.count("Telegram · connected (IPv4)") == 1
+    assert f"{DIM}Telegram · connected (IPv4)" in shown and len(drawn) == 1
+
+
 @pytest.mark.spec("CNV-8")
 def test_the_conversation_opens_with_the_banner_before_the_status(monkeypatch):
     terminal = colour_terminal(monkeypatch, 80)
@@ -2062,42 +2098,6 @@ def test_the_status_is_sent_anew_as_tinker_starts_and_the_goodbye_is_handed_on(d
     }
     assert handed == [(["channel", "goodbye"], goodbye, subprocess.DEVNULL)]
     channel.claimed.close()
-
-
-@pytest.mark.spec("CHN-11")
-def test_each_chat_channel_finds_its_route_once_as_tinker_starts(desk, home_store, monkeypatch):
-    monkeypatch.setattr(conversation, "ENDED_LOOK_SECONDS", 0.05)
-    goodbyes_handed(monkeypatch)
-    channel = Listening("bot", inbox=[Message("1", "/exit", id=1), Message("1", "/confirm", id=2)])
-    found = threading.Event()
-    finds = []
-
-    def find_route():
-        finds.append(True)
-        found.set()
-        raise OSError("no route")
-
-    channel.find_route = find_route
-    Desk([channel], Path.cwd()).run()
-    assert found.wait(1) and finds == [True] and channel.closed
-    channel.claimed.close()
-
-
-@pytest.mark.spec("CHN-11")
-def test_routes_are_found_for_chat_channels_only_and_a_failing_one_does_not_stop_the_rest():
-    failing, chat, console = Recorder(), Recorder(), ConsoleChannel()
-    finds = []
-
-    def fails():
-        finds.append("failing")
-        raise OSError("no route")
-
-    failing.find_route = fails
-    chat.find_route = lambda: finds.append("chat")
-    console.find_route = lambda: finds.append("console")
-    Desk([failing, chat, console], Path.cwd()).find_routes()
-    assert finds == ["failing", "chat"]
-    assert Recorder().find_route() is None
 
 
 @pytest.mark.spec("CNV-9")

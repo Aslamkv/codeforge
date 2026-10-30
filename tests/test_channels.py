@@ -5,6 +5,7 @@ import socket
 import stat
 import sys
 import time
+import types
 import urllib.parse
 
 import pytest
@@ -23,16 +24,16 @@ class BotAPI:
             name: list(value) if isinstance(value, list) else [value] for name, value in answers.items()
         }
         self.calls, self.headers_and_bodies = [], []
+        self.family = socket.AF_INET
 
     def connection(self, wait):
         return Connection(self)
 
 
 class Connection:
-    sock = None
-
     def __init__(self, api):
         self.api, self.response, self.closed = api, None, False
+        self.sock = types.SimpleNamespace(family=api.family)
 
     def request(self, method, path, data, headers):
         name = path.rsplit("/", 1)[1]
@@ -70,17 +71,16 @@ def keep_a_disabled_bot():
 
 
 class Sockets:
-    def __init__(self, monkeypatch, ipv6=(("2001:db8::1", 443, 0, 0),), connects=()):
-        self.ipv6, self.connects, self.tries, self.closed = list(ipv6), list(connects), [], 0
+    def __init__(self, monkeypatch, connects=()):
+        self.connects, self.tries, self.timeouts, self.closed = list(connects), [], [], 0
         monkeypatch.setattr(socket, "getaddrinfo", self.getaddrinfo)
         monkeypatch.setattr(socket, "create_connection", self.create_connection)
 
     def getaddrinfo(self, host, port, family=0, kind=0):
-        if family == socket.AF_INET:
-            return [(socket.AF_INET, socket.SOCK_STREAM, 6, "", ("192.0.2.1", port))]
-        if not self.ipv6:
-            raise socket.gaierror("no IPv6 address")
-        return [(socket.AF_INET6, socket.SOCK_STREAM, 6, "", address) for address in self.ipv6]
+        return [
+            (socket.AF_INET6, socket.SOCK_STREAM, 6, "", ("2001:db8::1", port, 0, 0)),
+            (socket.AF_INET, socket.SOCK_STREAM, 6, "", ("192.0.2.1", port)),
+        ]
 
     def create_connection(self, address, timeout=None, source_address=None):
         self.tries.append((address, timeout))
@@ -88,50 +88,103 @@ class Sockets:
             raise TimeoutError("timed out")
         return self
 
-    def __enter__(self):
-        return self
-
-    def __exit__(self, *exception):
-        self.close()
+    def settimeout(self, timeout):
+        self.timeouts.append(timeout)
 
     def close(self):
         self.closed += 1
 
+    def timeout(self):
+        return self.timeouts[-1] if self.timeouts else self.tries[-1][1]
+
+
+class Handshakes:
+    def __init__(self, sockets, shakes=()):
+        self.sockets, self.shakes, self.timeouts = sockets, list(shakes), []
+
+    def wrap_socket(self, sock, server_hostname=None):
+        self.timeouts.append(self.sockets.timeout())
+        if self.shakes and not self.shakes.pop(0):
+            raise TimeoutError("_ssl.c:1129: The handshake operation timed out")
+        return sock
+
+
+def connected(monkeypatch, wait, sockets, shakes=()):
+    connection = TelegramChannel("bot", {"allowed": ["42"]}, {"token": "T0K"}).connection(wait)
+    handshakes = Handshakes(sockets, shakes)
+    monkeypatch.setattr(connection, "context", handshakes)
+    connection.connect()
+    return connection, handshakes
+
 
 @pytest.mark.spec("CHN-11")
-def test_a_host_whose_ipv6_connects_every_try_is_reached_over_any_address(monkeypatch, home_store):
+def test_a_telegram_connection_whose_first_address_hangs_falls_to_the_next_within_connect_seconds(
+    monkeypatch,
+):
+    sockets = Sockets(monkeypatch, connects=[False, True])
+    connection, _ = connected(monkeypatch, 5, sockets)
+    assert connection.sock is sockets
+    assert sockets.tries == [
+        (("2001:db8::1", 443), channels.CONNECT_SECONDS),
+        (("192.0.2.1", 443), channels.CONNECT_SECONDS),
+    ]
+    assert channels.CONNECT_SECONDS == 1
+
+
+@pytest.mark.spec("CHN-11")
+def test_a_telegram_connection_whose_first_handshake_hangs_falls_to_the_next_address(monkeypatch):
     sockets = Sockets(monkeypatch)
-    channels.Route.find("api.telegram.org")
-    assert home_store.get("routes", "api.telegram.org") == "any"
-    assert sockets.tries == [(("2001:db8::1", 443), channels.ROUTE_SECONDS)] * channels.ROUTE_TRIES
-    assert sockets.closed == channels.ROUTE_TRIES
+    connection, handshakes = connected(monkeypatch, 30, sockets, shakes=[False, True])
+    assert [address for address, _ in sockets.tries] == [("2001:db8::1", 443), ("192.0.2.1", 443)]
+    assert handshakes.timeouts == [channels.CONNECT_SECONDS, channels.CONNECT_SECONDS]
+    assert sockets.closed == 1 and connection.sock is sockets
 
 
 @pytest.mark.spec("CHN-11")
-def test_a_host_whose_ipv6_fails_a_try_is_kept_to_ipv4(monkeypatch, home_store):
-    Sockets(monkeypatch, connects=[True, False])
-    TelegramChannel("bot", {"allowed": ["42"]}, {"token": "T0K"}).find_route()
-    assert home_store.get("routes", TelegramChannel.HOST) == "ipv4"
-
-
-@pytest.mark.spec("CHN-11")
-def test_a_host_without_ipv6_is_reached_over_any_address(monkeypatch, home_store):
-    sockets = Sockets(monkeypatch, ipv6=())
-    channels.Route.find("api.telegram.org")
-    assert home_store.get("routes", "api.telegram.org") == "any" and sockets.tries == []
-
-
-@pytest.mark.spec("CHN-11")
-def test_a_telegram_connection_goes_over_ipv4_only_while_its_host_is_kept_to_it(monkeypatch, home_store):
+def test_a_telegram_connection_answers_within_the_calls_own_wait(monkeypatch):
     sockets = Sockets(monkeypatch)
-    channel = TelegramChannel("bot", {"allowed": ["42"]}, {"token": "T0K"})
-    assert channel.connection(5)._create_connection is not channels.Route.ipv4_connection
-    home_store.put("routes", TelegramChannel.HOST, "ipv4")
-    connection = channel.connection(5)
-    assert connection._create_connection((TelegramChannel.HOST, 443), 5, None) is sockets
-    assert sockets.tries == [(("192.0.2.1", 443), 5)]
-    home_store.put("routes", TelegramChannel.HOST, "any")
-    assert channel.connection(5)._create_connection is not channels.Route.ipv4_connection
+    connection, _ = connected(monkeypatch, 30, sockets)
+    assert sockets.timeouts == [30] and connection.timeout == 30
+
+
+@pytest.mark.spec("CHN-11")
+def test_a_telegram_connection_fails_when_no_address_connects(monkeypatch):
+    Sockets(monkeypatch, connects=[False, False])
+    with pytest.raises(TimeoutError):
+        channels.connect_by_address((TelegramChannel.HOST, 443), None, 5)
+
+
+@pytest.mark.spec("CHN-12")
+def test_a_telegram_chat_is_connecting_until_its_first_call_ends():
+    assert TelegramChannel("bot", {"allowed": ["42"]}, {"token": "T0K"}).state == "connecting…"
+
+
+@pytest.mark.spec("CHN-12")
+def test_a_telegram_chat_answered_is_connected_by_the_family_of_its_address():
+    api = BotAPI(getMe={"username": "b"})
+    channel = telegram(api)
+    channel.call("getMe")
+    assert channel.state == "connected (IPv4)"
+    api.family = socket.AF_INET6
+    channel.call("getMe")
+    assert channel.state == "connected (IPv6)"
+
+
+@pytest.mark.spec("CHN-12")
+def test_a_telegram_chat_refused_is_still_connected():
+    channel = telegram(BotAPI(getMe=(401, '{"ok": false, "description": "Unauthorized"}')))
+    with pytest.raises(ChannelError):
+        channel.call("getMe")
+    assert channel.state == "connected (IPv4)"
+
+
+@pytest.mark.spec("CHN-12")
+def test_a_telegram_chat_the_network_fails_is_unreachable_with_the_reason():
+    channel = telegram(BotAPI(getMe=[{"username": "b"}, OSError("reset"), OSError("no route")]))
+    channel.call("getMe")
+    with pytest.raises(OSError):
+        channel.call("getMe")
+    assert channel.state == "unreachable: no route"
 
 
 @pytest.mark.spec("CNV-8")

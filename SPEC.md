@@ -879,8 +879,8 @@ The terminal and the chats are one conversation: the same commands, the same ans
   you type on it and the menu under it are drawn again after each print, with the cursor where it was. When the window is resized, the block and the rule are drawn again
   at the new size right away, still right above the prompt and with what Tinker printed right above them, and
   they never spill onto the prompt row. The conversation opens in a framed banner that names Tinker, the model
-  in use, the embedding model when one is set, the projects folder and the chats it listens on, each on a
-  line of its own; each chat opens with the same lines as a message of its own (the first in bold, the last in
+  in use, the embedding model when one is set, the projects folder and the chats it listens on (each with its
+  state, **CHN-12**), each on a line of its own; each chat opens with the same lines as a message of its own (the first in bold, the last in
   italics), kept by `clear chat` as the status is. When a message changes what the banner says (`model NAME`
   picks another model), the chats are cleared as `clear chat` does, the terminal's screen and scrollback are
   wiped, and the banner is drawn and sent anew, with the status below it. It draws a rule over the prompt, shows each line
@@ -1014,12 +1014,16 @@ The chat plugin: Telegram, and `tinker channel`.
   `read PATH`: the link Telegram gives a bot holds its token, so it is never passed on. A file over
   `TELEGRAM_MAX_DOWNLOAD_BYTES`, or one that cannot be downloaded, is said to the person, and nothing is read.
   A file from any other chat is ignored.
-- **CHN-11** As Tinker starts (`Desk.run`), each chat channel finds its route to its host once, in a thread of
-  its own so nothing waits on it. `Route.find(host)` connects to the host's IPv6 addresses `ROUTE_TRIES` times,
-  each try given `ROUTE_SECONDS`; when a try does not connect, the home's `routes` keeps the host to IPv4,
-  otherwise (or when the host has no IPv6 address) any address is used. Every connection to the host
-  (`TelegramChannel.connection`), in this Tinker and in the goodbye it hands on, connects over IPv4 only while
-  the host is kept to it; until the route is found, the one found last is used.
+- **CHN-11** Every connection to Telegram (`TelegramChannel.connection`), in this Tinker and in the goodbye it
+  hands on, gives each of the host's addresses `CONNECT_SECONDS` to connect and `CONNECT_SECONDS` for the TLS
+  handshake after it, in the order the system lists them, so an IPv6 route whose connect or handshake hangs
+  falls to IPv4 within that time; once the handshake is done, the call's own wait applies to its answer.
+- **CHN-12** A chat channel's `state` is `connecting…` until its first call to Telegram ends, then
+  `connected (IPv4)` or `connected (IPv6)` (the family of the address it connected to) after a call Telegram
+  answers, and `unreachable: REASON` after a call the network fails. The terminal's banner (**CNV-8**) shows
+  each chat with its state (`chats Telegram · connecting…`); the banner each chat opens with names the chats
+  only. When a chat's state changes after that, the terminal prints `Telegram · STATE` as a line of its own,
+  dimmed; the banner is not drawn again for it.
 
 ## knowledge (KNW)
 
