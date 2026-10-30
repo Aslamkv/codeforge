@@ -20,6 +20,7 @@ from tinkerkit.commands import (
 )
 from tinkerkit.messages import Text
 from tinkerkit.settings import Config
+from tinkerkit.system import SYSTEM_CHECKS
 
 
 @pytest.mark.spec("CMD-1")
@@ -182,9 +183,16 @@ def matched_names(menu):
 def test_slash_matches_name_starts_first_then_name_holds_in_table_order():
     chat = [command.name for command in COMMANDS if command.chat]
     assert names(slash_matches("/")) == chat
-    assert names(slash_matches("/st")) == ["status", "stop", "restart", "history"]
+    assert names(slash_matches("/st")) == ["status", "stop", "restart", "system", "history"]
     assert names(slash_matches("/mod")) == ["model"]
     assert names(slash_matches("/xyz")) == []
+
+
+@pytest.mark.spec("SYS-3")
+def test_system_is_a_chat_glance_whose_synopsis_words_are_the_system_checks():
+    system = BY_NAME["system"]
+    assert system.chat and kind_of("system") == "glance"
+    assert offered_words(system) == [check.word for check in SYSTEM_CHECKS]
 
 
 @pytest.mark.spec("MSG-10")
