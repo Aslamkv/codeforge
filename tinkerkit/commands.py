@@ -725,6 +725,45 @@ def alternative_words(synopsis):
     return words
 
 
+def menu_matches(typed):
+    commands = [CommandMatch(command) for command in slash_matches(typed)]
+    return commands or [WordMatch(command, word) for command, word in word_matches(typed)]
+
+
+class CommandMatch:
+    def __init__(self, command):
+        self.command = command
+
+    @property
+    def line(self):
+        return "/" + self.command.name
+
+    def row(self, marked):
+        return MenuRow(marked, self.line, synopsis_words(self.command), self.command.what)
+
+    def fill(self):
+        return MenuAnswer(self.line + " ", False)
+
+    def enter(self):
+        return self.fill() if self.command.words else MenuAnswer(self.line, True)
+
+
+class WordMatch(CommandMatch):
+    def __init__(self, command, word):
+        super().__init__(command)
+        self.word = word
+
+    @property
+    def line(self):
+        return f"/{self.command.name} {self.word}"
+
+    def row(self, marked):
+        return MenuRow(marked, self.line, "", self.command.what)
+
+    def enter(self):
+        return MenuAnswer(self.line, True)
+
+
 class CommandMenu:
     def __init__(self):
         self.typed = None
@@ -741,19 +780,14 @@ class CommandMenu:
     def follow(self, text):
         if text != self.typed:
             self.typed = text
-            self.matches, self.current, self.top = slash_matches(text), 0, 0
+            self.matches, self.current, self.top = menu_matches(text), 0, 0
 
     def close(self):
         self.matches, self.current, self.top = [], 0, 0
 
     def rows(self):
         shown = self.matches[self.top : self.top + MENU_ROWS]
-        return [
-            MenuRow(
-                self.top + index == self.current, "/" + command.name, synopsis_words(command), command.what
-            )
-            for index, command in enumerate(shown)
-        ]
+        return [match.row(self.top + index == self.current) for index, match in enumerate(shown)]
 
     def press(self, key):
         if not self.open or not isinstance(key, str):
@@ -776,16 +810,14 @@ class CommandMenu:
         return self.fill()
 
     def on_enter(self):
-        if not self.chosen.words:
-            line = "/" + self.chosen.name
-            self.close()
-            return MenuAnswer(line, True)
-        return self.fill()
+        answer = self.chosen.enter()
+        self.close()
+        return answer
 
     def fill(self):
-        line = f"/{self.chosen.name} "
+        answer = self.chosen.fill()
         self.close()
-        return MenuAnswer(line, False)
+        return answer
 
     def on_esc(self):
         self.close()

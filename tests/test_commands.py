@@ -173,6 +173,10 @@ def menu_on(text):
     return menu
 
 
+def matched_names(menu):
+    return names(match.command for match in menu.matches)
+
+
 @pytest.mark.spec("MSG-10")
 def test_slash_matches_name_starts_first_then_name_holds_in_table_order():
     chat = [command.name for command in COMMANDS if command.chat]
@@ -232,19 +236,19 @@ def test_up_and_down_move_the_current_row_scroll_eight_and_stop_at_the_ends():
     menu = menu_on("/")
     count = len(menu.matches)
     assert count > 9
-    assert [row[1] for row in menu.rows()] == ["/" + name for name in names(menu.matches[:8])]
+    assert [row[1] for row in menu.rows()] == ["/" + name for name in matched_names(menu)[:8]]
     assert menu.press("up") == MenuAnswer(None, False) and menu.current == 0
     for _ in range(8):
         menu.press("down")
     rows = menu.rows()
-    assert len(rows) == 8 and rows[-1] == (True, "/" + menu.matches[8].name, *rows[-1][2:])
-    assert rows[0][1] == "/" + menu.matches[1].name
+    assert len(rows) == 8 and rows[-1] == (True, "/" + matched_names(menu)[8], *rows[-1][2:])
+    assert rows[0][1] == "/" + matched_names(menu)[1]
     for _ in range(count + 3):
         menu.press("down")
     assert menu.current == count - 1 and menu.rows()[-1][0]
     for _ in range(count + 3):
         menu.press("up")
-    assert menu.current == 0 and menu.rows()[0] == (True, "/" + menu.matches[0].name, *menu.rows()[0][2:])
+    assert menu.current == 0 and menu.rows()[0] == (True, "/" + matched_names(menu)[0], *menu.rows()[0][2:])
 
 
 @pytest.mark.spec("MSG-10")
@@ -272,7 +276,25 @@ def test_esc_closes_the_menu_until_typing_narrows_it_again():
     menu.follow("/r")
     assert not menu.open
     menu.follow("/ru")
-    assert menu.open and names(menu.matches) == ["runs", "run"]
+    assert menu.open and matched_names(menu) == ["runs", "run"]
+
+
+@pytest.mark.spec("MSG-10")
+def test_the_menu_offers_a_command_s_words_once_a_letter_is_typed():
+    model = BY_NAME["model"]
+    assert menu_on("/model r").rows() == [
+        (True, "/model recipe", "", model.what),
+        (False, "/model calibrate", "", model.what),
+    ]
+    assert not menu_on("/model ").open
+
+
+@pytest.mark.spec("MSG-10")
+def test_tab_fills_the_picked_word_and_enter_sends_it():
+    menu = menu_on("/model r")
+    assert menu.press("tab") == MenuAnswer("/model recipe ", False) and not menu.open
+    menu = menu_on("/model r")
+    assert menu.press("enter") == MenuAnswer("/model recipe", True) and not menu.open
 
 
 @pytest.mark.spec("MSG-10")

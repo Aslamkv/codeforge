@@ -510,6 +510,18 @@ def test_console_draws_the_command_menu_under_the_prompt_line(monkeypatch):
     assert f"› /{first.name}{DIM} {synopsis_words(first)}" in sys.stdout.getvalue()
 
 
+@pytest.mark.spec("MSG-10")
+def test_console_draws_a_command_s_words_under_the_prompt_line(monkeypatch):
+    lines_keyed(monkeypatch, Text("/model r"))
+    assert "› /model recipe" in sys.stdout.getvalue()
+
+
+@pytest.mark.spec("MSG-10")
+def test_console_fills_or_sends_the_word_picked_from_the_menu(monkeypatch):
+    assert lines_keyed(monkeypatch, Text("/model r"), "tab", Text("x"), "enter") == ["/model recipe x", None]
+    assert lines_keyed(monkeypatch, Text("/model r"), "enter") == ["/model recipe", None]
+
+
 @pytest.mark.spec("CNV-8")
 def test_console_keeps_the_lines_typed_for_up_and_down_across_restarts(monkeypatch, tinker_home):
     colour_terminal(monkeypatch)
