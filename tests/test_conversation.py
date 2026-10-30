@@ -26,6 +26,7 @@ from tinkerkit.conversation import (
     Message,
     Progress,
     PromptDrawer,
+    Question,
     Questions,
     Reporter,
     Shell,
@@ -1845,6 +1846,14 @@ def test_what_waits_for_confirm_is_cancelled_by_anything_else(desk, monkeypatch)
     wait_until(lambda: ["clear", "memory", "--yes"] in desk.ran)
     assert desk.decide("confirm", ["confirm"]).startswith("🤷 No plan waits")
     assert desk.rename({}, ["rename", "x"]).startswith("🤷 No plan waits")
+
+
+@pytest.mark.spec("CNV-12")
+def test_a_question_with_nothing_to_say_on_a_cancel_is_dropped_quietly(desk):
+    desk, channel, _ = desk
+    desk.questions.ask(channel, "1", Question(wanted="model pick"))
+    assert not desk.settle(channel, Message("1", "/status"), "status")
+    assert not desk.questions.waiting(channel, "1") and channel.texts() == []
     assert desk.decide("amend", ["amend"]).startswith("✍️ Write `/amend [@PROJECT] CHANGE`")
 
 

@@ -946,7 +946,8 @@ The terminal and the chats are one conversation: the same commands, the same ans
   text.
 - **CNV-12** Each chat has at most one question that waits for the person (a deletion, a chat's `/exit`, a
   command line, words a command needs), kept in one place by channel and chat: what its answer runs and what a
-  cancel says. `Desk.settle` runs what waits for a `/confirm`. Any other message cancels it and says so. The
+  cancel says. `Desk.settle` runs what waits for a `/confirm`. Any other message cancels it and says so; a question
+  with nothing to say on a cancel (words a command needs) is dropped quietly. The
   plan that waits is not such a question: every chat and the terminal share it. `decide` builds or changes the plan that waits. For a new project, its first
   `confirm` asks for the folder's name.
 - **CNV-13** A command that needs words, sent alone (as a chat app's menu sends it: `/fix`), asks for them

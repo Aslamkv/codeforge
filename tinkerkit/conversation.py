@@ -124,7 +124,9 @@ WordsAsked = namedtuple("WordsAsked", "question example")
 AppRequest = namedtuple("AppRequest", "project args stdin")
 ShellRun = namedtuple("ShellRun", "code output")
 Secret = namedtuple("Secret", "key question")
-Question = namedtuple("Question", "runs cancels held wanted naming", defaults=(None, None, None, None, False))
+Question = namedtuple(
+    "Question", "runs cancels held wanted naming", defaults=(None, lambda: None, None, None, False)
+)
 
 
 def session(root):
@@ -501,9 +503,7 @@ class Desk:
         if said_command(line[1:]) == line:
             self.handle(channel, sent)
             return
-        self.questions.ask(
-            channel, message.chat, Question(runs=lambda: self.handle(channel, sent), cancels=lambda: None)
-        )
+        self.questions.ask(channel, message.chat, Question(runs=lambda: self.handle(channel, sent)))
         channel.send(message.chat, md(t"👉 {line:code} — `/confirm` runs it"))
 
     def settle(self, channel, message, command):
