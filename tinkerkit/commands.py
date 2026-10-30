@@ -227,7 +227,7 @@ COMMANDS = [
         "system",
         "Talk",
         f"system [{'|'.join(SYSTEM_WORDS)}]",
-        "this computer's time, date, disk, memory, battery, uptime or network address",
+        "what this computer tells at once: one check or all",
         "Show what a system check answers on this computer, or every check's answer.",
         kind="glance",
         chat=True,

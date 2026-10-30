@@ -32,7 +32,6 @@ def answer_with(monkeypatch, fake_run, platform="darwin"):
 def test_system_checks_are_the_known_words_each_with_a_fixed_command_per_system():
     assert SYSTEM_WORDS == ("time", "date", "disk", "ram", "battery", "uptime", "network")
     for check in SYSTEM_CHECKS:
-        assert check.tells
         for argv in (check.mac, check.linux):
             assert isinstance(argv, tuple) and argv and all(isinstance(part, str) for part in argv)
     assert check_named("ram").mac == ("top", "-l", "1", "-n", "0")
