@@ -2064,42 +2064,6 @@ def test_the_status_is_sent_anew_as_tinker_starts_and_the_goodbye_is_handed_on(d
     channel.claimed.close()
 
 
-@pytest.mark.spec("CHN-11")
-def test_each_chat_channel_finds_its_route_once_as_tinker_starts(desk, home_store, monkeypatch):
-    monkeypatch.setattr(conversation, "ENDED_LOOK_SECONDS", 0.05)
-    goodbyes_handed(monkeypatch)
-    channel = Listening("bot", inbox=[Message("1", "/exit", id=1), Message("1", "/confirm", id=2)])
-    found = threading.Event()
-    finds = []
-
-    def find_route():
-        finds.append(True)
-        found.set()
-        raise OSError("no route")
-
-    channel.find_route = find_route
-    Desk([channel], Path.cwd()).run()
-    assert found.wait(1) and finds == [True] and channel.closed
-    channel.claimed.close()
-
-
-@pytest.mark.spec("CHN-11")
-def test_routes_are_found_for_chat_channels_only_and_a_failing_one_does_not_stop_the_rest():
-    failing, chat, console = Recorder(), Recorder(), ConsoleChannel()
-    finds = []
-
-    def fails():
-        finds.append("failing")
-        raise OSError("no route")
-
-    failing.find_route = fails
-    chat.find_route = lambda: finds.append("chat")
-    console.find_route = lambda: finds.append("console")
-    Desk([failing, chat, console], Path.cwd()).find_routes()
-    assert finds == ["failing", "chat"]
-    assert Recorder().find_route() is None
-
-
 @pytest.mark.spec("CNV-9")
 def test_ctrl_c_closes_the_chats_and_posts_no_status_after_the_first(desk, home_store, monkeypatch):
     handed = goodbyes_handed(monkeypatch)

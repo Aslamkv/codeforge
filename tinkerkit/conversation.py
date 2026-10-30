@@ -190,7 +190,6 @@ class Desk:
         self.echo_to_terminal = not self.consoles
 
     def run(self):
-        threading.Thread(target=self.find_routes, daemon=True).start()
         self.claim_chats()
         self.open_banner()
         self.talk.warm()
@@ -208,11 +207,6 @@ class Desk:
                 say.title("Stopped listening.", "🛑")
         finally:
             Desk.unload_models()
-
-    def find_routes(self):
-        for channel in [channel for channel in self.channels if channel not in self.consoles]:
-            with contextlib.suppress(Exception):
-                channel.find_route()
 
     @staticmethod
     def unload_models():
@@ -1813,9 +1807,6 @@ class Channel:
         return self.send(chat, f"{caption}\n📄 `{path}`")
 
     def typing(self, chat):
-        pass
-
-    def find_route(self):
         pass
 
     def send_banner(self, chat, lines):

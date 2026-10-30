@@ -70,17 +70,16 @@ def keep_a_disabled_bot():
 
 
 class Sockets:
-    def __init__(self, monkeypatch, ipv6=(("2001:db8::1", 443, 0, 0),), connects=()):
-        self.ipv6, self.connects, self.tries, self.closed = list(ipv6), list(connects), [], 0
+    def __init__(self, monkeypatch, connects=()):
+        self.connects, self.tries, self.timeouts = list(connects), [], []
         monkeypatch.setattr(socket, "getaddrinfo", self.getaddrinfo)
         monkeypatch.setattr(socket, "create_connection", self.create_connection)
 
     def getaddrinfo(self, host, port, family=0, kind=0):
-        if family == socket.AF_INET:
-            return [(socket.AF_INET, socket.SOCK_STREAM, 6, "", ("192.0.2.1", port))]
-        if not self.ipv6:
-            raise socket.gaierror("no IPv6 address")
-        return [(socket.AF_INET6, socket.SOCK_STREAM, 6, "", address) for address in self.ipv6]
+        return [
+            (socket.AF_INET6, socket.SOCK_STREAM, 6, "", ("2001:db8::1", port, 0, 0)),
+            (socket.AF_INET, socket.SOCK_STREAM, 6, "", ("192.0.2.1", port)),
+        ]
 
     def create_connection(self, address, timeout=None, source_address=None):
         self.tries.append((address, timeout))
@@ -88,50 +87,37 @@ class Sockets:
             raise TimeoutError("timed out")
         return self
 
-    def __enter__(self):
-        return self
-
-    def __exit__(self, *exception):
-        self.close()
-
-    def close(self):
-        self.closed += 1
+    def settimeout(self, timeout):
+        self.timeouts.append(timeout)
 
 
 @pytest.mark.spec("CHN-11")
-def test_a_host_whose_ipv6_connects_every_try_is_reached_over_any_address(monkeypatch, home_store):
-    sockets = Sockets(monkeypatch)
-    channels.Route.find("api.telegram.org")
-    assert home_store.get("routes", "api.telegram.org") == "any"
-    assert sockets.tries == [(("2001:db8::1", 443), channels.ROUTE_SECONDS)] * channels.ROUTE_TRIES
-    assert sockets.closed == channels.ROUTE_TRIES
-
-
-@pytest.mark.spec("CHN-11")
-def test_a_host_whose_ipv6_fails_a_try_is_kept_to_ipv4(monkeypatch, home_store):
-    Sockets(monkeypatch, connects=[True, False])
-    TelegramChannel("bot", {"allowed": ["42"]}, {"token": "T0K"}).find_route()
-    assert home_store.get("routes", TelegramChannel.HOST) == "ipv4"
-
-
-@pytest.mark.spec("CHN-11")
-def test_a_host_without_ipv6_is_reached_over_any_address(monkeypatch, home_store):
-    sockets = Sockets(monkeypatch, ipv6=())
-    channels.Route.find("api.telegram.org")
-    assert home_store.get("routes", "api.telegram.org") == "any" and sockets.tries == []
-
-
-@pytest.mark.spec("CHN-11")
-def test_a_telegram_connection_goes_over_ipv4_only_while_its_host_is_kept_to_it(monkeypatch, home_store):
-    sockets = Sockets(monkeypatch)
-    channel = TelegramChannel("bot", {"allowed": ["42"]}, {"token": "T0K"})
-    assert channel.connection(5)._create_connection is not channels.Route.ipv4_connection
-    home_store.put("routes", TelegramChannel.HOST, "ipv4")
-    connection = channel.connection(5)
+def test_a_telegram_connection_whose_first_address_hangs_falls_to_the_next_within_connect_seconds(
+    monkeypatch,
+):
+    sockets = Sockets(monkeypatch, connects=[False, True])
+    connection = TelegramChannel("bot", {"allowed": ["42"]}, {"token": "T0K"}).connection(5)
     assert connection._create_connection((TelegramChannel.HOST, 443), 5, None) is sockets
-    assert sockets.tries == [(("192.0.2.1", 443), 5)]
-    home_store.put("routes", TelegramChannel.HOST, "any")
-    assert channel.connection(5)._create_connection is not channels.Route.ipv4_connection
+    assert sockets.tries == [
+        (("2001:db8::1", 443), channels.CONNECT_SECONDS),
+        (("192.0.2.1", 443), channels.CONNECT_SECONDS),
+    ]
+    assert channels.CONNECT_SECONDS == 1
+
+
+@pytest.mark.spec("CHN-11")
+def test_a_telegram_connection_answers_within_the_calls_own_wait(monkeypatch):
+    sockets = Sockets(monkeypatch)
+    connection = TelegramChannel("bot", {"allowed": ["42"]}, {"token": "T0K"}).connection(30)
+    connection._create_connection((TelegramChannel.HOST, 443), connection.timeout, None)
+    assert sockets.tries == [(("2001:db8::1", 443), channels.CONNECT_SECONDS)] and sockets.timeouts == [30]
+
+
+@pytest.mark.spec("CHN-11")
+def test_a_telegram_connection_fails_when_no_address_connects(monkeypatch):
+    Sockets(monkeypatch, connects=[False, False])
+    with pytest.raises(TimeoutError):
+        channels.connect_by_address((TelegramChannel.HOST, 443), 5)
 
 
 @pytest.mark.spec("CNV-8")
