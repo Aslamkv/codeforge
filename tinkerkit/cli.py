@@ -662,10 +662,16 @@ class Commands:
     def recipe_all():
         for name in Models.unmeasured():
             try:
-                Calibrator(name).run()
+                Commands.measure(Calibrator(name))
             except SystemExit as exc:
                 say.warn(f"{name} was not measured: {exc}")
         Commands.recipe()
+
+    @staticmethod
+    def measure(calibrator):
+        if Models.settings(calibrator.name):
+            return calibrator.retest()
+        return calibrator.run()
 
     @staticmethod
     def use(name):

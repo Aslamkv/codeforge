@@ -201,7 +201,15 @@ def calibrating(monkeypatch, measures):
             raise SystemExit("could not measure")
         Models.keep(self.name, MEASURED)
 
-    monkeypatch.setattr(cli, "Calibrator", lambda name: type("C", (), {"name": name, "run": run})())
+    def retest(self):
+        measured.append(f"{self.name} again")
+        if not measures:
+            raise SystemExit("could not measure")
+        Models.keep(self.name, quality_settings(1))
+
+    monkeypatch.setattr(
+        cli, "Calibrator", lambda name: type("C", (), {"name": name, "run": run, "retest": retest})()
+    )
     return measured
 
 
@@ -369,10 +377,23 @@ def test_model_recipe_all_measures_the_models_it_lacks_and_goes_on_past_a_failur
     measured = calibrating(monkeypatch, measures=False)
     Commands.model(["recipe", "all"])
     out = capsys.readouterr().out
-    assert measured == ["other", "m"] and "m was not measured: could not measure" in out
+    assert measured == ["other", "m again"] and "m was not measured: could not measure" in out
     assert "other was not measured: could not measure" in out
     assert "🍳 Model recipe, picked from 1 measured model (2 not measured" in out
     assert Config.get("model") == "n"
+
+
+@pytest.mark.spec("MOD-31")
+def test_model_recipe_all_retests_a_model_measured_with_older_tasks(home_store, monkeypatch, capsys):
+    picker(monkeypatch, None)
+    Config.save(model="n")
+    Models.keep("n", quality_settings(3))
+    Models.keep("m", MEASURED)
+    measured = calibrating(monkeypatch, measures=True)
+    Commands.model(["recipe", "all"])
+    out = capsys.readouterr().out
+    assert measured == ["other", "m again"] and Models.settings("m") == quality_settings(1)
+    assert "picked from 2 measured models (1 not measured" in out and Config.get("model") == "n"
 
 
 @pytest.mark.spec("CLI-3")

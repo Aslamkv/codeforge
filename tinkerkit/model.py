@@ -847,6 +847,17 @@ class Calibrator:
         say.done(self.summary(settings))
         return settings
 
+    def retest(self):
+        say.title(f"Testing {self.name} again on the current test tasks", "📏")
+        settings = dict(Models.settings(self.name) or {})
+        settings.update(
+            self.quality(settings["think"], settings["num_ctx"], settings.get("write_tokens_per_s"))
+        )
+        Ollama.unload(self.name)
+        Models.keep(self.name, settings)
+        say.done("\n   ".join([f"{self.name} is ready", self.solved_line(settings)]))
+        return settings
+
     def summary(self, settings):
         ratio = settings["chars_per_token"]
         read, write = settings["read_tokens_per_s"], settings["write_tokens_per_s"]
@@ -858,10 +869,16 @@ class Calibrator:
                 f"✍️ Writes {self.about_words(write, ratio)} words a second ({self.speed_text(write)} tok/s)",
                 f"📥 Takes requests up to about {self.words(prompt, ratio)} words ({prompt:,} tokens)",
                 f"📤 Replies up to about {self.words(reply, ratio)} words ({reply:,} tokens)",
-                f"🧠 Solved {settings['solved']} of {len(settings['quality_tasks'])} test tasks"
-                + quality_facts(settings.get("quality_results", [])),
+                self.solved_line(settings),
                 self.thinking(settings["think"]),
             ]
+        )
+
+    @staticmethod
+    def solved_line(settings):
+        return (
+            f"🧠 Solved {settings['solved']} of {len(settings['quality_tasks'])} test tasks"
+            + quality_facts(settings.get("quality_results", []))
         )
 
     @staticmethod

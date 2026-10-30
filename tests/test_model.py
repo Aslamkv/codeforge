@@ -796,6 +796,24 @@ def test_the_probe_stops_after_a_tier_with_neither_task_solved(fake_ollama, caps
     assert "Stopped after tier 1: neither task solved" in capsys.readouterr().out
 
 
+@pytest.mark.spec("MOD-31")
+def test_retest_reruns_only_the_quality_probe_and_keeps_the_other_settings(fake_ollama, tinker_home, capsys):
+    Models.keep("m", dict(MEASURED, write_tokens_per_s=10, quality_version=0, solved=5))
+    fake_ollama.reply("not the answer", times=6)
+    settings = Calibrator("m").retest()
+    saved = Models.settings("m")
+    assert saved == settings and saved == dict(saved, **MEASURED, write_tokens_per_s=10)
+    assert saved["quality_version"] == QUALITY_VERSION and saved["solved"] == 0
+    assert len(saved["quality_tasks"]) == 8 and len(saved["quality_results"]) == 2
+    assert all(call["think"] == "high" for call in fake_ollama.calls)
+    assert all(call["options"]["num_ctx"] == MEASURED["num_ctx"] for call in fake_ollama.calls)
+    assert fake_ollama.calls[0]["options"]["num_predict"] == int(QUALITY_TASK_SECONDS * 10)
+    assert fake_ollama.unloaded[-1] == "m"
+    out = capsys.readouterr().out
+    assert "Testing m again on the current test tasks" in out
+    assert "✅ m is ready\n   🧠 Solved 0 of 8 test tasks" in out and "📖" not in out
+
+
 @pytest.mark.spec("MOD-28")
 @pytest.mark.spec("MOD-30")
 @pytest.mark.parametrize(
