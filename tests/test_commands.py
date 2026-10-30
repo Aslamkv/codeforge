@@ -8,9 +8,10 @@ from tinkerkit.commands import (
     GROUPS,
     CommandMenu,
     MenuAnswer,
-    command_words,
+    alternative_words,
     deletes,
     kind_of,
+    offered_words,
     ref,
     refs,
     slash_matches,
@@ -194,14 +195,19 @@ def test_slash_matches_only_chat_commands_and_only_a_slash_word():
 
 
 @pytest.mark.spec("MSG-10")
-def test_command_words_are_action_words_then_synopsis_alternatives_once():
-    assert command_words(BY_NAME["model"]) == ["calibrate", "recipe"]
-    assert command_words(BY_NAME["jobs"]) == ["running", "paused", "stopped", "finished", "archived"]
-    assert command_words(BY_NAME["memory"]) == ["show", "find", "recent"]
-    assert command_words(BY_NAME["exercise"]) == ["status"]
-    assert command_words(BY_NAME["read"]) == ["list", "show"]
-    assert command_words(BY_NAME["channel"]) == ["add", "remove", "start"]
-    assert command_words(BY_NAME["task"]) == [] and command_words(BY_NAME["restart"]) == []
+def test_offered_words_are_action_words_then_synopsis_alternatives_once():
+    assert offered_words(BY_NAME["model"]) == ["calibrate", "recipe"]
+    assert offered_words(BY_NAME["jobs"]) == ["running", "paused", "stopped", "finished", "archived"]
+    assert offered_words(BY_NAME["memory"]) == ["show", "find", "recent"]
+    assert offered_words(BY_NAME["exercise"]) == ["status"]
+    assert offered_words(BY_NAME["read"]) == ["list", "show"]
+    assert offered_words(BY_NAME["channel"]) == ["add", "remove", "start"]
+    assert offered_words(BY_NAME["task"]) == [] and offered_words(BY_NAME["restart"]) == []
+
+
+@pytest.mark.spec("MSG-10")
+def test_alternative_words_are_lowercase_words_opening_an_alternative_one_bracket_deep():
+    assert alternative_words("open [a [b [deep]] | Cap | two words] x") == ["open", "a", "two"]
 
 
 @pytest.mark.spec("MSG-10")

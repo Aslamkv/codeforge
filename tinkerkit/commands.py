@@ -1,5 +1,6 @@
 import re
 from collections import namedtuple
+from operator import attrgetter
 
 from .settings import SETTINGS, Config, Home
 
@@ -688,10 +689,8 @@ def refs(words):
 def slash_matches(typed):
     if not typed.startswith("/") or " " in typed:
         return []
-    word = typed[1:]
     offered = [command for command in COMMANDS if command.chat]
-    starts = [command for command in offered if command.name.startswith(word)]
-    return starts + [command for command in offered if word in command.name and command not in starts]
+    return starts_then_holds(typed[1:], offered, attrgetter("name"))
 
 
 def word_matches(typed):
@@ -699,15 +698,15 @@ def word_matches(typed):
     command = BY_NAME.get(name)
     if not typed.startswith("/") or not word or " " in word or not command or not command.chat:
         return []
-    words = command_words(command)
-    starts = [known for known in words if known.startswith(word)]
-    return [
-        (command, known)
-        for known in starts + [known for known in words if word in known and known not in starts]
-    ]
+    return [(command, known) for known in starts_then_holds(word, offered_words(command), str)]
 
 
-def command_words(command):
+def starts_then_holds(word, items, name_of):
+    starts = [item for item in items if name_of(item).startswith(word)]
+    return starts + [item for item in items if word in name_of(item) and item not in starts]
+
+
+def offered_words(command):
     actions = [action.word for action in command.actions if action.word]
     return list(dict.fromkeys(actions + alternative_words(synopsis_words(command))))
 
