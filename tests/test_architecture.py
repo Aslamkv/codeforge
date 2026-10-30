@@ -15,6 +15,7 @@ LAYERS = (
     "text",
     "store",
     "settings",
+    "system",
     "commands",
     "jobs",
     "sandbox",
