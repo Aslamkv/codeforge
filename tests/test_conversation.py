@@ -217,6 +217,7 @@ def test_said_command_takes_show_words_and_a_left_out_command_name():
 @pytest.mark.spec("CNV-5", "SYS-3")
 def test_said_command_drops_question_words():
     assert conversation.said_command("What's the time now?") == "/system time"
+    assert conversation.said_command("what time is it now?") == "/system time"
     assert conversation.said_command("what is my battery") == "/system battery"
 
 

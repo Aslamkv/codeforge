@@ -1123,7 +1123,7 @@ def replied_command(reply):
 
 
 SAID_FILLER = tuple(
-    "the my please can could would you tinker a an me now just show see view display what is s".split()
+    "the my please can could would you tinker a an me now just show see view display what is it s".split()
 )
 
 
