@@ -72,7 +72,7 @@ def keep_a_disabled_bot():
 
 class Sockets:
     def __init__(self, monkeypatch, connects=()):
-        self.connects, self.tries, self.timeouts = list(connects), [], []
+        self.connects, self.tries, self.timeouts, self.closed = list(connects), [], [], 0
         monkeypatch.setattr(socket, "getaddrinfo", self.getaddrinfo)
         monkeypatch.setattr(socket, "create_connection", self.create_connection)
 
@@ -91,14 +91,39 @@ class Sockets:
     def settimeout(self, timeout):
         self.timeouts.append(timeout)
 
+    def close(self):
+        self.closed += 1
+
+    def timeout(self):
+        return self.timeouts[-1] if self.timeouts else self.tries[-1][1]
+
+
+class Handshakes:
+    def __init__(self, sockets, shakes=()):
+        self.sockets, self.shakes, self.timeouts = sockets, list(shakes), []
+
+    def wrap_socket(self, sock, server_hostname=None):
+        self.timeouts.append(self.sockets.timeout())
+        if self.shakes and not self.shakes.pop(0):
+            raise TimeoutError("_ssl.c:1129: The handshake operation timed out")
+        return sock
+
+
+def connected(monkeypatch, wait, sockets, shakes=()):
+    connection = TelegramChannel("bot", {"allowed": ["42"]}, {"token": "T0K"}).connection(wait)
+    handshakes = Handshakes(sockets, shakes)
+    monkeypatch.setattr(connection, "context", handshakes)
+    connection.connect()
+    return connection, handshakes
+
 
 @pytest.mark.spec("CHN-11")
 def test_a_telegram_connection_whose_first_address_hangs_falls_to_the_next_within_connect_seconds(
     monkeypatch,
 ):
     sockets = Sockets(monkeypatch, connects=[False, True])
-    connection = TelegramChannel("bot", {"allowed": ["42"]}, {"token": "T0K"}).connection(5)
-    assert connection._create_connection((TelegramChannel.HOST, 443), 5, None) is sockets
+    connection, _ = connected(monkeypatch, 5, sockets)
+    assert connection.sock is sockets
     assert sockets.tries == [
         (("2001:db8::1", 443), channels.CONNECT_SECONDS),
         (("192.0.2.1", 443), channels.CONNECT_SECONDS),
@@ -107,18 +132,26 @@ def test_a_telegram_connection_whose_first_address_hangs_falls_to_the_next_withi
 
 
 @pytest.mark.spec("CHN-11")
+def test_a_telegram_connection_whose_first_handshake_hangs_falls_to_the_next_address(monkeypatch):
+    sockets = Sockets(monkeypatch)
+    connection, handshakes = connected(monkeypatch, 30, sockets, shakes=[False, True])
+    assert [address for address, _ in sockets.tries] == [("2001:db8::1", 443), ("192.0.2.1", 443)]
+    assert handshakes.timeouts == [channels.CONNECT_SECONDS, channels.CONNECT_SECONDS]
+    assert sockets.closed == 1 and connection.sock is sockets
+
+
+@pytest.mark.spec("CHN-11")
 def test_a_telegram_connection_answers_within_the_calls_own_wait(monkeypatch):
     sockets = Sockets(monkeypatch)
-    connection = TelegramChannel("bot", {"allowed": ["42"]}, {"token": "T0K"}).connection(30)
-    connection._create_connection((TelegramChannel.HOST, 443), connection.timeout, None)
-    assert sockets.tries == [(("2001:db8::1", 443), channels.CONNECT_SECONDS)] and sockets.timeouts == [30]
+    connection, _ = connected(monkeypatch, 30, sockets)
+    assert sockets.timeouts == [30] and connection.timeout == 30
 
 
 @pytest.mark.spec("CHN-11")
 def test_a_telegram_connection_fails_when_no_address_connects(monkeypatch):
     Sockets(monkeypatch, connects=[False, False])
     with pytest.raises(TimeoutError):
-        channels.connect_by_address((TelegramChannel.HOST, 443), 5)
+        channels.connect_by_address((TelegramChannel.HOST, 443), None, 5)
 
 
 @pytest.mark.spec("CHN-12")

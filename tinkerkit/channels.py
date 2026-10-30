@@ -6,6 +6,7 @@ lazy import queue
 lazy import re
 lazy import secrets
 lazy import socket
+lazy import ssl
 lazy import sys
 lazy import time
 lazy import urllib.parse
@@ -569,30 +570,47 @@ class TelegramChannel(Channel):
         try:
             connection = self.open_connections.get_nowait()
         except queue.Empty:
-            connection = http.client.HTTPSConnection(self.HOST, timeout=wait)
-            connection._create_connection = connect_by_address
+            connection = TelegramConnection(self.HOST, timeout=wait)
         connection.timeout = wait
         if connection.sock is not None:
             connection.sock.settimeout(wait)
         return connection
 
 
+class TelegramConnection(http.client.HTTPSConnection):
+    def __init__(self, host, timeout):
+        self.context = ssl.create_default_context()
+        super().__init__(host, timeout=timeout, context=self.context)
+
+    def connect(self):
+        self.sock = connect_by_address((self.host, self.port), self.context, self.timeout)
+
+
 def family_name(family):
     return "IPv6" if family == socket.AF_INET6 else "IPv4"
 
 
-def connect_by_address(address, wait, source_address=None):
+def connect_by_address(address, context, wait):
     host, port = address
     failure = OSError(f"{host} has no address")
     for *_, socket_address in socket.getaddrinfo(host, port, 0, socket.SOCK_STREAM):
         try:
-            sock = socket.create_connection((str(socket_address[0]), port), CONNECT_SECONDS, source_address)
+            sock = shake_hands(context, host, (str(socket_address[0]), port))
         except OSError as error:
             failure = error
             continue
         sock.settimeout(wait)
         return sock
     raise failure
+
+
+def shake_hands(context, host, address):
+    sock = socket.create_connection(address, CONNECT_SECONDS)
+    try:
+        return context.wrap_socket(sock, server_hostname=host)
+    except OSError:
+        sock.close()
+        raise
 
 
 KINDS = frozendict({kind.KIND: kind for kind in (TelegramChannel,)})

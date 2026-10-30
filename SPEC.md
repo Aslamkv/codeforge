@@ -1015,9 +1015,9 @@ The chat plugin: Telegram, and `tinker channel`.
   `TELEGRAM_MAX_DOWNLOAD_BYTES`, or one that cannot be downloaded, is said to the person, and nothing is read.
   A file from any other chat is ignored.
 - **CHN-11** Every connection to Telegram (`TelegramChannel.connection`), in this Tinker and in the goodbye it
-  hands on, gives each of the host's addresses `CONNECT_SECONDS` to connect, in the order the system lists
-  them, so an IPv6 route that hangs falls to IPv4 within that time; once connected, the call's own wait
-  applies to its answer.
+  hands on, gives each of the host's addresses `CONNECT_SECONDS` to connect and `CONNECT_SECONDS` for the TLS
+  handshake after it, in the order the system lists them, so an IPv6 route whose connect or handshake hangs
+  falls to IPv4 within that time; once the handshake is done, the call's own wait applies to its answer.
 - **CHN-12** A chat channel's `state` is `connecting…` until its first call to Telegram ends, then
   `connected (IPv4)` or `connected (IPv6)` (the family of the address it connected to) after a call Telegram
   answers, and `unreachable: REASON` after a call the network fails. The terminal's banner (**CNV-8**) shows
