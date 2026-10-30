@@ -18,7 +18,7 @@ from .commands import BY_NAME, COMMANDS, GROUPS, kind_of, refs, taught_command
 from .jobs import STATES, Jobs, archived, calls_log, job_number
 from .messages import Messages, human_duration, paint, say
 from .reading import Reader
-from .system import SYSTEM_CHECKS
+from .system import SYSTEM_CHECKS, SYSTEM_WORDS
 lazy from .building import BugReproducer, CodeWriter, TestToolSetup, TestWriter, Verifier
 lazy from .finishing import FinalReview, LessonWriter, ReadmeWriter, Tidy
 lazy from .graph import Graph, MemoryBrowser, write_page
@@ -171,7 +171,6 @@ class Cli:
         "calls": False,
         "graph": False,
     }
-    SYSTEM_WORDS = tuple(check.word for check in SYSTEM_CHECKS)
     FOLDER_RE = re.compile(r"[A-Za-z0-9][\w.-]{0,63}")
 
     @staticmethod
@@ -399,8 +398,8 @@ class Cli:
 
     @staticmethod
     def system_word(word, parser):
-        if word is not None and word not in Cli.SYSTEM_WORDS:
-            parser.error(f"no system check {word!r}; use one of {', '.join(Cli.SYSTEM_WORDS)}")
+        if word is not None and word not in SYSTEM_WORDS:
+            parser.error(f"no system check {word!r}; use one of {', '.join(SYSTEM_WORDS)}")
         return word
 
     @staticmethod

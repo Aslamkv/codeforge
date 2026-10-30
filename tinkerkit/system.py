@@ -25,7 +25,7 @@ class SystemCheck:
 def run_quietly(argv: tuple[str, ...]) -> str:
     try:
         done = subprocess.run(list(argv), capture_output=True, text=True, timeout=SYSTEM_CHECK_SECONDS)
-    except (OSError, subprocess.SubprocessError):
+    except OSError, subprocess.SubprocessError:
         return ""
     return done.stdout.strip() if done.returncode == 0 else ""
 
@@ -46,5 +46,9 @@ SYSTEM_CHECKS = (
         ("upower", "-i", "/org/freedesktop/UPower/devices/battery_BAT0"),
     ),
     SystemCheck("uptime", "how long the computer has been on", ("uptime",), ("uptime",)),
-    SystemCheck("network", "this computer's network address", ("ipconfig", "getifaddr", "en0"), ("hostname", "-I")),
+    SystemCheck(
+        "network", "this computer's network address", ("ipconfig", "getifaddr", "en0"), ("hostname", "-I")
+    ),
 )
+
+SYSTEM_WORDS = tuple(check.word for check in SYSTEM_CHECKS)

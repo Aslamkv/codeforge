@@ -1122,7 +1122,9 @@ def replied_command(reply):
     return line if "\n" not in line and line.startswith("/") and command_of(line) else ""
 
 
-SAID_FILLER = tuple("the my please can could would you tinker a an me now just show see view display what is what's s".split())
+SAID_FILLER = tuple(
+    "the my please can could would you tinker a an me now just show see view display what is s".split()
+)
 
 
 def said_command(text):

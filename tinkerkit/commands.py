@@ -3,7 +3,7 @@ from collections import namedtuple
 from operator import attrgetter
 
 from .settings import SETTINGS, Config, Home
-from .system import SYSTEM_CHECKS
+from .system import SYSTEM_WORDS
 
 Refs = namedtuple("Refs", "project words")
 MenuAnswer = namedtuple("MenuAnswer", "line send")
@@ -226,7 +226,7 @@ COMMANDS = [
     Command(
         "system",
         "Talk",
-        f"system [{'|'.join(check.word for check in SYSTEM_CHECKS)}]",
+        f"system [{'|'.join(SYSTEM_WORDS)}]",
         "this computer's time, date, disk, memory, battery, uptime or network address",
         "Show what a system check answers on this computer, or every check's answer.",
         kind="glance",

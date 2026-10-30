@@ -3,7 +3,7 @@ import subprocess
 import pytest
 
 import tinkerkit.system as system
-from tinkerkit.system import SYSTEM_CHECK_SECONDS, SYSTEM_CHECKS
+from tinkerkit.system import SYSTEM_CHECK_SECONDS, SYSTEM_CHECKS, SYSTEM_WORDS
 
 
 @pytest.fixture
@@ -30,8 +30,7 @@ def answer_with(monkeypatch, fake_run, platform="darwin"):
 
 @pytest.mark.spec("SYS-1")
 def test_system_checks_are_the_known_words_each_with_a_fixed_command_per_system():
-    words = [check.word for check in SYSTEM_CHECKS]
-    assert words == ["time", "date", "disk", "ram", "battery", "uptime", "network"]
+    assert SYSTEM_WORDS == ("time", "date", "disk", "ram", "battery", "uptime", "network")
     for check in SYSTEM_CHECKS:
         assert check.tells
         for argv in (check.mac, check.linux):
