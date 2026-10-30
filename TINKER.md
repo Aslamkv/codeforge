@@ -249,6 +249,17 @@ tinker command show the five biggest files here
 
 `command` shows the command line first, and runs it only once you agree.
 
+Ask about this computer and the answer comes at once, with no model: `time`, `date`, `disk`, `ram`,
+`battery`, `uptime` or `network`. Each runs one fixed command that changes nothing:
+
+```sh
+tinker system time
+tinker system
+```
+
+`tinker system` prints every check. In the conversation or a chat, `time`, `/system disk` or
+`what is the time now?` answer the same way, and the model asks for a check when your question needs one.
+
 Run a project you built (the last one, by default) with its arguments:
 
 ```sh
