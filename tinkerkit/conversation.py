@@ -229,11 +229,7 @@ class Desk:
     def banner_on_consoles(self):
         self.shown_states = {chat: chat.state for chat in self.chats()}
         for console in self.consoles:
-            console.banner(self.console_banner())
-
-    def console_banner(self):
-        named, stated = self.chats_line(Desk.chat_name), self.chats_line(Desk.chat_with_state)
-        return [stated if line == named else line for line in self.shown_banner]
+            console.banner(self.shown_banner)
 
     def say_state_changes(self):
         for chat in self.chats():
