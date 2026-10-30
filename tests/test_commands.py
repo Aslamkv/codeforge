@@ -8,12 +8,15 @@ from tinkerkit.commands import (
     GROUPS,
     CommandMenu,
     MenuAnswer,
+    alternative_words,
     deletes,
     kind_of,
+    offered_words,
     ref,
     refs,
     slash_matches,
     taught_command,
+    word_matches,
 )
 from tinkerkit.messages import Text
 from tinkerkit.settings import Config
@@ -171,6 +174,10 @@ def menu_on(text):
     return menu
 
 
+def matched_names(menu):
+    return names(match.command for match in menu.matches)
+
+
 @pytest.mark.spec("MSG-10")
 def test_slash_matches_name_starts_first_then_name_holds_in_table_order():
     chat = [command.name for command in COMMANDS if command.chat]
@@ -188,6 +195,41 @@ def test_slash_matches_only_chat_commands_and_only_a_slash_word():
 
 
 @pytest.mark.spec("MSG-10")
+def test_offered_words_are_action_words_then_synopsis_alternatives_once():
+    assert offered_words(BY_NAME["model"]) == ["calibrate", "recipe"]
+    assert offered_words(BY_NAME["jobs"]) == ["running", "paused", "stopped", "finished", "archived"]
+    assert offered_words(BY_NAME["memory"]) == ["show", "find", "recent"]
+    assert offered_words(BY_NAME["exercise"]) == ["status"]
+    assert offered_words(BY_NAME["read"]) == ["list", "show"]
+    assert offered_words(BY_NAME["channel"]) == ["add", "remove", "start"]
+    assert offered_words(BY_NAME["task"]) == [] and offered_words(BY_NAME["restart"]) == []
+
+
+@pytest.mark.spec("MSG-10")
+def test_alternative_words_are_lowercase_words_opening_an_alternative_one_bracket_deep():
+    assert alternative_words("open [a [b [deep]] | Cap | two words] x") == ["open", "a", "two"]
+
+
+@pytest.mark.spec("MSG-10")
+def test_word_matches_word_starts_first_then_word_holds():
+    assert word_matches("/jobs p") == [(BY_NAME["jobs"], "paused"), (BY_NAME["jobs"], "stopped")]
+    assert word_matches("/model re") == [(BY_NAME["model"], "recipe")]
+    assert word_matches("/memory xyz") == []
+
+
+@pytest.mark.spec("MSG-10")
+def test_word_matches_only_a_second_word_of_a_chat_command():
+    assert (
+        word_matches("/jobs") == [] and word_matches("/jobs ") == [] and word_matches("/jobs running p") == []
+    )
+    assert (
+        word_matches("jobs r") == [] and word_matches("/nosuch r") == [] and word_matches("/model all") == []
+    )
+    not_chat = [command.name for command in COMMANDS if not command.chat and command.name]
+    assert all(word_matches(f"/{name} a") == [] for name in not_chat)
+
+
+@pytest.mark.spec("MSG-10")
 def test_the_menu_rows_show_the_name_its_synopsis_words_and_what_it_does():
     rows = menu_on("/tas").rows()
     task = BY_NAME["task"]
@@ -200,19 +242,19 @@ def test_up_and_down_move_the_current_row_scroll_eight_and_stop_at_the_ends():
     menu = menu_on("/")
     count = len(menu.matches)
     assert count > 9
-    assert [row[1] for row in menu.rows()] == ["/" + name for name in names(menu.matches[:8])]
+    assert [row[1] for row in menu.rows()] == ["/" + name for name in matched_names(menu)[:8]]
     assert menu.press("up") == MenuAnswer(None, False) and menu.current == 0
     for _ in range(8):
         menu.press("down")
     rows = menu.rows()
-    assert len(rows) == 8 and rows[-1] == (True, "/" + menu.matches[8].name, *rows[-1][2:])
-    assert rows[0][1] == "/" + menu.matches[1].name
+    assert len(rows) == 8 and rows[-1] == (True, "/" + matched_names(menu)[8], *rows[-1][2:])
+    assert rows[0][1] == "/" + matched_names(menu)[1]
     for _ in range(count + 3):
         menu.press("down")
     assert menu.current == count - 1 and menu.rows()[-1][0]
     for _ in range(count + 3):
         menu.press("up")
-    assert menu.current == 0 and menu.rows()[0] == (True, "/" + menu.matches[0].name, *menu.rows()[0][2:])
+    assert menu.current == 0 and menu.rows()[0] == (True, "/" + matched_names(menu)[0], *menu.rows()[0][2:])
 
 
 @pytest.mark.spec("MSG-10")
@@ -240,7 +282,25 @@ def test_esc_closes_the_menu_until_typing_narrows_it_again():
     menu.follow("/r")
     assert not menu.open
     menu.follow("/ru")
-    assert menu.open and names(menu.matches) == ["runs", "run"]
+    assert menu.open and matched_names(menu) == ["runs", "run"]
+
+
+@pytest.mark.spec("MSG-10")
+def test_the_menu_offers_a_command_s_words_once_a_letter_is_typed():
+    model = BY_NAME["model"]
+    assert menu_on("/model r").rows() == [
+        (True, "/model recipe", "", model.what),
+        (False, "/model calibrate", "", model.what),
+    ]
+    assert not menu_on("/model ").open
+
+
+@pytest.mark.spec("MSG-10")
+def test_tab_fills_the_picked_word_and_enter_sends_it():
+    menu = menu_on("/model r")
+    assert menu.press("tab") == MenuAnswer("/model recipe ", False) and not menu.open
+    menu = menu_on("/model r")
+    assert menu.press("enter") == MenuAnswer("/model recipe", True) and not menu.open
 
 
 @pytest.mark.spec("MSG-10")

@@ -216,7 +216,15 @@ with what you typed first, then names that hold it):
 ```
 
 Up and down pick one, Tab fills it in, Enter sends a command that takes no words (or fills one that does),
-and Esc closes the list. Resizing the window redraws the rule at the new size. Your lines show again
+and Esc closes the list. Once you start a command's next word, the list offers that command's words the
+same way:
+
+```
+› /model r
+› /model recipe  the models Ollama has, and the one every build uses
+```
+
+Tab fills the word in and Enter sends the command with it. Resizing the window redraws the rule at the new size. Your lines show again
 highlighted, Tinker's messages are marked with a steel blue `●`, and a `✻ Tinkering…` line above the prompt,
 with a steel blue glow moving across the word, shows the time, the tokens, how long the model thought and
 the current step while it works:

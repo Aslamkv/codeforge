@@ -1,4 +1,6 @@
+import re
 from collections import namedtuple
+from operator import attrgetter
 
 from .settings import SETTINGS, Config, Home
 
@@ -687,10 +689,78 @@ def refs(words):
 def slash_matches(typed):
     if not typed.startswith("/") or " " in typed:
         return []
-    word = typed[1:]
     offered = [command for command in COMMANDS if command.chat]
-    starts = [command for command in offered if command.name.startswith(word)]
-    return starts + [command for command in offered if word in command.name and command not in starts]
+    return starts_then_holds(typed[1:], offered, attrgetter("name"))
+
+
+def word_matches(typed):
+    name, _, word = typed.removeprefix("/").partition(" ")
+    command = BY_NAME.get(name)
+    if not typed.startswith("/") or not word or " " in word or not command or not command.chat:
+        return []
+    return [(command, known) for known in starts_then_holds(word, offered_words(command), str)]
+
+
+def starts_then_holds(word, items, name_of):
+    starts = [item for item in items if name_of(item).startswith(word)]
+    return starts + [item for item in items if word in name_of(item) and item not in starts]
+
+
+def offered_words(command):
+    actions = [action.word for action in command.actions if action.word]
+    return list(dict.fromkeys(actions + alternative_words(synopsis_words(command))))
+
+
+def alternative_words(synopsis):
+    words, depth, opens = [], 0, True
+    for token in re.findall(r"\[|\]|\||[^\s\[\]|]+", synopsis):
+        if token in "[]|":
+            depth += {"[": 1, "]": -1}.get(token, 0)
+            opens = token != "]"
+            continue
+        if opens and depth <= 1 and re.fullmatch(r"[a-z]+", token):
+            words.append(token)
+        opens = False
+    return words
+
+
+def menu_matches(typed):
+    commands = [CommandMatch(command) for command in slash_matches(typed)]
+    return commands or [WordMatch(command, word) for command, word in word_matches(typed)]
+
+
+class CommandMatch:
+    def __init__(self, command):
+        self.command = command
+
+    @property
+    def line(self):
+        return "/" + self.command.name
+
+    def row(self, marked):
+        return MenuRow(marked, self.line, synopsis_words(self.command), self.command.what)
+
+    def fill(self):
+        return MenuAnswer(self.line + " ", False)
+
+    def enter(self):
+        return self.fill() if self.command.words else MenuAnswer(self.line, True)
+
+
+class WordMatch(CommandMatch):
+    def __init__(self, command, word):
+        super().__init__(command)
+        self.word = word
+
+    @property
+    def line(self):
+        return f"/{self.command.name} {self.word}"
+
+    def row(self, marked):
+        return MenuRow(marked, self.line, "", self.command.what)
+
+    def enter(self):
+        return MenuAnswer(self.line, True)
 
 
 class CommandMenu:
@@ -709,19 +779,14 @@ class CommandMenu:
     def follow(self, text):
         if text != self.typed:
             self.typed = text
-            self.matches, self.current, self.top = slash_matches(text), 0, 0
+            self.matches, self.current, self.top = menu_matches(text), 0, 0
 
     def close(self):
         self.matches, self.current, self.top = [], 0, 0
 
     def rows(self):
         shown = self.matches[self.top : self.top + MENU_ROWS]
-        return [
-            MenuRow(
-                self.top + index == self.current, "/" + command.name, synopsis_words(command), command.what
-            )
-            for index, command in enumerate(shown)
-        ]
+        return [match.row(self.top + index == self.current) for index, match in enumerate(shown)]
 
     def press(self, key):
         if not self.open or not isinstance(key, str):
@@ -744,16 +809,14 @@ class CommandMenu:
         return self.fill()
 
     def on_enter(self):
-        if not self.chosen.words:
-            line = "/" + self.chosen.name
-            self.close()
-            return MenuAnswer(line, True)
-        return self.fill()
+        answer = self.chosen.enter()
+        self.close()
+        return answer
 
     def fill(self):
-        line = f"/{self.chosen.name} "
+        answer = self.chosen.fill()
         self.close()
-        return MenuAnswer(line, False)
+        return answer
 
     def on_esc(self):
         self.close()
