@@ -5,6 +5,7 @@ import socket
 import stat
 import sys
 import time
+import types
 import urllib.parse
 
 import pytest
@@ -23,16 +24,16 @@ class BotAPI:
             name: list(value) if isinstance(value, list) else [value] for name, value in answers.items()
         }
         self.calls, self.headers_and_bodies = [], []
+        self.family = socket.AF_INET
 
     def connection(self, wait):
         return Connection(self)
 
 
 class Connection:
-    sock = None
-
     def __init__(self, api):
         self.api, self.response, self.closed = api, None, False
+        self.sock = types.SimpleNamespace(family=api.family)
 
     def request(self, method, path, data, headers):
         name = path.rsplit("/", 1)[1]
@@ -118,6 +119,35 @@ def test_a_telegram_connection_fails_when_no_address_connects(monkeypatch):
     Sockets(monkeypatch, connects=[False, False])
     with pytest.raises(TimeoutError):
         channels.connect_by_address((TelegramChannel.HOST, 443), 5)
+
+
+def test_a_telegram_chat_is_connecting_until_its_first_call_ends():
+    assert TelegramChannel("bot", {"allowed": ["42"]}, {"token": "T0K"}).state == "connecting…"
+
+
+def test_a_telegram_chat_answered_is_connected_by_the_family_of_its_address():
+    api = BotAPI(getMe={"username": "b"})
+    channel = telegram(api)
+    channel.call("getMe")
+    assert channel.state == "connected (IPv4)"
+    api.family = socket.AF_INET6
+    channel.call("getMe")
+    assert channel.state == "connected (IPv6)"
+
+
+def test_a_telegram_chat_refused_is_still_connected():
+    channel = telegram(BotAPI(getMe=(401, '{"ok": false, "description": "Unauthorized"}')))
+    with pytest.raises(ChannelError):
+        channel.call("getMe")
+    assert channel.state == "connected (IPv4)"
+
+
+def test_a_telegram_chat_the_network_fails_is_unreachable_with_the_reason():
+    channel = telegram(BotAPI(getMe=[{"username": "b"}, OSError("reset"), OSError("no route")]))
+    channel.call("getMe")
+    with pytest.raises(OSError):
+        channel.call("getMe")
+    assert channel.state == "unreachable: no route"
 
 
 @pytest.mark.spec("CNV-8")

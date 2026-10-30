@@ -277,6 +277,7 @@ class TelegramChannel(Channel):
         self.open_connections = queue.Queue()
         self.live_message_ids = {}
         self.last_words_by_chat = {}
+        self.state = "connecting…"
 
     def handle(self):
         return "@" + self.call("getMe")["username"]
@@ -522,8 +523,9 @@ class TelegramChannel(Channel):
         for attempt in (1, 2):
             try:
                 return self.exchange(path, data, wait, kind)
-            except http.client.HTTPException, OSError:
+            except (http.client.HTTPException, OSError) as error:
                 if attempt == 2:
+                    self.state = f"unreachable: {error}"
                     raise OSError(f"Telegram did not answer {method}") from None
 
     @staticmethod
@@ -539,12 +541,14 @@ class TelegramChannel(Channel):
         connection = self.connection(wait)
         try:
             connection.request("POST", path, data, {"Content-Type": kind})
+            family = connection.sock.family
             response = connection.getresponse()
             answer = Answer(response.status, response.read().decode(errors="replace"))
         except http.client.HTTPException, OSError:
             connection.close()
             raise
         self.open_connections.put(connection)
+        self.state = f"connected ({family_name(family)})"
         return answer
 
     @staticmethod
@@ -567,6 +571,10 @@ class TelegramChannel(Channel):
         if connection.sock is not None:
             connection.sock.settimeout(wait)
         return connection
+
+
+def family_name(family):
+    return "IPv6" if family == socket.AF_INET6 else "IPv4"
 
 
 def connect_by_address(address, wait, source_address=None):

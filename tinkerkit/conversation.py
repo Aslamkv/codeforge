@@ -1790,6 +1790,7 @@ class Channel:
         self.name, self.settings, self.secrets = name, settings, secrets
         self.allowed = {str(chat) for chat in settings.get("allowed", [])}
         self.closed = False
+        self.state = None
 
     def handle(self):
         raise NotImplementedError
