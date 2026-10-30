@@ -520,13 +520,17 @@ class TelegramChannel(Channel):
         )
 
     def answer(self, method, path, data, wait, kind=FORM):
-        for attempt in (1, 2):
-            try:
-                return self.exchange(path, data, wait, kind)
-            except (http.client.HTTPException, OSError) as error:
-                if attempt == 2:
-                    self.state = f"unreachable: {error}"
-                    raise OSError(f"Telegram did not answer {method}") from None
+        try:
+            return self.exchange(path, data, wait, kind)
+        except http.client.HTTPException, OSError:
+            return self.answer_again(method, path, data, wait, kind)
+
+    def answer_again(self, method, path, data, wait, kind):
+        try:
+            return self.exchange(path, data, wait, kind)
+        except (http.client.HTTPException, OSError) as error:
+            self.state = f"unreachable: {error}"
+            raise OSError(f"Telegram did not answer {method}") from None
 
     @staticmethod
     def retry_after(status, body):
@@ -582,7 +586,7 @@ def connect_by_address(address, wait, source_address=None):
     failure = OSError(f"{host} has no address")
     for *_, socket_address in socket.getaddrinfo(host, port, 0, socket.SOCK_STREAM):
         try:
-            sock = socket.create_connection(socket_address[:2], CONNECT_SECONDS, source_address)
+            sock = socket.create_connection((str(socket_address[0]), port), CONNECT_SECONDS, source_address)
         except OSError as error:
             failure = error
             continue
