@@ -1,6 +1,5 @@
 import io
 import json
-import random
 import urllib.error
 import urllib.request
 
@@ -671,7 +670,7 @@ def test_calibrate_writes_the_measured_settings(fake_ollama, monkeypatch, no_sle
     )
     fake_ollama.reply("not the answer", times=6)
     ids = [task["id"] for tier in quality.tiers() for task in tier]
-    settings = Calibrator("m", random.Random(5)).run()
+    settings = Calibrator("m").run()
     saved = Models.settings("m")
     assert saved == settings and Home.store().get("models", "m") == settings
     assert saved["max_prompt_tokens"] == 13653 and saved["max_reply_tokens"] == 27307
@@ -739,6 +738,7 @@ def test_a_model_that_does_not_think_says_so_and_an_unmeasured_speed_is_a_questi
         "max_reply_tokens": 4096,
         "solved": 0,
         "quality_tasks": [1, 2, 3],
+        "quality_results": [],
     }
     summary = Calibrator("m").summary(settings)
     assert "📖 Reads ? words a second (? tok/s)" in summary and "(12.5 tok/s)" in summary

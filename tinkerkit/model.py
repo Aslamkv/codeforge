@@ -1,6 +1,5 @@
 from collections import namedtuple
 lazy import json
-lazy import random
 lazy import secrets
 lazy import subprocess
 lazy import sys
@@ -587,24 +586,13 @@ class Models:
         return " · ".join(
             [
                 Models.solved_count_text(settings),
-                *Models.retries_text(settings),
-                *Models.answer_text(settings),
+                *quality_facts(settings["quality_results"]),
             ]
         )
 
     @staticmethod
     def solved_count_text(settings):
         return f"solved {Models.solved(settings)} of {len(settings['quality_tasks'])}"
-
-    @staticmethod
-    def retries_text(settings):
-        count = retries(settings["quality_results"])
-        return [f"{count} after a retry"] if count else []
-
-    @staticmethod
-    def answer_text(settings):
-        seconds = answer_seconds(settings["quality_results"])
-        return [] if seconds is None else [f"~{round(seconds)}s an answer"]
 
     @staticmethod
     def measured():
@@ -655,7 +643,7 @@ class Models:
 
     @staticmethod
     def fastest_text(settings):
-        return " · ".join([*Models.answer_text(settings), Models.solved_count_text(settings)])
+        return " · ".join([*answer_facts(settings["quality_results"]), Models.solved_count_text(settings)])
 
     @staticmethod
     def writes_text(settings):
@@ -821,9 +809,8 @@ class Calibrator:
 """
     RETRY = "That answer is wrong. Check your work and answer again."
 
-    def __init__(self, name, rng=None):
+    def __init__(self, name):
         self.name = name
-        self.rng = rng or random
         self.tokens_per_digit = 1.0
         self.largest_read_stats = {}
         self.load_seconds = None
@@ -876,10 +863,9 @@ class Calibrator:
 
     @staticmethod
     def solved_line(settings):
-        return (
-            f"🧠 Solved {settings['solved']} of {len(settings['quality_tasks'])} test tasks"
-            + quality_facts(settings.get("quality_results", []))
-        )
+        facts = quality_facts(settings["quality_results"])
+        line = f"🧠 Solved {settings['solved']} of {len(settings['quality_tasks'])} test tasks"
+        return f"{line} ({', '.join(facts)})" if facts else line
 
     @staticmethod
     def thinking(think):
@@ -1020,7 +1006,7 @@ class Calibrator:
             options = {"num_ctx": context, "num_predict": self.reply_tokens(seconds, write_tokens_per_s)}
             reply = Ollama.chat(self.name, list(messages), CALIBRATION_KEEP_ALIVE, options, think)
             attempts += 1
-            seconds += (reply.get("total_duration") or 0) / 1e9
+            seconds += self.reply_seconds(reply)
             content = reply["message"]["content"]
             solved = reply.get("done_reason") != "length" and solves(content, task["answer"])
             messages += [{"role": "assistant", "content": content}, {"role": "user", "content": self.RETRY}]
@@ -1030,6 +1016,10 @@ class Calibrator:
                 f"Task {task['id']} ({self.attempts_text(attempts)}, {round(seconds)}s)"
             )
         return result
+
+    @staticmethod
+    def reply_seconds(reply):
+        return (reply.get("total_duration") or 0) / 1e9
 
     @staticmethod
     def reply_tokens(seconds, write_tokens_per_s):
@@ -1542,9 +1532,17 @@ class OllamaError(Exception):
 
 
 def quality_facts(results):
-    facts = [f"{count} after a retry" for count in [retries(results)] if count]
-    facts += [f"~{round(seconds)}s an answer" for seconds in [answer_seconds(results)] if seconds is not None]
-    return f" ({', '.join(facts)})" if facts else ""
+    return retry_facts(results) + answer_facts(results)
+
+
+def retry_facts(results):
+    count = retries(results)
+    return [f"{count} after a retry"] if count else []
+
+
+def answer_facts(results):
+    seconds = answer_seconds(results)
+    return [] if seconds is None else [f"~{round(seconds)}s an answer"]
 
 
 def retries(results):
