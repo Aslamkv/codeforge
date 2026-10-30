@@ -183,7 +183,7 @@ class Desk:
         self.seconds_by_run = {}
         self.consoles = [channel for channel in channels if isinstance(channel, ConsoleChannel)]
         self.said_status = None
-        self.shown_banner = self.banner_lines()
+        self.shown_banner, self.shown_states = self.banner_lines(), {}
         self.chats_started, self.post_lock = set(), threading.Lock()
         self.stop_question = None
         self.exercise_reporter = None
@@ -224,8 +224,23 @@ class Desk:
 
     def open_banner(self):
         self.shown_banner = self.banner_lines()
+        self.banner_on_consoles()
+
+    def banner_on_consoles(self):
+        self.shown_states = {chat: chat.state for chat in self.chats()}
         for console in self.consoles:
-            console.banner(self.shown_banner)
+            console.banner(self.console_banner())
+
+    def console_banner(self):
+        named, stated = self.chats_line(Desk.chat_name), self.chats_line(Desk.chat_with_state)
+        return [stated if line == named else line for line in self.shown_banner]
+
+    def say_state_changes(self):
+        for chat in self.chats():
+            if chat.state != self.shown_states.get(chat):
+                self.shown_states[chat] = chat.state
+                for console in self.consoles:
+                    console.note(Desk.chat_with_state(chat))
 
     def renew_banner_when_changed(self):
         if self.banner_lines() != self.shown_banner:
@@ -236,20 +251,35 @@ class Desk:
         self.clear_all_chats()
         for console in self.consoles:
             console.wipe()
-            console.banner(self.shown_banner)
+        self.banner_on_consoles()
         with self.post_lock:
             for channel in self.chats_started:
                 self.post_banner(channel, self.shown_banner)
         self.say_status(anew=True)
 
     def banner_lines(self):
-        chats = [channel.name for channel in self.channels if channel not in self.consoles]
         embedding = Config.get("embed_model")
+        chats = self.chats_line(Desk.chat_name)
         details = [f"model {Config.get('model') or 'no model yet'}"]
         details += [f"embedding {embedding}"] if embedding else []
         details += [f"projects {self.shown_root()}"]
-        details += [f"chats {', '.join(chats)}"] if chats else []
+        details += [chats] if chats else []
         return ["🔧 Tinker", *details, "help lists commands · exit quits"]
+
+    def chats(self):
+        return [channel for channel in self.channels if channel not in self.consoles]
+
+    def chats_line(self, shown):
+        chats = [shown(chat) for chat in self.chats()]
+        return f"chats {', '.join(chats)}" if chats else None
+
+    @staticmethod
+    def chat_name(chat):
+        return chat.name
+
+    @staticmethod
+    def chat_with_state(chat):
+        return f"{chat.name} · {chat.state}" if chat.state else chat.name
 
     def shown_root(self):
         home = Path.home()
@@ -352,6 +382,7 @@ class Desk:
         looked = collected = 0.0
         while not self.a_channel_closed():
             time.sleep(ENDED_LOOK_SECONDS)
+            self.say_state_changes()
             if time.monotonic() - collected >= EXPIRED_MESSAGES_SWEEP_SECONDS:
                 collected = time.monotonic()
                 for channel in self.channels:
@@ -2021,6 +2052,9 @@ class ConsoleChannel(Channel):
     def wipe(self):
         if typed_here():
             self.screen.draw(WIPE_SCREEN_AND_SCROLLBACK)
+
+    def note(self, text):
+        self.screen.print(styled(text, "dim"))
 
     @staticmethod
     def banner_row(text, style, room):

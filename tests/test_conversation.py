@@ -1182,6 +1182,36 @@ def test_the_banner_names_tinker_the_model_the_projects_folder_and_the_chats(mon
     assert len(alone.banner_lines()) == 4
 
 
+def test_the_terminal_banner_shows_each_chat_with_its_state_and_a_chat_banner_names_it_only(desk, monkeypatch):
+    monkeypatch.setattr(conversation.Config, "get", lambda key: None)
+    console, telegram, stateless, drawn = ConsoleChannel(), Recorder("Telegram"), Recorder("rec"), []
+    telegram.state = "connecting…"
+    monkeypatch.setattr(console, "banner", lambda lines: drawn.append(list(lines)))
+    listening = Desk([console, telegram, stateless], Path.cwd())
+    listening.said_status = "🟢 **Tinker** · idle"
+    listening.open_banner()
+    assert "chats Telegram · connecting…, rec" in drawn[0]
+    assert "chats Telegram, rec" in listening.banner_lines()
+    listening.start_chat(telegram)
+    assert any("chats Telegram, rec" in text and "connecting" not in text for text in telegram.texts("send"))
+
+
+def test_a_chat_state_that_changes_after_the_banner_prints_a_dimmed_line_and_draws_no_banner(desk, monkeypatch):
+    terminal = colour_terminal(monkeypatch, 80)
+    console, telegram, drawn = ConsoleChannel(), Recorder("Telegram"), []
+    telegram.state = "connecting…"
+    monkeypatch.setattr(console, "banner", lambda lines: drawn.append(list(lines)))
+    listening = Desk([console, telegram], Path.cwd())
+    listening.open_banner()
+    listening.say_state_changes()
+    telegram.state = "connected (IPv4)"
+    listening.say_state_changes()
+    listening.say_state_changes()
+    shown = terminal.getvalue()
+    assert "connecting…" not in shown and shown.count("Telegram · connected (IPv4)") == 1
+    assert f"{DIM}Telegram · connected (IPv4)" in shown and len(drawn) == 1
+
+
 @pytest.mark.spec("CNV-8")
 def test_the_conversation_opens_with_the_banner_before_the_status(monkeypatch):
     terminal = colour_terminal(monkeypatch, 80)
