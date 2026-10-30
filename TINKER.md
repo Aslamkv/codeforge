@@ -291,7 +291,8 @@ tinker channel start
 ```
 
 Only your paired chat is listened to. Each of the bot host's addresses gets a second to connect and a second
-for its TLS handshake, so a broken IPv6 route falls to IPv4 at once instead of slowing the chat. The terminal's
+for its TLS handshake, so a broken IPv6 route falls to IPv4 at once instead of slowing the chat; once a family answers, the
+chat's later connections try it first. The terminal's
 banner names each chat (`chats Telegram`), and each change of its state prints a dimmed `Telegram · STATE`
 line (`connected (IPv4)` or `unreachable: REASON`). Manage your channels (removing one asks first; `--yes` skips that):
 
