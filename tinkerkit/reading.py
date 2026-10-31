@@ -309,6 +309,7 @@ class Readings:
         entry = Readings.get(number)
         READINGS.delete(number)
         Home.store().delete("learned", entry["topic"])
+        Principles(None).forget_scope(entry["topic"])
 
     @staticmethod
     def about(text, items):
@@ -344,9 +345,9 @@ def read_ending(entry, new, chapters):
     book, topic = Book.of(entry), Library.read(entry["topic"]) or {}
     readable = [chapter for chapter in book.chapters if chapter.state != "raw"]
     details = [
-        ("Read now", f"{len(chapters)} chapter(s), {new} new fact(s)"),
+        ("Read now", f"{len(chapters)} chapter(s), {new} principle(s) changed"),
         ("Chapters read", f"{len(book.in_state('read'))} of {len(readable)}"),
-        ("Kept", f"{len(topic.get('facts', []))} fact(s), {len(topic.get('rules', []))} rule(s)"),
+        ("Kept", f"{len(Principles(None).kept(entry['topic']))} principle(s)"),
         (
             "Builds",
             "use it when a request needs it"
@@ -392,7 +393,7 @@ def show(number):
             say.info(entry["survey"]["summary"], "📝")
         for chapter in Book.of(entry).chapters:
             note = {"raw": "text only", "unread": "not read yet"}.get(
-                chapter.state, f"{len(chapter.principles)} fact(s)"
+                chapter.state, f"{len(chapter.principles)} principle(s)"
             )
             say.item(f"{CHAPTER_STATE_ICONS[chapter.state]} {chapter.number}. {chapter.title} ({note})")
     say.info(
@@ -431,7 +432,7 @@ def known_reading(number):
 def progress(entry):
     book = Book.of(entry)
     readable = [chapter for chapter in book.chapters if chapter.state != "raw"]
-    return f"{len(book.in_state('read'))} of {len(readable)} chapters read · {len(Principles(None).kept(entry['topic']))} fact(s)"
+    return f"{len(book.in_state('read'))} of {len(readable)} chapters read · {len(Principles(None).kept(entry['topic']))} principle(s)"
 
 
 def learned(count):

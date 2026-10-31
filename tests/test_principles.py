@@ -83,6 +83,18 @@ def test_kept_gives_principles_of_a_scope_that_are_not_retired(tinker_home):
     assert principles.kept("any") == [anywhere]
 
 
+def test_forget_scope_deletes_every_principle_of_that_scope_retired_or_not(tinker_home):
+    principles = Principles(None)
+    python = a_principle()
+    retired = a_principle(do="use tmp_path")
+    retired.status = "retired"
+    anywhere = a_principle(scope="any", do="name each topic")
+    for principle in (python, retired, anywhere):
+        principles.put(principle)
+    principles.forget_scope("python")
+    assert principles.all() == [anywhere]
+
+
 def test_put_embeds_when_and_do(tinker_home, monkeypatch):
     server = EmbedServer()
     monkeypatch.setattr(Ollama, "get_json", staticmethod(server))

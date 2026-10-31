@@ -353,7 +353,7 @@ def test_every_chapter_is_read_in_order_and_saved_as_it_is_read(
     assert ("Chapters read", "4 of 4") in ending["details"]
     assert ending["headline"] == "Read #1 The Craft of Small Programs"
     fake_ollama.calls.clear()
-    assert Reader(make_model()).read(1)["details"][0] == ("Read now", "0 chapter(s), 0 new fact(s)")
+    assert Reader(make_model()).read(1)["details"][0] == ("Read now", "0 chapter(s), 0 principle(s) changed")
     assert fake_ollama.calls == []
 
 
@@ -413,7 +413,8 @@ def test_read_again_with_a_focus_looks_where_it_is_asked(
     assert labels(fake_ollama) == ["Read: chapter 3", "Read: chapter 4"]
     assert "Look for" in prompts(fake_ollama)[0]
     assert "chapter 3, and when to run every test" in prompts(fake_ollama)[0]
-    assert ("Read now", "2 chapter(s), 2 new fact(s)") in ending["details"]
+    assert ("Read now", "2 chapter(s), 2 principle(s) changed") in ending["details"]
+    assert ("Kept", f"{len(kept_rules())} principle(s)") in ending["details"]
     assert "Run every test after each change" in kept_rules()
 
 
@@ -548,16 +549,17 @@ def test_the_reading_list_is_shown_and_cleared(
     listed = capsys.readouterr().out
     assert (
         listed.index("#2 The Craft") < listed.index("#1 The Craft")
-        and "4 of 4 chapters read · 3 fact(s)" in listed
+        and "4 of 4 chapters read · 3 principle(s)" in listed
     )
     show(1)
     shown = capsys.readouterr().out
-    assert "✅ 2. Naming (1 fact(s))" in shown and "📄 5. Index (text only)" in shown
+    assert "✅ 2. Naming (1 principle(s))" in shown and "📄 5. Index (text only)" in shown
     assert "Small programs stay" in shown
     with pytest.raises(SystemExit, match="Nothing deleted: run tinker clear read #1"):
         cli.Cli.cleared(["read", "#1"], yes=False)
     cli.Cli.cleared(["read", "#1"], yes=True)
     assert Readings.get(1) is None and Library.read("read-1") is None and list(Readings.all()) == [2]
+    assert Principles(None).all() == []
     with pytest.raises(SystemExit, match="reading numbers alone"):
         cli.Cli.cleared(["read", "memory"], yes=True)
     cli.Cli.cleared(["read"], yes=True)

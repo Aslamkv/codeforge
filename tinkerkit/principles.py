@@ -105,6 +105,11 @@ class Principles:
     def kept(self, scope):
         return [principle for principle in self.live() if principle.scope == scope]
 
+    def forget_scope(self, scope):
+        for principle in self.all():
+            if principle.scope == scope:
+                Home.store().delete(self.COLLECTION, principle.id)
+
     def about(self, text, limit, scope=None):
         principles = self.kept(scope) if scope else self.live()
         order = Retriever(self.embeddings).rank(text, [principle.do for principle in principles])
