@@ -327,7 +327,7 @@ The home and its database, the settings, numbered lists, and the one way to dele
   | `time` | 🕒 | Time | `date +%H:%M %Z` | `date +%H:%M %Z` | the output: `11:16 IST` |
   | `date` | 📅 | Date | `date +%A %d %B %Y` | `date +%A %d %B %Y` | the output: `Saturday 31 October 2026` |
   | `disk` | 💾 | Disk | `df -h HOME` | `df -h HOME` | free of size and the share used: `609 GB free of 926 GB (3% used)` |
-  | `ram` | 🧠 | RAM | `top -l 1 -n 0` | `free -h` | used and free: `23 GB used, 266 MB free` |
+  | `ram` | 🧠 | RAM | `memory_pressure` | `free -h` | available of the total and the share used: `21 GB available of 24 GB (14% used)`; macOS gives the total in bytes and the free percentage, Linux the `total` and `available` columns |
   | `battery` | 🔋 | Battery | `pmset -g batt` | `upower -i /org/freedesktop/UPower/devices/battery_BAT0` | percent, state, and the power source when named: `100%, charged, on AC power` |
   | `uptime` | ⏱️ | Uptime | `uptime` | `uptime` | days, hours, minutes, leaving out the zero ones: `2 d 3 h 53 m`, `45 m` |
   | `network` | 🌐 | Network | `ipconfig getifaddr en0` | `hostname -I` | the first address: `192.168.220.41` |
@@ -339,7 +339,7 @@ The home and its database, the settings, numbered lists, and the one way to dele
   A subclass registers itself when defined, so `SYSTEM_CHECKS` (one instance of each, in table order) and
   `SYSTEM_WORDS` hold exactly the table's rows, and a new check is one new subclass and one new row; nothing
   else changes. `answer()` runs the command for the system Tinker runs on, without a shell, and gives
-  `EMOJI LABEL: SUMMARY` (`🧠 RAM: 23 GB used, 266 MB free`). A system it has no command for, a program not
+  `EMOJI LABEL: SUMMARY` (`🧠 RAM: 21 GB available of 24 GB (14% used)`). A system it has no command for, a program not
   found, a failure, an empty output, no answer within `SYSTEM_CHECK_SECONDS` (5) or an output `summary`
   cannot read gives `⚠️ LABEL: couldn't check on this computer` instead; it never raises.
 - **SYS-3** `system [time|date|…]` is a `glance` command a chat offers, whose synopsis takes its words from
