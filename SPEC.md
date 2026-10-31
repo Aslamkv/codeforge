@@ -1119,7 +1119,8 @@ kept as principles (**PRI**); where a point below names them, it holds for princ
   empty.
 - **KNW-3** `Library.items(topics)` gives one item per text, as `{topic, name, phase, text}`: the summary, the
   tools, what is installed, research findings, each fact with its confidence, and each principle scoped to the
-  topic and not retired (**PRI-2**), with `kind` "principle", its `id`, and its `prompt_text` as text. A broken
+  topic and not retired (**PRI-2**), with `kind` "principle", its `id`, its `when`, and its `prompt_text` as
+  text. A broken
   topic is left out, with a note. `shown_in(item, phases)` sends machine items to the toolchain and config
   prompts, tools also to the tests prompt, findings to the spec and design prompts, a fact or principle to its
   own phase, and a principle of phase `any` to every prompt.
@@ -1139,17 +1140,19 @@ kept as principles (**PRI**); where a point below names them, it holds for princ
   does not run: a type checker it never names, a linter or formatter where it has no command.
   `toolchain_title` asks to add them. `unavailable_tools` names the learned tools not installed here that the
   toolchain neither installs nor runs, and that are not to be added.
-- **KNW-7** Every lesson and every learned fact or finding has an ID and a status, `candidate` or `proven`.
-  `prove(used)` makes the used candidates proven, and copies the used web facts into the language's knowledge
-  as proven facts. `disprove(used, phases)` retires every used item shown in those phases' prompts, whether it
+- **KNW-7** Every lesson (a principle, **PRI-5**) and every learned fact or finding has an ID and a status,
+  `candidate` or `proven`. `prove(used)` makes the used candidates proven, lessons and topic principles among
+  them, and copies the used web facts into the language's knowledge as proven facts. `disprove(used, phases)` retires every used item shown in those phases' prompts, whether it
   was proven or not.
 - **KNW-8** `facts(phases)` gives the language's proven facts for the prompts of those phases.
 - **KNW-9** `Knowledge(language, run)` records each item's history as `{event, run, at}`, the last
   `EVENTS_KEPT_PER_ITEM`: a new lesson or fix is `born`, a lesson seen again is `confirmed`, every item a
   succeeding cycle used `helped` (counted in `helped`, proven before or not), a retired one `failed`, and one
-  taught and checked `taught` (**TCH-7**). A replayed fix that works `helped`.
-- **KNW-10** A retired item leaves the lessons, facts, findings or fixes it was among for the `retired` list
-  beside them, with status `retired`, its `reason` and the run. That list keeps the last
+  taught and checked `taught` (**TCH-7**). A lesson's events live in its principle's history. A replayed fix
+  that works `helped`.
+- **KNW-10** A retired principle stays in the store with status `retired`, its reason on its `failed` event.
+  A retired fact, finding or fix leaves the list it was among for the `retired` list beside it, with status
+  `retired`, its `reason` and the run. That list keeps the last
   `RETIRED_KEPT_PER_LIST`. Nothing retired is shown in a prompt.
 - **KNW-11** `Embeddings` keeps each text's vector by its key, per embedding model, in the home database. Only
   missing texts are asked for, in batches of `TEXTS_PER_REQUEST`, keeping the model loaded for `EMBED_KEEP_ALIVE` and in
@@ -1355,7 +1358,8 @@ What Tinker knows as one graph, and the page that shows it.
   of that name), its details its phase, `when`, `because`, exceptions, `helped` and `harmed`, its sources its
   evidence, and its day its first history event.
 - **GRF-2** Links: `belongs_to` from an item to its language, topic, any language or the person's commands;
-  `cites` from a finding to its facts and from a language's rule to its facts and lessons; `became` from a web
+  `cites` from a finding to its facts, and from a rule to each fact it cites, else the principle of that id;
+  `became` from a web
   fact to the language's proven fact it was copied into; and `taught_by`, `confirmed_in`, `helped_in` and
   `failed_in` from an item to the runs in its history. A run is a node with its line from `runs`, or marked as
   having none.
@@ -1506,7 +1510,8 @@ then is anything changed.
   why. When no change is made, nothing changes.
 - **TCH-7** A change that is made retires the items it shows wrong (the reason names what was taught),
   replaces the commands of the language's toolchain (only when it has one, and the result is usable), and
-  keeps its lesson (or its fact, **TCH-8**) as proven, with a `taught` event and its sources: the evidence its
+  keeps its lesson as a proven principle (or its fact, **TCH-8**), with a `taught` event, evidence of kind
+  `taught` and its sources: the evidence its
   facts cite, and "your preference" for a preference. A lesson like a known one proves that one instead of
   being added.
 - **TCH-8** A teaching about a reading is checked against its text: its passages most about each fact are
@@ -1605,7 +1610,9 @@ What every phase works through.
   and it prepares `.env`. `run_all_tests` runs the suite once per state of the project's files. `note` keeps
   the last 30 problems. `ask_until_usable` gives the value, and ends with `SystemExit` when no reply was usable. `format_code` drops
   a formatter that fails.
-- **SES-3** `knowledge_parts(*phases)` gives lessons and learned facts as optional parts, plus the person's
+- **SES-3** `knowledge_parts(*phases)` gives as optional parts the lessons (principles scoped `any` or to the
+  language) and the learned items: the language's proven facts and the chosen topics' facts and principles,
+  plus the person's
   commands for the toolchain. It records each item it shows in the cycle's `used`, with the prompt phases it
   was shown in; a learned principle as `Item("principle", id)` (**PRI-7**), so the build proves or retires it
   (**PRI-5**). A prompt that writes code or tests is also told the checks they must pass: the toolchain's
@@ -1631,7 +1638,8 @@ Recall, the spec, the design and the contracts where files meet, and their revie
   cycle's topics. When the call fails, the cycle goes on without learned topics.
 - **PLN-3** A topic is used when the request names it, by its name or by its language without a version, or is
   close to it in meaning (`TOPIC_RELEVANT_SIMILARITY`, when embeddings are there). What the project does not
-  need stays out of its prompts (`inapplicable`), proven or not: a rule for some code (its `when`) until the
+  need stays out of its prompts (`inapplicable`), proven or not: a rule or principle for some code (its `when`)
+  until the
   spec reply names that code among the listed `situations`, and anything that names a tool `unavailable_tools`
   gives.
 - **PLN-4** `asked(cycle)` is the request, followed by each amendment the person made.
