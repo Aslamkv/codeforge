@@ -730,9 +730,10 @@ def test_a_teaching_that_holds_corrects_what_tinker_keeps(kept, make_model, fake
     sources = lambda principle: [item["source"] for item in principle.evidence if item["kind"] == "taught"]
     assert sources(ruff) == [PAGE["url"]] and sources(no_mypy) == ["your preference"]
     assert ending["status"] == "done" and ending["headline"] == "Corrected: 5 change(s)"
-    retired = python["retired"][-1]
-    assert retired["text"] == "Format Python with black before linting with ruff"
-    assert retired["reason"] == f"corrected by what you taught: {teaching}"
+    kept_principles = {principle.do: principle for principle in Principles(None).all()}
+    retired = kept_principles["Format Python with black before linting with ruff"]
+    assert retired.status == "retired"
+    assert retired.history[-1]["reason"] == f"corrected by what you taught: {teaching}"
 
 
 @pytest.mark.spec("TCH-9")

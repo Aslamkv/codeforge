@@ -1219,17 +1219,20 @@ def test_an_item_reads_back_from_its_key(item, key):
 
 
 @pytest.mark.spec("KNW-22")
+@pytest.mark.spec("PRI-7")
 def test_retire_takes_an_item_from_its_own_store(tinker_home):
     route, client = topic_with_facts()
     known = Knowledge("Python", "r1")
     known.add_lessons([lesson("Seed random generators inside tests", "tests")], [])
     known.add_lessons([lesson("Use tmp_path for files a test makes", "tests", "language")], [])
+    known.add_lessons([lesson("Name each test after the behaviour it checks", "tests")], [])
     known.remember_fix({"failure": "error: no module named calc", "cause": "pythonpath", "replay": None})
     known.prove({f"fact:flask:{route}": ["code"]})
     lessons = {item["text"]: item["id"] for item in Knowledge("Python").known_lessons()}
     for item in (
         Item("lesson", lessons["Seed random generators inside tests"]),
         Item("lesson", lessons["Use tmp_path for files a test makes"]),
+        Item("principle", lessons["Name each test after the behaviour it checks"]),
         Item("known", route),
         Item("fix", "error: no module named calc", "python"),
         Item("fact", client, "flask"),
@@ -1240,6 +1243,8 @@ def test_retire_takes_an_item_from_its_own_store(tinker_home):
     assert after.known_lessons() == [] and after.language_doc["facts"] == after.language_doc["fixes"] == []
     assert [fact["id"] for fact in Library.read("flask")["facts"]] == [route]
     assert {item["reason"] for item in after.language_doc["retired"]} == {"taught wrong"}
+    assert Principles(None).get(lessons["Name each test after the behaviour it checks"]).status == "retired"
+    assert not retire(Item("principle", "missing"), "Python", "taught wrong", "r2")
     assert not retire(Item("toolchain", "python"), "Python", "taught wrong", "r2")
 
 

@@ -11,6 +11,7 @@ from tinkerkit import cli
 from tinkerkit.cli import Cli, Commands, CycleRunner, Doctor, ProjectFolder, ProjectRun
 from tinkerkit.knowledge import Knowledge, Library
 from tinkerkit.model import Models, Ollama, OllamaError
+from tinkerkit.principles import Principles
 from tinkerkit.project import Runs, Tracker, project_store
 from tinkerkit.session import Phase, Stopped
 from tinkerkit.settings import FIX_PHASES, PHASES, QUALITY_VERSION, Config
@@ -876,7 +877,7 @@ def test_a_task_is_built_end_to_end(run_ready, fake_ollama, home_store):
         "task": "a calculator that adds and subtracts",
     }
     assert home_store.get("languages", "python")["projects"] == 1
-    assert home_store.get("memory", "any")["lessons"][0]["text"] == "Subtract with the minus operator"
+    assert [principle.do for principle in Principles(None).all()] == ["Subtract with the minus operator"]
     assert "Done. All 3 spec tests pass (SPEC.md)." in printed(folder)
     assert sorted(path.name for path in folder.iterdir()) == [
         ".tinker",

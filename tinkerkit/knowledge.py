@@ -1744,7 +1744,18 @@ def retire(item, language, reason, run):
         return Library.retire(item.topic, {item.id}, reason, run) > 0
     if item.kind == "lesson":
         return Knowledge(language, run).retire_lessons({item}, reason) > 0
+    if item.kind == "principle":
+        return retire_principle(item.id, reason, run)
     return item.kind in STORED_AS and retire_known(Knowledge(language, run), item, reason)
+
+
+def retire_principle(principle_id, reason, run):
+    principle = Principles(None).get(principle_id)
+    if not principle or principle.status == "retired":
+        return False
+    principle.fail(reason, run)
+    Principles(None).put(principle)
+    return True
 
 
 def retire_known(knowledge, item, reason):
