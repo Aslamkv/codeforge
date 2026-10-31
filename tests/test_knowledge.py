@@ -477,6 +477,19 @@ def test_web_pages_reads_each_address_once_up_to_the_cap(make_model):
 
 
 @pytest.mark.spec("KNW-24")
+def test_web_pages_reads_a_page_once_whatever_its_address(make_model):
+    first, other = "https://example.org/page", "https://example.org/Page?q=1"
+    results = {
+        "ruff": [first, "https://www.example.org/page/"],
+        "black": ["http://EXAMPLE.org/page", other],
+    }
+    internet = FakeInternet({first: "what the page says", other: "what the other says"}, results)
+    read = Learner(make_model(), internet, None).web_pages([{"query": "ruff"}, {"query": "black"}])
+    assert internet.fetches == [[first, other]]
+    assert [page["url"] for page in read] == [first, other]
+
+
+@pytest.mark.spec("KNW-24")
 def test_a_page_the_web_could_not_read_stands_on_its_search_snippet(make_model):
     internet = FakeInternet(
         {}, {"ruff": ["https://gone", "https://bare"]}, {"https://gone": "Ruff replaces black"}
