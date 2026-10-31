@@ -224,7 +224,9 @@ class Reader(Tracked):
         for part, text in enumerate(texts, 1):
             label = f"Read: chapter {chapter.number}" + (f" part {part}" if len(texts) > 1 else "")
             passage = {"text": text, "source": f"#{entry['number']} chapter {chapter.number}"}
-            deltas += inducer.induce([passage], entry["topic"], think(), look_for=focus or look_for, label=label)
+            deltas += inducer.induce(
+                [passage], entry["topic"], think(), look_for=focus or look_for, label=label
+            )
         return [read_phase(delta, survey["software"]) for delta in deltas][:READ_FACTS_PER_CHAPTER]
 
 
@@ -299,7 +301,9 @@ class Readings:
         changed = Principles(Embeddings.configured()).apply(deltas, "")
         for kept in entry["chapters"]:
             if kept["number"] == chapter:
-                kept["principles"] = list(dict.fromkeys(kept.get("principles", []) + [principle.id for principle in changed]))
+                kept["principles"] = list(
+                    dict.fromkeys(kept.get("principles", []) + [principle.id for principle in changed])
+                )
                 kept["state"] = "read"
         Readings.save(entry)
         return changed

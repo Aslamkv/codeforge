@@ -389,7 +389,9 @@ class SlotLearner(Tracked):
         return selected
 
     def digested(self, plan, version, selected):
-        self.step("digest", "Reading the passages for principles, one question at a time (the slow part)…", "🧠")
+        self.step(
+            "digest", "Reading the passages for principles, one question at a time (the slow part)…", "🧠"
+        )
         asked = [slot for slot in web_slots(plan["profile"]) if selected.get(slot.id)]
         records = []
         for done, slot in enumerate(asked, 1):
@@ -414,7 +416,13 @@ class SlotLearner(Tracked):
                 say.skip(f"{label(slot.id)}: nothing found in {len(passages)} passage(s)")
         cited = [item["source"] for delta in deltas for item in delta["evidence"]]
         return (
-            [{"slot": slot.id, "principles": [principle.id for principle in changed], "passages": list(dict.fromkeys(cited))}]
+            [
+                {
+                    "slot": slot.id,
+                    "principles": [principle.id for principle in changed],
+                    "passages": list(dict.fromkeys(cited)),
+                }
+            ]
             if changed
             else []
         )
@@ -529,7 +537,9 @@ class SlotLearner(Tracked):
             (
                 "🧩",
                 "Principles changed",
-                ", ".join(f"{label(record['slot'])} {len(record['principles'])}" for record in entry["principles"])
+                ", ".join(
+                    f"{label(record['slot'])} {len(record['principles'])}" for record in entry["principles"]
+                )
                 or "none",
             ),
             ("🌐", "Web requests", self.internet.requests.text()),

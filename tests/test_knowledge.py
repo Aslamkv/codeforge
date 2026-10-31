@@ -19,6 +19,7 @@ from tinkerkit.knowledge import (
     search_entry,
 )
 from tinkerkit.model import Models, Ollama, OllamaError
+from tinkerkit.principles import Principles
 from tinkerkit.prompts import Prompts
 from tinkerkit.settings import (
     CHUNKS_PER_PAGE,
@@ -824,8 +825,19 @@ def test_research_a_domain(make_model, fake_ollama, tinker_home):
         when="Analyse the findings",
     )
     fake_ollama.reply(analysis(), when="Analyse the findings")
+    fake_ollama.reply(
+        json.dumps(
+            {"deltas": [{"kind": "add", "phase": "spec", "do": "Weigh donations at intake", "cites": [1]}]}
+        ),
+        when="Induce",
+    )
     internet = FakeInternet(pages)
     entry = Researcher(Learner(make_model(), internet, None)).research("food bank inventory")
+    kept = Principles(None).all()
+    assert [principle.do for principle in kept] == ["Weigh donations at intake"]
+    [record] = entry["principles"]
+    assert record["question"] == 1 and record["principles"] == [kept[0].id]
+    assert len(record["passages"]) == 1 and record["passages"][0] in pages
     assert entry["kind"] == "research" and entry["name"] == "Food bank inventory"
     assert entry["questions"] == FRAME["questions"] and entry["open"] == []
     assert entry["facts"][0]["confidence"] == "corroborated" and entry["facts"][0]["sites"] == [
@@ -841,12 +853,13 @@ def test_research_a_domain(make_model, fake_ollama, tinker_home):
 
 
 @pytest.mark.spec("KNW-18")
-def test_a_research_that_finds_nothing_keeps_the_earlier_one(make_model, tinker_home, capsys):
+def test_a_research_that_finds_nothing_keeps_the_earlier_one(make_model, fake_ollama, tinker_home, capsys):
     earlier = dict(FRAME, kind="research", learned="2026-01-01", facts=[], findings=[])
     Library.save("food-bank-inventory", earlier)
     learner = Learner(make_model(), FakeInternet(), None)
     kept = Researcher(learner).research("food bank inventory")
     assert kept["learned"] == "2026-01-01" and learner.kept_earlier_topic
+    assert not any(label.startswith("Induce") for label in fake_ollama.labels())
     assert "No page gave facts; kept what was found before (2026-01-01)" in capsys.readouterr().out
 
 

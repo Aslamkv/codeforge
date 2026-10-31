@@ -43,6 +43,7 @@ from .settings import (
 from .text import field, fingerprint, first_line, host, now_text, one_line, similarity, split_text, words
 lazy from .jobs import today
 lazy from .model import Answer, Models, Ollama, OllamaError
+lazy from .principles import Inducer, Principles
 lazy from .project import Tracked
 lazy from .prompts import Part, Prompts, Reply
 lazy from .workspace import Toolchain, Workspace
@@ -50,7 +51,7 @@ lazy from .workspace import Toolchain, Workspace
 SavedPlan = namedtuple("SavedPlan", "plan saved")
 SafeCommands = namedtuple("SafeCommands", "kept dropped")
 Findings = namedtuple("Findings", "facts sources")
-Investigation = namedtuple("Investigation", "facts sources analysis")
+Investigation = namedtuple("Investigation", "facts sources analysis pages")
 CrossCheck = namedtuple("CrossCheck", "support differ")
 
 
@@ -848,7 +849,7 @@ class Researcher:
         learner = self.learner
         known = Library.read(slug)
         frame = self.frame(topic, known if (known or {}).get("kind") == "research" else None)
-        facts, sources, analysis = self.investigate(frame)
+        facts, sources, analysis, pages = self.investigate(frame)
         if known and (learner.cut_short() or not facts):
             say.warn(
                 f"{learner.cut_short() or 'No page gave facts'}; kept what was found before "
@@ -863,6 +864,7 @@ class Researcher:
             )
             return None
         entry = self.entry(topic, frame, facts, sources, analysis)
+        entry["principles"] = self.principles_from(pages, slug)
         learner.step("keep")
         Library.save(slug, entry)
         say.info(
@@ -916,7 +918,7 @@ class Researcher:
 
     def investigate(self, frame):
         searches = self.first_searches(frame)
-        facts, sources, analysis = [], [], self.EMPTY_ANALYSIS
+        facts, sources, analysis, fetched = [], [], self.EMPTY_ANALYSIS, []
         for round_number, pages in enumerate(RESEARCH_PAGES_PER_ROUND, 1):
             if not searches:
                 break
@@ -926,7 +928,9 @@ class Researcher:
                 "🔎",
             )
             with say.working_on(f"Reading up to {pages} page(s) about {frame['name']}, round {round_number}"):
-                found, read = self.learner.read_web(frame["name"], searches, pages)
+                round_pages = self.round_pages(searches, pages)
+                found, read = self.learner.read_pages(frame["name"], round_pages)
+            fetched += round_pages
             self.learner.add_facts(facts, found)
             sources += [url for url in read if url not in sources]
             self.say_round(facts, sources, found)
@@ -935,7 +939,45 @@ class Researcher:
             differ = self.cross_check(facts)
             analysis = self.analyse(frame, facts, differ) or analysis
             searches = self.next_searches(frame, facts, analysis)
-        return Investigation(facts, sources, analysis)
+        return Investigation(facts, sources, analysis, fetched)
+
+    def round_pages(self, searches, max_pages):
+        learner = self.learner
+        return learner.fetched(learner.in_turn(searches, learner.results(searches), max_pages))
+
+    def principles_from(self, pages, slug):
+        principles = Principles(self.learner.embeddings)
+        by_question = collections.defaultdict(list)
+        for page in pages:
+            by_question[int(page["section"])].append(page)
+        return [
+            record
+            for number, question_pages in sorted(by_question.items())
+            for record in self.question_principles(principles, number, question_pages, slug)
+        ]
+
+    def question_principles(self, principles, number, pages, slug):
+        given = [{"text": page["content"], "source": page["url"]} for page in pages]
+        deltas = Inducer(self.model, principles).induce(given, scope=slug)
+        changed = principles.apply(deltas, "")
+        with say.section():
+            if changed:
+                say.done(f"Question {number}: {len(changed)} principle(s) from {len(pages)} page(s)")
+                say.found(first_line(changed[0].prompt_text(), 200))
+            else:
+                say.skip(f"Question {number}: nothing found in {len(pages)} page(s)")
+        cited = [item["source"] for delta in deltas for item in delta["evidence"]]
+        return (
+            [
+                {
+                    "question": number,
+                    "principles": [principle.id for principle in changed],
+                    "passages": list(dict.fromkeys(cited)),
+                }
+            ]
+            if changed
+            else []
+        )
 
     @staticmethod
     def first_searches(frame):
