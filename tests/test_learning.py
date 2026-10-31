@@ -11,7 +11,6 @@ from tinkerkit.learning import (
     LearnStopped,
     SlotLearner,
     label,
-    read_digest,
     read_plan,
     wanted_docs,
 )
@@ -23,7 +22,6 @@ from tinkerkit.prompts import Reply
 from tinkerkit.settings import (
     DOCS_SITE_SEARCH,
     DOCS_VERSION_SEARCH,
-    FACTS_PER_SLOT,
     MAX_PLANNED_SEARCHES,
     RESULTS_PER_LEARN_SEARCH,
     SLOT_CANDIDATE_PASSAGES,
@@ -374,36 +372,6 @@ def test_read_plan_checks_the_plan():
     for bad in ({"kind": "band", "name": "X"}, {"kind": "tool", "name": ""}, ["not", "an", "object"]):
         with pytest.raises(ValueError):
             read_plan(bad)
-
-
-@pytest.mark.spec("LRN-2")
-def test_read_digest_keeps_only_facts_that_cite_the_passages_given():
-    slot, given = TOOLCHAIN, [passage(1, "a", "https://a.dev"), passage(2, "b", "https://b.dev")]
-    facts = read_digest(
-        {
-            "facts": [
-                {"phase": "tests", "text": "Run  tests\nwith langtest", "cites": ["P1", "[P2]", "P1"]},
-                {"phase": "nowhere", "text": "Format with langfmt", "cites": ["P2"]},
-                {"phase": "code", "text": "Trust me", "cites": []},
-                {"phase": "code", "text": "Made up", "cites": ["P9"]},
-                {"phase": "code", "text": "Lang 9 is in development", "cites": ["P1"]},
-                "junk",
-            ]
-            + [{"text": f"fact {number}", "cites": ["P1"]} for number in range(10)]
-        },
-        slot,
-        given,
-    )
-    assert facts[0] == {
-        "phase": "tests",
-        "text": "Run tests with langtest",
-        "slot": "toolchain",
-        "passages": ["P1", "P2"],
-        "source": "https://a.dev",
-        "also": ["https://b.dev"],
-    }
-    the_slots_section = "toolchain"
-    assert facts[1]["phase"] == the_slots_section and len(facts) == FACTS_PER_SLOT
 
 
 WEB_AND_WARNING_BY_CAUSE = {

@@ -27,9 +27,6 @@ lazy from .settings import (
     DOCS_NAME_SEARCH,
     DOCS_SITE_SEARCH,
     DOCS_VERSION_SEARCH,
-    FACT_PHASES,
-    FACTS_PER_SLOT,
-    MAX_FACT_CHARS,
     MAX_VERSION_COMMANDS,
     NOT_REFERENCE_WORDS,
     RESULTS_PER_LEARN_SEARCH,
@@ -694,31 +691,6 @@ def searches_by_slot(given, ids):
         for key, search in (given.items() if isinstance(given, dict) else [])
         if key in ids and search_entry(search)
     }
-
-
-def read_digest(data, slot, passages):
-    by_id = {passage.id: passage for passage in passages}
-    facts = []
-    for item in (data.get("facts") or []) if isinstance(data, dict) else []:
-        if not isinstance(item, dict):
-            continue
-        text, phase = clean(item.get("text"), MAX_FACT_CHARS), clean(item.get("phase"), 20).lower()
-        cited = list(dict.fromkeys(str(citation).strip("[] ") for citation in item.get("cites") or []))
-        cited = [passage_id for passage_id in cited if passage_id in by_id]
-        if not text or not cited or Learner.UNRELEASED_RE.search(text):
-            continue
-        pages = list(dict.fromkeys(by_id[passage_id].url for passage_id in cited))
-        facts.append(
-            {
-                "phase": phase if phase in FACT_PHASES else slot.section,
-                "text": text,
-                "slot": slot.id,
-                "passages": cited,
-                "source": pages[0],
-                **({"also": pages[1:]} if pages[1:] else {}),
-            }
-        )
-    return facts[:FACTS_PER_SLOT]
 
 
 def clean(value, limit):

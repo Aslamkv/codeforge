@@ -23,6 +23,7 @@ def a_principle(**changes):
     return Principle.new(**{**fields, **changes})
 
 
+@pytest.mark.spec("PRI-1")
 def test_a_new_principle_is_a_candidate_with_an_id_from_scope_when_and_do():
     principle = a_principle()
     assert principle.status == "candidate"
@@ -33,11 +34,13 @@ def test_a_new_principle_is_a_candidate_with_an_id_from_scope_when_and_do():
     assert principle.history[0]["event"] == "born"
 
 
+@pytest.mark.spec("PRI-1")
 def test_a_principle_round_trips_through_its_document():
     principle = a_principle()
     assert Principle.from_doc(principle.to_doc()) == principle
 
 
+@pytest.mark.spec("PRI-1")
 def test_prompt_text_is_compact_and_names_no_evidence():
     assert a_principle().prompt_text() == (
         "a test reads a file → give it a temporary directory; unless the file is a checked-in fixture"
@@ -45,10 +48,12 @@ def test_prompt_text_is_compact_and_names_no_evidence():
     assert "run-7" not in a_principle().prompt_text()
 
 
+@pytest.mark.spec("PRI-1")
 def test_prompt_text_leaves_out_an_empty_when_and_no_exceptions():
     assert a_principle(when="", exceptions=[]).prompt_text() == "give it a temporary directory"
 
 
+@pytest.mark.spec("PRI-1")
 def test_english_is_a_sentence_that_names_no_evidence():
     assert a_principle().english() == (
         "When a test reads a file, give it a temporary directory, because tests must not touch the real home, "
@@ -57,10 +62,12 @@ def test_english_is_a_sentence_that_names_no_evidence():
     assert "run-7" not in a_principle().english()
 
 
+@pytest.mark.spec("PRI-1")
 def test_english_leaves_out_empty_parts():
     assert a_principle(when="", because="", exceptions=[]).english() == "Give it a temporary directory."
 
 
+@pytest.mark.spec("PRI-2")
 def test_principles_keeps_each_principle_as_one_document(tinker_home):
     principles = Principles(None)
     principle = a_principle()
@@ -71,6 +78,7 @@ def test_principles_keeps_each_principle_as_one_document(tinker_home):
     assert principles.all() == [principle]
 
 
+@pytest.mark.spec("PRI-2")
 def test_kept_gives_principles_of_a_scope_that_are_not_retired(tinker_home):
     principles = Principles(None)
     python = a_principle()
@@ -83,6 +91,7 @@ def test_kept_gives_principles_of_a_scope_that_are_not_retired(tinker_home):
     assert principles.kept("any") == [anywhere]
 
 
+@pytest.mark.spec("PRI-2")
 def test_forget_scope_deletes_every_principle_of_that_scope_retired_or_not(tinker_home):
     principles = Principles(None)
     python = a_principle()
@@ -120,6 +129,7 @@ def new_evidence(ref):
     return {"kind": "run", "ref": ref, "source": "lessons"}
 
 
+@pytest.mark.spec("PRI-3")
 def test_apply_add_keeps_a_new_candidate_that_was_born(tinker_home):
     principles = Principles(None)
     delta = {
@@ -141,6 +151,7 @@ def test_apply_add_keeps_a_new_candidate_that_was_born(tinker_home):
     assert [event["event"] for event in added.history] == ["born"]
 
 
+@pytest.mark.spec("PRI-3")
 def test_apply_drops_an_add_with_no_do_or_no_evidence(tinker_home):
     principles = Principles(None)
     no_do = {
@@ -161,6 +172,7 @@ def test_apply_drops_an_add_with_no_do_or_no_evidence(tinker_home):
     assert principles.all() == []
 
 
+@pytest.mark.spec("PRI-3")
 def test_apply_add_like_a_kept_principle_strengthens_that_one(tinker_home):
     principles = Principles(None)
     kept = kept_principle(principles)
@@ -178,6 +190,7 @@ def test_apply_add_like_a_kept_principle_strengthens_that_one(tinker_home):
     assert len(principles.all()) == 1
 
 
+@pytest.mark.spec("PRI-3")
 def test_apply_add_like_a_principle_of_another_scope_adds_a_new_one(tinker_home):
     principles = Principles(None)
     kept_principle(principles)
@@ -192,6 +205,7 @@ def test_apply_add_like_a_principle_of_another_scope_adds_a_new_one(tinker_home)
     assert sorted(principle.scope for principle in principles.all()) == ["python", "rust"]
 
 
+@pytest.mark.spec("PRI-3")
 def test_apply_strengthen_confirms_and_adds_the_evidence(tinker_home):
     principles = Principles(None)
     kept = kept_principle(principles)
@@ -204,6 +218,7 @@ def test_apply_strengthen_confirms_and_adds_the_evidence(tinker_home):
     assert changed.history[-1]["run"] == "run-9"
 
 
+@pytest.mark.spec("PRI-3")
 def test_apply_contradict_counts_harm_and_records_it(tinker_home):
     principles = Principles(None)
     kept = kept_principle(principles)
@@ -216,6 +231,7 @@ def test_apply_contradict_counts_harm_and_records_it(tinker_home):
     assert changed.evidence == kept.evidence
 
 
+@pytest.mark.spec("PRI-3")
 def test_apply_contradict_retires_one_harmed_more_than_its_evidence(tinker_home):
     principles = Principles(None)
     kept = kept_principle(principles)
@@ -228,6 +244,7 @@ def test_apply_contradict_retires_one_harmed_more_than_its_evidence(tinker_home)
     assert principles.kept("python") == []
 
 
+@pytest.mark.spec("PRI-3")
 def test_apply_except_adds_the_exception_and_its_evidence(tinker_home):
     principles = Principles(None)
     kept = kept_principle(principles)
@@ -243,6 +260,7 @@ def test_apply_except_adds_the_exception_and_its_evidence(tinker_home):
     assert principles.get(kept.id) == changed
 
 
+@pytest.mark.spec("PRI-3")
 def test_apply_drops_unknown_ids_and_kinds(tinker_home):
     principles = Principles(None)
     kept = kept_principle(principles)
@@ -256,6 +274,7 @@ def test_apply_drops_unknown_ids_and_kinds(tinker_home):
     assert principles.all() == [kept]
 
 
+@pytest.mark.spec("PRI-3")
 def test_apply_drops_an_except_with_no_exception(tinker_home):
     principles = Principles(None)
     kept = kept_principle(principles)

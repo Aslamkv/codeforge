@@ -15,7 +15,6 @@ from .settings import (
     LESSON_PHASES,
     LESSONS_PER_PROMPT,
     MAX_FACT_CHARS,
-    MAX_LESSONS_PER_FILE,
     MAX_PLANNED_SEARCHES,
     MAX_RULE_CHARS,
     MAX_RULE_WHEN_CHARS,
@@ -29,7 +28,6 @@ from .settings import (
     RETIRED_KEPT_PER_LIST,
     SAME_CLAIM_SIMILARITY,
     SAME_FACT_SIMILARITY,
-    SAME_LESSON_SIMILARITY,
     SEARCHES_PER_RESEARCH_QUESTION,
     TEACH_PAGE_CHARS,
     TEACH_PAGES,
@@ -95,7 +93,6 @@ class Knowledge:
             "projects": 0,
             "toolchain": None,
             "fixes": [],
-            "facts": [],
         }
         self.any_language_doc = Home.store().get("memory", "any") or {}
 
@@ -180,45 +177,9 @@ class Knowledge:
         text, phase = field(item, "text", 240), field(item, "phase").lower()
         return bool(text) and phase in LESSON_PHASES and not self.names_project(text, names)
 
-    def new_lesson(self, item, known, names):
-        text, phase = field(item, "text", 240), field(item, "phase").lower()
-        if not self.valid_lesson(item, names):
-            return None
-        same = next(
-            (lesson for lesson in known if similarity(lesson["text"], text) >= SAME_LESSON_SIMILARITY), None
-        )
-        if same:
-            self.confirm(same)
-            return None
-        lesson = {
-            "id": fingerprint(text)[:12],
-            "phase": phase,
-            "text": text,
-            "status": "candidate",
-            "seen": 1,
-            "added": now_text(),
-            "last_seen": now_text(),
-        }
-        return record(lesson, "born", self.run)
-
     @staticmethod
     def names_project(text, names):
         return any(re.search(rf"(?<![\w.-]){re.escape(name)}(?![\w-])", text, re.I) for name in names if name)
-
-    def confirm(self, lesson):
-        lesson["seen"], lesson["last_seen"] = lesson.get("seen", 1) + 1, now_text()
-        record(lesson, "confirmed", self.run)
-
-    @staticmethod
-    def keep(lessons, new):
-        rank = Knowledge.rank
-        fresh = [lesson for lesson in lessons if any(lesson is new_lesson for new_lesson in new)]
-        older = sorted(
-            (lesson for lesson in lessons if not any(lesson is new_lesson for new_lesson in new)),
-            key=rank,
-            reverse=True,
-        )
-        return sorted(fresh + older[: max(0, MAX_LESSONS_PER_FILE - len(fresh))], key=rank, reverse=True)
 
     def prove(self, used):
         used = items_of(used)
@@ -296,18 +257,6 @@ class Knowledge:
             if item.kind == "fact":
                 found[item.topic].add(item.id)
         return dict(found)
-
-    def supersede(self, slug, shown):
-        reason = "replaced when the language was learned again"
-        gone = retire_from(
-            self.language_doc,
-            "facts",
-            lambda fact: fact.get("topic") == slug and fact["id"] not in shown,
-            reason,
-            self.run,
-        )
-        self.save()
-        return gone
 
     def toolchain(self):
         known = Toolchain(self.language_doc.get("toolchain"))
@@ -415,9 +364,6 @@ class Knowledge:
         principles.put(principle)
         return as_lesson(principle)
 
-    def lessons_of(self, scope):
-        return self.language_doc if scope == "language" else self.any_language_doc
-
     def save(self):
         self.save_language()
         self.save_any_language()
@@ -494,13 +440,6 @@ class Learner(Tracked):
                     f"no shell operators, nothing installed or changed)",
                     "🚫",
                 )
-
-    @staticmethod
-    def replace_proven(slug, entry):
-        shown = {item["id"] for item in Library.items({slug: entry}) if item["id"]}
-        gone = Knowledge(entry["language"]).supersede(slug, shown)
-        if gone:
-            say.info(f"Replaced {gone} fact(s) from earlier learning with what was learned now", "♻️")
 
     def look_at_machine(self, commands):
         if commands:
