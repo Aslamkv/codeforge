@@ -504,7 +504,11 @@ class Learner(Tracked):
         pages, seen = [], set()
         for rank in range(RESULTS_PER_RESEARCH_SEARCH):
             for search, found in zip(searches, results):
-                if rank < len(found) and page_identity(found[rank]["url"]) not in seen and len(pages) < max_pages:
+                if (
+                    rank < len(found)
+                    and page_identity(found[rank]["url"]) not in seen
+                    and len(pages) < max_pages
+                ):
                     seen.add(page_identity(found[rank]["url"]))
                     pages.append(dict(found[rank], section=search["section"], focus=search["focus"]))
         return pages
