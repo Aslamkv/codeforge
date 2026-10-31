@@ -1197,11 +1197,12 @@ kept as principles (**PRI**); where a point below names them, it holds for princ
 - **KNW-23** `Researcher.answer(entry)` gives a research as text: its findings by question, each with its confidence
   and the pages of the facts it cites as `[n]`, then those pages as numbered sources. A research with no finding
   says so.
-- **KNW-24** `Learner.web_pages(searches)` runs the searches at once (`Internet.search_all`), takes the results in turn, each address once, at
+- **KNW-24** `Learner.web_pages(searches)` runs the searches at once (`Internet.search_all`), takes the results in turn, each page once, at
   most `TEACH_PAGES`, and fetches them in one `Internet.fetch`; a research round searches and fetches its pages the same
   way, all at once. A page the web could not read stands on its search snippet. Each page keeps
   its `relevant_chunks` for the searches (**KNW-14**), up to
-  `TEACH_PAGE_CHARS`. A page with no text is left out.
+  `TEACH_PAGE_CHARS`. A page with no text is left out. Two addresses are one page when they differ only in
+  scheme (`http`/`https`), a leading `www.`, the host's case or a trailing `/`; the first one found is kept.
 - **KNW-25** Every prompt that writes searches (a research's frame, gaps and checks, a learn plan's
   follow-ups, and a teaching's checks) writes each as `{query, engines, count}`
   (**WEB-3**), and says what each engine is good for: `mwmbl` the whole web, plain keywords only; `wikipedia`
