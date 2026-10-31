@@ -6,6 +6,7 @@ lazy from collections import Counter, namedtuple
 
 lazy from .knowledge import Embeddings, Item, Library
 lazy from .messages import say
+lazy from .principles import Principles
 lazy from .settings import (
     MEMORY_FOUND_SHOWN,
     MEMORY_ID_CHARS,
@@ -35,6 +36,7 @@ class Graph:
         graph.add_any_language()
         graph.add_topics()
         graph.add_commands()
+        graph.add_principles()
         graph.add_runs()
         graph.add_similar(embeddings)
         return graph
@@ -131,6 +133,40 @@ class Graph:
                     day=entry.get("taught"),
                 )
 
+    def add_principles(self):
+        for principle in Principles(None).all():
+            self.add_principle(principle)
+
+    def add_principle(self, principle):
+        details = [
+            ("phase", principle.phase),
+            ("when", principle.when),
+            ("because", principle.because),
+            ("exceptions", principle.unless()),
+            ("helped", principle.helped),
+            ("harmed", principle.harmed),
+        ]
+        sources = [
+            evidence.get("source", "")
+            for evidence in principle.evidence
+            if str(evidence.get("source", "")).startswith("http")
+        ]
+        return self.item(
+            Item("principle", principle.id).key,
+            "principle",
+            principle.english(),
+            self.scope_hub(principle.scope),
+            principle.status,
+            details,
+            history=principle.history,
+            sources=sources,
+        )
+
+    def scope_hub(self, scope):
+        named = ("any",) if scope == "any" else (f"lang:{scope}", f"topic:{scope}")
+        known = next((hub for hub in named if hub in self.nodes), None)
+        return known or self.hub(f"topic:{scope}", "topic", scope, scope, [])
+
     def add_runs(self):
         lines = Home.store().items("runs")
         for node in list(self.nodes.values()):
@@ -158,7 +194,9 @@ class Graph:
 
     def add_similar(self, embeddings):
         lessons = [
-            node for node in self.nodes.values() if node["kind"] == "lesson" and node["status"] != "retired"
+            node
+            for node in self.nodes.values()
+            if node["kind"] in ("lesson", "principle") and node["status"] != "retired"
         ]
         texts = [lesson["text"] for lesson in lessons]
         vectors = embeddings.vectors(texts, keep=False) if embeddings and lessons else None
@@ -321,6 +359,7 @@ class Graph:
             for kind in (
                 "language",
                 "topic",
+                "principle",
                 "lesson",
                 "rule",
                 "fact",
@@ -344,6 +383,7 @@ class GraphPage:
         "language": "Languages",
         "topic": "Topics",
         "commands": "Your commands",
+        "principle": "Principles",
         "lesson": "Lessons",
         "rule": "Rules",
         "fact": "Facts",
@@ -422,6 +462,8 @@ class MemoryBrowser:
             "fixes": "fix",
             "lesson": "lesson",
             "lessons": "lesson",
+            "principle": "principle",
+            "principles": "principle",
             "command": "command",
             "commands": "command",
             "retired": "retired",
@@ -431,7 +473,7 @@ class MemoryBrowser:
     ICONS = frozendict({"language": "📘", "topic": "🔬", "commands": "⌨️"})
     USAGE = (
         "use tinker memory [PAGE], tinker memory NAME [KIND] [PAGE] (KIND: toolchain, facts, findings, rules, "
-        "fixes, lessons, commands or retired; alone, across memory), tinker memory show ID, "
+        "fixes, lessons, principles, commands or retired; alone, across memory), tinker memory show ID, "
         "tinker memory find WORDS or tinker memory recent [PAGE]"
     )
     TIPS = (
@@ -449,7 +491,7 @@ class MemoryBrowser:
         ("cites", "target", "Cited by"),
         ("became", "source", "Became"),
         ("became", "target", "Came from"),
-        ("similar", "either", "Similar lessons"),
+        ("similar", "either", "Similar lessons and principles"),
     )
     RUN_LINKS = frozendict(
         {"taught_by": "taught", "confirmed_in": "confirmed", "helped_in": "helped", "failed_in": "failed"}
@@ -826,7 +868,7 @@ document.body.classList.add('js','graph');
 var ctx=canvas.getContext('2d'),css=getComputedStyle(document.documentElement);
 function color(name){return css.getPropertyValue('--'+name).trim()||'#888';}
 var HUBS={language:1,topic:1,commands:1};
-var KINDS=['lesson','rule','fact','finding','fix','toolchain','command','run'];
+var KINDS=['principle','lesson','rule','fact','finding','fix','toolchain','command','run'];
 var nodes=data.nodes,links=data.links,byId={};
 var hubs=nodes.filter(function(n){return HUBS[n.kind];}),R=hubs.length>1?140*Math.sqrt(hubs.length):0;
 hubs.forEach(function(h,i){var a=6.283*i/hubs.length;h.x=Math.cos(a)*R;h.y=Math.sin(a)*R;});
