@@ -1,8 +1,9 @@
 from dataclasses import asdict, dataclass, field
 
-from .knowledge import Library, Retriever, record
 from .prompts import Part, Prompts
+from .retrieval import Retriever
 from .settings import (
+    EVENTS_KEPT_PER_ITEM,
     FACT_PHASES,
     INDUCE_KNOWN_SHOWN,
     MAX_FACT_CHARS,
@@ -276,7 +277,7 @@ class Migration:
     def cited(item, entry, scope):
         cites = item.get("cites")
         facts = {
-            Library.claim_id(fact, fact.get("text")): fact
+            claim_id(fact, fact.get("text")): fact
             for fact in entry.get("facts") or []
             if isinstance(fact, dict)
         }
@@ -404,3 +405,16 @@ class Inducer:
         change = self.change_of(item, shown_passages, known, scope)
         exception = one_line(item.get("exception"))[:MAX_RULE_WHEN_CHARS]
         return change and exception and dict(change, exception=exception)
+
+
+def record(item, event, run):
+    item["history"] = (item.get("history", []) + [{"event": event, "run": run, "at": now_text()}])[
+        -EVENTS_KEPT_PER_ITEM:
+    ]
+    if event == "helped":
+        item["helped"] = item.get("helped", 0) + 1
+    return item
+
+
+def claim_id(claim, text):
+    return claim.get("id") or fingerprint(str(text))[:12]

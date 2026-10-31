@@ -12,7 +12,6 @@ lazy from .knowledge import (
     Learner,
     Library,
     Researcher,
-    Retriever,
     SearchPlanner,
     language_key,
     search_entry,
@@ -23,6 +22,7 @@ lazy from .passages import Cleaner, Page
 lazy from .principles import Inducer, Principles
 lazy from .project import Tracked
 lazy from .prompts import Part, Prompts, PromptTooLarge
+lazy from .retrieval import Retriever
 lazy from .settings import (
     DOCS_NAME_SEARCH,
     DOCS_SITE_SEARCH,

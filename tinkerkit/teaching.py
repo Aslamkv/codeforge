@@ -5,13 +5,14 @@ from itertools import zip_longest
 from .messages import say
 lazy from .checking import Check, found_programs
 lazy from .graph import Graph
-lazy from .knowledge import Item, Knowledge, Learner, Library, Retriever, retire, search_entries
+lazy from .knowledge import Item, Knowledge, Learner, Library, retire, search_entries
 lazy from .learning import DocCache
 lazy from .passages import Cleaner
 lazy from .principles import Principles
 lazy from .project import ending
 lazy from .prompts import Part, Prompts, Reply
 lazy from .reading import Readings
+lazy from .retrieval import Retriever
 lazy from .sandbox import Sandbox
 lazy from .settings import (
     ASK_ITEM_CHARS,

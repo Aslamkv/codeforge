@@ -4,9 +4,10 @@ lazy import itertools
 lazy import json
 lazy from collections import Counter, namedtuple
 
-lazy from .knowledge import Embeddings, Item, Library
+lazy from .knowledge import Item, Library
 lazy from .messages import say
 lazy from .principles import Principles
+lazy from .retrieval import Embeddings
 lazy from .settings import (
     MEMORY_FOUND_SHOWN,
     MEMORY_ID_CHARS,

@@ -22,7 +22,7 @@ from .system import SYSTEM_CHECKS, SYSTEM_WORDS
 lazy from .building import BugReproducer, CodeWriter, TestToolSetup, TestWriter, Verifier
 lazy from .finishing import FinalReview, LessonWriter, ReadmeWriter, Tidy
 lazy from .graph import Graph, MemoryBrowser, write_page
-lazy from .knowledge import Embeddings, Learner, Library, Researcher, search_entry
+lazy from .knowledge import Learner, Library, Researcher, search_entry
 lazy from .learning import LearnStopped, SlotLearner
 lazy from .model import Calibrator, Model, Models, Ollama, OllamaError, SelectedModel
 lazy from .planning import Designer, InterfaceReviewer, Recaller, SpecWriter
@@ -40,6 +40,7 @@ lazy from .project import (
     saved,
 )
 lazy from .prompts import Prompts
+lazy from .retrieval import Embeddings
 lazy from .session import Session, Stopped
 lazy from .settings import (
     CONFIRM_AFTER,

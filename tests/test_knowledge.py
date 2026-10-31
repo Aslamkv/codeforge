@@ -4,23 +4,21 @@ import pytest
 from conftest import FakeSearch, quick_model_replying, web_page
 
 from tinkerkit.knowledge import (
-    Embeddings,
     Item,
     Knowledge,
     Learner,
     Library,
     Researcher,
-    Retriever,
     SearchPlanner,
     language_key,
-    record,
     relevant_chunks,
     retire,
     search_entry,
 )
 from tinkerkit.model import Models, Ollama, OllamaError
-from tinkerkit.principles import Principles
+from tinkerkit.principles import Principles, record
 from tinkerkit.prompts import Prompts
+from tinkerkit.retrieval import Embeddings, Retriever
 from tinkerkit.settings import (
     CHUNKS_PER_PAGE,
     EMBED_KEEP_ALIVE,
@@ -1147,7 +1145,7 @@ def test_a_fix_keeps_its_history_and_history_is_capped(tinker_home, monkeypatch)
     again = Knowledge("Python", "r2")
     again.fix_result(again.known_fix("no module named calc"), worked=True)
     assert events(Knowledge("Python").known_fix("no module named calc")) == [("born", "r1"), ("helped", "r2")]
-    monkeypatch.setattr("tinkerkit.knowledge.EVENTS_KEPT_PER_ITEM", 3)
+    monkeypatch.setattr("tinkerkit.principles.EVENTS_KEPT_PER_ITEM", 3)
     item = {}
     for run in ("r1", "r2", "r3", "r4"):
         record(item, "helped", run)

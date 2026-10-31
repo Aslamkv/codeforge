@@ -12,10 +12,11 @@ lazy import zipfile
 lazy from pathlib import Path
 
 from .messages import say
-lazy from .knowledge import Embeddings, Library, Retriever, mentions, relevant_chunks
+lazy from .knowledge import Library, mentions, relevant_chunks
 lazy from .principles import Inducer, Principles
 lazy from .project import Tracked, ending
 lazy from .prompts import Part, Prompts
+lazy from .retrieval import Embeddings, Retriever
 lazy from .settings import (
     BOOK_PASSAGES_SHOWN,
     FACT_PHASES,

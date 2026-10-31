@@ -8,10 +8,11 @@ lazy from pathlib import Path
 
 from .messages import say
 from .session import Phase, Worker
-lazy from .knowledge import Embeddings, Library, Retriever, mentions
+lazy from .knowledge import Library, mentions
 lazy from .learning import SlotLearner
 lazy from .model import OllamaError
 lazy from .prompts import Part, Prompts, PromptTooLarge
+lazy from .retrieval import Embeddings, Retriever
 lazy from .settings import (
     CHECK_MAX_TOKENS,
     ENV_EXAMPLE,
