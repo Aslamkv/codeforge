@@ -1118,17 +1118,19 @@ kept as principles (**PRI**); where a point below names them, it holds for princ
   its name. A language is learned and kept under its key, with its version apart. A language never seen starts
   empty.
 - **KNW-3** `Library.items(topics)` gives one item per text, as `{topic, name, phase, text}`: the summary, the
-  tools, what is installed, research findings, and each fact with its confidence. A broken topic is left out,
-  with a note. `shown_in(item, phases)` sends machine items to the toolchain and config prompts, tools also to
-  the tests prompt, findings to the spec and design prompts, and a fact to its own phase.
+  tools, what is installed, research findings, each fact with its confidence, and each principle scoped to the
+  topic and not retired (**PRI-2**), with `kind` "principle", its `id`, and its `prompt_text` as text. A broken
+  topic is left out, with a note. `shown_in(item, phases)` sends machine items to the toolchain and config
+  prompts, tools also to the tests prompt, findings to the spec and design prompts, a fact or principle to its
+  own phase, and a principle of phase `any` to every prompt.
 - **KNW-4** Lessons are principles (**PRI-2**). `known_lessons()` gives the principles not retired, scoped to
-  the language's key or `any`, of a phase in `LESSON_PHASES`, each as a lesson `{id, phase, text, status, seen,
+  the language's key or `any`, of a phase in `LESSON_PHASES` or `any`, each as a lesson `{id, phase, text, status, seen,
   helped, history}` (`text` its `prompt_text`, `seen` its evidence count). `add_lessons(new, confirmed)` applies
   deltas (**PRI-3**) with the run as evidence: a confirmed number strengthens that known lesson; a new lesson is
   an `add` (`do` its text, `when` "", its phase, scoped to the language's key or `any` by its scope), so one like
   a kept principle strengthens it instead; lessons are not embedded, so a run's chat model stays loaded. It skips a lesson with no text, an unknown phase, or one that names
-  the project (`names`). It gives how many were new. `lessons(phases)` gives the best evidenced first: the times
-  seen plus the times helped. Proving or retiring a lesson (**KNW-7**, **KNW-10**) changes its principle.
+  the project (`names`). It gives how many were new. `lessons(phases)` gives those of the phases or of phase `any`,
+  the best evidenced first: the times seen plus the times helped. Proving or retiring a lesson (**KNW-7**, **KNW-10**) changes its principle.
 - **KNW-5** Toolchain fixes. `known_fix` replays only a fix for exactly this failure, not tried yet. A replay
   that fails retires that fix at once. `remember_fix` keeps the last 20, one per failure. `similar_fix` needs a
   similarity of at least `TOOLCHAIN_HINT_SIMILARITY`. `remember_toolchain` keeps the toolchain without its
@@ -1239,8 +1241,8 @@ What every learning keeps: patterns found in what Tinker read or did, as princip
   its evidence.
 - **PRI-6** A principle's `when` and `do` are embedded when it is added (**KNW-11**). `about(text, limit)` embeds
   only the text and ranks the principles not retired with `Retriever.rank` (**KNW-12**), best first.
-  `for_phases(phases, language)` gives the principles of those phases scoped `any` or to that language, proven
-  first, then by `helped`, for build prompts (**SES-3**).
+  Build prompts (**SES-3**) show a principle scoped `any` or to the language as a lesson (**KNW-4**), and one
+  scoped to a topic recall chose as a learned item of that topic (**KNW-3**, **PLN-1**).
 - **PRI-7** `Item("principle", id)` names a principle (**KNW-22**), and `retire` retires it from the store. The
   graph shows each principle as a node of kind `principle`, its evidence as the node's sources (**GRF-1**).
 - **PRI-8** A home that keeps knowledge from before principles is migrated once, when it is first opened: each
@@ -1605,7 +1607,8 @@ What every phase works through.
   a formatter that fails.
 - **SES-3** `knowledge_parts(*phases)` gives lessons and learned facts as optional parts, plus the person's
   commands for the toolchain. It records each item it shows in the cycle's `used`, with the prompt phases it
-  was shown in. A prompt that writes code or tests is also told the checks they must pass: the toolchain's
+  was shown in; a learned principle as `Item("principle", id)` (**PRI-7**), so the build proves or retires it
+  (**PRI-5**). A prompt that writes code or tests is also told the checks they must pass: the toolchain's
   lint command, when it has one. `failed_phases(phase, stopped)` names the prompt phases whose knowledge a
   failure in that phase disproves: toolchain and config for setup, the final review or a tooling problem
   (`stopped` of kind `tools`); code and config when the project did not build (kind `build`); code, tests,
@@ -1620,8 +1623,8 @@ What every phase works through.
 Recall, the spec, the design and the contracts where files meet, and their review.
 
 - **PLN-1** `Recaller`. With nothing learned and no web, it makes no call and uses no topic. Without the web,
-  it uses the topics the request names or is close to. It keeps the chosen topics' facts in the project: tools
-  and machine facts first, then a language's rules, then the other facts. The project's learned language is
+  it uses the topics the request names or is close to. It keeps the chosen topics' items (**KNW-3**) in the
+  project: tools and machine facts first, then a language's rules, then the other facts and principles. The project's learned language is
   always used.
 - **PLN-2** With the web, recall makes one call that names the learned topics to use and up to
   `learn_missing` new topics to learn (one per slug). Those are learned first, and they come first in the
