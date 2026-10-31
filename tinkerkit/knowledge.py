@@ -1543,6 +1543,7 @@ def as_lesson(principle):
         "id": principle.id,
         "phase": principle.phase,
         "text": principle.prompt_text(),
+        "when": principle.when,
         "status": principle.status,
         "seen": len(principle.evidence),
         "helped": principle.helped,

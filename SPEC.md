@@ -1125,8 +1125,8 @@ kept as principles (**PRI**); where a point below names them, it holds for princ
   prompts, tools also to the tests prompt, findings to the spec and design prompts, a fact or principle to its
   own phase, and a principle of phase `any` to every prompt.
 - **KNW-4** Lessons are principles (**PRI-2**). `known_lessons()` gives the principles not retired, scoped to
-  the language's key or `any`, of a phase in `LESSON_PHASES` or `any`, each as a lesson `{id, phase, text, status, seen,
-  helped, history}` (`text` its `prompt_text`, `seen` its evidence count). `add_lessons(new, confirmed)` applies
+  the language's key or `any`, of a phase in `LESSON_PHASES` or `any`, each as a lesson `{id, phase, text, when, status, seen,
+  helped, history}` (`text` its `prompt_text`, `when` its `when`, `seen` its evidence count). `add_lessons(new, confirmed)` applies
   deltas (**PRI-3**) with the run as evidence: a confirmed number strengthens that known lesson; a new lesson is
   an `add` (`do` its text, `when` "", its phase, scoped to the language's key or `any` by its scope), so one like
   a kept principle strengthens it instead; lessons are not embedded, so a run's chat model stays loaded. It skips a lesson with no text, an unknown phase, or one that names
@@ -1613,7 +1613,8 @@ What every phase works through.
 - **SES-3** `knowledge_parts(*phases)` gives as optional parts the lessons (principles scoped `any` or to the
   language) and the learned items: the language's proven facts and the chosen topics' facts and principles,
   plus the person's
-  commands for the toolchain. It records each item it shows in the cycle's `used`, with the prompt phases it
+  commands for the toolchain. A lesson for code the project lacks stays out like a learned item (**PLN-3**),
+  and a principle shown as a lesson is not shown again among the learned items. It records each item it shows in the cycle's `used`, with the prompt phases it
   was shown in; a learned principle as `Item("principle", id)` (**PRI-7**), so the build proves or retires it
   (**PRI-5**). A prompt that writes code or tests is also told the checks they must pass: the toolchain's
   lint command, when it has one. `failed_phases(phase, stopped)` names the prompt phases whose knowledge a
@@ -1638,7 +1639,7 @@ Recall, the spec, the design and the contracts where files meet, and their revie
   cycle's topics. When the call fails, the cycle goes on without learned topics.
 - **PLN-3** A topic is used when the request names it, by its name or by its language without a version, or is
   close to it in meaning (`TOPIC_RELEVANT_SIMILARITY`, when embeddings are there). What the project does not
-  need stays out of its prompts (`inapplicable`), proven or not: a rule or principle for some code (its `when`)
+  need stays out of its prompts (`inapplicable`), proven or not: a rule, principle or lesson for some code (its `when`)
   until the
   spec reply names that code among the listed `situations`, and anything that names a tool `unavailable_tools`
   gives.

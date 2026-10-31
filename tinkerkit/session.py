@@ -69,9 +69,9 @@ class Session:
         return int(self.model.limit_chars(system + Prompts.NO_TOOL_CALLS) * 0.95)
 
     def knowledge_parts(self, *phases):
-        lessons = self.knowledge.lessons(phases)
+        lessons = [lesson for lesson in self.knowledge.lessons(phases) if lesson["id"] not in self.inapplicable()]
         proven = [fact for fact in self.knowledge.facts(phases) if fact["id"] not in self.inapplicable()]
-        learned = self.learned_for(phases, {fact["id"] for fact in proven})
+        learned = self.learned_for(phases, {item["id"] for item in proven + lessons})
         self.used(self.ids_used(lessons, proven, learned), phases)
         facts = [f"[{self.project.language or 'the language'}] {fact['text']}" for fact in proven] + [
             f"[{item['name']}] {item['text']}" for item in learned

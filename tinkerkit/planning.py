@@ -194,7 +194,9 @@ class Recaller(Phase):
 
     def known_rules(self):
         return self.project.spec.get("learned", []) + (
-            self.session.knowledge.facts(FACT_PHASES) if self.project.language else []
+            self.session.knowledge.facts(FACT_PHASES) + self.session.knowledge.known_lessons()
+            if self.project.language
+            else []
         )
 
     def situations(self):
