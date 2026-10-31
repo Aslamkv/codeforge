@@ -767,6 +767,22 @@ where (one sentence, citing its facts), or null when the facts name none.
 Reply with ONLY JSON: {{"rules":[{{"phase":"code","text":"Use `match` for dispatch on a value's shape, not
 if/elif chains","when":"","cites":[3,7]}}],"declare":{{"text":"Declare `go 1.25` in go.mod","cites":[2]}}}}"""
 
+    INDUCE_SYSTEM = f"""Learn principles for building software from the numbered passages below: what to do, in which
+situation, and why. Rest every change on the passages (cite their numbers; never your own knowledge); a passage
+that teaches nothing new gives no change. The principles already kept are numbered after the passages: change
+one of them rather than adding a principle that says the same.
+Each change is one of these kinds:
+- "add": a new principle: "when" (a few words naming the situation, "" when it always holds), "do" (one short
+imperative sentence), "because" (why, one short sentence), "phase" ({", ".join(FACT_PHASES)}, book or any).
+- "strengthen": the passages confirm a kept principle: "id" is its number.
+- "contradict": the passages show a kept principle is wrong: "id" is its number.
+- "except": the passages show a case where a kept principle does not hold: "id" is its number, "exception" a
+few words naming that case.
+Every change has "cites": the numbers of the passages it rests on.
+Reply with ONLY JSON: {{"deltas":[{{"kind":"add","when":"a test reads a file","do":"Give it a temporary
+directory","because":"tests must not touch real files","phase":"tests","cites":[1,3]}},{{"kind":"except","id":5,
+"exception":"the file is a checked-in fixture","cites":[2]}}]}}"""
+
     READ_SURVEY_SYSTEM = f"""You, Tinker, are about to read what the person gave you (a book, an article, a document),
 every chapter of it, as a careful reader does: first its contents, what it says about itself (its foreword, preface,
 introduction or summary) and the terms its index refers to most, to know what it is about and what to read first.

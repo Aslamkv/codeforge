@@ -1,8 +1,13 @@
+import json
+
+import pytest
+
 from tests.test_knowledge import EmbedServer
+from tinkerkit import principles as principles_module
 from tinkerkit.knowledge import Embeddings
 from tinkerkit.model import Ollama
-from tinkerkit.principles import Principle, Principles
-from tinkerkit.settings import Home
+from tinkerkit.principles import Inducer, Principle, Principles
+from tinkerkit.settings import MAX_FACT_CHARS, MAX_RULE_WHEN_CHARS, Home
 
 
 def a_principle(**changes):
@@ -18,12 +23,13 @@ def a_principle(**changes):
     return Principle.new(**{**fields, **changes})
 
 
-def test_a_new_principle_is_a_candidate_with_an_id_from_when_and_do():
+def test_a_new_principle_is_a_candidate_with_an_id_from_scope_when_and_do():
     principle = a_principle()
     assert principle.status == "candidate"
     assert len(principle.id) == 12
     assert principle.id == a_principle(because="another reason").id
     assert principle.id != a_principle(do="use tmp_path").id
+    assert principle.id != a_principle(scope="rust").id
     assert principle.history[0]["event"] == "born"
 
 
@@ -125,8 +131,20 @@ def test_apply_add_keeps_a_new_candidate_that_was_born(tinker_home):
 
 def test_apply_drops_an_add_with_no_do_or_no_evidence(tinker_home):
     principles = Principles(None)
-    no_do = {"kind": "add", "when": "a test runs", "do": "", "scope": "python", "evidence": [new_evidence("r")]}
-    no_evidence = {"kind": "add", "when": "a test runs", "do": "keep it fast", "scope": "python", "evidence": []}
+    no_do = {
+        "kind": "add",
+        "when": "a test runs",
+        "do": "",
+        "scope": "python",
+        "evidence": [new_evidence("r")],
+    }
+    no_evidence = {
+        "kind": "add",
+        "when": "a test runs",
+        "do": "keep it fast",
+        "scope": "python",
+        "evidence": [],
+    }
     assert principles.apply([no_do, no_evidence], "run-8") == []
     assert principles.all() == []
 
@@ -165,7 +183,9 @@ def test_apply_add_like_a_principle_of_another_scope_adds_a_new_one(tinker_home)
 def test_apply_strengthen_confirms_and_adds_the_evidence(tinker_home):
     principles = Principles(None)
     kept = kept_principle(principles)
-    [changed] = principles.apply([{"kind": "strengthen", "id": kept.id, "evidence": [new_evidence("run-9")]}], "run-9")
+    [changed] = principles.apply(
+        [{"kind": "strengthen", "id": kept.id, "evidence": [new_evidence("run-9")]}], "run-9"
+    )
     assert principles.get(kept.id) == changed
     assert changed.evidence == kept.evidence + [new_evidence("run-9")]
     assert changed.history[-1]["event"] == "confirmed"
@@ -175,7 +195,9 @@ def test_apply_strengthen_confirms_and_adds_the_evidence(tinker_home):
 def test_apply_contradict_counts_harm_and_records_it(tinker_home):
     principles = Principles(None)
     kept = kept_principle(principles)
-    [changed] = principles.apply([{"kind": "contradict", "id": kept.id, "evidence": [new_evidence("run-9")]}], "run-9")
+    [changed] = principles.apply(
+        [{"kind": "contradict", "id": kept.id, "evidence": [new_evidence("run-9")]}], "run-9"
+    )
     assert changed.harmed == 1
     assert changed.status == "candidate"
     assert changed.history[-1]["event"] == "contradicted"
@@ -197,7 +219,12 @@ def test_apply_contradict_retires_one_harmed_more_than_its_evidence(tinker_home)
 def test_apply_except_adds_the_exception_and_its_evidence(tinker_home):
     principles = Principles(None)
     kept = kept_principle(principles)
-    delta = {"kind": "except", "id": kept.id, "exception": "the test is a benchmark", "evidence": [new_evidence("run-9")]}
+    delta = {
+        "kind": "except",
+        "id": kept.id,
+        "exception": "the test is a benchmark",
+        "evidence": [new_evidence("run-9")],
+    }
     [changed] = principles.apply([delta], "run-9")
     assert changed.exceptions == kept.exceptions + ["the test is a benchmark"]
     assert changed.evidence == kept.evidence + [new_evidence("run-9")]
@@ -215,3 +242,146 @@ def test_apply_drops_unknown_ids_and_kinds(tinker_home):
     ]
     assert principles.apply(deltas, "run-9") == []
     assert principles.all() == [kept]
+
+
+def test_apply_drops_an_except_with_no_exception(tinker_home):
+    principles = Principles(None)
+    kept = kept_principle(principles)
+    delta = {"kind": "except", "id": kept.id, "exception": "", "evidence": [new_evidence("run-9")]}
+    assert principles.apply([delta], "run-9") == []
+    assert principles.get(kept.id) == kept
+
+
+@pytest.mark.spec("PRI-6")
+def test_about_ranks_principles_not_retired_best_first(tinker_home):
+    principles = Principles(None)
+    files = kept_principle(principles)
+    names = kept_principle(principles, when="a function is public", do="name it after what it returns")
+    kept_principle(
+        principles, when="a file is read", do="give it a temporary directory path", status="retired"
+    )
+    assert principles.about("what a public function returns", 5) == [names, files]
+    assert principles.about("what a public function returns", 1) == [names]
+
+
+@pytest.mark.spec("PRI-6")
+def test_about_embeds_only_the_text(tinker_home, monkeypatch):
+    server = EmbedServer()
+    monkeypatch.setattr(Ollama, "get_json", staticmethod(server))
+    principles = Principles(Embeddings("embed-a"))
+    kept_principle(principles)
+    server.requests.clear()
+    principles.about("tests that read files", 5)
+    assert server.requests == [["tests that read files"]]
+
+
+PASSAGES = [
+    {"text": "Tests should never write to the user's home.", "source": "book:testing#2"},
+    {"text": "Use a temporary directory for every test that reads a file.", "source": "book:testing#3"},
+]
+
+
+def induced(make_model, fake_ollama, reply, scope="python"):
+    fake_ollama.reply(json.dumps(reply), when="Induce", times=2)
+    return Inducer(make_model(), Principles(None)).induce(PASSAGES, scope)
+
+
+@pytest.mark.spec("PRI-4")
+def test_induce_shows_numbered_passages_then_the_kept_principles_of_its_scope(
+    make_model, fake_ollama, tinker_home
+):
+    principles = Principles(None)
+    kept = kept_principle(principles)
+    kept_principle(principles, scope="rust", do="use tempfile")
+    fake_ollama.reply(json.dumps({"deltas": []}), when="Induce")
+    assert Inducer(make_model(), principles).induce(PASSAGES, "python") == []
+    prompt = fake_ollama.calls[-1]["messages"][-1]["content"]
+    assert "1. Tests should never write to the user's home." in prompt
+    assert "2. Use a temporary directory for every test that reads a file." in prompt
+    assert f"3. {kept.prompt_text()}" in prompt
+    assert "use tempfile" not in prompt
+
+
+@pytest.mark.spec("PRI-4")
+def test_induce_shows_at_most_the_known_principles_allowed(make_model, fake_ollama, tinker_home, monkeypatch):
+    monkeypatch.setattr(principles_module, "INDUCE_KNOWN_SHOWN", 1)
+    principles = Principles(None)
+    kept_principle(principles)
+    kept_principle(principles, do="clean the directory after")
+    fake_ollama.reply(json.dumps({"deltas": []}), when="Induce")
+    Inducer(make_model(), principles).induce(PASSAGES, "python")
+    prompt = fake_ollama.calls[-1]["messages"][-1]["content"]
+    assert "3. " in prompt and "4. " not in prompt
+
+
+@pytest.mark.spec("PRI-4")
+def test_an_induced_add_gets_the_scope_and_its_cited_passages_as_evidence(
+    make_model, fake_ollama, tinker_home
+):
+    reply = {
+        "deltas": [
+            {
+                "kind": "add",
+                "when": "a test reads a file " + "w" * 200,
+                "do": "Give it a temporary directory " + "d" * 500,
+                "because": "tests must not touch the home",
+                "phase": "tests",
+                "cites": [2, 2, 9],
+            }
+        ]
+    }
+    [delta] = induced(make_model, fake_ollama, reply)
+    assert delta["kind"] == "add" and delta["scope"] == "python" and delta["phase"] == "tests"
+    assert len(delta["do"]) == MAX_FACT_CHARS and len(delta["when"]) == MAX_RULE_WHEN_CHARS
+    assert delta["because"] == "tests must not touch the home"
+    assert delta["evidence"] == [{"kind": "passage", "source": "book:testing#3", "text": PASSAGES[1]["text"]}]
+
+
+@pytest.mark.spec("PRI-4")
+def test_an_induced_add_of_an_unknown_phase_is_for_any(make_model, fake_ollama, tinker_home):
+    reply = {"deltas": [{"kind": "add", "do": "Write the test first", "phase": "lunch", "cites": [1]}]}
+    assert induced(make_model, fake_ollama, reply)[0]["phase"] == "any"
+
+
+@pytest.mark.spec("PRI-4")
+def test_an_induced_delta_citing_no_given_passage_is_dropped(make_model, fake_ollama, tinker_home):
+    reply = {
+        "deltas": [
+            {"kind": "add", "do": "Write the test first", "cites": [7]},
+            {"kind": "add", "do": "Write the test first", "cites": []},
+            {"kind": "add", "do": "Write the test first"},
+        ]
+    }
+    assert induced(make_model, fake_ollama, reply) == []
+
+
+@pytest.mark.spec("PRI-4")
+def test_an_induced_change_names_a_shown_principle_by_its_number(make_model, fake_ollama, tinker_home):
+    principles = Principles(None)
+    kept = kept_principle(principles)
+    reply = {
+        "deltas": [
+            {"kind": "strengthen", "id": 3, "cites": [2]},
+            {"kind": "contradict", "id": 3, "cites": [1]},
+            {"kind": "except", "id": 3, "exception": "the file is a fixture", "cites": [1]},
+            {"kind": "strengthen", "id": 4, "cites": [2]},
+            {"kind": "strengthen", "id": 1, "cites": [2]},
+            {"kind": "rewrite", "id": 3, "cites": [2]},
+        ]
+    }
+    fake_ollama.reply(json.dumps(reply), when="Induce")
+    deltas = Inducer(make_model(), principles).induce(PASSAGES, "python")
+    assert [(delta["kind"], delta["id"]) for delta in deltas] == [
+        ("strengthen", kept.id),
+        ("contradict", kept.id),
+        ("except", kept.id),
+    ]
+    assert deltas[2]["exception"] == "the file is a fixture"
+    assert deltas[0]["evidence"] == [
+        {"kind": "passage", "source": "book:testing#3", "text": PASSAGES[1]["text"]}
+    ]
+
+
+@pytest.mark.spec("PRI-4")
+def test_a_reply_with_no_list_of_deltas_gives_none(make_model, fake_ollama, tinker_home):
+    assert induced(make_model, fake_ollama, {"rules": []}) == []

@@ -245,6 +245,7 @@ TOOL_ROLES = ("environment", "packages", "build", "tests", "format", "lint", "ty
 PLAYBOOK_RULES = 16
 MAX_RULE_CHARS = 200
 MAX_RULE_WHEN_CHARS = 80
+INDUCE_KNOWN_SHOWN = 12
 
 DOCS_SITE_SEARCH = "{topic} official documentation"
 DOCS_VERSION_SEARCH = "{name} {version} documentation"

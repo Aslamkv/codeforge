@@ -1,8 +1,16 @@
 from dataclasses import asdict, dataclass, field
 
-from .knowledge import record
-from .settings import SAME_FACT_SIMILARITY, Home
-from .text import fingerprint, similarity
+from .knowledge import Retriever, record
+from .prompts import Part, Prompts
+from .settings import (
+    FACT_PHASES,
+    INDUCE_KNOWN_SHOWN,
+    MAX_FACT_CHARS,
+    MAX_RULE_WHEN_CHARS,
+    SAME_FACT_SIMILARITY,
+    Home,
+)
+from .text import fingerprint, one_line, similarity
 
 
 @dataclass
@@ -21,8 +29,10 @@ class Principle:
     history: list = field(default_factory=list)
 
     @classmethod
-    def new(cls, when, do, **fields):
-        principle = cls(id=fingerprint(f"{when}\n{do}")[:12], when=when, do=do, **fields)
+    def new(cls, when, do, scope="any", **fields):
+        principle = cls(
+            id=fingerprint(f"{scope}\n{when}\n{do}")[:12], when=when, do=do, scope=scope, **fields
+        )
         principle.history = record({}, "born", "")["history"]
         return principle
 
@@ -89,12 +99,16 @@ class Principles:
         doc = Home.store().get(self.COLLECTION, principle_id)
         return Principle.from_doc(doc) if doc else None
 
+    def live(self):
+        return [principle for principle in self.all() if principle.status != "retired"]
+
     def kept(self, scope):
-        return [
-            principle
-            for principle in self.all()
-            if principle.status != "retired" and principle.scope == scope
-        ]
+        return [principle for principle in self.live() if principle.scope == scope]
+
+    def about(self, text, limit, scope=None):
+        principles = self.kept(scope) if scope else self.live()
+        order = Retriever(self.embeddings).rank(text, [principle.do for principle in principles])
+        return [principles[index] for index in order[:limit]]
 
     def put(self, principle):
         Home.store().put(self.COLLECTION, principle.id, principle.to_doc())
@@ -165,7 +179,104 @@ class Principles:
         return principle
 
     def add_exception(self, delta, run):
-        principle = self.get(delta.get("id"))
+        exception = delta.get("exception")
+        principle = self.get(delta.get("id")) if exception else None
         if principle:
-            principle.except_when(delta.get("exception", ""), list(delta.get("evidence", [])), run)
+            principle.except_when(exception, list(delta.get("evidence", [])), run)
         return principle
+
+
+class Inducer:
+    PHASES = FACT_PHASES + ("book", "any")
+
+    def __init__(self, model, principles):
+        self.model = model
+        self.principles = principles
+
+    def induce(self, passages, scope, think=None):
+        known = self.principles.about(self.passages_text(passages), INDUCE_KNOWN_SHOWN, scope)
+        answer = self.model.ask_until_usable(
+            Prompts.INDUCE_SYSTEM,
+            self.induce_parts(passages, known),
+            "Induce principles from the passages",
+            lambda reply: self.read_deltas(reply.json(), passages, known, scope),
+            attempts=2,
+            think=think,
+        )
+        return answer.value or []
+
+    @staticmethod
+    def passages_text(passages):
+        return "\n".join(passage["text"] for passage in passages)
+
+    @staticmethod
+    def induce_parts(passages, known):
+        listing = "\n".join(f"{number}. {passage['text']}" for number, passage in enumerate(passages, 1))
+        principles = "\n".join(
+            f"{number}. {principle.prompt_text()}"
+            for number, principle in enumerate(known, len(passages) + 1)
+        )
+        return [
+            Part("Passages", listing, True, exact=True),
+            Part("Principles kept", principles or "(none yet)", True, exact=True),
+        ]
+
+    def read_deltas(self, data, passages, known, scope):
+        given = data.get("deltas") if isinstance(data, dict) else None
+        if not isinstance(given, list):
+            raise ValueError("it needs a list of deltas")
+        deltas = (self.delta_of(item, passages, known, scope) for item in given if isinstance(item, dict))
+        return [delta for delta in deltas if delta]
+
+    def delta_of(self, item, passages, known, scope):
+        evidence = self.cited_evidence(item, passages)
+        kinds = {
+            "add": self.add_of,
+            "strengthen": self.change_of,
+            "contradict": self.change_of,
+            "except": self.exception_of,
+        }
+        delta_of_kind = kinds.get(item.get("kind"))
+        if not (evidence and delta_of_kind):
+            return None
+        delta = delta_of_kind(item, len(passages), known, scope)
+        return dict(delta, kind=item["kind"], evidence=evidence) if delta else None
+
+    @staticmethod
+    def cited_evidence(item, passages):
+        cites = item.get("cites")
+        numbers = dict.fromkeys(
+            number
+            for number in (cites if isinstance(cites, list) else [])
+            if isinstance(number, int) and 1 <= number <= len(passages)
+        )
+        return [
+            {
+                "kind": "passage",
+                "source": passages[number - 1]["source"],
+                "text": passages[number - 1]["text"][:MAX_FACT_CHARS],
+            }
+            for number in numbers
+        ]
+
+    def add_of(self, item, shown_passages, known, scope):
+        do = one_line(item.get("do"))[:MAX_FACT_CHARS]
+        phase = str(item.get("phase") or "").lower()
+        return do and {
+            "do": do,
+            "when": one_line(item.get("when"))[:MAX_RULE_WHEN_CHARS],
+            "because": one_line(item.get("because")),
+            "scope": scope,
+            "phase": phase if phase in self.PHASES else "any",
+        }
+
+    @staticmethod
+    def change_of(item, shown_passages, known, scope):
+        number = item.get("id")
+        index = number - shown_passages - 1 if isinstance(number, int) else -1
+        return {"id": known[index].id} if 0 <= index < len(known) else None
+
+    def exception_of(self, item, shown_passages, known, scope):
+        change = self.change_of(item, shown_passages, known, scope)
+        exception = one_line(item.get("exception"))[:MAX_RULE_WHEN_CHARS]
+        return change and exception and dict(change, exception=exception)
