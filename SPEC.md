@@ -1168,7 +1168,10 @@ kept as principles (**PRI**); where a point below names them, it holds for princ
   sets each fact's confidence to disputed, corroborated or single.
 - **KNW-18** `Researcher.research(topic)` frames the topic as questions, reads pages for each, cross-checks and
   analyses the facts, searches the gaps and checks in one more round, and keeps the topic as research: its
-  questions, findings, contradictions, open gaps, and facts with their sources and confidence.
+  questions, findings, contradictions, open gaps, and facts with their sources and confidence. Each question's
+  pages read are induced into principles (**PRI-4**, scoped to the topic's slug; a page's text is a passage, its
+  address the source), and the research keeps, per question, the ids of the principles they changed and the
+  pages cited. A research that keeps the earlier one induces nothing.
 - **KNW-19** `Library.save` gives each research finding `cites`: the IDs of the facts it cites by number, so
   the link holds when a fact is retired.
 - **KNW-20** A topic's playbook is its principles (**PRI**): nothing condenses facts into rules. What a learn
