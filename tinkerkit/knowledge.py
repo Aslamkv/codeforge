@@ -199,7 +199,9 @@ class Knowledge:
         return proven
 
     def used_lessons(self, used):
-        lessons = [principle for principle in self.lesson_principles() if Item("lesson", principle.id) in used]
+        lessons = [
+            principle for principle in self.lesson_principles() if Item("lesson", principle.id) in used
+        ]
         return lessons + self.used_topic_principles(used, {principle.id for principle in lessons})
 
     @staticmethod
@@ -1421,7 +1423,13 @@ class Library:
                 for fact in Library.facts_shown(entry)
             ]
             + [
-                item(principle.phase, principle.prompt_text(), kind="principle", id=principle.id, status=principle.status)
+                item(
+                    principle.phase,
+                    principle.prompt_text(),
+                    kind="principle",
+                    id=principle.id,
+                    status=principle.status,
+                )
                 for principle in Principles(None).kept(slug)
             ]
         )
