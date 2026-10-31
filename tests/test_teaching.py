@@ -144,14 +144,14 @@ def lessons():
 @pytest.mark.spec("TCH-1")
 def test_memory_is_what_tinker_keeps_but_the_retired_most_related_first(kept):
     kinds = {item["kind"] for item in kept.items}
-    assert kinds == {"toolchain", "lesson", "fact"}
+    assert kinds == {"toolchain", "principle", "fact"}
     Knowledge("Python", "r2").disprove(
         {f"lesson:{kept.items[1]['id'].split(':')[1]}": ["toolchain"]}, ("toolchain",)
     )
     assert all(item["status"] != "retired" for item in Memory().items)
     first = kept.about("what is your current toolchain for python")[0]
     assert first["kind"] == "toolchain" and "black" in first["text"]
-    assert kept.about("which lessons do you have")[0]["kind"] == "lesson"
+    assert kept.about("which principles do you have")[0]["kind"] == "principle"
     assert kept.about("what is the current toolset you use for a python project")[0]["kind"] == "toolchain"
     assert len(kept.about("anything", limit=2)) == 2 and MEMORY_ITEMS_SHOWN >= 20
 
@@ -193,14 +193,14 @@ def test_about_makes_no_embedding_call(kept, monkeypatch):
 @pytest.mark.spec("TCH-1")
 def test_memory_holds_the_live_principles_in_english(kept):
     principles = Principles(None)
-    principles.put(
-        Principle.new("formatting python", "run ruff format", scope="python", because="it is fast")
-    )
+    formatting = Principle.new("formatting python", "run ruff format", scope="python", because="it is fast")
+    principles.put(formatting)
     gone = Principle.new("linting python", "run pylint", scope="python")
     gone.retire("contradicted", "r3")
     principles.put(gone)
     memory = Memory()
-    kept_principles = [item for item in memory.items if item["kind"] == "principle"]
+    put_ids = {f"principle:{formatting.id}", f"principle:{gone.id}"}
+    kept_principles = [item for item in memory.items if item["id"] in put_ids]
     assert [(item["group"], item["text"]) for item in kept_principles] == [
         ("python", "When formatting python, run ruff format, because it is fast.")
     ]

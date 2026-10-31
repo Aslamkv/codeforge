@@ -946,7 +946,7 @@ def test_memory_browses_what_tinker_learned(home_store, capsys):
     )
     Commands(parse("memory")).run()
     out = capsys.readouterr().out
-    assert "📘 Python (memory python): 1 toolchain, 1 lesson; 1 proven · nothing built yet" in out
+    assert "📘 Python (memory python): 1 toolchain, 1 principle; 1 proven · nothing built yet" in out
     assert "📘 Go (memory go): 1 fact; 0 proven · nothing built yet" in out
     Commands(parse("memory", "go", "facts")).run()
     out = capsys.readouterr().out
