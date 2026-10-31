@@ -1085,6 +1085,19 @@ def test_knowledge_starts_as_a_candidate_and_a_success_proves_it(tinker_home):
     assert proven_again == 0
 
 
+@pytest.mark.spec("PRI-5")
+def test_a_shown_topic_principle_is_proven_by_a_success_and_retired_by_a_failure(tinker_home):
+    principle = Principle.new("", "register routes on a blueprint", scope="flask", phase="code")
+    Principles(None).put(principle)
+    used = {f"principle:{principle.id}": ["code"], "principle:missing": ["code"]}
+    assert Knowledge("Python").prove(used) == 1
+    assert Principles(None).get(principle.id).status == "proven"
+    assert Knowledge("Python").disprove(used, ("tests",)) == 0
+    assert Knowledge("Python").disprove(used, ("code",)) == 1
+    assert Principles(None).get(principle.id).status == "retired"
+    assert Knowledge("Python").disprove(used, ("code",)) == 0
+
+
 @pytest.mark.spec("KNW-7")
 def test_a_failure_retires_what_was_used_in_that_step(tinker_home):
     route, client = topic_with_facts()

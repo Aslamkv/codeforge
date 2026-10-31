@@ -100,8 +100,14 @@ class Session:
         return (
             [Item("lesson", lesson["id"]).key for lesson in lessons]
             + [Item("known", fact["id"]).key for fact in proven]
-            + [Item("fact", item["id"], item["topic"]).key for item in learned if item.get("id")]
+            + [Session.learned_key(item) for item in learned if item.get("id")]
         )
+
+    @staticmethod
+    def learned_key(item):
+        if item.get("kind") == "principle":
+            return Item("principle", item["id"]).key
+        return Item("fact", item["id"], item["topic"]).key
 
     def checks_part(self, phases):
         lint = self.project.toolchain.lint if self.project.toolchain else ""

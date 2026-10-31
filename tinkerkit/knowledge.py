@@ -238,7 +238,14 @@ class Knowledge:
         return proven
 
     def used_lessons(self, used):
-        return [principle for principle in self.lesson_principles() if Item("lesson", principle.id) in used]
+        lessons = [principle for principle in self.lesson_principles() if Item("lesson", principle.id) in used]
+        return lessons + self.used_topic_principles(used, {principle.id for principle in lessons})
+
+    @staticmethod
+    def used_topic_principles(used, skipped):
+        named = {item.id for item in used if item.kind == "principle"} - skipped
+        found = [Principles(None).get(principle_id) for principle_id in sorted(named)]
+        return [principle for principle in found if principle and principle.status != "retired"]
 
     def prove_web_facts(self, used):
         proven, known = 0, {fact["id"] for fact in self.language_doc.setdefault("facts", [])}
