@@ -641,7 +641,6 @@ class Tracker:
         "documentation": ("📖 Reading its documentation", "📖 Documentation read"),
         "digest": ("🧠 Reading the passages for answers", "🧠 Passages read"),
         "follow-up": ("🔁 Searching for what is still missing", "🔁 Searched for what was missing"),
-        "condense": ("✍️ Turning the facts into rules", "✍️ Rules written"),
         "frame": ("📝 Framing the research questions", "📝 Questions framed"),
         "investigate": ("🔬 Reading and cross-checking sources", "🔬 Sources cross-checked"),
         "keep": ("💾 Saving what was learned", "💾 Saved"),

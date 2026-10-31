@@ -23,8 +23,6 @@ from tinkerkit.settings import (
     CHUNKS_PER_PAGE,
     EMBED_KEEP_ALIVE,
     MAX_PLANNED_SEARCHES,
-    MAX_RULE_CHARS,
-    PLAYBOOK_RULES,
     TEACH_PAGE_CHARS,
     TEACH_PAGES,
     Config,
@@ -860,109 +858,6 @@ def test_a_research_that_finds_nothing_keeps_the_earlier_one(make_model, fake_ol
     assert kept["learned"] == "2026-01-01" and learner.kept_earlier_topic
     assert not any(label.startswith("Induce") for label in fake_ollama.labels())
     assert "No page gave facts; kept what was found before (2026-01-01)" in capsys.readouterr().out
-
-
-SOURCES = [{"id": "fact1", "text": "a"}, {"id": "fact2", "text": "b"}, {"id": "lesson1", "text": "c"}]
-
-
-@pytest.mark.spec("KNW-20")
-def test_read_rules_keeps_only_rules_that_rest_on_what_was_learned():
-    rules = Learner.read_rules(
-        {
-            "rules": [
-                {"phase": "code", "text": "Use  match\n for dispatch", "cites": [1, 3, 1, 9, "2"]},
-                {"phase": "code", "text": "Trust me", "cites": []},
-                {"phase": "dreams", "text": "Unknown phase", "cites": [1]},
-                {"phase": "code", "text": "Use match for dispatch", "cites": [2]},
-                {"phase": "tests", "text": "x" * 500, "cites": [2]},
-                "junk",
-            ]
-        },
-        SOURCES,
-    )
-    assert [(rule["phase"], rule["text"][:22], rule["cites"]) for rule in rules] == [
-        ("code", "Use match for dispatch", ["fact1", "lesson1"]),
-        ("tests", "x" * 22, ["fact2"]),
-    ]
-    assert len(rules[1]["text"]) == MAX_RULE_CHARS and rules[0]["id"]
-    many = Learner.read_rules(
-        {"rules": [{"phase": "code", "text": f"rule {number}", "cites": [1]} for number in range(40)]},
-        SOURCES,
-    )
-    assert len(many) == PLAYBOOK_RULES
-    with pytest.raises(ValueError, match="cites"):
-        Learner.read_rules({"rules": [{"phase": "code", "text": "Trust me"}]}, SOURCES)
-
-
-@pytest.mark.spec("KNW-20")
-def test_a_rule_says_when_it_applies_and_what_a_new_project_declares_comes_first():
-    rules = Learner.read_rules(
-        {
-            "rules": [
-                {"phase": "code", "text": "Await in async code", "when": "async code " * 20, "cites": [1]}
-            ],
-            "declare": {"text": "Set edition 2024 in Cargo.toml", "cites": [2]},
-        },
-        SOURCES,
-    )
-    assert [(rule["phase"], rule["text"], rule["when"]) for rule in rules][0] == (
-        "config",
-        "Set edition 2024 in Cargo.toml",
-        "",
-    )
-    assert rules[1]["when"].startswith("async code") and len(rules[1]["when"]) <= 80
-    assert (
-        Learner.read_rules(
-            {"rules": [{"phase": "code", "text": "x", "cites": [1]}], "declare": None}, SOURCES
-        )[0]["when"]
-        == ""
-    )
-
-
-@pytest.mark.spec("KNW-20")
-def test_condensing_folds_in_the_lessons_the_language_proved(make_model, fake_ollama, tinker_home):
-    known = Knowledge("Go")
-    known.add_lessons(
-        [
-            dict(lesson("Name the module after its folder", "config"), scope="language"),
-            dict(lesson("Read the spec twice", "design"), scope="language"),
-        ],
-        [],
-    )
-    named = {lesson["text"]: lesson["id"] for lesson in known.known_lessons()}
-    known.prove({f"lesson:{named['Name the module after its folder']}": ["config"]})
-    fake_ollama.reply(
-        json.dumps(
-            {"rules": [{"phase": "config", "text": "Name the module after its folder", "cites": [2]}]}
-        ),
-        when="Condense",
-    )
-    plan = {
-        "kind": "language",
-        "language": "Go",
-        "name": "Go 1.25",
-        "tools": [{"role": "tests", "name": "go test"}],
-    }
-    facts = [{"phase": "code", "text": "Go 1.25 has generic type aliases", "slot": "this-version"}]
-    rules = Learner(make_model(), FakeInternet(), None).condense(plan, facts)
-    prompt = fake_ollama.calls[-1]["messages"][-1]["content"]
-    assert (
-        "1. [this-version, code] Go 1.25 has generic type aliases" in prompt
-        and "2. Name the module after its folder" in prompt
-    )
-    a_candidate_lesson = "Read the spec twice"
-    assert a_candidate_lesson not in prompt
-    assert rules[0]["cites"] == [named["Name the module after its folder"]]
-
-
-@pytest.mark.spec("KNW-20")
-def test_a_playbook_the_model_cannot_give_leaves_the_facts_as_they_are(make_model, fake_ollama, tinker_home):
-    fake_ollama.reply(json.dumps({"rules": []}), when="Condense", times=2)
-    learner = Learner(make_model(), FakeInternet(), None)
-    assert (
-        learner.condense({"language": "Go", "name": "Go", "tools": []}, [{"phase": "code", "text": "a"}])
-        == []
-    )
 
 
 def language_with_rules():

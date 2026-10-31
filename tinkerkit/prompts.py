@@ -12,10 +12,8 @@ from .settings import (
     LESSON_PHASES,
     MAX_FILE_LINES,
     MAX_PLANNED_SEARCHES,
-    MAX_RULE_CHARS,
     MAX_VERSION_COMMANDS,
     MIN_TRIMMED_PROSE_CHARS,
-    PLAYBOOK_RULES,
     READ_FACTS_PER_CHAPTER,
     READ_KEY_TERMS,
     RESEARCH_FACTS_CHECKED,
@@ -745,27 +743,6 @@ where it matters: spec (what to build and test), design (files, structure), conf
 settings), tests, code, toolchain (commands and tools).
 Reply with ONLY JSON: {{"facts":[{{"phase":"one of {", ".join(FACT_PHASES)}","text":"the fact"}}]}}
 or {{"facts":[]}} when the excerpt states nothing like that."""
-
-    PLAYBOOK_SYSTEM = f"""Condense what was learned about a programming language or a tool into the rules a code
-generator follows to write small programs with it that are correct, idiomatic, modern and efficient, quickly: at
-most {PLAYBOOK_RULES}, the most useful first. Each rule is one short imperative sentence (under
-{MAX_RULE_CHARS} chars) that changes what is written: the construct, library, command or setting to use
-(the newest stable form the facts show) and what it replaces or what to avoid; a short example in
-backticks when it helps. Rest every rule on the numbered facts and lessons given (cite their numbers;
-never your own knowledge); merge facts that say one thing; leave out what a small program never needs.
-Where the facts give alternatives, the rule names only the one that adds no file, dependency or tool
-(a setting in an existing file over a new file, the standard library over a package), never both.
-A rule that needs a package or tool beyond the language's own install and its tools listed is never for
-every program: its "when" names that package or tool ("projects that use uv").
-A rule never tells to create or add a file (the plan decides the files): it says what to write.
-"phase" is where it matters: {", ".join(FACT_PHASES)} (toolchain: commands and tools).
-"when": "" for a rule that holds for every program in the language; else a few words naming the code it
-applies to ("async code", "a package published to an index", "code that reads files"), so a program that
-has no such code never sees it.
-"declare": what a new project writes to get the newest stable version or edition the facts name, and
-where (one sentence, citing its facts), or null when the facts name none.
-Reply with ONLY JSON: {{"rules":[{{"phase":"code","text":"Use `match` for dispatch on a value's shape, not
-if/elif chains","when":"","cites":[3,7]}}],"declare":{{"text":"Declare `go 1.25` in go.mod","cites":[2]}}}}"""
 
     INDUCE_SYSTEM = f"""Learn principles for building software from the numbered passages below: what to do, in which
 situation, and why. Rest every change on the passages (cite their numbers; never your own knowledge); a passage

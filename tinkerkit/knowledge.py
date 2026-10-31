@@ -16,9 +16,6 @@ from .settings import (
     LESSONS_PER_PROMPT,
     MAX_FACT_CHARS,
     MAX_PLANNED_SEARCHES,
-    MAX_RULE_CHARS,
-    MAX_RULE_WHEN_CHARS,
-    PLAYBOOK_RULES,
     REPEAT_CLAIM_SIMILARITY,
     RESEARCH_FACTS_CHECKED,
     RESEARCH_GAPS,
@@ -35,7 +32,7 @@ from .settings import (
     VERSION_TIMEOUT,
     Home,
 )
-from .text import field, fingerprint, first_line, host, now_text, one_line, similarity, split_text
+from .text import field, fingerprint, first_line, host, now_text, similarity, split_text
 lazy from .jobs import today
 lazy from .model import Answer, Models, OllamaError
 lazy from .project import Tracked
@@ -75,7 +72,6 @@ LEARN_STEPS = (
     "documentation",
     "digest",
     "follow-up",
-    "condense",
     "frame",
     "investigate",
     "keep",
@@ -143,10 +139,6 @@ class Knowledge:
     def lesson_principles(self):
         kept = Principles(None).kept(self.key) + Principles(None).kept("any")
         return [principle for principle in kept if principle.phase in {*LESSON_PHASES, "any"}]
-
-    def proven_lessons(self):
-        proven = [principle for principle in Principles(None).kept(self.key) if principle.status == "proven"]
-        return [as_lesson(principle) for principle in proven if principle.phase in LESSON_PHASES]
 
     def add_lessons(self, new, confirmed, names=()):
         known = self.known_lessons()
@@ -611,100 +603,6 @@ class Learner(Tracked):
         if self.model_failure:
             return f"the model stopped answering ({self.model_failure})"
         return ""
-
-    def condense(self, plan, facts, think=None):
-        lessons = Knowledge(plan["language"]).proven_lessons() if plan.get("kind") == "language" else []
-        sources = self.rule_sources(facts, lessons)
-        self.step("condense", f"Turning {len(facts)} fact(s) into rules a code writer can follow…", "✍️")
-        with say.working_on(f"Turning {len(facts)} fact(s) about {plan['name']} into rules"):
-            answer = self.model.ask_until_usable(
-                Prompts.PLAYBOOK_SYSTEM,
-                self.playbook_parts(plan, facts, lessons),
-                "Condense the facts",
-                lambda reply: self.read_rules(reply.json(), sources),
-                attempts=2,
-                think=think,
-            )
-        rules = answer.value or []
-        self.say_rules(rules, facts, answer.why)
-        return rules
-
-    def say_rules(self, rules, facts, why):
-        if not rules:
-            self.notes.append(
-                f"the facts were not condensed into rules ({first_line(why, 160) or 'no usable reply'})"
-            )
-        with say.section():
-            if rules:
-                say.done(f"{len(rules)} rule(s)")
-                say.found(first_line(rules[0]["text"], 200))
-            else:
-                say.warn("Could not make rules: the facts are kept as they are")
-        self.outcome(f"{len(rules or [])} rule(s) from {len(facts)} fact(s)")
-
-    @staticmethod
-    def rule_sources(facts, lessons):
-        return [{"id": claim_id(fact, fact["text"]), "text": fact["text"]} for fact in facts] + [
-            {"id": lesson.get("id") or fingerprint(lesson["text"])[:12], "text": lesson["text"]}
-            for lesson in lessons
-        ]
-
-    @staticmethod
-    def playbook_parts(plan, facts, lessons):
-        listing = "\n".join(
-            f"{number}. [{fact.get('slot', '')}, {fact['phase']}] {fact['text']}"
-            for number, fact in enumerate(facts, 1)
-        )
-        proved = "\n".join(
-            f"{number}. {lesson['text']}" for number, lesson in enumerate(lessons, len(facts) + 1)
-        )
-        tools = Library.tools_text(plan.get("tools", [])) or "none named"
-        return [
-            Part("Topic", f"{plan['name']} ({plan.get('kind', 'tool')}); its tools: {tools}", True),
-            Part("Facts learned from the web", listing, True, exact=True),
-            Part("Lessons its projects proved", proved or "(none yet)", True, exact=True),
-        ]
-
-    @staticmethod
-    def read_rules(data, sources):
-        rules = {}
-        for item in Learner.rules_given(data):
-            rule = Learner.rule_of(item, sources)
-            if rule and rule["text"] not in rules:
-                rules[rule["text"]] = rule
-        if not rules:
-            raise ValueError("it needs at least one rule that cites the facts")
-        return list(rules.values())[:PLAYBOOK_RULES]
-
-    @staticmethod
-    def rules_given(data):
-        if not isinstance(data, dict):
-            return []
-        given = data.get("rules") or []
-        declare = data.get("declare")
-        if isinstance(declare, dict):
-            given = [dict(declare, phase="config", when="")] + list(given)
-        return [item for item in given if isinstance(item, dict)]
-
-    @staticmethod
-    def rule_of(item, sources):
-        text = one_line(item.get("text"))[:MAX_RULE_CHARS]
-        phase = str(item.get("phase") or "").lower()
-        cites = Learner.cited_ids(item, sources)
-        if not (text and phase in FACT_PHASES and cites):
-            return None
-        when = one_line(item.get("when"))[:MAX_RULE_WHEN_CHARS]
-        return {"id": fingerprint(text)[:12], "phase": phase, "text": text, "when": when, "cites": cites}
-
-    @staticmethod
-    def cited_ids(item, sources):
-        return list(
-            dict.fromkeys(
-                sources[number - 1]["id"]
-                for number in item.get("cites") or []
-                if isinstance(number, int) and 1 <= number <= len(sources)
-            )
-        )
 
     def index(self, slug, entry):
         if self.embeddings is None:

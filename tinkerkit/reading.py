@@ -40,7 +40,7 @@ lazy from .web import Internet, is_web_address
 
 CHAPTER_ROLE_ORDER = ("core", "supporting", "other")
 READINGS = Numbered("readings", "reading numbers")
-READ_STEPS = ("survey", "chapters", "condense", "done")
+READ_STEPS = ("survey", "chapters", "done")
 CHAPTER_STATE_ICONS = {"read": "✅", "unread": "⏳", "raw": "📄"}
 ABOUT_CHAPTER_TITLES = (
     "foreword",

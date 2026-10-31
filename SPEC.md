@@ -1298,7 +1298,7 @@ learning and run lessons are apart.
   `read_digest` keeps a fact only when it cites a passage given and speaks of no unreleased version; each keeps
   its slot, the passages it cites, their pages (`source`, `also`), and a known phase (else the slot's
   section); at most `FACTS_PER_SLOT`.
-- **LRN-3** Fail fast. No model call (plan, digest, condense or embedding; a search plan, **KNW-25**, may) runs until the web, or the
+- **LRN-3** Fail fast. No model call (plan, digest or embedding; a search plan, **KNW-25**, may) runs until the web, or the
   documentation kept from before, has delivered usable pages. PREFLIGHT stops when there is no embedding model;
   GATE 1 when the search finds nothing, or nothing above `learn_cutoff` (when the web could not search, it has
   said why, **WEB-3**, **WEB-4**); GATE 2 when fewer than `learn_min_pages` pages give usable
@@ -1333,7 +1333,7 @@ learning and run lessons are apart.
   Any other topic is planned by its slots first: a plan that says it is a domain hands it to `Researcher` for
   `tinker research`, and a learn learns it like a tool.
 - **LRN-7** Learning's steps (`LEARN_STEPS`, **PRJ-16**) are, in order: search, plan, machine, documentation,
-  digest, follow-up, condense and keep (a domain's: frame and investigate). A saved plan skips search, unless
+  digest, follow-up and keep (a domain's: frame and investigate). A saved plan skips search, unless
   GATE 2 finds the documentation kept too few (**LRN-3**); PREFLIGHT, GATE 1 and GATE 2 (**LRN-3**) are checks
   within them. A learn is not saved step by step: stopped, it goes on through its job's journal (**JOB-3**),
   so nothing done is asked again. Given a tracker, learning moves it through its steps

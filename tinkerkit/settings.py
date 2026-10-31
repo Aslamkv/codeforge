@@ -241,8 +241,6 @@ CHUNKS_PER_PAGE = 2
 FACTS_PER_CHUNK = 4
 MAX_FACT_CHARS = 400
 TOOL_ROLES = ("environment", "packages", "build", "tests", "format", "lint", "types")
-PLAYBOOK_RULES = 16
-MAX_RULE_CHARS = 200
 MAX_RULE_WHEN_CHARS = 80
 INDUCE_KNOWN_SHOWN = 12
 

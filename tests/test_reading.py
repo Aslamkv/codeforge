@@ -447,7 +447,6 @@ def test_a_principle_keeps_its_building_phase_only_from_a_software_source():
 def test_what_is_not_about_software_is_kept_for_asking_alone(tmp_path, home_store, make_model, fake_ollama):
     ending, tracker = read_craft(tmp_path, make_model, fake_ollama, software=False)
     assert {principle.phase for principle in Principles(None).kept("read-1")} == {"book"}
-    assert "condense" not in tracker.steps
     assert ("Builds", "never use it: it is not about building software") in ending["details"]
 
 
