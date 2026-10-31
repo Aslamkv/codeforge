@@ -420,16 +420,42 @@ def seed_old_knowledge():
         {
             "projects": 2,
             "lessons": [
-                {"id": "lesson000001", "phase": "tests", "text": "use tmp_path", "status": "proven",
-                 "history": OLD_HISTORY},
+                {
+                    "id": "lesson000001",
+                    "phase": "tests",
+                    "text": "use tmp_path",
+                    "status": "proven",
+                    "history": OLD_HISTORY,
+                },
             ],
-            "facts": [{"id": "fact00000001", "phase": "code", "text": "uv runs scripts", "status": "proven",
-                       "topic": "uv", "history": OLD_HISTORY}],
+            "facts": [
+                {
+                    "id": "fact00000001",
+                    "phase": "code",
+                    "text": "uv runs scripts",
+                    "status": "proven",
+                    "topic": "uv",
+                    "history": OLD_HISTORY,
+                }
+            ],
             "fixes": [{"failure": "boom", "fix": "pin it"}],
         },
     )
-    store.put("memory", "any", {"lessons": [{"id": "lesson000002", "phase": "spec", "text": "ask first",
-                                             "status": "candidate", "history": OLD_HISTORY}]})
+    store.put(
+        "memory",
+        "any",
+        {
+            "lessons": [
+                {
+                    "id": "lesson000002",
+                    "phase": "spec",
+                    "text": "ask first",
+                    "status": "candidate",
+                    "history": OLD_HISTORY,
+                }
+            ]
+        },
+    )
     store.put(
         "learned",
         "uv",
@@ -438,17 +464,46 @@ def seed_old_knowledge():
             "overview": "a fast tool",
             "questions": [{"question": "How fast is it?"}],
             "facts": [
-                {"id": "topicfact001", "phase": "toolchain", "text": "uv is fast", "status": "proven",
-                 "sources": ["https://docs.astral.sh/uv"], "history": OLD_HISTORY},
-                {"phase": "book", "text": "a point from chapter 2", "chapter": 2, "status": "proven",
-                 "sources": ["#1 chapter 2"]},
+                {
+                    "id": "topicfact001",
+                    "phase": "toolchain",
+                    "text": "uv is fast",
+                    "status": "proven",
+                    "sources": ["https://docs.astral.sh/uv"],
+                    "history": OLD_HISTORY,
+                },
+                {
+                    "phase": "book",
+                    "text": "a point from chapter 2",
+                    "chapter": 2,
+                    "status": "proven",
+                    "sources": ["#1 chapter 2"],
+                },
             ],
-            "rules": [{"id": "rule00000001", "phase": "config", "text": "pin the python version",
-                       "when": "a project starts", "cites": ["topicfact001"], "status": "candidate"}],
-            "findings": [{"question": 1, "answer": "very fast", "confidence": "high",
-                          "cites": ["topicfact001"]}],
-            "retired": [{"id": "topicfact002", "phase": "toolchain", "text": "uv is slow", "status": "retired",
-                         "reason": "wrong", "was": "facts", "history": OLD_HISTORY}],
+            "rules": [
+                {
+                    "id": "rule00000001",
+                    "phase": "config",
+                    "text": "pin the python version",
+                    "when": "a project starts",
+                    "cites": ["topicfact001"],
+                    "status": "candidate",
+                }
+            ],
+            "findings": [
+                {"question": 1, "answer": "very fast", "confidence": "high", "cites": ["topicfact001"]}
+            ],
+            "retired": [
+                {
+                    "id": "topicfact002",
+                    "phase": "toolchain",
+                    "text": "uv is slow",
+                    "status": "retired",
+                    "reason": "wrong",
+                    "was": "facts",
+                    "history": OLD_HISTORY,
+                }
+            ],
         },
     )
 
@@ -464,14 +519,25 @@ def test_migrate_turns_lessons_and_facts_into_principles_with_their_id_status_an
     kept = migrated_by_do()
     lesson = kept["use tmp_path"]
     assert (lesson.id, lesson.status, lesson.history, lesson.scope, lesson.phase, lesson.when) == (
-        "lesson000001", "proven", OLD_HISTORY, "python", "tests", ""
+        "lesson000001",
+        "proven",
+        OLD_HISTORY,
+        "python",
+        "tests",
+        "",
     )
-    assert (kept["ask first"].id, kept["ask first"].scope, kept["ask first"].phase) == ("lesson000002", "any", "spec")
+    assert (kept["ask first"].id, kept["ask first"].scope, kept["ask first"].phase) == (
+        "lesson000002",
+        "any",
+        "spec",
+    )
     assert (kept["uv runs scripts"].id, kept["uv runs scripts"].scope) == ("fact00000001", "python")
 
 
 @pytest.mark.spec("PRI-8")
-def test_migrate_turns_topic_facts_rules_findings_and_reading_points_into_principles_of_the_topic(tinker_home):
+def test_migrate_turns_topic_facts_rules_findings_and_reading_points_into_principles_of_the_topic(
+    tinker_home,
+):
     seed_old_knowledge()
     Principles(None).migrate()
     kept = migrated_by_do()
@@ -479,7 +545,12 @@ def test_migrate_turns_topic_facts_rules_findings_and_reading_points_into_princi
     assert (fact.id, fact.scope, fact.phase, fact.status) == ("topicfact001", "uv", "toolchain", "proven")
     assert [evidence["source"] for evidence in fact.evidence] == ["https://docs.astral.sh/uv"]
     rule = kept["pin the python version"]
-    assert (rule.id, rule.when, rule.phase, rule.scope) == ("rule00000001", "a project starts", "config", "uv")
+    assert (rule.id, rule.when, rule.phase, rule.scope) == (
+        "rule00000001",
+        "a project starts",
+        "config",
+        "uv",
+    )
     assert [(evidence["source"], evidence["text"]) for evidence in rule.evidence] == [
         ("https://docs.astral.sh/uv", "uv is fast")
     ]
@@ -488,7 +559,9 @@ def test_migrate_turns_topic_facts_rules_findings_and_reading_points_into_princi
     assert [evidence["text"] for evidence in finding.evidence] == ["uv is fast"]
     point = kept["a point from chapter 2"]
     assert (point.phase, point.scope, [evidence["source"] for evidence in point.evidence]) == (
-        "book", "uv", ["#1 chapter 2"]
+        "book",
+        "uv",
+        ["#1 chapter 2"],
     )
 
 
@@ -498,11 +571,19 @@ def test_migrate_empties_the_old_lists_keeps_the_rest_and_marks_the_home(tinker_
     Principles(None).migrate()
     store = Home.store()
     language = store.get("languages", "python")
-    assert (language["lessons"], language["facts"], language["fixes"]) == ([], [], [{"failure": "boom", "fix": "pin it"}])
+    assert (language["lessons"], language["facts"], language["fixes"]) == (
+        [],
+        [],
+        [{"failure": "boom", "fix": "pin it"}],
+    )
     assert store.get("memory", "any")["lessons"] == []
     topic = store.get("learned", "uv")
     assert (topic["facts"], topic["rules"], topic["findings"], topic["retired"], topic["overview"]) == (
-        [], [], [], [], "a fast tool"
+        [],
+        [],
+        [],
+        [],
+        "a fast tool",
     )
     assert store.get("migrated", "principles")["at"]
 
@@ -513,7 +594,11 @@ def test_migrate_turns_retired_topic_items_into_retired_principles(tinker_home):
     Principles(None).migrate()
     retired = migrated_by_do()["uv is slow"]
     assert (retired.id, retired.status, retired.scope, retired.phase, retired.history) == (
-        "topicfact002", "retired", "uv", "toolchain", OLD_HISTORY
+        "topicfact002",
+        "retired",
+        "uv",
+        "toolchain",
+        OLD_HISTORY,
     )
 
 
@@ -538,7 +623,9 @@ def test_migrate_marks_a_home_with_no_old_knowledge(tinker_home):
 @pytest.mark.spec("PRI-8")
 def test_an_item_that_cannot_be_read_keeps_its_text_as_do_with_a_note(tinker_home):
     Home.store().put("memory", "any", {"lessons": ["just a sentence", {"text": "no phase", "status": 7}]})
-    Home.store().put("learned", "uv", {"topic": "uv", "findings": [{"question": 9, "answer": "lost question"}]})
+    Home.store().put(
+        "learned", "uv", {"topic": "uv", "findings": [{"question": 9, "answer": "lost question"}]}
+    )
     Principles(None).migrate()
     kept = migrated_by_do()
     assert set(kept) == {"just a sentence", "no phase", "lost question"}
@@ -546,4 +633,8 @@ def test_an_item_that_cannot_be_read_keeps_its_text_as_do_with_a_note(tinker_hom
     assert (sentence.scope, sentence.status) == ("any", "candidate")
     assert sentence.history[-1]["note"]
     assert kept["lost question"].history[-1]["note"]
-    assert (kept["no phase"].status, kept["no phase"].phase, kept["no phase"].history) == ("candidate", "any", [])
+    assert (kept["no phase"].status, kept["no phase"].phase, kept["no phase"].history) == (
+        "candidate",
+        "any",
+        [],
+    )

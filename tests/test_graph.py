@@ -253,7 +253,9 @@ def test_a_short_id_is_six_hex_digits_made_longer_only_where_two_items_share_the
 def test_memory_lists_the_parts_with_what_each_holds(memory, capsys):
     browse()
     out = capsys.readouterr().out
-    assert "Python (memory python): 1 toolchain, 1 fix, 1 fact, 1 principle; 4 proven · nothing built yet" in out
+    assert (
+        "Python (memory python): 1 toolchain, 1 fix, 1 fact, 1 principle; 4 proven · nothing built yet" in out
+    )
     assert "Any language (memory any): 1 principle; 0 proven" in out
     assert "Flask (memory flask): 2 facts, 1 finding; 1 proven" in out
     assert "Your commands (memory commands): 1 command; 1 proven" in out

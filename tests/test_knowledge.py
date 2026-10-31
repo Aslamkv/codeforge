@@ -176,7 +176,9 @@ def test_add_lessons(tinker_home):
         for lesson in known.known_lessons()
     )
     again = Knowledge("Python")
-    number = [lesson["text"] for lesson in again.known_lessons()].index("Keep each module under sixty lines") + 1
+    number = [lesson["text"] for lesson in again.known_lessons()].index(
+        "Keep each module under sixty lines"
+    ) + 1
     repeated = lesson("Use tmp_path for the files a test makes", "tests", "language")
     assert again.add_lessons([repeated], [number]) == 0
     seen = {lesson["text"]: lesson["seen"] for lesson in again.known_lessons()}
