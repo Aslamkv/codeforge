@@ -1,6 +1,7 @@
 import re
 from collections import namedtuple
 from itertools import batched, combinations
+from urllib.parse import urlsplit
 lazy import collections
 lazy import tempfile
 lazy from pathlib import Path
@@ -503,8 +504,12 @@ class Learner(Tracked):
         pages, seen = [], set()
         for rank in range(RESULTS_PER_RESEARCH_SEARCH):
             for search, found in zip(searches, results):
-                if rank < len(found) and found[rank]["url"] not in seen and len(pages) < max_pages:
-                    seen.add(found[rank]["url"])
+                if (
+                    rank < len(found)
+                    and page_identity(found[rank]["url"]) not in seen
+                    and len(pages) < max_pages
+                ):
+                    seen.add(page_identity(found[rank]["url"]))
                     pages.append(dict(found[rank], section=search["section"], focus=search["focus"]))
         return pages
 
@@ -1474,3 +1479,9 @@ def language_key(name):
     base = (name or "").split("(")[0].lower().replace("+", "p").replace("#", "sharp")
     found = re.findall(r"[a-z][a-z0-9]*", base)
     return found[0] if found else "unknown"
+
+
+def page_identity(url):
+    parts = urlsplit(url)
+    site = parts.netloc.lower().removeprefix("www.")
+    return site, parts.path.removesuffix("/"), parts.query, parts.fragment
