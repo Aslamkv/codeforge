@@ -992,7 +992,6 @@ class Commands:
     def system(word):
         for check in SYSTEM_CHECKS:
             if word in (None, check.word):
-                say.text(paint(check.word, "bold", sys.stdout))
                 say.text(check.answer())
 
     @staticmethod

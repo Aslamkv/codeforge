@@ -988,8 +988,9 @@ Reply with ONLY JSON: {"claims":[{"claim":1,"verdict":"holds","why":"one short s
         "about anything. You cannot run anything yourself from the chat; these messages do:\n{commands}\n"
         "When the person asks you to do what one of these does, reply with only that command line and "
         'nothing else (`/clear chat` for "wipe the chat"); when they ask what a `/system` check tells, '
-        'reply with only that check\'s line (`/system battery` for "am I charged?"); when they ask how to '
-        "do it, answer in words."
+        'reply with only that check\'s line (`/system battery` for "am I charged?"), where memory means '
+        "Tinker's `memory` command and only RAM means `/system ram`; when they ask how to do it, answer "
+        "in words."
     )
 
     COMMAND_SYSTEM = (

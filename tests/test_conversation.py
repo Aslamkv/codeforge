@@ -219,6 +219,8 @@ def test_said_command_drops_question_words():
     assert conversation.said_command("What's the time now?") == "/system time"
     assert conversation.said_command("what time is it now?") == "/system time"
     assert conversation.said_command("what is my battery") == "/system battery"
+    assert conversation.said_command("ram usage") == "/system ram"
+    assert conversation.said_command("disk usage") == "/system disk"
 
 
 def test_said_filler_holds_no_word_of_a_phrase():

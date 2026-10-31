@@ -441,23 +441,21 @@ def test_runs_and_status(tmp_path, capsys):
 
 def faked_checks(monkeypatch):
     monkeypatch.setattr(SystemCheck, "answer", lambda check: f"{check.word} answer")
-    monkeypatch.setattr(cli, "paint", lambda text, style, stream=None: f"<{style}>{text}")
 
 
 @pytest.mark.spec("SYS-3")
-def test_system_word_prints_that_check_s_answer_under_its_bold_word(home_store, monkeypatch, capsys):
+def test_system_word_prints_that_check_s_answer_line(home_store, monkeypatch, capsys):
     faked_checks(monkeypatch)
     Commands(parse("system", "disk")).run()
-    assert capsys.readouterr().out.splitlines() == ["<bold>disk", "disk answer"]
+    assert capsys.readouterr().out.splitlines() == ["disk answer"]
 
 
 @pytest.mark.spec("SYS-3")
-def test_system_alone_prints_every_check_under_its_bold_word(home_store, monkeypatch, capsys):
+def test_system_alone_prints_every_check_one_line_each(home_store, monkeypatch, capsys):
     faked_checks(monkeypatch)
     Commands(parse("system")).run()
     lines = capsys.readouterr().out.splitlines()
-    for check in SYSTEM_CHECKS:
-        assert lines[lines.index(f"<bold>{check.word}") + 1] == f"{check.word} answer"
+    assert lines == [f"{check.word} answer" for check in SYSTEM_CHECKS]
 
 
 @pytest.mark.spec("SYS-3")
