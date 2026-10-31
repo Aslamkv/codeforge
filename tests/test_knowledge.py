@@ -107,7 +107,7 @@ def test_items(tinker_home, capsys):
         ("tests", "a route is added → test it with the client"),
     ]
     assert items[-1]["kind"] == "principle" and items[-1]["id"] == kept.id
-    assert items[-1]["status"] == "candidate"
+    assert items[-1]["status"] == "candidate" and items[-1]["when"] == "a route is added"
     assert all(item["topic"] == "py" and item["name"] == "Python 3.14" for item in items)
     assert "What was learned about bad is not readable" in capsys.readouterr().out
     assert Library.searched(items[0]) == "Python 3.14: A language."

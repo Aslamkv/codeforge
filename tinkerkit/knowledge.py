@@ -1429,6 +1429,7 @@ class Library:
                     kind="principle",
                     id=principle.id,
                     status=principle.status,
+                    when=principle.when,
                 )
                 for principle in Principles(None).kept(slug)
             ]
