@@ -83,7 +83,9 @@ listed above it:
 | `web` | the web plugin, the only part that reaches web content: search and fetch, and every failure of either (`Internet`, `WebPage`, `RequestLog`), and a page as text (`PageText`, a view over `passages`) |
 | `conversation` | the terminal and the chats as one conversation (`Desk`, `Channel`, `Markup`, `Talk`, `Shell`, `Progress`, `Reporter`) |
 | `channels` | the chat plugin: Telegram, and `tinker channel` |
-| `knowledge` | lessons and proven knowledge (`Knowledge`), research (`Researcher`), and what learning shares (`Learner`, `Library`, `Retriever`, `Embeddings`) |
+| `retrieval` | ranking texts by words and meaning (`Retriever`) and the cached embeddings (`Embeddings`) |
+| `principles` | the principle record and its one home store (`Principle`, `Principles`), the deltas' inducer (`Inducer`) and the migration of old knowledge (`Migration`) |
+| `knowledge` | lessons and proven knowledge (`Knowledge`), research (`Researcher`), and what learning shares (`Learner`, `Library`) |
 | `slots` | what learning a language or a tool must find out, as data (`Slot`, `PROFILES`), and each slot's passages (`Selector`) |
 | `learning` | learning a language or a tool by its slots (`SlotLearner`, `DocCache`, `LearnStopped`) |
 | `graph` | what Tinker knows as one graph of items and links (`Graph`), the page that shows it (`GraphPage`), and browsing it in pages (`MemoryBrowser`) |
