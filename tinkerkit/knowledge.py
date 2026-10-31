@@ -402,25 +402,15 @@ class Knowledge:
         return corrected
 
     def taught_lesson(self, item, sources):
-        known = self.known_lessons()
-        text = field(item, "text")
-        lesson = next(
-            (lesson for lesson in known if similarity(lesson["text"], text) >= SAME_LESSON_SIMILARITY), None
-        )
-        if lesson is None:
-            lesson = self.new_lesson(item, known, ())
-            if lesson is None:
-                return None
-            self.lessons_of(item.get("scope"))["lessons"].append(lesson)
-        lesson.update(status="proven", sources=list(dict.fromkeys(sources)))
-        record(lesson, "taught", self.run)
-        for doc in (self.language_doc, self.any_language_doc):
-            doc["lessons"] = self.keep(doc["lessons"], [lesson])
-        if any(kept is lesson for kept in self.language_doc["lessons"]):
-            self.save_language()
-        else:
-            self.save_any_language()
-        return lesson
+        if not self.valid_lesson(item, ()):
+            return None
+        evidence = [{"kind": "taught", "source": source, "text": ""} for source in dict.fromkeys(sources)]
+        principles = Principles(None)
+        principle = principles.apply([dict(self.lesson_delta(item), evidence=evidence)], self.run)[0]
+        principle.status = "proven"
+        principle.record("taught", self.run)
+        principles.put(principle)
+        return as_lesson(principle)
 
     def lessons_of(self, scope):
         return self.language_doc if scope == "language" else self.any_language_doc

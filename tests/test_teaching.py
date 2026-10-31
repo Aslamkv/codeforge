@@ -138,7 +138,7 @@ def verdict_reply(verdict="holds", evidence=(2,), follows=True):
 
 
 def lessons():
-    return [lesson["text"] for lesson in Home.store().get("languages", "python")["lessons"]]
+    return [principle.do for principle in Principles(None).live()]
 
 
 @pytest.mark.spec("TCH-1")
@@ -713,7 +713,7 @@ def test_nothing_changes_when_no_change_can_be_made(kept, make_model, fake_ollam
 @pytest.mark.spec("TCH-7")
 def test_a_teaching_that_holds_corrects_what_tinker_keeps(kept, make_model, fake_ollama):
     teaching = "ruff alone is enough, black is not needed, and I prefer no mypy"
-    lesson = numbered_item(kept, teaching, "lesson")
+    lesson = numbered_item(kept, teaching, "principle")
     fake_ollama.reply(
         plan_reply(changes=[dict(RUFF_CHANGE, retire=[lesson]), NO_MYPY_CHANGE]), when="what to check"
     )
@@ -721,17 +721,18 @@ def test_a_teaching_that_holds_corrects_what_tinker_keeps(kept, make_model, fake
     ending = Teacher(make_model(), FakeWeb(), kept).teach(teaching)
     python = Home.store().get("languages", "python")
     assert python["toolchain"]["format"] == "ruff format ." and python["toolchain"]["lint"] == "ruff check ."
-    retired = python["retired"][-1]
-    assert retired["text"] == "Format Python with black before linting with ruff"
-    assert retired["reason"] == f"corrected by what you taught: {teaching}"
-    taught = {lesson["text"]: lesson for lesson in python["lessons"]}
+    taught = {principle.do: principle for principle in Principles(None).live()}
     ruff, no_mypy = (
         taught["Format and lint Python with ruff alone; black is not needed"],
         taught["Run no type checker in Python projects"],
     )
-    assert ruff["status"] == no_mypy["status"] == "proven" and ruff["history"][-1]["event"] == "taught"
-    assert ruff["sources"] == [PAGE["url"]] and no_mypy["sources"] == ["your preference"]
+    assert ruff.status == no_mypy.status == "proven" and ruff.history[-1]["event"] == "taught"
+    sources = lambda principle: [item["source"] for item in principle.evidence if item["kind"] == "taught"]
+    assert sources(ruff) == [PAGE["url"]] and sources(no_mypy) == ["your preference"]
     assert ending["status"] == "done" and ending["headline"] == "Corrected: 5 change(s)"
+    retired = python["retired"][-1]
+    assert retired["text"] == "Format Python with black before linting with ruff"
+    assert retired["reason"] == f"corrected by what you taught: {teaching}"
 
 
 @pytest.mark.spec("TCH-9")
