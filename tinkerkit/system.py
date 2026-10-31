@@ -97,6 +97,21 @@ class RamCheck(SystemCheck):
         return f"{size_text(available)} available of {size_text(total)} ({used}% used)"
 
 
+SIZE = re.compile(r"(\d+(?:\.\d+)?)([GM])i?")
+
+
+def size_text(text: str) -> str | None:
+    found = SIZE.fullmatch(text)
+    return f"{found[1]} {found[2]}B" if found else None
+
+
+def size_gb(text: str) -> float | None:
+    found = SIZE.fullmatch(text)
+    if not found:
+        return None
+    return float(found[1]) / (1 if found[2] == "G" else 1024)
+
+
 class BatteryCheck(SystemCheck):
     word, emoji, label = "battery", "🔋", "Battery"
     mac = ("pmset", "-g", "batt")
@@ -135,21 +150,6 @@ class UptimeCheck(SystemCheck):
         days, hours, minutes, only_minutes, only_hours = (int(group or 0) for group in found.groups())
         amounts = [(days, "d"), (hours or only_hours, "h"), (minutes or only_minutes, "m")]
         return " ".join(f"{amount} {unit}" for amount, unit in amounts if amount) or "0 m"
-
-
-SIZE = re.compile(r"(\d+(?:\.\d+)?)([GM])i?")
-
-
-def size_text(text: str) -> str | None:
-    found = SIZE.fullmatch(text)
-    return f"{found[1]} {found[2]}B" if found else None
-
-
-def size_gb(text: str) -> float | None:
-    found = SIZE.fullmatch(text)
-    if not found:
-        return None
-    return float(found[1]) / (1 if found[2] == "G" else 1024)
 
 
 class NetworkCheck(SystemCheck):

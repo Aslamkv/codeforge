@@ -23,10 +23,14 @@ def check_named(word):
     return next(check for check in SYSTEM_CHECKS if check.word == word)
 
 
-def answer_with(monkeypatch, fake_run, platform="darwin"):
+def answer_with(monkeypatch, fake_run, word="time", platform="darwin"):
     monkeypatch.setattr(system.subprocess, "run", fake_run)
     monkeypatch.setattr(system.sys, "platform", platform)
-    return check_named("time").answer()
+    return check_named(word).answer()
+
+
+def printing(output):
+    return lambda argv, **_: subprocess.CompletedProcess(argv, 0, output)
 
 
 HOME = str(Path.home())
@@ -71,23 +75,6 @@ def test_a_new_subclass_registers_itself_after_the_table(monkeypatch):
         word, emoji, label, mac, linux = "weather", "☁️", "Weather", ("true",), ("true",)
 
     assert type(SystemCheck.registered[-1]) is Weather
-
-
-@pytest.mark.spec("SYS-1")
-@pytest.mark.parametrize(
-    ("word", "output", "line"),
-    [
-        ("time", "11:16 IST", "🕒 Time: 11:16 IST"),
-        ("date", "Saturday 31 October 2026", "📅 Date: Saturday 31 October 2026"),
-        ("network", "192.168.220.41 10.0.0.2", "🌐 Network: 192.168.220.41"),
-    ],
-)
-def test_answer_gives_emoji_label_and_summary(monkeypatch, word, output, line):
-    monkeypatch.setattr(system.sys, "platform", "linux")
-    monkeypatch.setattr(
-        system.subprocess, "run", lambda argv, **_: subprocess.CompletedProcess(argv, 0, output)
-    )
-    assert check_named(word).answer() == line
 
 
 MAC_DF = """Filesystem       Size   Used  Avail Capacity iused ifree %iused  Mounted on
@@ -153,14 +140,13 @@ UPOWER = """  native-path:          BAT0
             " 11:25:01 up 2 days,  3:53,  1 user,  load average: 0.10, 0.20",
             "⏱️ Uptime: 2 d 3 h 53 m",
         ),
+        ("time", "linux", "11:16 IST", "🕒 Time: 11:16 IST"),
+        ("date", "linux", "Saturday 31 October 2026", "📅 Date: Saturday 31 October 2026"),
+        ("network", "linux", "192.168.220.41 10.0.0.2", "🌐 Network: 192.168.220.41"),
     ],
 )
-def test_summary_reads_the_output_of_each_system(monkeypatch, word, platform, output, line):
-    monkeypatch.setattr(system.sys, "platform", platform)
-    monkeypatch.setattr(
-        system.subprocess, "run", lambda argv, **_: subprocess.CompletedProcess(argv, 0, output)
-    )
-    assert check_named(word).answer() == line
+def test_answer_gives_emoji_label_and_the_summary_of_each_system(monkeypatch, word, platform, output, line):
+    assert answer_with(monkeypatch, printing(output), word, platform) == line
 
 
 @pytest.mark.spec("SYS-2")
@@ -169,11 +155,8 @@ def test_summary_reads_the_output_of_each_system(monkeypatch, word, platform, ou
 )
 @pytest.mark.parametrize("platform", ["darwin", "linux"])
 def test_summary_that_cannot_read_the_output_falls_back(monkeypatch, word, label, platform):
-    monkeypatch.setattr(system.sys, "platform", platform)
-    monkeypatch.setattr(
-        system.subprocess, "run", lambda argv, **_: subprocess.CompletedProcess(argv, 0, "garbled\n")
-    )
-    assert check_named(word).answer() == f"⚠️ {label}: couldn't check on this computer"
+    answer = answer_with(monkeypatch, printing("garbled\n"), word, platform)
+    assert answer == f"⚠️ {label}: couldn't check on this computer"
 
 
 @pytest.mark.spec("SYS-1")
@@ -229,9 +212,3 @@ def empty(argv, **_):
 @pytest.mark.parametrize("fake_run", [missing, too_slow, failed, empty])
 def test_answer_falls_back_instead_of_raising(monkeypatch, fake_run):
     assert answer_with(monkeypatch, fake_run) == "⚠️ Time: couldn't check on this computer"
-
-
-@pytest.mark.spec("SYS-2")
-def test_answer_falls_back_when_summary_cannot_read_the_output(runs, monkeypatch):
-    monkeypatch.setattr(type(check_named("time")), "summary", lambda check, output: None)
-    assert check_named("time").answer() == "⚠️ Time: couldn't check on this computer"

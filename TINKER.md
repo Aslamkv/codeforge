@@ -250,15 +250,18 @@ tinker command show the five biggest files here
 `command` shows the command line first, and runs it only once you agree.
 
 Ask about this computer and the answer comes at once, with no model: `time`, `date`, `disk`, `ram`,
-`battery`, `uptime` or `network`. Each runs one fixed command that changes nothing:
+`battery`, `uptime` or `network`. Each runs one fixed command that changes nothing and gives one short line:
 
 ```sh
-tinker system time
+tinker system ram
+# 🧠 RAM: 21 GB available of 24 GB (14% used)
 tinker system
 ```
 
-`tinker system` prints every check. In the conversation or a chat, `time`, `/system disk` or
-`what is the time now?` answer the same way, and the model asks for a check when your question needs one.
+`tinker system` prints every check, one line each; a check this computer can't answer says
+`⚠️ Battery: couldn't check on this computer`. In the conversation or a chat, `time`, `/system disk`,
+`ram usage` or `what is the time now?` answer the same way, and the model asks for a check when your question
+needs one. `ram` is the computer's RAM; `memory` is what Tinker learned.
 
 Run a project you built (the last one, by default) with its arguments:
 
