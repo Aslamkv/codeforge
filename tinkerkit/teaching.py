@@ -40,7 +40,7 @@ Follows = namedtuple("Follows", "follows why")
 
 
 class Memory:
-    def __init__(self, embeddings=None):
+    def __init__(self):
         graph = Graph.build()
         self.items = [
             node
@@ -48,7 +48,6 @@ class Memory:
             if node["kind"] in ITEM_KINDS and node["status"] != "retired"
         ] + [principle_item(principle) for principle in Principles(None).live()]
         self.cited = self.cited_by_rules(graph)
-        self.retriever = Retriever(embeddings)
 
     def cited_by_rules(self, graph):
         kept = {item["id"]: item for item in self.items}
@@ -124,11 +123,6 @@ def moved_on(tracker, phase, said, icon):
 
 
 class PassageSource:
-    SHORTLIST_TIMES = 4
-
-    def __init__(self, retriever):
-        self.retriever = retriever
-
     @staticmethod
     def found(question, items) -> list:
         return []
@@ -136,9 +130,7 @@ class PassageSource:
     def passages(self, question, items, count=BOOK_PASSAGES_SHOWN):
         found = distinct(self.found(question, items))
         by_words = Retriever(None).by_words(question, [passage["text"] for passage in found])
-        shortlist = [found[index] for index in by_words[: self.SHORTLIST_TIMES * count]]
-        by_meaning = self.retriever.rank(question, [passage["text"] for passage in shortlist])
-        return [shortlist[index] for index in by_meaning[:count]]
+        return [found[index] for index in by_words[:count]]
 
 
 class ReadingPassages(PassageSource):
@@ -192,10 +184,7 @@ class Asker:
 
     def recalled(self, question):
         items = self.memory.about(question, limit=ASK_ITEMS_SHOWN)
-        best = [
-            source(self.memory.retriever).passages(question, items)
-            for source in (ReadingPassages, DocumentationPassages)
-        ]
+        best = [source().passages(question, items) for source in (ReadingPassages, DocumentationPassages)]
         in_turn = (passage for turn in zip_longest(*best) for passage in turn if passage)
         return items, distinct(in_turn)[:ASK_PASSAGES_SHOWN]
 

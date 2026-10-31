@@ -26,6 +26,7 @@ lazy from .knowledge import Embeddings, Learner, Library, Researcher, search_ent
 lazy from .learning import LearnStopped, SlotLearner
 lazy from .model import Calibrator, Model, Models, Ollama, OllamaError, SelectedModel
 lazy from .planning import Designer, InterfaceReviewer, Recaller, SpecWriter
+lazy from .principles import Principles
 lazy from .project import (
     Brief,
     Outcome,
@@ -38,7 +39,6 @@ lazy from .project import (
     project_store,
     saved,
 )
-lazy from .principles import Principles
 lazy from .prompts import Prompts
 lazy from .session import Session, Stopped
 lazy from .settings import (
@@ -828,7 +828,7 @@ class Commands:
     def ask(self):
         question = self.args.ask
         model = Commands.model_in_use(*Commands.checked_model())
-        memory = Memory(Embeddings.configured())
+        memory = Memory()
         Commands.reported(
             f"Asking: {first_line(question, 60)}",
             model,
@@ -839,7 +839,7 @@ class Commands:
         teaching = self.args.teach
         name, settings = Commands.checked_model()
         internet = Internet()
-        model, memory = Commands.model_in_use(name, settings), Memory(Embeddings.configured())
+        model, memory = Commands.model_in_use(name, settings), Memory()
         Commands.reported(
             f"Teaching: {first_line(teaching, 60)}",
             model,

@@ -7,7 +7,7 @@ from conftest import MODEL, TOOLCHAIN, FakeSearch, web_page
 from tinkerkit import cli
 from tinkerkit.cli import Cli, Commands
 from tinkerkit.commands import kind_of
-from tinkerkit.knowledge import Embeddings, Knowledge, Library
+from tinkerkit.knowledge import Knowledge, Library
 from tinkerkit.learning import DocCache
 from tinkerkit.model import Ollama
 from tinkerkit.passages import Block, Page
@@ -20,7 +20,6 @@ from tinkerkit.settings import (
     ASK_ITEM_CHARS,
     ASK_ITEMS_SHOWN,
     ASK_PASSAGES_SHOWN,
-    BOOK_PASSAGES_SHOWN,
     MEMORY_ITEMS_SHOWN,
     TEACH_CLAIMS,
     Home,
@@ -29,7 +28,6 @@ from tinkerkit.teaching import (
     Asker,
     DocumentationPassages,
     Memory,
-    PassageSource,
     ReadingPassages,
     Teacher,
     Verdict,
@@ -184,7 +182,7 @@ def test_about_makes_no_embedding_call(kept, monkeypatch):
         return {"embeddings": [[float(len(text)), 1.0] for text in payload["input"]]}
 
     monkeypatch.setattr(Ollama, "get_json", staticmethod(embed))
-    memory = Memory(Embeddings("e"))
+    memory = Memory()
     memory.about("what is your current toolchain for python")
     memory.about("how do flask routes work with black")
     assert embedded == []
@@ -864,9 +862,7 @@ def test_an_ask_gives_a_passage_kept_at_two_addresses_once(home_store, make_mode
 
 
 @pytest.mark.spec("TCH-3")
-def test_an_ask_embeds_only_the_passages_its_words_shortlist(
-    home_store, make_model, fake_ollama, monkeypatch
-):
+def test_an_ask_makes_no_embedding_call(home_store, make_model, fake_ollama, monkeypatch):
     learned_flask([f"Passage {number}: a flask route binds a view. " + "x" * 1100 for number in range(40)])
     embedded = []
 
@@ -876,9 +872,8 @@ def test_an_ask_embeds_only_the_passages_its_words_shortlist(
 
     monkeypatch.setattr(Ollama, "get_json", staticmethod(embed))
     fake_ollama.reply("With the route decorator.", when="ask")
-    Asker(make_model(), Memory(Embeddings("e"))).answer("how does a flask route bind a view?")
-    passages_embedded = [text for text in embedded if "Passage " in text]
-    assert len(passages_embedded) == PassageSource.SHORTLIST_TIMES * BOOK_PASSAGES_SHOWN
+    Asker(make_model(), Memory()).answer("how does a flask route bind a view?")
+    assert embedded == []
 
 
 @pytest.mark.spec("TCH-3")
