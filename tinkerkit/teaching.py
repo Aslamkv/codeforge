@@ -8,18 +8,19 @@ lazy from .graph import Graph
 lazy from .knowledge import Item, Knowledge, Learner, Library, Retriever, retire, search_entries
 lazy from .learning import DocCache
 lazy from .passages import Cleaner
+lazy from .principles import Principles
 lazy from .project import ending
 lazy from .prompts import Part, Prompts, Reply
 lazy from .reading import Readings
 lazy from .sandbox import Sandbox
 lazy from .settings import (
+    ASK_ITEM_CHARS,
     ASK_ITEMS_SHOWN,
     ASK_PASSAGES_SHOWN,
     BOOK_PASSAGES_SHOWN,
     CHECK_SOURCE_CHARS,
     LESSON_PHASES,
     MEMORY_ITEMS_SHOWN,
-    RECALL_OTHER_TOPIC_SIMILARITY,
     TEACH_CHECK_COMMANDS,
     TEACH_CHECK_SEARCHES,
     TEACH_CLAIMS,
@@ -45,7 +46,7 @@ class Memory:
             node
             for node in graph.nodes.values()
             if node["kind"] in ITEM_KINDS and node["status"] != "retired"
-        ]
+        ] + [principle_item(principle) for principle in Principles(None).live()]
         self.cited = self.cited_by_rules(graph)
         self.retriever = Retriever(embeddings)
 
@@ -62,24 +63,18 @@ class Memory:
         return cited
 
     def about(self, text, limit=MEMORY_ITEMS_SHOWN):
-        ranking = self.retriever.rank(text, [item["text"] for item in self.items])
+        ranking = Retriever(None).rank(text, [item["text"] for item in self.items])
         named = set(words(text))
         ranking.sort(key=lambda index: -self.named_in(self.items[index], named))
         ranked = [self.items[index] for index in ranking]
-        return self.with_cited(self.on_named_topics(text, ranked, named))[:limit]
+        return self.with_cited(self.on_named_topics(ranked, named))[:limit]
 
-    def on_named_topics(self, text, ranked, named):
+    @staticmethod
+    def on_named_topics(ranked, named):
         topics = {item["group"] for item in ranked} & named
         if not topics:
             return ranked
-        others = [item for item in ranked if item["group"] not in topics]
-        similarity_of = self.retriever.similarities(text, [item["text"] for item in others]) or []
-        alike = [
-            item
-            for item, similarity in zip(others, similarity_of)
-            if similarity >= RECALL_OTHER_TOPIC_SIMILARITY
-        ]
-        return [item for item in ranked if item["group"] in topics] + alike
+        return [item for item in ranked if item["group"] in topics]
 
     def with_cited(self, ranked):
         given = {}
@@ -95,12 +90,31 @@ class Memory:
         return group + kind
 
 
+def principle_item(principle):
+    return {
+        "id": f"principle:{principle.id}",
+        "kind": "principle",
+        "group": principle.scope,
+        "text": principle.english(),
+        "prompt_text": principle.prompt_text(),
+        "status": principle.status,
+    }
+
+
 def numbered(items):
     return "\n".join(item_line(number, item) for number, item in enumerate(items, 1))
 
 
-def item_line(number, item):
-    return f"[{number}] {item['kind']} ({item['group']}, {item['status'] or 'proven'}): {item['text']}"
+def item_line(number, item, text=None):
+    shown = item["text"] if text is None else text
+    return f"[{number}] {item['kind']} ({item['group']}, {item['status'] or 'proven'}): {shown}"
+
+
+def ask_numbered(items):
+    return "\n".join(
+        item_line(number, item, item.get("prompt_text", item["text"])[:ASK_ITEM_CHARS])
+        for number, item in enumerate(items, 1)
+    )
 
 
 def moved_on(tracker, phase, said, icon):
@@ -487,7 +501,7 @@ class Teacher:
 
 def ask_parts(question, items, passages):
     return [
-        Part("What Tinker keeps", numbered(items) or "(nothing)", True),
+        Part("What Tinker keeps", ask_numbered(items) or "(nothing)", True),
         Part("From what you read", quoted(passages, len(items) + 1)),
         Part("Installed here", installed_here(items)),
         Part("The question", question, True),

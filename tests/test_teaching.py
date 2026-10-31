@@ -11,11 +11,13 @@ from tinkerkit.knowledge import Embeddings, Knowledge, Library
 from tinkerkit.learning import DocCache
 from tinkerkit.model import Ollama
 from tinkerkit.passages import Block, Page
+from tinkerkit.principles import Principle, Principles
 from tinkerkit.project import Tracker
 from tinkerkit.prompts import Prompts
 from tinkerkit.reading import Readings
 from tinkerkit.sandbox import Ran, Sandbox
 from tinkerkit.settings import (
+    ASK_ITEM_CHARS,
     ASK_ITEMS_SHOWN,
     ASK_PASSAGES_SHOWN,
     BOOK_PASSAGES_SHOWN,
@@ -166,23 +168,15 @@ def test_a_rule_given_brings_the_facts_it_cites_right_after_it_within_the_limit(
     assert len(memory.about("which rules do you have", limit=1)) == 1
 
 
-@pytest.mark.spec("TCH-1")
-def test_an_item_of_a_topic_the_text_does_not_name_comes_after_only_by_meaning(kept, monkeypatch):
+@pytest.mark.spec("TCH-1", "PRI-9")
+def test_an_item_of_a_topic_the_text_does_not_name_is_not_shown(kept):
     asked = "how do flask routes work with black"
     assert {item["group"] for item in kept.about(asked)} == {"flask"}
-
-    def embed(path, payload=None, timeout=10, errors=False):
-        return {"embeddings": [[1.0, 0.0] if "black" in text else [0.0, 1.0] for text in payload["input"]]}
-
-    monkeypatch.setattr(Ollama, "get_json", staticmethod(embed))
-    recalled = Memory(Embeddings("e")).about(asked)
-    assert recalled[0]["group"] == "flask"
-    assert recalled[1:] and all("black" in item["text"] for item in recalled[1:])
     assert {item["group"] for item in kept.about("which lessons do you have")} >= {"python"}
 
 
-@pytest.mark.spec("TCH-1")
-def test_a_second_about_embeds_only_its_text(kept, monkeypatch):
+@pytest.mark.spec("TCH-1", "PRI-9")
+def test_about_makes_no_embedding_call(kept, monkeypatch):
     embedded = []
 
     def embed(path, payload=None, timeout=10, errors=False):
@@ -190,11 +184,27 @@ def test_a_second_about_embeds_only_its_text(kept, monkeypatch):
         return {"embeddings": [[float(len(text)), 1.0] for text in payload["input"]]}
 
     monkeypatch.setattr(Ollama, "get_json", staticmethod(embed))
-    Memory(Embeddings("e")).about("what is your current toolchain for python")
-    assert len(embedded) == len(kept.items) + 1
-    embedded.clear()
-    Memory(Embeddings("e")).about("which lessons do you have")
-    assert embedded == ["which lessons do you have"]
+    memory = Memory(Embeddings("e"))
+    memory.about("what is your current toolchain for python")
+    memory.about("how do flask routes work with black")
+    assert embedded == []
+
+
+@pytest.mark.spec("TCH-1")
+def test_memory_holds_the_live_principles_in_english(kept):
+    principles = Principles(None)
+    principles.put(
+        Principle.new("formatting python", "run ruff format", scope="python", because="it is fast")
+    )
+    gone = Principle.new("linting python", "run pylint", scope="python")
+    gone.retire("contradicted", "r3")
+    principles.put(gone)
+    memory = Memory()
+    kept_principles = [item for item in memory.items if item["kind"] == "principle"]
+    assert [(item["group"], item["text"]) for item in kept_principles] == [
+        ("python", "When formatting python, run ruff format, because it is fast.")
+    ]
+    assert memory.about("which principles do you keep for python")[0]["kind"] == "principle"
 
 
 @pytest.mark.spec("TCH-2")
@@ -277,7 +287,22 @@ def test_ask_shows_at_most_the_ask_items(home_store, make_model, fake_ollama):
     Asker(make_model(), Memory()).answer("flask fact")
     prompt = fake_ollama.calls[0]["messages"][1]["content"]
     assert f"[{ASK_ITEMS_SHOWN}] fact" in prompt and f"[{ASK_ITEMS_SHOWN + 1}]" not in prompt
-    assert ASK_ITEMS_SHOWN < MEMORY_ITEMS_SHOWN
+    assert ASK_ITEMS_SHOWN == 6 < MEMORY_ITEMS_SHOWN
+
+
+@pytest.mark.spec("TCH-2", "PRI-10")
+def test_ask_shows_a_principle_as_its_prompt_text_and_cuts_each_item(home_store, make_model, fake_ollama):
+    long_fact = "Flask routes use @app.route " + "and more " * 60
+    Library.save("flask", {"topic": "flask", "facts": [{"phase": "code", "text": long_fact}]})
+    Principles(None).put(
+        Principle.new("routing in flask", "use @app.route", scope="flask", because="it is plain")
+    )
+    fake_ollama.reply("With @app.route.", when="ask")
+    Asker(make_model(), Memory()).answer("how do flask routes work")
+    prompt = fake_ollama.calls[0]["messages"][1]["content"]
+    assert "routing in flask → use @app.route" in prompt and "because it is plain" not in prompt
+    assert long_fact[:ASK_ITEM_CHARS] in prompt and long_fact[: ASK_ITEM_CHARS + 1] not in prompt
+    assert ASK_ITEM_CHARS == 240
 
 
 class FakeSandbox:
