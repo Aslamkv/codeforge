@@ -90,3 +90,128 @@ def test_put_keeps_the_principle_when_the_embedding_server_fails(tinker_home, mo
     principle = a_principle()
     principles.put(principle)
     assert principles.get(principle.id) == principle
+
+
+def kept_principle(principles, **changes):
+    principle = a_principle(**changes)
+    principles.put(principle)
+    return principle
+
+
+def new_evidence(ref):
+    return {"kind": "run", "ref": ref, "source": "lessons"}
+
+
+def test_apply_add_keeps_a_new_candidate_that_was_born(tinker_home):
+    principles = Principles(None)
+    delta = {
+        "kind": "add",
+        "when": "a command needs a path",
+        "do": "pass it as an argument",
+        "because": "scripts must not assume the cwd",
+        "exceptions": [],
+        "scope": "python",
+        "phase": "code",
+        "evidence": [new_evidence("run-8")],
+    }
+    [added] = principles.apply([delta], "run-8")
+    assert principles.get(added.id) == added
+    assert added.status == "candidate"
+    assert added.do == "pass it as an argument"
+    assert added.phase == "code"
+    assert added.evidence == [new_evidence("run-8")]
+    assert [event["event"] for event in added.history] == ["born"]
+
+
+def test_apply_drops_an_add_with_no_do_or_no_evidence(tinker_home):
+    principles = Principles(None)
+    no_do = {"kind": "add", "when": "a test runs", "do": "", "scope": "python", "evidence": [new_evidence("r")]}
+    no_evidence = {"kind": "add", "when": "a test runs", "do": "keep it fast", "scope": "python", "evidence": []}
+    assert principles.apply([no_do, no_evidence], "run-8") == []
+    assert principles.all() == []
+
+
+def test_apply_add_like_a_kept_principle_strengthens_that_one(tinker_home):
+    principles = Principles(None)
+    kept = kept_principle(principles)
+    delta = {
+        "kind": "add",
+        "when": "a test reads a file",
+        "do": "give it a temporary directory.",
+        "scope": "python",
+        "evidence": [new_evidence("run-9")],
+    }
+    [changed] = principles.apply([delta], "run-9")
+    assert changed.id == kept.id
+    assert changed.evidence == kept.evidence + [new_evidence("run-9")]
+    assert changed.history[-1]["event"] == "confirmed"
+    assert len(principles.all()) == 1
+
+
+def test_apply_add_like_a_principle_of_another_scope_adds_a_new_one(tinker_home):
+    principles = Principles(None)
+    kept_principle(principles)
+    delta = {
+        "kind": "add",
+        "when": "a test reads a file",
+        "do": "give it a temporary directory.",
+        "scope": "rust",
+        "evidence": [new_evidence("run-9")],
+    }
+    principles.apply([delta], "run-9")
+    assert sorted(principle.scope for principle in principles.all()) == ["python", "rust"]
+
+
+def test_apply_strengthen_confirms_and_adds_the_evidence(tinker_home):
+    principles = Principles(None)
+    kept = kept_principle(principles)
+    [changed] = principles.apply([{"kind": "strengthen", "id": kept.id, "evidence": [new_evidence("run-9")]}], "run-9")
+    assert principles.get(kept.id) == changed
+    assert changed.evidence == kept.evidence + [new_evidence("run-9")]
+    assert changed.history[-1]["event"] == "confirmed"
+    assert changed.history[-1]["run"] == "run-9"
+
+
+def test_apply_contradict_counts_harm_and_records_it(tinker_home):
+    principles = Principles(None)
+    kept = kept_principle(principles)
+    [changed] = principles.apply([{"kind": "contradict", "id": kept.id, "evidence": [new_evidence("run-9")]}], "run-9")
+    assert changed.harmed == 1
+    assert changed.status == "candidate"
+    assert changed.history[-1]["event"] == "contradicted"
+    assert changed.evidence == kept.evidence
+
+
+def test_apply_contradict_retires_one_harmed_more_than_its_evidence(tinker_home):
+    principles = Principles(None)
+    kept = kept_principle(principles)
+    contradict = {"kind": "contradict", "id": kept.id, "evidence": [new_evidence("run-9")]}
+    [changed] = principles.apply([contradict, contradict], "run-9")
+    assert changed.harmed == 2
+    assert changed.status == "retired"
+    assert changed.history[-1]["event"] == "retired"
+    assert "contradicted" in changed.history[-1]["reason"]
+    assert principles.kept("python") == []
+
+
+def test_apply_except_adds_the_exception_and_its_evidence(tinker_home):
+    principles = Principles(None)
+    kept = kept_principle(principles)
+    delta = {"kind": "except", "id": kept.id, "exception": "the test is a benchmark", "evidence": [new_evidence("run-9")]}
+    [changed] = principles.apply([delta], "run-9")
+    assert changed.exceptions == kept.exceptions + ["the test is a benchmark"]
+    assert changed.evidence == kept.evidence + [new_evidence("run-9")]
+    assert principles.get(kept.id) == changed
+
+
+def test_apply_drops_unknown_ids_and_kinds(tinker_home):
+    principles = Principles(None)
+    kept = kept_principle(principles)
+    deltas = [
+        {"kind": "strengthen", "id": "missing", "evidence": [new_evidence("run-9")]},
+        {"kind": "contradict", "id": "missing", "evidence": [new_evidence("run-9")]},
+        {"kind": "except", "id": "missing", "exception": "never", "evidence": []},
+        {"kind": "rewrite", "id": kept.id},
+    ]
+    assert principles.apply(deltas, "run-9") == []
+    assert principles.all() == [kept]
