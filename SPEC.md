@@ -1479,8 +1479,8 @@ then is anything changed.
   the time taken (a terminal shows one status line while it thinks). It changes nothing but **TCH-11**.
 - **TCH-3** An ask also sees the passages most about the question from each passage source: the readings
   (`Readings`; a reading named by its title or whose items are shown) and the documentation kept for the topics
-  shown (**LRN-1**, any version), so it answers from the source's own words. Each source shortlists its
-  passages by words first (**KNW-12**) and ranks only the shortlist by meaning; no source embeds all its pages.
+  shown (**LRN-1**, any version), so it answers from the source's own words. Each source ranks its passages by
+  words alone (BM25, **KNW-12** without embeddings): an ask makes no embedding call (**PRI-9**).
   A passage whose text is one already given (the same page at another address) is given once. The ask gets at most
   `ASK_PASSAGES_SHOWN` passages in all, taken in turn from each source's best.
 - **TCH-4** `read_plan` keeps at most `TEACH_CLAIMS` claims, each a fact or a preference (the person's own
