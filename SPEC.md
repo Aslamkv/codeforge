@@ -1104,7 +1104,8 @@ The chat plugin: Telegram, and `tinker channel`.
 
 ## knowledge (KNW)
 
-Lessons and proven knowledge, and what every kind of learning shares.
+Lessons and proven knowledge, and what every kind of learning shares. Lessons, facts, findings and rules are
+kept as principles (**PRI**); where a point below names them, it holds for principles.
 
 - **KNW-1** `Library.slug`: "Test-driven development" gives `test-driven-development`, "C++" gives `cpp`, "C#"
   gives `csharp`, and "Python 3.14" gives `python-3-14` (at most 60 chars). `read(slug)` gives `None` for a
@@ -1170,19 +1171,10 @@ Lessons and proven knowledge, and what every kind of learning shares.
   questions, findings, contradictions, open gaps, and facts with their sources and confidence.
 - **KNW-19** `Library.save` gives each research finding `cites`: the IDs of the facts it cites by number, so
   the link holds when a fact is retired.
-- **KNW-20** A topic's playbook. `condense(plan, facts)` asks one call to turn the topic's facts (a language's
-  with the lessons its own projects proved; candidates are left out) into at most `PLAYBOOK_RULES` rules, at
-  the think setting it is given (learning's `learn_think`). `read_rules` keeps a rule only with a known phase
-  and at least one cited fact or lesson, cuts its text to `MAX_RULE_CHARS`, keeps one per text and gives each
-  the IDs it cites. When the model gives no usable rules, there are none and the facts are shown as they are.
-  `Library.items` gives each rule (kind `rule`), and the rules stand in for the facts: none is shown but those
-  a retired rule cited and no rule in use cites. A rule is a claim like a fact: it is proven and copied into
-  the language's facts, or retired. Each rule says when it applies (`when`, at most `MAX_RULE_WHEN_CHARS`): ""
-  for every program, else the kind of code it is for, which a proven copy keeps. What the reply says a new
-  project declares to get the newest version (`declare`) is the first rule, for every program.
-- **KNW-21** Learning a language again (**LRN-4**) replaces what its earlier learning proved: `supersede`
-  retires the language's proven facts from its own topic that the new learning does not show (its rules, when
-  it has them), with the reason that they were replaced. Proven facts from other topics stay.
+- **KNW-20** A topic's playbook is its principles (**PRI**): nothing condenses facts into rules. What a learn
+  finds a new project declares to get the newest version is a principle for every program (`when` "").
+- **KNW-21** Learning a topic again changes its principles only by deltas (**PRI-3**): a principle the new
+  passages contradict counts it, and nothing is retired for not being found again.
 - **KNW-22** `Item(kind, id, topic)` names one knowledge item: a lesson (`lesson`) or a language's proven fact
   (`known`), with no topic; a toolchain fix (`fix`: its topic the language, its ID the failure); and a topic's
   `fact`, `finding` or `rule` (its topic the slug). `key` gives it as text, `kind:id` or `kind:topic:id`, and
@@ -1209,6 +1201,46 @@ Lessons and proven knowledge, and what every kind of learning shares.
 - **KNW-26** `SearchPlanner` keeps each plan in the home's `search plans`, keyed by its need before filling,
   lowercased with spaces collapsed, and plans a need found there with no call, so one plan serves every topic.
   A fallback plan is not kept. Plans stay until `tinker clear searches`.
+
+## principles (PRI)
+
+What every learning keeps: patterns found in what Tinker read or did, as principles in one store.
+
+- **PRI-1** A `Principle` is `{id, when, do, because, exceptions, scope, phase, evidence, helped, harmed, status,
+  history}`: when it applies (`when`, "" for always), what to do or expect (`do`), why (`because`), when it does
+  not hold (`exceptions`), its scope (`any`, a language's key, a topic's slug or a reading), its phase (one of
+  `FACT_PHASES`, `book` or `any`), and what supports it (`evidence`: each a passage, page, run, check or "your
+  preference", with where it came from). `prompt_text` gives it compact for prompts (`when → do; unless …`),
+  `english` as a sentence ("When …, …, because …, unless …"). Both name no evidence.
+- **PRI-2** `Principles` keeps every principle in one home store (**STO**), whatever learned it: a learn, a
+  reading, a research, a run's lessons (**FIN**), a practice's reflect (**EXR-4**) and teaching (**TCH-7**). A
+  principle may hold across topics: its scope is `any` and its evidence names each topic. Toolchains, fixes and
+  commands are kept apart, as before.
+- **PRI-3** Principles change only by deltas, applied by code, never by rewriting them all: `add` (a new
+  candidate, `born`), `strengthen(id, evidence)` (`confirmed`, adds the evidence), `contradict(id, evidence)`
+  (`harmed` + 1, `contradicted`), `except(id, exception, evidence)` (adds the exception). A delta naming an
+  unknown id, or an add with no `do` or no evidence, is dropped. An add like a kept principle in its scope
+  (`SAME_FACT_SIMILARITY` on `when` and `do`) strengthens that one instead.
+- **PRI-4** `Inducer.induce(passages, scope)` makes one call (`INDUCE_SYSTEM`) with numbered passages (source
+  text, never facts made from it) and, numbered after them, the kept principles of that scope most about the
+  passages (**PRI-6**, at most `INDUCE_KNOWN_SHOWN`). The reply is a list of deltas, each citing the passages it
+  rests on by number; a delta citing no given passage is dropped, and the cited passages become its evidence.
+  `do` is cut to `MAX_FACT_CHARS`, `when` to `MAX_RULE_WHEN_CHARS`. A reply with no list is not usable.
+- **PRI-5** A principle is a candidate when added, and is proven, helped and retired as a lesson is (**KNW-7**,
+  **KNW-9**, **KNW-10**). One with more `harmed` than evidence is retired, with the reason that it was
+  contradicted. One no build can prove (phase `book`, or from a research) stays a candidate and is shown with
+  its evidence.
+- **PRI-6** A principle's `when` and `do` are embedded when it is added (**KNW-11**). `about(text, limit)` embeds
+  only the text and ranks the principles not retired with `Retriever.rank` (**KNW-12**), best first.
+  `for_phases(phases, language)` gives the principles of those phases scoped `any` or to that language, proven
+  first, then by `helped`, for build prompts (**SES-3**).
+- **PRI-7** `Item("principle", id)` names a principle (**KNW-22**), and `retire` retires it from the store. The
+  graph shows each principle as a node of kind `principle`, with `cites` links to its evidence (**GRF**).
+- **PRI-8** A home that keeps knowledge from before principles is migrated once, when it is first opened: each
+  lesson, proven fact, topic fact, finding, rule and reading point becomes a principle with its ID, status,
+  history and sources (a finding's and rule's `cites` as evidence), its `when` a rule's `when` or "", its `do`
+  its text, its scope and phase from where it was kept. The old lists are then emptied and the home marked
+  migrated. An item that cannot be read keeps its text as `do`, with a note.
 
 ## slots (SLT)
 
@@ -1270,9 +1302,8 @@ learning and run lessons are apart.
   the topic's own documentation, by its name alone. Among the results picked, reference pages come before
   news, release notes, changelogs and downloads; those serve only the slot of what this version changes. And
   each of a language's tools by its own `TOOL_DOCS_SEARCH` (its own version, at most
-  `tool_docs_pages` pages), the tools' searches all at once; their pages join the pool, and are kept (**LRN-1**). Each slot's passages are digested into facts
-  (candidates, each with its slot) and condensed into rules, both at `learn_think`, and kept only after both
-  succeed, under the language's key or the topic's slug, with its plan, machine, documentation versions,
+  `tool_docs_pages` pages), the tools' searches all at once; their pages join the pool, and are kept (**LRN-1**). Each slot's passages are induced into principles
+  (**PRI-4**, scoped to the topic) at `learn_think`, and the topic is kept only after that succeeds, under the language's key or the topic's slug, with its plan, machine, documentation versions,
   sources, cited passages, status (`complete` or `incomplete`), missing slots and request counts; then
   indexed. A summary prints the slots filled and missing, what is installed (each machine command and the
   version it found), the documentation, the pages by source, the facts and the requests by kind.
@@ -1394,11 +1425,9 @@ the core ones first, and saved as soon as it is read. What it teaches is a topic
   words, `READ_FOCUS_CHAPTERS` in all, never a raw one: each shows its `excerpt`, its `relevant_chunks` for WHAT
   (**KNW-14**, `READ_FOCUS_CHUNKS` parts), and the prompt says what the person asks to look for. What it finds
   that is new joins the topic.
-- **RDG-10** `read_points` keeps at most `READ_FACTS_PER_CHAPTER` points, each cut to `MAX_FACT_CHARS`. A point
-  of a source about building software keeps its phase when it is one of `FACT_PHASES`; every other point has
-  the phase `book`, which no build is shown. A reply with no list of points is not usable. Once every chapter
-  is read, a source about building software has its facts condensed into rules (again when a reading found
-  something new); no other is.
+- **RDG-10** Each chapter part is induced into principles (**PRI-4**, scoped to the reading), at most
+  `READ_FACTS_PER_CHAPTER` deltas a chapter. A principle from a source about building software keeps its phase
+  when it is one of `FACT_PHASES`; every other has the phase `book`, which no build is shown.
 - **RDG-11** `Readings.about(text, items)` gives the readings the text names by title, then those whose items
   were shown. `passages(numbers, query)` gives their passages (`MAX_PASSAGE_CHARS`) most about the query by its
   words, at most `BOOK_PASSAGES_SHOWN`, each with its title and chapter.
@@ -1419,13 +1448,12 @@ until what was taught is checked: the model turns it into claims and the change 
 checked on this machine, on the web and in what Tinker read, the model weighs that evidence alone, and only
 then is anything changed.
 
-- **TCH-1** `Memory(embeddings).items` are the memory graph's toolchains, fixes, lessons, facts, findings,
-  rules and commands, without the retired. `about(text)` gives at most `MEMORY_ITEMS_SHOWN` of them, the most
+- **TCH-1** `Memory(embeddings).items` are the memory graph's toolchains, fixes, principles (in `english`)
+  and commands, without the retired. `about(text)` gives at most `MEMORY_ITEMS_SHOWN` of them, the most
   related first: first the items whose kind and language (or topic) the text names. A language's toolchain
   counts as named with its language, however the text calls it ("toolset"). When the text names a topic, an
   item of a topic it does not name comes after them, and only when its meaning is at least
-  `RECALL_OTHER_TOPIC_SIMILARITY` like the text's: a shared word alone ("NULL") never brings it. A rule given brings the facts it
-  cites (`cites`) right after it, still within `MEMORY_ITEMS_SHOWN`. A second `about` embeds only its text: the
+  `RECALL_OTHER_TOPIC_SIMILARITY` like the text's: a shared word alone ("NULL") never brings it. A second `about` embeds only its text: the
   items' embeddings are kept.
 - **TCH-2** `Asker.answer(question)` gives the model at most `ASK_ITEMS_SHOWN` items (the first of `about`) and the
   passages numbered, and the version installed here of each topic shown (its machine's version), of no other
