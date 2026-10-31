@@ -1465,7 +1465,7 @@ class Library:
     def facts_shown(entry):
         rules = entry.get("rules", [])
         if not rules:
-            return entry["facts"]
+            return entry.get("facts", [])
         cited = lambda given: {*rule.get("cites", []) for rule in given}
         reopened = cited(
             retired for retired in entry.get("retired", []) if retired.get("was") == "rules"

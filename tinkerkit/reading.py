@@ -291,8 +291,6 @@ class Readings:
                 "terms": survey["terms"],
                 "source": entry["source"],
                 "learned": now_text(),
-                "facts": [],
-                "rules": [],
             },
         )
 

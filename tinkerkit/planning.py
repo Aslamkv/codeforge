@@ -190,7 +190,7 @@ class Recaller(Phase):
         left_out = self.for_other_code(known) | self.needing_tools_missing_here(known)
         self.project.spec["inapplicable"] = sorted(left_out)
         if left_out:
-            say.skip(f"Left out {len(left_out)} learned rule(s) or fact(s) this project does not need")
+            say.skip(f"Left out {len(left_out)} learned principle(s) this project does not need")
 
     def known_rules(self):
         return self.project.spec.get("learned", []) + (

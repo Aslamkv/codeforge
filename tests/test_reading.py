@@ -334,6 +334,7 @@ def test_every_chapter_is_read_in_order_and_saved_as_it_is_read(
     assert all(the_index not in prompt for prompt in sent[1:])
     topic = Library.read("read-1")
     assert topic["kind"] == "reading" and topic["reading"] == 1 and topic["software"] is True
+    assert "facts" not in topic and "rules" not in topic and Library.items({"read-1": topic})
     assert sorted(kept_rules()) == [
         "Name each function after what it does",
         "Small programs stay easy to change",

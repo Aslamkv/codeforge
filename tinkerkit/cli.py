@@ -1675,7 +1675,7 @@ class CycleRunner:
             cycle.get("used", {}), self.session.failed_phases(phase, self.stopped)
         )
         if gone:
-            say.info(f"{gone} lesson(s) and fact(s) used in this step are discarded: they did not hold", "🗑️")
+            say.info(f"{gone} principle(s) used in this step are discarded: they did not hold", "🗑️")
         self.session.save()
 
     def show_plan(self):

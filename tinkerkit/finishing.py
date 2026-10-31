@@ -538,7 +538,7 @@ class LessonWriter(Phase):
         cycle["proven"] = True
         self.session.save()
         if proven:
-            say.done(f"{proven} lesson(s) and fact(s) used here are proven now")
+            say.done(f"{proven} principle(s) used here are proven now")
 
     def keep_the_toolchain(self, cycle):
         self.session.knowledge.remember_toolchain(self.session.toolchain)
