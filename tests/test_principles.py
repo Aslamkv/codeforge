@@ -447,6 +447,8 @@ def seed_old_knowledge():
                        "when": "a project starts", "cites": ["topicfact001"], "status": "candidate"}],
             "findings": [{"question": 1, "answer": "very fast", "confidence": "high",
                           "cites": ["topicfact001"]}],
+            "retired": [{"id": "topicfact002", "phase": "toolchain", "text": "uv is slow", "status": "retired",
+                         "reason": "wrong", "was": "facts", "history": OLD_HISTORY}],
         },
     )
 
@@ -499,8 +501,20 @@ def test_migrate_empties_the_old_lists_keeps_the_rest_and_marks_the_home(tinker_
     assert (language["lessons"], language["facts"], language["fixes"]) == ([], [], [{"failure": "boom", "fix": "pin it"}])
     assert store.get("memory", "any")["lessons"] == []
     topic = store.get("learned", "uv")
-    assert (topic["facts"], topic["rules"], topic["findings"], topic["overview"]) == ([], [], [], "a fast tool")
+    assert (topic["facts"], topic["rules"], topic["findings"], topic["retired"], topic["overview"]) == (
+        [], [], [], [], "a fast tool"
+    )
     assert store.get("migrated", "principles")["at"]
+
+
+@pytest.mark.spec("PRI-8")
+def test_migrate_turns_retired_topic_items_into_retired_principles(tinker_home):
+    seed_old_knowledge()
+    Principles(None).migrate()
+    retired = migrated_by_do()["uv is slow"]
+    assert (retired.id, retired.status, retired.scope, retired.phase, retired.history) == (
+        "topicfact002", "retired", "uv", "toolchain", OLD_HISTORY
+    )
 
 
 @pytest.mark.spec("PRI-8")

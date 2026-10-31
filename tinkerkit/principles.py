@@ -219,7 +219,7 @@ class Migration:
             self.move("languages", key, doc, ("lessons", "facts"), key)
         self.move("memory", "any", store.get("memory", "any"), ("lessons",), "any")
         for slug, doc in store.items("learned").items():
-            self.move("learned", slug, doc, ("facts", "rules", "findings"), slug)
+            self.move("learned", slug, doc, ("facts", "rules", "findings", "retired"), slug)
         store.put(*self.MARKER, {"at": now_text()})
 
     def move(self, collection, key, doc, lists, scope):

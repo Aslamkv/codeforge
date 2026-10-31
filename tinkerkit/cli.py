@@ -38,6 +38,7 @@ lazy from .project import (
     project_store,
     saved,
 )
+lazy from .principles import Principles
 lazy from .prompts import Prompts
 lazy from .session import Session, Stopped
 lazy from .settings import (
@@ -99,12 +100,17 @@ def cannot_read_or_write(exc):
 def run(args, script_started, started_at):
     if args.reset:
         return Home.reset(args.yes)
-    Home.ensure()
+    open_home()
     if Cli.works_for_hours(args):
         Home.keep_awake()
     if Commands(args).run():
         return
     ProjectRun(args, script_started, started_at).execute()
+
+
+def open_home():
+    Home.ensure()
+    Principles(None).migrate()
 
 
 class Cli:
@@ -197,7 +203,7 @@ class Cli:
     @staticmethod
     def run_at_once(argv):
         if not argv:
-            Home.ensure()
+            open_home()
             conversation.session(Path.cwd())
             raise SystemExit(0)
         if argv[0] in ("help", "-h", "--help"):
@@ -205,7 +211,7 @@ class Cli:
         if argv[0] in Cli.TALK_COMMANDS:
             if argv[1:2] in (["-h"], ["--help"]):
                 Cli.help(argv[0])
-            Home.ensure()
+            open_home()
             raise SystemExit(conversation.one_shot(argv[0], " ".join(argv[1:])))
         if argv[0] == "channel":
             if channels is None:

@@ -133,6 +133,15 @@ def test_clear_runs_on_its_own(home_store):
     assert done.value.code == 0 and home_store.items("memory") == {}
 
 
+@pytest.mark.spec("PRI-8")
+def test_a_start_migrates_an_old_home(home_store, monkeypatch):
+    home_store.put("languages", "python", {"lessons": [{"id": "lesson000001", "text": "use tmp_path"}]})
+    monkeypatch.setattr(cli.conversation, "one_shot", lambda command, text: 0)
+    with pytest.raises(SystemExit):
+        Cli.run_at_once([Cli.TALK_COMMANDS[0], "hello"])
+    assert home_store.get("languages", "python")["lessons"] == [] and home_store.get("migrated", "principles")
+
+
 @pytest.mark.spec("CLI-2")
 def test_help_overview(capsys):
     with pytest.raises(SystemExit):
