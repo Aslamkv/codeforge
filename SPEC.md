@@ -1119,12 +1119,14 @@ kept as principles (**PRI**); where a point below names them, it holds for princ
   tools, what is installed, research findings, and each fact with its confidence. A broken topic is left out,
   with a note. `shown_in(item, phases)` sends machine items to the toolchain and config prompts, tools also to
   the tests prompt, findings to the spec and design prompts, and a fact to its own phase.
-- **KNW-4** `add_lessons(new, confirmed)` confirms known lessons by number. It confirms instead of adding a
-  lesson that is like a known one. It skips a lesson with no text, an unknown phase, or one that names the
-  project (`names`). A new lesson is a candidate. A lesson goes to the language or to any language by its
-  scope. A store keeps at most `MAX_LESSONS_PER_FILE`, and new lessons always stay. It gives how many were new.
-  `lessons(phases)` gives the best evidenced first: the times seen plus the times helped, then the most
-  recently seen.
+- **KNW-4** Lessons are principles (**PRI-2**). `known_lessons()` gives the principles not retired, scoped to
+  the language's key or `any`, of a phase in `LESSON_PHASES`, each as a lesson `{id, phase, text, status, seen,
+  helped, history}` (`text` its `prompt_text`, `seen` its evidence count). `add_lessons(new, confirmed)` applies
+  deltas (**PRI-3**) with the run as evidence: a confirmed number strengthens that known lesson; a new lesson is
+  an `add` (`do` its text, `when` "", its phase, scoped to the language's key or `any` by its scope), so one like
+  a kept principle strengthens it instead; lessons are not embedded, so a run's chat model stays loaded. It skips a lesson with no text, an unknown phase, or one that names
+  the project (`names`). It gives how many were new. `lessons(phases)` gives the best evidenced first: the times
+  seen plus the times helped. Proving or retiring a lesson (**KNW-7**, **KNW-10**) changes its principle.
 - **KNW-5** Toolchain fixes. `known_fix` replays only a fix for exactly this failure, not tried yet. A replay
   that fails retires that fix at once. `remember_fix` keeps the last 20, one per failure. `similar_fix` needs a
   similarity of at least `TOOLCHAIN_HINT_SIMILARITY`. `remember_toolchain` keeps the toolchain without its
