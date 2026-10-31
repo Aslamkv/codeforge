@@ -1026,11 +1026,14 @@ The terminal and the chats are one conversation: the same commands, the same ans
   failed. The chat's prompt (`CHAT_SYSTEM`) asks the model, when the person asks Tinker to do what one of the
   commands does, to reply with only that command line (`/clear chat` for `wipe the chat`), and when they ask
   what a `system` check tells (**SYS-1**), to reply with only that check's line (`/system battery` for
-  `am I charged?`), where memory means Tinker's `memory` command and only RAM means `/system ram`; asked
-  how to do it, it answers in words. A reply that is one line, with or without backticks, and that `command_of` gives
-  a command for is not shown: its words a fixed phrase (**CNV-5**), it is handled as that command sent;
-  otherwise (more words: `/fix the login bug`) it is offered, `👉 /fix the login bug — /confirm runs it`,
-  and `/confirm` handles it as sent. This takes no extra model call.
+  `am I charged?`), where memory means Tinker's `memory` command and only RAM means `/system ram`, and
+  one command per line when several are asked for (`/system time` and `/system date` for `time and date`);
+  asked how to do it, it answers in words. A reply whose every line, with or without backticks, is one that
+  `command_of` gives a command for is not shown. A line runs as sent when its words are a fixed phrase
+  (**CNV-5**) or its command is a glance (**CNV-14**), since a glance changes nothing; a reply of several
+  lines that all run as sent runs each in turn. A one-line reply that does not (more words:
+  `/fix the login bug`) is offered, `👉 /fix the login bug — /confirm runs it`, and `/confirm` handles it as
+  sent; any other reply is shown. This takes no extra model call.
 - **CNV-21** While a chat or a command line pauses the job that runs (**JOB-10**, `Talk.pausing_jobs`), its
   note says what is paused for it, and that it goes on once they have their answer.
 - **CNV-22** `Shell.propose` gives one command line to confirm, with a warning when it changes or deletes
