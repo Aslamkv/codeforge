@@ -1237,8 +1237,8 @@ What every learning keeps: patterns found in what Tinker read or did, as princip
   `do` is cut to `MAX_FACT_CHARS`, `when` to `MAX_RULE_WHEN_CHARS`. A reply with no list is not usable.
 - **PRI-5** A principle is a candidate when added, and is proven, helped and retired as a lesson is (**KNW-7**,
   **KNW-9**, **KNW-10**). One with more `harmed` than evidence is retired, with the reason that it was
-  contradicted. One no build can prove (phase `book`, or from a research) stays a candidate and is shown with
-  its evidence.
+  contradicted. One no build shows (phase `book`) stays a candidate and is shown with its evidence; one from a
+  research is proven or retired by the builds it is shown in, as any other.
 - **PRI-6** A principle's `when` and `do` are embedded when it is added (**KNW-11**). `about(text, limit)` embeds
   only the text and ranks the principles not retired with `Retriever.rank` (**KNW-12**), best first.
   Build prompts (**SES-3**) show a principle scoped `any` or to the language as a lesson (**KNW-4**), and one
