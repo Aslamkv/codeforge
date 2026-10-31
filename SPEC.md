@@ -326,7 +326,7 @@ The home and its database, the settings, numbered lists, and the one way to dele
   |---|---|---|---|---|---|
   | `time` | 🕒 | Time | `date +%H:%M %Z` | `date +%H:%M %Z` | the output: `11:16 IST` |
   | `date` | 📅 | Date | `date +%A %d %B %Y` | `date +%A %d %B %Y` | the output: `Saturday 31 October 2026` |
-  | `disk` | 💾 | Disk | `df -h HOME` | `df -h HOME` | free of size and the share used: `609 GB free of 926 GB (3% used)` |
+  | `disk` | 💾 | Disk | `df -h HOME` | `df -h HOME` | free of size and the share used: `609 GB free of 926 GB (33% used)` |
   | `ram` | 🧠 | RAM | `memory_pressure` | `free -h` | available of the total and the share used: `21 GB available of 24 GB (14% used)`; macOS gives the total in bytes and the free percentage, Linux the `total` and `available` columns |
   | `battery` | 🔋 | Battery | `pmset -g batt` | `upower -i /org/freedesktop/UPower/devices/battery_BAT0` | percent, state, and the power source when named: `100%, charged, on AC power` |
   | `uptime` | ⏱️ | Uptime | `uptime` | `uptime` | days, hours, minutes, leaving out the zero ones: `2 d 3 h 53 m`, `45 m` |
