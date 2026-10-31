@@ -288,6 +288,12 @@ def test_the_chat_prompt_asks_for_only_the_check_line_when_asked_what_a_system_c
     assert "only that check's line" in chat and "`/system battery`" in chat and "am I charged?" in chat
 
 
+@pytest.mark.spec("CNV-20", "SYS-1")
+def test_the_chat_prompt_keeps_memory_for_the_memory_command_and_ram_for_system_ram():
+    chat = Prompts.CHAT_SYSTEM.format(kind="Telegram", commands="/memory\n/system ram")
+    assert "memory means Tinker's `memory` command" in chat and "only RAM means `/system ram`" in chat
+
+
 @pytest.mark.spec("PRM-14")
 def test_the_example_toolchain_commands_are_real_commands():
     toolchain = json.loads("{" + Prompts.TOOLCHAIN_JSON + "}")["toolchain"]
