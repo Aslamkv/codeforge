@@ -29,11 +29,11 @@ class Principle:
     history: list = field(default_factory=list)
 
     @classmethod
-    def new(cls, when, do, scope="any", **fields):
+    def new(cls, when, do, scope="any", run="", **fields):
         principle = cls(
             id=fingerprint(f"{scope}\n{when}\n{do}")[:12], when=when, do=do, scope=scope, **fields
         )
-        principle.history = record({}, "born", "")["history"]
+        principle.history = record({}, "born", run)["history"]
         return principle
 
     @classmethod
@@ -84,6 +84,14 @@ class Principle:
     def retire(self, reason, run):
         self.status = "retired"
         self.record("retired", run, reason=reason)
+
+    def prove(self, run):
+        self.status, self.helped = "proven", self.helped + 1
+        self.record("helped", run)
+
+    def fail(self, reason, run):
+        self.status = "retired"
+        self.record("failed", run, reason=reason)
 
 
 class Principles:
@@ -154,6 +162,7 @@ class Principles:
             scope=delta.get("scope", "any"),
             phase=delta.get("phase", "any"),
             evidence=list(delta["evidence"]),
+            run=run,
         )
         like = self.like(candidate)
         if like:

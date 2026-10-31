@@ -24,7 +24,6 @@ from tinkerkit.prompts import Prompts
 from tinkerkit.settings import (
     CHUNKS_PER_PAGE,
     EMBED_KEEP_ALIVE,
-    MAX_LESSONS_PER_FILE,
     MAX_PLANNED_SEARCHES,
     MAX_RULE_CHARS,
     PLAYBOOK_RULES,
@@ -165,53 +164,42 @@ def test_add_lessons(tinker_home):
         [],
     )
     assert added == 2
-    assert [lesson["text"] for lesson in Home.store().get("languages", "python")["lessons"]] == [
-        "Use tmp_path for files a test makes"
-    ]
-    assert [lesson["text"] for lesson in Home.store().get("memory", "any")["lessons"]] == [
-        "Keep each module under sixty lines"
-    ]
+    kept = {principle.do: principle for principle in Principles(None).all()}
+    assert {text: principle.scope for text, principle in kept.items()} == {
+        "Use tmp_path for files a test makes": "python",
+        "Keep each module under sixty lines": "any",
+    }
+    assert kept["Use tmp_path for files a test makes"].evidence == [{"kind": "run", "source": "", "text": ""}]
+    assert "lessons" not in Home.store().get("languages", "python") and not Home.store().get("memory", "any")
     assert all(
-        lesson["status"] == "candidate" and len(lesson["id"]) == 12 for lesson in known.known_lessons()
+        lesson["status"] == "candidate" and len(lesson["id"]) == 12 and lesson["seen"] == 1
+        for lesson in known.known_lessons()
     )
     again = Knowledge("Python")
-    assert again.add_lessons([lesson("Use tmp_path for the files a test makes", "tests")], [2]) == 0
+    number = [lesson["text"] for lesson in again.known_lessons()].index("Keep each module under sixty lines") + 1
+    repeated = lesson("Use tmp_path for the files a test makes", "tests", "language")
+    assert again.add_lessons([repeated], [number]) == 0
     seen = {lesson["text"]: lesson["seen"] for lesson in again.known_lessons()}
     assert seen == {"Use tmp_path for files a test makes": 2, "Keep each module under sixty lines": 2}
     assert "2 lesson(s)" in again.summary()
 
 
 @pytest.mark.spec("KNW-4")
-def test_lessons_are_capped_and_ranked(tinker_home):
+def test_lessons_give_the_best_evidenced_first(tinker_home):
     known = Knowledge("Python")
     distinct = [
         "Give pytest a pythonpath setting in pyproject.toml",
         "Run cargo test with -q for short output",
         "Pass sample JSON to adapters instead of calling the API",
         "Name test files test_*.py",
-        "Keep secrets out of the repository",
-        "Close sqlite connections in a finally block",
-        "Round money to two decimals only when printing it",
-        "Exit with code 1 after an error message",
-        "Read settings from the environment first",
-        "Prefer pathlib over os.path joins",
-        "Quote shell variables that hold paths",
-        "Sort dictionary keys before comparing output",
-        "Seed random generators inside tests",
-        "Use tmp_path for files the tests create",
-        "Flush stdout before the process exits",
     ]
-    for text in distinct[:MAX_LESSONS_PER_FILE]:
+    for text in distinct:
         known.add_lessons([lesson(text)], [])
-    assert len(known.known_lessons()) == MAX_LESSONS_PER_FILE
-    known.confirm(known.known_lessons()[3])
-    assert known.add_lessons([lesson("a brand new rule that is unlike every other one")], []) == 1
-    texts = [lesson["text"] for lesson in known.any_language_doc["lessons"]]
-    assert len(texts) == MAX_LESSONS_PER_FILE and "a brand new rule that is unlike every other one" in texts
-    assert [lesson["text"] for lesson in known.lessons(("code",), limit=1)] == [
-        known.known_lessons()[0]["text"]
-    ]
-    assert known.known_lessons()[0]["seen"] == 2
+    number = [lesson["text"] for lesson in known.known_lessons()].index("Name test files test_*.py") + 1
+    assert known.add_lessons([lesson("a brand new rule that is unlike every other one")], [number]) == 1
+    assert len(known.known_lessons()) == 5
+    assert [lesson["text"] for lesson in known.lessons(("code",), limit=1)] == ["Name test files test_*.py"]
+    assert known.lessons(("code",), limit=1)[0]["seen"] == 2
     assert known.lessons(("design",)) == []
 
 
@@ -930,7 +918,8 @@ def test_condensing_folds_in_the_lessons_the_language_proved(make_model, fake_ol
         ],
         [],
     )
-    known.prove({f"lesson:{known.language_doc['lessons'][0]['id']}": ["config"]})
+    named = {lesson["text"]: lesson["id"] for lesson in known.known_lessons()}
+    known.prove({f"lesson:{named['Name the module after its folder']}": ["config"]})
     fake_ollama.reply(
         json.dumps(
             {"rules": [{"phase": "config", "text": "Name the module after its folder", "cites": [2]}]}
@@ -952,7 +941,7 @@ def test_condensing_folds_in_the_lessons_the_language_proved(make_model, fake_ol
     )
     a_candidate_lesson = "Read the spec twice"
     assert a_candidate_lesson not in prompt
-    assert rules[0]["cites"] == [known.language_doc["lessons"][0]["id"]]
+    assert rules[0]["cites"] == [named["Name the module after its folder"]]
 
 
 @pytest.mark.spec("KNW-20")
@@ -1195,13 +1184,10 @@ def test_what_is_retired_is_kept_apart_with_why_and_never_shown(tinker_home, mon
     )
     after = Knowledge("Python", "r3")
     after.fix_result(after.known_fix("no module named calc"), worked=False)
-    retired = Knowledge("Python").any_language_doc["retired"][0]
-    assert retired["text"] == "Seed random generators inside tests" and retired["status"] == "retired"
-    assert (
-        retired["reason"] == "shown in the tests prompts of a step that failed"
-        and retired["was"] == "lessons"
-    )
-    assert events(retired)[-1] == ("failed", "r2")
+    retired = Principles(None).get(seed)
+    assert retired and retired.do == "Seed random generators inside tests" and retired.status == "retired"
+    assert retired.history[-1]["reason"] == "shown in the tests prompts of a step that failed"
+    assert events({"history": retired.history})[-1] == ("failed", "r2")
     fix = Knowledge("Python").language_doc["retired"][0]
     assert fix["reason"] == "its replay failed" and events(fix)[-1] == ("failed", "r3")
     entry = Library.read("flask")

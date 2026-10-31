@@ -73,7 +73,7 @@ class Item(namedtuple("Item", "kind id topic", defaults=("",))):
         return cls(kind, item_id, topic)
 
 
-STORED_AS = frozendict({"lesson": ("lessons", "id"), "known": ("facts", "id"), "fix": ("fixes", "failure")})
+STORED_AS = frozendict({"known": ("facts", "id"), "fix": ("fixes", "failure")})
 LEARN_STEPS = (
     "search",
     "plan",
@@ -99,10 +99,9 @@ class Knowledge:
             "projects": 0,
             "toolchain": None,
             "fixes": [],
-            "lessons": [],
             "facts": [],
         }
-        self.any_language_doc = Home.store().get("memory", "any") or {"lessons": []}
+        self.any_language_doc = Home.store().get("memory", "any") or {}
 
     @staticmethod
     def named_in(text):
@@ -117,7 +116,7 @@ class Knowledge:
         return min(named, key=lambda name: (text or "").lower().index(name.lower()), default=None)
 
     def summary(self):
-        lessons = len(self.language_doc.get("lessons", [])) + len(self.any_language_doc.get("lessons", []))
+        lessons = len(self.known_lessons())
         projects, facts = self.language_doc.get("projects", 0), len(self.language_doc.get("facts", []))
         known = [
             ("the toolchain that worked" + (f" ({projects} finished project(s))" if projects else ""))
@@ -146,32 +145,48 @@ class Knowledge:
         return [fact for fact in self.language_doc.get("facts", []) if fact.get("phase") in phases]
 
     def known_lessons(self):
-        return self.language_doc.setdefault("lessons", []) + self.any_language_doc.setdefault("lessons", [])
+        return [as_lesson(principle) for principle in self.lesson_principles()]
+
+    def lesson_principles(self):
+        kept = Principles(None).kept(self.key) + Principles(None).kept("any")
+        return [principle for principle in kept if principle.phase in LESSON_PHASES]
 
     def proven_lessons(self):
-        return [lesson for lesson in self.language_doc.get("lessons", []) if lesson.get("status") == "proven"]
+        proven = [principle for principle in Principles(None).kept(self.key) if principle.status == "proven"]
+        return [as_lesson(principle) for principle in proven if principle.phase in LESSON_PHASES]
 
     def add_lessons(self, new, confirmed, names=()):
-        known, added = self.known_lessons(), 0
-        for number in confirmed:
-            if isinstance(number, int) and 1 <= number <= len(known):
-                self.confirm(known[number - 1])
-        for item in new:
-            lesson = self.new_lesson(item, known, names)
-            if lesson:
-                (self.language_doc if item.get("scope") == "language" else self.any_language_doc)[
-                    "lessons"
-                ].append(lesson)
-                known.append(lesson)
-                added += 1
-        for doc in (self.language_doc, self.any_language_doc):
-            doc["lessons"] = self.keep(doc["lessons"], known[len(known) - added :])
-        self.save()
-        return added
+        known = self.known_lessons()
+        strengthened = [
+            {"kind": "strengthen", "id": known[number - 1]["id"], "evidence": [self.run_evidence()]}
+            for number in confirmed
+            if isinstance(number, int) and 1 <= number <= len(known)
+        ]
+        added = [self.lesson_delta(item) for item in new if self.valid_lesson(item, names)]
+        changed = Principles(None).apply(strengthened + added, self.run)
+        self.save_language()
+        return sum(principle.history[-1]["event"] == "born" for principle in changed)
+
+    def run_evidence(self):
+        return {"kind": "run", "source": self.run or "", "text": ""}
+
+    def lesson_delta(self, item):
+        return {
+            "kind": "add",
+            "do": field(item, "text", 240),
+            "when": "",
+            "phase": field(item, "phase").lower(),
+            "scope": self.key if item.get("scope") == "language" else "any",
+            "evidence": [self.run_evidence()],
+        }
+
+    def valid_lesson(self, item, names):
+        text, phase = field(item, "text", 240), field(item, "phase").lower()
+        return bool(text) and phase in LESSON_PHASES and not self.names_project(text, names)
 
     def new_lesson(self, item, known, names):
         text, phase = field(item, "text", 240), field(item, "phase").lower()
-        if not text or phase not in LESSON_PHASES or self.names_project(text, names):
+        if not self.valid_lesson(item, names):
             return None
         same = next(
             (lesson for lesson in known if similarity(lesson["text"], text) >= SAME_LESSON_SIMILARITY), None
@@ -220,11 +235,14 @@ class Knowledge:
 
     def prove_lessons(self, used):
         proven = 0
-        for lesson in self.known_lessons():
-            if Item("lesson", lesson.get("id")) in used:
-                proven += lesson.get("status") != "proven"
-                record(lesson, "helped", self.run)["status"] = "proven"
+        for principle in self.used_lessons(used):
+            proven += principle.status != "proven"
+            principle.prove(self.run)
+            Principles(None).put(principle)
         return proven
+
+    def used_lessons(self, used):
+        return [principle for principle in self.lesson_principles() if Item("lesson", principle.id) in used]
 
     def prove_web_facts(self, used):
         proven, known = 0, {fact["id"] for fact in self.language_doc.setdefault("facts", [])}
@@ -262,12 +280,11 @@ class Knowledge:
         return gone
 
     def retire_lessons(self, shown, reason):
-        return sum(
-            retire_from(
-                doc, "lessons", lambda lesson: Item("lesson", lesson.get("id")) in shown, reason, self.run
-            )
-            for doc in (self.language_doc, self.any_language_doc)
-        )
+        retired = self.used_lessons(shown)
+        for principle in retired:
+            principle.fail(reason, self.run)
+            Principles(None).put(principle)
+        return len(retired)
 
     @staticmethod
     def used_facts(used):
@@ -1735,6 +1752,8 @@ def record(item, event, run):
 def retire(item, language, reason, run):
     if item.kind in Item.CLAIM_KINDS:
         return Library.retire(item.topic, {item.id}, reason, run) > 0
+    if item.kind == "lesson":
+        return Knowledge(language, run).retire_lessons({item}, reason) > 0
     return item.kind in STORED_AS and retire_known(Knowledge(language, run), item, reason)
 
 
@@ -1744,10 +1763,19 @@ def retire_known(knowledge, item, reason):
     if retire_from(knowledge.language_doc, name, gone, reason, knowledge.run):
         knowledge.save_language()
         return True
-    if item.kind == "lesson" and retire_from(knowledge.any_language_doc, name, gone, reason, knowledge.run):
-        knowledge.save_any_language()
-        return True
     return False
+
+
+def as_lesson(principle):
+    return {
+        "id": principle.id,
+        "phase": principle.phase,
+        "text": principle.prompt_text(),
+        "status": principle.status,
+        "seen": len(principle.evidence),
+        "helped": principle.helped,
+        "history": principle.history,
+    }
 
 
 def items_of(keys):
