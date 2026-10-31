@@ -1312,7 +1312,8 @@ learning and run lessons are apart.
   (**PRI-4**, scoped to the topic) at `learn_think`, and the topic is kept only after that succeeds, under the language's key or the topic's slug, with its plan, machine, documentation versions,
   sources, cited passages, status (`complete` or `incomplete`), missing slots and request counts; then
   indexed. A summary prints the slots filled and missing, what is installed (each machine command and the
-  version it found), the documentation, the pages by source, the facts and the requests by kind.
+  version it found), the documentation, the pages by source, the principles each slot changed and the requests
+  by kind. The topic keeps, per slot, the ids of the principles it changed and the passages they cite.
 - **LRN-5** After the digest, each slot left without facts gets the plan's follow-up search, at most
   `learn_searches` follow-ups in all; its pages join the pool, and that slot alone is selected and digested
   again. When a follow-up fails, the learn goes on, marked `incomplete`, with a warning and a note.

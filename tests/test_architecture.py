@@ -33,6 +33,7 @@ LAYERS = (
     "conversation",
     "channels",
     "knowledge",
+    "principles",
     "slots",
     "learning",
     "graph",

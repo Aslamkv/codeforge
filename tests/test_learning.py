@@ -10,12 +10,14 @@ from tinkerkit.learning import (
     DocCache,
     LearnStopped,
     SlotLearner,
+    label,
     read_digest,
     read_plan,
     wanted_docs,
 )
 from tinkerkit.model import Answer
 from tinkerkit.passages import Block, Page, Passage
+from tinkerkit.principles import Principles
 from tinkerkit.project import Tracker
 from tinkerkit.prompts import Reply
 from tinkerkit.settings import (
@@ -177,26 +179,19 @@ FOUND = {FIRST_SEARCH: RESULTS, VERSION_DOCS_SEARCH: DOC_RESULTS}
 ALL_PAGES = {**PAGES, **DOC_PAGES}
 
 
-def digest(parts):
+def induce(parts):
     passages = next(part.text for part in parts if part.title == "Passages")
-    question = next(part.text for part in parts if part.title == "Question")
-    first = re.search(r"\[(P\d+)\]", passages).group(1)
+    first = re.match(r"1\. (.{1,40})", passages).group(1)
     return {
-        "facts": [
-            {"phase": "code", "text": f"Fact for: {question[:40]}", "cites": [first]},
-            {"phase": "code", "text": "Uncited claim", "cites": ["P999"]},
+        "deltas": [
+            {"kind": "add", "phase": "code", "do": f"Principle from: {first}", "cites": [1]},
+            {"kind": "add", "phase": "code", "do": "Uncited claim", "cites": [999]},
         ]
     }
 
 
 def tool_model():
-    return CountingModel(
-        {
-            "Plan learning": PLAN,
-            "Digest": digest,
-            "Condense": {"rules": [{"phase": "code", "text": "Create a Widget, then show it", "cites": [1]}]},
-        }
-    )
+    return CountingModel({"Plan learning": PLAN, "Induce": induce})
 
 
 def learner(web, model=None, embeddings="default"):
@@ -479,25 +474,29 @@ def test_a_tool_is_learned_from_one_search_and_its_versions_documentation(tinker
     assert web.fetched[:3] == reference_first_without_off_topic_and_repeat
     assert all(url in web.fetched for url in DOC_PAGES if url != ELSEWHERE) and ELSEWHERE not in web.fetched
     assert entry["docs"] == {"widgetlib": "2.1.0"} and Home.store().get("sources", "widgetlib@2.1.0")["pages"]
-    assert model.calls[0] == "Plan learning" and model.calls[-1] == "Condense the facts" and embeddings.calls
+    assert model.calls[0] == "Plan learning" and model.calls[-1].startswith("Induce") and embeddings.calls
     assert entry["kind"] == "tool" and entry["machine"][0]["version"] == "2.1.0" and entry["language"] == ""
-    assert any(fact["source"].startswith(DOC_ROOT) for fact in entry["facts"])
-    assert all(
-        fact["passages"] and fact["source"].startswith("https://widgetlib.dev") for fact in entry["facts"]
-    )
-    assert "Uncited claim" not in [fact["text"] for fact in entry["facts"]]
+    assert "facts" not in entry and "rules" not in entry
+    kept = Principles(CountingEmbeddings())
+    changed = [kept.get(id) for record in entry["principles"] for id in record["principles"]]
+    assert changed and all(principle.scope == "widgetlib" for principle in changed)
+    assert "Uncited claim" not in [principle.do for principle in kept.all()]
+    cited = {id for record in entry["principles"] for id in record["passages"]}
+    assert cited and cited == {passage["id"] for passage in entry["passages"]}
+    assert any(passage["url"].startswith(DOC_ROOT) for passage in entry["passages"])
     assert all(passage["fetched"] for passage in entry["passages"])
-    assert [rule["text"] for rule in entry["rules"]] == ["Create a Widget, then show it"]
     assert entry["requests"]["search"]["requests"] == len(web.queries)
     assert (
         entry["status"] == ("incomplete" if entry["missing"] else "complete")
         and "readiness" not in entry["missing"]
     )
     saved = Library.read("widgetlib")
-    assert "docs" not in saved["plan"] and all(fact["status"] == "candidate" for fact in saved["facts"])
+    assert "docs" not in saved["plan"] and saved["principles"] == entry["principles"]
     out = capsys.readouterr().out
     assert "Documentation: widgetlib 2.1.0" in out and f"Web requests: search {len(web.queries)}" in out
-    assert "Pages: 2 searched, 1 failed, 4 docs" in out and f"Facts kept: {len(entry['facts'])}" in out
+    first = entry["principles"][0]
+    assert "Pages: 2 searched, 1 failed, 4 docs" in out and "Principles changed: " in out
+    assert f"{label(first['slot'])} {len(first['principles'])}" in out
 
 
 def quick_model_planning(monkeypatch, plans):
@@ -582,7 +581,7 @@ def test_learning_moves_its_tracker_through_its_steps_and_keeps_its_summary(tink
         "🤔 Worked out what it is: Widgetlib, a tool",
         "💻 Checked what is installed",
         "📖 Documentation read: 4 page(s) of Widgetlib 2.1.0",
-        f"🧠 Passages read: 6 of 6 question(s) answered, {len(entry['facts'])} fact(s)",
+        f"🧠 Passages read: 6 of 6 question(s) answered, {sum(len(record['principles']) for record in entry['principles'])} principle(s)",
     ]
     assert tracker.state["steps"][:5] == each_with_what_came_of_it
     each_step_once = len(tracker.state["steps"]) == len(set(tracker.state["steps"]))
@@ -594,11 +593,14 @@ def test_learning_moves_its_tracker_through_its_steps_and_keeps_its_summary(tink
         "Installed",
         "Documentation",
         "Pages",
-        "Facts kept",
+        "Principles changed",
         "Web requests",
     ]
     assert recap["Installed"] == "`echo widgetlib 2.1.0`: widgetlib 2.1.0"
-    assert recap["Facts kept"] == str(len(entry["facts"])) and recap["Documentation"] == "widgetlib 2.1.0"
+    changed = ", ".join(
+        f"{record['slot'].replace('-', ' ')} {len(record['principles'])}" for record in entry["principles"]
+    )
+    assert recap["Principles changed"] == changed and recap["Documentation"] == "widgetlib 2.1.0"
 
 
 @pytest.mark.spec("LRN-7")
@@ -627,7 +629,7 @@ def test_learning_a_version_again_reuses_the_saved_plan_and_its_kept_documentati
     learner(FakeWeb(FOUND, ALL_PAGES)).learn("Widgetlib")
     model, web = tool_model(), FakeWeb(FOUND, ALL_PAGES)
     entry = learner(web, model).learn("Widgetlib")
-    assert "Plan learning" not in model.calls and model.calls[0].startswith("Digest")
+    assert "Plan learning" not in model.calls and model.calls[0].startswith("Induce")
     assert FIRST_SEARCH not in web.queries and VERSION_DOCS_SEARCH not in web.queries
     assert not any(url.startswith(DOC_ROOT) for url in web.fetched)
     assert entry["docs"] == {"widgetlib": "2.1.0"}
@@ -648,7 +650,7 @@ def test_a_saved_plan_whose_documentation_gives_too_little_searches_the_web(tink
 
 
 @pytest.mark.spec("LRN-4")
-def test_digest_and_condense_think_at_learn_think_and_the_plan_at_the_models_own(tinker_home):
+def test_induce_thinks_at_learn_think_and_the_plan_at_the_models_own(tinker_home):
     Config.save(learn_think="medium")
     model = tool_model()
     learner(FakeWeb(FOUND, ALL_PAGES), model).learn("Widgetlib")
@@ -688,8 +690,10 @@ def test_a_slot_left_without_facts_gets_the_plans_follow_up_search(tinker_home):
     assert dict(PITFALLS_SEARCH, query="widgetlib common mistakes") in [
         entry for entries in web.entries for entry in entries
     ]
+    from_pitfalls = {passage["id"] for passage in entry["passages"] if passage["url"] == PITFALLS}
     assert any(
-        fact["source"] == PITFALLS and fact["slot"] == "pitfalls-and-limits" for fact in entry["facts"]
+        record["slot"] == "pitfalls-and-limits" and from_pitfalls & set(record["passages"])
+        for record in entry["principles"]
     )
     assert len(follow_ups(web)) <= int(Config.get("learn_searches"))
 
@@ -712,7 +716,7 @@ def test_a_failed_follow_up_keeps_the_run_alive_and_marks_it_incomplete(tinker_h
         any("the extra search" in note for note in entry["notes"])
         and "⚠️  the extra search" in capsys.readouterr().out
     )
-    assert model.calls[-1] == "Condense the facts"
+    assert model.calls[-1].startswith("Induce")
 
 
 LANGUAGE_PLAN = {
@@ -755,14 +759,13 @@ def language_model():
     return CountingModel(
         {
             "Plan learning": LANGUAGE_PLAN,
-            "Digest": digest,
-            "Condense": {"rules": [{"phase": "tests", "text": "Run tests with langtest", "cites": [1]}]},
+            "Induce": induce,
         }
     )
 
 
 @pytest.mark.spec("LRN-4", "KNW-21")
-def test_a_language_is_learned_under_its_key_and_replaces_what_its_earlier_learning_proved(tinker_home):
+def test_a_language_is_learned_under_its_key_and_retires_nothing_its_earlier_learning_proved(tinker_home):
     Library.save(
         "lang",
         {
@@ -795,10 +798,7 @@ def test_a_language_is_learned_under_its_key_and_replaces_what_its_earlier_learn
     language_and_tool_docs_at_once = [batch for batch in web.batches if TOOL_DOCS_SEARCH in batch]
     assert len(language_and_tool_docs_at_once) == 1 and len(language_and_tool_docs_at_once[0]) == 2
     assert entry["docs"] == {"langtest": "1.2.0"} and Home.store().get("sources", "langtest@1.2.0")["pages"]
-    assert (
-        Knowledge("Lang").language_doc["retired"][0]["reason"]
-        == "replaced when the language was learned again"
-    )
+    assert not Knowledge("Lang").language_doc.get("retired")
 
 
 SQL_PLAN = {**LANGUAGE_PLAN, "name": "SQL", "language": "SQL", "commands": ["sqlite3 --version"], "tools": []}
