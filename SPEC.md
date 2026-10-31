@@ -1240,7 +1240,7 @@ What every learning keeps: patterns found in what Tinker read or did, as princip
   `for_phases(phases, language)` gives the principles of those phases scoped `any` or to that language, proven
   first, then by `helped`, for build prompts (**SES-3**).
 - **PRI-7** `Item("principle", id)` names a principle (**KNW-22**), and `retire` retires it from the store. The
-  graph shows each principle as a node of kind `principle`, with `cites` links to its evidence (**GRF**).
+  graph shows each principle as a node of kind `principle`, its evidence as the node's sources (**GRF-1**).
 - **PRI-8** A home that keeps knowledge from before principles is migrated once, when it is first opened: each
   lesson, proven fact, topic fact, finding, rule and reading point becomes a principle with its ID, status,
   history and sources (a finding's and rule's `cites` as evidence), its `when` a rule's `when` or "", its `do`
@@ -1339,20 +1339,23 @@ learning and run lessons are apart.
 What Tinker knows as one graph, and the page that shows it.
 
 - **GRF-1** `Graph.build()` makes one node per thing Tinker knows: each language (one for its knowledge and
-  what was learned of it), any language, each topic learned, the person's commands, and each lesson, fact,
-  finding, rule, toolchain, fix, command and retired item. A node is
+  what was learned of it), any language, each topic learned, the person's commands, and each principle, lesson,
+  fact, finding, rule, toolchain, fix, command and retired item. A node is
   `{id, kind, label, text, status, group, details, sources, day}`; `group` is the language or topic it belongs
   to. A fact's details name its slot, and a topic's details name the slots it is missing. An item's `day`
   (`YYYY-MM-DD`, or empty) is when it was first kept: its first history event, else its `added` or saved day,
   else the day its topic was learned. A node's `id` comes from what it is, never from where it is in a list: a
   retired item's is `retired:` and the key it had before it was retired, so it stays the same while the item
-  is kept.
+  is kept. A principle's node (**PRI-7**) is `principle:` and its id, retired or not (its status says so); its
+  text is its `english`, its group its scope (a scope that names no language, topic or `any` gets a topic hub
+  of that name), its details its phase, `when`, `because`, exceptions, `helped` and `harmed`, its sources its
+  evidence, and its day its first history event.
 - **GRF-2** Links: `belongs_to` from an item to its language, topic, any language or the person's commands;
   `cites` from a finding to its facts and from a language's rule to its facts and lessons; `became` from a web
   fact to the language's proven fact it was copied into; and `taught_by`, `confirmed_in`, `helped_in` and
   `failed_in` from an item to the runs in its history. A run is a node with its line from `runs`, or marked as
   having none.
-- **GRF-3** `similar` links join lessons by meaning (cosine at least `SIMILAR_LESSON_MEANING`) when the
+- **GRF-3** `similar` links join lessons and principles not retired by meaning (cosine at least `SIMILAR_LESSON_MEANING`) when the
   embedding model gives their embeddings, else by words (at least `SIMILAR_LESSON_WORDS`). `similar_by` says
   which, and why words were used.
 - **GRF-4** `GraphPage.html(graph)` is one self-contained page: the graph as JSON inside it, and no script,
@@ -1377,13 +1380,13 @@ What Tinker knows as one graph, and the page that shows it.
 - **GRF-9** `tinker memory NAME [KIND] [PAGE]` shows one part, named by its group or its label (case does not
   matter): its details (summary, when learned, the slots missing, projects built), then its items, each with its
   short ID, its status (✅ proven, 🌱 not yet), its kind and its first line, in the graph's order. Retired items
-  are left out but counted, and the `retired` kind lists them alone. `KIND` (`toolchain`, `facts`, `findings`,
-  `rules`, `fixes`, `lessons`, `commands` or `retired`, singular or plural) keeps that kind; without `NAME` it
+  are left out but counted, and the `retired` kind lists them alone. `KIND` (`toolchain`, `principles`, `facts`,
+  `findings`, `rules`, `fixes`, `lessons`, `commands` or `retired`, singular or plural) keeps that kind; without `NAME` it
   lists that kind across memory. A last word that is a number is the page, a kind word is always the kind, and
   the other words are the name. An unknown name is refused, saying `tinker memory` lists the parts.
 - **GRF-10** `tinker memory show ID` shows one item whole: its kind, status, part (and `memory NAME` to see it),
-  day, text, details and sources; what it cites and what cites it, what it became or came from, the lessons
-  similar to it (each with its short ID and first line); and the runs that taught, confirmed, helped or failed
+  day, text, details and sources; what it cites and what cites it, what it became or came from, the lessons and
+  principles similar to it (each with its short ID and first line); and the runs that taught, confirmed, helped or failed
   it (`@ID` and the run's task, once per run and verb, with how many times when more than once). It ends with
   how to correct it (`tinker teach`).
 - **GRF-11** `tinker memory find WORDS` lists the items whose text or label holds every word (case does not
