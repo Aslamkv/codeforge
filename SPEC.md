@@ -319,17 +319,32 @@ The home and its database, the settings, numbered lists, and the one way to dele
 
 ## system (SYS)
 
-- **SYS-1** `SYSTEM_CHECKS` is the one list of what Tinker tells about this computer at once: `time`, `date`,
-  `disk`, `ram` (memory, a word the `memory` command has), `battery`, `uptime` and `network`. Each is a `SystemCheck`: its word and
-  its fixed command on macOS and on Linux (a program and its arguments, never a line a model wrote), none of
-  which changes anything. A new check is one more entry, and the `system` command takes its word.
-- **SYS-2** `SystemCheck.answer()` runs the check's command for the system Tinker runs on, without a shell,
-  and gives its output, trimmed. A system it has no command for, a program not found, a failure, an empty
-  output or no answer within `SYSTEM_CHECK_SECONDS` (5) gives `⚠️ No WORD on this computer` instead; it never
-  raises.
+- **SYS-1** Tinker tells about this computer at once only what this table allows, in this order. Each row
+  is a fixed command (a program and its arguments, never a line a model wrote) that changes nothing:
+
+  | word | emoji | label | macOS | Linux | the line shows |
+  |---|---|---|---|---|---|
+  | `time` | 🕒 | Time | `date +%H:%M %Z` | `date +%H:%M %Z` | the output: `11:16 IST` |
+  | `date` | 📅 | Date | `date +%A %d %B %Y` | `date +%A %d %B %Y` | the output: `Saturday 31 October 2026` |
+  | `disk` | 💾 | Disk | `df -h HOME` | `df -h HOME` | free of size and the share used: `609 GB free of 926 GB (3% used)` |
+  | `ram` | 🧠 | RAM | `top -l 1 -n 0` | `free -h` | used and free: `23 GB used, 266 MB free` |
+  | `battery` | 🔋 | Battery | `pmset -g batt` | `upower -i /org/freedesktop/UPower/devices/battery_BAT0` | percent, state, and the power source when named: `100%, charged, on AC power` |
+  | `uptime` | ⏱️ | Uptime | `uptime` | `uptime` | days, hours, minutes, leaving out the zero ones: `2 d 3 h 53 m`, `45 m` |
+  | `network` | 🌐 | Network | `ipconfig getifaddr en0` | `hostname -I` | the first address: `192.168.220.41` |
+
+  Sizes read `N GB`, `N MB` (`926Gi`, `23G` → `926 GB`, `23 GB`). `ram` is RAM alone: `memory` is the
+  `memory` command's word and never names this check.
+- **SYS-2** `SystemCheck` is the base of every check; each row of **SYS-1** is one subclass that sets its
+  word, emoji, label and two commands and gives `summary(output)`, its line's text from the command's output.
+  A subclass registers itself when defined, so `SYSTEM_CHECKS` (one instance of each, in table order) and
+  `SYSTEM_WORDS` hold exactly the table's rows, and a new check is one new subclass and one new row; nothing
+  else changes. `answer()` runs the command for the system Tinker runs on, without a shell, and gives
+  `EMOJI LABEL: SUMMARY` (`🧠 RAM: 23 GB used, 266 MB free`). A system it has no command for, a program not
+  found, a failure, an empty output, no answer within `SYSTEM_CHECK_SECONDS` (5) or an output `summary`
+  cannot read gives `⚠️ LABEL: couldn't check on this computer` instead; it never raises.
 - **SYS-3** `system [time|date|…]` is a `glance` command a chat offers, whose synopsis takes its words from
-  `SYSTEM_CHECKS`. `tinker system WORD` prints that check's answer, and `tinker system` every check's, each
-  under its word in bold. In a conversation it is a fixed phrase (**CNV-5**), so `time`, `system disk` and
+  `SYSTEM_WORDS`. `tinker system WORD` prints that check's answer, and `tinker system` every check's, one line
+  each. In a conversation it is a fixed phrase (**CNV-5**), so `time`, `system disk`, `ram usage` and
   `what is the time now?` run it with no model, and the chat model asks for it for other questions about
   this computer (**CNV-20**).
 
@@ -887,9 +902,9 @@ The terminal and the chats are one conversation: the same commands, the same ans
   gives none, and options (`--yes`) are left out. So `clear chat`, `status`, `jobs running`,
   `model recipe all`, `exercise status` are phrases, and `task`, `fix`, `ask` none. The text matches when its
   words, lowercased, without punctuation and without the filler words `SAID_FILLER` (`the`, `my`, `please`,
-  `can`, `you`, `tinker`, `show`, `see`, `what`, `is`, `it`, `now`, …), are a phrase exactly:
+  `can`, `you`, `tinker`, `show`, `see`, `what`, `is`, `it`, `now`, `usage`, …), are a phrase exactly:
   `Clear the chat, please!` is `/clear chat`, `show model recipe` is `/model recipe`, `What's the time now?`
-  and `what time is it now?` are `/system time` (**SYS-3**), while `clear the chat and the history` stays a
+  and `what time is it now?` are `/system time` and `ram usage` is `/system ram` (**SYS-3**), while `clear the chat and the history` stays a
   chat. The command's
   name may be left out when the words are the rest of just one phrase, of a command that does not delete:
   `show recipe` is `/model recipe`, while `chat` (`/clear chat` deletes) stays a chat. Such a message is handled as the `/PHRASE` sent, so a
@@ -1011,7 +1026,8 @@ The terminal and the chats are one conversation: the same commands, the same ans
   failed. The chat's prompt (`CHAT_SYSTEM`) asks the model, when the person asks Tinker to do what one of the
   commands does, to reply with only that command line (`/clear chat` for `wipe the chat`), and when they ask
   what a `system` check tells (**SYS-1**), to reply with only that check's line (`/system battery` for
-  `am I charged?`); asked how to do it, it answers in words. A reply that is one line, with or without backticks, and that `command_of` gives
+  `am I charged?`), where memory means Tinker's `memory` command and only RAM means `/system ram`; asked
+  how to do it, it answers in words. A reply that is one line, with or without backticks, and that `command_of` gives
   a command for is not shown: its words a fixed phrase (**CNV-5**), it is handled as that command sent;
   otherwise (more words: `/fix the login bug`) it is offered, `👉 /fix the login bug — /confirm runs it`,
   and `/confirm` handles it as sent. This takes no extra model call.
