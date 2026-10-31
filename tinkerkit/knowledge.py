@@ -127,7 +127,7 @@ class Knowledge:
         return f"{self.language}: " + (", ".join(topic for topic in known if topic) or "nothing learned yet")
 
     def lessons(self, phases, limit=LESSONS_PER_PROMPT):
-        pool = [lesson for lesson in self.known_lessons() if lesson.get("phase") in phases]
+        pool = [lesson for lesson in self.known_lessons() if lesson.get("phase") in {*phases, "any"}]
         pool.sort(key=Knowledge.rank, reverse=True)
         return [
             dict(lesson, id=lesson.get("id") or fingerprint(lesson["text"])[:12]) for lesson in pool[:limit]
@@ -145,7 +145,7 @@ class Knowledge:
 
     def lesson_principles(self):
         kept = Principles(None).kept(self.key) + Principles(None).kept("any")
-        return [principle for principle in kept if principle.phase in LESSON_PHASES]
+        return [principle for principle in kept if principle.phase in {*LESSON_PHASES, "any"}]
 
     def proven_lessons(self):
         proven = [principle for principle in Principles(None).kept(self.key) if principle.status == "proven"]
@@ -1450,8 +1450,8 @@ class Library:
             "name": name,
             "phase": phase,
             "text": text,
-            **more,
             **Library.claim_state(claim, said),
+            **more,
         }
         return (
             [item(phase, text) for phase, text in Library.overview(entry, name)]
@@ -1473,6 +1473,10 @@ class Library:
             + [
                 item(str(fact["phase"]), Library.fact_text(fact), fact, fact["text"])
                 for fact in Library.facts_shown(entry)
+            ]
+            + [
+                item(principle.phase, principle.prompt_text(), kind="principle", id=principle.id, status=principle.status)
+                for principle in Principles(None).kept(slug)
             ]
         )
 
@@ -1539,7 +1543,7 @@ class Library:
             "tools": {"toolchain", "config", "tests"},
             "findings": {"spec", "design"},
         }.get(item["phase"])
-        return item["phase"] in phases or bool(shown and shown & set(phases))
+        return item["phase"] in {*phases, "any"} or bool(shown and shown & set(phases))
 
 
 def relevant_chunks(text, size, wanted, count):

@@ -16,7 +16,7 @@ from tinkerkit.knowledge import (
     search_entry,
 )
 from tinkerkit.model import Models, Ollama, OllamaError
-from tinkerkit.principles import Principles, record
+from tinkerkit.principles import Principle, Principles, record
 from tinkerkit.prompts import Prompts
 from tinkerkit.retrieval import Embeddings, Retriever
 from tinkerkit.settings import (
@@ -74,7 +74,11 @@ def test_a_learned_language_is_found_for_a_versioned_name(tinker_home):
 
 
 @pytest.mark.spec("KNW-3")
-def test_items(capsys):
+def test_items(tinker_home, capsys):
+    kept = Principle.new("a route is added", "test it with the client", scope="py", phase="tests")
+    Principles(None).put(kept)
+    Principles(None).put(Principle.new("", "a retired rule", scope="py", status="retired"))
+    Principles(None).put(Principle.new("", "another topic's rule", scope="flask"))
     entry = {
         "topic": "py",
         "name": "Python 3.14",
@@ -100,7 +104,10 @@ def test_items(capsys):
         ("findings", "What is new? Free threading. (high confidence)"),
         ("code", "match is a soft keyword"),
         ("spec", "a claim (corroborated)"),
+        ("tests", "a route is added → test it with the client"),
     ]
+    assert items[-1]["kind"] == "principle" and items[-1]["id"] == kept.id
+    assert items[-1]["status"] == "candidate"
     assert all(item["topic"] == "py" and item["name"] == "Python 3.14" for item in items)
     assert "What was learned about bad is not readable" in capsys.readouterr().out
     assert Library.searched(items[0]) == "Python 3.14: A language."
@@ -119,6 +126,7 @@ def test_shown_in():
         shown("findings", ("spec",)) and shown("findings", ("design",)) and not shown("findings", ("code",))
     )
     assert shown("code", ("code", "tests")) and not shown("code", ("spec",))
+    assert shown("any", ("spec",)) and shown("any", ("toolchain",))
 
 
 @pytest.mark.spec("KNW-2")
@@ -201,6 +209,9 @@ def test_lessons_give_the_best_evidenced_first(tinker_home):
     assert [lesson["text"] for lesson in known.lessons(("code",), limit=1)] == ["Name test files test_*.py"]
     assert known.lessons(("code",), limit=1)[0]["seen"] == 2
     assert known.lessons(("design",)) == []
+    Principles(None).put(Principle.new("", "Keep the README current", scope="python", phase="any"))
+    assert [lesson["text"] for lesson in known.lessons(("design",))] == ["Keep the README current"]
+    assert len(known.known_lessons()) == 6
 
 
 @pytest.mark.spec("KNW-5")
