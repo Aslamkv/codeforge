@@ -385,3 +385,13 @@ def test_an_induced_change_names_a_shown_principle_by_its_number(make_model, fak
 @pytest.mark.spec("PRI-4")
 def test_a_reply_with_no_list_of_deltas_gives_none(make_model, fake_ollama, tinker_home):
     assert induced(make_model, fake_ollama, {"rules": []}) == []
+
+
+@pytest.mark.spec("RDG-9")
+def test_induce_shows_what_to_look_for_when_given(make_model, fake_ollama, tinker_home):
+    fake_ollama.reply(json.dumps({"deltas": []}), when="Read: chapter 3")
+    Inducer(make_model(), Principles(None)).induce(
+        PASSAGES, "python", look_for="how tests keep the home clean", label="Read: chapter 3"
+    )
+    prompt = fake_ollama.calls[-1]["messages"][-1]["content"]
+    assert "Look for" in prompt and "how tests keep the home clean" in prompt

@@ -193,12 +193,12 @@ class Inducer:
         self.model = model
         self.principles = principles
 
-    def induce(self, passages, scope, think=None):
+    def induce(self, passages, scope, think=None, look_for="", label="Induce principles from the passages"):
         known = self.principles.about(self.passages_text(passages), INDUCE_KNOWN_SHOWN, scope)
         answer = self.model.ask_until_usable(
             Prompts.INDUCE_SYSTEM,
-            self.induce_parts(passages, known),
-            "Induce principles from the passages",
+            self.induce_parts(passages, known, look_for),
+            label,
             lambda reply: self.read_deltas(reply.json(), passages, known, scope),
             attempts=2,
             think=think,
@@ -210,7 +210,7 @@ class Inducer:
         return "\n".join(passage["text"] for passage in passages)
 
     @staticmethod
-    def induce_parts(passages, known):
+    def induce_parts(passages, known, look_for=""):
         listing = "\n".join(f"{number}. {passage['text']}" for number, passage in enumerate(passages, 1))
         principles = "\n".join(
             f"{number}. {principle.prompt_text()}"
@@ -219,7 +219,7 @@ class Inducer:
         return [
             Part("Passages", listing, True, exact=True),
             Part("Principles kept", principles or "(none yet)", True, exact=True),
-        ]
+        ] + ([Part("Look for", look_for)] if look_for else [])
 
     def read_deltas(self, data, passages, known, scope):
         given = data.get("deltas") if isinstance(data, dict) else None

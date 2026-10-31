@@ -12,13 +12,13 @@ lazy import zipfile
 lazy from pathlib import Path
 
 from .messages import say
-lazy from .knowledge import Learner, Library, Retriever, mentions, relevant_chunks
+lazy from .knowledge import Embeddings, Library, Retriever, mentions, relevant_chunks
+lazy from .principles import Inducer, Principles
 lazy from .project import Tracked, ending
 lazy from .prompts import Part, Prompts
 lazy from .settings import (
     BOOK_PASSAGES_SHOWN,
     FACT_PHASES,
-    MAX_FACT_CHARS,
     MAX_PASSAGE_CHARS,
     READ_CHAPTER_TEXT_SHARE,
     READ_FACTS_PER_CHAPTER,
@@ -106,6 +106,7 @@ class Chapter:
     text: str
     kind: str
     state: str = "unread"
+    principles: list = dataclasses.field(default_factory=list)
 
     def size(self):
         return len(words(self.text))
@@ -165,8 +166,7 @@ class Reader(Tracked):
                 f'Every chapter of #{number} is read: read #{number} "WHAT" reads it again with a focus', "📚"
             )
             return read_ending(Readings.get(number), 0, [])
-        found = self.chapters_read(entry, book, survey, chapters, focus)
-        self.condensed(Readings.get(number), survey, found)
+        found = self.chapters_read(entry, survey, chapters, focus)
         return read_ending(Readings.get(number), len(found), chapters)
 
     def surveyed(self, entry, book):
@@ -187,7 +187,7 @@ class Reader(Tracked):
         self.outcome(f"{len(core)} core chapter(s) of {len(book.chapters)}, read first" if core else "")
         return survey
 
-    def chapters_read(self, entry, book, survey, chapters, focus):
+    def chapters_read(self, entry, survey, chapters, focus):
         self.step(
             "chapters",
             f"Reading {len(chapters)} chapter(s)" + (f" for: {first_line(focus, 60)}" if focus else "") + "…",
@@ -199,54 +199,33 @@ class Reader(Tracked):
             with say.working_on(
                 f"Reading chapter {chapter.number}, {chapter.title} ({done} of {len(chapters)})"
             ):
-                facts = self.chapter_read(entry, book, survey, chapter, focus)
-            found += Readings.learned(entry["number"], chapter.number, facts)
-            self.say_chapter(chapter, facts, f"{done}/{len(chapters)}", found)
+                deltas = self.chapter_read(entry, survey, chapter, focus)
+            changed = Readings.learned(entry["number"], chapter.number, deltas)
+            found = list(dict.fromkeys(found + [principle.id for principle in changed]))
+            self.say_chapter(chapter, changed, f"{done}/{len(chapters)}", found)
         self.outcome(f"{len(chapters)} chapter(s), {learned(len(found))}")
         return found
 
     @staticmethod
-    def say_chapter(chapter, facts, done, found):
+    def say_chapter(chapter, changed, done, found):
         say.info(
-            f"Chapter {chapter.number}, {chapter.title}: {learned(len(facts))}", CHAPTER_STATE_ICONS["read"]
+            f"Chapter {chapter.number}, {chapter.title}: {learned(len(changed))}", CHAPTER_STATE_ICONS["read"]
         )
-        if facts:
-            say.found(first_line(facts[0]["text"], 200))
+        if changed:
+            say.found(first_line(changed[0].english(), 200))
         say.tally(f"{done} chapters · {learned(len(found)) if found else 'nothing learned yet'}")
 
-    def chapter_read(self, entry, book, survey, chapter, focus):
-        room = int(self.model.limit_chars(Prompts.READ_CHAPTER_SYSTEM) * READ_CHAPTER_TEXT_SHARE)
+    def chapter_read(self, entry, survey, chapter, focus):
+        room = int(self.model.limit_chars(Prompts.INDUCE_SYSTEM) * READ_CHAPTER_TEXT_SHARE)
         look_for = survey["order"].get(str(chapter.number), {}).get("look_for") or "what it teaches"
         texts = [excerpt(chapter.text, room, focus)] if focus else split_text(chapter.text, room)
-        found = []
+        inducer = Inducer(self.model, Principles(Embeddings.configured()))
+        deltas = []
         for part, text in enumerate(texts, 1):
-            known = Readings.facts(entry) + [fact["text"] for fact in found]
             label = f"Read: chapter {chapter.number}" + (f" part {part}" if len(texts) > 1 else "")
-            points = self.model.ask_until_usable(
-                Prompts.READ_CHAPTER_SYSTEM,
-                chapter_parts(book, survey, chapter, text, look_for, known, focus),
-                label,
-                lambda reply: read_points(reply.json(), survey["software"]),
-                attempts=2,
-                think=think(),
-            ).value
-            found += [
-                dict(point, chapter=chapter.number, slot=f"chapter {chapter.number}")
-                for point in points or []
-            ]
-        return found
-
-    def condensed(self, entry, survey, found):
-        topic = Library.read(entry["topic"]) or {}
-        building = [fact for fact in topic.get("facts", []) if fact["phase"] in FACT_PHASES]
-        if not (survey["software"] and building) or Book.of(entry).in_state("unread"):
-            return
-        if topic.get("rules") and not found:
-            return
-        learner = Learner(self.model, None, None)
-        learner.tracker = self.tracker
-        rules = learner.condense({"name": entry["title"], "kind": "reading"}, building, think=think())
-        Readings.ruled(entry, rules)
+            passage = {"text": text, "source": f"#{entry['number']} chapter {chapter.number}"}
+            deltas += inducer.induce([passage], entry["topic"], think(), look_for=focus or look_for, label=label)
+        return [read_phase(delta, survey["software"]) for delta in deltas][:READ_FACTS_PER_CHAPTER]
 
 
 class Readings:
@@ -315,26 +294,15 @@ class Readings:
         )
 
     @staticmethod
-    def learned(number, chapter, facts):
+    def learned(number, chapter, deltas):
         entry = Readings.get(number)
-        known = set(Readings.facts(entry))
-        new = [fact for fact in {fact["text"]: fact for fact in facts}.values() if fact["text"] not in known]
-        topic = Library.read(entry["topic"])
-        Library.save(entry["topic"], dict(topic, learned=now_text(), facts=topic["facts"] + new))
+        changed = Principles(Embeddings.configured()).apply(deltas, "")
         for kept in entry["chapters"]:
             if kept["number"] == chapter:
+                kept["principles"] = list(dict.fromkeys(kept.get("principles", []) + [principle.id for principle in changed]))
                 kept["state"] = "read"
         Readings.save(entry)
-        return new
-
-    @staticmethod
-    def ruled(entry, rules):
-        if rules:
-            Library.save(entry["topic"], dict(Library.read(entry["topic"]), rules=rules))
-
-    @staticmethod
-    def facts(entry):
-        return [fact["text"] for fact in (Library.read(entry["topic"]) or {}).get("facts", [])]
+        return changed
 
     @staticmethod
     def forget(number):
@@ -416,8 +384,6 @@ def show_list(page=1):
 
 def show(number):
     entry = known_reading(number)
-    topic = Library.read(entry["topic"]) or {}
-    facts = collections.Counter(fact.get("chapter") for fact in topic.get("facts", []))
     with say.part(
         f"#{number} {entry['title']}" + (f" by {entry['author']}" if entry["author"] else ""), "📘"
     ):
@@ -426,7 +392,7 @@ def show(number):
             say.info(entry["survey"]["summary"], "📝")
         for chapter in Book.of(entry).chapters:
             note = {"raw": "text only", "unread": "not read yet"}.get(
-                chapter.state, f"{facts[chapter.number]} fact(s)"
+                chapter.state, f"{len(chapter.principles)} fact(s)"
             )
             say.item(f"{CHAPTER_STATE_ICONS[chapter.state]} {chapter.number}. {chapter.title} ({note})")
     say.info(
@@ -465,7 +431,7 @@ def known_reading(number):
 def progress(entry):
     book = Book.of(entry)
     readable = [chapter for chapter in book.chapters if chapter.state != "raw"]
-    return f"{len(book.in_state('read'))} of {len(readable)} chapters read · {len(Readings.facts(entry))} fact(s)"
+    return f"{len(book.in_state('read'))} of {len(readable)} chapters read · {len(Principles(None).kept(entry['topic']))} fact(s)"
 
 
 def learned(count):
@@ -476,20 +442,6 @@ def learned(count):
 
 def think():
     return Config.get("learn_think")
-
-
-def chapter_parts(book, survey, chapter, text, look_for, known, focus):
-    return [
-        Part(
-            "The source",
-            f"{book.title}: {survey['summary']}\nIts key terms: {', '.join(survey['terms']) or 'none named'}",
-            True,
-        ),
-        Part("What you learned from it before", Part.bullets(known), keep="tail"),
-        Part("What the person asks you to look for", focus, bool(focus)),
-        Part(f"Chapter {chapter.number}: {chapter.title}", f"Look for: {look_for}", True),
-        Part("Its text", text, True),
-    ]
 
 
 def in_order(chapters, survey):
@@ -652,22 +604,10 @@ def excerpt(text, room, wanted):
     return "\n\n[…]\n\n".join(relevant_chunks(text, room // READ_FOCUS_CHUNKS, wanted, READ_FOCUS_CHUNKS))
 
 
-def read_points(data, software):
-    if not isinstance(data.get("points"), list):
-        raise ValueError('no "points" list')
-    points = []
-    for point in data["points"]:
-        text = field(point, "text") if isinstance(point, dict) else ""
-        if text:
-            phase = field(point, "phase").lower()
-            points.append(
-                {
-                    "text": text[:MAX_FACT_CHARS],
-                    "phase": phase if software and phase in FACT_PHASES else "book",
-                    "section": first_line(str(point.get("section") or ""), 80),
-                }
-            )
-    return points[:READ_FACTS_PER_CHAPTER]
+def read_phase(delta, software):
+    if delta["kind"] != "add":
+        return delta
+    return dict(delta, phase=delta["phase"] if software and delta["phase"] in FACT_PHASES else "book")
 
 
 class Epub:
