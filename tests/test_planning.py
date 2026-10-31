@@ -15,6 +15,7 @@ from tinkerkit.planning import (
     asked,
     groups_fitting,
 )
+from tinkerkit.principles import Principle, Principles
 from tinkerkit.prompts import Reply
 from tinkerkit.web import Internet
 from tinkerkit.workspace import Toolchain, Workspace
@@ -697,6 +698,32 @@ def test_a_proven_rule_for_other_code_stays_out_too(make_project, make_session):
     Recaller(session).run(project.cycles[0])
     shown = "\n".join(part.text for part in session.knowledge_parts("code"))
     assert "mutable default" in shown and "iscoroutinefunction" not in shown
+
+
+@pytest.mark.spec("PLN-3")
+def test_a_principle_for_other_code_stays_out(make_project, make_session):
+    python_with_conditional_rules()
+    Principles(None).put(Principle.new("async code", "await every coroutine", scope="python", phase="code"))
+    project = make_project(
+        cycles=[{"id": "base", "request": "a calculator in Python", "phase": "recall", "kind": "feature"}]
+    )
+    session = make_session(project)
+    Recaller(session).run(project.cycles[0])
+    shown = "\n".join(part.text for part in session.knowledge_parts("code"))
+    assert "mutable default" in shown and "await every coroutine" not in shown
+
+
+@pytest.mark.spec("SES-3")
+def test_a_principle_shown_as_a_lesson_is_not_repeated_among_learned_items(make_project, make_session):
+    python_with_conditional_rules()
+    Principles(None).put(Principle.new("", "close every file you open", scope="python", phase="code"))
+    project = make_project(
+        cycles=[{"id": "base", "request": "a calculator in Python", "phase": "recall", "kind": "feature"}]
+    )
+    session = make_session(project)
+    Recaller(session).run(project.cycles[0])
+    shown = "\n".join(part.text for part in session.knowledge_parts("code"))
+    assert shown.count("close every file you open") == 1
 
 
 @pytest.mark.spec("PLN-8")

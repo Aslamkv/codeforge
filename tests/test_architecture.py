@@ -32,6 +32,8 @@ LAYERS = (
     "web",
     "conversation",
     "channels",
+    "retrieval",
+    "principles",
     "knowledge",
     "slots",
     "learning",

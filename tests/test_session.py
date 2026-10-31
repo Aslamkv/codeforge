@@ -2,6 +2,7 @@ import pytest
 from conftest import TOOLCHAIN, criterion, plan_of
 
 from tinkerkit.knowledge import Knowledge, Library
+from tinkerkit.principles import Principle, Principles
 from tinkerkit.project import Tracker
 from tinkerkit.prompts import Part, Prompts, PromptTooLarge
 from tinkerkit.session import Phase, Session, Stopped
@@ -97,6 +98,8 @@ def test_knowledge_parts_record_what_they_show(session, home_store):
     )
     proven, client = (fact["id"] for fact in reversed(Library.read("flask")["facts"]))
     knowledge.prove({f"fact:flask:{proven}": ["code"]})
+    principle = Principle.new("", "register routes on a blueprint", scope="flask", phase="code")
+    Principles(None).put(principle)
     session.project.spec["learned"] = [
         item for item in Library.items({"flask": Library.read("flask")}) if item["id"]
     ]
@@ -108,13 +111,14 @@ def test_knowledge_parts_record_what_they_show(session, home_store):
     ]
     assert parts[0].text == "- Use tmp_path in tests"
     each_proven_fact_once = "- [Python] routes use decorators\n- [Flask] use the test client"
-    assert parts[1].text == each_proven_fact_once
+    assert parts[1].text == each_proven_fact_once + "\n- [Flask] register routes on a blueprint"
     assert all(not part.required and part.place == "first" for part in parts)
     lesson_id = knowledge.known_lessons()[0]["id"]
     assert cycle["used"] == {
         f"lesson:{lesson_id}": ["code", "tests"],
         f"known:{proven}": ["code", "tests"],
         f"fact:flask:{client}": ["code", "tests"],
+        f"principle:{principle.id}": ["code", "tests"],
     }
     assert len(session.knowledge_parts("toolchain")) == 3
 

@@ -10,6 +10,7 @@ from tinkerkit import cli, settings
 from tinkerkit.cli import Cli, Commands
 from tinkerkit.graph import Graph, GraphPage, MemoryBrowser, short_ids
 from tinkerkit.knowledge import Knowledge, Library
+from tinkerkit.principles import Principle, Principles
 from tinkerkit.project import Runs
 from tinkerkit.settings import Home
 from tinkerkit.workspace import TaughtCommands, Toolchain
@@ -70,18 +71,43 @@ def test_one_node_per_thing_tinker_knows(memory):
     assert kinds["commands"] == "commands" and kinds["command:act"] == "command"
     assert re.fullmatch(r"\d{4}-\d{2}-\d{2}", nodes["command:act"]["day"])
     assert kinds["toolchain:python"] == "toolchain" and kinds["fix:python:no module named calc"] == "fix"
-    assert kinds[f"lesson:{memory['seed']}"] == "lesson" and kinds[f"known:{memory['route']}"] == "fact"
+    assert kinds[f"principle:{memory['seed']}"] == "principle" and kinds[f"known:{memory['route']}"] == "fact"
     assert kinds[f"fact:flask:{memory['route']}"] == "fact"
     assert [node["kind"] for node in nodes.values() if node["id"].startswith("finding:flask:")] == ["finding"]
-    retired = nodes[f"retired:lesson:{memory['name']}"]
+    retired = nodes[f"principle:{memory['name']}"]
     assert (
-        retired["status"] == "retired" and retired["text"] == "Name each test after the behaviour it checks"
+        retired["status"] == "retired" and retired["text"] == "Name each test after the behaviour it checks."
     )
-    assert ["why", "shown in the tests prompts of a step that failed"] in retired["details"]
-    seed = nodes[f"lesson:{memory['seed']}"]
+    seed = nodes[f"principle:{memory['seed']}"]
     assert set(seed) == {"id", "kind", "label", "text", "status", "group", "details", "sources", "day"}
     assert seed["group"] == "python" and seed["status"] == "proven" and ["helped", "1"] in seed["details"]
     assert nodes[f"fact:flask:{memory['route']}"]["sources"] == ["https://a.org/x"]
+
+
+@pytest.mark.spec("GRF-1")
+def test_a_principle_is_a_node_in_its_scope_with_its_parts(home_store):
+    principle = Principle.new(
+        "a test reads the clock",
+        "freeze the clock",
+        scope="timekeeping",
+        run="r1",
+        because="the time changes between runs",
+        exceptions=["the test measures elapsed time"],
+        evidence=[{"source": "https://a.org/clock"}, {"source": "a run"}],
+    )
+    Principles(None).put(principle)
+    graph = Graph.build()
+    node = graph.nodes[f"principle:{principle.id}"]
+    assert node["kind"] == "principle" and node["status"] == "candidate"
+    assert node["text"] == (
+        "When a test reads the clock, freeze the clock, because the time changes between runs, "
+        "unless the test measures elapsed time."
+    )
+    assert node["group"] == "timekeeping" and graph.nodes["topic:timekeeping"]["kind"] == "topic"
+    assert ["when", "a test reads the clock"] in node["details"] and ["harmed", "0"] in node["details"]
+    assert node["sources"] == ["https://a.org/clock"]
+    assert re.fullmatch(r"\d{4}-\d{2}-\d{2}", node["day"])
+    assert (f"principle:{principle.id}", "run:r1", "taught_by") in linked(graph)
 
 
 def linked(graph):
@@ -92,7 +118,7 @@ def linked(graph):
 def test_links_join_items_to_what_they_belong_to_and_to_their_runs(memory):
     graph = Graph.build()
     links = linked(graph)
-    seed, route = f"lesson:{memory['seed']}", memory["route"]
+    seed, route = f"principle:{memory['seed']}", memory["route"]
     finding = next(node for node in graph.nodes if node.startswith("finding:"))
     assert {
         (seed, "lang:python", "belongs_to"),
@@ -101,7 +127,7 @@ def test_links_join_items_to_what_they_belong_to_and_to_their_runs(memory):
         (f"fact:flask:{route}", f"known:{route}", "became"),
         (seed, "run:r1", "taught_by"),
         (seed, "run:r2", "helped_in"),
-        (f"retired:lesson:{memory['name']}", "run:r2", "failed_in"),
+        (f"principle:{memory['name']}", "run:r2", "failed_in"),
     } <= links
     assert (
         graph.nodes["run:r1"]["text"] == "a calculator"
@@ -122,7 +148,7 @@ def test_a_rule_links_to_the_facts_and_lessons_it_rests_on(memory):
     links = linked(graph)
     assert {
         (rule, f"fact:flask:{memory['route']}", "cites"),
-        (rule, f"lesson:{memory['seed']}", "cites"),
+        (rule, f"principle:{memory['seed']}", "cites"),
     } <= links
     assert graph.nodes[rule]["kind"] == "rule" and "1 rule" in graph.summary()
 
@@ -149,12 +175,12 @@ def test_similar_lessons_by_meaning_else_by_words(home_store):
         "Mock the clock in tests that read the time",
     ]
     Knowledge("Python").add_lessons([lesson(text) for text in texts], [])
-    ids = {lesson["text"]: f"lesson:{lesson['id']}" for lesson in Knowledge("Python").known_lessons()}
+    ids = {lesson["text"]: f"principle:{lesson['id']}" for lesson in Knowledge("Python").known_lessons()}
     similar = lambda graph: {
         frozenset((link["source"], link["target"])) for link in graph.links if link["kind"] == "similar"
     }
     first, unlike, also_unlike, like_the_first = [1.0, 0, 0], [0, 1.0, 0], [0, 0, 1.0], [0.9, 0.1, 0]
-    meaning = dict(zip(texts, (first, unlike, also_unlike, like_the_first)))
+    meaning = dict(zip((f"{text}." for text in texts), (first, unlike, also_unlike, like_the_first)))
     by_meaning = Graph.build(FakeEmbeddings(meaning))
     assert by_meaning.similar_by == "meaning (embed-model)"
     assert similar(by_meaning) == {frozenset((ids[texts[0]], ids[texts[3]]))}
@@ -190,7 +216,7 @@ def test_memory_graph_writes_the_page_and_opens_it_only_in_a_terminal(memory, mo
     Commands.show_memory(graph=True)
     out = capsys.readouterr().out
     assert Home.graph_page().read_text().startswith("<!doctype html>") and opened == []
-    assert "Tinker's memory: 1 language, 1 topic, 2 lessons" in out and "1 retired" in out
+    assert "Tinker's memory: 1 language, 1 topic, 2 principles" in out and "1 retired" in out
     assert f"Page: {Home.graph_page()}" in out and "Similar lessons found by words" in out
     monkeypatch.setattr(sys.stdout, "isatty", lambda: True)
     Commands.show_memory(graph=True)
@@ -227,8 +253,10 @@ def test_a_short_id_is_six_hex_digits_made_longer_only_where_two_items_share_the
 def test_memory_lists_the_parts_with_what_each_holds(memory, capsys):
     browse()
     out = capsys.readouterr().out
-    assert "Python (memory python): 1 toolchain, 1 fix, 1 fact, 1 lesson; 4 proven · nothing built yet" in out
-    assert "Any language (memory any): 1 lesson; 0 proven" in out
+    assert (
+        "Python (memory python): 1 toolchain, 1 fix, 1 fact, 1 principle; 4 proven · nothing built yet" in out
+    )
+    assert "Any language (memory any): 1 principle; 0 proven" in out
     assert "Flask (memory flask): 2 facts, 1 finding; 1 proven" in out
     assert "Your commands (memory commands): 1 command; 1 proven" in out
     assert "1 item did not hold and was retired" in out
@@ -253,17 +281,17 @@ def test_memory_with_nothing_learned_says_how_to_start(home_store, capsys):
 def test_memory_name_shows_one_part_its_items_with_short_ids_and_counts_the_retired(memory, capsys):
     browse("PYTHON")
     out = capsys.readouterr().out
-    seed = f"lesson:{memory['seed']}"
-    assert f"[{short_id(seed)}] ✅ lesson    Seed random generators inside tests" in out
+    seed = f"principle:{memory['seed']}"
+    assert f"[{short_id(seed)}] ✅ principle Seed random generators inside tests." in out
     assert f"[{short_id('toolchain:python')}] ✅ toolchain" in out and "nothing built yet" in out
     assert "Exit with code 1" not in out and "retired" not in out
     browse("Any", "language")
     out = capsys.readouterr().out
-    assert "🌱 lesson    Exit with code 1 after an error <b>" in out and "Name each test after" not in out
+    assert "🌱 principle Exit with code 1 after an error <b>." in out and "Name each test after" not in out
     assert "1 retired, not shown: tinker memory any retired" in out
     browse("any", "retired")
     out = capsys.readouterr().out
-    assert f"[{short_id('retired:lesson:' + memory['name'])}] ♻️ lesson    Name each test after" in out
+    assert f"[{short_id('principle:' + memory['name'])}] ♻️ principle Name each test after" in out
     assert "Exit with code 1" not in out
     browse("flask", "fact")
     out = capsys.readouterr().out
@@ -272,9 +300,9 @@ def test_memory_name_shows_one_part_its_items_with_short_ids_and_counts_the_reti
 
 @pytest.mark.spec("GRF-9")
 def test_memory_kind_alone_lists_that_kind_across_memory_with_each_part(memory, capsys):
-    browse("lessons")
+    browse("principles")
     out = capsys.readouterr().out
-    assert "Seed random generators inside tests  (python)" in out and "after an error <b>  (any)" in out
+    assert "Seed random generators inside tests.  (python)" in out and "after an error <b>.  (any)" in out
     assert "toolchain" not in out and "Flask" not in out
 
 
@@ -325,11 +353,11 @@ def test_memory_words_are_a_name_a_kind_and_a_page(home_store, capsys):
 
 @pytest.mark.spec("GRF-10")
 def test_memory_show_shows_one_item_whole_with_its_links_and_runs(memory, capsys):
-    seed = f"lesson:{memory['seed']}"
-    Knowledge("Python", "r2").prove({seed: ["tests"]})
+    seed = f"principle:{memory['seed']}"
+    Knowledge("Python", "r2").prove({f"lesson:{memory['seed']}": ["tests"]})
     browse("show", f"[{short_id(seed).upper()}]")
     out = capsys.readouterr().out
-    assert "lesson ✅" in out and "Seed random generators inside tests" in out
+    assert "principle ✅" in out and "Seed random generators inside tests" in out
     assert "part: Python (tinker memory python)" in out and "day: 20" in out
     assert "@r1 a calculator — taught" in out and out.count("@r2 ") == 1 and "— helped ×2" in out
     assert "Correct it: tinker teach WHAT" in out and "Cites" not in out and "Similar" not in out
@@ -344,9 +372,9 @@ def test_memory_show_shows_one_item_whole_with_its_links_and_runs(memory, capsys
     assert "source: https://a.org/x" in out
     browse("show", short_id(f"known:{memory['route']}"))
     assert "Came from" in capsys.readouterr().out
-    browse("show", short_id(f"retired:lesson:{memory['name']}"))
+    browse("show", short_id(f"principle:{memory['name']}"))
     out = capsys.readouterr().out
-    assert "♻️" in out and "why: shown in the tests prompts of a step that failed" in out and "— failed" in out
+    assert "♻️" in out and "— failed" in out
 
 
 @pytest.mark.spec("GRF-7", "GRF-10")
@@ -368,10 +396,10 @@ def test_memory_show_refuses_a_short_unknown_or_shared_id(memory):
 def test_memory_find_lists_items_holding_every_word_retired_too(memory, monkeypatch, capsys):
     browse("find", "TESTS")
     out = capsys.readouterr().out
-    assert "Seed random generators inside tests  (python)" in out
-    assert "♻️ lesson    Name each test after" not in out
+    assert "Seed random generators inside tests.  (python)" in out
+    assert "♻️ principle Name each test after" not in out
     browse("find", "test", "name")
-    assert "♻️ lesson    Name each test after the behaviour it checks  (any)" in capsys.readouterr().out
+    assert "♻️ principle Name each test after the behaviour it checks.  (any)" in capsys.readouterr().out
     browse("find", "cobol")
     assert "Nothing in memory holds 'cobol'" in capsys.readouterr().out
     monkeypatch.setattr("tinkerkit.graph.MEMORY_FOUND_SHOWN", 1)
@@ -386,9 +414,9 @@ def test_memory_recent_lists_kept_items_newest_first_with_day_and_part(memory, m
     browser = MemoryBrowser(graph)
     for item in browser.items:
         item["day"] = ""
-    seed, route = f"lesson:{memory['seed']}", f"fact:flask:{memory['route']}"
+    seed, route = f"principle:{memory['seed']}", f"fact:flask:{memory['route']}"
     graph.nodes[seed]["day"], graph.nodes[route]["day"] = "2026-01-02", "2026-03-04"
-    graph.nodes[f"retired:lesson:{memory['name']}"]["day"] = "2026-05-06"
+    graph.nodes[f"principle:{memory['name']}"]["day"] = "2026-05-06"
     browser.show(MemoryBrowser.request(["recent"]))
     out = capsys.readouterr().out
     assert out.index("2026-03-04 [") < out.index("2026-01-02 [") and out.count("] ") == 2

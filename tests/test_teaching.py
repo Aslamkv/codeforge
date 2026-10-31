@@ -7,18 +7,19 @@ from conftest import MODEL, TOOLCHAIN, FakeSearch, web_page
 from tinkerkit import cli
 from tinkerkit.cli import Cli, Commands
 from tinkerkit.commands import kind_of
-from tinkerkit.knowledge import Embeddings, Knowledge, Library
+from tinkerkit.knowledge import Knowledge, Library
 from tinkerkit.learning import DocCache
 from tinkerkit.model import Ollama
 from tinkerkit.passages import Block, Page
+from tinkerkit.principles import Principle, Principles
 from tinkerkit.project import Tracker
 from tinkerkit.prompts import Prompts
 from tinkerkit.reading import Readings
 from tinkerkit.sandbox import Ran, Sandbox
 from tinkerkit.settings import (
+    ASK_ITEM_CHARS,
     ASK_ITEMS_SHOWN,
     ASK_PASSAGES_SHOWN,
-    BOOK_PASSAGES_SHOWN,
     MEMORY_ITEMS_SHOWN,
     TEACH_CLAIMS,
     Home,
@@ -27,7 +28,6 @@ from tinkerkit.teaching import (
     Asker,
     DocumentationPassages,
     Memory,
-    PassageSource,
     ReadingPassages,
     Teacher,
     Verdict,
@@ -136,20 +136,20 @@ def verdict_reply(verdict="holds", evidence=(2,), follows=True):
 
 
 def lessons():
-    return [lesson["text"] for lesson in Home.store().get("languages", "python")["lessons"]]
+    return [principle.do for principle in Principles(None).live()]
 
 
 @pytest.mark.spec("TCH-1")
 def test_memory_is_what_tinker_keeps_but_the_retired_most_related_first(kept):
     kinds = {item["kind"] for item in kept.items}
-    assert kinds == {"toolchain", "lesson", "fact"}
+    assert kinds == {"toolchain", "principle", "fact"}
     Knowledge("Python", "r2").disprove(
         {f"lesson:{kept.items[1]['id'].split(':')[1]}": ["toolchain"]}, ("toolchain",)
     )
     assert all(item["status"] != "retired" for item in Memory().items)
     first = kept.about("what is your current toolchain for python")[0]
     assert first["kind"] == "toolchain" and "black" in first["text"]
-    assert kept.about("which lessons do you have")[0]["kind"] == "lesson"
+    assert kept.about("which principles do you have")[0]["kind"] == "principle"
     assert kept.about("what is the current toolset you use for a python project")[0]["kind"] == "toolchain"
     assert len(kept.about("anything", limit=2)) == 2 and MEMORY_ITEMS_SHOWN >= 20
 
@@ -166,23 +166,15 @@ def test_a_rule_given_brings_the_facts_it_cites_right_after_it_within_the_limit(
     assert len(memory.about("which rules do you have", limit=1)) == 1
 
 
-@pytest.mark.spec("TCH-1")
-def test_an_item_of_a_topic_the_text_does_not_name_comes_after_only_by_meaning(kept, monkeypatch):
+@pytest.mark.spec("TCH-1", "PRI-9")
+def test_an_item_of_a_topic_the_text_does_not_name_is_not_shown(kept):
     asked = "how do flask routes work with black"
     assert {item["group"] for item in kept.about(asked)} == {"flask"}
-
-    def embed(path, payload=None, timeout=10, errors=False):
-        return {"embeddings": [[1.0, 0.0] if "black" in text else [0.0, 1.0] for text in payload["input"]]}
-
-    monkeypatch.setattr(Ollama, "get_json", staticmethod(embed))
-    recalled = Memory(Embeddings("e")).about(asked)
-    assert recalled[0]["group"] == "flask"
-    assert recalled[1:] and all("black" in item["text"] for item in recalled[1:])
     assert {item["group"] for item in kept.about("which lessons do you have")} >= {"python"}
 
 
-@pytest.mark.spec("TCH-1")
-def test_a_second_about_embeds_only_its_text(kept, monkeypatch):
+@pytest.mark.spec("TCH-1", "PRI-9")
+def test_about_makes_no_embedding_call(kept, monkeypatch):
     embedded = []
 
     def embed(path, payload=None, timeout=10, errors=False):
@@ -190,11 +182,27 @@ def test_a_second_about_embeds_only_its_text(kept, monkeypatch):
         return {"embeddings": [[float(len(text)), 1.0] for text in payload["input"]]}
 
     monkeypatch.setattr(Ollama, "get_json", staticmethod(embed))
-    Memory(Embeddings("e")).about("what is your current toolchain for python")
-    assert len(embedded) == len(kept.items) + 1
-    embedded.clear()
-    Memory(Embeddings("e")).about("which lessons do you have")
-    assert embedded == ["which lessons do you have"]
+    memory = Memory()
+    memory.about("what is your current toolchain for python")
+    memory.about("how do flask routes work with black")
+    assert embedded == []
+
+
+@pytest.mark.spec("TCH-1")
+def test_memory_holds_the_live_principles_in_english(kept):
+    principles = Principles(None)
+    formatting = Principle.new("formatting python", "run ruff format", scope="python", because="it is fast")
+    principles.put(formatting)
+    gone = Principle.new("linting python", "run pylint", scope="python")
+    gone.retire("contradicted", "r3")
+    principles.put(gone)
+    memory = Memory()
+    put_ids = {f"principle:{formatting.id}", f"principle:{gone.id}"}
+    kept_principles = [item for item in memory.items if item["id"] in put_ids]
+    assert [(item["group"], item["text"]) for item in kept_principles] == [
+        ("python", "When formatting python, run ruff format, because it is fast.")
+    ]
+    assert memory.about("which principles do you keep for python")[0]["kind"] == "principle"
 
 
 @pytest.mark.spec("TCH-2")
@@ -277,7 +285,22 @@ def test_ask_shows_at_most_the_ask_items(home_store, make_model, fake_ollama):
     Asker(make_model(), Memory()).answer("flask fact")
     prompt = fake_ollama.calls[0]["messages"][1]["content"]
     assert f"[{ASK_ITEMS_SHOWN}] fact" in prompt and f"[{ASK_ITEMS_SHOWN + 1}]" not in prompt
-    assert ASK_ITEMS_SHOWN < MEMORY_ITEMS_SHOWN
+    assert ASK_ITEMS_SHOWN == 6 < MEMORY_ITEMS_SHOWN
+
+
+@pytest.mark.spec("TCH-2", "PRI-10")
+def test_ask_shows_a_principle_as_its_prompt_text_and_cuts_each_item(home_store, make_model, fake_ollama):
+    long_fact = "Flask routes use @app.route " + "and more " * 60
+    Library.save("flask", {"topic": "flask", "facts": [{"phase": "code", "text": long_fact}]})
+    Principles(None).put(
+        Principle.new("routing in flask", "use @app.route", scope="flask", because="it is plain")
+    )
+    fake_ollama.reply("With @app.route.", when="ask")
+    Asker(make_model(), Memory()).answer("how do flask routes work")
+    prompt = fake_ollama.calls[0]["messages"][1]["content"]
+    assert "routing in flask → use @app.route" in prompt and "because it is plain" not in prompt
+    assert long_fact[:ASK_ITEM_CHARS] in prompt and long_fact[: ASK_ITEM_CHARS + 1] not in prompt
+    assert ASK_ITEM_CHARS == 240
 
 
 class FakeSandbox:
@@ -688,7 +711,7 @@ def test_nothing_changes_when_no_change_can_be_made(kept, make_model, fake_ollam
 @pytest.mark.spec("TCH-7")
 def test_a_teaching_that_holds_corrects_what_tinker_keeps(kept, make_model, fake_ollama):
     teaching = "ruff alone is enough, black is not needed, and I prefer no mypy"
-    lesson = numbered_item(kept, teaching, "lesson")
+    lesson = numbered_item(kept, teaching, "principle")
     fake_ollama.reply(
         plan_reply(changes=[dict(RUFF_CHANGE, retire=[lesson]), NO_MYPY_CHANGE]), when="what to check"
     )
@@ -696,17 +719,19 @@ def test_a_teaching_that_holds_corrects_what_tinker_keeps(kept, make_model, fake
     ending = Teacher(make_model(), FakeWeb(), kept).teach(teaching)
     python = Home.store().get("languages", "python")
     assert python["toolchain"]["format"] == "ruff format ." and python["toolchain"]["lint"] == "ruff check ."
-    retired = python["retired"][-1]
-    assert retired["text"] == "Format Python with black before linting with ruff"
-    assert retired["reason"] == f"corrected by what you taught: {teaching}"
-    taught = {lesson["text"]: lesson for lesson in python["lessons"]}
+    taught = {principle.do: principle for principle in Principles(None).live()}
     ruff, no_mypy = (
         taught["Format and lint Python with ruff alone; black is not needed"],
         taught["Run no type checker in Python projects"],
     )
-    assert ruff["status"] == no_mypy["status"] == "proven" and ruff["history"][-1]["event"] == "taught"
-    assert ruff["sources"] == [PAGE["url"]] and no_mypy["sources"] == ["your preference"]
+    assert ruff.status == no_mypy.status == "proven" and ruff.history[-1]["event"] == "taught"
+    sources = lambda principle: [item["source"] for item in principle.evidence if item["kind"] == "taught"]
+    assert sources(ruff) == [PAGE["url"]] and sources(no_mypy) == ["your preference"]
     assert ending["status"] == "done" and ending["headline"] == "Corrected: 5 change(s)"
+    kept_principles = {principle.do: principle for principle in Principles(None).all()}
+    retired = kept_principles["Format Python with black before linting with ruff"]
+    assert retired.status == "retired"
+    assert retired.history[-1]["reason"] == f"corrected by what you taught: {teaching}"
 
 
 @pytest.mark.spec("TCH-9")
@@ -837,9 +862,7 @@ def test_an_ask_gives_a_passage_kept_at_two_addresses_once(home_store, make_mode
 
 
 @pytest.mark.spec("TCH-3")
-def test_an_ask_embeds_only_the_passages_its_words_shortlist(
-    home_store, make_model, fake_ollama, monkeypatch
-):
+def test_an_ask_makes_no_embedding_call(home_store, make_model, fake_ollama, monkeypatch):
     learned_flask([f"Passage {number}: a flask route binds a view. " + "x" * 1100 for number in range(40)])
     embedded = []
 
@@ -849,9 +872,8 @@ def test_an_ask_embeds_only_the_passages_its_words_shortlist(
 
     monkeypatch.setattr(Ollama, "get_json", staticmethod(embed))
     fake_ollama.reply("With the route decorator.", when="ask")
-    Asker(make_model(), Memory(Embeddings("e"))).answer("how does a flask route bind a view?")
-    passages_embedded = [text for text in embedded if "Passage " in text]
-    assert len(passages_embedded) == PassageSource.SHORTLIST_TIMES * BOOK_PASSAGES_SHOWN
+    Asker(make_model(), Memory()).answer("how does a flask route bind a view?")
+    assert embedded == []
 
 
 @pytest.mark.spec("TCH-3")

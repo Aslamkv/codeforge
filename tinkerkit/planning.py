@@ -8,10 +8,11 @@ lazy from pathlib import Path
 
 from .messages import say
 from .session import Phase, Worker
-lazy from .knowledge import Embeddings, Library, Retriever, mentions
+lazy from .knowledge import Library, mentions
 lazy from .learning import SlotLearner
 lazy from .model import OllamaError
 lazy from .prompts import Part, Prompts, PromptTooLarge
+lazy from .retrieval import Embeddings, Retriever
 lazy from .settings import (
     CHECK_MAX_TOKENS,
     ENV_EXAMPLE,
@@ -189,11 +190,13 @@ class Recaller(Phase):
         left_out = self.for_other_code(known) | self.needing_tools_missing_here(known)
         self.project.spec["inapplicable"] = sorted(left_out)
         if left_out:
-            say.skip(f"Left out {len(left_out)} learned rule(s) or fact(s) this project does not need")
+            say.skip(f"Left out {len(left_out)} learned principle(s) this project does not need")
 
     def known_rules(self):
         return self.project.spec.get("learned", []) + (
-            self.session.knowledge.facts(FACT_PHASES) if self.project.language else []
+            self.session.knowledge.facts(FACT_PHASES) + self.session.knowledge.known_lessons()
+            if self.project.language
+            else []
         )
 
     def situations(self):

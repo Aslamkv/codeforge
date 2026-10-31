@@ -69,9 +69,11 @@ class Session:
         return int(self.model.limit_chars(system + Prompts.NO_TOOL_CALLS) * 0.95)
 
     def knowledge_parts(self, *phases):
-        lessons = self.knowledge.lessons(phases)
+        lessons = [
+            lesson for lesson in self.knowledge.lessons(phases) if lesson["id"] not in self.inapplicable()
+        ]
         proven = [fact for fact in self.knowledge.facts(phases) if fact["id"] not in self.inapplicable()]
-        learned = self.learned_for(phases, {fact["id"] for fact in proven})
+        learned = self.learned_for(phases, {item["id"] for item in proven + lessons})
         self.used(self.ids_used(lessons, proven, learned), phases)
         facts = [f"[{self.project.language or 'the language'}] {fact['text']}" for fact in proven] + [
             f"[{item['name']}] {item['text']}" for item in learned
@@ -100,8 +102,14 @@ class Session:
         return (
             [Item("lesson", lesson["id"]).key for lesson in lessons]
             + [Item("known", fact["id"]).key for fact in proven]
-            + [Item("fact", item["id"], item["topic"]).key for item in learned if item.get("id")]
+            + [Session.learned_key(item) for item in learned if item.get("id")]
         )
+
+    @staticmethod
+    def learned_key(item):
+        if item.get("kind") == "principle":
+            return Item("principle", item["id"]).key
+        return Item("fact", item["id"], item["topic"]).key
 
     def checks_part(self, phases):
         lint = self.project.toolchain.lint if self.project.toolchain else ""

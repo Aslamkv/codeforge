@@ -22,10 +22,11 @@ from .system import SYSTEM_CHECKS, SYSTEM_WORDS
 lazy from .building import BugReproducer, CodeWriter, TestToolSetup, TestWriter, Verifier
 lazy from .finishing import FinalReview, LessonWriter, ReadmeWriter, Tidy
 lazy from .graph import Graph, MemoryBrowser, write_page
-lazy from .knowledge import Embeddings, Learner, Library, Researcher, search_entry
+lazy from .knowledge import Learner, Library, Researcher, search_entry
 lazy from .learning import LearnStopped, SlotLearner
 lazy from .model import Calibrator, Model, Models, Ollama, OllamaError, SelectedModel
 lazy from .planning import Designer, InterfaceReviewer, Recaller, SpecWriter
+lazy from .principles import Principles
 lazy from .project import (
     Brief,
     Outcome,
@@ -39,6 +40,7 @@ lazy from .project import (
     saved,
 )
 lazy from .prompts import Prompts
+lazy from .retrieval import Embeddings
 lazy from .session import Session, Stopped
 lazy from .settings import (
     CONFIRM_AFTER,
@@ -99,12 +101,17 @@ def cannot_read_or_write(exc):
 def run(args, script_started, started_at):
     if args.reset:
         return Home.reset(args.yes)
-    Home.ensure()
+    open_home()
     if Cli.works_for_hours(args):
         Home.keep_awake()
     if Commands(args).run():
         return
     ProjectRun(args, script_started, started_at).execute()
+
+
+def open_home():
+    Home.ensure()
+    Principles(None).migrate()
 
 
 class Cli:
@@ -197,7 +204,7 @@ class Cli:
     @staticmethod
     def run_at_once(argv):
         if not argv:
-            Home.ensure()
+            open_home()
             conversation.session(Path.cwd())
             raise SystemExit(0)
         if argv[0] in ("help", "-h", "--help"):
@@ -205,7 +212,7 @@ class Cli:
         if argv[0] in Cli.TALK_COMMANDS:
             if argv[1:2] in (["-h"], ["--help"]):
                 Cli.help(argv[0])
-            Home.ensure()
+            open_home()
             raise SystemExit(conversation.one_shot(argv[0], " ".join(argv[1:])))
         if argv[0] == "channel":
             if channels is None:
@@ -822,7 +829,7 @@ class Commands:
     def ask(self):
         question = self.args.ask
         model = Commands.model_in_use(*Commands.checked_model())
-        memory = Memory(Embeddings.configured())
+        memory = Memory()
         Commands.reported(
             f"Asking: {first_line(question, 60)}",
             model,
@@ -833,7 +840,7 @@ class Commands:
         teaching = self.args.teach
         name, settings = Commands.checked_model()
         internet = Internet()
-        model, memory = Commands.model_in_use(name, settings), Memory(Embeddings.configured())
+        model, memory = Commands.model_in_use(name, settings), Memory()
         Commands.reported(
             f"Teaching: {first_line(teaching, 60)}",
             model,
@@ -1668,7 +1675,7 @@ class CycleRunner:
             cycle.get("used", {}), self.session.failed_phases(phase, self.stopped)
         )
         if gone:
-            say.info(f"{gone} lesson(s) and fact(s) used in this step are discarded: they did not hold", "🗑️")
+            say.info(f"{gone} principle(s) used in this step are discarded: they did not hold", "🗑️")
         self.session.save()
 
     def show_plan(self):

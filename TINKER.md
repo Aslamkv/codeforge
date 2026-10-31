@@ -356,6 +356,11 @@ none of them. When the web finds nothing (offline, nothing about the topic), it 
 before the model does any work, and keeps what it knew before. Every web search and fetch Tinker makes is
 logged in `.tinker/web-requests.log`. The summary at the end shows the versions installed here.
 
+What it learns is kept as principles: when one applies, what to do, and why, each citing the pages or runs it
+came from. Learning, reading, exercising and every build feed the same store, and only change it a step at a
+time: a new principle, more evidence for one it has, one contradicted (retired, with why), or an exception. A
+new principle is 🌱 until a build that used it goes well, and is retired when builds that used it go wrong.
+
 Forget what learning keeps:
 
 ```sh
@@ -379,9 +384,9 @@ that stays the same while it is kept, and ✅ when a build proved it, 🌱 when 
 ```sh
 tinker memory                      # the parts, and how many items are retired
 tinker memory python               # one part: its details, then its items
-tinker memory python lessons 2     # its lessons, the second page
+tinker memory python principles 2  # its principles, the second page
 tinker memory flask facts          # a topic's facts
-tinker memory lessons              # every lesson, across memory
+tinker memory principles           # every principle, across memory
 tinker memory any retired          # what did not hold, and was retired
 tinker memory show 5b94dc          # one item whole: details, sources, links, the runs that used it
 tinker memory find pytest toml     # every item that holds all the words, retired ones too
@@ -390,7 +395,7 @@ tinker memory recent               # what was learned, newest first
 
 Browsing changes nothing: `tinker teach` corrects an item, and `tinker clear PART` forgets a part.
 
-See it as a graph you can explore in the browser: each lesson, fact and fix linked to its language, and to
+See it as a graph you can explore in the browser: each principle, fact and fix linked to its language, and to
 the runs that taught it, proved it or found it wrong (what did not hold is kept, greyed, with why). In a
 chat, `memory --graph` sends the page as a file to open on your phone:
 
@@ -470,7 +475,7 @@ tinker teach Clean Architecture says entities never depend on use cases, not the
 ```
 
 What teaches how to build software also guides the builds that need it, like anything else Tinker learned: its
-lessons are shown to a build when the request needs them, and kept or retired by how the build goes. Anything else
+principles are shown to a build when the request needs them, and kept or retired by how the build goes. Anything else
 is there for asking only.
 
 ### Exercise 🏋️

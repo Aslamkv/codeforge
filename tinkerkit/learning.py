@@ -12,7 +12,6 @@ lazy from .knowledge import (
     Learner,
     Library,
     Researcher,
-    Retriever,
     SearchPlanner,
     language_key,
     search_entry,
@@ -20,15 +19,14 @@ lazy from .knowledge import (
 )
 lazy from .model import OllamaError
 lazy from .passages import Cleaner, Page
+lazy from .principles import Inducer, Principles
 lazy from .project import Tracked
 lazy from .prompts import Part, Prompts, PromptTooLarge
+lazy from .retrieval import Retriever
 lazy from .settings import (
     DOCS_NAME_SEARCH,
     DOCS_SITE_SEARCH,
     DOCS_VERSION_SEARCH,
-    FACT_PHASES,
-    FACTS_PER_SLOT,
-    MAX_FACT_CHARS,
     MAX_VERSION_COMMANDS,
     NOT_REFERENCE_WORDS,
     RESULTS_PER_LEARN_SEARCH,
@@ -350,19 +348,18 @@ class SlotLearner(Tracked):
         pool = self.cleaner.pool(pages)
         say.info(f"Split the pages into {len(pool)} passage(s), repeats dropped", "🧹")
         try:
-            facts = self.digested(plan, version, self.selected(selector, plan, version, pool))
-            facts += self.followed_up(plan, version, pool, selector, facts)
-            rules = self.learner.condense(plan, facts, think=self.think()) if facts else []
+            records = self.digested(plan, version, self.selected(selector, plan, version, pool))
+            records += self.followed_up(plan, version, pool, selector, records)
         except (OllamaError, PromptTooLarge) as exc:
             raise SystemExit(
                 f"Learning {self.topic} stopped: the model failed ({first_line(str(exc), 160)}). "
                 f"Nothing was saved."
             )
-        if not facts:
+        if not records:
             raise SystemExit(
                 f"Nothing learned about {self.topic}: no passage answered a slot. Nothing was saved."
             )
-        entry = self.kept(plan, machine, facts, rules, pool)
+        entry = self.kept(plan, machine, records, pool)
         self.recap = self.recap_of(entry, plan["profile"])
         return entry
 
@@ -389,41 +386,43 @@ class SlotLearner(Tracked):
         return selected
 
     def digested(self, plan, version, selected):
-        self.step("digest", "Reading the passages for answers, one question at a time (the slow part)…", "🧠")
+        self.step(
+            "digest", "Reading the passages for principles, one question at a time (the slow part)…", "🧠"
+        )
         asked = [slot for slot in web_slots(plan["profile"]) if selected.get(slot.id)]
-        facts, answered = [], 0
+        records = []
         for done, slot in enumerate(asked, 1):
             with say.working_on(f"Learning about {label(slot.id)} ({done} of {len(asked)})"):
-                found = self.slot_facts(slot, plan, version, selected[slot.id])
-            facts, answered = facts + found, answered + bool(found)
-            say.tally(f"{done}/{len(asked)} questions · {len(facts)} fact(s)")
-        self.outcome(f"{answered} of {len(asked)} question(s) answered, {len(facts)} fact(s)")
-        return facts
-
-    def slot_facts(self, slot, plan, version, passages):
-        parts = [
-            Part("Topic", f"{plan['name']} {version}".strip(), True),
-            Part("Question", slot.asked(plan, version), True),
-            Part("Passages", "\n\n".join(passage.listing() for passage in passages), True, exact=True),
-        ]
-        found = (
-            self.model.ask_until_usable(
-                Prompts.DIGEST_SYSTEM,
-                parts,
-                f"Digest {slot.id}",
-                lambda reply: read_digest(reply.json(), slot, passages),
-                attempts=2,
-                think=self.think(),
-            ).value
-            or []
+                records += self.slot_principles(slot, plan, selected[slot.id])
+            say.tally(f"{done}/{len(asked)} questions · {principle_count(records)} principle(s)")
+        self.outcome(
+            f"{len(records)} of {len(asked)} question(s) answered, {principle_count(records)} principle(s)"
         )
+        return records
+
+    def slot_principles(self, slot, plan, passages):
+        principles = Principles(self.embeddings)
+        given = [{"text": passage.searched() or passage.text, "source": passage.id} for passage in passages]
+        deltas = Inducer(self.model, principles).induce(given, scope=self.slug(plan), think=self.think())
+        changed = principles.apply(deltas, "")
         with say.section():
-            if found:
-                say.done(f"{label(slot.id)}: {len(found)} fact(s) from {len(passages)} passage(s)")
-                say.found(first_line(found[0]["text"], 200))
+            if changed:
+                say.done(f"{label(slot.id)}: {len(changed)} principle(s) from {len(passages)} passage(s)")
+                say.found(first_line(changed[0].prompt_text(), 200))
             else:
                 say.skip(f"{label(slot.id)}: nothing found in {len(passages)} passage(s)")
-        return Learner.add_facts([], found)
+        cited = [item["source"] for delta in deltas for item in delta["evidence"]]
+        return (
+            [
+                {
+                    "slot": slot.id,
+                    "principles": [principle.id for principle in changed],
+                    "passages": list(dict.fromkeys(cited)),
+                }
+            ]
+            if changed
+            else []
+        )
 
     @staticmethod
     def think():
@@ -447,7 +446,7 @@ class SlotLearner(Tracked):
                 pool += self.cleaner.pool(pages, known=pool)
                 passages = self.selected(selector, plan, version, pool, [slot])[slot.id]
                 with say.working_on(f"Learning about {label(slot.id)} from {len(pages)} more page(s)"):
-                    found += self.slot_facts(slot, plan, version, passages) if passages else []
+                    found += self.slot_principles(slot, plan, passages) if passages else []
         return found
 
     def extra_pages(self, search, plan):
@@ -470,26 +469,25 @@ class SlotLearner(Tracked):
     def slug(self, plan):
         return language_key(plan["language"]) if plan["kind"] == "language" else Library.slug(self.topic)
 
-    def kept(self, plan, machine, facts, rules, pool):
-        slug, language = self.slug(plan), plan["kind"] == "language"
-        entry = self.entry(plan, machine, facts, rules, pool)
+    def kept(self, plan, machine, records, pool):
+        slug = self.slug(plan)
+        entry = self.entry(plan, machine, records, pool)
         self.step("keep")
         Library.save(slug, entry)
         say.info(
-            f"Saved {len(facts)} fact(s) about {plan['name']} from {len(entry['sources'])} page(s) as {slug}"
+            f"Saved {principle_count(records)} principle(s) about {plan['name']} "
+            f"from {len(entry['sources'])} page(s) as {slug}"
             + (" (some questions are still open)" if entry["status"] == "incomplete" else ""),
             "💾",
         )
-        self.outcome(f"{len(facts)} fact(s) and {len(rules)} rule(s)")
-        if language:
-            self.learner.replace_proven(slug, entry)
+        self.outcome(f"{principle_count(records)} principle(s) changed")
         self.learner.index(slug, entry)
         return entry
 
-    def entry(self, plan, machine, facts, rules, pool):
+    def entry(self, plan, machine, records, pool):
         language = plan["kind"] == "language"
-        gaps = missing(plan["profile"], facts, machine)
-        cited = {*fact["passages"] for fact in facts}
+        gaps = missing(plan["profile"], records, machine)
+        cited = {source for record in records for source in record["passages"]}
         used = [passage for passage in pool if passage.id in cited]
         return {
             "topic": self.topic,
@@ -504,8 +502,7 @@ class SlotLearner(Tracked):
             "learned": now_text(),
             "model": self.model.name,
             "machine": machine,
-            "facts": facts,
-            "rules": rules,
+            "principles": records,
             "sources": list(dict.fromkeys(passage.url for passage in used)),
             "docs": self.docs,
             "passages": [
@@ -534,7 +531,14 @@ class SlotLearner(Tracked):
                 "Pages",
                 ", ".join(f"{count} {kind}" for kind, count in self.pages.items() if count) or "none",
             ),
-            ("🧩", "Facts kept", str(len(entry["facts"]))),
+            (
+                "🧩",
+                "Principles changed",
+                ", ".join(
+                    f"{label(record['slot'])} {len(record['principles'])}" for record in entry["principles"]
+                )
+                or "none",
+            ),
             ("🌐", "Web requests", self.internet.requests.text()),
         ]
 
@@ -563,6 +567,10 @@ class SlotLearner(Tracked):
 
 def label(slot_id):
     return slot_id.replace("-", " ")
+
+
+def principle_count(records):
+    return sum(len(record["principles"]) for record in records)
 
 
 def version_of(machine, commands):
@@ -683,31 +691,6 @@ def searches_by_slot(given, ids):
         for key, search in (given.items() if isinstance(given, dict) else [])
         if key in ids and search_entry(search)
     }
-
-
-def read_digest(data, slot, passages):
-    by_id = {passage.id: passage for passage in passages}
-    facts = []
-    for item in (data.get("facts") or []) if isinstance(data, dict) else []:
-        if not isinstance(item, dict):
-            continue
-        text, phase = clean(item.get("text"), MAX_FACT_CHARS), clean(item.get("phase"), 20).lower()
-        cited = list(dict.fromkeys(str(citation).strip("[] ") for citation in item.get("cites") or []))
-        cited = [passage_id for passage_id in cited if passage_id in by_id]
-        if not text or not cited or Learner.UNRELEASED_RE.search(text):
-            continue
-        pages = list(dict.fromkeys(by_id[passage_id].url for passage_id in cited))
-        facts.append(
-            {
-                "phase": phase if phase in FACT_PHASES else slot.section,
-                "text": text,
-                "slot": slot.id,
-                "passages": cited,
-                "source": pages[0],
-                **({"also": pages[1:]} if pages[1:] else {}),
-            }
-        )
-    return facts[:FACTS_PER_SLOT]
 
 
 def clean(value, limit):

@@ -1,7 +1,7 @@
 from dataclasses import dataclass
 
-lazy from .knowledge import Embeddings, Retriever
 lazy from .passages import repeats, shingles
+lazy from .retrieval import Embeddings, Retriever
 lazy from .settings import MMR_BALANCE, SLOT_CANDIDATE_PASSAGES, SLOT_RELEVANT_SIMILARITY
 
 

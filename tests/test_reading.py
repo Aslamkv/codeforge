@@ -10,6 +10,7 @@ from tinkerkit.cli import Cli, Commands
 from tinkerkit.jobs import is_job
 from tinkerkit.knowledge import Library
 from tinkerkit.model import Ollama
+from tinkerkit.principles import Principles
 from tinkerkit.project import Tracker
 from tinkerkit.reading import (
     Reader,
@@ -20,13 +21,13 @@ from tinkerkit.reading import (
     index_terms,
     kind_of,
     opened,
-    read_points,
+    read_phase,
     read_survey,
     show,
     show_list,
     stored,
 )
-from tinkerkit.settings import MAX_FACT_CHARS, READ_FACTS_PER_CHAPTER, READ_KEY_TERMS, READ_MAX_BYTES
+from tinkerkit.settings import READ_KEY_TERMS, READ_MAX_BYTES
 from tinkerkit.web import WebPage
 
 CONTAINER = (
@@ -229,8 +230,14 @@ def survey_reply(software=True, **reads):
     )
 
 
-def points(*texts, phase="code"):
-    return json.dumps({"points": [{"text": text, "phase": phase, "section": ""} for text in texts]})
+def added(*texts, phase="code"):
+    return json.dumps(
+        {"deltas": [{"kind": "add", "when": "", "do": text, "phase": phase, "cites": [1]} for text in texts]}
+    )
+
+
+def kept_rules():
+    return [principle.do for principle in Principles(None).kept("read-1")]
 
 
 class Steps:
@@ -300,22 +307,10 @@ def test_the_survey_orders_every_chapter_and_skips_none(tmp_path, home_store):
 def read_craft(tmp_path, make_model, fake_ollama, software=True):
     stored(craft(tmp_path))
     fake_ollama.reply(survey_reply(software), when="reading plan")
-    fake_ollama.reply(points("Write a test for each behaviour first", phase="tests"), when="chapter 4")
-    fake_ollama.reply(points("Name each function after what it does"), when="chapter 2")
-    fake_ollama.reply(points("Small programs stay easy to change", phase="design"), when="chapter 1")
-    fake_ollama.reply(points("Write a test for each behaviour first", phase="tests"), when="chapter 3")
-    if software:
-        fake_ollama.reply(
-            json.dumps(
-                {
-                    "rules": [
-                        {"phase": "code", "text": "Name functions by what they do", "when": "", "cites": [1]}
-                    ],
-                    "declare": None,
-                }
-            ),
-            when="Condense",
-        )
+    fake_ollama.reply(added("Write a test for each behaviour first", phase="tests"), when="chapter 4")
+    fake_ollama.reply(added("Name each function after what it does"), when="chapter 2")
+    fake_ollama.reply(added("Small programs stay easy to change", phase="design"), when="chapter 1")
+    fake_ollama.reply(added("Write a test for each behaviour first", phase="tests"), when="chapter 3")
     tracker = Steps()
     return Reader(make_model(), tracker).read(1), tracker
 
@@ -331,30 +326,35 @@ def test_every_chapter_is_read_in_order_and_saved_as_it_is_read(
         "Read: chapter 2",
         "Read: chapter 1",
         "Read: chapter 3",
-        "Condense the facts",
     ]
     sent = prompts(fake_ollama)
     assert "1. Foreword (front" in sent[0] and FOREWORD in sent[0] and "testing (3)" in sent[0]
-    assert TESTING in sent[1] and "- Write a test for each behaviour first" in sent[2]
+    assert TESTING in sent[1] and "Write a test for each behaviour first" in sent[2]
     the_index = "coupling, 11"
     assert all(the_index not in prompt for prompt in sent[1:])
     topic = Library.read("read-1")
     assert topic["kind"] == "reading" and topic["reading"] == 1 and topic["software"] is True
-    chapter_3s_repeat_kept_once = [
-        ("Write a test for each behaviour first", 4),
-        ("Name each function after what it does", 2),
-        ("Small programs stay easy to change", 1),
+    assert "facts" not in topic and "rules" not in topic and Library.items({"read-1": topic})
+    assert sorted(kept_rules()) == [
+        "Name each function after what it does",
+        "Small programs stay easy to change",
+        "Write a test for each behaviour first",
     ]
-    assert [(fact["text"], fact["chapter"]) for fact in topic["facts"]] == chapter_3s_repeat_kept_once
-    assert [rule["text"] for rule in topic["rules"]] == ["Name functions by what they do"]
-    assert {chapter["state"] for chapter in Readings.get(1)["chapters"][:4]} == {"read"}
-    assert tracker.steps == ["survey", "chapters", "condense"]
+    entry = Readings.get(1)
+    assert entry
+    chapters = entry["chapters"]
+    assert {chapter["state"] for chapter in chapters[:4]} == {"read"}
+    chapter_3s_repeat_strengthens_chapter_4s = chapters[3]["principles"]
+    assert chapters[2]["principles"] == chapter_3s_repeat_strengthens_chapter_4s
+    testing = Principles(None).get(chapters[3]["principles"][0])
+    assert testing and testing.phase == "tests"
+    assert tracker.steps == ["survey", "chapters"]
     assert tracker.outcomes["survey"] == "1 core chapter(s) of 5, read first"
     assert tracker.outcomes["chapters"] == "4 chapter(s), 3 things learned"
     assert ("Chapters read", "4 of 4") in ending["details"]
     assert ending["headline"] == "Read #1 The Craft of Small Programs"
     fake_ollama.calls.clear()
-    assert Reader(make_model()).read(1)["details"][0] == ("Read now", "0 chapter(s), 0 new fact(s)")
+    assert Reader(make_model()).read(1)["details"][0] == ("Read now", "0 chapter(s), 0 principle(s) changed")
     assert fake_ollama.calls == []
 
 
@@ -362,7 +362,7 @@ def test_every_chapter_is_read_in_order_and_saved_as_it_is_read(
 def test_a_stopped_reading_goes_on_with_the_chapters_not_read(tmp_path, home_store, make_model, fake_ollama):
     stored(craft(tmp_path))
     fake_ollama.reply(survey_reply(), when="reading plan")
-    fake_ollama.reply(points("Write a test for each behaviour first", phase="tests"), when="chapter 4")
+    fake_ollama.reply(added("Write a test for each behaviour first", phase="tests"), when="chapter 4")
     fake_ollama.reply(KeyboardInterrupt(), when="chapter 2")
     with pytest.raises(KeyboardInterrupt):
         Reader(make_model()).read(1)
@@ -373,22 +373,12 @@ def test_a_stopped_reading_goes_on_with_the_chapters_not_read(tmp_path, home_sto
         "read",
         "raw",
     ]
-    assert [fact["text"] for fact in Library.read("read-1")["facts"]] == [
-        "Write a test for each behaviour first"
-    ]
+    assert kept_rules() == ["Write a test for each behaviour first"]
     fake_ollama.calls.clear()
     for chapter in (2, 1, 3):
-        fake_ollama.reply(points(), when=f"chapter {chapter}")
-    fake_ollama.reply(
-        json.dumps({"rules": [{"phase": "tests", "text": "Test first", "cites": [1]}]}), when="Condense"
-    )
+        fake_ollama.reply(added(), when=f"chapter {chapter}")
     Reader(make_model()).read(1)
-    assert labels(fake_ollama) == [
-        "Read: chapter 2",
-        "Read: chapter 1",
-        "Read: chapter 3",
-        "Condense the facts",
-    ]
+    assert labels(fake_ollama) == ["Read: chapter 2", "Read: chapter 1", "Read: chapter 3"]
 
 
 @pytest.mark.spec("RDG-8")
@@ -403,7 +393,7 @@ def test_a_long_chapter_is_read_in_every_part(tmp_path, home_store, make_model, 
     )
     monkeypatch.setattr(reading, "READ_CHAPTER_TEXT_SHARE", 0.05)
     fake_ollama.reply(survey_reply(software=False, **{"1": "core"}), when="reading plan")
-    fake_ollama.reply(points(), times=20)
+    fake_ollama.reply(added(), times=20)
     Reader(make_model()).read(1)
     parts = [label for label in labels(fake_ollama) if label.startswith("Read: chapter 1")]
     assert len(parts) > 1 and parts[:2] == ["Read: chapter 1 part 1", "Read: chapter 1 part 2"]
@@ -418,19 +408,15 @@ def test_read_again_with_a_focus_looks_where_it_is_asked(
     read_craft(tmp_path, make_model, fake_ollama)
     fake_ollama.calls.clear()
     monkeypatch.setattr(reading, "READ_FOCUS_CHAPTERS", 2)
-    fake_ollama.reply(points("A long program was written three times"), when="chapter 3")
-    fake_ollama.reply(points("Run every test after each change", phase="tests"), when="chapter 4")
-    fake_ollama.reply(
-        json.dumps({"rules": [{"phase": "tests", "text": "Run every test", "cites": [1]}]}), when="Condense"
-    )
+    fake_ollama.reply(added("A long program was written three times"), when="chapter 3")
+    fake_ollama.reply(added("Run every test after each change", phase="tests"), when="chapter 4")
     ending = Reader(make_model()).read(1, "chapter 3, and when to run every test")
-    assert labels(fake_ollama) == ["Read: chapter 3", "Read: chapter 4", "Condense the facts"]
-    assert (
-        "## What the person asks you to look for\nchapter 3, and when to run every test"
-        in prompts(fake_ollama)[0]
-    )
-    assert ("Read now", "2 chapter(s), 2 new fact(s)") in ending["details"]
-    assert Library.read("read-1")["facts"][-1]["text"] == "Run every test after each change"
+    assert labels(fake_ollama) == ["Read: chapter 3", "Read: chapter 4"]
+    assert "Look for" in prompts(fake_ollama)[0]
+    assert "chapter 3, and when to run every test" in prompts(fake_ollama)[0]
+    assert ("Read now", "2 chapter(s), 2 principle(s) changed") in ending["details"]
+    assert ("Kept", f"{len(kept_rules())} principle(s)") in ending["details"]
+    assert "Run every test after each change" in kept_rules()
 
 
 @pytest.mark.spec("RDG-9")
@@ -447,31 +433,20 @@ def test_a_focus_excerpt_keeps_the_start_and_the_chunks_that_match():
 
 
 @pytest.mark.spec("RDG-10")
-def test_a_chapter_gives_points_with_their_phase():
-    reply = {
-        "points": [
-            {"text": "Name functions by what they do", "phase": "code", "section": "Names"},
-            {"text": "x" * (MAX_FACT_CHARS + 50), "phase": "nowhere"},
-            {"text": " "},
-            "not a point",
-        ]
-        + [{"text": f"point {number}", "phase": "tests"} for number in range(READ_FACTS_PER_CHAPTER)]
-    }
-    found = read_points(reply, software=True)
-    assert len(found) == READ_FACTS_PER_CHAPTER
-    assert found[0] == {"text": "Name functions by what they do", "phase": "code", "section": "Names"}
-    assert found[1]["phase"] == "book" and len(found[1]["text"]) == MAX_FACT_CHARS
-    assert {point["phase"] for point in read_points(reply, software=False)} == {"book"}
-    with pytest.raises(ValueError, match="points"):
-        read_points({"facts": []}, software=True)
+def test_a_principle_keeps_its_building_phase_only_from_a_software_source():
+    code = {"kind": "add", "do": "Name functions by what they do", "phase": "code"}
+    anywhere = {"kind": "add", "do": "Small programs stay easy to change", "phase": "any"}
+    strengthen = {"kind": "strengthen", "principle": "p1"}
+    assert read_phase(code, software=True) == code
+    assert read_phase(anywhere, software=True)["phase"] == "book"
+    assert read_phase(code, software=False)["phase"] == "book"
+    assert read_phase(strengthen, software=False) == strengthen
 
 
 @pytest.mark.spec("RDG-10")
 def test_what_is_not_about_software_is_kept_for_asking_alone(tmp_path, home_store, make_model, fake_ollama):
     ending, tracker = read_craft(tmp_path, make_model, fake_ollama, software=False)
-    topic = Library.read("read-1")
-    assert {fact["phase"] for fact in topic["facts"]} == {"book"} and topic["rules"] == []
-    assert "condense" not in tracker.steps and "Condense the facts" not in labels(fake_ollama)
+    assert {principle.phase for principle in Principles(None).kept("read-1")} == {"book"}
     assert ("Builds", "never use it: it is not about building software") in ending["details"]
 
 
@@ -545,7 +520,7 @@ def test_tinker_read_stores_then_reads_as_its_own_job(
     monkeypatch.chdir(tmp_path)
     craft(tmp_path)
     fake_ollama.reply(survey_reply(software=False, **{"2": "core"}), when="reading plan")
-    fake_ollama.reply(points("Name each function after what it does"), times=4)
+    fake_ollama.reply(added("Name each function after what it does"), times=4)
     Commands(Cli.parse(["read", "craft.md"])).run()
     assert retargeted == [["read", "#1"]]
     title, ending, steps = ended[0]
@@ -574,16 +549,17 @@ def test_the_reading_list_is_shown_and_cleared(
     listed = capsys.readouterr().out
     assert (
         listed.index("#2 The Craft") < listed.index("#1 The Craft")
-        and "4 of 4 chapters read · 3 fact(s)" in listed
+        and "4 of 4 chapters read · 3 principle(s)" in listed
     )
     show(1)
     shown = capsys.readouterr().out
-    assert "✅ 2. Naming (1 fact(s))" in shown and "📄 5. Index (text only)" in shown
+    assert "✅ 2. Naming (1 principle(s))" in shown and "📄 5. Index (text only)" in shown
     assert "Small programs stay" in shown
     with pytest.raises(SystemExit, match="Nothing deleted: run tinker clear read #1"):
         cli.Cli.cleared(["read", "#1"], yes=False)
     cli.Cli.cleared(["read", "#1"], yes=True)
     assert Readings.get(1) is None and Library.read("read-1") is None and list(Readings.all()) == [2]
+    assert Principles(None).all() == []
     with pytest.raises(SystemExit, match="reading numbers alone"):
         cli.Cli.cleared(["read", "memory"], yes=True)
     cli.Cli.cleared(["read"], yes=True)

@@ -11,6 +11,7 @@ from tinkerkit import cli
 from tinkerkit.cli import Cli, Commands, CycleRunner, Doctor, ProjectFolder, ProjectRun
 from tinkerkit.knowledge import Knowledge, Library
 from tinkerkit.model import Models, Ollama, OllamaError
+from tinkerkit.principles import Principles
 from tinkerkit.project import Runs, Tracker, project_store
 from tinkerkit.session import Phase, Stopped
 from tinkerkit.settings import FIX_PHASES, PHASES, QUALITY_VERSION, Config
@@ -130,6 +131,15 @@ def test_clear_runs_on_its_own(home_store):
     with pytest.raises(SystemExit) as done:
         parse("clear", "memory", "--yes")
     assert done.value.code == 0 and home_store.items("memory") == {}
+
+
+@pytest.mark.spec("PRI-8")
+def test_a_start_migrates_an_old_home(home_store, monkeypatch):
+    home_store.put("languages", "python", {"lessons": [{"id": "lesson000001", "text": "use tmp_path"}]})
+    monkeypatch.setattr(cli.conversation, "one_shot", lambda command, text: 0)
+    with pytest.raises(SystemExit):
+        Cli.run_at_once([Cli.TALK_COMMANDS[0], "hello"])
+    assert home_store.get("languages", "python")["lessons"] == [] and home_store.get("migrated", "principles")
 
 
 @pytest.mark.spec("CLI-2")
@@ -876,7 +886,7 @@ def test_a_task_is_built_end_to_end(run_ready, fake_ollama, home_store):
         "task": "a calculator that adds and subtracts",
     }
     assert home_store.get("languages", "python")["projects"] == 1
-    assert home_store.get("memory", "any")["lessons"][0]["text"] == "Subtract with the minus operator"
+    assert [principle.do for principle in Principles(None).all()] == ["Subtract with the minus operator"]
     assert "Done. All 3 spec tests pass (SPEC.md)." in printed(folder)
     assert sorted(path.name for path in folder.iterdir()) == [
         ".tinker",
@@ -946,7 +956,7 @@ def test_memory_browses_what_tinker_learned(home_store, capsys):
     )
     Commands(parse("memory")).run()
     out = capsys.readouterr().out
-    assert "📘 Python (memory python): 1 toolchain, 1 lesson; 1 proven · nothing built yet" in out
+    assert "📘 Python (memory python): 1 toolchain, 1 principle; 1 proven · nothing built yet" in out
     assert "📘 Go (memory go): 1 fact; 0 proven · nothing built yet" in out
     Commands(parse("memory", "go", "facts")).run()
     out = capsys.readouterr().out

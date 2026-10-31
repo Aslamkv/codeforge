@@ -2,26 +2,20 @@ import re
 from collections import namedtuple
 from itertools import batched, combinations
 lazy import collections
-lazy import hashlib
-lazy import math
 lazy import tempfile
 lazy from pathlib import Path
 
 from .messages import say
+from .principles import Inducer, Principles, claim_id, record
+from .retrieval import Embeddings, Retriever
 from .settings import (
     CHUNKS_PER_PAGE,
-    EMBED_KEEP_ALIVE,
-    EVENTS_KEPT_PER_ITEM,
     FACT_PHASES,
     FACTS_PER_CHUNK,
     LESSON_PHASES,
     LESSONS_PER_PROMPT,
     MAX_FACT_CHARS,
-    MAX_LESSONS_PER_FILE,
     MAX_PLANNED_SEARCHES,
-    MAX_RULE_CHARS,
-    MAX_RULE_WHEN_CHARS,
-    PLAYBOOK_RULES,
     REPEAT_CLAIM_SIMILARITY,
     RESEARCH_FACTS_CHECKED,
     RESEARCH_GAPS,
@@ -31,18 +25,16 @@ from .settings import (
     RETIRED_KEPT_PER_LIST,
     SAME_CLAIM_SIMILARITY,
     SAME_FACT_SIMILARITY,
-    SAME_LESSON_SIMILARITY,
     SEARCHES_PER_RESEARCH_QUESTION,
     TEACH_PAGE_CHARS,
     TEACH_PAGES,
     TOOLCHAIN_HINT_SIMILARITY,
     VERSION_TIMEOUT,
-    Config,
     Home,
 )
-from .text import field, fingerprint, first_line, host, now_text, one_line, similarity, split_text, words
+from .text import field, fingerprint, first_line, host, now_text, similarity, split_text
 lazy from .jobs import today
-lazy from .model import Answer, Models, Ollama, OllamaError
+lazy from .model import Answer, Models, OllamaError
 lazy from .project import Tracked
 lazy from .prompts import Part, Prompts, Reply
 lazy from .workspace import Toolchain, Workspace
@@ -50,7 +42,7 @@ lazy from .workspace import Toolchain, Workspace
 SavedPlan = namedtuple("SavedPlan", "plan saved")
 SafeCommands = namedtuple("SafeCommands", "kept dropped")
 Findings = namedtuple("Findings", "facts sources")
-Investigation = namedtuple("Investigation", "facts sources analysis")
+Investigation = namedtuple("Investigation", "facts sources analysis pages")
 CrossCheck = namedtuple("CrossCheck", "support differ")
 
 
@@ -72,7 +64,7 @@ class Item(namedtuple("Item", "kind id topic", defaults=("",))):
         return cls(kind, item_id, topic)
 
 
-STORED_AS = frozendict({"lesson": ("lessons", "id"), "known": ("facts", "id"), "fix": ("fixes", "failure")})
+STORED_AS = frozendict({"known": ("facts", "id"), "fix": ("fixes", "failure")})
 LEARN_STEPS = (
     "search",
     "plan",
@@ -80,7 +72,6 @@ LEARN_STEPS = (
     "documentation",
     "digest",
     "follow-up",
-    "condense",
     "frame",
     "investigate",
     "keep",
@@ -98,10 +89,8 @@ class Knowledge:
             "projects": 0,
             "toolchain": None,
             "fixes": [],
-            "lessons": [],
-            "facts": [],
         }
-        self.any_language_doc = Home.store().get("memory", "any") or {"lessons": []}
+        self.any_language_doc = Home.store().get("memory", "any") or {}
 
     @staticmethod
     def named_in(text):
@@ -116,7 +105,7 @@ class Knowledge:
         return min(named, key=lambda name: (text or "").lower().index(name.lower()), default=None)
 
     def summary(self):
-        lessons = len(self.language_doc.get("lessons", [])) + len(self.any_language_doc.get("lessons", []))
+        lessons = len(self.known_lessons())
         projects, facts = self.language_doc.get("projects", 0), len(self.language_doc.get("facts", []))
         known = [
             ("the toolchain that worked" + (f" ({projects} finished project(s))" if projects else ""))
@@ -131,7 +120,7 @@ class Knowledge:
         return f"{self.language}: " + (", ".join(topic for topic in known if topic) or "nothing learned yet")
 
     def lessons(self, phases, limit=LESSONS_PER_PROMPT):
-        pool = [lesson for lesson in self.known_lessons() if lesson.get("phase") in phases]
+        pool = [lesson for lesson in self.known_lessons() if lesson.get("phase") in {*phases, "any"}]
         pool.sort(key=Knowledge.rank, reverse=True)
         return [
             dict(lesson, id=lesson.get("id") or fingerprint(lesson["text"])[:12]) for lesson in pool[:limit]
@@ -145,68 +134,44 @@ class Knowledge:
         return [fact for fact in self.language_doc.get("facts", []) if fact.get("phase") in phases]
 
     def known_lessons(self):
-        return self.language_doc.setdefault("lessons", []) + self.any_language_doc.setdefault("lessons", [])
+        return [as_lesson(principle) for principle in self.lesson_principles()]
 
-    def proven_lessons(self):
-        return [lesson for lesson in self.language_doc.get("lessons", []) if lesson.get("status") == "proven"]
+    def lesson_principles(self):
+        kept = Principles(None).kept(self.key) + Principles(None).kept("any")
+        return [principle for principle in kept if principle.phase in {*LESSON_PHASES, "any"}]
 
     def add_lessons(self, new, confirmed, names=()):
-        known, added = self.known_lessons(), 0
-        for number in confirmed:
-            if isinstance(number, int) and 1 <= number <= len(known):
-                self.confirm(known[number - 1])
-        for item in new:
-            lesson = self.new_lesson(item, known, names)
-            if lesson:
-                (self.language_doc if item.get("scope") == "language" else self.any_language_doc)[
-                    "lessons"
-                ].append(lesson)
-                known.append(lesson)
-                added += 1
-        for doc in (self.language_doc, self.any_language_doc):
-            doc["lessons"] = self.keep(doc["lessons"], known[len(known) - added :])
-        self.save()
-        return added
+        known = self.known_lessons()
+        strengthened = [
+            {"kind": "strengthen", "id": known[number - 1]["id"], "evidence": [self.run_evidence()]}
+            for number in confirmed
+            if isinstance(number, int) and 1 <= number <= len(known)
+        ]
+        added = [self.lesson_delta(item) for item in new if self.valid_lesson(item, names)]
+        changed = Principles(None).apply(strengthened + added, self.run)
+        self.save_language()
+        return sum(principle.history[-1]["event"] == "born" for principle in changed)
 
-    def new_lesson(self, item, known, names):
-        text, phase = field(item, "text", 240), field(item, "phase").lower()
-        if not text or phase not in LESSON_PHASES or self.names_project(text, names):
-            return None
-        same = next(
-            (lesson for lesson in known if similarity(lesson["text"], text) >= SAME_LESSON_SIMILARITY), None
-        )
-        if same:
-            self.confirm(same)
-            return None
-        lesson = {
-            "id": fingerprint(text)[:12],
-            "phase": phase,
-            "text": text,
-            "status": "candidate",
-            "seen": 1,
-            "added": now_text(),
-            "last_seen": now_text(),
+    def run_evidence(self):
+        return {"kind": "run", "source": self.run or "", "text": ""}
+
+    def lesson_delta(self, item):
+        return {
+            "kind": "add",
+            "do": field(item, "text", 240),
+            "when": "",
+            "phase": field(item, "phase").lower(),
+            "scope": self.key if item.get("scope") == "language" else "any",
+            "evidence": [self.run_evidence()],
         }
-        return record(lesson, "born", self.run)
+
+    def valid_lesson(self, item, names):
+        text, phase = field(item, "text", 240), field(item, "phase").lower()
+        return bool(text) and phase in LESSON_PHASES and not self.names_project(text, names)
 
     @staticmethod
     def names_project(text, names):
         return any(re.search(rf"(?<![\w.-]){re.escape(name)}(?![\w-])", text, re.I) for name in names if name)
-
-    def confirm(self, lesson):
-        lesson["seen"], lesson["last_seen"] = lesson.get("seen", 1) + 1, now_text()
-        record(lesson, "confirmed", self.run)
-
-    @staticmethod
-    def keep(lessons, new):
-        rank = Knowledge.rank
-        fresh = [lesson for lesson in lessons if any(lesson is new_lesson for new_lesson in new)]
-        older = sorted(
-            (lesson for lesson in lessons if not any(lesson is new_lesson for new_lesson in new)),
-            key=rank,
-            reverse=True,
-        )
-        return sorted(fresh + older[: max(0, MAX_LESSONS_PER_FILE - len(fresh))], key=rank, reverse=True)
 
     def prove(self, used):
         used = items_of(used)
@@ -219,11 +184,23 @@ class Knowledge:
 
     def prove_lessons(self, used):
         proven = 0
-        for lesson in self.known_lessons():
-            if Item("lesson", lesson.get("id")) in used:
-                proven += lesson.get("status") != "proven"
-                record(lesson, "helped", self.run)["status"] = "proven"
+        for principle in self.used_lessons(used):
+            proven += principle.status != "proven"
+            principle.prove(self.run)
+            Principles(None).put(principle)
         return proven
+
+    def used_lessons(self, used):
+        lessons = [
+            principle for principle in self.lesson_principles() if Item("lesson", principle.id) in used
+        ]
+        return lessons + self.used_topic_principles(used, {principle.id for principle in lessons})
+
+    @staticmethod
+    def used_topic_principles(used, skipped):
+        named = {item.id for item in used if item.kind == "principle"} - skipped
+        found = [Principles(None).get(principle_id) for principle_id in sorted(named)]
+        return [principle for principle in found if principle and principle.status != "retired"]
 
     def prove_web_facts(self, used):
         proven, known = 0, {fact["id"] for fact in self.language_doc.setdefault("facts", [])}
@@ -261,12 +238,11 @@ class Knowledge:
         return gone
 
     def retire_lessons(self, shown, reason):
-        return sum(
-            retire_from(
-                doc, "lessons", lambda lesson: Item("lesson", lesson.get("id")) in shown, reason, self.run
-            )
-            for doc in (self.language_doc, self.any_language_doc)
-        )
+        retired = self.used_lessons(shown)
+        for principle in retired:
+            principle.fail(reason, self.run)
+            Principles(None).put(principle)
+        return len(retired)
 
     @staticmethod
     def used_facts(used):
@@ -275,18 +251,6 @@ class Knowledge:
             if item.kind == "fact":
                 found[item.topic].add(item.id)
         return dict(found)
-
-    def supersede(self, slug, shown):
-        reason = "replaced when the language was learned again"
-        gone = retire_from(
-            self.language_doc,
-            "facts",
-            lambda fact: fact.get("topic") == slug and fact["id"] not in shown,
-            reason,
-            self.run,
-        )
-        self.save()
-        return gone
 
     def toolchain(self):
         known = Toolchain(self.language_doc.get("toolchain"))
@@ -384,28 +348,15 @@ class Knowledge:
         return corrected
 
     def taught_lesson(self, item, sources):
-        known = self.known_lessons()
-        text = field(item, "text")
-        lesson = next(
-            (lesson for lesson in known if similarity(lesson["text"], text) >= SAME_LESSON_SIMILARITY), None
-        )
-        if lesson is None:
-            lesson = self.new_lesson(item, known, ())
-            if lesson is None:
-                return None
-            self.lessons_of(item.get("scope"))["lessons"].append(lesson)
-        lesson.update(status="proven", sources=list(dict.fromkeys(sources)))
-        record(lesson, "taught", self.run)
-        for doc in (self.language_doc, self.any_language_doc):
-            doc["lessons"] = self.keep(doc["lessons"], [lesson])
-        if any(kept is lesson for kept in self.language_doc["lessons"]):
-            self.save_language()
-        else:
-            self.save_any_language()
-        return lesson
-
-    def lessons_of(self, scope):
-        return self.language_doc if scope == "language" else self.any_language_doc
+        if not self.valid_lesson(item, ()):
+            return None
+        evidence = [{"kind": "taught", "source": source, "text": ""} for source in dict.fromkeys(sources)]
+        principles = Principles(None)
+        principle = principles.apply([dict(self.lesson_delta(item), evidence=evidence)], self.run)[0]
+        principle.status = "proven"
+        principle.record("taught", self.run)
+        principles.put(principle)
+        return as_lesson(principle)
 
     def save(self):
         self.save_language()
@@ -483,13 +434,6 @@ class Learner(Tracked):
                     f"no shell operators, nothing installed or changed)",
                     "🚫",
                 )
-
-    @staticmethod
-    def replace_proven(slug, entry):
-        shown = {item["id"] for item in Library.items({slug: entry}) if item["id"]}
-        gone = Knowledge(entry["language"]).supersede(slug, shown)
-        if gone:
-            say.info(f"Replaced {gone} fact(s) from earlier learning with what was learned now", "♻️")
 
     def look_at_machine(self, commands):
         if commands:
@@ -660,100 +604,6 @@ class Learner(Tracked):
             return f"the model stopped answering ({self.model_failure})"
         return ""
 
-    def condense(self, plan, facts, think=None):
-        lessons = Knowledge(plan["language"]).proven_lessons() if plan.get("kind") == "language" else []
-        sources = self.rule_sources(facts, lessons)
-        self.step("condense", f"Turning {len(facts)} fact(s) into rules a code writer can follow…", "✍️")
-        with say.working_on(f"Turning {len(facts)} fact(s) about {plan['name']} into rules"):
-            answer = self.model.ask_until_usable(
-                Prompts.PLAYBOOK_SYSTEM,
-                self.playbook_parts(plan, facts, lessons),
-                "Condense the facts",
-                lambda reply: self.read_rules(reply.json(), sources),
-                attempts=2,
-                think=think,
-            )
-        rules = answer.value or []
-        self.say_rules(rules, facts, answer.why)
-        return rules
-
-    def say_rules(self, rules, facts, why):
-        if not rules:
-            self.notes.append(
-                f"the facts were not condensed into rules ({first_line(why, 160) or 'no usable reply'})"
-            )
-        with say.section():
-            if rules:
-                say.done(f"{len(rules)} rule(s)")
-                say.found(first_line(rules[0]["text"], 200))
-            else:
-                say.warn("Could not make rules: the facts are kept as they are")
-        self.outcome(f"{len(rules or [])} rule(s) from {len(facts)} fact(s)")
-
-    @staticmethod
-    def rule_sources(facts, lessons):
-        return [{"id": Library.claim_id(fact, fact["text"]), "text": fact["text"]} for fact in facts] + [
-            {"id": lesson.get("id") or fingerprint(lesson["text"])[:12], "text": lesson["text"]}
-            for lesson in lessons
-        ]
-
-    @staticmethod
-    def playbook_parts(plan, facts, lessons):
-        listing = "\n".join(
-            f"{number}. [{fact.get('slot', '')}, {fact['phase']}] {fact['text']}"
-            for number, fact in enumerate(facts, 1)
-        )
-        proved = "\n".join(
-            f"{number}. {lesson['text']}" for number, lesson in enumerate(lessons, len(facts) + 1)
-        )
-        tools = Library.tools_text(plan.get("tools", [])) or "none named"
-        return [
-            Part("Topic", f"{plan['name']} ({plan.get('kind', 'tool')}); its tools: {tools}", True),
-            Part("Facts learned from the web", listing, True, exact=True),
-            Part("Lessons its projects proved", proved or "(none yet)", True, exact=True),
-        ]
-
-    @staticmethod
-    def read_rules(data, sources):
-        rules = {}
-        for item in Learner.rules_given(data):
-            rule = Learner.rule_of(item, sources)
-            if rule and rule["text"] not in rules:
-                rules[rule["text"]] = rule
-        if not rules:
-            raise ValueError("it needs at least one rule that cites the facts")
-        return list(rules.values())[:PLAYBOOK_RULES]
-
-    @staticmethod
-    def rules_given(data):
-        if not isinstance(data, dict):
-            return []
-        given = data.get("rules") or []
-        declare = data.get("declare")
-        if isinstance(declare, dict):
-            given = [dict(declare, phase="config", when="")] + list(given)
-        return [item for item in given if isinstance(item, dict)]
-
-    @staticmethod
-    def rule_of(item, sources):
-        text = one_line(item.get("text"))[:MAX_RULE_CHARS]
-        phase = str(item.get("phase") or "").lower()
-        cites = Learner.cited_ids(item, sources)
-        if not (text and phase in FACT_PHASES and cites):
-            return None
-        when = one_line(item.get("when"))[:MAX_RULE_WHEN_CHARS]
-        return {"id": fingerprint(text)[:12], "phase": phase, "text": text, "when": when, "cites": cites}
-
-    @staticmethod
-    def cited_ids(item, sources):
-        return list(
-            dict.fromkeys(
-                sources[number - 1]["id"]
-                for number in item.get("cites") or []
-                if isinstance(number, int) and 1 <= number <= len(sources)
-            )
-        )
-
     def index(self, slug, entry):
         if self.embeddings is None:
             return
@@ -848,7 +698,7 @@ class Researcher:
         learner = self.learner
         known = Library.read(slug)
         frame = self.frame(topic, known if (known or {}).get("kind") == "research" else None)
-        facts, sources, analysis = self.investigate(frame)
+        facts, sources, analysis, pages = self.investigate(frame)
         if known and (learner.cut_short() or not facts):
             say.warn(
                 f"{learner.cut_short() or 'No page gave facts'}; kept what was found before "
@@ -863,6 +713,7 @@ class Researcher:
             )
             return None
         entry = self.entry(topic, frame, facts, sources, analysis)
+        entry["principles"] = self.principles_from(pages, slug)
         learner.step("keep")
         Library.save(slug, entry)
         say.info(
@@ -916,7 +767,7 @@ class Researcher:
 
     def investigate(self, frame):
         searches = self.first_searches(frame)
-        facts, sources, analysis = [], [], self.EMPTY_ANALYSIS
+        facts, sources, analysis, fetched = [], [], self.EMPTY_ANALYSIS, []
         for round_number, pages in enumerate(RESEARCH_PAGES_PER_ROUND, 1):
             if not searches:
                 break
@@ -926,7 +777,9 @@ class Researcher:
                 "🔎",
             )
             with say.working_on(f"Reading up to {pages} page(s) about {frame['name']}, round {round_number}"):
-                found, read = self.learner.read_web(frame["name"], searches, pages)
+                round_pages = self.round_pages(searches, pages)
+                found, read = self.learner.read_pages(frame["name"], round_pages)
+            fetched += round_pages
             self.learner.add_facts(facts, found)
             sources += [url for url in read if url not in sources]
             self.say_round(facts, sources, found)
@@ -935,7 +788,45 @@ class Researcher:
             differ = self.cross_check(facts)
             analysis = self.analyse(frame, facts, differ) or analysis
             searches = self.next_searches(frame, facts, analysis)
-        return Investigation(facts, sources, analysis)
+        return Investigation(facts, sources, analysis, fetched)
+
+    def round_pages(self, searches, max_pages):
+        learner = self.learner
+        return learner.fetched(learner.in_turn(searches, learner.results(searches), max_pages))
+
+    def principles_from(self, pages, slug):
+        principles = Principles(self.learner.embeddings)
+        by_question = collections.defaultdict(list)
+        for page in pages:
+            by_question[int(page["section"])].append(page)
+        return [
+            record
+            for number, question_pages in sorted(by_question.items())
+            for record in self.question_principles(principles, number, question_pages, slug)
+        ]
+
+    def question_principles(self, principles, number, pages, slug):
+        given = [{"text": page["content"], "source": page["url"]} for page in pages]
+        deltas = Inducer(self.model, principles).induce(given, scope=slug)
+        changed = principles.apply(deltas, "")
+        with say.section():
+            if changed:
+                say.done(f"Question {number}: {len(changed)} principle(s) from {len(pages)} page(s)")
+                say.found(first_line(changed[0].prompt_text(), 200))
+            else:
+                say.skip(f"Question {number}: nothing found in {len(pages)} page(s)")
+        cited = [item["source"] for delta in deltas for item in delta["evidence"]]
+        return (
+            [
+                {
+                    "question": number,
+                    "principles": [principle.id for principle in changed],
+                    "passages": list(dict.fromkeys(cited)),
+                }
+            ]
+            if changed
+            else []
+        )
 
     @staticmethod
     def first_searches(frame):
@@ -1405,8 +1296,8 @@ class Library:
             "name": name,
             "phase": phase,
             "text": text,
-            **more,
             **Library.claim_state(claim, said),
+            **more,
         }
         return (
             [item(phase, text) for phase, text in Library.overview(entry, name)]
@@ -1428,6 +1319,17 @@ class Library:
             + [
                 item(str(fact["phase"]), Library.fact_text(fact), fact, fact["text"])
                 for fact in Library.facts_shown(entry)
+            ]
+            + [
+                item(
+                    principle.phase,
+                    principle.prompt_text(),
+                    kind="principle",
+                    id=principle.id,
+                    status=principle.status,
+                    when=principle.when,
+                )
+                for principle in Principles(None).kept(slug)
             ]
         )
 
@@ -1464,22 +1366,18 @@ class Library:
     def claim_state(claim, said):
         if claim is None:
             return {"id": None, "status": None}
-        return {"id": Library.claim_id(claim, said), "status": claim.get("status", "candidate")}
+        return {"id": claim_id(claim, said), "status": claim.get("status", "candidate")}
 
     @staticmethod
     def facts_shown(entry):
         rules = entry.get("rules", [])
         if not rules:
-            return entry["facts"]
+            return entry.get("facts", [])
         cited = lambda given: {*rule.get("cites", []) for rule in given}
         reopened = cited(
             retired for retired in entry.get("retired", []) if retired.get("was") == "rules"
         ) - cited(rules)
-        return [fact for fact in entry["facts"] if Library.claim_id(fact, fact["text"]) in reopened]
-
-    @staticmethod
-    def claim_id(claim, text):
-        return claim.get("id") or fingerprint(str(text))[:12]
+        return [fact for fact in entry["facts"] if claim_id(fact, fact["text"]) in reopened]
 
     @staticmethod
     def tools_text(tools):
@@ -1498,7 +1396,7 @@ class Library:
             "tools": {"toolchain", "config", "tests"},
             "findings": {"spec", "design"},
         }.get(item["phase"])
-        return item["phase"] in phases or bool(shown and shown & set(phases))
+        return item["phase"] in {*phases, "any"} or bool(shown and shown & set(phases))
 
 
 def relevant_chunks(text, size, wanted, count):
@@ -1510,190 +1408,23 @@ def relevant_chunks(text, size, wanted, count):
     return [chunks[index] for index in sorted(chosen)]
 
 
-class Retriever:
-    RRF_K = 60
-    BM25_K1, BM25_B = 1.5, 0.75
-
-    def __init__(self, embeddings):
-        self.embeddings = embeddings
-        self.used = "words"
-        self.query_embeddings = {}
-
-    def rank(self, query, texts, prune=False):
-        if not texts:
-            return []
-        fused = {}
-        for ranking in (self.by_words(query, texts), self.by_meaning(query, texts, prune)):
-            for position, index in enumerate(ranking):
-                fused[index] = fused.get(index, 0.0) + 1.0 / (self.RRF_K + position + 1)
-        found = sorted(fused, key=lambda index: (-fused[index], index))
-        return found + [index for index in range(len(texts)) if index not in fused]
-
-    def by_words(self, query, texts):
-        scores = [(score, index) for index, score in enumerate(self.word_scores(query, texts))]
-        return [
-            index
-            for _, index in sorted(
-                (scored for scored in scores if scored[0] > 0), key=lambda pair: (-pair[0], pair[1])
-            )
-        ]
-
-    def word_scores(self, query, texts):
-        if not texts:
-            return []
-        terms, docs = set(words(query)), [words(text) for text in texts]
-        average = sum(len(doc) for doc in docs) / len(docs) or 1
-        holding = collections.Counter(*(set(doc) & terms) for doc in docs)
-        return [self.relevance(terms, doc, len(docs), holding, average) for doc in docs]
-
-    def relevance(self, terms, doc, total, holding, average):
-        counts, score = collections.Counter(doc), 0.0
-        for term in terms & counts.keys():
-            idf = math.log(1 + (total - holding[term] + 0.5) / (holding[term] + 0.5))
-            tf, length = counts[term], len(doc) / average
-            score += (
-                idf * tf * (self.BM25_K1 + 1) / (tf + self.BM25_K1 * (1 - self.BM25_B + self.BM25_B * length))
-            )
-        return score
-
-    def by_meaning(self, query, texts, prune):
-        similarity_of = self.similarities(query, texts, prune)
-        if similarity_of is None:
-            return []
-        return sorted(range(len(texts)), key=lambda index: (-similarity_of[index], index))
-
-    def similarities(self, query, texts, prune=False):
-        if self.embeddings is None:
-            return None
-        if not texts:
-            return []
-        vectors = self.embeddings.vectors(texts, prune=prune)
-        if vectors and query not in self.query_embeddings:
-            asked = self.embeddings.vectors([query], keep=False)
-            self.query_embeddings[query] = asked[0] if asked else None
-        if not vectors or not self.query_embeddings.get(query):
-            say.warn(f"Meaning search not used: {self.embeddings.failed}; the word search stands alone")
-            self.embeddings = None
-            return None
-        self.used = f"words and meaning ({self.embeddings.name})"
-        return [Embeddings.cosine(self.query_embeddings[query], vector) for vector in vectors]
-
-
-class Embeddings:
-    TEXTS_PER_REQUEST = 32
-
-    def __init__(self, name):
-        self.name, self.failed = name, ""
-        self.cache = {"model": name, "vectors": Home.store().get("embeddings", name, {})}
-
-    @staticmethod
-    def required(option):
-        if not Config.get("embed_model"):
-            raise SystemExit(
-                f"{option} needs an embedding model, which indexes what it learns: select one Ollama "
-                f"has with tinker model NAME (tinker model lists them)"
-            )
-        Embeddings.check()
-        return Embeddings(Config.get("embed_model"))
-
-    @staticmethod
-    def check():
-        name = Config.get("embed_model")
-        if not isinstance(name, str):
-            raise SystemExit(f"embed_model is not a model name ({name!r}): select one with tinker model NAME")
-        if name:
-            try:
-                Models.installed(name)
-            except SystemExit as exc:
-                raise SystemExit(f"The embedding model (tinker model): {exc}")
-
-    @staticmethod
-    def configured():
-        name = Config.get("embed_model")
-        return Embeddings(name) if name else None
-
-    def vectors(self, texts, keep=True, prune=False):
-        stored = self.cache["vectors"]
-        keys = [self.key(text) for text in texts]
-        missing = list(dict.fromkeys(text for text, key in zip(texts, keys) if key not in stored))
-        fresh = {}
-        for start in range(0, len(missing), self.TEXTS_PER_REQUEST):
-            batch = missing[start : start + self.TEXTS_PER_REQUEST]
-            found = self.embedded(batch)
-            if found is None:
-                return None
-            fresh.update(self.keyed(batch, found))
-        result = [stored.get(key) or fresh[key] for key in keys]
-        if keep and (fresh or prune):
-            self.kept(fresh, keys if prune else None)
-        return result
-
-    def keyed(self, texts, vectors):
-        return {
-            self.key(text): [round(number, 5) for number in vector] for text, vector in zip(texts, vectors)
-        }
-
-    def embedded(self, batch):
-        Ollama.embedders.add(self.name)
-        data = Ollama.get_json(
-            "/api/embed",
-            {"model": self.name, "input": batch, "keep_alive": EMBED_KEEP_ALIVE},
-            timeout=300,
-            errors=True,
-        )
-        found = data.get("embeddings") if isinstance(data, dict) else None
-        if self.one_vector_each(found, batch):
-            return found
-        self.failed = f"{self.name} gave no embeddings" + (
-            f" ({data['error']})" if isinstance(data, dict) and data.get("error") else ""
-        )
-        return None
-
-    def one_vector_each(self, found, batch):
-        return (
-            isinstance(found, list)
-            and len(found) == len(batch)
-            and all(self.is_vector(vector) for vector in found)
-        )
-
-    @staticmethod
-    def is_vector(value):
-        return isinstance(value, list) and value and all(isinstance(number, (int, float)) for number in value)
-
-    def kept(self, fresh, only=None):
-        stored = self.cache["vectors"]
-        stored.update(fresh)
-        if only is not None:
-            self.cache["vectors"] = {key: stored[key] for key in only}
-        kept = self.cache["vectors"]
-        Home.store().update(
-            "embeddings", self.name, lambda saved: {**({} if only is not None else saved or {}), **kept}
-        )
-
-    @staticmethod
-    def key(text):
-        return hashlib.sha1(text.encode("utf-8")).hexdigest()[:20]
-
-    @staticmethod
-    def cosine(a, b):
-        dot = sum(x * y for x, y in zip(a, b))
-        size = math.sqrt(sum(x * x for x in a)) * math.sqrt(sum(y * y for y in b))
-        return dot / size if size else 0.0
-
-
-def record(item, event, run):
-    item["history"] = (item.get("history", []) + [{"event": event, "run": run, "at": now_text()}])[
-        -EVENTS_KEPT_PER_ITEM:
-    ]
-    if event == "helped":
-        item["helped"] = item.get("helped", 0) + 1
-    return item
-
-
 def retire(item, language, reason, run):
     if item.kind in Item.CLAIM_KINDS:
         return Library.retire(item.topic, {item.id}, reason, run) > 0
+    if item.kind == "lesson":
+        return Knowledge(language, run).retire_lessons({item}, reason) > 0
+    if item.kind == "principle":
+        return retire_principle(item.id, reason, run)
     return item.kind in STORED_AS and retire_known(Knowledge(language, run), item, reason)
+
+
+def retire_principle(principle_id, reason, run):
+    principle = Principles(None).get(principle_id)
+    if not principle or principle.status == "retired":
+        return False
+    principle.fail(reason, run)
+    Principles(None).put(principle)
+    return True
 
 
 def retire_known(knowledge, item, reason):
@@ -1702,10 +1433,20 @@ def retire_known(knowledge, item, reason):
     if retire_from(knowledge.language_doc, name, gone, reason, knowledge.run):
         knowledge.save_language()
         return True
-    if item.kind == "lesson" and retire_from(knowledge.any_language_doc, name, gone, reason, knowledge.run):
-        knowledge.save_any_language()
-        return True
     return False
+
+
+def as_lesson(principle):
+    return {
+        "id": principle.id,
+        "phase": principle.phase,
+        "text": principle.prompt_text(),
+        "when": principle.when,
+        "status": principle.status,
+        "seen": len(principle.evidence),
+        "helped": principle.helped,
+        "history": principle.history,
+    }
 
 
 def items_of(keys):
