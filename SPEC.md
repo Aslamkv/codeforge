@@ -1241,6 +1241,12 @@ What every learning keeps: patterns found in what Tinker read or did, as princip
   history and sources (a finding's and rule's `cites` as evidence), its `when` a rule's `when` or "", its `do`
   its text, its scope and phase from where it was kept. The old lists are then emptied and the home marked
   migrated. An item that cannot be read keeps its text as `do`, with a note.
+- **PRI-9** Recalling for an ask or for memory (`Memory.about`, **TCH-1**) makes no embedding call: loading the
+  embedding model unloads the chat model, which then takes 10–16 s to load again. It ranks the items by BM25
+  alone (**KNW-12** without embeddings), the items whose kind and language or topic the text names first; when
+  the text names a topic, items of a topic it does not name are not shown. Inducing (**PRI-4**) still embeds.
+- **PRI-10** The ask prompt (**TCH-2**) shows at most `ASK_ITEMS_SHOWN` (6) items, a principle as its
+  `prompt_text`, each cut to `ASK_ITEM_CHARS` (240): the prompt's length is most of an ask's time after the load.
 
 ## slots (SLT)
 
@@ -1451,10 +1457,8 @@ then is anything changed.
 - **TCH-1** `Memory(embeddings).items` are the memory graph's toolchains, fixes, principles (in `english`)
   and commands, without the retired. `about(text)` gives at most `MEMORY_ITEMS_SHOWN` of them, the most
   related first: first the items whose kind and language (or topic) the text names. A language's toolchain
-  counts as named with its language, however the text calls it ("toolset"). When the text names a topic, an
-  item of a topic it does not name comes after them, and only when its meaning is at least
-  `RECALL_OTHER_TOPIC_SIMILARITY` like the text's: a shared word alone ("NULL") never brings it. A second `about` embeds only its text: the
-  items' embeddings are kept.
+  counts as named with its language, however the text calls it ("toolset"). Ranking makes no embedding call
+  (**PRI-9**): when the text names a topic, an item of a topic it does not name is not shown.
 - **TCH-2** `Asker.answer(question)` gives the model at most `ASK_ITEMS_SHOWN` items (the first of `about`) and the
   passages numbered, and the version installed here of each topic shown (its machine's version), of no other
   topic: only the commands that found one, and a topic with none says it is not installed. The model replies JSON: `answer`, and
