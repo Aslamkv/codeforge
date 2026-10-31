@@ -500,7 +500,7 @@ class Desk:
 
     def replied(self, channel, message, line):
         sent = Message(message.chat, line, message.sender)
-        if said_command(line[1:]) == line:
+        if runs_as_sent(line):
             self.handle(channel, sent)
             return
         self.questions.ask(channel, message.chat, Question(runs=lambda: self.handle(channel, sent)))
@@ -1117,9 +1117,16 @@ def command_of(text, commands=None):
     return first if first in (commands or Desk.COMMANDS) else ""
 
 
-def replied_command(reply):
-    line = reply.strip().strip("`").strip()
-    return line if "\n" not in line and line.startswith("/") and command_of(line) else ""
+def replied_commands(reply):
+    lines = [line.strip().strip("`").strip() for line in reply.splitlines()]
+    lines = [line for line in lines if line]
+    if not lines or not all(line.startswith("/") and command_of(line) for line in lines):
+        return []
+    return lines if len(lines) == 1 or all(map(runs_as_sent, lines)) else []
+
+
+def runs_as_sent(line):
+    return said_command(line[1:]) == line or kind_of(command_words(line)) == "glance"
 
 
 SAID_FILLER = tuple(
@@ -1267,11 +1274,12 @@ class Talk:
         asked = (channel, message, self.context(running, waiting), CHAT_MAX_REPLY_TOKENS)
         threading.Thread(target=self.write, args=(write_reply, asked, reply, written), daemon=True).start()
         note = self.busy_until(written, running, now, channel, message.chat)
-        line = replied_command(reply[0]) if on_command and reply else ""
-        if line:
+        lines = replied_commands(reply[0]) if on_command and reply else []
+        if lines:
             for shown in note or []:
                 channel.delete(message.chat, shown)
-            on_command(line)
+            for line in lines:
+                on_command(line)
             return
         note = channel.show(
             message.chat, note, reply[0] if reply else "⚠️ **The model did not answer.**", done=True

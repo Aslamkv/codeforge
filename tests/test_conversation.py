@@ -1593,9 +1593,13 @@ def test_a_chat_reply_that_is_a_command_line_is_handled_or_offered(desk, monkeyp
     monkeypatch.setattr(desk, "answer", lambda message, channel: handled.append(message.text))
     say(desk, channel, "/confirm")
     wait_until(lambda: handled == ["/fix the login bug"])
-    chat("/status\n/jobs", lambda last: "/status\n/jobs" in last)
+    chat("/clear chat\n/fix the login bug", lambda last: "/clear chat\n/fix the login bug" in last)
     chat("status is fine", lambda last: "status is fine" in last)
-    assert all("/clear chat" not in text and "`/status`" not in text for text in channel.texts())
+    assert all("`/status`" not in text for text in channel.texts())
+    handled.clear()
+    chat("`/system time`\n`/system date`", lambda last: len(handled) == 2)
+    chat("/system time and /system date", lambda last: len(handled) == 3)
+    assert handled == ["/system time", "/system date", "/system time and /system date"]
 
 
 @pytest.mark.spec("CNV-22")
