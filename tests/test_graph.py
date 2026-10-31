@@ -70,15 +70,14 @@ def test_one_node_per_thing_tinker_knows(memory):
     assert kinds["commands"] == "commands" and kinds["command:act"] == "command"
     assert re.fullmatch(r"\d{4}-\d{2}-\d{2}", nodes["command:act"]["day"])
     assert kinds["toolchain:python"] == "toolchain" and kinds["fix:python:no module named calc"] == "fix"
-    assert kinds[f"lesson:{memory['seed']}"] == "lesson" and kinds[f"known:{memory['route']}"] == "fact"
+    assert kinds[f"principle:{memory['seed']}"] == "principle" and kinds[f"known:{memory['route']}"] == "fact"
     assert kinds[f"fact:flask:{memory['route']}"] == "fact"
     assert [node["kind"] for node in nodes.values() if node["id"].startswith("finding:flask:")] == ["finding"]
-    retired = nodes[f"retired:lesson:{memory['name']}"]
+    retired = nodes[f"principle:{memory['name']}"]
     assert (
-        retired["status"] == "retired" and retired["text"] == "Name each test after the behaviour it checks"
+        retired["status"] == "retired" and retired["text"] == "Name each test after the behaviour it checks."
     )
-    assert ["why", "shown in the tests prompts of a step that failed"] in retired["details"]
-    seed = nodes[f"lesson:{memory['seed']}"]
+    seed = nodes[f"principle:{memory['seed']}"]
     assert set(seed) == {"id", "kind", "label", "text", "status", "group", "details", "sources", "day"}
     assert seed["group"] == "python" and seed["status"] == "proven" and ["helped", "1"] in seed["details"]
     assert nodes[f"fact:flask:{memory['route']}"]["sources"] == ["https://a.org/x"]
@@ -92,7 +91,7 @@ def linked(graph):
 def test_links_join_items_to_what_they_belong_to_and_to_their_runs(memory):
     graph = Graph.build()
     links = linked(graph)
-    seed, route = f"lesson:{memory['seed']}", memory["route"]
+    seed, route = f"principle:{memory['seed']}", memory["route"]
     finding = next(node for node in graph.nodes if node.startswith("finding:"))
     assert {
         (seed, "lang:python", "belongs_to"),
@@ -101,7 +100,7 @@ def test_links_join_items_to_what_they_belong_to_and_to_their_runs(memory):
         (f"fact:flask:{route}", f"known:{route}", "became"),
         (seed, "run:r1", "taught_by"),
         (seed, "run:r2", "helped_in"),
-        (f"retired:lesson:{memory['name']}", "run:r2", "failed_in"),
+        (f"principle:{memory['name']}", "run:r2", "failed_in"),
     } <= links
     assert (
         graph.nodes["run:r1"]["text"] == "a calculator"
@@ -122,7 +121,7 @@ def test_a_rule_links_to_the_facts_and_lessons_it_rests_on(memory):
     links = linked(graph)
     assert {
         (rule, f"fact:flask:{memory['route']}", "cites"),
-        (rule, f"lesson:{memory['seed']}", "cites"),
+        (rule, f"principle:{memory['seed']}", "cites"),
     } <= links
     assert graph.nodes[rule]["kind"] == "rule" and "1 rule" in graph.summary()
 

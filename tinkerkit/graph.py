@@ -27,7 +27,7 @@ RETIRED_KINDS = frozendict({"lessons": "lesson", "fixes": "fix", "findings": "fi
 
 class Graph:
     def __init__(self):
-        self.nodes, self.links, self.similar_by = {}, [], ""
+        self.nodes, self.links, self.similar_by, self.citations = {}, [], "", []
 
     @classmethod
     def build(cls, embeddings=None):
@@ -37,6 +37,7 @@ class Graph:
         graph.add_topics()
         graph.add_commands()
         graph.add_principles()
+        graph.add_citations()
         graph.add_runs()
         graph.add_similar(embeddings)
         return graph
@@ -117,7 +118,11 @@ class Graph:
             node = self.add_claim(Item("rule", rule["id"], slug).key, "rule", rule, hub, entry.get("learned"))
             for cited in rule.get("cites", []):
                 fact = Item("fact", cited, slug).key
-                self.link(node, fact if fact in self.nodes else Item("lesson", cited).key, "cites")
+                self.citations.append((node, fact if fact in self.nodes else Item("principle", cited).key))
+
+    def add_citations(self):
+        for rule, cited in self.citations:
+            self.link(rule, cited, "cites")
 
     def add_commands(self):
         taught = TaughtCommands.all()
@@ -786,11 +791,11 @@ PAGE = """<!doctype html>
 <title>Tinker's memory</title>
 <style>
 :root{--bg:#fbfaf8;--panel:#ffffff;--ink:#1d1d1f;--muted:#6b6b70;--line:#e3e1dc;--link:#c9c6bf;
---language:#3a5ba0;--topic:#7a4fa0;--commands:#2f7d6d;--lesson:#d0782a;--fact:#3d8bd0;--finding:#a04f7a;
+--language:#3a5ba0;--topic:#7a4fa0;--commands:#2f7d6d;--lesson:#d0782a;--principle:#b8892a;--fact:#3d8bd0;--finding:#a04f7a;
 --rule:#2f8f5b;--fix:#b33b3b;--toolchain:#5d7f2f;--command:#2f7d6d;--run:#8a8a8f;--retired:#b9b7b1;--hl:#f2c94c}
 @media (prefers-color-scheme:dark){:root:not([data-theme="light"]){--bg:#151517;--panel:#1f1f22;--ink:#ececef;
 --muted:#9a9aa1;--line:#2e2e33;--link:#45454c;--language:#7b9be0;--topic:#b38ddb;--commands:#5fbfa9;
---lesson:#f0a05a;--fact:#6fb3ee;--finding:#de8cb6;--rule:#6cc795;--fix:#ee7b7b;--toolchain:#9cc560;--command:#5fbfa9;
+--lesson:#f0a05a;--principle:#e6bc5c;--fact:#6fb3ee;--finding:#de8cb6;--rule:#6cc795;--fix:#ee7b7b;--toolchain:#9cc560;--command:#5fbfa9;
 --run:#8f8f96;--retired:#5c5b58}}
 *{box-sizing:border-box}
 body{margin:0;overflow-x:hidden;background:var(--bg);color:var(--ink);font:15px/1.45 -apple-system,BlinkMacSystemFont,"Segoe UI",
