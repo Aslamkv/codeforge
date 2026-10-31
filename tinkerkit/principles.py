@@ -1,6 +1,6 @@
 from dataclasses import asdict, dataclass, field
 
-from .knowledge import Retriever, record
+from .knowledge import Library, Retriever, record
 from .prompts import Part, Prompts
 from .settings import (
     FACT_PHASES,
@@ -10,7 +10,7 @@ from .settings import (
     SAME_FACT_SIMILARITY,
     Home,
 )
-from .text import fingerprint, one_line, similarity
+from .text import fingerprint, now_text, one_line, similarity
 
 
 @dataclass
@@ -198,6 +198,116 @@ class Principles:
         if principle:
             principle.except_when(exception, list(delta.get("evidence", [])), run)
         return principle
+
+    def migrate(self):
+        Migration(self).run()
+
+
+class Migration:
+    MARKER = ("migrated", "principles")
+    STATUSES = ("candidate", "proven", "retired")
+    PHASES = (*FACT_PHASES, "book")
+
+    def __init__(self, principles):
+        self.principles = principles
+
+    def run(self):
+        store = Home.store()
+        if store.get(*self.MARKER):
+            return
+        for key, doc in store.items("languages").items():
+            self.move("languages", key, doc, ("lessons", "facts"), key)
+        self.move("memory", "any", store.get("memory", "any"), ("lessons",), "any")
+        for slug, doc in store.items("learned").items():
+            self.move("learned", slug, doc, ("facts", "rules", "findings"), slug)
+        store.put(*self.MARKER, {"at": now_text()})
+
+    def move(self, collection, key, doc, lists, scope):
+        kept = [name for name in lists if isinstance(doc, dict) and isinstance(doc.get(name), list)]
+        for name in kept:
+            for item in doc[name]:
+                self.principles.put(self.principle(item, doc, scope))
+        if kept:
+            Home.store().put(collection, key, dict(doc, **{name: [] for name in kept}))
+
+    def principle(self, item, entry, scope):
+        do = self.text(item, entry)
+        if not do:
+            return self.unreadable(item, scope)
+        when = str(item.get("when") or "")
+        return Principle(
+            id=str(item.get("id") or Principle.new(when, do, scope).id),
+            when=when,
+            do=do,
+            scope=scope,
+            phase=self.phase(item),
+            evidence=self.sources(item, do) + self.cited(item, entry, scope),
+            helped=item["helped"] if isinstance(item.get("helped"), int) else 0,
+            status=item["status"] if item.get("status") in self.STATUSES else "candidate",
+            history=item["history"] if isinstance(item.get("history"), list) else [],
+        )
+
+    def text(self, item, entry):
+        if not isinstance(item, dict):
+            return ""
+        if "answer" in item:
+            return self.finding_text(item, entry)
+        return item["text"] if isinstance(item.get("text"), str) else ""
+
+    @staticmethod
+    def finding_text(finding, entry):
+        questions, number = entry.get("questions") or [], finding.get("question")
+        if not (isinstance(number, int) and 1 <= number <= len(questions)):
+            return ""
+        question = questions[number - 1]
+        return f"{question.get('question')} {finding['answer']}" if isinstance(question, dict) else ""
+
+    def phase(self, item):
+        if "chapter" in item:
+            return "book"
+        return item["phase"] if item.get("phase") in self.PHASES else "any"
+
+    @staticmethod
+    def sources(item, text):
+        sources = item.get("sources")
+        return [Migration.evidence(source, text) for source in (sources if isinstance(sources, list) else [])]
+
+    @staticmethod
+    def cited(item, entry, scope):
+        cites = item.get("cites")
+        facts = {
+            Library.claim_id(fact, fact.get("text")): fact
+            for fact in entry.get("facts") or []
+            if isinstance(fact, dict)
+        }
+        return [
+            Migration.cited_evidence(facts.get(cite), cite, scope)
+            for cite in (cites if isinstance(cites, list) else [])
+        ]
+
+    @staticmethod
+    def cited_evidence(fact, cite, scope):
+        if fact is None:
+            return Migration.evidence(scope, str(cite))
+        sources = fact.get("sources") or [scope]
+        return Migration.evidence(str(sources[0]), str(fact.get("text")))
+
+    @staticmethod
+    def evidence(source, text):
+        kind = "page" if str(source).startswith("http") else "passage"
+        return {"kind": kind, "source": str(source), "text": text[:MAX_FACT_CHARS]}
+
+    @staticmethod
+    def unreadable(item, scope):
+        principle = Principle.new("", one_line(Migration.kept_text(item)), scope)
+        principle.record("migrated", None, note="could not be read; kept its text")
+        return principle
+
+    @staticmethod
+    def kept_text(item):
+        if isinstance(item, dict):
+            return str(item.get("text") or item.get("answer") or item)
+        return str(item)
 
 
 class Inducer:
