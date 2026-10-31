@@ -1425,8 +1425,8 @@ the core ones first, and saved as soon as it is read. What it teaches is a topic
   supporting, then the others, each in the source's order.
 - **RDG-8** `Reader.read(N)` reads every unread chapter in that order, each in parts that fit the prompt
   (`READ_CHAPTER_TEXT_SHARE`), one call per part, each shown what was learned from the reading before (the
-  latest kept when the prompt is full). Each chapter is saved as soon as it is read: its new facts (one
-  already kept is not kept again) join the topic, each with its chapter, and it is marked read; so a reading
+  latest kept when the prompt is full). Each chapter is saved as soon as it is read: its deltas are applied
+  (**PRI-3**), the chapter keeps the ids of the principles they changed, and it is marked read; so a reading
   stopped goes on with the chapters not read yet. With every chapter read, it says so and asks nothing.
 - **RDG-9** `read #N "WHAT"` reads again the chapters WHAT names ("chapter 7"), then those most about it by its
   words, `READ_FOCUS_CHAPTERS` in all, never a raw one: each shows its `excerpt`, its `relevant_chunks` for WHAT
@@ -1441,10 +1441,11 @@ the core ones first, and saved as soon as it is read. What it teaches is a topic
 - **RDG-12** `tinker read FILE | URL` stores the source, then learns from it as `read #N`: its job's arguments
   become `read #N` (`Jobs.retarget`), so a stopped or paused reading goes on with what is not read, and nothing
   is fetched again. `read #N ["WHAT"]` needs a measured model and a known reading. Its tracker moves through its
-  steps (`READ_STEPS`, **PRJ-16**): survey, chapters (and condense), and ends with what was read now, the
-  chapters read, what is kept, whether builds use it, and what to do next.
+  steps (`READ_STEPS`, **PRJ-16**): survey, chapters, and ends with what was read now (chapters and principles changed), the
+  chapters read, the principles kept in its scope, whether builds use it, and what to do next.
 - **RDG-13** `read list [PAGE]` shows the readings by page ([State](#state)), each with how many chapters are
-  read and the facts kept; `read show #N` its source, summary and each chapter with its state and facts. Both
+  read and the principles kept; `read show #N` its source, summary and each chapter with its state and
+  principles. Both
   are glances (**CMD-1**). `clear read [#N...]` deletes those readings (every one with no number): their text
   and their topic, as a deletion (**SET-9**).
 
