@@ -16,7 +16,7 @@ from tinkerkit.knowledge import Learner, Researcher
 from tinkerkit.learning import SlotLearner
 from tinkerkit.model import Ollama
 from tinkerkit.project import Tracker
-from tinkerkit.settings import JOB_STOP_SIGNAL
+from tinkerkit.settings import JOB_STOP_SIGNAL, RESEARCH_FRAME_THINK
 
 DEAD_PID = 999999999
 
@@ -391,15 +391,18 @@ def test_the_conversation_stops_and_resumes_jobs(home_store, tmp_path, monkeypat
 def test_a_research_job_frames_its_topic_on_the_day_the_job_started(home_store, monkeypatch):
     research_job_started_on_jan_2(home_store)
     framed = {"name": "Go", "summary": "", "questions": [{"question": "Which release?", "queries": ["go"]}]}
-    given = []
+    given, thinks = [], []
     monkeypatch.setattr(
         Learner,
         "saved_or_asked",
-        lambda self, known, read, system, parts, *rest: given.extend(parts) or (framed, True),
+        lambda self, known, read, system, parts, *rest, think: (
+            given.extend(parts) or thinks.append(think) or (framed, True)
+        ),
     )
     with Jobs.running(Jobs.arguments(["resume", "#1"])):
         Researcher(Learner(None, None, None)).frame("go", None)
     assert next(part for part in given if part.title == "Today").text == "2026-01-02"
+    assert thinks == [RESEARCH_FRAME_THINK]
 
 
 def other_running(home_store, number=1, command="learn", title="learn go"):

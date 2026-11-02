@@ -1166,7 +1166,7 @@ kept as principles (**PRI**); where a point below names them, it holds for princ
 - **KNW-14** `Learner.read_facts` keeps facts of a known phase, cut to `MAX_FACT_CHARS`, at most
   `FACTS_PER_CHUNK`. `add_facts` keeps a repeated fact once and adds the other page to its `also`.
   `relevant_chunks` gives the page's first chunk and then the ones best matching what is wanted (**KNW-12**),
-  in page order. Facts about unreleased versions are dropped.
+  in page order. Facts about unreleased versions are dropped. Reading a page's facts (`facts_in`) never thinks.
 - **KNW-15** `look_at_machine(commands)` runs each command in an empty temporary folder and keeps its first
   line and version. A failing command means the tool is not installed.
 - **KNW-16** `Researcher.read_frame` and `read_analysis` keep only well-formed questions, findings that cite
@@ -1178,10 +1178,12 @@ kept as principles (**PRI**); where a point below names them, it holds for princ
   sets each fact's confidence to disputed, corroborated or single.
 - **KNW-18** `Researcher.research(topic)` frames the topic as questions, reads pages for each, cross-checks and
   analyses the facts, searches the gaps and checks in one more round, and keeps the topic as research: its
-  questions, findings, contradictions, open gaps, and facts with their sources and confidence. Each question's
-  pages read are induced into principles (**PRI-4**, scoped to the topic's slug; a page's text is a passage, its
-  address the source), and the research keeps, per question, the ids of the principles they changed and the
-  pages cited. A research that keeps the earlier one induces nothing.
+  questions, findings, contradictions, open gaps, and facts with their sources and confidence. Each call thinks
+  only as much as it needs: framing `RESEARCH_FRAME_THINK` (low), analysing `RESEARCH_ANALYSIS_THINK` (medium),
+  inducing at `learn_think`. The last round's analysis asks for no checks, since no round follows. The pages the
+  findings cite are induced into principles in one call (**PRI-4**, scoped to the topic's slug; a passage is the
+  page's `relevant_chunks` for the questions, its address the source), and the research keeps one record: the
+  ids of the principles it changed and the pages cited. A research that keeps the earlier one induces nothing.
 - **KNW-19** `Library.save` gives each research finding `cites`: the IDs of the facts it cites by number, so
   the link holds when a fact is retired.
 - **KNW-20** A topic's playbook is its principles (**PRI**): nothing condenses facts into rules. What a learn
@@ -1200,7 +1202,9 @@ kept as principles (**PRI**); where a point below names them, it holds for princ
   says so.
 - **KNW-24** `Learner.web_pages(searches)` runs the searches at once (`Internet.search_all`), takes the results in turn, each page once, at
   most `TEACH_PAGES`, and fetches them in one `Internet.fetch`; a research round searches and fetches its pages the same
-  way, all at once. A page the web could not read stands on its search snippet. Each page keeps
+  way, all at once, skipping a result whose title and snippet score at most `learn_cutoff` against the topic and
+  the search's question (as **LRN-4**), at most `RESEARCH_PAGES_PER_ROUND` (6, then 4) pages. A page the web
+  could not read stands on its search snippet. Each page keeps
   its `relevant_chunks` for the searches (**KNW-14**), up to
   `TEACH_PAGE_CHARS`. A page with no text is left out. Two addresses are one page when they differ only in
   scheme (`http`/`https`), a leading `www.`, the host's case or a trailing `/`; the first one found is kept.
@@ -1335,7 +1339,7 @@ learning and run lessons are apart.
   Any other topic is planned by its slots first: a plan that says it is a domain hands it to `Researcher` for
   `tinker research`, and a learn learns it like a tool.
 - **LRN-7** Learning's steps (`LEARN_STEPS`, **PRJ-16**) are, in order: search, plan, machine, documentation,
-  digest, follow-up and keep (a domain's: frame and investigate). A saved plan skips search, unless
+  digest, follow-up and keep (a domain's: frame, investigate and induce). A saved plan skips search, unless
   GATE 2 finds the documentation kept too few (**LRN-3**); PREFLIGHT, GATE 1 and GATE 2 (**LRN-3**) are checks
   within them. A learn is not saved step by step: stopped, it goes on through its job's journal (**JOB-3**),
   so nothing done is asked again. Given a tracker, learning moves it through its steps

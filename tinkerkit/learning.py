@@ -14,6 +14,7 @@ lazy from .knowledge import (
     Researcher,
     SearchPlanner,
     language_key,
+    on_topic,
     search_entry,
     searched_in_batches,
 )
@@ -22,7 +23,6 @@ lazy from .passages import Cleaner, Page
 lazy from .principles import Inducer, Principles
 lazy from .project import Tracked
 lazy from .prompts import Part, Prompts, PromptTooLarge
-lazy from .retrieval import Retriever
 lazy from .settings import (
     DOCS_NAME_SEARCH,
     DOCS_SITE_SEARCH,
@@ -202,13 +202,10 @@ class SlotLearner(Tracked):
         return pooled_by_plan(results, plans)
 
     def picked(self, topic, results, most=None):
-        scores = Retriever(None).word_scores(
-            topic, [f"{result['title']} {result['content']}" for result in results]
-        )
-        picked, cutoff, most = [], float(Config.get("learn_cutoff")), most or int(Config.get("learn_pages"))
-        for result, score in sorted(zip(results, scores), key=lambda scored: not_reference(scored[0])):
+        picked, most = [], most or int(Config.get("learn_pages"))
+        for result in sorted(on_topic(topic, results), key=not_reference):
             key = address_key(result["url"])
-            if score > cutoff and key not in self.seen and len(picked) < most:
+            if key not in self.seen and len(picked) < most:
                 self.seen.add(key)
                 picked.append(result)
         return picked

@@ -23,6 +23,8 @@ from tinkerkit.settings import (
     CHUNKS_PER_PAGE,
     EMBED_KEEP_ALIVE,
     MAX_PLANNED_SEARCHES,
+    RESEARCH_ANALYSIS_THINK,
+    RESEARCH_FRAME_THINK,
     TEACH_PAGE_CHARS,
     TEACH_PAGES,
     Config,
@@ -649,6 +651,8 @@ def test_read_analysis():
         {"fact": 1, "search": {"query": "c", "count": 2}},
         {"fact": 2, "search": {"query": "d"}},
     ]
+    unchecked = Researcher.read_analysis({"findings": [{"question": 1, "answer": "a", "facts": [1]}]}, 3, 2)
+    assert unchecked["checks"] == []
     with pytest.raises(ValueError, match="finding"):
         Researcher.read_analysis({"findings": []}, 3, 2)
 
@@ -841,13 +845,15 @@ def test_research_a_domain(make_model, fake_ollama, tinker_home):
         ),
         when="Induce",
     )
-    internet = FakeInternet(pages)
+    snippets = {url: "How a food bank records donated food" for url in pages}
+    internet = FakeInternet(pages, snippets=snippets)
     entry = Researcher(Learner(make_model(), internet, None)).research("food bank inventory")
     kept = Principles(None).all()
     assert [principle.do for principle in kept] == ["Weigh donations at intake"]
     [record] = entry["principles"]
-    assert record["question"] == 1 and record["principles"] == [kept[0].id]
+    assert "question" not in record and record["principles"] == [kept[0].id]
     assert len(record["passages"]) == 1 and record["passages"][0] in pages
+    assert len([label for label in fake_ollama.labels() if label.startswith("Induce")]) == 1
     assert entry["kind"] == "research" and entry["name"] == "Food bank inventory"
     assert entry["questions"] == FRAME["questions"] and entry["open"] == []
     assert entry["facts"][0]["confidence"] == "corroborated" and entry["facts"][0]["sites"] == [
@@ -855,11 +861,47 @@ def test_research_a_domain(make_model, fake_ollama, tinker_home):
         "b.org",
     ]
     assert entry["findings"][0]["confidence"] == "high" and sorted(entry["sources"]) == sorted(pages)
-    assert [label.split(" (")[0].split(",")[0] for label in fake_ollama.labels()].count(
-        "Analyse the findings"
-    ) == 2
+    assert [step_of(label) for label in fake_ollama.labels()].count("Analyse the findings") == 2
+    first_analysis, last_analysis = [
+        call["messages"][0]["content"]
+        for call in fake_ollama.calls
+        if step_of(call["label"]) == "Analyse the findings"
+    ]
+    assert (
+        '"checks"' in first_analysis and '"checks"' not in last_analysis and "- checks:" not in last_analysis
+    )
+    thinks = {step_of(call["label"]): call["think"] for call in fake_ollama.calls}
+    assert thinks["Frame the research"] == RESEARCH_FRAME_THINK
+    assert thinks["Facts"] is False
+    assert thinks["Analyse the findings"] == RESEARCH_ANALYSIS_THINK
+    assert thinks["Induce principles from the passages"] == Config.get("learn_think")
     assert Library.read("food-bank-inventory")["kind"] == "research"
     assert len(internet.fetches) == 2 and internet.fetches[0] == list(pages)
+
+
+def step_of(label):
+    return label.split(" (")[0].split(",")[0]
+
+
+@pytest.mark.spec("KNW-24")
+def test_research_skips_an_off_topic_result(make_model, fake_ollama, tinker_home):
+    pages = {
+        "https://a.org/intake": "Donations are weighed at intake.",
+        "https://c.org/flights": "Cheap flights to Paris.",
+    }
+    snippets = {
+        "https://a.org/intake": "How a food bank records donated food at intake",
+        "https://c.org/flights": "Cheap flights to Paris this summer",
+    }
+    fake_ollama.reply(json.dumps(FRAME), when="Frame the research")
+    fake_ollama.reply(
+        json.dumps({"facts": [{"phase": "spec", "text": "Donated food is weighed at intake"}]}), when="Facts"
+    )
+    fake_ollama.reply(analysis(), when="Analyse the findings")
+    fake_ollama.reply(json.dumps({"deltas": []}), when="Induce")
+    internet = FakeInternet(pages, snippets=snippets)
+    Researcher(Learner(make_model(), internet, None)).research("food bank inventory")
+    assert internet.fetches[0] == ["https://a.org/intake"]
 
 
 @pytest.mark.spec("KNW-18")

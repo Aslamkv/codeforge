@@ -18,7 +18,9 @@ from .settings import (
     MAX_FACT_CHARS,
     MAX_PLANNED_SEARCHES,
     REPEAT_CLAIM_SIMILARITY,
+    RESEARCH_ANALYSIS_THINK,
     RESEARCH_FACTS_CHECKED,
+    RESEARCH_FRAME_THINK,
     RESEARCH_GAPS,
     RESEARCH_PAGES_PER_ROUND,
     RESEARCH_QUESTIONS,
@@ -31,6 +33,7 @@ from .settings import (
     TEACH_PAGES,
     TOOLCHAIN_HINT_SIMILARITY,
     VERSION_TIMEOUT,
+    Config,
     Home,
 )
 from .text import field, fingerprint, first_line, host, now_text, similarity, split_text
@@ -75,6 +78,7 @@ LEARN_STEPS = (
     "follow-up",
     "frame",
     "investigate",
+    "induce",
     "keep",
     "done",
 )
@@ -395,7 +399,7 @@ class Learner(Tracked):
     def start(self):
         self.notes, self.model_failure, self.kept_earlier_topic = [], "", False
 
-    def saved_or_asked(self, known, read, system, parts, label, what, saved_as):
+    def saved_or_asked(self, known, read, system, parts, label, what, saved_as, think):
         if known:
             try:
                 plan = read(known)
@@ -404,7 +408,7 @@ class Learner(Tracked):
             except ValueError as exc:
                 say.warn(f"The plan saved last time cannot be used ({exc}), so making a new one")
         answer = self.model.ask_until_usable(
-            system, parts, label, lambda reply: read(reply.json()), attempts=2
+            system, parts, label, lambda reply: read(reply.json()), attempts=2, think=think
         )
         plan = answer.needed(
             f"{self.model.name} gave no usable plan for {what}; see the log of its replies "
@@ -475,13 +479,7 @@ class Learner(Tracked):
         return [page for page in pages if page["content"]]
 
     def web_page(self, page, wanted):
-        text = page["content"]
-        chunks = (
-            relevant_chunks(text, TEACH_PAGE_CHARS // CHUNKS_PER_PAGE, wanted, CHUNKS_PER_PAGE)
-            if text.strip()
-            else []
-        )
-        return {"title": page["title"], "url": page["url"], "content": "\n\n".join(chunks)[:TEACH_PAGE_CHARS]}
+        return {"title": page["title"], "url": page["url"], "content": page_passage(page, wanted)}
 
     def results(self, searches):
         found = searched_in_batches(self.internet, searches, RESULTS_PER_RESEARCH_SEARCH)
@@ -564,6 +562,7 @@ class Learner(Tracked):
                 f"Facts, page {number} part {part}",
                 self.read_facts,
                 attempts=2,
+                think=False,
             )
         except OllamaError as exc:
             self.model_failure = first_line(str(exc), 200)
@@ -718,7 +717,8 @@ class Researcher:
             )
             return None
         entry = self.entry(topic, frame, facts, sources, analysis)
-        entry["principles"] = self.principles_from(pages, slug)
+        learner.step("induce")
+        entry["principles"] = self.principles_from(entry, pages, slug)
         learner.step("keep")
         Library.save(slug, entry)
         say.info(
@@ -740,6 +740,7 @@ class Researcher:
             "Frame the research",
             f"researching {topic}",
             Library.slug(topic),
+            think=RESEARCH_FRAME_THINK,
         )
         if not saved:
             say.found(f"{frame['name']}: {frame['summary']}")
@@ -782,7 +783,7 @@ class Researcher:
                 "🔎",
             )
             with say.working_on(f"Reading up to {pages} page(s) about {frame['name']}, round {round_number}"):
-                round_pages = self.round_pages(searches, pages)
+                round_pages = self.round_pages(frame["name"], searches, pages)
                 found, read = self.learner.read_pages(frame["name"], round_pages)
             fetched += round_pages
             self.learner.add_facts(facts, found)
@@ -791,47 +792,48 @@ class Researcher:
             if self.learner.cut_short() or not facts:
                 break
             differ = self.cross_check(facts)
-            analysis = self.analyse(frame, facts, differ) or analysis
+            system = self.analysis_system(round_number)
+            analysis = self.analyse(frame, facts, differ, system) or analysis
             searches = self.next_searches(frame, facts, analysis)
         return Investigation(facts, sources, analysis, fetched)
 
-    def round_pages(self, searches, max_pages):
+    def round_pages(self, topic, searches, max_pages):
         learner = self.learner
-        return learner.fetched(learner.in_turn(searches, learner.results(searches), max_pages))
-
-    def principles_from(self, pages, slug):
-        principles = Principles(self.learner.embeddings)
-        by_question = collections.defaultdict(list)
-        for page in pages:
-            by_question[int(page["section"])].append(page)
-        return [
-            record
-            for number, question_pages in sorted(by_question.items())
-            for record in self.question_principles(principles, number, question_pages, slug)
+        results = [
+            on_topic(f"{topic} {search['focus']}", found)
+            for search, found in zip(searches, learner.results(searches))
         ]
+        return learner.fetched(learner.in_turn(searches, results, max_pages))
 
-    def question_principles(self, principles, number, pages, slug):
-        given = [{"text": page["content"], "source": page["url"]} for page in pages]
-        deltas = Inducer(self.model, principles).induce(given, scope=slug)
+    def principles_from(self, entry, pages, slug):
+        principles = Principles(self.learner.embeddings)
+        cited_pages = self.pages_cited(entry, pages)
+        wanted = " ".join(question["question"] for question in entry["questions"])
+        given = [{"text": page_passage(page, wanted), "source": page["url"]} for page in cited_pages]
+        deltas = Inducer(self.model, principles).induce(given, scope=slug, think=Config.get("learn_think"))
         changed = principles.apply(deltas, "")
         with say.section():
             if changed:
-                say.done(f"Question {number}: {len(changed)} principle(s) from {len(pages)} page(s)")
+                say.done(f"{len(changed)} principle(s) from {len(cited_pages)} page(s)")
                 say.found(first_line(changed[0].prompt_text(), 200))
             else:
-                say.skip(f"Question {number}: nothing found in {len(pages)} page(s)")
+                say.skip(f"No principles found in {len(cited_pages)} page(s)")
         cited = [item["source"] for delta in deltas for item in delta["evidence"]]
         return (
-            [
-                {
-                    "question": number,
-                    "principles": [principle.id for principle in changed],
-                    "passages": list(dict.fromkeys(cited)),
-                }
-            ]
+            [{"principles": [principle.id for principle in changed], "passages": list(dict.fromkeys(cited))}]
             if changed
             else []
         )
+
+    @staticmethod
+    def pages_cited(entry, pages):
+        sources = {
+            url
+            for finding in entry["findings"]
+            for number in finding["facts"]
+            for url in Learner.pages_of(entry["facts"][number - 1])
+        }
+        return list({page["url"]: page for page in pages if page["url"] in sources}.values())
 
     @staticmethod
     def first_searches(frame):
@@ -917,15 +919,22 @@ class Researcher:
     def numbers(cls, fact):
         return set(cls.NUMBER_RE.findall(fact["text"]))
 
-    def analyse(self, frame, facts, differ):
-        parts = self.analysis_parts(frame, facts, differ)
+    @staticmethod
+    def analysis_system(round_number):
+        if round_number == len(RESEARCH_PAGES_PER_ROUND):
+            return Prompts.RESEARCH_LAST_ANALYSIS_SYSTEM
+        return Prompts.RESEARCH_ANALYSIS_SYSTEM
+
+    def analyse(self, frame, facts, differ, system):
+        parts = self.analysis_parts(frame, facts, differ, system)
         try:
             answer = self.model.ask_until_usable(
-                Prompts.RESEARCH_ANALYSIS_SYSTEM,
+                system,
                 parts,
                 "Analyse the findings",
                 lambda reply: self.read_analysis(reply.json(), len(facts), len(frame["questions"])),
                 attempts=2,
+                think=RESEARCH_ANALYSIS_THINK,
             )
         except OllamaError as exc:
             answer = Answer(None, why=str(exc))
@@ -934,7 +943,7 @@ class Researcher:
             say.warn(self.learner.notes[-1])
         return answer.value
 
-    def analysis_parts(self, frame, facts, differ):
+    def analysis_parts(self, frame, facts, differ, system):
         questions = "\n".join(
             f"Q{number}. {question['question']}" for number, question in enumerate(frame["questions"], 1)
         )
@@ -944,7 +953,7 @@ class Researcher:
             Part("Questions", questions, True),
             Part("Facts that may disagree", pairs, True),
         ]
-        room = self.model.limit_chars(Prompts.RESEARCH_ANALYSIS_SYSTEM) - Part.total_size(fixed) - 200
+        room = self.model.limit_chars(system) - Part.total_size(fixed) - 200
         return fixed + [Part("Facts", self.fact_listing(facts, room), True, exact=True)]
 
     @staticmethod
@@ -1404,6 +1413,16 @@ class Library:
         return item["phase"] in {*phases, "any"} or bool(shown and shown & set(phases))
 
 
+def page_passage(page, wanted):
+    text = page["content"]
+    chunks = (
+        relevant_chunks(text, TEACH_PAGE_CHARS // CHUNKS_PER_PAGE, wanted, CHUNKS_PER_PAGE)
+        if text.strip()
+        else []
+    )
+    return "\n\n".join(chunks)[:TEACH_PAGE_CHARS]
+
+
 def relevant_chunks(text, size, wanted, count):
     chunks = split_text(text, size)
     if len(chunks) <= count:
@@ -1411,6 +1430,14 @@ def relevant_chunks(text, size, wanted, count):
     matched = [index for index in Retriever(None).by_words(wanted, chunks) if index]
     chosen = [0] + (matched + [index for index in range(1, len(chunks)) if index not in matched])[: count - 1]
     return [chunks[index] for index in sorted(chosen)]
+
+
+def on_topic(query, results):
+    scores = Retriever(None).word_scores(
+        query, [f"{result['title']} {result['content']}" for result in results]
+    )
+    cutoff = float(Config.get("learn_cutoff"))
+    return [result for result, score in zip(results, scores) if score > cutoff]
 
 
 def retire(item, language, reason, run):
