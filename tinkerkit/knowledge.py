@@ -783,7 +783,7 @@ class Researcher:
                 "🔎",
             )
             with say.working_on(f"Reading up to {pages} page(s) about {frame['name']}, round {round_number}"):
-                round_pages = self.round_pages(searches, pages)
+                round_pages = self.round_pages(frame["name"], searches, pages)
                 found, read = self.learner.read_pages(frame["name"], round_pages)
             fetched += round_pages
             self.learner.add_facts(facts, found)
@@ -796,9 +796,13 @@ class Researcher:
             searches = self.next_searches(frame, facts, analysis)
         return Investigation(facts, sources, analysis, fetched)
 
-    def round_pages(self, searches, max_pages):
+    def round_pages(self, topic, searches, max_pages):
         learner = self.learner
-        return learner.fetched(learner.in_turn(searches, learner.results(searches), max_pages))
+        results = [
+            on_topic(f"{topic} {search['focus']}", found)
+            for search, found in zip(searches, learner.results(searches))
+        ]
+        return learner.fetched(learner.in_turn(searches, results, max_pages))
 
     def principles_from(self, entry, pages, slug):
         principles = Principles(self.learner.embeddings)
@@ -1419,6 +1423,12 @@ def relevant_chunks(text, size, wanted, count):
     matched = [index for index in Retriever(None).by_words(wanted, chunks) if index]
     chosen = [0] + (matched + [index for index in range(1, len(chunks)) if index not in matched])[: count - 1]
     return [chunks[index] for index in sorted(chosen)]
+
+
+def on_topic(query, results):
+    scores = Retriever(None).word_scores(query, [f"{result['title']} {result['content']}" for result in results])
+    cutoff = float(Config.get("learn_cutoff"))
+    return [result for result, score in zip(results, scores) if score > cutoff]
 
 
 def retire(item, language, reason, run):

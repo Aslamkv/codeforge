@@ -843,7 +843,8 @@ def test_research_a_domain(make_model, fake_ollama, tinker_home):
         ),
         when="Induce",
     )
-    internet = FakeInternet(pages)
+    snippets = {url: "How a food bank records donated food" for url in pages}
+    internet = FakeInternet(pages, snippets=snippets)
     entry = Researcher(Learner(make_model(), internet, None)).research("food bank inventory")
     kept = Principles(None).all()
     assert [principle.do for principle in kept] == ["Weigh donations at intake"]
@@ -868,6 +869,27 @@ def test_research_a_domain(make_model, fake_ollama, tinker_home):
     assert thinks["Induce principles from the passages"] == Config.get("learn_think")
     assert Library.read("food-bank-inventory")["kind"] == "research"
     assert len(internet.fetches) == 2 and internet.fetches[0] == list(pages)
+
+
+@pytest.mark.spec("KNW-24")
+def test_research_skips_an_off_topic_result(make_model, fake_ollama, tinker_home):
+    pages = {
+        "https://a.org/intake": "Donations are weighed at intake.",
+        "https://c.org/flights": "Cheap flights to Paris.",
+    }
+    snippets = {
+        "https://a.org/intake": "How a food bank records donated food at intake",
+        "https://c.org/flights": "Cheap flights to Paris this summer",
+    }
+    fake_ollama.reply(json.dumps(FRAME), when="Frame the research")
+    fake_ollama.reply(
+        json.dumps({"facts": [{"phase": "spec", "text": "Donated food is weighed at intake"}]}), when="Facts"
+    )
+    fake_ollama.reply(analysis(), when="Analyse the findings")
+    fake_ollama.reply(json.dumps({"deltas": []}), when="Induce")
+    internet = FakeInternet(pages, snippets=snippets)
+    Researcher(Learner(make_model(), internet, None)).research("food bank inventory")
+    assert internet.fetches[0] == ["https://a.org/intake"]
 
 
 @pytest.mark.spec("KNW-18")
