@@ -11,7 +11,6 @@ from .principles import Inducer, Principles, claim_id, record
 from .retrieval import Embeddings, Retriever
 from .settings import (
     CHUNKS_PER_PAGE,
-    Config,
     FACT_PHASES,
     FACTS_PER_CHUNK,
     LESSON_PHASES,
@@ -34,6 +33,7 @@ from .settings import (
     TEACH_PAGES,
     TOOLCHAIN_HINT_SIMILARITY,
     VERSION_TIMEOUT,
+    Config,
     Home,
 )
 from .text import field, fingerprint, first_line, host, now_text, similarity, split_text
@@ -1433,7 +1433,9 @@ def relevant_chunks(text, size, wanted, count):
 
 
 def on_topic(query, results):
-    scores = Retriever(None).word_scores(query, [f"{result['title']} {result['content']}" for result in results])
+    scores = Retriever(None).word_scores(
+        query, [f"{result['title']} {result['content']}" for result in results]
+    )
     cutoff = float(Config.get("learn_cutoff"))
     return [result for result, score in zip(results, scores) if score > cutoff]
 

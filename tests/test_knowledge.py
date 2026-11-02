@@ -861,20 +861,26 @@ def test_research_a_domain(make_model, fake_ollama, tinker_home):
         "b.org",
     ]
     assert entry["findings"][0]["confidence"] == "high" and sorted(entry["sources"]) == sorted(pages)
-    assert [label.split(" (")[0].split(",")[0] for label in fake_ollama.labels()].count(
-        "Analyse the findings"
-    ) == 2
+    assert [step_of(label) for label in fake_ollama.labels()].count("Analyse the findings") == 2
     first_analysis, last_analysis = [
-        call["messages"][0]["content"] for call in fake_ollama.calls if call["label"].startswith("Analyse the findings")
+        call["messages"][0]["content"]
+        for call in fake_ollama.calls
+        if step_of(call["label"]) == "Analyse the findings"
     ]
-    assert '"checks"' in first_analysis and '"checks"' not in last_analysis and "- checks:" not in last_analysis
-    thinks = {call["label"].split(" (")[0].split(",")[0]: call["think"] for call in fake_ollama.calls}
+    assert (
+        '"checks"' in first_analysis and '"checks"' not in last_analysis and "- checks:" not in last_analysis
+    )
+    thinks = {step_of(call["label"]): call["think"] for call in fake_ollama.calls}
     assert thinks["Frame the research"] == RESEARCH_FRAME_THINK
     assert thinks["Facts"] is False
     assert thinks["Analyse the findings"] == RESEARCH_ANALYSIS_THINK
     assert thinks["Induce principles from the passages"] == Config.get("learn_think")
     assert Library.read("food-bank-inventory")["kind"] == "research"
     assert len(internet.fetches) == 2 and internet.fetches[0] == list(pages)
+
+
+def step_of(label):
+    return label.split(" (")[0].split(",")[0]
 
 
 @pytest.mark.spec("KNW-24")
