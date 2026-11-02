@@ -1105,11 +1105,14 @@ def test_other_models_are_unloaded_and_a_grown_model_too(make_model, fake_ollama
     fake_ollama.reply("ok")
     ask_a_question(make_model())
     assert fake_ollama.unloaded == ["other"]
-    sizes = iter([10e9, 11e9, 12e9])
+    sizes = iter([10e9, 11e9, 12e9, 15e9])
     monkeypatch.setattr(Ollama, "loaded_models", staticmethod(lambda: [(MODEL, next(sizes))]))
+    monkeypatch.setattr(Calibrator, "gpu_memory", classmethod(lambda cls: 16e9))
     model = Model(MODEL, MEASURED, 300, make_model().log, max_growth=1.15)
     for _ in range(3):
         model.check_memory()
+    assert fake_ollama.unloaded == ["other"]
+    model.check_memory()
     assert fake_ollama.unloaded == ["other", MODEL]
 
 

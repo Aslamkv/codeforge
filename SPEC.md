@@ -656,7 +656,8 @@ What is said in the chats, kept so that a chat is only a view of it.
   [2, 4]. `learned_chars_per_token()` is `None` until 5 prompts have been seen.
 - **MOD-23** Before each call, every other loaded model is unloaded, except an embedding model `Embeddings` used
   (`Ollama.embedders`). With the model kept loaded, it is unloaded once it grows past `max_growth` times its
-  first size.
+  first size and leaves the GPU's memory (`gpu_memory`) less than `RUNNER_OVERHEAD_BYTES` free; a model that
+  still has room keeps growing loaded.
 - **MOD-24** `Model` keeps each call's step and details in its log and never prints them. The person sees
   only a short line when it asks again, and its live line says in plain words what Tinker is working on (the
   step it is on, else "Working on it") and for how long ("Working on it… 1m 41s (101s)").

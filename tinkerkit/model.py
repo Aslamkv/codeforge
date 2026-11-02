@@ -430,9 +430,13 @@ class Model:
             return
         if self.base_gb is None:
             self.base_gb = size
-        elif size > self.base_gb * self.max_growth:
-            self.note(f"model grew {self.base_gb:.1f} -> {size:.1f} GB; unloading")
+        elif size > self.base_gb * self.max_growth and self.leaves_no_room(size):
+            self.note(f"model grew {self.base_gb:.1f} -> {size:.1f} GB and leaves no room; unloading")
             self.unload()
+
+    def leaves_no_room(self, size):
+        memory = Calibrator.gpu_memory()
+        return bool(memory) and size * 1e9 + RUNNER_OVERHEAD_BYTES > memory
 
     def loaded_size(self):
         return next(
