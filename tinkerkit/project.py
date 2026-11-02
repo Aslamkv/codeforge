@@ -643,6 +643,7 @@ class Tracker:
         "follow-up": ("🔁 Searching for what is still missing", "🔁 Searched for what was missing"),
         "frame": ("📝 Framing the research questions", "📝 Questions framed"),
         "investigate": ("🔬 Reading and cross-checking sources", "🔬 Sources cross-checked"),
+        "induce": ("💡 Inducing principles from the cited pages", "💡 Principles induced"),
         "keep": ("💾 Saving what was learned", "💾 Saved"),
         "open": ("📖 Opening the book", "📖 Book opened"),
         "survey": ("🧭 Reading its contents, foreword and index", "🧭 Chose the chapters to read"),

@@ -848,8 +848,9 @@ def test_research_a_domain(make_model, fake_ollama, tinker_home):
     kept = Principles(None).all()
     assert [principle.do for principle in kept] == ["Weigh donations at intake"]
     [record] = entry["principles"]
-    assert record["question"] == 1 and record["principles"] == [kept[0].id]
+    assert "question" not in record and record["principles"] == [kept[0].id]
     assert len(record["passages"]) == 1 and record["passages"][0] in pages
+    assert len([label for label in fake_ollama.labels() if label.startswith("Induce")]) == 1
     assert entry["kind"] == "research" and entry["name"] == "Food bank inventory"
     assert entry["questions"] == FRAME["questions"] and entry["open"] == []
     assert entry["facts"][0]["confidence"] == "corroborated" and entry["facts"][0]["sites"] == [
@@ -864,6 +865,7 @@ def test_research_a_domain(make_model, fake_ollama, tinker_home):
     assert thinks["Frame the research"] == RESEARCH_FRAME_THINK
     assert thinks["Facts"] is False
     assert thinks["Analyse the findings"] == RESEARCH_ANALYSIS_THINK
+    assert thinks["Induce principles from the passages"] == Config.get("learn_think")
     assert Library.read("food-bank-inventory")["kind"] == "research"
     assert len(internet.fetches) == 2 and internet.fetches[0] == list(pages)
 

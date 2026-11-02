@@ -11,6 +11,7 @@ from .principles import Inducer, Principles, claim_id, record
 from .retrieval import Embeddings, Retriever
 from .settings import (
     CHUNKS_PER_PAGE,
+    Config,
     FACT_PHASES,
     FACTS_PER_CHUNK,
     LESSON_PHASES,
@@ -77,6 +78,7 @@ LEARN_STEPS = (
     "follow-up",
     "frame",
     "investigate",
+    "induce",
     "keep",
     "done",
 )
@@ -477,13 +479,7 @@ class Learner(Tracked):
         return [page for page in pages if page["content"]]
 
     def web_page(self, page, wanted):
-        text = page["content"]
-        chunks = (
-            relevant_chunks(text, TEACH_PAGE_CHARS // CHUNKS_PER_PAGE, wanted, CHUNKS_PER_PAGE)
-            if text.strip()
-            else []
-        )
-        return {"title": page["title"], "url": page["url"], "content": "\n\n".join(chunks)[:TEACH_PAGE_CHARS]}
+        return {"title": page["title"], "url": page["url"], "content": page_passage(page, wanted)}
 
     def results(self, searches):
         found = searched_in_batches(self.internet, searches, RESULTS_PER_RESEARCH_SEARCH)
@@ -721,7 +717,8 @@ class Researcher:
             )
             return None
         entry = self.entry(topic, frame, facts, sources, analysis)
-        entry["principles"] = self.principles_from(pages, slug)
+        learner.step("induce")
+        entry["principles"] = self.principles_from(entry, pages, slug)
         learner.step("keep")
         Library.save(slug, entry)
         say.info(
@@ -803,39 +800,35 @@ class Researcher:
         learner = self.learner
         return learner.fetched(learner.in_turn(searches, learner.results(searches), max_pages))
 
-    def principles_from(self, pages, slug):
+    def principles_from(self, entry, pages, slug):
         principles = Principles(self.learner.embeddings)
-        by_question = collections.defaultdict(list)
-        for page in pages:
-            by_question[int(page["section"])].append(page)
-        return [
-            record
-            for number, question_pages in sorted(by_question.items())
-            for record in self.question_principles(principles, number, question_pages, slug)
-        ]
-
-    def question_principles(self, principles, number, pages, slug):
-        given = [{"text": page["content"], "source": page["url"]} for page in pages]
-        deltas = Inducer(self.model, principles).induce(given, scope=slug)
+        cited_pages = self.pages_cited(entry, pages)
+        wanted = " ".join(question["question"] for question in entry["questions"])
+        given = [{"text": page_passage(page, wanted), "source": page["url"]} for page in cited_pages]
+        deltas = Inducer(self.model, principles).induce(given, scope=slug, think=Config.get("learn_think"))
         changed = principles.apply(deltas, "")
         with say.section():
             if changed:
-                say.done(f"Question {number}: {len(changed)} principle(s) from {len(pages)} page(s)")
+                say.done(f"{len(changed)} principle(s) from {len(cited_pages)} page(s)")
                 say.found(first_line(changed[0].prompt_text(), 200))
             else:
-                say.skip(f"Question {number}: nothing found in {len(pages)} page(s)")
+                say.skip(f"No principles found in {len(cited_pages)} page(s)")
         cited = [item["source"] for delta in deltas for item in delta["evidence"]]
         return (
-            [
-                {
-                    "question": number,
-                    "principles": [principle.id for principle in changed],
-                    "passages": list(dict.fromkeys(cited)),
-                }
-            ]
+            [{"principles": [principle.id for principle in changed], "passages": list(dict.fromkeys(cited))}]
             if changed
             else []
         )
+
+    @staticmethod
+    def pages_cited(entry, pages):
+        sources = {
+            url
+            for finding in entry["findings"]
+            for number in finding["facts"]
+            for url in Learner.pages_of(entry["facts"][number - 1])
+        }
+        return list({page["url"]: page for page in pages if page["url"] in sources}.values())
 
     @staticmethod
     def first_searches(frame):
@@ -1407,6 +1400,16 @@ class Library:
             "findings": {"spec", "design"},
         }.get(item["phase"])
         return item["phase"] in {*phases, "any"} or bool(shown and shown & set(phases))
+
+
+def page_passage(page, wanted):
+    text = page["content"]
+    chunks = (
+        relevant_chunks(text, TEACH_PAGE_CHARS // CHUNKS_PER_PAGE, wanted, CHUNKS_PER_PAGE)
+        if text.strip()
+        else []
+    )
+    return "\n\n".join(chunks)[:TEACH_PAGE_CHARS]
 
 
 def relevant_chunks(text, size, wanted, count):
