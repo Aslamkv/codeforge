@@ -792,7 +792,8 @@ class Researcher:
             if self.learner.cut_short() or not facts:
                 break
             differ = self.cross_check(facts)
-            analysis = self.analyse(frame, facts, differ) or analysis
+            system = self.analysis_system(round_number)
+            analysis = self.analyse(frame, facts, differ, system) or analysis
             searches = self.next_searches(frame, facts, analysis)
         return Investigation(facts, sources, analysis, fetched)
 
@@ -918,11 +919,17 @@ class Researcher:
     def numbers(cls, fact):
         return set(cls.NUMBER_RE.findall(fact["text"]))
 
-    def analyse(self, frame, facts, differ):
-        parts = self.analysis_parts(frame, facts, differ)
+    @staticmethod
+    def analysis_system(round_number):
+        if round_number == len(RESEARCH_PAGES_PER_ROUND):
+            return Prompts.RESEARCH_LAST_ANALYSIS_SYSTEM
+        return Prompts.RESEARCH_ANALYSIS_SYSTEM
+
+    def analyse(self, frame, facts, differ, system):
+        parts = self.analysis_parts(frame, facts, differ, system)
         try:
             answer = self.model.ask_until_usable(
-                Prompts.RESEARCH_ANALYSIS_SYSTEM,
+                system,
                 parts,
                 "Analyse the findings",
                 lambda reply: self.read_analysis(reply.json(), len(facts), len(frame["questions"])),
@@ -936,7 +943,7 @@ class Researcher:
             say.warn(self.learner.notes[-1])
         return answer.value
 
-    def analysis_parts(self, frame, facts, differ):
+    def analysis_parts(self, frame, facts, differ, system):
         questions = "\n".join(
             f"Q{number}. {question['question']}" for number, question in enumerate(frame["questions"], 1)
         )
@@ -946,7 +953,7 @@ class Researcher:
             Part("Questions", questions, True),
             Part("Facts that may disagree", pairs, True),
         ]
-        room = self.model.limit_chars(Prompts.RESEARCH_ANALYSIS_SYSTEM) - Part.total_size(fixed) - 200
+        room = self.model.limit_chars(system) - Part.total_size(fixed) - 200
         return fixed + [Part("Facts", self.fact_listing(facts, room), True, exact=True)]
 
     @staticmethod

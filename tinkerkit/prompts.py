@@ -801,7 +801,7 @@ Reply with ONLY JSON (this example is for "food bank inventory"):
    "queries":[{{"query":"food bank donation intake weighing records","engines":["mwmbl"],"count":5}},
     {{"query":"food bank receiving donated food","engines":["wikipedia","wikibooks"],"count":3}}]}}]}}"""
 
-    RESEARCH_ANALYSIS_SYSTEM = f"""You are a careful researcher. Below are research questions about a topic and numbered
+    RESEARCH_ANALYSIS_RULES = f"""You are a careful researcher. Below are research questions about a topic and numbered
 facts found on web pages: each with the question it was searched for and how many independent sites
 state it. Work only from these facts, never from your own knowledge.
 - findings: answer each question the facts answer, citing the facts it rests on; "confidence": high
@@ -813,16 +813,23 @@ state it. Work only from these facts, never from your own knowledge.
   versions, places or dates, and a fact that merely gives more detail than another or states a
   stricter rule within the other's limits, are compatible: leave them out;
 - gaps: what a question still needs that no fact answers, each with one web search that would find
-  it; at most {RESEARCH_GAPS}, the most important first;
+  it; at most {RESEARCH_GAPS}, the most important first"""
+    RESEARCH_ANALYSIS_CHECKS = f""";
 - checks: the key facts the answers rest on that only one site states (above all figures, limits and
   rules), each with one web search that would find another, independent source for it; at most
-  {RESEARCH_FACTS_CHECKED}, those the answers depend on most first.
+  {RESEARCH_FACTS_CHECKED}, those the answers depend on most first"""
+    RESEARCH_ANALYSIS_REPLY = f""".
 Each search names the engines that suit it and how many results to take. {SEARCH_ENGINES}
 Reply with ONLY JSON:
 {{"findings":[{{"question":1,"answer":"...","confidence":"high","facts":[1,4]}}],
  "contradictions":[{{"facts":[3,9,12],"doubtful":[9],"note":"..."}}],
- "gaps":[{{"question":2,"missing":"...","search":{{"query":"...","engines":["mwmbl"],"count":5}}}}],
- "checks":[{{"fact":7,"search":{{"query":"...","engines":["mwmbl","wikipedia"],"count":5}}}}]}}"""
+ "gaps":[{{"question":2,"missing":"...","search":{{"query":"...","engines":["mwmbl"],"count":5}}}}]"""
+    RESEARCH_ANALYSIS_CHECKS_JSON = """,
+ "checks":[{"fact":7,"search":{"query":"...","engines":["mwmbl","wikipedia"],"count":5}}]"""
+    RESEARCH_ANALYSIS_SYSTEM = (
+        RESEARCH_ANALYSIS_RULES + RESEARCH_ANALYSIS_CHECKS + RESEARCH_ANALYSIS_REPLY + RESEARCH_ANALYSIS_CHECKS_JSON + "}"
+    )
+    RESEARCH_LAST_ANALYSIS_SYSTEM = RESEARCH_ANALYSIS_RULES + RESEARCH_ANALYSIS_REPLY + "}"
 
     README_SYSTEM = """Write the heart of a README for a beginner who has never seen this project: from the request,
 its tested criteria and its code, say what it is and how to use it. Only what the code really does and

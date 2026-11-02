@@ -651,6 +651,8 @@ def test_read_analysis():
         {"fact": 1, "search": {"query": "c", "count": 2}},
         {"fact": 2, "search": {"query": "d"}},
     ]
+    unchecked = Researcher.read_analysis({"findings": [{"question": 1, "answer": "a", "facts": [1]}]}, 3, 2)
+    assert unchecked["checks"] == []
     with pytest.raises(ValueError, match="finding"):
         Researcher.read_analysis({"findings": []}, 3, 2)
 
@@ -862,6 +864,10 @@ def test_research_a_domain(make_model, fake_ollama, tinker_home):
     assert [label.split(" (")[0].split(",")[0] for label in fake_ollama.labels()].count(
         "Analyse the findings"
     ) == 2
+    first_analysis, last_analysis = [
+        call["messages"][0]["content"] for call in fake_ollama.calls if call["label"].startswith("Analyse the findings")
+    ]
+    assert '"checks"' in first_analysis and '"checks"' not in last_analysis and "- checks:" not in last_analysis
     thinks = {call["label"].split(" (")[0].split(",")[0]: call["think"] for call in fake_ollama.calls}
     assert thinks["Frame the research"] == RESEARCH_FRAME_THINK
     assert thinks["Facts"] is False

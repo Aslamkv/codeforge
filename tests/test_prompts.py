@@ -258,6 +258,7 @@ def test_every_prompt_that_writes_searches_writes_them_with_engines_and_count():
             reply["gaps"][0]["search"],
             reply["checks"][0]["search"],
         ],
+        Prompts.RESEARCH_LAST_ANALYSIS_SYSTEM: lambda reply: [reply["gaps"][0]["search"]],
         Prompts.SLOT_PLAN_SYSTEM: lambda reply: list(reply["followups"].values()),
         Prompts.TEACH_SYSTEM: lambda reply: reply["searches"],
     }
