@@ -1,3 +1,4 @@
+import math
 import re
 from collections import namedtuple
 from itertools import batched, combinations
@@ -36,7 +37,7 @@ from .settings import (
     Config,
     Home,
 )
-from .text import field, fingerprint, first_line, host, now_text, similarity, split_text
+from .text import field, fingerprint, first_line, host, now_text, similarity, split_text, words
 lazy from .jobs import today
 lazy from .model import Answer, Models, OllamaError
 lazy from .project import Tracked
@@ -800,7 +801,7 @@ class Researcher:
     def round_pages(self, topic, searches, max_pages):
         learner = self.learner
         results = [
-            on_topic(f"{topic} {search['focus']}", found)
+            on_topic(topic, found, query=f"{topic} {search['focus']}")
             for search, found in zip(searches, learner.results(searches))
         ]
         return learner.fetched(learner.in_turn(searches, results, max_pages))
@@ -1433,12 +1434,21 @@ def relevant_chunks(text, size, wanted, count):
     return [chunks[index] for index in sorted(chosen)]
 
 
-def on_topic(query, results):
-    scores = Retriever(None).word_scores(
-        query, [f"{result['title']} {result['content']}" for result in results]
-    )
+def on_topic(topic, results, query=None):
+    texts = [f"{result['title']} {result['content']}" for result in results]
+    scores = Retriever(None).word_scores(query or topic, texts)
     cutoff = float(Config.get("learn_cutoff"))
-    return [result for result, score in zip(results, scores) if score > cutoff]
+    return [
+        result
+        for result, text, score in zip(results, texts, scores)
+        if score > cutoff and covers_topic(topic, text)
+    ]
+
+
+def covers_topic(topic, text):
+    topic_words = set(words(topic))
+    needed = math.ceil(round(float(Config.get("learn_coverage")) * len(topic_words), 9))
+    return len(topic_words & set(words(text))) >= needed
 
 
 def retire(item, language, reason, run):

@@ -577,6 +577,7 @@ Tune how `tinker learn` uses the web:
 ```sh
 tinker config learn_searches 1      # at most one follow-up search
 tinker config learn_pages 4         # pages read from each search
+tinker config learn_coverage 0.8    # keep a result only when it holds 80% of the topic's words (60% by default)
 tinker config tool_docs_pages 2     # pages read about each of a language's tools
 tinker config learn_think high      # think harder (and slower) while reading pages
 tinker config web_timeout 60        # wait up to 60 seconds for each search engine

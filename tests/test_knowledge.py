@@ -891,10 +891,12 @@ def test_research_skips_an_off_topic_result(make_model, fake_ollama, tinker_home
     pages = {
         "https://a.org/intake": "Donations are weighed at intake.",
         "https://c.org/flights": "Cheap flights to Paris.",
+        "https://d.org/rates": "Savings rates at a bank.",
     }
     snippets = {
         "https://a.org/intake": "How a food bank records donated food at intake",
         "https://c.org/flights": "Cheap flights to Paris this summer",
+        "https://d.org/rates": "Bank savings account interest rates",
     }
     fake_ollama.reply(json.dumps(FRAME), when="Frame the research")
     fake_ollama.reply(

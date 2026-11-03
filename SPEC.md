@@ -274,7 +274,7 @@ The home and its database, the settings, numbered lists, and the one way to dele
   really are (symlinks resolved). `Home.store()` is the home database, `tinker.db`, in it.
 - **SET-2** `DEFAULT_CONFIG` is exactly: model `None`, ollama_url `http://localhost:11434`, keep_alive `"30m"`,
   max_growth `1.15`, build_think `"medium"`, test_timeout `60`, web_timeout `30`, learn_missing `2`,
-  learn_cutoff `0.0`, learn_pages `8`, learn_min_pages `2`, learn_searches `3`, learn_think `"low"`,
+  learn_cutoff `0.0`, learn_coverage `0.6`, learn_pages `8`, learn_min_pages `2`, learn_searches `3`, learn_think `"low"`,
   tool_docs_pages `5`, docs_latest_days `30`, fetch_workers `6`, fetch_timeout `15`, fetch_max_bytes `2000000`,
   embed_model `""`, projects `"~/Projects"`. web_timeout is a search's timeout; fetch_workers, fetch_timeout and
   fetch_max_bytes are the `Fetcher`'s workers, timeout and max_bytes; embed_model is the embedding model
@@ -1204,7 +1204,7 @@ kept as principles (**PRI**); where a point below names them, it holds for princ
 - **KNW-24** `Learner.web_pages(searches)` runs the searches at once (`Internet.search_all`), takes the results in turn, each page once, at
   most `TEACH_PAGES`, and fetches them in one `Internet.fetch`; a research round searches and fetches its pages the same
   way, all at once, skipping a result whose title and snippet score at most `learn_cutoff` against the topic and
-  the search's question (as **LRN-4**), at most `RESEARCH_PAGES_PER_ROUND` (6, then 4) pages. A page the web
+  the search's question, or hold too few of the topic's own words (as **LRN-4**), at most `RESEARCH_PAGES_PER_ROUND` (6, then 4) pages. A page the web
   could not read stands on its search snippet. Each page keeps
   its `relevant_chunks` for the searches (**KNW-14**), up to
   `TEACH_PAGE_CHARS`. A page with no text is left out. Two addresses are one page when they differ only in
@@ -1307,18 +1307,19 @@ learning and run lessons are apart.
   section); at most `FACTS_PER_SLOT`.
 - **LRN-3** Fail fast. No model call (plan, digest or embedding; a search plan, **KNW-25**, may) runs until the web, or the
   documentation kept from before, has delivered usable pages. PREFLIGHT stops when there is no embedding model;
-  GATE 1 when the search finds nothing, or nothing above `learn_cutoff` (when the web could not search, it has
+  GATE 1 when the search finds nothing, or nothing on topic (**LRN-4**; when the web could not search, it has
   said why, **WEB-3**, **WEB-4**); GATE 2 when fewer than `learn_min_pages` pages give usable
   text (snippets never count). With a saved plan, GATE 2 counts the documentation's pages, and runs search 1
   when they are too few. Then it raises `LearnStopped` (a `SystemExit`: a non-zero exit) naming the cause, what
   was tried and the requests made, saying nothing was learned or saved and what was learned before is
-  untouched, and the next step (after nothing above `learn_cutoff`: learn again later, or name the topic
+  untouched, and the next step (after nothing on topic: learn again later, or name the topic
   differently if it is ambiguous, never only more fully); nothing is written to Tinker's database.
 - **LRN-4** A learn's version and tool documentation searches are needs planned by `SearchPlanner`
   (**KNW-25**). A first learn searches by `DOCS_SITE_SEARCH` (from the topic alone) on every engine, with no
   plan: a plan kept for every topic cannot suit each one, so no one engine's blind spot (a one-letter name, say)
-  can leave the search with nothing about the topic. It picks the results whose
-  title and snippet score above `learn_cutoff` (BM25), each address once, at most `learn_pages`, and fetches
+  can leave the search with nothing about the topic. It picks the results on topic:
+  their title and snippet score above `learn_cutoff` (BM25) and hold at least `learn_coverage` of the topic's
+  distinct words, the share rounded up (both words of a two-word topic, two of three), each address once, at most `learn_pages`, and fetches
   them in one `Internet.fetch`. Only then does the plan call run (at the model's own think setting); for a
   language it names each tool's version command. A saved plan is reused with no search and no call. The version
   commands (each run once) give the version installed. That version's documentation is found by
