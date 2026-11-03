@@ -526,7 +526,8 @@ class Desk:
     def answer(self, message, channel):
         words = command_words(message.text)
         handler = self.handlers(channel, message, words).get(words[0])
-        return handler() if handler is not None else self.by_table(channel, message.chat, words)
+        with channel.waiting(message.chat, f"Running /{' '.join(words)}"):
+            return handler() if handler is not None else self.by_table(channel, message.chat, words)
 
     def by_table(self, channel, chat, words):
         kind = kind_of(words)
@@ -1937,6 +1938,9 @@ class Channel:
     def typing(self, chat):
         pass
 
+    def waiting(self, chat, text):
+        return contextlib.nullcontext()
+
     def send_banner(self, chat, lines):
         first, *middle, last = lines
         return self.send(
@@ -2179,6 +2183,20 @@ class ConsoleChannel(Channel):
         else:
             self.show_going(sent, text, doing, facts)
         return [sent]
+
+    @contextlib.contextmanager
+    def waiting(self, chat, text):
+        if not self.screen.ruled() or self.live_owner is not None:
+            yield
+            return
+        waiter = self.live_owner = object()
+        self.screen.show_live(text, time.monotonic())
+        try:
+            yield
+        finally:
+            if self.live_owner is waiter:
+                self.live_owner = None
+                self.screen.end_live()
 
     def count_live(self, chat, shown, **facts):
         if shown and shown[0] == self.live_owner:

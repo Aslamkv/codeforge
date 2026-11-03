@@ -978,7 +978,9 @@ The terminal and the chats are one conversation: the same commands, the same ans
 - **CNV-11** `Desk.answer` handles a command in one place: its own handler when the conversation has one
   (`Desk.handlers`, by command name), and otherwise by its action in the table (**CMD-1**): one that deletes
   asks first, a `job` starts a task, a `terminal` one says to run it in a terminal, and the rest run as
-  `tinker`. `task WHAT` starts a task, and a bare `task` gets its usage. A
+  `tinker`. While a command is answered, the terminal's live line says it runs (`Channel.waiting`), unless a
+  job's progress holds that line, and it goes when the answer comes. `task WHAT` starts a task, and a bare
+  `task` gets its usage. A
   run that starts a cycle is given `--confirm`, so its plan waits for the person. `status` alone gives what
   runs (`status @PROJECT` is that project's status, **CLI-3**). `stop`, `stop #N` and `resume [#N]` act on
   jobs (**JOB-7**). A command that deletes shows what it deletes and waits
