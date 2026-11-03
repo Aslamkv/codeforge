@@ -1188,7 +1188,9 @@ kept as principles (**PRI**); where a point below names them, it holds for princ
   The first round searches the topic's name alone on `wikipedia` and `wikibooks` (its own article) before the
   frame's searches; its facts answer no question, and a check of one searches for none. A research reads its
   pages with `RESEARCH_FACTS_SYSTEM`, which keeps what its questions ask (definitions, key terms, how it is done,
-  numbers, limits and standards, what is changing); a learn reads with `FACTS_SYSTEM`. A round that gives no fact goes on: the next round searches each question as written on
+  numbers, limits and standards, what is changing); a learn reads with `FACTS_SYSTEM`. Each excerpt a research reads is at most
+  `RESEARCH_EXCERPT_CHARS` characters (16000, a page's `relevant_chunks` of that size); a learn's fills the model's
+  room for the prompt. A round that gives no fact goes on: the next round searches each question as written on
   every engine. A research says it found nothing only when every round gave no fact.
 - **KNW-19** `Library.save` gives each research finding `cites`: the IDs of the facts it cites by number, so
   the link holds when a fact is retired.

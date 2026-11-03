@@ -20,6 +20,7 @@ from .settings import (
     MAX_PLANNED_SEARCHES,
     REPEAT_CLAIM_SIMILARITY,
     RESEARCH_ANALYSIS_THINK,
+    RESEARCH_EXCERPT_CHARS,
     RESEARCH_FACTS_CHECKED,
     RESEARCH_FRAME_THINK,
     RESEARCH_GAPS,
@@ -622,6 +623,9 @@ class Learner(Tracked):
 
 class ResearchLearner(Learner):
     FACTS_SYSTEM = Prompts.RESEARCH_FACTS_SYSTEM
+
+    def room_for_excerpts(self, topic, source, focus):
+        return min(super().room_for_excerpts(topic, source, focus), RESEARCH_EXCERPT_CHARS)
 
 
 class SearchPlanner:

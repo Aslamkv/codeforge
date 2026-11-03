@@ -24,6 +24,7 @@ from tinkerkit.settings import (
     CHUNKS_PER_PAGE,
     EMBED_KEEP_ALIVE,
     MAX_PLANNED_SEARCHES,
+    RESEARCH_EXCERPT_CHARS,
     RESULTS_PER_RESEARCH_SEARCH,
     TEACH_PAGE_CHARS,
     TEACH_PAGES,
@@ -1024,9 +1025,44 @@ def test_a_learn_reads_with_the_facts_prompt_and_a_research_with_the_research_fa
     facts = learner.facts_in([Part("Look for", "stock", True)], {"url": "https://a.org"}, 1, 1)
     assert facts == [{"phase": "spec", "text": "A ledger lists the stock"}]
     assert fake_ollama.calls[0]["messages"][0]["content"].startswith(system)
+
+
+@pytest.mark.spec("KNW-18")
+def test_a_learn_reads_excerpts_that_fill_the_models_room(make_model):
+    learner = Learner(make_model(), FakeInternet(), None)
     topic, source, focus = "stock", Part("Page", "s", True), Part("Look for", "f", True)
-    room = learner.model.limit_chars(system) - source.size() - focus.size() - len(topic) - 200
+    room = learner.model.limit_chars(Prompts.FACTS_SYSTEM) - source.size() - focus.size() - len(topic) - 200
     assert learner.room_for_excerpts(topic, source, focus) == room
+
+
+@pytest.mark.spec("KNW-18")
+def test_a_research_reads_excerpts_of_at_most_the_research_excerpt_size(make_model):
+    learner = ResearchLearner(make_model(), FakeInternet(), None)
+    topic, source, focus = "stock", Part("Page", "s", True), Part("Look for", "f", True)
+    room = Learner.room_for_excerpts(learner, topic, source, focus)
+    assert room > RESEARCH_EXCERPT_CHARS
+    assert learner.room_for_excerpts(topic, source, focus) == RESEARCH_EXCERPT_CHARS
+
+
+@pytest.mark.spec("KNW-18")
+def test_a_research_reads_a_long_page_as_excerpts_of_at_most_the_research_excerpt_size(
+    make_model, fake_ollama
+):
+    fake_ollama.reply(
+        json.dumps({"facts": [{"phase": "spec", "text": "A ledger lists the stock"}]}),
+        when="Facts",
+        times=CHUNKS_PER_PAGE,
+    )
+    learner = ResearchLearner(make_model(), FakeInternet(), None)
+    page = {
+        "title": "Stock",
+        "url": "https://a.org",
+        "focus": "ledger",
+        "content": "A stock ledger line. " * 5000,
+    }
+    learner.read_page("stock", page, 1)
+    excerpts = [call["messages"][-1]["content"] for call in fake_ollama.calls]
+    assert excerpts and all(len(excerpt) < RESEARCH_EXCERPT_CHARS + 500 for excerpt in excerpts)
 
 
 @pytest.mark.spec("KNW-18")
