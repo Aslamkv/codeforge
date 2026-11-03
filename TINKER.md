@@ -349,8 +349,7 @@ A domain is learned like a tool. To research one, its facts checked across sites
 slower). The first round reads the topic's own article first. Each round skips results off the topic and
 reads 6 pages, then 4, keeping what its questions ask; a round that finds nothing searches each question again
 as written, so a research says it found nothing only when every round did. The model frames, reads facts and
-weighs the findings without thinking, and thinks only when the pages those findings cite become principles,
-once, at the end.
+weighs the findings without thinking. A research is kept as facts and findings; it makes no principles.
 
 A language or a tool is learned mainly from its own documentation, for the version you have installed
 (a language's tools too: its test runner, formatter, linter). The first time takes a search to find what it
