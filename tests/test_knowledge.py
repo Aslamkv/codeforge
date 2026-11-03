@@ -23,8 +23,6 @@ from tinkerkit.settings import (
     CHUNKS_PER_PAGE,
     EMBED_KEEP_ALIVE,
     MAX_PLANNED_SEARCHES,
-    RESEARCH_ANALYSIS_THINK,
-    RESEARCH_FRAME_THINK,
     TEACH_PAGE_CHARS,
     TEACH_PAGES,
     Config,
@@ -871,9 +869,9 @@ def test_research_a_domain(make_model, fake_ollama, tinker_home):
         '"checks"' in first_analysis and '"checks"' not in last_analysis and "- checks:" not in last_analysis
     )
     thinks = {step_of(call["label"]): call["think"] for call in fake_ollama.calls}
-    assert thinks["Frame the research"] == RESEARCH_FRAME_THINK
+    assert thinks["Frame the research"] is False
     assert thinks["Facts"] is False
-    assert thinks["Analyse the findings"] == RESEARCH_ANALYSIS_THINK
+    assert thinks["Analyse the findings"] is False
     assert thinks["Induce principles from the passages"] == Config.get("learn_think")
     assert Library.read("food-bank-inventory")["kind"] == "research"
     assert len(internet.fetches) == 2 and internet.fetches[0] == list(pages)

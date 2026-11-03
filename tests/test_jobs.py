@@ -16,7 +16,7 @@ from tinkerkit.knowledge import Learner, Researcher
 from tinkerkit.learning import SlotLearner
 from tinkerkit.model import Ollama
 from tinkerkit.project import Tracker
-from tinkerkit.settings import JOB_STOP_SIGNAL, RESEARCH_FRAME_THINK
+from tinkerkit.settings import JOB_STOP_SIGNAL
 
 DEAD_PID = 999999999
 
@@ -402,7 +402,7 @@ def test_a_research_job_frames_its_topic_on_the_day_the_job_started(home_store, 
     with Jobs.running(Jobs.arguments(["resume", "#1"])):
         Researcher(Learner(None, None, None)).frame("go", None)
     assert next(part for part in given if part.title == "Today").text == "2026-01-02"
-    assert thinks == [RESEARCH_FRAME_THINK]
+    assert thinks == [False]
 
 
 def other_running(home_store, number=1, command="learn", title="learn go"):

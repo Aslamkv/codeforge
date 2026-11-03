@@ -346,9 +346,9 @@ tinker learn food bank inventory
 ```
 
 A domain is learned like a tool. To research one, its facts checked across sites, use `tinker research` (it is
-slower). Each round skips results off the topic and reads 6 pages, then 4; the model reads their facts without
-thinking and thinks only to weigh the findings, and the pages those findings cite become principles once, at
-the end.
+slower). Each round skips results off the topic and reads 6 pages, then 4; the model frames, reads facts and
+weighs the findings without thinking, and thinks only when the pages those findings cite become principles,
+once, at the end.
 
 A language or a tool is learned mainly from its own documentation, for the version you have installed
 (a language's tools too: its test runner, formatter, linter). The first time takes a search to find what it
