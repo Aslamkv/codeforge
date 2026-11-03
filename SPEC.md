@@ -1184,6 +1184,7 @@ kept as principles (**PRI**); where a point below names them, it holds for princ
   findings cite are induced into principles in one call (**PRI-4**, scoped to the topic's slug; a passage is the
   page's `relevant_chunks` for the questions, its address the source), and the research keeps one record: the
   ids of the principles it changed and the pages cited. A research that keeps the earlier one induces nothing.
+  An analysis is usable with findings or gaps: one with only gaps says the facts answer nothing and searches again.
 - **KNW-19** `Library.save` gives each research finding `cites`: the IDs of the facts it cites by number, so
   the link holds when a fact is retired.
 - **KNW-20** A topic's playbook is its principles (**PRI**): nothing condenses facts into rules. What a learn
