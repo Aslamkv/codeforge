@@ -1186,9 +1186,9 @@ kept as principles (**PRI**); where a point below names them, it holds for princ
   ids of the principles it changed and the pages cited. A research that keeps the earlier one induces nothing.
   An analysis is usable with findings or gaps: one with only gaps says the facts answer nothing and searches again.
   The first round searches the topic's name alone on `wikipedia` and `wikibooks` (its own article) before the
-  frame's searches. A research reads its pages with `RESEARCH_FACTS_SYSTEM`, which keeps what its questions
-  ask (definitions, key terms, how it is done, numbers, limits and standards, what is changing); a learn reads
-  with `FACTS_SYSTEM`. A round that gives no fact goes on: the next round searches each question as written on
+  frame's searches; its facts answer no question, and a check of one searches for none. A research reads its
+  pages with `RESEARCH_FACTS_SYSTEM`, which keeps what its questions ask (definitions, key terms, how it is done,
+  numbers, limits and standards, what is changing); a learn reads with `FACTS_SYSTEM`. A round that gives no fact goes on: the next round searches each question as written on
   every engine. A research says it found nothing only when every round gave no fact.
 - **KNW-19** `Library.save` gives each research finding `cites`: the IDs of the facts it cites by number, so
   the link holds when a fact is retired.

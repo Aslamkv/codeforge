@@ -1083,7 +1083,7 @@ class Researcher:
         checks = [
             dict(
                 check["search"],
-                section=facts[check["fact"] - 1]["section"],
+                section=facts[check["fact"] - 1].get("section", ""),
                 pages=2,
                 focus=f"whether this is so, and the exact figures: {facts[check['fact'] - 1]['text']}",
             )

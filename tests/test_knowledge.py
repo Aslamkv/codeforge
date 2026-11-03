@@ -817,6 +817,21 @@ def test_supported_and_entry():
 
 
 @pytest.mark.spec("KNW-18")
+def test_a_check_of_a_fact_from_the_topics_own_article_searches_for_no_question():
+    frame = {"questions": [{"question": "q1"}]}
+    analysis = {"gaps": [], "checks": [{"fact": 1, "search": {"query": "check a"}}]}
+    searches = Researcher.next_searches(frame, [{"text": "a", "url": "u"}], analysis)
+    assert searches == [
+        {
+            "query": "check a",
+            "section": "",
+            "pages": 2,
+            "focus": "whether this is so, and the exact figures: a",
+        }
+    ]
+
+
+@pytest.mark.spec("KNW-18")
 def test_next_searches_and_fact_listing():
     frame = {"questions": [{"question": "q1"}, {"question": "q2"}]}
     facts = [fact("a", "u", "2"), fact("b", "u", "1")]
