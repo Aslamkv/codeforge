@@ -10,7 +10,7 @@ import tinkerkit.model as model_module
 from tinkerkit import quality
 from tinkerkit.messages import DIMMED, HEADING, say
 from tinkerkit.model import Answer, Calibrator, GgufReading, Model, Models, Ollama, OllamaError, Stream
-from tinkerkit.prompts import Part, Prompts, PromptTooLarge, Reply
+from tinkerkit.prompts import Part, PromptTooLarge, Reply
 from tinkerkit.settings import (
     PROMPT_BUDGET_SHARE,
     QUALITY_REPLY_TOKENS,
@@ -873,7 +873,7 @@ def test_ask_once(make_model, fake_ollama, model_log):
         "the answer"
     )
     messages = fake_ollama.calls[0]["messages"]
-    assert messages[0] == {"role": "system", "content": "You help." + Prompts.NO_TOOL_CALLS}
+    assert messages[0] == {"role": "system", "content": "You help.\nNever call a tool or function."}
     assert messages[1] == {"role": "user", "content": "## Question\nwhat?"}
     assert fake_ollama.calls[0]["think"] == "high" and fake_ollama.calls[0]["options"]["num_ctx"] == 32768
     log = [entry for _, entry in model_log.store.entries("calls")]
@@ -1009,7 +1009,7 @@ def test_a_reply_error_is_asked_once_more_then_the_partial_is_used(make_model, f
 def test_crashes_lower_a_limit_for_the_run_then_stop(make_model, fake_ollama, no_sleep, capsys):
     model = make_model(max_prompt_tokens=700)
     fake_ollama.reply(OllamaError("runner process has terminated", crashed=True), times=2).reply("ok")
-    assert model.ask("s", [Part("Q", "q" * 1000, True)], "Ask") == Answer("ok")
+    assert model.ask("s", [Part("Q", "q" * 5000, True)], "Ask") == Answer("ok")
     assert model.max_tokens == 630 and model.crashes == 2 and model.calibrated[0] == 700
     assert no_sleep.count(model_module.CRASH_RECOVERY_SECONDS) == 2
     fake_ollama.reply(OllamaError("runner failed", crashed=True), times=4)

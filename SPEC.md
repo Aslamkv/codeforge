@@ -632,8 +632,9 @@ What is said in the chats, kept so that a chat is only a view of it.
 - **MOD-16** `Model` takes its limits from the measured settings. It builds at `build_think` only when the
   model thinks. Its chars per token stay within [2, 4]. `limit_chars(system)` is
   `tokens × PROMPT_BUDGET_SHARE × chars_per_token − len(system) − 40`.
-- **MOD-17** `Model.ask_once` adds `NO_TOOL_CALLS` to the system prompt. It fits the user message to the
-  prompt budget, gives an `Answer` with the reply's content as its value, and logs the exchange to its log.
+- **MOD-17** `Model.ask_once` adds `NO_TOOL_CALLS` to the system prompt: never call a tool or function, with
+  no word on the reply's form, so a prompt that asks for JSON never meets a call for plain text. It fits the
+  user message to the prompt budget, gives an `Answer` with the reply's content as its value, and logs the exchange to its log.
   An `Answer` is one result of a model call: its `value`, `why` it is not usable (empty when it is) and the
   `thought` left unfinished. `needed(message)` gives the value, or ends with `SystemExit` naming the message
   and why.
@@ -1179,16 +1180,15 @@ kept as principles (**PRI**); where a point below names them, it holds for princ
 - **KNW-18** `Researcher.research(topic)` frames the topic as questions, reads pages for each, cross-checks and
   analyses the facts, searches the gaps and checks in one more round, and keeps the topic as research: its
   questions, findings, contradictions, open gaps, and facts with their sources and confidence. Framing
-  (`RESEARCH_FRAME_THINK`) and analysing (`RESEARCH_ANALYSIS_THINK`) never think; inducing thinks at
-  `learn_think`. The last round's analysis asks for no checks, since no round follows. The pages the
-  findings cite are induced into principles in one call (**PRI-4**, scoped to the topic's slug; a passage is the
-  page's `relevant_chunks` for the questions, its address the source), and the research keeps one record: the
-  ids of the principles it changed and the pages cited. A research that keeps the earlier one induces nothing.
+  (`RESEARCH_FRAME_THINK`) and analysing (`RESEARCH_ANALYSIS_THINK`) never think. The last round's analysis
+  asks for no checks, since no round follows. A research induces no principles.
   An analysis is usable with findings or gaps: one with only gaps says the facts answer nothing and searches again.
   The first round searches the topic's name alone on `wikipedia` and `wikibooks` (its own article) before the
-  frame's searches. A research reads its pages with `RESEARCH_FACTS_SYSTEM`, which keeps what its questions
-  ask (definitions, key terms, how it is done, numbers, limits and standards, what is changing); a learn reads
-  with `FACTS_SYSTEM`. A round that gives no fact goes on: the next round searches each question as written on
+  frame's searches; its facts answer no question, and a check of one searches for none. A research reads its
+  pages with `RESEARCH_FACTS_SYSTEM`, which keeps what its questions ask (definitions, key terms, how it is done,
+  numbers, limits and standards, what is changing); a learn reads with `FACTS_SYSTEM`. Each excerpt a research reads is at most
+  `RESEARCH_EXCERPT_CHARS` characters (16000, a page's `relevant_chunks` of that size); a learn's fills the model's
+  room for the prompt. A round that gives no fact goes on: the next round searches each question as written on
   every engine. A research says it found nothing only when every round gave no fact.
 - **KNW-19** `Library.save` gives each research finding `cites`: the IDs of the facts it cites by number, so
   the link holds when a fact is retired.
@@ -1250,6 +1250,7 @@ What every learning keeps: patterns found in what Tinker read or did, as princip
   passages (**PRI-6**, at most `INDUCE_KNOWN_SHOWN`). The reply is a list of deltas, each citing the passages it
   rests on by number; a delta citing no given passage is dropped, and the cited passages become its evidence.
   `do` is cut to `MAX_FACT_CHARS`, `when` to `MAX_RULE_WHEN_CHARS`. A reply with no list is not usable.
+  Passages without text are left out; with none left, it makes no call and changes nothing.
 - **PRI-5** A principle is a candidate when added, and is proven, helped and retired as a lesson is (**KNW-7**,
   **KNW-9**, **KNW-10**). One with more `harmed` than evidence is retired, with the reason that it was
   contradicted. One no build shows (phase `book`) stays a candidate and is shown with its evidence; one from a

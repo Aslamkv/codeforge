@@ -8,7 +8,7 @@ lazy import tempfile
 lazy from pathlib import Path
 
 from .messages import say
-from .principles import Inducer, Principles, claim_id, record
+from .principles import Principles, claim_id, record
 from .retrieval import Embeddings, Retriever
 from .settings import (
     CHUNKS_PER_PAGE,
@@ -20,6 +20,7 @@ from .settings import (
     MAX_PLANNED_SEARCHES,
     REPEAT_CLAIM_SIMILARITY,
     RESEARCH_ANALYSIS_THINK,
+    RESEARCH_EXCERPT_CHARS,
     RESEARCH_FACTS_CHECKED,
     RESEARCH_FRAME_THINK,
     RESEARCH_GAPS,
@@ -47,7 +48,7 @@ lazy from .workspace import Toolchain, Workspace
 SavedPlan = namedtuple("SavedPlan", "plan saved")
 SafeCommands = namedtuple("SafeCommands", "kept dropped")
 Findings = namedtuple("Findings", "facts sources")
-Investigation = namedtuple("Investigation", "facts sources analysis pages")
+Investigation = namedtuple("Investigation", "facts sources analysis")
 CrossCheck = namedtuple("CrossCheck", "support differ")
 
 
@@ -623,6 +624,9 @@ class Learner(Tracked):
 class ResearchLearner(Learner):
     FACTS_SYSTEM = Prompts.RESEARCH_FACTS_SYSTEM
 
+    def room_for_excerpts(self, topic, source, focus):
+        return min(super().room_for_excerpts(topic, source, focus), RESEARCH_EXCERPT_CHARS)
+
 
 class SearchPlanner:
     PLAN_TOKENS = 400
@@ -708,7 +712,7 @@ class Researcher:
         learner = self.learner
         known = Library.read(slug)
         frame = self.frame(topic, known if (known or {}).get("kind") == "research" else None)
-        facts, sources, analysis, pages = self.investigate(frame)
+        facts, sources, analysis = self.investigate(frame)
         if known and (learner.cut_short() or not facts):
             say.warn(
                 f"{learner.cut_short() or 'No page gave facts'}; kept what was found before "
@@ -723,8 +727,6 @@ class Researcher:
             )
             return None
         entry = self.entry(topic, frame, facts, sources, analysis)
-        learner.step("induce")
-        entry["principles"] = self.principles_from(entry, pages, slug)
         learner.step("keep")
         Library.save(slug, entry)
         say.info(
@@ -779,7 +781,7 @@ class Researcher:
 
     def investigate(self, frame):
         searches = self.first_searches(frame)
-        facts, sources, analysis, fetched = [], [], self.EMPTY_ANALYSIS, []
+        facts, sources, analysis = [], [], self.EMPTY_ANALYSIS
         for round_number, pages in enumerate(RESEARCH_PAGES_PER_ROUND, 1):
             if not searches:
                 break
@@ -791,7 +793,6 @@ class Researcher:
             with say.working_on(f"Reading up to {pages} page(s) about {frame['name']}, round {round_number}"):
                 round_pages = self.round_pages(frame["name"], searches, pages)
                 found, read = self.learner.read_pages(frame["name"], round_pages)
-            fetched += round_pages
             self.learner.add_facts(facts, found)
             sources += [url for url in read if url not in sources]
             self.say_round(facts, sources, found)
@@ -804,7 +805,7 @@ class Researcher:
             system = self.analysis_system(round_number)
             analysis = self.analyse(frame, facts, differ, system) or analysis
             searches = self.next_searches(frame, facts, analysis)
-        return Investigation(facts, sources, analysis, fetched)
+        return Investigation(facts, sources, analysis)
 
     def round_pages(self, topic, searches, max_pages):
         learner = self.learner
@@ -813,36 +814,6 @@ class Researcher:
             for search, found in zip(searches, learner.results(searches))
         ]
         return learner.fetched(learner.in_turn(searches, results, max_pages))
-
-    def principles_from(self, entry, pages, slug):
-        principles = Principles(self.learner.embeddings)
-        cited_pages = self.pages_cited(entry, pages)
-        wanted = " ".join(question["question"] for question in entry["questions"])
-        given = [{"text": page_passage(page, wanted), "source": page["url"]} for page in cited_pages]
-        deltas = Inducer(self.model, principles).induce(given, scope=slug, think=Config.get("learn_think"))
-        changed = principles.apply(deltas, "")
-        with say.section():
-            if changed:
-                say.done(f"{len(changed)} principle(s) from {len(cited_pages)} page(s)")
-                say.found(first_line(changed[0].prompt_text(), 200))
-            else:
-                say.skip(f"No principles found in {len(cited_pages)} page(s)")
-        cited = [item["source"] for delta in deltas for item in delta["evidence"]]
-        return (
-            [{"principles": [principle.id for principle in changed], "passages": list(dict.fromkeys(cited))}]
-            if changed
-            else []
-        )
-
-    @staticmethod
-    def pages_cited(entry, pages):
-        sources = {
-            url
-            for finding in entry["findings"]
-            for number in finding["facts"]
-            for url in Learner.pages_of(entry["facts"][number - 1])
-        }
-        return list({page["url"]: page for page in pages if page["url"] in sources}.values())
 
     @staticmethod
     def first_searches(frame):
@@ -1083,7 +1054,7 @@ class Researcher:
         checks = [
             dict(
                 check["search"],
-                section=facts[check["fact"] - 1]["section"],
+                section=facts[check["fact"] - 1].get("section", ""),
                 pages=2,
                 focus=f"whether this is so, and the exact figures: {facts[check['fact'] - 1]['text']}",
             )

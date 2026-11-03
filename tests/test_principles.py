@@ -387,6 +387,24 @@ def test_an_induced_delta_citing_no_given_passage_is_dropped(make_model, fake_ol
 
 
 @pytest.mark.spec("PRI-4")
+def test_induce_without_passages_makes_no_call(make_model, fake_ollama, tinker_home):
+    assert Inducer(make_model(), Principles(None)).induce([], "python") == []
+    assert fake_ollama.calls == []
+
+
+@pytest.mark.spec("PRI-4")
+def test_induce_leaves_out_passages_without_text(make_model, fake_ollama, tinker_home):
+    blank = [{"text": "", "source": "book:testing#1"}, {"text": "  \n", "source": "book:testing#4"}]
+    fake_ollama.reply(json.dumps({"deltas": []}), when="Induce")
+    assert Inducer(make_model(), Principles(None)).induce(blank + PASSAGES[1:], "python") == []
+    prompt = fake_ollama.calls[-1]["messages"][-1]["content"]
+    assert "1. Use a temporary directory for every test that reads a file." in prompt
+    assert "2. " not in prompt
+    assert Inducer(make_model(), Principles(None)).induce(blank, "python") == []
+    assert len(fake_ollama.calls) == 1
+
+
+@pytest.mark.spec("PRI-4")
 def test_an_induced_change_names_a_shown_principle_by_its_number(make_model, fake_ollama, tinker_home):
     principles = Principles(None)
     kept = kept_principle(principles)

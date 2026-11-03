@@ -319,6 +319,9 @@ class Inducer:
         self.principles = principles
 
     def induce(self, passages, scope, think=None, look_for="", label="Induce principles from the passages"):
+        passages = [passage for passage in passages if passage["text"].strip()]
+        if not passages:
+            return []
         known = self.principles.about(self.passages_text(passages), INDUCE_KNOWN_SHOWN, scope)
         answer = self.model.ask_until_usable(
             Prompts.INDUCE_SYSTEM,

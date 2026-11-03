@@ -24,6 +24,7 @@ from tinkerkit.settings import (
     CHUNKS_PER_PAGE,
     EMBED_KEEP_ALIVE,
     MAX_PLANNED_SEARCHES,
+    RESEARCH_EXCERPT_CHARS,
     RESULTS_PER_RESEARCH_SEARCH,
     TEACH_PAGE_CHARS,
     TEACH_PAGES,
@@ -817,6 +818,21 @@ def test_supported_and_entry():
 
 
 @pytest.mark.spec("KNW-18")
+def test_a_check_of_a_fact_from_the_topics_own_article_searches_for_no_question():
+    frame = {"questions": [{"question": "q1"}]}
+    analysis = {"gaps": [], "checks": [{"fact": 1, "search": {"query": "check a"}}]}
+    searches = Researcher.next_searches(frame, [{"text": "a", "url": "u"}], analysis)
+    assert searches == [
+        {
+            "query": "check a",
+            "section": "",
+            "pages": 2,
+            "focus": "whether this is so, and the exact figures: a",
+        }
+    ]
+
+
+@pytest.mark.spec("KNW-18")
 def test_next_searches_and_fact_listing():
     frame = {"questions": [{"question": "q1"}, {"question": "q2"}]}
     facts = [fact("a", "u", "2"), fact("b", "u", "1")]
@@ -891,21 +907,11 @@ def test_research_a_domain(make_model, fake_ollama, tinker_home):
         when="Analyse the findings",
     )
     fake_ollama.reply(analysis(), when="Analyse the findings")
-    fake_ollama.reply(
-        json.dumps(
-            {"deltas": [{"kind": "add", "phase": "spec", "do": "Weigh donations at intake", "cites": [1]}]}
-        ),
-        when="Induce",
-    )
     snippets = {url: "How a food bank records donated food" for url in pages}
     internet = FakeInternet(pages, snippets=snippets)
     entry = Researcher(Learner(make_model(), internet, None)).research("food bank inventory")
-    kept = Principles(None).all()
-    assert [principle.do for principle in kept] == ["Weigh donations at intake"]
-    [record] = entry["principles"]
-    assert "question" not in record and record["principles"] == [kept[0].id]
-    assert len(record["passages"]) == 1 and record["passages"][0] in pages
-    assert len([label for label in fake_ollama.labels() if label.startswith("Induce")]) == 1
+    assert "principles" not in entry and Principles(None).all() == []
+    assert not any(Prompts.INDUCE_SYSTEM in call["messages"][0]["content"] for call in fake_ollama.calls)
     assert entry["kind"] == "research" and entry["name"] == "Food bank inventory"
     assert entry["questions"] == FRAME["questions"] and entry["open"] == []
     assert entry["facts"][0]["confidence"] == "corroborated" and entry["facts"][0]["sites"] == [
@@ -926,7 +932,6 @@ def test_research_a_domain(make_model, fake_ollama, tinker_home):
     assert thinks["Frame the research"] is False
     assert thinks["Facts"] is False
     assert thinks["Analyse the findings"] is False
-    assert thinks["Induce principles from the passages"] == Config.get("learn_think")
     assert Library.read("food-bank-inventory")["kind"] == "research"
     assert len(internet.fetches) == 2 and internet.fetches[0] == list(pages)
 
@@ -1009,9 +1014,44 @@ def test_a_learn_reads_with_the_facts_prompt_and_a_research_with_the_research_fa
     facts = learner.facts_in([Part("Look for", "stock", True)], {"url": "https://a.org"}, 1, 1)
     assert facts == [{"phase": "spec", "text": "A ledger lists the stock"}]
     assert fake_ollama.calls[0]["messages"][0]["content"].startswith(system)
+
+
+@pytest.mark.spec("KNW-18")
+def test_a_learn_reads_excerpts_that_fill_the_models_room(make_model):
+    learner = Learner(make_model(), FakeInternet(), None)
     topic, source, focus = "stock", Part("Page", "s", True), Part("Look for", "f", True)
-    room = learner.model.limit_chars(system) - source.size() - focus.size() - len(topic) - 200
+    room = learner.model.limit_chars(Prompts.FACTS_SYSTEM) - source.size() - focus.size() - len(topic) - 200
     assert learner.room_for_excerpts(topic, source, focus) == room
+
+
+@pytest.mark.spec("KNW-18")
+def test_a_research_reads_excerpts_of_at_most_the_research_excerpt_size(make_model):
+    learner = ResearchLearner(make_model(), FakeInternet(), None)
+    topic, source, focus = "stock", Part("Page", "s", True), Part("Look for", "f", True)
+    room = Learner.room_for_excerpts(learner, topic, source, focus)
+    assert room > RESEARCH_EXCERPT_CHARS
+    assert learner.room_for_excerpts(topic, source, focus) == RESEARCH_EXCERPT_CHARS
+
+
+@pytest.mark.spec("KNW-18")
+def test_a_research_reads_a_long_page_as_excerpts_of_at_most_the_research_excerpt_size(
+    make_model, fake_ollama
+):
+    fake_ollama.reply(
+        json.dumps({"facts": [{"phase": "spec", "text": "A ledger lists the stock"}]}),
+        when="Facts",
+        times=CHUNKS_PER_PAGE,
+    )
+    learner = ResearchLearner(make_model(), FakeInternet(), None)
+    page = {
+        "title": "Stock",
+        "url": "https://a.org",
+        "focus": "ledger",
+        "content": "A stock ledger line. " * 5000,
+    }
+    learner.read_page("stock", page, 1)
+    excerpts = [call["messages"][-1]["content"] for call in fake_ollama.calls]
+    assert excerpts and all(len(excerpt) < RESEARCH_EXCERPT_CHARS + 500 for excerpt in excerpts)
 
 
 @pytest.mark.spec("KNW-18")
