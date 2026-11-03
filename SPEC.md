@@ -632,8 +632,9 @@ What is said in the chats, kept so that a chat is only a view of it.
 - **MOD-16** `Model` takes its limits from the measured settings. It builds at `build_think` only when the
   model thinks. Its chars per token stay within [2, 4]. `limit_chars(system)` is
   `tokens × PROMPT_BUDGET_SHARE × chars_per_token − len(system) − 40`.
-- **MOD-17** `Model.ask_once` adds `NO_TOOL_CALLS` to the system prompt. It fits the user message to the
-  prompt budget, gives an `Answer` with the reply's content as its value, and logs the exchange to its log.
+- **MOD-17** `Model.ask_once` adds `NO_TOOL_CALLS` to the system prompt: never call a tool or function, with
+  no word on the reply's form, so a prompt that asks for JSON never meets a call for plain text. It fits the
+  user message to the prompt budget, gives an `Answer` with the reply's content as its value, and logs the exchange to its log.
   An `Answer` is one result of a model call: its `value`, `why` it is not usable (empty when it is) and the
   `thought` left unfinished. `needed(message)` gives the value, or ends with `SystemExit` naming the message
   and why.

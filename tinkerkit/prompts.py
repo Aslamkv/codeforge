@@ -373,7 +373,7 @@ class PromptTooLarge(Exception):
 
 
 class Prompts:
-    NO_TOOL_CALLS = "\nReply in plain text; never call a tool or function."
+    NO_TOOL_CALLS = "\nNever call a tool or function."
     FOLDER_NAME_SYSTEM = (
         "Name the folder of the project the person asks for: one to three short lowercase words "
         "joined by hyphens, at most 20 characters, the shorter the better; shorten well-known "
