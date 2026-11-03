@@ -1185,6 +1185,11 @@ kept as principles (**PRI**); where a point below names them, it holds for princ
   page's `relevant_chunks` for the questions, its address the source), and the research keeps one record: the
   ids of the principles it changed and the pages cited. A research that keeps the earlier one induces nothing.
   An analysis is usable with findings or gaps: one with only gaps says the facts answer nothing and searches again.
+  The first round searches the topic's name alone on `wikipedia` and `wikibooks` (its own article) before the
+  frame's searches. A research reads its pages with `RESEARCH_FACTS_SYSTEM`, which keeps what its questions
+  ask (definitions, key terms, how it is done, numbers, limits and standards, what is changing); a learn reads
+  with `FACTS_SYSTEM`. A round that gives no fact goes on: the next round searches each question as written on
+  every engine. A research says it found nothing only when every round gave no fact.
 - **KNW-19** `Library.save` gives each research finding `cites`: the IDs of the facts it cites by number, so
   the link holds when a fact is retired.
 - **KNW-20** A topic's playbook is its principles (**PRI**): nothing condenses facts into rules. What a learn
@@ -1212,7 +1217,7 @@ kept as principles (**PRI**); where a point below names them, it holds for princ
 - **KNW-25** Every prompt that writes searches (a research's frame, gaps and checks, a learn plan's
   follow-ups, and a teaching's checks) writes each as `{query, engines, count}`
   (**WEB-3**), and says what each engine is good for: `mwmbl` the whole web, plain keywords only; `wikipedia`
-  overviews; `wikibooks` tutorials and manuals. Where code alone has a need (a learn's version and tool
+  overviews; `wikibooks` tutorials and manuals. A query is short and never names an engine. Where code alone has a need (a learn's version and tool
   documentation searches), `SearchPlanner.plan(need, count, values)` turns it into searches with one quick call (**MOD-25**,
   no thinking) under that prompt, then fills the need's placeholders (`{topic}`, `{name}`, `{version}`) from
   `values`. With no quick model, a failed call or a reply with no search, the plan is the filled need as one
