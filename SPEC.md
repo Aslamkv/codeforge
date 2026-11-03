@@ -1180,11 +1180,8 @@ kept as principles (**PRI**); where a point below names them, it holds for princ
 - **KNW-18** `Researcher.research(topic)` frames the topic as questions, reads pages for each, cross-checks and
   analyses the facts, searches the gaps and checks in one more round, and keeps the topic as research: its
   questions, findings, contradictions, open gaps, and facts with their sources and confidence. Framing
-  (`RESEARCH_FRAME_THINK`) and analysing (`RESEARCH_ANALYSIS_THINK`) never think; inducing thinks at
-  `learn_think`. The last round's analysis asks for no checks, since no round follows. The pages the
-  findings cite are induced into principles in one call (**PRI-4**, scoped to the topic's slug; a passage is the
-  page's `relevant_chunks` for the questions, its address the source), and the research keeps one record: the
-  ids of the principles it changed and the pages cited. A research that keeps the earlier one induces nothing.
+  (`RESEARCH_FRAME_THINK`) and analysing (`RESEARCH_ANALYSIS_THINK`) never think. The last round's analysis
+  asks for no checks, since no round follows. A research induces no principles.
   An analysis is usable with findings or gaps: one with only gaps says the facts answer nothing and searches again.
   The first round searches the topic's name alone on `wikipedia` and `wikibooks` (its own article) before the
   frame's searches; its facts answer no question, and a check of one searches for none. A research reads its
