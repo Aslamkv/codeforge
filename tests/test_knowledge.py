@@ -603,23 +603,21 @@ def test_read_frame():
 
 @pytest.mark.spec("KNW-18")
 def test_the_first_round_searches_the_topics_name_alone_on_wikipedia_and_wikibooks_first():
-    frame = {
-        "name": "Food banks",
-        "questions": [{"question": "How?", "queries": [{"query": "food recording"}]}],
-    }
-    own, asked = Researcher.first_searches(frame)
+    own, asked = Researcher.first_searches(FRAME)
     assert own == {
-        "query": "Food banks",
+        "query": "Food bank inventory",
         "engines": ["wikipedia", "wikibooks"],
         "section": "",
         "pages": RESULTS_PER_RESEARCH_SEARCH,
-        "focus": "Food banks",
+        "focus": "Food bank inventory",
     }
     assert asked == {
-        "query": "food recording",
+        "query": "food bank intake records",
+        "engines": ["mwmbl"],
+        "count": 5,
         "section": "1",
         "pages": RESULTS_PER_RESEARCH_SEARCH,
-        "focus": "How?",
+        "focus": "How is donated food recorded?",
     }
 
 
@@ -633,8 +631,20 @@ def test_the_question_searches_are_each_questions_text_on_every_engine():
         ],
     }
     assert Researcher.question_searches(frame) == [
-        {"query": "How?", "engines": [], "section": "1", "pages": RESULTS_PER_RESEARCH_SEARCH, "focus": "How?"},
-        {"query": "Who?", "engines": [], "section": "2", "pages": RESULTS_PER_RESEARCH_SEARCH, "focus": "Who?"},
+        {
+            "query": "How?",
+            "engines": [],
+            "section": "1",
+            "pages": RESULTS_PER_RESEARCH_SEARCH,
+            "focus": "How?",
+        },
+        {
+            "query": "Who?",
+            "engines": [],
+            "section": "2",
+            "pages": RESULTS_PER_RESEARCH_SEARCH,
+            "focus": "Who?",
+        },
     ]
 
 
@@ -960,7 +970,9 @@ def test_a_research_that_finds_nothing_keeps_the_earlier_one(make_model, fake_ol
 
 
 @pytest.mark.spec("KNW-18")
-def test_a_round_that_gives_no_fact_searches_each_question_as_written_next(make_model, fake_ollama, tinker_home):
+def test_a_round_that_gives_no_fact_searches_each_question_as_written_next(
+    make_model, fake_ollama, tinker_home
+):
     question = FRAME["questions"][0]["question"]
     url = "https://a.org/intake"
     internet = FakeInternet(
@@ -977,7 +989,8 @@ def test_a_round_that_gives_no_fact_searches_each_question_as_written_next(make_
     Researcher(Learner(make_model(), internet, None)).research("food bank inventory")
     assert internet.batches[1] == [question]
     assert internet.fetches == [[url]]
-    assert Library.read("food-bank-inventory")["facts"][0]["text"] == "Donated food is weighed at intake"
+    entry = Library.read("food-bank-inventory")
+    assert entry is not None and entry["facts"][0]["text"] == "Donated food is weighed at intake"
 
 
 @pytest.mark.spec("KNW-18")
@@ -996,9 +1009,9 @@ def test_a_learn_reads_with_the_facts_prompt_and_a_research_with_the_research_fa
     facts = learner.facts_in([Part("Look for", "stock", True)], {"url": "https://a.org"}, 1, 1)
     assert facts == [{"phase": "spec", "text": "A ledger lists the stock"}]
     assert fake_ollama.calls[0]["messages"][0]["content"].startswith(system)
-    source, focus = Part("Page", "s", True), Part("Look for", "f", True)
-    room = learner.model.limit_chars(system) - source.size() - focus.size() - 1 - 200
-    assert learner.room_for_excerpts("t", source, focus) == room
+    topic, source, focus = "stock", Part("Page", "s", True), Part("Look for", "f", True)
+    room = learner.model.limit_chars(system) - source.size() - focus.size() - len(topic) - 200
+    assert learner.room_for_excerpts(topic, source, focus) == room
 
 
 @pytest.mark.spec("KNW-18")
