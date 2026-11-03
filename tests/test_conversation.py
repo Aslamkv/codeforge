@@ -1765,6 +1765,48 @@ def test_desk_answers_commands(desk):
 
 
 @pytest.mark.spec("CNV-11")
+def test_desk_answers_a_command_while_its_channel_says_it_waits(desk):
+    desk, channel, _ = desk
+    waited = []
+
+    @contextlib.contextmanager
+    def waiting(chat, text):
+        waited.append((chat, text))
+        yield
+        waited.append("done")
+
+    channel.waiting = waiting
+    desk.answer(Message("1", "/memory --graph"), channel)
+    assert waited == [("1", "Running /memory --graph"), "done"]
+
+
+@pytest.mark.spec("CNV-11")
+def test_a_chat_shows_its_typing_sign_while_it_waits():
+    channel = Recorder(chats=("1",))
+    with channel.waiting("1", "Running /memory"):
+        wait_until(lambda: ("typing", "1", None, "") in channel.log)
+
+
+@pytest.mark.spec("CNV-11")
+def test_console_waits_in_its_live_line_and_takes_it_out_after(monkeypatch, clock):
+    console = live_console(monkeypatch)
+    with console.waiting("console", "Running /memory"):
+        assert sys.stdout.getvalue() == live_shown("Running /memory")
+        sys.stdout.truncate(0)
+        sys.stdout.seek(0)
+    assert sys.stdout.getvalue() == block_taken_out(1) and console.live_owner is None
+
+
+@pytest.mark.spec("CNV-11")
+def test_console_waits_without_taking_a_jobs_live_line(monkeypatch, clock):
+    console = live_console(monkeypatch)
+    console.show("console", None, CALC_WRITING_NOW, doing="Writing")
+    with console.waiting("console", "Running /memory"):
+        assert console.screen.live == ("Writing", 100.0, {})
+    assert console.screen.live == ("Writing", 100.0, {})
+
+
+@pytest.mark.spec("CNV-11")
 def test_a_command_that_deletes_and_exit_ask_first(desk):
     desk, channel, _ = desk
     assert desk.answer(Message("1", "/clear memory"), channel) is None
