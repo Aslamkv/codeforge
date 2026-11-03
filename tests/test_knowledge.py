@@ -653,8 +653,13 @@ def test_read_analysis():
     ]
     unchecked = Researcher.read_analysis({"findings": [{"question": 1, "answer": "a", "facts": [1]}]}, 3, 2)
     assert unchecked["checks"] == []
-    with pytest.raises(ValueError, match="finding"):
-        Researcher.read_analysis({"findings": []}, 3, 2)
+    gaps_only = Researcher.read_analysis(
+        {"findings": [], "gaps": [{"question": 2, "missing": "m", "search": {"query": "q"}}]}, 3, 2
+    )
+    assert gaps_only["findings"] == []
+    assert gaps_only["gaps"] == [{"question": 2, "missing": "m", "search": {"query": "q"}}]
+    with pytest.raises(ValueError, match="finding or a gap"):
+        Researcher.read_analysis({"findings": [], "gaps": []}, 3, 2)
 
 
 class FakeLearner:

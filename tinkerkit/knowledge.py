@@ -982,12 +982,13 @@ class Researcher:
             and 1 <= item["question"] <= question_count
         )
         findings = Researcher.read_findings(data.get("findings") or [], cited, asked)
-        if not findings:
-            raise ValueError("it needs a finding for at least one question")
+        gaps = Researcher.read_gaps(data.get("gaps") or [], asked)[:RESEARCH_GAPS]
+        if not findings and not gaps:
+            raise ValueError("it needs a finding or a gap for at least one question")
         return {
             "findings": findings,
             "contradictions": Researcher.read_contradictions(data.get("contradictions") or [], cited),
-            "gaps": Researcher.read_gaps(data.get("gaps") or [], asked)[:RESEARCH_GAPS],
+            "gaps": gaps,
             "checks": Researcher.read_checks(data.get("checks") or [], fact_count)[:RESEARCH_FACTS_CHECKED],
         }
 
