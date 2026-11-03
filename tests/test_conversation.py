@@ -1781,6 +1781,13 @@ def test_desk_answers_a_command_while_its_channel_says_it_waits(desk):
 
 
 @pytest.mark.spec("CNV-11")
+def test_a_chat_shows_its_typing_sign_while_it_waits():
+    channel = Recorder(chats=("1",))
+    with channel.waiting("1", "Running /memory"):
+        wait_until(lambda: ("typing", "1", None, "") in channel.log)
+
+
+@pytest.mark.spec("CNV-11")
 def test_console_waits_in_its_live_line_and_takes_it_out_after(monkeypatch, clock):
     console = live_console(monkeypatch)
     with console.waiting("console", "Running /memory"):

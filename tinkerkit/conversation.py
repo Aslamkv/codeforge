@@ -1938,8 +1938,14 @@ class Channel:
     def typing(self, chat):
         pass
 
+    @contextlib.contextmanager
     def waiting(self, chat, text):
-        return contextlib.nullcontext()
+        done = threading.Event()
+        threading.Thread(target=keep_typing, args=(self, chat, done), daemon=True).start()
+        try:
+            yield
+        finally:
+            done.set()
 
     def send_banner(self, chat, lines):
         first, *middle, last = lines
