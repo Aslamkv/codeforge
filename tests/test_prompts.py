@@ -265,6 +265,7 @@ def test_every_prompt_that_writes_searches_writes_them_with_engines_and_count():
     for prompt, searches in searches_in.items():
         example = json.loads(prompt[prompt.index("{", prompt.index("ONLY JSON")) :], strict=False)
         assert Prompts.SEARCH_ENGINES in prompt
+        assert "A query is short and never names an engine" in prompt
         assert all(set(search) == {"query", "engines", "count"} for search in searches(example))
 
 

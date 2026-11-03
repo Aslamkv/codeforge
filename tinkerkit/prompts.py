@@ -382,7 +382,7 @@ class Prompts:
     )
     SEARCH_ENGINES = (
         "The search engines: mwmbl searches the whole web and takes plain keywords only, no operators "
-        "or quotes; wikipedia finds overviews; wikibooks finds tutorials and manuals."
+        "or quotes; wikipedia finds overviews; wikibooks finds tutorials and manuals. A query is short and never names an engine."
     )
     SEARCH_PLAN_SYSTEM = (
         "Plan the web searches that best meet the need the person names. "
@@ -741,6 +741,15 @@ nothing about one particular project, nothing about an unreleased version (alpha
 candidate, dev, draft); at most {FACTS_PER_CHUNK}. "phase" is
 where it matters: spec (what to build and test), design (files, structure), config (dependencies,
 settings), tests, code, toolchain (commands and tools).
+Reply with ONLY JSON: {{"facts":[{{"phase":"one of {", ".join(FACT_PHASES)}","text":"the fact"}}]}}
+or {{"facts":[]}} when the excerpt states nothing like that."""
+
+    RESEARCH_FACTS_SYSTEM = f"""Read part of a web page for a research on a topic. List what the page states that
+answers "Look for": what the topic is (definitions, key terms), how it is done, the numbers it gives, its limits
+and standards, and what is changing in it; each one plain, concrete sentence the page states (never from your own
+knowledge), with the exact names, numbers and versions it gives; nothing about an unreleased version (alpha,
+beta, release candidate, dev, draft); at most {FACTS_PER_CHUNK}. "phase" is where it matters: spec (what to build
+and test), design (files, structure), config (dependencies, settings), tests, code, toolchain (commands and tools).
 Reply with ONLY JSON: {{"facts":[{{"phase":"one of {", ".join(FACT_PHASES)}","text":"the fact"}}]}}
 or {{"facts":[]}} when the excerpt states nothing like that."""
 

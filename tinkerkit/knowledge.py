@@ -377,6 +377,7 @@ class Knowledge:
 
 class Learner(Tracked):
     STEPS = LEARN_STEPS
+    FACTS_SYSTEM = Prompts.FACTS_SYSTEM
     VERSION_RE = re.compile(r"\d+(?:\.\d+)+")
     SHELL_OPERATORS = re.compile(r"[;&|<>`$\n\\]")
     UNRELEASED_RE = re.compile(
@@ -553,12 +554,12 @@ class Learner(Tracked):
         return []
 
     def room_for_excerpts(self, topic, source, focus):
-        return self.model.limit_chars(Prompts.FACTS_SYSTEM) - source.size() - focus.size() - len(topic) - 200
+        return self.model.limit_chars(self.FACTS_SYSTEM) - source.size() - focus.size() - len(topic) - 200
 
     def facts_in(self, parts, page, number, part):
         try:
             answer = self.model.ask_until_usable(
-                Prompts.FACTS_SYSTEM,
+                self.FACTS_SYSTEM,
                 parts,
                 f"Facts, page {number} part {part}",
                 self.read_facts,
@@ -617,6 +618,10 @@ class Learner(Tracked):
             say.warn(f"Not indexed now ({self.embeddings.failed}); a run indexes it when it searches")
         else:
             say.info(f"Indexed with {self.embeddings.name}, so a run can find it by meaning", "🔍")
+
+
+class ResearchLearner(Learner):
+    FACTS_SYSTEM = Prompts.RESEARCH_FACTS_SYSTEM
 
 
 class SearchPlanner:
@@ -790,8 +795,11 @@ class Researcher:
             self.learner.add_facts(facts, found)
             sources += [url for url in read if url not in sources]
             self.say_round(facts, sources, found)
-            if self.learner.cut_short() or not facts:
+            if self.learner.cut_short():
                 break
+            if not facts:
+                searches = self.question_searches(frame)
+                continue
             differ = self.cross_check(facts)
             system = self.analysis_system(round_number)
             analysis = self.analyse(frame, facts, differ, system) or analysis
@@ -838,10 +846,24 @@ class Researcher:
 
     @staticmethod
     def first_searches(frame):
-        return [
+        own_article = {"query": frame["name"], "engines": ["wikipedia", "wikibooks"]}
+        return [dict(own_article, section="", pages=RESULTS_PER_RESEARCH_SEARCH, focus=frame["name"])] + [
             dict(search, section=str(number), pages=RESULTS_PER_RESEARCH_SEARCH, focus=question["question"])
             for number, question in enumerate(frame["questions"], 1)
             for search in question["queries"]
+        ]
+
+    @staticmethod
+    def question_searches(frame):
+        return [
+            {
+                "query": question["question"],
+                "engines": [],
+                "section": str(number),
+                "pages": RESULTS_PER_RESEARCH_SEARCH,
+                "focus": question["question"],
+            }
+            for number, question in enumerate(frame["questions"], 1)
         ]
 
     def say_round(self, facts, sources, found):
@@ -1100,7 +1122,7 @@ class Researcher:
         confidence = "disputed" if disputed else "corroborated" if len(sites) >= 2 else "single"
         return {
             **{key: value for key, value in fact.items() if key != "section"},
-            "question": int(fact["section"]),
+            **({"question": int(fact["section"])} if fact.get("section") else {}),
             "sites": sites,
             "confidence": confidence,
         }

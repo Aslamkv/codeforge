@@ -9,6 +9,7 @@ from tinkerkit.knowledge import (
     Learner,
     Library,
     Researcher,
+    ResearchLearner,
     SearchPlanner,
     language_key,
     relevant_chunks,
@@ -17,12 +18,13 @@ from tinkerkit.knowledge import (
 )
 from tinkerkit.model import Models, Ollama, OllamaError
 from tinkerkit.principles import Principle, Principles, record
-from tinkerkit.prompts import Prompts
+from tinkerkit.prompts import Part, Prompts
 from tinkerkit.retrieval import Embeddings, Retriever
 from tinkerkit.settings import (
     CHUNKS_PER_PAGE,
     EMBED_KEEP_ALIVE,
     MAX_PLANNED_SEARCHES,
+    RESULTS_PER_RESEARCH_SEARCH,
     TEACH_PAGE_CHARS,
     TEACH_PAGES,
     Config,
@@ -599,6 +601,53 @@ def test_read_frame():
         Researcher.read_frame({"name": "X", "questions": []})
 
 
+@pytest.mark.spec("KNW-18")
+def test_the_first_round_searches_the_topics_name_alone_on_wikipedia_and_wikibooks_first():
+    own, asked = Researcher.first_searches(FRAME)
+    assert own == {
+        "query": "Food bank inventory",
+        "engines": ["wikipedia", "wikibooks"],
+        "section": "",
+        "pages": RESULTS_PER_RESEARCH_SEARCH,
+        "focus": "Food bank inventory",
+    }
+    assert asked == {
+        "query": "food bank intake records",
+        "engines": ["mwmbl"],
+        "count": 5,
+        "section": "1",
+        "pages": RESULTS_PER_RESEARCH_SEARCH,
+        "focus": "How is donated food recorded?",
+    }
+
+
+@pytest.mark.spec("KNW-18")
+def test_the_question_searches_are_each_questions_text_on_every_engine():
+    frame = {
+        "name": "Food banks",
+        "questions": [
+            {"question": "How?", "queries": [{"query": "food recording"}]},
+            {"question": "Who?", "queries": []},
+        ],
+    }
+    assert Researcher.question_searches(frame) == [
+        {
+            "query": "How?",
+            "engines": [],
+            "section": "1",
+            "pages": RESULTS_PER_RESEARCH_SEARCH,
+            "focus": "How?",
+        },
+        {
+            "query": "Who?",
+            "engines": [],
+            "section": "2",
+            "pages": RESULTS_PER_RESEARCH_SEARCH,
+            "focus": "Who?",
+        },
+    ]
+
+
 @pytest.mark.spec("KNW-16")
 def test_read_analysis():
     analysis = Researcher.read_analysis(
@@ -918,6 +967,58 @@ def test_a_research_that_finds_nothing_keeps_the_earlier_one(make_model, fake_ol
     assert kept["learned"] == "2026-01-01" and learner.kept_earlier_topic
     assert not any(label.startswith("Induce") for label in fake_ollama.labels())
     assert "No page gave facts; kept what was found before (2026-01-01)" in capsys.readouterr().out
+
+
+@pytest.mark.spec("KNW-18")
+def test_a_round_that_gives_no_fact_searches_each_question_as_written_next(
+    make_model, fake_ollama, tinker_home
+):
+    question = FRAME["questions"][0]["question"]
+    url = "https://a.org/intake"
+    internet = FakeInternet(
+        {url: "Donated food is weighed at intake."},
+        {"Food bank inventory": [], "food bank intake records": [], question: [url]},
+        {url: "Food bank inventory: how donated food is recorded at intake"},
+    )
+    fake_ollama.reply(json.dumps(FRAME), when="Frame the research")
+    fake_ollama.reply(
+        json.dumps({"facts": [{"phase": "spec", "text": "Donated food is weighed at intake"}]}), when="Facts"
+    )
+    fake_ollama.reply(analysis(), when="Analyse the findings")
+    fake_ollama.reply(json.dumps({"deltas": []}), when="Induce")
+    Researcher(Learner(make_model(), internet, None)).research("food bank inventory")
+    assert internet.batches[1] == [question]
+    assert internet.fetches == [[url]]
+    entry = Library.read("food-bank-inventory")
+    assert entry is not None and entry["facts"][0]["text"] == "Donated food is weighed at intake"
+
+
+@pytest.mark.spec("KNW-18")
+@pytest.mark.parametrize(
+    "learner_class, system",
+    [(Learner, Prompts.FACTS_SYSTEM), (ResearchLearner, Prompts.RESEARCH_FACTS_SYSTEM)],
+    ids=["learn", "research"],
+)
+def test_a_learn_reads_with_the_facts_prompt_and_a_research_with_the_research_facts_prompt(
+    learner_class, system, make_model, fake_ollama
+):
+    fake_ollama.reply(
+        json.dumps({"facts": [{"phase": "spec", "text": "A ledger lists the stock"}]}), when="Facts"
+    )
+    learner = learner_class(make_model(), FakeInternet(), None)
+    facts = learner.facts_in([Part("Look for", "stock", True)], {"url": "https://a.org"}, 1, 1)
+    assert facts == [{"phase": "spec", "text": "A ledger lists the stock"}]
+    assert fake_ollama.calls[0]["messages"][0]["content"].startswith(system)
+    topic, source, focus = "stock", Part("Page", "s", True), Part("Look for", "f", True)
+    room = learner.model.limit_chars(system) - source.size() - focus.size() - len(topic) - 200
+    assert learner.room_for_excerpts(topic, source, focus) == room
+
+
+@pytest.mark.spec("KNW-18")
+def test_the_research_facts_prompt_asks_for_what_its_questions_ask():
+    asked = Prompts.RESEARCH_FACTS_SYSTEM
+    assert all(want in asked for want in ("definitions", "key terms", "numbers", "standards", "changing"))
+    assert '{"facts":[]}' in asked and "change how code is written" not in asked
 
 
 def language_with_rules():

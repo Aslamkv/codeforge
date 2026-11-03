@@ -9,7 +9,7 @@ from conftest import MEASURED, MODEL, PY, TOOLCHAIN, criterion, file_block, plan
 
 from tinkerkit import cli
 from tinkerkit.cli import Cli, Commands, CycleRunner, Doctor, ProjectFolder, ProjectRun
-from tinkerkit.knowledge import Knowledge, Library
+from tinkerkit.knowledge import Knowledge, Library, ResearchLearner
 from tinkerkit.model import Models, Ollama, OllamaError
 from tinkerkit.principles import Principles
 from tinkerkit.project import Runs, Tracker, project_store
@@ -1095,3 +1095,9 @@ def test_a_job_keeps_the_computer_awake_and_a_glance_does_not(home_store):
     assert Cli.works_for_hours(Cli.parse(["model", "calibrate", "qwen3"]))
     assert not Cli.works_for_hours(Cli.parse(["model", "qwen3"]))
     assert not Cli.works_for_hours(Cli.parse(["runs"]))
+
+
+@pytest.mark.spec("KNW-18")
+def test_a_research_reads_its_pages_with_the_research_learner():
+    researcher = Commands.researcher(None, None, None, None)
+    assert isinstance(researcher.learner, ResearchLearner)
