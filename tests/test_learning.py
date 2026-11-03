@@ -797,6 +797,17 @@ def test_reference_pages_are_picked_before_news_release_notes_changelogs_and_dow
     assert [found["url"] for found in picked] == [SQL_RESULTS[3]["url"], *[r["url"] for r in SQL_RESULTS[:3]]]
 
 
+@pytest.mark.spec("LRN-4")
+def test_only_results_holding_enough_of_the_topics_words_are_picked(tinker_home):
+    results = [
+        result("https://ml.example.org/world-models", "A world model for reinforcement learning"),
+        result("https://cars.example.com/model-s", "Model S review", "The new model of the car"),
+        result("https://atlas.example.org/world", "World atlas", "Maps of the world"),
+    ]
+    picked = SlotLearner(language_model(), FakeWeb(), CountingEmbeddings()).picked("world model", results)
+    assert [found["url"] for found in picked] == ["https://ml.example.org/world-models"]
+
+
 @pytest.mark.spec("LRN-6")
 def test_a_domain_is_researched_when_deep(tinker_home, monkeypatch):
     researched = []

@@ -192,7 +192,7 @@ class SlotLearner(Tracked):
             self.stop("gate 1", "no-results")
         picked = self.picked(self.topic, results)
         if not picked:
-            self.stop("gate 1", "irrelevant", f"{len(results)} result(s), none above learn_cutoff")
+            self.stop("gate 1", "irrelevant", f"{len(results)} result(s), none on topic")
         return picked
 
     def searched_needs(self, plans):
