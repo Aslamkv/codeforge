@@ -1253,6 +1253,7 @@ What every learning keeps: patterns found in what Tinker read or did, as princip
   passages (**PRI-6**, at most `INDUCE_KNOWN_SHOWN`). The reply is a list of deltas, each citing the passages it
   rests on by number; a delta citing no given passage is dropped, and the cited passages become its evidence.
   `do` is cut to `MAX_FACT_CHARS`, `when` to `MAX_RULE_WHEN_CHARS`. A reply with no list is not usable.
+  Passages without text are left out; with none left, it makes no call and changes nothing.
 - **PRI-5** A principle is a candidate when added, and is proven, helped and retired as a lesson is (**KNW-7**,
   **KNW-9**, **KNW-10**). One with more `harmed` than evidence is retired, with the reason that it was
   contradicted. One no build shows (phase `book`) stays a candidate and is shown with its evidence; one from a
