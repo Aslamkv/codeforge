@@ -623,6 +623,21 @@ def test_the_first_round_searches_the_topics_name_alone_on_wikipedia_and_wikiboo
     }
 
 
+@pytest.mark.spec("KNW-18")
+def test_the_question_searches_are_each_questions_text_on_every_engine():
+    frame = {
+        "name": "Food banks",
+        "questions": [
+            {"question": "How?", "queries": [{"query": "food recording"}]},
+            {"question": "Who?", "queries": []},
+        ],
+    }
+    assert Researcher.question_searches(frame) == [
+        {"query": "How?", "engines": [], "section": "1", "pages": RESULTS_PER_RESEARCH_SEARCH, "focus": "How?"},
+        {"query": "Who?", "engines": [], "section": "2", "pages": RESULTS_PER_RESEARCH_SEARCH, "focus": "Who?"},
+    ]
+
+
 @pytest.mark.spec("KNW-16")
 def test_read_analysis():
     analysis = Researcher.read_analysis(
@@ -942,6 +957,27 @@ def test_a_research_that_finds_nothing_keeps_the_earlier_one(make_model, fake_ol
     assert kept["learned"] == "2026-01-01" and learner.kept_earlier_topic
     assert not any(label.startswith("Induce") for label in fake_ollama.labels())
     assert "No page gave facts; kept what was found before (2026-01-01)" in capsys.readouterr().out
+
+
+@pytest.mark.spec("KNW-18")
+def test_a_round_that_gives_no_fact_searches_each_question_as_written_next(make_model, fake_ollama, tinker_home):
+    question = FRAME["questions"][0]["question"]
+    url = "https://a.org/intake"
+    internet = FakeInternet(
+        {url: "Donated food is weighed at intake."},
+        {"Food bank inventory": [], "food bank intake records": [], question: [url]},
+        {url: "Food bank inventory: how donated food is recorded at intake"},
+    )
+    fake_ollama.reply(json.dumps(FRAME), when="Frame the research")
+    fake_ollama.reply(
+        json.dumps({"facts": [{"phase": "spec", "text": "Donated food is weighed at intake"}]}), when="Facts"
+    )
+    fake_ollama.reply(analysis(), when="Analyse the findings")
+    fake_ollama.reply(json.dumps({"deltas": []}), when="Induce")
+    Researcher(Learner(make_model(), internet, None)).research("food bank inventory")
+    assert internet.batches[1] == [question]
+    assert internet.fetches == [[url]]
+    assert Library.read("food-bank-inventory")["facts"][0]["text"] == "Donated food is weighed at intake"
 
 
 @pytest.mark.spec("KNW-18")

@@ -795,8 +795,11 @@ class Researcher:
             self.learner.add_facts(facts, found)
             sources += [url for url in read if url not in sources]
             self.say_round(facts, sources, found)
-            if self.learner.cut_short() or not facts:
+            if self.learner.cut_short():
                 break
+            if not facts:
+                searches = self.question_searches(frame)
+                continue
             differ = self.cross_check(facts)
             system = self.analysis_system(round_number)
             analysis = self.analyse(frame, facts, differ, system) or analysis
@@ -848,6 +851,19 @@ class Researcher:
             dict(search, section=str(number), pages=RESULTS_PER_RESEARCH_SEARCH, focus=question["question"])
             for number, question in enumerate(frame["questions"], 1)
             for search in question["queries"]
+        ]
+
+    @staticmethod
+    def question_searches(frame):
+        return [
+            {
+                "query": question["question"],
+                "engines": [],
+                "section": str(number),
+                "pages": RESULTS_PER_RESEARCH_SEARCH,
+                "focus": question["question"],
+            }
+            for number, question in enumerate(frame["questions"], 1)
         ]
 
     def say_round(self, facts, sources, found):
