@@ -907,21 +907,11 @@ def test_research_a_domain(make_model, fake_ollama, tinker_home):
         when="Analyse the findings",
     )
     fake_ollama.reply(analysis(), when="Analyse the findings")
-    fake_ollama.reply(
-        json.dumps(
-            {"deltas": [{"kind": "add", "phase": "spec", "do": "Weigh donations at intake", "cites": [1]}]}
-        ),
-        when="Induce",
-    )
     snippets = {url: "How a food bank records donated food" for url in pages}
     internet = FakeInternet(pages, snippets=snippets)
     entry = Researcher(Learner(make_model(), internet, None)).research("food bank inventory")
-    kept = Principles(None).all()
-    assert [principle.do for principle in kept] == ["Weigh donations at intake"]
-    [record] = entry["principles"]
-    assert "question" not in record and record["principles"] == [kept[0].id]
-    assert len(record["passages"]) == 1 and record["passages"][0] in pages
-    assert len([label for label in fake_ollama.labels() if label.startswith("Induce")]) == 1
+    assert "principles" not in entry and Principles(None).all() == []
+    assert not any(Prompts.INDUCE_SYSTEM in call["messages"][0]["content"] for call in fake_ollama.calls)
     assert entry["kind"] == "research" and entry["name"] == "Food bank inventory"
     assert entry["questions"] == FRAME["questions"] and entry["open"] == []
     assert entry["facts"][0]["confidence"] == "corroborated" and entry["facts"][0]["sites"] == [
@@ -942,7 +932,6 @@ def test_research_a_domain(make_model, fake_ollama, tinker_home):
     assert thinks["Frame the research"] is False
     assert thinks["Facts"] is False
     assert thinks["Analyse the findings"] is False
-    assert thinks["Induce principles from the passages"] == Config.get("learn_think")
     assert Library.read("food-bank-inventory")["kind"] == "research"
     assert len(internet.fetches) == 2 and internet.fetches[0] == list(pages)
 
