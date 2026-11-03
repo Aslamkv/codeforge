@@ -377,6 +377,7 @@ class Knowledge:
 
 class Learner(Tracked):
     STEPS = LEARN_STEPS
+    FACTS_SYSTEM = Prompts.FACTS_SYSTEM
     VERSION_RE = re.compile(r"\d+(?:\.\d+)+")
     SHELL_OPERATORS = re.compile(r"[;&|<>`$\n\\]")
     UNRELEASED_RE = re.compile(
@@ -553,12 +554,12 @@ class Learner(Tracked):
         return []
 
     def room_for_excerpts(self, topic, source, focus):
-        return self.model.limit_chars(Prompts.FACTS_SYSTEM) - source.size() - focus.size() - len(topic) - 200
+        return self.model.limit_chars(self.FACTS_SYSTEM) - source.size() - focus.size() - len(topic) - 200
 
     def facts_in(self, parts, page, number, part):
         try:
             answer = self.model.ask_until_usable(
-                Prompts.FACTS_SYSTEM,
+                self.FACTS_SYSTEM,
                 parts,
                 f"Facts, page {number} part {part}",
                 self.read_facts,
@@ -617,6 +618,10 @@ class Learner(Tracked):
             say.warn(f"Not indexed now ({self.embeddings.failed}); a run indexes it when it searches")
         else:
             say.info(f"Indexed with {self.embeddings.name}, so a run can find it by meaning", "🔍")
+
+
+class ResearchLearner(Learner):
+    FACTS_SYSTEM = Prompts.RESEARCH_FACTS_SYSTEM
 
 
 class SearchPlanner:

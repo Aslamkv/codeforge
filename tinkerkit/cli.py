@@ -22,7 +22,7 @@ from .system import SYSTEM_CHECKS, SYSTEM_WORDS
 lazy from .building import BugReproducer, CodeWriter, TestToolSetup, TestWriter, Verifier
 lazy from .finishing import FinalReview, LessonWriter, ReadmeWriter, Tidy
 lazy from .graph import Graph, MemoryBrowser, write_page
-lazy from .knowledge import Learner, Library, Researcher, search_entry
+lazy from .knowledge import Library, Researcher, ResearchLearner, search_entry
 lazy from .learning import LearnStopped, SlotLearner
 lazy from .model import Calibrator, Model, Models, Ollama, OllamaError, SelectedModel
 lazy from .planning import Designer, InterfaceReviewer, Recaller, SpecWriter
@@ -781,7 +781,7 @@ class Commands:
 
     @staticmethod
     def researcher(model, internet, embeddings, tracker):
-        learner = Learner(model, internet, embeddings)
+        learner = ResearchLearner(model, internet, embeddings)
         learner.tracker = tracker
         return Researcher(learner)
 

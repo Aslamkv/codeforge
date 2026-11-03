@@ -9,6 +9,7 @@ from tinkerkit.knowledge import (
     Learner,
     Library,
     Researcher,
+    ResearchLearner,
     SearchPlanner,
     language_key,
     relevant_chunks,
@@ -17,7 +18,7 @@ from tinkerkit.knowledge import (
 )
 from tinkerkit.model import Models, Ollama, OllamaError
 from tinkerkit.principles import Principle, Principles, record
-from tinkerkit.prompts import Prompts
+from tinkerkit.prompts import Part, Prompts
 from tinkerkit.retrieval import Embeddings, Retriever
 from tinkerkit.settings import (
     CHUNKS_PER_PAGE,
@@ -602,7 +603,10 @@ def test_read_frame():
 
 @pytest.mark.spec("KNW-18")
 def test_the_first_round_searches_the_topics_name_alone_on_wikipedia_and_wikibooks_first():
-    frame = {"name": "Food banks", "questions": [{"question": "How?", "queries": [{"query": "food recording"}]}]}
+    frame = {
+        "name": "Food banks",
+        "questions": [{"question": "How?", "queries": [{"query": "food recording"}]}],
+    }
     own, asked = Researcher.first_searches(frame)
     assert own == {
         "query": "Food banks",
@@ -938,6 +942,34 @@ def test_a_research_that_finds_nothing_keeps_the_earlier_one(make_model, fake_ol
     assert kept["learned"] == "2026-01-01" and learner.kept_earlier_topic
     assert not any(label.startswith("Induce") for label in fake_ollama.labels())
     assert "No page gave facts; kept what was found before (2026-01-01)" in capsys.readouterr().out
+
+
+@pytest.mark.spec("KNW-18")
+@pytest.mark.parametrize(
+    "learner_class, system",
+    [(Learner, Prompts.FACTS_SYSTEM), (ResearchLearner, Prompts.RESEARCH_FACTS_SYSTEM)],
+    ids=["learn", "research"],
+)
+def test_a_learn_reads_with_the_facts_prompt_and_a_research_with_the_research_facts_prompt(
+    learner_class, system, make_model, fake_ollama
+):
+    fake_ollama.reply(
+        json.dumps({"facts": [{"phase": "spec", "text": "A ledger lists the stock"}]}), when="Facts"
+    )
+    learner = learner_class(make_model(), FakeInternet(), None)
+    facts = learner.facts_in([Part("Look for", "stock", True)], {"url": "https://a.org"}, 1, 1)
+    assert facts == [{"phase": "spec", "text": "A ledger lists the stock"}]
+    assert fake_ollama.calls[0]["messages"][0]["content"].startswith(system)
+    source, focus = Part("Page", "s", True), Part("Look for", "f", True)
+    room = learner.model.limit_chars(system) - source.size() - focus.size() - 1 - 200
+    assert learner.room_for_excerpts("t", source, focus) == room
+
+
+@pytest.mark.spec("KNW-18")
+def test_the_research_facts_prompt_asks_for_what_its_questions_ask():
+    asked = Prompts.RESEARCH_FACTS_SYSTEM
+    assert all(want in asked for want in ("definitions", "key terms", "numbers", "standards", "changing"))
+    assert '{"facts":[]}' in asked and "change how code is written" not in asked
 
 
 def language_with_rules():
