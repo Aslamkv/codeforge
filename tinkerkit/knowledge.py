@@ -838,7 +838,8 @@ class Researcher:
 
     @staticmethod
     def first_searches(frame):
-        return [
+        own_article = {"query": frame["name"], "engines": ["wikipedia", "wikibooks"]}
+        return [dict(own_article, section="", pages=RESULTS_PER_RESEARCH_SEARCH, focus=frame["name"])] + [
             dict(search, section=str(number), pages=RESULTS_PER_RESEARCH_SEARCH, focus=question["question"])
             for number, question in enumerate(frame["questions"], 1)
             for search in question["queries"]
@@ -1100,7 +1101,7 @@ class Researcher:
         confidence = "disputed" if disputed else "corroborated" if len(sites) >= 2 else "single"
         return {
             **{key: value for key, value in fact.items() if key != "section"},
-            "question": int(fact["section"]),
+            **({"question": int(fact["section"])} if fact.get("section") else {}),
             "sites": sites,
             "confidence": confidence,
         }

@@ -23,6 +23,7 @@ from tinkerkit.settings import (
     CHUNKS_PER_PAGE,
     EMBED_KEEP_ALIVE,
     MAX_PLANNED_SEARCHES,
+    RESULTS_PER_RESEARCH_SEARCH,
     TEACH_PAGE_CHARS,
     TEACH_PAGES,
     Config,
@@ -597,6 +598,25 @@ def test_read_frame():
     assert len(frame["questions"]) == 4
     with pytest.raises(ValueError):
         Researcher.read_frame({"name": "X", "questions": []})
+
+
+@pytest.mark.spec("KNW-18")
+def test_the_first_round_searches_the_topics_name_alone_on_wikipedia_and_wikibooks_first():
+    frame = {"name": "Food banks", "questions": [{"question": "How?", "queries": [{"query": "food recording"}]}]}
+    own, asked = Researcher.first_searches(frame)
+    assert own == {
+        "query": "Food banks",
+        "engines": ["wikipedia", "wikibooks"],
+        "section": "",
+        "pages": RESULTS_PER_RESEARCH_SEARCH,
+        "focus": "Food banks",
+    }
+    assert asked == {
+        "query": "food recording",
+        "section": "1",
+        "pages": RESULTS_PER_RESEARCH_SEARCH,
+        "focus": "How?",
+    }
 
 
 @pytest.mark.spec("KNW-16")

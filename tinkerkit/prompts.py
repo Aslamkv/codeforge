@@ -382,7 +382,7 @@ class Prompts:
     )
     SEARCH_ENGINES = (
         "The search engines: mwmbl searches the whole web and takes plain keywords only, no operators "
-        "or quotes; wikipedia finds overviews; wikibooks finds tutorials and manuals."
+        "or quotes; wikipedia finds overviews; wikibooks finds tutorials and manuals. A query is short and never names an engine."
     )
     SEARCH_PLAN_SYSTEM = (
         "Plan the web searches that best meet the need the person names. "
