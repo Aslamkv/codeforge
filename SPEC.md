@@ -956,8 +956,9 @@ The terminal and the chats are one conversation: the same commands, the same ans
   alone there prints the recipe (**MOD-30**), opens its select box on the prompt (**CLI-3**) and sends the
   command with the NAME chosen; a cancel sends nothing.
   Once it reads, all that Tinker says (`say`, a chat's message too) prints through it, above the prompt, and
-  `live` draws in that same live block, its star turning and its glow moving on their own about eight times a second. While a job
-  shows its progress there, the status that says what Tinker works on is left out of the terminal. A job's
+  `live` draws in that same live block, its star turning and its glow moving on their own about eight times a second. While the
+  terminal is a job's asker (**CNV-11**), the job's progress shows there and the status that says what Tinker
+  works on is left out of the terminal; otherwise the terminal prints the status as the chats show it. A job's
   live line counts from when the job began (its tracker's `started`, less the time of earlier runs), so a
   Tinker opened later shows the same time.
   On a terminal with colour, the live block, the rule and the prompt follow what Tinker printed, as in Claude
@@ -990,7 +991,7 @@ The terminal and the chats are one conversation: the same commands, the same ans
   own: the goodbye's is the last, waiting for a status being posted to be done before it is handed on. Each chat has one status message: what Tinker works on (a job's title), never how far it got. Every
   time the status changes (Tinker starts listening, a job starts, waits for the person, ends, Tinker ends:
   `not listening`), the one before is taken out and the new one is sent at the bottom, with the message of the
-  job that runs moved below it. A job says its status at once as it starts, before its own message, and the
+  job that runs moved below it in its asker's chat. A job says its status at once as it starts, before its own message, and the
   status before it comes back at once as it ends. While it listens it collects the messages whose time is up,
   every `EXPIRED_MESSAGES_SWEEP_SECONDS` seconds.
 - **CNV-10** `/start` (what a chat app sends when a person first opens the bot) is answered with a welcome and
@@ -1011,12 +1012,16 @@ The terminal and the chats are one conversation: the same commands, the same ans
   once, **CNV-8**); the person's `/exit` and `/confirm` are taken out at once, and the question as Tinker
   ends (its status says it no longer listens). The preview of a deletion is what `tinker` printed (its stdout),
   and the plan that waits is kept without the lines on what to send next: the chat never filters `tinker`'s
-  text.
+  text. The conversation that sends a command that starts or goes on with a job (a `job` command, `/confirm`,
+  `/amend`, `rename`, `resume`, `exercise LANGUAGE`) is that step's asker: only it sees the job's progress, its
+  ending and the plan that waits; every other conversation, another chat on the same channel too, sees only
+  the status.
 - **CNV-12** Each chat has at most one question that waits for the person (a deletion, a chat's `/exit`, a
   command line, words a command needs), kept in one place by channel and chat: what its answer runs and what a
   cancel says. `Desk.settle` runs what waits for a `/confirm`. Any other message cancels it and says so; a question
   with nothing to say on a cancel (words a command needs) is dropped quietly. The
-  plan that waits is not such a question: every chat and the terminal share it. `decide` builds or changes the plan that waits. For a new project, its first
+  plan that waits is not such a question: every chat and the terminal share it and can answer it, though only
+  its asker sees it; the others see the status that says it waits. `decide` builds or changes the plan that waits. For a new project, its first
   `confirm` asks for the folder's name.
 - **CNV-13** A command that needs words, sent alone (as a chat app's menu sends it: `/fix`), asks for them
   (`ask_for`: what it does, what to send, an example) and takes the next message without a `/` as them
@@ -1040,13 +1045,14 @@ The terminal and the chats are one conversation: the same commands, the same ans
   further each edit), what the model writes now, the passing
   spec points and the latest line (`text`); a one-line `brief`; how long it took (`took`); and its `ending`: the
   end's headline, details and next commands, or the plan that waits with its criteria and what to send next.
-- **CNV-18** `Reporter` shows one run's tracker in one message per chat. It reads the tracker every
+- **CNV-18** `Reporter` shows one run's tracker in one message in its asker's chat. It reads the tracker every
   `PROGRESS_EDIT_SECONDS` seconds (about 1–2) and edits the message when a line changed; when only the time
   or the tokens changed, it edits at most every `CLOCK_ONLY_EDIT_SECONDS` seconds. It ends with the run's ending (with
   its `text`: a research's answer). A command that keeps no tracker shows its latest printed line, and ends
   with its title and that line, without the Tinkering line or its clock. Indented lines printed right after
   a line count as part of it, so a multi-line message shows whole.
-- **CNV-19** A task run from a terminal reports to the enabled chats (`Attached`). Stopped or paused
+- **CNV-19** A task run from a command line (`Attached`) reports to that terminal only; the chats see the
+  status that says it works in a terminal. Stopped or paused
   (**JOB-1**), its last state is shown once it ends.
 - **CNV-20** The chat asks the model only through the quick call (**MOD-25**); `Talk` and `Shell`
   read a JSON answer with `Reply.json()` (**PRM-2**), and take one that cannot be read as `{}`. `reply` keeps
@@ -1622,7 +1628,7 @@ It is a job like any other, so the person always comes first.
   tracker shows its build's: its step after the exercise's, what the model writes now, the spec points passing
   and the latest line, and a practice project's steps only. As a conversation starts (`adopt_exercise`), it
   keeps up the message of an exercise whose job runs and whose tracker does not say it `reports` by itself
-  (`Attached` says so), and an exercise whose job ended without being stopped (`Jobs.lost`: killed, the
+  (`Attached` says so), in the conversations its message is in (none: they see only the status), and an exercise whose job ended without being stopped (`Jobs.lost`: killed, the
   computer restarted) goes on as `resume #N`; either way its message is taken out and sent anew at the bottom.
   While it listens, it adopts again an exercise that went on by itself.
 - **EXR-7** Ctrl-C or `stop #N` stops an exercise's build, keeps everything, and ends `stopped` with how to go
@@ -1630,7 +1636,7 @@ It is a job like any other, so the person always comes first.
   `status`. `exercise status` shows each exercise: its job's state (running, paused or stopped), its focus,
   each recent project's measures, and what it does now. In the conversation, `exercise LANGUAGE` (or
   `resume #N` of an exercise's job) starts it as a tinker of its own that outlives the conversation, its
-  progress in its one message: every exercise has the same one (its ids kept in the home's `activity`),
+  progress in its one message, in the conversation that started or resumed it: every exercise has the same one (its ids kept in the home's `activity`),
   started, stopped (`stop #N` shows only there) or resumed, and the person's `exercise LANGUAGE` message is
   taken out; an exercise paused for another hands it its message, and gets it back when it goes on (the
   conversation adopts it again). One that ends before it keeps a tracker shows the last lines it printed.
