@@ -381,10 +381,10 @@ class Prompts:
         "only."
     )
     REVIEW_PROMPT = (
-        "Judge how much thinking the person's request needs before it is answered: off for a greeting "
-        "or a plain fact, low for a small clear task, medium for a task with a few steps, high for a "
-        "hard problem, a subtle bug or a design. Reply with one word, off, low, medium or high, then a "
-        "short reason, on one line."
+        "Judge how much thinking the person's request needs before it is answered. off: the answer is only "
+        "recalled, such as a greeting, a fact, or a list, summary or definition of well-known things. low: a small "
+        "clear task that writes or changes something. medium: a task with a few steps. high: a hard problem, a "
+        "subtle bug or a design. Reply with one word, off, low, medium or high, then a short reason, on one line."
     )
     SEARCH_ENGINES = (
         "The search engines: mwmbl searches the whole web and takes plain keywords only, no operators "

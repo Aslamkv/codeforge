@@ -747,9 +747,9 @@ Each request's one thinking level.
   `code`, `function`, `class`, `method`, `test`, `error`) that says `bug`, `why does`, `fails`, `design`,
   `architecture` or `refactor` is `high`, and so is a long one: more than `LONG_REQUEST_WORDS` (60) words,
   `MANY_PARTS` (3) or more parts (list lines or question marks), or `MANY_FILES` (3) or more path-like words.
-  A request of at most `SHORT_REQUEST_WORDS` (12) words that greets, asks a question, renames or formats is
-  `off`. Otherwise one quick call (**MOD-25**) at think `high` asks `REVIEW_PROMPT` for the level in a short
-  reply; a reply that names no level, or a failed call, is `medium`. The level and why go to the call log.
+  A request of at most `SHORT_REQUEST_WORDS` (12) words that greets, asks a question, lists, names, defines,
+  renames or formats is `off`. Otherwise one quick call (**MOD-25**) without thinking (think `off`) asks `REVIEW_PROMPT` for the
+  level in a short reply, recalling well-known things being `off`; a reply that names no level, or a failed call, is `medium`. The level and why go to the call log.
 - **RVW-2** A model's think values are Ollama's `/api/show` `thinking.values`. The home's `think_levels` keeps
   them per model name and digest (from `/api/tags`), read when missing; calibration reads them again.
   `ThinkLevels.taken(level, values)` gives `false` for `off`; the level itself when the model has it; else
