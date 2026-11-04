@@ -826,6 +826,7 @@ class Calibrator:
     def run(self):
         say.title(f"Testing {self.name} on this machine (once per model, about a minute)", "📏")
         facts = Ollama.model_facts(self.name)
+        ThinkLevels.read(self.name)
         self.check_fit(facts)
         target = facts["context_length"] or UNKNOWN_CONTEXT_TOKENS
         think = self.first_chat(facts, target)
@@ -1408,6 +1409,60 @@ class Ollama:
                 return {"error": f"HTTP {exc.code}"}
         except urllib.error.URLError, OSError, ValueError:
             return None
+
+
+class ThinkLevels:
+    RANKS = ("off", "low", "medium", "high", "xhigh")
+
+    @staticmethod
+    def values(name):
+        kept = Home.store().get("think_levels", ThinkLevels.key(name))
+        return kept if isinstance(kept, list) else ThinkLevels.read(name)
+
+    @staticmethod
+    def read(name):
+        data = Ollama.get_json("/api/show", {"model": name}, timeout=30)
+        if data is None:
+            return []
+        values = (data.get("thinking") or {}).get("values") or []
+        Home.store().put("think_levels", ThinkLevels.key(name), values)
+        return values
+
+    @staticmethod
+    def key(name):
+        digest = next(
+            (
+                installed_model.get("digest")
+                for installed_model in Ollama.installed_models() or []
+                if installed_model.get("name") == name
+            ),
+            None,
+        )
+        return f"{name}@{digest or ''}"
+
+    @staticmethod
+    def taken(level, values):
+        if not values:
+            return None
+        if level == "off":
+            return False
+        if level in values:
+            return level
+        if True in values:
+            return True
+        return ThinkLevels.nearest(level, values)
+
+    @staticmethod
+    def nearest(level, values):
+        ranks = ThinkLevels.RANKS
+        ranked = [
+            ranks.index("off" if value is False else value)
+            for value in values
+            if value is False or value in ranks
+        ]
+        wanted = ranks.index(level)
+        best = min(ranked, key=lambda rank: (abs(rank - wanted), -rank), default=None)
+        return None if best is None else False if best == 0 else ranks[best]
 
 
 class Stream:

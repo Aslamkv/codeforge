@@ -9,7 +9,17 @@ from conftest import MEASURED, MODEL
 import tinkerkit.model as model_module
 from tinkerkit import quality
 from tinkerkit.messages import DIMMED, HEADING, say
-from tinkerkit.model import Answer, Calibrator, GgufReading, Model, Models, Ollama, OllamaError, Stream
+from tinkerkit.model import (
+    Answer,
+    Calibrator,
+    GgufReading,
+    Model,
+    Models,
+    Ollama,
+    OllamaError,
+    Stream,
+    ThinkLevels,
+)
 from tinkerkit.prompts import Part, PromptTooLarge, Reply
 from tinkerkit.settings import (
     PROMPT_BUDGET_SHARE,
@@ -638,7 +648,7 @@ def test_check_fit(monkeypatch):
     calibrator.check_fit({"size": 99e9})
 
 
-@pytest.mark.spec("MOD-13")
+@pytest.mark.spec("MOD-13", "MOD-15")
 def test_calibrate_writes_the_measured_settings(fake_ollama, monkeypatch, no_sleep, tinker_home, capsys):
     monkeypatch.setattr(
         Ollama,
@@ -1211,3 +1221,54 @@ def test_the_first_chat_asks_again_at_4096_when_the_target_does_not_run(fake_oll
     fake_ollama.reply(OllamaError("crashed", crashed=True), times=2)
     with pytest.raises(SystemExit, match="m does not run"):
         Calibrator("m").first_chat({"capabilities": []}, 24576)
+
+
+@pytest.mark.spec("RVW-2")
+@pytest.mark.parametrize(
+    "level, values, taken",
+    [
+        ("off", [False, True], False),
+        ("high", [False, True], True),
+        ("medium", [False, "low", "medium", "xhigh"], "medium"),
+        ("high", [False, "low", "medium", "xhigh"], "xhigh"),
+        ("high", [False, "low", "medium"], "medium"),
+        ("low", ["medium", "high"], "medium"),
+        ("off", [False, "low", "medium", "xhigh"], False),
+        ("high", [], None),
+        ("off", [], None),
+    ],
+)
+def test_think_levels_map_a_level_to_the_setting_the_model_takes(level, values, taken):
+    assert ThinkLevels.taken(level, values) == taken
+
+
+@pytest.mark.spec("RVW-2")
+def test_think_levels_are_read_once_per_model_and_digest(fake_ollama, tinker_home):
+    fake_ollama.show("m", {"thinking": {"values": [False, "low", "medium", "xhigh"]}})
+    assert ThinkLevels.values("m") == [False, "low", "medium", "xhigh"]
+    assert ThinkLevels.values("m") == [False, "low", "medium", "xhigh"]
+    assert fake_ollama.shown == ["m"]
+    fake_ollama.show("m", {"thinking": {"values": [False, True]}}, digest="d2")
+    assert ThinkLevels.values("m") == [False, True] and fake_ollama.shown == ["m", "m"]
+
+
+@pytest.mark.spec("RVW-2")
+def test_think_levels_keep_a_model_without_thinking_as_empty(fake_ollama, tinker_home):
+    fake_ollama.show("embed", {"capabilities": ["embedding"]})
+    assert ThinkLevels.values("embed") == [] and ThinkLevels.values("embed") == []
+    assert fake_ollama.shown == ["embed"]
+
+
+@pytest.mark.spec("RVW-2")
+def test_think_levels_do_not_keep_a_failed_read(fake_ollama, tinker_home):
+    assert ThinkLevels.values("gone") == [] and ThinkLevels.values("gone") == []
+    assert fake_ollama.shown == ["gone", "gone"]
+
+
+@pytest.mark.spec("RVW-2")
+def test_think_levels_read_again_replaces_the_kept_values(fake_ollama, tinker_home):
+    fake_ollama.show("m", {"thinking": {"values": [False, True]}})
+    ThinkLevels.values("m")
+    fake_ollama.show("m", {"thinking": {"values": [False, "low", "high"]}})
+    assert ThinkLevels.read("m") == [False, "low", "high"]
+    assert ThinkLevels.values("m") == [False, "low", "high"] and fake_ollama.shown == ["m", "m"]
