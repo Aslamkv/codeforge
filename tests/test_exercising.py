@@ -5,11 +5,11 @@ from pathlib import Path
 
 import pytest
 from conftest import criterion
-from test_conversation import Recorder
+from test_conversation import Recorder, everyone
 
 from tinkerkit import conversation, exercising
 from tinkerkit.cli import Cli
-from tinkerkit.conversation import Desk, persons_runs
+from tinkerkit.conversation import Desk, Message, persons_runs
 from tinkerkit.exercising import (
     PRACTICE_STEPS,
     Exercise,
@@ -323,7 +323,7 @@ def test_the_exercise_shows_what_its_build_does(make_model, home_store, no_sleep
 def test_an_exercise_that_goes_on_by_itself_comes_to_the_bottom(home_store):
     channel = Recorder()
     home_store.put("jobs", "1", exercise_job("running", progress=BUILDING))
-    reporter = conversation.Reporter([channel], "Exercising Rust", pid=OTHER_LIVE_PID)
+    reporter = conversation.Reporter(everyone([channel]), "Exercising Rust", pid=OTHER_LIVE_PID)
     reporter.refresh()
     reporter.ended = True
     the_persons_message = "hello"
@@ -360,40 +360,77 @@ def test_the_conversation_adopts_an_exercise_a_conversation_before_it_started(
     desk = Desk([channel], tmp_path)
     followed = []
     monkeypatch.setattr(
-        desk, "follow_exercise", lambda pid, title, ended, anew: followed.append((pid, title, anew))
+        desk,
+        "follow_exercise",
+        lambda audience, pid, title, ended, anew: followed.append((audience, pid, title, anew)),
     )
+    conversation.keep_exercise_board({("rec", "1"): [7], ("other", "5"): [8]})
     reports_by_itself = {"title": "Exercising Rust", "exercise": True, "reports": True}
     home_store.put("jobs", "1", exercise_job("running", progress=reports_by_itself))
     desk.adopt_exercise()
     assert followed == []
     home_store.put("jobs", "1", exercise_job("running", progress=BUILDING))
     desk.adopt_exercise()
-    assert followed == [(OTHER_LIVE_PID, "Exercising Rust", True)]
+    assert followed == [([(channel, "1")], OTHER_LIVE_PID, "Exercising Rust", True)]
 
 
 @pytest.mark.spec("EXR-6")
 def test_an_exercise_that_ended_unstopped_goes_on_as_the_conversation_starts(
     home_store, tmp_path, monkeypatch
 ):
-    desk = Desk([Recorder()], tmp_path)
+    channel = Recorder()
+    desk = Desk([channel], tmp_path)
     started = []
-    monkeypatch.setattr(desk, "start_exercise", lambda words, title=None: started.append((words, title)))
+    monkeypatch.setattr(
+        desk, "start_exercise", lambda audience, words, title=None: started.append((audience, words, title))
+    )
     desk.adopt_exercise()
     its_job_killed_too = exercise_job("running", number=4, pid=999999999, updated="2026-10-23 09:00")
     home_store.put("jobs", "4", its_job_killed_too)
+    conversation.keep_exercise_board({("rec", "1"): [7]})
     desk.adopt_exercise()
-    assert started == [(["resume", "#4"], "exercise rust")]
+    assert started == [([(channel, "1")], ["resume", "#4"], "exercise rust")]
 
 
 @pytest.mark.spec("EXR-6")
-def test_an_adopted_exercise_takes_its_message_out_and_sends_it_at_the_bottom(home_store, tmp_path):
+def test_an_adopted_exercise_takes_its_message_out_and_sends_it_at_the_bottom(
+    home_store, tmp_path, monkeypatch
+):
+    monkeypatch.setattr(conversation, "until_ended", lambda pid: time.sleep(0.2))
     channel = Recorder()
     desk = Desk([channel], tmp_path)
     conversation.keep_exercise_board({("rec", "1"): [7]})
     home_store.put("jobs", "1", exercise_job("running", progress=BUILDING))
-    desk.follow_exercise(OTHER_LIVE_PID, "Exercising Rust", lambda: time.sleep(0.2), anew=True)
+    desk.adopt_exercise()
     after = channel.log[channel.log.index(("delete", "1", 7, "")) :]
     assert any(kind == "send" and "Exercising Rust" in text for kind, _, _, text in after)
+    wait_for_the_reporter_to_end(desk)
+
+
+@pytest.mark.spec("EXR-6")
+def test_an_adopted_exercise_with_no_saved_message_sends_none(home_store, tmp_path, monkeypatch):
+    monkeypatch.setattr(conversation, "until_ended", lambda pid: time.sleep(0.2))
+    channel = Recorder()
+    desk = Desk([channel], tmp_path)
+    home_store.put("jobs", "1", exercise_job("running", progress=BUILDING))
+    desk.adopt_exercise()
+    assert desk.exercise_reporter is not None and desk.exercise_reporter.audience == []
+    wait_for_the_reporter_to_end(desk)
+    assert not [entry for entry in channel.log if entry[0] == "send"]
+
+
+@pytest.mark.spec("EXR-7")
+def test_another_chat_sees_no_exercise_message(home_store, tmp_path, monkeypatch):
+    channel = Recorder(chats=("1", "2"))
+    desk = Desk([channel], tmp_path)
+    monkeypatch.setattr(desk, "start_exercise", lambda audience, words, title=None: started.append(audience))
+    started = []
+    desk.answer(Message("1", "exercise rust"), channel)
+    assert started == [[(channel, "1")]]
+    home_store.put("jobs", "1", exercise_job("running", progress=BUILDING))
+    desk.follow_exercise(started[0], OTHER_LIVE_PID, "Exercising Rust", lambda: time.sleep(0.2))
+    wait_for_the_reporter_to_end(desk)
+    assert {entry[1] for entry in channel.log if entry[0] in ("send", "edit")} == {"1"}
 
 
 @pytest.mark.spec("EXR-7")
@@ -404,7 +441,9 @@ def test_an_exercise_that_ends_before_it_keeps_a_tracker_shows_what_it_printed(h
     log.write_text("before\n")
     start = log.stat().st_size
     log.write_text("before\n'cobol' is not a programming language. Nothing done.\n")
-    desk.follow_exercise(OTHER_LIVE_PID + 999999, "exercise cobol", lambda: None, (log, start))
+    desk.follow_exercise(
+        [(channel, "1")], OTHER_LIVE_PID + 999999, "exercise cobol", lambda: None, (log, start)
+    )
     ends = time.monotonic() + 5
     while not channel.log or "Nothing done" not in channel.log[-1][3]:
         assert time.monotonic() < ends, channel.log
@@ -485,12 +524,15 @@ def test_every_exercise_keeps_one_message_started_stopped_or_resumed(home_store,
     home_store.put("jobs", "1", exercise_job("running", progress=BUILDING))
     first_ended = []
     desk.follow_exercise(
-        OTHER_LIVE_PID, "Exercising Rust", lambda: first_ended.append(True) or time.sleep(0.2)
+        [(channel, "1")],
+        OTHER_LIVE_PID,
+        "Exercising Rust",
+        lambda: first_ended.append(True) or time.sleep(0.2),
     )
     assert desk.stop_exercise() is None and told == [(OTHER_LIVE_PID, conversation.JOB_STOP_SIGNAL)]
     wait_for_the_reporter_to_end(desk)
     the_next_exercise = "resume #4"
-    desk.follow_exercise(OTHER_LIVE_PID, the_next_exercise, lambda: None)
+    desk.follow_exercise([(channel, "1")], OTHER_LIVE_PID, the_next_exercise, lambda: None)
     wait_for_the_reporter_to_end(desk)
     sent = {entry[2] for entry in channel.log if entry[0] == "send" and "🔨 **" in entry[3]}
     deleted = {entry[2] for entry in channel.log if entry[0] == "delete"}

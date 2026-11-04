@@ -6,7 +6,7 @@ import threading
 import time
 
 import pytest
-from test_conversation import Recorder
+from test_conversation import Recorder, everyone
 
 from tinkerkit import cli, conversation, exercising, jobs
 from tinkerkit.cli import Cli, Commands
@@ -362,9 +362,11 @@ def test_the_conversation_stops_and_resumes_jobs(home_store, tmp_path, monkeypat
     monkeypatch.setattr(
         desk,
         "start_task",
-        lambda arguments, folder, title, *rest, **kwargs: started.append((arguments, title)),
+        lambda audience, arguments, folder, title, *rest, **kwargs: started.append((arguments, title)),
     )
-    monkeypatch.setattr(desk, "start_exercise", lambda words, title=None: started.append((words, title)))
+    monkeypatch.setattr(
+        desk, "start_exercise", lambda audience, words, title=None: started.append((words, title))
+    )
     monkeypatch.setattr(desk, "stop_exercise", lambda: told.append("exercise"))
     monkeypatch.setattr(Jobs, "stop", staticmethod(lambda job: told.append(job["number"])))
     keep_jobs(home_store, ["stopped", "running", "stopped", "running"])
@@ -467,8 +469,10 @@ def test_the_conversation_starts_a_task_while_another_runs(home_store, tmp_path,
 
     monkeypatch.setattr(desk, "spawn", lambda arguments: spawned.append(arguments) or Running())
     monkeypatch.setattr(desk, "follow", lambda process, reporter, task: None)
-    assert desk.start_task(["learn", "go"], tmp_path, "learn go") is None
-    assert desk.start_task(["exercise", "python"], tmp_path, "exercise python") is None
+    assert desk.start_task(everyone(desk.channels), ["learn", "go"], tmp_path, "learn go") is None
+    assert (
+        desk.start_task(everyone(desk.channels), ["exercise", "python"], tmp_path, "exercise python") is None
+    )
     assert spawned == [["learn", "go"], ["exercise", "python"]] and len(desk.live_tasks) == 2
     desk.reporter.ended = True
 
@@ -644,7 +648,8 @@ def test_a_research_job_says_its_steps_and_ends_with_its_answer(home_store, monk
 
 @pytest.mark.spec("EXR-7")
 def test_an_exercise_paused_for_another_hands_it_its_message(home_store, tmp_path):
-    desk = Desk([Recorder()], tmp_path)
+    channel = Recorder()
+    desk = Desk([channel], tmp_path)
     home_store.put(
         "jobs",
         "1",
@@ -657,9 +662,9 @@ def test_an_exercise_paused_for_another_hands_it_its_message(home_store, tmp_pat
         },
     )
     paused_one_ends = threading.Event()
-    desk.follow_exercise(os.getpid(), "exercise rust", paused_one_ends.wait)
+    desk.follow_exercise([(channel, "1")], os.getpid(), "exercise rust", paused_one_ends.wait)
     first = desk.exercise_reporter
-    desk.follow_exercise(os.getpid(), "exercise python", lambda: time.sleep(5))
+    desk.follow_exercise([(channel, "1")], os.getpid(), "exercise python", lambda: time.sleep(5))
     assert first.ended and desk.exercise_reporter is not first
     paused_one_ends.set()
     time.sleep(0.2)
@@ -675,7 +680,7 @@ def test_a_new_jobs_message_is_kept_up_and_one_that_goes_on_comes_to_the_bottom(
     monkeypatch.setattr(Jobs, "current", Jobs.save(job))
     a_new_job = Tracker("learn html5")
     a_new_job.publish()
-    reporter = conversation.Reporter([channel], "learn html5", pid=os.getpid())
+    reporter = conversation.Reporter(everyone([channel]), "learn html5", pid=os.getpid())
     reporter.refresh()
     reporter.refresh()
     the_persons_message = "learn tailwind"

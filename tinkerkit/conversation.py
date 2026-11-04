@@ -312,9 +312,13 @@ class Desk:
                 with self.post_lock:
                     if channel in self.chats_started and not self.a_channel_closed():
                         self.post_status(channel, text)
-            elif (anew and not self.busy()) or text.startswith("💤"):
+            elif (anew and not self.terminal_follows_job()) or text.startswith("💤"):
                 channel.show(ConsoleChannel.CHAT, None, text, done=True)
         self.keep_job_at_bottom()
+
+    def terminal_follows_job(self):
+        audience = self.reporter.audience if self.reporter else []
+        return self.busy() and any(channel in self.consoles for channel, _ in audience)
 
     def keep_job_at_bottom(self):
         reporter = self.reporter
@@ -537,20 +541,20 @@ class Desk:
         if deletes(words) and "--yes" not in words:
             return self.ask_first(channel, chat, words)
         if kind == "job":
-            return self.start_task(words, self.root, " ".join(words))
+            return self.start_task([(channel, chat)], words, self.root, " ".join(words))
         shown = self.tinker(words)
         return md(t"⚙️ **{' '.join(words)}**\n{shown:block}")
 
     def handlers(self, channel, message, words):
         command = words[0]
         return {
-            "task": lambda: self.new_task(words),
-            "confirm": lambda: self.decide(command, words),
-            "amend": lambda: self.decide(command, words),
-            "rename": lambda: self.decide(command, words),
-            "resume": lambda: self.resume(words),
+            "task": lambda: self.new_task([(channel, message.chat)], words),
+            "confirm": lambda: self.decide([(channel, message.chat)], command, words),
+            "amend": lambda: self.decide([(channel, message.chat)], command, words),
+            "rename": lambda: self.decide([(channel, message.chat)], command, words),
+            "resume": lambda: self.resume([(channel, message.chat)], words),
             "stop": lambda: self.stop(words),
-            "research": lambda: self.research(words),
+            "research": lambda: self.research([(channel, message.chat)], words),
             "exercise": lambda: self.exercise(channel, message, words),
             "runs": lambda: self.report(command, words),
             "status": lambda: self.report(command, words),
@@ -584,14 +588,18 @@ class Desk:
             return self.memory_graph(channel, chat, words)
         return md(t"🧠 **{' '.join(words)}**\n{self.tinker(words):block}")
 
-    def research(self, words):
-        return self.start_task(words, self.root, " ".join(words)) if len(words) > 1 else USAGE["research"]
+    def research(self, audience, words):
+        return (
+            self.start_task(audience, words, self.root, " ".join(words))
+            if len(words) > 1
+            else USAGE["research"]
+        )
 
     def exercise(self, channel, message, words):
         if len(words) < 2:
             return USAGE["exercise"]
         if words[1].lower() != "status":
-            return self.start_exercise(words)
+            return self.start_exercise([(channel, message.chat)], words)
 
         def answer():
             sent = channel.send(message.chat, md(t"🏋️ **{' '.join(words)}**\n{self.tinker(words):block}"))
@@ -608,7 +616,7 @@ class Desk:
         self.exercise_says("🛑 Stopping: its build saves itself first")
         return None
 
-    def start_exercise(self, words, title=None):
+    def start_exercise(self, audience, words, title=None):
         log = projects_folder() / EXERCISE_FOLDER / "exercise.log"
         log.parent.mkdir(parents=True, exist_ok=True)
         start = log.stat().st_size if log.exists() else 0
@@ -619,27 +627,30 @@ class Desk:
                 )
         except OSError as exc:
             return md(t"⚠️ **Could not start it:** {exc}")
-        self.follow_exercise(process.pid, title or " ".join(words), process.wait, (log, start), anew=True)
+        self.follow_exercise(
+            audience, process.pid, title or " ".join(words), process.wait, (log, start), anew=True
+        )
         return None
 
     def adopt_exercise(self):
         exercise = exercising_now()
         lost = next((job for job in Jobs.lost() if job["command"] == "exercise"), None)
+        audience = shown_in(self.channels, exercise_board())
         if exercise and not exercise["reports"]:
             self.follow_exercise(
-                exercise["pid"], exercise["title"], lambda: until_ended(exercise["pid"]), anew=True
+                audience, exercise["pid"], exercise["title"], lambda: until_ended(exercise["pid"]), anew=True
             )
         elif not exercise and lost:
-            self.start_exercise(["resume", f"#{lost['number']}"], lost["title"])
+            self.start_exercise(audience, ["resume", f"#{lost['number']}"], lost["title"])
 
-    def follow_exercise(self, pid, title, ended, log=None, anew=False):
+    def follow_exercise(self, audience, pid, title, ended, log=None, anew=False):
         sent = exercise_board()
         if anew:
             self.take_out(sent)
         if self.exercise_reporter is not None:
             self.exercise_reporter.ended = True
         reporter = self.exercise_reporter = Reporter(
-            self.channels,
+            audience,
             title,
             pid=pid,
             sent=sent,
@@ -690,21 +701,21 @@ class Desk:
         channel.send_file(chat, page, md(t"🧠 **Tinker's memory**\n{shown}"))
         return None
 
-    def new_task(self, words):
+    def new_task(self, audience, words):
         if len(words) < 2:
             return USAGE["task"]
         request = " ".join(words[1:])
-        return self.start_task(["task", request], self.root, request)
+        return self.start_task(audience, ["task", request], self.root, request)
 
-    def decide(self, command, words):
+    def decide(self, audience, command, words):
         waiting = self.waiting_plan or {}
         if command == "rename":
-            return self.rename(waiting, words)
+            return self.rename(audience, waiting, words)
         name, rest = refs(words[1:])
         if command == "amend" and not rest:
             return USAGE["amend"]
         if self.confirms_a_new_project(command, name, waiting):
-            return self.ask_folder_name(waiting)
+            return self.ask_folder_name(audience, waiting)
         target = name or waiting.get("run")
         if not target:
             return "🤷 No plan waits for confirmation: start one with `/task WHAT TO BUILD`"
@@ -713,6 +724,7 @@ class Desk:
         target = waiting["run"] if mine else target
         if command == "confirm":
             started = self.start_task(
+                audience,
                 ["resume", f"@{target}"],
                 folder,
                 title,
@@ -722,22 +734,26 @@ class Desk:
         else:
             change = " ".join(rest)
             started = self.start_task(
-                ["amend", f"@{target}", change], folder, title, md(t"✏️ **Changing the plan:** {change}")
+                audience,
+                ["amend", f"@{target}", change],
+                folder,
+                title,
+                md(t"✏️ **Changing the plan:** {change}"),
             )
-        return self.on_task(waiting if mine else {}, started)
+        return self.on_task(audience, waiting if mine else {}, started)
 
     @staticmethod
     def confirms_a_new_project(command, name, waiting):
         return command == "confirm" and not name and waiting.get("stage") == "spec" and waiting.get("new")
 
-    def ask_folder_name(self, waiting):
+    def ask_folder_name(self, audience, waiting):
         waiting["stage"] = "name"
-        self.on_board(waiting, self.asked(waiting))
+        self.on_board(audience, waiting, self.asked(waiting))
         return None
 
-    def on_task(self, waiting, said):
+    def on_task(self, audience, waiting, said):
         if said and waiting:
-            self.on_board(waiting, f"{self.asked(waiting)}\n\n{said}")
+            self.on_board(audience, waiting, f"{self.asked(waiting)}\n\n{said}")
             return None
         return said
 
@@ -754,34 +770,33 @@ class Desk:
     def plan_shown(waiting):
         return Progress.waits(waiting["plan"], waiting["so_far"]) if waiting else ""
 
-    def on_board(self, waiting, text):
+    def on_board(self, audience, waiting, text):
         board = self.messages_by_run.setdefault(waiting["run"], {})
-        for channel in self.channels:
-            for chat in channel.allowed:
-                board[(channel.name, chat)] = channel.show(
-                    chat, board.get((channel.name, chat)), text, done=True
-                )
+        for channel, chat in audience:
+            board[(channel.name, chat)] = channel.show(chat, board.get((channel.name, chat)), text, done=True)
         self.say_status()
 
-    def rename(self, waiting, words):
+    def rename(self, audience, waiting, words):
         if len(words) != 2:
             return USAGE["rename"]
         if not waiting:
             return "🤷 No plan waits for confirmation, so no folder can be renamed (once built, it stays)."
         if self.busy():
-            return self.on_task(waiting, "⏳ A task is running: wait for it, or `/stop` it first.")
+            return self.on_task(audience, waiting, "⏳ A task is running: wait for it, or `/stop` it first.")
         why = self.rename_folder(waiting, words[1])
         if why is not None:
-            return self.on_task(waiting, md(t"⚠️ **Not renamed:** {why}"))
+            return self.on_task(audience, waiting, md(t"⚠️ **Not renamed:** {why}"))
         self.renamed(waiting, words[1])
         if waiting.get("stage") != "name":
             self.on_board(
-                waiting, f"{self.plan_shown(waiting)}\n\n📁 **Renamed:** its folder is `{words[1]}`"
+                audience, waiting, f"{self.plan_shown(waiting)}\n\n📁 **Renamed:** its folder is `{words[1]}`"
             )
             return None
         return self.on_task(
+            audience,
             waiting,
             self.start_task(
+                audience,
                 ["resume", f"@{waiting['run']}"],
                 waiting["folder"],
                 waiting["title"],
@@ -810,10 +825,10 @@ class Desk:
         waiting["title"] = f"{name}: {waiting['title'].split(': ', 1)[-1]}"
         waiting["plan"] = waiting["plan"].replace(f"📁 `{Path(old).name}`", f"📁 `{name}`")
 
-    def resume(self, words):
+    def resume(self, audience, words):
         name, rest = refs(words[1:])
         if name and not rest:
-            return self.start_task(["resume", f"@{name}"], self.root, f"resume @{name}")
+            return self.start_task(audience, ["resume", f"@{name}"], self.root, f"resume @{name}")
         number = job_number(words[1]) if len(words) == 2 else None
         if len(words) > 2 or (len(words) == 2 and number is None):
             return USAGE["resume"]
@@ -824,8 +839,8 @@ class Desk:
             return md(t"🤷 {why.replace('tinker ', '')}")
         again = ["resume", f"#{job['number']}"]
         if job["command"] == "exercise":
-            return self.start_exercise(again, job["title"])
-        return self.start_task(again, self.root, job["title"])
+            return self.start_exercise(audience, again, job["title"])
+        return self.start_task(audience, again, self.root, job["title"])
 
     def stop(self, words):
         if len(words) > 1:
@@ -902,7 +917,7 @@ class Desk:
             return
         words = asking["words"] + ["--yes"]
         if kind_of(words) == "job":
-            refused = self.start_task(words, self.root, " ".join(asking["words"]))
+            refused = self.start_task([(channel, chat)], words, self.root, " ".join(asking["words"]))
             if refused:
                 channel.show(chat, asking["shown"], refused, done=True)
             return
@@ -972,13 +987,13 @@ class Desk:
             t"{'✅' if code == 0 else '❌'} **{title}** {line:code} · _exit {code}_{fed:md}\n{printed:md}"
         )
 
-    def start_task(self, arguments, folder, title, phase=Tracker.STARTING, sent=None, keep=""):
+    def start_task(self, audience, arguments, folder, title, phase=Tracker.STARTING, sent=None, keep=""):
         run = self.run_named(arguments)
         sent = sent if sent is not None else self.messages_by_run.get(run) if run else None
         with self.lock:
             self.task = {"arguments": arguments, "folder": folder, "title": title, "run": run}
             self.reporter = Reporter(
-                self.channels,
+                audience,
                 title,
                 sent=sent,
                 phase=phase,
@@ -1540,10 +1555,14 @@ def in_shell(shell, line, folder, given=None):
         return ShellRun("not started", str(exc))
 
 
+def shown_in(channels, board):
+    return [(channel, chat) for channel in channels for name, chat in board if name == channel.name]
+
+
 class Reporter:
     def __init__(
         self,
-        channels,
+        audience,
         title,
         pid=None,
         sent=None,
@@ -1552,7 +1571,7 @@ class Reporter:
         before=0.0,
         on_step=None,
     ):
-        self.channels, self.progress, self.pid = channels, Progress(title, phase, before), pid
+        self.audience, self.progress, self.pid = audience, Progress(title, phase, before), pid
         self.on_step = on_step
         self.plan_on_top = plan_on_top
         self.sent, self.last_edit, self.lock = ({} if sent is None else sent), 0.0, threading.Lock()
@@ -1590,26 +1609,24 @@ class Reporter:
             self.on_step()
 
     def count_live(self):
-        for channel in self.channels:
-            for chat in channel.allowed:
-                channel.count_live(chat, self.sent.get((channel.name, chat)), **self.progress.facts)
+        for channel, chat in self.audience:
+            channel.count_live(chat, self.sent.get((channel.name, chat)), **self.progress.facts)
 
     def say(self, text, done=False):
         text = f"{self.plan_on_top}\n\n{text}" if self.plan_on_top else text
         bottom, self.send_at_bottom = done or self.send_at_bottom, False
-        for channel in self.channels:
-            for chat in channel.allowed:
-                key = (channel.name, chat)
-                self.sent[key] = channel.show(
-                    chat,
-                    self.sent.get(key),
-                    text,
-                    done,
-                    bottom,
-                    began=self.progress.work_began,
-                    doing=self.progress.working_on,
-                    **self.progress.facts,
-                )
+        for channel, chat in self.audience:
+            key = (channel.name, chat)
+            self.sent[key] = channel.show(
+                chat,
+                self.sent.get(key),
+                text,
+                done,
+                bottom,
+                began=self.progress.work_began,
+                doing=self.progress.working_on,
+                **self.progress.facts,
+            )
 
     def printed(self, line):
         if self.tracked() is None and self.says_something(line):
@@ -1810,32 +1827,20 @@ class Progress:
 
 
 class Attached:
-    def __init__(self, channels, title, tracker):
+    def __init__(self, tracker):
         self.tracker = tracker
-        self.reporter = Reporter(channels, title, pid=os.getpid())
 
     def start(self):
         signal.signal(JOB_STOP_SIGNAL, self.stop)
         self.tracker.change("attached", reports=True)
-        with self.reporter.lock:
-            self.reporter.progress.take(self.tracker.state)
-            self.reporter.update()
         return self
 
     def stop(self, signum, frame):
         raise KeyboardInterrupt
 
-    def end(self):
-        self.reporter.finish(self.tracker.state)
 
-
-def attach(title, tracker):
-    try:
-        channels = chat_channels()
-    except SystemExit as exc:
-        say.warn(f"Channels left out: {exc}")
-        return None
-    return Attached(channels, title, tracker).start() if channels else None
+def attach(tracker):
+    return Attached(tracker).start()
 
 
 def chat_channels():

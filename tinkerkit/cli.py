@@ -884,7 +884,8 @@ class Commands:
     @staticmethod
     def reported(title, model, work, chats=False, blocked=None):
         tracker = Commands.followed(title)
-        listening = conversation.attach(title, tracker) if chats else None
+        if chats:
+            conversation.attach(tracker)
         started, ended = time.monotonic(), ending("stopped", f"{title} did not finish")
         try:
             ended = work(tracker)
@@ -896,8 +897,6 @@ class Commands:
             took = time.monotonic() - started
             say.title(f"Time taken: {human_duration(took)}", "⏱️")
             tracker.end(ended, took)
-            if listening:
-                listening.end()
 
     @staticmethod
     def print_learned(topic, entry):
@@ -1161,13 +1160,9 @@ class ProjectRun:
             Runs.clear_folder(workdir, Path(spec).expanduser().resolve() if spec else None, self.args.yes)
         say.follow(self.tracker.heard)
         self.open()
-        listening = conversation.attach(self.tracker.state["title"], self.tracker)
-        try:
-            self.work_safely()
-            self.finish()
-        finally:
-            if listening:
-                listening.end()
+        conversation.attach(self.tracker)
+        self.work_safely()
+        self.finish()
         sys.exit(self.outcome.exit_code)
 
     def check_requirements(self):
