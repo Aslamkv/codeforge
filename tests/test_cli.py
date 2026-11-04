@@ -735,7 +735,7 @@ def test_a_job_never_unloads_its_model_when_it_ends(monkeypatch, fake_ollama):
     monkeypatch.setattr(Models, "remember", staticmethod(lambda model: None))
     commands = Commands(parse("ask", "a"))
     commands.tracker = Ended()
-    commands.reported(Kept(), lambda tracker: cli.ending("done", "asked"))
+    commands.reported(lambda: (Kept(),), lambda tracker, model: cli.ending("done", "asked"))
     assert fake_ollama.unloaded == []
 
 
@@ -759,9 +759,39 @@ def test_a_jobs_clock_counts_from_its_process_start(monkeypatch):
     monkeypatch.setattr(Models, "remember", staticmethod(lambda model: None))
     commands = Commands(parse("ask", "a"), started_at)
     commands.follow("Asking")
-    commands.reported(object(), lambda tracker: cli.ending("done", "asked"))
+    commands.reported(lambda: (object(),), lambda tracker, model: cli.ending("done", "asked"))
     assert clock["started"] == started_at.timestamp()
     assert clock["took"] >= 30
+
+
+@pytest.mark.spec("PRJ-17")
+def test_a_stop_during_setup_ends_the_job_as_blocked_with_its_time_taken(monkeypatch):
+    clock = {}
+
+    class Ended:
+        heard = None
+
+        def __init__(self, title, started=None):
+            self.state = {"title": title}
+
+        def end(self, ended, took):
+            clock["ended"], clock["took"] = ended, took
+
+    def not_installed():
+        raise SystemExit("Model m is not installed.")
+
+    remembered = []
+    started_at = datetime.datetime.now() - datetime.timedelta(seconds=30)
+    monkeypatch.setattr(cli, "Tracker", Ended)
+    monkeypatch.setattr(cli.say, "follow", lambda heard: None)
+    monkeypatch.setattr(Models, "remember", staticmethod(remembered.append))
+    monkeypatch.setattr(Commands, "checked_model", staticmethod(not_installed))
+    commands = Commands(parse("ask", "a"), started_at)
+    with pytest.raises(SystemExit):
+        commands.ask()
+    assert clock["ended"]["status"] == "blocked"
+    assert clock["took"] >= 30
+    assert remembered == []
 
 
 @pytest.mark.spec("PRJ-18")
@@ -776,6 +806,10 @@ def test_a_job_shows_it_is_getting_ready_before_it_checks_its_model(words, monke
 
         def __init__(self, title, started=None):
             order.append(Tracker.STARTING)
+            self.state = {"title": title}
+
+        def end(self, ended, took):
+            pass
 
     def checked():
         order.append("checked")

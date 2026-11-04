@@ -735,10 +735,11 @@ class Commands:
             TaughtCommands.teach(topic, definition)
             return
         self.follow(f"Learning {topic}")
-        model, embeddings, internet = self.learning_tools("tinker learn", topic)
         self.reported(
-            model,
-            lambda tracker: self.learned(topic, SlotLearner(model, internet, embeddings, tracker)),
+            lambda: self.learning_tools("tinker learn", topic),
+            lambda tracker, model, embeddings, internet: self.learned(
+                topic, SlotLearner(model, internet, embeddings, tracker)
+            ),
             blocked=lambda stopped: Commands.blocked(f"Nothing learned about {topic}", stopped),
         )
 
@@ -769,10 +770,9 @@ class Commands:
     def research(self):
         topic = self.args.research
         self.follow(f"Researching {topic}")
-        model, embeddings, internet = self.learning_tools("tinker research", topic)
         self.reported(
-            model,
-            lambda tracker: Commands.researched(
+            lambda: self.learning_tools("tinker research", topic),
+            lambda tracker, model, embeddings, internet: Commands.researched(
                 topic, Commands.researcher(model, internet, embeddings, tracker).research(topic)
             ),
             blocked=lambda stopped: Commands.blocked(f"Nothing found about {topic}", stopped),
@@ -830,23 +830,25 @@ class Commands:
     def ask(self):
         question = self.args.ask
         self.follow(f"Asking: {first_line(question, 60)}")
-        model = self.model_in_use(*Commands.checked_model(), question)
-        memory = Memory()
         self.reported(
-            model,
-            lambda tracker: Asker(model, memory, tracker).answer(question),
+            lambda: (self.model_in_use(*Commands.checked_model(), question), Memory()),
+            lambda tracker, model, memory: Asker(model, memory, tracker).answer(question),
         )
 
     def teach(self):
         teaching = self.args.teach
         self.follow(f"Teaching: {first_line(teaching, 60)}")
+        self.reported(
+            lambda: self.teaching_tools(teaching),
+            lambda tracker, model, internet, memory: Teacher(model, internet, memory, tracker).teach(
+                teaching
+            ),
+        )
+
+    def teaching_tools(self, teaching):
         name, settings = Commands.checked_model()
         internet = Internet()
-        model, memory = self.model_in_use(name, settings, teaching), Memory()
-        self.reported(
-            model,
-            lambda tracker: Teacher(model, internet, memory, tracker).teach(teaching),
-        )
+        return self.model_in_use(name, settings, teaching), internet, Memory()
 
     def read(self):
         words = self.args.read
@@ -862,10 +864,9 @@ class Commands:
             Jobs.retarget(["read", f"#{number}"])
         title = reading.known_reading(number)["title"]
         self.follow(f"Reading #{number} {first_line(title, 50)}")
-        model = self.model_in_use(*Commands.checked_model(), f"{title} {focus}")
         self.reported(
-            model,
-            lambda tracker: Reader(model, tracker).read(number, focus),
+            lambda: (self.model_in_use(*Commands.checked_model(), f"{title} {focus}"),),
+            lambda tracker, model: Reader(model, tracker).read(number, focus),
         )
 
     def exercise(self):
@@ -873,24 +874,26 @@ class Commands:
         if what.lower() == "status":
             return exercising.show()
         self.follow(f"Exercising {what}")
-        model = self.model_in_use(*Commands.checked_model(), what)
         self.reported(
-            model,
-            lambda tracker: exercising.Exercise(model, tracker).run(what),
+            lambda: (self.model_in_use(*Commands.checked_model(), what),),
+            lambda tracker, model: exercising.Exercise(model, tracker).run(what),
             chats=True,
         )
 
-    def reported(self, model, work, chats=False, blocked=None):
-        if chats:
-            conversation.attach(self.tracker)
+    def reported(self, setup, work, chats=False, blocked=None):
         ended = ending("stopped", f"{self.tracker.state['title']} did not finish")
+        tools = ()
         try:
-            ended = work(self.tracker)
+            tools = setup()
+            if chats:
+                conversation.attach(self.tracker)
+            ended = work(self.tracker, *tools)
         except SystemExit as stopped:
             ended = blocked(stopped) if blocked else ending("blocked", first_line(str(stopped), 200))
             raise
         finally:
-            Models.remember(model)
+            if tools:
+                Models.remember(tools[0])
             took = time.time() - self.started_at.timestamp()
             say.title(f"Time taken: {human_duration(took)}", "⏱️")
             self.tracker.end(ended, took)
