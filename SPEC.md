@@ -757,8 +757,9 @@ Each request's one thinking level.
   going up (`high` → `xhigh`). A model with no values gets no think setting.
 - **RVW-3** Each command that serves a request (`ask`, `teach`, `read`, `exercise`, `learn`, `research` and a
   run) reviews it once, and every model call for it asks at that level: no call picks its own. Retries keep
-  theirs (**MOD-18**, **MOD-19**), and so does a build's concluding call without thinking. Quick calls keep
-  theirs (**MOD-25**). Where a command shows that its model thinks, it shows the request's level.
+  theirs (**MOD-18**, **MOD-19**), and so does a build's concluding call without thinking. Each message the
+  person sends the chat is reviewed too, and the chat's reply to it is asked at its level. The other quick
+  calls keep theirs (**MOD-25**). Where a command shows that its model thinks, it shows the request's level.
 
 ## project (PRJ)
 
