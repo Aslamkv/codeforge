@@ -18,7 +18,21 @@ lazy import webbrowser
 lazy from pathlib import Path
 
 from .commands import BY_NAME, COMMANDS, CommandMenu, deletes, kind_of, refs
-from .jobs import Jobs, alive, calls_log, job_number, paused_for_you
+from .jobs import (
+    Jobs,
+    Queue,
+    Runner,
+    alive,
+    answer_stopped,
+    answering,
+    calls_log,
+    emptied_queue,
+    job_number,
+    queue_action,
+    queue_lines,
+    stop_answers,
+    tinker_command,
+)
 from .project import Runs, Tracker, saved
 lazy from .ledger import DONE_NOTE_KEPT_SECONDS, Ledger
 lazy from .messages import (
@@ -148,13 +162,11 @@ def one_shot(command, text):
     if not text and command != "run":
         return f"tinker {command} needs words after it, e.g. tinker {command} {'hello' if command == 'chat' else '...'}"
     if command == "chat":
-        with paused_for_you():
-            console.show(chat, None, talk.reply(console, message, "", CHAT_MAX_REPLY_TOKENS), done=True)
+        console.show(chat, None, talk.reply(console, message, "", CHAT_MAX_REPLY_TOKENS), done=True)
     elif command == "run":
         Desk([console], Path.cwd()).run_app(console, chat, [text])
     else:
-        with paused_for_you():
-            command_once(console, talk, message)
+        command_once(console, talk, message)
     return None
 
 
@@ -177,8 +189,7 @@ class Desk:
     def __init__(self, channels, root):
         self.channels, self.root = channels, Path(root).resolve()
         self.last_task = self.reporter = self.task = None
-        self.live_tasks = []
-        self.lock, self.talk = threading.Lock(), Talk(commands_brief(), pausing_jobs=paused_for_you)
+        self.lock, self.talk = threading.Lock(), Talk(commands_brief(), pausing_jobs=answering)
         self.questions = Questions()
         self.shell = Shell(self.talk, self.root, self.questions)
         self.waiting_plan = None
@@ -191,9 +202,12 @@ class Desk:
         self.stop_question = None
         self.exercise_reporter = None
         self.echo_to_terminal = not self.consoles
+        if threading.current_thread() is threading.main_thread():
+            signal.signal(JOB_STOP_SIGNAL, stop_answers)
 
     def run(self):
         self.claim_chats()
+        self.hosting = Runner.host()
         self.open_banner()
         self.talk.warm()
         self.say_status(anew=True)
@@ -203,6 +217,7 @@ class Desk:
         try:
             self.listen_until_ended()
         except KeyboardInterrupt:
+            Runner.pause(self.hosting)
             self.close_channels()
             self.stop_task()
             self.say_goodbye()
@@ -328,8 +343,11 @@ class Desk:
                 reporter.update()
 
     def status(self):
-        if self.busy():
-            return md(t"🔄 **Tinker** · working on {self.reporter.progress.title}")
+        head, *queued = Queue.ordered() or [None]
+        job = Jobs.get(head) if head is not None else None
+        if job:
+            behind = f" · {len(queued)} queued" if queued else ""
+            return md(t"🔄 **Tinker** · working on {job['title']}{behind}")
         if self.waiting_plan:
             then = (
                 "`/confirm` · `/rename NAME`"
@@ -337,14 +355,6 @@ class Desk:
                 else "`/confirm` · `/amend WHAT`"
             )
             return md(t"🙋 **Tinker** · {self.waiting_plan['title']} waits for you: {then:md}")
-        elsewhere = [described(state) for state in persons_runs(self.children())]
-        if elsewhere:
-            return md(
-                t"🔄 **Tinker** · working in a terminal on {'; '.join(run['title'] for run in elsewhere)}"
-            )
-        exercise = exercising_now()
-        if exercise:
-            return md(t"🏋️ **Tinker** · {exercise['title']}")
         return "🟢 **Tinker** · idle: send a task"
 
     @staticmethod
@@ -554,6 +564,7 @@ class Desk:
             "rename": lambda: self.decide([(channel, message.chat)], command, words),
             "resume": lambda: self.resume([(channel, message.chat)], words),
             "stop": lambda: self.stop(words),
+            "queue": lambda: self.queue(words),
             "research": lambda: self.research([(channel, message.chat)], words),
             "exercise": lambda: self.exercise(channel, message, words),
             "runs": lambda: self.report(command, words),
@@ -832,8 +843,6 @@ class Desk:
         number = job_number(words[1]) if len(words) == 2 else None
         if len(words) > 2 or (len(words) == 2 and number is None):
             return USAGE["resume"]
-        if Jobs.wake(number):
-            return md(t"▶️ **Job #{number}** goes on now.")
         job, why = Jobs.resumable(number)
         if job is None:
             return md(t"🤷 {why.replace('tinker ', '')}")
@@ -851,9 +860,9 @@ class Desk:
 
     def stop_job(self, number):
         job = Jobs.get(number)
-        if job is None or job["state"] not in ("running", "paused"):
-            return f"🤷 Job #{number} is not running or paused: `/jobs` lists them."
-        if job["state"] == "paused":
+        if job is None or number not in Queue.ordered():
+            return f"🤷 Job #{number} is not in the queue (`/queue list` shows it)."
+        if job["state"] == "queued":
             Jobs.stop(job)
         elif self.busy() and job["pid"] == self.last_task.pid:
             self.stop_task()
@@ -861,7 +870,23 @@ class Desk:
             return self.stop_exercise()
         else:
             Jobs.stop(job)
+        if job["command"] == "chat":
+            return md(t"⏹ **Stopped #{number}**, the answer.")
         return md(t"⏹ **Stopping #{number}** {job['title']}: it is saved; `/resume #{number}` goes on later.")
+
+    def queue(self, words):
+        action = queue_action(words[1:])
+        if action is None:
+            return USAGE["queue"]
+        if action == "list":
+            return "\n".join(queue_lines())
+        if action != "all":
+            return self.stop_job(action)
+        head = emptied_queue()
+        said = ["🧹 Every waiting job is out of the queue."]
+        if head is not None:
+            said.append(self.stop_job(head))
+        return "\n".join(line for line in said if line)
 
     def report(self, command, words):
         if command == "status" and len(words) == 1:
@@ -1006,9 +1031,6 @@ class Desk:
                 self.last_task = None
                 return md(t"⚠️ **Could not start it:** {exc}")
             self.reporter.pid = self.last_task.pid
-            self.live_tasks = [process for process in self.live_tasks if process.poll() is None] + [
-                self.last_task
-            ]
             self.say_status()
             with self.reporter.lock:
                 self.reporter.update()
@@ -1095,16 +1117,15 @@ class Desk:
         return self.last_task is not None and self.last_task.poll() is None
 
     def running_now(self):
-        progress = self.reporter.progress if self.busy() else None
-        here = (
-            [{"title": progress.title, "brief": progress.brief(), "text": progress.text()}]
-            if progress
-            else []
-        )
-        return here + [described(state) for state in persons_runs(self.children())]
+        ordered = Queue.ordered()
+        jobs = [job for job in (Jobs.get(number) for number in ordered) if job]
+        return [self.running(job, job["number"] == ordered[0]) for job in jobs]
 
-    def children(self):
-        return {process.pid for process in self.live_tasks}
+    def running(self, job, at_head):
+        if at_head and self.busy():
+            progress = self.reporter.progress
+            return {"title": progress.title, "brief": progress.brief(), "text": progress.text()}
+        return described(dict({"title": job["title"]}, **(job.get("progress") or {})))
 
     def tinker(self, arguments, timeout=120):
         done = self.run_tinker(arguments, timeout)
@@ -1378,7 +1399,7 @@ class Talk:
         done = threading.Event()
         threading.Thread(target=keep_typing, args=(channel, chat, done), daemon=True).start()
         try:
-            return Models.quick_reply(messages, tokens, level)
+            return answer_or_stop(lambda: Models.quick_reply(messages, tokens, level))
         finally:
             done.set()
 
@@ -1851,22 +1872,9 @@ def chat_channels():
     return Channels.enabled()
 
 
-def persons_runs(skip=()):
-    return [state for state in running(skip) if not state.get("exercise")]
-
-
 def exercising_now():
     jobs = [job for job in Jobs.listed("running") if job["command"] == "exercise" and job.get("progress")]
     return described(tracker_of(jobs[0])) if jobs else None
-
-
-def running(skip=()):
-    return [
-        tracker_of(job)
-        for state in ("running", "paused")
-        for job in Jobs.listed(state)
-        if job.get("progress") and job["pid"] != os.getpid() and job["pid"] not in skip
-    ]
 
 
 def tracker_of(job):
@@ -2868,10 +2876,6 @@ def commands_brief():
     return "; ".join(re.findall(r"- `([^`]+)`", help_text())) or "help"
 
 
-def tinker_command():
-    return [sys.executable, str(Path(sys.argv[0]).resolve())]
-
-
 def tinker_process(arguments, folder=None, output=None, **env):
     return subprocess.Popen(
         tinker_command() + arguments,
@@ -2904,6 +2908,25 @@ def keep_typing(channel, chat, done):
     while not done.is_set():
         channel.typing(chat)
         done.wait(TYPING_SIGN_SECONDS)
+
+
+def answer_or_stop(answer):
+    outcome = {}
+
+    def run():
+        try:
+            outcome["reply"] = answer()
+        except Exception as error:
+            outcome["error"] = error
+
+    thread = threading.Thread(target=run, daemon=True)
+    thread.start()
+    stopped = answer_stopped()
+    while thread.is_alive() and not stopped.wait(0.1):
+        pass
+    if "error" in outcome:
+        raise outcome["error"]
+    return outcome.get("reply", "⏹ Stopped.")
 
 
 def reviewed_level(text):

@@ -502,8 +502,8 @@ tinker exercise status         # how it is going: each project's measures, and w
 
 An exercise is a [job](#jobs-) like any other, and each language keeps its own projects and lessons.
 `tinker stop #N` stops it with everything kept, and `tinker resume #N` goes on. Anything you start, another
-exercise too, or a chat or a command line, pauses it (its build stops and saves itself), and the exercise goes
-on as soon as nothing else runs and you have your answer.
+exercise too, or a chat or a command line, pauses it (its build stops and saves itself, and it waits in the
+queue), and the exercise goes on when its turn in the queue comes again.
 
 It runs until you stop it. In a chat, `/exercise rust` starts it in the background, so it keeps going after the
 conversation ends. It keeps one message, whether it is started, stopped or resumed, and that message shows what
@@ -516,20 +516,30 @@ by itself.
 Everything that takes a while is a job: a task (and `restart`, `confirm`, `amend`, `resume`), `add`, `fix`,
 `model NAME` of a model never measured, `model calibrate`, `learn`, `ask`, `teach`, `read`, `research` and `exercise`. Each gets a number (`#1`, `#2` ...).
 
-One job runs at a time. Start another, of any kind, or chat with Tinker, and the one that runs is paused: it
-saves itself and waits, and you are answered at once. As soon as Tinker is idle (no job runs, and nothing you
-asked is still being answered), the newest paused job goes on by itself, then the next. There is no waiting
-time.
+Jobs wait in one queue, and only the first one runs. Start another, of any kind, or chat with Tinker, and it
+goes to the front: the one that ran saves itself and waits second in the queue, and you are answered at once.
+Once a job ends, the next in the queue goes on by itself where it was. The queue runs while a Tinker is open
+(a chat, or a job command in a terminal), and goes on by itself whenever Tinker starts again. Ctrl-C on a job
+command, or quitting a chat, pauses the job that runs; it stays first in the queue.
 
 List them, newest first, 10 to a page:
 
 ```sh
-tinker jobs              # the running ones, then the paused ones, then the stopped ones
-tinker jobs paused       # only the paused ones (or running, stopped, finished, archived)
+tinker jobs              # the running one, then the queued ones in queue order, then the stopped ones
+tinker jobs queued       # only the queued ones (or running, stopped, finished, archived)
 tinker jobs finished 2   # the second page
 ```
 
-Stop one, or the one that runs. What it did is kept. A paused job you stop no longer goes on by itself:
+See the queue, first job first, and take jobs out of it:
+
+```sh
+tinker queue list
+tinker queue stop #3     # as tinker stop #3
+tinker queue stop all    # stop the job that runs and empty the queue
+```
+
+Stop one, or the one that runs (a chat's answer too). What it did is kept. A stopped job leaves the queue and
+never goes on by itself:
 
 ```sh
 tinker stop #3
@@ -540,15 +550,15 @@ Go on where it stopped, even days later. What it already asked the model and the
 job's own journal, so no search or model call is made twice; it works live again from the first new step:
 
 ```sh
-tinker resume #3         # a paused one goes on at once
+tinker resume #3         # back to the front of the queue, so it goes on at once
 tinker resume            # the job stopped last (with none stopped, this folder's run)
 ```
 
 `tinker confirm` is not a job's resume: it always builds the plan that waits in its folder.
 
-A job that was killed (or the computer restarted) shows as stopped, and resumes the same way. Once a job
-finishes, its journal is deleted. While a job runs, the computer stays awake. In a chat, the same commands work with a `/`:
-`/jobs`, `/stop #3`, `/resume #3`.
+A job that was killed (or the computer restarted) stays in the queue and goes on when its turn comes. Once a
+job finishes, its journal is deleted. While a job runs, the computer stays awake. In a chat, the same commands
+work with a `/`: `/jobs`, `/stop #3`, `/resume #3`, `/queue list`, `/queue stop all`.
 
 Clear the jobs you are done with (it asks first). They are archived, not deleted: `tinker jobs` no longer shows
 them, but `tinker jobs archived` does. An archived job cannot be resumed, and its journal and its log of model

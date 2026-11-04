@@ -387,11 +387,11 @@ def test_searches_and_fetches_go_through_the_journal(home_store, monkeypatch):
         monkeypatch,
         {"https://a": got("https://a", b"\x89PNG", "image/png"), "https://b": got("https://b", "<p>hi</p>")},
     )
-    with pytest.raises(KeyboardInterrupt), Jobs.running(["ask", "hi"]):
+    with pytest.raises(KeyboardInterrupt), Jobs.run_here(["ask", "hi"]):
         first = Internet([engine]).fetch(["https://a", "https://b"])
         Internet([engine]).search("q", 3)
         raise KeyboardInterrupt
-    with Jobs.running(Jobs.arguments(["resume", "#1"])):
+    with Jobs.run_here(Jobs.arguments(["resume", "#1"])):
         assert Internet([engine]).fetch(["https://a", "https://b"]) == first
         assert Internet([engine]).search("q", 3) == FOUND
     assert engine.asked == ["q"] and len(fetcher.asked) == 1

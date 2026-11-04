@@ -9,7 +9,7 @@ from test_conversation import Recorder, everyone
 
 from tinkerkit import conversation, exercising
 from tinkerkit.cli import Cli
-from tinkerkit.conversation import Desk, Message, persons_runs
+from tinkerkit.conversation import Desk, Message
 from tinkerkit.exercising import (
     PRACTICE_STEPS,
     Exercise,
@@ -21,7 +21,7 @@ from tinkerkit.exercising import (
     read_choice,
     read_verdict,
 )
-from tinkerkit.jobs import Jobs
+from tinkerkit.jobs import Jobs, Queue
 from tinkerkit.knowledge import Knowledge, Library
 from tinkerkit.project import Steps, Tracker, project_store
 from tinkerkit.settings import Config
@@ -291,8 +291,6 @@ def test_measured_and_problems_come_from_the_projects_own_database(make_project,
 def test_the_exercise_has_no_rule_of_its_own_for_giving_way(make_model, home_store, monkeypatch, no_sleep):
     signals = []
     monkeypatch.setattr(os, "killpg", lambda pid, signum: signals.append(signum))
-    the_person_is_answered = {"a chat": os.getpid()}
-    home_store.put("activity", "answering", the_person_is_answered)
     code = exercise_of(make_model, lambda arguments: FakeBuild(polls=3, code=0)).built(lambda: ["task", "t"])
     assert code == 0 and signals == []
 
@@ -367,6 +365,7 @@ def test_the_conversation_adopts_an_exercise_a_conversation_before_it_started(
     conversation.keep_exercise_board({("rec", "1"): [7], ("other", "5"): [8]})
     reports_by_itself = {"title": "Exercising Rust", "exercise": True, "reports": True}
     home_store.put("jobs", "1", exercise_job("running", progress=reports_by_itself))
+    Queue.add_back(1)
     desk.adopt_exercise()
     assert followed == []
     home_store.put("jobs", "1", exercise_job("running", progress=BUILDING))
@@ -387,6 +386,7 @@ def test_an_exercise_that_ended_unstopped_goes_on_as_the_conversation_starts(
     desk.adopt_exercise()
     its_job_killed_too = exercise_job("running", number=4, pid=999999999, updated="2026-10-23 09:00")
     home_store.put("jobs", "4", its_job_killed_too)
+    Queue.add_back(4)
     conversation.keep_exercise_board({("rec", "1"): [7]})
     desk.adopt_exercise()
     assert started == [([(channel, "1")], ["resume", "#4"], "exercise rust")]
@@ -401,6 +401,7 @@ def test_an_adopted_exercise_takes_its_message_out_and_sends_it_at_the_bottom(
     desk = Desk([channel], tmp_path)
     conversation.keep_exercise_board({("rec", "1"): [7]})
     home_store.put("jobs", "1", exercise_job("running", progress=BUILDING))
+    Queue.add_back(1)
     desk.adopt_exercise()
     after = channel.log[channel.log.index(("delete", "1", 7, "")) :]
     assert any(kind == "send" and "Exercising Rust" in text for kind, _, _, text in after)
@@ -413,6 +414,7 @@ def test_an_adopted_exercise_with_no_saved_message_sends_none(home_store, tmp_pa
     channel = Recorder()
     desk = Desk([channel], tmp_path)
     home_store.put("jobs", "1", exercise_job("running", progress=BUILDING))
+    Queue.add_back(1)
     desk.adopt_exercise()
     assert desk.exercise_reporter is not None and desk.exercise_reporter.audience == []
     wait_for_the_reporter_to_end(desk)
@@ -452,11 +454,11 @@ def test_an_exercise_that_ends_before_it_keeps_a_tracker_shows_what_it_printed(h
 
 
 @pytest.mark.spec("EXR-6")
-def test_the_conversation_leaves_exercise_runs_alone(home_store, tmp_path):
+def test_the_conversation_status_names_a_running_exercise_from_the_queue(home_store, tmp_path):
     desk = Desk([Recorder()], tmp_path)
     home_store.put("jobs", "1", exercise_job("running", progress=BUILDING))
-    assert persons_runs() == [] and desk.running_now() == []
-    assert desk.status() == "🏋️ **Tinker** · Exercising Rust"
+    Queue.add_back(1)
+    assert desk.status() == "🔄 **Tinker** · working on exercise rust"
 
 
 @pytest.mark.spec("EXR-7")
@@ -500,10 +502,15 @@ def test_exercise_status_shows_each_project_measured(home_store, projects, capsy
         "Rust: stopped, 1 practice project(s) done" in out
         and "word-count: done, 4.0 min, 9 model calls" in out
     )
-    for state in ("paused", "running"):
-        home_store.put("jobs", "1", exercise_job(state))
-        exercising.show()
-        assert f"Rust: {state}, 1 practice project(s) done" in capsys.readouterr().out
+    home_store.put("jobs", "1", exercise_job("running"))
+    another_job = 2
+    Queue.add_back(another_job)
+    Queue.add_back(1)
+    exercising.show()
+    assert "Rust: queued, 1 practice project(s) done" in capsys.readouterr().out
+    Queue.remove(another_job)
+    exercising.show()
+    assert "Rust: running, 1 practice project(s) done" in capsys.readouterr().out
 
 
 @pytest.mark.spec("EXR-7")
@@ -522,6 +529,7 @@ def test_every_exercise_keeps_one_message_started_stopped_or_resumed(home_store,
     monkeypatch.setattr(conversation, "signal_task", lambda pid, signum: told.append((pid, signum)))
     assert desk.stop_exercise().startswith("🤷 No exercise runs")
     home_store.put("jobs", "1", exercise_job("running", progress=BUILDING))
+    Queue.add_back(1)
     first_ended = []
     desk.follow_exercise(
         [(channel, "1")],

@@ -50,8 +50,8 @@ enforce it.
   files, its names or its data.
 - **Every part reports through one tracker.** A run publishes what it is doing as structured state. The
   terminal and the chats show that state. They never read meaning back out of printed text.
-- **The person comes first.** Every long command is a job. Whatever the person asks for pauses the job that
-  runs, and a paused job goes on by itself once Tinker is idle ([jobs](#jobs-job)).
+- **The person comes first.** Every long command is a job, in one queue. Whatever the person asks for goes to
+  its front and runs at once; the job it pushed back goes on by itself when its turn comes ([jobs](#jobs-job)).
 - **Tinker uses the web as a person does.** It asks a few open search engines, in parallel within a fixed
   limit, and reads only the pages its searches found, as curl would on the person's behalf. It never crawls:
   no site maps, no links followed. A good search is how it finds what it needs, so no search engine has reason
@@ -151,6 +151,8 @@ the last column:
 | `jobs`, `job numbers` | every job: its number, command, title, arguments, state, process, dates and tracker; the last number given, kept by a clear | `jobs` |
 | log `calls #N` | the model calls and details of job #N (a run's go to its project's `events`), until the job is archived (**JOB-12**) | `jobs` |
 | log `journal #N` | job #N's requests (model calls, web searches, page fetches) with their answers, until it finishes | `jobs` |
+| `job queue`, `job runner` | the job numbers in the queue, head first (**JOB-8**); the process that runs it (**JOB-9**) | `jobs` |
+| log `output #N` | what job #N printed as the runner ran it (**JOB-9**), until the job is archived | `jobs` |
 
 Jobs, readings and the chat history are numbered lists (`Numbered`, **SET-12**). `#N` names an entry. A list
 shows them newest first, a page at a time, and a page that has more after it names the command for the next.
@@ -354,8 +356,8 @@ The home and its database, the settings, numbered lists, and the one way to dele
 - **CMD-1** `COMMANDS` is the one table of Tinker's commands. For each it gives the synopsis, the group, what
   it does, its kind, whether a chat offers it, whether it is a run, whether it deletes, the words it takes in
   a chat (`none`, `one`, `any`), its arguments and its options. The kind is `job` (a long command, **JOB-1**),
-  `glance` (answered at once, pausing nothing, **CNV-14**), `pauses` (a request the model answers right away,
-  **JOB-10**), `own` (the conversation answers it its own way) or `terminal` (it asks in a terminal, so a chat
+  `glance` (answered at once, never queued, **CNV-14**), `pauses` (a request the model answers right away, a
+  job too, **JOB-1**), `own` (the conversation answers it its own way) or `terminal` (it asks in a terminal, so a chat
   only says to run it there). An action whose kind differs from its command's is an `Action` of that command,
   with its own kind: `read list`, `read show`, `exercise status`, `channel add`, `channel remove`,
   `channel start`, `model calibrate NAME`, `model recipe` (`glance`), `model recipe all`, `model NAME` of a model that does not embed and was never measured
@@ -372,69 +374,77 @@ The home and its database, the settings, numbered lists, and the one way to dele
 ## jobs (JOB)
 
 Every long command is a job: it can be listed, stopped and resumed the same way, and a resumed job does not do
-again what it did. The job asked for last is the one that runs (**JOB-8**), and a chat or a command line the
-person asks for pauses it too (**JOB-10**), so the person is always answered at once.
+again what it did. Jobs wait in one queue and only its head runs (**JOB-8**); whatever the person asks for
+goes to the front, so the person is always answered first.
 
-- **JOB-1** `is_job(argv)` is true for a command of kind `job` (**CMD-1**): `task`, `restart`, `resume`,
-  `confirm`, `amend`, `add`, `fix`, `model calibrate NAME`, `model recipe all`, `model NAME` of a model the home has no record of and that is not the embedding model (an embedding model not
-  yet `embed_model` is one too: the home cannot tell it apart, **ARCH-1**), `learn`, `ask`, `teach`, `read`, `research` and `exercise`.
-  Help, and a build an exercise runs (`EXERCISE_ENV`, which holds the exercise's job number), are never jobs. A job keeps the computer awake while it
-  runs (**SET-11**). `Jobs.running(argv)` runs a job as the next number (`#1`, `#2` ...), kept in the home's
-  `jobs` with its command, title, arguments, the day it started, its state `running`, its process and its
-  tracker (`progress`, **PRJ-14**): the one list of what runs. Its process takes `JOB_STOP_SIGNAL` (SIGUSR2) as Ctrl-C.
-- **JOB-2** A job ends `stopped` when it is interrupted (Ctrl-C, `JOB_STOP_SIGNAL`) or its tracker ends with
-  the status `stopped` (`Tracker.end` tells `Jobs.ended`, which adds `("Go on", "tinker resume #N")` to the
-  ending), and `paused` when another job or the person paused it ("Paused for job #N", "Paused for you": its
-  ending says so, and its tracker's `doing`); otherwise it is `finished`, and its journal is deleted (its
-  `calls #N` log is kept). A `running` or `paused` job whose process is gone (killed, the computer restarted)
-  is read as `stopped`; `Jobs.lost()` gives those jobs. A process is known by its ID and the time it started
-  (`alive(pid, began)`), so a later process given the same ID is not taken for it.
+- **JOB-1** `is_job(argv)` is true for a command of kind `job` or `pauses` (**CMD-1**): `task`, `restart`,
+  `resume`, `confirm`, `amend`, `add`, `fix`, `model calibrate NAME`, `model recipe all`, `model NAME` of a model the home has no record of and that is not the embedding model (an embedding model not
+  yet `embed_model` is one too: the home cannot tell it apart, **ARCH-1**), `learn`, `ask`, `teach`, `read`, `research`, `exercise`,
+  `chat` and `command WHAT`. Help, and a build an exercise runs (`EXERCISE_ENV`, which holds the exercise's job number), are never jobs. A job keeps the computer awake while it
+  runs (**SET-11**). `Jobs.running(argv)` makes a job the next number (`#1`, `#2` ...), kept in the home's
+  `jobs` with its command, title, arguments, the day it started, its state, its process and its tracker
+  (`progress`, **PRJ-14**), and puts it at the front of the queue (**JOB-8**). Its process takes
+  `JOB_STOP_SIGNAL` (SIGUSR2) as Ctrl-C.
+- **JOB-2** A job's state follows the queue: its head is `running` and the other jobs in it `queued`. A job's
+  process that is interrupted (`JOB_STOP_SIGNAL`, Ctrl-C) saves itself and ends; the job stays `queued` while it
+  is in the queue (a job pushed back says "Paused for job #N" in its tracker's `doing`), and is `stopped` once
+  out of it, as when its tracker ends with the status `stopped` (`Tracker.end` tells `Jobs.ended`, which adds
+  `("Go on", "tinker resume #N")` to the ending). Otherwise it ends `finished`, leaves the queue, and its
+  journal is deleted (its `calls #N` log is kept). A job in the queue whose process is gone (killed, the
+  computer restarted) stays queued and goes on when its turn comes; `Jobs.lost()` gives those jobs. A process
+  is known by its ID and the time it started (`alive(pid, began)`), so a later process given the same ID is
+  not taken for it.
 - **JOB-3** `journaled(request, ask)` outside a job asks. In a job, a request made before, word for word, is
   answered from the job's journal (log `journal #N`) in the order the answers were kept, and nothing is asked;
   any other request is asked, and its answer kept unless it failed (`keep`). `Ollama.chat` (but an unload),
   `Internet.search` and `Internet.fetch` go through it.
 - **JOB-4** `today()` is the day the job that runs started (today outside a job): the prompts that say the date
   (learning's plan, research's frame) say the same on the day a job is resumed.
-- **JOB-5** `Jobs.arguments`: `resume #N` runs job #N's arguments, as that job (its number, its journal);
+- **JOB-5** `Jobs.arguments`: `resume #N` puts job #N back at the front of the queue and runs its arguments,
+  as that job (its number, its journal);
   `resume` alone runs the job stopped last, or, with no job stopped, the folder's run; `resume @PROJECT` runs
   that project. `confirm` is never a job's resume: it always builds the plan that waits in its folder. An
-  unknown job, one that runs in another process, and a finished or archived one are refused with why. A
+  unknown job, the one that runs, and a finished or archived one are refused with why. A
   task's job is resumed as `resume @RUN` once its run is known (`Jobs.retarget`). A job that goes on
   (`resume #N`) starts its tracker with `resumed`, so its message comes to the bottom of the chat.
-- **JOB-6** `tinker jobs [running|paused|stopped|finished|archived] [PAGE]` lists the jobs by page
-  ([State](#state)): with no state, the running ones, then the paused ones, then the stopped ones. Any other
-  words are an error.
-- **JOB-7** `tinker stop #N` sends job #N `JOB_STOP_SIGNAL`, as Ctrl-C (one that neither runs nor is paused is
-  an error); `tinker stop` stops the job that runs, whatever it is. In the conversation, `/stop #N` stops that
-  job (the task started here, the exercise in its own message, or one elsewhere) and `/stop` the job that runs,
-  and `/resume [#N]` starts `tinker resume #N` as a job (an exercise as the exercise). A paused job that is
-  stopped no longer goes on by itself.
-- **JOB-8** One job runs at a time, whatever kind it is. A job that starts (`Jobs.begin`) pauses every job that
-  runs: each is marked `paused_by` it and told to stop (`JOB_STOP_SIGNAL`), and it waits, at most
-  `JOB_PAUSE_GRACE_SECONDS` seconds, while they save themselves. A paused job keeps its process: it waits there
-  (`go_on_when_idle`). No rule refuses a job because another runs: not the conversation's task, nor a second
-  exercise.
-- **JOB-9** A paused job goes on by itself, at once, as `resume #N` in its own process, as soon as Tinker is
-  idle (`idle`: no job runs, and no request of the person's is being answered: `answering`, in the home's
-  `activity`, kept by `paused_for_you`; a request of a process that is gone does not count). There is no quiet
-  time to wait out. Of the paused jobs, the newest goes on first (`next_to_go_on`), so one at a time.
-  `resume #N` of a paused job makes it go on at once (`Jobs.wake`), in the process where it waits: a paused
-  job never runs in a second process.
-- **JOB-10** A request the model answers right away, a chat or `command WHAT` (in the conversation, or
-  `tinker chat` and `tinker command`), pauses the job that runs while it is answered (`paused_for_you`: paused
-  by "you"). The request is marked as being answered before anything is paused, so the paused job does not go
-  on the moment it has saved itself. The person is answered as soon as it has, and the job goes on as soon as
-  the answer is written (a command line run once confirmed pauses it again while the model reads its output).
-  A glance (**CMD-1**) pauses nothing, and a job asked for pauses it as **JOB-8** says.
+- **JOB-6** `tinker jobs [running|queued|stopped|finished|archived] [PAGE]` lists the jobs by page
+  ([State](#state)): with no state, the running one, then the queued ones in queue order, then the stopped
+  ones. Any other words are an error.
+- **JOB-7** `tinker stop #N` takes job #N out of the queue and, if it runs, sends it `JOB_STOP_SIGNAL`, as
+  Ctrl-C (one not in the queue is an error); `tinker stop` stops the job that runs, whatever it is, a chat's
+  answer too. In the conversation, `/stop #N` stops that job (the task started here, the exercise in its own
+  message, or one elsewhere) and `/stop` the job that runs, and `/resume [#N]` starts `tinker resume #N` as a
+  job (an exercise as the exercise). A stopped job never goes on by itself.
+- **JOB-8** The home keeps one queue (`Queue`): an ordered list of job numbers, and only its head runs. A job
+  is added at the front (whatever the person asks for) or at the back (which no command uses yet). The head a
+  new front pushes back is sent `JOB_STOP_SIGNAL`: it saves itself, its process ends, and it stays queued,
+  second. A job leaves the queue when it ends or is stopped. No rule refuses a job because another runs: not
+  the conversation's task, nor a second exercise.
+- **JOB-9** One `Runner` runs the queue: a thread in a long-lived Tinker process, claimed in the home (its
+  process, `alive(pid, began)`); when its holder is gone, the next Tinker process that can host one takes over.
+  The conversation (the console, a channel's bot) hosts one, and so does a job command in a terminal while no
+  runner is alive; short commands (`jobs`, `stop`, `queue`, a glance) never do. The runner starts the head as a
+  process of its own, `tinker ARGS` (`resume #N` for a job that ran before, which skips what it did), marked as
+  the runner's job #N so it does not queue itself again, and keeps what it prints in log `output #N`. An add in
+  the runner's own process wakes it at once; otherwise it reads the queue once every `QUEUE_LOOK_SECONDS`
+  seconds. It runs until the queue is empty, so the queue goes on whenever a Tinker that hosts it starts.
+- **JOB-10** Whoever asked for a job follows it: a job command in a terminal (and the conversation's own
+  `tinker ...` process) puts its job at the front, prints log `output #N` as it grows and ends once its job
+  leaves the queue; one that hosts the runner keeps it until the queue is empty. Ctrl-C there, and quitting
+  the conversation, pause the job that runs: it stays at the head and goes on when Tinker starts next, or at
+  once if another live Tinker runs the queue. A glance (**CMD-1**) never enters the queue.
 - **JOB-11** `tinker clear jobs [#N...] [--yes]` archives those jobs (with no `#N`, every stopped and finished
   one), as a deletion (**SET-9**): each is kept with the state `archived` (and `archived_from`, the state it
   had), listed by `tinker jobs archived` and not without a state, and its journal and its `calls #N` log are
-  deleted. An archived job is not resumed (**JOB-5**). An unknown job, a running or paused one, one archived
+  deleted. An archived job is not resumed (**JOB-5**). An unknown job, one in the queue, one archived
   already, and any word but `#N` are refused with why.
 - **JOB-12** `calls_log()` is the one log of a job's model calls: `calls #N` for the job that runs, kept when
   it finishes and deleted when it is archived (**JOB-11**). Outside a job it keeps nothing. `learn`, `ask`,
   `teach`, `read`, `research` and `exercise` give it to their model and to `say` (`detail`, **MSG-5**);
   calibration (`model`) calls Ollama directly and keeps none.
+- **JOB-13** `queue list` (`tinker queue list`, `/queue list`) lists the queue in order, its head first;
+  `queue stop #N` takes job #N out of it, as `stop #N`; `queue stop all` stops the job that runs and takes
+  every job out.
 
 ## ledger (LED)
 
@@ -1013,7 +1023,8 @@ The terminal and the chats are one conversation: the same commands, the same ans
   live line says it runs, unless a job's progress holds that line; each goes when the answer comes. `task WHAT` starts a task, and a bare
   `task` gets its usage. A
   run that starts a cycle is given `--confirm`, so its plan waits for the person. `status` alone gives what
-  runs (`status @PROJECT` is that project's status, **CLI-3**). `stop`, `stop #N` and `resume [#N]` act on
+  runs, read from the queue in every chat (`working on <head> · N queued`, idle when it is empty;
+  `status @PROJECT` is that project's status, **CLI-3**). `stop`, `stop #N` and `resume [#N]` act on
   jobs (**JOB-7**). A command that deletes shows what it deletes and waits
   for `/confirm` (**SET-9**), but `clear chat`, which deletes no record (the history keeps it), is done at
   once. `/exit` in a chat asks first, as Tinker cannot be started again from there (the terminal's closes at
@@ -1046,8 +1057,9 @@ The terminal and the chats are one conversation: the same commands, the same ans
   does, and leaves nothing in the history, not even what it said.
 - **CNV-15** `Desk.follow` follows a task by its tracker: its run ID, its folder (the title is named after it),
   and a plan that waits. Once the task ends, it reads the task's last state from its job.
-- **CNV-16** `running(skip)` lists the trackers of the jobs that run or are paused, but for its own process and
-  those it skips. A job whose process is gone is not among them (**JOB-2**).
+- **CNV-16** `Desk.running_now()` lists the trackers of the jobs in the queue, in its order (**JOB-8**): the
+  head as the conversation's own task shows it while that task runs here, every other job from its saved
+  progress.
 - **CNV-17** `Progress(snapshot)` shows a run's tracker: its title with its job (`(Job #N)`, so the person can
   stop it at once), its steps done, the step it is on as the Tinkering line (**MSG-4**, its star one frame
   further each edit), what the model writes now, the passing
@@ -1060,7 +1072,7 @@ The terminal and the chats are one conversation: the same commands, the same ans
   with its title and that line, without the Tinkering line or its clock. Indented lines printed right after
   a line count as part of it, so a multi-line message shows whole.
 - **CNV-19** A task run from a command line (`Attached`) reports to that terminal only; the chats see the
-  status that says it works in a terminal. Stopped or paused
+  status that says it works in a terminal. Stopped or pushed back
   (**JOB-1**), its last state is shown once it ends.
 - **CNV-20** The chat asks the model only through the quick call (**MOD-25**); `Talk` and `Shell`
   read a JSON answer with `Reply.json()` (**PRM-2**), and take one that cannot be read as `{}`. `reply` keeps
@@ -1076,8 +1088,9 @@ The terminal and the chats are one conversation: the same commands, the same ans
   lines that all run as sent runs each in turn. A one-line reply that does not (more words:
   `/fix the login bug`) is offered, `👉 /fix the login bug — /confirm runs it`, and `/confirm` handles it as
   sent; any other reply is shown. This takes no extra model call.
-- **CNV-21** While a chat or a command line pauses the job that runs (**JOB-10**, `Talk.pausing_jobs`), its
-  note says what is paused for it, and that it goes on once they have their answer.
+- **CNV-21** A chat or a command line is a job at the front (**JOB-1**, **JOB-8**); while it pushes back the
+  job that ran (`Talk.pausing_jobs`), its note says which job that is, and that it goes on once they have
+  their answer.
 - **CNV-22** `Shell.propose` gives one command line to confirm, with a warning when it changes or deletes
   things. It gives no command for an empty, multi-line or failed reply. `take` hands the proposal over once.
   `run` runs it in the person's shell and shows the exit code and output.
@@ -1086,7 +1099,7 @@ The terminal and the chats are one conversation: the same commands, the same ans
   one named, else the one built last. With no project built, or one with no run command, it says so.
 - **CNV-24** `one_shot` says one of the conversation's commands once, in the terminal (`tinker chat`,
   `command`, `run`, `history`). Each needs words after it, except `run` and `history`. `chat` and
-  `command` pause the job that runs (**JOB-10**). `command` runs nothing without a yes at the terminal.
+  `command` are jobs (**JOB-1**). `command` runs nothing without a yes at the terminal.
 - **CNV-25** `memory --graph` in a conversation makes the page (`tinker memory --graph`) and sends it with
   `send_file`, what tinker printed as its caption. The terminal opens the file in the browser and says where it
   is; a channel that cannot send files sends the caption with the file's path.
@@ -1506,7 +1519,7 @@ the core ones first, and saved as soon as it is read. What it teaches is a topic
   were shown. `passages(numbers, query)` gives their passages (`MAX_PASSAGE_CHARS`) most about the query by its
   words, at most `BOOK_PASSAGES_SHOWN`, each with its title and chapter.
 - **RDG-12** `tinker read FILE | URL` stores the source, then learns from it as `read #N`: its job's arguments
-  become `read #N` (`Jobs.retarget`), so a stopped or paused reading goes on with what is not read, and nothing
+  become `read #N` (`Jobs.retarget`), so a stopped or pushed-back reading goes on with what is not read, and nothing
   is fetched again. `read #N ["WHAT"]` needs a measured model and a known reading. Its tracker moves through its
   steps (`READ_STEPS`, **PRJ-16**): survey, chapters, and ends with what was read now (chapters and principles changed), the
   chapters read, the principles kept in its scope, whether builds use it, and what to do next.
@@ -1628,8 +1641,8 @@ It is a job like any other, so the person always comes first.
   in all, README examples that failed, and the `slowest` steps (a step is its call's first word, so no file is
   named). `problems` lists, at most `REFLECTION_PROBLEMS`: what nothing made pass, failed README examples,
   failed, unusable and cut replies, and the warnings the runs said.
-- **EXR-6** The exercise gives way as every job does (**JOB-8** to **JOB-10**): paused, it stops its build as
-  Ctrl-C stops it (it saves itself), and goes on from where it was. A run an exercise started (its build) is
+- **EXR-6** The exercise gives way as every job does (**JOB-8**): pushed back, it stops its build as Ctrl-C
+  stops it (it saves itself), and goes on from where it was when it is the head again. A run an exercise started (its build) is
   not a job (**JOB-1**): its tracker goes in the exercise's job as `build` (**PRJ-14**), which only the
   exercise reads, so it is never among what runs, and the conversation's status shows the exercise when
   nothing else runs (looked at every `STATUS_LOOK_SECONDS` seconds, so it moves on by itself). The exercise's
@@ -1641,12 +1654,12 @@ It is a job like any other, so the person always comes first.
   While it listens, it adopts again an exercise that went on by itself.
 - **EXR-7** Ctrl-C or `stop #N` stops an exercise's build, keeps everything, and ends `stopped` with how to go
   on (`resume #N`, or `tinker exercise LANGUAGE`, goes on from there). `tinker exercise` takes a language or
-  `status`. `exercise status` shows each exercise: its job's state (running, paused or stopped), its focus,
+  `status`. `exercise status` shows each exercise: its job's state (running, queued or stopped), its focus,
   each recent project's measures, and what it does now. In the conversation, `exercise LANGUAGE` (or
   `resume #N` of an exercise's job) starts it as a tinker of its own that outlives the conversation, its
   progress in its one message, in the conversation that started or resumed it: every exercise has the same one (its ids kept in the home's `activity`),
   started, stopped (`stop #N` shows only there) or resumed, and the person's `exercise LANGUAGE` message is
-  taken out; an exercise paused for another hands it its message, and gets it back when it goes on (the
+  taken out; an exercise pushed back by another hands it its message, and gets it back when it goes on (the
   conversation adopts it again). One that ends before it keeps a tracker shows the last lines it printed.
 
 ## session (SES)

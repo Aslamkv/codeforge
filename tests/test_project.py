@@ -411,7 +411,7 @@ def test_a_tracker_starts_by_getting_tinker_ready():
 
 @pytest.mark.spec("PRJ-14")
 def test_the_tracker_publishes_each_change_in_its_job(home_store, project_dir):
-    with Jobs.running(["task", "a", "calculator"]):
+    with Jobs.run_here(["task", "a", "calculator"]):
         tracker = Tracker("a calculator", before=12.0)
         store = project_store(project_dir)
         tracker.project(store, "abc123", project_dir, "calc: a calculator")
@@ -482,7 +482,7 @@ def test_steps_live_progress_and_messages(home_store, project_dir, monkeypatch):
         "reproduce",
         "amend",
     }
-    with Jobs.running(["task", "calc"]):
+    with Jobs.run_here(["task", "calc"]):
         tracker = Tracker("calc")
         store = project_store(project_dir)
         tracker.project(store, "abc123", project_dir)
@@ -514,7 +514,7 @@ def test_steps_live_progress_and_messages(home_store, project_dir, monkeypatch):
 @pytest.mark.spec("MSG-3")
 def test_a_resumed_job_counts_on_from_the_tokens_of_its_earlier_runs(home_store, monkeypatch):
     assert Tracker("new").state["tokens"] == 0
-    with Jobs.running(["task", "calc"]):
+    with Jobs.run_here(["task", "calc"]):
         Jobs.update(1, progress={"tokens": 500})
         monkeypatch.setattr(Jobs, "current", Jobs.get(1))
         monkeypatch.setattr(Jobs, "resumed_here", True)

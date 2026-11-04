@@ -1,4 +1,3 @@
-import contextlib
 import datetime
 import os
 import signal
@@ -11,7 +10,7 @@ from test_conversation import Recorder, everyone
 from tinkerkit import cli, conversation, exercising, jobs
 from tinkerkit.cli import Cli, Commands
 from tinkerkit.conversation import Desk, Message
-from tinkerkit.jobs import Jobs, archived, began_at, calls_log, is_job, journaled, today
+from tinkerkit.jobs import Jobs, Queue, Runner, archived, began_at, calls_log, is_job, journaled, today
 from tinkerkit.knowledge import Learner, Researcher
 from tinkerkit.learning import SlotLearner
 from tinkerkit.model import Ollama
@@ -48,7 +47,7 @@ def research_job_started_on_jan_2(home_store):
 
 
 def stopped_job(home_store, argv, answers=()):
-    with pytest.raises(KeyboardInterrupt), Jobs.running(argv):
+    with pytest.raises(KeyboardInterrupt), Jobs.run_here(argv):
         for request, answer in answers:
             journaled(request, lambda answer=answer: answer)
         raise KeyboardInterrupt
@@ -78,6 +77,8 @@ def test_long_commands_are_jobs_and_the_rest_are_not():
         ["amend", "x"],
         ["model", "calibrate", "qwen3"],
         ["ask", "status", "of", "python"],
+        ["chat", "hello"],
+        ["command", "list", "files"],
     ):
         assert is_job(argv), argv
     for argv in (
@@ -90,7 +91,6 @@ def test_long_commands_are_jobs_and_the_rest_are_not():
         ["exercise", "status"],
         ["learn", "ll", "ls -l"],
         ["read", "list"],
-        ["chat", "hi"],
         ["task", "--help"],
     ):
         assert not is_job(argv), argv
@@ -108,14 +108,14 @@ def test_an_exercises_build_is_not_a_job_of_its_own(monkeypatch):
 
 @pytest.mark.spec("JOB-1")
 def test_a_job_is_numbered_and_kept_while_it_runs(home_store):
-    with Jobs.running(["learn", "rust"]):
-        job = Jobs.get(1)
+    with Jobs.run_here(["learn", "rust"]):
+        job = Jobs.current
         assert (
             job["state"] == "running" and job["pid"] == os.getpid() and job["arguments"] == ["learn", "rust"]
         )
         assert job["today"] == datetime.date.today().isoformat() and job["title"] == "learn rust"
         assert signal.getsignal(JOB_STOP_SIGNAL) is jobs.interrupted
-    with Jobs.running(["task", "a", "calculator", "--confirm"]):
+    with Jobs.run_here(["task", "a", "calculator", "--confirm"]):
         assert Jobs.current["number"] == 2 and Jobs.current["title"] == "task a calculator"
     with Jobs.running(["runs"]):
         assert Jobs.current is None
@@ -129,15 +129,17 @@ def test_an_interrupted_job_is_stopped_with_its_journal_kept(home_store):
 
 @pytest.mark.spec("JOB-2")
 def test_a_finished_job_drops_its_journal(home_store):
-    with Jobs.running(["research", "python"]):
+    with Jobs.run_here(["research", "python"]):
+        Queue.add_back(Jobs.current["number"])
         journaled({"search": "python"}, lambda: ["found"])
     assert Jobs.get(1)["state"] == "finished" and len(home_store.entries("journal #1")) == 0
+    assert Queue.ordered() == []
 
 
 @pytest.mark.spec("JOB-2")
 def test_a_tracker_that_ends_stopped_stops_the_job_and_says_how_to_go_on(home_store):
     tracker = Tracker("Exercising rust")
-    with Jobs.running(["exercise", "rust"]):
+    with Jobs.run_here(["exercise", "rust"]):
         tracker.end({"status": "stopped", "headline": "stopped", "next": [("See", "x")]}, 1.0)
     assert tracker.state["ended"]["next"] == [("See", "x"), ("Go on", "tinker resume #1")]
     assert Jobs.get(1)["state"] == "stopped"
@@ -147,21 +149,25 @@ def test_a_tracker_that_ends_stopped_stops_the_job_and_says_how_to_go_on(home_st
 
 
 @pytest.mark.spec("JOB-2")
-def test_a_running_job_whose_process_is_gone_is_stopped(home_store):
+def test_a_running_job_out_of_the_queue_is_stopped_and_one_in_it_whose_process_is_gone_is_lost(home_store):
     put_job(home_store, 3, state="running")
-    assert Jobs.get(3)["state"] == "stopped" and Jobs.listed("stopped")[0]["number"] == 3
-    assert [job["number"] for job in Jobs.lost()] == [3]
+    assert (
+        Jobs.get(3)["state"] == "stopped" and Jobs.listed("stopped")[0]["number"] == 3 and Jobs.lost() == []
+    )
+    Queue.add_back(3)
+    assert Jobs.get(3)["state"] == "running" and [job["number"] for job in Jobs.lost()] == [3]
     stopped_job(home_store, ["learn", "rust"])
     assert [job["number"] for job in Jobs.lost()] == [3]
 
 
 @pytest.mark.spec("JOB-2")
-def test_a_job_whose_process_id_went_to_another_process_is_stopped(home_store):
+def test_a_job_whose_process_id_went_to_another_process_is_lost(home_store):
     mine = {"number": 4, "command": "learn", "title": "learn go", "state": "running", "pid": os.getpid()}
     home_store.put("jobs", "4", dict(mine, pid_began=began_at(os.getpid())))
-    assert Jobs.get(4)["state"] == "running"
+    Queue.add_back(4)
+    assert Jobs.lost() == []
     home_store.put("jobs", "4", dict(mine, pid_began="Sat Oct 24 16:32:00 2026"))
-    assert Jobs.get(4)["state"] == "stopped" and [job["number"] for job in Jobs.lost()] == [4]
+    assert Jobs.get(4)["state"] == "running" and [job["number"] for job in Jobs.lost()] == [4]
 
 
 @pytest.mark.spec("JOB-3")
@@ -169,7 +175,7 @@ def test_a_resumed_job_is_answered_from_its_journal_and_asks_only_what_is_new(ho
     kept_twice, never_kept = {"search": "rust"}, {"search": "rust docs"}
     stopped_job(home_store, ["learn", "rust"], [(kept_twice, ["a"]), (kept_twice, ["b"])])
     calls = []
-    with Jobs.running(Jobs.arguments(["resume", "#1"])):
+    with Jobs.run_here(Jobs.arguments(["resume", "#1"])):
         assert Jobs.current["number"] == 1
         assert journaled(kept_twice, asked(["new"], calls)) == ["a"]
         assert journaled(kept_twice, asked(["new"], calls)) == ["b"]
@@ -200,12 +206,12 @@ def test_model_calls_go_through_the_journal(home_store, monkeypatch):
 
     monkeypatch.setattr(Ollama, "streamed", staticmethod(streamed))
     say_hi = [{"role": "user", "content": "hi"}]
-    with pytest.raises(KeyboardInterrupt), Jobs.running(["ask", "hi"]):
+    with pytest.raises(KeyboardInterrupt), Jobs.run_here(["ask", "hi"]):
         Ollama.chat("m", say_hi, 0, {})
         raise KeyboardInterrupt
     calls.clear()
     a_different_keep_alive, an_unload = 300, []
-    with Jobs.running(Jobs.arguments(["resume", "#1"])):
+    with Jobs.run_here(Jobs.arguments(["resume", "#1"])):
         assert Ollama.chat("m", say_hi, a_different_keep_alive, {})["message"]["content"] == "hi"
         Ollama.chat("m", an_unload, 0, None)
     assert calls == [an_unload]
@@ -215,7 +221,7 @@ def test_model_calls_go_through_the_journal(home_store, monkeypatch):
 def test_a_job_says_the_day_it_started(home_store):
     assert today() == datetime.date.today()
     put_job(home_store, 1, title="learn rust", arguments=["learn", "rust"], today="2026-01-02")
-    with Jobs.running(Jobs.arguments(["resume", "#1"])):
+    with Jobs.run_here(Jobs.arguments(["resume", "#1"])):
         assert today() == datetime.date(2026, 1, 2)
 
 
@@ -233,8 +239,16 @@ def test_resume_runs_the_jobs_own_command_line(home_store):
     home_store.put(
         "jobs", "1", dict(Jobs.get(1), state="running", pid=os.getppid(), pid_began=began_at(os.getppid()))
     )
+    Queue.add_front(1)
     with pytest.raises(SystemExit, match="Job #1 is running"):
         Jobs.arguments(["resume", "#1"])
+    put_job(home_store, 2, state="queued", arguments=["learn", "go"])
+    Queue.add_back(2)
+    assert Jobs.get(2)["state"] == "queued"
+    assert Jobs.arguments(["resume", "#2"]) == ["learn", "go"] and Jobs.current["number"] == 2
+    Jobs.current = None
+    Queue.remove(2)
+    Queue.remove(1)
     home_store.put("jobs", "1", dict(Jobs.get(1), state="finished"))
     with pytest.raises(SystemExit, match="Job #1 is finished"):
         Jobs.arguments(["resume", "#1"])
@@ -249,7 +263,7 @@ def test_confirm_builds_the_folders_plan_and_never_a_stopped_job(home_store):
 
 @pytest.mark.spec("JOB-5")
 def test_a_tasks_job_is_resumed_as_its_run(home_store):
-    with Jobs.running(["task", "a", "calculator"]):
+    with Jobs.run_here(["task", "a", "calculator"]):
         Jobs.retarget(["resume", "@a1b2"])
         assert Jobs.get(1)["arguments"] == ["resume", "@a1b2"] and Jobs.get(1)["title"] == "task a calculator"
     Jobs.retarget(["resume", "@other"])
@@ -268,12 +282,15 @@ def keep_jobs(home_store, states):
             started="2026-10-23 09:00",
             updated="2026-10-23 09:00",
         )
+    for number in reversed(range(1, len(states) + 1)):
+        if states[number - 1] == "running":
+            Queue.add_back(number)
 
 
 @pytest.mark.spec("JOB-6")
 def test_jobs_lists_running_then_stopped_newest_first(home_store, capsys):
     Commands.list_jobs(None, 1)
-    assert "No running, paused or stopped jobs." in capsys.readouterr().out
+    assert "No running, queued or stopped jobs." in capsys.readouterr().out
     keep_jobs(home_store, ["stopped", "running", "finished", "stopped", "running"])
     assert [job["number"] for job in Jobs.listed()] == [5, 2, 4, 1]
     assert [job["number"] for job in Jobs.listed("finished")] == [3]
@@ -307,21 +324,57 @@ def test_tinker_jobs_takes_a_state_and_a_page():
 
 
 @pytest.mark.spec("JOB-7")
-def test_stop_tells_a_job_or_every_one_of_the_persons(home_store, monkeypatch, capsys):
+def test_stop_tells_a_job_or_the_one_that_runs(home_store, monkeypatch, capsys):
     told = []
     monkeypatch.setattr(Jobs, "stop", staticmethod(lambda job: told.append(job["number"])))
     keep_jobs(home_store, ["running", "stopped", "running"])
     home_store.put("jobs", "3", dict(Jobs.get(3), command="exercise"))
-    running_newest_first = [3, 1]
+    the_queues_head = [3]
     Commands.stop(None)
-    assert told == running_newest_first
+    assert told == the_queues_head
     Commands.stop(3)
-    assert told == running_newest_first + [3] and "tinker resume #3 goes on" in capsys.readouterr().out
-    with pytest.raises(SystemExit, match="Job #2 is not running or paused"):
+    assert told == the_queues_head + [3] and "tinker resume #3 goes on" in capsys.readouterr().out
+    with pytest.raises(SystemExit, match=r"Job #2 is not in the queue \(tinker queue list shows it\)"):
         Commands.stop(2)
     assert Cli.parse(["stop", "#3"]).stop == 3 and Cli.parse(["stop"]).stop is None
     with pytest.raises(SystemExit):
         Cli.parse(["stop", "3"])
+
+
+@pytest.mark.spec("JOB-13")
+def test_queue_lists_its_jobs_head_first_and_stops_one_or_all(home_store, monkeypatch, capsys):
+    signalled = []
+    monkeypatch.setattr(jobs, "signal_job", lambda job: signalled.append(job["number"]))
+    Commands.queue("list")
+    assert "The queue is empty." in capsys.readouterr().out
+    keep_jobs(home_store, ["running", "stopped", "running"])
+    put_job(home_store, 4, title="learn topic 4", state="queued")
+    Queue.add_back(4)
+    Commands.queue("list")
+    out = capsys.readouterr().out
+    assert (
+        out.index("#3 running learn topic 3") < out.index("#1 queued") < out.index("#4 queued learn topic 4")
+    )
+    assert "#2" not in out
+    Commands.queue(1)
+    assert Queue.ordered() == [3, 4] and signalled == [1]
+    with pytest.raises(SystemExit, match="Job #2 is not in the queue"):
+        Commands.queue(2)
+    Commands.queue("all")
+    assert Queue.ordered() == [] and signalled == [1, 3]
+    assert "Stopping #3" in capsys.readouterr().out
+    assert Cli.parse(["queue", "list"]).queue == "list"
+    assert Cli.parse(["queue", "stop", "#4"]).queue == 4
+    assert Cli.parse(["queue", "stop", "all"]).queue == "all"
+    for words in (
+        ["queue"],
+        ["queue", "stop"],
+        ["queue", "stop", "4"],
+        ["queue", "list", "2"],
+        ["queue", "go"],
+    ):
+        with pytest.raises(SystemExit):
+            Cli.parse(words)
 
 
 @pytest.mark.spec("JOB-11")
@@ -378,7 +431,7 @@ def test_the_conversation_stops_and_resumes_jobs(home_store, tmp_path, monkeypat
         and answer("stop #4") is None
         and told == [2, "exercise"]
     )
-    assert answer("stop").startswith("⏹ **Stopping #2**") and told == [2, "exercise", "exercise", 2]
+    assert answer("stop") is None and told == [2, "exercise", "exercise"]
     answer("resume #1")
     answer("resume #3")
     answer("resume @calc")
@@ -387,6 +440,29 @@ def test_the_conversation_stops_and_resumes_jobs(home_store, tmp_path, monkeypat
         (["resume", "#3"], "exercise rust"),
         (["resume", "@calc"], "resume @calc"),
     ]
+    assert answer("stop #1") == "🤷 Job #1 is not in the queue (`/queue list` shows it)."
+
+
+@pytest.mark.spec("JOB-13")
+def test_the_conversation_lists_the_queue_and_stops_one_or_all(home_store, tmp_path, monkeypatch):
+    signalled = []
+    monkeypatch.setattr(jobs, "signal_job", lambda job: signalled.append(job["number"]))
+    desk = Desk([Recorder()], tmp_path)
+    answer = lambda text: desk.answer(Message("1", text), desk.channels[0])
+    assert answer("queue list") == "The queue is empty."
+    keep_jobs(home_store, ["running", "stopped", "running"])
+    put_job(home_store, 4, title="learn topic 4", state="queued")
+    Queue.add_back(4)
+    listed = answer("queue list")
+    assert listed.index("#3 running") < listed.index("#1 queued") < listed.index("#4 queued learn topic 4")
+    assert "#2" not in listed
+    assert answer("queue stop #1").startswith("⏹ **Stopping #1**")
+    assert Queue.ordered() == [3, 4] and signalled == [1]
+    assert answer("queue stop #2") == "🤷 Job #2 is not in the queue (`/queue list` shows it)."
+    stopped_all = answer("queue stop all")
+    assert Queue.ordered() == [] and signalled == [1, 3] and "Stopping #3" in stopped_all
+    for text in ("queue", "queue stop", "queue stop 4", "queue list 2", "queue go"):
+        assert answer(text).startswith("✍️ Write `/queue")
 
 
 @pytest.mark.spec("JOB-4")
@@ -399,58 +475,93 @@ def test_a_research_job_frames_its_topic_on_the_day_the_job_started(home_store, 
         "saved_or_asked",
         lambda self, known, read, system, parts, *rest: given.extend(parts) or (framed, True),
     )
-    with Jobs.running(Jobs.arguments(["resume", "#1"])):
+    with Jobs.run_here(Jobs.arguments(["resume", "#1"])):
         Researcher(Learner(None, None, None)).frame("go", None)
     assert next(part for part in given if part.title == "Today").text == "2026-01-02"
 
 
-def other_running(home_store, number=1, command="learn", title="learn go"):
-    put_job(
-        home_store,
-        number,
-        command=command,
-        title=title,
-        state="running",
-        pid=os.getppid(),
-        arguments=title.split(),
-    )
-    home_store.put("job numbers", "last", number)
-
-
 @pytest.mark.spec("JOB-8")
-def test_a_job_that_starts_pauses_the_one_that_runs(home_store, monkeypatch, capsys):
-    other_running(home_store)
+def test_the_queue_keeps_job_numbers_in_order_and_a_new_front_stops_the_head(home_store, monkeypatch):
     told = []
-    monkeypatch.setattr(
-        jobs, "signal_job", lambda job: told.append(job["number"]) or Jobs.update(1, state="paused")
-    )
-    with Jobs.running(["exercise", "python"]):
-        assert told == [1] and Jobs.get(1)["paused_by"] == 2 and Jobs.current["state"] == "running"
-    assert "Pausing #1 learn go: it goes on once Tinker is idle" in capsys.readouterr().out
+    monkeypatch.setattr(jobs, "signal_job", lambda job: told.append(job["number"]))
+    put_job(home_store, 1)
+    put_job(home_store, 2)
+    Queue.add_back(1)
+    Queue.add_back(3)
+    assert Queue.ordered() == [1, 3] and Queue.head() == 1 and told == []
+    Queue.add_front(2)
+    assert Queue.ordered() == [2, 1, 3] and told == [1]
+    Queue.add_front(3)
+    assert Queue.ordered() == [3, 2, 1] and told == [1, 2]
+    Queue.remove(3)
+    Queue.remove(7)
+    assert Queue.ordered() == [2, 1] and Queue.head() == 2
+    Queue.remove(2)
+    Queue.remove(1)
+    assert Queue.ordered() == [] and Queue.head() is None
 
 
 @pytest.mark.spec("JOB-2", "JOB-8")
-def test_a_paused_job_says_so_and_waits_where_it_is(home_store, monkeypatch):
-    waited = []
-    monkeypatch.setattr(jobs, "go_on_when_idle", waited.append)
+def test_a_jobs_state_follows_the_queue_and_a_queued_job_whose_process_is_gone_stays_queued(home_store):
+    alive_now = {"pid": os.getpid(), "pid_began": began_at(os.getpid())}
+    put_job(home_store, 1, state="running")
+    put_job(home_store, 2, state="running", **alive_now)
+    put_job(home_store, 3, state="running", **alive_now)
+    put_job(home_store, 4, state="finished")
+    Queue.add_back(3)
+    Queue.add_back(1)
+    Queue.add_back(2)
+    assert [Jobs.get(number)["state"] for number in (1, 2, 3, 4)] == [
+        "queued",
+        "queued",
+        "running",
+        "finished",
+    ]
+    assert [job["number"] for job in Jobs.lost()] == [1]
+    Queue.remove(1)
+    assert Jobs.get(1)["state"] == "stopped"
+    assert [job["number"] for job in Jobs.listed()] == [3, 2, 1]
+    assert [job["number"] for job in Jobs.listed("queued")] == [2]
+
+
+@pytest.mark.spec("JOB-2", "JOB-8")
+def test_a_job_pushed_back_says_so_and_stays_queued(home_store, monkeypatch):
+    monkeypatch.setattr(jobs, "signal_job", lambda job: None)
+    put_job(home_store, 5, state="queued")
     tracker = Tracker("Learning go")
-    with pytest.raises(KeyboardInterrupt), Jobs.running(["learn", "go"]):
-        another_job = 2
-        Jobs.update(1, paused_by=another_job)
+    with pytest.raises(KeyboardInterrupt), Jobs.run_here(["learn", "go"]):
+        Queue.add_back(1)
+        Queue.add_front(5)
         tracker.end({"status": "stopped", "headline": "Learning go did not finish"}, 1.0)
         raise KeyboardInterrupt
     ended = tracker.state["ended"]
     assert (
         ended["status"] == "paused"
-        and ended["headline"] == "Paused for job #2: it goes on once Tinker is idle"
+        and ended["headline"] == "Paused for job #5: it goes on when its turn comes"
     )
-    assert tracker.state["doing"].startswith("⏸ Paused for job #2") and ended["next"] == [
-        ("Go on now", "tinker resume #1")
-    ]
-    assert Jobs.get(1)["state"] == "paused" and waited == [1]
-    killed_while_waiting = dict(Jobs.get(1), pid=DEAD_PID)
-    home_store.put("jobs", "1", killed_while_waiting)
+    assert tracker.state["doing"].startswith("⏸ Paused for job #5") and "next" not in ended
+    assert (
+        jobs.JOBS.get(1)["state"] == "queued"
+        and Jobs.get(1)["state"] == "queued"
+        and Queue.ordered() == [5, 1]
+    )
+    Queue.remove(1)
     assert Jobs.get(1)["state"] == "stopped"
+
+
+@pytest.mark.spec("JOB-2")
+def test_an_interrupted_head_stays_at_the_head_and_a_stopped_job_leaves_the_queue(home_store, monkeypatch):
+    told = []
+    monkeypatch.setattr(jobs, "signal_job", lambda job: told.append(job["number"]))
+    with pytest.raises(KeyboardInterrupt), Jobs.run_here(["learn", "go"]):
+        Queue.add_back(1)
+        raise KeyboardInterrupt
+    assert Queue.ordered() == [1] and Jobs.get(1)["state"] == "running" and told == []
+    put_job(home_store, 2, pid=os.getpid(), pid_began=began_at(os.getpid()))
+    Queue.add_back(2)
+    Jobs.stop(Jobs.get(1))
+    Jobs.stop(Jobs.get(2))
+    assert Queue.ordered() == [] and told == [1, 2]
 
 
 @pytest.mark.spec("JOB-8")
@@ -473,86 +584,17 @@ def test_the_conversation_starts_a_task_while_another_runs(home_store, tmp_path,
     assert (
         desk.start_task(everyone(desk.channels), ["exercise", "python"], tmp_path, "exercise python") is None
     )
-    assert spawned == [["learn", "go"], ["exercise", "python"]] and len(desk.live_tasks) == 2
+    assert spawned == [["learn", "go"], ["exercise", "python"]]
     desk.reporter.ended = True
 
 
-class Execd(Exception):
-    pass
-
-
-def paused_job(home_store, number, pid=None, **more):
-    put_job(
-        home_store,
-        number,
-        title=f"learn {number}",
-        state="paused",
-        pid=pid or os.getpid(),
-        paused_by=9,
-        arguments=["learn", str(number)],
-        **more,
-    )
-
-
-@pytest.mark.spec("JOB-9")
-def test_tinker_is_idle_when_no_job_runs_and_nothing_asked_is_being_answered(home_store):
-    assert jobs.idle()
-    other_running(home_store, number=5)
-    assert not jobs.idle()
-    home_store.delete("jobs")
-    home_store.put("activity", "answering", {"a chat": os.getpid()})
-    assert not jobs.idle()
-    home_store.put("activity", "answering", {"a chat of a Tinker that is gone": DEAD_PID})
-    assert jobs.idle()
-
-
-@pytest.mark.spec("JOB-9")
-def test_the_newest_paused_job_goes_on_by_itself_once_tinker_is_idle(home_store, monkeypatch, no_sleep):
-    def execv(path, argv):
-        raise Execd(argv[-2:])
-
-    monkeypatch.setattr(os, "execv", execv)
-    paused_job(home_store, 1)
-    paused_job(home_store, 3)
-    assert jobs.next_to_go_on() == 3
-    job_3_first_then_job_1 = iter([True, True, False])
-    monkeypatch.setattr(jobs, "next_to_go_on", lambda: 3 if next(job_3_first_then_job_1) else 1)
-    with pytest.raises(Execd) as went_on:
-        jobs.go_on_when_idle(1)
-    assert went_on.value.args[0] == ["resume", "#1"] and len(no_sleep) == 2
-
-
-@pytest.mark.spec("JOB-9")
-def test_resume_makes_a_paused_job_go_on_at_once_and_stop_keeps_it_stopped(home_store, monkeypatch, no_sleep):
-    monkeypatch.setattr(os, "execv", lambda path, argv: (_ for _ in ()).throw(Execd(argv[-2:])))
-    a_chat_is_being_answered = {"a chat": os.getpid()}
-    home_store.put("activity", "answering", a_chat_is_being_answered)
-    paused_job(home_store, 1, pid=os.getppid())
-    with pytest.raises(SystemExit) as woken:
-        Jobs.arguments(["resume", "#1"])
-    assert woken.value.code == 0 and Jobs.get(1)["go_now"]
-    home_store.put("jobs", "1", dict(Jobs.get(1), pid=os.getpid()))
-    with pytest.raises(Execd):
-        jobs.go_on_when_idle(1)
-    stopped_meanwhile = 2
-    paused_job(home_store, stopped_meanwhile, pid=os.getppid())
-    assert Jobs.resumable(stopped_meanwhile) == (
-        None,
-        "Job #2 is paused: it goes on by itself once Tinker is idle.",
-    )
-    Jobs.stop(Jobs.get(stopped_meanwhile))
-    assert (
-        Jobs.get(stopped_meanwhile)["state"] == "stopped" and Jobs.get(stopped_meanwhile)["paused_by"] is None
-    )
-    jobs.go_on_when_idle(stopped_meanwhile)
-
-
 @pytest.mark.spec("JOB-6")
-def test_paused_jobs_are_listed_between_running_and_stopped(home_store):
+def test_queued_jobs_are_listed_between_running_and_stopped(home_store):
     keep_jobs(home_store, ["stopped", "running"])
-    paused_job(home_store, 3)
-    assert [job["number"] for job in Jobs.listed()] == [2, 3, 1] and Cli.parse(["jobs", "paused"]).jobs == (
-        "paused",
+    put_job(home_store, 3, title="learn 3", state="queued", pid=os.getpid(), arguments=["learn", "3"])
+    Queue.add_back(3)
+    assert [job["number"] for job in Jobs.listed()] == [2, 3, 1] and Cli.parse(["jobs", "queued"]).jobs == (
+        "queued",
         1,
     )
 
@@ -562,7 +604,7 @@ def test_a_learning_plan_says_the_day_the_job_started(home_store):
     research_job_started_on_jan_2(home_store)
     learner = SlotLearner.__new__(SlotLearner)
     learner.topic = "go"
-    with Jobs.running(Jobs.arguments(["resume", "#1"])):
+    with Jobs.run_here(Jobs.arguments(["resume", "#1"])):
         parts = learner.plan_parts([])
     assert next(part for part in parts if part.title == "Today").text == "2026-01-02"
 
@@ -575,44 +617,57 @@ def test_a_job_that_goes_on_starts_its_tracker_resumed(home_store):
     assert Tracker("Learning go").state["resumed"]
 
 
-@pytest.mark.spec("JOB-10")
-def test_a_chat_pauses_the_job_that_runs_while_it_is_answered(home_store, monkeypatch):
-    other_running(home_store)
-    seen = []
-
-    def told_to_pause(job):
-        seen.append(jobs.idle())
-        Jobs.update(1, state="paused")
-
-    monkeypatch.setattr(jobs, "signal_job", told_to_pause)
-    with jobs.paused_for_you():
-        assert Jobs.get(1)["paused_by"] == "you" and not jobs.idle()
-    assert seen == [False] and jobs.idle()
-    tracker = Tracker("Learning go")
-    Jobs.current = Jobs.get(1)
-    tracker.end({"status": "stopped"}, 1.0)
-    assert tracker.state["ended"]["headline"] == "Paused for you: it goes on once Tinker is idle"
-
-
-@pytest.mark.spec("JOB-10")
-def test_tinker_chat_and_command_pause_the_job_that_runs(monkeypatch, capsys):
+@pytest.mark.spec("JOB-1")
+def test_tinker_chat_answers_without_pausing_anything_itself(monkeypatch, capsys):
     paused = []
-    monkeypatch.setattr(conversation, "paused_for_you", lambda: contextlib.nullcontext(paused.append(True)))
+    monkeypatch.setattr(Queue, "add_front", lambda number: paused.append(number))
     monkeypatch.setattr(conversation, "commands_brief", lambda: "cmds")
     conversation.one_shot("chat", "hello")
-    assert paused == [True]
+    assert paused == []
 
 
-@pytest.mark.spec("JOB-8")
-def test_a_job_that_does_not_pause_is_waited_for_at_most_pause_wait(home_store, monkeypatch, no_sleep):
-    other_running(home_store)
-    never_pauses = lambda job: None
-    monkeypatch.setattr(jobs, "signal_job", never_pauses)
-    clock = iter(range(0, 1000, 50))
-    monkeypatch.setattr(jobs.time, "monotonic", lambda: next(clock))
-    with Jobs.running(["ask", "q"]):
-        looked_at_50s_and_100s = [0.5, 0.5]
-        assert Jobs.get(1)["state"] == "running" and no_sleep == looked_at_50s_and_100s
+@pytest.mark.spec("JOB-8", "CNV-21")
+def test_an_answer_runs_at_the_front_and_pushes_back_the_head(home_store, monkeypatch):
+    signalled = []
+    monkeypatch.setattr(jobs, "signal_job", lambda job: signalled.append(job["number"]))
+    Jobs.save(
+        dict(Jobs.new(["learn", "rust"]), state="running", pid=os.getpid(), pid_began=began_at(os.getpid()))
+    )
+    Queue.add_back(1)
+    with jobs.answering():
+        assert Queue.ordered() == [2, 1] and signalled == [1]
+        assert Jobs.get(2)["state"] == "running" and Jobs.get(2)["pid"] == os.getpid()
+        assert Runner.startable() is None
+    assert Queue.ordered() == [1] and Jobs.get(2)["state"] == "finished"
+
+
+@pytest.mark.spec("JOB-7")
+def test_a_stopped_answer_here_is_told_without_a_signal_and_a_pushed_back_one_goes_on(
+    home_store, monkeypatch
+):
+    real_kill = os.kill
+    monkeypatch.setattr(
+        os,
+        "kill",
+        lambda pid, sig: real_kill(pid, sig) if sig == 0 else pytest.fail(f"signalled {pid} {sig}"),
+    )
+    with jobs.answering():
+        stopped = jobs.answer_stopped()
+        Queue.add_front(Jobs.save(Jobs.new(["chat"]))["number"])
+        assert not stopped.is_set()
+        Jobs.stop(Jobs.get(1))
+        assert stopped.is_set()
+
+
+@pytest.mark.spec("JOB-7")
+def test_a_stop_from_another_process_ends_only_answers_out_of_the_queue(home_store):
+    with jobs.answering():
+        stopped = jobs.answer_stopped()
+        jobs.stop_answers(JOB_STOP_SIGNAL, None)
+        assert not stopped.is_set()
+        Queue.remove(1)
+        jobs.stop_answers(JOB_STOP_SIGNAL, None)
+        assert stopped.is_set()
 
 
 @pytest.mark.spec("CLI-7")
@@ -639,7 +694,7 @@ def test_a_research_job_says_its_steps_and_ends_with_its_answer(home_store, monk
     )
     monkeypatch.setattr(cli.Models, "remember", staticmethod(lambda model: None))
     monkeypatch.setattr(Researcher, "research", research)
-    with Jobs.running(["research", "go"]):
+    with Jobs.run_here(["research", "go"]):
         Commands(Cli.parse(["research", "go"])).run()
     state = Jobs.get(1)["progress"]
     assert state["title"] == "Researching go" and len(state["steps"]) == 2 and state["step"] == "keep"
@@ -697,8 +752,188 @@ def test_a_new_jobs_message_is_kept_up_and_one_that_goes_on_comes_to_the_bottom(
 @pytest.mark.spec("JOB-12")
 def test_a_job_keeps_its_model_calls_in_its_own_log_until_it_is_archived(home_store):
     calls_log().add({"note": "outside a job"})
-    with Jobs.running(["learn", "rust"]):
+    with Jobs.run_here(["learn", "rust"]):
         calls_log().add({"note": "a model call"})
     assert [entry["note"] for _, entry in home_store.entries("calls #1")] == ["a model call"]
     archived([1], yes=True)
     assert home_store.entries("calls #1") == []
+
+
+REAL_POPEN = jobs.subprocess.Popen
+
+
+def finished_head():
+    Queue.remove(Queue.head())
+
+
+class Started:
+    def __init__(self, started, lines, during=finished_head):
+        self.started, self.lines, self.during, self.folders = started, lines, during, []
+
+    def __call__(self, command, **options):
+        if command[:2] != jobs.tinker_command():
+            return REAL_POPEN(command, **options)
+        self.started.append((command, options["env"]["TINKER_RUNNER_JOB"]))
+        self.folders.append(options["cwd"])
+        self.stdout = iter(self.lines)
+        return self
+
+    def wait(self):
+        self.during()
+        return 0
+
+
+@pytest.mark.spec("JOB-9")
+def test_one_runner_holds_the_home_and_one_whose_holder_is_gone_is_taken_over(home_store):
+    parent = os.getppid()
+    home_store.put("state", "job runner", {"pid": parent, "began": began_at(parent)})
+    assert not Runner.claim()
+    home_store.put("state", "job runner", {"pid": DEAD_PID, "began": "x"})
+    assert Runner.claim() and Runner.claim()
+    assert home_store.get("state", "job runner") == {"pid": os.getpid(), "began": began_at(os.getpid())}
+
+
+@pytest.mark.spec("JOB-9")
+def test_the_runner_starts_each_head_as_its_own_tinker_and_keeps_its_output(home_store, monkeypatch):
+    started = []
+    monkeypatch.setattr(jobs.subprocess, "Popen", Started(started, ["one\n", "two\n"]))
+    put_job(home_store, 1, pid=None)
+    put_job(home_store, 2, arguments=["research", "go"])
+    Queue.add_back(1)
+    Queue.add_back(2)
+    Runner.go_through()
+    assert [(command[2:], job) for command, job in started] == [
+        (["learn", "go"], "1"),
+        (["resume", "#2"], "2"),
+    ]
+    assert started[0][0][:2] == jobs.tinker_command()
+    assert [entry.get("line") for _, entry in home_store.entries("output #1")] == ["one", "two", None]
+    assert Queue.ordered() == []
+
+
+@pytest.mark.spec("JOB-9")
+def test_the_runner_drops_a_head_with_no_job_and_starts_a_job_in_its_folder(
+    home_store, monkeypatch, tmp_path
+):
+    started = []
+    monkeypatch.setattr(jobs.subprocess, "Popen", child := Started(started, []))
+    put_job(home_store, 2, pid=None, folder=str(tmp_path))
+    Queue.add_back(1)
+    Queue.add_back(2)
+    Runner.go_through()
+    assert [job for _, job in started] == ["2"] and child.folders == [str(tmp_path)] and Queue.ordered() == []
+
+
+@pytest.mark.spec("JOB-9")
+def test_a_head_pushed_back_stays_queued_and_the_new_head_runs_next(home_store, monkeypatch):
+    started = []
+    monkeypatch.setattr(jobs, "signal_job", lambda job: None)
+
+    def pushed_back_once_it_ran():
+        if len(started) == 1:
+            Jobs.update(1, pid=DEAD_PID)
+            Queue.add_front(2)
+        else:
+            finished_head()
+
+    monkeypatch.setattr(jobs.subprocess, "Popen", Started(started, [], pushed_back_once_it_ran))
+    put_job(home_store, 1, pid=None)
+    put_job(home_store, 2, pid=None, arguments=["learn", "rust"])
+    Queue.add_back(1)
+    Runner.go_through()
+    assert [command[2:] for command, _ in started] == [["learn", "go"], ["learn", "rust"], ["resume", "#1"]]
+
+
+@pytest.mark.spec("JOB-9")
+def test_the_runner_waits_while_the_head_runs_in_a_process_of_its_own(home_store, monkeypatch):
+    started = []
+    monkeypatch.setattr(jobs.subprocess, "Popen", Started(started, []))
+    put_job(home_store, 1, pid=os.getpid(), pid_began=began_at(os.getpid()))
+    Queue.add_back(1)
+    Runner.go_through()
+    assert started == [] and Queue.ordered() == [1]
+
+
+@pytest.mark.spec("JOB-9")
+def test_an_add_wakes_the_runner_in_its_own_process(home_store):
+    Runner.wake.clear()
+    Queue.add_back(1)
+    assert Runner.wake.is_set()
+
+
+@pytest.fixture
+def runner(monkeypatch):
+    monkeypatch.setattr(Runner, "paused", False)
+    monkeypatch.setattr(jobs, "signal_job", lambda job: None)
+    monkeypatch.setattr(jobs.subprocess, "Popen", child := Started([], ["one\n", "two\n"]))
+    return child
+
+
+@pytest.mark.spec("JOB-10")
+def test_a_job_command_hosting_the_runner_follows_its_job_then_the_queue(
+    home_store, runner, monkeypatch, capsys, tmp_path
+):
+    monkeypatch.setattr(
+        Runner, "host", classmethod(lambda cls: threading.Thread(target=Runner.go_through).start() or True)
+    )
+    put_job(home_store, 1, state="queued", pid=None)
+    home_store.put("job numbers", "last", 1)
+    Queue.add_back(1)
+    monkeypatch.chdir(tmp_path)
+    with pytest.raises(SystemExit) as ended, Jobs.running(["learn", "rust"]):
+        raise AssertionError("a job command runs no job itself")
+    assert ended.value.code == 0 and capsys.readouterr().out == "one\ntwo\n"
+    assert [job for _, job in runner.started] == ["2", "1"] and runner.folders[0] == str(tmp_path)
+    assert Queue.ordered() == [] and Jobs.get(2)["title"] == "learn rust"
+
+
+@pytest.mark.spec("JOB-10")
+def test_a_job_command_ends_once_its_job_leaves_the_queue(home_store, runner, monkeypatch, capsys):
+    asked_to_host = []
+
+    def another_tinker_hosts(cls):
+        if not asked_to_host:
+            threading.Thread(target=Runner.run_job, args=(Queue.head(),)).start()
+        asked_to_host.append(True)
+        return False
+
+    monkeypatch.setattr(Runner, "host", classmethod(another_tinker_hosts))
+    put_job(home_store, 1, state="queued", pid=None)
+    home_store.put("job numbers", "last", 1)
+    Queue.add_back(1)
+    with pytest.raises(SystemExit), Jobs.running(["learn", "rust"]):
+        pass
+    assert capsys.readouterr().out == "one\ntwo\n" and Queue.ordered() == [1]
+
+
+@pytest.mark.spec("JOB-10")
+def test_ctrl_c_in_a_job_command_pauses_the_job_that_runs(home_store, runner, monkeypatch):
+    told = []
+    monkeypatch.setattr(jobs, "signal_job", lambda job: told.append(job["number"]))
+    monkeypatch.setattr(Runner, "host", classmethod(lambda cls: True))
+
+    def ctrl_c(seconds):
+        Jobs.update(1, pid=os.getpid(), pid_began=began_at(os.getpid()))
+        raise KeyboardInterrupt
+
+    monkeypatch.setattr(jobs.time, "sleep", ctrl_c)
+    with pytest.raises(KeyboardInterrupt), Jobs.running(["learn", "rust"]):
+        pass
+    assert told == [1] and Runner.paused and Queue.ordered() == [1] and Jobs.get(1)["state"] == "running"
+    Runner.go_through()
+    assert runner.started == []
+
+
+@pytest.mark.spec("JOB-10")
+@pytest.mark.parametrize("hosting", [True, False])
+def test_pausing_signals_the_live_head_and_stops_the_runner_only_where_it_is_hosted(
+    home_store, runner, monkeypatch, hosting
+):
+    told = []
+    monkeypatch.setattr(jobs, "signal_job", lambda job: told.append(job["number"]))
+    put_job(home_store, 1, state="running", pid=os.getpid(), pid_began=began_at(os.getpid()))
+    put_job(home_store, 2, state="queued", pid=None)
+    Queue.add_back(1)
+    Queue.add_back(2)
+    Runner.pause(hosting)
+    assert told == [1] and Runner.paused is hosting and Queue.ordered() == [1, 2]

@@ -15,7 +15,17 @@ lazy from pathlib import Path
 
 from . import conversation, exercising, reading
 from .commands import BY_NAME, COMMANDS, GROUPS, kind_of, refs, taught_command
-from .jobs import STATES, Jobs, archived, calls_log, job_number
+from .jobs import (
+    STATES,
+    Jobs,
+    Queue,
+    archived,
+    calls_log,
+    emptied_queue,
+    job_number,
+    queue_action,
+    queue_lines,
+)
 from .messages import Messages, human_duration, paint, say
 from .reading import Reader
 from .system import SYSTEM_CHECKS, SYSTEM_WORDS
@@ -161,6 +171,7 @@ class Cli:
         "log": None,
         "jobs": None,
         "stop": None,
+        "queue": None,
         "doctor": False,
         "system": None,
         "task": None,
@@ -390,7 +401,7 @@ class Cli:
                 return Cli.renamed(given.words, parser)
             case "learn":
                 return Cli.learning(given.words, parser)
-            case "jobs" | "stop":
+            case "jobs" | "stop" | "queue":
                 return Cli.job_words(command, given.words, parser)
             case "read":
                 return Cli.reading(given.words, parser)
@@ -435,6 +446,8 @@ class Cli:
 
     @staticmethod
     def job_words(command, words, parser):
+        if command == "queue":
+            return Cli.queue_words(words, parser)
         if command == "stop":
             number = job_number(words[0]) if len(words) == 1 else None
             if words and number is None:
@@ -446,9 +459,16 @@ class Cli:
         rest = words[1:] if state else words
         if len(rest) > 1 or (rest and not Cli.is_page(rest[0])):
             parser.error(
-                "use tinker jobs [running|paused|stopped|finished|archived] [PAGE], e.g. tinker jobs finished 2"
+                "use tinker jobs [running|queued|stopped|finished|archived] [PAGE], e.g. tinker jobs finished 2"
             )
         return state, int(rest[0]) if rest else 1
+
+    @staticmethod
+    def queue_words(words, parser):
+        action = queue_action(words)
+        if action is None:
+            parser.error("use tinker queue list, tinker queue stop #N or tinker queue stop all")
+        return action
 
     @staticmethod
     def is_page(word):
@@ -595,6 +615,7 @@ class Commands:
             "runs": self.list_runs,
             "jobs": lambda: self.list_jobs(*args.jobs),
             "stop": lambda: self.stop(args.stop),
+            "queue": lambda: self.queue(args.queue),
             "status": lambda: self.show_status(args.status, args.workdir),
             "log": lambda: self.show_log(args.log, args.workdir, args.calls),
             "rename": lambda: self.rename(*args.rename, args.workdir),
@@ -953,7 +974,7 @@ class Commands:
     def list_jobs(state, page):
         jobs = Jobs.listed(state)
         if not jobs:
-            say.text(f"No {state or 'running, paused or stopped'} jobs.")
+            say.text(f"No {state or 'running, queued or stopped'} jobs.")
             return
         shown, pages = Numbered.page(jobs, page)
         say.text(f"{'JOB':6} {'STATE':9} {'STARTED':17} COMMAND")
@@ -971,8 +992,8 @@ class Commands:
     def stop(number):
         if number is not None:
             job = Jobs.get(number)
-            if job is None or job["state"] not in ("running", "paused"):
-                raise SystemExit(f"Job #{number} is not running or paused (tinker jobs lists them).")
+            if job is None or number not in Queue.ordered():
+                raise SystemExit(f"Job #{number} is not in the queue (tinker queue list shows it).")
             jobs = [job]
         else:
             jobs = Jobs.listed("running")
@@ -983,6 +1004,20 @@ class Commands:
             say.done(
                 f"Stopping #{job['number']} {job['title']}: it saves itself; tinker resume #{job['number']} goes on."
             )
+
+    @staticmethod
+    def queue(action):
+        if action == "list":
+            for line in queue_lines():
+                say.text(line)
+            return
+        if action != "all":
+            Commands.stop(action)
+            return
+        head = emptied_queue()
+        say.done("Every waiting job is out of the queue.")
+        if head is not None:
+            Commands.stop(head)
 
     @staticmethod
     def short_folder(workdir):

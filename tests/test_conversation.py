@@ -15,6 +15,7 @@ import pytest
 from conftest import ACCENT, BOLD, DIM, GREY, MEASURED, RESET, Terminal
 
 import tinkerkit.conversation as conversation
+import tinkerkit.jobs as jobs
 from tinkerkit.commands import MenuRow, slash_matches, synopsis_words
 from tinkerkit.conversation import (
     Channel,
@@ -34,21 +35,27 @@ from tinkerkit.conversation import (
     after_word,
     built_project,
     command_of,
-    described,
     first_lines,
     first_words,
     pieces,
-    running,
     text_of,
     typed_before,
     welcome,
 )
-from tinkerkit.jobs import began_at
+from tinkerkit.jobs import Queue, Runner, began_at
 from tinkerkit.ledger import DONE_NOTE_KEPT_SECONDS, Ledger
 from tinkerkit.messages import DIMMED, HEADING, Text, styled
 from tinkerkit.model import Models, Ollama, QuickModel, ThinkLevels
 from tinkerkit.project import Runs, Tracker
 from tinkerkit.settings import Config, Home
+
+
+@pytest.fixture(autouse=True)
+def runner_calls(monkeypatch):
+    calls = []
+    monkeypatch.setattr(Runner, "host", classmethod(lambda cls: calls.append("host") or True))
+    monkeypatch.setattr(Runner, "pause", classmethod(lambda cls, hosting: calls.append(("pause", hosting))))
+    return calls
 
 
 def wait_until(condition, timeout=15):
@@ -1673,26 +1680,6 @@ def keep_job(home_store, number, pid, progress, **job):
     home_store.put("jobs", str(number), dict(kept, progress=progress) if progress else kept)
 
 
-@pytest.mark.spec("CNV-16")
-def test_running(home_store):
-    ended = subprocess.Popen([sys.executable, "-c", "pass"])
-    ended.wait()
-    keep_job(home_store, 1, ended.pid, snapshot(title="gone"))
-    keep_job(home_store, 2, os.getpid(), snapshot(title="mine"))
-    keep_job(home_store, 3, os.getppid(), snapshot(title="calc"))
-    keep_job(home_store, 4, os.getppid(), None)
-    keep_job(home_store, 5, os.getppid(), snapshot(title="done"), state="finished")
-    assert [run["title"] for run in running()] == ["calc"] and running()[0]["pid"] == os.getppid()
-    assert running(skip={os.getppid()}) == []
-    keep_job(home_store, 3, os.getppid(), snapshot(title="calc"), pid_began="Sat Oct 24 16:32:00 2026")
-    assert running() == []
-    keep_job(home_store, 3, os.getppid(), snapshot(title="calc"), pid_began=began_at(os.getppid()))
-    keep_job(home_store, 6, os.getppid(), snapshot(title="paused"), state="paused")
-    assert [run["title"] for run in running()] == ["calc", "paused"]
-    shown = described(running()[0])
-    assert shown["title"] == "calc" and shown["brief"].startswith("**calc**") and shown["pid"] == os.getppid()
-
-
 FAKE_TINKER = """
 import json, os, signal, sys, time
 sys.path.insert(0, os.environ["TINKER_SOURCE"])
@@ -1783,7 +1770,7 @@ def test_desk_answers_commands(desk):
         replies["status"] == "🟢 **Tinker** · idle: send a task"
         and replies["stop"] == "💤 No job is running."
     )
-    assert replies["stop #9"] == "🤷 Job #9 is not running or paused: `/jobs` lists them."
+    assert replies["stop #9"] == "🤷 Job #9 is not in the queue (`/queue list` shows it)."
     assert replies["resume"] == "🤷 No job is stopped (jobs lists them)."
     assert replies["resume #9"] == "🤷 No job #9 (jobs lists them)."
     assert replies["resume abc123"].startswith("✍️ Write `/resume [#JOB | @PROJECT]`")
@@ -2212,7 +2199,22 @@ def test_a_chat_pauses_the_job_that_runs_before_it_is_answered(desk, monkeypatch
     say(desk, channel, "hello there")
     wait_until(lambda: any("the answer" in text for text in channel.texts()))
     assert order == ["paused", "answered", "goes on"]
-    assert Desk([channel], desk.root).talk.pausing_jobs is conversation.paused_for_you
+    assert Desk([channel], desk.root).talk.pausing_jobs is jobs.answering
+
+
+@pytest.mark.spec("JOB-7", "CNV-21")
+def test_a_stop_ends_a_running_chat_answer_and_the_conversation_lives(desk, monkeypatch):
+    desk, channel, _ = desk
+    asked, never = threading.Event(), threading.Event()
+    monkeypatch.setattr(Models, "quick", staticmethod(lambda: QuickModel("m", {}, None)))
+    monkeypatch.setattr(
+        Models, "quick_reply", staticmethod(lambda *_, **__: asked.set() or never.wait(30) or "late")
+    )
+    say(desk, channel, "hello there")
+    assert asked.wait(10)
+    say(desk, channel, "/stop")
+    wait_until(lambda: any("Stopped" in text for text in channel.texts()))
+    assert Queue.ordered() == [] and signal.getsignal(conversation.JOB_STOP_SIGNAL) is jobs.stop_answers
 
 
 ECHO_APP = "import sys\nprint('args:', sys.argv[1:])\nprint('input:', sys.stdin.read().strip())\n"
@@ -2310,6 +2312,23 @@ def test_ctrl_c_closes_the_chats_and_posts_no_status_after_the_first(desk, home_
     status = [sent for kind, _, sent, text in channel.log if "**Tinker** ·" in text and kind != "delete"]
     assert channel.closed and len(status) == 1
     assert handed[0][1]["status"] == "💤 **Tinker** · not listening"
+    channel.claimed.close()
+
+
+@pytest.mark.spec("JOB-9", "JOB-10")
+def test_the_conversation_hosts_the_runner_and_pauses_the_job_when_it_quits(
+    desk, home_store, monkeypatch, runner_calls
+):
+    goodbyes_handed(monkeypatch)
+    channel = Listening("bot")
+
+    def interrupted(self):
+        assert runner_calls == ["host"]
+        raise KeyboardInterrupt
+
+    monkeypatch.setattr(Desk, "listen_until_ended", interrupted)
+    Desk([channel], Path.cwd()).run()
+    assert runner_calls == ["host", ("pause", True)]
     channel.claimed.close()
 
 
@@ -2502,7 +2521,7 @@ def test_the_terminal_prints_what_tinker_works_on_when_a_chat_asked(desk, monkey
 
 
 @pytest.mark.spec("CNV-9")
-def test_a_job_says_its_status_as_it_starts_and_ends(desk, monkeypatch):
+def test_a_job_says_its_status_as_it_starts_and_ends(desk, home_store, monkeypatch):
     channel = Recorder("bot")
     listening = desk_with_a_started_chat(channel)
     listening.say_status()
@@ -2517,7 +2536,13 @@ def test_a_job_says_its_status_as_it_starts_and_ends(desk, monkeypatch):
             return 0
 
     job = Running()
-    monkeypatch.setattr(listening, "spawn", lambda arguments: job)
+
+    def spawn(arguments):
+        keep_job(home_store, 1, os.getpid(), None, title="learn go")
+        Queue.add_front(1)
+        return job
+
+    monkeypatch.setattr(listening, "spawn", spawn)
     monkeypatch.setattr(listening, "follow", lambda process, reporter, task: None)
     listening.start_task(everyone([channel]), ["learn", "go"], Path.cwd(), "learn go")
     sent = channel.texts("send")
@@ -2530,6 +2555,7 @@ def test_a_job_says_its_status_as_it_starts_and_ends(desk, monkeypatch):
     sent = channel.texts("send")
     assert "calc in a terminal" in sent[-2] and "building" in sent[-1]
     job.code = 0
+    Queue.remove(1)
     listening.ended(job, listening.reporter, listening.task)
     assert listening.said_status.startswith("🟢 **Tinker** · idle")
 
@@ -2538,8 +2564,27 @@ def test_a_job_says_its_status_as_it_starts_and_ends(desk, monkeypatch):
 def test_a_run_in_a_terminal_shows_its_title_and_never_how_far_it_got(home_store, tmp_path):
     desk = Desk([Recorder()], tmp_path)
     state = snapshot(title="calc", doing="🔨 Building", passing=[1, 2], pid_began=began_at(os.getppid()))
-    keep_job(home_store, 1, os.getppid(), state)
-    assert desk.status() == "🔄 **Tinker** · working in a terminal on calc"
+    keep_job(home_store, 1, os.getppid(), state, title="calc")
+    Queue.add_back(1)
+    assert desk.status() == "🔄 **Tinker** · working on calc"
+
+
+@pytest.mark.spec("CNV-11")
+def test_status_counts_the_jobs_queued_behind_the_one_that_runs(home_store, tmp_path):
+    desk = Desk([Recorder()], tmp_path)
+    for number, title in ((1, "calc"), (2, "learn go"), (3, "notes")):
+        keep_job(home_store, number, os.getpid(), None, title=title, state="queued")
+        Queue.add_back(number)
+    assert desk.status() == "🔄 **Tinker** · working on calc · 2 queued"
+
+
+@pytest.mark.spec("CNV-16")
+def test_running_now_lists_the_queue_in_order_from_saved_progress(home_store, tmp_path):
+    desk = Desk([Recorder()], tmp_path)
+    for number, title in ((2, "learn go"), (1, "calc")):
+        keep_job(home_store, number, os.getpid(), snapshot(title=title), title=title, state="queued")
+        Queue.add_back(number)
+    assert [job["title"] for job in desk.running_now()] == ["learn go", "calc"]
 
 
 @pytest.mark.spec("CNV-9")

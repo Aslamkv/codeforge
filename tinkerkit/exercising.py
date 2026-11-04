@@ -469,7 +469,7 @@ class Exercises:
 def job_state(exercise):
     jobs = [
         job
-        for state in ("running", "paused")
+        for state in ("running", "queued")
         for job in Jobs.listed(state)
         if job["command"] == "exercise"
         and language_key(" ".join(job["arguments"][1:])) == language_key(exercise["language"])

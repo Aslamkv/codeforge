@@ -378,12 +378,12 @@ COMMANDS = [
     Command(
         "jobs",
         "Jobs",
-        "jobs [running|paused|stopped|finished|archived] [PAGE]",
-        "the long commands: running, paused, stopped",
+        "jobs [running|queued|stopped|finished|archived] [PAGE]",
+        "the long commands: running, queued, stopped",
         "List the jobs: every long command (a task, add, fix, learn, ask, teach, read, research, exercise, "
-        "model calibrate) is one, numbered #1, #2 ... One runs at a time: a job you start pauses the one that runs, which goes on by itself once Tinker "
-        "is idle (resume #N: at once). Without a state, the running ones, the paused ones and the stopped ones; "
-        "running, paused, stopped, finished or archived (by clear jobs) lists those alone. Newest first, 10 to a "
+        "model calibrate) is one, numbered #1, #2 ... One runs at a time: a job you start goes to the front of the queue and the one that ran waits "
+        "behind it (resume #N: at once). Without a state, the running ones, the queued ones and the stopped ones; "
+        "running, queued, stopped, finished or archived (by clear jobs) lists those alone. Newest first, 10 to a "
         "page (jobs stopped 2: the second page).",
         kind="glance",
         chat=True,
@@ -393,7 +393,7 @@ COMMANDS = [
                 "words",
                 "*",
                 "[STATE] [PAGE]",
-                "running, paused, stopped, finished or archived; the page, from 1",
+                "running, queued, stopped, finished or archived; the page, from 1",
             )
         ],
         example="jobs stopped",
@@ -404,12 +404,25 @@ COMMANDS = [
         "stop [#JOB]",
         "stop a job (it is saved): the one that runs, or #N",
         "Stop a job as Ctrl-C does: what it did is kept, and resume #N goes on from there. Without a number, the "
-        "job that runs, whatever it is. A paused job that is stopped no longer goes on by itself.",
+        "job that runs, whatever it is. A queued job that is stopped leaves the queue and never goes on by itself.",
         kind="own",
         chat=True,
         words=True,
         arguments=[Argument("words", "*", "[#JOB]", "the job, as jobs numbers it")],
         example="stop #3",
+    ),
+    Command(
+        "queue",
+        "Jobs",
+        "queue list | queue stop #JOB | queue stop all",
+        "the queue of jobs: list it, or take jobs out",
+        "The jobs wait in one queue and its head runs. queue list lists it in order, the head first; queue stop #N "
+        "takes job #N out, as stop #N does; queue stop all stops the job that runs and takes every job out.",
+        kind="own",
+        chat=True,
+        words=True,
+        arguments=[Argument("words", "+", "list | stop #JOB | stop all", "what to do with the queue")],
+        example="queue list",
     ),
     Command(
         "resume",
