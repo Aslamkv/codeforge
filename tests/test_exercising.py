@@ -5,7 +5,7 @@ from pathlib import Path
 
 import pytest
 from conftest import criterion
-from test_conversation import Recorder
+from test_conversation import Recorder, everyone
 
 from tinkerkit import conversation, exercising
 from tinkerkit.cli import Cli
@@ -323,7 +323,7 @@ def test_the_exercise_shows_what_its_build_does(make_model, home_store, no_sleep
 def test_an_exercise_that_goes_on_by_itself_comes_to_the_bottom(home_store):
     channel = Recorder()
     home_store.put("jobs", "1", exercise_job("running", progress=BUILDING))
-    reporter = conversation.Reporter(conversation.everyone([channel]), "Exercising Rust", pid=OTHER_LIVE_PID)
+    reporter = conversation.Reporter(everyone([channel]), "Exercising Rust", pid=OTHER_LIVE_PID)
     reporter.refresh()
     reporter.ended = True
     the_persons_message = "hello"
@@ -524,7 +524,10 @@ def test_every_exercise_keeps_one_message_started_stopped_or_resumed(home_store,
     home_store.put("jobs", "1", exercise_job("running", progress=BUILDING))
     first_ended = []
     desk.follow_exercise(
-        [(channel, "1")], OTHER_LIVE_PID, "Exercising Rust", lambda: first_ended.append(True) or time.sleep(0.2)
+        [(channel, "1")],
+        OTHER_LIVE_PID,
+        "Exercising Rust",
+        lambda: first_ended.append(True) or time.sleep(0.2),
     )
     assert desk.stop_exercise() is None and told == [(OTHER_LIVE_PID, conversation.JOB_STOP_SIGNAL)]
     wait_for_the_reporter_to_end(desk)

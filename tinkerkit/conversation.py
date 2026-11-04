@@ -1555,10 +1555,6 @@ def in_shell(shell, line, folder, given=None):
         return ShellRun("not started", str(exc))
 
 
-def everyone(channels):
-    return [(channel, chat) for channel in channels for chat in channel.allowed]
-
-
 def shown_in(channels, board):
     return [(channel, chat) for channel in channels for name, chat in board if name == channel.name]
 

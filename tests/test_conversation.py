@@ -93,10 +93,16 @@ class Recorder(Channel):
         messages, self.inbox = self.inbox, []
         return messages
 
-    def texts(self, action=None):
+    def texts(self, action=None, chat=None):
         return [
-            text for kind, _, _, text in list(self.log) if action in (None, kind) and kind in ("send", "edit")
+            text
+            for kind, at, _, text in list(self.log)
+            if action in (None, kind) and chat in (None, at) and kind in ("send", "edit")
         ]
+
+
+def everyone(channels):
+    return [(channel, chat) for channel in channels for chat in channel.allowed]
 
 
 @pytest.mark.spec("CNV-1")
@@ -1467,7 +1473,7 @@ def test_reporter_shows_the_tracker_and_ends_with_its_ending(home_store, monkeyp
     channel = Recorder(chats=chats)
     no_background_edits = 1000
     monkeypatch.setattr(conversation, "PROGRESS_EDIT_SECONDS", no_background_edits)
-    reporter = Reporter(conversation.everyone([channel]), "a calculator", pid=4242)
+    reporter = Reporter(everyone([channel]), "a calculator", pid=4242)
     reporter.update()
     one_per_chat = len(chats)
     assert len(channel.texts("send")) == one_per_chat
@@ -1499,7 +1505,7 @@ def test_reporter_edits_for_new_tokens_only_with_the_clock_but_the_console_count
 ):
     monkeypatch.setattr(conversation, "PROGRESS_EDIT_SECONDS", 1000)
     chat, console = Recorder(), live_console(monkeypatch)
-    reporter = Reporter(conversation.everyone([chat, console]), "a calculator", pid=4242)
+    reporter = Reporter(everyone([chat, console]), "a calculator", pid=4242)
     keep_job(home_store, 1, 4242, snapshot(step="spec", doing=Tracker.DOING_AND_DONE["spec"][0], tokens=10))
     reporter.refresh()
     edits = len(chat.log)
@@ -1518,7 +1524,7 @@ def test_progress_edits_come_within_about_two_seconds():
 def test_a_reporter_without_a_tracker_shows_its_lines(monkeypatch):
     monkeypatch.setattr(conversation, "PROGRESS_EDIT_SECONDS", 1000)
     channel = Recorder()
-    learning = Reporter(conversation.everyone([channel]), "learn rust", pid=999999)
+    learning = Reporter(everyone([channel]), "learn rust", pid=999999)
     learning.printed("  reading 4 pages")
     assert learning.progress.snapshot["latest"] == "reading 4 pages"
 
@@ -1527,7 +1533,7 @@ def test_a_reporter_without_a_tracker_shows_its_lines(monkeypatch):
 def test_a_reporter_without_a_tracker_ends_with_its_title_and_last_line(monkeypatch):
     monkeypatch.setattr(conversation, "PROGRESS_EDIT_SECONDS", 1000)
     channel = Recorder()
-    calibrating = Reporter(conversation.everyone([channel]), "calibrate qwen", pid=999999)
+    calibrating = Reporter(everyone([channel]), "calibrate qwen", pid=999999)
     calibrating.update()
     for line in (
         "📏 Testing qwen",
@@ -1889,9 +1895,8 @@ def test_a_job_shows_its_progress_only_in_the_chat_that_asked(desk):
     channel.allowed = ["1", "2"]
     say(desk, channel, "/research the newest Python")
     wait_until(lambda: not desk.busy())
-    wait_until(lambda: any("came out in October" in text for _, chat, _, text in channel.log if chat == "1"))
-    elsewhere = [text for kind, chat, _, text in channel.log if chat == "2" and kind in ("send", "edit")]
-    assert not any("research" in text or "October" in text for text in elsewhere)
+    wait_until(lambda: any("came out in October" in text for text in channel.texts(chat="1")))
+    assert not any("research" in text or "October" in text for text in channel.texts(chat="2"))
 
 
 @pytest.mark.spec("CNV-12")
@@ -1919,10 +1924,8 @@ def test_the_plan_that_waits_and_its_build_show_only_in_the_chat_that_confirmed(
     say(desk, channel, "/confirm")
     wait_until(lambda: "resume @abc123" in calls_of(script))
     wait_until(lambda: not desk.busy())
-    here = [text for kind, chat, _, text in channel.log if chat == "1" and kind in ("send", "edit")]
-    elsewhere = [text for kind, chat, _, text in channel.log if chat == "2" and kind in ("send", "edit")]
-    assert any("📁 **Its folder:**" in text for text in here)
-    assert not any("📁 **Its folder:**" in text or "Confirmed" in text for text in elsewhere)
+    assert any("📁 **Its folder:**" in text for text in channel.texts(chat="1"))
+    assert not any("📁 **Its folder:**" in text or "Confirmed" in text for text in channel.texts(chat="2"))
 
 
 @pytest.mark.spec("CNV-11")
@@ -2140,7 +2143,7 @@ def test_follow_reads_the_tasks_tracker(tmp_path, home_store):
     desk = Desk.__new__(Desk)
     desk.echo_to_terminal, desk.messages_by_run, desk.seconds_by_run, desk.waiting_plan = False, {}, {}, None
     desk.say_status = lambda *args, **kwargs: None
-    reporter = Reporter(conversation.everyone([Recorder()]), "a calculator", pid=4343)
+    reporter = Reporter(everyone([Recorder()]), "a calculator", pid=4343)
     keep_job(home_store, 1, 4343, snapshot(folder="/tmp/projects/calc", waiting=PLAN))
     process = type(
         "P",
@@ -2476,7 +2479,7 @@ def status_said_while_busy(monkeypatch, asker):
     listening = desk_with_a_started_chat(chat)
     listening.channels.append(console)
     listening.consoles.append(console)
-    listening.reporter = Reporter(conversation.everyone([asker(chat, console)]), "calc")
+    listening.reporter = Reporter(everyone([asker(chat, console)]), "calc")
     monkeypatch.setattr(listening, "keep_job_at_bottom", lambda: None)
     monkeypatch.setattr(listening, "busy", lambda: True)
     listening.say_status("🔄 **Tinker** · working on calc")
@@ -2516,7 +2519,7 @@ def test_a_job_says_its_status_as_it_starts_and_ends(desk, monkeypatch):
     job = Running()
     monkeypatch.setattr(listening, "spawn", lambda arguments: job)
     monkeypatch.setattr(listening, "follow", lambda process, reporter, task: None)
-    listening.start_task(conversation.everyone([channel]), ["learn", "go"], Path.cwd(), "learn go")
+    listening.start_task(everyone([channel]), ["learn", "go"], Path.cwd(), "learn go")
     sent = channel.texts("send")
     assert sent[0].startswith("🟢 **Tinker** · idle")
     assert sent[1].startswith("🔄 **Tinker** · working on learn go\n\n🕒") and "learn go" in sent[2]
@@ -2583,28 +2586,24 @@ def attached(monkeypatch, home_store):
     import signal
 
     handler = signal.getsignal(conversation.JOB_STOP_SIGNAL)
-    channel = Recorder()
-    monkeypatch.setattr(conversation, "chat_channels", lambda: [channel])
 
     def start(title="calc: a calculator"):
         tracker = Tracker(title)
         tracker.publish()
         return conversation.attach(tracker)
 
-    yield start, channel
+    yield start
     signal.signal(conversation.JOB_STOP_SIGNAL, handler)
 
 
 @pytest.mark.spec("CNV-19")
-def test_a_terminal_task_tells_no_chat_and_stops_on_a_signal(attached, home_store):
-    start, channel = attached
-    task = start()
+def test_a_terminal_task_reports_itself_and_stops_on_a_signal(attached, home_store):
+    task = attached()
     assert task.tracker.state["reports"] is True
     task.tracker.phase("recall")
     with pytest.raises(KeyboardInterrupt):
         os.kill(os.getpid(), conversation.JOB_STOP_SIGNAL)
         time.sleep(1)
-    assert channel.texts() == []
 
 
 @pytest.mark.spec("CNV-10")

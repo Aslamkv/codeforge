@@ -6,7 +6,7 @@ import threading
 import time
 
 import pytest
-from test_conversation import Recorder
+from test_conversation import Recorder, everyone
 
 from tinkerkit import cli, conversation, exercising, jobs
 from tinkerkit.cli import Cli, Commands
@@ -469,14 +469,9 @@ def test_the_conversation_starts_a_task_while_another_runs(home_store, tmp_path,
 
     monkeypatch.setattr(desk, "spawn", lambda arguments: spawned.append(arguments) or Running())
     monkeypatch.setattr(desk, "follow", lambda process, reporter, task: None)
+    assert desk.start_task(everyone(desk.channels), ["learn", "go"], tmp_path, "learn go") is None
     assert (
-        desk.start_task(conversation.everyone(desk.channels), ["learn", "go"], tmp_path, "learn go") is None
-    )
-    assert (
-        desk.start_task(
-            conversation.everyone(desk.channels), ["exercise", "python"], tmp_path, "exercise python"
-        )
-        is None
+        desk.start_task(everyone(desk.channels), ["exercise", "python"], tmp_path, "exercise python") is None
     )
     assert spawned == [["learn", "go"], ["exercise", "python"]] and len(desk.live_tasks) == 2
     desk.reporter.ended = True
@@ -685,7 +680,7 @@ def test_a_new_jobs_message_is_kept_up_and_one_that_goes_on_comes_to_the_bottom(
     monkeypatch.setattr(Jobs, "current", Jobs.save(job))
     a_new_job = Tracker("learn html5")
     a_new_job.publish()
-    reporter = conversation.Reporter(conversation.everyone([channel]), "learn html5", pid=os.getpid())
+    reporter = conversation.Reporter(everyone([channel]), "learn html5", pid=os.getpid())
     reporter.refresh()
     reporter.refresh()
     the_persons_message = "learn tailwind"
