@@ -68,7 +68,9 @@ def test_a_high_rule_wins_over_an_off_rule(fake_ollama, model_log):
 
 
 @pytest.mark.spec("RVW-1")
-def test_other_requests_ask_the_reviewer_without_thinking(measured_model, fake_ollama, tinker_home, model_log):
+def test_other_requests_ask_the_reviewer_without_thinking(
+    measured_model, fake_ollama, tinker_home, model_log
+):
     fake_ollama.show(MODEL, {"thinking": {"values": [False, "low", "medium", "high"]}})
     fake_ollama.reply("Level: low. A small, plain change.\nmore")
     request_text = "Write a short poem about the sea in the evening for my sister's birthday card"

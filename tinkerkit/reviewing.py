@@ -16,7 +16,22 @@ class RequestReview:
     HARD_WORDS = frozenset({"bug", "fails", "design", "architecture", "refactor"})
     HARD_PHRASES = ("why does",)
     SIMPLE_WORDS = frozenset(
-        {"hi", "hello", "thanks", "what", "who", "when", "where", "how", "is", "list", "name", "define", "rename", "format"}
+        {
+            "hi",
+            "hello",
+            "thanks",
+            "what",
+            "who",
+            "when",
+            "where",
+            "how",
+            "is",
+            "list",
+            "name",
+            "define",
+            "rename",
+            "format",
+        }
     )
 
     def __init__(self, log):
