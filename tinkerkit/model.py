@@ -81,12 +81,11 @@ def assistant_turn(text):
 
 
 class Model:
-    def __init__(self, name, settings, keep_alive, log, max_growth=DEFAULT_CONFIG["max_growth"]):
+    def __init__(self, name, settings, keep_alive, log, max_growth=DEFAULT_CONFIG["max_growth"], level=None):
         self.name, self.settings = name, settings
         self.max_tokens, self.num_ctx = int(settings["max_prompt_tokens"]), int(settings["num_ctx"])
-        self.think = settings.get("think")
-        self.build_think = Config.get("build_think") if self.think not in (None, False) else None
-        self.is_building = False
+        self.level = level
+        self.think = settings.get("think") if level is None else ThinkLevels.taken(level, ThinkLevels.values(name))
         self.max_reply, self.fix_max = int(settings["max_reply_tokens"]), int(settings["fix_max_tokens"])
         self.keep_alive = keep_alive
         self.options = {"num_batch": int(settings["num_batch"])} if settings.get("num_batch") else {}
@@ -168,7 +167,7 @@ class Model:
                 Ollama.unload(loaded)
 
     def think_now(self):
-        return self.build_think if self.is_building and self.build_think else self.think
+        return self.think
 
     def user_message(self, system, parts, label, shrink):
         limit = self.limit_chars(system, int(self.max_tokens * OOM_RETRY_PROMPT_SHARE**shrink))
@@ -309,9 +308,7 @@ class Model:
 
     def lower_think(self, label, tries):
         rejected = tries.think
-        if self.is_building and rejected == self.build_think != self.think:
-            self.build_think, tries.think = None, self.think
-        elif rejected in (True, False):
+        if rejected in (True, False):
             self.think, self.think_rejected, tries.think = None, True, None
         else:
             self.think = tries.think = True

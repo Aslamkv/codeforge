@@ -633,7 +633,7 @@ def test_a_research_job_says_its_steps_and_ends_with_its_answer(home_store, monk
             self.learner.step(step)
         return entry
 
-    monkeypatch.setattr(Commands, "learning_tools", staticmethod(lambda option: (Model(), None, None)))
+    monkeypatch.setattr(Commands, "learning_tools", staticmethod(lambda option, request: (Model(), None, None)))
     monkeypatch.setattr(cli.Models, "remember", staticmethod(lambda model: None))
     monkeypatch.setattr(Researcher, "research", research)
     with Jobs.running(["research", "go"]):

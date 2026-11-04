@@ -41,6 +41,7 @@ lazy from .project import (
 )
 lazy from .prompts import Prompts
 lazy from .retrieval import Embeddings
+lazy from .reviewing import RequestReview
 lazy from .session import Session, Stopped
 lazy from .settings import (
     CONFIRM_AFTER,
@@ -649,8 +650,7 @@ class Commands:
         )
         say.text(f"context:         {settings['num_ctx']} tokens")
         think = settings.get("think")
-        build = Config.get("build_think") if think not in (None, False) else None
-        say.text(f"think:           {think} for planning" + (f", {build} for building" if build else ""))
+        say.text(f"think:           {think}")
         say.text(f"chars per token: {settings.get('chars_per_token')}")
 
     @staticmethod
@@ -733,7 +733,7 @@ class Commands:
         if definition is not None or TaughtCommands.alias(topic):
             TaughtCommands.teach(topic, definition)
             return
-        model, embeddings, internet = self.learning_tools("tinker learn")
+        model, embeddings, internet = self.learning_tools("tinker learn", topic)
         Commands.reported(
             f"Learning {topic}",
             model,
@@ -769,7 +769,7 @@ class Commands:
 
     def research(self):
         topic = self.args.research
-        model, embeddings, internet = self.learning_tools("tinker research")
+        model, embeddings, internet = self.learning_tools("tinker research", topic)
         Commands.reported(
             f"Researching {topic}",
             model,
@@ -798,10 +798,10 @@ class Commands:
         return {**researched, "text": Researcher.answer(entry)}
 
     @staticmethod
-    def learning_tools(option):
+    def learning_tools(option, request):
         name, settings = Commands.checked_model()
         embeddings = Embeddings.required(option)
-        return LearningTools(Commands.model_in_use(name, settings), embeddings, Internet())
+        return LearningTools(Commands.model_in_use(name, settings, request), embeddings, Internet())
 
     @staticmethod
     def checked_model():
@@ -811,24 +811,26 @@ class Commands:
         return SelectedModel(name, settings)
 
     @staticmethod
-    def model_in_use(name, settings):
+    def model_in_use(name, settings, request):
         log = calls_log()
         say.keep_log(log)
-        return Commands.configured_model(name, settings, log)
+        return Commands.configured_model(name, settings, log, request)
 
     @staticmethod
-    def configured_model(name, settings, log):
+    def configured_model(name, settings, log, request):
+        level, _ = RequestReview(log).level(request)
         return Model(
             name,
             settings,
             Config.keep_alive(Config.get("keep_alive")),
             log,
             max_growth=float(Config.get("max_growth")),
+            level=level,
         )
 
     def ask(self):
         question = self.args.ask
-        model = Commands.model_in_use(*Commands.checked_model())
+        model = Commands.model_in_use(*Commands.checked_model(), question)
         memory = Memory()
         Commands.reported(
             f"Asking: {first_line(question, 60)}",
@@ -840,7 +842,7 @@ class Commands:
         teaching = self.args.teach
         name, settings = Commands.checked_model()
         internet = Internet()
-        model, memory = Commands.model_in_use(name, settings), Memory()
+        model, memory = Commands.model_in_use(name, settings, teaching), Memory()
         Commands.reported(
             f"Teaching: {first_line(teaching, 60)}",
             model,
@@ -860,7 +862,7 @@ class Commands:
                 return
             Jobs.retarget(["read", f"#{number}"])
         title = reading.known_reading(number)["title"]
-        model = Commands.model_in_use(*Commands.checked_model())
+        model = Commands.model_in_use(*Commands.checked_model(), f"{title} {focus}")
         Commands.reported(
             f"Reading #{number} {first_line(title, 50)}",
             model,
@@ -871,7 +873,7 @@ class Commands:
         what = self.args.exercise
         if what.lower() == "status":
             return exercising.show()
-        model = Commands.model_in_use(*Commands.checked_model())
+        model = Commands.model_in_use(*Commands.checked_model(), what)
         Commands.reported(
             f"Exercising {what}",
             model,
@@ -1195,7 +1197,7 @@ class ProjectRun:
         Jobs.retarget(["resume", f"@{self.record['id']}"])
         self.log = Log(project.store, "events")
         say.keep_log(self.log)
-        model = Commands.configured_model(model_name, settings, self.log)
+        model = Commands.configured_model(model_name, settings, self.log, self.record["task"])
         self.record["model"] = model.name
         self.print_header(model, workdir)
         self.log_start(model)
@@ -1237,8 +1239,6 @@ class ProjectRun:
 
     @staticmethod
     def thinking(model):
-        if model.build_think and model.build_think != model.think:
-            return f"{model.think} (building: {model.build_think})"
         return model.think
 
     def work_safely(self):
@@ -1608,7 +1608,6 @@ class CycleRunner:
 
     def run_phase(self, phase, cycle):
         worker = self.phase_class(phase)(self.session)
-        self.session.model.is_building = worker.BUILDS
         if not worker.TITLE:
             return self.result(worker.run(cycle))
         started = time.perf_counter()

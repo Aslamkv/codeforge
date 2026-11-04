@@ -213,8 +213,8 @@ def model_log(tmp_path):
 
 @pytest.fixture
 def make_model(model_log, fake_ollama):
-    def make(**overrides):
-        return Model(MODEL, dict(MEASURED, **overrides), 0, model_log)
+    def make(level=None, **overrides):
+        return Model(MODEL, dict(MEASURED, **overrides), 0, model_log, level=level)
 
     return make
 

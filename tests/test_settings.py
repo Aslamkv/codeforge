@@ -31,7 +31,6 @@ def test_default_config():
         "ollama_url": "http://localhost:11434",
         "keep_alive": "30m",
         "max_growth": 1.15,
-        "build_think": "medium",
         "test_timeout": 60,
         "web_timeout": 30,
         "learn_missing": 2,
@@ -99,10 +98,9 @@ def test_a_stored_key_no_setting_has_is_ignored(home_store):
         ("max_growth", 1),
         ("max_growth", True),
         ("max_growth", "2"),
-        ("build_think", "max"),
-        ("build_think", "true"),
-        ("build_think", 1),
         ("learn_think", "max"),
+        ("learn_think", "true"),
+        ("learn_think", 1),
         ("test_timeout", 0),
         ("test_timeout", 1.5),
         ("test_timeout", "60"),
@@ -297,7 +295,7 @@ def test_keep_awake_without_a_tool_or_failing_does_nothing(monkeypatch):
 def test_config_set_reads_and_checks_the_value():
     assert Config.set("test_timeout", "90") == 90 and Config.get("test_timeout") == 90
     assert Config.set("keep_alive", "10m") == "10m" and Config.set("keep_alive", "300") == 300
-    assert Config.set("build_think", "false") is False and Config.set("max_growth", "1.5") == 1.5
+    assert Config.set("max_growth", "1.5") == 1.5
     assert Config.set("learn_think", "false") is False and Config.set("tool_docs_pages", "12") == 12
     assert Config.set("projects", "~/Code") == "~/Code"
     with pytest.raises(SystemExit, match="test_timeout must be a whole number"):

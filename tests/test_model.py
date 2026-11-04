@@ -879,10 +879,7 @@ def test_model_settings(make_model):
     model = make_model(num_batch=256, chars_per_token=9)
     assert (model.max_tokens, model.num_ctx, model.max_reply, model.fix_max) == (8192, 32768, 16384, 4096)
     assert model.options == {"num_batch": 256} and model.chars_per_token == 4.0
-    assert model.build_think == "medium" and model.think_now() == "high"
-    model.is_building = True
-    assert model.think_now() == "medium"
-    assert make_model(think=None).build_think is None
+    assert model.level is None and model.think_now() == "high"
     assert model.limit_chars("s" * 100) == int(8192 * PROMPT_BUDGET_SHARE * 4.0) - 140
     assert model.limit_chars("", tokens=1000) == int(1000 * PROMPT_BUDGET_SHARE * 4.0) - 40
 
@@ -1010,13 +1007,37 @@ def test_a_rejected_think_level_falls_back(make_model, fake_ollama):
 
 
 @pytest.mark.spec("MOD-19")
-def test_a_rejected_build_think_falls_back_to_the_planning_one(make_model, fake_ollama):
-    fake_ollama.reply(OllamaError('invalid think value "medium"')).reply("ok")
-    model = make_model()
-    model.is_building = True
-    assert ask_a_question(model) == Answer("ok")
-    assert [call["think"] for call in fake_ollama.calls] == ["medium", "high"]
-    assert model.build_think is None and model.think == "high"
+def test_a_rejected_request_level_falls_back_to_true_then_none(make_model, fake_ollama, tinker_home):
+    fake_ollama.show(MODEL, {"thinking": {"values": [False, "low", "medium"]}})
+    fake_ollama.reply(OllamaError('invalid think value "medium"')).reply(
+        OllamaError("model does not support think")
+    )
+    fake_ollama.reply("ok").reply("ok")
+    model = make_model(level="medium")
+    assert ask_a_question(model) == Answer("ok") and ask_a_question(model) == Answer("ok")
+    assert [call["think"] for call in fake_ollama.calls] == ["medium", True, None, None]
+    assert model.level == "medium" and model.think is None and model.think_rejected
+
+
+@pytest.mark.spec("MOD-16")
+@pytest.mark.parametrize(
+    ("level", "values", "think"),
+    [
+        ("off", [False, "low", "high"], False),
+        ("high", [False, "low", "high"], "high"),
+        ("medium", [False, True], True),
+        ("high", [], None),
+    ],
+)
+def test_the_model_asks_at_the_requests_level_as_it_takes_it(
+    make_model, fake_ollama, tinker_home, level, values, think
+):
+    fake_ollama.show(MODEL, {"thinking": {"values": values}} if values else {})
+    fake_ollama.reply("ok")
+    model = make_model(level=level)
+    assert model.think == think and model.think_now() == think
+    ask_a_question(model)
+    assert [call["think"] for call in fake_ollama.calls] == [think]
 
 
 @pytest.mark.spec("MOD-19")
