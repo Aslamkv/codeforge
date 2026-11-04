@@ -235,9 +235,9 @@ the current step while it works:
   … Read 2 of 6 page(s) found
 ```
 
-The dim lines under it (the tally and the latest news) update in place. A job's steps appear as in the
-chats, each once as it finishes, and the chats show the same Tinkering line. `NO_COLOR=1 tinker` turns all
-of that off.
+The dim lines under it (the tally and the latest news) update in place. A job's steps appear each once as
+it finishes. Only the one who asked for a job, here or in a chat, follows it this way; everyone else sees
+Tinker's status, such as `working on X`. `NO_COLOR=1 tinker` turns all of that off.
 
 Or say one thing at a time:
 
@@ -277,7 +277,7 @@ the job goes on as soon as you have your answer (see [Jobs](#jobs-)).
 
 ## Chat Channels 📡
 
-Talk to Tinker from Telegram, and follow every task there.
+Talk to Tinker from Telegram, and follow there every task you start from it.
 
 1. Make a bot with [@BotFather](https://t.me/BotFather) and copy its token.
 2. Add it. Tinker asks for the token, then asks you to send the bot a message, to pair your chat:
@@ -320,8 +320,8 @@ tap one to choose it.
 Attach a book, an article or a document to the chat, and Tinker reads it: see [Read](#read-).
 
 The chat stays tidy. Tinker's status is one message: each new status replaces the one before, at the
-bottom of the chat, even after a restart. Each task has
-one message. Quick looks like `/jobs` or `/help` go after two minutes, and your question goes as soon as
+bottom of the chat, even after a restart. Each task the chat asked for has
+one message; a task started elsewhere shows only in the status. Quick looks like `/jobs` or `/help` go after two minutes, and your question goes as soon as
 Tinker answers. Everything else goes after a day. Nothing is lost: Tinker keeps a history of what it showed.
 
 ```text
@@ -502,8 +502,9 @@ on as soon as nothing else runs and you have your answer.
 
 It runs until you stop it. In a chat, `/exercise rust` starts it in the background, so it keeps going after the
 conversation ends. It keeps one message, whether it is started, stopped or resumed, and that message shows what
-its build is doing right now, as a task's does. A conversation started later picks up the exercise's message
-again, and an exercise that was killed (or the computer restarted) goes on by itself.
+its build is doing right now, as a task's does, in the chat that started or resumed it. A conversation started
+later picks up the exercise's message again, and an exercise that was killed (or the computer restarted) goes on
+by itself.
 
 ## Jobs ⏯
 
