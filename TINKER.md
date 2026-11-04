@@ -235,6 +235,11 @@ the current step while it works:
   … Read 2 of 6 page(s) found
 ```
 
+The time counts from the moment the job starts, so it matches the `Done in` at the end. Before its own
+steps, a job says what it is doing to get started: `🚀 Getting Tinker ready`, `🧭 Working out how much
+thought your request needs` while the model judges the request, and `📦 Loading the model into memory` only
+when the model isn't loaded yet.
+
 The dim lines under it (the tally and the latest news) update in place. A job's steps appear each once as
 it finishes. Only the one who asked for a job, here or in a chat, follows it this way; everyone else sees
 Tinker's status, such as `working on X`. `NO_COLOR=1 tinker` turns all of that off.
