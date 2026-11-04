@@ -730,10 +730,32 @@ def test_a_job_never_unloads_its_model_when_it_ends(monkeypatch, fake_ollama):
         def unload(self):
             raise AssertionError("the job unloaded its model")
 
-    monkeypatch.setattr(Commands, "followed", staticmethod(lambda title: Ended()))
+    monkeypatch.setattr(Commands, "followed", lambda self, title: Ended())
     monkeypatch.setattr(Models, "remember", staticmethod(lambda model: None))
-    Commands.reported("Asking", Kept(), lambda tracker: cli.ending("done", "asked"))
+    Commands(parse("ask", "a")).reported("Asking", Kept(), lambda tracker: cli.ending("done", "asked"))
     assert fake_ollama.unloaded == []
+
+
+@pytest.mark.spec("PRJ-17")
+def test_a_jobs_clock_counts_from_its_process_start(monkeypatch):
+    clock = {}
+
+    class Ended:
+        heard = None
+
+        def __init__(self, title, started=None):
+            clock["started"] = started
+
+        def end(self, ended, took):
+            clock["took"] = took
+
+    started_at = datetime.datetime.now() - datetime.timedelta(seconds=30)
+    monkeypatch.setattr(cli, "Tracker", Ended)
+    monkeypatch.setattr(cli.say, "follow", lambda heard: None)
+    monkeypatch.setattr(Models, "remember", staticmethod(lambda model: None))
+    Commands(parse("ask", "a"), started_at).reported("Asking", object(), lambda tracker: cli.ending("done", "asked"))
+    assert clock["started"] == started_at.timestamp()
+    assert clock["took"] >= 30
 
 
 SPEC_REPLY = {
@@ -816,7 +838,7 @@ README = {
 
 def build(*argv):
     with pytest.raises(SystemExit) as ended:
-        ProjectRun(Cli.parse(list(argv)), 0.0, datetime.datetime.now()).execute()
+        ProjectRun(Cli.parse(list(argv)), datetime.datetime.now()).execute()
     return ended.value.code
 
 
