@@ -811,7 +811,9 @@ class Commands:
     def model_in_use(self, name, settings, request):
         log = calls_log()
         say.keep_log(log)
-        return Commands.configured_model(name, settings, log, request, self.tracker.phase)
+        configured = Commands.configured_model(name, settings, log, request, self.tracker.phase)
+        Ollama.loading(name, self.tracker.phase)
+        return configured
 
     @staticmethod
     def configured_model(name, settings, log, request, phase=lambda doing: None):

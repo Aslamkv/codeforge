@@ -10,7 +10,7 @@ from conftest import MEASURED, MODEL, PY, TOOLCHAIN, criterion, file_block, plan
 from tinkerkit import cli
 from tinkerkit.cli import Cli, Commands, CycleRunner, Doctor, ProjectFolder, ProjectRun
 from tinkerkit.knowledge import Knowledge, Library, ResearchLearner
-from tinkerkit.model import Models, Ollama, OllamaError, ThinkLevels
+from tinkerkit.model import LoadedModel, Models, Ollama, OllamaError, ThinkLevels
 from tinkerkit.principles import Principles
 from tinkerkit.project import Runs, Tracker, project_store
 from tinkerkit.session import Phase, Stopped
@@ -787,6 +787,33 @@ def test_a_job_shows_it_is_getting_ready_before_it_checks_its_model(words, monke
     with pytest.raises(SystemExit):
         getattr(Commands(parse(*words)), words[0])()
     assert order == ["🚀 Getting Tinker ready", "checked"]
+
+
+@pytest.mark.spec("PRJ-18")
+@pytest.mark.parametrize(
+    "loaded, shown",
+    [([], ["configured", "📦 Loading the model into memory"]), ([LoadedModel(MODEL, 1)], ["configured"])],
+)
+def test_a_job_shows_the_loading_phase_after_the_review_when_its_model_is_not_in_memory(
+    loaded, shown, monkeypatch
+):
+    phases = []
+
+    class Followed:
+        phase = staticmethod(phases.append)
+
+    def configured(name, settings, log, request, phase):
+        phases.append("configured")
+        return name
+
+    monkeypatch.setattr(cli, "calls_log", lambda: None)
+    monkeypatch.setattr(cli.say, "keep_log", lambda log: None)
+    monkeypatch.setattr(Commands, "configured_model", staticmethod(configured))
+    monkeypatch.setattr(Ollama, "loaded_models", staticmethod(lambda: loaded))
+    commands = Commands(parse("ask", "a"))
+    commands.tracker = Followed()
+    assert commands.model_in_use(MODEL, {}, "a") == MODEL
+    assert phases == shown
 
 
 SPEC_REPLY = {

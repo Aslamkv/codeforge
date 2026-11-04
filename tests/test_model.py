@@ -13,6 +13,7 @@ from tinkerkit.model import (
     Answer,
     Calibrator,
     GgufReading,
+    LoadedModel,
     Model,
     Models,
     Ollama,
@@ -421,6 +422,26 @@ def test_get_json(monkeypatch):
 def test_get_json_without_ollama_gives_none():
     assert Ollama.get_json("/api/tags") is None
     assert Ollama.installed_models() is None and Ollama.loaded_models() is None
+
+
+LOADING_PHASE = "📦 Loading the model into memory"
+
+
+@pytest.mark.spec("PRJ-18")
+@pytest.mark.parametrize(
+    "loaded, phases",
+    [
+        ([], [LOADING_PHASE]),
+        ([LoadedModel("other", 1)], [LOADING_PHASE]),
+        ([LoadedModel(MODEL, 1)], []),
+        (None, []),
+    ],
+)
+def test_loading_shows_only_when_the_model_is_not_in_memory(loaded, phases, monkeypatch):
+    shown = []
+    monkeypatch.setattr(Ollama, "loaded_models", staticmethod(lambda: loaded))
+    Ollama.loading(MODEL, shown.append)
+    assert shown == phases
 
 
 @pytest.mark.spec("MOD-8")

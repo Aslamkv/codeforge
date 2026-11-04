@@ -1371,6 +1371,12 @@ class Ollama:
         ]
 
     @staticmethod
+    def loading(name, phase):
+        loaded = Ollama.loaded_models()
+        if loaded is not None and all(model.name != name for model in loaded):
+            phase("📦 Loading the model into memory")
+
+    @staticmethod
     def capabilities(name):
         return (Ollama.get_json("/api/show", {"model": name}, timeout=30) or {}).get("capabilities")
 
