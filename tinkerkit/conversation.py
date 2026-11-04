@@ -312,9 +312,13 @@ class Desk:
                 with self.post_lock:
                     if channel in self.chats_started and not self.a_channel_closed():
                         self.post_status(channel, text)
-            elif (anew and not self.busy()) or text.startswith("💤"):
+            elif (anew and not self.terminal_follows_job()) or text.startswith("💤"):
                 channel.show(ConsoleChannel.CHAT, None, text, done=True)
         self.keep_job_at_bottom()
+
+    def terminal_follows_job(self):
+        audience = self.reporter.audience if self.reporter else []
+        return self.busy() and any(channel in self.consoles for channel, _ in audience)
 
     def keep_job_at_bottom(self):
         reporter = self.reporter

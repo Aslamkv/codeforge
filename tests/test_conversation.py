@@ -2470,20 +2470,32 @@ def test_console_wipes_the_screen_and_scrollback_only_in_a_colour_terminal(monke
     assert terminal.getvalue() == "\033[H\033[2J\033[3J"
 
 
-@pytest.mark.spec("CNV-8")
-def test_the_terminal_leaves_out_what_tinker_works_on_while_a_job_shows_its_progress(desk, monkeypatch):
+def status_said_while_busy(monkeypatch, asker):
     chat, console, shown = Recorder("bot"), ConsoleChannel(), []
     monkeypatch.setattr(console, "show", lambda chat, sent, text, done=False: shown.append(text) or [1])
     listening = desk_with_a_started_chat(chat)
     listening.channels.append(console)
     listening.consoles.append(console)
+    listening.reporter = Reporter(conversation.everyone([asker(chat, console)]), "calc")
     monkeypatch.setattr(listening, "keep_job_at_bottom", lambda: None)
     monkeypatch.setattr(listening, "busy", lambda: True)
     listening.say_status("🔄 **Tinker** · working on calc")
     monkeypatch.setattr(listening, "busy", lambda: False)
     listening.say_status("🟢 **Tinker** · idle: send a task")
-    assert shown == ["🟢 **Tinker** · idle: send a task"]
     assert any("working on calc" in text for text in chat.texts("send"))
+    return shown
+
+
+@pytest.mark.spec("CNV-8")
+def test_the_terminal_leaves_out_what_tinker_works_on_while_a_job_shows_its_progress(desk, monkeypatch):
+    shown = status_said_while_busy(monkeypatch, lambda chat, console: console)
+    assert shown == ["🟢 **Tinker** · idle: send a task"]
+
+
+@pytest.mark.spec("CNV-8")
+def test_the_terminal_prints_what_tinker_works_on_when_a_chat_asked(desk, monkeypatch):
+    shown = status_said_while_busy(monkeypatch, lambda chat, console: chat)
+    assert shown == ["🔄 **Tinker** · working on calc", "🟢 **Tinker** · idle: send a task"]
 
 
 @pytest.mark.spec("CNV-9")
