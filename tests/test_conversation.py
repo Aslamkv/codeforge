@@ -1579,7 +1579,7 @@ def test_a_chat_reply_that_is_a_command_line_is_handled_or_offered(desk, monkeyp
     desk, channel, _ = desk
     replies = []
     monkeypatch.setattr(Models, "quick", staticmethod(lambda: ("m", {}, None)))
-    monkeypatch.setattr(Models, "quick_reply", staticmethod(lambda *asked: replies.pop(0)))
+    monkeypatch.setattr(Models, "quick_reply", staticmethod(lambda *asked, **options: replies.pop(0)))
 
     def chat(reply, shown):
         replies.extend(["low: a plain request", reply])
@@ -2641,7 +2641,7 @@ def test_a_command_line_run_once_confirmed_pauses_the_job_while_its_output_is_re
     talk = Talk("cmds", pausing_jobs=pausing_into(order))
     monkeypatch.setattr(Models, "quick", staticmethod(lambda: ("m", {}, None)))
     monkeypatch.setattr(
-        Models, "quick_reply", staticmethod(lambda *asked: order.append("read") or "it says hi")
+        Models, "quick_reply", staticmethod(lambda *asked, **options: order.append("read") or "it says hi")
     )
     channel = Recorder()
     Shell(talk, tmp_path, Questions()).run(

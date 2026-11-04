@@ -77,6 +77,7 @@ def test_other_requests_ask_the_reviewer_without_thinking(
     assert RequestReview(model_log).level(request_text) == ("low", "Level: low. A small, plain change.")
     call = fake_ollama.calls[-1]
     assert call["think"] is False
+    assert call["options"]["temperature"] == 0
     assert call["messages"] == [
         {"role": "system", "content": Prompts.REVIEW_PROMPT},
         {"role": "user", "content": request_text},
