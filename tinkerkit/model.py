@@ -733,14 +733,14 @@ class Models:
         return QuickModel(name, options, False if settings.get("think") not in (None, False) else None)
 
     @staticmethod
-    def quick_reply(messages, tokens):
-        name, options, think = Models.quick()
+    def quick_reply(messages, tokens, think=None):
+        name, options, quick_think = Models.quick()
         data = Ollama.chat(
             name,
             messages,
             Config.keep_alive(Config.get("keep_alive")),
             dict(options, num_predict=tokens),
-            think=think,
+            think=quick_think if think is None else ThinkLevels.taken(think, ThinkLevels.values(name)),
             timeout=QUICK_REPLY_TIMEOUT,
         )
         return data["message"]["content"].strip()
