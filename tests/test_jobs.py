@@ -391,18 +391,15 @@ def test_the_conversation_stops_and_resumes_jobs(home_store, tmp_path, monkeypat
 def test_a_research_job_frames_its_topic_on_the_day_the_job_started(home_store, monkeypatch):
     research_job_started_on_jan_2(home_store)
     framed = {"name": "Go", "summary": "", "questions": [{"question": "Which release?", "queries": ["go"]}]}
-    given, thinks = [], []
+    given = []
     monkeypatch.setattr(
         Learner,
         "saved_or_asked",
-        lambda self, known, read, system, parts, *rest, think: (
-            given.extend(parts) or thinks.append(think) or (framed, True)
-        ),
+        lambda self, known, read, system, parts, *rest: given.extend(parts) or (framed, True),
     )
     with Jobs.running(Jobs.arguments(["resume", "#1"])):
         Researcher(Learner(None, None, None)).frame("go", None)
     assert next(part for part in given if part.title == "Today").text == "2026-01-02"
-    assert thinks == [False]
 
 
 def other_running(home_store, number=1, command="learn", title="learn go"):
@@ -633,7 +630,9 @@ def test_a_research_job_says_its_steps_and_ends_with_its_answer(home_store, monk
             self.learner.step(step)
         return entry
 
-    monkeypatch.setattr(Commands, "learning_tools", staticmethod(lambda option: (Model(), None, None)))
+    monkeypatch.setattr(
+        Commands, "learning_tools", staticmethod(lambda option, request: (Model(), None, None))
+    )
     monkeypatch.setattr(cli.Models, "remember", staticmethod(lambda model: None))
     monkeypatch.setattr(Researcher, "research", research)
     with Jobs.running(["research", "go"]):

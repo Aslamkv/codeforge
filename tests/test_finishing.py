@@ -284,7 +284,7 @@ def test_tidy_fixes_what_the_linter_reports(built, fake_ollama, project_dir):
     Tidy(session).run(project.cycles[0])
     assert (project_dir / "calc.py").read_text() == CALC + "# done\n"
     numbered = fake_ollama.calls[0]["messages"][1]["content"]
-    assert "   7| # TODO tidy me" in numbered and fake_ollama.calls[0]["think"] is False
+    assert "   7| # TODO tidy me" in numbered and fake_ollama.calls[0]["think"] == "high"
 
 
 @pytest.mark.spec("FIN-2")

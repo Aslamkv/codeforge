@@ -22,7 +22,6 @@ Lessons = namedtuple("Lessons", "new confirmed")
 
 class Tidy(Phase):
     TITLE = "Tidy (the linter over the code)"
-    BUILDS = True
     MAX_FILES_PER_PASS = FILES_SHOWN_PER_FIX
 
     def run(self, cycle):
@@ -95,16 +94,12 @@ class Tidy(Phase):
         return "\n\n".join(blocks) or output
 
     def tidied(self, path, parts, lines):
-        change, reply = None, None
-        for think in (False, None):
-            reply = self.session.ask(
-                Prompts.TIDY_SYSTEM, parts, f"Tidy {path}", max_reply=self.session.model.fix_max, think=think
-            )
-            change = self.workspace.apply(
-                reply, lambda target, exists: "only the lines shown may change", {path: (1, lines)}
-            )
-            if change:
-                break
+        reply = self.session.ask(
+            Prompts.TIDY_SYSTEM, parts, f"Tidy {path}", max_reply=self.session.model.fix_max
+        )
+        change = self.workspace.apply(
+            reply, lambda target, exists: "only the lines shown may change", {path: (1, lines)}
+        )
         return Tidied(change, reply)
 
     def keep_if_better(self, path, change, reply, output, passing):
@@ -139,7 +134,6 @@ class Tidy(Phase):
 
 class ReadmeWriter(Phase):
     TITLE = "README (and its examples run, as a user would)"
-    BUILDS = True
     MAX_USAGE_EXAMPLES = 12
     EXAMPLE_FIX_ROUNDS = 2
     SERVER_ANSWER_TIMEOUT = 20
@@ -163,7 +157,7 @@ class ReadmeWriter(Phase):
     def guide(self):
         try:
             answer = self.session.model.ask_until_usable(
-                Prompts.README_SYSTEM, self.readme_parts(), "README", self.read, attempts=2, think=False
+                Prompts.README_SYSTEM, self.readme_parts(), "README", self.read, attempts=2
             )
         except OllamaError as exc:
             answer = Answer(None, why=str(exc))
@@ -454,7 +448,6 @@ class ReadmeWriter(Phase):
 
 class FinalReview(Phase):
     TITLE = "Final review (the project as a person runs it)"
-    BUILDS = True
 
     def run(self, cycle):
         problem, output = self.problem()

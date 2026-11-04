@@ -117,7 +117,7 @@ def test_config_files_come_first_in_one_call(make_project, make_session, fake_ol
     ).exists()
     assert (
         cycle["code_done"] == ["pyproject.toml", "requirements.txt"]
-        and fake_ollama.calls[0]["think"] is False
+        and fake_ollama.calls[0]["think"] == "high"
     )
 
 
@@ -197,7 +197,7 @@ def test_verify_parks_what_nothing_fixes_and_puts_the_files_back(calc, fake_olla
     assert step["status"] == "blocked" and steps_of(project)["C1"]["status"] == "green"
     assert (project_dir / "calc.py").read_text() == CALC_WITH_WRONG_SUB
     labels = [label.split(" [")[0] for label in fake_ollama.labels()]
-    assert labels[0] == "Fix the code C2 (no thinking first)" and labels[-1].startswith(
+    assert labels[0] == "Fix the code C2" and labels[-1].startswith(
         "Review the test and the code against the plan C2"
     )
     assert len(labels) == 5 and project.store.get("restore", Verifier.RESTORE_POINT) is None
@@ -398,7 +398,7 @@ def test_a_project_that_does_not_build_is_fixed(calc, fake_ollama, project_dir):
     (project_dir / "calc.py").write_text("def add(a, b)\n    return a + b\n")
     fake_ollama.reply("CAUSE: a colon was missing\n" + file_block("calc.py", CALC), when="Make it build")
     assert Verifier(session).make_it_build() is None
-    assert (project_dir / "calc.py").read_text() == CALC and fake_ollama.calls[0]["think"] is False
+    assert (project_dir / "calc.py").read_text() == CALC and fake_ollama.calls[0]["think"] == "high"
 
 
 @pytest.mark.spec("BLD-5")

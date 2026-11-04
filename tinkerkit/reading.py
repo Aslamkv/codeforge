@@ -30,7 +30,6 @@ lazy from .settings import (
     READ_MAX_BYTES,
     READ_MIN_CHAPTERS,
     READ_WINDOW_CHARS,
-    Config,
     Home,
     Numbered,
     confirm_deletion,
@@ -178,7 +177,6 @@ class Reader(Tracked):
                 survey_parts(book),
                 "Read: the reading plan",
                 lambda reply: read_survey(reply.json(), book),
-                think=think(),
             ).needed(f"{self.model.name} could not make a reading plan; its text stays stored.")
         Readings.surveyed(entry, survey)
         core = [str(chapter.number) for chapter in book.chapters if order_of(survey, chapter) == "core"]
@@ -225,9 +223,7 @@ class Reader(Tracked):
         for part, text in enumerate(texts, 1):
             label = f"Read: chapter {chapter.number}" + (f" part {part}" if len(texts) > 1 else "")
             passage = {"text": text, "source": f"#{entry['number']} chapter {chapter.number}"}
-            deltas += inducer.induce(
-                [passage], entry["topic"], think(), look_for=focus or look_for, label=label
-            )
+            deltas += inducer.induce([passage], entry["topic"], look_for=focus or look_for, label=label)
         return [read_phase(delta, survey["software"]) for delta in deltas][:READ_FACTS_PER_CHAPTER]
 
 
@@ -442,10 +438,6 @@ def learned(count):
     if not count:
         return "nothing new"
     return f"{count} thing{'s' if count > 1 else ''} learned"
-
-
-def think():
-    return Config.get("learn_think")
 
 
 def in_order(chapters, survey):

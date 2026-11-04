@@ -273,8 +273,8 @@ The home and its database, the settings, numbered lists, and the one way to dele
 - **SET-1** `Home.root` is the `.tinker` folder next to the `tinkerkit` package and `tinker.py`, where they
   really are (symlinks resolved). `Home.store()` is the home database, `tinker.db`, in it.
 - **SET-2** `DEFAULT_CONFIG` is exactly: model `None`, ollama_url `http://localhost:11434`, keep_alive `"30m"`,
-  max_growth `1.15`, build_think `"medium"`, test_timeout `60`, web_timeout `30`, learn_missing `2`,
-  learn_cutoff `0.0`, learn_coverage `0.6`, learn_pages `8`, learn_min_pages `2`, learn_searches `3`, learn_think `"low"`,
+  max_growth `1.15`, test_timeout `60`, web_timeout `30`, learn_missing `2`,
+  learn_cutoff `0.0`, learn_coverage `0.6`, learn_pages `8`, learn_min_pages `2`, learn_searches `3`,
   tool_docs_pages `5`, docs_latest_days `30`, fetch_workers `6`, fetch_timeout `15`, fetch_max_bytes `2000000`,
   embed_model `""`, projects `"~/Projects"`. web_timeout is a search's timeout; fetch_workers, fetch_timeout and
   fetch_max_bytes are the `Fetcher`'s workers, timeout and max_bytes; embed_model is the embedding model
@@ -287,8 +287,7 @@ The home and its database, the settings, numbered lists, and the one way to dele
 - **SET-5** `SETTINGS` is the one table of the settings: for each key of `DEFAULT_CONFIG`, its type, its
   range and its owner, the command that sets it (`model` for model and embed_model, `config` for the
   rest). `Config.check()` checks every setting by its row, and rejects with
-  `SystemExit`: a keep_alive that is neither whole seconds nor a duration (`10m`, `1h30m`); a build_think or
-  learn_think other than `"high"`, `"medium"`, `"low"`, `true`, `false` or `null`; and a number outside its range, or not whole
+  `SystemExit`: a keep_alive that is neither whole seconds nor a duration (`10m`, `1h30m`); and a number outside its range, or not whole
   where its row says so (max_growth above 1, web_timeout above 0, test_timeout and learn_missing at least 1,
   and each `learn_*`, `docs_*` and `fetch_*` limit). A boolean is never a number. Every command that needs the
   model checks them first.
@@ -628,9 +627,9 @@ What is said in the chats, kept so that a chat is only a view of it.
 - **MOD-15** Calibration's first chat finds the think setting the model takes: `"high"`, else `true`, and none
   for a model that does not think. It asks for the context calibration aims for, so the first probe finds the
   model loaded, and asks again at 4096 when the model does not run there. A model that does not run ends
-  calibration with `SystemExit`.
-- **MOD-16** `Model` takes its limits from the measured settings. It builds at `build_think` only when the
-  model thinks. Its chars per token stay within [2, 4]. `limit_chars(system)` is
+  calibration with `SystemExit`. Calibration also reads the model's think levels again (**RVW-2**).
+- **MOD-16** `Model` takes its limits from the measured settings. It asks every call at its request's think
+  level (**RVW-3**), as the model takes it (**RVW-2**). Its chars per token stay within [2, 4]. `limit_chars(system)` is
   `tokens × PROMPT_BUDGET_SHARE × chars_per_token − len(system) − 40`.
 - **MOD-17** `Model.ask_once` adds `NO_TOOL_CALLS` to the system prompt: never call a tool or function, with
   no word on the reply's form, so a prompt that asks for JSON never meets a call for plain text. It fits the
@@ -644,8 +643,7 @@ What is said in the chats, kept so that a chat is only a view of it.
   when its `done_when` says so or its blocks have all ended.
 - **MOD-19** A failed request is tried again after what the failure calls for. Out of memory: a smaller prompt
   budget, up to `OOM_RETRIES` times. A stall: the model is reloaded, up to `STALL_RETRIES` times. A rejected
-  think level: `true`, then no think setting; a rejected `build_think` falls back to the calibrated think
-  setting (**MOD-15**), for the run. A reply error: one more try, then what came before it. A crash: the same
+  think level: `true`, then no think setting, for the run. A reply error: one more try, then what came before it. A crash: the same
   call again; after a second crash near a limit, that limit is lowered for the run; after `CRASH_RETRIES`
   crashes it raises. Anything else is raised.
 - **MOD-20** `Model.ask` tries a prompt that is too large again with every part relaxed. It raises
@@ -663,10 +661,10 @@ What is said in the chats, kept so that a chat is only a view of it.
   only a short line when it asks again, and its live line says in plain words what Tinker is working on (the
   step it is on, else "Working on it") and for how long ("Working on it… 1m 41s (101s)").
 - **MOD-25** A quick call is one model chat outside a run: the chat's replies, its warm-up, the commands it
-  proposes, the searches planned for a need (**KNW-25**), and a project's folder name. `Models.quick()` is `None` until a measured model is in
+  proposes, the searches planned for a need (**KNW-25**), a project's folder name, and a request's review (**RVW-1**). `Models.quick()` is `None` until a measured model is in
   use; otherwise it gives the model's name, its options (`num_ctx`, and `num_batch` when measured) and its think
-  setting (`false` for a thinking model, else none). `Models.quick_reply(messages, tokens)` sends one chat with
-  them, `keep_alive`, `num_predict` `tokens` and `QUICK_REPLY_TIMEOUT`, and gives the reply's content, stripped.
+  setting (`false` for a thinking model, else none). `Models.quick_reply(messages, tokens, think)` sends one chat with
+  them, at `think` as the model takes it (**RVW-2**) when it is given, `keep_alive`, `num_predict` `tokens` and `QUICK_REPLY_TIMEOUT`, and gives the reply's content, stripped.
   An Ollama failure is its `OllamaError`. Nothing else outside `Model`, the quick call, an unload and
   calibration calls `Ollama.chat`.
 - **MOD-26** `Models.choices()` gives the name of each model Ollama has that does not embed, in Ollama's order,
@@ -739,6 +737,29 @@ What is said in the chats, kept so that a chat is only a view of it.
   NAME` does (**MOD-28**); one calibrated with an older test reruns only the quality probe (**MOD-27**) with its
   kept think setting, `num_ctx` and write speed, under the title "Testing NAME again on the current test
   tasks", keeps its other settings and ends with `✅ NAME is ready` and its 🧠 line. Then it prints the recipe.
+
+## reviewing (RVW)
+
+Each request's one thinking level.
+
+- **RVW-1** `RequestReview.level(request)` gives a request's think level, `off`, `low`, `medium` or `high`,
+  and why. A word rule comes first, with no model call. A request about code (a path-like word, a backtick, or
+  `code`, `function`, `class`, `method`, `test`, `error`) that says `bug`, `why does`, `fails`, `design`,
+  `architecture` or `refactor` is `high`, and so is a long one: more than `LONG_REQUEST_WORDS` (60) words,
+  `MANY_PARTS` (3) or more parts (list lines or question marks), or `MANY_FILES` (3) or more path-like words.
+  A request of at most `SHORT_REQUEST_WORDS` (12) words that greets, asks a question, renames or formats is
+  `off`. Otherwise one quick call (**MOD-25**) at think `high` asks `REVIEW_PROMPT` for the level in a short
+  reply; a reply that names no level, or a failed call, is `medium`. The level and why go to the call log.
+- **RVW-2** A model's think values are Ollama's `/api/show` `thinking.values`. The home's `think_levels` keeps
+  them per model name and digest (from `/api/tags`), read when missing; calibration reads them again.
+  `ThinkLevels.taken(level, values)` gives `false` for `off`; the level itself when the model has it; else
+  `true` when it has that; else the nearest by rank (`off` < `low` < `medium` < `high` < `xhigh`), a tie
+  going up (`high` → `xhigh`). A model with no values gets no think setting.
+- **RVW-3** Each command that serves a request (`ask`, `teach`, `read`, `exercise`, `learn`, `research` and a
+  run) reviews it once, and every model call for it asks at that level: no call picks its own. Retries keep
+  theirs (**MOD-18**, **MOD-19**), and so does a build's concluding call without thinking. Each message the
+  person sends the chat is reviewed too, and the chat's reply to it is asked at its level. The other quick
+  calls keep theirs (**MOD-25**). Where a command shows that its model thinks, it shows the request's level.
 
 ## project (PRJ)
 
@@ -1169,7 +1190,7 @@ kept as principles (**PRI**); where a point below names them, it holds for princ
 - **KNW-14** `Learner.read_facts` keeps facts of a known phase, cut to `MAX_FACT_CHARS`, at most
   `FACTS_PER_CHUNK`. `add_facts` keeps a repeated fact once and adds the other page to its `also`.
   `relevant_chunks` gives the page's first chunk and then the ones best matching what is wanted (**KNW-12**),
-  in page order. Facts about unreleased versions are dropped. Reading a page's facts (`facts_in`) never thinks.
+  in page order. Facts about unreleased versions are dropped.
 - **KNW-15** `look_at_machine(commands)` runs each command in an empty temporary folder and keeps its first
   line and version. A failing command means the tool is not installed.
 - **KNW-16** `Researcher.read_frame` and `read_analysis` keep only well-formed questions, findings that cite
@@ -1181,8 +1202,7 @@ kept as principles (**PRI**); where a point below names them, it holds for princ
   sets each fact's confidence to disputed, corroborated or single.
 - **KNW-18** `Researcher.research(topic)` frames the topic as questions, reads pages for each, cross-checks and
   analyses the facts, searches the gaps and checks in one more round, and keeps the topic as research: its
-  questions, findings, contradictions, open gaps, and facts with their sources and confidence. Framing
-  (`RESEARCH_FRAME_THINK`) and analysing (`RESEARCH_ANALYSIS_THINK`) never think. The last round's analysis
+  questions, findings, contradictions, open gaps, and facts with their sources and confidence. The last round's analysis
   asks for no checks, since no round follows. A research induces no principles.
   An analysis is usable with findings or gaps: one with only gaps says the facts answer nothing and searches again.
   The first round searches the topic's name alone on `wikipedia` and `wikibooks` (its own article) before the
@@ -1328,7 +1348,7 @@ learning and run lessons are apart.
   can leave the search with nothing about the topic. It picks the results on topic:
   their title and snippet score above `learn_cutoff` (BM25) and hold at least `learn_coverage` of the topic's
   distinct words, the share rounded up (both words of a two-word topic, two of three), each address once, at most `learn_pages`, and fetches
-  them in one `Internet.fetch`. Only then does the plan call run (at the model's own think setting); for a
+  them in one `Internet.fetch`. Only then does the plan call run; for a
   language it names each tool's version command. A saved plan is reused with no search and no call. The version
   commands (each run once) give the version installed. That version's documentation is found by
   `DOCS_VERSION_SEARCH` (the topic's name, its version and `documentation`), its results picked as above, and
@@ -1337,7 +1357,7 @@ learning and run lessons are apart.
   news, release notes, changelogs and downloads; those serve only the slot of what this version changes. And
   each of a language's tools by its own `TOOL_DOCS_SEARCH` (its own version, at most
   `tool_docs_pages` pages), the tools' searches all at once; their pages join the pool, and are kept (**LRN-1**). Each slot's passages are induced into principles
-  (**PRI-4**, scoped to the topic) at `learn_think`, and the topic is kept only after that succeeds, under the language's key or the topic's slug, with its plan, machine, documentation versions,
+  (**PRI-4**, scoped to the topic), and the topic is kept only after that succeeds, under the language's key or the topic's slug, with its plan, machine, documentation versions,
   sources, cited passages, status (`complete` or `incomplete`), missing slots and request counts; then
   indexed. A summary prints the slots filled and missing, what is installed (each machine command and the
   version it found), the documentation, the pages by source, the principles each slot changed and the requests
@@ -1679,7 +1699,7 @@ Recall, the spec, the design and the contracts where files meet, and their revie
   gets a `README.md`), sets the toolchain and the entry, keeps the cycle's non-goals, constraints and data, and
   marks the cycle specified. When a user starts a file but the toolchain has no run command, the toolchain is
   asked for again. A cycle already specified is not planned again. A plan the person will confirm is a quick
-  draft (think `low`).
+  draft.
 - **PLN-10** `SpecWriter.amend` replaces the cycle's criteria with the amended spec, numbered from where they
   began, records the amendment and what changed (`+ ~ -`), and leaves the spec as it was when the model gives
   nothing usable. The cycle then plans its design and review again.
@@ -1719,7 +1739,7 @@ Setup, the tests, the code, and fixing until every test passes.
   design says. A file more than twice `MAX_FILE_LINES` long is asked for again, once. `wiring_problems` names
   each used file the code never mentions.
 - **BLD-5** `Verifier.make_it_build` runs setup and the toolchain's check, and while the project does not build
-  it asks `BuildFix` for a fix, at first without thinking, up to `BROKEN_BUILD_FIXES` times. `BuildFix` may
+  it asks `BuildFix` for a fix, up to `BROKEN_BUILD_FIXES` times. `BuildFix` may
   change only the existing files it showed, and never a test.
 - **BLD-6** `Verifier.run` gives True when every criterion passes. A failing criterion gets fixes until they
   stop making progress, then a review against the plan (`ladder`); a test file that does not load, or fixes

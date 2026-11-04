@@ -81,12 +81,13 @@ def assistant_turn(text):
 
 
 class Model:
-    def __init__(self, name, settings, keep_alive, log, max_growth=DEFAULT_CONFIG["max_growth"]):
+    def __init__(self, name, settings, keep_alive, log, max_growth=DEFAULT_CONFIG["max_growth"], level=None):
         self.name, self.settings = name, settings
         self.max_tokens, self.num_ctx = int(settings["max_prompt_tokens"]), int(settings["num_ctx"])
-        self.think = settings.get("think")
-        self.build_think = Config.get("build_think") if self.think not in (None, False) else None
-        self.is_building = False
+        self.level = level
+        self.think = (
+            settings.get("think") if level is None else ThinkLevels.taken(level, ThinkLevels.values(name))
+        )
         self.max_reply, self.fix_max = int(settings["max_reply_tokens"]), int(settings["fix_max_tokens"])
         self.keep_alive = keep_alive
         self.options = {"num_batch": int(settings["num_batch"])} if settings.get("num_batch") else {}
@@ -168,7 +169,7 @@ class Model:
                 Ollama.unload(loaded)
 
     def think_now(self):
-        return self.build_think if self.is_building and self.build_think else self.think
+        return self.think
 
     def user_message(self, system, parts, label, shrink):
         limit = self.limit_chars(system, int(self.max_tokens * OOM_RETRY_PROMPT_SHARE**shrink))
@@ -309,9 +310,7 @@ class Model:
 
     def lower_think(self, label, tries):
         rejected = tries.think
-        if self.is_building and rejected == self.build_think != self.think:
-            self.build_think, tries.think = None, self.think
-        elif rejected in (True, False):
+        if rejected in (True, False):
             self.think, self.think_rejected, tries.think = None, True, None
         else:
             self.think = tries.think = True
@@ -733,14 +732,14 @@ class Models:
         return QuickModel(name, options, False if settings.get("think") not in (None, False) else None)
 
     @staticmethod
-    def quick_reply(messages, tokens):
-        name, options, think = Models.quick()
+    def quick_reply(messages, tokens, think=None):
+        name, options, quick_think = Models.quick()
         data = Ollama.chat(
             name,
             messages,
             Config.keep_alive(Config.get("keep_alive")),
             dict(options, num_predict=tokens),
-            think=think,
+            think=quick_think if think is None else ThinkLevels.taken(think, ThinkLevels.values(name)),
             timeout=QUICK_REPLY_TIMEOUT,
         )
         return data["message"]["content"].strip()
@@ -826,6 +825,7 @@ class Calibrator:
     def run(self):
         say.title(f"Testing {self.name} on this machine (once per model, about a minute)", "📏")
         facts = Ollama.model_facts(self.name)
+        ThinkLevels.read(self.name)
         self.check_fit(facts)
         target = facts["context_length"] or UNKNOWN_CONTEXT_TOKENS
         think = self.first_chat(facts, target)
@@ -1408,6 +1408,60 @@ class Ollama:
                 return {"error": f"HTTP {exc.code}"}
         except urllib.error.URLError, OSError, ValueError:
             return None
+
+
+class ThinkLevels:
+    RANKS = ("off", "low", "medium", "high", "xhigh")
+
+    @staticmethod
+    def values(name):
+        kept = Home.store().get("think_levels", ThinkLevels.key(name))
+        return kept if isinstance(kept, list) else ThinkLevels.read(name)
+
+    @staticmethod
+    def read(name):
+        data = Ollama.get_json("/api/show", {"model": name}, timeout=30)
+        if data is None:
+            return []
+        values = (data.get("thinking") or {}).get("values") or []
+        Home.store().put("think_levels", ThinkLevels.key(name), values)
+        return values
+
+    @staticmethod
+    def key(name):
+        digest = next(
+            (
+                installed_model.get("digest")
+                for installed_model in Ollama.installed_models() or []
+                if installed_model.get("name") == name
+            ),
+            None,
+        )
+        return f"{name}@{digest or ''}"
+
+    @staticmethod
+    def taken(level, values):
+        if not values:
+            return None
+        if level == "off":
+            return False
+        if level in values:
+            return level
+        if True in values:
+            return True
+        return ThinkLevels.nearest(level, values)
+
+    @staticmethod
+    def nearest(level, values):
+        ranks = ThinkLevels.RANKS
+        ranked = [
+            ranks.index("off" if value is False else value)
+            for value in values
+            if value is False or value in ranks
+        ]
+        wanted = ranks.index(level)
+        best = min(ranked, key=lambda rank: (abs(rank - wanted), -rank), default=None)
+        return None if best is None else False if best == 0 else ranks[best]
 
 
 class Stream:

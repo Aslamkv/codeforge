@@ -400,7 +400,7 @@ class SlotLearner(Tracked):
     def slot_principles(self, slot, plan, passages):
         principles = Principles(self.embeddings)
         given = [{"text": passage.searched() or passage.text, "source": passage.id} for passage in passages]
-        deltas = Inducer(self.model, principles).induce(given, scope=self.slug(plan), think=self.think())
+        deltas = Inducer(self.model, principles).induce(given, scope=self.slug(plan))
         changed = principles.apply(deltas, "")
         with say.section():
             if changed:
@@ -420,10 +420,6 @@ class SlotLearner(Tracked):
             if changed
             else []
         )
-
-    @staticmethod
-    def think():
-        return Config.get("learn_think")
 
     def followed_up(self, plan, version, pool, selector, facts):
         found = []

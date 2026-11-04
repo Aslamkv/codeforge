@@ -618,12 +618,11 @@ def test_a_saved_plan_whose_documentation_gives_too_little_searches_the_web(tink
 
 
 @pytest.mark.spec("LRN-4")
-def test_induce_thinks_at_learn_think_and_the_plan_at_the_models_own(tinker_home):
-    Config.save(learn_think="medium")
+def test_induce_asks_at_the_requests_level(tinker_home):
     model = tool_model()
     learner(FakeWeb(FOUND, ALL_PAGES), model).learn("Widgetlib")
     assert ("Plan learning", None) in model.thinking
-    assert all(think == "medium" for label, think in model.thinking if label != "Plan learning")
+    assert all(think is None for label, think in model.thinking)
 
 
 GUIDE = "https://widgetlib.dev/guide"

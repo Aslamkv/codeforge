@@ -123,6 +123,20 @@ def no_sleep(monkeypatch):
 class FakeOllama:
     def __init__(self):
         self.queue, self.calls, self.unloaded = [], [], []
+        self.shows, self.digests, self.shown = {}, {}, []
+
+    def show(self, name, answer, digest="d1"):
+        self.shows[name], self.digests[name] = answer, digest
+        return self
+
+    def get_json(self, path, payload=None, timeout=10, errors=False):
+        if path == "/api/show":
+            name = (payload or {}).get("model")
+            self.shown.append(name)
+            return self.shows.get(name)
+        if path == "/api/tags" and self.digests:
+            return {"models": [{"name": name, "digest": digest} for name, digest in self.digests.items()]}
+        return None
 
     def reply(self, answer, when=None, times=1):
         for _ in range(times):
@@ -187,6 +201,7 @@ class FakeOllama:
 def fake_ollama(monkeypatch):
     fake = FakeOllama()
     monkeypatch.setattr(Ollama, "chat", staticmethod(fake.chat))
+    monkeypatch.setattr(Ollama, "get_json", staticmethod(fake.get_json))
     monkeypatch.setattr(Ollama, "loaded_models", staticmethod(lambda: []))
     return fake
 
@@ -198,8 +213,8 @@ def model_log(tmp_path):
 
 @pytest.fixture
 def make_model(model_log, fake_ollama):
-    def make(**overrides):
-        return Model(MODEL, dict(MEASURED, **overrides), 0, model_log)
+    def make(level=None, **overrides):
+        return Model(MODEL, dict(MEASURED, **overrides), 0, model_log, level=level)
 
     return make
 
@@ -317,7 +332,7 @@ class FakeSearch:
 def quick_model_replying(monkeypatch, reply):
     asked = []
 
-    def replied(messages, tokens):
+    def replied(messages, tokens, think=None):
         asked.append(messages)
         return reply(messages)
 

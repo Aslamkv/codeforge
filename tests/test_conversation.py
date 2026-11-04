@@ -46,7 +46,7 @@ from tinkerkit.conversation import (
 from tinkerkit.jobs import began_at
 from tinkerkit.ledger import DONE_NOTE_KEPT_SECONDS, Ledger
 from tinkerkit.messages import DIMMED, HEADING, Text, styled
-from tinkerkit.model import Models, Ollama
+from tinkerkit.model import Models, Ollama, ThinkLevels
 from tinkerkit.project import Runs, Tracker
 from tinkerkit.settings import Config, Home
 
@@ -1536,9 +1536,9 @@ def test_a_reporter_without_a_tracker_ends_with_its_title_and_last_line(monkeypa
 def test_an_unreadable_json_answer_is_taken_as_empty(measured_model, fake_ollama):
     shell, channel = Shell(Talk("cmds"), Path.cwd(), Questions()), Recorder()
     for unreadable in ("{bad}", "[1]", "none"):
-        fake_ollama.reply(unreadable)
+        fake_ollama.reply("low: a plain request").reply(unreadable)
         assert "describe it another way" in shell.propose(channel, Message("1", "x"), "", 300)
-    fake_ollama.reply('Sure: {"command": "ls", "does": "lists", "flags": [}')
+    fake_ollama.reply("low: a plain request").reply('Sure: {"command": "ls", "does": "lists", "flags": [}')
     assert "```\nls\n```" in shell.propose(channel, Message("1", "x"), "", 300)
 
 
@@ -1547,7 +1547,7 @@ def test_talk_reply(measured_model, fake_ollama, monkeypatch):
     monkeypatch.setattr(conversation, "CHAT_CONTEXT_MESSAGES", 4)
     talk, channel = Talk("task; status"), Recorder()
     for number in range(3):
-        fake_ollama.reply(f"answer {number}")
+        fake_ollama.reply("low: a plain request").reply(f"answer {number}")
         assert talk.reply(channel, Message("1", f"question {number}")) == f"answer {number}"
     messages = fake_ollama.calls[-1]["messages"]
     assert messages[0]["role"] == "system" and "task; status" in messages[0]["content"]
@@ -1557,10 +1557,10 @@ def test_talk_reply(measured_model, fake_ollama, monkeypatch):
         "answer 1",
         "question 2",
     ]
-    assert fake_ollama.calls[-1]["think"] is False and fake_ollama.calls[-1]["options"]["num_predict"] == 1024
+    assert fake_ollama.calls[-1]["think"] is None and fake_ollama.calls[-1]["options"]["num_predict"] == 1024
     from tinkerkit.model import OllamaError
 
-    fake_ollama.reply(OllamaError("runner failed"))
+    fake_ollama.reply("low: a plain request").reply(OllamaError("runner failed"))
     assert talk.reply(channel, Message("1", "x")).startswith("⚠️ **The model did not answer:**")
 
 
@@ -1582,7 +1582,7 @@ def test_a_chat_reply_that_is_a_command_line_is_handled_or_offered(desk, monkeyp
     monkeypatch.setattr(Models, "quick_reply", staticmethod(lambda *asked: replies.pop(0)))
 
     def chat(reply, shown):
-        replies.append(reply)
+        replies.extend(["low: a plain request", reply])
         say(desk, channel, "do it for me")
         wait_until(lambda: shown("".join(channel.texts()[-1:])))
 
@@ -1605,18 +1605,22 @@ def test_a_chat_reply_that_is_a_command_line_is_handled_or_offered(desk, monkeyp
 @pytest.mark.spec("CNV-22")
 def test_shell_proposes_one_command(measured_model, fake_ollama):
     shell, channel = Shell(Talk("cmds"), Path.cwd(), Questions()), Recorder()
+    fake_ollama.reply("low: a plain request")
     fake_ollama.reply('{"command": "rm -rf build", "does": "deletes the build folder"}')
     shown = shell.propose(channel, Message("1", "clean up"), "", 300)
     assert "```\nrm -rf build\n```" in shown and "It changes or deletes things" in shown
     proposed = shell.take(channel, "1")
     assert (
-        proposed == {"line": "rm -rf build", "asked": "clean up", "shown": None}
+        proposed == {"line": "rm -rf build", "asked": "clean up", "level": "low", "shown": None}
         and shell.take(channel, "1") is None
     )
+    fake_ollama.reply("low: a plain request")
     fake_ollama.reply('{"command": "ls\\nrm x", "does": "two"}')
     assert shell.propose(channel, Message("1", "x"), "", 300).startswith("🤷 **No command found:**")
+    fake_ollama.reply("low: a plain request")
     fake_ollama.reply("{}")
     assert "describe it another way" in shell.propose(channel, Message("1", "x"), "", 300)
+    fake_ollama.reply("low: a plain request")
     fake_ollama.reply('{"command": "df -h", "does": "shows the free space"}')
     assert "It changes" not in shell.propose(channel, Message("1", "disk"), "", 300)
 
@@ -1625,7 +1629,9 @@ def test_shell_proposes_one_command(measured_model, fake_ollama):
 def test_shell_runs_the_confirmed_command(tmp_path):
     shell, channel = Shell(Talk("cmds"), tmp_path, Questions()), Recorder()
     shell.shell = "/bin/sh"
-    shell.run(channel, "1", {"line": "pwd; echo oops >&2; exit 3", "asked": "where", "shown": None})
+    shell.run(
+        channel, "1", {"line": "pwd; echo oops >&2; exit 3", "asked": "where", "level": "low", "shown": None}
+    )
     final = channel.texts()[-1]
     assert (
         final.startswith("❌ `pwd; echo oops >&2; exit 3` · _exit 3_")
@@ -1635,6 +1641,14 @@ def test_shell_runs_the_confirmed_command(tmp_path):
     assert "```output" in final
     shell.drop(channel, "1", {"line": "ls", "shown": None})
     assert "🚫 _Not run:_ `ls`" in channel.texts()[-1]
+
+
+@pytest.mark.spec("RVW-3")
+def test_a_chat_reply_asks_at_its_messages_level(measured_model, fake_ollama, monkeypatch):
+    monkeypatch.setattr(ThinkLevels, "values", staticmethod(lambda name: ["low", "medium", "high"]))
+    fake_ollama.reply("Look at the loop.")
+    text = Talk("cmds").reply(Recorder(), Message("1", "why does this function fail with a bug"))
+    assert text == "Look at the loop." and [call["think"] for call in fake_ollama.calls] == ["high"]
 
 
 def keep_job(home_store, number, pid, progress, **job):
@@ -2508,7 +2522,7 @@ def test_one_shot_command_runs_nothing_without_a_yes(
     monkeypatch.setattr(conversation, "commands_brief", lambda: "cmds")
     monkeypatch.setattr(sys, "stdin", io.StringIO(""))
     monkeypatch.chdir(tmp_path)
-    fake_ollama.reply('{"command": "touch made.txt", "does": "makes a file"}')
+    fake_ollama.reply("low: a plain request").reply('{"command": "touch made.txt", "does": "makes a file"}')
     conversation.one_shot("command", "make a file")
     out = capsys.readouterr().out
     assert "touch made.txt" in out and "Not run:" in out and not (tmp_path / "made.txt").exists()
@@ -2631,7 +2645,7 @@ def test_a_command_line_run_once_confirmed_pauses_the_job_while_its_output_is_re
     )
     channel = Recorder()
     Shell(talk, tmp_path, Questions()).run(
-        channel, "1", {"line": "echo hi", "asked": "say hi", "shown": None}
+        channel, "1", {"line": "echo hi", "asked": "say hi", "level": "low", "shown": None}
     )
     assert order == ["paused", "read", "goes on"] and "it says hi" in channel.texts()[-1]
 

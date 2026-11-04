@@ -25,6 +25,7 @@ LAYERS = (
     "workspace",
     "quality",
     "model",
+    "reviewing",
     "project",
     "fetcher",
     "search",

@@ -19,10 +19,8 @@ from .settings import (
     MAX_FACT_CHARS,
     MAX_PLANNED_SEARCHES,
     REPEAT_CLAIM_SIMILARITY,
-    RESEARCH_ANALYSIS_THINK,
     RESEARCH_EXCERPT_CHARS,
     RESEARCH_FACTS_CHECKED,
-    RESEARCH_FRAME_THINK,
     RESEARCH_GAPS,
     RESEARCH_PAGES_PER_ROUND,
     RESEARCH_QUESTIONS,
@@ -402,7 +400,7 @@ class Learner(Tracked):
     def start(self):
         self.notes, self.model_failure, self.kept_earlier_topic = [], "", False
 
-    def saved_or_asked(self, known, read, system, parts, label, what, saved_as, think):
+    def saved_or_asked(self, known, read, system, parts, label, what, saved_as):
         if known:
             try:
                 plan = read(known)
@@ -411,7 +409,7 @@ class Learner(Tracked):
             except ValueError as exc:
                 say.warn(f"The plan saved last time cannot be used ({exc}), so making a new one")
         answer = self.model.ask_until_usable(
-            system, parts, label, lambda reply: read(reply.json()), attempts=2, think=think
+            system, parts, label, lambda reply: read(reply.json()), attempts=2
         )
         plan = answer.needed(
             f"{self.model.name} gave no usable plan for {what}; see the log of its replies "
@@ -565,7 +563,6 @@ class Learner(Tracked):
                 f"Facts, page {number} part {part}",
                 self.read_facts,
                 attempts=2,
-                think=False,
             )
         except OllamaError as exc:
             self.model_failure = first_line(str(exc), 200)
@@ -748,7 +745,6 @@ class Researcher:
             "Frame the research",
             f"researching {topic}",
             Library.slug(topic),
-            think=RESEARCH_FRAME_THINK,
         )
         if not saved:
             say.found(f"{frame['name']}: {frame['summary']}")
@@ -928,7 +924,6 @@ class Researcher:
                 "Analyse the findings",
                 lambda reply: self.read_analysis(reply.json(), len(facts), len(frame["questions"])),
                 attempts=2,
-                think=RESEARCH_ANALYSIS_THINK,
             )
         except OllamaError as exc:
             answer = Answer(None, why=str(exc))

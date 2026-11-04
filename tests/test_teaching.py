@@ -751,6 +751,7 @@ def test_ask_and_teach_report_through_a_tracker_and_run_as_jobs(
     )
     fake_ollama.reply(first_reply("Black formats it.", uses=[1]), when="ask")
     Commands(Cli.parse(["ask", "what", "formats", "python"])).run()
+    fake_ollama.reply("medium")
     fake_ollama.reply(plan_reply(), when="what to check")
     fake_ollama.reply(verdict_reply(), when="weigh the evidence")
     Commands(Cli.parse(["teach", "ruff", "alone", "is", "enough,", "I", "prefer", "no", "mypy"])).run()

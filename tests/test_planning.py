@@ -330,7 +330,7 @@ def test_amend_replaces_the_cycles_criteria(planner, fake_ollama):
         "~ C1 calc.add(2, 3) is 5 and calc.add(-1, 1) is 0",
         "+ C3 calc.sub(5, 3) is 2",
     ]
-    assert fake_ollama.calls[-1]["think"] is False
+    assert fake_ollama.calls[-1]["think"] == "high"
     assert (cycle["phase"], cycle["awaiting"], cycle["contracts_done"]) == ("design", False, [])
 
 
@@ -627,11 +627,11 @@ def test_recall_goes_on_when_its_call_fails(make_project, make_session, fake_oll
 
 
 @pytest.mark.spec("PLN-9")
-def test_a_plan_to_confirm_is_a_quick_draft(planner, fake_ollama):
+def test_a_plan_to_confirm_asks_at_the_requests_level(planner, fake_ollama):
     session, project, cycle = planner
     cycle["confirm"] = True
     write_spec(session, cycle, fake_ollama)
-    assert fake_ollama.calls[0]["think"] == "low"
+    assert fake_ollama.calls[0]["think"] == "high"
 
 
 def python_with_conditional_rules():

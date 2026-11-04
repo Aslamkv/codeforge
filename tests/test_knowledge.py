@@ -929,9 +929,9 @@ def test_research_a_domain(make_model, fake_ollama, tinker_home):
         '"checks"' in first_analysis and '"checks"' not in last_analysis and "- checks:" not in last_analysis
     )
     thinks = {step_of(call["label"]): call["think"] for call in fake_ollama.calls}
-    assert thinks["Frame the research"] is False
-    assert thinks["Facts"] is False
-    assert thinks["Analyse the findings"] is False
+    assert thinks["Frame the research"] == "high"
+    assert thinks["Facts"] == "high"
+    assert thinks["Analyse the findings"] == "high"
     assert Library.read("food-bank-inventory")["kind"] == "research"
     assert len(internet.fetches) == 2 and internet.fetches[0] == list(pages)
 

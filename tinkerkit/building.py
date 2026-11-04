@@ -32,7 +32,6 @@ SetupOutcome = namedtuple("SetupOutcome", "stage output")
 
 class TestToolSetup(Phase, NotAPytestClass):
     TITLE = "Setup (the test tool, before any test is written)"
-    BUILDS = True
 
     def run(self, cycle):
         Designer(self.session).ensure_toolchain()
@@ -49,7 +48,6 @@ class TestToolSetup(Phase, NotAPytestClass):
 
 class TestWriter(Phase, NotAPytestClass):
     TITLE = "Spec tests (one for every spec point, before any code)"
-    BUILDS = True
 
     def run(self, cycle, only=None):
         steps = [
@@ -227,7 +225,6 @@ class TestWriter(Phase, NotAPytestClass):
 
 class CodeWriter(Phase):
     TITLE = "Code (just enough to pass the tests)"
-    BUILDS = True
 
     def run(self, cycle):
         self.write_all(cycle)
@@ -286,7 +283,6 @@ class CodeWriter(Phase):
                 *self.session.knowledge_parts("config", "toolchain"),
             ],
             f"Write {len(paths)} config files",
-            think=False,
             done_when=Reply.wrote(paths),
         )
         change = self.workspace.apply(
@@ -520,7 +516,6 @@ class CodeWriter(Phase):
 
 class Verifier(Phase):
     TITLE = "Verify (until every test passes)"
-    BUILDS = True
     RANK = {"missing": -1, "build": 0, "fails": 1, "passes": 2}
 
     RESTORE_POINT = "verify"
@@ -912,16 +907,10 @@ class FixAttempt(Worker):
 
     def ask(self, view):
         key, tried = f"overthought_{self.approach}", f"tried_{self.approach}"
-        first, concluding = not self.step.get(tried), bool(self.step.pop(key, None))
+        concluding = bool(self.step.pop(key, None))
         self.step[tried] = self.step.get(tried, 0) + 1
-        think = False if first or concluding else None
-        label = self.label + (
-            " (no thinking: concluding the last one's thought)"
-            if concluding
-            else " (no thinking first)"
-            if first
-            else ""
-        )
+        think = False if concluding else None
+        label = self.label + (" (no thinking: concluding the last one's thought)" if concluding else "")
         reply = self.session.ask(
             self.system(),
             view,
@@ -1057,7 +1046,7 @@ class BuildFix(Worker):
                 label,
                 max_reply=self.session.model.fix_max,
                 unthinking_retry=False,
-                think=False if self.concluding or not self.tried else None,
+                think=False if self.concluding else None,
             )
         except PromptTooLarge as exc:
             say.skip(f"Make it build: the prompt does not fit ({exc})")
