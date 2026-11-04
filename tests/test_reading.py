@@ -519,6 +519,7 @@ def test_tinker_read_stores_then_reads_as_its_own_job(
     )
     monkeypatch.chdir(tmp_path)
     craft(tmp_path)
+    fake_ollama.reply("medium")
     fake_ollama.reply(survey_reply(software=False, **{"2": "core"}), when="reading plan")
     fake_ollama.reply(added("Name each function after what it does"), times=4)
     Commands(Cli.parse(["read", "craft.md"])).run()
