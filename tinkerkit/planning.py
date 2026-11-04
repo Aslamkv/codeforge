@@ -241,12 +241,9 @@ class SpecWriter(Phase):
         if cycle.get("specified"):
             return
         system, parts = self.spec_prompt(cycle)
-        think = self.thinking("low") if cycle.get("confirm") else None
         self.take(
             cycle,
-            self.session.ask_until_usable(
-                system, parts, "Spec", lambda reply: self.read_spec(reply, cycle), think=think
-            ),
+            self.session.ask_until_usable(system, parts, "Spec", lambda reply: self.read_spec(reply, cycle)),
         )
 
     def spec_prompt(self, cycle):
@@ -298,12 +295,6 @@ class SpecWriter(Phase):
             Part("Project files", self.project.outline()),
             *self.session.knowledge_parts("spec", "design"),
         ]
-
-    def thinking(self, level):
-        think = self.session.model.think
-        if think in (None, False):
-            return think
-        return False if level == "none" else level if isinstance(think, str) else think
 
     def read_spec(self, reply, cycle):
         data = reply.spec_json()
@@ -628,11 +619,7 @@ class SpecWriter(Phase):
         ]
         try:
             plan = self.session.ask_until_usable(
-                system,
-                parts,
-                "Amend the spec",
-                lambda reply: self.read_spec(reply, cycle),
-                think=self.thinking("none"),
+                system, parts, "Amend the spec", lambda reply: self.read_spec(reply, cycle)
             )
         except BaseException:
             self.restore(cycle, saved)

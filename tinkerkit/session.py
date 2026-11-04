@@ -237,7 +237,6 @@ class Worker:
 
 class Phase(Worker):
     TITLE = ""
-    BUILDS = False
 
     def run(self, cycle):
         raise NotImplementedError

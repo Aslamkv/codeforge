@@ -600,7 +600,7 @@ def recording_phases(monkeypatch, stop_at=None):
     ran = []
 
     class Recorded(Phase):
-        TITLE, BUILDS = "", False
+        TITLE = ""
 
         def run(self, cycle):
             ran.append(cycle["phase"])
@@ -864,7 +864,7 @@ def test_a_task_is_built_end_to_end(run_ready, fake_ollama, home_store, monkeypa
         "Spec (attempt 1)",
         "Tests test_calc.py (3)",
         "Write calc.py",
-        "Fix the code C2 (no thinking first)",
+        "Fix the code C2",
         "README (attempt 1)",
         "Lessons (attempt 1)",
     ]
