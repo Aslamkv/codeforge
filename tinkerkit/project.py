@@ -663,7 +663,7 @@ class Tracker:
         "read": ("🌐 Searching the web and reading the pages", "🌐 Pages read"),
         "write": ("✍️ Writing the answer from the pages", "✍️ Answer written"),
     }
-    STARTING = "🚀 Starting: the model loads"
+    STARTING = "🚀 Getting Tinker ready"
     QUIET_PUBLISH_SECONDS = 1.0
 
     def __init__(self, title, before=0.0, started=None):

@@ -110,3 +110,29 @@ def test_a_failed_reviewer_call_is_medium(measured_model, fake_ollama, tinker_ho
 def test_the_rule_level_goes_to_the_call_log(fake_ollama, model_log):
     level, why = RequestReview(model_log).level("hi")
     assert logged(model_log) == [{"review": level, "why": why}]
+
+
+REVIEW_PHASE = "🧭 Working out how much thought your request needs"
+
+
+@pytest.mark.spec("PRJ-18")
+def test_the_review_phase_shows_while_the_model_reviews(measured_model, fake_ollama, tinker_home, model_log):
+    phases = []
+    fake_ollama.reply("low: a short story")
+    RequestReview(model_log, phases.append).level("Write a story about a dragon who learns to bake bread")
+    assert phases == [REVIEW_PHASE]
+
+
+@pytest.mark.spec("PRJ-18")
+def test_the_review_phase_never_shows_when_a_rule_decides(fake_ollama, model_log):
+    phases = []
+    RequestReview(model_log, phases.append).level("hi")
+    assert phases == []
+
+
+@pytest.mark.spec("PRJ-18")
+def test_the_review_phase_never_shows_without_a_model(measured_model, fake_ollama, tinker_home, model_log):
+    phases = []
+    Config.save(**{"model": None})
+    RequestReview(model_log, phases.append).level("Write a story about a dragon who learns to bake bread")
+    assert phases == [] and fake_ollama.calls == []

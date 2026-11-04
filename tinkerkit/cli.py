@@ -734,18 +734,17 @@ class Commands:
         if definition is not None or TaughtCommands.alias(topic):
             TaughtCommands.teach(topic, definition)
             return
+        self.follow(f"Learning {topic}")
         model, embeddings, internet = self.learning_tools("tinker learn", topic)
         self.reported(
-            f"Learning {topic}",
             model,
             lambda tracker: self.learned(topic, SlotLearner(model, internet, embeddings, tracker)),
             blocked=lambda stopped: Commands.blocked(f"Nothing learned about {topic}", stopped),
         )
 
-    def followed(self, title):
-        tracker = Tracker(title, started=self.started_at.timestamp())
-        say.follow(tracker.heard)
-        return tracker
+    def follow(self, title):
+        self.tracker = Tracker(title, started=self.started_at.timestamp())
+        say.follow(self.tracker.heard)
 
     def learned(self, topic, learner):
         entry = learner.learn(topic, deep=True)
@@ -769,9 +768,9 @@ class Commands:
 
     def research(self):
         topic = self.args.research
+        self.follow(f"Researching {topic}")
         model, embeddings, internet = self.learning_tools("tinker research", topic)
         self.reported(
-            f"Researching {topic}",
             model,
             lambda tracker: Commands.researched(
                 topic, Commands.researcher(model, internet, embeddings, tracker).research(topic)
@@ -797,11 +796,10 @@ class Commands:
         researched = ending("done", f"Researched {entry['name']}", details, [("See it", "tinker memory")])
         return {**researched, "text": Researcher.answer(entry)}
 
-    @staticmethod
-    def learning_tools(option, request):
+    def learning_tools(self, option, request):
         name, settings = Commands.checked_model()
         embeddings = Embeddings.required(option)
-        return LearningTools(Commands.model_in_use(name, settings, request), embeddings, Internet())
+        return LearningTools(self.model_in_use(name, settings, request), embeddings, Internet())
 
     @staticmethod
     def checked_model():
@@ -810,15 +808,14 @@ class Commands:
         Config.check()
         return SelectedModel(name, settings)
 
-    @staticmethod
-    def model_in_use(name, settings, request):
+    def model_in_use(self, name, settings, request):
         log = calls_log()
         say.keep_log(log)
-        return Commands.configured_model(name, settings, log, request)
+        return Commands.configured_model(name, settings, log, request, self.tracker.phase)
 
     @staticmethod
-    def configured_model(name, settings, log, request):
-        level, _ = RequestReview(log).level(request)
+    def configured_model(name, settings, log, request, phase=lambda doing: None):
+        level, _ = RequestReview(log, phase).level(request)
         return Model(
             name,
             settings,
@@ -830,21 +827,21 @@ class Commands:
 
     def ask(self):
         question = self.args.ask
-        model = Commands.model_in_use(*Commands.checked_model(), question)
+        self.follow(f"Asking: {first_line(question, 60)}")
+        model = self.model_in_use(*Commands.checked_model(), question)
         memory = Memory()
         self.reported(
-            f"Asking: {first_line(question, 60)}",
             model,
             lambda tracker: Asker(model, memory, tracker).answer(question),
         )
 
     def teach(self):
         teaching = self.args.teach
+        self.follow(f"Teaching: {first_line(teaching, 60)}")
         name, settings = Commands.checked_model()
         internet = Internet()
-        model, memory = Commands.model_in_use(name, settings, teaching), Memory()
+        model, memory = self.model_in_use(name, settings, teaching), Memory()
         self.reported(
-            f"Teaching: {first_line(teaching, 60)}",
             model,
             lambda tracker: Teacher(model, internet, memory, tracker).teach(teaching),
         )
@@ -862,9 +859,9 @@ class Commands:
                 return
             Jobs.retarget(["read", f"#{number}"])
         title = reading.known_reading(number)["title"]
-        model = Commands.model_in_use(*Commands.checked_model(), f"{title} {focus}")
+        self.follow(f"Reading #{number} {first_line(title, 50)}")
+        model = self.model_in_use(*Commands.checked_model(), f"{title} {focus}")
         self.reported(
-            f"Reading #{number} {first_line(title, 50)}",
             model,
             lambda tracker: Reader(model, tracker).read(number, focus),
         )
@@ -873,21 +870,20 @@ class Commands:
         what = self.args.exercise
         if what.lower() == "status":
             return exercising.show()
-        model = Commands.model_in_use(*Commands.checked_model(), what)
+        self.follow(f"Exercising {what}")
+        model = self.model_in_use(*Commands.checked_model(), what)
         self.reported(
-            f"Exercising {what}",
             model,
             lambda tracker: exercising.Exercise(model, tracker).run(what),
             chats=True,
         )
 
-    def reported(self, title, model, work, chats=False, blocked=None):
-        tracker = self.followed(title)
+    def reported(self, model, work, chats=False, blocked=None):
         if chats:
-            conversation.attach(tracker)
-        ended = ending("stopped", f"{title} did not finish")
+            conversation.attach(self.tracker)
+        ended = ending("stopped", f"{self.tracker.state['title']} did not finish")
         try:
-            ended = work(tracker)
+            ended = work(self.tracker)
         except SystemExit as stopped:
             ended = blocked(stopped) if blocked else ending("blocked", first_line(str(stopped), 200))
             raise
@@ -895,7 +891,7 @@ class Commands:
             Models.remember(model)
             took = time.time() - self.started_at.timestamp()
             say.title(f"Time taken: {human_duration(took)}", "⏱️")
-            tracker.end(ended, took)
+            self.tracker.end(ended, took)
 
     @staticmethod
     def print_learned(topic, entry):

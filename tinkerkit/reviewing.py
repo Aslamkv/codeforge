@@ -34,8 +34,8 @@ class RequestReview:
         }
     )
 
-    def __init__(self, log):
-        self.log = log
+    def __init__(self, log, phase=lambda doing: None):
+        self.log, self.phase = log, phase
 
     def level(self, request):
         level, why = self.ruled(RequestWords(request)) or self.reviewed(request)
@@ -58,6 +58,7 @@ class RequestReview:
     def reviewed(self, request):
         if not Models.quick():
             return "medium", "no model to review the request"
+        self.phase("🧭 Working out how much thought your request needs")
         try:
             reply = Models.quick_reply(
                 [
