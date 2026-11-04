@@ -1483,7 +1483,7 @@ def test_a_failed_or_empty_search_plan_is_the_filled_need_to_every_engine(monkey
 @pytest.mark.spec("KNW-25")
 def test_with_no_quick_model_the_plan_is_the_need_with_no_call(monkeypatch):
     monkeypatch.setattr(Models, "quick", staticmethod(lambda: None))
-    monkeypatch.setattr(Models, "quick_reply", staticmethod(lambda *asked: pytest.fail("no call")))
+    monkeypatch.setattr(Models, "quick_reply", staticmethod(lambda *asked, **options: pytest.fail("no call")))
     assert SearchPlanner().plan("python docs", 2) == [{"query": "python docs", "engines": [], "count": 2}]
 
 

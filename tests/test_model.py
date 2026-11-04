@@ -104,6 +104,15 @@ def test_a_quick_reply_thinks_at_a_given_level_as_the_model_takes_it(
     assert fake_ollama.calls[-1]["think"] is False
 
 
+@pytest.mark.spec("MOD-25")
+def test_a_quick_reply_asks_at_a_given_temperature(measured_model, fake_ollama, tinker_home):
+    fake_ollama.reply("a", times=2)
+    Models.quick_reply([{"role": "user", "content": "hi"}], 7, temperature=0)
+    assert fake_ollama.calls[-1]["options"] == {"num_ctx": 32768, "num_predict": 7, "temperature": 0}
+    Models.quick_reply([{"role": "user", "content": "hi"}], 7)
+    assert "temperature" not in fake_ollama.calls[-1]["options"]
+
+
 @pytest.mark.spec("MOD-3")
 def test_installed(monkeypatch):
     monkeypatch.setattr(Ollama, "installed_models", staticmethod(lambda: None))
@@ -1264,6 +1273,9 @@ def test_the_first_chat_asks_again_at_4096_when_the_target_does_not_run(fake_oll
     [
         ("off", [False, True], False),
         ("high", [False, True], True),
+        ("medium", [False, True], True),
+        ("low", [False, True], False),
+        ("low", [True], True),
         ("medium", [False, "low", "medium", "xhigh"], "medium"),
         ("high", [False, "low", "medium", "xhigh"], "xhigh"),
         ("high", [False, "low", "medium"], "medium"),

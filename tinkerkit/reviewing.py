@@ -66,6 +66,7 @@ class RequestReview:
                 ],
                 REVIEW_REPLY_TOKENS,
                 "off",
+                temperature=0,
             )
         except OllamaError as error:
             return "medium", f"the review failed: {error}"

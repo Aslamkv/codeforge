@@ -732,17 +732,24 @@ class Models:
         return QuickModel(name, options, False if settings.get("think") not in (None, False) else None)
 
     @staticmethod
-    def quick_reply(messages, tokens, think=None):
+    def quick_reply(messages, tokens, think=None, temperature=None):
         name, options, quick_think = Models.quick()
         data = Ollama.chat(
             name,
             messages,
             Config.keep_alive(Config.get("keep_alive")),
-            dict(options, num_predict=tokens),
+            Models.quick_options(options, tokens, temperature),
             think=quick_think if think is None else ThinkLevels.taken(think, ThinkLevels.values(name)),
             timeout=QUICK_REPLY_TIMEOUT,
         )
         return data["message"]["content"].strip()
+
+    @staticmethod
+    def quick_options(options, tokens, temperature):
+        chosen = dict(options, num_predict=tokens)
+        if temperature is not None:
+            chosen["temperature"] = temperature
+        return chosen
 
     @staticmethod
     def unusable_measurements(settings):
@@ -1448,8 +1455,12 @@ class ThinkLevels:
         if level in values:
             return level
         if True in values:
-            return True
+            return ThinkLevels.switched(level, values)
         return ThinkLevels.nearest(level, values)
+
+    @staticmethod
+    def switched(level, values):
+        return not (level == "low" and False in values)
 
     @staticmethod
     def nearest(level, values):

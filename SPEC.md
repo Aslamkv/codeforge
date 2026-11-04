@@ -663,8 +663,8 @@ What is said in the chats, kept so that a chat is only a view of it.
 - **MOD-25** A quick call is one model chat outside a run: the chat's replies, its warm-up, the commands it
   proposes, the searches planned for a need (**KNW-25**), a project's folder name, and a request's review (**RVW-1**). `Models.quick()` is `None` until a measured model is in
   use; otherwise it gives the model's name, its options (`num_ctx`, and `num_batch` when measured) and its think
-  setting (`false` for a thinking model, else none). `Models.quick_reply(messages, tokens, think)` sends one chat with
-  them, at `think` as the model takes it (**RVW-2**) when it is given, `keep_alive`, `num_predict` `tokens` and `QUICK_REPLY_TIMEOUT`, and gives the reply's content, stripped.
+  setting (`false` for a thinking model, else none). `Models.quick_reply(messages, tokens, think, temperature)` sends one chat with
+  them, at `think` as the model takes it (**RVW-2**) and at `temperature` when each is given, `keep_alive`, `num_predict` `tokens` and `QUICK_REPLY_TIMEOUT`, and gives the reply's content, stripped.
   An Ollama failure is its `OllamaError`. Nothing else outside `Model`, the quick call, an unload and
   calibration calls `Ollama.chat`.
 - **MOD-26** `Models.choices()` gives the name of each model Ollama has that does not embed, in Ollama's order,
@@ -748,12 +748,13 @@ Each request's one thinking level.
   `architecture` or `refactor` is `high`, and so is a long one: more than `LONG_REQUEST_WORDS` (60) words,
   `MANY_PARTS` (3) or more parts (list lines or question marks), or `MANY_FILES` (3) or more path-like words.
   A request of at most `SHORT_REQUEST_WORDS` (12) words that greets, asks a question, lists, names, defines,
-  renames or formats is `off`. Otherwise one quick call (**MOD-25**) without thinking (think `off`) asks `REVIEW_PROMPT` for the
+  renames or formats is `off`. Otherwise one quick call (**MOD-25**) without thinking (think `off`) at temperature 0, so the same request gets the same answer, asks `REVIEW_PROMPT` for the
   level in a short reply, recalling well-known things being `off`; a reply that names no level, or a failed call, is `medium`. The level and why go to the call log.
 - **RVW-2** A model's think values are Ollama's `/api/show` `thinking.values`. The home's `think_levels` keeps
   them per model name and digest (from `/api/tags`), read when missing; calibration reads them again.
-  `ThinkLevels.taken(level, values)` gives `false` for `off`; the level itself when the model has it; else
-  `true` when it has that; else the nearest by rank (`off` < `low` < `medium` < `high` < `xhigh`), a tie
+  `ThinkLevels.taken(level, values)` gives `false` for `off`; the level itself when the model has it; else,
+  when it has `true`, `false` for `low` if it has `false` too (a switch alone thinks too long for `low`) and `true`
+  otherwise; else the nearest by rank (`off` < `low` < `medium` < `high` < `xhigh`), a tie
   going up (`high` → `xhigh`). A model with no values gets no think setting.
 - **RVW-3** Each command that serves a request (`ask`, `teach`, `read`, `exercise`, `learn`, `research` and a
   run) reviews it once, and every model call for it asks at that level: no call picks its own. Retries keep
