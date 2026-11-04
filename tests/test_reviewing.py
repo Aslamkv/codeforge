@@ -1,5 +1,5 @@
 import pytest
-from conftest import MODEL
+from conftest import LOADING_PHASE, MODEL
 
 from tinkerkit.model import LoadedModel, Ollama, OllamaError
 from tinkerkit.prompts import Prompts
@@ -113,7 +113,6 @@ def test_the_rule_level_goes_to_the_call_log(fake_ollama, model_log):
 
 
 REVIEW_PHASE = "🧭 Working out how much thought your request needs"
-LOADING_PHASE = "📦 Loading the model into memory"
 
 
 @pytest.mark.spec("PRJ-18")

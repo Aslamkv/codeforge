@@ -4,7 +4,7 @@ import urllib.error
 import urllib.request
 
 import pytest
-from conftest import MEASURED, MODEL
+from conftest import LOADING_PHASE, MEASURED, MODEL
 
 import tinkerkit.model as model_module
 from tinkerkit import quality
@@ -422,9 +422,6 @@ def test_get_json(monkeypatch):
 def test_get_json_without_ollama_gives_none():
     assert Ollama.get_json("/api/tags") is None
     assert Ollama.installed_models() is None and Ollama.loaded_models() is None
-
-
-LOADING_PHASE = "📦 Loading the model into memory"
 
 
 @pytest.mark.spec("PRJ-18")

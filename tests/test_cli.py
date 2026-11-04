@@ -5,7 +5,7 @@ import signal
 import sys
 
 import pytest
-from conftest import MEASURED, MODEL, PY, TOOLCHAIN, criterion, file_block, plan_of, record_of
+from conftest import LOADING_PHASE, MEASURED, MODEL, PY, TOOLCHAIN, criterion, file_block, plan_of, record_of
 
 from tinkerkit import cli
 from tinkerkit.cli import Cli, Commands, CycleRunner, Doctor, ProjectFolder, ProjectRun
@@ -718,14 +718,27 @@ def test_main_unloads_no_model_however_it_ends(monkeypatch, fake_ollama, ending)
     assert fake_ollama.unloaded == []
 
 
-@pytest.mark.spec("CLI-12")
-def test_a_job_never_unloads_its_model_when_it_ends(monkeypatch, fake_ollama):
-    class Ended:
-        state = {"title": "Asking"}
+@pytest.fixture
+def followed(monkeypatch):
+    seen = {}
+
+    class Followed:
+        heard = None
+
+        def __init__(self, title, started=None):
+            seen["started"] = started
+            self.state = {"title": title}
 
         def end(self, ended, took):
-            pass
+            seen["ended"], seen["took"] = ended, took
 
+    monkeypatch.setattr(cli, "Tracker", Followed)
+    monkeypatch.setattr(cli.say, "follow", lambda heard: None)
+    return seen
+
+
+@pytest.mark.spec("CLI-12")
+def test_a_job_never_unloads_its_model_when_it_ends(monkeypatch, fake_ollama, followed):
     class Kept:
         name = "m"
 
@@ -734,63 +747,42 @@ def test_a_job_never_unloads_its_model_when_it_ends(monkeypatch, fake_ollama):
 
     monkeypatch.setattr(Models, "remember", staticmethod(lambda model: None))
     commands = Commands(parse("ask", "a"))
-    commands.tracker = Ended()
+    commands.follow("Asking")
     commands.reported(lambda: (Kept(),), lambda tracker, model: cli.ending("done", "asked"))
     assert fake_ollama.unloaded == []
 
 
 @pytest.mark.spec("PRJ-17")
-def test_a_jobs_clock_counts_from_its_process_start(monkeypatch):
-    clock = {}
-
-    class Ended:
-        heard = None
-
-        def __init__(self, title, started=None):
-            clock["started"] = started
-            self.state = {"title": title}
-
-        def end(self, ended, took):
-            clock["took"] = took
-
+def test_a_jobs_clock_counts_from_its_process_start(monkeypatch, followed):
     started_at = datetime.datetime.now() - datetime.timedelta(seconds=30)
-    monkeypatch.setattr(cli, "Tracker", Ended)
-    monkeypatch.setattr(cli.say, "follow", lambda heard: None)
     monkeypatch.setattr(Models, "remember", staticmethod(lambda model: None))
     commands = Commands(parse("ask", "a"), started_at)
     commands.follow("Asking")
     commands.reported(lambda: (object(),), lambda tracker, model: cli.ending("done", "asked"))
-    assert clock["started"] == started_at.timestamp()
-    assert clock["took"] >= 30
+    assert followed["started"] == started_at.timestamp()
+    assert followed["took"] >= 30
 
 
 @pytest.mark.spec("PRJ-17")
-def test_a_stop_during_setup_ends_the_job_as_blocked_with_its_time_taken(monkeypatch):
-    clock = {}
+def test_a_builds_clock_counts_from_its_process_start():
+    started_at = datetime.datetime.now() - datetime.timedelta(seconds=30)
+    run = ProjectRun(parse("task", "a calculator"), started_at)
+    assert run.tracker.state["started"] == started_at.timestamp()
 
-    class Ended:
-        heard = None
 
-        def __init__(self, title, started=None):
-            self.state = {"title": title}
-
-        def end(self, ended, took):
-            clock["ended"], clock["took"] = ended, took
-
+@pytest.mark.spec("PRJ-17")
+def test_a_stop_during_setup_ends_the_job_as_blocked_with_its_time_taken(monkeypatch, followed):
     def not_installed():
         raise SystemExit("Model m is not installed.")
 
     remembered = []
     started_at = datetime.datetime.now() - datetime.timedelta(seconds=30)
-    monkeypatch.setattr(cli, "Tracker", Ended)
-    monkeypatch.setattr(cli.say, "follow", lambda heard: None)
     monkeypatch.setattr(Models, "remember", staticmethod(remembered.append))
     monkeypatch.setattr(Commands, "checked_model", staticmethod(not_installed))
-    commands = Commands(parse("ask", "a"), started_at)
     with pytest.raises(SystemExit):
-        commands.ask()
-    assert clock["ended"]["status"] == "blocked"
-    assert clock["took"] >= 30
+        Commands(parse("ask", "a"), started_at).ask()
+    assert followed["ended"]["status"] == "blocked"
+    assert followed["took"] >= 30
     assert remembered == []
 
 
@@ -798,35 +790,23 @@ def test_a_stop_during_setup_ends_the_job_as_blocked_with_its_time_taken(monkeyp
 @pytest.mark.parametrize(
     "words", [("ask", "a"), ("teach", "a"), ("research", "a"), ("learn", "a"), ("exercise", "a")]
 )
-def test_a_job_shows_it_is_getting_ready_before_it_checks_its_model(words, monkeypatch):
-    order = []
+def test_a_job_follows_its_tracker_before_it_checks_its_model(words, monkeypatch, followed):
+    checked = []
 
-    class Followed:
-        heard = None
-
-        def __init__(self, title, started=None):
-            order.append(Tracker.STARTING)
-            self.state = {"title": title}
-
-        def end(self, ended, took):
-            pass
-
-    def checked():
-        order.append("checked")
+    def checking():
+        checked.append("started" in followed)
         raise SystemExit("no model")
 
-    monkeypatch.setattr(cli, "Tracker", Followed)
-    monkeypatch.setattr(cli.say, "follow", lambda heard: None)
-    monkeypatch.setattr(Commands, "checked_model", staticmethod(checked))
+    monkeypatch.setattr(Commands, "checked_model", staticmethod(checking))
     with pytest.raises(SystemExit):
         getattr(Commands(parse(*words)), words[0])()
-    assert order == ["🚀 Getting Tinker ready", "checked"]
+    assert checked == [True]
 
 
 @pytest.mark.spec("PRJ-18")
 @pytest.mark.parametrize(
     "loaded, shown",
-    [([], ["configured", "📦 Loading the model into memory"]), ([LoadedModel(MODEL, 1)], ["configured"])],
+    [([], ["configured", LOADING_PHASE]), ([LoadedModel(MODEL, 1)], ["configured"])],
 )
 def test_a_job_shows_the_loading_phase_after_the_review_when_its_model_is_not_in_memory(
     loaded, shown, monkeypatch
