@@ -323,7 +323,7 @@ def test_the_exercise_shows_what_its_build_does(make_model, home_store, no_sleep
 def test_an_exercise_that_goes_on_by_itself_comes_to_the_bottom(home_store):
     channel = Recorder()
     home_store.put("jobs", "1", exercise_job("running", progress=BUILDING))
-    reporter = conversation.Reporter([channel], "Exercising Rust", pid=OTHER_LIVE_PID)
+    reporter = conversation.Reporter(conversation.everyone([channel]), "Exercising Rust", pid=OTHER_LIVE_PID)
     reporter.refresh()
     reporter.ended = True
     the_persons_message = "hello"

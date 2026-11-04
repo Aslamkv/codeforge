@@ -1467,7 +1467,7 @@ def test_reporter_shows_the_tracker_and_ends_with_its_ending(home_store, monkeyp
     channel = Recorder(chats=chats)
     no_background_edits = 1000
     monkeypatch.setattr(conversation, "PROGRESS_EDIT_SECONDS", no_background_edits)
-    reporter = Reporter([channel], "a calculator", pid=4242)
+    reporter = Reporter(conversation.everyone([channel]), "a calculator", pid=4242)
     reporter.update()
     one_per_chat = len(chats)
     assert len(channel.texts("send")) == one_per_chat
@@ -1483,12 +1483,23 @@ def test_reporter_shows_the_tracker_and_ends_with_its_ending(home_store, monkeyp
 
 
 @pytest.mark.spec("CNV-18")
+def test_a_reporter_shows_only_to_its_audience(monkeypatch):
+    monkeypatch.setattr(conversation, "PROGRESS_EDIT_SECONDS", 1000)
+    channel = Recorder(chats=("1", "2"))
+    reporter = Reporter([(channel, "2")], "a calculator", pid=999999)
+    reporter.update()
+    reporter.finish()
+    assert {chat for _, chat, *_ in channel.log} == {"2"}
+    assert set(reporter.sent) == {("rec", "2")}
+
+
+@pytest.mark.spec("CNV-18")
 def test_reporter_edits_for_new_tokens_only_with_the_clock_but_the_console_counts_them_live(
     home_store, monkeypatch, clock
 ):
     monkeypatch.setattr(conversation, "PROGRESS_EDIT_SECONDS", 1000)
     chat, console = Recorder(), live_console(monkeypatch)
-    reporter = Reporter([chat, console], "a calculator", pid=4242)
+    reporter = Reporter(conversation.everyone([chat, console]), "a calculator", pid=4242)
     keep_job(home_store, 1, 4242, snapshot(step="spec", doing=Tracker.DOING_AND_DONE["spec"][0], tokens=10))
     reporter.refresh()
     edits = len(chat.log)
@@ -1507,7 +1518,7 @@ def test_progress_edits_come_within_about_two_seconds():
 def test_a_reporter_without_a_tracker_shows_its_lines(monkeypatch):
     monkeypatch.setattr(conversation, "PROGRESS_EDIT_SECONDS", 1000)
     channel = Recorder()
-    learning = Reporter([channel], "learn rust", pid=999999)
+    learning = Reporter(conversation.everyone([channel]), "learn rust", pid=999999)
     learning.printed("  reading 4 pages")
     assert learning.progress.snapshot["latest"] == "reading 4 pages"
 
@@ -1516,7 +1527,7 @@ def test_a_reporter_without_a_tracker_shows_its_lines(monkeypatch):
 def test_a_reporter_without_a_tracker_ends_with_its_title_and_last_line(monkeypatch):
     monkeypatch.setattr(conversation, "PROGRESS_EDIT_SECONDS", 1000)
     channel = Recorder()
-    calibrating = Reporter([channel], "calibrate qwen", pid=999999)
+    calibrating = Reporter(conversation.everyone([channel]), "calibrate qwen", pid=999999)
     calibrating.update()
     for line in (
         "📏 Testing qwen",
@@ -2102,7 +2113,7 @@ def test_follow_reads_the_tasks_tracker(tmp_path, home_store):
     desk = Desk.__new__(Desk)
     desk.echo_to_terminal, desk.messages_by_run, desk.seconds_by_run, desk.waiting_plan = False, {}, {}, None
     desk.say_status = lambda *args, **kwargs: None
-    reporter = Reporter([Recorder()], "a calculator", pid=4343)
+    reporter = Reporter(conversation.everyone([Recorder()]), "a calculator", pid=4343)
     keep_job(home_store, 1, 4343, snapshot(folder="/tmp/projects/calc", waiting=PLAN))
     process = type(
         "P",
@@ -2540,7 +2551,7 @@ def attached(monkeypatch, home_store):
     def start(title="calc: a calculator"):
         tracker = Tracker(title)
         tracker.publish()
-        started.append(conversation.Attached([channel], title, tracker).start())
+        started.append(conversation.Attached(conversation.everyone([channel]), title, tracker).start())
         return started[-1]
 
     yield start, channel

@@ -639,7 +639,7 @@ class Desk:
         if self.exercise_reporter is not None:
             self.exercise_reporter.ended = True
         reporter = self.exercise_reporter = Reporter(
-            self.channels,
+            everyone(self.channels),
             title,
             pid=pid,
             sent=sent,
@@ -978,7 +978,7 @@ class Desk:
         with self.lock:
             self.task = {"arguments": arguments, "folder": folder, "title": title, "run": run}
             self.reporter = Reporter(
-                self.channels,
+                everyone(self.channels),
                 title,
                 sent=sent,
                 phase=phase,
@@ -1540,10 +1540,14 @@ def in_shell(shell, line, folder, given=None):
         return ShellRun("not started", str(exc))
 
 
+def everyone(channels):
+    return [(channel, chat) for channel in channels for chat in channel.allowed]
+
+
 class Reporter:
     def __init__(
         self,
-        channels,
+        audience,
         title,
         pid=None,
         sent=None,
@@ -1552,7 +1556,7 @@ class Reporter:
         before=0.0,
         on_step=None,
     ):
-        self.channels, self.progress, self.pid = channels, Progress(title, phase, before), pid
+        self.audience, self.progress, self.pid = audience, Progress(title, phase, before), pid
         self.on_step = on_step
         self.plan_on_top = plan_on_top
         self.sent, self.last_edit, self.lock = ({} if sent is None else sent), 0.0, threading.Lock()
@@ -1590,26 +1594,24 @@ class Reporter:
             self.on_step()
 
     def count_live(self):
-        for channel in self.channels:
-            for chat in channel.allowed:
-                channel.count_live(chat, self.sent.get((channel.name, chat)), **self.progress.facts)
+        for channel, chat in self.audience:
+            channel.count_live(chat, self.sent.get((channel.name, chat)), **self.progress.facts)
 
     def say(self, text, done=False):
         text = f"{self.plan_on_top}\n\n{text}" if self.plan_on_top else text
         bottom, self.send_at_bottom = done or self.send_at_bottom, False
-        for channel in self.channels:
-            for chat in channel.allowed:
-                key = (channel.name, chat)
-                self.sent[key] = channel.show(
-                    chat,
-                    self.sent.get(key),
-                    text,
-                    done,
-                    bottom,
-                    began=self.progress.work_began,
-                    doing=self.progress.working_on,
-                    **self.progress.facts,
-                )
+        for channel, chat in self.audience:
+            key = (channel.name, chat)
+            self.sent[key] = channel.show(
+                chat,
+                self.sent.get(key),
+                text,
+                done,
+                bottom,
+                began=self.progress.work_began,
+                doing=self.progress.working_on,
+                **self.progress.facts,
+            )
 
     def printed(self, line):
         if self.tracked() is None and self.says_something(line):
@@ -1810,9 +1812,9 @@ class Progress:
 
 
 class Attached:
-    def __init__(self, channels, title, tracker):
+    def __init__(self, audience, title, tracker):
         self.tracker = tracker
-        self.reporter = Reporter(channels, title, pid=os.getpid())
+        self.reporter = Reporter(audience, title, pid=os.getpid())
 
     def start(self):
         signal.signal(JOB_STOP_SIGNAL, self.stop)
@@ -1835,7 +1837,7 @@ def attach(title, tracker):
     except SystemExit as exc:
         say.warn(f"Channels left out: {exc}")
         return None
-    return Attached(channels, title, tracker).start() if channels else None
+    return Attached(everyone(channels), title, tracker).start() if channels else None
 
 
 def chat_channels():

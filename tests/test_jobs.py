@@ -675,7 +675,7 @@ def test_a_new_jobs_message_is_kept_up_and_one_that_goes_on_comes_to_the_bottom(
     monkeypatch.setattr(Jobs, "current", Jobs.save(job))
     a_new_job = Tracker("learn html5")
     a_new_job.publish()
-    reporter = conversation.Reporter([channel], "learn html5", pid=os.getpid())
+    reporter = conversation.Reporter(conversation.everyone([channel]), "learn html5", pid=os.getpid())
     reporter.refresh()
     reporter.refresh()
     the_persons_message = "learn tailwind"
