@@ -545,9 +545,9 @@ class Desk:
         command = words[0]
         return {
             "task": lambda: self.new_task([(channel, message.chat)], words),
-            "confirm": lambda: self.decide(command, words),
-            "amend": lambda: self.decide(command, words),
-            "rename": lambda: self.decide(command, words),
+            "confirm": lambda: self.decide([(channel, message.chat)], command, words),
+            "amend": lambda: self.decide([(channel, message.chat)], command, words),
+            "rename": lambda: self.decide([(channel, message.chat)], command, words),
             "resume": lambda: self.resume([(channel, message.chat)], words),
             "stop": lambda: self.stop(words),
             "research": lambda: self.research([(channel, message.chat)], words),
@@ -700,15 +700,15 @@ class Desk:
         request = " ".join(words[1:])
         return self.start_task(audience, ["task", request], self.root, request)
 
-    def decide(self, command, words):
+    def decide(self, audience, command, words):
         waiting = self.waiting_plan or {}
         if command == "rename":
-            return self.rename(waiting, words)
+            return self.rename(audience, waiting, words)
         name, rest = refs(words[1:])
         if command == "amend" and not rest:
             return USAGE["amend"]
         if self.confirms_a_new_project(command, name, waiting):
-            return self.ask_folder_name(waiting)
+            return self.ask_folder_name(audience, waiting)
         target = name or waiting.get("run")
         if not target:
             return "🤷 No plan waits for confirmation: start one with `/task WHAT TO BUILD`"
@@ -717,7 +717,7 @@ class Desk:
         target = waiting["run"] if mine else target
         if command == "confirm":
             started = self.start_task(
-                everyone(self.channels),
+                audience,
                 ["resume", f"@{target}"],
                 folder,
                 title,
@@ -727,26 +727,26 @@ class Desk:
         else:
             change = " ".join(rest)
             started = self.start_task(
-                everyone(self.channels),
+                audience,
                 ["amend", f"@{target}", change],
                 folder,
                 title,
                 md(t"✏️ **Changing the plan:** {change}"),
             )
-        return self.on_task(waiting if mine else {}, started)
+        return self.on_task(audience, waiting if mine else {}, started)
 
     @staticmethod
     def confirms_a_new_project(command, name, waiting):
         return command == "confirm" and not name and waiting.get("stage") == "spec" and waiting.get("new")
 
-    def ask_folder_name(self, waiting):
+    def ask_folder_name(self, audience, waiting):
         waiting["stage"] = "name"
-        self.on_board(waiting, self.asked(waiting))
+        self.on_board(audience, waiting, self.asked(waiting))
         return None
 
-    def on_task(self, waiting, said):
+    def on_task(self, audience, waiting, said):
         if said and waiting:
-            self.on_board(waiting, f"{self.asked(waiting)}\n\n{said}")
+            self.on_board(audience, waiting, f"{self.asked(waiting)}\n\n{said}")
             return None
         return said
 
@@ -763,35 +763,33 @@ class Desk:
     def plan_shown(waiting):
         return Progress.waits(waiting["plan"], waiting["so_far"]) if waiting else ""
 
-    def on_board(self, waiting, text):
+    def on_board(self, audience, waiting, text):
         board = self.messages_by_run.setdefault(waiting["run"], {})
-        for channel in self.channels:
-            for chat in channel.allowed:
-                board[(channel.name, chat)] = channel.show(
-                    chat, board.get((channel.name, chat)), text, done=True
-                )
+        for channel, chat in audience:
+            board[(channel.name, chat)] = channel.show(chat, board.get((channel.name, chat)), text, done=True)
         self.say_status()
 
-    def rename(self, waiting, words):
+    def rename(self, audience, waiting, words):
         if len(words) != 2:
             return USAGE["rename"]
         if not waiting:
             return "🤷 No plan waits for confirmation, so no folder can be renamed (once built, it stays)."
         if self.busy():
-            return self.on_task(waiting, "⏳ A task is running: wait for it, or `/stop` it first.")
+            return self.on_task(audience, waiting, "⏳ A task is running: wait for it, or `/stop` it first.")
         why = self.rename_folder(waiting, words[1])
         if why is not None:
-            return self.on_task(waiting, md(t"⚠️ **Not renamed:** {why}"))
+            return self.on_task(audience, waiting, md(t"⚠️ **Not renamed:** {why}"))
         self.renamed(waiting, words[1])
         if waiting.get("stage") != "name":
             self.on_board(
-                waiting, f"{self.plan_shown(waiting)}\n\n📁 **Renamed:** its folder is `{words[1]}`"
+                audience, waiting, f"{self.plan_shown(waiting)}\n\n📁 **Renamed:** its folder is `{words[1]}`"
             )
             return None
         return self.on_task(
+            audience,
             waiting,
             self.start_task(
-                everyone(self.channels),
+                audience,
                 ["resume", f"@{waiting['run']}"],
                 waiting["folder"],
                 waiting["title"],

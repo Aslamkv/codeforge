@@ -1909,6 +1909,22 @@ def test_confirm_asks_a_new_projects_folder_once_then_builds(desk):
     assert desk.waiting_plan is None
 
 
+@pytest.mark.spec("CNV-12")
+def test_the_plan_that_waits_and_its_build_show_only_in_the_chat_that_confirmed(desk):
+    desk, channel, script = desk
+    channel.allowed = ["1", "2"]
+    say(desk, channel, "/task a calculator")
+    wait_until(lambda: desk.waiting_plan is not None)
+    say(desk, channel, "/confirm")
+    say(desk, channel, "/confirm")
+    wait_until(lambda: "resume @abc123" in calls_of(script))
+    wait_until(lambda: not desk.busy())
+    here = [text for kind, chat, _, text in channel.log if chat == "1" and kind in ("send", "edit")]
+    elsewhere = [text for kind, chat, _, text in channel.log if chat == "2" and kind in ("send", "edit")]
+    assert any("📁 **Its folder:**" in text for text in here)
+    assert not any("📁 **Its folder:**" in text or "Confirmed" in text for text in elsewhere)
+
+
 @pytest.mark.spec("CNV-11")
 def test_a_confirmed_plan_is_kept_without_its_next_step_lines(desk):
     desk, channel, script = desk
@@ -1956,8 +1972,8 @@ def test_what_waits_for_confirm_is_cancelled_by_anything_else(desk, monkeypatch)
     desk.answer(Message("1", "/clear memory"), channel)
     say(desk, channel, "/confirm")
     wait_until(lambda: ["clear", "memory", "--yes"] in desk.ran)
-    assert desk.decide("confirm", ["confirm"]).startswith("🤷 No plan waits")
-    assert desk.rename({}, ["rename", "x"]).startswith("🤷 No plan waits")
+    assert desk.decide([(channel, "1")], "confirm", ["confirm"]).startswith("🤷 No plan waits")
+    assert desk.rename([(channel, "1")], {}, ["rename", "x"]).startswith("🤷 No plan waits")
 
 
 @pytest.mark.spec("CNV-12")
@@ -1966,7 +1982,7 @@ def test_a_question_with_nothing_to_say_on_a_cancel_is_dropped_quietly(desk):
     desk.questions.ask(channel, "1", Question(wanted="model pick"))
     assert not desk.settle(channel, Message("1", "/status"), "status")
     assert not desk.questions.waiting(channel, "1") and channel.texts() == []
-    assert desk.decide("amend", ["amend"]).startswith("✍️ Write `/amend [@PROJECT] CHANGE`")
+    assert desk.decide([(channel, "1")], "amend", ["amend"]).startswith("✍️ Write `/amend [@PROJECT] CHANGE`")
 
 
 @pytest.mark.spec("CNV-12")
