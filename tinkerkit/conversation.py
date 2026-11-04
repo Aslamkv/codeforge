@@ -18,7 +18,7 @@ lazy import webbrowser
 lazy from pathlib import Path
 
 from .commands import BY_NAME, COMMANDS, CommandMenu, deletes, kind_of, refs
-from .jobs import Jobs, alive, job_number, paused_for_you
+from .jobs import Jobs, alive, calls_log, job_number, paused_for_you
 from .project import Runs, Tracker, saved
 lazy from .ledger import DONE_NOTE_KEPT_SECONDS, Ledger
 lazy from .messages import (
@@ -1337,8 +1337,9 @@ class Talk:
         asked = self.remembered(said, "user", message.text)
         system = Prompts.CHAT_SYSTEM.format(kind=channel.KIND.title(), commands=self.commands)
         system += f"\n\n{now}" if now else "\n\nNo task is running now."
+        level = reviewed_level(message.text)
         try:
-            text = self.ask(channel, message.chat, [{"role": "system", "content": system}] + asked, tokens)
+            text = self.ask(channel, message.chat, [{"role": "system", "content": system}] + asked, tokens, level)
         except OllamaError as exc:
             return md(t"⚠️ **The model did not answer:** {first_words(exc)}")
         text = text or "_(no answer)_"
@@ -1355,11 +1356,11 @@ class Talk:
             del said[:-CHAT_CONTEXT_MESSAGES]
             return list(said)
 
-    def ask(self, channel, chat, messages, tokens):
+    def ask(self, channel, chat, messages, tokens, level):
         done = threading.Event()
         threading.Thread(target=keep_typing, args=(channel, chat, done), daemon=True).start()
         try:
-            return Models.quick_reply(messages, tokens)
+            return Models.quick_reply(messages, tokens, level)
         finally:
             done.set()
 
@@ -1418,6 +1419,7 @@ class Shell:
         system = Prompts.COMMAND_SYSTEM.format(
             system=os.uname().sysname, shell=Path(self.shell).name, folder=self.folder
         )
+        level = reviewed_level(message.text)
         try:
             data = json_answer(
                 self.talk.ask(
@@ -1425,6 +1427,7 @@ class Shell:
                     message.chat,
                     [{"role": "system", "content": system}, {"role": "user", "content": message.text}],
                     COMMAND_NAMING_MAX_TOKENS,
+                    level,
                 )
             )
         except OllamaError as exc:
@@ -1434,7 +1437,7 @@ class Shell:
         if not line or "\n" in line:
             self.questions.answered(channel, message.chat)
             return md(t"🤷 **No command found:** {does or 'describe it another way'}")
-        self.wait_for_confirm(channel, message.chat, {"line": line, "asked": message.text, "shown": None})
+        self.wait_for_confirm(channel, message.chat, {"line": line, "asked": message.text, "level": level, "shown": None})
         return self.proposal(line, does)
 
     def wait_for_confirm(self, channel, chat, proposed):
@@ -1479,7 +1482,7 @@ class Shell:
         if not tells:
             return
         with self.talk.pausing_jobs():
-            told = self.told(channel, chat, proposed["asked"], line, code, output)
+            told = self.told(channel, chat, proposed, code, output)
         channel.show(chat, sent, f"{head}\n{told}\n{folded}" if told else f"{head}\n{folded}", done=True)
 
     @staticmethod
@@ -1493,7 +1496,7 @@ class Shell:
         )
         return f"```output\n{Markup.fenced(Markup.columns(shown))}\n```"
 
-    def told(self, channel, chat, asked, line, code, output):
+    def told(self, channel, chat, proposed, code, output):
         try:
             return self.talk.ask(
                 channel,
@@ -1502,11 +1505,12 @@ class Shell:
                     {"role": "system", "content": Prompts.COMMAND_TELL_SYSTEM},
                     {
                         "role": "user",
-                        "content": f"They asked: {asked}\nCommand: {line}\n"
+                        "content": f"They asked: {proposed['asked']}\nCommand: {proposed['line']}\n"
                         f"Exit code: {code}\nOutput:\n{output[-CHAT_COMMAND_OUTPUT_READ_CHARS:]}",
                     },
                 ],
                 CHAT_MAX_REPLY_TOKENS,
+                proposed["level"],
             )
         except OllamaError:
             return ""
@@ -2891,6 +2895,13 @@ def keep_typing(channel, chat, done):
     while not done.is_set():
         channel.typing(chat)
         done.wait(TYPING_SIGN_SECONDS)
+
+
+def reviewed_level(text):
+    from .reviewing import RequestReview
+
+    level, _ = RequestReview(calls_log()).level(text)
+    return level
 
 
 def first_words(text, size=160):

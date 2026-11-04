@@ -332,7 +332,7 @@ class FakeSearch:
 def quick_model_replying(monkeypatch, reply):
     asked = []
 
-    def replied(messages, tokens):
+    def replied(messages, tokens, think=None):
         asked.append(messages)
         return reply(messages)
 
