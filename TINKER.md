@@ -350,7 +350,8 @@ tinker learn Python 3.14
 tinker learn food bank inventory
 ```
 
-A domain is learned like a tool. To research one, its facts checked across sites, use `tinker research` (it is
+A domain is learned like a tool, and any topic is taken, even one the model does not know or that is not about
+code: learning is how it finds out. To research one, its facts checked across sites, use `tinker research` (it is
 slower). The first round reads the topic's own article first. Each round skips results off the topic and
 reads 6 pages, then 4, keeping what its questions ask; a round that finds nothing searches each question again
 as written, so a research says it found nothing only when every round did. The model frames, reads facts and
@@ -585,7 +586,9 @@ A value that does not fit is refused, with what the setting takes, and the old v
 How hard the model thinks is not a setting: each request (a build, a fix, a question, each chat message) is
 reviewed once and gets one level, `off`, `low`, `medium` or `high`, that every call for it uses. Greetings and
 short questions get `off` and answer in a second or two; a bug, a design question or a long request with many
-parts or files gets `high`; anything else is weighed by one short model call. A model that has no such level
+parts or files gets `high`; anything else is weighed by one short model call. `learn`, `research`, `teach`,
+`read` and `exercise` never go below `medium`: they plan, extract and judge from pages, however short the topic
+reads. A model that has no such level
 gets the nearest it has. The call log shows each request's level and why.
 
 Choose where new projects go, and how long the model stays loaded after a call (before each call, other

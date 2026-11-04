@@ -600,6 +600,12 @@ def test_read_frame():
     assert len(frame["questions"]) == 4
     with pytest.raises(ValueError):
         Researcher.read_frame({"name": "X", "questions": []})
+    unnamed = {"questions": [{"question": "Q", "queries": ["q"]}]}
+    assert Researcher.read_frame(unnamed, " Food  banks ")["name"] == "Food banks"
+    with pytest.raises(ValueError):
+        Researcher.read_frame(unnamed)
+    with pytest.raises(ValueError):
+        Researcher.read_frame({"questions": []}, "Food banks")
 
 
 @pytest.mark.spec("KNW-18")

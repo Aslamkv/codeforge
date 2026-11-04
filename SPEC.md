@@ -771,6 +771,10 @@ Each request's one thinking level.
   theirs (**MOD-18**, **MOD-19**), and so does a build's concluding call without thinking. Each message the
   person sends the chat is reviewed too, and the chat's reply to it is asked at its level. The other quick
   calls keep theirs (**MOD-25**). Where a command shows that its model thinks, it shows the request's level.
+  `learn`, `research`, `teach`, `read` and `exercise` never ask below `medium` (`WORK_THINK`): their review
+  sees only a topic, which reads as recall, yet they plan, extract and judge from pages; replaying job #138's
+  plan on qwen3.5:4b gave 3 of 4 usable plans thinking, 1 of 4 without, and `low` is no thinking on on/off
+  models (**RVW-2**). The log says the level was raised.
 
 ## project (PRJ)
 
@@ -1223,7 +1227,7 @@ kept as principles (**PRI**); where a point below names them, it holds for princ
   line and version. A failing command means the tool is not installed.
 - **KNW-16** `Researcher.read_frame` and `read_analysis` keep only well-formed questions, findings that cite
   known facts, contradictions of at least two facts, and gaps and checks within their limits. An analysis with
-  no finding is a `ValueError`.
+  no finding is a `ValueError`. A frame with no name takes the topic as asked.
 - **KNW-17** `Researcher.cross_check` folds repeats and adds support from other sites when the numbers agree.
   When they disagree, it returns the pair. `supported(stated, cited)` never rates a finding above what its
   facts allow: high only when at least half the cited facts are corroborated and none is disputed. `entry`
@@ -1355,7 +1359,10 @@ learning and run lessons are apart.
   `slug@version` (`slug@latest` when no version is known). A learn reads them from there before the web, so
   learning a version again makes none of its documentation searches. A `latest` copy is searched again after
   `docs_latest_days`; a version's own is kept until `tinker clear docs`.
-- **LRN-2** `read_plan` needs a kind (language, tool or domain) and a name. It keeps safe commands only
+- **LRN-2** `read_plan` needs a kind (language, tool or domain); a plan with no name takes the topic as asked.
+  The plan and frame prompts say a topic new to the model or not about code is never refused, nor answered
+  with a question: learning exists to fetch what the model does not know, and when unsure it is a domain.
+  It keeps safe commands only
   (`MAX_VERSION_COMMANDS`), a language's tools (one per role of `TOOL_ROLES`, each with a safe version
   command), and hints and follow-ups for its profile's slots only; a tool's language is `used_with`.
   `read_digest` keeps a fact only when it cites a passage given and speaks of no unreleased version; each keeps

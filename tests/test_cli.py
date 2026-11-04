@@ -14,7 +14,7 @@ from tinkerkit.model import LoadedModel, Models, Ollama, OllamaError, ThinkLevel
 from tinkerkit.principles import Principles
 from tinkerkit.project import Runs, Tracker, project_store
 from tinkerkit.session import Phase, Stopped
-from tinkerkit.settings import FIX_PHASES, PHASES, QUALITY_VERSION, Config
+from tinkerkit.settings import FIX_PHASES, PHASES, QUALITY_VERSION, WORK_THINK, Config
 from tinkerkit.system import SYSTEM_CHECKS, SystemCheck
 from tinkerkit.workspace import Toolchain
 
@@ -816,7 +816,7 @@ def test_a_job_shows_the_loading_phase_after_the_review_when_its_model_is_not_in
     class Followed:
         phase = staticmethod(phases.append)
 
-    def configured(name, settings, log, request, phase):
+    def configured(name, settings, log, request, phase, least=None):
         phases.append("configured")
         return name
 
@@ -828,6 +828,37 @@ def test_a_job_shows_the_loading_phase_after_the_review_when_its_model_is_not_in
     commands.tracker = Followed()
     assert commands.model_in_use(MODEL, {}, "a") == MODEL
     assert phases == shown
+
+
+@pytest.mark.spec("RVW-3")
+@pytest.mark.parametrize("reviewed", ["off", "low"])
+def test_a_work_command_thinks_at_least_medium_and_ask_keeps_the_review(reviewed, model_log, monkeypatch):
+    monkeypatch.setattr(cli.RequestReview, "ruled", lambda self, request: (reviewed, "reviewed"))
+    monkeypatch.setattr(cli, "Model", lambda name, settings, keep_alive, log, max_growth, level: level)
+    monkeypatch.setattr(Config, "get", staticmethod(lambda key: "1"))
+    monkeypatch.setattr(Config, "keep_alive", staticmethod(lambda value: value))
+    assert Commands.configured_model(MODEL, {}, model_log, "a topic", least=WORK_THINK) == "medium"
+    assert Commands.configured_model(MODEL, {}, model_log, "a question") == reviewed
+
+
+@pytest.mark.spec("RVW-3")
+@pytest.mark.parametrize(
+    "command, tools",
+    [
+        ("teach", lambda commands: commands.teaching_tools("a topic")),
+        ("learn", lambda commands: commands.learning_tools("learn", "a topic")),
+    ],
+)
+def test_teach_and_learn_ask_for_their_model_at_least_at_the_work_level(command, tools, monkeypatch):
+    asked = []
+    monkeypatch.setattr(Commands, "checked_model", staticmethod(lambda: (MODEL, {})))
+    monkeypatch.setattr(
+        Commands, "model_in_use", lambda self, name, settings, request, least=None: asked.append(least)
+    )
+    monkeypatch.setattr(cli.Embeddings, "required", staticmethod(lambda option: None))
+    monkeypatch.setattr(cli, "LearningTools", lambda model, embeddings, internet: None)
+    tools(Commands(parse(command, "a topic")))
+    assert asked == [WORK_THINK]
 
 
 SPEC_REPLY = {

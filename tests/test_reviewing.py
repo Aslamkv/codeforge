@@ -112,6 +112,21 @@ def test_the_rule_level_goes_to_the_call_log(fake_ollama, model_log):
     assert logged(model_log) == [{"review": level, "why": why}]
 
 
+@pytest.mark.spec("RVW-3")
+def test_a_level_below_the_floor_is_raised_and_the_log_says_so(fake_ollama, model_log):
+    level, why = RequestReview(model_log).level("hi", least="medium")
+    assert level == "medium" and "raised" in why
+    assert logged(model_log) == [{"review": level, "why": why}]
+
+
+@pytest.mark.spec("RVW-3")
+def test_a_level_at_or_above_the_floor_stays(fake_ollama, model_log):
+    request_text = "There is a bug in tinkerkit/model.py when the reply is empty"
+    assert RequestReview(model_log).level(request_text, least="medium") == RequestReview(model_log).level(
+        request_text
+    )
+
+
 REVIEW_PHASE = "🧭 Working out how much thought your request needs"
 
 

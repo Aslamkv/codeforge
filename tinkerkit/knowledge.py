@@ -739,7 +739,7 @@ class Researcher:
         parts = [Part("Topic", topic, True), Part("Today", today().isoformat(), True)]
         frame, saved = self.learner.saved_or_asked(
             known,
-            self.read_frame,
+            lambda data: self.read_frame(data, topic),
             Prompts.RESEARCH_PLAN_SYSTEM,
             parts,
             "Frame the research",
@@ -756,11 +756,11 @@ class Researcher:
         return frame
 
     @staticmethod
-    def read_frame(data):
+    def read_frame(data, topic=""):
         if not isinstance(data, dict):
             raise ValueError("not a JSON object")
         name, summary = (
-            field(data, "name", 80),
+            field(data, "name", 80) or " ".join(topic.split())[:80],
             " ".join(str(data.get("summary") or "").split())[:200],
         )
         questions = []

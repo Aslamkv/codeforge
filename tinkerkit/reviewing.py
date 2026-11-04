@@ -1,6 +1,6 @@
 import re
 
-from .model import Models, Ollama, OllamaError
+from .model import Models, Ollama, OllamaError, ThinkLevels
 from .prompts import Prompts
 from .settings import LONG_REQUEST_WORDS, MANY_FILES, MANY_PARTS, REVIEW_REPLY_TOKENS, SHORT_REQUEST_WORDS
 from .text import first_line
@@ -37,10 +37,17 @@ class RequestReview:
     def __init__(self, log, phase=lambda doing: None):
         self.log, self.phase = log, phase
 
-    def level(self, request):
-        level, why = self.ruled(RequestWords(request)) or self.reviewed(request)
+    def level(self, request, least=None):
+        level, why = self.raised(self.ruled(RequestWords(request)) or self.reviewed(request), least)
         self.log.add({"review": level, "why": why})
         return level, why
+
+    @staticmethod
+    def raised(reviewed, least):
+        level, why = reviewed
+        if least is None or ThinkLevels.RANKS.index(level) >= ThinkLevels.RANKS.index(least):
+            return reviewed
+        return least, f"raised from {level} to the {least} this command needs: {why}"
 
     def ruled(self, request):
         if request.about_code(self.CODE_WORDS) and request.says(self.HARD_WORDS, self.HARD_PHRASES):

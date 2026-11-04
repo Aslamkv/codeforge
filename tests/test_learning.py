@@ -372,6 +372,9 @@ def test_read_plan_checks_the_plan():
     for bad in ({"kind": "band", "name": "X"}, {"kind": "tool", "name": ""}, ["not", "an", "object"]):
         with pytest.raises(ValueError):
             read_plan(bad)
+    assert read_plan({"kind": "domain", "name": ""}, "  Food  banks ")["name"] == "Food banks"
+    with pytest.raises(ValueError):
+        read_plan({"kind": "domain"}, "")
 
 
 WEB_AND_WARNING_BY_CAUSE = {

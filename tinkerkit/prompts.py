@@ -712,6 +712,8 @@ Below are the topic, the titles and snippets of web pages already found about it
 fills: what it must find out, for a language and for a tool. Say what the topic is: "kind": "language" for a
 programming language; "tool" for a library, framework or tool used in code; "domain" for a field, practice,
 standard or subject a program must get right (food bank inventory, accessibility rules), which is researched.
+The topic may be new to you or not about code: never refuse it or answer with a question, the pages and searches
+tell what it is; when unsure, it is a domain.
 Give its name, its newest stable version the pages name (else ""), and one sentence on what it is;
 "language": the language's name when it is one, else the language a tool is used with ("" when none);
 "commands": up to {MAX_VERSION_COMMANDS} commands that show its installed version and exit (one command each: no shell
@@ -810,6 +812,8 @@ numbers, limits and standards that matter; what is changing or disputed. Each qu
 {SEARCHES_PER_RESEARCH_QUESTION} web searches that would answer it from different, independent sources (name the year
 when it helps), each naming the engines that suit it and how many results to take. {SEARCH_ENGINES}
 Give the topic's name and one sentence on what it is.
+The topic may be new to you or not about code: never refuse it or answer with a question, the searches tell what
+it is.
 Reply with ONLY JSON (this example is for "food bank inventory"):
 {{"name":"Food bank inventory","summary":"How food banks track donated food from intake to distribution.",
  "questions":[{{"question":"How do food banks record donations at intake?",

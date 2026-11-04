@@ -245,7 +245,7 @@ class SlotLearner(Tracked):
                 Prompts.SLOT_PLAN_SYSTEM,
                 self.plan_parts(results),
                 "Plan learning",
-                lambda reply: read_plan(reply.json()),
+                lambda reply: read_plan(reply.json(), self.topic),
                 attempts=2,
             ).needed(f"{self.model.name} gave no usable plan for learning {self.topic}. Nothing was saved.")
         self.say_plan(plan)
@@ -629,10 +629,10 @@ def say_docs(slug, key, pages, kept):
     say.info(f"Read {len(pages)} page(s) of the {slug} {key} documentation{saved}", "📖")
 
 
-def read_plan(data):
+def read_plan(data, topic=""):
     if not isinstance(data, dict):
         raise ValueError("not a JSON object")
-    kind, name = clean(data.get("kind"), 20).lower(), clean(data.get("name"), 80)
+    kind, name = clean(data.get("kind"), 20).lower(), clean(data.get("name"), 80) or clean(topic, 80)
     if kind not in ("language", "tool", "domain"):
         raise ValueError('"kind" must be "language", "tool" or "domain"')
     if not name:

@@ -63,6 +63,7 @@ lazy from .settings import (
     NUMBERED_PARTS,
     PHASES,
     STATUS_TEXT,
+    WORK_THINK,
     Config,
     Home,
     Numbered,
@@ -820,7 +821,7 @@ class Commands:
     def learning_tools(self, option, request):
         name, settings = Commands.checked_model()
         embeddings = Embeddings.required(option)
-        return LearningTools(self.model_in_use(name, settings, request), embeddings, Internet())
+        return LearningTools(self.model_in_use(name, settings, request, WORK_THINK), embeddings, Internet())
 
     @staticmethod
     def checked_model():
@@ -829,16 +830,16 @@ class Commands:
         Config.check()
         return SelectedModel(name, settings)
 
-    def model_in_use(self, name, settings, request):
+    def model_in_use(self, name, settings, request, least=None):
         log = calls_log()
         say.keep_log(log)
-        configured = Commands.configured_model(name, settings, log, request, self.tracker.phase)
+        configured = Commands.configured_model(name, settings, log, request, self.tracker.phase, least=least)
         Ollama.loading(name, self.tracker.phase)
         return configured
 
     @staticmethod
-    def configured_model(name, settings, log, request, phase=lambda doing: None):
-        level, _ = RequestReview(log, phase).level(request)
+    def configured_model(name, settings, log, request, phase=lambda doing: None, least=None):
+        level, _ = RequestReview(log, phase).level(request, least)
         return Model(
             name,
             settings,
@@ -869,7 +870,7 @@ class Commands:
     def teaching_tools(self, teaching):
         name, settings = Commands.checked_model()
         internet = Internet()
-        return self.model_in_use(name, settings, teaching), internet, Memory()
+        return self.model_in_use(name, settings, teaching, WORK_THINK), internet, Memory()
 
     def read(self):
         words = self.args.read
@@ -886,7 +887,7 @@ class Commands:
         title = reading.known_reading(number)["title"]
         self.follow(f"Reading #{number} {first_line(title, 50)}")
         self.reported(
-            lambda: (self.model_in_use(*Commands.checked_model(), f"{title} {focus}"),),
+            lambda: (self.model_in_use(*Commands.checked_model(), f"{title} {focus}", WORK_THINK),),
             lambda tracker, model: Reader(model, tracker).read(number, focus),
         )
 
@@ -896,7 +897,7 @@ class Commands:
             return exercising.show()
         self.follow(f"Exercising {what}")
         self.reported(
-            lambda: (self.model_in_use(*Commands.checked_model(), what),),
+            lambda: (self.model_in_use(*Commands.checked_model(), what, WORK_THINK),),
             lambda tracker, model: exercising.Exercise(model, tracker).run(what),
             chats=True,
         )
