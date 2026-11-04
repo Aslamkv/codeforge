@@ -364,7 +364,9 @@ def test_the_conversation_stops_and_resumes_jobs(home_store, tmp_path, monkeypat
         "start_task",
         lambda audience, arguments, folder, title, *rest, **kwargs: started.append((arguments, title)),
     )
-    monkeypatch.setattr(desk, "start_exercise", lambda words, title=None: started.append((words, title)))
+    monkeypatch.setattr(
+        desk, "start_exercise", lambda audience, words, title=None: started.append((words, title))
+    )
     monkeypatch.setattr(desk, "stop_exercise", lambda: told.append("exercise"))
     monkeypatch.setattr(Jobs, "stop", staticmethod(lambda job: told.append(job["number"])))
     keep_jobs(home_store, ["stopped", "running", "stopped", "running"])
@@ -651,7 +653,8 @@ def test_a_research_job_says_its_steps_and_ends_with_its_answer(home_store, monk
 
 @pytest.mark.spec("EXR-7")
 def test_an_exercise_paused_for_another_hands_it_its_message(home_store, tmp_path):
-    desk = Desk([Recorder()], tmp_path)
+    channel = Recorder()
+    desk = Desk([channel], tmp_path)
     home_store.put(
         "jobs",
         "1",
@@ -664,9 +667,9 @@ def test_an_exercise_paused_for_another_hands_it_its_message(home_store, tmp_pat
         },
     )
     paused_one_ends = threading.Event()
-    desk.follow_exercise(os.getpid(), "exercise rust", paused_one_ends.wait)
+    desk.follow_exercise([(channel, "1")], os.getpid(), "exercise rust", paused_one_ends.wait)
     first = desk.exercise_reporter
-    desk.follow_exercise(os.getpid(), "exercise python", lambda: time.sleep(5))
+    desk.follow_exercise([(channel, "1")], os.getpid(), "exercise python", lambda: time.sleep(5))
     assert first.ended and desk.exercise_reporter is not first
     paused_one_ends.set()
     time.sleep(0.2)

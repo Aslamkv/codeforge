@@ -599,7 +599,7 @@ class Desk:
         if len(words) < 2:
             return USAGE["exercise"]
         if words[1].lower() != "status":
-            return self.start_exercise(words)
+            return self.start_exercise([(channel, message.chat)], words)
 
         def answer():
             sent = channel.send(message.chat, md(t"🏋️ **{' '.join(words)}**\n{self.tinker(words):block}"))
@@ -616,7 +616,7 @@ class Desk:
         self.exercise_says("🛑 Stopping: its build saves itself first")
         return None
 
-    def start_exercise(self, words, title=None):
+    def start_exercise(self, audience, words, title=None):
         log = projects_folder() / EXERCISE_FOLDER / "exercise.log"
         log.parent.mkdir(parents=True, exist_ok=True)
         start = log.stat().st_size if log.exists() else 0
@@ -627,27 +627,30 @@ class Desk:
                 )
         except OSError as exc:
             return md(t"⚠️ **Could not start it:** {exc}")
-        self.follow_exercise(process.pid, title or " ".join(words), process.wait, (log, start), anew=True)
+        self.follow_exercise(
+            audience, process.pid, title or " ".join(words), process.wait, (log, start), anew=True
+        )
         return None
 
     def adopt_exercise(self):
         exercise = exercising_now()
         lost = next((job for job in Jobs.lost() if job["command"] == "exercise"), None)
+        audience = shown_in(self.channels, exercise_board())
         if exercise and not exercise["reports"]:
             self.follow_exercise(
-                exercise["pid"], exercise["title"], lambda: until_ended(exercise["pid"]), anew=True
+                audience, exercise["pid"], exercise["title"], lambda: until_ended(exercise["pid"]), anew=True
             )
         elif not exercise and lost:
-            self.start_exercise(["resume", f"#{lost['number']}"], lost["title"])
+            self.start_exercise(audience, ["resume", f"#{lost['number']}"], lost["title"])
 
-    def follow_exercise(self, pid, title, ended, log=None, anew=False):
+    def follow_exercise(self, audience, pid, title, ended, log=None, anew=False):
         sent = exercise_board()
         if anew:
             self.take_out(sent)
         if self.exercise_reporter is not None:
             self.exercise_reporter.ended = True
         reporter = self.exercise_reporter = Reporter(
-            everyone(self.channels),
+            audience,
             title,
             pid=pid,
             sent=sent,
@@ -836,7 +839,7 @@ class Desk:
             return md(t"🤷 {why.replace('tinker ', '')}")
         again = ["resume", f"#{job['number']}"]
         if job["command"] == "exercise":
-            return self.start_exercise(again, job["title"])
+            return self.start_exercise(audience, again, job["title"])
         return self.start_task(audience, again, self.root, job["title"])
 
     def stop(self, words):
@@ -1554,6 +1557,10 @@ def in_shell(shell, line, folder, given=None):
 
 def everyone(channels):
     return [(channel, chat) for channel in channels for chat in channel.allowed]
+
+
+def shown_in(channels, board):
+    return [(channel, chat) for channel in channels for name, chat in board if name == channel.name]
 
 
 class Reporter:
