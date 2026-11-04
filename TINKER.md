@@ -349,7 +349,8 @@ A domain is learned like a tool. To research one, its facts checked across sites
 slower). The first round reads the topic's own article first. Each round skips results off the topic and
 reads 6 pages, then 4, keeping what its questions ask; a round that finds nothing searches each question again
 as written, so a research says it found nothing only when every round did. The model frames, reads facts and
-weighs the findings without thinking. A research is kept as facts and findings; it makes no principles.
+weighs the findings at the request's thinking level (see Settings). A research is kept as facts and findings;
+it makes no principles.
 
 A language or a tool is learned mainly from its own documentation, for the version you have installed
 (a language's tools too: its test runner, formatter, linter). The first time takes a search to find what it
@@ -565,6 +566,12 @@ tinker help config                  # every setting you can change, with what it
 
 A value that does not fit is refused, with what the setting takes, and the old value stays.
 
+How hard the model thinks is not a setting: each request (a build, a fix, a question, each chat message) is
+reviewed once and gets one level, `off`, `low`, `medium` or `high`, that every call for it uses. Greetings and
+short questions get `off` and answer in a second or two; a bug, a design question or a long request with many
+parts or files gets `high`; anything else is weighed by one short model call. A model that has no such level
+gets the nearest it has. The call log shows each request's level and why.
+
 Choose where new projects go, and how long the model stays loaded after a call (before each call, other
 loaded models are unloaded):
 
@@ -580,7 +587,6 @@ tinker config learn_searches 1      # at most one follow-up search
 tinker config learn_pages 4         # pages read from each search
 tinker config learn_coverage 0.8    # keep a result only when it holds 80% of the topic's words (60% by default)
 tinker config tool_docs_pages 2     # pages read about each of a language's tools
-tinker config learn_think high      # think harder (and slower) while reading pages
 tinker config web_timeout 60        # wait up to 60 seconds for each search engine
 ```
 

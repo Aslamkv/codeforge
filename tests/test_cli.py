@@ -1062,6 +1062,31 @@ def test_a_blocked_run_says_why_and_how_to_go_on(make_project, make_session, cap
     assert run.ending["status"] == "blocked" and run.ending["headline"] in out
 
 
+@pytest.mark.spec("RVW-3")
+def test_a_run_header_shows_the_requests_think_level(monkeypatch):
+    notes = []
+    monkeypatch.setattr(cli.say, "detail", lambda text, **facts: notes.append(text))
+    run = bare_run(
+        record={"id": "abc123", "task": "a calculator"},
+        args=argparse.Namespace(restart=False),
+        mode="new",
+        started_at=datetime.datetime(2026, 1, 1, 9, 30),
+    )
+    model = argparse.Namespace(
+        name="m",
+        settings={"calibrated": "2026-01-01"},
+        num_ctx=8192,
+        max_tokens=4096,
+        level="high",
+        think="xhigh",
+        keep_alive="5m",
+        max_reply=2048,
+        fix_max=3,
+    )
+    run.print_header(model, "/tmp/calc")
+    assert "think high " in notes[0] and "xhigh" not in notes[0]
+
+
 @pytest.mark.spec("CLI-9")
 def test_the_cycle_a_run_works_on(make_project, make_session):
     def run_on(project, mode, confirm=True, **given):

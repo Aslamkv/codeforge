@@ -1226,7 +1226,7 @@ class ProjectRun:
             say.info(f"Model: {model.name}; started {clock(self.started_at)}", "🤖")
         say.detail(
             f"model {model.name} (calibrated {model.settings.get('calibrated', '?')})   context {model.num_ctx}   "
-            f"input budget {model.max_tokens} tok   think {self.thinking(model)}   keep_alive {model.keep_alive}   "
+            f"input budget {model.max_tokens} tok   think {model.level}   keep_alive {model.keep_alive}   "
             f"reply limit per call (thinking included): {model.max_reply} tokens; fixes at most {model.fix_max}"
         )
 
@@ -1236,10 +1236,6 @@ class ProjectRun:
         if self.mode == "resume":
             return "resuming"
         return "restarting" if self.args.restart else "new"
-
-    @staticmethod
-    def thinking(model):
-        return model.think
 
     def work_safely(self):
         try:
