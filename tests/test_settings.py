@@ -39,7 +39,6 @@ def test_default_config():
         "learn_pages": 8,
         "learn_min_pages": 2,
         "learn_searches": 3,
-        "learn_think": "low",
         "tool_docs_pages": 5,
         "docs_latest_days": 30,
         "fetch_workers": 6,
@@ -85,6 +84,7 @@ def test_config_is_defaults_overridden_by_the_home(home_store):
 @pytest.mark.spec("SET-4")
 def test_a_stored_key_no_setting_has_is_ignored(home_store):
     home_store.put("config", "web_fallback", "duckduckgo")
+    home_store.put("config", "learn_think", "low")
     assert Config.load() == settings.DEFAULT_CONFIG
     Config.check()
 
@@ -98,9 +98,6 @@ def test_a_stored_key_no_setting_has_is_ignored(home_store):
         ("max_growth", 1),
         ("max_growth", True),
         ("max_growth", "2"),
-        ("learn_think", "max"),
-        ("learn_think", "true"),
-        ("learn_think", 1),
         ("test_timeout", 0),
         ("test_timeout", 1.5),
         ("test_timeout", "60"),
@@ -296,7 +293,7 @@ def test_config_set_reads_and_checks_the_value():
     assert Config.set("test_timeout", "90") == 90 and Config.get("test_timeout") == 90
     assert Config.set("keep_alive", "10m") == "10m" and Config.set("keep_alive", "300") == 300
     assert Config.set("max_growth", "1.5") == 1.5
-    assert Config.set("learn_think", "false") is False and Config.set("tool_docs_pages", "12") == 12
+    assert Config.set("tool_docs_pages", "12") == 12
     assert Config.set("projects", "~/Code") == "~/Code"
     with pytest.raises(SystemExit, match="test_timeout must be a whole number"):
         Config.set("test_timeout", "soon")

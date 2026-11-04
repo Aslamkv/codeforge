@@ -318,7 +318,7 @@ class Inducer:
         self.model = model
         self.principles = principles
 
-    def induce(self, passages, scope, think=None, look_for="", label="Induce principles from the passages"):
+    def induce(self, passages, scope, look_for="", label="Induce principles from the passages"):
         passages = [passage for passage in passages if passage["text"].strip()]
         if not passages:
             return []
@@ -329,7 +329,6 @@ class Inducer:
             label,
             lambda reply: self.read_deltas(reply.json(), passages, known, scope),
             attempts=2,
-            think=think,
         )
         return answer.value or []
 

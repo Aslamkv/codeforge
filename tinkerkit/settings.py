@@ -25,7 +25,6 @@ DEFAULT_CONFIG = frozendict(
         "learn_pages": 8,
         "learn_min_pages": 2,
         "learn_searches": 3,
-        "learn_think": "low",
         "tool_docs_pages": 5,
         "docs_latest_days": 30,
         "fetch_workers": 6,
@@ -40,11 +39,8 @@ DEFAULT_CONFIG = frozendict(
 class Setting(namedtuple("Setting", "kind owner least whole above", defaults=("config", None, False, False))):
     __slots__ = ()
     SECONDS_OR_DURATION_RE = re.compile(r"-?\d+|-?(\d+(\.\d+)?(ns|us|ms|s|m|h))+")
-    THINK_WORDS = frozendict({"true": True, "false": False, "null": None})
 
     def read(self, text):
-        if self.kind == "think" and text.lower() in self.THINK_WORDS:
-            return self.THINK_WORDS[text.lower()]
         if self.kind == "duration" and re.fullmatch(r"-?\d+", text):
             return int(text)
         if self.kind == "number":
@@ -61,10 +57,6 @@ class Setting(namedtuple("Setting", "kind owner least whole above", defaults=("c
                 return self.in_range(value)
             case "duration":
                 return bool(self.SECONDS_OR_DURATION_RE.fullmatch(str(value)))
-            case "think":
-                return value in ("high", "medium", "low", True, False, None) and not (
-                    value in (0, 1) and not isinstance(value, bool)
-                )
         return value is None or isinstance(value, str)
 
     def in_range(self, value):
@@ -79,8 +71,6 @@ class Setting(namedtuple("Setting", "kind owner least whole above", defaults=("c
                 return f"{whole} above {self.least}" if self.above else f"{whole}, {self.least} or more"
             case "duration":
                 return "seconds (0, 300; -1 keeps the model loaded) or a duration (10m, 1h)"
-            case "think":
-                return '"high", "medium", "low", true, false or null'
         return "text"
 
 
@@ -98,7 +88,6 @@ SETTINGS = frozendict(
         "learn_pages": Setting("number", least=1, whole=True),
         "learn_min_pages": Setting("number", least=1, whole=True),
         "learn_searches": Setting("number", least=1, whole=True),
-        "learn_think": Setting("think"),
         "tool_docs_pages": Setting("number", least=0, whole=True),
         "docs_latest_days": Setting("number", least=0),
         "fetch_workers": Setting("number", least=1, whole=True),
@@ -273,8 +262,6 @@ SEARCHES_PER_RESEARCH_QUESTION = 2
 RESEARCH_PAGES_PER_ROUND = (6, 4)
 RESEARCH_GAPS = 2
 RESEARCH_FACTS_CHECKED = 2
-RESEARCH_FRAME_THINK = False
-RESEARCH_ANALYSIS_THINK = False
 SAME_CLAIM_SIMILARITY = 0.8
 REPEAT_CLAIM_SIMILARITY = 0.9
 MAX_RECALL_TOPICS = 6
