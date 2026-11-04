@@ -43,6 +43,9 @@ def test_the_word_rule_finds_high_requests_without_a_model_call(request_text, fa
         "What is a monad",
         "rename the variable x to count",
         "format this paragraph please",
+        "list the software engineering principles",
+        "Name the SOLID principles",
+        "define coupling",
     ],
 )
 def test_the_word_rule_finds_short_simple_requests_off(request_text, fake_ollama, model_log):
@@ -65,13 +68,15 @@ def test_a_high_rule_wins_over_an_off_rule(fake_ollama, model_log):
 
 
 @pytest.mark.spec("RVW-1")
-def test_other_requests_ask_the_reviewer_at_think_high(measured_model, fake_ollama, tinker_home, model_log):
+def test_other_requests_ask_the_reviewer_without_thinking(
+    measured_model, fake_ollama, tinker_home, model_log
+):
     fake_ollama.show(MODEL, {"thinking": {"values": [False, "low", "medium", "high"]}})
     fake_ollama.reply("Level: low. A small, plain change.\nmore")
     request_text = "Write a short poem about the sea in the evening for my sister's birthday card"
     assert RequestReview(model_log).level(request_text) == ("low", "Level: low. A small, plain change.")
     call = fake_ollama.calls[-1]
-    assert call["think"] == "high"
+    assert call["think"] is False
     assert call["messages"] == [
         {"role": "system", "content": Prompts.REVIEW_PROMPT},
         {"role": "user", "content": request_text},

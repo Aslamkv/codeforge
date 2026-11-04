@@ -16,7 +16,22 @@ class RequestReview:
     HARD_WORDS = frozenset({"bug", "fails", "design", "architecture", "refactor"})
     HARD_PHRASES = ("why does",)
     SIMPLE_WORDS = frozenset(
-        {"hi", "hello", "thanks", "what", "who", "when", "where", "how", "is", "rename", "format"}
+        {
+            "hi",
+            "hello",
+            "thanks",
+            "what",
+            "who",
+            "when",
+            "where",
+            "how",
+            "is",
+            "list",
+            "name",
+            "define",
+            "rename",
+            "format",
+        }
     )
 
     def __init__(self, log):
@@ -37,7 +52,7 @@ class RequestReview:
         if len(request.paths()) >= MANY_FILES:
             return "high", f"a request naming {MANY_FILES} or more files"
         if len(request.words) <= SHORT_REQUEST_WORDS and request.opens_with(self.SIMPLE_WORDS):
-            return "off", "a short greeting, question, rename or format"
+            return "off", "a short greeting, question, list, definition, rename or format"
         return None
 
     def reviewed(self, request):
@@ -50,7 +65,7 @@ class RequestReview:
                     {"role": "user", "content": request},
                 ],
                 REVIEW_REPLY_TOKENS,
-                "high",
+                "off",
             )
         except OllamaError as error:
             return "medium", f"the review failed: {error}"
