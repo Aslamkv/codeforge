@@ -1339,7 +1339,9 @@ class Talk:
         system += f"\n\n{now}" if now else "\n\nNo task is running now."
         level = reviewed_level(message.text)
         try:
-            text = self.ask(channel, message.chat, [{"role": "system", "content": system}] + asked, tokens, level)
+            text = self.ask(
+                channel, message.chat, [{"role": "system", "content": system}] + asked, tokens, level
+            )
         except OllamaError as exc:
             return md(t"⚠️ **The model did not answer:** {first_words(exc)}")
         text = text or "_(no answer)_"
@@ -1437,7 +1439,9 @@ class Shell:
         if not line or "\n" in line:
             self.questions.answered(channel, message.chat)
             return md(t"🤷 **No command found:** {does or 'describe it another way'}")
-        self.wait_for_confirm(channel, message.chat, {"line": line, "asked": message.text, "level": level, "shown": None})
+        self.wait_for_confirm(
+            channel, message.chat, {"line": line, "asked": message.text, "level": level, "shown": None}
+        )
         return self.proposal(line, does)
 
     def wait_for_confirm(self, channel, chat, proposed):

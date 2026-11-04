@@ -51,7 +51,9 @@ def test_the_word_rule_finds_short_simple_requests_off(request_text, fake_ollama
 
 
 @pytest.mark.spec("RVW-1")
-def test_a_simple_word_inside_a_request_does_not_make_it_off(measured_model, fake_ollama, tinker_home, model_log):
+def test_a_simple_word_inside_a_request_does_not_make_it_off(
+    measured_model, fake_ollama, tinker_home, model_log
+):
     fake_ollama.reply("low: a short story")
     assert RequestReview(model_log).level("Write a story about a dragon who learns how to bake")[0] == "low"
 
@@ -88,9 +90,13 @@ def test_a_reply_naming_no_level_is_medium(measured_model, fake_ollama, tinker_h
 @pytest.mark.spec("RVW-1")
 def test_a_failed_reviewer_call_is_medium(measured_model, fake_ollama, tinker_home, model_log):
     fake_ollama.reply(OllamaError("down"))
-    assert RequestReview(model_log).level("Write a story about a dragon who learns to bake bread")[0] == "medium"
+    assert (
+        RequestReview(model_log).level("Write a story about a dragon who learns to bake bread")[0] == "medium"
+    )
     Config.save(**{"model": None})
-    assert RequestReview(model_log).level("Write a story about a dragon who learns to bake bread")[0] == "medium"
+    assert (
+        RequestReview(model_log).level("Write a story about a dragon who learns to bake bread")[0] == "medium"
+    )
     assert len(fake_ollama.calls) == 1
 
 

@@ -1629,7 +1629,9 @@ def test_shell_proposes_one_command(measured_model, fake_ollama):
 def test_shell_runs_the_confirmed_command(tmp_path):
     shell, channel = Shell(Talk("cmds"), tmp_path, Questions()), Recorder()
     shell.shell = "/bin/sh"
-    shell.run(channel, "1", {"line": "pwd; echo oops >&2; exit 3", "asked": "where", "level": "low", "shown": None})
+    shell.run(
+        channel, "1", {"line": "pwd; echo oops >&2; exit 3", "asked": "where", "level": "low", "shown": None}
+    )
     final = channel.texts()[-1]
     assert (
         final.startswith("❌ `pwd; echo oops >&2; exit 3` · _exit 3_")

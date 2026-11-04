@@ -91,7 +91,9 @@ def test_quick_calls_use_the_measured_model(measured_model, fake_ollama, tinker_
 
 
 @pytest.mark.spec("MOD-25")
-def test_a_quick_reply_thinks_at_a_given_level_as_the_model_takes_it(measured_model, fake_ollama, tinker_home):
+def test_a_quick_reply_thinks_at_a_given_level_as_the_model_takes_it(
+    measured_model, fake_ollama, tinker_home
+):
     fake_ollama.reply("a", times=3)
     Models.quick_reply([{"role": "user", "content": "hi"}], 7, "high")
     assert fake_ollama.calls[-1]["think"] is None

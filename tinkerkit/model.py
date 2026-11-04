@@ -85,7 +85,9 @@ class Model:
         self.name, self.settings = name, settings
         self.max_tokens, self.num_ctx = int(settings["max_prompt_tokens"]), int(settings["num_ctx"])
         self.level = level
-        self.think = settings.get("think") if level is None else ThinkLevels.taken(level, ThinkLevels.values(name))
+        self.think = (
+            settings.get("think") if level is None else ThinkLevels.taken(level, ThinkLevels.values(name))
+        )
         self.max_reply, self.fix_max = int(settings["max_reply_tokens"]), int(settings["fix_max_tokens"])
         self.keep_alive = keep_alive
         self.options = {"num_batch": int(settings["num_batch"])} if settings.get("num_batch") else {}
