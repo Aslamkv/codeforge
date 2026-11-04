@@ -10,7 +10,7 @@ from conftest import MEASURED, MODEL, PY, TOOLCHAIN, criterion, file_block, plan
 from tinkerkit import cli
 from tinkerkit.cli import Cli, Commands, CycleRunner, Doctor, ProjectFolder, ProjectRun
 from tinkerkit.knowledge import Knowledge, Library, ResearchLearner
-from tinkerkit.model import Models, Ollama, OllamaError
+from tinkerkit.model import Models, Ollama, OllamaError, ThinkLevels
 from tinkerkit.principles import Principles
 from tinkerkit.project import Runs, Tracker, project_store
 from tinkerkit.session import Phase, Stopped
@@ -504,7 +504,7 @@ def test_config(measured_model, capsys):
         f"model in use:    {MODEL} (calibrated",
         "input budget:    8192 tokens",
         "context:         32768 tokens",
-        "think:           high for planning, medium for building",
+        "think:           high",
         "keep_alive:      '30m'",
         "test_timeout:    60",
         "web:             searches mwmbl, wikipedia, wikibooks",
@@ -835,8 +835,10 @@ def printed(folder):
 
 
 @pytest.mark.spec("CLI-13")
-def test_a_task_is_built_end_to_end(run_ready, fake_ollama, home_store):
+def test_a_task_is_built_end_to_end(run_ready, fake_ollama, home_store, monkeypatch):
     folder = run_ready
+    monkeypatch.setattr(ThinkLevels, "values", staticmethod(lambda name: ["low", "medium", "high"]))
+    fake_ollama.reply("high: a whole project to plan and build")
     fake_ollama.reply(json.dumps(SPEC_REPLY), when="Spec")
     fake_ollama.reply(file_block("test_calc.py", TESTS), when="Tests test_calc.py")
     fake_ollama.reply(file_block("calc.py", CODE), when="Write calc.py")
@@ -858,6 +860,7 @@ def test_a_task_is_built_end_to_end(run_ready, fake_ollama, home_store):
     assert build("task", "a calculator that adds and subtracts", "--workdir", str(folder)) == 0
     labels = [label.split(" [")[0] for label in fake_ollama.labels()]
     assert labels == [
+        "",
         "Spec (attempt 1)",
         "Tests test_calc.py (3)",
         "Write calc.py",
@@ -865,7 +868,7 @@ def test_a_task_is_built_end_to_end(run_ready, fake_ollama, home_store):
         "README (attempt 1)",
         "Lessons (attempt 1)",
     ]
-    no_quick_draft = fake_ollama.calls[0]["think"] == "high"
+    no_quick_draft = fake_ollama.calls[1]["think"] == "high"
     assert fake_ollama.queue == [] and no_quick_draft
     assert "return a - b" in (folder / "calc.py").read_text()
     spec = plan_of(folder)
@@ -929,9 +932,10 @@ def test_learning_checks_everything_before_loading_and_finding_nothing_is_an_err
     Config.save(embed_model="embedder")
     finder_class, method = finder
     monkeypatch.setattr(getattr(cli, finder_class), method, lambda self, *args, **kwargs: None)
+    fake_ollama.reply("medium: a plain lookup")
     with pytest.raises(SystemExit, match=nothing):
         Commands(parse(*words)).run()
-    assert fake_ollama.calls == []
+    assert fake_ollama.labels() == [""]
     assert "Time taken: 0s" in capsys.readouterr().out
     Config.save(model=None)
     with pytest.raises(SystemExit, match="No model in use"):
@@ -979,8 +983,10 @@ def test_memory_refuses_words_it_cannot_read(home_store, capsys):
 
 
 @pytest.mark.spec("CLI-10")
-def test_a_task_waits_for_its_plan_then_confirm_builds_it(run_ready, fake_ollama, home_store):
+def test_a_task_waits_for_its_plan_then_confirm_builds_it(run_ready, fake_ollama, home_store, monkeypatch):
     folder = run_ready
+    monkeypatch.setattr(ThinkLevels, "values", staticmethod(lambda name: ["low", "medium", "high"]))
+    fake_ollama.reply("low: a small plan to confirm")
     fake_ollama.reply(json.dumps(SPEC_REPLY), when="Spec")
     assert build("task", "a calculator that adds and subtracts", "--confirm", "--workdir", str(folder)) == 0
     out = printed(folder)
@@ -989,7 +995,7 @@ def test_a_task_waits_for_its_plan_then_confirm_builds_it(run_ready, fake_ollama
         and "  C2  calc.sub(5, 3) is 2" in out
         and "Not included: a GUI" in out
     )
-    assert fake_ollama.calls[0]["think"] == "low" and not (folder / "calc.py").exists()
+    assert fake_ollama.calls[1]["think"] == "low" and not (folder / "calc.py").exists()
     run = record_of(folder)
     assert run["status"] == "awaiting" and plan_of(folder)["cycles"][0]["phase"] == "setup"
     assert f"Build it: tinker confirm @{run['id']}" in out
@@ -998,6 +1004,7 @@ def test_a_task_waits_for_its_plan_then_confirm_builds_it(run_ready, fake_ollama
         file_block("calc.py", fixed), when="Write"
     )
     fake_ollama.reply(json.dumps(README), when="README")
+    fake_ollama.reply("medium: a plain build")
     assert build("confirm", f"@{run['id']}") == 0
     assert "Plan confirmed: building it" in printed(folder)
     assert record_of(folder)["status"] == "done" and fake_ollama.queue == []
@@ -1006,6 +1013,7 @@ def test_a_task_waits_for_its_plan_then_confirm_builds_it(run_ready, fake_ollama
 @pytest.mark.spec("CLI-10")
 def test_amend_plans_again_and_waits_again(run_ready, fake_ollama):
     folder = run_ready
+    fake_ollama.reply("medium: a plain build")
     fake_ollama.reply(json.dumps(SPEC_REPLY), when="Spec")
     build("task", "a calculator that adds and subtracts", "--confirm", "--workdir", str(folder))
     more = dict(
@@ -1013,6 +1021,7 @@ def test_amend_plans_again_and_waits_again(run_ready, fake_ollama):
         criteria=SPEC_REPLY["criteria"]
         + [{"text": "calc.mul(2, 3) is 6", "source": "adds", "test": "test_calc.py::test_mul"}],
     )
+    fake_ollama.reply("medium: a plain change")
     fake_ollama.reply(json.dumps(more), when="Amend the spec")
     assert build("amend", "also multiply", "--workdir", str(folder)) == 0
     cycle = plan_of(folder)["cycles"][0]
