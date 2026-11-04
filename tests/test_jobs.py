@@ -362,7 +362,7 @@ def test_the_conversation_stops_and_resumes_jobs(home_store, tmp_path, monkeypat
     monkeypatch.setattr(
         desk,
         "start_task",
-        lambda arguments, folder, title, *rest, **kwargs: started.append((arguments, title)),
+        lambda audience, arguments, folder, title, *rest, **kwargs: started.append((arguments, title)),
     )
     monkeypatch.setattr(desk, "start_exercise", lambda words, title=None: started.append((words, title)))
     monkeypatch.setattr(desk, "stop_exercise", lambda: told.append("exercise"))
@@ -467,8 +467,15 @@ def test_the_conversation_starts_a_task_while_another_runs(home_store, tmp_path,
 
     monkeypatch.setattr(desk, "spawn", lambda arguments: spawned.append(arguments) or Running())
     monkeypatch.setattr(desk, "follow", lambda process, reporter, task: None)
-    assert desk.start_task(["learn", "go"], tmp_path, "learn go") is None
-    assert desk.start_task(["exercise", "python"], tmp_path, "exercise python") is None
+    assert (
+        desk.start_task(conversation.everyone(desk.channels), ["learn", "go"], tmp_path, "learn go") is None
+    )
+    assert (
+        desk.start_task(
+            conversation.everyone(desk.channels), ["exercise", "python"], tmp_path, "exercise python"
+        )
+        is None
+    )
     assert spawned == [["learn", "go"], ["exercise", "python"]] and len(desk.live_tasks) == 2
     desk.reporter.ended = True
 

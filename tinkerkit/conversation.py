@@ -537,20 +537,20 @@ class Desk:
         if deletes(words) and "--yes" not in words:
             return self.ask_first(channel, chat, words)
         if kind == "job":
-            return self.start_task(words, self.root, " ".join(words))
+            return self.start_task([(channel, chat)], words, self.root, " ".join(words))
         shown = self.tinker(words)
         return md(t"⚙️ **{' '.join(words)}**\n{shown:block}")
 
     def handlers(self, channel, message, words):
         command = words[0]
         return {
-            "task": lambda: self.new_task(words),
+            "task": lambda: self.new_task([(channel, message.chat)], words),
             "confirm": lambda: self.decide(command, words),
             "amend": lambda: self.decide(command, words),
             "rename": lambda: self.decide(command, words),
-            "resume": lambda: self.resume(words),
+            "resume": lambda: self.resume([(channel, message.chat)], words),
             "stop": lambda: self.stop(words),
-            "research": lambda: self.research(words),
+            "research": lambda: self.research([(channel, message.chat)], words),
             "exercise": lambda: self.exercise(channel, message, words),
             "runs": lambda: self.report(command, words),
             "status": lambda: self.report(command, words),
@@ -584,8 +584,12 @@ class Desk:
             return self.memory_graph(channel, chat, words)
         return md(t"🧠 **{' '.join(words)}**\n{self.tinker(words):block}")
 
-    def research(self, words):
-        return self.start_task(words, self.root, " ".join(words)) if len(words) > 1 else USAGE["research"]
+    def research(self, audience, words):
+        return (
+            self.start_task(audience, words, self.root, " ".join(words))
+            if len(words) > 1
+            else USAGE["research"]
+        )
 
     def exercise(self, channel, message, words):
         if len(words) < 2:
@@ -690,11 +694,11 @@ class Desk:
         channel.send_file(chat, page, md(t"🧠 **Tinker's memory**\n{shown}"))
         return None
 
-    def new_task(self, words):
+    def new_task(self, audience, words):
         if len(words) < 2:
             return USAGE["task"]
         request = " ".join(words[1:])
-        return self.start_task(["task", request], self.root, request)
+        return self.start_task(audience, ["task", request], self.root, request)
 
     def decide(self, command, words):
         waiting = self.waiting_plan or {}
@@ -713,6 +717,7 @@ class Desk:
         target = waiting["run"] if mine else target
         if command == "confirm":
             started = self.start_task(
+                everyone(self.channels),
                 ["resume", f"@{target}"],
                 folder,
                 title,
@@ -722,7 +727,11 @@ class Desk:
         else:
             change = " ".join(rest)
             started = self.start_task(
-                ["amend", f"@{target}", change], folder, title, md(t"✏️ **Changing the plan:** {change}")
+                everyone(self.channels),
+                ["amend", f"@{target}", change],
+                folder,
+                title,
+                md(t"✏️ **Changing the plan:** {change}"),
             )
         return self.on_task(waiting if mine else {}, started)
 
@@ -782,6 +791,7 @@ class Desk:
         return self.on_task(
             waiting,
             self.start_task(
+                everyone(self.channels),
                 ["resume", f"@{waiting['run']}"],
                 waiting["folder"],
                 waiting["title"],
@@ -810,10 +820,10 @@ class Desk:
         waiting["title"] = f"{name}: {waiting['title'].split(': ', 1)[-1]}"
         waiting["plan"] = waiting["plan"].replace(f"📁 `{Path(old).name}`", f"📁 `{name}`")
 
-    def resume(self, words):
+    def resume(self, audience, words):
         name, rest = refs(words[1:])
         if name and not rest:
-            return self.start_task(["resume", f"@{name}"], self.root, f"resume @{name}")
+            return self.start_task(audience, ["resume", f"@{name}"], self.root, f"resume @{name}")
         number = job_number(words[1]) if len(words) == 2 else None
         if len(words) > 2 or (len(words) == 2 and number is None):
             return USAGE["resume"]
@@ -825,7 +835,7 @@ class Desk:
         again = ["resume", f"#{job['number']}"]
         if job["command"] == "exercise":
             return self.start_exercise(again, job["title"])
-        return self.start_task(again, self.root, job["title"])
+        return self.start_task(audience, again, self.root, job["title"])
 
     def stop(self, words):
         if len(words) > 1:
@@ -902,7 +912,7 @@ class Desk:
             return
         words = asking["words"] + ["--yes"]
         if kind_of(words) == "job":
-            refused = self.start_task(words, self.root, " ".join(asking["words"]))
+            refused = self.start_task([(channel, chat)], words, self.root, " ".join(asking["words"]))
             if refused:
                 channel.show(chat, asking["shown"], refused, done=True)
             return
@@ -972,13 +982,13 @@ class Desk:
             t"{'✅' if code == 0 else '❌'} **{title}** {line:code} · _exit {code}_{fed:md}\n{printed:md}"
         )
 
-    def start_task(self, arguments, folder, title, phase=Tracker.STARTING, sent=None, keep=""):
+    def start_task(self, audience, arguments, folder, title, phase=Tracker.STARTING, sent=None, keep=""):
         run = self.run_named(arguments)
         sent = sent if sent is not None else self.messages_by_run.get(run) if run else None
         with self.lock:
             self.task = {"arguments": arguments, "folder": folder, "title": title, "run": run}
             self.reporter = Reporter(
-                everyone(self.channels),
+                audience,
                 title,
                 sent=sent,
                 phase=phase,

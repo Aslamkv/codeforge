@@ -1883,6 +1883,17 @@ def test_research_in_a_chat_is_the_research_job_ending_with_its_answer(desk):
     assert "✅ **Researched it.**" in shown and shown.endswith("**Python 3.14** came out in October [1].")
 
 
+@pytest.mark.spec("CNV-18")
+def test_a_job_shows_its_progress_only_in_the_chat_that_asked(desk):
+    desk, channel, script = desk
+    channel.allowed = ["1", "2"]
+    say(desk, channel, "/research the newest Python")
+    wait_until(lambda: not desk.busy())
+    wait_until(lambda: any("came out in October" in text for _, chat, _, text in channel.log if chat == "1"))
+    elsewhere = [text for kind, chat, _, text in channel.log if chat == "2" and kind in ("send", "edit")]
+    assert not any("research" in text or "October" in text for text in elsewhere)
+
+
 @pytest.mark.spec("CNV-12")
 def test_confirm_asks_a_new_projects_folder_once_then_builds(desk):
     desk, channel, script = desk
@@ -2477,7 +2488,7 @@ def test_a_job_says_its_status_as_it_starts_and_ends(desk, monkeypatch):
     job = Running()
     monkeypatch.setattr(listening, "spawn", lambda arguments: job)
     monkeypatch.setattr(listening, "follow", lambda process, reporter, task: None)
-    listening.start_task(["learn", "go"], Path.cwd(), "learn go")
+    listening.start_task(conversation.everyone([channel]), ["learn", "go"], Path.cwd(), "learn go")
     sent = channel.texts("send")
     assert sent[0].startswith("🟢 **Tinker** · idle")
     assert sent[1].startswith("🔄 **Tinker** · working on learn go\n\n🕒") and "learn go" in sent[2]
