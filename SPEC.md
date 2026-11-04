@@ -826,6 +826,14 @@ Each request's one thinking level.
   learn goes on through its journal, and a reading by its chapters' states. Both share `Tracked`: its
   `step(phase, said)` says the words and enters the step, and its `outcome(text)` gives the tracker what came of
   it; neither touches a tracker when there is none.
+- **PRJ-17** A job's clock starts when its process starts, for every kind of job (a build, an exercise, ask,
+  teach, read, learn, research), and stops at its end. The Tinkering line's time (**MSG-4**), the seconds
+  taken, `Done in` (**CNV-17**) and `Time taken` all count from that one start, so they agree and cover all
+  the person waited for.
+- **PRJ-18** A job says what happens while it starts, in plain words, before its own steps: `🚀 Getting Tinker
+  ready` from its start; `📦 Loading the model into memory` before its first model call, only when the model
+  in use is not in memory (Ollama's loaded models); `🧭 Working out how much thought your request needs` while
+  the request review (**RVW**) asks the model, never when it rules without one.
 
 ## fetcher (FET)
 

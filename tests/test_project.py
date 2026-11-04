@@ -398,6 +398,17 @@ def test_outcome():
         assert (outcome.status, outcome.exit_code) == (status, code)
 
 
+@pytest.mark.spec("PRJ-17")
+def test_a_tracker_given_a_start_keeps_it_as_started():
+    assert Tracker("a calculator", started=1000.0).state["started"] == 1000.0
+    assert Tracker("a calculator").state["started"] > 1000.0
+
+
+@pytest.mark.spec("PRJ-18")
+def test_a_tracker_starts_by_getting_tinker_ready():
+    assert Tracker("a calculator").state["doing"] == "🚀 Getting Tinker ready"
+
+
 @pytest.mark.spec("PRJ-14")
 def test_the_tracker_publishes_each_change_in_its_job(home_store, project_dir):
     with Jobs.running(["task", "a", "calculator"]):

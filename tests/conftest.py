@@ -18,6 +18,7 @@ from tinkerkit.web import WebPage, readable
 REAL_HOME = Home.root
 ACCENT, DIM, BOLD, GREY, RESET = "\033[38;5;67m", "\033[2m", "\033[1m", "\033[48;5;236m", "\033[0m"
 MODEL = "fake-model"
+LOADING_PHASE = "📦 Loading the model into memory"
 MEASURED = {
     "model": MODEL,
     "calibrated": "2026-10-20 10:00",

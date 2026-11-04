@@ -663,10 +663,10 @@ class Tracker:
         "read": ("🌐 Searching the web and reading the pages", "🌐 Pages read"),
         "write": ("✍️ Writing the answer from the pages", "✍️ Answer written"),
     }
-    STARTING = "🚀 Starting: the model loads"
+    STARTING = "🚀 Getting Tinker ready"
     QUIET_PUBLISH_SECONDS = 1.0
 
-    def __init__(self, title, before=0.0):
+    def __init__(self, title, before=0.0, started=None):
         self.pid, self.store, self.published = os.getpid(), None, 0.0
         self.thought_began = None
         self.published_in = published_in()
@@ -691,7 +691,7 @@ class Tracker:
             "waiting": None,
             "ended": None,
             "before": before,
-            "started": time.time(),
+            "started": time.time() if started is None else started,
             "seconds": 0.0,
             "pid": self.pid,
             "pid_began": began_at(self.pid),

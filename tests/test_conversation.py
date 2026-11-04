@@ -46,7 +46,7 @@ from tinkerkit.conversation import (
 from tinkerkit.jobs import began_at
 from tinkerkit.ledger import DONE_NOTE_KEPT_SECONDS, Ledger
 from tinkerkit.messages import DIMMED, HEADING, Text, styled
-from tinkerkit.model import Models, Ollama, ThinkLevels
+from tinkerkit.model import Models, Ollama, QuickModel, ThinkLevels
 from tinkerkit.project import Runs, Tracker
 from tinkerkit.settings import Config, Home
 
@@ -1595,7 +1595,7 @@ def test_talk_without_a_model_says_so():
 def test_a_chat_reply_that_is_a_command_line_is_handled_or_offered(desk, monkeypatch):
     desk, channel, _ = desk
     replies = []
-    monkeypatch.setattr(Models, "quick", staticmethod(lambda: ("m", {}, None)))
+    monkeypatch.setattr(Models, "quick", staticmethod(lambda: QuickModel("m", {}, None)))
     monkeypatch.setattr(Models, "quick_reply", staticmethod(lambda *asked, **options: replies.pop(0)))
 
     def chat(reply, shown):
@@ -2682,7 +2682,7 @@ def test_the_terminal_opens_the_file_and_other_channels_send_where_it_is(monkeyp
 def test_a_command_line_run_once_confirmed_pauses_the_job_while_its_output_is_read(tmp_path, monkeypatch):
     order = []
     talk = Talk("cmds", pausing_jobs=pausing_into(order))
-    monkeypatch.setattr(Models, "quick", staticmethod(lambda: ("m", {}, None)))
+    monkeypatch.setattr(Models, "quick", staticmethod(lambda: QuickModel("m", {}, None)))
     monkeypatch.setattr(
         Models, "quick_reply", staticmethod(lambda *asked, **options: order.append("read") or "it says hi")
     )

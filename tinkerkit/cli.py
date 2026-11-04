@@ -76,13 +76,13 @@ DoctorCheck = namedtuple("DoctorCheck", "required what check")
 
 
 def main():
-    script_started, started_at = time.perf_counter(), datetime.datetime.now()
+    started_at = datetime.datetime.now()
     for signum in (signal.SIGTERM, signal.SIGHUP):
         signal.signal(signum, ended_like_ctrl_c)
     try:
         argv = Cli.named(Jobs.arguments(sys.argv[1:]))
         with Jobs.running(argv):
-            run(Cli.parse(argv), script_started, started_at)
+            run(Cli.parse(argv), started_at)
     except KeyboardInterrupt:
         raise SystemExit("\nInterrupted.")
     except OllamaError as exc:
@@ -99,15 +99,15 @@ def cannot_read_or_write(exc):
     return f"\n{exc.strerror or exc}: {exc.filename or ''}".rstrip(": ")
 
 
-def run(args, script_started, started_at):
+def run(args, started_at):
     if args.reset:
         return Home.reset(args.yes)
     open_home()
     if Cli.works_for_hours(args):
         Home.keep_awake()
-    if Commands(args).run():
+    if Commands(args, started_at).run():
         return
-    ProjectRun(args, script_started, started_at).execute()
+    ProjectRun(args, started_at).execute()
 
 
 def open_home():
@@ -569,8 +569,9 @@ class Cli:
 
 
 class Commands:
-    def __init__(self, args):
+    def __init__(self, args, started_at=None):
         self.args = args
+        self.started_at = started_at or datetime.datetime.now()
 
     def run(self):
         run = self.handlers().get(self.args.command)
@@ -733,19 +734,18 @@ class Commands:
         if definition is not None or TaughtCommands.alias(topic):
             TaughtCommands.teach(topic, definition)
             return
-        model, embeddings, internet = self.learning_tools("tinker learn", topic)
-        Commands.reported(
-            f"Learning {topic}",
-            model,
-            lambda tracker: self.learned(topic, SlotLearner(model, internet, embeddings, tracker)),
+        self.follow(f"Learning {topic}")
+        self.reported(
+            lambda: self.learning_tools("tinker learn", topic),
+            lambda tracker, model, embeddings, internet: self.learned(
+                topic, SlotLearner(model, internet, embeddings, tracker)
+            ),
             blocked=lambda stopped: Commands.blocked(f"Nothing learned about {topic}", stopped),
         )
 
-    @staticmethod
-    def followed(title):
-        tracker = Tracker(title)
-        say.follow(tracker.heard)
-        return tracker
+    def follow(self, title):
+        self.tracker = Tracker(title, started=self.started_at.timestamp())
+        say.follow(self.tracker.heard)
 
     def learned(self, topic, learner):
         entry = learner.learn(topic, deep=True)
@@ -769,11 +769,10 @@ class Commands:
 
     def research(self):
         topic = self.args.research
-        model, embeddings, internet = self.learning_tools("tinker research", topic)
-        Commands.reported(
-            f"Researching {topic}",
-            model,
-            lambda tracker: Commands.researched(
+        self.follow(f"Researching {topic}")
+        self.reported(
+            lambda: self.learning_tools("tinker research", topic),
+            lambda tracker, model, embeddings, internet: Commands.researched(
                 topic, Commands.researcher(model, internet, embeddings, tracker).research(topic)
             ),
             blocked=lambda stopped: Commands.blocked(f"Nothing found about {topic}", stopped),
@@ -797,11 +796,10 @@ class Commands:
         researched = ending("done", f"Researched {entry['name']}", details, [("See it", "tinker memory")])
         return {**researched, "text": Researcher.answer(entry)}
 
-    @staticmethod
-    def learning_tools(option, request):
+    def learning_tools(self, option, request):
         name, settings = Commands.checked_model()
         embeddings = Embeddings.required(option)
-        return LearningTools(Commands.model_in_use(name, settings, request), embeddings, Internet())
+        return LearningTools(self.model_in_use(name, settings, request), embeddings, Internet())
 
     @staticmethod
     def checked_model():
@@ -810,15 +808,16 @@ class Commands:
         Config.check()
         return SelectedModel(name, settings)
 
-    @staticmethod
-    def model_in_use(name, settings, request):
+    def model_in_use(self, name, settings, request):
         log = calls_log()
         say.keep_log(log)
-        return Commands.configured_model(name, settings, log, request)
+        configured = Commands.configured_model(name, settings, log, request, self.tracker.phase)
+        Ollama.loading(name, self.tracker.phase)
+        return configured
 
     @staticmethod
-    def configured_model(name, settings, log, request):
-        level, _ = RequestReview(log).level(request)
+    def configured_model(name, settings, log, request, phase=lambda doing: None):
+        level, _ = RequestReview(log, phase).level(request)
         return Model(
             name,
             settings,
@@ -830,24 +829,26 @@ class Commands:
 
     def ask(self):
         question = self.args.ask
-        model = Commands.model_in_use(*Commands.checked_model(), question)
-        memory = Memory()
-        Commands.reported(
-            f"Asking: {first_line(question, 60)}",
-            model,
-            lambda tracker: Asker(model, memory, tracker).answer(question),
+        self.follow(f"Asking: {first_line(question, 60)}")
+        self.reported(
+            lambda: (self.model_in_use(*Commands.checked_model(), question), Memory()),
+            lambda tracker, model, memory: Asker(model, memory, tracker).answer(question),
         )
 
     def teach(self):
         teaching = self.args.teach
+        self.follow(f"Teaching: {first_line(teaching, 60)}")
+        self.reported(
+            lambda: self.teaching_tools(teaching),
+            lambda tracker, model, internet, memory: Teacher(model, internet, memory, tracker).teach(
+                teaching
+            ),
+        )
+
+    def teaching_tools(self, teaching):
         name, settings = Commands.checked_model()
         internet = Internet()
-        model, memory = Commands.model_in_use(name, settings, teaching), Memory()
-        Commands.reported(
-            f"Teaching: {first_line(teaching, 60)}",
-            model,
-            lambda tracker: Teacher(model, internet, memory, tracker).teach(teaching),
-        )
+        return self.model_in_use(name, settings, teaching), internet, Memory()
 
     def read(self):
         words = self.args.read
@@ -862,41 +863,40 @@ class Commands:
                 return
             Jobs.retarget(["read", f"#{number}"])
         title = reading.known_reading(number)["title"]
-        model = Commands.model_in_use(*Commands.checked_model(), f"{title} {focus}")
-        Commands.reported(
-            f"Reading #{number} {first_line(title, 50)}",
-            model,
-            lambda tracker: Reader(model, tracker).read(number, focus),
+        self.follow(f"Reading #{number} {first_line(title, 50)}")
+        self.reported(
+            lambda: (self.model_in_use(*Commands.checked_model(), f"{title} {focus}"),),
+            lambda tracker, model: Reader(model, tracker).read(number, focus),
         )
 
     def exercise(self):
         what = self.args.exercise
         if what.lower() == "status":
             return exercising.show()
-        model = Commands.model_in_use(*Commands.checked_model(), what)
-        Commands.reported(
-            f"Exercising {what}",
-            model,
-            lambda tracker: exercising.Exercise(model, tracker).run(what),
+        self.follow(f"Exercising {what}")
+        self.reported(
+            lambda: (self.model_in_use(*Commands.checked_model(), what),),
+            lambda tracker, model: exercising.Exercise(model, tracker).run(what),
             chats=True,
         )
 
-    @staticmethod
-    def reported(title, model, work, chats=False, blocked=None):
-        tracker = Commands.followed(title)
-        if chats:
-            conversation.attach(tracker)
-        started, ended = time.monotonic(), ending("stopped", f"{title} did not finish")
+    def reported(self, setup, work, chats=False, blocked=None):
+        ended = ending("stopped", f"{self.tracker.state['title']} did not finish")
+        tools = ()
         try:
-            ended = work(tracker)
+            tools = setup()
+            if chats:
+                conversation.attach(self.tracker)
+            ended = work(self.tracker, *tools)
         except SystemExit as stopped:
             ended = blocked(stopped) if blocked else ending("blocked", first_line(str(stopped), 200))
             raise
         finally:
-            Models.remember(model)
-            took = time.monotonic() - started
+            if tools:
+                Models.remember(tools[0])
+            took = time.time() - self.started_at.timestamp()
             say.title(f"Time taken: {human_duration(took)}", "⏱️")
-            tracker.end(ended, took)
+            self.tracker.end(ended, took)
 
     @staticmethod
     def print_learned(topic, entry):
@@ -1143,15 +1143,15 @@ class Doctor:
 
 
 class ProjectRun:
-    def __init__(self, args, script_started, started_at):
+    def __init__(self, args, started_at):
         self.args = args
-        self.script_started, self.started_at = script_started, started_at
+        self.started_at = started_at
         self.session = self.record = self.mode = self.log = None
         self.internet = None
         self.spec_text = ""
         self.outcome = Outcome()
         self.stopped = None
-        self.tracker = Tracker(args.task or "a task")
+        self.tracker = Tracker(args.task or "a task", started=started_at.timestamp())
 
     def execute(self):
         workdir = self.check_requirements()
@@ -1336,13 +1336,11 @@ class ProjectRun:
         self.log.add({"label": "session end", "status": self.outcome.status, **times})
         self.record["last_session"] = times
         Runs.save(self.record, self.session.project.workdir)
-        total = time.perf_counter() - self.script_started
         say.title(
             f"Time taken: {human_duration(wall)} (started {clock(self.started_at)}, ended {clock(ended_at)})",
             "⏱️",
         )
-        say.detail(f"total execution time: {total:.2f}s")
-        self.tracker.end(self.ending, total)
+        self.tracker.end(self.ending, wall)
 
     def print_summary(self):
         status = self.outcome.status

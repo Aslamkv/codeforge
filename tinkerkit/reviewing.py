@@ -1,6 +1,6 @@
 import re
 
-from .model import Models, OllamaError
+from .model import Models, Ollama, OllamaError
 from .prompts import Prompts
 from .settings import LONG_REQUEST_WORDS, MANY_FILES, MANY_PARTS, REVIEW_REPLY_TOKENS, SHORT_REQUEST_WORDS
 from .text import first_line
@@ -34,8 +34,8 @@ class RequestReview:
         }
     )
 
-    def __init__(self, log):
-        self.log = log
+    def __init__(self, log, phase=lambda doing: None):
+        self.log, self.phase = log, phase
 
     def level(self, request):
         level, why = self.ruled(RequestWords(request)) or self.reviewed(request)
@@ -56,8 +56,11 @@ class RequestReview:
         return None
 
     def reviewed(self, request):
-        if not Models.quick():
+        quick = Models.quick()
+        if not quick:
             return "medium", "no model to review the request"
+        Ollama.loading(quick.name, self.phase)
+        self.phase("🧭 Working out how much thought your request needs")
         try:
             reply = Models.quick_reply(
                 [

@@ -5,12 +5,12 @@ import signal
 import sys
 
 import pytest
-from conftest import MEASURED, MODEL, PY, TOOLCHAIN, criterion, file_block, plan_of, record_of
+from conftest import LOADING_PHASE, MEASURED, MODEL, PY, TOOLCHAIN, criterion, file_block, plan_of, record_of
 
 from tinkerkit import cli
 from tinkerkit.cli import Cli, Commands, CycleRunner, Doctor, ProjectFolder, ProjectRun
 from tinkerkit.knowledge import Knowledge, Library, ResearchLearner
-from tinkerkit.model import Models, Ollama, OllamaError, ThinkLevels
+from tinkerkit.model import LoadedModel, Models, Ollama, OllamaError, ThinkLevels
 from tinkerkit.principles import Principles
 from tinkerkit.project import Runs, Tracker, project_store
 from tinkerkit.session import Phase, Stopped
@@ -718,22 +718,116 @@ def test_main_unloads_no_model_however_it_ends(monkeypatch, fake_ollama, ending)
     assert fake_ollama.unloaded == []
 
 
-@pytest.mark.spec("CLI-12")
-def test_a_job_never_unloads_its_model_when_it_ends(monkeypatch, fake_ollama):
-    class Ended:
-        def end(self, ended, took):
-            pass
+@pytest.fixture
+def followed(monkeypatch):
+    seen = {}
 
+    class Followed:
+        heard = None
+
+        def __init__(self, title, started=None):
+            seen["started"] = started
+            self.state = {"title": title}
+
+        def end(self, ended, took):
+            seen["ended"], seen["took"] = ended, took
+
+    monkeypatch.setattr(cli, "Tracker", Followed)
+    monkeypatch.setattr(cli.say, "follow", lambda heard: None)
+    return seen
+
+
+@pytest.mark.spec("CLI-12")
+def test_a_job_never_unloads_its_model_when_it_ends(monkeypatch, fake_ollama, followed):
     class Kept:
         name = "m"
 
         def unload(self):
             raise AssertionError("the job unloaded its model")
 
-    monkeypatch.setattr(Commands, "followed", staticmethod(lambda title: Ended()))
     monkeypatch.setattr(Models, "remember", staticmethod(lambda model: None))
-    Commands.reported("Asking", Kept(), lambda tracker: cli.ending("done", "asked"))
+    commands = Commands(parse("ask", "a"))
+    commands.follow("Asking")
+    commands.reported(lambda: (Kept(),), lambda tracker, model: cli.ending("done", "asked"))
     assert fake_ollama.unloaded == []
+
+
+@pytest.mark.spec("PRJ-17")
+def test_a_jobs_clock_counts_from_its_process_start(monkeypatch, followed):
+    started_at = datetime.datetime.now() - datetime.timedelta(seconds=30)
+    monkeypatch.setattr(Models, "remember", staticmethod(lambda model: None))
+    commands = Commands(parse("ask", "a"), started_at)
+    commands.follow("Asking")
+    commands.reported(lambda: (object(),), lambda tracker, model: cli.ending("done", "asked"))
+    assert followed["started"] == started_at.timestamp()
+    assert followed["took"] >= 30
+
+
+@pytest.mark.spec("PRJ-17")
+def test_a_builds_clock_counts_from_its_process_start():
+    started_at = datetime.datetime.now() - datetime.timedelta(seconds=30)
+    run = ProjectRun(parse("task", "a calculator"), started_at)
+    assert run.tracker.state["started"] == started_at.timestamp()
+
+
+@pytest.mark.spec("PRJ-17")
+def test_a_stop_during_setup_ends_the_job_as_blocked_with_its_time_taken(monkeypatch, followed):
+    def not_installed():
+        raise SystemExit("Model m is not installed.")
+
+    remembered = []
+    started_at = datetime.datetime.now() - datetime.timedelta(seconds=30)
+    monkeypatch.setattr(Models, "remember", staticmethod(remembered.append))
+    monkeypatch.setattr(Commands, "checked_model", staticmethod(not_installed))
+    with pytest.raises(SystemExit):
+        Commands(parse("ask", "a"), started_at).ask()
+    assert followed["ended"]["status"] == "blocked"
+    assert followed["took"] >= 30
+    assert remembered == []
+
+
+@pytest.mark.spec("PRJ-18")
+@pytest.mark.parametrize(
+    "words", [("ask", "a"), ("teach", "a"), ("research", "a"), ("learn", "a"), ("exercise", "a")]
+)
+def test_a_job_follows_its_tracker_before_it_checks_its_model(words, monkeypatch, followed):
+    checked = []
+
+    def checking():
+        checked.append("started" in followed)
+        raise SystemExit("no model")
+
+    monkeypatch.setattr(Commands, "checked_model", staticmethod(checking))
+    with pytest.raises(SystemExit):
+        getattr(Commands(parse(*words)), words[0])()
+    assert checked == [True]
+
+
+@pytest.mark.spec("PRJ-18")
+@pytest.mark.parametrize(
+    "loaded, shown",
+    [([], ["configured", LOADING_PHASE]), ([LoadedModel(MODEL, 1)], ["configured"])],
+)
+def test_a_job_shows_the_loading_phase_after_the_review_when_its_model_is_not_in_memory(
+    loaded, shown, monkeypatch
+):
+    phases = []
+
+    class Followed:
+        phase = staticmethod(phases.append)
+
+    def configured(name, settings, log, request, phase):
+        phases.append("configured")
+        return name
+
+    monkeypatch.setattr(cli, "calls_log", lambda: None)
+    monkeypatch.setattr(cli.say, "keep_log", lambda log: None)
+    monkeypatch.setattr(Commands, "configured_model", staticmethod(configured))
+    monkeypatch.setattr(Ollama, "loaded_models", staticmethod(lambda: loaded))
+    commands = Commands(parse("ask", "a"))
+    commands.tracker = Followed()
+    assert commands.model_in_use(MODEL, {}, "a") == MODEL
+    assert phases == shown
 
 
 SPEC_REPLY = {
@@ -816,7 +910,7 @@ README = {
 
 def build(*argv):
     with pytest.raises(SystemExit) as ended:
-        ProjectRun(Cli.parse(list(argv)), 0.0, datetime.datetime.now()).execute()
+        ProjectRun(Cli.parse(list(argv)), datetime.datetime.now()).execute()
     return ended.value.code
 
 
