@@ -982,7 +982,7 @@ def test_memory_refuses_words_it_cannot_read(home_store, capsys):
         assert "tinker memory NAME [KIND] [PAGE]" in capsys.readouterr().err
 
 
-@pytest.mark.spec("CLI-10")
+@pytest.mark.spec("CLI-10", "PLN-9")
 def test_a_task_waits_for_its_plan_then_confirm_builds_it(run_ready, fake_ollama, home_store, monkeypatch):
     folder = run_ready
     monkeypatch.setattr(ThinkLevels, "values", staticmethod(lambda name: ["low", "medium", "high"]))

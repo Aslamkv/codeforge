@@ -440,7 +440,6 @@ def learned(count):
     return f"{count} thing{'s' if count > 1 else ''} learned"
 
 
-
 def in_order(chapters, survey):
     return sorted(
         chapters, key=lambda chapter: (CHAPTER_ROLE_ORDER.index(order_of(survey, chapter)), chapter.number)

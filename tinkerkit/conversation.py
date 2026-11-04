@@ -41,6 +41,7 @@ lazy from .messages import (
 lazy from .messages import styled as styled_choice
 lazy from .model import Models, Ollama, OllamaError
 lazy from .prompts import Prompts, Reply
+lazy from .reviewing import RequestReview
 lazy from .settings import EXERCISE_FOLDER, JOB_STOP_SIGNAL, Config, Home, projects_folder
 lazy from .text import field
 lazy from .workspace import Toolchain
@@ -1439,9 +1440,8 @@ class Shell:
         if not line or "\n" in line:
             self.questions.answered(channel, message.chat)
             return md(t"🤷 **No command found:** {does or 'describe it another way'}")
-        self.wait_for_confirm(
-            channel, message.chat, {"line": line, "asked": message.text, "level": level, "shown": None}
-        )
+        proposed = {"line": line, "asked": message.text, "level": level, "shown": None}
+        self.wait_for_confirm(channel, message.chat, proposed)
         return self.proposal(line, does)
 
     def wait_for_confirm(self, channel, chat, proposed):
@@ -2902,8 +2902,6 @@ def keep_typing(channel, chat, done):
 
 
 def reviewed_level(text):
-    from .reviewing import RequestReview
-
     level, _ = RequestReview(calls_log()).level(text)
     return level
 
