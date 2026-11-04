@@ -102,7 +102,6 @@ def test_without_the_channels_plugin_the_conversation_has_no_chats(monkeypatch):
     monkeypatch.delitem(sys.modules, "tinkerkit.channels", raising=False)
     monkeypatch.setattr(builtins, "__import__", no_channels)
     assert conversation.chat_channels() == []
-    assert conversation.attach("a task", None) is None
 
 
 def program_files():

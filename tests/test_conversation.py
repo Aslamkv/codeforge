@@ -2583,34 +2583,28 @@ def attached(monkeypatch, home_store):
     import signal
 
     handler = signal.getsignal(conversation.JOB_STOP_SIGNAL)
-    monkeypatch.setattr(conversation, "PROGRESS_EDIT_SECONDS", 1000)
-    started = []
     channel = Recorder()
+    monkeypatch.setattr(conversation, "chat_channels", lambda: [channel])
 
     def start(title="calc: a calculator"):
         tracker = Tracker(title)
         tracker.publish()
-        started.append(conversation.Attached(conversation.everyone([channel]), title, tracker).start())
-        return started[-1]
+        return conversation.attach(tracker)
 
     yield start, channel
-    for task in started:
-        task.reporter.ended = True
     signal.signal(conversation.JOB_STOP_SIGNAL, handler)
 
 
 @pytest.mark.spec("CNV-19")
-def test_a_terminal_task_reports_and_stops_on_a_signal(attached, home_store):
+def test_a_terminal_task_tells_no_chat_and_stops_on_a_signal(attached, home_store):
     start, channel = attached
     task = start()
-    assert channel.texts()[0].startswith("🔨 **calc: a calculator**")
+    assert task.tracker.state["reports"] is True
     task.tracker.phase("recall")
     with pytest.raises(KeyboardInterrupt):
         os.kill(os.getpid(), conversation.JOB_STOP_SIGNAL)
         time.sleep(1)
-    task.end()
-    assert "🧠 Recalling what Tinker has learned" in channel.texts()[-1]
-    assert "Tinkering" not in channel.texts()[-1]
+    assert channel.texts() == []
 
 
 @pytest.mark.spec("CNV-10")

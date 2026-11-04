@@ -1831,32 +1831,20 @@ class Progress:
 
 
 class Attached:
-    def __init__(self, audience, title, tracker):
+    def __init__(self, tracker):
         self.tracker = tracker
-        self.reporter = Reporter(audience, title, pid=os.getpid())
 
     def start(self):
         signal.signal(JOB_STOP_SIGNAL, self.stop)
         self.tracker.change("attached", reports=True)
-        with self.reporter.lock:
-            self.reporter.progress.take(self.tracker.state)
-            self.reporter.update()
         return self
 
     def stop(self, signum, frame):
         raise KeyboardInterrupt
 
-    def end(self):
-        self.reporter.finish(self.tracker.state)
 
-
-def attach(title, tracker):
-    try:
-        channels = chat_channels()
-    except SystemExit as exc:
-        say.warn(f"Channels left out: {exc}")
-        return None
-    return Attached(everyone(channels), title, tracker).start() if channels else None
+def attach(tracker):
+    return Attached(tracker).start()
 
 
 def chat_channels():
