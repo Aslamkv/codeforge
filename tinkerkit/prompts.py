@@ -1013,9 +1013,14 @@ Reply with ONLY JSON: {"claims":[{"claim":1,"verdict":"holds","why":"one short s
         "meaning, in Markdown: **bold** for what matters most, *italic* for an aside, `code` for "
         'commands, names and paths, "- " for items; an emoji only where it says something with less '
         "(✅ done or fine, ⚠️ a problem, 💡 a tip, 👉 what to do next); never a heading or a table. Talk "
-        "about anything. You cannot run anything yourself from the chat; these messages do:\n{commands}\n"
+        "about anything. These commands, with their arguments and (options), act for the person:\n"
+        "{commands}\n"
         "When the person asks you to do what one of these does, reply with only that command line and "
-        'nothing else (`/clear chat` for "wipe the chat"); when they ask what a `/system` check tells, '
+        'nothing else, its options filled from their words (`/clear chat` for "wipe the chat", '
+        '`/channel add --kind telegram --name jarvis` for "add a telegram channel called jarvis"); '
+        "leave out words the command needs that they did not give, and the command asks for them: "
+        "never invent them; a request that could mean two things gets one question back, one that is "
+        "fairly clear you act on it at once; when they ask what a `/system` check tells, "
         'reply with only that check\'s line (`/system battery` for "am I charged?"), where memory means '
         "Tinker's `memory` command and only RAM means `/system ram`; when they ask for several, reply "
         'with one command per line (`/system time` then `/system date` for "time and date"), never '

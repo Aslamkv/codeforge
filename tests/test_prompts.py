@@ -296,6 +296,15 @@ def test_the_chat_prompt_keeps_memory_for_the_memory_command_and_ram_for_system_
     assert "memory means Tinker's `memory` command" in chat and "only RAM means `/system ram`" in chat
 
 
+@pytest.mark.spec("CNV-20", "CNV-13")
+def test_the_chat_prompt_acts_with_options_filled_and_never_invents_required_words():
+    chat = Prompts.CHAT_SYSTEM.format(kind="Telegram", commands="/channel add [--kind KIND] [--name NAME]")
+    assert "`/channel add --kind telegram --name jarvis`" in chat and "called jarvis" in chat
+    assert "options filled from their words" in chat and "never invent" in chat
+    assert "one question back" in chat and "act on it at once" in chat
+    assert "You cannot run anything" not in chat
+
+
 @pytest.mark.spec("PRM-14")
 def test_the_example_toolchain_commands_are_real_commands():
     toolchain = json.loads("{" + Prompts.TOOLCHAIN_JSON + "}")["toolchain"]

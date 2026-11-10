@@ -465,7 +465,7 @@ class Desk:
         self.handle(channel, message)
         self.renew_banner_when_changed()
 
-    def handle(self, channel, message):
+    def handle(self, channel, message, asked=None):
         if message.text.split()[:1] == [CHAT_APP_START]:
             channel.send(message.chat, welcome())
             return
@@ -495,13 +495,36 @@ class Desk:
                 self.running_now,
                 lambda: self.plan_shown(self.waiting_plan),
                 on_command=lambda line: self.replied(channel, message, line),
+                state=self.live_state,
             )
             return
         reply = self.answer(message, channel)
-        if reply:
+        if reply and asked is not None:
+            channel.send(message.chat, self.told(channel, message, reply, asked))
+        elif reply:
             sent = channel.send(message.chat, reply)
             if kind_of(command_words(message.text)) == "glance":
                 channel.glance(message.chat, message.id, [sent])
+
+    def told(self, channel, message, reply, asked):
+        kind = kind_of(command_words(message.text))
+        if kind == "glance":
+            return self.talk.told(channel, message.chat, asked, message.text, reply)
+        if kind == "own" and not self.questions.waiting(channel, message.chat):
+            return f"✅ {reply}"
+        return reply
+
+    def live_state(self):
+        from .channels import Channels
+
+        listened = {channel.name for channel in self.channels}
+        channels = [
+            f"- {name} ({settings.get('kind', '?')}, {'enabled' if settings.get('enabled') else 'disabled'}): "
+            + ("listening" if name in listened else "not listening")
+            for name, settings in Channels.settings().items()
+        ]
+        model = f"Model in use: {Config.get('model') or 'none picked yet'}"
+        return model + ("\nChannels:\n" + "\n".join(channels) if channels else "\nChannels: none set up")
 
     def chose(self, channel, message, command):
         pick = model_pick(message.text)
@@ -540,12 +563,7 @@ class Desk:
             self.shell.name(channel, after_word(message), self.running_now)
 
     def replied(self, channel, message, line):
-        sent = Message(message.chat, line, message.sender)
-        if runs_as_sent(line):
-            self.handle(channel, sent)
-            return
-        self.questions.ask(channel, message.chat, Question(runs=lambda: self.handle(channel, sent)))
-        channel.send(message.chat, md(t"👉 {line:code} — `/confirm` runs it"))
+        self.handle(channel, Message(message.chat, line, message.sender), message.text)
 
     def settle(self, channel, message, command):
         confirm = command == "confirm" and len(message.text.split()) == 1
@@ -578,11 +596,27 @@ class Desk:
 
     def terminal_kind(self, channel, chat, words):
         here = channel in self.consoles
+        if here and words[1] == "add" and typed_here():
+            return self.added_and_started(channel, words[2:])
         if here and words[1] == "start":
             return self.listen_on(words[2:])
         if here and words[1] == "remove":
             return self.run_listed(channel, chat, words, "terminal")
+        if words[1] == "add":
+            return (
+                "🖥 Channels are set up from the terminal: `tinker channel add` there "
+                "(its token would land in the chat's history, and pairing needs the terminal)"
+            )
         return f"🖥 `{' '.join(words[:2])}` asks in a terminal: `tinker {' '.join(words[:2])}` there"
+
+    def added_and_started(self, console, options):
+        from .channels import Channels
+
+        name = console.channel_added(options)
+        if name is None:
+            return ""
+        Channels.keep(name, dict(Channels.settings()[name], enabled=True))
+        return self.listen_on([name])
 
     def run_listed(self, channel, chat, words, kind):
         if deletes(words) and "--yes" not in words:
@@ -1206,13 +1240,16 @@ def command_of(text, commands=None):
 def replied_commands(reply):
     lines = [line.strip().strip("`").strip() for line in reply.splitlines()]
     lines = [line for line in lines if line]
-    if not lines or not all(line.startswith("/") and command_of(line) for line in lines):
-        return []
-    return lines if len(lines) == 1 or all(map(runs_as_sent, lines)) else []
+    if lines and all(line.startswith("/") and command_of(line) for line in lines):
+        return lines
+    return glance_in_sentence(reply)
 
 
-def runs_as_sent(line):
-    return said_command(line[1:]) == line or kind_of(command_words(line)) == "glance"
+def glance_in_sentence(reply):
+    spans = [span.strip() for span in re.findall(r"`([^`\n]+)`", reply) if span.strip().startswith("/")]
+    if len(spans) == 1 and command_of(spans[0]) and kind_of(command_words(spans[0])) == "glance":
+        return spans
+    return []
 
 
 SAID_FILLER = tuple(
@@ -1367,16 +1404,26 @@ class Talk:
         self.commands, self.said, self.lock, self.turn = commands, {}, threading.Lock(), threading.Lock()
         self.pausing_jobs = pausing_jobs
 
-    def answer(self, channel, message, now, waiting=lambda: "", write=None, on_shown=None, on_command=None):
+    def answer(
+        self,
+        channel,
+        message,
+        now,
+        waiting=lambda: "",
+        write=None,
+        on_shown=None,
+        on_command=None,
+        state=lambda: "",
+    ):
         threading.Thread(
             target=self.answering,
-            args=(channel, message, now, waiting, write or self.reply, on_shown, on_command),
+            args=(channel, message, now, waiting, write or self.reply, on_shown, on_command, state),
             daemon=True,
         ).start()
 
-    def answering(self, channel, message, now, waiting, write_reply, on_shown, on_command):
+    def answering(self, channel, message, now, waiting, write_reply, on_shown, on_command, state=lambda: ""):
         running, written, reply = now(), threading.Event(), []
-        asked = (channel, message, self.context(running, waiting), CHAT_MAX_REPLY_TOKENS)
+        asked = (channel, message, self.context(running, waiting, state), CHAT_MAX_REPLY_TOKENS)
         threading.Thread(target=self.write, args=(write_reply, asked, reply, written), daemon=True).start()
         note = self.busy_until(written, running, now, channel, message.chat)
         lines = replied_commands(reply[0]) if on_command and reply else []
@@ -1393,8 +1440,13 @@ class Talk:
             on_shown(note)
 
     @staticmethod
-    def context(running, waiting):
-        context = ["Running now:\n" + "\n\n".join(run["text"] for run in running)] if running else []
+    def context(running, waiting, state=lambda: ""):
+        context = [state()]
+        context += [
+            "Running now:\n" + "\n\n".join(run["text"] for run in running)
+            if running
+            else "Running now: nothing"
+        ]
         context += [
             f"A spec waits for the person (confirm builds it, amend WHAT changes it):\n{waiting()}"
             if waiting()
@@ -1461,6 +1513,29 @@ class Talk:
             said.append({"role": role, "content": text})
             del said[:-CHAT_CONTEXT_MESSAGES]
             return list(said)
+
+    def told(self, channel, chat, asked, line, output):
+        try:
+            told = self.tell(channel, chat, asked, line, "", output, "low")
+        except OllamaError:
+            return output
+        return told or output
+
+    def tell(self, channel, chat, asked, line, exit_line, output, level):
+        return self.ask(
+            channel,
+            chat,
+            [
+                {"role": "system", "content": Prompts.COMMAND_TELL_SYSTEM},
+                {
+                    "role": "user",
+                    "content": f"They asked: {asked}\nCommand: {line}\n"
+                    f"{exit_line}Output:\n{output[-CHAT_COMMAND_OUTPUT_READ_CHARS:]}",
+                },
+            ],
+            CHAT_MAX_REPLY_TOKENS,
+            level,
+        )
 
     def ask(self, channel, chat, messages, tokens, level):
         done = threading.Event()
@@ -1605,18 +1680,13 @@ class Shell:
 
     def told(self, channel, chat, proposed, code, output):
         try:
-            return self.talk.ask(
+            return self.talk.tell(
                 channel,
                 chat,
-                [
-                    {"role": "system", "content": Prompts.COMMAND_TELL_SYSTEM},
-                    {
-                        "role": "user",
-                        "content": f"They asked: {proposed['asked']}\nCommand: {proposed['line']}\n"
-                        f"Exit code: {code}\nOutput:\n{output[-CHAT_COMMAND_OUTPUT_READ_CHARS:]}",
-                    },
-                ],
-                CHAT_MAX_REPLY_TOKENS,
+                proposed["asked"],
+                proposed["line"],
+                f"Exit code: {code}\n",
+                output,
                 proposed["level"],
             )
         except OllamaError:
@@ -2235,9 +2305,10 @@ class ConsoleChannel(Channel):
 
         try:
             with self.screen.printing, said_plainly():
-                ChannelCommand.run(["add", *words])
+                return ChannelCommand.run(["add", *words])
         except SystemExit as exc:
             say.warn(str(exc))
+            return None
 
     def picked(self, line):
         pick = model_pick(line)
@@ -2974,7 +3045,7 @@ def entry_headline(text):
 
 
 def commands_brief():
-    return "; ".join(re.findall(r"- `([^`]+)`", help_text())) or "help"
+    return "\n".join(re.findall(r"^- `[^`]+`.*$", help_text(), re.MULTILINE)) or "help"
 
 
 def tinker_process(arguments, folder=None, output=None, **env):

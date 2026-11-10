@@ -661,6 +661,18 @@ def test_console_adds_a_channel_in_place_and_reads_on(monkeypatch, home_store):
 
 
 @pytest.mark.spec("CNV-8")
+def test_console_gives_back_the_name_of_the_channel_it_added(monkeypatch, home_store):
+    console = ruled_console(monkeypatch)
+    every_telegram_talks_to(monkeypatch, BotAPI(getMe={"username": "my_bot"}))
+    monkeypatch.setattr(conversation.say, "warn", lambda text: None)
+    assert (
+        console.channel_added(["--kind", "telegram", "--name", "home", "--token", "abc", "--chat", "42"])
+        == "home"
+    )
+    assert console.channel_added(["--kind", "pigeon"]) is None
+
+
+@pytest.mark.spec("CNV-8")
 def test_piped_console_sends_channel_add_on(monkeypatch):
     console, _ = piped_console(monkeypatch)
     typing(monkeypatch, CHANNEL_ADD)
@@ -1687,6 +1699,14 @@ def test_talk_reply(measured_model, fake_ollama, monkeypatch):
 
 
 @pytest.mark.spec("CNV-20")
+def test_each_turn_context_holds_the_live_state():
+    context = Talk.context([], lambda: "", lambda: "Model in use: n")
+    assert "Model in use: n" in context and "Running now: nothing" in context
+    running = [{"text": "build x"}]
+    assert "Running now:\nbuild x" in Talk.context(running, lambda: "", lambda: "")
+
+
+@pytest.mark.spec("CNV-20")
 def test_talk_without_a_model_says_so():
     assert Talk("cmds").reply(Recorder(), Message("1", "hi")).startswith("⚠️ **No model is in use yet**")
     assert (
@@ -1696,32 +1716,56 @@ def test_talk_without_a_model_says_so():
     assert "Getting ready to answer" in Talk.busy_note([])
 
 
-@pytest.mark.spec("CNV-20")
-def test_a_chat_reply_that_is_a_command_line_is_handled_or_offered(desk, monkeypatch):
-    desk, channel, _ = desk
+def chatted(desk, channel, monkeypatch, asked):
     replies = []
     monkeypatch.setattr(Models, "quick", staticmethod(lambda: QuickModel("m", {}, None)))
-    monkeypatch.setattr(Models, "quick_reply", staticmethod(lambda *asked, **options: replies.pop(0)))
 
-    def chat(reply, shown):
-        replies.extend(["low: a plain request", reply])
+    def quick_reply(messages, *rest, **options):
+        asked.append(messages)
+        return replies.pop(0)
+
+    monkeypatch.setattr(Models, "quick_reply", staticmethod(quick_reply))
+
+    def chat(reply, shown, *more):
+        replies.extend(["low: a plain request", reply, *more])
         say(desk, channel, "do it for me")
         wait_until(lambda: shown("".join(channel.texts()[-1:])))
 
+    return chat
+
+
+@pytest.mark.spec("CNV-20")
+def test_a_chat_reply_that_is_a_command_line_is_run_at_once(desk, monkeypatch):
+    desk, channel, _ = desk
+    chat = chatted(desk, channel, monkeypatch, [])
     chat("/clear chat", lambda last: last.startswith("🧹 **Chat cleared:**"))
-    chat("`/status`", lambda last: last.startswith("🟢 **Tinker**"))
-    chat("/fix the login bug", lambda last: "👉 `/fix the login bug` — `/confirm` runs it" in last)
+    chat("`/status`", lambda last: last == "Tinker is up.", "Tinker is up.")
     handled = []
     monkeypatch.setattr(desk, "answer", lambda message, channel: handled.append(message.text))
-    say(desk, channel, "/confirm")
-    wait_until(lambda: handled == ["/fix the login bug"])
-    chat("/clear chat\n/fix the login bug", lambda last: "/clear chat\n/fix the login bug" in last)
+    chat("/fix the login bug", lambda last: handled == ["/fix the login bug"])
+    chat("/clear chat\n/fix the login bug", lambda last: handled[1:] == ["/clear chat", "/fix the login bug"])
     chat("status is fine", lambda last: "status is fine" in last)
-    assert all("`/status`" not in text for text in channel.texts())
+    assert all("`/status`" not in text and "/confirm" not in text for text in channel.texts())
     handled.clear()
     chat("`/system time`\n`/system date`", lambda last: len(handled) == 2)
     chat("/system time and /system date", lambda last: len(handled) == 3)
-    assert handled == ["/system time", "/system date", "/system time and /system date"]
+    chat("The time is shown by `/system time` for you.", lambda last: len(handled) == 4)
+    assert handled == ["/system time", "/system date", "/system time and /system date", "/system time"]
+
+
+@pytest.mark.spec("CNV-14", "CNV-20")
+def test_a_command_asked_in_words_is_answered_in_words(desk, monkeypatch):
+    desk, channel, _ = desk
+    asked = []
+    chat = chatted(desk, channel, monkeypatch, asked)
+    monkeypatch.setattr(desk, "answer", lambda message, channel: f"raw {message.text}")
+    chat("/system time", lambda last: last == "It is **10:00**.", "It is **10:00**.")
+    assert "raw /system time" in asked[-1][-1]["content"] and "do it for me" in asked[-1][-1]["content"]
+    assert all("raw /system time" not in text for text in channel.texts())
+    chat("/rename jarvis", lambda last: last == "✅ raw /rename jarvis")
+    chat("/run tests", lambda last: last == "✅ raw /run tests")
+    monkeypatch.setattr(desk, "answer", lambda message, channel: "fix started")
+    chat("/fix the login bug", lambda last: last == "fix started")
 
 
 @pytest.mark.spec("CNV-22")
@@ -1845,7 +1889,7 @@ def calls_of(script):
 @pytest.mark.spec("CNV-11")
 def test_desk_answers_commands(desk):
     desk, channel, _ = desk
-    assert desk.talk.commands == "task WHAT; status"
+    assert desk.talk.commands == "- `task WHAT`\n- `status`"
     replies = {
         text: desk.answer(Message("1", text), channel)
         for text in (
@@ -1872,9 +1916,12 @@ def test_desk_answers_commands(desk):
     assert replies["resume"] == "🤷 No job is stopped (jobs lists them)."
     assert replies["resume #9"] == "🤷 No job #9 (jobs lists them)."
     assert replies["resume abc123"].startswith("✍️ Write `/resume [#JOB | @PROJECT]`")
-    assert [replies[text] for text in ("channel add", "channel remove bot", "channel start")] == [
+    assert replies["channel add"].startswith(
+        "🖥 Channels are set up from the terminal: `tinker channel add` there"
+    )
+    assert [replies[text] for text in ("channel remove bot", "channel start")] == [
         f"🖥 `channel {action}` asks in a terminal: `tinker channel {action}` there"
-        for action in ("add", "remove", "start")
+        for action in ("remove", "start")
     ]
     assert replies["model"] == "⚙️ **model**\n```\noutput of model\n```"
     assert replies["/Runs"] == "📚 **Runs**\n```\noutput of runs\n```"
@@ -1950,6 +1997,55 @@ def kept_telegram(monkeypatch, settings):
     return telegram
 
 
+ROUTED_ADD = "/channel add --kind telegram --name jarvis"
+
+
+def added_jarvis(monkeypatch, console, name):
+    kept, jarvis = {"jarvis": {"kind": "telegram", "enabled": False}}, Recorder("jarvis")
+    console.added = []
+    console.channel_added = lambda words: console.added.append(words) or name
+    monkeypatch.setattr(channels.Channels, "settings", lambda: kept)
+    monkeypatch.setattr(channels.Channels, "keep", lambda name, settings: kept.update({name: settings}))
+    monkeypatch.setattr(channels.Channels, "make", lambda name: jarvis)
+    return kept, jarvis
+
+
+@pytest.mark.spec("CNV-8", "CNV-11")
+def test_the_terminal_adds_a_channel_asked_for_in_words_then_enables_and_listens_on_it(
+    terminal_desk, monkeypatch
+):
+    desk, console = terminal_desk
+    monkeypatch.setattr(conversation, "typed_here", lambda: True)
+    kept, jarvis = added_jarvis(monkeypatch, console, "jarvis")
+    assert desk.answer(Message("1", ROUTED_ADD), console) == "📡 Listening on jarvis."
+    wait_until(lambda: desk.listened == [jarvis])
+    assert console.added == [["--kind", "telegram", "--name", "jarvis"]] and kept["jarvis"]["enabled"]
+    assert desk.ran == [] and desk.channels == [console, jarvis]
+
+
+@pytest.mark.spec("CNV-8")
+def test_the_terminal_starts_nothing_when_a_channel_add_asked_for_in_words_fails(terminal_desk, monkeypatch):
+    desk, console = terminal_desk
+    monkeypatch.setattr(conversation, "typed_here", lambda: True)
+    kept, _ = added_jarvis(monkeypatch, console, None)
+    assert not desk.answer(Message("1", ROUTED_ADD), console)
+    assert not kept["jarvis"]["enabled"] and desk.channels == [console] and desk.listened == []
+
+
+@pytest.mark.spec("CNV-11")
+def test_a_chat_or_piped_console_is_told_to_add_a_channel_from_the_terminal(desk, monkeypatch):
+    desk, channel, _ = desk
+    monkeypatch.setattr(conversation, "typed_here", lambda: False)
+    answer = (
+        "🖥 Channels are set up from the terminal: `tinker channel add` there "
+        "(its token would land in the chat's history, and pairing needs the terminal)"
+    )
+    assert desk.answer(Message("1", ROUTED_ADD), channel) == answer
+    desk.consoles.append(channel)
+    assert desk.answer(Message("1", ROUTED_ADD), channel) == answer
+    assert desk.ran == []
+
+
 @pytest.mark.spec("CNV-11")
 def test_the_terminal_removes_a_channel_once_confirmed(terminal_desk):
     desk, console = terminal_desk
@@ -1965,6 +2061,27 @@ def test_the_terminal_starts_listening_on_enabled_channels_not_yet_listened_to(t
     assert desk.answer(Message("1", "/channel start"), console) == "📡 Listening on Telegram."
     wait_until(lambda: desk.listened == [telegram])
     assert desk.checked == [telegram] and desk.channels == [console, telegram] and desk.renewed == [True]
+
+
+@pytest.mark.spec("CNV-20")
+def test_the_live_state_names_the_model_and_each_channel_with_whether_it_is_listened_to(desk, monkeypatch):
+    desk, _, _ = desk
+    desk.channels.append(Recorder("jarvis"))
+    settings = {
+        "jarvis": {"kind": "telegram", "enabled": True},
+        "bot": {"kind": "telegram", "enabled": False},
+    }
+    monkeypatch.setattr(channels.Channels, "settings", lambda: settings)
+    Config.save(model="n")
+    state = desk.live_state()
+    assert "Model in use: n" in state
+    assert (
+        "jarvis (telegram, enabled): listening" in state
+        and "bot (telegram, disabled): not listening" in state
+    )
+    monkeypatch.setattr(channels.Channels, "settings", lambda: {})
+    Config.save(model="")
+    assert desk.live_state() == "Model in use: none picked yet\nChannels: none set up"
 
 
 @pytest.mark.spec("CNV-11")
@@ -2805,6 +2922,15 @@ def test_desk_refuses_a_chat_another_tinker_listens_to(desk):
             Desk([Recorder("bot")], Path.cwd()).run()
     finally:
         holder.claimed.close()
+
+
+@pytest.mark.spec("CNV-20")
+def test_the_commands_brief_keeps_each_commands_arguments_description_and_options(monkeypatch):
+    shown = "**Build**\n- `/task WHAT` build something new (--spec FILE)\n- `/channel add [--kind KIND]` add one\n"
+    monkeypatch.setattr(conversation, "help_text", lambda: shown)
+    assert conversation.commands_brief() == (
+        "- `/task WHAT` build something new (--spec FILE)\n- `/channel add [--kind KIND]` add one"
+    )
 
 
 @pytest.mark.spec("CNV-24")

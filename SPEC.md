@@ -978,9 +978,11 @@ The terminal and the chats are one conversation: the same commands, the same ans
   alone there prints the recipe (**MOD-30**), opens its select box on the prompt (**CLI-3**) and sends the
   command with the NAME chosen; a cancel sends nothing. When no model is in use as it starts, it does the same
   for `/model` at once, before the first line you type; when Ollama has no model to pick, it prints the recipe
-  and that one is got with `ollama pull NAME` and then picked with `/model NAME`, and reads on. `/channel add`
-  typed there runs in place as `tinker channel add` does, its questions (**CHN-2**) and the pairing yes
-  (**CHN-4**) asked at the prompt; an error it ends with is said, and Tinker reads on.
+  and that one is got with `ollama pull NAME` and then picked with `/model NAME`, and reads on. `/channel add`,
+  typed there or asked for in words (**CNV-20**), runs in place as `tinker channel add` does, its questions
+  (**CHN-2**) and the pairing yes (**CHN-4**) asked at the prompt; asked for in words, the channel it adds is
+  then enabled and started as `channel start NAME` does (**CNV-11**). An error it ends with is said, and Tinker
+  reads on.
   Once it reads, all that Tinker says (`say`, a chat's message too) prints through it, above the prompt, and
   `live` draws in that same live block, its star turning and its glow moving on their own about eight times a second. While the
   terminal is a job's asker (**CNV-11**), the job's progress shows there and the status that says what Tinker
@@ -1030,7 +1032,9 @@ The terminal and the chats are one conversation: the same commands, the same ans
   `tinker`. On the terminal, a `terminal` one runs there instead: `channel add` as **CNV-8** says, `channel
   remove` as a deletion, and `channel start [NAME]`, as `channel enable NAME` does once it is done, listens on
   each enabled channel (or the one named) not yet listened to, checked (**CHN-4**) and claimed as **CNV-9**
-  says, its chat started there, and the banner drawn and sent anew. While a command is answered, a chat shows its typing sign (`Channel.waiting`) and the terminal's
+  says, its chat started there, and the banner drawn and sent anew. In a chat, a channel asked for in words is
+  answered that channels are set up from the terminal (its token would land in the chat's history, **CHN-9**,
+  and pairing needs the terminal, **CHN-4**). While a command is answered, a chat shows its typing sign (`Channel.waiting`) and the terminal's
   live line says it runs, unless a job's progress holds that line; each goes when the answer comes. `task WHAT` starts a task, and a bare
   `task` gets its usage. A
   run that starts a cycle is given `--confirm`, so its plan waits for the person. `status` alone gives what
@@ -1059,9 +1063,12 @@ The terminal and the chats are one conversation: the same commands, the same ans
   sent to read is) drops the question. A command whose words are optional (`status`) runs at once. `/model` and `/model calibrate` sent alone on a channel with buttons (Telegram) ask with
   `choose(chat, question, names)` instead: a button with the name of each model its select box (**CLI-3**)
   offers, the question holding the recipe and the rows (**MOD-29**, **MOD-30**); the next message (a tap sends the name) is the NAME, as above. With none to
-  show, or on a channel without buttons, they run at once and list the models.
+  show, or on a channel without buttons, they run at once and list the models. A command asked for in words
+  (**CNV-20**) whose required words the person did not give asks for them the same way: the model never
+  invents them.
 - **CNV-14** A glance (a command of kind `glance`, **CMD-1**) is answered with `glance`: the person's message
-  goes at once, the answer in `GLANCE_KEPT_SECONDS`. `history [PAGE | #N]` lists the things shown by page
+  goes at once, the answer in `GLANCE_KEPT_SECONDS`. A glance asked for in words (**CNV-20**) is answered in
+  words instead: its output is turned into a short answer to what was asked. `history [PAGE | #N]` lists the things shown by page
   ([State](#state)), with what was asked for each, or shows thing N again. `clear chat` takes every message out
   of the chats but the status, said in a note that goes in `DONE_NOTE_KEPT_SECONDS`. `clear history` is
   `tinker clear history` (**SET-10**): once confirmed, it forgets the history, clears the chat as `clear chat`
@@ -1088,17 +1095,23 @@ The terminal and the chats are one conversation: the same commands, the same ans
 - **CNV-20** The chat asks the model only through the quick call (**MOD-25**); `Talk` and `Shell`
   read a JSON answer with `Reply.json()` (**PRM-2**), and take one that cannot be read as `{}`. `reply` keeps
   the last `CHAT_CONTEXT_MESSAGES` messages per chat, and it says plainly when no model is in use or the model
-  failed. The chat's prompt (`CHAT_SYSTEM`) asks the model, when the person asks Tinker to do what one of the
-  commands does, to reply with only that command line (`/clear chat` for `wipe the chat`), and when they ask
-  what a `system` check tells (**SYS-1**), to reply with only that check's line (`/system battery` for
-  `am I charged?`), where memory means Tinker's `memory` command and only RAM means `/system ram`, and
-  one command per line when several are asked for (`/system time` and `/system date` for `time and date`);
-  asked how to do it, it answers in words. A reply whose every line, with or without backticks, is one that
-  `command_of` gives a command for is not shown. A line runs as sent when its words are a fixed phrase
-  (**CNV-5**) or its command is a glance (**CNV-14**), since a glance changes nothing; a reply of several
-  lines that all run as sent runs each in turn. A one-line reply that does not (more words:
-  `/fix the login bug`) is offered, `👉 /fix the login bug — /confirm runs it`, and `/confirm` handles it as
-  sent; any other reply is shown. This takes no extra model call.
+  failed. Each turn's context holds the live state: the model in use, each channel and whether Tinker listens
+  on it, the queue and the plan that waits, so a question about them is answered directly. Tinker acts on what
+  the person asks rather than saying what to type. The chat's prompt (`CHAT_SYSTEM`) lists each command with
+  its options and arguments, and asks the model, when the person asks Tinker to do what one of the commands
+  does, to reply with only that command line, its options filled from their words (`/clear chat` for `wipe
+  the chat`, `/channel add --kind telegram --name jarvis` for `add a telegram channel called jarvis`); when
+  they ask what a `system` check tells (**SYS-1**), to reply with only that check's line (`/system battery`
+  for `am I charged?`), where memory means Tinker's `memory` command and only RAM means `/system ram`; and one
+  command per line when several are asked for (`/system time` and `/system date` for `time and date`). Words a
+  command requires that the person did not give are asked for (**CNV-13**), never invented; a request that
+  could mean two things gets one question back, and one that is fairly clear is acted on at once. Asked how to
+  do it, it answers in words. A reply whose every line, with or without backticks, is one that `command_of`
+  gives a command for is not shown, and neither is a glance's line inside a sentence. Each such line runs at
+  once, in turn, with no offer to confirm: a deletion still asks first (**SET-9**) and a build still waits at
+  its plan (**CNV-11**). A glance asked for this way is answered in words (**CNV-14**), with one more model
+  call over its output; any other command asked for in words ends with a short answer saying what was done
+  (`✅ jarvis added`). Any other reply is shown.
 - **CNV-21** A chat or a command line is a job at the front (**JOB-1**, **JOB-8**); while it pushes back the
   job that ran (`Talk.pausing_jobs`), its note says which job that is, and that it goes on once they have
   their answer.
@@ -1124,7 +1137,7 @@ The chat plugin: Telegram, and `tinker channel`.
   private when it is opened. `make(name)` builds the channel of its kind, and an unknown name or kind ends with
   `SystemExit`. `enabled()` gives nothing when `TINKER_CHANNELS=off`.
 - **CHN-2** `ChannelCommand.run` lists by default and rejects an unknown action. `list` shows each channel and
-  its chats. `add` (from options or questions) checks the name, refuses a name taken, checks the token, and
+  its chats. `add` (from options `--kind`, `--name`, `--token` and `--chat`, or questions) checks the name, refuses a name taken, checks the token, and
   saves the channel disabled. `remove` drops the settings and the secrets, as a deletion (**SET-9**).
   `enable` and `disable` switch a channel.
 - **CHN-3** `ask` gives the default when there is no terminal, or ends with `SystemExit` when it has no default.

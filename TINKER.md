@@ -192,7 +192,7 @@ tinker restart --workdir ~/Projects/calc-py
 
 ## Talk 💬
 
-Talk with Tinker. Every command works here, and anything else is a normal chat. A command starts with `/`, as in `/status`; plain words that say one, like `clear the chat, please` or `show recipe`, run it too, and asking the model to do what a command does runs it or offers it for `/confirm`. `/exit` (or Ctrl-D) ends it:
+Talk with Tinker. Every command works here, and anything else is a normal chat. A command starts with `/`, as in `/status`; plain words that say one, like `clear the chat, please` or `show recipe`, run it too, and asking the model to do what a command does runs it at once (a deletion still asks first, and a build still waits at its plan). A question about what Tinker has, like `which model is in use?`, is answered in words. `/exit` (or Ctrl-D) ends it:
 
 ```sh
 tinker
@@ -314,8 +314,9 @@ tinker channel remove telegram
 ```
 
 At plain `tinker`'s prompt, `/channel add`, `/channel remove` and `/channel start` run in place too, and a
-channel enabled or started there is listened to at once. A chat answers them with the command to run in a
-terminal.
+channel enabled or started there is listened to at once. Asking there in words, like `add a telegram channel
+called jarvis`, adds, enables and starts it in one go. A chat answers them with the command to run in a
+terminal: a channel's token would land in the chat's history, and pairing needs the terminal.
 
 Type `/` in the chat to pick any command from the bot's menu. A command starts with `/`; anything else is a
 chat, and a `/` with a name Tinker doesn't know is answered with a pointer to `/help`:

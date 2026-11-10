@@ -69,7 +69,7 @@ class ChannelCommand:
             return
         if action not in actions:
             raise SystemExit(f"tinker channel: no action {action!r}\n{ChannelCommand.USAGE}")
-        actions[action](rest)
+        return actions[action](rest)
 
     @staticmethod
     def list(rest):
@@ -103,6 +103,7 @@ class ChannelCommand:
             f"Added {name} ({kind}, {who}), serving chat(s) {', '.join(chats)}. "
             f"It starts disabled: tinker channel enable {name}"
         )
+        return name
 
     @staticmethod
     def options(rest):
