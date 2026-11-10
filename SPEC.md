@@ -358,7 +358,7 @@ The home and its database, the settings, numbered lists, and the one way to dele
   a chat (`none`, `one`, `any`), its arguments and its options. The kind is `job` (a long command, **JOB-1**),
   `glance` (answered at once, never queued, **CNV-14**), `pauses` (a request the model answers right away, a
   job too, **JOB-1**), `own` (the conversation answers it its own way) or `terminal` (it asks in a terminal, so a chat
-  only says to run it there). An action whose kind differs from its command's is an `Action` of that command,
+  only says to run it there, **CNV-11**). An action whose kind differs from its command's is an `Action` of that command,
   with its own kind: `read list`, `read show`, `exercise status`, `channel add`, `channel remove`,
   `channel start`, `model calibrate NAME`, `model recipe` (`glance`), `model recipe all`, `model NAME` of a model that does not embed and was never measured
   (**CLI-3**) and `learn` of a command of the person's (**CLI-1**). `kind_of(argv)` gives the kind of what the words
@@ -976,7 +976,11 @@ The terminal and the chats are one conversation: the same commands, the same ans
   a restart. Typing `/` there opens `CommandMenu` (**MSG-10**) under the prompt, narrowed as you type; up and
   down move in the menu while it is open. Piped input reads lines as before. `/model` or `/model calibrate` typed
   alone there prints the recipe (**MOD-30**), opens its select box on the prompt (**CLI-3**) and sends the
-  command with the NAME chosen; a cancel sends nothing.
+  command with the NAME chosen; a cancel sends nothing. When no model is in use as it starts, it does the same
+  for `/model` at once, before the first line you type; when Ollama has no model to pick, it prints the recipe
+  and that one is got with `ollama pull NAME` and then picked with `/model NAME`, and reads on. `/channel add`
+  typed there runs in place as `tinker channel add` does, its questions (**CHN-2**) and the pairing yes
+  (**CHN-4**) asked at the prompt; an error it ends with is said, and Tinker reads on.
   Once it reads, all that Tinker says (`say`, a chat's message too) prints through it, above the prompt, and
   `live` draws in that same live block, its star turning and its glow moving on their own about eight times a second. While the
   terminal is a job's asker (**CNV-11**), the job's progress shows there and the status that says what Tinker
@@ -1023,7 +1027,10 @@ The terminal and the chats are one conversation: the same commands, the same ans
 - **CNV-11** `Desk.answer` handles a command in one place: its own handler when the conversation has one
   (`Desk.handlers`, by command name), and otherwise by its action in the table (**CMD-1**): one that deletes
   asks first, a `job` starts a task, a `terminal` one says to run it in a terminal, and the rest run as
-  `tinker`. While a command is answered, a chat shows its typing sign (`Channel.waiting`) and the terminal's
+  `tinker`. On the terminal, a `terminal` one runs there instead: `channel add` as **CNV-8** says, `channel
+  remove` as a deletion, and `channel start [NAME]`, as `channel enable NAME` does once it is done, listens on
+  each enabled channel (or the one named) not yet listened to, checked (**CHN-4**) and claimed as **CNV-9**
+  says, its chat started there, and the banner drawn and sent anew. While a command is answered, a chat shows its typing sign (`Channel.waiting`) and the terminal's
   live line says it runs, unless a job's progress holds that line; each goes when the answer comes. `task WHAT` starts a task, and a bare
   `task` gets its usage. A
   run that starts a cycle is given `--confirm`, so its plan waits for the person. `status` alone gives what

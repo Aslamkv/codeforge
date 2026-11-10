@@ -93,6 +93,9 @@ tinker model
 tinker model calibrate
 ```
 
+Plain `tinker` with no model in use opens that select box at once; with none pulled yet, it shows how to get
+one (`ollama pull NAME`, then `/model NAME`).
+
 See the recipe alone, from the models that solved at least one test task: the smartest model (the most tasks
 solved, then fewer retries, then the quicker answers) and the fastest (the shortest time to a correct answer),
 as `🧠 Smartest: qwen3 (solved 7 of 8 · ~80s an answer)` and `⚡ Fastest: gemma3 (~20s an answer · solved 5 of 8)`:
@@ -309,6 +312,10 @@ tinker channel list
 tinker channel disable telegram
 tinker channel remove telegram
 ```
+
+At plain `tinker`'s prompt, `/channel add`, `/channel remove` and `/channel start` run in place too, and a
+channel enabled or started there is listened to at once. A chat answers them with the command to run in a
+terminal.
 
 Type `/` in the chat to pick any command from the bot's menu. A command starts with `/`; anything else is a
 chat, and a `/` with a name Tinker doesn't know is answered with a pointer to `/help`:

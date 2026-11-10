@@ -13,9 +13,12 @@ from pathlib import Path
 
 import pytest
 from conftest import ACCENT, BOLD, DIM, GREY, MEASURED, RESET, Terminal
+from test_channels import BotAPI, every_telegram_talks_to
 
+import tinkerkit.channels as channels
 import tinkerkit.conversation as conversation
 import tinkerkit.jobs as jobs
+from tinkerkit.channels import Channels
 from tinkerkit.commands import MenuRow, slash_matches, synopsis_words
 from tinkerkit.conversation import (
     Channel,
@@ -473,8 +476,9 @@ def test_console_marks_each_message_and_indents_its_lines_on_a_colour_terminal(m
 
 
 @pytest.mark.spec("CNV-8")
-def test_console_shows_your_line_again_highlighted_without_ruling_each_prompt(monkeypatch):
+def test_console_shows_your_line_again_highlighted_without_ruling_each_prompt(monkeypatch, home_store):
     console = ruled_console(monkeypatch)
+    Config.save(model="n")
     typing(monkeypatch, "hello there", "")
     console.read()
     assert sys.stdout.getvalue() == (
@@ -631,6 +635,99 @@ def test_console_picks_the_model_for_model_typed_alone(monkeypatch, home_store):
     assert [console.lines.get() for _ in range(5)] == ["/model m", "/model n", "/models", "model", None]
 
 
+CHANNEL_ADD = "/channel add --kind telegram --name home --token abc --chat '42, 43'"
+
+
+@pytest.mark.spec("CNV-8")
+def test_console_adds_a_channel_in_place_and_reads_on(monkeypatch, home_store):
+    console = ruled_console(monkeypatch)
+    Config.save(model="n")
+    every_telegram_talks_to(monkeypatch, BotAPI(getMe={"username": "my_bot"}))
+    added_while_locked, warned = [], []
+    keep = Channels.keep
+    monkeypatch.setattr(
+        Channels,
+        "keep",
+        staticmethod(
+            lambda *args: added_while_locked.append(console.screen.printing.locked()) or keep(*args)
+        ),
+    )
+    monkeypatch.setattr(conversation.say, "warn", warned.append)
+    typing(monkeypatch, CHANNEL_ADD, "/channel add --kind pigeon", "hi")
+    console.read()
+    assert Channels.settings()["home"]["allowed"] == ["42", "43"] and added_while_locked == [True]
+    assert warned == ["tinker: no channel kind 'pigeon' (supported: telegram)"]
+    assert [console.lines.get() for _ in range(4)] == ["", "", "hi", None]
+
+
+@pytest.mark.spec("CNV-8")
+def test_piped_console_sends_channel_add_on(monkeypatch):
+    console, _ = piped_console(monkeypatch)
+    typing(monkeypatch, CHANNEL_ADD)
+    console.read()
+    assert [console.lines.get() for _ in range(2)] == [CHANNEL_ADD, None]
+    assert Channels.settings() == {}
+
+
+@pytest.mark.spec("CNV-8")
+def test_console_picks_a_model_first_when_none_is_in_use(monkeypatch, home_store):
+    console = ruled_console(monkeypatch)
+    shown = model_picker(monkeypatch, console, 2)
+    typing(monkeypatch, "hi")
+    console.read()
+    assert picked_names(shown) == [(["General", "m", "n"], 1, True)]
+    assert [console.lines.get() for _ in range(3)] == ["/model n", "hi", None]
+
+
+@pytest.mark.spec("CNV-8")
+def test_console_sends_nothing_when_the_first_pick_is_cancelled(monkeypatch, home_store):
+    console = ruled_console(monkeypatch)
+    shown = model_picker(monkeypatch, console, None)
+    typing(monkeypatch, "hi")
+    console.read()
+    assert len(shown) == 1
+    assert [console.lines.get() for _ in range(2)] == ["hi", None]
+
+
+@pytest.mark.spec("CNV-8")
+def test_console_says_how_to_get_a_model_when_ollama_has_none(monkeypatch, home_store):
+    console = ruled_console(monkeypatch)
+    printed = []
+    shown = model_picker(monkeypatch, console, 1, models=())
+    monkeypatch.setattr(Models, "shown_recipe", staticmethod(lambda: ["recipe"]))
+    monkeypatch.setattr(conversation.say, "text", printed.append)
+    typing(monkeypatch, "hi")
+    console.read()
+    assert shown == [] and printed == ["recipe", conversation.MODEL_PULL_HINT]
+    assert [console.lines.get() for _ in range(2)] == ["hi", None]
+
+
+@pytest.mark.spec("CNV-8")
+def test_console_warns_and_reads_on_when_ollama_is_down_at_first_run(monkeypatch, home_store):
+    console = ruled_console(monkeypatch)
+    warned = []
+    model_picker(monkeypatch, console, 1)
+    monkeypatch.setattr(
+        Models, "command_choices", staticmethod(lambda command: (_ for _ in ()).throw(SystemExit("down")))
+    )
+    monkeypatch.setattr(conversation.say, "warn", warned.append)
+    typing(monkeypatch, "hi")
+    console.read()
+    assert warned == ["down"]
+    assert [console.lines.get() for _ in range(2)] == ["hi", None]
+
+
+@pytest.mark.spec("CNV-8")
+def test_console_opens_no_first_pick_with_a_model_in_use(monkeypatch, home_store):
+    console = ruled_console(monkeypatch)
+    Config.save(model="n")
+    shown = model_picker(monkeypatch, console, 1)
+    typing(monkeypatch, "hi")
+    console.read()
+    assert shown == []
+    assert [console.lines.get() for _ in range(2)] == ["hi", None]
+
+
 @pytest.mark.spec("CNV-8")
 def test_console_picks_the_model_for_model_calibrate_typed_alone(monkeypatch, home_store):
     console = ruled_console(monkeypatch)
@@ -648,6 +745,7 @@ def test_console_picks_the_model_for_model_calibrate_typed_alone(monkeypatch, ho
 @pytest.mark.spec("CNV-8")
 def test_console_prints_the_recipe_before_the_pick(monkeypatch, home_store):
     console = ruled_console(monkeypatch)
+    Config.save(model="n")
     printed = []
     model_picker(monkeypatch, console, 1)
     monkeypatch.setattr(
@@ -1832,6 +1930,116 @@ def test_a_command_that_deletes_and_exit_ask_first(desk):
     assert desk.answer(Message("1", "/exit"), channel) is None and "**Stop Tinker?**" in channel.texts()[-1]
     say(desk, channel, "/confirm")
     wait_until(lambda: channel.closed)
+
+
+@pytest.fixture
+def terminal_desk(desk, monkeypatch):
+    desk, console, _ = desk
+    desk.consoles.append(console)
+    desk.listened, desk.checked, desk.renewed = [], [], []
+    monkeypatch.setattr(desk, "listen", desk.listened.append)
+    monkeypatch.setattr(desk, "renew_banner", lambda: desk.renewed.append(True))
+    monkeypatch.setattr(channels.ChannelCommand, "check", desk.checked.append)
+    return desk, console
+
+
+def kept_telegram(monkeypatch, settings):
+    telegram = Recorder("Telegram")
+    monkeypatch.setattr(channels.Channels, "settings", lambda: {"Telegram": settings})
+    monkeypatch.setattr(channels.Channels, "make", lambda name: telegram)
+    return telegram
+
+
+@pytest.mark.spec("CNV-11")
+def test_the_terminal_removes_a_channel_once_confirmed(terminal_desk):
+    desk, console = terminal_desk
+    assert desk.answer(Message("1", "/channel remove bot"), console) is None
+    assert desk.ran == [["channel", "remove", "bot"]] and "👉 `/confirm` to delete it" in console.texts()[-1]
+
+
+@pytest.mark.spec("CNV-11")
+def test_the_terminal_starts_listening_on_enabled_channels_not_yet_listened_to(terminal_desk, monkeypatch):
+    desk, console = terminal_desk
+    telegram, again = Recorder("Telegram"), Recorder("rec")
+    monkeypatch.setattr(channels.Channels, "enabled", lambda: [telegram, again])
+    assert desk.answer(Message("1", "/channel start"), console) == "📡 Listening on Telegram."
+    wait_until(lambda: desk.listened == [telegram])
+    assert desk.checked == [telegram] and desk.channels == [console, telegram] and desk.renewed == [True]
+
+
+@pytest.mark.spec("CNV-11")
+def test_the_terminal_starts_listening_on_the_channel_named(terminal_desk, monkeypatch):
+    desk, console = terminal_desk
+    kept_telegram(monkeypatch, {})
+    assert desk.answer(Message("1", "/channel start Telegram"), console) == "📡 Listening on Telegram."
+    assert desk.answer(Message("1", "/channel start Slack"), console) == (
+        "⚠️ tinker: no channel 'Slack' (tinker channel list shows them)"
+    )
+
+
+@pytest.mark.spec("CNV-11")
+def test_the_terminal_says_when_no_channel_is_new_to_listen_on(terminal_desk, monkeypatch):
+    desk, console = terminal_desk
+    monkeypatch.setattr(channels.Channels, "enabled", lambda: [Recorder("rec")])
+    assert desk.answer(Message("1", "/channel start"), console) == (
+        "🤷 No enabled channel is new to listen on (tinker channel enable NAME, or start NAME)."
+    )
+    assert desk.renewed == [] and desk.checked == []
+
+
+@pytest.mark.spec("CNV-11")
+def test_the_terminal_skips_a_channel_that_fails_its_check_or_is_held(terminal_desk, monkeypatch):
+    desk, console = terminal_desk
+    broken, held = Recorder("broken"), Recorder("held")
+    held.claim, held.holder = lambda holder: False, lambda: {"pid": 42}
+    monkeypatch.setattr(channels.Channels, "enabled", lambda: [broken])
+
+    def failing(channel):
+        raise SystemExit(f"tinker: channel {channel.name} does not work: no")
+
+    monkeypatch.setattr(channels.ChannelCommand, "check", failing)
+    assert (
+        desk.answer(Message("1", "/channel start"), console) == "⚠️ tinker: channel broken does not work: no"
+    )
+    monkeypatch.setattr(channels.ChannelCommand, "check", lambda channel: None)
+    monkeypatch.setattr(channels.Channels, "enabled", lambda: [held])
+    assert desk.answer(Message("1", "/channel start"), console) == (
+        "⚠️ held is listened to by another Tinker (process 42): stop it first"
+    )
+    assert desk.channels == [console] and desk.renewed == []
+
+
+@pytest.mark.spec("CNV-11")
+def test_the_terminal_listens_on_a_channel_once_it_is_enabled(terminal_desk, monkeypatch):
+    desk, console = terminal_desk
+    telegram = kept_telegram(monkeypatch, {"enabled": True})
+    assert desk.answer(Message("1", "/channel enable Telegram"), console) == (
+        "⚙️ **channel enable Telegram**\n```\noutput of channel enable Telegram\n```\n📡 Listening on Telegram."
+    )
+    wait_until(lambda: desk.listened == [telegram])
+    assert desk.ran == [["channel", "enable", "Telegram"]] and desk.channels == [console, telegram]
+
+
+@pytest.mark.spec("CNV-11")
+def test_the_terminal_adds_nothing_when_an_enable_fails_or_the_channel_is_listened_to(
+    terminal_desk, monkeypatch
+):
+    desk, console = terminal_desk
+    shown = "⚙️ **channel enable {0}**\n```\noutput of channel enable {0}\n```"
+    monkeypatch.setattr(
+        channels.Channels, "settings", lambda: {"Telegram": {"enabled": False}, "rec": {"enabled": True}}
+    )
+    assert desk.answer(Message("1", "/channel enable Telegram"), console) == shown.format("Telegram")
+    assert desk.answer(Message("1", "/channel enable rec"), console) == shown.format("rec")
+    assert desk.channels == [console] and desk.renewed == [] and desk.checked == []
+
+
+@pytest.mark.spec("CNV-11")
+def test_a_chat_does_not_listen_on_a_channel_it_enables(desk, monkeypatch):
+    desk, channel, _ = desk
+    monkeypatch.setattr(channels.Channels, "settings", lambda: {"Telegram": {"enabled": True}})
+    assert desk.answer(Message("1", "/channel enable Telegram"), channel).endswith("```")
+    assert desk.channels == [channel]
 
 
 @pytest.mark.spec("CNV-11")

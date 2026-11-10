@@ -62,6 +62,7 @@ lazy from .workspace import Toolchain
 
 CHANNEL_REPORTS_ENV = "TINKER_CHANNELS"
 MODEL_PICKS = (["model"], ["model", "calibrate"])
+MODEL_PULL_HINT = "Get one with `ollama pull NAME`, then pick it with `/model NAME`."
 PROGRESS_EDIT_SECONDS = 2
 CLOCK_ONLY_EDIT_SECONDS = 15
 BUILD_STOP_GRACE_SECONDS = 120
@@ -234,11 +235,36 @@ class Desk:
     def claim_chats(self):
         for channel in [channel for channel in self.channels if channel not in self.consoles]:
             if not channel.claim({"pid": os.getpid()}):
-                held = f"{channel.name} is listened to by another Tinker (process {channel.holder().get('pid', '?')})"
+                held = held_by_another(channel)
                 if not self.consoles:
                     raise SystemExit(f"tinker: {held}: stop it first")
                 say.warn(f"{held}: this one talks here only")
                 self.channels.remove(channel)
+
+    def listen_on(self, names):
+        from .channels import ChannelCommand, Channels
+
+        listened = {channel.name for channel in self.channels}
+        try:
+            found = [Channels.make(ChannelCommand.named(names, "start"))] if names else Channels.enabled()
+            new = [channel for channel in found if channel.name not in listened]
+            for channel in new:
+                ChannelCommand.check(channel)
+        except SystemExit as exc:
+            return f"⚠️ {exc}"
+        if not new:
+            return "🤷 No enabled channel is new to listen on (tinker channel enable NAME, or start NAME)."
+        held = [channel for channel in new if not channel.claim({"pid": os.getpid()})]
+        claimed = [channel for channel in new if channel not in held]
+        self.channels.extend(claimed)
+        if claimed:
+            self.renew_banner()
+        for channel in claimed:
+            threading.Thread(target=self.listen, args=(channel,), daemon=True).start()
+        lines = [f"⚠️ {held_by_another(channel)}: stop it first" for channel in held]
+        if claimed:
+            lines.insert(0, f"📡 Listening on {', '.join(channel.name for channel in claimed)}.")
+        return "\n".join(lines)
 
     def open_banner(self):
         self.shown_banner = self.banner_lines()
@@ -547,13 +573,35 @@ class Desk:
     def by_table(self, channel, chat, words):
         kind = kind_of(words)
         if kind == "terminal":
-            return f"🖥 `{' '.join(words[:2])}` asks in a terminal: `tinker {' '.join(words[:2])}` there"
+            return self.terminal_kind(channel, chat, words)
+        return self.run_listed(channel, chat, words, kind)
+
+    def terminal_kind(self, channel, chat, words):
+        here = channel in self.consoles
+        if here and words[1] == "start":
+            return self.listen_on(words[2:])
+        if here and words[1] == "remove":
+            return self.run_listed(channel, chat, words, "terminal")
+        return f"🖥 `{' '.join(words[:2])}` asks in a terminal: `tinker {' '.join(words[:2])}` there"
+
+    def run_listed(self, channel, chat, words, kind):
         if deletes(words) and "--yes" not in words:
             return self.ask_first(channel, chat, words)
         if kind == "job":
             return self.start_task([(channel, chat)], words, self.root, " ".join(words))
         shown = self.tinker(words)
-        return md(t"⚙️ **{' '.join(words)}**\n{shown:block}")
+        return md(t"⚙️ **{' '.join(words)}**\n{shown:block}") + self.listen_once_enabled(channel, words)
+
+    def listen_once_enabled(self, channel, words):
+        from .channels import Channels
+
+        if channel not in self.consoles or words[:2] != ["channel", "enable"] or len(words) < 3:
+            return ""
+        name = words[2]
+        listened = {listening.name for listening in self.channels}
+        if name in listened or not Channels.settings().get(name, {}).get("enabled"):
+            return ""
+        return "\n" + self.listen_on([name])
 
     def handlers(self, channel, message, words):
         command = words[0]
@@ -1251,6 +1299,25 @@ def command_words(text):
         words = text.split()
     words[0] = command_word(words[0])
     return words
+
+
+def held_by_another(channel):
+    return f"{channel.name} is listened to by another Tinker (process {channel.holder().get('pid', '?')})"
+
+
+def channel_add_words(text):
+    words = command_words(text) if text.strip() else []
+    return words[2:] if words[:2] == ["channel", "add"] else None
+
+
+@contextlib.contextmanager
+def said_plainly():
+    write, screen = say.write, say.screen
+    say.write_through(print)
+    try:
+        yield
+    finally:
+        say.write_through(write, screen)
 
 
 def command_word(word):
@@ -2098,6 +2165,8 @@ class ConsoleChannel(Channel):
         threading.Thread(target=self.read, daemon=True).start()
 
     def read(self):
+        if typed_here() and not Config.get("model"):
+            self.first_pick()
         while True:
             try:
                 line = self.typed_line() if typed_here() else input(self.screen.prompt())
@@ -2108,7 +2177,7 @@ class ConsoleChannel(Channel):
                 return
             self.show_again(line)
             self.remember(line)
-            self.lines.put(self.picked(line))
+            self.lines.put(self.answered(line))
 
     def typed_line(self):
         editor, menu, drawer = LineEditor(typed_before()), CommandMenu(), PromptDrawer(self.screen.prompt())
@@ -2142,16 +2211,48 @@ class ConsoleChannel(Channel):
             editor.replace(answer.line)
         return answer.send and editor.press("enter")
 
+    def first_pick(self):
+        try:
+            line = self.model_picked("model")
+        except SystemExit as exc:
+            say.warn(str(exc))
+            return
+        if line is None:
+            Models.say_recipe()
+            say.text(MODEL_PULL_HINT)
+        elif line:
+            self.lines.put(line)
+
+    def answered(self, line):
+        words = channel_add_words(line)
+        if words is None or not typed_here():
+            return self.picked(line)
+        self.channel_added(words)
+        return ""
+
+    def channel_added(self, words):
+        from .channels import ChannelCommand
+
+        try:
+            with self.screen.printing, said_plainly():
+                ChannelCommand.run(["add", *words])
+        except SystemExit as exc:
+            say.warn(str(exc))
+
     def picked(self, line):
         pick = model_pick(line)
         if not pick or not typed_here():
             return line
         try:
-            choices = Models.command_choices(pick.split()[-1])
+            chosen = self.model_picked(pick)
         except SystemExit:
             return line
+        return line if chosen is None else chosen
+
+    def model_picked(self, pick):
+        choices = Models.command_choices(pick.split()[-1])
         if not choices:
-            return line
+            return None
         Models.say_recipe()
         with self.screen.printing:
             name = Models.picked(choices)
