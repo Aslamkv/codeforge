@@ -36,7 +36,6 @@ lazy from .knowledge import Library, Researcher, ResearchLearner, search_entry
 lazy from .learning import LearnStopped, SlotLearner
 lazy from .model import Calibrator, Model, Models, Ollama, OllamaError, SelectedModel
 lazy from .planning import Designer, InterfaceReviewer, Recaller, SpecWriter
-lazy from .principles import Principles
 lazy from .project import (
     Brief,
     Outcome,
@@ -123,7 +122,6 @@ def run(args, started_at):
 
 def open_home():
     Home.ensure()
-    Principles(None).migrate()
 
 
 class Cli:

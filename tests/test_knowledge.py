@@ -279,7 +279,7 @@ class EmbedServer:
         return {"embeddings": [[float(len(text)), float(text.count("a")) + 0.5] for text in payload["input"]]}
 
 
-@pytest.mark.spec("KNW-11")
+@pytest.mark.spec("KNW-10")
 def test_embeddings_are_cached_per_model(tinker_home, monkeypatch):
     server = EmbedServer()
     monkeypatch.setattr(Ollama, "get_json", staticmethod(server))
@@ -299,7 +299,7 @@ def test_embeddings_are_cached_per_model(tinker_home, monkeypatch):
     assert Ollama.embedders == {"embed-a", "embed-b"}
 
 
-@pytest.mark.spec("KNW-11")
+@pytest.mark.spec("KNW-10")
 def test_embeddings_keep_prune_and_failure(tinker_home, monkeypatch):
     monkeypatch.setattr(Ollama, "get_json", staticmethod(EmbedServer()))
     embeddings = Embeddings("e")
@@ -317,7 +317,7 @@ def test_embeddings_keep_prune_and_failure(tinker_home, monkeypatch):
     assert Embeddings.cosine([0, 0], [1, 1]) == 0.0
 
 
-@pytest.mark.spec("KNW-11")
+@pytest.mark.spec("KNW-10")
 def test_embeddings_required_check_and_configured(monkeypatch):
     assert Embeddings.configured() is None
     with pytest.raises(SystemExit, match="needs an embedding model"):
@@ -330,7 +330,7 @@ def test_embeddings_required_check_and_configured(monkeypatch):
     assert Embeddings.required("--web").name == "nomic" and Embeddings.configured().name == "nomic"
 
 
-@pytest.mark.spec("KNW-12")
+@pytest.mark.spec("KNW-11")
 def test_by_words_and_rank():
     texts = ["Flask routes and templates", "Django models", "Flask Flask Flask quickstart", "nothing here"]
     retriever = Retriever(None)
@@ -339,7 +339,7 @@ def test_by_words_and_rank():
     assert retriever.rank("q", []) == [] and retriever.used == "words"
 
 
-@pytest.mark.spec("KNW-12")
+@pytest.mark.spec("KNW-11")
 def test_rank_fuses_meaning(monkeypatch, capsys):
     class Meaning:
         name, failed = "e", ""
@@ -368,7 +368,7 @@ def test_rank_fuses_meaning(monkeypatch, capsys):
     assert retriever.embeddings is None and "Meaning search not used: it broke" in capsys.readouterr().out
 
 
-@pytest.mark.spec("KNW-13")
+@pytest.mark.spec("KNW-12")
 def test_safe_commands():
     kept, dropped = Learner.safe_commands(
         [
@@ -385,7 +385,7 @@ def test_safe_commands():
     assert dropped == ["npm install x", "cargo --version; rm x", "echo $HOME", "sudo ls"]
 
 
-@pytest.mark.spec("KNW-14")
+@pytest.mark.spec("KNW-13")
 def test_read_facts_and_add_facts():
     from tinkerkit.prompts import Reply
 
@@ -422,7 +422,7 @@ def test_read_facts_and_add_facts():
     assert Learner.pages_of(kept[0]) == ["https://a", "https://b"]
 
 
-@pytest.mark.spec("KNW-14")
+@pytest.mark.spec("KNW-13")
 def test_relevant_chunks():
     paragraphs = (
         ["intro about the page " * 10]
@@ -457,7 +457,7 @@ class FakeInternet(FakeSearch):
         return web_page(url, self.pages[url])
 
 
-@pytest.mark.spec("KNW-24")
+@pytest.mark.spec("KNW-22")
 def test_web_pages_reads_each_address_once_up_to_the_cap(make_model):
     pages = {url: f"what {url} says" for url in ("https://shared", "https://r1", "https://r2", "https://b1")}
     results = {
@@ -479,7 +479,7 @@ def test_web_pages_reads_each_address_once_up_to_the_cap(make_model):
     }
 
 
-@pytest.mark.spec("KNW-24")
+@pytest.mark.spec("KNW-22")
 def test_web_pages_reads_a_page_once_whatever_its_address(make_model):
     first, other = "https://example.org/page", "https://example.org/Page?q=1"
     results = {
@@ -492,7 +492,7 @@ def test_web_pages_reads_a_page_once_whatever_its_address(make_model):
     assert [page["url"] for page in read] == [first, other]
 
 
-@pytest.mark.spec("KNW-24")
+@pytest.mark.spec("KNW-22")
 def test_a_page_the_web_could_not_read_stands_on_its_search_snippet(make_model):
     internet = FakeInternet(
         {}, {"ruff": ["https://gone", "https://bare"]}, {"https://gone": "Ruff replaces black"}
@@ -501,7 +501,7 @@ def test_a_page_the_web_could_not_read_stands_on_its_search_snippet(make_model):
     assert read == [{"title": "https://gone", "url": "https://gone", "content": "Ruff replaces black"}]
 
 
-@pytest.mark.spec("KNW-24")
+@pytest.mark.spec("KNW-22")
 def test_a_research_round_reads_its_pages_from_one_fetch(make_model, fake_ollama):
     fake_ollama.reply(json.dumps({"facts": [{"phase": "spec", "text": "Food is weighed"}]}), when="Facts")
     internet = FakeInternet(
@@ -520,7 +520,7 @@ def test_a_research_round_reads_its_pages_from_one_fetch(make_model, fake_ollama
     assert learner.notes == ["page https://gone: HTTP 404", "page https://bare: HTTP 404"]
 
 
-@pytest.mark.spec("KNW-24")
+@pytest.mark.spec("KNW-22")
 def test_web_pages_keep_the_first_chunk_and_the_best_about_the_searches(make_model):
     paragraphs = (
         ["intro to the page " * 60]
@@ -534,7 +534,7 @@ def test_web_pages_keep_the_first_chunk_and_the_best_about_the_searches(make_mod
     assert "filler" not in page["content"]
 
 
-@pytest.mark.spec("KNW-24", "WEB-3")
+@pytest.mark.spec("KNW-22", "WEB-3")
 def test_more_searches_than_one_ask_keeps_each_searchs_results_its_own(make_model):
     queries = [f"search {number}" for number in range(MAX_PLANNED_SEARCHES + 2)]
     internet = FakeInternet({}, {query: [f"https://x.dev/{number}"] for number, query in enumerate(queries)})
@@ -547,7 +547,7 @@ def test_more_searches_than_one_ask_keeps_each_searchs_results_its_own(make_mode
     ]
 
 
-@pytest.mark.spec("KNW-25")
+@pytest.mark.spec("KNW-23")
 def test_a_search_a_model_writes_is_a_query_or_an_entry_with_engines_and_count():
     assert search_entry("  food   bank ") == {"query": "food bank"}
     assert search_entry({"query": " x ", "engines": ["mwmbl"], "count": 3, "why": "y"}) == {
@@ -559,7 +559,7 @@ def test_a_search_a_model_writes_is_a_query_or_an_entry_with_engines_and_count()
     assert [search_entry(raw) for raw in ("  ", {"engines": ["mwmbl"]}, {"query": 3}, 7, None)] == [None] * 5
 
 
-@pytest.mark.spec("KNW-15")
+@pytest.mark.spec("KNW-14")
 def test_look_at_machine(make_model):
     found = Learner(make_model(), FakeInternet(), None).look_at_machine(
         ["pwd", "echo tool version 2.4.1", "exit 3"]
@@ -574,7 +574,7 @@ def test_look_at_machine(make_model):
     assert found[2]["found"] is False and found[2]["version"] == ""
 
 
-@pytest.mark.spec("KNW-16")
+@pytest.mark.spec("KNW-15")
 def test_read_frame():
     frame = Researcher.read_frame(
         {
@@ -608,7 +608,7 @@ def test_read_frame():
         Researcher.read_frame({"questions": []}, "Food banks")
 
 
-@pytest.mark.spec("KNW-18")
+@pytest.mark.spec("KNW-17")
 def test_the_first_round_searches_the_topics_name_alone_on_wikipedia_and_wikibooks_first():
     own, asked = Researcher.first_searches(FRAME)
     assert own == {
@@ -628,7 +628,7 @@ def test_the_first_round_searches_the_topics_name_alone_on_wikipedia_and_wikiboo
     }
 
 
-@pytest.mark.spec("KNW-18")
+@pytest.mark.spec("KNW-17")
 def test_the_question_searches_are_each_questions_text_on_every_engine():
     frame = {
         "name": "Food banks",
@@ -655,7 +655,7 @@ def test_the_question_searches_are_each_questions_text_on_every_engine():
     ]
 
 
-@pytest.mark.spec("KNW-16")
+@pytest.mark.spec("KNW-15")
 def test_read_analysis():
     analysis = Researcher.read_analysis(
         {
@@ -725,7 +725,7 @@ def fact(text, source, section="1"):
     return {"text": text, "source": source, "section": section}
 
 
-@pytest.mark.spec("KNW-17")
+@pytest.mark.spec("KNW-16")
 def test_cross_check_supports_agreeing_facts_and_pairs_disagreeing_ones():
     facts = [
         fact("Food is weighed in 10 kg crates", "https://a.org/1"),
@@ -741,7 +741,7 @@ def test_cross_check_supports_agreeing_facts_and_pairs_disagreeing_ones():
     assert facts[3]["sites"] == ["a.org"] and (1, 3) in differ and (2, 3) in differ
 
 
-@pytest.mark.spec("KNW-17")
+@pytest.mark.spec("KNW-16")
 def test_fold_repeats_keeps_the_more_detailed_text():
     facts = [fact("Open on Mondays", "https://a.org"), fact("Open on Mondays from 9 to 5", "https://b.org")]
     vectors = [[1, 0], [1, 0.01]]
@@ -757,7 +757,7 @@ def test_fold_repeats_keeps_the_more_detailed_text():
     )
 
 
-@pytest.mark.spec("KNW-23")
+@pytest.mark.spec("KNW-21")
 def test_a_research_answers_with_its_findings_and_their_numbered_sources():
     entry = {
         "name": "Food banks",
@@ -791,7 +791,7 @@ def test_a_research_answers_with_its_findings_and_their_numbered_sources():
     assert "no finding" in Researcher.answer(dict(entry, findings=[]))
 
 
-@pytest.mark.spec("KNW-17")
+@pytest.mark.spec("KNW-16")
 def test_supported_and_entry():
     corroborated, single, disputed = (
         {"confidence": confidence} for confidence in ("corroborated", "single", "disputed")
@@ -823,7 +823,7 @@ def test_supported_and_entry():
     assert "section" not in entry["facts"][0]
 
 
-@pytest.mark.spec("KNW-18")
+@pytest.mark.spec("KNW-17")
 def test_a_check_of_a_fact_from_the_topics_own_article_searches_for_no_question():
     frame = {"questions": [{"question": "q1"}]}
     analysis = {"gaps": [], "checks": [{"fact": 1, "search": {"query": "check a"}}]}
@@ -838,7 +838,7 @@ def test_a_check_of_a_fact_from_the_topics_own_article_searches_for_no_question(
     ]
 
 
-@pytest.mark.spec("KNW-18")
+@pytest.mark.spec("KNW-17")
 def test_next_searches_and_fact_listing():
     frame = {"questions": [{"question": "q1"}, {"question": "q2"}]}
     facts = [fact("a", "u", "2"), fact("b", "u", "1")]
@@ -896,7 +896,7 @@ def analysis(gaps=()):
     )
 
 
-@pytest.mark.spec("KNW-18")
+@pytest.mark.spec("KNW-17")
 def test_research_a_domain(make_model, fake_ollama, tinker_home):
     pages = {
         "https://a.org/intake": "Donations are weighed at intake.",
@@ -946,7 +946,7 @@ def step_of(label):
     return label.split(" (")[0].split(",")[0]
 
 
-@pytest.mark.spec("KNW-24")
+@pytest.mark.spec("KNW-22")
 def test_research_skips_an_off_topic_result(make_model, fake_ollama, tinker_home):
     pages = {
         "https://a.org/intake": "Donations are weighed at intake.",
@@ -969,7 +969,7 @@ def test_research_skips_an_off_topic_result(make_model, fake_ollama, tinker_home
     assert internet.fetches[0] == ["https://a.org/intake"]
 
 
-@pytest.mark.spec("KNW-18")
+@pytest.mark.spec("KNW-17")
 def test_a_research_that_finds_nothing_keeps_the_earlier_one(make_model, fake_ollama, tinker_home, capsys):
     earlier = dict(FRAME, kind="research", learned="2026-01-01", facts=[], findings=[])
     Library.save("food-bank-inventory", earlier)
@@ -980,7 +980,7 @@ def test_a_research_that_finds_nothing_keeps_the_earlier_one(make_model, fake_ol
     assert "No page gave facts; kept what was found before (2026-01-01)" in capsys.readouterr().out
 
 
-@pytest.mark.spec("KNW-18")
+@pytest.mark.spec("KNW-17")
 def test_a_round_that_gives_no_fact_searches_each_question_as_written_next(
     make_model, fake_ollama, tinker_home
 ):
@@ -1004,7 +1004,7 @@ def test_a_round_that_gives_no_fact_searches_each_question_as_written_next(
     assert entry is not None and entry["facts"][0]["text"] == "Donated food is weighed at intake"
 
 
-@pytest.mark.spec("KNW-18")
+@pytest.mark.spec("KNW-17")
 @pytest.mark.parametrize(
     "learner_class, system",
     [(Learner, Prompts.FACTS_SYSTEM), (ResearchLearner, Prompts.RESEARCH_FACTS_SYSTEM)],
@@ -1022,7 +1022,7 @@ def test_a_learn_reads_with_the_facts_prompt_and_a_research_with_the_research_fa
     assert fake_ollama.calls[0]["messages"][0]["content"].startswith(system)
 
 
-@pytest.mark.spec("KNW-18")
+@pytest.mark.spec("KNW-17")
 def test_a_learn_reads_excerpts_that_fill_the_models_room(make_model):
     learner = Learner(make_model(), FakeInternet(), None)
     topic, source, focus = "stock", Part("Page", "s", True), Part("Look for", "f", True)
@@ -1030,7 +1030,7 @@ def test_a_learn_reads_excerpts_that_fill_the_models_room(make_model):
     assert learner.room_for_excerpts(topic, source, focus) == room
 
 
-@pytest.mark.spec("KNW-18")
+@pytest.mark.spec("KNW-17")
 def test_a_research_reads_excerpts_of_at_most_the_research_excerpt_size(make_model):
     learner = ResearchLearner(make_model(), FakeInternet(), None)
     topic, source, focus = "stock", Part("Page", "s", True), Part("Look for", "f", True)
@@ -1039,7 +1039,7 @@ def test_a_research_reads_excerpts_of_at_most_the_research_excerpt_size(make_mod
     assert learner.room_for_excerpts(topic, source, focus) == RESEARCH_EXCERPT_CHARS
 
 
-@pytest.mark.spec("KNW-18")
+@pytest.mark.spec("KNW-17")
 def test_a_research_reads_a_long_page_as_excerpts_of_at_most_the_research_excerpt_size(
     make_model, fake_ollama
 ):
@@ -1060,7 +1060,7 @@ def test_a_research_reads_a_long_page_as_excerpts_of_at_most_the_research_excerp
     assert excerpts and all(len(excerpt) < RESEARCH_EXCERPT_CHARS + 500 for excerpt in excerpts)
 
 
-@pytest.mark.spec("KNW-18")
+@pytest.mark.spec("KNW-17")
 def test_the_research_facts_prompt_asks_for_what_its_questions_ask():
     asked = Prompts.RESEARCH_FACTS_SYSTEM
     assert all(want in asked for want in ("definitions", "key terms", "numbers", "standards", "changing"))
@@ -1093,7 +1093,7 @@ def language_with_rules():
     return [rule["id"] for rule in Library.read("go")["rules"]]
 
 
-@pytest.mark.spec("KNW-20")
+@pytest.mark.spec("KNW-19")
 def test_rules_are_shown_in_place_of_the_facts_they_cite(tinker_home):
     aliases, _ = language_with_rules()
     items = Library.items({"go": Library.read("go")})
@@ -1107,7 +1107,7 @@ def test_rules_are_shown_in_place_of_the_facts_they_cite(tinker_home):
     assert len(Library.items({"go": plain})) == every_fact_without_a_playbook
 
 
-@pytest.mark.spec("KNW-20")
+@pytest.mark.spec("KNW-19")
 def test_a_rule_is_proven_and_retired_like_a_fact(tinker_home):
     aliases, run = language_with_rules()
     Knowledge("Go").prove({f"fact:go:{aliases}": ["code"]})
@@ -1233,7 +1233,7 @@ def test_a_failure_retires_what_was_used_in_that_step(tinker_home):
     ] == [route]
 
 
-@pytest.mark.spec("KNW-8")
+@pytest.mark.spec("KNW-7")
 def test_proven_facts_are_shown_for_their_phase(tinker_home):
     route, client = topic_with_facts()
     known = Knowledge("Python 3.13")
@@ -1246,7 +1246,7 @@ def events(item):
     return [(event["event"], event["run"]) for event in item.get("history", [])]
 
 
-@pytest.mark.spec("KNW-9")
+@pytest.mark.spec("KNW-8")
 def test_each_item_keeps_its_history_by_run(tinker_home):
     route, _ = topic_with_facts()
     Knowledge("Python", "r1").add_lessons([lesson("Seed random generators inside tests", "tests")], [])
@@ -1263,7 +1263,7 @@ def test_each_item_keeps_its_history_by_run(tinker_home):
     assert events(after.language_doc["facts"][0]) == [("born", "r3"), ("helped", "r4")]
 
 
-@pytest.mark.spec("KNW-9")
+@pytest.mark.spec("KNW-8")
 def test_a_fix_keeps_its_history_and_history_is_capped(tinker_home, monkeypatch):
     Knowledge("Python", "r1").remember_fix(
         {"failure": "no module named calc", "cause": "pythonpath", "replay": {"toolchain": {}}}
@@ -1278,7 +1278,7 @@ def test_a_fix_keeps_its_history_and_history_is_capped(tinker_home, monkeypatch)
     assert [run for _, run in events(item)] == ["r2", "r3", "r4"] and item["helped"] == 4
 
 
-@pytest.mark.spec("KNW-4", "KNW-9")
+@pytest.mark.spec("KNW-4", "KNW-8")
 def test_lessons_rank_by_times_seen_and_helped(tinker_home):
     known = Knowledge("Python")
     known.add_lessons(
@@ -1296,7 +1296,7 @@ def test_lessons_rank_by_times_seen_and_helped(tinker_home):
     ] == "Seed random generators inside tests"
 
 
-@pytest.mark.spec("KNW-10")
+@pytest.mark.spec("KNW-9")
 def test_what_is_retired_is_kept_apart_with_why_and_never_shown(tinker_home, monkeypatch):
     route, client = topic_with_facts()
     known = Knowledge("Python", "r1")
@@ -1328,7 +1328,7 @@ def test_what_is_retired_is_kept_apart_with_why_and_never_shown(tinker_home, mon
     assert [retired["id"] for retired in Library.read("flask")["retired"]] == [route]
 
 
-@pytest.mark.spec("KNW-22")
+@pytest.mark.spec("KNW-20")
 @pytest.mark.parametrize(
     "item,key",
     [
@@ -1344,7 +1344,7 @@ def test_an_item_reads_back_from_its_key(item, key):
     assert item.key == key and Item.of(key) == item
 
 
-@pytest.mark.spec("KNW-22")
+@pytest.mark.spec("KNW-20")
 @pytest.mark.spec("PRI-7")
 def test_retire_takes_an_item_from_its_own_store(tinker_home):
     route, client = topic_with_facts()
@@ -1374,7 +1374,7 @@ def test_retire_takes_an_item_from_its_own_store(tinker_home):
     assert not retire(Item("toolchain", "python"), "Python", "taught wrong", "r2")
 
 
-@pytest.mark.spec("KNW-19")
+@pytest.mark.spec("KNW-18")
 def test_a_finding_cites_its_facts_by_id(tinker_home):
     Library.save(
         "food",
@@ -1441,7 +1441,7 @@ def searches_reply(*searches):
     return json.dumps({"searches": list(searches)})
 
 
-@pytest.mark.spec("KNW-25")
+@pytest.mark.spec("KNW-23")
 def test_a_search_plan_asks_the_quick_model_and_fills_the_placeholders(monkeypatch):
     asked = planner_replying(
         monkeypatch,
@@ -1460,16 +1460,12 @@ def test_a_search_plan_asks_the_quick_model_and_fills_the_placeholders(monkeypat
     system, user = asked[0]
     assert system["content"] == Prompts.SEARCH_PLAN_SYSTEM
     assert "{topic} documentation" in user["content"] and "10" in user["content"]
-
-
-@pytest.mark.spec("KNW-25")
-def test_the_search_plan_prompt_names_each_engine_the_placeholders_and_the_cap():
     prompt = Prompts.SEARCH_PLAN_SYSTEM
     assert all(engine in prompt for engine in ("mwmbl", "wikipedia", "wikibooks"))
     assert "placeholder" in prompt and str(MAX_PLANNED_SEARCHES) in prompt and '"searches"' in prompt
 
 
-@pytest.mark.spec("KNW-25", "KNW-26")
+@pytest.mark.spec("KNW-23", "KNW-24")
 @pytest.mark.parametrize(
     "reply",
     [
@@ -1486,14 +1482,14 @@ def test_a_failed_or_empty_search_plan_is_the_filled_need_to_every_engine(monkey
     assert home_store.items("search plans") == {}
 
 
-@pytest.mark.spec("KNW-25")
+@pytest.mark.spec("KNW-23")
 def test_with_no_quick_model_the_plan_is_the_need_with_no_call(monkeypatch):
     monkeypatch.setattr(Models, "quick", staticmethod(lambda: None))
     monkeypatch.setattr(Models, "quick_reply", staticmethod(lambda *asked, **options: pytest.fail("no call")))
     assert SearchPlanner().plan("python docs", 2) == [{"query": "python docs", "engines": [], "count": 2}]
 
 
-@pytest.mark.spec("KNW-25")
+@pytest.mark.spec("KNW-23")
 def test_a_plan_keeps_searches_with_a_query_up_to_the_cap(monkeypatch):
     many = [{"query": f"q{n}"} for n in range(MAX_PLANNED_SEARCHES + 2)]
     planner_replying(monkeypatch, searches_reply({"query": "  "}, *many))
@@ -1502,13 +1498,13 @@ def test_a_plan_keeps_searches_with_a_query_up_to_the_cap(monkeypatch):
     ]
 
 
-@pytest.mark.spec("KNW-25")
+@pytest.mark.spec("KNW-23")
 def test_stray_braces_in_a_planned_query_are_left_as_written(monkeypatch):
     planner_replying(monkeypatch, searches_reply({"query": "{topic} {unknown} {"}))
     assert SearchPlanner().plan("need", 3, {"topic": "Go"})[0]["query"] == "Go {unknown} {"
 
 
-@pytest.mark.spec("KNW-26")
+@pytest.mark.spec("KNW-24")
 def test_a_plan_is_kept_unfilled_by_its_need_and_serves_every_topic_with_no_call(monkeypatch, home_store):
     asked = planner_replying(
         monkeypatch, searches_reply({"query": "{topic} guide", "engines": ["wikibooks"]})

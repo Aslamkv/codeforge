@@ -51,6 +51,10 @@ def http_error(code):
     return urllib.error.HTTPError("https://x", code, "err", {}, io.BytesIO(b""))
 
 
+def searched(internet, query, count, engines=None):
+    return internet.search_all([{"query": query, "engines": engines or []}], count)[0]
+
+
 NO_ROUTE = urllib.error.URLError(OSError("no route"))
 FOUND = [found("x.org")]
 
@@ -68,7 +72,7 @@ def test_internet_searches_with_mwmbl_wikipedia_and_wikibooks():
 def test_search_interleaves_the_engines_results_by_rank():
     first = Engine("a", [found("a1"), found("same"), found("a3")])
     second = Engine("b", [found("same", "B"), found("b2")])
-    results = Internet([first, second]).search("q", 4)
+    results = searched(Internet([first, second]), "q", 4)
     assert [result["url"] for result in results] == ["https://a1", "https://same", "https://b2", "https://a3"]
     assert results[1]["title"] == "B" and first.asked == second.asked == ["q"]
 
@@ -82,7 +86,7 @@ def test_search_keeps_web_addresses_as_strings():
         {"title": 5, "url": "http://y.org"},
         {"url": "https://z.org"},
     ]
-    assert Internet([Engine("a", answer)]).search("q", 2) == [
+    assert searched(Internet([Engine("a", answer)]), "q", 2) == [
         {"title": "T", "url": "https://x.org", "content": ""},
         {"title": "5", "url": "http://y.org", "content": ""},
     ]
@@ -100,7 +104,7 @@ def test_search_asks_every_engine_at_once_with_no_pause(monkeypatch):
     slept = []
     monkeypatch.setattr(time, "sleep", slept.append)
     engines = [Waiting(name) for name in ("a", "b", "c")]
-    assert len(Internet(engines).search("q", 5)) == 3 and slept == []
+    assert len(searched(Internet(engines), "q", 5)) == 3 and slept == []
 
 
 @pytest.mark.spec("WEB-3")
@@ -109,9 +113,9 @@ def test_search_asks_every_engine_at_once_with_no_pause(monkeypatch):
 )
 def test_an_engine_that_times_out_or_fails_on_the_server_is_asked_once_more(trouble):
     engine = Engine("a", trouble, FOUND)
-    assert Internet([engine]).search("q", 3) == FOUND and engine.asked == ["q", "q"]
+    assert searched(Internet([engine]), "q", 3) == FOUND and engine.asked == ["q", "q"]
     engine = Engine("a", trouble, trouble)
-    assert Internet([engine]).search("q", 3) == [] and engine.asked == ["q", "q"]
+    assert searched(Internet([engine]), "q", 3) == [] and engine.asked == ["q", "q"]
 
 
 @pytest.mark.spec("WEB-3")
@@ -120,8 +124,8 @@ def test_an_engine_that_times_out_or_fails_on_the_server_is_asked_once_more(trou
 )
 def test_any_other_failure_gives_nothing_from_that_engine(trouble):
     failing, answering = Engine("a", trouble), Engine("b", FOUND)
-    assert Internet([failing, answering]).search("q", 3) == FOUND
-    assert failing.asked == ["q"] and Internet([Engine("a", trouble)]).search("q", 3) == []
+    assert searched(Internet([failing, answering]), "q", 3) == FOUND
+    assert failing.asked == ["q"] and searched(Internet([Engine("a", trouble)]), "q", 3) == []
 
 
 @pytest.mark.spec("WEB-3")
@@ -136,7 +140,7 @@ def test_search_all_gives_each_querys_results_in_order():
 @pytest.mark.spec("WEB-3")
 def test_search_asks_only_the_engines_named():
     first, second = Echo("a"), Echo("b")
-    assert Internet([first, second]).search("q", 3, ["b"]) == [found("b/q")]
+    assert searched(Internet([first, second]), "q", 3, ["b"]) == [found("b/q")]
     assert first.asked == [] and second.asked == ["q"]
 
 
@@ -212,7 +216,7 @@ def test_an_unreachable_web_is_offline_after_saying_so_once(monkeypatch, capsys)
     internet = Internet(engines)
     assert internet.search_all(["q", "r"], 3) == [[], []]
     asked = [list(engine.asked) for engine in engines]
-    assert internet.search("s", 3) == [] and [engine.asked for engine in engines] == asked
+    assert searched(internet, "s", 3) == [] and [engine.asked for engine in engines] == asked
     [page] = internet.fetch(["https://a.org"])
     assert all("q" in engine_asked for engine_asked in asked) and fetcher.asked == []
     assert page.url == "https://a.org" and page.data == b"" and page.blocks == [] and page.why
@@ -225,10 +229,14 @@ def test_a_timeout_or_one_unreachable_engine_is_not_offline():
     engine = Engine("a", timed_out, timed_out, FOUND)
     internet = Internet([engine])
     assert (
-        internet.search("q", 3) == [] and internet.search("r", 3) == FOUND and engine.asked == ["q", "q", "r"]
+        searched(internet, "q", 3) == []
+        and searched(internet, "r", 3) == FOUND
+        and engine.asked == ["q", "q", "r"]
     )
     internet = Internet([Engine("a", NO_ROUTE, FOUND), Engine("b", FOUND, FOUND)])
-    assert internet.search("q", 3) == FOUND and internet.search("r", 3) == FOUND and not internet.offline
+    assert (
+        searched(internet, "q", 3) == FOUND and searched(internet, "r", 3) == FOUND and not internet.offline
+    )
 
 
 ARTICLE = (
@@ -323,7 +331,7 @@ def test_every_request_is_logged_and_counted():
 def test_internet_logs_every_engine_request_and_fetch(monkeypatch):
     reading(monkeypatch, {"https://a": got("https://a", "words", "text/plain")})
     internet = Internet([Engine("mwmbl", http_error(503), FOUND), Engine("wikipedia", http_error(404))])
-    internet.search("q", 3)
+    searched(internet, "q", 3)
     internet.fetch(["https://a"])
     lines = sorted((line["kind"], line["by"], line["result"], line["target"]) for line in logged())
     assert lines == [
@@ -389,9 +397,9 @@ def test_searches_and_fetches_go_through_the_journal(home_store, monkeypatch):
     )
     with pytest.raises(KeyboardInterrupt), Jobs.run_here(["ask", "hi"]):
         first = Internet([engine]).fetch(["https://a", "https://b"])
-        Internet([engine]).search("q", 3)
+        searched(Internet([engine]), "q", 3)
         raise KeyboardInterrupt
     with Jobs.run_here(Jobs.arguments(["resume", "#1"])):
         assert Internet([engine]).fetch(["https://a", "https://b"]) == first
-        assert Internet([engine]).search("q", 3) == FOUND
+        assert searched(Internet([engine]), "q", 3) == FOUND
     assert engine.asked == ["q"] and len(fetcher.asked) == 1

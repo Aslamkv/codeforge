@@ -2,6 +2,7 @@ from collections import namedtuple
 lazy import time
 
 lazy from .settings import GLANCE_KEPT_SECONDS, MESSAGE_KEPT_SECONDS, Home, Numbered
+lazy from .text import now_text
 
 DONE_NOTE_KEPT_SECONDS = 5
 ANSWER_WINDOW_SECONDS = 60
@@ -86,9 +87,7 @@ class Ledger:
             thing = cls.HISTORY.next_number()
         cls.HISTORY.update(
             thing,
-            lambda kept: dict(
-                kept or {"number": thing, "asked": asked}, time=time.strftime("%Y-%m-%d %H:%M"), text=text
-            ),
+            lambda kept: dict(kept or {"number": thing, "asked": asked}, time=now_text(), text=text),
         )
         for message in messages:
             if message is not None:

@@ -34,7 +34,7 @@ lazy from .settings import (
     Numbered,
     confirm_deletion,
 )
-lazy from .text import field, fingerprint, first_line, now_text, split_text, words
+lazy from .text import field, fingerprint, first_line, now_text, one_line, split_text, words
 lazy from .web import Internet, is_web_address
 
 CHAPTER_ROLE_ORDER = ("core", "supporting", "other")
@@ -535,13 +535,13 @@ def sliced(text, marks):
 
 
 def numbered(pieces):
-    pieces = [(" ".join(title.split()), tidy(text)) for title, text in pieces]
+    pieces = [(one_line(title), tidy(text)) for title, text in pieces]
     pieces = [(title, text) for title, text in pieces if len(words(text)) > len(words(title)) + 3]
     return [Chapter(number, title, text, kind_of(title)) for number, (title, text) in enumerate(pieces, 1)]
 
 
 def tidy(text):
-    lines = [" ".join(line.split()) for line in text.splitlines()]
+    lines = [one_line(line) for line in text.splitlines()]
     return re.sub(r"\n{3,}", "\n\n", "\n".join(lines)).strip()
 
 
@@ -631,7 +631,7 @@ class Epub:
 
     def metadata(self, name):
         found = self.opf.find(f".//{{*}}metadata/{{*}}{name}")
-        return " ".join((found.text or "").split()) if found is not None else ""
+        return one_line(found.text) if found is not None else ""
 
     def spine_text(self):
         parts, starts, size = [], {}, 0
@@ -693,7 +693,7 @@ def ncx_entries(parent, depth=1):
     for point in parent.findall("{*}navPoint"):
         label, content = point.find("{*}navLabel/{*}text"), point.find("{*}content")
         if label is not None and content is not None:
-            yield NcxEntry(depth, " ".join((label.text or "").split()), content.get("src"))
+            yield NcxEntry(depth, one_line(label.text), content.get("src"))
         yield from ncx_entries(point, depth + 1)
 
 
@@ -796,7 +796,7 @@ class NavEntries(html.parser.HTMLParser):
         elif self.inside and tag == "ol":
             self.depth -= 1
         elif self.inside and tag == "a" and self.link is not None:
-            title = " ".join("".join(self.words).split())
+            title = one_line("".join(self.words))
             if title and self.link:
                 self.navs[-1][1].append((max(self.depth, 1), title, self.link))
             self.link = None

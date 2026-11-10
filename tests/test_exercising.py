@@ -4,7 +4,7 @@ import time
 from pathlib import Path
 
 import pytest
-from conftest import criterion
+from conftest import add_back, criterion
 from test_conversation import Recorder, everyone
 
 from tinkerkit import conversation, exercising
@@ -111,6 +111,16 @@ class Builds:
 def projects(tmp_path, home_store):
     Config.save(projects=str(tmp_path / "Projects"))
     return tmp_path / "Projects" / "tinker-exercise"
+
+
+@pytest.fixture
+def channel():
+    return Recorder()
+
+
+@pytest.fixture
+def desk(channel, tmp_path):
+    return Desk([channel], tmp_path)
 
 
 def exercise_of(make_model, builds, title="Exercising rust"):
@@ -253,20 +263,7 @@ def test_measured_and_problems_come_from_the_projects_own_database(make_project,
         project.store.append("events", event)
     project.store.append("output", {"line": "⚠️ ruff is not installed", "kind": "warn"})
     measures = measured(project_dir)
-    assert {
-        key: measures[key]
-        for key in (
-            "status",
-            "minutes",
-            "calls",
-            "retried",
-            "tokens",
-            "passing",
-            "parked",
-            "points",
-            "readme_failures",
-        )
-    } == {
+    expected = {
         "status": "done",
         "minutes": 5.0,
         "calls": 3,
@@ -277,6 +274,7 @@ def test_measured_and_problems_come_from_the_projects_own_database(make_project,
         "points": 2,
         "readme_failures": 1,
     }
+    assert {key: measures[key] for key in expected} == expected
     assert measures["slowest"] == ["Write: 120s in 1 call", "Spec: 90s in 2 calls"]
     found = problems(project_dir)
     assert "nothing made this pass: sorts" in found and "README example failed: `x`: boom" in found
@@ -352,10 +350,8 @@ def test_each_practice_project_shows_only_its_own_steps(make_model, fake_ollama,
 
 @pytest.mark.spec("EXR-6")
 def test_the_conversation_adopts_an_exercise_a_conversation_before_it_started(
-    home_store, tmp_path, monkeypatch
+    home_store, channel, desk, monkeypatch
 ):
-    channel = Recorder()
-    desk = Desk([channel], tmp_path)
     followed = []
     monkeypatch.setattr(
         desk,
@@ -365,7 +361,7 @@ def test_the_conversation_adopts_an_exercise_a_conversation_before_it_started(
     conversation.keep_exercise_board({("rec", "1"): [7], ("other", "5"): [8]})
     reports_by_itself = {"title": "Exercising Rust", "exercise": True, "reports": True}
     home_store.put("jobs", "1", exercise_job("running", progress=reports_by_itself))
-    Queue.add_back(1)
+    add_back(1)
     desk.adopt_exercise()
     assert followed == []
     home_store.put("jobs", "1", exercise_job("running", progress=BUILDING))
@@ -375,10 +371,8 @@ def test_the_conversation_adopts_an_exercise_a_conversation_before_it_started(
 
 @pytest.mark.spec("EXR-6")
 def test_an_exercise_that_ended_unstopped_goes_on_as_the_conversation_starts(
-    home_store, tmp_path, monkeypatch
+    home_store, channel, desk, monkeypatch
 ):
-    channel = Recorder()
-    desk = Desk([channel], tmp_path)
     started = []
     monkeypatch.setattr(
         desk, "start_exercise", lambda audience, words, title=None: started.append((audience, words, title))
@@ -386,7 +380,7 @@ def test_an_exercise_that_ended_unstopped_goes_on_as_the_conversation_starts(
     desk.adopt_exercise()
     its_job_killed_too = exercise_job("running", number=4, pid=999999999, updated="2026-10-23 09:00")
     home_store.put("jobs", "4", its_job_killed_too)
-    Queue.add_back(4)
+    add_back(4)
     conversation.keep_exercise_board({("rec", "1"): [7]})
     desk.adopt_exercise()
     assert started == [([(channel, "1")], ["resume", "#4"], "exercise rust")]
@@ -394,14 +388,12 @@ def test_an_exercise_that_ended_unstopped_goes_on_as_the_conversation_starts(
 
 @pytest.mark.spec("EXR-6")
 def test_an_adopted_exercise_takes_its_message_out_and_sends_it_at_the_bottom(
-    home_store, tmp_path, monkeypatch
+    home_store, channel, desk, monkeypatch
 ):
     monkeypatch.setattr(conversation, "until_ended", lambda pid: time.sleep(0.2))
-    channel = Recorder()
-    desk = Desk([channel], tmp_path)
     conversation.keep_exercise_board({("rec", "1"): [7]})
     home_store.put("jobs", "1", exercise_job("running", progress=BUILDING))
-    Queue.add_back(1)
+    add_back(1)
     desk.adopt_exercise()
     after = channel.log[channel.log.index(("delete", "1", 7, "")) :]
     assert any(kind == "send" and "Exercising Rust" in text for kind, _, _, text in after)
@@ -409,12 +401,10 @@ def test_an_adopted_exercise_takes_its_message_out_and_sends_it_at_the_bottom(
 
 
 @pytest.mark.spec("EXR-6")
-def test_an_adopted_exercise_with_no_saved_message_sends_none(home_store, tmp_path, monkeypatch):
+def test_an_adopted_exercise_with_no_saved_message_sends_none(home_store, channel, desk, monkeypatch):
     monkeypatch.setattr(conversation, "until_ended", lambda pid: time.sleep(0.2))
-    channel = Recorder()
-    desk = Desk([channel], tmp_path)
     home_store.put("jobs", "1", exercise_job("running", progress=BUILDING))
-    Queue.add_back(1)
+    add_back(1)
     desk.adopt_exercise()
     assert desk.exercise_reporter is not None and desk.exercise_reporter.audience == []
     wait_for_the_reporter_to_end(desk)
@@ -436,9 +426,9 @@ def test_another_chat_sees_no_exercise_message(home_store, tmp_path, monkeypatch
 
 
 @pytest.mark.spec("EXR-7")
-def test_an_exercise_that_ends_before_it_keeps_a_tracker_shows_what_it_printed(home_store, tmp_path):
-    channel = Recorder()
-    desk = Desk([channel], tmp_path)
+def test_an_exercise_that_ends_before_it_keeps_a_tracker_shows_what_it_printed(
+    home_store, channel, desk, tmp_path
+):
     log = tmp_path / "exercise.log"
     log.write_text("before\n")
     start = log.stat().st_size
@@ -454,10 +444,9 @@ def test_an_exercise_that_ends_before_it_keeps_a_tracker_shows_what_it_printed(h
 
 
 @pytest.mark.spec("EXR-6")
-def test_the_conversation_status_names_a_running_exercise_from_the_queue(home_store, tmp_path):
-    desk = Desk([Recorder()], tmp_path)
+def test_the_conversation_status_names_a_running_exercise_from_the_queue(home_store, desk):
     home_store.put("jobs", "1", exercise_job("running", progress=BUILDING))
-    Queue.add_back(1)
+    add_back(1)
     assert desk.status() == "🔄 **Tinker** · working on exercise rust"
 
 
@@ -504,8 +493,8 @@ def test_exercise_status_shows_each_project_measured(home_store, projects, capsy
     )
     home_store.put("jobs", "1", exercise_job("running"))
     another_job = 2
-    Queue.add_back(another_job)
-    Queue.add_back(1)
+    add_back(another_job)
+    add_back(1)
     exercising.show()
     assert "Rust: queued, 1 practice project(s) done" in capsys.readouterr().out
     Queue.remove(another_job)
@@ -522,14 +511,12 @@ def test_tinker_exercise_takes_a_language_or_status():
 
 
 @pytest.mark.spec("EXR-7")
-def test_every_exercise_keeps_one_message_started_stopped_or_resumed(home_store, tmp_path, monkeypatch):
-    channel = Recorder()
-    desk = Desk([channel], tmp_path)
+def test_every_exercise_keeps_one_message_started_stopped_or_resumed(home_store, channel, desk, monkeypatch):
     told = []
     monkeypatch.setattr(conversation, "signal_task", lambda pid, signum: told.append((pid, signum)))
     assert desk.stop_exercise().startswith("🤷 No exercise runs")
     home_store.put("jobs", "1", exercise_job("running", progress=BUILDING))
-    Queue.add_back(1)
+    add_back(1)
     first_ended = []
     desk.follow_exercise(
         [(channel, "1")],
@@ -557,10 +544,5 @@ def wait_for_the_reporter_to_end(desk):
 
 @pytest.mark.spec("EXR-7")
 def test_exercise_commands_that_switch_it_show_in_its_message_alone():
-    assert conversation.exercise_switch("/exercise rust") and conversation.exercise_switch(
-        "/exercise python 3"
-    )
-    assert not conversation.exercise_switch("/exercise status") and not conversation.exercise_switch(
-        "/exercise"
-    )
-    assert not conversation.exercise_switch("exercise rust")
+    assert all(map(conversation.exercise_switch, ["/exercise rust", "/exercise python 3"]))
+    assert not any(map(conversation.exercise_switch, ["/exercise status", "/exercise", "exercise rust"]))

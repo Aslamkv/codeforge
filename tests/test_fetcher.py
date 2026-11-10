@@ -74,7 +74,7 @@ def fetcher(max_bytes=100_000):
 
 
 @pytest.mark.spec("FET-1")
-def test_sites_are_fetched_in_parallel_in_order_and_one_failure_blocks_none(site):
+def test_sites_are_fetched_in_parallel_in_order_timed_and_one_failure_blocks_none(site):
     together = threading.Barrier(2, timeout=3)
     one, other = (
         site({"/together": (200, HTML, b"<p>a</p>")}, together),
@@ -94,6 +94,7 @@ def test_sites_are_fetched_in_parallel_in_order_and_one_failure_blocks_none(site
     assert got[1].status == 404 and got[1].error == "HTTP 404" and got[1].data == b""
     assert got[2].status is None and got[2].error
     assert all(agent == Fetcher(1, 1, 1).user_agent for _, agent, _ in one.seen)
+    assert all(fetched.seconds >= 0 for fetched in got)
 
 
 @pytest.mark.spec("FET-1")
@@ -150,11 +151,3 @@ def test_redirects_are_followed_up_to_the_limit(site):
     assert moved.ok and moved.final_url == f"{web.base}/new" and moved.text == "<p>new</p>"
     assert not looping.ok and looping.error.startswith("HTTP 30")
     assert f"/hop{MAX_REDIRECTS + 1}" not in web.paths()
-
-
-@pytest.mark.spec("FET-1")
-def test_each_page_says_how_long_it_took(site):
-    web = site({"/a": (200, HTML, b"a")})
-    assert all(
-        fetched.seconds >= 0 for fetched in fetcher().fetch_all([f"{web.base}/a", "http://127.0.0.1:1/"])
-    )

@@ -74,6 +74,8 @@ def test_the_kind_of_a_command_and_of_its_actions_comes_from_the_table():
         (["model"], "glance"),
         (["model", "calibrate"], "glance"),
         (["model", "calibrate", "qwen3"], "job"),
+        (["model", "recipe"], "glance"),
+        (["model", "recipe", "all"], "job"),
         (["fly"], None),
         ([], None),
     ],
@@ -89,12 +91,6 @@ def test_model_of_a_never_measured_model_is_a_job(home_store):
     assert kind_of(["model", "measured"]) == "glance"
     assert kind_of(["model", "nomic"]) == "glance"
     assert kind_of(["model", "fresh"]) == "job"
-
-
-@pytest.mark.spec("CMD-1")
-def test_model_recipe_is_a_glance_and_model_recipe_all_a_job(home_store):
-    assert kind_of(["model", "recipe"]) == "glance"
-    assert kind_of(["model", "recipe", "all"]) == "job"
 
 
 @pytest.mark.spec("JOB-1")

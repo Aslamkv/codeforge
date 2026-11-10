@@ -43,11 +43,6 @@ class Queue:
         Runner.wake.set()
 
     @staticmethod
-    def add_back(number):
-        Queue.place(number, lambda others: others + [number])
-        Runner.wake.set()
-
-    @staticmethod
     def remove(number):
         Queue.place(number, lambda others: others)
 
@@ -118,15 +113,12 @@ class Runner:
 
     @staticmethod
     def start(job):
-        return subprocess.Popen(
-            tinker_command() + Runner.arguments(job),
-            env=dict(os.environ, PYTHONUNBUFFERED="1", NO_COLOR="1", **{RUNNER_JOB_ENV: str(job["number"])}),
-            cwd=job.get("folder"),
-            text=True,
-            stdin=subprocess.DEVNULL,
-            stdout=subprocess.PIPE,
-            stderr=subprocess.STDOUT,
-            start_new_session=True,
+        return tinker_process(
+            Runner.arguments(job),
+            job.get("folder"),
+            subprocess.PIPE,
+            NO_COLOR="1",
+            **{RUNNER_JOB_ENV: str(job["number"])},
         )
 
     @staticmethod
@@ -164,6 +156,19 @@ def runner_job():
 
 def tinker_command():
     return [sys.executable, str(Path(sys.argv[0]).resolve())]
+
+
+def tinker_process(arguments, folder=None, output=None, **env):
+    return subprocess.Popen(
+        tinker_command() + arguments,
+        cwd=folder,
+        env=dict(os.environ, PYTHONUNBUFFERED="1", **env),
+        text=True,
+        stdin=subprocess.DEVNULL,
+        stdout=output,
+        stderr=subprocess.STDOUT if output else None,
+        start_new_session=True,
+    )
 
 
 class Journal:

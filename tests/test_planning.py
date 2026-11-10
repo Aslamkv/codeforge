@@ -21,7 +21,7 @@ from tinkerkit.web import Internet
 from tinkerkit.workspace import Toolchain, Workspace
 
 
-@pytest.mark.spec("PLN-4")
+@pytest.mark.spec("PLN-9")
 def test_asked():
     assert asked({"request": "a calculator"}) == "a calculator"
     assert (
@@ -30,7 +30,7 @@ def test_asked():
     )
 
 
-@pytest.mark.spec("PLN-5")
+@pytest.mark.spec("PLN-4")
 @pytest.mark.parametrize(
     "text",
     [
@@ -50,7 +50,7 @@ def test_working_that_adds_up(text):
     assert Working.mistakes(text) == []
 
 
-@pytest.mark.spec("PLN-5")
+@pytest.mark.spec("PLN-4")
 @pytest.mark.parametrize(
     "text,mistake",
     [
@@ -64,14 +64,14 @@ def test_working_that_does_not(text, mistake):
     assert Working.mistakes(text) == [mistake]
 
 
-@pytest.mark.spec("PLN-5")
+@pytest.mark.spec("PLN-4")
 def test_working_values():
     assert Working.value("2 * (3 + 4)") == 14 and Working.value("-2") == -2
     assert Working.value("1 / 0") is None and Working.value("abc") is None and Working.value("2 ** 3") is None
     assert Working.balanced("(3 + 4") == "3 + 4" and Working.balanced("(3 + 4))") == "(3 + 4)"
 
 
-@pytest.mark.spec("PLN-6")
+@pytest.mark.spec("PLN-5")
 @pytest.mark.parametrize(
     "source,ok",
     [
@@ -88,7 +88,7 @@ def test_traced(source, ok):
     assert SpecWriter.traced(source, "A calculator that divides two numbers") is ok
 
 
-@pytest.mark.spec("PLN-7")
+@pytest.mark.spec("PLN-6")
 @pytest.mark.parametrize(
     "text,ok",
     [
@@ -106,7 +106,7 @@ def test_runs_program(text, ok):
     assert SpecWriter.runs_program(text, "calc.py", "python3 calc.py") is ok
 
 
-@pytest.mark.spec("PLN-10")
+@pytest.mark.spec("PLN-9")
 def test_changes_mark_each_point_added_changed_or_removed():
     before = [
         {"id": "C1", "test": "t::a", "behaviour": "adds"},
@@ -164,6 +164,9 @@ def spec_reply(**changes):
     return json.dumps(data)
 
 
+ADDS = {"text": "calc.add(2, 3) is 5", "source": "adds", "test": "tests/test_calc.py::test_add"}
+
+
 @pytest.fixture
 def planner(make_project, make_session):
     project = make_project(
@@ -180,7 +183,7 @@ def write_spec(session, cycle, fake_ollama):
     SpecWriter(session).run(cycle)
 
 
-@pytest.mark.spec("PLN-8")
+@pytest.mark.spec("PLN-7")
 def test_read_spec_traces_criteria_and_checks_the_plan(planner):
     session, project, cycle = planner
     plan = SpecWriter(session).read_spec(Reply(spec_reply()), cycle)
@@ -193,7 +196,7 @@ def test_read_spec_traces_criteria_and_checks_the_plan(planner):
     assert SpecWriter(session).read_spec(Reply(spec_reply(language="")), cycle)["language"] == "Python"
 
 
-@pytest.mark.spec("PLN-8")
+@pytest.mark.spec("PLN-7")
 @pytest.mark.parametrize(
     "changes,why",
     [
@@ -220,6 +223,7 @@ def test_read_spec_traces_criteria_and_checks_the_plan(planner):
         ({"entry": "main.py"}, "entry main.py is not one of the files"),
         ({"toolchain": None}, "it needs the toolchain"),
         ({"toolchain": dict(TOOLCHAIN, test_one="")}, "test_one is missing"),
+        ({"criteria": [ADDS]}, "is a program a person runs, yet no criterion runs it"),
     ],
 )
 def test_read_spec_rejects(planner, changes, why):
@@ -228,7 +232,7 @@ def test_read_spec_rejects(planner, changes, why):
         SpecWriter(session).read_spec(Reply(spec_reply(**changes)), cycle)
 
 
-@pytest.mark.spec("PLN-8")
+@pytest.mark.spec("PLN-7")
 def test_read_spec_sends_wrong_working_back_twice_at_most(planner):
     session, project, cycle = planner
     wrong = spec_reply(
@@ -247,7 +251,7 @@ def test_read_spec_sends_wrong_working_back_twice_at_most(planner):
     assert writer.read_spec(Reply(wrong), cycle)["criteria"]
 
 
-@pytest.mark.spec("PLN-8")
+@pytest.mark.spec("PLN-7")
 def test_read_spec_takes_a_test_file_by_its_stem_or_the_only_one(planner):
     session, project, cycle = planner
     criteria = [{"text": 'calc.main(["x"]) prints x', "source": "adds", "test": "calc::test_main"}]
@@ -255,22 +259,14 @@ def test_read_spec_takes_a_test_file_by_its_stem_or_the_only_one(planner):
     assert plan["criteria"][0]["test"] == "tests/test_calc.py::test_main"
 
 
-@pytest.mark.spec("PLN-8")
+@pytest.mark.spec("PLN-7")
 def test_read_spec_needs_the_program_run_as_a_person_runs_it(planner):
     session, project, cycle = planner
-    unrun = spec_reply(
-        criteria=[{"text": "calc.add(2, 3) is 5", "source": "adds", "test": "tests/test_calc.py::test_add"}]
-    )
-    with pytest.raises(ValueError, match="is a program a person runs, yet no criterion runs it"):
-        SpecWriter(session).read_spec(Reply(unrun), cycle)
-    library = spec_reply(
-        entry="",
-        criteria=[{"text": "calc.add(2, 3) is 5", "source": "adds", "test": "tests/test_calc.py::test_add"}],
-    )
+    library = spec_reply(entry="", criteria=[ADDS])
     assert SpecWriter(session).read_spec(Reply(library), cycle)["entry"] == ""
 
 
-@pytest.mark.spec("PLN-9")
+@pytest.mark.spec("PLN-8")
 def test_spec_phase_makes_the_plan_the_cycles_spec(planner, fake_ollama):
     session, project, cycle = planner
     write_spec(session, cycle, fake_ollama)
@@ -289,7 +285,7 @@ def test_spec_phase_makes_the_plan_the_cycles_spec(planner, fake_ollama):
     assert len(fake_ollama.calls) == 1
 
 
-@pytest.mark.spec("PLN-9")
+@pytest.mark.spec("PLN-8")
 def test_a_program_without_a_run_command_gets_its_toolchain_again(planner, fake_ollama):
     session, project, cycle = planner
     fake_ollama.reply(spec_reply(toolchain=dict(TOOLCHAIN, run="")), when="Spec")
@@ -299,7 +295,7 @@ def test_a_program_without_a_run_command_gets_its_toolchain_again(planner, fake_
     assert [label.split(" (")[0] for label in fake_ollama.labels()] == ["Spec", "Toolchain"]
 
 
-@pytest.mark.spec("PLN-10")
+@pytest.mark.spec("PLN-9")
 def test_amend_replaces_the_cycles_criteria(planner, fake_ollama):
     session, project, cycle = planner
     write_spec(session, cycle, fake_ollama)
@@ -334,7 +330,7 @@ def test_amend_replaces_the_cycles_criteria(planner, fake_ollama):
     assert (cycle["phase"], cycle["awaiting"], cycle["contracts_done"]) == ("design", False, [])
 
 
-@pytest.mark.spec("PLN-10")
+@pytest.mark.spec("PLN-9")
 def test_an_amendment_that_fails_leaves_the_spec(planner, fake_ollama):
     session, project, cycle = planner
     write_spec(session, cycle, fake_ollama)
@@ -346,7 +342,7 @@ def test_an_amendment_that_fails_leaves_the_spec(planner, fake_ollama):
     assert cycle["amendments"] == [] and cycle["specified"] and "calc.py" in project.files
 
 
-@pytest.mark.spec("PLN-11")
+@pytest.mark.spec("PLN-10")
 def test_order_puts_config_first_and_tests_last():
     files = [
         {"path": "tests/test_app.py", "kind": "test", "uses": ["app.py"]},
@@ -366,7 +362,7 @@ def test_order_puts_config_first_and_tests_last():
     ]
 
 
-@pytest.mark.spec("PLN-11")
+@pytest.mark.spec("PLN-10")
 def test_read_toolchain_data(capsys):
     toolchain = Designer.read_toolchain_data(
         dict(TOOLCHAIN, setup=["cp .env.example .env", "brew install x"]), "calc.py"
@@ -380,7 +376,7 @@ def test_read_toolchain_data(capsys):
         Designer.read_toolchain_data("junk")
 
 
-@pytest.mark.spec("PLN-11")
+@pytest.mark.spec("PLN-10")
 def test_templates_get_a_renderer_and_files_their_layout(project_dir):
     files = [
         {"path": "templates/list.html", "kind": "template", "uses": []},
@@ -402,7 +398,7 @@ def test_templates_get_a_renderer_and_files_their_layout(project_dir):
     )
 
 
-@pytest.mark.spec("PLN-11")
+@pytest.mark.spec("PLN-10")
 def test_adapter_criteria_are_dropped(make_project, make_session):
     files = {
         "weather_api.py": {"kind": "code", "role": "adapter: the weather service", "uses": []},
@@ -417,7 +413,7 @@ def test_adapter_criteria_are_dropped(make_project, make_session):
     assert [criterion["id"] for criterion in project.criteria] == ["C2"]
 
 
-@pytest.mark.spec("PLN-11")
+@pytest.mark.spec("PLN-10")
 def test_ensure_toolchain_asks_only_when_missing(make_project, make_session, fake_ollama):
     project = make_project(toolchain={}, entry="calc.py")
     fake_ollama.reply(json.dumps({"toolchain": TOOLCHAIN}), when="Toolchain")
@@ -435,7 +431,7 @@ DESIGN = {
 }
 
 
-@pytest.mark.spec("PLN-12")
+@pytest.mark.spec("PLN-11")
 def test_contract_order_needed_and_markers(make_project, make_session):
     project = make_project(files=json.loads(json.dumps(DESIGN)), entry="app.py")
     cycle = project.cycles[0]
@@ -449,7 +445,7 @@ def test_contract_order_needed_and_markers(make_project, make_session):
     assert "marker" not in project.files["app.py"]
 
 
-@pytest.mark.spec("PLN-12")
+@pytest.mark.spec("PLN-11")
 def test_contracts_are_written_where_files_meet(make_project, make_session, fake_ollama):
     files = dict(
         json.loads(json.dumps(DESIGN)),
@@ -487,7 +483,7 @@ REVIEWED = {
 }
 
 
-@pytest.mark.spec("PLN-13")
+@pytest.mark.spec("PLN-12")
 def test_interface_review_corrects_and_checks_again(make_project, make_session, fake_ollama):
     project = make_project(files=json.loads(json.dumps(REVIEWED)))
     cycle = dict(project.cycles[0], files=["a.py", "b.py", "solo.py", "app.py"])
@@ -509,7 +505,7 @@ def test_interface_review_corrects_and_checks_again(make_project, make_session, 
     assert len(fake_ollama.calls) == app_py_checked_and_checked_again
 
 
-@pytest.mark.spec("PLN-13")
+@pytest.mark.spec("PLN-12")
 def test_interface_review_with_nothing_to_check(make_project, make_session, fake_ollama):
     project = make_project(files={"a.py": {"kind": "code", "role": "a", "contract": ["f()"], "uses": []}})
     cycle = dict(project.cycles[0], files=["a.py"])
@@ -517,7 +513,7 @@ def test_interface_review_with_nothing_to_check(make_project, make_session, fake
     assert fake_ollama.calls == [] and "review" not in cycle
 
 
-@pytest.mark.spec("PLN-14")
+@pytest.mark.spec("PLN-13")
 def test_after_what_they_use_orders_dependencies_first_breaks_cycles_and_skips_unknown():
     uses = {"app": ["db", "util"], "db": ["util"], "util": [], "x": ["app"], "a": ["b", "ghost"], "b": ["a"]}
     known = lambda name: name in uses
@@ -525,7 +521,7 @@ def test_after_what_they_use_orders_dependencies_first_breaks_cycles_and_skips_u
     assert after_what_they_use(["a"], lambda name: uses[name], known) == ["b", "a"]
 
 
-@pytest.mark.spec("PLN-15")
+@pytest.mark.spec("PLN-14")
 def test_groups_fitting():
     assert groups_fitting(["aa", "bb", "cc"], 6) == [["aa", "bb"], ["cc"]]
     assert groups_fitting(["a" * 10, "b"], 5) == [["a" * 10], ["b"]]
@@ -550,6 +546,13 @@ def with_python_rules(*rules):
     return {rule["text"]: rule["id"] for rule in Library.read("python")["rules"]}
 
 
+def recalled(make_project, make_session, request, **session_options):
+    project = make_project(cycles=[{"id": "base", "request": request, "phase": "recall", "kind": "feature"}])
+    session = make_session(project, **session_options)
+    Recaller(session).run(project.cycles[0])
+    return session, project
+
+
 @pytest.mark.spec("PLN-1")
 def test_recall_with_nothing_learned_makes_no_call(make_project, make_session, fake_ollama):
     project = make_project()
@@ -567,9 +570,8 @@ def test_recall_without_the_web_uses_the_topics_named_and_the_language(
     python_topic(
         tools=[{"role": "tests", "name": "pytest"}], facts=[{"phase": "code", "text": "match is soft"}]
     )
-    project = make_project(cycles=[{"id": "base", "request": "a Flask app for notes", "phase": "recall"}])
+    session, project = recalled(make_project, make_session, "a Flask app for notes")
     cycle = project.cycles[0]
-    Recaller(make_session(project)).run(cycle)
     assert cycle["topics"] == ["python", "flask"] and fake_ollama.calls == []
     learned = project.spec["learned"]
     assert learned[0]["phase"] == "tools" and {item["topic"] for item in learned} == {"python", "flask"}
@@ -583,8 +585,7 @@ def test_recall_keeps_a_languages_rules_before_its_other_facts(make_project, mak
         facts=[{"phase": "code", "text": "Python has match"}, {"phase": "code", "text": "t-strings are new"}],
     )
     with_python_rules({"phase": "code", "text": "Use match for dispatch"})
-    project = make_project(cycles=[{"id": "base", "request": "a calculator in Python", "phase": "recall"}])
-    Recaller(make_session(project)).run(project.cycles[0])
+    session, project = recalled(make_project, make_session, "a calculator in Python")
     the_rules_stand_in_for_the_facts = ["its tools: tests pytest", "Use match for dispatch"]
     assert [item["text"] for item in project.spec["learned"]] == the_rules_stand_in_for_the_facts
 
@@ -599,9 +600,6 @@ def test_topic_listing_fits_the_room():
 @pytest.mark.spec("PLN-2")
 def test_recall_with_the_web_learns_what_it_needs(make_project, make_session, fake_ollama, monkeypatch):
     topic("flask", name="Flask", facts=[{"phase": "code", "text": "Flask routes use decorators"}])
-    project = make_project(
-        cycles=[{"id": "base", "request": "a Flask app with background jobs", "phase": "recall"}]
-    )
     learned = []
     monkeypatch.setattr(
         Recaller, "learn", lambda self, name, internet, retriever: learned.append(name) or Library.slug(name)
@@ -609,8 +607,10 @@ def test_recall_with_the_web_learns_what_it_needs(make_project, make_session, fa
     fake_ollama.reply(
         json.dumps({"use": ["flask", "unknown"], "learn": ["Celery", "celery", "Redis", "RQ"]}), when="Recall"
     )
+    session, project = recalled(
+        make_project, make_session, "a Flask app with background jobs", internet=Internet()
+    )
     cycle = project.cycles[0]
-    Recaller(make_session(project, internet=Internet())).run(cycle)
     assert learned == ["Celery", "Redis"] and cycle["topics"] == ["celery", "redis", "flask"]
     prompt = fake_ollama.calls[0]["messages"][1]["content"]
     assert "possible: name up to 2 topics to learn" in prompt and "- flask: Flask" in prompt
@@ -619,14 +619,13 @@ def test_recall_with_the_web_learns_what_it_needs(make_project, make_session, fa
 @pytest.mark.spec("PLN-2")
 def test_recall_goes_on_when_its_call_fails(make_project, make_session, fake_ollama, capsys):
     topic("flask", name="Flask")
-    project = make_project(cycles=[{"id": "base", "request": "a Flask app", "phase": "recall"}])
     fake_ollama.reply("no json", when="Recall", times=2)
+    session, project = recalled(make_project, make_session, "a Flask app", internet=Internet())
     cycle = project.cycles[0]
-    Recaller(make_session(project, internet=Internet())).run(cycle)
     assert cycle["topics"] == [] and "Going on without what was learned" in capsys.readouterr().out
 
 
-@pytest.mark.spec("PLN-9")
+@pytest.mark.spec("PLN-8")
 def test_a_plan_to_confirm_asks_at_the_requests_level(planner, fake_ollama):
     session, project, cycle = planner
     cycle["confirm"] = True
@@ -691,11 +690,7 @@ def test_a_proven_rule_for_other_code_stays_out_too(make_project, make_session):
     ids = python_with_conditional_rules()
     Knowledge("Python").prove({f"fact:python:{ids['Use inspect.iscoroutinefunction']}": ["code"]})
     assert Knowledge("Python").facts(("code",))[0]["when"] == "async code"
-    project = make_project(
-        cycles=[{"id": "base", "request": "a calculator in Python", "phase": "recall", "kind": "feature"}]
-    )
-    session = make_session(project)
-    Recaller(session).run(project.cycles[0])
+    session, project = recalled(make_project, make_session, "a calculator in Python")
     shown = "\n".join(part.text for part in session.knowledge_parts("code"))
     assert "mutable default" in shown and "iscoroutinefunction" not in shown
 
@@ -704,11 +699,7 @@ def test_a_proven_rule_for_other_code_stays_out_too(make_project, make_session):
 def test_a_principle_for_other_code_stays_out(make_project, make_session):
     python_with_conditional_rules()
     Principles(None).put(Principle.new("async code", "await every coroutine", scope="python", phase="code"))
-    project = make_project(
-        cycles=[{"id": "base", "request": "a calculator in Python", "phase": "recall", "kind": "feature"}]
-    )
-    session = make_session(project)
-    Recaller(session).run(project.cycles[0])
+    session, project = recalled(make_project, make_session, "a calculator in Python")
     shown = "\n".join(part.text for part in session.knowledge_parts("code"))
     assert "mutable default" in shown and "await every coroutine" not in shown
 
@@ -717,16 +708,12 @@ def test_a_principle_for_other_code_stays_out(make_project, make_session):
 def test_a_principle_shown_as_a_lesson_is_not_repeated_among_learned_items(make_project, make_session):
     python_with_conditional_rules()
     Principles(None).put(Principle.new("", "close every file you open", scope="python", phase="code"))
-    project = make_project(
-        cycles=[{"id": "base", "request": "a calculator in Python", "phase": "recall", "kind": "feature"}]
-    )
-    session = make_session(project)
-    Recaller(session).run(project.cycles[0])
+    session, project = recalled(make_project, make_session, "a calculator in Python")
     shown = "\n".join(part.text for part in session.knowledge_parts("code"))
     assert shown.count("close every file you open") == 1
 
 
-@pytest.mark.spec("PLN-8")
+@pytest.mark.spec("PLN-7")
 def test_the_spec_sees_the_config_rules_since_it_plans_the_config_files(planner, fake_ollama):
     session, project, cycle = planner
     python_topic(facts=[{"phase": "code", "text": "f"}])
@@ -736,7 +723,7 @@ def test_the_spec_sees_the_config_rules_since_it_plans_the_config_files(planner,
     assert "Set pythonpath in pyproject.toml" in fake_ollama.calls[0]["messages"][-1]["content"]
 
 
-@pytest.mark.spec("PLN-8")
+@pytest.mark.spec("PLN-7")
 def test_a_settings_file_is_planned_only_for_a_spec_point_about_a_setting(planner):
     session, project, cycle = planner
     files = [

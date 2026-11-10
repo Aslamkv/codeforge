@@ -1300,10 +1300,14 @@ class Ollama:
     @staticmethod
     def http_error(exc, streamed=0):
         body = exc.read().decode("utf-8", errors="replace").strip()
+        return Ollama.error(f"Ollama returned HTTP {exc.code}: {body or exc.reason}", body, streamed)
+
+    @staticmethod
+    def error(message, text, streamed=0):
         return OllamaError(
-            f"Ollama returned HTTP {exc.code}: {body or exc.reason}",
-            oom=Ollama.is_oom(body),
-            crashed=Ollama.is_crash(body),
+            message,
+            oom=Ollama.is_oom(text),
+            crashed=Ollama.is_crash(text),
             streamed=streamed,
         )
 
@@ -1339,11 +1343,7 @@ class Ollama:
         except (TimeoutError, ConnectionError) as exc:
             raise OllamaError(f"Ollama stopped responding ({exc})", stalled=True)
         if data.get("error"):
-            raise OllamaError(
-                f"Ollama error: {data['error']}",
-                oom=Ollama.is_oom(data["error"]),
-                crashed=Ollama.is_crash(data["error"]),
-            )
+            raise Ollama.error(f"Ollama error: {data['error']}", data["error"])
         return data
 
     @staticmethod

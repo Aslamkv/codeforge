@@ -6,6 +6,9 @@ from tinkerkit.prompts import Prompts
 from tinkerkit.reviewing import RequestReview
 from tinkerkit.settings import Config
 
+STORY = "Write a story about a dragon who learns to bake bread"
+REVIEW_PHASE = "🧭 Working out how much thought your request needs"
+
 
 def logged(model_log):
     return [
@@ -16,41 +19,32 @@ def logged(model_log):
 
 @pytest.mark.spec("RVW-1")
 @pytest.mark.parametrize(
-    "request_text",
+    "request_text, expected",
     [
-        "There is a bug in tinkerkit/model.py when the reply is empty",
-        "Why does the function parse drop the last line?",
-        "The test of the parser fails on Windows",
-        "Help me refactor the class Store into smaller parts",
-        "What design should the `Cache` have for many readers?",
-        " ".join(["word"] * 61),
-        "Add a flag.\n- read it\n- keep it\n- print it",
-        "Why? How? When?",
-        "Look at a.py, b.py and tinkerkit/c.py together",
+        ("There is a bug in tinkerkit/model.py when the reply is empty", "high"),
+        ("Why does the function parse drop the last line?", "high"),
+        ("The test of the parser fails on Windows", "high"),
+        ("Help me refactor the class Store into smaller parts", "high"),
+        ("What design should the `Cache` have for many readers?", "high"),
+        (" ".join(["word"] * 61), "high"),
+        ("Add a flag.\n- read it\n- keep it\n- print it", "high"),
+        ("Why? How? When?", "high"),
+        ("Look at a.py, b.py and tinkerkit/c.py together", "high"),
+        ("hi", "off"),
+        ("Hello there, thanks!", "off"),
+        ("What is a monad", "off"),
+        ("rename the variable x to count", "off"),
+        ("format this paragraph please", "off"),
+        ("list the software engineering principles", "off"),
+        ("Name the SOLID principles", "off"),
+        ("define coupling", "off"),
     ],
 )
-def test_the_word_rule_finds_high_requests_without_a_model_call(request_text, fake_ollama, model_log):
+def test_the_word_rule_finds_high_and_short_simple_requests_without_a_model_call(
+    request_text, expected, fake_ollama, model_log
+):
     level, why = RequestReview(model_log).level(request_text)
-    assert level == "high" and why and fake_ollama.calls == []
-
-
-@pytest.mark.spec("RVW-1")
-@pytest.mark.parametrize(
-    "request_text",
-    [
-        "hi",
-        "Hello there, thanks!",
-        "What is a monad",
-        "rename the variable x to count",
-        "format this paragraph please",
-        "list the software engineering principles",
-        "Name the SOLID principles",
-        "define coupling",
-    ],
-)
-def test_the_word_rule_finds_short_simple_requests_off(request_text, fake_ollama, model_log):
-    level, why = RequestReview(model_log).level(request_text)
-    assert level == "off" and why and fake_ollama.calls == []
+    assert level == expected and why and fake_ollama.calls == []
 
 
 @pytest.mark.spec("RVW-1")
@@ -88,7 +82,7 @@ def test_other_requests_ask_the_reviewer_without_thinking(
 @pytest.mark.spec("RVW-1")
 def test_a_reply_naming_no_level_is_medium(measured_model, fake_ollama, tinker_home, model_log):
     fake_ollama.reply("I am not sure.")
-    level, why = RequestReview(model_log).level("Write a story about a dragon who learns to bake bread")
+    level, why = RequestReview(model_log).level(STORY)
     assert level == "medium" and why
     assert logged(model_log) == [{"review": "medium", "why": why}]
 
@@ -96,13 +90,9 @@ def test_a_reply_naming_no_level_is_medium(measured_model, fake_ollama, tinker_h
 @pytest.mark.spec("RVW-1")
 def test_a_failed_reviewer_call_is_medium(measured_model, fake_ollama, tinker_home, model_log):
     fake_ollama.reply(OllamaError("down"))
-    assert (
-        RequestReview(model_log).level("Write a story about a dragon who learns to bake bread")[0] == "medium"
-    )
+    assert RequestReview(model_log).level(STORY)[0] == "medium"
     Config.save(**{"model": None})
-    assert (
-        RequestReview(model_log).level("Write a story about a dragon who learns to bake bread")[0] == "medium"
-    )
+    assert RequestReview(model_log).level(STORY)[0] == "medium"
     assert len(fake_ollama.calls) == 1
 
 
@@ -127,9 +117,6 @@ def test_a_level_at_or_above_the_floor_stays(fake_ollama, model_log):
     )
 
 
-REVIEW_PHASE = "🧭 Working out how much thought your request needs"
-
-
 @pytest.mark.spec("PRJ-18")
 @pytest.mark.parametrize(
     "loaded, shown",
@@ -141,7 +128,7 @@ def test_the_review_phase_shows_while_the_model_reviews_after_loading_it_when_no
     phases = []
     monkeypatch.setattr(Ollama, "loaded_models", staticmethod(lambda: loaded))
     fake_ollama.reply("low: a short story")
-    RequestReview(model_log, phases.append).level("Write a story about a dragon who learns to bake bread")
+    RequestReview(model_log, phases.append).level(STORY)
     assert phases == shown
 
 
@@ -156,5 +143,5 @@ def test_the_review_phase_never_shows_when_a_rule_decides(fake_ollama, model_log
 def test_the_review_phase_never_shows_without_a_model(measured_model, fake_ollama, tinker_home, model_log):
     phases = []
     Config.save(**{"model": None})
-    RequestReview(model_log, phases.append).level("Write a story about a dragon who learns to bake bread")
+    RequestReview(model_log, phases.append).level(STORY)
     assert phases == [] and fake_ollama.calls == []

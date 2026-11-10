@@ -2,7 +2,7 @@ import pytest
 
 from tinkerkit import quality
 
-pytestmark = pytest.mark.spec("MOD-27")
+pytestmark = pytest.mark.spec("MOD-25")
 
 
 def test_eight_tasks_with_unique_ids_a_prompt_and_an_answer_that_solves_it():

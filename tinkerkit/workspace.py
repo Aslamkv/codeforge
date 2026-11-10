@@ -1,6 +1,5 @@
 import re
 from collections import namedtuple
-lazy import hashlib
 lazy import os
 lazy import shlex
 lazy import shutil
@@ -22,7 +21,7 @@ from .settings import (
     Home,
     NotAPytestClass,
 )
-from .text import field, first_line, now_text
+from .text import field, fingerprint, first_line, now_text
 lazy from .messages import human_duration, say
 lazy from .prompts import Part, Prompts, Reply
 
@@ -848,7 +847,7 @@ class Output:
         lines = [line.strip() for line in output.splitlines() if line.strip()]
         errors = [line for line in lines if Output.ERROR_LINE_RE.search(line)]
         key = "\n".join((errors or lines)[-4:])
-        return hashlib.sha1(Output.NOISE_RE.sub("#", key).encode()).hexdigest()[:12]
+        return fingerprint(Output.NOISE_RE.sub("#", key))[:12]
 
     @staticmethod
     def tool_failure(output, workdir):

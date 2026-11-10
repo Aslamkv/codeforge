@@ -380,6 +380,12 @@ def frames(terminal, count=3):
     ]
 
 
+def marks(terminal, count=3):
+    return [
+        frame.index(next(row for row in frame if row.startswith("›"))) for frame in frames(terminal, count)
+    ]
+
+
 @pytest.mark.spec("MSG-8")
 def test_pick_marks_the_start_choice_and_enter_gives_it(terminal):
     assert picking("enter", start=1) == 1
@@ -389,8 +395,7 @@ def test_pick_marks_the_start_choice_and_enter_gives_it(terminal):
 @pytest.mark.spec("MSG-8")
 def test_up_and_down_move_the_mark_and_stop_at_the_ends(terminal):
     assert picking("up", "down", "down", "down", "down", "up", "enter") == 1
-    marked = [frame.index(next(row for row in frame if row.startswith("›"))) for frame in frames(terminal)]
-    assert marked == [0, 0, 1, 2, 2, 2, 1]
+    assert marks(terminal) == [0, 0, 1, 2, 2, 2, 1]
 
 
 @pytest.mark.spec("MSG-8")
@@ -438,12 +443,7 @@ HEADED = (("Chat", HEADING), "one", "two", ("Embeddings", HEADING), "three")
 @pytest.mark.spec("MSG-8")
 def test_up_and_down_step_over_headings(terminal):
     assert picking("down", "down", "down", "up", "enter", choices=HEADED, start=1) == 2
-    marked = [frame.index(next(row for row in frame if row.startswith("›"))) for frame in frames(terminal, 5)]
-    assert marked == [1, 2, 4, 4, 2]
-
-
-@pytest.mark.spec("MSG-8")
-def test_up_stops_below_a_heading_at_the_top(terminal):
+    assert marks(terminal, 5) == [1, 2, 4, 4, 2]
     assert picking("up", "enter", choices=HEADED, start=1) == 1
 
 
@@ -513,19 +513,17 @@ def test_editing_keys_are_named(pressed, key):
 
 
 @pytest.mark.spec("MSG-9")
-def test_other_bytes_are_text_a_utf8_character_whole():
-    assert keys_in("é".encode()) == [Text("é")]
-    assert keys_in("🙂".encode()) == [Text("🙂")]
-
-
-@pytest.mark.spec("MSG-9")
-def test_a_paste_is_one_text_piece():
-    assert keys_in("hello wörld".encode()) == [Text("hello wörld")]
-
-
-@pytest.mark.spec("MSG-9")
-def test_keys_waiting_together_are_split_from_the_text():
-    assert keys_in(b"ab\x1b[D\x1b[Dc\r") == [Text("ab"), "left", "left", Text("c"), "enter"]
+@pytest.mark.parametrize(
+    "pressed,keys",
+    [
+        ("é".encode(), [Text("é")]),
+        ("🙂".encode(), [Text("🙂")]),
+        ("hello wörld".encode(), [Text("hello wörld")]),
+        (b"ab\x1b[D\x1b[Dc\r", [Text("ab"), "left", "left", Text("c"), "enter"]),
+    ],
+)
+def test_other_bytes_are_text_split_from_the_keys(pressed, keys):
+    assert keys_in(pressed) == keys
 
 
 @pytest.mark.spec("MSG-9")
@@ -550,56 +548,33 @@ def edited(*keys, history=()):
 
 
 @pytest.mark.spec("MSG-9")
-def test_text_goes_in_at_the_cursor():
-    editor = edited(Text("ac"), "left", Text("b"))
-    assert (editor.text, editor.cursor) == ("abc", 2)
-
-
-@pytest.mark.spec("MSG-9")
-def test_left_and_right_stop_at_the_ends():
-    assert edited(Text("ab"), "left", "left", "left").cursor == 0
-    assert edited(Text("ab"), "right").cursor == 2
-
-
-@pytest.mark.spec("MSG-9")
-@pytest.mark.parametrize("key,cursor", [("home", 0), ("ctrl-a", 0), ("end", 3), ("ctrl-e", 3)])
-def test_home_and_end_go_to_the_ends(key, cursor):
-    assert edited(Text("abc"), "left", key).cursor == cursor
-
-
-@pytest.mark.spec("MSG-9")
-def test_backspace_and_delete_take_one_character():
-    editor = edited(Text("abcd"), "left", "left", "backspace", "delete")
-    assert (editor.text, editor.cursor) == ("ad", 1)
-    assert edited(Text("a"), "home", "backspace").text == "a"
-    assert edited(Text("a"), "delete").text == "a"
-
-
-@pytest.mark.spec("MSG-9")
-def test_ctrl_u_and_ctrl_k_cut_to_the_ends():
-    editor = edited(Text("abcd"), "left", "left", "ctrl-u")
-    assert (editor.text, editor.cursor) == ("cd", 0)
-    editor = edited(Text("abcd"), "left", "left", "ctrl-k")
-    assert (editor.text, editor.cursor) == ("ab", 2)
-
-
-@pytest.mark.spec("MSG-9")
-def test_ctrl_w_takes_the_word_before():
-    editor = edited(Text("run the  tests"), "left", "left", "ctrl-w")
-    assert (editor.text, editor.cursor) == ("run the  ts", 9)
-    editor = edited(Text("run the  "), "ctrl-w")
-    assert (editor.text, editor.cursor) == ("run ", 4)
-
-
-@pytest.mark.spec("MSG-9")
-def test_up_and_down_go_through_the_lines_typed_before():
-    history = ["first", "second"]
-    assert edited("up", history=history).text == "second"
-    assert edited("up", "up", "up", history=history).text == "first"
-    editor = edited(Text("draft"), "up", "up", "down", history=history)
-    assert (editor.text, editor.cursor) == ("second", 6)
-    assert edited(Text("draft"), "up", "down", "down", history=history).text == "draft"
-    assert edited(Text("draft"), "up", history=()).text == "draft"
+@pytest.mark.parametrize(
+    "keys,history,line",
+    [
+        ((Text("ac"), "left", Text("b")), (), ("abc", 2)),
+        ((Text("ab"), "left", "left", "left"), (), ("ab", 0)),
+        ((Text("ab"), "right"), (), ("ab", 2)),
+        ((Text("abc"), "left", "home"), (), ("abc", 0)),
+        ((Text("abc"), "left", "ctrl-a"), (), ("abc", 0)),
+        ((Text("abc"), "left", "end"), (), ("abc", 3)),
+        ((Text("abc"), "left", "ctrl-e"), (), ("abc", 3)),
+        ((Text("abcd"), "left", "left", "backspace", "delete"), (), ("ad", 1)),
+        ((Text("a"), "home", "backspace"), (), ("a", 0)),
+        ((Text("a"), "delete"), (), ("a", 1)),
+        ((Text("abcd"), "left", "left", "ctrl-u"), (), ("cd", 0)),
+        ((Text("abcd"), "left", "left", "ctrl-k"), (), ("ab", 2)),
+        ((Text("run the  tests"), "left", "left", "ctrl-w"), (), ("run the  ts", 9)),
+        ((Text("run the  "), "ctrl-w"), (), ("run ", 4)),
+        (("up",), ("first", "second"), ("second", 6)),
+        (("up", "up", "up"), ("first", "second"), ("first", 5)),
+        ((Text("draft"), "up", "up", "down"), ("first", "second"), ("second", 6)),
+        ((Text("draft"), "up", "down", "down"), ("first", "second"), ("draft", 5)),
+        ((Text("draft"), "up"), (), ("draft", 5)),
+    ],
+)
+def test_keys_edit_the_line_and_move_the_cursor(keys, history, line):
+    editor = edited(*keys, history=history)
+    assert (editor.text, editor.cursor) == line
 
 
 @pytest.mark.spec("MSG-9")

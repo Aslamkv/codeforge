@@ -1,10 +1,9 @@
 lazy import collections
-lazy import hashlib
 lazy import math
 
 from .messages import say
 from .settings import EMBED_KEEP_ALIVE, Config, Home
-from .text import words
+from .text import fingerprint, words
 lazy from .model import Models, Ollama
 
 
@@ -170,7 +169,7 @@ class Embeddings:
 
     @staticmethod
     def key(text):
-        return hashlib.sha1(text.encode("utf-8")).hexdigest()[:20]
+        return fingerprint(text)[:20]
 
     @staticmethod
     def cosine(a, b):

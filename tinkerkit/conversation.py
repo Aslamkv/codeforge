@@ -32,6 +32,7 @@ from .jobs import (
     queue_lines,
     stop_answers,
     tinker_command,
+    tinker_process,
 )
 from .project import Runs, Tracker, saved
 lazy from .ledger import DONE_NOTE_KEPT_SECONDS, Ledger
@@ -899,15 +900,7 @@ class Desk:
         )
 
     def rename_folder(self, waiting, name):
-        done = subprocess.run(
-            tinker_command() + ["rename", f"@{waiting['run']}", name],
-            cwd=self.root,
-            text=True,
-            capture_output=True,
-            stdin=subprocess.DEVNULL,
-            env=dict(os.environ, NO_COLOR="1"),
-            timeout=60,
-        )
+        done = self.run_tinker(["rename", f"@{waiting['run']}", name], 60)
         if done.returncode:
             return first_lines((done.stdout + done.stderr).strip(), 10).splitlines()[-1]
         return None
@@ -1133,16 +1126,8 @@ class Desk:
 
     def spawn(self, arguments):
         arguments = arguments + ["--confirm"] if arguments[0] in PLAN_CONFIRMING_COMMANDS else arguments
-        env = dict(os.environ, **{CHANNEL_REPORTS_ENV: "off", "PYTHONUNBUFFERED": "1", "NO_COLOR": "1"})
-        return subprocess.Popen(
-            tinker_command() + arguments,
-            cwd=self.root,
-            env=env,
-            text=True,
-            stdin=subprocess.DEVNULL,
-            stdout=subprocess.PIPE,
-            stderr=subprocess.STDOUT,
-            start_new_session=True,
+        return tinker_process(
+            arguments, self.root, subprocess.PIPE, **{CHANNEL_REPORTS_ENV: "off"}, NO_COLOR="1"
         )
 
     def follow(self, process, reporter, task):
@@ -3046,18 +3031,6 @@ def entry_headline(text):
 
 def commands_brief():
     return "\n".join(re.findall(r"^- `[^`]+`.*$", help_text(), re.MULTILINE)) or "help"
-
-
-def tinker_process(arguments, folder=None, output=None, **env):
-    return subprocess.Popen(
-        tinker_command() + arguments,
-        cwd=folder,
-        env=dict(os.environ, PYTHONUNBUFFERED="1", **env),
-        stdin=subprocess.DEVNULL,
-        stdout=output,
-        stderr=subprocess.STDOUT if output else None,
-        start_new_session=True,
-    )
 
 
 def started_by_a_conversation():

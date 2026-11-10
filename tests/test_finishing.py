@@ -76,7 +76,7 @@ def test_compare():
     assert ReadmeWriter.missing(["code <code>"], "code") == ["code <code>"]
 
 
-@pytest.mark.spec("FIN-5")
+@pytest.mark.spec("FIN-4")
 @pytest.mark.parametrize(
     "expected,output,missing",
     [
@@ -89,7 +89,7 @@ def test_an_expected_line_matches_only_a_whole_line(expected, output, missing):
     assert ReadmeWriter.missing([expected], output) == missing
 
 
-@pytest.mark.spec("FIN-6")
+@pytest.mark.spec("FIN-5")
 def test_read():
     writer = ReadmeWriter.__new__(ReadmeWriter)
     data = {
@@ -118,7 +118,7 @@ def test_read():
         writer.read(Reply(json.dumps(dict(data, usage=[]))))
 
 
-@pytest.mark.spec("FIN-7")
+@pytest.mark.spec("FIN-6")
 def test_text(built, project_dir, tinker_home):
     session, project = built
     TaughtCommands.teach("act", ". .venv/bin/activate")
@@ -176,15 +176,10 @@ def test_findings_said_about_and_reported(built):
     assert Tidy(session).reported("") == []
 
 
-@pytest.mark.spec("FIN-9")
-def test_final_review_passes_a_built_project(built):
-    session, project = built
-    assert FinalReview(session).run(project.cycles[0]) is True
-
-
-@pytest.mark.spec("FIN-9")
+@pytest.mark.spec("FIN-8")
 def test_final_review_finds_what_is_wrong(built, project_dir):
     session, project = built
+    assert FinalReview(session).run(project.cycles[0]) is True
     project.criteria[1]["status"] = "blocked"
     assert FinalReview(session).problem()[0] == "spec points without a passing test: C2"
     project.criteria[1]["status"] = "green"
@@ -195,7 +190,7 @@ def test_final_review_finds_what_is_wrong(built, project_dir):
     assert problem.startswith("`") and "fails when the whole suite runs" in problem and output
 
 
-@pytest.mark.spec("FIN-9")
+@pytest.mark.spec("FIN-8")
 def test_final_review_needs_tests_to_run_and_setup_to_work(built, fake_ollama, monkeypatch):
     session, project = built
     project.spec["toolchain"]["test_all"] = "echo no tests ran"
@@ -207,7 +202,15 @@ def test_final_review_needs_tests_to_run_and_setup_to_work(built, fake_ollama, m
     assert stopped.kind == "review" and stopped.reason.startswith("setup fails from the project's own files")
 
 
-@pytest.mark.spec("FIN-10")
+def lesson(text):
+    return {"phase": "code", "scope": "any", "text": text}
+
+
+def reply_lessons(fake_ollama, lessons, confirmed):
+    fake_ollama.reply(json.dumps({"lessons": lessons, "confirmed": confirmed}), when="Lessons")
+
+
+@pytest.mark.spec("FIN-9")
 def test_lessons_without_problems_make_no_call(built, fake_ollama, tinker_home):
     session, project = built
     cycle = project.cycles[0]
@@ -218,7 +221,7 @@ def test_lessons_without_problems_make_no_call(built, fake_ollama, tinker_home):
     assert fake_ollama.calls == []
 
 
-@pytest.mark.spec("FIN-10")
+@pytest.mark.spec("FIN-9")
 def test_lessons_from_the_problems_solved(built, fake_ollama):
     session, project = built
     session.note("fix", "sub added instead of subtracting | solved: use -")
@@ -228,21 +231,13 @@ def test_lessons_from_the_problems_solved(built, fake_ollama):
         "Keep the parser apart from the arithmetic",
         "Print errors to stderr and exit with 1",
     ]
-    fake_ollama.reply(
-        json.dumps(
-            {
-                "lessons": [{"phase": "code", "scope": "any", "text": text} for text in texts] + ["junk"],
-                "confirmed": [1, "x"],
-            }
-        ),
-        when="Lessons",
-    )
+    reply_lessons(fake_ollama, [lesson(text) for text in texts] + ["junk"], [1, "x"])
     LessonWriter(session).run(project.cycles[0])
     assert len(session.knowledge.known_lessons()) == 3 and project.spec["events"] == []
     assert LessonWriter.read(Reply('{"lessons": [], "confirmed": [2, "3"]}')) == ([], [2])
 
 
-@pytest.mark.spec("FIN-8")
+@pytest.mark.spec("FIN-7")
 def test_readme_examples_are_run_and_a_failing_one_fixed(built, fake_ollama, project_dir):
     session, project = built
     readme = "# calc\n\n## Usage\n\n```console\n$ echo 41\n42\n```\n\n```console\n$ echo hi\nhi\n```\n"
@@ -258,7 +253,7 @@ def test_readme_examples_are_run_and_a_failing_one_fixed(built, fake_ollama, pro
     assert "It printed:\n41" in fake_ollama.calls[0]["messages"][1]["content"]
 
 
-@pytest.mark.spec("FIN-8")
+@pytest.mark.spec("FIN-7")
 def test_readme_examples_that_stay_wrong_are_kept(built, fake_ollama, project_dir):
     session, project = built
     project.spec["toolchain"]["use"] = ["echo ready > used.txt"]
@@ -302,7 +297,7 @@ def test_tidy_reverts_a_change_that_breaks_a_test_or_finds_more(built, fake_olla
     assert (project_dir / "calc.py").read_text() == CALC + "# TODO tidy me\n"
 
 
-@pytest.mark.spec("FIN-10")
+@pytest.mark.spec("FIN-9")
 def test_the_lessons_step_proves_what_the_cycle_used(built, fake_ollama):
     session, project = built
     session.knowledge.add_lessons([{"text": "Seed random generators inside tests", "phase": "tests"}], [])
@@ -313,21 +308,12 @@ def test_the_lessons_step_proves_what_the_cycle_used(built, fake_ollama):
     assert session.knowledge.known_lessons()[0]["status"] == "proven" and cycle["proven"]
 
 
-@pytest.mark.spec("FIN-10")
+@pytest.mark.spec("FIN-9")
 def test_a_lesson_naming_the_project_is_dropped(built, fake_ollama):
     session, project = built
     session.note("fix", "sub added | solved: use -")
-    fake_ollama.reply(
-        json.dumps(
-            {
-                "lessons": [
-                    {"phase": "code", "scope": "any", "text": "In calc.py, subtract with -"},
-                    {"phase": "code", "scope": "any", "text": "Name tests after criteria"},
-                ],
-                "confirmed": [],
-            }
-        ),
-        when="Lessons",
+    reply_lessons(
+        fake_ollama, [lesson("In calc.py, subtract with -"), lesson("Name tests after criteria")], []
     )
     LessonWriter(session).run(project.cycles[0])
     assert [lesson["text"] for lesson in session.knowledge.known_lessons()] == ["Name tests after criteria"]

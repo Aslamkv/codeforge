@@ -4,6 +4,8 @@ import re
 import urllib.parse
 import urllib.request
 
+from .text import one_line
+
 USER_AGENT = "Tinker/1.0 (https://github.com/Aslamkv/codeforge)"
 TAG_RE = re.compile(r"<[^>]+>")
 
@@ -120,4 +122,4 @@ def joined(text):
 
 
 def plain(fragment):
-    return " ".join(html.unescape(TAG_RE.sub("", fragment)).split())
+    return one_line(html.unescape(TAG_RE.sub("", fragment)))

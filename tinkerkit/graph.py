@@ -1,4 +1,3 @@
-lazy import hashlib
 lazy import html
 lazy import itertools
 lazy import json
@@ -16,7 +15,7 @@ lazy from .settings import (
     Home,
     Numbered,
 )
-lazy from .text import first_line, similarity
+lazy from .text import fingerprint, first_line, similarity
 lazy from .workspace import TaughtCommands, Toolchain
 
 HISTORY_LINKS = frozendict(
@@ -761,7 +760,7 @@ class MemoryBrowser:
 
 
 def digest_of(node_id):
-    return hashlib.sha1(node_id.encode()).hexdigest()
+    return fingerprint(node_id)
 
 
 def short_ids(node_ids):

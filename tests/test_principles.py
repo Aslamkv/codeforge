@@ -10,6 +10,11 @@ from tinkerkit.retrieval import Embeddings
 from tinkerkit.settings import MAX_FACT_CHARS, MAX_RULE_WHEN_CHARS, Home
 
 
+@pytest.fixture
+def principles(tinker_home):
+    return Principles(None)
+
+
 def a_principle(**changes):
     fields = {
         "when": "a test reads a file",
@@ -68,8 +73,7 @@ def test_english_leaves_out_empty_parts():
 
 
 @pytest.mark.spec("PRI-2")
-def test_principles_keeps_each_principle_as_one_document(tinker_home):
-    principles = Principles(None)
+def test_principles_keeps_each_principle_as_one_document(principles):
     principle = a_principle()
     principles.put(principle)
     assert Home.store().get("principles", principle.id) == principle.to_doc()
@@ -79,8 +83,7 @@ def test_principles_keeps_each_principle_as_one_document(tinker_home):
 
 
 @pytest.mark.spec("PRI-2")
-def test_kept_gives_principles_of_a_scope_that_are_not_retired(tinker_home):
-    principles = Principles(None)
+def test_kept_gives_principles_of_a_scope_that_are_not_retired(principles):
     python = a_principle()
     retired = a_principle(do="use tmp_path")
     retired.status = "retired"
@@ -92,8 +95,7 @@ def test_kept_gives_principles_of_a_scope_that_are_not_retired(tinker_home):
 
 
 @pytest.mark.spec("PRI-2")
-def test_forget_scope_deletes_every_principle_of_that_scope_retired_or_not(tinker_home):
-    principles = Principles(None)
+def test_forget_scope_deletes_every_principle_of_that_scope_retired_or_not(principles):
     python = a_principle()
     retired = a_principle(do="use tmp_path")
     retired.status = "retired"
@@ -129,19 +131,21 @@ def new_evidence(ref):
     return {"kind": "run", "ref": ref, "source": "lessons"}
 
 
+def an_add(**fields):
+    delta = {"kind": "add", "when": "a test reads a file", "do": "give it a temporary directory."}
+    return {**delta, "scope": "python", "evidence": [new_evidence("run-9")], **fields}
+
+
 @pytest.mark.spec("PRI-3")
-def test_apply_add_keeps_a_new_candidate_that_was_born(tinker_home):
-    principles = Principles(None)
-    delta = {
-        "kind": "add",
-        "when": "a command needs a path",
-        "do": "pass it as an argument",
-        "because": "scripts must not assume the cwd",
-        "exceptions": [],
-        "scope": "python",
-        "phase": "code",
-        "evidence": [new_evidence("run-8")],
-    }
+def test_apply_add_keeps_a_new_candidate_that_was_born(principles):
+    delta = an_add(
+        when="a command needs a path",
+        do="pass it as an argument",
+        because="scripts must not assume the cwd",
+        exceptions=[],
+        phase="code",
+        evidence=[new_evidence("run-8")],
+    )
     [added] = principles.apply([delta], "run-8")
     assert principles.get(added.id) == added
     assert added.status == "candidate"
@@ -152,38 +156,17 @@ def test_apply_add_keeps_a_new_candidate_that_was_born(tinker_home):
 
 
 @pytest.mark.spec("PRI-3")
-def test_apply_drops_an_add_with_no_do_or_no_evidence(tinker_home):
-    principles = Principles(None)
-    no_do = {
-        "kind": "add",
-        "when": "a test runs",
-        "do": "",
-        "scope": "python",
-        "evidence": [new_evidence("r")],
-    }
-    no_evidence = {
-        "kind": "add",
-        "when": "a test runs",
-        "do": "keep it fast",
-        "scope": "python",
-        "evidence": [],
-    }
+def test_apply_drops_an_add_with_no_do_or_no_evidence(principles):
+    no_do = an_add(when="a test runs", do="", evidence=[new_evidence("r")])
+    no_evidence = an_add(when="a test runs", do="keep it fast", evidence=[])
     assert principles.apply([no_do, no_evidence], "run-8") == []
     assert principles.all() == []
 
 
 @pytest.mark.spec("PRI-3")
-def test_apply_add_like_a_kept_principle_strengthens_that_one(tinker_home):
-    principles = Principles(None)
+def test_apply_add_like_a_kept_principle_strengthens_that_one(principles):
     kept = kept_principle(principles)
-    delta = {
-        "kind": "add",
-        "when": "a test reads a file",
-        "do": "give it a temporary directory.",
-        "scope": "python",
-        "evidence": [new_evidence("run-9")],
-    }
-    [changed] = principles.apply([delta], "run-9")
+    [changed] = principles.apply([an_add()], "run-9")
     assert changed.id == kept.id
     assert changed.evidence == kept.evidence + [new_evidence("run-9")]
     assert changed.history[-1]["event"] == "confirmed"
@@ -191,23 +174,14 @@ def test_apply_add_like_a_kept_principle_strengthens_that_one(tinker_home):
 
 
 @pytest.mark.spec("PRI-3")
-def test_apply_add_like_a_principle_of_another_scope_adds_a_new_one(tinker_home):
-    principles = Principles(None)
+def test_apply_add_like_a_principle_of_another_scope_adds_a_new_one(principles):
     kept_principle(principles)
-    delta = {
-        "kind": "add",
-        "when": "a test reads a file",
-        "do": "give it a temporary directory.",
-        "scope": "rust",
-        "evidence": [new_evidence("run-9")],
-    }
-    principles.apply([delta], "run-9")
+    principles.apply([an_add(scope="rust")], "run-9")
     assert sorted(principle.scope for principle in principles.all()) == ["python", "rust"]
 
 
 @pytest.mark.spec("PRI-3")
-def test_apply_strengthen_confirms_and_adds_the_evidence(tinker_home):
-    principles = Principles(None)
+def test_apply_strengthen_confirms_and_adds_the_evidence(principles):
     kept = kept_principle(principles)
     [changed] = principles.apply(
         [{"kind": "strengthen", "id": kept.id, "evidence": [new_evidence("run-9")]}], "run-9"
@@ -219,8 +193,7 @@ def test_apply_strengthen_confirms_and_adds_the_evidence(tinker_home):
 
 
 @pytest.mark.spec("PRI-3")
-def test_apply_contradict_counts_harm_and_records_it(tinker_home):
-    principles = Principles(None)
+def test_apply_contradict_counts_harm_and_records_it(principles):
     kept = kept_principle(principles)
     [changed] = principles.apply(
         [{"kind": "contradict", "id": kept.id, "evidence": [new_evidence("run-9")]}], "run-9"
@@ -232,8 +205,7 @@ def test_apply_contradict_counts_harm_and_records_it(tinker_home):
 
 
 @pytest.mark.spec("PRI-3")
-def test_apply_contradict_retires_one_harmed_more_than_its_evidence(tinker_home):
-    principles = Principles(None)
+def test_apply_contradict_retires_one_harmed_more_than_its_evidence(principles):
     kept = kept_principle(principles)
     contradict = {"kind": "contradict", "id": kept.id, "evidence": [new_evidence("run-9")]}
     [changed] = principles.apply([contradict, contradict], "run-9")
@@ -245,8 +217,7 @@ def test_apply_contradict_retires_one_harmed_more_than_its_evidence(tinker_home)
 
 
 @pytest.mark.spec("PRI-3")
-def test_apply_except_adds_the_exception_and_its_evidence(tinker_home):
-    principles = Principles(None)
+def test_apply_except_adds_the_exception_and_its_evidence(principles):
     kept = kept_principle(principles)
     delta = {
         "kind": "except",
@@ -261,8 +232,7 @@ def test_apply_except_adds_the_exception_and_its_evidence(tinker_home):
 
 
 @pytest.mark.spec("PRI-3")
-def test_apply_drops_unknown_ids_and_kinds(tinker_home):
-    principles = Principles(None)
+def test_apply_drops_unknown_ids_and_kinds(principles):
     kept = kept_principle(principles)
     deltas = [
         {"kind": "strengthen", "id": "missing", "evidence": [new_evidence("run-9")]},
@@ -275,8 +245,7 @@ def test_apply_drops_unknown_ids_and_kinds(tinker_home):
 
 
 @pytest.mark.spec("PRI-3")
-def test_apply_drops_an_except_with_no_exception(tinker_home):
-    principles = Principles(None)
+def test_apply_drops_an_except_with_no_exception(principles):
     kept = kept_principle(principles)
     delta = {"kind": "except", "id": kept.id, "exception": "", "evidence": [new_evidence("run-9")]}
     assert principles.apply([delta], "run-9") == []
@@ -284,8 +253,7 @@ def test_apply_drops_an_except_with_no_exception(tinker_home):
 
 
 @pytest.mark.spec("PRI-6")
-def test_about_ranks_principles_not_retired_best_first(tinker_home):
-    principles = Principles(None)
+def test_about_ranks_principles_not_retired_best_first(principles):
     files = kept_principle(principles)
     names = kept_principle(principles, when="a function is public", do="name it after what it returns")
     kept_principle(
@@ -319,9 +287,8 @@ def induced(make_model, fake_ollama, reply, scope="python"):
 
 @pytest.mark.spec("PRI-4")
 def test_induce_shows_numbered_passages_then_the_kept_principles_of_its_scope(
-    make_model, fake_ollama, tinker_home
+    make_model, fake_ollama, principles
 ):
-    principles = Principles(None)
     kept = kept_principle(principles)
     kept_principle(principles, scope="rust", do="use tempfile")
     fake_ollama.reply(json.dumps({"deltas": []}), when="Induce")
@@ -334,9 +301,8 @@ def test_induce_shows_numbered_passages_then_the_kept_principles_of_its_scope(
 
 
 @pytest.mark.spec("PRI-4")
-def test_induce_shows_at_most_the_known_principles_allowed(make_model, fake_ollama, tinker_home, monkeypatch):
+def test_induce_shows_at_most_the_known_principles_allowed(make_model, fake_ollama, principles, monkeypatch):
     monkeypatch.setattr(principles_module, "INDUCE_KNOWN_SHOWN", 1)
-    principles = Principles(None)
     kept_principle(principles)
     kept_principle(principles, do="clean the directory after")
     fake_ollama.reply(json.dumps({"deltas": []}), when="Induce")
@@ -405,8 +371,7 @@ def test_induce_leaves_out_passages_without_text(make_model, fake_ollama, tinker
 
 
 @pytest.mark.spec("PRI-4")
-def test_an_induced_change_names_a_shown_principle_by_its_number(make_model, fake_ollama, tinker_home):
-    principles = Principles(None)
+def test_an_induced_change_names_a_shown_principle_by_its_number(make_model, fake_ollama, principles):
     kept = kept_principle(principles)
     reply = {
         "deltas": [
@@ -444,234 +409,3 @@ def test_induce_shows_what_to_look_for_when_given(make_model, fake_ollama, tinke
     )
     prompt = fake_ollama.calls[-1]["messages"][-1]["content"]
     assert "Look for" in prompt and "how tests keep the home clean" in prompt
-
-
-OLD_HISTORY = [{"event": "born", "run": "run-1", "at": "2026-01-01 10:00"}]
-
-
-def seed_old_knowledge():
-    store = Home.store()
-    store.put(
-        "languages",
-        "python",
-        {
-            "projects": 2,
-            "lessons": [
-                {
-                    "id": "lesson000001",
-                    "phase": "tests",
-                    "text": "use tmp_path",
-                    "status": "proven",
-                    "history": OLD_HISTORY,
-                },
-            ],
-            "facts": [
-                {
-                    "id": "fact00000001",
-                    "phase": "code",
-                    "text": "uv runs scripts",
-                    "status": "proven",
-                    "topic": "uv",
-                    "history": OLD_HISTORY,
-                }
-            ],
-            "fixes": [{"failure": "boom", "fix": "pin it"}],
-        },
-    )
-    store.put(
-        "memory",
-        "any",
-        {
-            "lessons": [
-                {
-                    "id": "lesson000002",
-                    "phase": "spec",
-                    "text": "ask first",
-                    "status": "candidate",
-                    "history": OLD_HISTORY,
-                }
-            ]
-        },
-    )
-    store.put(
-        "learned",
-        "uv",
-        {
-            "topic": "uv",
-            "overview": "a fast tool",
-            "questions": [{"question": "How fast is it?"}],
-            "facts": [
-                {
-                    "id": "topicfact001",
-                    "phase": "toolchain",
-                    "text": "uv is fast",
-                    "status": "proven",
-                    "sources": ["https://docs.astral.sh/uv"],
-                    "history": OLD_HISTORY,
-                },
-                {
-                    "phase": "book",
-                    "text": "a point from chapter 2",
-                    "chapter": 2,
-                    "status": "proven",
-                    "sources": ["#1 chapter 2"],
-                },
-            ],
-            "rules": [
-                {
-                    "id": "rule00000001",
-                    "phase": "config",
-                    "text": "pin the python version",
-                    "when": "a project starts",
-                    "cites": ["topicfact001"],
-                    "status": "candidate",
-                }
-            ],
-            "findings": [
-                {"question": 1, "answer": "very fast", "confidence": "high", "cites": ["topicfact001"]}
-            ],
-            "retired": [
-                {
-                    "id": "topicfact002",
-                    "phase": "toolchain",
-                    "text": "uv is slow",
-                    "status": "retired",
-                    "reason": "wrong",
-                    "was": "facts",
-                    "history": OLD_HISTORY,
-                }
-            ],
-        },
-    )
-
-
-def migrated_by_do():
-    return {principle.do: principle for principle in Principles(None).all()}
-
-
-@pytest.mark.spec("PRI-8")
-def test_migrate_turns_lessons_and_facts_into_principles_with_their_id_status_and_history(tinker_home):
-    seed_old_knowledge()
-    Principles(None).migrate()
-    kept = migrated_by_do()
-    lesson = kept["use tmp_path"]
-    assert (lesson.id, lesson.status, lesson.history, lesson.scope, lesson.phase, lesson.when) == (
-        "lesson000001",
-        "proven",
-        OLD_HISTORY,
-        "python",
-        "tests",
-        "",
-    )
-    assert (kept["ask first"].id, kept["ask first"].scope, kept["ask first"].phase) == (
-        "lesson000002",
-        "any",
-        "spec",
-    )
-    assert (kept["uv runs scripts"].id, kept["uv runs scripts"].scope) == ("fact00000001", "python")
-
-
-@pytest.mark.spec("PRI-8")
-def test_migrate_turns_topic_facts_rules_findings_and_reading_points_into_principles_of_the_topic(
-    tinker_home,
-):
-    seed_old_knowledge()
-    Principles(None).migrate()
-    kept = migrated_by_do()
-    fact = kept["uv is fast"]
-    assert (fact.id, fact.scope, fact.phase, fact.status) == ("topicfact001", "uv", "toolchain", "proven")
-    assert [evidence["source"] for evidence in fact.evidence] == ["https://docs.astral.sh/uv"]
-    rule = kept["pin the python version"]
-    assert (rule.id, rule.when, rule.phase, rule.scope) == (
-        "rule00000001",
-        "a project starts",
-        "config",
-        "uv",
-    )
-    assert [(evidence["source"], evidence["text"]) for evidence in rule.evidence] == [
-        ("https://docs.astral.sh/uv", "uv is fast")
-    ]
-    finding = kept["How fast is it? very fast"]
-    assert (finding.scope, finding.phase, len(finding.id)) == ("uv", "any", 12)
-    assert [evidence["text"] for evidence in finding.evidence] == ["uv is fast"]
-    point = kept["a point from chapter 2"]
-    assert (point.phase, point.scope, [evidence["source"] for evidence in point.evidence]) == (
-        "book",
-        "uv",
-        ["#1 chapter 2"],
-    )
-
-
-@pytest.mark.spec("PRI-8")
-def test_migrate_empties_the_old_lists_keeps_the_rest_and_marks_the_home(tinker_home):
-    seed_old_knowledge()
-    Principles(None).migrate()
-    store = Home.store()
-    language = store.get("languages", "python")
-    assert (language["lessons"], language["facts"], language["fixes"]) == (
-        [],
-        [],
-        [{"failure": "boom", "fix": "pin it"}],
-    )
-    assert store.get("memory", "any")["lessons"] == []
-    topic = store.get("learned", "uv")
-    assert (topic["facts"], topic["rules"], topic["findings"], topic["retired"], topic["overview"]) == (
-        [],
-        [],
-        [],
-        [],
-        "a fast tool",
-    )
-    assert store.get("migrated", "principles")["at"]
-
-
-@pytest.mark.spec("PRI-8")
-def test_migrate_turns_retired_topic_items_into_retired_principles(tinker_home):
-    seed_old_knowledge()
-    Principles(None).migrate()
-    retired = migrated_by_do()["uv is slow"]
-    assert (retired.id, retired.status, retired.scope, retired.phase, retired.history) == (
-        "topicfact002",
-        "retired",
-        "uv",
-        "toolchain",
-        OLD_HISTORY,
-    )
-
-
-@pytest.mark.spec("PRI-8")
-def test_migrate_runs_once(tinker_home):
-    seed_old_knowledge()
-    Principles(None).migrate()
-    before = Home.store().items("principles")
-    Home.store().put("memory", "any", {"lessons": [{"id": "late", "phase": "spec", "text": "late lesson"}]})
-    Principles(None).migrate()
-    assert Home.store().items("principles") == before
-    assert Home.store().get("memory", "any")["lessons"] != []
-
-
-@pytest.mark.spec("PRI-8")
-def test_migrate_marks_a_home_with_no_old_knowledge(tinker_home):
-    Principles(None).migrate()
-    assert Principles(None).all() == []
-    assert Home.store().get("migrated", "principles")
-
-
-@pytest.mark.spec("PRI-8")
-def test_an_item_that_cannot_be_read_keeps_its_text_as_do_with_a_note(tinker_home):
-    Home.store().put("memory", "any", {"lessons": ["just a sentence", {"text": "no phase", "status": 7}]})
-    Home.store().put(
-        "learned", "uv", {"topic": "uv", "findings": [{"question": 9, "answer": "lost question"}]}
-    )
-    Principles(None).migrate()
-    kept = migrated_by_do()
-    assert set(kept) == {"just a sentence", "no phase", "lost question"}
-    sentence = kept["just a sentence"]
-    assert (sentence.scope, sentence.status) == ("any", "candidate")
-    assert sentence.history[-1]["note"]
-    assert kept["lost question"].history[-1]["note"]
-    assert (kept["no phase"].status, kept["no phase"].phase, kept["no phase"].history) == (
-        "candidate",
-        "any",
-        [],
-    )

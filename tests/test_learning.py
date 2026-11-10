@@ -493,7 +493,7 @@ def test_more_planned_searches_than_one_ask_keeps_each_needs_results_its_own():
     assert results == [[found[f"need {need} search {number}"][0] for number in range(4)] for need in range(3)]
 
 
-@pytest.mark.spec("LRN-1", "KNW-25")
+@pytest.mark.spec("LRN-1", "KNW-23")
 def test_kept_documentation_is_not_planned_or_searched(tinker_home, monkeypatch):
     asked = quick_model_planning(monkeypatch, {DOCS_VERSION_SEARCH: [{"query": "{name} {version} docs"}]})
     page = Page("https://widgetlib.dev/docs/", "t", [Block("text", "Overview")])
@@ -505,7 +505,7 @@ def test_kept_documentation_is_not_planned_or_searched(tinker_home, monkeypatch)
     assert asked == [] and web.entries == []
 
 
-@pytest.mark.spec("LRN-4", "KNW-25")
+@pytest.mark.spec("LRN-4", "KNW-23")
 def test_a_learns_documentation_needs_are_planned_and_each_pools_its_searches(tinker_home, monkeypatch):
     asked = quick_model_planning(
         monkeypatch,
@@ -597,7 +597,10 @@ def test_a_stopped_learn_says_why_and_what_next_as_data(tinker_home):
 
 @pytest.mark.spec("LRN-1", "LRN-4")
 def test_learning_a_version_again_reuses_the_saved_plan_and_its_kept_documentation(tinker_home):
-    learner(FakeWeb(FOUND, ALL_PAGES)).learn("Widgetlib")
+    first = tool_model()
+    learner(FakeWeb(FOUND, ALL_PAGES), first).learn("Widgetlib")
+    assert ("Plan learning", None) in first.thinking
+    assert all(think is None for label, think in first.thinking)
     model, web = tool_model(), FakeWeb(FOUND, ALL_PAGES)
     entry = learner(web, model).learn("Widgetlib")
     assert "Plan learning" not in model.calls and model.calls[0].startswith("Induce")
@@ -618,14 +621,6 @@ def test_a_saved_plan_whose_documentation_gives_too_little_searches_the_web(tink
     with pytest.raises(LearnStopped, match="the search found nothing"):
         learner(FakeWeb(), model).learn("Widgetlib")
     assert model.calls == []
-
-
-@pytest.mark.spec("LRN-4")
-def test_induce_asks_at_the_requests_level(tinker_home):
-    model = tool_model()
-    learner(FakeWeb(FOUND, ALL_PAGES), model).learn("Widgetlib")
-    assert ("Plan learning", None) in model.thinking
-    assert all(think is None for label, think in model.thinking)
 
 
 GUIDE = "https://widgetlib.dev/guide"
@@ -734,7 +729,7 @@ def language_model():
     )
 
 
-@pytest.mark.spec("LRN-4", "KNW-21")
+@pytest.mark.spec("LRN-4", "KNW-19")
 def test_a_language_is_learned_under_its_key_and_retires_nothing_its_earlier_learning_proved(tinker_home):
     Library.save(
         "lang",
@@ -789,13 +784,13 @@ SQL_RESULTS = [
 @pytest.mark.spec("LRN-4")
 def test_a_version_of_one_implementation_searches_the_topics_own_docs_by_its_name_alone(tinker_home):
     web = FakeWeb({"SQL documentation": SQL_RESULTS})
-    SlotLearner(language_model(), web, CountingEmbeddings()).documentation(SQL_PLAN, [SQLITE], "3.54.0")
+    learner(web, language_model()).documentation(SQL_PLAN, [SQLITE], "3.54.0")
     assert web.queries == ["SQL documentation"]
 
 
 @pytest.mark.spec("LRN-4")
 def test_reference_pages_are_picked_before_news_release_notes_changelogs_and_downloads(tinker_home):
-    picked = SlotLearner(language_model(), FakeWeb(), CountingEmbeddings()).picked("SQL", SQL_RESULTS)
+    picked = learner(FakeWeb(), language_model()).picked("SQL", SQL_RESULTS)
     assert [found["url"] for found in picked] == [SQL_RESULTS[3]["url"], *[r["url"] for r in SQL_RESULTS[:3]]]
 
 
@@ -806,7 +801,7 @@ def test_only_results_holding_enough_of_the_topics_words_are_picked(tinker_home)
         result("https://cars.example.com/model-s", "Model S review", "The new model of the car"),
         result("https://atlas.example.org/world", "World atlas", "Maps of the world"),
     ]
-    picked = SlotLearner(language_model(), FakeWeb(), CountingEmbeddings()).picked("world model", results)
+    picked = learner(FakeWeb(), language_model()).picked("world model", results)
     assert [found["url"] for found in picked] == ["https://ml.example.org/world-models"]
 
 

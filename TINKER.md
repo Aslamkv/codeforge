@@ -37,15 +37,13 @@ To update later, just `git pull`. The link always points at the latest code.
 
 Tinker searches open search engines that need no account and no key:
 [Mwmbl](https://mwmbl.org) for the web at large, and [Wikipedia](https://en.wikipedia.org) and
-[Wikibooks](https://en.wikibooks.org) for overviews and tutorials. For each thing it needs to find, the model
-plans the searches: their words, the engines that suit each one and how many results to take. Each plan is
-kept, so the same need is not planned twice. A learn's first search, from the topic alone, is not planned: it
-asks every engine. It asks the engines at once and mixes their results by rank. If
-one is down, the others still answer. Pages are read straight from their sites, in parallel, like `curl`
-would.
+[Wikibooks](https://en.wikibooks.org) for overviews and tutorials. The model plans each search (its words,
+engines and number of results) and the plan is kept, so the same need is not planned twice; a learn's first
+search, from the topic alone, asks every engine. The engines are asked at once and their results mixed by
+rank, so one that is down does not stop the others. Pages are read straight from their sites, in parallel.
 
-Tinker uses the web as you would: a few searches at a time, within a small limit for each engine, and only
-the pages its searches found. It never crawls a site. It only goes on the web when you ask: `tinker learn`,
+Tinker uses the web as you would: a few searches at a time, a small limit for each engine, only the pages
+its searches found, never a crawl. It only goes on the web when you ask: `tinker learn`,
 `tinker research`, `tinker teach`, a run with `--web`, `tinker read` of a link, or `tinker exercise` of a
 language it has not learned yet. Offline, it says so once and goes on with what it has.
 `tinker doctor` shows the engines it searches.
@@ -58,11 +56,10 @@ Check that everything is ready (it tells you how to fix what is missing):
 tinker doctor
 ```
 
-Pull a model and use it. A model never measured is measured first, in a few minutes: how fast it reads
-and writes, how much it can take in and reply, and 8 test tasks to solve, easy to hard, the same for every
-model. Each task gets up to 3 tries in 2 minutes, and the test stops at a level where it solves neither
-task. It ends with a summary in plain words, exact figures in brackets, and keeps every run in its history.
-If the measurement fails, the model in use stays:
+Pull a model and use it. A new model is measured first, in a few minutes: how fast it reads and writes, how
+much it takes in and replies, and 8 test tasks from easy to hard, the same for every model (up to 3 tries in
+2 minutes each, stopping at a level where it solves neither). It ends with a plain summary, exact figures in
+brackets, kept in its history. If the measurement fails, the model in use stays:
 
 ```sh
 ollama pull qwen3
@@ -83,10 +80,10 @@ ollama pull qwen3-embedding:0.6b
 tinker model qwen3-embedding:0.6b
 ```
 
-Leave out the name to see Ollama's models, general ones first and then embeddings, each with what was
-measured (`in use · writes ~19 words/s · reads ~225 words/s · solved 5 of 8 · 1 after a retry · ~40s an answer`). Above the list, with two or
-more measured, it names the smartest and the fastest. On a terminal or typed alone in the chat, it is a select
-box (up, down, Enter, Esc) that starts at the model in use, with the unmeasured models dimmed:
+Leave out the name to list Ollama's models, general ones before embeddings, each with what was measured
+(`in use · writes ~19 words/s · reads ~225 words/s · solved 5 of 8 · 1 after a retry · ~40s an answer`), and,
+with two or more measured, the smartest and the fastest above. On a terminal or typed alone in the chat, it is
+a select box (up, down, Enter, Esc) starting at the model in use, unmeasured models dimmed:
 
 ```sh
 tinker model
@@ -96,17 +93,15 @@ tinker model calibrate
 Plain `tinker` with no model in use opens that select box at once; with none pulled yet, it shows how to get
 one (`ollama pull NAME`, then `/model NAME`).
 
-See the recipe alone, from the models that solved at least one test task: the smartest model (the most tasks
-solved, then fewer retries, then the quicker answers) and the fastest (the shortest time to a correct answer),
-as `🧠 Smartest: qwen3 (solved 7 of 8 · ~80s an answer)` and `⚡ Fastest: gemma3 (~20s an answer · solved 5 of 8)`:
+See the recipe alone, from the models that solved a test task: the smartest (most solved, then fewer
+retries, then quicker answers) and the fastest (shortest time to a correct answer), as `🧠 Smartest: qwen3 (solved 7 of 8 · ~80s an answer)` and `⚡ Fastest: gemma3 (~20s an answer · solved 5 of 8)`:
 
 ```sh
 tinker model recipe
 ```
 
-Measure every model never measured first, one after another, then print the recipe. A model measured on
-older test tasks reruns only the test tasks and keeps its other figures. It changes no model in use, and a
-failed measurement goes on to the next:
+Measure every unmeasured model in turn, then print the recipe. A model measured on older test tasks reruns
+only the tasks. The model in use stays, and a failed measurement goes on to the next:
 
 ```sh
 tinker model recipe all
@@ -192,23 +187,27 @@ tinker restart --workdir ~/Projects/calc-py
 
 ## Talk 💬
 
-Talk with Tinker. Every command works here, and anything else is a normal chat. A command starts with `/`, as in `/status`; plain words that say one, like `clear the chat, please` or `show recipe`, run it too, and asking the model to do what a command does runs it at once (a deletion still asks first, and a build still waits at its plan). A question about what Tinker has, like `which model is in use?`, is answered in words. `/exit` (or Ctrl-D) ends it:
+Talk with Tinker. Every command works here, and anything else is a normal chat. A command starts with `/`,
+as in `/status`; words that ask for one (`clear the chat, please`, `show recipe`) run it at once, though a
+deletion still asks first and a build still waits at its plan. A question about what Tinker has, like
+`which model is in use?`, is answered in words. `/exit` (or Ctrl-D) ends it:
 
 ```sh
 tinker
 ```
 
-On a colour terminal it opens with a banner showing the model, the embedding model, the projects folder and the chats it listens
-on. Each chat opens cleared, with the same lines as a message above the status, and is cleared again when Tinker ends, leaving only the `not listening` status. When `/model NAME` picks
-another model, the chats are cleared, the terminal is wiped and the banner shows anew. As in Claude Code, the prompt, with a rule over it, follows the output: it starts under the banner and
-moves down as Tinker prints, until it reaches the bottom row; then older lines scroll into the scrollback.
+On a colour terminal it opens with a banner: the model, the embedding model, the projects folder and the
+chats it listens on. Each chat opens cleared, with the same lines as a message above the status, and is
+cleared again when Tinker ends, leaving only the `not listening` status. `/model NAME` clears the chats and
+the terminal and shows the banner anew. The prompt, with a rule over it (redrawn when the window resizes),
+follows the output down to the bottom row; then older lines scroll into the scrollback.
 The prompt edits like a shell: left and right, Home and End (or Ctrl-A and Ctrl-E), Backspace and Delete,
 Ctrl-U and Ctrl-K to clear to the start or the end, and Ctrl-W to delete the word before. Up and down bring
 back the lines you typed before, even from an earlier session. Ctrl-C clears the line, or quits on an empty
 one. When Tinker prints while you type, your line and the menu are drawn again under it.
 
-As in Claude Code, typing `/` lists the commands under the prompt, narrowed as you type (names that start
-with what you typed first, then names that hold it):
+Typing `/` lists the commands under the prompt, narrowed as you type (names starting with what you typed
+first, then names holding it):
 
 ```
 › /re
@@ -219,18 +218,16 @@ with what you typed first, then names that hold it):
 ```
 
 Up and down pick one, Tab fills it in, Enter sends a command that takes no words (or fills one that does),
-and Esc closes the list. Once you start a command's next word, the list offers that command's words the
-same way:
+and Esc closes the list. A command's next word is offered the same way:
 
 ```
 › /model r
 › /model recipe  the models Ollama has, and the one every build uses
 ```
 
-Tab fills the word in and Enter sends the command with it. Resizing the window redraws the rule at the new size. Your lines show again
-highlighted, Tinker's messages are marked with a steel blue `●`, and a `✻ Tinkering…` line above the prompt,
-with a steel blue glow moving across the word, shows the time, the tokens, how long the model thought and
-the current step while it works:
+Your lines show again highlighted and Tinker's messages are marked with a steel blue `●`. While it works, a
+`✻ Tinkering…` line above the prompt, a glow moving across the word, shows the time, the tokens, how long
+the model thought and the current step:
 
 ```
 ✻ Tinkering… (1m 4s · ↓ 1.2k tokens · thought for 12s) · 🧠 Learning about purpose (1 of 6)
@@ -238,14 +235,13 @@ the current step while it works:
   … Read 2 of 6 page(s) found
 ```
 
-The time counts from the moment the job starts, so it matches the `Done in` at the end. Before its own
-steps, a job says what it is doing to get started: `🚀 Getting Tinker ready`, `🧭 Working out how much
-thought your request needs` while the model judges the request, and `📦 Loading the model into memory` only
-when the model isn't loaded yet.
+The time counts from the job's start, matching the `Done in` at the end. Before its own steps, a job says
+how it gets started: `🚀 Getting Tinker ready`, `🧭 Working out how much thought your request needs`, and
+`📦 Loading the model into memory` only when the model isn't loaded yet.
 
-The dim lines under it (the tally and the latest news) update in place. A job's steps appear each once as
-it finishes. Only the one who asked for a job, here or in a chat, follows it this way; everyone else sees
-Tinker's status, such as `working on X`. `NO_COLOR=1 tinker` turns all of that off.
+The dim lines under it (the tally and the latest news) update in place; each finished step appears once.
+Only the one who asked for a job, here or in a chat, follows it this way; everyone else sees Tinker's
+status, such as `working on X`. `NO_COLOR=1 tinker` turns all of that off.
 
 Or say one thing at a time:
 
@@ -258,7 +254,7 @@ tinker command show the five biggest files here
 `command` shows the command line first, and runs it only once you agree.
 
 Ask about this computer and the answer comes at once, with no model: `time`, `date`, `disk`, `ram`,
-`battery`, `uptime` or `network`. Each runs one fixed command that changes nothing and gives one short line:
+`battery`, `uptime` or `network`, each one fixed command that changes nothing, giving one short line:
 
 ```sh
 tinker system ram
@@ -280,8 +276,8 @@ tinker run @calc-py add 5 2
 
 In the conversation or a chat, give it input after `<<<`: `/run @calc-py <<< 2+2`.
 
-While a job runs, just ask: a chat or a command line pauses it (it saves itself), you are answered at once, and
-the job goes on as soon as you have your answer (see [Jobs](#jobs-)).
+While a job runs, just ask: a chat or a command line pauses it (it saves itself), answers you, and the job
+goes on (see [Jobs](#jobs-)).
 
 ## Chat Channels 📡
 
@@ -301,11 +297,11 @@ tinker channel enable telegram
 tinker channel start
 ```
 
-Only your paired chat is listened to. Each of the bot host's addresses gets a second to connect and a second
-for its TLS handshake, so a broken IPv6 route falls to IPv4 at once instead of slowing the chat; once a family answers, the
-chat's later connections try it first. The terminal's
-banner names each chat (`chats Telegram`), and each change of its state prints a dimmed `Telegram · STATE`
-line (`connected (IPv4)` or `unreachable: REASON`). Manage your channels (removing one asks first; `--yes` skips that):
+Only your paired chat is listened to. Each of the bot host's addresses gets a second to connect and one for
+TLS, so a broken IPv6 route falls to IPv4 at once; the family that answers is tried first after that. The
+terminal's banner names each chat (`chats Telegram`), and each change of its state prints a dimmed
+`Telegram · STATE` line (`connected (IPv4)` or `unreachable: REASON`). Manage your channels (removing one
+asks first; `--yes` skips that):
 
 ```sh
 tinker channel list
@@ -332,10 +328,10 @@ tap one to choose it.
 
 Attach a book, an article or a document to the chat, and Tinker reads it: see [Read](#read-).
 
-The chat stays tidy. Tinker's status is one message: each new status replaces the one before, at the
-bottom of the chat, even after a restart. Each task the chat asked for has
-one message; a task started elsewhere shows only in the status. Quick looks like `/jobs` or `/help` go after two minutes, and your question goes as soon as
-Tinker answers. Everything else goes after a day. Nothing is lost: Tinker keeps a history of what it showed.
+The chat stays tidy. Tinker's status is one message at the bottom of the chat, replaced by each new one,
+even after a restart. Each task the chat asked for has one message; a task started elsewhere shows only in
+the status. Quick looks like `/jobs` or `/help` go after two minutes, your question once Tinker answers it,
+everything else after a day. Nothing is lost: Tinker keeps a history of what it showed.
 
 ```text
 /history         # what the chat showed, newest first, with what you asked
@@ -358,21 +354,20 @@ tinker learn Python 3.14
 tinker learn food bank inventory
 ```
 
-A domain is learned like a tool, and any topic is taken, even one the model does not know or that is not about
-code: learning is how it finds out. To research one, its facts checked across sites, use `tinker research` (it is
-slower). The first round reads the topic's own article first. Each round skips results off the topic and
-reads 6 pages, then 4, keeping what its questions ask; a round that finds nothing searches each question again
-as written, so a research says it found nothing only when every round did. The model frames, reads facts and
-weighs the findings at the request's thinking level (see Settings). A research is kept as facts and findings;
-it makes no principles.
+A domain is learned like a tool, and any topic is taken, even one the model does not know or that is not
+about code: learning is how it finds out. To research one, its facts checked across sites, use the slower
+`tinker research`. Its first round reads the topic's own article first; each round skips results off the
+topic and reads 6 pages, then 4, keeping what its questions ask. A round that finds nothing searches each
+question again as written, so a research finds nothing only when every round did. The model works at the
+request's thinking level (see Settings). A research is kept as facts and findings, not principles.
 
-A language or a tool is learned mainly from its own documentation, for the version you have installed
-(a language's tools too: its test runner, formatter, linter). The first time takes a search to find what it
-is, one for your version's documentation, one for each tool, and a few more only for what the
-documentation leaves unanswered. The cleaned pages are kept per version, so learning it again searches for
-none of them. When the web finds nothing (offline, nothing about the topic), it stops at once and says why,
-before the model does any work, and keeps what it knew before. Every web search and fetch Tinker makes is
-logged in `.tinker/web-requests.log`. The summary at the end shows the versions installed here.
+A language or a tool is learned mainly from its own documentation, for your installed version (a
+language's tools too: its test runner, formatter, linter). The first time takes a search for what it is,
+one for your version's documentation, one for each tool, and a few for what the documentation leaves
+unanswered. The cleaned pages are kept per version, so learning it again searches for none of them. When the
+web finds nothing (offline, nothing about the topic), it stops before the model does any work, says why and
+keeps what it knew. Every web search and fetch is logged in `.tinker/web-requests.log`. The summary at the
+end shows the versions installed here.
 
 What it learns is kept as principles: when one applies, what to do, and why, each citing the pages or runs it
 came from. Learning, reading, exercising and every build feed the same store, and only change it a step at a
@@ -421,9 +416,9 @@ chat, `memory --graph` sends the page as a file to open on your phone:
 tinker memory --graph
 ```
 
-Ask what it has learned. It answers just what you ask, from what it keeps first: its items, the passages of the
-documentation and readings it kept that are most about your question, and the versions of those topics installed
-here. What it adds from the model's own knowledge is marked "Not from what I learned", and an answer that depends
+Ask what it has learned. It answers just what you ask, from what it keeps first: its items, the kept
+documentation and reading passages most about your question, and the installed versions of those topics.
+What it adds from the model's own knowledge is marked "Not from what I learned", and an answer that depends
 on your version names it:
 
 ```sh
@@ -436,15 +431,15 @@ tinker ask how do I list a cargo project's dependencies
 To be sure, it may run one check first and answer with what it printed ("I ran …, it printed …"): SQL in an
 in-memory SQLite, or a command with a tool it learned and found on your machine, run in a [sandbox](#safety-)
 from a new empty folder. Installers (pip, npm, brew, cargo install and the like) are refused, and without a
-sandbox nothing runs. A refused or failed check is told to it once, and its fixed check runs; if that fails
-too, its first answer stands. An answer a check confirmed
-is kept in its topic (a tool or domain it learned; a language keeps none) as a 🌱 fact, for `tinker teach` to confirm or correct. Asking changes nothing else.
+sandbox nothing runs. A refused or failed check is told to it once and its fixed check runs; if that fails
+too, its first answer stands. An answer a check confirmed is kept in its topic (a tool or domain it learned;
+a language keeps none) as a 🌱 fact, for `tinker teach` to confirm or correct. Asking changes nothing else.
 
-Correct it when you know better, as many things at once as you like. Mark your own choices with the word
-**prefer** ("I prefer no mypy"): Tinker honors them as they are. Everything else is a fact, checked first: Tinker runs commands on your machine that
-only show what is installed, and reads web pages about them. Each change is made once the facts it rests
-on hold: what you showed wrong is retired (kept, with why), the toolchain is corrected, and your lesson is
-kept, with its sources. A change whose facts do not hold is not made, and Tinker says why:
+Correct it when you know better, as many things at once as you like. Your own choices, marked with
+**prefer** ("I prefer no mypy"), are honored as they are. Everything else is a fact, checked first with
+commands that only show what is installed and with web pages about them. Once its facts hold, a change is
+made: what you showed wrong is retired (kept, with why), the toolchain is corrected, and your lesson is kept
+with its sources. A change whose facts do not hold is not made, and Tinker says why:
 
 ```sh
 tinker teach use ruff and not black for python, ruff already does what black does
@@ -455,10 +450,10 @@ In zsh, a `?` in a command is a wildcard, so leave it out or quote the question.
 
 ### Read 📚
 
-Give Tinker a book, an article or a document, and it learns what it teaches. Its whole text is stored first,
-numbered on your reading list (#1, #2 ...), so you never send it twice. Then Tinker reads every chapter, the core
-ones first: the contents, the foreword and the terms the index mentions most tell it which those are. Each chapter
-is saved as soon as it is read, so what it learned is there to ask about while it goes on.
+Give Tinker a book, an article or a document, and it learns what it teaches. Its text is stored first, numbered on
+your reading list (#1, #2 ...), so you never send it twice. Then Tinker reads every chapter, the core ones first
+(the contents, the foreword and the index's most mentioned terms tell which). Each chapter is saved once read, so
+you can ask about it while Tinker goes on.
 
 ```sh
 tinker read ~/Books/clean-architecture.epub          # a file: EPUB, Markdown or plain text
@@ -480,56 +475,53 @@ A PDF is refused: convert it to EPUB first, which keeps its chapters. Calibre do
 ebook-convert book.pdf book.epub
 ```
 
-Reading is a [job](#jobs-) with a job number of its own (`tinker jobs` shows it, apart from its reading number):
-it gives way to you like any job, and `tinker stop #J` stops it, everything read so far kept. `tinker resume #J`
-(or `tinker read #N`) goes on with the chapters not read yet, without downloading anything again.
+Reading is a [job](#jobs-) with its own job number (`tinker jobs` shows it, apart from the reading number): it
+gives way to you like any job, `tinker stop #J` stops it with everything read so far kept, and `tinker resume #J`
+(or `tinker read #N`) goes on with the unread chapters, downloading nothing again.
 
-Ask about what it read, and correct it when it got something wrong. A correction is checked against the text
-itself, and the corrected fact is kept in place of the wrong one:
+Ask about what it read, and correct it when it is wrong. A correction is checked against the text, and the
+corrected fact replaces the wrong one:
 
 ```sh
 tinker ask what does Clean Architecture say about the dependency rule
 tinker teach Clean Architecture says entities never depend on use cases, not the other way round
 ```
 
-What teaches how to build software also guides the builds that need it, like anything else Tinker learned: its
-principles are shown to a build when the request needs them, and kept or retired by how the build goes. Anything else
-is there for asking only.
+What teaches how to build software also guides builds, like anything else Tinker learned: its principles are shown
+to a build whose request needs them, and kept or retired by how the build goes. Anything else is for asking only.
 
 ### Exercise 🏋️
 
-Let Tinker practise a language on its own, to write better code faster. It builds small practice projects
-one after another in `~/Projects/tinker-exercise`: each one is built, then given a feature. It measures each
-project (time, model calls, retried replies, fixes, what failed) and keeps lessons from its mistakes and slow
-steps. The next projects prove those lessons or retire them. A language it has not learned yet is learned
-first (this needs the web). Words that are not one language are said so, and nothing is done:
+Let Tinker practise a language on its own, to write better code faster. It builds small practice projects one
+after another in `~/Projects/tinker-exercise`, each built and then given a feature. It measures each (time, model
+calls, retried replies, fixes, what failed) and keeps lessons from its mistakes and slow steps; the next projects
+prove or retire them. A language not learned yet is learned first (this needs the web). Words that are not one
+language are said so, and nothing is done:
 
 ```sh
 tinker exercise rust           # start, or go on from where it stopped
 tinker exercise status         # how it is going: each project's measures, and what it practises next
 ```
 
-An exercise is a [job](#jobs-) like any other, and each language keeps its own projects and lessons.
-`tinker stop #N` stops it with everything kept, and `tinker resume #N` goes on. Anything you start, another
-exercise too, or a chat or a command line, pauses it (its build stops and saves itself, and it waits in the
-queue), and the exercise goes on when its turn in the queue comes again.
+An exercise is a [job](#jobs-), and each language keeps its own projects and lessons. `tinker stop #N` stops it
+with everything kept, and `tinker resume #N` goes on. Anything you start (another exercise, a chat, a command
+line) pauses it: its build saves itself and waits in the queue until its turn comes again.
 
-It runs until you stop it. In a chat, `/exercise rust` starts it in the background, so it keeps going after the
-conversation ends. It keeps one message, whether it is started, stopped or resumed, and that message shows what
-its build is doing right now, as a task's does, in the chat that started or resumed it. A conversation started
-later picks up the exercise's message again, and an exercise that was killed (or the computer restarted) goes on
-by itself.
+It runs until you stop it. In a chat, `/exercise rust` starts it in the background, so it outlives the
+conversation. It keeps one message through start, stop and resume, showing what its build is doing right now, as
+a task's does, in the chat that started or resumed it. A later conversation picks that message up again, and an
+exercise that was killed (or the computer restarted) goes on by itself.
 
 ## Jobs ⏯
 
 Everything that takes a while is a job: a task (and `restart`, `confirm`, `amend`, `resume`), `add`, `fix`,
-`model NAME` of a model never measured, `model calibrate`, `learn`, `ask`, `teach`, `read`, `research` and `exercise`. Each gets a number (`#1`, `#2` ...).
+`model NAME` of a model never measured, `model calibrate`, `learn`, `ask`, `teach`, `read`, `research` and
+`exercise`. Each gets a number (`#1`, `#2` ...).
 
-Jobs wait in one queue, and only the first one runs. Start another, of any kind, or chat with Tinker, and it
-goes to the front: the one that ran saves itself and waits second in the queue, and you are answered at once.
-Once a job ends, the next in the queue goes on by itself where it was. The queue runs while a Tinker is open
-(a chat, or a job command in a terminal), and goes on by itself whenever Tinker starts again. Ctrl-C on a job
-command, or quitting a chat, pauses the job that runs; it stays first in the queue.
+Jobs wait in one queue, and only the first runs. Start another job, or chat with Tinker, and it goes to the front:
+the running one saves itself and waits second, and you are answered at once. When a job ends, the next goes on
+where it was. The queue runs while a Tinker is open (a chat, or a job command in a terminal), and again whenever
+Tinker starts. Ctrl-C on a job command, or quitting a chat, pauses the running job; it stays first in the queue.
 
 List them, newest first, 10 to a page:
 
@@ -547,16 +539,16 @@ tinker queue stop #3     # as tinker stop #3
 tinker queue stop all    # stop the job that runs and empty the queue
 ```
 
-Stop one, or the one that runs (a chat's answer too). What it did is kept. A stopped job leaves the queue and
-never goes on by itself:
+Stop one, or the running one (a chat's answer too). What it did is kept; a stopped job leaves the queue and never
+goes on by itself:
 
 ```sh
 tinker stop #3
 tinker stop
 ```
 
-Go on where it stopped, even days later. What it already asked the model and the web is answered from the
-job's own journal, so no search or model call is made twice; it works live again from the first new step:
+Go on where it stopped, even days later. What it already asked the model and the web is answered from the job's
+journal, so no search or model call is made twice; it works live from the first new step:
 
 ```sh
 tinker resume #3         # back to the front of the queue, so it goes on at once
@@ -565,13 +557,12 @@ tinker resume            # the job stopped last (with none stopped, this folder'
 
 `tinker confirm` is not a job's resume: it always builds the plan that waits in its folder.
 
-A job that was killed (or the computer restarted) stays in the queue and goes on when its turn comes. Once a
-job finishes, its journal is deleted. While a job runs, the computer stays awake. In a chat, the same commands
-work with a `/`: `/jobs`, `/stop #3`, `/resume #3`, `/queue list`, `/queue stop all`.
+A job that was killed (or the computer restarted) stays in the queue and goes on when its turn comes. A
+finished job's journal is deleted. While a job runs, the computer stays awake. In a chat, the same commands work
+with a `/`: `/jobs`, `/stop #3`, `/resume #3`, `/queue list`, `/queue stop all`.
 
-Clear the jobs you are done with (it asks first). They are archived, not deleted: `tinker jobs` no longer shows
-them, but `tinker jobs archived` does. An archived job cannot be resumed, and its journal and its log of model
-calls are deleted:
+Clear the jobs you are done with (it asks first). They are archived, not deleted: only `tinker jobs archived`
+shows them. An archived job cannot be resumed, and its journal and model call log are deleted:
 
 ```sh
 tinker clear jobs #3 #5     # archive these two (stop a running one first)
@@ -591,16 +582,15 @@ tinker help config                  # every setting you can change, with what it
 
 A value that does not fit is refused, with what the setting takes, and the old value stays.
 
-How hard the model thinks is not a setting: each request (a build, a fix, a question, each chat message) is
-reviewed once and gets one level, `off`, `low`, `medium` or `high`, that every call for it uses. Greetings and
-short questions get `off` and answer in a second or two; a bug, a design question or a long request with many
-parts or files gets `high`; anything else is weighed by one short model call. `learn`, `research`, `teach`,
-`read` and `exercise` never go below `medium`: they plan, extract and judge from pages, however short the topic
-reads. A model that has no such level
-gets the nearest it has. The call log shows each request's level and why.
+How hard the model thinks is not a setting: each request (a build, a fix, a question, each chat message) gets one
+level, `off`, `low`, `medium` or `high`, used by all its calls. Greetings and short questions get `off` and answer
+in a second or two; a bug, a design question or a long request with many parts or files gets `high`; anything
+else is weighed by one short model call. `learn`, `research`, `teach`, `read` and `exercise` never go below
+`medium`: they plan, extract and judge from pages, however short the topic. A model without that level gets its
+nearest one. The call log shows each request's level and why.
 
-Choose where new projects go, and how long the model stays loaded after a call (before each call, other
-loaded models are unloaded):
+Choose where new projects go, and how long the model stays loaded after a call (other loaded models are unloaded
+before each call):
 
 ```sh
 tinker config projects ~/Code       # new projects (and the exercises) go here
@@ -617,8 +607,8 @@ tinker config tool_docs_pages 2     # pages read about each of a language's tool
 tinker config web_timeout 60        # wait up to 60 seconds for each search engine
 ```
 
-Delete parts of what Tinker keeps, or all of it (your projects stay). Each shows what it deletes and asks
-first (`--yes` skips that). `tinker help clear` lists every part:
+Delete parts of what Tinker keeps, or all of it (your projects stay). Each shows what it deletes and asks first
+(`--yes` skips that); `tinker help clear` lists every part:
 
 ```sh
 tinker clear memory runs            # lessons for any language, and the list of projects

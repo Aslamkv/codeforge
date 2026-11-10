@@ -601,7 +601,7 @@ def wanted_docs(slug, name, version, need, cap):
 
 def planned_searches(need, values):
     planned = SearchPlanner().plan(need, RESULTS_PER_LEARN_SEARCH, values)
-    return [{**search, "query": collapsed(search["query"])} for search in planned]
+    return [{**search, "query": one_line(search["query"])} for search in planned]
 
 
 def every_engine_search(need, values):
@@ -609,11 +609,7 @@ def every_engine_search(need, values):
 
 
 def filled_query(need, values):
-    return collapsed(SearchPlanner.filled(need, values))
-
-
-def collapsed(query):
-    return " ".join(query.split())
+    return one_line(SearchPlanner.filled(need, values))
 
 
 def pooled_by_plan(results, plans):

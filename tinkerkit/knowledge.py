@@ -36,7 +36,7 @@ from .settings import (
     Config,
     Home,
 )
-from .text import field, fingerprint, first_line, host, now_text, similarity, split_text, words
+from .text import field, fingerprint, first_line, host, now_text, one_line, similarity, split_text, words
 lazy from .jobs import today
 lazy from .model import Answer, Models, OllamaError
 lazy from .project import Tracked
@@ -672,7 +672,7 @@ def search_entry(raw, limit=160):
         query, given = raw["query"], {key: raw[key] for key in ("engines", "count") if key in raw}
     else:
         return None
-    query = " ".join(query.split())[:limit]
+    query = one_line(query)[:limit]
     return {"query": query, **given} if query else None
 
 
@@ -760,14 +760,14 @@ class Researcher:
         if not isinstance(data, dict):
             raise ValueError("not a JSON object")
         name, summary = (
-            field(data, "name", 80) or " ".join(topic.split())[:80],
-            " ".join(str(data.get("summary") or "").split())[:200],
+            field(data, "name", 80) or one_line(topic)[:80],
+            one_line(data.get("summary"))[:200],
         )
         questions = []
         for item in data.get("questions") or []:
             if not isinstance(item, dict):
                 continue
-            question = " ".join(str(item.get("question") or "").split())[:200]
+            question = one_line(item.get("question"))[:200]
             queries = search_entries(item.get("queries"))[:SEARCHES_PER_RESEARCH_QUESTION]
             if question and queries:
                 questions.append({"question": question, "queries": queries})
@@ -986,7 +986,7 @@ class Researcher:
         return [
             {
                 "question": finding["question"],
-                "answer": " ".join(str(finding.get("answer") or "").split())[:600],
+                "answer": one_line(finding.get("answer"))[:600],
                 "confidence": finding.get("confidence")
                 if finding.get("confidence") in ("high", "medium", "low")
                 else "low",
@@ -1007,7 +1007,7 @@ class Researcher:
                     {
                         "facts": facts,
                         "doubtful": doubtful,
-                        "note": " ".join(str(item.get("note") or "").split())[:300],
+                        "note": one_line(item.get("note"))[:300],
                     }
                 )
         return contradictions
@@ -1017,7 +1017,7 @@ class Researcher:
         return [
             {
                 "question": gap["question"],
-                "missing": " ".join(str(gap.get("missing") or "").split())[:200],
+                "missing": one_line(gap.get("missing"))[:200],
                 "search": search_entry(gap.get("search")),
             }
             for gap in given

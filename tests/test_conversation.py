@@ -12,7 +12,7 @@ import time
 from pathlib import Path
 
 import pytest
-from conftest import ACCENT, BOLD, DIM, GREY, MEASURED, RESET, Terminal
+from conftest import ACCENT, BOLD, DIM, GREY, MEASURED, RESET, Terminal, add_back, tinker_runs
 from test_channels import BotAPI, every_telegram_talks_to
 
 import tinkerkit.channels as channels
@@ -162,7 +162,7 @@ def test_markup_of_a_t_string():
         Markup.of(t"{said:bold}")
 
 
-@pytest.mark.spec("CNV-2")
+@pytest.mark.spec("CNV-1")
 def test_columns():
     table = (
         "NAME                 ID              SIZE      MODIFIED\n"
@@ -177,7 +177,7 @@ def test_columns():
         assert Markup.columns(text) == text
 
 
-@pytest.mark.spec("CNV-3")
+@pytest.mark.spec("CNV-2")
 def test_pieces_split_between_lines_and_lose_no_text():
     text = "\n".join(f"line {number:03}" for number in range(100))
     parts = pieces(text, size=100)
@@ -187,7 +187,7 @@ def test_pieces_split_between_lines_and_lose_no_text():
     assert "".join("".join(pieces(a_long_line, size=100)).split()) == "".join(a_long_line.split())
 
 
-@pytest.mark.spec("CNV-5")
+@pytest.mark.spec("CNV-3")
 @pytest.mark.parametrize(
     "text,command",
     [
@@ -210,7 +210,7 @@ def test_command_of(text, command):
     assert command_of(text, Desk.COMMANDS) == command
 
 
-@pytest.mark.spec("CNV-5")
+@pytest.mark.spec("CNV-3")
 def test_said_command_gives_a_fixed_phrase_of_a_chat_command_as_slash():
     for said in ("clear chat", "status", "jobs running", "model recipe all", "exercise status"):
         assert conversation.said_command(said) == f"/{said}"
@@ -221,7 +221,7 @@ def test_said_command_gives_a_fixed_phrase_of_a_chat_command_as_slash():
     assert conversation.said_command("status of my build") == ""
 
 
-@pytest.mark.spec("CNV-5")
+@pytest.mark.spec("CNV-3")
 def test_said_command_takes_show_words_and_a_left_out_command_name():
     assert conversation.said_command("show model recipe") == "/model recipe"
     assert conversation.said_command("show recipe") == "/model recipe"
@@ -230,7 +230,7 @@ def test_said_command_takes_show_words_and_a_left_out_command_name():
     assert conversation.said_command("show me the chat") == ""
 
 
-@pytest.mark.spec("CNV-5", "SYS-3")
+@pytest.mark.spec("CNV-3", "SYS-3")
 def test_said_command_drops_question_words():
     assert conversation.said_command("What's the time now?") == "/system time"
     assert conversation.said_command("what time is it now?") == "/system time"
@@ -244,7 +244,7 @@ def test_said_filler_holds_no_word_of_a_phrase():
     assert not words & set(conversation.SAID_FILLER)
 
 
-@pytest.mark.spec("CNV-6")
+@pytest.mark.spec("CNV-4")
 def test_said_writes_tinker_before_a_command_as_slash():
     for channel in (Recorder(), ConsoleChannel()):
         assert (
@@ -254,7 +254,7 @@ def test_said_writes_tinker_before_a_command_as_slash():
         assert channel.said("the tinker tool and /x/tinker task") == "the tinker tool and /x/tinker task"
 
 
-@pytest.mark.spec("CNV-6")
+@pytest.mark.spec("CNV-4")
 def test_show_edits_sends_and_deletes(monkeypatch):
     channel = Recorder()
     first = channel.show("1", None, "hello", status=True)
@@ -266,7 +266,7 @@ def test_show_edits_sends_and_deletes(monkeypatch):
     assert channel.show("1", two, "short") == [first[0]] and channel.log[-1] == ("delete", "1", two[1], "")
 
 
-@pytest.mark.spec("CNV-6")
+@pytest.mark.spec("CNV-4")
 def test_show_done_comes_to_the_bottom():
     channel = Recorder()
     old = channel.show("1", None, "working")
@@ -277,7 +277,7 @@ def test_show_done_comes_to_the_bottom():
     assert kept == new
 
 
-@pytest.mark.spec("CNV-7")
+@pytest.mark.spec("CNV-5")
 def test_listened_filters_chats_and_says_a_refusal_once(monkeypatch, capsys):
     channel = Recorder(chats=("1",), inbox=[Message("1", "hi"), Message("2", "stranger")])
     assert [message.text for message in channel.listened(0)] == ["hi"]
@@ -291,7 +291,7 @@ def test_listened_filters_chats_and_says_a_refusal_once(monkeypatch, capsys):
     assert capsys.readouterr().out.count("409 Conflict") == 1
 
 
-@pytest.mark.spec("CNV-7")
+@pytest.mark.spec("CNV-5")
 def test_only_one_process_claims_a_channel():
     one, two = Recorder("bot"), Recorder("bot")
     assert one.claim({"pid": 123}) is True
@@ -318,7 +318,7 @@ def piped_console(monkeypatch):
     return ConsoleChannel(), out
 
 
-@pytest.mark.spec("CNV-8")
+@pytest.mark.spec("CNV-6")
 def test_console_without_a_live_line_prints_settled_lines_once_and_each_new_doing_line(monkeypatch):
     console, out = piped_console(monkeypatch)
     shown = console.show("console", None, CALC_WRITING, doing="Writing the code")
@@ -336,7 +336,7 @@ def test_console_without_a_live_line_prints_settled_lines_once_and_each_new_doin
     ]
 
 
-@pytest.mark.spec("CNV-8")
+@pytest.mark.spec("CNV-6")
 def test_console_prints_only_what_a_done_message_grew_by(monkeypatch):
     console, out = piped_console(monkeypatch)
     shown = console.show("console", None, "Done\n\nline one", done=True)
@@ -463,7 +463,7 @@ def stacked(line, count):
     return "\n".join([line] * count)
 
 
-@pytest.mark.spec("CNV-8")
+@pytest.mark.spec("CNV-6")
 def test_console_marks_each_message_and_indents_its_lines_on_a_colour_terminal(monkeypatch):
     terminal = colour_terminal(monkeypatch)
     console = ConsoleChannel()
@@ -475,7 +475,7 @@ def test_console_marks_each_message_and_indents_its_lines_on_a_colour_terminal(m
     )
 
 
-@pytest.mark.spec("CNV-8")
+@pytest.mark.spec("CNV-6")
 def test_console_shows_your_line_again_highlighted_without_ruling_each_prompt(monkeypatch, home_store):
     console = ruled_console(monkeypatch)
     Config.save(model="n")
@@ -538,7 +538,7 @@ def test_console_esc_closes_the_menu_and_keeps_the_typed_slash(monkeypatch):
     assert lines_keyed(monkeypatch, Text("/"), "esc", "enter") == ["/", None]
 
 
-@pytest.mark.spec("MSG-10", "CNV-8")
+@pytest.mark.spec("MSG-10", "CNV-6")
 def test_console_draws_the_command_menu_under_the_prompt_line(monkeypatch):
     first = slash_matches("/")[0]
     lines_keyed(monkeypatch, Text("/"))
@@ -557,7 +557,7 @@ def test_console_fills_or_sends_the_word_picked_from_the_menu(monkeypatch):
     assert lines_keyed(monkeypatch, Text("/model r"), "enter") == ["/model recipe", None]
 
 
-@pytest.mark.spec("CNV-8")
+@pytest.mark.spec("CNV-6")
 def test_console_keeps_the_lines_typed_for_up_and_down_across_restarts(monkeypatch, tinker_home):
     colour_terminal(monkeypatch)
     monkeypatch.setattr(ConsoleScreen, "TICK_SECONDS", 60)
@@ -572,7 +572,7 @@ def test_console_keeps_the_lines_typed_for_up_and_down_across_restarts(monkeypat
     assert (tinker_home / "prompt_history").exists()
 
 
-@pytest.mark.spec("CNV-8")
+@pytest.mark.spec("CNV-6")
 @pytest.mark.parametrize(("line", "columns", "rows"), [("hi", 20, 1), ("x" * 25, 10, 3)])
 def test_console_shows_a_line_sent_again_right_above_the_rule_by_all_its_rows(
     monkeypatch, line, columns, rows
@@ -581,14 +581,14 @@ def test_console_shows_a_line_sent_again_right_above_the_rule_by_all_its_rows(
     assert drawn_after(lambda: console.show_again(line)) == sent_back_shown(line, rows, columns=columns)
 
 
-@pytest.mark.spec("CNV-8")
+@pytest.mark.spec("CNV-6")
 @pytest.mark.parametrize("line", ["", "  ", "/exit", " /EXIT "])
 def test_console_drops_a_quiet_line_by_pulling_the_prompt_up(monkeypatch, line):
     console = ruled_console(monkeypatch)
     assert drawn_after(lambda: console.show_again(line)) == pulled_up(1, kept=0)
 
 
-@pytest.mark.spec("CNV-8")
+@pytest.mark.spec("CNV-6")
 def test_console_sends_a_line_back_above_the_live_block(monkeypatch, clock):
     console = ruled_console(monkeypatch, columns=20)
     console.screen.show_live("Learning", 100.0, under=["one"])
@@ -622,7 +622,7 @@ def picked_names(shown):
     ]
 
 
-@pytest.mark.spec("CNV-8")
+@pytest.mark.spec("CNV-6")
 def test_console_picks_the_model_for_model_typed_alone(monkeypatch, home_store):
     console = ruled_console(monkeypatch)
     Models.keep("n", MEASURED)
@@ -638,7 +638,7 @@ def test_console_picks_the_model_for_model_typed_alone(monkeypatch, home_store):
 CHANNEL_ADD = "/channel add --kind telegram --name home --token abc --chat '42, 43'"
 
 
-@pytest.mark.spec("CNV-8")
+@pytest.mark.spec("CNV-6")
 def test_console_adds_a_channel_in_place_and_reads_on(monkeypatch, home_store):
     console = ruled_console(monkeypatch)
     Config.save(model="n")
@@ -660,7 +660,7 @@ def test_console_adds_a_channel_in_place_and_reads_on(monkeypatch, home_store):
     assert [console.lines.get() for _ in range(4)] == ["", "", "hi", None]
 
 
-@pytest.mark.spec("CNV-8")
+@pytest.mark.spec("CNV-6")
 def test_console_gives_back_the_name_of_the_channel_it_added(monkeypatch, home_store):
     console = ruled_console(monkeypatch)
     every_telegram_talks_to(monkeypatch, BotAPI(getMe={"username": "my_bot"}))
@@ -672,7 +672,7 @@ def test_console_gives_back_the_name_of_the_channel_it_added(monkeypatch, home_s
     assert console.channel_added(["--kind", "pigeon"]) is None
 
 
-@pytest.mark.spec("CNV-8")
+@pytest.mark.spec("CNV-6")
 def test_piped_console_sends_channel_add_on(monkeypatch):
     console, _ = piped_console(monkeypatch)
     typing(monkeypatch, CHANNEL_ADD)
@@ -681,7 +681,7 @@ def test_piped_console_sends_channel_add_on(monkeypatch):
     assert Channels.settings() == {}
 
 
-@pytest.mark.spec("CNV-8")
+@pytest.mark.spec("CNV-6")
 def test_console_picks_a_model_first_when_none_is_in_use(monkeypatch, home_store):
     console = ruled_console(monkeypatch)
     shown = model_picker(monkeypatch, console, 2)
@@ -691,17 +691,21 @@ def test_console_picks_a_model_first_when_none_is_in_use(monkeypatch, home_store
     assert [console.lines.get() for _ in range(3)] == ["/model n", "hi", None]
 
 
-@pytest.mark.spec("CNV-8")
-def test_console_sends_nothing_when_the_first_pick_is_cancelled(monkeypatch, home_store):
+@pytest.mark.spec("CNV-6")
+@pytest.mark.parametrize(
+    ("saved", "pick", "picks"), [({}, None, 1), ({"model": "n"}, 1, 0)], ids=["cancelled", "model in use"]
+)
+def test_console_sends_only_the_typed_line_without_a_first_pick(monkeypatch, home_store, saved, pick, picks):
     console = ruled_console(monkeypatch)
-    shown = model_picker(monkeypatch, console, None)
+    Config.save(**saved)
+    shown = model_picker(monkeypatch, console, pick)
     typing(monkeypatch, "hi")
     console.read()
-    assert len(shown) == 1
+    assert len(shown) == picks
     assert [console.lines.get() for _ in range(2)] == ["hi", None]
 
 
-@pytest.mark.spec("CNV-8")
+@pytest.mark.spec("CNV-6")
 def test_console_says_how_to_get_a_model_when_ollama_has_none(monkeypatch, home_store):
     console = ruled_console(monkeypatch)
     printed = []
@@ -714,7 +718,7 @@ def test_console_says_how_to_get_a_model_when_ollama_has_none(monkeypatch, home_
     assert [console.lines.get() for _ in range(2)] == ["hi", None]
 
 
-@pytest.mark.spec("CNV-8")
+@pytest.mark.spec("CNV-6")
 def test_console_warns_and_reads_on_when_ollama_is_down_at_first_run(monkeypatch, home_store):
     console = ruled_console(monkeypatch)
     warned = []
@@ -729,18 +733,7 @@ def test_console_warns_and_reads_on_when_ollama_is_down_at_first_run(monkeypatch
     assert [console.lines.get() for _ in range(2)] == ["hi", None]
 
 
-@pytest.mark.spec("CNV-8")
-def test_console_opens_no_first_pick_with_a_model_in_use(monkeypatch, home_store):
-    console = ruled_console(monkeypatch)
-    Config.save(model="n")
-    shown = model_picker(monkeypatch, console, 1)
-    typing(monkeypatch, "hi")
-    console.read()
-    assert shown == []
-    assert [console.lines.get() for _ in range(2)] == ["hi", None]
-
-
-@pytest.mark.spec("CNV-8")
+@pytest.mark.spec("CNV-6")
 def test_console_picks_the_model_for_model_calibrate_typed_alone(monkeypatch, home_store):
     console = ruled_console(monkeypatch)
     Config.save(model="n")
@@ -754,7 +747,7 @@ def test_console_picks_the_model_for_model_calibrate_typed_alone(monkeypatch, ho
     assert [console.lines.get() for _ in range(3)] == ["/model calibrate m", "/model calibrate n", None]
 
 
-@pytest.mark.spec("CNV-8")
+@pytest.mark.spec("CNV-6")
 def test_console_prints_the_recipe_before_the_pick(monkeypatch, home_store):
     console = ruled_console(monkeypatch)
     Config.save(model="n")
@@ -769,7 +762,7 @@ def test_console_prints_the_recipe_before_the_pick(monkeypatch, home_store):
     assert printed == ["🧠⚡ m is the smartest and the fastest"] and console.lines.get() == "/model m"
 
 
-@pytest.mark.spec("CNV-8")
+@pytest.mark.spec("CNV-6")
 @pytest.mark.parametrize("command", ["model", "model calibrate"])
 def test_console_sends_nothing_when_the_pick_is_cancelled(monkeypatch, home_store, command):
     console = ruled_console(monkeypatch)
@@ -779,7 +772,7 @@ def test_console_sends_nothing_when_the_pick_is_cancelled(monkeypatch, home_stor
     assert console.lines.get() == "" and console.receive(0) == []
 
 
-@pytest.mark.spec("CNV-8")
+@pytest.mark.spec("CNV-6")
 @pytest.mark.parametrize("command", ["model", "model calibrate"])
 @pytest.mark.parametrize("models", [(), None])
 def test_console_passes_a_pick_command_on_when_there_is_nothing_to_pick(
@@ -792,7 +785,7 @@ def test_console_passes_a_pick_command_on_when_there_is_nothing_to_pick(
     assert shown == [] and console.lines.get() == f"/{command}"
 
 
-@pytest.mark.spec("CNV-8")
+@pytest.mark.spec("CNV-6")
 @pytest.mark.parametrize("command", ["model", "model calibrate"])
 def test_console_passes_a_piped_pick_command_on(monkeypatch, home_store, command):
     colour_terminal(monkeypatch)
@@ -804,7 +797,7 @@ def test_console_passes_a_piped_pick_command_on(monkeypatch, home_store, command
     assert shown == [] and console.lines.get() == f"/{command}"
 
 
-@pytest.mark.spec("CNV-8")
+@pytest.mark.spec("CNV-6")
 def test_console_leaves_piped_input_unruled_and_unrepeated(monkeypatch):
     terminal = colour_terminal(monkeypatch)
     monkeypatch.setattr(sys.stdin, "isatty", lambda: False)
@@ -814,20 +807,20 @@ def test_console_leaves_piped_input_unruled_and_unrepeated(monkeypatch):
     assert terminal.getvalue() == ""
 
 
-@pytest.mark.spec("CNV-8")
+@pytest.mark.spec("CNV-6")
 def test_console_prints_above_the_rule_without_touching_the_prompt(monkeypatch):
     ruled_console(monkeypatch).send("console", "hi")
     assert sys.stdout.getvalue() == printed_above(f"{MARK}hi")
 
 
-@pytest.mark.spec("CNV-8")
+@pytest.mark.spec("CNV-6")
 def test_what_tinker_says_while_you_type_prints_above_the_prompt(monkeypatch):
     reading_console(monkeypatch)
     said = drawn_after(lambda: conversation.say.text("[12:00:00] tinker_bot: hello"))
     assert said == printed_above("[12:00:00] tinker_bot: hello", rows=3)
 
 
-@pytest.mark.spec("CNV-8")
+@pytest.mark.spec("CNV-6")
 @pytest.mark.parametrize(
     ("text", "printed"),
     [
@@ -899,7 +892,7 @@ def live_screen(monkeypatch):
     return live_console(monkeypatch).screen
 
 
-@pytest.mark.spec("CNV-8")
+@pytest.mark.spec("CNV-6")
 @pytest.mark.parametrize("under", [[], UNDER], ids=["live-line", "with-lines-under"])
 def test_console_shows_its_live_block_dim_and_indented_above_the_rule_and_prompt(monkeypatch, clock, under):
     screen = live_screen(monkeypatch)
@@ -907,7 +900,7 @@ def test_console_shows_its_live_block_dim_and_indented_above_the_rule_and_prompt
     assert shown == block_grown(1 + len(under)) + block_changed(block_drawn("Learning", under))
 
 
-@pytest.mark.spec("CNV-8")
+@pytest.mark.spec("CNV-6")
 def test_console_changes_its_live_line_in_place_without_touching_what_you_type(monkeypatch, clock):
     screen = live_screen(monkeypatch)
     screen.show_live("Writing tests", 100.0)
@@ -916,7 +909,7 @@ def test_console_changes_its_live_line_in_place_without_touching_what_you_type(m
     assert changed == live_changed("Running tests", "1m 4s")
 
 
-@pytest.mark.spec("CNV-8")
+@pytest.mark.spec("CNV-6")
 def test_console_changes_its_live_block_in_place_and_turns_its_star_and_glow_on_each_tick(monkeypatch, clock):
     screen = live_screen(monkeypatch)
     screen.show_live("Learning", 100.0, under=UNDER)
@@ -928,28 +921,28 @@ def test_console_changes_its_live_block_in_place_and_turns_its_star_and_glow_on_
     )
 
 
-@pytest.mark.spec("CNV-8")
+@pytest.mark.spec("CNV-6")
 def test_the_live_block_ticks_about_eight_times_a_second():
     assert round(1 / ConsoleScreen.TICK_SECONDS) == 8
 
 
-@pytest.mark.spec("CNV-8")
-def test_a_shrinking_live_block_pulls_the_rule_and_prompt_up(monkeypatch, clock):
+@pytest.mark.spec("CNV-6")
+@pytest.mark.parametrize(
+    ("before", "after", "moved"),
+    [
+        (UNDER, ("Writing", []), block_shrunk(2, rows_left=1) + live_changed("Writing")),
+        ([], ("Learning", UNDER), block_grown(2) + block_changed(block_drawn("Learning", UNDER))),
+    ],
+    ids=["shrinking pulls up", "growing pushes down"],
+)
+def test_a_live_block_changing_size_moves_the_rule_and_prompt(monkeypatch, clock, before, after, moved):
     screen = live_screen(monkeypatch)
-    screen.show_live("Learning", 100.0, under=UNDER)
-    shrunk = drawn_after(lambda: screen.show_live("Writing", 100.0))
-    assert shrunk == block_shrunk(2, rows_left=1) + live_changed("Writing")
+    screen.show_live("Learning", 100.0, under=before)
+    text, under = after
+    assert drawn_after(lambda: screen.show_live(text, 100.0, under=under)) == moved
 
 
-@pytest.mark.spec("CNV-8")
-def test_a_growing_live_block_pushes_the_rule_and_prompt_down(monkeypatch, clock):
-    screen = live_screen(monkeypatch)
-    screen.show_live("Learning", 100.0)
-    grown = drawn_after(lambda: screen.show_live("Learning", 100.0, under=UNDER))
-    assert grown == block_grown(2) + block_changed(block_drawn("Learning", UNDER))
-
-
-@pytest.mark.spec("CNV-8")
+@pytest.mark.spec("CNV-6")
 @pytest.mark.parametrize("under", [[], UNDER], ids=["live-line", "with-lines-under"])
 def test_console_prints_above_its_live_block_and_takes_it_out_for_good(monkeypatch, clock, under):
     screen = live_screen(monkeypatch)
@@ -961,7 +954,7 @@ def test_console_prints_above_its_live_block_and_takes_it_out_for_good(monkeypat
     assert drawn_after(screen.tick) == "" and drawn_after(screen.end_live) == ""
 
 
-@pytest.mark.spec("CNV-8")
+@pytest.mark.spec("CNV-6")
 def test_the_lines_under_the_live_line_are_cut_to_the_terminal_width(monkeypatch, clock):
     screen = live_screen(monkeypatch)
     screen.show_live("Learning", 100.0, under=["x" * 60])
@@ -972,7 +965,7 @@ def menu_rows():
     return [MenuRow(True, "/ask", "QUESTION", "answers a question"), MenuRow(False, "/clear", "", "clears")]
 
 
-@pytest.mark.spec("CNV-8")
+@pytest.mark.spec("CNV-6")
 def test_prompt_drawer_draws_the_line_and_puts_the_cursor_at_the_column():
     drawer = PromptDrawer("› ")
     assert drawer.draw("hello", 2, [], 80) == "\r\033[J› hello\r\033[4C"
@@ -1000,7 +993,7 @@ def test_prompt_drawer_dims_the_words_on_a_colour_terminal(monkeypatch):
     assert f"› /ask{DIM} QUESTION{RESET}  answers a question" in drawn
 
 
-@pytest.mark.spec("CNV-8")
+@pytest.mark.spec("CNV-6")
 def test_prompt_drawer_follows_a_wrapped_line_and_starts_the_next_draw_from_its_top():
     drawer = PromptDrawer("› ")
     assert drawer.draw("x" * 12, 12, [], 10) == "\r\033[J› " + "x" * 12 + "\r\033[4C"
@@ -1008,7 +1001,7 @@ def test_prompt_drawer_follows_a_wrapped_line_and_starts_the_next_draw_from_its_
     assert drawer.draw("x", 1, [], 10).startswith("\033[1A\r\033[J› x")
 
 
-@pytest.mark.spec("CNV-8")
+@pytest.mark.spec("CNV-6")
 def test_prompt_drawer_done_drops_the_menu_and_moves_below_the_line():
     drawer = PromptDrawer("› ")
     drawer.draw("x" * 12, 12, menu_rows(), 10)
@@ -1016,7 +1009,7 @@ def test_prompt_drawer_done_drops_the_menu_and_moves_below_the_line():
     assert drawer.cursor_row == 0
 
 
-@pytest.mark.spec("CNV-8")
+@pytest.mark.spec("CNV-6")
 def test_prompt_drawer_taken_away_clears_from_the_line_top_and_draws_next_from_there():
     drawer = PromptDrawer("› ")
     drawer.draw("x" * 12, 12, menu_rows(), 10)
@@ -1035,7 +1028,7 @@ def prompt_again(text="hi", rows=()):
     return PromptDrawer("› ").draw(text, len(text), list(rows), 10)
 
 
-@pytest.mark.spec("CNV-8")
+@pytest.mark.spec("CNV-6")
 @pytest.mark.parametrize("rows", [[], menu_rows()], ids=["line", "with-menu"])
 def test_a_print_while_typing_takes_the_prompt_away_and_draws_it_again(monkeypatch, rows):
     screen = ruled_screen(monkeypatch)
@@ -1044,7 +1037,7 @@ def test_a_print_while_typing_takes_the_prompt_away_and_draws_it_again(monkeypat
     assert printed == "\r\033[J" + printed_above("hello") + prompt_again(rows=rows)
 
 
-@pytest.mark.spec("CNV-8")
+@pytest.mark.spec("CNV-6")
 def test_a_resize_while_typing_takes_the_prompt_away_before_drawing_the_rule_again(monkeypatch):
     screen = ruled_screen(monkeypatch)
     typing_on(screen)
@@ -1053,7 +1046,7 @@ def test_a_resize_while_typing_takes_the_prompt_away_before_drawing_the_rule_aga
     assert printed.startswith("\r\033[J" + RULE_REDRAWN_NARROWER)
 
 
-@pytest.mark.spec("CNV-8")
+@pytest.mark.spec("CNV-6")
 def test_the_live_block_while_typing_draws_the_prompt_again_and_a_quiet_tick_draws_nothing(
     monkeypatch, clock
 ):
@@ -1064,7 +1057,7 @@ def test_the_live_block_while_typing_draws_the_prompt_again_and_a_quiet_tick_dra
     assert shown.startswith("\r\033[J") and shown.endswith(prompt_again())
 
 
-@pytest.mark.spec("CNV-8")
+@pytest.mark.spec("CNV-6")
 def test_a_print_from_elsewhere_while_typing_keeps_the_typed_text_and_ends_typing(monkeypatch):
     console = ruled_console(monkeypatch)
 
@@ -1093,7 +1086,7 @@ def started_screen(monkeypatch):
     signal.signal(signal.SIGWINCH, resize_handler)
 
 
-@pytest.mark.spec("CNV-8")
+@pytest.mark.spec("CNV-6")
 def test_console_starts_by_drawing_the_rule_where_the_cursor_is(started_screen):
     started_screen()
     assert sys.stdout.getvalue() == unwrapped(rule_drawn(10)) + "\n"
@@ -1110,7 +1103,7 @@ def redrawn_with_rule(block, columns, typed_rows=0):
 RULE_REDRAWN_NARROWER = stale_rows_cleared(2) + pulled_up(1, kept=1) + redrawn_with_rule([], 5)
 
 
-@pytest.mark.spec("CNV-8")
+@pytest.mark.spec("CNV-6")
 @pytest.mark.parametrize(
     ("columns", "lines", "repaired"),
     [
@@ -1139,7 +1132,7 @@ def test_a_resized_window_draws_the_block_and_rule_again_at_its_size_right_above
     assert drawn_after(screen.tick).startswith(repaired)
 
 
-@pytest.mark.spec("CNV-8")
+@pytest.mark.spec("CNV-6")
 def test_a_resized_window_without_a_block_draws_only_the_rule_again(monkeypatch):
     screen = ruled_screen(monkeypatch)
     resized_to(monkeypatch, 5)
@@ -1154,7 +1147,7 @@ def drawn_soon(expected, seconds=2.0):
     return sys.stdout.getvalue()
 
 
-@pytest.mark.spec("CNV-8")
+@pytest.mark.spec("CNV-6")
 def test_a_resize_signal_draws_the_rule_again_without_waiting_for_the_tick(monkeypatch, started_screen):
     started_screen()
     resized_to(monkeypatch, 5)
@@ -1162,7 +1155,7 @@ def test_a_resize_signal_draws_the_rule_again_without_waiting_for_the_tick(monke
     assert redrawn_with_rule([], 5) in drawn_soon(redrawn_with_rule([], 5))
 
 
-@pytest.mark.spec("CNV-8")
+@pytest.mark.spec("CNV-6")
 def test_a_print_right_after_a_resize_draws_the_rule_again_first(monkeypatch):
     screen = ruled_screen(monkeypatch)
     resized_to(monkeypatch, 5)
@@ -1170,7 +1163,7 @@ def test_a_print_right_after_a_resize_draws_the_rule_again_first(monkeypatch):
     assert printed == RULE_REDRAWN_NARROWER + printed_above("hello")
 
 
-@pytest.mark.spec("CNV-8")
+@pytest.mark.spec("CNV-6")
 def test_a_line_sent_right_after_a_resize_draws_the_rule_again_above_it(monkeypatch):
     console = ruled_console(monkeypatch)
     resized_to(monkeypatch, 5)
@@ -1183,7 +1176,7 @@ def test_a_line_sent_right_after_a_resize_draws_the_rule_again_above_it(monkeypa
     )
 
 
-@pytest.mark.spec("CNV-8")
+@pytest.mark.spec("CNV-6")
 def test_an_unruled_screen_does_nothing_when_resized(monkeypatch):
     screen = ruled_screen(monkeypatch)
     monkeypatch.setattr(sys.stdin, "isatty", lambda: False)
@@ -1191,7 +1184,7 @@ def test_an_unruled_screen_does_nothing_when_resized(monkeypatch):
     assert drawn_after(screen.tick) == ""
 
 
-@pytest.mark.spec("CNV-8")
+@pytest.mark.spec("CNV-6")
 def test_console_without_colour_shows_no_live_line(monkeypatch, clock):
     screen = live_screen(monkeypatch)
     monkeypatch.setenv("NO_COLOR", "1")
@@ -1201,7 +1194,7 @@ def test_console_without_colour_shows_no_live_line(monkeypatch, clock):
     assert sys.stdout.getvalue() == ""
 
 
-@pytest.mark.spec("CNV-8")
+@pytest.mark.spec("CNV-6")
 def test_once_the_console_reads_live_draws_in_its_live_line(monkeypatch, clock):
     reading_console(monkeypatch, LIVE_COLUMNS)
     assert drawn_after(lambda: conversation.say.live("Writing tests")) == live_shown("Writing tests")
@@ -1209,7 +1202,7 @@ def test_once_the_console_reads_live_draws_in_its_live_line(monkeypatch, clock):
     assert said == block_taken_out(1) + printed_above("Answered")
 
 
-@pytest.mark.spec("CNV-8")
+@pytest.mark.spec("CNV-6")
 def test_console_prints_a_jobs_settled_lines_once_and_shows_what_goes_on_in_its_live_line(monkeypatch, clock):
     console = live_console(monkeypatch)
     writing = "🔨 calc\n✅ step one\n✻ Tinkering… (3s) · **Writing the code**\n… detail"
@@ -1229,7 +1222,7 @@ def test_console_prints_a_jobs_settled_lines_once_and_shows_what_goes_on_in_its_
     assert done == f"{block_taken_out(2)}{printed_above('  🏁 calc\n  ✅ Done', rows=2)}"
 
 
-@pytest.mark.spec("CNV-8")
+@pytest.mark.spec("CNV-6")
 def test_console_shows_a_message_without_a_doing_line_in_its_live_line_until_done(monkeypatch, clock):
     console = live_console(monkeypatch)
     shown = console.show("console", None, "⏳ **Getting ready**\nI answer soon.")
@@ -1238,7 +1231,7 @@ def test_console_shows_a_message_without_a_doing_line_in_its_live_line_until_don
     assert done == block_taken_out(1) + printed_above(f"{MARK}Answer")
 
 
-@pytest.mark.spec("CNV-8")
+@pytest.mark.spec("CNV-6")
 def test_a_done_message_leaves_a_live_line_it_does_not_own(monkeypatch, clock):
     console = live_console(monkeypatch)
     console.show("console", None, CALC_WRITING_NOW, doing="Writing")
@@ -1247,7 +1240,7 @@ def test_a_done_message_leaves_a_live_line_it_does_not_own(monkeypatch, clock):
     assert console.screen.live == ("Writing", 100.0, {})
 
 
-@pytest.mark.spec("CNV-8")
+@pytest.mark.spec("CNV-6")
 def test_a_done_message_forgets_how_it_went(monkeypatch, clock):
     console = live_console(monkeypatch)
     shown = console.show("console", None, CALC_WRITING_NOW, doing="Writing")
@@ -1255,7 +1248,7 @@ def test_a_done_message_forgets_how_it_went(monkeypatch, clock):
     assert console.began == {} and console.doings == {} and console.live_owner is None
 
 
-@pytest.mark.spec("CNV-8")
+@pytest.mark.spec("CNV-6")
 def test_a_jobs_live_line_counts_from_when_the_job_began(monkeypatch, clock):
     monkeypatch.setattr(time, "time", lambda: 5000.0)
     console = live_console(monkeypatch)
@@ -1263,7 +1256,7 @@ def test_a_jobs_live_line_counts_from_when_the_job_began(monkeypatch, clock):
     assert console.screen.live == ("Writing", 36.0, {})
 
 
-@pytest.mark.spec("CNV-8")
+@pytest.mark.spec("CNV-6")
 def test_a_jobs_live_line_shows_its_tokens_and_thinking(monkeypatch, clock):
     console = live_console(monkeypatch)
     line = "🔨 calc\n✻ Tinkering… (↓ 1.2k tokens · thinking) · **Writing**"
@@ -1273,7 +1266,7 @@ def test_a_jobs_live_line_shows_its_tokens_and_thinking(monkeypatch, clock):
     assert f"Tinkering…{RESET} (0s · ↓ 1.2k tokens" in sys.stdout.getvalue()
 
 
-@pytest.mark.spec("CNV-8")
+@pytest.mark.spec("CNV-6")
 def test_progress_says_when_the_work_began_counting_earlier_runs():
     progress = Progress("calc", before=60.0)
     assert progress.work_began is None
@@ -1281,7 +1274,7 @@ def test_progress_says_when_the_work_began_counting_earlier_runs():
     assert progress.work_began == 940.0
 
 
-@pytest.mark.spec("CNV-8")
+@pytest.mark.spec("CNV-6")
 def test_console_prints_plain_without_colour(monkeypatch):
     terminal = colour_terminal(monkeypatch)
     monkeypatch.setenv("NO_COLOR", "1")
@@ -1305,7 +1298,7 @@ def framed(width, *rows):
     )
 
 
-@pytest.mark.spec("CNV-8")
+@pytest.mark.spec("CNV-6")
 def test_console_frames_the_banner_as_wide_as_the_terminal_up_to_64_columns(monkeypatch):
     terminal = colour_terminal(monkeypatch, 80)
     ConsoleChannel().banner(["🔧 Tinker", "model qwen3", "help lists commands"])
@@ -1314,14 +1307,14 @@ def test_console_frames_the_banner_as_wide_as_the_terminal_up_to_64_columns(monk
     )
 
 
-@pytest.mark.spec("CNV-8")
+@pytest.mark.spec("CNV-6")
 def test_console_cuts_banner_text_that_is_too_long(monkeypatch):
     terminal = colour_terminal(monkeypatch, 14)
     ConsoleChannel().banner(["🔧 Tinker tool", "help lists commands"])
     assert terminal.getvalue() == framed(14, ("🔧 Tinker", BOLD, 9), ("help lists", DIM, 10))
 
 
-@pytest.mark.spec("CNV-8")
+@pytest.mark.spec("CNV-6")
 def test_console_draws_no_banner_without_colour_or_a_terminal(monkeypatch):
     terminal = colour_terminal(monkeypatch)
     monkeypatch.setattr(sys.stdin, "isatty", lambda: False)
@@ -1332,7 +1325,7 @@ def test_console_draws_no_banner_without_colour_or_a_terminal(monkeypatch):
     assert terminal.getvalue() == ""
 
 
-@pytest.mark.spec("CNV-8")
+@pytest.mark.spec("CNV-6")
 def test_the_banner_names_tinker_the_model_the_projects_folder_and_the_chats(monkeypatch):
     settings = {"model": "qwen3", "embed_model": "nomic-embed"}
     monkeypatch.setattr(conversation.Config, "get", lambda key: settings.get(key))
@@ -1352,7 +1345,7 @@ def test_the_banner_names_tinker_the_model_the_projects_folder_and_the_chats(mon
     assert len(alone.banner_lines()) == 4
 
 
-@pytest.mark.spec("CNV-8", "CHN-12")
+@pytest.mark.spec("CNV-6", "CHN-11")
 def test_the_terminal_banner_and_a_chat_banner_name_the_chats_only(desk, monkeypatch):
     monkeypatch.setattr(conversation.Config, "get", lambda key: None)
     console, telegram, stateless, drawn = ConsoleChannel(), Recorder("Telegram"), Recorder("rec"), []
@@ -1366,7 +1359,7 @@ def test_the_terminal_banner_and_a_chat_banner_name_the_chats_only(desk, monkeyp
     assert any("chats Telegram, rec" in text and "connecting" not in text for text in telegram.texts("send"))
 
 
-@pytest.mark.spec("CNV-8", "CHN-12")
+@pytest.mark.spec("CNV-6", "CHN-11")
 def test_a_chat_state_that_changes_after_the_banner_prints_a_dimmed_line_and_draws_no_banner(
     desk, monkeypatch
 ):
@@ -1385,7 +1378,7 @@ def test_a_chat_state_that_changes_after_the_banner_prints_a_dimmed_line_and_dra
     assert f"{DIM}Telegram · connected (IPv4)" in shown and len(drawn) == 1
 
 
-@pytest.mark.spec("CNV-8")
+@pytest.mark.spec("CNV-6")
 def test_the_conversation_opens_with_the_banner_before_the_status(monkeypatch):
     terminal = colour_terminal(monkeypatch, 80)
     typing(monkeypatch)
@@ -1398,7 +1391,7 @@ def test_the_conversation_opens_with_the_banner_before_the_status(monkeypatch):
     )
 
 
-@pytest.mark.spec("CNV-8")
+@pytest.mark.spec("CNV-6")
 def test_console_receives_lines_until_exit():
     console = ConsoleChannel()
     console.screen.reading = True
@@ -1436,7 +1429,7 @@ def snapshot(**state):
     return dict(base, **state)
 
 
-@pytest.mark.spec("CNV-17")
+@pytest.mark.spec("CNV-15")
 def test_progress_shows_the_tracker():
     progress = Progress("a calculator", phase="✅ **Confirmed:** building it")
     assert progress.text().splitlines() == [
@@ -1470,7 +1463,7 @@ def test_progress_shows_the_tracker():
     assert not progress.take(progress.snapshot)
 
 
-@pytest.mark.spec("CNV-17")
+@pytest.mark.spec("CNV-15")
 def test_progress_says_what_the_run_works_on_how_far_it_got_and_what_it_found():
     progress = Progress("Reading Atomic Habits")
     progress.take(
@@ -1503,7 +1496,7 @@ def test_progress_says_what_the_run_works_on_how_far_it_got_and_what_it_found():
     assert progress.text().splitlines()[2].startswith("✶ Tinkering…") and not progress.take(progress.snapshot)
 
 
-@pytest.mark.spec("CNV-17")
+@pytest.mark.spec("CNV-15")
 def test_progress_says_while_the_model_thinks_and_edits_for_a_new_token_count_only_with_the_clock():
     progress = Progress("calc")
     progress.take(snapshot(tokens=950, thinking=True, thought_seconds=4.0))
@@ -1512,7 +1505,7 @@ def test_progress_says_while_the_model_thinks_and_edits_for_a_new_token_count_on
     assert progress.take(dict(progress.snapshot, thinking=False))
 
 
-@pytest.mark.spec("CNV-17")
+@pytest.mark.spec("CNV-15")
 def test_progress_ending_of_a_done_run():
     progress = Progress("calc", before=60)
     progress.take(
@@ -1561,7 +1554,7 @@ PLAN = {
 }
 
 
-@pytest.mark.spec("CNV-17")
+@pytest.mark.spec("CNV-15")
 def test_progress_ending_of_a_plan_that_waits():
     progress = Progress("calc")
     progress.take(snapshot(waiting=PLAN))
@@ -1584,7 +1577,7 @@ def test_progress_ending_of_a_plan_that_waits():
     assert Progress.plan(dict(PLAN, kind="fix")).startswith("🐞 **Bug shown for calc**")
 
 
-@pytest.mark.spec("CNV-18")
+@pytest.mark.spec("CNV-16")
 def test_reporter_shows_the_tracker_and_ends_with_its_ending(home_store, monkeypatch):
     chats = ("1", "2")
     channel = Recorder(chats=chats)
@@ -1605,7 +1598,7 @@ def test_reporter_shows_the_tracker_and_ends_with_its_ending(home_store, monkeyp
     assert set(reporter.sent) == {("rec", "1"), ("rec", "2")}
 
 
-@pytest.mark.spec("CNV-18")
+@pytest.mark.spec("CNV-16")
 def test_a_reporter_shows_only_to_its_audience(monkeypatch):
     monkeypatch.setattr(conversation, "PROGRESS_EDIT_SECONDS", 1000)
     channel = Recorder(chats=("1", "2"))
@@ -1616,7 +1609,7 @@ def test_a_reporter_shows_only_to_its_audience(monkeypatch):
     assert set(reporter.sent) == {("rec", "2")}
 
 
-@pytest.mark.spec("CNV-18")
+@pytest.mark.spec("CNV-16")
 def test_reporter_edits_for_new_tokens_only_with_the_clock_but_the_console_counts_them_live(
     home_store, monkeypatch, clock
 ):
@@ -1632,12 +1625,12 @@ def test_reporter_edits_for_new_tokens_only_with_the_clock_but_the_console_count
     assert console.screen.live[2]["tokens"] == 900
 
 
-@pytest.mark.spec("CNV-18")
+@pytest.mark.spec("CNV-16")
 def test_progress_edits_come_within_about_two_seconds():
     assert conversation.PROGRESS_EDIT_SECONDS <= 2 < conversation.CLOCK_ONLY_EDIT_SECONDS
 
 
-@pytest.mark.spec("CNV-18")
+@pytest.mark.spec("CNV-16")
 def test_a_reporter_without_a_tracker_shows_its_lines(monkeypatch):
     monkeypatch.setattr(conversation, "PROGRESS_EDIT_SECONDS", 1000)
     channel = Recorder()
@@ -1646,7 +1639,7 @@ def test_a_reporter_without_a_tracker_shows_its_lines(monkeypatch):
     assert learning.progress.snapshot["latest"] == "reading 4 pages"
 
 
-@pytest.mark.spec("CNV-18")
+@pytest.mark.spec("CNV-16")
 def test_a_reporter_without_a_tracker_ends_with_its_title_and_last_line(monkeypatch):
     monkeypatch.setattr(conversation, "PROGRESS_EDIT_SECONDS", 1000)
     channel = Recorder()
@@ -1666,7 +1659,7 @@ def test_a_reporter_without_a_tracker_ends_with_its_title_and_last_line(monkeypa
     assert "Tinkering" not in ending and "Testing" not in ending and "Checking" not in ending
 
 
-@pytest.mark.spec("CNV-20")
+@pytest.mark.spec("CNV-18")
 def test_an_unreadable_json_answer_is_taken_as_empty(measured_model, fake_ollama):
     shell, channel = Shell(Talk("cmds"), Path.cwd(), Questions()), Recorder()
     for unreadable in ("{bad}", "[1]", "none"):
@@ -1676,7 +1669,7 @@ def test_an_unreadable_json_answer_is_taken_as_empty(measured_model, fake_ollama
     assert "```\nls\n```" in shell.propose(channel, Message("1", "x"), "", 300)
 
 
-@pytest.mark.spec("CNV-20")
+@pytest.mark.spec("CNV-18")
 def test_talk_reply(measured_model, fake_ollama, monkeypatch):
     monkeypatch.setattr(conversation, "CHAT_CONTEXT_MESSAGES", 4)
     talk, channel = Talk("task; status"), Recorder()
@@ -1698,7 +1691,7 @@ def test_talk_reply(measured_model, fake_ollama, monkeypatch):
     assert talk.reply(channel, Message("1", "x")).startswith("⚠️ **The model did not answer:**")
 
 
-@pytest.mark.spec("CNV-20")
+@pytest.mark.spec("CNV-18")
 def test_each_turn_context_holds_the_live_state():
     context = Talk.context([], lambda: "", lambda: "Model in use: n")
     assert "Model in use: n" in context and "Running now: nothing" in context
@@ -1706,7 +1699,7 @@ def test_each_turn_context_holds_the_live_state():
     assert "Running now:\nbuild x" in Talk.context(running, lambda: "", lambda: "")
 
 
-@pytest.mark.spec("CNV-20")
+@pytest.mark.spec("CNV-18")
 def test_talk_without_a_model_says_so():
     assert Talk("cmds").reply(Recorder(), Message("1", "hi")).startswith("⚠️ **No model is in use yet**")
     assert (
@@ -1734,7 +1727,7 @@ def chatted(desk, channel, monkeypatch, asked):
     return chat
 
 
-@pytest.mark.spec("CNV-20")
+@pytest.mark.spec("CNV-18")
 def test_a_chat_reply_that_is_a_command_line_is_run_at_once(desk, monkeypatch):
     desk, channel, _ = desk
     chat = chatted(desk, channel, monkeypatch, [])
@@ -1753,7 +1746,7 @@ def test_a_chat_reply_that_is_a_command_line_is_run_at_once(desk, monkeypatch):
     assert handled == ["/system time", "/system date", "/system time and /system date", "/system time"]
 
 
-@pytest.mark.spec("CNV-14", "CNV-20")
+@pytest.mark.spec("CNV-12", "CNV-18")
 def test_a_command_asked_in_words_is_answered_in_words(desk, monkeypatch):
     desk, channel, _ = desk
     asked = []
@@ -1768,7 +1761,7 @@ def test_a_command_asked_in_words_is_answered_in_words(desk, monkeypatch):
     chat("/fix the login bug", lambda last: last == "fix started")
 
 
-@pytest.mark.spec("CNV-22")
+@pytest.mark.spec("CNV-20")
 def test_shell_proposes_one_command(measured_model, fake_ollama):
     shell, channel = Shell(Talk("cmds"), Path.cwd(), Questions()), Recorder()
     fake_ollama.reply("low: a plain request")
@@ -1791,7 +1784,7 @@ def test_shell_proposes_one_command(measured_model, fake_ollama):
     assert "It changes" not in shell.propose(channel, Message("1", "disk"), "", 300)
 
 
-@pytest.mark.spec("CNV-22")
+@pytest.mark.spec("CNV-20")
 def test_shell_runs_the_confirmed_command(tmp_path):
     shell, channel = Shell(Talk("cmds"), tmp_path, Questions()), Recorder()
     shell.shell = "/bin/sh"
@@ -1861,7 +1854,7 @@ def desk(tmp_path, monkeypatch, home_store):
     script.write_text(textwrap.dedent(FAKE_TINKER))
     monkeypatch.setenv("TINKER_SOURCE", str(Path(__file__).resolve().parent.parent))
     monkeypatch.setenv("FAKE_TINKER_DB", str(home_store.path))
-    monkeypatch.setattr(conversation, "tinker_command", lambda: [sys.executable, str(script)])
+    tinker_runs(monkeypatch, script)
     monkeypatch.setattr(conversation, "PROGRESS_EDIT_SECONDS", 0.2)
     channel = Recorder(chats=("1",))
     desk = Desk([channel], tmp_path)
@@ -1886,7 +1879,7 @@ def calls_of(script):
     return path.read_text().splitlines() if path.exists() else []
 
 
-@pytest.mark.spec("CNV-11")
+@pytest.mark.spec("CNV-9")
 def test_desk_answers_commands(desk):
     desk, channel, _ = desk
     assert desk.talk.commands == "- `task WHAT`\n- `status`"
@@ -1927,7 +1920,7 @@ def test_desk_answers_commands(desk):
     assert replies["/Runs"] == "📚 **Runs**\n```\noutput of runs\n```"
 
 
-@pytest.mark.spec("CNV-11")
+@pytest.mark.spec("CNV-9")
 def test_desk_answers_a_command_while_its_channel_says_it_waits(desk):
     desk, channel, _ = desk
     waited = []
@@ -1943,14 +1936,14 @@ def test_desk_answers_a_command_while_its_channel_says_it_waits(desk):
     assert waited == [("1", "Running /memory --graph"), "done"]
 
 
-@pytest.mark.spec("CNV-11")
+@pytest.mark.spec("CNV-9")
 def test_a_chat_shows_its_typing_sign_while_it_waits():
     channel = Recorder(chats=("1",))
     with channel.waiting("1", "Running /memory"):
         wait_until(lambda: ("typing", "1", None, "") in channel.log)
 
 
-@pytest.mark.spec("CNV-11")
+@pytest.mark.spec("CNV-9")
 def test_console_waits_in_its_live_line_and_takes_it_out_after(monkeypatch, clock):
     console = live_console(monkeypatch)
     with console.waiting("console", "Running /memory"):
@@ -1960,7 +1953,7 @@ def test_console_waits_in_its_live_line_and_takes_it_out_after(monkeypatch, cloc
     assert sys.stdout.getvalue() == block_taken_out(1) and console.live_owner is None
 
 
-@pytest.mark.spec("CNV-11")
+@pytest.mark.spec("CNV-9")
 def test_console_waits_without_taking_a_jobs_live_line(monkeypatch, clock):
     console = live_console(monkeypatch)
     console.show("console", None, CALC_WRITING_NOW, doing="Writing")
@@ -1969,7 +1962,7 @@ def test_console_waits_without_taking_a_jobs_live_line(monkeypatch, clock):
     assert console.screen.live == ("Writing", 100.0, {})
 
 
-@pytest.mark.spec("CNV-11")
+@pytest.mark.spec("CNV-9")
 def test_a_command_that_deletes_and_exit_ask_first(desk):
     desk, channel, _ = desk
     assert desk.answer(Message("1", "/clear memory"), channel) is None
@@ -2010,7 +2003,7 @@ def added_jarvis(monkeypatch, console, name):
     return kept, jarvis
 
 
-@pytest.mark.spec("CNV-8", "CNV-11")
+@pytest.mark.spec("CNV-6", "CNV-9")
 def test_the_terminal_adds_a_channel_asked_for_in_words_then_enables_and_listens_on_it(
     terminal_desk, monkeypatch
 ):
@@ -2023,7 +2016,7 @@ def test_the_terminal_adds_a_channel_asked_for_in_words_then_enables_and_listens
     assert desk.ran == [] and desk.channels == [console, jarvis]
 
 
-@pytest.mark.spec("CNV-8")
+@pytest.mark.spec("CNV-6")
 def test_the_terminal_starts_nothing_when_a_channel_add_asked_for_in_words_fails(terminal_desk, monkeypatch):
     desk, console = terminal_desk
     monkeypatch.setattr(conversation, "typed_here", lambda: True)
@@ -2032,7 +2025,7 @@ def test_the_terminal_starts_nothing_when_a_channel_add_asked_for_in_words_fails
     assert not kept["jarvis"]["enabled"] and desk.channels == [console] and desk.listened == []
 
 
-@pytest.mark.spec("CNV-11")
+@pytest.mark.spec("CNV-9")
 def test_a_chat_or_piped_console_is_told_to_add_a_channel_from_the_terminal(desk, monkeypatch):
     desk, channel, _ = desk
     monkeypatch.setattr(conversation, "typed_here", lambda: False)
@@ -2046,14 +2039,14 @@ def test_a_chat_or_piped_console_is_told_to_add_a_channel_from_the_terminal(desk
     assert desk.ran == []
 
 
-@pytest.mark.spec("CNV-11")
+@pytest.mark.spec("CNV-9")
 def test_the_terminal_removes_a_channel_once_confirmed(terminal_desk):
     desk, console = terminal_desk
     assert desk.answer(Message("1", "/channel remove bot"), console) is None
     assert desk.ran == [["channel", "remove", "bot"]] and "👉 `/confirm` to delete it" in console.texts()[-1]
 
 
-@pytest.mark.spec("CNV-11")
+@pytest.mark.spec("CNV-9")
 def test_the_terminal_starts_listening_on_enabled_channels_not_yet_listened_to(terminal_desk, monkeypatch):
     desk, console = terminal_desk
     telegram, again = Recorder("Telegram"), Recorder("rec")
@@ -2063,7 +2056,7 @@ def test_the_terminal_starts_listening_on_enabled_channels_not_yet_listened_to(t
     assert desk.checked == [telegram] and desk.channels == [console, telegram] and desk.renewed == [True]
 
 
-@pytest.mark.spec("CNV-20")
+@pytest.mark.spec("CNV-18")
 def test_the_live_state_names_the_model_and_each_channel_with_whether_it_is_listened_to(desk, monkeypatch):
     desk, _, _ = desk
     desk.channels.append(Recorder("jarvis"))
@@ -2084,7 +2077,7 @@ def test_the_live_state_names_the_model_and_each_channel_with_whether_it_is_list
     assert desk.live_state() == "Model in use: none picked yet\nChannels: none set up"
 
 
-@pytest.mark.spec("CNV-11")
+@pytest.mark.spec("CNV-9")
 def test_the_terminal_starts_listening_on_the_channel_named(terminal_desk, monkeypatch):
     desk, console = terminal_desk
     kept_telegram(monkeypatch, {})
@@ -2094,7 +2087,7 @@ def test_the_terminal_starts_listening_on_the_channel_named(terminal_desk, monke
     )
 
 
-@pytest.mark.spec("CNV-11")
+@pytest.mark.spec("CNV-9")
 def test_the_terminal_says_when_no_channel_is_new_to_listen_on(terminal_desk, monkeypatch):
     desk, console = terminal_desk
     monkeypatch.setattr(channels.Channels, "enabled", lambda: [Recorder("rec")])
@@ -2104,7 +2097,7 @@ def test_the_terminal_says_when_no_channel_is_new_to_listen_on(terminal_desk, mo
     assert desk.renewed == [] and desk.checked == []
 
 
-@pytest.mark.spec("CNV-11")
+@pytest.mark.spec("CNV-9")
 def test_the_terminal_skips_a_channel_that_fails_its_check_or_is_held(terminal_desk, monkeypatch):
     desk, console = terminal_desk
     broken, held = Recorder("broken"), Recorder("held")
@@ -2126,7 +2119,7 @@ def test_the_terminal_skips_a_channel_that_fails_its_check_or_is_held(terminal_d
     assert desk.channels == [console] and desk.renewed == []
 
 
-@pytest.mark.spec("CNV-11")
+@pytest.mark.spec("CNV-9")
 def test_the_terminal_listens_on_a_channel_once_it_is_enabled(terminal_desk, monkeypatch):
     desk, console = terminal_desk
     telegram = kept_telegram(monkeypatch, {"enabled": True})
@@ -2137,7 +2130,7 @@ def test_the_terminal_listens_on_a_channel_once_it_is_enabled(terminal_desk, mon
     assert desk.ran == [["channel", "enable", "Telegram"]] and desk.channels == [console, telegram]
 
 
-@pytest.mark.spec("CNV-11")
+@pytest.mark.spec("CNV-9")
 def test_the_terminal_adds_nothing_when_an_enable_fails_or_the_channel_is_listened_to(
     terminal_desk, monkeypatch
 ):
@@ -2151,7 +2144,7 @@ def test_the_terminal_adds_nothing_when_an_enable_fails_or_the_channel_is_listen
     assert desk.channels == [console] and desk.renewed == [] and desk.checked == []
 
 
-@pytest.mark.spec("CNV-11")
+@pytest.mark.spec("CNV-9")
 def test_a_chat_does_not_listen_on_a_channel_it_enables(desk, monkeypatch):
     desk, channel, _ = desk
     monkeypatch.setattr(channels.Channels, "settings", lambda: {"Telegram": {"enabled": True}})
@@ -2159,14 +2152,14 @@ def test_a_chat_does_not_listen_on_a_channel_it_enables(desk, monkeypatch):
     assert desk.channels == [channel]
 
 
-@pytest.mark.spec("CNV-11")
+@pytest.mark.spec("CNV-9")
 def test_a_deletion_preview_is_what_tinker_printed_without_its_errors(tmp_path, monkeypatch, home_store):
     script = tmp_path / "deletes.py"
     script.write_text(
         "import sys\nprint('Delete these runs:')\nprint('  • abc123')\n"
         "sys.exit('Nothing deleted: run tinker clear runs in a terminal to confirm, or add --yes.')\n"
     )
-    monkeypatch.setattr(conversation, "tinker_command", lambda: [sys.executable, str(script)])
+    tinker_runs(monkeypatch, script)
     channel = Recorder(chats=("1",))
     desk = Desk([channel], tmp_path)
     desk.answer(Message("1", "/clear runs"), channel)
@@ -2175,7 +2168,7 @@ def test_a_deletion_preview_is_what_tinker_printed_without_its_errors(tmp_path, 
     assert "Nothing deleted" not in shown and "👉 `/confirm` to delete it" in shown
 
 
-@pytest.mark.spec("CNV-11")
+@pytest.mark.spec("CNV-9")
 def test_a_task_runs_as_its_own_tinker_and_its_plan_waits(desk, home_store):
     desk, channel, script = desk
     say(desk, channel, "/task a calculator")
@@ -2190,7 +2183,7 @@ def test_a_task_runs_as_its_own_tinker_and_its_plan_waits(desk, home_store):
     assert desk.status().startswith("🙋 **Tinker** · calc: a calculator waits for you")
 
 
-@pytest.mark.spec("CNV-18")
+@pytest.mark.spec("CNV-16")
 def test_research_in_a_chat_is_the_research_job_ending_with_its_answer(desk):
     desk, channel, script = desk
     say(desk, channel, "/research the newest Python")
@@ -2201,7 +2194,7 @@ def test_research_in_a_chat_is_the_research_job_ending_with_its_answer(desk):
     assert "✅ **Researched it.**" in shown and shown.endswith("**Python 3.14** came out in October [1].")
 
 
-@pytest.mark.spec("CNV-18")
+@pytest.mark.spec("CNV-16")
 def test_a_job_shows_its_progress_only_in_the_chat_that_asked(desk):
     desk, channel, script = desk
     channel.allowed = ["1", "2"]
@@ -2211,7 +2204,7 @@ def test_a_job_shows_its_progress_only_in_the_chat_that_asked(desk):
     assert not any("research" in text or "October" in text for text in channel.texts(chat="2"))
 
 
-@pytest.mark.spec("CNV-12")
+@pytest.mark.spec("CNV-10")
 def test_confirm_asks_a_new_projects_folder_once_then_builds(desk):
     desk, channel, script = desk
     say(desk, channel, "/task a calculator")
@@ -2226,7 +2219,7 @@ def test_confirm_asks_a_new_projects_folder_once_then_builds(desk):
     assert desk.waiting_plan is None
 
 
-@pytest.mark.spec("CNV-12")
+@pytest.mark.spec("CNV-10")
 def test_the_plan_that_waits_and_its_build_show_only_in_the_chat_that_confirmed(desk):
     desk, channel, script = desk
     channel.allowed = ["1", "2"]
@@ -2240,7 +2233,7 @@ def test_the_plan_that_waits_and_its_build_show_only_in_the_chat_that_confirmed(
     assert not any("📁 **Its folder:**" in text or "Confirmed" in text for text in channel.texts(chat="2"))
 
 
-@pytest.mark.spec("CNV-11")
+@pytest.mark.spec("CNV-9")
 def test_a_confirmed_plan_is_kept_without_its_next_step_lines(desk):
     desk, channel, script = desk
     say(desk, channel, "/task a calculator")
@@ -2265,7 +2258,7 @@ def a_features_plan(root):
     }
 
 
-@pytest.mark.spec("CNV-12")
+@pytest.mark.spec("CNV-10")
 def test_confirm_of_a_feature_builds_at_once_and_amend_changes_it(desk):
     desk, channel, script = desk
     desk.waiting_plan = a_features_plan(desk.root)
@@ -2277,7 +2270,7 @@ def test_confirm_of_a_feature_builds_at_once_and_amend_changes_it(desk):
     wait_until(lambda: "resume @abc123" in calls_of(script))
 
 
-@pytest.mark.spec("CNV-12")
+@pytest.mark.spec("CNV-10")
 def test_what_waits_for_confirm_is_cancelled_by_anything_else(desk, monkeypatch):
     desk, channel, _ = desk
     monkeypatch.setattr(desk.talk, "answer", lambda *args, **kwargs: None)
@@ -2291,7 +2284,7 @@ def test_what_waits_for_confirm_is_cancelled_by_anything_else(desk, monkeypatch)
     assert desk.rename([(channel, "1")], {}, ["rename", "x"]).startswith("🤷 No plan waits")
 
 
-@pytest.mark.spec("CNV-12")
+@pytest.mark.spec("CNV-10")
 def test_a_question_with_nothing_to_say_on_a_cancel_is_dropped_quietly(desk):
     desk, channel, _ = desk
     desk.questions.ask(channel, "1", Question(wanted="model pick"))
@@ -2300,7 +2293,7 @@ def test_a_question_with_nothing_to_say_on_a_cancel_is_dropped_quietly(desk):
     assert desk.decide([(channel, "1")], "amend", ["amend"]).startswith("✍️ Write `/amend [@PROJECT] CHANGE`")
 
 
-@pytest.mark.spec("CNV-12")
+@pytest.mark.spec("CNV-10")
 def test_a_chat_has_one_question_and_a_new_one_cancels_the_one_before(desk, monkeypatch):
     desk, channel, _ = desk
     monkeypatch.setattr(desk.talk, "answer", lambda *args, **kwargs: None)
@@ -2318,7 +2311,7 @@ def test_a_chat_has_one_question_and_a_new_one_cancels_the_one_before(desk, monk
     assert desk.questions.waiting(channel, "1").naming
 
 
-@pytest.mark.spec("CNV-13")
+@pytest.mark.spec("CNV-11")
 def test_a_command_sent_alone_asks_for_its_words(desk, monkeypatch):
     desk, channel, _ = desk
     answered = []
@@ -2347,7 +2340,7 @@ def test_a_command_sent_alone_asks_for_its_words(desk, monkeypatch):
     assert desk.questions.by_chat == {}
 
 
-@pytest.mark.spec("CNV-5")
+@pytest.mark.spec("CNV-3")
 def test_a_said_phrase_runs_its_command_and_a_deleting_one_asks_first(desk, monkeypatch):
     desk, channel, _ = desk
     monkeypatch.setattr(desk.talk, "answer", lambda *args, **kwargs: None)
@@ -2379,7 +2372,7 @@ def test_a_slash_word_that_names_no_command_is_only_answered(desk, monkeypatch):
     assert heard == ["status of my build", "/status"]
 
 
-@pytest.mark.spec("CNV-13")
+@pytest.mark.spec("CNV-11")
 def test_a_model_pick_sent_alone_asks_with_buttons(desk, monkeypatch):
     desk, channel, _ = desk
     answered, chosen = [], []
@@ -2416,7 +2409,7 @@ def test_a_model_pick_sent_alone_asks_with_buttons(desk, monkeypatch):
     assert answered[-2:] == ["/model", "/model"] and len(chosen) == 2
 
 
-@pytest.mark.spec("CNV-14")
+@pytest.mark.spec("CNV-12")
 def test_a_glance_goes_soon_and_history_shows_things_again(desk, monkeypatch):
     desk, channel, _ = desk
     glances = []
@@ -2450,7 +2443,7 @@ def test_a_glance_goes_soon_and_history_shows_things_again(desk, monkeypatch):
     assert Ledger.page(1) == nothing_left
 
 
-@pytest.mark.spec("CNV-15")
+@pytest.mark.spec("CNV-13")
 def test_follow_reads_the_tasks_tracker(tmp_path, home_store):
     desk = Desk.__new__(Desk)
     desk.echo_to_terminal, desk.messages_by_run, desk.seconds_by_run, desk.waiting_plan = False, {}, {}, None
@@ -2474,7 +2467,7 @@ def test_follow_reads_the_tasks_tracker(tmp_path, home_store):
     assert reporter.tracked()["waiting"] == PLAN
 
 
-@pytest.mark.spec("CNV-4")
+@pytest.mark.spec("CNV-2")
 def test_helpers(tmp_path):
     assert first_lines("a\nb\nc", 2) == "a\nb\n… 1 more lines" and first_lines("a", 2) == "a"
     assert first_words("  a \n b  c ", 3) == "a b"
@@ -2494,7 +2487,7 @@ def built(tmp_path, name, run_id, run, status="done", updated="2026-10-01 10:00"
     return folder
 
 
-@pytest.mark.spec("CNV-4")
+@pytest.mark.spec("CNV-2")
 def test_built_project(tmp_path):
     built(tmp_path, "calc", "aaa111", "x", updated="2026-10-01 10:00")
     built(tmp_path, "notes", "bbb222", "x", updated="2026-10-02 10:00")
@@ -2515,7 +2508,7 @@ def pausing_into(order):
     return pausing
 
 
-@pytest.mark.spec("CNV-21", "JOB-10")
+@pytest.mark.spec("CNV-19", "JOB-10")
 def test_a_chat_pauses_the_job_that_runs_before_it_is_answered(desk, monkeypatch):
     desk, channel, _ = desk
     order = []
@@ -2527,7 +2520,7 @@ def test_a_chat_pauses_the_job_that_runs_before_it_is_answered(desk, monkeypatch
     assert Desk([channel], desk.root).talk.pausing_jobs is jobs.answering
 
 
-@pytest.mark.spec("JOB-7", "CNV-21")
+@pytest.mark.spec("JOB-7", "CNV-19")
 def test_a_stop_ends_a_running_chat_answer_and_the_conversation_lives(desk, monkeypatch):
     desk, channel, _ = desk
     asked, never = threading.Event(), threading.Event()
@@ -2545,7 +2538,7 @@ def test_a_stop_ends_a_running_chat_answer_and_the_conversation_lives(desk, monk
 ECHO_APP = "import sys\nprint('args:', sys.argv[1:])\nprint('input:', sys.stdin.read().strip())\n"
 
 
-@pytest.mark.spec("CNV-23")
+@pytest.mark.spec("CNV-21")
 def test_run_a_built_project(desk, tmp_path):
     desk, channel, _ = desk
     folder = built(tmp_path, "calc", "aaa111", f'"{sys.executable}" app.py')
@@ -2563,7 +2556,7 @@ def test_run_a_built_project(desk, tmp_path):
     assert "args: ['5', '+', '3']" in channel.texts()[-1]
 
 
-@pytest.mark.spec("CNV-23")
+@pytest.mark.spec("CNV-21")
 def test_run_with_nothing_to_run(desk, tmp_path):
     desk, channel, _ = desk
     desk.run_app(channel, "1", ["x"])
@@ -2594,7 +2587,7 @@ def goodbyes_handed(monkeypatch):
     return handed
 
 
-@pytest.mark.spec("CNV-9", "CNV-11")
+@pytest.mark.spec("CNV-7", "CNV-9")
 def test_the_status_is_sent_anew_as_tinker_starts_and_the_goodbye_is_handed_on(desk, home_store, monkeypatch):
     monkeypatch.setattr(conversation, "ENDED_LOOK_SECONDS", 0.05)
     handed = goodbyes_handed(monkeypatch)
@@ -2623,7 +2616,7 @@ def test_the_status_is_sent_anew_as_tinker_starts_and_the_goodbye_is_handed_on(d
     channel.claimed.close()
 
 
-@pytest.mark.spec("CNV-9")
+@pytest.mark.spec("CNV-7")
 def test_ctrl_c_closes_the_chats_and_posts_no_status_after_the_first(desk, home_store, monkeypatch):
     handed = goodbyes_handed(monkeypatch)
     channel = Listening("bot")
@@ -2657,7 +2650,7 @@ def test_the_conversation_hosts_the_runner_and_pauses_the_job_when_it_quits(
     channel.claimed.close()
 
 
-@pytest.mark.spec("CNV-9")
+@pytest.mark.spec("CNV-7")
 def test_no_status_is_posted_to_a_chat_once_a_channel_is_closed(monkeypatch):
     chat = Recorder()
     console, out = piped_console(monkeypatch)
@@ -2667,7 +2660,7 @@ def test_no_status_is_posted_to_a_chat_once_a_channel_is_closed(monkeypatch):
     assert chat.log == [] and "not listening" in out.getvalue()
 
 
-@pytest.mark.spec("CNV-9")
+@pytest.mark.spec("CNV-7")
 def test_a_terminal_alone_hands_no_goodbye_on(monkeypatch):
     handed = goodbyes_handed(monkeypatch)
     console, out = piped_console(monkeypatch)
@@ -2675,7 +2668,7 @@ def test_a_terminal_alone_hands_no_goodbye_on(monkeypatch):
     assert handed == [] and "not listening" in out.getvalue()
 
 
-@pytest.mark.spec("CLI-12")
+@pytest.mark.spec("CLI-11")
 def test_a_chat_unloads_the_model_in_use_and_the_embedding_model_when_it_ends(
     desk, home_store, monkeypatch, fake_ollama
 ):
@@ -2690,7 +2683,7 @@ def test_a_chat_unloads_the_model_in_use_and_the_embedding_model_when_it_ends(
     channel.claimed.close()
 
 
-@pytest.mark.spec("CNV-9")
+@pytest.mark.spec("CNV-7")
 @pytest.mark.parametrize("slow", ["collect", "status", "adopt_exercise"])
 def test_the_terminal_reads_and_exits_at_once_while_periodic_work_waits(monkeypatch, slow):
     monkeypatch.setattr(conversation, "STATUS_LOOK_SECONDS", 0)
@@ -2740,7 +2733,7 @@ def desk_with_a_started_chat(channel, *others):
     return listening
 
 
-@pytest.mark.spec("CNV-9")
+@pytest.mark.spec("CNV-7")
 def test_every_status_is_sent_anew_the_one_before_taken_out(desk):
     channel = Recorder("bot")
     listening = desk_with_a_started_chat(channel)
@@ -2753,7 +2746,7 @@ def test_every_status_is_sent_anew_the_one_before_taken_out(desk):
     assert sorted(log[3:]) == [("delete", 102), ("send", 103)]
 
 
-@pytest.mark.spec("CNV-9")
+@pytest.mark.spec("CNV-7")
 def test_each_chat_starts_cleared_with_the_banner_before_the_status(desk, monkeypatch):
     channel, cleared, lasting = Recorder("bot"), [], []
     monkeypatch.setattr(channel, "clear", lambda: cleared.append(channel.name) or 0)
@@ -2786,7 +2779,7 @@ def renewing_desk(monkeypatch, lines):
     return listening, channel, done
 
 
-@pytest.mark.spec("CNV-8")
+@pytest.mark.spec("CNV-6")
 def test_a_message_that_changes_the_banner_clears_the_chats_and_shows_the_banner_anew(desk, monkeypatch):
     lines = ["🔧 Tinker", "model qwen3", "help lists commands"]
     listening, channel, done = renewing_desk(monkeypatch, lines)
@@ -2799,7 +2792,7 @@ def test_a_message_that_changes_the_banner_clears_the_chats_and_shows_the_banner
     assert banner in sent and sent.index(banner) == len(sent) - 2
 
 
-@pytest.mark.spec("CNV-8")
+@pytest.mark.spec("CNV-6")
 def test_a_message_that_leaves_the_banner_alone_clears_nothing(desk, monkeypatch):
     lines = ["🔧 Tinker", "model qwen3", "help lists commands"]
     listening, channel, done = renewing_desk(monkeypatch, lines)
@@ -2807,7 +2800,7 @@ def test_a_message_that_leaves_the_banner_alone_clears_nothing(desk, monkeypatch
     assert done == [lines] and not any("🔧 Tinker" in text for text in channel.texts())
 
 
-@pytest.mark.spec("CNV-8")
+@pytest.mark.spec("CNV-6")
 def test_console_wipes_the_screen_and_scrollback_only_in_a_colour_terminal(monkeypatch):
     terminal = colour_terminal(monkeypatch)
     ConsoleChannel().wipe()
@@ -2833,19 +2826,19 @@ def status_said_while_busy(monkeypatch, asker):
     return shown
 
 
-@pytest.mark.spec("CNV-8")
+@pytest.mark.spec("CNV-6")
 def test_the_terminal_leaves_out_what_tinker_works_on_while_a_job_shows_its_progress(desk, monkeypatch):
     shown = status_said_while_busy(monkeypatch, lambda chat, console: console)
     assert shown == ["🟢 **Tinker** · idle: send a task"]
 
 
-@pytest.mark.spec("CNV-8")
+@pytest.mark.spec("CNV-6")
 def test_the_terminal_prints_what_tinker_works_on_when_a_chat_asked(desk, monkeypatch):
     shown = status_said_while_busy(monkeypatch, lambda chat, console: chat)
     assert shown == ["🔄 **Tinker** · working on calc", "🟢 **Tinker** · idle: send a task"]
 
 
-@pytest.mark.spec("CNV-9")
+@pytest.mark.spec("CNV-7")
 def test_a_job_says_its_status_as_it_starts_and_ends(desk, home_store, monkeypatch):
     channel = Recorder("bot")
     listening = desk_with_a_started_chat(channel)
@@ -2885,34 +2878,34 @@ def test_a_job_says_its_status_as_it_starts_and_ends(desk, home_store, monkeypat
     assert listening.said_status.startswith("🟢 **Tinker** · idle")
 
 
-@pytest.mark.spec("CNV-9")
+@pytest.mark.spec("CNV-7")
 def test_a_run_in_a_terminal_shows_its_title_and_never_how_far_it_got(home_store, tmp_path):
     desk = Desk([Recorder()], tmp_path)
     state = snapshot(title="calc", doing="🔨 Building", passing=[1, 2], pid_began=began_at(os.getppid()))
     keep_job(home_store, 1, os.getppid(), state, title="calc")
-    Queue.add_back(1)
+    add_back(1)
     assert desk.status() == "🔄 **Tinker** · working on calc"
 
 
-@pytest.mark.spec("CNV-11")
+@pytest.mark.spec("CNV-9")
 def test_status_counts_the_jobs_queued_behind_the_one_that_runs(home_store, tmp_path):
     desk = Desk([Recorder()], tmp_path)
     for number, title in ((1, "calc"), (2, "learn go"), (3, "notes")):
         keep_job(home_store, number, os.getpid(), None, title=title, state="queued")
-        Queue.add_back(number)
+        add_back(number)
     assert desk.status() == "🔄 **Tinker** · working on calc · 2 queued"
 
 
-@pytest.mark.spec("CNV-16")
+@pytest.mark.spec("CNV-14")
 def test_running_now_lists_the_queue_in_order_from_saved_progress(home_store, tmp_path):
     desk = Desk([Recorder()], tmp_path)
     for number, title in ((2, "learn go"), (1, "calc")):
         keep_job(home_store, number, os.getpid(), snapshot(title=title), title=title, state="queued")
-        Queue.add_back(number)
+        add_back(number)
     assert [job["title"] for job in desk.running_now()] == ["learn go", "calc"]
 
 
-@pytest.mark.spec("CNV-9")
+@pytest.mark.spec("CNV-7")
 def test_desk_refuses_a_chat_another_tinker_listens_to(desk):
     _, _, script = desk
     holder = Recorder("bot")
@@ -2924,7 +2917,7 @@ def test_desk_refuses_a_chat_another_tinker_listens_to(desk):
         holder.claimed.close()
 
 
-@pytest.mark.spec("CNV-20")
+@pytest.mark.spec("CNV-18")
 def test_the_commands_brief_keeps_each_commands_arguments_description_and_options(monkeypatch):
     shown = "**Build**\n- `/task WHAT` build something new (--spec FILE)\n- `/channel add [--kind KIND]` add one\n"
     monkeypatch.setattr(conversation, "help_text", lambda: shown)
@@ -2933,7 +2926,7 @@ def test_the_commands_brief_keeps_each_commands_arguments_description_and_option
     )
 
 
-@pytest.mark.spec("CNV-24")
+@pytest.mark.spec("CNV-22")
 def test_one_shot_commands(monkeypatch, capsys):
     monkeypatch.setattr(conversation, "commands_brief", lambda: "cmds")
     monkeypatch.setattr(sys, "stdin", io.StringIO(""))
@@ -2947,7 +2940,7 @@ def test_one_shot_commands(monkeypatch, capsys):
     assert "No model is in use yet" in capsys.readouterr().out
 
 
-@pytest.mark.spec("CNV-24")
+@pytest.mark.spec("CNV-22")
 def test_one_shot_command_runs_nothing_without_a_yes(
     monkeypatch, measured_model, fake_ollama, capsys, tmp_path
 ):
@@ -2975,7 +2968,7 @@ def attached(monkeypatch, home_store):
     signal.signal(conversation.JOB_STOP_SIGNAL, handler)
 
 
-@pytest.mark.spec("CNV-19")
+@pytest.mark.spec("CNV-17")
 def test_a_terminal_task_reports_itself_and_stops_on_a_signal(attached, home_store):
     task = attached()
     assert task.tracker.state["reports"] is True
@@ -2985,7 +2978,7 @@ def test_a_terminal_task_reports_itself_and_stops_on_a_signal(attached, home_sto
         time.sleep(1)
 
 
-@pytest.mark.spec("CNV-10")
+@pytest.mark.spec("CNV-8")
 def test_start_is_answered_with_a_welcome(desk):
     desk, channel, script = desk
     say(desk, channel, "/start")
@@ -3006,7 +2999,7 @@ def test_start_is_answered_with_a_welcome(desk):
     assert channel.texts()[-1] == welcome()
 
 
-@pytest.mark.spec("CNV-25")
+@pytest.mark.spec("CNV-23")
 def test_memory_graph_is_sent_as_a_file(desk, monkeypatch):
     desk, channel, _ = desk
     sent = []
@@ -3043,7 +3036,7 @@ def test_memory_with_words_is_browsed_in_a_chat(desk, monkeypatch):
     assert desk.ran[-1] == ["memory", "show", "[2d35d6]"]
 
 
-@pytest.mark.spec("CNV-25")
+@pytest.mark.spec("CNV-23")
 def test_the_terminal_opens_the_file_and_other_channels_send_where_it_is(monkeypatch, tmp_path):
     opened, printed = [], []
     monkeypatch.setattr(conversation.webbrowser, "open", opened.append)

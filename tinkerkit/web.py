@@ -40,9 +40,6 @@ class Internet:
     def state():
         return "searches " + ", ".join(engine.name for engine in search_engines())
 
-    def search(self, query, count, engines=None):
-        return self.search_all([{"query": query, "engines": engines or []}], count)[0]
-
     def search_all(self, searches, count):
         searches = self.planned(searches, count)
         answers = journaled(

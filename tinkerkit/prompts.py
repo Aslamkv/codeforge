@@ -740,6 +740,9 @@ design (files, structure), config (dependencies, settings), tests, code, toolcha
 Reply with ONLY JSON: {{"facts":[{{"phase":"one of {", ".join(FACT_PHASES)}","text":"the fact","cites":["P3"]}}]}}
 or {{"facts":[]}} when the passages do not answer it."""
 
+    FACTS_REPLY = f"""Reply with ONLY JSON: {{"facts":[{{"phase":"one of {", ".join(FACT_PHASES)}","text":"the fact"}}]}}
+or {{"facts":[]}} when the excerpt states nothing like that."""
+
     FACTS_SYSTEM = f"""Read part of a web page for a code generator that knows only what it was trained on. List what
 the page states that matches "Look for" and that such a generator needs to build good software today:
 each one plain, concrete sentence the page states (never from your own knowledge), with the exact
@@ -749,8 +752,7 @@ nothing about one particular project, nothing about an unreleased version (alpha
 candidate, dev, draft); at most {FACTS_PER_CHUNK}. "phase" is
 where it matters: spec (what to build and test), design (files, structure), config (dependencies,
 settings), tests, code, toolchain (commands and tools).
-Reply with ONLY JSON: {{"facts":[{{"phase":"one of {", ".join(FACT_PHASES)}","text":"the fact"}}]}}
-or {{"facts":[]}} when the excerpt states nothing like that."""
+{FACTS_REPLY}"""
 
     RESEARCH_FACTS_SYSTEM = f"""Read part of a web page for a research on a topic. List what the page states that
 answers "Look for": what the topic is (definitions, key terms), how it is done, the numbers it gives, its limits
@@ -758,8 +760,7 @@ and standards, and what is changing in it; each one plain, concrete sentence the
 knowledge), with the exact names, numbers and versions it gives; nothing about an unreleased version (alpha,
 beta, release candidate, dev, draft); at most {FACTS_PER_CHUNK}. "phase" is where it matters: spec (what to build
 and test), design (files, structure), config (dependencies, settings), tests, code, toolchain (commands and tools).
-Reply with ONLY JSON: {{"facts":[{{"phase":"one of {", ".join(FACT_PHASES)}","text":"the fact"}}]}}
-or {{"facts":[]}} when the excerpt states nothing like that."""
+{FACTS_REPLY}"""
 
     INDUCE_SYSTEM = f"""Learn principles for building software from the numbered passages below: what to do, in which
 situation, and why. Rest every change on the passages (cite their numbers; never your own knowledge); a passage

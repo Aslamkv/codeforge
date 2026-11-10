@@ -18,6 +18,7 @@ from tinkerkit.settings import TESTS_LOCKED_REASON
 from tinkerkit.workspace import Output, TestRef
 
 CALC_WITH_WRONG_SUB = "def add(a, b):\n    return a + b\n\n\ndef sub(a, b):\n    return a + b\n"
+SHOWN = type("V", (), {"shown": {"calc.py", "test_calc.py"}})()
 
 
 @pytest.fixture
@@ -275,13 +276,12 @@ def attempt(session, project, approach="fix", output="it fails", before=()):
 @pytest.mark.spec("BLD-8")
 def test_what_a_fix_and_a_review_may_change(calc):
     session, project = calc
-    view = type("V", (), {"shown": {"calc.py", "test_calc.py"}})()
-    fix = attempt(session, project).may_change(view)
+    fix = attempt(session, project).may_change(SHOWN)
     assert fix("calc.py", True) is None and fix("test_calc.py", True) == TESTS_LOCKED_REASON
     assert fix("other.py", True) == "only the files shown may change" and "no new files" in fix(
         "new.py", False
     )
-    review = attempt(session, project, "review").may_change(view)
+    review = attempt(session, project, "review").may_change(SHOWN)
     assert review("test_calc.py", True) is None and review("test_helper.py", False) is None
     assert review("sub/new.py", False) == "no new files now; change the files shown"
 
@@ -404,7 +404,7 @@ def test_a_project_that_does_not_build_is_fixed(calc, fake_ollama, project_dir):
 @pytest.mark.spec("BLD-5")
 def test_what_a_build_fix_may_change(calc):
     session, project = calc
-    check = BuildFix(session, "output").may_change(type("V", (), {"shown": {"calc.py", "test_calc.py"}})())
+    check = BuildFix(session, "output").may_change(SHOWN)
     assert check("calc.py", True) is None and check("test_calc.py", True) == TESTS_LOCKED_REASON
     assert check("new.py", False) == "only the files shown may change now"
     assert check("hidden.py", True) == "only the files shown may change now"

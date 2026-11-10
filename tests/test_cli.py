@@ -125,21 +125,12 @@ def test_projects_are_named_with_an_at(tmp_path):
     ]
 
 
-@pytest.mark.spec("SET-10")
+@pytest.mark.spec("SET-9")
 def test_clear_runs_on_its_own(home_store):
     home_store.put("memory", "any", {})
     with pytest.raises(SystemExit) as done:
         parse("clear", "memory", "--yes")
     assert done.value.code == 0 and home_store.items("memory") == {}
-
-
-@pytest.mark.spec("PRI-8")
-def test_a_start_migrates_an_old_home(home_store, monkeypatch):
-    home_store.put("languages", "python", {"lessons": [{"id": "lesson000001", "text": "use tmp_path"}]})
-    monkeypatch.setattr(cli.conversation, "one_shot", lambda command, text: 0)
-    with pytest.raises(SystemExit):
-        Cli.run_at_once([Cli.TALK_COMMANDS[0], "hello"])
-    assert home_store.get("languages", "python")["lessons"] == [] and home_store.get("migrated", "principles")
 
 
 @pytest.mark.spec("CLI-2")
@@ -228,19 +219,13 @@ def calibrating(monkeypatch, measures):
 def test_model_of_a_never_measured_model_measures_it_then_uses_it(home_store, monkeypatch, capsys):
     picker(monkeypatch, None)
     Config.save(model="m")
+    failed = calibrating(monkeypatch, measures=False)
+    with pytest.raises(SystemExit, match="could not measure"):
+        Commands.model(["n"])
+    assert failed == ["n"] and Config.get("model") == "m"
     measured = calibrating(monkeypatch, measures=True)
     Commands.model(["n"])
     assert measured == ["n"] and Config.get("model") == "n" and "Model in use: n" in capsys.readouterr().out
-
-
-@pytest.mark.spec("CLI-3")
-def test_a_failed_measure_keeps_the_model_in_use(home_store, monkeypatch):
-    picker(monkeypatch, None)
-    Config.save(model="m")
-    measured = calibrating(monkeypatch, measures=False)
-    with pytest.raises(SystemExit, match="could not measure"):
-        Commands.model(["n"])
-    assert measured == ["n"] and Config.get("model") == "m"
 
 
 @pytest.mark.spec("CLI-3")
@@ -269,7 +254,7 @@ def test_model_takes_one_name(wrong, capsys):
     assert "tinker model [calibrate] [NAME]" in capsys.readouterr().err
 
 
-@pytest.mark.spec("MOD-31")
+@pytest.mark.spec("MOD-29")
 def test_model_recipe_takes_all_and_no_model_name(capsys):
     assert parse("model", "recipe", "all").model == ["recipe", "all"]
     with pytest.raises(SystemExit):
@@ -357,7 +342,7 @@ def test_model_calibrate_without_a_name_prints_the_recipe_first_off_a_terminal(
     assert Models.recipe() and out[:2] == Models.recipe() and out[2] == "General models"
 
 
-@pytest.mark.spec("MOD-31")
+@pytest.mark.spec("MOD-29")
 def test_model_recipe_prints_the_recipe_under_its_heading(home_store, monkeypatch, capsys):
     picker(monkeypatch, None, embedding=("other",))
     Commands.model(["recipe"])
@@ -377,7 +362,7 @@ def test_model_recipe_prints_the_recipe_under_its_heading(home_store, monkeypatc
     assert capsys.readouterr().out.splitlines()[0] == "🍳 Model recipe, picked from 2 measured models"
 
 
-@pytest.mark.spec("MOD-31")
+@pytest.mark.spec("MOD-29")
 def test_model_recipe_all_measures_the_models_it_lacks_and_goes_on_past_a_failure(
     home_store, monkeypatch, capsys
 ):
@@ -392,14 +377,6 @@ def test_model_recipe_all_measures_the_models_it_lacks_and_goes_on_past_a_failur
     assert "other was not measured: could not measure" in out
     assert "🍳 Model recipe, picked from 1 measured model (2 not measured" in out
     assert Config.get("model") == "n"
-
-
-@pytest.mark.spec("MOD-31")
-def test_model_recipe_all_retests_a_model_measured_with_older_tasks(home_store, monkeypatch, capsys):
-    picker(monkeypatch, None)
-    Config.save(model="n")
-    Models.keep("n", quality_settings(3))
-    Models.keep("m", MEASURED)
     measured = calibrating(monkeypatch, measures=True)
     Commands.model(["recipe", "all"])
     out = capsys.readouterr().out
@@ -449,23 +426,13 @@ def test_runs_and_status(tmp_path, capsys):
     assert "project: next phase setup (its plan waits for your confirm)" in out
 
 
-def faked_checks(monkeypatch):
-    monkeypatch.setattr(SystemCheck, "answer", lambda check: f"{check.word} answer")
-
-
 @pytest.mark.spec("SYS-3")
 def test_system_word_prints_that_check_s_answer_line(home_store, monkeypatch, capsys):
-    faked_checks(monkeypatch)
+    monkeypatch.setattr(SystemCheck, "answer", lambda check: f"{check.word} answer")
     Commands(parse("system", "disk")).run()
     assert capsys.readouterr().out.splitlines() == ["disk answer"]
-
-
-@pytest.mark.spec("SYS-3")
-def test_system_alone_prints_every_check_one_line_each(home_store, monkeypatch, capsys):
-    faked_checks(monkeypatch)
     Commands(parse("system")).run()
-    lines = capsys.readouterr().out.splitlines()
-    assert lines == [f"{check.word} answer" for check in SYSTEM_CHECKS]
+    assert capsys.readouterr().out.splitlines() == [f"{check.word} answer" for check in SYSTEM_CHECKS]
 
 
 @pytest.mark.spec("SYS-3")
@@ -540,7 +507,7 @@ def test_doctor(monkeypatch, capsys):
     assert failed.value.code == 1 and "1 thing(s) to fix" in capsys.readouterr().out
 
 
-@pytest.mark.spec("CLI-8")
+@pytest.mark.spec("CLI-7")
 def test_project_folders(measured_model, fake_ollama, tmp_path):
     Config.save(projects=str(tmp_path / "Projects"))
     assert ProjectFolder.from_words("Build me a simple calculator app in Python") == "calculator-python"
@@ -558,7 +525,7 @@ def test_project_folders(measured_model, fake_ollama, tmp_path):
     assert ProjectFolder.named("x") == ""
 
 
-@pytest.mark.spec("CLI-6")
+@pytest.mark.spec("CLI-5")
 def test_log_prints_the_output_or_the_model_calls(tmp_path, capsys):
     folder = tmp_path / "calc"
     registered(folder)
@@ -577,7 +544,7 @@ def test_log_prints_the_output_or_the_model_calls(tmp_path, capsys):
     )
 
 
-@pytest.mark.spec("CLI-11")
+@pytest.mark.spec("CLI-10")
 def test_each_build_step_says_what_came_of_it(make_project, make_session):
     project = make_project([criterion("C1", "t.py::a", status="green"), criterion("C2", "t.py::b")])
     runner, cycle = (
@@ -610,7 +577,7 @@ def recording_phases(monkeypatch, stop_at=None):
     return ran
 
 
-@pytest.mark.spec("CLI-11")
+@pytest.mark.spec("CLI-10")
 def test_cycle_runs_its_phases_in_order(session, monkeypatch, project_dir):
     ran = recording_phases(monkeypatch)
     formatted = []
@@ -624,7 +591,7 @@ def test_cycle_runs_its_phases_in_order(session, monkeypatch, project_dir):
     assert CycleRunner(session).run(fix) == "done" and ran == list(FIX_PHASES[:-1])
 
 
-@pytest.mark.spec("CLI-11")
+@pytest.mark.spec("CLI-10")
 def test_cycle_waits_after_its_plan_unless_told_not_to(session, monkeypatch):
     ran = recording_phases(monkeypatch)
     cycle = dict(session.project.cycles[0], confirm=True)
@@ -642,7 +609,7 @@ def test_cycle_waits_after_its_plan_unless_told_not_to(session, monkeypatch):
     assert CycleRunner(session).run(feature) == "done"
 
 
-@pytest.mark.spec("CLI-11")
+@pytest.mark.spec("CLI-10")
 def test_a_blocked_cycle_disproves_what_it_used_there(session, monkeypatch):
     recording_phases(monkeypatch, stop_at="verify")
     knowledge = session.knowledge
@@ -662,7 +629,7 @@ def test_a_blocked_cycle_disproves_what_it_used_there(session, monkeypatch):
     ]
 
 
-@pytest.mark.spec("CLI-11")
+@pytest.mark.spec("CLI-10")
 def test_a_web_run_past_recall_recalls_first(session, monkeypatch):
     ran = recording_phases(monkeypatch)
     recalled = []
@@ -677,14 +644,14 @@ def test_a_web_run_past_recall_recalls_first(session, monkeypatch):
     assert recalled == []
 
 
-@pytest.mark.spec("CLI-11")
+@pytest.mark.spec("CLI-10")
 def test_every_phase_has_a_phase_class():
     for phase in set(PHASES + FIX_PHASES) - {"done"}:
         worker = CycleRunner.phase_class(phase)
         assert issubclass(worker, Phase) and worker.TITLE
 
 
-@pytest.mark.spec("CLI-12")
+@pytest.mark.spec("CLI-11")
 @pytest.mark.parametrize(
     "error,message",
     [
@@ -703,7 +670,7 @@ def test_main_ends_cleanly(monkeypatch, error, message):
     assert ended.value.code == message
 
 
-@pytest.mark.spec("CLI-12")
+@pytest.mark.spec("CLI-11")
 @pytest.mark.parametrize("ending", [KeyboardInterrupt, signal.SIGTERM, signal.SIGHUP])
 def test_main_unloads_no_model_however_it_ends(monkeypatch, fake_ollama, ending):
     def end(argv=None):
@@ -737,7 +704,7 @@ def followed(monkeypatch):
     return seen
 
 
-@pytest.mark.spec("CLI-12")
+@pytest.mark.spec("CLI-11")
 def test_a_job_never_unloads_its_model_when_it_ends(monkeypatch, fake_ollama, followed):
     class Kept:
         name = "m"
@@ -959,7 +926,7 @@ def printed(folder):
     return "\n".join(entry["line"] for _, entry in project_store(folder).entries("output"))
 
 
-@pytest.mark.spec("CLI-13")
+@pytest.mark.spec("CLI-12")
 def test_a_task_is_built_end_to_end(run_ready, fake_ollama, home_store, monkeypatch):
     folder = run_ready
     monkeypatch.setattr(ThinkLevels, "values", staticmethod(lambda name: ["low", "medium", "high"]))
@@ -1027,13 +994,13 @@ def test_a_task_is_built_end_to_end(run_ready, fake_ollama, home_store, monkeypa
     assert progress[0] == "project" and "points" in progress and progress[-1] == "ended"
 
 
-@pytest.mark.spec("CLI-7")
+@pytest.mark.spec("CLI-6")
 def test_learn_a_command_of_yours_needs_no_model(home_store):
     Commands(parse("learn", "act", ". .venv/bin/activate")).run()
     assert home_store.get("commands", "act")["definition"] == ". .venv/bin/activate"
 
 
-@pytest.mark.spec("CLI-7")
+@pytest.mark.spec("CLI-6")
 @pytest.mark.parametrize(
     "words,finder,nothing",
     [
@@ -1067,8 +1034,10 @@ def test_learning_checks_everything_before_loading_and_finding_nothing_is_an_err
         Commands(parse(*words)).run()
 
 
-@pytest.mark.spec("CLI-5", "GRF-8", "GRF-9")
+@pytest.mark.spec("GRF-8", "GRF-9")
 def test_memory_browses_what_tinker_learned(home_store, capsys):
+    Commands(parse("memory")).run()
+    assert "🌱 Nothing yet: it learns from every build" in capsys.readouterr().out
     known = Knowledge("Python")
     known.remember_toolchain(Toolchain(TOOLCHAIN))
     known.add_lessons([{"text": "Use tmp_path in tests", "phase": "tests", "scope": "language"}], [])
@@ -1093,13 +1062,7 @@ def test_memory_browses_what_tinker_learned(home_store, capsys):
     assert "] 🌱 fact      Run go test ./..." in out
 
 
-@pytest.mark.spec("CLI-5", "GRF-8")
-def test_memory_with_nothing_learned_says_how_to_start(home_store, capsys):
-    Commands(parse("memory")).run()
-    assert "🌱 Nothing yet: it learns from every build" in capsys.readouterr().out
-
-
-@pytest.mark.spec("CLI-5", "GRF-9")
+@pytest.mark.spec("GRF-9")
 def test_memory_refuses_words_it_cannot_read(home_store, capsys):
     for wrong in (["show"], ["lessons", "facts"], ["python", "0"]):
         with pytest.raises(SystemExit):
@@ -1107,7 +1070,7 @@ def test_memory_refuses_words_it_cannot_read(home_store, capsys):
         assert "tinker memory NAME [KIND] [PAGE]" in capsys.readouterr().err
 
 
-@pytest.mark.spec("CLI-10", "PLN-9")
+@pytest.mark.spec("CLI-9", "PLN-8")
 def test_a_task_waits_for_its_plan_then_confirm_builds_it(run_ready, fake_ollama, home_store, monkeypatch):
     folder = run_ready
     monkeypatch.setattr(ThinkLevels, "values", staticmethod(lambda name: ["low", "medium", "high"]))
@@ -1135,7 +1098,7 @@ def test_a_task_waits_for_its_plan_then_confirm_builds_it(run_ready, fake_ollama
     assert record_of(folder)["status"] == "done" and fake_ollama.queue == []
 
 
-@pytest.mark.spec("CLI-10")
+@pytest.mark.spec("CLI-9")
 def test_amend_plans_again_and_waits_again(run_ready, fake_ollama):
     folder = run_ready
     fake_ollama.reply("medium: a plain build")
@@ -1154,7 +1117,7 @@ def test_amend_plans_again_and_waits_again(run_ready, fake_ollama):
     assert "+ C4 calc.mul(2, 3) is 6" in printed(folder) and not (folder / "calc.py").exists()
 
 
-@pytest.mark.spec("CLI-10")
+@pytest.mark.spec("CLI-9")
 @pytest.mark.parametrize(
     "stopped,said",
     [
@@ -1212,7 +1175,7 @@ def test_a_run_header_shows_the_requests_think_level(monkeypatch):
     assert "think high " in notes[0] and "xhigh" not in notes[0]
 
 
-@pytest.mark.spec("CLI-9")
+@pytest.mark.spec("CLI-8")
 def test_the_cycle_a_run_works_on(make_project, make_session):
     def run_on(project, mode, confirm=True, **given):
         defaults = {"bug": False, "change_request": "keep a history"}
@@ -1256,7 +1219,7 @@ def test_a_job_keeps_the_computer_awake_and_a_glance_does_not(home_store):
     assert not Cli.works_for_hours(Cli.parse(["runs"]))
 
 
-@pytest.mark.spec("KNW-18")
+@pytest.mark.spec("KNW-17")
 def test_a_research_reads_its_pages_with_the_research_learner():
     researcher = Commands.researcher(None, None, None, None)
     assert isinstance(researcher.learner, ResearchLearner)

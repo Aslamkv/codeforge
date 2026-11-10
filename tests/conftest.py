@@ -1,4 +1,5 @@
 import io
+import os
 import signal
 import socket
 import sys
@@ -7,7 +8,8 @@ import time
 import pytest
 
 import tinkerkit.cli  # noqa: F401
-from tinkerkit import conversation
+from tinkerkit import conversation, jobs
+from tinkerkit.jobs import Queue, Runner
 from tinkerkit.messages import say
 from tinkerkit.model import Model, Models, Ollama
 from tinkerkit.project import Project
@@ -111,7 +113,17 @@ def no_stale_bytecode(monkeypatch):
 
 @pytest.fixture(autouse=True)
 def tinker_runs_nothing(monkeypatch):
-    monkeypatch.setattr(conversation, "tinker_command", lambda: [sys.executable, "-c", ""])
+    tinker_runs(monkeypatch, os.devnull)
+
+
+def tinker_runs(monkeypatch, *arguments):
+    for module in (conversation, jobs):
+        monkeypatch.setattr(module, "tinker_command", lambda: [sys.executable, *map(str, arguments)])
+
+
+@pytest.fixture(autouse=True)
+def quick_queue_look(monkeypatch):
+    monkeypatch.setattr(jobs, "QUEUE_LOOK_SECONDS", 0.01)
 
 
 @pytest.fixture
@@ -328,6 +340,11 @@ class FakeSearch:
         entries = [entry for entry in entries if entry["query"]][:MAX_PLANNED_SEARCHES]
         self.entries.append(entries)
         return [self.search(entry["query"], count) for entry in entries]
+
+
+def add_back(number):
+    Queue.place(number, lambda others: others + [number])
+    Runner.wake.set()
 
 
 def quick_model_replying(monkeypatch, reply):

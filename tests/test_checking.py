@@ -4,7 +4,7 @@ import tinkerkit.checking as checking
 from tinkerkit.checking import Check, CommandCheck, RefusedCheck, SqlCheck, found_programs
 from tinkerkit.sandbox import NoSandbox, Ran, Sandbox
 
-pytestmark = pytest.mark.spec("TCH-10")
+pytestmark = pytest.mark.spec("TCH-9")
 
 
 class FakeSandbox:
@@ -47,30 +47,22 @@ def test_an_unknown_kind_or_missing_code_is_refused():
         assert not result.ran and result.why
 
 
-def test_sql_prints_a_value():
-    result = sql("select 1+1")
+@pytest.mark.parametrize(
+    "code, lines",
+    [
+        ("select 1+1", ["2"]),
+        (
+            "create table t (a, b);\ninsert into t values (1, 'x');\ninsert into t values (2, 'y');\nselect * from t;",
+            ["1|x", "2|y"],
+        ),
+        ("create table t(a); insert into t values (null); select count(*), count(a) from t;", ["1|0"]),
+        ("select 'a;b'; select 2;", ["a;b", "2"]),
+    ],
+)
+def test_sql_prints_each_statement_of_a_script(code, lines):
+    result = sql(code)
     assert result.ran and result.code == 0
-    assert result.output.strip() == "2"
-
-
-def test_sql_runs_a_script_statement_by_statement():
-    result = sql(
-        "create table t (a, b);\ninsert into t values (1, 'x');\ninsert into t values (2, 'y');\nselect * from t;"
-    )
-    assert result.code == 0
-    assert result.output.splitlines() == ["1|x", "2|y"]
-
-
-def test_sql_runs_statements_that_share_a_line():
-    result = sql("create table t(a); insert into t values (null); select count(*), count(a) from t;")
-    assert result.code == 0
-    assert result.output.splitlines() == ["1|0"]
-
-
-def test_sql_keeps_a_semicolon_inside_a_string():
-    result = sql("select 'a;b'; select 2;")
-    assert result.code == 0
-    assert result.output.splitlines() == ["a;b", "2"]
+    assert result.output.splitlines() == lines
 
 
 def test_sql_stops_at_an_error_keeping_what_printed():

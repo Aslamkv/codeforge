@@ -215,6 +215,10 @@ def craft(tmp_path, name="craft.md", text=MARKDOWN):
     return str(path)
 
 
+def second_edition(tmp_path):
+    return craft(tmp_path, "other.md", MARKDOWN + "\nA second edition.")
+
+
 def survey_reply(software=True, **reads):
     reads = reads or {"4": "core", "2": "supporting"}
     return json.dumps(
@@ -280,10 +284,7 @@ def test_a_source_is_stored_whole_before_anything_is_read(tmp_path, home_store, 
     assert entry["chapters"][1]["text"].endswith(NAMING)
     assert stored(craft(tmp_path, "same-text.md")) == (1, False)
     assert "Already on the reading list as #1" in capsys.readouterr().out
-    assert stored(craft(tmp_path, "other.md", MARKDOWN + "\nOne more line of the second edition.")) == (
-        2,
-        True,
-    )
+    assert stored(second_edition(tmp_path)) == (2, True)
     assert list(Readings.all()) == [2, 1]
 
 
@@ -366,13 +367,7 @@ def test_a_stopped_reading_goes_on_with_the_chapters_not_read(tmp_path, home_sto
     fake_ollama.reply(KeyboardInterrupt(), when="chapter 2")
     with pytest.raises(KeyboardInterrupt):
         Reader(make_model()).read(1)
-    assert [chapter["state"] for chapter in Readings.get(1)["chapters"]] == [
-        "unread",
-        "unread",
-        "unread",
-        "read",
-        "raw",
-    ]
+    assert [chapter["state"] for chapter in Readings.get(1)["chapters"]] == ["unread"] * 3 + ["read", "raw"]
     assert kept_rules() == ["Write a test for each behaviour first"]
     fake_ollama.calls.clear()
     for chapter in (2, 1, 3):
@@ -386,11 +381,8 @@ def test_a_long_chapter_is_read_in_every_part(tmp_path, home_store, make_model, 
     long = "\n\n".join(
         f"Paragraph {number} of a long chapter about naming things well." for number in range(40)
     )
-    stored(
-        craft(
-            tmp_path, text=f"# Long\n\n## One\n\n{long}\n\n## Two\n\nA short second chapter, with more words."
-        )
-    )
+    text = f"# Long\n\n## One\n\n{long}\n\n## Two\n\nA short second chapter, with more words."
+    stored(craft(tmp_path, text=text))
     monkeypatch.setattr(reading, "READ_CHAPTER_TEXT_SHARE", 0.05)
     fake_ollama.reply(survey_reply(software=False, **{"1": "core"}), when="reading plan")
     fake_ollama.reply(added(), times=20)
@@ -544,7 +536,7 @@ def test_the_reading_list_is_shown_and_cleared(
     show_list()
     assert "Nothing on the reading list" in capsys.readouterr().out
     read_craft(tmp_path, make_model, fake_ollama, software=False)
-    stored(craft(tmp_path, "other.md", MARKDOWN + "\nA second edition."))
+    stored(second_edition(tmp_path))
     capsys.readouterr()
     show_list()
     listed = capsys.readouterr().out
@@ -571,7 +563,7 @@ def test_the_reading_list_is_shown_and_cleared(
 def test_the_reading_list_comes_a_page_at_a_time(tmp_path, home_store, capsys, monkeypatch):
     monkeypatch.setattr(settings, "PER_PAGE", 1)
     stored(craft(tmp_path))
-    stored(craft(tmp_path, "other.md", MARKDOWN + "\nA second edition."))
+    stored(second_edition(tmp_path))
     capsys.readouterr()
     show_list()
     first = capsys.readouterr().out

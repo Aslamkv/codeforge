@@ -64,27 +64,19 @@ def test_files_several_blocks_with_normalized_paths():
 
 
 @pytest.mark.spec("PRM-3")
-def test_files_placeholder_path_with_the_real_one_after_it():
-    assert Reply("<<<FILE path>>>real/app.py\nx = 1\n<<<END>>>").files() == [("real/app.py", "x = 1")]
-    assert Reply("<<<FILE path>>>\nreal/app.py\nx = 1\n<<<END>>>").files() == [("real/app.py", "x = 1")]
-
-
-@pytest.mark.spec("PRM-3")
-def test_files_skip_placeholder_bodies_and_keep_a_file_begun_on_the_header():
-    assert Reply("<<<FILE app.py>>>\nthe complete file\n<<<END>>>").files() == []
-    assert Reply("<<<FILE app.py>>>x=1\ny = 2\n<<<END>>>").files() == [("app.py", "x=1\ny = 2")]
-
-
-@pytest.mark.spec("PRM-3")
-def test_files_drop_debris_and_a_fence_around_the_body():
-    reply = Reply("<<<FILE app.py>>>\n```python\nx = 1\n```\n>>>\n<<<END>>>")
-    assert reply.files() == [("app.py", "x = 1")]
-
-
-@pytest.mark.spec("PRM-3")
-def test_a_markdown_file_keeps_its_fences():
-    body = "```sh\nmake\n```"
-    assert Reply(f"<<<FILE README.md>>>\n{body}\n<<<END>>>").files() == [("README.md", body)]
+@pytest.mark.parametrize(
+    "text,expected",
+    [
+        ("<<<FILE path>>>real/app.py\nx = 1\n<<<END>>>", [("real/app.py", "x = 1")]),
+        ("<<<FILE path>>>\nreal/app.py\nx = 1\n<<<END>>>", [("real/app.py", "x = 1")]),
+        ("<<<FILE app.py>>>\nthe complete file\n<<<END>>>", []),
+        ("<<<FILE app.py>>>x=1\ny = 2\n<<<END>>>", [("app.py", "x=1\ny = 2")]),
+        ("<<<FILE app.py>>>\n```python\nx = 1\n```\n>>>\n<<<END>>>", [("app.py", "x = 1")]),
+        ("<<<FILE README.md>>>\n```sh\nmake\n```\n<<<END>>>", [("README.md", "```sh\nmake\n```")]),
+    ],
+)
+def test_files_mend_placeholders_debris_and_fences_but_keep_markdown_fences(text, expected):
+    assert Reply(text).files() == expected
 
 
 @pytest.mark.spec("PRM-4")
@@ -250,7 +242,7 @@ def test_the_prompts_example_json_parses_and_its_toolchain_works():
     )
 
 
-@pytest.mark.spec("KNW-25")
+@pytest.mark.spec("KNW-23")
 def test_every_prompt_that_writes_searches_writes_them_with_engines_and_count():
     searches_in = {
         Prompts.RESEARCH_PLAN_SYSTEM: lambda reply: reply["questions"][0]["queries"],
@@ -278,25 +270,25 @@ def test_the_templates_format():
     assert len(systems) >= 25 and all(isinstance(system, str) and system.strip() for system in systems)
 
 
-@pytest.mark.spec("CNV-20")
+@pytest.mark.spec("CNV-18")
 def test_the_chat_prompt_asks_for_only_the_command_line_when_asked_to_do_what_one_does():
     chat = Prompts.CHAT_SYSTEM.format(kind="Telegram", commands="/clear chat")
     assert "only that command line" in chat and "`/clear chat`" in chat and "answer in words" in chat
 
 
-@pytest.mark.spec("CNV-20", "SYS-1")
+@pytest.mark.spec("CNV-18", "SYS-1")
 def test_the_chat_prompt_asks_for_only_the_check_line_when_asked_what_a_system_check_tells():
     chat = Prompts.CHAT_SYSTEM.format(kind="Telegram", commands="/system battery")
     assert "only that check's line" in chat and "`/system battery`" in chat and "am I charged?" in chat
 
 
-@pytest.mark.spec("CNV-20", "SYS-1")
+@pytest.mark.spec("CNV-18", "SYS-1")
 def test_the_chat_prompt_keeps_memory_for_the_memory_command_and_ram_for_system_ram():
     chat = Prompts.CHAT_SYSTEM.format(kind="Telegram", commands="/memory\n/system ram")
     assert "memory means Tinker's `memory` command" in chat and "only RAM means `/system ram`" in chat
 
 
-@pytest.mark.spec("CNV-20", "CNV-13")
+@pytest.mark.spec("CNV-18", "CNV-11")
 def test_the_chat_prompt_acts_with_options_filled_and_never_invents_required_words():
     chat = Prompts.CHAT_SYSTEM.format(kind="Telegram", commands="/channel add [--kind KIND] [--name NAME]")
     assert "`/channel add --kind telegram --name jarvis`" in chat and "called jarvis" in chat

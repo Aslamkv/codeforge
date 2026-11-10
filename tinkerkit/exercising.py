@@ -9,9 +9,8 @@ from .messages import say
 lazy from .conversation import (
     BUILD_STOP_GRACE_SECONDS,
     CHANNEL_REPORTS_ENV,
-    tinker_process,
 )
-lazy from .jobs import Jobs
+lazy from .jobs import Jobs, tinker_process
 lazy from .knowledge import Knowledge, Library, language_key
 lazy from .project import Project, Steps, ending, saved
 lazy from .prompts import Part, Prompts

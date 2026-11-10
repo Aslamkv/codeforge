@@ -49,6 +49,9 @@ def http_error(code, body=b""):
     return urllib.error.HTTPError("http://x", code, "err", {}, io.BytesIO(body))
 
 
+HI = [{"role": "user", "content": "hi"}]
+
+
 @pytest.mark.spec("MOD-1")
 def test_measured_settings_are_kept_by_model_name(home_store):
     assert Models.settings("qwen3:8b") is None
@@ -60,7 +63,7 @@ def test_measured_settings_are_kept_by_model_name(home_store):
     assert Models.settings("broken") is None
 
 
-@pytest.mark.spec("MOD-2")
+@pytest.mark.spec("MOD-1")
 def test_selected_needs_a_measured_model(tinker_home):
     with pytest.raises(SystemExit, match="No model in use"):
         Models.selected()
@@ -74,47 +77,47 @@ def test_selected_needs_a_measured_model(tinker_home):
     assert Models.selected() == ("m", MEASURED)
 
 
-@pytest.mark.spec("MOD-25")
+@pytest.mark.spec("MOD-23")
 def test_quick_calls_use_the_measured_model(measured_model, fake_ollama, tinker_home):
     assert Models.quick() == (MODEL, {"num_ctx": 32768}, False)
     Models.keep(MODEL, dict(MEASURED, think=None, num_batch=512))
     assert Models.quick() == (MODEL, {"num_ctx": 32768, "num_batch": 512}, None)
     fake_ollama.reply("  hi there \n")
-    assert Models.quick_reply([{"role": "user", "content": "hi"}], 7) == "hi there"
+    assert Models.quick_reply(HI, 7) == "hi there"
     call = fake_ollama.calls[-1]
     assert call["options"] == {"num_ctx": 32768, "num_batch": 512, "num_predict": 7}
     assert call["timeout"] == model_module.QUICK_REPLY_TIMEOUT and call["keep_alive"] is not None
     fake_ollama.reply(OllamaError("down"))
     with pytest.raises(OllamaError, match="down"):
-        Models.quick_reply([{"role": "user", "content": "hi"}], 7)
+        Models.quick_reply(HI, 7)
     Config.save(**{"model": None})
     assert Models.quick() is None
 
 
-@pytest.mark.spec("MOD-25")
+@pytest.mark.spec("MOD-23")
 def test_a_quick_reply_thinks_at_a_given_level_as_the_model_takes_it(
     measured_model, fake_ollama, tinker_home
 ):
     fake_ollama.reply("a", times=3)
-    Models.quick_reply([{"role": "user", "content": "hi"}], 7, "high")
+    Models.quick_reply(HI, 7, "high")
     assert fake_ollama.calls[-1]["think"] is None
     fake_ollama.show(MODEL, {"thinking": {"values": [False, "low", "medium", "high"]}}, digest="d2")
-    Models.quick_reply([{"role": "user", "content": "hi"}], 7, "high")
+    Models.quick_reply(HI, 7, "high")
     assert fake_ollama.calls[-1]["think"] == "high"
-    Models.quick_reply([{"role": "user", "content": "hi"}], 7)
+    Models.quick_reply(HI, 7)
     assert fake_ollama.calls[-1]["think"] is False
 
 
-@pytest.mark.spec("MOD-25")
+@pytest.mark.spec("MOD-23")
 def test_a_quick_reply_asks_at_a_given_temperature(measured_model, fake_ollama, tinker_home):
     fake_ollama.reply("a", times=2)
-    Models.quick_reply([{"role": "user", "content": "hi"}], 7, temperature=0)
+    Models.quick_reply(HI, 7, temperature=0)
     assert fake_ollama.calls[-1]["options"] == {"num_ctx": 32768, "num_predict": 7, "temperature": 0}
-    Models.quick_reply([{"role": "user", "content": "hi"}], 7)
+    Models.quick_reply(HI, 7)
     assert "temperature" not in fake_ollama.calls[-1]["options"]
 
 
-@pytest.mark.spec("MOD-3")
+@pytest.mark.spec("MOD-2")
 def test_installed(monkeypatch):
     monkeypatch.setattr(Ollama, "installed_models", staticmethod(lambda: None))
     with pytest.raises(SystemExit, match="Ollama does not answer"):
@@ -127,7 +130,7 @@ def test_installed(monkeypatch):
         Models.installed("qwen3")
 
 
-@pytest.mark.spec("MOD-26")
+@pytest.mark.spec("MOD-24")
 def test_named_splits_general_and_embedding_models(monkeypatch):
     monkeypatch.setattr(Ollama, "installed_models", staticmethod(lambda: None))
     with pytest.raises(SystemExit, match="Ollama does not answer"):
@@ -176,7 +179,7 @@ def older(solved, write=40.0):
     return dict(measured(solved, write=write), quality_version=QUALITY_VERSION - 1)
 
 
-@pytest.mark.spec("MOD-29")
+@pytest.mark.spec("MOD-27")
 def test_rows(home_store, monkeypatch):
     installed(
         monkeypatch,
@@ -210,7 +213,7 @@ def test_rows(home_store, monkeypatch):
     ]
 
 
-@pytest.mark.spec("MOD-29")
+@pytest.mark.spec("MOD-27")
 def test_rows_leave_out_a_group_with_no_model(home_store, monkeypatch):
     installed(monkeypatch, [{"name": "qwen3:8b"}], {"qwen3:8b": ["completion"]})
     assert Models.rows() == [
@@ -219,7 +222,7 @@ def test_rows_leave_out_a_group_with_no_model(home_store, monkeypatch):
     ]
 
 
-@pytest.mark.spec("MOD-30")
+@pytest.mark.spec("MOD-28")
 @pytest.mark.parametrize(
     "settings,text",
     [
@@ -242,7 +245,7 @@ def recipe_for(monkeypatch, settings):
     return Models.recipe()
 
 
-@pytest.mark.spec("MOD-30")
+@pytest.mark.spec("MOD-28")
 def test_a_slow_model_that_solves_more_is_smartest_and_a_quick_one_fastest(home_store, monkeypatch):
     assert recipe_for(monkeypatch, {"a": measured(7, 80.0), "b": measured(5, 20.0)}) == [
         "🧠 Smartest: a (solved 7 of 8 · ~80s an answer)",
@@ -250,7 +253,7 @@ def test_a_slow_model_that_solves_more_is_smartest_and_a_quick_one_fastest(home_
     ]
 
 
-@pytest.mark.spec("MOD-30")
+@pytest.mark.spec("MOD-28")
 def test_a_smartest_tie_goes_to_fewer_retries(home_store, monkeypatch):
     assert recipe_for(monkeypatch, {"a": measured(5, 20.0, retried=2), "b": measured(5, 40.0)}) == [
         "🧠 Smartest: b (solved 5 of 8 · ~40s an answer)",
@@ -258,7 +261,7 @@ def test_a_smartest_tie_goes_to_fewer_retries(home_store, monkeypatch):
     ]
 
 
-@pytest.mark.spec("MOD-30")
+@pytest.mark.spec("MOD-28")
 @pytest.mark.parametrize(
     "settings, line",
     [
@@ -282,7 +285,7 @@ def test_recipe_says_one_line_for_a_model_both_smartest_and_fastest(home_store, 
     assert recipe_for(monkeypatch, settings) == [f"🧠⚡ {line} an answer)"]
 
 
-@pytest.mark.spec("MOD-30")
+@pytest.mark.spec("MOD-28")
 @pytest.mark.parametrize(
     "other",
     [dict(MEASURED, write_tokens_per_s=80.0), older(8, 80.0), measured(0, write=80.0)],
@@ -294,20 +297,20 @@ def test_only_a_model_that_solved_a_task_is_picked(home_store, monkeypatch, othe
     ]
 
 
-@pytest.mark.spec("MOD-30")
+@pytest.mark.spec("MOD-28")
 def test_with_no_model_solving_a_task_the_fastest_writer_alone(home_store, monkeypatch):
     settings = {"c": measured(0, write=20.0), "d": measured(0, write=80.0), "e": older(3, 200.0)}
     assert recipe_for(monkeypatch, settings) == ["⚡ Fastest: d (writes ~40 words/s)"]
 
 
-@pytest.mark.spec("MOD-30")
+@pytest.mark.spec("MOD-28")
 def test_the_recipe_needs_one_measured_model(home_store, monkeypatch):
     assert recipe_for(monkeypatch, {}) == []
     assert recipe_for(monkeypatch, {"a": older(3)}) == []
     assert recipe_for(monkeypatch, {"a": measured(3, 20.0)})[0].startswith("🧠⚡ a is the smartest")
 
 
-@pytest.mark.spec("MOD-30")
+@pytest.mark.spec("MOD-28")
 def test_the_shown_recipe_needs_two_measured_models(home_store, monkeypatch):
     recipe_for(monkeypatch, {"a": measured(3, 20.0), "b": older(5)})
     assert Models.shown_recipe() == []
@@ -315,19 +318,14 @@ def test_the_shown_recipe_needs_two_measured_models(home_store, monkeypatch):
     assert Models.shown_recipe() == Models.recipe() != []
 
 
-@pytest.mark.spec("MOD-31")
+@pytest.mark.spec("MOD-29")
 def test_unmeasured_names_general_models_never_measured_or_with_an_older_test(home_store, monkeypatch):
     recipe_for(monkeypatch, {"a": measured(3, 20.0), "b": older(3), "c": dict(MEASURED)})
     assert Models.unmeasured() == ["b", "c", "unmeasured"]
-
-
-@pytest.mark.spec("MOD-31")
-def test_measured_names_only_models_that_ran_the_current_test(home_store, monkeypatch):
-    recipe_for(monkeypatch, {"a": measured(3, 20.0), "b": older(3), "c": dict(MEASURED)})
     assert [name for name, _ in Models.measured()] == ["a"]
 
 
-@pytest.mark.spec("MOD-26")
+@pytest.mark.spec("MOD-24")
 def test_capabilities_asks_show_once(monkeypatch):
     asked = []
     answers = {"qwen3": {"capabilities": ["completion", "tools"]}, "old": {}}
@@ -342,7 +340,7 @@ def test_capabilities_asks_show_once(monkeypatch):
     assert asked == ["/api/show"] * 3
 
 
-@pytest.mark.spec("MOD-26")
+@pytest.mark.spec("MOD-24")
 def test_picked_starts_at_the_model_in_use(home_store, monkeypatch):
     shown = []
     monkeypatch.setattr(say, "pick", lambda choices, start: shown.append((choices, start)) or 2)
@@ -359,7 +357,7 @@ def test_picked_starts_at_the_model_in_use(home_store, monkeypatch):
     assert shown == [(rows, 3), (rows, 1)]
 
 
-@pytest.mark.spec("MOD-4")
+@pytest.mark.spec("MOD-3")
 def test_context_for_and_reply_limits():
     assert Models.context_for(8192, 16384, None) == 25600
     assert Models.context_for(1000, 1000, None) == 3072
@@ -368,7 +366,7 @@ def test_context_for_and_reply_limits():
     assert Models.reply_limits(2000)["fix_max_tokens"] == 2000
 
 
-@pytest.mark.spec("MOD-5")
+@pytest.mark.spec("MOD-4")
 def test_remember_keeps_the_learned_chars_per_token(measured_model, make_model, capsys):
     model = make_model()
     model.recent_chars_per_token = [3.5, 2.9, 3.1, 3.3, 3.0]
@@ -383,7 +381,7 @@ def test_remember_keeps_the_learned_chars_per_token(measured_model, make_model, 
     assert Models.settings(MODEL)["chars_per_token"] == 2.9
 
 
-@pytest.mark.spec("MOD-6")
+@pytest.mark.spec("MOD-5")
 def test_error_kinds():
     assert Ollama.is_oom("CUDA error: out of memory") and Ollama.is_oom(
         "model requires more system memory: insufficient memory"
@@ -399,7 +397,7 @@ def test_error_kinds():
     assert not Ollama.is_crash("model not found")
 
 
-@pytest.mark.spec("MOD-7")
+@pytest.mark.spec("MOD-6")
 def test_get_json(monkeypatch):
     monkeypatch.setattr(urllib.request, "urlopen", lambda request, timeout: Body(b'{"models": []}'))
     assert Ollama.get_json("/api/tags") == {"models": []}
@@ -418,7 +416,7 @@ def test_get_json(monkeypatch):
     assert Ollama.get_json("/api/embed", {}, errors=True) == {"error": "HTTP 500"}
 
 
-@pytest.mark.spec("MOD-7")
+@pytest.mark.spec("MOD-6")
 def test_get_json_without_ollama_gives_none():
     assert Ollama.get_json("/api/tags") is None
     assert Ollama.installed_models() is None and Ollama.loaded_models() is None
@@ -441,7 +439,7 @@ def test_loading_shows_only_when_the_model_is_not_in_memory(loaded, phases, monk
     assert shown == phases
 
 
-@pytest.mark.spec("MOD-8")
+@pytest.mark.spec("MOD-7")
 def test_chat_streams_and_gives_the_final_chunk(monkeypatch):
     sent = []
 
@@ -455,12 +453,12 @@ def test_chat_streams_and_gives_the_final_chunk(monkeypatch):
         )
 
     monkeypatch.setattr(urllib.request, "urlopen", urlopen)
-    final = Ollama.chat("m", [{"role": "user", "content": "hi"}], 0, {"num_ctx": 2048}, think="high")
+    final = Ollama.chat("m", HI, 0, {"num_ctx": 2048}, think="high")
     assert final["message"] == {"role": "assistant", "content": "Hello", "thinking": "let me "}
     assert final["done_reason"] == "stop"
     assert sent[0] == {
         "model": "m",
-        "messages": [{"role": "user", "content": "hi"}],
+        "messages": HI,
         "stream": True,
         "keep_alive": 0,
         "think": "high",
@@ -470,7 +468,7 @@ def test_chat_streams_and_gives_the_final_chunk(monkeypatch):
     assert "think" not in sent[1] and "options" not in sent[1] and sent[1]["keep_alive"] == "5m"
 
 
-@pytest.mark.spec("MOD-8")
+@pytest.mark.spec("MOD-7")
 def test_chat_errors(monkeypatch):
     def oom(request, timeout):
         raise http_error(500, b'{"error":"model requires more system memory: out of memory"}')
@@ -481,13 +479,13 @@ def test_chat_errors(monkeypatch):
     assert error.value.oom and not error.value.crashed and "HTTP 500" in str(error.value)
 
 
-@pytest.mark.spec("MOD-8")
+@pytest.mark.spec("MOD-7")
 def test_chat_without_ollama():
     with pytest.raises(OllamaError, match="Could not reach Ollama"):
         Ollama.chat("m", [{"role": "user", "content": "x"}], 0, None)
 
 
-@pytest.mark.spec("MOD-9")
+@pytest.mark.spec("MOD-8")
 def test_stream_keeps_the_end_of_the_thought(monkeypatch):
     monkeypatch.setattr(model_module, "UNFINISHED_THOUGHT_KEPT_CHARS", 10)
     stream = Stream(None, None)
@@ -507,7 +505,7 @@ def heard_of(*kinds):
     return heard
 
 
-@pytest.mark.spec("MOD-9")
+@pytest.mark.spec("MOD-8")
 def test_stream_says_live_the_step_never_what_the_model_is_doing(monkeypatch):
     stream_clock(monkeypatch, 0, 3, 6)
     seen = heard_of("live")
@@ -518,7 +516,7 @@ def test_stream_says_live_the_step_never_what_the_model_is_doing(monkeypatch):
     assert seen == [("live", "Writing the spec")] * 2
 
 
-@pytest.mark.spec("MOD-9")
+@pytest.mark.spec("MOD-8")
 def test_what_the_command_works_on_is_said_live_and_heard(monkeypatch):
     stream_clock(monkeypatch, 0, 3, 6)
     seen = heard_of("live", "working")
@@ -536,7 +534,7 @@ def test_what_the_command_works_on_is_said_live_and_heard(monkeypatch):
     assert say.doing == ""
 
 
-@pytest.mark.spec("MOD-9")
+@pytest.mark.spec("MOD-8")
 def test_a_stream_tells_its_tokens_on_each_update_and_its_thinking_when_it_turns(monkeypatch):
     stream_clock(monkeypatch, 0, 1, 3, 4)
     told = heard_of("tokens", "thinking")
@@ -548,7 +546,7 @@ def test_a_stream_tells_its_tokens_on_each_update_and_its_thinking_when_it_turns
     assert told == [("thinking", "on"), ("thinking", ""), ("tokens", "2"), ("tokens", "1")]
 
 
-@pytest.mark.spec("MOD-9")
+@pytest.mark.spec("MOD-8")
 def test_a_stream_that_writes_one_line_again_and_again_is_cut(monkeypatch):
     monkeypatch.setattr(model_module, "LOOPING_REPEATED_LINES", 4)
     stream = Stream(None, None)
@@ -561,7 +559,7 @@ def test_a_stream_that_writes_one_line_again_and_again_is_cut(monkeypatch):
     assert not any(calm.take({"message": {"content": piece}}) for piece in ["\n"] * 6 + ["a\n", "b\n"] * 4)
 
 
-@pytest.mark.spec("MOD-9")
+@pytest.mark.spec("MOD-8")
 def test_stream_error_chunks():
     stream = Stream(None, None)
     stream.take({"message": {"content": "partial "}})
@@ -573,7 +571,7 @@ def test_stream_error_chunks():
     assert error.value.crashed and not error.value.in_reply
 
 
-@pytest.mark.spec("MOD-9")
+@pytest.mark.spec("MOD-8")
 def test_stream_stops_soon_after_the_reply_is_complete(monkeypatch):
     clock = iter(range(0, 1000))
     monkeypatch.setattr(model_module.time, "perf_counter", lambda: next(clock))
@@ -591,7 +589,7 @@ def test_stream_stops_soon_after_the_reply_is_complete(monkeypatch):
     assert stream.content.startswith('{"a": 1} junk')
 
 
-@pytest.mark.spec("MOD-10")
+@pytest.mark.spec("MOD-9")
 @pytest.mark.parametrize(
     "context,shared",
     [(24576, (8192, 16384)), (4096, (1365, 2731)), (1200, (512, 1024)), (100000, (33333, 66667))],
@@ -600,7 +598,7 @@ def test_shared(context, shared):
     assert Calibrator.shared(context) == shared
 
 
-@pytest.mark.spec("MOD-10")
+@pytest.mark.spec("MOD-9")
 def test_safe_ratio():
     calibrator = Calibrator("m")
     assert calibrator.safe_ratio() == STARTING_CHARS_PER_TOKEN
@@ -625,7 +623,7 @@ class Probed(Calibrator):
 GGUF = {"format": "gguf"}
 
 
-@pytest.mark.spec("MOD-11")
+@pytest.mark.spec("MOD-10")
 def test_capacity():
     probed = Probed(30000)
     assert probed.capacity(24576, GGUF) == (24576, None) and probed.tried == [(2048, 24576)]
@@ -643,26 +641,26 @@ def growing(monkeypatch, sizes, memory):
     return Probed(30000)
 
 
-@pytest.mark.spec("MOD-11")
+@pytest.mark.spec("MOD-10")
 def test_a_growing_model_that_fits_is_read_once_in_a_sample(monkeypatch):
     probed = growing(monkeypatch, [[("other", 1e9), ("m", 5e9)], [("m", 5.1e9)]], 20e9)
     assert probed.capacity(24576, {}) == (24576, None) and probed.tried == [(2048, 24576)]
 
 
-@pytest.mark.spec("MOD-11")
+@pytest.mark.spec("MOD-10")
 def test_a_growing_model_that_does_not_fit_gets_the_capacity_from_its_rate(monkeypatch):
     probed = growing(monkeypatch, [[("m", 5e9)], [("m", 5.1e9)]], 7.03e9)
     assert probed.capacity(24576, {}) == (10240, 24576) and probed.tried == [(2048, 24576)]
 
 
-@pytest.mark.spec("MOD-11")
+@pytest.mark.spec("MOD-10")
 def test_a_growing_model_whose_rate_fits_too_little_stops(monkeypatch):
     probed = growing(monkeypatch, [[("m", 5e9)], [("m", 5.1e9)]], 6.5e9)
     with pytest.raises(SystemExit, match="cannot hold even 1536"):
         probed.capacity(24576, {})
 
 
-@pytest.mark.spec("MOD-11")
+@pytest.mark.spec("MOD-10")
 @pytest.mark.parametrize(
     ("sizes", "memory", "tried"),
     [
@@ -676,7 +674,7 @@ def test_a_growing_model_of_unknown_size_reads_the_whole_target(monkeypatch, siz
     assert probed.capacity(24576, {}) == (24576, None) and probed.tried == tried
 
 
-@pytest.mark.spec("MOD-12")
+@pytest.mark.spec("MOD-11")
 def test_check_fit(monkeypatch):
     calibrator = Calibrator("big")
     monkeypatch.setattr(Calibrator, "gpu_memory", classmethod(lambda cls: 16e9))
@@ -689,7 +687,7 @@ def test_check_fit(monkeypatch):
     calibrator.check_fit({"size": 99e9})
 
 
-@pytest.mark.spec("MOD-13", "MOD-15")
+@pytest.mark.spec("MOD-12", "MOD-14")
 def test_calibrate_writes_the_measured_settings(fake_ollama, monkeypatch, no_sleep, tinker_home, capsys):
     monkeypatch.setattr(
         Ollama,
@@ -770,7 +768,7 @@ def test_calibrate_writes_the_measured_settings(fake_ollama, monkeypatch, no_sle
     assert all(len(line) <= 80 for line in out.splitlines() if "Testing" not in line)
 
 
-@pytest.mark.spec("MOD-28")
+@pytest.mark.spec("MOD-26")
 @pytest.mark.parametrize(
     "tokens,ratio,text", [(10922, 4.4, "8,000"), (8192, 4.4, "6,000"), (300, 4.5, "225"), (25.1, 4.5, "19")]
 )
@@ -778,7 +776,7 @@ def test_words_are_rounded_from_tokens(tokens, ratio, text):
     assert Calibrator.words(tokens, ratio) == text
 
 
-@pytest.mark.spec("MOD-28")
+@pytest.mark.spec("MOD-26")
 def test_a_model_that_does_not_think_says_so_and_an_unmeasured_speed_is_a_question_mark():
     settings = {
         "think": None,
@@ -796,13 +794,13 @@ def test_a_model_that_does_not_think_says_so_and_an_unmeasured_speed_is_a_questi
     assert summary.endswith("💭 Answers without thinking (think: false)") and "Solved 0 of 3" in summary
 
 
-@pytest.mark.spec("MOD-13")
+@pytest.mark.spec("MOD-12")
 @pytest.mark.parametrize("tokens_per_s,text", [(None, "?"), (12.0, "12"), (12.5, "12.5")])
 def test_speed_text(tokens_per_s, text):
     assert Calibrator.speed_text(tokens_per_s) == text
 
 
-@pytest.mark.spec("MOD-27")
+@pytest.mark.spec("MOD-25")
 def test_a_reply_cut_off_before_an_answer_fails_its_task(fake_ollama):
     task = quality.tiers()[0][0]
     fake_ollama.reply({"content": task["answer"], "done_reason": "length"})
@@ -812,7 +810,7 @@ def test_a_reply_cut_off_before_an_answer_fails_its_task(fake_ollama):
     assert all(call["options"]["num_predict"] == QUALITY_REPLY_TOKENS for call in fake_ollama.calls)
 
 
-@pytest.mark.spec("MOD-27")
+@pytest.mark.spec("MOD-25")
 def test_a_wrong_answer_is_asked_again_in_the_same_chat(fake_ollama):
     task = quality.tiers()[1][0]
     fake_ollama.reply({"content": "not the answer", "total_duration": 10e9})
@@ -827,7 +825,7 @@ def test_a_wrong_answer_is_asked_again_in_the_same_chat(fake_ollama):
     assert [call["options"]["num_predict"] for call in fake_ollama.calls] == [1200, 1100]
 
 
-@pytest.mark.spec("MOD-27")
+@pytest.mark.spec("MOD-25")
 def test_a_task_stops_when_its_seconds_run_out(fake_ollama):
     task = quality.tiers()[0][0]
     fake_ollama.reply({"content": "not the answer", "total_duration": 100e9})
@@ -837,8 +835,8 @@ def test_a_task_stops_when_its_seconds_run_out(fake_ollama):
     assert [call["options"]["num_predict"] for call in fake_ollama.calls] == [1200, 200]
 
 
-@pytest.mark.spec("MOD-27")
-@pytest.mark.spec("MOD-28")
+@pytest.mark.spec("MOD-25")
+@pytest.mark.spec("MOD-26")
 def test_the_probe_stops_after_a_tier_with_neither_task_solved(fake_ollama, capsys):
     fake_ollama.reply("not the answer", times=6)
     probe = Calibrator("m").quality(None, 8192, None)
@@ -847,7 +845,7 @@ def test_the_probe_stops_after_a_tier_with_neither_task_solved(fake_ollama, caps
     assert "Stopped after tier 1: neither task solved" in capsys.readouterr().out
 
 
-@pytest.mark.spec("MOD-31")
+@pytest.mark.spec("MOD-29")
 def test_retest_reruns_only_the_quality_probe_and_keeps_the_other_settings(fake_ollama, tinker_home, capsys):
     Models.keep("m", dict(MEASURED, write_tokens_per_s=10, quality_version=0, solved=5))
     fake_ollama.reply("not the answer", times=6)
@@ -865,8 +863,8 @@ def test_retest_reruns_only_the_quality_probe_and_keeps_the_other_settings(fake_
     assert "✅ m is ready\n   🧠 Solved 0 of 8 test tasks" in out and "📖" not in out
 
 
+@pytest.mark.spec("MOD-26")
 @pytest.mark.spec("MOD-28")
-@pytest.mark.spec("MOD-30")
 @pytest.mark.parametrize(
     "results,line",
     [
@@ -903,7 +901,7 @@ def test_the_summary_tells_retries_and_answer_time(results, line):
     assert line in Calibrator("m").summary(settings)
 
 
-@pytest.mark.spec("MOD-16")
+@pytest.mark.spec("MOD-15")
 def test_model_settings(make_model):
     model = make_model(num_batch=256, chars_per_token=9)
     assert (model.max_tokens, model.num_ctx, model.max_reply, model.fix_max) == (8192, 32768, 16384, 4096)
@@ -913,7 +911,7 @@ def test_model_settings(make_model):
     assert model.limit_chars("", tokens=1000) == int(1000 * PROMPT_BUDGET_SHARE * 4.0) - 40
 
 
-@pytest.mark.spec("MOD-17")
+@pytest.mark.spec("MOD-16")
 def test_ask_once(make_model, fake_ollama, model_log):
     fake_ollama.reply("the answer")
     model = make_model()
@@ -928,7 +926,7 @@ def test_ask_once(make_model, fake_ollama, model_log):
     assert log[0]["reply"] == "the answer" and log[0]["label"].startswith("Ask [think high")
 
 
-@pytest.mark.spec("TCH-10")
+@pytest.mark.spec("TCH-9")
 def test_an_ask_goes_on_a_conversation_and_adds_its_turns(make_model, fake_ollama):
     fake_ollama.reply("first").reply("second")
     model, conversation = make_model(), []
@@ -940,7 +938,7 @@ def test_an_ask_goes_on_a_conversation_and_adds_its_turns(make_model, fake_ollam
     assert conversation == [*second[1:], {"role": "assistant", "content": "second"}]
 
 
-@pytest.mark.spec("MOD-24")
+@pytest.mark.spec("MOD-22")
 def test_a_model_logs_its_details_and_says_only_when_it_asks_again(model_log, fake_ollama, capsys):
     fake_ollama.reply("not json").reply('{"ok": 1}')
     model = Model(MODEL, MEASURED, 0, model_log)
@@ -956,7 +954,7 @@ def test_a_model_logs_its_details_and_says_only_when_it_asks_again(model_log, fa
     assert stream.status() == "Working on it"
 
 
-@pytest.mark.spec("MOD-17")
+@pytest.mark.spec("MOD-16")
 def test_an_answer_gives_its_value_when_it_is_usable_and_ends_when_it_is_not():
     assert Answer("ok").needed("No plan") == "ok"
     with pytest.raises(SystemExit, match=r"^No plan \(it ran out\)$"):
@@ -967,18 +965,18 @@ def ask_a_question(model, **options):
     return model.ask("s", [Part("Q", "q", True)], "Ask", **options)
 
 
-def cut(thinking="I was thinking about it"):
-    return {"content": "", "thinking": thinking, "done_reason": "length", "eval_count": 4096}
+def cut(thinking="I was thinking about it", content=""):
+    return {"content": content, "thinking": thinking, "done_reason": "length", "eval_count": 4096}
 
 
-@pytest.mark.spec("MOD-18")
+@pytest.mark.spec("MOD-17")
 def test_a_reply_cut_while_thinking_gets_more_room(make_model, fake_ollama):
     fake_ollama.reply(cut()).reply("done")
     assert ask_a_question(make_model(), budget=2048) == Answer("done")
     assert [call["options"]["num_predict"] for call in fake_ollama.calls] == [2048, 4096]
 
 
-@pytest.mark.spec("MOD-18")
+@pytest.mark.spec("MOD-17")
 def test_then_it_is_asked_without_thinking_to_conclude(make_model, fake_ollama):
     fake_ollama.reply(cut("the plan is to add")).reply("concluded")
     assert ask_a_question(make_model()) == Answer("concluded")
@@ -986,24 +984,23 @@ def test_then_it_is_asked_without_thinking_to_conclude(make_model, fake_ollama):
     assert second["think"] is False and "the plan is to add" in second["messages"][1]["content"]
 
 
-@pytest.mark.spec("MOD-18")
+@pytest.mark.spec("MOD-17")
 def test_without_unthinking_retry_it_gives_up(make_model, fake_ollama):
     fake_ollama.reply(cut("half a thought"))
-    model = make_model()
-    assert ask_a_question(model, unthinking_retry=False) == Answer(
+    assert ask_a_question(make_model(), unthinking_retry=False) == Answer(
         "", why="the reply ran out of room while still thinking", thought="half a thought"
     )
 
 
-@pytest.mark.spec("MOD-18")
+@pytest.mark.spec("MOD-17")
 def test_a_cut_reply_whose_blocks_have_ended_is_kept(make_model, fake_ollama):
     answer = "<<<FILE a.py>>>\nx = 1\n<<<END>>>\nI"
-    fake_ollama.reply({"content": answer, "thinking": "t", "done_reason": "length", "eval_count": 4096})
+    fake_ollama.reply(cut("t", answer))
     assert ask_a_question(make_model(), done_when=Reply.files_complete) == Answer(answer)
     assert len(fake_ollama.calls) == 1
 
 
-@pytest.mark.spec("MOD-19")
+@pytest.mark.spec("MOD-18")
 def test_out_of_memory_shrinks_the_prompt_then_gives_up(make_model, fake_ollama, capsys):
     fake_ollama.reply(OllamaError("oom", oom=True)).reply("ok")
     assert ask_a_question(make_model()) == Answer("ok")
@@ -1013,7 +1010,7 @@ def test_out_of_memory_shrinks_the_prompt_then_gives_up(make_model, fake_ollama,
         ask_a_question(make_model())
 
 
-@pytest.mark.spec("MOD-19")
+@pytest.mark.spec("MOD-18")
 def test_a_stall_reloads_the_model(make_model, fake_ollama):
     fake_ollama.reply(OllamaError("stuck", stalled=True), times=2).reply("ok")
     assert ask_a_question(make_model()) == Answer("ok")
@@ -1023,7 +1020,7 @@ def test_a_stall_reloads_the_model(make_model, fake_ollama):
         ask_a_question(make_model())
 
 
-@pytest.mark.spec("MOD-19")
+@pytest.mark.spec("MOD-18")
 def test_a_rejected_think_level_falls_back(make_model, fake_ollama):
     fake_ollama.reply(OllamaError('invalid think value "high"')).reply(
         OllamaError("model does not support think")
@@ -1035,7 +1032,7 @@ def test_a_rejected_think_level_falls_back(make_model, fake_ollama):
     assert model.think is None and model.think_rejected
 
 
-@pytest.mark.spec("MOD-19")
+@pytest.mark.spec("MOD-18")
 def test_a_rejected_request_level_falls_back_to_true_then_none(make_model, fake_ollama, tinker_home):
     fake_ollama.show(MODEL, {"thinking": {"values": [False, "low", "medium"]}})
     fake_ollama.reply(OllamaError('invalid think value "medium"')).reply(
@@ -1048,7 +1045,7 @@ def test_a_rejected_request_level_falls_back_to_true_then_none(make_model, fake_
     assert model.level == "medium" and model.think is None and model.think_rejected
 
 
-@pytest.mark.spec("MOD-16")
+@pytest.mark.spec("MOD-15")
 @pytest.mark.parametrize(
     ("level", "values", "think"),
     [
@@ -1069,7 +1066,7 @@ def test_the_model_asks_at_the_requests_level_as_it_takes_it(
     assert [call["think"] for call in fake_ollama.calls] == [think]
 
 
-@pytest.mark.spec("MOD-19")
+@pytest.mark.spec("MOD-18")
 def test_a_reply_error_is_asked_once_more_then_the_partial_is_used(make_model, fake_ollama, capsys):
     error = OllamaError("parse error", in_reply=True, partial="<<<FILE a.py>>>\nx")
     fake_ollama.reply(error, times=2)
@@ -1077,7 +1074,7 @@ def test_a_reply_error_is_asked_once_more_then_the_partial_is_used(make_model, f
     assert len(fake_ollama.calls) == 2
 
 
-@pytest.mark.spec("MOD-19")
+@pytest.mark.spec("MOD-18")
 def test_crashes_lower_a_limit_for_the_run_then_stop(make_model, fake_ollama, no_sleep, capsys):
     model = make_model(max_prompt_tokens=700)
     fake_ollama.reply(OllamaError("runner process has terminated", crashed=True), times=2).reply("ok")
@@ -1089,7 +1086,7 @@ def test_crashes_lower_a_limit_for_the_run_then_stop(make_model, fake_ollama, no
         ask_a_question(make_model())
 
 
-@pytest.mark.spec("MOD-19")
+@pytest.mark.spec("MOD-18")
 def test_a_crash_while_writing_lowers_the_longest_reply(make_model, fake_ollama, no_sleep):
     model = make_model()
     crash = OllamaError("runner failed", crashed=True, streamed=12000)
@@ -1098,14 +1095,14 @@ def test_a_crash_while_writing_lowers_the_longest_reply(make_model, fake_ollama,
     assert model.max_reply == int(16384 * 0.9) and model.max_tokens == 8192
 
 
-@pytest.mark.spec("MOD-19")
+@pytest.mark.spec("MOD-18")
 def test_any_other_error_is_raised(make_model, fake_ollama):
     fake_ollama.reply(OllamaError("model not found"))
     with pytest.raises(OllamaError, match="model not found"):
         ask_a_question(make_model())
 
 
-@pytest.mark.spec("MOD-20")
+@pytest.mark.spec("MOD-19")
 def test_a_prompt_too_large_is_relaxed_then_refused(make_model, fake_ollama, model_log):
     fake_ollama.reply("ok")
     model = make_model(max_prompt_tokens=512)
@@ -1119,7 +1116,7 @@ def test_a_prompt_too_large_is_relaxed_then_refused(make_model, fake_ollama, mod
         model.ask("s", [Part(f"P{number}", "p" * 1000, True) for number in range(10)], "Ask")
 
 
-@pytest.mark.spec("MOD-21")
+@pytest.mark.spec("MOD-20")
 def test_ask_until_usable(make_model, fake_ollama, monkeypatch):
     fake_ollama.reply("not json").reply('{"ok": true}')
     answer = make_model().ask_until_usable(
@@ -1152,7 +1149,7 @@ def test_ask_until_usable(make_model, fake_ollama, monkeypatch):
     assert "(too big)" in answer.why and "tinker model calibrate" in answer.why
 
 
-@pytest.mark.spec("MOD-22")
+@pytest.mark.spec("MOD-4")
 def test_learn_chars_per_token(make_model):
     model = make_model()
     too_few_tokens = 40
@@ -1168,7 +1165,7 @@ def test_learn_chars_per_token(make_model):
     assert len(model.recent_chars_per_token) == 20 and model.chars_per_token == 3.0
 
 
-@pytest.mark.spec("MOD-23")
+@pytest.mark.spec("MOD-21")
 def test_other_models_are_unloaded_and_a_grown_model_too(make_model, fake_ollama, monkeypatch):
     monkeypatch.setattr(
         Ollama, "loaded_models", staticmethod(lambda: [("other", 1), ("embed", 1), (MODEL, 1)])
@@ -1188,7 +1185,7 @@ def test_other_models_are_unloaded_and_a_grown_model_too(make_model, fake_ollama
     assert fake_ollama.unloaded == ["other", MODEL]
 
 
-@pytest.mark.spec("MOD-14")
+@pytest.mark.spec("MOD-13")
 def test_a_failed_probe_is_recorded_and_waited_out(monkeypatch, fake_ollama, no_sleep, capsys):
     def crash(name, prompt, options, keep_alive=0, timeout=0):
         raise OllamaError("llama runner process has terminated", crashed=True)
@@ -1207,7 +1204,7 @@ def test_a_failed_probe_is_recorded_and_waited_out(monkeypatch, fake_ollama, no_
         calibrator.probe(4096, 8192)
 
 
-@pytest.mark.spec("MOD-11")
+@pytest.mark.spec("MOD-10")
 def test_a_probe_keeps_the_model_loaded(monkeypatch):
     kept = []
 
@@ -1233,7 +1230,7 @@ def test_a_raw_read_sends_its_keep_alive(monkeypatch):
     assert [payload["keep_alive"] for payload in sent] == [0, "5m"]
 
 
-@pytest.mark.spec("MOD-14")
+@pytest.mark.spec("MOD-13")
 def test_a_gguf_model_that_crashes_is_read_in_pieces(monkeypatch, no_sleep, fake_ollama, capsys):
     reads = []
 
@@ -1251,7 +1248,7 @@ def test_a_gguf_model_that_crashes_is_read_in_pieces(monkeypatch, no_sleep, fake
     assert "Read it in smaller pieces (num_batch 256)" in capsys.readouterr().out
 
 
-@pytest.mark.spec("MOD-15")
+@pytest.mark.spec("MOD-14")
 def test_the_first_chat_finds_the_think_setting(fake_ollama):
     fake_ollama.reply(OllamaError('invalid think value "high"')).reply(
         {"content": "OK", "prompt_eval_count": 300}
@@ -1266,20 +1263,12 @@ def test_the_first_chat_finds_the_think_setting(fake_ollama):
         Calibrator("m").first_chat({"capabilities": []}, 4096)
 
 
-@pytest.mark.spec("MOD-15")
-def test_the_first_chat_keeps_the_model_loaded_at_the_target_context(fake_ollama):
-    fake_ollama.reply("OK")
-    Calibrator("m").first_chat({"capabilities": ["completion"]}, 24576)
-    call = fake_ollama.calls[-1]
-    assert call["options"]["num_ctx"] == 24576 and call["keep_alive"] not in (0, "0")
-
-
-@pytest.mark.spec("MOD-15")
+@pytest.mark.spec("MOD-14")
 def test_the_first_chat_asks_again_at_4096_when_the_target_does_not_run(fake_ollama, no_sleep):
     fake_ollama.reply(OllamaError("runner process has terminated", crashed=True)).reply("OK")
     assert Calibrator("m").first_chat({"capabilities": ["completion"]}, 24576) is None
     assert [call["options"]["num_ctx"] for call in fake_ollama.calls] == [24576, 4096]
-    assert fake_ollama.unloaded == ["m"]
+    assert fake_ollama.calls[0]["keep_alive"] not in (0, "0") and fake_ollama.unloaded == ["m"]
     fake_ollama.reply(OllamaError("crashed", crashed=True), times=2)
     with pytest.raises(SystemExit, match="m does not run"):
         Calibrator("m").first_chat({"capabilities": []}, 24576)
@@ -1315,6 +1304,9 @@ def test_think_levels_are_read_once_per_model_and_digest(fake_ollama, tinker_hom
     assert fake_ollama.shown == ["m"]
     fake_ollama.show("m", {"thinking": {"values": [False, True]}}, digest="d2")
     assert ThinkLevels.values("m") == [False, True] and fake_ollama.shown == ["m", "m"]
+    fake_ollama.show("m", {"thinking": {"values": [False, "low", "high"]}}, digest="d2")
+    assert ThinkLevels.read("m") == [False, "low", "high"]
+    assert ThinkLevels.values("m") == [False, "low", "high"] and fake_ollama.shown == ["m", "m", "m"]
 
 
 @pytest.mark.spec("RVW-2")
@@ -1328,12 +1320,3 @@ def test_think_levels_keep_a_model_without_thinking_as_empty(fake_ollama, tinker
 def test_think_levels_do_not_keep_a_failed_read(fake_ollama, tinker_home):
     assert ThinkLevels.values("gone") == [] and ThinkLevels.values("gone") == []
     assert fake_ollama.shown == ["gone", "gone"]
-
-
-@pytest.mark.spec("RVW-2")
-def test_think_levels_read_again_replaces_the_kept_values(fake_ollama, tinker_home):
-    fake_ollama.show("m", {"thinking": {"values": [False, True]}})
-    ThinkLevels.values("m")
-    fake_ollama.show("m", {"thinking": {"values": [False, "low", "high"]}})
-    assert ThinkLevels.read("m") == [False, "low", "high"]
-    assert ThinkLevels.values("m") == [False, "low", "high"] and fake_ollama.shown == ["m", "m"]

@@ -137,7 +137,7 @@ def test_every_setting_has_one_row_with_its_owner():
     Config.check()
 
 
-@pytest.mark.spec("SET-7")
+@pytest.mark.spec("SET-4")
 def test_keep_alive_and_ollama_url_as_ollama_takes_them():
     assert Config.keep_alive("300") == 300 and Config.keep_alive(-1) == -1
     assert Config.keep_alive("10m") == "10m"
@@ -145,7 +145,7 @@ def test_keep_alive_and_ollama_url_as_ollama_takes_them():
     assert Config.ollama_url() == "http://host:1"
 
 
-@pytest.mark.spec("SET-8")
+@pytest.mark.spec("SET-7")
 def test_ensure_makes_home_and_its_database(tinker_home, capsys):
     assert not tinker_home.exists()
     Home.ensure()
@@ -154,7 +154,7 @@ def test_ensure_makes_home_and_its_database(tinker_home, capsys):
     assert capsys.readouterr().out == ""
 
 
-@pytest.mark.spec("SET-8")
+@pytest.mark.spec("SET-7")
 def test_ensure_stops_when_home_cannot_be_written(tinker_home, monkeypatch):
     def refuse(*args, **kwargs):
         raise PermissionError("read-only")
@@ -164,7 +164,7 @@ def test_ensure_stops_when_home_cannot_be_written(tinker_home, monkeypatch):
         Home.ensure()
 
 
-@pytest.mark.spec("SET-9")
+@pytest.mark.spec("SET-8")
 def test_reset_with_yes_deletes_home(tinker_home):
     Home.ensure()
     Home.reset(yes=True)
@@ -173,13 +173,13 @@ def test_reset_with_yes_deletes_home(tinker_home):
     assert Config.get("model") == "m"
 
 
-@pytest.mark.spec("SET-9")
+@pytest.mark.spec("SET-8")
 def test_reset_without_home_does_nothing(tinker_home, capsys):
     Home.reset(yes=True)
     assert "Nothing to reset" in capsys.readouterr().out
 
 
-@pytest.mark.spec("SET-9")
+@pytest.mark.spec("SET-8")
 def test_reset_refuses_a_folder_not_named_dot_tinker(tmp_path, monkeypatch):
     other = tmp_path / "precious"
     other.mkdir()
@@ -189,7 +189,7 @@ def test_reset_refuses_a_folder_not_named_dot_tinker(tmp_path, monkeypatch):
     assert other.exists()
 
 
-@pytest.mark.spec("SET-9")
+@pytest.mark.spec("SET-8")
 def test_reset_outside_a_terminal_without_yes_deletes_nothing(tinker_home, monkeypatch):
     Home.ensure()
     monkeypatch.setattr(sys, "stdin", io.StringIO(""))
@@ -198,7 +198,7 @@ def test_reset_outside_a_terminal_without_yes_deletes_nothing(tinker_home, monke
     assert tinker_home.exists()
 
 
-@pytest.mark.spec("SET-9")
+@pytest.mark.spec("SET-8")
 def test_a_deletion_says_what_goes_then_asks(monkeypatch, capsys):
     confirm_deletion("This deletes:", ["the notes", "the logs"], "tinker clear notes", yes=True)
     said = capsys.readouterr().out
@@ -218,7 +218,7 @@ def test_a_deletion_says_what_goes_then_asks(monkeypatch, capsys):
     assert asked == ["Delete it? [y/N] ", "Delete them? [y/N] "]
 
 
-@pytest.mark.spec("SET-10")
+@pytest.mark.spec("SET-9")
 def test_clear_deletes_only_the_named_parts(home_store, capsys):
     home_store.put("languages", "python", {})
     home_store.put("memory", "any", {})
@@ -231,7 +231,7 @@ def test_clear_deletes_only_the_named_parts(home_store, capsys):
     assert "Cleared languages, memory, learned." in capsys.readouterr().out
 
 
-@pytest.mark.spec("SET-10")
+@pytest.mark.spec("SET-9")
 def test_clear_rejects_an_unknown_part():
     parts = (
         "languages, memory, learned, docs, searches, models, runs, commands, history, exercise, jobs, read"
@@ -240,7 +240,7 @@ def test_clear_rejects_an_unknown_part():
         Home.clear(["everything"], yes=True)
 
 
-@pytest.mark.spec("SET-10", "KNW-26")
+@pytest.mark.spec("SET-9", "KNW-24")
 def test_clear_searches_forgets_the_search_plans(home_store):
     home_store.put("search plans", "{topic} docs", [{"query": "{topic} docs"}])
     home_store.put("sources", "flask@latest", {})
@@ -248,13 +248,13 @@ def test_clear_searches_forgets_the_search_plans(home_store):
     assert home_store.items("search plans") == {} and home_store.items("sources") == {"flask@latest": {}}
 
 
-@pytest.mark.spec("SET-10")
+@pytest.mark.spec("SET-9")
 def test_clear_with_nothing_there(capsys):
     Home.clear(["runs"], yes=True)
     assert "Nothing to clear: runs is empty" in capsys.readouterr().out
 
 
-@pytest.mark.spec("SET-10")
+@pytest.mark.spec("SET-9")
 def test_clear_outside_a_terminal_without_yes_deletes_nothing(home_store, monkeypatch):
     home_store.put("memory", "any", {})
     monkeypatch.setattr(sys, "stdin", io.StringIO(""))
@@ -263,7 +263,7 @@ def test_clear_outside_a_terminal_without_yes_deletes_nothing(home_store, monkey
     assert home_store.items("memory") == {"any": {}}
 
 
-@pytest.mark.spec("SET-11")
+@pytest.mark.spec("SET-10")
 @pytest.mark.parametrize(
     "tool,program", [("caffeinate", "caffeinate"), ("systemd-inhibit", "systemd-inhibit")]
 )
@@ -275,7 +275,7 @@ def test_keep_awake_uses_the_tool_there_is(monkeypatch, tool, program):
     assert started and started[0][0] == program and str(settings.os.getpid()) in " ".join(started[0])
 
 
-@pytest.mark.spec("SET-11")
+@pytest.mark.spec("SET-10")
 def test_keep_awake_without_a_tool_or_failing_does_nothing(monkeypatch):
     monkeypatch.setattr(settings.shutil, "which", lambda name: None)
     Home.keep_awake()
@@ -321,7 +321,7 @@ def test_help_config_lists_the_settings_from_the_table():
     assert "web_timeout (" in about and "embed_model" not in about and "model (" not in about
 
 
-@pytest.mark.spec("SET-12")
+@pytest.mark.spec("SET-11")
 def test_a_numbered_list_never_gives_a_number_again(home_store):
     listed = Numbered("things", "thing numbers")
     first, second = listed.add({"text": "a"}), listed.add({"text": "b"})
@@ -334,7 +334,7 @@ def test_a_numbered_list_never_gives_a_number_again(home_store):
     assert [entry["text"] for entry in listed.newest()] == ["d", "e"]
 
 
-@pytest.mark.spec("SET-12")
+@pytest.mark.spec("SET-11")
 def test_a_list_comes_a_page_at_a_time():
     entries = list(range(PER_PAGE * 2 + 1))
     assert PER_PAGE == 10 and Numbered.page(entries, 1) == Paged(entries[:PER_PAGE], 3)

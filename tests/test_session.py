@@ -125,17 +125,17 @@ def test_knowledge_parts_record_what_they_show(session, home_store):
 
 @pytest.mark.spec("SES-3")
 def test_code_and_tests_are_told_the_checks_they_must_pass(session):
-    session.project.spec["toolchain"]["lint"] = "ruff check . && mypy --strict ."
-    checks = [part for part in session.knowledge_parts("code") if part.title.startswith("Checks")]
-    assert [part.text for part in checks] == ["$ ruff check . && mypy --strict ."]
-    assert not [
-        part for part in session.knowledge_parts("design", "toolchain") if part.title.startswith("Checks")
+    checks = lambda *phases: [
+        part.text for part in session.knowledge_parts(*phases) if part.title.startswith("Checks")
     ]
+    session.project.spec["toolchain"]["lint"] = "ruff check . && mypy --strict ."
+    assert checks("code") == ["$ ruff check . && mypy --strict ."]
+    assert not checks("design", "toolchain")
     session.project.spec["toolchain"]["lint"] = "none"
-    assert not [part for part in session.knowledge_parts("tests") if part.title.startswith("Checks")]
+    assert not checks("tests")
 
 
-@pytest.mark.spec("SES-5")
+@pytest.mark.spec("SES-4")
 def test_before_the_spec_names_the_language_knowledge_is_for_the_one_the_request_names(session, home_store):
     Library.save(
         "rust", {"topic": "rust", "kind": "language", "language": "Rust", "name": "Rust 1.95", "facts": []}
@@ -165,7 +165,7 @@ def test_the_phases_a_failure_disproves():
     assert Session.failed_phases("reproduce", Stopped("unreproduced", "no test")) == ()
 
 
-@pytest.mark.spec("SES-4")
+@pytest.mark.spec("SES-2")
 def test_save_keeps_the_project_and_tells_the_tracker(make_project, make_session, project_dir):
     tracker = Tracker("calc")
     session = make_session(make_project([criterion("C1", "t.py::a", status="green")]), tracker=tracker)

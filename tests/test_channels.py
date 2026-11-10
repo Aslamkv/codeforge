@@ -118,7 +118,7 @@ def connected(monkeypatch, wait, sockets, shakes=(), channel=None):
     return connection, handshakes
 
 
-@pytest.mark.spec("CHN-11")
+@pytest.mark.spec("CHN-10")
 def test_a_telegram_connection_whose_first_address_hangs_falls_to_the_next_within_connect_seconds(
     monkeypatch,
 ):
@@ -132,7 +132,7 @@ def test_a_telegram_connection_whose_first_address_hangs_falls_to_the_next_withi
     assert channels.CONNECT_SECONDS == 1
 
 
-@pytest.mark.spec("CHN-11")
+@pytest.mark.spec("CHN-10")
 def test_a_telegram_connection_whose_first_handshake_hangs_falls_to_the_next_address(monkeypatch):
     sockets = Sockets(monkeypatch)
     connection, handshakes = connected(monkeypatch, 30, sockets, shakes=[False, True])
@@ -141,14 +141,14 @@ def test_a_telegram_connection_whose_first_handshake_hangs_falls_to_the_next_add
     assert sockets.closed == 1 and connection.sock is sockets
 
 
-@pytest.mark.spec("CHN-11")
+@pytest.mark.spec("CHN-10")
 def test_a_telegram_connection_answers_within_the_calls_own_wait(monkeypatch):
     sockets = Sockets(monkeypatch)
     connection, _ = connected(monkeypatch, 30, sockets)
     assert sockets.timeouts == [30] and connection.timeout == 30
 
 
-@pytest.mark.spec("CHN-11")
+@pytest.mark.spec("CHN-10")
 def test_a_telegram_chat_answered_over_ipv4_connects_to_ipv4_first(monkeypatch):
     channel = telegram(BotAPI(getMe={"username": "b"}))
     channel.call("getMe")
@@ -159,22 +159,18 @@ def test_a_telegram_chat_answered_over_ipv4_connects_to_ipv4_first(monkeypatch):
     assert [address for address, _ in sockets.tries] == [("192.0.2.1", 443)]
 
 
-@pytest.mark.spec("CHN-11")
+@pytest.mark.spec("CHN-10")
 def test_a_telegram_connection_fails_when_no_address_connects(monkeypatch):
     Sockets(monkeypatch, connects=[False, False])
     with pytest.raises(TimeoutError):
         channels.connect_by_address((TelegramChannel.HOST, 443), None, 5)
 
 
-@pytest.mark.spec("CHN-12")
-def test_a_telegram_chat_is_connecting_until_its_first_call_ends():
-    assert TelegramChannel("bot", {"allowed": ["42"]}, {"token": "T0K"}).state == "connecting…"
-
-
-@pytest.mark.spec("CHN-12")
+@pytest.mark.spec("CHN-11")
 def test_a_telegram_chat_answered_is_connected_by_the_family_of_its_address():
     api = BotAPI(getMe={"username": "b"})
     channel = telegram(api)
+    assert channel.state == "connecting…"
     channel.call("getMe")
     assert channel.state == "connected (IPv4)"
     api.family = socket.AF_INET6
@@ -182,7 +178,7 @@ def test_a_telegram_chat_answered_is_connected_by_the_family_of_its_address():
     assert channel.state == "connected (IPv6)"
 
 
-@pytest.mark.spec("CHN-12")
+@pytest.mark.spec("CHN-11")
 def test_a_telegram_chat_refused_is_still_connected():
     channel = telegram(BotAPI(getMe=(401, '{"ok": false, "description": "Unauthorized"}')))
     with pytest.raises(ChannelError):
@@ -190,7 +186,7 @@ def test_a_telegram_chat_refused_is_still_connected():
     assert channel.state == "connected (IPv4)"
 
 
-@pytest.mark.spec("CHN-12")
+@pytest.mark.spec("CHN-11")
 def test_a_telegram_chat_the_network_fails_is_unreachable_with_the_reason():
     channel = telegram(BotAPI(getMe=[{"username": "b"}, OSError("reset"), OSError("no route")]))
     channel.call("getMe")
@@ -199,7 +195,7 @@ def test_a_telegram_chat_the_network_fails_is_unreachable_with_the_reason():
     assert channel.state == "unreachable: no route"
 
 
-@pytest.mark.spec("CNV-8")
+@pytest.mark.spec("CNV-6")
 def test_telegram_sends_the_banner_first_line_bold_last_line_italic():
     api = BotAPI(sendMessage={"message_id": 7})
     sent = telegram(api).send_banner("42", ["🔧 Tinker", "model qwen*3", "help lists commands"])
@@ -283,7 +279,7 @@ class Goodbyes:
     clear = TelegramChannel.clear
 
 
-@pytest.mark.spec("CNV-9", "CNV-11")
+@pytest.mark.spec("CNV-7", "CNV-9")
 def test_the_goodbye_sender_clears_each_chat_posts_the_status_and_takes_the_question_out(
     monkeypatch, home_store, capsys
 ):
@@ -464,7 +460,7 @@ def test_choose_sends_a_button_for_each_name():
     }
 
 
-@pytest.mark.spec("CHN-9")
+@pytest.mark.spec("CHN-8")
 def test_the_ledger_keeps_every_message_and_collects_them(monkeypatch):
     update = {"update_id": 1, "message": {"message_id": 4, "text": "task calc", "chat": {"id": 42}}}
     api = BotAPI(getUpdates=[[update]], sendMessage=[{"message_id": 1}, {"message_id": 2}, {"message_id": 3}])
@@ -549,7 +545,7 @@ def test_start_needs_a_channel_and_checks_it(monkeypatch):
         ChannelCommand.run(["start", "bot"])
 
 
-@pytest.mark.spec("CHN-8")
+@pytest.mark.spec("CHN-7")
 def test_send_file_uploads_a_document_with_its_caption(tmp_path):
     page = tmp_path / "memory.html"
     page.write_bytes(b"<!doctype html><p>graph</p>")
@@ -595,7 +591,7 @@ def sent_file(chat=42, size=10, name="My Book.epub"):
     ]
 
 
-@pytest.mark.spec("CHN-10")
+@pytest.mark.spec("CHN-9")
 def test_a_book_sent_in_a_chat_is_kept_and_read(tinker_home, home_store):
     api = BotAPI(
         getUpdates=sent_file(),
@@ -608,7 +604,7 @@ def test_a_book_sent_in_a_chat_is_kept_and_read(tinker_home, home_store):
     assert api.calls[-1][0] == "/file/botT0K/documents/file_1.epub" and "T0K" not in messages[0].text
 
 
-@pytest.mark.spec("CHN-10")
+@pytest.mark.spec("CHN-9")
 def test_a_book_that_cannot_be_taken_is_said_and_one_from_a_stranger_ignored(tinker_home, home_store):
     api = BotAPI(getUpdates=sent_file(size=30_000_000), sendMessage={"message_id": 9})
     assert telegram(api).receive(1) == []

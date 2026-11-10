@@ -19,31 +19,28 @@ def runs(monkeypatch):
     return calls
 
 
+@pytest.fixture
+def mac(monkeypatch):
+    monkeypatch.setattr(MacSandbox, "process_limit", lambda self: 500)
+    return MacSandbox()
+
+
 @pytest.mark.spec("SBX-1")
-def test_here_picks_the_backend_by_platform_and_none_when_its_probe_fails(monkeypatch):
-    monkeypatch.setattr(MacSandbox, "probe", classmethod(lambda cls: ""))
-    monkeypatch.setattr(sys, "platform", "darwin")
-    assert type(Sandbox.here()) is MacSandbox
+@pytest.mark.parametrize("platform, backend", [("darwin", MacSandbox), ("linux", LinuxSandbox)])
+def test_here_picks_the_backend_by_platform_and_none_when_its_probe_fails(monkeypatch, platform, backend):
+    monkeypatch.setattr(backend, "probe", classmethod(lambda cls: ""))
+    monkeypatch.setattr(sys, "platform", platform)
+    assert type(Sandbox.here()) is backend
     monkeypatch.setattr(sys, "platform", "plan9")
     assert type(Sandbox.here()) is NoSandbox
     assert "plan9" in Sandbox.here().why
-    monkeypatch.setattr(sys, "platform", "darwin")
-    monkeypatch.setattr(MacSandbox, "probe", classmethod(lambda cls: "sandbox-exec is missing"))
+    monkeypatch.setattr(sys, "platform", platform)
+    monkeypatch.setattr(backend, "probe", classmethod(lambda cls: "the probe failed"))
     assert type(Sandbox.here()) is NoSandbox
-    assert Sandbox.here().why == "sandbox-exec is missing"
+    assert Sandbox.here().why == "the probe failed"
 
 
 @pytest.mark.spec("SBX-1")
-def test_here_picks_linux_sandbox_on_linux_and_none_when_its_probe_fails(monkeypatch):
-    monkeypatch.setattr(sys, "platform", "linux")
-    monkeypatch.setattr(LinuxSandbox, "probe", classmethod(lambda cls: ""))
-    assert type(Sandbox.here()) is LinuxSandbox
-    monkeypatch.setattr(LinuxSandbox, "probe", classmethod(lambda cls: "user namespaces are off"))
-    assert type(Sandbox.here()) is NoSandbox
-    assert Sandbox.here().why == "user namespaces are off"
-
-
-@pytest.mark.spec("SBX-4")
 def test_no_sandbox_runs_nothing_and_says_why(runs):
     with Sandbox.folder() as folder:
         result = NoSandbox("no sandbox on plan9").run(["python3", "check.py"], folder)
@@ -52,11 +49,10 @@ def test_no_sandbox_runs_nothing_and_says_why(runs):
 
 
 @pytest.mark.spec("SBX-2")
-def test_a_run_starts_in_a_new_empty_folder_that_goes_after(runs, monkeypatch):
-    monkeypatch.setattr(MacSandbox, "process_limit", lambda self: 500)
+def test_a_run_starts_in_a_new_empty_folder_that_goes_after(runs, mac):
     with Sandbox.folder() as folder:
         assert folder.is_dir() and list(folder.iterdir()) == [] and folder == folder.resolve()
-        result = MacSandbox().run(["python3", "check.py"], folder, timeout=7)
+        result = mac.run(["python3", "check.py"], folder, timeout=7)
     assert not folder.exists()
     _, options = runs[0]
     assert options["cwd"] == folder and options["timeout"] == 7
@@ -66,34 +62,31 @@ def test_a_run_starts_in_a_new_empty_folder_that_goes_after(runs, monkeypatch):
 
 
 @pytest.mark.spec("SBX-2")
-def test_a_run_past_its_timeout_is_timed_out(monkeypatch):
+def test_a_run_past_its_timeout_is_timed_out(monkeypatch, mac):
     def too_slow(argv, **options):
         raise subprocess.TimeoutExpired(argv, options["timeout"], output=b"started")
 
     monkeypatch.setattr(sandbox.subprocess, "run", too_slow)
-    monkeypatch.setattr(MacSandbox, "process_limit", lambda self: 500)
     with Sandbox.folder() as folder:
-        result = MacSandbox().run(["python3", "check.py"], folder, timeout=1)
+        result = mac.run(["python3", "check.py"], folder, timeout=1)
     assert result.ran and result.timed_out and result.output == "started"
 
 
 @pytest.mark.spec("SBX-2")
-def test_a_long_output_is_cut(monkeypatch):
+def test_a_long_output_is_cut(monkeypatch, mac):
     def loud(argv, **options):
         return subprocess.CompletedProcess(argv, 0, stdout="x" * (sandbox.OUTPUT_LENGTH * 2))
 
     monkeypatch.setattr(sandbox.subprocess, "run", loud)
-    monkeypatch.setattr(MacSandbox, "process_limit", lambda self: 500)
     with Sandbox.folder() as folder:
-        result = MacSandbox().run(["true"], folder)
+        result = mac.run(["true"], folder)
     assert len(result.output) == sandbox.OUTPUT_LENGTH
 
 
 @pytest.mark.spec("SBX-3")
-def test_mac_runs_under_sandbox_exec_denying_the_network_and_writes_outside(runs, monkeypatch):
-    monkeypatch.setattr(MacSandbox, "process_limit", lambda self: 500)
+def test_mac_runs_under_sandbox_exec_denying_the_network_and_writes_outside(runs, mac):
     with Sandbox.folder() as folder:
-        MacSandbox().run(["python3", "check.py"], folder)
+        mac.run(["python3", "check.py"], folder)
     argv, _ = runs[0]
     assert argv[:2] == ["sandbox-exec", "-p"] and argv[3:] == ["python3", "check.py"]
     profile = argv[2]
