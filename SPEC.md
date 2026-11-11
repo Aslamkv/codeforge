@@ -126,7 +126,7 @@ The Tinker home (**SET-1**) holds:
 | `tinker.db` | the home database (mode 600), below |
 | `channel-NAME.lock` | the lock of each chat channel a Tinker listens to |
 | `web-requests.log` | every web search and fetch Tinker made, one JSON line each (**WEB-6**) |
-| `tinker.log` | what Tinker does, one JSON line per watched call, while `log` is on (**LOG-1**); rotated as `tinker-STAMP.log.zip` |
+| `tinker.log` | what Tinker does, one plain-text sentence per watched step or fact, always (**LOG-1**); rotated as `tinker-STAMP.log.zip` |
 | `memory.html` | the page `tinker memory --graph` writes |
 | `reading/` | the files sent in a chat to read |
 
@@ -283,7 +283,7 @@ The home and its database, the settings, numbered lists, and the one way to dele
   max_growth `1.15`, test_timeout `60`, web_timeout `30`, learn_missing `2`,
   learn_cutoff `0.0`, learn_coverage `0.6`, learn_pages `8`, learn_min_pages `2`, learn_searches `3`,
   tool_docs_pages `5`, docs_latest_days `30`, fetch_workers `6`, fetch_timeout `15`, fetch_max_bytes `2000000`,
-  embed_model `""`, projects `"~/Projects"`, log `"on"`. web_timeout is a search's timeout; fetch_workers, fetch_timeout and
+  embed_model `""`, projects `"~/Projects"`. web_timeout is a search's timeout; fetch_workers, fetch_timeout and
   fetch_max_bytes are the `Fetcher`'s workers, timeout and max_bytes; embed_model is the embedding model
   `tinker model NAME` selects.
 - **SET-3** `PHASES` and `FIX_PHASES` are the phase lists given in [The cycle](#the-cycle).
@@ -297,7 +297,7 @@ The home and its database, the settings, numbered lists, and the one way to dele
   rest). `Config.check()` checks every setting by its row, and rejects with `SystemExit`: a keep_alive that is
   neither whole seconds nor a duration (`10m`, `1h30m`); and a number outside its range, or not whole where its
   row says so (max_growth above 1, web_timeout above 0, test_timeout and learn_missing at least 1,
-  and each `learn_*`, `docs_*` and `fetch_*` limit); and a switch that is not `on` or `off` (log). A boolean is never a number. Every command that needs the
+  and each `learn_*`, `docs_*` and `fetch_*` limit). A boolean is never a number. Every command that needs the
   model checks them first.
 - **SET-6** `Config.set(key, text)` is `tinker config KEY VALUE`. It sets only the keys whose owner is
   `config`, reading the value by the row's type. A value that fails its row's check is not kept, and the
@@ -1805,26 +1805,32 @@ Tidy, the README, the final review and the lessons.
 The trace of what Tinker does, for performance work and spec corrections. It wraps chosen methods from outside;
 no other module imports it or changes for it, and deleting it with its one call in `cli` leaves Tinker as it was.
 
-- **LOG-1** `Home.tinker_log()` is `tinker.log` in the home. `TraceLog.write(entry)` appends the entry as one
-  JSON line in a single write, under a lock, so threads and processes never mix lines. The path is asked of
-  `Home` at each write.
+- **LOG-1** `Home.tinker_log()` is `tinker.log` in the home. `TraceLog.write(text)` appends one line of plain
+  text in a single write, under a lock, so threads and processes never mix lines. The path is asked of `Home`
+  at each write. Before a process's first line of a day it writes the day line `── YYYY-MM-DD ──`.
 - **LOG-2** Before a write, a `tinker.log` of `LOG_ROTATE_BYTES` (20 MB) or more is renamed to a unique name
   and zipped as `tinker-STAMP.log.zip` in the home (STAMP `YYYYmmdd-HHMMSS-PID`), and the renamed file deleted;
   the next write starts a new `tinker.log`. A process that loses the rename to another skips the rotation.
-- **LOG-3** `WATCHED` lists the watched methods: `Commands.run` and `ProjectRun.execute` (the command),
-  `run` of every subclass of `Phase` (each phase), `Model.ask` and `Ollama.chat` (model calls),
-  `Workspace.run` and `Workspace.start` (project commands), `Internet.search_all` and `Internet.fetch` (web),
-  `Store.get`, `Store.put` and `Store.append` (the database).
-- **LOG-4** `install()` wraps each watched method once; installing again changes nothing. `uninstall()` puts
-  every original back. A wrapped method returns and raises exactly as the original.
-- **LOG-5** Each wrapped call writes one entry when it ends: `at` (start, ISO time with milliseconds), `pid`,
-  `call` (`Class.method`), `seconds` (rounded to 4 places), `depth` (how many watched calls of this thread it
-  runs inside, 0 at the top), `args` (each argument after `self`, keywords by name, as its `repr` cut to
-  `LOG_VALUE_CHARS` (120)), and `result` (cut the same way) or `error` (`Type: message`).
-- **LOG-6** A failure to write the log never stops Tinker: the call's result or error is kept and the entry
+- **LOG-3** A line is `HH:MM:SS.mmm [PID] `, two spaces for each watched call of this thread it runs inside,
+  then a sentence. Values in a sentence are given in full, never cut.
+- **LOG-4** `WATCHED` lists the watched methods, each with its sentence in `logger`. A step writes a line when
+  it starts and one when it ends, with its seconds; a fact writes one line when it ends, with its result and
+  seconds. A step or fact that raises ends with `failed: Type: message` and its seconds. Steps:
+  `Commands.run` and `ProjectRun.execute` (the command and its arguments), `run` of every subclass of `Phase`
+  (the phase), `Model.ask` and `Ollama.chat` (the model asked, the messages, options, think and keep_alive;
+  the reply at the end), `Ollama.loading` and `Talk.warm` (the model loaded), `Workspace.run` and
+  `Workspace.start` (the project command), `Internet.search_all` and `Internet.fetch` (the query or address),
+  `channels.connect_by_address` (the host; at the end the address reached and whether by IPv4 or IPv6),
+  `Desk.run` (the conversation), `Desk.handle` (the channel and what the user asked), `TelegramChannel.send`
+  (the chat and the text), `Desk.close_channels` and `Desk.unload_models`. Facts: `Store.get`, `Store.put`
+  and `Store.append` (the table, the key, found or not, and the value).
+- **LOG-5** `install()` writes `Tinker is starting: tinker ARGS`, wraps each watched method once, follows `say`
+  so each message is written as `Said: TEXT`, and writes `Tinker stopped` when the process exits; installing
+  again changes nothing. `uninstall()` puts every original back and stops following and the exit line. A
+  wrapped method returns and raises exactly as the original.
+- **LOG-6** A failure to write the log never stops Tinker: the call's result or error is kept and the line
   dropped.
-- **LOG-7** `cli.run` installs the logger once the home is open, when `log` is `on`. `tinker config log off`
-  turns it off from the next command; `on` turns it back.
+- **LOG-7** `cli.run` installs the logger once the home is open, always.
 
 ## cli (CLI)
 

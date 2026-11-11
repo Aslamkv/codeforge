@@ -46,7 +46,6 @@ def test_default_config():
         "fetch_max_bytes": 2000000,
         "embed_model": "",
         "projects": "~/Projects",
-        "log": "on",
     }
 
 
@@ -113,9 +112,6 @@ def test_a_stored_key_no_setting_has_is_ignored(home_store):
         ("learn_coverage", -1),
         ("fetch_workers", True),
         ("fetch_max_bytes", "big"),
-        ("log", "yes"),
-        ("log", True),
-        ("log", None),
     ],
 )
 def test_check_rejects_a_setting_outside_its_row(key, value):
@@ -319,10 +315,6 @@ def test_config_set_reads_and_checks_the_value():
     with pytest.raises(SystemExit, match="learn_missing"):
         Config.set("learn_missing", "0")
     assert Config.get("learn_missing") == settings.DEFAULT_CONFIG["learn_missing"]
-    assert Config.set("log", "off") == "off" and Config.get("log") == "off"
-    with pytest.raises(SystemExit, match="log must be on or off"):
-        Config.set("log", "maybe")
-    assert Config.get("log") == "off"
 
 
 @pytest.mark.spec("SET-6")

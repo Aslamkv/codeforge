@@ -597,14 +597,10 @@ tinker config projects ~/Code       # new projects (and the exercises) go here
 tinker config keep_alive 10m        # keep the model loaded 10 idle minutes (30m by default; 0 unloads it at once)
 ```
 
-Tinker traces what it does in `.tinker/tinker.log`: one JSON line per command, phase, model call, project
-command, web request and database call, with its arguments, result or error, time taken and how deep it ran. At
-20 MB it is zipped as `tinker-STAMP.log.zip` and a new log starts. It is on by default; turn it off (or back on)
-from the next command:
-
-```sh
-tinker config log off
-```
+Tinker always tells what it does in `.tinker/tinker.log`, one plain sentence per line: when it starts and stops,
+each command, phase, model call and load, project command, web request, connection, Telegram send and database
+call, with its details, result or failure and seconds taken, indented by how deep it ran, and each message it
+said. A day line opens each new day. At 20 MB it is zipped as `tinker-STAMP.log.zip` and a new log starts.
 
 Tune how `tinker learn` uses the web:
 

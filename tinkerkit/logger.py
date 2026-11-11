@@ -1,21 +1,25 @@
+import atexit
 import functools
 import importlib
-import json
+import inspect
 import os
+import socket
+import sys
 import threading
 import time
 import zipfile
-from datetime import datetime
+from datetime import date, datetime
+from types import SimpleNamespace
 
+from tinkerkit.messages import say
 from tinkerkit.settings import Home
 
 LOG_ROTATE_BYTES = 20_000_000
-LOG_VALUE_CHARS = 120
 
 
 class Watched:
-    def __init__(self, module, owner, method):
-        self.module, self.owner, self.method = module, owner, method
+    def __init__(self, module, owner, method, sentence):
+        self.module, self.owner, self.method, self.sentence = module, owner, method, sentence
 
     def classes(self):
         return [self.owner_class()]
@@ -25,14 +29,22 @@ class Watched:
 
 
 class WatchedFamily(Watched):
-    def __init__(self, module, owner, method, loads):
-        super().__init__(module, owner, method)
+    def __init__(self, module, owner, method, sentence, loads):
+        super().__init__(module, owner, method, sentence)
         self.loads = loads
 
     def classes(self):
         for module in self.loads:
             importlib.import_module(module)
         return [cls for cls in descendants(self.owner_class()) if self.method in cls.__dict__]
+
+
+class WatchedFunction(Watched):
+    def __init__(self, module, function, sentence):
+        super().__init__(module, module.rpartition(".")[2], function, sentence)
+
+    def classes(self):
+        return [importlib.import_module(self.module)]
 
 
 def descendants(cls):
@@ -42,53 +54,274 @@ def descendants(cls):
     return list(dict.fromkeys(found))
 
 
+class Step:
+    def __init__(self, subject, start, end):
+        self.subject, self.start, self.end = subject, start, end
+
+    def starts(self, arguments):
+        return [self.start(arguments)]
+
+
+class Fact(Step):
+    def __init__(self, subject, end):
+        super().__init__(subject, None, end)
+
+    def starts(self, arguments):
+        return []
+
+
+def command_line(arguments):
+    return f"tinker {arguments.self.args.command}"
+
+
+def command_options(arguments):
+    options = {name: value for name, value in vars(arguments.self.args).items() if name != "command"}
+    return ", ".join(f"{name}={value!r}" for name, value in options.items())
+
+
+def phase(arguments):
+    return f"Phase {type(arguments.self).__name__}"
+
+
+def asked(arguments):
+    extra = "".join(f", {name}={value!r}" for name, value in arguments.kw.items())
+    return f"label={arguments.label!r}, system={arguments.system!r}, parts={arguments.parts!r}{extra}"
+
+
+def chatted(arguments):
+    return (
+        f"label={arguments.label!r}, messages={arguments.messages!r}, options={arguments.options!r}, "
+        f"think={arguments.think!r}, keep_alive={arguments.keep_alive!r}"
+    )
+
+
+def stored(arguments):
+    return f"{arguments.collection}/{arguments.key!r}"
+
+
+def looked_up(arguments, result):
+    if result is arguments.default:
+        return f"Database get {stored(arguments)}: not found"
+    return f"Database get {stored(arguments)}: found {result!r}"
+
+
+def host(arguments):
+    return arguments.address[0]
+
+
+def ip_version(sock):
+    return "IPv6" if sock.family == socket.AF_INET6 else "IPv4"
+
+
+def channel_kind(arguments):
+    return type(arguments.channel).__name__
+
+
+COMMAND = Step(
+    command_line,
+    lambda a: f"Running {command_line(a)} ({command_options(a)})",
+    lambda a, result: f"{command_line(a)} finished",
+)
+
 WATCHED = (
-    Watched("tinkerkit.cli", "Commands", "run"),
-    Watched("tinkerkit.cli", "ProjectRun", "execute"),
+    Watched("tinkerkit.cli", "Commands", "run", COMMAND),
+    Watched("tinkerkit.cli", "ProjectRun", "execute", COMMAND),
     WatchedFamily(
         "tinkerkit.session",
         "Phase",
         "run",
+        Step(
+            phase,
+            lambda a: f"{phase(a)} starts (cycle {a.cycle['id']})",
+            lambda a, result: f"{phase(a)} ends",
+        ),
         ("tinkerkit.planning", "tinkerkit.building", "tinkerkit.finishing"),
     ),
-    Watched("tinkerkit.model", "Model", "ask"),
-    Watched("tinkerkit.model", "Ollama", "chat"),
-    Watched("tinkerkit.workspace", "Workspace", "run"),
-    Watched("tinkerkit.workspace", "Workspace", "start"),
-    Watched("tinkerkit.web", "Internet", "search_all"),
-    Watched("tinkerkit.web", "Internet", "fetch"),
-    Watched("tinkerkit.store", "Store", "get"),
-    Watched("tinkerkit.store", "Store", "put"),
-    Watched("tinkerkit.store", "Store", "append"),
+    Watched(
+        "tinkerkit.model",
+        "Model",
+        "ask",
+        Step(
+            lambda a: a.self.name,
+            lambda a: f"Asking {a.self.name} ({asked(a)})",
+            lambda a, result: f"{a.self.name} answered: {result!r}",
+        ),
+    ),
+    Watched(
+        "tinkerkit.model",
+        "Ollama",
+        "chat",
+        Step(
+            lambda a: f"Ollama {a.name}",
+            lambda a: f"Asking Ollama {a.name} ({chatted(a)})",
+            lambda a, result: f"Ollama {a.name} answered: {result!r}",
+        ),
+    ),
+    Watched(
+        "tinkerkit.workspace",
+        "Workspace",
+        "run",
+        Step(
+            lambda a: f"Project command {a.command}",
+            lambda a: f"Project command: {a.command}",
+            lambda a, result: f"Project command {a.command} ended",
+        ),
+    ),
+    Watched(
+        "tinkerkit.workspace",
+        "Workspace",
+        "start",
+        Step(
+            lambda a: f"Project command {a.command}",
+            lambda a: f"Starting project command: {a.command}",
+            lambda a, result: f"Project command {a.command} started",
+        ),
+    ),
+    Watched(
+        "tinkerkit.web",
+        "Internet",
+        "search_all",
+        Step(lambda a: "Search", lambda a: f"Searching {a.searches!r}", lambda a, result: "Search done"),
+    ),
+    Watched(
+        "tinkerkit.web",
+        "Internet",
+        "fetch",
+        Step(lambda a: "Fetch", lambda a: f"Fetching {a.urls!r}", lambda a, result: "Fetch done"),
+    ),
+    Watched("tinkerkit.store", "Store", "get", Fact(lambda a: f"Database get {stored(a)}", looked_up)),
+    Watched(
+        "tinkerkit.store",
+        "Store",
+        "put",
+        Fact(
+            lambda a: f"Database put {stored(a)}", lambda a, result: f"Database put {stored(a)}: {a.value!r}"
+        ),
+    ),
+    Watched(
+        "tinkerkit.store",
+        "Store",
+        "append",
+        Fact(lambda a: f"Database append {a.log}", lambda a, result: f"Database append {a.log}: {a.entry!r}"),
+    ),
+    Watched(
+        "tinkerkit.model",
+        "Ollama",
+        "loading",
+        Step(
+            lambda a: f"Model {a.name}",
+            lambda a: f"Loading model {a.name}",
+            lambda a, result: f"Model {a.name} loaded",
+        ),
+    ),
+    Watched(
+        "tinkerkit.conversation",
+        "Talk",
+        "warm",
+        Step(
+            lambda a: "Chat model loading",
+            lambda a: "Loading the chat model",
+            lambda a, result: "Chat model loading started",
+        ),
+    ),
+    WatchedFunction(
+        "tinkerkit.channels",
+        "connect_by_address",
+        Step(
+            lambda a: f"Connection to {host(a)}",
+            lambda a: f"Connecting to {host(a)}",
+            lambda a, result: f"Connected to {host(a)} at {result.getpeername()[0]} by {ip_version(result)}",
+        ),
+    ),
+    Watched(
+        "tinkerkit.conversation",
+        "Desk",
+        "run",
+        Step(
+            lambda a: "Conversation", lambda a: "Conversation starts", lambda a, result: "Conversation ends"
+        ),
+    ),
+    Watched(
+        "tinkerkit.conversation",
+        "Desk",
+        "handle",
+        Step(
+            lambda a: f"{channel_kind(a)} message",
+            lambda a: f"Handling a {channel_kind(a)} message: {a.message.text!r}",
+            lambda a, result: f"{channel_kind(a)} message handled",
+        ),
+    ),
+    Watched(
+        "tinkerkit.channels",
+        "TelegramChannel",
+        "send",
+        Step(
+            lambda a: f"Telegram chat {a.chat}",
+            lambda a: f"Sending to Telegram chat {a.chat}: {a.text!r}",
+            lambda a, result: f"Telegram chat {a.chat} got message {result!r}",
+        ),
+    ),
+    Watched(
+        "tinkerkit.conversation",
+        "Desk",
+        "close_channels",
+        Step(lambda a: "Channels", lambda a: "Closing the channels", lambda a, result: "Channels closed"),
+    ),
+    Watched(
+        "tinkerkit.conversation",
+        "Desk",
+        "unload_models",
+        Step(lambda a: "Models", lambda a: "Unloading the models", lambda a, result: "Models unloaded"),
+    ),
 )
 
 originals = {}
 
 
 def install():
+    if said in say.followers:
+        return
+    note(f"Tinker is starting: tinker {' '.join(sys.argv[1:])}")
     for watched in WATCHED:
         for cls in watched.classes():
-            wrap(cls, watched.method)
+            wrap(cls, watched.method, watched.sentence)
+    say.follow(said)
+    atexit.register(stopped)
 
 
 def uninstall():
     for (cls, method), original in originals.items():
         setattr(cls, method, original)
     originals.clear()
+    if said in say.followers:
+        say.followers.remove(said)
+    atexit.unregister(stopped)
 
 
-def wrap(cls, method):
+def said(message):
+    note(f"Said: {message.text}")
+
+
+def stopped():
+    note("Tinker stopped")
+
+
+def note(sentence):
+    TraceLog.write(prefixed(depth.level, sentence))
+
+
+def wrap(cls, method, sentence):
     if (cls, method) in originals:
         return
     original = cls.__dict__[method]
     originals[cls, method] = original
-    setattr(cls, method, wrapped(original, f"{cls.__name__}.{method}"))
+    setattr(cls, method, wrapped(original, sentence))
 
 
-def wrapped(original, call):
+def wrapped(original, sentence):
     if isinstance(original, staticmethod):
-        return staticmethod(watcher(original.__func__, call, skipped=0))
-    return watcher(original, call, skipped=1)
+        return staticmethod(watcher(original.__func__, sentence))
+    return watcher(original, sentence)
 
 
 class Depth(threading.local):
@@ -98,73 +331,86 @@ class Depth(threading.local):
 depth = Depth()
 
 
-def watcher(function, call, skipped):
+def watcher(function, sentence):
+    signature = inspect.signature(function)
+
     @functools.wraps(function)
     def watch(*args, **kwargs):
-        started = Call(call, args[skipped:], kwargs, depth.level)
+        started = Call(sentence, lambda: bound(signature, args, kwargs), depth.level)
         depth.level += 1
         try:
             result = function(*args, **kwargs)
         except BaseException as error:
-            started.end(failed, error)
+            started.fail(error)
             raise
         finally:
             depth.level -= 1
-        started.end(returned, result)
+        started.end(result)
         return result
 
     return watch
 
 
-class Call:
-    def __init__(self, call, args, kwargs, level):
-        self.call, self.args, self.kwargs, self.level = call, args, kwargs, level
-        self.at, self.clock = datetime.now(), time.perf_counter()
+def bound(signature, args, kwargs):
+    arguments = signature.bind(*args, **kwargs)
+    arguments.apply_defaults()
+    return SimpleNamespace(**arguments.arguments)
 
-    def end(self, outcome, value):
+
+class Call:
+    def __init__(self, sentence, binding, level):
+        self.sentence, self.binding, self.level = sentence, binding, level
+        self.clock = time.perf_counter()
+        self.write(lambda: self.sentence.starts(self.arguments))
+
+    @functools.cached_property
+    def arguments(self):
+        return self.binding()
+
+    def end(self, result):
         seconds = time.perf_counter() - self.clock
+        self.write(lambda: [f"{self.sentence.end(self.arguments, result)} ({seconds:.3f}s)"])
+
+    def fail(self, error):
+        seconds = time.perf_counter() - self.clock
+        self.write(
+            lambda: [
+                f"{self.sentence.subject(self.arguments)} failed: {type(error).__name__}: {error} ({seconds:.3f}s)"
+            ]
+        )
+
+    def write(self, sentences):
         try:
-            TraceLog.write(self.entry(seconds) | outcome(value))
+            for sentence in sentences():
+                TraceLog.write(prefixed(self.level, sentence))
         except Exception:
             pass
 
-    def entry(self, seconds):
-        return {
-            "at": self.at.isoformat(timespec="milliseconds"),
-            "pid": os.getpid(),
-            "call": self.call,
-            "seconds": round(seconds, 4),
-            "depth": self.level,
-            "args": [cut(value) for value in self.args]
-            + [f"{name}={cut(value)}" for name, value in self.kwargs.items()],
-        }
 
-
-def returned(result):
-    return {"result": cut(result)}
-
-
-def failed(error):
-    return {"error": f"{type(error).__name__}: {error}"}
-
-
-def cut(value):
-    return repr(value)[:LOG_VALUE_CHARS]
+def prefixed(level, sentence):
+    clock = datetime.now().strftime("%H:%M:%S.%f")[:-3]
+    return f"{clock} [{os.getpid()}] {'  ' * level}{sentence}".replace("\n", "\\n")
 
 
 class TraceLog:
     lock = threading.Lock()
+    day = None
 
     @classmethod
-    def write(cls, entry):
-        line = json.dumps(entry) + "\n"
+    def write(cls, text):
         try:
             with cls.lock:
                 log = Home.tinker_log()
                 cls.rotate_when_big(log)
-                cls.append(log, line)
+                today = date.today().isoformat()
+                cls.append(log, cls.day_line(today) + text + "\n")
+                cls.day = today
         except OSError:
             pass
+
+    @classmethod
+    def day_line(cls, today):
+        return "" if today == cls.day else f"── {today} ──\n"
 
     @classmethod
     def append(cls, log, line):

@@ -32,7 +32,6 @@ DEFAULT_CONFIG = frozendict(
         "fetch_max_bytes": 2000000,
         "embed_model": "",
         "projects": "~/Projects",
-        "log": "on",
     }
 )
 
@@ -58,8 +57,6 @@ class Setting(namedtuple("Setting", "kind owner least whole above", defaults=("c
                 return self.in_range(value)
             case "duration":
                 return bool(self.SECONDS_OR_DURATION_RE.fullmatch(str(value)))
-            case "switch":
-                return value in ("on", "off")
         return value is None or isinstance(value, str)
 
     def in_range(self, value):
@@ -74,8 +71,6 @@ class Setting(namedtuple("Setting", "kind owner least whole above", defaults=("c
                 return f"{whole} above {self.least}" if self.above else f"{whole}, {self.least} or more"
             case "duration":
                 return "seconds (0, 300; -1 keeps the model loaded) or a duration (10m, 1h)"
-            case "switch":
-                return "on or off"
         return "text"
 
 
@@ -100,7 +95,6 @@ SETTINGS = frozendict(
         "fetch_max_bytes": Setting("number", least=1000, whole=True),
         "embed_model": Setting("text", "model"),
         "projects": Setting("text"),
-        "log": Setting("switch"),
     }
 )
 

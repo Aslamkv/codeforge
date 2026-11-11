@@ -481,22 +481,13 @@ def test_config(measured_model, capsys):
     assert Config.get("test_timeout") == 90 and "test_timeout is 90 now" in capsys.readouterr().out
 
 
-def logged_calls():
-    log = Home.tinker_log()
-    return [json.loads(line)["call"] for line in log.read_text().splitlines()] if log.exists() else []
-
-
 @pytest.mark.spec("LOG-7")
-def test_a_command_is_logged_while_log_is_on_and_not_from_the_command_after_log_off():
-    cli.run(parse("config", "log", "off"), datetime.datetime.now())
+def test_a_plain_command_writes_tinker_log():
+    cli.run(parse("config"), datetime.datetime.now())
     logger.uninstall()
-    assert "Commands.run" in logged_calls()
-    before = logged_calls()
-    cli.run(parse("config", "log", "on"), datetime.datetime.now())
-    logger.uninstall()
-    assert logged_calls() == before
-    cli.run(parse("config", "log", "off"), datetime.datetime.now())
-    assert logged_calls().count("Commands.run") == before.count("Commands.run") + 1
+    log = Home.tinker_log().read_text()
+    assert "Tinker is starting: tinker" in log
+    assert "Running tinker config (" in log and "tinker config finished" in log
 
 
 @pytest.mark.spec("CLI-4")

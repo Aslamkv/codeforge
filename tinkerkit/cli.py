@@ -113,8 +113,7 @@ def run(args, started_at):
     if args.reset:
         return Home.reset(args.yes)
     open_home()
-    if Config.get("log") == "on":
-        logger.install()
+    logger.install()
     if Cli.works_for_hours(args):
         Home.keep_awake()
     if Commands(args, started_at).run():
