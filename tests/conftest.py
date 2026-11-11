@@ -8,7 +8,7 @@ import time
 import pytest
 
 import tinkerkit.cli  # noqa: F401
-from tinkerkit import conversation, jobs
+from tinkerkit import conversation, jobs, logger
 from tinkerkit.jobs import Queue, Runner
 from tinkerkit.messages import say
 from tinkerkit.model import Model, Models, Ollama
@@ -59,6 +59,12 @@ def tinker_home(tmp_path, monkeypatch):
     home = tmp_path / "tinker-home" / ".tinker"
     monkeypatch.setattr(Home, "root", home)
     return home
+
+
+@pytest.fixture(autouse=True)
+def nothing_watched():
+    yield
+    logger.uninstall()
 
 
 @pytest.fixture(autouse=True)

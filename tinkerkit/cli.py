@@ -13,7 +13,7 @@ lazy import traceback
 lazy import webbrowser
 lazy from pathlib import Path
 
-from . import conversation, exercising, reading
+from . import conversation, exercising, logger, reading
 from .commands import BY_NAME, COMMANDS, GROUPS, kind_of, refs, taught_command
 from .jobs import (
     STATES,
@@ -113,6 +113,8 @@ def run(args, started_at):
     if args.reset:
         return Home.reset(args.yes)
     open_home()
+    if Config.get("log") == "on":
+        logger.install()
     if Cli.works_for_hours(args):
         Home.keep_awake()
     if Commands(args, started_at).run():

@@ -7,14 +7,14 @@ import sys
 import pytest
 from conftest import LOADING_PHASE, MEASURED, MODEL, PY, TOOLCHAIN, criterion, file_block, plan_of, record_of
 
-from tinkerkit import cli
+from tinkerkit import cli, logger
 from tinkerkit.cli import Cli, Commands, CycleRunner, Doctor, ProjectFolder, ProjectRun
 from tinkerkit.knowledge import Knowledge, Library, ResearchLearner
 from tinkerkit.model import LoadedModel, Models, Ollama, OllamaError, ThinkLevels
 from tinkerkit.principles import Principles
 from tinkerkit.project import Runs, Tracker, project_store
 from tinkerkit.session import Phase, Stopped
-from tinkerkit.settings import FIX_PHASES, PHASES, QUALITY_VERSION, WORK_THINK, Config
+from tinkerkit.settings import FIX_PHASES, PHASES, QUALITY_VERSION, WORK_THINK, Config, Home
 from tinkerkit.system import SYSTEM_CHECKS, SystemCheck
 from tinkerkit.workspace import Toolchain
 
@@ -479,6 +479,24 @@ def test_config(measured_model, capsys):
         assert line in out, line
     Commands(parse("config", "test_timeout", "90")).run()
     assert Config.get("test_timeout") == 90 and "test_timeout is 90 now" in capsys.readouterr().out
+
+
+def logged_calls():
+    log = Home.tinker_log()
+    return [json.loads(line)["call"] for line in log.read_text().splitlines()] if log.exists() else []
+
+
+@pytest.mark.spec("LOG-7")
+def test_a_command_is_logged_while_log_is_on_and_not_from_the_command_after_log_off():
+    cli.run(parse("config", "log", "off"), datetime.datetime.now())
+    logger.uninstall()
+    assert "Commands.run" in logged_calls()
+    before = logged_calls()
+    cli.run(parse("config", "log", "on"), datetime.datetime.now())
+    logger.uninstall()
+    assert logged_calls() == before
+    cli.run(parse("config", "log", "off"), datetime.datetime.now())
+    assert logged_calls().count("Commands.run") == before.count("Commands.run") + 1
 
 
 @pytest.mark.spec("CLI-4")

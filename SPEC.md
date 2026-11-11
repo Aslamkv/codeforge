@@ -100,6 +100,7 @@ listed above it:
 | `planning` | recall, the spec, the contracts where files meet, and their review |
 | `building` | setup, the tests, the code, and fixing until every test passes |
 | `finishing` | tidy, the README, the final review and the lessons |
+| `logger` | the trace of what Tinker does, wrapped around chosen methods from outside, so no other module knows it (`install`, `uninstall`, `WATCHED`, `TraceLog`) |
 | `cli` | the main system: the command line (`Cli`, `Commands`, `Doctor`), one run (`ProjectRun`, `ProjectFolder`) and the cycle of phases (`CycleRunner`) |
 
 - **ARCH-1** Each `tinkerkit` module imports only the modules listed above it in the table. The one exception
@@ -125,6 +126,7 @@ The Tinker home (**SET-1**) holds:
 | `tinker.db` | the home database (mode 600), below |
 | `channel-NAME.lock` | the lock of each chat channel a Tinker listens to |
 | `web-requests.log` | every web search and fetch Tinker made, one JSON line each (**WEB-6**) |
+| `tinker.log` | what Tinker does, one JSON line per watched call, while `log` is on (**LOG-1**); rotated as `tinker-STAMP.log.zip` |
 | `memory.html` | the page `tinker memory --graph` writes |
 | `reading/` | the files sent in a chat to read |
 
@@ -281,7 +283,7 @@ The home and its database, the settings, numbered lists, and the one way to dele
   max_growth `1.15`, test_timeout `60`, web_timeout `30`, learn_missing `2`,
   learn_cutoff `0.0`, learn_coverage `0.6`, learn_pages `8`, learn_min_pages `2`, learn_searches `3`,
   tool_docs_pages `5`, docs_latest_days `30`, fetch_workers `6`, fetch_timeout `15`, fetch_max_bytes `2000000`,
-  embed_model `""`, projects `"~/Projects"`. web_timeout is a search's timeout; fetch_workers, fetch_timeout and
+  embed_model `""`, projects `"~/Projects"`, log `"on"`. web_timeout is a search's timeout; fetch_workers, fetch_timeout and
   fetch_max_bytes are the `Fetcher`'s workers, timeout and max_bytes; embed_model is the embedding model
   `tinker model NAME` selects.
 - **SET-3** `PHASES` and `FIX_PHASES` are the phase lists given in [The cycle](#the-cycle).
@@ -295,7 +297,7 @@ The home and its database, the settings, numbered lists, and the one way to dele
   rest). `Config.check()` checks every setting by its row, and rejects with `SystemExit`: a keep_alive that is
   neither whole seconds nor a duration (`10m`, `1h30m`); and a number outside its range, or not whole where its
   row says so (max_growth above 1, web_timeout above 0, test_timeout and learn_missing at least 1,
-  and each `learn_*`, `docs_*` and `fetch_*` limit). A boolean is never a number. Every command that needs the
+  and each `learn_*`, `docs_*` and `fetch_*` limit); and a switch that is not `on` or `off` (log). A boolean is never a number. Every command that needs the
   model checks them first.
 - **SET-6** `Config.set(key, text)` is `tinker config KEY VALUE`. It sets only the keys whose owner is
   `config`, reading the value by the row's type. A value that fails its row's check is not kept, and the
@@ -1797,6 +1799,32 @@ Tidy, the README, the final review and the lessons.
   toolchain once. With no problems noted, it makes no call. Otherwise it keeps at most 3 new lessons
   (**KNW-4**), giving the project's files and folder as the names a lesson must not have, and clears the noted
   problems.
+
+## logger (LOG)
+
+The trace of what Tinker does, for performance work and spec corrections. It wraps chosen methods from outside;
+no other module imports it or changes for it, and deleting it with its one call in `cli` leaves Tinker as it was.
+
+- **LOG-1** `Home.tinker_log()` is `tinker.log` in the home. `TraceLog.write(entry)` appends the entry as one
+  JSON line in a single write, under a lock, so threads and processes never mix lines. The path is asked of
+  `Home` at each write.
+- **LOG-2** Before a write, a `tinker.log` of `LOG_ROTATE_BYTES` (20 MB) or more is renamed to a unique name
+  and zipped as `tinker-STAMP.log.zip` in the home (STAMP `YYYYmmdd-HHMMSS-PID`), and the renamed file deleted;
+  the next write starts a new `tinker.log`. A process that loses the rename to another skips the rotation.
+- **LOG-3** `WATCHED` lists the watched methods: `Commands.run` and `ProjectRun.execute` (the command),
+  `run` of every subclass of `Phase` (each phase), `Model.ask` and `Ollama.chat` (model calls),
+  `Workspace.run` and `Workspace.start` (project commands), `Internet.search_all` and `Internet.fetch` (web),
+  `Store.get`, `Store.put` and `Store.append` (the database).
+- **LOG-4** `install()` wraps each watched method once; installing again changes nothing. `uninstall()` puts
+  every original back. A wrapped method returns and raises exactly as the original.
+- **LOG-5** Each wrapped call writes one entry when it ends: `at` (start, ISO time with milliseconds), `pid`,
+  `call` (`Class.method`), `seconds` (rounded to 4 places), `depth` (how many watched calls of this thread it
+  runs inside, 0 at the top), `args` (each argument after `self`, keywords by name, as its `repr` cut to
+  `LOG_VALUE_CHARS` (120)), and `result` (cut the same way) or `error` (`Type: message`).
+- **LOG-6** A failure to write the log never stops Tinker: the call's result or error is kept and the entry
+  dropped.
+- **LOG-7** `cli.run` installs the logger once the home is open, when `log` is `on`. `tinker config log off`
+  turns it off from the next command; `on` turns it back.
 
 ## cli (CLI)
 

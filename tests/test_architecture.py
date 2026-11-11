@@ -15,6 +15,7 @@ LAYERS = (
     "text",
     "store",
     "settings",
+    "logger",
     "system",
     "commands",
     "jobs",
