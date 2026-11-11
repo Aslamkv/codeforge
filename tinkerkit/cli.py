@@ -113,7 +113,6 @@ def run(args, started_at):
     if args.reset:
         return Home.reset(args.yes)
     open_home()
-    logger.install()
     if Cli.works_for_hours(args):
         Home.keep_awake()
     if Commands(args, started_at).run():
@@ -123,6 +122,7 @@ def run(args, started_at):
 
 def open_home():
     Home.ensure()
+    logger.install()
 
 
 class Cli:
@@ -229,6 +229,7 @@ class Cli:
         if argv[0] == "channel":
             if channels is None:
                 raise SystemExit("tinker: channels are not installed (tinkerkit/channels.py is missing)")
+            open_home()
             channels.ChannelCommand.run(argv[1:])
             raise SystemExit(0)
         if argv[0] == "clear":

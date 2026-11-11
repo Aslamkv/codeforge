@@ -1830,7 +1830,8 @@ no other module imports it or changes for it, and deleting it with its one call 
   wrapped method returns and raises exactly as the original.
 - **LOG-6** A failure to write the log never stops Tinker: the call's result or error is kept and the line
   dropped.
-- **LOG-7** `cli.run` installs the logger once the home is open, always.
+- **LOG-7** Opening the home installs the logger, always, so every command that opens it logs: the
+  conversation, talk commands, channels and every other command.
 
 ## cli (CLI)
 

@@ -490,6 +490,18 @@ def test_a_plain_command_writes_tinker_log():
     assert "Running tinker config (" in log and "tinker config finished" in log
 
 
+@pytest.mark.spec("LOG-7")
+@pytest.mark.parametrize("argv", [[], ["chat", "the capital of Norway?"], ["channel", "start"]])
+def test_the_conversation_talk_and_channels_write_tinker_log(argv, monkeypatch):
+    monkeypatch.setattr(cli.conversation, "session", lambda folder: None)
+    monkeypatch.setattr(cli.conversation, "one_shot", lambda command, text: 0)
+    monkeypatch.setattr(cli.channels.ChannelCommand, "run", staticmethod(lambda argv: None))
+    with pytest.raises(SystemExit):
+        Cli.parse(argv)
+    logger.uninstall()
+    assert "Tinker is starting: tinker" in Home.tinker_log().read_text()
+
+
 @pytest.mark.spec("CLI-4")
 def test_doctor(monkeypatch, capsys):
     assert [name for _, name, _ in Doctor().checks()] == [
