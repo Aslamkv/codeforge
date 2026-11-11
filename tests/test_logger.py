@@ -355,6 +355,24 @@ def test_a_real_store_call_returns_as_before_and_is_logged(tmp_path):
 
 
 @pytest.mark.spec("LOG-4")
+def test_a_value_read_again_unchanged_is_logged_once(tmp_path):
+    logger.install()
+    store = Store(tmp_path / "s.db")
+    store.put("c", "k", [])
+    assert [store.get("c", "k"), store.get("c", "k"), store.get("c", "other")] == [[], [], None]
+    store.put("c", "k", [1])
+    assert store.get("c", "k") == [1]
+    assert store.get("c", "k") == [1]
+    assert [PREFIX.sub("", line).rsplit(" (", 1)[0] for line in sentences()] == [
+        "Database put c/'k': []",
+        "Database get c/'k': found []",
+        "Database get c/'other': not found",
+        "Database put c/'k': [1]",
+        "Database get c/'k': found [1]",
+    ]
+
+
+@pytest.mark.spec("LOG-4")
 def test_channel_secrets_are_masked_in_the_log(tmp_path):
     logger.install()
     store = Store(tmp_path / "s.db")

@@ -1826,6 +1826,8 @@ no other module imports it or changes for it, and deleting it with its one call 
   (the chat and the text), `Desk.close_channels` and `Desk.unload_models`. Facts: `Store.get`, `Store.put`
   and `Store.append` (the table, the key, found or not, and the value). A value of `channel_secrets` is
   masked: a dict keeps its keys with each value written `***`, any other value is written `***`.
+  A `Store.get` whose line, but for its seconds, is the one this process last wrote for that table and key
+  writes nothing, so a value read again and again unchanged is written once.
 - **LOG-5** `install()` writes `Tinker is starting: tinker ARGS`, wraps each watched method once, follows `say`
   so each message is written as `Said: TEXT`, and writes `Tinker stopped` when the process exits; installing
   again changes nothing. `uninstall()` puts every original back and stops following and the exit line. A

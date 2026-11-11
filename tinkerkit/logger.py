@@ -63,6 +63,12 @@ class Step:
     def starts(self, arguments):
         return [self.start(arguments)]
 
+    def ends(self, arguments, result):
+        return [self.end(arguments, result)]
+
+    def forget(self):
+        pass
+
 
 class Fact(Step):
     def __init__(self, subject, end):
@@ -70,6 +76,22 @@ class Fact(Step):
 
     def starts(self, arguments):
         return []
+
+
+class ChangeFact(Fact):
+    def __init__(self, subject, end):
+        super().__init__(subject, end)
+        self.last = {}
+
+    def ends(self, arguments, result):
+        subject, sentence = self.subject(arguments), self.end(arguments, result)
+        if self.last.get(subject) == sentence:
+            return []
+        self.last[subject] = sentence
+        return [sentence]
+
+    def forget(self):
+        self.last.clear()
 
 
 def command_line(arguments):
@@ -199,7 +221,7 @@ WATCHED = (
         "fetch",
         Step(lambda a: "Fetch", lambda a: f"Fetching {a.urls!r}", lambda a, result: "Fetch done"),
     ),
-    Watched("tinkerkit.store", "Store", "get", Fact(lambda a: f"Database get {stored(a)}", looked_up)),
+    Watched("tinkerkit.store", "Store", "get", ChangeFact(lambda a: f"Database get {stored(a)}", looked_up)),
     Watched(
         "tinkerkit.store",
         "Store",
@@ -304,6 +326,8 @@ def uninstall():
     for (cls, method), original in originals.items():
         setattr(cls, method, original)
     originals.clear()
+    for watched in WATCHED:
+        watched.sentence.forget()
     if said in say.followers:
         say.followers.remove(said)
     atexit.unregister(stopped)
@@ -380,7 +404,11 @@ class Call:
 
     def end(self, result):
         seconds = time.perf_counter() - self.clock
-        self.write(lambda: [f"{self.sentence.end(self.arguments, result)} ({seconds:.3f}s)"])
+        self.write(
+            lambda: [
+                f"{sentence} ({seconds:.3f}s)" for sentence in self.sentence.ends(self.arguments, result)
+            ]
+        )
 
     def fail(self, error):
         seconds = time.perf_counter() - self.clock
