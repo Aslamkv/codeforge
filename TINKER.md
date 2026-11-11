@@ -600,7 +600,7 @@ tinker config keep_alive 10m        # keep the model loaded 10 idle minutes (30m
 Tinker always tells what it does in `.tinker/tinker.log`, one plain sentence per line: when it starts and stops,
 each command, phase, model call and load, project command, web request, connection, Telegram send and database
 call, with its details, result or failure and seconds taken, indented by how deep it ran, and each message it
-said. A day line opens each new day. At 20 MB it is zipped as `tinker-STAMP.log.zip` and a new log starts.
+said. Channel tokens are written as `***`. A day line opens each new day, once whichever process writes first. At 20 MB it is zipped as `tinker-STAMP.log.zip` and a new log starts.
 
 Tune how `tinker learn` uses the web:
 

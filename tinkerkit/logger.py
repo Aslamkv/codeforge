@@ -15,6 +15,8 @@ from tinkerkit.messages import say
 from tinkerkit.settings import Home
 
 LOG_ROTATE_BYTES = 20_000_000
+SECRET_TABLES = {"channel_secrets"}
+MASK = "***"
 
 
 class Watched:
@@ -102,7 +104,15 @@ def stored(arguments):
 def looked_up(arguments, result):
     if result is arguments.default:
         return f"Database get {stored(arguments)}: not found"
-    return f"Database get {stored(arguments)}: found {result!r}"
+    return f"Database get {stored(arguments)}: found {shown(arguments, result)!r}"
+
+
+def shown(arguments, value):
+    if arguments.collection not in SECRET_TABLES:
+        return value
+    if isinstance(value, dict):
+        return {key: MASK for key in value}
+    return MASK
 
 
 def host(arguments):
@@ -195,7 +205,8 @@ WATCHED = (
         "Store",
         "put",
         Fact(
-            lambda a: f"Database put {stored(a)}", lambda a, result: f"Database put {stored(a)}: {a.value!r}"
+            lambda a: f"Database put {stored(a)}",
+            lambda a, result: f"Database put {stored(a)}: {shown(a, a.value)!r}",
         ),
     ),
     Watched(
@@ -394,7 +405,6 @@ def prefixed(level, sentence):
 
 class TraceLog:
     lock = threading.Lock()
-    day = None
 
     @classmethod
     def write(cls, text):
@@ -402,15 +412,16 @@ class TraceLog:
             with cls.lock:
                 log = Home.tinker_log()
                 cls.rotate_when_big(log)
-                today = date.today().isoformat()
-                cls.append(log, cls.day_line(today) + text + "\n")
-                cls.day = today
+                cls.append(log, cls.day_line(log) + text + "\n")
         except OSError:
             pass
 
     @classmethod
-    def day_line(cls, today):
-        return "" if today == cls.day else f"── {today} ──\n"
+    def day_line(cls, log):
+        today = date.today()
+        if log.exists() and date.fromtimestamp(log.stat().st_mtime) == today:
+            return ""
+        return f"── {today.isoformat()} ──\n"
 
     @classmethod
     def append(cls, log, line):

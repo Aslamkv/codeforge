@@ -41,11 +41,6 @@ def day_line():
     return f"── {date.today().isoformat()} ──"
 
 
-@pytest.fixture(autouse=True)
-def fresh_day(monkeypatch):
-    monkeypatch.setattr(TraceLog, "day", None)
-
-
 def unwritable_home(tmp_path, monkeypatch):
     blocker = tmp_path / "blocker"
     blocker.write_text("")
@@ -64,11 +59,18 @@ def test_write_appends_one_line_per_text_after_the_day_line():
 
 
 @pytest.mark.spec("LOG-1")
-def test_the_day_line_comes_again_on_a_new_day(monkeypatch):
+def test_the_day_line_comes_again_on_a_new_day():
     TraceLog.write("first")
-    monkeypatch.setattr(TraceLog, "day", "2000-01-01")
+    os.utime(Home.tinker_log(), (0, 0))
     TraceLog.write("second")
     assert lines() == [day_line(), "first", day_line(), "second"]
+
+
+@pytest.mark.spec("LOG-1")
+def test_a_log_written_today_by_another_process_gets_no_second_day_line():
+    Home.tinker_log().write_text(f"{day_line()}\nearlier\n")
+    TraceLog.write("later")
+    assert lines() == [day_line(), "earlier", "later"]
 
 
 @pytest.mark.spec("LOG-1")
@@ -77,7 +79,7 @@ def test_write_asks_home_for_the_path_each_time(tmp_path, monkeypatch):
     other = tmp_path / "other-home"
     monkeypatch.setattr(Home, "root", other)
     TraceLog.write("second")
-    assert lines() == ["second"]
+    assert lines() == [day_line(), "second"]
 
 
 @pytest.mark.spec("LOG-1")
@@ -101,7 +103,7 @@ def test_a_big_log_is_zipped_and_a_new_log_started(monkeypatch):
     monkeypatch.setattr(logger, "LOG_ROTATE_BYTES", 100)
     TraceLog.write("x" * 200)
     TraceLog.write("after")
-    assert lines() == ["after"]
+    assert lines() == [day_line(), "after"]
     [archive] = archives()
     assert archive.name.startswith("tinker-") and archive.name.endswith(".log.zip")
     with zipfile.ZipFile(archive) as packed:
@@ -233,7 +235,6 @@ def fakes(monkeypatch):
     )
     logger.install()
     Home.tinker_log().unlink()
-    TraceLog.day = None
 
 
 @pytest.mark.spec("LOG-3")
@@ -351,6 +352,20 @@ def test_a_real_store_call_returns_as_before_and_is_logged(tmp_path):
     assert re.fullmatch(r"Database put c/'k': \{'a': 1\} \(\d+\.\d{3}s\)", put)
     assert re.fullmatch(r"Database get c/'k': found \{'a': 1\} \(\d+\.\d{3}s\)", found)
     assert re.fullmatch(r"Database get c/'missing': not found \(\d+\.\d{3}s\)", missing)
+
+
+@pytest.mark.spec("LOG-4")
+def test_channel_secrets_are_masked_in_the_log(tmp_path):
+    logger.install()
+    store = Store(tmp_path / "s.db")
+    store.put("channel_secrets", "telegram", {"token": "secret"})
+    store.put("channel_secrets", "plain", "secret")
+    assert store.get("channel_secrets", "telegram") == {"token": "secret"}
+    put, plain, found = sentences()
+    assert "secret" not in Home.tinker_log().read_text().replace("channel_secrets", "")
+    assert put.startswith("Database put channel_secrets/'telegram': {'token': '***'} (")
+    assert plain.startswith("Database put channel_secrets/'plain': '***' (")
+    assert found.startswith("Database get channel_secrets/'telegram': found {'token': '***'} (")
 
 
 def started_and_ended(start, end):

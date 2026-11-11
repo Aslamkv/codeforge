@@ -1807,7 +1807,8 @@ no other module imports it or changes for it, and deleting it with its one call 
 
 - **LOG-1** `Home.tinker_log()` is `tinker.log` in the home. `TraceLog.write(text)` appends one line of plain
   text in a single write, under a lock, so threads and processes never mix lines. The path is asked of `Home`
-  at each write. Before a process's first line of a day it writes the day line `── YYYY-MM-DD ──`.
+  at each write. Before the first line of a day in `tinker.log`, from any process, it writes the day line
+  `── YYYY-MM-DD ──`: a log missing or last written on another day gets one, any other none.
 - **LOG-2** Before a write, a `tinker.log` of `LOG_ROTATE_BYTES` (20 MB) or more is renamed to a unique name
   and zipped as `tinker-STAMP.log.zip` in the home (STAMP `YYYYmmdd-HHMMSS-PID`), and the renamed file deleted;
   the next write starts a new `tinker.log`. A process that loses the rename to another skips the rotation.
@@ -1823,7 +1824,8 @@ no other module imports it or changes for it, and deleting it with its one call 
   `channels.connect_by_address` (the host; at the end the address reached and whether by IPv4 or IPv6),
   `Desk.run` (the conversation), `Desk.handle` (the channel and what the user asked), `TelegramChannel.send`
   (the chat and the text), `Desk.close_channels` and `Desk.unload_models`. Facts: `Store.get`, `Store.put`
-  and `Store.append` (the table, the key, found or not, and the value).
+  and `Store.append` (the table, the key, found or not, and the value). A value of `channel_secrets` is
+  masked: a dict keeps its keys with each value written `***`, any other value is written `***`.
 - **LOG-5** `install()` writes `Tinker is starting: tinker ARGS`, wraps each watched method once, follows `say`
   so each message is written as `Said: TEXT`, and writes `Tinker stopped` when the process exits; installing
   again changes nothing. `uninstall()` puts every original back and stops following and the exit line. A
