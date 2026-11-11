@@ -264,37 +264,51 @@ def test_every_prompt_that_writes_searches_writes_them_with_engines_and_count():
 @pytest.mark.spec("PRM-13")
 def test_the_templates_format():
     assert "60 words" in Prompts.BRIEF_SYSTEM.format(words=60)
-    assert "over Telegram" in Prompts.CHAT_SYSTEM.format(kind="Telegram", commands="status")
+    chat = Prompts.CHAT_SYSTEM.format(style=Prompts.PHONE_STYLE, index="status", state="")
+    assert Prompts.PHONE_STYLE in chat and "status" in chat
+    fill = Prompts.CHAT_FILL_SYSTEM.format(commands="/clear chat", state="Running: calc")
+    assert "/clear chat" in fill and "Running: calc" in fill
+    tell = Prompts.COMMAND_TELL_SYSTEM.format(style=Prompts.TERMINAL_STYLE)
+    assert Prompts.TERMINAL_STYLE in tell
     assert '{"command": ' in Prompts.COMMAND_SYSTEM.format(system="Darwin", shell="zsh", folder="/tmp")
     systems = [value for key, value in vars(Prompts).items() if key.endswith("_SYSTEM")]
     assert len(systems) >= 25 and all(isinstance(system, str) and system.strip() for system in systems)
 
 
 @pytest.mark.spec("CNV-18")
-def test_the_chat_prompt_asks_for_only_the_command_line_when_asked_to_do_what_one_does():
-    chat = Prompts.CHAT_SYSTEM.format(kind="Telegram", commands="/clear chat")
-    assert "only that command line" in chat and "`/clear chat`" in chat and "answer in words" in chat
+def test_the_phone_style_is_brief_and_the_terminal_style_is_not_a_phone():
+    assert Prompts.PHONE_STYLE != Prompts.TERMINAL_STYLE
+    assert "phone" in Prompts.PHONE_STYLE and "short lines" in Prompts.PHONE_STYLE
+    assert "phone" not in Prompts.TERMINAL_STYLE and "short lines" not in Prompts.TERMINAL_STYLE
+    assert all("Markdown" in style for style in (Prompts.PHONE_STYLE, Prompts.TERMINAL_STYLE))
+
+
+@pytest.mark.spec("CNV-18")
+def test_the_chat_prompt_asks_for_only_the_command_names_when_asked_to_act():
+    chat = Prompts.CHAT_SYSTEM.format(style=Prompts.PHONE_STYLE, index="/clear", state="")
+    assert "only the command names, one per line" in chat and "answer in words" in chat
 
 
 @pytest.mark.spec("CNV-18", "SYS-1")
-def test_the_chat_prompt_asks_for_only_the_check_line_when_asked_what_a_system_check_tells():
-    chat = Prompts.CHAT_SYSTEM.format(kind="Telegram", commands="/system battery")
-    assert "only that check's line" in chat and "`/system battery`" in chat and "am I charged?" in chat
+def test_the_fill_prompt_asks_for_only_the_check_line_when_asked_what_a_system_check_tells():
+    fill = Prompts.CHAT_FILL_SYSTEM.format(commands="/system battery", state="")
+    assert "only that check's line" in fill and "`/system battery`" in fill and "am I charged?" in fill
 
 
 @pytest.mark.spec("CNV-18", "SYS-1")
 def test_the_chat_prompt_keeps_memory_for_the_memory_command_and_ram_for_system_ram():
-    chat = Prompts.CHAT_SYSTEM.format(kind="Telegram", commands="/memory\n/system ram")
+    chat = Prompts.CHAT_SYSTEM.format(style=Prompts.PHONE_STYLE, index="/memory\n/system", state="")
     assert "memory means Tinker's `memory` command" in chat and "only RAM means `/system ram`" in chat
 
 
 @pytest.mark.spec("CNV-18", "CNV-11")
-def test_the_chat_prompt_acts_with_options_filled_and_never_invents_required_words():
-    chat = Prompts.CHAT_SYSTEM.format(kind="Telegram", commands="/channel add [--kind KIND] [--name NAME]")
-    assert "`/channel add --kind telegram --name jarvis`" in chat and "called jarvis" in chat
-    assert "options filled from their words" in chat and "never invent" in chat
-    assert "one question back" in chat and "act on it at once" in chat
-    assert "You cannot run anything" not in chat
+def test_the_fill_prompt_acts_with_options_filled_and_never_invents_required_words():
+    fill = Prompts.CHAT_FILL_SYSTEM.format(commands="/channel add [--kind KIND] [--name NAME]", state="")
+    assert "`/channel add --kind telegram --name jarvis`" in fill and "called jarvis" in fill
+    assert "options filled from their words" in fill and "never invent" in fill
+    assert "one question back" in fill and "act on it at once" in fill
+    assert "one command per line" in fill and "`/clear chat`" in fill
+    assert "You cannot run anything" not in fill
 
 
 @pytest.mark.spec("PRM-14")

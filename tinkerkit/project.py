@@ -280,6 +280,18 @@ class Runs:
             if pointer.get("workdir") == str(workdir):
                 Home.store().delete("projects", run_id)
 
+    @staticmethod
+    def short_folder(workdir):
+        home = str(Path.home())
+        shown = ("~" + workdir[len(home) :]) if workdir.startswith(home) else workdir
+        return ("..." + shown[-29:] if len(shown) > 32 else shown)[:32]
+
+    @staticmethod
+    def task_of(entry):
+        task = entry.get("task", "").replace("\n", " ")
+        features = entry.get("features")
+        return f"[+{len(features)} feature{'s' if len(features) > 1 else ''}] " + task if features else task
+
 
 class Project:
     DEPENDENCY_FILES = {

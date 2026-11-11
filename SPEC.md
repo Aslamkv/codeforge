@@ -1048,7 +1048,7 @@ The terminal and the chats are one conversation: the same commands, the same ans
   for them the same way: the model never invents them.
 - **CNV-12** A glance (a command of kind `glance`, **CMD-1**) is answered with `glance`: the person's message goes at
   once, the answer in `GLANCE_KEPT_SECONDS`. A glance asked for in words (**CNV-18**) is answered in words instead: its
-  output is turned into a short answer to what was asked. `history [PAGE | #N]` lists the things shown by page
+  output is turned into a short answer to what was asked, written in the channel's style (**CNV-18**). `history [PAGE | #N]` lists the things shown by page
   ([State](#state)), with what was asked for each, or shows thing N again. `clear chat` takes every message out of the
   chats but the status, said in a note that goes in `DONE_NOTE_KEPT_SECONDS`. `clear history` is `tinker clear history`
   (**SET-9**): once confirmed, it forgets the history, clears the chat as `clear chat` does, and leaves nothing in the
@@ -1075,15 +1075,22 @@ The terminal and the chats are one conversation: the same commands, the same ans
 - **CNV-18** The chat asks the model only through the quick call (**MOD-23**); `Talk` and `Shell`
   read a JSON answer with `Reply.json()` (**PRM-2**), and take one that cannot be read as `{}`. `reply` keeps
   the last `CHAT_CONTEXT_MESSAGES` messages per chat, and it says plainly when no model is in use or the model
-  failed. Each turn's context holds the live state: the model in use, each channel and whether Tinker listens
-  on it, the queue and the plan that waits, so a question about them is answered directly. Tinker acts on what
-  the person asks rather than saying what to type. The chat's prompt (`CHAT_SYSTEM`) lists each command with
-  its options and arguments, and asks the model, when the person asks Tinker to do what one of the commands
-  does, to reply with only that command line, its options filled from their words (`/clear chat` for `wipe
-  the chat`, `/channel add --kind telegram --name jarvis` for `add a telegram channel called jarvis`); when
-  they ask what a `system` check tells (**SYS-1**), to reply with only that check's line (`/system battery`
-  for `am I charged?`), where memory means Tinker's `memory` command and only RAM means `/system ram`; and one
-  command per line when several are asked for (`/system time` and `/system date` for `time and date`). Words a
+  failed. Each prompt holds only what its message needs. The channel's class picks how replies are written
+  (`STYLE`): a Telegram chat is read on a phone (brief, short lines), the console is a terminal; both render
+  Markdown. Tinker acts on what the person asks rather than saying what to type, in two steps.
+  The first (`CHAT_SYSTEM`) holds the style, the commands a chat offers by name only, grouped as in `help`,
+  and the live state only when there is some: what runs now and the plan that waits. A plain question is
+  answered there in one call. To act, the model replies with only the command names, one per line, where
+  memory means Tinker's `memory` command and only RAM means `/system ram`. A named command that takes no
+  words runs at once; otherwise a second call (`CHAT_FILL_SYSTEM`) gets the same messages, each named
+  command's synopses and descriptions, and only the state those commands use: the channels and whether
+  Tinker listens on each for `channel`, the model in use for `model`, what runs and waits for the job
+  commands, the plan that waits for `confirm`, `amend` and `rename`, and the known projects (`@ID`, folder,
+  task) for a command taking `@PROJECT`. It replies with only the command lines, options filled from the
+  person's words (`/clear chat` for `wipe the chat`, `/channel add --kind telegram --name jarvis` for `add a
+  telegram channel called jarvis`); for what a `system` check tells (**SYS-1**), only that check's line
+  (`/system battery` for `am I charged?`); one command per line when several are asked for (`/system time`
+  and `/system date` for `time and date`). Words a
   command requires that the person did not give are asked for (**CNV-11**), never invented; a request that
   could mean two things gets one question back, and one that is fairly clear is acted on at once. Asked how to
   do it, it answers in words. A reply whose every line, with or without backticks, is one that `command_of`

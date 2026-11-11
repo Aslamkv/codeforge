@@ -2,6 +2,7 @@ import contextlib
 import io
 import json
 import os
+import re
 import readline
 import signal
 import subprocess
@@ -19,10 +20,11 @@ import tinkerkit.channels as channels
 import tinkerkit.conversation as conversation
 import tinkerkit.jobs as jobs
 from tinkerkit.channels import Channels
-from tinkerkit.commands import MenuRow, slash_matches, synopsis_words
+from tinkerkit.commands import BY_NAME, COMMANDS, GROUPS, MenuRow, slash_matches, synopsis_words
 from tinkerkit.conversation import (
     Channel,
     ChannelError,
+    ChatState,
     ConsoleChannel,
     ConsoleScreen,
     Desk,
@@ -1677,7 +1679,7 @@ def test_talk_reply(measured_model, fake_ollama, monkeypatch):
         fake_ollama.reply("low: a plain request").reply(f"answer {number}")
         assert talk.reply(channel, Message("1", f"question {number}")) == f"answer {number}"
     messages = fake_ollama.calls[-1]["messages"]
-    assert messages[0]["role"] == "system" and "task; status" in messages[0]["content"]
+    assert messages[0]["role"] == "system" and conversation.chat_index() in messages[0]["content"]
     assert [message["content"] for message in messages[1:]] == [
         "answer 0",
         "question 1",
@@ -1691,12 +1693,54 @@ def test_talk_reply(measured_model, fake_ollama, monkeypatch):
     assert talk.reply(channel, Message("1", "x")).startswith("⚠️ **The model did not answer:**")
 
 
+class FakeChatState:
+    def __init__(self):
+        self.named = []
+
+    def everyday(self):
+        return "Running now:\nbuild x"
+
+    def for_commands(self, names):
+        self.named.append(names)
+        return "A spec waits: calc"
+
+
+def system_of(call):
+    return call["messages"][0]["content"]
+
+
 @pytest.mark.spec("CNV-18")
-def test_each_turn_context_holds_the_live_state():
-    context = Talk.context([], lambda: "", lambda: "Model in use: n")
-    assert "Model in use: n" in context and "Running now: nothing" in context
-    running = [{"text": "build x"}]
-    assert "Running now:\nbuild x" in Talk.context(running, lambda: "", lambda: "")
+def test_the_state_reaches_the_prompt(measured_model, fake_ollama):
+    fake_ollama.reply("low: a plain request").reply("hi")
+    Talk("cmds").reply(Recorder(), Message("1", "hello"), FakeChatState())
+    assert system_of(fake_ollama.calls[-1]).endswith("\n\nRunning now:\nbuild x")
+    fake_ollama.reply("low: a plain request").reply("hi")
+    Talk("cmds").reply(Recorder(), Message("1", "hello"))
+    assert "Running now" not in system_of(fake_ollama.calls[-1])
+
+
+@pytest.mark.spec("CNV-18")
+def test_a_named_command_taking_words_gets_a_second_call(measured_model, fake_ollama):
+    talk, state = Talk("cmds"), FakeChatState()
+    fake_ollama.reply("low: a plain request").reply("`/amend`").reply("/amend handle negatives")
+    assert talk.reply(Recorder(), Message("1", "also handle negatives"), state) == "/amend handle negatives"
+    fill = system_of(fake_ollama.calls[-1])
+    assert conversation.command_details(["amend"]) in fill and fill.endswith("\n\nA spec waits: calc")
+    assert "Running now" not in fill and state.named == [["amend"]]
+    assert [message["content"] for message in fake_ollama.calls[-1]["messages"][1:]] == [
+        "also handle negatives"
+    ]
+    assert talk.said[("rec", "1")][-1]["content"] == "/amend handle negatives"
+
+
+@pytest.mark.spec("CNV-18")
+def test_a_wordless_name_or_a_full_line_takes_one_call(measured_model, fake_ollama):
+    fake_ollama.reply("/runs")
+    assert Talk("cmds").reply(Recorder(), Message("1", "what projects")) == "/runs"
+    calls = len(fake_ollama.calls)
+    fake_ollama.reply("low: a plain request").reply("/amend handle negatives")
+    assert Talk("cmds").reply(Recorder(), Message("1", "also negatives")) == "/amend handle negatives"
+    assert len(fake_ollama.calls) == calls + 2
 
 
 @pytest.mark.spec("CNV-18")
@@ -1732,7 +1776,7 @@ def test_a_chat_reply_that_is_a_command_line_is_run_at_once(desk, monkeypatch):
     desk, channel, _ = desk
     chat = chatted(desk, channel, monkeypatch, [])
     chat("/clear chat", lambda last: last.startswith("🧹 **Chat cleared:**"))
-    chat("`/status`", lambda last: last == "Tinker is up.", "Tinker is up.")
+    chat("`/status`", lambda last: last == "Tinker is up.", "/status", "Tinker is up.")
     handled = []
     monkeypatch.setattr(desk, "answer", lambda message, channel: handled.append(message.text))
     chat("/fix the login bug", lambda last: handled == ["/fix the login bug"])
@@ -2057,7 +2101,7 @@ def test_the_terminal_starts_listening_on_enabled_channels_not_yet_listened_to(t
 
 
 @pytest.mark.spec("CNV-18")
-def test_the_live_state_names_the_model_and_each_channel_with_whether_it_is_listened_to(desk, monkeypatch):
+def test_the_chat_state_names_the_model_and_each_channel_with_whether_it_is_listened_to(desk, monkeypatch):
     desk, _, _ = desk
     desk.channels.append(Recorder("jarvis"))
     settings = {
@@ -2066,15 +2110,54 @@ def test_the_live_state_names_the_model_and_each_channel_with_whether_it_is_list
     }
     monkeypatch.setattr(channels.Channels, "settings", lambda: settings)
     Config.save(model="n")
-    state = desk.live_state()
-    assert "Model in use: n" in state
+    state = ChatState(desk)
+    assert state.model() == "Model in use: n"
     assert (
-        "jarvis (telegram, enabled): listening" in state
-        and "bot (telegram, disabled): not listening" in state
+        "jarvis (telegram, enabled): listening" in state.channels()
+        and "bot (telegram, disabled): not listening" in state.channels()
     )
     monkeypatch.setattr(channels.Channels, "settings", lambda: {})
     Config.save(model="")
-    assert desk.live_state() == "Model in use: none picked yet\nChannels: none set up"
+    assert state.model() == "Model in use: none picked yet" and state.channels() == "Channels: none set up"
+
+
+def quiet_chat_state(desk, monkeypatch, running=(), plan="", entries=()):
+    monkeypatch.setattr(desk, "running_now", lambda: list(running))
+    monkeypatch.setattr(Desk, "plan_shown", staticmethod(lambda waiting: plan))
+    monkeypatch.setattr(conversation.Runs, "entries", staticmethod(lambda: list(entries)))
+    monkeypatch.setattr(channels.Channels, "settings", lambda: {})
+    Config.save(model="n")
+    return ChatState(desk)
+
+
+@pytest.mark.spec("CNV-18")
+def test_the_everyday_chat_state_holds_what_runs_and_the_plan_that_waits(desk, monkeypatch):
+    desk, _, _ = desk
+    state = quiet_chat_state(desk, monkeypatch)
+    assert state.running() == state.waiting() == state.projects() == state.everyday() == ""
+    state = quiet_chat_state(
+        desk, monkeypatch, running=[{"text": "job 1"}, {"text": "job 2"}], plan="the plan"
+    )
+    assert state.everyday() == (
+        "Running now:\njob 1\n\njob 2\n\n"
+        "A spec waits for the person (confirm builds it, amend WHAT changes it):\nthe plan"
+    )
+
+
+@pytest.mark.spec("CNV-18")
+def test_the_chat_state_for_commands_holds_only_the_pieces_they_use(desk, monkeypatch):
+    desk, _, _ = desk
+    entry = {"id": "3", "workdir": "/tmp/app", "task": "an app"}
+    state = quiet_chat_state(desk, monkeypatch, running=[{"text": "job 1"}], plan="the plan", entries=[entry])
+    assert state.for_commands(["model"]) == "Model in use: n"
+    assert state.for_commands(["confirm"]) == state.waiting() + "\n\n" + state.projects()
+    assert state.for_commands(["queue"]) == state.running() + "\n\n" + state.waiting()
+    assert state.for_commands(["jobs", "model", "stop"]) == "\n\n".join(
+        ["Model in use: n", state.running(), state.waiting()]
+    )
+    assert state.projects() == "Known projects:\n@3 /tmp/app: an app"
+    assert state.for_commands(["status"]) == state.projects()
+    assert state.for_commands(["help"]) == ""
 
 
 @pytest.mark.spec("CNV-9")
@@ -2924,6 +3007,29 @@ def test_the_commands_brief_keeps_each_commands_arguments_description_and_option
     assert conversation.commands_brief() == (
         "- `/task WHAT` build something new (--spec FILE)\n- `/channel add [--kind KIND]` add one"
     )
+
+
+@pytest.mark.spec("CNV-18")
+def test_the_chat_index_names_each_chat_command_once_grouped_as_in_help():
+    index = conversation.chat_index()
+    named = re.findall(r"/(\S+)", index)
+    chat_names = [command.name for command in COMMANDS if command.name and command.chat]
+    assert named == [
+        command.name
+        for group in GROUPS
+        for command in COMMANDS
+        if command.group == group and command.name in chat_names
+    ]
+    assert all(re.fullmatch(r"[A-Z][\w ]*: /\S+( /\S+)*", line) for line in index.splitlines())
+    assert "/clear" in index and not set(named) - set(chat_names)
+
+
+@pytest.mark.spec("CNV-18")
+def test_the_command_details_give_only_the_named_commands_rows():
+    details = conversation.command_details(["clear", "system"]).splitlines()
+    rows = [row for name in ("clear", "system") for row in BY_NAME[name].rows]
+    assert details == [f"- `/{synopsis}` {what}" for synopsis, what in rows]
+    assert conversation.command_details(["no-such-command"]) == ""
 
 
 @pytest.mark.spec("CNV-22")

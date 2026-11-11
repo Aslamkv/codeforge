@@ -17,7 +17,7 @@ lazy import time
 lazy import webbrowser
 lazy from pathlib import Path
 
-from .commands import BY_NAME, COMMANDS, CommandMenu, deletes, kind_of, refs
+from .commands import BY_NAME, COMMANDS, GROUPS, CommandMenu, deletes, kind_of, refs
 from .jobs import (
     Jobs,
     Queue,
@@ -164,7 +164,7 @@ def one_shot(command, text):
     if not text and command != "run":
         return f"tinker {command} needs words after it, e.g. tinker {command} {'hello' if command == 'chat' else '...'}"
     if command == "chat":
-        console.show(chat, None, talk.reply(console, message, "", CHAT_MAX_REPLY_TOKENS), done=True)
+        console.show(chat, None, talk.reply(console, message), done=True)
     elif command == "run":
         Desk([console], Path.cwd()).run_app(console, chat, [text])
     else:
@@ -494,9 +494,8 @@ class Desk:
                 channel,
                 message,
                 self.running_now,
-                lambda: self.plan_shown(self.waiting_plan),
+                ChatState(self),
                 on_command=lambda line: self.replied(channel, message, line),
-                state=self.live_state,
             )
             return
         reply = self.answer(message, channel)
@@ -514,18 +513,6 @@ class Desk:
         if kind == "own" and not self.questions.waiting(channel, message.chat):
             return f"✅ {reply}"
         return reply
-
-    def live_state(self):
-        from .channels import Channels
-
-        listened = {channel.name for channel in self.channels}
-        channels = [
-            f"- {name} ({settings.get('kind', '?')}, {'enabled' if settings.get('enabled') else 'disabled'}): "
-            + ("listening" if name in listened else "not listening")
-            for name, settings in Channels.settings().items()
-        ]
-        model = f"Model in use: {Config.get('model') or 'none picked yet'}"
-        return model + ("\nChannels:\n" + "\n".join(channels) if channels else "\nChannels: none set up")
 
     def chose(self, channel, message, command):
         pick = model_pick(message.text)
@@ -1213,6 +1200,84 @@ class Desk:
         )
 
 
+class ChatState:
+    PIECES = ("channels", "model", "running", "waiting", "projects")
+    USES = frozendict(
+        channel=("channels",),
+        model=("model",),
+        stop=("running", "waiting"),
+        jobs=("running", "waiting"),
+        resume=("running", "waiting"),
+        queue=("running", "waiting"),
+        confirm=("waiting",),
+        amend=("waiting",),
+        rename=("waiting",),
+    )
+
+    def __init__(self, desk):
+        self.desk = desk
+
+    def everyday(self):
+        return self.joined(("running", "waiting"))
+
+    def for_commands(self, names):
+        used = {piece for name in names for piece in self.pieces_of(name)}
+        return self.joined(piece for piece in self.PIECES if piece in used)
+
+    def pieces_of(self, name):
+        command = BY_NAME.get(name)
+        takes_a_project = command and any(
+            "@PROJECT" in (argument.metavar or "") for argument in command.arguments
+        )
+        return self.USES.get(name, ()) + (("projects",) if takes_a_project else ())
+
+    def joined(self, pieces):
+        return "\n\n".join(text for text in (getattr(self, piece)() for piece in pieces) if text)
+
+    def running(self):
+        running = self.desk.running_now()
+        return "Running now:\n" + "\n\n".join(run["text"] for run in running) if running else ""
+
+    def waiting(self):
+        plan = Desk.plan_shown(self.desk.waiting_plan)
+        return (
+            f"A spec waits for the person (confirm builds it, amend WHAT changes it):\n{plan}" if plan else ""
+        )
+
+    def channels(self):
+        from .channels import Channels
+
+        listened = {channel.name for channel in self.desk.channels}
+        channels = [
+            f"- {name} ({settings.get('kind', '?')}, {'enabled' if settings.get('enabled') else 'disabled'}): "
+            + ("listening" if name in listened else "not listening")
+            for name, settings in Channels.settings().items()
+        ]
+        return "Channels:\n" + "\n".join(channels) if channels else "Channels: none set up"
+
+    def model(self):
+        return f"Model in use: {Config.get('model') or 'none picked yet'}"
+
+    def projects(self):
+        entries = Runs.entries()
+        lines = [
+            f"@{entry.get('id', '?')} {Runs.short_folder(entry.get('workdir', ''))}: {Runs.task_of(entry)}"
+            for entry in entries
+        ]
+        return "Known projects:\n" + "\n".join(lines) if lines else ""
+
+
+class NoChatState:
+    def everyday(self):
+        return ""
+
+    def for_commands(self, names):
+        return ""
+
+
+NO_CHAT_STATE = NoChatState()
+
+
 def shown_output(output):
     return first_lines(Markup.columns(output.strip()) or "(nothing)", 40)
 
@@ -1389,26 +1454,16 @@ class Talk:
         self.commands, self.said, self.lock, self.turn = commands, {}, threading.Lock(), threading.Lock()
         self.pausing_jobs = pausing_jobs
 
-    def answer(
-        self,
-        channel,
-        message,
-        now,
-        waiting=lambda: "",
-        write=None,
-        on_shown=None,
-        on_command=None,
-        state=lambda: "",
-    ):
+    def answer(self, channel, message, now, state=NO_CHAT_STATE, write=None, on_shown=None, on_command=None):
         threading.Thread(
             target=self.answering,
-            args=(channel, message, now, waiting, write or self.reply, on_shown, on_command, state),
+            args=(channel, message, now, state, write or self.reply, on_shown, on_command),
             daemon=True,
         ).start()
 
-    def answering(self, channel, message, now, waiting, write_reply, on_shown, on_command, state=lambda: ""):
+    def answering(self, channel, message, now, state, write_reply, on_shown, on_command):
         running, written, reply = now(), threading.Event(), []
-        asked = (channel, message, self.context(running, waiting, state), CHAT_MAX_REPLY_TOKENS)
+        asked = (channel, message, state, CHAT_MAX_REPLY_TOKENS)
         threading.Thread(target=self.write, args=(write_reply, asked, reply, written), daemon=True).start()
         note = self.busy_until(written, running, now, channel, message.chat)
         lines = replied_commands(reply[0]) if on_command and reply else []
@@ -1423,21 +1478,6 @@ class Talk:
         )
         if on_shown:
             on_shown(note)
-
-    @staticmethod
-    def context(running, waiting, state=lambda: ""):
-        context = [state()]
-        context += [
-            "Running now:\n" + "\n\n".join(run["text"] for run in running)
-            if running
-            else "Running now: nothing"
-        ]
-        context += [
-            f"A spec waits for the person (confirm builds it, amend WHAT changes it):\n{waiting()}"
-            if waiting()
-            else ""
-        ]
-        return "\n\n".join(piece for piece in context if piece)
 
     def write(self, write_reply, asked, reply, written):
         try:
@@ -1468,7 +1508,7 @@ class Talk:
             ]
         return "\n".join(lines)
 
-    def reply(self, channel, message, now="", tokens=CHAT_MAX_REPLY_TOKENS):
+    def reply(self, channel, message, state=NO_CHAT_STATE, tokens=CHAT_MAX_REPLY_TOKENS):
         if not Models.quick():
             return (
                 "⚠️ **No model is in use yet**, so I cannot chat: `tinker model NAME` picks "
@@ -1476,13 +1516,22 @@ class Talk:
             )
         said = self.chat_of(channel, message.chat)
         asked = self.remembered(said, "user", message.text)
-        system = Prompts.CHAT_SYSTEM.format(kind=channel.KIND.title(), commands=self.commands)
-        system += f"\n\n{now}" if now else "\n\nNo task is running now."
         level = reviewed_level(message.text)
+        names_system = Prompts.CHAT_SYSTEM.format(
+            style=channel.STYLE, index=chat_index(), state=state_part(state.everyday())
+        )
         try:
             text = self.ask(
-                channel, message.chat, [{"role": "system", "content": system}] + asked, tokens, level
+                channel, message.chat, [{"role": "system", "content": names_system}] + asked, tokens, level
             )
+            names = named_commands(text or "")
+            if any(takes_words(name) for name in names):
+                fill_system = Prompts.CHAT_FILL_SYSTEM.format(
+                    commands=command_details(names), state=state_part(state.for_commands(names))
+                )
+                text = self.ask(
+                    channel, message.chat, [{"role": "system", "content": fill_system}] + asked, tokens, level
+                )
         except OllamaError as exc:
             return md(t"⚠️ **The model did not answer:** {first_words(exc)}")
         text = text or "_(no answer)_"
@@ -1511,7 +1560,7 @@ class Talk:
             channel,
             chat,
             [
-                {"role": "system", "content": Prompts.COMMAND_TELL_SYSTEM},
+                {"role": "system", "content": Prompts.COMMAND_TELL_SYSTEM.format(style=channel.STYLE)},
                 {
                     "role": "user",
                     "content": f"They asked: {asked}\nCommand: {line}\n"
@@ -1578,7 +1627,7 @@ class Shell:
 
         self.talk.answer(channel, message, now, write=self.propose, on_shown=shown)
 
-    def propose(self, channel, message, context, tokens):
+    def propose(self, channel, message, state, tokens):
         if not Models.quick():
             self.questions.answered(channel, message.chat)
             return "⚠️ **No model is in use yet:** `tinker model NAME` picks one."
@@ -2055,6 +2104,7 @@ def signal_task(pid, signum):
 
 class Channel:
     KIND = ""
+    STYLE = Prompts.PHONE_STYLE
     SECRETS = ()
 
     def __init__(self, name, settings, secrets):
@@ -2188,6 +2238,7 @@ class ChannelError(Exception):
 
 class ConsoleChannel(Channel):
     KIND = "console"
+    STYLE = Prompts.TERMINAL_STYLE
     CHAT = "console"
 
     def __init__(self):
@@ -3031,6 +3082,39 @@ def entry_headline(text):
 
 def commands_brief():
     return "\n".join(re.findall(r"^- `[^`]+`.*$", help_text(), re.MULTILINE)) or "help"
+
+
+def chat_index():
+    chat_commands = [command for command in COMMANDS if command.name and command.chat]
+    lines = []
+    for group in GROUPS:
+        names = [f"/{command.name}" for command in chat_commands if command.group == group]
+        lines += [f"{group}: {' '.join(names)}"] if names else []
+    return "\n".join(lines)
+
+
+def command_details(names):
+    commands = [BY_NAME[name] for name in names if name in BY_NAME]
+    return "\n".join(f"- `/{synopsis}` {what}" for command in commands for synopsis, what in command.rows)
+
+
+def named_commands(reply):
+    lines = [line.strip().strip("`").strip() for line in reply.splitlines()]
+    lines = [line for line in lines if line]
+    return [line[1:] for line in lines] if lines and all(map(names_a_chat_command, lines)) else []
+
+
+def names_a_chat_command(line):
+    command = BY_NAME.get(line[1:]) if line.startswith("/") else None
+    return bool(command and command.chat)
+
+
+def takes_words(name):
+    return any(synopsis != name for synopsis, what in BY_NAME[name].rows)
+
+
+def state_part(state):
+    return f"\n\n{state}" if state else ""
 
 
 def started_by_a_conversation():

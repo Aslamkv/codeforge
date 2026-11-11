@@ -964,10 +964,10 @@ class Commands:
             return
         say.text(f"{'PROJECT':9} {'STATUS':14} {'UPDATED':17} {'FOLDER':32} TASK")
         for entry in entries:
-            task = Commands.task_of(entry)
+            task = Runs.task_of(entry)
             say.text(
                 f"{'@' + entry.get('id', '?'):9} {entry.get('status', '?'):14} {entry.get('updated', ''):17} "
-                f"{Commands.short_folder(entry.get('workdir', '')):32} "
+                f"{Runs.short_folder(entry.get('workdir', '')):32} "
                 f"{task[:60] + ('...' if len(task) > 60 else '')}"
             )
 
@@ -1019,18 +1019,6 @@ class Commands:
         say.done("Every waiting job is out of the queue.")
         if head is not None:
             Commands.stop(head)
-
-    @staticmethod
-    def short_folder(workdir):
-        home = str(Path.home())
-        shown = ("~" + workdir[len(home) :]) if workdir.startswith(home) else workdir
-        return ("..." + shown[-29:] if len(shown) > 32 else shown)[:32]
-
-    @staticmethod
-    def task_of(entry):
-        task = entry.get("task", "").replace("\n", " ")
-        features = entry.get("features")
-        return f"[+{len(features)} feature{'s' if len(features) > 1 else ''}] " + task if features else task
 
     @staticmethod
     def system(word):
