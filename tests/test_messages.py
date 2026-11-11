@@ -40,7 +40,7 @@ def test_each_kind_says_its_words_after_its_icon(capsys):
     say.retry("Asking again")
     say.skip("Nothing found")
     say.stop("Stopped")
-    say.tip("tinker memory")
+    say.tip("tinker knowledge")
     say.item("a fact")
     say.step("Searching…", "🔎")
     say.info("A fact")
@@ -52,7 +52,7 @@ def test_each_kind_says_its_words_after_its_icon(capsys):
         "🔁 Asking again",
         "➖ Nothing found",
         "🛑 Stopped",
-        "💡 tinker memory",
+        "💡 tinker knowledge",
         "• a fact",
         "🔎 Searching…",
         "A fact",

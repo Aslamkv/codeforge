@@ -296,9 +296,9 @@ def test_the_fill_prompt_asks_for_only_the_check_line_when_asked_what_a_system_c
 
 
 @pytest.mark.spec("CNV-18", "SYS-1")
-def test_the_chat_prompt_keeps_memory_for_the_memory_command_and_ram_for_system_ram():
-    chat = Prompts.CHAT_SYSTEM.format(style=Prompts.PHONE_STYLE, index="/memory\n/system", state="")
-    assert "memory means Tinker's `memory` command" in chat and "only RAM means `/system ram`" in chat
+def test_the_chat_prompt_keeps_ram_for_system_ram():
+    chat = Prompts.CHAT_SYSTEM.format(style=Prompts.PHONE_STYLE, index="/knowledge\n/system", state="")
+    assert "`knowledge`" not in chat and "nothing else, where only RAM means `/system ram`" in chat
 
 
 @pytest.mark.spec("CNV-18", "CNV-11")

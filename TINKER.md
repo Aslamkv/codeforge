@@ -265,7 +265,7 @@ tinker system
 `tinker system` prints every check, one line each; a check this computer can't answer says
 `⚠️ Battery: couldn't check on this computer`. In the conversation or a chat, `time`, `/system disk`,
 `ram usage` or `what is the time now?` answer the same way, and the model asks for a check when your question
-needs one. `ram` is the computer's RAM; `memory` is what Tinker learned.
+needs one. `ram` is the computer's RAM; `knowledge` is what Tinker learned.
 
 Run a project you built (the last one, by default) with its arguments:
 
@@ -390,30 +390,30 @@ tinker learn serve "python3 -m http.server"
 tinker learn serve none
 ```
 
-See what it has learned, a part at a time: `memory` lists the parts (each language, any language, each
+See what it has learned, a part at a time: `knowledge` lists the parts (each language, any language, each
 topic, your commands) with what each holds, and every list comes 10 to a page. Each item has a short ID
 that stays the same while it is kept, and ✅ when a build proved it, 🌱 when not yet:
 
 ```sh
-tinker memory                      # the parts, and how many items are retired
-tinker memory python               # one part: its details, then its items
-tinker memory python principles 2  # its principles, the second page
-tinker memory flask facts          # a topic's facts
-tinker memory principles           # every principle, across memory
-tinker memory any retired          # what did not hold, and was retired
-tinker memory show 5b94dc          # one item whole: details, sources, links, the runs that used it
-tinker memory find pytest toml     # every item that holds all the words, retired ones too
-tinker memory recent               # what was learned, newest first
+tinker knowledge                      # the parts, and how many items are retired
+tinker knowledge python               # one part: its details, then its items
+tinker knowledge python principles 2  # its principles, the second page
+tinker knowledge flask facts          # a topic's facts
+tinker knowledge principles           # every principle, across all parts
+tinker knowledge any retired          # what did not hold, and was retired
+tinker knowledge show 5b94dc          # one item whole: details, sources, links, the runs that used it
+tinker knowledge find pytest toml     # every item that holds all the words, retired ones too
+tinker knowledge recent               # what was learned, newest first
 ```
 
 Browsing changes nothing: `tinker teach` corrects an item, and `tinker clear PART` forgets a part.
 
 See it as a graph you can explore in the browser: each principle, fact and fix linked to its language, and to
 the runs that taught it, proved it or found it wrong (what did not hold is kept, greyed, with why). In a
-chat, `memory --graph` sends the page as a file to open on your phone:
+chat, `knowledge --graph` sends the page as a file to open on your phone:
 
 ```sh
-tinker memory --graph
+tinker knowledge --graph
 ```
 
 Ask what it has learned. It answers just what you ask, from what it keeps first: its items, the kept
@@ -511,6 +511,29 @@ It runs until you stop it. In a chat, `/exercise rust` starts it in the backgrou
 conversation. It keeps one message through start, stop and resume, showing what its build is doing right now, as
 a task's does, in the chat that started or resumed it. A later conversation picks that message up again, and an
 exercise that was killed (or the computer restarted) goes on by itself.
+
+## Remember 💭
+
+Tinker remembers what you do with it: each chat answer, command and build is kept as an episode. When a chat
+or command comes, it recalls the memories and fresh episodes that share a word with it (or are close in
+meaning, with an embedding model) and tells the model what it remembers.
+
+While nothing waits for it, Tinker dreams: a few seconds after the queue empties, it turns the fresh episodes
+into memories (about you, what you did, the tools you use, facts), joins the ones that say the same thing,
+lets fade what was never recalled or seen again, and keeps a short portrait of who you are. A dream is a job,
+so it never runs over a chat or a build:
+
+```sh
+tinker memory                # the memories, newest first, and when the last dream was
+tinker memory show m3        # one memory with the episodes it came from, or one episode
+tinker memory forget m3      # delete a memory or an episode
+tinker memory portrait       # who Tinker thinks you are, and why
+tinker dream                 # the last dream, what it changed, and what waits
+tinker dream run             # dream now
+tinker dream graph           # watch the episodes and memories change, live in the browser
+```
+
+In a chat, `memory graph` and `dream graph` send the graph as a page to open on your phone.
 
 ## Jobs ⏯
 

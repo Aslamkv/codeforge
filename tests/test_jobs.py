@@ -11,12 +11,12 @@ from test_conversation import Recorder, everyone
 from tinkerkit import cli, conversation, exercising, jobs
 from tinkerkit.cli import Cli, Commands
 from tinkerkit.conversation import Desk, Message
-from tinkerkit.jobs import Jobs, Queue, Runner, archived, began_at, calls_log, is_job, journaled, today
+from tinkerkit.jobs import JOBS, Jobs, Queue, Runner, archived, began_at, calls_log, is_job, journaled, today
 from tinkerkit.knowledge import Learner, Researcher
 from tinkerkit.learning import SlotLearner
 from tinkerkit.model import Ollama
 from tinkerkit.project import Tracker
-from tinkerkit.settings import JOB_STOP_SIGNAL
+from tinkerkit.settings import DREAM_IDLE_SECONDS, JOB_STOP_SIGNAL
 
 DEAD_PID = 999999999
 
@@ -87,6 +87,7 @@ def test_long_commands_are_jobs_and_the_rest_are_not():
         ["ask", "status", "of", "python"],
         ["chat", "hello"],
         ["command", "list", "files"],
+        ["dream", "run"],
     ):
         assert is_job(argv), argv
     for argv in (
@@ -99,6 +100,8 @@ def test_long_commands_are_jobs_and_the_rest_are_not():
         ["exercise", "status"],
         ["learn", "ll", "ls -l"],
         ["read", "list"],
+        ["dream"],
+        ["dream", "status"],
         ["task", "--help"],
     ):
         assert not is_job(argv), argv
@@ -851,6 +854,55 @@ def test_an_add_wakes_the_runner_in_its_own_process(home_store):
     Runner.wake.clear()
     add_back(1)
     assert Runner.wake.is_set()
+
+
+def fresh_episode():
+    from tinkerkit.remembering import Scratchpad
+
+    Scratchpad.write({"chat": "telegram:1", "message": "hi", "reply": "Hello.", "status": "answered"})
+
+
+def queued_dreams():
+    return [number for number in Queue.ordered() if JOBS.get(number)["arguments"] == ["dream", "run"]]
+
+
+@pytest.mark.spec("DRM-1")
+def test_an_idle_queue_with_a_fresh_episode_queues_one_dream(home_store, monkeypatch):
+    monkeypatch.setattr(Runner, "idle_since", None)
+    fresh_episode()
+    Runner.dream_when_idle(100.0)
+    Runner.dream_when_idle(100.0 + DREAM_IDLE_SECONDS - 1)
+    assert Queue.ordered() == []
+    Runner.dream_when_idle(100.0 + DREAM_IDLE_SECONDS)
+    dreams = queued_dreams()
+    assert len(dreams) == 1 and JOBS.get(dreams[0])["state"] == "queued"
+    Runner.dream_when_idle(200.0)
+    Runner.dream_when_idle(200.0 + DREAM_IDLE_SECONDS)
+    assert queued_dreams() == dreams
+
+
+@pytest.mark.spec("DRM-1")
+def test_no_dream_is_queued_without_a_fresh_episode_or_while_the_queue_is_busy(home_store, monkeypatch):
+    monkeypatch.setattr(Runner, "idle_since", None)
+    Runner.dream_when_idle(100.0)
+    Runner.dream_when_idle(100.0 + DREAM_IDLE_SECONDS)
+    assert Queue.ordered() == []
+    fresh_episode()
+    put_job(home_store, 1, pid=os.getpid(), pid_began=began_at(os.getpid()))
+    add_back(1)
+    Runner.dream_when_idle(100.0 + 2 * DREAM_IDLE_SECONDS)
+    assert Runner.idle_since is None and Queue.ordered() == [1]
+
+
+@pytest.mark.spec("DRM-1", "JOB-9")
+def test_going_through_an_emptied_queue_starts_the_idle_clock(home_store, runner, monkeypatch):
+    monkeypatch.setattr(Runner, "idle_since", None)
+    fresh_episode()
+    Runner.go_through()
+    assert Runner.idle_since is not None and Queue.ordered() == []
+    monkeypatch.setattr(Runner, "idle_since", Runner.idle_since - DREAM_IDLE_SECONDS)
+    Runner.go_through()
+    assert len(queued_dreams()) == 1
 
 
 @pytest.fixture

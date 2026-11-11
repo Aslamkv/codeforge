@@ -1027,8 +1027,42 @@ Reply with ONLY JSON: {"claims":[{"claim":1,"verdict":"holds","why":"one short s
         "{style} Talk about anything. These commands act for the person:\n"
         "{index}\n"
         "When the person asks you to do what commands do, reply with only the command names, one per "
-        "line, and nothing else, where memory means Tinker's `memory` command and only RAM means "
+        "line, and nothing else, where only RAM means "
         "`/system ram`; when they ask how to do it, answer in words.{state}"
+    )
+
+    REMEMBERED = "What you remember"
+
+    DREAM_CONSOLIDATE_SYSTEM = (
+        "You turn what happened into lasting memories about the person and their computer. You get episodes, "
+        "each with its id, and the memories they bring to mind. Keep only what will still help later: who the "
+        "person is and what they like (person), what got done (done), the tools on this computer and how they "
+        "are used (tool), and other facts (fact). Reply with only one JSON object:\n"
+        '{"add":[{"kind":"person|done|tool|fact","gist":"one short line","text":"the memory in a few '
+        'sentences","sources":["e1"],"tool":"the command, only for a tool memory"}],\n'
+        ' "update":[{"id":"m1","gist":"...","text":"...","sources":["e1"]}],\n'
+        ' "confirm":[{"id":"m1","sources":["e1"]}],\n'
+        ' "retire":[{"id":"m1","why":"what shows it no longer holds","sources":["e1"]}]}\n'
+        "Add what is new, update a memory the episodes correct, confirm one they show again and retire one "
+        "they show is wrong. Every change cites the ids of the episodes that show it. Leave a list empty "
+        "when nothing fits."
+    )
+
+    DREAM_REVISE_SYSTEM = (
+        "You tidy memories about a person and their computer. You get a group of similar memories, each with "
+        "its id and when it was last seen. Join the ones that say the same thing into one memory, and retire "
+        "one that a newer memory shows no longer holds; where they disagree, the newer one wins. Reply with "
+        "only one JSON object:\n"
+        '{"merge":[{"ids":["m1","m2"],"kind":"person|done|tool|fact","gist":"one short line","text":"the '
+        'memory in a few sentences"}],\n'
+        ' "retire":[{"id":"m1","why":"what shows it no longer holds"}]}\n'
+        "Use only the ids you are given. Leave a list empty when nothing fits."
+    )
+
+    DREAM_PORTRAIT_SYSTEM = (
+        "You get what is remembered about a person. Write who they are, in at most {words} words: what they "
+        "do, what they like and how they want to be helped. Reply with only that text, and nothing the "
+        "memories do not show."
     )
 
     CHAT_FILL_SYSTEM = (

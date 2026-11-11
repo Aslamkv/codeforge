@@ -397,6 +397,8 @@ class GraphPage:
         "toolchain": "Toolchains",
         "command": "Commands",
         "run": "Runs",
+        "episode": "Episodes",
+        "memory": "Memories",
     }
 
     @classmethod
@@ -477,16 +479,16 @@ class MemoryBrowser:
     MANY = frozendict({"fix": "fixes", "toolchain": "toolchains", "retired": "retired items"})
     ICONS = frozendict({"language": "📘", "topic": "🔬", "commands": "⌨️"})
     USAGE = (
-        "use tinker memory [PAGE], tinker memory NAME [KIND] [PAGE] (KIND: toolchain, facts, findings, rules, "
-        "fixes, lessons, principles, commands or retired; alone, across memory), tinker memory show ID, "
-        "tinker memory find WORDS or tinker memory recent [PAGE]"
+        "use tinker knowledge [PAGE], tinker knowledge NAME [KIND] [PAGE] (KIND: toolchain, facts, findings, rules, "
+        "fixes, lessons, principles, commands or retired; alone, across memory), tinker knowledge show ID, "
+        "tinker knowledge find WORDS or tinker knowledge recent [PAGE]"
     )
     TIPS = (
-        ("See a part", "tinker memory NAME [KIND]"),
-        ("See an item", "tinker memory show ID"),
-        ("Find items", "tinker memory find WORDS"),
-        ("Newest first", "tinker memory recent"),
-        ("Explore it", "tinker memory --graph"),
+        ("See a part", "tinker knowledge NAME [KIND]"),
+        ("See an item", "tinker knowledge show ID"),
+        ("Find items", "tinker knowledge find WORDS"),
+        ("Newest first", "tinker knowledge recent"),
+        ("Explore it", "tinker knowledge --graph"),
         ("Ask about it", "tinker ask WHAT"),
         ("Correct it", "tinker teach WHAT"),
         ("Forget a part", "tinker clear PART"),
@@ -563,7 +565,7 @@ class MemoryBrowser:
         if retired:
             say.info(
                 f"{retired} item{'s' if retired > 1 else ''} did not hold and {'were' if retired > 1 else 'was'} "
-                f"retired: never shown to the model again (tinker memory retired)",
+                f"retired: never shown to the model again (tinker knowledge retired)",
                 "♻️",
             )
         self.say_page(request.page, pages, [])
@@ -585,7 +587,9 @@ class MemoryBrowser:
     def show_part(self, request):
         hub = self.named(request.name) if request.name else None
         if request.name and hub is None:
-            raise SystemExit(f"No part of memory is called {request.name!r}: tinker memory lists the parts.")
+            raise SystemExit(
+                f"No part of memory is called {request.name!r}: tinker knowledge lists the parts."
+            )
         members = self.members(hub) if hub else self.items
         if hub:
             self.say_details(hub)
@@ -596,7 +600,7 @@ class MemoryBrowser:
         left_out = self.retired_in(members) if request.kind != "retired" else 0
         if left_out:
             where = f"{hub['group']} " if hub else ""
-            say.text(f"\n{left_out} retired, not shown: tinker memory {where}retired")
+            say.text(f"\n{left_out} retired, not shown: tinker knowledge {where}retired")
         self.say_page(request.page, pages, request.words)
 
     def show_item(self, request):
@@ -604,7 +608,7 @@ class MemoryBrowser:
         hub = self.part_of.get(item["id"])
         say.title(f"{item['kind']} {self.status_of(item)} [{self.ids[item['id']]}]", "🧠")
         lines = [
-            f"part: {hub['label']} (tinker memory {hub['group']})" if hub else None,
+            f"part: {hub['label']} (tinker knowledge {hub['group']})" if hub else None,
             f"day: {item['day']}" if item["day"] else None,
             item["text"],
             *(f"{key}: {value}" for key, value in item["details"]),
@@ -622,11 +626,11 @@ class MemoryBrowser:
         wanted = word.strip("[]").lower()
         if len(wanted) < MEMORY_ID_CHARS:
             raise SystemExit(
-                f"A short ID has at least {MEMORY_ID_CHARS} digits, not {word!r}: tinker memory NAME lists them."
+                f"A short ID has at least {MEMORY_ID_CHARS} digits, not {word!r}: tinker knowledge NAME lists them."
             )
         found = [item for item in self.items if self.digests[item["id"]].startswith(wanted)]
         if not found:
-            raise SystemExit(f"No item has the short ID {word!r}: tinker memory find WORDS finds one.")
+            raise SystemExit(f"No item has the short ID {word!r}: tinker knowledge find WORDS finds one.")
         if len(found) > 1:
             shared = "\n".join(self.item_line(item) for item in found)
             raise SystemExit(f"{len(found)} items start with {word!r}; give more digits:\n{shared}")
@@ -738,7 +742,7 @@ class MemoryBrowser:
     def say_page(self, page, pages, words):
         shown = "".join(f"{word} " for word in words)
         if page < pages:
-            say.text(f"\nPage {page} of {pages}: tinker memory {shown}{page + 1} for more.")
+            say.text(f"\nPage {page} of {pages}: tinker knowledge {shown}{page + 1} for more.")
         elif pages > 1 or page > 1:
             say.text(f"\nPage {page} of {pages}.")
 

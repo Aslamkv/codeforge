@@ -76,6 +76,9 @@ def test_the_kind_of_a_command_and_of_its_actions_comes_from_the_table():
         (["model", "calibrate", "qwen3"], "job"),
         (["model", "recipe"], "glance"),
         (["model", "recipe", "all"], "job"),
+        (["dream"], "glance"),
+        (["dream", "status"], "glance"),
+        (["dream", "run"], "job"),
         (["fly"], None),
         ([], None),
     ],
@@ -131,6 +134,8 @@ def test_runs_and_what_deletes():
     ] == ["task", "restart", "add", "fix"]
     assert [command.name for command in COMMANDS if command.deletes] == ["restart", "clear", "reset"]
     assert deletes(["clear", "memory"]) and deletes(["channel", "remove", "bot"])
+    assert deletes(["memory", "forget", "a1b2c3"]) and not deletes(["memory", "portrait"])
+    assert kind_of(["memory"]) == "glance" and kind_of(["memory", "forget", "a1b2c3"]) == "glance"
     assert not deletes(["channel", "list"]) and not deletes(["status"]) and not deletes([])
 
 
@@ -202,7 +207,7 @@ def test_slash_matches_only_chat_commands_and_only_a_slash_word():
 def test_offered_words_are_action_words_then_synopsis_alternatives_once():
     assert offered_words(BY_NAME["model"]) == ["calibrate", "recipe"]
     assert offered_words(BY_NAME["jobs"]) == ["running", "queued", "stopped", "finished", "archived"]
-    assert offered_words(BY_NAME["memory"]) == ["show", "find", "recent"]
+    assert offered_words(BY_NAME["knowledge"]) == ["show", "find", "recent"]
     assert offered_words(BY_NAME["exercise"]) == ["status"]
     assert offered_words(BY_NAME["read"]) == ["list", "show"]
     assert offered_words(BY_NAME["channel"]) == ["add", "remove", "start"]
@@ -218,7 +223,7 @@ def test_alternative_words_are_lowercase_words_opening_an_alternative_one_bracke
 def test_word_matches_word_starts_first_then_word_holds():
     assert word_matches("/jobs r") == [(BY_NAME["jobs"], "running"), (BY_NAME["jobs"], "archived")]
     assert word_matches("/model re") == [(BY_NAME["model"], "recipe")]
-    assert word_matches("/memory xyz") == []
+    assert word_matches("/knowledge xyz") == []
 
 
 @pytest.mark.spec("MSG-10")

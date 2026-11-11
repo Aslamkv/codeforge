@@ -13,7 +13,7 @@ lazy import traceback
 lazy import webbrowser
 lazy from pathlib import Path
 
-from . import conversation, exercising, logger, reading
+from . import conversation, dreaming, exercising, logger, reading, remembering
 from .commands import BY_NAME, COMMANDS, GROUPS, kind_of, refs, taught_command
 from .jobs import (
     STATES,
@@ -28,8 +28,10 @@ from .jobs import (
 )
 from .messages import Messages, human_duration, paint, say
 from .reading import Reader
+from .remembering import Scratchpad
 from .system import SYSTEM_CHECKS, SYSTEM_WORDS
 lazy from .building import BugReproducer, CodeWriter, TestToolSetup, TestWriter, Verifier
+lazy from .dreaming import Dream
 lazy from .finishing import FinalReview, LessonWriter, ReadmeWriter, Tidy
 lazy from .graph import Graph, MemoryBrowser, write_page
 lazy from .knowledge import Library, Researcher, ResearchLearner, search_entry
@@ -49,7 +51,7 @@ lazy from .project import (
     saved,
 )
 lazy from .prompts import Prompts
-lazy from .retrieval import Embeddings
+lazy from .retrieval import Embeddings, Retriever
 lazy from .reviewing import RequestReview
 lazy from .session import Session, Stopped
 lazy from .settings import (
@@ -165,7 +167,9 @@ class Cli:
         "teach": None,
         "read": None,
         "exercise": None,
+        "knowledge": None,
         "memory": None,
+        "dream": None,
         "runs": False,
         "status": None,
         "log": None,
@@ -406,8 +410,12 @@ class Cli:
                 return Cli.job_words(command, given.words, parser)
             case "read":
                 return Cli.reading(given.words, parser)
+            case "knowledge":
+                return Cli.knowledge_words(given, parser)
             case "memory":
-                return Cli.memory_words(given, parser)
+                return Cli.memory_words(given.words, parser)
+            case "dream":
+                return Cli.dream_words(given.words, parser)
             case "ask" | "teach" | "research" | "exercise":
                 return Cli.non_empty(" ".join(given.words), command, parser)
             case "config":
@@ -496,13 +504,27 @@ class Cli:
         return [Cli.non_empty(" ".join(words), "read", parser)]
 
     @staticmethod
-    def memory_words(given, parser):
+    def knowledge_words(given, parser):
         if given.graph and given.words:
             parser.error(f"--graph takes no other words; {MemoryBrowser.USAGE}")
         try:
             return MemoryBrowser.request(given.words)
         except ValueError as refused:
             parser.error(str(refused))
+
+    @staticmethod
+    def memory_words(words, parser):
+        if words in ([], ["portrait"], ["graph"]) or (len(words) == 1 and Cli.is_page(words[0])):
+            return words
+        if len(words) == 2 and words[0] in ("show", "forget"):
+            return words
+        parser.error("use tinker memory [PAGE] | show ID | forget ID [--yes] | portrait | graph")
+
+    @staticmethod
+    def dream_words(words, parser):
+        if words in ([], ["status"], ["run"], ["graph"]):
+            return words
+        parser.error("use tinker dream [status] | run | graph")
 
     @staticmethod
     def lists_readings(words):
@@ -612,7 +634,9 @@ class Commands:
             "teach": self.teach,
             "read": self.read,
             "exercise": self.exercise,
-            "memory": lambda: self.show_memory(args.graph, args.memory),
+            "knowledge": lambda: self.show_knowledge(args.graph, args.knowledge),
+            "memory": lambda: self.memory(args.memory, args.yes),
+            "dream": lambda: self.dream(args.dream),
             "runs": self.list_runs,
             "jobs": lambda: self.list_jobs(*args.jobs),
             "stop": lambda: self.stop(args.stop),
@@ -779,7 +803,7 @@ class Commands:
             f"Learned {entry['name']}",
             [(name, text) for _, name, text in learner.recap]
             or [("Findings", str(len(entry.get("findings", []))))],
-            [("See it", "tinker memory")],
+            [("See it", "tinker knowledge")],
         )
 
     @staticmethod
@@ -815,7 +839,7 @@ class Commands:
             ("Facts", str(len(entry.get("facts", [])))),
             ("Pages", str(len(entry.get("sources", [])))),
         ]
-        researched = ending("done", f"Researched {entry['name']}", details, [("See it", "tinker memory")])
+        researched = ending("done", f"Researched {entry['name']}", details, [("See it", "tinker knowledge")])
         return {**researched, "text": Researcher.answer(entry)}
 
     def learning_tools(self, option, request):
@@ -936,15 +960,46 @@ class Commands:
             for note in entry["notes"]:
                 say.warn(f"Not learned: {note}")
         say.tip(
-            "A run uses this whenever its request needs it. See everything Tinker learned with: tinker memory"
+            "A run uses this whenever its request needs it. See everything Tinker learned with: tinker knowledge"
         )
 
     @staticmethod
-    def show_memory(graph=False, request=None):
+    def show_knowledge(graph=False, request=None):
         if graph:
             Commands.show_graph()
             return
         MemoryBrowser(Graph.build()).show(request or MemoryBrowser.request([]))
+
+    @staticmethod
+    def memory(words, yes=False):
+        match words:
+            case ["show", item_id]:
+                remembering.show_remembered(item_id)
+            case ["forget", item_id]:
+                remembering.forget(item_id, yes)
+            case ["portrait"]:
+                remembering.show_portrait()
+            case ["graph"]:
+                dreaming.show_memory_graph()
+            case [page]:
+                remembering.show_memories(int(page))
+            case _:
+                remembering.show_memories(1)
+
+    def dream(self, words):
+        if words == ["graph"] and sys.stdout.isatty():
+            return dreaming.serve_dream_graph()
+        if words == ["graph"]:
+            return dreaming.show_memory_graph()
+        if words != ["run"]:
+            return dreaming.show_dream()
+        self.follow("Dreaming")
+        self.reported(
+            lambda: (),
+            lambda tracker: (
+                Dream(Retriever(Embeddings.configured()), tracker.phase).run() or ending("done", "Dreamt")
+            ),
+        )
 
     @staticmethod
     def show_graph():
@@ -1596,7 +1651,10 @@ class CycleRunner:
             lambda phase: self.reached(phase, cycle),
             waits=lambda: cycle.get("awaiting"),
         )
-        return "awaiting" if went == "waiting" else went
+        if went == "waiting":
+            return "awaiting"
+        Scratchpad.write({"chat": cycle.get("chat", "cli"), "task": cycle["request"], "status": went})
+        return went
 
     def phase_done(self, phase, cycle):
         if self.run_phase(phase, cycle) is False:

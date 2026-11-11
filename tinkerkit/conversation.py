@@ -35,6 +35,7 @@ from .jobs import (
     tinker_process,
 )
 from .project import Runs, Tracker, saved
+from .remembering import EPISODE_BOOKKEEPING, Memories, Portrait, Scratchpad
 lazy from .ledger import DONE_NOTE_KEPT_SECONDS, Ledger
 lazy from .messages import (
     CLEAR_LINE,
@@ -55,7 +56,8 @@ lazy from .messages import (
 )
 lazy from .messages import styled as styled_choice
 lazy from .model import Models, Ollama, OllamaError
-lazy from .prompts import Prompts, Reply
+lazy from .prompts import Part, Prompts, Reply
+lazy from .retrieval import Embeddings, Retriever
 lazy from .reviewing import RequestReview
 lazy from .settings import EXERCISE_FOLDER, JOB_STOP_SIGNAL, Config, Home, projects_folder
 lazy from .text import field
@@ -645,7 +647,9 @@ class Desk:
             "command": lambda: self.asked_with_words(channel, message, command),
             "clear": lambda: self.clear(channel, message.chat, words),
             "read": lambda: self.read(channel, message.chat, words),
-            "memory": lambda: self.memory(channel, message.chat, words),
+            "knowledge": lambda: self.knowledge(channel, message.chat, words),
+            "memory": lambda: self.memory_or_dream(channel, message.chat, words),
+            "dream": lambda: self.memory_or_dream(channel, message.chat, words),
             **{word: lambda: self.ask_to_exit(channel, message.chat, command) for word in EXIT_WORDS},
         }
 
@@ -664,10 +668,15 @@ class Desk:
             return md(t"📚 **{' '.join(words)}**\n{self.tinker(words):block}")
         return self.by_table(channel, chat, words)
 
-    def memory(self, channel, chat, words):
+    def knowledge(self, channel, chat, words):
         if "--graph" in words:
-            return self.memory_graph(channel, chat, words)
+            return self.knowledge_graph(channel, chat, words)
         return md(t"🧠 **{' '.join(words)}**\n{self.tinker(words):block}")
+
+    def memory_or_dream(self, channel, chat, words):
+        if words[1:] == ["graph"]:
+            return self.memory_graph(channel, chat, words)
+        return self.by_table(channel, chat, words)
 
     def research(self, audience, words):
         return (
@@ -772,14 +781,21 @@ class Desk:
             reporter.send_at_bottom = True
             reporter.update()
 
+    def knowledge_graph(self, channel, chat, words):
+        return self.page_sent(channel, chat, words, Home.graph_page(), "🧠", "Tinker's memory")
+
     def memory_graph(self, channel, chat, words):
-        page = Home.graph_page()
+        return self.page_sent(
+            channel, chat, words, Home.memory_page(), "💭", "Tinker's episodes and memories"
+        )
+
+    def page_sent(self, channel, chat, words, page, icon, title):
         before = page.stat().st_mtime_ns if page.exists() else None
         shown = self.tinker(words)
         written_now = page.exists() and page.stat().st_mtime_ns != before
         if not written_now:
-            return md(t"🧠 **{' '.join(words)}**\n{shown:block}")
-        channel.send_file(chat, page, md(t"🧠 **Tinker's memory**\n{shown}"))
+            return md(t"{icon} **{' '.join(words)}**\n{shown:block}")
+        channel.send_file(chat, page, md(t"{icon} **{title}**\n{shown}"))
         return None
 
     def new_task(self, audience, words):
@@ -1295,6 +1311,14 @@ def replied_commands(reply):
     return glance_in_sentence(reply)
 
 
+def answered_episode(message, reply, lines):
+    said = reply[0] if reply else ""
+    failed = not said or said.startswith("⚠️")
+    episode = {"chat": message.chat, "message": message.text, "reply": said}
+    commands = {"commands": lines} if lines else {}
+    return dict(episode, **commands, status="failed" if failed else "answered")
+
+
 def glance_in_sentence(reply):
     spans = [span.strip() for span in re.findall(r"`([^`\n]+)`", reply) if span.strip().startswith("/")]
     if len(spans) == 1 and command_of(spans[0]) and kind_of(command_words(spans[0])) == "glance":
@@ -1467,6 +1491,7 @@ class Talk:
         threading.Thread(target=self.write, args=(write_reply, asked, reply, written), daemon=True).start()
         note = self.busy_until(written, running, now, channel, message.chat)
         lines = replied_commands(reply[0]) if on_command and reply else []
+        Scratchpad.write(answered_episode(message, reply, lines))
         if lines:
             for shown in note or []:
                 channel.delete(message.chat, shown)
@@ -1519,7 +1544,7 @@ class Talk:
         level = reviewed_level(message.text)
         names_system = Prompts.CHAT_SYSTEM.format(
             style=channel.STYLE, index=chat_index(), state=state_part(state.everyday())
-        )
+        ) + remembered_part(recall(message.text), Portrait.read())
         try:
             text = self.ask(
                 channel, message.chat, [{"role": "system", "content": names_system}] + asked, tokens, level
@@ -1633,7 +1658,7 @@ class Shell:
             return "⚠️ **No model is in use yet:** `tinker model NAME` picks one."
         system = Prompts.COMMAND_SYSTEM.format(
             system=os.uname().sysname, shell=Path(self.shell).name, folder=self.folder
-        )
+        ) + remembered_part(recall(message.text, ("tool",)))
         level = reviewed_level(message.text)
         try:
             data = json_answer(
@@ -1691,6 +1716,9 @@ class Shell:
         line = proposed["line"]
         sent = channel.show(chat, proposed["shown"], f"▶️ **Running** `{line}` …")
         code, output = in_shell(self.shell, line, self.folder)
+        Scratchpad.write(
+            {"chat": chat, "request": proposed.get("asked", ""), "line": line, "output": output, "code": code}
+        )
         head = md(t"{'✅' if code == 0 else '❌'} {line:code} · _exit {code}_")
         folded = self.folded(output)
         tells = bool(output) and bool(Models.quick())
@@ -3115,6 +3143,27 @@ def takes_words(name):
 
 def state_part(state):
     return f"\n\n{state}" if state else ""
+
+
+def remembered_part(recalled, portrait=""):
+    if not recalled:
+        return ""
+    lines = ([portrait] if portrait else []) + [recalled_line(item) for item in recalled]
+    return f"\n\n{Part(Prompts.REMEMBERED, Part.bullets(lines)).render()}"
+
+
+def recalled_line(item):
+    if item["id"].startswith("m"):
+        return item["gist"]
+    return "; ".join(
+        f"{key}: {value}"
+        for key, value in item.items()
+        if key not in EPISODE_BOOKKEEPING and value not in ("", [])
+    )
+
+
+def recall(request, kinds=None):
+    return Memories(Retriever(Embeddings.configured())).recall(request, kinds=kinds)
 
 
 def started_by_a_conversation():

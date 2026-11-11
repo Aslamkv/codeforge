@@ -547,7 +547,7 @@ def test_start_needs_a_channel_and_checks_it(monkeypatch):
 
 @pytest.mark.spec("CHN-7")
 def test_send_file_uploads_a_document_with_its_caption(tmp_path):
-    page = tmp_path / "memory.html"
+    page = tmp_path / "knowledge.html"
     page.write_bytes(b"<!doctype html><p>graph</p>")
     api = BotAPI(sendDocument={"message_id": 12})
     channel = telegram(api)
@@ -567,7 +567,7 @@ def test_send_file_uploads_a_document_with_its_caption(tmp_path):
     assert (
         named["caption"].startswith(b"<b>Tinker's memory</b> xx") and len(named["caption"].decode()) == 1024
     )
-    assert named["document"] == b"<!doctype html><p>graph</p>" and b'filename="memory.html"' in body
+    assert named["document"] == b"<!doctype html><p>graph</p>" and b'filename="knowledge.html"' in body
     assert parts[-1] == b"--\r\n" and channel.live_message_ids["42"] == [12]
     failing = telegram(
         BotAPI(sendDocument=(400, "Bad Request: file too big"), sendMessage={"message_id": 13})

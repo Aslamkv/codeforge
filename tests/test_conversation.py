@@ -1671,6 +1671,87 @@ def test_an_unreadable_json_answer_is_taken_as_empty(measured_model, fake_ollama
     assert "```\nls\n```" in shell.propose(channel, Message("1", "x"), "", 300)
 
 
+@pytest.mark.spec("REM-1")
+def test_each_command_line_run_writes_one_episode(tmp_path):
+    from tinkerkit.remembering import Scratchpad
+
+    shell, channel = Shell(Talk("cmds"), tmp_path, Questions()), Recorder()
+    shell.run(channel, "1", {"line": "echo hi; exit 3", "asked": "say hi", "shown": None})
+    [episode] = Scratchpad.fresh()
+    assert episode["chat"] == "1" and episode["request"] == "say hi" and episode["line"] == "echo hi; exit 3"
+    assert episode["output"].strip() == "hi" and episode["code"] == 3
+
+
+def remembering(kind, gist, text):
+    from tinkerkit.remembering import Memories
+    from tinkerkit.retrieval import Retriever
+
+    return Memories(Retriever(None)).add(kind, gist, text, ["e1"])
+
+
+@pytest.mark.spec("REM-6")
+def test_a_chat_reply_adds_what_tinker_remembers_and_the_portrait(measured_model, fake_ollama):
+    from tinkerkit.remembering import Portrait
+
+    remembering("fact", "the person keeps bees", "they keep bees in the garden")
+    Portrait.write("A beekeeper who likes short answers.")
+    fake_ollama.reply("low: a plain request").reply("hi")
+    assert Talk("task").reply(Recorder(), Message("1", "tell me about the bees")) == "hi"
+    system = fake_ollama.calls[-1]["messages"][0]["content"]
+    assert "What you remember" in system
+    assert "A beekeeper who likes short answers." in system and "the person keeps bees" in system
+
+
+@pytest.mark.spec("REM-6")
+def test_a_chat_reply_with_nothing_recalled_keeps_its_prompt(measured_model, fake_ollama):
+    remembering("fact", "the person keeps bees", "they keep bees in the garden")
+    fake_ollama.reply("low: a plain request").reply("hi")
+    assert Talk("task").reply(Recorder(), Message("1", "weather today")) == "hi"
+    system = fake_ollama.calls[-1]["messages"][0]["content"]
+    assert system == conversation.Prompts.CHAT_SYSTEM.format(
+        style=Recorder.STYLE, index=conversation.chat_index(), state=""
+    )
+
+
+@pytest.mark.spec("REM-6")
+def test_a_proposed_command_sees_tool_memories_and_episodes_only(measured_model, fake_ollama, tmp_path):
+    from tinkerkit.remembering import Scratchpad
+
+    remembering("tool", "disk usage goes through dust", "dust shows disk usage")
+    remembering("fact", "the disk is named Bees", "the disk name")
+    Scratchpad.write({"chat": "1", "request": "show disk usage", "line": "du -sh .", "output": "", "code": 0})
+    shell = Shell(Talk("cmds"), tmp_path, Questions())
+    fake_ollama.reply("low: a plain request").reply('{"command": "dust", "does": "shows disk usage"}')
+    shell.propose(Recorder(), Message("1", "disk usage"), "", 300)
+    system = fake_ollama.calls[-1]["messages"][0]["content"]
+    assert "disk usage goes through dust" in system and "du -sh ." in system
+    assert "named Bees" not in system
+
+
+@pytest.mark.spec("REM-6")
+def test_a_proposed_command_counts_only_the_tool_memories_it_shows(measured_model, fake_ollama, tmp_path):
+    from tinkerkit.remembering import Memories
+    from tinkerkit.settings import Home
+
+    remembering("tool", "disk usage goes through dust", "dust shows disk usage")
+    remembering("fact", "the disk usage is high", "disk usage grows")
+    shell = Shell(Talk("cmds"), tmp_path, Questions())
+    fake_ollama.reply("low: a plain request").reply('{"command": "dust", "does": "shows disk usage"}')
+    shell.propose(Recorder(), Message("1", "disk usage"), "", 300)
+    recalled = {
+        memory["gist"]: memory["recalled"] for memory in Home.store().items(Memories.MEMORIES).values()
+    }
+    assert recalled == {"disk usage goes through dust": 1, "the disk usage is high": 0}
+
+
+@pytest.mark.spec("REM-6")
+def test_a_proposed_command_with_nothing_recalled_keeps_its_prompt(measured_model, fake_ollama, tmp_path):
+    shell = Shell(Talk("cmds"), tmp_path, Questions())
+    fake_ollama.reply("low: a plain request").reply('{"command": "ls", "does": "lists"}')
+    shell.propose(Recorder(), Message("1", "list files"), "", 300)
+    assert "What you remember" not in fake_ollama.calls[-1]["messages"][0]["content"]
+
+
 @pytest.mark.spec("CNV-18")
 def test_talk_reply(measured_model, fake_ollama, monkeypatch):
     monkeypatch.setattr(conversation, "CHAT_CONTEXT_MESSAGES", 4)
@@ -1788,6 +1869,24 @@ def test_a_chat_reply_that_is_a_command_line_is_run_at_once(desk, monkeypatch):
     chat("/system time and /system date", lambda last: len(handled) == 3)
     chat("The time is shown by `/system time` for you.", lambda last: len(handled) == 4)
     assert handled == ["/system time", "/system date", "/system time and /system date", "/system time"]
+
+
+@pytest.mark.spec("REM-1")
+def test_each_chat_request_writes_one_episode(desk, monkeypatch):
+    from tinkerkit.remembering import Scratchpad
+
+    desk, channel, _ = desk
+    chat = chatted(desk, channel, monkeypatch, [])
+    monkeypatch.setattr(desk, "answer", lambda message, channel: None)
+    chat("status is fine", lambda last: "status is fine" in last)
+    wait_until(lambda: len(Scratchpad.fresh()) == 1)
+    chat("/clear chat\n/fix the login bug", lambda last: len(Scratchpad.fresh()) == 2)
+    answered, commanded = sorted(Scratchpad.fresh(), key=lambda episode: int(episode["id"][1:]))
+    assert answered["message"] == "do it for me" and answered["reply"] == "status is fine"
+    assert answered["status"] == "answered" and answered["chat"] == "1" and "commands" not in answered
+    assert (
+        commanded["commands"] == ["/clear chat", "/fix the login bug"] and commanded["status"] == "answered"
+    )
 
 
 @pytest.mark.spec("CNV-12", "CNV-18")
@@ -1976,22 +2075,22 @@ def test_desk_answers_a_command_while_its_channel_says_it_waits(desk):
         waited.append("done")
 
     channel.waiting = waiting
-    desk.answer(Message("1", "/memory --graph"), channel)
-    assert waited == [("1", "Running /memory --graph"), "done"]
+    desk.answer(Message("1", "/knowledge --graph"), channel)
+    assert waited == [("1", "Running /knowledge --graph"), "done"]
 
 
 @pytest.mark.spec("CNV-9")
 def test_a_chat_shows_its_typing_sign_while_it_waits():
     channel = Recorder(chats=("1",))
-    with channel.waiting("1", "Running /memory"):
+    with channel.waiting("1", "Running /knowledge"):
         wait_until(lambda: ("typing", "1", None, "") in channel.log)
 
 
 @pytest.mark.spec("CNV-9")
 def test_console_waits_in_its_live_line_and_takes_it_out_after(monkeypatch, clock):
     console = live_console(monkeypatch)
-    with console.waiting("console", "Running /memory"):
-        assert sys.stdout.getvalue() == live_shown("Running /memory")
+    with console.waiting("console", "Running /knowledge"):
+        assert sys.stdout.getvalue() == live_shown("Running /knowledge")
         sys.stdout.truncate(0)
         sys.stdout.seek(0)
     assert sys.stdout.getvalue() == block_taken_out(1) and console.live_owner is None
@@ -2001,7 +2100,7 @@ def test_console_waits_in_its_live_line_and_takes_it_out_after(monkeypatch, cloc
 def test_console_waits_without_taking_a_jobs_live_line(monkeypatch, clock):
     console = live_console(monkeypatch)
     console.show("console", None, CALC_WRITING_NOW, doing="Writing")
-    with console.waiting("console", "Running /memory"):
+    with console.waiting("console", "Running /knowledge"):
         assert console.screen.live == ("Writing", 100.0, {})
     assert console.screen.live == ("Writing", 100.0, {})
 
@@ -2014,6 +2113,29 @@ def test_a_command_that_deletes_and_exit_ask_first(desk):
     assert desk.answer(Message("1", "/exit"), channel) is None and "**Stop Tinker?**" in channel.texts()[-1]
     say(desk, channel, "/confirm")
     wait_until(lambda: channel.closed)
+
+
+@pytest.mark.spec("CNV-9", "REM-9", "REM-10")
+def test_memory_forget_asks_first_and_the_other_memory_views_are_glances(desk, monkeypatch):
+    desk, channel, _ = desk
+    assert desk.answer(Message("1", "/memory forget a1b2c3"), channel) is None
+    assert (
+        desk.ran == [["memory", "forget", "a1b2c3"]] and "👉 `/confirm` to delete it" in channel.texts()[-1]
+    )
+    monkeypatch.setattr(desk, "tinker", lambda words: desk.ran.append(words) or "🧠 Memories")
+    assert (
+        desk.answer(Message("1", "/memory portrait"), channel)
+        == "⚙️ **memory portrait**\n```\n🧠 Memories\n```"
+    )
+    assert desk.ran[-1] == ["memory", "portrait"]
+
+
+@pytest.mark.spec("CNV-9", "DRM-8")
+def test_dream_status_is_a_glance_in_a_chat(desk, monkeypatch):
+    desk, channel, _ = desk
+    monkeypatch.setattr(desk, "tinker", lambda words: desk.ran.append(words) or "💤 Dream")
+    assert desk.answer(Message("1", "/dream"), channel) == "⚙️ **dream**\n```\n💤 Dream\n```"
+    assert desk.ran[-1] == ["dream"]
 
 
 @pytest.fixture
@@ -3106,7 +3228,7 @@ def test_start_is_answered_with_a_welcome(desk):
 
 
 @pytest.mark.spec("CNV-23")
-def test_memory_graph_is_sent_as_a_file(desk, monkeypatch):
+def test_knowledge_graph_is_sent_as_a_file(desk, monkeypatch):
     desk, channel, _ = desk
     sent = []
     channel.send_file = lambda chat, path, caption: sent.append((chat, path, caption))
@@ -3118,28 +3240,50 @@ def test_memory_graph_is_sent_as_a_file(desk, monkeypatch):
         return "Tinker's memory: 2 lessons; 3 links"
 
     monkeypatch.setattr(desk, "tinker", make_page)
-    assert command_of("/memory --graph") == "memory"
-    assert desk.answer(Message("1", "memory --graph"), channel) is None
-    assert desk.ran == [["memory", "--graph"]]
+    assert command_of("/knowledge --graph") == "knowledge"
+    assert desk.answer(Message("1", "knowledge --graph"), channel) is None
+    assert desk.ran == [["knowledge", "--graph"]]
     assert sent == [("1", page, "🧠 **Tinker's memory**\nTinker's memory: 2 lessons; 3 links")]
     monkeypatch.setattr(desk, "tinker", lambda words: "Error: the home cannot be read")
     assert (
-        desk.answer(Message("1", "memory --graph"), channel)
-        == "🧠 **memory --graph**\n```\nError: the home cannot be read\n```"
+        desk.answer(Message("1", "knowledge --graph"), channel)
+        == "🧠 **knowledge --graph**\n```\nError: the home cannot be read\n```"
         and len(sent) == 1
     )
 
 
+@pytest.mark.spec("CNV-23", "DRM-9")
+def test_memory_graph_and_dream_graph_send_the_memory_page(desk, monkeypatch):
+    desk, channel, _ = desk
+    sent = []
+    channel.send_file = lambda chat, path, caption: sent.append((chat, path, caption))
+    page = conversation.Home.memory_page()
+
+    def make_page(words):
+        desk.ran.append(words)
+        page.write_text(f"<!doctype html>{len(desk.ran)}")
+        return "Tinker's episodes and memories: 2 episodes, 1 memory; 2 links"
+
+    monkeypatch.setattr(desk, "tinker", make_page)
+    assert desk.answer(Message("1", "memory graph"), channel) is None
+    assert desk.answer(Message("1", "dream graph"), channel) is None
+    assert desk.ran == [["memory", "graph"], ["dream", "graph"]]
+    caption = (
+        "💭 **Tinker's episodes and memories**\nTinker's episodes and memories: 2 episodes, 1 memory; 2 links"
+    )
+    assert sent == [("1", page, caption), ("1", page, caption)]
+
+
 @pytest.mark.spec("GRF-6", "GRF-10", "CMD-1")
-def test_memory_with_words_is_browsed_in_a_chat(desk, monkeypatch):
+def test_knowledge_with_words_is_browsed_in_a_chat(desk, monkeypatch):
     desk, channel, _ = desk
     monkeypatch.setattr(desk, "tinker", lambda words: desk.ran.append(words) or "[2d35d6] ✅ lesson    Seed")
-    assert command_of("/memory python lessons 2") == "memory"
-    answer = desk.answer(Message("1", "memory python lessons 2"), channel)
-    assert desk.ran == [["memory", "python", "lessons", "2"]]
-    assert answer == "🧠 **memory python lessons 2**\n```\n[2d35d6] ✅ lesson    Seed\n```"
-    desk.answer(Message("1", "memory show [2d35d6]"), channel)
-    assert desk.ran[-1] == ["memory", "show", "[2d35d6]"]
+    assert command_of("/knowledge python lessons 2") == "knowledge"
+    answer = desk.answer(Message("1", "knowledge python lessons 2"), channel)
+    assert desk.ran == [["knowledge", "python", "lessons", "2"]]
+    assert answer == "🧠 **knowledge python lessons 2**\n```\n[2d35d6] ✅ lesson    Seed\n```"
+    desk.answer(Message("1", "knowledge show [2d35d6]"), channel)
+    assert desk.ran[-1] == ["knowledge", "show", "[2d35d6]"]
 
 
 @pytest.mark.spec("CNV-23")
@@ -3148,7 +3292,7 @@ def test_the_terminal_opens_the_file_and_other_channels_send_where_it_is(monkeyp
     monkeypatch.setattr(conversation.webbrowser, "open", opened.append)
     console = ConsoleChannel()
     monkeypatch.setattr(console.screen, "print", printed.append)
-    page = tmp_path / "memory.html"
+    page = tmp_path / "knowledge.html"
     console.send_file("console", page, "🧠 **Tinker's memory**")
     assert opened == [page.as_uri()] and f"Opened in your browser: {page}" in Markup.plain(printed[0])
     plain = Recorder()

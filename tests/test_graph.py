@@ -209,17 +209,18 @@ def test_the_page_is_self_contained_with_a_plain_list(memory):
 
 
 @pytest.mark.spec("GRF-5")
-def test_memory_graph_writes_the_page_and_opens_it_only_in_a_terminal(memory, monkeypatch, capsys):
-    assert Cli.parse(["memory", "--graph"]).graph is True and Cli.parse(["memory"]).graph is False
+def test_knowledge_graph_writes_the_page_and_opens_it_only_in_a_terminal(memory, monkeypatch, capsys):
+    assert Cli.parse(["knowledge", "--graph"]).graph is True and Cli.parse(["knowledge"]).graph is False
     opened = []
     monkeypatch.setattr(cli.webbrowser, "open", opened.append)
-    Commands.show_memory(graph=True)
+    Commands.show_knowledge(graph=True)
     out = capsys.readouterr().out
+    assert Home.graph_page().name == "knowledge.html"
     assert Home.graph_page().read_text().startswith("<!doctype html>") and opened == []
     assert "Tinker's memory: 1 language, 1 topic, 2 principles" in out and "1 retired" in out
     assert f"Page: {Home.graph_page()}" in out and "Similar lessons found by words" in out
     monkeypatch.setattr(sys.stdout, "isatty", lambda: True)
-    Commands.show_memory(graph=True)
+    Commands.show_knowledge(graph=True)
     assert opened == [Home.graph_page().as_uri()]
 
 
@@ -265,8 +266,8 @@ def test_memory_lists_the_parts_with_what_each_holds(memory, capsys):
     assert "Your commands (memory commands): 1 command; 1 proven" in out
     assert "1 item did not hold and was retired" in out
     for tip in ("NAME", "show ID", "find WORDS", "recent"):
-        assert f"tinker memory {tip}" in out
-    assert "tinker memory --graph" in out and "tinker teach" in out and "tinker clear PART" in out
+        assert f"tinker knowledge {tip}" in out
+    assert "tinker knowledge --graph" in out and "tinker teach" in out and "tinker clear PART" in out
 
 
 @pytest.mark.spec("GRF-8")
@@ -284,7 +285,7 @@ def test_memory_name_shows_one_part_its_items_with_short_ids_and_counts_the_reti
     assert "Exit with code 1" not in out and "retired" not in out
     out = shown(capsys, "Any", "language")
     assert "🌱 principle Exit with code 1 after an error <b>." in out and "Name each test after" not in out
-    assert "1 retired, not shown: tinker memory any retired" in out
+    assert "1 retired, not shown: tinker knowledge any retired" in out
     out = shown(capsys, "any", "retired")
     assert f"[{short_id('principle:' + memory['name'])}] ♻️ principle Name each test after" in out
     assert "Exit with code 1" not in out
@@ -301,7 +302,7 @@ def test_memory_kind_alone_lists_that_kind_across_memory_with_each_part(memory, 
 
 @pytest.mark.spec("GRF-9")
 def test_an_unknown_part_is_refused_saying_memory_lists_the_parts(memory):
-    with pytest.raises(SystemExit, match="tinker memory lists the parts"):
+    with pytest.raises(SystemExit, match="tinker knowledge lists the parts"):
         browse("cobol")
 
 
@@ -309,13 +310,13 @@ def test_an_unknown_part_is_refused_saying_memory_lists_the_parts(memory):
 def test_every_memory_list_comes_a_page_at_a_time(memory, monkeypatch, capsys):
     monkeypatch.setattr(settings, "PER_PAGE", 1)
     out = shown(capsys, "python", "2")
-    assert "Page 2 of 4: tinker memory python 3 for more." in out and out.count("] ") == 1
+    assert "Page 2 of 4: tinker knowledge python 3 for more." in out and out.count("] ") == 1
     assert "Page 1 of 1" not in shown(capsys, "python", "lessons", "1")
-    assert "Page 2 of 4: tinker memory 3 for more." in shown(capsys, "2")
+    assert "Page 2 of 4: tinker knowledge 3 for more." in shown(capsys, "2")
 
 
 @pytest.mark.spec("GRF-9")
-def test_memory_words_are_a_name_a_kind_and_a_page(home_store, capsys):
+def test_knowledge_words_are_a_name_a_kind_and_a_page(home_store, capsys):
     request = MemoryBrowser.request
     assert request([]) == ("parts", "", "", 1, [])
     assert request(["python", "Lessons", "2"]) == ("part", "python", "lesson", 2, ["python", "Lessons"])
@@ -325,12 +326,12 @@ def test_memory_words_are_a_name_a_kind_and_a_page(home_store, capsys):
     assert request(["find", "seed", "tests"])[:1] == ("find",)
     assert request(["recent", "2"])[:4] == ("recent", "", "", 2)
     for wrong in ("show", "show a b", "find", "recent x", "lessons facts", "python 0"):
-        with pytest.raises(ValueError, match="tinker memory NAME"):
+        with pytest.raises(ValueError, match="tinker knowledge NAME"):
             request(wrong.split())
-    assert Cli.parse(["memory", "python", "lessons", "2"]).memory == request(["python", "lessons", "2"])
+    assert Cli.parse(["knowledge", "python", "lessons", "2"]).knowledge == request(["python", "lessons", "2"])
     with pytest.raises(SystemExit):
-        Cli.parse(["memory", "--graph", "python"])
-    assert "--graph takes no other words; use tinker memory [PAGE]" in capsys.readouterr().err
+        Cli.parse(["knowledge", "--graph", "python"])
+    assert "--graph takes no other words; use tinker knowledge [PAGE]" in capsys.readouterr().err
 
 
 @pytest.mark.spec("GRF-10")
@@ -339,7 +340,7 @@ def test_memory_show_shows_one_item_whole_with_its_links_and_runs(memory, capsys
     Knowledge("Python", "r2").prove({f"lesson:{memory['seed']}": ["tests"]})
     out = shown(capsys, "show", f"[{short_id(seed).upper()}]")
     assert "principle ✅" in out and "Seed random generators inside tests" in out
-    assert "part: Python (tinker memory python)" in out and "day: 20" in out
+    assert "part: Python (tinker knowledge python)" in out and "day: 20" in out
     assert "@r1 a calculator — taught" in out and out.count("@r2 ") == 1 and "— helped ×2" in out
     assert "Correct it: tinker teach WHAT" in out and "Cites" not in out and "Similar" not in out
     for prefix in (digest(seed)[:7], digest(seed)):
@@ -397,7 +398,7 @@ def test_memory_recent_lists_kept_items_newest_first_with_day_and_part(memory, m
     assert "Flask routes use @app.route  (flask)" in out and "Name each test" not in out
     monkeypatch.setattr(settings, "PER_PAGE", 1)
     browser.show(MemoryBrowser.request(["recent"]))
-    assert "Page 1 of 2: tinker memory recent 2 for more." in capsys.readouterr().out
+    assert "Page 1 of 2: tinker knowledge recent 2 for more." in capsys.readouterr().out
 
 
 @pytest.mark.spec("GRF-1")

@@ -280,7 +280,7 @@ COMMANDS = [
         "research TOPIC",
         "the web researched in depth, its facts checked across sites, and kept: slow",
         "Research a topic on the web in depth: Tinker frames it as questions, reads pages for each, checks the "
-        "facts across sites, keeps what it found (tinker memory) and answers with its sources. It is slow. "
+        "facts across sites, keeps what it found (tinker knowledge) and answers with its sources. It is slow. "
         "No quotes needed.",
         kind="job",
         chat=True,
@@ -444,12 +444,12 @@ COMMANDS = [
         example="resume #3",
     ),
     Command(
-        "memory",
+        "knowledge",
         "Learn",
-        "memory [NAME] [KIND] [PAGE] | show ID | find WORDS | recent [PAGE] [--graph]",
+        "knowledge [NAME] [KIND] [PAGE] | show ID | find WORDS | recent [PAGE] [--graph]",
         "browse what Tinker has learned (--graph: as a graph to explore)",
-        "Browse what Tinker has learned, a page at a time: memory lists the parts (each language, any language, "
-        "each topic, your commands) with what each holds; memory NAME shows one part, each item with its short "
+        "Browse what Tinker has learned, a page at a time: knowledge lists the parts (each language, any language, "
+        "each topic, your commands) with what each holds; knowledge NAME shows one part, each item with its short "
         "ID, ✅ proven or 🌱 not yet, its kind and its first line; a KIND (toolchain, facts, findings, rules, "
         "fixes, lessons, commands or retired) keeps that kind, and alone lists it across memory. The browser "
         "changes nothing: correct an item with teach, forget a part with clear PART. --graph draws it as a "
@@ -463,20 +463,66 @@ COMMANDS = [
                 "words",
                 "*",
                 "[NAME] [KIND] [PAGE]",
-                "a part (as memory lists it), a kind of item, the page, from 1; or show ID, find WORDS, "
+                "a part (as knowledge lists it), a kind of item, the page, from 1; or show ID, find WORDS, "
                 "recent [PAGE]",
             )
         ],
         options=("graph",),
-        example="memory python lessons 2",
+        example="knowledge python lessons 2",
         rows=[
-            ("memory [PAGE]", "the parts of memory: what each holds, how much is proven, what is retired"),
-            ("memory NAME [KIND] [PAGE]", "one part: its details, then its items with their short IDs"),
-            ("memory KIND [PAGE]", "one kind of item across memory (retired: the retired ones)"),
-            ("memory show ID", "one item whole: its text, details, sources, links and runs"),
-            ("memory find WORDS", "the items that hold every word, retired ones too"),
-            ("memory recent [PAGE]", "the items newest first, each with its day"),
-            ("memory --graph", "memory as a graph in one page, to explore"),
+            ("knowledge [PAGE]", "the parts of memory: what each holds, how much is proven, what is retired"),
+            ("knowledge NAME [KIND] [PAGE]", "one part: its details, then its items with their short IDs"),
+            ("knowledge KIND [PAGE]", "one kind of item across memory (retired: the retired ones)"),
+            ("knowledge show ID", "one item whole: its text, details, sources, links and runs"),
+            ("knowledge find WORDS", "the items that hold every word, retired ones too"),
+            ("knowledge recent [PAGE]", "the items newest first, each with its day"),
+            ("knowledge --graph", "memory as a graph in one page, to explore"),
+        ],
+    ),
+    Command(
+        "memory",
+        "Learn",
+        "memory [PAGE] | show ID | forget ID [--yes] | portrait",
+        "what Tinker remembers about you, and the portrait",
+        "See what Tinker remembers from what you do, a page at a time: memory lists the memories newest first, "
+        "each with its ID, kind and gist, then how many episodes wait for a dream and when the last dream was; "
+        "memory show ID shows one memory or episode whole; memory forget ID deletes one (asking first); "
+        "memory portrait shows the portrait and the memories it comes from.",
+        kind="glance",
+        actions=[Action("glance", "forget", deletes=True)],
+        chat=True,
+        words=True,
+        arguments=[
+            Argument(
+                "words", "*", "[PAGE] | show ID | forget ID | portrait", "the page, from 1; or an action"
+            )
+        ],
+        options=("yes",),
+        example="memory show a1b2c3",
+        rows=[
+            ("memory [PAGE]", "the memories, newest first, and when the last dream was"),
+            ("memory show ID", "one memory (with its sources) or episode whole"),
+            ("memory forget ID [--yes]", "delete one memory or episode"),
+            ("memory portrait", "the portrait and the memories it comes from"),
+        ],
+    ),
+    Command(
+        "dream",
+        "Learn",
+        "dream [status] | run",
+        "when Tinker last dreamt, and dream now",
+        "See how Tinker learns from what you do: dream (or dream status) says when the last dream was, how many "
+        "changes each step made, how many episodes wait, and whether a dream is queued or running; dream run "
+        "dreams now, turning fresh episodes into memories and redrawing the portrait.",
+        kind="glance",
+        actions=[Action("job", "run")],
+        chat=True,
+        words=True,
+        arguments=[Argument("words", "*", "[status] | run", "status (the default) or run")],
+        example="dream run",
+        rows=[
+            ("dream [status]", "the last dream, its changes, the waiting episodes and any queued dream"),
+            ("dream run", "dream now: consolidate fresh episodes, revise memories, redraw the portrait"),
         ],
     ),
     Command(

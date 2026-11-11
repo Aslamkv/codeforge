@@ -520,7 +520,7 @@ class TaughtCommands:
     @staticmethod
     def forget(name):
         if name not in TaughtCommands.all():
-            raise SystemExit(f"{name} was not taught (tinker memory lists the commands taught)")
+            raise SystemExit(f"{name} was not taught (tinker knowledge lists the commands taught)")
         Home.store().delete("commands", name)
         say.done(f"Forgot the command {name}")
 

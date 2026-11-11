@@ -612,6 +612,20 @@ def test_cycle_runs_its_phases_in_order(session, monkeypatch, project_dir):
     assert CycleRunner(session).run(fix) == "done" and ran == list(FIX_PHASES[:-1])
 
 
+@pytest.mark.spec("REM-1")
+def test_a_cycle_writes_one_episode_when_it_ends_not_while_it_waits(session, monkeypatch):
+    from tinkerkit.remembering import Scratchpad
+
+    recording_phases(monkeypatch)
+    cycle = dict(session.project.cycles[0], confirm=True)
+    session.project.cycles[0] = cycle
+    assert CycleRunner(session).run(cycle) == "awaiting" and Scratchpad.fresh() == []
+    cycle.update(awaiting=False, confirmed=True)
+    assert CycleRunner(session).run(cycle) == "done"
+    [episode] = Scratchpad.fresh()
+    assert episode["task"] == cycle["request"] and episode["status"] == "done" and episode["chat"] == "cli"
+
+
 @pytest.mark.spec("CLI-10")
 def test_cycle_waits_after_its_plan_unless_told_not_to(session, monkeypatch):
     ran = recording_phases(monkeypatch)
@@ -1057,7 +1071,7 @@ def test_learning_checks_everything_before_loading_and_finding_nothing_is_an_err
 
 @pytest.mark.spec("GRF-8", "GRF-9")
 def test_memory_browses_what_tinker_learned(home_store, capsys):
-    Commands(parse("memory")).run()
+    Commands(parse("knowledge")).run()
     assert "🌱 Nothing yet: it learns from every build" in capsys.readouterr().out
     known = Knowledge("Python")
     known.remember_toolchain(Toolchain(TOOLCHAIN))
@@ -1073,22 +1087,115 @@ def test_memory_browses_what_tinker_learned(home_store, capsys):
             "facts": [{"phase": "code", "text": "Run go test ./..."}],
         },
     )
-    Commands(parse("memory")).run()
+    Commands(parse("knowledge")).run()
     out = capsys.readouterr().out
     assert "📘 Python (memory python): 1 toolchain, 1 principle; 1 proven · nothing built yet" in out
     assert "📘 Go (memory go): 1 fact; 0 proven · nothing built yet" in out
-    Commands(parse("memory", "go", "facts")).run()
+    Commands(parse("knowledge", "go", "facts")).run()
     out = capsys.readouterr().out
     assert "A compiled language.\nlearned: 2026-10-22 08:53\nnothing built yet" in out
     assert "] 🌱 fact      Run go test ./..." in out
 
 
 @pytest.mark.spec("GRF-9")
-def test_memory_refuses_words_it_cannot_read(home_store, capsys):
+def test_knowledge_refuses_words_it_cannot_read(home_store, capsys):
     for wrong in (["show"], ["lessons", "facts"], ["python", "0"]):
         with pytest.raises(SystemExit):
+            parse("knowledge", *wrong)
+        assert "tinker knowledge NAME [KIND] [PAGE]" in capsys.readouterr().err
+
+
+@pytest.mark.spec("REM-7", "REM-8", "REM-9", "REM-10")
+def test_memory_runs_the_memory_views(home_store, monkeypatch):
+    seen = []
+    for view in ("show_memories", "show_remembered", "forget", "show_portrait"):
+        monkeypatch.setattr(cli.remembering, view, lambda *given, view=view: seen.append((view, *given)))
+    for words in (
+        [],
+        ["2"],
+        ["show", "a1b2c3"],
+        ["forget", "a1b2c3", "--yes"],
+        ["forget", "d4e5f6"],
+        ["portrait"],
+    ):
+        Commands(parse("memory", *words)).run()
+    assert seen == [
+        ("show_memories", 1),
+        ("show_memories", 2),
+        ("show_remembered", "a1b2c3"),
+        ("forget", "a1b2c3", True),
+        ("forget", "d4e5f6", False),
+        ("show_portrait",),
+    ]
+
+
+@pytest.mark.spec("REM-7")
+def test_memory_refuses_words_it_cannot_read(home_store, capsys):
+    for wrong in (
+        ["show"],
+        ["forget"],
+        ["0"],
+        ["portrait", "now"],
+        ["what"],
+        ["show", "a", "b"],
+        ["graph", "now"],
+    ):
+        with pytest.raises(SystemExit):
             parse("memory", *wrong)
-        assert "tinker memory NAME [KIND] [PAGE]" in capsys.readouterr().err
+        assert "| portrait | graph" in capsys.readouterr().err
+
+
+@pytest.mark.spec("DRM-8", "CMD-1")
+def test_dream_shows_the_dream_state_and_dream_run_dreams_with_the_tracker_phases(home_store, monkeypatch):
+    seen = []
+    monkeypatch.setattr(cli.dreaming, "show_dream", lambda: seen.append("show_dream"))
+    monkeypatch.setattr(Commands, "follow", lambda self, title: seen.append(("follow", title)))
+    monkeypatch.setattr(
+        Commands,
+        "reported",
+        lambda self, setup, work: seen.append(("reported", setup(), work(FakeTracker(), *setup()))),
+    )
+    monkeypatch.setattr(
+        "tinkerkit.dreaming.Dream.run", lambda dream: seen.append(("run", dream.phase("consolidate")))
+    )
+    for words in ([], ["status"], ["run"]):
+        Commands(parse("dream", *words)).run()
+    assert seen[:2] == ["show_dream", "show_dream"]
+    assert seen[2] == ("follow", "Dreaming")
+    assert seen[3] == ("run", "phase consolidate")
+    assert seen[4][:2] == ("reported", ()) and seen[4][2]["status"] == "done"
+
+
+class FakeTracker:
+    def phase(self, step):
+        return f"phase {step}"
+
+
+@pytest.mark.spec("DRM-8")
+def test_dream_refuses_words_it_cannot_read(home_store, capsys):
+    for wrong in (["now"], ["run", "now"], ["status", "run"], ["graph", "now"]):
+        with pytest.raises(SystemExit):
+            parse("dream", *wrong)
+        assert "tinker dream [status] | run | graph" in capsys.readouterr().err
+
+
+@pytest.mark.spec("DRM-9")
+def test_memory_graph_and_dream_graph_write_the_memory_page(home_store, monkeypatch):
+    seen = []
+    monkeypatch.setattr(cli.dreaming, "show_memory_graph", lambda: seen.append("show_memory_graph"))
+    Commands(parse("memory", "graph")).run()
+    Commands(parse("dream", "graph")).run()
+    assert seen == ["show_memory_graph", "show_memory_graph"]
+
+
+@pytest.mark.spec("DRM-9")
+def test_dream_graph_in_a_terminal_serves_the_live_page(home_store, monkeypatch):
+    seen = []
+    monkeypatch.setattr(cli.sys.stdout, "isatty", lambda: True)
+    monkeypatch.setattr(cli.dreaming, "serve_dream_graph", lambda: seen.append("serve_dream_graph"))
+    monkeypatch.setattr(cli.dreaming, "show_memory_graph", lambda: seen.append("show_memory_graph"))
+    Commands(parse("dream", "graph")).run()
+    assert seen == ["serve_dream_graph"]
 
 
 @pytest.mark.spec("CLI-9", "PLN-8")

@@ -69,6 +69,7 @@ listed above it:
 | `text` | plain text helpers every module shares |
 | `store` | one SQLite database of documents and logs (`Store`, `Log`) |
 | `settings` | the numbers and fixed names more than one part shares (a module's own stay with it); the Tinker home (`Home`) and its database, the settings table (`SETTINGS`, `Config`), numbered lists (`Numbered`), the one way to delete (`confirm_deletion`) |
+| `remembering` | what the person and Tinker did together, with no model: each request's episode (`Scratchpad`), the memories a dream keeps of them and their recall, ranked by the `Retriever` its caller gives (`Memories`), and who the person is (`Portrait`) |
 | `system` | what this computer tells at once by fixed read-only commands, with no model (`SystemCheck`, `SYSTEM_CHECKS`) |
 | `commands` | the one table of Tinker's commands with each one's kind (`kind_of`, `deletes`), and project references (`@ID`, `@folder`) |
 | `jobs` | every long command as a job, listed, stopped and resumed (`Jobs`), its journal of requests and answers (`Journal`, `journaled`), and its log of model calls (`calls_log`) |
@@ -83,14 +84,15 @@ listed above it:
 | `search` | the search engines the web plugin asks, used by `web` alone: open engines with no key, with the standard library only (`SearchEngine`, `Mwmbl`, `MediaWiki`, `Wikipedia`, `Wikibooks`) |
 | `passages` | every page read as text: an HTML page's main content as blocks, and fetched pages as passages under headings, repeats dropped (`Cleaner`, `MainBlocks`, `Page`, `Passage`) |
 | `web` | the web plugin, the only part that reaches web content: search and fetch, and every failure of either (`Internet`, `WebPage`, `RequestLog`), and a page as text (`PageText`, a view over `passages`) |
+| `retrieval` | ranking texts by words and meaning (`Retriever`) and the cached embeddings (`Embeddings`) |
 | `conversation` | the terminal and the chats as one conversation (`Desk`, `Channel`, `Markup`, `Talk`, `Shell`, `Progress`, `Reporter`) |
 | `channels` | the chat plugin: Telegram, and `tinker channel` |
-| `retrieval` | ranking texts by words and meaning (`Retriever`) and the cached embeddings (`Embeddings`) |
 | `principles` | the principle record and its one home store (`Principle`, `Principles`) and the deltas' inducer (`Inducer`) |
 | `knowledge` | lessons and proven knowledge (`Knowledge`), research (`Researcher`), and what learning shares (`Learner`, `Library`) |
 | `slots` | what learning a language or a tool must find out, as data (`Slot`, `PROFILES`), and each slot's passages (`Selector`) |
 | `learning` | learning a language or a tool by its slots (`SlotLearner`, `DocCache`, `LearnStopped`) |
 | `graph` | what Tinker knows as one graph of items and links (`Graph`), the page that shows it (`GraphPage`), and browsing it in pages (`MemoryBrowser`) |
+| `dreaming` | the dream: turning fresh episodes into memories while the queue is idle, revising and fading them, and the live page that shows it (`Dream`, `DreamPage`) |
 | `reading` | what the person gives to read: stored whole on the reading list (`Readings`), then learned from chapter by chapter (`Reader`, `Epub`, `Book`) |
 | `sandbox` | running a check with no network and writes only in its own folder, one backend per platform (`Sandbox`, `MacSandbox`, `LinuxSandbox`, `NoSandbox`) |
 | `checking` | running a check of what is taught: SQL in a confined database, a command in the sandbox (`Check`, `SqlCheck`, `CommandCheck`) |
@@ -127,7 +129,8 @@ The Tinker home (**SET-1**) holds:
 | `channel-NAME.lock` | the lock of each chat channel a Tinker listens to |
 | `web-requests.log` | every web search and fetch Tinker made, one JSON line each (**WEB-6**) |
 | `tinker.log` | what Tinker does, one plain-text sentence per watched step or fact, always (**LOG-1**); rotated as `tinker-STAMP.log.zip` |
-| `memory.html` | the page `tinker memory --graph` writes |
+| `knowledge.html` | the page `tinker knowledge --graph` writes |
+| `memory.html` | the page of episodes and memories `memory graph` sends in a conversation (**DRM-9**) |
 | `reading/` | the files sent in a chat to read |
 
 The home database holds these collections and logs. `tinker clear PART` deletes a part (**SET-9**), named in
@@ -158,6 +161,10 @@ the last column:
 | log `journal #N` | job #N's requests (model calls, web searches, page fetches) with their answers, until it finishes | `jobs` |
 | `job queue`, `job runner` | the job numbers in the queue, head first (**JOB-8**); the process that runs it (**JOB-9**) | `jobs` |
 | log `output #N` | what job #N printed as the runner ran it (**JOB-9**), until the job is archived | `jobs` |
+| `episodes` | what each chat request, command line and build did (**REM-1**) | |
+| `memories` | what the dream kept of the episodes (**REM-3**) | |
+| `dream` | the portrait (`portrait`) and the dream's last state (`state`) | |
+| log `dream events` | every change a dream made (**DRM-7**) | |
 
 Jobs, readings and the chat history are numbered lists (`Numbered`, **SET-11**). `#N` names an entry. A list
 shows them newest first, a page at a time, and a page that has more after it names the command for the next.
@@ -339,8 +346,8 @@ The home and its database, the settings, numbered lists, and the one way to dele
   | `uptime` | ⏱️ | Uptime | `uptime` | `uptime` | days, hours, minutes, leaving out the zero ones: `2 d 3 h 53 m`, `45 m` |
   | `network` | 🌐 | Network | `ipconfig getifaddr en0` | `hostname -I` | the first address: `192.168.220.41` |
 
-  Sizes read `N GB`, `N MB` (`926Gi`, `23G` → `926 GB`, `23 GB`). `ram` is RAM alone: `memory` is the
-  `memory` command's word and never names this check.
+  Sizes read `N GB`, `N MB` (`926Gi`, `23G` → `926 GB`, `23 GB`). `ram` is RAM alone: `memory` and
+  `knowledge` are commands' words and never name this check.
 - **SYS-2** `SystemCheck` is the base of every check; each row of **SYS-1** is one subclass that sets its
   word, emoji, label and two commands and gives `summary(output)`, its line's text from the command's output.
   A subclass registers itself when defined, so `SYSTEM_CHECKS` (one instance of each, in table order) and
@@ -364,14 +371,15 @@ The home and its database, the settings, numbered lists, and the one way to dele
   job too, **JOB-1**), `own` (the conversation answers it its own way) or `terminal` (it asks in a terminal, so
   a chat only says to run it there, **CNV-9**). An action whose kind differs from its command's is an `Action`
   of that command, with its own kind: `read list`, `read show`, `exercise status`, `channel add`,
-  `channel remove`, `channel start`, `model calibrate NAME`, `model recipe` (`glance`), `model recipe all`,
+  `channel remove`, `channel start`, `model calibrate NAME`, `model recipe` (`glance`), `model recipe all`, `dream run` (`job`; `dream`, `dream status` and
+  `dream graph` are `glance`),
   `model NAME` of a model that does not embed and was never measured (**CLI-3**) and `learn` of a command of
   the person's (**CLI-1**). `kind_of(argv)` gives the kind of what the words ask for, and `deletes(argv)`
   whether it deletes. The command line builds its parser and its help from the
   table, and the conversation its commands. Nothing else lists commands by kind.
 - **CMD-2** The runs are `task`, `restart`, `confirm`, `amend`, `add`, `fix` and `resume`. Every run takes
   `--web`. The runs that start a cycle (`task`, `restart`, `add`, `fix`) take `--confirm`, and the others do
-  not. The commands that delete are `clear`, `reset`, `restart` and `channel remove`.
+  not. The commands that delete are `clear`, `reset`, `restart`, `channel remove` and `memory forget`.
 - **CMD-3** `ref(word)` reads a project reference: `@` followed by a run ID or a folder name. Any other word is
   not a reference. `refs(words)` takes a reference from the start of the words, and leaves the rest as they
   are.
@@ -385,7 +393,7 @@ goes to the front, so the person is always answered first.
 - **JOB-1** `is_job(argv)` is true for a command of kind `job` or `pauses` (**CMD-1**): `task`, `restart`, `resume`,
   `confirm`, `amend`, `add`, `fix`, `model calibrate NAME`, `model recipe all`, `model NAME` of a model the home has no
   record of and that is not the embedding model (an embedding model not yet `embed_model` is one too: the home cannot
-  tell it apart, **CLI-3**), `learn`, `ask`, `teach`, `read`, `research`, `exercise`, `chat` and `command WHAT`. Help,
+  tell it apart, **CLI-3**), `learn`, `ask`, `teach`, `read`, `research`, `exercise`, `chat`, `command WHAT` and `dream run`. Help,
   and a build an exercise runs (`EXERCISE_ENV`, which holds the exercise's job number), are never jobs. A job keeps the
   computer awake while it runs (**SET-10**). `Jobs.running(argv)` makes a job the next number (`#1`, `#2` ...), kept in
   the home's `jobs` with its command, title, arguments, the day it started, its state, its process and its tracker
@@ -433,7 +441,8 @@ goes to the front, so the person is always answered first.
   process of its own, `tinker ARGS` (`resume #N` for a job that ran before, which skips what it did), marked as
   the runner's job #N so it does not queue itself again, and keeps what it prints in log `output #N`. An add in
   the runner's own process wakes it at once; otherwise it reads the queue once every `QUEUE_LOOK_SECONDS`
-  seconds. It runs until the queue is empty, so the queue goes on whenever a Tinker that hosts it starts.
+  seconds. It runs until the queue is empty, so the queue goes on whenever a Tinker that hosts it starts. An
+  idle queue starts a dream (**DRM-1**).
 - **JOB-10** Whoever asked for a job follows it: a job command in a terminal (and the conversation's own
   `tinker ...` process) puts its job at the front, prints log `output #N` as it grows and ends once its job
   leaves the queue; one that hosts the runner keeps it until the queue is empty. Ctrl-C there, and quitting
@@ -670,7 +679,8 @@ What is said in the chats, kept so that a chat is only a view of it.
   only a short line when it asks again, and its live line says in plain words what Tinker is working on (the
   step it is on, else "Working on it") and for how long ("Working on it… 1m 41s (101s)").
 - **MOD-23** A quick call is one model chat outside a run: the chat's replies, its warm-up, the commands it proposes,
-  the searches planned for a need (**KNW-23**), a project's folder name, and a request's review (**RVW-1**).
+  the searches planned for a need (**KNW-23**), a project's folder name, a request's review (**RVW-1**), and a
+  dream's steps (**DRM-2**).
   `Models.quick()` is `None` until a measured model is in use; otherwise it gives the model's name, its options
   (`num_ctx`, and `num_batch` when measured) and its think setting (`false` for a thinking model, else none).
   `Models.quick_reply(messages, tokens, think, temperature)` sends one chat with them, at `think` as the model takes it
@@ -1081,7 +1091,7 @@ The terminal and the chats are one conversation: the same commands, the same ans
   The first (`CHAT_SYSTEM`) holds the style, the commands a chat offers by name only, grouped as in `help`,
   and the live state only when there is some: what runs now and the plan that waits. A plain question is
   answered there in one call. To act, the model replies with only the command names, one per line, where
-  memory means Tinker's `memory` command and only RAM means `/system ram`. A named command that takes no
+  only RAM means `/system ram`. A named command that takes no
   words runs at once; otherwise a second call (`CHAT_FILL_SYSTEM`) gets the same messages, each named
   command's synopses and descriptions, and only the state those commands use: the channels and whether
   Tinker listens on each for `channel`, the model in use for `model`, what runs and waits for the job
@@ -1111,9 +1121,10 @@ The terminal and the chats are one conversation: the same commands, the same ans
 - **CNV-22** `one_shot` says one of the conversation's commands once, in the terminal (`tinker chat`,
   `command`, `run`, `history`). Each needs words after it, except `run` and `history`. `chat` and
   `command` are jobs (**JOB-1**). `command` runs nothing without a yes at the terminal.
-- **CNV-23** `memory --graph` in a conversation makes the page (`tinker memory --graph`) and sends it with
-  `send_file`, what tinker printed as its caption. The terminal opens the file in the browser and says where it
-  is; a channel that cannot send files sends the caption with the file's path.
+- **CNV-23** `knowledge --graph` in a conversation makes the page (`tinker knowledge --graph`) and sends it with
+  `send_file`, what tinker printed as its caption; `memory graph` and `dream graph` send `memory.html` the same
+  way (**DRM-9**). The terminal opens the file in the browser and says where it is; a channel that cannot send
+  files sends the caption with the file's path.
 
 ## channels (CHN)
 
@@ -1436,7 +1447,7 @@ What Tinker knows as one graph, and the page that shows it.
 - **GRF-4** `GraphPage.html(graph)` is one self-contained page: the graph as JSON inside it, and no script,
   style, font or image from elsewhere. It holds a plain list of every node by group (readable without
   scripts), escapes every text, and draws the graph when scripts run.
-- **GRF-5** `tinker memory --graph` writes the page to `Home.graph_page()`, prints what it holds (the counts,
+- **GRF-5** `tinker knowledge --graph` writes the page to `Home.graph_page()`, prints what it holds (the counts,
   and how lessons were found similar), and opens it in the browser only when printing to a terminal.
 - **GRF-6** `MemoryBrowser` shows memory from one `Graph.build()` (without embeddings), never from the stores
   themselves, so the browser and the page always show the same things. It deletes nothing and changes nothing;
@@ -1444,31 +1455,101 @@ What Tinker knows as one graph, and the page that shows it.
   at a time ([State](#state)), and every view is a glance (**CMD-1**).
 - **GRF-7** An item's short ID is the first `MEMORY_ID_CHARS` (6) hex digits of the SHA-1 of its node `id`, made
   longer only when two items share it, so it names the same item for as long as it is kept, whatever is learned
-  or retired around it. `memory show ID` takes any prefix of at least `MEMORY_ID_CHARS` digits: one that matches
+  or retired around it. `knowledge show ID` takes any prefix of at least `MEMORY_ID_CHARS` digits: one that matches
   no item, or more than one (listed), is refused with why. Hubs and runs have no short ID.
-- **GRF-8** `tinker memory [PAGE]` lists the parts of memory: each language, any language, each topic and the
+- **GRF-8** `tinker knowledge [PAGE]` lists the parts of knowledge: each language, any language, each topic and the
   person's commands, one line each with the name to see it by (its group), how many of each kind of item it
   holds and how many of them are proven, and for a language how many projects built it. Then how many items are
-  retired, and what to do next: `memory NAME`, `memory show ID`, `memory find WORDS`, `memory recent`,
-  `memory --graph`, `tinker ask`, `tinker teach` and `tinker clear PART`. With nothing learned, it says how to
+  retired, and what to do next: `knowledge NAME`, `knowledge show ID`, `knowledge find WORDS`, `knowledge recent`,
+  `knowledge --graph`, `tinker ask`, `tinker teach` and `tinker clear PART`. With nothing learned, it says how to
   start.
-- **GRF-9** `tinker memory NAME [KIND] [PAGE]` shows one part, named by its group or its label (case does not matter):
+- **GRF-9** `tinker knowledge NAME [KIND] [PAGE]` shows one part, named by its group or its label (case does not matter):
   its details (summary, when learned, the slots missing, projects built), then its items, each with its short ID, its
   status (✅ proven, 🌱 not yet), its kind and its first line, in the graph's order. Retired items are left out but
   counted, and the `retired` kind lists them alone. `KIND` (`toolchain`, `principles`, `facts`, `findings`, `rules`,
   `fixes`, `lessons`, `commands` or `retired`, singular or plural) keeps that kind; without `NAME` it lists that kind
   across memory. A last word that is a number is the page, a kind word is always the kind, and the other words are the
-  name. An unknown name is refused, saying `tinker memory` lists the parts.
-- **GRF-10** `tinker memory show ID` shows one item whole: its kind, status, part (and `memory NAME` to see it), day,
+  name. An unknown name is refused, saying `tinker knowledge` lists the parts.
+- **GRF-10** `tinker knowledge show ID` shows one item whole: its kind, status, part (and `knowledge NAME` to see it), day,
   text, details and sources; what it cites and what cites it, what it became or came from, the lessons and principles
   similar to it (each with its short ID and first line); and the runs that taught, confirmed, helped or failed it (`@ID`
   and the run's task, once per run and verb, with how many times when more than once). It ends with how to correct it
   (`tinker teach`).
-- **GRF-11** `tinker memory find WORDS` lists the items whose text or label holds every word (case does not
+- **GRF-11** `tinker knowledge find WORDS` lists the items whose text or label holds every word (case does not
   matter), retired ones too (marked ♻️), each as **GRF-9** shows it with its part. It shows at most
   `MEMORY_FOUND_SHOWN` (20) and says how many more there are; with none found, it says so.
-- **GRF-12** `tinker memory recent [PAGE]` lists the items that are not retired by `day`, newest first, each
+- **GRF-12** `tinker knowledge recent [PAGE]` lists the items that are not retired by `day`, newest first, each
   with its day and its part; an item with no day is left out.
+
+## remembering (REM)
+
+What the person and Tinker did together, kept as episodes, and the memories a dream makes of them (**DRM**).
+Nothing here calls the model.
+
+- **REM-1** `Scratchpad.write(episode)` keeps one episode in `episodes` for each chat request (`Talk.answering`:
+  the message, the commands it ran, their output cut to `EPISODE_FOUND_CHARS`, the reply, and `answered` or
+  `failed`), each command line run (`Shell.run`: the request, the line, its output cut the same way, its exit
+  code), and each build when it ends (its task and status). An episode has the next id `eN`, its chat, its time
+  and `dreamt` false. A `system` check's output (**SYS-1**) is never kept.
+- **REM-2** A dreamt episode keeps only its gist: its texts cut to `EPISODE_GIST_CHARS`. It is deleted
+  `EPISODE_KEPT_DAYS` (30) days after it was dreamt; a memory's source that is gone shows as `gone`.
+- **REM-3** A memory in `memories` is `{id, kind, gist, text, sources, first_seen, last_seen, recalled,
+  last_recalled, strength, retired}`: id `mN`, kind `person`, `fact`, `done` or `tool`, `sources` the ids of the
+  episodes it came from (at least one: `Memories` refuses a memory without), and `retired` empty or why.
+- **REM-4** `Memories.recall(request)` gives the memories not retired and the fresh episodes (not dreamt) that
+  hold a word of the request (BM25), or, when the embedding model is set, whose meaning is at least
+  `RECALL_MEANING` (cosine) close; in rank order, at most `RECALL_SHOWN` (6). Each memory recalled gets
+  `recalled` one higher and `last_recalled` now.
+- **REM-5** `Portrait` is who the person is, in at most `PORTRAIT_WORDS` (100) words, kept as `dream`/`portrait`.
+- **REM-6** `Talk.reply` adds "What you remember" (the portrait and each recalled line) to `CHAT_SYSTEM` only
+  when there is some; `Shell.propose` adds the recalled `tool` memories and episodes to `COMMAND_SYSTEM` the
+  same way. With nothing recalled, the prompt is unchanged, and the model always answers.
+- **REM-7** `tinker memory [PAGE]` lists the memories not retired, newest `last_seen` first, a page at a time,
+  each as its id, kind and gist; then how many episodes are fresh, how many memories are retired, when the last
+  dream was, and what to do next (`memory show ID`, `memory forget ID`, `memory portrait`, `dream`). With no memory,
+  it says a dream makes them from what the person does.
+- **REM-8** `tinker memory show ID` shows one memory or episode whole (a memory with its sources); an unknown
+  id is refused with why.
+- **REM-9** `tinker memory forget ID` deletes one memory or episode, as a deletion (**SET-8**).
+- **REM-10** `tinker memory portrait` shows the portrait and the `person` memories it comes from. Every `memory`
+  view but `forget` is a glance (**CMD-1**).
+
+## dreaming (DRM)
+
+While nothing waits for Tinker, it dreams: the fresh episodes become memories, the memories are revised and
+fade, and the portrait is kept up to date.
+
+- **DRM-1** The runner (**JOB-9**) queues `dream run` once the queue has been empty for `DREAM_IDLE_SECONDS`
+  (5) and a fresh episode is there. A chat's answer and the exercise are jobs, so a dream never runs over
+  them, and a dream pushed back goes on later (**JOB-2**). Only one dream is in the queue at a time.
+  `tinker dream run` queues one now.
+- **DRM-2** `Dream.run()` goes through its steps in turn, consolidate, revise, decay and portrait, each saved
+  when done in `dream`/`state`, so a dream that goes on skips the steps done; its tracker's `doing` names the
+  step.
+- **DRM-3** Consolidate takes the fresh episodes chat by chat, at most `DREAM_BATCH_EPISODES` (12) to a call.
+  `DREAM_CONSOLIDATE_SYSTEM` gets the batch and the memories it recalls (**REM-4**), and answers JSON
+  `{add, update, confirm, retire}`, each change citing episode ids of the batch; a change that cites none, or
+  an id outside the batch, is dropped. An add starts at strength 1, a confirm adds 1 and makes `last_seen`
+  now; an update keeps its sources and adds the cited ones. A `tool` memory is kept only when `shutil.which`
+  finds the tool. Then the batch is dreamt; a reply that cannot be read leaves it fresh.
+- **DRM-4** Revise joins similar memories (as **GRF-3**) of a group where one changed in this dream:
+  `DREAM_REVISE_SYSTEM` answers `{merge: [{ids, kind, gist, text}], retire: [{id, why}]}`, the newer memory
+  winning where they disagree. A merged memory has the union of their sources, the earliest `first_seen` and
+  the sum of their strengths; the old ones are retired "merged into mN".
+- **DRM-5** Decay, with no model, retires "faded" each memory neither recalled nor confirmed for
+  `DREAM_FORGET_DAYS` (60) whose strength is below `DREAM_KEEP_STRENGTH` (3), and deletes the dreamt episodes
+  older than **REM-2** allows.
+- **DRM-6** Portrait, only when a `person` memory changed in this dream, asks `DREAM_PORTRAIT_SYSTEM` for the
+  portrait (**REM-5**) from the `person` memories.
+- **DRM-7** Each change a dream makes is added to log `dream events` as `{step, change, id, gist}`.
+- **DRM-8** `tinker dream` (or `dream status`) says when the last dream was, how many changes each step made,
+  how many episodes wait, and whether a dream is queued or running.
+- **DRM-9** `tinker dream graph` (command line only) serves a live page on `127.0.0.1` at a random port
+  (`ThreadingHTTPServer`), with a token in its path (any other path is 403): one self-contained page as
+  **GRF-4**, the graph of episodes and memories (links: a memory's sources, `merged into`), updated by
+  server-sent events from log `dream events`. It opens the browser and runs until Ctrl-C. In a conversation,
+  `memory graph` and `dream graph` write the same graph as a still page to `Home.memory_page()` and send it
+  (**CNV-23**).
 
 ## reading (RDG)
 

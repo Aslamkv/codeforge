@@ -11,7 +11,8 @@ lazy from pathlib import Path
 
 lazy from .commands import kind_of
 lazy from .messages import say
-lazy from .settings import EXERCISE_ENV, JOB_STOP_SIGNAL, Home, Numbered, confirm_deletion
+lazy from .remembering import Scratchpad
+lazy from .settings import DREAM_IDLE_SECONDS, EXERCISE_ENV, JOB_STOP_SIGNAL, Home, Numbered, confirm_deletion
 lazy from .store import Log
 lazy from .text import fingerprint, now_text
 
@@ -56,6 +57,7 @@ class Queue:
 class Runner:
     wake = threading.Event()
     paused = False
+    idle_since = None
 
     @classmethod
     def host(cls):
@@ -92,6 +94,19 @@ class Runner:
     def go_through(cls):
         while not cls.paused and (number := cls.startable()) is not None:
             cls.run_job(number)
+        if not cls.paused:
+            cls.dream_when_idle(time.monotonic())
+
+    @classmethod
+    def dream_when_idle(cls, now):
+        if Queue.ordered():
+            cls.idle_since = None
+            return
+        if cls.idle_since is None:
+            cls.idle_since = now
+        if now - cls.idle_since >= DREAM_IDLE_SECONDS and Scratchpad.fresh():
+            Queue.add_front(Jobs.save(dict(Jobs.new(["dream", "run"]), state="queued"))["number"])
+            cls.idle_since = None
 
     @staticmethod
     def startable():

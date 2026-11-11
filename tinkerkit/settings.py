@@ -212,6 +212,18 @@ TEACH_PAGES = 4
 TEACH_PAGE_CHARS = 3500
 RESEARCH_EXCERPT_CHARS = 16000
 
+EPISODE_FOUND_CHARS = 1200
+EPISODE_GIST_CHARS = 200
+EPISODE_KEPT_DAYS = 30
+RECALL_MEANING = 0.6
+RECALL_SHOWN = 6
+PORTRAIT_WORDS = 100
+DREAM_IDLE_SECONDS = 5
+DREAM_BATCH_EPISODES = 12
+DREAM_FORGET_DAYS = 60
+DREAM_KEEP_STRENGTH = 3
+DREAM_REPLY_TOKENS = 1500
+
 READ_MAX_BYTES = 50_000_000
 READ_MIN_CHAPTERS = 5
 READ_WINDOW_CHARS = 20_000
@@ -306,6 +318,11 @@ class Home:
 
     @classmethod
     def graph_page(cls):
+        cls.root.mkdir(parents=True, exist_ok=True)
+        return cls.root / "knowledge.html"
+
+    @classmethod
+    def memory_page(cls):
         cls.root.mkdir(parents=True, exist_ok=True)
         return cls.root / "memory.html"
 

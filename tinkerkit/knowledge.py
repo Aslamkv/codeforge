@@ -413,7 +413,7 @@ class Learner(Tracked):
         )
         plan = answer.needed(
             f"{self.model.name} gave no usable plan for {what}; see the log of its replies "
-            f"(tinker memory; its calls are in tinker learn's log)"
+            f"(tinker knowledge; its calls are in tinker learn's log)"
         )
         return SavedPlan(plan, False)
 
