@@ -38,7 +38,6 @@ from tinkerkit.conversation import (
     Reporter,
     Shell,
     Talk,
-    Thread,
     after_word,
     built_project,
     command_of,
@@ -46,6 +45,8 @@ from tinkerkit.conversation import (
     first_words,
     pieces,
     text_of,
+    thread_episodes,
+    thread_line,
     typed_before,
     welcome,
 )
@@ -1823,13 +1824,15 @@ def written_minutes_ago(episode, minutes):
     return Scratchpad.write(episode, THREAD_NOW - datetime.timedelta(minutes=minutes))
 
 
+def thread_lines(chat):
+    return [thread_line(episode) for episode in thread_episodes(chat, THREAD_NOW)]
+
+
 @pytest.mark.spec("REM-11")
 def test_the_thread_is_the_last_turns_of_the_chat_oldest_first(home_store):
     for number in range(6):
         written_minutes_ago(chatted_episode(number), 10 - number)
-    assert Thread.of("1", THREAD_NOW) == [
-        f"question {number} → Answer {number}. More." for number in range(2, 6)
-    ]
+    assert thread_lines("1") == [f"question {number} → Answer {number}. More." for number in range(2, 6)]
 
 
 @pytest.mark.spec("REM-11")
@@ -1838,8 +1841,8 @@ def test_the_thread_keeps_only_this_chats_recent_messages(home_store):
     written_minutes_ago(chatted_episode(1), 29)
     written_minutes_ago(chatted_episode(2, chat="2"), 5)
     written_minutes_ago({"chat": "1", "task": "make a game", "status": "done"}, 5)
-    assert Thread.of("1", THREAD_NOW) == ["question 1 → Answer 1. More."]
-    assert Thread.of("3", THREAD_NOW) == []
+    assert thread_lines("1") == ["question 1 → Answer 1. More."]
+    assert thread_lines("3") == []
 
 
 @pytest.mark.spec("REM-11")
@@ -1848,7 +1851,7 @@ def test_a_thread_line_is_the_gist_once_dreamt_and_is_cut(home_store):
         episode = written_minutes_ago(chatted_episode(number), 3 - number)
         home_store.put(Scratchpad.EPISODES, episode["id"], dict(episode, dreamt=number < 2, **changes))
     written_minutes_ago(chatted_episode(3, message="x" * 300), 0)
-    assert Thread.of("1", THREAD_NOW) == [
+    assert thread_lines("1") == [
         "asked about zero",
         "question 1 → Answer 1. More.",
         "question 2 → Answer 2. More.",
@@ -1861,13 +1864,13 @@ def test_a_thread_line_keeps_the_whole_reply_on_one_line(home_store):
     reply = "First part. Second part!\n\n  Third   part?\nFourth " + "y" * 300
     written_minutes_ago(chatted_episode(0, reply=reply), 0)
     line = "question 0 → First part. Second part! Third part? Fourth " + "y" * 300
-    assert Thread.of("1", THREAD_NOW) == [line[:EPISODE_GIST_CHARS]]
+    assert thread_lines("1") == [line[:EPISODE_GIST_CHARS]]
 
 
 @pytest.mark.spec("REM-11")
 def test_a_remembered_thread_line_gives_only_the_answer(home_store):
     written_minutes_ago(chatted_episode(0, reply=REMEMBERED_REPLY, status="remembered"), 0)
-    assert Thread.of("1", THREAD_NOW) == ["question 0 → The answer. More of it."]
+    assert thread_lines("1") == ["question 0 → The answer. More of it."]
 
 
 @pytest.mark.spec("REM-11")
@@ -2133,6 +2136,40 @@ def test_a_chat_reply_review_gets_the_thread_before_the_message(measured_model, 
     reviewed = fake_ollama.calls[0]["messages"][1]["content"]
     assert reviewed.index("question 0 → Answer 0. More.") < reviewed.index("question 1")
     assert reviewed.endswith("\n\nquestion 1")
+
+
+@pytest.mark.spec("REM-13")
+def test_a_chat_reply_is_not_told_the_threads_earlier_answer(measured_model, fake_ollama):
+    Scratchpad.write(chatted_episode(0))
+    Scratchpad.write(chatted_episode(1))
+    fake_ollama.reply("low: a plain request").reply("answer 1")
+    Talk("cmds").reply(Recorder(), Message("1", "question 1"))
+    reviewed = fake_ollama.calls[0]["messages"][1]["content"]
+    system = fake_ollama.calls[-1]["messages"][0]["content"]
+    assert "question 0 → Answer 0. More." in reviewed and "Answer 0. More." in system
+    assert "Answer 1" not in reviewed and "Answer 1" not in system
+
+
+@pytest.mark.spec("REM-13", "CNV-24")
+def test_a_fresh_reply_is_not_told_a_remembered_answer(measured_model, fake_ollama):
+    remembered_answer("how tall is everest in km", "About 8.85 km.")
+    remembered_answer("how tall is everest in feet", "About 29,032 feet.")
+    fake_ollama.reply("low: a plain request").reply("8.8 km")
+    Talk("cmds").asked_reply(Recorder(), Message("1", "How tall is Everest in km?"))
+    system = fake_ollama.calls[-1]["messages"][0]["content"]
+    assert "how tall is everest in feet" in system
+    assert "how tall is everest in km" not in system
+
+
+@pytest.mark.spec("REM-13")
+def test_a_chat_reply_is_not_told_a_recalled_episodes_answer(measured_model, fake_ollama):
+    Scratchpad.write(chatted_episode("about bees", chat="2"))
+    Scratchpad.write(chatted_episode("about bees and honey", chat="2"))
+    fake_ollama.reply("low: a plain request").reply("bees")
+    Talk("cmds").asked_reply(Recorder(), Message("1", "question about bees"))
+    system = fake_ollama.calls[-1]["messages"][0]["content"]
+    assert "Answer about bees and honey. More." in system
+    assert "Answer about bees. More." not in system
 
 
 def keep_job(home_store, number, pid, progress, **job):

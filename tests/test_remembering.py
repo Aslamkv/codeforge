@@ -412,3 +412,57 @@ def test_same_answer_embeds_plain_words(home_store):
     lookup.same_answer("HOW TALL is it!!")
 
     assert seen == [("how tall is it", ["how tall is it"])]
+
+
+@pytest.mark.spec("REM-12")
+def test_matching_questions_returns_every_match_by_index(home_store):
+    lookup = memories()
+    lookup.retriever.similarities = lambda request, questions: [0.95, 0.2, 0.92]
+
+    matches = lookup.matching_questions(
+        "How tall is it?", ["how tall is it", "how tall is the tower", "HOW TALL is it!!"]
+    )
+
+    assert matches == {0: 0.95, 2: 0.92}
+
+
+@pytest.mark.spec("REM-12")
+def test_matching_questions_leaves_out_a_question_missing_a_telling_word(home_store):
+    lookup = memories()
+    seen = []
+    lookup.retriever.similarities = lambda request, questions: (
+        seen.append(questions) or [1.0] * len(questions)
+    )
+
+    matches = lookup.matching_questions("how many feet is it", ["how many km is it", "how many feet is it"])
+
+    assert matches == {1: 1.0}
+    assert seen == [["how many feet is it"]]
+
+
+@pytest.mark.spec("REM-12")
+def test_matching_questions_leaves_out_a_close_question_below_the_threshold(home_store):
+    lookup = memories()
+    lookup.retriever.similarities = lambda request, questions: [0.89]
+
+    assert lookup.matching_questions("how tall is it", ["how tall is it really"]) == {}
+
+
+@pytest.mark.spec("REM-12")
+def test_matching_questions_falls_back_to_word_similarity(home_store):
+    matches = memories().matching_questions(
+        "HOW TALL is it!!", ["how tall is it?", "how tall is the tower in paris"]
+    )
+
+    assert list(matches) == [0] and matches[0] >= 0.9
+
+
+@pytest.mark.spec("REM-12")
+def test_matching_questions_of_no_questions_is_empty_without_embedding(home_store):
+    lookup = memories()
+    seen = []
+    lookup.retriever.similarities = lambda request, questions: seen.append(questions) or []
+
+    assert lookup.matching_questions("how tall is it", []) == {}
+    assert lookup.matching_questions("how many feet", ["how many km"]) == {}
+    assert seen == []

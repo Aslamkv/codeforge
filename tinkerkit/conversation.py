@@ -1509,14 +1509,12 @@ def welcome():
     return START_WELCOME
 
 
-class Thread:
-    @classmethod
-    def of(cls, chat, now):
-        since = now - datetime.timedelta(minutes=THREAD_MINUTES)
-        said = [
-            episode for episode in asked_in(chat) if datetime.datetime.fromisoformat(episode["time"]) >= since
-        ]
-        return [thread_line(episode) for episode in said[-THREAD_TURNS:]]
+def thread_episodes(chat, now):
+    since = now - datetime.timedelta(minutes=THREAD_MINUTES)
+    said = [
+        episode for episode in asked_in(chat) if datetime.datetime.fromisoformat(episode["time"]) >= since
+    ]
+    return said[-THREAD_TURNS:]
 
 
 def last_asked(chat):
@@ -1631,14 +1629,19 @@ class Talk:
                 "⚠️ **No model is in use yet**, so I cannot chat: `tinker model NAME` picks "
                 f"one. These still work:\n{self.commands}"
             )
-        thread = thread_part(Thread.of(message.chat, datetime.datetime.now()))
+        memories = Memories(Retriever(Embeddings.configured()))
+        episodes = thread_episodes(message.chat, datetime.datetime.now())
+        thread = thread_part(
+            [thread_line(episode) for episode in unanswered(memories, message.text, episodes)]
+        )
+        recalled = unanswered(memories, message.text, memories.recall(message.text))
         asked = [{"role": "user", "content": message.text}]
         level = reviewed_level(message.text, thread)
         names_system = (
             Prompts.CHAT_SYSTEM.format(
                 style=channel.STYLE, index=chat_index(), state=state_part(state.everyday())
             )
-            + remembered_part(recall(message.text), Portrait.read())
+            + remembered_part(recalled, Portrait.read())
             + thread
         )
         try:
@@ -3260,6 +3263,19 @@ def shown_episode(episode):
 
 def recall(request, kinds=None):
     return Memories(Retriever(Embeddings.configured())).recall(request, kinds=kinds)
+
+
+def unanswered(memories, request, items):
+    asking = [item for item in items if question_of(item)]
+    matches = memories.matching_questions(request, [question_of(item) for item in asking])
+    answered = {asking[index]["id"] for index in matches}
+    return [item for item in items if item["id"] not in answered]
+
+
+def question_of(item):
+    if item["id"].startswith("m"):
+        return item["gist"] if item["kind"] == "answer" else ""
+    return item.get("message", "")
 
 
 class Remembered(str):

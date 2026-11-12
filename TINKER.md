@@ -520,8 +520,8 @@ meaning, with an embedding model) and tells the model what it remembers.
 
 A chat also keeps its thread: the last few turns of the past minutes go with each message, so `and in km?`
 follows the question before it. Asked the same question again, Tinker answers from memory without the model,
-marked `💭 From memory`; `/fresh` (or the 🔄 Fresh answer button on Telegram) asks the model again, and the
-next dream keeps the new answer. An answer that only holds for a day or a month is let go once it is that old.
+marked `💭 From memory`; `/fresh` (or the 🔄 Fresh answer button on Telegram) asks the model again, without
+showing it the earlier answer, and the next dream keeps the new answer. An answer that only holds for a day or a month is let go once it is that old.
 
 While nothing waits for it, Tinker dreams: a few seconds after the queue empties, it turns the fresh episodes
 into memories (about you, what you did, the tools you use, facts), joins the ones that say the same thing,

@@ -133,23 +133,24 @@ class Memories:
         return self.recalled(memory, now) if memory else None
 
     def same_answer(self, request):
-        answers = [
-            memory
-            for memory in self.living()
-            if memory["kind"] == "answer" and telling_words(request) <= words_of(memory["gist"])
-        ]
-        if not answers:
-            return None
+        answers = [memory for memory in self.living() if memory["kind"] == "answer"]
+        matches = self.matching_questions(request, [memory["gist"] for memory in answers])
+        return answers[max(matches, key=matches.get)] if matches else None
+
+    def matching_questions(self, request, questions):
+        needed = telling_words(request)
+        telling = [index for index, question in enumerate(questions) if needed <= words_of(question)]
+        if not telling:
+            return {}
         plain = plain_words(request)
-        questions = [plain_words(memory["gist"]) for memory in answers]
-        meanings = self.retriever.similarities(plain, questions)
+        candidates = [plain_words(questions[index]) for index in telling]
+        meanings = self.retriever.similarities(plain, candidates)
         closeness, least = (
             (meanings, ANSWER_SAME_MEANING)
             if meanings
-            else ([similarity(plain, question) for question in questions], ANSWER_SAME_WORDS)
+            else ([similarity(plain, candidate) for candidate in candidates], ANSWER_SAME_WORDS)
         )
-        best = max(range(len(answers)), key=lambda index: closeness[index])
-        return answers[best] if closeness[best] >= least else None
+        return {index: close for index, close in zip(telling, closeness) if close >= least}
 
     def recalled(self, memory, now):
         return self.update(memory["id"], {"recalled": memory["recalled"] + 1, "last_recalled": stamp(now)})

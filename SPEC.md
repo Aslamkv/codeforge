@@ -1526,8 +1526,8 @@ Nothing here calls the model.
 - **REM-9** `tinker memory forget ID` deletes one memory or episode, as a deletion (**SET-8**).
 - **REM-10** `tinker memory portrait` shows the portrait and the `person` memories it comes from. Every `memory`
   view but `forget` is a glance (**CMD-1**).
-- **REM-11** `Thread.of(chat, now)` is what the chat said lately, with no model: its last `THREAD_TURNS` (4)
-  chat episodes (those with a message) within `THREAD_MINUTES` (30), oldest first, one line each: the
+- **REM-11** `thread_episodes(chat, now)` is what the chat said lately, with no model: its last `THREAD_TURNS` (4)
+  chat episodes (those with a message) within `THREAD_MINUTES` (30), oldest first, one `thread_line` each: the
   episode's gist once dreamt, else its message and its reply on one line, cut to `EPISODE_GIST_CHARS`; a reply
   from memory gives only the answer, without its "💭 From memory" line and its `/fresh` hint, here and in a
   recalled episode. `Talk.reply` sends them as "Earlier in this chat" only when there are some, to both of its calls and to the
@@ -1539,6 +1539,10 @@ Nothing here calls the model.
   `ANSWER_COMMON_WORDS`) is in its question, so "feet" never finds "km". A match is the reply, with no model
   call: "💭 From memory (you asked "QUESTION" on DATE):", the answer and the `/fresh` hint (**CNV-24**). It counts
   as recalled.
+- **REM-13** When the model answers a message (no answer memory matched, **REM-12**, or `/fresh`, **CNV-24**), it
+  is told no earlier answer to that question: the thread lines, recalled episodes and recalled answer memories
+  whose question (an episode's message, a memory's gist) matches the message by the **REM-12** test are left
+  out, in both calls and the review, so the answer is the model's own.
 
 ## dreaming (DRM)
 
