@@ -564,6 +564,20 @@ def test_the_memory_graph_page_names_its_episodes(home_store):
     assert "Memories (1)" in page
 
 
+@pytest.mark.spec("DRM-9")
+def test_the_memory_graph_page_draws_and_colours_every_kind_it_made(home_store):
+    episode()
+    remembered("Lists files often", "The person lists files.")
+    show_memory_graph()
+    page = Home.memory_page().read_text()
+    data = page.split('id="data">', 1)[1].split("</script>", 1)[0]
+    made = {node["kind"] for node in json.loads(data)["nodes"]}
+    drawn = json.loads(page.split("var KINDS=", 1)[1].split(";", 1)[0].replace("'", '"'))
+    assert made == {"episode", "memory"}
+    assert made <= set(drawn)
+    assert all(f"--{kind}:" in page for kind in made)
+
+
 class ClosedBrowser:
     def write(self, data):
         raise BrokenPipeError

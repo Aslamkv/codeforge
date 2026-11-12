@@ -210,17 +210,17 @@ def test_the_page_is_self_contained_with_a_plain_list(memory):
 
 @pytest.mark.spec("GRF-5")
 def test_knowledge_graph_writes_the_page_and_opens_it_only_in_a_terminal(memory, monkeypatch, capsys):
-    assert Cli.parse(["knowledge", "--graph"]).graph is True and Cli.parse(["knowledge"]).graph is False
+    assert Cli.parse(["knowledge", "graph"]).knowledge == ("graph", "", "", 1, ["graph"])
     opened = []
     monkeypatch.setattr(cli.webbrowser, "open", opened.append)
-    Commands.show_knowledge(graph=True)
+    Commands.show_knowledge(MemoryBrowser.request(["graph"]))
     out = capsys.readouterr().out
     assert Home.graph_page().name == "knowledge.html"
     assert Home.graph_page().read_text().startswith("<!doctype html>") and opened == []
     assert "Tinker's memory: 1 language, 1 topic, 2 principles" in out and "1 retired" in out
     assert f"Page: {Home.graph_page()}" in out and "Similar lessons found by words" in out
     monkeypatch.setattr(sys.stdout, "isatty", lambda: True)
-    Commands.show_knowledge(graph=True)
+    Commands.show_knowledge(MemoryBrowser.request(["graph"]))
     assert opened == [Home.graph_page().as_uri()]
 
 
@@ -267,7 +267,7 @@ def test_memory_lists_the_parts_with_what_each_holds(memory, capsys):
     assert "1 item did not hold and was retired" in out
     for tip in ("NAME", "show ID", "find WORDS", "recent"):
         assert f"tinker knowledge {tip}" in out
-    assert "tinker knowledge --graph" in out and "tinker teach" in out and "tinker clear PART" in out
+    assert "tinker knowledge graph" in out and "tinker teach" in out and "tinker clear PART" in out
 
 
 @pytest.mark.spec("GRF-8")
@@ -325,13 +325,16 @@ def test_knowledge_words_are_a_name_a_kind_and_a_page(home_store, capsys):
     assert request(["show", "2d35d6"])[:1] == ("show",)
     assert request(["find", "seed", "tests"])[:1] == ("find",)
     assert request(["recent", "2"])[:4] == ("recent", "", "", 2)
-    for wrong in ("show", "show a b", "find", "recent x", "lessons facts", "python 0"):
+    assert request(["Graph"]) == ("graph", "", "", 1, ["graph"])
+    for wrong in ("show", "show a b", "find", "recent x", "graph python", "lessons facts", "python 0"):
         with pytest.raises(ValueError, match="tinker knowledge NAME"):
             request(wrong.split())
     assert Cli.parse(["knowledge", "python", "lessons", "2"]).knowledge == request(["python", "lessons", "2"])
     with pytest.raises(SystemExit):
-        Cli.parse(["knowledge", "--graph", "python"])
-    assert "--graph takes no other words; use tinker knowledge [PAGE]" in capsys.readouterr().err
+        Cli.parse(["knowledge", "graph", "python"])
+    assert "use tinker knowledge [PAGE]" in capsys.readouterr().err
+    with pytest.raises(SystemExit):
+        Cli.parse(["knowledge", "--graph"])
 
 
 @pytest.mark.spec("GRF-10")

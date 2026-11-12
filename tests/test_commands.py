@@ -207,7 +207,7 @@ def test_slash_matches_only_chat_commands_and_only_a_slash_word():
 def test_offered_words_are_action_words_then_synopsis_alternatives_once():
     assert offered_words(BY_NAME["model"]) == ["calibrate", "recipe"]
     assert offered_words(BY_NAME["jobs"]) == ["running", "queued", "stopped", "finished", "archived"]
-    assert offered_words(BY_NAME["knowledge"]) == ["show", "find", "recent"]
+    assert offered_words(BY_NAME["knowledge"]) == ["show", "find", "recent", "graph"]
     assert offered_words(BY_NAME["exercise"]) == ["status"]
     assert offered_words(BY_NAME["read"]) == ["list", "show"]
     assert offered_words(BY_NAME["channel"]) == ["add", "remove", "start"]

@@ -192,7 +192,6 @@ class Cli:
         "rename": None,
         "yes": False,
         "calls": False,
-        "graph": False,
     }
     FOLDER_RE = re.compile(r"[A-Za-z0-9][\w.-]{0,63}")
 
@@ -505,8 +504,6 @@ class Cli:
 
     @staticmethod
     def knowledge_words(given, parser):
-        if given.graph and given.words:
-            parser.error(f"--graph takes no other words; {MemoryBrowser.USAGE}")
         try:
             return MemoryBrowser.request(given.words)
         except ValueError as refused:
@@ -634,7 +631,7 @@ class Commands:
             "teach": self.teach,
             "read": self.read,
             "exercise": self.exercise,
-            "knowledge": lambda: self.show_knowledge(args.graph, args.knowledge),
+            "knowledge": lambda: self.show_knowledge(args.knowledge),
             "memory": lambda: self.memory(args.memory, args.yes),
             "dream": lambda: self.dream(args.dream),
             "runs": self.list_runs,
@@ -964,11 +961,12 @@ class Commands:
         )
 
     @staticmethod
-    def show_knowledge(graph=False, request=None):
-        if graph:
+    def show_knowledge(request=None):
+        request = request or MemoryBrowser.request([])
+        if request.view == "graph":
             Commands.show_graph()
             return
-        MemoryBrowser(Graph.build()).show(request or MemoryBrowser.request([]))
+        MemoryBrowser(Graph.build()).show(request)
 
     @staticmethod
     def memory(words, yes=False):

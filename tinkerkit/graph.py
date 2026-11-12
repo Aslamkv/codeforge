@@ -481,14 +481,14 @@ class MemoryBrowser:
     USAGE = (
         "use tinker knowledge [PAGE], tinker knowledge NAME [KIND] [PAGE] (KIND: toolchain, facts, findings, rules, "
         "fixes, lessons, principles, commands or retired; alone, across memory), tinker knowledge show ID, "
-        "tinker knowledge find WORDS or tinker knowledge recent [PAGE]"
+        "tinker knowledge find WORDS, tinker knowledge recent [PAGE] or tinker knowledge graph"
     )
     TIPS = (
         ("See a part", "tinker knowledge NAME [KIND]"),
         ("See an item", "tinker knowledge show ID"),
         ("Find items", "tinker knowledge find WORDS"),
         ("Newest first", "tinker knowledge recent"),
-        ("Explore it", "tinker knowledge --graph"),
+        ("Explore it", "tinker knowledge graph"),
         ("Ask about it", "tinker ask WHAT"),
         ("Correct it", "tinker teach WHAT"),
         ("Forget a part", "tinker clear PART"),
@@ -525,7 +525,9 @@ class MemoryBrowser:
             return MemoryRequest("find", " ".join(rest), "", 1, rest)
         if first == "recent" and len(rest) <= 1:
             return MemoryRequest("recent", "", "", cls.page_of(rest[0]) if rest else 1, ["recent"])
-        if first in ("show", "find", "recent"):
+        if first == "graph" and not rest:
+            return MemoryRequest("graph", "", "", 1, ["graph"])
+        if first in ("show", "find", "recent", "graph"):
             raise ValueError(cls.USAGE)
         named, page = (words[:-1], cls.page_of(words[-1])) if words and words[-1].isdigit() else (words, 1)
         kinds = [cls.KINDS[word.lower()] for word in named if word.lower() in cls.KINDS]
@@ -796,11 +798,11 @@ PAGE = """<!doctype html>
 <style>
 :root{--bg:#fbfaf8;--panel:#ffffff;--ink:#1d1d1f;--muted:#6b6b70;--line:#e3e1dc;--link:#c9c6bf;
 --language:#3a5ba0;--topic:#7a4fa0;--commands:#2f7d6d;--lesson:#d0782a;--principle:#b8892a;--fact:#3d8bd0;--finding:#a04f7a;
---rule:#2f8f5b;--fix:#b33b3b;--toolchain:#5d7f2f;--command:#2f7d6d;--run:#8a8a8f;--retired:#b9b7b1;--hl:#f2c94c}
+--rule:#2f8f5b;--fix:#b33b3b;--toolchain:#5d7f2f;--command:#2f7d6d;--run:#8a8a8f;--episode:#2a8fa8;--memory:#8f5bd6;--retired:#b9b7b1;--hl:#f2c94c}
 @media (prefers-color-scheme:dark){:root:not([data-theme="light"]){--bg:#151517;--panel:#1f1f22;--ink:#ececef;
 --muted:#9a9aa1;--line:#2e2e33;--link:#45454c;--language:#7b9be0;--topic:#b38ddb;--commands:#5fbfa9;
 --lesson:#f0a05a;--principle:#e6bc5c;--fact:#6fb3ee;--finding:#de8cb6;--rule:#6cc795;--fix:#ee7b7b;--toolchain:#9cc560;--command:#5fbfa9;
---run:#8f8f96;--retired:#5c5b58}}
+--run:#8f8f96;--episode:#5cc3db;--memory:#b894f0;--retired:#5c5b58}}
 *{box-sizing:border-box}
 body{margin:0;overflow-x:hidden;background:var(--bg);color:var(--ink);font:15px/1.45 -apple-system,BlinkMacSystemFont,"Segoe UI",
 Roboto,sans-serif}
@@ -877,7 +879,7 @@ document.body.classList.add('js','graph');
 var ctx=canvas.getContext('2d'),css=getComputedStyle(document.documentElement);
 function color(name){return css.getPropertyValue('--'+name).trim()||'#888';}
 var HUBS={language:1,topic:1,commands:1};
-var KINDS=['principle','lesson','rule','fact','finding','fix','toolchain','command','run'];
+var KINDS=['principle','lesson','rule','fact','finding','fix','toolchain','command','run','episode','memory'];
 var nodes=data.nodes,links=data.links,byId={};
 var hubs=nodes.filter(function(n){return HUBS[n.kind];}),R=hubs.length>1?140*Math.sqrt(hubs.length):0;
 hubs.forEach(function(h,i){var a=6.283*i/hubs.length;h.x=Math.cos(a)*R;h.y=Math.sin(a)*R;});

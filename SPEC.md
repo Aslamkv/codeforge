@@ -129,7 +129,7 @@ The Tinker home (**SET-1**) holds:
 | `channel-NAME.lock` | the lock of each chat channel a Tinker listens to |
 | `web-requests.log` | every web search and fetch Tinker made, one JSON line each (**WEB-6**) |
 | `tinker.log` | what Tinker does, one plain-text sentence per watched step or fact, always (**LOG-1**); rotated as `tinker-STAMP.log.zip` |
-| `knowledge.html` | the page `tinker knowledge --graph` writes |
+| `knowledge.html` | the page `tinker knowledge graph` writes |
 | `memory.html` | the page of episodes and memories `memory graph` sends in a conversation (**DRM-9**) |
 | `reading/` | the files sent in a chat to read |
 
@@ -235,11 +235,14 @@ Everything Tinker tells the person goes through one voice, `say` (a `Messages`).
   `›` marks the current one, first `start`. Up and down move it, stopping at the ends; Enter gives its index; Esc,
   Ctrl-C or end of input give `None`. It reads the keys one at a time with the terminal raw, gives the terminal back as
   it was, and clears the list when it ends. A row wider than the terminal is cut to fit, so each row takes one line.
-- **MSG-9** The raw keys name, beside those of **MSG-8**: left, right, Home, End, Backspace, Delete, Tab and
-  Ctrl-A/E/U/K/W; any other bytes are text, a UTF-8 character whole and a paste as one piece. `LineEditor`
-  edits one line from them: the text and the cursor, text inserted at the cursor, left and right one
-  character, Home/Ctrl-A and End/Ctrl-E to the ends, Backspace and Delete one character, Ctrl-U to the start,
-  Ctrl-K to the end, Ctrl-W the word before. Up and down go through the lines typed before (newest first, the
+- **MSG-9** The raw keys name, beside those of **MSG-8**: left, right, Home, End, Backspace, Delete, Tab,
+  Ctrl-A/E/U/K/W, and word-left and word-right: Alt+left/right as xterm, tmux and Linux terminals send them
+  (`ESC [1;3D`/`C`), as macOS Terminal and iTerm send them (`ESC b`/`f`, `ESC ESC [D`/`C`), and Ctrl+left/right
+  as Linux terminals send them (`ESC [1;5D`/`C`, `ESC [5D`/`C`, `ESC Od`/`Oc`); any other bytes are text, a
+  UTF-8 character whole and a paste as one piece. `LineEditor` edits one line from them: the text and the
+  cursor, text inserted at the cursor, left and right one character, word-left to the start of the word before
+  the cursor and word-right to the end of the word after it, Home/Ctrl-A and End/Ctrl-E to the ends, Backspace
+  and Delete one character, Ctrl-U to the start, Ctrl-K to the end, Ctrl-W the word before. Up and down go through the lines typed before (newest first, the
   line being typed kept for when down passes the newest). Enter gives the line; Ctrl-C or end of input on an
   empty line give `None`, Ctrl-C on a line empties it, and end of input on a line does nothing. Tab is the
   command menu's key (**MSG-10**); the editor ignores it. The cursor counts a wide character as two columns.
@@ -1121,7 +1124,7 @@ The terminal and the chats are one conversation: the same commands, the same ans
 - **CNV-22** `one_shot` says one of the conversation's commands once, in the terminal (`tinker chat`,
   `command`, `run`, `history`). Each needs words after it, except `run` and `history`. `chat` and
   `command` are jobs (**JOB-1**). `command` runs nothing without a yes at the terminal.
-- **CNV-23** `knowledge --graph` in a conversation makes the page (`tinker knowledge --graph`) and sends it with
+- **CNV-23** `knowledge graph` in a conversation makes the page (`tinker knowledge graph`) and sends it with
   `send_file`, what tinker printed as its caption; `memory graph` and `dream graph` send `memory.html` the same
   way (**DRM-9**). The terminal opens the file in the browser and says where it is; a channel that cannot send
   files sends the caption with the file's path.
@@ -1447,8 +1450,9 @@ What Tinker knows as one graph, and the page that shows it.
 - **GRF-4** `GraphPage.html(graph)` is one self-contained page: the graph as JSON inside it, and no script,
   style, font or image from elsewhere. It holds a plain list of every node by group (readable without
   scripts), escapes every text, and draws the graph when scripts run.
-- **GRF-5** `tinker knowledge --graph` writes the page to `Home.graph_page()`, prints what it holds (the counts,
-  and how lessons were found similar), and opens it in the browser only when printing to a terminal.
+- **GRF-5** `tinker knowledge graph` writes the page to `Home.graph_page()`, prints what it holds (the counts,
+  and how lessons were found similar), and opens it in the browser only when printing to a terminal. `graph`
+  with other words after it is refused with the usage.
 - **GRF-6** `MemoryBrowser` shows memory from one `Graph.build()` (without embeddings), never from the stores
   themselves, so the browser and the page always show the same things. It deletes nothing and changes nothing;
   `tinker teach` corrects an item and `tinker clear PART` forgets a part (**SET-9**). Every list comes a page
@@ -1461,7 +1465,7 @@ What Tinker knows as one graph, and the page that shows it.
   person's commands, one line each with the name to see it by (its group), how many of each kind of item it
   holds and how many of them are proven, and for a language how many projects built it. Then how many items are
   retired, and what to do next: `knowledge NAME`, `knowledge show ID`, `knowledge find WORDS`, `knowledge recent`,
-  `knowledge --graph`, `tinker ask`, `tinker teach` and `tinker clear PART`. With nothing learned, it says how to
+  `knowledge graph`, `tinker ask`, `tinker teach` and `tinker clear PART`. With nothing learned, it says how to
   start.
 - **GRF-9** `tinker knowledge NAME [KIND] [PAGE]` shows one part, named by its group or its label (case does not matter):
   its details (summary, when learned, the slots missing, projects built), then its items, each with its short ID, its

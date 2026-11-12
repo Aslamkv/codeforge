@@ -36,12 +36,6 @@ OPTIONS = frozendict(
         "workdir": Option("--workdir", "workdir", "DIR", "the project folder, if not this one"),
         "yes": Option("--yes", "yes", None, "delete without asking"),
         "calls": Option("--calls", "calls", None, "the model calls, instead of what was printed"),
-        "graph": Option(
-            "--graph",
-            "graph",
-            None,
-            "as a graph to explore: a page that opens in the browser (in a chat: sent as a file)",
-        ),
     }
 )
 
@@ -446,13 +440,13 @@ COMMANDS = [
     Command(
         "knowledge",
         "Learn",
-        "knowledge [NAME] [KIND] [PAGE] | show ID | find WORDS | recent [PAGE] [--graph]",
-        "browse what Tinker has learned (--graph: as a graph to explore)",
+        "knowledge [NAME] [KIND] [PAGE] | show ID | find WORDS | recent [PAGE] | graph",
+        "browse what Tinker has learned (graph: as a graph to explore)",
         "Browse what Tinker has learned, a page at a time: knowledge lists the parts (each language, any language, "
         "each topic, your commands) with what each holds; knowledge NAME shows one part, each item with its short "
         "ID, ✅ proven or 🌱 not yet, its kind and its first line; a KIND (toolchain, facts, findings, rules, "
         "fixes, lessons, commands or retired) keeps that kind, and alone lists it across memory. The browser "
-        "changes nothing: correct an item with teach, forget a part with clear PART. --graph draws it as a "
+        "changes nothing: correct an item with teach, forget a part with clear PART. knowledge graph draws it as a "
         "graph in one page (opened in the browser; in a chat, sent as a file): each lesson, fact and fix linked "
         "to its language or topic and to the runs that taught it, proved it or found it wrong.",
         kind="glance",
@@ -464,10 +458,9 @@ COMMANDS = [
                 "*",
                 "[NAME] [KIND] [PAGE]",
                 "a part (as knowledge lists it), a kind of item, the page, from 1; or show ID, find WORDS, "
-                "recent [PAGE]",
+                "recent [PAGE], graph",
             )
         ],
-        options=("graph",),
         example="knowledge python lessons 2",
         rows=[
             ("knowledge [PAGE]", "the parts of memory: what each holds, how much is proven, what is retired"),
@@ -476,7 +469,7 @@ COMMANDS = [
             ("knowledge show ID", "one item whole: its text, details, sources, links and runs"),
             ("knowledge find WORDS", "the items that hold every word, retired ones too"),
             ("knowledge recent [PAGE]", "the items newest first, each with its day"),
-            ("knowledge --graph", "memory as a graph in one page, to explore"),
+            ("knowledge graph", "memory as a graph in one page, to explore"),
         ],
     ),
     Command(

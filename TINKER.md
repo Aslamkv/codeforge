@@ -201,10 +201,10 @@ chats it listens on. Each chat opens cleared, with the same lines as a message a
 cleared again when Tinker ends, leaving only the `not listening` status. `/model NAME` clears the chats and
 the terminal and shows the banner anew. The prompt, with a rule over it (redrawn when the window resizes),
 follows the output down to the bottom row; then older lines scroll into the scrollback.
-The prompt edits like a shell: left and right, Home and End (or Ctrl-A and Ctrl-E), Backspace and Delete,
-Ctrl-U and Ctrl-K to clear to the start or the end, and Ctrl-W to delete the word before. Up and down bring
-back the lines you typed before, even from an earlier session. Ctrl-C clears the line, or quits on an empty
-one. When Tinker prints while you type, your line and the menu are drawn again under it.
+The prompt edits like a shell: left and right, a word at a time with Alt (or Ctrl on Linux), Home and End
+(or Ctrl-A and Ctrl-E), Backspace and Delete, Ctrl-U and Ctrl-K to clear to the start or the end, and Ctrl-W
+to delete the word before. Up and down bring back the lines you typed before, even from an earlier session.
+Ctrl-C clears the line, or quits on an empty one. When Tinker prints while you type, your line and the menu are drawn again under it.
 
 Typing `/` lists the commands under the prompt, narrowed as you type (names starting with what you typed
 first, then names holding it):
@@ -410,10 +410,10 @@ Browsing changes nothing: `tinker teach` corrects an item, and `tinker clear PAR
 
 See it as a graph you can explore in the browser: each principle, fact and fix linked to its language, and to
 the runs that taught it, proved it or found it wrong (what did not hold is kept, greyed, with why). In a
-chat, `knowledge --graph` sends the page as a file to open on your phone:
+chat, `knowledge graph` sends the page as a file to open on your phone:
 
 ```sh
-tinker knowledge --graph
+tinker knowledge graph
 ```
 
 Ask what it has learned. It answers just what you ask, from what it keeps first: its items, the kept

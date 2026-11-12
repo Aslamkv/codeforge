@@ -669,7 +669,7 @@ class Desk:
         return self.by_table(channel, chat, words)
 
     def knowledge(self, channel, chat, words):
-        if "--graph" in words:
+        if words[1:] == ["graph"]:
             return self.knowledge_graph(channel, chat, words)
         return md(t"🧠 **{' '.join(words)}**\n{self.tinker(words):block}")
 

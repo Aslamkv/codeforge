@@ -2075,8 +2075,8 @@ def test_desk_answers_a_command_while_its_channel_says_it_waits(desk):
         waited.append("done")
 
     channel.waiting = waiting
-    desk.answer(Message("1", "/knowledge --graph"), channel)
-    assert waited == [("1", "Running /knowledge --graph"), "done"]
+    desk.answer(Message("1", "/knowledge graph"), channel)
+    assert waited == [("1", "Running /knowledge graph"), "done"]
 
 
 @pytest.mark.spec("CNV-9")
@@ -3240,14 +3240,14 @@ def test_knowledge_graph_is_sent_as_a_file(desk, monkeypatch):
         return "Tinker's memory: 2 lessons; 3 links"
 
     monkeypatch.setattr(desk, "tinker", make_page)
-    assert command_of("/knowledge --graph") == "knowledge"
-    assert desk.answer(Message("1", "knowledge --graph"), channel) is None
-    assert desk.ran == [["knowledge", "--graph"]]
+    assert command_of("/knowledge graph") == "knowledge"
+    assert desk.answer(Message("1", "knowledge graph"), channel) is None
+    assert desk.ran == [["knowledge", "graph"]]
     assert sent == [("1", page, "🧠 **Tinker's memory**\nTinker's memory: 2 lessons; 3 links")]
     monkeypatch.setattr(desk, "tinker", lambda words: "Error: the home cannot be read")
     assert (
-        desk.answer(Message("1", "knowledge --graph"), channel)
-        == "🧠 **knowledge --graph**\n```\nError: the home cannot be read\n```"
+        desk.answer(Message("1", "knowledge graph"), channel)
+        == "🧠 **knowledge graph**\n```\nError: the home cannot be read\n```"
         and len(sent) == 1
     )
 

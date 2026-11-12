@@ -45,6 +45,18 @@ KEYS = frozendict(
         b"\x1bOD": "left",
         b"\x1b[C": "right",
         b"\x1bOC": "right",
+        b"\x1b[1;3D": "word-left",
+        b"\x1b[1;3C": "word-right",
+        b"\x1bb": "word-left",
+        b"\x1bf": "word-right",
+        b"\x1b\x1b[D": "word-left",
+        b"\x1b\x1b[C": "word-right",
+        b"\x1b[1;5D": "word-left",
+        b"\x1b[1;5C": "word-right",
+        b"\x1b[5D": "word-left",
+        b"\x1b[5C": "word-right",
+        b"\x1bOd": "word-left",
+        b"\x1bOc": "word-right",
         b"\x1b[H": "home",
         b"\x1bOH": "home",
         b"\x1b[1~": "home",
@@ -65,7 +77,7 @@ KEYS = frozendict(
         b"": "eof",
     }
 )
-ESCAPE_SEQUENCE = re.compile(rb"\x1b(\[[0-9;]*[@-~]|O[@-~])")
+ESCAPE_SEQUENCE = re.compile(rb"\x1b(\[[0-9;]*[@-~]|O[@-~]|[bf]|\x1b\[[CD])")
 TEXT_RUN = re.compile(rb"[^\x00-\x1f\x7f]+")
 
 
@@ -351,6 +363,15 @@ class LineEditor:
     def on_right(self):
         self.cursor = min(self.cursor + 1, len(self.text))
 
+    def on_word_left(self):
+        self.cursor = self.word_start()
+
+    def on_word_right(self):
+        self.cursor += len(re.match(r"\s*\S*", self.text[self.cursor :]).group())
+
+    def word_start(self):
+        return len(re.sub(r"\S*\s*$", "", self.text[: self.cursor]))
+
     def on_home(self):
         self.cursor = 0
 
@@ -373,7 +394,7 @@ class LineEditor:
         self.cut(self.cursor, len(self.text))
 
     def on_ctrl_w(self):
-        self.cut(len(re.sub(r"\S*\s*$", "", self.text[: self.cursor])), self.cursor)
+        self.cut(self.word_start(), self.cursor)
 
     def on_up(self):
         if self.place > 0:
