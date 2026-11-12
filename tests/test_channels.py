@@ -392,6 +392,55 @@ def test_receive(monkeypatch):
     assert telegram(BotAPI(getUpdates=[OSError("down"), OSError("down")])).receive(1) == []
 
 
+@pytest.mark.spec("CNV-24")
+def test_a_fresh_answer_button_tap_arrives_as_fresh():
+    tapped = {"id": "q1", "from": {"username": "me"}, "message": {"message_id": 7, "chat": {"id": 42}}}
+    updates = [
+        {"update_id": 10, "callback_query": dict(tapped, data="/fresh")},
+        {"update_id": 11, "callback_query": dict(tapped, id="q2", data="other")},
+    ]
+    api = BotAPI(getUpdates=[updates])
+    messages = telegram(api).receive(1)
+    assert [(message.chat, message.text, message.sender) for message in messages] == [("42", "/fresh", "me")]
+    answered = [
+        fields["callback_query_id"] for path, fields in api.calls if path.endswith("answerCallbackQuery")
+    ]
+    assert answered == ["q1", "q2"]
+
+
+@pytest.mark.spec("CNV-24")
+def test_offer_fresh_puts_a_button_on_the_reply():
+    api = BotAPI()
+    telegram(api).offer_fresh("42", 7)
+    [(path, fields)] = api.calls
+    assert (
+        path.endswith("editMessageReplyMarkup") and fields["chat_id"] == "42" and fields["message_id"] == "7"
+    )
+    assert json.loads(fields["reply_markup"]) == {
+        "inline_keyboard": [[{"text": "🔄 Fresh answer", "callback_data": "/fresh"}]]
+    }
+    telegram(BotAPI(editMessageReplyMarkup=OSError("down"))).offer_fresh("42", 7)
+
+
+@pytest.mark.spec("CNV-24")
+def test_an_edit_keeps_the_fresh_answer_button():
+    api = BotAPI(
+        editMessageText=[{}, {}, (400, "message to edit not found"), {}],
+        sendMessage={"message_id": 9},
+    )
+    channel = telegram(api)
+    channel.offer_fresh("42", 7)
+    button = api.calls[-1][1]["reply_markup"]
+    channel.edit("42", 7, "more")
+    assert api.calls[-1][1]["reply_markup"] == button
+    channel.edit("42", 8, "other")
+    assert "reply_markup" not in api.calls[-1][1]
+    assert channel.edit("42", 7, "gone") == 9
+    assert api.calls[-1][0].endswith("sendMessage") and api.calls[-1][1]["reply_markup"] == button
+    channel.edit("42", 9, "again")
+    assert api.calls[-1][1]["reply_markup"] == button
+
+
 @pytest.mark.spec("CHN-6")
 def test_skip_waiting_moves_past_old_messages():
     channel = telegram(BotAPI(getUpdates=[[{"update_id": 99}]]))

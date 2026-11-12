@@ -773,7 +773,8 @@ Each request's one thinking level.
   that greets, asks a question, lists, names, defines, renames or formats is `off`. Otherwise one quick call
   (**MOD-23**) without thinking (think `off`) at temperature 0, so the same request gets the same answer, asks
   `REVIEW_PROMPT` for the level in a short reply, recalling well-known things being `off`; a reply that names no level,
-  or a failed call, is `medium`. The level and why go to the call log.
+  or a failed call, is `medium`. A chat message's review also gets its thread (**REM-11**) before the request; the
+  word rule reads the request only. The level and why go to the call log.
 - **RVW-2** A model's think values are Ollama's `/api/show` `thinking.values`. The home's `think_levels` keeps
   them per model name and digest (from `/api/tags`), read when missing; calibration reads them again.
   `ThinkLevels.taken(level, values)` gives `false` for `off`; the level itself when the model has it; else,
@@ -1086,8 +1087,8 @@ The terminal and the chats are one conversation: the same commands, the same ans
   status that says it works in a terminal. Stopped or pushed back
   (**JOB-1**), its last state is shown once it ends.
 - **CNV-18** The chat asks the model only through the quick call (**MOD-23**); `Talk` and `Shell`
-  read a JSON answer with `Reply.json()` (**PRM-2**), and take one that cannot be read as `{}`. `reply` keeps
-  the last `CHAT_CONTEXT_MESSAGES` messages per chat, and it says plainly when no model is in use or the model
+  read a JSON answer with `Reply.json()` (**PRM-2**), and take one that cannot be read as `{}`. `reply` sends
+  the chat's thread (**REM-11**) and the current message only, and it says plainly when no model is in use or the model
   failed. Each prompt holds only what its message needs. The channel's class picks how replies are written
   (`STYLE`): a Telegram chat is read on a phone (brief, short lines), the console is a terminal; both render
   Markdown. Tinker acts on what the person asks rather than saying what to type, in two steps.
@@ -1128,6 +1129,11 @@ The terminal and the chats are one conversation: the same commands, the same ans
   `send_file`, what tinker printed as its caption; `memory graph` and `dream graph` send `memory.html` the same
   way (**DRM-9**). The terminal opens the file in the browser and says where it is; a channel that cannot send
   files sends the caption with the file's path.
+- **CNV-24** `/fresh` asks the model again what this chat last asked (its last chat episode's message), with no
+  answer memory looked up (**REM-12**); with no question yet, it says so. A reply from memory ends with a hint
+  to send `/fresh`; on a channel with buttons (Telegram) it also gets a "🔄 Fresh answer" button whose tap
+  sends `/fresh`; an edit of that reply keeps the button. The dream then updates the old answer memory with the
+  new answer.
 
 ## channels (CHN)
 
@@ -1491,15 +1497,18 @@ What the person and Tinker did together, kept as episodes, and the memories a dr
 Nothing here calls the model.
 
 - **REM-1** `Scratchpad.write(episode)` keeps one episode in `episodes` for each chat request (`Talk.answering`:
-  the message, the commands it ran, their output cut to `EPISODE_FOUND_CHARS`, the reply, and `answered` or
-  `failed`), each command line run (`Shell.run`: the request, the line, its output cut the same way, its exit
+  the message, the commands it ran, their output cut to `EPISODE_FOUND_CHARS`, the reply, and `answered`,
+  `remembered` (answered from memory, **REM-12**) or `failed`), each command line run (`Shell.run`: the request, the line, its output cut the same way, its exit
   code), and each build when it ends (its task and status). An episode has the next id `eN`, its chat, its time
   and `dreamt` false. A `system` check's output (**SYS-1**) is never kept.
-- **REM-2** A dreamt episode keeps only its gist: its texts cut to `EPISODE_GIST_CHARS`. It is deleted
+- **REM-2** A dreamt episode keeps only its gist: the gist the dream wrote for it (**DRM-3**), else its texts
+  cut to `EPISODE_GIST_CHARS`. It is deleted
   `EPISODE_KEPT_DAYS` (30) days after it was dreamt; a memory's source that is gone shows as `gone`.
 - **REM-3** A memory in `memories` is `{id, kind, gist, text, sources, first_seen, last_seen, recalled,
-  last_recalled, strength, retired}`: id `mN`, kind `person`, `fact`, `done` or `tool`, `sources` the ids of the
-  episodes it came from (at least one: `Memories` refuses a memory without), and `retired` empty or why.
+  last_recalled, strength, retired}`: id `mN`, kind `person`, `fact`, `done`, `tool` or `answer`, `sources` the
+  ids of the episodes it came from (at least one: `Memories` refuses a memory without), and `retired` empty or
+  why. An `answer` memory's gist is a question asked on its own, its text the answer, and it has `lasts`: `day`,
+  `month` or `always`.
 - **REM-4** `Memories.recall(request)` gives the memories not retired and the fresh episodes (not dreamt) that
   hold a word of the request (BM25), or, when the embedding model is set, whose meaning is at least
   `RECALL_MEANING` (cosine) close; in rank order, at most `RECALL_SHOWN` (6). Each memory recalled gets
@@ -1507,7 +1516,7 @@ Nothing here calls the model.
 - **REM-5** `Portrait` is who the person is, in at most `PORTRAIT_WORDS` (100) words, kept as `dream`/`portrait`.
 - **REM-6** `Talk.reply` adds "What you remember" (the portrait and each recalled line) to `CHAT_SYSTEM` only
   when there is some; `Shell.propose` adds the recalled `tool` memories and episodes to `COMMAND_SYSTEM` the
-  same way. With nothing recalled, the prompt is unchanged, and the model always answers.
+  same way. With nothing recalled, the prompt is unchanged. The model answers unless an answer memory does (**REM-12**).
 - **REM-7** `tinker memory [PAGE]` lists the memories not retired, newest `last_seen` first, a page at a time,
   each as its id, kind and gist; then how many episodes are fresh, how many memories are retired, when the last
   dream was, and what to do next (`memory show ID`, `memory forget ID`, `memory portrait`, `dream`). With no memory,
@@ -1517,6 +1526,19 @@ Nothing here calls the model.
 - **REM-9** `tinker memory forget ID` deletes one memory or episode, as a deletion (**SET-8**).
 - **REM-10** `tinker memory portrait` shows the portrait and the `person` memories it comes from. Every `memory`
   view but `forget` is a glance (**CMD-1**).
+- **REM-11** `Thread.of(chat, now)` is what the chat said lately, with no model: its last `THREAD_TURNS` (4)
+  chat episodes (those with a message) within `THREAD_MINUTES` (30), oldest first, one line each: the
+  episode's gist once dreamt, else its message and its reply on one line, cut to `EPISODE_GIST_CHARS`; a reply
+  from memory gives only the answer, without its "💭 From memory" line and its `/fresh` hint, here and in a
+  recalled episode. `Talk.reply` sends them as "Earlier in this chat" only when there are some, to both of its calls and to the
+  review of its level (**RVW-1**).
+- **REM-12** Before asking the model, `Talk.reply` looks for an answer memory not retired whose question means
+  the same as the message: cosine at least `ANSWER_SAME_MEANING` (0.9) of the two as lowercase words with the
+  punctuation dropped, so "HOW TALL…!!" means "how tall…", or, with no embedding model, word
+  similarity at least `ANSWER_SAME_WORDS` (0.9); and every word of the message (lowercase, not in
+  `ANSWER_COMMON_WORDS`) is in its question, so "feet" never finds "km". A match is the reply, with no model
+  call: "💭 From memory (you asked "QUESTION" on DATE):", the answer and the `/fresh` hint (**CNV-24**). It counts
+  as recalled.
 
 ## dreaming (DRM)
 
@@ -1532,16 +1554,27 @@ fade, and the portrait is kept up to date.
   step.
 - **DRM-3** Consolidate takes the fresh episodes chat by chat, at most `DREAM_BATCH_EPISODES` (12) to a call.
   `DREAM_CONSOLIDATE_SYSTEM` gets the batch and the memories it recalls (**REM-4**), and answers JSON
-  `{add, update, confirm, retire}`, each change citing episode ids of the batch; a change that cites none, or
-  an id outside the batch, is dropped. An add starts at strength 1, a confirm adds 1 and makes `last_seen`
+  `{add, update, confirm, retire, gists}`, each change citing episode ids of the batch; `gists` maps each
+  episode id to a short gist keeping its numbers, names and conclusion (**REM-2**). The code picks the episodes that
+  may become answers, a question answered in words (no command run, not answered from memory), and names them
+  in the batch as `questions`; the model gives each only its `lasts` (`{lasts: {id: lasts}}`): always for a fact
+  that does not change (a mountain's height, a date in history), month for one that changes slowly (a price, a
+  version), day for news or weather, never for what is read off right now (the time, the RAM). An id or value
+  the code cannot read is dropped. Each one with a lasts other than never becomes an
+  `answer` memory whose gist is the episode's message as sent and whose text is its reply; when a living answer
+  memory already answers that message (**REM-12**), it is updated instead, with the new text and lasts. An add of
+  kind `answer` from the model is dropped, and so is its update or retire of an `answer` memory; a plain question and answer makes no `person` memory; a change that
+  cites none, or an id outside the batch, is dropped. An add starts at strength 1, a confirm adds 1 and makes `last_seen`
   now; an update keeps its sources and adds the cited ones. A `tool` memory is kept only when `shutil.which`
   finds the tool. Then the batch is dreamt; a reply that cannot be read leaves it fresh.
-- **DRM-4** Revise joins similar memories (as **GRF-3**) of a group where one changed in this dream:
+- **DRM-4** Revise joins similar memories (as **GRF-3**) of a group where one changed in this dream, never an
+  `answer` memory (answers to near questions, feet and km, stay apart):
   `DREAM_REVISE_SYSTEM` answers `{merge: [{ids, kind, gist, text}], retire: [{id, why}]}`, the newer memory
   winning where they disagree. A merged memory has the union of their sources, the earliest `first_seen` and
   the sum of their strengths; the old ones are retired "merged into mN".
 - **DRM-5** Decay, with no model, retires "faded" each memory neither recalled nor confirmed for
-  `DREAM_FORGET_DAYS` (60) whose strength is below `DREAM_KEEP_STRENGTH` (3), and deletes the dreamt episodes
+  `DREAM_FORGET_DAYS` (60) whose strength is below `DREAM_KEEP_STRENGTH` (3), retires "expired" each answer
+  memory a day (`lasts` `day`) or 30 days (`month`) after its `last_seen`, and deletes the dreamt episodes
   older than **REM-2** allows.
 - **DRM-6** Portrait, only when a `person` memory changed in this dream, asks `DREAM_PORTRAIT_SYSTEM` for the
   portrait (**REM-5**) from the `person` memories.

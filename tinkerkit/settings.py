@@ -215,6 +215,8 @@ RESEARCH_EXCERPT_CHARS = 16000
 EPISODE_FOUND_CHARS = 1200
 EPISODE_GIST_CHARS = 200
 EPISODE_KEPT_DAYS = 30
+THREAD_TURNS = 4
+THREAD_MINUTES = 30
 RECALL_MEANING = 0.6
 RECALL_SHOWN = 6
 PORTRAIT_WORDS = 100
@@ -222,6 +224,13 @@ DREAM_IDLE_SECONDS = 5
 DREAM_BATCH_EPISODES = 12
 DREAM_FORGET_DAYS = 60
 DREAM_KEEP_STRENGTH = 3
+ANSWER_LASTS_DAYS = {"day": 1, "month": 30, "always": None}
+ANSWER_SAME_MEANING = 0.9
+ANSWER_SAME_WORDS = 0.9
+ANSWER_COMMON_WORDS = frozenset(
+    {"a", "an", "the", "is", "are", "was", "were", "what", "how", "in", "of", "to", "for", "on", "do", "does"}
+    | {"i", "me", "my", "you", "it", "and", "or", "please", "tell", "about", "with", "at", "by", "be"}
+)
 DREAM_REPLY_TOKENS = 1500
 
 READ_MAX_BYTES = 50_000_000

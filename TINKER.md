@@ -518,6 +518,11 @@ Tinker remembers what you do with it: each chat answer, command and build is kep
 or command comes, it recalls the memories and fresh episodes that share a word with it (or are close in
 meaning, with an embedding model) and tells the model what it remembers.
 
+A chat also keeps its thread: the last few turns of the past minutes go with each message, so `and in km?`
+follows the question before it. Asked the same question again, Tinker answers from memory without the model,
+marked `💭 From memory`; `/fresh` (or the 🔄 Fresh answer button on Telegram) asks the model again, and the
+next dream keeps the new answer. An answer that only holds for a day or a month is let go once it is that old.
+
 While nothing waits for it, Tinker dreams: a few seconds after the queue empties, it turns the fresh episodes
 into memories (about you, what you did, the tools you use, facts), joins the ones that say the same thing,
 lets fade what was never recalled or seen again, and keeps a short portrait of who you are. A dream is a job,

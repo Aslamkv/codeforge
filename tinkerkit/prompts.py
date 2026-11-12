@@ -1032,20 +1032,27 @@ Reply with ONLY JSON: {"claims":[{"claim":1,"verdict":"holds","why":"one short s
     )
 
     REMEMBERED = "What you remember"
+    EARLIER = "Earlier in this chat"
 
     DREAM_CONSOLIDATE_SYSTEM = (
         "You turn what happened into lasting memories about the person and their computer. You get episodes, "
         "each with its id, and the memories they bring to mind. Keep only what will still help later: who the "
         "person is and what they like (person), what got done (done), the tools on this computer and how they "
-        "are used (tool), and other facts (fact). Reply with only one JSON object:\n"
+        "are used (tool) and other facts (fact), and no person memory from a plain question and answer. "
+        "Reply with only one JSON object:\n"
         '{"add":[{"kind":"person|done|tool|fact","gist":"one short line","text":"the memory in a few '
         'sentences","sources":["e1"],"tool":"the command, only for a tool memory"}],\n'
         ' "update":[{"id":"m1","gist":"...","text":"...","sources":["e1"]}],\n'
         ' "confirm":[{"id":"m1","sources":["e1"]}],\n'
-        ' "retire":[{"id":"m1","why":"what shows it no longer holds","sources":["e1"]}]}\n'
+        ' "retire":[{"id":"m1","why":"what shows it no longer holds","sources":["e1"]}],\n'
+        ' "gists":{"e1":"..."},\n'
+        ' "lasts":{"e1":"always|month|day|never"}}\n'
         "Add what is new, update a memory the episodes correct, confirm one they show again and retire one "
         "they show is wrong. Every change cites the ids of the episodes that show it. Leave a list empty "
-        "when nothing fits."
+        "when nothing fits. Give every episode one short gist keeping its numbers, names and conclusion. "
+        "For each episode id in questions, say how long its answer holds: always for a fact that does not "
+        "change (a mountain's height, a date in history), month for one that changes slowly (a price, a "
+        "version), day for news or weather, never for what is read off right now (the time, the RAM)."
     )
 
     DREAM_REVISE_SYSTEM = (

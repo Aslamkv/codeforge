@@ -37,8 +37,8 @@ class RequestReview:
     def __init__(self, log, phase=lambda doing: None):
         self.log, self.phase = log, phase
 
-    def level(self, request, least=None):
-        level, why = self.raised(self.ruled(RequestWords(request)) or self.reviewed(request), least)
+    def level(self, request, least=None, thread=""):
+        level, why = self.raised(self.ruled(RequestWords(request)) or self.reviewed(request, thread), least)
         self.log.add({"review": level, "why": why})
         return level, why
 
@@ -62,7 +62,7 @@ class RequestReview:
             return "off", "a short greeting, question, list, definition, rename or format"
         return None
 
-    def reviewed(self, request):
+    def reviewed(self, request, thread=""):
         quick = Models.quick()
         if not quick:
             return "medium", "no model to review the request"
@@ -72,7 +72,10 @@ class RequestReview:
             reply = Models.quick_reply(
                 [
                     {"role": "system", "content": Prompts.REVIEW_PROMPT},
-                    {"role": "user", "content": request},
+                    {
+                        "role": "user",
+                        "content": f"{thread.strip()}\n\n{request}" if thread.strip() else request,
+                    },
                 ],
                 REVIEW_REPLY_TOKENS,
                 "off",

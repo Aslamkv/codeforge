@@ -86,6 +86,18 @@ def test_a_dreamt_episode_keeps_only_its_gist(home_store):
     assert len(episode["message"]) == len(episode["reply"]) == EPISODE_GIST_CHARS
     assert len(episode["commands"][0]["line"]) == len(episode["commands"][0]["output"]) == EPISODE_GIST_CHARS
     assert episode["id"] == "e1" and episode["chat"] == "telegram:1" and episode["status"] == "answered"
+    assert "gist" not in episode
+
+
+@pytest.mark.spec("REM-2")
+def test_a_dreamt_episode_keeps_the_gist_the_dream_wrote_cut(home_store):
+    Scratchpad.write(chat_episode(), NOW)
+    Scratchpad.write(chat_episode(message="second"), NOW)
+
+    Scratchpad.dreamt(["e1", "e2"], NOW, gists={"e1": "z" * (EPISODE_GIST_CHARS * 2)})
+
+    assert Home.store().get("episodes", "e1")["gist"] == "z" * EPISODE_GIST_CHARS
+    assert "gist" not in Home.store().get("episodes", "e2")
 
 
 @pytest.mark.spec("REM-2")
@@ -371,3 +383,32 @@ def test_you_without_a_portrait_says_a_dream_writes_it(home_store, capsys):
     show_portrait()
 
     assert "No portrait yet" in capsys.readouterr().out
+
+
+@pytest.mark.spec("REM-12")
+def test_same_answer_finds_the_answer_memory_without_counting_a_recall(home_store):
+    kept = memories().add("answer", "what is the capital of France?", "Paris.", ["e1"], NOW, "always")
+
+    found = memories().same_answer("what is the capital of France?")
+
+    assert found["id"] == kept["id"] and found["recalled"] == 0
+    assert memories().same_answer("what is the capital of Peru?") is None
+
+
+@pytest.mark.spec("REM-12")
+def test_same_answer_finds_a_shouted_punctuated_request(home_store):
+    kept = memories().add("answer", "how tall is it?", "330 metres.", ["e1"], NOW, "always")
+
+    assert memories().same_answer("HOW TALL is it!!")["id"] == kept["id"]
+
+
+@pytest.mark.spec("REM-12")
+def test_same_answer_embeds_plain_words(home_store):
+    memories().add("answer", "How tall is it?", "330 metres.", ["e1"], NOW, "always")
+    lookup = memories()
+    seen = []
+    lookup.retriever.similarities = lambda request, questions: seen.append((request, questions)) or [1.0]
+
+    lookup.same_answer("HOW TALL is it!!")
+
+    assert seen == [("how tall is it", ["how tall is it"])]

@@ -1,8 +1,13 @@
 import datetime
 import json
+import re
 
 from .messages import say
 from .settings import (
+    ANSWER_COMMON_WORDS,
+    ANSWER_LASTS_DAYS,
+    ANSWER_SAME_MEANING,
+    ANSWER_SAME_WORDS,
     EPISODE_FOUND_CHARS,
     EPISODE_GIST_CHARS,
     EPISODE_KEPT_DAYS,
@@ -13,6 +18,7 @@ from .settings import (
     Numbered,
     confirm_deletion,
 )
+from .text import similarity
 
 EPISODE_BOOKKEEPING = frozenset({"id", "chat", "time", "dreamt", "dreamt_time"})
 KEPT_WHOLE = EPISODE_BOOKKEEPING | {"status"}
@@ -42,12 +48,16 @@ class Scratchpad:
         return [episode for episode in Home.store().items(cls.EPISODES).values() if not episode["dreamt"]]
 
     @classmethod
-    def dreamt(cls, ids, now=None):
+    def dreamt(cls, ids, now=None, gists=None):
+        gists = gists or {}
         for episode_id in ids:
+            written = {"gist": gists[episode_id][:EPISODE_GIST_CHARS]} if episode_id in gists else {}
             Home.store().update(
                 cls.EPISODES,
                 episode_id,
-                lambda episode: dict(gist(episode), dreamt=True, dreamt_time=stamp(now)),
+                lambda episode, written=written: dict(
+                    gist(episode), dreamt=True, dreamt_time=stamp(now), **written
+                ),
             )
 
     @classmethod
@@ -59,16 +69,18 @@ class Scratchpad:
 
 
 class Memories:
-    KINDS = ("person", "fact", "done", "tool")
+    KINDS = ("person", "fact", "done", "tool", "answer")
     MEMORIES = "memories"
     COUNTER = "memory_ids"
 
     def __init__(self, retriever):
         self.retriever = retriever
 
-    def add(self, kind, gist, text, sources, now=None):
+    def add(self, kind, gist, text, sources, now=None, lasts=None):
         if not sources:
             raise ValueError("a memory needs the episodes it came from")
+        if not lasts_found(kind, lasts):
+            raise ValueError("an answer memory needs how long it lasts")
         memory = {
             "id": f"m{self.next_number()}",
             "kind": kind,
@@ -82,6 +94,8 @@ class Memories:
             "strength": 1,
             "retired": "",
         }
+        if kind == "answer":
+            memory["lasts"] = lasts
         Home.store().put(self.MEMORIES, memory["id"], memory)
         return memory
 
@@ -114,6 +128,29 @@ class Memories:
         )
         return (by_words + [index for index in by_meaning if index not in by_words])[:RECALL_SHOWN]
 
+    def answer_to(self, request, now=None):
+        memory = self.same_answer(request)
+        return self.recalled(memory, now) if memory else None
+
+    def same_answer(self, request):
+        answers = [
+            memory
+            for memory in self.living()
+            if memory["kind"] == "answer" and telling_words(request) <= words_of(memory["gist"])
+        ]
+        if not answers:
+            return None
+        plain = plain_words(request)
+        questions = [plain_words(memory["gist"]) for memory in answers]
+        meanings = self.retriever.similarities(plain, questions)
+        closeness, least = (
+            (meanings, ANSWER_SAME_MEANING)
+            if meanings
+            else ([similarity(plain, question) for question in questions], ANSWER_SAME_WORDS)
+        )
+        best = max(range(len(answers)), key=lambda index: closeness[index])
+        return answers[best] if closeness[best] >= least else None
+
     def recalled(self, memory, now):
         return self.update(memory["id"], {"recalled": memory["recalled"] + 1, "last_recalled": stamp(now)})
 
@@ -129,6 +166,22 @@ class Portrait:
     @classmethod
     def write(cls, text):
         Home.store().put(cls.DREAM, cls.KEY, " ".join(text.split()[:PORTRAIT_WORDS]))
+
+
+def lasts_found(kind, lasts):
+    return kind != "answer" or (isinstance(lasts, str) and lasts in ANSWER_LASTS_DAYS)
+
+
+def telling_words(text):
+    return words_of(text) - ANSWER_COMMON_WORDS
+
+
+def words_of(text):
+    return set(plain_words(text).split())
+
+
+def plain_words(text):
+    return " ".join(re.findall(r"[a-z0-9']+", text.lower()))
 
 
 def recall_text(item):

@@ -80,6 +80,25 @@ def test_other_requests_ask_the_reviewer_without_thinking(
 
 
 @pytest.mark.spec("RVW-1")
+def test_a_thread_goes_before_the_request_in_the_review_call(
+    measured_model, fake_ollama, tinker_home, model_log
+):
+    fake_ollama.reply("low: a plain follow-up")
+    RequestReview(model_log).level(STORY, thread="\n\nEarlier:\n- a question → an answer\n")
+    assert fake_ollama.calls[-1]["messages"][1] == {
+        "role": "user",
+        "content": f"Earlier:\n- a question → an answer\n\n{STORY}",
+    }
+
+
+@pytest.mark.spec("RVW-1")
+def test_a_thread_does_not_change_the_word_rule(fake_ollama, model_log):
+    thread = "\n\nEarlier:\n- " + "fix the parse function bug " * 40
+    assert RequestReview(model_log).level("hi there", thread=thread)[0] == "off"
+    assert fake_ollama.calls == []
+
+
+@pytest.mark.spec("RVW-1")
 def test_a_reply_naming_no_level_is_medium(measured_model, fake_ollama, tinker_home, model_log):
     fake_ollama.reply("I am not sure.")
     level, why = RequestReview(model_log).level(STORY)

@@ -5,6 +5,7 @@ import shutil
 import signal
 import sys
 from collections import namedtuple
+lazy import datetime
 lazy import fcntl
 lazy import html
 lazy import json
@@ -59,7 +60,16 @@ lazy from .model import Models, Ollama, OllamaError
 lazy from .prompts import Part, Prompts, Reply
 lazy from .retrieval import Embeddings, Retriever
 lazy from .reviewing import RequestReview
-lazy from .settings import EXERCISE_FOLDER, JOB_STOP_SIGNAL, Config, Home, projects_folder
+lazy from .settings import (
+    EPISODE_GIST_CHARS,
+    EXERCISE_FOLDER,
+    JOB_STOP_SIGNAL,
+    THREAD_MINUTES,
+    THREAD_TURNS,
+    Config,
+    Home,
+    projects_folder,
+)
 lazy from .text import field
 lazy from .workspace import Toolchain
 
@@ -75,7 +85,6 @@ ENDED_LOOK_SECONDS = 0.1
 BANNER_MAX_COLUMNS = 64
 WIPE_SCREEN_AND_SCROLLBACK = "\033[H\033[2J\033[3J"
 
-CHAT_CONTEXT_MESSAGES = 12
 CHAT_MAX_REPLY_TOKENS = 1024
 TYPING_SIGN_SECONDS = 4
 MODEL_BUSY_NOTE_AFTER_SECONDS = 5
@@ -109,6 +118,9 @@ COMMANDS_ASKING_FOR_WORDS = tuple(
 EXIT_WORDS = ("exit",)
 PROMPT_HISTORY_LINES = 1000
 CHAT_APP_START = "/start"
+CHAT_FRESH = "/fresh"
+FRESH_ANSWER_BUTTON = "🔄 Fresh answer"
+NO_QUESTION_YET = "❓ **No question yet** to ask again."
 START_WELCOME = """👋 **Hi, I'm Tinker!**
 I build small programs for you, on this computer, with an AI model that runs right here.
 
@@ -472,6 +484,9 @@ class Desk:
         if message.text.split()[:1] == [CHAT_APP_START]:
             channel.send(message.chat, welcome())
             return
+        if message.text.split() == [CHAT_FRESH]:
+            self.fresh(channel, message)
+            return
         message = self.as_said(channel, self.with_words_wanted(channel, message))
         command = command_of(message.text)
         unknown = not command and unknown_command(message.text)
@@ -507,6 +522,21 @@ class Desk:
             sent = channel.send(message.chat, reply)
             if kind_of(command_words(message.text)) == "glance":
                 channel.glance(message.chat, message.id, [sent])
+
+    def fresh(self, channel, message):
+        question = last_asked(message.chat)
+        if not question:
+            channel.send(message.chat, NO_QUESTION_YET)
+            return
+        asked = Message(message.chat, question, message.sender)
+        self.talk.answer(
+            channel,
+            asked,
+            self.running_now,
+            ChatState(self),
+            write=self.talk.asked_reply,
+            on_command=lambda line: self.replied(channel, asked, line),
+        )
 
     def told(self, channel, message, reply, asked):
         kind = kind_of(command_words(message.text))
@@ -1316,7 +1346,13 @@ def answered_episode(message, reply, lines):
     failed = not said or said.startswith("⚠️")
     episode = {"chat": message.chat, "message": message.text, "reply": said}
     commands = {"commands": lines} if lines else {}
-    return dict(episode, **commands, status="failed" if failed else "answered")
+    return dict(episode, **commands, status=reply_status(said, failed))
+
+
+def reply_status(said, failed):
+    if failed:
+        return "failed"
+    return "remembered" if isinstance(said, Remembered) else "answered"
 
 
 def glance_in_sentence(reply):
@@ -1473,9 +1509,59 @@ def welcome():
     return START_WELCOME
 
 
+class Thread:
+    @classmethod
+    def of(cls, chat, now):
+        since = now - datetime.timedelta(minutes=THREAD_MINUTES)
+        said = [
+            episode for episode in asked_in(chat) if datetime.datetime.fromisoformat(episode["time"]) >= since
+        ]
+        return [thread_line(episode) for episode in said[-THREAD_TURNS:]]
+
+
+def last_asked(chat):
+    said = asked_in(chat)
+    return said[-1]["message"] if said else None
+
+
+def asked_in(chat):
+    return sorted(
+        (
+            episode
+            for episode in Home.store().items(Scratchpad.EPISODES).values()
+            if episode["chat"] == chat and "message" in episode
+        ),
+        key=written_order,
+    )
+
+
+def written_order(episode):
+    return episode["time"], int(episode["id"].removeprefix("e"))
+
+
+def thread_line(episode):
+    if episode["dreamt"] and episode.get("gist"):
+        line = episode["gist"]
+    else:
+        line = f"{episode['message']} → {' '.join(thread_reply(episode).split())}"
+    return line[:EPISODE_GIST_CHARS]
+
+
+def thread_reply(episode):
+    if episode.get("status") == "remembered":
+        return "\n".join(episode["reply"].splitlines()[1:-1])
+    return episode["reply"]
+
+
+def thread_part(lines):
+    if not lines:
+        return ""
+    return f"\n\n{Part(Prompts.EARLIER, Part.bullets(lines)).render()}"
+
+
 class Talk:
     def __init__(self, commands, pausing_jobs=contextlib.nullcontext):
-        self.commands, self.said, self.lock, self.turn = commands, {}, threading.Lock(), threading.Lock()
+        self.commands, self.turn = commands, threading.Lock()
         self.pausing_jobs = pausing_jobs
 
     def answer(self, channel, message, now, state=NO_CHAT_STATE, write=None, on_shown=None, on_command=None):
@@ -1501,6 +1587,8 @@ class Talk:
         note = channel.show(
             message.chat, note, reply[0] if reply else "⚠️ **The model did not answer.**", done=True
         )
+        if reply and isinstance(reply[0], Remembered) and note:
+            channel.offer_fresh(message.chat, note[-1])
         if on_shown:
             on_shown(note)
 
@@ -1534,44 +1622,43 @@ class Talk:
         return "\n".join(lines)
 
     def reply(self, channel, message, state=NO_CHAT_STATE, tokens=CHAT_MAX_REPLY_TOKENS):
+        remembered = Models.quick() and remembered_answer(message.text)
+        return remembered or self.asked_reply(channel, message, state, tokens)
+
+    def asked_reply(self, channel, message, state=NO_CHAT_STATE, tokens=CHAT_MAX_REPLY_TOKENS):
         if not Models.quick():
             return (
                 "⚠️ **No model is in use yet**, so I cannot chat: `tinker model NAME` picks "
                 f"one. These still work:\n{self.commands}"
             )
-        said = self.chat_of(channel, message.chat)
-        asked = self.remembered(said, "user", message.text)
-        level = reviewed_level(message.text)
-        names_system = Prompts.CHAT_SYSTEM.format(
-            style=channel.STYLE, index=chat_index(), state=state_part(state.everyday())
-        ) + remembered_part(recall(message.text), Portrait.read())
+        thread = thread_part(Thread.of(message.chat, datetime.datetime.now()))
+        asked = [{"role": "user", "content": message.text}]
+        level = reviewed_level(message.text, thread)
+        names_system = (
+            Prompts.CHAT_SYSTEM.format(
+                style=channel.STYLE, index=chat_index(), state=state_part(state.everyday())
+            )
+            + remembered_part(recall(message.text), Portrait.read())
+            + thread
+        )
         try:
             text = self.ask(
                 channel, message.chat, [{"role": "system", "content": names_system}] + asked, tokens, level
             )
             names = named_commands(text or "")
             if any(takes_words(name) for name in names):
-                fill_system = Prompts.CHAT_FILL_SYSTEM.format(
-                    commands=command_details(names), state=state_part(state.for_commands(names))
+                fill_system = (
+                    Prompts.CHAT_FILL_SYSTEM.format(
+                        commands=command_details(names), state=state_part(state.for_commands(names))
+                    )
+                    + thread
                 )
                 text = self.ask(
                     channel, message.chat, [{"role": "system", "content": fill_system}] + asked, tokens, level
                 )
         except OllamaError as exc:
             return md(t"⚠️ **The model did not answer:** {first_words(exc)}")
-        text = text or "_(no answer)_"
-        self.remembered(said, "assistant", text)
-        return text
-
-    def chat_of(self, channel, chat):
-        with self.lock:
-            return self.said.setdefault((channel.name, chat), [])
-
-    def remembered(self, said, role, text):
-        with self.lock:
-            said.append({"role": role, "content": text})
-            del said[:-CHAT_CONTEXT_MESSAGES]
-            return list(said)
+        return text or "_(no answer)_"
 
     def told(self, channel, chat, asked, line, output):
         try:
@@ -2217,6 +2304,9 @@ class Channel:
         pass
 
     def offer(self, commands):
+        pass
+
+    def offer_fresh(self, chat, shown):
         pass
 
     def ask_for(self, chat, question, hint):
@@ -3157,13 +3247,33 @@ def recalled_line(item):
         return item["gist"]
     return "; ".join(
         f"{key}: {value}"
-        for key, value in item.items()
+        for key, value in shown_episode(item).items()
         if key not in EPISODE_BOOKKEEPING and value not in ("", [])
     )
 
 
+def shown_episode(episode):
+    if "reply" not in episode:
+        return episode
+    return {**episode, "reply": thread_reply(episode)}
+
+
 def recall(request, kinds=None):
     return Memories(Retriever(Embeddings.configured())).recall(request, kinds=kinds)
+
+
+class Remembered(str):
+    pass
+
+
+def remembered_answer(request):
+    memory = Memories(Retriever(Embeddings.configured())).answer_to(request)
+    if not memory:
+        return None
+    return Remembered(
+        f'💭 From memory (you asked "{memory["gist"]}" on {memory["last_seen"][:10]}):\n'
+        f"{memory['text']}\n_`/fresh` asks the model again._"
+    )
 
 
 def started_by_a_conversation():
@@ -3207,8 +3317,8 @@ def answer_or_stop(answer):
     return outcome.get("reply", "⏹ Stopped.")
 
 
-def reviewed_level(text):
-    level, _ = RequestReview(calls_log()).level(text)
+def reviewed_level(text, thread=""):
+    level, _ = RequestReview(calls_log()).level(text, thread=thread)
     return level
 
 

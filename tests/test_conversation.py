@@ -1,4 +1,5 @@
 import contextlib
+import datetime
 import io
 import json
 import os
@@ -37,6 +38,7 @@ from tinkerkit.conversation import (
     Reporter,
     Shell,
     Talk,
+    Thread,
     after_word,
     built_project,
     command_of,
@@ -52,7 +54,8 @@ from tinkerkit.ledger import DONE_NOTE_KEPT_SECONDS, Ledger
 from tinkerkit.messages import DIMMED, HEADING, Text, styled
 from tinkerkit.model import Models, Ollama, QuickModel, ThinkLevels
 from tinkerkit.project import Runs, Tracker
-from tinkerkit.settings import Config, Home
+from tinkerkit.remembering import Scratchpad
+from tinkerkit.settings import EPISODE_GIST_CHARS, Config, Home
 
 
 @pytest.fixture(autouse=True)
@@ -97,6 +100,9 @@ class Recorder(Channel):
 
     def typing(self, chat):
         self.log.append(("typing", chat, None, ""))
+
+    def offer_fresh(self, chat, shown):
+        self.log.append(("fresh", chat, shown, ""))
 
     def latest(self, chat, sent):
         return self.newest.get(chat) == sent
@@ -1702,6 +1708,57 @@ def test_a_chat_reply_adds_what_tinker_remembers_and_the_portrait(measured_model
     assert "A beekeeper who likes short answers." in system and "the person keeps bees" in system
 
 
+def remembered_answer(question, answer):
+    from tinkerkit.remembering import Memories
+    from tinkerkit.retrieval import Retriever
+
+    now = datetime.datetime(2026, 11, 2, 9, 0)
+    return Memories(Retriever(None)).add("answer", question, answer, ["e1"], now, "always")
+
+
+@pytest.mark.spec("REM-12", "CNV-24")
+def test_a_chat_reply_comes_from_a_remembered_answer_without_the_model(measured_model, fake_ollama):
+    from tinkerkit.remembering import Memories
+    from tinkerkit.retrieval import Retriever
+
+    memory = remembered_answer("how tall is everest in km", "About 8.85 km.")
+    reply = Talk("task").reply(Recorder(), Message("1", "How tall is Everest in km?"))
+    assert reply == (
+        '💭 From memory (you asked "how tall is everest in km" on 2026-11-02):\n'
+        "About 8.85 km.\n_`/fresh` asks the model again._"
+    )
+    assert fake_ollama.calls == []
+    [kept] = [item for item in Memories(Retriever(None)).living() if item["id"] == memory["id"]]
+    assert kept["recalled"] == 1
+
+
+@pytest.mark.spec("REM-12")
+def test_a_remembered_answer_needs_every_word_of_the_message(measured_model, fake_ollama):
+    remembered_answer("how tall is everest in km", "About 8.85 km.")
+    fake_ollama.reply("29,032 feet")
+    assert Talk("task").reply(Recorder(), Message("1", "how tall is everest in feet")) == "29,032 feet"
+
+
+@pytest.mark.spec("REM-12")
+def test_a_retired_answer_or_another_kind_is_not_a_reply(measured_model, fake_ollama):
+    from tinkerkit.remembering import Memories
+    from tinkerkit.retrieval import Retriever
+
+    memory = remembered_answer("how tall is everest in km", "About 8.85 km.")
+    Memories(Retriever(None)).retire(memory["id"], "outdated")
+    remembering("fact", "how tall is everest in km", "About 8.85 km.")
+    fake_ollama.reply("8.8 km")
+    assert Talk("task").reply(Recorder(), Message("1", "how tall is everest in km")) == "8.8 km"
+
+
+@pytest.mark.spec("REM-1")
+def test_a_reply_from_memory_makes_a_remembered_episode():
+    reply = conversation.Remembered("💭 From memory (you asked ...):\nAbout 8.85 km.")
+    episode = conversation.answered_episode(Message("1", "how tall is everest in km"), [reply], [])
+    assert episode["status"] == "remembered"
+    assert conversation.answered_episode(Message("1", "hi"), ["hello"], [])["status"] == "answered"
+
+
 @pytest.mark.spec("REM-6")
 def test_a_chat_reply_with_nothing_recalled_keeps_its_prompt(measured_model, fake_ollama):
     remembering("fact", "the person keeps bees", "they keep bees in the garden")
@@ -1752,21 +1809,90 @@ def test_a_proposed_command_with_nothing_recalled_keeps_its_prompt(measured_mode
     assert "What you remember" not in fake_ollama.calls[-1]["messages"][0]["content"]
 
 
+THREAD_NOW = datetime.datetime(2026, 11, 11, 12, 0, 0)
+REMEMBERED_REPLY = (
+    '💭 From memory (you asked "x" on 2026-01-01):\nThe answer.\nMore of it.\n_`/fresh` asks again._'
+)
+
+
+def chatted_episode(number, chat="1", **changes):
+    return {"chat": chat, "message": f"question {number}", "reply": f"Answer {number}. More.", **changes}
+
+
+def written_minutes_ago(episode, minutes):
+    return Scratchpad.write(episode, THREAD_NOW - datetime.timedelta(minutes=minutes))
+
+
+@pytest.mark.spec("REM-11")
+def test_the_thread_is_the_last_turns_of_the_chat_oldest_first(home_store):
+    for number in range(6):
+        written_minutes_ago(chatted_episode(number), 10 - number)
+    assert Thread.of("1", THREAD_NOW) == [
+        f"question {number} → Answer {number}. More." for number in range(2, 6)
+    ]
+
+
+@pytest.mark.spec("REM-11")
+def test_the_thread_keeps_only_this_chats_recent_messages(home_store):
+    written_minutes_ago(chatted_episode(0), 31)
+    written_minutes_ago(chatted_episode(1), 29)
+    written_minutes_ago(chatted_episode(2, chat="2"), 5)
+    written_minutes_ago({"chat": "1", "task": "make a game", "status": "done"}, 5)
+    assert Thread.of("1", THREAD_NOW) == ["question 1 → Answer 1. More."]
+    assert Thread.of("3", THREAD_NOW) == []
+
+
+@pytest.mark.spec("REM-11")
+def test_a_thread_line_is_the_gist_once_dreamt_and_is_cut(home_store):
+    for number, changes in enumerate(({"gist": "asked about zero"}, {}, {})):
+        episode = written_minutes_ago(chatted_episode(number), 3 - number)
+        home_store.put(Scratchpad.EPISODES, episode["id"], dict(episode, dreamt=number < 2, **changes))
+    written_minutes_ago(chatted_episode(3, message="x" * 300), 0)
+    assert Thread.of("1", THREAD_NOW) == [
+        "asked about zero",
+        "question 1 → Answer 1. More.",
+        "question 2 → Answer 2. More.",
+        "x" * EPISODE_GIST_CHARS,
+    ]
+
+
+@pytest.mark.spec("REM-11")
+def test_a_thread_line_keeps_the_whole_reply_on_one_line(home_store):
+    reply = "First part. Second part!\n\n  Third   part?\nFourth " + "y" * 300
+    written_minutes_ago(chatted_episode(0, reply=reply), 0)
+    line = "question 0 → First part. Second part! Third part? Fourth " + "y" * 300
+    assert Thread.of("1", THREAD_NOW) == [line[:EPISODE_GIST_CHARS]]
+
+
+@pytest.mark.spec("REM-11")
+def test_a_remembered_thread_line_gives_only_the_answer(home_store):
+    written_minutes_ago(chatted_episode(0, reply=REMEMBERED_REPLY, status="remembered"), 0)
+    assert Thread.of("1", THREAD_NOW) == ["question 0 → The answer. More of it."]
+
+
+@pytest.mark.spec("REM-11")
+def test_a_recalled_remembered_episode_gives_only_the_answer():
+    line = conversation.recalled_line(
+        {"id": "e1", **chatted_episode(0, reply=REMEMBERED_REPLY, status="remembered")}
+    )
+    assert "reply: The answer.\nMore of it." in line
+    assert "From memory" not in line and "/fresh" not in line
+
+
 @pytest.mark.spec("CNV-18")
-def test_talk_reply(measured_model, fake_ollama, monkeypatch):
-    monkeypatch.setattr(conversation, "CHAT_CONTEXT_MESSAGES", 4)
+def test_talk_reply(measured_model, fake_ollama):
     talk, channel = Talk("task; status"), Recorder()
-    for number in range(3):
-        fake_ollama.reply("low: a plain request").reply(f"answer {number}")
-        assert talk.reply(channel, Message("1", f"question {number}")) == f"answer {number}"
+    Scratchpad.write(chatted_episode(0))
+    fake_ollama.reply("low: a plain request").reply("answer 1")
+    assert talk.reply(channel, Message("1", "question 1")) == "answer 1"
     messages = fake_ollama.calls[-1]["messages"]
     assert messages[0]["role"] == "system" and conversation.chat_index() in messages[0]["content"]
-    assert [message["content"] for message in messages[1:]] == [
-        "answer 0",
-        "question 1",
-        "answer 1",
-        "question 2",
-    ]
+    assert "Earlier in this chat" in messages[0]["content"]
+    assert "question 0 → Answer 0." in messages[0]["content"]
+    assert [message["content"] for message in messages[1:]] == ["question 1"]
+    fake_ollama.reply("low: a plain request").reply("answer 2")
+    talk.reply(channel, Message("2", "question 2"))
+    assert "Earlier in this chat" not in system_of(fake_ollama.calls[-1])
     assert fake_ollama.calls[-1]["think"] is None and fake_ollama.calls[-1]["options"]["num_predict"] == 1024
     from tinkerkit.model import OllamaError
 
@@ -1811,7 +1937,10 @@ def test_a_named_command_taking_words_gets_a_second_call(measured_model, fake_ol
     assert [message["content"] for message in fake_ollama.calls[-1]["messages"][1:]] == [
         "also handle negatives"
     ]
-    assert talk.said[("rec", "1")][-1]["content"] == "/amend handle negatives"
+    Scratchpad.write(chatted_episode(0))
+    fake_ollama.reply("low: a plain request").reply("`/amend`").reply("/amend handle zero")
+    talk.reply(Recorder(), Message("1", "and zero"), state)
+    assert all("question 0 → Answer 0." in system_of(call) for call in fake_ollama.calls[-2:])
 
 
 @pytest.mark.spec("CNV-18")
@@ -1889,6 +2018,49 @@ def test_each_chat_request_writes_one_episode(desk, monkeypatch):
     )
 
 
+@pytest.mark.spec("CNV-24", "REM-12")
+def test_fresh_asks_the_model_again_what_the_chat_last_asked(desk, monkeypatch):
+    desk, channel, _ = desk
+    asked = []
+    chat = chatted(desk, channel, monkeypatch, asked)
+    chat("first answer", lambda last: "first answer" in last)
+    wait_until(lambda: len(Scratchpad.fresh()) == 1)
+    remembered_answer("do it for me", "Done from memory.")
+    replies = ["low: a plain request", "fresh answer"]
+    monkeypatch.setattr(
+        Models, "quick_reply", staticmethod(lambda messages, *rest, **options: replies.pop(0))
+    )
+    say(desk, channel, "/fresh")
+    wait_until(lambda: "fresh answer" in "".join(channel.texts()[-1:]))
+    assert all("Done from memory." not in text for text in channel.texts())
+    wait_until(lambda: len(Scratchpad.fresh()) == 2)
+    episodes = sorted(Scratchpad.fresh(), key=lambda episode: int(episode["id"][1:]))
+    assert [episode["message"] for episode in episodes] == ["do it for me", "do it for me"]
+    assert episodes[-1]["reply"] == "fresh answer"
+
+
+@pytest.mark.spec("CNV-24")
+def test_only_a_reply_from_memory_offers_a_fresh_answer(desk, monkeypatch):
+    desk, channel, _ = desk
+    chat = chatted(desk, channel, monkeypatch, [])
+    chat("first answer", lambda last: "first answer" in last)
+    assert [entry for entry in channel.log if entry[0] == "fresh"] == []
+    remembered_answer("do it for me", "Done from memory.")
+    say(desk, channel, "do it for me")
+    wait_until(lambda: any(entry[0] == "fresh" for entry in channel.log))
+    [(_, chat_id, shown, _)] = [entry for entry in channel.log if entry[0] == "fresh"]
+    assert chat_id == "1" and shown == channel.newest["1"]
+    assert "Done from memory." in channel.texts()[-1]
+
+
+@pytest.mark.spec("CNV-24")
+def test_fresh_with_no_question_yet_says_so(desk, monkeypatch):
+    desk, channel, _ = desk
+    chatted(desk, channel, monkeypatch, [])
+    say(desk, channel, "/fresh")
+    assert channel.texts()[-1] == "❓ **No question yet** to ask again."
+
+
 @pytest.mark.spec("CNV-12", "CNV-18")
 def test_a_command_asked_in_words_is_answered_in_words(desk, monkeypatch):
     desk, channel, _ = desk
@@ -1951,6 +2123,16 @@ def test_a_chat_reply_asks_at_its_messages_level(measured_model, fake_ollama, mo
     fake_ollama.reply("Look at the loop.")
     text = Talk("cmds").reply(Recorder(), Message("1", "why does this function fail with a bug"))
     assert text == "Look at the loop." and [call["think"] for call in fake_ollama.calls] == ["high"]
+
+
+@pytest.mark.spec("RVW-1")
+def test_a_chat_reply_review_gets_the_thread_before_the_message(measured_model, fake_ollama):
+    Scratchpad.write(chatted_episode(0))
+    fake_ollama.reply("low: a plain request").reply("answer 1")
+    Talk("cmds").reply(Recorder(), Message("1", "question 1"))
+    reviewed = fake_ollama.calls[0]["messages"][1]["content"]
+    assert reviewed.index("question 0 → Answer 0. More.") < reviewed.index("question 1")
+    assert reviewed.endswith("\n\nquestion 1")
 
 
 def keep_job(home_store, number, pid, progress, **job):

@@ -13,9 +13,10 @@ from .jobs import Jobs
 from .messages import say
 from .model import Models, OllamaError
 from .prompts import Prompts, Reply
-from .remembering import Memories, Portrait, Scratchpad, counted, recall_text, stamp
+from .remembering import Memories, Portrait, Scratchpad, counted, lasts_found, recall_text, stamp
 from .retrieval import Embeddings
 from .settings import (
+    ANSWER_LASTS_DAYS,
     DREAM_BATCH_EPISODES,
     DREAM_FORGET_DAYS,
     DREAM_KEEP_STRENGTH,
@@ -80,9 +81,40 @@ class Dream:
         ids = {episode["id"] for episode in batch}
         for name, change in CHANGE_OF.items():
             for item in listed(reply.get(name)):
-                if cited(item.get("sources"), ids):
+                if cited(item.get("sources"), ids) and not answer_touched(name, item):
                     self.logged("consolidate", name, change(self.memories).made(item, item["sources"], now))
-        Scratchpad.dreamt(ids, now)
+        self.answers(batch, reply, now)
+        Scratchpad.dreamt(ids, now, self.gists(reply, ids))
+
+    def answers(self, batch, reply, now):
+        questions = {episode["id"]: episode for episode in answered_in_words(batch)}
+        for episode_id, lasts in mapped(reply.get("lasts")).items():
+            episode = questions.get(episode_id)
+            if episode and lasts_found("answer", lasts):
+                self.logged("consolidate", *self.answered(episode, lasts, now))
+
+    def answered(self, episode, lasts, now):
+        same = self.memories.same_answer(episode["message"])
+        if not same:
+            return "add", self.memories.add(
+                "answer", episode["message"], episode["reply"], [episode["id"]], now, lasts
+            )
+        return "update", self.memories.update(
+            same["id"],
+            {
+                "text": episode["reply"],
+                "lasts": lasts,
+                "sources": merged(same["sources"], [episode["id"]]),
+                "last_seen": stamp(now),
+            },
+        )
+
+    def gists(self, reply, ids):
+        return {
+            episode_id: gist
+            for episode_id, gist in mapped(reply.get("gists")).items()
+            if episode_id in ids and isinstance(gist, str) and gist
+        }
 
     def batch_text(self, batch):
         living = self.memories.living()
@@ -90,12 +122,18 @@ class Dream:
             " ".join(recall_text(episode) for episode in batch), [recall_text(memory) for memory in living]
         )
         return json.dumps(
-            {"episodes": batch, "memories": shown([living[index] for index in related])}, ensure_ascii=False
+            {
+                "episodes": batch,
+                "questions": [episode["id"] for episode in answered_in_words(batch)],
+                "memories": shown([living[index] for index in related]),
+            },
+            ensure_ascii=False,
         )
 
     def revise(self, now=None):
         changed = self.changed_in_dream()
-        for group in self.similar_groups(self.memories.living()):
+        revisable = [memory for memory in self.memories.living() if memory["kind"] != "answer"]
+        for group in self.similar_groups(revisable):
             if len(group) > 1 and any(memory["id"] in changed for memory in group):
                 self.revised(group, now)
 
@@ -144,8 +182,10 @@ class Dream:
         kind, gist, text = item.get("kind"), item.get("gist"), item.get("text")
         if not all(isinstance(value, str) and value for value in (kind, gist, text)):
             return None
+        if not lasts_found(kind, item.get("lasts")):
+            return None
         sources = list(dict.fromkeys(source for memory in merged for source in memory["sources"]))
-        memory = self.memories.add(kind, gist, text, sources, now)
+        memory = self.memories.add(kind, gist, text, sources, now, item.get("lasts"))
         memory = self.memories.update(
             memory["id"],
             {
@@ -164,6 +204,8 @@ class Dream:
         for memory in self.memories.living():
             if faded(memory, oldest):
                 self.logged("decay", "retire", self.memories.retire(memory["id"], "faded"))
+            elif expired(memory, now):
+                self.logged("decay", "retire", self.memories.retire(memory["id"], "expired"))
         Scratchpad.prune(now)
 
     def portrait(self, now=None):
@@ -280,9 +322,13 @@ class Add(Change):
         kind, gist, text = item.get("kind"), item.get("gist"), item.get("text")
         if not all(isinstance(value, str) and value for value in (kind, gist, text)):
             return None
-        if kind not in Memories.KINDS or not tool_found(kind, item):
+        if (
+            kind not in Memories.KINDS
+            or not tool_found(kind, item)
+            or not lasts_found(kind, item.get("lasts"))
+        ):
             return None
-        return self.memories.add(kind, gist, text, sources, now)
+        return self.memories.add(kind, gist, text, sources, now, item.get("lasts"))
 
 
 class Update(Change):
@@ -355,6 +401,33 @@ def faded(memory, oldest):
     return datetime.datetime.fromisoformat(newest) < oldest and memory["strength"] < DREAM_KEEP_STRENGTH
 
 
+def expired(memory, now):
+    days = ANSWER_LASTS_DAYS.get(memory.get("lasts")) if memory["kind"] == "answer" else None
+    if days is None:
+        return False
+    return datetime.datetime.fromisoformat(memory["last_seen"]) + datetime.timedelta(days=days) < now
+
+
+def answer_touched(name, item):
+    if name == "add":
+        return item.get("kind") == "answer"
+    if name in ("update", "retire") and "id" in item:
+        target = Home.store().get(Memories.MEMORIES, item["id"])
+        return bool(target) and target["kind"] == "answer"
+    return False
+
+
+def answered_in_words(batch):
+    return [
+        episode
+        for episode in batch
+        if "message" in episode
+        and "reply" in episode
+        and "commands" not in episode
+        and episode.get("status") != "remembered"
+    ]
+
+
 def cited(sources, ids):
     if not isinstance(sources, list) or not sources:
         return False
@@ -370,6 +443,10 @@ def tool_found(kind, item):
 
 def listed(value):
     return [item for item in value if isinstance(item, dict)] if isinstance(value, list) else []
+
+
+def mapped(value):
+    return value if isinstance(value, dict) else {}
 
 
 CHANGE_OF = {"add": Add, "update": Update, "confirm": Confirm, "retire": Retire}

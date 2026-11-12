@@ -78,6 +78,139 @@ def test_consolidate_adds_a_memory_citing_the_batch_and_dreams_it(home_store, mo
     assert asked[0][0]["content"] == Prompts.DREAM_CONSOLIDATE_SYSTEM
     assert first["id"] in asked[0][1]["content"]
     assert Scratchpad.fresh() == []
+    assert "gist" not in Home.store().get(Scratchpad.EPISODES, first["id"])
+
+
+def question(message="what is the capital of France?", reply="Paris.", **changes):
+    return Scratchpad.write(
+        dict({"chat": "telegram:1", "message": message, "reply": reply, "status": "answered"}, **changes),
+        EARLIER,
+    )
+
+
+@pytest.mark.spec("DRM-3")
+def test_consolidate_names_the_questions_and_adds_an_answer_with_its_lasts(home_store, monkeypatch):
+    asked = question()
+    asked_model = replying(monkeypatch, {"lasts": {asked["id"]: "month"}})
+    dream().consolidate(NOW)
+    memory = memories().living()[0]
+    assert (memory["kind"], memory["gist"], memory["text"], memory["lasts"], memory["sources"]) == (
+        "answer",
+        "what is the capital of France?",
+        "Paris.",
+        "month",
+        [asked["id"]],
+    )
+    assert json.loads(asked_model[0][1]["content"])["questions"] == [asked["id"]]
+
+
+@pytest.mark.spec("DRM-3")
+def test_consolidate_makes_no_answer_from_commands_memory_never_or_the_model(home_store, monkeypatch):
+    plain = question()
+    ran = question("free space?", "9 GB.", commands=[])
+    recalled = question("my shell?", "zsh.", status="remembered")
+    changing = question("what time is it?", "12:00.")
+    asked_model = replying(
+        monkeypatch,
+        {
+            "add": [
+                {
+                    "kind": "answer",
+                    "gist": "capital?",
+                    "text": "Paris.",
+                    "sources": [plain["id"]],
+                    "lasts": "always",
+                }
+            ],
+            "lasts": {
+                ran["id"]: "always",
+                recalled["id"]: "always",
+                changing["id"]: "never",
+                plain["id"]: "week",
+                "e99": "always",
+            },
+        },
+    )
+    dream().consolidate(NOW)
+    assert memories().living() == []
+    assert json.loads(asked_model[0][1]["content"])["questions"] == [plain["id"], changing["id"]]
+
+
+@pytest.mark.spec("DRM-3")
+def test_consolidate_leaves_an_answer_the_model_updates_or_retires(home_store, monkeypatch):
+    updated = memories().add("answer", "what is the capital of France?", "Paris.", ["e0"], EARLIER, "always")
+    retired = memories().add("answer", "how high is Everest?", "8,849 m.", ["e0"], EARLIER, "always")
+    asked = episode()
+    replying(
+        monkeypatch,
+        {
+            "update": [{"id": updated["id"], "text": "Lyon.", "sources": [asked["id"]]}],
+            "retire": [{"id": retired["id"], "why": "stale", "sources": [asked["id"]]}],
+        },
+    )
+    dream().consolidate(NOW)
+    assert [(memory["id"], memory["text"]) for memory in memories().living()] == [
+        (updated["id"], "Paris."),
+        (retired["id"], "8,849 m."),
+    ]
+
+
+@pytest.mark.spec("DRM-3")
+def test_consolidate_updates_the_living_answer_to_the_same_message(home_store, monkeypatch):
+    kept = memories().add("answer", "what is the capital of France?", "Lyon.", ["e0"], EARLIER, "day")
+    asked = question()
+    replying(monkeypatch, {"lasts": {asked["id"]: "always"}})
+    dream().consolidate(NOW)
+    [memory] = memories().living()
+    assert (memory["id"], memory["text"], memory["lasts"], memory["sources"], memory["last_seen"]) == (
+        kept["id"],
+        "Paris.",
+        "always",
+        ["e0", asked["id"]],
+        NOW.isoformat(timespec="seconds"),
+    )
+
+
+@pytest.mark.spec("REM-3")
+def test_an_answer_memory_needs_how_long_it_lasts():
+    with pytest.raises(ValueError):
+        memories().add("answer", "what is 2+2?", "4.", ["e1"], NOW)
+
+
+@pytest.mark.spec("DRM-3")
+def test_consolidate_stores_the_gist_of_each_batch_episode(home_store, monkeypatch):
+    first = episode()
+    second = episode(message="read the log")
+    replying(
+        monkeypatch,
+        {
+            "gists": {
+                first["id"]: "listed 12 files in ~/notes",
+                second["id"]: "",
+                "e99": "not in the batch",
+            }
+        },
+    )
+    dream().consolidate(NOW)
+    assert Home.store().get(Scratchpad.EPISODES, first["id"])["gist"] == "listed 12 files in ~/notes"
+    assert "gist" not in Home.store().get(Scratchpad.EPISODES, second["id"])
+    assert Home.store().get(Scratchpad.EPISODES, "e99") is None
+
+
+@pytest.mark.spec("DRM-3")
+def test_consolidate_drops_gists_and_lasts_not_given_as_maps_of_strings(home_store, monkeypatch):
+    first = episode()
+    asked = question()
+    replying(
+        monkeypatch,
+        {
+            "gists": [{"id": first["id"], "gist": "listed 12 files"}],
+            "lasts": {asked["id"]: ["always"]},
+        },
+    )
+    dream().consolidate(NOW)
+    assert "gist" not in Home.store().get(Scratchpad.EPISODES, first["id"])
+    assert memories().living() == []
 
 
 @pytest.mark.spec("DRM-3")
@@ -334,6 +467,18 @@ def test_revise_merges_a_changed_group_into_one_memory(home_store, monkeypatch):
 
 
 @pytest.mark.spec("DRM-4")
+def test_revise_keeps_similar_answers_apart(home_store, monkeypatch):
+    feet = memories().add("answer", "how high is Everest?", "29,032 feet.", ["e1"], EARLIER, "always")
+    km = memories().add("answer", "how high is Everest?", "8.8 km.", ["e2"], EARLIER, "always")
+    asked = replying(monkeypatch)
+    revising = dream()
+    revising.changed = [km["id"]]
+    revising.revise(NOW)
+    assert asked == []
+    assert [memory["id"] for memory in memories().living()] == [feet["id"], km["id"]]
+
+
+@pytest.mark.spec("DRM-4")
 def test_revise_leaves_a_group_with_nothing_changed(home_store, monkeypatch):
     remembered("likes short replies", "Wants it brief.")
     remembered("likes short replies", "Wants it brief always.")
@@ -398,6 +543,22 @@ def test_decay_retires_a_faded_memory_and_prunes_old_episodes(home_store, monkey
     assert list(Home.store().items(Scratchpad.EPISODES)) == [young["id"]]
     assert dream_events() == [{"step": "decay", "change": "retire", "id": faded["id"], "gist": "old"}]
     assert asked == []
+
+
+@pytest.mark.spec("DRM-5")
+def test_decay_retires_answers_once_they_expire(home_store):
+    def answer(lasts, seen):
+        memory = memories().add("answer", f"{lasts} question?", "Answer.", ["e1"], seen, lasts)
+        return memories().update(memory["id"], {"strength": 3})
+
+    stale_day = answer("day", NOW - datetime.timedelta(days=2))
+    today = answer("day", NOW - datetime.timedelta(hours=2))
+    stale_month = answer("month", NOW - datetime.timedelta(days=31))
+    this_month = answer("month", NOW - datetime.timedelta(days=20))
+    always = answer("always", LONG_AGO)
+    dream().decay(NOW)
+    assert [stored(memory["id"])["retired"] for memory in (stale_day, stale_month)] == ["expired", "expired"]
+    assert [memory["id"] for memory in memories().living()] == [today["id"], this_month["id"], always["id"]]
 
 
 @pytest.mark.spec("DRM-6")

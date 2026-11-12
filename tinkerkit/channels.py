@@ -13,6 +13,8 @@ lazy import urllib.parse
 lazy from pathlib import Path
 
 from .conversation import (
+    CHAT_FRESH,
+    FRESH_ANSWER_BUTTON,
     Channel,
     ChannelError,
     Desk,
@@ -280,6 +282,7 @@ class TelegramChannel(Channel):
         self.family = None
         self.live_message_ids = {}
         self.last_words_by_chat = {}
+        self.fresh_offered = set()
         self.state = "connecting…"
 
     def handle(self):
@@ -293,6 +296,8 @@ class TelegramChannel(Channel):
         messages = []
         for update in updates:
             self.offset = update["update_id"] + 1
+            if update.get("callback_query"):
+                messages.extend(self.tapped(update["callback_query"]))
             message = update.get("message") or {}
             if self.book_sent(message):
                 message = self.book_in(message)
@@ -302,6 +307,16 @@ class TelegramChannel(Channel):
             if message.get("message_id"):
                 self.seen(str(message["chat"]["id"]), message["message_id"])
         return messages
+
+    def tapped(self, query):
+        try:
+            self.call("answerCallbackQuery", callback_query_id=query["id"])
+        except OSError, ChannelError:
+            pass
+        message = query.get("message") or {}
+        if query.get("data") != CHAT_FRESH or not message.get("chat"):
+            return []
+        return [self.message_of({"chat": message["chat"], "text": CHAT_FRESH, "from": query.get("from")})]
 
     @staticmethod
     def nothing_while_the_network_is_gone(timeout):
@@ -368,6 +383,21 @@ class TelegramChannel(Channel):
         except OSError, ChannelError:
             pass
 
+    def offer_fresh(self, chat, shown):
+        self.fresh_offered.add((str(chat), shown))
+        try:
+            self.call("editMessageReplyMarkup", chat_id=chat, message_id=shown, **self.fresh_button())
+        except OSError, ChannelError:
+            pass
+
+    @staticmethod
+    def fresh_button():
+        button = {"text": FRESH_ANSWER_BUTTON, "callback_data": CHAT_FRESH}
+        return {"reply_markup": json.dumps({"inline_keyboard": [[button]]})}
+
+    def kept_buttons(self, chat, sent):
+        return self.fresh_button() if (str(chat), sent) in self.fresh_offered else {}
+
     def ask_for(self, chat, question, hint):
         reply = {"force_reply": True, "input_field_placeholder": hint[:TELEGRAM_MAX_PLACEHOLDER_CHARS]}
         return self.send(chat, question, reply_markup=json.dumps(reply))
@@ -388,16 +418,24 @@ class TelegramChannel(Channel):
     def edit(self, chat, sent, text):
         if sent is None:
             return self.send(chat, text)
+        buttons = self.kept_buttons(chat, sent)
         try:
-            self.post("editMessageText", chat, text, message_id=sent)
+            self.post("editMessageText", chat, text, message_id=sent, **buttons)
         except ChannelError as exc:
             if not self.refused_as_unchanged(exc):
                 self.delete(chat, sent)
-                return self.send(chat, text)
+                return self.resent(chat, sent, text, buttons)
         except OSError:
             return sent
         Ledger.touched(self.name, str(chat), sent)
         return sent
+
+    def resent(self, chat, sent, text, buttons):
+        again = self.send(chat, text, **buttons)
+        if buttons:
+            self.fresh_offered.discard((str(chat), sent))
+            self.fresh_offered.add((str(chat), again))
+        return again
 
     @staticmethod
     def refused_as_unchanged(exc):
