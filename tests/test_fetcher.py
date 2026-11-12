@@ -139,6 +139,8 @@ def test_text_is_decoded_by_its_charset_and_a_page_over_max_bytes_fails(site):
     )
     for big in got[3:]:
         assert not big.ok and big.error == "larger than 1000 bytes" and big.data == b"" and big.text == ""
+    whole = fetcher(max_bytes=None).fetch_all([f"{web.base}/{path}" for path in ("big", "big-zipped")])
+    assert [page.data for page in whole] == [b"x" * 5000, b"x" * 5000]
 
 
 @pytest.mark.spec("FET-1")

@@ -95,6 +95,118 @@ def test_quick_calls_use_the_measured_model(measured_model, fake_ollama, tinker_
 
 
 @pytest.mark.spec("MOD-23")
+def test_quick_reply_sends_images_as_they_are(measured_model, fake_ollama, tinker_home):
+    seen = [{"role": "user", "content": "what is this?", "images": ["aGk=", "Ynll"]}]
+    fake_ollama.reply("a cat")
+    assert Models.quick_reply(seen, 7) == "a cat"
+    assert fake_ollama.calls[-1]["messages"] == seen
+    assert Ollama.chat_payload(MODEL, seen, "5m", {}, None)["messages"] == seen
+
+
+@pytest.mark.spec("MOD-23")
+@pytest.mark.parametrize(
+    ("capabilities", "senses"),
+    [
+        (["completion", "vision", "audio"], ("vision", "audio")),
+        (["completion", "vision"], ("vision",)),
+        (["audio", "tools"], ("audio",)),
+        (["completion", "tools"], ()),
+        (None, ()),
+    ],
+)
+def test_senses_come_from_the_quick_models_capabilities(
+    capabilities, senses, measured_model, fake_ollama, tinker_home
+):
+    fake_ollama.show(MODEL, None if capabilities is None else {"capabilities": capabilities})
+    assert Models.senses() == senses
+
+
+@pytest.mark.spec("MOD-23")
+def test_no_quick_model_has_no_senses(fake_ollama, tinker_home):
+    fake_ollama.show(MODEL, {"capabilities": ["vision", "audio"]})
+    Config.save(**{"model": None})
+    assert Models.senses() == ()
+    assert fake_ollama.shown == []
+
+
+@pytest.mark.spec("MOD-30")
+def test_hearing_is_the_quick_model_when_it_hears(measured_model, fake_ollama, tinker_home):
+    fake_ollama.show("a-ear", {"capabilities": ["audio"]})
+    fake_ollama.show(MODEL, {"capabilities": ["completion", "audio"]})
+    assert Models.hearing() == MODEL
+
+
+@pytest.mark.spec("MOD-30")
+def test_hearing_is_else_the_first_installed_model_that_hears(measured_model, fake_ollama, tinker_home):
+    fake_ollama.show(MODEL, {"capabilities": ["completion"]})
+    fake_ollama.show("c-ear", {"capabilities": ["audio"]})
+    fake_ollama.show("a-mute", {"capabilities": ["completion"]})
+    fake_ollama.show("b-ear", {"capabilities": ["completion", "audio"]})
+    assert Models.hearing() == "b-ear"
+    Config.save(**{"model": None})
+    assert Models.hearing() == "b-ear"
+
+
+@pytest.mark.spec("MOD-30")
+def test_no_model_that_hears_gives_no_hearing(measured_model, fake_ollama, tinker_home):
+    assert Models.hearing() is None
+    fake_ollama.show(MODEL, {"capabilities": ["completion"]}).show("other", None)
+    assert Models.hearing() is None
+
+
+@pytest.mark.spec("MOD-30")
+def test_transcript_posts_the_recording_to_the_hearing_model(
+    measured_model, fake_ollama, tinker_home, monkeypatch
+):
+    fake_ollama.show(MODEL, {"capabilities": ["audio"]})
+    sent = []
+
+    def urlopen(request, timeout):
+        sent.append((request, timeout))
+        return Body(b"  hello there \n")
+
+    monkeypatch.setattr(urllib.request, "urlopen", urlopen)
+    assert Models.transcript(b"RIFFwav-bytes") == "hello there"
+    request, timeout = sent[0]
+    assert request.full_url == Config.ollama_url() + "/v1/audio/transcriptions"
+    assert request.get_method() == "POST" and timeout == model_module.TRANSCRIBE_TIMEOUT
+    boundary = request.get_header("Content-type").split("boundary=")[1]
+    parts = request.data.split(b"--" + boundary.encode())
+    assert any(b'name="file"' in part and b"RIFFwav-bytes" in part for part in parts)
+    assert any(b'name="model"' in part and part.rstrip().endswith(MODEL.encode()) for part in parts)
+    assert any(b'name="response_format"' in part and part.rstrip().endswith(b"text") for part in parts)
+
+
+@pytest.mark.spec("MOD-30")
+@pytest.mark.parametrize(
+    ("failure", "message"),
+    [
+        (http_error(500, b"no audio"), "HTTP 500: no audio"),
+        (urllib.error.URLError("refused"), "Could not reach Ollama"),
+        (TimeoutError("slow"), "stopped responding"),
+    ],
+)
+def test_a_failed_transcript_is_an_ollama_error(
+    failure, message, measured_model, fake_ollama, tinker_home, monkeypatch
+):
+    fake_ollama.show(MODEL, {"capabilities": ["audio"]})
+
+    def urlopen(request, timeout):
+        raise failure
+
+    monkeypatch.setattr(urllib.request, "urlopen", urlopen)
+    with pytest.raises(OllamaError, match=message):
+        Models.transcript(b"wav")
+
+
+@pytest.mark.spec("MOD-30")
+def test_transcript_without_a_hearing_model_is_an_ollama_error(measured_model, fake_ollama, tinker_home):
+    fake_ollama.show(MODEL, {"capabilities": ["completion"]})
+    with pytest.raises(OllamaError):
+        Models.transcript(b"wav")
+
+
+@pytest.mark.spec("MOD-23")
 def test_a_quick_reply_thinks_at_a_given_level_as_the_model_takes_it(
     measured_model, fake_ollama, tinker_home
 ):
@@ -1320,3 +1432,84 @@ def test_think_levels_keep_a_model_without_thinking_as_empty(fake_ollama, tinker
 def test_think_levels_do_not_keep_a_failed_read(fake_ollama, tinker_home):
     assert ThinkLevels.values("gone") == [] and ThinkLevels.values("gone") == []
     assert fake_ollama.shown == ["gone", "gone"]
+
+
+GIB = 2**30
+
+
+@pytest.mark.spec("MOD-30")
+@pytest.mark.parametrize(
+    "memory, offered",
+    [
+        (8 * GIB, "lfm3-audio:2b"),
+        (16 * GIB, "lfm3-audio:2b"),
+        (24 * GIB, "gemma4:e2b"),
+        (64 * GIB, "gemma4:e4b"),
+        (4 * GIB, "lfm3-audio:2b"),
+        (None, "lfm3-audio:2b"),
+    ],
+)
+def test_the_audio_offer_is_the_largest_model_within_a_quarter_of_memory(monkeypatch, memory, offered):
+    monkeypatch.setattr(Calibrator, "total_memory", staticmethod(lambda: memory))
+    assert Models.audio_offer() == offered
+
+
+@pytest.mark.spec("MOD-30")
+def test_the_audio_offer_asks_with_the_download_size():
+    assert Models.audio_question("lfm3-audio:2b") == (
+        "🎧 To hear it I can get lfm3-audio:2b (1.7 GB), which fits this machine. Get it?"
+    )
+
+
+def pull_lines(*lines):
+    return Body(b"".join(json.dumps(line).encode() + b"\n" for line in lines))
+
+
+@pytest.mark.spec("MOD-30")
+def test_a_pull_streams_the_model_and_shows_how_much_is_downloaded(monkeypatch):
+    sent = []
+    heard = heard_of("live")
+
+    def urlopen(request, timeout):
+        sent.append((request.full_url, json.loads(request.data)))
+        return pull_lines(
+            {"status": "pulling manifest"},
+            {"status": "pulling abc", "total": 1_700_000_000, "completed": 800_000_000},
+            {"status": "success"},
+        )
+
+    monkeypatch.setattr(urllib.request, "urlopen", urlopen)
+    Ollama.pull("lfm3-audio:2b")
+    assert sent[0][0].endswith("/api/pull")
+    assert sent[0][1] == {"model": "lfm3-audio:2b", "stream": True}
+    assert ("live", "Getting lfm3-audio:2b: 0.8 / 1.7 GB") in heard
+
+
+@pytest.mark.spec("MOD-30")
+def test_a_pull_error_line_is_an_ollama_error(monkeypatch):
+    monkeypatch.setattr(
+        urllib.request,
+        "urlopen",
+        lambda request, timeout: pull_lines({"error": "pull model manifest: not found"}),
+    )
+    with pytest.raises(OllamaError, match="not found"):
+        Ollama.pull("nope")
+
+
+@pytest.mark.spec("MOD-30")
+def test_a_pull_that_never_succeeds_is_an_ollama_error(monkeypatch):
+    monkeypatch.setattr(
+        urllib.request, "urlopen", lambda request, timeout: pull_lines({"status": "pulling abc"})
+    )
+    with pytest.raises(OllamaError):
+        Ollama.pull("cut-off")
+
+
+@pytest.mark.spec("MOD-30")
+def test_a_pull_that_cannot_reach_ollama_is_an_ollama_error(monkeypatch):
+    def fail(request, timeout):
+        raise urllib.error.URLError("refused")
+
+    monkeypatch.setattr(urllib.request, "urlopen", fail)
+    with pytest.raises(OllamaError, match="Could not reach Ollama"):
+        Ollama.pull("lfm3-audio:2b")

@@ -214,11 +214,11 @@ first, then names holding it):
 › /restart [--yes]  build this folder's task again from scratch (asks first)
   /rename [@PROJECT] NAME  rename the folder of a project whose plan waits
   /research TOPIC  the web researched in depth, its facts checked across sites, and kept: slow
-  /read FILE | URL  store a book, an article or a document, then learn from every chapter
+  /read FILE | URL  keep a book, an article or a document on the reading list
 ```
 
-Up and down pick one, Tab fills it in, Enter sends a command that takes no words (or fills one that does),
-and Esc closes the list. A command's next word is offered the same way:
+Up and down pick one, Tab fills it in, Enter sends a command that takes no words or is fully typed (or fills
+one that does take words), and Esc closes the list. A command's next word is offered the same way:
 
 ```
 › /model r
@@ -450,34 +450,37 @@ In zsh, a `?` in a command is a wildcard, so leave it out or quote the question.
 
 ### Read 📚
 
-Give Tinker a book, an article or a document, and it learns what it teaches. Its text is stored first, numbered on
-your reading list (#1, #2 ...), so you never send it twice. Then Tinker reads every chapter, the core ones first
-(the contents, the foreword and the index's most mentioned terms tell which). Each chapter is saved once read, so
-you can ask about it while Tinker goes on.
+Give Tinker a book, an article, a document, a picture or a recording, and it keeps it on your reading list,
+numbered (#1, #2 ...), so you never send it twice. Keeping learns nothing yet: ask about it in a chat, or have
+Tinker learn from every chapter, the core ones first (the contents, the foreword and the index's most mentioned
+terms tell which). Each chapter is saved once learned, so you can ask about it while Tinker goes on.
 
 ```sh
-tinker read ~/Books/clean-architecture.epub          # a file: EPUB, Markdown or plain text
+tinker read ~/Books/clean-architecture.epub          # a file: EPUB, DOCX, PDF, Markdown, text, image or audio
 tinker read https://example.org/files/my-book.epub   # a link that downloads it
-tinker read list [PAGE]                              # the reading list, a page at a time: how much of each is read
+tinker read list [PAGE]                              # the reading list, a page at a time: kind, size, ✓ when learned
 tinker read show #1                                  # one reading: each chapter, read or not, and what it taught
-tinker read #1                                       # go on with the chapters not read yet
-tinker read #1 "the chapter on retries: when to give up"   # look again, with that in mind
-tinker clear read #1                                 # forget it: its text and what was learned from it
+tinker read rename #1 Clean Architecture             # give it a new title
+tinker read #1 learn                                 # learn from the chapters not read yet
+tinker read #1 learn "the chapter on retries: when to give up"   # look again, with that in mind
+tinker read forget #1                                # delete it: its file and what was learned from it
 ```
 
-In a chat, just attach the file: Tinker stores it and starts reading. Telegram lets a bot download files of up to
-20 MB, so send a link for a bigger one. A share link (Google Drive, Dropbox, iCloud) must be its download link
-(Dropbox's ends in `?dl=1`).
+Nothing is installed for any format. A PDF's text is read directly; a scanned one is read page by page by a
+model that sees, as is a picture. A recording is turned into text by a model that hears, after `ffmpeg`
+converts it (Tinker tells you the install command when it is missing, and offers a model that hears when you
+have none). A file it cannot read is kept anyway, and Tinker says why.
 
-A PDF is refused: convert it to EPUB first, which keeps its chapters. Calibre does it:
+In a chat, keeping a file takes you inside it: every message is answered from it, until `/leave`, entering
+another, or deleting it. The prompt shows `📕 #1 Title ›` while inside, and on Telegram each answer has a
+"📕 Leave #1" button. `/read #1` goes back inside. On a terminal, drop a file to keep it; a path followed by a
+question keeps it and answers. On Telegram, send a document, photo, voice note or audio, with the question as its
+caption. Telegram lets a bot download files of up to 20 MB, so send a link for a bigger one. A share link (Google
+Drive, Dropbox, iCloud) must be its download link (Dropbox's ends in `?dl=1`).
 
-```sh
-ebook-convert book.pdf book.epub
-```
-
-Reading is a [job](#jobs-) with its own job number (`tinker jobs` shows it, apart from the reading number): it
+Learning is a [job](#jobs-) with its own job number (`tinker jobs` shows it, apart from the reading number): it
 gives way to you like any job, `tinker stop #J` stops it with everything read so far kept, and `tinker resume #J`
-(or `tinker read #N`) goes on with the unread chapters, downloading nothing again.
+(or `tinker read #N learn`) goes on with the unread chapters, downloading nothing again.
 
 Ask about what it read, and correct it when it is wrong. A correction is checked against the text, and the
 corrected fact replaces the wrong one:
@@ -558,6 +561,9 @@ tinker jobs              # the running one, then the queued ones in queue order,
 tinker jobs queued       # only the queued ones (or running, stopped, finished, archived)
 tinker jobs finished 2   # the second page
 ```
+
+Every numbered list (jobs, readings, the chat history) names the command for its next page. In a chat, an empty
+line right after a page's dim `↵ next page` sends it, and on Telegram a "Next page ›" button does.
 
 See the queue, first job first, and take jobs out of it:
 

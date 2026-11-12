@@ -1,208 +1,51 @@
-import io
+import base64
+import hashlib
 import json
-import zipfile
+import re
+import shutil
+import subprocess
+import sys
+from pathlib import Path
 
 import pytest
-from conftest import MODEL
+from conftest import FOREWORD, MARKDOWN, MODEL, NAMING, TESTING
+from test_formats import pdf
 
 from tinkerkit import cli, commands, reading, settings
 from tinkerkit.cli import Cli, Commands
+from tinkerkit.formats import opened
 from tinkerkit.jobs import is_job
 from tinkerkit.knowledge import Library
-from tinkerkit.model import Ollama
+from tinkerkit.model import Models, Ollama, OllamaError
 from tinkerkit.principles import Principles
 from tinkerkit.project import Tracker
 from tinkerkit.reading import (
     Reader,
     Readings,
-    book_bytes,
+    Shelf,
+    TooLarge,
+    answered_inside,
     excerpt,
+    heard_again,
     in_order,
     index_terms,
-    kind_of,
-    opened,
+    kept,
     read_phase,
     read_survey,
     show,
     show_list,
-    stored,
+    source_bytes,
 )
 from tinkerkit.settings import READ_KEY_TERMS, READ_MAX_BYTES
-from tinkerkit.web import WebPage
+from tinkerkit.web import WHOLE, WebPage
 
-CONTAINER = (
-    '<?xml version="1.0"?><container xmlns="urn:oasis:names:tc:opendocument:xmlns:container" version="1.0">'
-    '<rootfiles><rootfile full-path="OEBPS/content.opf" media-type="application/oebps-package+xml"/>'
-    "</rootfiles></container>"
-)
-FOREWORD = (
-    "This book teaches how to write small programs that stay easy to change. Its heart is naming and testing."
-)
-NAMING = (
-    "Name each function after what it does, so that its callers read like prose and need no comment at all."
-)
-TESTING = "Write one test for each behaviour before the code, and run every test after each change you make."
-INDEX = "- naming, 3, 7, 12\n- testing, 4–6, 9\n- coupling, 11"
-NAV = (
-    '<html xmlns:epub="http://www.idpf.org/2007/ops"><body>'
-    '<nav epub:type="landmarks"><ol><li><a href="text/cover.xhtml">Cover</a></li></ol></nav>'
-    '<nav epub:type="toc"><ol><li><a href="text/foreword.xhtml">Foreword</a></li>'
-    '<li><a href="text/part1.xhtml">Part I</a><ol><li><a href="text/part1.xhtml#naming">Naming</a></li>'
-    '<li><a href="text/part1.xhtml#testing">Testing</a></li></ol></li>'
-    '<li><a href="text/index.xhtml">Index</a></li></ol></nav></body></html>'
-)
-NCX = (
-    '<?xml version="1.0"?><ncx xmlns="http://www.daisy.org/z3986/2005/ncx/"><navMap>'
-    '<navPoint id="a"><navLabel><text>Foreword</text></navLabel><content src="text/foreword.xhtml"/></navPoint>'
-    '<navPoint id="b"><navLabel><text>Part I</text></navLabel><content src="text/part1.xhtml"/>'
-    '<navPoint id="c"><navLabel><text>Naming</text></navLabel><content src="text/part1.xhtml#naming"/></navPoint>'
-    '<navPoint id="d"><navLabel><text>Testing</text></navLabel><content src="text/part1.xhtml#testing"/></navPoint>'
-    '</navPoint><navPoint id="e"><navLabel><text>Index</text></navLabel><content src="text/index.xhtml"/>'
-    "</navPoint></navMap></ncx>"
-)
-DOCUMENTS = {
-    "cover.xhtml": "<h1>The Craft</h1>",
-    "foreword.xhtml": f"<h1>Foreword</h1><p>{FOREWORD}</p>",
-    "part1.xhtml": "<h1>Part I</h1><p>The basics that every small program needs from its first line.</p>"
-    f"<h2 id='naming'>Naming</h2><p>{NAMING}</p><h2 id='testing'>Testing</h2><p>{TESTING}</p>",
-    "index.xhtml": "<h1>Index</h1><ul>"
-    + "".join(f"<li>{line[2:]}</li>" for line in INDEX.splitlines())
-    + "</ul>",
-}
-
-
-def epub(nav=True):
-    manifest = "".join(
-        f'<item id="d{number}" href="text/{name}" media-type="application/xhtml+xml"/>'
-        for number, name in enumerate(DOCUMENTS)
-    )
-    manifest += (
-        '<item id="nav" href="nav.xhtml" media-type="application/xhtml+xml" properties="nav"/>'
-        if nav
-        else '<item id="ncx" href="toc.ncx" media-type="application/x-dtbncx+xml"/>'
-    )
-    spine = "".join(f'<itemref idref="d{number}"/>' for number in range(len(DOCUMENTS)))
-    opf = (
-        '<?xml version="1.0"?><package xmlns="http://www.idpf.org/2007/opf" version="3.0">'
-        '<metadata xmlns:dc="http://purl.org/dc/elements/1.1/"><dc:title>The Craft of Small Programs</dc:title>'
-        f"<dc:creator>A. Writer</dc:creator></metadata><manifest>{manifest}</manifest>"
-        f"<spine{'' if nav else ' toc="ncx"'}>{spine}</spine></package>"
-    )
-    buffer = io.BytesIO()
-    with zipfile.ZipFile(buffer, "w") as book:
-        book.writestr("mimetype", "application/epub+zip")
-        book.writestr("META-INF/container.xml", CONTAINER)
-        book.writestr("OEBPS/content.opf", opf)
-        book.writestr("OEBPS/nav.xhtml" if nav else "OEBPS/toc.ncx", NAV if nav else NCX)
-        for name, body in DOCUMENTS.items():
-            book.writestr(
-                f"OEBPS/text/{name}",
-                f"<html><head><title>x</title><style>p{{}}</style></head><body>{body}</body></html>",
-            )
-    return buffer.getvalue()
-
-
-MARKDOWN = f"""# The Craft of Small Programs
-
-## Foreword
-
-{FOREWORD}
-
-## Naming
-
-{NAMING}
-
-## Stories
-
-Once a team wrote a very long program, and then another one, and then a third one after that.
-
-## Testing
-
-{TESTING}
-
-## Index
-
-{INDEX}
-"""
-
-
-def titles(book):
-    return [(chapter.title, chapter.kind) for chapter in book.chapters]
-
-
-@pytest.mark.spec("RDG-2")
-def test_a_book_is_read_by_what_its_bytes_hold():
-    assert opened(epub(), "anything.txt").title == "The Craft of Small Programs"
-    assert opened(MARKDOWN.encode(), "craft.md").title == "The Craft of Small Programs"
-    assert opened(b"Some words\n\nand more words.", "my_little-book.txt").title == "my little book"
-    with pytest.raises(SystemExit, match="This is a PDF.*Calibre"):
-        opened(b"%PDF-1.7 ...", "book.epub")
-    with pytest.raises(SystemExit, match="a web page, not something to read.*download link"):
-        opened(b"<!DOCTYPE html><html><body>Sign in</body></html>", "book.epub")
-    with pytest.raises(SystemExit, match="not a book Tinker can read"):
-        opened(b"\x89PNG\r\n\x1a\n\x00\x00", "cover.png")
-    with pytest.raises(SystemExit, match="not an EPUB"):
-        opened(b"PK\x03\x04 broken", "book.epub")
-
-
-@pytest.mark.spec("RDG-3")
-@pytest.mark.parametrize("nav", [True, False], ids=["epub3-nav", "epub2-ncx"])
-def test_an_epub_is_split_where_its_contents_say(nav):
-    book = opened(epub(nav), "book.epub")
-    assert book.author == "A. Writer"
-    assert titles(book) == [
-        ("Foreword", "front"),
-        ("Part I", "body"),
-        ("Naming", "body"),
-        ("Testing", "body"),
-        ("Index", "index"),
-    ]
-    naming = book.chapters[2]
-    assert NAMING in naming.text and TESTING not in naming.text and "p{}" not in naming.text
-
-
-@pytest.mark.spec("RDG-3")
-def test_an_epub_with_no_usable_contents_is_split_at_its_headings(monkeypatch):
-    monkeypatch.setattr(reading.Epub, "contents", lambda self: [])
-    book = opened(epub(), "book.epub")
-    assert [title for title, _ in titles(book)] == ["Foreword", "Part I", "Naming", "Testing", "Index"]
-
-
-@pytest.mark.spec("RDG-4")
-def test_markdown_and_plain_text_are_split_into_chapters():
-    assert titles(opened(MARKDOWN.encode(), "craft.md")) == [
-        ("Foreword", "front"),
-        ("Naming", "body"),
-        ("Stories", "body"),
-        ("Testing", "body"),
-        ("Index", "index"),
-    ]
-    plain = (
-        f"Contents\nChapter 1 Naming\nChapter 2 Testing\n\nChapter 1 Naming\n{NAMING}\n\n"
-        f"Chapter 2 Testing\n{TESTING}"
-    )
-    assert [title for title, _ in titles(opened(plain.encode(), "craft.txt"))] == [
-        "Chapter 1 Naming",
-        "Chapter 2 Testing",
-    ]
-    parts = opened(("A long plain paragraph of words with no heading at all.\n\n" * 800).encode(), "long.txt")
-    assert [chapter.title for chapter in parts.chapters][:2] == ["Part 1", "Part 2"]
+PNG = b"\x89PNG\r\n\x1a\n\x00 whiteboard"
+OGG = b"OggS\x00\x02 a talk"
 
 
 @pytest.mark.spec("RDG-5")
-def test_chapters_have_kinds_and_the_index_names_what_matters():
-    assert [
-        kind_of(title)
-        for title in (
-            "Index",
-            "Table of Contents",
-            "Acknowledgements",
-            "Preface",
-            "Introduction",
-            "3. Naming things",
-        )
-    ] == ["index", "raw", "raw", "front", "front", "body"]
-    assert index_terms(opened(MARKDOWN.encode(), "craft.md")) == [
+def test_the_index_names_what_matters():
+    assert index_terms(opened(MARKDOWN.encode(), "craft.md").book()) == [
         ("naming", 3),
         ("testing", 3),
         ("coupling", 1),
@@ -266,7 +109,7 @@ def prompts(fake_ollama):
 
 @pytest.mark.spec("RDG-6")
 def test_a_source_is_stored_whole_before_anything_is_read(tmp_path, home_store, capsys):
-    assert stored(craft(tmp_path)) == (1, True)
+    assert kept(craft(tmp_path)) == (1, True)
     entry = Readings.get(1)
     assert (entry["title"], entry["source"], entry["topic"], entry["survey"]) == (
         "The Craft of Small Programs",
@@ -282,15 +125,321 @@ def test_a_source_is_stored_whole_before_anything_is_read(tmp_path, home_store, 
         ("Index", "raw"),
     ]
     assert entry["chapters"][1]["text"].endswith(NAMING)
-    assert stored(craft(tmp_path, "same-text.md")) == (1, False)
+    key = hashlib.sha1(MARKDOWN.encode()).hexdigest()[:16]
+    assert (entry["kind"], entry["file"], entry["size"], entry["fingerprint"], entry["learned"]) == (
+        "document",
+        f"{key}.md",
+        len(MARKDOWN.encode()),
+        key,
+        False,
+    )
+    assert settings.Home.reading_file(f"{key}.md").read_text() == MARKDOWN
+    assert kept(craft(tmp_path, "same-text.md")) == (1, False)
     assert "Already on the reading list as #1" in capsys.readouterr().out
-    assert stored(second_edition(tmp_path)) == (2, True)
+    assert kept(second_edition(tmp_path)) == (2, True)
     assert list(Readings.all()) == [2, 1]
 
 
+@pytest.mark.spec("CHN-9")
+def test_a_file_downloaded_into_the_reading_folder_leaves_no_second_copy(home_store, capsys):
+    key = hashlib.sha1(MARKDOWN.encode()).hexdigest()[:16]
+    downloaded = settings.Home.reading_file("My Book.md")
+    downloaded.write_text(MARKDOWN)
+    assert kept(str(downloaded))[0] == 1
+    assert sorted(path.name for path in downloaded.parent.iterdir()) == [f"{key}.md"]
+    downloaded.write_text(MARKDOWN)
+    assert kept(str(downloaded)) == (1, False)
+    assert sorted(path.name for path in downloaded.parent.iterdir()) == [f"{key}.md"]
+    assert kept(str(settings.Home.reading_file(f"{key}.md"))) == (1, False)
+    assert settings.Home.reading_file(f"{key}.md").read_text() == MARKDOWN
+
+
+@pytest.mark.spec("RDG-2")
+def test_a_file_tinker_cannot_read_is_kept_with_no_chapters(tmp_path, home_store, capsys):
+    kept_with_no_chapters(
+        written(tmp_path, "x.bin", b"\x00\x01binary"), capsys, "x.bin is not a file Tinker can read"
+    )
+    assert Readings.get(1)["title"] == "x"
+
+
+def kept_with_no_chapters(path, capsys, reason, number=1):
+    assert kept(path) == (number, True)
+    entry = Readings.get(number)
+    assert entry["chapters"] == []
+    assert settings.Home.reading_file(entry["file"]).read_bytes() == Path(path).read_bytes()
+    assert re.search(rf"#{number} \S.* kept with no chapters: {reason}", capsys.readouterr().out)
+
+
+def sensing(monkeypatch, senses=("vision",), hearing="hears", ffmpeg="/usr/bin/ffmpeg"):
+    asked, converted = [], []
+
+    def quick_reply(messages, tokens):
+        asked.append(messages)
+        return f"What the model read, call {len(asked)}."
+
+    def run(command, **options):
+        converted.append(command)
+        return subprocess.CompletedProcess(command, 0, b"RIFF16k")
+
+    monkeypatch.setattr(Models, "senses", staticmethod(lambda: senses))
+    monkeypatch.setattr(Models, "hearing", staticmethod(lambda: hearing))
+    monkeypatch.setattr(Models, "quick_reply", staticmethod(quick_reply))
+    monkeypatch.setattr(Models, "transcript", staticmethod(lambda wav: f"Transcript of {wav.decode()}."))
+    monkeypatch.setattr(shutil, "which", lambda name: ffmpeg if name == "ffmpeg" else None)
+    monkeypatch.setattr(subprocess, "run", run)
+    return asked, converted
+
+
+def written(tmp_path, name, data):
+    path = tmp_path / name
+    path.write_bytes(data)
+    return str(path)
+
+
+@pytest.mark.spec("RDG-8")
+def test_an_image_is_described_by_the_model_that_sees_it(tmp_path, home_store, monkeypatch):
+    asked, _ = sensing(monkeypatch)
+    assert kept(written(tmp_path, "whiteboard.png", PNG)) == (1, True)
+    [messages] = asked
+    assert messages[-1]["images"] == [base64.b64encode(PNG).decode()]
+    assert [(c["title"], c["text"]) for c in Readings.get(1)["chapters"]] == [
+        ("whiteboard", "What the model read, call 1.")
+    ]
+
+
+@pytest.mark.spec("CNV-25")
+def test_a_question_inside_a_reading_is_answered_from_its_passages(tmp_path, home_store, monkeypatch):
+    asked, _ = sensing(monkeypatch)
+    kept(craft(tmp_path))
+    passage = Readings.passages([1], "naming")[0]
+    assert answered_inside(1, "What about naming?") == "What the model read, call 1."
+    [[system, user]] = asked
+    assert system["role"] == "system" and Readings.get(1)["title"] in system["content"]
+    assert passage["text"] in user["content"] and "What about naming?" in user["content"]
+    assert "images" not in user
+
+
+@pytest.mark.spec("CNV-25")
+def test_a_question_inside_an_image_shows_it_only_to_a_model_that_sees(tmp_path, home_store, monkeypatch):
+    asked, _ = sensing(monkeypatch)
+    kept(written(tmp_path, "whiteboard.png", PNG))
+    answered_inside(1, "What is drawn?")
+    assert asked[-1][-1]["images"] == [base64.b64encode(PNG).decode()]
+    monkeypatch.setattr(Models, "senses", staticmethod(lambda: ()))
+    answered_inside(1, "What is drawn?")
+    assert "images" not in asked[-1][-1]
+
+
+@pytest.mark.spec("CNV-25")
+def test_a_reading_with_chapters_is_entered_by_its_number_or_the_source_just_kept(tmp_path, home_store):
+    source = craft(tmp_path)
+    kept(source)
+    title = Readings.get(1)["title"]
+    assert Shelf().entered(["#1"]) == (1, title)
+    assert Shelf().entered([source]) == (1, title)
+    assert Shelf().entered(["#1", "learn"]) is None
+    assert Shelf().entered(["#2"]) is None
+    assert Shelf().entered([str(tmp_path / "other.md")]) is None
+    assert Shelf().exists(1) and not Shelf().exists(2)
+
+
+@pytest.mark.spec("CNV-25")
+def test_a_reading_kept_with_no_chapters_is_not_entered(tmp_path, home_store, capsys):
+    path = written(tmp_path, "x.bin", b"\x00\x01binary")
+    kept(path)
+    assert Shelf().entered(["#1"]) is None
+    assert Shelf().entered([path]) is None
+
+
+@pytest.mark.spec("RDG-8")
+def test_an_image_without_a_model_that_sees_is_kept_with_no_chapters(
+    tmp_path, home_store, monkeypatch, capsys
+):
+    sensing(monkeypatch, senses=())
+    kept_with_no_chapters(
+        written(tmp_path, "whiteboard.png", PNG),
+        capsys,
+        "whiteboard.png is an image: .*needs a model that sees",
+    )
+
+
 @pytest.mark.spec("RDG-7")
+def test_a_scan_is_read_by_the_model_that_sees_one_call_a_page(tmp_path, home_store, monkeypatch):
+    asked, _ = sensing(monkeypatch)
+    images = {
+        0: (b"\xff\xd8\xff\xe0 one", b"DCTDecode", False),
+        1: (b"\xff\xd8\xff\xe0 two", b"DCTDecode", False),
+    }
+    page = (b"q /Im1 Do Q", False)
+    assert kept(written(tmp_path, "scan.pdf", pdf([page, page], images=images))) == (1, True)
+    assert [messages[-1]["images"] for messages in asked] == [
+        [base64.b64encode(b"\xff\xd8\xff\xe0 one").decode()],
+        [base64.b64encode(b"\xff\xd8\xff\xe0 two").decode()],
+    ]
+    text = "\n".join(chapter["text"] for chapter in Readings.get(1)["chapters"])
+    assert "call 1" in text and "call 2" in text
+
+
+@pytest.mark.spec("RDG-7")
+def test_a_scan_is_kept_with_no_chapters_without_a_model_that_sees_or_a_page_image(
+    tmp_path, home_store, monkeypatch, capsys
+):
+    sensing(monkeypatch, senses=())
+    images = {0: (b"\xff\xd8\xff\xe0 one", b"DCTDecode", False)}
+    scan = written(tmp_path, "scan.pdf", pdf([(b"q /Im1 Do Q", False)], images=images))
+    kept_with_no_chapters(scan, capsys, "scan.pdf is a scan: .*needs a model that sees")
+    blank = written(tmp_path, "blank.pdf", pdf([(b"q /Im1 Do Q", False)]))
+    kept_with_no_chapters(blank, capsys, "blank.pdf has no text and no page image", 2)
+
+
+@pytest.mark.spec("RDG-8")
+def test_a_recording_is_turned_into_16k_mono_wav_and_transcribed(tmp_path, home_store, monkeypatch):
+    _, converted = sensing(monkeypatch)
+    assert kept(written(tmp_path, "talk.ogg", OGG)) == (1, True)
+    [command] = converted
+    assert command[0] == "/usr/bin/ffmpeg" and " ".join(command).count("-ar 16000 -ac 1") == 1
+    assert [(c["title"], c["text"]) for c in Readings.get(1)["chapters"]] == [
+        ("talk", "Transcript of RIFF16k.")
+    ]
+    assert (Readings.get(1)["kind"], Readings.get(1)["file"].endswith(".ogg")) == ("audio", True)
+    assert kept(written(tmp_path, "again.OGG", OGG)) == (1, False)
+    assert len(converted) == 1
+
+
+@pytest.mark.spec("RDG-8")
+@pytest.mark.parametrize(
+    ("platform", "install"), [("darwin", "brew install ffmpeg"), ("linux", "sudo apt install ffmpeg")]
+)
+def test_a_recording_without_ffmpeg_is_kept_with_no_chapters_and_says_how_to_install_it(
+    tmp_path, home_store, monkeypatch, capsys, platform, install
+):
+    sensing(monkeypatch, ffmpeg=None)
+    monkeypatch.setattr(sys, "platform", platform)
+    kept_with_no_chapters(
+        written(tmp_path, "talk.ogg", OGG), capsys, f"talk.ogg is a recording: audio needs ffmpeg.*{install}"
+    )
+
+
+@pytest.mark.spec("RDG-8")
+def test_a_recording_ffmpeg_or_the_transcript_fails_on_is_kept_with_no_chapters(
+    tmp_path, home_store, monkeypatch, capsys
+):
+    sensing(monkeypatch)
+
+    def failing_run(command, **options):
+        raise subprocess.CalledProcessError(1, command, b"", b"Invalid data found")
+
+    monkeypatch.setattr(subprocess, "run", failing_run)
+    kept_with_no_chapters(
+        written(tmp_path, "talk.ogg", OGG), capsys, "talk.ogg is a recording: .*Invalid data found"
+    )
+    sensing(monkeypatch)
+
+    def failing_transcript(wav):
+        raise OllamaError("the model that hears is not answering")
+
+    monkeypatch.setattr(Models, "transcript", staticmethod(failing_transcript))
+    kept_with_no_chapters(
+        written(tmp_path, "other.ogg", OGG + b"2"),
+        capsys,
+        "other.ogg is a recording: the model that hears",
+        2,
+    )
+
+
+@pytest.mark.spec("RDG-8")
+def test_read_of_a_recording_kept_with_no_chapters_tries_its_transcript_again(
+    tmp_path, home_store, monkeypatch, capsys
+):
+    sensing(monkeypatch, ffmpeg=None)
+    kept_with_no_chapters(
+        written(tmp_path, "talk.ogg", OGG), capsys, "talk.ogg is a recording: audio needs ffmpeg"
+    )
+    heard_again(1)
+    assert Readings.get(1)["chapters"] == []
+    assert re.search(
+        r"#1 \S.* kept with no chapters: talk.ogg is a recording: audio needs ffmpeg", capsys.readouterr().out
+    )
+    _, converted = sensing(monkeypatch)
+    heard_again(1)
+    assert [(c["title"], c["text"], c["state"]) for c in Readings.get(1)["chapters"]] == [
+        ("talk", "Transcript of RIFF16k.", "unread")
+    ]
+    heard_again(1)
+    assert len(converted) == 1
+
+
+@pytest.mark.spec("RDG-8")
+def test_read_does_not_hear_again_an_entry_that_is_not_a_recording_kept_empty(
+    tmp_path, home_store, monkeypatch
+):
+    _, converted = sensing(monkeypatch)
+    kept(craft(tmp_path))
+    before = Readings.get(1)
+    heard_again(1)
+    assert Readings.get(1) == before and converted == []
+
+
+@pytest.mark.spec("RDG-8")
+def test_a_recording_without_a_model_that_hears_is_kept_with_no_chapters(
+    tmp_path, home_store, monkeypatch, capsys
+):
+    pulled = offering(monkeypatch, tty=False)
+    kept_with_no_chapters(
+        written(tmp_path, "talk.ogg", OGG), capsys, "talk.ogg is a recording: no model that hears was got"
+    )
+    assert pulled == []
+
+
+def offering(monkeypatch, tty=True, answer="y", failure=None):
+    sensing(monkeypatch, hearing=None)
+    pulled = []
+
+    def pull(name):
+        pulled.append(name)
+        if failure:
+            raise OllamaError(failure)
+
+    monkeypatch.setattr(Models, "audio_offer", staticmethod(lambda: "gemma3n:e2b"))
+    monkeypatch.setattr(Models, "audio_question", staticmethod(lambda name: f"Get {name}?"))
+    monkeypatch.setattr(Ollama, "pull", staticmethod(pull))
+    monkeypatch.setattr(sys.stdin, "isatty", lambda: tty)
+    monkeypatch.setattr("builtins.input", lambda question: answer)
+    return pulled
+
+
+@pytest.mark.spec("MOD-30")
+def test_a_yes_to_the_offer_pulls_the_model_then_transcribes(tmp_path, home_store, monkeypatch):
+    pulled = offering(monkeypatch)
+    assert kept(written(tmp_path, "talk.ogg", OGG)) == (1, True)
+    assert pulled == ["gemma3n:e2b"]
+    assert [c["text"] for c in Readings.get(1)["chapters"]] == ["Transcript of RIFF16k."]
+
+
+@pytest.mark.spec("MOD-30")
+def test_a_no_to_the_offer_never_pulls_and_keeps_it_with_no_chapters(
+    tmp_path, home_store, monkeypatch, capsys
+):
+    pulled = offering(monkeypatch, answer="n")
+    kept_with_no_chapters(
+        written(tmp_path, "talk.ogg", OGG), capsys, "talk.ogg is a recording: no model that hears was got"
+    )
+    assert pulled == []
+
+
+@pytest.mark.spec("MOD-30")
+def test_a_failed_pull_is_said_and_keeps_it_with_no_chapters(tmp_path, home_store, monkeypatch, capsys):
+    offering(monkeypatch, failure="Could not get gemma3n:e2b: disk full")
+    kept_with_no_chapters(
+        written(tmp_path, "talk.ogg", OGG),
+        capsys,
+        "talk.ogg is a recording: Could not get gemma3n:e2b: disk full",
+    )
+
+
+@pytest.mark.spec("RDG-9")
 def test_the_survey_orders_every_chapter_and_skips_none(tmp_path, home_store):
-    book = opened(MARKDOWN.encode(), "craft.md")
+    book = opened(MARKDOWN.encode(), "craft.md").book()
     survey = read_survey(dict(json.loads(survey_reply()), terms=[f"t{number}" for number in range(30)]), book)
     assert survey["software"] is True and len(survey["terms"]) == READ_KEY_TERMS
     assert survey["order"] == {
@@ -306,7 +455,7 @@ def test_the_survey_orders_every_chapter_and_skips_none(tmp_path, home_store):
 
 
 def read_craft(tmp_path, make_model, fake_ollama, software=True):
-    stored(craft(tmp_path))
+    kept(craft(tmp_path))
     fake_ollama.reply(survey_reply(software), when="reading plan")
     fake_ollama.reply(added("Write a test for each behaviour first", phase="tests"), when="chapter 4")
     fake_ollama.reply(added("Name each function after what it does"), when="chapter 2")
@@ -316,7 +465,7 @@ def read_craft(tmp_path, make_model, fake_ollama, software=True):
     return Reader(make_model(), tracker).read(1), tracker
 
 
-@pytest.mark.spec("RDG-8")
+@pytest.mark.spec("RDG-10")
 def test_every_chapter_is_read_in_order_and_saved_as_it_is_read(
     tmp_path, home_store, make_model, fake_ollama
 ):
@@ -359,9 +508,9 @@ def test_every_chapter_is_read_in_order_and_saved_as_it_is_read(
     assert fake_ollama.calls == []
 
 
-@pytest.mark.spec("RDG-8")
+@pytest.mark.spec("RDG-10")
 def test_a_stopped_reading_goes_on_with_the_chapters_not_read(tmp_path, home_store, make_model, fake_ollama):
-    stored(craft(tmp_path))
+    kept(craft(tmp_path))
     fake_ollama.reply(survey_reply(), when="reading plan")
     fake_ollama.reply(added("Write a test for each behaviour first", phase="tests"), when="chapter 4")
     fake_ollama.reply(KeyboardInterrupt(), when="chapter 2")
@@ -376,13 +525,13 @@ def test_a_stopped_reading_goes_on_with_the_chapters_not_read(tmp_path, home_sto
     assert labels(fake_ollama) == ["Read: chapter 2", "Read: chapter 1", "Read: chapter 3"]
 
 
-@pytest.mark.spec("RDG-8")
+@pytest.mark.spec("RDG-10")
 def test_a_long_chapter_is_read_in_every_part(tmp_path, home_store, make_model, fake_ollama, monkeypatch):
     long = "\n\n".join(
         f"Paragraph {number} of a long chapter about naming things well." for number in range(40)
     )
     text = f"# Long\n\n## One\n\n{long}\n\n## Two\n\nA short second chapter, with more words."
-    stored(craft(tmp_path, text=text))
+    kept(craft(tmp_path, text=text))
     monkeypatch.setattr(reading, "READ_CHAPTER_TEXT_SHARE", 0.05)
     fake_ollama.reply(survey_reply(software=False, **{"1": "core"}), when="reading plan")
     fake_ollama.reply(added(), times=20)
@@ -393,7 +542,7 @@ def test_a_long_chapter_is_read_in_every_part(tmp_path, home_store, make_model, 
     assert "Paragraph 0 " in shown and "Paragraph 39 " in shown
 
 
-@pytest.mark.spec("RDG-9")
+@pytest.mark.spec("RDG-11")
 def test_read_again_with_a_focus_looks_where_it_is_asked(
     tmp_path, home_store, make_model, fake_ollama, monkeypatch
 ):
@@ -411,7 +560,7 @@ def test_read_again_with_a_focus_looks_where_it_is_asked(
     assert "Run every test after each change" in kept_rules()
 
 
-@pytest.mark.spec("RDG-9")
+@pytest.mark.spec("RDG-11")
 def test_a_focus_excerpt_keeps_the_start_and_the_chunks_that_match():
     paragraphs = (
         ["intro about the book " * 10]
@@ -424,7 +573,7 @@ def test_a_focus_excerpt_keeps_the_start_and_the_chunks_that_match():
     assert excerpt("short chapter", 750, "x") == "short chapter"
 
 
-@pytest.mark.spec("RDG-10")
+@pytest.mark.spec("RDG-12")
 def test_a_principle_keeps_its_building_phase_only_from_a_software_source():
     code = {"kind": "add", "do": "Name functions by what they do", "phase": "code"}
     anywhere = {"kind": "add", "do": "Small programs stay easy to change", "phase": "any"}
@@ -435,7 +584,7 @@ def test_a_principle_keeps_its_building_phase_only_from_a_software_source():
     assert read_phase(strengthen, software=False) == strengthen
 
 
-@pytest.mark.spec("RDG-10")
+@pytest.mark.spec("RDG-12")
 def test_what_is_not_about_software_is_kept_for_asking_alone(tmp_path, home_store, make_model, fake_ollama):
     ending, tracker = read_craft(tmp_path, make_model, fake_ollama, software=False)
     assert {principle.phase for principle in Principles(None).kept("read-1")} == {"book"}
@@ -446,37 +595,57 @@ def test_what_is_not_about_software_is_kept_for_asking_alone(tmp_path, home_stor
 def test_a_source_comes_from_a_file_or_a_web_address(tmp_path, monkeypatch):
     path = tmp_path / "craft.md"
     path.write_text("words")
-    assert book_bytes(str(path)) == b"words"
+    assert source_bytes(str(path)) == b"words"
     with pytest.raises(SystemExit, match="No file at"):
-        book_bytes(str(tmp_path / "missing.epub"))
+        source_bytes(str(tmp_path / "missing.epub"))
     asked = []
 
     def fetch(internet, urls, max_bytes=None):
         asked.append((urls, max_bytes))
-        ok = urls[0].endswith("ok")
-        return [
-            WebPage(urls[0], "application/epub+zip", b"book", [], "", "")
-            if ok
-            else WebPage.failed(urls[0], "HTTP 404")
-        ]
+        if urls[0].endswith("ok"):
+            return [WebPage(urls[0], "application/epub+zip", b"book", [], "", "")]
+        if urls[0].endswith("big"):
+            return [WebPage.failed(urls[0], f"larger than {max_bytes} bytes")]
+        return [WebPage.failed(urls[0], "HTTP 404")]
 
     monkeypatch.setattr(reading.Internet, "__init__", lambda internet: None)
     monkeypatch.setattr(reading.Internet, "fetch", fetch)
-    assert book_bytes("https://example.org/ok") == b"book"
+    assert source_bytes("https://example.org/ok") == b"book"
     with pytest.raises(SystemExit, match="Could not download https://example.org/gone: HTTP 404"):
-        book_bytes("https://example.org/gone")
+        source_bytes("https://example.org/gone")
     assert asked == [
         (["https://example.org/ok"], READ_MAX_BYTES),
         (["https://example.org/gone"], READ_MAX_BYTES),
     ]
     monkeypatch.setattr(reading, "READ_MAX_BYTES", 2)
-    with pytest.raises(SystemExit, match="larger than"):
-        book_bytes(str(path))
+    with pytest.raises(TooLarge, match="larger than"):
+        source_bytes(str(path))
+    with pytest.raises(TooLarge, match="Could not download https://example.org/big: larger than 2 bytes"):
+        source_bytes("https://example.org/big")
+    assert source_bytes(str(path), beyond=True) == b"words"
+    source_bytes("https://example.org/ok", beyond=True)
+    assert asked[-1] == (["https://example.org/ok"], WHOLE)
 
 
-@pytest.mark.spec("RDG-11")
+@pytest.mark.spec("RDG-1")
+def test_a_source_too_large_is_kept_only_when_a_yes_answers_the_one_question(
+    tmp_path, home_store, monkeypatch, capsys
+):
+    path = craft(tmp_path)
+    monkeypatch.setattr(reading, "READ_MAX_BYTES", 2)
+    questions, answers = [], [False, True]
+    monkeypatch.setattr(reading.say, "agreed", lambda question: questions.append(question) or answers.pop(0))
+    with pytest.raises(TooLarge, match="nothing read"):
+        Commands(Cli.parse(["read", path])).run()
+    assert len(questions) == 1 and "keep it anyway" in questions[0] and Readings.all() == {}
+    Commands(Cli.parse(["read", path])).run()
+    assert len(questions) == 2 and list(Readings.all()) == [1]
+    assert "#1 (" in capsys.readouterr().out
+
+
+@pytest.mark.spec("RDG-13")
 def test_the_readings_find_what_a_source_says(tmp_path, home_store):
-    stored(craft(tmp_path))
+    kept(craft(tmp_path))
     assert Readings.about("what does The Craft of Small Programs say?", []) == [1]
     assert Readings.about("anything", [{"group": "read-1"}, {"group": "python"}]) == [1]
     assert Readings.about("anything", [{"group": "python"}]) == []
@@ -487,20 +656,19 @@ def test_the_readings_find_what_a_source_says(tmp_path, home_store):
     }
 
 
-@pytest.mark.spec("RDG-12")
-def test_tinker_read_stores_then_reads_as_its_own_job(
+@pytest.mark.spec("RDG-14")
+def test_tinker_read_keeps_and_read_learn_is_its_own_job(
     tmp_path, measured_model, fake_ollama, monkeypatch, capsys
 ):
-    assert (
-        is_job(["read", "book.epub"])
-        and is_job(["read", "#2", "retries"])
-        and commands.kind_of(["read", "book.epub"]) == "job"
-    )
+    assert not is_job(["read", "book.epub"]) and not is_job(["read", "#2"])
+    assert is_job(["read", "#2", "learn"]) and commands.kind_of(["read", "#2", "learn", "retries"]) == "job"
     assert Cli.parse(["read", "~/Books/the", "craft.epub"]).read == ["~/Books/the craft.epub"]
-    assert Cli.parse(["read", "#2", '"retries,', 'when"']).read == ["#2", "retries, when"]
+    assert Cli.parse(["read", "#2", "learn", '"retries,', 'when"']).read == ["#2", "learn", "retries, when"]
+    assert Cli.parse(["read", "#2", "learn"]).read == ["#2", "learn"]
     assert Cli.parse(["read", "#2"]).read == ["#2"]
-    with pytest.raises(SystemExit):
-        Cli.parse(["read", "show"])
+    for wrong in (["read", "show"], ["read", "#2", "retries"]):
+        with pytest.raises(SystemExit):
+            Cli.parse(wrong)
     monkeypatch.setattr(Ollama, "installed_models", staticmethod(lambda: [{"name": MODEL}]))
     retargeted, ended = [], []
     monkeypatch.setattr(cli.Jobs, "retarget", staticmethod(lambda arguments: retargeted.append(arguments)))
@@ -511,24 +679,38 @@ def test_tinker_read_stores_then_reads_as_its_own_job(
     )
     monkeypatch.chdir(tmp_path)
     craft(tmp_path)
+    Commands(Cli.parse(["read", "craft.md"])).run()
+    kept_out = capsys.readouterr().out
+    assert re.search(r"#1 \(\w+\) The Craft of Small Programs.*: \d+ chapter", kept_out)
+    assert "ask about it in a chat, or read #1 learn" in kept_out and not ended and not retargeted
+    Commands(Cli.parse(["read", "#1"])).run()
+    assert "#1 The Craft of Small Programs" in capsys.readouterr().out and not ended
     fake_ollama.reply("medium")
     fake_ollama.reply(survey_reply(software=False, **{"2": "core"}), when="reading plan")
     fake_ollama.reply(added("Name each function after what it does"), times=4)
-    Commands(Cli.parse(["read", "craft.md"])).run()
-    assert retargeted == [["read", "#1"]]
+    Commands(Cli.parse(["read", "#1", "learn"])).run()
     title, ending, steps = ended[0]
     assert title == "Reading #1 The Craft of Small Programs" and ending["status"] == "done"
-    assert ("Look again", 'tinker read #1 "what to look for"') in ending["next"]
+    assert ("Look again", 'tinker read #1 learn "what to look for"') in ending["next"]
     assert any(step.startswith("🧭 Chose the chapters to read") for step in steps)
-    assert "Time taken" in capsys.readouterr().out
-    stored_before = Cli.parse(["read", "craft.md"])
-    Commands(stored_before).run()
-    assert len(ended) == 1 and "Already on the reading list as #1" in capsys.readouterr().out
+    assert "Time taken" in capsys.readouterr().out and not retargeted
+    Commands(Cli.parse(["read", "craft.md"])).run()
+    again = capsys.readouterr().out
+    assert len(ended) == 1 and "Already on the reading list as #1 (" in again and "read #1 learn" in again
     with pytest.raises(SystemExit, match="No reading #9"):
-        Commands(Cli.parse(["read", "#9"])).run()
+        Commands(Cli.parse(["read", "#9", "learn"])).run()
 
 
-@pytest.mark.spec("RDG-13")
+@pytest.mark.spec("RDG-14")
+def test_read_learn_needs_a_reading_with_chapters(tmp_path, home_store, monkeypatch, capsys):
+    monkeypatch.chdir(tmp_path)
+    written(tmp_path, "x.bin", b"\x00\x01binary")
+    Commands(Cli.parse(["read", "x.bin"])).run()
+    with pytest.raises(SystemExit, match="#1 x has no chapters to learn from"):
+        Commands(Cli.parse(["read", "#1", "learn"])).run()
+
+
+@pytest.mark.spec("RDG-15")
 def test_the_reading_list_is_shown_and_cleared(
     tmp_path, home_store, make_model, fake_ollama, capsys, monkeypatch
 ):
@@ -536,40 +718,97 @@ def test_the_reading_list_is_shown_and_cleared(
     show_list()
     assert "Nothing on the reading list" in capsys.readouterr().out
     read_craft(tmp_path, make_model, fake_ollama, software=False)
-    stored(second_edition(tmp_path))
+    kept(second_edition(tmp_path))
     capsys.readouterr()
+    Readings.save(dict(Readings.get(1), learned="2026-11-12 10:00"))
     show_list()
     listed = capsys.readouterr().out
-    assert (
-        listed.index("#2 The Craft") < listed.index("#1 The Craft")
-        and "4 of 4 chapters read · 3 principle(s)" in listed
-    )
+    first, second = (re.search(rf"#{number} 📄 The Craft.*", listed)[0] for number in (1, 2))
+    assert listed.index(second) < listed.index(first) and "4 of 4 chapters read · 3 principle(s)" in first
+    assert " B · " in first and first.endswith("✓") and not second.endswith("✓")
     show(1)
     shown = capsys.readouterr().out
     assert "✅ 2. Naming (1 principle(s))" in shown and "📄 5. Index (text only)" in shown
-    assert "Small programs stay" in shown
+    assert "Small programs stay" in shown and "📄 document · " in shown and "craft.md" in shown
+    assert "tinker read rename #1 TITLE" in shown and "tinker read forget #1" in shown
+    file = settings.Home.reading_file(Readings.get(1)["file"])
+    assert file.exists()
     with pytest.raises(SystemExit, match="Nothing deleted: run tinker clear read #1"):
         cli.Cli.cleared(["read", "#1"], yes=False)
     cli.Cli.cleared(["read", "#1"], yes=True)
     assert Readings.get(1) is None and Library.read("read-1") is None and list(Readings.all()) == [2]
-    assert Principles(None).all() == []
+    assert Principles(None).all() == [] and not file.exists()
     with pytest.raises(SystemExit, match="reading numbers alone"):
         cli.Cli.cleared(["read", "memory"], yes=True)
     cli.Cli.cleared(["read"], yes=True)
     assert Readings.all() == {}
 
 
-@pytest.mark.spec("RDG-13")
+@pytest.mark.spec("RDG-15")
+def test_a_reading_is_renamed_and_forgotten(tmp_path, home_store, capsys, monkeypatch):
+    kept(craft(tmp_path))
+    kept(second_edition(tmp_path))
+    assert not is_job(["read", "rename", "#1", "Small"]) and not is_job(["read", "forget", "#1"])
+    assert Cli.parse(["read", "rename", "#1", "Small", "Craft"]).read == ["rename", "#1", "Small Craft"]
+    assert Cli.parse(["read", "forget", "#1", "#2"]).read == ["forget", "#1", "#2"]
+    for wrong in (
+        ["read", "rename", "#1"],
+        ["read", "rename", "one", "x"],
+        ["read", "forget"],
+        ["read", "forget", "x"],
+    ):
+        with pytest.raises(SystemExit):
+            Cli.parse(wrong)
+    Commands(Cli.parse(["read", "rename", "#1", "Small", "Craft"])).run()
+    assert Readings.get(1)["title"] == "Small Craft" and "#1 Small Craft" in capsys.readouterr().out
+    with pytest.raises(SystemExit, match="No reading #9"):
+        Commands(Cli.parse(["read", "rename", "#9", "x"])).run()
+    file = settings.Home.reading_file(Readings.get(1)["file"])
+    with pytest.raises(SystemExit, match="Nothing deleted: run tinker clear read #1"):
+        Commands(Cli.parse(["read", "forget", "#1"])).run()
+    Commands(Cli.parse(["read", "forget", "#1", "--yes"])).run()
+    assert Readings.get(1) is None and not file.exists() and list(Readings.all()) == [2]
+
+
+@pytest.mark.spec("RDG-15")
+def test_an_old_reading_without_kind_or_file_is_listed_and_forgotten(tmp_path, home_store, capsys):
+    kept(craft(tmp_path))
+    old = {key: value for key, value in Readings.get(1).items() if key not in ("kind", "file", "size")}
+    Readings.save(old)
+    show_list()
+    assert "#1 📕 The Craft" in capsys.readouterr().out
+    show(1)
+    assert "📕 book" in capsys.readouterr().out
+    assert kept(craft(tmp_path, "same-text.md")) == (1, False)
+    assert "Already on the reading list as #1 (book)" in capsys.readouterr().out
+    reading.forgotten([1], yes=True)
+    assert Readings.get(1) is None
+
+
+@pytest.mark.spec("RDG-15")
 def test_the_reading_list_comes_a_page_at_a_time(tmp_path, home_store, capsys, monkeypatch):
     monkeypatch.setattr(settings, "PER_PAGE", 1)
-    stored(craft(tmp_path))
-    stored(second_edition(tmp_path))
+    kept(craft(tmp_path))
+    kept(second_edition(tmp_path))
     capsys.readouterr()
     show_list()
     first = capsys.readouterr().out
-    assert "#2 The Craft" in first and "#1 " not in first and "tinker read list 2 for more" in first
+    assert "#2 📄 The Craft" in first and "#1 " not in first and "tinker read list 2 for more" in first
     show_list(2)
-    assert "#1 The Craft" in capsys.readouterr().out
+    assert "#1 📄 The Craft" in capsys.readouterr().out
     assert Cli.parse(["read", "list", "2"]).read == ["list", "2"]
     with pytest.raises(SystemExit):
         Cli.parse(["read", "list", "two"])
+
+
+@pytest.mark.spec("RDG-15")
+def test_in_a_chat_the_reading_list_marks_the_one_the_person_is_inside(tmp_path, home_store, capsys):
+    kept(craft(tmp_path))
+    kept(second_edition(tmp_path))
+    capsys.readouterr()
+    show_list(inside=1)
+    lines = capsys.readouterr().out.splitlines()
+    marked = [line for line in lines if "← inside" in line]
+    assert len(marked) == 1 and "#1 " in marked[0] and marked[0].endswith(" ← inside")
+    show_list()
+    assert "← inside" not in capsys.readouterr().out

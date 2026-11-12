@@ -75,7 +75,7 @@ class Fetcher:
     def request(self, url, connections):
         target = url
         for _ in range(MAX_REDIRECTS + 1):
-            status, headers, body = connections.exchange(target, self.asked(), self.max_bytes + 1)
+            status, headers, body = connections.exchange(target, self.asked(), self.read_limit())
             if status not in self.REDIRECTS or not headers.get("Location"):
                 return self.answered(url, target, status, headers, body)
             target = urllib.parse.urljoin(target, headers["Location"])
@@ -87,7 +87,7 @@ class Fetcher:
     def answered(self, url, final_url, status, headers, body):
         if status >= 400:
             return Fetched(url, status, final_url, error=f"HTTP {status}")
-        data = unzipped(body, headers.get("Content-Encoding", ""), self.max_bytes + 1)
+        data = unzipped(body, headers.get("Content-Encoding", ""), self.read_limit() or 0)
         return self.read(url, status, final_url, data, headers)
 
     def through_proxy(self, url):
@@ -98,13 +98,16 @@ class Fetcher:
             with urllib.request.build_opener(LimitedRedirects).open(
                 request, timeout=self.timeout
             ) as response:
-                data = response.read(self.max_bytes + 1)
+                data = response.read(self.read_limit())
                 return self.read(url, response.status, response.geturl(), data, response.headers)
         except urllib.error.HTTPError as exc:
             return Fetched(url, exc.code, exc.geturl() or url, error=f"HTTP {exc.code}")
 
+    def read_limit(self):
+        return None if self.max_bytes is None else self.max_bytes + 1
+
     def read(self, url, status, final_url, data, headers):
-        if len(data) > self.max_bytes:
+        if self.max_bytes is not None and len(data) > self.max_bytes:
             return Fetched(url, status, final_url, error=f"larger than {self.max_bytes} bytes")
         text = self.decoded(data, headers.get_content_charset())
         return Fetched(url, status, final_url, text, (headers.get_content_type() or "").lower(), data=data)

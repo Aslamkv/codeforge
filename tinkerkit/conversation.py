@@ -49,6 +49,8 @@ lazy from .messages import (
     cut_to_width,
     human_duration,
     live_line,
+    next_page_line,
+    next_page_words,
     paint,
     say,
     star_at,
@@ -84,6 +86,7 @@ EXPIRED_MESSAGES_SWEEP_SECONDS = 2
 ENDED_LOOK_SECONDS = 0.1
 BANNER_MAX_COLUMNS = 64
 WIPE_SCREEN_AND_SCROLLBACK = "\033[H\033[2J\033[3J"
+NEXT_PAGE_HINT = "↵ next page"
 
 CHAT_MAX_REPLY_TOKENS = 1024
 TYPING_SIGN_SECONDS = 4
@@ -119,7 +122,10 @@ EXIT_WORDS = ("exit",)
 PROMPT_HISTORY_LINES = 1000
 CHAT_APP_START = "/start"
 CHAT_FRESH = "/fresh"
+CHAT_LEAVE = "/leave"
+NEXT_PAGE_BUTTON = "Next page ›"
 FRESH_ANSWER_BUTTON = "🔄 Fresh answer"
+LEAVE_READING_BUTTON = "📕 Leave #{number}"
 NO_QUESTION_YET = "❓ **No question yet** to ask again."
 START_WELCOME = """👋 **Hi, I'm Tinker!**
 I build small programs for you, on this computer, with an AI model that runs right here.
@@ -160,13 +166,24 @@ Question = namedtuple(
 )
 
 
-def session(root):
+class NoShelf:
+    def entered(self, words):
+        return None
+
+    def exists(self, number):
+        return False
+
+    def answered(self, number, text):
+        return None
+
+
+def session(root, shelf=None):
     try:
         chats = chat_channels()
     except SystemExit as exc:
         say.warn(f"Chats left out: {exc}")
         chats = []
-    Desk([ConsoleChannel()] + chats, root).run()
+    Desk([ConsoleChannel()] + chats, root, shelf=shelf or NoShelf()).run()
 
 
 def one_shot(command, text):
@@ -192,7 +209,7 @@ def command_once(console, talk, message):
     proposed = shell.take(console, chat)
     if not proposed:
         return
-    if sys.stdin.isatty() and input("Run it? [y/N] ").strip().lower() in ("y", "yes"):
+    if say.agreed("Run it?"):
         shell.run(console, chat, proposed)
     else:
         console.show(chat, None, f"🚫 _Not run:_ `{proposed['line']}`", done=True)
@@ -202,8 +219,9 @@ class Desk:
     COMMANDS = tuple(command.name for command in COMMANDS if command.chat)
     TRACKER_LOOK_SECONDS = 1.0
 
-    def __init__(self, channels, root):
+    def __init__(self, channels, root, shelf=None):
         self.channels, self.root = channels, Path(root).resolve()
+        self.shelf, self.inside = shelf or NoShelf(), {}
         self.last_task = self.reporter = self.task = None
         self.lock, self.talk = threading.Lock(), Talk(commands_brief(), pausing_jobs=answering)
         self.questions = Questions()
@@ -481,6 +499,10 @@ class Desk:
         self.renew_banner_when_changed()
 
     def handle(self, channel, message, asked=None):
+        self.handled(channel, message, asked)
+        self.left_if_gone(channel, message.chat)
+
+    def handled(self, channel, message, asked):
         if message.text.split()[:1] == [CHAT_APP_START]:
             channel.send(message.chat, welcome())
             return
@@ -488,6 +510,11 @@ class Desk:
             self.fresh(channel, message)
             return
         message = self.as_said(channel, self.with_words_wanted(channel, message))
+        if message.text.split() == [CHAT_LEAVE]:
+            channel.send(message.chat, self.left(channel, message.chat))
+            return
+        if self.answered_inside(channel, message):
+            return
         command = command_of(message.text)
         unknown = not command and unknown_command(message.text)
         if unknown:
@@ -516,12 +543,44 @@ class Desk:
             )
             return
         reply = self.answer(message, channel)
-        if reply and asked is not None:
-            channel.send(message.chat, self.told(channel, message, reply, asked))
-        elif reply:
+        if not reply:
+            return
+        if asked is not None:
+            sent = channel.send(message.chat, self.told(channel, message, reply, asked))
+        else:
             sent = channel.send(message.chat, reply)
             if kind_of(command_words(message.text)) == "glance":
                 channel.glance(message.chat, message.id, [sent])
+        if words := next_page_words(reply):
+            channel.offer_next(message.chat, sent, words)
+
+    def left(self, channel, chat):
+        if chat not in self.inside:
+            return "📕 **Not inside a reading**"
+        number, title = self.inside.pop(chat)
+        channel.now_inside(chat, None)
+        return md(t"📕 **Left #{number} {title}**")
+
+    def left_if_gone(self, channel, chat):
+        reading = self.inside.get(chat)
+        if reading and not self.shelf.exists(reading[0]) and self.inside.pop(chat, None):
+            channel.now_inside(chat, None)
+
+    def answered_inside(self, channel, message):
+        self.left_if_gone(channel, message.chat)
+        if message.chat not in self.inside or message.text.startswith("/"):
+            return False
+        number, _ = self.inside[message.chat]
+        sent = channel.send(message.chat, self.inside_answer(channel, message, number))
+        channel.offer_leave(message.chat, sent, number)
+        return True
+
+    def inside_answer(self, channel, message, number):
+        try:
+            with self.talk.pausing_jobs(), channel.waiting(message.chat, message.text):
+                return self.shelf.answered(number, message.text) or "_(no answer)_"
+        except OllamaError as exc:
+            return md(t"⚠️ **The model did not answer:** {first_words(exc)}")
 
     def fresh(self, channel, message):
         question = last_asked(message.chat)
@@ -596,11 +655,15 @@ class Desk:
             return confirm
         question = self.questions.answered(channel, message.chat)
         if question and confirm:
-            threading.Thread(target=question.runs, daemon=True).start()
+            threading.Thread(target=self.settled, args=(channel, message.chat, question), daemon=True).start()
             return True
         if question:
             question.cancels()
         return False
+
+    def settled(self, channel, chat, question):
+        question.runs()
+        self.left_if_gone(channel, chat)
 
     def answer(self, message, channel):
         words = command_words(message.text)
@@ -695,8 +758,21 @@ class Desk:
 
     def read(self, channel, chat, words):
         if words[1:2] in (["list"], ["show"]):
-            return md(t"📚 **{' '.join(words)}**\n{self.tinker(words):block}")
-        return self.by_table(channel, chat, words)
+            return md(t"📚 **{' '.join(words)}**\n{self.tinker(words, env=self.inside_env(chat)):block}")
+        reply = self.by_table(channel, chat, words)
+        return reply and reply + self.entered(channel, chat, words[1:])
+
+    def inside_env(self, chat):
+        return {"TINKER_INSIDE": str(self.inside[chat][0])} if chat in self.inside else {}
+
+    def entered(self, channel, chat, words):
+        reading = self.shelf.entered(words)
+        if not reading:
+            return ""
+        self.inside[chat] = reading
+        channel.now_inside(chat, reading)
+        number, title = reading
+        return md(t"\n📕 **Inside #{number} {title}**: ask me about it · `/leave` leaves it")
 
     def knowledge(self, channel, chat, words):
         if words[1:] == ["graph"]:
@@ -1227,21 +1303,21 @@ class Desk:
             return {"title": progress.title, "brief": progress.brief(), "text": progress.text()}
         return described(dict({"title": job["title"]}, **(job.get("progress") or {})))
 
-    def tinker(self, arguments, timeout=120):
-        done = self.run_tinker(arguments, timeout)
+    def tinker(self, arguments, timeout=120, env=None):
+        done = self.run_tinker(arguments, timeout, env)
         return shown_output(done.stdout + done.stderr)
 
     def printed(self, arguments):
         return shown_output(self.run_tinker(arguments, 120).stdout)
 
-    def run_tinker(self, arguments, timeout):
+    def run_tinker(self, arguments, timeout, env=None):
         return subprocess.run(
             tinker_command() + arguments,
             cwd=self.root,
             text=True,
             capture_output=True,
             stdin=subprocess.DEVNULL,
-            env=dict(os.environ, NO_COLOR="1"),
+            env=dict(os.environ, NO_COLOR="1", **(env or {})),
             timeout=timeout,
         )
 
@@ -1325,7 +1401,7 @@ NO_CHAT_STATE = NoChatState()
 
 
 def shown_output(output):
-    return first_lines(Markup.columns(output.strip()) or "(nothing)", 40)
+    return first_lines(output.strip() or "(nothing)", 40)
 
 
 def command_of(text, commands=None):
@@ -1455,6 +1531,18 @@ def held_by_another(channel):
 def channel_add_words(text):
     words = command_words(text) if text.strip() else []
     return words[2:] if words[:2] == ["channel", "add"] else None
+
+
+def dropped_path(text):
+    try:
+        words = shlex.split(text)
+    except ValueError:
+        return None, ""
+    for end in range(len(words), 0, -1):
+        path = os.path.expanduser(" ".join(words[:end]))
+        if os.path.isfile(path):
+            return path, " ".join(words[end:])
+    return None, ""
 
 
 @contextlib.contextmanager
@@ -1828,7 +1916,7 @@ class Shell:
             if len(output) <= CHAT_COMMAND_OUTPUT_SHOWN_CHARS
             else "… (the start is left out)\n" + output[-CHAT_COMMAND_OUTPUT_SHOWN_CHARS:]
         )
-        return f"```output\n{Markup.fenced(Markup.columns(shown))}\n```"
+        return f"```output\n{Markup.fenced(shown)}\n```"
 
     def told(self, channel, chat, proposed, code, output):
         try:
@@ -2312,6 +2400,15 @@ class Channel:
     def offer_fresh(self, chat, shown):
         pass
 
+    def offer_next(self, chat, shown, words):
+        pass
+
+    def now_inside(self, chat, reading):
+        pass
+
+    def offer_leave(self, chat, shown, number):
+        pass
+
     def ask_for(self, chat, question, hint):
         return self.send(chat, question)
 
@@ -2367,10 +2464,27 @@ class ConsoleChannel(Channel):
         self.screen, self.lines = ConsoleScreen(), queue.Queue()
         self.last_id, self.numbering = 0, threading.Lock()
         self.printed, self.began, self.doings, self.live_owner = {}, {}, {}, None
-        self.history = None
+        self.history, self.next_page, self.reading = None, None, None
 
     def handle(self):
         return "this terminal"
+
+    def offer_next(self, chat, shown, words):
+        self.next_page = words
+        self.note(NEXT_PAGE_HINT)
+
+    def now_inside(self, chat, reading):
+        self.reading = reading
+        typing = self.screen.typing
+        if typing is not None:
+            typing[0].prompt = self.prompt()
+            self.screen.draw_prompt()
+
+    def prompt(self):
+        if self.reading is None:
+            return self.screen.prompt()
+        number, title = self.reading
+        return f"📕 #{number} {title} › "
 
     def receive(self, timeout):
         if not self.screen.reading:
@@ -2396,7 +2510,7 @@ class ConsoleChannel(Channel):
             self.first_pick()
         while True:
             try:
-                line = self.typed_line() if typed_here() else input(self.screen.prompt())
+                line = self.typed_line() if typed_here() else input(self.prompt())
             except EOFError, KeyboardInterrupt:
                 line = None
             if line is None:
@@ -2407,7 +2521,7 @@ class ConsoleChannel(Channel):
             self.lines.put(self.answered(line))
 
     def typed_line(self):
-        editor, menu, drawer = LineEditor(typed_before()), CommandMenu(), PromptDrawer(self.screen.prompt())
+        editor, menu, drawer = LineEditor(typed_before()), CommandMenu(), PromptDrawer(self.prompt())
         columns = shutil.get_terminal_size().columns
         self.screen.typing_with(
             (
@@ -2451,11 +2565,24 @@ class ConsoleChannel(Channel):
             self.lines.put(line)
 
     def answered(self, line):
+        next_page, self.next_page = self.next_page, None
+        if next_page and not line.strip():
+            return f"/{next_page}"
         words = channel_add_words(line)
         if words is None or not typed_here():
-            return self.picked(line)
+            return self.dropped(line)
         self.channel_added(words)
         return ""
+
+    def dropped(self, line):
+        path, words = dropped_path(line)
+        if path is None:
+            return self.picked(line)
+        reading = f"/read {shlex.quote(path)}"
+        if not words:
+            return reading
+        self.lines.put(reading)
+        return words
 
     def channel_added(self, words):
         from .channels import ChannelCommand
@@ -3031,11 +3158,15 @@ class Markup:
     @staticmethod
     def columns(text):
         lines = str(text).expandtabs().splitlines()
-        rows = [line for line in lines if len(line.split()) >= 3]
+        rows = [line for line in lines if Markup.is_row(line)]
         cuts = Markup.column_cuts(rows) if len(rows) >= 2 else []
         if len(cuts) < 2:
             return str(text)
-        return "\n".join(Markup.in_columns(line, cuts) if len(line.split()) >= 3 else line for line in lines)
+        return "\n".join(Markup.in_columns(line, cuts) if Markup.is_row(line) else line for line in lines)
+
+    @staticmethod
+    def is_row(line):
+        return len(line.split()) >= 3 and "  " in line.strip()
 
     @staticmethod
     def column_cuts(rows):
@@ -3043,7 +3174,7 @@ class Markup:
         last = list(re.finditer(r"\S+", shape))[-1].start()
         tolerated = 1 if len(rows) >= 4 else 0
         blank = [sum(at < len(line) and line[at] != " " for line in rows) <= tolerated for at in range(last)]
-        gaps = [at for at in range(1, last) if blank[at] and not blank[at - 1]] + [last]
+        gaps = [at for at in range(1, last - 1) if blank[at] and blank[at + 1] and not blank[at - 1]] + [last]
         cuts, begin = [], 0
         for index, gap in enumerate(gaps):
             after = shape[gap : gaps[index + 1]] if index + 1 < len(gaps) else shape[gap:]
@@ -3073,12 +3204,10 @@ class Markup:
         keep = cls.keeper()
 
         def block(found):
-            body = html.escape(found.group(2).rstrip("\n"), quote=False)
-            return keep(
-                f"<blockquote expandable>{body}</blockquote>"
-                if found.group(1) == "output"
-                else f"<pre>{body}</pre>"
-            )
+            output = found.group(1) == "output"
+            body = found.group(2).rstrip("\n")
+            body = html.escape(cls.columns(body) if output else body, quote=False)
+            return keep(f"<blockquote expandable>{body}</blockquote>" if output else f"<pre>{body}</pre>")
 
         return cls.render(
             text,
@@ -3184,8 +3313,8 @@ def history_text(words=()):
         lines.append(
             md(t"`#{thing['number']}` {thing['time'][5:]} · {entry_headline(thing['text'])}") + asked
         )
-    older = f" · `/history {page + 1}` older" if page < pages else ""
-    return "\n".join(lines + [f"👉 `/history #N` shows one again{older}"])
+    older = [next_page_line(page, pages, f"history {page + 1}")] if page < pages else []
+    return "\n".join(lines + ["👉 `/history #N` shows one again"] + older)
 
 
 def history_thing(word):

@@ -45,7 +45,6 @@ def test_the_kind_of_a_command_and_of_its_actions_comes_from_the_table():
         "research",
         "ask",
         "teach",
-        "read",
         "exercise",
         "resume",
     ]
@@ -56,7 +55,10 @@ def test_the_kind_of_a_command_and_of_its_actions_comes_from_the_table():
 @pytest.mark.parametrize(
     "argv,kind",
     [
-        (["read", "craft.md"], "job"),
+        (["read", "craft.md"], "glance"),
+        (["read", "#1"], "glance"),
+        (["read", "#1", "learn"], "job"),
+        (["read", "#1", "learn", "retries"], "job"),
         (["read", "list", "2"], "glance"),
         (["read", "show", "#1"], "glance"),
         (["exercise", "status"], "glance"),
@@ -209,7 +211,7 @@ def test_offered_words_are_action_words_then_synopsis_alternatives_once():
     assert offered_words(BY_NAME["jobs"]) == ["running", "queued", "stopped", "finished", "archived"]
     assert offered_words(BY_NAME["knowledge"]) == ["show", "find", "recent", "graph"]
     assert offered_words(BY_NAME["exercise"]) == ["status"]
-    assert offered_words(BY_NAME["read"]) == ["list", "show"]
+    assert offered_words(BY_NAME["read"]) == ["list", "show", "rename", "forget"]
     assert offered_words(BY_NAME["channel"]) == ["add", "remove", "start"]
     assert offered_words(BY_NAME["task"]) == [] and offered_words(BY_NAME["restart"]) == []
 
@@ -282,6 +284,12 @@ def test_enter_sends_a_command_without_words_and_fills_one_that_takes_words():
     assert menu.press("enter") == MenuAnswer("/task ", False) and not menu.open
     menu.follow("/task ")
     assert not menu.open
+
+
+@pytest.mark.spec("MSG-10")
+def test_enter_sends_a_fully_typed_command_that_takes_words():
+    menu = menu_on("/task")
+    assert menu.press("enter") == MenuAnswer("/task", True) and not menu.open
 
 
 @pytest.mark.spec("MSG-10")

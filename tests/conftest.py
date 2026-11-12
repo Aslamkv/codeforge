@@ -20,6 +20,37 @@ from tinkerkit.web import WebPage, readable
 REAL_HOME = Home.root
 ACCENT, DIM, BOLD, GREY, RESET = "\033[38;5;67m", "\033[2m", "\033[1m", "\033[48;5;236m", "\033[0m"
 MODEL = "fake-model"
+FOREWORD = (
+    "This book teaches how to write small programs that stay easy to change. Its heart is naming and testing."
+)
+NAMING = (
+    "Name each function after what it does, so that its callers read like prose and need no comment at all."
+)
+TESTING = "Write one test for each behaviour before the code, and run every test after each change you make."
+INDEX = "- naming, 3, 7, 12\n- testing, 4–6, 9\n- coupling, 11"
+
+MARKDOWN = f"""# The Craft of Small Programs
+
+## Foreword
+
+{FOREWORD}
+
+## Naming
+
+{NAMING}
+
+## Stories
+
+Once a team wrote a very long program, and then another one, and then a third one after that.
+
+## Testing
+
+{TESTING}
+
+## Index
+
+{INDEX}
+"""
 LOADING_PHASE = "📦 Loading the model into memory"
 MEASURED = {
     "model": MODEL,

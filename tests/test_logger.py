@@ -454,7 +454,9 @@ def test_a_conversation_that_raises_ends_with_its_failure(monkeypatch):
 def test_handling_a_message_tells_the_channel_and_what_was_asked():
     channel = SimpleNamespace(send=lambda chat, text: None)
     logger.install()
-    Desk.__new__(Desk).handle(channel, SimpleNamespace(text=CHAT_APP_START, chat=1))
+    desk = Desk.__new__(Desk)
+    desk.inside = {}
+    desk.handle(channel, SimpleNamespace(text=CHAT_APP_START, chat=1))
     started_and_ended(
         f"Handling a SimpleNamespace message: {CHAT_APP_START!r}", "SimpleNamespace message handled"
     )

@@ -1,18 +1,21 @@
 import collections
 import dataclasses
+import hashlib
 import re
+import sys
 from collections import namedtuple
-from dataclasses import dataclass
-lazy import html.parser
-lazy import io
-lazy import posixpath
+lazy import base64
+lazy import shutil
+lazy import subprocess
+lazy import tempfile
 lazy import urllib.parse
-lazy import xml.etree.ElementTree as ET
-lazy import zipfile
 lazy from pathlib import Path
 
-from .messages import say
+from .messages import next_page_line, say
+lazy from .formats import Book, opened
+lazy from .jobs import job_number
 lazy from .knowledge import Library, mentions, relevant_chunks
+lazy from .model import Models, Ollama, OllamaError
 lazy from .principles import Inducer, Principles
 lazy from .project import Tracked, ending
 lazy from .prompts import Part, Prompts
@@ -28,126 +31,171 @@ lazy from .settings import (
     READ_INDEX_TERMS,
     READ_KEY_TERMS,
     READ_MAX_BYTES,
-    READ_MIN_CHAPTERS,
-    READ_WINDOW_CHARS,
     Home,
     Numbered,
     confirm_deletion,
 )
-lazy from .text import field, fingerprint, first_line, now_text, one_line, split_text, words
-lazy from .web import Internet, is_web_address
+lazy from .text import field, first_line, now_text, split_text
+lazy from .web import WHOLE, Internet, is_web_address
 
 CHAPTER_ROLE_ORDER = ("core", "supporting", "other")
 READINGS = Numbered("readings", "reading numbers")
 READ_STEPS = ("survey", "chapters", "done")
 CHAPTER_STATE_ICONS = {"read": "✅", "unread": "⏳", "raw": "📄"}
-ABOUT_CHAPTER_TITLES = (
-    "foreword",
-    "preface",
-    "introduction",
-    "prologue",
-    "about this book",
-    "how to read",
-    "how to use",
-    "overview",
-    "summary",
-    "who this book is for",
-)
-UNREAD_MATTER_TITLES = (
-    "cover",
-    "title page",
-    "copyright",
-    "dedication",
-    "contents",
-    "acknowledg",
-    "about the author",
-    "also by",
-    "praise for",
-    "colophon",
-    "bibliography",
-    "references",
-    "endnotes",
-    "further reading",
-    "list of figures",
-    "list of tables",
-)
-HEADING_RE = re.compile(r"^(#{1,6})[ \t]+(.+?)[ \t#]*$", re.M)
-CHAPTER_LINE_RE = re.compile(
-    r"^[ \t]*(?:(?:chapter|part|book|section|appendix)[ \t]+[\w.-]+|preface|foreword|"
-    r"introduction|prologue|epilogue|conclusion|index|contents)\b[^\n]{0,80}$",
-    re.I | re.M,
-)
+KIND_ICONS = {"book": "📕", "document": "📄", "image": "🖼", "audio": "🎧"}
 NAMED_CHAPTER_RE = re.compile(r"\bchapters?\s+(\d+)", re.I)
 INDEX_LINE_RE = re.compile(r"^[-\s]*([^\d\n,;:]{2,60}?)[\s,;:]+((?:\d+(?:\s*[-–]\s*\d+)?[\s,;]*)+)$", re.M)
-HTML_RE = re.compile(r"\s*(<!doctype html|<html)", re.I)
-PDF_REFUSED = (
-    "This is a PDF. Tinker reads EPUB, Markdown and plain text: convert it first (Calibre's "
-    "`ebook-convert book.pdf book.epub` keeps its chapters), then tinker read book.epub."
-)
-WEB_PAGE = (
-    "That gave a web page, not something to read. A share link (Google Drive, Dropbox, iCloud) needs its "
-    "download link: Dropbox's ends in ?dl=1."
-)
-
 
 IndexTerm = namedtuple("IndexTerm", "term references")
-Located = namedtuple("Located", "path fragment")
-NcxEntry = namedtuple("NcxEntry", "depth title src")
-Added = namedtuple("Added", "number new")
-SpineText = namedtuple("SpineText", "text starts")
-ContentsEntry = namedtuple("ContentsEntry", "depth title where")
-ParsedText = namedtuple("ParsedText", "text ids")
+Kept = namedtuple("Kept", "kind name size fingerprint")
 
 
-@dataclass
-class Chapter:
-    number: int
-    title: str
-    text: str
-    kind: str
-    state: str = "unread"
-    principles: list = dataclasses.field(default_factory=list)
-
-    def size(self):
-        return len(words(self.text))
-
-
-@dataclass
-class Book:
-    title: str
-    author: str
-    chapters: list
-
-    @classmethod
-    def of(cls, entry):
-        return cls(entry["title"], entry["author"], [Chapter(**chapter) for chapter in entry["chapters"]])
-
-    def of_kind(self, *kinds):
-        return [chapter for chapter in self.chapters if chapter.kind in kinds]
-
-    def in_state(self, *states):
-        return [chapter for chapter in self.chapters if chapter.state in states]
-
-
-def stored(source):
+def kept(source, beyond=False):
     say.step(f"Storing {first_line(source, 80)}…", "📥")
-    book = opened(book_bytes(source), Path(urllib.parse.urlsplit(source).path).name or source)
-    if not book.of_kind("body", "front"):
-        raise SystemExit(f"Found nothing to read in {source}; nothing stored.")
-    number, new = Readings.add(book, source)
-    with say.section():
-        if not new:
+    name = source_name(source)
+    data = source_bytes(source, beyond)
+    key = hashlib.sha1(data).hexdigest()[:16]
+    known = Readings.with_fingerprint(key)
+    if known is not None:
+        entry = Readings.get(known)
+        if entry.get("file"):
+            without_downloaded_copy(source, Home.reading_file(entry["file"]))
+        with say.section():
             say.info(
-                f"Already on the reading list as #{number}: read #{number} goes on with it, "
-                f'read #{number} "WHAT" reads it again with a focus',
+                f"Already on the reading list as #{known} ({kind_of(entry)}): {next_after_keeping(known)}",
                 "📚",
             )
-            return number, False
+        return known, False
+    found = opened(data, name)
+    try:
+        book = sensed(found, name)
+    except Unsensed as refusal:
+        number = stored(Book(found.title, found.author, []), source, found, data, key)
+        with say.section():
+            say.warn(f"#{number} {found.title} kept with no chapters: {refusal}")
+        return number, True
+    if not book.of_kind("body", "front"):
+        raise SystemExit(f"Found nothing to read in {source}; nothing stored.")
+    number = stored(book, source, found, data, key)
+    with say.section():
         say.done(
-            f"#{number} {book.title}{f' by {book.author}' if book.author else ''}: "
+            f"#{number} ({found.kind}) {book.title}{f' by {book.author}' if book.author else ''}: "
             f"{len(book.chapters)} chapter(s), {len(book.in_state('raw'))} kept as text only"
         )
+        say.info(f"Next: {next_after_keeping(number)}", "📚")
     return number, True
+
+
+def heard_again(number):
+    entry = known_reading(number)
+    if entry["chapters"] or kind_of(entry) != "audio" or not entry.get("file"):
+        return
+    name = source_name(entry["source"])
+    found = opened(Home.reading_file(entry["file"]).read_bytes(), name)
+    try:
+        book = sensed(found, name)
+    except Unsensed as refusal:
+        with say.section():
+            say.warn(f"#{number} {entry['title']} kept with no chapters: {refusal}")
+        return
+    chapters = [dataclasses.asdict(Readings.unread(chapter)) for chapter in book.chapters]
+    Readings.save(dict(entry, chapters=chapters))
+
+
+def source_name(source):
+    return Path(urllib.parse.urlsplit(source).path).name or source
+
+
+def next_after_keeping(number):
+    return f"ask about it in a chat, or read #{number} learn to learn from it"
+
+
+def sensed(found, name):
+    if not found.readable:
+        raise Unsensed(f"{name} is not a file Tinker can read")
+    return found.sensed(Senses(name))
+
+
+def stored(book, source, found, data, key):
+    file = Home.reading_file(f"{key}{Path(found.name).suffix.lower()}")
+    file.write_bytes(data)
+    without_downloaded_copy(source, file)
+    return Readings.add(book, source, Kept(found.kind, file.name, len(data), key))
+
+
+def without_downloaded_copy(source, file):
+    copy = Path(source).resolve()
+    if copy.parent == file.parent.resolve() and copy != file.resolve() and copy.is_file():
+        copy.unlink()
+
+
+class Unsensed(Exception):
+    pass
+
+
+class TooLarge(SystemExit):
+    pass
+
+
+class Senses:
+    REPLY_TOKENS = 4096
+    FFMPEG_INSTALL = {"darwin": "brew install ffmpeg"}
+    FFMPEG_INSTALL_ELSEWHERE = "sudo apt install ffmpeg"
+
+    def __init__(self, name):
+        self.name = name
+
+    def seen(self, image):
+        self.need_sight(f"{self.name} is an image: describing it needs a model that sees")
+        return self.looked(Prompts.SEE_IMAGE, image)
+
+    def scanned(self, images):
+        if not images:
+            raise Unsensed(f"{self.name} has no text and no page image Tinker can read")
+        self.need_sight(f"{self.name} is a scan: reading its pages needs a model that sees")
+        return [self.looked(Prompts.READ_PAGE, image) for image in images]
+
+    def heard(self, data, suffix):
+        ffmpeg = shutil.which("ffmpeg")
+        if ffmpeg is None:
+            install = self.FFMPEG_INSTALL.get(sys.platform, self.FFMPEG_INSTALL_ELSEWHERE)
+            raise Unsensed(f"{self.name} is a recording: audio needs ffmpeg, installed with `{install}`")
+        if Models.hearing() is None:
+            self.get_hearing()
+        try:
+            return Models.transcript(self.wav(ffmpeg, data, suffix))
+        except subprocess.CalledProcessError as error:
+            raise Unsensed(
+                f"{self.name} is a recording: ffmpeg failed: {error.stderr.decode(errors='replace').strip()}"
+            )
+        except OllamaError as error:
+            raise Unsensed(f"{self.name} is a recording: {error}")
+
+    def get_hearing(self):
+        name = Models.audio_offer()
+        if not say.agreed(Models.audio_question(name)):
+            raise Unsensed(f"{self.name} is a recording: no model that hears was got")
+        try:
+            Ollama.pull(name)
+        except OllamaError as error:
+            raise Unsensed(f"{self.name} is a recording: {error}")
+
+    def need_sight(self, reason):
+        if "vision" not in Models.senses():
+            raise Unsensed(f"{reason} (vision) as the quick model")
+
+    def looked(self, prompt, image):
+        message = {"role": "user", "content": prompt, "images": [base64.b64encode(image).decode()]}
+        return Models.quick_reply([message], self.REPLY_TOKENS)
+
+    @staticmethod
+    def wav(ffmpeg, data, suffix):
+        with tempfile.NamedTemporaryFile(suffix=suffix) as recording:
+            recording.write(data)
+            recording.flush()
+            command = [ffmpeg, "-nostdin", "-loglevel", "error", "-i", recording.name]
+            command += ["-ar", "16000", "-ac", "1", "-f", "wav", "pipe:1"]
+            return subprocess.run(command, capture_output=True, check=True).stdout
 
 
 class Reader(Tracked):
@@ -163,7 +211,8 @@ class Reader(Tracked):
         chapters = focused(book, focus) if focus else in_order(book.in_state("unread"), survey)
         if not chapters:
             say.info(
-                f'Every chapter of #{number} is read: read #{number} "WHAT" reads it again with a focus', "📚"
+                f'Every chapter of #{number} is read: read #{number} learn "WHAT" reads it again with a focus',
+                "📚",
             )
             return read_ending(Readings.get(number), 0, [])
         found = self.chapters_read(entry, survey, chapters, focus)
@@ -229,27 +278,27 @@ class Reader(Tracked):
 
 class Readings:
     @staticmethod
-    def add(book, source):
-        key = fingerprint("\n\n".join(chapter.text for chapter in book.chapters))[:16]
-        known = Readings.with_fingerprint(key)
-        if known is not None:
-            return Added(known, False)
+    def add(book, source, file):
         number = READINGS.next_number()
         chapters = [dataclasses.asdict(Readings.unread(chapter)) for chapter in book.chapters]
         Readings.save(
             {
                 "number": number,
+                "kind": file.kind,
                 "title": book.title,
                 "author": book.author,
+                "file": file.name,
                 "source": source,
-                "fingerprint": key,
+                "size": file.size,
+                "fingerprint": file.fingerprint,
                 "added": now_text(),
+                "learned": False,
                 "topic": f"read-{number}",
                 "survey": None,
                 "chapters": chapters,
             }
         )
-        return Added(number, True)
+        return number
 
     @staticmethod
     def with_fingerprint(key):
@@ -304,8 +353,14 @@ class Readings:
         return changed
 
     @staticmethod
+    def renamed(number, title):
+        Readings.save(dict(Readings.get(number), title=title))
+
+    @staticmethod
     def forget(number):
         entry = Readings.get(number)
+        if entry.get("file"):
+            Home.reading_file(entry["file"]).unlink(missing_ok=True)
         READINGS.delete(number)
         Home.store().delete("learned", entry["topic"])
         Principles(None).forget_scope(entry["topic"])
@@ -340,6 +395,44 @@ class Readings:
         return found
 
 
+def answered_inside(number, question):
+    entry = Readings.get(number)
+    system = {"role": "system", "content": Prompts.INSIDE_READING.format(title=entry["title"])}
+    return Models.quick_reply([system, inside_question(entry, question)], Senses.REPLY_TOKENS)
+
+
+class Shelf:
+    def entered(self, words):
+        entry = self.found(words)
+        return (entry["number"], entry["title"]) if entry and entry["chapters"] else None
+
+    @staticmethod
+    def found(words):
+        number = job_number(words[0]) if len(words) == 1 else None
+        if number:
+            return Readings.get(number)
+        source = " ".join(words)
+        return next((entry for entry in Readings.all().values() if entry["source"] == source), None)
+
+    @staticmethod
+    def exists(number):
+        return Readings.get(number) is not None
+
+    @staticmethod
+    def answered(number, text):
+        return answered_inside(number, text)
+
+
+def inside_question(entry, question):
+    passages = Readings.passages([entry["number"]], question)
+    shown = "\n\n".join(f"[{passage['source']}]\n{passage['text']}" for passage in passages)
+    message = {"role": "user", "content": f"Passages:\n{shown}\n\nQuestion: {question}"}
+    if kind_of(entry) == "image" and "vision" in Models.senses():
+        image = Home.reading_file(entry["file"]).read_bytes()
+        message["images"] = [base64.b64encode(image).decode()]
+    return message
+
+
 def read_ending(entry, new, chapters):
     book, topic = Book.of(entry), Library.read(entry["topic"]) or {}
     readable = [chapter for chapter in book.chapters if chapter.state != "raw"]
@@ -363,23 +456,45 @@ def read_ending(entry, new, chapters):
         details,
         [
             ("Ask about it", f"tinker ask what does {entry['title']} say about …"),
-            ("Look again", f'tinker read #{number} "what to look for"'),
+            ("Look again", f'tinker read #{number} learn "what to look for"'),
             ("See it", f"tinker read show #{number}"),
         ],
     )
 
 
-def show_list(page=1):
+def show_list(page=1, inside=None):
     readings, pages = Numbered.page(READINGS.newest(), page)
     if not readings:
         say.info("Nothing on the reading list: tinker read FILE | URL adds one (in a chat: attach it).", "📭")
         return
     with say.part("Reading list", "📚"):
         for entry in readings:
-            say.item(f"#{entry['number']} {entry['title']}: {progress(entry)} · added {entry['added']}")
+            say.item(listed(entry, inside))
     if page < pages:
-        say.info(f"Page {page} of {pages}: tinker read list {page + 1} for more.", "👉")
+        say.info(next_page_line(page, pages, f"read list {page + 1}"), "👉")
     say.info("tinker read show #N shows one; tinker read #N goes on with it.", "👉")
+
+
+def listed(entry, inside=None):
+    size = f" · {byte_size(entry['size'])}" if entry.get("size") else ""
+    mark = " ✓" if entry.get("learned") else ""
+    here = " ← inside" if entry["number"] == inside else ""
+    return (
+        f"#{entry['number']} {KIND_ICONS[kind_of(entry)]} {entry['title']}: {progress(entry)}{size} · added "
+        f"{entry['added']}{mark}{here}"
+    )
+
+
+def kind_of(entry):
+    return entry.get("kind", "book")
+
+
+def byte_size(count):
+    for unit in ("B", "KB", "MB"):
+        if count < 1000:
+            return f"{count:.0f} {unit}" if unit == "B" else f"{count:.1f} {unit}"
+        count /= 1000
+    return f"{count:.1f} GB"
 
 
 def show(number):
@@ -387,6 +502,8 @@ def show(number):
     with say.part(
         f"#{number} {entry['title']}" + (f" by {entry['author']}" if entry["author"] else ""), "📘"
     ):
+        kept_as = [kind_of(entry), entry.get("file"), entry.get("size") and byte_size(entry["size"])]
+        say.info(f"{KIND_ICONS[kind_of(entry)]} {' · '.join(part for part in kept_as if part)}", "🗂")
         say.info(f"From {entry['source']}, added {entry['added']}: {progress(entry)}", "📥")
         if entry["survey"]:
             say.info(entry["survey"]["summary"], "📝")
@@ -396,10 +513,16 @@ def show(number):
             )
             say.item(f"{CHAPTER_STATE_ICONS[chapter.state]} {chapter.number}. {chapter.title} ({note})")
     say.info(
-        f'tinker read #{number} goes on · tinker read #{number} "WHAT" looks again · tinker clear read '
-        f"#{number} deletes it",
+        f'tinker read #{number} learn goes on · tinker read #{number} learn "WHAT" looks again · tinker read '
+        f"rename #{number} TITLE renames it · tinker read forget #{number} deletes it",
         "👉",
     )
+
+
+def renamed(number, title):
+    known_reading(number)
+    Readings.renamed(number, title)
+    say.done(f"Renamed: #{number} {title}")
 
 
 def forgotten(numbers, yes=False):
@@ -463,95 +586,20 @@ def focused(book, focus):
     )
 
 
-def book_bytes(source):
+def source_bytes(source, beyond=False):
     if is_web_address(source):
-        [page] = Internet().fetch([source], READ_MAX_BYTES)
+        [page] = Internet().fetch([source], WHOLE if beyond else READ_MAX_BYTES)
+        if page.why.startswith("larger than"):
+            raise TooLarge(f"Could not download {source}: {page.why}; nothing read.")
         if page.why:
             raise SystemExit(f"Could not download {source}: {page.why}")
         return page.data
     path = Path(source).expanduser()
     if not path.is_file():
         raise SystemExit(f"No file at {source}: give a book's file or its web address.")
-    if path.stat().st_size > READ_MAX_BYTES:
-        raise SystemExit(f"{source} is larger than {READ_MAX_BYTES // 1_000_000} MB; nothing read.")
+    if path.stat().st_size > READ_MAX_BYTES and not beyond:
+        raise TooLarge(f"{source} is larger than {READ_MAX_BYTES // 1_000_000} MB; nothing read.")
     return path.read_bytes()
-
-
-def opened(data, name):
-    title = re.sub(r"[-_]+", " ", Path(name).stem).strip() or "Untitled book"
-    if data.startswith(b"%PDF"):
-        raise SystemExit(PDF_REFUSED)
-    if data.startswith(b"PK\x03\x04"):
-        return Epub(data).book(title)
-    if b"\x00" in data[:4096]:
-        raise SystemExit(f"{name} is not a book Tinker can read: it reads EPUB, Markdown and plain text.")
-    text = data.decode("utf-8-sig", errors="replace")
-    if HTML_RE.match(text):
-        raise SystemExit(WEB_PAGE)
-    return Book(lone_title(text) or title, "", headed_chapters(text) or plain_chapters(text))
-
-
-def lone_title(text):
-    headings = [(len(match.group(1)), match.group(2)) for match in HEADING_RE.finditer(text)]
-    top = [
-        title
-        for level, title in headings
-        if level == min((heading_level for heading_level, _ in headings), default=0)
-    ]
-    return top[0].strip() if len(top) == 1 and len(headings) > 1 else ""
-
-
-def headed_chapters(text):
-    headings = [(len(match.group(1)), match.group(2), match.start()) for match in HEADING_RE.finditer(text)]
-    if lone_title(text):
-        headings = [heading for heading in headings if heading[0] != min(level for level, _, _ in headings)]
-    depth = chapter_depth([level for level, _, _ in headings])
-    return sliced(text, {start: title for level, title, start in headings if level <= depth})
-
-
-def plain_chapters(text):
-    marks = {match.start(): match.group(0).strip() for match in CHAPTER_LINE_RE.finditer(text)}
-    if len(marks) >= 2:
-        return sliced(text, marks)
-    return numbered(
-        [(f"Part {number}", piece) for number, piece in enumerate(split_text(text, READ_WINDOW_CHARS), 1)]
-    )
-
-
-def chapter_depth(depths):
-    for depth in sorted(set(depths)):
-        if sum(level <= depth for level in depths) >= READ_MIN_CHAPTERS:
-            return depth
-    return max(depths, default=1)
-
-
-def sliced(text, marks):
-    if not marks:
-        return []
-    starts = sorted(marks)
-    pieces = [("Opening pages", text[: starts[0]])] if starts[0] > 0 else []
-    pieces += [(marks[start], text[start:end]) for start, end in zip(starts, starts[1:] + [len(text)])]
-    return numbered(pieces)
-
-
-def numbered(pieces):
-    pieces = [(one_line(title), tidy(text)) for title, text in pieces]
-    pieces = [(title, text) for title, text in pieces if len(words(text)) > len(words(title)) + 3]
-    return [Chapter(number, title, text, kind_of(title)) for number, (title, text) in enumerate(pieces, 1)]
-
-
-def tidy(text):
-    lines = [one_line(line) for line in text.splitlines()]
-    return re.sub(r"\n{3,}", "\n\n", "\n".join(lines)).strip()
-
-
-def kind_of(title):
-    name = title.lower()
-    if re.search(r"\bindex\b", name):
-        return "index"
-    if any(word in name for word in UNREAD_MATTER_TITLES):
-        return "raw"
-    return "front" if any(word in name for word in ABOUT_CHAPTER_TITLES) else "body"
 
 
 def index_terms(book, limit=READ_INDEX_TERMS):
@@ -604,203 +652,3 @@ def read_phase(delta, software):
     if delta["kind"] != "add":
         return delta
     return dict(delta, phase=delta["phase"] if software and delta["phase"] in FACT_PHASES else "book")
-
-
-class Epub:
-    def __init__(self, data):
-        try:
-            self.zip = zipfile.ZipFile(io.BytesIO(data))
-            self.opf_path = self.xml("META-INF/container.xml").find(".//{*}rootfile").get("full-path")
-            self.opf = self.xml(self.opf_path)
-        except (zipfile.BadZipFile, KeyError, AttributeError, TypeError, ET.ParseError) as exc:
-            raise SystemExit(f"This is not an EPUB Tinker can read ({first_line(str(exc), 120)}).") from None
-        self.manifest = {item.get("id"): item for item in self.opf.iterfind(".//{*}manifest/{*}item")}
-
-    def book(self, title):
-        text, starts = self.spine_text()
-        chapters = (
-            contents_chapters(text, starts, self.contents()) or headed_chapters(text) or plain_chapters(text)
-        )
-        return Book(self.metadata("title") or title, self.metadata("creator"), chapters)
-
-    def xml(self, path):
-        return ET.fromstring(self.zip.read(path))
-
-    def text_of(self, path):
-        return self.zip.read(path).decode("utf-8", errors="replace")
-
-    def metadata(self, name):
-        found = self.opf.find(f".//{{*}}metadata/{{*}}{name}")
-        return one_line(found.text) if found is not None else ""
-
-    def spine_text(self):
-        parts, starts, size = [], {}, 0
-        for ref in self.opf.iterfind(".//{*}spine/{*}itemref"):
-            item = self.manifest.get(ref.get("idref"))
-            path = located(item.get("href"), self.opf_path)[0] if item is not None else ""
-            if path not in self.zip.namelist():
-                continue
-            text, ids = XhtmlText.of(self.text_of(path))
-            starts[(path, "")] = size
-            starts.update({(path, found): size + at for found, at in ids.items()})
-            parts.append(text + "\n\n")
-            size += len(text) + 2
-        return SpineText("".join(parts), starts)
-
-    def contents(self):
-        nav = next(
-            (item for item in self.manifest.values() if "nav" in (item.get("properties") or "").split()), None
-        )
-        if nav is not None:
-            document = located(nav.get("href"), self.opf_path)[0]
-            entries = NavEntries.of(self.text_of(document))
-        else:
-            ncx = next(
-                (
-                    item
-                    for item in self.manifest.values()
-                    if item.get("media-type") == "application/x-dtbncx+xml"
-                ),
-                None,
-            )
-            if ncx is None:
-                return []
-            document = located(ncx.get("href"), self.opf_path)[0]
-            entries = list(ncx_entries(self.xml(document).find(".//{*}navMap")))
-        return [ContentsEntry(depth, title, located(href, document)) for depth, title, href in entries]
-
-
-def located(href, document):
-    path, _, fragment = urllib.parse.unquote(href or "").partition("#")
-    return Located(
-        posixpath.normpath(posixpath.join(posixpath.dirname(document), path)) if path else document, fragment
-    )
-
-
-def contents_chapters(text, starts, contents):
-    depth = chapter_depth([entry_depth for entry_depth, _, _ in contents])
-    marks = {}
-    for entry_depth, title, (path, fragment) in contents:
-        start = starts.get((path, fragment), starts.get((path, "")))
-        if entry_depth <= depth and start is not None:
-            marks.setdefault(start, title)
-    return sliced(text, marks)
-
-
-def ncx_entries(parent, depth=1):
-    if parent is None:
-        return
-    for point in parent.findall("{*}navPoint"):
-        label, content = point.find("{*}navLabel/{*}text"), point.find("{*}content")
-        if label is not None and content is not None:
-            yield NcxEntry(depth, one_line(label.text), content.get("src"))
-        yield from ncx_entries(point, depth + 1)
-
-
-class XhtmlText(html.parser.HTMLParser):
-    BLOCKS = {
-        "p",
-        "div",
-        "section",
-        "article",
-        "aside",
-        "blockquote",
-        "pre",
-        "table",
-        "tr",
-        "ul",
-        "ol",
-        "dl",
-        "dt",
-        "dd",
-        "figure",
-        "figcaption",
-        "hr",
-        "header",
-        "footer",
-        "body",
-    }
-    HEADINGS = {f"h{level}": level for level in range(1, 7)}
-    HIDDEN = {"head", "script", "style"}
-
-    def __init__(self):
-        super().__init__(convert_charrefs=True)
-        self.parts, self.size, self.ids, self.hidden = [], 0, {}, 0
-
-    @classmethod
-    def of(cls, markup):
-        parser = cls()
-        parser.feed(markup)
-        parser.close()
-        return ParsedText("".join(parser.parts), parser.ids)
-
-    def handle_starttag(self, tag, attrs):
-        if tag in self.HIDDEN:
-            self.hidden += 1
-            return
-        found = dict(attrs).get("id")
-        if found:
-            self.ids.setdefault(found, self.size)
-        if tag in self.HEADINGS:
-            self.add("\n\n" + "#" * self.HEADINGS[tag] + " ")
-        elif tag in self.BLOCKS:
-            self.add("\n\n")
-        elif tag == "li":
-            self.add("\n- ")
-        elif tag == "br":
-            self.add("\n")
-
-    def handle_endtag(self, tag):
-        if tag in self.HIDDEN:
-            self.hidden = max(0, self.hidden - 1)
-        elif tag in self.HEADINGS or tag in self.BLOCKS:
-            self.add("\n\n")
-
-    def handle_data(self, data):
-        if not self.hidden:
-            self.add(re.sub(r"\s+", " ", data))
-
-    def add(self, text):
-        self.parts.append(text)
-        self.size += len(text)
-
-
-class NavEntries(html.parser.HTMLParser):
-    def __init__(self):
-        super().__init__(convert_charrefs=True)
-        self.navs, self.depth, self.link, self.words, self.inside = [], 0, None, [], False
-
-    @classmethod
-    def of(cls, markup):
-        parser = cls()
-        parser.feed(markup)
-        parser.close()
-        tocs = [entries for toc, entries in parser.navs if toc and entries] or [
-            nav_entries for _, nav_entries in parser.navs if nav_entries
-        ]
-        return tocs[0] if tocs else []
-
-    def handle_starttag(self, tag, attrs):
-        attrs = dict(attrs)
-        if tag == "nav":
-            self.navs.append(("toc" in f"{attrs.get('epub:type', '')} {attrs.get('role', '')}", []))
-            self.inside, self.depth = True, 0
-        elif self.inside and tag == "ol":
-            self.depth += 1
-        elif self.inside and tag == "a":
-            self.link, self.words = attrs.get("href") or "", []
-
-    def handle_endtag(self, tag):
-        if tag == "nav":
-            self.inside = False
-        elif self.inside and tag == "ol":
-            self.depth -= 1
-        elif self.inside and tag == "a" and self.link is not None:
-            title = one_line("".join(self.words))
-            if title and self.link:
-                self.navs[-1][1].append((max(self.depth, 1), title, self.link))
-            self.link = None
-
-    def handle_data(self, data):
-        if self.link is not None:
-            self.words.append(data)

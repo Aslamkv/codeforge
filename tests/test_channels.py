@@ -7,6 +7,7 @@ import sys
 import time
 import types
 import urllib.parse
+from pathlib import Path
 
 import pytest
 
@@ -441,6 +442,20 @@ def test_an_edit_keeps_the_fresh_answer_button():
     assert api.calls[-1][1]["reply_markup"] == button
 
 
+@pytest.mark.spec("CNV-25")
+def test_offer_leave_puts_a_leave_button_on_the_answer():
+    api = BotAPI()
+    telegram(api).offer_leave("42", 7, 3)
+    [(path, fields)] = api.calls
+    assert (
+        path.endswith("editMessageReplyMarkup") and fields["chat_id"] == "42" and fields["message_id"] == "7"
+    )
+    assert json.loads(fields["reply_markup"]) == {
+        "inline_keyboard": [[{"text": "📕 Leave #3", "callback_data": "/leave"}]]
+    }
+    telegram(BotAPI(editMessageReplyMarkup=OSError("down"))).offer_leave("42", 7, 3)
+
+
 @pytest.mark.spec("CHN-6")
 def test_skip_waiting_moves_past_old_messages():
     channel = telegram(BotAPI(getUpdates=[[{"update_id": 99}]]))
@@ -624,20 +639,46 @@ def test_send_file_uploads_a_document_with_its_caption(tmp_path):
     assert failing.send_file("42", page, "the caption") == 13
 
 
-def sent_file(chat=42, size=10, name="My Book.epub"):
+def sent_file(chat=42, size=10, name="My Book.epub", caption=None, **sent):
+    sent = sent or {"document": {"file_id": "F1", "file_name": name, "file_size": size}}
+    sent |= {"caption": caption} if caption else {}
     return [
         [
             {
                 "update_id": 1,
-                "message": {
-                    "message_id": 5,
-                    "chat": {"id": chat},
-                    "from": {"username": "me"},
-                    "document": {"file_id": "F1", "file_name": name, "file_size": size},
-                },
+                "message": {"message_id": 5, "chat": {"id": chat}, "from": {"username": "me"}, **sent},
             }
         ]
     ]
+
+
+def received_file(tinker_home, **sent):
+    api = BotAPI(
+        getUpdates=sent_file(**sent),
+        getFile={"file_path": "documents/file_1"},
+        **{"file_1": (200, "FILE BYTES")},
+    )
+    messages = telegram(api).receive(1)
+    path = Path(messages[0].text.removeprefix("/read "))
+    assert path.parent == tinker_home / "reading" and path.read_bytes() == b"FILE BYTES"
+    assert api.calls[1] == ("/botT0K/getFile", {"file_id": "F2"})
+    return path.name, [message.text for message in messages[1:]]
+
+
+@pytest.mark.spec("CHN-9")
+def test_a_photo_voice_or_audio_sent_is_read_and_its_caption_asked_after(tinker_home, home_store):
+    photo = [{"file_id": "F1", "file_size": 10}, {"file_id": "F2", "file_size": 90}]
+    assert received_file(tinker_home, photo=photo) == ("photo.jpg", [])
+    assert received_file(tinker_home, photo=photo, caption="what is drawn?") == (
+        "photo.jpg",
+        ["what is drawn?"],
+    )
+    voice = {"file_id": "F2", "mime_type": "audio/ogg", "file_size": 10}
+    assert received_file(tinker_home, voice=voice) == ("voice.ogg", [])
+    audio = {"file_id": "F2", "mime_type": "audio/mpeg"}
+    assert received_file(tinker_home, audio=audio) == ("audio.mp3", [])
+    named = dict(audio, file_name="Talk.m4a")
+    assert received_file(tinker_home, audio=named, caption="sum it up") == ("Talk.m4a", ["sum it up"])
 
 
 @pytest.mark.spec("CHN-9")
@@ -655,7 +696,7 @@ def test_a_book_sent_in_a_chat_is_kept_and_read(tinker_home, home_store):
 
 @pytest.mark.spec("CHN-9")
 def test_a_book_that_cannot_be_taken_is_said_and_one_from_a_stranger_ignored(tinker_home, home_store):
-    api = BotAPI(getUpdates=sent_file(size=30_000_000), sendMessage={"message_id": 9})
+    api = BotAPI(getUpdates=sent_file(size=30_000_000, caption="what?"), sendMessage={"message_id": 9})
     assert telegram(api).receive(1) == []
     assert "larger than a bot may download" in api.calls[-1][1]["text"]
     api = BotAPI(
@@ -669,3 +710,20 @@ def test_a_book_that_cannot_be_taken_is_said_and_one_from_a_stranger_ignored(tin
     api = BotAPI(getUpdates=sent_file(chat=7))
     assert telegram(api).receive(1) == [] and [path for path, _ in api.calls] == ["/botT0K/getUpdates"]
     assert not (tinker_home / "reading").exists()
+
+
+@pytest.mark.spec("SET-11")
+def test_a_next_page_button_sends_its_command_when_tapped():
+    api = BotAPI()
+    channel = telegram(api)
+    channel.offer_next("42", 7, "read list 2")
+    [(path, fields)] = api.calls
+    assert path.endswith("editMessageReplyMarkup") and fields["message_id"] == "7"
+    assert json.loads(fields["reply_markup"]) == {
+        "inline_keyboard": [[{"text": "Next page ›", "callback_data": "/read list 2"}]]
+    }
+    channel.offer_next("42", 8, "x" * 64)
+    assert len(api.calls) == 1
+    tapped = {"id": "q1", "from": {"username": "me"}, "message": {"message_id": 7, "chat": {"id": 42}}}
+    api = BotAPI(getUpdates=[[{"update_id": 10, "callback_query": dict(tapped, data="/read list 2")}]])
+    assert [message.text for message in telegram(api).receive(1)] == ["/read list 2"]

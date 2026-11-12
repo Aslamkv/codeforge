@@ -42,6 +42,7 @@ LAYERS = (
     "learning",
     "graph",
     "dreaming",
+    "formats",
     "reading",
     "teaching",
     "exercising",

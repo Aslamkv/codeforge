@@ -26,8 +26,8 @@ from .jobs import (
     queue_action,
     queue_lines,
 )
-from .messages import Messages, human_duration, paint, say
-from .reading import Reader
+from .messages import Messages, human_duration, next_page_line, paint, say
+from .reading import Reader, Shelf
 from .remembering import Scratchpad
 from .system import SYSTEM_CHECKS, SYSTEM_WORDS
 lazy from .building import BugReproducer, CodeWriter, TestToolSetup, TestWriter, Verifier
@@ -220,7 +220,7 @@ class Cli:
     def run_at_once(argv):
         if not argv:
             open_home()
-            conversation.session(Path.cwd())
+            conversation.session(Path.cwd(), Shelf())
             raise SystemExit(0)
         if argv[0] in ("help", "-h", "--help"):
             Cli.help(argv[1] if len(argv) > 1 else None)
@@ -233,7 +233,7 @@ class Cli:
             if channels is None:
                 raise SystemExit("tinker: channels are not installed (tinkerkit/channels.py is missing)")
             open_home()
-            channels.ChannelCommand.run(argv[1:])
+            channels.ChannelCommand.run(argv[1:], Shelf())
             raise SystemExit(0)
         if argv[0] == "clear":
             given = Cli.parser("clear").parse_args(argv[1:])
@@ -498,8 +498,19 @@ class Cli:
             if Cli.lists_readings(words) or (words[0] == "show" and len(words) == 2 and job_number(words[1])):
                 return words
             parser.error("use tinker read list [PAGE], or tinker read show #N")
+        if words[0] == "rename":
+            title = " ".join(words[2:]).strip(" \"'“”")
+            if len(words) > 2 and job_number(words[1]) and title:
+                return [*words[:2], title]
+            parser.error("use tinker read rename #N TITLE")
+        if words[0] == "forget":
+            if words[1:] and all(job_number(word) for word in words[1:]):
+                return words
+            parser.error("use tinker read forget #N...")
         if job_number(words[0]):
-            return words[:1] + ([" ".join(words[1:]).strip(" \"'“”")] if words[1:] else [])
+            if words[1:2] in ([], ["learn"]):
+                return words[:2] + ([" ".join(words[2:]).strip(" \"'“”")] if words[2:] else [])
+            parser.error('use tinker read #N, or tinker read #N learn ["WHAT"]')
         return [Cli.non_empty(" ".join(words), "read", parser)]
 
     @staticmethod
@@ -896,16 +907,40 @@ class Commands:
     def read(self):
         words = self.args.read
         if words[0] == "list":
-            return reading.show_list(int(words[1]) if words[1:] else 1)
+            return reading.show_list(
+                int(words[1]) if words[1:] else 1, int(os.environ.get("TINKER_INSIDE") or 0) or None
+            )
         if words[0] == "show":
             return reading.show(job_number(words[1]))
-        number, focus = job_number(words[0]), " ".join(words[1:])
+        if words[0] == "rename":
+            return reading.renamed(job_number(words[1]), words[2])
+        if words[0] == "forget":
+            return reading.forgotten([job_number(word) for word in words[1:]], self.args.yes)
+        number = job_number(words[0])
         if number is None:
-            number, new = reading.stored(words[0])
-            if not new:
-                return
-            Jobs.retarget(["read", f"#{number}"])
-        title = reading.known_reading(number)["title"]
+            self.keep_reading(words[0])
+            return
+        if words[1:2] != ["learn"]:
+            reading.heard_again(number)
+            return reading.show(number)
+        self.learn_reading(number, " ".join(words[2:]))
+
+    @staticmethod
+    def keep_reading(source):
+        try:
+            reading.kept(source)
+        except reading.TooLarge:
+            if not say.agreed(
+                f"{source} is larger than {reading.READ_MAX_BYTES // 1_000_000} MB: keep it anyway?"
+            ):
+                raise
+            reading.kept(source, beyond=True)
+
+    def learn_reading(self, number, focus):
+        entry = reading.known_reading(number)
+        title = entry["title"]
+        if not entry["chapters"]:
+            raise SystemExit(f"#{number} {title} has no chapters to learn from.")
         self.follow(f"Reading #{number} {first_line(title, 50)}")
         self.reported(
             lambda: (self.model_in_use(*Commands.checked_model(), f"{title} {focus}", WORK_THINK),),
@@ -1036,9 +1071,7 @@ class Commands:
             title = job["title"][:70] + ("..." if len(job["title"]) > 70 else "")
             say.text(f"{'#' + str(job['number']):6} {job['state']:9} {job['started']:17} {title}")
         if page < pages:
-            say.text(
-                f"\nPage {page} of {pages}: tinker jobs {(state + ' ') if state else ''}{page + 1} for more."
-            )
+            say.text("\n" + next_page_line(page, pages, f"jobs {(state + ' ') if state else ''}{page + 1}"))
         elif pages > 1 or page > 1:
             say.text(f"\nPage {page} of {pages}.")
 

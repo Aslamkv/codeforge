@@ -17,6 +17,7 @@ lazy from .jobs import journaled
 lazy from .passages import Block, MainBlocks, is_html, text_blocks
 lazy from .search import Mwmbl, SearchFailed, Wikibooks, Wikipedia
 
+WHOLE = "whole"
 TEXT_KINDS = (
     "text/plain",
     "text/markdown",
@@ -147,7 +148,7 @@ class Internet:
         return Fetcher(
             int(Config.get("fetch_workers")),
             float(Config.get("fetch_timeout")),
-            int(max_bytes or Config.get("fetch_max_bytes")),
+            None if max_bytes == WHOLE else int(max_bytes or Config.get("fetch_max_bytes")),
         )
 
 

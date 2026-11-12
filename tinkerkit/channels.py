@@ -2,6 +2,7 @@ from collections import namedtuple
 lazy import getpass
 lazy import http.client
 lazy import json
+lazy import mimetypes
 lazy import queue
 lazy import re
 lazy import secrets
@@ -14,12 +15,16 @@ lazy from pathlib import Path
 
 from .conversation import (
     CHAT_FRESH,
+    CHAT_LEAVE,
     FRESH_ANSWER_BUTTON,
+    LEAVE_READING_BUTTON,
+    NEXT_PAGE_BUTTON,
     Channel,
     ChannelError,
     Desk,
     Markup,
     Message,
+    NoShelf,
     Secret,
     first_words,
     started_by_a_conversation,
@@ -34,10 +39,13 @@ TELEGRAM_RATE_LIMIT_WAITS = 3
 TELEGRAM_MAX_CAPTION_CHARS = 1024
 TELEGRAM_MAX_MENU_DESCRIPTION_CHARS = 256
 TELEGRAM_MAX_PLACEHOLDER_CHARS = 64
+TELEGRAM_CALLBACK_DATA_BYTES = 64
 TELEGRAM_MAX_DOWNLOAD_BYTES = 20_000_000
 SENT_FILE_DOWNLOAD_TIMEOUT = 120
+SENT_FILE_NAMES = frozendict(document="book", photo="photo.jpg", voice="voice.ogg", audio="audio")
 FORM = "application/x-www-form-urlencoded"
 CONNECT_SECONDS = 1
+NO_SHELF = NoShelf()
 
 
 Upload = namedtuple("Upload", "body content_type")
@@ -55,7 +63,7 @@ class ChannelCommand:
     )
 
     @staticmethod
-    def run(argv):
+    def run(argv, shelf=NO_SHELF):
         action, rest = (argv[0], argv[1:]) if argv else ("list", [])
         actions = {
             "list": ChannelCommand.list,
@@ -63,7 +71,7 @@ class ChannelCommand:
             "remove": ChannelCommand.remove,
             "enable": ChannelCommand.enable,
             "disable": ChannelCommand.disable,
-            "start": ChannelCommand.start,
+            "start": lambda rest: ChannelCommand.start(rest, shelf),
             "goodbye": ChannelCommand.goodbye,
         }
         if action in ("help", "-h", "--help"):
@@ -178,7 +186,7 @@ class ChannelCommand:
         ChannelCommand.enable(rest, on=False)
 
     @staticmethod
-    def start(rest):
+    def start(rest, shelf):
         if rest:
             channels = [Channels.make(ChannelCommand.named(rest, "start"))]
         else:
@@ -187,7 +195,7 @@ class ChannelCommand:
             raise SystemExit("tinker: no channel is enabled (tinker channel enable NAME, or start NAME)")
         for channel in channels:
             ChannelCommand.check(channel)
-        Desk(channels, Path.cwd()).run()
+        Desk(channels, Path.cwd(), shelf=shelf).run()
 
     @staticmethod
     def goodbye(rest):
@@ -299,11 +307,9 @@ class TelegramChannel(Channel):
             if update.get("callback_query"):
                 messages.extend(self.tapped(update["callback_query"]))
             message = update.get("message") or {}
-            if self.book_sent(message):
-                message = self.book_in(message)
-            if message.get("text"):
-                messages.append(self.message_of(message))
-                self.last_words_by_chat[str(message["chat"]["id"])] = (message["text"], time.monotonic())
+            for words in self.words_in(message):
+                messages.append(self.message_of(dict(message, text=words)))
+                self.last_words_by_chat[str(message["chat"]["id"])] = (words, time.monotonic())
             if message.get("message_id"):
                 self.seen(str(message["chat"]["id"]), message["message_id"])
         return messages
@@ -314,17 +320,28 @@ class TelegramChannel(Channel):
         except OSError, ChannelError:
             pass
         message = query.get("message") or {}
-        if query.get("data") != CHAT_FRESH or not message.get("chat"):
+        data = query.get("data") or ""
+        if not data.startswith("/") or not message.get("chat"):
             return []
-        return [self.message_of({"chat": message["chat"], "text": CHAT_FRESH, "from": query.get("from")})]
+        return [self.message_of({"chat": message["chat"], "text": data, "from": query.get("from")})]
 
     @staticmethod
     def nothing_while_the_network_is_gone(timeout):
         time.sleep(min(timeout, 10))
         return []
 
-    def book_sent(self, message):
-        return message.get("document") and str(message["chat"]["id"]) in map(str, self.allowed)
+    def words_in(self, message):
+        kind = self.file_kind(message)
+        if kind is None:
+            return [message["text"]] if message.get("text") else []
+        path = self.file_in(str(message["chat"]["id"]), kind, message[kind])
+        if path is None:
+            return []
+        return [f"/read {path}"] + ([message["caption"]] if message.get("caption") else [])
+
+    def file_kind(self, message):
+        sent = next((kind for kind in SENT_FILE_NAMES if message.get(kind)), None)
+        return sent if sent and str(message["chat"]["id"]) in map(str, self.allowed) else None
 
     @staticmethod
     def message_of(message):
@@ -332,22 +349,28 @@ class TelegramChannel(Channel):
         sender = person.get("username") or person.get("first_name", "")
         return Message(message["chat"]["id"], message["text"], sender, message.get("message_id"))
 
-    def book_in(self, message):
-        chat, document = str(message["chat"]["id"]), message["document"]
-        name = document.get("file_name") or "book"
-        if document.get("file_size", 0) > TELEGRAM_MAX_DOWNLOAD_BYTES:
+    def file_in(self, chat, kind, sent):
+        file = sent[-1] if kind == "photo" else sent
+        name = self.file_name(kind, file)
+        if file.get("file_size", 0) > TELEGRAM_MAX_DOWNLOAD_BYTES:
             self.send(
                 chat,
                 f"{name} is larger than a bot may download from Telegram (20 MB): send a link that "
                 f"downloads it instead (read URL).",
             )
-            return dict(message, text="")
+            return None
         try:
-            path = self.downloaded(document["file_id"], name)
+            return self.downloaded(file["file_id"], name)
         except (OSError, ChannelError, KeyError, TypeError) as exc:
             self.send(chat, f"Could not take {name}: {exc}")
-            return dict(message, text="")
-        return dict(message, text=f"/read {path}")
+            return None
+
+    @staticmethod
+    def file_name(kind, file):
+        named = file.get("file_name") or SENT_FILE_NAMES[kind]
+        if Path(named).suffix:
+            return named
+        return named + (mimetypes.guess_extension(file.get("mime_type") or "") or "")
 
     def downloaded(self, file_id, name):
         found = self.call("getFile", file_id=file_id)["file_path"]
@@ -393,6 +416,34 @@ class TelegramChannel(Channel):
     @staticmethod
     def fresh_button():
         button = {"text": FRESH_ANSWER_BUTTON, "callback_data": CHAT_FRESH}
+        return {"reply_markup": json.dumps({"inline_keyboard": [[button]]})}
+
+    def offer_next(self, chat, shown, words):
+        button = self.next_button(words)
+        if not button:
+            return
+        try:
+            self.call("editMessageReplyMarkup", chat_id=chat, message_id=shown, **button)
+        except OSError, ChannelError:
+            pass
+
+    @staticmethod
+    def next_button(words):
+        data = f"/{words}"
+        if len(data.encode()) > TELEGRAM_CALLBACK_DATA_BYTES:
+            return {}
+        button = {"text": NEXT_PAGE_BUTTON, "callback_data": data}
+        return {"reply_markup": json.dumps({"inline_keyboard": [[button]]})}
+
+    def offer_leave(self, chat, shown, number):
+        try:
+            self.call("editMessageReplyMarkup", chat_id=chat, message_id=shown, **self.leave_button(number))
+        except OSError, ChannelError:
+            pass
+
+    @staticmethod
+    def leave_button(number):
+        button = {"text": LEAVE_READING_BUTTON.format(number=number), "callback_data": CHAT_LEAVE}
         return {"reply_markup": json.dumps({"inline_keyboard": [[button]]})}
 
     def kept_buttons(self, chat, sent):

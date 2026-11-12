@@ -21,6 +21,8 @@ from tinkerkit.messages import (
     keys_in,
     lacking,
     live_line,
+    next_page_line,
+    next_page_words,
     output_kept,
     say,
     short_count,
@@ -616,6 +618,38 @@ def test_ctrl_c_or_end_of_input_on_an_empty_line_give_none(key):
     assert editor.answer is None
 
 
+@pytest.mark.spec("RDG-8")
+@pytest.mark.parametrize(
+    ("answer", "agreed"),
+    [("y", True), (" YES ", True), ("Yes", True), ("", False), ("n", False), ("yep", False)],
+)
+def test_a_yes_or_y_answer_agrees(monkeypatch, answer, agreed):
+    asked = []
+    monkeypatch.setattr(sys.stdin, "isatty", lambda: True)
+    monkeypatch.setattr("builtins.input", lambda question: asked.append(question) or answer)
+    assert Messages().agreed("Get it?") is agreed
+    assert asked == ["Get it? [y/N] "]
+
+
+@pytest.mark.spec("RDG-8")
+@pytest.mark.parametrize("stop", [EOFError, KeyboardInterrupt])
+def test_end_of_input_or_ctrl_c_at_a_question_is_a_no(monkeypatch, stop):
+    def stopped(question):
+        raise stop
+
+    monkeypatch.setattr(sys.stdin, "isatty", lambda: True)
+    monkeypatch.setattr("builtins.input", stopped)
+    assert Messages().agreed("Get it?") is False
+
+
+@pytest.mark.spec("RDG-8")
+def test_a_question_with_no_terminal_is_said_and_taken_as_no(monkeypatch, capsys):
+    monkeypatch.setattr(sys.stdin, "isatty", lambda: False)
+    monkeypatch.setattr("builtins.input", lambda question: pytest.fail("asked with no terminal"))
+    assert Messages().agreed("Get it?") is False
+    assert "❔ Get it? [y/N] — no terminal to answer, taken as no" in capsys.readouterr().out
+
+
 @pytest.mark.spec("MSG-9")
 def test_ctrl_c_on_a_line_empties_it():
     editor = LineEditor()
@@ -642,3 +676,11 @@ def test_the_line_can_be_replaced():
     editor = edited(Text("/he"))
     editor.replace("/help ")
     assert (editor.text, editor.cursor) == ("/help ", 6)
+
+
+@pytest.mark.spec("SET-11")
+def test_a_next_page_line_names_the_command_and_is_found_again_in_any_text():
+    line = next_page_line(2, 5, "read list 3")
+    assert line == "Page 2 of 5: tinker read list 3 for more."
+    assert next_page_words(f"#4 a\n#3 b\n👉 {line}") == "read list 3"
+    assert next_page_words("Page 5 of 5.") is None and next_page_words("") is None

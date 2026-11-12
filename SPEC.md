@@ -93,7 +93,8 @@ listed above it:
 | `learning` | learning a language or a tool by its slots (`SlotLearner`, `DocCache`, `LearnStopped`) |
 | `graph` | what Tinker knows as one graph of items and links (`Graph`), the page that shows it (`GraphPage`), and browsing it in pages (`MemoryBrowser`) |
 | `dreaming` | the dream: turning fresh episodes into memories while the queue is idle, revising and fading them, and the live page that shows it (`Dream`, `DreamPage`) |
-| `reading` | what the person gives to read: stored whole on the reading list (`Readings`), then learned from chapter by chapter (`Reader`, `Epub`, `Book`) |
+| `formats` | what a kept file holds, read by its bytes: one subclass of `Format` per kind (`Epub`, `Docx`, `Markdown`, `PlainText`, `Pdf`, `Image`, `Audio`, `Unsupported`), each giving its title and chapters (`Book`) |
+| `reading` | what the person gives to read: kept on the shelf (`Readings`), asked about inside a chat, and learned from chapter by chapter on request (`Reader`) |
 | `sandbox` | running a check with no network and writes only in its own folder, one backend per platform (`Sandbox`, `MacSandbox`, `LinuxSandbox`, `NoSandbox`) |
 | `checking` | running a check of what is taught: SQL in a confined database, a command in the sandbox (`Check`, `SqlCheck`, `CommandCheck`) |
 | `teaching` | asking what Tinker keeps (`Asker`), checked by running when it can, and teaching it, checked before anything changes (`Teacher`, `Memory`, `Verdict`) |
@@ -131,7 +132,7 @@ The Tinker home (**SET-1**) holds:
 | `tinker.log` | what Tinker does, one plain-text sentence per watched step or fact, always (**LOG-1**); rotated as `tinker-STAMP.log.zip` |
 | `knowledge.html` | the page `tinker knowledge graph` writes |
 | `memory.html` | the page of episodes and memories `memory graph` sends in a conversation (**DRM-9**) |
-| `reading/` | the files sent in a chat to read |
+| `reading/` | each kept file, as `FINGERPRINT.EXT` (**RDG-6**) |
 
 The home database holds these collections and logs. `tinker clear PART` deletes a part (**SET-9**), named in
 the last column:
@@ -146,7 +147,7 @@ the last column:
 | `embeddings` | the embedding of each learned text, per embedding model | `learned` |
 | `sources` | the cleaned documentation pages a learn read for each topic, per version (`slug@version`) | `docs` |
 | `search plans` | the searches planned for each need (**KNW-24**) | `searches` |
-| `readings`, `reading numbers` | the reading list: each source's whole text by chapter, each chapter's state, its survey; the last number given, kept by a clear | `read` |
+| `readings`, `reading numbers` | the shelf: each kept file's kind, file, source, size, fingerprint, its chapters (text, an image's description, a transcript) with each one's state, its survey, whether it was learned; the last number given, kept by a clear | `read` |
 | `commands` | the person's own commands (aliases, programs) | `commands` |
 | `projects` | a pointer to each project: its run ID, folder and task | `runs` |
 | `runs` | one line about each run: its task, language, status and dates (the last `RUNS_KEPT`) | `runs` |
@@ -168,7 +169,10 @@ the last column:
 
 Jobs, readings and the chat history are numbered lists (`Numbered`, **SET-11**). `#N` names an entry. A list
 shows them newest first, a page at a time, and a page that has more after it names the command for the next.
-Clearing archives jobs (**JOB-11**), and deletes readings (**RDG-13**) and the history (**SET-9**).
+On a channel with buttons (Telegram) that page also gets a "Next page ›" button whose tap sends that command. In
+the terminal, the page's last line is a dim `↵ next page`, and an empty line sent right after it sends that
+command; an empty line at any other time does nothing.
+Clearing archives jobs (**JOB-11**), and deletes readings (**RDG-15**) and the history (**SET-9**).
 
 Each project keeps its own state in `<project>/.tinker/project.db`:
 
@@ -251,8 +255,8 @@ Everything Tinker tells the person goes through one voice, `say` (a `Messages`).
   group in table order. `CommandMenu` shows them under the prompt, at most 8 rows, each `/name` with its
   synopsis' words after the name dim and what it does; `›` marks the current one, first the first. Up and down
   move it, scrolling the 8 rows, stopping at the ends. Tab fills the line with `/name ` and closes the menu.
-  Enter on a command that takes no words (`words` is `none`) sends `/name`; on one that takes words it fills
-  the line with `/name ` and waits. Esc closes the menu and keeps the line; typing on narrows it again, and no
+  Enter on a command that takes no words (`words` is `none`), or on a line that already is `/name`, sends
+  `/name`; on a partly typed one that takes words it fills the line with `/name ` and waits. Esc closes the menu and keeps the line; typing on narrows it again, and no
   match or a space closes it. `word_matches(typed)` gives, for a line `/name w` of a chat command with one
   partly typed word after the name, that command's words (its actions' words, then the lowercase words opening
   an alternative in its synopsis, at most one bracket deep, each once) that start with it, then those that hold
@@ -323,7 +327,7 @@ The home and its database, the settings, numbered lists, and the one way to dele
   nothing when the folder is missing.
 - **SET-9** `tinker clear PART` names exactly these parts: languages, memory, learned, docs, searches, models,
   runs, commands, history, exercise, jobs and read ([State](#state) shows what each holds). `jobs` and `read` take
-  numbers (`#N`), and their own modules clear them (**JOB-11**, **RDG-13**). `Home.clear(names, yes)` deletes
+  numbers (`#N`), and their own modules clear them (**JOB-11**, **RDG-15**). `Home.clear(names, yes)` deletes
   only the named parts from the home database, as a deletion (**SET-8**). It rejects an unknown part by
   listing the parts.
 - **SET-10** `Home.keep_awake()` keeps the computer awake with `caffeinate` (macOS) or `systemd-inhibit`
@@ -373,7 +377,8 @@ The home and its database, the settings, numbered lists, and the one way to dele
   `glance` (answered at once, never queued, **CNV-12**), `pauses` (a request the model answers right away, a
   job too, **JOB-1**), `own` (the conversation answers it its own way) or `terminal` (it asks in a terminal, so
   a chat only says to run it there, **CNV-9**). An action whose kind differs from its command's is an `Action`
-  of that command, with its own kind: `read list`, `read show`, `exercise status`, `channel add`,
+  of that command, with its own kind: `read list`, `read show`, `read rename` (`glance`), `read #N learn` (`job`),
+  `read forget` (`glance`, deletes), `exercise status`, `channel add`,
   `channel remove`, `channel start`, `model calibrate NAME`, `model recipe` (`glance`), `model recipe all`, `dream run` (`job`; `dream`, `dream status` and
   `dream graph` are `glance`),
   `model NAME` of a model that does not embed and was never measured (**CLI-3**) and `learn` of a command of
@@ -382,7 +387,8 @@ The home and its database, the settings, numbered lists, and the one way to dele
   table, and the conversation its commands. Nothing else lists commands by kind.
 - **CMD-2** The runs are `task`, `restart`, `confirm`, `amend`, `add`, `fix` and `resume`. Every run takes
   `--web`. The runs that start a cycle (`task`, `restart`, `add`, `fix`) take `--confirm`, and the others do
-  not. The commands that delete are `clear`, `reset`, `restart`, `channel remove` and `memory forget`.
+  not. The commands that delete are `clear`, `reset`, `restart`, `channel remove`, `memory forget` and
+  `read forget`.
 - **CMD-3** `ref(word)` reads a project reference: `@` followed by a run ID or a folder name. Any other word is
   not a reference. `refs(words)` takes a reference from the start of the words, and leaves the rest as they
   are.
@@ -689,7 +695,9 @@ What is said in the chats, kept so that a chat is only a view of it.
   `Models.quick_reply(messages, tokens, think, temperature)` sends one chat with them, at `think` as the model takes it
   (**RVW-2**) and at `temperature` when each is given, `keep_alive`, `num_predict` `tokens` and `QUICK_REPLY_TIMEOUT`,
   and gives the reply's content, stripped. An Ollama failure is its `OllamaError`. Nothing else outside `Model`, the
-  quick call, an unload and calibration calls `Ollama.chat`.
+  quick call, an unload and calibration calls `Ollama.chat`. A user message may carry `images` (each base64), sent as
+  they are. `Models.senses()` gives what the quick model takes besides text, from its `capabilities` (`/api/show`):
+  `vision` and `audio`; none when no model is in use or Ollama does not say.
 - **MOD-24** `Models.choices()` gives the name of each model Ollama has that does not embed, in Ollama's order,
   with whether it was measured. It ends with `SystemExit` when Ollama does not answer, as `tinker model` does.
   `Models.embedding_choices()` gives the names of the ones that embed: their `capabilities` from Ollama's
@@ -760,6 +768,17 @@ What is said in the chats, kept so that a chat is only a view of it.
   NAME` does (**MOD-26**); one calibrated with an older test reruns only the quality probe (**MOD-25**) with its
   kept think setting, `num_ctx` and write speed, under the title "Testing NAME again on the current test
   tasks", keeps its other settings and ends with `✅ NAME is ready` and its 🧠 line. Then it prints the recipe.
+- **MOD-30** `Models.hearing()` gives the quick model when its senses hold `audio`, else the first model Ollama has
+  whose `capabilities` hold `audio`, else `None`. `Models.transcript(wav)` sends the recording to Ollama's
+  `/v1/audio/transcriptions` (form fields `file`, `model` the hearing model, `response_format` `text`) within
+  `TRANSCRIBE_TIMEOUT` and gives the text, stripped; a failure is an `OllamaError`. `AUDIO_MODELS` lists the
+  models offered, each with its download size: `lfm3-audio:2b` (1.7 GB), `gemma4:e2b` (4.6 GB), `gemma4:e4b`
+  (6.6 GB). `Models.audio_offer()` picks the largest whose size is at most a quarter of the machine's memory
+  (`sysctl -n hw.memsize` on macOS, `MemTotal` in `/proc/meminfo` on Linux), the smallest when the memory is
+  unknown or none fits. The offer asks once, "🎧 To hear it I can get NAME (1.7 GB), which fits this machine. Get
+  it?", with Yes and No buttons on Telegram and `y`/`n` in the terminal. A yes pulls it through Ollama's
+  `/api/pull`, its live line showing how much is downloaded, then the recording is transcribed; a failed pull is
+  said to the person and the recording is kept with no chapters. Tinker never pulls a model without that yes.
 
 ## reviewing (RVW)
 
@@ -848,7 +867,7 @@ Each request's one thinking level.
   (`step(name)`), and saves the next one (`save(next)`), until the end (`done`). A step whose `only_if` says no
   is passed over, neither entered nor run. A step that gives False stops there, unsaved (`blocked`), and
   `waits()` stops it before the next step (`waiting`). The cycle's phases (**CLI-10**) and a practice project's
-  steps (**EXR-4**) run this way. Learning (**LRN-7**) and reading (**RDG-12**) only enter their steps: a
+  steps (**EXR-4**) run this way. Learning (**LRN-7**) and reading (**RDG-14**) only enter their steps: a
   learn goes on through its journal, and a reading by its chapters' states. Both share `Tracked`: its
   `step(phase, said)` says the words and enters the step, and its `outcome(text)` gives the tracker what came of
   it; neither touches a tracker when there is none.
@@ -936,8 +955,9 @@ The terminal and the chats are one conversation: the same commands, the same ans
   (escaped), and as ANSI (plain when `NO_COLOR` is set or there is no terminal). `literal` escapes the marks.
   `of(template)` makes a message from a t-string: each value with its marks escaped, but `:md` keeps Markup as it is,
   `:code` makes a code span and `:block` a fenced block. Any other format is an error. `columns(text)` joins the columns
-  of a terminal table with ` | `, and leaves text that is not in columns as it is.
-  | , and leaves text that is not in columns as it is.
+  of a terminal table with ` | `, and leaves text that is not in columns as it is: a line outside the table's
+  aligned rows (a heading, a page line) stays whole, and a cell of several words stays one cell. Telegram HTML joins
+  columns only in ` ```output ` blocks; other fenced blocks keep their text.
 - **CNV-2** Helpers. `pieces(text, size)` splits a message between lines into parts of at most `size` chars, and loses
   no text. `first_lines` cuts lines and counts the rest. `first_words` collapses whitespace and cuts. `text_of` decodes
   bytes. `after_word` drops the command word. `built_project(name)` gives the project named (`Runs.find`), or without a
@@ -1134,6 +1154,17 @@ The terminal and the chats are one conversation: the same commands, the same ans
   to send `/fresh`; on a channel with buttons (Telegram) it also gets a "🔄 Fresh answer" button whose tap
   sends `/fresh`; an edit of that reply keeps the button. The dream then updates the old answer memory with the
   new answer.
+- **CNV-25** A chat is inside a reading once it keeps one (`read FILE|URL`, a file dropped or sent, **CNV-26**,
+  **CHN-9**) or the person sends `read #N`; a reading kept with no chapters is not entered. Entering says so in
+  one line with how to leave. Inside, a plain message is answered in one model call from that reading's passages
+  most about it (**RDG-13**), with its image when it is one and the model sees (**MOD-23**): no command is named
+  from it and no answer memory is looked up or kept (**REM-12**). A `/command` still runs. `/leave` leaves it,
+  and so does entering another or deleting it (**RDG-15**). The terminal's prompt is `📕 #N Title ›` while
+  inside; on a channel with buttons (Telegram) each answer inside gets a "📕 Leave #N" button whose tap sends
+  `/leave`, as **CNV-24**'s button does. Being inside is kept per chat while Tinker runs, and a restart leaves it.
+- **CNV-26** A terminal message that is the path of an existing file (quoted, or with its spaces
+  backslash-escaped, as a file dropped on the terminal gives it) is `read PATH`. A path followed by words keeps
+  the file, enters it (**CNV-25**) and answers the words inside it.
 
 ## channels (CHN)
 
@@ -1171,10 +1202,11 @@ The chat plugin: Telegram, and `tinker channel`.
   message within `ANSWER_WINDOW_SECONDS`). `glance` (**CNV-12**) also takes out the glance before it.
   `collect` takes out the messages whose time is up, and `clear` every message but the status. A message taken
   out without a network stays in the ledger; one Telegram refuses to take out is forgotten.
-- **CHN-9** A file sent in an allowed chat is downloaded into the home (`Home.reading_file`) and taken as
-  `read PATH`: the link Telegram gives a bot holds its token, so it is never passed on. A file over
-  `TELEGRAM_MAX_DOWNLOAD_BYTES`, or one that cannot be downloaded, is said to the person, and nothing is read.
-  A file from any other chat is ignored.
+- **CHN-9** A document, a photo (its largest size), a voice message or an audio file sent in an allowed chat is
+  downloaded into the home (`Home.reading_file`) and taken as `read PATH`: the link Telegram gives a bot holds
+  its token, so it is never passed on. Its caption is a question, answered inside the reading once it is kept
+  (**CNV-25**). A file over `TELEGRAM_MAX_DOWNLOAD_BYTES`, or one that cannot be downloaded, is said to the
+  person, and nothing is read. A file from any other chat is ignored.
 - **CHN-10** Every connection to Telegram (`TelegramChannel.connection`), in this Tinker and in the goodbye it
   hands on, gives each of the host's addresses `CONNECT_SECONDS` to connect and `CONNECT_SECONDS` for the TLS
   handshake after it, in the order the system lists them, so an IPv6 route whose connect or handshake hangs
@@ -1594,18 +1626,24 @@ fade, and the portrait is kept up to date.
 
 ## reading (RDG)
 
-`tinker read FILE | URL` reads what the person gives: a book, an article, a document. Its whole text is stored
-first (no model), numbered on the reading list, so it is never sent twice; then every chapter is learned from,
-the core ones first, and saved as soon as it is read. What it teaches is a topic of the library (kind
-`reading`, slug `read-N`); its text stays for ask, teach and a focused read again (`read #N "WHAT"`).
+`tinker read FILE | URL` keeps what the person gives on the shelf: a book, a document, an image, a recording.
+Keeping is not learning: the file is copied into the home, what it holds is taken out as chapters (text, an
+image's description, a transcript), and it is numbered `#N`, so it is never kept twice. In a chat the person is
+then inside it and asks about it (**CNV-25**). Learning from it is asked for apart (`read #N learn`): every chapter
+is learned from, the core ones first, and saved as soon as it is read. What it teaches is a topic of the library
+(kind `reading`, slug `read-N`); its text stays for ask and teach.
 
-- **RDG-1** `book_bytes(source)` reads a file, or downloads a web address with `Internet.fetch` (its
-  bytes as they are, **WEB-5**), at most `READ_MAX_BYTES`; a missing file, a failed download or a larger one is
-  an error that says so (the page's `why`).
-- **RDG-2** `opened(data, name)` reads a source by what its bytes hold, never by its name: a zip is an EPUB,
-  other text is Markdown or plain text (its title: a lone top heading, else the file's name). A PDF is
-  refused, saying to convert it to EPUB first (Calibre); a web page is refused, saying a share link needs its
-  download link; any other binary file is refused.
+- **RDG-1** `source_bytes(source, beyond)` reads a file, or downloads a web address with `Internet.fetch` (its
+  bytes as they are, **WEB-5**). A missing file or a failed download is an error that says so (the page's `why`).
+  One larger than `READ_MAX_BYTES` is refused unless `beyond`: the command asks once to keep it anyway, and a yes
+  reads it whole.
+- **RDG-2** `formats.opened(data, name)` gives the `Format` of a source by what its bytes hold, never by its name:
+  a zip with the EPUB mimetype is `Epub`, a zip holding `word/document.xml` is `Docx`, `%PDF` is `Pdf`, a PNG,
+  JPEG, GIF or WebP is `Image`, a WAV, MP3, OGG, FLAC or M4A is `Audio`, other text is `Markdown` or `PlainText`
+  (its title: a lone top heading, else the file's name). A web page is refused, saying a share link needs its
+  download link. Any other file is `Unsupported`: it is kept, with no chapters, and the person is told it cannot
+  be read. Each format gives its kind (`book` for an EPUB, `image`, `audio`, else `document`), title, author when
+  it has one, and chapters. Nothing is installed for any format.
 - **RDG-3** An EPUB is read in its spine's order. Its contents (EPUB 3's navigation document, else EPUB 2's
   NCX) mark where each chapter starts (an entry's fragment, else its document's start), at the shallowest
   depth that gives `READ_MIN_CHAPTERS` chapters (else the deepest); what comes before the first is the opening
@@ -1613,45 +1651,68 @@ the core ones first, and saved as soon as it is read. What it teaches is a topic
   headings.
 - **RDG-4** A Markdown text is split at its headings, at the depth `chapter_depth` gives (a lone top heading
   is the title, not a chapter). A plain text is split at its chapter lines ("Chapter 3", "Preface"), else into
-  parts of `READ_WINDOW_CHARS`. A piece that holds no more than its heading is no chapter.
+  parts of `READ_WINDOW_CHARS`. A DOCX is its paragraphs in order, split at its heading paragraphs as Markdown
+  is, its title from its core properties, else its file's name. A piece that holds no more than its heading is
+  no chapter; any piece with text after its heading is one, however short.
 - **RDG-5** `kind_of(title)` gives a chapter's kind: `index`, `raw` (front or back matter: contents,
   copyright, acknowledgements ...), `front` (foreword, preface, introduction ...: what the source says about
-  itself) or `body`. `index_terms(book)` gives the index's terms with how many pages each refers to, the most
-  first, at most `READ_INDEX_TERMS`.
-- **RDG-6** `stored(source)` stores the source's whole text before anything is read: on the reading list
-  (`Readings`, the home's `readings`) as the next number, with its title, author, source, the fingerprint of
-  its text, the day it was added and each chapter with its text, kind and state (`unread`; `raw` for an index
-  and front or back matter: kept, never read). A text stored before is that one: it says its number, and
-  nothing else is done.
-- **RDG-7** The survey, made once per reading and kept with it, sees the contents (each chapter's kind and
+  itself) or `body`. A title has a kind other than `body` only when the whole title, its numbering and case
+  aside, is one of that kind's names: "Index" is the index, "An Index of Patterns" is a body chapter.
+  `index_terms(book)` gives the index's terms with how many pages each refers to, the most first, at most
+  `READ_INDEX_TERMS`.
+- **RDG-6** `kept(source)` keeps the source before anything is learned: the file is copied to the home's
+  `reading/FINGERPRINT.EXT` (`Home.reading_file`, the fingerprint of its bytes), and the shelf (`Readings`, the
+  home's `readings`) gets it as the next number, with its kind, title, author, file, source, size, fingerprint,
+  the day it was added, `learned` false and each chapter with its text, kind and state (`unread`; `raw` for an
+  index and front or back matter: kept, never read). A file kept before is that one: it says its number, and
+  nothing else is done. An entry kept before these fields is a book with no file.
+- **RDG-7** A PDF's text is taken with the standard library alone: each page's content streams (inflated when
+  `FlateDecode`), the strings of their text operators in order, a page break between pages; then it is split as
+  a plain text is. A PDF with no text (a scan) gives its pages' JPEG images (`DCTDecode`) to the quick model to
+  read when its senses hold `vision` (**MOD-23**), one call a page, the text it reads being the page's; with no
+  such model or no such image, it is kept with no chapters and the person is told why.
+- **RDG-8** An image is one chapter: its description and any text it shows, from the quick model when its senses
+  hold `vision`, the image sent with the prompt; with no such model it is kept with no chapters, and the person is
+  told it needs a model that sees. A recording (any format) is one chapter: its transcript (**MOD-30**). It is first
+  turned into 16 kHz mono WAV by `ffmpeg`, found on the system's path and never installed by Tinker; with no
+  `ffmpeg` it is kept with no chapters, and the person is told audio needs ffmpeg, with the install command for
+  the system (`brew install ffmpeg` on macOS, `sudo apt install ffmpeg` on Linux). With `ffmpeg` but no model that
+  hears, the person is offered one (**MOD-30**); a no keeps it with no chapters and says so. `read #N` of a
+  recording kept with no chapters tries its transcript again.
+- **RDG-9** The survey, made once per reading and kept with it, sees the contents (each chapter's kind and
   length), the front chapters and the index terms. `read_survey` needs a summary; at most `READ_KEY_TERMS`
   terms; `software` is true only when the reply says so; each chapter is `core`, `supporting` or `other` (left
   out: other). It orders the reading and never skips a chapter: `in_order` gives the core ones, then the
   supporting, then the others, each in the source's order.
-- **RDG-8** `Reader.read(N)` reads every unread chapter in that order, each in parts that fit the prompt
+- **RDG-10** `Reader.read(N)` reads every unread chapter in that order, each in parts that fit the prompt
   (`READ_CHAPTER_TEXT_SHARE`), one call per part, each shown what was learned from the reading before (the
   latest kept when the prompt is full). Each chapter is saved as soon as it is read: its deltas are applied
   (**PRI-3**), the chapter keeps the ids of the principles they changed, and it is marked read; so a reading
-  stopped goes on with the chapters not read yet. With every chapter read, it says so and asks nothing.
-- **RDG-9** `read #N "WHAT"` reads again the chapters WHAT names ("chapter 7"), then those most about it by its
-  words, `READ_FOCUS_CHAPTERS` in all, never a raw one: each shows its `excerpt`, its `relevant_chunks` for WHAT
-  (**KNW-13**, `READ_FOCUS_CHUNKS` parts), and the prompt says what the person asks to look for. What it finds
-  that is new joins the topic.
-- **RDG-10** Each chapter part is induced into principles (**PRI-4**, scoped to the reading), at most
+  stopped goes on with the chapters not read yet. With every chapter read, the entry is `learned`, and a learn
+  says so and asks nothing.
+- **RDG-11** `read #N learn "WHAT"` reads again the chapters WHAT names ("chapter 7"), then those most about it by
+  its words, `READ_FOCUS_CHAPTERS` in all, never a raw one: each shows its `excerpt`, its `relevant_chunks` for
+  WHAT (**KNW-13**, `READ_FOCUS_CHUNKS` parts), and the prompt says what the person asks to look for. What it
+  finds that is new joins the topic.
+- **RDG-12** Each chapter part is induced into principles (**PRI-4**, scoped to the reading), at most
   `READ_FACTS_PER_CHAPTER` deltas a chapter. A principle from a source about building software keeps its phase
   when it is one of `FACT_PHASES`; every other has the phase `book`, which no build is shown.
-- **RDG-11** `Readings.about(text, items)` gives the readings the text names by title, then those whose items
+- **RDG-13** `Readings.about(text, items)` gives the readings the text names by title, then those whose items
   were shown. `passages(numbers, query)` gives their passages (`MAX_PASSAGE_CHARS`) most about the query by its
   words, at most `BOOK_PASSAGES_SHOWN`, each with its title and chapter.
-- **RDG-12** `tinker read FILE | URL` stores the source, then learns from it as `read #N`: its job's arguments become
-  `read #N` (`Jobs.retarget`), so a stopped or pushed-back reading goes on with what is not read, and nothing is fetched
-  again. `read #N ["WHAT"]` needs a measured model and a known reading. Its tracker moves through its steps
-  (`READ_STEPS`, **PRJ-16**): survey, chapters, and ends with what was read now (chapters and principles changed), the
-  chapters read, the principles kept in its scope, whether builds use it, and what to do next.
-- **RDG-13** `read list [PAGE]` shows the readings by page ([State](#state)), each with how many chapters are read and
-  the principles kept; `read show #N` its source, summary and each chapter with its state and principles. Both are
-  glances (**CMD-1**). `clear read [#N...]` deletes those readings (every one with no number): their text and their
-  topic, as a deletion (**SET-8**).
+- **RDG-14** `tinker read FILE | URL` keeps the source (**RDG-6**) and says its number, kind, title, how many
+  chapters it holds, and what to do next (ask about it in a chat, `read #N learn`); it is no job and learns
+  nothing. `read #N learn ["WHAT"]` is the job that learns: it needs a measured model and a known reading with
+  chapters, so a stopped or pushed-back learn goes on with what is not read, and nothing is fetched again. Its
+  tracker moves through its steps (`READ_STEPS`, **PRJ-16**): survey, chapters, and ends with what was read now
+  (chapters and principles changed), the chapters read, the principles kept in its scope, whether builds use it,
+  and what to do next. `tinker read #N` on the command line is `read show #N`.
+- **RDG-15** `read list [PAGE]` shows the shelf by page ([State](#state)), one line each: `#N`, the kind's icon (📕
+  book, 📄 document, 🖼 image, 🎧 audio), the title, its size, the day it was added, ✓ when learned, and in a chat
+  `← inside` on the one the person is inside. `read show #N` shows its kind, source, file, size, summary and each
+  chapter with its state and principles. `read rename #N TITLE` gives it a new title. All three are glances
+  (**CMD-1**). `read forget #N...` and `clear read [#N...]` delete those readings (every one with no number for
+  `clear read`): their entry, their file and their topic, as a deletion (**SET-8**); a chat inside one leaves it.
 
 ## teaching (TCH)
 

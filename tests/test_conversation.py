@@ -52,9 +52,10 @@ from tinkerkit.conversation import (
 )
 from tinkerkit.jobs import Queue, Runner, began_at
 from tinkerkit.ledger import DONE_NOTE_KEPT_SECONDS, Ledger
-from tinkerkit.messages import DIMMED, HEADING, Text, styled
+from tinkerkit.messages import DIMMED, HEADING, Text, next_page_words, styled
 from tinkerkit.model import Models, Ollama, QuickModel, ThinkLevels
 from tinkerkit.project import Runs, Tracker
+from tinkerkit.reading import Shelf
 from tinkerkit.remembering import Scratchpad
 from tinkerkit.settings import EPISODE_GIST_CHARS, Config, Home
 
@@ -104,6 +105,15 @@ class Recorder(Channel):
 
     def offer_fresh(self, chat, shown):
         self.log.append(("fresh", chat, shown, ""))
+
+    def offer_next(self, chat, shown, words):
+        self.log.append(("next", chat, shown, words))
+
+    def now_inside(self, chat, reading):
+        self.log.append(("inside", chat, None, reading))
+
+    def offer_leave(self, chat, shown, number):
+        self.log.append(("leave", chat, shown, number))
 
     def latest(self, chat, sent):
         return self.newest.get(chat) == sent
@@ -184,6 +194,36 @@ def test_columns():
     )
     for text in ("just some words here\nand more words there", "one line only with words", "a\nb"):
         assert Markup.columns(text) == text
+    assert (
+        Markup.html(f"```output\n{table}\n```")
+        == f"<blockquote expandable>{Markup.columns(table)}</blockquote>"
+    )
+    assert Markup.html(f"```\n{table}\n```") == f"<pre>{table}</pre>"
+    assert Markup.ansi(f"```\n{table}\n```").count(" | ") == 0
+
+
+@pytest.mark.spec("CNV-1")
+def test_columns_leave_lines_outside_the_aligned_rows_whole():
+    table = (
+        "Reading list\n"
+        "NUMBER  TITLE                   ADDED\n"
+        "3       Lighthouse Keeping      2026-11-10\n"
+        "2       The Craft               2026-11-09\n"
+        "1       Tides and Moons         2026-11-01\n"
+        "Page 1 of 2: tinker read list 2 for more."
+    )
+    assert Markup.columns(table) == (
+        "Reading list\nNUMBER | TITLE | ADDED\n3 | Lighthouse Keeping | 2026-11-10\n2 | The Craft | 2026-11-09\n"
+        "1 | Tides and Moons | 2026-11-01\nPage 1 of 2: tinker read list 2 for more."
+    )
+    read_list = (
+        "📚 Reading list\n"
+        "  • #3 📕 Lighthouse Keeping: 2 of 9 chapters · 1.2 MB · added 2026-11-10\n"
+        "  • #2 📄 The Craft: not started · 40 KB · added 2026-11-09\n"
+        "  • #1 🌐 Tides and Moons of Earth: learned · added 2026-11-01 ✓\n"
+        "👉 Page 1 of 2: tinker read list 2 for more."
+    )
+    assert Markup.columns(read_list) == read_list
 
 
 @pytest.mark.spec("CNV-2")
@@ -537,9 +577,10 @@ def test_console_fills_the_command_picked_from_the_menu_and_reads_on(monkeypatch
 
 
 @pytest.mark.spec("MSG-10")
-def test_console_sends_a_command_without_words_on_enter_and_fills_the_rest(monkeypatch):
+def test_console_sends_a_fully_typed_command_on_enter_and_fills_a_partial_one(monkeypatch):
     assert lines_keyed(monkeypatch, Text("/runs"), "enter") == ["/runs", None]
-    assert lines_keyed(monkeypatch, Text("/task"), "enter", Text("x"), "enter") == ["/task x", None]
+    assert lines_keyed(monkeypatch, Text("/task"), "enter") == ["/task", None]
+    assert lines_keyed(monkeypatch, Text("/tas"), "enter", Text("x"), "enter") == ["/task x", None]
 
 
 @pytest.mark.spec("MSG-10")
@@ -2219,9 +2260,9 @@ def desk(tmp_path, monkeypatch, home_store):
     tinker_runs(monkeypatch, script)
     monkeypatch.setattr(conversation, "PROGRESS_EDIT_SECONDS", 0.2)
     channel = Recorder(chats=("1",))
-    desk = Desk([channel], tmp_path)
+    desk = Desk([channel], tmp_path, shelf=Shelf())
     desk.ran = []
-    ran = lambda words: desk.ran.append(words) or f"output of {' '.join(words)}"
+    ran = lambda words, **options: desk.ran.append(words) or f"output of {' '.join(words)}"
     monkeypatch.setattr(desk, "tinker", ran)
     monkeypatch.setattr(desk, "printed", ran)
     yield desk, channel, script
@@ -3534,7 +3575,155 @@ def test_a_command_line_run_once_confirmed_pauses_the_job_while_its_output_is_re
     assert order == ["paused", "read", "goes on"] and "it says hi" in channel.texts()[-1]
 
 
-@pytest.mark.spec("RDG-13")
+@pytest.fixture
+def inside(desk, monkeypatch):
+    desk, channel, _ = desk
+    asked = []
+    monkeypatch.setattr(Shelf, "entered", lambda self, words: (3, "Small Craft"))
+    monkeypatch.setattr(Shelf, "exists", staticmethod(lambda number: True))
+    monkeypatch.setattr(
+        Shelf, "answered", staticmethod(lambda number, text: asked.append((number, text)) or "It is a boat.")
+    )
+    monkeypatch.setattr(desk.talk, "answer", lambda channel, message, *rest, **options: asked.append("talk"))
+    desk.handle(channel, Message("1", "/read book.pdf"))
+    return desk, channel, asked
+
+
+@pytest.mark.spec("CNV-25")
+def test_keeping_a_reading_with_chapters_enters_it_in_one_line_saying_how_to_leave(inside):
+    desk, channel, _ = inside
+    assert desk.inside == {"1": (3, "Small Craft")}
+    assert channel.texts()[-1].endswith(
+        "\n📕 **Inside #3 Small Craft**: ask me about it · `/leave` leaves it"
+    )
+
+
+@pytest.mark.spec("CNV-25")
+def test_inside_a_reading_a_plain_message_is_answered_by_the_shelf_not_the_chat(inside):
+    desk, channel, asked = inside
+    desk.handle(channel, Message("1", "what is it"))
+    assert asked == [(3, "what is it")] and channel.texts()[-1] == "It is a boat."
+
+
+@pytest.mark.spec("CNV-25")
+def test_inside_a_reading_a_command_still_runs(inside):
+    desk, channel, asked = inside
+    desk.handle(channel, Message("1", "/read list"))
+    assert desk.ran[-1] == ["read", "list"] and asked == [] and desk.inside
+
+
+def tinker_envs(desk, monkeypatch):
+    envs = []
+    monkeypatch.delenv("TINKER_INSIDE", raising=False)
+    monkeypatch.delattr(desk, "tinker")
+    monkeypatch.setattr(
+        conversation.subprocess,
+        "run",
+        lambda command, **options: (
+            envs.append(options["env"]) or subprocess.CompletedProcess(command, 0, "", "")
+        ),
+    )
+    return envs
+
+
+@pytest.mark.spec("RDG-15")
+def test_inside_a_reading_the_reading_list_is_told_which_one(inside, monkeypatch):
+    desk, channel, _ = inside
+    envs = tinker_envs(desk, monkeypatch)
+    desk.handle(channel, Message("1", "/read list"))
+    assert envs[-1]["TINKER_INSIDE"] == "3" and envs[-1]["NO_COLOR"] == "1"
+
+
+@pytest.mark.spec("RDG-15")
+def test_outside_a_reading_the_reading_list_is_told_none(desk, monkeypatch):
+    desk, channel, _ = desk
+    envs = tinker_envs(desk, monkeypatch)
+    desk.handle(channel, Message("1", "/read list"))
+    assert envs and "TINKER_INSIDE" not in envs[-1]
+
+
+@pytest.mark.spec("CNV-25")
+def test_leave_leaves_the_reading_and_plain_messages_go_back_to_the_chat(inside):
+    desk, channel, asked = inside
+    desk.handle(channel, Message("1", "/leave"))
+    assert channel.texts()[-1] == "📕 **Left #3 Small Craft**" and desk.inside == {}
+    desk.handle(channel, Message("1", "hello"))
+    assert asked == ["talk"]
+    desk.handle(channel, Message("1", "/leave"))
+    assert channel.texts()[-1] == "📕 **Not inside a reading**"
+
+
+@pytest.mark.spec("CNV-25")
+def test_the_channel_is_told_on_entering_and_leaving_a_reading(inside):
+    desk, channel, _ = inside
+    desk.handle(channel, Message("1", "/leave"))
+    told = [(chat, reading) for kind, chat, _, reading in channel.log if kind == "inside"]
+    assert told == [("1", (3, "Small Craft")), ("1", None)]
+
+
+@pytest.mark.spec("CNV-25")
+def test_each_answer_inside_offers_the_leave_button(inside):
+    desk, channel, _ = inside
+    desk.handle(channel, Message("1", "what is it"))
+    assert channel.log[-1] == ("leave", "1", channel.newest["1"], 3)
+
+
+@pytest.mark.spec("CNV-25")
+def test_a_reading_gone_is_left_and_the_channel_told(inside, monkeypatch):
+    desk, channel, asked = inside
+    monkeypatch.setattr(Shelf, "exists", staticmethod(lambda number: False))
+    desk.handle(channel, Message("1", "hello"))
+    assert asked == ["talk"] and desk.inside == {}
+    assert ("inside", "1", None, None) in channel.log
+    assert not [entry for entry in channel.log if entry[0] == "leave"]
+
+
+@pytest.mark.spec("RDG-15")
+def test_a_command_deleting_the_entered_reading_leaves_it_in_that_call(inside, monkeypatch):
+    desk, channel, _ = inside
+    gone = []
+    monkeypatch.setattr(Shelf, "exists", staticmethod(lambda number: not gone))
+    monkeypatch.setattr(desk, "answer", lambda message, channel: gone.append(3) or "Forgot #3")
+    desk.handle(channel, Message("1", "/read forget #3"))
+    assert channel.log[-1] == ("inside", "1", None, None) and desk.inside == {}
+
+
+@pytest.mark.spec("RDG-15")
+def test_confirming_the_forgetting_of_the_entered_reading_leaves_it(inside, monkeypatch):
+    desk, channel, _ = inside
+    confirmed = threading.Event()
+    monkeypatch.setattr(
+        desk, "tinker", lambda words: confirmed.wait(5) and desk.ran.append(words) or "✅ Forgot #3"
+    )
+    monkeypatch.setattr(
+        Shelf, "exists", staticmethod(lambda number: ["read", "forget", "#3", "--yes"] not in desk.ran)
+    )
+    say(desk, channel, "/read forget #3")
+    say(desk, channel, "/confirm")
+    confirmed.set()
+    wait_until(lambda: ("inside", "1", None, None) in channel.log and desk.inside == {})
+
+
+@pytest.mark.spec("CNV-25")
+def test_the_terminal_prompt_names_the_reading_while_inside(monkeypatch):
+    monkeypatch.setattr("tinkerkit.conversation.typed_here", lambda: True)
+    channel = ConsoleChannel()
+    plain = channel.prompt()
+    channel.now_inside("console", (3, "Small Craft"))
+    assert channel.prompt() == "📕 #3 Small Craft › "
+    channel.now_inside("console", None)
+    assert channel.prompt() == plain
+
+
+@pytest.mark.spec("CNV-25")
+def test_a_reading_kept_with_no_chapters_is_not_entered(desk, monkeypatch):
+    desk, channel, _ = desk
+    monkeypatch.setattr(Shelf, "entered", lambda self, words: None)
+    desk.handle(channel, Message("1", "/read note.txt"))
+    assert desk.inside == {} and "📕" not in channel.texts()[-1]
+
+
+@pytest.mark.spec("RDG-15")
 def test_the_reading_list_is_answered_at_once_in_a_chat(desk):
     desk, channel, _ = desk
     assert (
@@ -3542,3 +3731,103 @@ def test_the_reading_list_is_answered_at_once_in_a_chat(desk):
     )
     assert desk.answer(Message("1", "read show #2"), channel).startswith("📚 **read show #2**")
     assert desk.ran == [["read", "list"], ["read", "show", "#2"]]
+
+
+@pytest.mark.spec("RDG-15")
+def test_a_reading_is_renamed_at_once_and_forgotten_after_asking_in_a_chat(desk, monkeypatch):
+    desk, channel, _ = desk
+    monkeypatch.setattr(desk, "tinker", lambda words: desk.ran.append(words) or "✅ #1 Small Craft")
+    assert desk.answer(Message("1", "/read rename #1 Small Craft"), channel).startswith(
+        "⚙️ **read rename #1 Small Craft**"
+    )
+    assert desk.answer(Message("1", "/read forget #1"), channel) is None
+    assert "👉 `/confirm` to delete it" in channel.texts()[-1]
+    say(desk, channel, "/confirm")
+    wait_until(lambda: ["read", "forget", "#1", "--yes"] in desk.ran)
+
+
+@pytest.mark.spec("SET-11")
+def test_a_reply_naming_the_next_page_offers_it(desk, monkeypatch):
+    desk, channel, _ = desk
+    monkeypatch.setattr(desk, "answer", lambda message, channel: "#3 a\nPage 1 of 2: tinker jobs 2 for more.")
+    desk.handle(channel, Message("1", "/jobs"))
+    assert channel.log[-1] == ("next", "1", channel.newest["1"], "jobs 2")
+    monkeypatch.setattr(desk, "answer", lambda message, channel: "#1 a\nPage 2 of 2.")
+    desk.handle(channel, Message("1", "/jobs 2"))
+    assert all(kind != "next" or shown != channel.newest["1"] for kind, _, shown, _ in channel.log)
+
+
+@pytest.mark.spec("SET-11")
+def test_a_listed_page_of_tinker_output_offers_the_next_page_and_keeps_its_lines(desk, monkeypatch):
+    desk, channel, _ = desk
+    rows = "".join(f"📘 #{number:<3} Lighthouse Keeping    3 days ago\n" for number in range(12, 2, -1))
+    output = rows + "👉 Page 1 of 2: tinker read list 2 for more.\n"
+    monkeypatch.delattr(desk, "tinker")
+    monkeypatch.setattr(
+        desk, "run_tinker", lambda arguments, timeout, env: subprocess.CompletedProcess([], 0, output, "")
+    )
+    desk.handle(channel, Message("1", "/read list"))
+    assert channel.log[-1] == ("next", "1", channel.newest["1"], "read list 2")
+    assert " | " not in channel.log[-2][3]
+
+
+@pytest.mark.spec("SET-11")
+def test_a_reply_told_after_a_question_also_offers_the_next_page(desk, monkeypatch):
+    desk, channel, _ = desk
+    monkeypatch.setattr(desk, "answer", lambda message, channel: "#3 a\nPage 1 of 2: tinker jobs 2 for more.")
+    monkeypatch.setattr(desk, "told", lambda channel, message, reply, asked: reply)
+    desk.handle(channel, Message("1", "/jobs"), asked=[])
+    assert channel.log[-1] == ("next", "1", channel.newest["1"], "jobs 2")
+
+
+@pytest.mark.spec("SET-11")
+def test_console_sends_the_next_page_on_an_empty_line_right_after_offering_it(monkeypatch):
+    colour_terminal(monkeypatch)
+    console = ConsoleChannel()
+    printed = []
+    monkeypatch.setattr(console.screen, "print", printed.append)
+    console.offer_next("console", 1, "read list 2")
+    assert DIM in printed[-1] and "↵ next page" in printed[-1]
+    assert console.answered("") == "/read list 2"
+    assert console.answered("") == ""
+    console.offer_next("console", 2, "read list 3")
+    assert console.answered("hello") == "hello"
+    assert console.answered("") == ""
+
+
+@pytest.mark.spec("CNV-26")
+def test_console_reads_a_dropped_file_path(tmp_path):
+    dropped = tmp_path / "my notes.txt"
+    dropped.write_text("notes")
+    console = ConsoleChannel()
+    assert console.answered(f"'{dropped}'") == f"/read '{dropped}'"
+    assert console.answered(str(dropped).replace(" ", "\\ ") + " ") == f"/read '{dropped}'"
+    assert console.lines.empty()
+
+
+@pytest.mark.spec("CNV-26")
+def test_console_answers_words_after_a_dropped_path_inside_its_reading(tmp_path):
+    dropped = tmp_path / "plain.txt"
+    dropped.write_text("notes")
+    console = ConsoleChannel()
+    assert console.answered(f"{dropped} what does it say?") == "what does it say?"
+    assert console.lines.get_nowait() == f"/read {dropped}"
+
+
+@pytest.mark.spec("CNV-26")
+def test_console_passes_on_a_line_that_names_no_file(tmp_path):
+    console = ConsoleChannel()
+    assert console.answered(f"{tmp_path / 'gone.txt'} hi") == f"{tmp_path / 'gone.txt'} hi"
+    assert console.answered("it's 'open") == "it's 'open"
+    assert console.lines.empty()
+
+
+@pytest.mark.spec("SET-11")
+def test_history_pages_end_with_the_shared_next_page_line(monkeypatch):
+    monkeypatch.setattr(
+        conversation.Ledger,
+        "page",
+        lambda page: ([], 3) if page > 3 else ([{"number": 1, "time": "2026-11-12 10:00", "text": "hi"}], 3),
+    )
+    assert next_page_words(conversation.history_text(["2"])) == "history 3"
+    assert next_page_words(conversation.history_text(["3"])) is None

@@ -2,7 +2,7 @@ import datetime
 import json
 import re
 
-from .messages import say
+from .messages import next_page_line, say
 from .settings import (
     ANSWER_COMMON_WORDS,
     ANSWER_LASTS_DAYS,
@@ -238,7 +238,7 @@ def show_memories(page=1):
             for memory in shown:
                 say.item(memory_line(memory))
         if page < pages:
-            say.info(f"Page {page} of {pages}: tinker memory {page + 1} for more.", "👉")
+            say.info(next_page_line(page, pages, f"memory {page + 1}"), "👉")
     else:
         say.info("Nothing remembered yet: a dream makes them from what you do.", "📭")
     say.info(memory_state(), "📊")

@@ -401,7 +401,7 @@ def test_a_reply_with_no_list_of_deltas_gives_none(make_model, fake_ollama, tink
     assert induced(make_model, fake_ollama, {"rules": []}) == []
 
 
-@pytest.mark.spec("RDG-9")
+@pytest.mark.spec("RDG-11")
 def test_induce_shows_what_to_look_for_when_given(make_model, fake_ollama, tinker_home):
     fake_ollama.reply(json.dumps({"deltas": []}), when="Read: chapter 3")
     Inducer(make_model(), Principles(None)).induce(

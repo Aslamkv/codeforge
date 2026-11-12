@@ -778,6 +778,16 @@ Reply with ONLY JSON: {{"deltas":[{{"kind":"add","when":"a test reads a file","d
 directory","because":"tests must not touch real files","phase":"tests","cites":[1,3]}},{{"kind":"except","id":5,
 "exception":"the file is a checked-in fixture","cites":[2]}}]}}"""
 
+    SEE_IMAGE = """Describe this image for someone who cannot see it: what it shows and what it means, then every
+piece of text it shows, word for word. Plain text only."""
+
+    READ_PAGE = """This is one scanned page. Write out all of its text, word for word and in reading order, keeping
+its headings as lines of their own. Plain text only, nothing about the page itself."""
+
+    INSIDE_READING = """You, Tinker, are answering a question about "{title}", which the person gave you to read.
+Answer only from the passages of it given below (and its image, when one is shown), never from what you were trained
+on. When they don't hold the answer, say so plainly in one sentence. Plain text, short."""
+
     READ_SURVEY_SYSTEM = f"""You, Tinker, are about to read what the person gave you (a book, an article, a document),
 every chapter of it, as a careful reader does: first its contents, what it says about itself (its foreword, preface,
 introduction or summary) and the terms its index refers to most, to know what it is about and what to read first.

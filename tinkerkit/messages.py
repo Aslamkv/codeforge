@@ -79,6 +79,7 @@ KEYS = frozendict(
 )
 ESCAPE_SEQUENCE = re.compile(rb"\x1b(\[[0-9;]*[@-~]|O[@-~]|[bf]|\x1b\[[CD])")
 TEXT_RUN = re.compile(rb"[^\x00-\x1f\x7f]+")
+NEXT_PAGE_LINE = re.compile(r"Page \d+ of \d+: tinker (?P<words>.+?) for more\.")
 
 
 @dataclass(frozen=True)
@@ -98,6 +99,15 @@ class Message:
         return "   " * self.depth + (
             f"{self.icon}{space_after(self.icon)}{self.text}" if self.icon else self.text
         )
+
+
+def next_page_line(page, pages, words):
+    return f"Page {page} of {pages}: tinker {words} for more."
+
+
+def next_page_words(text):
+    found = NEXT_PAGE_LINE.search(text)
+    return found and found["words"]
 
 
 def space_after(icon):
@@ -174,6 +184,16 @@ class Messages:
 
     def found(self, text):
         self.say("found", text)
+
+    def agreed(self, question):
+        if not sys.stdin.isatty():
+            self.info(f"{question} [y/N] — no terminal to answer, taken as no", "❔")
+            return False
+        try:
+            return input(f"{question} [y/N] ").strip().lower() in ("y", "yes")
+        except EOFError, KeyboardInterrupt:
+            self.write("")
+            return False
 
     def tally(self, text):
         self.tell(Message("tally", text, self.depth))

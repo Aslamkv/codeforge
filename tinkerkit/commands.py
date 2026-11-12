@@ -315,37 +315,47 @@ COMMANDS = [
         "read",
         "Learn",
         "read FILE | URL",
-        "store a book, an article or a document, then learn from every chapter",
-        "Read what you give it: a book, an article or a document (EPUB, Markdown or plain text; a PDF is refused: "
-        "convert it to EPUB first, Calibre's ebook-convert keeps its chapters). Its whole text is stored first, "
-        "numbered on the reading list (#1, #2 ...), so you never send it twice; then every chapter is read, the "
-        "core ones first (its contents, foreword and index tell which), each saved as soon as it is read. It is a "
-        'job: stop it, and read #N (or resume) goes on with the chapters not read yet. read #N "WHAT" reads the '
+        "keep a book, an article or a document on the reading list",
+        "Keep what you give it: a book, an article or a document (EPUB, PDF, Word, Markdown or plain text). "
+        "Its whole text is stored, numbered on the reading list (#1, #2 ...), so you never send it twice; it learns "
+        "nothing yet. Ask about it in a chat, or read #N learn to learn from every chapter, the core ones first "
+        "(its contents, foreword and index tell which), each saved as soon as it is read. Learning is a job: stop "
+        'it, and read #N learn (or resume) goes on with the chapters not read yet. read #N learn "WHAT" reads the '
         "chapters most about WHAT again, with it in mind. Ask about it (tinker ask) and correct it (tinker teach): "
         "its own text is the evidence. What teaches how to build software guides the builds that need it. In a "
         "chat, attach the file.",
-        kind="job",
-        actions=[Action("glance", "list"), Action("glance", "show")],
+        kind="glance",
+        actions=[
+            Action("glance", "list"),
+            Action("glance", "show"),
+            Action("glance", "rename"),
+            Action("glance", "forget", deletes=True),
+            Action("job", when=lambda rest: rest[1:2] == ["learn"]),
+        ],
         chat=True,
         words=True,
+        options=("yes",),
         arguments=[
             Argument(
                 "words",
                 "+",
                 "WORDS",
-                "FILE | URL (what to read: a file, or a link that downloads "
-                "it), list, show #N, or #N [WHAT] (go on; with WHAT, look again)",
+                "FILE | URL (what to keep: a file, or a link that downloads it), list, show #N, #N (the same "
+                "as show #N), rename #N TITLE, forget #N..., or #N learn [WHAT] (learn from it; with WHAT, look "
+                "again)",
             )
         ],
-        example='read #2 "the chapter on retries: when to give up"',
+        example='read #2 learn "the chapter on retries: when to give up"',
         rows=[
-            ("read FILE | URL", "store a book, an article or a document, then learn from every chapter"),
+            ("read FILE | URL", "keep a book, an article or a document on the reading list"),
             (
                 "read list [PAGE]",
                 "the reading list, a page at a time: how much of each is read, what was learned",
             ),
             ("read show #N", "one reading: its chapters, read or not, and what each taught"),
-            ('read #N ["WHAT"]', "go on with the chapters not read yet, or look again for WHAT"),
+            ("read rename #N TITLE", "give a reading a new title"),
+            ("read forget #N... [--yes]", "delete readings: their file and what was learned from them"),
+            ('read #N learn ["WHAT"]', "learn from the chapters not read yet, or look again for WHAT"),
         ],
     ),
     Command(
@@ -810,8 +820,8 @@ class CommandMatch:
     def fill(self):
         return MenuAnswer(self.line + " ", False)
 
-    def enter(self):
-        return self.fill() if self.command.words else MenuAnswer(self.line, True)
+    def enter(self, typed):
+        return self.fill() if self.command.words and typed != self.line else MenuAnswer(self.line, True)
 
 
 class WordMatch(CommandMatch):
@@ -826,7 +836,7 @@ class WordMatch(CommandMatch):
     def row(self, marked):
         return MenuRow(marked, self.line, "", self.command.what)
 
-    def enter(self):
+    def enter(self, typed):
         return MenuAnswer(self.line, True)
 
 
@@ -876,7 +886,7 @@ class CommandMenu:
         return self.fill()
 
     def on_enter(self):
-        answer = self.chosen.enter()
+        answer = self.chosen.enter(self.typed)
         self.close()
         return answer
 

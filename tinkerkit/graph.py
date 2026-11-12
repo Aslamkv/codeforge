@@ -4,7 +4,7 @@ lazy import json
 lazy from collections import Counter, namedtuple
 
 lazy from .knowledge import Item, Library
-lazy from .messages import say
+lazy from .messages import next_page_line, say
 lazy from .principles import Principles
 lazy from .retrieval import Embeddings
 lazy from .settings import (
@@ -744,7 +744,7 @@ class MemoryBrowser:
     def say_page(self, page, pages, words):
         shown = "".join(f"{word} " for word in words)
         if page < pages:
-            say.text(f"\nPage {page} of {pages}: tinker knowledge {shown}{page + 1} for more.")
+            say.text("\n" + next_page_line(page, pages, f"knowledge {shown}{page + 1}"))
         elif pages > 1 or page > 1:
             say.text(f"\nPage {page} of {pages}.")
 

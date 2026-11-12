@@ -159,6 +159,11 @@ UNFINISHED_THOUGHT_KEPT_CHARS = 4000
 OLLAMA_SILENCE_TIMEOUT = 600
 EMBED_KEEP_ALIVE = "5m"
 QUICK_REPLY_TIMEOUT = 600
+TRANSCRIBE_TIMEOUT = 600
+PULL_TIMEOUT = 600
+GIGABYTE = 10**9
+AUDIO_MODELS = {"lfm3-audio:2b": 1.7, "gemma4:e2b": 4.6, "gemma4:e4b": 6.6}
+AUDIO_MODEL_MEMORY_SHARE = 0.25
 STALL_RETRIES = 2
 OOM_RETRIES = 2
 OOM_RETRY_PROMPT_SHARE = 0.75
@@ -547,8 +552,7 @@ def confirm_deletion(said, items, command, yes=False, verb="delete"):
         return
     if not sys.stdin.isatty():
         raise SystemExit(f"Nothing {verb}d: run {command} in a terminal to confirm, or add --yes.")
-    question = f"{verb.capitalize()} {'it' if len(items) == 1 else 'them'}? [y/N] "
-    if input(question).strip().lower() not in ("y", "yes"):
+    if not say.agreed(f"{verb.capitalize()} {'it' if len(items) == 1 else 'them'}?"):
         raise SystemExit(f"Nothing {verb}d.")
 
 

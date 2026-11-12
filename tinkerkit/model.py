@@ -10,6 +10,8 @@ lazy import urllib.request
 
 from .messages import DIMMED, HEADING, say, styled
 from .settings import (
+    AUDIO_MODEL_MEMORY_SHARE,
+    AUDIO_MODELS,
     CALIBRATION_KEEP_ALIVE,
     CAPACITY_SEARCH_PRECISION,
     CRASH_NEAR_LIMIT_SHARE,
@@ -20,6 +22,7 @@ from .settings import (
     DEFAULT_THINK,
     FIRST_CHAT_CONTEXT,
     FIX_MAX_TOKENS,
+    GIGABYTE,
     LAST_CHUNK_WAIT_SECONDS,
     LOOPING_REPEATED_LINES,
     MAX_CHARS_PER_TOKEN,
@@ -33,6 +36,7 @@ from .settings import (
     PROBE_SAMPLE_TOKENS,
     PROGRESS_UPDATE_SECONDS,
     PROMPT_BUDGET_SHARE,
+    PULL_TIMEOUT,
     QUALITY_ATTEMPTS,
     QUALITY_REPLY_TOKENS,
     QUALITY_TASK_SECONDS,
@@ -42,6 +46,7 @@ from .settings import (
     RUNNER_OVERHEAD_BYTES,
     STALL_RETRIES,
     STARTING_CHARS_PER_TOKEN,
+    TRANSCRIBE_TIMEOUT,
     UNFINISHED_THOUGHT_KEPT_CHARS,
     UNKNOWN_CONTEXT_TOKENS,
     Config,
@@ -56,6 +61,7 @@ lazy from .workspace import ToolError
 
 SelectedModel = namedtuple("SelectedModel", "name settings")
 QuickModel = namedtuple("QuickModel", "name options think")
+SENSES = ("vision", "audio")
 Capacity = namedtuple("Capacity", "largest_that_reads smallest_that_failed")
 ContextSplit = namedtuple("ContextSplit", "prompt_budget longest_reply")
 LoadedModel = namedtuple("LoadedModel", "name size_bytes")
@@ -745,6 +751,40 @@ class Models:
         return data["message"]["content"].strip()
 
     @staticmethod
+    def senses():
+        quick = Models.quick()
+        capabilities = (Ollama.capabilities(quick.name) if quick else None) or ()
+        return tuple(sense for sense in SENSES if sense in capabilities)
+
+    @staticmethod
+    def hearing():
+        quick = Models.quick()
+        if quick and "audio" in Models.senses():
+            return quick.name
+        installed = (model.get("name", "") for model in Ollama.installed_models() or [])
+        return next((name for name in installed if "audio" in (Ollama.capabilities(name) or ())), None)
+
+    @staticmethod
+    def audio_offer():
+        by_size = sorted(AUDIO_MODELS, key=AUDIO_MODELS.get)
+        memory = Calibrator.total_memory() or 0
+        fitting = [
+            name for name in by_size if AUDIO_MODELS[name] * GIGABYTE <= memory * AUDIO_MODEL_MEMORY_SHARE
+        ]
+        return fitting[-1] if fitting else by_size[0]
+
+    @staticmethod
+    def audio_question(name):
+        return f"🎧 To hear it I can get {name} ({AUDIO_MODELS[name]} GB), which fits this machine. Get it?"
+
+    @staticmethod
+    def transcript(wav):
+        name = Models.hearing()
+        if name is None:
+            raise OllamaError("No installed model can hear")
+        return Ollama.transcribe(name, wav).strip()
+
+    @staticmethod
     def quick_options(options, tokens, temperature):
         chosen = dict(options, num_predict=tokens)
         if temperature is not None:
@@ -1296,6 +1336,67 @@ class Ollama:
             headers={"Content-Type": "application/json"},
             method="GET" if payload is None else "POST",
         )
+
+    @staticmethod
+    def transcribe(name, wav):
+        boundary = secrets.token_hex(16)
+        request = urllib.request.Request(
+            Config.ollama_url() + "/v1/audio/transcriptions",
+            data=Ollama.form(boundary, {"model": name, "response_format": "text"}, wav),
+            headers={"Content-Type": f"multipart/form-data; boundary={boundary}"},
+            method="POST",
+        )
+        try:
+            with urllib.request.urlopen(request, timeout=TRANSCRIBE_TIMEOUT) as response:
+                return response.read().decode("utf-8", errors="replace")
+        except urllib.error.HTTPError as exc:
+            raise Ollama.http_error(exc)
+        except urllib.error.URLError as exc:
+            raise OllamaError(f"Could not reach Ollama at {Config.ollama_url()}: {exc.reason}")
+        except (TimeoutError, ConnectionError) as exc:
+            raise OllamaError(f"Ollama stopped responding ({exc})", stalled=True)
+
+    @staticmethod
+    def pull(name):
+        try:
+            request = Ollama.request("/api/pull", {"model": name, "stream": True})
+            with urllib.request.urlopen(request, timeout=PULL_TIMEOUT) as response:
+                Ollama.follow_pull(name, response)
+        except urllib.error.HTTPError as exc:
+            raise Ollama.http_error(exc)
+        except urllib.error.URLError as exc:
+            raise OllamaError(f"Could not reach Ollama at {Config.ollama_url()}: {exc.reason}")
+        except (TimeoutError, ConnectionError) as exc:
+            raise OllamaError(f"Ollama stopped responding ({exc})", stalled=True)
+
+    @staticmethod
+    def follow_pull(name, response):
+        for line in response:
+            if not line.strip():
+                continue
+            progress = json.loads(line)
+            if "error" in progress:
+                raise OllamaError(f"Could not get {name}: {progress['error']}")
+            if progress.get("status") == "success":
+                return
+            if progress.get("total"):
+                done, total = (progress.get("completed", 0) / GIGABYTE, progress["total"] / GIGABYTE)
+                say.live(f"Getting {name}: {done:.1f} / {total:.1f} GB")
+        raise OllamaError(f"Could not get {name}: the download stopped before it finished")
+
+    @staticmethod
+    def form(boundary, fields, wav):
+        parts = [
+            f'--{boundary}\r\nContent-Disposition: form-data; name="{key}"\r\n\r\n{value}\r\n'.encode()
+            for key, value in fields.items()
+        ]
+        parts.append(
+            f'--{boundary}\r\nContent-Disposition: form-data; name="file"; filename="recording.wav"\r\n'
+            "Content-Type: audio/wav\r\n\r\n".encode()
+            + wav
+            + b"\r\n"
+        )
+        return b"".join(parts) + f"--{boundary}--\r\n".encode()
 
     @staticmethod
     def http_error(exc, streamed=0):

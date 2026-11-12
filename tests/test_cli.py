@@ -493,9 +493,9 @@ def test_a_plain_command_writes_tinker_log():
 @pytest.mark.spec("LOG-7")
 @pytest.mark.parametrize("argv", [[], ["chat", "the capital of Norway?"], ["channel", "start"]])
 def test_the_conversation_talk_and_channels_write_tinker_log(argv, monkeypatch):
-    monkeypatch.setattr(cli.conversation, "session", lambda folder: None)
+    monkeypatch.setattr(cli.conversation, "session", lambda folder, shelf: None)
     monkeypatch.setattr(cli.conversation, "one_shot", lambda command, text: 0)
-    monkeypatch.setattr(cli.channels.ChannelCommand, "run", staticmethod(lambda argv: None))
+    monkeypatch.setattr(cli.channels.ChannelCommand, "run", staticmethod(lambda argv, shelf: None))
     with pytest.raises(SystemExit):
         Cli.parse(argv)
     logger.uninstall()

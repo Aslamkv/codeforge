@@ -218,6 +218,18 @@ def test_a_deletion_says_what_goes_then_asks(monkeypatch, capsys):
     assert asked == ["Delete it? [y/N] ", "Delete them? [y/N] "]
 
 
+@pytest.mark.spec("SET-8")
+@pytest.mark.parametrize("stop", [EOFError, KeyboardInterrupt])
+def test_end_of_input_or_ctrl_c_at_a_deletion_deletes_nothing(monkeypatch, stop):
+    def stopped(question):
+        raise stop
+
+    monkeypatch.setattr(sys.stdin, "isatty", lambda: True)
+    monkeypatch.setattr("builtins.input", stopped)
+    with pytest.raises(SystemExit, match=r"^Nothing deleted\.$"):
+        confirm_deletion("This deletes:", ["the home"], "tinker reset")
+
+
 @pytest.mark.spec("SET-9")
 def test_clear_deletes_only_the_named_parts(home_store, capsys):
     home_store.put("languages", "python", {})
