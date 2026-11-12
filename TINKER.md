@@ -458,8 +458,8 @@ terms tell which). Each chapter is saved once learned, so you can ask about it w
 ```sh
 tinker read ~/Books/clean-architecture.epub          # a file: EPUB, DOCX, PDF, Markdown, text, image or audio
 tinker read https://example.org/files/my-book.epub   # a link that downloads it
-tinker read list [PAGE]                              # the reading list, a page at a time: kind, size, ✓ when learned
-tinker read show #1                                  # one reading: each chapter, read or not, and what it taught
+tinker read list [PAGE]                              # the reading list, a page at a time: kind, size, day added, ✓ when learned
+tinker read show #1                                  # one reading: its summary, each chapter, read or not, and what it taught
 tinker read rename #1 Clean Architecture             # give it a new title
 tinker read #1 learn                                 # learn from the chapters not read yet
 tinker read #1 learn "the chapter on retries: when to give up"   # look again, with that in mind

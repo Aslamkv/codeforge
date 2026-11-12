@@ -11,7 +11,7 @@ import pytest
 from tinkerkit import channels, logger
 from tinkerkit.building import CodeWriter, Verifier
 from tinkerkit.channels import TelegramChannel
-from tinkerkit.conversation import CHAT_APP_START, Desk, Talk
+from tinkerkit.conversation import CHAT_APP_START, Desk, Questions, Talk
 from tinkerkit.finishing import Tidy
 from tinkerkit.logger import TraceLog
 from tinkerkit.messages import say
@@ -452,10 +452,10 @@ def test_a_conversation_that_raises_ends_with_its_failure(monkeypatch):
 
 @pytest.mark.spec("LOG-4")
 def test_handling_a_message_tells_the_channel_and_what_was_asked():
-    channel = SimpleNamespace(send=lambda chat, text: None)
+    channel = SimpleNamespace(name="chat", send=lambda chat, text: None)
     logger.install()
     desk = Desk.__new__(Desk)
-    desk.inside = {}
+    desk.inside, desk.questions = {}, Questions()
     desk.handle(channel, SimpleNamespace(text=CHAT_APP_START, chat=1))
     started_and_ended(
         f"Handling a SimpleNamespace message: {CHAT_APP_START!r}", "SimpleNamespace message handled"

@@ -16,7 +16,7 @@ from tinkerkit.knowledge import Learner, Researcher
 from tinkerkit.learning import SlotLearner
 from tinkerkit.model import Ollama
 from tinkerkit.project import Tracker
-from tinkerkit.settings import DREAM_IDLE_SECONDS, JOB_STOP_SIGNAL
+from tinkerkit.settings import DREAM_IDLE_SECONDS, JOB_START_TRIES, JOB_STOP_SIGNAL
 
 DEAD_PID = 999999999
 
@@ -911,6 +911,53 @@ def runner(monkeypatch):
     monkeypatch.setattr(jobs, "signal_job", lambda job: None)
     monkeypatch.setattr(jobs.subprocess, "Popen", child := Started([], ["one\n", "two\n"]))
     return child
+
+
+@pytest.mark.spec("JOB-9")
+def test_the_runner_gives_up_on_a_head_that_keeps_ending_while_it_is_the_head(home_store, runner):
+    put_job(home_store, 1, state="queued", pid=None)
+    put_job(home_store, 2, state="queued", pid=None, arguments=["learn", "rust"])
+    add_back(1)
+    add_back(2)
+    runner.during = lambda: None if len(runner.started) <= JOB_START_TRIES else finished_head()
+    Runner.go_through()
+    assert [job for _, job in runner.started] == ["1"] * JOB_START_TRIES + ["2"]
+    assert JOBS.get(1)["state"] == "stopped" and JOBS.get(1)["start_failures"] == 0
+    assert Queue.ordered() == []
+    lines = [entry.get("line") for _, entry in home_store.entries("output #1")]
+    assert lines[-2] == f"gave up after {JOB_START_TRIES} failed starts in a row; resume #1 tries it again"
+
+
+@pytest.mark.spec("JOB-9")
+def test_the_output_of_a_given_up_head_ends_with_its_exit_so_its_follower_stops(home_store, runner):
+    runner.during = lambda: None
+    put_job(home_store, 1, state="queued", pid=None, start_failures=JOB_START_TRIES - 1)
+    add_back(1)
+    follower = jobs.Follower(1)
+    Runner.run_job(1)
+    entries = [entry for _, entry in home_store.entries("output #1")]
+    assert "exit" in entries[-1] and entries[-2]["line"].startswith("gave up after")
+    assert follower.show()
+
+
+@pytest.mark.spec("JOB-9")
+def test_a_head_that_leaves_the_queue_clears_its_failed_starts(home_store, runner):
+    put_job(home_store, 1, state="queued", pid=None, start_failures=JOB_START_TRIES - 1)
+    add_back(1)
+    Runner.run_job(1)
+    assert JOBS.get(1)["start_failures"] == 0 and JOBS.get(1)["state"] == "queued"
+
+
+@pytest.mark.spec("JOB-9")
+def test_a_head_ending_while_the_runner_is_paused_is_no_failed_start(home_store, runner, monkeypatch):
+    def paused_meanwhile():
+        monkeypatch.setattr(Runner, "paused", True)
+
+    runner.during = paused_meanwhile
+    put_job(home_store, 1, state="queued", pid=None, start_failures=JOB_START_TRIES - 1)
+    add_back(1)
+    Runner.run_job(1)
+    assert JOBS.get(1)["start_failures"] == JOB_START_TRIES - 1 and Queue.ordered() == [1]
 
 
 @pytest.mark.spec("JOB-10")

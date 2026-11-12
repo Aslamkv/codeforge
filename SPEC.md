@@ -450,8 +450,10 @@ goes to the front, so the person is always answered first.
   process of its own, `tinker ARGS` (`resume #N` for a job that ran before, which skips what it did), marked as
   the runner's job #N so it does not queue itself again, and keeps what it prints in log `output #N`. An add in
   the runner's own process wakes it at once; otherwise it reads the queue once every `QUEUE_LOOK_SECONDS`
-  seconds. It runs until the queue is empty, so the queue goes on whenever a Tinker that hosts it starts. An
-  idle queue starts a dream (**DRM-1**).
+  seconds. It runs until the queue is empty, so the queue goes on whenever a Tinker that hosts it starts. A head
+  whose process ends while it is still the head, the runner not paused, is a failed start; after `JOB_START_TRIES`
+  of them in a row the runner gives up on it: the job is `stopped`, leaves the queue, and log `output #N` says why
+  (`resume #N` tries it again). An idle queue starts a dream (**DRM-1**).
 - **JOB-10** Whoever asked for a job follows it: a job command in a terminal (and the conversation's own
   `tinker ...` process) puts its job at the front, prints log `output #N` as it grows and ends once its job
   leaves the queue; one that hosts the runner keeps it until the queue is empty. Ctrl-C there, and quitting
@@ -1060,14 +1062,16 @@ The terminal and the chats are one conversation: the same commands, the same ans
   shows what it deletes and waits for `/confirm` (**SET-8**), but `clear chat`, which deletes no record (the history
   keeps it), is done at once. `/exit` in a chat asks first, as Tinker cannot be started again from there (the terminal's
   closes at once, **CNV-6**); the person's `/exit` and `/confirm` are taken out at once, and the question as Tinker ends
-  (its status says it no longer listens). The preview of a deletion is what `tinker` printed (its stdout), and the plan
+  (its status says it no longer listens). The preview of a deletion is what `tinker` printed (its stdout); a preview
+  that fails (an unknown number: `No reading #15`) is the answer, and nothing waits for `/confirm`. The plan
   that waits is kept without the lines on what to send next: the chat never filters `tinker`'s text. The conversation
   that sends a command that starts or goes on with a job (a `job` command, `/confirm`, `/amend`, `rename`, `resume`,
   `exercise LANGUAGE`) is that step's asker: only it sees the job's progress, its ending and the plan that waits; every
   other conversation, another chat on the same channel too, sees only the status.
 - **CNV-10** Each chat has at most one question that waits for the person (a deletion, a chat's `/exit`, a command line,
   words a command needs), kept in one place by channel and chat: what its answer runs and what a cancel says.
-  `Desk.settle` runs what waits for a `/confirm`. Any other message cancels it and says so; a question with nothing to
+  `Desk.settle` runs what waits for a `/confirm`. Any other message cancels it and says so at once, before that
+  message is answered; a question with nothing to
   say on a cancel (words a command needs) is dropped quietly. The plan that waits is not such a question: every chat and
   the terminal share it and can answer it, though only its asker sees it; the others see the status that says it waits.
   `decide` builds or changes the plan that waits. For a new project, its first `confirm` asks for the folder's name.
@@ -1676,7 +1680,8 @@ is learned from, the core ones first, and saved as soon as it is read. What it t
   told it needs a model that sees. A recording (any format) is one chapter: its transcript (**MOD-30**). It is first
   turned into 16 kHz mono WAV by `ffmpeg`, found on the system's path and never installed by Tinker; with no
   `ffmpeg` it is kept with no chapters, and the person is told audio needs ffmpeg, with the install command for
-  the system (`brew install ffmpeg` on macOS, `sudo apt install ffmpeg` on Linux). With `ffmpeg` but no model that
+  the system (`brew install ffmpeg` on macOS, `sudo apt install ffmpeg` on Linux). An `ffmpeg` that fails keeps it
+  with no chapters too, and the person is told the last line of its error, not all of it. With `ffmpeg` but no model that
   hears, the person is offered one (**MOD-30**); a no keeps it with no chapters and says so. `read #N` of a
   recording kept with no chapters tries its transcript again.
 - **RDG-9** The survey, made once per reading and kept with it, sees the contents (each chapter's kind and
@@ -1708,9 +1713,10 @@ is learned from, the core ones first, and saved as soon as it is read. What it t
   (chapters and principles changed), the chapters read, the principles kept in its scope, whether builds use it,
   and what to do next. `tinker read #N` on the command line is `read show #N`.
 - **RDG-15** `read list [PAGE]` shows the shelf by page ([State](#state)), one line each: `#N`, the kind's icon (📕
-  book, 📄 document, 🖼 image, 🎧 audio), the title, its size, the day it was added, ✓ when learned, and in a chat
-  `← inside` on the one the person is inside. `read show #N` shows its kind, source, file, size, summary and each
-  chapter with its state and principles. `read rename #N TITLE` gives it a new title. All three are glances
+  book, 📄 document, 🖼 image, 🎧 audio), the title, how much is read (`N of M chapters read · K principle(s)`),
+  its size, the day it was added (the day alone, no time), ✓ when learned, and in a chat `← inside` on the one the
+  person is inside. `read show #N` shows its kind, source, file, size, the day it was added, its summary (before a
+  learn: that there is none yet and `read #N learn` writes one) and each chapter with its state and principles. `read rename #N TITLE` gives it a new title. All three are glances
   (**CMD-1**). `read forget #N...` and `clear read [#N...]` delete those readings (every one with no number for
   `clear read`): their entry, their file and their topic, as a deletion (**SET-8**); a chat inside one leaves it.
 

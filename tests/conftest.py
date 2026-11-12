@@ -120,6 +120,20 @@ def no_job():
 
 
 @pytest.fixture(autouse=True)
+def no_reporter_left(monkeypatch):
+    made, start = [], conversation.Reporter.__init__
+
+    def recorded(reporter, *arguments, **options):
+        made.append(reporter)
+        start(reporter, *arguments, **options)
+
+    monkeypatch.setattr(conversation.Reporter, "__init__", recorded)
+    yield
+    for reporter in made:
+        reporter.ended = True
+
+
+@pytest.fixture(autouse=True)
 def nothing_kept(monkeypatch):
     monkeypatch.setattr(Ollama, "embedders", set())
     handlers = {signum: signal.getsignal(signum) for signum in (signal.SIGTERM, signal.SIGHUP)}

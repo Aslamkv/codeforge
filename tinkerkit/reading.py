@@ -165,11 +165,16 @@ class Senses:
         try:
             return Models.transcript(self.wav(ffmpeg, data, suffix))
         except subprocess.CalledProcessError as error:
-            raise Unsensed(
-                f"{self.name} is a recording: ffmpeg failed: {error.stderr.decode(errors='replace').strip()}"
-            )
+            raise Unsensed(f"{self.name} is a recording: {self.ffmpeg_failure(error)}")
         except OllamaError as error:
             raise Unsensed(f"{self.name} is a recording: {error}")
+
+    @staticmethod
+    def ffmpeg_failure(error):
+        lines = [line.strip() for line in error.stderr.decode(errors="replace").splitlines() if line.strip()]
+        if not lines:
+            return f"ffmpeg failed with exit code {error.returncode}"
+        return f"ffmpeg failed: {lines[-1]}"
 
     def get_hearing(self):
         name = Models.audio_offer()
@@ -481,8 +486,12 @@ def listed(entry, inside=None):
     here = " ← inside" if entry["number"] == inside else ""
     return (
         f"#{entry['number']} {KIND_ICONS[kind_of(entry)]} {entry['title']}: {progress(entry)}{size} · added "
-        f"{entry['added']}{mark}{here}"
+        f"{day_added(entry)}{mark}{here}"
     )
+
+
+def day_added(entry):
+    return entry["added"].split()[0]
 
 
 def kind_of(entry):
@@ -504,9 +513,11 @@ def show(number):
     ):
         kept_as = [kind_of(entry), entry.get("file"), entry.get("size") and byte_size(entry["size"])]
         say.info(f"{KIND_ICONS[kind_of(entry)]} {' · '.join(part for part in kept_as if part)}", "🗂")
-        say.info(f"From {entry['source']}, added {entry['added']}: {progress(entry)}", "📥")
+        say.info(f"From {entry['source']}, added {day_added(entry)}: {progress(entry)}", "📥")
         if entry["survey"]:
             say.info(entry["survey"]["summary"], "📝")
+        else:
+            say.info(f"No summary yet: tinker read #{number} learn writes one", "📝")
         for chapter in Book.of(entry).chapters:
             note = {"raw": "text only", "unread": "not read yet"}.get(
                 chapter.state, f"{len(chapter.principles)} principle(s)"

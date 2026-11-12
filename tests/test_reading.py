@@ -327,11 +327,13 @@ def test_a_recording_ffmpeg_or_the_transcript_fails_on_is_kept_with_no_chapters(
     sensing(monkeypatch)
 
     def failing_run(command, **options):
-        raise subprocess.CalledProcessError(1, command, b"", b"Invalid data found")
+        raise subprocess.CalledProcessError(1, command, b"", b"Probing stream 0\nInvalid data found\n\n  \n")
 
     monkeypatch.setattr(subprocess, "run", failing_run)
     kept_with_no_chapters(
-        written(tmp_path, "talk.ogg", OGG), capsys, "talk.ogg is a recording: .*Invalid data found"
+        written(tmp_path, "talk.ogg", OGG),
+        capsys,
+        "talk.ogg is a recording: ffmpeg failed: Invalid data found",
     )
     sensing(monkeypatch)
 
@@ -344,6 +346,21 @@ def test_a_recording_ffmpeg_or_the_transcript_fails_on_is_kept_with_no_chapters(
         capsys,
         "other.ogg is a recording: the model that hears",
         2,
+    )
+
+
+@pytest.mark.spec("RDG-8")
+def test_a_recording_ffmpeg_fails_on_silently_is_told_its_exit_code(
+    tmp_path, home_store, monkeypatch, capsys
+):
+    sensing(monkeypatch)
+
+    def failing_run(command, **options):
+        raise subprocess.CalledProcessError(69, command, b"", b"\n  \n")
+
+    monkeypatch.setattr(subprocess, "run", failing_run)
+    kept_with_no_chapters(
+        written(tmp_path, "talk.ogg", OGG), capsys, "talk.ogg is a recording: ffmpeg failed with exit code 69"
     )
 
 
@@ -742,6 +759,27 @@ def test_the_reading_list_is_shown_and_cleared(
         cli.Cli.cleared(["read", "memory"], yes=True)
     cli.Cli.cleared(["read"], yes=True)
     assert Readings.all() == {}
+
+
+@pytest.mark.spec("RDG-15")
+def test_a_reading_shows_the_day_it_was_added_and_says_when_it_has_no_summary(
+    tmp_path, home_store, make_model, fake_ollama, capsys
+):
+    read_craft(tmp_path, make_model, fake_ollama, software=False)
+    kept(second_edition(tmp_path))
+    Readings.save(dict(Readings.get(1), added="2026-11-12 10:00"))
+    Readings.save(dict(Readings.get(2), added="2026-11-11", survey=None))
+    capsys.readouterr()
+    show_list()
+    listed = capsys.readouterr().out
+    assert "added 2026-11-12" in listed and "added 2026-11-11" in listed and "10:00" not in listed
+    show(1)
+    shown = capsys.readouterr().out
+    assert "added 2026-11-12:" in shown and "10:00" not in shown and "No summary yet" not in shown
+    show(2)
+    shown = capsys.readouterr().out
+    assert "added 2026-11-11:" in shown
+    assert "📝 No summary yet: tinker read #2 learn writes one" in shown
 
 
 @pytest.mark.spec("RDG-15")

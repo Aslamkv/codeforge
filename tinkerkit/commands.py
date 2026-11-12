@@ -137,8 +137,9 @@ COMMANDS = [
         "confirm",
         "Build",
         "confirm [@PROJECT]",
-        "build the plan that waits for your confirmation",
-        "Build the plan that waits for confirmation (as resume).",
+        "say yes to what waits: a plan, or in a chat a deletion or offer",
+        "Say yes to what waits for confirmation: build the plan that waits (as resume); in a chat, also carry out "
+        "a deletion or an offer that waits.",
         kind="job",
         chat=True,
         words=True,

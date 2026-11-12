@@ -2375,6 +2375,18 @@ def test_a_command_that_deletes_and_exit_ask_first(desk):
     wait_until(lambda: channel.closed)
 
 
+@pytest.mark.spec("CNV-9")
+def test_a_deletion_whose_preview_fails_answers_with_the_error_and_waits_for_nothing(desk, monkeypatch):
+    desk, channel, _ = desk
+    failed = subprocess.CompletedProcess([], 1, "", "No reading #15\n")
+    monkeypatch.setattr(desk, "run_tinker", lambda arguments, timeout, env=None: failed)
+    monkeypatch.setattr(desk, "printed", Desk.printed.__get__(desk))
+    answer = desk.answer(Message("1", "/read forget #15"), channel)
+    assert "No reading #15" in answer and "/confirm" not in answer
+    assert not any("/confirm" in text for text in channel.texts())
+    assert desk.questions.waiting(channel, "1") is None
+
+
 @pytest.mark.spec("CNV-9", "REM-9", "REM-10")
 def test_memory_forget_asks_first_and_the_other_memory_views_are_glances(desk, monkeypatch):
     desk, channel, _ = desk
@@ -2756,6 +2768,19 @@ def test_a_question_with_nothing_to_say_on_a_cancel_is_dropped_quietly(desk):
     assert not desk.settle(channel, Message("1", "/status"), "status")
     assert not desk.questions.waiting(channel, "1") and channel.texts() == []
     assert desk.decide([(channel, "1")], "amend", ["amend"]).startswith("✍️ Write `/amend [@PROJECT] CHANGE`")
+
+
+@pytest.mark.spec("CNV-10")
+@pytest.mark.parametrize("then", ["hello", "/nope", "/clear runs", "/status", "/leave", "/fresh", "/start"])
+def test_a_cancel_shows_at_once_before_the_message_that_cancels_is_answered(desk, monkeypatch, then):
+    desk, _, _ = desk
+    console, out = piped_console(monkeypatch)
+    answer = lambda channel, message, *args, **kwargs: channel.send(message.chat, "THE ANSWER")
+    monkeypatch.setattr(desk.talk, "answer", answer)
+    desk.hear(console, Message("console", "/clear memory", "you"))
+    asked = len(out.getvalue())
+    desk.hear(console, Message("console", then, "you"))
+    assert out.getvalue()[asked:].startswith("🚫 Not done: clear memory\n")
 
 
 @pytest.mark.spec("CNV-10")

@@ -12,7 +12,15 @@ lazy from pathlib import Path
 lazy from .commands import kind_of
 lazy from .messages import say
 lazy from .remembering import Scratchpad
-lazy from .settings import DREAM_IDLE_SECONDS, EXERCISE_ENV, JOB_STOP_SIGNAL, Home, Numbered, confirm_deletion
+lazy from .settings import (
+    DREAM_IDLE_SECONDS,
+    EXERCISE_ENV,
+    JOB_START_TRIES,
+    JOB_STOP_SIGNAL,
+    Home,
+    Numbered,
+    confirm_deletion,
+)
 lazy from .store import Log
 lazy from .text import fingerprint, now_text
 
@@ -124,7 +132,32 @@ class Runner:
         output = Log(Home.store(), f"output #{number}")
         for line in process.stdout:
             output.add({"line": line.rstrip("\n")})
-        output.add({"exit": process.wait()})
+        code = process.wait()
+        cls.count_failed_start(number, output)
+        output.add({"exit": code})
+
+    @classmethod
+    def count_failed_start(cls, number, output):
+        if cls.paused:
+            return
+        failures = JOBS.get(number).get("start_failures", 0)
+        if Queue.head() != number:
+            if failures:
+                Jobs.update(number, start_failures=0)
+            return
+        Jobs.update(number, start_failures=failures + 1)
+        if failures + 1 >= JOB_START_TRIES:
+            cls.give_up(number, output)
+
+    @staticmethod
+    def give_up(number, output):
+        Jobs.update(number, state="stopped", start_failures=0)
+        Queue.remove(number)
+        output.add(
+            {
+                "line": f"gave up after {JOB_START_TRIES} failed starts in a row; resume #{number} tries it again"
+            }
+        )
 
     @staticmethod
     def start(job):

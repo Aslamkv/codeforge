@@ -503,13 +503,15 @@ class Desk:
         self.left_if_gone(channel, message.chat)
 
     def handled(self, channel, message, asked):
+        said = self.as_said(channel, self.with_words_wanted(channel, message))
+        self.cancel_unless_confirmed(channel, said)
         if message.text.split()[:1] == [CHAT_APP_START]:
             channel.send(message.chat, welcome())
             return
         if message.text.split() == [CHAT_FRESH]:
             self.fresh(channel, message)
             return
-        message = self.as_said(channel, self.with_words_wanted(channel, message))
+        message = said
         if message.text.split() == [CHAT_LEAVE]:
             channel.send(message.chat, self.left(channel, message.chat))
             return
@@ -644,6 +646,12 @@ class Desk:
     def replied(self, channel, message, line):
         self.handle(channel, Message(message.chat, line, message.sender), message.text)
 
+    def cancel_unless_confirmed(self, channel, said):
+        question = self.questions.waiting(channel, said.chat)
+        if not question or question.naming or said.text.split() == ["/confirm"]:
+            return
+        self.questions.answered(channel, said.chat).cancels()
+
     def settle(self, channel, message, command):
         confirm = command == "confirm" and len(message.text.split()) == 1
         question = self.questions.waiting(channel, message.chat)
@@ -657,8 +665,6 @@ class Desk:
         if question and confirm:
             threading.Thread(target=self.settled, args=(channel, message.chat, question), daemon=True).start()
             return True
-        if question:
-            question.cancels()
         return False
 
     def settled(self, channel, chat, question):
@@ -1090,7 +1096,10 @@ class Desk:
         return None
 
     def ask_first(self, channel, chat, words):
-        preview = self.printed(words)
+        try:
+            preview = self.printed(words)
+        except PreviewFailed as failed:
+            return md(t"⚙️ **{' '.join(words)}**\n{str(failed):block}")
         shown = channel.show(
             chat,
             None,
@@ -1308,7 +1317,10 @@ class Desk:
         return shown_output(done.stdout + done.stderr)
 
     def printed(self, arguments):
-        return shown_output(self.run_tinker(arguments, 120).stdout)
+        done = self.run_tinker(arguments, 120)
+        if done.returncode and not done.stdout.strip():
+            raise PreviewFailed(shown_output(done.stderr))
+        return shown_output(done.stdout)
 
     def run_tinker(self, arguments, timeout, env=None):
         return subprocess.run(
@@ -2451,6 +2463,10 @@ class Channel:
 
 
 class ChannelError(Exception):
+    pass
+
+
+class PreviewFailed(Exception):
     pass
 
 
