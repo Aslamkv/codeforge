@@ -2629,7 +2629,7 @@ class ConsoleChannel(Channel):
             self.screen.draw_prompt()
 
     def prompt(self):
-        if self.mode is None:
+        if self.mode is None or not typed_here():
             return self.screen.prompt()
         return self.mode.prompt()
 
@@ -2768,7 +2768,7 @@ class ConsoleChannel(Channel):
     def show_again(self, line):
         if self.screen.ruled():
             quiet = not line.strip() or typed_exit(line)
-            self.screen.sent(f"› {line}", shown=not quiet)
+            self.screen.sent(f"{self.prompt()}{line}", shown=not quiet)
 
     def banner(self, lines):
         if not typed_here():
@@ -2969,7 +2969,7 @@ class ConsoleScreen:
 
     @staticmethod
     def shown_again(typed):
-        return styled(typed.ljust(terminal_columns()), "grey background")
+        return styled(typed + " " * (terminal_columns() - visible_width(typed)), "grey background")
 
     def draw(self, text):
         with self.printing:

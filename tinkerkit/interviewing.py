@@ -70,10 +70,17 @@ class Interview:
         )
         Scratchpad.dreamt([episode["id"]], now)
         Traits().apply(deltas_of(reply, question["traits"], episode["id"]), now)
-        if isinstance(reply.get("question"), dict):
-            self.question_kept(reply["question"], [episode["id"]], now)
+        if isinstance(follow_up := follow_up_of(reply), dict):
+            self.question_kept(follow_up, [episode["id"]], now)
         self.questions.answer(question["id"], text, now)
         return self.turn(chat, now)
+
+
+def follow_up_of(reply):
+    question = reply.get("question")
+    if isinstance(question, str):
+        return {"text": question, "suggestions": reply.get("suggestions")}
+    return question
 
 
 def out_of_range(question, text):
@@ -118,7 +125,10 @@ def asked_traits(question):
 
 def deltas_of(reply, asked_about, source):
     return [
-        *({"op": "confirm", "id": trait_id} for trait_id in cited_only(reply.get("confirm"), asked_about)),
+        *(
+            {"op": "confirm", "id": trait_id, "sources": [source]}
+            for trait_id in cited_only(reply.get("confirm"), asked_about)
+        ),
         *(
             {"op": "reject", "id": item["id"], "why": text_of(item, "why")}
             for item in listed(reply.get("reject"))

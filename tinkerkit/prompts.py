@@ -945,12 +945,12 @@ Reply with ONLY JSON: {"overview":"...","features":["..."],"requires":"Python 3.
         'its code with "tool" (only a tool named in "Installed here"; never an installer or package manager) '
         'from an empty folder, the code written to "file" when the tool reads a file. Otherwise check is '
         'null. "uses" lists the numbers of the items and passages the answer rests on, empty when none. '
-        'Reply with ONLY JSON: {"answer": "...", "uses": [1], "check": null or {"kind": "sql|command", '
+        'Reply with ONLY JSON: {"answer": "...", "uses": [1], "check": {"kind": "sql|command", '
         '"code": "...", "shows": "what it shows", "tool": "...", "file": "..."}}'
     )
     ASK_CHECK_AGAIN = (
         "Tinker could not run your check, for the reason above. Give back one fixed check that shows the same "
-        'claim and avoids that reason, or null when no check can. Reply with ONLY JSON: {"check": null or '
+        'claim and avoids that reason, or null when no check can. Reply with ONLY JSON: {"check": '
         '{"kind": "sql|command", "code": "...", "shows": "what it shows", "tool": "...", "file": "..."}}'
     )
     ASK_CHECKED = (
@@ -1116,7 +1116,8 @@ Reply with ONLY JSON: {"claims":[{"claim":1,"verdict":"holds","why":"one short s
         "person that just changed, each with its id, and the traits already known. A trait is about person "
         "(who the person is: work, goals, likes) or tinker (who Tinker is for them: role, duties, tone, how "
         "it builds), when is the situation it holds in, empty when it always holds, and do is the trait as "
-        "said. Reply with only one JSON object:\n"
+        "said. A trait is lasting (work, goals, likes, ways of working), never a passing state (the folder, "
+        "the time, one command's output). Reply with only one JSON object:\n"
         '{"add":[{"about":"person|tinker","when":"the situation, or empty","do":"the trait as said",'
         '"sources":["e1","m1"],"question":"a short question the person answers to confirm it",'
         '"suggestions":["2 to 4 short answers"]}],\n'
@@ -1124,6 +1125,16 @@ Reply with ONLY JSON: {"claims":[{"claim":1,"verdict":"holds","why":"one short s
         "Add every new trait the episodes and memories show and support a known trait they show again. Every "
         "add and support cites the ids it rests on. Use only the ids you are given. Leave a list empty when "
         "nothing fits."
+    )
+
+    DREAM_MERGE_TRAITS_SYSTEM = (
+        "You tidy what is known about a person and about Tinker for them. You get a group of similar traits, "
+        "each with its id, about (person or tinker), when (the situation it holds in, empty when it always "
+        "holds), do (the trait as said) and when it last changed. The traits come newest first. Join the ones "
+        "that say the same thing into one trait; where they disagree, the newer wording wins. Reply with only "
+        "one JSON object:\n"
+        '{"merge":[{"ids":["t1","t2"],"when":"the situation, or empty","do":"the trait as said"}]}\n'
+        "Use only the ids you are given. Leave the list empty when nothing fits."
     )
 
     DREAM_GISTS_SYSTEM = (
@@ -1161,12 +1172,13 @@ Reply with ONLY JSON: {"claims":[{"claim":1,"verdict":"holds","why":"one short s
         "JSON object:\n"
         '{"confirm":["ids of the traits the reply says hold"],'
         '"reject":[{"id":"a trait id","why":"why it does not hold"}],'
-        '"amend":[{"id":"a trait id","when":"when it holds now","do":"what it says now"}],'
-        '"add":[{"about":"person|tinker","when":"when it holds, or empty","do":"what the reply says"}],'
+        '"amend":[{"id":"a trait id","when":"when it holds now","do":"the habit it holds now"}],'
+        '"add":[{"about":"person|tinker","when":"when it holds, or empty","do":"the lasting habit"}],'
         '"question":{"text":"a short follow-up question","suggestions":["2 to 4 short answers"]}}\n'
-        "Use only the given trait ids and add only what the reply says; an add's do keeps the whole reply, "
-        "every detail and condition in it. Leave a list empty and question null when the reply gives nothing "
-        "for them."
+        "Use only the given trait ids and add only what the reply says. An add's or amend's do is a lasting "
+        "habit in Tinker's own words, never the reply copied, and keeps every detail and condition the reply "
+        "gives. When the reply asks to be asked something, that is no add: a request to be asked something "
+        "is a question. Leave a list empty and question null when the reply gives nothing for them."
     )
 
     INTERACT_ADD_SYSTEM = (

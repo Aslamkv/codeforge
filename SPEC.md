@@ -273,7 +273,7 @@ Plain text helpers every module shares.
 - **TXT-1** `first_line` gives the first line of the text with its ends stripped, cut to the limit with
   `...`. `one_line` gives the text on one line, each run of whitespace one space. `words` gives the lowercase
   alphanumeric words. `fingerprint` is the SHA-1 of the text. `similarity` is a case-insensitive ratio from 0
-  to 1. `field(item, key, limit)` gives a key's value as stripped text, cut to the limit, empty when it is
+  to 1, the same whichever text comes first. `field(item, key, limit)` gives a key's value as stripped text, cut to the limit, empty when it is
   missing or none. `host` gives a URL's site in lowercase, without `www.`.
 - **TXT-2** `split_text(text, size)` gives chunks of at most `max(size, 200)` chars. It splits between
   paragraphs, cuts a longer paragraph, and loses no text.
@@ -524,8 +524,8 @@ What is said in the chats, kept so that a chat is only a view of it.
   shortened titles are added to `notes`.
 - **PRM-12** A part is `exact` only when it is required, and `atomic` only when it is optional. `relaxed()` is
   the same part, but not exact. A part renders as `## title\ntext`, and its size is the rendered length + 2.
-- **PRM-13** The example JSON in `SPEC_SYSTEM`, `FEATURE_SPEC_SYSTEM`, `TOOLCHAIN_SYSTEM` and `README_SYSTEM`
-  parses. Its toolchain is a usable `Toolchain`. Every `{placeholder}` template (`BRIEF_SYSTEM`) formats.
+- **PRM-13** The example JSON in `SPEC_SYSTEM`, `FEATURE_SPEC_SYSTEM`, `TOOLCHAIN_SYSTEM`, `README_SYSTEM`,
+  `ASK_SYSTEM` and `ASK_CHECK_AGAIN` parses. Its toolchain is a usable `Toolchain`. Every `{placeholder}` template (`BRIEF_SYSTEM`) formats.
 - **PRM-14** Each command in the example toolchain is a real command line of its own tools. Tinker's own words
   never appear in it.
 - **PRM-15** `LESSONS_SYSTEM` asks for general lessons only: never a project's names, files or data.
@@ -1021,7 +1021,7 @@ The terminal and the chats are one conversation: the same commands, the same ans
   goes in right above the block and pushes the block, the rule and the prompt down a row. Once the prompt is on the last
   row, the lines above scroll up instead and older lines go to the scrollback. When the block grows or shrinks, the rule
   and the prompt move down or up with it. A message of any height prints above the block in pieces that fit, and the
-  line you send shows again there; the prompt line, what you type on it and the menu under it are drawn again after each
+  line you send shows again there after the prompt it was typed at; the prompt line, what you type on it and the menu under it are drawn again after each
   print, with the cursor where it was. When the window is resized, the block and the rule are drawn again at the new
   size right away, still right above the prompt and with what Tinker printed right above them, and they never spill onto
   the prompt row. The conversation opens in a framed banner that names Tinker, the model in use, the embedding model
@@ -1594,16 +1594,19 @@ Nothing here calls the model.
   whose question (an episode's message, a memory's gist) matches the message by the **REM-12** test are left
   out, in both calls and the review, so the answer is the model's own.
 - **REM-14** `Traits` changes only by deltas the code applies: `add` (a new candidate, or confirmed when the person
-  said it), `support` (id, sources), `confirm`, `reject` (retired, with why) and `amend` (id, new `when`/`do`). Each
-  is added to the trait's history. A delta with an unknown id, or an add or support with no source, is dropped. An
-  add like a living trait (`SAME_FACT_SIMILARITY` on `when` and `do`) supports it instead; one like a retired trait
-  is dropped, so nothing is asked twice.
+  said it), `support` (id, sources), `confirm` (id, sources), `reject` (retired, with why), `amend` (id, new
+  `when`/`do`) and `merge` (ids, `when`, `do`; **DRM-12**). Each is added to the trait's history. A delta with an
+  unknown id, or an add, support or confirm with no source, is dropped. An add like a living trait
+  (`SAME_FACT_SIMILARITY` on `when` and `do`) supports it instead, and a confirmed add like a candidate confirms it
+  too; one like a retired trait is dropped, so nothing is asked twice. A merge makes one trait with the union of
+  their sources, confirmed when any of them was, and retires the old ones "merged into tN"; a pending confirm
+  question about one of them asks about the merged trait instead.
 - **REM-15** A question in `questions` is `{id, kind, text, suggestions, traits, sources, status, answer, at}`: id
   `qN`, kind `confirm` (of candidate `traits`) or `open`, `suggestions` the answers offered, status `pending`,
   `answered` or `skipped`. One like a question kept (word similarity at least `SAME_FACT_SIMILARITY`) is dropped.
   `next()` gives the pending ones in turn: confirms first, the best-supported candidate first, then open ones, in
-  the order kept; a skipped question goes behind every pending one, still pending. A confirm question whose traits
-  are all retired no longer waits.
+  the order kept; a skipped question goes behind every pending one, still pending. A confirm question none of whose
+  traits is still a candidate (each confirmed or retired) no longer waits.
 - **REM-16** `Traits.relevant(text, room)` gives the confirmed traits a prompt needs, each as its gist (else its
   `do`) after its `when`: those for always first, most sources first, then the rest ranked by BM25 against the text
   (no embedding call, **PRI-8**), cut at `room` characters (`TRAITS_CHARS`, 800). With none, it gives `""`. It is the
@@ -1620,7 +1623,8 @@ fade, and the traits they show become candidates and questions that wait for the
   (5) and a fresh episode is there. A chat's answer and the exercise are jobs, so a dream never runs over
   them, and a dream pushed back goes on later (**JOB-2**). Only one dream is in the queue at a time.
   `tinker dream run` queues one now.
-- **DRM-2** `Dream.run()` goes through its steps in turn, consolidate, revise, decay, traits, gists and questions, each saved
+- **DRM-2** `Dream.run()` goes through its steps in turn, consolidate, revise, decay, traits, merge traits (**DRM-12**),
+  gists and questions, each saved
   when done in `dream`/`state`, so a dream that goes on skips the steps done; its tracker's `doing` names the
   step.
 - **DRM-3** Consolidate takes the fresh episodes chat by chat, at most `DREAM_BATCH_EPISODES` (12) to a call.
@@ -1651,6 +1655,8 @@ fade, and the traits they show become candidates and questions that wait for the
   `DREAM_TRAITS_SYSTEM` the gists of the episodes this dream dreamt, the `person` memories it changed and the living
   traits, and reads `{add: [{about, when, do, sources, question, suggestions}], support: [{id, sources}]}`: each add
   is a candidate (**REM-14**) with its `confirm` question and 2 to 4 suggestions (**REM-15**). As many as it finds.
+  The prompt says a trait is lasting (work, goals, likes, ways of working), never a passing state (the folder, the
+  time, one command's output).
 - **DRM-7** Each change a dream makes is added to log `dream events` as `{step, change, id, gist}`.
 - **DRM-8** `tinker dream` (or `dream status`) says when the last dream was, how many changes each step made,
   how many episodes and questions wait, and whether a dream is queued or running.
@@ -1666,7 +1672,12 @@ fade, and the traits they show become candidates and questions that wait for the
 - **DRM-11** Questions asks `DREAM_QUESTIONS_SYSTEM` for open questions about who the person is and who Tinker is
   for them (the areas are named in the prompt), each with 2 to 4 suggestions, given the confirmed traits and the
   questions kept, and reads `{questions: [{text, suggestions}]}`. It asks again, one call a round, until a round
-  keeps nothing new (**REM-15**). Nothing is sent to the person: the questions wait for `interact` (**INT-1**).
+  keeps nothing new (**REM-15**) or `QUESTIONS_WAITING` (5) questions are pending; with that many pending it asks
+  nothing. Nothing is sent to the person: the questions wait for `interact` (**INT-1**).
+- **DRM-12** Merge traits joins similar living traits (as **GRF-3**, on `when` and `do`) of a group where one has a
+  history event since the last dream (teaching and the interview change traits too): `DREAM_MERGE_TRAITS_SYSTEM`
+  (given the traits newest first, and told so) answers `{merge: [{ids, when, do}]}`, the newer wording winning where they disagree, each applied as a `merge`
+  delta (**REM-14**). With no such group it makes no call.
 
 ## interviewing (INT)
 
@@ -1683,8 +1694,10 @@ Nothing here is shown unasked.
   questions kept) gives the next `{text, suggestions}`, kept pending before it is shown, or `{done: true}`: then it
   says nothing is left to ask and leaves the interview. There is no limit; `/leave` ends it any time.
 - **INT-3** Each answer is one call (`INTERACT_ANSWER_SYSTEM`: the question, its suggestions, its traits and the
-  reply) that reads `{confirm, reject, amend, add, question}` as deltas (**REM-14**): an add is confirmed, its source
-  the answer's episode (**INT-5**); `question` is a follow-up, kept pending (**REM-15**). They are applied and the
+  reply) that reads `{confirm, reject, amend, add, question}` as deltas (**REM-14**): an add is confirmed, and an add
+  or confirm has the answer's episode as its source (**INT-5**); `question` is a follow-up, kept pending (**REM-15**); a `question` given as text, with `suggestions` beside it,
+  is read the same. This call's add or amend gives `do` as a lasting habit in Tinker's own words, never the reply copied, and a
+  request to be asked something is a `question`. They are applied and the
   question is answered at once, so a restart loses nothing; then the next question is shown. A reply that cannot be
   read, or a call that fails, leaves the question pending, says the answer could not be read and asks it again. An
   answer starting with a number no suggestion has makes no call: it names the numbers there are and asks again.
@@ -2091,7 +2104,8 @@ no other module imports it or changes for it, and deleting it with its one call 
   `channels.connect_by_address` (the host; at the end the address reached and whether by IPv4 or IPv6),
   `Desk.run` (the conversation), `Desk.handle` (the channel and what the user asked), `TelegramChannel.send`
   (the chat and the text), `Desk.close_channels` and `Desk.unload_models`. Facts: `Store.get`, `Store.put`
-  and `Store.append` (the table, the key, found or not, and the value). A value of `channel_secrets` is
+  and `Store.append` (the table, the key, found or not, and the value), and `dreaming.reply_read` (the object read
+  from a quick reply of a dream or interview, so a reply that cannot be read ends `failed` with why). A value of `channel_secrets` is
   masked: a dict keeps its keys with each value written `***`, any other value is written `***`.
   A `Store.get` whose line, but for its seconds, is the one this process last wrote for that table and key
   writes nothing, so a value read again and again unchanged is written once.

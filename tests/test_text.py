@@ -1,3 +1,4 @@
+import difflib
 import re
 
 import pytest
@@ -37,6 +38,15 @@ def test_words_fingerprint_and_similarity():
     assert fingerprint("a") == fingerprint("a") != fingerprint("b")
     assert re.fullmatch(r"[0-9a-f]{40}", fingerprint("a"))
     assert similarity("ABC", "abc") == 1.0 and similarity("abc", "xyz") == 0.0
+
+
+@pytest.mark.spec("TXT-1")
+def test_similarity_is_the_same_whichever_text_comes_first():
+    assert (
+        difflib.SequenceMatcher(None, "tide", "diet").ratio()
+        != difflib.SequenceMatcher(None, "diet", "tide").ratio()
+    )
+    assert similarity("Tide", "diet") == similarity("diet", "Tide") == 0.5
 
 
 @pytest.mark.spec("TXT-2")

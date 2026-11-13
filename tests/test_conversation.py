@@ -68,7 +68,7 @@ from tinkerkit.conversation import (
 from tinkerkit.interviewing import Interview
 from tinkerkit.jobs import Queue, Runner, began_at
 from tinkerkit.ledger import DONE_NOTE_KEPT_SECONDS, Ledger
-from tinkerkit.messages import DIMMED, HEADING, Text, next_page_words, styled
+from tinkerkit.messages import DIMMED, HEADING, Text, next_page_words, styled, visible_width
 from tinkerkit.model import Models, Ollama, QuickModel, ThinkLevels
 from tinkerkit.project import Runs, Tracker
 from tinkerkit.reading import Shelf
@@ -500,8 +500,9 @@ def pulled_up(rows, kept):
     return f"\0337\033[{kept + rows}F\033[{rows}M\0338\033[{rows}A"
 
 
-def shown_again(line, columns=10):
-    return f"{GREY}{f'› {line}'.ljust(columns)}{RESET}"
+def shown_again(line, columns=10, prompt="› "):
+    typed = f"{prompt}{line}"
+    return f"{GREY}{typed}{' ' * (columns - visible_width(typed))}{RESET}"
 
 
 def rule_drawn(columns):
@@ -516,8 +517,8 @@ def block_and_rule(block, columns):
     return unwrapped("\033[E".join([*cleared_to_end(block), rule_drawn(columns)]))
 
 
-def sent_back_shown(line, rows=1, block=(), columns=10):
-    shown = f"{shown_again(line, columns)}\033[E{block_and_rule(block, columns)}"
+def sent_back_shown(line, rows=1, block=(), columns=10, prompt="› "):
+    shown = f"{shown_again(line, columns, prompt)}\033[E{block_and_rule(block, columns)}"
     return above_the_rule(rows + len(block) + 1, shown)
 
 
@@ -649,6 +650,16 @@ def test_console_shows_a_line_sent_again_right_above_the_rule_by_all_its_rows(
 ):
     console = ruled_console(monkeypatch, columns)
     assert drawn_after(lambda: console.show_again(line)) == sent_back_shown(line, rows, columns=columns)
+
+
+@pytest.mark.spec("CNV-6")
+def test_console_shows_a_line_sent_again_after_the_prompt_it_was_typed_at(monkeypatch):
+    monkeypatch.setattr("tinkerkit.conversation.typed_here", lambda: True)
+    console = ruled_console(monkeypatch, 30)
+    console.now_inside("console", InsideInterview(NoInterview()))
+    assert drawn_after(lambda: console.show_again("hi")) == sent_back_shown(
+        "hi", columns=30, prompt="💬 interact › "
+    )
 
 
 @pytest.mark.spec("CNV-6")
@@ -875,6 +886,18 @@ def test_console_leaves_piped_input_unruled_and_unrepeated(monkeypatch):
     ConsoleChannel().read()
     assert prompts == [ConsoleScreen.PROMPT] * 2
     assert terminal.getvalue() == ""
+
+
+@pytest.mark.spec("CNV-6")
+@pytest.mark.parametrize("mode", [InsideReading(3, "Small Craft"), InsideInterview(NoInterview())])
+def test_console_keeps_the_plain_prompt_for_piped_input_inside_a_mode(monkeypatch, mode):
+    colour_terminal(monkeypatch)
+    monkeypatch.setattr(sys.stdin, "isatty", lambda: False)
+    prompts = typing(monkeypatch, "hello there")
+    console = ConsoleChannel()
+    console.now_inside("console", mode)
+    console.read()
+    assert prompts == [ConsoleScreen.PROMPT] * 2
 
 
 @pytest.mark.spec("CNV-6")
@@ -3075,7 +3098,7 @@ def test_a_stop_ends_a_running_chat_answer_and_the_conversation_lives(desk, monk
     say(desk, channel, "hello there")
     assert asked.wait(10)
     say(desk, channel, "/stop")
-    wait_until(lambda: any("Stopped" in text for text in channel.texts()))
+    wait_until(lambda: any("⏹ Stopped." in text for text in channel.texts()))
     assert Queue.ordered() == [] and signal.getsignal(conversation.JOB_STOP_SIGNAL) is jobs.stop_answers
 
 

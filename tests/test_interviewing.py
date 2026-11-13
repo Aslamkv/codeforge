@@ -83,7 +83,7 @@ def test_the_model_saying_done_ends_the_interview(home_store, monkeypatch):
 
 @pytest.mark.spec("INT-3")
 def test_an_answer_applies_its_deltas_answers_the_question_and_shows_the_follow_up(home_store, monkeypatch):
-    rust, tabs, vim = trait("writes Rust"), trait("uses tabs"), trait("uses Vim daily")
+    rust, tabs, vim = trait("writes Rust", sources=("s1",)), trait("uses tabs"), trait("uses Vim daily")
     question = confirm("Do you write Rust and use tabs?", [rust, tabs, vim])
     asked = replying(
         monkeypatch,
@@ -113,7 +113,8 @@ def test_an_answer_applies_its_deltas_answers_the_question_and_shows_the_follow_
         True,
     )
     kept = {t["id"]: t for t in Traits().all()}
-    assert kept[rust["id"]]["status"] == "confirmed"
+    assert (kept[rust["id"]]["status"], kept[rust["id"]]["sources"]) == ("confirmed", ["s1", episode["id"]])
+    assert kept[rust["id"]]["history"][-1]["text"] == episode["id"]
     assert (kept[tabs["id"]]["status"], kept[tabs["id"]]["why"]) == ("retired", "spaces")
     assert (kept[vim["id"]]["when"], kept[vim["id"]]["do"]) == ("at work", "uses Vim")
     [added] = [t for t in kept.values() if t["do"] == "indents with four spaces"]
@@ -213,6 +214,16 @@ def test_a_question_without_traits_asks_only_for_adds_and_a_follow_up(home_store
     assert asked[0][0]["content"] == Prompts.INTERACT_ADD_SYSTEM
     assert "traits" not in json.loads(asked[0][1]["content"])
     assert [t["do"] for t in Traits().all()] == ["uses Helix for everything"]
+
+
+@pytest.mark.spec("INT-3")
+def test_a_follow_up_given_as_text_with_suggestions_beside_it_is_kept(home_store, monkeypatch):
+    ask("Where do you write code?")
+    replying(monkeypatch, {"add": [], "question": "Which editor at home?", "suggestions": ["Helix", "Emacs"]})
+    turn = Interview().answered("1", "at work and at home", NOW)
+    assert turn == f"💬 Which editor at home?\n1. Helix\n2. Emacs\n{HINT}"
+    [episode] = Home.store().items(Scratchpad.EPISODES).values()
+    assert Questions().next()["sources"] == [episode["id"]]
 
 
 def shown_then_outranked(interview):

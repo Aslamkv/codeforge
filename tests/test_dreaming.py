@@ -15,7 +15,7 @@ from tinkerkit.model import Models, OllamaError
 from tinkerkit.prompts import Prompts
 from tinkerkit.remembering import Memories, Questions, Scratchpad, Traits
 from tinkerkit.retrieval import Retriever
-from tinkerkit.settings import DREAM_BATCH_EPISODES, Home
+from tinkerkit.settings import DREAM_BATCH_EPISODES, QUESTIONS_WAITING, Home
 from tinkerkit.store import Log
 
 NOW = datetime.datetime(2026, 11, 11, 12, 0, 0)
@@ -392,10 +392,9 @@ def test_consolidate_keeps_the_episodes_it_dreamt_in_the_state(home_store, monke
     assert dreaming.state["dreamt"] == [first["id"]]
 
 
-def living_trait(do="keep replies short", when=""):
-    return Traits().apply(
-        [{"op": "add", "about": "tinker", "when": when, "do": do, "sources": ["e1"]}], EARLIER
-    )[0]
+def living_trait(do="keep replies short", when="", at=EARLIER):
+    delta = {"op": "add", "about": "tinker", "when": when, "do": do, "sources": ["e1"]}
+    return Traits().apply([delta], at)[0]
 
 
 def dreamt_in(dreaming, episodes=(), changed=()):
@@ -449,6 +448,100 @@ def test_traits_reads_the_dream_and_adds_a_candidate_with_its_question_and_suppo
         {"step": "traits", "change": "add", "id": "t2", "gist": "answer with rust examples"},
         {"step": "traits", "change": "support", "id": known["id"], "gist": "keep replies short"},
     ]
+
+
+def merged_reply(first, second):
+    return {
+        "merge": [{"ids": [first["id"], second["id"]], "when": "chatting", "do": "keep replies short, plain"}]
+    }
+
+
+@pytest.mark.spec("DRM-7", "DRM-12", "REM-14")
+def test_merge_traits_joins_a_changed_group_of_similar_traits_into_one(home_store, monkeypatch):
+    first = living_trait("keep replies short", "chatting")
+    second = living_trait("keep every reply brief", "chatting")
+    living_trait("answer with rust examples", "coding")
+    asked = replying(monkeypatch, merged_reply(first, second))
+    merging = dream()
+    merging.merge_traits(NOW)
+    assert asked[0][0]["content"] == Prompts.DREAM_MERGE_TRAITS_SYSTEM
+    shown = asked[0][1]["content"]
+    assert all(text in shown for text in (first["id"], second["id"], "chatting", EARLIER.isoformat()))
+    assert "rust" not in shown
+    merged = Home.store().get("traits", "t4")
+    assert (merged["when"], merged["do"], merged["status"]) == (
+        "chatting",
+        "keep replies short, plain",
+        "candidate",
+    )
+    assert {Home.store().get("traits", old["id"])["status"] for old in (first, second)} == {"retired"}
+    assert dream_events() == [
+        {"step": "merge_traits", "change": "merge", "id": "t4", "gist": "keep replies short, plain"},
+        {"step": "merge_traits", "change": "retire", "id": first["id"], "gist": "keep replies short"},
+        {"step": "merge_traits", "change": "retire", "id": second["id"], "gist": "keep every reply brief"},
+    ]
+    assert merging.changed == []
+
+
+@pytest.mark.spec("DRM-12")
+def test_merge_traits_gives_the_group_newest_first(home_store, monkeypatch):
+    older = living_trait("keep replies short", "chatting")
+    newer = living_trait("keep every reply brief", "chatting", EARLIER + datetime.timedelta(days=1))
+    asked = replying(monkeypatch, {"merge": []})
+    dream().merge_traits(NOW)
+    assert [trait["id"] for trait in json.loads(asked[0][1]["content"])] == [newer["id"], older["id"]]
+
+
+@pytest.mark.spec("DRM-12")
+def test_merge_traits_asks_nothing_for_a_group_unchanged_since_the_last_dream(home_store, monkeypatch):
+    living_trait("keep replies short", "chatting")
+    living_trait("keep every reply brief", "chatting")
+    asked = replying(monkeypatch)
+    merging = dream()
+    merging.state = dict(merging.state, last=NOW.isoformat())
+    merging.merge_traits(NOW)
+    assert asked == []
+
+
+@pytest.mark.spec("DRM-12")
+def test_merge_traits_asks_nothing_without_similar_traits(home_store, monkeypatch):
+    living_trait("keep replies short", "chatting")
+    living_trait("answer with rust examples", "coding")
+    asked = replying(monkeypatch)
+    dream().merge_traits(NOW)
+    assert asked == []
+
+
+@pytest.mark.spec("DRM-12")
+def test_merge_traits_reads_a_trait_changed_since_the_last_dream(home_store, monkeypatch):
+    first = living_trait("keep replies short", "chatting")
+    living_trait("keep every reply brief", "chatting")
+    Traits().apply([{"op": "support", "id": first["id"], "sources": ["e2"]}], NOW)
+    asked = replying(monkeypatch, {"merge": []})
+    merging = dream()
+    merging.state = dict(merging.state, last=EARLIER.isoformat())
+    merging.merge_traits(NOW)
+    assert len(asked) == 1
+
+
+@pytest.mark.spec("DRM-12")
+def test_merge_traits_drops_a_merge_outside_the_group_or_without_a_do(home_store, monkeypatch):
+    first = living_trait("keep replies short", "chatting")
+    second = living_trait("keep every reply brief", "chatting")
+    other = living_trait("answer with rust examples", "coding")
+    replying(
+        monkeypatch,
+        {
+            "merge": [
+                {"ids": [first["id"], other["id"]], "when": "", "do": "x"},
+                {"ids": [first["id"], second["id"]], "when": "chatting"},
+                {"ids": [first["id"], first["id"]], "when": "", "do": "x"},
+            ]
+        },
+    )
+    dream().merge_traits(NOW)
+    assert [trait["id"] for trait in Traits().living()] == [first["id"], second["id"], other["id"]]
+    assert dream_events() == []
 
 
 @pytest.mark.spec("DRM-6")
@@ -617,6 +710,42 @@ def test_questions_asks_round_after_round_until_a_round_keeps_nothing_new(home_s
     ]
 
 
+WAITING_QUESTIONS = (
+    "Which editor do you use?",
+    "What time zone are you in?",
+    "Do you prefer tabs or spaces?",
+    "Should I explain my changes?",
+    "Which language do you write most?",
+)
+
+
+def pending_questions(count):
+    for text in WAITING_QUESTIONS[:count]:
+        Questions().add("open", text, ["yes", "no"], [], [], NOW)
+
+
+@pytest.mark.spec("DRM-11")
+def test_questions_stops_asking_once_enough_questions_are_pending(home_store, monkeypatch):
+    pending_questions(QUESTIONS_WAITING - 1)
+    asked = replying(
+        monkeypatch,
+        {"questions": [{"text": "What do you work on?", "suggestions": ["web", "data"]}]},
+        {"questions": [{"text": "How formal should I sound?", "suggestions": ["formal", "casual"]}]},
+    )
+    dream().questions(NOW)
+    assert (len(asked), len(Questions().pending())) == (1, QUESTIONS_WAITING)
+
+
+@pytest.mark.spec("DRM-11")
+def test_questions_asks_nothing_with_enough_questions_pending(home_store, monkeypatch):
+    pending_questions(QUESTIONS_WAITING)
+    asked = replying(
+        monkeypatch, {"questions": [{"text": "What do you work on?", "suggestions": ["web", "data"]}]}
+    )
+    dream().questions(NOW)
+    assert (asked, len(Questions().all())) == ([], QUESTIONS_WAITING)
+
+
 @pytest.mark.spec("DRM-11")
 def test_questions_ends_on_a_reply_that_is_not_a_dict(home_store, monkeypatch):
     confirmed_trait("use rust", about="tinker")
@@ -637,14 +766,33 @@ def test_run_walks_its_steps_and_saves_the_state(home_store, monkeypatch):
     doing = []
     dream(doing.append).run(NOW)
     state = Home.store().get("dream", "state")
-    assert doing == ["consolidate", "revise", "decay", "traits", "gists", "questions"]
+    assert doing == ["consolidate", "revise", "decay", "traits", "merge_traits", "gists", "questions"]
     assert state == {
         "done": [],
         "changed": [],
         "dreamt": [],
-        "counts": {"consolidate": 1, "revise": 0, "decay": 0, "traits": 0, "gists": 0, "questions": 0},
+        "counts": {
+            "consolidate": 1,
+            "revise": 0,
+            "decay": 0,
+            "traits": 0,
+            "merge_traits": 0,
+            "gists": 0,
+            "questions": 0,
+        },
         "last": NOW.isoformat(),
     }
+
+
+@pytest.mark.spec("DRM-7", "DRM-8")
+def test_run_counts_trait_changes_but_keeps_trait_ids_out_of_the_changed_memories(home_store, monkeypatch):
+    first = living_trait("keep replies short", "chatting")
+    second = living_trait("keep every reply brief", "chatting")
+    replying(monkeypatch, merged_reply(first, second), {"questions": []})
+    seen = []
+    dream(lambda step: seen.append(Home.store().get("dream", "state") or {})).run(NOW)
+    assert Home.store().get("dream", "state")["counts"]["merge_traits"] == 3
+    assert all(not state.get("changed") for state in seen)
 
 
 @pytest.mark.spec("DRM-2")
@@ -666,7 +814,7 @@ def test_run_ignores_a_saved_step_it_no_longer_has(home_store, monkeypatch):
     replying(monkeypatch, {"questions": []})
     doing = []
     dream(doing.append).run(NOW)
-    assert doing == ["revise", "decay", "traits", "gists", "questions"]
+    assert doing == ["revise", "decay", "traits", "merge_traits", "gists", "questions"]
     assert Home.store().get("dream", "state")["done"] == []
 
 

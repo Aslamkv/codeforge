@@ -56,4 +56,8 @@ def fingerprint(text):
 
 
 def similarity(a, b):
-    return difflib.SequenceMatcher(None, a.lower(), b.lower()).ratio()
+    return max(ratio(a.lower(), b.lower()), ratio(b.lower(), a.lower()))
+
+
+def ratio(a, b):
+    return difflib.SequenceMatcher(None, a, b).ratio()

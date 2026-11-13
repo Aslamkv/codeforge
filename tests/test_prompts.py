@@ -271,6 +271,9 @@ def test_the_prompts_example_json_parses_and_its_toolchain_works():
     assert json.loads("{" + Prompts.TOOLCHAIN_JSON + "}")["toolchain"]["test_all"] == "pytest -q"
     readme = re.search(r"Reply with ONLY JSON: (\{.*\})", Prompts.README_SYSTEM, re.S).group(1)
     assert json.loads(readme)["usage"][0]["command"] == "python3 calculator.py add 5 2"
+    for prompt in (Prompts.ASK_SYSTEM, Prompts.ASK_CHECK_AGAIN):
+        reply = re.search(r"Reply with ONLY JSON: (\{.*\})", prompt, re.S).group(1)
+        assert json.loads(reply)["check"]["kind"] == "sql|command"
     assert (
         Prompts.SPEC_JSON[:-1] in Prompts.SPEC_SYSTEM and Prompts.TOOLCHAIN_JSON in Prompts.TOOLCHAIN_SYSTEM
     )
@@ -357,3 +360,21 @@ def test_the_lessons_prompt_asks_for_general_lessons():
     assert "never name this project, its files, its names, its features or its data" in " ".join(
         Prompts.LESSONS_SYSTEM.split()
     )
+
+
+@pytest.mark.spec("INT-3")
+def test_the_interview_answer_prompt_asks_for_a_lasting_habit_in_tinkers_words():
+    prompt = " ".join(Prompts.INTERACT_ANSWER_SYSTEM.split())
+
+    assert "An add's or amend's do is a lasting habit in Tinker's own words, never the reply copied" in prompt
+    assert "every detail and condition" in prompt
+    assert "a request to be asked something is a question" in prompt
+    assert "keeps the whole reply" not in prompt
+
+
+@pytest.mark.spec("DRM-12")
+def test_the_merge_traits_prompt_says_the_traits_come_newest_first():
+    prompt = " ".join(Prompts.DREAM_MERGE_TRAITS_SYSTEM.split())
+
+    assert "The traits come newest first" in prompt
+    assert "where they disagree, the newer wording wins" in prompt

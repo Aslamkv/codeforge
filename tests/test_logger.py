@@ -7,8 +7,9 @@ from datetime import date
 from types import SimpleNamespace
 
 import pytest
+from conftest import quick_model_replying
 
-from tinkerkit import channels, logger
+from tinkerkit import channels, dreaming, logger
 from tinkerkit.building import CodeWriter, Verifier
 from tinkerkit.channels import TelegramChannel
 from tinkerkit.conversation import CHAT_APP_START, Desk, Questions, Talk
@@ -253,6 +254,7 @@ def test_watched_names_every_watched_method():
         "Store.get",
         "Store.put",
         "Store.append",
+        "dreaming.reply_read",
         "Ollama.loading",
         "Talk.warm",
         "channels.connect_by_address",
@@ -436,6 +438,24 @@ def test_connecting_tells_the_host_and_the_address_reached_by_ip_version(monkeyp
     logger.install()
     assert channels.connect_by_address(("api.example.org", 443), None, 5) is sock
     started_and_ended("Connecting to api.example.org", "Connected to api.example.org at ::1 by IPv6")
+
+
+@pytest.mark.spec("LOG-4")
+def test_a_quick_reply_read_is_a_fact_with_the_object_read(monkeypatch):
+    quick_model_replying(monkeypatch, lambda messages: 'Here: {"done": true}')
+    logger.install()
+    assert dreaming.asked("system", "content") == {"done": True}
+    [read] = [line for line in sentences() if line.startswith("Quick reply read")]
+    assert re.fullmatch(r"Quick reply read: \{'done': True\} \(\d+\.\d{3}s\)", read)
+
+
+@pytest.mark.spec("LOG-4")
+def test_a_quick_reply_that_cannot_be_read_ends_with_why(monkeypatch):
+    quick_model_replying(monkeypatch, lambda messages: "not a reply")
+    logger.install()
+    assert dreaming.asked("system", "content") is None
+    [read] = [line for line in sentences() if line.startswith("Quick reply read")]
+    assert re.fullmatch(r"Quick reply read failed: ValueError: no JSON object in reply \(\d+\.\d{3}s\)", read)
 
 
 @pytest.mark.spec("LOG-4")

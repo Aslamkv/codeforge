@@ -211,13 +211,22 @@ def test_support_adds_only_new_sources_to_the_history(home_store):
 def test_confirm_and_reject_set_the_status_and_a_retired_trait_takes_nothing_more(home_store):
     Traits().apply([add_trait(), add_trait("Plays chess")], NOW)
 
-    Traits().apply([{"op": "confirm", "id": "t1"}, {"op": "reject", "id": "t2", "why": "not true"}], NOW)
+    Traits().apply(
+        [{"op": "confirm", "id": "t1", "sources": ["e3"]}, {"op": "reject", "id": "t2", "why": "not true"}],
+        NOW,
+    )
     unchanged = Traits().apply(
-        [{"op": "confirm", "id": "t2"}, {"op": "support", "id": "t2", "sources": ["e9"]}], NOW
+        [
+            {"op": "confirm", "id": "t2", "sources": ["e9"]},
+            {"op": "support", "id": "t2", "sources": ["e9"]},
+        ],
+        NOW,
     )
 
-    rejected = home_store.get("traits", "t2")
+    confirmed, rejected = home_store.get("traits", "t1"), home_store.get("traits", "t2")
     assert unchanged == []
+    assert confirmed["sources"] == ["e1", "e3"]
+    assert confirmed["history"][-1] == {"event": "confirm", "at": "2026-11-11T12:00:00", "text": "e3"}
     assert rejected["status"] == "retired" and rejected["why"] == "not true"
     assert rejected["history"][-1] == {"event": "reject", "at": "2026-11-11T12:00:00", "text": "not true"}
     assert [trait["id"] for trait in Traits().confirmed()] == ["t1"]
@@ -256,12 +265,14 @@ def test_deltas_with_an_unknown_id_or_op_or_no_source_are_dropped(home_store):
         [
             add_trait(sources=[]),
             {"op": "support", "id": "t1", "sources": ["e1"]},
-            {"op": "confirm", "id": "t9"},
+            {"op": "confirm", "id": "t9", "sources": ["e1"]},
             {"op": "forget", "id": "t1"},
         ],
         NOW,
     )
-    Traits().apply([add_trait(), {"op": "support", "id": "t1", "sources": []}], NOW)
+    Traits().apply(
+        [add_trait(), {"op": "support", "id": "t1", "sources": []}, {"op": "confirm", "id": "t1"}], NOW
+    )
 
     assert changed == []
     assert [trait["id"] for trait in Traits().all()] == ["t1"]
@@ -279,6 +290,126 @@ def test_an_add_like_a_living_trait_supports_it_and_one_like_a_retired_trait_is_
 
     assert supported["id"] == "t1" and supported["sources"] == ["e1", "e5"]
     assert [trait["id"] for trait in Traits().all()] == ["t1", "t2"]
+
+
+@pytest.mark.spec("REM-14", "DRM-12")
+def test_a_merge_makes_one_trait_with_all_sources_confirmed_when_any_was_and_retires_the_old_ones(home_store):
+    Traits().apply(
+        [
+            add_trait("Writes Rust code every day", sources=["e1", "e2"]),
+            add_trait("Plays chess on weekends", sources=["e2", "e3"], confirmed=True, about="tinker"),
+        ],
+        NOW,
+    )
+
+    (merged,) = Traits().apply(
+        [{"op": "merge", "ids": ["t1", "t2"], "when": "on weekends", "do": "Codes Rust and plays chess"}], NOW
+    )
+
+    assert merged == {
+        "id": "t3",
+        "about": "tinker",
+        "when": "on weekends",
+        "do": "Codes Rust and plays chess",
+        "gist": "",
+        "status": "confirmed",
+        "sources": ["e1", "e2", "e3"],
+        "history": [{"event": "merge", "at": "2026-11-11T12:00:00", "text": "t1 t2"}],
+    }
+    assert home_store.get("traits", "t3") == merged
+    for old in (home_store.get("traits", "t1"), home_store.get("traits", "t2")):
+        assert old["status"] == "retired" and old["why"] == "merged into t3"
+        assert old["history"][-1] == {"event": "merge", "at": "2026-11-11T12:00:00", "text": "merged into t3"}
+    assert [trait["id"] for trait in Traits().living()] == ["t3"]
+
+
+@pytest.mark.spec("REM-14", "DRM-12")
+def test_a_merge_of_candidates_stays_a_candidate(home_store):
+    Traits().apply([add_trait("Writes Rust code every day"), add_trait("Plays chess on weekends")], NOW)
+
+    (merged,) = Traits().apply([{"op": "merge", "ids": ["t1", "t2"], "do": "Codes and plays chess"}], NOW)
+
+    assert merged["status"] == "candidate" and merged["when"] == "" and merged["about"] == "person"
+
+
+@pytest.mark.spec("REM-14", "DRM-12")
+def test_a_merge_leaves_out_unknown_and_retired_ids_and_is_dropped_with_fewer_than_two_left(home_store):
+    Traits().apply(
+        [
+            add_trait("Writes Rust code every day"),
+            add_trait("Plays chess on weekends"),
+            add_trait("Keeps bees in the garden"),
+        ],
+        NOW,
+    )
+    Traits().apply([{"op": "reject", "id": "t3", "why": "stopped"}], NOW)
+
+    dropped = Traits().apply(
+        [
+            {"op": "merge", "ids": ["t1", "t3", "t9"], "do": "Codes"},
+            {"op": "merge", "ids": ["t1", "t1"], "do": "Codes"},
+            {"op": "merge", "ids": [], "do": "Nothing"},
+            {"op": "merge", "do": "Nothing"},
+        ],
+        NOW,
+    )
+    (merged,) = Traits().apply(
+        [{"op": "merge", "ids": ["t1", "t2", "t3", "t9"], "do": "Codes and plays"}], NOW
+    )
+
+    assert dropped == []
+    assert merged["id"] == "t4" and merged["history"][0]["text"] == "t1 t2"
+    assert home_store.get("traits", "t3")["why"] == "stopped"
+
+
+@pytest.mark.spec("REM-14", "REM-15", "DRM-12")
+def test_a_pending_confirm_about_a_merged_trait_asks_about_the_new_one(home_store):
+    Traits().apply(
+        [
+            add_trait("Writes Rust code every day"),
+            add_trait("Plays chess on weekends"),
+            add_trait("Keeps bees in the garden"),
+        ],
+        NOW,
+    )
+    Questions().add("confirm", "Do you write Rust code every day?", ["yes", "no"], ["t1"], ["e1"], NOW)
+    Questions().add(
+        "confirm", "Do you write Rust and play chess?", ["yes", "no"], ["t1", "t2", "t3"], ["e1"], NOW
+    )
+    Questions().add("confirm", "Do you play chess on weekends?", ["yes", "no"], ["t2"], ["e1"], NOW)
+    Questions().add("open", "Which editor do you use at work?", [], [], ["e1"], NOW)
+    Questions().answer("q3", "yes", NOW)
+
+    Traits().apply([{"op": "merge", "ids": ["t1", "t2"], "do": "Codes Rust and plays chess"}], NOW)
+
+    asked = {question["id"]: question["traits"] for question in Questions().all()}
+    assert asked == {"q1": ["t4"], "q2": ["t4", "t3"], "q3": ["t2"], "q4": []}
+    assert [question["id"] for question in Questions().pending()] == ["q1", "q2", "q4"]
+
+
+@pytest.mark.spec("REM-14")
+def test_a_confirmed_add_like_a_candidate_supports_and_confirms_it(home_store):
+    Traits().apply([add_trait("Writes Rust code every day")], NOW)
+
+    (confirmed,) = Traits().apply(
+        [add_trait("Writes Rust code every day", sources=["e5"], confirmed=True)], NOW
+    )
+
+    assert confirmed["id"] == "t1" and confirmed["status"] == "confirmed"
+    assert confirmed["sources"] == ["e1", "e5"]
+    assert [entry["event"] for entry in confirmed["history"]] == ["add", "support", "confirm"]
+
+
+@pytest.mark.spec("REM-14")
+def test_a_confirmed_add_like_a_confirmed_trait_only_supports_it(home_store):
+    Traits().apply([add_trait("Writes Rust code every day", confirmed=True)], NOW)
+
+    (supported,) = Traits().apply(
+        [add_trait("Writes Rust code every day", sources=["e5"], confirmed=True)], NOW
+    )
+
+    assert supported["sources"] == ["e1", "e5"]
+    assert [entry["event"] for entry in supported["history"]] == ["add", "support"]
 
 
 @pytest.mark.spec("REM-16")
@@ -417,6 +548,45 @@ def test_a_confirm_whose_traits_are_all_retired_no_longer_waits(home_store):
 
     assert [question["id"] for question in Questions().pending()] == ["q2"]
     assert home_store.get("questions", "q1")["status"] == "pending"
+
+
+@pytest.mark.spec("REM-15")
+def test_a_confirm_about_a_candidate_merged_into_a_confirmed_trait_no_longer_waits(home_store):
+    Traits().apply(
+        [add_trait("Writes Rust code every day"), add_trait("Plays chess on weekends", confirmed=True)], NOW
+    )
+    Questions().add("confirm", "Do you write Rust code every day?", ["yes", "no"], ["t1"], ["e1"], NOW)
+    Questions().add("confirm", "Do you play chess on weekends?", ["yes", "no"], ["t2"], ["e1"], NOW)
+
+    Traits().apply([{"op": "merge", "ids": ["t1", "t2"], "do": "Codes Rust and plays chess"}], NOW)
+
+    assert home_store.get("traits", "t3")["status"] == "confirmed"
+    assert Questions().pending() == []
+
+
+@pytest.mark.spec("REM-15")
+def test_a_confirm_about_a_candidate_confirmed_by_a_teach_no_longer_waits(home_store):
+    Traits().apply([add_trait("Writes Rust code every day"), add_trait("Plays chess on weekends")], NOW)
+    Questions().add("confirm", "Do you write Rust code every day?", ["yes", "no"], ["t1"], ["e1"], NOW)
+    Questions().add("confirm", "Do you write Rust and play chess?", ["yes", "no"], ["t1", "t2"], ["e1"], NOW)
+
+    Traits().apply([add_trait("Writes Rust code every day", sources=["e2"], confirmed=True)], NOW)
+
+    assert home_store.get("traits", "t1")["status"] == "confirmed"
+    assert [question["id"] for question in Questions().pending()] == ["q2"]
+
+
+@pytest.mark.spec("REM-15")
+def test_a_confirm_whose_traits_are_each_confirmed_or_retired_no_longer_waits(home_store):
+    Traits().apply([add_trait("Writes Rust code every day"), add_trait("Plays chess on weekends")], NOW)
+    Questions().add("confirm", "Do you write Rust and play chess?", ["yes", "no"], ["t1", "t2"], ["e1"], NOW)
+
+    Traits().apply(
+        [{"op": "reject", "id": "t1", "why": "not true"}, {"op": "confirm", "id": "t2", "sources": ["e2"]}],
+        NOW,
+    )
+
+    assert Questions().pending() == []
 
 
 @pytest.mark.spec("REM-15")

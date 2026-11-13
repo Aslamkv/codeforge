@@ -529,8 +529,9 @@ showing it the earlier answer, and the next dream keeps the new answer. An answe
 While nothing waits for it, Tinker dreams: a few seconds after the queue empties, it turns the fresh episodes
 into memories (about you, what you did, the tools you use, facts), joins the ones that say the same thing,
 lets fade what was never recalled or seen again, and notices traits: how you work and how you want Tinker to
-be. A dream never decides a trait on its own; each one waits as a question for you. A dream is a job, so it
-never runs over a chat or a build:
+be, for good rather than for the moment. It joins traits that say the same thing into one, in the newer words.
+A dream never decides a trait on its own; each one waits as a question for you, and once five wait it asks no
+more. A dream is a job, so it never runs over a chat or a build:
 
 ```sh
 tinker memory                # the memories, newest first, and when the last dream was

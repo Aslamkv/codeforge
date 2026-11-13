@@ -176,9 +176,10 @@ class Traits:
             "confirm": self.confirm,
             "reject": self.reject,
             "amend": self.amend,
+            "merge": self.merge,
         }
         op = ops.get(delta.get("op"))
-        if op is None or (op != self.add and not self.open(delta.get("id"))):
+        if op is None or (op not in (self.add, self.merge) and not self.open(delta.get("id"))):
             return None
         return op(delta, at)
 
@@ -191,16 +192,51 @@ class Traits:
             return None
         alike = self.most_alike(delta.get("when", ""), delta["do"])
         if alike:
-            return None if alike["status"] == "retired" else self.support(dict(delta, id=alike["id"]), at)
+            return (
+                None
+                if alike["status"] == "retired"
+                else self.alike_added(dict(delta, id=alike["id"]), alike, at)
+            )
+        return self.created(
+            delta["about"],
+            delta,
+            delta.get("confirmed"),
+            delta["sources"],
+            history_entry("add", at, delta["do"]),
+        )
+
+    def merge(self, delta, at):
+        merged = [
+            Home.store().get(self.TRAITS, trait_id)
+            for trait_id in dict.fromkeys(delta.get("ids") or [])
+            if self.open(trait_id)
+        ]
+        if len(merged) < 2:
+            return None
+        merged_ids = [old["id"] for old in merged]
+        trait = self.created(
+            max(merged, key=trait_number)["about"],
+            delta,
+            any(old["status"] == "confirmed" for old in merged),
+            [source for old in merged for source in old["sources"]],
+            history_entry("merge", at, " ".join(merged_ids)),
+        )
+        why = f"merged into {trait['id']}"
+        for trait_id in merged_ids:
+            self.changed(trait_id, at, "merge", why, lambda old: {"status": "retired", "why": why})
+        Questions().merged(merged_ids, trait["id"])
+        return trait
+
+    def created(self, about, delta, confirmed, sources, history):
         trait = {
             "id": f"t{self.next_number()}",
-            "about": delta["about"],
+            "about": about,
             "when": delta.get("when", ""),
             "do": delta["do"],
             "gist": "",
-            "status": "confirmed" if delta.get("confirmed") else "candidate",
-            "sources": list(dict.fromkeys(delta["sources"])),
-            "history": [history_entry("add", at, delta["do"])],
+            "status": "confirmed" if confirmed else "candidate",
+            "sources": list(dict.fromkeys(sources)),
+            "history": [history],
         }
         Home.store().put(self.TRAITS, trait["id"], trait)
         return trait
@@ -213,19 +249,30 @@ class Traits:
         alike = [trait for trait in self.all() if closeness[trait["id"]] >= SAME_FACT_SIMILARITY]
         return max(alike, key=lambda trait: closeness[trait["id"]], default=None)
 
+    def alike_added(self, delta, alike, at):
+        supported = self.support(delta, at)
+        confirming = delta.get("confirmed") and alike["status"] == "candidate"
+        return self.confirm(delta, at) if confirming else supported
+
     def support(self, delta, at):
+        return self.sourced(delta, at, "support", {})
+
+    def confirm(self, delta, at):
+        return self.sourced(delta, at, "confirm", {"status": "confirmed"})
+
+    def sourced(self, delta, at, event, changes):
         if not delta.get("sources"):
             return None
         return self.changed(
             delta["id"],
             at,
-            "support",
+            event,
             " ".join(delta["sources"]),
-            lambda trait: {"sources": list(dict.fromkeys(trait["sources"] + list(delta["sources"])))},
+            lambda trait: {
+                "sources": list(dict.fromkeys(trait["sources"] + list(delta["sources"]))),
+                **changes,
+            },
         )
-
-    def confirm(self, delta, at):
-        return self.changed(delta["id"], at, "confirm", "", lambda trait: {"status": "confirmed"})
 
     def reject(self, delta, at):
         why = delta.get("why", "")
@@ -267,7 +314,7 @@ class Traits:
         return [trait for trait in self.all() if trait["status"] == "confirmed"]
 
     def relevant(self, text, room=TRAITS_CHARS):
-        confirmed = sorted(self.confirmed(), key=lambda trait: int(trait["id"][1:]))
+        confirmed = sorted(self.confirmed(), key=trait_number)
         always = sorted(
             (trait for trait in confirmed if not trait["when"]), key=lambda trait: -len(trait["sources"])
         )
@@ -308,11 +355,11 @@ class Questions:
 
     def pending(self):
         traits = Traits().all()
-        retired = {trait["id"] for trait in traits if trait["status"] == "retired"}
+        no_longer_candidates = {trait["id"] for trait in traits if trait["status"] != "candidate"}
         waiting = [
             question
             for question in self.all()
-            if question["status"] == "pending" and not self.only_about_retired(question, retired)
+            if question["status"] == "pending" and not self.settled(question, no_longer_candidates)
         ]
         never_skipped = [question for question in waiting if question["skips"] == 0]
         skipped = sorted(
@@ -320,9 +367,9 @@ class Questions:
         )
         return self.in_kept_order(never_skipped, traits) + skipped
 
-    def only_about_retired(self, question, retired):
+    def settled(self, question, no_longer_candidates):
         about_traits = question["kind"] == "confirm" and question["traits"]
-        return bool(about_traits) and set(question["traits"]) <= retired
+        return bool(about_traits) and set(question["traits"]) <= no_longer_candidates
 
     def in_kept_order(self, questions, traits):
         support = {trait["id"]: len(trait["sources"]) for trait in traits}
@@ -354,6 +401,14 @@ class Questions:
             },
         )
 
+    def merged(self, trait_ids, merged_id):
+        for question in self.all():
+            if question["kind"] == "confirm" and set(question["traits"]) & set(trait_ids):
+                self.changed(
+                    question["id"],
+                    lambda question: {"traits": with_merged(question["traits"], trait_ids, merged_id)},
+                )
+
     def changed(self, question_id, changes):
         with Home.store().transaction(write=True):
             question = Home.store().get(self.QUESTIONS, question_id)
@@ -376,6 +431,14 @@ def likeness_text(when, do):
 
 def history_entry(event, at, text):
     return {"event": event, "at": at, "text": text}
+
+
+def trait_number(trait):
+    return int(trait["id"].removeprefix("t"))
+
+
+def with_merged(traits, merged_ids, merged_id):
+    return list(dict.fromkeys(merged_id if trait_id in merged_ids else trait_id for trait_id in traits))
 
 
 def trait_line(trait):

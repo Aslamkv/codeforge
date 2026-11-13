@@ -21,6 +21,7 @@ from .remembering import (
     Traits,
     counted,
     lasts_found,
+    likeness_text,
     recall_text,
     stamp,
 )
@@ -31,6 +32,7 @@ from .settings import (
     DREAM_FORGET_DAYS,
     DREAM_KEEP_STRENGTH,
     DREAM_REPLY_TOKENS,
+    QUESTIONS_WAITING,
     SIMILAR_LESSON_MEANING,
     SIMILAR_LESSON_WORDS,
     Home,
@@ -46,13 +48,14 @@ TRAIT_ABOUTS = ("person", "tinker")
 class Dream:
     STATE = "state"
     EVENTS = "dream events"
-    STEPS = ("consolidate", "revise", "decay", "traits", "gists", "questions")
+    STEPS = ("consolidate", "revise", "decay", "traits", "merge_traits", "gists", "questions")
 
     def __init__(self, retriever, phase=lambda step: None):
         self.memories = Memories(retriever)
         self.phase = phase
         self.events = Log(Home.store(), self.EVENTS)
         self.changed = []
+        self.count = 0
         self.state = new_state()
 
     def run(self, now=None):
@@ -64,10 +67,11 @@ class Dream:
                 continue
             self.phase(step)
             self.changed = []
+            self.count = 0
             getattr(self, step)(now)
             state["done"].append(step)
             state["changed"] += [memory_id for memory_id in self.changed if memory_id not in state["changed"]]
-            state["counts"][step] = len(self.changed)
+            state["counts"][step] = self.count
             Home.store().put(DREAM, self.STATE, state)
         Home.store().put(DREAM, self.STATE, dict(state, done=[], changed=[], dreamt=[], last=stamp(now)))
 
@@ -145,15 +149,15 @@ class Dream:
     def revise(self, now=None):
         changed = self.changed_in_dream()
         revisable = [memory for memory in self.memories.living() if memory["kind"] != "answer"]
-        for group in self.similar_groups(revisable):
+        for group in self.similar_groups(revisable, [recall_text(memory) for memory in revisable]):
             if len(group) > 1 and any(memory["id"] in changed for memory in group):
                 self.revised(group, now)
 
     def changed_in_dream(self):
         return set(self.state["changed"]) | set(self.changed)
 
-    def similar_groups(self, living):
-        alike = self.alike(living)
+    def similar_groups(self, living, texts):
+        alike = self.alike(texts)
         group_of = {index: {index} for index in range(len(living))}
         for first, second in itertools.combinations(range(len(living)), 2):
             if group_of[first] is not group_of[second] and alike(first, second):
@@ -163,8 +167,7 @@ class Dream:
         groups = {id(group): group for group in group_of.values()}.values()
         return [[living[index] for index in sorted(group)] for group in groups]
 
-    def alike(self, living):
-        texts = [recall_text(memory) for memory in living]
+    def alike(self, texts):
         embeddings = self.memories.retriever.embeddings
         vectors = embeddings.vectors(texts, keep=False) if embeddings and texts else None
         if vectors:
@@ -253,10 +256,10 @@ class Dream:
         delta = {"op": "add", "about": item["about"], "when": when, "do": item["do"], "sources": sources}
         for trait in Traits().apply([delta], now):
             if newly_added(trait):
-                self.trait_logged("add", trait)
+                self.trait_logged("traits", "add", trait)
                 self.confirm_asked(item, trait, sources, now)
             else:
-                self.trait_logged("support", trait)
+                self.trait_logged("traits", "support", trait)
 
     def confirm_asked(self, item, trait, sources, now):
         question = item.get("question")
@@ -268,10 +271,32 @@ class Dream:
             return
         delta = {"op": "support", "id": item["id"], "sources": cited_only(item.get("sources"), given)}
         for trait in Traits().apply([delta], now):
-            self.trait_logged("support", trait)
+            self.trait_logged("traits", "support", trait)
 
-    def trait_logged(self, name, trait):
-        self.logged("traits", name, dict(trait, gist=trait["gist"] or trait["do"]))
+    def trait_logged(self, step, name, trait):
+        self.recorded(step, name, dict(trait, gist=trait["gist"] or trait["do"]))
+
+    def merge_traits(self, now=None):
+        living = Traits().living()
+        texts = [likeness_text(trait["when"], trait["do"]) for trait in living]
+        for group in self.similar_groups(living, texts):
+            if len(group) > 1 and any(changed_since(trait, self.state["last"]) for trait in group):
+                self.traits_merged(group, now)
+
+    def traits_merged(self, group, now):
+        reply = asked(Prompts.DREAM_MERGE_TRAITS_SYSTEM, merge_traits_text(group))
+        if not isinstance(reply, dict):
+            return
+        by_id = {trait["id"]: trait for trait in group}
+        for item in listed(reply.get("merge")):
+            ids = group_ids(item.get("ids"), by_id)
+            if len(ids) > 1 and isinstance(item.get("do"), str) and item["do"]:
+                when = item.get("when") if isinstance(item.get("when"), str) else ""
+                delta = {"op": "merge", "ids": ids, "when": when, "do": item["do"]}
+                for trait in Traits().apply([delta], now):
+                    self.trait_logged("merge_traits", "merge", trait)
+                    for trait_id in ids:
+                        self.trait_logged("merge_traits", "retire", by_id.pop(trait_id))
 
     def gists(self, now=None):
         ungisted = {trait["id"]: trait for trait in Traits().confirmed() if not trait["gist"]}
@@ -286,8 +311,11 @@ class Dream:
                 self.logged("gists", "gist", Traits().gisted(trait_id, gist))
 
     def questions(self, now=None):
-        while self.questions_asked(now):
+        while self.questions_wanted() and self.questions_asked(now):
             pass
+
+    def questions_wanted(self):
+        return len(Questions().pending()) < QUESTIONS_WAITING
 
     def questions_asked(self, now):
         content = questions_text(Traits().confirmed(), Questions().all())
@@ -309,7 +337,11 @@ class Dream:
     def logged(self, step, name, memory):
         if memory:
             self.changed.append(memory["id"])
-            self.events.add({"step": step, "change": name, "id": memory["id"], "gist": memory["gist"]})
+            self.recorded(step, name, memory)
+
+    def recorded(self, step, name, item):
+        self.count += 1
+        self.events.add({"step": step, "change": name, "id": item["id"], "gist": item["gist"]})
 
 
 class MemoryGraph(Graph):
@@ -448,6 +480,30 @@ def traits_text(episodes, people, living):
     )
 
 
+def merge_traits_text(group):
+    return json.dumps(
+        [
+            {
+                "id": trait["id"],
+                "about": trait["about"],
+                "when": trait["when"],
+                "do": trait["do"],
+                "changed": last_changed(trait),
+            }
+            for trait in sorted(group, key=last_changed, reverse=True)
+        ],
+        ensure_ascii=False,
+    )
+
+
+def changed_since(trait, last):
+    return last_changed(trait) > last
+
+
+def last_changed(trait):
+    return max(entry["at"] for entry in trait["history"])
+
+
 def gists_text(traits):
     return json.dumps(
         [
@@ -566,17 +622,19 @@ def asked(system, content):
     if Models.quick() is None:
         return None
     try:
-        reply = Reply(
-            Models.quick_reply(
-                [{"role": "system", "content": system}, {"role": "user", "content": content}],
-                DREAM_REPLY_TOKENS,
-                "off",
-                temperature=0,
-            )
+        text = Models.quick_reply(
+            [{"role": "system", "content": system}, {"role": "user", "content": content}],
+            DREAM_REPLY_TOKENS,
+            "off",
+            temperature=0,
         )
-        return reply.json(system)
+        return reply_read(text, system)
     except OllamaError, ValueError:
         return None
+
+
+def reply_read(text, system):
+    return Reply(text).json(system)
 
 
 def listed(value):
