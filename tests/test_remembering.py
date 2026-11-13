@@ -4,19 +4,19 @@ import pytest
 
 from tinkerkit.remembering import (
     Memories,
-    Portrait,
+    Questions,
     Scratchpad,
+    Traits,
     forget,
     show_memories,
-    show_portrait,
     show_remembered,
+    show_traits,
 )
 from tinkerkit.retrieval import Retriever
 from tinkerkit.settings import (
     EPISODE_FOUND_CHARS,
     EPISODE_GIST_CHARS,
     EPISODE_KEPT_DAYS,
-    PORTRAIT_WORDS,
     RECALL_MEANING,
     RECALL_SHOWN,
     Home,
@@ -164,6 +164,285 @@ def test_a_memory_without_sources_is_refused(home_store):
     assert home_store.items("memories") == {}
 
 
+def add_trait(do="Writes Rust daily", when="", sources=("e1",), **more):
+    return {"op": "add", "about": "person", "when": when, "do": do, "sources": list(sources), **more}
+
+
+@pytest.mark.spec("REM-5", "REM-14")
+def test_an_added_trait_is_a_candidate_with_the_next_id_and_its_history(home_store):
+    added, second = Traits().apply(
+        [add_trait(), add_trait("Answer in short replies", "on Telegram", ["m2"], about="tinker")], NOW
+    )
+
+    assert added == {
+        "id": "t1",
+        "about": "person",
+        "when": "",
+        "do": "Writes Rust daily",
+        "gist": "",
+        "status": "candidate",
+        "sources": ["e1"],
+        "history": [{"event": "add", "at": "2026-11-11T12:00:00", "text": "Writes Rust daily"}],
+    }
+    assert second["id"] == "t2" and second["about"] == "tinker" and second["when"] == "on Telegram"
+    assert home_store.get("traits", "t1") == added
+    assert [trait["id"] for trait in Traits().candidates()] == ["t1", "t2"]
+
+
+@pytest.mark.spec("REM-14")
+def test_a_trait_the_person_said_is_added_confirmed(home_store):
+    Traits().apply([add_trait(confirmed=True)], NOW)
+
+    assert [trait["id"] for trait in Traits().confirmed()] == ["t1"]
+    assert Traits().candidates() == []
+
+
+@pytest.mark.spec("REM-14")
+def test_support_adds_only_new_sources_to_the_history(home_store):
+    Traits().apply([add_trait()], NOW)
+
+    (supported,) = Traits().apply([{"op": "support", "id": "t1", "sources": ["e1", "e7"]}], NOW)
+
+    assert supported["sources"] == ["e1", "e7"]
+    assert supported["history"][-1] == {"event": "support", "at": "2026-11-11T12:00:00", "text": "e1 e7"}
+
+
+@pytest.mark.spec("REM-5", "REM-14")
+def test_confirm_and_reject_set_the_status_and_a_retired_trait_takes_nothing_more(home_store):
+    Traits().apply([add_trait(), add_trait("Plays chess")], NOW)
+
+    Traits().apply([{"op": "confirm", "id": "t1"}, {"op": "reject", "id": "t2", "why": "not true"}], NOW)
+    unchanged = Traits().apply(
+        [{"op": "confirm", "id": "t2"}, {"op": "support", "id": "t2", "sources": ["e9"]}], NOW
+    )
+
+    rejected = home_store.get("traits", "t2")
+    assert unchanged == []
+    assert rejected["status"] == "retired" and rejected["why"] == "not true"
+    assert rejected["history"][-1] == {"event": "reject", "at": "2026-11-11T12:00:00", "text": "not true"}
+    assert [trait["id"] for trait in Traits().confirmed()] == ["t1"]
+    assert [trait["id"] for trait in Traits().living()] == ["t1"]
+    assert [trait["id"] for trait in Traits().all()] == ["t1", "t2"]
+
+
+@pytest.mark.spec("REM-14")
+def test_amend_rewrites_when_and_do_and_clears_the_gist(home_store):
+    Traits().apply([add_trait()], NOW)
+    home_store.update("traits", "t1", lambda trait: dict(trait, gist="Rust"))
+
+    (amended,) = Traits().apply([{"op": "amend", "id": "t1", "when": "at work"}], NOW)
+
+    assert amended["when"] == "at work" and amended["do"] == "Writes Rust daily" and amended["gist"] == ""
+    assert amended["history"][-1] == {
+        "event": "amend",
+        "at": "2026-11-11T12:00:00",
+        "text": "at work Writes Rust daily",
+    }
+
+
+@pytest.mark.spec("REM-5", "DRM-10")
+def test_a_gist_is_written_without_a_history_entry(home_store):
+    (added,) = Traits().apply([add_trait()], NOW)
+
+    gisted = Traits().gisted("t1", "Rust daily")
+
+    assert gisted == dict(added, gist="Rust daily")
+    assert home_store.get("traits", "t1") == gisted
+
+
+@pytest.mark.spec("REM-14")
+def test_deltas_with_an_unknown_id_or_op_or_no_source_are_dropped(home_store):
+    changed = Traits().apply(
+        [
+            add_trait(sources=[]),
+            {"op": "support", "id": "t1", "sources": ["e1"]},
+            {"op": "confirm", "id": "t9"},
+            {"op": "forget", "id": "t1"},
+        ],
+        NOW,
+    )
+    Traits().apply([add_trait(), {"op": "support", "id": "t1", "sources": []}], NOW)
+
+    assert changed == []
+    assert [trait["id"] for trait in Traits().all()] == ["t1"]
+    assert home_store.get("traits", "t1")["history"][-1]["event"] == "add"
+
+
+@pytest.mark.spec("REM-14")
+def test_an_add_like_a_living_trait_supports_it_and_one_like_a_retired_trait_is_dropped(home_store):
+    Traits().apply([add_trait("Writes Rust code every day"), add_trait("Plays chess on weekends")], NOW)
+    Traits().apply([{"op": "reject", "id": "t2", "why": "stopped"}], NOW)
+
+    (supported,) = Traits().apply(
+        [add_trait("Writes Rust code every day", sources=["e5"]), add_trait("Plays chess on weekends")], NOW
+    )
+
+    assert supported["id"] == "t1" and supported["sources"] == ["e1", "e5"]
+    assert [trait["id"] for trait in Traits().all()] == ["t1", "t2"]
+
+
+@pytest.mark.spec("REM-16")
+def test_relevant_traits_put_always_ones_first_by_sources_then_the_conditional_ones_matching_the_text(
+    home_store,
+):
+    Traits().apply(
+        [
+            add_trait("Writes Rust daily", confirmed=True),
+            add_trait("Prefers metric units", sources=["e1", "e2", "e3"], confirmed=True),
+            add_trait("Use short replies", "on Telegram", confirmed=True),
+            add_trait("Explain each Python error", "when debugging Python", confirmed=True),
+            add_trait("Likes jazz records", "music talk", confirmed=True),
+            add_trait("Drinks green tea"),
+            add_trait("Plays chess on weekends", confirmed=True),
+        ],
+        NOW,
+    )
+    home_store.update("traits", "t4", lambda trait: dict(trait, gist="explain errors"))
+    Traits().apply([{"op": "reject", "id": "t7", "why": "stopped"}], NOW)
+
+    relevant = Traits(Retriever(None)).relevant("Help me fix this Python error while debugging")
+
+    assert relevant == "- Prefers metric units\n- Writes Rust daily\n- when debugging Python: explain errors"
+
+
+@pytest.mark.spec("REM-16")
+def test_relevant_traits_stop_at_the_first_line_past_the_room(home_store):
+    Traits().apply(
+        [
+            add_trait("Writes Rust daily", sources=["e1", "e2"], confirmed=True),
+            add_trait("Prefers metric units", confirmed=True),
+            add_trait("Use short replies", confirmed=True),
+        ],
+        NOW,
+    )
+
+    traits = Traits(Retriever(None))
+    first, two = "- Writes Rust daily", "- Writes Rust daily\n- Prefers metric units"
+
+    assert traits.relevant("anything", room=len(two)) == two
+    assert traits.relevant("anything", room=len(first)) == first
+    assert traits.relevant("anything", room=5) == ""
+
+
+@pytest.mark.spec("REM-16")
+def test_relevant_traits_are_empty_without_confirmed_traits(home_store):
+    Traits().apply([add_trait()], NOW)
+
+    assert Traits(Retriever(None)).relevant("Writes Rust daily") == ""
+
+
+@pytest.mark.spec("REM-15")
+def test_an_added_question_is_pending_with_the_next_id(home_store):
+    question = Questions().add("confirm", "Do you write Rust daily?", ["yes", "no"], ["t1"], ["e1"], NOW)
+
+    assert question == {
+        "id": "q1",
+        "kind": "confirm",
+        "text": "Do you write Rust daily?",
+        "suggestions": ["yes", "no"],
+        "traits": ["t1"],
+        "sources": ["e1"],
+        "status": "pending",
+        "answer": "",
+        "at": "2026-11-11T12:00:00",
+        "turn": 1,
+        "skips": 0,
+    }
+    assert home_store.get("questions", "q1") == question
+
+
+@pytest.mark.spec("REM-15")
+def test_a_question_like_one_kept_is_dropped_whatever_its_status(home_store):
+    Questions().add("open", "Which editor do you use at work?", [], [], ["e1"], NOW)
+    Questions().answer("q1", "Helix", NOW)
+
+    dropped = Questions().add("open", "Which editor do you use at work?", [], [], ["e2"], NOW)
+
+    assert dropped is None
+    assert list(home_store.items("questions")) == ["q1"]
+
+
+@pytest.mark.spec("REM-15")
+def test_pending_gives_confirms_first_the_best_supported_first_then_open_ones_in_order(home_store):
+    Traits().apply(
+        [add_trait("Writes Rust code every day"), add_trait("Plays chess on weekends", sources=["e1", "e2"])],
+        NOW,
+    )
+    Questions().add("open", "Which editor do you use at work?", [], [], ["e1"], NOW)
+    Questions().add("confirm", "Do you write Rust code every day?", ["yes", "no"], ["t1"], ["e1"], NOW)
+    Questions().add("open", "What music helps you focus?", [], [], ["e2"], NOW)
+    Questions().add("confirm", "Do you play chess on weekends?", ["yes", "no"], ["t2"], ["e2"], NOW)
+
+    assert [question["id"] for question in Questions().pending()] == ["q4", "q2", "q1", "q3"]
+    assert Questions().next()["id"] == "q4"
+
+
+@pytest.mark.spec("REM-15")
+def test_a_skipped_question_goes_behind_every_pending_one_still_pending(home_store):
+    Traits().apply([add_trait("Writes Rust code every day")], NOW)
+    Questions().add("confirm", "Do you write Rust code every day?", ["yes", "no"], ["t1"], ["e1"], NOW)
+    Questions().add("open", "Which editor do you use at work?", [], [], ["e1"], NOW)
+
+    skipped = Questions().skip("q1", NOW)
+
+    assert skipped["status"] == "pending" and skipped["at"] == "2026-11-11T12:00:00"
+    assert [question["id"] for question in Questions().pending()] == ["q2", "q1"]
+
+
+@pytest.mark.spec("REM-15", "INT-4")
+def test_skipped_questions_follow_the_order_they_were_skipped_whatever_their_kind_or_support(home_store):
+    Traits().apply(
+        [add_trait("Writes Rust code every day"), add_trait("Plays chess on weekends", sources=["e1", "e2"])],
+        NOW,
+    )
+    Questions().add("confirm", "Do you write Rust code every day?", ["yes", "no"], ["t1"], ["e1"], NOW)
+    Questions().add("confirm", "Do you play chess on weekends?", ["yes", "no"], ["t2"], ["e2"], NOW)
+    Questions().add("open", "Which editor do you use at work?", [], [], ["e1"], NOW)
+
+    Questions().skip("q2", NOW)
+    assert [question["id"] for question in Questions().pending()] == ["q1", "q3", "q2"]
+
+    Questions().skip("q3", NOW)
+    Questions().skip("q1", NOW)
+    assert [question["id"] for question in Questions().pending()] == ["q2", "q3", "q1"]
+
+
+@pytest.mark.spec("REM-15")
+def test_a_confirm_whose_traits_are_all_retired_no_longer_waits(home_store):
+    Traits().apply([add_trait("Writes Rust code every day"), add_trait("Plays chess on weekends")], NOW)
+    Questions().add("confirm", "Do you write Rust code every day?", ["yes", "no"], ["t1"], ["e1"], NOW)
+    Questions().add("confirm", "Do you write Rust and play chess?", ["yes", "no"], ["t1", "t2"], ["e1"], NOW)
+
+    Traits().apply([{"op": "reject", "id": "t1", "why": "not true"}], NOW)
+
+    assert [question["id"] for question in Questions().pending()] == ["q2"]
+    assert home_store.get("questions", "q1")["status"] == "pending"
+
+
+@pytest.mark.spec("REM-15")
+def test_an_answered_question_leaves_the_pending_ones(home_store):
+    Questions().add("open", "Which editor do you use at work?", [], [], ["e1"], NOW)
+
+    answered = Questions().answer("q1", "Helix", NOW)
+
+    assert answered["status"] == "answered" and answered["answer"] == "Helix"
+    assert answered["at"] == "2026-11-11T12:00:00"
+    assert Questions().pending() == [] and Questions().next() is None
+
+
+@pytest.mark.spec("REM-15")
+def test_answer_or_skip_of_an_unknown_or_answered_question_changes_nothing(home_store):
+    Questions().add("open", "Which editor do you use at work?", [], [], ["e1"], NOW)
+    Questions().answer("q1", "Helix", NOW)
+
+    assert Questions().answer("q9", "Vim", NOW) is None
+    assert Questions().skip("q9", NOW) is None
+    assert Questions().answer("q1", "Vim", NOW) is None
+    assert Questions().skip("q1", NOW) is None
+    assert home_store.get("questions", "q1")["answer"] == "Helix"
+    assert list(home_store.items("questions")) == ["q1"]
+
+
 @pytest.mark.spec("REM-3")
 def test_update_changes_a_memory_and_retire_says_why(home_store):
     memories().add("fact", "Repo", "The repo is codeforge.", ["e1"], NOW)
@@ -262,16 +541,6 @@ def test_recall_finds_by_meaning_close_enough_after_word_hits(home_store):
     assert RECALL_MEANING > 0
 
 
-@pytest.mark.spec("REM-5")
-def test_the_portrait_is_cut_to_its_word_limit(home_store):
-    assert Portrait.read() == ""
-
-    Portrait.write(" ".join(["word"] * (PORTRAIT_WORDS + 20)))
-
-    assert len(Portrait.read().split()) == PORTRAIT_WORDS
-    assert home_store.get("dream", "portrait") == Portrait.read()
-
-
 @pytest.mark.spec("REM-7")
 def test_memory_lists_living_memories_newest_first_with_the_state(home_store, capsys):
     older = memories().add("fact", "Uses uv", "The person uses uv for Python.", ["e1"], NOW)
@@ -288,9 +557,7 @@ def test_memory_lists_living_memories_newest_first_with_the_state(home_store, ca
     assert out.index("m2 person: Likes short answers") < out.index(f"{older['id']} fact: Uses uv")
     assert "Uses pip" not in out
     assert "1 fresh episode · 1 retired memory · last dream 2026-11-10T03:00:00" in out
-    assert (
-        "memory show ID" in out and "memory forget ID" in out and "memory portrait" in out and "dream" in out
-    )
+    assert "memory show ID" in out and "memory forget ID" in out and "memory traits" in out and "dream" in out
 
 
 @pytest.mark.spec("REM-7")
@@ -365,24 +632,85 @@ def test_forget_without_yes_off_a_terminal_deletes_nothing(home_store):
     assert home_store.get("memories", "m1") is not None
 
 
-@pytest.mark.spec("REM-10")
-def test_you_shows_the_portrait_and_its_person_memories(home_store, capsys):
-    Portrait.write("A Python developer who likes short answers.")
-    memories().add("person", "Likes short answers", "text", ["e1"], NOW)
-    memories().add("fact", "Uses uv", "text", ["e1"], NOW)
+@pytest.mark.spec("REM-9")
+def test_forget_retires_a_trait_as_forgotten_without_asking(home_store, capsys):
+    Traits().apply([{"op": "add", "about": "person", "when": "", "do": "keeps bees", "sources": ["e1"]}], NOW)
 
-    show_portrait()
+    forget("t1")
+
+    trait = home_store.get("traits", "t1")
+    assert trait["status"] == "retired" and trait["why"] == "forgotten"
+    assert "Forgot t1." in capsys.readouterr().out
+
+
+@pytest.mark.spec("REM-9")
+def test_forget_refuses_an_unknown_or_retired_trait(home_store):
+    Traits().apply([{"op": "add", "about": "person", "when": "", "do": "keeps bees", "sources": ["e1"]}], NOW)
+    forget("t1")
+
+    for trait_id in ("t1", "t7"):
+        with pytest.raises(SystemExit, match=f"no trait {trait_id}"):
+            forget(trait_id, yes=True)
+
+
+@pytest.mark.spec("REM-10")
+def test_traits_shows_the_confirmed_by_about_then_candidates_then_questions(home_store, capsys):
+    Traits().apply(
+        [
+            {
+                "op": "add",
+                "about": "tinker",
+                "when": "",
+                "do": "answer in short lines",
+                "sources": ["e1"],
+                "confirmed": True,
+            },
+            {
+                "op": "add",
+                "about": "person",
+                "when": "writing Python",
+                "do": "uses uv",
+                "sources": ["e1"],
+                "confirmed": True,
+            },
+            {
+                "op": "add",
+                "about": "person",
+                "when": "",
+                "do": "keeps bees in the garden",
+                "sources": ["e1", "e2"],
+            },
+            {
+                "op": "add",
+                "about": "person",
+                "when": "",
+                "do": "dislikes long meetings",
+                "sources": ["e3"],
+                "confirmed": True,
+            },
+        ],
+        NOW,
+    )
+    Traits().apply([{"op": "reject", "id": "t4", "why": "wrong"}], NOW)
+    Questions().add("confirm", "Do you keep bees?", [], ["t3"], ["e1"], NOW)
+
+    show_traits()
 
     out = capsys.readouterr().out
-    assert "A Python developer who likes short answers." in out
-    assert "m1 person: Likes short answers" in out and "Uses uv" not in out
+    assert out.index("t2 writing Python: uses uv") < out.index("t1 answer in short lines")
+    assert out.index("person") < out.index("tinker") < out.index("t1 answer in short lines")
+    assert "t3 keeps bees in the garden · 2 sources" in out
+    assert out.index("t1 answer in short lines") < out.index("t3 keeps bees")
+    assert "dislikes long meetings" not in out
+    assert "1 question waits: tinker interact asks it." in out
 
 
 @pytest.mark.spec("REM-10")
-def test_you_without_a_portrait_says_a_dream_writes_it(home_store, capsys):
-    show_portrait()
+def test_traits_without_any_says_a_dream_learns_them(home_store, capsys):
+    show_traits()
 
-    assert "No portrait yet" in capsys.readouterr().out
+    out = capsys.readouterr().out
+    assert "No traits yet" in out and "dream" in out and "interact" in out
 
 
 @pytest.mark.spec("REM-12")

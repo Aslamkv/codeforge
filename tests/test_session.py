@@ -1,5 +1,5 @@
 import pytest
-from conftest import TOOLCHAIN, criterion, plan_of
+from conftest import TOOLCHAIN, confirmed_trait, criterion, plan_of
 
 from tinkerkit.knowledge import Knowledge, Library
 from tinkerkit.principles import Principle, Principles
@@ -104,7 +104,7 @@ def test_knowledge_parts_record_what_they_show(session, home_store):
         item for item in Library.items({"flask": Library.read("flask")}) if item["id"]
     ]
     session.cycle = cycle = session.project.cycles[0]
-    parts = session.knowledge_parts("tests", "code")
+    parts = session.knowledge_parts("tests", "code")[1:]
     assert [part.title for part in parts] == [
         "Lessons from earlier projects (follow them)",
         "Learned from the web (current; newer than what you were trained on)",
@@ -120,7 +120,23 @@ def test_knowledge_parts_record_what_they_show(session, home_store):
         f"fact:flask:{client}": ["code", "tests"],
         f"principle:{principle.id}": ["code", "tests"],
     }
-    assert len(session.knowledge_parts("toolchain")) == 3
+    assert len(session.knowledge_parts("toolchain")) == 4
+
+
+@pytest.mark.spec("SES-3")
+@pytest.mark.spec("REM-16")
+def test_a_build_gets_the_persons_traits_first(session, home_store):
+    confirmed_trait("Keeps the calculator code in one file", when="building a calculator")
+    first = session.knowledge_parts("code")[0]
+    assert (first.title, first.place) == (Prompts.TRAITS, "first")
+    assert "Keeps the calculator code in one file" in first.text
+
+
+@pytest.mark.spec("SES-3")
+@pytest.mark.spec("REM-16")
+def test_a_build_without_confirmed_traits_has_no_traits_part(session, home_store):
+    parts = session.knowledge_parts("code")
+    assert Prompts.TRAITS not in Part.assemble(parts, 10_000)
 
 
 @pytest.mark.spec("SES-3")

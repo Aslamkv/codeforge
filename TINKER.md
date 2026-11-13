@@ -528,20 +528,28 @@ showing it the earlier answer, and the next dream keeps the new answer. An answe
 
 While nothing waits for it, Tinker dreams: a few seconds after the queue empties, it turns the fresh episodes
 into memories (about you, what you did, the tools you use, facts), joins the ones that say the same thing,
-lets fade what was never recalled or seen again, and keeps a short portrait of who you are. A dream is a job,
-so it never runs over a chat or a build:
+lets fade what was never recalled or seen again, and notices traits: how you work and how you want Tinker to
+be. A dream never decides a trait on its own; each one waits as a question for you. A dream is a job, so it
+never runs over a chat or a build:
 
 ```sh
 tinker memory                # the memories, newest first, and when the last dream was
 tinker memory show m3        # one memory with the episodes it came from, or one episode
-tinker memory forget m3      # delete a memory or an episode
-tinker memory portrait       # who Tinker thinks you are, and why
+tinker memory forget m3      # delete a memory or an episode; for a trait (t2), retire it
+tinker memory traits         # who Tinker thinks you are and should be, and the traits still in doubt
 tinker dream                 # the last dream, what it changed, and what waits
 tinker dream run             # dream now
 tinker dream graph           # watch the episodes and memories change, live in the browser
 ```
 
 In a chat, `memory graph` and `dream graph` send the graph as a page to open on your phone.
+
+`interact` (or `tinker interact` for a terminal chat already in it) asks the questions the dreams left, one at
+a time, with the answers it guesses numbered. Answer with a number, a number with changes (`2, but on
+weekdays`), your own words, or `/skip` to come back to it later; `/leave` ends it. When no question waits,
+Tinker thinks of a new one, until there is nothing left to ask. On Telegram each answer is a button. What you
+confirm goes with every chat, `tinker ask` and build from then on; a preference you teach (`tinker teach`)
+becomes a trait too.
 
 ## Jobs ⏯
 

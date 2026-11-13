@@ -19,7 +19,7 @@ lazy from .model import Models, Ollama, OllamaError
 lazy from .principles import Inducer, Principles
 lazy from .project import Tracked, ending
 lazy from .prompts import Part, Prompts
-lazy from .retrieval import Embeddings, Retriever
+lazy from .retrieval import Embeddings, Retriever, traits_part
 lazy from .settings import (
     BOOK_PASSAGES_SHOWN,
     FACT_PHASES,
@@ -402,7 +402,10 @@ class Readings:
 
 def answered_inside(number, question):
     entry = Readings.get(number)
-    system = {"role": "system", "content": Prompts.INSIDE_READING.format(title=entry["title"])}
+    system = {
+        "role": "system",
+        "content": Prompts.INSIDE_READING.format(title=entry["title"]) + traits_part(question),
+    }
     return Models.quick_reply([system, inside_question(entry, question)], Senses.REPLY_TOKENS)
 
 

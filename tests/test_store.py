@@ -1,5 +1,6 @@
 import multiprocessing
 import stat
+import threading
 
 import pytest
 
@@ -56,6 +57,52 @@ def test_a_failed_write_leaves_the_old_value(tmp_path):
         not_json = object()
         store.put("c", "k", not_json)
     assert store.get("c", "k") == "old"
+
+
+@pytest.mark.spec("STO-1")
+def test_a_nested_update_joins_the_open_transaction(tmp_path):
+    path = tmp_path / "x.db"
+
+    def count_and_name(value):
+        Store(path).update("c", "n", lambda count: count + 1, 0)
+        return "named"
+
+    assert Store(path).update("c", "k", count_and_name) == "named"
+    assert Store(path).get("c", "k") == "named" and Store(path).get("c", "n") == 1
+
+
+@pytest.mark.spec("STO-1")
+def test_a_failed_nested_update_rolls_back_both(tmp_path):
+    store = Store(tmp_path / "x.db")
+    store.put("c", "k", "old")
+
+    def broken(value):
+        raise RuntimeError("crash in the nested change")
+
+    def nested_broken(value):
+        store.put("c", "other", "new")
+        store.update("c", "n", broken, 0)
+        return "new"
+
+    with pytest.raises(RuntimeError):
+        store.update("c", "k", nested_broken)
+    assert store.get("c", "k") == "old" and store.items("c") == {"k": "old"}
+
+
+@pytest.mark.spec("STO-1")
+def test_another_thread_waits_for_the_open_transaction(tmp_path):
+    path = tmp_path / "x.db"
+    writer = threading.Thread(target=lambda: Store(path).put("c", "t", "thread"))
+
+    def start_writer(value):
+        writer.start()
+        writer.join(0.5)
+        assert writer.is_alive() and Store(path).get("c", "t") is None
+        return "main"
+
+    Store(path).update("c", "k", start_writer)
+    writer.join(30)
+    assert Store(path).items("c") == {"k": "main", "t": "thread"}
 
 
 @pytest.mark.spec("STO-2")

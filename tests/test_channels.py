@@ -409,6 +409,17 @@ def test_a_fresh_answer_button_tap_arrives_as_fresh():
     assert answered == ["q1", "q2"]
 
 
+@pytest.mark.spec("INT-1")
+def test_a_tapped_number_button_arrives_as_its_number():
+    tapped = {"id": "q1", "from": {"username": "me"}, "message": {"message_id": 7, "chat": {"id": 42}}}
+    updates = [
+        {"update_id": 10, "callback_query": dict(tapped, data="2")},
+        {"update_id": 11, "callback_query": dict(tapped, id="q2", data="x2")},
+    ]
+    messages = telegram(BotAPI(getUpdates=[updates])).receive(1)
+    assert [(message.chat, message.text, message.sender) for message in messages] == [("42", "2", "me")]
+
+
 @pytest.mark.spec("CNV-24")
 def test_offer_fresh_puts_a_button_on_the_reply():
     api = BotAPI()
@@ -454,6 +465,34 @@ def test_offer_leave_puts_a_leave_button_on_the_answer():
         "inline_keyboard": [[{"text": "📕 Leave #3", "callback_data": "/leave"}]]
     }
     telegram(BotAPI(editMessageReplyMarkup=OSError("down"))).offer_leave("42", 7, 3)
+
+
+@pytest.mark.spec("INT-1")
+def test_offer_answers_puts_a_button_per_suggestion_then_skip_and_leave_on_the_question():
+    api = BotAPI()
+    telegram(api).offer_answers("42", 7, 2)
+    [(path, fields)] = api.calls
+    assert (
+        path.endswith("editMessageReplyMarkup") and fields["chat_id"] == "42" and fields["message_id"] == "7"
+    )
+    assert json.loads(fields["reply_markup"]) == {
+        "inline_keyboard": [
+            [{"text": "1", "callback_data": "1"}, {"text": "2", "callback_data": "2"}],
+            [{"text": "⏭ Skip", "callback_data": "/skip"}, {"text": "🚪 Leave", "callback_data": "/leave"}],
+        ]
+    }
+    telegram(BotAPI(editMessageReplyMarkup=OSError("down"))).offer_answers("42", 7, 2)
+
+
+@pytest.mark.spec("INT-1")
+def test_offer_answers_with_no_suggestions_puts_only_skip_and_leave():
+    api = BotAPI()
+    telegram(api).offer_answers("42", 7, 0)
+    assert json.loads(api.calls[0][1]["reply_markup"]) == {
+        "inline_keyboard": [
+            [{"text": "⏭ Skip", "callback_data": "/skip"}, {"text": "🚪 Leave", "callback_data": "/leave"}]
+        ]
+    }
 
 
 @pytest.mark.spec("CHN-6")

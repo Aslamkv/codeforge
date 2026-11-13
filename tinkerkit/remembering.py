@@ -11,9 +11,10 @@ from .settings import (
     EPISODE_FOUND_CHARS,
     EPISODE_GIST_CHARS,
     EPISODE_KEPT_DAYS,
-    PORTRAIT_WORDS,
     RECALL_MEANING,
     RECALL_SHOWN,
+    SAME_FACT_SIMILARITY,
+    TRAITS_CHARS,
     Home,
     Numbered,
     confirm_deletion,
@@ -22,6 +23,7 @@ from .text import similarity
 
 EPISODE_BOOKKEEPING = frozenset({"id", "chat", "time", "dreamt", "dreamt_time"})
 KEPT_WHOLE = EPISODE_BOOKKEEPING | {"status"}
+DREAM = "dream"
 
 
 class Scratchpad:
@@ -156,17 +158,238 @@ class Memories:
         return self.update(memory["id"], {"recalled": memory["recalled"] + 1, "last_recalled": stamp(now)})
 
 
-class Portrait:
-    DREAM = "dream"
-    KEY = "portrait"
+class Traits:
+    TRAITS = "traits"
+    COUNTER = "trait_ids"
 
-    @classmethod
-    def read(cls):
-        return Home.store().get(cls.DREAM, cls.KEY, "")
+    def __init__(self, retriever=None):
+        self.retriever = retriever
 
-    @classmethod
-    def write(cls, text):
-        Home.store().put(cls.DREAM, cls.KEY, " ".join(text.split()[:PORTRAIT_WORDS]))
+    def apply(self, deltas, now=None):
+        changed = [self.applied(delta, stamp(now)) for delta in deltas]
+        return [trait for trait in changed if trait]
+
+    def applied(self, delta, at):
+        ops = {
+            "add": self.add,
+            "support": self.support,
+            "confirm": self.confirm,
+            "reject": self.reject,
+            "amend": self.amend,
+        }
+        op = ops.get(delta.get("op"))
+        if op is None or (op != self.add and not self.open(delta.get("id"))):
+            return None
+        return op(delta, at)
+
+    def open(self, trait_id):
+        trait = Home.store().get(self.TRAITS, trait_id) if trait_id else None
+        return trait is not None and trait["status"] != "retired"
+
+    def add(self, delta, at):
+        if not delta.get("sources"):
+            return None
+        alike = self.most_alike(delta.get("when", ""), delta["do"])
+        if alike:
+            return None if alike["status"] == "retired" else self.support(dict(delta, id=alike["id"]), at)
+        trait = {
+            "id": f"t{self.next_number()}",
+            "about": delta["about"],
+            "when": delta.get("when", ""),
+            "do": delta["do"],
+            "gist": "",
+            "status": "confirmed" if delta.get("confirmed") else "candidate",
+            "sources": list(dict.fromkeys(delta["sources"])),
+            "history": [history_entry("add", at, delta["do"])],
+        }
+        Home.store().put(self.TRAITS, trait["id"], trait)
+        return trait
+
+    def most_alike(self, when, do):
+        said = likeness_text(when, do)
+        closeness = {
+            trait["id"]: similarity(said, likeness_text(trait["when"], trait["do"])) for trait in self.all()
+        }
+        alike = [trait for trait in self.all() if closeness[trait["id"]] >= SAME_FACT_SIMILARITY]
+        return max(alike, key=lambda trait: closeness[trait["id"]], default=None)
+
+    def support(self, delta, at):
+        if not delta.get("sources"):
+            return None
+        return self.changed(
+            delta["id"],
+            at,
+            "support",
+            " ".join(delta["sources"]),
+            lambda trait: {"sources": list(dict.fromkeys(trait["sources"] + list(delta["sources"])))},
+        )
+
+    def confirm(self, delta, at):
+        return self.changed(delta["id"], at, "confirm", "", lambda trait: {"status": "confirmed"})
+
+    def reject(self, delta, at):
+        why = delta.get("why", "")
+        return self.changed(delta["id"], at, "reject", why, lambda trait: {"status": "retired", "why": why})
+
+    def amend(self, delta, at):
+        trait = Home.store().get(self.TRAITS, delta["id"])
+        when, do = delta.get("when", trait["when"]), delta.get("do", trait["do"])
+        return self.changed(
+            delta["id"],
+            at,
+            "amend",
+            likeness_text(when, do),
+            lambda trait: {"when": when, "do": do, "gist": ""},
+        )
+
+    def changed(self, trait_id, at, event, text, changes):
+        return Home.store().update(
+            self.TRAITS,
+            trait_id,
+            lambda trait: dict(
+                trait, **changes(trait), history=trait["history"] + [history_entry(event, at, text)]
+            ),
+        )
+
+    def gisted(self, trait_id, gist):
+        return Home.store().update(self.TRAITS, trait_id, lambda trait: dict(trait, gist=gist))
+
+    def next_number(self):
+        return Home.store().update(self.COUNTER, "last", lambda last: (last or 0) + 1)
+
+    def all(self):
+        return list(Home.store().items(self.TRAITS).values())
+
+    def living(self):
+        return [trait for trait in self.all() if trait["status"] != "retired"]
+
+    def confirmed(self):
+        return [trait for trait in self.all() if trait["status"] == "confirmed"]
+
+    def relevant(self, text, room=TRAITS_CHARS):
+        confirmed = sorted(self.confirmed(), key=lambda trait: int(trait["id"][1:]))
+        always = sorted(
+            (trait for trait in confirmed if not trait["when"]), key=lambda trait: -len(trait["sources"])
+        )
+        conditional = [trait for trait in confirmed if trait["when"]]
+        hits = self.retriever.by_words(
+            text, [likeness_text(trait["when"], trait["do"]) for trait in conditional]
+        )
+        return within_room(
+            [trait_line(trait) for trait in always + [conditional[index] for index in hits]], room
+        )
+
+    def candidates(self):
+        return [trait for trait in self.all() if trait["status"] == "candidate"]
+
+
+class Questions:
+    QUESTIONS = "questions"
+    COUNTER = "question_ids"
+
+    def add(self, kind, text, suggestions, traits, sources, now=None):
+        if any(similarity(text, kept["text"]) >= SAME_FACT_SIMILARITY for kept in self.all()):
+            return None
+        question = {
+            "id": f"q{self.next_number('last')}",
+            "kind": kind,
+            "text": text,
+            "suggestions": list(suggestions),
+            "traits": list(traits),
+            "sources": list(sources),
+            "status": "pending",
+            "answer": "",
+            "at": stamp(now),
+            "turn": self.next_number("turn"),
+            "skips": 0,
+        }
+        Home.store().put(self.QUESTIONS, question["id"], question)
+        return question
+
+    def pending(self):
+        traits = Traits().all()
+        retired = {trait["id"] for trait in traits if trait["status"] == "retired"}
+        waiting = [
+            question
+            for question in self.all()
+            if question["status"] == "pending" and not self.only_about_retired(question, retired)
+        ]
+        never_skipped = [question for question in waiting if question["skips"] == 0]
+        skipped = sorted(
+            (question for question in waiting if question["skips"] > 0), key=lambda question: question["turn"]
+        )
+        return self.in_kept_order(never_skipped, traits) + skipped
+
+    def only_about_retired(self, question, retired):
+        about_traits = question["kind"] == "confirm" and question["traits"]
+        return bool(about_traits) and set(question["traits"]) <= retired
+
+    def in_kept_order(self, questions, traits):
+        support = {trait["id"]: len(trait["sources"]) for trait in traits}
+        confirms = [question for question in questions if question["kind"] == "confirm"]
+        opens = [question for question in questions if question["kind"] != "confirm"]
+        best_supported_first = sorted(
+            confirms, key=lambda question: (-self.support(question, support), question["turn"])
+        )
+        return best_supported_first + sorted(opens, key=lambda question: question["turn"])
+
+    def support(self, question, support):
+        return max((support.get(trait_id, 0) for trait_id in question["traits"]), default=0)
+
+    def next(self):
+        return next(iter(self.pending()), None)
+
+    def answer(self, question_id, text, now=None):
+        return self.changed(
+            question_id, lambda question: {"status": "answered", "answer": text, "at": stamp(now)}
+        )
+
+    def skip(self, question_id, now=None):
+        return self.changed(
+            question_id,
+            lambda question: {
+                "at": stamp(now),
+                "turn": self.next_number("turn"),
+                "skips": question["skips"] + 1,
+            },
+        )
+
+    def changed(self, question_id, changes):
+        with Home.store().transaction(write=True):
+            question = Home.store().get(self.QUESTIONS, question_id)
+            if question is None or question["status"] != "pending":
+                return None
+            return Home.store().update(
+                self.QUESTIONS, question_id, lambda question: dict(question, **changes(question))
+            )
+
+    def next_number(self, key):
+        return Home.store().update(self.COUNTER, key, lambda last: (last or 0) + 1)
+
+    def all(self):
+        return list(Home.store().items(self.QUESTIONS).values())
+
+
+def likeness_text(when, do):
+    return f"{when} {do}".strip()
+
+
+def history_entry(event, at, text):
+    return {"event": event, "at": at, "text": text}
+
+
+def trait_line(trait):
+    said = trait["gist"] or trait["do"]
+    return f"- {trait['when']}: {said}" if trait["when"] else f"- {said}"
+
+
+def within_room(lines, room):
+    kept = []
+    for line in lines:
+        if len("\n".join(kept + [line])) > room:
+            break
+        kept.append(line)
+    return "\n".join(kept)
 
 
 def lasts_found(kind, lasts):
@@ -244,7 +467,7 @@ def show_memories(page=1):
     say.info(memory_state(), "📊")
     say.info(
         "tinker memory show ID shows one; tinker memory forget ID deletes one; "
-        "tinker memory portrait shows the portrait; tinker dream run makes memories now.",
+        "tinker memory traits shows the traits; tinker dream run makes memories now.",
         "👉",
     )
 
@@ -255,6 +478,9 @@ def show_remembered(item_id):
 
 
 def forget(item_id, yes=False):
+    if item_id.startswith("t"):
+        forget_trait(item_id)
+        return
     item, collection = remembered(item_id)
     confirm_deletion(
         "This forgets for good:",
@@ -266,17 +492,47 @@ def forget(item_id, yes=False):
     say.done(f"Forgot {item_id}.")
 
 
-def show_portrait():
-    portrait = Portrait.read()
-    if not portrait:
-        say.info("No portrait yet: a dream writes it from what you do.", "📭")
+def forget_trait(trait_id):
+    if not Traits().open(trait_id):
+        raise SystemExit(
+            f"tinker: no trait {trait_id} to forget: tinker memory traits lists the traits by id."
+        )
+    Traits().apply([{"op": "reject", "id": trait_id, "why": "forgotten"}])
+    say.done(f"Forgot {trait_id}.")
+
+
+def show_traits():
+    confirmed, candidates = Traits().confirmed(), Traits().candidates()
+    if not confirmed and not candidates:
+        say.info(
+            "No traits yet: a dream learns them from what you do, and tinker interact asks about them.", "📭"
+        )
         return
-    with say.part("Who you are", "🪞"):
-        say.text(portrait)
-    people = [memory for memory in Memories(None).living() if memory["kind"] == "person"]
-    with say.part("From these memories", "🧠"):
-        for memory in people:
-            say.item(memory_line(memory))
+    for about in TRAIT_ABOUTS:
+        shown = [trait for trait in by_number(confirmed) if trait["about"] == about]
+        if shown:
+            with say.part(f"Traits: {about}", "🪞"):
+                for trait in shown:
+                    say.item(trait_view_line(trait))
+    if candidates:
+        with say.part("Candidates", "🌱"):
+            for trait in by_number(candidates):
+                say.item(f"{trait_view_line(trait)} · {counted(len(trait['sources']), 'source')}")
+    waiting = len(Questions().pending())
+    say.info(
+        f"{counted(waiting, 'question waits', 'questions wait')}: tinker interact asks {'it' if waiting == 1 else 'them'}.",
+        "👉",
+    )
+
+
+def by_number(traits):
+    return sorted(traits, key=lambda trait: int(trait["id"][1:]))
+
+
+def trait_view_line(trait):
+    return (
+        f"{trait['id']} {trait['when']}: {trait['do']}" if trait["when"] else f"{trait['id']} {trait['do']}"
+    )
 
 
 def remembered(item_id):
@@ -324,7 +580,7 @@ def memory_line(memory):
 def memory_state():
     fresh = len(Scratchpad.fresh())
     retired = sum(1 for memory in Home.store().items(Memories.MEMORIES).values() if memory["retired"])
-    last = Home.store().get(Portrait.DREAM, "state", {}).get("last")
+    last = Home.store().get(DREAM, "state", {}).get("last")
     dreamt = f"last dream {last}" if last else "no dream yet"
     return f"{counted(fresh, 'fresh episode')} · {counted(retired, 'retired memory', 'retired memories')} · {dreamt}"
 
@@ -334,6 +590,7 @@ def counted(number, one, many=None):
 
 
 HEADING_KEYS = ("gist", "message", "task", "line")
+TRAIT_ABOUTS = ("person", "tinker")
 COLLECTION_OF_PREFIX = {"m": Memories.MEMORIES, "e": Scratchpad.EPISODES}
 NOUN_OF = {Memories.MEMORIES: "memory", Scratchpad.EPISODES: "episode"}
 SHOWN_BY_COLLECTION = {Memories.MEMORIES: show_memory, Scratchpad.EPISODES: show_episode}

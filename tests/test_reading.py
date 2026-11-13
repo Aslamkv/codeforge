@@ -217,6 +217,29 @@ def test_a_question_inside_a_reading_is_answered_from_its_passages(tmp_path, hom
     assert system["role"] == "system" and Readings.get(1)["title"] in system["content"]
     assert passage["text"] in user["content"] and "What about naming?" in user["content"]
     assert "images" not in user
+    assert "Who the person is" not in system["content"]
+
+
+@pytest.mark.spec("REM-16")
+def test_a_question_inside_a_reading_gets_the_persons_traits(tmp_path, home_store, monkeypatch):
+    from tinkerkit.remembering import Traits
+    from tinkerkit.retrieval import Retriever
+
+    trait = {
+        "op": "add",
+        "about": "person",
+        "when": "",
+        "do": "Answers in short sentences",
+        "sources": ["e1"],
+    }
+    Traits(Retriever(None)).apply([trait | {"confirmed": True}])
+    asked, _ = sensing(monkeypatch)
+    kept(craft(tmp_path))
+    answered_inside(1, "What about naming?")
+    [[system, _]] = asked
+    assert system["content"].endswith(
+        "\n\n## Who the person is and how they want you to be\n- Answers in short sentences"
+    )
 
 
 @pytest.mark.spec("CNV-25")

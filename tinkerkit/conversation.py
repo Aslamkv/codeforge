@@ -5,6 +5,7 @@ import shutil
 import signal
 import sys
 from collections import namedtuple
+from typing import NamedTuple
 lazy import datetime
 lazy import fcntl
 lazy import html
@@ -36,7 +37,7 @@ from .jobs import (
     tinker_process,
 )
 from .project import Runs, Tracker, saved
-from .remembering import EPISODE_BOOKKEEPING, Memories, Portrait, Scratchpad
+from .remembering import EPISODE_BOOKKEEPING, Memories, Scratchpad
 lazy from .ledger import DONE_NOTE_KEPT_SECONDS, Ledger
 lazy from .messages import (
     CLEAR_LINE,
@@ -60,7 +61,7 @@ lazy from .messages import (
 lazy from .messages import styled as styled_choice
 lazy from .model import Models, Ollama, OllamaError
 lazy from .prompts import Part, Prompts, Reply
-lazy from .retrieval import Embeddings, Retriever
+lazy from .retrieval import Embeddings, Retriever, traits_part
 lazy from .reviewing import RequestReview
 lazy from .settings import (
     EPISODE_GIST_CHARS,
@@ -123,9 +124,15 @@ PROMPT_HISTORY_LINES = 1000
 CHAT_APP_START = "/start"
 CHAT_FRESH = "/fresh"
 CHAT_LEAVE = "/leave"
+CHAT_SKIP = "/skip"
 NEXT_PAGE_BUTTON = "Next page ›"
 FRESH_ANSWER_BUTTON = "🔄 Fresh answer"
 LEAVE_READING_BUTTON = "📕 Leave #{number}"
+SKIP_QUESTION_BUTTON = "⏭ Skip"
+LEAVE_INTERVIEW_BUTTON = "🚪 Leave"
+INTERVIEW_ENTERED = "💬 **Interview**: answer, /skip · /leave leaves it"
+INTERVIEW_LEFT = "💬 **Left the interview**"
+NOTHING_LEFT_TO_ASK = "💬 **Nothing left to ask**"
 NO_QUESTION_YET = "❓ **No question yet** to ask again."
 START_WELCOME = """👋 **Hi, I'm Tinker!**
 I build small programs for you, on this computer, with an AI model that runs right here.
@@ -177,13 +184,106 @@ class NoShelf:
         return None
 
 
-def session(root, shelf=None):
+class NoInterview:
+    def turn(self, chat, now=None):
+        return None
+
+    def skipped(self, chat):
+        return None
+
+    def answered(self, chat, text, now=None):
+        return None
+
+    def suggestion_count(self, chat):
+        return 0
+
+
+class InsideReading(NamedTuple):
+    number: int
+    title: str
+
+    def answer(self, desk, channel, message):
+        sent = channel.send(message.chat, self.answer_text(desk, channel, message))
+        channel.offer_leave(message.chat, sent, self.number)
+
+    def answer_text(self, desk, channel, message):
+        try:
+            with desk.talk.pausing_jobs(), channel.waiting(message.chat, message.text):
+                return desk.shelf.answered(self.number, message.text) or "_(no answer)_"
+        except OllamaError as exc:
+            return md(t"⚠️ **The model did not answer:** {first_words(exc)}")
+
+    def offer(self, channel, chat, shown):
+        pass
+
+    def entered_line(self, chat):
+        return md(t"\n📕 **Inside #{self.number} {self.title}**: ask me about it · `/leave` leaves it")
+
+    def left_line(self):
+        return md(t"📕 **Left #{self.number} {self.title}**")
+
+    def env(self):
+        return {"TINKER_INSIDE": str(self.number)}
+
+    def gone(self, shelf):
+        return not shelf.exists(self.number)
+
+    def prompt(self):
+        return f"📕 #{self.number} {self.title} › "
+
+    def takes(self, text):
+        return not text.startswith("/")
+
+
+class InsideInterview(NamedTuple):
+    interview: object
+
+    def answer(self, desk, channel, message):
+        if message.text.split() == [CHAT_SKIP]:
+            turn = self.interview.skipped(message.chat)
+        else:
+            turn = self.interview.answered(message.chat, message.text)
+        if turn is None:
+            channel.send(message.chat, NOTHING_LEFT_TO_ASK)
+            desk.leave_mode(channel, message.chat)
+        else:
+            self.offer(channel, message.chat, channel.send(message.chat, turn))
+
+    def offer(self, channel, chat, shown):
+        channel.offer_answers(chat, shown, self.interview.suggestion_count(chat))
+
+    def opening(self, turn):
+        return f"{INTERVIEW_ENTERED}\n\n{turn}"
+
+    def left_line(self):
+        return INTERVIEW_LEFT
+
+    def env(self):
+        return {}
+
+    def gone(self, shelf):
+        return False
+
+    def prompt(self):
+        return "💬 interact › "
+
+    def takes(self, text):
+        return text.split() == [CHAT_SKIP] or not text.startswith("/")
+
+
+def session(root, shelf=None, interview=None, interviewing=False):
     try:
         chats = chat_channels()
     except SystemExit as exc:
         say.warn(f"Chats left out: {exc}")
         chats = []
-    Desk([ConsoleChannel()] + chats, root, shelf=shelf or NoShelf()).run()
+    Desk(
+        [ConsoleChannel()] + chats,
+        root,
+        shelf=shelf or NoShelf(),
+        interview=interview,
+        interviewing=interviewing,
+    ).run()
 
 
 def one_shot(command, text):
@@ -219,9 +319,10 @@ class Desk:
     COMMANDS = tuple(command.name for command in COMMANDS if command.chat)
     TRACKER_LOOK_SECONDS = 1.0
 
-    def __init__(self, channels, root, shelf=None):
+    def __init__(self, channels, root, shelf=None, interview=None, interviewing=False):
         self.channels, self.root = channels, Path(root).resolve()
         self.shelf, self.inside = shelf or NoShelf(), {}
+        self.interview, self.interviewing = interview or NoInterview(), interviewing
         self.last_task = self.reporter = self.task = None
         self.lock, self.talk = threading.Lock(), Talk(commands_brief(), pausing_jobs=answering)
         self.questions = Questions()
@@ -245,6 +346,8 @@ class Desk:
         self.open_banner()
         self.talk.warm()
         self.say_status(anew=True)
+        if self.interviewing:
+            self.open_interview()
         if not self.consoles:
             names = ", ".join(channel.name for channel in self.channels)
             say.info(f"Listening on {names}; projects go in {self.root}. Ctrl-C stops.", "👂")
@@ -544,6 +647,7 @@ class Desk:
                 on_command=lambda line: self.replied(channel, message, line),
             )
             return
+        mode_before = self.inside.get(message.chat)
         reply = self.answer(message, channel)
         if not reply:
             return
@@ -555,34 +659,34 @@ class Desk:
                 channel.glance(message.chat, message.id, [sent])
         if words := next_page_words(reply):
             channel.offer_next(message.chat, sent, words)
+        self.offer_if_entered(channel, message.chat, sent, mode_before)
+
+    def offer_if_entered(self, channel, chat, sent, mode_before):
+        mode = self.inside.get(chat)
+        if mode is not None and mode is not mode_before:
+            mode.offer(channel, chat, sent)
 
     def left(self, channel, chat):
         if chat not in self.inside:
             return "📕 **Not inside a reading**"
-        number, title = self.inside.pop(chat)
-        channel.now_inside(chat, None)
-        return md(t"📕 **Left #{number} {title}**")
+        return self.leave_mode(channel, chat).left_line()
 
     def left_if_gone(self, channel, chat):
-        reading = self.inside.get(chat)
-        if reading and not self.shelf.exists(reading[0]) and self.inside.pop(chat, None):
-            channel.now_inside(chat, None)
+        mode = self.inside.get(chat)
+        if mode and mode.gone(self.shelf):
+            self.leave_mode(channel, chat)
+
+    def leave_mode(self, channel, chat):
+        mode = self.inside.pop(chat)
+        channel.now_inside(chat, None)
+        return mode
 
     def answered_inside(self, channel, message):
         self.left_if_gone(channel, message.chat)
-        if message.chat not in self.inside or message.text.startswith("/"):
+        if message.chat not in self.inside or not self.inside[message.chat].takes(message.text):
             return False
-        number, _ = self.inside[message.chat]
-        sent = channel.send(message.chat, self.inside_answer(channel, message, number))
-        channel.offer_leave(message.chat, sent, number)
+        self.inside[message.chat].answer(self, channel, message)
         return True
-
-    def inside_answer(self, channel, message, number):
-        try:
-            with self.talk.pausing_jobs(), channel.waiting(message.chat, message.text):
-                return self.shelf.answered(number, message.text) or "_(no answer)_"
-        except OllamaError as exc:
-            return md(t"⚠️ **The model did not answer:** {first_words(exc)}")
 
     def fresh(self, channel, message):
         question = last_asked(message.chat)
@@ -749,6 +853,7 @@ class Desk:
             "knowledge": lambda: self.knowledge(channel, message.chat, words),
             "memory": lambda: self.memory_or_dream(channel, message.chat, words),
             "dream": lambda: self.memory_or_dream(channel, message.chat, words),
+            "interact": lambda: self.interviewed(channel, message.chat),
             **{word: lambda: self.ask_to_exit(channel, message.chat, command) for word in EXIT_WORDS},
         }
 
@@ -769,16 +874,34 @@ class Desk:
         return reply and reply + self.entered(channel, chat, words[1:])
 
     def inside_env(self, chat):
-        return {"TINKER_INSIDE": str(self.inside[chat][0])} if chat in self.inside else {}
+        return self.inside[chat].env() if chat in self.inside else {}
 
     def entered(self, channel, chat, words):
         reading = self.shelf.entered(words)
         if not reading:
             return ""
-        self.inside[chat] = reading
-        channel.now_inside(chat, reading)
-        number, title = reading
-        return md(t"\n📕 **Inside #{number} {title}**: ask me about it · `/leave` leaves it")
+        return self.entered_mode(channel, chat, InsideReading(*reading))
+
+    def open_interview(self):
+        console, chat = self.consoles[0], ConsoleChannel.CHAT
+        sent = console.send(chat, self.interviewed(console, chat))
+        self.offer_if_entered(console, chat, sent, None)
+
+    def interviewed(self, channel, chat):
+        turn = self.interview.turn(chat)
+        if turn is None:
+            return NOTHING_LEFT_TO_ASK
+        mode = InsideInterview(self.interview)
+        self.now_in(channel, chat, mode)
+        return mode.opening(turn)
+
+    def entered_mode(self, channel, chat, mode):
+        self.now_in(channel, chat, mode)
+        return mode.entered_line(chat)
+
+    def now_in(self, channel, chat, mode):
+        self.inside[chat] = mode
+        channel.now_inside(chat, mode)
 
     def knowledge(self, channel, chat, words):
         if words[1:] == ["graph"]:
@@ -1737,11 +1860,13 @@ class Talk:
         recalled = unanswered(memories, message.text, memories.recall(message.text))
         asked = [{"role": "user", "content": message.text}]
         level = reviewed_level(message.text, thread)
+        traits = traits_part(message.text)
         names_system = (
             Prompts.CHAT_SYSTEM.format(
                 style=channel.STYLE, index=chat_index(), state=state_part(state.everyday())
             )
-            + remembered_part(recalled, Portrait.read())
+            + traits
+            + remembered_part(recalled)
             + thread
         )
         try:
@@ -1754,6 +1879,7 @@ class Talk:
                     Prompts.CHAT_FILL_SYSTEM.format(
                         commands=command_details(names), state=state_part(state.for_commands(names))
                     )
+                    + traits
                     + thread
                 )
                 text = self.ask(
@@ -1775,7 +1901,10 @@ class Talk:
             channel,
             chat,
             [
-                {"role": "system", "content": Prompts.COMMAND_TELL_SYSTEM.format(style=channel.STYLE)},
+                {
+                    "role": "system",
+                    "content": Prompts.COMMAND_TELL_SYSTEM.format(style=channel.STYLE) + traits_part(asked),
+                },
                 {
                     "role": "user",
                     "content": f"They asked: {asked}\nCommand: {line}\n"
@@ -2415,10 +2544,13 @@ class Channel:
     def offer_next(self, chat, shown, words):
         pass
 
-    def now_inside(self, chat, reading):
+    def now_inside(self, chat, mode):
         pass
 
     def offer_leave(self, chat, shown, number):
+        pass
+
+    def offer_answers(self, chat, shown, count):
         pass
 
     def ask_for(self, chat, question, hint):
@@ -2480,7 +2612,7 @@ class ConsoleChannel(Channel):
         self.screen, self.lines = ConsoleScreen(), queue.Queue()
         self.last_id, self.numbering = 0, threading.Lock()
         self.printed, self.began, self.doings, self.live_owner = {}, {}, {}, None
-        self.history, self.next_page, self.reading = None, None, None
+        self.history, self.next_page, self.mode = None, None, None
 
     def handle(self):
         return "this terminal"
@@ -2489,18 +2621,17 @@ class ConsoleChannel(Channel):
         self.next_page = words
         self.note(NEXT_PAGE_HINT)
 
-    def now_inside(self, chat, reading):
-        self.reading = reading
+    def now_inside(self, chat, mode):
+        self.mode = mode
         typing = self.screen.typing
         if typing is not None:
             typing[0].prompt = self.prompt()
             self.screen.draw_prompt()
 
     def prompt(self):
-        if self.reading is None:
+        if self.mode is None:
             return self.screen.prompt()
-        number, title = self.reading
-        return f"📕 #{number} {title} › "
+        return self.mode.prompt()
 
     def receive(self, timeout):
         if not self.screen.reading:
@@ -3383,10 +3514,10 @@ def state_part(state):
     return f"\n\n{state}" if state else ""
 
 
-def remembered_part(recalled, portrait=""):
+def remembered_part(recalled):
     if not recalled:
         return ""
-    lines = ([portrait] if portrait else []) + [recalled_line(item) for item in recalled]
+    lines = [recalled_line(item) for item in recalled]
     return f"\n\n{Part(Prompts.REMEMBERED, Part.bullets(lines)).render()}"
 
 

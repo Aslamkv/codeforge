@@ -23,10 +23,44 @@ def test_reply_drops_thinking_and_whitespace():
         ),
         pytest.param('{"a": {"b": [1, 2]}', {"a": {"b": [1, 2]}}, id="left open at the end"),
         pytest.param('{"a": [{"b": 1]}', {"a": [{"b": 1}]}, id="closer missing before an outer one"),
+        pytest.param('{"a": {"b": [1]}"}', {"a": {"b": [1]}}, id="stray quote between closers"),
+        pytest.param(
+            '{"question": "Which one?", "suggestions": ["a", "b"]}"}',
+            {"question": "Which one?", "suggestions": ["a", "b"]},
+            id="stray quote after the whole object",
+        ),
+        pytest.param('{"k": "[]}"}', {"k": "[]}"}, id="closers and quote inside a string"),
+        pytest.param('{"a": [1, 2]', {"a": [1, 2]}, id="object never closed"),
+        pytest.param(
+            '{"confirm":["t4"],"question":"q","suggestions":["x","y"]',
+            {"confirm": ["t4"], "question": "q", "suggestions": ["x", "y"]},
+            id="reply ends before its last closer",
+        ),
+        pytest.param('} then {"a": 1', {"a": 1}, id="closer only before the object"),
     ],
 )
 def test_json_in_prose_mends_the_usual_slips(text, expected):
     assert Reply(text).json() == expected
+
+
+@pytest.mark.spec("PRM-2")
+def test_json_drops_strings_copied_from_the_prompt_example():
+    system = (
+        'Answer as JSON: {"why":"why it does not hold","suggestions":["2 to 4 short answers"],'
+        '"kind":"done","items":[{"gist":"a short gist"}]}'
+    )
+    reply = (
+        '{"why":"why it does not hold","suggestions":["2 to 4 short answers","yes please"],'
+        '"kind":"done","items":[{"gist":"a short gist"},{"gist":"a real gist"}],"empty":{}}'
+    )
+    assert Reply(reply).json(system) == {
+        "suggestions": ["yes please"],
+        "kind": "done",
+        "items": [{"gist": "a real gist"}],
+        "empty": {},
+    }
+    assert Reply(reply).json()["why"] == "why it does not hold"
+    assert Reply('{"why":"why it does not hold"}').json(system) == {}
 
 
 @pytest.mark.spec("PRM-2")

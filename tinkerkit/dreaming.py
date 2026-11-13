@@ -13,7 +13,17 @@ from .jobs import Jobs
 from .messages import say
 from .model import Models, OllamaError
 from .prompts import Prompts, Reply
-from .remembering import Memories, Portrait, Scratchpad, counted, lasts_found, recall_text, stamp
+from .remembering import (
+    DREAM,
+    Memories,
+    Questions,
+    Scratchpad,
+    Traits,
+    counted,
+    lasts_found,
+    recall_text,
+    stamp,
+)
 from .retrieval import Embeddings
 from .settings import (
     ANSWER_LASTS_DAYS,
@@ -21,7 +31,6 @@ from .settings import (
     DREAM_FORGET_DAYS,
     DREAM_KEEP_STRENGTH,
     DREAM_REPLY_TOKENS,
-    PORTRAIT_WORDS,
     SIMILAR_LESSON_MEANING,
     SIMILAR_LESSON_WORDS,
     Home,
@@ -30,12 +39,14 @@ from .store import Log
 from .text import similarity
 
 SHOWN_MEMORY_KEYS = ("id", "kind", "gist", "text", "strength", "recalled")
+TRAIT_KEYS = ("id", "about", "when", "do", "status")
+TRAIT_ABOUTS = ("person", "tinker")
 
 
 class Dream:
     STATE = "state"
     EVENTS = "dream events"
-    STEPS = ("consolidate", "revise", "decay", "portrait")
+    STEPS = ("consolidate", "revise", "decay", "traits", "gists", "questions")
 
     def __init__(self, retriever, phase=lambda step: None):
         self.memories = Memories(retriever)
@@ -47,7 +58,7 @@ class Dream:
     def run(self, now=None):
         if not Models.quick():
             return
-        state = self.state = Home.store().get(Portrait.DREAM, self.STATE) or new_state()
+        state = self.state = new_state() | (Home.store().get(DREAM, self.STATE) or {})
         for step in self.STEPS:
             if step in state["done"]:
                 continue
@@ -57,8 +68,8 @@ class Dream:
             state["done"].append(step)
             state["changed"] += [memory_id for memory_id in self.changed if memory_id not in state["changed"]]
             state["counts"][step] = len(self.changed)
-            Home.store().put(Portrait.DREAM, self.STATE, state)
-        Home.store().put(Portrait.DREAM, self.STATE, dict(state, done=[], changed=[], last=stamp(now)))
+            Home.store().put(DREAM, self.STATE, state)
+        Home.store().put(DREAM, self.STATE, dict(state, done=[], changed=[], dreamt=[], last=stamp(now)))
 
     def consolidate(self, now=None):
         for batch in self.batches():
@@ -75,7 +86,7 @@ class Dream:
         ]
 
     def consolidated(self, batch, now):
-        reply = self.asked(Prompts.DREAM_CONSOLIDATE_SYSTEM, self.batch_text(batch))
+        reply = asked(Prompts.DREAM_CONSOLIDATE_SYSTEM, self.batch_text(batch))
         if not isinstance(reply, dict):
             return
         ids = {episode["id"] for episode in batch}
@@ -84,7 +95,8 @@ class Dream:
                 if cited(item.get("sources"), ids) and not answer_touched(name, item):
                     self.logged("consolidate", name, change(self.memories).made(item, item["sources"], now))
         self.answers(batch, reply, now)
-        Scratchpad.dreamt(ids, now, self.gists(reply, ids))
+        Scratchpad.dreamt(ids, now, self.episode_gists(reply, ids))
+        self.state["dreamt"] += [episode["id"] for episode in batch]
 
     def answers(self, batch, reply, now):
         questions = {episode["id"]: episode for episode in answered_in_words(batch)}
@@ -109,7 +121,7 @@ class Dream:
             },
         )
 
-    def gists(self, reply, ids):
+    def episode_gists(self, reply, ids):
         return {
             episode_id: gist
             for episode_id, gist in mapped(reply.get("gists")).items()
@@ -162,7 +174,7 @@ class Dream:
         return lambda first, second: similarity(texts[first], texts[second]) >= SIMILAR_LESSON_WORDS
 
     def revised(self, group, now):
-        reply = self.asked(Prompts.DREAM_REVISE_SYSTEM, revise_text(group))
+        reply = asked(Prompts.DREAM_REVISE_SYSTEM, revise_text(group))
         if not isinstance(reply, dict):
             return
         by_id = {memory["id"]: memory for memory in group}
@@ -208,40 +220,91 @@ class Dream:
                 self.logged("decay", "retire", self.memories.retire(memory["id"], "expired"))
         Scratchpad.prune(now)
 
-    def portrait(self, now=None):
-        changed = [Home.store().get(Memories.MEMORIES, memory_id) for memory_id in self.changed_in_dream()]
-        if not any(memory and memory["kind"] == "person" for memory in changed):
+    def traits(self, now=None):
+        episodes, people = self.dreamt_episodes(), self.changed_people()
+        if not episodes and not people:
             return
-        people = [memory for memory in self.memories.living() if memory["kind"] == "person"]
-        reply = self.replied(
-            Prompts.DREAM_PORTRAIT_SYSTEM.format(words=PORTRAIT_WORDS),
-            json.dumps(shown(people), ensure_ascii=False),
+        living = Traits().living()
+        reply = asked(Prompts.DREAM_TRAITS_SYSTEM, traits_text(episodes, people, living))
+        if not isinstance(reply, dict):
+            return
+        given = {item["id"] for item in episodes + people + living}
+        for item in listed(reply.get("add")):
+            self.trait_added(item, given, now)
+        for item in listed(reply.get("support")):
+            self.trait_supported(item, given, now)
+
+    def dreamt_episodes(self):
+        kept = (Home.store().get(Scratchpad.EPISODES, episode_id) for episode_id in self.state["dreamt"])
+        return [episode for episode in kept if episode]
+
+    def changed_people(self):
+        changed = (Home.store().get(Memories.MEMORIES, memory_id) for memory_id in self.changed_in_dream())
+        return sorted(
+            (memory for memory in changed if memory and memory["kind"] == "person" and not memory["retired"]),
+            key=lambda memory: int(memory["id"][1:]),
         )
-        if reply is not None and reply.text.split():
-            Portrait.write(reply.text)
-            self.logged("portrait", "portrait", {"id": Portrait.KEY, "gist": Portrait.read()})
 
-    def asked(self, system, content):
-        reply = self.replied(system, content)
-        if reply is None:
-            return None
-        try:
-            return reply.json()
-        except ValueError:
-            return None
+    def trait_added(self, item, given, now):
+        if item.get("about") not in TRAIT_ABOUTS or not (isinstance(item.get("do"), str) and item["do"]):
+            return
+        when = item.get("when") if isinstance(item.get("when"), str) else ""
+        sources = cited_only(item.get("sources"), given)
+        delta = {"op": "add", "about": item["about"], "when": when, "do": item["do"], "sources": sources}
+        for trait in Traits().apply([delta], now):
+            if newly_added(trait):
+                self.trait_logged("add", trait)
+                self.confirm_asked(item, trait, sources, now)
+            else:
+                self.trait_logged("support", trait)
 
-    def replied(self, system, content):
-        try:
-            return Reply(
-                Models.quick_reply(
-                    [{"role": "system", "content": system}, {"role": "user", "content": content}],
-                    DREAM_REPLY_TOKENS,
-                    "off",
-                    temperature=0,
-                )
-            )
-        except OllamaError:
+    def confirm_asked(self, item, trait, sources, now):
+        question = item.get("question")
+        if isinstance(question, str) and question:
+            Questions().add("confirm", question, suggestions_of(item), [trait["id"]], sources, now)
+
+    def trait_supported(self, item, given, now):
+        if item.get("id") not in given:
+            return
+        delta = {"op": "support", "id": item["id"], "sources": cited_only(item.get("sources"), given)}
+        for trait in Traits().apply([delta], now):
+            self.trait_logged("support", trait)
+
+    def trait_logged(self, name, trait):
+        self.logged("traits", name, dict(trait, gist=trait["gist"] or trait["do"]))
+
+    def gists(self, now=None):
+        ungisted = {trait["id"]: trait for trait in Traits().confirmed() if not trait["gist"]}
+        if not ungisted:
+            return
+        reply = asked(Prompts.DREAM_GISTS_SYSTEM, gists_text(ungisted.values()))
+        if not isinstance(reply, dict):
+            return
+        for trait_id, gist in mapped(reply.get("gists")).items():
+            trait = ungisted.get(trait_id)
+            if trait and isinstance(gist, str) and gist and len(gist) < len(trait["do"]):
+                self.logged("gists", "gist", Traits().gisted(trait_id, gist))
+
+    def questions(self, now=None):
+        while self.questions_asked(now):
+            pass
+
+    def questions_asked(self, now):
+        content = questions_text(Traits().confirmed(), Questions().all())
+        reply = asked(Prompts.DREAM_QUESTIONS_SYSTEM, content)
+        if not isinstance(reply, dict):
+            return False
+        kept = [self.question_kept(item, now) for item in listed(reply.get("questions"))]
+        return any(kept)
+
+    def question_kept(self, item, now):
+        text = item.get("text")
+        if not (isinstance(text, str) and text):
             return None
+        question = Questions().add("open", text, suggestions_of(item), [], [], now)
+        if question:
+            self.logged("questions", "question", dict(question, gist=text))
+        return question
 
     def logged(self, step, name, memory):
         if memory:
@@ -371,7 +434,65 @@ class Retire(Change):
 
 
 def new_state():
-    return {"done": [], "changed": [], "counts": {}, "last": ""}
+    return {"done": [], "changed": [], "dreamt": [], "counts": {}, "last": ""}
+
+
+def traits_text(episodes, people, living):
+    return json.dumps(
+        {
+            "episodes": [{"id": episode["id"], "gist": episode.get("gist", "")} for episode in episodes],
+            "memories": shown(people),
+            "traits": [{key: trait[key] for key in TRAIT_KEYS} for trait in living],
+        },
+        ensure_ascii=False,
+    )
+
+
+def gists_text(traits):
+    return json.dumps(
+        [
+            {"id": trait["id"], "do": trait["do"]}
+            for trait in sorted(traits, key=lambda trait: int(trait["id"][1:]))
+        ],
+        ensure_ascii=False,
+    )
+
+
+def questions_text(traits, kept):
+    return json.dumps(
+        {
+            "traits": [
+                {
+                    "id": trait["id"],
+                    "about": trait["about"],
+                    "when": trait["when"],
+                    "do": trait["gist"] or trait["do"],
+                }
+                for trait in sorted(traits, key=lambda trait: int(trait["id"][1:]))
+            ],
+            "questions": [
+                question["text"] for question in sorted(kept, key=lambda question: int(question["id"][1:]))
+            ],
+        },
+        ensure_ascii=False,
+    )
+
+
+def newly_added(trait):
+    return len(trait["history"]) == 1 and trait["history"][0]["event"] == "add"
+
+
+def cited_only(sources, given):
+    if not isinstance(sources, list):
+        return []
+    return [source for source in sources if isinstance(source, str) and source in given]
+
+
+def suggestions_of(item):
+    suggestions = item.get("suggestions")
+    if not isinstance(suggestions, list) or not all(isinstance(text, str) and text for text in suggestions):
+        return []
+    return suggestions if 2 <= len(suggestions) <= 4 else []
 
 
 def revise_text(group):
@@ -441,6 +562,23 @@ def tool_found(kind, item):
     return isinstance(tool, str) and bool(tool) and bool(shutil.which(tool))
 
 
+def asked(system, content):
+    if Models.quick() is None:
+        return None
+    try:
+        reply = Reply(
+            Models.quick_reply(
+                [{"role": "system", "content": system}, {"role": "user", "content": content}],
+                DREAM_REPLY_TOKENS,
+                "off",
+                temperature=0,
+            )
+        )
+        return reply.json(system)
+    except OllamaError, ValueError:
+        return None
+
+
 def listed(value):
     return [item for item in value if isinstance(item, dict)] if isinstance(value, list) else []
 
@@ -453,11 +591,16 @@ CHANGE_OF = {"add": Add, "update": Update, "confirm": Confirm, "retire": Retire}
 
 
 def show_dream():
-    state = Home.store().get(Portrait.DREAM, Dream.STATE) or new_state()
+    state = Home.store().get(DREAM, Dream.STATE) or new_state()
     with say.part("Dream", "💤"):
         say.item(last_dream(state))
-        say.item(f"{counted(len(Scratchpad.fresh()), 'fresh episode')} wait for a dream")
+        say.item(f"{waiting(len(Scratchpad.fresh()), 'fresh episode')} for a dream")
+        say.item(f"{waiting(len(Questions().pending()), 'question')} for tinker interact")
         say.item(dream_job())
+
+
+def waiting(number, one):
+    return f"{counted(number, one)} {'waits' if number == 1 else 'wait'}"
 
 
 def last_dream(state):

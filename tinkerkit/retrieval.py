@@ -5,6 +5,8 @@ from .messages import say
 from .settings import EMBED_KEEP_ALIVE, Config, Home
 from .text import fingerprint, words
 lazy from .model import Models, Ollama
+lazy from .prompts import Part, Prompts
+lazy from .remembering import Traits
 
 
 class Retriever:
@@ -176,3 +178,14 @@ class Embeddings:
         dot = sum(x * y for x, y in zip(a, b))
         size = math.sqrt(sum(x * x for x in a)) * math.sqrt(sum(y * y for y in b))
         return dot / size if size else 0.0
+
+
+def person_traits(text):
+    return Traits(Retriever(None)).relevant(text)
+
+
+def traits_part(text):
+    relevant = person_traits(text)
+    if not relevant:
+        return ""
+    return f"\n\n{Part(Prompts.TRAITS, relevant).render()}"

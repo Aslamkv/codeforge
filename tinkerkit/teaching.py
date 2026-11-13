@@ -12,7 +12,8 @@ lazy from .principles import Principles
 lazy from .project import ending
 lazy from .prompts import Part, Prompts, Reply
 lazy from .reading import Readings
-lazy from .retrieval import Retriever
+lazy from .remembering import Traits
+lazy from .retrieval import Retriever, person_traits
 lazy from .sandbox import Sandbox
 lazy from .settings import (
     ASK_ITEM_CHARS,
@@ -418,13 +419,17 @@ class Teacher:
     def corrected(self, teaching, plan, items, evidence, verdict):
         moved_on(self.tracker, "correct", "Correcting what Tinker keeps…", "✏️")
         reason = f"corrected by what you taught: {first_line(teaching, 120)}"
+        taught = f"taught: {first_line(teaching, 120)}"
         made, skipped = [], []
         for number, change in enumerate(plan["changes"], 1):
             why_not = verdict.why_not(number, change)
             if why_not:
                 skipped.append(f"{change_summary(change)} ({why_not})")
             else:
-                made += self.made(change, plan["language"], items, reason, verdict.sources(change, evidence))
+                trait_source = taught if verdict.preferences_only(change) else ""
+                made += self.made(
+                    change, plan["language"], items, reason, verdict.sources(change, evidence), trait_source
+                )
         for line in made:
             say.done(line)
         for line in skipped:
@@ -439,10 +444,14 @@ class Teacher:
             return ending("blocked", "Nothing changed", details)
         return ending("done", f"Corrected: {len(made)} change(s)", details)
 
-    def made(self, change, language, items, reason, sources):
+    def made(self, change, language, items, reason, sources, trait_source):
         lines = self.retired([items[number - 1] for number in change["retire"]], reason)
         lines.append(self.toolchain_corrected(language, change["toolchain"]))
-        lines.append(self.lesson_kept(language, change["lesson"], sources))
+        lines.append(
+            self.trait_kept(change["lesson"], trait_source)
+            if trait_source
+            else self.lesson_kept(language, change["lesson"], sources)
+        )
         lines.append(self.fact_kept(change["fact"], items, sources))
         return [line for line in lines if line]
 
@@ -474,6 +483,21 @@ class Teacher:
         return f"Lesson kept for {language or 'any language'}: {kept['text']}" if kept else ""
 
     @staticmethod
+    def trait_kept(lesson, source):
+        if not lesson:
+            return ""
+        delta = {
+            "op": "add",
+            "about": "tinker",
+            "when": lesson.get("when", ""),
+            "do": lesson["text"],
+            "sources": [source],
+            "confirmed": True,
+        }
+        kept = Traits(Retriever(None)).apply([delta])
+        return f"Trait kept: {kept[0]['do']}" if kept else ""
+
+    @staticmethod
     def fact_kept(fact, items, sources):
         if not fact:
             return ""
@@ -491,6 +515,7 @@ class Teacher:
 
 def ask_parts(question, items, passages):
     return [
+        Part(Prompts.TRAITS, person_traits(question)),
         Part("What Tinker keeps", ask_numbered(items) or "(nothing)", True),
         Part("From what you read", quoted(passages, len(items) + 1)),
         Part("Installed here", installed_here(items)),
@@ -805,6 +830,11 @@ class Verdict:
         if any(self.claims_by_number[number]["verdict"] == "preference" for number in change["claims"]):
             found.append("your preference")
         return list(dict.fromkeys(found))
+
+    def preferences_only(self, change):
+        return bool(change["claims"]) and all(
+            self.claims_by_number[number]["verdict"] == "preference" for number in change["claims"]
+        )
 
     def show(self):
         for claim in self.claims_by_number.values():

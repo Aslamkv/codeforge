@@ -14,7 +14,19 @@ import time
 from pathlib import Path
 
 import pytest
-from conftest import ACCENT, BOLD, DIM, GREY, MEASURED, RESET, Terminal, add_back, tinker_runs
+from conftest import (
+    ACCENT,
+    BOLD,
+    DIM,
+    GREY,
+    MEASURED,
+    RESET,
+    Terminal,
+    add_back,
+    confirmed_trait,
+    quick_model_replying,
+    tinker_runs,
+)
 from test_channels import BotAPI, every_telegram_talks_to
 
 import tinkerkit.channels as channels
@@ -29,8 +41,11 @@ from tinkerkit.conversation import (
     ConsoleChannel,
     ConsoleScreen,
     Desk,
+    InsideInterview,
+    InsideReading,
     Markup,
     Message,
+    NoInterview,
     Progress,
     PromptDrawer,
     Question,
@@ -50,12 +65,14 @@ from tinkerkit.conversation import (
     typed_before,
     welcome,
 )
+from tinkerkit.interviewing import Interview
 from tinkerkit.jobs import Queue, Runner, began_at
 from tinkerkit.ledger import DONE_NOTE_KEPT_SECONDS, Ledger
 from tinkerkit.messages import DIMMED, HEADING, Text, next_page_words, styled
 from tinkerkit.model import Models, Ollama, QuickModel, ThinkLevels
 from tinkerkit.project import Runs, Tracker
 from tinkerkit.reading import Shelf
+from tinkerkit.remembering import Questions as KeptQuestions
 from tinkerkit.remembering import Scratchpad
 from tinkerkit.settings import EPISODE_GIST_CHARS, Config, Home
 
@@ -109,11 +126,14 @@ class Recorder(Channel):
     def offer_next(self, chat, shown, words):
         self.log.append(("next", chat, shown, words))
 
-    def now_inside(self, chat, reading):
-        self.log.append(("inside", chat, None, reading))
+    def now_inside(self, chat, mode):
+        self.log.append(("inside", chat, None, mode))
 
     def offer_leave(self, chat, shown, number):
         self.log.append(("leave", chat, shown, number))
+
+    def offer_answers(self, chat, shown, count):
+        self.log.append(("answers", chat, shown, count))
 
     def latest(self, chat, sent):
         return self.newest.get(chat) == sent
@@ -1738,16 +1758,12 @@ def remembering(kind, gist, text):
 
 
 @pytest.mark.spec("REM-6")
-def test_a_chat_reply_adds_what_tinker_remembers_and_the_portrait(measured_model, fake_ollama):
-    from tinkerkit.remembering import Portrait
-
+def test_a_chat_reply_adds_what_tinker_remembers(measured_model, fake_ollama):
     remembering("fact", "the person keeps bees", "they keep bees in the garden")
-    Portrait.write("A beekeeper who likes short answers.")
     fake_ollama.reply("low: a plain request").reply("hi")
     assert Talk("task").reply(Recorder(), Message("1", "tell me about the bees")) == "hi"
     system = fake_ollama.calls[-1]["messages"][0]["content"]
-    assert "What you remember" in system
-    assert "A beekeeper who likes short answers." in system and "the person keeps bees" in system
+    assert "What you remember" in system and "the person keeps bees" in system
 
 
 def remembered_answer(question, answer):
@@ -1985,6 +2001,40 @@ def test_a_named_command_taking_words_gets_a_second_call(measured_model, fake_ol
     fake_ollama.reply("low: a plain request").reply("`/amend`").reply("/amend handle zero")
     talk.reply(Recorder(), Message("1", "and zero"), state)
     assert all("question 0 → Answer 0." in system_of(call) for call in fake_ollama.calls[-2:])
+
+
+TRAITS_PART = "Who the person is and how they want you to be"
+
+
+@pytest.mark.spec("REM-16")
+def test_both_calls_of_a_chat_reply_get_the_persons_traits(measured_model, fake_ollama):
+    confirmed_trait("Answers in short sentences")
+    confirmed_trait("Uses metric units", when="on numbers")
+    fake_ollama.reply("low: a plain request").reply("`/amend`").reply("/amend handle negatives")
+    Talk("cmds").reply(Recorder(), Message("1", "also handle negatives"), FakeChatState())
+    for call in fake_ollama.calls[-2:]:
+        assert f"## {TRAITS_PART}\n- Answers in short sentences" in system_of(call)
+
+
+@pytest.mark.spec("REM-16")
+def test_a_chat_reply_without_confirmed_traits_has_no_traits_part(measured_model, fake_ollama):
+    from tinkerkit.remembering import Traits
+
+    Traits().apply([{"op": "add", "about": "person", "when": "", "do": "Likes tea", "sources": ["e1"]}])
+    fake_ollama.reply("low: a plain request").reply("`/amend`").reply("/amend handle negatives")
+    Talk("cmds").reply(Recorder(), Message("1", "also handle negatives"), FakeChatState())
+    assert all(TRAITS_PART not in system_of(call) for call in fake_ollama.calls)
+
+
+@pytest.mark.spec("REM-16")
+def test_the_command_tell_gets_the_persons_traits(measured_model, fake_ollama):
+    fake_ollama.reply("told")
+    Talk("cmds").tell(Recorder(), "1", "how much ram", "/system ram", "", "8 GB free", "low")
+    assert TRAITS_PART not in system_of(fake_ollama.calls[-1])
+    confirmed_trait("Answers in short sentences")
+    fake_ollama.reply("told")
+    Talk("cmds").tell(Recorder(), "1", "how much ram", "/system ram", "", "8 GB free", "low")
+    assert system_of(fake_ollama.calls[-1]).endswith(f"## {TRAITS_PART}\n- Answers in short sentences")
 
 
 @pytest.mark.spec("CNV-18")
@@ -2396,10 +2446,14 @@ def test_memory_forget_asks_first_and_the_other_memory_views_are_glances(desk, m
     )
     monkeypatch.setattr(desk, "tinker", lambda words: desk.ran.append(words) or "🧠 Memories")
     assert (
-        desk.answer(Message("1", "/memory portrait"), channel)
-        == "⚙️ **memory portrait**\n```\n🧠 Memories\n```"
+        desk.answer(Message("1", "/memory traits"), channel) == "⚙️ **memory traits**\n```\n🧠 Memories\n```"
     )
-    assert desk.ran[-1] == ["memory", "portrait"]
+    assert desk.ran[-1] == ["memory", "traits"]
+    assert (
+        desk.answer(Message("1", "/memory forget t3"), channel)
+        == "⚙️ **memory forget t3**\n```\n🧠 Memories\n```"
+    )
+    assert desk.ran[-1] == ["memory", "forget", "t3"]
 
 
 @pytest.mark.spec("CNV-9", "DRM-8")
@@ -3734,10 +3788,209 @@ def test_the_terminal_prompt_names_the_reading_while_inside(monkeypatch):
     monkeypatch.setattr("tinkerkit.conversation.typed_here", lambda: True)
     channel = ConsoleChannel()
     plain = channel.prompt()
-    channel.now_inside("console", (3, "Small Craft"))
+    channel.now_inside("console", InsideReading(3, "Small Craft"))
     assert channel.prompt() == "📕 #3 Small Craft › "
     channel.now_inside("console", None)
     assert channel.prompt() == plain
+
+
+HINT = '_a number, a number with changes ("2, but on weekdays"), your own words, or /skip_'
+ENTERED = "💬 **Interview**: answer, /skip · /leave leaves it"
+
+
+@pytest.fixture
+def interviewing(desk):
+    desk, channel, _ = desk
+    KeptQuestions().add("open", "When do you write Rust?", ["Weekdays"], [], ["e1"])
+    KeptQuestions().add("open", "Which editor do you use?", [], [], ["e1"])
+    desk.interview = Interview()
+    asked = []
+    desk.talk.answer = lambda channel, message, *rest, **options: asked.append("talk")
+    return desk, channel, asked, desk.interviewed(channel, "1")
+
+
+@pytest.mark.spec("CNV-25", "INT-1")
+def test_entering_the_interview_says_how_to_leave_then_shows_the_next_question(interviewing):
+    desk, channel, _, entered = interviewing
+    assert entered == f"{ENTERED}\n\n💬 When do you write Rust?\n1. Weekdays\n{HINT}"
+    assert channel.log[-1] == ("inside", "1", None, desk.inside["1"])
+    assert desk.inside["1"].prompt() == "💬 interact › "
+
+
+@pytest.mark.spec("CNV-25", "INT-1")
+def test_entering_with_no_question_pending_says_nothing_is_left_and_stays_outside(desk):
+    desk, channel, _ = desk
+    assert desk.interviewed(channel, "1") == "💬 **Nothing left to ask**"
+    assert desk.inside == {}
+
+
+@pytest.mark.spec("INT-1")
+def test_a_desk_opened_interviewing_shows_the_first_question_after_the_status(monkeypatch):
+    terminal = colour_terminal(monkeypatch, 80)
+    typing(monkeypatch)
+    KeptQuestions().add("open", "When do you write Rust?", ["Weekdays"], [], ["e1"])
+    desk = Desk([ConsoleChannel()], Path.cwd(), interview=Interview(), interviewing=True)
+    monkeypatch.setattr(desk.talk, "warm", lambda: None)
+    desk.run()
+    shown = terminal.getvalue()
+    assert shown.index("idle") < shown.index("When do you write Rust?")
+    assert desk.inside[ConsoleChannel.CHAT].prompt() == "💬 interact › "
+
+
+@pytest.mark.spec("INT-1")
+def test_a_desk_opened_interviewing_with_nothing_pending_says_so(monkeypatch):
+    terminal = colour_terminal(monkeypatch, 80)
+    typing(monkeypatch)
+    desk = Desk([ConsoleChannel()], Path.cwd(), interview=Interview(), interviewing=True)
+    monkeypatch.setattr(desk.talk, "warm", lambda: None)
+    desk.run()
+    assert "Nothing left to ask" in terminal.getvalue() and desk.inside == {}
+
+
+@pytest.mark.spec("INT-1", "CNV-3")
+@pytest.mark.parametrize("text", ["/interact", "interact"])
+def test_interact_enters_the_interview_and_shows_the_first_question(desk, text):
+    desk, channel, _ = desk
+    KeptQuestions().add("open", "When do you write Rust?", ["Weekdays"], [], ["e1"])
+    desk.interview = Interview()
+    desk.handle(channel, Message("1", text))
+    assert channel.texts()[-1] == f"{ENTERED}\n\n💬 When do you write Rust?\n1. Weekdays\n{HINT}"
+    assert desk.inside["1"].prompt() == "💬 interact › "
+
+
+@pytest.mark.spec("INT-1")
+def test_the_first_interview_turn_offers_its_answer_buttons(desk):
+    desk, channel, _ = desk
+    KeptQuestions().add("open", "When do you write Rust?", ["Weekdays", "Weekends"], [], ["e1"])
+    desk.interview = Interview()
+    desk.handle(channel, Message("1", "/interact"))
+    assert channel.log[-1] == ("answers", "1", channel.newest["1"], 2)
+
+
+@pytest.mark.spec("INT-1")
+def test_each_later_interview_turn_offers_its_answer_buttons(interviewing):
+    desk, channel, _, _ = interviewing
+    desk.handle(channel, Message("1", "weekdays mostly"))
+    assert channel.log[-1] == ("answers", "1", channel.newest["1"], 1)
+    desk.handle(channel, Message("1", "/skip"))
+    assert channel.log[-1] == ("answers", "1", channel.newest["1"], 0)
+
+
+@pytest.mark.spec("INT-1")
+def test_nothing_left_to_ask_offers_no_answer_buttons(interviewing):
+    desk, channel, _, _ = interviewing
+    for question in KeptQuestions().pending():
+        KeptQuestions().answer(question["id"], "done")
+    desk.handle(channel, Message("1", "/skip"))
+    assert not [entry for entry in channel.log if entry[0] == "answers"]
+
+
+@pytest.mark.spec("CNV-25")
+def test_entering_a_reading_offers_no_answer_buttons(inside):
+    _, channel, _ = inside
+    assert not [entry for entry in channel.log if entry[0] in ("answers", "leave")]
+
+
+@pytest.mark.spec("INT-1")
+def test_interact_with_no_question_pending_and_no_quick_model_says_nothing_is_left(desk):
+    desk, channel, _ = desk
+    desk.interview = Interview()
+    desk.handle(channel, Message("1", "/interact"))
+    assert channel.texts()[-1] == "💬 **Nothing left to ask**"
+    assert desk.inside == {}
+
+
+@pytest.mark.spec("INT-1")
+def test_inside_the_interview_a_plain_message_shows_the_same_question_again(interviewing):
+    desk, channel, asked, _ = interviewing
+    desk.handle(channel, Message("1", "weekdays mostly"))
+    assert (
+        channel.texts()[-1]
+        == (f"Couldn't read that answer; here it is again.\n💬 When do you write Rust?\n1. Weekdays\n{HINT}")
+        and asked == []
+    )
+
+
+@pytest.mark.spec("INT-3")
+def test_inside_the_interview_an_answer_moves_to_the_next_question(interviewing, monkeypatch):
+    desk, channel, asked, _ = interviewing
+    reply = {"confirm": [], "reject": [], "amend": [], "add": [], "question": None}
+    quick_model_replying(monkeypatch, lambda messages: json.dumps(reply))
+    desk.handle(channel, Message("1", "weekdays mostly"))
+    assert channel.texts()[-1] == f"💬 Which editor do you use?\n{HINT}" and asked == []
+    assert KeptQuestions().all()[0]["answer"] == "weekdays mostly"
+
+
+@pytest.mark.spec("INT-4")
+def test_skip_inside_the_interview_shows_the_next_question(interviewing):
+    desk, channel, _, _ = interviewing
+    desk.handle(channel, Message("1", "/skip"))
+    assert channel.texts()[-1] == f"💬 Which editor do you use?\n{HINT}"
+    assert KeptQuestions().next()["text"] == "Which editor do you use?"
+
+
+@pytest.mark.spec("INT-1", "INT-4")
+def test_skip_with_nothing_left_says_so_and_leaves_the_interview(interviewing):
+    desk, channel, _, _ = interviewing
+    for question in KeptQuestions().pending():
+        KeptQuestions().answer(question["id"], "done")
+    desk.handle(channel, Message("1", "/skip"))
+    assert channel.texts()[-1] == "💬 **Nothing left to ask**"
+    assert desk.inside == {} and channel.log[-1] == ("inside", "1", None, None)
+
+
+@pytest.mark.spec("INT-4")
+def test_inside_the_interview_another_command_still_runs(interviewing):
+    desk, channel, _, _ = interviewing
+    desk.handle(channel, Message("1", "/read list"))
+    assert desk.ran[-1] == ["read", "list"] and desk.inside
+
+
+@pytest.mark.spec("CNV-25")
+def test_leave_leaves_the_interview(interviewing):
+    desk, channel, asked, _ = interviewing
+    desk.handle(channel, Message("1", "/leave"))
+    assert channel.texts()[-1] == "💬 **Left the interview**" and desk.inside == {}
+    desk.handle(channel, Message("1", "hello"))
+    assert asked == ["talk"]
+
+
+@pytest.mark.spec("CNV-25")
+def test_entering_the_interview_leaves_a_reading(inside):
+    desk, channel, _ = inside
+    KeptQuestions().add("open", "Which editor do you use?", [], [], ["e1"])
+    desk.interview = Interview()
+    desk.interviewed(channel, "1")
+    assert desk.inside["1"] == InsideInterview(desk.interview)
+
+
+@pytest.mark.spec("CNV-25")
+def test_entering_the_interview_takes_its_turn_once(inside, monkeypatch):
+    desk, channel, _ = inside
+    KeptQuestions().add("open", "Which editor do you use?", [], [], ["e1"])
+    desk.interview = Interview()
+    turns = []
+    taken = Interview.turn
+    monkeypatch.setattr(Interview, "turn", lambda self, chat: turns.append(chat) or taken(self, chat))
+    entered = desk.interviewed(channel, "1")
+    assert turns == ["1"] and "Which editor do you use?" in entered
+
+
+@pytest.mark.spec("CNV-25")
+def test_entering_a_reading_leaves_the_interview(interviewing, monkeypatch):
+    desk, channel, _, _ = interviewing
+    monkeypatch.setattr(Shelf, "entered", lambda self, words: (3, "Small Craft"))
+    monkeypatch.setattr(Shelf, "exists", staticmethod(lambda number: True))
+    desk.handle(channel, Message("1", "/read book.pdf"))
+    assert desk.inside == {"1": (3, "Small Craft")}
+
+
+@pytest.mark.spec("INT-1")
+def test_the_terminal_prompt_says_interact_inside_the_interview(monkeypatch):
+    monkeypatch.setattr("tinkerkit.conversation.typed_here", lambda: True)
+    channel = ConsoleChannel()
+    channel.now_inside("console", InsideInterview(NoInterview()))
+    assert channel.prompt() == "💬 interact › "
 
 
 @pytest.mark.spec("CNV-25")

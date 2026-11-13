@@ -366,6 +366,15 @@ def criterion(id, test, behaviour="does it", status="todo", cycle="base", **more
     }
 
 
+def confirmed_trait(do, when="", gist="", about="person"):
+    from tinkerkit.remembering import Traits
+    from tinkerkit.retrieval import Retriever
+
+    delta = {"op": "add", "about": about, "when": when, "do": do, "sources": ["e1"], "confirmed": True}
+    trait = Traits(Retriever(None)).apply([delta])[0]
+    return Home.store().update("traits", trait["id"], lambda trait: dict(trait, gist=gist))
+
+
 def file_block(path, body):
     return f"<<<FILE {path}>>>\n{body}\n<<<END>>>"
 

@@ -15,6 +15,7 @@ lazy from pathlib import Path
 
 from . import conversation, dreaming, exercising, logger, reading, remembering
 from .commands import BY_NAME, COMMANDS, GROUPS, kind_of, refs, taught_command
+from .interviewing import Interview
 from .jobs import (
     STATES,
     Jobs,
@@ -220,10 +221,16 @@ class Cli:
     def run_at_once(argv):
         if not argv:
             open_home()
-            conversation.session(Path.cwd(), Shelf())
+            conversation.session(Path.cwd(), Shelf(), Interview())
             raise SystemExit(0)
         if argv[0] in ("help", "-h", "--help"):
             Cli.help(argv[1] if len(argv) > 1 else None)
+        if argv[0] == "interact":
+            if argv[1:2] in (["-h"], ["--help"]):
+                Cli.help("interact")
+            open_home()
+            conversation.session(Path.cwd(), Shelf(), Interview(), interviewing=True)
+            raise SystemExit(0)
         if argv[0] in Cli.TALK_COMMANDS:
             if argv[1:2] in (["-h"], ["--help"]):
                 Cli.help(argv[0])
@@ -233,7 +240,7 @@ class Cli:
             if channels is None:
                 raise SystemExit("tinker: channels are not installed (tinkerkit/channels.py is missing)")
             open_home()
-            channels.ChannelCommand.run(argv[1:], Shelf())
+            channels.ChannelCommand.run(argv[1:], Shelf(), Interview())
             raise SystemExit(0)
         if argv[0] == "clear":
             given = Cli.parser("clear").parse_args(argv[1:])
@@ -522,11 +529,11 @@ class Cli:
 
     @staticmethod
     def memory_words(words, parser):
-        if words in ([], ["portrait"], ["graph"]) or (len(words) == 1 and Cli.is_page(words[0])):
+        if words in ([], ["traits"], ["graph"]) or (len(words) == 1 and Cli.is_page(words[0])):
             return words
         if len(words) == 2 and words[0] in ("show", "forget"):
             return words
-        parser.error("use tinker memory [PAGE] | show ID | forget ID [--yes] | portrait | graph")
+        parser.error("use tinker memory [PAGE] | show ID | forget ID [--yes] | traits | graph")
 
     @staticmethod
     def dream_words(words, parser):
@@ -1010,8 +1017,8 @@ class Commands:
                 remembering.show_remembered(item_id)
             case ["forget", item_id]:
                 remembering.forget(item_id, yes)
-            case ["portrait"]:
-                remembering.show_portrait()
+            case ["traits"]:
+                remembering.show_traits()
             case ["graph"]:
                 dreaming.show_memory_graph()
             case [page]:

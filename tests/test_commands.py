@@ -136,7 +136,8 @@ def test_runs_and_what_deletes():
     ] == ["task", "restart", "add", "fix"]
     assert [command.name for command in COMMANDS if command.deletes] == ["restart", "clear", "reset"]
     assert deletes(["clear", "memory"]) and deletes(["channel", "remove", "bot"])
-    assert deletes(["memory", "forget", "a1b2c3"]) and not deletes(["memory", "portrait"])
+    assert deletes(["memory", "forget", "a1b2c3"]) and not deletes(["memory", "traits"])
+    assert not deletes(["memory", "forget", "t12"]) and kind_of(["memory", "forget", "t12"]) == "glance"
     assert kind_of(["memory"]) == "glance" and kind_of(["memory", "forget", "a1b2c3"]) == "glance"
     assert not deletes(["channel", "list"]) and not deletes(["status"]) and not deletes([])
 

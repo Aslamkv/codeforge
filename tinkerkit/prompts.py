@@ -32,6 +32,29 @@ FileBlock = namedtuple("FileBlock", "path content")
 LineEdit = namedtuple("LineEdit", "path first last lines")
 
 
+class ExampleCopies:
+    STRING_RE = re.compile(r'"((?:[^"\\]|\\.)*)"(\s*:)?')
+
+    def __init__(self, system):
+        self.examples = {
+            value for value, key in self.STRING_RE.findall(system) if not key and len(value.split()) > 1
+        }
+
+    def dropped(self, value):
+        if isinstance(value, dict):
+            return {key: self.dropped(item) for key, item in value.items() if self.kept(item)}
+        if isinstance(value, list):
+            return [self.dropped(item) for item in value if self.kept(item)]
+        return value
+
+    def kept(self, value):
+        if isinstance(value, str):
+            return value not in self.examples
+        if isinstance(value, dict):
+            return not value or bool(self.dropped(value))
+        return True
+
+
 class Reply:
     THINK_RE = re.compile(r"<think>.*?</think>", re.S)
     HEADER_PATH = r"[ \t:]+(?:(?:path|file)[ \t]*[=:][ \t]*)?[\"'`]?([^\s<>\"'`]+?)[\"'`]?"
@@ -53,19 +76,30 @@ class Reply:
     RELATIVE_PATH_LINE_RE = re.compile(r"[\w.-]+(?:/[\w.-]+)*\.[\w]+|[\w.-]+(?:/[\w.-]+)+")
     BLOCK_MARKS_ONLY_RE = re.compile(r"\s*(<{2,}|>{2,}|<<<\w*>>>)\s*")
     MARKDOWN_FENCE_RE = re.compile(r"\s*(`{3,}|~{3,})[\w+#.-]*\s*")
+    STRAY_QUOTE_RE = re.compile(r'[\]}]\s*(")\s*[\]}]')
 
     def __init__(self, raw, thought=""):
         self.text = self.THINK_RE.sub("", raw or "").strip()
         self.thought = thought
 
-    def json(self):
+    def json(self, system=""):
         start, end = self.text.find("{"), self.text.rfind("}")
-        if start == -1 or end <= start:
+        if start == -1:
             raise ValueError("no JSON object in reply")
-        return self.first_parsed(self.json_candidates(self.text[start : end + 1], self.text[start:]))
+        parsed = self.first_parsed(self.json_candidates(self.text[start : end + 1], self.text[start:]))
+        return ExampleCopies(system).dropped(parsed) if system else parsed
 
     def json_candidates(self, whole, to_the_end):
-        return [whole, self.balanced(to_the_end.rstrip().rstrip("`").rstrip())]
+        trimmed = to_the_end.rstrip().rstrip("`").rstrip()
+        return [whole, self.balanced(trimmed), self.balanced(self.without_stray_quote(trimmed))]
+
+    @staticmethod
+    def without_stray_quote(text):
+        inside = Reply.string_states(text).states
+        for match in Reply.STRAY_QUOTE_RE.finditer(text):
+            if not inside[match.start(1)]:
+                return text[: match.start(1)] + text[match.end(1) :]
+        return text
 
     @staticmethod
     def first_parsed(candidates):
@@ -1041,6 +1075,7 @@ Reply with ONLY JSON: {"claims":[{"claim":1,"verdict":"holds","why":"one short s
         "`/system ram`; when they ask how to do it, answer in words.{state}"
     )
 
+    TRAITS = "Who the person is and how they want you to be"
     REMEMBERED = "What you remember"
     EARLIER = "Earlier in this chat"
 
@@ -1076,10 +1111,72 @@ Reply with ONLY JSON: {"claims":[{"claim":1,"verdict":"holds","why":"one short s
         "Use only the ids you are given. Leave a list empty when nothing fits."
     )
 
-    DREAM_PORTRAIT_SYSTEM = (
-        "You get what is remembered about a person. Write who they are, in at most {words} words: what they "
-        "do, what they like and how they want to be helped. Reply with only that text, and nothing the "
-        "memories do not show."
+    DREAM_TRAITS_SYSTEM = (
+        "You learn how best to help a person. You get the gists of new episodes and the memories about the "
+        "person that just changed, each with its id, and the traits already known. A trait is about person "
+        "(who the person is: work, goals, likes) or tinker (who Tinker is for them: role, duties, tone, how "
+        "it builds), when is the situation it holds in, empty when it always holds, and do is the trait as "
+        "said. Reply with only one JSON object:\n"
+        '{"add":[{"about":"person|tinker","when":"the situation, or empty","do":"the trait as said",'
+        '"sources":["e1","m1"],"question":"a short question the person answers to confirm it",'
+        '"suggestions":["2 to 4 short answers"]}],\n'
+        ' "support":[{"id":"t1","sources":["e1"]}]}\n'
+        "Add every new trait the episodes and memories show and support a known trait they show again. Every "
+        "add and support cites the ids it rests on. Use only the ids you are given. Leave a list empty when "
+        "nothing fits."
+    )
+
+    DREAM_GISTS_SYSTEM = (
+        "You shorten what is known about a person and about Tinker for them. You get traits, each with its "
+        "id and do, the trait as said. Give each the shortest wording that keeps its meaning. Reply with only "
+        "one JSON object:\n"
+        '{"gists":{"t1":"the shortest wording"}}\n'
+        "Use only the ids you are given. Leave out a trait no shorter wording keeps."
+    )
+
+    DREAM_QUESTIONS_SYSTEM = (
+        "You find what is still unknown about a person and about Tinker for them. You get the confirmed "
+        "traits, each with its id, about, when and do, and the questions already asked. A trait is about "
+        "person (who the person is: work, goals, likes) or tinker (who Tinker is for them: role, duties, tone, "
+        "how it builds). Ask the open questions whose answers would fill what the traits leave unknown, each "
+        "with 2 to 4 short answers the person can pick. Reply with only one JSON object:\n"
+        '{"questions":[{"text":"a short question","suggestions":["2 to 4 short answers"]}]}\n'
+        "Never repeat a question already asked. Leave the list empty when nothing is left to ask."
+    )
+
+    INTERACT_SYSTEM = (
+        "You interview a person to learn who they are and who Tinker is for them. You get the confirmed "
+        "traits, each with its id, about, when and do, and the questions already asked. A trait is about "
+        "person (who the person is: work, goals, likes) or tinker (who Tinker is for them: role, duties, tone, "
+        "how it builds). Ask the one open question whose answer would fill most of what the traits leave "
+        "unknown, with 2 to 4 short answers the person can pick. Reply with only one JSON object:\n"
+        '{"text":"a short question","suggestions":["2 to 4 short answers"]}\n'
+        'Never repeat a question already asked. Reply {"done":true} when nothing is left to ask.'
+    )
+
+    INTERACT_ANSWER_SYSTEM = (
+        "You read a person's reply to one question about them or about Tinker for them. You get the "
+        "question, its suggested answers, the traits it asks about, each with its id, about, when and do, and "
+        "the reply: a suggestion, a suggestion with changes, or their own words. Reply with only one "
+        "JSON object:\n"
+        '{"confirm":["ids of the traits the reply says hold"],'
+        '"reject":[{"id":"a trait id","why":"why it does not hold"}],'
+        '"amend":[{"id":"a trait id","when":"when it holds now","do":"what it says now"}],'
+        '"add":[{"about":"person|tinker","when":"when it holds, or empty","do":"what the reply says"}],'
+        '"question":{"text":"a short follow-up question","suggestions":["2 to 4 short answers"]}}\n'
+        "Use only the given trait ids and add only what the reply says; an add's do keeps the whole reply, "
+        "every detail and condition in it. Leave a list empty and question null when the reply gives nothing "
+        "for them."
+    )
+
+    INTERACT_ADD_SYSTEM = (
+        "You read a person's reply to one question about them or about Tinker for them. You get the "
+        "question, its suggested answers and the reply: a suggestion, a suggestion with changes, or their own "
+        "words. Reply with only one JSON object:\n"
+        '{"add":[{"about":"person|tinker","when":"when it holds, or empty","do":"what the reply says"}],'
+        '"question":{"text":"a short follow-up question","suggestions":["2 to 4 short answers"]}}\n'
+        "Add only what the reply says; an add's do keeps the whole reply, every detail and condition in it. "
+        "Leave add empty and question null when the reply gives nothing for them."
     )
 
     CHAT_FILL_SYSTEM = (

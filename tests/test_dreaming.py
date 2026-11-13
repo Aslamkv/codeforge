@@ -7,15 +7,15 @@ import urllib.error
 import urllib.request
 
 import pytest
-from conftest import quick_model_replying
+from conftest import confirmed_trait, quick_model_replying
 
-from tinkerkit.dreaming import Dream, LiveGraph, MemoryGraph, show_dream, show_memory_graph
+from tinkerkit.dreaming import Dream, LiveGraph, MemoryGraph, asked, show_dream, show_memory_graph
 from tinkerkit.jobs import Jobs, Queue
 from tinkerkit.model import Models, OllamaError
 from tinkerkit.prompts import Prompts
-from tinkerkit.remembering import Memories, Scratchpad
+from tinkerkit.remembering import Memories, Questions, Scratchpad, Traits
 from tinkerkit.retrieval import Retriever
-from tinkerkit.settings import DREAM_BATCH_EPISODES, PORTRAIT_WORDS, Home
+from tinkerkit.settings import DREAM_BATCH_EPISODES, Home
 from tinkerkit.store import Log
 
 NOW = datetime.datetime(2026, 11, 11, 12, 0, 0)
@@ -294,8 +294,13 @@ def test_a_failed_quick_call_replies_none(home_store, monkeypatch):
         raise OllamaError("down")
 
     monkeypatch.setattr(Models, "quick_reply", failing)
-    assert dream().replied("system", "content") is None
-    assert dream().asked("system", "content") is None
+    assert asked("system", "content") is None
+
+
+@pytest.mark.spec("PRM-2")
+def test_a_reply_copying_the_prompt_example_loses_the_copy(home_store, monkeypatch):
+    replying(monkeypatch, {"gist": "a short gist", "kind": "done"})
+    assert asked('Reply {"gist":"a short gist","kind":"done"}', "content") == {"kind": "done"}
 
 
 @pytest.mark.spec("DRM-3")
@@ -378,20 +383,266 @@ def test_each_change_is_logged_as_a_dream_event(home_store, monkeypatch):
     assert dream_events() == [{"step": "consolidate", "change": "add", "id": "m1", "gist": "uses zsh"}]
 
 
+@pytest.mark.spec("DRM-6")
+def test_consolidate_keeps_the_episodes_it_dreamt_in_the_state(home_store, monkeypatch):
+    first = episode()
+    replying(monkeypatch, {"add": []})
+    dreaming = dream()
+    dreaming.consolidate(NOW)
+    assert dreaming.state["dreamt"] == [first["id"]]
+
+
+def living_trait(do="keep replies short", when=""):
+    return Traits().apply(
+        [{"op": "add", "about": "tinker", "when": when, "do": do, "sources": ["e1"]}], EARLIER
+    )[0]
+
+
+def dreamt_in(dreaming, episodes=(), changed=()):
+    dreaming.state = dict(dreaming.state, dreamt=list(episodes), changed=list(changed))
+    return dreaming
+
+
+def added_trait(do, sources, question="Do you code in Rust?", suggestions=("yes", "no")):
+    return {
+        "about": "tinker",
+        "when": "coding",
+        "do": do,
+        "sources": list(sources),
+        "question": question,
+        "suggestions": list(suggestions),
+    }
+
+
+@pytest.mark.spec("DRM-6", "DRM-7", "REM-15")
+def test_traits_reads_the_dream_and_adds_a_candidate_with_its_question_and_supports_a_trait(
+    home_store, monkeypatch
+):
+    first = episode()
+    Scratchpad.dreamt([first["id"]], NOW, {first["id"]: "listed the rust crates"})
+    person = remembered("writes rust", "Writes Rust daily.", "person")
+    fact = remembered("uses zsh", "The shell is zsh.")
+    known = living_trait()
+    asked = replying(
+        monkeypatch,
+        {
+            "add": [added_trait("answer with rust examples", [first["id"], "e99"])],
+            "support": [{"id": known["id"], "sources": [person["id"]]}],
+        },
+    )
+    dreamt_in(dream(), [first["id"]], [person["id"], fact["id"]]).traits(NOW)
+    assert asked[0][0]["content"] == Prompts.DREAM_TRAITS_SYSTEM
+    shown = asked[0][1]["content"]
+    assert all(text in shown for text in ("listed the rust crates", "writes rust", "keep replies short"))
+    assert "uses zsh" not in shown
+    added = Home.store().get("traits", "t2")
+    assert (added["status"], added["when"], added["sources"]) == ("candidate", "coding", [first["id"]])
+    assert Home.store().get("traits", known["id"])["sources"] == ["e1", person["id"]]
+    question = Questions().all()[0]
+    assert (question["kind"], question["text"], question["suggestions"], question["traits"]) == (
+        "confirm",
+        "Do you code in Rust?",
+        ["yes", "no"],
+        ["t2"],
+    )
+    assert dream_events() == [
+        {"step": "traits", "change": "add", "id": "t2", "gist": "answer with rust examples"},
+        {"step": "traits", "change": "support", "id": known["id"], "gist": "keep replies short"},
+    ]
+
+
+@pytest.mark.spec("DRM-6")
+def test_traits_asks_nothing_without_a_dreamt_episode_or_a_changed_person(home_store, monkeypatch):
+    fact = remembered("uses zsh", "The shell is zsh.")
+    asked = replying(monkeypatch)
+    dreamt_in(dream(), [], [fact["id"]]).traits(NOW)
+    assert asked == []
+
+
+@pytest.mark.spec("DRM-6", "REM-14")
+def test_an_added_trait_like_a_living_one_supports_it_and_asks_nothing(home_store, monkeypatch):
+    episode()
+    second = episode()
+    known = living_trait("answer with rust examples", "coding")
+    replying(monkeypatch, {"add": [added_trait("answer with rust examples", [second["id"]])], "support": []})
+    dreamt_in(dream(), [second["id"]]).traits(NOW)
+    assert Home.store().get("traits", known["id"])["sources"] == ["e1", second["id"]]
+    assert Questions().all() == []
+    assert [event["change"] for event in dream_events()] == ["support"]
+
+
+@pytest.mark.spec("DRM-6", "REM-14")
+def test_an_add_or_support_citing_nothing_given_is_dropped(home_store, monkeypatch):
+    first = episode()
+    known = living_trait()
+    replying(
+        monkeypatch,
+        {
+            "add": [added_trait("answer with rust examples", ["e99"])],
+            "support": [{"id": known["id"], "sources": ["m99"]}, {"id": "t9", "sources": [first["id"]]}],
+        },
+    )
+    dreamt_in(dream(), [first["id"]]).traits(NOW)
+    assert [trait["id"] for trait in Traits().all()] == [known["id"]]
+    assert Home.store().get("traits", known["id"])["sources"] == ["e1"]
+    assert dream_events() == []
+
+
+@pytest.mark.spec("REM-15")
+def test_a_question_keeps_its_suggestions_only_when_two_to_four(home_store, monkeypatch):
+    first = episode()
+    replying(
+        monkeypatch,
+        {
+            "add": [
+                added_trait("answer with rust examples", [first["id"]], suggestions=["yes"]),
+                added_trait(
+                    "start with the test",
+                    [first["id"]],
+                    "Do you write tests first?",
+                    ["a", "b", "c", "d", "e"],
+                ),
+            ]
+        },
+    )
+    dreamt_in(dream(), [first["id"]]).traits(NOW)
+    assert [question["suggestions"] for question in Questions().all()] == [[], []]
+
+
+@pytest.mark.spec("DRM-6", "REM-5")
+def test_traits_adds_only_traits_about_the_person_or_tinker(home_store, monkeypatch):
+    first = episode()
+    replying(
+        monkeypatch,
+        {
+            "add": [
+                dict(added_trait("answer with rust examples", [first["id"]]), about="style"),
+                dict(added_trait("works on codeforge", [first["id"]]), about="person"),
+                dict(added_trait("start with the test", [first["id"]]), about="tinker"),
+            ]
+        },
+    )
+    dreamt_in(dream(), [first["id"]]).traits(NOW)
+    assert [(trait["about"], trait["do"]) for trait in Traits().all()] == [
+        ("person", "works on codeforge"),
+        ("tinker", "start with the test"),
+    ]
+
+
+@pytest.mark.spec("DRM-10", "DRM-7")
+def test_gists_shortens_the_confirmed_traits_without_a_gist(home_store, monkeypatch):
+    short = confirmed_trait("always keep the replies you give short", about="tinker")
+    long = confirmed_trait("use rust", about="tinker")
+    gisted = confirmed_trait("answer with rust examples", about="tinker", gist="rust examples")
+    candidate = living_trait("start every change with the test")
+    asked = replying(
+        monkeypatch,
+        {
+            "gists": {
+                short["id"]: "short replies",
+                long["id"]: "write it in rust",
+                candidate["id"]: "test first",
+            }
+        },
+    )
+    dream().gists(NOW)
+    assert asked[0][0]["content"] == Prompts.DREAM_GISTS_SYSTEM
+    shown = json.loads(asked[0][1]["content"])
+    assert shown == [
+        {"id": short["id"], "do": "always keep the replies you give short"},
+        {"id": long["id"], "do": "use rust"},
+    ]
+    assert [
+        Home.store().get("traits", trait["id"])["gist"] for trait in (short, long, gisted, candidate)
+    ] == [
+        "short replies",
+        "",
+        "rust examples",
+        "",
+    ]
+    assert Home.store().get("traits", short["id"])["history"] == short["history"]
+    assert dream_events() == [{"step": "gists", "change": "gist", "id": short["id"], "gist": "short replies"}]
+
+
+@pytest.mark.spec("DRM-10")
+def test_gists_asks_nothing_when_every_confirmed_trait_has_a_gist(home_store, monkeypatch):
+    confirmed_trait("answer with rust examples", about="tinker", gist="rust examples")
+    living_trait("start every change with the test")
+    asked = replying(monkeypatch)
+    dream().gists(NOW)
+    assert asked == []
+
+
+@pytest.mark.spec("DRM-11", "REM-15", "DRM-7")
+def test_questions_asks_round_after_round_until_a_round_keeps_nothing_new(home_store, monkeypatch):
+    short = confirmed_trait("always keep the replies you give short", about="tinker", gist="short replies")
+    rust = confirmed_trait("use rust", about="tinker")
+    living_trait("start every change with the test")
+    kept = Questions().add("confirm", "Do you want short replies?", ["yes", "no"], [short["id"]], [], NOW)
+    Questions().answer(kept["id"], "yes", NOW)
+    work = {"text": "What do you work on most days?", "suggestions": ["web apps", "data", "games"]}
+    tone = {"text": "How formal should I sound with you?", "suggestions": ["formal", "casual"]}
+    asked = replying(
+        monkeypatch,
+        {"questions": [work, {"text": "Do you want short replies?", "suggestions": ["yes", "no"]}]},
+        {"questions": [dict(work), tone]},
+        {"questions": [dict(tone)]},
+    )
+    dream().questions(NOW)
+    assert len(asked) == 3
+    assert asked[0][0]["content"] == Prompts.DREAM_QUESTIONS_SYSTEM
+    assert json.loads(asked[0][1]["content"]) == {
+        "traits": [
+            {"id": short["id"], "about": "tinker", "when": "", "do": "short replies"},
+            {"id": rust["id"], "about": "tinker", "when": "", "do": "use rust"},
+        ],
+        "questions": ["Do you want short replies?"],
+    }
+    assert json.loads(asked[2][1]["content"])["questions"] == [
+        "Do you want short replies?",
+        work["text"],
+        tone["text"],
+    ]
+    added = [question for question in Questions().all() if question["id"] != kept["id"]]
+    assert [
+        {key: question[key] for key in ("kind", "text", "suggestions", "traits", "sources", "status")}
+        for question in added
+    ] == [
+        dict(work, kind="open", traits=[], sources=[], status="pending"),
+        dict(tone, kind="open", traits=[], sources=[], status="pending"),
+    ]
+    assert dream_events() == [
+        {"step": "questions", "change": "question", "id": question["id"], "gist": question["text"]}
+        for question in added
+    ]
+
+
+@pytest.mark.spec("DRM-11")
+def test_questions_ends_on_a_reply_that_is_not_a_dict(home_store, monkeypatch):
+    confirmed_trait("use rust", about="tinker")
+    asked = replying(monkeypatch, ["What do you work on?"])
+    dream().questions(NOW)
+    assert (len(asked), Questions().all(), dream_events()) == (1, [], [])
+
+
 @pytest.mark.spec("DRM-2")
 def test_run_walks_its_steps_and_saves_the_state(home_store, monkeypatch):
     first = episode()
     replying(
-        monkeypatch, {"add": [{"kind": "fact", "gist": "uses zsh", "text": "x", "sources": [first["id"]]}]}
+        monkeypatch,
+        {"add": [{"kind": "fact", "gist": "uses zsh", "text": "x", "sources": [first["id"]]}]},
+        {"add": [], "support": []},
+        {"questions": []},
     )
     doing = []
     dream(doing.append).run(NOW)
     state = Home.store().get("dream", "state")
-    assert doing == ["consolidate", "revise", "decay", "portrait"]
+    assert doing == ["consolidate", "revise", "decay", "traits", "gists", "questions"]
     assert state == {
         "done": [],
         "changed": [],
-        "counts": {"consolidate": 1, "revise": 0, "decay": 0, "portrait": 0},
+        "dreamt": [],
+        "counts": {"consolidate": 1, "revise": 0, "decay": 0, "traits": 0, "gists": 0, "questions": 0},
         "last": NOW.isoformat(),
     }
 
@@ -405,6 +656,18 @@ def test_run_skips_the_steps_already_done(home_store, monkeypatch):
     dream(doing.append).run(NOW)
     assert (doing, asked) == ([], [])
     assert Home.store().get("dream", "state")["last"] == NOW.isoformat()
+
+
+@pytest.mark.spec("DRM-2")
+def test_run_ignores_a_saved_step_it_no_longer_has(home_store, monkeypatch):
+    episode()
+    saved = {"done": ["consolidate", "portrait"], "changed": [], "counts": {}, "last": ""}
+    Home.store().put("dream", "state", saved)
+    replying(monkeypatch, {"questions": []})
+    doing = []
+    dream(doing.append).run(NOW)
+    assert doing == ["revise", "decay", "traits", "gists", "questions"]
+    assert Home.store().get("dream", "state")["done"] == []
 
 
 @pytest.mark.spec("DRM-2")
@@ -561,61 +824,14 @@ def test_decay_retires_answers_once_they_expire(home_store):
     assert [memory["id"] for memory in memories().living()] == [today["id"], this_month["id"], always["id"]]
 
 
-@pytest.mark.spec("DRM-6")
-def test_portrait_is_written_when_a_person_memory_changed(home_store, monkeypatch):
-    person = remembered("likes short replies", "Wants it brief.", "person")
-    remembered("uses zsh", "The shell is zsh.")
-    asked = quick_model_replying(monkeypatch, lambda messages: " ".join(["word"] * 120))
-    portraying = dream()
-    portraying.changed = [person["id"]]
-    portraying.portrait(NOW)
-    assert Home.store().get("dream", "portrait") == " ".join(["word"] * 100)
-    assert asked[0][0]["content"] == Prompts.DREAM_PORTRAIT_SYSTEM.format(words=PORTRAIT_WORDS)
-    assert "likes short replies" in asked[0][1]["content"]
-    assert "uses zsh" not in asked[0][1]["content"]
-    assert dream_events()[0] | {"gist": ""} == {
-        "step": "portrait",
-        "change": "portrait",
-        "id": "portrait",
-        "gist": "",
-    }
-
-
-@pytest.mark.spec("DRM-6")
-def test_portrait_is_left_when_no_person_memory_changed(home_store, monkeypatch):
-    fact = remembered("uses zsh", "The shell is zsh.")
-    remembered("likes short replies", "Wants it brief.", "person")
-    asked = quick_model_replying(monkeypatch, lambda messages: "A person.")
-    portraying = dream()
-    portraying.changed = [fact["id"]]
-    portraying.portrait(NOW)
-    assert asked == []
-    assert Home.store().get("dream", "portrait") is None
-
-
-@pytest.mark.spec("DRM-6")
-def test_an_empty_or_failed_portrait_reply_changes_nothing(home_store, monkeypatch):
-    person = remembered("likes short replies", "Wants it brief.", "person")
-    for reply in (lambda messages: "  ", failing):
-        quick_model_replying(monkeypatch, reply)
-        portraying = dream()
-        portraying.changed = [person["id"]]
-        portraying.portrait(NOW)
-    assert Home.store().get("dream", "portrait") is None
-    assert dream_events() == []
-
-
-def failing(messages):
-    raise OllamaError("down")
-
-
 @pytest.mark.spec("DRM-8")
-def test_show_dream_says_the_last_dream_its_counts_the_waiting_episodes_and_a_queued_dream(
+def test_show_dream_says_the_last_dream_its_counts_the_waiting_episodes_and_questions_and_a_queued_dream(
     home_store, capsys
 ):
     episode()
     episode(message="show the date")
-    counts = {"consolidate": 2, "revise": 1, "decay": 0, "portrait": 1}
+    Questions().add("confirm", "Do you write Rust daily?", ["yes", "no"], ["t1"], ["e1"], NOW)
+    counts = {"consolidate": 2, "revise": 1, "decay": 0}
     Home.store().put("dream", "state", {"done": [], "changed": [], "counts": counts, "last": NOW.isoformat()})
     Queue.add_front(Jobs.save(dict(Jobs.new(["ask", "why"]), state="queued"))["number"])
     dream = Jobs.save(dict(Jobs.new(["dream", "run"]), state="queued"))["number"]
@@ -623,15 +839,28 @@ def test_show_dream_says_the_last_dream_its_counts_the_waiting_episodes_and_a_qu
     show_dream()
     out = capsys.readouterr().out
     assert f"Last dream {NOW.isoformat()}" in out
-    assert "consolidate 2 · revise 1 · decay 0 · portrait 1" in out
+    assert "consolidate 2 · revise 1 · decay 0" in out
     assert "2 fresh episodes wait for a dream" in out and "A dream is queued" in out
+    assert "1 question waits for tinker interact" in out
 
 
 @pytest.mark.spec("DRM-8")
 def test_show_dream_without_a_dream_says_none_yet_and_how_to_dream(home_store, capsys):
     show_dream()
     out = capsys.readouterr().out
-    assert "No dream yet" in out and "0 fresh episodes" in out and "tinker dream run" in out
+    assert "No dream yet" in out and "0 fresh episodes wait for a dream" in out and "tinker dream run" in out
+    assert "0 questions wait for tinker interact" in out
+
+
+@pytest.mark.spec("DRM-8")
+def test_show_dream_says_one_fresh_episode_waits_and_two_questions_wait(home_store, capsys):
+    episode()
+    Questions().add("confirm", "Do you write Rust daily?", ["yes", "no"], ["t1"], ["e1"], NOW)
+    Questions().add("confirm", "Do you use Python?", ["yes", "no"], ["t2"], ["e1"], NOW)
+    show_dream()
+    out = capsys.readouterr().out
+    assert "1 fresh episode waits for a dream" in out
+    assert "2 questions wait for tinker interact" in out
 
 
 @pytest.mark.spec("DRM-9")

@@ -13,7 +13,9 @@ from .settings import (
 )
 from .text import fingerprint, first_line
 lazy from .knowledge import Item, Knowledge, Library
+lazy from .project import SpecDocument
 lazy from .prompts import Part, Prompts, Reply
+lazy from .retrieval import person_traits
 lazy from .workspace import TaughtCommands, Workspace
 
 Stopped = namedtuple("Stopped", "kind reason")
@@ -79,6 +81,7 @@ class Session:
             f"[{item['name']}] {item['text']}" for item in learned
         ]
         parts = [
+            Part(Prompts.TRAITS, person_traits(self.request_and_spec()), place="first"),
             Part(
                 "Lessons from earlier projects (follow them)",
                 Part.bullets(lesson["text"] for lesson in lessons),
@@ -96,6 +99,10 @@ class Session:
             + ([TaughtCommands.prompt_part()] if "toolchain" in phases else [])
             + self.checks_part(phases)
         )
+
+    def request_and_spec(self):
+        request = (self.project.cycles[-1:] or [{}])[0].get("request", "")
+        return f"{request}\n\n{SpecDocument(self.project).text()}"
 
     @staticmethod
     def ids_used(lessons, proven, learned):

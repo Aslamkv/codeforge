@@ -2,7 +2,7 @@ import json
 import sys
 
 import pytest
-from conftest import MODEL, TOOLCHAIN, FakeSearch, web_page
+from conftest import MODEL, TOOLCHAIN, FakeSearch, confirmed_trait, web_page
 
 from tinkerkit import cli
 from tinkerkit.cli import Cli, Commands
@@ -336,6 +336,28 @@ def test_an_ask_without_a_check_makes_one_call(kept, make_model, fake_ollama, ca
     assert ending["details"] == [("Answer", "Tests run with pytest.")]
 
 
+def asked_text(call):
+    return "\n".join(message["content"] for message in call["messages"])
+
+
+@pytest.mark.spec("REM-16")
+def test_an_ask_gets_the_persons_traits(kept, make_model, fake_ollama, embedded):
+    confirmed_trait("Answers in short sentences")
+    fake_ollama.reply(first_reply("Tests run with pytest.", uses=[1]), when="ask")
+    Asker(make_model(), kept).answer("what is your current toolchain for python")
+    assert "## Who the person is and how they want you to be\n- Answers in short sentences" in asked_text(
+        fake_ollama.calls[0]
+    )
+    assert embedded == []
+
+
+@pytest.mark.spec("REM-16")
+def test_an_ask_without_confirmed_traits_has_no_traits_part(kept, make_model, fake_ollama):
+    fake_ollama.reply(first_reply("Tests run with pytest.", uses=[1]), when="ask")
+    Asker(make_model(), kept).answer("what is your current toolchain for python")
+    assert "Who the person is" not in asked_text(fake_ollama.calls[0])
+
+
 @pytest.mark.spec("TCH-9")
 def test_an_ask_runs_its_sql_check_and_answers_with_what_it_printed(
     kept, make_model, fake_ollama, capsys, monkeypatch
@@ -609,8 +631,34 @@ def test_preferences_alone_are_honored_with_no_check(kept, make_model, fake_olla
     web = FakeWeb()
     ending = Teacher(make_model(), web, kept).teach("I prefer no mypy")
     assert len(fake_ollama.calls) == 1 and web.queries == []
-    assert ending["status"] == "done" and "Run no type checker in Python projects" in lessons()
-    assert "👤 Your preference, honored: Our projects need no type checker" in capsys.readouterr().out
+    assert ending["status"] == "done" and "Run no type checker in Python projects" not in lessons()
+    assert [(trait["about"], trait["do"], trait["sources"]) for trait in confirmed_traits()] == [
+        ("tinker", "Run no type checker in Python projects", ["taught: I prefer no mypy"])
+    ]
+    out = capsys.readouterr().out
+    assert "👤 Your preference, honored: Our projects need no type checker" in out
+    assert "Trait kept: Run no type checker in Python projects" in out
+
+
+@pytest.mark.spec("TCH-7")
+def test_a_change_resting_on_a_fact_and_a_preference_keeps_a_principle(kept, make_model, fake_ollama):
+    fake_ollama.reply(plan_reply(changes=[dict(RUFF_CHANGE, claims=[1, 2])]), when="what to check")
+    fake_ollama.reply(verdict_reply(), when="weigh the evidence")
+    ending = Teacher(make_model(), FakeWeb(), kept).teach("ruff alone is enough, and I prefer no mypy")
+    ruff = {principle.do: principle for principle in Principles(None).live()}[RUFF_CHANGE["lesson"]["text"]]
+    assert ending["status"] == "done" and taught_sources(ruff) == [PAGE["url"], "your preference"]
+    assert confirmed_traits() == []
+
+
+def taught_sources(principle):
+    return [item["source"] for item in principle.evidence if item["kind"] == "taught"]
+
+
+def confirmed_traits():
+    from tinkerkit.remembering import Traits
+    from tinkerkit.retrieval import Retriever
+
+    return Traits(Retriever(None)).confirmed()
 
 
 @pytest.mark.spec("TCH-4")
@@ -667,6 +715,7 @@ def test_a_verdict_needs_every_fact_and_every_change_a_fact_is_for():
         and verdict.claims_by_number[2]["verdict"] == "preference"
     )
     assert verdict.why_not(1, plan["changes"][0]) == verdict.why_not(2, plan["changes"][1]) == ""
+    assert verdict.preferences_only({"claims": [2]}) and not verdict.preferences_only({"claims": []})
     cites_nothing_given = dict(holds, evidence=[9])
     assert read([cites_nothing_given]).why_not(1, plan["changes"][0]) == "claim 1 is unsure"
     assert read([dict(holds, verdict="wrong")]).why_not(1, plan["changes"][0]) == "claim 1 is wrong"
@@ -696,7 +745,7 @@ def test_a_change_whose_fact_does_not_hold_waits_and_the_rest_are_made(kept, mak
         "Format and lint Python with ruff alone; black is not needed (claim 1 is wrong)",
     ) in ending["details"]
     assert Home.store().get("languages", "python")["toolchain"]["format"] == "black ."
-    assert "Run no type checker in Python projects" in lessons()
+    assert [trait["do"] for trait in confirmed_traits()] == ["Run no type checker in Python projects"]
     out = capsys.readouterr().out
     assert "❌ Wrong: Ruff formats" in out and "➖ Not changed: Format and lint" in out
 
@@ -723,13 +772,10 @@ def test_a_teaching_that_holds_corrects_what_tinker_keeps(kept, make_model, fake
     python = Home.store().get("languages", "python")
     assert python["toolchain"]["format"] == "ruff format ." and python["toolchain"]["lint"] == "ruff check ."
     taught = {principle.do: principle for principle in Principles(None).live()}
-    ruff, no_mypy = (
-        taught["Format and lint Python with ruff alone; black is not needed"],
-        taught["Run no type checker in Python projects"],
-    )
-    assert ruff.status == no_mypy.status == "proven" and ruff.history[-1]["event"] == "taught"
-    sources = lambda principle: [item["source"] for item in principle.evidence if item["kind"] == "taught"]
-    assert sources(ruff) == [PAGE["url"]] and sources(no_mypy) == ["your preference"]
+    ruff = taught["Format and lint Python with ruff alone; black is not needed"]
+    assert ruff.status == "proven" and ruff.history[-1]["event"] == "taught"
+    assert taught_sources(ruff) == [PAGE["url"]]
+    assert [trait["do"] for trait in confirmed_traits()] == ["Run no type checker in Python projects"]
     assert ending["status"] == "done" and ending["headline"] == "Corrected: 5 change(s)"
     kept_principles = {principle.do: principle for principle in Principles(None).all()}
     retired = kept_principles["Format Python with black before linting with ruff"]

@@ -1,4 +1,5 @@
 import contextlib
+import threading
 from collections import namedtuple
 from pathlib import Path
 lazy import json
@@ -9,7 +10,13 @@ lazy import time
 LogEntry = namedtuple("LogEntry", "id entry")
 
 
+class OpenConnections(threading.local):
+    def __init__(self):
+        self.by_path = {}
+
+
 class Store:
+    OPEN = OpenConnections()
     SCHEMA = (
         "CREATE TABLE IF NOT EXISTS docs (collection TEXT NOT NULL, key TEXT NOT NULL, value TEXT NOT NULL, "
         "PRIMARY KEY (collection, key))",
@@ -73,7 +80,17 @@ class Store:
 
     @contextlib.contextmanager
     def transaction(self, write=False):
+        joined = self.OPEN.by_path.get(self.path)
+        if joined is not None:
+            yield joined
+        else:
+            with self.outermost(write) as db:
+                yield db
+
+    @contextlib.contextmanager
+    def outermost(self, write):
         db = self.opened()
+        self.OPEN.by_path[self.path] = db
         try:
             db.execute("BEGIN IMMEDIATE" if write else "BEGIN")
             yield db
@@ -85,6 +102,7 @@ class Store:
                 db.execute("ROLLBACK")
             raise
         finally:
+            del self.OPEN.by_path[self.path]
             db.close()
 
     def opened(self):

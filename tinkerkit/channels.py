@@ -16,14 +16,18 @@ lazy from pathlib import Path
 from .conversation import (
     CHAT_FRESH,
     CHAT_LEAVE,
+    CHAT_SKIP,
     FRESH_ANSWER_BUTTON,
+    LEAVE_INTERVIEW_BUTTON,
     LEAVE_READING_BUTTON,
     NEXT_PAGE_BUTTON,
+    SKIP_QUESTION_BUTTON,
     Channel,
     ChannelError,
     Desk,
     Markup,
     Message,
+    NoInterview,
     NoShelf,
     Secret,
     first_words,
@@ -46,6 +50,7 @@ SENT_FILE_NAMES = frozendict(document="book", photo="photo.jpg", voice="voice.og
 FORM = "application/x-www-form-urlencoded"
 CONNECT_SECONDS = 1
 NO_SHELF = NoShelf()
+NO_INTERVIEW = NoInterview()
 
 
 Upload = namedtuple("Upload", "body content_type")
@@ -63,7 +68,7 @@ class ChannelCommand:
     )
 
     @staticmethod
-    def run(argv, shelf=NO_SHELF):
+    def run(argv, shelf=NO_SHELF, interview=NO_INTERVIEW):
         action, rest = (argv[0], argv[1:]) if argv else ("list", [])
         actions = {
             "list": ChannelCommand.list,
@@ -71,7 +76,7 @@ class ChannelCommand:
             "remove": ChannelCommand.remove,
             "enable": ChannelCommand.enable,
             "disable": ChannelCommand.disable,
-            "start": lambda rest: ChannelCommand.start(rest, shelf),
+            "start": lambda rest: ChannelCommand.start(rest, shelf, interview),
             "goodbye": ChannelCommand.goodbye,
         }
         if action in ("help", "-h", "--help"):
@@ -186,7 +191,7 @@ class ChannelCommand:
         ChannelCommand.enable(rest, on=False)
 
     @staticmethod
-    def start(rest, shelf):
+    def start(rest, shelf, interview):
         if rest:
             channels = [Channels.make(ChannelCommand.named(rest, "start"))]
         else:
@@ -195,7 +200,7 @@ class ChannelCommand:
             raise SystemExit("tinker: no channel is enabled (tinker channel enable NAME, or start NAME)")
         for channel in channels:
             ChannelCommand.check(channel)
-        Desk(channels, Path.cwd(), shelf=shelf).run()
+        Desk(channels, Path.cwd(), shelf=shelf, interview=interview).run()
 
     @staticmethod
     def goodbye(rest):
@@ -321,7 +326,7 @@ class TelegramChannel(Channel):
             pass
         message = query.get("message") or {}
         data = query.get("data") or ""
-        if not data.startswith("/") or not message.get("chat"):
+        if not (data.startswith("/") or data.isdigit()) or not message.get("chat"):
             return []
         return [self.message_of({"chat": message["chat"], "text": data, "from": query.get("from")})]
 
@@ -445,6 +450,22 @@ class TelegramChannel(Channel):
     def leave_button(number):
         button = {"text": LEAVE_READING_BUTTON.format(number=number), "callback_data": CHAT_LEAVE}
         return {"reply_markup": json.dumps({"inline_keyboard": [[button]]})}
+
+    def offer_answers(self, chat, shown, count):
+        try:
+            self.call("editMessageReplyMarkup", chat_id=chat, message_id=shown, **self.answer_buttons(count))
+        except OSError, ChannelError:
+            pass
+
+    @staticmethod
+    def answer_buttons(count):
+        numbers = [{"text": str(number), "callback_data": str(number)} for number in range(1, count + 1)]
+        moves = [
+            {"text": SKIP_QUESTION_BUTTON, "callback_data": CHAT_SKIP},
+            {"text": LEAVE_INTERVIEW_BUTTON, "callback_data": CHAT_LEAVE},
+        ]
+        rows = [numbers, moves] if numbers else [moves]
+        return {"reply_markup": json.dumps({"inline_keyboard": rows})}
 
     def kept_buttons(self, chat, sent):
         return self.fresh_button() if (str(chat), sent) in self.fresh_offered else {}

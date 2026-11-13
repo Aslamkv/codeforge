@@ -9,6 +9,7 @@ from conftest import LOADING_PHASE, MEASURED, MODEL, PY, TOOLCHAIN, criterion, f
 
 from tinkerkit import cli, logger
 from tinkerkit.cli import Cli, Commands, CycleRunner, Doctor, ProjectFolder, ProjectRun
+from tinkerkit.interviewing import Interview
 from tinkerkit.knowledge import Knowledge, Library, ResearchLearner
 from tinkerkit.model import LoadedModel, Models, Ollama, OllamaError, ThinkLevels
 from tinkerkit.principles import Principles
@@ -493,13 +494,46 @@ def test_a_plain_command_writes_tinker_log():
 @pytest.mark.spec("LOG-7")
 @pytest.mark.parametrize("argv", [[], ["chat", "the capital of Norway?"], ["channel", "start"]])
 def test_the_conversation_talk_and_channels_write_tinker_log(argv, monkeypatch):
-    monkeypatch.setattr(cli.conversation, "session", lambda folder, shelf: None)
+    interviews = []
+    monkeypatch.setattr(
+        cli.conversation,
+        "session",
+        lambda folder, shelf, interview, interviewing=False: interviews.append(interview),
+    )
     monkeypatch.setattr(cli.conversation, "one_shot", lambda command, text: 0)
-    monkeypatch.setattr(cli.channels.ChannelCommand, "run", staticmethod(lambda argv, shelf: None))
+    monkeypatch.setattr(
+        cli.channels.ChannelCommand,
+        "run",
+        staticmethod(lambda argv, shelf, interview: interviews.append(interview)),
+    )
     with pytest.raises(SystemExit):
         Cli.parse(argv)
     logger.uninstall()
     assert "Tinker is starting: tinker" in Home.tinker_log().read_text()
+    assert all(isinstance(interview, Interview) for interview in interviews)
+
+
+@pytest.mark.spec("INT-1")
+def test_interact_opens_the_terminal_chat_in_the_interview(monkeypatch):
+    sessions = []
+    monkeypatch.setattr(
+        cli.conversation,
+        "session",
+        lambda folder, shelf, interview, interviewing=False: sessions.append((interview, interviewing)),
+    )
+    with pytest.raises(SystemExit) as ended:
+        Cli.parse(["interact"])
+    logger.uninstall()
+    assert ended.value.code == 0
+    assert [(type(interview), interviewing) for interview, interviewing in sessions] == [(Interview, True)]
+
+
+@pytest.mark.spec("INT-1")
+@pytest.mark.parametrize("flag", ["-h", "--help"])
+def test_interact_help_shows_its_usage(flag, capsys):
+    with pytest.raises(SystemExit):
+        Cli.parse(["interact", flag])
+    assert capsys.readouterr().out.startswith("usage: tinker interact")
 
 
 @pytest.mark.spec("CLI-4")
@@ -1108,7 +1142,7 @@ def test_knowledge_refuses_words_it_cannot_read(home_store, capsys):
 @pytest.mark.spec("REM-7", "REM-8", "REM-9", "REM-10")
 def test_memory_runs_the_memory_views(home_store, monkeypatch):
     seen = []
-    for view in ("show_memories", "show_remembered", "forget", "show_portrait"):
+    for view in ("show_memories", "show_remembered", "forget", "show_traits"):
         monkeypatch.setattr(cli.remembering, view, lambda *given, view=view: seen.append((view, *given)))
     for words in (
         [],
@@ -1116,7 +1150,7 @@ def test_memory_runs_the_memory_views(home_store, monkeypatch):
         ["show", "a1b2c3"],
         ["forget", "a1b2c3", "--yes"],
         ["forget", "d4e5f6"],
-        ["portrait"],
+        ["traits"],
     ):
         Commands(parse("memory", *words)).run()
     assert seen == [
@@ -1125,7 +1159,7 @@ def test_memory_runs_the_memory_views(home_store, monkeypatch):
         ("show_remembered", "a1b2c3"),
         ("forget", "a1b2c3", True),
         ("forget", "d4e5f6", False),
-        ("show_portrait",),
+        ("show_traits",),
     ]
 
 
@@ -1135,14 +1169,14 @@ def test_memory_refuses_words_it_cannot_read(home_store, capsys):
         ["show"],
         ["forget"],
         ["0"],
-        ["portrait", "now"],
+        ["traits", "now"],
         ["what"],
         ["show", "a", "b"],
         ["graph", "now"],
     ):
         with pytest.raises(SystemExit):
             parse("memory", *wrong)
-        assert "| portrait | graph" in capsys.readouterr().err
+        assert "| traits | graph" in capsys.readouterr().err
 
 
 @pytest.mark.spec("DRM-8", "CMD-1")
