@@ -1000,7 +1000,8 @@ A command of the person's, learned once as a skill, runs from a chat in words an
 - **SKL-6** `skill NAME WORDS` (a job) fills the slots from the words in order, one word each, the last slot
   taking all the words left, and runs the skill with no question first: the person taught it. When the
   skill's peak memory and the loaded model do not both fit in the computer's RAM, the model is unloaded first.
-  The use is added to the skill's history, and the job's ending carries the files, or the text. An unknown
+  The use is added to the skill's history, and the job's ending carries the files, or the text, as labelled
+  details (`File` for each file, `Printed` for each line of text). An unknown
   name says so and lists the skills.
 - **SKL-7** The result goes to the asker only (**CNV-9**): in a Telegram chat an image (`formats.Image`) with
   `send_photo` and any other file with `send_file` (**CHN-7**); the terminal says where each file is and opens

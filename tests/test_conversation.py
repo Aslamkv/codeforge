@@ -35,6 +35,7 @@ import tinkerkit.channels as channels
 import tinkerkit.conversation as conversation
 import tinkerkit.jobs as jobs
 from tinkerkit.channels import Channels
+from tinkerkit.cli import Commands
 from tinkerkit.commands import BY_NAME, COMMANDS, GROUPS, MenuRow, slash_matches, synopsis_words
 from tinkerkit.conversation import (
     ALL_FOR_NOW,
@@ -78,7 +79,7 @@ from tinkerkit.reading import Shelf
 from tinkerkit.remembering import Questions as KeptQuestions
 from tinkerkit.remembering import Scratchpad
 from tinkerkit.settings import EPISODE_GIST_CHARS, Config, Home
-from tinkerkit.skills import Skills
+from tinkerkit.skills import SkillResult, Skills
 
 
 @pytest.fixture(autouse=True)
@@ -1709,8 +1710,8 @@ def test_reporter_sends_the_ending_files_to_its_audience_after_the_ending(home_s
     notes.write_text("plain words")
     channel = Recorder(chats=("1", "2"))
     reporter = Reporter(everyone([channel]), "thumbs", pid=4242)
-    ended = {"status": "done", "headline": "Used thumbs", "details": [], "next": []}
-    reporter.finish(snapshot(ended=ended | {"files": [str(picture), str(notes)]}))
+    ended = Commands.use_ending("thumbs", SkillResult(True, [picture, notes], "", 10, tmp_path))
+    reporter.finish(snapshot(ended=ended))
     delivered = [entry for entry in channel.log if entry[0] in ("file", "photo")]
     assert delivered == [
         ("photo", "1", str(picture), "thumb.out"),

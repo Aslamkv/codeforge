@@ -1248,7 +1248,12 @@ def test_skill_learn_is_a_job_that_ends_with_the_trial_output(home_store, monkey
     seen = skill_learning(monkeypatch, cli.skills.SkillResult(True, [made], "", 10, tmp_path))
     Commands(parse("skill", "learn", "thumbs", "make", "a", "thumbnail")).run()
     assert seen[:2] == [("follow", "Learning the skill thumbs"), ("learned", "thumbs", "make a thumbnail")]
-    assert seen[2][1] == {"status": "done", "headline": "Learned thumbs", "details": [str(made)], "next": []}
+    assert seen[2][1] == {
+        "status": "done",
+        "headline": "Learned thumbs",
+        "details": [("File", str(made))],
+        "next": [],
+    }
 
 
 @pytest.mark.spec("SKL-5")
@@ -1261,7 +1266,10 @@ def test_skill_learn_without_purpose_whose_trial_fails_shows_what_it_printed(
     Commands(parse("skill", "learn", "thumbs")).run()
     assert seen[1] == ("learned", "thumbs", "")
     ended = seen[2][1]
-    assert ended["status"] == "blocked" and ended["details"] == ["no such file", "usage: x"]
+    assert ended["status"] == "blocked" and ended["details"] == [
+        ("Printed", "no such file"),
+        ("Printed", "usage: x"),
+    ]
 
 
 @pytest.mark.spec("SKL-8")
@@ -1468,7 +1476,7 @@ def test_skill_use_is_a_job_that_ends_with_the_files(home_store, monkeypatch, tm
     assert seen[2][1] == {
         "status": "done",
         "headline": "Used thumbs",
-        "details": [str(made)],
+        "details": [("File", str(made))],
         "next": [],
         "files": [str(made)],
     }
@@ -1480,7 +1488,7 @@ def test_skill_use_that_fails_ends_blocked_with_what_it_printed(home_store, monk
     seen = skill_using(monkeypatch, cli.skills.SkillResult(False, [], "no such file\n", 10, tmp_path))
     Commands(parse("skill", "count")).run()
     ended = seen[2][1]
-    assert ended["status"] == "blocked" and ended["details"] == ["no such file"]
+    assert ended["status"] == "blocked" and ended["details"] == [("Printed", "no such file")]
 
 
 @pytest.mark.spec("SKL-6")

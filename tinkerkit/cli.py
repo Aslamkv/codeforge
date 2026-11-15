@@ -1086,18 +1086,22 @@ class Commands:
     def trial_ending(name, result):
         if result.ok:
             return ending("done", f"Learned {name}", Commands.result_lines(result))
-        return ending("blocked", f"{name} did not work with its sample values", result.text.splitlines())
+        return ending("blocked", f"{name} did not work with its sample values", Commands.printed(result))
 
     @staticmethod
     def use_ending(name, result):
         if result.ok:
             done = ending("done", f"Used {name}", Commands.result_lines(result))
             return done | {"files": [str(path) for path in result.files]}
-        return ending("blocked", f"{name} did not work", result.text.splitlines())
+        return ending("blocked", f"{name} did not work", Commands.printed(result))
 
     @staticmethod
     def result_lines(result):
-        return [str(path) for path in result.files] or result.text.splitlines()
+        return [("File", str(path)) for path in result.files] or Commands.printed(result)
+
+    @staticmethod
+    def printed(result):
+        return [("Printed", line) for line in result.text.splitlines()]
 
     @staticmethod
     def show_graph():
