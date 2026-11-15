@@ -342,6 +342,7 @@ class Desk:
         self.said_status = None
         self.shown_banner, self.shown_states = self.banner_lines(), {}
         self.chats_started, self.post_lock = set(), threading.Lock()
+        self.said_endings = {job["number"] for job in Desk.ended_idle_calibrations()}
         self.stop_question = None
         self.exercise_reporter = None
         self.echo_to_terminal = not self.consoles
@@ -425,6 +426,37 @@ class Desk:
                 self.shown_states[chat] = chat.state
                 for console in self.consoles:
                     console.note(Desk.chat_with_state(chat))
+
+    @staticmethod
+    def ended_idle_calibrations():
+        return [
+            job
+            for job in Jobs.every()
+            if job.get("idle")
+            and job["state"] == "finished"
+            and job["arguments"][:2] == ["model", "calibrate"]
+        ]
+
+    def say_idle_endings(self):
+        for job in Desk.ended_idle_calibrations():
+            if job["number"] not in self.said_endings:
+                self.said_endings.add(job["number"])
+                self.say_everywhere(Desk.ending_of(job))
+
+    @staticmethod
+    def ending_of(job):
+        entries = Home.store().entries(f"output #{job['number']}")
+        return "\n".join(entry["line"] for _, entry in entries if "line" in entry)
+
+    def say_everywhere(self, text):
+        for channel in self.channels:
+            if channel not in self.consoles:
+                with self.post_lock:
+                    if channel in self.chats_started:
+                        for chat in channel.allowed:
+                            channel.show(chat, None, text, done=True)
+        for console in self.consoles:
+            console.show(ConsoleChannel.CHAT, None, text, done=True)
 
     def renew_banner_when_changed(self):
         if self.banner_lines() != self.shown_banner:
@@ -566,6 +598,7 @@ class Desk:
         while not self.a_channel_closed():
             time.sleep(ENDED_LOOK_SECONDS)
             self.say_state_changes()
+            self.say_idle_endings()
             if time.monotonic() - collected >= EXPIRED_MESSAGES_SWEEP_SECONDS:
                 collected = time.monotonic()
                 for channel in self.channels:

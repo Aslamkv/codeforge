@@ -94,18 +94,18 @@ def test_the_kind_of_an_action_comes_from_its_command(argv, kind):
 
 
 @pytest.mark.spec("CMD-1")
-def test_model_of_a_never_measured_model_is_a_job(home_store):
+def test_model_name_is_a_glance_even_for_a_model_never_measured(home_store):
     home_store.put("models", "measured", MEASURED)
     Config.save(embed_model="nomic")
     assert kind_of(["model", "measured"]) == "glance"
     assert kind_of(["model", "nomic"]) == "glance"
-    assert kind_of(["model", "fresh"]) == "job"
+    assert kind_of(["model", "fresh"]) == "glance"
 
 
 @pytest.mark.spec("JOB-1")
-def test_model_of_an_embedding_model_not_yet_in_use_is_a_job(home_store):
+def test_model_of_an_embedding_model_not_yet_in_use_is_a_glance(home_store):
     Config.save(embed_model="nomic")
-    assert kind_of(["model", "mxbai-embed"]) == "job"
+    assert kind_of(["model", "mxbai-embed"]) == "glance"
 
 
 @pytest.mark.spec("CMD-1")

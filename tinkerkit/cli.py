@@ -707,10 +707,10 @@ class Commands:
     @staticmethod
     def model_state(name, settings):
         if not name:
-            return "none (use one with tinker model NAME: it measures a model never measured)"
+            return "none (use one with tinker model NAME)"
         if settings:
             return f"{name} (calibrated {settings.get('calibrated', '?')})"
-        return f"{name} (not measured: tinker model calibrate {name})"
+        return f"{name} (not measured yet · measured when Tinker is idle)"
 
     @staticmethod
     def print_measured(settings):
@@ -779,10 +779,11 @@ class Commands:
         if name in Models.named(embedding=True):
             Commands.embed(name)
             return
-        if Models.settings(name) is None:
-            Calibrator(name).run()
         Config.save(model=name)
-        say.done(f"Model in use: {name}")
+        say.done(
+            f"Model in use: {name}"
+            + (" (measured when Tinker is idle)" if Models.settings(name) is None else "")
+        )
 
     @staticmethod
     def picked_model(command):

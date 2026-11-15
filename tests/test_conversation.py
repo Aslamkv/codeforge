@@ -72,7 +72,7 @@ from tinkerkit.conversation import (
 from tinkerkit.interviewing import UNREADABLE, Interview
 from tinkerkit.jobs import Queue, Runner, began_at
 from tinkerkit.ledger import DONE_NOTE_KEPT_SECONDS, Ledger
-from tinkerkit.messages import DIMMED, HEADING, Text, next_page_words, styled, visible_width
+from tinkerkit.messages import DIMMED, HEADING, Messages, Text, next_page_words, styled, visible_width
 from tinkerkit.model import Cut, Models, Ollama, QuickModel, ThinkLevels
 from tinkerkit.project import Runs, Tracker
 from tinkerkit.reading import Shelf
@@ -80,6 +80,7 @@ from tinkerkit.remembering import Questions as KeptQuestions
 from tinkerkit.remembering import Scratchpad
 from tinkerkit.settings import EPISODE_GIST_CHARS, Config, Home
 from tinkerkit.skills import SkillResult, Skills
+from tinkerkit.store import Log
 
 
 @pytest.fixture(autouse=True)
@@ -2833,7 +2834,7 @@ def test_research_in_a_chat_is_the_research_job_ending_with_its_answer(desk):
     wait_until(lambda: not desk.busy())
     assert calls_of(script) == ["help", "research the newest Python"]
     wait_until(lambda: "came out in October" in channel.texts()[-1])
-    shown = channel.texts()[-1].split("\n\n🕒")[0]
+    shown = unstamped(channel.texts())[-1]
     assert "✅ **Researched it.**" in shown and shown.endswith("**Python 3.14** came out in October [1].")
 
 
@@ -3410,6 +3411,53 @@ def test_every_status_is_sent_anew_the_one_before_taken_out(desk):
     assert log[0] == ("send", 101) and "edit" not in {kind for kind, _ in log}
     assert sorted(log[1:3]) == [("delete", 101), ("send", 102)]
     assert sorted(log[3:]) == [("delete", 102), ("send", 103)]
+
+
+def ended_idle_calibration(lines, state="finished", idle=True, code=0):
+    job = jobs.Jobs.save(dict(jobs.Jobs.new(["model", "calibrate", "fresh"]), state=state, idle=idle))
+    output = Log(Home.store(), f"output #{job['number']}")
+    for line in lines:
+        output.add({"line": line})
+    output.add({"exit": code})
+    return job
+
+
+def unstamped(texts):
+    return [text.split("\n\n🕒")[0] for text in texts]
+
+
+@pytest.mark.spec("MOD-31")
+def test_an_idle_calibration_ending_is_said_once_in_started_chats_and_consoles(home_store):
+    ready = [f"{Messages.ICONS['done']} fresh is ready", "🧠 fresh thinks at 40 tokens a second"]
+    channel, other, console = Recorder("bot"), Recorder("quiet"), Recorder("console")
+    console.show = lambda chat, reply_to, text, **options: console.log.append(("send", chat, None, text))
+    listening = desk_with_a_started_chat(channel, other)
+    listening.consoles = [console]
+    ended_idle_calibration(ready)
+    listening.say_idle_endings()
+    listening.say_idle_endings()
+    assert unstamped(channel.texts()) == ["\n".join(ready)]
+    assert console.texts() == ["\n".join(ready)] and other.texts() == []
+
+
+@pytest.mark.spec("MOD-31")
+def test_a_failed_idle_calibration_says_its_lines_as_they_are(home_store):
+    channel = Recorder("bot")
+    listening = desk_with_a_started_chat(channel)
+    ended_idle_calibration(["❌ fresh could not be measured"], code=1)
+    listening.say_idle_endings()
+    assert unstamped(channel.texts()) == ["❌ fresh could not be measured"]
+
+
+@pytest.mark.spec("MOD-31")
+def test_only_idle_calibrations_ended_after_the_desk_started_are_said(home_store):
+    ended_idle_calibration(["✅ old is ready"])
+    channel = Recorder("bot")
+    listening = desk_with_a_started_chat(channel)
+    ended_idle_calibration(["✅ asked for"], idle=False)
+    ended_idle_calibration(["half way"], state="queued")
+    listening.say_idle_endings()
+    assert channel.texts() == []
 
 
 @pytest.mark.spec("CNV-7")

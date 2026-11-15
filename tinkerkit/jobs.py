@@ -17,6 +17,7 @@ lazy from .settings import (
     EXERCISE_ENV,
     JOB_START_TRIES,
     JOB_STOP_SIGNAL,
+    Config,
     Home,
     Numbered,
     confirm_deletion,
@@ -112,9 +113,25 @@ class Runner:
             return
         if cls.idle_since is None:
             cls.idle_since = now
-        if now - cls.idle_since >= DREAM_IDLE_SECONDS and Scratchpad.fresh():
-            Queue.add_front(Jobs.save(dict(Jobs.new(["dream", "run"]), state="queued"))["number"])
-            cls.idle_since = None
+        if now - cls.idle_since < DREAM_IDLE_SECONDS:
+            return
+        if model := cls.calibration_wanted():
+            cls.queue_idle_job(["model", "calibrate", model])
+        elif Scratchpad.fresh():
+            cls.queue_idle_job(["dream", "run"])
+
+    @classmethod
+    def queue_idle_job(cls, argv):
+        Queue.add_front(Jobs.save(dict(Jobs.new(argv), state="queued", idle=True))["number"])
+        cls.idle_since = None
+
+    @staticmethod
+    def calibration_wanted():
+        model = Config.get("model")
+        if not model or Home.store().get("models", model):
+            return None
+        calibrations = [job for job in Jobs.every() if job.get("arguments") == ["model", "calibrate", model]]
+        return None if calibrations else model
 
     @staticmethod
     def startable():

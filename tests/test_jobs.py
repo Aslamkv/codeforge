@@ -16,7 +16,7 @@ from tinkerkit.knowledge import Learner, Researcher
 from tinkerkit.learning import SlotLearner
 from tinkerkit.model import Ollama
 from tinkerkit.project import Tracker
-from tinkerkit.settings import DREAM_IDLE_SECONDS, JOB_START_TRIES, JOB_STOP_SIGNAL
+from tinkerkit.settings import DREAM_IDLE_SECONDS, JOB_START_TRIES, JOB_STOP_SIGNAL, Config
 
 DEAD_PID = 999999999
 
@@ -876,6 +876,7 @@ def test_an_idle_queue_with_a_fresh_episode_queues_one_dream(home_store, monkeyp
     Runner.dream_when_idle(100.0 + DREAM_IDLE_SECONDS)
     dreams = queued_dreams()
     assert len(dreams) == 1 and JOBS.get(dreams[0])["state"] == "queued"
+    assert JOBS.get(dreams[0])["idle"] is True
     Runner.dream_when_idle(200.0)
     Runner.dream_when_idle(200.0 + DREAM_IDLE_SECONDS)
     assert queued_dreams() == dreams
@@ -892,6 +893,62 @@ def test_no_dream_is_queued_without_a_fresh_episode_or_while_the_queue_is_busy(h
     add_back(1)
     Runner.dream_when_idle(100.0 + 2 * DREAM_IDLE_SECONDS)
     assert Runner.idle_since is None and Queue.ordered() == [1]
+
+
+def queued_calibrations():
+    return [
+        number for number in Queue.ordered() if JOBS.get(number)["arguments"][:2] == ["model", "calibrate"]
+    ]
+
+
+def idle_turn(start):
+    Runner.dream_when_idle(start)
+    Runner.dream_when_idle(start + DREAM_IDLE_SECONDS)
+
+
+@pytest.mark.spec("MOD-31", "DRM-1")
+def test_an_idle_queue_calibrates_a_never_measured_model_in_use_before_any_dream(home_store, monkeypatch):
+    monkeypatch.setattr(Runner, "idle_since", None)
+    Config.save(model="fresh")
+    fresh_episode()
+    Runner.dream_when_idle(100.0)
+    Runner.dream_when_idle(100.0 + DREAM_IDLE_SECONDS - 1)
+    assert Queue.ordered() == []
+    Runner.dream_when_idle(100.0 + DREAM_IDLE_SECONDS)
+    assert [JOBS.get(number)["arguments"] for number in Queue.ordered()] == [["model", "calibrate", "fresh"]]
+    assert JOBS.get(Queue.ordered()[0])["idle"] is True
+    assert Runner.idle_since is None
+
+
+@pytest.mark.spec("MOD-31")
+@pytest.mark.parametrize("state", ["queued", "running", "stopped", "finished"])
+def test_a_model_with_a_calibrate_job_is_not_calibrated_again_by_itself(home_store, monkeypatch, state):
+    monkeypatch.setattr(Runner, "idle_since", None)
+    Config.save(model="fresh")
+    Jobs.save(dict(Jobs.new(["model", "calibrate", "fresh"]), state=state))
+    idle_turn(100.0)
+    assert queued_calibrations() == []
+
+
+@pytest.mark.spec("MOD-31", "DRM-1")
+def test_the_dream_waits_for_the_idle_turn_after_the_calibration(home_store, monkeypatch):
+    monkeypatch.setattr(Runner, "idle_since", None)
+    Config.save(model="fresh")
+    fresh_episode()
+    idle_turn(100.0)
+    Queue.remove(queued_calibrations()[0])
+    idle_turn(200.0)
+    assert queued_calibrations() == [] and len(queued_dreams()) == 1
+
+
+@pytest.mark.spec("MOD-31")
+def test_no_calibration_without_a_model_in_use_or_for_a_measured_one(home_store, monkeypatch):
+    monkeypatch.setattr(Runner, "idle_since", None)
+    idle_turn(100.0)
+    Config.save(model="measured")
+    home_store.put("models", "measured", {"num_ctx": 8192})
+    idle_turn(200.0)
+    assert Queue.ordered() == []
 
 
 @pytest.mark.spec("DRM-1", "JOB-9")

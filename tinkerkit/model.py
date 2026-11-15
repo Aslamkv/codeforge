@@ -45,6 +45,7 @@ from .settings import (
     REPLY_ERROR_RETRIES,
     RUNNER_OVERHEAD_BYTES,
     STALL_RETRIES,
+    STANDIN_SETTINGS,
     STARTING_CHARS_PER_TOKEN,
     TRANSCRIBE_TIMEOUT,
     UNFINISHED_THOUGHT_KEPT_CHARS,
@@ -561,7 +562,7 @@ class Models:
     def general_row(name, width):
         settings = Models.settings(name)
         if settings is None:
-            return (f"{name:<{width}}not measured yet · choosing it measures it (about a minute)", DIMMED)
+            return (f"{name:<{width}}not measured yet · measured when Tinker is idle", DIMMED)
         facts = [
             f"writes {Models.speed_words(settings, 'write_tokens_per_s')} words/s",
             f"reads {Models.speed_words(settings, 'read_tokens_per_s')} words/s",
@@ -714,14 +715,9 @@ class Models:
         name = Config.get("model")
         if not name:
             raise SystemExit(
-                "No model in use. Use one Ollama has with tinker model NAME, which measures it first if it was "
-                "never measured (tinker model lists them)."
+                "No model in use. Use one Ollama has with tinker model NAME (tinker model lists them)."
             )
-        settings = Models.settings(name)
-        if settings is None:
-            raise SystemExit(
-                f"{name}, the model in use, has not been measured: tinker model calibrate {name}"
-            )
+        settings = Models.settings(name) or dict(STANDIN_SETTINGS)
         broken = Models.unusable_measurements(settings)
         if broken:
             raise SystemExit(
@@ -733,7 +729,7 @@ class Models:
     @staticmethod
     def quick():
         name = Config.get("model")
-        settings = (Models.settings(name) or {}) if name else {}
+        settings = (Models.settings(name) or STANDIN_SETTINGS) if name else {}
         if not settings.get("num_ctx"):
             return None
         options = {"num_ctx": settings["num_ctx"]}

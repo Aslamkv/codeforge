@@ -388,7 +388,7 @@ The home and its database, the settings, numbered lists, and the one way to dele
   `read forget` (`glance`, deletes), `exercise status`, `channel add`,
   `channel remove`, `channel start`, `model calibrate NAME`, `model recipe` (`glance`), `model recipe all`, `dream run` (`job`; `dream`, `dream status` and
   `dream graph` are `glance`), `skill list` (`glance`), `skill forget` (`glance`, deletes),
-  `model NAME` of a model that does not embed and was never measured (**CLI-3**) and `learn` of a command of
+  and `learn` of a command of
   the person's (**CLI-1**). `kind_of(argv)` gives the kind of what the words ask for, and `deletes(argv)`
   whether it deletes. The command line builds its parser and its help from the
   table, and the conversation its commands. Nothing else lists commands by kind.
@@ -407,9 +407,7 @@ again what it did. Jobs wait in one queue and only its head runs (**JOB-8**); wh
 goes to the front, so the person is always answered first.
 
 - **JOB-1** `is_job(argv)` is true for a command of kind `job` or `pauses` (**CMD-1**): `task`, `restart`, `resume`,
-  `confirm`, `amend`, `add`, `fix`, `model calibrate NAME`, `model recipe all`, `model NAME` of a model the home has no
-  record of and that is not the embedding model (an embedding model not yet `embed_model` is one too: the home cannot
-  tell it apart, **CLI-3**), `learn`, `ask`, `teach`, `read`, `research`, `exercise`, `chat`, `command WHAT`, `dream run` and `skill` (`skill learn` and a skill's use). Help,
+  `confirm`, `amend`, `add`, `fix`, `model calibrate NAME`, `model recipe all`, `learn`, `ask`, `teach`, `read`, `research`, `exercise`, `chat`, `command WHAT`, `dream run` and `skill` (`skill learn` and a skill's use). Help,
   and a build an exercise runs (`EXERCISE_ENV`, which holds the exercise's job number), are never jobs. A job keeps the
   computer awake while it runs (**SET-10**). `Jobs.running(argv)` makes a job the next number (`#1`, `#2` ...), kept in
   the home's `jobs` with its command, title, arguments, the day it started, its state, its process and its tracker
@@ -618,9 +616,11 @@ What is said in the chats, kept so that a chat is only a view of it.
 ## model (MOD)
 
 - **MOD-1** `Models.settings(name)` is what calibration measured for a model, kept in the home's `models` under the
-  model's name, or `None`. `Models.selected()` ends with `SystemExit` when no model is in use, when the model in use was
-  never measured, or when a measured value (`max_prompt_tokens`, `num_ctx`, `max_reply_tokens`, `fix_max_tokens`) is
-  missing, below 1, or a boolean. Otherwise it gives `(name, settings)`.
+  model's name, or `None`. `Models.selected()` ends with `SystemExit` when no model is in use, or when a measured
+  value (`max_prompt_tokens`, `num_ctx`, `max_reply_tokens`, `fix_max_tokens`) is missing, below 1, or a boolean.
+  Otherwise it gives `(name, settings)`; for a model in use that was never measured, the settings are
+  `STANDIN_SETTINGS` (`num_ctx` 4096, `max_prompt_tokens` 2048, `max_reply_tokens` 1024, `fix_max_tokens` 1024, no
+  think, `chars_per_token` 3), so the model works at once until calibration (**MOD-31**) measures it.
 - **MOD-2** `Models.installed(name)` ends with `SystemExit` when Ollama does not answer, or has no model of
   exactly that name. In that case it suggests close names. Otherwise it gives the name.
 - **MOD-3** `Models.context_for(budget, reply, length)` is `budget + reply + 512`, rounded up to a multiple of
@@ -705,8 +705,9 @@ What is said in the chats, kept so that a chat is only a view of it.
 - **MOD-23** A quick call is one model chat outside a run: the chat's replies, its warm-up, the commands it proposes,
   the searches planned for a need (**KNW-23**), a project's folder name, a request's review (**RVW-1**), and a
   dream's steps (**DRM-2**).
-  `Models.quick()` is `None` until a measured model is in use; otherwise it gives the model's name, its options
-  (`num_ctx`, and `num_batch` when measured) and its think setting (`false` for a thinking model, else none).
+  `Models.quick()` is `None` while no model is in use; otherwise it gives the model's name, its options
+  (`num_ctx`, and `num_batch` when measured; `STANDIN_SETTINGS`' `num_ctx` for a model never measured) and its think
+  setting (`false` for a thinking model, else none).
   `Models.quick_reply(messages, tokens, think, temperature)` sends one chat with them, at `think` as the model takes it
   (**RVW-2**) and at `temperature` when each is given, `keep_alive`, `num_predict` `tokens` and `QUICK_REPLY_TIMEOUT`,
   and gives the reply's content, stripped. An Ollama failure is its `OllamaError`. Nothing else outside `Model`, the
@@ -758,7 +759,7 @@ What is said in the chats, kept so that a chat is only a view of it.
   (`in use ·` only for the model in use, words as **MOD-26** counts them, an unmeasured speed `?`, the solved
   facts as **MOD-28** says them; one whose `quality_version` is not `QUALITY_VERSION` never ran the current
   test tasks, and says `test tasks not run · tinker model recipe all runs them` in their place), one never measured
-  `not measured yet · choosing it measures it (about a minute)`, an embedding model `in use · 0.3 GB` (its
+  `not measured yet · measured when Tinker is idle`, an embedding model `in use · 0.3 GB` (its
   size; `in use ·` for the embedding model).
 - **MOD-28** `Models.recipe()` gives the recipe lines, so the person sees what to pick, from the measured models
   that do not embed. Every measured model was asked the same tasks (**MOD-25**), so its facts compare as they
@@ -794,6 +795,12 @@ What is said in the chats, kept so that a chat is only a view of it.
   it?", with Yes and No buttons on Telegram and `y`/`n` in the terminal. A yes pulls it through Ollama's
   `/api/pull`, its live line showing how much is downloaded, then the recording is transcribed; a failed pull is
   said to the person and the recording is kept with no chapters. Tinker never pulls a model without that yes.
+- **MOD-31** The runner (**JOB-9**) queues `model calibrate NAME` for the model in use once the queue has been empty
+  for `DREAM_IDLE_SECONDS` and that model was never measured and has never had a `model calibrate NAME` job; it is
+  queued before a dream (**DRM-1**), which waits for the next idle turn. A request pushes it
+  back like any job (**JOB-8**), and it goes on later. When it ends, the conversation says its ending
+  (`✅ NAME is ready` and its 🧠 line, or the failure) in the chat; a failed one keeps the model in use on
+  `STANDIN_SETTINGS` and is not queued again by itself (`tinker model calibrate NAME` measures it).
 
 ## reviewing (RVW)
 
@@ -1900,7 +1907,7 @@ is learned from, the core ones first, and saved as soon as it is read. What it t
   words, at most `BOOK_PASSAGES_SHOWN`, each with its title and chapter.
 - **RDG-14** `tinker read FILE | URL` keeps the source (**RDG-6**) and says its number, kind, title, how many
   chapters it holds, and what to do next (ask about it in a chat, `read #N learn`); it is no job and learns
-  nothing. `read #N learn ["WHAT"]` is the job that learns: it needs a measured model and a known reading with
+  nothing. `read #N learn ["WHAT"]` is the job that learns: it needs a model in use (**MOD-1**) and a known reading with
   chapters, so a stopped or pushed-back learn goes on with what is not read, and nothing is fetched again. Its
   tracker moves through its steps (`READ_STEPS`, **PRJ-16**): survey, chapters, and ends with what was read now
   (chapters and principles changed), the chapters read, the principles kept in its scope, whether builds use it,
@@ -2243,9 +2250,9 @@ The main system: the command line, one run, and the cycle of phases.
 - **CLI-2** `tinker help` lists every command by group, the options, and examples. With `TINKER_FORMAT=markup`, it lists
   what a chat can send, each command with its `/`. `tinker help COMMAND` shows that command's arguments, and an unknown
   command is an error.
-- **CLI-3** `Commands`. `model NAME` of a measured model uses it for every build; of one that does not embed and was
-  never measured, it is a job that measures it (`Calibrator`) and then uses it, so a failed measurement keeps the model
-  in use; of an embedding model, it checks the model gives a vector and makes it the embedding model.
+- **CLI-3** `Commands`. `model NAME` of a model that does not embed uses it for every build at once, saying
+  `Model in use: NAME`; one never measured runs on `STANDIN_SETTINGS` (**MOD-1**) and adds
+  ` (measured when Tinker is idle)`, and is measured then (**MOD-31**); of an embedding model, it checks the model gives a vector and makes it the embedding model.
   `model calibrate NAME` measures a model that does not embed again, and changes no model in use. `model recipe` prints
   the recipe, and `model recipe all` measures the models it lacks first (**MOD-29**). A NAME Ollama does not have is
   refused, with `tinker model` to list them. `model` and `model calibrate` with no NAME, on a terminal, print the recipe
@@ -2261,7 +2268,7 @@ The main system: the command line, one run, and the cycle of phases.
 - **CLI-5** `tinker log [@PROJECT]` shows what the project's last runs said. `--calls` shows its model calls
   and details instead.
 - **CLI-6** `tinker learn NAME = DEFINITION`, `tinker learn NAME "DEFINITION"` (or an alias in the person's
-  shell) keeps the command, with no model. `tinker learn WHAT` needs a measured model, checked before anything
+  shell) keeps the command, with no model. `tinker learn WHAT` needs a model in use (**MOD-1**), checked before anything
   is loaded, and an embedding model (PREFLIGHT, **LRN-3**). Learning nothing ends with an error. However it
   ends, it prints the time it took (`Time taken: 8m 34s`). It keeps a `Tracker` as a run does: its messages,
   what the model is doing (in plain words), its steps and its end (learned, with the summary, or why it

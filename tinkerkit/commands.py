@@ -2,7 +2,7 @@ import re
 from collections import namedtuple
 from operator import attrgetter
 
-from .settings import SETTINGS, Config, Home
+from .settings import SETTINGS
 from .system import SYSTEM_WORDS
 
 Refs = namedtuple("Refs", "project words")
@@ -59,15 +59,6 @@ def taught_command(words):
     if len(words) == 2 and (" " in words[1].strip() or words[1].strip().lower() == "none"):
         return words[0], words[1]
     return None
-
-
-def never_measured(words):
-    return (
-        len(words) == 1
-        and words[0] != "calibrate"
-        and words[0] != Config.get("embed_model")
-        and not isinstance(Home.store().get("models", words[0]), dict)
-    )
 
 
 def forgets_no_trait(words):
@@ -577,15 +568,14 @@ COMMANDS = [
         "Set up",
         "model [calibrate|recipe [all]] [NAME]",
         "the models Ollama has, and the one every build uses",
-        "List the models Ollama has and pick one: a measured model is used for every build, one never measured "
-        "is measured first, an embedding model indexes what is learned. calibrate NAME measures a model again. "
+        "List the models Ollama has and pick one: it is used for every build at once, one never measured is "
+        "measured when Tinker is idle, an embedding model indexes what is learned. calibrate NAME measures a model again. "
         "recipe prints the smartest and the fastest measured model; recipe all measures the rest first.",
         kind="glance",
         actions=[
             Action("job", "calibrate", when=lambda words: len(words) > 1),
             Action("glance", "recipe", when=lambda words: len(words) == 1),
             Action("job", "recipe", when=lambda words: words[1:] == ["all"]),
-            Action("job", when=never_measured),
         ],
         chat=True,
         words=True,

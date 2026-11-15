@@ -140,6 +140,14 @@ SETUP_TIMEOUT = 900
 COMMAND_TIMEOUT = 300
 
 STARTING_CHARS_PER_TOKEN = 2.8
+STANDIN_SETTINGS = {
+    "num_ctx": 4096,
+    "max_prompt_tokens": 2048,
+    "max_reply_tokens": 1024,
+    "fix_max_tokens": 1024,
+    "think": None,
+    "chars_per_token": 3,
+}
 MIN_CHARS_PER_TOKEN = 2.0
 MAX_CHARS_PER_TOKEN = 4.0
 PROMPT_BUDGET_SHARE = 0.95

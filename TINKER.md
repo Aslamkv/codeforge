@@ -56,10 +56,11 @@ Check that everything is ready (it tells you how to fix what is missing):
 tinker doctor
 ```
 
-Pull a model and use it. A new model is measured first, in a few minutes: how fast it reads and writes, how
-much it takes in and replies, and 8 test tasks from easy to hard, the same for every model (up to 3 tries in
-2 minutes each, stopping at a level where it solves neither). It ends with a plain summary, exact figures in
-brackets, kept in its history. If the measurement fails, the model in use stays:
+Pull a model and use it. It works at once, on safe stand-in settings, and is measured the next time Tinker is
+idle, in a few minutes: how fast it reads and writes, how much it takes in and replies, and 8 test tasks from
+easy to hard, the same for every model (up to 3 tries in 2 minutes each, stopping at a level where it solves
+neither). Its ending, a plain summary with exact figures in brackets, kept in its history, shows in every open
+chat. If the measurement fails, the model stays in use on the stand-in settings until you measure it again:
 
 ```sh
 ollama pull qwen3
@@ -581,7 +582,7 @@ too.
 ## Jobs ⏯
 
 Everything that takes a while is a job: a task (and `restart`, `confirm`, `amend`, `resume`), `add`, `fix`,
-`model NAME` of a model never measured, `model calibrate`, `learn`, `ask`, `teach`, `read`, `research` and
+`model calibrate` (also queued by itself when Tinker is idle and the model in use was never measured), `learn`, `ask`, `teach`, `read`, `research` and
 `exercise`. Each gets a number (`#1`, `#2` ...).
 
 Jobs wait in one queue, and only the first runs. Start another job, or chat with Tinker, and it goes to the front:

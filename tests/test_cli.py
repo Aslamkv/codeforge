@@ -217,16 +217,19 @@ def calibrating(monkeypatch, measures):
 
 
 @pytest.mark.spec("CLI-3")
-def test_model_of_a_never_measured_model_measures_it_then_uses_it(home_store, monkeypatch, capsys):
+def test_model_of_a_never_measured_model_uses_it_at_once(home_store, monkeypatch, capsys):
     picker(monkeypatch, None)
     Config.save(model="m")
-    failed = calibrating(monkeypatch, measures=False)
-    with pytest.raises(SystemExit, match="could not measure"):
-        Commands.model(["n"])
-    assert failed == ["n"] and Config.get("model") == "m"
     measured = calibrating(monkeypatch, measures=True)
     Commands.model(["n"])
-    assert measured == ["n"] and Config.get("model") == "n" and "Model in use: n" in capsys.readouterr().out
+    assert measured == [] and Config.get("model") == "n"
+    assert "Model in use: n (measured when Tinker is idle)" in capsys.readouterr().out
+
+
+@pytest.mark.spec("CLI-3")
+def test_status_says_a_never_measured_model_is_measured_when_idle():
+    assert Commands.model_state(None, None) == "none (use one with tinker model NAME)"
+    assert Commands.model_state("n", None) == "n (not measured yet · measured when Tinker is idle)"
 
 
 @pytest.mark.spec("CLI-3")

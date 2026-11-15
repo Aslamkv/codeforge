@@ -28,6 +28,7 @@ from tinkerkit.settings import (
     QUALITY_REPLY_TOKENS,
     QUALITY_TASK_SECONDS,
     QUALITY_VERSION,
+    STANDIN_SETTINGS,
     STARTING_CHARS_PER_TOKEN,
     Config,
     Home,
@@ -65,12 +66,19 @@ def test_measured_settings_are_kept_by_model_name(home_store):
 
 
 @pytest.mark.spec("MOD-1")
-def test_selected_needs_a_measured_model(tinker_home):
+def test_selected_needs_a_model_in_use_with_usable_measurements(tinker_home):
     with pytest.raises(SystemExit, match="No model in use"):
         Models.selected()
     Config.save(**{"model": "m"})
-    with pytest.raises(SystemExit, match="has not been measured"):
-        Models.selected()
+    assert Models.selected() == ("m", STANDIN_SETTINGS)
+    assert STANDIN_SETTINGS == {
+        "num_ctx": 4096,
+        "max_prompt_tokens": 2048,
+        "max_reply_tokens": 1024,
+        "fix_max_tokens": 1024,
+        "think": None,
+        "chars_per_token": 3,
+    }
     Models.keep("m", dict(MEASURED, num_ctx=0, fix_max_tokens=True))
     with pytest.raises(SystemExit, match="no usable num_ctx, fix_max_tokens"):
         Models.selected()
@@ -93,6 +101,12 @@ def test_quick_calls_use_the_measured_model(measured_model, fake_ollama, tinker_
         Models.quick_reply(HI, 7)
     Config.save(**{"model": None})
     assert Models.quick() is None
+
+
+@pytest.mark.spec("MOD-23")
+def test_quick_calls_use_stand_in_settings_for_a_model_never_measured(tinker_home):
+    Config.save(**{"model": "m"})
+    assert Models.quick() == ("m", {"num_ctx": STANDIN_SETTINGS["num_ctx"]}, None)
 
 
 @pytest.mark.spec("MOD-23")
@@ -326,7 +340,7 @@ def test_rows(home_store, monkeypatch):
     Config.save(model="llama3", embed_model="nomic")
     assert Models.rows() == [
         ("General models", HEADING),
-        ("qwen3:8b  not measured yet · choosing it measures it (about a minute)", DIMMED),
+        ("qwen3:8b  not measured yet · measured when Tinker is idle", DIMMED),
         "llama3    in use · writes ~19 words/s · reads ~150 words/s · solved 5 of 8 · 1 after a retry · ~40s an answer",
         "phi       writes ? words/s · reads ? words/s · test tasks not run · tinker model recipe all runs them",
         "old       writes ~20 words/s · reads ~150 words/s · test tasks not run · tinker model recipe all runs them",
@@ -340,7 +354,7 @@ def test_rows_leave_out_a_group_with_no_model(home_store, monkeypatch):
     installed(monkeypatch, [{"name": "qwen3:8b"}], {"qwen3:8b": ["completion"]})
     assert Models.rows() == [
         ("General models", HEADING),
-        ("qwen3:8b  not measured yet · choosing it measures it (about a minute)", DIMMED),
+        ("qwen3:8b  not measured yet · measured when Tinker is idle", DIMMED),
     ]
 
 
