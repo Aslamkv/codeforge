@@ -816,7 +816,8 @@ Each request's one thinking level.
 - **RVW-3** Each command that serves a request (`ask`, `teach`, `read`, `exercise`, `learn`, `research` and a run)
   reviews it once, and every model call for it asks at that level: no call picks its own. Retries keep theirs
   (**MOD-17**, **MOD-18**), and so does a build's concluding call without thinking. Each message the person sends the
-  chat is reviewed too, and the chat's reply to it is asked at its level. The other quick calls keep theirs
+  chat that its route call sends to no command (**CNV-18**) is reviewed too, and the chat's answer to it is asked at
+  its level. The other quick calls keep theirs
   (**MOD-23**). Where a command shows that its model thinks, it shows the request's level. `learn`, `research`, `teach`,
   `read` and `exercise` never ask below `medium` (`WORK_THINK`). The log says the level was raised.
 
@@ -1174,13 +1175,21 @@ The terminal and the chats are one conversation: the same commands, the same ans
   the chat's thread (**REM-11**) and the current message only, and it says plainly when no model is in use or the model
   failed. Each prompt holds only what its message needs. The channel's class picks how replies are written
   (`STYLE`): a Telegram chat is read on a phone (brief, short lines), the console is a terminal; both render
-  Markdown. Tinker acts on what the person asks rather than saying what to type, in two steps.
-  The first (`CHAT_SYSTEM`) holds the style, the commands a chat offers by name only, grouped as in `help`,
-  the skills, one line each (`/skill NAME — purpose`, **SKL-1**), only when there are some,
-  and the live state only when there is some: what runs now and the plan that waits. A plain question is
-  answered there in one call. To act, the model replies with only the command names, one per line, where
-  only RAM means `/system ram`. A named command that takes no
-  words runs at once; otherwise a second call (`CHAT_FILL_SYSTEM`) gets the same messages, each named
+  Markdown. Tinker acts on what the person asks rather than saying what to type, in steps.
+  First a route call (`CHAT_ROUTE_SYSTEM`, think `off`, temperature 0, a short reply) gets only the thread, the message and
+  the index: the commands a chat offers, grouped as in `help`, each with what it is for, from its `what`
+  (`/skill — learn a shell command, alias, script or program as a skill, and list or forget the skills`), and the skills, one line
+  each (`/skill NAME — purpose`, **SKL-1**), only when there are some. It replies with only the command names,
+  one per line, where only RAM means `/system ram`, or `none`; asked how to use one of Tinker's commands is `/help`
+  (`/help` for `how do I learn a skill?`), asked how to do anything else is `none`. A line names the command (or
+  skill) its leading words name, with or without `/`; words after the name are ignored (`skill learn mgen` names
+  `/skill`, `runs` names `/runs`). A reply with a line that names none is read as `none`. With
+  `none`, the answer call (`CHAT_SYSTEM`) holds the style and the live state only when there is some: what
+  runs now and the plan that waits, and no commands; a plain question is answered there, at the message's
+  level (**RVW-3**). When it thinks, its `num_predict` is the reply budget plus a thinking budget; an empty
+  answer after a stop at length is asked once more without thinking, and an answer cut off at length is shown
+  but kept as no episode (**REM-1**). A named command that takes no
+  words runs at once; otherwise a fill call (`CHAT_FILL_SYSTEM`, think `off`, temperature 0) gets the same messages, each named
   command's synopses and descriptions, and only the state those commands use: the channels and whether
   Tinker listens on each for `channel`, the model in use for `model`, what runs and waits for the job
   commands, the plan that waits for `confirm`, `amend` and `rename`, and the known projects (`@ID`, folder,
@@ -1188,12 +1197,15 @@ The terminal and the chats are one conversation: the same commands, the same ans
   person's words (`/clear chat` for `wipe the chat`, `/channel add --kind telegram --name jarvis` for `add a
   telegram channel called jarvis`); for what a `system` check tells (**SYS-1**), only that check's line
   (`/system battery` for `am I charged?`); one command per line when several are asked for (`/system time`
-  and `/system date` for `time and date`); `/skill learn mgen "generate an image from text"` for `I have an
-  alias mgen, use it to generate images from now on`, and then `/skill mgen a shark` for `generate an image of
-  a shark`; a value of several words for a skill's slot that is not its last is quoted. Words a
+  and `/system date` for `time and date`); `/skill learn mgen "generate an image from text"` alone for `I have an
+  alias mgen, use it to generate images from now on`, `/skill mgen a shark` for `generate an image of a shark`
+  once mgen is a skill (two separate examples, never one reply of both lines), `/help skill` for `how do I learn
+  a skill?`; a value of several words for a skill's slot that is not its last is quoted. Words a
   command requires that the person did not give are asked for (**CNV-11**), never invented; a request that
   could mean two things gets one question back, and one that is fairly clear is acted on at once. Asked how to
-  do it, it answers in words. A reply whose every line, with or without backticks, is one that `command_of`
+  do it, it answers in words. A fill reply's line that `command_of` gives a command for, but whose command (or
+  skill) the route call did not name, is dropped; a reply left with no line runs the route call's lines as it gave them
+  instead, each with `/` added when it has none. A reply whose every line, with or without backticks, is one that `command_of`
   gives a command for is not shown, and neither is a glance's line inside a sentence. Each such line runs at
   once, in turn, with no offer to confirm: a deletion still asks first (**SET-8**) and a build still waits at
   its plan (**CNV-9**). A glance asked for this way is answered in words (**CNV-12**), with one more model
@@ -1600,7 +1612,8 @@ Nothing here calls the model.
 - **REM-1** `Scratchpad.write(episode)` keeps one episode in `episodes` for each chat request (`Talk.answering`:
   the message, the commands it ran, their output cut to `EPISODE_FOUND_CHARS`, the reply, and `answered`,
   `remembered` (answered from memory, **REM-12**) or `failed`), each command line run (`Shell.run`: the request, the line, its output cut the same way, its exit
-  code), and each build when it ends (its task and status). An episode has the next id `eN`, its chat, its time
+  code), and each build when it ends (its task and status); a chat answer cut off at length is not kept
+  (**CNV-18**). An episode has the next id `eN`, its chat, its time
   and `dreamt` false. A `system` check's output (**SYS-1**) is never kept.
 - **REM-2** A dreamt episode keeps only its gist: the gist the dream wrote for it (**DRM-3**), else its texts
   cut to `EPISODE_GIST_CHARS`. It is deleted

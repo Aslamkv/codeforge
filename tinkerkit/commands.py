@@ -535,7 +535,7 @@ COMMANDS = [
         "skill",
         "Learn",
         "skill learn NAME [PURPOSE] | list | forget NAME",
-        "learn one of your commands as a skill, and list or forget the skills",
+        "learn a shell command, alias, script or program as a skill, and list or forget the skills",
         "Turn a command you use (taught to Tinker, known to your shell or a program on PATH) into a skill: skill "
         "learn NAME [PURPOSE] finds out how it is used, drafts a command with slots for what changes, frees the "
         "memory the model holds and tries it once with sample values. A trial that works keeps the skill, proven, "

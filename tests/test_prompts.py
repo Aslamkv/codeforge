@@ -312,8 +312,9 @@ def test_every_prompt_that_writes_searches_writes_them_with_engines_and_count():
 @pytest.mark.spec("PRM-13")
 def test_the_templates_format():
     assert "60 words" in Prompts.BRIEF_SYSTEM.format(words=60)
-    chat = Prompts.CHAT_SYSTEM.format(style=Prompts.PHONE_STYLE, index="status", state="")
-    assert Prompts.PHONE_STYLE in chat and "status" in chat
+    chat = Prompts.CHAT_SYSTEM.format(style=Prompts.PHONE_STYLE, state="Running: calc")
+    assert Prompts.PHONE_STYLE in chat and "Running: calc" in chat
+    assert "/status — show" in Prompts.CHAT_ROUTE_SYSTEM.format(index="/status — show")
     fill = Prompts.CHAT_FILL_SYSTEM.format(commands="/clear chat", state="Running: calc")
     assert "/clear chat" in fill and "Running: calc" in fill
     tell = Prompts.COMMAND_TELL_SYSTEM.format(style=Prompts.TERMINAL_STYLE)
@@ -332,9 +333,20 @@ def test_the_phone_style_is_brief_and_the_terminal_style_is_not_a_phone():
 
 
 @pytest.mark.spec("CNV-18")
-def test_the_chat_prompt_asks_for_only_the_command_names_when_asked_to_act():
-    chat = Prompts.CHAT_SYSTEM.format(style=Prompts.PHONE_STYLE, index="/clear", state="")
-    assert "only the command names, one per line" in chat and "answer in words" in chat
+def test_the_route_prompt_asks_for_only_the_command_names_or_none():
+    route = Prompts.CHAT_ROUTE_SYSTEM.format(index="/clear — wipe the chat")
+    assert "only the command names, one per line" in route and "`none`" in route
+    assert "how to do something" not in route
+    assert "how to use one of Tinker's commands is `/help`" in route
+    assert "how to do anything else is `none`" in route
+    assert "(`/help` for `how do I learn a skill?`)" in route
+    assert route.index("how to use one of Tinker's commands") < route.index("only the command names")
+
+
+@pytest.mark.spec("CNV-18", "RVW-3")
+def test_the_answer_prompt_holds_no_commands():
+    chat = Prompts.CHAT_SYSTEM.format(style=Prompts.PHONE_STYLE, state="")
+    assert "{index}" not in Prompts.CHAT_SYSTEM and "command names" not in chat and "/" not in chat
 
 
 @pytest.mark.spec("CNV-18", "SYS-1")
@@ -344,9 +356,9 @@ def test_the_fill_prompt_asks_for_only_the_check_line_when_asked_what_a_system_c
 
 
 @pytest.mark.spec("CNV-18", "SYS-1")
-def test_the_chat_prompt_keeps_ram_for_system_ram():
-    chat = Prompts.CHAT_SYSTEM.format(style=Prompts.PHONE_STYLE, index="/knowledge\n/system", state="")
-    assert "`knowledge`" not in chat and "nothing else, where only RAM means `/system ram`" in chat
+def test_the_route_prompt_keeps_ram_for_system_ram():
+    route = Prompts.CHAT_ROUTE_SYSTEM.format(index="/knowledge — ask\n/system — checks")
+    assert "`knowledge`" not in route and "where only RAM means `/system ram`" in route
 
 
 @pytest.mark.spec("CNV-18", "CNV-11")
@@ -363,6 +375,21 @@ def test_the_fill_prompt_acts_with_options_filled_and_never_invents_required_wor
 def test_the_fill_prompt_quotes_a_several_word_value_for_a_slot_that_is_not_the_last():
     fill = Prompts.CHAT_FILL_SYSTEM.format(commands="/skill mgen {prompt}", state="")
     assert "several words for a skill's slot that is not its last is quoted" in fill
+
+
+@pytest.mark.spec("CNV-18", "SKL-6")
+def test_the_fill_prompt_shows_a_skill_learned_and_a_skill_used_as_separate_examples():
+    fill = Prompts.CHAT_FILL_SYSTEM.format(commands="/skill learn NAME DESCRIPTION", state="")
+    assert (
+        '`/skill learn mgen "generate an image from text"` alone for '
+        '"I have an alias mgen, use it to generate images from now on"'
+    ) in fill
+    assert (
+        '`/skill mgen a shark` for "generate an image of a shark" once mgen is a skill '
+        "(two separate examples, never one reply of both lines), "
+        '`/help skill` for "how do I learn a skill?"'
+    ) in fill
+    assert "and then" not in fill
 
 
 @pytest.mark.spec("PRM-14")

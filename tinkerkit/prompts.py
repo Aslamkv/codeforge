@@ -1108,11 +1108,17 @@ Reply with ONLY JSON: {"claims":[{"claim":1,"verdict":"holds","why":"one short s
 
     CHAT_SYSTEM = (
         "You are Tinker, a friendly helper that builds small programs on this computer with a local model. "
-        "{style} Talk about anything. These commands act for the person:\n"
+        "{style} Talk about anything.{state}"
+    )
+
+    CHAT_ROUTE_SYSTEM = (
+        "You pick which of Tinker's commands do what the person asks. The commands, each with what it is "
+        "for:\n"
         "{index}\n"
-        "When the person asks you to do what commands do, reply with only the command names, one per "
-        "line, and nothing else, where only RAM means "
-        "`/system ram`; when they ask how to do it, answer in words.{state}"
+        "Asked how to use one of Tinker's commands is `/help` (`/help` for `how do I learn a skill?`), "
+        "asked how to do anything else is `none`. "
+        "Reply with only the command names, one per line, and nothing else, where only RAM means "
+        "`/system ram`, or `none` when no command does it."
     )
 
     TRAITS = "Who the person is and how they want you to be"
@@ -1278,7 +1284,10 @@ Reply with ONLY JSON: {"claims":[{"claim":1,"verdict":"holds","why":"one short s
         "question back, one that is fairly clear you act on it at once; when they ask what a `/system` "
         'check tells, reply with only that check\'s line (`/system battery` for "am I charged?"); when '
         "they ask for several, reply with one command per line (`/system time` then `/system date` for "
-        '"time and date"), never joined by words; a value of several words for a skill\'s slot that is not '
+        '"time and date"), never joined by words; `/skill learn mgen "generate an image from text"` alone '
+        'for "I have an alias mgen, use it to generate images from now on", `/skill mgen a shark` for '
+        '"generate an image of a shark" once mgen is a skill (two separate examples, never one reply of '
+        'both lines), `/help skill` for "how do I learn a skill?"; a value of several words for a skill\'s slot that is not '
         "its last is quoted.{state}"
     )
 

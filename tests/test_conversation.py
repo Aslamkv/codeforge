@@ -72,7 +72,7 @@ from tinkerkit.interviewing import UNREADABLE, Interview
 from tinkerkit.jobs import Queue, Runner, began_at
 from tinkerkit.ledger import DONE_NOTE_KEPT_SECONDS, Ledger
 from tinkerkit.messages import DIMMED, HEADING, Text, next_page_words, styled, visible_width
-from tinkerkit.model import Models, Ollama, QuickModel, ThinkLevels
+from tinkerkit.model import Cut, Models, Ollama, QuickModel, ThinkLevels
 from tinkerkit.project import Runs, Tracker
 from tinkerkit.reading import Shelf
 from tinkerkit.remembering import Questions as KeptQuestions
@@ -1823,7 +1823,7 @@ def remembering(kind, gist, text):
 @pytest.mark.spec("REM-6")
 def test_a_chat_reply_adds_what_tinker_remembers(measured_model, fake_ollama):
     remembering("fact", "the person keeps bees", "they keep bees in the garden")
-    fake_ollama.reply("low: a plain request").reply("hi")
+    fake_ollama.reply("none").reply("low: a plain request").reply("hi")
     assert Talk("task").reply(Recorder(), Message("1", "tell me about the bees")) == "hi"
     system = fake_ollama.calls[-1]["messages"][0]["content"]
     assert "What you remember" in system and "the person keeps bees" in system
@@ -1856,7 +1856,7 @@ def test_a_chat_reply_comes_from_a_remembered_answer_without_the_model(measured_
 @pytest.mark.spec("REM-12")
 def test_a_remembered_answer_needs_every_word_of_the_message(measured_model, fake_ollama):
     remembered_answer("how tall is everest in km", "About 8.85 km.")
-    fake_ollama.reply("29,032 feet")
+    fake_ollama.reply("none").reply("29,032 feet")
     assert Talk("task").reply(Recorder(), Message("1", "how tall is everest in feet")) == "29,032 feet"
 
 
@@ -1868,7 +1868,7 @@ def test_a_retired_answer_or_another_kind_is_not_a_reply(measured_model, fake_ol
     memory = remembered_answer("how tall is everest in km", "About 8.85 km.")
     Memories(Retriever(None)).retire(memory["id"], "outdated")
     remembering("fact", "how tall is everest in km", "About 8.85 km.")
-    fake_ollama.reply("8.8 km")
+    fake_ollama.reply("none").reply("8.8 km")
     assert Talk("task").reply(Recorder(), Message("1", "how tall is everest in km")) == "8.8 km"
 
 
@@ -1883,12 +1883,10 @@ def test_a_reply_from_memory_makes_a_remembered_episode():
 @pytest.mark.spec("REM-6")
 def test_a_chat_reply_with_nothing_recalled_keeps_its_prompt(measured_model, fake_ollama):
     remembering("fact", "the person keeps bees", "they keep bees in the garden")
-    fake_ollama.reply("low: a plain request").reply("hi")
+    fake_ollama.reply("none").reply("low: a plain request").reply("hi")
     assert Talk("task").reply(Recorder(), Message("1", "weather today")) == "hi"
     system = fake_ollama.calls[-1]["messages"][0]["content"]
-    assert system == conversation.Prompts.CHAT_SYSTEM.format(
-        style=Recorder.STYLE, index=conversation.chat_index(), state=""
-    )
+    assert system == conversation.Prompts.CHAT_SYSTEM.format(style=Recorder.STYLE, state="")
 
 
 @pytest.mark.spec("REM-6")
@@ -2006,20 +2004,27 @@ def test_a_recalled_remembered_episode_gives_only_the_answer():
 def test_talk_reply(measured_model, fake_ollama):
     talk, channel = Talk("task; status"), Recorder()
     Scratchpad.write(chatted_episode(0))
-    fake_ollama.reply("low: a plain request").reply("answer 1")
+    fake_ollama.reply("none").reply("low: a plain request").reply("answer 1")
     assert talk.reply(channel, Message("1", "question 1")) == "answer 1"
-    messages = fake_ollama.calls[-1]["messages"]
-    assert messages[0]["role"] == "system" and conversation.chat_index() in messages[0]["content"]
+    route, messages = fake_ollama.calls[-3]["messages"], fake_ollama.calls[-1]["messages"]
+    assert route[0]["content"].startswith(
+        conversation.Prompts.CHAT_ROUTE_SYSTEM.format(index=conversation.chat_index())
+    )
+    assert "question 0 → Answer 0." in route[0]["content"] and route[1:] == messages[1:]
+    assert messages[0]["role"] == "system" and conversation.chat_index() not in messages[0]["content"]
     assert "Earlier in this chat" in messages[0]["content"]
     assert "question 0 → Answer 0." in messages[0]["content"]
     assert [message["content"] for message in messages[1:]] == ["question 1"]
-    fake_ollama.reply("low: a plain request").reply("answer 2")
+    fake_ollama.reply("none").reply("low: a plain request").reply("answer 2")
     talk.reply(channel, Message("2", "question 2"))
     assert "Earlier in this chat" not in system_of(fake_ollama.calls[-1])
-    assert fake_ollama.calls[-1]["think"] is None and fake_ollama.calls[-1]["options"]["num_predict"] == 1024
+    assert fake_ollama.calls[-1]["think"] is None
+    assert fake_ollama.calls[-1]["options"]["num_predict"] == (
+        conversation.CHAT_MAX_REPLY_TOKENS + conversation.CHAT_THINK_TOKENS
+    )
     from tinkerkit.model import OllamaError
 
-    fake_ollama.reply("low: a plain request").reply(OllamaError("runner failed"))
+    fake_ollama.reply("none").reply("low: a plain request").reply(OllamaError("runner failed"))
     assert talk.reply(channel, Message("1", "x")).startswith("⚠️ **The model did not answer:**")
 
 
@@ -2052,7 +2057,7 @@ def test_the_state_reaches_the_prompt(measured_model, fake_ollama):
 @pytest.mark.spec("CNV-18")
 def test_a_named_command_taking_words_gets_a_second_call(measured_model, fake_ollama):
     talk, state = Talk("cmds"), FakeChatState()
-    fake_ollama.reply("low: a plain request").reply("`/amend`").reply("/amend handle negatives")
+    fake_ollama.reply("`/amend`").reply("/amend handle negatives")
     assert talk.reply(Recorder(), Message("1", "also handle negatives"), state) == "/amend handle negatives"
     fill = system_of(fake_ollama.calls[-1])
     assert conversation.command_details(["amend"]) in fill and fill.endswith("\n\nA spec waits: calc")
@@ -2061,7 +2066,7 @@ def test_a_named_command_taking_words_gets_a_second_call(measured_model, fake_ol
         "also handle negatives"
     ]
     Scratchpad.write(chatted_episode(0))
-    fake_ollama.reply("low: a plain request").reply("`/amend`").reply("/amend handle zero")
+    fake_ollama.reply("`/amend`").reply("/amend handle zero")
     talk.reply(Recorder(), Message("1", "and zero"), state)
     assert all("question 0 → Answer 0." in system_of(call) for call in fake_ollama.calls[-2:])
 
@@ -2073,9 +2078,12 @@ TRAITS_PART = "Who the person is and how they want you to be"
 def test_both_calls_of_a_chat_reply_get_the_persons_traits(measured_model, fake_ollama):
     confirmed_trait("Answers in short sentences")
     confirmed_trait("Uses metric units", when="on numbers")
-    fake_ollama.reply("low: a plain request").reply("`/amend`").reply("/amend handle negatives")
+    fake_ollama.reply("`/amend`").reply("/amend handle negatives")
     Talk("cmds").reply(Recorder(), Message("1", "also handle negatives"), FakeChatState())
-    for call in fake_ollama.calls[-2:]:
+    fill = fake_ollama.calls[-1]
+    fake_ollama.reply("none").reply("low: a plain request").reply("hi")
+    Talk("cmds").reply(Recorder(), Message("1", "tell me about the bees"), FakeChatState())
+    for call in (fill, fake_ollama.calls[-1]):
         assert f"## {TRAITS_PART}\n- Answers in short sentences" in system_of(call)
 
 
@@ -2084,7 +2092,7 @@ def test_a_chat_reply_without_confirmed_traits_has_no_traits_part(measured_model
     from tinkerkit.remembering import Traits
 
     Traits().apply([{"op": "add", "about": "person", "when": "", "do": "Likes tea", "sources": ["e1"]}])
-    fake_ollama.reply("low: a plain request").reply("`/amend`").reply("/amend handle negatives")
+    fake_ollama.reply("`/amend`").reply("/amend handle negatives")
     Talk("cmds").reply(Recorder(), Message("1", "also handle negatives"), FakeChatState())
     assert all(TRAITS_PART not in system_of(call) for call in fake_ollama.calls)
 
@@ -2098,16 +2106,6 @@ def test_the_command_tell_gets_the_persons_traits(measured_model, fake_ollama):
     fake_ollama.reply("told")
     Talk("cmds").tell(Recorder(), "1", "how much ram", "/system ram", "", "8 GB free", "low")
     assert system_of(fake_ollama.calls[-1]).endswith(f"## {TRAITS_PART}\n- Answers in short sentences")
-
-
-@pytest.mark.spec("CNV-18")
-def test_a_wordless_name_or_a_full_line_takes_one_call(measured_model, fake_ollama):
-    fake_ollama.reply("/runs")
-    assert Talk("cmds").reply(Recorder(), Message("1", "what projects")) == "/runs"
-    calls = len(fake_ollama.calls)
-    fake_ollama.reply("low: a plain request").reply("/amend handle negatives")
-    assert Talk("cmds").reply(Recorder(), Message("1", "also negatives")) == "/amend handle negatives"
-    assert len(fake_ollama.calls) == calls + 2
 
 
 @pytest.mark.spec("CNV-18")
@@ -2130,8 +2128,8 @@ def chatted(desk, channel, monkeypatch, asked):
 
     monkeypatch.setattr(Models, "quick_reply", staticmethod(quick_reply))
 
-    def chat(reply, shown, *more):
-        replies.extend(["low: a plain request", reply, *more])
+    def chat(reply, shown, *more, ahead=("none", "low: a plain request")):
+        replies.extend([*ahead, reply, *more])
         say(desk, channel, "do it for me")
         wait_until(lambda: shown("".join(channel.texts()[-1:])))
 
@@ -2143,7 +2141,7 @@ def test_a_chat_reply_that_is_a_command_line_is_run_at_once(desk, monkeypatch):
     desk, channel, _ = desk
     chat = chatted(desk, channel, monkeypatch, [])
     chat("/clear chat", lambda last: last.startswith("🧹 **Chat cleared:**"))
-    chat("`/status`", lambda last: last == "Tinker is up.", "/status", "Tinker is up.")
+    chat("`/status`", lambda last: last == "Tinker is up.", "/status", "Tinker is up.", ahead=())
     handled = []
     monkeypatch.setattr(desk, "answer", lambda message, channel: handled.append(message.text))
     chat("/fix the login bug", lambda last: handled == ["/fix the login bug"])
@@ -2175,6 +2173,50 @@ def test_each_chat_request_writes_one_episode(desk, monkeypatch):
     )
 
 
+def budgeted(monkeypatch, replies):
+    calls = []
+    monkeypatch.setattr(Models, "quick", staticmethod(lambda: QuickModel("m", {}, None)))
+
+    def quick_reply(messages, tokens, think=None, temperature=None):
+        calls.append((tokens, think))
+        return replies.pop(0)
+
+    monkeypatch.setattr(Models, "quick_reply", staticmethod(quick_reply))
+    return calls
+
+
+@pytest.mark.spec("CNV-18")
+def test_a_thinking_chat_answer_gets_a_thinking_budget_and_an_empty_cut_is_asked_again_without(
+    desk, monkeypatch
+):
+    desk, channel, _ = desk
+    calls = budgeted(monkeypatch, ["none", "high: a hard request", Cut(""), "the answer"])
+    say(desk, channel, "do it for me")
+    wait_until(lambda: "the answer" in "".join(channel.texts()[-1:]))
+    assert calls[-2:] == [
+        (conversation.CHAT_MAX_REPLY_TOKENS + conversation.CHAT_THINK_TOKENS, "high"),
+        (conversation.CHAT_MAX_REPLY_TOKENS, "off"),
+    ]
+
+
+@pytest.mark.spec("CNV-18")
+def test_a_chat_answer_without_thinking_gets_only_the_reply_budget(desk, monkeypatch):
+    desk, channel, _ = desk
+    calls = budgeted(monkeypatch, ["none", "off: a plain request", Cut("")])
+    say(desk, channel, "do it for me")
+    wait_until(lambda: "_(no answer)_" in "".join(channel.texts()[-1:]))
+    assert calls[-1] == (conversation.CHAT_MAX_REPLY_TOKENS, "off")
+
+
+@pytest.mark.spec("CNV-18", "REM-1")
+def test_a_chat_answer_cut_off_at_length_is_shown_but_kept_as_no_episode(desk, monkeypatch):
+    desk, channel, _ = desk
+    budgeted(monkeypatch, ["none", "low: a plain request", Cut("half an ans")])
+    say(desk, channel, "do it for me")
+    wait_until(lambda: "half an ans" in "".join(channel.texts()[-1:]))
+    assert Scratchpad.fresh() == []
+
+
 @pytest.mark.spec("CNV-24", "REM-12")
 def test_fresh_asks_the_model_again_what_the_chat_last_asked(desk, monkeypatch):
     desk, channel, _ = desk
@@ -2183,7 +2225,7 @@ def test_fresh_asks_the_model_again_what_the_chat_last_asked(desk, monkeypatch):
     chat("first answer", lambda last: "first answer" in last)
     wait_until(lambda: len(Scratchpad.fresh()) == 1)
     remembered_answer("do it for me", "Done from memory.")
-    replies = ["low: a plain request", "fresh answer"]
+    replies = ["none", "low: a plain request", "fresh answer"]
     monkeypatch.setattr(
         Models, "quick_reply", staticmethod(lambda messages, *rest, **options: replies.pop(0))
     )
@@ -2277,17 +2319,17 @@ def test_shell_runs_the_confirmed_command(tmp_path):
 @pytest.mark.spec("RVW-3")
 def test_a_chat_reply_asks_at_its_messages_level(measured_model, fake_ollama, monkeypatch):
     monkeypatch.setattr(ThinkLevels, "values", staticmethod(lambda name: ["low", "medium", "high"]))
-    fake_ollama.reply("Look at the loop.")
+    fake_ollama.reply("none").reply("Look at the loop.")
     text = Talk("cmds").reply(Recorder(), Message("1", "why does this function fail with a bug"))
-    assert text == "Look at the loop." and [call["think"] for call in fake_ollama.calls] == ["high"]
+    assert text == "Look at the loop." and [call["think"] for call in fake_ollama.calls] == [False, "high"]
 
 
 @pytest.mark.spec("RVW-1")
 def test_a_chat_reply_review_gets_the_thread_before_the_message(measured_model, fake_ollama):
     Scratchpad.write(chatted_episode(0))
-    fake_ollama.reply("low: a plain request").reply("answer 1")
+    fake_ollama.reply("none").reply("low: a plain request").reply("answer 1")
     Talk("cmds").reply(Recorder(), Message("1", "question 1"))
-    reviewed = fake_ollama.calls[0]["messages"][1]["content"]
+    reviewed = fake_ollama.calls[1]["messages"][1]["content"]
     assert reviewed.index("question 0 → Answer 0. More.") < reviewed.index("question 1")
     assert reviewed.endswith("\n\nquestion 1")
 
@@ -2296,9 +2338,9 @@ def test_a_chat_reply_review_gets_the_thread_before_the_message(measured_model, 
 def test_a_chat_reply_is_not_told_the_threads_earlier_answer(measured_model, fake_ollama):
     Scratchpad.write(chatted_episode(0))
     Scratchpad.write(chatted_episode(1))
-    fake_ollama.reply("low: a plain request").reply("answer 1")
+    fake_ollama.reply("none").reply("low: a plain request").reply("answer 1")
     Talk("cmds").reply(Recorder(), Message("1", "question 1"))
-    reviewed = fake_ollama.calls[0]["messages"][1]["content"]
+    reviewed = fake_ollama.calls[1]["messages"][1]["content"]
     system = fake_ollama.calls[-1]["messages"][0]["content"]
     assert "question 0 → Answer 0. More." in reviewed and "Answer 0. More." in system
     assert "Answer 1" not in reviewed and "Answer 1" not in system
@@ -2308,7 +2350,7 @@ def test_a_chat_reply_is_not_told_the_threads_earlier_answer(measured_model, fak
 def test_a_fresh_reply_is_not_told_a_remembered_answer(measured_model, fake_ollama):
     remembered_answer("how tall is everest in km", "About 8.85 km.")
     remembered_answer("how tall is everest in feet", "About 29,032 feet.")
-    fake_ollama.reply("low: a plain request").reply("8.8 km")
+    fake_ollama.reply("none").reply("low: a plain request").reply("8.8 km")
     Talk("cmds").asked_reply(Recorder(), Message("1", "How tall is Everest in km?"))
     system = fake_ollama.calls[-1]["messages"][0]["content"]
     assert "how tall is everest in feet" in system
@@ -2319,7 +2361,7 @@ def test_a_fresh_reply_is_not_told_a_remembered_answer(measured_model, fake_olla
 def test_a_chat_reply_is_not_told_a_recalled_episodes_answer(measured_model, fake_ollama):
     Scratchpad.write(chatted_episode("about bees", chat="2"))
     Scratchpad.write(chatted_episode("about bees and honey", chat="2"))
-    fake_ollama.reply("low: a plain request").reply("bees")
+    fake_ollama.reply("none").reply("low: a plain request").reply("bees")
     Talk("cmds").asked_reply(Recorder(), Message("1", "question about bees"))
     system = fake_ollama.calls[-1]["messages"][0]["content"]
     assert "Answer about bees and honey. More." in system
@@ -3534,9 +3576,9 @@ def test_the_commands_brief_keeps_each_commands_arguments_description_and_option
 
 
 @pytest.mark.spec("CNV-18")
-def test_the_chat_index_names_each_chat_command_once_grouped_as_in_help():
+def test_the_chat_index_names_each_chat_command_once_grouped_as_in_help_with_what_it_is_for():
     index = conversation.chat_index()
-    named = re.findall(r"/(\S+)", index)
+    named = re.findall(r"^/(\S+) — ", index, re.M)
     chat_names = [command.name for command in COMMANDS if command.name and command.chat]
     assert named == [
         command.name
@@ -3544,8 +3586,92 @@ def test_the_chat_index_names_each_chat_command_once_grouped_as_in_help():
         for command in COMMANDS
         if command.group == group and command.name in chat_names
     ]
-    assert all(re.fullmatch(r"[A-Z][\w ]*: /\S+( /\S+)*", line) for line in index.splitlines())
+    assert all(re.fullmatch(r"[A-Z][\w ]*:|/\S+ — .+", line) for line in index.splitlines())
     assert "/clear" in index and not set(named) - set(chat_names)
+    assert (
+        "/skill — learn a shell command, alias, script or program as a skill, and list or forget the skills"
+        in index.splitlines()
+    )
+
+
+@pytest.mark.spec("CNV-18", "RVW-3")
+def test_a_message_routed_to_none_is_reviewed_and_answered_without_the_commands(
+    measured_model, fake_ollama, monkeypatch
+):
+    monkeypatch.setattr(ThinkLevels, "values", staticmethod(lambda name: ["low", "medium", "high"]))
+    fake_ollama.reply("none").reply("low: a plain request").reply("It is a bird.")
+    assert Talk("task").reply(Recorder(), Message("1", "tell me about the robin")) == "It is a bird."
+    route, review, answer = fake_ollama.calls[-3:]
+    assert system_of(route).startswith(
+        conversation.Prompts.CHAT_ROUTE_SYSTEM.format(index=conversation.chat_index())
+    )
+    assert route["think"] is False and route["options"]["num_predict"] == conversation.CHAT_ROUTE_TOKENS
+    assert route["options"]["temperature"] == 0 and "temperature" not in answer["options"]
+    assert "low: a plain request" not in system_of(answer) and "/skill" not in system_of(answer)
+    assert system_of(answer).startswith(
+        conversation.Prompts.CHAT_SYSTEM.format(style=Recorder.STYLE, state="")
+    )
+
+
+@pytest.mark.spec("CNV-18", "RVW-3")
+def test_a_message_routed_to_a_command_that_takes_words_goes_to_the_fill_call_unreviewed(
+    measured_model, fake_ollama, monkeypatch
+):
+    monkeypatch.setattr(ThinkLevels, "values", staticmethod(lambda name: ["low", "medium", "high"]))
+    fake_ollama.reply("/skill").reply("/skill forget mgen")
+    assert Talk("task").reply(Recorder(), Message("1", "forget the mgen skill")) == "/skill forget mgen"
+    route, fill = fake_ollama.calls[-2:]
+    assert system_of(fill).startswith(
+        conversation.Prompts.CHAT_FILL_SYSTEM.format(
+            commands=conversation.command_details(["skill"]), state=""
+        )
+    )
+    assert fill["think"] is False and len(fake_ollama.calls) == 2
+    assert route["options"]["temperature"] == 0 and fill["options"]["temperature"] == 0
+
+
+@pytest.mark.spec("CNV-18")
+def test_a_fill_line_naming_a_command_the_route_did_not_name_is_dropped(measured_model, fake_ollama):
+    Skills.put(made_skill("mgen"))
+    fake_ollama.reply("/skill").reply('/skill learn mgen "generate an image from text"\n/skill mgen a shark')
+    reply = Talk("task").reply(Recorder(), Message("1", "learn mgen and draw a shark"))
+    assert reply == '/skill learn mgen "generate an image from text"'
+    assert len(fake_ollama.calls) == 2
+
+
+@pytest.mark.spec("CNV-18")
+@pytest.mark.parametrize(("routed", "run"), [("help skill", "/help skill"), ("/help", "/help")])
+def test_a_fill_reply_left_with_no_line_runs_the_routed_lines(measured_model, fake_ollama, routed, run):
+    fake_ollama.reply(routed).reply('/skill learn mgen "generate an image"')
+    assert Talk("task").reply(Recorder(), Message("1", "how do I learn a skill")) == run
+    assert len(fake_ollama.calls) == 2
+
+
+@pytest.mark.spec("CNV-18")
+def test_a_fill_line_naming_the_routed_command_is_kept(measured_model, fake_ollama):
+    fake_ollama.reply("/system").reply("/system ram")
+    assert Talk("task").reply(Recorder(), Message("1", "how much ram is free")) == "/system ram"
+    assert len(fake_ollama.calls) == 2
+
+
+@pytest.mark.spec("CNV-18")
+@pytest.mark.parametrize("routed", ["/runs", "`/runs`", "runs"])
+def test_a_message_routed_to_a_command_without_words_runs_it_at_once(measured_model, fake_ollama, routed):
+    fake_ollama.reply(routed)
+    assert Talk("task").reply(Recorder(), Message("1", "which projects are there")) == "/runs"
+    assert len(fake_ollama.calls) == 1
+
+
+@pytest.mark.spec("CNV-18")
+def test_a_route_line_names_the_command_its_leading_words_name():
+    Skills.put(made_skill("mgen"))
+    assert conversation.named_commands("runs") == ["runs"]
+    assert conversation.named_commands("skill learn mgen") == ["skill"]
+    assert conversation.named_commands("/system ram") == ["system"]
+    assert conversation.named_commands("`skill mgen a cat`") == ["skill mgen"]
+    assert conversation.named_commands("runs\nsystem ram") == ["runs", "system"]
+    assert conversation.named_commands("runs\nno such thing") == []
+    assert conversation.named_commands("none") == []
 
 
 @pytest.mark.spec("CNV-18")
@@ -3558,7 +3684,7 @@ def test_the_command_details_give_only_the_named_commands_rows():
 
 @pytest.mark.spec("CNV-18")
 def test_the_chat_index_lists_each_learned_skill_only_when_there_are_some():
-    assert "/skill " not in conversation.chat_index()
+    assert not any(line.startswith("/skill thumbs") for line in conversation.chat_index().splitlines())
     Skills.put(made_skill("thumbs"))
     Skills.put(made_skill("count", purpose="count lines"))
     index = conversation.chat_index().splitlines()
@@ -3569,7 +3695,7 @@ def test_the_chat_index_lists_each_learned_skill_only_when_there_are_some():
 def test_a_reply_naming_a_known_skill_goes_to_the_fill_call_with_its_template_and_slots():
     Skills.put(made_skill("thumbs"))
     assert conversation.named_commands("/skill thumbs") == ["skill thumbs"]
-    assert conversation.named_commands("/skill ghost") == []
+    assert conversation.named_commands("/skill ghost") == ["skill"]
     assert conversation.takes_words("skill thumbs")
     assert conversation.command_details(["skill thumbs"]).splitlines() == [
         "- `/skill thumbs WORDS` make a thumbnail",

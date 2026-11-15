@@ -189,8 +189,10 @@ tinker restart --workdir ~/Projects/calc-py
 
 Talk with Tinker. Every command works here, and anything else is a normal chat. A command starts with `/`,
 as in `/status`; words that ask for one (`clear the chat, please`, `show recipe`) run it at once, though a
-deletion still asks first and a build still waits at its plan. A question about what Tinker has, like
-`which model is in use?`, is answered in words. `/exit` (or Ctrl-D) ends it:
+deletion still asks first and a build still waits at its plan. The same goes for skills: `I have an alias mgen,
+use it to generate images` learns it, and `generate an image of a shark` then runs it. A question about what
+Tinker has, like `which model is in use?`, is answered in words, and so is how to use one of its commands
+(`how do I learn a skill?`). `/exit` (or Ctrl-D) ends it:
 
 ```sh
 tinker
@@ -650,7 +652,8 @@ tinker help config                  # every setting you can change, with what it
 A value that does not fit is refused, with what the setting takes, and the old value stays.
 
 How hard the model thinks is not a setting: each request (a build, a fix, a question, each chat message) gets one
-level, `off`, `low`, `medium` or `high`, used by all its calls. Greetings and short questions get `off` and answer
+level, `off`, `low`, `medium` or `high`, used by all its calls. A chat message that asks for a command is
+picked out and filled in at `off`. Greetings and short questions get `off` and answer
 in a second or two; a bug, a design question or a long request with many parts or files gets `high`; anything
 else is weighed by one short model call. `learn`, `research`, `teach`, `read` and `exercise` never go below
 `medium`: they plan, extract and judge from pages, however short the topic. A model without that level gets its

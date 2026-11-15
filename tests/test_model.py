@@ -12,6 +12,7 @@ from tinkerkit.messages import DIMMED, HEADING, say
 from tinkerkit.model import (
     Answer,
     Calibrator,
+    Cut,
     GgufReading,
     LoadedModel,
     Model,
@@ -218,6 +219,15 @@ def test_a_quick_reply_thinks_at_a_given_level_as_the_model_takes_it(
     assert fake_ollama.calls[-1]["think"] == "high"
     Models.quick_reply(HI, 7)
     assert fake_ollama.calls[-1]["think"] is False
+
+
+@pytest.mark.spec("CNV-18")
+def test_a_quick_reply_stopped_at_length_comes_back_cut(measured_model, fake_ollama, tinker_home):
+    fake_ollama.reply({"content": " half an ans ", "done_reason": "length"}).reply(" whole ")
+    cut = Models.quick_reply(HI, 7)
+    whole = Models.quick_reply(HI, 7)
+    assert isinstance(cut, Cut) and cut == "half an ans"
+    assert not isinstance(whole, Cut) and whole == "whole"
 
 
 @pytest.mark.spec("MOD-23")

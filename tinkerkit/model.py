@@ -86,6 +86,10 @@ def assistant_turn(text):
     return {"role": "assistant", "content": text}
 
 
+class Cut(str):
+    pass
+
+
 class Model:
     def __init__(self, name, settings, keep_alive, log, max_growth=DEFAULT_CONFIG["max_growth"], level=None):
         self.name, self.settings = name, settings
@@ -748,7 +752,8 @@ class Models:
             think=quick_think if think is None else ThinkLevels.taken(think, ThinkLevels.values(name)),
             timeout=QUICK_REPLY_TIMEOUT,
         )
-        return data["message"]["content"].strip()
+        content = data["message"]["content"].strip()
+        return Cut(content) if data.get("done_reason") == "length" else content
 
     @staticmethod
     def senses():

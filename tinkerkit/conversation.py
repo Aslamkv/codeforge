@@ -61,7 +61,7 @@ lazy from .messages import (
     visible_width,
 )
 lazy from .messages import styled as styled_choice
-lazy from .model import Models, Ollama, OllamaError
+lazy from .model import Cut, Models, Ollama, OllamaError, system_turn
 lazy from .prompts import Part, Prompts, Reply
 lazy from .retrieval import Embeddings, Retriever, traits_part
 lazy from .reviewing import RequestReview
@@ -92,6 +92,8 @@ WIPE_SCREEN_AND_SCROLLBACK = "\033[H\033[2J\033[3J"
 NEXT_PAGE_HINT = "↵ next page"
 
 CHAT_MAX_REPLY_TOKENS = 1024
+CHAT_THINK_TOKENS = 2048
+CHAT_ROUTE_TOKENS = 64
 TYPING_SIGN_SECONDS = 4
 MODEL_BUSY_NOTE_AFTER_SECONDS = 5
 MODEL_BUSY_NOTE_EDIT_SECONDS = 30
@@ -1804,7 +1806,8 @@ class Talk:
         threading.Thread(target=self.write, args=(write_reply, asked, reply, written), daemon=True).start()
         note = self.busy_until(written, running, now, channel, message.chat)
         lines = replied_commands(reply[0]) if on_command and reply else []
-        Scratchpad.write(answered_episode(message, reply, lines))
+        if not (reply and isinstance(reply[0], Cut)):
+            Scratchpad.write(answered_episode(message, reply, lines))
         if lines:
             for shown in note or []:
                 channel.delete(message.chat, shown)
@@ -1863,37 +1866,45 @@ class Talk:
         thread = thread_part(
             [thread_line(episode) for episode in unanswered(memories, message.text, episodes)]
         )
-        recalled = unanswered(memories, message.text, memories.recall(message.text))
         asked = [{"role": "user", "content": message.text}]
-        level = reviewed_level(message.text, thread)
-        traits = traits_part(message.text)
-        names_system = (
-            Prompts.CHAT_SYSTEM.format(
-                style=channel.STYLE, index=chat_index(), state=state_part(state.everyday())
-            )
-            + traits
-            + remembered_part(recalled)
-            + thread
-        )
         try:
-            text = self.ask(
-                channel, message.chat, [{"role": "system", "content": names_system}] + asked, tokens, level
-            )
-            names = named_commands(text or "")
-            if any(takes_words(name) for name in names):
-                fill_system = (
-                    Prompts.CHAT_FILL_SYSTEM.format(
-                        commands=command_details(names), state=state_part(state.for_commands(names))
-                    )
-                    + traits
-                    + thread
-                )
-                text = self.ask(
-                    channel, message.chat, [{"role": "system", "content": fill_system}] + asked, tokens, level
-                )
+            text = self.routed(channel, message.chat, asked, thread)
+            names = named_commands(text)
+            if not names:
+                text = self.answered(channel, message, asked, memories, state, thread, tokens)
+            elif any(takes_words(name) for name in names):
+                filled = self.filled(channel, message, asked, names, state, thread, tokens)
+                text = routed_lines(filled, names) or slashed_lines(text)
+            else:
+                text = "\n".join(f"/{name}" for name in names)
         except OllamaError as exc:
             return md(t"⚠️ **The model did not answer:** {first_words(exc)}")
         return text or "_(no answer)_"
+
+    def routed(self, channel, chat, asked, thread):
+        system = Prompts.CHAT_ROUTE_SYSTEM.format(index=chat_index()) + thread
+        return self.ask(channel, chat, [system_turn(system)] + asked, CHAT_ROUTE_TOKENS, "off", 0) or ""
+
+    def answered(self, channel, message, asked, memories, state, thread, tokens):
+        recalled = unanswered(memories, message.text, memories.recall(message.text))
+        level = reviewed_level(message.text, thread)
+        system = (
+            Prompts.CHAT_SYSTEM.format(style=channel.STYLE, state=state_part(state.everyday()))
+            + traits_part(message.text)
+            + remembered_part(recalled)
+            + thread
+        )
+        return self.ask(channel, message.chat, [system_turn(system)] + asked, tokens, level)
+
+    def filled(self, channel, message, asked, names, state, thread, tokens):
+        system = (
+            Prompts.CHAT_FILL_SYSTEM.format(
+                commands=command_details(names), state=state_part(state.for_commands(names))
+            )
+            + traits_part(message.text)
+            + thread
+        )
+        return self.ask(channel, message.chat, [system_turn(system)] + asked, tokens, "off", 0)
 
     def told(self, channel, chat, asked, line, output):
         try:
@@ -1921,13 +1932,22 @@ class Talk:
             level,
         )
 
-    def ask(self, channel, chat, messages, tokens, level):
+    def ask(self, channel, chat, messages, tokens, level, temperature=None):
         done = threading.Event()
         threading.Thread(target=keep_typing, args=(channel, chat, done), daemon=True).start()
         try:
-            return answer_or_stop(lambda: Models.quick_reply(messages, tokens, level))
+            return answer_or_stop(lambda: self.thought_reply(messages, tokens, level, temperature))
         finally:
             done.set()
+
+    @staticmethod
+    def thought_reply(messages, tokens, level, temperature=None):
+        if level == "off":
+            return Models.quick_reply(messages, tokens, level, temperature)
+        reply = Models.quick_reply(messages, tokens + CHAT_THINK_TOKENS, level, temperature)
+        if isinstance(reply, Cut) and not reply:
+            return Models.quick_reply(messages, tokens, "off", temperature)
+        return reply
 
     def warm(self):
         threading.Thread(target=self.load, daemon=True).start()
@@ -3507,8 +3527,10 @@ def chat_index():
     chat_commands = [command for command in COMMANDS if command.name and command.chat]
     lines = []
     for group in GROUPS:
-        names = [f"/{command.name}" for command in chat_commands if command.group == group]
-        lines += [f"{group}: {' '.join(names)}"] if names else []
+        purposes = [
+            f"/{command.name} — {command.what}" for command in chat_commands if command.group == group
+        ]
+        lines += [f"{group}:", *purposes] if purposes else []
     return "\n".join(lines + [f"/skill {skill.name} — {skill.purpose}" for skill in Skills.all()])
 
 
@@ -3538,16 +3560,40 @@ def learned_skill(name):
 
 
 def named_commands(reply):
-    lines = [line.strip().strip("`").strip() for line in reply.splitlines()]
-    lines = [line for line in lines if line]
-    return [line[1:] for line in lines] if lines and all(map(names_a_chat_command, lines)) else []
+    lines = [bare_line(line).removeprefix("/") for line in reply.splitlines()]
+    names = [line_name(line) for line in lines if line]
+    return names if names and all(names) else []
 
 
-def names_a_chat_command(line):
-    if not line.startswith("/"):
-        return False
-    command = BY_NAME.get(line[1:])
-    return bool(command and command.chat) or learned_skill(line[1:]) is not None
+def routed_lines(reply, names):
+    return "\n".join(line for line in reply.splitlines() if is_routed(line, names)).strip()
+
+
+def slashed_lines(reply):
+    bare = (bare_line(line) for line in reply.splitlines())
+    return "\n".join(f"/{line.removeprefix('/')}" for line in bare if line)
+
+
+def is_routed(line, names):
+    bare = bare_line(line)
+    if not (bare.startswith("/") and command_of(bare)):
+        return True
+    return line_name(bare.removeprefix("/")) in names
+
+
+def bare_line(line):
+    return line.strip().strip("`").strip()
+
+
+def line_name(line):
+    words = line.split()
+    leading = (" ".join(words[:count]) for count in range(len(words), 0, -1))
+    return next((name for name in leading if names_a_chat_command(name)), "")
+
+
+def names_a_chat_command(name):
+    command = BY_NAME.get(name)
+    return bool(command and command.chat) or learned_skill(name) is not None
 
 
 def takes_words(name):
