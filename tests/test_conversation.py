@@ -29,6 +29,7 @@ from conftest import (
     tinker_runs,
 )
 from test_channels import BotAPI, every_telegram_talks_to
+from test_skills import made_skill
 
 import tinkerkit.channels as channels
 import tinkerkit.conversation as conversation
@@ -77,6 +78,7 @@ from tinkerkit.reading import Shelf
 from tinkerkit.remembering import Questions as KeptQuestions
 from tinkerkit.remembering import Scratchpad
 from tinkerkit.settings import EPISODE_GIST_CHARS, Config, Home
+from tinkerkit.skills import Skills
 
 
 @pytest.fixture(autouse=True)
@@ -136,6 +138,13 @@ class Recorder(Channel):
 
     def offer_answers(self, chat, shown):
         self.log.append(("answers", chat, shown, ""))
+
+    def send_file(self, chat, path, caption):
+        self.log.append(("file", chat, path, caption))
+        return super().send_file(chat, path, caption)
+
+    def send_photo(self, chat, path, caption):
+        self.log.append(("photo", chat, path, caption))
 
     def latest(self, chat, sent):
         return self.newest.get(chat) == sent
@@ -1691,6 +1700,35 @@ def test_reporter_shows_the_tracker_and_ends_with_its_ending(home_store, monkeyp
     reporter.finish(snapshot(ended={"status": "done", "headline": "Done.", "details": [], "next": []}))
     assert reporter.ended and "✅ **Done.**" in channel.texts()[-1]
     assert set(reporter.sent) == {("rec", "1"), ("rec", "2")}
+
+
+@pytest.mark.spec("SKL-7")
+def test_reporter_sends_the_ending_files_to_its_audience_after_the_ending(home_store, tmp_path):
+    picture, notes = tmp_path / "thumb.out", tmp_path / "notes.png"
+    picture.write_bytes(b"\x89PNG\r\n\x1a\nrest")
+    notes.write_text("plain words")
+    channel = Recorder(chats=("1", "2"))
+    reporter = Reporter(everyone([channel]), "thumbs", pid=4242)
+    ended = {"status": "done", "headline": "Used thumbs", "details": [], "next": []}
+    reporter.finish(snapshot(ended=ended | {"files": [str(picture), str(notes)]}))
+    delivered = [entry for entry in channel.log if entry[0] in ("file", "photo")]
+    assert delivered == [
+        ("photo", "1", str(picture), "thumb.out"),
+        ("photo", "2", str(picture), "thumb.out"),
+        ("file", "1", str(notes), "notes.png"),
+        ("file", "2", str(notes), "notes.png"),
+    ]
+    assert channel.log.index(delivered[0]) > max(
+        at for at, entry in enumerate(channel.log) if "Used thumbs" in entry[3]
+    )
+
+
+def test_a_channel_without_photos_sends_them_as_files(tmp_path):
+    channel = Channel("plain", {}, {})
+    seen = []
+    channel.send = lambda chat, text: seen.append((chat, text))
+    channel.send_photo("1", tmp_path / "a.png", "a.png")
+    assert seen == [("1", f"a.png\n📄 `{tmp_path / 'a.png'}`")]
 
 
 @pytest.mark.spec("CNV-16")
@@ -3516,6 +3554,29 @@ def test_the_command_details_give_only_the_named_commands_rows():
     rows = [row for name in ("clear", "system") for row in BY_NAME[name].rows]
     assert details == [f"- `/{synopsis}` {what}" for synopsis, what in rows]
     assert conversation.command_details(["no-such-command"]) == ""
+
+
+@pytest.mark.spec("CNV-18")
+def test_the_chat_index_lists_each_learned_skill_only_when_there_are_some():
+    assert "/skill " not in conversation.chat_index()
+    Skills.put(made_skill("thumbs"))
+    Skills.put(made_skill("count", purpose="count lines"))
+    index = conversation.chat_index().splitlines()
+    assert index[-2:] == ["/skill thumbs — make a thumbnail", "/skill count — count lines"]
+
+
+@pytest.mark.spec("CNV-18")
+def test_a_reply_naming_a_known_skill_goes_to_the_fill_call_with_its_template_and_slots():
+    Skills.put(made_skill("thumbs"))
+    assert conversation.named_commands("/skill thumbs") == ["skill thumbs"]
+    assert conversation.named_commands("/skill ghost") == []
+    assert conversation.takes_words("skill thumbs")
+    assert conversation.command_details(["skill thumbs"]).splitlines() == [
+        "- `/skill thumbs WORDS` make a thumbnail",
+        "  template: convert {source} -resize {size} {target}",
+        "  slots: source (e.g. a.png), size (e.g. 64x64)",
+    ]
+    assert conversation.ChatState(None).for_commands(["skill thumbs"]) == ""
 
 
 @pytest.mark.spec("CNV-22")

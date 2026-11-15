@@ -15,6 +15,7 @@ LAYERS = (
     "text",
     "store",
     "settings",
+    "formats",
     "remembering",
     "logger",
     "system",
@@ -34,6 +35,7 @@ LAYERS = (
     "passages",
     "web",
     "retrieval",
+    "skills",
     "conversation",
     "channels",
     "principles",
@@ -44,7 +46,6 @@ LAYERS = (
     "reflecting",
     "dreaming",
     "interviewing",
-    "formats",
     "reading",
     "teaching",
     "exercising",
@@ -130,7 +131,7 @@ def test_only_the_model_web_and_channel_modules_open_connections():
     runners = {
         path.stem for path in program_files() if "subprocess.Popen(" in path.read_text(encoding="utf-8")
     }
-    assert runners <= {"workspace", "settings", "conversation", "jobs"}, runners
+    assert runners <= {"workspace", "settings", "conversation", "jobs", "skills"}, runners
 
 
 def importers_of(module):

@@ -360,6 +360,19 @@ class Home:
         return folder / (re.sub(r"[^\w.-]+", "-", Path(name).name).strip("-.") or "book")
 
     @classmethod
+    def skill_folder(cls, name):
+        folder = cls.root / "skills"
+        folder.mkdir(parents=True, exist_ok=True)
+        stem = re.sub(r"[^\w.-]+", "-", name).strip("-.") or "skill"
+        run = 1
+        while True:
+            try:
+                (made := folder / f"{stem}-{run}").mkdir()
+                return made
+            except FileExistsError:
+                run += 1
+
+    @classmethod
     def lock_file(cls, name):
         cls.root.mkdir(parents=True, exist_ok=True)
         return cls.root / f"channel-{name}.lock"

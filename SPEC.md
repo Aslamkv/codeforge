@@ -69,6 +69,7 @@ listed above it:
 | `text` | plain text helpers every module shares |
 | `store` | one SQLite database of documents and logs (`Store`, `Log`) |
 | `settings` | the numbers and fixed names more than one part shares (a module's own stay with it); the Tinker home (`Home`) and its database, the settings table (`SETTINGS`, `Config`), numbered lists (`Numbered`), the one way to delete (`confirm_deletion`) |
+| `formats` | what a kept file holds, read by its bytes: one subclass of `Format` per kind (`Epub`, `Docx`, `Markdown`, `PlainText`, `Pdf`, `Image`, `Audio`, `Unsupported`), each giving its title and chapters (`Book`) |
 | `remembering` | what the person and Tinker did together, with no model: each request's episode (`Scratchpad`), the memories a dream keeps of them and their recall, ranked by the `Retriever` its caller gives (`Memories`), who the person is and who Tinker is for them (`Traits`), and the questions that wait for the person (`Questions`) |
 | `system` | what this computer tells at once by fixed read-only commands, with no model (`SystemCheck`, `SYSTEM_CHECKS`) |
 | `commands` | the one table of Tinker's commands with each one's kind (`kind_of`, `deletes`), and project references (`@ID`, `@folder`) |
@@ -85,6 +86,7 @@ listed above it:
 | `passages` | every page read as text: an HTML page's main content as blocks, and fetched pages as passages under headings, repeats dropped (`Cleaner`, `MainBlocks`, `Page`, `Passage`) |
 | `web` | the web plugin, the only part that reaches web content: search and fetch, and every failure of either (`Internet`, `WebPage`, `RequestLog`), and a page as text (`PageText`, a view over `passages`) |
 | `retrieval` | ranking texts by words and meaning (`Retriever`) and the cached embeddings (`Embeddings`) |
+| `skills` | a command of the person's learned as a skill, run from a chat and its result handed back (`Skill`, `Skills`, `SkillLearner`, `SkillRun`) |
 | `conversation` | the terminal and the chats as one conversation (`Desk`, `Channel`, `Markup`, `Talk`, `Shell`, `Progress`, `Reporter`) |
 | `channels` | the chat plugin: Telegram, and `tinker channel` |
 | `principles` | the principle record and its one home store (`Principle`, `Principles`) and the deltas' inducer (`Inducer`) |
@@ -94,9 +96,7 @@ listed above it:
 | `graph` | what Tinker knows as one graph of items and links (`Graph`), the page that shows it (`GraphPage`), and browsing it in pages (`MemoryBrowser`) |
 | `reflecting` | thinking about who the person is and who Tinker is for them, from what the dreams kept, into candidate traits and questions that wait (`Reflection`) |
 | `dreaming` | the dream: turning fresh episodes into memories while the queue is idle, revising and fading them, reflecting on them, and the live page that shows it (`Dream`, `DreamPage`) |
-| `interviewing` | the dialogue: opening the questions that wait, talking each through with the person and turning what they say into trait changes (`Interview`) |
-| `formats` | what a kept file holds, read by its bytes: one subclass of `Format` per kind (`Epub`, `Docx`, `Markdown`, `PlainText`, `Pdf`, `Image`, `Audio`, `Unsupported`), each giving its title and chapters (`Book`) |
-| `reading` | what the person gives to read: kept on the shelf (`Readings`), asked about inside a chat, and learned from chapter by chapter on request (`Reader`) |
+| `interviewing` | the dialogue: opening the questions that wait, talking each through with the person and turning what they say into trait changes (`Interview`) || `reading` | what the person gives to read: kept on the shelf (`Readings`), asked about inside a chat, and learned from chapter by chapter on request (`Reader`) |
 | `sandbox` | running a check with no network and writes only in its own folder, one backend per platform (`Sandbox`, `MacSandbox`, `LinuxSandbox`, `NoSandbox`) |
 | `checking` | running a check of what is taught: SQL in a confined database, a command in the sandbox (`Check`, `SqlCheck`, `CommandCheck`) |
 | `teaching` | asking what Tinker keeps (`Asker`), checked by running when it can, and teaching it, checked before anything changes (`Teacher`, `Memory`, `Verdict`) |
@@ -135,6 +135,7 @@ The Tinker home (**SET-1**) holds:
 | `knowledge.html` | the page `tinker knowledge graph` writes |
 | `memory.html` | the page of episodes and memories `memory graph` sends in a conversation (**DRM-9**) |
 | `reading/` | each kept file, as `FINGERPRINT.EXT` (**RDG-6**) |
+| `skills/` | a folder of its own for each skill run, its trial included (**SKL-4**) |
 
 The home database holds these collections and logs. `tinker clear PART` deletes a part (**SET-9**), named in
 the last column:
@@ -151,6 +152,7 @@ the last column:
 | `search plans` | the searches planned for each need (**KNW-24**) | `searches` |
 | `readings`, `reading numbers` | the shelf: each kept file's kind, file, source, size, fingerprint, its chapters (text, an image's description, a transcript) with each one's state, its survey, whether it was learned; the last number given, kept by a clear | `read` |
 | `commands` | the person's own commands (aliases, programs) | `commands` |
+| `skills` | each skill: its command, template, slots, purpose, output, peak memory, state and uses (**SKL-1**) | |
 | `projects` | a pointer to each project: its run ID, folder and task | `runs` |
 | `runs` | one line about each run: its task, language, status and dates (the last `RUNS_KEPT`) | `runs` |
 | `channels`, `channel_secrets` | the chat channels and their tokens | |
@@ -385,15 +387,15 @@ The home and its database, the settings, numbered lists, and the one way to dele
   of that command, with its own kind: `read list`, `read show`, `read rename` (`glance`), `read #N learn` (`job`),
   `read forget` (`glance`, deletes), `exercise status`, `channel add`,
   `channel remove`, `channel start`, `model calibrate NAME`, `model recipe` (`glance`), `model recipe all`, `dream run` (`job`; `dream`, `dream status` and
-  `dream graph` are `glance`),
+  `dream graph` are `glance`), `skill list` (`glance`), `skill forget` (`glance`, deletes),
   `model NAME` of a model that does not embed and was never measured (**CLI-3**) and `learn` of a command of
   the person's (**CLI-1**). `kind_of(argv)` gives the kind of what the words ask for, and `deletes(argv)`
   whether it deletes. The command line builds its parser and its help from the
   table, and the conversation its commands. Nothing else lists commands by kind.
 - **CMD-2** The runs are `task`, `restart`, `confirm`, `amend`, `add`, `fix` and `resume`. Every run takes
   `--web`. The runs that start a cycle (`task`, `restart`, `add`, `fix`) take `--confirm`, and the others do
-  not. The commands that delete are `clear`, `reset`, `restart`, `channel remove`, `memory forget` and
-  `read forget`.
+  not. The commands that delete are `clear`, `reset`, `restart`, `channel remove`, `memory forget`,
+  `read forget` and `skill forget`.
 - **CMD-3** `ref(word)` reads a project reference: `@` followed by a run ID or a folder name. Any other word is
   not a reference. `refs(words)` takes a reference from the start of the words, and leaves the rest as they
   are.
@@ -407,7 +409,7 @@ goes to the front, so the person is always answered first.
 - **JOB-1** `is_job(argv)` is true for a command of kind `job` or `pauses` (**CMD-1**): `task`, `restart`, `resume`,
   `confirm`, `amend`, `add`, `fix`, `model calibrate NAME`, `model recipe all`, `model NAME` of a model the home has no
   record of and that is not the embedding model (an embedding model not yet `embed_model` is one too: the home cannot
-  tell it apart, **CLI-3**), `learn`, `ask`, `teach`, `read`, `research`, `exercise`, `chat`, `command WHAT` and `dream run`. Help,
+  tell it apart, **CLI-3**), `learn`, `ask`, `teach`, `read`, `research`, `exercise`, `chat`, `command WHAT`, `dream run` and `skill` (`skill learn` and a skill's use). Help,
   and a build an exercise runs (`EXERCISE_ENV`, which holds the exercise's job number), are never jobs. A job keeps the
   computer awake while it runs (**SET-10**). `Jobs.running(argv)` makes a job the next number (`#1`, `#2` ...), kept in
   the home's `jobs` with its command, title, arguments, the day it started, its state, its process and its tracker
@@ -957,6 +959,54 @@ every failure of either: no caller sees a backend, an HTTP status or an exceptio
   blocks as text, a blank line between them. A heading becomes a `#` line of its level, list items become `- `
   lines one under another, and a code block keeps its layout.
 
+## skills (SKL)
+
+A command of the person's, learned once as a skill, runs from a chat in words and hands its result back.
+
+- **SKL-1** A skill is a command of the person's (a taught alias, **WS-9**, or a program) learned as a fixed
+  template with named slots, with its purpose, its output (`files` or `text`), the peak memory of its trial run,
+  its state (`candidate`, `proven` or `retired`) and the history of its uses (when, the slot values, ok or
+  failed). `Skills` keeps them in the home's `skills` (`put`, `get`, `all`, `forget`). Nothing in a skill is
+  particular to one kind of output.
+- **SKL-2** `skill learn NAME [PURPOSE]` (a job) finds out how NAME is used without asking the person
+  (`SkillLearner.probe`): the taught command (`TaughtCommands.look_up`), what the person's interactive shell
+  says of it (`$SHELL -i -c "which NAME"`), the program that resolves to (the first word that is a program on
+  `PATH` and not a word of the shell's own, such as `[`, `test`, `if` or `local`), and that program's `--help`, else
+  `-h`, each within `SKILL_PROBE_SECONDS`. A name none of these knows ends the learn, saying so. One model call
+  (`SKILL_SYSTEM`) turns what was found and the purpose into the template, its slots (each a name and a
+  sample value) and the output kind. A file the line writes gets a fixed name in the template, not a slot, as
+  each run has a folder of its own (**SKL-4**). A slot the template writes as `$name`, `${name}` or `"$name"`,
+  where name is one of the reply's slots, is read as `{name}`; other `$` words, such as `$HOME`, stay as
+  written. A reply with no template, or with a slot the template does not hold,
+  fails the learn.
+- **SKL-3** The template is fixed when it is learned: a use changes only the slot values, each put in with
+  `shlex.quote`, so the model never writes the shell line of a use. `SkillRun.command(values)` gives that
+  line; a slot with no value ends with `SystemExit` naming it.
+- **SKL-4** `SkillRun.run` runs the line in the person's shell with the alias prelude (**WS-10**), preceded,
+  when the skill's command is a function of the person's interactive shell, by that function's definition as
+  `$SHELL -i -c "which NAME"` gives it at run time (`SkillRun.definition`; the rest of the shell's startup files
+  are not run, and a command that is not a function adds nothing), in a new
+  folder of its own (`Home.skill_folder`), and measures its peak memory: the highest rise in the computer's
+  memory in use over the run, sampled every `SKILL_MEMORY_SAMPLE_SECONDS` while it runs (so memory a program
+  takes on a GPU that shares the RAM counts), or the run's own peak when that is higher. Its output is the files new in the
+  folder, else the existing files whose paths it printed, else what it printed, as text. A run that exits
+  non-zero, or a `files` skill that gives no file, fails with what it printed.
+- **SKL-5** A learn ends with one trial run with the slots' sample values, after the model in use is unloaded.
+  A slot whose sample value is the name of a file the trial wrote is a file the line writes: the template takes
+  that name in its place, fixed, and the slot is dropped (**SKL-2**).
+  A trial that works saves the skill `proven` with its peak memory and shows its output; one that fails saves
+  nothing and shows what the run printed. Learning a name again replaces its skill.
+- **SKL-6** `skill NAME WORDS` (a job) fills the slots from the words in order, one word each, the last slot
+  taking all the words left, and runs the skill with no question first: the person taught it. When the
+  skill's peak memory and the loaded model do not both fit in the computer's RAM, the model is unloaded first.
+  The use is added to the skill's history, and the job's ending carries the files, or the text. An unknown
+  name says so and lists the skills.
+- **SKL-7** The result goes to the asker only (**CNV-9**): in a Telegram chat an image (`formats.Image`) with
+  `send_photo` and any other file with `send_file` (**CHN-7**); the terminal says where each file is and opens
+  it, as **CNV-23** does; text is the answer.
+- **SKL-8** `skill list` (a glance) shows each skill with its purpose, state, slots and number of uses;
+  `skill forget NAME` deletes one, asking first (**SET-8**).
+
 ## conversation (CNV)
 
 The terminal and the chats are one conversation: the same commands, the same answers.
@@ -1126,6 +1176,7 @@ The terminal and the chats are one conversation: the same commands, the same ans
   (`STYLE`): a Telegram chat is read on a phone (brief, short lines), the console is a terminal; both render
   Markdown. Tinker acts on what the person asks rather than saying what to type, in two steps.
   The first (`CHAT_SYSTEM`) holds the style, the commands a chat offers by name only, grouped as in `help`,
+  the skills, one line each (`/skill NAME — purpose`, **SKL-1**), only when there are some,
   and the live state only when there is some: what runs now and the plan that waits. A plain question is
   answered there in one call. To act, the model replies with only the command names, one per line, where
   only RAM means `/system ram`. A named command that takes no
@@ -1133,11 +1184,13 @@ The terminal and the chats are one conversation: the same commands, the same ans
   command's synopses and descriptions, and only the state those commands use: the channels and whether
   Tinker listens on each for `channel`, the model in use for `model`, what runs and waits for the job
   commands, the plan that waits for `confirm`, `amend` and `rename`, and the known projects (`@ID`, folder,
-  task) for a command taking `@PROJECT`. It replies with only the command lines, options filled from the
+  task) for a command taking `@PROJECT`, and for a skill named its template and slots. It replies with only the command lines, options filled from the
   person's words (`/clear chat` for `wipe the chat`, `/channel add --kind telegram --name jarvis` for `add a
   telegram channel called jarvis`); for what a `system` check tells (**SYS-1**), only that check's line
   (`/system battery` for `am I charged?`); one command per line when several are asked for (`/system time`
-  and `/system date` for `time and date`). Words a
+  and `/system date` for `time and date`); `/skill learn mgen "generate an image from text"` for `I have an
+  alias mgen, use it to generate images from now on`, and then `/skill mgen a shark` for `generate an image of
+  a shark`; a value of several words for a skill's slot that is not its last is quoted. Words a
   command requires that the person did not give are asked for (**CNV-11**), never invented; a request that
   could mean two things gets one question back, and one that is fairly clear is acted on at once. Asked how to
   do it, it answers in words. A reply whose every line, with or without backticks, is one that `command_of`
@@ -1210,7 +1263,9 @@ The chat plugin: Telegram, and `tinker channel`.
   (`force_reply`), the hint in it cut to 64 characters. `choose(chat, question, names)` sends the question with a
   keyboard of one button per name, one to a row, hidden after a tap (`one_time_keyboard`).
   `send_file(chat, path, caption)` posts `sendDocument` as `multipart/form-data`: the chat, the file under its name, and
-  the caption as Telegram HTML (at most 1024 chars). A failure sends the caption alone.
+  the caption as Telegram HTML (at most 1024 chars). A failure sends the caption alone. `send_photo(chat, path,
+  caption)` does the same with `sendPhoto`, so the image shows in the chat; a refused photo is sent with
+  `send_file`.
 - **CHN-8** Every message of a chat served (Tinker's, and the person's) is kept in the ledger (**LED-1**); an
   edit moves its time on. `show` keeps the thing it shows, numbered, with the person's words it answers (their
   message within `ANSWER_WINDOW_SECONDS`). `glance` (**CNV-12**) also takes out the glance before it.

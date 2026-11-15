@@ -655,6 +655,36 @@ def test_send_file_uploads_a_document_with_its_caption(tmp_path):
     assert failing.send_file("42", page, "the caption") == 13
 
 
+def uploaded_parts(api):
+    ((headers, body),) = api.headers_and_bodies
+    boundary = headers["Content-Type"].split("boundary=")[1]
+    return {
+        re.search(rb'name="(\w+)"', part).group(1).decode(): part.split(b"\r\n\r\n", 1)[1][:-2]
+        for part in body.split(f"--{boundary}".encode())[1:-1]
+    }
+
+
+@pytest.mark.spec("CHN-7")
+def test_send_photo_uploads_a_photo_with_its_caption(tmp_path):
+    picture = tmp_path / "thumb.png"
+    picture.write_bytes(b"\x89PNG\r\n\x1a\nrest")
+    api = BotAPI(sendPhoto={"message_id": 14})
+    channel = telegram(api)
+    assert channel.send_photo("42", picture, "**thumb.png**") == 14
+    named = uploaded_parts(api)
+    assert api.calls[0][0] == "/botT0K/sendPhoto" and named["photo"] == b"\x89PNG\r\n\x1a\nrest"
+    assert named["caption"] == b"<b>thumb.png</b>" and channel.live_message_ids["42"] == [14]
+
+
+@pytest.mark.spec("CHN-7")
+def test_a_refused_photo_is_sent_as_a_document(tmp_path):
+    picture = tmp_path / "thumb.png"
+    picture.write_bytes(b"\x89PNG\r\n\x1a\nrest")
+    api = BotAPI(sendPhoto=(400, "Bad Request: IMAGE_PROCESS_FAILED"), sendDocument={"message_id": 15})
+    assert telegram(api).send_photo("42", picture, "thumb.png") == 15
+    assert [call[0] for call in api.calls] == ["/botT0K/sendPhoto", "/botT0K/sendDocument"]
+
+
 def sent_file(chat=42, size=10, name="My Book.epub", caption=None, **sent):
     sent = sent or {"document": {"file_id": "F1", "file_name": name, "file_size": size}}
     sent |= {"caption": caption} if caption else {}

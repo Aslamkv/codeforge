@@ -13,7 +13,7 @@ lazy import traceback
 lazy import webbrowser
 lazy from pathlib import Path
 
-from . import conversation, dreaming, exercising, logger, reading, remembering
+from . import conversation, dreaming, exercising, logger, reading, remembering, skills
 from .commands import BY_NAME, COMMANDS, GROUPS, kind_of, refs, taught_command
 from .interviewing import Interview
 from .jobs import (
@@ -30,6 +30,7 @@ from .jobs import (
 from .messages import Messages, human_duration, next_page_line, paint, say
 from .reading import Reader, Shelf
 from .remembering import Scratchpad
+from .skills import SkillLearner
 from .system import SYSTEM_CHECKS, SYSTEM_WORDS
 lazy from .building import BugReproducer, CodeWriter, TestToolSetup, TestWriter, Verifier
 lazy from .dreaming import Dream
@@ -171,6 +172,7 @@ class Cli:
         "knowledge": None,
         "memory": None,
         "dream": None,
+        "skill": None,
         "runs": False,
         "status": None,
         "log": None,
@@ -422,6 +424,8 @@ class Cli:
                 return Cli.memory_words(given.words, parser)
             case "dream":
                 return Cli.dream_words(given.words, parser)
+            case "skill":
+                return Cli.skill_words(given.words, parser)
             case "ask" | "teach" | "research" | "exercise":
                 return Cli.non_empty(" ".join(given.words), command, parser)
             case "config":
@@ -542,6 +546,16 @@ class Cli:
         parser.error("use tinker dream [status] | run | graph")
 
     @staticmethod
+    def skill_words(words, parser):
+        if words == ["list"] or (len(words) == 2 and words[0] == "forget"):
+            return words
+        if len(words) >= 2 and words[0] == "learn":
+            return [*words[:2], " ".join(words[2:]).strip(" \"'“”")]
+        if words[0] not in ("learn", "list", "forget"):
+            return words
+        parser.error("use tinker skill learn NAME [PURPOSE] | list | forget NAME")
+
+    @staticmethod
     def lists_readings(words):
         return words[0] == "list" and (len(words) == 1 or (len(words) == 2 and Cli.is_page(words[1])))
 
@@ -652,6 +666,7 @@ class Commands:
             "knowledge": lambda: self.show_knowledge(args.knowledge),
             "memory": lambda: self.memory(args.memory, args.yes),
             "dream": lambda: self.dream(args.dream),
+            "skill": lambda: self.skill(args.skill),
             "runs": self.list_runs,
             "jobs": lambda: self.list_jobs(*args.jobs),
             "stop": lambda: self.stop(args.stop),
@@ -1040,6 +1055,49 @@ class Commands:
                 Dream(Retriever(Embeddings.configured()), tracker.phase).run() or ending("done", "Dreamt")
             ),
         )
+
+    def skill(self, words):
+        match words:
+            case ["list"]:
+                return skills.show_list()
+            case ["forget", name]:
+                return skills.forgotten(name, self.args.yes)
+            case ["learn", name, purpose]:
+                return self.learn_skill(name, purpose)
+        return self.use_skill(skills.known_skill(words[0]), words[1:])
+
+    def use_skill(self, skill, words):
+        self.skill_job(
+            f"Using the skill {skill.name}",
+            lambda: Commands.use_ending(skill.name, skills.skill_used(skill, words)),
+        )
+
+    def learn_skill(self, name, purpose):
+        self.skill_job(
+            f"Learning the skill {name}",
+            lambda: Commands.trial_ending(name, SkillLearner.learned(name, purpose)),
+        )
+
+    def skill_job(self, title, ended):
+        self.follow(title)
+        self.reported(lambda: (), lambda tracker: ended())
+
+    @staticmethod
+    def trial_ending(name, result):
+        if result.ok:
+            return ending("done", f"Learned {name}", Commands.result_lines(result))
+        return ending("blocked", f"{name} did not work with its sample values", result.text.splitlines())
+
+    @staticmethod
+    def use_ending(name, result):
+        if result.ok:
+            done = ending("done", f"Used {name}", Commands.result_lines(result))
+            return done | {"files": [str(path) for path in result.files]}
+        return ending("blocked", f"{name} did not work", result.text.splitlines())
+
+    @staticmethod
+    def result_lines(result):
+        return [str(path) for path in result.files] or result.text.splitlines()
 
     @staticmethod
     def show_graph():

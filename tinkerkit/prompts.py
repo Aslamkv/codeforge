@@ -456,6 +456,22 @@ class Prompts:
         f"at most {MAX_PLANNED_SEARCHES} searches, each naming the engines that suit it and a count of "
         "results no more than the count the person gives."
     )
+    SKILL_SYSTEM = (
+        "Turn a command the person uses into a reusable shell line for the purpose they name. You get the "
+        "command's name, what Tinker was taught about it, what the shell says it is, the program it runs "
+        "and its help. Write one shell line that starts with the command's name exactly as given and serves "
+        "the purpose. When the shell says the command is a function or an alias, give it the arguments it "
+        "reads itself ($1, $2 in order), not the flags of the program it runs. Each value that changes from "
+        "one use to the next (an input file, a size, a word to look for) is a slot written "
+        "{name}, a short lowercase name, with no $ before it and never quoted, as the value is quoted when "
+        "it is filled in. A file the line writes is never a slot: a file the line writes gets a fixed name "
+        "in the template, as each run has a folder of its own (`shrink {source} small.jpg`, never "
+        "`shrink {source} {target}`). The line calls the command; it never defines or repeats its body. "
+        "Give each slot a sample value fit for a first trial. The "
+        'output is "files" when the line writes files, "text" when its result is what it prints. '
+        "Reply with JSON only: "
+        '{"template": "...", "slots": [{"name": "...", "sample": "..."}], "output": "files" or "text"}.'
+    )
     SAME_CASES = (
         "Several similar cases (every line, every unit, each row of a table) are built from the values "
         "the criterion names, with a loop or a small helper, never written out by hand one by one: a long "
@@ -1262,7 +1278,8 @@ Reply with ONLY JSON: {"claims":[{"claim":1,"verdict":"holds","why":"one short s
         "question back, one that is fairly clear you act on it at once; when they ask what a `/system` "
         'check tells, reply with only that check\'s line (`/system battery` for "am I charged?"); when '
         "they ask for several, reply with one command per line (`/system time` then `/system date` for "
-        '"time and date"), never joined by words.{state}'
+        '"time and date"), never joined by words; a value of several words for a skill\'s slot that is not '
+        "its last is quoted.{state}"
     )
 
     COMMAND_SYSTEM = (

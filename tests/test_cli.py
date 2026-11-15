@@ -1213,6 +1213,65 @@ def test_dream_refuses_words_it_cannot_read(home_store, capsys):
         assert "tinker dream [status] | run | graph" in capsys.readouterr().err
 
 
+@pytest.mark.spec("SKL-8", "CMD-1")
+def test_skill_list_and_forget_glance_at_the_skills(home_store, monkeypatch):
+    seen = []
+    monkeypatch.setattr(cli.skills, "show_list", lambda: seen.append(("show_list",)))
+    monkeypatch.setattr(cli.skills, "forgotten", lambda name, yes: seen.append(("forgotten", name, yes)))
+    for words in (["list"], ["forget", "thumbs"], ["forget", "thumbs", "--yes"]):
+        Commands(parse("skill", *words)).run()
+    assert seen == [("show_list",), ("forgotten", "thumbs", False), ("forgotten", "thumbs", True)]
+
+
+def skill_job(monkeypatch):
+    seen = []
+    monkeypatch.setattr(Commands, "follow", lambda self, title: seen.append(("follow", title)))
+    monkeypatch.setattr(
+        Commands, "reported", lambda self, setup, work: seen.append(("ended", work(FakeTracker(), *setup())))
+    )
+    return seen
+
+
+def skill_learning(monkeypatch, result):
+    seen = skill_job(monkeypatch)
+    monkeypatch.setattr(
+        cli.SkillLearner,
+        "learned",
+        staticmethod(lambda name, purpose: seen.append(("learned", name, purpose)) or result),
+    )
+    return seen
+
+
+@pytest.mark.spec("SKL-5")
+def test_skill_learn_is_a_job_that_ends_with_the_trial_output(home_store, monkeypatch, tmp_path):
+    made = tmp_path / "a.png"
+    seen = skill_learning(monkeypatch, cli.skills.SkillResult(True, [made], "", 10, tmp_path))
+    Commands(parse("skill", "learn", "thumbs", "make", "a", "thumbnail")).run()
+    assert seen[:2] == [("follow", "Learning the skill thumbs"), ("learned", "thumbs", "make a thumbnail")]
+    assert seen[2][1] == {"status": "done", "headline": "Learned thumbs", "details": [str(made)], "next": []}
+
+
+@pytest.mark.spec("SKL-5")
+def test_skill_learn_without_purpose_whose_trial_fails_shows_what_it_printed(
+    home_store, monkeypatch, tmp_path
+):
+    seen = skill_learning(
+        monkeypatch, cli.skills.SkillResult(False, [], "no such file\nusage: x\n", 10, tmp_path)
+    )
+    Commands(parse("skill", "learn", "thumbs")).run()
+    assert seen[1] == ("learned", "thumbs", "")
+    ended = seen[2][1]
+    assert ended["status"] == "blocked" and ended["details"] == ["no such file", "usage: x"]
+
+
+@pytest.mark.spec("SKL-8")
+def test_skill_refuses_words_it_cannot_read(home_store, capsys):
+    for wrong in (["learn"], ["forget"], ["list", "now"], ["forget", "a", "b"]):
+        with pytest.raises(SystemExit):
+            parse("skill", *wrong)
+        assert "tinker skill learn NAME [PURPOSE] | list | forget NAME" in capsys.readouterr().err
+
+
 @pytest.mark.spec("DRM-9")
 def test_memory_graph_and_dream_graph_write_the_memory_page(home_store, monkeypatch):
     seen = []
@@ -1385,3 +1444,48 @@ def test_a_job_keeps_the_computer_awake_and_a_glance_does_not(home_store):
 def test_a_research_reads_its_pages_with_the_research_learner():
     researcher = Commands.researcher(None, None, None, None)
     assert isinstance(researcher.learner, ResearchLearner)
+
+
+def skill_using(monkeypatch, result):
+    seen = skill_job(monkeypatch)
+    monkeypatch.setattr(
+        cli.skills,
+        "skill_used",
+        lambda skill, words: seen.append(("used", skill.name, words)) or result,
+    )
+    return seen
+
+
+@pytest.mark.spec("SKL-6")
+def test_skill_use_is_a_job_that_ends_with_the_files(home_store, monkeypatch, tmp_path):
+    cli.skills.Skills.put(
+        cli.skills.Skill("thumbs", "convert", "convert {a}", [{"name": "a"}], "", "files", 1)
+    )
+    made = tmp_path / "a.png"
+    seen = skill_using(monkeypatch, cli.skills.SkillResult(True, [made], "", 10, tmp_path))
+    Commands(parse("skill", "thumbs", "b.png", "big")).run()
+    assert seen[:2] == [("follow", "Using the skill thumbs"), ("used", "thumbs", ["b.png", "big"])]
+    assert seen[2][1] == {
+        "status": "done",
+        "headline": "Used thumbs",
+        "details": [str(made)],
+        "next": [],
+        "files": [str(made)],
+    }
+
+
+@pytest.mark.spec("SKL-6")
+def test_skill_use_that_fails_ends_blocked_with_what_it_printed(home_store, monkeypatch, tmp_path):
+    cli.skills.Skills.put(cli.skills.Skill("count", "wc", "wc", [], "", "text", 1))
+    seen = skill_using(monkeypatch, cli.skills.SkillResult(False, [], "no such file\n", 10, tmp_path))
+    Commands(parse("skill", "count")).run()
+    ended = seen[2][1]
+    assert ended["status"] == "blocked" and ended["details"] == ["no such file"]
+
+
+@pytest.mark.spec("SKL-6")
+def test_skill_use_of_an_unknown_name_stops_before_the_job(home_store, monkeypatch):
+    seen = skill_using(monkeypatch, None)
+    with pytest.raises(SystemExit, match="There is no skill ghost"):
+        Commands(parse("skill", "ghost", "x")).run()
+    assert seen == []

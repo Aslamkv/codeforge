@@ -515,6 +515,28 @@ conversation. It keeps one message through start, stop and resume, showing what 
 a task's does, in the chat that started or resumed it. A later conversation picks that message up again, and an
 exercise that was killed (or the computer restarted) goes on by itself.
 
+### Skills 🪄
+
+Turn a command of yours (an alias, a shell function, a program) into a skill Tinker runs for you. It finds out
+for itself how the command works (your shell, the program behind it, its `--help`), writes one fixed command
+line with slots for what changes, and tries it once on a sample in a folder of its own. A trial that fails
+saves nothing and shows what the command printed:
+
+```sh
+tinker skill learn mgen "generate an image from text"
+tinker skill mgen a shark      # the words fill the slots in order, the last slot takes the rest
+tinker skill list              # the skills it knows
+tinker skill forget mgen       # asks first
+```
+
+Only the slot values change when a skill runs, each safely quoted: the model never writes shell. A skill
+gives back the files it wrote (in a chat, an image is sent as a photo, any other file as a file; in a
+terminal, the file is opened) or the text it printed. If the skill and the loaded model don't both fit in
+memory, the model is unloaded first. Learning a skill and running one are each a [job](#jobs-).
+
+In a chat, say it in your own words: "I have an alias mgen, use it to generate images from now on" learns
+it, and "generate an image of a shark" then runs it.
+
 ## Remember 💭
 
 Tinker remembers what you do with it: each chat answer, command and build is kept as an episode. When a chat

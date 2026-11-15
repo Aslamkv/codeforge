@@ -536,18 +536,26 @@ class TelegramChannel(Channel):
         return "parse" in str(exc) or "entit" in str(exc)
 
     def send_file(self, chat, path, caption):
-        caption = self.said(caption)
         try:
-            sent = self.call(
-                "sendDocument",
-                wait=120,
-                file=Path(path),
-                chat_id=chat,
-                caption=Markup.html(caption)[:TELEGRAM_MAX_CAPTION_CHARS],
-                parse_mode="HTML",
-            )["message_id"]
+            return self.uploaded("sendDocument", "document", chat, path, caption)
         except OSError, ChannelError:
-            return self.send(chat, caption)
+            return self.send(chat, self.said(caption))
+
+    def send_photo(self, chat, path, caption):
+        try:
+            return self.uploaded("sendPhoto", "photo", chat, path, caption)
+        except OSError, ChannelError:
+            return self.send_file(chat, path, caption)
+
+    def uploaded(self, method, field, chat, path, caption):
+        sent = self.call(
+            method,
+            wait=120,
+            file=(field, Path(path)),
+            chat_id=chat,
+            caption=Markup.html(self.said(caption))[:TELEGRAM_MAX_CAPTION_CHARS],
+            parse_mode="HTML",
+        )["message_id"]
         self.seen(str(chat), sent)
         return sent
 
@@ -615,13 +623,14 @@ class TelegramChannel(Channel):
 
     @staticmethod
     def multipart(fields, file):
+        field, file = file
         boundary = f"tinker-{secrets.token_hex(12)}"
         parts = [
             f'--{boundary}\r\nContent-Disposition: form-data; name="{name}"\r\n\r\n{value}\r\n'.encode()
             for name, value in fields.items()
         ]
         parts.append(
-            f'--{boundary}\r\nContent-Disposition: form-data; name="document"; filename="{file.name}"\r\n'
+            f'--{boundary}\r\nContent-Disposition: form-data; name="{field}"; filename="{file.name}"\r\n'
             f"Content-Type: application/octet-stream\r\n\r\n".encode()
             + file.read_bytes()
             + b"\r\n"

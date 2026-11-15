@@ -47,6 +47,7 @@ def test_the_kind_of_a_command_and_of_its_actions_comes_from_the_table():
         "teach",
         "exercise",
         "resume",
+        "skill",
     ]
     assert [command.name for command in COMMANDS if command.kind == "pauses"] == ["chat", "command"]
 
@@ -81,6 +82,9 @@ def test_the_kind_of_a_command_and_of_its_actions_comes_from_the_table():
         (["dream"], "glance"),
         (["dream", "status"], "glance"),
         (["dream", "run"], "job"),
+        (["skill", "learn", "thumbs"], "job"),
+        (["skill", "list"], "glance"),
+        (["skill", "forget", "thumbs"], "glance"),
         (["fly"], None),
         ([], None),
     ],
@@ -140,6 +144,8 @@ def test_runs_and_what_deletes():
     assert not deletes(["memory", "forget", "t12"]) and kind_of(["memory", "forget", "t12"]) == "glance"
     assert kind_of(["memory"]) == "glance" and kind_of(["memory", "forget", "a1b2c3"]) == "glance"
     assert not deletes(["channel", "list"]) and not deletes(["status"]) and not deletes([])
+    assert deletes(["skill", "forget", "thumbs"]) and not deletes(["skill", "list"])
+    assert not deletes(["skill", "learn", "thumbs"])
 
 
 @pytest.mark.spec("CMD-3")
@@ -213,6 +219,7 @@ def test_offered_words_are_action_words_then_synopsis_alternatives_once():
     assert offered_words(BY_NAME["knowledge"]) == ["show", "find", "recent", "graph"]
     assert offered_words(BY_NAME["exercise"]) == ["status"]
     assert offered_words(BY_NAME["read"]) == ["list", "show", "rename", "forget"]
+    assert offered_words(BY_NAME["skill"])[:2] == ["list", "forget"]
     assert offered_words(BY_NAME["channel"]) == ["add", "remove", "start"]
     assert offered_words(BY_NAME["task"]) == [] and offered_words(BY_NAME["restart"]) == []
 

@@ -359,6 +359,12 @@ def test_the_fill_prompt_acts_with_options_filled_and_never_invents_required_wor
     assert "You cannot run anything" not in fill
 
 
+@pytest.mark.spec("CNV-18", "SKL-6")
+def test_the_fill_prompt_quotes_a_several_word_value_for_a_slot_that_is_not_the_last():
+    fill = Prompts.CHAT_FILL_SYSTEM.format(commands="/skill mgen {prompt}", state="")
+    assert "several words for a skill's slot that is not its last is quoted" in fill
+
+
 @pytest.mark.spec("PRM-14")
 def test_the_example_toolchain_commands_are_real_commands():
     toolchain = json.loads("{" + Prompts.TOOLCHAIN_JSON + "}")["toolchain"]

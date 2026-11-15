@@ -20,6 +20,7 @@ lazy import webbrowser
 lazy from pathlib import Path
 
 from .commands import BY_NAME, COMMANDS, GROUPS, CommandMenu, deletes, kind_of, refs
+from .formats import IMAGE_TYPES, sniffed
 from .jobs import (
     Jobs,
     Queue,
@@ -38,6 +39,7 @@ from .jobs import (
 )
 from .project import Runs, Tracker, saved
 from .remembering import EPISODE_BOOKKEEPING, Memories, Scratchpad
+from .skills import Skills
 lazy from .ledger import DONE_NOTE_KEPT_SECONDS, Ledger
 lazy from .messages import (
     CLEAR_LINE,
@@ -2191,6 +2193,19 @@ class Reporter:
             self.ended = True
             self.progress.take(snapshot or self.tracked())
             self.say(self.progress.ending(), done=True)
+            self.deliver((self.progress.snapshot.get("ended") or {}).get("files", []))
+
+    def deliver(self, files):
+        for path in map(Path, files):
+            for channel, chat in self.audience:
+                send = channel.send_photo if Reporter.is_image(path) else channel.send_file
+                send(chat, str(path), path.name)
+
+    @staticmethod
+    def is_image(path):
+        with contextlib.suppress(OSError), path.open("rb") as file:
+            return bool(sniffed(file.read(64), IMAGE_TYPES))
+        return False
 
 
 class Progress:
@@ -2460,7 +2475,7 @@ class Channel:
 
     def __init__(self, name, settings, secrets):
         self.name, self.settings, self.secrets = name, settings, secrets
-        self.allowed = {str(chat) for chat in settings.get("allowed", [])}
+        self.allowed = dict.fromkeys(str(chat) for chat in settings.get("allowed", [])).keys()
         self.closed = False
         self.state = None
 
@@ -2478,6 +2493,9 @@ class Channel:
 
     def send_file(self, chat, path, caption):
         return self.send(chat, f"{caption}\n📄 `{path}`")
+
+    def send_photo(self, chat, path, caption):
+        return self.send_file(chat, path, caption)
 
     def typing(self, chat):
         pass
@@ -3491,12 +3509,32 @@ def chat_index():
     for group in GROUPS:
         names = [f"/{command.name}" for command in chat_commands if command.group == group]
         lines += [f"{group}: {' '.join(names)}"] if names else []
-    return "\n".join(lines)
+    return "\n".join(lines + [f"/skill {skill.name} — {skill.purpose}" for skill in Skills.all()])
 
 
 def command_details(names):
-    commands = [BY_NAME[name] for name in names if name in BY_NAME]
-    return "\n".join(f"- `/{synopsis}` {what}" for command in commands for synopsis, what in command.rows)
+    return "\n".join(line for name in names for line in details_of(name))
+
+
+def details_of(name):
+    if name in BY_NAME:
+        return [f"- `/{synopsis}` {what}" for synopsis, what in BY_NAME[name].rows]
+    skill = learned_skill(name)
+    return skill_details(skill) if skill else []
+
+
+def skill_details(skill):
+    slots = ", ".join(f"{slot['name']} (e.g. {slot['sample']})" for slot in skill.slots)
+    return [
+        f"- `/skill {skill.name} WORDS` {skill.purpose}",
+        f"  template: {skill.template}",
+        f"  slots: {slots or 'none'}",
+    ]
+
+
+def learned_skill(name):
+    words = name.split()
+    return Skills.get(words[1]) if len(words) == 2 and words[0] == "skill" else None
 
 
 def named_commands(reply):
@@ -3506,11 +3544,15 @@ def named_commands(reply):
 
 
 def names_a_chat_command(line):
-    command = BY_NAME.get(line[1:]) if line.startswith("/") else None
-    return bool(command and command.chat)
+    if not line.startswith("/"):
+        return False
+    command = BY_NAME.get(line[1:])
+    return bool(command and command.chat) or learned_skill(line[1:]) is not None
 
 
 def takes_words(name):
+    if name not in BY_NAME:
+        return True
     return any(synopsis != name for synopsis, what in BY_NAME[name].rows)
 
 

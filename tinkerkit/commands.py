@@ -532,6 +532,37 @@ COMMANDS = [
         ],
     ),
     Command(
+        "skill",
+        "Learn",
+        "skill learn NAME [PURPOSE] | list | forget NAME",
+        "learn one of your commands as a skill, and list or forget the skills",
+        "Turn a command you use (taught to Tinker, known to your shell or a program on PATH) into a skill: skill "
+        "learn NAME [PURPOSE] finds out how it is used, drafts a command with slots for what changes, frees the "
+        "memory the model holds and tries it once with sample values. A trial that works keeps the skill, proven, "
+        "and shows what it made; one that fails keeps nothing and shows what it printed. Learning a name again "
+        "replaces its skill. skill list shows each skill with its purpose, state, slots and uses; skill forget "
+        "NAME deletes one.",
+        kind="job",
+        actions=[Action("glance", "list"), Action("glance", "forget", deletes=True)],
+        chat=True,
+        words=True,
+        options=("yes",),
+        arguments=[
+            Argument(
+                "words",
+                "+",
+                "WORDS",
+                "learn NAME [PURPOSE] (learn a command as a skill), list, or forget NAME",
+            )
+        ],
+        example='skill learn thumbs "make a thumbnail"',
+        rows=[
+            ("skill learn NAME [PURPOSE]", "learn a command as a skill and try it once"),
+            ("skill list", "each skill with its purpose, state, slots and uses"),
+            ("skill forget NAME [--yes]", "delete one skill"),
+        ],
+    ),
+    Command(
         "doctor",
         "Set up",
         "doctor",
