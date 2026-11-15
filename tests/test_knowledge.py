@@ -19,7 +19,7 @@ from tinkerkit.knowledge import (
 from tinkerkit.model import Models, Ollama, OllamaError
 from tinkerkit.principles import Principle, Principles, record
 from tinkerkit.prompts import Part, Prompts
-from tinkerkit.retrieval import Embeddings, Retriever
+from tinkerkit.retrieval import Embeddings, Likeness, Retriever
 from tinkerkit.settings import (
     CHUNKS_PER_PAGE,
     EMBED_KEEP_ALIVE,
@@ -244,6 +244,24 @@ def test_toolchain_fixes(tinker_home):
     assert [fix["cause"] for fix in known.language_doc["fixes"] if fix["failure"] == "failure 24"] == ["new"]
 
 
+@pytest.mark.spec("KNW-5", "KNW-11")
+def test_a_failure_alike_in_meaning_finds_the_fix(tinker_home, monkeypatch):
+    from tests.test_remembering import FakeEmbeddings
+
+    known = Knowledge("Python")
+    known.remember_fix({"failure": "no module named pytest", "cause": "pytest missing", "replay": None})
+    known.remember_fix({"failure": "cargo not found", "cause": "no rust", "replay": None})
+    meanings = {
+        "no module named pytest": [1.0, 0.0],
+        "the test runner is not installed": [0.99, 0.1],
+        "cargo not found": [0.0, 1.0],
+    }
+    assert known.similar_fix("the test runner is not installed") is None
+    monkeypatch.setattr(Embeddings, "configured", staticmethod(lambda: FakeEmbeddings(meanings)))
+    assert known.similar_fix("the test runner is not installed")["cause"] == "pytest missing"
+    assert known.similar_fix("cargo not found!")["cause"] == "no rust"
+
+
 @pytest.mark.spec("KNW-5")
 def test_remember_toolchain_without_its_project_commands(tinker_home):
     known = Knowledge("Python")
@@ -420,6 +438,42 @@ def test_read_facts_and_add_facts():
     )
     assert len(kept) == 2 and kept[0]["also"] == ["https://b"]
     assert Learner.pages_of(kept[0]) == ["https://a", "https://b"]
+
+
+@pytest.mark.spec("TCH-10", "KNW-11")
+def test_a_fact_alike_in_meaning_is_like_a_kept_fact(monkeypatch):
+    from tests.test_remembering import FakeEmbeddings
+
+    meanings = {
+        "Flask 3.1 needs Python 3.9": [1.0, 0.0],
+        "Python 3.9 is the oldest Flask 3.1 runs on": [0.99, 0.1],
+    }
+    kept = {"text": "Flask 3.1 needs Python 3.9"}
+    other = {"text": "Python 3.9 is the oldest Flask 3.1 runs on"}
+    assert Library.like_fact([kept], other) is None
+    monkeypatch.setattr(Embeddings, "configured", staticmethod(lambda: FakeEmbeddings(meanings)))
+    assert Library.like_fact([kept], other) is kept
+
+
+@pytest.mark.spec("TCH-10", "KNW-11")
+def test_a_checked_fact_is_compared_once_and_returned_as_kept(home_store, monkeypatch):
+    Library.save(
+        "flask", {"topic": "flask", "facts": [{"text": "Flask 3.1 needs Python 3.9", "sources": ["a"]}]}
+    )
+    like_fact = Library.like_fact
+    comparisons = []
+
+    def counted(facts, fact):
+        comparisons.append(fact["text"])
+        return like_fact(facts, fact)
+
+    monkeypatch.setattr(Library, "like_fact", staticmethod(counted))
+    same = Library.checked_fact("flask", "Flask 3.1 needs Python 3.9", ["b"])
+    new = Library.checked_fact("flask", "Flask routes are functions", ["c"])
+    assert len(comparisons) == 2
+    assert same["text"] == "Flask 3.1 needs Python 3.9" and same["sources"] == ["a", "b"]
+    assert new["text"] == "Flask routes are functions" and new["sources"] == ["c"]
+    assert Library.read("flask")["facts"] == [same, new]
 
 
 @pytest.mark.spec("KNW-13")
@@ -718,7 +772,9 @@ def test_read_analysis():
 
 class FakeLearner:
     def __init__(self, vectors):
-        self.embeddings = type("E", (), {"vectors": lambda self, texts, keep=True: vectors})()
+        self.embeddings = type(
+            "E", (), {"name": "fake", "failed": "", "vectors": lambda self, texts, keep=True: vectors}
+        )()
 
 
 def fact(text, source, section="1"):
@@ -743,15 +799,22 @@ def test_cross_check_supports_agreeing_facts_and_pairs_disagreeing_ones():
 
 @pytest.mark.spec("KNW-16")
 def test_fold_repeats_keeps_the_more_detailed_text():
-    facts = [fact("Open on Mondays", "https://a.org"), fact("Open on Mondays from 9 to 5", "https://b.org")]
-    vectors = [[1, 0], [1, 0.01]]
-    researcher = Researcher(type("L", (), {"model": None, "embeddings": None})())
-    researcher.fold_repeats(facts, vectors)
-    assert (
-        len(facts) == 1
-        and facts[0]["text"] == "Open on Mondays from 9 to 5"
-        and facts[0]["also"] == ["https://b.org"]
-    )
+    from tests.test_remembering import FakeEmbeddings
+
+    def folded(texts, embeddings):
+        facts = [fact(text, f"https://{site}.org") for text, site in zip(texts, "abcd")]
+        Researcher(type("L", (), {"model": None, "embeddings": None})()).fold_repeats(
+            facts, Likeness(embeddings)
+        )
+        return facts
+
+    meanings = {"Open on Mondays": [1, 0], "Open on Mondays from 9 to 5": [1, 0.01], "Closed": [0, 1]}
+    facts = folded(["Closed", "Open on Mondays", "Open on Mondays from 9 to 5"], FakeEmbeddings(meanings))
+    assert [fact["text"] for fact in facts] == ["Closed", "Open on Mondays from 9 to 5"]
+    assert facts[1]["also"] == ["https://c.org"]
+    assert len(folded(["Open on Mondays", "Open on Mondays from 9 to 5"], None)) == 2
+    by_words = folded(["Open on Mondays from 9 to 5", "Open on Mondays from 9 to 5pm"], None)
+    assert len(by_words) == 1 and by_words[0]["text"] == "Open on Mondays from 9 to 5pm"
     assert Researcher.agree({"text": "5 kg"}, {"text": "5 kg at 9am"}) and not Researcher.agree(
         {"text": "5"}, {"text": "6"}
     )

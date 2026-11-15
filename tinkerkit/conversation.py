@@ -474,10 +474,9 @@ class Desk:
         self.say_status(anew=True)
 
     def banner_lines(self):
-        embedding = Config.get("embed_model")
         chats = self.chats_line(Desk.chat_name)
         details = [f"model {Config.get('model') or 'no model yet'}"]
-        details += [f"embedding {embedding}"] if embedding else []
+        details += [f"embedding {Config.get('embed_model') or 'none'}"]
         details += [f"projects {self.shown_root()}"]
         details += [chats] if chats else []
         return ["🔧 Tinker", *details, "help lists commands · exit quits"]

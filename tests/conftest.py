@@ -14,6 +14,7 @@ from tinkerkit.jobs import Queue, Runner
 from tinkerkit.messages import say
 from tinkerkit.model import Model, Models, Ollama
 from tinkerkit.project import Project
+from tinkerkit.retrieval import Likeness
 from tinkerkit.settings import MAX_PLANNED_SEARCHES, Home
 from tinkerkit.store import Log, Store
 from tinkerkit.web import WebPage, readable
@@ -91,6 +92,11 @@ def tinker_home(tmp_path, monkeypatch):
     home = tmp_path / "tinker-home" / ".tinker"
     monkeypatch.setattr(Home, "root", home)
     return home
+
+
+@pytest.fixture(autouse=True)
+def no_embedding_model_failed(monkeypatch):
+    monkeypatch.setattr(Likeness, "failed", {})
 
 
 @pytest.fixture(autouse=True)

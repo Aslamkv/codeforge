@@ -1447,8 +1447,12 @@ def test_the_banner_names_tinker_the_model_the_projects_folder_and_the_chats(mon
     ]
     settings.clear()
     alone = Desk([ConsoleChannel()], "/tmp")
-    assert alone.banner_lines()[1:3] == ["model no model yet", f"projects {Path('/tmp').resolve()}"]
-    assert len(alone.banner_lines()) == 4
+    assert alone.banner_lines()[1:4] == [
+        "model no model yet",
+        "embedding none",
+        f"projects {Path('/tmp').resolve()}",
+    ]
+    assert len(alone.banner_lines()) == 5
 
 
 @pytest.mark.spec("CNV-6", "CHN-11")

@@ -35,7 +35,6 @@ from .remembering import (
     recall_text,
     stamp,
 )
-from .retrieval import Embeddings
 from .settings import (
     ANSWER_LASTS_DAYS,
     DREAM_BATCH_EPISODES,
@@ -47,7 +46,6 @@ from .settings import (
     Home,
 )
 from .store import Log
-from .text import similarity
 
 TRAIT_KEYS = ("id", "about", "when", "do", "status")
 EPISODE_PLACE_KEYS = ("id", "chat", "time", "dreamt")
@@ -185,13 +183,7 @@ class Dream:
         return [[living[index] for index in sorted(group)] for group in groups]
 
     def alike(self, texts):
-        embeddings = self.memories.retriever.embeddings
-        vectors = embeddings.vectors(texts, keep=False) if embeddings and texts else None
-        if vectors:
-            return lambda first, second: (
-                Embeddings.cosine(vectors[first], vectors[second]) >= SIMILAR_LESSON_MEANING
-            )
-        return lambda first, second: similarity(texts[first], texts[second]) >= SIMILAR_LESSON_WORDS
+        return self.memories.retriever.likeness().among(texts, SIMILAR_LESSON_WORDS, SIMILAR_LESSON_MEANING)
 
     def revised(self, group, now):
         reply = asked(Prompts.DREAM_REVISE_SYSTEM, revise_text(group))

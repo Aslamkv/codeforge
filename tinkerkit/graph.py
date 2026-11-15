@@ -6,7 +6,7 @@ lazy from collections import Counter, namedtuple
 lazy from .knowledge import Item, Library
 lazy from .messages import next_page_line, say
 lazy from .principles import Principles
-lazy from .retrieval import Embeddings
+lazy from .retrieval import Likeness
 lazy from .settings import (
     MEMORY_FOUND_SHOWN,
     MEMORY_ID_CHARS,
@@ -15,7 +15,7 @@ lazy from .settings import (
     Home,
     Numbered,
 )
-lazy from .text import fingerprint, first_line, similarity
+lazy from .text import fingerprint, first_line
 lazy from .workspace import TaughtCommands, Toolchain
 
 HISTORY_LINKS = frozendict(
@@ -203,25 +203,14 @@ class Graph:
             for node in self.nodes.values()
             if node["kind"] in ("lesson", "principle") and node["status"] != "retired"
         ]
-        texts = [lesson["text"] for lesson in lessons]
-        vectors = embeddings.vectors(texts, keep=False) if embeddings and lessons else None
-        alike = (
-            self.alike_in_meaning(embeddings, vectors) if vectors else self.alike_in_words(embeddings, texts)
+        likeness = Likeness(embeddings)
+        alike = likeness.among(
+            [lesson["text"] for lesson in lessons], SIMILAR_LESSON_WORDS, SIMILAR_LESSON_MEANING
         )
+        self.similar_by = likeness.used
         for first, second in itertools.combinations(range(len(lessons)), 2):
             if alike(first, second):
                 self.link(lessons[first]["id"], lessons[second]["id"], "similar")
-
-    def alike_in_meaning(self, embeddings, vectors):
-        self.similar_by = f"meaning ({embeddings.name})"
-        return lambda first, second: (
-            Embeddings.cosine(vectors[first], vectors[second]) >= SIMILAR_LESSON_MEANING
-        )
-
-    def alike_in_words(self, embeddings, texts):
-        why = embeddings.failed if embeddings else "no embedding model selected (tinker model NAME)"
-        self.similar_by = f"words ({why})" if texts else "words"
-        return lambda first, second: similarity(texts[first], texts[second]) >= SIMILAR_LESSON_WORDS
 
     def add_lesson(self, lesson, hub):
         details = [

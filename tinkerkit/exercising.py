@@ -14,16 +14,18 @@ lazy from .jobs import Jobs, tinker_process
 lazy from .knowledge import Knowledge, Library, language_key
 lazy from .project import Project, Steps, ending, saved
 lazy from .prompts import Part, Prompts
+lazy from .retrieval import Embeddings, Likeness
 lazy from .settings import (
     EARLIER_MEASURES_SHOWN,
     EXERCISE_BUILD_LOOK_SECONDS,
     EXERCISE_ENV,
     EXERCISE_FOLDER,
     REFLECTION_PROBLEMS,
+    SAME_MEANING,
     Home,
     projects_folder,
 )
-lazy from .text import field, first_line, now_text, similarity
+lazy from .text import field, first_line, now_text
 
 VERDICTS = ("language", "ambiguous", "other")
 PRACTICE_STEPS = ("build", "feature", "measure", "reflect", "done")
@@ -250,9 +252,8 @@ def read_choice(data, language, earlier):
     task, feature = field(data, "task"), field(data, "feature")
     if not task or not feature:
         raise ValueError('a practice project needs a "task" and a "feature"')
-    repeated = next(
-        (before for before in earlier if similarity(before, task) >= SAME_PRACTICE_TASK_SIMILARITY), None
-    )
+    closes = Likeness(Embeddings.configured()).to(task, earlier, SAME_PRACTICE_TASK_SIMILARITY, SAME_MEANING)
+    repeated = next((before for before, close in zip(earlier, closes) if close), None)
     if repeated:
         raise ValueError(f"it repeats an earlier project ({first_line(repeated, 80)}): choose another")
     if language.lower() not in task.lower():

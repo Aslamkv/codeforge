@@ -167,7 +167,7 @@ class FakeEmbeddings:
 
 
 @pytest.mark.spec("GRF-3")
-def test_similar_lessons_by_meaning_else_by_words(home_store):
+def test_similar_lessons_by_words_or_meaning(home_store):
     texts = [
         "Seed random generators inside tests",
         "Always seed random generators before tests run",
@@ -182,8 +182,11 @@ def test_similar_lessons_by_meaning_else_by_words(home_store):
     first, unlike, also_unlike, like_the_first = [1.0, 0, 0], [0, 1.0, 0], [0, 0, 1.0], [0.9, 0.1, 0]
     meaning = dict(zip((f"{text}." for text in texts), (first, unlike, also_unlike, like_the_first)))
     by_meaning = Graph.build(FakeEmbeddings(meaning))
-    assert by_meaning.similar_by == "meaning (embed-model)"
-    assert similar(by_meaning) == {frozenset((ids[texts[0]], ids[texts[3]]))}
+    assert by_meaning.similar_by == "words and meaning (embed-model)"
+    assert similar(by_meaning) == {
+        frozenset((ids[texts[0]], ids[texts[3]])),
+        frozenset((ids[texts[0]], ids[texts[1]])),
+    }
     by_words = Graph.build(FakeEmbeddings(None))
     assert by_words.similar_by == "words (embed-model gave no embeddings)"
     assert similar(by_words) == {frozenset((ids[texts[0]], ids[texts[1]]))}

@@ -932,6 +932,16 @@ def test_revise_groups_by_meaning_when_the_embeddings_are_given(home_store, monk
     assert second["id"] in asked[0][1]["content"]
 
 
+@pytest.mark.spec("DRM-12")
+def test_merge_traits_groups_by_words_when_meaning_finds_them_apart(home_store, monkeypatch):
+    living_trait("keep replies short", "chatting")
+    living_trait("keep every reply brief", "chatting")
+    asked = replying(monkeypatch, {"merge": []})
+    apart = iter([[1.0, 0.0], [0.0, 1.0]])
+    Dream(Retriever(FakeEmbeddings(lambda text: next(apart, [0.0, 1.0])))).merge_traits(NOW)
+    assert len(asked) == 1
+
+
 @pytest.mark.spec("DRM-5")
 def test_decay_retires_a_faded_memory_and_prunes_old_episodes(home_store, monkeypatch):
     faded = remembered("old", "Old.", now=LONG_AGO)

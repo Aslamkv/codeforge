@@ -9,7 +9,7 @@ lazy from pathlib import Path
 
 from .messages import say
 from .principles import Principles, claim_id, record
-from .retrieval import Embeddings, Retriever
+from .retrieval import Embeddings, Likeness, Retriever
 from .settings import (
     CHUNKS_PER_PAGE,
     FACT_PHASES,
@@ -28,6 +28,7 @@ from .settings import (
     RETIRED_KEPT_PER_LIST,
     SAME_CLAIM_SIMILARITY,
     SAME_FACT_SIMILARITY,
+    SAME_MEANING,
     SEARCHES_PER_RESEARCH_QUESTION,
     TEACH_PAGE_CHARS,
     TEACH_PAGES,
@@ -36,7 +37,7 @@ from .settings import (
     Config,
     Home,
 )
-from .text import field, fingerprint, first_line, host, now_text, one_line, similarity, split_text, words
+from .text import field, fingerprint, first_line, host, now_text, one_line, split_text, words
 lazy from .jobs import today
 lazy from .model import Answer, Models, OllamaError
 lazy from .project import Tracked
@@ -312,9 +313,12 @@ class Knowledge:
         )
 
     def similar_fix(self, failure):
-        scored = [(similarity(fix["failure"], failure), fix) for fix in self.language_doc.get("fixes", [])]
-        best = max(scored, key=lambda pair: pair[0], default=(0, None))
-        return best[1] if best[0] >= TOOLCHAIN_HINT_SIMILARITY else None
+        fixes = self.language_doc.get("fixes", [])
+        closes = Likeness(Embeddings.configured()).to(
+            failure, [fix["failure"] for fix in fixes], TOOLCHAIN_HINT_SIMILARITY, SAME_MEANING
+        )
+        close, best = max(zip(closes, fixes), key=lambda pair: pair[0], default=(0.0, None))
+        return best if close else None
 
     def remember_fix(self, fix):
         fixes = [
@@ -840,21 +844,22 @@ class Researcher:
         self.learner.outcome(f"{len(facts)} fact(s) from {len(sources)} page(s)")
 
     def cross_check(self, facts):
-        vectors = (
-            self.learner.embeddings.vectors([fact["text"] for fact in facts], keep=False)
-            if self.learner.embeddings
-            else None
-        )
-        if vectors is None:
-            say.warn("Cross-checking by repeats only: the embedding model gave no embeddings")
-            vectors = [None] * len(facts)
-        else:
-            self.fold_repeats(facts, vectors)
+        likeness = Likeness(self.learner.embeddings)
+        self.fold_repeats(facts, likeness)
+        vectors = self.meanings(facts, likeness.embeddings)
         sites = [{host(url) for url in Learner.pages_of(fact)} for fact in facts]
         support, differ = self.compared(facts, vectors, sites)
         for fact, found_on in zip(facts, support):
             fact["sites"] = sorted(found_on)
         return differ
+
+    @staticmethod
+    def meanings(facts, embeddings):
+        vectors = embeddings.vectors([fact["text"] for fact in facts], keep=False) if embeddings else None
+        if vectors is None:
+            say.warn("Cross-checking by repeats only: the embedding model gave no embeddings")
+            return [None] * len(facts)
+        return vectors
 
     def compared(self, facts, vectors, sites):
         support, differ = [set(site) for site in sites], []
@@ -868,23 +873,24 @@ class Researcher:
                 differ.append((first + 1, second + 1))
         return CrossCheck(support, differ)
 
-    def fold_repeats(self, facts, vectors):
-        index = 0
-        while index < len(facts):
-            kept = next(
+    def fold_repeats(self, facts, likeness):
+        texts = [fact["text"] for fact in facts]
+        closeness = likeness.among(texts, REPEAT_CLAIM_SIMILARITY, REPEAT_CLAIM_SIMILARITY)
+        kept = []
+        for position, fact in enumerate(facts):
+            original = next(
                 (
                     earlier
-                    for earlier in range(index)
-                    if self.same_claim(vectors[earlier], vectors[index], REPEAT_CLAIM_SIMILARITY)
-                    and self.agree(facts[earlier], facts[index])
+                    for earlier in kept
+                    if closeness(earlier, position) and self.agree(facts[earlier], fact)
                 ),
                 None,
             )
-            if kept is None:
-                index += 1
-                continue
-            vectors.pop(index)
-            self.fold(facts[kept], facts.pop(index))
+            if original is None:
+                kept.append(position)
+            else:
+                self.fold(facts[original], fact)
+        facts[:] = [facts[position] for position in kept]
 
     def fold(self, original, repeat):
         if self.more_detailed(repeat, original):
@@ -1247,27 +1253,27 @@ class Library:
             "id": fingerprint(text)[:12],
         }
 
+        kept = []
+
         def checked_in(entry):
             facts = entry.get("facts", [])
             same = Library.like_fact(facts, fact)
             if same is None:
-                return dict(entry, facts=facts + [record(fact, "checked", None)])
+                kept.append(record(fact, "checked", None))
+                return dict(entry, facts=facts + kept)
             same["sources"] = list(dict.fromkeys(same.get("sources", []) + fact["sources"]))
-            record(same, "checked", None)
+            kept.append(record(same, "checked", None))
             return entry
 
-        return Library.like_fact(Home.store().update("learned", slug, checked_in)["facts"], fact)
+        Home.store().update("learned", slug, checked_in)
+        return kept[-1]
 
     @staticmethod
     def like_fact(facts, fact):
-        return next(
-            (
-                known
-                for known in facts
-                if similarity(known.get("text", ""), fact["text"]) >= SAME_FACT_SIMILARITY
-            ),
-            None,
+        closes = Likeness(Embeddings.configured()).to(
+            fact["text"], [known.get("text", "") for known in facts], SAME_FACT_SIMILARITY, SAME_MEANING
         )
+        return next((known for known, close in zip(facts, closes) if close), None)
 
     @staticmethod
     def slug(topic):

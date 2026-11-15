@@ -16,6 +16,7 @@ from tinkerkit.settings import Home
 
 LOG_ROTATE_BYTES = 20_000_000
 SECRET_TABLES = {"channel_secrets"}
+QUIET_TABLES = {"embeddings"}
 MASK = "***"
 
 
@@ -66,6 +67,9 @@ class Step:
     def ends(self, arguments, result):
         return [self.end(arguments, result)]
 
+    def fails(self, arguments, error):
+        return [f"{self.subject(arguments)} failed: {type(error).__name__}: {error}"]
+
     def forget(self):
         pass
 
@@ -92,6 +96,29 @@ class ChangeFact(Fact):
 
     def forget(self):
         self.last.clear()
+
+
+class OutsideQuietTables:
+    def __init__(self, sentence):
+        self.sentence = sentence
+
+    def starts(self, arguments):
+        return self.heard(arguments, self.sentence.starts)
+
+    def ends(self, arguments, result):
+        return self.heard(arguments, lambda a: self.sentence.ends(a, result))
+
+    def fails(self, arguments, error):
+        return self.heard(arguments, lambda a: self.sentence.fails(a, error))
+
+    def forget(self):
+        self.sentence.forget()
+
+    @staticmethod
+    def heard(arguments, sentences):
+        if arguments.collection in QUIET_TABLES:
+            return []
+        return sentences(arguments)
 
 
 def command_line(arguments):
@@ -221,14 +248,21 @@ WATCHED = (
         "fetch",
         Step(lambda a: "Fetch", lambda a: f"Fetching {a.urls!r}", lambda a, result: "Fetch done"),
     ),
-    Watched("tinkerkit.store", "Store", "get", ChangeFact(lambda a: f"Database get {stored(a)}", looked_up)),
+    Watched(
+        "tinkerkit.store",
+        "Store",
+        "get",
+        OutsideQuietTables(ChangeFact(lambda a: f"Database get {stored(a)}", looked_up)),
+    ),
     Watched(
         "tinkerkit.store",
         "Store",
         "put",
-        Fact(
-            lambda a: f"Database put {stored(a)}",
-            lambda a, result: f"Database put {stored(a)}: {shown(a, a.value)!r}",
+        OutsideQuietTables(
+            Fact(
+                lambda a: f"Database put {stored(a)}",
+                lambda a, result: f"Database put {stored(a)}: {shown(a, a.value)!r}",
+            )
         ),
     ),
     Watched(
@@ -419,7 +453,7 @@ class Call:
         seconds = time.perf_counter() - self.clock
         self.write(
             lambda: [
-                f"{self.sentence.subject(self.arguments)} failed: {type(error).__name__}: {error} ({seconds:.3f}s)"
+                f"{sentence} ({seconds:.3f}s)" for sentence in self.sentence.fails(self.arguments, error)
             ]
         )
 

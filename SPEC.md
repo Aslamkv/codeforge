@@ -1089,7 +1089,7 @@ The terminal and the chats are one conversation: the same commands, the same ans
   print, with the cursor where it was. When the window is resized, the block and the rule are drawn again at the new
   size right away, still right above the prompt and with what Tinker printed right above them, and they never spill onto
   the prompt row. The conversation opens in a framed banner that names Tinker, the model in use, the embedding model
-  when one is set, the projects folder and the chats it listens on (each with its state, **CHN-11**), each on a line of
+  (`embedding NAME`, or `embedding none` when none is set), the projects folder and the chats it listens on (each with its state, **CHN-11**), each on a line of
   its own; each chat opens with the same lines as a message of its own (the first in bold, the last in italics), kept by
   `clear chat` as the status is. When a message changes what the banner says (`model NAME` picks another model), the
   chats are cleared as `clear chat` does, the terminal's screen and scrollback are wiped, and the banner is drawn and
@@ -1341,7 +1341,7 @@ kept as principles (**PRI**); where a point below names them, it holds for princ
   times seen plus the times helped. Proving or retiring a lesson (**KNW-7**, **KNW-9**) changes its principle.
 - **KNW-5** Toolchain fixes. `known_fix` replays only a fix for exactly this failure, not tried yet. A replay
   that fails retires that fix at once. `remember_fix` keeps the last 20, one per failure. `similar_fix` needs a
-  similarity of at least `TOOLCHAIN_HINT_SIMILARITY`. `remember_toolchain` keeps the toolchain without its
+  failure alike (**KNW-11**): words at least `TOOLCHAIN_HINT_SIMILARITY` or meaning at least `SAME_MEANING`. `remember_toolchain` keeps the toolchain without its
   `run` and `check`.
 - **KNW-6** `missing_checks` names the language's learned tools that check code and the toolchain that worked
   does not run: a type checker it never names, a linter or formatter where it has no command.
@@ -1367,7 +1367,10 @@ kept as principles (**PRI**); where a point below names them, it holds for princ
   for. `cosine` is the cosine similarity, and 0 for a zero vector.
 - **KNW-11** `Retriever.by_words` ranks the texts that hold the query's words with BM25, best first. `rank`
   fuses the word and meaning rankings and gives every index: the ones neither finds come last. When embeddings
-  fail, the meaning search is turned off for the rest of the run.
+  fail, the meaning search is turned off for the rest of the run. `Likeness(embeddings)` finds two texts alike when
+  their word similarity reaches a word threshold or, with an embedding model set, their cosine reaches a meaning
+  threshold. It asks for vectors without storing them; when embeddings fail, words alone decide for the rest of the run, with
+  one warning.
 - **KNW-12** `Learner.safe_commands` drops a command with a shell operator, a command that changes something,
   and an unsafe command.
 - **KNW-13** `Learner.read_facts` keeps facts of a known phase, cut to `MAX_FACT_CHARS`, at most
@@ -1379,7 +1382,8 @@ kept as principles (**PRI**); where a point below names them, it holds for princ
 - **KNW-15** `Researcher.read_frame` and `read_analysis` keep only well-formed questions, findings that cite
   known facts, contradictions of at least two facts, and gaps and checks within their limits. An analysis with
   no finding is a `ValueError`. A frame with no name takes the topic as asked.
-- **KNW-16** `Researcher.cross_check` folds repeats and adds support from other sites when the numbers agree.
+- **KNW-16** `Researcher.cross_check` folds repeats (alike, **KNW-11**: words or meaning at least
+  `REPEAT_CLAIM_SIMILARITY`) and adds support from other sites when the numbers agree.
   When they disagree, it returns the pair. `supported(stated, cited)` never rates a finding above what its
   facts allow: high only when at least half the cited facts are corroborated and none is disputed. `entry`
   sets each fact's confidence to disputed, corroborated or single.
@@ -1448,7 +1452,7 @@ What every learning keeps: patterns found in what Tinker read or did, as princip
   candidate, `born`), `strengthen(id, evidence)` (`confirmed`, adds the evidence), `contradict(id, evidence)`
   (`harmed` + 1, `contradicted`), `except(id, exception, evidence)` (adds the exception). A delta naming an
   unknown id, or an add with no `do` or no evidence, is dropped. An add like a kept principle in its scope
-  (`SAME_FACT_SIMILARITY` on `when` and `do`) strengthens that one instead.
+  (alike, **KNW-11**, on `when` and `do`: words `SAME_FACT_SIMILARITY` or meaning `SAME_MEANING`) strengthens that one instead.
 - **PRI-4** `Inducer.induce(passages, scope)` makes one call (`INDUCE_SYSTEM`) with numbered passages (source
   text, never facts made from it) and, numbered after them, the kept principles of that scope most about the
   passages (**PRI-6**, at most `INDUCE_KNOWN_SHOWN`). The reply is a list of deltas, each citing the passages it
@@ -1573,9 +1577,9 @@ What Tinker knows as one graph, and the page that shows it.
   a finding to its facts, and from a rule to each fact it cites, else the principle of that id; `became` from a web fact
   to the language's proven fact it was copied into; and `taught_by`, `confirmed_in`, `helped_in` and `failed_in` from an
   item to the runs in its history. A run is a node with its line from `runs`, or marked as having none.
-- **GRF-3** `similar` links join lessons and principles not retired by meaning (cosine at least
-  `SIMILAR_LESSON_MEANING`) when the embedding model gives their embeddings, else by words (at least
-  `SIMILAR_LESSON_WORDS`). `similar_by` says which, and why words were used.
+- **GRF-3** `similar` links join lessons and principles not retired that are alike (**KNW-11**): words at least
+  `SIMILAR_LESSON_WORDS`, or meaning at least `SIMILAR_LESSON_MEANING` when the embedding model gives their
+  embeddings. `similar_by` says `words and meaning (NAME)`, or `words (why)` when meaning was not used.
 - **GRF-4** `GraphPage.html(graph)` is one self-contained page: the graph as JSON inside it, and no script,
   style, font or image from elsewhere. It holds a plain list of every node by group (readable without
   scripts), escapes every text, and draws the graph when scripts run.
@@ -1665,8 +1669,8 @@ Nothing here calls the model.
   review of its level (**RVW-1**).
 - **REM-12** Before asking the model, `Talk.reply` looks for an answer memory not retired whose question means
   the same as the message: cosine at least `ANSWER_SAME_MEANING` (0.9) of the two as lowercase words with the
-  punctuation dropped, so "HOW TALL…!!" means "how tall…", or, with no embedding model, word
-  similarity at least `ANSWER_SAME_WORDS` (0.9); and every word of the message (lowercase, not in
+  punctuation dropped, so "HOW TALL…!!" means "how tall…", or word similarity at least `ANSWER_SAME_WORDS` (0.9)
+  (alike, **KNW-11**); and every word of the message (lowercase, not in
   `ANSWER_COMMON_WORDS`) is in its question, so "feet" never finds "km". A match is the reply, with no model
   call: "💭 From memory (you asked "QUESTION" on DATE):", the answer and the `/fresh` hint (**CNV-24**). It counts
   as recalled.
@@ -1678,7 +1682,7 @@ Nothing here calls the model.
   said it), `support` (id, sources), `confirm` (id, sources), `reject` (retired, with why), `amend` (id, new
   `when`/`do`) and `merge` (ids, `when`, `do`; **DRM-12**). Each is added to the trait's history. A delta with an
   unknown id, or an add, support or confirm with no source, is dropped. An add like a living trait
-  (`SAME_FACT_SIMILARITY` on `when` and `do`) supports it instead, and a confirmed add like a candidate confirms it
+  (alike, **KNW-11**, on `when` and `do`: words `SAME_FACT_SIMILARITY` or meaning `SAME_MEANING`) supports it instead, and a confirmed add like a candidate confirms it
   too; one like a retired trait is dropped, so nothing is asked twice. A merge makes one trait with the union of
   their sources, confirmed when any of them was, and retires the old ones "merged into tN"; a pending confirm
   question about one of them asks about the merged trait instead.
@@ -1988,7 +1992,8 @@ then is anything changed.
   failed check is told to the model with why, once, on the same conversation, and the check it gives back runs instead.
   When that one is refused or fails too, or none is given, it is said, and the first answer stands.
 - **TCH-10** An answer a check ran and confirmed is kept in its topic as a candidate fact, with a `checked` event and
-  its sources (the check and what it printed). One like a fact the topic keeps (`SAME_FACT_SIMILARITY`) adds its sources
+  its sources (the check and what it printed). One like a fact the topic keeps (alike, **KNW-11**: words
+  `SAME_FACT_SIMILARITY` or meaning `SAME_MEANING`) adds its sources
   and a `checked` event to that fact instead, whose status stays. `tinker teach` confirms or corrects it (**TCH-7**).
 
 ## sandbox (SBX)
@@ -2019,7 +2024,7 @@ It is a job like any other, so the person always comes first.
   the exercise). A language whose learned machine commands all failed is not installed here: it says so and
   ends before anything is practised.
 - **EXR-3** `read_choice` needs a task and a feature, rejects a task like an earlier project's
-  (`SAME_PRACTICE_TASK_SIMILARITY`), adds the language to a task that does not name it, and makes a folder name
+  (alike, **KNW-11**: words `SAME_PRACTICE_TASK_SIMILARITY` or meaning `SAME_MEANING`), adds the language to a task that does not name it, and makes a folder name
   from the task when the one given does not fit. `free_folder` gives a folder of the exercise folder
   (`EXERCISE_FOLDER` in the projects folder) that no project has yet.
 - **EXR-4** `practise` goes through a practice project's steps, `build → feature → measure → reflect → done`,
@@ -2224,7 +2229,7 @@ no other module imports it or changes for it, and deleting it with its one call 
   `channels.connect_by_address` (the host; at the end the address reached and whether by IPv4 or IPv6),
   `Desk.run` (the conversation), `Desk.handle` (the channel and what the user asked), `TelegramChannel.send`
   (the chat and the text), `Desk.close_channels` and `Desk.unload_models`. Facts: `Store.get`, `Store.put`
-  and `Store.append` (the table, the key, found or not, and the value), and `dreaming.reply_read` (the object read
+  and `Store.append` (the table, the key, found or not, and the value; none for the `embeddings` table), and `dreaming.reply_read` (the object read
   from a quick reply of a dream or interview, so a reply that cannot be read ends `failed` with why, and a note `Quick reply unread` keeps the error and
   the raw reply). A value of `channel_secrets` is
   masked: a dict keeps its keys with each value written `***`, any other value is written `***`.

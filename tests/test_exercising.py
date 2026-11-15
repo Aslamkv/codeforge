@@ -196,6 +196,21 @@ def test_read_choice_names_the_language_and_never_repeats_a_project():
         read_choice({"task": "A todo list"}, "Rust", [])
 
 
+@pytest.mark.spec("EXR-3", "KNW-11")
+def test_read_choice_rejects_a_task_alike_in_meaning(monkeypatch):
+    from test_remembering import FakeEmbeddings
+
+    from tinkerkit.retrieval import Embeddings
+
+    earlier = ["A todo list in Rust"]
+    task = {"task": "Track chores still to finish in Rust", "feature": "x"}
+    assert read_choice(task, "Rust", earlier)["task"] == "Track chores still to finish in Rust"
+    meanings = {"A todo list in Rust": [1.0, 0.0], "Track chores still to finish in Rust": [0.99, 0.1]}
+    monkeypatch.setattr(Embeddings, "configured", staticmethod(lambda: FakeEmbeddings(meanings)))
+    with pytest.raises(ValueError, match="repeats"):
+        read_choice(task, "Rust", earlier)
+
+
 @pytest.mark.spec("EXR-3")
 def test_each_practice_project_gets_a_folder_of_its_own(projects):
     (projects / "word-count").mkdir(parents=True)

@@ -375,6 +375,19 @@ def test_a_value_read_again_unchanged_is_logged_once(tmp_path):
 
 
 @pytest.mark.spec("LOG-4")
+def test_the_embeddings_table_is_never_logged(tmp_path):
+    logger.install()
+    store = Store(tmp_path / "s.db")
+    store.put("embeddings", "k", [0.5, 0.25])
+    assert store.get("embeddings", "k") == [0.5, 0.25]
+    assert store.get("embeddings", "missing") is None
+    with pytest.raises(TypeError):
+        store.put("embeddings", "bad", object())
+    store.put("c", "k", 1)
+    assert [PREFIX.sub("", line).rsplit(" (", 1)[0] for line in sentences()] == ["Database put c/'k': 1"]
+
+
+@pytest.mark.spec("LOG-4")
 def test_channel_secrets_are_masked_in_the_log(tmp_path):
     logger.install()
     store = Store(tmp_path / "s.db")

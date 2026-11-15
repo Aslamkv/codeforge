@@ -1,7 +1,7 @@
 from dataclasses import asdict, dataclass, field
 
 from .prompts import Part, Prompts
-from .retrieval import Retriever
+from .retrieval import Likeness, Retriever
 from .settings import (
     EVENTS_KEPT_PER_ITEM,
     FACT_PHASES,
@@ -9,9 +9,10 @@ from .settings import (
     MAX_FACT_CHARS,
     MAX_RULE_WHEN_CHARS,
     SAME_FACT_SIMILARITY,
+    SAME_MEANING,
     Home,
 )
-from .text import fingerprint, now_text, one_line, similarity
+from .text import fingerprint, now_text, one_line
 
 
 @dataclass
@@ -172,14 +173,14 @@ class Principles:
         return candidate
 
     def like(self, candidate):
-        return next(
-            (
-                kept
-                for kept in self.kept(candidate.scope)
-                if similarity(kept.rule_text(), candidate.rule_text()) >= SAME_FACT_SIMILARITY
-            ),
-            None,
+        kept = self.kept(candidate.scope)
+        closes = Likeness(self.embeddings).to(
+            candidate.rule_text(),
+            [principle.rule_text() for principle in kept],
+            SAME_FACT_SIMILARITY,
+            SAME_MEANING,
         )
+        return next((principle for principle, close in zip(kept, closes) if close), None)
 
     def strengthen(self, delta, run):
         principle = self.get(delta.get("id"))

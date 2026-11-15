@@ -3,7 +3,7 @@ lazy import math
 
 from .messages import say
 from .settings import EMBED_KEEP_ALIVE, Config, Home
-from .text import fingerprint, words
+from .text import fingerprint, similarity, words
 lazy from .model import Models, Ollama
 lazy from .prompts import Part, Prompts
 lazy from .remembering import Traits
@@ -76,6 +76,53 @@ class Retriever:
             return None
         self.used = f"words and meaning ({self.embeddings.name})"
         return [Embeddings.cosine(self.query_embeddings[query], vector) for vector in vectors]
+
+    def likeness(self):
+        return Likeness(self.embeddings)
+
+
+class Likeness:
+    NO_MODEL = "no embedding model selected (tinker model NAME)"
+    failed = {}
+
+    def __init__(self, embeddings):
+        self.embeddings, self.why = embeddings, self.NO_MODEL
+        if embeddings is not None and embeddings.name in self.failed:
+            self.embeddings, self.why = None, self.failed[embeddings.name]
+        self.used = "words"
+
+    def to(self, text, others, least_words, least_meaning):
+        if not others:
+            return []
+        closeness = self.among([text, *others], least_words, least_meaning)
+        return [closeness(0, position) for position in range(1, len(others) + 1)]
+
+    def among(self, texts, least_words, least_meaning):
+        vectors = self.meanings(texts)
+
+        def closeness(first, second):
+            measures = [(similarity(texts[first], texts[second]), least_words)]
+            if vectors:
+                measures.append((Embeddings.cosine(vectors[first], vectors[second]), least_meaning))
+            return max((close for close, least in measures if close >= least), default=0.0)
+
+        return closeness
+
+    def meanings(self, texts):
+        if not texts:
+            return None
+        if self.embeddings is None:
+            self.used = f"words ({self.why})"
+            return None
+        vectors = self.embeddings.vectors(texts, keep=False)
+        if not vectors:
+            say.warn(f"Likeness by meaning not used: {self.embeddings.failed}; words alone decide")
+            self.failed[self.embeddings.name] = self.embeddings.failed
+            self.why, self.embeddings = self.embeddings.failed, None
+            self.used = f"words ({self.why})"
+            return None
+        self.used = f"words and meaning ({self.embeddings.name})"
+        return vectors
 
 
 class Embeddings:

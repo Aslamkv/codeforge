@@ -199,10 +199,10 @@ Tinker has, like `which model is in use?`, is answered in words, and so is how t
 tinker
 ```
 
-On a colour terminal it opens with a banner: the model, the embedding model, the projects folder and the
-chats it listens on. Each chat opens cleared, with the same lines as a message above the status, and is
-cleared again when Tinker ends, leaving only the `not listening` status. `/model NAME` clears the chats and
-the terminal and shows the banner anew. The prompt, with a rule over it (redrawn when the window resizes),
+On a colour terminal it opens with a banner: the model, the embedding model (`embedding none` when none is
+set), the projects folder and the chats it listens on. Each chat opens cleared, with the same lines as a
+message above the status, and is cleared again when Tinker ends, leaving only the `not listening` status.
+`/model NAME` clears the chats and the terminal and shows the banner anew. The prompt, with a rule over it (redrawn when the window resizes),
 follows the output down to the bottom row; then older lines scroll into the scrollback.
 The prompt edits like a shell: left and right, a word at a time with Alt (or Ctrl on Linux), Home and End
 (or Ctrl-A and Ctrl-E), Backspace and Delete, Ctrl-U and Ctrl-K to clear to the start or the end, and Ctrl-W

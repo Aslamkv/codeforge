@@ -15,6 +15,7 @@ from .settings import (
     RECALL_MEANING,
     RECALL_SHOWN,
     SAME_FACT_SIMILARITY,
+    SAME_MEANING,
     TRAITS_CHARS,
     Home,
     Numbered,
@@ -169,17 +170,11 @@ class Memories:
     def matching_questions(self, request, questions):
         needed = telling_words(request)
         telling = [index for index, question in enumerate(questions) if needed <= words_of(question)]
-        if not telling:
-            return {}
-        plain = plain_words(request)
         candidates = [plain_words(questions[index]) for index in telling]
-        meanings = self.retriever.similarities(plain, candidates)
-        closeness, least = (
-            (meanings, ANSWER_SAME_MEANING)
-            if meanings
-            else ([similarity(plain, candidate) for candidate in candidates], ANSWER_SAME_WORDS)
+        closes = self.retriever.likeness().to(
+            plain_words(request), candidates, ANSWER_SAME_WORDS, ANSWER_SAME_MEANING
         )
-        return {index: close for index, close in zip(telling, closeness) if close >= least}
+        return {index: close for index, close in zip(telling, closes) if close}
 
     def recalled(self, memory, now):
         return self.update(memory["id"], {"recalled": memory["recalled"] + 1, "last_recalled": stamp(now)})
@@ -269,12 +264,16 @@ class Traits:
         return trait
 
     def most_alike(self, when, do):
-        said = likeness_text(when, do)
-        closeness = {
-            trait["id"]: similarity(said, likeness_text(trait["when"], trait["do"])) for trait in self.all()
-        }
-        alike = [trait for trait in self.all() if closeness[trait["id"]] >= SAME_FACT_SIMILARITY]
-        return max(alike, key=lambda trait: closeness[trait["id"]], default=None)
+        traits = self.all()
+        likeness = self.retriever.likeness() if self.retriever else WordsLikeness()
+        closes = likeness.to(
+            likeness_text(when, do),
+            [likeness_text(trait["when"], trait["do"]) for trait in traits],
+            SAME_FACT_SIMILARITY,
+            SAME_MEANING,
+        )
+        alike = [(close, trait) for close, trait in zip(closes, traits) if close]
+        return max(alike, key=lambda pair: pair[0], default=(0.0, None))[1]
 
     def alike_added(self, delta, alike, at):
         supported = self.support(delta, at)
@@ -499,6 +498,12 @@ class Questions:
 
 def likeness_text(when, do):
     return f"{when} {do}".strip()
+
+
+class WordsLikeness:
+    def to(self, text, others, least_words, least_meaning):
+        closes = [similarity(text, other) for other in others]
+        return [close if close >= least_words else 0.0 for close in closes]
 
 
 def history_entry(event, at, text):

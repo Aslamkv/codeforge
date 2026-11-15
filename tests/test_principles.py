@@ -3,6 +3,7 @@ import json
 import pytest
 
 from tests.test_knowledge import EmbedServer
+from tests.test_remembering import FakeEmbeddings
 from tinkerkit import principles as principles_module
 from tinkerkit.model import Ollama
 from tinkerkit.principles import Inducer, Principle, Principles
@@ -170,6 +171,19 @@ def test_apply_add_like_a_kept_principle_strengthens_that_one(principles):
     assert changed.id == kept.id
     assert changed.evidence == kept.evidence + [new_evidence("run-9")]
     assert changed.history[-1]["event"] == "confirmed"
+    assert len(principles.all()) == 1
+
+
+@pytest.mark.spec("PRI-3", "KNW-11")
+def test_apply_add_alike_in_meaning_strengthens_the_kept_one(tinker_home):
+    meanings = {
+        "a test reads a file\ngive it a temporary directory": [1.0, 0.0],
+        "a test opens a file\nhand it a scratch folder": [0.99, 0.1],
+    }
+    principles = Principles(FakeEmbeddings(meanings))
+    kept = kept_principle(principles)
+    [changed] = principles.apply([an_add(when="a test opens a file", do="hand it a scratch folder")], "run-9")
+    assert changed.id == kept.id
     assert len(principles.all()) == 1
 
 

@@ -293,6 +293,27 @@ def test_an_add_like_a_living_trait_supports_it_and_one_like_a_retired_trait_is_
     assert [trait["id"] for trait in Traits().all()] == ["t1", "t2"]
 
 
+@pytest.mark.spec("REM-14", "KNW-11")
+def test_an_add_alike_in_meaning_supports_the_closest_living_trait(home_store):
+    meanings = {"Writes Rust code every day": [1.0, 0.0], "Codes in Rust daily": [0.99, 0.1]}
+    traits = Traits(Retriever(FakeEmbeddings(meanings)))
+    traits.apply([add_trait("Writes Rust code every day"), add_trait("Plays chess on weekends")], NOW)
+
+    (supported,) = traits.apply([add_trait("Codes in Rust daily", sources=["e5"])], NOW)
+
+    assert supported["id"] == "t1" and supported["sources"] == ["e1", "e5"]
+    assert [trait["id"] for trait in traits.all()] == ["t1", "t2"]
+
+
+@pytest.mark.spec("REM-14", "KNW-11")
+def test_an_add_alike_in_meaning_is_a_new_trait_with_no_embedding_model(home_store):
+    Traits().apply([add_trait("Writes Rust code every day")], NOW)
+
+    (added,) = Traits().apply([add_trait("Codes in Rust daily", sources=["e5"])], NOW)
+
+    assert added["id"] == "t2"
+
+
 @pytest.mark.spec("REM-14", "DRM-12")
 def test_a_merge_makes_one_trait_with_all_sources_confirmed_when_any_was_and_retires_the_old_ones(home_store):
     Traits().apply(
@@ -1084,50 +1105,63 @@ def test_same_answer_finds_a_shouted_punctuated_request(home_store):
     assert memories().same_answer("HOW TALL is it!!")["id"] == kept["id"]
 
 
+class RecordingEmbeddings(FakeEmbeddings):
+    def __init__(self, closeness):
+        super().__init__({})
+        self.closeness, self.seen = closeness, []
+
+    def vectors(self, texts, keep=True, prune=False):
+        self.seen.append(texts)
+        return [[1.0, 0.0]] + [[close, (1 - close**2) ** 0.5] for close in self.closeness[: len(texts) - 1]]
+
+
 @pytest.mark.spec("REM-12")
 def test_same_answer_embeds_plain_words(home_store):
     memories().add("answer", "How tall is it?", "330 metres.", ["e1"], NOW, "always")
-    lookup = memories()
-    seen = []
-    lookup.retriever.similarities = lambda request, questions: seen.append((request, questions)) or [1.0]
+    embeddings = RecordingEmbeddings([1.0])
 
-    lookup.same_answer("HOW TALL is it!!")
+    memories(embeddings).same_answer("HOW TALL is it!!")
 
-    assert seen == [("how tall is it", ["how tall is it"])]
+    assert embeddings.seen == [["how tall is it", "how tall is it"]]
 
 
 @pytest.mark.spec("REM-12")
 def test_matching_questions_returns_every_match_by_index(home_store):
-    lookup = memories()
-    lookup.retriever.similarities = lambda request, questions: [0.95, 0.2, 0.92]
+    lookup = memories(RecordingEmbeddings([0.95, 0.2, 0.92]))
 
     matches = lookup.matching_questions(
-        "How tall is it?", ["how tall is it", "how tall is the tower", "HOW TALL is it!!"]
+        "How tall is it?", ["how tall is the place", "how tall is the tower", "how tall is the spire"]
     )
 
-    assert matches == {0: 0.95, 2: 0.92}
+    assert matches == {0: pytest.approx(0.95), 2: pytest.approx(0.92)}
 
 
 @pytest.mark.spec("REM-12")
 def test_matching_questions_leaves_out_a_question_missing_a_telling_word(home_store):
-    lookup = memories()
-    seen = []
-    lookup.retriever.similarities = lambda request, questions: (
-        seen.append(questions) or [1.0] * len(questions)
+    embeddings = RecordingEmbeddings([1.0, 1.0])
+
+    matches = memories(embeddings).matching_questions(
+        "how many feet is it", ["how many km is it", "how many feet is it"]
     )
 
-    matches = lookup.matching_questions("how many feet is it", ["how many km is it", "how many feet is it"])
-
-    assert matches == {1: 1.0}
-    assert seen == [["how many feet is it"]]
+    assert matches == {1: pytest.approx(1.0)}
+    assert embeddings.seen == [["how many feet is it", "how many feet is it"]]
 
 
 @pytest.mark.spec("REM-12")
-def test_matching_questions_leaves_out_a_close_question_below_the_threshold(home_store):
-    lookup = memories()
-    lookup.retriever.similarities = lambda request, questions: [0.89]
+def test_matching_questions_leaves_out_a_close_question_below_both_thresholds(home_store):
+    lookup = memories(RecordingEmbeddings([0.89]))
 
     assert lookup.matching_questions("how tall is it", ["how tall is it really"]) == {}
+
+
+@pytest.mark.spec("REM-12")
+def test_matching_questions_finds_by_words_when_meaning_is_far(home_store):
+    matches = memories(RecordingEmbeddings([0.1, 0.1])).matching_questions(
+        "HOW TALL is it!!", ["how tall is it?", "how tall is the tower in paris"]
+    )
+
+    assert list(matches) == [0] and matches[0] >= 0.9
 
 
 @pytest.mark.spec("REM-12")
@@ -1141,10 +1175,9 @@ def test_matching_questions_falls_back_to_word_similarity(home_store):
 
 @pytest.mark.spec("REM-12")
 def test_matching_questions_of_no_questions_is_empty_without_embedding(home_store):
-    lookup = memories()
-    seen = []
-    lookup.retriever.similarities = lambda request, questions: seen.append(questions) or []
+    embeddings = RecordingEmbeddings([])
+    lookup = memories(embeddings)
 
     assert lookup.matching_questions("how tall is it", []) == {}
     assert lookup.matching_questions("how many feet", ["how many km"]) == {}
-    assert seen == []
+    assert embeddings.seen == []
