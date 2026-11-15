@@ -2390,6 +2390,8 @@ state = {"title": "calc: a calculator", "run": "abc123", "folder": folder, "step
          "began": time.time(), "steps": [], "passing": None, "live": "", "latest": "", "waiting": None, "ended": None,
          "before": 0.0, "seconds": 1.0}
 job = {"number": os.getpid(), "command": "task", "title": "task", "state": "running", "pid": os.getpid()}
+if os.environ.get("FAKE_TINKER_FOLLOWS"):
+    job.update(pid=os.getpid() + 100000, follower=os.getpid())
 store.put("jobs", str(os.getpid()), dict(job, progress=state))
 print("Plan: the spec (project)", flush=True)
 if args[:1] == ["slow"]:
@@ -2401,6 +2403,10 @@ if args[:1] == ["task"]:
 elif args[:1] == ["research"]:
     state["ended"] = {"status": "done", "headline": "Researched it.", "details": [], "next": [],
                       "text": "**Python 3.14** came out in October [1]."}
+    if os.environ.get("FAKE_TINKER_FOLLOWS"):
+        picture = sys.argv[0].rsplit("/", 1)[0] + "/chart.png"
+        open(picture, "wb").write(b"\\x89PNG\\r\\n\\x1a\\nrest")
+        state["ended"]["files"] = [picture]
 else:
     state["ended"] = {"status": "done", "headline": "Done. All 1 spec tests pass (SPEC.md).", "details": [], "next": []}
 store.put("jobs", str(os.getpid()), dict(job, progress=state))
@@ -2829,6 +2835,16 @@ def test_research_in_a_chat_is_the_research_job_ending_with_its_answer(desk):
     wait_until(lambda: "came out in October" in channel.texts()[-1])
     shown = channel.texts()[-1].split("\n\n🕒")[0]
     assert "✅ **Researched it.**" in shown and shown.endswith("**Python 3.14** came out in October [1].")
+
+
+@pytest.mark.spec("JOB-10", "SKL-7")
+def test_a_chat_job_another_tinker_runs_ends_in_the_chat_with_its_files(desk, monkeypatch):
+    monkeypatch.setenv("FAKE_TINKER_FOLLOWS", "1")
+    desk, channel, script = desk
+    say(desk, channel, "/research the newest Python")
+    picture = str(Path(script).parent / "chart.png")
+    wait_until(lambda: ("photo", "1", picture, "chart.png") in channel.log)
+    assert any("✅ **Researched it.**" in text for text in channel.texts())
 
 
 @pytest.mark.spec("CNV-16")

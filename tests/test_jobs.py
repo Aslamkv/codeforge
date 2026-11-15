@@ -979,6 +979,17 @@ def test_a_job_command_hosting_the_runner_follows_its_job_then_the_queue(
 
 
 @pytest.mark.spec("JOB-10")
+def test_the_job_a_process_follows_is_found_by_that_process(home_store, runner, monkeypatch, tmp_path):
+    monkeypatch.setattr(
+        Runner, "host", classmethod(lambda cls: threading.Thread(target=Runner.go_through).start() or True)
+    )
+    monkeypatch.chdir(tmp_path)
+    with pytest.raises(SystemExit), Jobs.running(["learn", "rust"]):
+        raise AssertionError("a job command runs no job itself")
+    assert Jobs.of_process(os.getpid())["title"] == "learn rust"
+
+
+@pytest.mark.spec("JOB-10")
 def test_a_job_command_ends_once_its_job_leaves_the_queue(home_store, runner, monkeypatch, capsys):
     asked_to_host = []
 

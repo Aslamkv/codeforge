@@ -462,10 +462,12 @@ goes to the front, so the person is always answered first.
   of them in a row the runner gives up on it: the job is `stopped`, leaves the queue, and log `output #N` says why
   (`resume #N` tries it again). An idle queue starts a dream (**DRM-1**).
 - **JOB-10** Whoever asked for a job follows it: a job command in a terminal (and the conversation's own
-  `tinker ...` process) puts its job at the front, prints log `output #N` as it grows and ends once its job
-  leaves the queue; one that hosts the runner keeps it until the queue is empty. Ctrl-C there, and quitting
-  the conversation, pause the job that runs: it stays at the head and goes on when Tinker starts next, or at
-  once if another live Tinker runs the queue. A glance (**CMD-1**) never enters the queue.
+  `tinker ...` process) puts its job at the front, keeps its own pid on the job as `follower` (so
+  `Jobs.of_process` finds the job by it too, and the conversation tracks the job's progress, ending and files),
+  prints log `output #N` as it grows and ends once its job leaves the queue; one that hosts the runner keeps it
+  until the queue is empty. Ctrl-C there, and quitting the conversation, pause the job that runs: it stays at the
+  head and goes on when Tinker starts next, or at once if another live Tinker runs the queue. A glance
+  (**CMD-1**) never enters the queue.
 - **JOB-11** `tinker clear jobs [#N...] [--yes]` archives those jobs (with no `#N`, every stopped and finished
   one), as a deletion (**SET-8**): each is kept with the state `archived` (and `archived_from`, the state it
   had), listed by `tinker jobs archived` and not without a state, and its journal and its `calls #N` log are

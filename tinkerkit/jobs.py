@@ -292,7 +292,9 @@ class Jobs:
 
     @classmethod
     def follow(cls, argv):
-        job = cls.save(dict(cls.current or cls.new(argv), state="queued", folder=str(Path.cwd())))
+        job = cls.save(
+            dict(cls.current or cls.new(argv), state="queued", folder=str(Path.cwd()), follower=os.getpid())
+        )
         follower = Follower(job["number"])
         Queue.add_front(job["number"])
         hosting = Runner.host()
@@ -375,7 +377,7 @@ class Jobs:
 
     @staticmethod
     def of_process(pid):
-        return next((job for job in JOBS.newest() if job.get("pid") == pid), None)
+        return next((job for job in JOBS.newest() if pid in (job.get("pid"), job.get("follower"))), None)
 
     @staticmethod
     def every():
