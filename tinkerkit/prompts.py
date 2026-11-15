@@ -80,15 +80,38 @@ class Reply:
     STRAY_QUOTE_RE = re.compile(r'[\]}]\s*(")\s*[\]}]')
 
     def __init__(self, raw, thought=""):
-        self.text = self.THINK_RE.sub("", raw or "").strip()
+        self.text = self.THINK_RE.sub("", raw or "").rpartition("</think>")[2].strip()
         self.thought = thought
 
     def json(self, system=""):
         start, end = self.text.find("{"), self.text.rfind("}")
         if start == -1:
             raise ValueError("no JSON object in reply")
-        parsed = self.first_parsed(self.json_candidates(self.text[start : end + 1], self.text[start:]))
+        parsed = self.first_whole_object()
+        if parsed is None:
+            parsed = self.first_parsed(self.json_candidates(self.text[start : end + 1], self.text[start:]))
         return ExampleCopies(system).dropped(parsed) if system else parsed
+
+    def first_whole_object(self):
+        decoder = json.JSONDecoder()
+        for offset in self.outermost_openers():
+            try:
+                parsed, _ = decoder.raw_decode(self.text, offset)
+            except json.JSONDecodeError:
+                continue
+            if isinstance(parsed, dict):
+                return parsed
+        return None
+
+    def outermost_openers(self):
+        depth = 0
+        for offset, char in enumerate(self.text):
+            if char == "{":
+                if depth == 0:
+                    yield offset
+                depth += 1
+            elif char == "}":
+                depth = max(depth - 1, 0)
 
     def json_candidates(self, whole, to_the_end):
         trimmed = to_the_end.rstrip().rstrip("`").rstrip()
@@ -1157,8 +1180,9 @@ Reply with ONLY JSON: {"claims":[{"claim":1,"verdict":"holds","why":"one short s
         "fill what the traits leave unknown. Give each the thought that led to it and expected, your guess at "
         "the person's answer. The person reads the question, thought and expected: plain words, naming no id. "
         f"{REFLECT_WAITING} questions waiting is plenty: a guideline, never a reason to "
-        "stop thinking. Never ask again a question like one waiting, nor about a trait the person retired. Reply "
-        "with only one JSON object:\n"
+        "stop thinking. Never ask again a question like one waiting, nor about a trait the person retired, "
+        "nor what an asked question or a known trait already covers, even in other words. Reply with only one "
+        "JSON object:\n"
         '{"thought":"what you notice and still wonder, in two or three sentences",\n'
         ' "add":[{"about":"person|tinker","when":"the situation, or empty","do":"the trait as said",'
         '"sources":["e1","m1"],"question":"a short question to confirm it, shown to the person in plain words, '
@@ -1218,11 +1242,12 @@ Reply with ONLY JSON: {"claims":[{"claim":1,"verdict":"holds","why":"one short s
         "never a matter the person raised in passing, such as the weather. An add's or amend's do is a "
         "lasting habit in Tinker's own words, never the message copied, and keeps every detail and condition "
         "the message gives. When the message asks to be asked something, that is no add: a request to be "
-        "asked something is a question. Say settled true when the message answers the question, false when "
-        "the talk about it should go on. Your question is null unless the message raises a new follow-up. A "
-        "message that does not answer the current question (off-topic, such as \"By the way, what's the weather "
-        'like?") gives settled false, empty confirm, reject, amend and add, and question null. Leave a list '
-        "empty when the message gives nothing for it."
+        "asked something is a question. Settled is true when the message answers the question or asks to move "
+        "on from it (ask less, change the topic), and false when it does not answer it (off-topic) or the talk "
+        "about it should go on. Your question is null unless the message raises a new follow-up. An off-topic "
+        'message, such as "By the way, what\'s the weather like?", gives empty confirm, reject, amend and add, '
+        "and question null. A request about this talk is not a trait: it gives empty confirm, reject, amend and "
+        "add. Leave a list empty when the message gives nothing for it."
     )
 
     CHAT_FILL_SYSTEM = (

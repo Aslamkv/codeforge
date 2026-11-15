@@ -326,7 +326,7 @@ class TelegramChannel(Channel):
             pass
         message = query.get("message") or {}
         data = query.get("data") or ""
-        if not (data.startswith("/") or data.isdigit()) or not message.get("chat"):
+        if not data.startswith("/") or not message.get("chat"):
             return []
         return [self.message_of({"chat": message["chat"], "text": data, "from": query.get("from")})]
 

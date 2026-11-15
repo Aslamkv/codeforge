@@ -491,7 +491,44 @@ def test_an_added_question_is_pending_with_the_next_id(home_store):
 
 
 @pytest.mark.spec("REM-15")
-@pytest.mark.parametrize("status", ["answered", "skipped"])
+@pytest.mark.parametrize(
+    ("text", "kept"),
+    [
+        ("Do you write Rust daily (e12)?", "Do you write Rust daily?"),
+        ("You write Rust (e1, m3) and Go [t4, q2].", "You write Rust and Go."),
+        ("e1, m3 and t4 show it", "show it"),
+        ("You like tea (see e1).", "You like tea (see)."),
+        ("Based on e12, you like Rust.", "Based on, you like Rust."),
+        ("Is t4x part of item3?", "Is t4x part of item3?"),
+        ("ran 'ruff format .' in e9", "ran 'ruff format .' in"),
+        ("used 'pytest -q' in e5 and e6, which is quiet", "used 'pytest -q' in, which is quiet"),
+        ("You ran it (e4, e10)", "You ran it"),
+        ("Episode e9 shows it", "Episode shows it"),
+        ("You ran e1, e2 , then stopped", "You ran, then stopped"),
+        ("Tea, e1, and coffee", "Tea, and coffee"),
+        ("Run 'ruff format .'  ( fast ) , then rest ", "Run 'ruff format .'  ( fast ) , then rest "),
+    ],
+)
+def test_an_added_question_keeps_no_ids(home_store, text, kept):
+    question = ask(text, thought=f"Thought: {text}", expected=f"Expected: {text}")
+
+    assert (question["text"], question["thought"], question["expected"]) == (
+        kept,
+        f"Thought: {kept}",
+        f"Expected: {kept}",
+    )
+    assert home_store.get("questions", question["id"])["text"] == kept
+
+
+@pytest.mark.spec("REM-15")
+def test_a_question_alike_once_ids_are_gone_is_absorbed(home_store):
+    ask("Do you write Rust daily?")
+
+    assert ask("Do you write Rust daily (e12, m3)?", sources=["e2"]) is None
+
+
+@pytest.mark.spec("REM-15")
+@pytest.mark.parametrize("status", ["answered"])
 def test_a_confirm_question_like_a_settled_one_is_kept_pending_with_its_own_traits_and_sources(
     home_store, status
 ):

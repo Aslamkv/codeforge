@@ -488,8 +488,10 @@ What is said in the chats, kept so that a chat is only a view of it.
 
 ## prompts (PRM)
 
-- **PRM-1** `Reply(raw).text` is the raw reply without `<think>…</think>`, stripped.
-- **PRM-2** `Reply.json()` gives the JSON object in the reply, with prose around it allowed. Only when it
+- **PRM-1** `Reply(raw).text` is the raw reply without `<think>…</think>`, and without all before a lone
+  `</think>`, stripped.
+- **PRM-2** `Reply.json()` gives the JSON object in the reply, with prose around it allowed: the first whole
+  object that parses from an outermost `{`, so braces in the prose before or after it do not matter. Only when none does, it
   does not parse, it closes brackets the reply left open: before a closing bracket further out, and at the
   end; and it drops a quote standing between two closing brackets (`]}"}` as `]}}`). No object is a `ValueError`. What cannot be mended raises the reply's own `JSONDecodeError`, so the
   caller asks again. Given the system prompt, `Reply.json(system)` leaves out each string the reply copied from
@@ -1604,9 +1606,11 @@ Nothing here calls the model.
   question about one of them asks about the merged trait instead.
 - **REM-15** A question in `questions` is `{id, kind, about, text, thought, expected, traits, sources, status, answer,
   at}`: id `qN`, kind `confirm` (of candidate `traits`) or `open`, `about` `person` or `tinker`, `thought` why Tinker
-  wonders, `expected` its guess at the answer, status `pending`, `answered` or `skipped`. One like a pending question (word
+  wonders, `expected` its guess at the answer, status `pending` or `answered`. An id the model named in its text,
+  thought or expected (`e12`, `m3`, `t4`, `q2`) is taken out on keeping, with the brackets and commas left empty
+  around it, since the person never sees ids. One like a pending question (word
   similarity at least `SAME_FACT_SIMILARITY`) is dropped, and the pending one gains its traits and sources, so the
-  one question confirms the candidate too; an answered or skipped question never drops a new one.
+  one question confirms the candidate too; an answered question never drops a new one.
   `next()` gives the pending ones in turn: confirms first, the best-supported candidate first, then open ones, in
   the order kept; a skipped question goes behind every pending one, still pending. A confirm question none of whose
   traits is still a candidate (each confirmed or retired) no longer waits.
@@ -1637,7 +1641,7 @@ dream reflects at its end (**DRM-11**), and the dialogue reflects live when noth
 - **REF-3** The prompt holds `TINKER_PURPOSE`, what Tinker is for in the words of [The idea](#the-idea); says a trait
   is lasting, never a passing state (as **DRM-6**); tells the model `REFLECT_WAITING` (12) questions waiting is
   plenty, as a guideline and never a block; that a question like one waiting, or about a trait the person retired,
-  is not to ask again; asks for the `thought` in two or three sentences, so a reply never spends its budget on
+  is not to ask again, nor one that an asked question or a known trait already covers, even in other words; asks for the `thought` in two or three sentences, so a reply never spends its budget on
   a thought that goes on; and says each question's text, thought and expected are shown to the person, in plain
   words that name no id.
 
@@ -1731,8 +1735,8 @@ questions the dreams left. Nothing here is shown unasked.
   and null when the message raises none. They are applied before anything is shown, so a restart loses nothing.
   `settled` true answers the question, and the next pending one is opened after the `say` (**INT-1**); false keeps
   it current, so the talk goes on; a message that does not answer the question (off-topic) gives `settled` false,
-  empty deltas and no `question`. A reply
-  that cannot be read, or a call that fails, says the answer could not be read and keeps the question. A message
+  empty deltas and no `question`. A request about the talk itself (ask less, change the topic) is no trait: it gives
+  empty deltas and `settled` true. A reply that cannot be read, or a call that fails, says the answer could not be read and keeps the question. A message
   and `/skip` are to the question last shown in that chat while it is pending, even when questions kept since (a
   dream run) now come before it.
 - **INT-4** `/skip` sends the question to the end of the queue (**REM-15**); its candidates stay candidates, and the
@@ -2134,7 +2138,8 @@ no other module imports it or changes for it, and deleting it with its one call 
   `Desk.run` (the conversation), `Desk.handle` (the channel and what the user asked), `TelegramChannel.send`
   (the chat and the text), `Desk.close_channels` and `Desk.unload_models`. Facts: `Store.get`, `Store.put`
   and `Store.append` (the table, the key, found or not, and the value), and `dreaming.reply_read` (the object read
-  from a quick reply of a dream or interview, so a reply that cannot be read ends `failed` with why). A value of `channel_secrets` is
+  from a quick reply of a dream or interview, so a reply that cannot be read ends `failed` with why, and a note `Quick reply unread` keeps the error and
+  the raw reply). A value of `channel_secrets` is
   masked: a dict keeps its keys with each value written `***`, any other value is written `***`.
   A `Store.get` whose line, but for its seconds, is the one this process last wrote for that table and key
   writes nothing, so a value read again and again unchanged is written once.

@@ -459,6 +459,16 @@ def test_a_quick_reply_that_cannot_be_read_ends_with_why(monkeypatch):
 
 
 @pytest.mark.spec("LOG-4")
+def test_a_quick_reply_that_cannot_be_read_keeps_its_raw_text(monkeypatch):
+    quick_model_replying(monkeypatch, lambda messages: '{"a": tru}')
+    logger.install()
+    assert dreaming.asked("system", "content") is None
+    [unread] = [line for line in sentences() if line.startswith("Quick reply unread")]
+    assert unread.startswith("Quick reply unread: JSONDecodeError: Expecting value")
+    assert unread.endswith(": '{\"a\": tru}'")
+
+
+@pytest.mark.spec("LOG-4")
 def test_a_conversation_that_raises_ends_with_its_failure(monkeypatch):
     def broken(self):
         raise OSError("no chats")

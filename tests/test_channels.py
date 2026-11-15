@@ -409,17 +409,6 @@ def test_a_fresh_answer_button_tap_arrives_as_fresh():
     assert answered == ["q1", "q2"]
 
 
-@pytest.mark.spec("INT-1")
-def test_a_tapped_number_button_arrives_as_its_number():
-    tapped = {"id": "q1", "from": {"username": "me"}, "message": {"message_id": 7, "chat": {"id": 42}}}
-    updates = [
-        {"update_id": 10, "callback_query": dict(tapped, data="2")},
-        {"update_id": 11, "callback_query": dict(tapped, id="q2", data="x2")},
-    ]
-    messages = telegram(BotAPI(getUpdates=[updates])).receive(1)
-    assert [(message.chat, message.text, message.sender) for message in messages] == [("42", "2", "me")]
-
-
 @pytest.mark.spec("CNV-24")
 def test_offer_fresh_puts_a_button_on_the_reply():
     api = BotAPI()

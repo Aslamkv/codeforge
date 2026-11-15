@@ -3,16 +3,18 @@ import json
 from tinkerkit.conversation import ALL_FOR_NOW, Turn, md
 from tinkerkit.prompts import Prompts
 from tinkerkit.reflecting import (
-    TRAIT_ABOUTS,
     Reflection,
+    add_delta,
     asked,
     cited_only,
     listed,
+    own_traits,
     question_kept,
     said,
+    shown_question,
     traits_shown,
 )
-from tinkerkit.remembering import Questions, Scratchpad, Traits
+from tinkerkit.remembering import TRAIT_ABOUTS, Questions, Scratchpad, Traits
 from tinkerkit.settings import INTERACT_TURNS, Home
 
 UNREADABLE = "Couldn't read that answer; here it is again."
@@ -86,16 +88,8 @@ def talk_text(chat, question, waiting, message):
     traits = Traits().all()
     return json.dumps(
         {
-            "traits": {
-                about: traits_shown([trait for trait in traits if trait["about"] == about], "confirmed")
-                for about in TRAIT_ABOUTS
-            },
-            "question": {
-                "text": question["text"],
-                "thought": question["thought"],
-                "expected": question["expected"],
-                "traits": asked_traits(question),
-            },
+            "traits": {about: traits_shown(own_traits(traits, about), "confirmed") for about in TRAIT_ABOUTS},
+            "question": {**shown_question(question), "traits": asked_traits(question)},
             "next": waiting["text"] if waiting else None,
             "dialogue": dialogue(chat),
             "message": message,
@@ -145,16 +139,9 @@ def deltas_of(reply, asked_about, source):
         ),
         *(amend_of(item) for item in listed(reply.get("amend")) if item.get("id") in asked_about),
         *(
-            {
-                "op": "add",
-                "about": item["about"],
-                "when": said(item, "when"),
-                "do": item["do"],
-                "sources": [source],
-                "confirmed": True,
-            }
-            for item in listed(reply.get("add"))
-            if item.get("about") in TRAIT_ABOUTS and said(item, "do")
+            {**delta, "confirmed": True}
+            for delta in (add_delta(item, [source]) for item in listed(reply.get("add")))
+            if delta is not None
         ),
     ]
 

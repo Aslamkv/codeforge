@@ -12,6 +12,8 @@ from tinkerkit.workspace import Toolchain
 def test_reply_drops_thinking_and_whitespace():
     assert Reply("  <think>hmm\nwell</think>\n answer \n").text == "answer"
     assert Reply(None).text == ""
+    assert Reply("half a thought\n</think>\n answer ").text == "answer"
+    assert Reply("<think>a</think> first </think> answer").text == "answer"
 
 
 @pytest.mark.spec("PRM-2")
@@ -37,6 +39,13 @@ def test_reply_drops_thinking_and_whitespace():
             id="reply ends before its last closer",
         ),
         pytest.param('} then {"a": 1', {"a": 1}, id="closer only before the object"),
+        pytest.param(
+            'Fill {name} and {x: 1} in:\n{"a": {"b": 1}}\nThen use {it}.',
+            {"a": {"b": 1}},
+            id="braces in prose before and after",
+        ),
+        pytest.param('{"a": 1} or else {"b": 2}', {"a": 1}, id="first whole object wins"),
+        pytest.param('Here {"a": 1} {broken', {"a": 1}, id="unclosed brace after the object"),
     ],
 )
 def test_json_in_prose_mends_the_usual_slips(text, expected):
@@ -406,9 +415,16 @@ def test_the_interact_talk_prompt_keeps_question_null_without_a_follow_up_and_se
     assert '"question":null or {"about":"person|tinker"' in prompt
     assert "question is null unless the message raises a new follow-up" in prompt
     assert (
-        "A message that does not answer the current question (off-topic, such as \"By the way, what's the "
-        'weather like?") gives settled false, empty confirm, reject, amend and add, and question null'
+        "Settled is true when the message answers the question or asks to move on from it (ask less, change "
+        "the topic), and false when it does not answer it (off-topic) or the talk about it should go on."
         in prompt
+    )
+    assert (
+        'An off-topic message, such as "By the way, what\'s the weather like?", gives empty confirm, reject, '
+        "amend and add, and question null." in prompt
+    )
+    assert (
+        "A request about this talk is not a trait: it gives empty confirm, reject, amend and add." in prompt
     )
 
 
@@ -421,6 +437,7 @@ def test_the_reflect_prompt_holds_tinkers_purpose_lasting_traits_and_what_not_to
     assert "A trait is lasting" in prompt and "never a passing state" in prompt
     assert "12 questions waiting is plenty" in prompt and "never a reason to stop" in prompt
     assert "a question like one waiting" in prompt and "a trait the person retired" in prompt
+    assert "nor what an asked question or a known trait already covers, even in other words" in prompt
     assert "in two or three sentences" in prompt
     assert '"text":"a short question, shown to the person in plain words, naming no id"' in prompt
     assert '"thought":"why you ask, shown to the person in plain words, naming no id"' in prompt

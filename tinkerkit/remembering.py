@@ -24,6 +24,25 @@ from .text import similarity, words
 EPISODE_BOOKKEEPING = frozenset({"id", "chat", "time", "dreamt", "dreamt_time"})
 KEPT_WHOLE = EPISODE_BOOKKEEPING | {"status"}
 DREAM = "dream"
+GIVEN_ID = r"\b[emtq]\d+\b"
+GIVEN_IDS = re.compile(rf"{GIVEN_ID}(?:\s*(?:,|\band\b|\bor\b)\s*{GIVEN_ID})*")
+REMOVED_ID = "\0"
+REMOVED_IDS = rf"(?: *{REMOVED_ID})+ *"
+LEFT_AFTER_IDS = (
+    (re.compile(rf"[(\[]\s*[,;]?{REMOVED_IDS}[,;]?\s*[)\]]"), REMOVED_ID),
+    (re.compile(rf",\s*{REMOVED_IDS},"), ","),
+    (re.compile(rf"^[\s,;]*{REMOVED_IDS}[\s,;]*"), ""),
+    (re.compile(rf"([(\[]){REMOVED_IDS}"), r"\1"),
+    (re.compile(rf"{REMOVED_IDS}(?=[,.;:!?)\]]|$)"), ""),
+    (re.compile(REMOVED_IDS), " "),
+)
+
+
+def without_ids(text):
+    text = GIVEN_IDS.sub(REMOVED_ID, text)
+    for leftover, replacement in LEFT_AFTER_IDS:
+        text = leftover.sub(replacement, text)
+    return text
 
 
 class Scratchpad:
@@ -344,7 +363,8 @@ class Questions:
     COUNTER = "question_ids"
 
     def add(self, kind, about, text, thought, expected, traits, sources, now=None):
-        alike = self.alike(text)
+        text, thought, expected = without_ids(text), without_ids(thought), without_ids(expected)
+        alike = self.pending_like(text)
         if alike:
             self.absorb(alike, traits, sources)
             return None
@@ -366,7 +386,7 @@ class Questions:
         Home.store().put(self.QUESTIONS, question["id"], question)
         return question
 
-    def alike(self, text):
+    def pending_like(self, text):
         return next(
             (
                 kept

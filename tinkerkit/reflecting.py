@@ -1,11 +1,11 @@
 import json
 
+from .logger import note
 from .model import Models, OllamaError
 from .prompts import Prompts, Reply
-from .remembering import Memories, Questions, Scratchpad, Traits
+from .remembering import TRAIT_ABOUTS, Memories, Questions, Scratchpad, Traits
 from .settings import DREAM_REPLY_TOKENS, REFLECT_EPISODES, REFLECT_ROUNDS, REFLECT_THOUGHTS, Home
 
-TRAIT_ABOUTS = ("person", "tinker")
 SHOWN_MEMORY_KEYS = ("id", "kind", "gist", "text", "strength", "recalled")
 SIDE_TRAIT_KEYS = ("id", "when", "do")
 PENDING_KEYS = ("text", "thought", "expected")
@@ -63,13 +63,11 @@ def reflection_text(seen, thoughts):
 
 
 def side(about, traits, pending):
-    own = [trait for trait in traits if trait["about"] == about]
+    own = own_traits(traits, about)
     return {
         "confirmed": traits_shown(own, "confirmed"),
         "candidates": traits_shown(own, "candidate"),
-        "pending": [
-            {key: question[key] for key in PENDING_KEYS} for question in pending if question["about"] == about
-        ],
+        "pending": [shown_question(question) for question in pending if question["about"] == about],
         "retired": [
             {"when": trait["when"], "do": trait["do"], "why": trait.get("why", "")}
             for trait in own
@@ -78,21 +76,35 @@ def side(about, traits, pending):
     }
 
 
+def own_traits(traits, about):
+    return [trait for trait in traits if trait["about"] == about]
+
+
+def shown_question(question):
+    return {key: question[key] for key in PENDING_KEYS}
+
+
 def traits_shown(traits, status):
     return [{key: trait[key] for key in SIDE_TRAIT_KEYS} for trait in traits if trait["status"] == status]
 
 
-def trait_added(item, given, now, logged):
+def add_delta(item, sources):
     if item.get("about") not in TRAIT_ABOUTS or not said(item, "do"):
         return None
-    sources = cited_only(item.get("sources"), given)
-    delta = {
+    return {
         "op": "add",
         "about": item["about"],
         "when": said(item, "when"),
         "do": item["do"],
         "sources": sources,
     }
+
+
+def trait_added(item, given, now, logged):
+    sources = cited_only(item.get("sources"), given)
+    delta = add_delta(item, sources)
+    if delta is None:
+        return None
     confirms = []
     for trait in Traits().apply([delta], now):
         if newly_added(trait):
@@ -168,8 +180,12 @@ def asked(system, content):
             "off",
             temperature=0,
         )
+    except OllamaError:
+        return None
+    try:
         return reply_read(text, system)
-    except OllamaError, ValueError:
+    except ValueError as problem:
+        note(f"Quick reply unread: {type(problem).__name__}: {problem}: {text!r}")
         return None
 
 
