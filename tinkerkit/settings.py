@@ -231,12 +231,14 @@ DREAM_BATCH_EPISODES = 12
 DREAM_FORGET_DAYS = 60
 DREAM_KEEP_STRENGTH = 3
 REFLECT_EPISODES = 20
+REFLECT_ANSWERED = 20
 REFLECT_THOUGHTS = 10
 REFLECT_WAITING = 12
 REFLECT_ROUNDS = 20
 INTERACT_TURNS = 6
 ANSWER_LASTS_DAYS = {"day": 1, "month": 30, "always": None}
 ANSWER_SAME_MEANING = 0.9
+QUESTION_SAME_MEANING = 0.9
 ANSWER_SAME_WORDS = 0.9
 ANSWER_COMMON_WORDS = frozenset(
     {"a", "an", "the", "is", "are", "was", "were", "what", "how", "in", "of", "to", "for", "on", "do", "does"}

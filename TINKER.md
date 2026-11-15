@@ -549,7 +549,7 @@ In a chat, `memory graph` and `dream graph` send the graph as a page to open on 
 `interact` (or `tinker interact` for a terminal chat already in it) opens a dialogue about the questions the
 dreams left, one at a time: Tinker says what it has been thinking, the question and its guess at your answer.
 Answer in your own words; Tinker replies, keeps what you confirm or correct, and moves on once the question is
-settled. `/skip` comes back to it later; `/leave` ends it. When no question waits, Tinker reflects and finds a
+settled, and never asks it again, even in other words. `/skip` comes back to it later; `/leave` ends it. When no question waits, Tinker reflects and finds a
 new one, or says that is all it had on its mind. On Telegram, Skip and Leave are buttons. What you confirm goes
 with every chat, `tinker ask` and build from then on; a preference you teach (`tinker teach`) becomes a trait
 too.

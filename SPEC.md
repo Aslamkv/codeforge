@@ -1608,9 +1608,14 @@ Nothing here calls the model.
   at}`: id `qN`, kind `confirm` (of candidate `traits`) or `open`, `about` `person` or `tinker`, `thought` why Tinker
   wonders, `expected` its guess at the answer, status `pending` or `answered`. An id the model named in its text,
   thought or expected (`e12`, `m3`, `t4`, `q2`) is taken out on keeping, with the brackets and commas left empty
-  around it, since the person never sees ids. One like a pending question (word
-  similarity at least `SAME_FACT_SIMILARITY`) is dropped, and the pending one gains its traits and sources, so the
-  one question confirms the candidate too; an answered question never drops a new one.
+  around it, since the person never sees ids; a list of ids (`e1, e2, and e3`, "or" too) goes as one, and a lead
+  word left dangling before a removed id at a clause's end (`in`, `from`, `of`, `by`, `see`, `at`, `per`, `on`,
+  `to`) goes with it, and so does an opening phrase of one word and a lead word before the ids (`Based on e3,`,
+  `According to e1,`). One like a pending question, in words (similarity at least `SAME_FACT_SIMILARITY`) or in meaning (cosine at
+  least `QUESTION_SAME_MEANING`, words alone when embeddings fail), is dropped, and the pending one gains its
+  traits and sources, so the one question confirms the candidate too. An `open` one like an answered question, in
+  words or meaning, is dropped too, since it was already asked (**REF-1** shows the answered ones so the model
+  asks no repeat in other words); a `confirm` one like an answered question is kept.
   `next()` gives the pending ones in turn: confirms first, the best-supported candidate first, then open ones, in
   the order kept; a skipped question goes behind every pending one, still pending. A confirm question none of whose
   traits is still a candidate (each confirmed or retired) no longer waits.
@@ -1628,8 +1633,9 @@ candidate trait with its question, or to an open question, and the questions wai
 dream reflects at its end (**DRM-11**), and the dialogue reflects live when nothing waits (**INT-2**).
 
 - **REF-1** A round is one call of `REFLECT_SYSTEM` given, as JSON: `person` and `tinker`, each with the confirmed
-  traits, the candidates, the pending questions (text, thought, expected) and the traits the person retired with
-  why; `evidence`, the gists of the last `REFLECT_EPISODES` (20) dreamt episodes (id, gist) and the living `person`
+  traits, the candidates, the pending questions (text, thought, expected), the last `REFLECT_ANSWERED` (20)
+  answered questions (text, answer), never to be asked again in other words, and the traits the person retired
+  with why; `evidence`, the gists of the last `REFLECT_EPISODES` (20) dreamt episodes (id, gist) and the living `person`
   memories; `thoughts`, this loop's so far and the last `REFLECT_THOUGHTS` (10) kept from earlier loops; and
   `waiting`, how many questions are pending. It reads `{thought, add: [{about, when, do, sources, question, thought,
   expected}], questions: [{about, text, thought, expected}], done}`: each add is a candidate (**REM-14**) with its

@@ -11,6 +11,7 @@ from .settings import (
     EPISODE_FOUND_CHARS,
     EPISODE_GIST_CHARS,
     EPISODE_KEPT_DAYS,
+    QUESTION_SAME_MEANING,
     RECALL_MEANING,
     RECALL_SHOWN,
     SAME_FACT_SIMILARITY,
@@ -25,15 +26,22 @@ EPISODE_BOOKKEEPING = frozenset({"id", "chat", "time", "dreamt", "dreamt_time"})
 KEPT_WHOLE = EPISODE_BOOKKEEPING | {"status"}
 DREAM = "dream"
 GIVEN_ID = r"\b[emtq]\d+\b"
-GIVEN_IDS = re.compile(rf"{GIVEN_ID}(?:\s*(?:,|\band\b|\bor\b)\s*{GIVEN_ID})*")
+ID_SEPARATOR = r"\s*(?:,\s*(?:(?:and|or)\b)?|\b(?:and|or)\b)\s*"
+GIVEN_IDS = re.compile(rf"{GIVEN_ID}(?:{ID_SEPARATOR}{GIVEN_ID})*")
 REMOVED_ID = "\0"
 REMOVED_IDS = rf"(?: *{REMOVED_ID})+ *"
+CLAUSE_END = r"(?=[,.;:!?)\]]|$)"
+LEAD_WORD = r"\b(?:in|from|of|by|see|at|per|on|to)"
+SENTENCE_START = r"(^\s*|[.!?:]\s+)"
+OPENING_PHRASE = rf"\w+\s+(?:on|to)\s*{REMOVED_IDS},\s*"
 LEFT_AFTER_IDS = (
+    (re.compile(rf"{SENTENCE_START}{OPENING_PHRASE}", re.IGNORECASE), r"\1"),
+    (re.compile(rf"{LEAD_WORD}\s+(?={REMOVED_IDS}{CLAUSE_END})", re.IGNORECASE), ""),
     (re.compile(rf"[(\[]\s*[,;]?{REMOVED_IDS}[,;]?\s*[)\]]"), REMOVED_ID),
     (re.compile(rf",\s*{REMOVED_IDS},"), ","),
     (re.compile(rf"^[\s,;]*{REMOVED_IDS}[\s,;]*"), ""),
     (re.compile(rf"([(\[]){REMOVED_IDS}"), r"\1"),
-    (re.compile(rf"{REMOVED_IDS}(?=[,.;:!?)\]]|$)"), ""),
+    (re.compile(rf"{REMOVED_IDS}{CLAUSE_END}"), ""),
     (re.compile(REMOVED_IDS), " "),
 )
 
@@ -362,11 +370,16 @@ class Questions:
     QUESTIONS = "questions"
     COUNTER = "question_ids"
 
+    def __init__(self, retriever=None):
+        self.retriever = retriever
+
     def add(self, kind, about, text, thought, expected, traits, sources, now=None):
         text, thought, expected = without_ids(text), without_ids(thought), without_ids(expected)
-        alike = self.pending_like(text)
+        alike = self.like(text, self.with_status("pending"))
         if alike:
             self.absorb(alike, traits, sources)
+            return None
+        if kind == "open" and self.like(text, self.with_status("answered")):
             return None
         question = {
             "id": f"q{self.next_number('last')}",
@@ -386,15 +399,23 @@ class Questions:
         Home.store().put(self.QUESTIONS, question["id"], question)
         return question
 
-    def pending_like(self, text):
+    def with_status(self, status):
+        return [question for question in self.all() if question["status"] == status]
+
+    def like(self, text, kept):
+        meanings = self.meanings(text, [question["text"] for question in kept]) or [0.0] * len(kept)
         return next(
             (
-                kept
-                for kept in self.all()
-                if kept["status"] == "pending" and word_likeness(text, kept["text"]) >= SAME_FACT_SIMILARITY
+                question
+                for question, meaning in zip(kept, meanings)
+                if word_likeness(text, question["text"]) >= SAME_FACT_SIMILARITY
+                or meaning >= QUESTION_SAME_MEANING
             ),
             None,
         )
+
+    def meanings(self, text, texts):
+        return self.retriever.similarities(text, texts) if self.retriever else None
 
     def absorb(self, kept, traits, sources):
         absorbed = dict(
@@ -409,8 +430,8 @@ class Questions:
         no_longer_candidates = {trait["id"] for trait in traits if trait["status"] != "candidate"}
         waiting = [
             question
-            for question in self.all()
-            if question["status"] == "pending" and not self.settled(question, no_longer_candidates)
+            for question in self.with_status("pending")
+            if not self.settled(question, no_longer_candidates)
         ]
         never_skipped = [question for question in waiting if question["skips"] == 0]
         skipped = sorted(

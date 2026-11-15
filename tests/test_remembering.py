@@ -497,11 +497,19 @@ def test_an_added_question_is_pending_with_the_next_id(home_store):
         ("Do you write Rust daily (e12)?", "Do you write Rust daily?"),
         ("You write Rust (e1, m3) and Go [t4, q2].", "You write Rust and Go."),
         ("e1, m3 and t4 show it", "show it"),
-        ("You like tea (see e1).", "You like tea (see)."),
-        ("Based on e12, you like Rust.", "Based on, you like Rust."),
+        ("You like tea (see e1).", "You like tea."),
+        ("Based on e12, you like Rust.", "you like Rust."),
+        ("Based on e3, e5 and m2, what drives you (see t4)?", "what drives you?"),
+        ("According to e1, you like tea.", "you like tea."),
         ("Is t4x part of item3?", "Is t4x part of item3?"),
-        ("ran 'ruff format .' in e9", "ran 'ruff format .' in"),
-        ("used 'pytest -q' in e5 and e6, which is quiet", "used 'pytest -q' in, which is quiet"),
+        ("ran 'ruff format .' in e9", "ran 'ruff format .'"),
+        ("used 'pytest -q' in e5 and e6, which is quiet", "used 'pytest -q', which is quiet"),
+        ("As you said in e1, e2, and e3, you like tea?", "As you said, you like tea?"),
+        ("Seen in e4.", "Seen."),
+        ("Like it, as in m1, m2, or m3?", "Like it, as?"),
+        ("You named m1 or m2 at work", "You named at work"),
+        ("You live in Paris (from e2, e3)", "You live in Paris"),
+        ("Taken from e7; it holds", "Taken; it holds"),
         ("You ran it (e4, e10)", "You ran it"),
         ("Episode e9 shows it", "Episode shows it"),
         ("You ran e1, e2 , then stopped", "You ran, then stopped"),
@@ -565,6 +573,80 @@ def test_a_dropped_like_question_gives_the_kept_pending_one_its_new_traits_and_s
     assert dropped is None
     assert kept["traits"] == ["t1", "t2"]
     assert kept["sources"] == ["e1", "e2"]
+
+
+class FailingEmbeddings(FakeEmbeddings):
+    def vectors(self, texts, keep=True, prune=False):
+        return []
+
+
+HELIX = "Which editor do you use at work?"
+HELIX_AGAIN = "What tool do you write code in for your job?"
+CHESS = "Do you play chess on weekends?"
+
+
+def questions(embeddings):
+    return Questions(Retriever(embeddings))
+
+
+def meanings_of_helix_and_chess():
+    return FakeEmbeddings({HELIX: [1.0, 0.0], HELIX_AGAIN: [1.0, 0.0], CHESS: [0.0, 1.0]})
+
+
+def helix_answered(kind="open", traits=()):
+    question = ask(HELIX, kind, traits=traits, now=NOW)
+    Questions().answer(question["id"], "Helix", NOW)
+
+
+@pytest.mark.spec("REM-15")
+def test_an_open_question_meaning_an_answered_one_is_dropped(home_store):
+    helix_answered()
+    settled = home_store.get("questions", "q1")
+
+    dropped = questions(meanings_of_helix_and_chess()).add(
+        "open", "person", HELIX_AGAIN, "", "", [], ["e2"], NOW
+    )
+    kept = questions(meanings_of_helix_and_chess()).add("open", "person", CHESS, "", "", [], ["e3"], NOW)
+
+    assert dropped is None
+    assert kept["id"] == "q2"
+    assert home_store.get("questions", "q1") == settled
+
+
+@pytest.mark.spec("REM-15")
+def test_a_confirm_question_meaning_an_answered_one_is_kept(home_store):
+    helix_answered("confirm", ["t1"])
+
+    kept = questions(meanings_of_helix_and_chess()).add(
+        "confirm", "person", HELIX_AGAIN, "", "", ["t2"], [], NOW
+    )
+
+    assert kept["id"] == "q2" and kept["status"] == "pending"
+
+
+@pytest.mark.spec("REM-15")
+def test_a_question_meaning_a_pending_one_is_absorbed_into_it(home_store):
+    ask(HELIX, traits=["t1"], now=NOW)
+
+    dropped = questions(meanings_of_helix_and_chess()).add(
+        "open", "person", HELIX_AGAIN, "", "", ["t2"], ["e2"], NOW
+    )
+
+    kept = home_store.get("questions", "q1")
+    assert dropped is None
+    assert kept["traits"] == ["t1", "t2"] and kept["sources"] == ["e1", "e2"]
+
+
+@pytest.mark.spec("REM-15")
+@pytest.mark.parametrize("embeddings", [None, FailingEmbeddings({})])
+def test_without_meanings_only_like_words_drop_a_question(home_store, embeddings):
+    helix_answered()
+
+    kept = questions(embeddings).add("open", "person", HELIX_AGAIN, "", "", [], ["e2"], NOW)
+    dropped = questions(embeddings).add("open", "person", HELIX, "", "", [], ["e3"], NOW)
+
+    assert kept["id"] == "q2"
+    assert dropped is None
 
 
 @pytest.mark.spec("REM-15")

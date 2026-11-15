@@ -438,6 +438,8 @@ def test_the_reflect_prompt_holds_tinkers_purpose_lasting_traits_and_what_not_to
     assert "12 questions waiting is plenty" in prompt and "never a reason to stop" in prompt
     assert "a question like one waiting" in prompt and "a trait the person retired" in prompt
     assert "nor what an asked question or a known trait already covers, even in other words" in prompt
+    assert "the questions the person already answered, with the answers" in prompt
+    assert "Never ask an answered question again, in any words" in prompt
     assert "in two or three sentences" in prompt
     assert '"text":"a short question, shown to the person in plain words, naming no id"' in prompt
     assert '"thought":"why you ask, shown to the person in plain words, naming no id"' in prompt

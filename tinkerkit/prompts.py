@@ -1170,7 +1170,8 @@ Reply with ONLY JSON: {"claims":[{"claim":1,"verdict":"holds","why":"one short s
         + TINKER_PURPOSE
         + " You get, for person (who the person is: work, goals, likes) and for tinker (who Tinker is for "
         "them: role, duties, tone, how it builds), the confirmed traits, the candidates, the pending questions "
-        "with the thought behind each and the answer expected, and the traits the person retired with why; "
+        "with the thought behind each and the answer expected, the questions the person already answered, with "
+        "the answers, and the traits the person retired with why; "
         "the evidence, the gists of recent episodes and the memories about the person, each with its id; "
         "your thoughts so far; and how many questions are waiting. A trait has when, the situation it holds "
         "in, empty when it always holds, and do, the trait as said. A trait is lasting (work, goals, likes, "
@@ -1181,7 +1182,8 @@ Reply with ONLY JSON: {"claims":[{"claim":1,"verdict":"holds","why":"one short s
         "the person's answer. The person reads the question, thought and expected: plain words, naming no id. "
         f"{REFLECT_WAITING} questions waiting is plenty: a guideline, never a reason to "
         "stop thinking. Never ask again a question like one waiting, nor about a trait the person retired, "
-        "nor what an asked question or a known trait already covers, even in other words. Reply with only one "
+        "nor what an asked question or a known trait already covers, even in other words. Never ask an answered "
+        "question again, in any words. Reply with only one "
         "JSON object:\n"
         '{"thought":"what you notice and still wonder, in two or three sentences",\n'
         ' "add":[{"about":"person|tinker","when":"the situation, or empty","do":"the trait as said",'

@@ -4,7 +4,15 @@ from .logger import note
 from .model import Models, OllamaError
 from .prompts import Prompts, Reply
 from .remembering import TRAIT_ABOUTS, Memories, Questions, Scratchpad, Traits
-from .settings import DREAM_REPLY_TOKENS, REFLECT_EPISODES, REFLECT_ROUNDS, REFLECT_THOUGHTS, Home
+from .retrieval import Embeddings, Retriever
+from .settings import (
+    DREAM_REPLY_TOKENS,
+    REFLECT_ANSWERED,
+    REFLECT_EPISODES,
+    REFLECT_ROUNDS,
+    REFLECT_THOUGHTS,
+    Home,
+)
 
 SHOWN_MEMORY_KEYS = ("id", "kind", "gist", "text", "strength", "recalled")
 SIDE_TRAIT_KEYS = ("id", "when", "do")
@@ -55,19 +63,25 @@ def evidence():
 
 def reflection_text(seen, thoughts):
     traits, pending = Traits().all(), Questions().pending()
-    sides = {about: side(about, traits, pending) for about in TRAIT_ABOUTS}
+    answered = Questions().with_status("answered")
+    sides = {about: side(about, traits, pending, answered) for about in TRAIT_ABOUTS}
     return json.dumps(
         sides | {"evidence": seen, "thoughts": thoughts, "waiting": len(pending)},
         ensure_ascii=False,
     )
 
 
-def side(about, traits, pending):
+def side(about, traits, pending, answered):
     own = own_traits(traits, about)
     return {
         "confirmed": traits_shown(own, "confirmed"),
         "candidates": traits_shown(own, "candidate"),
         "pending": [shown_question(question) for question in pending if question["about"] == about],
+        "answered": [
+            {"text": question["text"], "answer": question["answer"]}
+            for question in answered
+            if question["about"] == about
+        ][-REFLECT_ANSWERED:],
         "retired": [
             {"when": trait["when"], "do": trait["do"], "why": trait.get("why", "")}
             for trait in own
@@ -119,7 +133,7 @@ def confirm_asked(item, trait, sources, now, logged):
     question = said(item, "question")
     if not question:
         return None
-    kept = Questions().add(
+    kept = meaning_questions().add(
         "confirm",
         trait["about"],
         question,
@@ -139,12 +153,16 @@ def question_kept(item, now, logged):
     about = item.get("about") if item.get("about") in TRAIT_ABOUTS else "person"
     if not text:
         return None
-    question = Questions().add(
+    question = meaning_questions().add(
         "open", about, text, said(item, "thought"), said(item, "expected"), [], [], now
     )
     if question:
         logged("question", question)
     return question
+
+
+def meaning_questions():
+    return Questions(Retriever(Embeddings.configured()))
 
 
 def newly_added(trait):

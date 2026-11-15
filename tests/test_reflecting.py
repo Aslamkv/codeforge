@@ -3,12 +3,13 @@ import json
 
 import pytest
 from conftest import ask, confirmed_trait, replying
+from test_remembering import CHESS, HELIX, HELIX_AGAIN, meanings_of_helix_and_chess
 
 from tinkerkit.prompts import Prompts
 from tinkerkit.reflecting import Reflection
-from tinkerkit.remembering import Memories, Scratchpad, Traits
-from tinkerkit.retrieval import Retriever
-from tinkerkit.settings import REFLECT_EPISODES, REFLECT_ROUNDS, REFLECT_THOUGHTS, Home
+from tinkerkit.remembering import Memories, Questions, Scratchpad, Traits
+from tinkerkit.retrieval import Embeddings, Retriever
+from tinkerkit.settings import REFLECT_ANSWERED, REFLECT_EPISODES, REFLECT_ROUNDS, REFLECT_THOUGHTS, Home
 
 NOW = datetime.datetime(2026, 11, 11, 12, 0, 0)
 EARLIER = datetime.datetime(2026, 11, 1, 9, 0, 0)
@@ -53,6 +54,8 @@ def test_a_round_is_given_both_sides_the_evidence_the_thoughts_and_how_many_wait
     )
     Memories(Retriever(None)).add("fact", "the sky is blue", "the sky is blue", [first["id"]], NOW, None)
     ask("What do you build?", sources=[], thought="work is unknown", expected="tools", now=NOW)
+    answered = ask("Which editor do you use?", sources=[], thought="tools are unknown", now=NOW)
+    Questions().answer(answered["id"], "Helix", NOW)
     asked = replying(monkeypatch, {"thought": "now", "add": [], "questions": [], "done": True})
 
     Reflection(thoughts=["before"]).round(NOW)
@@ -63,12 +66,33 @@ def test_a_round_is_given_both_sides_the_evidence_the_thoughts_and_how_many_wait
     assert content["person"]["pending"] == [
         {"text": "What do you build?", "thought": "work is unknown", "expected": "tools"}
     ]
+    assert content["person"]["answered"] == [{"text": "Which editor do you use?", "answer": "Helix"}]
+    assert content["tinker"]["answered"] == []
+    assert list(content["person"]) == ["confirmed", "candidates", "pending", "answered", "retired"]
     assert content["tinker"]["retired"][0]["why"] == "never said so"
     assert content["tinker"]["confirmed"] == []
     assert content["evidence"]["episodes"] == [{"id": first["id"], "gist": "I write Rust at work"}]
     assert [memory["id"] for memory in content["evidence"]["memories"]] == [person["id"]]
     assert content["thoughts"] == ["before"]
     assert content["waiting"] == 1
+
+
+@pytest.mark.spec("REF-1")
+def test_a_round_shows_only_the_newest_answered_questions_of_each_side(home_store, monkeypatch):
+    for number in range(REFLECT_ANSWERED + 2):
+        question = ask(f"Question number {number}?", sources=[], now=NOW)
+        Questions().answer(question["id"], f"answer {number}", NOW)
+    tinkers = ask("How short should replies be?", sources=[], about="tinker", now=NOW)
+    Questions().answer(tinkers["id"], "short", NOW)
+    asked = replying(monkeypatch, {"thought": "now", "add": [], "questions": [], "done": True})
+
+    Reflection().round(NOW)
+
+    content = given(asked)
+    assert [question["answer"] for question in content["person"]["answered"]] == [
+        f"answer {number}" for number in range(2, REFLECT_ANSWERED + 2)
+    ]
+    assert content["tinker"]["answered"] == [{"text": "How short should replies be?", "answer": "short"}]
 
 
 @pytest.mark.spec("REF-1")
@@ -129,6 +153,21 @@ def test_a_round_keeps_a_candidate_with_its_confirm_question_and_an_open_questio
     assert (open_question["about"], open_question["expected"]) == ("person", "a product")
     assert [name for name, _ in logs] == ["add", "question", "question"]
     assert reflection.thoughts == ["work shows, goals do not"]
+
+
+@pytest.mark.spec("REM-15")
+def test_a_round_drops_an_open_question_meaning_an_answered_one(home_store, monkeypatch):
+    settled = ask(HELIX, now=NOW)
+    Questions().answer(settled["id"], "Helix", NOW)
+    monkeypatch.setattr(Embeddings, "configured", staticmethod(meanings_of_helix_and_chess))
+    replying(
+        monkeypatch,
+        {"thought": "tools", "add": [], "questions": [opened(HELIX_AGAIN), opened(CHESS)], "done": False},
+    )
+
+    kept = Reflection().round(NOW)
+
+    assert [question["text"] for question in kept["kept"]] == [CHESS]
 
 
 @pytest.mark.spec("REF-1")
