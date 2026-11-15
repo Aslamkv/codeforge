@@ -451,21 +451,19 @@ class TelegramChannel(Channel):
         button = {"text": LEAVE_READING_BUTTON.format(number=number), "callback_data": CHAT_LEAVE}
         return {"reply_markup": json.dumps({"inline_keyboard": [[button]]})}
 
-    def offer_answers(self, chat, shown, count):
+    def offer_answers(self, chat, shown):
         try:
-            self.call("editMessageReplyMarkup", chat_id=chat, message_id=shown, **self.answer_buttons(count))
+            self.call("editMessageReplyMarkup", chat_id=chat, message_id=shown, **self.answer_buttons())
         except OSError, ChannelError:
             pass
 
     @staticmethod
-    def answer_buttons(count):
-        numbers = [{"text": str(number), "callback_data": str(number)} for number in range(1, count + 1)]
+    def answer_buttons():
         moves = [
             {"text": SKIP_QUESTION_BUTTON, "callback_data": CHAT_SKIP},
             {"text": LEAVE_INTERVIEW_BUTTON, "callback_data": CHAT_LEAVE},
         ]
-        rows = [numbers, moves] if numbers else [moves]
-        return {"reply_markup": json.dumps({"inline_keyboard": rows})}
+        return {"reply_markup": json.dumps({"inline_keyboard": [moves]})}
 
     def kept_buttons(self, chat, sent):
         return self.fresh_button() if (str(chat), sent) in self.fresh_offered else {}

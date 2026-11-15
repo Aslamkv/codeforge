@@ -530,8 +530,9 @@ While nothing waits for it, Tinker dreams: a few seconds after the queue empties
 into memories (about you, what you did, the tools you use, facts), joins the ones that say the same thing,
 lets fade what was never recalled or seen again, and notices traits: how you work and how you want Tinker to
 be, for good rather than for the moment. It joins traits that say the same thing into one, in the newer words.
-A dream never decides a trait on its own; each one waits as a question for you, and once five wait it asks no
-more. A dream is a job, so it never runs over a chat or a build:
+A dream never decides a trait on its own: each one waits as a question for you. At the end of every dream Tinker
+reflects on who you are and who it should be for you, from what it kept, and each thought it keeps becomes a
+question with its guess at your answer. A dream is a job, so it never runs over a chat or a build:
 
 ```sh
 tinker memory                # the memories, newest first, and when the last dream was
@@ -545,12 +546,13 @@ tinker dream graph           # watch the episodes and memories change, live in t
 
 In a chat, `memory graph` and `dream graph` send the graph as a page to open on your phone.
 
-`interact` (or `tinker interact` for a terminal chat already in it) asks the questions the dreams left, one at
-a time, with the answers it guesses numbered. Answer with a number, a number with changes (`2, but on
-weekdays`), your own words, or `/skip` to come back to it later; `/leave` ends it. When no question waits,
-Tinker thinks of a new one, until there is nothing left to ask. On Telegram each answer is a button. What you
-confirm goes with every chat, `tinker ask` and build from then on; a preference you teach (`tinker teach`)
-becomes a trait too.
+`interact` (or `tinker interact` for a terminal chat already in it) opens a dialogue about the questions the
+dreams left, one at a time: Tinker says what it has been thinking, the question and its guess at your answer.
+Answer in your own words; Tinker replies, keeps what you confirm or correct, and moves on once the question is
+settled. `/skip` comes back to it later; `/leave` ends it. When no question waits, Tinker reflects and finds a
+new one, or says that is all it had on its mind. On Telegram, Skip and Leave are buttons. What you confirm goes
+with every chat, `tinker ask` and build from then on; a preference you teach (`tinker teach`) becomes a trait
+too.
 
 ## Jobs ⏯
 

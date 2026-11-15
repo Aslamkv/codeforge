@@ -71,6 +71,8 @@ def test_json_without_an_object_or_beyond_mending():
         Reply('{"a": tru}').json()
     with pytest.raises(json.JSONDecodeError):
         Reply('{"a": 1,}').json()
+    with pytest.raises(ValueError, match="no JSON object"):
+        Reply('```json\n{\n  "thought": "never closes').json()
 
 
 @pytest.mark.spec("PRM-3")
@@ -363,13 +365,75 @@ def test_the_lessons_prompt_asks_for_general_lessons():
 
 
 @pytest.mark.spec("INT-3")
-def test_the_interview_answer_prompt_asks_for_a_lasting_habit_in_tinkers_words():
-    prompt = " ".join(Prompts.INTERACT_ANSWER_SYSTEM.split())
+def test_the_interact_talk_prompt_holds_tinkers_purpose_and_asks_for_a_lasting_habit_in_tinkers_words():
+    prompt = " ".join(Prompts.INTERACT_TALK_SYSTEM.split())
 
-    assert "An add's or amend's do is a lasting habit in Tinker's own words, never the reply copied" in prompt
+    assert " ".join(Prompts.TINKER_PURPOSE.split()) in prompt
+    assert (
+        "An add's or amend's do is a lasting habit in Tinker's own words, never the message copied" in prompt
+    )
     assert "every detail and condition" in prompt
     assert "a request to be asked something is a question" in prompt
     assert "keeps the whole reply" not in prompt
+
+
+@pytest.mark.spec("INT-3")
+def test_the_interact_talk_prompt_keeps_say_a_short_reply_that_never_asks_or_claims_a_record():
+    prompt = " ".join(Prompts.INTERACT_TALK_SYSTEM.split())
+
+    assert "say is one or two short sentences replying to the message only" in prompt
+    assert (
+        "it never asks the current question or the next one: Tinker shows the question itself after the say"
+        in (prompt)
+    )
+    assert "the next waiting question is only to lead into" in prompt
+    assert "it never claims to have recorded, saved or noted anything" in prompt
+    assert "add holds only what the person states, never an inference from a rejection" in prompt
+    assert (
+        "A follow-up question is about the person or Tinker, never a matter the person raised in passing, "
+        "such as the weather" in prompt
+    )
+    assert '"say":"your reply to the person, one or two sentences, never a question"' in prompt
+    assert '"text":"a short follow-up question, shown to the person in plain words, naming no id"' in prompt
+    assert '"thought":"why you ask, shown to the person in plain words, naming no id"' in prompt
+    assert '"expected":"your guess at the answer, shown to the person in plain words, naming no id"' in prompt
+
+
+@pytest.mark.spec("INT-3")
+def test_the_interact_talk_prompt_keeps_question_null_without_a_follow_up_and_settles_nothing_off_topic():
+    prompt = " ".join(Prompts.INTERACT_TALK_SYSTEM.split())
+
+    assert '"question":null or {"about":"person|tinker"' in prompt
+    assert "question is null unless the message raises a new follow-up" in prompt
+    assert (
+        "A message that does not answer the current question (off-topic, such as \"By the way, what's the "
+        'weather like?") gives settled false, empty confirm, reject, amend and add, and question null'
+        in prompt
+    )
+
+
+@pytest.mark.spec("REF-3")
+def test_the_reflect_prompt_holds_tinkers_purpose_lasting_traits_and_what_not_to_ask_again():
+    prompt = " ".join(Prompts.REFLECT_SYSTEM.split())
+
+    assert " ".join(Prompts.TINKER_PURPOSE.split()) in prompt
+    assert "builds only what the request clearly asks for" in Prompts.TINKER_PURPOSE
+    assert "A trait is lasting" in prompt and "never a passing state" in prompt
+    assert "12 questions waiting is plenty" in prompt and "never a reason to stop" in prompt
+    assert "a question like one waiting" in prompt and "a trait the person retired" in prompt
+    assert "in two or three sentences" in prompt
+    assert '"text":"a short question, shown to the person in plain words, naming no id"' in prompt
+    assert '"thought":"why you ask, shown to the person in plain words, naming no id"' in prompt
+    assert '"expected":"your guess at the answer, shown to the person in plain words, naming no id"' in prompt
+    assert (
+        '"question":"a short question to confirm it, shown to the person in plain words, naming no id"'
+        in prompt
+    )
+    assert (
+        'naming no id","thought":"why you ask, shown to the person in plain words, naming no id",'
+        '"expected":"your guess at the answer, shown to the person in plain words, naming no id"}], "questions"'
+        in prompt
+    )
 
 
 @pytest.mark.spec("DRM-12")
@@ -378,3 +442,18 @@ def test_the_merge_traits_prompt_says_the_traits_come_newest_first():
 
     assert "The traits come newest first" in prompt
     assert "where they disagree, the newer wording wins" in prompt
+
+
+@pytest.mark.spec("DRM-6")
+def test_the_dream_traits_prompt_asks_for_lasting_traits_each_with_a_question_thought_and_guess_for_the_person():
+    prompt = " ".join(Prompts.DREAM_TRAITS_SYSTEM.split())
+
+    assert "suggestions" not in prompt
+    assert "A trait is lasting (work, goals, likes, ways of working)" in prompt
+    assert "never a passing state (the folder, the time, one command's output)" in prompt
+    assert (
+        '"question":"a short question the person answers to confirm it, shown to the person in plain words, '
+        'naming no id"' in prompt
+    )
+    assert '"thought":"why you ask, shown to the person in plain words, naming no id"' in prompt
+    assert '"expected":"your guess at the answer, shown to the person in plain words, naming no id"' in prompt

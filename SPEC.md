@@ -92,8 +92,9 @@ listed above it:
 | `slots` | what learning a language or a tool must find out, as data (`Slot`, `PROFILES`), and each slot's passages (`Selector`) |
 | `learning` | learning a language or a tool by its slots (`SlotLearner`, `DocCache`, `LearnStopped`) |
 | `graph` | what Tinker knows as one graph of items and links (`Graph`), the page that shows it (`GraphPage`), and browsing it in pages (`MemoryBrowser`) |
-| `dreaming` | the dream: turning fresh episodes into memories while the queue is idle, revising and fading them, and the live page that shows it (`Dream`, `DreamPage`) |
-| `interviewing` | the interview: asking the person the questions that wait and turning each answer into trait changes (`Interview`) |
+| `reflecting` | thinking about who the person is and who Tinker is for them, from what the dreams kept, into candidate traits and questions that wait (`Reflection`) |
+| `dreaming` | the dream: turning fresh episodes into memories while the queue is idle, revising and fading them, reflecting on them, and the live page that shows it (`Dream`, `DreamPage`) |
+| `interviewing` | the dialogue: opening the questions that wait, talking each through with the person and turning what they say into trait changes (`Interview`) |
 | `formats` | what a kept file holds, read by its bytes: one subclass of `Format` per kind (`Epub`, `Docx`, `Markdown`, `PlainText`, `Pdf`, `Image`, `Audio`, `Unsupported`), each giving its title and chapters (`Book`) |
 | `reading` | what the person gives to read: kept on the shelf (`Readings`), asked about inside a chat, and learned from chapter by chapter on request (`Reader`) |
 | `sandbox` | running a check with no network and writes only in its own folder, one backend per platform (`Sandbox`, `MacSandbox`, `LinuxSandbox`, `NoSandbox`) |
@@ -166,8 +167,8 @@ the last column:
 | `episodes` | what each chat request, command line and build did (**REM-1**) | |
 | `memories` | what the dream kept of the episodes (**REM-3**) | |
 | `traits` | who the person is and who Tinker is for them (**REM-5**) | |
-| `questions` | the questions that wait for the person, and those answered or skipped (**REM-15**) | |
-| `dream` | the dream's last state (`state`) | |
+| `questions` | the questions that wait for the person, each with the thought behind it and Tinker's guess at the answer, and those answered or skipped (**REM-15**) | |
+| `dream` | the dream's last state (`state`), with the reflection's last thoughts (**DRM-11**) | |
 | log `dream events` | every change a dream made (**DRM-7**) | |
 
 Jobs, readings and the chat history are numbered lists (`Numbered`, **SET-11**). `#N` names an entry. A list
@@ -1573,9 +1574,9 @@ Nothing here calls the model.
   id is refused with why.
 - **REM-9** `tinker memory forget ID` deletes one memory or episode, as a deletion (**SET-8**); for a trait id it
   retires that trait "forgotten".
-- **REM-10** `tinker memory traits` shows the confirmed traits grouped by `about` (`person`, then `tinker`), each as
-  its id, `when` and `do`; then the candidates with how many sources each has; then how many questions wait and that
-  `interact` asks them. Every `memory` view but `forget` is a glance (**CMD-1**).
+- **REM-10** `tinker memory traits` shows, for `person` then `tinker`: the confirmed traits, each as its id, `when`
+  and `do`; the candidates with how many sources each has; then the questions that wait, each with its thought, and
+  that `interact` asks them. Every `memory` view but `forget` is a glance (**CMD-1**).
 - **REM-11** `thread_episodes(chat, now)` is what the chat said lately, with no model: its last `THREAD_TURNS` (4)
   chat episodes (those with a message) within `THREAD_MINUTES` (30), oldest first, one `thread_line` each: the
   episode's gist once dreamt, else its message and its reply on one line, cut to `EPISODE_GIST_CHARS`; a reply
@@ -1601,9 +1602,11 @@ Nothing here calls the model.
   too; one like a retired trait is dropped, so nothing is asked twice. A merge makes one trait with the union of
   their sources, confirmed when any of them was, and retires the old ones "merged into tN"; a pending confirm
   question about one of them asks about the merged trait instead.
-- **REM-15** A question in `questions` is `{id, kind, text, suggestions, traits, sources, status, answer, at}`: id
-  `qN`, kind `confirm` (of candidate `traits`) or `open`, `suggestions` the answers offered, status `pending`,
-  `answered` or `skipped`. One like a question kept (word similarity at least `SAME_FACT_SIMILARITY`) is dropped.
+- **REM-15** A question in `questions` is `{id, kind, about, text, thought, expected, traits, sources, status, answer,
+  at}`: id `qN`, kind `confirm` (of candidate `traits`) or `open`, `about` `person` or `tinker`, `thought` why Tinker
+  wonders, `expected` its guess at the answer, status `pending`, `answered` or `skipped`. One like a pending question (word
+  similarity at least `SAME_FACT_SIMILARITY`) is dropped, and the pending one gains its traits and sources, so the
+  one question confirms the candidate too; an answered or skipped question never drops a new one.
   `next()` gives the pending ones in turn: confirms first, the best-supported candidate first, then open ones, in
   the order kept; a skipped question goes behind every pending one, still pending. A confirm question none of whose
   traits is still a candidate (each confirmed or retired) no longer waits.
@@ -1614,17 +1617,42 @@ Nothing here calls the model.
   `Talk.reply`, an answer inside a reading (**CNV-25**), `COMMAND_TELL_SYSTEM`, `ASK_SYSTEM` and the build's phases
   (**SES-3**), each for its own text. A dream, learning, the exercise and calibration never get it.
 
+## reflecting (REF)
+
+Tinker thinks about who the person is and who it is for them, from what the dreams kept. Each thought leads to a
+candidate trait with its question, or to an open question, and the questions wait for the person (**INT**). Every
+dream reflects at its end (**DRM-11**), and the dialogue reflects live when nothing waits (**INT-2**).
+
+- **REF-1** A round is one call of `REFLECT_SYSTEM` given, as JSON: `person` and `tinker`, each with the confirmed
+  traits, the candidates, the pending questions (text, thought, expected) and the traits the person retired with
+  why; `evidence`, the gists of the last `REFLECT_EPISODES` (20) dreamt episodes (id, gist) and the living `person`
+  memories; `thoughts`, this loop's so far and the last `REFLECT_THOUGHTS` (10) kept from earlier loops; and
+  `waiting`, how many questions are pending. It reads `{thought, add: [{about, when, do, sources, question, thought,
+  expected}], questions: [{about, text, thought, expected}], done}`: each add is a candidate (**REM-14**) with its
+  `confirm` question, each question an `open` one (**REM-15**), both with the thought that led to it and `expected`,
+  Tinker's guess at the answer. The round's `thought` joins the loop's.
+- **REF-2** `Reflection.run()` makes rounds until one says `done`, or keeps nothing new (**REM-15**), or
+  `REFLECT_ROUNDS` (20) rounds are made. It gives back the loop's thoughts, its caller keeping the newest
+  `REFLECT_THOUGHTS` for the next loop, and what each round kept.
+- **REF-3** The prompt holds `TINKER_PURPOSE`, what Tinker is for in the words of [The idea](#the-idea); says a trait
+  is lasting, never a passing state (as **DRM-6**); tells the model `REFLECT_WAITING` (12) questions waiting is
+  plenty, as a guideline and never a block; that a question like one waiting, or about a trait the person retired,
+  is not to ask again; asks for the `thought` in two or three sentences, so a reply never spends its budget on
+  a thought that goes on; and says each question's text, thought and expected are shown to the person, in plain
+  words that name no id.
+
 ## dreaming (DRM)
 
 While nothing waits for Tinker, it dreams: the fresh episodes become memories, the memories are revised and
-fade, and the traits they show become candidates and questions that wait for the person (**INT**).
+fade, the traits they show become candidates, and Tinker reflects on them (**REF**) into questions that wait for
+the person (**INT**).
 
 - **DRM-1** The runner (**JOB-9**) queues `dream run` once the queue has been empty for `DREAM_IDLE_SECONDS`
   (5) and a fresh episode is there. A chat's answer and the exercise are jobs, so a dream never runs over
   them, and a dream pushed back goes on later (**JOB-2**). Only one dream is in the queue at a time.
   `tinker dream run` queues one now.
 - **DRM-2** `Dream.run()` goes through its steps in turn, consolidate, revise, decay, traits, merge traits (**DRM-12**),
-  gists and questions, each saved
+  gists and reflect (**DRM-11**), each saved
   when done in `dream`/`state`, so a dream that goes on skips the steps done; its tracker's `doing` names the
   step.
 - **DRM-3** Consolidate takes the fresh episodes chat by chat, at most `DREAM_BATCH_EPISODES` (12) to a call.
@@ -1653,10 +1681,12 @@ fade, and the traits they show become candidates and questions that wait for the
   older than **REM-2** allows.
 - **DRM-6** Traits, only when this dream dreamt an episode or changed a `person` memory, gives
   `DREAM_TRAITS_SYSTEM` the gists of the episodes this dream dreamt, the `person` memories it changed and the living
-  traits, and reads `{add: [{about, when, do, sources, question, suggestions}], support: [{id, sources}]}`: each add
-  is a candidate (**REM-14**) with its `confirm` question and 2 to 4 suggestions (**REM-15**). As many as it finds.
+  traits, and reads `{add: [{about, when, do, sources, question, thought, expected}], support: [{id, sources}]}`:
+  each add is a candidate (**REM-14**) with its `confirm` question, its thought and expected answer (**REM-15**). As
+  many as it finds.
   The prompt says a trait is lasting (work, goals, likes, ways of working), never a passing state (the folder, the
-  time, one command's output).
+  time, one command's output), and that each add's question, thought and expected are shown to the person, in plain
+  words that name no id.
 - **DRM-7** Each change a dream makes is added to log `dream events` as `{step, change, id, gist}`.
 - **DRM-8** `tinker dream` (or `dream status`) says when the last dream was, how many changes each step made,
   how many episodes and questions wait, and whether a dream is queued or running.
@@ -1669,11 +1699,9 @@ fade, and the traits they show become candidates and questions that wait for the
 - **DRM-10** Gists gives `DREAM_GISTS_SYSTEM` each confirmed trait without a gist or whose `do` changed since its
   gist, and reads `{gists: {id: gist}}`: the shortest wording that keeps the meaning, kept only when shorter than its
   `do`. Nothing is asked.
-- **DRM-11** Questions asks `DREAM_QUESTIONS_SYSTEM` for open questions about who the person is and who Tinker is
-  for them (the areas are named in the prompt), each with 2 to 4 suggestions, given the confirmed traits and the
-  questions kept, and reads `{questions: [{text, suggestions}]}`. It asks again, one call a round, until a round
-  keeps nothing new (**REM-15**) or `QUESTIONS_WAITING` (5) questions are pending; with that many pending it asks
-  nothing. Nothing is sent to the person: the questions wait for `interact` (**INT-1**).
+- **DRM-11** Reflect runs a reflection loop (**REF-2**) with the `thoughts` kept in `dream`/`state`, and keeps the
+  newest `REFLECT_THOUGHTS` back there; each round's thought is a dream event (**DRM-7**) of step `reflect`. Nothing
+  is sent to the person: the questions wait for `interact` (**INT-1**).
 - **DRM-12** Merge traits joins similar living traits (as **GRF-3**, on `when` and `do`) of a group where one has a
   history event since the last dream (teaching and the interview change traits too): `DREAM_MERGE_TRAITS_SYSTEM`
   (given the traits newest first, and told so) answers `{merge: [{ids, when, do}]}`, the newer wording winning where they disagree, each applied as a `merge`
@@ -1681,35 +1709,36 @@ fade, and the traits they show become candidates and questions that wait for the
 
 ## interviewing (INT)
 
-The person tells Tinker who they are and who Tinker should be for them, by answering the questions a dream left.
-Nothing here is shown unasked.
+The person and Tinker talk about who the person is and who Tinker should be for them, starting from the
+questions the dreams left. Nothing here is shown unasked.
 
-- **INT-1** `interact` enters the interview, a chat mode as a reading is (**CNV-25**); `tinker interact` opens a
-  terminal chat already in it. Each turn shows the next
-  pending question (**REM-15**) as kept, with no model call, then its suggestions numbered and "a number, a number
-  with changes ("2, but on weekdays"), your own words, or /skip". The terminal's prompt is `💬 interact ›` while in
-  it; on a channel with buttons (Telegram) the question gets one button per suggestion (sending its number), "⏭ Skip"
-  (`/skip`) and "🚪 Leave" (`/leave`).
-- **INT-2** With no question pending, one quick call (`INTERACT_SYSTEM`, given the confirmed traits and the
-  questions kept) gives the next `{text, suggestions}`, kept pending before it is shown, or `{done: true}`: then it
-  says nothing is left to ask and leaves the interview. There is no limit; `/leave` ends it any time.
-- **INT-3** Each answer is one call (`INTERACT_ANSWER_SYSTEM`: the question, its suggestions, its traits and the
-  reply) that reads `{confirm, reject, amend, add, question}` as deltas (**REM-14**): an add is confirmed, and an add
-  or confirm has the answer's episode as its source (**INT-5**); `question` is a follow-up, kept pending (**REM-15**); a `question` given as text, with `suggestions` beside it,
-  is read the same. This call's add or amend gives `do` as a lasting habit in Tinker's own words, never the reply copied, and a
-  request to be asked something is a `question`. They are applied and the
-  question is answered at once, so a restart loses nothing; then the next question is shown. A reply that cannot be
-  read, or a call that fails, leaves the question pending, says the answer could not be read and asks it again. An
-  answer starting with a number no suggestion has makes no call: it names the numbers there are and asks again.
-  An answer starting with a suggestion's number is sent with that suggestion's text in place of the number ("2, but
-  on weekdays" as "VS Code, but on weekdays"). A question with no traits asks only for `{add, question}`
-  (`INTERACT_ADD_SYSTEM`), and an add's `do` keeps the whole answer. An answer, its suggestion numbers and `/skip`
-  are to the question last shown in that chat while it is pending, even when questions kept since (a dream run)
-  now come before it.
-- **INT-4** `/skip` sends the question to the end of the queue (**REM-15**); its candidates stay candidates. A
-  `/command` other than `/skip` and `/leave` still runs.
-- **INT-5** Each answer is also kept as an episode of kind `interact` (**REM-1**), already dreamt, so it is a source
-  and never consolidated.
+- **INT-1** `interact` enters the dialogue, a chat mode as a reading is (**CNV-25**); `tinker interact` opens a
+  terminal chat already in it. A pending question (**REM-15**) is opened by code, with no model call: "💭 I've been
+  thinking: THOUGHT TEXT My guess: EXPECTED", from its `thought`, `text` and `expected`. The terminal's prompt is
+  `💬 interact ›` while in it; on a channel with buttons (Telegram) the question gets "⏭ Skip" (`/skip`) and
+  "🚪 Leave" (`/leave`).
+- **INT-2** With no question pending, on entering or once the current one is settled (**INT-3**) with no next, one
+  reflection round (**REF-1**) is made, and the first question it kept is opened (**INT-1**) after the turn's `say`
+  when there is one. A round that keeps no question says "That's all I had on my mind for now." (after the `say`)
+  and leaves the dialogue. There is no limit; `/leave` ends it any time.
+- **INT-3** Each message of the person is one call (`INTERACT_TALK_SYSTEM`: `TINKER_PURPOSE`, the confirmed traits
+  of both sections, the current question with its `thought`, `expected` and traits, the next waiting question to
+  lead into, the dialogue so far as the chat's last `INTERACT_TURNS` (6) `interact` episodes, and the message) that
+  reads `{say, confirm, reject, amend, add, question, settled}`: `say` is the reply shown; `confirm`, `reject`,
+  `amend` and `add` are deltas (**REM-14**), an add confirmed, an add or confirm with the turn's episode as its source
+  (**INT-5**), an add's or amend's `do` a lasting habit in Tinker's own words, never the message copied; `question`
+  `{about, text, thought, expected}` is a follow-up kept pending (**REM-15**), as is a request to be asked something,
+  and null when the message raises none. They are applied before anything is shown, so a restart loses nothing.
+  `settled` true answers the question, and the next pending one is opened after the `say` (**INT-1**); false keeps
+  it current, so the talk goes on; a message that does not answer the question (off-topic) gives `settled` false,
+  empty deltas and no `question`. A reply
+  that cannot be read, or a call that fails, says the answer could not be read and keeps the question. A message
+  and `/skip` are to the question last shown in that chat while it is pending, even when questions kept since (a
+  dream run) now come before it.
+- **INT-4** `/skip` sends the question to the end of the queue (**REM-15**); its candidates stay candidates, and the
+  next is opened (**INT-1**). A `/command` other than `/skip` and `/leave` still runs.
+- **INT-5** Each turn is also kept as an episode of kind `interact` (**REM-1**), `{question, answer, say}`, already
+  dreamt, so it is a source and never consolidated.
 
 ## reading (RDG)
 

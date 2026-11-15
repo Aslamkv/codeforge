@@ -1,4 +1,5 @@
 import io
+import json
 import os
 import signal
 import socket
@@ -417,6 +418,17 @@ def quick_model_replying(monkeypatch, reply):
     monkeypatch.setattr(Models, "quick", staticmethod(lambda: ("m", {}, None)))
     monkeypatch.setattr(Models, "quick_reply", staticmethod(replied))
     return asked
+
+
+def replying(monkeypatch, *replies):
+    queue = list(replies)
+    return quick_model_replying(monkeypatch, lambda messages: json.dumps(queue.pop(0)))
+
+
+def ask(text, kind="open", traits=(), sources=("e1",), thought="", expected="", about="person", now=None):
+    from tinkerkit.remembering import Questions
+
+    return Questions().add(kind, about, text, thought, expected, list(traits), list(sources), now)
 
 
 def plan_of(folder):

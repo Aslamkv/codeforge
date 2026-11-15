@@ -132,7 +132,6 @@ SKIP_QUESTION_BUTTON = "⏭ Skip"
 LEAVE_INTERVIEW_BUTTON = "🚪 Leave"
 INTERVIEW_ENTERED = "💬 **Interview**: answer, /skip · /leave leaves it"
 INTERVIEW_LEFT = "💬 **Left the interview**"
-NOTHING_LEFT_TO_ASK = "💬 **Nothing left to ask**"
 NO_QUESTION_YET = "❓ **No question yet** to ask again."
 START_WELCOME = """👋 **Hi, I'm Tinker!**
 I build small programs for you, on this computer, with an AI model that runs right here.
@@ -184,18 +183,23 @@ class NoShelf:
         return None
 
 
+ALL_FOR_NOW = "That's all I had on my mind for now."
+
+
+class Turn(NamedTuple):
+    text: str
+    over: bool
+
+
 class NoInterview:
     def turn(self, chat, now=None):
-        return None
+        return Turn(ALL_FOR_NOW, True)
 
     def skipped(self, chat):
-        return None
+        return self.turn(chat)
 
     def answered(self, chat, text, now=None):
-        return None
-
-    def suggestion_count(self, chat):
-        return 0
+        return self.turn(chat)
 
 
 class InsideReading(NamedTuple):
@@ -243,14 +247,14 @@ class InsideInterview(NamedTuple):
             turn = self.interview.skipped(message.chat)
         else:
             turn = self.interview.answered(message.chat, message.text)
-        if turn is None:
-            channel.send(message.chat, NOTHING_LEFT_TO_ASK)
+        if turn.over:
+            channel.send(message.chat, turn.text)
             desk.leave_mode(channel, message.chat)
         else:
-            self.offer(channel, message.chat, channel.send(message.chat, turn))
+            self.offer(channel, message.chat, channel.send(message.chat, turn.text))
 
     def offer(self, channel, chat, shown):
-        channel.offer_answers(chat, shown, self.interview.suggestion_count(chat))
+        channel.offer_answers(chat, shown)
 
     def opening(self, turn):
         return f"{INTERVIEW_ENTERED}\n\n{turn}"
@@ -889,11 +893,11 @@ class Desk:
 
     def interviewed(self, channel, chat):
         turn = self.interview.turn(chat)
-        if turn is None:
-            return NOTHING_LEFT_TO_ASK
+        if turn.over:
+            return turn.text
         mode = InsideInterview(self.interview)
         self.now_in(channel, chat, mode)
-        return mode.opening(turn)
+        return mode.opening(turn.text)
 
     def entered_mode(self, channel, chat, mode):
         self.now_in(channel, chat, mode)
@@ -2550,7 +2554,7 @@ class Channel:
     def offer_leave(self, chat, shown, number):
         pass
 
-    def offer_answers(self, chat, shown, count):
+    def offer_answers(self, chat, shown):
         pass
 
     def ask_for(self, chat, question, hint):

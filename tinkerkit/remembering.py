@@ -19,7 +19,7 @@ from .settings import (
     Numbered,
     confirm_deletion,
 )
-from .text import similarity
+from .text import similarity, words
 
 EPISODE_BOOKKEEPING = frozenset({"id", "chat", "time", "dreamt", "dreamt_time"})
 KEPT_WHOLE = EPISODE_BOOKKEEPING | {"status"}
@@ -330,18 +330,31 @@ class Traits:
         return [trait for trait in self.all() if trait["status"] == "candidate"]
 
 
+def word_likeness(text, other):
+    these, those = set(words(text)), set(words(other))
+    return len(these & those) / len(these | those) if these | those else 1.0
+
+
+def without_repeats(items):
+    return list(dict.fromkeys(items))
+
+
 class Questions:
     QUESTIONS = "questions"
     COUNTER = "question_ids"
 
-    def add(self, kind, text, suggestions, traits, sources, now=None):
-        if any(similarity(text, kept["text"]) >= SAME_FACT_SIMILARITY for kept in self.all()):
+    def add(self, kind, about, text, thought, expected, traits, sources, now=None):
+        alike = self.alike(text)
+        if alike:
+            self.absorb(alike, traits, sources)
             return None
         question = {
             "id": f"q{self.next_number('last')}",
             "kind": kind,
+            "about": about,
             "text": text,
-            "suggestions": list(suggestions),
+            "thought": thought,
+            "expected": expected,
             "traits": list(traits),
             "sources": list(sources),
             "status": "pending",
@@ -352,6 +365,24 @@ class Questions:
         }
         Home.store().put(self.QUESTIONS, question["id"], question)
         return question
+
+    def alike(self, text):
+        return next(
+            (
+                kept
+                for kept in self.all()
+                if kept["status"] == "pending" and word_likeness(text, kept["text"]) >= SAME_FACT_SIMILARITY
+            ),
+            None,
+        )
+
+    def absorb(self, kept, traits, sources):
+        absorbed = dict(
+            kept,
+            traits=without_repeats(kept["traits"] + traits),
+            sources=without_repeats(kept["sources"] + sources),
+        )
+        Home.store().put(self.QUESTIONS, kept["id"], absorbed)
 
     def pending(self):
         traits = Traits().all()
@@ -581,11 +612,21 @@ def show_traits():
         with say.part("Candidates", "🌱"):
             for trait in by_number(candidates):
                 say.item(f"{trait_view_line(trait)} · {counted(len(trait['sources']), 'source')}")
-    waiting = len(Questions().pending())
+    pending = Questions().pending()
+    if pending:
+        with say.part("Questions", "💭"):
+            for question in pending:
+                say.item(question_view_line(question))
+    waiting = len(pending)
     say.info(
         f"{counted(waiting, 'question waits', 'questions wait')}: tinker interact asks {'it' if waiting == 1 else 'them'}.",
         "👉",
     )
+
+
+def question_view_line(question):
+    line = f"{question['id']} {question['text']}"
+    return f"{line} · {question['thought']}" if question["thought"] else line
 
 
 def by_number(traits):

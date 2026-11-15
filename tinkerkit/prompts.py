@@ -16,6 +16,7 @@ from .settings import (
     MIN_TRIMMED_PROSE_CHARS,
     READ_FACTS_PER_CHAPTER,
     READ_KEY_TERMS,
+    REFLECT_WAITING,
     RESEARCH_FACTS_CHECKED,
     RESEARCH_GAPS,
     RESEARCH_QUESTIONS,
@@ -109,7 +110,7 @@ class Reply:
                 return json.loads(candidate)
             except json.JSONDecodeError as exc:
                 problem = problem or exc
-        raise problem
+        raise problem or ValueError("no JSON object closes in reply")
 
     @staticmethod
     def balanced(text):
@@ -1117,14 +1118,58 @@ Reply with ONLY JSON: {"claims":[{"claim":1,"verdict":"holds","why":"one short s
         "(who the person is: work, goals, likes) or tinker (who Tinker is for them: role, duties, tone, how "
         "it builds), when is the situation it holds in, empty when it always holds, and do is the trait as "
         "said. A trait is lasting (work, goals, likes, ways of working), never a passing state (the folder, "
-        "the time, one command's output). Reply with only one JSON object:\n"
+        "the time, one command's output). Give each add the thought that led to it and expected, your guess "
+        "at the person's answer. The person reads the question, thought and expected: plain words, naming no "
+        "id. Reply with only one JSON object:\n"
         '{"add":[{"about":"person|tinker","when":"the situation, or empty","do":"the trait as said",'
-        '"sources":["e1","m1"],"question":"a short question the person answers to confirm it",'
-        '"suggestions":["2 to 4 short answers"]}],\n'
+        '"sources":["e1","m1"],"question":"a short question the person answers to confirm it, shown to the '
+        'person in plain words, naming no id",'
+        '"thought":"why you ask, shown to the person in plain words, naming no id",'
+        '"expected":"your guess at the answer, shown to the person in plain words, naming no id"}],\n'
         ' "support":[{"id":"t1","sources":["e1"]}]}\n'
         "Add every new trait the episodes and memories show and support a known trait they show again. Every "
         "add and support cites the ids it rests on. Use only the ids you are given. Leave a list empty when "
         "nothing fits."
+    )
+
+    TINKER_PURPOSE = (
+        "Tinker builds only what the request clearly asks for, nothing beyond what the project's spec needs. "
+        "The plan is a spec of points, each with exactly one unit test written before any code, and the code "
+        "is just enough to pass those tests. A project is done when every spec point's test passes, set up "
+        "afresh, the way a person runs it. In the conversation the person confirms a plan before anything is "
+        "built; a command-line run builds autonomously. Tinker keeps what it knows in its own database and "
+        "each project's state in the project's own database, read through Tinker's commands, never edited by "
+        "hand."
+    )
+
+    REFLECT_SYSTEM = (
+        "You reflect on how best to help a person. What Tinker is for: "
+        + TINKER_PURPOSE
+        + " You get, for person (who the person is: work, goals, likes) and for tinker (who Tinker is for "
+        "them: role, duties, tone, how it builds), the confirmed traits, the candidates, the pending questions "
+        "with the thought behind each and the answer expected, and the traits the person retired with why; "
+        "the evidence, the gists of recent episodes and the memories about the person, each with its id; "
+        "your thoughts so far; and how many questions are waiting. A trait has when, the situation it holds "
+        "in, empty when it always holds, and do, the trait as said. A trait is lasting (work, goals, likes, "
+        "ways of working), never a passing state (the folder, the time, one command's output). Think about "
+        "what the evidence shows and what is still unknown, then add each new trait the evidence shows, with "
+        "a short question the person answers to confirm it, and ask the open questions whose answers would "
+        "fill what the traits leave unknown. Give each the thought that led to it and expected, your guess at "
+        "the person's answer. The person reads the question, thought and expected: plain words, naming no id. "
+        f"{REFLECT_WAITING} questions waiting is plenty: a guideline, never a reason to "
+        "stop thinking. Never ask again a question like one waiting, nor about a trait the person retired. Reply "
+        "with only one JSON object:\n"
+        '{"thought":"what you notice and still wonder, in two or three sentences",\n'
+        ' "add":[{"about":"person|tinker","when":"the situation, or empty","do":"the trait as said",'
+        '"sources":["e1","m1"],"question":"a short question to confirm it, shown to the person in plain words, '
+        'naming no id","thought":"why you ask, shown to the person in plain words, naming no id",'
+        '"expected":"your guess at the answer, shown to the person in plain words, naming no id"}],\n'
+        ' "questions":[{"about":"person|tinker","text":"a short question, shown to the person in plain words, '
+        'naming no id","thought":"why you ask, shown to the person in plain words, naming no id",'
+        '"expected":"your guess at the answer, shown to the person in plain words, naming no id"}],\n'
+        ' "done":false}\n'
+        "Every add cites the ids it rests on; use only the ids you are given. Leave a list empty when nothing "
+        "fits. Say done true when nothing is left worth adding or asking."
     )
 
     DREAM_MERGE_TRAITS_SYSTEM = (
@@ -1145,50 +1190,39 @@ Reply with ONLY JSON: {"claims":[{"claim":1,"verdict":"holds","why":"one short s
         "Use only the ids you are given. Leave out a trait no shorter wording keeps."
     )
 
-    DREAM_QUESTIONS_SYSTEM = (
-        "You find what is still unknown about a person and about Tinker for them. You get the confirmed "
-        "traits, each with its id, about, when and do, and the questions already asked. A trait is about "
-        "person (who the person is: work, goals, likes) or tinker (who Tinker is for them: role, duties, tone, "
-        "how it builds). Ask the open questions whose answers would fill what the traits leave unknown, each "
-        "with 2 to 4 short answers the person can pick. Reply with only one JSON object:\n"
-        '{"questions":[{"text":"a short question","suggestions":["2 to 4 short answers"]}]}\n'
-        "Never repeat a question already asked. Leave the list empty when nothing is left to ask."
-    )
-
-    INTERACT_SYSTEM = (
-        "You interview a person to learn who they are and who Tinker is for them. You get the confirmed "
-        "traits, each with its id, about, when and do, and the questions already asked. A trait is about "
-        "person (who the person is: work, goals, likes) or tinker (who Tinker is for them: role, duties, tone, "
-        "how it builds). Ask the one open question whose answer would fill most of what the traits leave "
-        "unknown, with 2 to 4 short answers the person can pick. Reply with only one JSON object:\n"
-        '{"text":"a short question","suggestions":["2 to 4 short answers"]}\n'
-        'Never repeat a question already asked. Reply {"done":true} when nothing is left to ask.'
-    )
-
-    INTERACT_ANSWER_SYSTEM = (
-        "You read a person's reply to one question about them or about Tinker for them. You get the "
-        "question, its suggested answers, the traits it asks about, each with its id, about, when and do, and "
-        "the reply: a suggestion, a suggestion with changes, or their own words. Reply with only one "
+    INTERACT_TALK_SYSTEM = (
+        "You talk with a person to learn who they are and who Tinker is for them. What Tinker is for: "
+        + TINKER_PURPOSE
+        + " You get the confirmed traits, for person (who the person is: work, goals, likes) and for tinker "
+        "(who Tinker is for them: role, duties, tone, how it builds), each with its id, when and do; the "
+        "question you are talking about, with the thought behind it, expected, your guess at the answer, and "
+        "the traits it asks about; the next waiting question, to lead into once this one is settled; the "
+        "dialogue so far; and the person's message. A trait is lasting (work, goals, likes, ways of working), "
+        "never a passing state. Reply to the message as Tinker, then read what it tells. Reply with only one "
         "JSON object:\n"
-        '{"confirm":["ids of the traits the reply says hold"],'
-        '"reject":[{"id":"a trait id","why":"why it does not hold"}],'
-        '"amend":[{"id":"a trait id","when":"when it holds now","do":"the habit it holds now"}],'
-        '"add":[{"about":"person|tinker","when":"when it holds, or empty","do":"the lasting habit"}],'
-        '"question":{"text":"a short follow-up question","suggestions":["2 to 4 short answers"]}}\n'
-        "Use only the given trait ids and add only what the reply says. An add's or amend's do is a lasting "
-        "habit in Tinker's own words, never the reply copied, and keeps every detail and condition the reply "
-        "gives. When the reply asks to be asked something, that is no add: a request to be asked something "
-        "is a question. Leave a list empty and question null when the reply gives nothing for them."
-    )
-
-    INTERACT_ADD_SYSTEM = (
-        "You read a person's reply to one question about them or about Tinker for them. You get the "
-        "question, its suggested answers and the reply: a suggestion, a suggestion with changes, or their own "
-        "words. Reply with only one JSON object:\n"
-        '{"add":[{"about":"person|tinker","when":"when it holds, or empty","do":"what the reply says"}],'
-        '"question":{"text":"a short follow-up question","suggestions":["2 to 4 short answers"]}}\n'
-        "Add only what the reply says; an add's do keeps the whole reply, every detail and condition in it. "
-        "Leave add empty and question null when the reply gives nothing for them."
+        '{"say":"your reply to the person, one or two sentences, never a question",\n'
+        ' "confirm":["ids of the traits the message says hold"],\n'
+        ' "reject":[{"id":"a trait id","why":"why it does not hold"}],\n'
+        ' "amend":[{"id":"a trait id","when":"when it holds now","do":"the habit it holds now"}],\n'
+        ' "add":[{"about":"person|tinker","when":"when it holds, or empty","do":"the lasting habit"}],\n'
+        ' "question":null or {"about":"person|tinker","text":"a short follow-up question, shown to the person in '
+        'plain words, naming no id",'
+        '"thought":"why you ask, shown to the person in plain words, naming no id",'
+        '"expected":"your guess at the answer, shown to the person in plain words, naming no id"},\n'
+        ' "settled":true}\n'
+        "Your say is one or two short sentences replying to the message only; it never asks the current "
+        "question or the next one: Tinker shows the question itself after the say, and the next waiting "
+        "question is only to lead into. In say, it never claims to have recorded, saved or noted anything. "
+        "Use only the given trait ids and add only what the message says: an add holds only what the person "
+        "states, never an inference from a rejection. A follow-up question is about the person or Tinker, "
+        "never a matter the person raised in passing, such as the weather. An add's or amend's do is a "
+        "lasting habit in Tinker's own words, never the message copied, and keeps every detail and condition "
+        "the message gives. When the message asks to be asked something, that is no add: a request to be "
+        "asked something is a question. Say settled true when the message answers the question, false when "
+        "the talk about it should go on. Your question is null unless the message raises a new follow-up. A "
+        "message that does not answer the current question (off-topic, such as \"By the way, what's the weather "
+        'like?") gives settled false, empty confirm, reject, amend and add, and question null. Leave a list '
+        "empty when the message gives nothing for it."
     )
 
     CHAT_FILL_SYSTEM = (

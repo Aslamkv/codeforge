@@ -41,6 +41,7 @@ LAYERS = (
     "slots",
     "learning",
     "graph",
+    "reflecting",
     "dreaming",
     "interviewing",
     "formats",

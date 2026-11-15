@@ -1,6 +1,7 @@
 import datetime
 
 import pytest
+from conftest import ask
 
 from tinkerkit.remembering import (
     Memories,
@@ -372,12 +373,10 @@ def test_a_pending_confirm_about_a_merged_trait_asks_about_the_new_one(home_stor
         ],
         NOW,
     )
-    Questions().add("confirm", "Do you write Rust code every day?", ["yes", "no"], ["t1"], ["e1"], NOW)
-    Questions().add(
-        "confirm", "Do you write Rust and play chess?", ["yes", "no"], ["t1", "t2", "t3"], ["e1"], NOW
-    )
-    Questions().add("confirm", "Do you play chess on weekends?", ["yes", "no"], ["t2"], ["e1"], NOW)
-    Questions().add("open", "Which editor do you use at work?", [], [], ["e1"], NOW)
+    ask("Do you write Rust code every day?", "confirm", traits=["t1"], now=NOW)
+    ask("Do you write Rust and play chess?", "confirm", traits=["t1", "t2", "t3"], now=NOW)
+    ask("Do you play chess on weekends?", "confirm", traits=["t2"], now=NOW)
+    ask("Which editor do you use at work?", now=NOW)
     Questions().answer("q3", "yes", NOW)
 
     Traits().apply([{"op": "merge", "ids": ["t1", "t2"], "do": "Codes Rust and plays chess"}], NOW)
@@ -464,13 +463,22 @@ def test_relevant_traits_are_empty_without_confirmed_traits(home_store):
 
 @pytest.mark.spec("REM-15")
 def test_an_added_question_is_pending_with_the_next_id(home_store):
-    question = Questions().add("confirm", "Do you write Rust daily?", ["yes", "no"], ["t1"], ["e1"], NOW)
+    question = ask(
+        "Do you write Rust daily?",
+        "confirm",
+        traits=["t1"],
+        thought="Every snippet they shared was Rust.",
+        expected="Yes, most days.",
+        now=NOW,
+    )
 
     assert question == {
         "id": "q1",
         "kind": "confirm",
+        "about": "person",
         "text": "Do you write Rust daily?",
-        "suggestions": ["yes", "no"],
+        "thought": "Every snippet they shared was Rust.",
+        "expected": "Yes, most days.",
         "traits": ["t1"],
         "sources": ["e1"],
         "status": "pending",
@@ -483,14 +491,43 @@ def test_an_added_question_is_pending_with_the_next_id(home_store):
 
 
 @pytest.mark.spec("REM-15")
-def test_a_question_like_one_kept_is_dropped_whatever_its_status(home_store):
-    Questions().add("open", "Which editor do you use at work?", [], [], ["e1"], NOW)
-    Questions().answer("q1", "Helix", NOW)
+@pytest.mark.parametrize("status", ["answered", "skipped"])
+def test_a_confirm_question_like_a_settled_one_is_kept_pending_with_its_own_traits_and_sources(
+    home_store, status
+):
+    ask("Do you use Helix at work?", "confirm", traits=["t1"], now=NOW)
+    home_store.put("questions", "q1", dict(home_store.get("questions", "q1"), status=status))
+    settled = home_store.get("questions", "q1")
 
-    dropped = Questions().add("open", "Which editor do you use at work?", [], [], ["e2"], NOW)
+    kept = ask("Do you use Helix at work?", "confirm", traits=["t2"], sources=["e2"], now=NOW)
+
+    assert kept["id"] == "q2" and kept["status"] == "pending"
+    assert kept["traits"] == ["t2"] and kept["sources"] == ["e2"]
+    assert home_store.get("questions", "q1") == settled
+
+
+@pytest.mark.spec("REM-15")
+def test_a_question_with_the_same_words_reordered_is_dropped_and_an_unrelated_one_kept(home_store):
+    ask("Do you prefer detailed explanations with context, or concise summaries?", now=NOW)
+
+    dropped = ask("Do you prefer concise summaries or detailed explanations?", sources=["e2"], now=NOW)
+    kept = ask("Do you write Python or Rust?", sources=["e3"], now=NOW)
 
     assert dropped is None
-    assert list(home_store.items("questions")) == ["q1"]
+    assert kept["id"] == "q2"
+    assert list(home_store.items("questions")) == ["q1", "q2"]
+
+
+@pytest.mark.spec("REM-15")
+def test_a_dropped_like_question_gives_the_kept_pending_one_its_new_traits_and_sources_once(home_store):
+    ask("Which editor do you use at work?", traits=["t1"], now=NOW)
+
+    dropped = ask("Which editor do you use at work?", traits=["t2", "t1"], sources=["e2", "e1"], now=NOW)
+
+    kept = home_store.get("questions", "q1")
+    assert dropped is None
+    assert kept["traits"] == ["t1", "t2"]
+    assert kept["sources"] == ["e1", "e2"]
 
 
 @pytest.mark.spec("REM-15")
@@ -499,10 +536,10 @@ def test_pending_gives_confirms_first_the_best_supported_first_then_open_ones_in
         [add_trait("Writes Rust code every day"), add_trait("Plays chess on weekends", sources=["e1", "e2"])],
         NOW,
     )
-    Questions().add("open", "Which editor do you use at work?", [], [], ["e1"], NOW)
-    Questions().add("confirm", "Do you write Rust code every day?", ["yes", "no"], ["t1"], ["e1"], NOW)
-    Questions().add("open", "What music helps you focus?", [], [], ["e2"], NOW)
-    Questions().add("confirm", "Do you play chess on weekends?", ["yes", "no"], ["t2"], ["e2"], NOW)
+    ask("Which editor do you use at work?", now=NOW)
+    ask("Do you write Rust code every day?", "confirm", traits=["t1"], now=NOW)
+    ask("What music helps you focus?", sources=["e2"], now=NOW)
+    ask("Do you play chess on weekends?", "confirm", traits=["t2"], sources=["e2"], now=NOW)
 
     assert [question["id"] for question in Questions().pending()] == ["q4", "q2", "q1", "q3"]
     assert Questions().next()["id"] == "q4"
@@ -511,8 +548,8 @@ def test_pending_gives_confirms_first_the_best_supported_first_then_open_ones_in
 @pytest.mark.spec("REM-15")
 def test_a_skipped_question_goes_behind_every_pending_one_still_pending(home_store):
     Traits().apply([add_trait("Writes Rust code every day")], NOW)
-    Questions().add("confirm", "Do you write Rust code every day?", ["yes", "no"], ["t1"], ["e1"], NOW)
-    Questions().add("open", "Which editor do you use at work?", [], [], ["e1"], NOW)
+    ask("Do you write Rust code every day?", "confirm", traits=["t1"], now=NOW)
+    ask("Which editor do you use at work?", now=NOW)
 
     skipped = Questions().skip("q1", NOW)
 
@@ -526,9 +563,9 @@ def test_skipped_questions_follow_the_order_they_were_skipped_whatever_their_kin
         [add_trait("Writes Rust code every day"), add_trait("Plays chess on weekends", sources=["e1", "e2"])],
         NOW,
     )
-    Questions().add("confirm", "Do you write Rust code every day?", ["yes", "no"], ["t1"], ["e1"], NOW)
-    Questions().add("confirm", "Do you play chess on weekends?", ["yes", "no"], ["t2"], ["e2"], NOW)
-    Questions().add("open", "Which editor do you use at work?", [], [], ["e1"], NOW)
+    ask("Do you write Rust code every day?", "confirm", traits=["t1"], now=NOW)
+    ask("Do you play chess on weekends?", "confirm", traits=["t2"], sources=["e2"], now=NOW)
+    ask("Which editor do you use at work?", now=NOW)
 
     Questions().skip("q2", NOW)
     assert [question["id"] for question in Questions().pending()] == ["q1", "q3", "q2"]
@@ -541,8 +578,8 @@ def test_skipped_questions_follow_the_order_they_were_skipped_whatever_their_kin
 @pytest.mark.spec("REM-15")
 def test_a_confirm_whose_traits_are_all_retired_no_longer_waits(home_store):
     Traits().apply([add_trait("Writes Rust code every day"), add_trait("Plays chess on weekends")], NOW)
-    Questions().add("confirm", "Do you write Rust code every day?", ["yes", "no"], ["t1"], ["e1"], NOW)
-    Questions().add("confirm", "Do you write Rust and play chess?", ["yes", "no"], ["t1", "t2"], ["e1"], NOW)
+    ask("Do you write Rust code every day?", "confirm", traits=["t1"], now=NOW)
+    ask("Do you write Rust and play chess?", "confirm", traits=["t1", "t2"], now=NOW)
 
     Traits().apply([{"op": "reject", "id": "t1", "why": "not true"}], NOW)
 
@@ -555,8 +592,8 @@ def test_a_confirm_about_a_candidate_merged_into_a_confirmed_trait_no_longer_wai
     Traits().apply(
         [add_trait("Writes Rust code every day"), add_trait("Plays chess on weekends", confirmed=True)], NOW
     )
-    Questions().add("confirm", "Do you write Rust code every day?", ["yes", "no"], ["t1"], ["e1"], NOW)
-    Questions().add("confirm", "Do you play chess on weekends?", ["yes", "no"], ["t2"], ["e1"], NOW)
+    ask("Do you write Rust code every day?", "confirm", traits=["t1"], now=NOW)
+    ask("Do you play chess on weekends?", "confirm", traits=["t2"], now=NOW)
 
     Traits().apply([{"op": "merge", "ids": ["t1", "t2"], "do": "Codes Rust and plays chess"}], NOW)
 
@@ -567,8 +604,8 @@ def test_a_confirm_about_a_candidate_merged_into_a_confirmed_trait_no_longer_wai
 @pytest.mark.spec("REM-15")
 def test_a_confirm_about_a_candidate_confirmed_by_a_teach_no_longer_waits(home_store):
     Traits().apply([add_trait("Writes Rust code every day"), add_trait("Plays chess on weekends")], NOW)
-    Questions().add("confirm", "Do you write Rust code every day?", ["yes", "no"], ["t1"], ["e1"], NOW)
-    Questions().add("confirm", "Do you write Rust and play chess?", ["yes", "no"], ["t1", "t2"], ["e1"], NOW)
+    ask("Do you write Rust code every day?", "confirm", traits=["t1"], now=NOW)
+    ask("Do you write Rust and play chess?", "confirm", traits=["t1", "t2"], now=NOW)
 
     Traits().apply([add_trait("Writes Rust code every day", sources=["e2"], confirmed=True)], NOW)
 
@@ -579,7 +616,7 @@ def test_a_confirm_about_a_candidate_confirmed_by_a_teach_no_longer_waits(home_s
 @pytest.mark.spec("REM-15")
 def test_a_confirm_whose_traits_are_each_confirmed_or_retired_no_longer_waits(home_store):
     Traits().apply([add_trait("Writes Rust code every day"), add_trait("Plays chess on weekends")], NOW)
-    Questions().add("confirm", "Do you write Rust and play chess?", ["yes", "no"], ["t1", "t2"], ["e1"], NOW)
+    ask("Do you write Rust and play chess?", "confirm", traits=["t1", "t2"], now=NOW)
 
     Traits().apply(
         [{"op": "reject", "id": "t1", "why": "not true"}, {"op": "confirm", "id": "t2", "sources": ["e2"]}],
@@ -591,7 +628,7 @@ def test_a_confirm_whose_traits_are_each_confirmed_or_retired_no_longer_waits(ho
 
 @pytest.mark.spec("REM-15")
 def test_an_answered_question_leaves_the_pending_ones(home_store):
-    Questions().add("open", "Which editor do you use at work?", [], [], ["e1"], NOW)
+    ask("Which editor do you use at work?", now=NOW)
 
     answered = Questions().answer("q1", "Helix", NOW)
 
@@ -602,7 +639,7 @@ def test_an_answered_question_leaves_the_pending_ones(home_store):
 
 @pytest.mark.spec("REM-15")
 def test_answer_or_skip_of_an_unknown_or_answered_question_changes_nothing(home_store):
-    Questions().add("open", "Which editor do you use at work?", [], [], ["e1"], NOW)
+    ask("Which editor do you use at work?", now=NOW)
     Questions().answer("q1", "Helix", NOW)
 
     assert Questions().answer("q9", "Vim", NOW) is None
@@ -862,7 +899,7 @@ def test_traits_shows_the_confirmed_by_about_then_candidates_then_questions(home
         NOW,
     )
     Traits().apply([{"op": "reject", "id": "t4", "why": "wrong"}], NOW)
-    Questions().add("confirm", "Do you keep bees?", [], ["t3"], ["e1"], NOW)
+    ask("Do you keep bees?", "confirm", traits=["t3"], now=NOW)
 
     show_traits()
 
@@ -873,6 +910,34 @@ def test_traits_shows_the_confirmed_by_about_then_candidates_then_questions(home
     assert out.index("t1 answer in short lines") < out.index("t3 keeps bees")
     assert "dislikes long meetings" not in out
     assert "1 question waits: tinker interact asks it." in out
+
+
+@pytest.mark.spec("REM-10")
+@pytest.mark.spec("REM-15")
+def test_traits_lists_each_waiting_question_with_its_thought_before_the_count(home_store, capsys):
+    Traits().apply(
+        [{"op": "add", "about": "person", "when": "", "do": "keeps bees", "sources": ["e1", "e2"]}],
+        NOW,
+    )
+    ask(
+        "Do you keep bees?",
+        "confirm",
+        traits=["t1"],
+        thought="you spoke of hives twice",
+        expected="yes",
+        now=NOW,
+    )
+    ask("What do you grow?", sources=["e2"], now=NOW)
+
+    show_traits()
+
+    out = capsys.readouterr().out
+    assert "Questions" in out
+    assert "q1 Do you keep bees? · you spoke of hives twice" in out
+    assert "q2 What do you grow?" in out
+    assert "q2 What do you grow? ·" not in out
+    assert out.index("t1 keeps bees") < out.index("q1 Do you keep bees?") < out.index("q2 What do you grow?")
+    assert out.index("q2 What do you grow?") < out.index("2 questions wait: tinker interact asks them.")
 
 
 @pytest.mark.spec("REM-10")

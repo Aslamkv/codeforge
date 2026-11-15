@@ -254,7 +254,7 @@ def test_watched_names_every_watched_method():
         "Store.get",
         "Store.put",
         "Store.append",
-        "dreaming.reply_read",
+        "reflecting.reply_read",
         "Ollama.loading",
         "Talk.warm",
         "channels.connect_by_address",

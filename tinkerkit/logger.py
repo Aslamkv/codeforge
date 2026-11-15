@@ -238,7 +238,7 @@ WATCHED = (
         Fact(lambda a: f"Database append {a.log}", lambda a, result: f"Database append {a.log}: {a.entry!r}"),
     ),
     WatchedFunction(
-        "tinkerkit.dreaming",
+        "tinkerkit.reflecting",
         "reply_read",
         Fact(lambda a: "Quick reply read", lambda a, result: f"Quick reply read: {result!r}"),
     ),

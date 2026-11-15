@@ -1,12 +1,21 @@
 import json
-import re
 
-from tinkerkit.conversation import md
-from tinkerkit.dreaming import TRAIT_ABOUTS, asked, cited_only, listed, questions_text, suggestions_of
+from tinkerkit.conversation import ALL_FOR_NOW, Turn, md
 from tinkerkit.prompts import Prompts
+from tinkerkit.reflecting import (
+    TRAIT_ABOUTS,
+    Reflection,
+    asked,
+    cited_only,
+    listed,
+    question_kept,
+    said,
+    traits_shown,
+)
 from tinkerkit.remembering import Questions, Scratchpad, Traits
+from tinkerkit.settings import INTERACT_TURNS, Home
 
-HINT = '_a number, a number with changes ("2, but on weekdays"), your own words, or /skip_'
+UNREADABLE = "Couldn't read that answer; here it is again."
 
 
 class Interview:
@@ -14,12 +23,12 @@ class Interview:
         self.questions = questions or Questions()
         self.shown_to = {}
 
-    def turn(self, chat, now=None):
-        question = self.questions.next() or self.question_asked(now)
+    def turn(self, chat, now=None, say=""):
+        question = self.questions.next() or first_kept(Reflection().round(now))
         if question is None:
-            return None
+            return Turn(after(say, ALL_FOR_NOW), True)
         self.shown_to[chat] = question["id"]
-        return self.shown(question)
+        return Turn(after(say, self.shown(question)), False)
 
     def current(self, chat):
         pending = self.questions.pending()
@@ -27,87 +36,87 @@ class Interview:
         return next(iter(shown + pending), None)
 
     def shown(self, question):
-        return "\n".join([md(t"💬 {question['text']}"), *self.suggestion_lines(question), HINT])
-
-    def suggestion_count(self, chat):
-        question = self.current(chat)
-        return len(question["suggestions"]) if question else 0
-
-    def suggestion_lines(self, question):
-        return [md(t"{number}. {suggestion}") for number, suggestion in enumerate(question["suggestions"], 1)]
-
-    def question_asked(self, now):
-        reply = asked(Prompts.INTERACT_SYSTEM, questions_text(Traits().confirmed(), self.questions.all()))
-        if not isinstance(reply, dict) or reply.get("done") is True:
-            return None
-        return self.question_kept(reply, [], now)
-
-    def question_kept(self, item, sources, now):
-        text = item.get("text")
-        if not (isinstance(text, str) and text):
-            return None
-        return self.questions.add("open", text, suggestions_of(item), [], sources, now)
+        return md(
+            t"💭 I've been thinking: {question['thought']} {question['text']} My guess: {question['expected']}"
+        )
 
     def skipped(self, chat):
         question = self.current(chat)
-        if question is None:
-            return None
-        self.questions.skip(question["id"])
+        if question:
+            self.questions.skip(question["id"])
         return self.turn(chat)
 
     def answered(self, chat, text, now=None):
         question = self.current(chat)
         if question is None:
             return self.turn(chat, now)
-        if out_of_range(question, text):
-            return f"Pick 1–{len(question['suggestions'])}, your own words, or /skip.\n{self.shown(question)}"
-        text = expanded(question, text)
-        reply = asked(answer_system(question), answer_text(question, text))
+        reply = asked(
+            Prompts.INTERACT_TALK_SYSTEM, talk_text(chat, question, self.waiting_after(question), text)
+        )
         if not isinstance(reply, dict):
-            return f"Couldn't read that answer; here it is again.\n{self.shown(question)}"
+            return Turn(f"{UNREADABLE}\n{self.shown(question)}", False)
+        say = said(reply, "say")
         episode = Scratchpad.write(
-            {"chat": chat, "kind": "interact", "question": question["text"], "answer": text}, now
+            {"chat": chat, "kind": "interact", "question": question["text"], "answer": text, "say": say}, now
         )
         Scratchpad.dreamt([episode["id"]], now)
         Traits().apply(deltas_of(reply, question["traits"], episode["id"]), now)
-        if isinstance(follow_up := follow_up_of(reply), dict):
-            self.question_kept(follow_up, [episode["id"]], now)
+        if isinstance(reply.get("question"), dict):
+            question_kept(reply["question"], now, lambda name, record: None)
+        if reply.get("settled") is not True:
+            return Turn(say or self.shown(question), False)
         self.questions.answer(question["id"], text, now)
-        return self.turn(chat, now)
+        return self.turn(chat, now, say)
+
+    def waiting_after(self, question):
+        return next(
+            (waiting for waiting in self.questions.pending() if waiting["id"] != question["id"]), None
+        )
 
 
-def follow_up_of(reply):
-    question = reply.get("question")
-    if isinstance(question, str):
-        return {"text": question, "suggestions": reply.get("suggestions")}
-    return question
+def first_kept(round_kept):
+    return round_kept["kept"][0] if round_kept and round_kept["kept"] else None
 
 
-def out_of_range(question, text):
-    count, number = len(question["suggestions"]), leading_number(text)
-    return count > 0 and number is not None and not 1 <= int(number[0]) <= count
+def after(say, text):
+    return f"{say}\n\n{text}" if say else text
 
 
-def expanded(question, text):
-    number = leading_number(text)
-    if not question["suggestions"] or number is None:
-        return text
-    return question["suggestions"][int(number[0]) - 1] + text.strip()[number.end() :]
+def talk_text(chat, question, waiting, message):
+    traits = Traits().all()
+    return json.dumps(
+        {
+            "traits": {
+                about: traits_shown([trait for trait in traits if trait["about"] == about], "confirmed")
+                for about in TRAIT_ABOUTS
+            },
+            "question": {
+                "text": question["text"],
+                "thought": question["thought"],
+                "expected": question["expected"],
+                "traits": asked_traits(question),
+            },
+            "next": waiting["text"] if waiting else None,
+            "dialogue": dialogue(chat),
+            "message": message,
+        },
+        ensure_ascii=False,
+    )
 
 
-def leading_number(text):
-    return re.match(r"\d+", text.strip())
-
-
-def answer_system(question):
-    return Prompts.INTERACT_ANSWER_SYSTEM if question["traits"] else Prompts.INTERACT_ADD_SYSTEM
-
-
-def answer_text(question, text):
-    asked = {"question": question["text"], "suggestions": question["suggestions"]}
-    if question["traits"]:
-        asked["traits"] = asked_traits(question)
-    return json.dumps(asked | {"reply": text}, ensure_ascii=False)
+def dialogue(chat):
+    turns = sorted(
+        (
+            episode
+            for episode in Home.store().items(Scratchpad.EPISODES).values()
+            if episode["chat"] == chat and episode.get("kind") == "interact"
+        ),
+        key=lambda episode: (episode["time"], int(episode["id"].removeprefix("e"))),
+    )
+    return [
+        {"question": turn["question"], "answer": turn["answer"], "say": turn.get("say", "")}
+        for turn in turns[-INTERACT_TURNS:]
+    ]
 
 
 def asked_traits(question):
@@ -130,7 +139,7 @@ def deltas_of(reply, asked_about, source):
             for trait_id in cited_only(reply.get("confirm"), asked_about)
         ),
         *(
-            {"op": "reject", "id": item["id"], "why": text_of(item, "why")}
+            {"op": "reject", "id": item["id"], "why": said(item, "why")}
             for item in listed(reply.get("reject"))
             if item.get("id") in asked_about
         ),
@@ -139,13 +148,13 @@ def deltas_of(reply, asked_about, source):
             {
                 "op": "add",
                 "about": item["about"],
-                "when": text_of(item, "when"),
+                "when": said(item, "when"),
                 "do": item["do"],
                 "sources": [source],
                 "confirmed": True,
             }
             for item in listed(reply.get("add"))
-            if item.get("about") in TRAIT_ABOUTS and text_of(item, "do")
+            if item.get("about") in TRAIT_ABOUTS and said(item, "do")
         ),
     ]
 
@@ -153,8 +162,3 @@ def deltas_of(reply, asked_about, source):
 def amend_of(item):
     changes = {key: item[key] for key in ("when", "do") if isinstance(item.get(key), str)}
     return {"op": "amend", "id": item["id"], **changes}
-
-
-def text_of(item, key):
-    value = item.get(key)
-    return value if isinstance(value, str) else ""

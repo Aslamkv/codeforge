@@ -11,8 +11,18 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from .graph import Graph, GraphPage
 from .jobs import Jobs
 from .messages import say
-from .model import Models, OllamaError
-from .prompts import Prompts, Reply
+from .model import Models
+from .prompts import Prompts
+from .reflecting import (
+    Reflection,
+    asked,
+    cited_only,
+    listed,
+    said,
+    shown,
+    shown_memory,
+    trait_added,
+)
 from .remembering import (
     DREAM,
     Memories,
@@ -31,8 +41,7 @@ from .settings import (
     DREAM_BATCH_EPISODES,
     DREAM_FORGET_DAYS,
     DREAM_KEEP_STRENGTH,
-    DREAM_REPLY_TOKENS,
-    QUESTIONS_WAITING,
+    REFLECT_THOUGHTS,
     SIMILAR_LESSON_MEANING,
     SIMILAR_LESSON_WORDS,
     Home,
@@ -40,15 +49,13 @@ from .settings import (
 from .store import Log
 from .text import similarity
 
-SHOWN_MEMORY_KEYS = ("id", "kind", "gist", "text", "strength", "recalled")
 TRAIT_KEYS = ("id", "about", "when", "do", "status")
-TRAIT_ABOUTS = ("person", "tinker")
 
 
 class Dream:
     STATE = "state"
     EVENTS = "dream events"
-    STEPS = ("consolidate", "revise", "decay", "traits", "merge_traits", "gists", "questions")
+    STEPS = ("consolidate", "revise", "decay", "traits", "merge_traits", "gists", "reflect")
 
     def __init__(self, retriever, phase=lambda step: None):
         self.memories = Memories(retriever)
@@ -233,7 +240,7 @@ class Dream:
             return
         given = {item["id"] for item in episodes + people + living}
         for item in listed(reply.get("add")):
-            self.trait_added(item, given, now)
+            trait_added(item, given, now, self.noting("traits"))
         for item in listed(reply.get("support")):
             self.trait_supported(item, given, now)
 
@@ -247,24 +254,6 @@ class Dream:
             (memory for memory in changed if memory and memory["kind"] == "person" and not memory["retired"]),
             key=lambda memory: int(memory["id"][1:]),
         )
-
-    def trait_added(self, item, given, now):
-        if item.get("about") not in TRAIT_ABOUTS or not (isinstance(item.get("do"), str) and item["do"]):
-            return
-        when = item.get("when") if isinstance(item.get("when"), str) else ""
-        sources = cited_only(item.get("sources"), given)
-        delta = {"op": "add", "about": item["about"], "when": when, "do": item["do"], "sources": sources}
-        for trait in Traits().apply([delta], now):
-            if newly_added(trait):
-                self.trait_logged("traits", "add", trait)
-                self.confirm_asked(item, trait, sources, now)
-            else:
-                self.trait_logged("traits", "support", trait)
-
-    def confirm_asked(self, item, trait, sources, now):
-        question = item.get("question")
-        if isinstance(question, str) and question:
-            Questions().add("confirm", question, suggestions_of(item), [trait["id"]], sources, now)
 
     def trait_supported(self, item, given, now):
         if item.get("id") not in given:
@@ -290,9 +279,8 @@ class Dream:
         by_id = {trait["id"]: trait for trait in group}
         for item in listed(reply.get("merge")):
             ids = group_ids(item.get("ids"), by_id)
-            if len(ids) > 1 and isinstance(item.get("do"), str) and item["do"]:
-                when = item.get("when") if isinstance(item.get("when"), str) else ""
-                delta = {"op": "merge", "ids": ids, "when": when, "do": item["do"]}
+            if len(ids) > 1 and said(item, "do"):
+                delta = {"op": "merge", "ids": ids, "when": said(item, "when"), "do": item["do"]}
                 for trait in Traits().apply([delta], now):
                     self.trait_logged("merge_traits", "merge", trait)
                     for trait_id in ids:
@@ -310,29 +298,21 @@ class Dream:
             if trait and isinstance(gist, str) and gist and len(gist) < len(trait["do"]):
                 self.logged("gists", "gist", Traits().gisted(trait_id, gist))
 
-    def questions(self, now=None):
-        while self.questions_wanted() and self.questions_asked(now):
-            pass
+    def reflect(self, now=None):
+        reflection = Reflection(self.state["thoughts"], self.noting("reflect"))
+        for done in reflection.run(now):
+            if done["thought"]:
+                self.recorded("reflect", "thought", {"id": "", "gist": done["thought"]})
+        self.state["thoughts"] = (self.state["thoughts"] + reflection.thoughts)[-REFLECT_THOUGHTS:]
 
-    def questions_wanted(self):
-        return len(Questions().pending()) < QUESTIONS_WAITING
+    def noting(self, step):
+        def logged(name, record):
+            if name == "question":
+                self.logged(step, "question", dict(record, gist=record["text"]))
+            else:
+                self.trait_logged(step, name, record)
 
-    def questions_asked(self, now):
-        content = questions_text(Traits().confirmed(), Questions().all())
-        reply = asked(Prompts.DREAM_QUESTIONS_SYSTEM, content)
-        if not isinstance(reply, dict):
-            return False
-        kept = [self.question_kept(item, now) for item in listed(reply.get("questions"))]
-        return any(kept)
-
-    def question_kept(self, item, now):
-        text = item.get("text")
-        if not (isinstance(text, str) and text):
-            return None
-        question = Questions().add("open", text, suggestions_of(item), [], [], now)
-        if question:
-            self.logged("questions", "question", dict(question, gist=text))
-        return question
+        return logged
 
     def logged(self, step, name, memory):
         if memory:
@@ -466,7 +446,7 @@ class Retire(Change):
 
 
 def new_state():
-    return {"done": [], "changed": [], "dreamt": [], "counts": {}, "last": ""}
+    return {"done": [], "changed": [], "dreamt": [], "counts": {}, "last": "", "thoughts": []}
 
 
 def traits_text(episodes, people, living):
@@ -514,55 +494,10 @@ def gists_text(traits):
     )
 
 
-def questions_text(traits, kept):
-    return json.dumps(
-        {
-            "traits": [
-                {
-                    "id": trait["id"],
-                    "about": trait["about"],
-                    "when": trait["when"],
-                    "do": trait["gist"] or trait["do"],
-                }
-                for trait in sorted(traits, key=lambda trait: int(trait["id"][1:]))
-            ],
-            "questions": [
-                question["text"] for question in sorted(kept, key=lambda question: int(question["id"][1:]))
-            ],
-        },
-        ensure_ascii=False,
-    )
-
-
-def newly_added(trait):
-    return len(trait["history"]) == 1 and trait["history"][0]["event"] == "add"
-
-
-def cited_only(sources, given):
-    if not isinstance(sources, list):
-        return []
-    return [source for source in sources if isinstance(source, str) and source in given]
-
-
-def suggestions_of(item):
-    suggestions = item.get("suggestions")
-    if not isinstance(suggestions, list) or not all(isinstance(text, str) and text for text in suggestions):
-        return []
-    return suggestions if 2 <= len(suggestions) <= 4 else []
-
-
 def revise_text(group):
     return json.dumps(
         [dict(shown_memory(memory), last_seen=memory["last_seen"]) for memory in group], ensure_ascii=False
     )
-
-
-def shown(memories):
-    return [shown_memory(memory) for memory in memories]
-
-
-def shown_memory(memory):
-    return {key: memory[key] for key in SHOWN_MEMORY_KEYS}
 
 
 def group_ids(ids, by_id):
@@ -616,29 +551,6 @@ def tool_found(kind, item):
         return True
     tool = item.get("tool")
     return isinstance(tool, str) and bool(tool) and bool(shutil.which(tool))
-
-
-def asked(system, content):
-    if Models.quick() is None:
-        return None
-    try:
-        text = Models.quick_reply(
-            [{"role": "system", "content": system}, {"role": "user", "content": content}],
-            DREAM_REPLY_TOKENS,
-            "off",
-            temperature=0,
-        )
-        return reply_read(text, system)
-    except OllamaError, ValueError:
-        return None
-
-
-def reply_read(text, system):
-    return Reply(text).json(system)
-
-
-def listed(value):
-    return [item for item in value if isinstance(item, dict)] if isinstance(value, list) else []
 
 
 def mapped(value):

@@ -468,31 +468,19 @@ def test_offer_leave_puts_a_leave_button_on_the_answer():
 
 
 @pytest.mark.spec("INT-1")
-def test_offer_answers_puts_a_button_per_suggestion_then_skip_and_leave_on_the_question():
+def test_offer_answers_puts_skip_then_leave_on_the_question():
     api = BotAPI()
-    telegram(api).offer_answers("42", 7, 2)
+    telegram(api).offer_answers("42", 7)
     [(path, fields)] = api.calls
     assert (
         path.endswith("editMessageReplyMarkup") and fields["chat_id"] == "42" and fields["message_id"] == "7"
     )
     assert json.loads(fields["reply_markup"]) == {
         "inline_keyboard": [
-            [{"text": "1", "callback_data": "1"}, {"text": "2", "callback_data": "2"}],
-            [{"text": "⏭ Skip", "callback_data": "/skip"}, {"text": "🚪 Leave", "callback_data": "/leave"}],
-        ]
-    }
-    telegram(BotAPI(editMessageReplyMarkup=OSError("down"))).offer_answers("42", 7, 2)
-
-
-@pytest.mark.spec("INT-1")
-def test_offer_answers_with_no_suggestions_puts_only_skip_and_leave():
-    api = BotAPI()
-    telegram(api).offer_answers("42", 7, 0)
-    assert json.loads(api.calls[0][1]["reply_markup"]) == {
-        "inline_keyboard": [
             [{"text": "⏭ Skip", "callback_data": "/skip"}, {"text": "🚪 Leave", "callback_data": "/leave"}]
         ]
     }
+    telegram(BotAPI(editMessageReplyMarkup=OSError("down"))).offer_answers("42", 7)
 
 
 @pytest.mark.spec("CHN-6")

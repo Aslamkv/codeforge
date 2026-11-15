@@ -7,7 +7,7 @@ import urllib.error
 import urllib.request
 
 import pytest
-from conftest import confirmed_trait, quick_model_replying
+from conftest import ask, confirmed_trait, quick_model_replying, replying
 
 from tinkerkit.dreaming import Dream, LiveGraph, MemoryGraph, asked, show_dream, show_memory_graph
 from tinkerkit.jobs import Jobs, Queue
@@ -15,7 +15,7 @@ from tinkerkit.model import Models, OllamaError
 from tinkerkit.prompts import Prompts
 from tinkerkit.remembering import Memories, Questions, Scratchpad, Traits
 from tinkerkit.retrieval import Retriever
-from tinkerkit.settings import DREAM_BATCH_EPISODES, QUESTIONS_WAITING, Home
+from tinkerkit.settings import DREAM_BATCH_EPISODES, REFLECT_THOUGHTS, Home
 from tinkerkit.store import Log
 
 NOW = datetime.datetime(2026, 11, 11, 12, 0, 0)
@@ -34,11 +34,6 @@ def memories():
 
 def dream(phase=lambda step: None):
     return Dream(Retriever(None), phase)
-
-
-def replying(monkeypatch, *replies):
-    queue = list(replies)
-    return quick_model_replying(monkeypatch, lambda messages: json.dumps(queue.pop(0)))
 
 
 def stored(memory_id):
@@ -402,14 +397,21 @@ def dreamt_in(dreaming, episodes=(), changed=()):
     return dreaming
 
 
-def added_trait(do, sources, question="Do you code in Rust?", suggestions=("yes", "no")):
+def added_trait(
+    do,
+    sources,
+    question="Do you code in Rust?",
+    thought="They listed rust crates.",
+    expected="Yes, mostly Rust.",
+):
     return {
         "about": "tinker",
         "when": "coding",
         "do": do,
         "sources": list(sources),
         "question": question,
-        "suggestions": list(suggestions),
+        "thought": thought,
+        "expected": expected,
     }
 
 
@@ -438,14 +440,17 @@ def test_traits_reads_the_dream_and_adds_a_candidate_with_its_question_and_suppo
     assert (added["status"], added["when"], added["sources"]) == ("candidate", "coding", [first["id"]])
     assert Home.store().get("traits", known["id"])["sources"] == ["e1", person["id"]]
     question = Questions().all()[0]
-    assert (question["kind"], question["text"], question["suggestions"], question["traits"]) == (
-        "confirm",
-        "Do you code in Rust?",
-        ["yes", "no"],
-        ["t2"],
-    )
+    assert {key: question[key] for key in ("kind", "about", "text", "thought", "expected", "traits")} == {
+        "kind": "confirm",
+        "about": "tinker",
+        "text": "Do you code in Rust?",
+        "thought": "They listed rust crates.",
+        "expected": "Yes, mostly Rust.",
+        "traits": ["t2"],
+    }
     assert dream_events() == [
         {"step": "traits", "change": "add", "id": "t2", "gist": "answer with rust examples"},
+        {"step": "traits", "change": "question", "id": question["id"], "gist": "Do you code in Rust?"},
         {"step": "traits", "change": "support", "id": known["id"], "gist": "keep replies short"},
     ]
 
@@ -582,24 +587,15 @@ def test_an_add_or_support_citing_nothing_given_is_dropped(home_store, monkeypat
 
 
 @pytest.mark.spec("REM-15")
-def test_a_question_keeps_its_suggestions_only_when_two_to_four(home_store, monkeypatch):
+def test_a_confirm_question_without_a_written_thought_or_guess_keeps_them_empty(home_store, monkeypatch):
     first = episode()
     replying(
         monkeypatch,
-        {
-            "add": [
-                added_trait("answer with rust examples", [first["id"]], suggestions=["yes"]),
-                added_trait(
-                    "start with the test",
-                    [first["id"]],
-                    "Do you write tests first?",
-                    ["a", "b", "c", "d", "e"],
-                ),
-            ]
-        },
+        {"add": [added_trait("answer with rust examples", [first["id"]], thought=None, expected=3)]},
     )
     dreamt_in(dream(), [first["id"]]).traits(NOW)
-    assert [question["suggestions"] for question in Questions().all()] == [[], []]
+    question = Questions().all()[0]
+    assert (question["thought"], question["expected"]) == ("", "")
 
 
 @pytest.mark.spec("DRM-6", "REM-5")
@@ -666,92 +662,69 @@ def test_gists_asks_nothing_when_every_confirmed_trait_has_a_gist(home_store, mo
     assert asked == []
 
 
-@pytest.mark.spec("DRM-11", "REM-15", "DRM-7")
-def test_questions_asks_round_after_round_until_a_round_keeps_nothing_new(home_store, monkeypatch):
-    short = confirmed_trait("always keep the replies you give short", about="tinker", gist="short replies")
-    rust = confirmed_trait("use rust", about="tinker")
-    living_trait("start every change with the test")
-    kept = Questions().add("confirm", "Do you want short replies?", ["yes", "no"], [short["id"]], [], NOW)
-    Questions().answer(kept["id"], "yes", NOW)
-    work = {"text": "What do you work on most days?", "suggestions": ["web apps", "data", "games"]}
-    tone = {"text": "How formal should I sound with you?", "suggestions": ["formal", "casual"]}
+@pytest.mark.spec("DRM-11", "DRM-7", "REF-2")
+def test_reflect_runs_rounds_and_logs_each_thought_and_kept_question(home_store, monkeypatch):
+    work = {
+        "about": "person",
+        "text": "What do you work on most days?",
+        "thought": "",
+        "expected": "web apps",
+    }
+    tone = {"about": "tinker", "text": "How formal should I sound?", "thought": "", "expected": "casual"}
     asked = replying(
         monkeypatch,
-        {"questions": [work, {"text": "Do you want short replies?", "suggestions": ["yes", "no"]}]},
-        {"questions": [dict(work), tone]},
-        {"questions": [dict(tone)]},
+        {"thought": "Their work is unknown.", "add": [], "questions": [work], "done": False},
+        {"thought": "", "add": [], "questions": [tone], "done": False},
+        {"thought": "I know enough.", "add": [], "questions": [], "done": True},
     )
-    dream().questions(NOW)
+    reflecting = dream()
+    reflecting.state = new_dream_state()
+    reflecting.reflect(NOW)
     assert len(asked) == 3
-    assert asked[0][0]["content"] == Prompts.DREAM_QUESTIONS_SYSTEM
-    assert json.loads(asked[0][1]["content"]) == {
-        "traits": [
-            {"id": short["id"], "about": "tinker", "when": "", "do": "short replies"},
-            {"id": rust["id"], "about": "tinker", "when": "", "do": "use rust"},
-        ],
-        "questions": ["Do you want short replies?"],
-    }
-    assert json.loads(asked[2][1]["content"])["questions"] == [
-        "Do you want short replies?",
-        work["text"],
-        tone["text"],
-    ]
-    added = [question for question in Questions().all() if question["id"] != kept["id"]]
-    assert [
-        {key: question[key] for key in ("kind", "text", "suggestions", "traits", "sources", "status")}
-        for question in added
-    ] == [
-        dict(work, kind="open", traits=[], sources=[], status="pending"),
-        dict(tone, kind="open", traits=[], sources=[], status="pending"),
+    assert asked[0][0]["content"] == Prompts.REFLECT_SYSTEM
+    assert json.loads(asked[0][1]["content"])["thoughts"] == ["They write Rust."]
+    pending = Questions().pending()
+    assert [(question["about"], question["text"]) for question in pending] == [
+        ("person", work["text"]),
+        ("tinker", tone["text"]),
     ]
     assert dream_events() == [
-        {"step": "questions", "change": "question", "id": question["id"], "gist": question["text"]}
-        for question in added
+        {"step": "reflect", "change": "question", "id": pending[0]["id"], "gist": work["text"]},
+        {"step": "reflect", "change": "question", "id": pending[1]["id"], "gist": tone["text"]},
+        {"step": "reflect", "change": "thought", "id": "", "gist": "Their work is unknown."},
+        {"step": "reflect", "change": "thought", "id": "", "gist": "I know enough."},
     ]
+    assert reflecting.state["thoughts"] == ["They write Rust.", "Their work is unknown.", "I know enough."]
 
 
-WAITING_QUESTIONS = (
-    "Which editor do you use?",
-    "What time zone are you in?",
-    "Do you prefer tabs or spaces?",
-    "Should I explain my changes?",
-    "Which language do you write most?",
-)
-
-
-def pending_questions(count):
-    for text in WAITING_QUESTIONS[:count]:
-        Questions().add("open", text, ["yes", "no"], [], [], NOW)
-
-
-@pytest.mark.spec("DRM-11")
-def test_questions_stops_asking_once_enough_questions_are_pending(home_store, monkeypatch):
-    pending_questions(QUESTIONS_WAITING - 1)
-    asked = replying(
-        monkeypatch,
-        {"questions": [{"text": "What do you work on?", "suggestions": ["web", "data"]}]},
-        {"questions": [{"text": "How formal should I sound?", "suggestions": ["formal", "casual"]}]},
-    )
-    dream().questions(NOW)
-    assert (len(asked), len(Questions().pending())) == (1, QUESTIONS_WAITING)
+def new_dream_state():
+    return {
+        "done": [],
+        "changed": [],
+        "dreamt": [],
+        "counts": {},
+        "last": "",
+        "thoughts": ["They write Rust."],
+    }
 
 
 @pytest.mark.spec("DRM-11")
-def test_questions_asks_nothing_with_enough_questions_pending(home_store, monkeypatch):
-    pending_questions(QUESTIONS_WAITING)
-    asked = replying(
-        monkeypatch, {"questions": [{"text": "What do you work on?", "suggestions": ["web", "data"]}]}
-    )
-    dream().questions(NOW)
-    assert (asked, len(Questions().all())) == ([], QUESTIONS_WAITING)
+def test_reflect_keeps_only_the_newest_thoughts(home_store, monkeypatch):
+    older = [f"thought {number}" for number in range(REFLECT_THOUGHTS)]
+    replying(monkeypatch, {"thought": "a new thought", "add": [], "questions": [], "done": True})
+    reflecting = dream()
+    reflecting.state = dict(new_dream_state(), thoughts=older)
+    reflecting.reflect(NOW)
+    assert reflecting.state["thoughts"] == (older + ["a new thought"])[-REFLECT_THOUGHTS:]
 
 
 @pytest.mark.spec("DRM-11")
-def test_questions_ends_on_a_reply_that_is_not_a_dict(home_store, monkeypatch):
+def test_reflect_ends_on_a_reply_that_is_not_a_dict(home_store, monkeypatch):
     confirmed_trait("use rust", about="tinker")
     asked = replying(monkeypatch, ["What do you work on?"])
-    dream().questions(NOW)
-    assert (len(asked), Questions().all(), dream_events()) == (1, [], [])
+    reflecting = dream()
+    reflecting.reflect(NOW)
+    assert (len(asked), Questions().all(), dream_events(), reflecting.state["thoughts"]) == (1, [], [], [])
 
 
 @pytest.mark.spec("DRM-2")
@@ -761,12 +734,12 @@ def test_run_walks_its_steps_and_saves_the_state(home_store, monkeypatch):
         monkeypatch,
         {"add": [{"kind": "fact", "gist": "uses zsh", "text": "x", "sources": [first["id"]]}]},
         {"add": [], "support": []},
-        {"questions": []},
+        {"thought": "", "add": [], "questions": [], "done": True},
     )
     doing = []
     dream(doing.append).run(NOW)
     state = Home.store().get("dream", "state")
-    assert doing == ["consolidate", "revise", "decay", "traits", "merge_traits", "gists", "questions"]
+    assert doing == ["consolidate", "revise", "decay", "traits", "merge_traits", "gists", "reflect"]
     assert state == {
         "done": [],
         "changed": [],
@@ -778,9 +751,10 @@ def test_run_walks_its_steps_and_saves_the_state(home_store, monkeypatch):
             "traits": 0,
             "merge_traits": 0,
             "gists": 0,
-            "questions": 0,
+            "reflect": 0,
         },
         "last": NOW.isoformat(),
+        "thoughts": [],
     }
 
 
@@ -788,7 +762,9 @@ def test_run_walks_its_steps_and_saves_the_state(home_store, monkeypatch):
 def test_run_counts_trait_changes_but_keeps_trait_ids_out_of_the_changed_memories(home_store, monkeypatch):
     first = living_trait("keep replies short", "chatting")
     second = living_trait("keep every reply brief", "chatting")
-    replying(monkeypatch, merged_reply(first, second), {"questions": []})
+    replying(
+        monkeypatch, merged_reply(first, second), {"thought": "", "add": [], "questions": [], "done": True}
+    )
     seen = []
     dream(lambda step: seen.append(Home.store().get("dream", "state") or {})).run(NOW)
     assert Home.store().get("dream", "state")["counts"]["merge_traits"] == 3
@@ -811,10 +787,10 @@ def test_run_ignores_a_saved_step_it_no_longer_has(home_store, monkeypatch):
     episode()
     saved = {"done": ["consolidate", "portrait"], "changed": [], "counts": {}, "last": ""}
     Home.store().put("dream", "state", saved)
-    replying(monkeypatch, {"questions": []})
+    replying(monkeypatch, {"thought": "", "add": [], "questions": [], "done": True})
     doing = []
     dream(doing.append).run(NOW)
-    assert doing == ["revise", "decay", "traits", "merge_traits", "gists", "questions"]
+    assert doing == ["revise", "decay", "traits", "merge_traits", "gists", "reflect"]
     assert Home.store().get("dream", "state")["done"] == []
 
 
@@ -978,7 +954,7 @@ def test_show_dream_says_the_last_dream_its_counts_the_waiting_episodes_and_ques
 ):
     episode()
     episode(message="show the date")
-    Questions().add("confirm", "Do you write Rust daily?", ["yes", "no"], ["t1"], ["e1"], NOW)
+    ask("Do you write Rust daily?", "confirm", traits=["t1"], now=NOW)
     counts = {"consolidate": 2, "revise": 1, "decay": 0}
     Home.store().put("dream", "state", {"done": [], "changed": [], "counts": counts, "last": NOW.isoformat()})
     Queue.add_front(Jobs.save(dict(Jobs.new(["ask", "why"]), state="queued"))["number"])
@@ -1003,8 +979,8 @@ def test_show_dream_without_a_dream_says_none_yet_and_how_to_dream(home_store, c
 @pytest.mark.spec("DRM-8")
 def test_show_dream_says_one_fresh_episode_waits_and_two_questions_wait(home_store, capsys):
     episode()
-    Questions().add("confirm", "Do you write Rust daily?", ["yes", "no"], ["t1"], ["e1"], NOW)
-    Questions().add("confirm", "Do you use Python?", ["yes", "no"], ["t2"], ["e1"], NOW)
+    ask("Do you write Rust daily?", "confirm", traits=["t1"], now=NOW)
+    ask("Do you use Python?", "confirm", traits=["t2"], now=NOW)
     show_dream()
     out = capsys.readouterr().out
     assert "1 fresh episode waits for a dream" in out

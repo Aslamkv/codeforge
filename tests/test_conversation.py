@@ -23,6 +23,7 @@ from conftest import (
     RESET,
     Terminal,
     add_back,
+    ask,
     confirmed_trait,
     quick_model_replying,
     tinker_runs,
@@ -35,6 +36,7 @@ import tinkerkit.jobs as jobs
 from tinkerkit.channels import Channels
 from tinkerkit.commands import BY_NAME, COMMANDS, GROUPS, MenuRow, slash_matches, synopsis_words
 from tinkerkit.conversation import (
+    ALL_FOR_NOW,
     Channel,
     ChannelError,
     ChatState,
@@ -65,7 +67,7 @@ from tinkerkit.conversation import (
     typed_before,
     welcome,
 )
-from tinkerkit.interviewing import Interview
+from tinkerkit.interviewing import UNREADABLE, Interview
 from tinkerkit.jobs import Queue, Runner, began_at
 from tinkerkit.ledger import DONE_NOTE_KEPT_SECONDS, Ledger
 from tinkerkit.messages import DIMMED, HEADING, Text, next_page_words, styled, visible_width
@@ -132,8 +134,8 @@ class Recorder(Channel):
     def offer_leave(self, chat, shown, number):
         self.log.append(("leave", chat, shown, number))
 
-    def offer_answers(self, chat, shown, count):
-        self.log.append(("answers", chat, shown, count))
+    def offer_answers(self, chat, shown):
+        self.log.append(("answers", chat, shown, ""))
 
     def latest(self, chat, sent):
         return self.newest.get(chat) == sent
@@ -3817,15 +3819,24 @@ def test_the_terminal_prompt_names_the_reading_while_inside(monkeypatch):
     assert channel.prompt() == plain
 
 
-HINT = '_a number, a number with changes ("2, but on weekdays"), your own words, or /skip_'
 ENTERED = "💬 **Interview**: answer, /skip · /leave leaves it"
+RUST_OPENING = "💭 I've been thinking: You mention Rust a lot. When do you write Rust? My guess: On weekdays."
+EDITOR_OPENING = "💭 I've been thinking: You never named one. Which editor do you use? My guess: Helix."
+
+
+def rust_question():
+    return ask("When do you write Rust?", thought="You mention Rust a lot.", expected="On weekdays.")
+
+
+def editor_question():
+    return ask("Which editor do you use?", thought="You never named one.", expected="Helix.")
 
 
 @pytest.fixture
 def interviewing(desk):
     desk, channel, _ = desk
-    KeptQuestions().add("open", "When do you write Rust?", ["Weekdays"], [], ["e1"])
-    KeptQuestions().add("open", "Which editor do you use?", [], [], ["e1"])
+    rust_question()
+    editor_question()
     desk.interview = Interview()
     asked = []
     desk.talk.answer = lambda channel, message, *rest, **options: asked.append("talk")
@@ -3835,23 +3846,16 @@ def interviewing(desk):
 @pytest.mark.spec("CNV-25", "INT-1")
 def test_entering_the_interview_says_how_to_leave_then_shows_the_next_question(interviewing):
     desk, channel, _, entered = interviewing
-    assert entered == f"{ENTERED}\n\n💬 When do you write Rust?\n1. Weekdays\n{HINT}"
+    assert entered == f"{ENTERED}\n\n{RUST_OPENING}"
     assert channel.log[-1] == ("inside", "1", None, desk.inside["1"])
     assert desk.inside["1"].prompt() == "💬 interact › "
-
-
-@pytest.mark.spec("CNV-25", "INT-1")
-def test_entering_with_no_question_pending_says_nothing_is_left_and_stays_outside(desk):
-    desk, channel, _ = desk
-    assert desk.interviewed(channel, "1") == "💬 **Nothing left to ask**"
-    assert desk.inside == {}
 
 
 @pytest.mark.spec("INT-1")
 def test_a_desk_opened_interviewing_shows_the_first_question_after_the_status(monkeypatch):
     terminal = colour_terminal(monkeypatch, 80)
     typing(monkeypatch)
-    KeptQuestions().add("open", "When do you write Rust?", ["Weekdays"], [], ["e1"])
+    rust_question()
     desk = Desk([ConsoleChannel()], Path.cwd(), interview=Interview(), interviewing=True)
     monkeypatch.setattr(desk.talk, "warm", lambda: None)
     desk.run()
@@ -3867,36 +3871,36 @@ def test_a_desk_opened_interviewing_with_nothing_pending_says_so(monkeypatch):
     desk = Desk([ConsoleChannel()], Path.cwd(), interview=Interview(), interviewing=True)
     monkeypatch.setattr(desk.talk, "warm", lambda: None)
     desk.run()
-    assert "Nothing left to ask" in terminal.getvalue() and desk.inside == {}
+    assert "all I had on my mind" in terminal.getvalue() and desk.inside == {}
 
 
 @pytest.mark.spec("INT-1", "CNV-3")
 @pytest.mark.parametrize("text", ["/interact", "interact"])
 def test_interact_enters_the_interview_and_shows_the_first_question(desk, text):
     desk, channel, _ = desk
-    KeptQuestions().add("open", "When do you write Rust?", ["Weekdays"], [], ["e1"])
+    rust_question()
     desk.interview = Interview()
     desk.handle(channel, Message("1", text))
-    assert channel.texts()[-1] == f"{ENTERED}\n\n💬 When do you write Rust?\n1. Weekdays\n{HINT}"
+    assert channel.texts()[-1] == f"{ENTERED}\n\n{RUST_OPENING}"
     assert desk.inside["1"].prompt() == "💬 interact › "
 
 
 @pytest.mark.spec("INT-1")
 def test_the_first_interview_turn_offers_its_answer_buttons(desk):
     desk, channel, _ = desk
-    KeptQuestions().add("open", "When do you write Rust?", ["Weekdays", "Weekends"], [], ["e1"])
+    rust_question()
     desk.interview = Interview()
     desk.handle(channel, Message("1", "/interact"))
-    assert channel.log[-1] == ("answers", "1", channel.newest["1"], 2)
+    assert channel.log[-1] == ("answers", "1", channel.newest["1"], "")
 
 
 @pytest.mark.spec("INT-1")
 def test_each_later_interview_turn_offers_its_answer_buttons(interviewing):
     desk, channel, _, _ = interviewing
     desk.handle(channel, Message("1", "weekdays mostly"))
-    assert channel.log[-1] == ("answers", "1", channel.newest["1"], 1)
+    assert channel.log[-1] == ("answers", "1", channel.newest["1"], "")
     desk.handle(channel, Message("1", "/skip"))
-    assert channel.log[-1] == ("answers", "1", channel.newest["1"], 0)
+    assert channel.log[-1] == ("answers", "1", channel.newest["1"], "")
 
 
 @pytest.mark.spec("INT-1")
@@ -3914,33 +3918,37 @@ def test_entering_a_reading_offers_no_answer_buttons(inside):
     assert not [entry for entry in channel.log if entry[0] in ("answers", "leave")]
 
 
-@pytest.mark.spec("INT-1")
+@pytest.mark.spec("CNV-25", "INT-1", "INT-2")
 def test_interact_with_no_question_pending_and_no_quick_model_says_nothing_is_left(desk):
     desk, channel, _ = desk
     desk.interview = Interview()
     desk.handle(channel, Message("1", "/interact"))
-    assert channel.texts()[-1] == "💬 **Nothing left to ask**"
+    assert channel.texts()[-1] == ALL_FOR_NOW
     assert desk.inside == {}
 
 
-@pytest.mark.spec("INT-1")
+@pytest.mark.spec("INT-3")
 def test_inside_the_interview_a_plain_message_shows_the_same_question_again(interviewing):
     desk, channel, asked, _ = interviewing
     desk.handle(channel, Message("1", "weekdays mostly"))
-    assert (
-        channel.texts()[-1]
-        == (f"Couldn't read that answer; here it is again.\n💬 When do you write Rust?\n1. Weekdays\n{HINT}")
-        and asked == []
-    )
+    assert channel.texts()[-1] == f"{UNREADABLE}\n{RUST_OPENING}" and asked == []
 
 
 @pytest.mark.spec("INT-3")
 def test_inside_the_interview_an_answer_moves_to_the_next_question(interviewing, monkeypatch):
     desk, channel, asked, _ = interviewing
-    reply = {"confirm": [], "reject": [], "amend": [], "add": [], "question": None}
+    reply = {
+        "say": "Got it.",
+        "confirm": [],
+        "reject": [],
+        "amend": [],
+        "add": [],
+        "question": None,
+        "settled": True,
+    }
     quick_model_replying(monkeypatch, lambda messages: json.dumps(reply))
     desk.handle(channel, Message("1", "weekdays mostly"))
-    assert channel.texts()[-1] == f"💬 Which editor do you use?\n{HINT}" and asked == []
+    assert channel.texts()[-1] == f"Got it.\n\n{EDITOR_OPENING}" and asked == []
     assert KeptQuestions().all()[0]["answer"] == "weekdays mostly"
 
 
@@ -3948,7 +3956,7 @@ def test_inside_the_interview_an_answer_moves_to_the_next_question(interviewing,
 def test_skip_inside_the_interview_shows_the_next_question(interviewing):
     desk, channel, _, _ = interviewing
     desk.handle(channel, Message("1", "/skip"))
-    assert channel.texts()[-1] == f"💬 Which editor do you use?\n{HINT}"
+    assert channel.texts()[-1] == EDITOR_OPENING
     assert KeptQuestions().next()["text"] == "Which editor do you use?"
 
 
@@ -3958,7 +3966,7 @@ def test_skip_with_nothing_left_says_so_and_leaves_the_interview(interviewing):
     for question in KeptQuestions().pending():
         KeptQuestions().answer(question["id"], "done")
     desk.handle(channel, Message("1", "/skip"))
-    assert channel.texts()[-1] == "💬 **Nothing left to ask**"
+    assert channel.texts()[-1] == ALL_FOR_NOW
     assert desk.inside == {} and channel.log[-1] == ("inside", "1", None, None)
 
 
@@ -3981,7 +3989,7 @@ def test_leave_leaves_the_interview(interviewing):
 @pytest.mark.spec("CNV-25")
 def test_entering_the_interview_leaves_a_reading(inside):
     desk, channel, _ = inside
-    KeptQuestions().add("open", "Which editor do you use?", [], [], ["e1"])
+    editor_question()
     desk.interview = Interview()
     desk.interviewed(channel, "1")
     assert desk.inside["1"] == InsideInterview(desk.interview)
@@ -3990,7 +3998,7 @@ def test_entering_the_interview_leaves_a_reading(inside):
 @pytest.mark.spec("CNV-25")
 def test_entering_the_interview_takes_its_turn_once(inside, monkeypatch):
     desk, channel, _ = inside
-    KeptQuestions().add("open", "Which editor do you use?", [], [], ["e1"])
+    editor_question()
     desk.interview = Interview()
     turns = []
     taken = Interview.turn
