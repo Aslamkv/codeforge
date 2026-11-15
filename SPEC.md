@@ -1744,6 +1744,9 @@ the person (**INT**).
   when done in `dream`/`state`, so a dream that goes on skips the steps done; its tracker's `doing` names the
   step.
 - **DRM-3** Consolidate takes the fresh episodes chat by chat, at most `DREAM_BATCH_EPISODES` (12) to a call.
+  Each episode of the batch keeps its id, chat and time and names who each other part came from: `person`
+  holds what the person said (its message, request or task), `tinker` all Tinker said and did (its reply,
+  commands, output, status), so a person memory rests only on the person's own words.
   `DREAM_CONSOLIDATE_SYSTEM` gets the batch and the memories it recalls (**REM-4**), and answers JSON
   `{add, update, confirm, retire, gists}`, each change citing episode ids of the batch; `gists` maps each
   episode id to a short gist keeping its numbers, names and conclusion (**REM-2**). The code picks the episodes that

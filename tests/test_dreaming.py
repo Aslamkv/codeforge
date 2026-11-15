@@ -76,6 +76,24 @@ def test_consolidate_adds_a_memory_citing_the_batch_and_dreams_it(home_store, mo
     assert "gist" not in Home.store().get(Scratchpad.EPISODES, first["id"])
 
 
+@pytest.mark.spec("DRM-3")
+def test_consolidate_names_who_said_each_part_of_an_episode(home_store, monkeypatch):
+    chat = Scratchpad.write(
+        {"chat": "console", "message": "who are you?", "reply": "I'm Tinker.", "status": "answered"}, EARLIER
+    )
+    run = Scratchpad.write(
+        {"chat": "console", "request": "list files", "line": "ls", "output": "a.py", "code": 0}, EARLIER
+    )
+    asked = replying(monkeypatch, {})
+    dream().consolidate(NOW)
+    shown = json.loads(asked[0][1]["content"])["episodes"]
+    assert [(episode["id"], episode["chat"], episode["person"], episode["tinker"]) for episode in shown] == [
+        (chat["id"], "console", {"message": "who are you?"}, {"reply": "I'm Tinker.", "status": "answered"}),
+        (run["id"], "console", {"request": "list files"}, {"line": "ls", "output": "a.py", "code": 0}),
+    ]
+    assert {"message", "reply", "request", "line"}.isdisjoint(shown[0] | shown[1])
+
+
 def question(message="what is the capital of France?", reply="Paris.", **changes):
     return Scratchpad.write(
         dict({"chat": "telegram:1", "message": message, "reply": reply, "status": "answered"}, **changes),

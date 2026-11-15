@@ -50,6 +50,16 @@ from .store import Log
 from .text import similarity
 
 TRAIT_KEYS = ("id", "about", "when", "do", "status")
+EPISODE_PLACE_KEYS = ("id", "chat", "time", "dreamt")
+PERSON_SAID_KEYS = ("message", "request", "task")
+
+
+def by_speaker(episode):
+    told = {key: value for key, value in episode.items() if key not in EPISODE_PLACE_KEYS}
+    return {key: episode[key] for key in EPISODE_PLACE_KEYS if key in episode} | {
+        "person": {key: value for key, value in told.items() if key in PERSON_SAID_KEYS},
+        "tinker": {key: value for key, value in told.items() if key not in PERSON_SAID_KEYS},
+    }
 
 
 class Dream:
@@ -146,7 +156,7 @@ class Dream:
         )
         return json.dumps(
             {
-                "episodes": batch,
+                "episodes": [by_speaker(episode) for episode in batch],
                 "questions": [episode["id"] for episode in answered_in_words(batch)],
                 "memories": shown([living[index] for index in related]),
             },

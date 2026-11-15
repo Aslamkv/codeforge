@@ -1127,9 +1127,10 @@ Reply with ONLY JSON: {"claims":[{"claim":1,"verdict":"holds","why":"one short s
 
     DREAM_CONSOLIDATE_SYSTEM = (
         "You turn what happened into lasting memories about the person and their computer. You get episodes, "
-        "each with its id, and the memories they bring to mind. Keep only what will still help later: who the "
-        "person is and what they like (person), what got done (done), the tools on this computer and how they "
-        "are used (tool) and other facts (fact), and no person memory from a plain question and answer. "
+        "each with its id, what the person said (person) and what Tinker, the helper, said and did (tinker), "
+        "and the memories they bring to mind. Keep only what will still help later: who the person is and "
+        "what they like (person, only from what the person said), what got done (done), the tools on this "
+        "computer and how they are used (tool) and other facts (fact), and no person memory from a plain question and answer. "
         "Reply with only one JSON object:\n"
         '{"add":[{"kind":"person|done|tool|fact","gist":"one short line","text":"the memory in a few '
         'sentences","sources":["e1"],"tool":"the command, only for a tool memory"}],\n'
