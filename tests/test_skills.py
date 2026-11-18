@@ -2,6 +2,7 @@ import itertools
 import json
 import os
 import sys
+from pathlib import Path
 
 import pytest
 from conftest import quick_model_replying
@@ -500,6 +501,31 @@ def test_learned_trial_that_fails_saves_nothing_and_gives_what_it_printed(plain_
     assert Skills.get("broken") is None
 
 
+@pytest.mark.spec("SKL-5", "PRJ-15")
+def test_learner_run_gives_its_end_naming_the_files_the_trial_wrote(plain_shell, monkeypatch):
+    skill = made_skill(
+        "draw",
+        template="echo {prompt} > {name}",
+        output="files",
+        slots=[{"name": "prompt", "sample": "a cat"}, {"name": "name", "sample": "cat.png"}],
+    )
+    learning_world(monkeypatch, skill)
+    ended = SkillLearner.run("draw", "draw")
+    assert (ended["status"], ended["headline"]) == ("done", "Learned draw")
+    assert [(label, Path(path).name) for label, path in ended["details"]] == [("File", "cat.png")]
+
+
+@pytest.mark.spec("SKL-5", "PRJ-15")
+def test_learner_run_whose_trial_fails_gives_a_blocked_end(plain_shell, monkeypatch):
+    learning_world(monkeypatch, made_skill("broken", template="echo broke; exit 2", output="text", slots=[]))
+    ended = SkillLearner.run("broken", "")
+    assert (ended["status"], ended["headline"], ended["details"]) == (
+        "blocked",
+        "broken did not work with its sample values",
+        [("Printed", "broke")],
+    )
+
+
 @pytest.mark.spec("SKL-5")
 def test_learning_a_name_again_replaces_its_skill(plain_shell, monkeypatch):
     Skills.put(made_skill("greet", purpose="old"))
@@ -626,6 +652,29 @@ def test_use_works_when_ollama_is_not_running(plain_shell, monkeypatch):
     using_world(monkeypatch, total=1_000)
     monkeypatch.setattr(skills.Ollama, "loaded_models", staticmethod(lambda: None))
     assert skills.skill_used(greeting_skill(), ["you"]).ok
+
+
+@pytest.mark.spec("SKL-6", "PRJ-15")
+def test_use_gives_its_end_with_what_it_printed(plain_shell, monkeypatch):
+    using_world(monkeypatch, total=10_000)
+    ended = skills.use(greeting_skill(), ["dear", "friend"])
+    assert (ended["status"], ended["headline"], ended["details"], ended["files"]) == (
+        "done",
+        "Used greet",
+        [("Printed", "hello dear friend")],
+        [],
+    )
+
+
+@pytest.mark.spec("SKL-6", "PRJ-15")
+def test_use_that_fails_gives_a_blocked_end(plain_shell, monkeypatch):
+    using_world(monkeypatch, total=10_000)
+    ended = skills.use(made_skill("broken", template="echo broke; exit 3", output="text", slots=[]), [])
+    assert (ended["status"], ended["headline"], ended["details"]) == (
+        "blocked",
+        "broken did not work",
+        [("Printed", "broke")],
+    )
 
 
 @pytest.mark.spec("SKL-6", "SKL-3")

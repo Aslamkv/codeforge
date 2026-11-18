@@ -46,6 +46,7 @@ from .reflection import (
     shown_memory,
     trait_added,
 )
+lazy from ..build.project import ending
 
 TRAIT_KEYS = ("id", "about", "when", "do", "status")
 EPISODE_PLACE_KEYS = ("id", "chat", "time", "dreamt")
@@ -74,8 +75,11 @@ class Dream:
         self.state = new_state()
 
     def run(self, now=None):
-        if not Models.quick():
-            return
+        if Models.quick():
+            self.walked(now)
+        return ending("done", "Dreamt")
+
+    def walked(self, now):
         state = self.state = new_state() | (Home.store().get(DREAM, self.STATE) or {})
         for step in self.STEPS:
             if step in state["done"]:

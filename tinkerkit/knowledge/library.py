@@ -38,7 +38,7 @@ from ..settings import (
 )
 from ..text import field, fingerprint, first_line, host, now_text, one_line, split_text, words
 from .principles import Principles, claim_id, record
-lazy from ..build.project import Tracked
+lazy from ..build.project import Tracked, ending
 lazy from ..jobs import today
 lazy from ..model.models import Answer, Models, OllamaError
 lazy from ..prompts import Part, Prompts, Reply
@@ -703,6 +703,24 @@ class Researcher:
 
     def __init__(self, learner):
         self.learner, self.model = learner, learner.model
+
+    @classmethod
+    def serving(cls, model, internet, embeddings, tracker):
+        learner = ResearchLearner(model, internet, embeddings)
+        learner.tracker = tracker
+        return cls(learner)
+
+    def run(self, topic):
+        entry = self.research(topic)
+        if entry is None:
+            raise SystemExit(f"Nothing found about {topic}; nothing saved.")
+        details = [
+            ("Findings", str(len(entry.get("findings", [])))),
+            ("Facts", str(len(entry.get("facts", [])))),
+            ("Pages", str(len(entry.get("sources", [])))),
+        ]
+        researched = ending("done", f"Researched {entry['name']}", details, [("See it", "tinker knowledge")])
+        return {**researched, "text": Researcher.answer(entry)}
 
     def research(self, topic):
         self.learner.start()

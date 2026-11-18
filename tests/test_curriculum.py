@@ -833,3 +833,20 @@ def test_a_domain_is_researched_when_deep(tinker_home, monkeypatch):
     nothing_asked = FakeWeb()
     assert learner(nothing_asked).learn("food bank inventory")["kind"] == "research"
     assert nothing_asked.queries == []
+
+
+@pytest.mark.spec("PRJ-15")
+def test_a_learn_that_serves_the_command_gives_its_own_end(tinker_home, monkeypatch, capsys):
+    slot_learner = SlotLearner(tool_model(), FakeWeb(FOUND, ALL_PAGES), CountingEmbeddings())
+    entry = {"name": "Widgetlib", "summary": "a lib", "findings": ["a", "b"], "notes": []}
+    monkeypatch.setattr(slot_learner, "learn", lambda topic, deep=False: entry)
+    assert slot_learner.run("Widgetlib") == {
+        "status": "done",
+        "headline": "Learned Widgetlib",
+        "details": [("Findings", "2")],
+        "next": [("See it", "tinker knowledge")],
+    }
+    assert "Widgetlib: a lib" in capsys.readouterr().out
+    monkeypatch.setattr(slot_learner, "learn", lambda topic, deep=False: None)
+    with pytest.raises(SystemExit, match="Nothing learned about Widgetlib; nothing saved."):
+        slot_learner.run("Widgetlib")

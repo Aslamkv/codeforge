@@ -830,6 +830,9 @@ Each request's one thinking level.
   its level. The other quick calls keep theirs
   (**MOD-23**). Where a command shows that its model thinks, it shows the request's level. `learn`, `research`, `teach`,
   `read` and `exercise` never ask below `medium` (`WORK_THINK`). The log says the level was raised.
+- **RVW-4** `Thinking.for_work(request, phase, least)` is the one way a command that serves a request gets its
+  model: the selected model, installed and checked, its calls logged, its think level the request's (**RVW-3**),
+  at least `least`. `Thinking.configured(name, settings, log, request, phase, least)` gives a named model the same way.
 
 ## build.project (PRJ)
 
@@ -886,7 +889,8 @@ Each request's one thinking level.
   done says what came of it (`outcome`) after its words. The passing count is taken from the project on every
   save, for every criterion (`C…` and `B…`). A plan that waits is kept as data: its project, run, language,
   how to start it, its kind, what changed, its criteria, its non-goals and its folder. The end is kept as
-  data, made by `ending`: its status, its headline, its details and the commands to go on.
+  data, made by `ending`: its status, its headline, its details and the commands to go on. A worker that serves a
+  command gives its own end; the command only hands it to the tracker.
 - **PRJ-16** `Steps(names, tracker, only_if)` is one step pipeline: its steps are data, in order, and the last
   is the end (`done`). `enter(step)` moves the tracker to a step of its own, once in a row, and an unknown step
   is an error. `run(at, step, save, waits)` goes on from `at`, the step reached: it enters each step, runs it

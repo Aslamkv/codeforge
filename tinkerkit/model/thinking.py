@@ -1,14 +1,53 @@
 import re
 
+from ..jobs import calls_log
+from ..messages import say
 from ..prompts import Prompts
-from ..settings import LONG_REQUEST_WORDS, MANY_FILES, MANY_PARTS, REVIEW_REPLY_TOKENS, SHORT_REQUEST_WORDS
+from ..settings import (
+    LONG_REQUEST_WORDS,
+    MANY_FILES,
+    MANY_PARTS,
+    REVIEW_REPLY_TOKENS,
+    SHORT_REQUEST_WORDS,
+    Config,
+)
 from ..text import first_line
-from .models import Models, Ollama, OllamaError, ThinkLevels
+from .models import Model, Models, Ollama, OllamaError, ThinkLevels
 
 LEVEL_RE = re.compile(r"\b(off|low|medium|high)\b")
 FILE_SUFFIX_RE = re.compile(r"\w\.[A-Za-z]\w{0,4}$")
 LIST_LINE_RE = re.compile(r"\s*(?:[-*]|\d+\.)\s")
 WORD_EDGES = ".,;:!?()[]{}\"'"
+
+
+class Thinking:
+    @staticmethod
+    def for_work(request, phase, least=None, selected=None):
+        name, settings = selected or Thinking.checked()
+        log = calls_log()
+        say.keep_log(log)
+        configured = Thinking.configured(name, settings, log, request, phase, least=least)
+        Ollama.loading(name, phase)
+        return configured
+
+    @staticmethod
+    def checked():
+        selected = Models.selected()
+        Models.installed(selected.name)
+        Config.check()
+        return selected
+
+    @staticmethod
+    def configured(name, settings, log, request, phase=lambda doing: None, least=None):
+        level, _ = RequestReview(log, phase).level(request, least)
+        return Model(
+            name,
+            settings,
+            Config.keep_alive(Config.get("keep_alive")),
+            log,
+            max_growth=float(Config.get("max_growth")),
+            level=level,
+        )
 
 
 class RequestReview:

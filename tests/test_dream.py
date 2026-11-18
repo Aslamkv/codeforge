@@ -821,6 +821,19 @@ def test_run_without_a_quick_model_does_nothing(home_store, monkeypatch):
     assert len(Scratchpad.fresh()) == 1
 
 
+@pytest.mark.spec("DRM-2", "PRJ-15")
+def test_run_gives_its_end(home_store, monkeypatch):
+    Home.store().put("dream", "state", {"done": list(Dream.STEPS), "changed": [], "counts": {}, "last": ""})
+    ended = dream().run(NOW)
+    assert (ended["status"], ended["headline"]) == ("done", "Dreamt")
+
+
+@pytest.mark.spec("DRM-2", "PRJ-15")
+def test_run_without_a_quick_model_still_gives_its_end(home_store, monkeypatch):
+    monkeypatch.setattr(Models, "quick", staticmethod(lambda: None))
+    assert dream().run(NOW)["headline"] == "Dreamt"
+
+
 LONG_AGO = datetime.datetime(2026, 8, 1, 9, 0, 0)
 
 

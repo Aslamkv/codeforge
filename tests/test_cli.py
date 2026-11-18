@@ -5,16 +5,17 @@ import signal
 import sys
 
 import pytest
-from conftest import LOADING_PHASE, MEASURED, MODEL, PY, TOOLCHAIN, criterion, file_block, plan_of, record_of
+from conftest import MEASURED, MODEL, PY, TOOLCHAIN, criterion, file_block, plan_of, record_of
 
 from tinkerkit import cli, logger
 from tinkerkit.build.project import Runs, Tracker, project_store
 from tinkerkit.build.session import Stopped
 from tinkerkit.cli import Cli, Commands, Doctor, ProjectFolder, ProjectRun
-from tinkerkit.knowledge.library import Knowledge, Library, ResearchLearner
+from tinkerkit.knowledge.library import Knowledge, Library
 from tinkerkit.knowledge.principles import Principles
 from tinkerkit.memory.interview import Interview
-from tinkerkit.model.models import LoadedModel, Models, Ollama, OllamaError, ThinkLevels
+from tinkerkit.model.models import Models, Ollama, OllamaError, ThinkLevels
+from tinkerkit.model.thinking import Thinking
 from tinkerkit.settings import QUALITY_VERSION, WORK_THINK, Config, Home
 from tinkerkit.system import SYSTEM_CHECKS, SystemCheck
 from tinkerkit.workspace import Toolchain
@@ -657,6 +658,9 @@ def followed(monkeypatch):
         def end(self, ended, took):
             seen["ended"], seen["took"] = ended, took
 
+        def phase(self, doing):
+            pass
+
     monkeypatch.setattr(cli, "Tracker", Followed)
     monkeypatch.setattr(cli.say, "follow", lambda heard: None)
     return seen
@@ -703,7 +707,7 @@ def test_a_stop_during_setup_ends_the_job_as_blocked_with_its_time_taken(monkeyp
     remembered = []
     started_at = datetime.datetime.now() - datetime.timedelta(seconds=30)
     monkeypatch.setattr(Models, "remember", staticmethod(remembered.append))
-    monkeypatch.setattr(Commands, "checked_model", staticmethod(not_installed))
+    monkeypatch.setattr(Thinking, "checked", staticmethod(not_installed))
     with pytest.raises(SystemExit):
         Commands(parse("ask", "a"), started_at).ask()
     assert followed["ended"]["status"] == "blocked"
@@ -722,48 +726,10 @@ def test_a_job_follows_its_tracker_before_it_checks_its_model(words, monkeypatch
         checked.append("started" in followed)
         raise SystemExit("no model")
 
-    monkeypatch.setattr(Commands, "checked_model", staticmethod(checking))
+    monkeypatch.setattr(Thinking, "checked", staticmethod(checking))
     with pytest.raises(SystemExit):
         getattr(Commands(parse(*words)), words[0])()
     assert checked == [True]
-
-
-@pytest.mark.spec("PRJ-18")
-@pytest.mark.parametrize(
-    "loaded, shown",
-    [([], ["configured", LOADING_PHASE]), ([LoadedModel(MODEL, 1)], ["configured"])],
-)
-def test_a_job_shows_the_loading_phase_after_the_review_when_its_model_is_not_in_memory(
-    loaded, shown, monkeypatch
-):
-    phases = []
-
-    class Followed:
-        phase = staticmethod(phases.append)
-
-    def configured(name, settings, log, request, phase, least=None):
-        phases.append("configured")
-        return name
-
-    monkeypatch.setattr(cli, "calls_log", lambda: None)
-    monkeypatch.setattr(cli.say, "keep_log", lambda log: None)
-    monkeypatch.setattr(Commands, "configured_model", staticmethod(configured))
-    monkeypatch.setattr(Ollama, "loaded_models", staticmethod(lambda: loaded))
-    commands = Commands(parse("ask", "a"))
-    commands.tracker = Followed()
-    assert commands.model_in_use(MODEL, {}, "a") == MODEL
-    assert phases == shown
-
-
-@pytest.mark.spec("RVW-3")
-@pytest.mark.parametrize("reviewed", ["off", "low"])
-def test_a_work_command_thinks_at_least_medium_and_ask_keeps_the_review(reviewed, model_log, monkeypatch):
-    monkeypatch.setattr(cli.RequestReview, "ruled", lambda self, request: (reviewed, "reviewed"))
-    monkeypatch.setattr(cli, "Model", lambda name, settings, keep_alive, log, max_growth, level: level)
-    monkeypatch.setattr(Config, "get", staticmethod(lambda key: "1"))
-    monkeypatch.setattr(Config, "keep_alive", staticmethod(lambda value: value))
-    assert Commands.configured_model(MODEL, {}, model_log, "a topic", least=WORK_THINK) == "medium"
-    assert Commands.configured_model(MODEL, {}, model_log, "a question") == reviewed
 
 
 @pytest.mark.spec("RVW-3")
@@ -776,13 +742,17 @@ def test_a_work_command_thinks_at_least_medium_and_ask_keeps_the_review(reviewed
 )
 def test_teach_and_learn_ask_for_their_model_at_least_at_the_work_level(command, tools, monkeypatch):
     asked = []
-    monkeypatch.setattr(Commands, "checked_model", staticmethod(lambda: (MODEL, {})))
+    monkeypatch.setattr(Thinking, "checked", staticmethod(lambda: (MODEL, {})))
     monkeypatch.setattr(
-        Commands, "model_in_use", lambda self, name, settings, request, least=None: asked.append(least)
+        Thinking,
+        "for_work",
+        staticmethod(lambda request, phase, least=None, selected=None: asked.append(least)),
     )
     monkeypatch.setattr(cli.Embeddings, "required", staticmethod(lambda option: None))
     monkeypatch.setattr(cli, "LearningTools", lambda model, embeddings, internet: None)
-    tools(Commands(parse(command, "a topic")))
+    commands = Commands(parse(command, "a topic"))
+    commands.tracker = type("Followed", (), {"phase": staticmethod(lambda doing: None)})()
+    tools(commands)
     assert asked == [WORK_THINK]
 
 
@@ -1079,7 +1049,8 @@ def test_dream_shows_the_dream_state_and_dream_run_dreams_with_the_tracker_phase
         lambda self, setup, work: seen.append(("reported", setup(), work(FakeTracker(), *setup()))),
     )
     monkeypatch.setattr(
-        "tinkerkit.memory.dream.Dream.run", lambda dream: seen.append(("run", dream.phase("consolidate")))
+        "tinkerkit.memory.dream.Dream.run",
+        lambda dream: seen.append(("run", dream.phase("consolidate"))) or {"status": "done"},
     )
     for words in ([], ["status"], ["run"]):
         Commands(parse("dream", *words)).run()
@@ -1146,19 +1117,10 @@ def test_skill_learn_is_a_job_that_ends_with_the_trial_output(home_store, monkey
 
 
 @pytest.mark.spec("SKL-5")
-def test_skill_learn_without_purpose_whose_trial_fails_shows_what_it_printed(
-    home_store, monkeypatch, tmp_path
-):
-    seen = skill_learning(
-        monkeypatch, cli.skills.SkillResult(False, [], "no such file\nusage: x\n", 10, tmp_path)
-    )
+def test_skill_learn_without_purpose_learns_with_an_empty_purpose(home_store, monkeypatch, tmp_path):
+    seen = skill_learning(monkeypatch, cli.skills.SkillResult(False, [], "", 10, tmp_path))
     Commands(parse("skill", "learn", "thumbs")).run()
     assert seen[1] == ("learned", "thumbs", "")
-    ended = seen[2][1]
-    assert ended["status"] == "blocked" and ended["details"] == [
-        ("Printed", "no such file"),
-        ("Printed", "usage: x"),
-    ]
 
 
 @pytest.mark.spec("SKL-8")
@@ -1337,12 +1299,6 @@ def test_a_job_keeps_the_computer_awake_and_a_glance_does_not(home_store):
     assert not Cli.works_for_hours(Cli.parse(["runs"]))
 
 
-@pytest.mark.spec("KNW-17")
-def test_a_research_reads_its_pages_with_the_research_learner():
-    researcher = Commands.researcher(None, None, None, None)
-    assert isinstance(researcher.learner, ResearchLearner)
-
-
 def skill_using(monkeypatch, result):
     seen = skill_job(monkeypatch)
     monkeypatch.setattr(
@@ -1369,15 +1325,6 @@ def test_skill_use_is_a_job_that_ends_with_the_files(home_store, monkeypatch, tm
         "next": [],
         "files": [str(made)],
     }
-
-
-@pytest.mark.spec("SKL-6")
-def test_skill_use_that_fails_ends_blocked_with_what_it_printed(home_store, monkeypatch, tmp_path):
-    cli.skills.Skills.put(cli.skills.Skill("count", "wc", "wc", [], "", "text", 1))
-    seen = skill_using(monkeypatch, cli.skills.SkillResult(False, [], "no such file\n", 10, tmp_path))
-    Commands(parse("skill", "count")).run()
-    ended = seen[2][1]
-    assert ended["status"] == "blocked" and ended["details"] == [("Printed", "no such file")]
 
 
 @pytest.mark.spec("SKL-6")

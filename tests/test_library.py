@@ -1580,3 +1580,24 @@ def test_a_plan_is_kept_unfilled_by_its_need_and_serves_every_topic_with_no_call
         {"query": "Rust guide", "engines": ["wikibooks"]}
     ]
     assert len(asked) == 1
+
+
+@pytest.mark.spec("PRJ-15", "KNW-17")
+def test_a_research_that_serves_the_command_reads_with_the_research_learner_and_gives_its_own_end(
+    monkeypatch,
+):
+    researcher = Researcher.serving(None, None, None, None)
+    assert isinstance(researcher.learner, ResearchLearner)
+    entry = {"name": "food banks", "summary": "s", "findings": [], "facts": ["f"], "sources": ["https://a"]}
+    monkeypatch.setattr(researcher, "research", lambda topic: entry)
+    ended = researcher.run("food banks")
+    assert {key: ended[key] for key in ("status", "headline", "details", "next")} == {
+        "status": "done",
+        "headline": "Researched food banks",
+        "details": [("Findings", "0"), ("Facts", "1"), ("Pages", "1")],
+        "next": [("See it", "tinker knowledge")],
+    }
+    assert ended["text"] == Researcher.answer(entry)
+    monkeypatch.setattr(researcher, "research", lambda topic: None)
+    with pytest.raises(SystemExit, match="Nothing found about food banks; nothing saved."):
+        researcher.run("food banks")

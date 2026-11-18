@@ -20,7 +20,6 @@ from .jobs import (
     Jobs,
     Queue,
     archived,
-    calls_log,
     emptied_queue,
     job_number,
     queue_action,
@@ -48,10 +47,10 @@ lazy from .build.project import (
 lazy from .build.session import Session
 lazy from .knowledge.curriculum import LearnStopped, SlotLearner
 lazy from .knowledge.graph import Graph, MemoryBrowser, write_page
-lazy from .knowledge.library import Library, Researcher, ResearchLearner, search_entry
+lazy from .knowledge.library import Researcher
 lazy from .knowledge.tutor import Asker, Memory, Teacher
-lazy from .model.models import Calibrator, Model, Models, Ollama, OllamaError, SelectedModel
-lazy from .model.thinking import RequestReview
+lazy from .model.models import Calibrator, Models, Ollama, OllamaError
+lazy from .model.thinking import Thinking
 lazy from .prompts import Prompts
 lazy from .ranking import Embeddings, Retriever
 lazy from .settings import (
@@ -807,28 +806,15 @@ class Commands:
         self.follow(f"Learning {topic}")
         self.reported(
             lambda: self.learning_tools("tinker learn", topic),
-            lambda tracker, model, embeddings, internet: self.learned(
-                topic, SlotLearner(model, internet, embeddings, tracker)
-            ),
+            lambda tracker, model, embeddings, internet: SlotLearner(
+                model, internet, embeddings, tracker
+            ).run(topic),
             blocked=lambda stopped: Commands.blocked(f"Nothing learned about {topic}", stopped),
         )
 
     def follow(self, title):
         self.tracker = Tracker(title, started=self.started_at.timestamp())
         say.follow(self.tracker.heard)
-
-    def learned(self, topic, learner):
-        entry = learner.learn(topic, deep=True)
-        if entry is None:
-            raise SystemExit(f"Nothing learned about {topic}; nothing saved.")
-        self.print_learned(topic, entry)
-        return ending(
-            "done",
-            f"Learned {entry['name']}",
-            [(name, text) for _, name, text in learner.recap]
-            or [("Findings", str(len(entry.get("findings", []))))],
-            [("See it", "tinker knowledge")],
-        )
 
     @staticmethod
     def blocked(headline, stopped):
@@ -842,66 +828,23 @@ class Commands:
         self.follow(f"Researching {topic}")
         self.reported(
             lambda: self.learning_tools("tinker research", topic),
-            lambda tracker, model, embeddings, internet: Commands.researched(
-                topic, Commands.researcher(model, internet, embeddings, tracker).research(topic)
-            ),
+            lambda tracker, model, embeddings, internet: Researcher.serving(
+                model, internet, embeddings, tracker
+            ).run(topic),
             blocked=lambda stopped: Commands.blocked(f"Nothing found about {topic}", stopped),
         )
 
-    @staticmethod
-    def researcher(model, internet, embeddings, tracker):
-        learner = ResearchLearner(model, internet, embeddings)
-        learner.tracker = tracker
-        return Researcher(learner)
-
-    @staticmethod
-    def researched(topic, entry):
-        if entry is None:
-            raise SystemExit(f"Nothing found about {topic}; nothing saved.")
-        details = [
-            ("Findings", str(len(entry.get("findings", [])))),
-            ("Facts", str(len(entry.get("facts", [])))),
-            ("Pages", str(len(entry.get("sources", [])))),
-        ]
-        researched = ending("done", f"Researched {entry['name']}", details, [("See it", "tinker knowledge")])
-        return {**researched, "text": Researcher.answer(entry)}
-
     def learning_tools(self, option, request):
-        name, settings = Commands.checked_model()
+        selected = Thinking.checked()
         embeddings = Embeddings.required(option)
-        return LearningTools(self.model_in_use(name, settings, request, WORK_THINK), embeddings, Internet())
-
-    @staticmethod
-    def checked_model():
-        name, settings = Models.selected()
-        Models.installed(name)
-        Config.check()
-        return SelectedModel(name, settings)
-
-    def model_in_use(self, name, settings, request, least=None):
-        log = calls_log()
-        say.keep_log(log)
-        configured = Commands.configured_model(name, settings, log, request, self.tracker.phase, least=least)
-        Ollama.loading(name, self.tracker.phase)
-        return configured
-
-    @staticmethod
-    def configured_model(name, settings, log, request, phase=lambda doing: None, least=None):
-        level, _ = RequestReview(log, phase).level(request, least)
-        return Model(
-            name,
-            settings,
-            Config.keep_alive(Config.get("keep_alive")),
-            log,
-            max_growth=float(Config.get("max_growth")),
-            level=level,
-        )
+        model = Thinking.for_work(request, self.tracker.phase, WORK_THINK, selected)
+        return LearningTools(model, embeddings, Internet())
 
     def ask(self):
         question = self.args.ask
         self.follow(f"Asking: {first_line(question, 60)}")
         self.reported(
-            lambda: (self.model_in_use(*Commands.checked_model(), question), Memory()),
+            lambda: (Thinking.for_work(question, self.tracker.phase), Memory()),
             lambda tracker, model, memory: Asker(model, memory, tracker).answer(question),
         )
 
@@ -916,9 +859,9 @@ class Commands:
         )
 
     def teaching_tools(self, teaching):
-        name, settings = Commands.checked_model()
+        selected = Thinking.checked()
         internet = Internet()
-        return self.model_in_use(name, settings, teaching, WORK_THINK), internet, Memory()
+        return Thinking.for_work(teaching, self.tracker.phase, WORK_THINK, selected), internet, Memory()
 
     def read(self):
         words = self.args.read
@@ -959,7 +902,7 @@ class Commands:
             raise SystemExit(f"#{number} {title} has no chapters to learn from.")
         self.follow(f"Reading #{number} {first_line(title, 50)}")
         self.reported(
-            lambda: (self.model_in_use(*Commands.checked_model(), f"{title} {focus}", WORK_THINK),),
+            lambda: (Thinking.for_work(f"{title} {focus}", self.tracker.phase, WORK_THINK),),
             lambda tracker, model: Reader(model, tracker).read(number, focus),
         )
 
@@ -969,7 +912,7 @@ class Commands:
             return practice.show()
         self.follow(f"Exercising {what}")
         self.reported(
-            lambda: (self.model_in_use(*Commands.checked_model(), what, WORK_THINK),),
+            lambda: (Thinking.for_work(what, self.tracker.phase, WORK_THINK),),
             lambda tracker, model: practice.Exercise(model, tracker).run(what),
             chats=True,
         )
@@ -991,25 +934,6 @@ class Commands:
             took = time.time() - self.started_at.timestamp()
             say.title(f"Time taken: {human_duration(took)}", "⏱️")
             self.tracker.end(ended, took)
-
-    @staticmethod
-    def print_learned(topic, entry):
-        with say.part(f"{entry['name']}: {entry['summary']}", "📘"):
-            for item in Library.items({Library.slug(entry.get("language") or topic): entry})[1:]:
-                say.item(f"[{item['phase']}] {item['text']}")
-            for contradiction in entry.get("contradictions", []):
-                say.info(
-                    f"Facts {', '.join(map(str, contradiction['facts']))} disagree: {contradiction['note']}",
-                    "⚖️",
-                )
-            for gap in entry.get("open", []):
-                missing = gap["missing"] or search_entry(gap["search"])["query"]
-                say.info(f"Still open (Q{gap['question']}): {missing}", "❓")
-            for note in entry["notes"]:
-                say.warn(f"Not learned: {note}")
-        say.tip(
-            "A run uses this whenever its request needs it. See everything Tinker learned with: tinker knowledge"
-        )
 
     @staticmethod
     def show_knowledge(request=None):
@@ -1045,10 +969,7 @@ class Commands:
         self.follow("Dreaming")
         self.reported(
             lambda: (),
-            lambda tracker: (
-                dream.Dream(Retriever(Embeddings.configured()), tracker.phase).run()
-                or ending("done", "Dreamt")
-            ),
+            lambda tracker: dream.Dream(Retriever(Embeddings.configured()), tracker.phase).run(),
         )
 
     def skill(self, words):
@@ -1062,41 +983,14 @@ class Commands:
         return self.use_skill(skills.known_skill(words[0]), words[1:])
 
     def use_skill(self, skill, words):
-        self.skill_job(
-            f"Using the skill {skill.name}",
-            lambda: Commands.use_ending(skill.name, skills.skill_used(skill, words)),
-        )
+        self.skill_job(f"Using the skill {skill.name}", lambda: skills.use(skill, words))
 
     def learn_skill(self, name, purpose):
-        self.skill_job(
-            f"Learning the skill {name}",
-            lambda: Commands.trial_ending(name, SkillLearner.learned(name, purpose)),
-        )
+        self.skill_job(f"Learning the skill {name}", lambda: SkillLearner.run(name, purpose))
 
     def skill_job(self, title, ended):
         self.follow(title)
         self.reported(lambda: (), lambda tracker: ended())
-
-    @staticmethod
-    def trial_ending(name, result):
-        if result.ok:
-            return ending("done", f"Learned {name}", Commands.result_lines(result))
-        return ending("blocked", f"{name} did not work with its sample values", Commands.printed(result))
-
-    @staticmethod
-    def use_ending(name, result):
-        if result.ok:
-            done = ending("done", f"Used {name}", Commands.result_lines(result))
-            return done | {"files": [str(path) for path in result.files]}
-        return ending("blocked", f"{name} did not work", Commands.printed(result))
-
-    @staticmethod
-    def result_lines(result):
-        return [("File", str(path)) for path in result.files] or Commands.printed(result)
-
-    @staticmethod
-    def printed(result):
-        return [("Printed", line) for line in result.text.splitlines()]
 
     @staticmethod
     def show_graph():
@@ -1366,7 +1260,7 @@ class ProjectRun:
         Jobs.retarget(["resume", f"@{self.record['id']}"])
         self.log = Log(project.store, "events")
         say.keep_log(self.log)
-        model = Commands.configured_model(model_name, settings, self.log, self.record["task"])
+        model = Thinking.configured(model_name, settings, self.log, self.record["task"])
         self.record["model"] = model.name
         self.print_header(model, workdir)
         self.log_start(model)

@@ -14,6 +14,7 @@ from .prompts import Prompts, Reply
 from .settings import Home, confirm_deletion
 from .text import now_text
 from .workspace import TaughtCommands
+lazy from .build.project import ending
 
 COLLECTION = "skills"
 SKILL_PROBE_SECONDS = 10
@@ -83,6 +84,10 @@ def known_skill(name):
         glances = [skill.glance() for skill in Skills.all()] or [NO_SKILLS]
         raise SystemExit("\n".join([f"There is no skill {name}", *glances]))
     return skill
+
+
+def use(skill, words):
+    return skill_used(skill, words).use_ending(skill.name)
 
 
 def skill_used(skill, words):
@@ -162,6 +167,10 @@ class SkillLearner:
         if taught is None and not shell and not program:
             raise SystemExit(f"{name} is not taught, not known to your shell and not a program on PATH")
         return Probe(name, taught, shell, program, SkillLearner.help(program))
+
+    @staticmethod
+    def run(name, purpose):
+        return SkillLearner.learned(name, purpose).trial_ending(name)
 
     @staticmethod
     def learned(name, purpose):
@@ -340,6 +349,23 @@ class SkillResult:
     text: str
     peak_memory: int
     folder: Path
+
+    def trial_ending(self, name):
+        if self.ok:
+            return ending("done", f"Learned {name}", self.result_lines())
+        return ending("blocked", f"{name} did not work with its sample values", self.printed())
+
+    def use_ending(self, name):
+        if self.ok:
+            done = ending("done", f"Used {name}", self.result_lines())
+            return done | {"files": [str(path) for path in self.files]}
+        return ending("blocked", f"{name} did not work", self.printed())
+
+    def result_lines(self):
+        return [("File", str(path)) for path in self.files] or self.printed()
+
+    def printed(self):
+        return [("Printed", line) for line in self.text.splitlines()]
 
 
 class MemoryRise:

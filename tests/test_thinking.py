@@ -1,10 +1,11 @@
 import pytest
 from conftest import LOADING_PHASE, MODEL
 
-from tinkerkit.model.models import LoadedModel, Ollama, OllamaError
-from tinkerkit.model.thinking import RequestReview
+from tinkerkit.model import thinking
+from tinkerkit.model.models import LoadedModel, Models, Ollama, OllamaError, SelectedModel
+from tinkerkit.model.thinking import RequestReview, Thinking
 from tinkerkit.prompts import Prompts
-from tinkerkit.settings import Config
+from tinkerkit.settings import WORK_THINK, Config
 
 STORY = "Write a story about a dragon who learns to bake bread"
 REVIEW_PHASE = "🧭 Working out how much thought your request needs"
@@ -164,3 +165,61 @@ def test_the_review_phase_never_shows_without_a_model(measured_model, fake_ollam
     Config.save(**{"model": None})
     RequestReview(model_log, phases.append).level(STORY)
     assert phases == [] and fake_ollama.calls == []
+
+
+@pytest.mark.spec("RVW-4")
+def test_a_command_gets_its_model_checked_logged_and_thinking_at_least_its_work_level(monkeypatch):
+    done = []
+
+    def configured(name, settings, log, request, phase, least=None):
+        done.append(("configured", name, settings, log, request, least))
+        return name
+
+    monkeypatch.setattr(Models, "selected", staticmethod(lambda: SelectedModel(MODEL, {"a": 1})))
+    monkeypatch.setattr(Models, "installed", staticmethod(lambda name: done.append(("installed", name))))
+    monkeypatch.setattr(Config, "check", staticmethod(lambda: done.append(("checked",))))
+    monkeypatch.setattr(thinking, "calls_log", lambda: "calls")
+    monkeypatch.setattr(thinking.say, "keep_log", lambda log: done.append(("kept", log)))
+    monkeypatch.setattr(Thinking, "configured", staticmethod(configured))
+    monkeypatch.setattr(Ollama, "loading", staticmethod(lambda name, phase: done.append(("loading", name))))
+    assert Thinking.for_work("a topic", lambda doing: None, WORK_THINK) == MODEL
+    assert done == [
+        ("installed", MODEL),
+        ("checked",),
+        ("kept", "calls"),
+        ("configured", MODEL, {"a": 1}, "calls", "a topic", WORK_THINK),
+        ("loading", MODEL),
+    ]
+
+
+@pytest.mark.spec("PRJ-18")
+@pytest.mark.parametrize(
+    "loaded, shown",
+    [([], ["configured", LOADING_PHASE]), ([LoadedModel(MODEL, 1)], ["configured"])],
+)
+def test_a_job_shows_the_loading_phase_after_the_review_when_its_model_is_not_in_memory(
+    loaded, shown, monkeypatch
+):
+    phases = []
+
+    def configured(name, settings, log, request, phase, least=None):
+        phases.append("configured")
+        return name
+
+    monkeypatch.setattr(thinking, "calls_log", lambda: None)
+    monkeypatch.setattr(thinking.say, "keep_log", lambda log: None)
+    monkeypatch.setattr(Thinking, "configured", staticmethod(configured))
+    monkeypatch.setattr(Ollama, "loaded_models", staticmethod(lambda: loaded))
+    assert Thinking.for_work("a", phases.append, selected=(MODEL, {})) == MODEL
+    assert phases == shown
+
+
+@pytest.mark.spec("RVW-3")
+@pytest.mark.parametrize("reviewed", ["off", "low"])
+def test_a_work_command_thinks_at_least_medium_and_ask_keeps_the_review(reviewed, model_log, monkeypatch):
+    monkeypatch.setattr(RequestReview, "ruled", lambda self, request: (reviewed, "reviewed"))
+    monkeypatch.setattr(thinking, "Model", lambda name, settings, keep_alive, log, max_growth, level: level)
+    monkeypatch.setattr(Config, "get", staticmethod(lambda key: "1"))
+    monkeypatch.setattr(Config, "keep_alive", staticmethod(lambda value: value))
+    assert Thinking.configured(MODEL, {}, model_log, "a topic", least=WORK_THINK) == "medium"
+    assert Thinking.configured(MODEL, {}, model_log, "a question") == reviewed

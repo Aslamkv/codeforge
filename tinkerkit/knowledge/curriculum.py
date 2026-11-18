@@ -6,7 +6,7 @@ lazy from collections import Counter
 lazy from itertools import islice
 
 from ..messages import Message, Messages, say
-lazy from ..build.project import Tracked
+lazy from ..build.project import Tracked, ending
 lazy from ..jobs import today
 lazy from ..model.models import OllamaError
 lazy from ..prompts import Part, Prompts, PromptTooLarge
@@ -131,6 +131,38 @@ class SlotLearner(Tracked):
         self.searched_first, self.follow_ups, self.incomplete = False, 0, False
         self.pages = Counter()
         self.recap = []
+
+    def run(self, topic):
+        entry = self.learn(topic, deep=True)
+        if entry is None:
+            raise SystemExit(f"Nothing learned about {topic}; nothing saved.")
+        self.print_learned(topic, entry)
+        return ending(
+            "done",
+            f"Learned {entry['name']}",
+            [(name, text) for _, name, text in self.recap]
+            or [("Findings", str(len(entry.get("findings", []))))],
+            [("See it", "tinker knowledge")],
+        )
+
+    @staticmethod
+    def print_learned(topic, entry):
+        with say.part(f"{entry['name']}: {entry['summary']}", "📘"):
+            for item in Library.items({Library.slug(entry.get("language") or topic): entry})[1:]:
+                say.item(f"[{item['phase']}] {item['text']}")
+            for contradiction in entry.get("contradictions", []):
+                say.info(
+                    f"Facts {', '.join(map(str, contradiction['facts']))} disagree: {contradiction['note']}",
+                    "⚖️",
+                )
+            for gap in entry.get("open", []):
+                missing = gap["missing"] or search_entry(gap["search"])["query"]
+                say.info(f"Still open (Q{gap['question']}): {missing}", "❓")
+            for note in entry["notes"]:
+                say.warn(f"Not learned: {note}")
+        say.tip(
+            "A run uses this whenever its request needs it. See everything Tinker learned with: tinker knowledge"
+        )
 
     def learn(self, topic, deep=False):
         known = Library.read(Library.slug(topic))
