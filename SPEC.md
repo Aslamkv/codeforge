@@ -68,11 +68,11 @@ with a dot, and each imports only the modules listed above it:
 | `messages` | everything Tinker tells the person, in one voice (`say`, `Messages`, `Message`, and `Voice`, `TerminalVoice` for subsystems): each message's kind gives its icon, sections nest it, followers (a tracker) get it as data, and details go to the log only |
 | `text` | plain text helpers every module shares |
 | `store` | one SQLite database of documents and logs (`Store`, `Log`) |
-| `settings` | the numbers and fixed names more than one part shares (a module's own stay with it); the Tinker home (`Home`) and its database, the settings table (`SETTINGS`, `Config`), numbered lists (`Numbered`), the one way to delete (`confirm_deletion`) |
+| `settings` | the numbers and fixed names more than one part shares (a module's own stay with it); the Tinker home (`Home`) and its database, the settings table (`SETTINGS`, `Config`), numbered lists (`Numbered`), the one way to delete (`confirm_deletion`), a file shown as a page and whether it changed (`Page`) |
 | `formats` | what a kept file holds, read by its bytes: one subclass of `Format` per kind (`Epub`, `Docx`, `Markdown`, `PlainText`, `Pdf`, `Image`, `Audio`, `Unsupported`), each giving its title and chapters (`Book`) |
 | `memory.memories` | what the person and Tinker did together, with no model: each request's episode (`Scratchpad`), the memories a dream keeps of them and their recall, ranked by the `Retriever` its caller gives (`Memories`), who the person is and who Tinker is for them (`Traits`), and the questions that wait for the person (`Questions`) |
 | `system` | what this computer tells at once by fixed read-only commands, with no model (`SystemCheck`, `SYSTEM_CHECKS`) |
-| `commands` | the one table of Tinker's commands with each one's kind (`kind_of`, `deletes`), and project references (`@ID`, `@folder`) |
+| `commands` | the one table of Tinker's commands with each one's kind (`kind_of`, `deletes`), the command a chat message names (`command_of`, `command_words`), and project references (`@ID`, `@folder`) |
 | `jobs` | every long command as a job, listed, stopped and resumed (`Jobs`), its journal of requests and answers (`Journal`, `journaled`), and its log of model calls (`calls_log`) |
 | `chat.ledger` | what is said in the chats, so a chat is only a view of it: each message with when it goes, each thing shown, numbered, for `history` (`Ledger`) |
 | `prompts` | prompt parts (`Part`), replies (`Reply`), every system prompt (`Prompts`) |
@@ -87,7 +87,11 @@ with a dot, and each imports only the modules listed above it:
 | `web.internet` | the web plugin, the only part that reaches web content: search and fetch, and every failure of either (`Internet`, `WebPage`, `RequestLog`), and a page as text (`PageText`, a view over `web.passages`) |
 | `ranking` | ranking texts by words and meaning (`Retriever`) and the cached embeddings (`Embeddings`) |
 | `skills` | a command of the person's learned as a skill, run from a chat and its result handed back (`Skill`, `Skills`, `SkillLearner`, `SkillRun`) |
-| `conversation` | the terminal and the chats as one conversation (`Desk`, `Channel`, `Markup`, `Talk`, `Shell`, `Progress`, `Reporter`) |
+| `chat.markup` | what a message is and how it is written for each place it shows (`Message`, `Markup`, `md`, `styled`) |
+| `chat.console` | the terminal as a chat: the channel contract every chat follows (`Channel`, `ChannelError`), the console channel and its prompt and screen (`ConsoleChannel`, `PromptDrawer`, `ConsoleScreen`) |
+| `chat.shell` | shell commands run from a chat (`Shell`) |
+| `chat.reports` | a job followed in the chats it was asked from: its message, progress and ending (`Reporter`, `Progress`, `Attached`) |
+| `desk` | the terminal and the chats as one conversation (`Desk`, `Talk`), the plan that waits for the person (`WaitingPlan`), and one command said once (`one_shot`) |
 | `chat.channels` | the chat plugin: Telegram, and `tinker channel` |
 | `knowledge.principles` | the principle record and its one home store (`Principle`, `Principles`) and the deltas' inducer (`Inducer`) |
 | `knowledge.library` | lessons and proven knowledge (`Knowledge`), research (`Researcher`), and what learning shares (`Learner`, `Library`) |
@@ -112,7 +116,7 @@ with a dot, and each imports only the modules listed above it:
 | `cli` | the main system: the command line (`Cli`, `Commands`, `Doctor`), one run (`ProjectRun`, `ProjectFolder`) |
 
 - **ARCH-1** Each `tinkerkit` module imports only the modules listed above it in the table. The one exception
-  is `conversation`, which imports the `chat.channels` plugin lazily, inside a function.
+  is `desk`, which imports the `chat.channels` plugin lazily, inside a function.
 - **ARCH-2** The channels plugin is optional. Without `tinkerkit/chat/channels.py`, the conversation has no chat
   channels, and everything else works.
 - **ARCH-3** Every model call goes through `Ollama`, and who may call `Ollama.chat` is **MOD-23**. Every web
@@ -1036,7 +1040,7 @@ A command of the person's, learned once as a skill, runs from a chat in words an
 - **SKL-8** `skill list` (a glance) shows each skill with its purpose, state, slots and number of uses;
   `skill forget NAME` deletes one, asking first (**SET-8**).
 
-## conversation (CNV)
+## desk (CNV)
 
 The terminal and the chats are one conversation: the same commands, the same answers.
 

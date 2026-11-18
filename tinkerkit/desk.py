@@ -1,36 +1,64 @@
 import contextlib
 import os
 import re
-import shutil
 import signal
 import sys
 from collections import namedtuple
 from dataclasses import dataclass
 from typing import NamedTuple
 lazy import datetime
-lazy import fcntl
-lazy import html
 lazy import json
-lazy import queue
-lazy import readline
 lazy import shlex
 lazy import subprocess
 lazy import threading
 lazy import time
-lazy import webbrowser
 lazy from pathlib import Path
 
 from .build.project import Runs, Tracker, saved
-from .commands import BY_NAME, COMMANDS, GROUPS, CommandMenu, deletes, kind_of, refs
-from .formats import IMAGE_TYPES, sniffed
+from .chat.console import EXIT_WORDS, ConsoleChannel, PreviewFailed, keep_typing, typed_here
+from .chat.markup import Markup, Message, md
+from .chat.reports import (
+    Progress,
+    Reporter,
+    described,
+    exercise_board,
+    exercise_switch,
+    exercising_now,
+    headline,
+    keep_exercise_board,
+    printed_since,
+    signal_task,
+    until_ended,
+)
+from .chat.shell import (
+    CHAT_COMMAND_OUTPUT_SHOWN_CHARS,
+    COMMAND_NAMING_MAX_TOKENS,
+    Question,
+    Shell,
+    first_words,
+    in_shell,
+    remembered_part,
+    reviewed_level,
+    thread_reply,
+)
+from .commands import (
+    BY_NAME,
+    CHAT_COMMANDS,
+    COMMANDS,
+    GROUPS,
+    command_of,
+    command_words,
+    deletes,
+    kind_of,
+    model_pick,
+    refs,
+)
 from .jobs import (
     Jobs,
     Queue,
     Runner,
-    alive,
     answer_stopped,
     answering,
-    calls_log,
     emptied_queue,
     job_number,
     queue_action,
@@ -39,32 +67,13 @@ from .jobs import (
     tinker_command,
     tinker_process,
 )
-from .memory.memories import EPISODE_BOOKKEEPING, Memories, Scratchpad
+from .memory.memories import Memories, Scratchpad
 from .skills import Skills
 lazy from .chat.ledger import DONE_NOTE_KEPT_SECONDS, Ledger
-lazy from .messages import (
-    CLEAR_LINE,
-    CLEAR_TO_LINE_END,
-    CLEAR_TO_SCREEN_END,
-    LineEditor,
-    Messages,
-    char_width,
-    colourful,
-    cut_to_width,
-    human_duration,
-    live_line,
-    next_page_line,
-    next_page_words,
-    paint,
-    say,
-    star_at,
-    tinkering,
-    visible_width,
-)
+lazy from .messages import next_page_line, next_page_words, say
 lazy from .messages import styled as styled_choice
 lazy from .model.models import Cut, Models, Ollama, OllamaError, system_turn
-lazy from .model.thinking import RequestReview
-lazy from .prompts import Part, Prompts, Reply
+lazy from .prompts import Part, Prompts
 lazy from .ranking import Embeddings, Retriever, traits_part
 lazy from .settings import (
     EPISODE_GIST_CHARS,
@@ -74,42 +83,26 @@ lazy from .settings import (
     THREAD_TURNS,
     Config,
     Home,
+    Page,
     projects_folder,
 )
-lazy from .text import field
 lazy from .workspace import Toolchain
 
 CHANNEL_REPORTS_ENV = "TINKER_CHANNELS"
-MODEL_PICKS = (["model"], ["model", "calibrate"])
-MODEL_PULL_HINT = "Get one with `ollama pull NAME`, then pick it with `/model NAME`."
-PROGRESS_EDIT_SECONDS = 2
-CLOCK_ONLY_EDIT_SECONDS = 15
 BUILD_STOP_GRACE_SECONDS = 120
 STATUS_LOOK_SECONDS = 10
 EXPIRED_MESSAGES_SWEEP_SECONDS = 2
 ENDED_LOOK_SECONDS = 0.1
-BANNER_MAX_COLUMNS = 64
-WIPE_SCREEN_AND_SCROLLBACK = "\033[H\033[2J\033[3J"
-NEXT_PAGE_HINT = "↵ next page"
-
 CHAT_MAX_REPLY_TOKENS = 1024
 CHAT_THINK_TOKENS = 2048
 CHAT_ROUTE_TOKENS = 64
-TYPING_SIGN_SECONDS = 4
 MODEL_BUSY_NOTE_AFTER_SECONDS = 5
 MODEL_BUSY_NOTE_EDIT_SECONDS = 30
 
-COMMAND_NAMING_MAX_TOKENS = 300
-CHAT_COMMAND_TIMEOUT = 120
-CHAT_COMMAND_OUTPUT_SHOWN_CHARS = 3000
 CHAT_COMMAND_OUTPUT_READ_CHARS = 6000
 
 PLAN_CONFIRMING_COMMANDS = tuple(
     command.name for command in COMMANDS if "--confirm" in (option.flag for option in command.options)
-)
-COMMAND_NAMES = tuple(command.name for command in COMMANDS if command.name)
-BARE_RE = re.compile(
-    r"(?<![/\w.-])tinker (?=(?:" + "|".join(sorted(COMMAND_NAMES, key=len, reverse=True)) + r")\b)"
 )
 USAGE = frozendict(
     {
@@ -124,8 +117,6 @@ COMMANDS_ASKING_FOR_WORDS = tuple(
     for command in COMMANDS
     if command.chat and any(argument.nargs in ("+", None) for argument in command.arguments)
 ) + ("command",)
-EXIT_WORDS = ("exit",)
-PROMPT_HISTORY_LINES = 1000
 CHAT_APP_START = "/start"
 CHAT_FRESH = "/fresh"
 CHAT_LEAVE = "/leave"
@@ -170,11 +161,7 @@ I build small programs for you, on this computer, with an AI model that runs rig
 MenuEntry = namedtuple("MenuEntry", "name what")
 WordsAsked = namedtuple("WordsAsked", "question example")
 AppRequest = namedtuple("AppRequest", "project args stdin")
-ShellRun = namedtuple("ShellRun", "code output")
 Secret = namedtuple("Secret", "key question")
-Question = namedtuple(
-    "Question", "runs cancels held wanted naming", defaults=(None, lambda: None, None, None, False)
-)
 
 
 class NoShelf:
@@ -295,6 +282,14 @@ def session(root, shelf=None, interview=None, interviewing=False):
     ).run()
 
 
+def chat_channels():
+    try:
+        from .chat.channels import Channels
+    except ImportError:
+        return []
+    return Channels.enabled()
+
+
 def one_shot(command, text):
     console, talk = ConsoleChannel(), Talk(commands_brief())
     message, chat = Message(ConsoleChannel.CHAT, text, "you"), ConsoleChannel.CHAT
@@ -409,7 +404,7 @@ class NoWaitingPlan:
 
 
 class Desk:
-    COMMANDS = tuple(command.name for command in COMMANDS if command.chat)
+    COMMANDS = CHAT_COMMANDS
     TRACKER_LOOK_SECONDS = 1.0
 
     def __init__(self, channels, root, shelf=None, interview=None, interviewing=False):
@@ -1146,10 +1141,9 @@ class Desk:
         )
 
     def page_sent(self, channel, chat, words, page, icon, title):
-        before = page.stat().st_mtime_ns if page.exists() else None
+        before = Page(page).seen()
         shown = self.tinker(words)
-        written_now = page.exists() and page.stat().st_mtime_ns != before
-        if not written_now:
+        if not Page(page).changed_since(before):
             return md(t"{icon} **{' '.join(words)}**\n{shown:block}")
         channel.send_file(chat, page, md(t"{icon} **{title}**\n{shown}"))
         return None
@@ -1640,11 +1634,6 @@ def shown_output(output):
     return first_lines(output.strip() or "(nothing)", 40)
 
 
-def command_of(text, commands=None):
-    first = slash_word(text)
-    return first if first in (commands or Desk.COMMANDS) else ""
-
-
 def replied_commands(reply):
     lines = [line.strip().strip("`").strip() for line in reply.splitlines()]
     lines = [line for line in lines if line]
@@ -1732,67 +1721,13 @@ def item_phrases(tokens, at):
     return ({(token,)} if re.fullmatch(r"[a-z]+", token) else set()), at + 1
 
 
-def model_pick(text):
-    asked = [command_of(text), *text.split()[1:]]
-    return " ".join(asked) if asked in MODEL_PICKS else ""
-
-
-def slash_word(text):
-    words = text.split()
-    return command_word(words[0]) if words and words[0].startswith("/") else ""
-
-
-def typed_exit(line):
-    return line.strip().lower() in [f"/{word}" for word in EXIT_WORDS]
-
-
 def unknown_command(text):
     word = text.split()[0].partition("@")[0] if text.startswith("/") else ""
     return f"❓ No command {word}: /help lists them" if len(word) > 1 else ""
 
 
-def command_words(text):
-    try:
-        words = shlex.split(text)
-    except ValueError:
-        words = text.split()
-    words[0] = command_word(words[0])
-    return words
-
-
 def held_by_another(channel):
     return f"{channel.name} is listened to by another Tinker (process {channel.holder().get('pid', '?')})"
-
-
-def channel_add_words(text):
-    words = command_words(text) if text.strip() else []
-    return words[2:] if words[:2] == ["channel", "add"] else None
-
-
-def dropped_path(text):
-    try:
-        words = shlex.split(text)
-    except ValueError:
-        return None, ""
-    for end in range(len(words), 0, -1):
-        path = os.path.expanduser(" ".join(words[:end]))
-        if os.path.isfile(path):
-            return path, " ".join(words[end:])
-    return None, ""
-
-
-@contextlib.contextmanager
-def said_plainly():
-    write, screen = say.write, say.screen
-    say.write_through(print)
-    try:
-        yield
-    finally:
-        say.write_through(write, screen)
-
-
-def command_word(word):
-    return word.lower().lstrip("/").partition("@")[0]
 
 
 def offered():
@@ -1867,12 +1802,6 @@ def thread_line(episode):
     else:
         line = f"{episode['message']} → {' '.join(thread_reply(episode).split())}"
     return line[:EPISODE_GIST_CHARS]
-
-
-def thread_reply(episode):
-    if episode.get("status") == "remembered":
-        return "\n".join(episode["reply"].splitlines()[1:-1])
-    return episode["reply"]
 
 
 def thread_part(lines):
@@ -2067,1502 +1996,8 @@ class Questions:
         return self.by_chat.pop((channel.name, chat), None)
 
 
-class Shell:
-    CHANGES_RE = re.compile(
-        r"\b(rm|rmdir|mv|dd|mkfs\w*|chmod|chown|kill|killall|pkill|sudo|shutdown|reboot|"
-        r"truncate)\b|(?<![\d&>])>(?!&)|\bgit\s+(push|reset|clean|checkout|rebase)\b|"
-        r"\b(brew|pip3?|npm|cargo)\s+(install|uninstall|remove)\b|\s-delete\b|-exec\s+(rm|mv)\b|"
-        r"\bxargs\s+(rm|mv)\b|\bsed\s+-i\b"
-    )
-    LOGIN_SHELL = os.environ.get("SHELL") or "/bin/sh"
-
-    def __init__(self, talk, folder, questions):
-        self.talk, self.folder, self.questions = talk, folder, questions
-        self.shell = self.LOGIN_SHELL
-
-    def name(self, channel, message, now):
-        self.questions.ask(channel, message.chat, Question(naming=True))
-
-        def shown(ids):
-            question = self.questions.waiting(channel, message.chat)
-            if question and question.held:
-                question.held["shown"] = ids
-
-        self.talk.answer(channel, message, now, write=self.propose, on_shown=shown)
-
-    def propose(self, channel, message, state, tokens):
-        if not Models.quick():
-            self.questions.answered(channel, message.chat)
-            return "⚠️ **No model is in use yet:** `tinker model NAME` picks one."
-        system = Prompts.COMMAND_SYSTEM.format(
-            system=os.uname().sysname, shell=Path(self.shell).name, folder=self.folder
-        ) + remembered_part(recall(message.text, ("tool",)))
-        level = reviewed_level(message.text)
-        try:
-            data = json_answer(
-                self.talk.ask(
-                    channel,
-                    message.chat,
-                    [{"role": "system", "content": system}, {"role": "user", "content": message.text}],
-                    COMMAND_NAMING_MAX_TOKENS,
-                    level,
-                )
-            )
-        except OllamaError as exc:
-            self.questions.answered(channel, message.chat)
-            return md(t"⚠️ **The model did not answer:** {first_words(exc)}")
-        line, does = field(data, "command"), field(data, "does")
-        if not line or "\n" in line:
-            self.questions.answered(channel, message.chat)
-            return md(t"🤷 **No command found:** {does or 'describe it another way'}")
-        proposed = {"line": line, "asked": message.text, "level": level, "shown": None}
-        self.wait_for_confirm(channel, message.chat, proposed)
-        return self.proposal(line, does)
-
-    def wait_for_confirm(self, channel, chat, proposed):
-        self.questions.ask(
-            channel,
-            chat,
-            Question(
-                runs=lambda: self.run(channel, chat, proposed),
-                cancels=lambda: self.drop(channel, chat, proposed),
-                held=proposed,
-            ),
-        )
-
-    def proposal(self, line, does):
-        warning = (
-            "\n⚠️ **It changes or deletes things:** read it before you confirm."
-            if self.CHANGES_RE.search(line)
-            else ""
-        )
-        return md(
-            t"🖥 **Run this?**\n{line:block}\n{does}{warning:md}\n"
-            t"👉 `/confirm` to run it · anything else cancels it"
-        )
-
-    def take(self, channel, chat):
-        question = self.questions.waiting(channel, chat)
-        if not question or not question.held:
-            return None
-        return self.questions.answered(channel, chat).held
-
-    def drop(self, channel, chat, proposed):
-        channel.show(chat, proposed["shown"], f"🚫 _Not run:_ `{proposed['line']}`", done=True)
-
-    def run(self, channel, chat, proposed):
-        line = proposed["line"]
-        sent = channel.show(chat, proposed["shown"], f"▶️ **Running** `{line}` …")
-        code, output = in_shell(self.shell, line, self.folder)
-        Scratchpad.write(
-            {"chat": chat, "request": proposed.get("asked", ""), "line": line, "output": output, "code": code}
-        )
-        head = md(t"{'✅' if code == 0 else '❌'} {line:code} · _exit {code}_")
-        folded = self.folded(output)
-        tells = bool(output) and bool(Models.quick())
-        sent = channel.show(chat, sent, f"{head}\n{folded}", done=not tells)
-        if not tells:
-            return
-        with self.talk.pausing_jobs():
-            told = self.told(channel, chat, proposed, code, output)
-        channel.show(chat, sent, f"{head}\n{told}\n{folded}" if told else f"{head}\n{folded}", done=True)
-
-    @staticmethod
-    def folded(output):
-        if not output:
-            return "_(no output)_"
-        shown = (
-            output
-            if len(output) <= CHAT_COMMAND_OUTPUT_SHOWN_CHARS
-            else "… (the start is left out)\n" + output[-CHAT_COMMAND_OUTPUT_SHOWN_CHARS:]
-        )
-        return f"```output\n{Markup.fenced(shown)}\n```"
-
-    def told(self, channel, chat, proposed, code, output):
-        try:
-            return self.talk.tell(
-                channel,
-                chat,
-                proposed["asked"],
-                proposed["line"],
-                f"Exit code: {code}\n",
-                output,
-                proposed["level"],
-            )
-        except OllamaError:
-            return ""
-
-
-def in_shell(shell, line, folder, given=None):
-    try:
-        done = subprocess.run(
-            [shell, "-lc", line],
-            cwd=folder,
-            text=True,
-            capture_output=True,
-            input=given,
-            stdin=None if given else subprocess.DEVNULL,
-            timeout=CHAT_COMMAND_TIMEOUT,
-        )
-        return ShellRun(done.returncode, (done.stdout + done.stderr).strip())
-    except subprocess.TimeoutExpired as exc:
-        return ShellRun(
-            f"stopped after {CHAT_COMMAND_TIMEOUT}s", (text_of(exc.stdout) + text_of(exc.stderr)).strip()
-        )
-    except OSError as exc:
-        return ShellRun("not started", str(exc))
-
-
 def shown_in(channels, board):
     return [(channel, chat) for channel in channels for name, chat in board if name == channel.name]
-
-
-class Reporter:
-    def __init__(
-        self,
-        audience,
-        title,
-        pid=None,
-        sent=None,
-        phase=Tracker.STARTING,
-        plan_on_top="",
-        before=0.0,
-        on_step=None,
-    ):
-        self.audience, self.progress, self.pid = audience, Progress(title, phase, before), pid
-        self.on_step = on_step
-        self.plan_on_top = plan_on_top
-        self.sent, self.last_edit, self.lock = ({} if sent is None else sent), 0.0, threading.Lock()
-        self.ended = False
-        self.send_at_bottom = True
-        threading.Thread(target=self.keep_up, daemon=True).start()
-
-    def keep_up(self):
-        while not self.ended:
-            time.sleep(PROGRESS_EDIT_SECONDS)
-            self.refresh()
-
-    def refresh(self):
-        with self.lock:
-            if self.ended:
-                return
-            state = self.tracked()
-            went_on = ((state or {}).get("resumed") or 0) > (self.progress.snapshot.get("resumed") or 0)
-            self.send_at_bottom = self.send_at_bottom or went_on
-            changed = self.progress.take(state)
-            if changed or went_on or time.monotonic() - self.last_edit >= CLOCK_ONLY_EDIT_SECONDS:
-                self.update()
-            else:
-                self.count_live()
-
-    def tracked(self):
-        job = Jobs.of_process(self.pid) if self.pid else None
-        return (job or {}).get("progress")
-
-    def update(self):
-        self.last_edit = time.monotonic()
-        self.progress.turn()
-        self.say(self.progress.text())
-        if self.on_step:
-            self.on_step()
-
-    def count_live(self):
-        for channel, chat in self.audience:
-            channel.count_live(chat, self.sent.get((channel.name, chat)), **self.progress.facts)
-
-    def say(self, text, done=False):
-        text = f"{self.plan_on_top}\n\n{text}" if self.plan_on_top else text
-        bottom, self.send_at_bottom = done or self.send_at_bottom, False
-        for channel, chat in self.audience:
-            key = (channel.name, chat)
-            self.sent[key] = channel.show(
-                chat,
-                self.sent.get(key),
-                text,
-                done,
-                bottom,
-                began=self.progress.work_began,
-                doing=self.progress.working_on,
-                **self.progress.facts,
-            )
-
-    def printed(self, line):
-        if self.tracked() is None and self.says_something(line):
-            with self.lock:
-                self.progress.snapshot["latest"] = self.joined(self.progress.snapshot.get("latest"), line)
-
-    @staticmethod
-    def joined(latest, line):
-        if latest and line[:1].isspace():
-            return f"{latest}\n{line.rstrip()[:300]}"
-        return line.strip()[:300]
-
-    @staticmethod
-    def says_something(line):
-        return line.strip() and not line.lstrip().startswith("...")
-
-    def finish(self, snapshot=None):
-        with self.lock:
-            self.ended = True
-            self.progress.take(snapshot or self.tracked())
-            self.say(self.progress.ending(), done=True)
-            self.deliver((self.progress.snapshot.get("ended") or {}).get("files", []))
-
-    def deliver(self, files):
-        for path in map(Path, files):
-            for channel, chat in self.audience:
-                send = channel.send_photo if Reporter.is_image(path) else channel.send_file
-                send(chat, str(path), path.name)
-
-    @staticmethod
-    def is_image(path):
-        with contextlib.suppress(OSError), path.open("rb") as file:
-            return bool(sniffed(file.read(64), IMAGE_TYPES))
-        return False
-
-
-class Progress:
-    OWN_PHASE_ICONS = ("✅", "✏️", "📁")
-    CHANGE_SIGNS = {"+": "➕", "~": "🔄"}
-
-    def __init__(self, title, phase=Tracker.STARTING, before=0.0):
-        self.snapshot = {
-            "title": title,
-            "doing": phase,
-            "step": None,
-            "began": None,
-            "steps": [],
-            "passing": None,
-            "working": "",
-            "tally": "",
-            "found": "",
-            "latest": "",
-            "waiting": None,
-            "ended": None,
-            "before": before,
-            "seconds": 0.0,
-        }
-        self.turns = 0
-
-    def turn(self):
-        self.turns += 1
-
-    def take(self, snapshot):
-        before = self.text(counted=False)
-        said = self.snapshot["doing"] if self.snapshot.get("step") is None else None
-        self.snapshot = dict(
-            self.snapshot, **{key: value for key, value in (snapshot or {}).items() if key != "before"}
-        )
-        if said and self.snapshot.get("step") is None:
-            self.snapshot["doing"] = said
-        return self.text(counted=False) != before
-
-    def text(self, counted=True):
-        state = self.snapshot
-        doing = (
-            self.working_on
-            if self.working_on.startswith(self.OWN_PHASE_ICONS)
-            else md(t"**{self.working_on}**")
-        )
-        job = f" (Job #{state['job']})" if state.get("job") else ""
-        lines = [md(t"🔨 **{state['title']}**{job}")] + [f"✅ {step}" for step in state.get("steps", [])]
-        lines += [f"{star_at(self.turns)} {self.tinkering_line(doing, counted)}"]
-        lines += [md(t"📊 {self.how_far}")] if self.how_far else []
-        if state.get("found"):
-            lines += [md(t"💡 {state['found']}")]
-        elif state.get("latest"):
-            lines += [md(t"… {state['latest']}")]
-        return "\n".join(lines)
-
-    def tinkering_line(self, doing, counted):
-        if not counted:
-            return tinkering(None, doing, **dict(self.facts, tokens=0))
-        began = self.work_began
-        return tinkering(time.time() - began if began else None, doing, **self.facts)
-
-    @property
-    def facts(self):
-        state = self.snapshot
-        return {
-            "tokens": state.get("tokens", 0),
-            "thinking": state.get("thinking", False),
-            "thought_seconds": state.get("thought_seconds"),
-        }
-
-    @property
-    def title(self):
-        return self.snapshot["title"]
-
-    @property
-    def work_began(self):
-        started = self.snapshot.get("started")
-        return started - self.snapshot.get("before", 0.0) if started else None
-
-    @property
-    def working_on(self):
-        state = self.snapshot
-        if not state.get("working"):
-            return state["doing"]
-        return f"{Tracker.icon(state.get('step'))} {state['working']}".strip()
-
-    @property
-    def passing(self):
-        counts = self.snapshot.get("passing")
-        return f"{counts[0]}/{counts[1]} spec points pass" if counts else ""
-
-    @property
-    def how_far(self):
-        return " · ".join(part for part in (self.passing, self.snapshot.get("tally")) if part)
-
-    def brief(self):
-        got = f", {self.how_far}" if self.how_far else ""
-        return md(t"**{self.title}** ({Markup.plain(self.working_on):md}{got})")
-
-    def waiting(self):
-        return bool(self.snapshot.get("waiting"))
-
-    def ending(self):
-        if self.waiting():
-            return self.waits(self.planned(self.snapshot["waiting"]), self.time_taken())
-        ended = self.snapshot.get("ended")
-        lines = self.ended_lines(ended) if ended else self.last_state_lines()
-        return "\n".join([md(t"🏁 **{self.title}**")] + lines)
-
-    def last_state_lines(self):
-        state = self.snapshot
-        lines = [f"✅ {step}" for step in state.get("steps", [])]
-        lines += [md(t"⏸ {self.working_on}")] if state.get("step") else []
-        return lines + ([md(t"{state['latest']}")] if state.get("latest") else [])
-
-    def ended_lines(self, ended):
-        mark = {"done": "✅", "blocked": "⚠️"}.get(ended.get("status"), "⏸")
-        took = (
-            f"⏱ **Done in {self.time_taken()}**"
-            if ended.get("status") == "done"
-            else f"⏱ _so far: {self.time_taken()}_"
-        )
-        lines = ([md(t"{mark} **{ended['headline']}**")] if ended.get("headline") else []) + [took]
-        lines += [self.detail(label, value) for label, value in ended.get("details", [])]
-        lines += (
-            [" · ".join(f"{label}: `{command}`" for label, command in ended.get("next", []))]
-            if ended.get("next")
-            else []
-        )
-        return lines + ([ended["text"]] if ended.get("text") else [])
-
-    @staticmethod
-    def detail(label, value):
-        if label == "Run it":
-            return md(t"▶️ {label}: {value:code}")
-        return md(t"• {label}: {value}")
-
-    def time_taken(self):
-        seconds = self.snapshot.get("before", 0.0) + self.snapshot.get("seconds", 0.0)
-        return f"{human_duration(seconds)} ({round(seconds)} seconds)"
-
-    @staticmethod
-    def waits(planned, so_far):
-        return f"{Progress.with_next_step(planned)}\n⏱ _so far: {so_far}_"
-
-    @staticmethod
-    def plan(plan):
-        return Progress.with_next_step(Progress.planned(plan))
-
-    @staticmethod
-    def with_next_step(planned):
-        return f"{planned}\n\n👉 `/confirm` to build it · `/amend WHAT` to change it"
-
-    @staticmethod
-    def planned(plan):
-        heading = "🐞 **Bug shown for" if plan.get("kind") == "fix" else "📋 **Plan for"
-        start = f" · ▶️ `{plan['start']}`" if plan.get("start") else ""
-        lines = [
-            md(t"{heading:md} {plan.get('name', '')}** · run {plan.get('run', ''):code}"),
-            md(t"🧰 {plan.get('language') or '?'}{start:md}"),
-        ]
-        if plan.get("changes"):
-            lines += ["", "✏️ **What changed**"] + [Progress.change_line(change) for change in plan["changes"]]
-        lines += ["", "🧪 **Tested before any code is written**"]
-        lines += [md(t"**{criterion_id}** {text}") for criterion_id, text in plan.get("criteria", [])]
-        if plan.get("non_goals"):
-            lines += ["", md(t"🚫 _Not included:_ {'; '.join(plan['non_goals'])}")]
-        if plan.get("folder"):
-            lines += [f"📁 `{Path(plan['folder']).name}`"]
-        return "\n".join(lines)
-
-    @staticmethod
-    def change_line(change):
-        if change.startswith("- "):
-            return md(t"➖ ~~{change[2:]}~~")
-        return md(t"{Progress.CHANGE_SIGNS.get(change[:1], '•')} {change[2:]}")
-
-
-class Attached:
-    def __init__(self, tracker):
-        self.tracker = tracker
-
-    def start(self):
-        signal.signal(JOB_STOP_SIGNAL, self.stop)
-        self.tracker.change("attached", reports=True)
-        return self
-
-    def stop(self, signum, frame):
-        raise KeyboardInterrupt
-
-
-def attach(tracker):
-    return Attached(tracker).start()
-
-
-def chat_channels():
-    try:
-        from .chat.channels import Channels
-    except ImportError:
-        return []
-    return Channels.enabled()
-
-
-def exercising_now():
-    jobs = [job for job in Jobs.listed("running") if job["command"] == "exercise" and job.get("progress")]
-    return described(tracker_of(jobs[0])) if jobs else None
-
-
-def tracker_of(job):
-    return dict(job["progress"], pid=job["pid"])
-
-
-def exercise_switch(text):
-    words = text.split()
-    return command_of(text) == "exercise" and len(words) > 1 and words[1].lower() != "status"
-
-
-def headline(status):
-    return re.split(r":| \(", (status or "").split("\n")[0])[0]
-
-
-def exercise_board():
-    kept = Home.store().get("activity", "exercise message") or {}
-    return {tuple(key.split("\t", 1)): ids for key, ids in kept.items()}
-
-
-def keep_exercise_board(sent):
-    Home.store().put(
-        "activity", "exercise message", {f"{name}\t{chat}": ids for (name, chat), ids in sent.items()}
-    )
-
-
-def printed_since(path, start):
-    with open(path, encoding="utf-8", errors="replace") as file:
-        file.seek(start)
-        return "\n".join(file.read().strip().splitlines()[-10:])
-
-
-def until_ended(pid):
-    while alive(pid):
-        time.sleep(PROGRESS_EDIT_SECONDS)
-
-
-def described(state):
-    progress = Progress(state.get("title") or "a task")
-    progress.take(state)
-    return {
-        "title": progress.title,
-        "brief": progress.brief(),
-        "text": progress.text(),
-        "pid": state.get("pid"),
-        "reports": bool(state.get("reports")),
-    }
-
-
-def signal_task(pid, signum):
-    try:
-        os.kill(pid, signum)
-    except ProcessLookupError, PermissionError:
-        pass
-
-
-class Channel:
-    KIND = ""
-    STYLE = Prompts.PHONE_STYLE
-    SECRETS = ()
-
-    def __init__(self, name, settings, secrets):
-        self.name, self.settings, self.secrets = name, settings, secrets
-        self.allowed = dict.fromkeys(str(chat) for chat in settings.get("allowed", [])).keys()
-        self.closed = False
-        self.state = None
-
-    def handle(self):
-        raise NotImplementedError
-
-    def receive(self, timeout):
-        raise NotImplementedError
-
-    def send(self, chat, text):
-        raise NotImplementedError
-
-    def edit(self, chat, sent, text):
-        return self.send(chat, text)
-
-    def send_file(self, chat, path, caption):
-        return self.send(chat, f"{caption}\n📄 `{path}`")
-
-    def send_photo(self, chat, path, caption):
-        return self.send_file(chat, path, caption)
-
-    def typing(self, chat):
-        pass
-
-    @contextlib.contextmanager
-    def waiting(self, chat, text):
-        done = threading.Event()
-        threading.Thread(target=keep_typing, args=(self, chat, done), daemon=True).start()
-        try:
-            yield
-        finally:
-            done.set()
-
-    def send_banner(self, chat, lines):
-        first, *middle, last = lines
-        return self.send(
-            chat, "\n".join([md(t"**{first}**"), *(md(t"{line}") for line in middle), md(t"_{last}_")])
-        )
-
-    def lasting(self, chat, sent):
-        pass
-
-    def glance(self, chat, asked, sent, keep=None):
-        pass
-
-    def collect(self):
-        pass
-
-    def clear(self):
-        return 0
-
-    def delete(self, chat, sent):
-        pass
-
-    def latest(self, chat, sent):
-        return True
-
-    def show(self, chat, shown, text, done=False, bottom=None, status=False, began=None, **going):
-        shown = list(shown or [])
-        if (done if bottom is None else bottom) and shown and not self.latest(chat, shown[-1]):
-            for old in shown:
-                self.delete(chat, old)
-            shown = []
-        parts = pieces(f"{self.said(text)}\n\n🕒 _updated {time.strftime('%H:%M:%S')}_")
-        now = [
-            self.edit(chat, shown[index], part) if index < len(shown) else self.send(chat, part)
-            for index, part in enumerate(parts)
-        ]
-        for extra in shown[len(parts) :]:
-            self.delete(chat, extra)
-        return now
-
-    def count_live(self, chat, shown, **facts):
-        pass
-
-    def said(self, text):
-        return BARE_RE.sub("/", text)
-
-    def skip_waiting(self):
-        pass
-
-    def offer(self, commands):
-        pass
-
-    def offer_fresh(self, chat, shown):
-        pass
-
-    def offer_next(self, chat, shown, words):
-        pass
-
-    def now_inside(self, chat, mode):
-        pass
-
-    def offer_leave(self, chat, shown, number):
-        pass
-
-    def offer_answers(self, chat, shown):
-        pass
-
-    def ask_for(self, chat, question, hint):
-        return self.send(chat, question)
-
-    def choose(self, chat, question, names):
-        return None
-
-    def listened(self, timeout):
-        try:
-            messages = self.receive(timeout)
-        except ChannelError as exc:
-            if str(exc) != getattr(self, "refused", None):
-                say.warn(f"{self.name}: {exc}; trying again")
-            self.refused = str(exc)
-            time.sleep(timeout)
-            return []
-        self.refused = None
-        return [message for message in messages if message.chat in self.allowed]
-
-    def claim(self, holder):
-        self.claimed = open(self.lock_file(), "a")
-        try:
-            fcntl.flock(self.claimed, fcntl.LOCK_EX | fcntl.LOCK_NB)
-        except BlockingIOError:
-            self.claimed.close()
-            return False
-        self.claimed.truncate(0)
-        self.claimed.write(json.dumps(holder))
-        self.claimed.flush()
-        return True
-
-    def holder(self):
-        try:
-            holder = json.loads(self.lock_file().read_text() or "{}")
-        except OSError, ValueError:
-            return {}
-        return holder if isinstance(holder, dict) else {}
-
-    def lock_file(self):
-        return Home.lock_file(self.name)
-
-
-class ChannelError(Exception):
-    pass
-
-
-class PreviewFailed(Exception):
-    pass
-
-
-class ConsoleChannel(Channel):
-    KIND = "console"
-    STYLE = Prompts.TERMINAL_STYLE
-    CHAT = "console"
-
-    def __init__(self):
-        super().__init__("console", {"allowed": [self.CHAT]}, {})
-        self.screen, self.lines = ConsoleScreen(), queue.Queue()
-        self.last_id, self.numbering = 0, threading.Lock()
-        self.printed, self.began, self.doings, self.live_owner = {}, {}, {}, None
-        self.history, self.next_page, self.mode = None, None, None
-
-    def handle(self):
-        return "this terminal"
-
-    def offer_next(self, chat, shown, words):
-        self.next_page = words
-        self.note(NEXT_PAGE_HINT)
-
-    def now_inside(self, chat, mode):
-        self.mode = mode
-        typing = self.screen.typing
-        if typing is not None:
-            typing[0].prompt = self.prompt()
-            self.screen.draw_prompt()
-
-    def prompt(self):
-        if self.mode is None or not typed_here():
-            return self.screen.prompt()
-        return self.mode.prompt()
-
-    def receive(self, timeout):
-        if not self.screen.reading:
-            self.start_reading()
-        try:
-            line = self.lines.get(timeout=timeout)
-        except queue.Empty:
-            return []
-        if line is None or typed_exit(line):
-            self.closed = True
-            return []
-        return [Message(self.CHAT, line, "you")] if line.strip() else []
-
-    def start_reading(self):
-        say.write_through(self.screen.print, self.screen if typed_here() else None)
-        if typed_here():
-            self.history = remembered_prompts()
-        self.screen.start()
-        threading.Thread(target=self.read, daemon=True).start()
-
-    def read(self):
-        if typed_here() and not Config.get("model"):
-            self.first_pick()
-        while True:
-            try:
-                line = self.typed_line() if typed_here() else input(self.prompt())
-            except EOFError, KeyboardInterrupt:
-                line = None
-            if line is None:
-                self.lines.put(None)
-                return
-            self.show_again(line)
-            self.remember(line)
-            self.lines.put(self.answered(line))
-
-    def typed_line(self):
-        editor, menu, drawer = LineEditor(typed_before()), CommandMenu(), PromptDrawer(self.prompt())
-        columns = shutil.get_terminal_size().columns
-        self.screen.typing_with(
-            (
-                drawer,
-                lambda: drawer.draw(editor.text, editor.column, menu.rows() if menu.open else [], columns),
-            )
-        )
-        self.screen.draw_prompt()
-        keys = say.keys()
-        try:
-            for key in keys:
-                if self.pressed(editor, menu, key):
-                    break
-                menu.follow(editor.text)
-                self.screen.draw_prompt()
-        finally:
-            keys.close()
-            self.screen.typing_with(None)
-        self.screen.draw(drawer.done(editor.text, columns))
-        return editor.answer
-
-    @staticmethod
-    def pressed(editor, menu, key):
-        answer = menu.press(key) if menu.open else None
-        if answer is None:
-            return editor.press(key)
-        if answer.line is not None:
-            editor.replace(answer.line)
-        return answer.send and editor.press("enter")
-
-    def first_pick(self):
-        try:
-            line = self.model_picked("model")
-        except SystemExit as exc:
-            say.warn(str(exc))
-            return
-        if line is None:
-            Models.say_recipe()
-            say.text(MODEL_PULL_HINT)
-        elif line:
-            self.lines.put(line)
-
-    def answered(self, line):
-        next_page, self.next_page = self.next_page, None
-        if next_page and not line.strip():
-            return f"/{next_page}"
-        words = channel_add_words(line)
-        if words is None or not typed_here():
-            return self.dropped(line)
-        self.channel_added(words)
-        return ""
-
-    def dropped(self, line):
-        path, words = dropped_path(line)
-        if path is None:
-            return self.picked(line)
-        reading = f"/read {shlex.quote(path)}"
-        if not words:
-            return reading
-        self.lines.put(reading)
-        return words
-
-    def channel_added(self, words):
-        from .chat.channels import ChannelCommand
-
-        try:
-            with self.screen.printing, said_plainly():
-                return ChannelCommand.run(["add", *words])
-        except SystemExit as exc:
-            say.warn(str(exc))
-            return None
-
-    def picked(self, line):
-        pick = model_pick(line)
-        if not pick or not typed_here():
-            return line
-        try:
-            chosen = self.model_picked(pick)
-        except SystemExit:
-            return line
-        return line if chosen is None else chosen
-
-    def model_picked(self, pick):
-        choices = Models.command_choices(pick.split()[-1])
-        if not choices:
-            return None
-        Models.say_recipe()
-        with self.screen.printing:
-            name = Models.picked(choices)
-        return "" if name is None else f"/{pick} {name}"
-
-    def remember(self, line):
-        if self.history and line.strip() and not typed_exit(line):
-            readline.add_history(line)
-            readline.write_history_file(self.history)
-
-    def show_again(self, line):
-        if self.screen.ruled():
-            quiet = not line.strip() or typed_exit(line)
-            self.screen.sent(f"{self.prompt()}{line}", shown=not quiet)
-
-    def banner(self, lines):
-        if not typed_here():
-            return
-        width = min(terminal_columns(), BANNER_MAX_COLUMNS)
-        edge = "─" * (width - 2)
-        rows = [self.banner_row(line, "dim" if row else "bold", width - 4) for row, line in enumerate(lines)]
-        framed = [styled(f"╭{edge}╮", "accent"), *rows, styled(f"╰{edge}╯", "accent")]
-        self.screen.draw("\n".join(framed) + "\n")
-
-    def wipe(self):
-        if typed_here():
-            self.screen.draw(WIPE_SCREEN_AND_SCROLLBACK)
-
-    def note(self, text):
-        self.screen.print(styled(text, "dim"))
-
-    @staticmethod
-    def banner_row(text, style, room):
-        shown = cut_to_width(text, room)
-        padding = " " * (room - visible_width(shown))
-        return styled("│ ", "accent") + styled(shown, style) + padding + styled(" │", "accent")
-
-    def send(self, chat, text):
-        self.screen.print(marked(Markup.ansi(self.said(text))))
-        return self.new_id()
-
-    def edit(self, chat, sent, text):
-        self.screen.print(marked(Markup.ansi(self.said(text))))
-        return sent
-
-    def send_file(self, chat, path, caption):
-        webbrowser.open(Path(path).as_uri())
-        return self.send(chat, f"{caption}\n📄 Opened in your browser: `{path}`")
-
-    def show(self, chat, shown, text, done=False, bottom=None, status=False, began=None, doing=None, **facts):
-        sent, text = (shown or [None])[0] or self.new_id(), self.said(text)
-        if began is not None:
-            self.began[sent] = monotonic_at(began)
-        if done:
-            self.show_done(sent, text)
-        else:
-            self.show_going(sent, text, doing, facts)
-        return [sent]
-
-    @contextlib.contextmanager
-    def waiting(self, chat, text):
-        if not self.screen.ruled() or self.live_owner is not None:
-            yield
-            return
-        waiter = self.live_owner = object()
-        self.screen.show_live(text, time.monotonic())
-        try:
-            yield
-        finally:
-            if self.live_owner is waiter:
-                self.live_owner = None
-                self.screen.end_live()
-
-    def count_live(self, chat, shown, **facts):
-        if shown and shown[0] == self.live_owner:
-            self.screen.count_live(**facts)
-
-    def show_done(self, sent, text):
-        if self.live_owner == sent:
-            self.live_owner = None
-            self.screen.end_live()
-        self.print_settled(sent, text.split("\n"))
-        self.forget_going(sent)
-
-    def forget_going(self, sent):
-        self.began.pop(sent, None)
-        self.doings.pop(sent, None)
-
-    def show_going(self, sent, text, doing, facts):
-        settled, going_on, under = split_at_tinkering(text.split("\n"))
-        self.print_settled(sent, settled)
-        shown_under = [Markup.plain(line).strip() for line in under if line.strip()]
-        self.show_doing(sent, doing or Markup.plain(going_on).strip(), facts, shown_under)
-
-    def print_settled(self, sent, lines):
-        printed = self.printed.setdefault(sent, set())
-        new = [line for line in lines if line.strip() and line not in printed]
-        if new and not printed:
-            self.screen.print(marked(Markup.ansi("\n".join(lines))))
-        elif new:
-            self.screen.print(indented(Markup.ansi("\n".join(new))))
-        printed.update(new)
-
-    def show_doing(self, sent, doing, facts, under):
-        if self.screen.ruled():
-            self.live_owner = sent
-            self.screen.show_live(doing, self.began.setdefault(sent, time.monotonic()), under, **facts)
-        elif self.doings.get(sent) != doing:
-            self.doings[sent] = doing
-            self.screen.print(doing)
-
-    def new_id(self):
-        with self.numbering:
-            self.last_id += 1
-            return self.last_id
-
-
-class PromptDrawer:
-    def __init__(self, prompt):
-        self.prompt, self.cursor_row = prompt, 0
-
-    def draw(self, text, column, rows, columns):
-        line = self.prompt + text
-        menu = "".join("\r\n" + menu_row(row, columns - 1) for row in rows)
-        drawn_row = (max(visible_width(line), 1) - 1) // columns + len(rows)
-        return self.cleared() + line + menu + self.cursor_placed(text[:column], drawn_row, columns)
-
-    def done(self, text, columns):
-        cleared, self.cursor_row = self.cleared(), 0
-        return cleared + self.prompt + text + "\r\n"
-
-    def taken_away(self):
-        cleared, self.cursor_row = self.cleared(), 0
-        return cleared
-
-    def cleared(self):
-        return rows_moved(-self.cursor_row) + "\r" + CLEAR_TO_SCREEN_END
-
-    def cursor_placed(self, before, drawn_row, columns):
-        row, column = divmod(visible_width(self.prompt + before), columns)
-        self.cursor_row = row
-        return rows_moved(row - drawn_row) + "\r" + (f"\033[{column}C" if column else "")
-
-
-def typed_before():
-    return [readline.get_history_item(item) for item in range(1, readline.get_current_history_length() + 1)]
-
-
-def rows_moved(rows):
-    if not rows:
-        return ""
-    return f"\033[{abs(rows)}{'B' if rows > 0 else 'A'}"
-
-
-def menu_row(row, room):
-    named = ("› " if row.marked else "  ") + row.name
-    words = f" {row.words}" if row.words else ""
-    shown = cut_to_width(named + words + "  " + row.what, room)
-    end = len(named) + len(words)
-    return shown[: len(named)] + styled(shown[len(named) : end], "dim") + shown[end:]
-
-
-class ConsoleScreen:
-    PROMPT = "› " if sys.stdin.isatty() else ""
-    TICK_SECONDS = 0.12
-
-    def __init__(self):
-        self.reading, self.live, self.under, self.frame, self.printing = False, None, [], 0, threading.Lock()
-        self.size, self.drawn = shutil.get_terminal_size(), []
-        self.size_changed, self.typing = threading.Event(), None
-
-    def start(self):
-        self.reading, self.size = True, shutil.get_terminal_size()
-        if typed_here():
-            self.draw(unwrapped(self.rule()) + "\n")
-            self.wake_on_resize()
-            threading.Thread(target=self.keep_ticking, daemon=True).start()
-
-    def wake_on_resize(self):
-        if hasattr(signal, "SIGWINCH") and threading.current_thread() is threading.main_thread():
-            signal.signal(signal.SIGWINCH, lambda *_: self.size_changed.set())
-
-    def print(self, text):
-        with self.printing:
-            self.out(lambda: self.printed_in_pieces(text) if self.ruled() else self.printed_over_prompt(text))
-
-    def printed_in_pieces(self, text):
-        room = terminal_lines() - self.live_rows() - 2
-        return "".join(
-            self.printed_above("\n".join(lines), rows) for lines, rows in screen_pieces(text, room)
-        )
-
-    def printed_above(self, text, rows):
-        return f"{self.room_made(rows, above=self.live_rows())}\r{text}{RESTORE_CURSOR}"
-
-    def printed_over_prompt(self, text):
-        if not sys.stdout.isatty():
-            return text + "\n"
-        return f"{CLEAR_LINE}{text}\n{self.PROMPT if self.reading else ''}"
-
-    def sent(self, typed, shown):
-        with self.printing:
-            rows = rows_shown(typed)
-            self.out(
-                lambda: self.shown_above_the_block(typed, rows) if shown else self.pulled_up(rows, kept=0),
-                typed_rows=rows,
-            )
-
-    def shown_above_the_block(self, typed, rows):
-        shown = NEXT_LINE.join([self.shown_again(typed), self.block_and_rule()])
-        return self.above_the_rule(rows + self.live_rows(), shown)
-
-    @staticmethod
-    def shown_again(typed):
-        return styled(typed + " " * (terminal_columns() - visible_width(typed)), "grey background")
-
-    def draw(self, text):
-        with self.printing:
-            write_out(text)
-
-    def typing_with(self, typing):
-        self.typing = typing
-
-    def draw_prompt(self):
-        with self.printing:
-            typing = self.typing
-            if typing is not None:
-                write_out(typing[1]())
-
-    def out(self, made, typed_rows=0):
-        text = self.repaired(typed_rows) + made()
-        if text and self.typing is not None:
-            drawer, drawn = self.typing
-            text = drawer.taken_away() + text + drawn()
-        write_out(text)
-
-    def show_live(self, text, began, under=(), **facts):
-        if not self.ruled():
-            return
-        with self.printing:
-            self.out(lambda: self.live_replaced(text, began, under, facts))
-
-    def count_live(self, **facts):
-        with self.printing:
-            self.out(lambda: self.live_counted(facts))
-
-    def end_live(self):
-        with self.printing:
-            self.out(self.live_ended)
-
-    def live_replaced(self, text, began, under, facts):
-        rows_before = self.live_rows()
-        self.live, self.under = (text, began, facts), list(under)
-        return self.resized(rows_before, self.live_rows()) + self.redrawn_live()
-
-    def live_counted(self, facts):
-        if self.live is None:
-            return ""
-        text, began, _ = self.live
-        self.live = (text, began, facts)
-        return self.redrawn_live()
-
-    def live_ended(self):
-        if self.live is None:
-            return ""
-        rows = self.live_rows()
-        self.live, self.under, self.drawn = None, [], []
-        return self.shrunk(rows)
-
-    def live_ticked(self):
-        if self.live is None:
-            return ""
-        self.frame += 1
-        return self.redrawn_live()
-
-    def keep_ticking(self):
-        while True:
-            self.size_changed.wait(self.TICK_SECONDS)
-            self.size_changed.clear()
-            self.tick()
-
-    def tick(self):
-        with self.printing:
-            self.out(self.live_ticked)
-
-    def repaired(self, typed_rows=0):
-        size = shutil.get_terminal_size()
-        redrawn = self.redrawn_at(size, typed_rows) if size != self.size and self.ruled() else ""
-        self.size = size
-        return redrawn
-
-    def redrawn_at(self, size, typed_rows):
-        stale, kept = self.stale_rows(size.columns), self.live_rows() + 1 + typed_rows
-        rewrapped = stale + typed_rows - kept
-        return (
-            self.stale_rows_cleared(stale, typed_rows)
-            + self.pulled_up(rewrapped, kept)
-            + self.above_the_prompt(kept, self.block_and_rule())
-        )
-
-    def stale_rows_cleared(self, stale, typed_rows):
-        return self.above_the_prompt(stale + typed_rows, NEXT_LINE.join([CLEAR_TO_LINE_END] * stale))
-
-    def stale_rows(self, columns):
-        rule_rows = rows_at(self.size.columns, columns)
-        return rule_rows + sum(rows_shown_at(row, columns) for row in self.drawn)
-
-    def block_and_rule(self):
-        block = self.live_block() if self.live is not None else []
-        return unwrapped(NEXT_LINE.join([*block, self.rule()]))
-
-    def live_rows(self):
-        return 0 if self.live is None else 1 + len(self.under)
-
-    def resized(self, rows_before, rows_after):
-        if rows_after > rows_before:
-            return self.room_made(rows_after - rows_before, above=0) + RESTORE_CURSOR
-        return self.shrunk(rows_before - rows_after)
-
-    @staticmethod
-    def room_made(rows, above):
-        return f"{ROW_DOWN_OR_SCROLL * rows}{SAVE_CURSOR}{rows_up(rows + above + 1)}{inserted_rows(rows)}"
-
-    def shrunk(self, by):
-        return self.pulled_up(by, kept=self.live_rows() + 1)
-
-    @staticmethod
-    def pulled_up(rows, kept):
-        if not rows:
-            return ""
-        return f"{SAVE_CURSOR}{lines_up(kept + rows)}{deleted_rows(rows)}{RESTORE_CURSOR}{rows_up(rows)}"
-
-    def redrawn_live(self):
-        return self.above_the_rule(self.live_rows(), unwrapped(NEXT_LINE.join(self.live_block())))
-
-    def live_block(self):
-        return [row + CLEAR_TO_LINE_END for row in self.live_drawn()]
-
-    @classmethod
-    def above_the_rule(cls, rows, change):
-        return cls.above_the_prompt(rows + 1, change)
-
-    @staticmethod
-    def above_the_prompt(rows, change):
-        return f"{SAVE_CURSOR}{lines_up(rows)}{change}{RESTORE_CURSOR}"
-
-    def live_drawn(self):
-        text, began, facts = self.live
-        width = terminal_columns() - 1
-        tinkering = live_line(text, began, self.frame, width, sys.stdout, **facts)
-        under = (f"  {styled(cut_to_width(line, width - 2), 'dim')}" for line in self.under)
-        self.drawn = [tinkering, *under]
-        return self.drawn
-
-    def prompt(self):
-        return "› " if typed_here() else self.PROMPT
-
-    @staticmethod
-    def rule():
-        return styled("─" * terminal_columns(), "dim")
-
-    def ruled(self):
-        return self.reading and typed_here()
-
-
-SAVE_CURSOR, RESTORE_CURSOR, NEXT_LINE = "\0337", "\0338", "\033[E"
-AUTOWRAP_OFF, AUTOWRAP_ON = "\033[?7l", "\033[?7h"
-COLOUR_CODE_RE = re.compile(r"\033\[[0-9;]*m")
-ROW_DOWN_OR_SCROLL = "\033D"
-
-
-def unwrapped(rows):
-    return f"{AUTOWRAP_OFF}{rows}{AUTOWRAP_ON}"
-
-
-def screen_pieces(text, room):
-    lines, rows = [], 0
-    for line in fitting_lines(text, room):
-        line_rows = rows_shown(line)
-        if lines and rows + line_rows > room:
-            yield lines, rows
-            lines, rows = [], 0
-        lines.append(line)
-        rows += line_rows
-    yield lines, rows
-
-
-def fitting_lines(text, room):
-    for line in text.split("\n"):
-        if rows_shown(line) > room:
-            yield from screen_wide_rows(COLOUR_CODE_RE.sub("", line))
-        else:
-            yield line
-
-
-def screen_wide_rows(line):
-    columns = terminal_columns()
-    row, width = "", 0
-    for char in line:
-        char_columns = char_width(char)
-        if width + char_columns > columns:
-            yield row
-            row, width = "", 0
-        row += char
-        width += char_columns
-    yield row
-
-
-def rows_shown(text):
-    return rows_shown_at(text, terminal_columns())
-
-
-def rows_shown_at(text, columns):
-    return sum(rows_at(visible_width(COLOUR_CODE_RE.sub("", line)), columns) for line in text.split("\n"))
-
-
-def rows_at(width, columns):
-    return max(1, -(-width // columns))
-
-
-def terminal_columns():
-    return shutil.get_terminal_size().columns
-
-
-def terminal_lines():
-    return shutil.get_terminal_size().lines
-
-
-def monotonic_at(wall_time):
-    return time.monotonic() - (time.time() - wall_time)
-
-
-def lines_up(rows):
-    return f"\033[{rows}F"
-
-
-def rows_up(rows):
-    return f"\033[{rows}A"
-
-
-def inserted_rows(rows):
-    return f"\033[{rows}L" if rows else ""
-
-
-def deleted_rows(rows):
-    return f"\033[{rows}M"
-
-
-def write_out(text):
-    sys.stdout.write(text)
-    sys.stdout.flush()
-
-
-def remembered_prompts():
-    path = Home.prompt_history()
-    readline.set_auto_history(False)
-    readline.set_history_length(PROMPT_HISTORY_LINES)
-    readline.clear_history()
-    with contextlib.suppress(OSError):
-        readline.read_history_file(path)
-    return path
-
-
-def typed_here():
-    return sys.stdin.isatty() and colourful(sys.stdout)
-
-
-def styled(text, style):
-    return paint(text, style, sys.stdout)
-
-
-def marked(text):
-    return indented(text, styled("● ", "accent"))
-
-
-def indented(text, first="  "):
-    return first + text.replace("\n", "\n  ") if colourful(sys.stdout) else text
-
-
-def split_at_tinkering(lines):
-    at = next((row for row, line in enumerate(lines) if is_tinkering(line)), None)
-    return (lines[:at], lines[at], lines[at + 1 :]) if at is not None else ([], lines[0], [])
-
-
-def is_tinkering(line):
-    star, _, rest = Markup.plain(line).lstrip().partition(" ")
-    return star in Messages.STAR and rest.startswith("Tinkering…")
-
-
-class Message:
-    def __init__(self, chat, text, sender="", id=None):
-        self.chat, self.text, self.sender, self.id = str(chat), (text or "").strip(), sender, id
-
-
-def pieces(text, size=3500):
-    parts, part = [], ""
-    for whole in text.splitlines():
-        for line in [whole[start : start + size] for start in range(0, len(whole), size)] or [""]:
-            if part and len(part) + len(line) + 1 > size:
-                parts.append(part)
-                part = ""
-            part = f"{part}\n{line}" if part else line
-    return parts + [part] if part else parts
-
-
-class Markup:
-    FENCE_RE = re.compile(r"```(\w*)\n?(.*?)(?:\n?```|\Z)", re.S)
-    CODE_RE = re.compile(r"`([^`\n]+)`")
-    LINK_RE = re.compile(r"\[([^\]\n]+)\]\((https?://[^)\s]+)\)")
-    ESCAPED_RE = re.compile(r"\\([*_`~\\])")
-    MARKS = (
-        (re.compile(r"\*\*(?=\S)(.+?)(?<=\S)\*\*"), "b"),
-        (re.compile(r"~~(?=\S)(.+?)(?<=\S)~~"), "s"),
-        (re.compile(r"(?<![\w*])\*(?=[^\s*])(.+?)(?<=[^\s*])\*(?![\w*])"), "i"),
-        (re.compile(r"(?<!\w)_(?=\S)(.+?)(?<=\S)_(?!\w)"), "i"),
-    )
-    ITEM_RE = re.compile(r"(?m)^\s*[-*] (?=\S)")
-    HEADING_RE = re.compile(r"(?m)^#{1,6} +(.+)$")
-    ANSI_ON_OFF = {"b": ("1", "22"), "i": ("3", "23"), "s": ("9", "29")}
-    TERMINAL_OUTPUT_LINES = 30
-
-    @classmethod
-    def of(cls, template):
-        return "".join(part if isinstance(part, str) else cls.formatted(part) for part in template)
-
-    @classmethod
-    def formatted(cls, part):
-        match part.format_spec:
-            case "":
-                return cls.literal(part.value)
-            case "md":
-                return str(part.value)
-            case "code":
-                return f"`{part.value}`"
-            case "block":
-                return f"```\n{cls.fenced(part.value)}\n```"
-            case spec:
-                raise ValueError(f"no Markup format {spec!r}")
-
-    @staticmethod
-    def literal(text):
-        return re.sub(r"([*_`~\\])", r"\\\1", str(text))
-
-    @staticmethod
-    def fenced(text):
-        return str(text).replace("```", "ˋˋˋ")
-
-    @staticmethod
-    def columns(text):
-        lines = str(text).expandtabs().splitlines()
-        rows = [line for line in lines if Markup.is_row(line)]
-        cuts = Markup.column_cuts(rows) if len(rows) >= 2 else []
-        if len(cuts) < 2:
-            return str(text)
-        return "\n".join(Markup.in_columns(line, cuts) if Markup.is_row(line) else line for line in lines)
-
-    @staticmethod
-    def is_row(line):
-        return len(line.split()) >= 3 and "  " in line.strip()
-
-    @staticmethod
-    def column_cuts(rows):
-        shape = min(rows, key=lambda line: len(line.split()))
-        last = list(re.finditer(r"\S+", shape))[-1].start()
-        tolerated = 1 if len(rows) >= 4 else 0
-        blank = [sum(at < len(line) and line[at] != " " for line in rows) <= tolerated for at in range(last)]
-        gaps = [at for at in range(1, last - 1) if blank[at] and blank[at + 1] and not blank[at - 1]] + [last]
-        cuts, begin = [], 0
-        for index, gap in enumerate(gaps):
-            after = shape[gap : gaps[index + 1]] if index + 1 < len(gaps) else shape[gap:]
-            if shape[begin:gap].strip() and after.strip():
-                cuts.append(gap)
-                begin = gap
-        return cuts
-
-    @staticmethod
-    def in_columns(line, cuts):
-        parts, begin = [], 0
-        for cut in cuts:
-            if cut >= len(line):
-                break
-            if line[cut] != " " and line[cut - 1] != " ":
-                cut = line.find(" ", cut)
-                if cut < 0:
-                    break
-            if cut > begin:
-                parts.append(line[begin:cut].strip())
-                begin = cut
-        parts.append(line[begin:].strip())
-        return " | ".join(part for part in parts if part)
-
-    @classmethod
-    def html(cls, text):
-        keep = cls.keeper()
-
-        def block(found):
-            output = found.group(1) == "output"
-            body = found.group(2).rstrip("\n")
-            body = html.escape(cls.columns(body) if output else body, quote=False)
-            return keep(f"<blockquote expandable>{body}</blockquote>" if output else f"<pre>{body}</pre>")
-
-        return cls.render(
-            text,
-            block,
-            lambda code: f"<code>{html.escape(code, quote=False)}</code>",
-            lambda plain: html.escape(plain, quote=False),
-            lambda tag, inner: f"<{tag}>{inner}</{tag}>",
-            keep,
-            lambda words, url: f'<a href="{html.escape(url)}">{html.escape(words, quote=False)}</a>',
-        )
-
-    @classmethod
-    def ansi(cls, text):
-        if os.environ.get("NO_COLOR") or not sys.stdout.isatty():
-            return cls.plain(text)
-        keep = cls.keeper()
-
-        def block(found):
-            body = found.group(2).rstrip("\n").splitlines()
-            if found.group(1) == "output":
-                more = len(body) - cls.TERMINAL_OUTPUT_LINES
-                body = body[: cls.TERMINAL_OUTPUT_LINES] + ([f"… {more} more lines"] if more > 0 else [])
-                return keep("\n".join(f"\033[2m  │ {line}\033[22m" for line in body))
-            return keep("\n".join(f"    \033[36m{line}\033[39m" for line in body))
-
-        return cls.render(
-            text,
-            block,
-            lambda code: f"\033[36m{code}\033[39m",
-            lambda plain: plain,
-            lambda tag, inner: f"\033[{cls.ANSI_ON_OFF[tag][0]}m{inner}\033[{cls.ANSI_ON_OFF[tag][1]}m",
-            keep,
-            lambda words, url: f"\033[4m{words}\033[24m \033[2m({url})\033[22m",
-        )
-
-    @classmethod
-    def plain(cls, text):
-        keep = cls.keeper()
-        return cls.render(
-            text,
-            lambda found: keep(found.group(2).rstrip("\n")),
-            lambda code: code,
-            lambda plain: plain,
-            lambda tag, inner: inner,
-            keep,
-            lambda words, url: f"{words} ({url})",
-        )
-
-    @classmethod
-    def render(cls, text, block, code, plain, mark, keep, link):
-        text = cls.FENCE_RE.sub(block, str(text))
-        text = cls.LINK_RE.sub(lambda found: keep(link(found.group(1), found.group(2))), text)
-        text = cls.ESCAPED_RE.sub(lambda found: keep(plain(found.group(1))), text)
-        text = cls.CODE_RE.sub(lambda found: keep(code(found.group(1))), text)
-        text = cls.ITEM_RE.sub("• ", plain(text))
-        text = cls.HEADING_RE.sub(lambda found: mark("b", found.group(1)), text)
-        for pattern, tag in cls.MARKS:
-            text = pattern.sub(lambda found, tag=tag: mark(tag, found.group(1)), text)
-        return re.sub("\x00(\\d+)\x00", lambda found: keep.kept[int(found.group(1))], text)
-
-    @staticmethod
-    def keeper():
-        kept = []
-
-        def keep(shown):
-            kept.append(shown)
-            return f"\x00{len(kept) - 1}\x00"
-
-        keep.kept = kept
-        return keep
-
-
-md = Markup.of
 
 
 def help_text(words=()):
@@ -3699,33 +2134,6 @@ def state_part(state):
     return f"\n\n{state}" if state else ""
 
 
-def remembered_part(recalled):
-    if not recalled:
-        return ""
-    lines = [recalled_line(item) for item in recalled]
-    return f"\n\n{Part(Prompts.REMEMBERED, Part.bullets(lines)).render()}"
-
-
-def recalled_line(item):
-    if item["id"].startswith("m"):
-        return item["gist"]
-    return "; ".join(
-        f"{key}: {value}"
-        for key, value in shown_episode(item).items()
-        if key not in EPISODE_BOOKKEEPING and value not in ("", [])
-    )
-
-
-def shown_episode(episode):
-    if "reply" not in episode:
-        return episode
-    return {**episode, "reply": thread_reply(episode)}
-
-
-def recall(request, kinds=None):
-    return Memories(Retriever(Embeddings.configured())).recall(request, kinds=kinds)
-
-
 def unanswered(memories, request, items):
     asking = [item for item in items if question_of(item)]
     matches = memories.matching_questions(request, [question_of(item) for item in asking])
@@ -3757,24 +2165,6 @@ def started_by_a_conversation():
     return os.environ.get(CHANNEL_REPORTS_ENV) == "off"
 
 
-def json_answer(text):
-    try:
-        data = Reply(text).json()
-    except ValueError:
-        return {}
-    return data if isinstance(data, dict) else {}
-
-
-def text_of(output):
-    return output.decode(errors="replace") if isinstance(output, bytes) else (output or "")
-
-
-def keep_typing(channel, chat, done):
-    while not done.is_set():
-        channel.typing(chat)
-        done.wait(TYPING_SIGN_SECONDS)
-
-
 def answer_or_stop(answer):
     outcome = {}
 
@@ -3792,15 +2182,6 @@ def answer_or_stop(answer):
     if "error" in outcome:
         raise outcome["error"]
     return outcome.get("reply", "⏹ Stopped.")
-
-
-def reviewed_level(text, thread=""):
-    level, _ = RequestReview(calls_log()).level(text, thread=thread)
-    return level
-
-
-def first_words(text, size=160):
-    return " ".join(str(text).split())[:size]
 
 
 def built_project(name=""):

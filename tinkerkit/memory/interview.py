@@ -1,6 +1,7 @@
 import json
 
-from tinkerkit.conversation import ALL_FOR_NOW, Turn, md
+from tinkerkit.chat.markup import md
+from tinkerkit.desk import ALL_FOR_NOW, Turn
 from tinkerkit.memory.memories import TRAIT_ABOUTS, Questions, Scratchpad, Traits
 from tinkerkit.memory.reflection import (
     Reflection,

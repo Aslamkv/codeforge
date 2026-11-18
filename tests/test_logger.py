@@ -16,7 +16,7 @@ from tinkerkit.build.plan import Recaller
 from tinkerkit.build.session import Phase
 from tinkerkit.chat import channels
 from tinkerkit.chat.channels import TelegramChannel
-from tinkerkit.conversation import CHAT_APP_START, Desk, Questions, Talk
+from tinkerkit.desk import CHAT_APP_START, Desk, Questions, Talk
 from tinkerkit.logger import TraceLog
 from tinkerkit.memory import dream
 from tinkerkit.messages import say

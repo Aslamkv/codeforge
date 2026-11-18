@@ -4,7 +4,7 @@ import pytest
 from conftest import ask, quick_model_replying, replying
 from test_dream import NOW
 
-from tinkerkit.conversation import ALL_FOR_NOW, Turn
+from tinkerkit.desk import ALL_FOR_NOW, Turn
 from tinkerkit.memory.interview import UNREADABLE, Interview
 from tinkerkit.memory.memories import Questions, Scratchpad, Traits
 from tinkerkit.model.models import OllamaError

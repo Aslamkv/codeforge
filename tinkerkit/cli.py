@@ -12,7 +12,7 @@ lazy import traceback
 lazy import webbrowser
 lazy from pathlib import Path
 
-from . import conversation, logger, shelf
+from . import desk, logger, shelf
 from .commands import BY_NAME, COMMANDS, GROUPS, kind_of, refs, taught_command
 from .jobs import (
     STATES,
@@ -44,6 +44,7 @@ lazy from .build.project import (
     saved,
 )
 lazy from .build.session import Session
+lazy from .chat.reports import attach
 lazy from .knowledge.curriculum import LearnStopped, SlotLearner
 lazy from .knowledge.graph import Graph, MemoryBrowser, write_page
 lazy from .knowledge.library import Researcher
@@ -214,7 +215,7 @@ class Cli:
     def run_at_once(argv):
         if not argv:
             open_home()
-            conversation.session(Path.cwd(), Shelf(), Interview())
+            desk.session(Path.cwd(), Shelf(), Interview())
             raise SystemExit(0)
         if argv[0] in ("help", "-h", "--help"):
             Cli.help(argv[1] if len(argv) > 1 else None)
@@ -222,13 +223,13 @@ class Cli:
             if argv[1:2] in (["-h"], ["--help"]):
                 Cli.help("interact")
             open_home()
-            conversation.session(Path.cwd(), Shelf(), Interview(), interviewing=True)
+            desk.session(Path.cwd(), Shelf(), Interview(), interviewing=True)
             raise SystemExit(0)
         if argv[0] in Cli.TALK_COMMANDS:
             if argv[1:2] in (["-h"], ["--help"]):
                 Cli.help(argv[0])
             open_home()
-            raise SystemExit(conversation.one_shot(argv[0], " ".join(argv[1:])))
+            raise SystemExit(desk.one_shot(argv[0], " ".join(argv[1:])))
         if argv[0] == "channel":
             if channels is None:
                 raise SystemExit("tinker: channels are not installed (tinkerkit/chat/channels.py is missing)")
@@ -1110,7 +1111,7 @@ class ProjectRun:
             Runs.clear_folder(workdir, Path(spec).expanduser().resolve() if spec else None, self.args.yes)
         say.follow(self.tracker.heard)
         self.open()
-        conversation.attach(self.tracker)
+        attach(self.tracker)
         self.work_safely()
         self.finish()
         sys.exit(self.outcome.exit_code)

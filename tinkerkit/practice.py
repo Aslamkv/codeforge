@@ -7,9 +7,9 @@ from pathlib import Path
 
 from .build.project import Subsystem
 from .messages import say
-lazy from . import conversation
 lazy from .build.project import Project, Steps, ending, saved
-lazy from .conversation import (
+lazy from .chat.reports import attach
+lazy from .desk import (
     BUILD_STOP_GRACE_SECONDS,
     CHANNEL_REPORTS_ENV,
 )
@@ -522,5 +522,5 @@ class Practice(Subsystem):
 
 
 def exercised(what, tracker, model):
-    conversation.attach(tracker)
+    attach(tracker)
     return Exercise(model, tracker).run(what)

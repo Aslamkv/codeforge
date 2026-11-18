@@ -1,6 +1,7 @@
 import re
 import signal
 from collections import namedtuple
+from dataclasses import dataclass
 from pathlib import Path
 lazy import os
 lazy import shutil
@@ -317,6 +318,17 @@ GLANCE_KEPT_SECONDS = 120
 
 
 Paged = namedtuple("Paged", "items pages")
+
+
+@dataclass(frozen=True)
+class Page:
+    path: Path
+
+    def seen(self):
+        return self.path.stat().st_mtime_ns if self.path.exists() else None
+
+    def changed_since(self, mark):
+        return self.path.exists() and self.seen() != mark
 
 
 class Home:

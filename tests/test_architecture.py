@@ -37,7 +37,11 @@ LAYERS = (
     "web.internet",
     "ranking",
     "skills",
-    "conversation",
+    "chat.markup",
+    "chat.console",
+    "chat.shell",
+    "chat.reports",
+    "desk",
     "chat.channels",
     "knowledge.principles",
     "knowledge.library",
@@ -117,7 +121,7 @@ def test_each_module_imports_only_the_modules_listed_above_it(module):
     above = set(LAYERS[: LAYERS.index(module)])
     top, inner = imports_of(module)
     assert top <= above, f"{module} imports {sorted(top - above)} at module level"
-    allowed_inner = above | ({"chat.channels"} if module == "conversation" else set())
+    allowed_inner = above | ({"chat.channels"} if module in ("desk", "chat.console") else set())
     assert inner <= allowed_inner, f"{module} imports {sorted(inner - allowed_inner)} inside a function"
 
 
@@ -128,7 +132,7 @@ def test_every_module_of_the_package_is_in_the_layers():
 
 @pytest.mark.spec("ARCH-2")
 def test_without_the_channels_plugin_the_conversation_has_no_chats(monkeypatch):
-    from tinkerkit import conversation
+    from tinkerkit import desk
 
     real_import = builtins.__import__
 
@@ -140,7 +144,7 @@ def test_without_the_channels_plugin_the_conversation_has_no_chats(monkeypatch):
     installed_plugin = types.SimpleNamespace(Channels=types.SimpleNamespace(enabled=lambda: ["telegram"]))
     monkeypatch.setitem(sys.modules, "tinkerkit.chat.channels", installed_plugin)
     monkeypatch.setattr(builtins, "__import__", no_channels)
-    assert conversation.chat_channels() == []
+    assert desk.chat_channels() == []
 
 
 def program_files():
@@ -170,7 +174,7 @@ def test_only_the_model_web_and_channel_modules_open_connections():
     runners = {
         module_of(path) for path in program_files() if "subprocess.Popen(" in path.read_text(encoding="utf-8")
     }
-    assert runners <= {"workspace", "settings", "conversation", "jobs", "skills"}, runners
+    assert runners <= {"workspace", "settings", "desk", "jobs", "skills"}, runners
 
 
 def importers_of(module):

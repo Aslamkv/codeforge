@@ -5,12 +5,16 @@ from pathlib import Path
 
 import pytest
 from conftest import add_back, criterion
-from test_conversation import Recorder, everyone
+from test_console import Recorder
+from test_reports import everyone
 
-from tinkerkit import conversation, practice
+from tinkerkit import desk as desk_module
+from tinkerkit import practice
 from tinkerkit.build.project import Steps, TrackedWork, Tracker, project_store
+from tinkerkit.chat import reports
+from tinkerkit.chat.markup import Message
 from tinkerkit.cli import Cli
-from tinkerkit.conversation import Desk, Message
+from tinkerkit.desk import Desk
 from tinkerkit.jobs import Jobs, Queue
 from tinkerkit.knowledge.library import Knowledge, Library
 from tinkerkit.model.thinking import Thinking
@@ -25,7 +29,7 @@ from tinkerkit.practice import (
     read_choice,
     read_verdict,
 )
-from tinkerkit.settings import WORK_THINK, Config
+from tinkerkit.settings import JOB_STOP_SIGNAL, WORK_THINK, Config
 
 OTHER_LIVE_PID = os.getppid()
 BUILDING = {"title": "Exercising Rust", "exercise": True, "doing": "🔨 Building"}
@@ -335,7 +339,7 @@ def test_the_exercise_shows_what_its_build_does(make_model, home_store, no_sleep
 def test_an_exercise_that_goes_on_by_itself_comes_to_the_bottom(home_store):
     channel = Recorder()
     home_store.put("jobs", "1", exercise_job("running", progress=BUILDING))
-    reporter = conversation.Reporter(everyone([channel]), "Exercising Rust", pid=OTHER_LIVE_PID)
+    reporter = reports.Reporter(everyone([channel]), "Exercising Rust", pid=OTHER_LIVE_PID)
     reporter.refresh()
     reporter.ended = True
     the_persons_message = "hello"
@@ -374,7 +378,7 @@ def test_the_conversation_adopts_an_exercise_a_conversation_before_it_started(
         "follow_exercise",
         lambda audience, pid, title, ended, anew: followed.append((audience, pid, title, anew)),
     )
-    conversation.keep_exercise_board({("rec", "1"): [7], ("other", "5"): [8]})
+    reports.keep_exercise_board({("rec", "1"): [7], ("other", "5"): [8]})
     reports_by_itself = {"title": "Exercising Rust", "exercise": True, "reports": True}
     home_store.put("jobs", "1", exercise_job("running", progress=reports_by_itself))
     add_back(1)
@@ -397,7 +401,7 @@ def test_an_exercise_that_ended_unstopped_goes_on_as_the_conversation_starts(
     its_job_killed_too = exercise_job("running", number=4, pid=999999999, updated="2026-10-23 09:00")
     home_store.put("jobs", "4", its_job_killed_too)
     add_back(4)
-    conversation.keep_exercise_board({("rec", "1"): [7]})
+    reports.keep_exercise_board({("rec", "1"): [7]})
     desk.adopt_exercise()
     assert started == [([(channel, "1")], ["resume", "#4"], "exercise rust")]
 
@@ -406,8 +410,8 @@ def test_an_exercise_that_ended_unstopped_goes_on_as_the_conversation_starts(
 def test_an_adopted_exercise_takes_its_message_out_and_sends_it_at_the_bottom(
     home_store, channel, desk, monkeypatch
 ):
-    monkeypatch.setattr(conversation, "until_ended", lambda pid: time.sleep(0.2))
-    conversation.keep_exercise_board({("rec", "1"): [7]})
+    monkeypatch.setattr(reports, "until_ended", lambda pid: time.sleep(0.2))
+    reports.keep_exercise_board({("rec", "1"): [7]})
     home_store.put("jobs", "1", exercise_job("running", progress=BUILDING))
     add_back(1)
     desk.adopt_exercise()
@@ -418,7 +422,7 @@ def test_an_adopted_exercise_takes_its_message_out_and_sends_it_at_the_bottom(
 
 @pytest.mark.spec("EXR-6")
 def test_an_adopted_exercise_with_no_saved_message_sends_none(home_store, channel, desk, monkeypatch):
-    monkeypatch.setattr(conversation, "until_ended", lambda pid: time.sleep(0.2))
+    monkeypatch.setattr(reports, "until_ended", lambda pid: time.sleep(0.2))
     home_store.put("jobs", "1", exercise_job("running", progress=BUILDING))
     add_back(1)
     desk.adopt_exercise()
@@ -529,7 +533,7 @@ def test_tinker_exercise_takes_a_language_or_status():
 @pytest.mark.spec("EXR-7")
 def test_every_exercise_keeps_one_message_started_stopped_or_resumed(home_store, channel, desk, monkeypatch):
     told = []
-    monkeypatch.setattr(conversation, "signal_task", lambda pid, signum: told.append((pid, signum)))
+    monkeypatch.setattr(desk_module, "signal_task", lambda pid, signum: told.append((pid, signum)))
     assert desk.stop_exercise().startswith("🤷 No exercise runs")
     home_store.put("jobs", "1", exercise_job("running", progress=BUILDING))
     add_back(1)
@@ -540,7 +544,7 @@ def test_every_exercise_keeps_one_message_started_stopped_or_resumed(home_store,
         "Exercising Rust",
         lambda: first_ended.append(True) or time.sleep(0.2),
     )
-    assert desk.stop_exercise() is None and told == [(OTHER_LIVE_PID, conversation.JOB_STOP_SIGNAL)]
+    assert desk.stop_exercise() is None and told == [(OTHER_LIVE_PID, JOB_STOP_SIGNAL)]
     wait_for_the_reporter_to_end(desk)
     the_next_exercise = "resume #4"
     desk.follow_exercise([(channel, "1")], OTHER_LIVE_PID, the_next_exercise, lambda: None)
@@ -548,7 +552,7 @@ def test_every_exercise_keeps_one_message_started_stopped_or_resumed(home_store,
     sent = {entry[2] for entry in channel.log if entry[0] == "send" and "🔨 **" in entry[3]}
     deleted = {entry[2] for entry in channel.log if entry[0] == "delete"}
     assert first_ended and len(sent - deleted) == 1
-    assert list(conversation.exercise_board().values()) == [[next(iter(sent - deleted))]]
+    assert list(reports.exercise_board().values()) == [[next(iter(sent - deleted))]]
 
 
 def wait_for_the_reporter_to_end(desk):
@@ -560,8 +564,8 @@ def wait_for_the_reporter_to_end(desk):
 
 @pytest.mark.spec("EXR-7")
 def test_exercise_commands_that_switch_it_show_in_its_message_alone():
-    assert all(map(conversation.exercise_switch, ["/exercise rust", "/exercise python 3"]))
-    assert not any(map(conversation.exercise_switch, ["/exercise status", "/exercise", "exercise rust"]))
+    assert all(map(reports.exercise_switch, ["/exercise rust", "/exercise python 3"]))
+    assert not any(map(reports.exercise_switch, ["/exercise status", "/exercise", "exercise rust"]))
 
 
 class Heard:
@@ -600,7 +604,7 @@ def test_an_exercise_job_attaches_its_tracker_to_the_chat_after_its_setup(monkey
         "for_work",
         staticmethod(lambda request, phase, think: seen.append(("model", think)) or "model"),
     )
-    monkeypatch.setattr(conversation, "attach", lambda tracker: seen.append(("attach", tracker)))
+    monkeypatch.setattr(practice, "attach", lambda tracker: seen.append(("attach", tracker)))
     monkeypatch.setattr(
         practice.Exercise,
         "run",

@@ -501,11 +501,11 @@ def test_a_plain_command_writes_tinker_log():
 def test_the_conversation_talk_and_channels_write_tinker_log(argv, monkeypatch):
     interviews = []
     monkeypatch.setattr(
-        cli.conversation,
+        cli.desk,
         "session",
         lambda folder, shelf, interview, interviewing=False: interviews.append(interview),
     )
-    monkeypatch.setattr(cli.conversation, "one_shot", lambda command, text: 0)
+    monkeypatch.setattr(cli.desk, "one_shot", lambda command, text: 0)
     monkeypatch.setattr(
         cli.channels.ChannelCommand,
         "run",
@@ -529,7 +529,7 @@ def test_the_installed_channels_plugin_is_the_chat_channels_module():
 def test_interact_opens_the_terminal_chat_in_the_interview(monkeypatch):
     sessions = []
     monkeypatch.setattr(
-        cli.conversation,
+        cli.desk,
         "session",
         lambda folder, shelf, interview, interviewing=False: sessions.append((interview, interviewing)),
     )

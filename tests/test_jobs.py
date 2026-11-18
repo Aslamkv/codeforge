@@ -6,12 +6,16 @@ import time
 
 import pytest
 from conftest import add_back
-from test_conversation import Recorder, everyone
+from test_console import Recorder
+from test_reports import everyone
 
-from tinkerkit import cli, conversation, jobs, practice
+from tinkerkit import cli, jobs, practice
+from tinkerkit import desk as desk_module
 from tinkerkit.build.project import Tracker
+from tinkerkit.chat import reports
+from tinkerkit.chat.markup import Message
 from tinkerkit.cli import Cli, Commands
-from tinkerkit.conversation import Desk, Message
+from tinkerkit.desk import Desk
 from tinkerkit.jobs import JOBS, Jobs, Queue, Runner, archived, began_at, calls_log, is_job, journaled, today
 from tinkerkit.knowledge.curriculum import SlotLearner
 from tinkerkit.knowledge.library import Learner, Researcher
@@ -618,8 +622,8 @@ def test_a_job_that_goes_on_starts_its_tracker_resumed(home_store):
 def test_tinker_chat_answers_without_pausing_anything_itself(monkeypatch, capsys):
     paused = []
     monkeypatch.setattr(Queue, "add_front", lambda number: paused.append(number))
-    monkeypatch.setattr(conversation, "commands_brief", lambda: "cmds")
-    conversation.one_shot("chat", "hello")
+    monkeypatch.setattr(desk_module, "commands_brief", lambda: "cmds")
+    desk_module.one_shot("chat", "hello")
     assert paused == []
 
 
@@ -724,13 +728,13 @@ def test_an_exercise_paused_for_another_hands_it_its_message(home_store, tmp_pat
 
 @pytest.mark.spec("JOB-5")
 def test_a_new_jobs_message_is_kept_up_and_one_that_goes_on_comes_to_the_bottom(home_store, monkeypatch):
-    monkeypatch.setattr(conversation, "PROGRESS_EDIT_SECONDS", 1000)
+    monkeypatch.setattr(reports, "PROGRESS_EDIT_SECONDS", 1000)
     channel = Recorder()
     job = {"number": 1, "command": "learn", "title": "learn html5", "state": "running", "pid": os.getpid()}
     monkeypatch.setattr(Jobs, "current", Jobs.save(job))
     a_new_job = Tracker("learn html5")
     a_new_job.publish()
-    reporter = conversation.Reporter(everyone([channel]), "learn html5", pid=os.getpid())
+    reporter = reports.Reporter(everyone([channel]), "learn html5", pid=os.getpid())
     reporter.refresh()
     reporter.refresh()
     the_persons_message = "learn tailwind"

@@ -9,8 +9,9 @@ import time
 import pytest
 
 import tinkerkit.cli  # noqa: F401
-from tinkerkit import conversation, jobs, logger
+from tinkerkit import desk, jobs, logger
 from tinkerkit.build.project import Project
+from tinkerkit.chat import reports
 from tinkerkit.jobs import Queue, Runner
 from tinkerkit.messages import say
 from tinkerkit.model.models import Model, Models, Ollama
@@ -128,13 +129,13 @@ def no_job():
 
 @pytest.fixture(autouse=True)
 def no_reporter_left(monkeypatch):
-    made, start = [], conversation.Reporter.__init__
+    made, start = [], reports.Reporter.__init__
 
     def recorded(reporter, *arguments, **options):
         made.append(reporter)
         start(reporter, *arguments, **options)
 
-    monkeypatch.setattr(conversation.Reporter, "__init__", recorded)
+    monkeypatch.setattr(reports.Reporter, "__init__", recorded)
     yield
     for reporter in made:
         reporter.ended = True
@@ -175,7 +176,7 @@ def tinker_runs_nothing(monkeypatch):
 
 
 def tinker_runs(monkeypatch, *arguments):
-    for module in (conversation, jobs):
+    for module in (desk, jobs):
         monkeypatch.setattr(module, "tinker_command", lambda: [sys.executable, *map(str, arguments)])
 
 

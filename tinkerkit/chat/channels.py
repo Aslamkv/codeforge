@@ -13,7 +13,7 @@ lazy import time
 lazy import urllib.parse
 lazy from pathlib import Path
 
-from ..conversation import (
+from ..desk import (
     CHAT_FRESH,
     CHAT_LEAVE,
     CHAT_SKIP,
@@ -22,17 +22,15 @@ from ..conversation import (
     LEAVE_READING_BUTTON,
     NEXT_PAGE_BUTTON,
     SKIP_QUESTION_BUTTON,
-    Channel,
-    ChannelError,
     Desk,
-    Markup,
-    Message,
     NoInterview,
     NoShelf,
     Secret,
     first_words,
     started_by_a_conversation,
 )
+from .console import Channel, ChannelError
+from .markup import Markup, Message
 lazy from ..messages import say
 lazy from ..settings import Home, confirm_deletion
 lazy from .ledger import ANSWER_WINDOW_SECONDS, Ledger

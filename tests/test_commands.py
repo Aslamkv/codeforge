@@ -1,7 +1,7 @@
 import pytest
 from conftest import MEASURED
 
-from tinkerkit import cli, conversation
+from tinkerkit import cli, desk
 from tinkerkit.commands import (
     BY_NAME,
     COMMANDS,
@@ -112,8 +112,8 @@ def test_model_of_an_embedding_model_not_yet_in_use_is_a_glance(home_store):
 def test_the_command_line_and_the_conversation_read_the_table():
     on_the_command_line = set(cli.Cli.COMMANDS) | set(cli.Cli.TALK_COMMANDS) | {"help", "channel", "confirm"}
     assert on_the_command_line == {command.name for command in COMMANDS if command.cli}
-    assert set(conversation.Desk.COMMANDS) == {command.name for command in COMMANDS if command.chat}
-    assert conversation.USAGE["task"] == "✍️ Write `/task WHAT TO BUILD`, e.g. `/task a calculator in Python`"
+    assert set(desk.Desk.COMMANDS) == {command.name for command in COMMANDS if command.chat}
+    assert desk.USAGE["task"] == "✍️ Write `/task WHAT TO BUILD`, e.g. `/task a calculator in Python`"
     for command in cli.Cli.COMMANDS:
         parser = cli.Cli.parser(command)
         assert parser.description == BY_NAME[command].about

@@ -287,7 +287,7 @@ WATCHED = (
         ),
     ),
     Watched(
-        "tinkerkit.conversation",
+        "tinkerkit.desk",
         "Talk",
         "warm",
         Step(
@@ -306,7 +306,7 @@ WATCHED = (
         ),
     ),
     Watched(
-        "tinkerkit.conversation",
+        "tinkerkit.desk",
         "Desk",
         "run",
         Step(
@@ -314,7 +314,7 @@ WATCHED = (
         ),
     ),
     Watched(
-        "tinkerkit.conversation",
+        "tinkerkit.desk",
         "Desk",
         "handle",
         Step(
@@ -334,13 +334,13 @@ WATCHED = (
         ),
     ),
     Watched(
-        "tinkerkit.conversation",
+        "tinkerkit.desk",
         "Desk",
         "close_channels",
         Step(lambda a: "Channels", lambda a: "Closing the channels", lambda a, result: "Channels closed"),
     ),
     Watched(
-        "tinkerkit.conversation",
+        "tinkerkit.desk",
         "Desk",
         "unload_models",
         Step(lambda a: "Models", lambda a: "Unloading the models", lambda a, result: "Models unloaded"),

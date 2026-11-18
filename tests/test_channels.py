@@ -14,8 +14,8 @@ import pytest
 import tinkerkit.chat.channels as channels
 import tinkerkit.chat.ledger as ledger
 from tinkerkit.chat.channels import ChannelCommand, Channels, TelegramChannel, ask
+from tinkerkit.chat.console import ChannelError
 from tinkerkit.chat.ledger import Ledger
-from tinkerkit.conversation import ChannelError
 from tinkerkit.store import Store
 
 

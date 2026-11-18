@@ -1,4 +1,5 @@
 import io
+import os
 import sys
 from pathlib import Path
 
@@ -361,3 +362,35 @@ def test_a_list_comes_a_page_at_a_time():
     entries = list(range(PER_PAGE * 2 + 1))
     assert PER_PAGE == 10 and Numbered.page(entries, 1) == Paged(entries[:PER_PAGE], 3)
     assert Numbered.page(entries, 3) == Paged([entries[-1]], 3) and Numbered.page([], 1) == Paged([], 1)
+
+
+def test_a_missing_page_has_no_mark_and_has_not_changed(tmp_path):
+    page = settings.Page(tmp_path / "page.html")
+    assert page.seen() is None
+    assert not page.changed_since(None)
+
+
+def test_a_page_written_after_its_mark_has_changed(tmp_path):
+    path = tmp_path / "page.html"
+    path.write_text("old")
+    os.utime(path, ns=(1_000_000_000, 1_000_000_000))
+    page = settings.Page(path)
+    mark = page.seen()
+    os.utime(path, ns=(2_000_000_000, 2_000_000_000))
+    assert page.changed_since(mark)
+
+
+def test_a_page_written_where_none_was_has_changed(tmp_path):
+    path = tmp_path / "page.html"
+    page = settings.Page(path)
+    mark = page.seen()
+    path.write_text("new")
+    assert page.changed_since(mark)
+
+
+def test_an_untouched_page_has_not_changed(tmp_path):
+    path = tmp_path / "page.html"
+    path.write_text("same")
+    os.utime(path, ns=(1_000_000_000, 1_000_000_000))
+    page = settings.Page(path)
+    assert not page.changed_since(page.seen())

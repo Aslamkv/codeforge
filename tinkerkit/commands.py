@@ -1,4 +1,5 @@
 import re
+import shlex
 from collections import namedtuple
 from operator import attrgetter
 
@@ -934,3 +935,40 @@ class CommandMenu:
 
 def synopsis_words(command):
     return command.synopsis.removeprefix(command.name).strip()
+
+
+MODEL_PICKS = (["model"], ["model", "calibrate"])
+CHAT_COMMANDS = tuple(command.name for command in COMMANDS if command.chat)
+
+
+def command_of(text, commands=None):
+    first = slash_word(text)
+    return first if first in (commands or CHAT_COMMANDS) else ""
+
+
+def model_pick(text):
+    asked = [command_of(text), *text.split()[1:]]
+    return " ".join(asked) if asked in MODEL_PICKS else ""
+
+
+def slash_word(text):
+    words = text.split()
+    return command_word(words[0]) if words and words[0].startswith("/") else ""
+
+
+def command_words(text):
+    try:
+        words = shlex.split(text)
+    except ValueError:
+        words = text.split()
+    words[0] = command_word(words[0])
+    return words
+
+
+def channel_add_words(text):
+    words = command_words(text) if text.strip() else []
+    return words[2:] if words[:2] == ["channel", "add"] else None
+
+
+def command_word(word):
+    return word.lower().lstrip("/").partition("@")[0]
