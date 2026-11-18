@@ -6,10 +6,10 @@ import urllib.request
 import pytest
 from conftest import LOADING_PHASE, MEASURED, MODEL
 
-import tinkerkit.model as model_module
-from tinkerkit import quality
+import tinkerkit.model.models as model_module
 from tinkerkit.messages import DIMMED, HEADING, say
-from tinkerkit.model import (
+from tinkerkit.model import quality
+from tinkerkit.model.models import (
     Answer,
     Calibrator,
     Cut,

@@ -5,10 +5,10 @@ import pytest
 from conftest import ask, confirmed_trait, replying
 from test_remembering import CHESS, HELIX, HELIX_AGAIN, meanings_of_helix_and_chess
 
+from tinkerkit.memory.memories import Memories, Questions, Scratchpad, Traits
+from tinkerkit.memory.reflection import Reflection
 from tinkerkit.prompts import Prompts
-from tinkerkit.reflecting import Reflection
-from tinkerkit.remembering import Memories, Questions, Scratchpad, Traits
-from tinkerkit.retrieval import Embeddings, Retriever
+from tinkerkit.ranking import Embeddings, Retriever
 from tinkerkit.settings import REFLECT_ANSWERED, REFLECT_EPISODES, REFLECT_ROUNDS, REFLECT_THOUGHTS, Home
 
 NOW = datetime.datetime(2026, 11, 11, 12, 0, 0)

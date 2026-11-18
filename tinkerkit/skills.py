@@ -9,7 +9,7 @@ from dataclasses import asdict, dataclass, field
 from pathlib import Path
 
 from .messages import say
-from .model import Calibrator, Models, Ollama, OllamaError
+from .model.models import Calibrator, Models, Ollama, OllamaError
 from .prompts import Prompts, Reply
 from .settings import Home, confirm_deletion
 from .text import now_text

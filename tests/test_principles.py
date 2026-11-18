@@ -4,10 +4,10 @@ import pytest
 
 from tests.test_knowledge import EmbedServer
 from tests.test_remembering import FakeEmbeddings
-from tinkerkit import principles as principles_module
-from tinkerkit.model import Ollama
-from tinkerkit.principles import Inducer, Principle, Principles
-from tinkerkit.retrieval import Embeddings
+from tinkerkit.knowledge import principles as principles_module
+from tinkerkit.knowledge.principles import Inducer, Principle, Principles
+from tinkerkit.model.models import Ollama
+from tinkerkit.ranking import Embeddings
 from tinkerkit.settings import MAX_FACT_CHARS, MAX_RULE_WHEN_CHARS, Home
 
 

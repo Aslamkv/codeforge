@@ -1,6 +1,6 @@
 import pytest
 
-from tinkerkit.retrieval import Likeness
+from tinkerkit.ranking import Likeness
 
 SEED = "Seed random generators inside tests"
 SEED_AGAIN = "Always seed random generators before tests run"

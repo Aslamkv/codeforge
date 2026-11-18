@@ -8,7 +8,8 @@ from pathlib import Path
 import pytest
 from conftest import ACCENT, BOLD, DIM, RESET, Terminal
 
-from tinkerkit import project as project_module
+from tinkerkit.build import project as project_module
+from tinkerkit.build.project import Tracker, project_store
 from tinkerkit.messages import (
     DIMMED,
     HEADING,
@@ -28,7 +29,6 @@ from tinkerkit.messages import (
     short_count,
     tinkering,
 )
-from tinkerkit.project import Tracker, project_store
 from tinkerkit.store import Log
 
 ROOT = Path(__file__).resolve().parent.parent

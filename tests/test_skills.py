@@ -7,7 +7,7 @@ import pytest
 from conftest import quick_model_replying
 
 from tinkerkit import skills
-from tinkerkit.model import LoadedModel, Models
+from tinkerkit.model.models import LoadedModel, Models
 from tinkerkit.prompts import Prompts
 from tinkerkit.settings import Home
 from tinkerkit.skills import Probe, Skill, SkillLearner, SkillRun, Skills

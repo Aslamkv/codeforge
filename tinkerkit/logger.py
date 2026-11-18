@@ -186,7 +186,7 @@ WATCHED = (
     Watched("tinkerkit.cli", "Commands", "run", COMMAND),
     Watched("tinkerkit.cli", "ProjectRun", "execute", COMMAND),
     WatchedFamily(
-        "tinkerkit.session",
+        "tinkerkit.build.session",
         "Phase",
         "run",
         Step(
@@ -194,10 +194,10 @@ WATCHED = (
             lambda a: f"{phase(a)} starts (cycle {a.cycle['id']})",
             lambda a, result: f"{phase(a)} ends",
         ),
-        ("tinkerkit.planning", "tinkerkit.building", "tinkerkit.finishing"),
+        ("tinkerkit.build.plan", "tinkerkit.build.code", "tinkerkit.build.finish"),
     ),
     Watched(
-        "tinkerkit.model",
+        "tinkerkit.model.models",
         "Model",
         "ask",
         Step(
@@ -207,7 +207,7 @@ WATCHED = (
         ),
     ),
     Watched(
-        "tinkerkit.model",
+        "tinkerkit.model.models",
         "Ollama",
         "chat",
         Step(
@@ -237,13 +237,13 @@ WATCHED = (
         ),
     ),
     Watched(
-        "tinkerkit.web",
+        "tinkerkit.web.internet",
         "Internet",
         "search_all",
         Step(lambda a: "Search", lambda a: f"Searching {a.searches!r}", lambda a, result: "Search done"),
     ),
     Watched(
-        "tinkerkit.web",
+        "tinkerkit.web.internet",
         "Internet",
         "fetch",
         Step(lambda a: "Fetch", lambda a: f"Fetching {a.urls!r}", lambda a, result: "Fetch done"),
@@ -272,12 +272,12 @@ WATCHED = (
         Fact(lambda a: f"Database append {a.log}", lambda a, result: f"Database append {a.log}: {a.entry!r}"),
     ),
     WatchedFunction(
-        "tinkerkit.reflecting",
+        "tinkerkit.memory.reflection",
         "reply_read",
         Fact(lambda a: "Quick reply read", lambda a, result: f"Quick reply read: {result!r}"),
     ),
     Watched(
-        "tinkerkit.model",
+        "tinkerkit.model.models",
         "Ollama",
         "loading",
         Step(
@@ -297,7 +297,7 @@ WATCHED = (
         ),
     ),
     WatchedFunction(
-        "tinkerkit.channels",
+        "tinkerkit.chat.channels",
         "connect_by_address",
         Step(
             lambda a: f"Connection to {host(a)}",
@@ -324,7 +324,7 @@ WATCHED = (
         ),
     ),
     Watched(
-        "tinkerkit.channels",
+        "tinkerkit.chat.channels",
         "TelegramChannel",
         "send",
         Step(

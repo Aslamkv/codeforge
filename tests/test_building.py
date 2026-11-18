@@ -3,7 +3,7 @@ import json
 import pytest
 from conftest import CALC, CALC_FILES, CALC_TESTS, PYTEST, criterion, file_block
 
-from tinkerkit.building import (
+from tinkerkit.build.code import (
     BugReproducer,
     BuildFix,
     CodeWriter,

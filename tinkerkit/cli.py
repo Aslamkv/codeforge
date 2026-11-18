@@ -13,9 +13,8 @@ lazy import traceback
 lazy import webbrowser
 lazy from pathlib import Path
 
-from . import conversation, dreaming, exercising, logger, reading, remembering, skills
+from . import conversation, logger, practice, shelf, skills
 from .commands import BY_NAME, COMMANDS, GROUPS, kind_of, refs, taught_command
-from .interviewing import Interview
 from .jobs import (
     STATES,
     Jobs,
@@ -27,20 +26,17 @@ from .jobs import (
     queue_action,
     queue_lines,
 )
+from .memory import dream, memories
+from .memory.interview import Interview
+from .memory.memories import Scratchpad
 from .messages import Messages, human_duration, next_page_line, paint, say
-from .reading import Reader, Shelf
-from .remembering import Scratchpad
+from .shelf import Reader, Shelf
 from .skills import SkillLearner
 from .system import SYSTEM_CHECKS, SYSTEM_WORDS
-lazy from .building import BugReproducer, CodeWriter, TestToolSetup, TestWriter, Verifier
-lazy from .dreaming import Dream
-lazy from .finishing import FinalReview, LessonWriter, ReadmeWriter, Tidy
-lazy from .graph import Graph, MemoryBrowser, write_page
-lazy from .knowledge import Library, Researcher, ResearchLearner, search_entry
-lazy from .learning import LearnStopped, SlotLearner
-lazy from .model import Calibrator, Model, Models, Ollama, OllamaError, SelectedModel
-lazy from .planning import Designer, InterfaceReviewer, Recaller, SpecWriter
-lazy from .project import (
+lazy from .build.code import BugReproducer, CodeWriter, TestToolSetup, TestWriter, Verifier
+lazy from .build.finish import FinalReview, LessonWriter, ReadmeWriter, Tidy
+lazy from .build.plan import Designer, InterfaceReviewer, Recaller, SpecWriter
+lazy from .build.project import (
     Brief,
     Outcome,
     Project,
@@ -52,10 +48,16 @@ lazy from .project import (
     project_store,
     saved,
 )
+lazy from .build.session import Session, Stopped
+lazy from .knowledge.curriculum import LearnStopped, SlotLearner
+lazy from .knowledge.graph import Graph, MemoryBrowser, write_page
+lazy from .knowledge.library import Library, Researcher, ResearchLearner, search_entry
+lazy from .knowledge.tutor import Asker, Memory, Teacher
+lazy from .memory.dream import Dream
+lazy from .model.models import Calibrator, Model, Models, Ollama, OllamaError, SelectedModel
+lazy from .model.thinking import RequestReview
 lazy from .prompts import Prompts
-lazy from .retrieval import Embeddings, Retriever
-lazy from .reviewing import RequestReview
-lazy from .session import Session, Stopped
+lazy from .ranking import Embeddings, Retriever
 lazy from .settings import (
     CONFIRM_AFTER,
     DEFAULT_MAX_STALL,
@@ -73,13 +75,12 @@ lazy from .settings import (
     projects_folder,
 )
 lazy from .store import Log
-lazy from .teaching import Asker, Memory, Teacher
 lazy from .text import clock, first_line, now_text
-lazy from .web import Internet
+lazy from .web.internet import Internet
 lazy from .workspace import TaughtCommands, TestRef
 
 try:
-    from . import channels
+    from .chat import channels
 except ImportError:
     channels = None
 
@@ -240,7 +241,7 @@ class Cli:
             raise SystemExit(conversation.one_shot(argv[0], " ".join(argv[1:])))
         if argv[0] == "channel":
             if channels is None:
-                raise SystemExit("tinker: channels are not installed (tinkerkit/channels.py is missing)")
+                raise SystemExit("tinker: channels are not installed (tinkerkit/chat/channels.py is missing)")
             open_home()
             channels.ChannelCommand.run(argv[1:], Shelf(), Interview())
             raise SystemExit(0)
@@ -262,7 +263,7 @@ class Cli:
             )
         if parts[0] == "jobs":
             return archived(numbers, yes)
-        reading.forgotten(numbers, yes)
+        shelf.forgotten(numbers, yes)
 
     @staticmethod
     def known_command(argv):
@@ -930,37 +931,37 @@ class Commands:
     def read(self):
         words = self.args.read
         if words[0] == "list":
-            return reading.show_list(
+            return shelf.show_list(
                 int(words[1]) if words[1:] else 1, int(os.environ.get("TINKER_INSIDE") or 0) or None
             )
         if words[0] == "show":
-            return reading.show(job_number(words[1]))
+            return shelf.show(job_number(words[1]))
         if words[0] == "rename":
-            return reading.renamed(job_number(words[1]), words[2])
+            return shelf.renamed(job_number(words[1]), words[2])
         if words[0] == "forget":
-            return reading.forgotten([job_number(word) for word in words[1:]], self.args.yes)
+            return shelf.forgotten([job_number(word) for word in words[1:]], self.args.yes)
         number = job_number(words[0])
         if number is None:
             self.keep_reading(words[0])
             return
         if words[1:2] != ["learn"]:
-            reading.heard_again(number)
-            return reading.show(number)
+            shelf.heard_again(number)
+            return shelf.show(number)
         self.learn_reading(number, " ".join(words[2:]))
 
     @staticmethod
     def keep_reading(source):
         try:
-            reading.kept(source)
-        except reading.TooLarge:
+            shelf.kept(source)
+        except shelf.TooLarge:
             if not say.agreed(
-                f"{source} is larger than {reading.READ_MAX_BYTES // 1_000_000} MB: keep it anyway?"
+                f"{source} is larger than {shelf.READ_MAX_BYTES // 1_000_000} MB: keep it anyway?"
             ):
                 raise
-            reading.kept(source, beyond=True)
+            shelf.kept(source, beyond=True)
 
     def learn_reading(self, number, focus):
-        entry = reading.known_reading(number)
+        entry = shelf.known_reading(number)
         title = entry["title"]
         if not entry["chapters"]:
             raise SystemExit(f"#{number} {title} has no chapters to learn from.")
@@ -973,11 +974,11 @@ class Commands:
     def exercise(self):
         what = self.args.exercise
         if what.lower() == "status":
-            return exercising.show()
+            return practice.show()
         self.follow(f"Exercising {what}")
         self.reported(
             lambda: (self.model_in_use(*Commands.checked_model(), what, WORK_THINK),),
-            lambda tracker, model: exercising.Exercise(model, tracker).run(what),
+            lambda tracker, model: practice.Exercise(model, tracker).run(what),
             chats=True,
         )
 
@@ -1030,25 +1031,25 @@ class Commands:
     def memory(words, yes=False):
         match words:
             case ["show", item_id]:
-                remembering.show_remembered(item_id)
+                memories.show_remembered(item_id)
             case ["forget", item_id]:
-                remembering.forget(item_id, yes)
+                memories.forget(item_id, yes)
             case ["traits"]:
-                remembering.show_traits()
+                memories.show_traits()
             case ["graph"]:
-                dreaming.show_memory_graph()
+                dream.show_memory_graph()
             case [page]:
-                remembering.show_memories(int(page))
+                memories.show_memories(int(page))
             case _:
-                remembering.show_memories(1)
+                memories.show_memories(1)
 
     def dream(self, words):
         if words == ["graph"] and sys.stdout.isatty():
-            return dreaming.serve_dream_graph()
+            return dream.serve_dream_graph()
         if words == ["graph"]:
-            return dreaming.show_memory_graph()
+            return dream.show_memory_graph()
         if words != ["run"]:
-            return dreaming.show_dream()
+            return dream.show_dream()
         self.follow("Dreaming")
         self.reported(
             lambda: (),

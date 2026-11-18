@@ -5,10 +5,10 @@ from conftest import ask, quick_model_replying, replying
 from test_dreaming import NOW
 
 from tinkerkit.conversation import ALL_FOR_NOW, Turn
-from tinkerkit.interviewing import UNREADABLE, Interview
-from tinkerkit.model import OllamaError
+from tinkerkit.memory.interview import UNREADABLE, Interview
+from tinkerkit.memory.memories import Questions, Scratchpad, Traits
+from tinkerkit.model.models import OllamaError
 from tinkerkit.prompts import Prompts
-from tinkerkit.remembering import Questions, Scratchpad, Traits
 from tinkerkit.settings import INTERACT_TURNS, Home
 
 

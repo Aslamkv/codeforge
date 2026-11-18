@@ -7,10 +7,13 @@ import pytest
 from conftest import add_back, criterion
 from test_conversation import Recorder, everyone
 
-from tinkerkit import conversation, exercising
+from tinkerkit import conversation, practice
+from tinkerkit.build.project import Steps, Tracker, project_store
 from tinkerkit.cli import Cli
 from tinkerkit.conversation import Desk, Message
-from tinkerkit.exercising import (
+from tinkerkit.jobs import Jobs, Queue
+from tinkerkit.knowledge.library import Knowledge, Library
+from tinkerkit.practice import (
     PRACTICE_STEPS,
     Exercise,
     Exercises,
@@ -21,9 +24,6 @@ from tinkerkit.exercising import (
     read_choice,
     read_verdict,
 )
-from tinkerkit.jobs import Jobs, Queue
-from tinkerkit.knowledge import Knowledge, Library
-from tinkerkit.project import Steps, Tracker, project_store
 from tinkerkit.settings import Config
 
 OTHER_LIVE_PID = os.getppid()
@@ -200,7 +200,7 @@ def test_read_choice_names_the_language_and_never_repeats_a_project():
 def test_read_choice_rejects_a_task_alike_in_meaning(monkeypatch):
     from test_remembering import FakeEmbeddings
 
-    from tinkerkit.retrieval import Embeddings
+    from tinkerkit.ranking import Embeddings
 
     earlier = ["A todo list in Rust"]
     task = {"task": "Track chores still to finish in Rust", "feature": "x"}
@@ -500,7 +500,7 @@ def test_exercise_status_shows_each_project_measured(home_store, projects, capsy
         dict(CHOICE, folder=str(projects / "word-count"), step="done", measures=measures)
     )
     Exercises.save(exercise)
-    exercising.show()
+    practice.show()
     out = capsys.readouterr().out
     assert (
         "Rust: stopped, 1 practice project(s) done" in out
@@ -510,10 +510,10 @@ def test_exercise_status_shows_each_project_measured(home_store, projects, capsy
     another_job = 2
     add_back(another_job)
     add_back(1)
-    exercising.show()
+    practice.show()
     assert "Rust: queued, 1 practice project(s) done" in capsys.readouterr().out
     Queue.remove(another_job)
-    exercising.show()
+    practice.show()
     assert "Rust: running, 1 practice project(s) done" in capsys.readouterr().out
 
 

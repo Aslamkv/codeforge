@@ -6,8 +6,8 @@ import time
 
 import pytest
 
-from tinkerkit.fetcher import Fetcher
 from tinkerkit.settings import MAX_REDIRECTS
+from tinkerkit.web.fetcher import Fetcher
 
 KEEP_ALIVE_PROTOCOL = "HTTP/1.1"
 REAL_CONNECT = socket.socket.connect

@@ -1,11 +1,11 @@
 import pytest
 from conftest import TOOLCHAIN, confirmed_trait, criterion, plan_of
 
-from tinkerkit.knowledge import Knowledge, Library
-from tinkerkit.principles import Principle, Principles
-from tinkerkit.project import Tracker
+from tinkerkit.build.project import Tracker
+from tinkerkit.build.session import Phase, Session, Stopped
+from tinkerkit.knowledge.library import Knowledge, Library
+from tinkerkit.knowledge.principles import Principle, Principles
 from tinkerkit.prompts import Part, Prompts, PromptTooLarge
-from tinkerkit.session import Phase, Session, Stopped
 
 
 @pytest.mark.spec("SES-1")

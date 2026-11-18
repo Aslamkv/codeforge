@@ -1,7 +1,7 @@
 import pytest
 
-import tinkerkit.checking as checking
-from tinkerkit.checking import Check, CommandCheck, RefusedCheck, SqlCheck, found_programs
+import tinkerkit.knowledge.checks as checking
+from tinkerkit.knowledge.checks import Check, CommandCheck, RefusedCheck, SqlCheck, found_programs
 from tinkerkit.sandbox import NoSandbox, Ran, Sandbox
 
 pytestmark = pytest.mark.spec("TCH-9")

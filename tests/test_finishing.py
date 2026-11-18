@@ -3,7 +3,7 @@ import json
 import pytest
 from conftest import CALC, CALC_FILES, CALC_TESTS, TOOLCHAIN, criterion, file_block
 
-from tinkerkit.finishing import FinalReview, LessonWriter, ReadmeWriter, Tidy
+from tinkerkit.build.finish import FinalReview, LessonWriter, ReadmeWriter, Tidy
 from tinkerkit.prompts import Reply
 from tinkerkit.settings import Home
 from tinkerkit.workspace import TaughtCommands

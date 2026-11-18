@@ -10,8 +10,8 @@ lazy import time
 lazy from pathlib import Path
 
 lazy from .commands import kind_of
+lazy from .memory.memories import Scratchpad
 lazy from .messages import say
-lazy from .remembering import Scratchpad
 lazy from .settings import (
     DREAM_IDLE_SECONDS,
     EXERCISE_ENV,

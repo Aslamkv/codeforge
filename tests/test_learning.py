@@ -5,8 +5,8 @@ import re
 import pytest
 from conftest import FakeSearch, quick_model_replying, web_page
 
-from tinkerkit.knowledge import Knowledge, Library
-from tinkerkit.learning import (
+from tinkerkit.build.project import Tracker
+from tinkerkit.knowledge.curriculum import (
     DocCache,
     LearnStopped,
     SlotLearner,
@@ -14,10 +14,10 @@ from tinkerkit.learning import (
     read_plan,
     wanted_docs,
 )
-from tinkerkit.model import Answer
-from tinkerkit.passages import Block, Page, Passage
-from tinkerkit.principles import Principles
-from tinkerkit.project import Tracker
+from tinkerkit.knowledge.library import Knowledge, Library
+from tinkerkit.knowledge.principles import Principles
+from tinkerkit.knowledge.slots import PROFILES, Selector, missing, short_slots, web_slots
+from tinkerkit.model.models import Answer
 from tinkerkit.prompts import Reply
 from tinkerkit.settings import (
     DOCS_SITE_SEARCH,
@@ -28,8 +28,8 @@ from tinkerkit.settings import (
     Config,
     Home,
 )
-from tinkerkit.slots import PROFILES, Selector, missing, short_slots, web_slots
-from tinkerkit.web import RequestLog, WebPage
+from tinkerkit.web.internet import RequestLog, WebPage
+from tinkerkit.web.passages import Block, Page, Passage
 
 
 class FakeWeb(FakeSearch):
@@ -809,7 +809,7 @@ def test_only_results_holding_enough_of_the_topics_words_are_picked(tinker_home)
 def test_a_domain_is_researched_when_deep(tinker_home, monkeypatch):
     researched = []
     monkeypatch.setattr(
-        "tinkerkit.learning.Researcher.research",
+        "tinkerkit.knowledge.curriculum.Researcher.research",
         lambda self, topic: researched.append(topic) or {"kind": "research"},
     )
     model = CountingModel({"Plan learning": {"kind": "domain", "name": "Food bank inventory"}})

@@ -1,6 +1,6 @@
 import pytest
 
-from tinkerkit import quality
+from tinkerkit.model import quality
 
 pytestmark = pytest.mark.spec("MOD-25")
 

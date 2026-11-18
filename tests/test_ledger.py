@@ -2,8 +2,8 @@ import time
 
 import pytest
 
-import tinkerkit.ledger as ledger
-from tinkerkit.ledger import Ledger
+import tinkerkit.chat.ledger as ledger
+from tinkerkit.chat.ledger import Ledger
 from tinkerkit.settings import GLANCE_KEPT_SECONDS, MESSAGE_KEPT_SECONDS, PER_PAGE, Home
 
 

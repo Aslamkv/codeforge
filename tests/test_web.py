@@ -6,11 +6,11 @@ import urllib.error
 
 import pytest
 
-from tinkerkit.fetcher import Fetched, Fetcher
 from tinkerkit.jobs import Jobs
-from tinkerkit.search import Mwmbl, SearchFailed, Wikibooks, Wikipedia
 from tinkerkit.settings import MAX_PLANNED_SEARCHES, SEARCHES_PER_ENGINE, Config, Home
-from tinkerkit.web import Internet, RequestLog, WebPage
+from tinkerkit.web.fetcher import Fetched, Fetcher
+from tinkerkit.web.internet import Internet, RequestLog, WebPage
+from tinkerkit.web.search import Mwmbl, SearchFailed, Wikibooks, Wikipedia
 
 
 class Engine:

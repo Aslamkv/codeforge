@@ -31,10 +31,12 @@ from conftest import (
 from test_channels import BotAPI, every_telegram_talks_to
 from test_skills import made_skill
 
-import tinkerkit.channels as channels
+import tinkerkit.chat.channels as channels
 import tinkerkit.conversation as conversation
 import tinkerkit.jobs as jobs
-from tinkerkit.channels import Channels
+from tinkerkit.build.project import Runs, Tracker
+from tinkerkit.chat.channels import Channels
+from tinkerkit.chat.ledger import DONE_NOTE_KEPT_SECONDS, Ledger
 from tinkerkit.cli import Commands
 from tinkerkit.commands import BY_NAME, COMMANDS, GROUPS, MenuRow, slash_matches, synopsis_words
 from tinkerkit.conversation import (
@@ -69,16 +71,14 @@ from tinkerkit.conversation import (
     typed_before,
     welcome,
 )
-from tinkerkit.interviewing import UNREADABLE, Interview
 from tinkerkit.jobs import Queue, Runner, began_at
-from tinkerkit.ledger import DONE_NOTE_KEPT_SECONDS, Ledger
+from tinkerkit.memory.interview import UNREADABLE, Interview
+from tinkerkit.memory.memories import Questions as KeptQuestions
+from tinkerkit.memory.memories import Scratchpad
 from tinkerkit.messages import DIMMED, HEADING, Messages, Text, next_page_words, styled, visible_width
-from tinkerkit.model import Cut, Models, Ollama, QuickModel, ThinkLevels
-from tinkerkit.project import Runs, Tracker
-from tinkerkit.reading import Shelf
-from tinkerkit.remembering import Questions as KeptQuestions
-from tinkerkit.remembering import Scratchpad
+from tinkerkit.model.models import Cut, Models, Ollama, QuickModel, ThinkLevels
 from tinkerkit.settings import EPISODE_GIST_CHARS, Config, Home
+from tinkerkit.shelf import Shelf
 from tinkerkit.skills import SkillResult, Skills
 from tinkerkit.store import Log
 
@@ -1810,7 +1810,7 @@ def test_an_unreadable_json_answer_is_taken_as_empty(measured_model, fake_ollama
 
 @pytest.mark.spec("REM-1")
 def test_each_command_line_run_writes_one_episode(tmp_path):
-    from tinkerkit.remembering import Scratchpad
+    from tinkerkit.memory.memories import Scratchpad
 
     shell, channel = Shell(Talk("cmds"), tmp_path, Questions()), Recorder()
     shell.run(channel, "1", {"line": "echo hi; exit 3", "asked": "say hi", "shown": None})
@@ -1820,8 +1820,8 @@ def test_each_command_line_run_writes_one_episode(tmp_path):
 
 
 def remembering(kind, gist, text):
-    from tinkerkit.remembering import Memories
-    from tinkerkit.retrieval import Retriever
+    from tinkerkit.memory.memories import Memories
+    from tinkerkit.ranking import Retriever
 
     return Memories(Retriever(None)).add(kind, gist, text, ["e1"])
 
@@ -1836,8 +1836,8 @@ def test_a_chat_reply_adds_what_tinker_remembers(measured_model, fake_ollama):
 
 
 def remembered_answer(question, answer):
-    from tinkerkit.remembering import Memories
-    from tinkerkit.retrieval import Retriever
+    from tinkerkit.memory.memories import Memories
+    from tinkerkit.ranking import Retriever
 
     now = datetime.datetime(2026, 11, 2, 9, 0)
     return Memories(Retriever(None)).add("answer", question, answer, ["e1"], now, "always")
@@ -1845,8 +1845,8 @@ def remembered_answer(question, answer):
 
 @pytest.mark.spec("REM-12", "CNV-24")
 def test_a_chat_reply_comes_from_a_remembered_answer_without_the_model(measured_model, fake_ollama):
-    from tinkerkit.remembering import Memories
-    from tinkerkit.retrieval import Retriever
+    from tinkerkit.memory.memories import Memories
+    from tinkerkit.ranking import Retriever
 
     memory = remembered_answer("how tall is everest in km", "About 8.85 km.")
     reply = Talk("task").reply(Recorder(), Message("1", "How tall is Everest in km?"))
@@ -1868,8 +1868,8 @@ def test_a_remembered_answer_needs_every_word_of_the_message(measured_model, fak
 
 @pytest.mark.spec("REM-12")
 def test_a_retired_answer_or_another_kind_is_not_a_reply(measured_model, fake_ollama):
-    from tinkerkit.remembering import Memories
-    from tinkerkit.retrieval import Retriever
+    from tinkerkit.memory.memories import Memories
+    from tinkerkit.ranking import Retriever
 
     memory = remembered_answer("how tall is everest in km", "About 8.85 km.")
     Memories(Retriever(None)).retire(memory["id"], "outdated")
@@ -1897,7 +1897,7 @@ def test_a_chat_reply_with_nothing_recalled_keeps_its_prompt(measured_model, fak
 
 @pytest.mark.spec("REM-6")
 def test_a_proposed_command_sees_tool_memories_and_episodes_only(measured_model, fake_ollama, tmp_path):
-    from tinkerkit.remembering import Scratchpad
+    from tinkerkit.memory.memories import Scratchpad
 
     remembering("tool", "disk usage goes through dust", "dust shows disk usage")
     remembering("fact", "the disk is named Bees", "the disk name")
@@ -1912,7 +1912,7 @@ def test_a_proposed_command_sees_tool_memories_and_episodes_only(measured_model,
 
 @pytest.mark.spec("REM-6")
 def test_a_proposed_command_counts_only_the_tool_memories_it_shows(measured_model, fake_ollama, tmp_path):
-    from tinkerkit.remembering import Memories
+    from tinkerkit.memory.memories import Memories
     from tinkerkit.settings import Home
 
     remembering("tool", "disk usage goes through dust", "dust shows disk usage")
@@ -2028,7 +2028,7 @@ def test_talk_reply(measured_model, fake_ollama):
     assert fake_ollama.calls[-1]["options"]["num_predict"] == (
         conversation.CHAT_MAX_REPLY_TOKENS + conversation.CHAT_THINK_TOKENS
     )
-    from tinkerkit.model import OllamaError
+    from tinkerkit.model.models import OllamaError
 
     fake_ollama.reply("none").reply("low: a plain request").reply(OllamaError("runner failed"))
     assert talk.reply(channel, Message("1", "x")).startswith("⚠️ **The model did not answer:**")
@@ -2095,7 +2095,7 @@ def test_both_calls_of_a_chat_reply_get_the_persons_traits(measured_model, fake_
 
 @pytest.mark.spec("REM-16")
 def test_a_chat_reply_without_confirmed_traits_has_no_traits_part(measured_model, fake_ollama):
-    from tinkerkit.remembering import Traits
+    from tinkerkit.memory.memories import Traits
 
     Traits().apply([{"op": "add", "about": "person", "when": "", "do": "Likes tea", "sources": ["e1"]}])
     fake_ollama.reply("`/amend`").reply("/amend handle negatives")
@@ -2163,7 +2163,7 @@ def test_a_chat_reply_that_is_a_command_line_is_run_at_once(desk, monkeypatch):
 
 @pytest.mark.spec("REM-1")
 def test_each_chat_request_writes_one_episode(desk, monkeypatch):
-    from tinkerkit.remembering import Scratchpad
+    from tinkerkit.memory.memories import Scratchpad
 
     desk, channel, _ = desk
     chat = chatted(desk, channel, monkeypatch, [])
@@ -2438,6 +2438,26 @@ def desk(tmp_path, monkeypatch, home_store):
         desk.last_task.wait(10)
     if desk.reporter:
         desk.reporter.ended = True
+
+
+class EndingTask:
+    pid = 4242
+
+    def poll(self):
+        return None
+
+
+@pytest.mark.spec("JOB-7")
+@pytest.mark.parametrize("ended", [PermissionError, ProcessLookupError])
+def test_stopping_a_task_that_just_ended_stops_nothing(tmp_path, monkeypatch, ended):
+    desk = Desk([ConsoleChannel()], tmp_path)
+    desk.last_task = EndingTask()
+
+    def group_gone(pid, sig):
+        raise ended
+
+    monkeypatch.setattr(conversation.os, "killpg", group_gone)
+    assert desk.stop_task() is False
 
 
 def say(desk, channel, text):
@@ -3147,7 +3167,7 @@ def test_helpers(tmp_path):
 
 
 def built(tmp_path, name, run_id, run, status="done", updated="2026-10-01 10:00"):
-    from tinkerkit.project import project_store
+    from tinkerkit.build.project import project_store
 
     folder = tmp_path / name
     folder.mkdir(parents=True)
@@ -4396,3 +4416,10 @@ def test_history_pages_end_with_the_shared_next_page_line(monkeypatch):
     )
     assert next_page_words(conversation.history_text(["2"])) == "history 3"
     assert next_page_words(conversation.history_text(["3"])) is None
+
+
+@pytest.mark.spec("ARCH-2")
+def test_the_enabled_chats_come_from_the_chat_channels_module(monkeypatch):
+    enabled = object()
+    monkeypatch.setattr(channels.Channels, "enabled", staticmethod(lambda: enabled))
+    assert conversation.chat_channels() is enabled

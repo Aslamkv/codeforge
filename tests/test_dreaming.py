@@ -9,12 +9,12 @@ import urllib.request
 import pytest
 from conftest import ask, confirmed_trait, quick_model_replying, replying
 
-from tinkerkit.dreaming import Dream, LiveGraph, MemoryGraph, asked, show_dream, show_memory_graph
 from tinkerkit.jobs import Jobs, Queue
-from tinkerkit.model import Models, OllamaError
+from tinkerkit.memory.dream import Dream, LiveGraph, MemoryGraph, asked, show_dream, show_memory_graph
+from tinkerkit.memory.memories import Memories, Questions, Scratchpad, Traits
+from tinkerkit.model.models import Models, OllamaError
 from tinkerkit.prompts import Prompts
-from tinkerkit.remembering import Memories, Questions, Scratchpad, Traits
-from tinkerkit.retrieval import Retriever
+from tinkerkit.ranking import Retriever
 from tinkerkit.settings import DREAM_BATCH_EPISODES, REFLECT_THOUGHTS, Home
 from tinkerkit.store import Log
 
@@ -1133,6 +1133,6 @@ def test_live_graph_writes_a_keepalive_so_a_closed_browser_ends_its_stream(live_
     def polled_without_writing(seconds):
         raise AssertionError("polled without writing")
 
-    monkeypatch.setattr("tinkerkit.dreaming.time.sleep", polled_without_writing)
+    monkeypatch.setattr("tinkerkit.memory.dream.time.sleep", polled_without_writing)
     with pytest.raises(BrokenPipeError):
         live_graph.stream(ClosedBrowser(), live_graph.newest_event())

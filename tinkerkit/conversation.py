@@ -19,6 +19,7 @@ lazy import time
 lazy import webbrowser
 lazy from pathlib import Path
 
+from .build.project import Runs, Tracker, saved
 from .commands import BY_NAME, COMMANDS, GROUPS, CommandMenu, deletes, kind_of, refs
 from .formats import IMAGE_TYPES, sniffed
 from .jobs import (
@@ -37,10 +38,9 @@ from .jobs import (
     tinker_command,
     tinker_process,
 )
-from .project import Runs, Tracker, saved
-from .remembering import EPISODE_BOOKKEEPING, Memories, Scratchpad
+from .memory.memories import EPISODE_BOOKKEEPING, Memories, Scratchpad
 from .skills import Skills
-lazy from .ledger import DONE_NOTE_KEPT_SECONDS, Ledger
+lazy from .chat.ledger import DONE_NOTE_KEPT_SECONDS, Ledger
 lazy from .messages import (
     CLEAR_LINE,
     CLEAR_TO_LINE_END,
@@ -61,10 +61,10 @@ lazy from .messages import (
     visible_width,
 )
 lazy from .messages import styled as styled_choice
-lazy from .model import Cut, Models, Ollama, OllamaError, system_turn
+lazy from .model.models import Cut, Models, Ollama, OllamaError, system_turn
+lazy from .model.thinking import RequestReview
 lazy from .prompts import Part, Prompts, Reply
-lazy from .retrieval import Embeddings, Retriever, traits_part
-lazy from .reviewing import RequestReview
+lazy from .ranking import Embeddings, Retriever, traits_part
 lazy from .settings import (
     EPISODE_GIST_CHARS,
     EXERCISE_FOLDER,
@@ -387,7 +387,7 @@ class Desk:
                 self.channels.remove(channel)
 
     def listen_on(self, names):
-        from .channels import ChannelCommand, Channels
+        from .chat.channels import ChannelCommand, Channels
 
         listened = {channel.name for channel in self.channels}
         try:
@@ -843,7 +843,7 @@ class Desk:
         return f"🖥 `{' '.join(words[:2])}` asks in a terminal: `tinker {' '.join(words[:2])}` there"
 
     def added_and_started(self, console, options):
-        from .channels import Channels
+        from .chat.channels import Channels
 
         name = console.channel_added(options)
         if name is None:
@@ -860,7 +860,7 @@ class Desk:
         return md(t"⚙️ **{' '.join(words)}**\n{shown:block}") + self.listen_once_enabled(channel, words)
 
     def listen_once_enabled(self, channel, words):
-        from .channels import Channels
+        from .chat.channels import Channels
 
         if channel not in self.consoles or words[:2] != ["channel", "enable"] or len(words) < 3:
             return ""
@@ -1458,7 +1458,10 @@ class Desk:
     def stop_task(self):
         if not self.busy():
             return False
-        os.killpg(self.last_task.pid, signal.SIGINT)
+        try:
+            os.killpg(self.last_task.pid, signal.SIGINT)
+        except ProcessLookupError, PermissionError:
+            return False
         return True
 
     def busy(self):
@@ -1542,7 +1545,7 @@ class ChatState:
         )
 
     def channels(self):
-        from .channels import Channels
+        from .chat.channels import Channels
 
         listened = {channel.name for channel in self.desk.channels}
         channels = [
@@ -2455,7 +2458,7 @@ def attach(tracker):
 
 def chat_channels():
     try:
-        from .channels import Channels
+        from .chat.channels import Channels
     except ImportError:
         return []
     return Channels.enabled()
@@ -2806,7 +2809,7 @@ class ConsoleChannel(Channel):
         return words
 
     def channel_added(self, words):
-        from .channels import ChannelCommand
+        from .chat.channels import ChannelCommand
 
         try:
             with self.screen.printing, said_plainly():

@@ -8,13 +8,13 @@ import pytest
 from conftest import LOADING_PHASE, MEASURED, MODEL, PY, TOOLCHAIN, criterion, file_block, plan_of, record_of
 
 from tinkerkit import cli, logger
+from tinkerkit.build.project import Runs, Tracker, project_store
+from tinkerkit.build.session import Phase, Stopped
 from tinkerkit.cli import Cli, Commands, CycleRunner, Doctor, ProjectFolder, ProjectRun
-from tinkerkit.interviewing import Interview
-from tinkerkit.knowledge import Knowledge, Library, ResearchLearner
-from tinkerkit.model import LoadedModel, Models, Ollama, OllamaError, ThinkLevels
-from tinkerkit.principles import Principles
-from tinkerkit.project import Runs, Tracker, project_store
-from tinkerkit.session import Phase, Stopped
+from tinkerkit.knowledge.library import Knowledge, Library, ResearchLearner
+from tinkerkit.knowledge.principles import Principles
+from tinkerkit.memory.interview import Interview
+from tinkerkit.model.models import LoadedModel, Models, Ollama, OllamaError, ThinkLevels
 from tinkerkit.settings import FIX_PHASES, PHASES, QUALITY_VERSION, WORK_THINK, Config, Home
 from tinkerkit.system import SYSTEM_CHECKS, SystemCheck
 from tinkerkit.workspace import Toolchain
@@ -516,6 +516,13 @@ def test_the_conversation_talk_and_channels_write_tinker_log(argv, monkeypatch):
     assert all(isinstance(interview, Interview) for interview in interviews)
 
 
+@pytest.mark.spec("ARCH-2")
+def test_the_installed_channels_plugin_is_the_chat_channels_module():
+    import tinkerkit.chat.channels
+
+    assert cli.channels is tinkerkit.chat.channels
+
+
 @pytest.mark.spec("INT-1")
 def test_interact_opens_the_terminal_chat_in_the_interview(monkeypatch):
     sessions = []
@@ -651,7 +658,7 @@ def test_cycle_runs_its_phases_in_order(session, monkeypatch, project_dir):
 
 @pytest.mark.spec("REM-1")
 def test_a_cycle_writes_one_episode_when_it_ends_not_while_it_waits(session, monkeypatch):
-    from tinkerkit.remembering import Scratchpad
+    from tinkerkit.memory.memories import Scratchpad
 
     recording_phases(monkeypatch)
     cycle = dict(session.project.cycles[0], confirm=True)
@@ -1146,7 +1153,7 @@ def test_knowledge_refuses_words_it_cannot_read(home_store, capsys):
 def test_memory_runs_the_memory_views(home_store, monkeypatch):
     seen = []
     for view in ("show_memories", "show_remembered", "forget", "show_traits"):
-        monkeypatch.setattr(cli.remembering, view, lambda *given, view=view: seen.append((view, *given)))
+        monkeypatch.setattr(cli.memories, view, lambda *given, view=view: seen.append((view, *given)))
     for words in (
         [],
         ["2"],
@@ -1185,7 +1192,7 @@ def test_memory_refuses_words_it_cannot_read(home_store, capsys):
 @pytest.mark.spec("DRM-8", "CMD-1")
 def test_dream_shows_the_dream_state_and_dream_run_dreams_with_the_tracker_phases(home_store, monkeypatch):
     seen = []
-    monkeypatch.setattr(cli.dreaming, "show_dream", lambda: seen.append("show_dream"))
+    monkeypatch.setattr(cli.dream, "show_dream", lambda: seen.append("show_dream"))
     monkeypatch.setattr(Commands, "follow", lambda self, title: seen.append(("follow", title)))
     monkeypatch.setattr(
         Commands,
@@ -1193,7 +1200,7 @@ def test_dream_shows_the_dream_state_and_dream_run_dreams_with_the_tracker_phase
         lambda self, setup, work: seen.append(("reported", setup(), work(FakeTracker(), *setup()))),
     )
     monkeypatch.setattr(
-        "tinkerkit.dreaming.Dream.run", lambda dream: seen.append(("run", dream.phase("consolidate")))
+        "tinkerkit.memory.dream.Dream.run", lambda dream: seen.append(("run", dream.phase("consolidate")))
     )
     for words in ([], ["status"], ["run"]):
         Commands(parse("dream", *words)).run()
@@ -1286,7 +1293,7 @@ def test_skill_refuses_words_it_cannot_read(home_store, capsys):
 @pytest.mark.spec("DRM-9")
 def test_memory_graph_and_dream_graph_write_the_memory_page(home_store, monkeypatch):
     seen = []
-    monkeypatch.setattr(cli.dreaming, "show_memory_graph", lambda: seen.append("show_memory_graph"))
+    monkeypatch.setattr(cli.dream, "show_memory_graph", lambda: seen.append("show_memory_graph"))
     Commands(parse("memory", "graph")).run()
     Commands(parse("dream", "graph")).run()
     assert seen == ["show_memory_graph", "show_memory_graph"]
@@ -1296,8 +1303,8 @@ def test_memory_graph_and_dream_graph_write_the_memory_page(home_store, monkeypa
 def test_dream_graph_in_a_terminal_serves_the_live_page(home_store, monkeypatch):
     seen = []
     monkeypatch.setattr(cli.sys.stdout, "isatty", lambda: True)
-    monkeypatch.setattr(cli.dreaming, "serve_dream_graph", lambda: seen.append("serve_dream_graph"))
-    monkeypatch.setattr(cli.dreaming, "show_memory_graph", lambda: seen.append("show_memory_graph"))
+    monkeypatch.setattr(cli.dream, "serve_dream_graph", lambda: seen.append("serve_dream_graph"))
+    monkeypatch.setattr(cli.dream, "show_memory_graph", lambda: seen.append("show_memory_graph"))
     Commands(parse("dream", "graph")).run()
     assert seen == ["serve_dream_graph"]
 

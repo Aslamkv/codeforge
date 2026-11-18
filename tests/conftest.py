@@ -10,14 +10,14 @@ import pytest
 
 import tinkerkit.cli  # noqa: F401
 from tinkerkit import conversation, jobs, logger
+from tinkerkit.build.project import Project
 from tinkerkit.jobs import Queue, Runner
 from tinkerkit.messages import say
-from tinkerkit.model import Model, Models, Ollama
-from tinkerkit.project import Project
-from tinkerkit.retrieval import Likeness
+from tinkerkit.model.models import Model, Models, Ollama
+from tinkerkit.ranking import Likeness
 from tinkerkit.settings import MAX_PLANNED_SEARCHES, Home
 from tinkerkit.store import Log, Store
-from tinkerkit.web import WebPage, readable
+from tinkerkit.web.internet import WebPage, readable
 
 REAL_HOME = Home.root
 ACCENT, DIM, BOLD, GREY, RESET = "\033[38;5;67m", "\033[2m", "\033[1m", "\033[48;5;236m", "\033[0m"
@@ -341,7 +341,7 @@ def make_project(project_dir):
 
 @pytest.fixture
 def make_session(make_model):
-    from tinkerkit.session import Session
+    from tinkerkit.build.session import Session
 
     def make(project, model=None, internet=None, confirm=True, tracker=None):
         return Session(model or make_model(), project, internet=internet, confirm=confirm, tracker=tracker)
@@ -374,8 +374,8 @@ def criterion(id, test, behaviour="does it", status="todo", cycle="base", **more
 
 
 def confirmed_trait(do, when="", gist="", about="person"):
-    from tinkerkit.remembering import Traits
-    from tinkerkit.retrieval import Retriever
+    from tinkerkit.memory.memories import Traits
+    from tinkerkit.ranking import Retriever
 
     delta = {"op": "add", "about": about, "when": when, "do": do, "sources": ["e1"], "confirmed": True}
     trait = Traits(Retriever(None)).apply([delta])[0]
@@ -432,18 +432,18 @@ def replying(monkeypatch, *replies):
 
 
 def ask(text, kind="open", traits=(), sources=("e1",), thought="", expected="", about="person", now=None):
-    from tinkerkit.remembering import Questions
+    from tinkerkit.memory.memories import Questions
 
     return Questions().add(kind, about, text, thought, expected, list(traits), list(sources), now)
 
 
 def plan_of(folder):
-    from tinkerkit.project import saved
+    from tinkerkit.build.project import saved
 
     return saved(folder, "spec", "plan")
 
 
 def record_of(folder):
-    from tinkerkit.project import saved
+    from tinkerkit.build.project import saved
 
     return saved(folder, "run", "record")

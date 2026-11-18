@@ -3,8 +3,7 @@ import json
 import pytest
 from conftest import TOOLCHAIN, criterion
 
-from tinkerkit.knowledge import Knowledge, Library
-from tinkerkit.planning import (
+from tinkerkit.build.plan import (
     ContractWriter,
     Designer,
     InterfaceReviewer,
@@ -15,9 +14,10 @@ from tinkerkit.planning import (
     asked,
     groups_fitting,
 )
-from tinkerkit.principles import Principle, Principles
+from tinkerkit.knowledge.library import Knowledge, Library
+from tinkerkit.knowledge.principles import Principle, Principles
 from tinkerkit.prompts import Reply
-from tinkerkit.web import Internet
+from tinkerkit.web.internet import Internet
 from tinkerkit.workspace import Toolchain, Workspace
 
 

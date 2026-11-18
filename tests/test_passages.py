@@ -1,7 +1,7 @@
 import pytest
 
-from tinkerkit.passages import Block, Cleaner, MainBlocks, Page, Passage, is_html, text_blocks
 from tinkerkit.settings import MAX_PASSAGE_CHARS
+from tinkerkit.web.passages import Block, Cleaner, MainBlocks, Page, Passage, is_html, text_blocks
 
 INSTALL = (
     "Install the tool with the package manager, then run it from the project folder to check every file. "

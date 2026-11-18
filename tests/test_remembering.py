@@ -3,7 +3,7 @@ import datetime
 import pytest
 from conftest import ask
 
-from tinkerkit.remembering import (
+from tinkerkit.memory.memories import (
     Memories,
     Questions,
     Scratchpad,
@@ -13,7 +13,7 @@ from tinkerkit.remembering import (
     show_remembered,
     show_traits,
 )
-from tinkerkit.retrieval import Retriever
+from tinkerkit.ranking import Retriever
 from tinkerkit.settings import (
     EPISODE_FOUND_CHARS,
     EPISODE_GIST_CHARS,

@@ -5,26 +5,13 @@ import pytest
 from conftest import MODEL, TOOLCHAIN, FakeSearch, confirmed_trait, web_page
 
 from tinkerkit import cli
+from tinkerkit.build.project import Tracker
 from tinkerkit.cli import Cli, Commands
 from tinkerkit.commands import kind_of
-from tinkerkit.knowledge import Knowledge, Library
-from tinkerkit.learning import DocCache
-from tinkerkit.model import Ollama
-from tinkerkit.passages import Block, Page
-from tinkerkit.principles import Principle, Principles
-from tinkerkit.project import Tracker
-from tinkerkit.prompts import Prompts
-from tinkerkit.reading import Readings
-from tinkerkit.sandbox import Ran, Sandbox
-from tinkerkit.settings import (
-    ASK_ITEM_CHARS,
-    ASK_ITEMS_SHOWN,
-    ASK_PASSAGES_SHOWN,
-    MEMORY_ITEMS_SHOWN,
-    TEACH_CLAIMS,
-    Home,
-)
-from tinkerkit.teaching import (
+from tinkerkit.knowledge.curriculum import DocCache
+from tinkerkit.knowledge.library import Knowledge, Library
+from tinkerkit.knowledge.principles import Principle, Principles
+from tinkerkit.knowledge.tutor import (
     Asker,
     DocumentationPassages,
     Memory,
@@ -34,6 +21,19 @@ from tinkerkit.teaching import (
     marked,
     read_plan,
 )
+from tinkerkit.model.models import Ollama
+from tinkerkit.prompts import Prompts
+from tinkerkit.sandbox import Ran, Sandbox
+from tinkerkit.settings import (
+    ASK_ITEM_CHARS,
+    ASK_ITEMS_SHOWN,
+    ASK_PASSAGES_SHOWN,
+    MEMORY_ITEMS_SHOWN,
+    TEACH_CLAIMS,
+    Home,
+)
+from tinkerkit.shelf import Readings
+from tinkerkit.web.passages import Block, Page
 from tinkerkit.workspace import Toolchain
 
 PY = sys.executable
@@ -655,8 +655,8 @@ def taught_sources(principle):
 
 
 def confirmed_traits():
-    from tinkerkit.remembering import Traits
-    from tinkerkit.retrieval import Retriever
+    from tinkerkit.memory.memories import Traits
+    from tinkerkit.ranking import Retriever
 
     return Traits(Retriever(None)).confirmed()
 

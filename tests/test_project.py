@@ -9,9 +9,7 @@ from pathlib import Path
 import pytest
 from conftest import criterion, plan_of, record_of
 
-from tinkerkit.jobs import Jobs
-from tinkerkit.messages import Message, say
-from tinkerkit.project import (
+from tinkerkit.build.project import (
     Brief,
     Outcome,
     Project,
@@ -25,6 +23,8 @@ from tinkerkit.project import (
     project_store,
     saved,
 )
+from tinkerkit.jobs import Jobs
+from tinkerkit.messages import Message, say
 from tinkerkit.prompts import Part
 from tinkerkit.settings import EXERCISE_ENV, Home
 from tinkerkit.store import Log
@@ -568,7 +568,7 @@ def test_a_run_keeps_its_calls_and_output_in_its_project(project_dir, make_model
 
 @pytest.mark.spec("PRJ-6")
 def test_remember_keeps_a_line_about_each_run(home_store, monkeypatch):
-    monkeypatch.setattr("tinkerkit.project.RUNS_KEPT", 2)
+    monkeypatch.setattr("tinkerkit.build.project.RUNS_KEPT", 2)
     for run_id, updated in (
         ("aaa111", "2026-10-01 10:00"),
         ("bbb222", "2026-10-03 10:00"),

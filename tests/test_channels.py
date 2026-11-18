@@ -11,11 +11,11 @@ from pathlib import Path
 
 import pytest
 
-import tinkerkit.channels as channels
-import tinkerkit.ledger as ledger
-from tinkerkit.channels import ChannelCommand, Channels, TelegramChannel, ask
+import tinkerkit.chat.channels as channels
+import tinkerkit.chat.ledger as ledger
+from tinkerkit.chat.channels import ChannelCommand, Channels, TelegramChannel, ask
+from tinkerkit.chat.ledger import Ledger
 from tinkerkit.conversation import ChannelError
-from tinkerkit.ledger import Ledger
 from tinkerkit.store import Store
 
 

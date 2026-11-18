@@ -60,8 +60,8 @@ enforce it.
 ## Architecture
 
 `tinker.py` only checks that Python is new enough, in syntax an older Python can still read, then starts
-`tinkerkit/cli.py`. The `tinkerkit` modules each have one responsibility, and each imports only the modules
-listed above it:
+`tinkerkit/cli.py`. The `tinkerkit` modules each have one responsibility, some grouped in packages and named
+with a dot, and each imports only the modules listed above it:
 
 | Module | Responsibility |
 |---|---|
@@ -70,51 +70,52 @@ listed above it:
 | `store` | one SQLite database of documents and logs (`Store`, `Log`) |
 | `settings` | the numbers and fixed names more than one part shares (a module's own stay with it); the Tinker home (`Home`) and its database, the settings table (`SETTINGS`, `Config`), numbered lists (`Numbered`), the one way to delete (`confirm_deletion`) |
 | `formats` | what a kept file holds, read by its bytes: one subclass of `Format` per kind (`Epub`, `Docx`, `Markdown`, `PlainText`, `Pdf`, `Image`, `Audio`, `Unsupported`), each giving its title and chapters (`Book`) |
-| `remembering` | what the person and Tinker did together, with no model: each request's episode (`Scratchpad`), the memories a dream keeps of them and their recall, ranked by the `Retriever` its caller gives (`Memories`), who the person is and who Tinker is for them (`Traits`), and the questions that wait for the person (`Questions`) |
+| `memory.memories` | what the person and Tinker did together, with no model: each request's episode (`Scratchpad`), the memories a dream keeps of them and their recall, ranked by the `Retriever` its caller gives (`Memories`), who the person is and who Tinker is for them (`Traits`), and the questions that wait for the person (`Questions`) |
 | `system` | what this computer tells at once by fixed read-only commands, with no model (`SystemCheck`, `SYSTEM_CHECKS`) |
 | `commands` | the one table of Tinker's commands with each one's kind (`kind_of`, `deletes`), and project references (`@ID`, `@folder`) |
 | `jobs` | every long command as a job, listed, stopped and resumed (`Jobs`), its journal of requests and answers (`Journal`, `journaled`), and its log of model calls (`calls_log`) |
-| `ledger` | what is said in the chats, so a chat is only a view of it: each message with when it goes, each thing shown, numbered, for `history` (`Ledger`) |
+| `chat.ledger` | what is said in the chats, so a chat is only a view of it: each message with when it goes, each thing shown, numbered, for `history` (`Ledger`) |
 | `prompts` | prompt parts (`Part`), replies (`Reply`), every system prompt (`Prompts`) |
 | `workspace` | the project's files and the commands run in it (`Workspace`, `Toolchain`, `TestRef`, `Output`, `FileView`, `TaughtCommands`) |
-| `quality` | calibration's quality tasks and how a reply is scored against them (`tasks`, `tiers`, `solves`) |
-| `model` | the local model: Ollama's API, one request with its budgets and retries (`Model`), measuring a model (`Calibrator`), measured models (`Models`) |
-| `reviewing` | each request's one thinking level (`RequestReview`, `RequestWords`) |
-| `project` | the plan and its record (`Project`, `SpecDocument`, `Runs`, `RunChecks`, `Brief`, `Outcome`), the run's `Tracker` and its `ending`, and the step pipeline (`Steps`) with what moves a tracker through it (`Tracked`) |
-| `fetcher` | the web plugin's page fetcher, used by `web` alone: pages read straight from their sites, in parallel, with the standard library only (`Fetcher`, `Fetched`) |
-| `search` | the search engines the web plugin asks, used by `web` alone: open engines with no key, with the standard library only (`SearchEngine`, `Mwmbl`, `MediaWiki`, `Wikipedia`, `Wikibooks`) |
-| `passages` | every page read as text: an HTML page's main content as blocks, and fetched pages as passages under headings, repeats dropped (`Cleaner`, `MainBlocks`, `Page`, `Passage`) |
-| `web` | the web plugin, the only part that reaches web content: search and fetch, and every failure of either (`Internet`, `WebPage`, `RequestLog`), and a page as text (`PageText`, a view over `passages`) |
-| `retrieval` | ranking texts by words and meaning (`Retriever`) and the cached embeddings (`Embeddings`) |
+| `model.quality` | calibration's quality tasks and how a reply is scored against them (`tasks`, `tiers`, `solves`) |
+| `model.models` | the local model: Ollama's API, one request with its budgets and retries (`Model`), measuring a model (`Calibrator`), measured models (`Models`) |
+| `model.thinking` | each request's one thinking level (`RequestReview`, `RequestWords`) |
+| `build.project` | the plan and its record (`Project`, `SpecDocument`, `Runs`, `RunChecks`, `Brief`, `Outcome`), the run's `Tracker` and its `ending`, and the step pipeline (`Steps`) with what moves a tracker through it (`Tracked`) |
+| `web.fetcher` | the web plugin's page fetcher, used by `web.internet` alone: pages read straight from their sites, in parallel, with the standard library only (`Fetcher`, `Fetched`) |
+| `web.search` | the search engines the web plugin asks, used by `web.internet` alone: open engines with no key, with the standard library only (`SearchEngine`, `Mwmbl`, `MediaWiki`, `Wikipedia`, `Wikibooks`) |
+| `web.passages` | every page read as text: an HTML page's main content as blocks, and fetched pages as passages under headings, repeats dropped (`Cleaner`, `MainBlocks`, `Page`, `Passage`) |
+| `web.internet` | the web plugin, the only part that reaches web content: search and fetch, and every failure of either (`Internet`, `WebPage`, `RequestLog`), and a page as text (`PageText`, a view over `web.passages`) |
+| `ranking` | ranking texts by words and meaning (`Retriever`) and the cached embeddings (`Embeddings`) |
 | `skills` | a command of the person's learned as a skill, run from a chat and its result handed back (`Skill`, `Skills`, `SkillLearner`, `SkillRun`) |
 | `conversation` | the terminal and the chats as one conversation (`Desk`, `Channel`, `Markup`, `Talk`, `Shell`, `Progress`, `Reporter`) |
-| `channels` | the chat plugin: Telegram, and `tinker channel` |
-| `principles` | the principle record and its one home store (`Principle`, `Principles`) and the deltas' inducer (`Inducer`) |
-| `knowledge` | lessons and proven knowledge (`Knowledge`), research (`Researcher`), and what learning shares (`Learner`, `Library`) |
-| `slots` | what learning a language or a tool must find out, as data (`Slot`, `PROFILES`), and each slot's passages (`Selector`) |
-| `learning` | learning a language or a tool by its slots (`SlotLearner`, `DocCache`, `LearnStopped`) |
-| `graph` | what Tinker knows as one graph of items and links (`Graph`), the page that shows it (`GraphPage`), and browsing it in pages (`MemoryBrowser`) |
-| `reflecting` | thinking about who the person is and who Tinker is for them, from what the dreams kept, into candidate traits and questions that wait (`Reflection`) |
-| `dreaming` | the dream: turning fresh episodes into memories while the queue is idle, revising and fading them, reflecting on them, and the live page that shows it (`Dream`, `DreamPage`) |
-| `interviewing` | the dialogue: opening the questions that wait, talking each through with the person and turning what they say into trait changes (`Interview`) || `reading` | what the person gives to read: kept on the shelf (`Readings`), asked about inside a chat, and learned from chapter by chapter on request (`Reader`) |
+| `chat.channels` | the chat plugin: Telegram, and `tinker channel` |
+| `knowledge.principles` | the principle record and its one home store (`Principle`, `Principles`) and the deltas' inducer (`Inducer`) |
+| `knowledge.library` | lessons and proven knowledge (`Knowledge`), research (`Researcher`), and what learning shares (`Learner`, `Library`) |
+| `knowledge.slots` | what learning a language or a tool must find out, as data (`Slot`, `PROFILES`), and each slot's passages (`Selector`) |
+| `knowledge.curriculum` | learning a language or a tool by its slots (`SlotLearner`, `DocCache`, `LearnStopped`) |
+| `knowledge.graph` | what Tinker knows as one graph of items and links (`Graph`), the page that shows it (`GraphPage`), and browsing it in pages (`MemoryBrowser`) |
+| `memory.reflection` | thinking about who the person is and who Tinker is for them, from what the dreams kept, into candidate traits and questions that wait (`Reflection`) |
+| `memory.dream` | the dream: turning fresh episodes into memories while the queue is idle, revising and fading them, reflecting on them, and the live page that shows it (`Dream`, `DreamPage`) |
+| `memory.interview` | the dialogue: opening the questions that wait, talking each through with the person and turning what they say into trait changes (`Interview`) |
+| `shelf` | what the person gives to read: kept on the shelf (`Readings`), asked about inside a chat, and learned from chapter by chapter on request (`Reader`) |
 | `sandbox` | running a check with no network and writes only in its own folder, one backend per platform (`Sandbox`, `MacSandbox`, `LinuxSandbox`, `NoSandbox`) |
-| `checking` | running a check of what is taught: SQL in a confined database, a command in the sandbox (`Check`, `SqlCheck`, `CommandCheck`) |
-| `teaching` | asking what Tinker keeps (`Asker`), checked by running when it can, and teaching it, checked before anything changes (`Teacher`, `Memory`, `Verdict`) |
-| `exercising` | practising a language on its own, giving way to the person (`Exercise`, `Exercises`) |
-| `session` | what every phase works through (`Session`), and the phase contract (`Worker`, `Phase`) |
-| `planning` | recall, the spec, the contracts where files meet, and their review |
-| `building` | setup, the tests, the code, and fixing until every test passes |
-| `finishing` | tidy, the README, the final review and the lessons |
+| `knowledge.checks` | running a check of what is taught: SQL in a confined database, a command in the sandbox (`Check`, `SqlCheck`, `CommandCheck`) |
+| `knowledge.tutor` | asking what Tinker keeps (`Asker`), checked by running when it can, and teaching it, checked before anything changes (`Teacher`, `Memory`, `Verdict`) |
+| `practice` | practising a language on its own, giving way to the person (`Exercise`, `Exercises`) |
+| `build.session` | what every phase works through (`Session`), and the phase contract (`Worker`, `Phase`) |
+| `build.plan` | recall, the spec, the contracts where files meet, and their review |
+| `build.code` | setup, the tests, the code, and fixing until every test passes |
+| `build.finish` | tidy, the README, the final review and the lessons |
 | `logger` | the trace of what Tinker does, wrapped around chosen methods from outside, so no other module knows it (`install`, `uninstall`, `WATCHED`, `TraceLog`) |
 | `cli` | the main system: the command line (`Cli`, `Commands`, `Doctor`), one run (`ProjectRun`, `ProjectFolder`) and the cycle of phases (`CycleRunner`) |
 
 - **ARCH-1** Each `tinkerkit` module imports only the modules listed above it in the table. The one exception
-  is `conversation`, which imports the `channels` plugin lazily, inside a function.
-- **ARCH-2** The channels plugin is optional. Without `tinkerkit/channels.py`, the conversation has no chat
+  is `conversation`, which imports the `chat.channels` plugin lazily, inside a function.
+- **ARCH-2** The channels plugin is optional. Without `tinkerkit/chat/channels.py`, the conversation has no chat
   channels, and everything else works.
 - **ARCH-3** Every model call goes through `Ollama`, and who may call `Ollama.chat` is **MOD-23**. Every web
-  search, page and download goes through `Internet.search_all` or `Internet.fetch`; only `web` uses the
-  `fetcher` and `search`. The model's server and the chat channels are not web content and keep their own
+  search, page and download goes through `Internet.search_all` or `Internet.fetch`; only `web.internet` uses
+  `web.fetcher` and `web.search`. The model's server and the chat channels are not web content and keep their own
   connections. Every project command goes through `Workspace.run` or `Workspace.start`.
 - **ARCH-4** Only `settings.Home` knows where the home is. No other module names a path inside it.
 - **ARCH-5** No module and no test has a comment or a docstring: names, types, tests and this spec say what the
@@ -476,7 +477,7 @@ goes to the front, so the person is always answered first.
   `teach`, `read`, `research` and `exercise` give it to their model and to `say` (`detail`, **MSG-5**);
   calibration (`model`) calls Ollama directly and keeps none.
 
-## ledger (LED)
+## chat.ledger (LED)
 
 What is said in the chats, kept so that a chat is only a view of it.
 
@@ -613,7 +614,7 @@ What is said in the chats, kept so that a chat is only a view of it.
   allow: never only the lines from it downwards while lines above it fit.
 - **WS-21** `online()` is true when one of the probe addresses accepts a connection.
 
-## model (MOD)
+## model.models (MOD)
 
 - **MOD-1** `Models.settings(name)` is what calibration measured for a model, kept in the home's `models` under the
   model's name, or `None`. `Models.selected()` ends with `SystemExit` when no model is in use, or when a measured
@@ -718,7 +719,7 @@ What is said in the chats, kept so that a chat is only a view of it.
   with whether it was measured. It ends with `SystemExit` when Ollama does not answer, as `tinker model` does.
   `Models.embedding_choices()` gives the names of the ones that embed: their `capabilities` from Ollama's
   `/api/show` hold `embedding`, or Ollama gives none for them.
-- **MOD-25** Calibration's quality probe asks every model the same tasks of `tinkerkit/quality_tasks.json`:
+- **MOD-25** Calibration's quality probe asks every model the same tasks of `tinkerkit/model/quality_tasks.json`:
   8 short tasks in 4 tiers of 2, easy to hard (tier 1 a one-step code output or word problem; tier 4 a
   many-step trace, a subtle bug in a longer function or a many-step logic puzzle), each with an `id`, a `tier`,
   a `prompt` and one fixed `answer`. Tiers go in order; once a model solves neither task of a tier, the probe
@@ -802,7 +803,7 @@ What is said in the chats, kept so that a chat is only a view of it.
   (`✅ NAME is ready` and its 🧠 line, or the failure) in the chat; a failed one keeps the model in use on
   `STANDIN_SETTINGS` and is not queued again by itself (`tinker model calibrate NAME` measures it).
 
-## reviewing (RVW)
+## model.thinking (RVW)
 
 Each request's one thinking level.
 
@@ -830,7 +831,7 @@ Each request's one thinking level.
   (**MOD-23**). Where a command shows that its model thinks, it shows the request's level. `learn`, `research`, `teach`,
   `read` and `exercise` never ask below `medium` (`WORK_THINK`). The log says the level was raised.
 
-## project (PRJ)
+## build.project (PRJ)
 
 - **PRJ-1** `Runs.new_record` gives `{id, task, workdir, spec, created, status: "running"}`, with a
   6-hex-digit ID. `Runs.save` sets `updated`, keeps the record in the project's database, and keeps in the
@@ -903,9 +904,9 @@ Each request's one thinking level.
   in use is not in memory (Ollama's loaded models); `🧭 Working out how much thought your request needs` while
   the request review (**RVW**) asks the model, never when it rules without one.
 
-## fetcher (FET)
+## web.fetcher (FET)
 
-The web plugin's page fetcher, with the standard library only. Only `web` uses it.
+The web plugin's page fetcher, with the standard library only. Only `web.internet` uses it.
 
 - **FET-1** `Fetcher.fetch_all(urls)` gives a `Fetched` per address, in order: status, final address, bytes, text,
   content type, error and the seconds it took. The pages of one site go one after another over one kept-alive connection
@@ -914,7 +915,7 @@ The web plugin's page fetcher, with the standard library only. Only `web` uses i
   decodes by the header's charset, else the page's `<meta>` charset, else UTF-8. A page larger than `max_bytes` fails,
   saying so. An address the environment sends through a proxy is fetched with urllib, which honours it.
 
-## passages (PAS)
+## web.passages (PAS)
 
 Fetched pages as passages: main content, under headings, repeats dropped.
 
@@ -929,7 +930,7 @@ Fetched pages as passages: main content, under headings, repeats dropped.
   several of its pages and a passage that repeats another or a known one (`NEAR_DUPLICATE_OVERLAP`), and numbers them on
   from the known ones (`P1`, `P2`, ...), each with its address and fetch time.
 
-## web (WEB)
+## web.internet (WEB)
 
 The web plugin, the only part that reaches web content. It has two calls, search and fetch, and it handles
 every failure of either: no caller sees a backend, an HTTP status or an exception from the web.
@@ -1255,7 +1256,7 @@ The terminal and the chats are one conversation: the same commands, the same ans
   backslash-escaped, as a file dropped on the terminal gives it) is `read PATH`. A path followed by words keeps
   the file, enters it (**CNV-25**) and answers the words inside it.
 
-## channels (CHN)
+## chat.channels (CHN)
 
 The chat plugin: Telegram, and `tinker channel`.
 
@@ -1311,7 +1312,7 @@ The chat plugin: Telegram, and `tinker channel`.
   the banner, the terminal prints `Telegram · STATE` as a line of its own, dimmed; the banner is not drawn
   again for it.
 
-## knowledge (KNW)
+## knowledge.library (KNW)
 
 Lessons and proven knowledge, and what every kind of learning shares. Lessons, facts, findings and rules are
 kept as principles (**PRI**); where a point below names them, it holds for principles.
@@ -1434,7 +1435,7 @@ kept as principles (**PRI**); where a point below names them, it holds for princ
   lowercased with spaces collapsed, and plans a need found there with no call, so one plan serves every topic.
   A fallback plan is not kept. Plans stay until `tinker clear searches`.
 
-## principles (PRI)
+## knowledge.principles (PRI)
 
 What every learning keeps: patterns found in what Tinker read or did, as principles in one store.
 
@@ -1476,7 +1477,7 @@ What every learning keeps: patterns found in what Tinker read or did, as princip
 - **PRI-9** The ask prompt (**TCH-2**) shows at most `ASK_ITEMS_SHOWN` (6) items, a principle as its
   `prompt_text`, each cut to `ASK_ITEM_CHARS` (240).
 
-## slots (SLT)
+## knowledge.slots (SLT)
 
 What learning a language or a tool must find out, as data, and each slot's passages.
 
@@ -1496,7 +1497,7 @@ What learning a language or a tool must find out, as data, and each slot's passa
   Readiness, `missing(profile, facts, machine)`, gives installed when no version command ran and each web slot
   without a fact.
 
-## learning (LRN)
+## knowledge.curriculum (LRN)
 
 `tinker learn TOPIC` and the recall phase of a run with `--web` learn a language or a tool by its slots
 (`SlotLearner`), from the pages about the version installed that its searches find, through the steps of
@@ -1557,7 +1558,7 @@ learning and run lessons are apart.
   left alone. The summary is kept as data too (`recap`: answered, still open, documentation, pages, facts
   kept, web requests), and a `LearnStopped` carries why it stopped and what to do next (`details`).
 
-## graph (GRF)
+## knowledge.graph (GRF)
 
 What Tinker knows as one graph, and the page that shows it.
 
@@ -1618,7 +1619,7 @@ What Tinker knows as one graph, and the page that shows it.
 - **GRF-12** `tinker knowledge recent [PAGE]` lists the items that are not retired by `day`, newest first, each
   with its day and its part; an item with no day is left out.
 
-## remembering (REM)
+## memory.memories (REM)
 
 What the person and Tinker did together, kept as episodes, and the memories a dream makes of them (**DRM**).
 Nothing here calls the model.
@@ -1708,7 +1709,7 @@ Nothing here calls the model.
   `Talk.reply`, an answer inside a reading (**CNV-25**), `COMMAND_TELL_SYSTEM`, `ASK_SYSTEM` and the build's phases
   (**SES-3**), each for its own text. A dream, learning, the exercise and calibration never get it.
 
-## reflecting (REF)
+## memory.reflection (REF)
 
 Tinker thinks about who the person is and who it is for them, from what the dreams kept. Each thought leads to a
 candidate trait with its question, or to an open question, and the questions wait for the person (**INT**). Every
@@ -1733,7 +1734,7 @@ dream reflects at its end (**DRM-11**), and the dialogue reflects live when noth
   a thought that goes on; and says each question's text, thought and expected are shown to the person, in plain
   words that name no id.
 
-## dreaming (DRM)
+## memory.dream (DRM)
 
 While nothing waits for Tinker, it dreams: the fresh episodes become memories, the memories are revised and
 fade, the traits they show become candidates, and Tinker reflects on them (**REF**) into questions that wait for
@@ -1802,7 +1803,7 @@ the person (**INT**).
   (given the traits newest first, and told so) answers `{merge: [{ids, when, do}]}`, the newer wording winning where they disagree, each applied as a `merge`
   delta (**REM-14**). With no such group it makes no call.
 
-## interviewing (INT)
+## memory.interview (INT)
 
 The person and Tinker talk about who the person is and who Tinker should be for them, starting from the
 questions the dreams left. Nothing here is shown unasked.
@@ -1835,7 +1836,7 @@ questions the dreams left. Nothing here is shown unasked.
 - **INT-5** Each turn is also kept as an episode of kind `interact` (**REM-1**), `{question, answer, say}`, already
   dreamt, so it is a source and never consolidated.
 
-## reading (RDG)
+## shelf (RDG)
 
 `tinker read FILE | URL` keeps what the person gives on the shelf: a book, a document, an image, a recording.
 Keeping is not learning: the file is copied into the home, what it holds is taken out as chapters (text, an
@@ -1927,7 +1928,7 @@ is learned from, the core ones first, and saved as soon as it is read. What it t
   (**CMD-1**). `read forget #N...` and `clear read [#N...]` delete those readings (every one with no number for
   `clear read`): their entry, their file and their topic, as a deletion (**SET-8**); a chat inside one leaves it.
 
-## teaching (TCH)
+## knowledge.tutor (TCH)
 
 `tinker ask QUESTION` answers from what Tinker keeps. `tinker teach WHAT` corrects it, and nothing changes
 until what was taught is checked: the model turns it into claims and the change it asks for, the claims are
@@ -2009,7 +2010,7 @@ A check from an ask runs only in a sandbox. Nothing is ever installed.
   write outside the folder. `LinuxSandbox` cuts the network with a new user and network namespace and allows
   writes only in the folder with Landlock (and no new privileges). Both let the command write to `/dev/null`.
 
-## exercising (EXR)
+## practice (EXR)
 
 `tinker exercise LANGUAGE` practises a language on its own, to write better code faster: practice projects one
 after another, each built and given a feature, measured, and turned into lessons, until the person stops it.
@@ -2059,7 +2060,7 @@ It is a job like any other, so the person always comes first.
   message, and gets it back when it goes on (the conversation adopts it again). One that ends before it keeps a tracker
   shows the last lines it printed.
 
-## session (SES)
+## build.session (SES)
 
 - **SES-1** `Session` is what every phase works through: the model, the project, its workspace and toolchain,
   the knowledge, the web plugin, the run's options (`web`, `confirm`) and its tracker. `Worker` and
@@ -2083,7 +2084,7 @@ It is a job like any other, so the person always comes first.
   language the request names (`Knowledge.named_in`: the first it names of the languages Tinker knows), and
   Python only when it names none.
 
-## planning (PLN)
+## build.plan (PLN)
 
 Recall, the spec, the design and the contracts where files meet, and their review.
 
@@ -2137,7 +2138,7 @@ Recall, the spec, the design and the contracts where files meet, and their revie
 - **PLN-14** `groups_fitting(items, room, size)` keeps the items in order, in groups that each fit `room` (each
   item takes `size + 1`). An item larger than the room is a group of its own.
 
-## building (BLD)
+## build.code (BLD)
 
 Setup, the tests, the code, and fixing until every test passes.
 
@@ -2174,7 +2175,7 @@ Setup, the tests, the code, and fixing until every test passes.
   writes the test for the report and each amendment (`asked`). A report no test can show is dropped with its
   test, and the cycle closes as not reproduced.
 
-## finishing (FIN)
+## build.finish (FIN)
 
 Tidy, the README, the final review and the lessons.
 

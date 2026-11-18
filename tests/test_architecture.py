@@ -5,6 +5,7 @@ import re
 import runpy
 import sys
 import tokenize
+import types
 from pathlib import Path
 
 import pytest
@@ -16,49 +17,49 @@ LAYERS = (
     "store",
     "settings",
     "formats",
-    "remembering",
+    "memory.memories",
     "logger",
     "system",
     "commands",
     "jobs",
     "sandbox",
-    "checking",
-    "ledger",
+    "knowledge.checks",
+    "chat.ledger",
     "prompts",
     "workspace",
-    "quality",
-    "model",
-    "reviewing",
-    "project",
-    "fetcher",
-    "search",
-    "passages",
-    "web",
-    "retrieval",
+    "model.quality",
+    "model.models",
+    "model.thinking",
+    "build.project",
+    "web.fetcher",
+    "web.search",
+    "web.passages",
+    "web.internet",
+    "ranking",
     "skills",
     "conversation",
-    "channels",
-    "principles",
-    "knowledge",
-    "slots",
-    "learning",
-    "graph",
-    "reflecting",
-    "dreaming",
-    "interviewing",
-    "reading",
-    "teaching",
-    "exercising",
-    "session",
-    "planning",
-    "building",
-    "finishing",
+    "chat.channels",
+    "knowledge.principles",
+    "knowledge.library",
+    "knowledge.slots",
+    "knowledge.curriculum",
+    "knowledge.graph",
+    "memory.reflection",
+    "memory.dream",
+    "memory.interview",
+    "shelf",
+    "knowledge.tutor",
+    "practice",
+    "build.session",
+    "build.plan",
+    "build.code",
+    "build.finish",
     "cli",
 )
 
 
 def imports_of(module):
-    tree = ast.parse((ROOT / "tinkerkit" / f"{module}.py").read_text(encoding="utf-8"))
+    tree = ast.parse(module_path(module).read_text(encoding="utf-8"))
     top, inner = set(), set()
     nested = {
         id(node)
@@ -68,15 +69,44 @@ def imports_of(module):
         if node is not function
     }
     for node in ast.walk(tree):
-        names = []
-        if isinstance(node, ast.ImportFrom) and node.level == 1:
-            names = [node.module] if node.module else [alias.name for alias in node.names]
-        elif isinstance(node, ast.ImportFrom) and (node.module or "").startswith("tinkerkit"):
-            names = (
-                [node.module.split(".", 1)[1]] if "." in node.module else [alias.name for alias in node.names]
-            )
-        (inner if id(node) in nested else top).update(module_name.split(".")[0] for module_name in names)
+        if isinstance(node, ast.ImportFrom) and (target := imported_package_path(module, node)) is not None:
+            names = [module_named(target, alias.name) for alias in node.names]
+            (inner if id(node) in nested else top).update(names)
     return top, inner
+
+
+def module_path(module):
+    return ROOT / "tinkerkit" / f"{module.replace('.', '/')}.py"
+
+
+def package_modules():
+    return {module_of(path) for path in (ROOT / "tinkerkit").rglob("*.py") if path.name != "__init__.py"}
+
+
+def module_of(path):
+    package = ROOT / "tinkerkit"
+    if not path.is_relative_to(package):
+        return path.stem
+    return ".".join(path.relative_to(package).with_suffix("").parts)
+
+
+def imported_package_path(module, node):
+    if node.level:
+        base = module.split(".")[: -node.level]
+        return ".".join([*base, *([node.module] if node.module else [])])
+    if node.module == "tinkerkit":
+        return ""
+    if (node.module or "").startswith("tinkerkit."):
+        return node.module.removeprefix("tinkerkit.")
+    return None
+
+
+def module_named(target, name):
+    dotted = f"{target}.{name}" if target else name
+    known = package_modules()
+    parts = dotted.split(".")
+    prefixes = (".".join(parts[:size]) for size in range(len(parts), 0, -1))
+    return next((prefix for prefix in prefixes if prefix in known), target)
 
 
 @pytest.mark.spec("ARCH-1")
@@ -85,14 +115,13 @@ def test_each_module_imports_only_the_modules_listed_above_it(module):
     above = set(LAYERS[: LAYERS.index(module)])
     top, inner = imports_of(module)
     assert top <= above, f"{module} imports {sorted(top - above)} at module level"
-    allowed_inner = above | ({"channels"} if module == "conversation" else set())
+    allowed_inner = above | ({"chat.channels"} if module == "conversation" else set())
     assert inner <= allowed_inner, f"{module} imports {sorted(inner - allowed_inner)} inside a function"
 
 
 @pytest.mark.spec("ARCH-1")
 def test_every_module_of_the_package_is_in_the_layers():
-    modules = {path.stem for path in (ROOT / "tinkerkit").glob("*.py") if path.stem != "__init__"}
-    assert modules == set(LAYERS)
+    assert package_modules() == set(LAYERS)
 
 
 @pytest.mark.spec("ARCH-2")
@@ -102,17 +131,18 @@ def test_without_the_channels_plugin_the_conversation_has_no_chats(monkeypatch):
     real_import = builtins.__import__
 
     def no_channels(name, globals=None, locals=None, fromlist=(), level=0):
-        if name == "channels" and level == 1 or name == "tinkerkit.channels":
+        if name == "chat.channels" and level == 1 or name == "tinkerkit.chat.channels":
             raise ImportError("no plugin")
         return real_import(name, globals, locals, fromlist, level)
 
-    monkeypatch.delitem(sys.modules, "tinkerkit.channels", raising=False)
+    installed_plugin = types.SimpleNamespace(Channels=types.SimpleNamespace(enabled=lambda: ["telegram"]))
+    monkeypatch.setitem(sys.modules, "tinkerkit.chat.channels", installed_plugin)
     monkeypatch.setattr(builtins, "__import__", no_channels)
     assert conversation.chat_channels() == []
 
 
 def program_files():
-    return [*(ROOT / "tinkerkit").glob("*.py"), ROOT / "tinker.py"]
+    return [*(ROOT / "tinkerkit").rglob("*.py"), ROOT / "tinker.py"]
 
 
 @pytest.mark.spec("ARCH-3")
@@ -122,30 +152,33 @@ def test_only_the_model_web_and_channel_modules_open_connections():
     for path in program_files():
         text = path.read_text(encoding="utf-8")
         if any(f"import {name}" in text or f"{name}(" in text for name in network):
-            users.add(path.stem)
-    assert users <= {"model", "web", "fetcher", "search", "channels", "knowledge"}, users
-    knowledge = (ROOT / "tinkerkit" / "knowledge.py").read_text(encoding="utf-8")
+            users.add(module_of(path))
+    assert users <= {
+        "model.models",
+        "web.internet",
+        "web.fetcher",
+        "web.search",
+        "chat.channels",
+        "knowledge.library",
+    }, users
+    knowledge = (ROOT / "tinkerkit" / "knowledge" / "library.py").read_text(encoding="utf-8")
     assert "urlopen(" not in knowledge, "knowledge goes online only through Internet and Ollama"
-    for plugin in ("fetcher", "search"):
-        assert importers_of(plugin) == {"web"}, plugin
+    for plugin in ("web.fetcher", "web.search"):
+        assert importers_of(plugin) == {"web.internet"}, plugin
     runners = {
-        path.stem for path in program_files() if "subprocess.Popen(" in path.read_text(encoding="utf-8")
+        module_of(path) for path in program_files() if "subprocess.Popen(" in path.read_text(encoding="utf-8")
     }
     assert runners <= {"workspace", "settings", "conversation", "jobs", "skills"}, runners
 
 
 def importers_of(module):
-    return {
-        path.stem
-        for path in (ROOT / "tinkerkit").glob("*.py")
-        if f".{module} import" in path.read_text(encoding="utf-8")
-    }
+    return {importer for importer in package_modules() if module in set.union(*imports_of(importer))}
 
 
 @pytest.mark.spec("ARCH-4")
 def test_only_home_knows_where_the_home_is():
     for path in program_files():
-        if path.stem == "settings":
+        if module_of(path) == "settings":
             continue
         text = path.read_text(encoding="utf-8")
         assert "Home.root /" not in text and '"tinker.db"' not in text, (
@@ -156,14 +189,14 @@ def test_only_home_knows_where_the_home_is():
 
 @pytest.mark.spec("SES-1")
 def test_every_phase_works_through_the_session():
-    from tinkerkit import session
-    from tinkerkit.building import Verifier
-    from tinkerkit.planning import SpecWriter
+    from tinkerkit.build import session
+    from tinkerkit.build.code import Verifier
+    from tinkerkit.build.plan import SpecWriter
 
     assert issubclass(SpecWriter, session.Phase) and issubclass(Verifier, session.Worker)
-    for module in ("planning", "building", "finishing", "cli"):
+    for module in ("build.plan", "build.code", "build.finish", "cli"):
         top, inner = imports_of(module)
-        assert "session" in top, f"{module} takes its phases from the session"
+        assert "build.session" in top, f"{module} takes its phases from the session"
 
 
 PRAGMA_RE = re.compile(r"# noqa(: [A-Z]+\d+(, [A-Z]+\d+)*)?")

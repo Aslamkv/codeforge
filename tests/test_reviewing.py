@@ -1,9 +1,9 @@
 import pytest
 from conftest import LOADING_PHASE, MODEL
 
-from tinkerkit.model import LoadedModel, Ollama, OllamaError
+from tinkerkit.model.models import LoadedModel, Ollama, OllamaError
+from tinkerkit.model.thinking import RequestReview
 from tinkerkit.prompts import Prompts
-from tinkerkit.reviewing import RequestReview
 from tinkerkit.settings import Config
 
 STORY = "Write a story about a dragon who learns to bake bread"

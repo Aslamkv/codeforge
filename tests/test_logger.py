@@ -9,16 +9,18 @@ from types import SimpleNamespace
 import pytest
 from conftest import quick_model_replying
 
-from tinkerkit import channels, dreaming, logger
-from tinkerkit.building import CodeWriter, Verifier
-from tinkerkit.channels import TelegramChannel
+from tinkerkit import logger
+from tinkerkit.build.code import CodeWriter, Verifier
+from tinkerkit.build.finish import Tidy
+from tinkerkit.build.plan import Recaller
+from tinkerkit.build.session import Phase
+from tinkerkit.chat import channels
+from tinkerkit.chat.channels import TelegramChannel
 from tinkerkit.conversation import CHAT_APP_START, Desk, Questions, Talk
-from tinkerkit.finishing import Tidy
 from tinkerkit.logger import TraceLog
+from tinkerkit.memory import dream
 from tinkerkit.messages import say
-from tinkerkit.model import Ollama
-from tinkerkit.planning import Recaller
-from tinkerkit.session import Phase
+from tinkerkit.model.models import Ollama
 from tinkerkit.settings import Config, Home
 from tinkerkit.store import Store
 
@@ -254,7 +256,7 @@ def test_watched_names_every_watched_method():
         "Store.get",
         "Store.put",
         "Store.append",
-        "reflecting.reply_read",
+        "reflection.reply_read",
         "Ollama.loading",
         "Talk.warm",
         "channels.connect_by_address",
@@ -457,7 +459,7 @@ def test_connecting_tells_the_host_and_the_address_reached_by_ip_version(monkeyp
 def test_a_quick_reply_read_is_a_fact_with_the_object_read(monkeypatch):
     quick_model_replying(monkeypatch, lambda messages: 'Here: {"done": true}')
     logger.install()
-    assert dreaming.asked("system", "content") == {"done": True}
+    assert dream.asked("system", "content") == {"done": True}
     [read] = [line for line in sentences() if line.startswith("Quick reply read")]
     assert re.fullmatch(r"Quick reply read: \{'done': True\} \(\d+\.\d{3}s\)", read)
 
@@ -466,7 +468,7 @@ def test_a_quick_reply_read_is_a_fact_with_the_object_read(monkeypatch):
 def test_a_quick_reply_that_cannot_be_read_ends_with_why(monkeypatch):
     quick_model_replying(monkeypatch, lambda messages: "not a reply")
     logger.install()
-    assert dreaming.asked("system", "content") is None
+    assert dream.asked("system", "content") is None
     [read] = [line for line in sentences() if line.startswith("Quick reply read")]
     assert re.fullmatch(r"Quick reply read failed: ValueError: no JSON object in reply \(\d+\.\d{3}s\)", read)
 
@@ -475,7 +477,7 @@ def test_a_quick_reply_that_cannot_be_read_ends_with_why(monkeypatch):
 def test_a_quick_reply_that_cannot_be_read_keeps_its_raw_text(monkeypatch):
     quick_model_replying(monkeypatch, lambda messages: '{"a": tru}')
     logger.install()
-    assert dreaming.asked("system", "content") is None
+    assert dream.asked("system", "content") is None
     [unread] = [line for line in sentences() if line.startswith("Quick reply unread")]
     assert unread.startswith("Quick reply unread: JSONDecodeError: Expecting value")
     assert unread.endswith(": '{\"a\": tru}'")

@@ -8,14 +8,14 @@ import pytest
 from conftest import add_back
 from test_conversation import Recorder, everyone
 
-from tinkerkit import cli, conversation, exercising, jobs
+from tinkerkit import cli, conversation, jobs, practice
+from tinkerkit.build.project import Tracker
 from tinkerkit.cli import Cli, Commands
 from tinkerkit.conversation import Desk, Message
 from tinkerkit.jobs import JOBS, Jobs, Queue, Runner, archived, began_at, calls_log, is_job, journaled, today
-from tinkerkit.knowledge import Learner, Researcher
-from tinkerkit.learning import SlotLearner
-from tinkerkit.model import Ollama
-from tinkerkit.project import Tracker
+from tinkerkit.knowledge.curriculum import SlotLearner
+from tinkerkit.knowledge.library import Learner, Researcher
+from tinkerkit.model.models import Ollama
 from tinkerkit.settings import DREAM_IDLE_SECONDS, JOB_START_TRIES, JOB_STOP_SIGNAL, Config
 
 DEAD_PID = 999999999
@@ -110,9 +110,9 @@ def test_long_commands_are_jobs_and_the_rest_are_not():
 @pytest.mark.spec("JOB-1")
 def test_an_exercises_build_is_not_a_job_of_its_own(monkeypatch):
     started = []
-    monkeypatch.setattr(exercising, "tinker_process", lambda arguments, **env: started.append(env))
+    monkeypatch.setattr(practice, "tinker_process", lambda arguments, **env: started.append(env))
     monkeypatch.setattr(Jobs, "current", {"number": 7})
-    exercising.start_tinker(["task", "a", "calculator"])
+    practice.start_tinker(["task", "a", "calculator"])
     monkeypatch.setenv("TINKER_EXERCISE", started[0]["TINKER_EXERCISE"])
     assert started[0]["TINKER_EXERCISE"] == "7" and not is_job(["task", "a", "calculator"])
 
@@ -857,7 +857,7 @@ def test_an_add_wakes_the_runner_in_its_own_process(home_store):
 
 
 def fresh_episode():
-    from tinkerkit.remembering import Scratchpad
+    from tinkerkit.memory.memories import Scratchpad
 
     Scratchpad.write({"chat": "telegram:1", "message": "hi", "reply": "Hello.", "status": "answered"})
 

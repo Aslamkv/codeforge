@@ -7,11 +7,11 @@ import pytest
 from conftest import TOOLCHAIN
 
 from tinkerkit import cli, settings
+from tinkerkit.build.project import Runs
 from tinkerkit.cli import Cli, Commands
-from tinkerkit.graph import Graph, GraphPage, MemoryBrowser, short_ids
-from tinkerkit.knowledge import Knowledge, Library
-from tinkerkit.principles import Principle, Principles
-from tinkerkit.project import Runs
+from tinkerkit.knowledge.graph import Graph, GraphPage, MemoryBrowser, short_ids
+from tinkerkit.knowledge.library import Knowledge, Library
+from tinkerkit.knowledge.principles import Principle, Principles
 from tinkerkit.settings import Home
 from tinkerkit.workspace import TaughtCommands, Toolchain
 
@@ -384,7 +384,7 @@ def test_memory_find_lists_items_holding_every_word_retired_too(memory, monkeypa
     out = shown(capsys, "find", "test", "name")
     assert "♻️ principle Name each test after the behaviour it checks.  (any)" in out
     assert "Nothing in memory holds 'cobol'" in shown(capsys, "find", "cobol")
-    monkeypatch.setattr("tinkerkit.graph.MEMORY_FOUND_SHOWN", 1)
+    monkeypatch.setattr("tinkerkit.knowledge.graph.MEMORY_FOUND_SHOWN", 1)
     out = shown(capsys, "find", "e")
     assert out.count("] ") == 1 and "more: add words to narrow it" in out
 

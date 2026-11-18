@@ -6,7 +6,7 @@ import urllib.request
 
 import pytest
 
-from tinkerkit.search import Mwmbl, SearchFailed, Wikibooks, Wikipedia
+from tinkerkit.web.search import Mwmbl, SearchFailed, Wikibooks, Wikipedia
 
 
 class Response(io.BytesIO):

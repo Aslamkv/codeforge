@@ -11,15 +11,16 @@ import pytest
 from conftest import FOREWORD, MARKDOWN, MODEL, NAMING, TESTING
 from test_formats import pdf
 
-from tinkerkit import cli, commands, reading, settings
+from tinkerkit import cli, commands, settings, shelf
+from tinkerkit.build.project import Tracker
 from tinkerkit.cli import Cli, Commands
 from tinkerkit.formats import opened
 from tinkerkit.jobs import is_job
-from tinkerkit.knowledge import Library
-from tinkerkit.model import Models, Ollama, OllamaError
-from tinkerkit.principles import Principles
-from tinkerkit.project import Tracker
-from tinkerkit.reading import (
+from tinkerkit.knowledge.library import Library
+from tinkerkit.knowledge.principles import Principles
+from tinkerkit.model.models import Models, Ollama, OllamaError
+from tinkerkit.settings import READ_KEY_TERMS, READ_MAX_BYTES
+from tinkerkit.shelf import (
     Reader,
     Readings,
     Shelf,
@@ -36,8 +37,7 @@ from tinkerkit.reading import (
     show_list,
     source_bytes,
 )
-from tinkerkit.settings import READ_KEY_TERMS, READ_MAX_BYTES
-from tinkerkit.web import WHOLE, WebPage
+from tinkerkit.web.internet import WHOLE, WebPage
 
 PNG = b"\x89PNG\r\n\x1a\n\x00 whiteboard"
 OGG = b"OggS\x00\x02 a talk"
@@ -222,8 +222,8 @@ def test_a_question_inside_a_reading_is_answered_from_its_passages(tmp_path, hom
 
 @pytest.mark.spec("REM-16")
 def test_a_question_inside_a_reading_gets_the_persons_traits(tmp_path, home_store, monkeypatch):
-    from tinkerkit.remembering import Traits
-    from tinkerkit.retrieval import Retriever
+    from tinkerkit.memory.memories import Traits
+    from tinkerkit.ranking import Retriever
 
     trait = {
         "op": "add",
@@ -572,7 +572,7 @@ def test_a_long_chapter_is_read_in_every_part(tmp_path, home_store, make_model, 
     )
     text = f"# Long\n\n## One\n\n{long}\n\n## Two\n\nA short second chapter, with more words."
     kept(craft(tmp_path, text=text))
-    monkeypatch.setattr(reading, "READ_CHAPTER_TEXT_SHARE", 0.05)
+    monkeypatch.setattr(shelf, "READ_CHAPTER_TEXT_SHARE", 0.05)
     fake_ollama.reply(survey_reply(software=False, **{"1": "core"}), when="reading plan")
     fake_ollama.reply(added(), times=20)
     Reader(make_model()).read(1)
@@ -588,7 +588,7 @@ def test_read_again_with_a_focus_looks_where_it_is_asked(
 ):
     read_craft(tmp_path, make_model, fake_ollama)
     fake_ollama.calls.clear()
-    monkeypatch.setattr(reading, "READ_FOCUS_CHAPTERS", 2)
+    monkeypatch.setattr(shelf, "READ_FOCUS_CHAPTERS", 2)
     fake_ollama.reply(added("A long program was written three times"), when="chapter 3")
     fake_ollama.reply(added("Run every test after each change", phase="tests"), when="chapter 4")
     ending = Reader(make_model()).read(1, "chapter 3, and when to run every test")
@@ -648,8 +648,8 @@ def test_a_source_comes_from_a_file_or_a_web_address(tmp_path, monkeypatch):
             return [WebPage.failed(urls[0], f"larger than {max_bytes} bytes")]
         return [WebPage.failed(urls[0], "HTTP 404")]
 
-    monkeypatch.setattr(reading.Internet, "__init__", lambda internet: None)
-    monkeypatch.setattr(reading.Internet, "fetch", fetch)
+    monkeypatch.setattr(shelf.Internet, "__init__", lambda internet: None)
+    monkeypatch.setattr(shelf.Internet, "fetch", fetch)
     assert source_bytes("https://example.org/ok") == b"book"
     with pytest.raises(SystemExit, match="Could not download https://example.org/gone: HTTP 404"):
         source_bytes("https://example.org/gone")
@@ -657,7 +657,7 @@ def test_a_source_comes_from_a_file_or_a_web_address(tmp_path, monkeypatch):
         (["https://example.org/ok"], READ_MAX_BYTES),
         (["https://example.org/gone"], READ_MAX_BYTES),
     ]
-    monkeypatch.setattr(reading, "READ_MAX_BYTES", 2)
+    monkeypatch.setattr(shelf, "READ_MAX_BYTES", 2)
     with pytest.raises(TooLarge, match="larger than"):
         source_bytes(str(path))
     with pytest.raises(TooLarge, match="Could not download https://example.org/big: larger than 2 bytes"):
@@ -672,9 +672,9 @@ def test_a_source_too_large_is_kept_only_when_a_yes_answers_the_one_question(
     tmp_path, home_store, monkeypatch, capsys
 ):
     path = craft(tmp_path)
-    monkeypatch.setattr(reading, "READ_MAX_BYTES", 2)
+    monkeypatch.setattr(shelf, "READ_MAX_BYTES", 2)
     questions, answers = [], [False, True]
-    monkeypatch.setattr(reading.say, "agreed", lambda question: questions.append(question) or answers.pop(0))
+    monkeypatch.setattr(shelf.say, "agreed", lambda question: questions.append(question) or answers.pop(0))
     with pytest.raises(TooLarge, match="nothing read"):
         Commands(Cli.parse(["read", path])).run()
     assert len(questions) == 1 and "keep it anyway" in questions[0] and Readings.all() == {}
@@ -842,7 +842,7 @@ def test_an_old_reading_without_kind_or_file_is_listed_and_forgotten(tmp_path, h
     assert "📕 book" in capsys.readouterr().out
     assert kept(craft(tmp_path, "same-text.md")) == (1, False)
     assert "Already on the reading list as #1 (book)" in capsys.readouterr().out
-    reading.forgotten([1], yes=True)
+    shelf.forgotten([1], yes=True)
     assert Readings.get(1) is None
 
 

@@ -3,7 +3,7 @@ import json
 import pytest
 from conftest import FakeSearch, quick_model_replying, web_page
 
-from tinkerkit.knowledge import (
+from tinkerkit.knowledge.library import (
     Item,
     Knowledge,
     Learner,
@@ -16,10 +16,10 @@ from tinkerkit.knowledge import (
     retire,
     search_entry,
 )
-from tinkerkit.model import Models, Ollama, OllamaError
-from tinkerkit.principles import Principle, Principles, record
+from tinkerkit.knowledge.principles import Principle, Principles, record
+from tinkerkit.model.models import Models, Ollama, OllamaError
 from tinkerkit.prompts import Part, Prompts
-from tinkerkit.retrieval import Embeddings, Likeness, Retriever
+from tinkerkit.ranking import Embeddings, Likeness, Retriever
 from tinkerkit.settings import (
     CHUNKS_PER_PAGE,
     EMBED_KEEP_ALIVE,
@@ -31,7 +31,7 @@ from tinkerkit.settings import (
     Config,
     Home,
 )
-from tinkerkit.web import WebPage
+from tinkerkit.web.internet import WebPage
 from tinkerkit.workspace import Toolchain
 
 
@@ -1334,7 +1334,7 @@ def test_a_fix_keeps_its_history_and_history_is_capped(tinker_home, monkeypatch)
     again = Knowledge("Python", "r2")
     again.fix_result(again.known_fix("no module named calc"), worked=True)
     assert events(Knowledge("Python").known_fix("no module named calc")) == [("born", "r1"), ("helped", "r2")]
-    monkeypatch.setattr("tinkerkit.principles.EVENTS_KEPT_PER_ITEM", 3)
+    monkeypatch.setattr("tinkerkit.knowledge.principles.EVENTS_KEPT_PER_ITEM", 3)
     item = {}
     for run in ("r1", "r2", "r3", "r4"):
         record(item, "helped", run)
@@ -1386,7 +1386,7 @@ def test_what_is_retired_is_kept_apart_with_why_and_never_shown(tinker_home, mon
         and Knowledge("Python").known_fix("no module named calc") is None
     )
     assert all(item["id"] != client for item in Library.items({"flask": entry}))
-    monkeypatch.setattr("tinkerkit.knowledge.RETIRED_KEPT_PER_LIST", 1)
+    monkeypatch.setattr("tinkerkit.knowledge.library.RETIRED_KEPT_PER_LIST", 1)
     Knowledge("Python").disprove({f"fact:flask:{route}": ["code"]}, ("code",))
     assert [retired["id"] for retired in Library.read("flask")["retired"]] == [route]
 
