@@ -2,8 +2,8 @@ import json
 
 import pytest
 
-from tests.test_knowledge import EmbedServer
-from tests.test_remembering import FakeEmbeddings
+from tests.test_library import EmbedServer
+from tests.test_memories import FakeEmbeddings
 from tinkerkit.knowledge import principles as principles_module
 from tinkerkit.knowledge.principles import Inducer, Principle, Principles
 from tinkerkit.model.models import Ollama

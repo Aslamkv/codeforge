@@ -198,7 +198,7 @@ def test_read_choice_names_the_language_and_never_repeats_a_project():
 
 @pytest.mark.spec("EXR-3", "KNW-11")
 def test_read_choice_rejects_a_task_alike_in_meaning(monkeypatch):
-    from test_remembering import FakeEmbeddings
+    from test_memories import FakeEmbeddings
 
     from tinkerkit.ranking import Embeddings
 

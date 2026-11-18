@@ -3,7 +3,7 @@ import json
 
 import pytest
 from conftest import ask, confirmed_trait, replying
-from test_remembering import CHESS, HELIX, HELIX_AGAIN, meanings_of_helix_and_chess
+from test_memories import CHESS, HELIX, HELIX_AGAIN, meanings_of_helix_and_chess
 
 from tinkerkit.memory.memories import Memories, Questions, Scratchpad, Traits
 from tinkerkit.memory.reflection import Reflection

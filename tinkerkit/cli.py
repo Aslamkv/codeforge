@@ -53,7 +53,6 @@ lazy from .knowledge.curriculum import LearnStopped, SlotLearner
 lazy from .knowledge.graph import Graph, MemoryBrowser, write_page
 lazy from .knowledge.library import Library, Researcher, ResearchLearner, search_entry
 lazy from .knowledge.tutor import Asker, Memory, Teacher
-lazy from .memory.dream import Dream
 lazy from .model.models import Calibrator, Model, Models, Ollama, OllamaError, SelectedModel
 lazy from .model.thinking import RequestReview
 lazy from .prompts import Prompts
@@ -1054,7 +1053,8 @@ class Commands:
         self.reported(
             lambda: (),
             lambda tracker: (
-                Dream(Retriever(Embeddings.configured()), tracker.phase).run() or ending("done", "Dreamt")
+                dream.Dream(Retriever(Embeddings.configured()), tracker.phase).run()
+                or ending("done", "Dreamt")
             ),
         )
 

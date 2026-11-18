@@ -2,7 +2,7 @@ import json
 
 import pytest
 from conftest import ask, quick_model_replying, replying
-from test_dreaming import NOW
+from test_dream import NOW
 
 from tinkerkit.conversation import ALL_FOR_NOW, Turn
 from tinkerkit.memory.interview import UNREADABLE, Interview

@@ -246,7 +246,7 @@ def test_toolchain_fixes(tinker_home):
 
 @pytest.mark.spec("KNW-5", "KNW-11")
 def test_a_failure_alike_in_meaning_finds_the_fix(tinker_home, monkeypatch):
-    from tests.test_remembering import FakeEmbeddings
+    from tests.test_memories import FakeEmbeddings
 
     known = Knowledge("Python")
     known.remember_fix({"failure": "no module named pytest", "cause": "pytest missing", "replay": None})
@@ -442,7 +442,7 @@ def test_read_facts_and_add_facts():
 
 @pytest.mark.spec("TCH-10", "KNW-11")
 def test_a_fact_alike_in_meaning_is_like_a_kept_fact(monkeypatch):
-    from tests.test_remembering import FakeEmbeddings
+    from tests.test_memories import FakeEmbeddings
 
     meanings = {
         "Flask 3.1 needs Python 3.9": [1.0, 0.0],
@@ -799,7 +799,7 @@ def test_cross_check_supports_agreeing_facts_and_pairs_disagreeing_ones():
 
 @pytest.mark.spec("KNW-16")
 def test_fold_repeats_keeps_the_more_detailed_text():
-    from tests.test_remembering import FakeEmbeddings
+    from tests.test_memories import FakeEmbeddings
 
     def folded(texts, embeddings):
         facts = [fact(text, f"https://{site}.org") for text, site in zip(texts, "abcd")]
